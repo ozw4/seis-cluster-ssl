@@ -136,7 +136,27 @@ Before running a stage, edit the corresponding YAML under:
 proc/configs/seis_ssl_cluster/
 ```
 
-At minimum, set the raw-data root, artifact root, input path-list, and stage-specific output paths.
+At minimum, set the raw-data root where applicable, artifact root, input path-list, and stage-specific input/output paths. The full configuration guide is in [docs/configuration.md](docs/configuration.md), and the stage runbook is in [docs/seis_ssl_cluster_runbook.md](docs/seis_ssl_cluster_runbook.md).
+
+This pipeline deliberately uses **Option 1: explicit paths in every stage YAML**. Each downstream YAML must name the upstream artifact path it consumes. Output paths are not derived automatically from dataset, version, or run IDs.
+
+Raw user YAML is minimal. The entrypoint selects the stage, the resolver adds fixed/defaulted runtime fields and CLI overrides, and training snapshots the complete effective settings in `resolved_config.json` and checkpoints.
+
+Configuration ownership:
+
+| Parameter group | Source of truth |
+|---|---|
+| Selected amplitude volumes | explicit `train_npy_paths.txt` |
+| Manifest/stat output paths | manifest-build YAML |
+| Normalization sampling and clipping | normalization YAML |
+| QC thresholds and clean outputs | QC YAML |
+| Crop/model/mask/loss/optimizer | MAE training YAML |
+| Model and zero-mask contract during extraction | checkpoint resolved config |
+| Extraction window/overlap/output | extraction YAML |
+| PCA/KMeans settings | clustering YAML |
+| Survey/slice/voxel rendering controls | visualization YAML |
+| Fixed amplitude-only contract | internal code constants |
+| Complete effective run settings | `resolved_config.json` and checkpoint |
 
 ### 1. Create the training path-list
 
@@ -327,20 +347,13 @@ Slice coordinates are specified in source-volume voxel coordinates. Token views 
 
 ## Default MAE geometry
 
-The starting configuration is:
+The raw training YAML contains only user-owned geometry and training controls:
 
 ```yaml
 data:
-  grid_order: [x, y, z]
-  input_channels: 1
-  target_channels: 1
-  use_context: false
   local_crop_size: [128, 128, 128]
 
 model:
-  name: amp_mae3d
-  in_channels: 1
-  out_channels: 1
   patch_size: [8, 8, 8]
   encoder_dim: 384
   encoder_depth: 8
@@ -351,8 +364,23 @@ model:
 
 masking:
   spatial_mask_ratio: 0.75
-  spatial_mask_mode: block
   block_size_tokens: [2, 2, 2]
+```
+
+The fixed amplitude-only contract is injected internally and appears in the resolved config and checkpoint, not in raw YAML:
+
+```text
+data.grid_order = [x, y, z]
+data.volume_format = npy_memmap
+data.input_channels = 1
+data.target_channels = 1
+data.use_context = false
+model.name = amp_mae3d
+model.in_channels = 1
+model.out_channels = 1
+masking.spatial_mask_mode = block
+loss.reconstruction = huber
+loss.valid_mask_mode = voxel
 ```
 
 A `128 x 128 x 128` crop with `8 x 8 x 8` patches produces a `16 x 16 x 16` token grid containing 4096 tokens.

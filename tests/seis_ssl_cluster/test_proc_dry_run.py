@@ -16,6 +16,63 @@ PROC_SCRIPTS = (
 	Path('proc/seis_ssl_cluster/cluster_embeddings.py'),
 	Path('proc/seis_ssl_cluster/visualize_clusters.py'),
 )
+DRY_RUN_FORBIDDEN_KEYS = {
+	Path('proc/seis_ssl_cluster/build_nopims_manifests.py'): (
+		'data.input_channels:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/prepare_nopims_normalization_stats.py'): (
+		'data.input_channels:',
+		'manifest.input_path_list:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/filter_manifest_by_normalization_qc.py'): (
+		'data.input_channels:',
+		'normalization.max_samples:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/train_amp_mae.py'): (
+		'data.input_channels:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/extract_embeddings.py'): (
+		'stage:',
+		'paths.artifact_root:',
+		'data.input_channels:',
+		'model.encoder_depth:',
+		'masking.spatial_mask_ratio:',
+		'loss.gradient_weight:',
+		'train.lr:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/cluster_embeddings.py'): (
+		'stage:',
+		'data.input_channels:',
+		'model.encoder_depth:',
+		'loss.gradient_weight:',
+		'train.lr:',
+		'embedding.window_size:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/visualize_clusters.py'): (
+		'stage:',
+		'data.input_channels:',
+		'model.encoder_depth:',
+		'loss.gradient_weight:',
+		'train.lr:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+	),
+}
 
 
 @pytest.mark.parametrize('script_path', PROC_SCRIPTS)
@@ -34,8 +91,8 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 	result = run_python_proc(script_path, '--dry-run')
 
 	assert result.returncode == 0, result.stderr
-	assert 'data.input_channels:' not in result.stdout
-	assert 'train.lr:' not in result.stdout
+	for key in DRY_RUN_FORBIDDEN_KEYS[script_path]:
+		assert key not in result.stdout
 	if script_path == Path('proc/seis_ssl_cluster/extract_embeddings.py'):
 		assert 'stage:' not in result.stdout
 		assert 'paths.artifact_root:' not in result.stdout

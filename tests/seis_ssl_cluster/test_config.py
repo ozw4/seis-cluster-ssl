@@ -39,8 +39,7 @@ DEFAULT_CONFIGS = (
 	(CONFIG_DIR / 'cluster_embeddings.yaml', resolve_clustering_config),
 	(CONFIG_DIR / 'visualize_clusters.yaml', resolve_cluster_visualization_config),
 )
-DATA_REGISTRY_CONFIGS = DEFAULT_CONFIGS[:3]
-DATA_REGISTRY_TOP_LEVELS = {
+DEFAULT_CONFIG_TOP_LEVELS = {
 	CONFIG_DIR / 'build_nopims_manifests.yaml': {'paths', 'manifest'},
 	CONFIG_DIR / 'prepare_nopims_normalization_stats.yaml': {
 		'paths',
@@ -53,6 +52,37 @@ DATA_REGISTRY_TOP_LEVELS = {
 		'splits',
 		'qc',
 	},
+	CONFIG_DIR / 'train_amp_mae.yaml': {
+		'paths',
+		'manifests',
+		'data',
+		'zero_mask',
+		'model',
+		'masking',
+		'loss',
+		'train',
+		'visualization',
+	},
+	CONFIG_DIR / 'extract_embeddings.yaml': {
+		'paths',
+		'manifests',
+		'embeddings',
+		'embedding',
+	},
+	CONFIG_DIR / 'cluster_embeddings.yaml': {
+		'paths',
+		'embeddings',
+		'clustering',
+	},
+	CONFIG_DIR / 'visualize_clusters.yaml': {
+		'paths',
+		'clustering',
+		'visualization',
+	},
+}
+DATA_REGISTRY_CONFIGS = DEFAULT_CONFIGS[:3]
+DATA_REGISTRY_TOP_LEVELS = {
+	path: DEFAULT_CONFIG_TOP_LEVELS[path] for path, _resolver in DATA_REGISTRY_CONFIGS
 }
 REDUNDANT_DATA_STAGE_SECTIONS = {'stage', 'data', 'model', 'masking', 'loss', 'train'}
 CHECKPOINT_OWNED_EXTRACTION_SECTIONS = (
@@ -98,6 +128,22 @@ FIXED_DISABLED_NORMALIZATION_KEYS = (
 	'trace_wise_agc',
 	'patch_wise_zscore',
 )
+
+
+@pytest.mark.parametrize('config_path', DEFAULT_CONFIG_TOP_LEVELS)
+def test_default_user_yaml_top_level_sections_are_stage_specific(
+	config_path: Path,
+) -> None:
+	raw = load_config(config_path)
+
+	assert set(raw) == DEFAULT_CONFIG_TOP_LEVELS[config_path]
+
+
+@pytest.mark.parametrize('config_path', DEFAULT_CONFIG_TOP_LEVELS)
+def test_default_user_yamls_do_not_define_stage(config_path: Path) -> None:
+	raw = load_config(config_path)
+
+	assert 'stage' not in raw
 
 
 @pytest.mark.parametrize(('config_path', 'resolver'), DEFAULT_CONFIGS)
