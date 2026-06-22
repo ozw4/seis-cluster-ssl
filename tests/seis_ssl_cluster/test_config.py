@@ -476,12 +476,13 @@ def test_build_manifest_stats_dir_under_nopims_root_is_rejected() -> None:
 		resolve_manifest_build_config(cfg)
 
 
-def test_build_manifest_config_requires_output_name() -> None:
+def test_build_manifest_config_defaults_output_name() -> None:
 	cfg = _minimal_manifest_build_config()
 	del cfg['manifest']['output_name']
 
-	with pytest.raises(TypeError, match=r'manifest\.output_name'):
-		resolve_manifest_build_config(cfg)
+	resolved = resolve_manifest_build_config(cfg)
+
+	assert resolved['manifest']['output_name'] == 'nopims_amplitude_manifests.json'
 
 
 def test_filter_qc_output_outside_artifact_root_is_rejected() -> None:

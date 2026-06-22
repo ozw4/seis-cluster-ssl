@@ -12,6 +12,7 @@ from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
 	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
+	DEFAULT_MANIFEST_OUTPUT_NAME,
 	DEFAULT_ZERO_MASK_CONTRACT,
 	EXPECTED_RECONSTRUCTION_LOSS,
 	EXPECTED_VALID_MASK_MODE,
@@ -104,6 +105,11 @@ _CHECKPOINT_OWNED_EXTRACTION_SECTIONS = frozenset(
 def resolve_manifest_build_config(config: _T) -> Config:
 	"""Validate and resolve raw config for the manifest-build entrypoint."""
 	resolved, paths = _resolve_base(config, STAGE_BUILD_MANIFESTS)
+	_merge_section_defaults(
+		resolved,
+		'manifest',
+		{'output_name': DEFAULT_MANIFEST_OUTPUT_NAME},
+	)
 	manifest = _required_mapping(resolved, 'manifest')
 	_validate_non_empty_path(manifest, 'input_path_list', prefix='manifest')
 	_validate_artifact_output_path(
