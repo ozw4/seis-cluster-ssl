@@ -47,6 +47,7 @@ DRY_RUN_FORBIDDEN_KEYS = {
 		'stage:',
 		'paths.artifact_root:',
 		'data.input_channels:',
+		'zero_mask.enabled:',
 		'model.encoder_depth:',
 		'masking.spatial_mask_ratio:',
 		'loss.gradient_weight:',
@@ -57,7 +58,9 @@ DRY_RUN_FORBIDDEN_KEYS = {
 	Path('proc/seis_ssl_cluster/cluster_embeddings.py'): (
 		'stage:',
 		'data.input_channels:',
+		'zero_mask.enabled:',
 		'model.encoder_depth:',
+		'masking.spatial_mask_ratio:',
 		'loss.gradient_weight:',
 		'train.lr:',
 		'embedding.window_size:',
@@ -66,7 +69,9 @@ DRY_RUN_FORBIDDEN_KEYS = {
 	Path('proc/seis_ssl_cluster/visualize_clusters.py'): (
 		'stage:',
 		'data.input_channels:',
+		'zero_mask.enabled:',
 		'model.encoder_depth:',
+		'masking.spatial_mask_ratio:',
 		'loss.gradient_weight:',
 		'train.lr:',
 		'embedding.window_size:',
