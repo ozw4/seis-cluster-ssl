@@ -1,0 +1,51 @@
+services:
+  sfm3d:
+    image: nvidia-pytorch:24.09
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: develop
+      args:
+        HTTP_PROXY: ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        NO_PROXY: ${NO_PROXY}
+        USERNAME: dcuser
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    environment:
+      HTTP_PROXY: ${HTTP_PROXY}
+      HTTPS_PROXY: ${HTTPS_PROXY}
+      NO_PROXY: ${NO_PROXY}
+      MLFLOW_ALLOW_FILE_STORE: ${MLFLOW_ALLOW_FILE_STORE:-true}
+      NVIDIA_VISIBLE_DEVICES: all
+    logging:
+      driver: local
+      options:
+        max-size: 3m
+        max-file: '3'
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - type: bind
+        source: /dev/shm
+        target: /dev/shm
+      - type: bind
+        source: ../
+        target: /workspace
+      - type: bind
+        source: /nvme01/aidata/
+        target: /home/dcuser/data
+      - type: bind
+        source: /home/aiuser4/Desktop/issue_forge
+        target: /workspace/vendor/issue_forge
+        read_only: true
+      - type: bind
+        source: /home/aiuser4/Desktop/.config/gh/
+        target: /home/dcuser/.config/gh/
+    stdin_open: true
+    tty: true
