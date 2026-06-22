@@ -8,12 +8,12 @@ from pathlib import Path
 
 import yaml
 
-from seis_ssl_cluster.config.schema import DEFAULT_ARTIFACT_ROOT, DEFAULT_NOPIMS_ROOT
+from seis_ssl_cluster.config.schema import KNOWN_STAGES
 from seis_ssl_cluster.config.validate import validate_config
 
 
 def load_config(path: str | Path) -> dict[str, object]:
-	"""Load a YAML config file and apply path defaults."""
+	"""Load a YAML config file as a raw mapping."""
 	config_path = Path(path)
 	with config_path.open(encoding='utf-8') as file_obj:
 		loaded = yaml.safe_load(file_obj)
@@ -21,13 +21,6 @@ def load_config(path: str | Path) -> dict[str, object]:
 	if not isinstance(loaded, dict):
 		msg = f'config file must contain a mapping: {config_path}'
 		raise TypeError(msg)
-
-	paths = loaded.setdefault('paths', {})
-	if not isinstance(paths, dict):
-		msg = 'paths must be a mapping'
-		raise TypeError(msg)
-	paths.setdefault('nopims_root', DEFAULT_NOPIMS_ROOT)
-	paths.setdefault('artifact_root', DEFAULT_ARTIFACT_ROOT)
 
 	return loaded
 
@@ -38,9 +31,15 @@ def main() -> None:
 		description='Validate a SeisSSLCluster amplitude-only config YAML file.',
 	)
 	parser.add_argument('config_path', type=Path)
+	parser.add_argument(
+		'--stage',
+		required=True,
+		choices=sorted(KNOWN_STAGES),
+		help='Pipeline stage selected by the caller.',
+	)
 	args = parser.parse_args()
 
-	config = validate_config(load_config(args.config_path))
+	config = validate_config(load_config(args.config_path), stage=args.stage)
 	summary = {
 		'stage': config.get('stage'),
 		'paths': config.get('paths', {}),

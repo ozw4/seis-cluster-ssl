@@ -11,7 +11,10 @@ SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
 if str(SRC_ROOT) not in sys.path:
 	sys.path.insert(0, str(SRC_ROOT))
 
-from seis_ssl_cluster.config import load_config, validate_config  # noqa: E402
+from seis_ssl_cluster.config import (  # noqa: E402
+	load_config,
+	resolve_manifest_build_config,
+)
 from seis_ssl_cluster.data import (  # noqa: E402
 	ManifestBuildSummary,
 	scan_nopims_amplitude_manifests_from_path_list,
@@ -37,7 +40,7 @@ def main() -> None:
 		'Build amplitude-only NOPIMS manifests.',
 		DEFAULT_CONFIG,
 	)
-	config = validate_config(load_config(args.config))
+	config = resolve_manifest_build_config(load_config(args.config))
 	paths = _required_mapping(config, 'paths')
 	manifest_cfg = _required_mapping(config, 'manifest')
 	nopims_root = Path(_required_str(paths, 'nopims_root'))

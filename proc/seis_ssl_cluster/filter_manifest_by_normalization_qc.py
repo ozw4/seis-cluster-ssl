@@ -12,7 +12,10 @@ SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
 if str(SRC_ROOT) not in sys.path:
 	sys.path.insert(0, str(SRC_ROOT))
 
-from seis_ssl_cluster.config import load_config, validate_config  # noqa: E402
+from seis_ssl_cluster.config import (  # noqa: E402
+	load_config,
+	resolve_normalization_qc_config,
+)
 from seis_ssl_cluster.data.manifest_filter import (  # noqa: E402
 	FilteredManifestStatsQcResult,
 	filter_manifests_by_stats_qc,
@@ -45,7 +48,7 @@ def main() -> None:
 		'Filter amplitude-only manifests by normalization QC.',
 		DEFAULT_CONFIG,
 	)
-	config = validate_config(load_config(args.config))
+	config = resolve_normalization_qc_config(load_config(args.config))
 	paths = _required_mapping(config, 'paths')
 	nopims_root = Path(_required_str(paths, 'nopims_root'))
 	manifest_path = _manifest_input_path(config)

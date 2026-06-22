@@ -10,7 +10,10 @@ SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
 if str(SRC_ROOT) not in sys.path:
 	sys.path.insert(0, str(SRC_ROOT))
 
-from seis_ssl_cluster.config import load_config, validate_config  # noqa: E402
+from seis_ssl_cluster.config import (  # noqa: E402
+	load_config,
+	resolve_mae_training_config,
+)
 from seis_ssl_cluster.training.mae import run_mae_pretraining  # noqa: E402
 from seis_ssl_cluster.utils.cli import print_config_summary  # noqa: E402
 
@@ -58,14 +61,13 @@ def main() -> None:
 	)
 	args = parser.parse_args()
 
-	config = load_config(args.config)
+	config = resolve_mae_training_config(load_config(args.config))
 	_apply_cli_overrides(
 		config,
 		device=args.device,
 		max_steps=args.max_steps,
 		output_root=args.output_root,
 	)
-	config = validate_config(config)
 	if args.resume is not None and not args.resume.is_file():
 		raise FileNotFoundError(f'resume checkpoint does not exist: {args.resume}')
 	if args.dry_run:

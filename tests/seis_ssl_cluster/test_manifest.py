@@ -166,7 +166,6 @@ def test_build_nopims_manifests_cli_writes_amplitude_manifest(
 	output_dir = artifact_root / 'registry' / 'manifests'
 	stats_dir = artifact_root / 'registry' / 'normalization_stats'
 	config = {
-		'stage': 'build_nopims_manifests',
 		'paths': {
 			'nopims_root': str(nopims_root),
 			'artifact_root': str(artifact_root),
@@ -175,32 +174,6 @@ def test_build_nopims_manifests_cli_writes_amplitude_manifest(
 			'input_path_list': str(path_list),
 			'output_dir': str(output_dir),
 			'normalization_stats_dir': str(stats_dir),
-		},
-		'data': {
-			'grid_order': ['x', 'y', 'z'],
-			'volume_format': 'npy_memmap',
-			'input_channels': 1,
-			'target_channels': 1,
-			'use_context': False,
-			'local_crop_size': [128, 128, 128],
-		},
-		'model': {
-			'name': 'amp_mae3d',
-			'in_channels': 1,
-			'out_channels': 1,
-			'patch_size': [8, 8, 8],
-		},
-		'masking': {
-			'spatial_mask_ratio': 0.75,
-			'spatial_mask_mode': 'block',
-			'block_size_tokens': [2, 2, 2],
-		},
-		'train': {
-			'batch_size': 4,
-			'samples_per_epoch': 10000,
-			'epochs': 100,
-			'num_workers': 8,
-			'amp': False,
 		},
 	}
 	config_path = tmp_path / 'build_nopims_manifests.yaml'
