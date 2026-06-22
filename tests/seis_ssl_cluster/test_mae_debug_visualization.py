@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import torch
@@ -13,10 +13,6 @@ from seis_ssl_cluster.visualization.mae_debug import (
 	unpatchify_mae_predictions,
 )
 from tests.seis_ssl_cluster.test_training_smoke import _tiny_config
-
-if TYPE_CHECKING:
-	from pathlib import Path
-
 
 def test_unpatchify_mae_predictions_produces_expected_dense_values() -> None:
 	pred_patches = torch.arange(16, dtype=torch.float32).reshape(1, 2, 1, 8)
@@ -95,7 +91,9 @@ def test_mae_training_writes_debug_visualization_pngs(tmp_path: Path) -> None:
 	}
 
 	checkpoint_path = run_mae_pretraining(cfg)
-	visualization_dir = tmp_path / 'run' / 'visualizations' / 'mae_debug'
+	visualization_dir = (
+		Path(cfg['paths']['output_root']) / 'visualizations' / 'mae_debug'
+	)
 
 	assert checkpoint_path.is_file()
 	assert (visualization_dir / 'epoch_0001_step_000001_xy.png').is_file()

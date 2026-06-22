@@ -35,6 +35,16 @@ KNOWN_STAGES: Final = {
 	STAGE_CLUSTER_VISUALIZATION,
 }
 
+STAGE_PATH_KEYS: Final = {
+	STAGE_BUILD_MANIFESTS: frozenset({'nopims_root', 'artifact_root'}),
+	STAGE_NORMALIZATION_STATS: frozenset({'nopims_root', 'artifact_root'}),
+	STAGE_NORMALIZATION_QC: frozenset({'nopims_root', 'artifact_root'}),
+	STAGE_MAE_TRAINING: frozenset({'artifact_root', 'output_root'}),
+	STAGE_EMBEDDING_EXTRACTION: frozenset({'artifact_root'}),
+	STAGE_CLUSTERING: frozenset({'artifact_root'}),
+	STAGE_CLUSTER_VISUALIZATION: frozenset({'artifact_root'}),
+}
+
 FIXED_DATA_CONTRACT: Final = {
 	'grid_order': EXPECTED_GRID_ORDER,
 	'volume_format': EXPECTED_VOLUME_FORMAT,

@@ -47,7 +47,10 @@ def main() -> None:
 	parser.add_argument(
 		'--output-root',
 		type=Path,
-		help='Override paths.output_root for checkpoints and run snapshots.',
+		help=(
+			'Override paths.output_root for checkpoints and run snapshots; '
+			'must be absolute and under paths.artifact_root.'
+		),
 	)
 	parser.add_argument(
 		'--resume',

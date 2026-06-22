@@ -384,6 +384,52 @@ def test_unrelated_top_level_sections_are_rejected() -> None:
 @pytest.mark.parametrize(
 	('resolver', 'raw_config'),
 	[
+		(resolve_manifest_build_config, lambda: _minimal_manifest_build_config()),
+		(
+			resolve_normalization_stats_config,
+			lambda: _minimal_normalization_stats_config(),
+		),
+		(resolve_normalization_qc_config, lambda: _minimal_normalization_qc_config()),
+		(resolve_mae_training_config, lambda: _minimal_training_config()),
+		(resolve_embedding_extraction_config, lambda: _minimal_embedding_config()),
+		(resolve_clustering_config, lambda: _minimal_clustering_config()),
+		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
+	],
+)
+def test_stage_configs_reject_unknown_path_keys(
+	resolver: Callable[[dict[str, object]], dict[str, object]],
+	raw_config: Callable[[], dict[str, object]],
+) -> None:
+	cfg = raw_config()
+	cfg['paths']['unexpected_path'] = '/unused'
+
+	with pytest.raises(ValueError, match=r'paths.*unexpected_path'):
+		resolver(cfg)
+
+
+@pytest.mark.parametrize(
+	('resolver', 'raw_config'),
+	[
+		(resolve_mae_training_config, lambda: _minimal_training_config()),
+		(resolve_embedding_extraction_config, lambda: _minimal_embedding_config()),
+		(resolve_clustering_config, lambda: _minimal_clustering_config()),
+		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
+	],
+)
+def test_non_registry_configs_reject_nopims_root_path(
+	resolver: Callable[[dict[str, object]], dict[str, object]],
+	raw_config: Callable[[], dict[str, object]],
+) -> None:
+	cfg = raw_config()
+	cfg['paths']['nopims_root'] = '/data/NOPIMS'
+
+	with pytest.raises(ValueError, match=r'paths.*nopims_root'):
+		resolver(cfg)
+
+
+@pytest.mark.parametrize(
+	('resolver', 'raw_config'),
+	[
 		(resolve_clustering_config, lambda: _minimal_clustering_config()),
 		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
 	],
@@ -398,24 +444,6 @@ def test_downstream_configs_reject_redundant_mae_sections(
 	cfg[section] = {}
 
 	with pytest.raises(ValueError, match=rf'top-level section.*{section}'):
-		resolver(cfg)
-
-
-@pytest.mark.parametrize(
-	('resolver', 'raw_config'),
-	[
-		(resolve_clustering_config, lambda: _minimal_clustering_config()),
-		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
-	],
-)
-def test_downstream_configs_reject_nopims_root_path(
-	resolver: Callable[[dict[str, object]], dict[str, object]],
-	raw_config: Callable[[], dict[str, object]],
-) -> None:
-	cfg = raw_config()
-	cfg['paths']['nopims_root'] = '/data/NOPIMS'
-
-	with pytest.raises(ValueError, match=r'paths.*nopims_root'):
 		resolver(cfg)
 
 
@@ -654,6 +682,83 @@ def test_embedding_extraction_output_dir_must_be_under_artifact_root() -> None:
 		resolve_embedding_extraction_config(cfg)
 
 
+def test_training_output_root_must_be_absolute() -> None:
+	cfg = _minimal_training_config()
+	cfg['paths']['output_root'] = 'relative/run'
+
+	with pytest.raises(ValueError, match=r'paths\.output_root.*absolute'):
+		resolve_mae_training_config(cfg)
+
+
+def test_training_output_root_must_be_under_artifact_root() -> None:
+	cfg = _minimal_training_config()
+	cfg['paths']['output_root'] = '/external/runs/train_amp_mae'
+
+	with pytest.raises(
+		ValueError,
+		match=r'paths\.output_root.*paths\.artifact_root',
+	):
+		resolve_mae_training_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('resolver', 'raw_config', 'section', 'key'),
+	[
+		(
+			resolve_mae_training_config,
+			lambda: _minimal_training_config(),
+			'paths',
+			'output_root',
+		),
+		(
+			resolve_clustering_config,
+			lambda: _minimal_clustering_config(),
+			'clustering',
+			'output_dir',
+		),
+		(
+			resolve_cluster_visualization_config,
+			lambda: _minimal_visualization_config(),
+			'visualization',
+			'output_dir',
+		),
+	],
+)
+def test_artifact_output_paths_reject_traversal_after_resolution(
+	resolver: Callable[[dict[str, object]], dict[str, object]],
+	raw_config: Callable[[], dict[str, object]],
+	section: str,
+	key: str,
+) -> None:
+	cfg = raw_config()
+	cfg[section][key] = '/artifacts/../outside'
+
+	with pytest.raises(ValueError, match=rf'{section}\.{key}.*paths\.artifact_root'):
+		resolver(cfg)
+
+
+def test_clustering_output_dir_must_be_under_artifact_root() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['output_dir'] = '/external/clustering'
+
+	with pytest.raises(
+		ValueError,
+		match=r'clustering\.output_dir.*paths\.artifact_root',
+	):
+		resolve_clustering_config(cfg)
+
+
+def test_visualization_output_dir_must_be_under_artifact_root() -> None:
+	cfg = _minimal_visualization_config()
+	cfg['visualization']['output_dir'] = '/external/visualizations'
+
+	with pytest.raises(
+		ValueError,
+		match=r'visualization\.output_dir.*paths\.artifact_root',
+	):
+		resolve_cluster_visualization_config(cfg)
+
+
 def test_embedding_extraction_overlap_must_be_less_than_window() -> None:
 	cfg = _minimal_embedding_config()
 	cfg['embedding']['window_size'] = [8, 8, 8]
@@ -816,7 +921,7 @@ def _minimal_normalization_qc_config() -> dict[str, object]:
 def _minimal_training_config() -> dict[str, object]:
 	return {
 		'paths': {
-			**_paths(),
+			'artifact_root': '/artifacts',
 			'output_root': '/artifacts/runs/train_amp_mae',
 		},
 		'manifests': {

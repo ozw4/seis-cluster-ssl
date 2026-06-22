@@ -428,9 +428,8 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 	)
 	return {
 		'paths': {
-			'nopims_root': str(tmp_path),
 			'artifact_root': str(tmp_path / 'artifacts'),
-			'output_root': str(tmp_path / 'run'),
+			'output_root': str(tmp_path / 'artifacts' / 'run'),
 		},
 		'manifests': {
 			'train': str(manifest_path),
