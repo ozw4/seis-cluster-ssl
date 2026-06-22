@@ -61,13 +61,14 @@ def main() -> None:
 	)
 	args = parser.parse_args()
 
-	config = resolve_mae_training_config(load_config(args.config))
+	raw_config = load_config(args.config)
 	_apply_cli_overrides(
-		config,
+		raw_config,
 		device=args.device,
 		max_steps=args.max_steps,
 		output_root=args.output_root,
 	)
+	config = resolve_mae_training_config(raw_config)
 	if args.resume is not None and not args.resume.is_file():
 		raise FileNotFoundError(f'resume checkpoint does not exist: {args.resume}')
 	if args.dry_run:

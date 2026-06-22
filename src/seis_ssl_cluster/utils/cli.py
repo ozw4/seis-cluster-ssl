@@ -44,11 +44,7 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 	"""Print a compact stage-aware summary of resolved config values."""
 	paths = _mapping(cfg.get('paths'))
 	stage = cfg.get('stage')
-	rows: list[tuple[str, Any]] = [
-		('stage', stage),
-		('paths.nopims_root', paths.get('nopims_root')),
-		('paths.artifact_root', paths.get('artifact_root')),
-	]
+	rows = _base_summary_rows(stage, paths)
 
 	if stage == STAGE_BUILD_MANIFESTS:
 		manifest = _mapping(cfg.get('manifest'))
@@ -166,6 +162,19 @@ def _add_training_rows(
 			('train.device', train.get('device')),
 		],
 	)
+
+
+def _base_summary_rows(
+	stage: object,
+	paths: Mapping[str, Any],
+) -> list[tuple[str, Any]]:
+	rows: list[tuple[str, Any]] = [('stage', stage)]
+	if 'nopims_root' in paths:
+		rows.append(('paths.nopims_root', paths.get('nopims_root')))
+	rows.append(('paths.artifact_root', paths.get('artifact_root')))
+	if 'output_root' in paths:
+		rows.append(('paths.output_root', paths.get('output_root')))
+	return rows
 
 
 def run_pending_entrypoint(

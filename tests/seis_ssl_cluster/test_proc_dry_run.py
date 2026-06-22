@@ -105,6 +105,40 @@ builtins.__import__ = _guarded_import
 	assert 'execution: dry-run; clustering skipped' in result.stdout
 
 
+def test_train_amp_mae_cli_overrides_are_resolved_before_dry_run(
+	tmp_path: Path,
+) -> None:
+	output_root = tmp_path / 'override-run'
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_mae.py'),
+		'--dry-run',
+		'--device',
+		'cpu',
+		'--max-steps',
+		'1',
+		'--output-root',
+		output_root,
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert f'paths.output_root: {output_root}' in result.stdout
+	assert 'train.device: cpu' in result.stdout
+
+
+def test_train_amp_mae_cli_overrides_are_validated_after_apply() -> None:
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_mae.py'),
+		'--dry-run',
+		'--max-steps',
+		'-1',
+	)
+
+	assert result.returncode != 0
+	assert 'train.max_steps' in result.stderr
+	assert 'stage:' not in result.stdout
+
+
 def test_proc_script_rejects_legacy_attribute_config(tmp_path: Path) -> None:
 	config_path = tmp_path / 'legacy.yaml'
 	config_path.write_text(

@@ -65,6 +65,27 @@ DEFAULT_ZERO_MASK_CONTRACT: Final = {
 	'xy_trace_influence_radius': 1,
 }
 
+DEFAULT_MAE_DATA_OPTIONS: Final = {
+	'min_valid_fraction': 0.1,
+	'max_resample_attempts': 16,
+}
+
+DEFAULT_MAE_LOSS_OPTIONS: Final = {
+	'huber_delta': 1.0,
+	'gradient_weight': 0.05,
+}
+
+DEFAULT_MAE_TRAIN_OPTIONS: Final = {
+	'num_workers': 8,
+	'shuffle': True,
+	'lr': 3.0e-5,
+	'weight_decay': 0.05,
+	'amp': False,
+	'device': 'cuda',
+	'seed': 42,
+	'grad_clip_norm': 1.0,
+}
+
 LEGACY_ATTRIBUTE_KEY_PATHS: Final = {
 	'attributes.names',
 	'attributes.registry',

@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import TypeAlias, TypeVar
 
 from seis_ssl_cluster.config.schema import (
+	DEFAULT_MAE_DATA_OPTIONS,
+	DEFAULT_MAE_LOSS_OPTIONS,
+	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
 	EXPECTED_RECONSTRUCTION_LOSS,
 	EXPECTED_VALID_MASK_MODE,
@@ -156,8 +159,16 @@ def resolve_normalization_qc_config(config: _T) -> Config:
 
 def resolve_mae_training_config(config: _T) -> Config:
 	"""Validate and resolve raw config for MAE training."""
-	resolved, _paths = _resolve_base(config, STAGE_MAE_TRAINING)
+	resolved, _paths = _resolve_base(
+		config,
+		STAGE_MAE_TRAINING,
+		require_nopims_root=False,
+	)
 	_reject_fixed_contract_keys(resolved)
+	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
+	_merge_section_defaults(resolved, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
+	_merge_section_defaults(resolved, 'train', DEFAULT_MAE_TRAIN_OPTIONS)
+	_merge_section_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
 
 	manifests = _required_mapping(resolved, 'manifests')
 	_validate_non_empty_path(manifests, 'train', prefix='manifests')
@@ -189,8 +200,7 @@ def resolve_mae_training_config(config: _T) -> Config:
 	_validate_masking(masking)
 	_validate_loss(loss)
 	_validate_train(train)
-	if 'zero_mask' in resolved:
-		_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
+	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
 	if 'visualization' in resolved:
 		_required_mapping(resolved, 'visualization')
 
@@ -198,7 +208,6 @@ def resolve_mae_training_config(config: _T) -> Config:
 	_merge_section_defaults(resolved, 'model', FIXED_MODEL_CONTRACT)
 	_merge_section_defaults(resolved, 'masking', FIXED_MASKING_CONTRACT)
 	_merge_section_defaults(resolved, 'loss', FIXED_LOSS_CONTRACT)
-	_merge_section_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
 	return resolved
 
 
@@ -283,6 +292,8 @@ def validate_config(config: _T, *, stage: str) -> Config:
 def _resolve_base(
 	config: Mapping[str, object],
 	stage: str,
+	*,
+	require_nopims_root: bool = True,
 ) -> tuple[Config, _ResolvedPaths]:
 	_validate_mapping(config)
 	_reject_legacy_attribute_config(config)
@@ -290,12 +301,15 @@ def _resolve_base(
 	_validate_top_level_sections(config, stage)
 	resolved = deepcopy(dict(config))
 	resolved['stage'] = stage
-	paths = _validate_paths(_required_mapping(resolved, 'paths'))
+	paths = _validate_paths(
+		_required_mapping(resolved, 'paths'),
+		require_nopims_root=require_nopims_root,
+	)
 	return resolved, paths
 
 
 class _ResolvedPaths:
-	def __init__(self, *, nopims_root: Path, artifact_root: Path) -> None:
+	def __init__(self, *, nopims_root: Path | None, artifact_root: Path) -> None:
 		self.nopims_root = nopims_root
 		self.artifact_root = artifact_root
 
@@ -358,10 +372,19 @@ def _reject_legacy_attribute_config(config: Mapping[str, object]) -> None:
 			raise ValueError(msg)
 
 
-def _validate_paths(paths: Mapping[str, object]) -> _ResolvedPaths:
+def _validate_paths(
+	paths: Mapping[str, object],
+	*,
+	require_nopims_root: bool,
+) -> _ResolvedPaths:
+	nopims_root: Path | None = None
+	if require_nopims_root or 'nopims_root' in paths:
+		nopims_root = _validate_absolute_path(paths, 'nopims_root', prefix='paths')
+	if 'output_root' in paths:
+		_validate_non_empty_path(paths, 'output_root', prefix='paths')
 	return _ResolvedPaths(
-		nopims_root=_validate_absolute_path(paths, 'nopims_root', prefix='paths'),
 		artifact_root=_validate_absolute_path(paths, 'artifact_root', prefix='paths'),
+		nopims_root=nopims_root,
 	)
 
 
@@ -405,12 +428,12 @@ def _validate_artifact_output_path(
 	label: str,
 	*,
 	artifact_root: Path,
-	nopims_root: Path,
+	nopims_root: Path | None,
 ) -> None:
 	if not path.is_absolute():
 		msg = f'{label} must be an absolute artifact-registry path; got {path}'
 		raise ValueError(msg)
-	if _is_relative_to(path, nopims_root):
+	if nopims_root is not None and _is_relative_to(path, nopims_root):
 		msg = f'{label} must not be under paths.nopims_root; got {path}'
 		raise ValueError(msg)
 	if not _is_relative_to(path, artifact_root):

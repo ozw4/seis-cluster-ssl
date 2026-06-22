@@ -91,8 +91,52 @@ def test_default_configs_resolve_without_mutating_raw(
 	assert raw == original
 	assert 'stage' not in raw
 	assert resolved['stage']
-	assert resolved['paths']['nopims_root'] == '/home/dcuser/data/NOPIMS'
+	if config_path == CONFIG_DIR / 'train_amp_mae.yaml':
+		assert 'nopims_root' not in raw['paths']
+		assert 'nopims_root' not in resolved['paths']
+		assert (
+			resolved['paths']['output_root']
+			== '/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1'
+		)
+	else:
+		assert resolved['paths']['nopims_root'] == '/home/dcuser/data/NOPIMS'
 	assert resolved['paths']['artifact_root'] == '/workspace/artifacts/seis_ssl_cluster'
+
+
+def test_default_training_config_is_minimal_raw_user_config() -> None:
+	raw = load_config(CONFIG_DIR / 'train_amp_mae.yaml')
+
+	assert set(raw) == {
+		'paths',
+		'manifests',
+		'data',
+		'zero_mask',
+		'model',
+		'masking',
+		'loss',
+		'train',
+		'visualization',
+	}
+	assert raw['paths'] == {
+		'artifact_root': '/workspace/artifacts/seis_ssl_cluster',
+		'output_root': (
+			'/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1'
+		),
+	}
+	assert raw['manifests']['train'] == DEFAULT_CLEAN_MANIFEST_PATH
+	assert raw['manifests']['train_path_list'] == DEFAULT_CLEAN_SPLIT_PATH
+	assert raw['data']['min_valid_fraction'] == 0.1
+	assert raw['data']['max_resample_attempts'] == 16
+	assert raw['zero_mask'] == {
+		'enabled': True,
+		'zero_atol': 0.0,
+		'z_sample_influence_radius': 16,
+		'xy_trace_influence_radius': 1,
+	}
+	assert not {'grid_order', 'volume_format', 'input_channels'} & set(raw['data'])
+	assert not {'name', 'in_channels', 'out_channels'} & set(raw['model'])
+	assert 'spatial_mask_mode' not in raw['masking']
+	assert not {'reconstruction', 'valid_mask_mode'} & set(raw['loss'])
 
 
 @pytest.mark.parametrize(('config_path', 'resolver'), DATA_REGISTRY_CONFIGS)

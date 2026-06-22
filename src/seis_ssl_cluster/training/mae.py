@@ -7,6 +7,7 @@ import math
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,17 @@ import numpy as np
 import torch
 
 import seis_ssl_cluster
+from seis_ssl_cluster.config.schema import (
+	DEFAULT_MAE_DATA_OPTIONS,
+	DEFAULT_MAE_LOSS_OPTIONS,
+	DEFAULT_MAE_TRAIN_OPTIONS,
+	DEFAULT_ZERO_MASK_CONTRACT,
+	FIXED_DATA_CONTRACT,
+	FIXED_LOSS_CONTRACT,
+	FIXED_MASKING_CONTRACT,
+	FIXED_MODEL_CONTRACT,
+	STAGE_MAE_TRAINING,
+)
 from seis_ssl_cluster.data import NopimsAmplitudePretrainDataset, read_manifest_json
 from seis_ssl_cluster.losses import mae_pretraining_loss
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
@@ -58,6 +70,24 @@ _RESUME_MAPPING_KEYS = (
 	'config',
 	'metrics',
 	'training_state',
+)
+_RESUME_COMPATIBILITY_SECTIONS = (
+	'manifests',
+	'data',
+	'zero_mask',
+	'model',
+	'masking',
+	'loss',
+)
+_RESUME_ALLOWED_TRAIN_OVERRIDES = frozenset(
+	{
+		'epochs',
+		'max_steps',
+		'checkpoint_every_steps',
+		'allow_overwrite_output',
+		'diagnostics_dir',
+		'device',
+	},
 )
 
 
@@ -114,6 +144,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	skip_batches: int = 0,
 	visualization_config: MaeDebugVisualizationConfig | None = None,
 	step_callback: StepCallback | None = None,
+	run_config: Mapping[str, object] | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
 	model.train()
@@ -156,6 +187,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				amp_enabled=amp_enabled,
 				diagnostics_dir=diagnostics_dir,
 				patch_size_xyz=patch_size_xyz,
+				run_config=run_config,
 			)
 
 		current_grad_norm: float | None = None
@@ -178,6 +210,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					amp_enabled=amp_enabled,
 					diagnostics_dir=diagnostics_dir,
 					patch_size_xyz=patch_size_xyz,
+					run_config=run_config,
 				)
 				totals['grad_norm'] = totals.get('grad_norm', 0.0) + current_grad_norm
 			scaler.step(optimizer)
@@ -197,6 +230,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					amp_enabled=amp_enabled,
 					diagnostics_dir=diagnostics_dir,
 					patch_size_xyz=patch_size_xyz,
+					run_config=run_config,
 				)
 				totals['grad_norm'] = totals.get('grad_norm', 0.0) + current_grad_norm
 			optimizer.step()
@@ -265,6 +299,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 	resume: str | Path | None = None,
 ) -> Path:
 	"""Run amplitude-only MAE pretraining from ``config``."""
+	config = _complete_mae_training_config(config)
 	manifests = read_manifest_json(_manifest_train_path(config))
 	train_config = _mapping(config, 'train')
 	model_config = _mapping(config, 'model')
@@ -330,6 +365,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			optimizer=optimizer,
 			scaler=scaler,
 			amp_enabled=amp_enabled,
+			config=config,
 		)
 		_restore_dataloader_generator_state(payload=payload, dataloader=dataloader)
 		if resume_state.skip_batches >= len(dataloader):
@@ -419,6 +455,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			skip_batches=skip_batches,
 			visualization_config=visualization_config,
 			step_callback=save_step_checkpoint,
+			run_config=config,
 		)
 		print_epoch_metrics(epoch, state.metrics)
 		checkpoint_kind: Literal['step', 'epoch'] = (
@@ -515,15 +552,18 @@ def _save_mae_checkpoint(  # noqa: PLR0913
 	return checkpoint_path
 
 
-def _restore_mae_checkpoint(
+def _restore_mae_checkpoint(  # noqa: PLR0913
 	*,
 	payload: Mapping[str, object],
 	model: torch.nn.Module,
 	optimizer: torch.optim.Optimizer,
 	scaler: torch.amp.GradScaler | None,
 	amp_enabled: bool,
+	config: Mapping[str, object] | None = None,
 ) -> ResumeState:
 	_validate_resume_payload(payload, amp_enabled=amp_enabled)
+	if config is not None:
+		_validate_resume_config_compatibility(payload, config)
 	try:
 		model.load_state_dict(payload['model_state_dict'])
 	except RuntimeError as exc:
@@ -904,6 +944,128 @@ def _checkpoint_stage(payload: Mapping[str, object]) -> object | None:
 	return None
 
 
+def _validate_resume_config_compatibility(
+	payload: Mapping[str, object],
+	config: Mapping[str, object],
+) -> None:
+	checkpoint_config = payload['config']
+	if not isinstance(checkpoint_config, Mapping):
+		msg = 'resume checkpoint config must be a mapping'
+		raise TypeError(msg)
+	checkpoint_view = _resume_compatibility_view(checkpoint_config)
+	current_view = _resume_compatibility_view(config)
+	if checkpoint_view == current_view:
+		return
+	label = _first_compatibility_mismatch(checkpoint_view, current_view)
+	msg = (
+		'resume checkpoint config is incompatible with current resolved '
+		f'config at {label}'
+	)
+	raise ValueError(msg)
+
+
+def _resume_compatibility_view(config: Mapping[str, object]) -> dict[str, object]:
+	view: dict[str, object] = {'stage': config.get('stage')}
+	for section in _RESUME_COMPATIBILITY_SECTIONS:
+		view[section] = _json_safe(config.get(section))
+	train = config.get('train')
+	if isinstance(train, Mapping):
+		view['train'] = {
+			str(key): _json_safe(value)
+			for key, value in sorted(train.items(), key=lambda item: str(item[0]))
+			if str(key) not in _RESUME_ALLOWED_TRAIN_OVERRIDES
+		}
+	else:
+		view['train'] = _json_safe(train)
+	return view
+
+
+def _first_compatibility_mismatch(
+	left: Mapping[str, object],
+	right: Mapping[str, object],
+) -> str:
+	for key in left:
+		if left.get(key) == right.get(key):
+			continue
+		left_value = left.get(key)
+		right_value = right.get(key)
+		if isinstance(left_value, Mapping) and isinstance(right_value, Mapping):
+			child_keys = sorted(
+				left_value.keys() | right_value.keys(),
+				key=str,
+			)
+			for child_key in child_keys:
+				if left_value.get(child_key) != right_value.get(child_key):
+					return f'{key}.{child_key}'
+		return str(key)
+	return 'config'
+
+
+def _complete_mae_training_config(config: Mapping[str, object]) -> dict[str, object]:
+	if not isinstance(config, Mapping):
+		msg = f'config must be a mapping; got {config!r}'
+		raise TypeError(msg)
+	resolved = deepcopy(dict(config))
+	stage = resolved.get('stage', STAGE_MAE_TRAINING)
+	if stage != STAGE_MAE_TRAINING:
+		msg = f'config.stage must be train_amp_mae; got {stage!r}'
+		raise ValueError(msg)
+	resolved['stage'] = STAGE_MAE_TRAINING
+	for section in ('paths', 'manifests', 'data', 'model', 'masking', 'loss', 'train'):
+		_runtime_mapping(resolved, section)
+	_merge_runtime_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
+	_merge_runtime_defaults(resolved, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
+	_merge_runtime_defaults(resolved, 'train', DEFAULT_MAE_TRAIN_OPTIONS)
+	_merge_runtime_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
+	_merge_runtime_fixed(resolved, 'data', FIXED_DATA_CONTRACT)
+	_merge_runtime_fixed(resolved, 'model', FIXED_MODEL_CONTRACT)
+	_merge_runtime_fixed(resolved, 'masking', FIXED_MASKING_CONTRACT)
+	_merge_runtime_fixed(resolved, 'loss', FIXED_LOSS_CONTRACT)
+	return resolved
+
+
+def _merge_runtime_defaults(
+	config: dict[str, object],
+	section: str,
+	defaults: Mapping[str, object],
+) -> None:
+	current = config.get(section)
+	if current is None:
+		config[section] = deepcopy(dict(defaults))
+		return
+	if not isinstance(current, Mapping):
+		msg = f'{section} must be a mapping'
+		raise TypeError(msg)
+	config[section] = {**deepcopy(dict(defaults)), **dict(current)}
+
+
+def _merge_runtime_fixed(
+	config: dict[str, object],
+	section: str,
+	fixed_values: Mapping[str, object],
+) -> None:
+	current = _runtime_mapping(config, section)
+	for key, fixed_value in fixed_values.items():
+		if key in current and current[key] != fixed_value:
+			msg = (
+				f'{section}.{key} is fixed by the amplitude-only training '
+				f'contract; got {current[key]!r}'
+			)
+			raise ValueError(msg)
+	config[section] = {**deepcopy(dict(fixed_values)), **dict(current)}
+
+
+def _runtime_mapping(
+	config: Mapping[str, object],
+	section: str,
+) -> Mapping[str, object]:
+	value = config.get(section)
+	if not isinstance(value, Mapping):
+		msg = f'{section} must be a mapping'
+		raise TypeError(msg)
+	return value
+
+
 def _build_model(model_config: Mapping[str, object]) -> AmplitudeMAE3D:
 	return AmplitudeMAE3D(
 		in_channels=_int_config(model_config, 'in_channels', 1),
@@ -1081,6 +1243,7 @@ def _clip_and_check_gradients(  # noqa: PLR0913
 	amp_enabled: bool,
 	diagnostics_dir: Path | None,
 	patch_size_xyz: tuple[int, int, int],
+	run_config: Mapping[str, object] | None,
 ) -> float:
 	grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
 	if torch.isfinite(grad_norm.detach()).all():
@@ -1097,6 +1260,7 @@ def _clip_and_check_gradients(  # noqa: PLR0913
 		diagnostics_dir=diagnostics_dir,
 		patch_size_xyz=patch_size_xyz,
 		grad_norm=grad_norm,
+		run_config=run_config,
 	)
 	raise AssertionError('unreachable after non-finite gradient diagnostic')
 
@@ -1114,6 +1278,7 @@ def _raise_nonfinite(  # noqa: PLR0913
 	diagnostics_dir: Path | None,
 	patch_size_xyz: tuple[int, int, int],
 	grad_norm: torch.Tensor | None = None,
+	run_config: Mapping[str, object] | None = None,
 ) -> None:
 	if diagnostics_dir is not None:
 		diagnostic_path = _write_json_diagnostic(
@@ -1127,6 +1292,7 @@ def _raise_nonfinite(  # noqa: PLR0913
 				amp_enabled=amp_enabled,
 				patch_size_xyz=patch_size_xyz,
 				grad_norm=grad_norm,
+				run_config=run_config,
 			),
 			diagnostics_dir / f'nonfinite_mae_step_{global_step:08d}.json',
 		)
@@ -1150,10 +1316,11 @@ def _build_nonfinite_diagnostic(  # noqa: PLR0913
 	amp_enabled: bool,
 	patch_size_xyz: tuple[int, int, int],
 	grad_norm: torch.Tensor | None,
+	run_config: Mapping[str, object] | None,
 ) -> dict[str, object]:
 	coords = _json_safe(batch.get('coords'))
 	coord_items = coords if isinstance(coords, list) else []
-	return {
+	diagnostic = {
 		'global_step': int(global_step),
 		'epoch': int(epoch),
 		'batch_index': int(batch_index),
@@ -1180,6 +1347,9 @@ def _build_nonfinite_diagnostic(  # noqa: PLR0913
 		'grad_norm': _summarize_tensor(grad_norm),
 		'torch_amp_enabled': bool(amp_enabled),
 	}
+	if run_config is not None:
+		diagnostic['config'] = _json_safe(run_config)
+	return diagnostic
 
 
 def _summarize_prediction(

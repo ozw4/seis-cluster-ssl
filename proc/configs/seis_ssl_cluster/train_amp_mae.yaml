@@ -1,11 +1,18 @@
 paths:
-  nopims_root: /home/dcuser/data/NOPIMS
   artifact_root: /workspace/artifacts/seis_ssl_cluster
+  output_root: /workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1
 manifests:
   train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
-  train_path_list: /home/dcuser/data/NOPIMS/inputs/train_npy_paths.txt
+  train_path_list: /workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1_clean/train_npy_paths.txt
 data:
   local_crop_size: [128, 128, 128]
+  min_valid_fraction: 0.1
+  max_resample_attempts: 16
+zero_mask:
+  enabled: true
+  zero_atol: 0.0
+  z_sample_influence_radius: 16
+  xy_trace_influence_radius: 1
 model:
   patch_size: [8, 8, 8]
   encoder_dim: 384
