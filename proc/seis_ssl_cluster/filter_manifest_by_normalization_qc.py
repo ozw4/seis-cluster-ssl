@@ -3,33 +3,28 @@
 from __future__ import annotations
 
 import json
-import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
-if str(SRC_ROOT) not in sys.path:
-	sys.path.insert(0, str(SRC_ROOT))
-
-from seis_ssl_cluster.config import (  # noqa: E402
+from seis_ssl_cluster.config import (
 	load_config,
 	resolve_normalization_qc_config,
 )
-from seis_ssl_cluster.data.manifest_filter import (  # noqa: E402
+from seis_ssl_cluster.data.manifest_filter import (
 	FilteredManifestStatsQcResult,
 	filter_manifests_by_stats_qc,
 )
-from seis_ssl_cluster.data.normalization_qc import (  # noqa: E402
+from seis_ssl_cluster.data.normalization_qc import (
 	NormalizationStatsQcThresholds,
 	normalization_qc_report_to_dict,
 )
-from seis_ssl_cluster.data.path_list import load_npy_path_list  # noqa: E402
-from seis_ssl_cluster.data.schema import (  # noqa: E402
+from seis_ssl_cluster.data.path_list import load_npy_path_list
+from seis_ssl_cluster.data.schema import (
 	read_manifest_json,
 	write_manifest_json,
 )
-from seis_ssl_cluster.utils.cli import (  # noqa: E402
+from seis_ssl_cluster.utils.cli import (
 	parse_config_args,
 	print_config_summary,
 )

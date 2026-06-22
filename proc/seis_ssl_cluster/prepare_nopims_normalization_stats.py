@@ -3,32 +3,27 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
-if str(SRC_ROOT) not in sys.path:
-	sys.path.insert(0, str(SRC_ROOT))
-
-from seis_ssl_cluster.config import (  # noqa: E402
+from seis_ssl_cluster.config import (
 	load_config,
 	resolve_normalization_stats_config,
 )
-from seis_ssl_cluster.data.normalization import (  # noqa: E402
+from seis_ssl_cluster.data.normalization import (
 	compute_normalization_stats,
 	load_normalization_stats,
 	write_normalization_stats,
 )
-from seis_ssl_cluster.data.schema import (  # noqa: E402
+from seis_ssl_cluster.data.schema import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
 	SurveyManifest,
 	read_manifest_json,
 )
-from seis_ssl_cluster.utils.cli import print_config_summary  # noqa: E402
+from seis_ssl_cluster.utils.cli import print_config_summary
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[1]

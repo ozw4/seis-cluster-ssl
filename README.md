@@ -71,7 +71,7 @@ seis-cluster-ssl/
 Python 3.10 or newer is required.
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/ozw4/seis-cluster-ssl.git
 cd seis-cluster-ssl
 
 python -m venv .venv
@@ -475,4 +475,4 @@ Planned extensions include:
 
 ## License
 
-Add the repository license and ensure all seismic datasets are used under their respective terms.
+No repository license file is currently included. Ensure all seismic datasets are used under their respective terms.
