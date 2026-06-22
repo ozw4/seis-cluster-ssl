@@ -1,9 +1,9 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 clustering:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/runs/clusters/nopims/pretrain_v1
+  input_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1
 visualization:
-  output_dir: /workspace/artifacts/seis_ssl_cluster/runs/figures/clusters/nopims/pretrain_v1
+  output_dir: /workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/pretrain_v1
   survey_ids: []
   modes: [token]
   reconstruct_voxel: false

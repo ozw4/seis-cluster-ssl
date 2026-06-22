@@ -16,6 +16,63 @@ PROC_SCRIPTS = (
 	Path('proc/seis_ssl_cluster/cluster_embeddings.py'),
 	Path('proc/seis_ssl_cluster/visualize_clusters.py'),
 )
+DRY_RUN_FORBIDDEN_KEYS = {
+	Path('proc/seis_ssl_cluster/build_nopims_manifests.py'): (
+		'data.input_channels:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/prepare_nopims_normalization_stats.py'): (
+		'data.input_channels:',
+		'manifest.input_path_list:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/filter_manifest_by_normalization_qc.py'): (
+		'data.input_channels:',
+		'normalization.max_samples:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/train_amp_mae.py'): (
+		'data.input_channels:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/extract_embeddings.py'): (
+		'stage:',
+		'paths.artifact_root:',
+		'data.input_channels:',
+		'model.encoder_depth:',
+		'masking.spatial_mask_ratio:',
+		'loss.gradient_weight:',
+		'train.lr:',
+		'clustering.k_values:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/cluster_embeddings.py'): (
+		'stage:',
+		'data.input_channels:',
+		'model.encoder_depth:',
+		'loss.gradient_weight:',
+		'train.lr:',
+		'embedding.window_size:',
+		'visualization.modes:',
+	),
+	Path('proc/seis_ssl_cluster/visualize_clusters.py'): (
+		'stage:',
+		'data.input_channels:',
+		'model.encoder_depth:',
+		'loss.gradient_weight:',
+		'train.lr:',
+		'embedding.window_size:',
+		'clustering.k_values:',
+	),
+}
 
 
 @pytest.mark.parametrize('script_path', PROC_SCRIPTS)
@@ -34,11 +91,17 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 	result = run_python_proc(script_path, '--dry-run')
 
 	assert result.returncode == 0, result.stderr
-	assert 'data.input_channels:' not in result.stdout
-	assert 'train.lr:' not in result.stdout
+	for key in DRY_RUN_FORBIDDEN_KEYS[script_path]:
+		assert key not in result.stdout
 	if script_path == Path('proc/seis_ssl_cluster/extract_embeddings.py'):
 		assert 'stage:' not in result.stdout
 		assert 'paths.artifact_root:' not in result.stdout
+	elif script_path in {
+		Path('proc/seis_ssl_cluster/cluster_embeddings.py'),
+		Path('proc/seis_ssl_cluster/visualize_clusters.py'),
+	}:
+		assert 'stage:' not in result.stdout
+		assert 'paths.artifact_root:' in result.stdout
 	else:
 		assert 'stage:' in result.stdout
 		assert 'paths.artifact_root:' in result.stdout
@@ -73,12 +136,50 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 		assert 'masking.spatial_mask_ratio:' not in result.stdout
 		assert 'execution: dry-run; extraction skipped' in result.stdout
 	elif script_path == Path('proc/seis_ssl_cluster/cluster_embeddings.py'):
-		assert 'clustering.k_values:' in result.stdout
-		assert 'loss.gradient_weight:' not in result.stdout
+		_assert_cluster_dry_run_summary(result.stdout)
 		assert 'execution: dry-run; clustering skipped' in result.stdout
 	else:
-		assert 'visualization.output_dir:' in result.stdout
+		_assert_cluster_visualization_dry_run_summary(result.stdout)
 		assert 'execution: dry-run; visualization skipped' in result.stdout
+
+
+def _assert_cluster_dry_run_summary(stdout: str) -> None:
+	for key in (
+		'embeddings.input_dir:',
+		'clustering.output_dir:',
+		'clustering.embedding_normalization:',
+		'clustering.pca.enabled:',
+		'clustering.pca.n_components:',
+		'clustering.pca.whiten:',
+		'clustering.sample_tokens:',
+		'clustering.method:',
+		'clustering.k_values:',
+		'clustering.minibatch_size:',
+		'clustering.seed:',
+	):
+		assert key in stdout
+	assert 'model.encoder_depth:' not in stdout
+	assert 'loss.gradient_weight:' not in stdout
+
+
+def _assert_cluster_visualization_dry_run_summary(stdout: str) -> None:
+	for key in (
+		'clustering.input_dir:',
+		'visualization.output_dir:',
+		'visualization.survey_ids:',
+		'visualization.modes:',
+		'visualization.slice_coordinate_space:',
+		'visualization.xy_slices:',
+		'visualization.xz_slices:',
+		'visualization.reconstruct_voxel:',
+		'visualization.allow_all_surveys_for_voxel_reconstruction:',
+		'visualization.skip_existing_voxel_labels:',
+		'visualization.max_voxel_output_gib:',
+		'visualization.allow_large_voxel_output:',
+	):
+		assert key in stdout
+	assert 'model.encoder_depth:' not in stdout
+	assert 'loss.gradient_weight:' not in stdout
 
 
 def test_extract_embeddings_dry_run_prints_device_override() -> None:

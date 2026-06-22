@@ -50,7 +50,11 @@ def print_config_summary(
 	stage = cfg.get('stage')
 	rows = (
 		[]
-		if stage == STAGE_EMBEDDING_EXTRACTION
+		if stage in {
+			STAGE_EMBEDDING_EXTRACTION,
+			STAGE_CLUSTERING,
+			STAGE_CLUSTER_VISUALIZATION,
+		}
 		else _base_summary_rows(stage, paths)
 	)
 
@@ -122,31 +126,9 @@ def print_config_summary(
 		if device_override is not None:
 			rows.append(('device_override', device_override))
 	elif stage == STAGE_CLUSTERING:
-		embeddings = _mapping(cfg.get('embeddings'))
-		clustering = _mapping(cfg.get('clustering'))
-		rows.extend(
-			[
-				('embeddings.input_dir', embeddings.get('input_dir')),
-				('clustering.output_dir', clustering.get('output_dir')),
-				('clustering.method', clustering.get('method')),
-				('clustering.k_values', clustering.get('k_values')),
-			],
-		)
+		_add_clustering_rows(rows, cfg)
 	elif stage == STAGE_CLUSTER_VISUALIZATION:
-		clustering = _mapping(cfg.get('clustering'))
-		visualization = _mapping(cfg.get('visualization'))
-		rows.extend(
-			[
-				('clustering.input_dir', clustering.get('input_dir')),
-				('visualization.output_dir', visualization.get('output_dir')),
-				('visualization.modes', visualization.get('modes')),
-				('visualization.survey_ids', visualization.get('survey_ids')),
-				(
-					'visualization.reconstruct_voxel',
-					visualization.get('reconstruct_voxel'),
-				),
-			],
-		)
+		_add_cluster_visualization_rows(rows, cfg)
 
 	for key, value in rows:
 		print(f'{key}: {_format_value(value)}')
@@ -175,6 +157,86 @@ def _add_training_rows(
 			('train.batch_size', train.get('batch_size')),
 			('train.epochs', train.get('epochs')),
 			('train.device', train.get('device')),
+		],
+	)
+
+
+def _add_clustering_rows(
+	rows: list[tuple[str, Any]],
+	cfg: Mapping[str, Any],
+) -> None:
+	paths = _mapping(cfg.get('paths'))
+	embeddings = _mapping(cfg.get('embeddings'))
+	clustering = _mapping(cfg.get('clustering'))
+	pca = _mapping(clustering.get('pca'))
+	rows.extend(
+		[
+			('paths.artifact_root', paths.get('artifact_root')),
+			('embeddings.input_dir', embeddings.get('input_dir')),
+			('clustering.output_dir', clustering.get('output_dir')),
+			(
+				'clustering.embedding_normalization',
+				clustering.get('embedding_normalization'),
+			),
+			('clustering.pca.enabled', pca.get('enabled')),
+			('clustering.pca.n_components', pca.get('n_components')),
+			('clustering.pca.whiten', pca.get('whiten')),
+			('clustering.sample_tokens', clustering.get('sample_tokens')),
+			('clustering.method', clustering.get('method')),
+			('clustering.k_values', clustering.get('k_values')),
+			('clustering.minibatch_size', clustering.get('minibatch_size')),
+			('clustering.seed', clustering.get('seed')),
+		],
+	)
+	if 'prediction_batch_size' in clustering:
+		rows.append(
+			(
+				'clustering.prediction_batch_size',
+				clustering.get('prediction_batch_size'),
+			),
+		)
+
+
+def _add_cluster_visualization_rows(
+	rows: list[tuple[str, Any]],
+	cfg: Mapping[str, Any],
+) -> None:
+	paths = _mapping(cfg.get('paths'))
+	clustering = _mapping(cfg.get('clustering'))
+	visualization = _mapping(cfg.get('visualization'))
+	rows.extend(
+		[
+			('paths.artifact_root', paths.get('artifact_root')),
+			('clustering.input_dir', clustering.get('input_dir')),
+			('visualization.output_dir', visualization.get('output_dir')),
+			('visualization.survey_ids', visualization.get('survey_ids')),
+			('visualization.modes', visualization.get('modes')),
+			(
+				'visualization.slice_coordinate_space',
+				visualization.get('slice_coordinate_space'),
+			),
+			('visualization.xy_slices', visualization.get('xy_slices')),
+			('visualization.xz_slices', visualization.get('xz_slices')),
+			(
+				'visualization.reconstruct_voxel',
+				visualization.get('reconstruct_voxel'),
+			),
+			(
+				'visualization.allow_all_surveys_for_voxel_reconstruction',
+				visualization.get('allow_all_surveys_for_voxel_reconstruction'),
+			),
+			(
+				'visualization.skip_existing_voxel_labels',
+				visualization.get('skip_existing_voxel_labels'),
+			),
+			(
+				'visualization.max_voxel_output_gib',
+				visualization.get('max_voxel_output_gib'),
+			),
+			(
+				'visualization.allow_large_voxel_output',
+				visualization.get('allow_large_voxel_output'),
+			),
 		],
 	)
 

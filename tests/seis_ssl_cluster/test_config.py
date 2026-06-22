@@ -39,8 +39,7 @@ DEFAULT_CONFIGS = (
 	(CONFIG_DIR / 'cluster_embeddings.yaml', resolve_clustering_config),
 	(CONFIG_DIR / 'visualize_clusters.yaml', resolve_cluster_visualization_config),
 )
-DATA_REGISTRY_CONFIGS = DEFAULT_CONFIGS[:3]
-DATA_REGISTRY_TOP_LEVELS = {
+DEFAULT_CONFIG_TOP_LEVELS = {
 	CONFIG_DIR / 'build_nopims_manifests.yaml': {'paths', 'manifest'},
 	CONFIG_DIR / 'prepare_nopims_normalization_stats.yaml': {
 		'paths',
@@ -53,6 +52,37 @@ DATA_REGISTRY_TOP_LEVELS = {
 		'splits',
 		'qc',
 	},
+	CONFIG_DIR / 'train_amp_mae.yaml': {
+		'paths',
+		'manifests',
+		'data',
+		'zero_mask',
+		'model',
+		'masking',
+		'loss',
+		'train',
+		'visualization',
+	},
+	CONFIG_DIR / 'extract_embeddings.yaml': {
+		'paths',
+		'manifests',
+		'embeddings',
+		'embedding',
+	},
+	CONFIG_DIR / 'cluster_embeddings.yaml': {
+		'paths',
+		'embeddings',
+		'clustering',
+	},
+	CONFIG_DIR / 'visualize_clusters.yaml': {
+		'paths',
+		'clustering',
+		'visualization',
+	},
+}
+DATA_REGISTRY_CONFIGS = DEFAULT_CONFIGS[:3]
+DATA_REGISTRY_TOP_LEVELS = {
+	path: DEFAULT_CONFIG_TOP_LEVELS[path] for path, _resolver in DATA_REGISTRY_CONFIGS
 }
 REDUNDANT_DATA_STAGE_SECTIONS = {'stage', 'data', 'model', 'masking', 'loss', 'train'}
 CHECKPOINT_OWNED_EXTRACTION_SECTIONS = (
@@ -83,11 +113,37 @@ DEFAULT_EMBEDDING_CHECKPOINT_PATH = (
 	'/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1/'
 	'mae_latest.pt'
 )
+DEFAULT_EMBEDDING_DIR = (
+	'/workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1'
+)
+DEFAULT_CLUSTERING_DIR = (
+	'/workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1'
+)
+DEFAULT_CLUSTER_VISUALIZATION_DIR = (
+	'/workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/'
+	'pretrain_v1'
+)
 FIXED_DISABLED_NORMALIZATION_KEYS = (
 	'smooth_time_depth_trend_correction',
 	'trace_wise_agc',
 	'patch_wise_zscore',
 )
+
+
+@pytest.mark.parametrize('config_path', DEFAULT_CONFIG_TOP_LEVELS)
+def test_default_user_yaml_top_level_sections_are_stage_specific(
+	config_path: Path,
+) -> None:
+	raw = load_config(config_path)
+
+	assert set(raw) == DEFAULT_CONFIG_TOP_LEVELS[config_path]
+
+
+@pytest.mark.parametrize('config_path', DEFAULT_CONFIG_TOP_LEVELS)
+def test_default_user_yamls_do_not_define_stage(config_path: Path) -> None:
+	raw = load_config(config_path)
+
+	assert 'stage' not in raw
 
 
 @pytest.mark.parametrize(('config_path', 'resolver'), DEFAULT_CONFIGS)
@@ -167,16 +223,58 @@ def test_default_embedding_extraction_config_is_minimal_raw_user_config() -> Non
 	}
 	assert raw['manifests']['input'] == DEFAULT_CLEAN_MANIFEST_PATH
 	assert raw['embeddings']['checkpoint'] == DEFAULT_EMBEDDING_CHECKPOINT_PATH
-	assert (
-		raw['embeddings']['output_dir']
-		== '/workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1'
-	)
+	assert raw['embeddings']['output_dir'] == DEFAULT_EMBEDDING_DIR
 	assert raw['embedding'] == {
 		'window_size': [128, 128, 128],
 		'overlap': [64, 64, 64],
 		'output_dtype': 'float16',
 		'batch_size': 1,
 		'min_token_valid_fraction': 0.5,
+	}
+	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
+
+
+def test_default_clustering_config_is_minimal_raw_user_config() -> None:
+	raw = load_config(CONFIG_DIR / 'cluster_embeddings.yaml')
+
+	assert set(raw) == {'paths', 'embeddings', 'clustering'}
+	assert raw['paths'] == {'artifact_root': '/workspace/artifacts/seis_ssl_cluster'}
+	assert raw['embeddings'] == {'input_dir': DEFAULT_EMBEDDING_DIR}
+	assert raw['clustering'] == {
+		'output_dir': DEFAULT_CLUSTERING_DIR,
+		'embedding_normalization': 'l2',
+		'pca': {'enabled': True, 'n_components': 64, 'whiten': False},
+		'sample_tokens': 1000000,
+		'method': 'minibatch_kmeans',
+		'k_values': [6, 8, 10, 12],
+		'minibatch_size': 8192,
+		'seed': 42,
+	}
+	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
+
+
+def test_default_cluster_visualization_config_is_minimal_raw_user_config() -> None:
+	raw = load_config(CONFIG_DIR / 'visualize_clusters.yaml')
+
+	assert set(raw) == {'paths', 'clustering', 'visualization'}
+	assert raw['paths'] == {'artifact_root': '/workspace/artifacts/seis_ssl_cluster'}
+	assert raw['clustering'] == {'input_dir': DEFAULT_CLUSTERING_DIR}
+	assert raw['visualization'] == {
+		'output_dir': DEFAULT_CLUSTER_VISUALIZATION_DIR,
+		'survey_ids': [],
+		'modes': ['token'],
+		'reconstruct_voxel': False,
+		'allow_all_surveys_for_voxel_reconstruction': False,
+		'skip_existing_voxel_labels': True,
+		'max_voxel_output_gib': 50.0,
+		'allow_large_voxel_output': False,
+		'slice_coordinate_space': 'voxel',
+		'xy_slices': [750],
+		'xz_slices': [150],
+		'dpi': 160,
+		'invalid_color': 'lightgray',
+		'amplitude_underlay': {'enabled': False, 'alpha': 0.35},
+		'summaries': {'enabled': True, 'include_amplitude_norm': False},
 	}
 	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
 
@@ -188,6 +286,16 @@ def test_default_clustering_input_matches_extraction_output() -> None:
 	assert (
 		clustering['embeddings']['input_dir']
 		== extraction['embeddings']['output_dir']
+	)
+
+
+def test_default_visualization_input_matches_clustering_output() -> None:
+	clustering = load_config(CONFIG_DIR / 'cluster_embeddings.yaml')
+	visualization = load_config(CONFIG_DIR / 'visualize_clusters.yaml')
+
+	assert (
+		visualization['clustering']['input_dir']
+		== clustering['clustering']['output_dir']
 	)
 
 
@@ -271,6 +379,104 @@ def test_unrelated_top_level_sections_are_rejected() -> None:
 
 	with pytest.raises(ValueError, match=r'cluster_embeddings.*train'):
 		resolve_clustering_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('resolver', 'raw_config'),
+	[
+		(resolve_clustering_config, lambda: _minimal_clustering_config()),
+		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
+	],
+)
+@pytest.mark.parametrize('section', ['data', 'model', 'masking', 'loss', 'train'])
+def test_downstream_configs_reject_redundant_mae_sections(
+	resolver: Callable[[dict[str, object]], dict[str, object]],
+	raw_config: Callable[[], dict[str, object]],
+	section: str,
+) -> None:
+	cfg = raw_config()
+	cfg[section] = {}
+
+	with pytest.raises(ValueError, match=rf'top-level section.*{section}'):
+		resolver(cfg)
+
+
+@pytest.mark.parametrize(
+	('resolver', 'raw_config'),
+	[
+		(resolve_clustering_config, lambda: _minimal_clustering_config()),
+		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
+	],
+)
+def test_downstream_configs_reject_nopims_root_path(
+	resolver: Callable[[dict[str, object]], dict[str, object]],
+	raw_config: Callable[[], dict[str, object]],
+) -> None:
+	cfg = raw_config()
+	cfg['paths']['nopims_root'] = '/data/NOPIMS'
+
+	with pytest.raises(ValueError, match=r'paths.*nopims_root'):
+		resolver(cfg)
+
+
+def test_clustering_config_rejects_duplicate_k_values() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['k_values'] = [2, 3, 2]
+
+	with pytest.raises(ValueError, match=r'clustering\.k_values.*duplicates'):
+		resolve_clustering_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('field', 'value', 'message'),
+	[
+		('embedding_normalization', 'zscore', 'embedding_normalization'),
+		('method', 'kmeans', 'method'),
+		('sample_tokens', 0, 'sample_tokens'),
+		('minibatch_size', 0, 'minibatch_size'),
+		('seed', 1.5, 'seed'),
+	],
+)
+def test_clustering_config_validates_stage_parameters(
+	field: str,
+	value: object,
+	message: str,
+) -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering'][field] = value
+
+	with pytest.raises(ValueError, match=message):
+		resolve_clustering_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('field', 'value', 'message'),
+	[
+		('modes', ['token', 'summary'], 'modes'),
+		('modes', ['token', 'token'], 'modes.*duplicates'),
+		('xy_slices', [-1], 'xy_slices'),
+		('max_voxel_output_gib', float('inf'), 'max_voxel_output_gib'),
+		('dpi', 0, 'dpi'),
+	],
+)
+def test_cluster_visualization_config_validates_stage_parameters(
+	field: str,
+	value: object,
+	message: str,
+) -> None:
+	cfg = _minimal_visualization_config()
+	cfg['visualization'][field] = value
+
+	with pytest.raises(ValueError, match=message):
+		resolve_cluster_visualization_config(cfg)
+
+
+def test_cluster_visualization_config_rejects_invalid_alpha() -> None:
+	cfg = _minimal_visualization_config()
+	cfg['visualization']['amplitude_underlay']['alpha'] = float('nan')
+
+	with pytest.raises(ValueError, match=r'amplitude_underlay\.alpha'):
+		resolve_cluster_visualization_config(cfg)
 
 
 @pytest.mark.parametrize(
@@ -410,6 +616,31 @@ def test_embedding_extraction_explicit_output_path_is_preserved() -> None:
 	resolved = resolve_embedding_extraction_config(cfg)
 
 	assert resolved['embeddings']['output_dir'] == '/artifacts/explicit/embeddings'
+
+
+def test_clustering_explicit_paths_are_preserved() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['embeddings']['input_dir'] = '/artifacts/explicit/embeddings'
+	cfg['clustering']['output_dir'] = '/artifacts/explicit/clustering'
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['embeddings']['input_dir'] == '/artifacts/explicit/embeddings'
+	assert resolved['clustering']['output_dir'] == '/artifacts/explicit/clustering'
+
+
+def test_cluster_visualization_explicit_paths_are_preserved() -> None:
+	cfg = _minimal_visualization_config()
+	cfg['clustering']['input_dir'] = '/artifacts/explicit/clustering'
+	cfg['visualization']['output_dir'] = '/artifacts/explicit/visualizations'
+
+	resolved = resolve_cluster_visualization_config(cfg)
+
+	assert resolved['clustering']['input_dir'] == '/artifacts/explicit/clustering'
+	assert (
+		resolved['visualization']['output_dir']
+		== '/artifacts/explicit/visualizations'
+	)
 
 
 def test_embedding_extraction_output_dir_must_be_under_artifact_root() -> None:
@@ -638,13 +869,38 @@ def _minimal_clustering_config() -> dict[str, object]:
 	return {
 		'paths': {'artifact_root': '/artifacts'},
 		'embeddings': {'input_dir': '/artifacts/embeddings'},
-		'clustering': {'output_dir': '/artifacts/clusters'},
+		'clustering': {
+			'output_dir': '/artifacts/clustering',
+			'embedding_normalization': 'l2',
+			'pca': {'enabled': True, 'n_components': 64, 'whiten': False},
+			'sample_tokens': 1000000,
+			'method': 'minibatch_kmeans',
+			'k_values': [6, 8, 10, 12],
+			'minibatch_size': 8192,
+			'seed': 42,
+		},
 	}
 
 
 def _minimal_visualization_config() -> dict[str, object]:
 	return {
 		'paths': {'artifact_root': '/artifacts'},
-		'clustering': {'input_dir': '/artifacts/clusters'},
-		'visualization': {'output_dir': '/artifacts/figures'},
+		'clustering': {'input_dir': '/artifacts/clustering'},
+		'visualization': {
+			'output_dir': '/artifacts/visualizations',
+			'survey_ids': [],
+			'modes': ['token'],
+			'reconstruct_voxel': False,
+			'allow_all_surveys_for_voxel_reconstruction': False,
+			'skip_existing_voxel_labels': True,
+			'max_voxel_output_gib': 50.0,
+			'allow_large_voxel_output': False,
+			'slice_coordinate_space': 'voxel',
+			'xy_slices': [750],
+			'xz_slices': [150],
+			'dpi': 160,
+			'invalid_color': 'lightgray',
+			'amplitude_underlay': {'enabled': False, 'alpha': 0.35},
+			'summaries': {'enabled': True, 'include_amplitude_norm': False},
+		},
 	}
