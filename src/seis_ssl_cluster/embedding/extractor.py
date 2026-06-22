@@ -618,7 +618,17 @@ def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
 	zero_mask = _required_mapping(config, 'zero_mask')
 
 	_required_non_empty_string(paths, 'output_root', 'paths')
+	_validate_required_checkpoint_keys(
+		manifests,
+		'manifests',
+		('train', 'train_path_list'),
+	)
 	_required_non_empty_string(manifests, 'train', 'manifests')
+	_required_non_empty_string(
+		manifests,
+		'train_path_list',
+		'manifests',
+	)
 	_validate_fixed_checkpoint_values(data, 'data', FIXED_DATA_CONTRACT)
 	_validate_fixed_checkpoint_values(model, 'model', FIXED_MODEL_CONTRACT)
 	_validate_fixed_checkpoint_values(masking, 'masking', FIXED_MASKING_CONTRACT)

@@ -118,8 +118,7 @@ def resolve_manifest_build_config(config: _T) -> Config:
 		artifact_root=paths.artifact_root,
 		nopims_root=paths.nopims_root,
 	)
-	if 'output_name' in manifest:
-		_validate_non_empty_str(manifest, 'output_name', prefix='manifest')
+	_validate_non_empty_str(manifest, 'output_name', prefix='manifest')
 	return resolved
 
 
@@ -179,8 +178,7 @@ def resolve_mae_training_config(config: _T) -> Config:
 
 	manifests = _required_mapping(resolved, 'manifests')
 	_validate_non_empty_path(manifests, 'train', prefix='manifests')
-	if 'train_path_list' in manifests:
-		_validate_non_empty_path(manifests, 'train_path_list', prefix='manifests')
+	_validate_non_empty_path(manifests, 'train_path_list', prefix='manifests')
 
 	data = _required_mapping(resolved, 'data')
 	model = _required_mapping(resolved, 'model')

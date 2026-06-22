@@ -94,6 +94,14 @@ def test_run_snapshots_configured_train_path_list(tmp_path: Path) -> None:
 	assert snapshot.read_text(encoding='utf-8') == 'survey/amplitude.npy\n'
 
 
+def test_run_rejects_missing_train_path_list(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	del cfg['manifests']['train_path_list']
+
+	with pytest.raises(ValueError, match=r'manifests\.train_path_list'):
+		run_mae_pretraining(cfg)
+
+
 def test_run_rejects_missing_configured_train_path_list(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	missing = tmp_path / 'missing_train_paths.txt'
@@ -409,6 +417,11 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 
 def _tiny_config(tmp_path: Path) -> dict[str, object]:
 	manifest_path = _write_synthetic_manifest(tmp_path / 'survey')
+	path_list = tmp_path / 'train_npy_paths.txt'
+	path_list.write_text(
+		f'{manifest_path.parent / "amplitude.npy"}\n',
+		encoding='utf-8',
+	)
 	return {
 		'stage': 'train_amp_mae',
 		'paths': {
@@ -416,7 +429,10 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 			'artifact_root': str(tmp_path / 'artifacts'),
 			'output_root': str(tmp_path / 'run'),
 		},
-		'manifests': {'train': str(manifest_path)},
+		'manifests': {
+			'train': str(manifest_path),
+			'train_path_list': str(path_list),
+		},
 		'data': {
 			'grid_order': ['x', 'y', 'z'],
 			'volume_format': 'npy_memmap',

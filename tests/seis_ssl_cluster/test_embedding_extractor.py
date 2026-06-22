@@ -206,6 +206,12 @@ def test_embedding_extraction_rejects_checkpoint_data_zero_mask_only(
 			),
 			'loss.*valid_mask_mode',
 		),
+		(
+			lambda checkpoint_config: checkpoint_config['manifests'].pop(
+				'train_path_list',
+			),
+			'manifests.*train_path_list',
+		),
 	],
 )
 def test_embedding_extraction_rejects_incomplete_checkpoint_resolved_config(
@@ -347,6 +353,11 @@ def _write_fixture(
 		)
 	manifest_path = tmp_path / 'manifest.json'
 	write_manifest_json(manifests, manifest_path)
+	path_list = tmp_path / 'train_npy_paths.txt'
+	path_list.write_text(
+		'\n'.join(str(manifest.amplitude.path) for manifest in manifests) + '\n',
+		encoding='utf-8',
+	)
 	checkpoint_path = tmp_path / 'mae.pt'
 	model_config = {
 		'name': 'amp_mae3d',
@@ -376,7 +387,10 @@ def _write_fixture(
 	checkpoint_config: dict[str, object] = {
 		'stage': 'train_amp_mae',
 		'paths': {'output_root': str(tmp_path / 'run')},
-		'manifests': {'train': str(manifest_path)},
+		'manifests': {
+			'train': str(manifest_path),
+			'train_path_list': str(path_list),
+		},
 		'data': {
 			'grid_order': list(GRID_ORDER_XYZ),
 			'volume_format': 'npy_memmap',

@@ -215,6 +215,7 @@ paths:
   output_root: /external/artifacts/runs/nondivisible
 manifests:
   train: /external/artifacts/registry/manifests/train.json
+  train_path_list: /external/artifacts/registry/splits/train_npy_paths.txt
 data:
   local_crop_size: [128, 128, 128]
 model:

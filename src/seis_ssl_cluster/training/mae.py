@@ -1094,10 +1094,9 @@ def _snapshot_run_inputs(
 	manifest_path = _manifest_train_path(config)
 	_copy_snapshot(manifest_path, output_root / 'manifest.json', overwrite=overwrite)
 	path_list = _configured_path_list(config)
-	if path_list is not None:
-		inputs_dir = output_root / 'inputs'
-		inputs_dir.mkdir(parents=True, exist_ok=True)
-		_copy_snapshot(path_list, inputs_dir / path_list.name, overwrite=overwrite)
+	inputs_dir = output_root / 'inputs'
+	inputs_dir.mkdir(parents=True, exist_ok=True)
+	_copy_snapshot(path_list, inputs_dir / path_list.name, overwrite=overwrite)
 	_write_json_snapshot(
 		output_root / 'run_metadata.json',
 		{
@@ -1124,17 +1123,16 @@ def _copy_snapshot(source: Path, target: Path, *, overwrite: bool) -> None:
 	shutil.copy2(source, target)
 
 
-def _configured_path_list(config: Mapping[str, object]) -> Path | None:
+def _configured_path_list(config: Mapping[str, object]) -> Path:
 	manifests = config.get('manifests')
 	if not isinstance(manifests, Mapping):
-		return None
+		msg = 'manifests must be a mapping'
+		raise TypeError(msg)
 	path_value = manifests.get('train_path_list')
-	if path_value is None:
-		return None
 	if not isinstance(path_value, str) or not path_value:
 		msg = (
-			'manifests.train_path_list must be a non-empty string when '
-			f'configured; got {path_value!r}'
+			'manifests.train_path_list must be a non-empty string; '
+			f'got {path_value!r}'
 		)
 		raise ValueError(msg)
 	path = Path(path_value)

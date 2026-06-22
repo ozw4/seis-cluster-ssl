@@ -413,6 +413,14 @@ def test_training_config_requires_explicit_output_root() -> None:
 		resolve_mae_training_config(cfg)
 
 
+def test_training_config_requires_explicit_train_path_list() -> None:
+	cfg = _minimal_training_config()
+	del cfg['manifests']['train_path_list']
+
+	with pytest.raises(TypeError, match=r'manifests\.train_path_list'):
+		resolve_mae_training_config(cfg)
+
+
 def test_embedding_extraction_config_requires_explicit_geometry() -> None:
 	cfg = _minimal_embedding_config()
 	del cfg['embedding']
@@ -468,6 +476,14 @@ def test_build_manifest_stats_dir_under_nopims_root_is_rejected() -> None:
 		resolve_manifest_build_config(cfg)
 
 
+def test_build_manifest_config_requires_output_name() -> None:
+	cfg = _minimal_manifest_build_config()
+	del cfg['manifest']['output_name']
+
+	with pytest.raises(TypeError, match=r'manifest\.output_name'):
+		resolve_manifest_build_config(cfg)
+
+
 def test_filter_qc_output_outside_artifact_root_is_rejected() -> None:
 	cfg = _minimal_normalization_qc_config()
 	cfg['qc']['output_json'] = '/external/qc/normalization_stats_qc.json'
@@ -492,6 +508,7 @@ def _minimal_manifest_build_config() -> dict[str, object]:
 		'manifest': {
 			'input_path_list': '/data/NOPIMS/inputs/train.txt',
 			'output_dir': '/artifacts/manifests',
+			'output_name': 'train.json',
 			'normalization_stats_dir': '/artifacts/normalization_stats',
 		},
 	}
@@ -529,7 +546,10 @@ def _minimal_training_config() -> dict[str, object]:
 			**_paths(),
 			'output_root': '/artifacts/runs/train_amp_mae',
 		},
-		'manifests': {'train': '/artifacts/manifests/train.json'},
+		'manifests': {
+			'train': '/artifacts/manifests/train.json',
+			'train_path_list': '/artifacts/splits/train_npy_paths.txt',
+		},
 		'data': {'local_crop_size': [128, 128, 128]},
 		'model': {
 			'patch_size': [8, 8, 8],
