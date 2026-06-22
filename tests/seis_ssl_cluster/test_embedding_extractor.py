@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -18,6 +19,9 @@ from seis_ssl_cluster.data import (
 )
 from seis_ssl_cluster.embedding import run_embedding_extraction
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
+
+if TYPE_CHECKING:
+	from collections.abc import Callable
 
 
 def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
@@ -160,7 +164,6 @@ def test_embedding_extraction_uses_checkpoint_zero_mask_settings(
 	config = _write_fixture(
 		tmp_path,
 		checkpoint_zero_mask=zero_mask,
-		include_extraction_zero_mask=False,
 	)
 	config['embedding']['min_token_valid_fraction'] = 1.0
 
@@ -173,7 +176,61 @@ def test_embedding_extraction_uses_checkpoint_zero_mask_settings(
 	assert valid_tokens[1, 1, 1]
 
 
-def test_embedding_extraction_rejects_conflicting_zero_mask_override(
+def test_embedding_extraction_rejects_checkpoint_data_zero_mask_only(
+	tmp_path: Path,
+) -> None:
+	zero_mask = {
+		'enabled': True,
+		'zero_atol': 0.0,
+		'z_sample_influence_radius': 0,
+		'xy_trace_influence_radius': 1,
+	}
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_zero_mask=zero_mask,
+		checkpoint_config_modifier=_move_zero_mask_to_data,
+	)
+	config['embedding']['min_token_valid_fraction'] = 1.0
+
+	with pytest.raises(ValueError, match=r'missing resolved section.*zero_mask'):
+		run_embedding_extraction(config, device='cpu')
+
+
+@pytest.mark.parametrize(
+	('mutate_checkpoint_config', 'error'),
+	[
+		(lambda checkpoint_config: checkpoint_config.pop('data'), 'data'),
+		(
+			lambda checkpoint_config: checkpoint_config['loss'].pop(
+				'valid_mask_mode',
+			),
+			'loss.*valid_mask_mode',
+		),
+		(
+			lambda checkpoint_config: checkpoint_config['manifests'].pop(
+				'train_path_list',
+			),
+			'manifests.*train_path_list',
+		),
+	],
+)
+def test_embedding_extraction_rejects_incomplete_checkpoint_resolved_config(
+	tmp_path: Path,
+	mutate_checkpoint_config: Callable[[dict[str, object]], object],
+	error: str,
+) -> None:
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_config_modifier=lambda checkpoint_config: mutate_checkpoint_config(
+			checkpoint_config,
+		),
+	)
+
+	with pytest.raises(ValueError, match=error):
+		run_embedding_extraction(config, device='cpu')
+
+
+def test_embedding_extraction_rejects_extraction_zero_mask_section(
 	tmp_path: Path,
 ) -> None:
 	config = _write_fixture(
@@ -187,7 +244,7 @@ def test_embedding_extraction_rejects_conflicting_zero_mask_override(
 	)
 	config['zero_mask'] = {'enabled': False}
 
-	with pytest.raises(ValueError, match='zero_mask override must match checkpoint'):
+	with pytest.raises(ValueError, match=r'checkpoint-owned.*zero_mask'):
 		run_embedding_extraction(config, device='cpu')
 
 
@@ -195,8 +252,28 @@ def test_embedding_extraction_rejects_integer_output_dtype(tmp_path: Path) -> No
 	config = _write_fixture(tmp_path)
 	config['embedding']['output_dtype'] = 'int16'
 
-	with pytest.raises(TypeError, match='floating-point NumPy dtype'):
+	with pytest.raises(ValueError, match='float16 or float32'):
 		run_embedding_extraction(config, device='cpu')
+
+
+def test_embedding_extraction_requires_explicit_embedding_section(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	del config['embedding']
+
+	with pytest.raises(TypeError, match='embedding must be a mapping'):
+		run_embedding_extraction(config, device='cpu')
+
+
+def test_embedding_extraction_allows_zero_overlap(tmp_path: Path) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['overlap'] = [0, 0, 0]
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	assert metadata['overlap'] == [0, 0, 0]
 
 
 def test_embedding_extraction_metadata_records_full_model_geometry(
@@ -226,11 +303,16 @@ def _write_fixture(
 	*,
 	checkpoint_dtype: torch.dtype = torch.float32,
 	checkpoint_zero_mask: dict[str, object] | None = None,
-	include_extraction_zero_mask: bool = True,
+	checkpoint_config_modifier: Callable[[dict[str, object]], object] | None = None,
 	survey_count: int = 1,
 ) -> dict[str, object]:
 	if checkpoint_zero_mask is None:
-		checkpoint_zero_mask = {'enabled': False}
+		checkpoint_zero_mask = {
+			'enabled': False,
+			'zero_atol': 0.0,
+			'z_sample_influence_radius': 16,
+			'xy_trace_influence_radius': 1,
+		}
 	manifests = []
 	for survey_index in range(survey_count):
 		survey_id = f'survey-{chr(ord("a") + survey_index)}'
@@ -271,6 +353,11 @@ def _write_fixture(
 		)
 	manifest_path = tmp_path / 'manifest.json'
 	write_manifest_json(manifests, manifest_path)
+	path_list = tmp_path / 'train_npy_paths.txt'
+	path_list.write_text(
+		'\n'.join(str(manifest.amplitude.path) for manifest in manifests) + '\n',
+		encoding='utf-8',
+	)
 	checkpoint_path = tmp_path / 'mae.pt'
 	model_config = {
 		'name': 'amp_mae3d',
@@ -297,21 +384,61 @@ def _write_fixture(
 		decoder_heads=3,
 	)
 	model.to(dtype=checkpoint_dtype)
+	checkpoint_config: dict[str, object] = {
+		'stage': 'train_amp_mae',
+		'paths': {'output_root': str(tmp_path / 'run')},
+		'manifests': {
+			'train': str(manifest_path),
+			'train_path_list': str(path_list),
+		},
+		'data': {
+			'grid_order': list(GRID_ORDER_XYZ),
+			'volume_format': 'npy_memmap',
+			'input_channels': 1,
+			'target_channels': 1,
+			'use_context': False,
+			'local_crop_size': [4, 4, 4],
+			'min_valid_fraction': 0.1,
+			'max_resample_attempts': 16,
+		},
+		'model': model_config,
+		'masking': {
+			'spatial_mask_ratio': 0.5,
+			'spatial_mask_mode': 'block',
+			'block_size_tokens': [1, 1, 1],
+		},
+		'loss': {
+			'reconstruction': 'huber',
+			'huber_delta': 1.0,
+			'gradient_weight': 0.05,
+			'valid_mask_mode': 'voxel',
+		},
+		'train': {
+			'batch_size': 1,
+			'samples_per_epoch': 1,
+			'epochs': 1,
+			'num_workers': 0,
+			'shuffle': False,
+			'lr': 1.0e-4,
+			'weight_decay': 0.0,
+			'amp': False,
+			'device': 'cpu',
+			'seed': 7,
+			'grad_clip_norm': 1.0,
+		},
+	}
+	checkpoint_config['zero_mask'] = checkpoint_zero_mask
+	if checkpoint_config_modifier is not None:
+		checkpoint_config_modifier(checkpoint_config)
 	torch.save(
 		{
 			'model_state_dict': model.state_dict(),
-			'config': {
-				'stage': 'train_amp_mae',
-				'model': model_config,
-				'zero_mask': checkpoint_zero_mask,
-			},
+			'config': checkpoint_config,
 		},
 		checkpoint_path,
 	)
 	config: dict[str, object] = {
-		'stage': 'extract_embeddings',
 		'paths': {
-			'nopims_root': str(tmp_path),
 			'artifact_root': str(tmp_path / 'artifacts'),
 		},
 		'manifests': {'input': str(manifest_path)},
@@ -326,28 +453,12 @@ def _write_fixture(
 			'batch_size': 2,
 			'min_token_valid_fraction': 0.5,
 		},
-		'data': {
-			'grid_order': ['x', 'y', 'z'],
-			'volume_format': 'npy_memmap',
-			'input_channels': 1,
-			'target_channels': 1,
-			'use_context': False,
-			'local_crop_size': [4, 4, 4],
-		},
-		'model': model_config,
-		'masking': {
-			'spatial_mask_ratio': 0.5,
-			'spatial_mask_mode': 'block',
-			'block_size_tokens': [1, 1, 1],
-		},
-		'train': {
-			'batch_size': 1,
-			'samples_per_epoch': 1,
-			'epochs': 1,
-			'amp': False,
-			'device': 'cpu',
-		},
 	}
-	if include_extraction_zero_mask:
-		config['zero_mask'] = dict(checkpoint_zero_mask)
 	return config
+
+
+def _move_zero_mask_to_data(checkpoint_config: dict[str, object]) -> None:
+	zero_mask = checkpoint_config.pop('zero_mask')
+	data = checkpoint_config['data']
+	assert isinstance(data, dict)
+	data['zero_mask'] = zero_mask

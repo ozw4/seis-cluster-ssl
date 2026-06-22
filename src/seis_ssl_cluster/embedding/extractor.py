@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral, Real
 from pathlib import Path
@@ -11,6 +11,17 @@ from typing import cast
 import numpy as np
 import torch
 
+from seis_ssl_cluster.config.schema import (
+	DEFAULT_MAE_DATA_OPTIONS,
+	DEFAULT_MAE_LOSS_OPTIONS,
+	DEFAULT_MAE_TRAIN_OPTIONS,
+	DEFAULT_ZERO_MASK_CONTRACT,
+	FIXED_DATA_CONTRACT,
+	FIXED_LOSS_CONTRACT,
+	FIXED_MASKING_CONTRACT,
+	FIXED_MODEL_CONTRACT,
+	STAGE_MAE_TRAINING,
+)
 from seis_ssl_cluster.data.crop_sampler import (
 	expand_request_with_margin,
 	required_zero_mask_margin_xyz,
@@ -22,7 +33,6 @@ from seis_ssl_cluster.data.normalization import (
 from seis_ssl_cluster.data.schema import CropRequest, SurveyManifest, read_manifest_json
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
 from seis_ssl_cluster.data.zero_mask import (
-	DEFAULT_ZERO_MASK_CONFIG,
 	ZeroMaskConfig,
 	compute_zero_amplitude_invalid_mask,
 )
@@ -45,6 +55,49 @@ from seis_ssl_cluster.models.mae.patching import patchify_3d
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
 
 XYZ = tuple[int, int, int]
+_CHECKPOINT_ALLOWED_TOP_LEVEL = frozenset(
+	{
+		'stage',
+		'paths',
+		'manifests',
+		'data',
+		'model',
+		'masking',
+		'loss',
+		'train',
+		'zero_mask',
+		'visualization',
+	},
+)
+_CHECKPOINT_REQUIRED_TOP_LEVEL = frozenset(
+	{
+		'stage',
+		'paths',
+		'manifests',
+		'data',
+		'model',
+		'masking',
+		'loss',
+		'train',
+		'zero_mask',
+	},
+)
+_CHECKPOINT_MODEL_GEOMETRY_KEYS = (
+	'patch_size',
+	'encoder_dim',
+	'encoder_depth',
+	'encoder_heads',
+	'decoder_dim',
+	'decoder_depth',
+	'decoder_heads',
+)
+_CHECKPOINT_MASKING_KEYS = ('spatial_mask_ratio', 'block_size_tokens')
+_CHECKPOINT_TRAIN_REQUIRED_KEYS = (
+	'batch_size',
+	'samples_per_epoch',
+	'epochs',
+	*DEFAULT_MAE_TRAIN_OPTIONS,
+)
 
 
 @dataclass(frozen=True)
@@ -86,7 +139,7 @@ def run_embedding_extraction(
 		raise ValueError(msg)
 
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
-	checkpoint_config = _checkpoint_config(payload, config)
+	checkpoint_config = _checkpoint_config(payload)
 	settings = extraction_settings_from_config(
 		config,
 		checkpoint_config=checkpoint_config,
@@ -123,30 +176,41 @@ def extraction_settings_from_config(
 	checkpoint_config: Mapping[str, object] | None = None,
 ) -> EmbeddingExtractionSettings:
 	"""Build extraction settings from validated config sections."""
+	if checkpoint_config is None:
+		msg = 'checkpoint_config is required for embedding extraction settings'
+		raise ValueError(msg)
+	_reject_checkpoint_owned_extraction_sections(config)
+	_validate_checkpoint_resolved_config(checkpoint_config)
 	embeddings = _required_mapping(config, 'embeddings')
-	embedding = _optional_mapping(config, 'embedding')
-	data = _required_mapping(config, 'data')
+	embedding = _required_mapping(config, 'embedding')
 	checkpoint_path = _required_path(embeddings, 'checkpoint', 'embeddings')
 	output_dir = _required_path(embeddings, 'output_dir', 'embeddings')
 	window_size = _xyz_from_mapping(
 		embedding,
 		'window_size',
 		'embedding',
-		default=data.get('local_crop_size', (128, 128, 128)),
+		default=None,
 	)
-	overlap = _xyz_from_mapping(
+	overlap = _nonnegative_xyz_from_mapping(
 		embedding,
 		'overlap',
 		'embedding',
-		default=(0, 0, 0),
+		default=None,
 	)
-	output_dtype = np.dtype(embedding.get('output_dtype', 'float16'))
-	if output_dtype.kind != 'f':
-		msg = (
-			'embedding.output_dtype must be a floating-point NumPy dtype; '
-			f'got {output_dtype}'
-		)
-		raise TypeError(msg)
+	_validate_overlap_less_than_window(overlap, window_size)
+	output_dtype_name = _required_non_empty_string(
+		embedding,
+		'output_dtype',
+		'embedding',
+	)
+	try:
+		output_dtype = np.dtype(output_dtype_name)
+	except TypeError as exc:
+		msg = 'embedding.output_dtype must be float16 or float32'
+		raise ValueError(msg) from exc
+	if output_dtype not in {np.dtype('float16'), np.dtype('float32')}:
+		msg = 'embedding.output_dtype must be float16 or float32'
+		raise ValueError(msg)
 	return EmbeddingExtractionSettings(
 		checkpoint_path=checkpoint_path,
 		output_dir=output_dir,
@@ -154,48 +218,47 @@ def extraction_settings_from_config(
 		overlap_xyz=overlap,
 		output_dtype=output_dtype,
 		batch_size=_positive_int(
-			embedding.get('batch_size', 1),
+			embedding.get('batch_size'),
 			'embedding.batch_size',
 		),
 		min_token_valid_fraction=_fraction(
-			embedding.get('min_token_valid_fraction', 0.5),
+			embedding.get('min_token_valid_fraction'),
 			'embedding.min_token_valid_fraction',
 		),
-		zero_mask=_zero_mask_for_extraction(
-			config,
-			checkpoint_config if checkpoint_config is not None else config,
-		),
+		zero_mask=_zero_mask_from_config(checkpoint_config),
 	)
 
 
 def build_model_from_config(config: Mapping[str, object]) -> AmplitudeMAE3D:
 	"""Instantiate an amplitude MAE from a checkpoint config."""
+	_validate_checkpoint_resolved_config(config)
 	model = _required_mapping(config, 'model')
+	_validate_checkpoint_model_contract(model)
 	return AmplitudeMAE3D(
-		in_channels=_positive_int(model.get('in_channels', 1), 'model.in_channels'),
-		out_channels=_positive_int(model.get('out_channels', 1), 'model.out_channels'),
+		in_channels=_positive_int(model.get('in_channels'), 'model.in_channels'),
+		out_channels=_positive_int(model.get('out_channels'), 'model.out_channels'),
 		patch_size_xyz=_xyz_from_mapping(
 			model,
 			'patch_size',
 			'model',
-			default=(8, 8, 8),
+			default=None,
 		),
-		encoder_dim=_positive_int(model.get('encoder_dim', 384), 'model.encoder_dim'),
+		encoder_dim=_positive_int(model.get('encoder_dim'), 'model.encoder_dim'),
 		encoder_depth=_positive_int(
-			model.get('encoder_depth', 8),
+			model.get('encoder_depth'),
 			'model.encoder_depth',
 		),
 		encoder_heads=_positive_int(
-			model.get('encoder_heads', 6),
+			model.get('encoder_heads'),
 			'model.encoder_heads',
 		),
-		decoder_dim=_positive_int(model.get('decoder_dim', 256), 'model.decoder_dim'),
+		decoder_dim=_positive_int(model.get('decoder_dim'), 'model.decoder_dim'),
 		decoder_depth=_positive_int(
-			model.get('decoder_depth', 4),
+			model.get('decoder_depth'),
 			'model.decoder_depth',
 		),
 		decoder_heads=_positive_int(
-			model.get('decoder_heads', 4),
+			model.get('decoder_heads'),
 			'model.decoder_heads',
 		),
 	)
@@ -452,14 +515,14 @@ def reduce_valid_mask_to_tokens(
 	return (fractions.reshape(token_grid) >= threshold).astype(bool, copy=False)
 
 
-def _checkpoint_config(
-	payload: Mapping[str, object],
-	fallback: Mapping[str, object],
-) -> Mapping[str, object]:
+def _checkpoint_config(payload: Mapping[str, object]) -> Mapping[str, object]:
 	value = payload.get('config')
 	if isinstance(value, Mapping):
-		return cast('Mapping[str, object]', value)
-	return fallback
+		config = cast('Mapping[str, object]', value)
+		_validate_checkpoint_resolved_config(config)
+		return config
+	msg = 'checkpoint is missing a resolved config'
+	raise TypeError(msg)
 
 
 def _model_state_dict(payload: Mapping[str, object]) -> Mapping[str, torch.Tensor]:
@@ -517,6 +580,146 @@ def _model_geometry(
 	}
 
 
+def _validate_checkpoint_model_contract(model: Mapping[str, object]) -> None:
+	if model.get('name') != FIXED_MODEL_CONTRACT['name']:
+		msg = "checkpoint model.name must be 'amp_mae3d'"
+		raise ValueError(msg)
+	if model.get('in_channels') != FIXED_MODEL_CONTRACT['in_channels']:
+		msg = 'checkpoint model.in_channels must be 1'
+		raise ValueError(msg)
+	if model.get('out_channels') != FIXED_MODEL_CONTRACT['out_channels']:
+		msg = 'checkpoint model.out_channels must be 1'
+		raise ValueError(msg)
+
+
+def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
+	if config.get('stage') != STAGE_MAE_TRAINING:
+		msg = (
+			'checkpoint config.stage must be '
+			f'{STAGE_MAE_TRAINING!r}; got {config.get("stage")!r}'
+		)
+		raise ValueError(msg)
+	unexpected = sorted(set(config) - _CHECKPOINT_ALLOWED_TOP_LEVEL)
+	if unexpected:
+		msg = f'checkpoint config has unsupported top-level key(s): {unexpected!r}'
+		raise ValueError(msg)
+	missing = sorted(_CHECKPOINT_REQUIRED_TOP_LEVEL - set(config))
+	if missing:
+		msg = f'checkpoint config is missing resolved section(s): {missing!r}'
+		raise ValueError(msg)
+
+	paths = _required_mapping(config, 'paths')
+	manifests = _required_mapping(config, 'manifests')
+	data = _required_mapping(config, 'data')
+	model = _required_mapping(config, 'model')
+	masking = _required_mapping(config, 'masking')
+	loss = _required_mapping(config, 'loss')
+	train = _required_mapping(config, 'train')
+	zero_mask = _required_mapping(config, 'zero_mask')
+
+	_required_non_empty_string(paths, 'output_root', 'paths')
+	_validate_required_checkpoint_keys(
+		manifests,
+		'manifests',
+		('train', 'train_path_list'),
+	)
+	_required_non_empty_string(manifests, 'train', 'manifests')
+	_required_non_empty_string(
+		manifests,
+		'train_path_list',
+		'manifests',
+	)
+	_validate_fixed_checkpoint_values(data, 'data', FIXED_DATA_CONTRACT)
+	_validate_fixed_checkpoint_values(model, 'model', FIXED_MODEL_CONTRACT)
+	_validate_fixed_checkpoint_values(masking, 'masking', FIXED_MASKING_CONTRACT)
+	_validate_fixed_checkpoint_values(loss, 'loss', FIXED_LOSS_CONTRACT)
+	_validate_required_checkpoint_keys(
+		data,
+		'data',
+		(*DEFAULT_MAE_DATA_OPTIONS, 'local_crop_size'),
+	)
+	_validate_required_checkpoint_keys(model, 'model', _CHECKPOINT_MODEL_GEOMETRY_KEYS)
+	_validate_required_checkpoint_keys(masking, 'masking', _CHECKPOINT_MASKING_KEYS)
+	_validate_required_checkpoint_keys(loss, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
+	_validate_required_checkpoint_keys(train, 'train', _CHECKPOINT_TRAIN_REQUIRED_KEYS)
+	_validate_required_checkpoint_keys(
+		zero_mask,
+		'zero_mask',
+		DEFAULT_ZERO_MASK_CONTRACT,
+	)
+	_validate_positive_xyz(data['local_crop_size'], 'data.local_crop_size')
+	_fraction(data['min_valid_fraction'], 'data.min_valid_fraction')
+	_positive_int(data['max_resample_attempts'], 'data.max_resample_attempts')
+	_validate_checkpoint_model_contract(model)
+	_validate_positive_xyz(model['patch_size'], 'model.patch_size')
+	for key in _CHECKPOINT_MODEL_GEOMETRY_KEYS[1:]:
+		_positive_int(model[key], f'model.{key}')
+	_validate_checkpoint_masking(masking)
+	_positive_number(loss['huber_delta'], 'loss.huber_delta')
+	_nonnegative_number(loss['gradient_weight'], 'loss.gradient_weight')
+	_validate_checkpoint_train(train)
+	_zero_mask_from_mapping(zero_mask)
+
+
+def _validate_required_checkpoint_keys(
+	parent: Mapping[str, object],
+	section: str,
+	keys: Iterable[str],
+) -> None:
+	missing = sorted(set(keys) - set(parent))
+	if missing:
+		msg = f'checkpoint config.{section} is missing resolved key(s): {missing!r}'
+		raise ValueError(msg)
+
+
+def _validate_fixed_checkpoint_values(
+	parent: Mapping[str, object],
+	section: str,
+	expected: Mapping[str, object],
+) -> None:
+	for key, expected_value in expected.items():
+		if parent.get(key) == expected_value:
+			continue
+		msg = (
+			f'checkpoint config.{section}.{key} must be {expected_value!r}; '
+			f'got {parent.get(key)!r}'
+		)
+		raise ValueError(msg)
+
+
+def _validate_checkpoint_masking(masking: Mapping[str, object]) -> None:
+	ratio = masking.get('spatial_mask_ratio')
+	if isinstance(ratio, bool) or not isinstance(ratio, Real):
+		msg = (
+			'checkpoint config.masking.spatial_mask_ratio must be a real '
+			f'number; got {ratio!r}'
+		)
+		raise TypeError(msg)
+	if not 0.0 < float(ratio) < 1.0:
+		msg = (
+			'checkpoint config.masking.spatial_mask_ratio must be greater than '
+			f'0 and less than 1; got {ratio!r}'
+		)
+		raise ValueError(msg)
+	_validate_positive_xyz(masking['block_size_tokens'], 'masking.block_size_tokens')
+
+
+def _validate_checkpoint_train(train: Mapping[str, object]) -> None:
+	for key in ('batch_size', 'samples_per_epoch', 'epochs'):
+		_positive_int(train[key], f'train.{key}')
+	_nonnegative_int(train['num_workers'], 'train.num_workers')
+	for key in ('shuffle', 'amp'):
+		_bool(train[key], f'train.{key}')
+	for key in ('lr', 'grad_clip_norm'):
+		_positive_number(train[key], f'train.{key}')
+	_nonnegative_number(train['weight_decay'], 'train.weight_decay')
+	_required_non_empty_string(train, 'device', 'train')
+	seed = train.get('seed')
+	if not isinstance(seed, Integral) or isinstance(seed, bool):
+		msg = f'train.seed must be an integer; got {seed!r}'
+		raise TypeError(msg)
+
+
 def _checkpoint_path(config: Mapping[str, object]) -> Path:
 	embeddings = _required_mapping(config, 'embeddings')
 	return _required_path(embeddings, 'checkpoint', 'embeddings')
@@ -546,28 +749,9 @@ def _resolve_device(
 def _zero_mask_from_config(config: Mapping[str, object]) -> ZeroMaskConfig:
 	value = _zero_mask_mapping_from_config(config)
 	if value is None:
-		return DEFAULT_ZERO_MASK_CONFIG
-	return _zero_mask_from_mapping(value)
-
-
-def _zero_mask_for_extraction(
-	extraction_config: Mapping[str, object],
-	checkpoint_config: Mapping[str, object],
-) -> ZeroMaskConfig:
-	checkpoint_zero_mask = _zero_mask_from_config(checkpoint_config)
-	override_value = _zero_mask_mapping_from_config(extraction_config)
-	if override_value is None:
-		return checkpoint_zero_mask
-
-	override_zero_mask = _zero_mask_from_mapping(override_value)
-	if override_zero_mask != checkpoint_zero_mask:
-		msg = (
-			'extraction zero_mask override must match checkpoint zero_mask '
-			f'settings; got {override_zero_mask!r}, checkpoint has '
-			f'{checkpoint_zero_mask!r}'
-		)
+		msg = 'checkpoint config is missing zero_mask'
 		raise ValueError(msg)
-	return checkpoint_zero_mask
+	return _zero_mask_from_mapping(value)
 
 
 def _zero_mask_mapping_from_config(
@@ -580,6 +764,21 @@ def _zero_mask_mapping_from_config(
 	if isinstance(data, Mapping):
 		return data.get('zero_mask')
 	return None
+
+
+def _reject_checkpoint_owned_extraction_sections(
+	config: Mapping[str, object],
+) -> None:
+	stale = sorted(
+		set(config)
+		& {'data', 'model', 'masking', 'loss', 'train', 'zero_mask'},
+	)
+	if stale:
+		msg = (
+			'embedding extraction config must not include checkpoint-owned '
+			f'section(s): {stale!r}'
+		)
+		raise ValueError(msg)
 
 
 def _zero_mask_from_mapping(value: object) -> ZeroMaskConfig:
@@ -642,6 +841,16 @@ def _xyz_from_mapping(
 	return _validate_positive_xyz(parent.get(key, default), f'{prefix}.{key}')
 
 
+def _nonnegative_xyz_from_mapping(
+	parent: Mapping[str, object],
+	key: str,
+	prefix: str,
+	*,
+	default: object,
+) -> XYZ:
+	return _validate_nonnegative_xyz(parent.get(key, default), f'{prefix}.{key}')
+
+
 def _validate_positive_xyz(value: object, name: str) -> XYZ:
 	if (
 		isinstance(value, str)
@@ -661,6 +870,25 @@ def _validate_positive_xyz(value: object, name: str) -> XYZ:
 	return xyz
 
 
+def _validate_nonnegative_xyz(value: object, name: str) -> XYZ:
+	if (
+		isinstance(value, str)
+		or not isinstance(value, Sequence)
+		or len(value) != 3
+		or not all(
+			not isinstance(axis, bool) and isinstance(axis, Integral)
+			for axis in value
+		)
+	):
+		msg = f'{name} must be a length-3 integer sequence; got {value!r}'
+		raise TypeError(msg)
+	xyz = cast('XYZ', tuple(int(axis) for axis in value))
+	if any(axis < 0 for axis in xyz):
+		msg = f'{name} values must be nonnegative; got {xyz!r}'
+		raise ValueError(msg)
+	return xyz
+
+
 def _positive_int(value: object, name: str) -> int:
 	if isinstance(value, bool) or not isinstance(value, Integral):
 		msg = f'{name} must be an integer; got {value!r}'
@@ -668,6 +896,17 @@ def _positive_int(value: object, name: str) -> int:
 	integer = int(value)
 	if integer <= 0:
 		msg = f'{name} must be positive; got {integer!r}'
+		raise ValueError(msg)
+	return integer
+
+
+def _nonnegative_int(value: object, name: str) -> int:
+	if isinstance(value, bool) or not isinstance(value, Integral):
+		msg = f'{name} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	integer = int(value)
+	if integer < 0:
+		msg = f'{name} must be nonnegative; got {integer!r}'
 		raise ValueError(msg)
 	return integer
 
@@ -681,6 +920,63 @@ def _fraction(value: object, name: str) -> float:
 		msg = f'{name} must be in [0, 1]; got {fraction!r}'
 		raise ValueError(msg)
 	return fraction
+
+
+def _positive_number(value: object, name: str) -> float:
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'{name} must be a real number; got {value!r}'
+		raise TypeError(msg)
+	number = float(value)
+	if number <= 0.0:
+		msg = f'{name} must be positive; got {number!r}'
+		raise ValueError(msg)
+	return number
+
+
+def _nonnegative_number(value: object, name: str) -> float:
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'{name} must be a real number; got {value!r}'
+		raise TypeError(msg)
+	number = float(value)
+	if number < 0.0:
+		msg = f'{name} must be nonnegative; got {number!r}'
+		raise ValueError(msg)
+	return number
+
+
+def _bool(value: object, name: str) -> bool:
+	if not isinstance(value, bool):
+		msg = f'{name} must be a boolean; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _required_non_empty_string(
+	parent: Mapping[str, object],
+	key: str,
+	prefix: str,
+) -> str:
+	value = parent.get(key)
+	if not isinstance(value, str) or not value:
+		msg = f'{prefix}.{key} must be a non-empty string; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _validate_overlap_less_than_window(
+	overlap: Sequence[int],
+	window_size: Sequence[int],
+) -> None:
+	if any(
+		overlap_axis >= window_axis
+		for overlap_axis, window_axis in zip(overlap, window_size, strict=True)
+	):
+		msg = (
+			'embedding.overlap values must be less than embedding.window_size '
+			f'values; got overlap={list(overlap)!r}, '
+			f'window_size={list(window_size)!r}'
+		)
+		raise ValueError(msg)
 
 
 __all__ = [

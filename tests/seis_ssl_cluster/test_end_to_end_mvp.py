@@ -47,7 +47,6 @@ def test_synthetic_amplitude_mvp_flow(tmp_path: Path) -> None:
 		clean_path_list=clean_path_list,
 	)
 	embedding_dir = _extract_embeddings(
-		nopims_root=nopims_root,
 		artifact_root=artifact_root,
 		clean_manifest_path=clean_manifest_path,
 		checkpoint_path=checkpoint_path,
@@ -182,28 +181,25 @@ def _train_tiny_mae(
 
 def _extract_embeddings(
 	*,
-	nopims_root: Path,
 	artifact_root: Path,
 	clean_manifest_path: Path,
 	checkpoint_path: Path,
 	survey_ids: list[str],
 ) -> Path:
-	embedding_config = _base_config(
-		nopims_root=nopims_root,
-		artifact_root=artifact_root,
-		stage='extract_embeddings',
-	)
-	embedding_config['manifests'] = {'input': str(clean_manifest_path)}
-	embedding_config['embeddings'] = {
-		'checkpoint': str(checkpoint_path),
-		'output_dir': str(artifact_root / 'runs' / 'embeddings' / 'synthetic'),
-	}
-	embedding_config['embedding'] = {
-		'window_size': [4, 4, 4],
-		'overlap': [2, 2, 2],
-		'output_dtype': 'float32',
-		'batch_size': 2,
-		'min_token_valid_fraction': 0.5,
+	embedding_config = {
+		'paths': {'artifact_root': str(artifact_root)},
+		'manifests': {'input': str(clean_manifest_path)},
+		'embeddings': {
+			'checkpoint': str(checkpoint_path),
+			'output_dir': str(artifact_root / 'runs' / 'embeddings' / 'synthetic'),
+		},
+		'embedding': {
+			'window_size': [4, 4, 4],
+			'overlap': [2, 2, 2],
+			'output_dtype': 'float32',
+			'batch_size': 2,
+			'min_token_valid_fraction': 0.5,
+		},
 	}
 	embedding_results = run_embedding_extraction(embedding_config, device='cpu')
 	assert [result.survey_id for result in embedding_results] == survey_ids

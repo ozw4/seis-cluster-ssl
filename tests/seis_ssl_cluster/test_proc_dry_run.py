@@ -34,28 +34,63 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 	result = run_python_proc(script_path, '--dry-run')
 
 	assert result.returncode == 0, result.stderr
-	assert 'stage:' in result.stdout
-	assert 'data.input_channels: 1' in result.stdout
-	assert 'data.target_channels: 1' in result.stdout
-	assert 'data.use_context: false' in result.stdout
+	assert 'data.input_channels:' not in result.stdout
+	assert 'train.lr:' not in result.stdout
+	if script_path == Path('proc/seis_ssl_cluster/extract_embeddings.py'):
+		assert 'stage:' not in result.stdout
+		assert 'paths.artifact_root:' not in result.stdout
+	else:
+		assert 'stage:' in result.stdout
+		assert 'paths.artifact_root:' in result.stdout
 	if script_path == Path('proc/seis_ssl_cluster/build_nopims_manifests.py'):
+		assert 'manifest.input_path_list:' in result.stdout
+		assert 'model.encoder_depth:' not in result.stdout
 		assert 'manifest scan: skipped' in result.stdout
 	elif script_path == Path(
 		'proc/seis_ssl_cluster/prepare_nopims_normalization_stats.py',
 	):
+		assert 'normalization.max_samples:' in result.stdout
 		assert 'normalization_stats.compute: skipped' in result.stdout
 	elif script_path == Path(
 		'proc/seis_ssl_cluster/filter_manifest_by_normalization_qc.py',
 	):
+		assert 'qc.output_json:' in result.stdout
 		assert 'normalization_qc.compute: skipped' in result.stdout
 	elif script_path == Path('proc/seis_ssl_cluster/train_amp_mae.py'):
+		assert 'model.encoder_depth:' in result.stdout
+		assert 'loss.gradient_weight:' in result.stdout
 		assert 'execution: dry-run; training skipped' in result.stdout
 	elif script_path == Path('proc/seis_ssl_cluster/extract_embeddings.py'):
+		assert 'manifests.input:' in result.stdout
+		assert 'embeddings.checkpoint:' in result.stdout
+		assert 'embeddings.output_dir:' in result.stdout
+		assert 'embedding.window_size:' in result.stdout
+		assert 'embedding.overlap:' in result.stdout
+		assert 'embedding.output_dtype:' in result.stdout
+		assert 'embedding.batch_size:' in result.stdout
+		assert 'embedding.min_token_valid_fraction:' in result.stdout
+		assert 'loss.gradient_weight:' not in result.stdout
+		assert 'masking.spatial_mask_ratio:' not in result.stdout
 		assert 'execution: dry-run; extraction skipped' in result.stdout
 	elif script_path == Path('proc/seis_ssl_cluster/cluster_embeddings.py'):
+		assert 'clustering.k_values:' in result.stdout
+		assert 'loss.gradient_weight:' not in result.stdout
 		assert 'execution: dry-run; clustering skipped' in result.stdout
 	else:
+		assert 'visualization.output_dir:' in result.stdout
 		assert 'execution: dry-run; visualization skipped' in result.stdout
+
+
+def test_extract_embeddings_dry_run_prints_device_override() -> None:
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/extract_embeddings.py'),
+		'--dry-run',
+		'--device',
+		'cpu',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'device_override: cpu' in result.stdout
 
 
 def test_cluster_embeddings_dry_run_does_not_import_optional_cluster_stack(
@@ -94,32 +129,59 @@ builtins.__import__ = _guarded_import
 	assert 'execution: dry-run; clustering skipped' in result.stdout
 
 
+def test_train_amp_mae_cli_overrides_are_resolved_before_dry_run(
+	tmp_path: Path,
+) -> None:
+	output_root = tmp_path / 'override-run'
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_mae.py'),
+		'--dry-run',
+		'--device',
+		'cpu',
+		'--max-steps',
+		'1',
+		'--output-root',
+		output_root,
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert f'paths.output_root: {output_root}' in result.stdout
+	assert 'train.device: cpu' in result.stdout
+
+
+def test_train_amp_mae_cli_overrides_are_validated_after_apply() -> None:
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_mae.py'),
+		'--dry-run',
+		'--max-steps',
+		'-1',
+	)
+
+	assert result.returncode != 0
+	assert 'train.max_steps' in result.stderr
+	assert 'stage:' not in result.stdout
+
+
 def test_proc_script_rejects_legacy_attribute_config(tmp_path: Path) -> None:
 	config_path = tmp_path / 'legacy.yaml'
 	config_path.write_text(
 		"""
-stage: train_amp_mae
 paths:
   nopims_root: /external/NOPIMS
   artifact_root: /external/artifacts
-data:
-  grid_order: [x, y, z]
-  volume_format: npy_memmap
-  input_channels: 1
-  target_channels: 1
-  use_context: false
-  local_crop_size: [128, 128, 128]
+manifests:
+  train: /external/artifacts/registry/manifests/train.json
 attributes:
   names: [amplitude_norm]
+data:
+  local_crop_size: [128, 128, 128]
 model:
-  name: amp_mae3d
-  in_channels: 1
-  out_channels: 1
   patch_size: [8, 8, 8]
 masking:
   spatial_mask_ratio: 0.75
-  spatial_mask_mode: block
   block_size_tokens: [2, 2, 2]
+loss: {}
 train:
   batch_size: 4
   samples_per_epoch: 10000
@@ -147,26 +209,27 @@ def test_proc_script_rejects_nondivisible_geometry(tmp_path: Path) -> None:
 	config_path = tmp_path / 'nondivisible.yaml'
 	config_path.write_text(
 		"""
-stage: train_amp_mae
 paths:
   nopims_root: /external/NOPIMS
   artifact_root: /external/artifacts
+  output_root: /external/artifacts/runs/nondivisible
+manifests:
+  train: /external/artifacts/registry/manifests/train.json
+  train_path_list: /external/artifacts/registry/splits/train_npy_paths.txt
 data:
-  grid_order: [x, y, z]
-  volume_format: npy_memmap
-  input_channels: 1
-  target_channels: 1
-  use_context: false
   local_crop_size: [128, 128, 128]
 model:
-  name: amp_mae3d
-  in_channels: 1
-  out_channels: 1
   patch_size: [8, 7, 8]
+  encoder_dim: 384
+  encoder_depth: 8
+  encoder_heads: 6
+  decoder_dim: 256
+  decoder_depth: 4
+  decoder_heads: 4
 masking:
   spatial_mask_ratio: 0.75
-  spatial_mask_mode: block
   block_size_tokens: [2, 2, 2]
+loss: {}
 train:
   batch_size: 4
   samples_per_epoch: 10000
@@ -196,7 +259,6 @@ def test_build_nopims_manifests_rejects_non_bare_output_name(
 	config_path = tmp_path / 'escaped_output_name.yaml'
 	config_path.write_text(
 		"""
-stage: build_nopims_manifests
 paths:
   nopims_root: /external/NOPIMS
   artifact_root: /external/artifacts
@@ -205,28 +267,6 @@ manifest:
   output_dir: /external/artifacts/registry/manifests
   output_name: ../nopims_amplitude_manifests.json
   normalization_stats_dir: /external/artifacts/registry/normalization_stats
-data:
-  grid_order: [x, y, z]
-  volume_format: npy_memmap
-  input_channels: 1
-  target_channels: 1
-  use_context: false
-  local_crop_size: [128, 128, 128]
-model:
-  name: amp_mae3d
-  in_channels: 1
-  out_channels: 1
-  patch_size: [8, 8, 8]
-masking:
-  spatial_mask_ratio: 0.75
-  spatial_mask_mode: block
-  block_size_tokens: [2, 2, 2]
-train:
-  batch_size: 4
-  samples_per_epoch: 10000
-  epochs: 100
-  num_workers: 8
-  amp: false
 """,
 		encoding='utf-8',
 	)

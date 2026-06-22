@@ -69,16 +69,13 @@ def test_synthetic_normalization_qc_integration_writes_clean_outputs(
 	original_manifest_text = manifest_path.read_text(encoding='utf-8')
 	original_split_text = source_split.read_text(encoding='utf-8')
 
-	prepare_config = _base_config('prepare_nopims_normalization_stats', nopims_root)
+	prepare_config = _base_config(nopims_root)
 	prepare_config['manifests'] = {'train': str(manifest_path)}
 	prepare_config['normalization'] = {
 		'clipping_percentiles': [0.5, 99.5],
 		'epsilon': 1.0e-6,
 		'max_samples': 1000000,
 		'seed': 42,
-		'smooth_time_depth_trend_correction': False,
-		'trace_wise_agc': False,
-		'patch_wise_zscore': False,
 	}
 	prepare_config_path = tmp_path / 'prepare.yaml'
 	prepare_config_path.write_text(yaml.safe_dump(prepare_config), encoding='utf-8')
@@ -124,7 +121,7 @@ def test_synthetic_normalization_qc_integration_writes_clean_outputs(
 		/ 'normalization_stats_qc.json'
 	)
 	excluded = qc_json.parent / 'excluded_surveys.txt'
-	filter_config = _base_config('filter_manifest_by_normalization_qc', nopims_root)
+	filter_config = _base_config(nopims_root)
 	filter_config['manifests'] = {
 		'input': str(manifest_path),
 		'output': str(clean_manifest),
@@ -248,7 +245,7 @@ def test_filter_manifest_qc_dry_run_prints_config_summary_with_existing_inputs(
 		/ 'pretrain_v1'
 		/ 'normalization_stats_qc.json'
 	)
-	config = _base_config('filter_manifest_by_normalization_qc', nopims_root)
+	config = _base_config(nopims_root)
 	config['manifests'] = {
 		'input': str(manifest_path),
 		'output': str(clean_manifest),
@@ -260,6 +257,8 @@ def test_filter_manifest_qc_dry_run_prints_config_summary_with_existing_inputs(
 	config['qc'] = {
 		'output_json': str(qc_json),
 		'excluded_surveys': str(qc_json.parent / 'excluded_surveys.txt'),
+		'min_iqr': 1.0e-4,
+		'max_normalized_abs': 1.0e6,
 	}
 	config_path = tmp_path / 'filter.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
@@ -273,7 +272,7 @@ def test_filter_manifest_qc_dry_run_prints_config_summary_with_existing_inputs(
 
 	assert result.returncode == 0, result.stderr
 	assert 'stage: filter_manifest_by_normalization_qc' in result.stdout
-	assert 'data.input_channels: 1' in result.stdout
+	assert 'data.input_channels:' not in result.stdout
 	assert 'normalization_qc.write: false' in result.stdout
 	assert not qc_json.exists()
 	assert not clean_manifest.exists()
@@ -325,37 +324,10 @@ def _write_stats(manifest: SurveyManifest) -> None:
 	)
 
 
-def _base_config(stage: str, nopims_root: Path) -> dict[str, object]:
+def _base_config(nopims_root: Path) -> dict[str, object]:
 	return {
-		'stage': stage,
 		'paths': {
 			'nopims_root': str(nopims_root),
 			'artifact_root': str(nopims_root.parent / 'artifacts'),
-		},
-		'data': {
-			'grid_order': ['x', 'y', 'z'],
-			'volume_format': 'npy_memmap',
-			'input_channels': 1,
-			'target_channels': 1,
-			'use_context': False,
-			'local_crop_size': [128, 128, 128],
-		},
-		'model': {
-			'name': 'amp_mae3d',
-			'in_channels': 1,
-			'out_channels': 1,
-			'patch_size': [8, 8, 8],
-		},
-		'masking': {
-			'spatial_mask_ratio': 0.75,
-			'spatial_mask_mode': 'block',
-			'block_size_tokens': [2, 2, 2],
-		},
-		'train': {
-			'batch_size': 4,
-			'samples_per_epoch': 10000,
-			'epochs': 100,
-			'num_workers': 8,
-			'amp': False,
 		},
 	}

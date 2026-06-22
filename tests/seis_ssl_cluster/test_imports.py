@@ -21,11 +21,9 @@ NEW_PACKAGE_MODULES = (
 )
 
 
-def test_new_and_existing_packages_import() -> None:
-	seis_attr_ssl = importlib.import_module('seis_attr_ssl')
+def test_new_package_imports() -> None:
 	seis_ssl_cluster = importlib.import_module('seis_ssl_cluster')
 
-	assert seis_attr_ssl is not None
 	assert seis_ssl_cluster is not None
 
 

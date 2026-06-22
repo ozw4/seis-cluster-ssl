@@ -218,20 +218,13 @@ def _write_prepare_inputs(
 		],
 		manifest_path,
 	)
-	config = _base_config(
-		'prepare_nopims_normalization_stats',
-		nopims_root=nopims_root,
-		artifact_root=artifact_root,
-	)
+	config = _base_config(nopims_root=nopims_root, artifact_root=artifact_root)
 	config['manifests'] = {'train': str(manifest_path)}
 	config['normalization'] = {
 		'clipping_percentiles': [0.5, 99.5],
 		'epsilon': 1.0e-6,
 		'max_samples': 1000,
 		'seed': 42,
-		'smooth_time_depth_trend_correction': False,
-		'trace_wise_agc': False,
-		'patch_wise_zscore': False,
 	}
 	config_path = tmp_path / 'prepare.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
@@ -279,41 +272,13 @@ def _stats(
 
 
 def _base_config(
-	stage: str,
 	*,
 	nopims_root: str | Path = '/unused',
 	artifact_root: str | Path = '/unused',
 ) -> dict[str, object]:
 	return {
-		'stage': stage,
 		'paths': {
 			'nopims_root': str(nopims_root),
 			'artifact_root': str(artifact_root),
-		},
-		'data': {
-			'grid_order': ['x', 'y', 'z'],
-			'volume_format': 'npy_memmap',
-			'input_channels': 1,
-			'target_channels': 1,
-			'use_context': False,
-			'local_crop_size': [128, 128, 128],
-		},
-		'model': {
-			'name': 'amp_mae3d',
-			'in_channels': 1,
-			'out_channels': 1,
-			'patch_size': [8, 8, 8],
-		},
-		'masking': {
-			'spatial_mask_ratio': 0.75,
-			'spatial_mask_mode': 'block',
-			'block_size_tokens': [2, 2, 2],
-		},
-		'train': {
-			'batch_size': 4,
-			'samples_per_epoch': 10000,
-			'epochs': 100,
-			'num_workers': 8,
-			'amp': False,
 		},
 	}

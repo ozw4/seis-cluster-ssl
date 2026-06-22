@@ -11,7 +11,10 @@ SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
 if str(SRC_ROOT) not in sys.path:
 	sys.path.insert(0, str(SRC_ROOT))
 
-from seis_ssl_cluster.config import load_config, validate_config  # noqa: E402
+from seis_ssl_cluster.config import (  # noqa: E402
+	load_config,
+	resolve_manifest_build_config,
+)
 from seis_ssl_cluster.data import (  # noqa: E402
 	ManifestBuildSummary,
 	scan_nopims_amplitude_manifests_from_path_list,
@@ -28,7 +31,6 @@ DEFAULT_CONFIG = (
 	/ 'seis_ssl_cluster'
 	/ 'build_nopims_manifests.yaml'
 )
-DEFAULT_OUTPUT_NAME = 'nopims_amplitude_manifests.json'
 
 
 def main() -> None:
@@ -37,7 +39,7 @@ def main() -> None:
 		'Build amplitude-only NOPIMS manifests.',
 		DEFAULT_CONFIG,
 	)
-	config = validate_config(load_config(args.config))
+	config = resolve_manifest_build_config(load_config(args.config))
 	paths = _required_mapping(config, 'paths')
 	manifest_cfg = _required_mapping(config, 'manifest')
 	nopims_root = Path(_required_str(paths, 'nopims_root'))
@@ -75,7 +77,7 @@ def main() -> None:
 
 def _manifest_output_path(manifest_cfg: Mapping[str, Any]) -> Path:
 	output_dir = Path(_required_str(manifest_cfg, 'output_dir'))
-	output_name = _optional_str(manifest_cfg, 'output_name', DEFAULT_OUTPUT_NAME)
+	output_name = _required_str(manifest_cfg, 'output_name')
 	_require_bare_filename(output_name, 'manifest.output_name')
 	return output_dir / output_name
 
@@ -90,14 +92,6 @@ def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, An
 
 def _required_str(parent: Mapping[str, object], key: str) -> str:
 	value = parent.get(key)
-	if not isinstance(value, str):
-		msg = f'{key} must be a string; got {value!r}'
-		raise TypeError(msg)
-	return value
-
-
-def _optional_str(parent: Mapping[str, object], key: str, default: str) -> str:
-	value = parent.get(key, default)
 	if not isinstance(value, str):
 		msg = f'{key} must be a string; got {value!r}'
 		raise TypeError(msg)

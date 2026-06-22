@@ -62,7 +62,22 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	assert checkpoint['package_version'] is None
 	assert isinstance(checkpoint['rng_state']['dataloader_generator'], torch.Tensor)
 	assert np.isfinite(checkpoint['metrics']['loss'])
-	assert (_path_like(cfg['paths']['output_root']) / 'resolved_config.json').is_file()
+	resolved_config_path = (
+		_path_like(cfg['paths']['output_root']) / 'resolved_config.json'
+	)
+	assert resolved_config_path.is_file()
+	resolved_config = json.loads(resolved_config_path.read_text(encoding='utf-8'))
+	assert checkpoint['config'] == resolved_config
+	assert checkpoint['config']['data']['min_valid_fraction'] == 0.1
+	assert checkpoint['config']['data']['max_resample_attempts'] == 16
+	assert checkpoint['config']['zero_mask'] == {
+		'enabled': False,
+		'zero_atol': 0.0,
+		'z_sample_influence_radius': 16,
+		'xy_trace_influence_radius': 1,
+	}
+	assert checkpoint['config']['model']['in_channels'] == 1
+	assert checkpoint['config']['loss']['valid_mask_mode'] == 'voxel'
 	assert (_path_like(cfg['paths']['output_root']) / 'manifest.json').is_file()
 	assert (_path_like(cfg['paths']['output_root']) / 'run_metadata.json').is_file()
 
@@ -77,6 +92,14 @@ def test_run_snapshots_configured_train_path_list(tmp_path: Path) -> None:
 
 	snapshot = _path_like(cfg['paths']['output_root']) / 'inputs' / path_list.name
 	assert snapshot.read_text(encoding='utf-8') == 'survey/amplitude.npy\n'
+
+
+def test_run_rejects_missing_train_path_list(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	del cfg['manifests']['train_path_list']
+
+	with pytest.raises(ValueError, match=r'manifests\.train_path_list'):
+		run_mae_pretraining(cfg)
 
 
 def test_run_rejects_missing_configured_train_path_list(tmp_path: Path) -> None:
@@ -116,6 +139,17 @@ def test_resume_advances_global_step(tmp_path: Path) -> None:
 	assert payload['epoch'] == 1
 	assert payload['global_step'] == 2
 	assert payload['training_state']['checkpoint_kind'] == 'epoch'
+
+
+def test_resume_rejects_incompatible_resolved_config(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	checkpoint_path = run_mae_pretraining(cfg)
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['data']['local_crop_size'] = [6, 4, 4]
+	resume_cfg['train']['epochs'] = 2
+
+	with pytest.raises(ValueError, match='config is incompatible'):
+		run_mae_pretraining(resume_cfg, resume=checkpoint_path)
 
 
 def test_step_checkpoint_resume_continues_unfinished_epoch(tmp_path: Path) -> None:
@@ -341,6 +375,10 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 	model = _TinyAmpModel()
 	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
 	diagnostics_dir = tmp_path / 'diagnostics'
+	run_config = {
+		'stage': 'train_amp_mae',
+		'zero_mask': {'enabled': False},
+	}
 
 	with pytest.raises(FloatingPointError, match='diagnostic written to'):
 		train_mae_one_epoch(
@@ -353,6 +391,7 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 			loss_config={'reconstruction': 'mse'},
 			global_step=1042,
 			diagnostics_dir=diagnostics_dir,
+			run_config=run_config,
 		)
 
 	payload = json.loads(
@@ -373,30 +412,30 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 		'finite': False,
 		'repr': 'nan',
 	}
+	assert payload['config'] == run_config
 
 
 def _tiny_config(tmp_path: Path) -> dict[str, object]:
 	manifest_path = _write_synthetic_manifest(tmp_path / 'survey')
+	path_list = tmp_path / 'train_npy_paths.txt'
+	path_list.write_text(
+		f'{manifest_path.parent / "amplitude.npy"}\n',
+		encoding='utf-8',
+	)
 	return {
-		'stage': 'train_amp_mae',
 		'paths': {
 			'nopims_root': str(tmp_path),
 			'artifact_root': str(tmp_path / 'artifacts'),
 			'output_root': str(tmp_path / 'run'),
 		},
-		'manifests': {'train': str(manifest_path)},
+		'manifests': {
+			'train': str(manifest_path),
+			'train_path_list': str(path_list),
+		},
 		'data': {
-			'grid_order': ['x', 'y', 'z'],
-			'volume_format': 'npy_memmap',
-			'input_channels': 1,
-			'target_channels': 1,
-			'use_context': False,
 			'local_crop_size': [4, 4, 4],
 		},
 		'model': {
-			'name': 'amp_mae3d',
-			'in_channels': 1,
-			'out_channels': 1,
 			'patch_size': [2, 2, 2],
 			'encoder_dim': 12,
 			'encoder_depth': 1,
@@ -407,14 +446,11 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 		},
 		'masking': {
 			'spatial_mask_ratio': 0.5,
-			'spatial_mask_mode': 'block',
 			'block_size_tokens': [1, 1, 1],
 		},
 		'loss': {
-			'reconstruction': 'huber',
 			'huber_delta': 1.0,
 			'gradient_weight': 0.0,
-			'valid_mask_mode': 'voxel',
 		},
 		'zero_mask': {'enabled': False},
 		'train': {

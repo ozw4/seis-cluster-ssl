@@ -13,7 +13,10 @@ SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
 if str(SRC_ROOT) not in sys.path:
 	sys.path.insert(0, str(SRC_ROOT))
 
-from seis_ssl_cluster.config import load_config, validate_config  # noqa: E402
+from seis_ssl_cluster.config import (  # noqa: E402
+	load_config,
+	resolve_normalization_stats_config,
+)
 from seis_ssl_cluster.data.normalization import (  # noqa: E402
 	compute_normalization_stats,
 	load_normalization_stats,
@@ -52,7 +55,7 @@ class NormalizationTarget:
 def main() -> None:
 	"""Compute missing NOPIMS normalization stats sidecars."""
 	args = _parse_args()
-	config = validate_config(load_config(args.config))
+	config = resolve_normalization_stats_config(load_config(args.config))
 	paths = _required_mapping(config, 'paths')
 	artifact_root = Path(_required_str(paths, 'artifact_root'))
 	nopims_root = Path(_required_str(paths, 'nopims_root'))

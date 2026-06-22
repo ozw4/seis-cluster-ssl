@@ -1,21 +1,19 @@
-stage: train_amp_mae
 paths:
-  nopims_root: /home/dcuser/data/NOPIMS
   artifact_root: /workspace/artifacts/seis_ssl_cluster
+  output_root: /workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1
 manifests:
   train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
-  train_path_list: /home/dcuser/data/NOPIMS/inputs/train_npy_paths.txt
+  train_path_list: /workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1_clean/train_npy_paths.txt
 data:
-  grid_order: [x, y, z]
-  volume_format: npy_memmap
-  input_channels: 1
-  target_channels: 1
-  use_context: false
   local_crop_size: [128, 128, 128]
+  min_valid_fraction: 0.1
+  max_resample_attempts: 16
+zero_mask:
+  enabled: true
+  zero_atol: 0.0
+  z_sample_influence_radius: 16
+  xy_trace_influence_radius: 1
 model:
-  name: amp_mae3d
-  in_channels: 1
-  out_channels: 1
   patch_size: [8, 8, 8]
   encoder_dim: 384
   encoder_depth: 8
@@ -25,13 +23,10 @@ model:
   decoder_heads: 4
 masking:
   spatial_mask_ratio: 0.75
-  spatial_mask_mode: block
   block_size_tokens: [2, 2, 2]
 loss:
-  reconstruction: huber
   huber_delta: 1.0
   gradient_weight: 0.05
-  valid_mask_mode: voxel
 train:
   batch_size: 4
   samples_per_epoch: 10000
