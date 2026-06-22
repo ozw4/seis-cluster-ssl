@@ -6,7 +6,6 @@ from typing import Final
 
 DEFAULT_NOPIMS_ROOT: Final = '/home/dcuser/data/NOPIMS'
 DEFAULT_ARTIFACT_ROOT: Final = '/workspace/artifacts/seis_ssl_cluster'
-DEFAULT_MANIFEST_OUTPUT_NAME: Final = 'nopims_amplitude_manifests.json'
 
 EXPECTED_GRID_ORDER: Final = ['x', 'y', 'z']
 EXPECTED_VOLUME_FORMAT: Final = 'npy_memmap'

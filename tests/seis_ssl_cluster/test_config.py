@@ -185,7 +185,10 @@ def test_default_clustering_input_matches_extraction_output() -> None:
 	extraction = load_config(CONFIG_DIR / 'extract_embeddings.yaml')
 	clustering = load_config(CONFIG_DIR / 'cluster_embeddings.yaml')
 
-	assert clustering['embeddings']['input_dir'] == extraction['embeddings']['output_dir']
+	assert (
+		clustering['embeddings']['input_dir']
+		== extraction['embeddings']['output_dir']
+	)
 
 
 @pytest.mark.parametrize(('config_path', 'resolver'), DATA_REGISTRY_CONFIGS)
@@ -508,13 +511,12 @@ def test_build_manifest_stats_dir_under_nopims_root_is_rejected() -> None:
 		resolve_manifest_build_config(cfg)
 
 
-def test_build_manifest_config_defaults_output_name() -> None:
+def test_build_manifest_config_requires_output_name() -> None:
 	cfg = _minimal_manifest_build_config()
 	del cfg['manifest']['output_name']
 
-	resolved = resolve_manifest_build_config(cfg)
-
-	assert resolved['manifest']['output_name'] == 'nopims_amplitude_manifests.json'
+	with pytest.raises(TypeError, match=r'manifest\.output_name'):
+		resolve_manifest_build_config(cfg)
 
 
 def test_filter_qc_output_outside_artifact_root_is_rejected() -> None:
