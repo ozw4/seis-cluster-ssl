@@ -110,7 +110,11 @@ def test_default_configs_resolve_without_mutating_raw(
 			resolved['paths']['output_root']
 			== '/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1'
 		)
-	elif config_path == CONFIG_DIR / 'extract_embeddings.yaml':
+	elif config_path in {
+		CONFIG_DIR / 'extract_embeddings.yaml',
+		CONFIG_DIR / 'cluster_embeddings.yaml',
+		CONFIG_DIR / 'visualize_clusters.yaml',
+	}:
 		assert 'nopims_root' not in raw['paths']
 		assert 'nopims_root' not in resolved['paths']
 	else:
@@ -175,6 +179,13 @@ def test_default_embedding_extraction_config_is_minimal_raw_user_config() -> Non
 		'min_token_valid_fraction': 0.5,
 	}
 	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
+
+
+def test_default_clustering_input_matches_extraction_output() -> None:
+	extraction = load_config(CONFIG_DIR / 'extract_embeddings.yaml')
+	clustering = load_config(CONFIG_DIR / 'cluster_embeddings.yaml')
+
+	assert clustering['embeddings']['input_dir'] == extraction['embeddings']['output_dir']
 
 
 @pytest.mark.parametrize(('config_path', 'resolver'), DATA_REGISTRY_CONFIGS)
@@ -623,7 +634,7 @@ def _minimal_embedding_config() -> dict[str, object]:
 
 def _minimal_clustering_config() -> dict[str, object]:
 	return {
-		'paths': _paths(),
+		'paths': {'artifact_root': '/artifacts'},
 		'embeddings': {'input_dir': '/artifacts/embeddings'},
 		'clustering': {'output_dir': '/artifacts/clusters'},
 	}
@@ -631,7 +642,7 @@ def _minimal_clustering_config() -> dict[str, object]:
 
 def _minimal_visualization_config() -> dict[str, object]:
 	return {
-		'paths': _paths(),
+		'paths': {'artifact_root': '/artifacts'},
 		'clustering': {'input_dir': '/artifacts/clusters'},
 		'visualization': {'output_dir': '/artifacts/figures'},
 	}

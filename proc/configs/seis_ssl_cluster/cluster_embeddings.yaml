@@ -1,8 +1,7 @@
 paths:
-  nopims_root: /home/dcuser/data/NOPIMS
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 embeddings:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/runs/embeddings/nopims/pretrain_v1
+  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1
 clustering:
   output_dir: /workspace/artifacts/seis_ssl_cluster/runs/clusters/nopims/pretrain_v1
   embedding_normalization: l2

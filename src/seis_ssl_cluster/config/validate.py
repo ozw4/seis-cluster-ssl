@@ -266,7 +266,11 @@ def resolve_embedding_extraction_config(config: _T) -> Config:
 
 def resolve_clustering_config(config: _T) -> Config:
 	"""Validate and resolve raw config for embedding clustering."""
-	resolved, _paths = _resolve_base(config, STAGE_CLUSTERING)
+	resolved, _paths = _resolve_base(
+		config,
+		STAGE_CLUSTERING,
+		require_nopims_root=False,
+	)
 	embeddings = _required_mapping(resolved, 'embeddings')
 	clustering = _required_mapping(resolved, 'clustering')
 	_validate_non_empty_path(embeddings, 'input_dir', prefix='embeddings')
@@ -291,7 +295,11 @@ def resolve_clustering_config(config: _T) -> Config:
 
 def resolve_cluster_visualization_config(config: _T) -> Config:
 	"""Validate and resolve raw config for cluster visualization."""
-	resolved, _paths = _resolve_base(config, STAGE_CLUSTER_VISUALIZATION)
+	resolved, _paths = _resolve_base(
+		config,
+		STAGE_CLUSTER_VISUALIZATION,
+		require_nopims_root=False,
+	)
 	clustering = _required_mapping(resolved, 'clustering')
 	visualization = _required_mapping(resolved, 'visualization')
 	_validate_non_empty_path(clustering, 'input_dir', prefix='clustering')
