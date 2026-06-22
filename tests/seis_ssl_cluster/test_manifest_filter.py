@@ -76,9 +76,6 @@ def test_synthetic_normalization_qc_integration_writes_clean_outputs(
 		'epsilon': 1.0e-6,
 		'max_samples': 1000000,
 		'seed': 42,
-		'smooth_time_depth_trend_correction': False,
-		'trace_wise_agc': False,
-		'patch_wise_zscore': False,
 	}
 	prepare_config_path = tmp_path / 'prepare.yaml'
 	prepare_config_path.write_text(yaml.safe_dump(prepare_config), encoding='utf-8')

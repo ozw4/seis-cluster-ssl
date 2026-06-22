@@ -73,6 +73,7 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 					'normalization.clipping_percentiles',
 					normalization.get('clipping_percentiles'),
 				),
+				('normalization.epsilon', normalization.get('epsilon')),
 				('normalization.max_samples', normalization.get('max_samples')),
 				('normalization.seed', normalization.get('seed')),
 			],
@@ -89,6 +90,8 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 				('splits.output', splits.get('output')),
 				('qc.output_json', qc.get('output_json')),
 				('qc.excluded_surveys', qc.get('excluded_surveys')),
+				('qc.min_iqr', qc.get('min_iqr')),
+				('qc.max_normalized_abs', qc.get('max_normalized_abs')),
 			],
 		)
 	elif stage == STAGE_MAE_TRAINING:

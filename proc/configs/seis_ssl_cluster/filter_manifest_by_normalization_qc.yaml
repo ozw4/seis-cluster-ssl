@@ -5,10 +5,10 @@ manifests:
   input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1/nopims_amplitude_manifests.json
   output: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
 splits:
-  input: /home/dcuser/data/NOPIMS/inputs/train_npy_paths.txt
+  input: /workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1/train_npy_paths.txt
   output: /workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1_clean/train_npy_paths.txt
 qc:
   output_json: /workspace/artifacts/seis_ssl_cluster/registry/qc/nopims/pretrain_v1/normalization_stats_qc.json
   excluded_surveys: /workspace/artifacts/seis_ssl_cluster/registry/qc/nopims/pretrain_v1/excluded_surveys.txt
-  min_iqr: 0.0001
-  max_normalized_abs: 1000000.0
+  min_iqr: 1.0e-4
+  max_normalized_abs: 1.0e+6

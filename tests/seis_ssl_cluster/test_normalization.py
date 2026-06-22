@@ -225,9 +225,6 @@ def _write_prepare_inputs(
 		'epsilon': 1.0e-6,
 		'max_samples': 1000,
 		'seed': 42,
-		'smooth_time_depth_trend_correction': False,
-		'trace_wise_agc': False,
-		'patch_wise_zscore': False,
 	}
 	config_path = tmp_path / 'prepare.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')

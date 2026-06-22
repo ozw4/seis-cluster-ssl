@@ -8,6 +8,3 @@ normalization:
   epsilon: 1.0e-6
   max_samples: 1000000
   seed: 42
-  smooth_time_depth_trend_correction: false
-  trace_wise_agc: false
-  patch_wise_zscore: false

@@ -85,6 +85,14 @@ _FIXED_RAW_KEYS: dict[str, frozenset[str]] = {
 	'loss': frozenset(FIXED_LOSS_CONTRACT),
 }
 
+_FIXED_DISABLED_NORMALIZATION_KEYS = frozenset(
+	{
+		'smooth_time_depth_trend_correction',
+		'trace_wise_agc',
+		'patch_wise_zscore',
+	},
+)
+
 _DEFAULT_EMBEDDING_LOCAL_CROP_SIZE = [128, 128, 128]
 
 
@@ -466,13 +474,13 @@ def _validate_normalization(normalization: Mapping[str, object]) -> None:
 			f'got {normalization.get("seed")!r}'
 		)
 		raise ValueError(msg)
-	for key in (
-		'smooth_time_depth_trend_correction',
-		'trace_wise_agc',
-		'patch_wise_zscore',
-	):
+	for key in sorted(_FIXED_DISABLED_NORMALIZATION_KEYS):
 		if key in normalization:
-			_validate_bool(normalization, key, prefix='normalization')
+			msg = (
+				f'normalization.{key} is fixed disabled by the amplitude-only '
+				'implementation contract and must be removed from raw YAML.'
+			)
+			raise ValueError(msg)
 
 
 def _validate_model(model: Mapping[str, object]) -> None:

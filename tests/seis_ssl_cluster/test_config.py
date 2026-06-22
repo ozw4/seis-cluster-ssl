@@ -39,6 +39,43 @@ DEFAULT_CONFIGS = (
 	(CONFIG_DIR / 'cluster_embeddings.yaml', resolve_clustering_config),
 	(CONFIG_DIR / 'visualize_clusters.yaml', resolve_cluster_visualization_config),
 )
+DATA_REGISTRY_CONFIGS = DEFAULT_CONFIGS[:3]
+DATA_REGISTRY_TOP_LEVELS = {
+	CONFIG_DIR / 'build_nopims_manifests.yaml': {'paths', 'manifest'},
+	CONFIG_DIR / 'prepare_nopims_normalization_stats.yaml': {
+		'paths',
+		'manifests',
+		'normalization',
+	},
+	CONFIG_DIR / 'filter_manifest_by_normalization_qc.yaml': {
+		'paths',
+		'manifests',
+		'splits',
+		'qc',
+	},
+}
+REDUNDANT_DATA_STAGE_SECTIONS = {'stage', 'data', 'model', 'masking', 'loss', 'train'}
+DEFAULT_SPLIT_PATH = (
+	'/workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1/'
+	'train_npy_paths.txt'
+)
+DEFAULT_MANIFEST_PATH = (
+	'/workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1/'
+	'nopims_amplitude_manifests.json'
+)
+DEFAULT_CLEAN_MANIFEST_PATH = (
+	'/workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/'
+	'pretrain_v1_clean/nopims_amplitude_manifests.json'
+)
+DEFAULT_CLEAN_SPLIT_PATH = (
+	'/workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1_clean/'
+	'train_npy_paths.txt'
+)
+FIXED_DISABLED_NORMALIZATION_KEYS = (
+	'smooth_time_depth_trend_correction',
+	'trace_wise_agc',
+	'patch_wise_zscore',
+)
 
 
 @pytest.mark.parametrize(('config_path', 'resolver'), DEFAULT_CONFIGS)
@@ -56,6 +93,42 @@ def test_default_configs_resolve_without_mutating_raw(
 	assert resolved['stage']
 	assert resolved['paths']['nopims_root'] == '/home/dcuser/data/NOPIMS'
 	assert resolved['paths']['artifact_root'] == '/workspace/artifacts/seis_ssl_cluster'
+
+
+@pytest.mark.parametrize(('config_path', 'resolver'), DATA_REGISTRY_CONFIGS)
+def test_default_data_registry_configs_are_minimal(
+	config_path: Path,
+	resolver: Callable[[dict[str, object]], dict[str, object]],
+) -> None:
+	raw = load_config(config_path)
+
+	resolver(raw)
+
+	assert set(raw) == DATA_REGISTRY_TOP_LEVELS[config_path]
+	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
+	if 'normalization' in raw:
+		normalization = raw['normalization']
+		assert isinstance(normalization, dict)
+		assert not set(FIXED_DISABLED_NORMALIZATION_KEYS) & set(normalization)
+
+
+def test_default_data_registry_handoff_paths_are_explicit() -> None:
+	build = load_config(CONFIG_DIR / 'build_nopims_manifests.yaml')
+	normalization = load_config(
+		CONFIG_DIR / 'prepare_nopims_normalization_stats.yaml',
+	)
+	qc = load_config(CONFIG_DIR / 'filter_manifest_by_normalization_qc.yaml')
+
+	assert build['manifest']['input_path_list'] == DEFAULT_SPLIT_PATH
+	assert (
+		build['manifest']['output_dir'] + '/' + build['manifest']['output_name']
+		== DEFAULT_MANIFEST_PATH
+	)
+	assert normalization['manifests']['train'] == DEFAULT_MANIFEST_PATH
+	assert qc['manifests']['input'] == DEFAULT_MANIFEST_PATH
+	assert qc['manifests']['output'] == DEFAULT_CLEAN_MANIFEST_PATH
+	assert qc['splits']['input'] == DEFAULT_SPLIT_PATH
+	assert qc['splits']['output'] == DEFAULT_CLEAN_SPLIT_PATH
 
 
 @pytest.mark.parametrize(
@@ -102,6 +175,39 @@ def test_unrelated_top_level_sections_are_rejected() -> None:
 
 	with pytest.raises(ValueError, match=r'cluster_embeddings.*train'):
 		resolve_clustering_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('resolver', 'raw_config'),
+	[
+		(resolve_manifest_build_config, lambda: _minimal_manifest_build_config()),
+		(
+			resolve_normalization_stats_config,
+			lambda: _minimal_normalization_stats_config(),
+		),
+		(resolve_normalization_qc_config, lambda: _minimal_normalization_qc_config()),
+	],
+)
+@pytest.mark.parametrize('section', ['model', 'train', 'loss', 'masking'])
+def test_data_registry_configs_reject_redundant_mae_sections(
+	resolver: Callable[[dict[str, object]], dict[str, object]],
+	raw_config: Callable[[], dict[str, object]],
+	section: str,
+) -> None:
+	cfg = raw_config()
+	cfg[section] = {}
+
+	with pytest.raises(ValueError, match=rf'top-level section.*{section}'):
+		resolver(cfg)
+
+
+@pytest.mark.parametrize('key', FIXED_DISABLED_NORMALIZATION_KEYS)
+def test_fixed_disabled_normalization_options_are_rejected(key: str) -> None:
+	cfg = _minimal_normalization_stats_config()
+	cfg['normalization'][key] = False
+
+	with pytest.raises(ValueError, match=rf'normalization\.{key}.*removed'):
+		resolve_normalization_stats_config(cfg)
 
 
 def test_fixed_contract_keys_are_rejected_from_raw_training_config() -> None:
