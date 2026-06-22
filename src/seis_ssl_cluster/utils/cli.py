@@ -40,11 +40,19 @@ def parse_config_args(
 	return parser.parse_args()
 
 
-def print_config_summary(cfg: Mapping[str, Any]) -> None:
+def print_config_summary(
+	cfg: Mapping[str, Any],
+	*,
+	device_override: str | None = None,
+) -> None:
 	"""Print a compact stage-aware summary of resolved config values."""
 	paths = _mapping(cfg.get('paths'))
 	stage = cfg.get('stage')
-	rows = _base_summary_rows(stage, paths)
+	rows = (
+		[]
+		if stage == STAGE_EMBEDDING_EXTRACTION
+		else _base_summary_rows(stage, paths)
+	)
 
 	if stage == STAGE_BUILD_MANIFESTS:
 		manifest = _mapping(cfg.get('manifest'))
@@ -104,8 +112,15 @@ def print_config_summary(cfg: Mapping[str, Any]) -> None:
 				('embedding.window_size', embedding.get('window_size')),
 				('embedding.overlap', embedding.get('overlap')),
 				('embedding.output_dtype', embedding.get('output_dtype')),
+				('embedding.batch_size', embedding.get('batch_size')),
+				(
+					'embedding.min_token_valid_fraction',
+					embedding.get('min_token_valid_fraction'),
+				),
 			],
 		)
+		if device_override is not None:
+			rows.append(('device_override', device_override))
 	elif stage == STAGE_CLUSTERING:
 		embeddings = _mapping(cfg.get('embeddings'))
 		clustering = _mapping(cfg.get('clustering'))

@@ -34,10 +34,14 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 	result = run_python_proc(script_path, '--dry-run')
 
 	assert result.returncode == 0, result.stderr
-	assert 'stage:' in result.stdout
-	assert 'paths.artifact_root:' in result.stdout
 	assert 'data.input_channels:' not in result.stdout
 	assert 'train.lr:' not in result.stdout
+	if script_path == Path('proc/seis_ssl_cluster/extract_embeddings.py'):
+		assert 'stage:' not in result.stdout
+		assert 'paths.artifact_root:' not in result.stdout
+	else:
+		assert 'stage:' in result.stdout
+		assert 'paths.artifact_root:' in result.stdout
 	if script_path == Path('proc/seis_ssl_cluster/build_nopims_manifests.py'):
 		assert 'manifest.input_path_list:' in result.stdout
 		assert 'model.encoder_depth:' not in result.stdout
@@ -57,8 +61,16 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 		assert 'loss.gradient_weight:' in result.stdout
 		assert 'execution: dry-run; training skipped' in result.stdout
 	elif script_path == Path('proc/seis_ssl_cluster/extract_embeddings.py'):
+		assert 'manifests.input:' in result.stdout
+		assert 'embeddings.checkpoint:' in result.stdout
+		assert 'embeddings.output_dir:' in result.stdout
 		assert 'embedding.window_size:' in result.stdout
+		assert 'embedding.overlap:' in result.stdout
+		assert 'embedding.output_dtype:' in result.stdout
+		assert 'embedding.batch_size:' in result.stdout
+		assert 'embedding.min_token_valid_fraction:' in result.stdout
 		assert 'loss.gradient_weight:' not in result.stdout
+		assert 'masking.spatial_mask_ratio:' not in result.stdout
 		assert 'execution: dry-run; extraction skipped' in result.stdout
 	elif script_path == Path('proc/seis_ssl_cluster/cluster_embeddings.py'):
 		assert 'clustering.k_values:' in result.stdout
@@ -67,6 +79,18 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 	else:
 		assert 'visualization.output_dir:' in result.stdout
 		assert 'execution: dry-run; visualization skipped' in result.stdout
+
+
+def test_extract_embeddings_dry_run_prints_device_override() -> None:
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/extract_embeddings.py'),
+		'--dry-run',
+		'--device',
+		'cpu',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'device_override: cpu' in result.stdout
 
 
 def test_cluster_embeddings_dry_run_does_not_import_optional_cluster_stack(

@@ -55,6 +55,14 @@ DATA_REGISTRY_TOP_LEVELS = {
 	},
 }
 REDUNDANT_DATA_STAGE_SECTIONS = {'stage', 'data', 'model', 'masking', 'loss', 'train'}
+CHECKPOINT_OWNED_EXTRACTION_SECTIONS = (
+	'data',
+	'model',
+	'masking',
+	'loss',
+	'train',
+	'zero_mask',
+)
 DEFAULT_SPLIT_PATH = (
 	'/workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1/'
 	'train_npy_paths.txt'
@@ -70,6 +78,10 @@ DEFAULT_CLEAN_MANIFEST_PATH = (
 DEFAULT_CLEAN_SPLIT_PATH = (
 	'/workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1_clean/'
 	'train_npy_paths.txt'
+)
+DEFAULT_EMBEDDING_CHECKPOINT_PATH = (
+	'/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1/'
+	'mae_latest.pt'
 )
 FIXED_DISABLED_NORMALIZATION_KEYS = (
 	'smooth_time_depth_trend_correction',
@@ -98,6 +110,9 @@ def test_default_configs_resolve_without_mutating_raw(
 			resolved['paths']['output_root']
 			== '/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1'
 		)
+	elif config_path == CONFIG_DIR / 'extract_embeddings.yaml':
+		assert 'nopims_root' not in raw['paths']
+		assert 'nopims_root' not in resolved['paths']
 	else:
 		assert resolved['paths']['nopims_root'] == '/home/dcuser/data/NOPIMS'
 	assert resolved['paths']['artifact_root'] == '/workspace/artifacts/seis_ssl_cluster'
@@ -137,6 +152,29 @@ def test_default_training_config_is_minimal_raw_user_config() -> None:
 	assert not {'name', 'in_channels', 'out_channels'} & set(raw['model'])
 	assert 'spatial_mask_mode' not in raw['masking']
 	assert not {'reconstruction', 'valid_mask_mode'} & set(raw['loss'])
+
+
+def test_default_embedding_extraction_config_is_minimal_raw_user_config() -> None:
+	raw = load_config(CONFIG_DIR / 'extract_embeddings.yaml')
+
+	assert set(raw) == {'paths', 'manifests', 'embeddings', 'embedding'}
+	assert raw['paths'] == {
+		'artifact_root': '/workspace/artifacts/seis_ssl_cluster',
+	}
+	assert raw['manifests']['input'] == DEFAULT_CLEAN_MANIFEST_PATH
+	assert raw['embeddings']['checkpoint'] == DEFAULT_EMBEDDING_CHECKPOINT_PATH
+	assert (
+		raw['embeddings']['output_dir']
+		== '/workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1'
+	)
+	assert raw['embedding'] == {
+		'window_size': [128, 128, 128],
+		'overlap': [64, 64, 64],
+		'output_dtype': 'float16',
+		'batch_size': 1,
+		'min_token_valid_fraction': 0.5,
+	}
+	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
 
 
 @pytest.mark.parametrize(('config_path', 'resolver'), DATA_REGISTRY_CONFIGS)
@@ -245,6 +283,20 @@ def test_data_registry_configs_reject_redundant_mae_sections(
 		resolver(cfg)
 
 
+@pytest.mark.parametrize(
+	'section',
+	CHECKPOINT_OWNED_EXTRACTION_SECTIONS,
+)
+def test_embedding_extraction_config_rejects_redundant_mae_sections(
+	section: str,
+) -> None:
+	cfg = _minimal_embedding_config()
+	cfg[section] = {}
+
+	with pytest.raises(ValueError, match=rf'checkpoint-owned.*{section}'):
+		resolve_embedding_extraction_config(cfg)
+
+
 @pytest.mark.parametrize('key', FIXED_DISABLED_NORMALIZATION_KEYS)
 def test_fixed_disabled_normalization_options_are_rejected(key: str) -> None:
 	cfg = _minimal_normalization_stats_config()
@@ -314,6 +366,45 @@ def test_raw_explicit_paths_are_preserved_exactly() -> None:
 	assert resolved['splits']['input'] == '/data/NOPIMS/inputs/train.txt'
 	assert resolved['splits']['output'] == '/artifacts/splits/train.txt'
 	assert resolved['qc']['output_json'] == '/artifacts/qc/report.json'
+
+
+def test_embedding_extraction_explicit_output_path_is_preserved() -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embeddings']['output_dir'] = '/artifacts/explicit/embeddings'
+
+	resolved = resolve_embedding_extraction_config(cfg)
+
+	assert resolved['embeddings']['output_dir'] == '/artifacts/explicit/embeddings'
+
+
+def test_embedding_extraction_output_dir_must_be_under_artifact_root() -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embeddings']['output_dir'] = '/external/embeddings'
+
+	with pytest.raises(
+		ValueError,
+		match=r'embeddings\.output_dir.*paths\.artifact_root',
+	):
+		resolve_embedding_extraction_config(cfg)
+
+
+def test_embedding_extraction_overlap_must_be_less_than_window() -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embedding'] = {
+		'window_size': [8, 8, 8],
+		'overlap': [4, 8, 4],
+	}
+
+	with pytest.raises(ValueError, match=r'embedding\.overlap.*window_size'):
+		resolve_embedding_extraction_config(cfg)
+
+
+def test_embedding_extraction_output_dtype_is_limited() -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embedding'] = {'output_dtype': 'float64'}
+
+	with pytest.raises(ValueError, match=r'embedding\.output_dtype.*float16.*float32'):
+		resolve_embedding_extraction_config(cfg)
 
 
 def test_no_output_paths_are_derived_from_dataset_or_version_names() -> None:
@@ -448,7 +539,7 @@ def _minimal_training_config() -> dict[str, object]:
 
 def _minimal_embedding_config() -> dict[str, object]:
 	return {
-		'paths': _paths(),
+		'paths': {'artifact_root': '/artifacts'},
 		'manifests': {'input': '/artifacts/manifests/train.json'},
 		'embeddings': {
 			'checkpoint': '/artifacts/runs/train_amp_mae/mae_latest.pt',

@@ -53,7 +53,7 @@ def main() -> None:
 
 	config = resolve_embedding_extraction_config(load_config(args.config))
 	if args.dry_run:
-		print_config_summary(config)
+		print_config_summary(config, device_override=args.device)
 		print('execution: dry-run; extraction skipped')
 		return
 

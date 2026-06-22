@@ -1,11 +1,10 @@
 paths:
-  nopims_root: /home/dcuser/data/NOPIMS
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 manifests:
   input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
 embeddings:
-  checkpoint: /workspace/artifacts/seis_ssl_cluster/runs/train_amp_mae/mae_latest.pt
-  output_dir: /workspace/artifacts/seis_ssl_cluster/runs/embeddings/nopims/pretrain_v1
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1/mae_latest.pt
+  output_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1
 embedding:
   window_size: [128, 128, 128]
   overlap: [64, 64, 64]

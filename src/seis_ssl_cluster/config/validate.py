@@ -97,6 +97,9 @@ _FIXED_DISABLED_NORMALIZATION_KEYS = frozenset(
 )
 
 _DEFAULT_EMBEDDING_LOCAL_CROP_SIZE = [128, 128, 128]
+_CHECKPOINT_OWNED_EXTRACTION_SECTIONS = frozenset(
+	{'data', 'model', 'masking', 'loss', 'train', 'zero_mask'},
+)
 
 
 def resolve_manifest_build_config(config: _T) -> Config:
@@ -213,18 +216,35 @@ def resolve_mae_training_config(config: _T) -> Config:
 
 def resolve_embedding_extraction_config(config: _T) -> Config:
 	"""Validate and resolve raw config for embedding extraction."""
-	resolved, _paths = _resolve_base(config, STAGE_EMBEDDING_EXTRACTION)
+	_reject_checkpoint_owned_extraction_sections(config)
+	resolved, paths = _resolve_base(
+		config,
+		STAGE_EMBEDDING_EXTRACTION,
+		require_nopims_root=False,
+	)
 	manifests = _required_mapping(resolved, 'manifests')
 	embeddings = _required_mapping(resolved, 'embeddings')
 	_validate_non_empty_path(manifests, 'input', prefix='manifests')
 	_validate_non_empty_path(embeddings, 'checkpoint', prefix='embeddings')
-	_validate_non_empty_path(embeddings, 'output_dir', prefix='embeddings')
+	_validate_artifact_output_path(
+		_validate_path(embeddings, 'output_dir', prefix='embeddings'),
+		'embeddings.output_dir',
+		artifact_root=paths.artifact_root,
+		nopims_root=paths.nopims_root,
+	)
 
 	embedding = _optional_mapping(resolved, 'embedding')
-	if 'window_size' in embedding:
+	window_size = (
 		_validate_positive_int_triplet(embedding, 'window_size', prefix='embedding')
-	if 'overlap' in embedding:
+		if 'window_size' in embedding
+		else tuple(_DEFAULT_EMBEDDING_LOCAL_CROP_SIZE)
+	)
+	overlap = (
 		_validate_nonnegative_int_triplet(embedding, 'overlap', prefix='embedding')
+		if 'overlap' in embedding
+		else (0, 0, 0)
+	)
+	_validate_overlap_less_than_window(overlap, window_size)
 	if 'batch_size' in embedding:
 		_validate_positive_int(embedding, 'batch_size', prefix='embedding')
 	if 'min_token_valid_fraction' in embedding:
@@ -234,13 +254,7 @@ def resolve_embedding_extraction_config(config: _T) -> Config:
 			prefix='embedding',
 		)
 	if 'output_dtype' in embedding:
-		_validate_non_empty_str(embedding, 'output_dtype', prefix='embedding')
-
-	window_size = embedding.get('window_size', _DEFAULT_EMBEDDING_LOCAL_CROP_SIZE)
-	resolved['data'] = {
-		**deepcopy(FIXED_DATA_CONTRACT),
-		'local_crop_size': deepcopy(window_size),
-	}
+		_validate_embedding_output_dtype(embedding)
 	return resolved
 
 
@@ -359,6 +373,18 @@ def _reject_fixed_contract_keys(config: Mapping[str, object]) -> None:
 				'resolver and must be removed from raw YAML.'
 			)
 			raise ValueError(msg)
+
+
+def _reject_checkpoint_owned_extraction_sections(
+	config: Mapping[str, object],
+) -> None:
+	stale = sorted(set(config) & _CHECKPOINT_OWNED_EXTRACTION_SECTIONS)
+	if stale:
+		msg = (
+			'embedding extraction config must not include checkpoint-owned '
+			f'section(s): {stale!r}'
+		)
+		raise ValueError(msg)
 
 
 def _reject_legacy_attribute_config(config: Mapping[str, object]) -> None:
@@ -700,6 +726,35 @@ def _validate_nonnegative_int_triplet(
 		msg = f'{prefix}.{key} must be a list of three nonnegative integers'
 		raise ValueError(msg)
 	return (int(value[0]), int(value[1]), int(value[2]))
+
+
+def _validate_overlap_less_than_window(
+	overlap: Sequence[int],
+	window_size: Sequence[int],
+) -> None:
+	if any(
+		overlap_axis >= window_axis
+		for overlap_axis, window_axis in zip(overlap, window_size, strict=True)
+	):
+		msg = (
+			'embedding.overlap values must be less than embedding.window_size '
+			f'values; got overlap={list(overlap)!r}, '
+			f'window_size={list(window_size)!r}'
+		)
+		raise ValueError(msg)
+
+
+def _validate_embedding_output_dtype(embedding: Mapping[str, object]) -> None:
+	value = embedding.get('output_dtype')
+	if not isinstance(value, str) or not value:
+		msg = f'embedding.output_dtype must be a non-empty string; got {value!r}'
+		raise TypeError(msg)
+	if value not in {'float16', 'float32'}:
+		msg = (
+			'embedding.output_dtype must be "float16" or "float32"; '
+			f'got {value!r}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_positive_int_list(
