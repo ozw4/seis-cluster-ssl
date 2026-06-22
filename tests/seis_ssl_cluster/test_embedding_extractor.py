@@ -250,6 +250,26 @@ def test_embedding_extraction_rejects_integer_output_dtype(tmp_path: Path) -> No
 		run_embedding_extraction(config, device='cpu')
 
 
+def test_embedding_extraction_requires_explicit_embedding_section(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	del config['embedding']
+
+	with pytest.raises(TypeError, match='embedding must be a mapping'):
+		run_embedding_extraction(config, device='cpu')
+
+
+def test_embedding_extraction_allows_zero_overlap(tmp_path: Path) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['overlap'] = [0, 0, 0]
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	assert metadata['overlap'] == [0, 0, 0]
+
+
 def test_embedding_extraction_metadata_records_full_model_geometry(
 	tmp_path: Path,
 ) -> None:

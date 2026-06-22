@@ -182,23 +182,32 @@ def extraction_settings_from_config(
 	_reject_checkpoint_owned_extraction_sections(config)
 	_validate_checkpoint_resolved_config(checkpoint_config)
 	embeddings = _required_mapping(config, 'embeddings')
-	embedding = _optional_mapping(config, 'embedding')
+	embedding = _required_mapping(config, 'embedding')
 	checkpoint_path = _required_path(embeddings, 'checkpoint', 'embeddings')
 	output_dir = _required_path(embeddings, 'output_dir', 'embeddings')
 	window_size = _xyz_from_mapping(
 		embedding,
 		'window_size',
 		'embedding',
-		default=(128, 128, 128),
+		default=None,
 	)
-	overlap = _xyz_from_mapping(
+	overlap = _nonnegative_xyz_from_mapping(
 		embedding,
 		'overlap',
 		'embedding',
-		default=(0, 0, 0),
+		default=None,
 	)
 	_validate_overlap_less_than_window(overlap, window_size)
-	output_dtype = np.dtype(embedding.get('output_dtype', 'float16'))
+	output_dtype_name = _required_non_empty_string(
+		embedding,
+		'output_dtype',
+		'embedding',
+	)
+	try:
+		output_dtype = np.dtype(output_dtype_name)
+	except TypeError as exc:
+		msg = 'embedding.output_dtype must be float16 or float32'
+		raise ValueError(msg) from exc
 	if output_dtype not in {np.dtype('float16'), np.dtype('float32')}:
 		msg = 'embedding.output_dtype must be float16 or float32'
 		raise ValueError(msg)
@@ -209,11 +218,11 @@ def extraction_settings_from_config(
 		overlap_xyz=overlap,
 		output_dtype=output_dtype,
 		batch_size=_positive_int(
-			embedding.get('batch_size', 1),
+			embedding.get('batch_size'),
 			'embedding.batch_size',
 		),
 		min_token_valid_fraction=_fraction(
-			embedding.get('min_token_valid_fraction', 0.5),
+			embedding.get('min_token_valid_fraction'),
 			'embedding.min_token_valid_fraction',
 		),
 		zero_mask=_zero_mask_from_config(checkpoint_config),
@@ -822,6 +831,16 @@ def _xyz_from_mapping(
 	return _validate_positive_xyz(parent.get(key, default), f'{prefix}.{key}')
 
 
+def _nonnegative_xyz_from_mapping(
+	parent: Mapping[str, object],
+	key: str,
+	prefix: str,
+	*,
+	default: object,
+) -> XYZ:
+	return _validate_nonnegative_xyz(parent.get(key, default), f'{prefix}.{key}')
+
+
 def _validate_positive_xyz(value: object, name: str) -> XYZ:
 	if (
 		isinstance(value, str)
@@ -837,6 +856,25 @@ def _validate_positive_xyz(value: object, name: str) -> XYZ:
 	xyz = cast('XYZ', tuple(int(axis) for axis in value))
 	if any(axis <= 0 for axis in xyz):
 		msg = f'{name} values must be positive; got {xyz!r}'
+		raise ValueError(msg)
+	return xyz
+
+
+def _validate_nonnegative_xyz(value: object, name: str) -> XYZ:
+	if (
+		isinstance(value, str)
+		or not isinstance(value, Sequence)
+		or len(value) != 3
+		or not all(
+			not isinstance(axis, bool) and isinstance(axis, Integral)
+			for axis in value
+		)
+	):
+		msg = f'{name} must be a length-3 integer sequence; got {value!r}'
+		raise TypeError(msg)
+	xyz = cast('XYZ', tuple(int(axis) for axis in value))
+	if any(axis < 0 for axis in xyz):
+		msg = f'{name} values must be nonnegative; got {xyz!r}'
 		raise ValueError(msg)
 	return xyz
 

@@ -73,7 +73,7 @@ _REQUIRED_TOP_LEVEL: dict[str, frozenset[str]] = {
 		{'paths', 'manifests', 'data', 'model', 'masking', 'loss', 'train'},
 	),
 	STAGE_EMBEDDING_EXTRACTION: frozenset(
-		{'paths', 'manifests', 'embeddings'},
+		{'paths', 'manifests', 'embeddings', 'embedding'},
 	),
 	STAGE_CLUSTERING: frozenset({'paths', 'embeddings', 'clustering'}),
 	STAGE_CLUSTER_VISUALIZATION: frozenset(
@@ -96,7 +96,6 @@ _FIXED_DISABLED_NORMALIZATION_KEYS = frozenset(
 	},
 )
 
-_DEFAULT_EMBEDDING_LOCAL_CROP_SIZE = [128, 128, 128]
 _CHECKPOINT_OWNED_EXTRACTION_SECTIONS = frozenset(
 	{'data', 'model', 'masking', 'loss', 'train', 'zero_mask'},
 )
@@ -167,6 +166,11 @@ def resolve_mae_training_config(config: _T) -> Config:
 		STAGE_MAE_TRAINING,
 		require_nopims_root=False,
 	)
+	_validate_non_empty_path(
+		_required_mapping(resolved, 'paths'),
+		'output_root',
+		prefix='paths',
+	)
 	_reject_fixed_contract_keys(resolved)
 	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
 	_merge_section_defaults(resolved, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
@@ -233,28 +237,25 @@ def resolve_embedding_extraction_config(config: _T) -> Config:
 		nopims_root=paths.nopims_root,
 	)
 
-	embedding = _optional_mapping(resolved, 'embedding')
-	window_size = (
-		_validate_positive_int_triplet(embedding, 'window_size', prefix='embedding')
-		if 'window_size' in embedding
-		else tuple(_DEFAULT_EMBEDDING_LOCAL_CROP_SIZE)
+	embedding = _required_mapping(resolved, 'embedding')
+	window_size = _validate_positive_int_triplet(
+		embedding,
+		'window_size',
+		prefix='embedding',
 	)
-	overlap = (
-		_validate_nonnegative_int_triplet(embedding, 'overlap', prefix='embedding')
-		if 'overlap' in embedding
-		else (0, 0, 0)
+	overlap = _validate_nonnegative_int_triplet(
+		embedding,
+		'overlap',
+		prefix='embedding',
 	)
 	_validate_overlap_less_than_window(overlap, window_size)
-	if 'batch_size' in embedding:
-		_validate_positive_int(embedding, 'batch_size', prefix='embedding')
-	if 'min_token_valid_fraction' in embedding:
-		_validate_fraction(
-			embedding,
-			'min_token_valid_fraction',
-			prefix='embedding',
-		)
-	if 'output_dtype' in embedding:
-		_validate_embedding_output_dtype(embedding)
+	_validate_embedding_output_dtype(embedding)
+	_validate_positive_int(embedding, 'batch_size', prefix='embedding')
+	_validate_fraction(
+		embedding,
+		'min_token_valid_fraction',
+		prefix='embedding',
+	)
 	return resolved
 
 
@@ -663,19 +664,6 @@ def _required_mapping(
 	key: str,
 ) -> Mapping[str, object]:
 	value = parent.get(key)
-	if not isinstance(value, Mapping):
-		msg = f'{key} must be a mapping'
-		raise TypeError(msg)
-	return value
-
-
-def _optional_mapping(
-	parent: Mapping[str, object],
-	key: str,
-) -> Mapping[str, object]:
-	value = parent.get(key, {})
-	if value is None:
-		return {}
 	if not isinstance(value, Mapping):
 		msg = f'{key} must be a mapping'
 		raise TypeError(msg)

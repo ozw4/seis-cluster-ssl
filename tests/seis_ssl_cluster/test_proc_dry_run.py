@@ -212,6 +212,7 @@ def test_proc_script_rejects_nondivisible_geometry(tmp_path: Path) -> None:
 paths:
   nopims_root: /external/NOPIMS
   artifact_root: /external/artifacts
+  output_root: /external/artifacts/runs/nondivisible
 manifests:
   train: /external/artifacts/registry/manifests/train.json
 data:

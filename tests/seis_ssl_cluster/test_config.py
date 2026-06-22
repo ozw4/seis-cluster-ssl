@@ -390,10 +390,8 @@ def test_embedding_extraction_output_dir_must_be_under_artifact_root() -> None:
 
 def test_embedding_extraction_overlap_must_be_less_than_window() -> None:
 	cfg = _minimal_embedding_config()
-	cfg['embedding'] = {
-		'window_size': [8, 8, 8],
-		'overlap': [4, 8, 4],
-	}
+	cfg['embedding']['window_size'] = [8, 8, 8]
+	cfg['embedding']['overlap'] = [4, 8, 4]
 
 	with pytest.raises(ValueError, match=r'embedding\.overlap.*window_size'):
 		resolve_embedding_extraction_config(cfg)
@@ -401,9 +399,25 @@ def test_embedding_extraction_overlap_must_be_less_than_window() -> None:
 
 def test_embedding_extraction_output_dtype_is_limited() -> None:
 	cfg = _minimal_embedding_config()
-	cfg['embedding'] = {'output_dtype': 'float64'}
+	cfg['embedding']['output_dtype'] = 'float64'
 
 	with pytest.raises(ValueError, match=r'embedding\.output_dtype.*float16.*float32'):
+		resolve_embedding_extraction_config(cfg)
+
+
+def test_training_config_requires_explicit_output_root() -> None:
+	cfg = _minimal_training_config()
+	del cfg['paths']['output_root']
+
+	with pytest.raises(TypeError, match=r'paths\.output_root'):
+		resolve_mae_training_config(cfg)
+
+
+def test_embedding_extraction_config_requires_explicit_geometry() -> None:
+	cfg = _minimal_embedding_config()
+	del cfg['embedding']
+
+	with pytest.raises(ValueError, match=r'missing required.*embedding'):
 		resolve_embedding_extraction_config(cfg)
 
 
@@ -414,7 +428,7 @@ def test_no_output_paths_are_derived_from_dataset_or_version_names() -> None:
 
 	assert 'dataset' not in resolved
 	assert 'version' not in resolved
-	assert 'output_root' not in resolved['paths']
+	assert resolved['paths']['output_root'] == cfg['paths']['output_root']
 
 
 def test_nondivisible_crop_patch_geometry_is_rejected() -> None:
@@ -511,7 +525,10 @@ def _minimal_normalization_qc_config() -> dict[str, object]:
 
 def _minimal_training_config() -> dict[str, object]:
 	return {
-		'paths': _paths(),
+		'paths': {
+			**_paths(),
+			'output_root': '/artifacts/runs/train_amp_mae',
+		},
 		'manifests': {'train': '/artifacts/manifests/train.json'},
 		'data': {'local_crop_size': [128, 128, 128]},
 		'model': {
@@ -544,6 +561,13 @@ def _minimal_embedding_config() -> dict[str, object]:
 		'embeddings': {
 			'checkpoint': '/artifacts/runs/train_amp_mae/mae_latest.pt',
 			'output_dir': '/artifacts/embeddings',
+		},
+		'embedding': {
+			'window_size': [128, 128, 128],
+			'overlap': [64, 64, 64],
+			'output_dtype': 'float16',
+			'batch_size': 1,
+			'min_token_valid_fraction': 0.5,
 		},
 	}
 
