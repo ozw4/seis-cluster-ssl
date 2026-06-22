@@ -173,6 +173,7 @@ def test_build_nopims_manifests_cli_writes_amplitude_manifest(
 		'manifest': {
 			'input_path_list': str(path_list),
 			'output_dir': str(output_dir),
+			'output_name': 'nopims_amplitude_manifests.json',
 			'normalization_stats_dir': str(stats_dir),
 		},
 	}
