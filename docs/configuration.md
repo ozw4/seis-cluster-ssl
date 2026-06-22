@@ -41,6 +41,45 @@ Default YAML files must keep these top-level sections only:
 
 No user YAML contains a top-level `stage`; the proc entrypoint selects the stage.
 
+## Path Contract
+
+Every stage names its upstream inputs and downstream outputs explicitly. The
+resolver validates those paths but does not derive paths from dataset names,
+version strings, run IDs, or other config fields.
+
+The `paths` mapping is stage-specific and accepts only these keys:
+
+| Stage | Required `paths` keys |
+|---|---|
+| Build manifest | `nopims_root`, `artifact_root` |
+| Normalization stats | `nopims_root`, `artifact_root` |
+| Normalization QC | `nopims_root`, `artifact_root` |
+| MAE training | `artifact_root`, `output_root` |
+| Embedding extraction | `artifact_root` |
+| Clustering | `artifact_root` |
+| Visualization | `artifact_root` |
+
+Generated outputs must be non-empty absolute paths under the resolved
+`paths.artifact_root`. The normalized path is checked, so `..` traversal cannot
+escape the artifact root. Registry stages that also have `paths.nopims_root`
+reject generated outputs under the raw NOPIMS root.
+
+Generated output fields are:
+
+| Stage | Output fields |
+|---|---|
+| Build manifest | `manifest.output_dir`, `manifest.normalization_stats_dir` |
+| Normalization QC | `manifests.output`, `splits.output`, `qc.output_json`, `qc.excluded_surveys` |
+| MAE training | `paths.output_root` |
+| Embedding extraction | `embeddings.output_dir` |
+| Clustering | `clustering.output_dir` |
+| Visualization | `visualization.output_dir` |
+
+Input and handoff fields remain explicit user-visible paths. They are not
+rewritten by the resolver and may point outside `artifact_root` when the stage
+intentionally supports that, such as raw NOPIMS path lists or an existing
+checkpoint path.
+
 ## Fixed And Checkpoint-Owned Settings
 
 These fixed amplitude-only contract fields are not valid in raw YAML:

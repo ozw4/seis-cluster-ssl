@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
-if str(SRC_ROOT) not in sys.path:
-	sys.path.insert(0, str(SRC_ROOT))
-
-from seis_ssl_cluster.config import (  # noqa: E402
+from seis_ssl_cluster.config import (
 	load_config,
 	resolve_embedding_extraction_config,
 )
-from seis_ssl_cluster.embedding import run_embedding_extraction  # noqa: E402
-from seis_ssl_cluster.utils.cli import print_config_summary  # noqa: E402
+from seis_ssl_cluster.embedding import run_embedding_extraction
+from seis_ssl_cluster.utils.cli import print_config_summary
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[1]

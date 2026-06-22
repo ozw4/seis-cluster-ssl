@@ -30,6 +30,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_MAE_TRAINING,
 	STAGE_NORMALIZATION_QC,
 	STAGE_NORMALIZATION_STATS,
+	STAGE_PATH_KEYS,
 )
 
 Config: TypeAlias = dict[str, object]
@@ -101,7 +102,6 @@ _CHECKPOINT_OWNED_EXTRACTION_SECTIONS = frozenset(
 	{'data', 'model', 'masking', 'loss', 'train', 'zero_mask'},
 )
 
-_DOWNSTREAM_PATH_KEYS = frozenset({'artifact_root'})
 _CLUSTERING_EMBEDDINGS_KEYS = frozenset({'input_dir'})
 _CLUSTERING_KEYS = frozenset(
 	{
@@ -214,15 +214,20 @@ def resolve_normalization_qc_config(config: _T) -> Config:
 
 def resolve_mae_training_config(config: _T) -> Config:
 	"""Validate and resolve raw config for MAE training."""
-	resolved, _paths = _resolve_base(
+	resolved, paths = _resolve_base(
 		config,
 		STAGE_MAE_TRAINING,
 		require_nopims_root=False,
 	)
-	_validate_non_empty_path(
-		_required_mapping(resolved, 'paths'),
-		'output_root',
-		prefix='paths',
+	_validate_artifact_output_path(
+		_validate_path(
+			_required_mapping(resolved, 'paths'),
+			'output_root',
+			prefix='paths',
+		),
+		'paths.output_root',
+		artifact_root=paths.artifact_root,
+		nopims_root=paths.nopims_root,
 	)
 	_reject_fixed_contract_keys(resolved)
 	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
@@ -313,11 +318,10 @@ def resolve_embedding_extraction_config(config: _T) -> Config:
 
 def resolve_clustering_config(config: _T) -> Config:
 	"""Validate and resolve raw config for embedding clustering."""
-	resolved, _paths = _resolve_base(
+	resolved, paths = _resolve_base(
 		config,
 		STAGE_CLUSTERING,
 		require_nopims_root=False,
-		allowed_path_keys=_DOWNSTREAM_PATH_KEYS,
 	)
 	embeddings = _required_mapping(resolved, 'embeddings')
 	clustering = _required_mapping(resolved, 'clustering')
@@ -333,7 +337,12 @@ def resolve_clustering_config(config: _T) -> Config:
 		prefix='clustering',
 	)
 	_validate_non_empty_path(embeddings, 'input_dir', prefix='embeddings')
-	_validate_non_empty_path(clustering, 'output_dir', prefix='clustering')
+	_validate_artifact_output_path(
+		_validate_path(clustering, 'output_dir', prefix='clustering'),
+		'clustering.output_dir',
+		artifact_root=paths.artifact_root,
+		nopims_root=paths.nopims_root,
+	)
 	_validate_clustering_normalization(clustering)
 	pca = _required_child_mapping(clustering, 'pca', prefix='clustering')
 	_validate_allowed_keys(pca, _CLUSTERING_PCA_KEYS, prefix='clustering.pca')
@@ -367,11 +376,10 @@ def resolve_clustering_config(config: _T) -> Config:
 
 def resolve_cluster_visualization_config(config: _T) -> Config:
 	"""Validate and resolve raw config for cluster visualization."""
-	resolved, _paths = _resolve_base(
+	resolved, paths = _resolve_base(
 		config,
 		STAGE_CLUSTER_VISUALIZATION,
 		require_nopims_root=False,
-		allowed_path_keys=_DOWNSTREAM_PATH_KEYS,
 	)
 	clustering = _required_mapping(resolved, 'clustering')
 	visualization = _required_mapping(resolved, 'visualization')
@@ -391,7 +399,12 @@ def resolve_cluster_visualization_config(config: _T) -> Config:
 		prefix='visualization',
 	)
 	_validate_non_empty_path(clustering, 'input_dir', prefix='clustering')
-	_validate_non_empty_path(visualization, 'output_dir', prefix='visualization')
+	_validate_artifact_output_path(
+		_validate_path(visualization, 'output_dir', prefix='visualization'),
+		'visualization.output_dir',
+		artifact_root=paths.artifact_root,
+		nopims_root=paths.nopims_root,
+	)
 	_validate_survey_id_list(visualization)
 	_validate_visualization_modes(visualization)
 	_validate_bool(visualization, 'reconstruct_voxel', prefix='visualization')
@@ -476,7 +489,6 @@ def _resolve_base(
 	stage: str,
 	*,
 	require_nopims_root: bool = True,
-	allowed_path_keys: frozenset[str] | None = None,
 ) -> tuple[Config, _ResolvedPaths]:
 	_validate_mapping(config)
 	_reject_legacy_attribute_config(config)
@@ -487,7 +499,7 @@ def _resolve_base(
 	paths = _validate_paths(
 		_required_mapping(resolved, 'paths'),
 		require_nopims_root=require_nopims_root,
-		allowed_keys=allowed_path_keys,
+		allowed_keys=STAGE_PATH_KEYS[stage],
 	)
 	return resolved, paths
 
@@ -595,8 +607,9 @@ def _validate_allowed_keys(
 ) -> None:
 	unexpected = sorted(set(parent) - allowed)
 	if unexpected:
+		labels = [f'{prefix}.{key}' for key in unexpected]
 		msg = (
-			f'{prefix} key(s) not allowed: {unexpected!r}; '
+			f'{prefix} key(s) not allowed: {labels!r}; '
 			f'allowed keys are {sorted(allowed)!r}'
 		)
 		raise ValueError(msg)

@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-import sys
 from argparse import ArgumentParser
 from pathlib import Path
 
-SRC_ROOT = Path(__file__).resolve().parents[2] / 'src'
-if str(SRC_ROOT) not in sys.path:
-	sys.path.insert(0, str(SRC_ROOT))
-
-from seis_ssl_cluster.config import (  # noqa: E402
+from seis_ssl_cluster.config import (
 	load_config,
 	resolve_mae_training_config,
 )
-from seis_ssl_cluster.training.mae import run_mae_pretraining  # noqa: E402
-from seis_ssl_cluster.utils.cli import print_config_summary  # noqa: E402
+from seis_ssl_cluster.training.mae import run_mae_pretraining
+from seis_ssl_cluster.utils.cli import print_config_summary
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[1]
@@ -52,7 +47,10 @@ def main() -> None:
 	parser.add_argument(
 		'--output-root',
 		type=Path,
-		help='Override paths.output_root for checkpoints and run snapshots.',
+		help=(
+			'Override paths.output_root for checkpoints and run snapshots; '
+			'must be absolute and under paths.artifact_root.'
+		),
 	)
 	parser.add_argument(
 		'--resume',

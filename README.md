@@ -71,7 +71,7 @@ seis-cluster-ssl/
 Python 3.10 or newer is required.
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/ozw4/seis-cluster-ssl.git
 cd seis-cluster-ssl
 
 python -m venv .venv
@@ -284,7 +284,7 @@ python proc/seis_ssl_cluster/train_amp_mae.py \
 
 ### 8. Extract full-volume embeddings
 
-Set the trained checkpoint, clean manifest, output root, window size, and overlap in `extract_embeddings.yaml`.
+Set the trained checkpoint, clean manifest, `embeddings.output_dir`, window size, and overlap in `extract_embeddings.yaml`.
 
 ```bash
 python proc/seis_ssl_cluster/extract_embeddings.py \
@@ -298,7 +298,7 @@ Embedding metadata binds each artifact to the checkpoint identity, model geometr
 
 ### 9. Cluster embeddings
 
-Configure the embedding root, output root, requested cluster counts, deterministic sampling, normalization, and optional PCA.
+Configure `embeddings.input_dir`, `clustering.output_dir`, requested cluster counts, deterministic sampling, normalization, and optional PCA.
 
 ```bash
 python proc/seis_ssl_cluster/cluster_embeddings.py \
@@ -475,4 +475,4 @@ Planned extensions include:
 
 ## License
 
-Add the repository license and ensure all seismic datasets are used under their respective terms.
+No repository license file is currently included. Ensure all seismic datasets are used under their respective terms.

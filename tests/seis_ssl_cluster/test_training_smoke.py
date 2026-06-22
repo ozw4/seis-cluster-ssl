@@ -9,6 +9,7 @@ import pytest
 import torch
 
 import seis_ssl_cluster.training.mae as mae_training
+from seis_ssl_cluster import __version__
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
@@ -59,7 +60,7 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	assert checkpoint['scaler_state_dict'] is None
 	assert checkpoint['training_state']['checkpoint_kind'] == 'epoch'
 	assert checkpoint['training_state']['stage'] == 'train_amp_mae'
-	assert checkpoint['package_version'] is None
+	assert checkpoint['package_version'] == __version__
 	assert isinstance(checkpoint['rng_state']['dataloader_generator'], torch.Tensor)
 	assert np.isfinite(checkpoint['metrics']['loss'])
 	resolved_config_path = (
@@ -79,7 +80,10 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	assert checkpoint['config']['model']['in_channels'] == 1
 	assert checkpoint['config']['loss']['valid_mask_mode'] == 'voxel'
 	assert (_path_like(cfg['paths']['output_root']) / 'manifest.json').is_file()
-	assert (_path_like(cfg['paths']['output_root']) / 'run_metadata.json').is_file()
+	run_metadata_path = _path_like(cfg['paths']['output_root']) / 'run_metadata.json'
+	assert run_metadata_path.is_file()
+	run_metadata = json.loads(run_metadata_path.read_text(encoding='utf-8'))
+	assert run_metadata['package_version'] == __version__
 
 
 def test_run_snapshots_configured_train_path_list(tmp_path: Path) -> None:
@@ -284,7 +288,7 @@ def test_resume_rejects_partial_checkpoint_payload(tmp_path: Path) -> None:
 		partial_payload['training_state'] = training_state
 		torch.save(partial_payload, partial_path)
 
-		with pytest.raises(ValueError, match=fr'training_state is missing {key}'):
+		with pytest.raises(ValueError, match=rf'training_state is missing {key}'):
 			run_mae_pretraining(cfg, resume=partial_path)
 
 	for key in ('python', 'numpy', 'torch', 'dataloader_generator'):
@@ -295,7 +299,7 @@ def test_resume_rejects_partial_checkpoint_payload(tmp_path: Path) -> None:
 		partial_payload['rng_state'] = rng_state
 		torch.save(partial_payload, partial_path)
 
-		with pytest.raises(TypeError, match=fr'rng_state\.{key}'):
+		with pytest.raises(TypeError, match=rf'rng_state\.{key}'):
 			run_mae_pretraining(cfg, resume=partial_path)
 
 
@@ -424,9 +428,8 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 	)
 	return {
 		'paths': {
-			'nopims_root': str(tmp_path),
 			'artifact_root': str(tmp_path / 'artifacts'),
-			'output_root': str(tmp_path / 'run'),
+			'output_root': str(tmp_path / 'artifacts' / 'run'),
 		},
 		'manifests': {
 			'train': str(manifest_path),
