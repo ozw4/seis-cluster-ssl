@@ -257,6 +257,8 @@ def test_filter_manifest_qc_dry_run_prints_config_summary_with_existing_inputs(
 	config['qc'] = {
 		'output_json': str(qc_json),
 		'excluded_surveys': str(qc_json.parent / 'excluded_surveys.txt'),
+		'min_iqr': 1.0e-4,
+		'max_normalized_abs': 1.0e6,
 	}
 	config_path = tmp_path / 'filter.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')

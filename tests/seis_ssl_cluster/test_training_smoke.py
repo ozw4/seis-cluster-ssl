@@ -423,7 +423,6 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 		encoding='utf-8',
 	)
 	return {
-		'stage': 'train_amp_mae',
 		'paths': {
 			'nopims_root': str(tmp_path),
 			'artifact_root': str(tmp_path / 'artifacts'),
@@ -434,17 +433,9 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 			'train_path_list': str(path_list),
 		},
 		'data': {
-			'grid_order': ['x', 'y', 'z'],
-			'volume_format': 'npy_memmap',
-			'input_channels': 1,
-			'target_channels': 1,
-			'use_context': False,
 			'local_crop_size': [4, 4, 4],
 		},
 		'model': {
-			'name': 'amp_mae3d',
-			'in_channels': 1,
-			'out_channels': 1,
 			'patch_size': [2, 2, 2],
 			'encoder_dim': 12,
 			'encoder_depth': 1,
@@ -455,14 +446,11 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 		},
 		'masking': {
 			'spatial_mask_ratio': 0.5,
-			'spatial_mask_mode': 'block',
 			'block_size_tokens': [1, 1, 1],
 		},
 		'loss': {
-			'reconstruction': 'huber',
 			'huber_delta': 1.0,
 			'gradient_weight': 0.0,
-			'valid_mask_mode': 'voxel',
 		},
 		'zero_mask': {'enabled': False},
 		'train': {

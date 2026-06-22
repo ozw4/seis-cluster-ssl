@@ -306,6 +306,27 @@ def test_fixed_disabled_normalization_options_are_rejected(key: str) -> None:
 		resolve_normalization_stats_config(cfg)
 
 
+@pytest.mark.parametrize(
+	'key',
+	['clipping_percentiles', 'epsilon', 'max_samples', 'seed'],
+)
+def test_normalization_stats_user_parameters_are_required(key: str) -> None:
+	cfg = _minimal_normalization_stats_config()
+	del cfg['normalization'][key]
+
+	with pytest.raises(ValueError, match=rf'normalization\.{key} is required'):
+		resolve_normalization_stats_config(cfg)
+
+
+@pytest.mark.parametrize('key', ['min_iqr', 'max_normalized_abs'])
+def test_normalization_qc_thresholds_are_required(key: str) -> None:
+	cfg = _minimal_normalization_qc_config()
+	del cfg['qc'][key]
+
+	with pytest.raises(ValueError, match=rf'qc\.{key} is required'):
+		resolve_normalization_qc_config(cfg)
+
+
 def test_fixed_contract_keys_are_rejected_from_raw_training_config() -> None:
 	cfg = _minimal_training_config()
 	cfg['data']['grid_order'] = ['x', 'y', 'z']
@@ -519,7 +540,12 @@ def _minimal_normalization_stats_config() -> dict[str, object]:
 	return {
 		'paths': _paths(),
 		'manifests': {'train': '/artifacts/manifests/train.json'},
-		'normalization': {},
+		'normalization': {
+			'clipping_percentiles': [0.5, 99.5],
+			'epsilon': 1.0e-6,
+			'max_samples': 1000000,
+			'seed': 42,
+		},
 	}
 
 
@@ -537,6 +563,8 @@ def _minimal_normalization_qc_config() -> dict[str, object]:
 		'qc': {
 			'output_json': '/artifacts/qc/report.json',
 			'excluded_surveys': '/artifacts/qc/excluded_surveys.txt',
+			'min_iqr': 1.0e-4,
+			'max_normalized_abs': 1.0e6,
 		},
 	}
 

@@ -159,8 +159,9 @@ def resolve_normalization_qc_config(config: _T) -> Config:
 			artifact_root=paths.artifact_root,
 			nopims_root=paths.nopims_root,
 		)
-	_validate_optional_positive_number(qc, 'min_iqr', prefix='qc')
-	_validate_optional_positive_number(qc, 'max_normalized_abs', prefix='qc')
+	for key in ('min_iqr', 'max_normalized_abs'):
+		_validate_required_key(qc, key, prefix='qc')
+		_validate_positive_number(qc, key, prefix='qc')
 	return resolved
 
 
@@ -505,24 +506,20 @@ def _iter_mapping_keys(
 
 
 def _validate_normalization(normalization: Mapping[str, object]) -> None:
-	if 'clipping_percentiles' in normalization:
-		value = normalization.get('clipping_percentiles')
-		if (
-			not isinstance(value, list)
-			or len(value) != 2
-			or not all(_is_number(item) for item in value)
-			or float(value[0]) >= float(value[1])
-		):
-			msg = 'normalization.clipping_percentiles must be two increasing numbers'
-			raise ValueError(msg)
-	for key in ('epsilon', 'max_samples'):
-		if key not in normalization:
-			continue
-		if key == 'epsilon':
-			_validate_positive_number(normalization, key, prefix='normalization')
-		else:
-			_validate_positive_int(normalization, key, prefix='normalization')
-	if 'seed' in normalization and not _is_int(normalization.get('seed')):
+	for key in ('clipping_percentiles', 'epsilon', 'max_samples', 'seed'):
+		_validate_required_key(normalization, key, prefix='normalization')
+	value = normalization.get('clipping_percentiles')
+	if (
+		not isinstance(value, list)
+		or len(value) != 2
+		or not all(_is_number(item) for item in value)
+		or float(value[0]) >= float(value[1])
+	):
+		msg = 'normalization.clipping_percentiles must be two increasing numbers'
+		raise ValueError(msg)
+	_validate_positive_number(normalization, 'epsilon', prefix='normalization')
+	_validate_positive_int(normalization, 'max_samples', prefix='normalization')
+	if not _is_int(normalization.get('seed')):
 		msg = (
 			'normalization.seed must be an integer; '
 			f'got {normalization.get("seed")!r}'
@@ -777,6 +774,17 @@ def _validate_positive_int(
 		raise ValueError(msg)
 
 
+def _validate_required_key(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	if key not in parent:
+		msg = f'{prefix}.{key} is required'
+		raise ValueError(msg)
+
+
 def _validate_nonnegative_int(
 	parent: Mapping[str, object],
 	key: str,
@@ -787,16 +795,6 @@ def _validate_nonnegative_int(
 	if not _is_int(value) or int(value) < 0:
 		msg = f'{prefix}.{key} must be a nonnegative integer; got {value!r}'
 		raise ValueError(msg)
-
-
-def _validate_optional_positive_number(
-	parent: Mapping[str, object],
-	key: str,
-	*,
-	prefix: str,
-) -> None:
-	if key in parent:
-		_validate_positive_number(parent, key, prefix=prefix)
 
 
 def _validate_positive_number(
