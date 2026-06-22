@@ -3,7 +3,7 @@ paths:
 embeddings:
   input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1
 clustering:
-  output_dir: /workspace/artifacts/seis_ssl_cluster/runs/clusters/nopims/pretrain_v1
+  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1
   embedding_normalization: l2
   pca:
     enabled: true

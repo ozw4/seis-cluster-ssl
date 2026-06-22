@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from numbers import Integral, Real
@@ -99,6 +100,58 @@ _FIXED_DISABLED_NORMALIZATION_KEYS = frozenset(
 _CHECKPOINT_OWNED_EXTRACTION_SECTIONS = frozenset(
 	{'data', 'model', 'masking', 'loss', 'train', 'zero_mask'},
 )
+
+_DOWNSTREAM_PATH_KEYS = frozenset({'artifact_root'})
+_CLUSTERING_EMBEDDINGS_KEYS = frozenset({'input_dir'})
+_CLUSTERING_KEYS = frozenset(
+	{
+		'output_dir',
+		'embedding_normalization',
+		'pca',
+		'sample_tokens',
+		'method',
+		'k_values',
+		'minibatch_size',
+		'prediction_batch_size',
+		'seed',
+	},
+)
+_CLUSTERING_REQUIRED_KEYS = frozenset(
+	{
+		'output_dir',
+		'embedding_normalization',
+		'pca',
+		'sample_tokens',
+		'method',
+		'k_values',
+		'minibatch_size',
+		'seed',
+	},
+)
+_CLUSTERING_PCA_KEYS = frozenset({'enabled', 'n_components', 'whiten'})
+_VISUALIZATION_CLUSTERING_KEYS = frozenset({'input_dir'})
+_VISUALIZATION_KEYS = frozenset(
+	{
+		'output_dir',
+		'survey_ids',
+		'modes',
+		'reconstruct_voxel',
+		'allow_all_surveys_for_voxel_reconstruction',
+		'skip_existing_voxel_labels',
+		'max_voxel_output_gib',
+		'allow_large_voxel_output',
+		'slice_coordinate_space',
+		'xy_slices',
+		'xz_slices',
+		'dpi',
+		'invalid_color',
+		'amplitude_underlay',
+		'summaries',
+	},
+)
+_VISUALIZATION_REQUIRED_KEYS = _VISUALIZATION_KEYS
+_VISUALIZATION_UNDERLAY_KEYS = frozenset({'enabled', 'alpha'})
+_VISUALIZATION_SUMMARY_KEYS = frozenset({'enabled', 'include_amplitude_norm'})
 
 
 def resolve_manifest_build_config(config: _T) -> Config:
@@ -264,24 +317,49 @@ def resolve_clustering_config(config: _T) -> Config:
 		config,
 		STAGE_CLUSTERING,
 		require_nopims_root=False,
+		allowed_path_keys=_DOWNSTREAM_PATH_KEYS,
 	)
 	embeddings = _required_mapping(resolved, 'embeddings')
 	clustering = _required_mapping(resolved, 'clustering')
+	_validate_allowed_keys(
+		embeddings,
+		_CLUSTERING_EMBEDDINGS_KEYS,
+		prefix='embeddings',
+	)
+	_validate_allowed_keys(clustering, _CLUSTERING_KEYS, prefix='clustering')
+	_validate_required_keys(
+		clustering,
+		_CLUSTERING_REQUIRED_KEYS,
+		prefix='clustering',
+	)
 	_validate_non_empty_path(embeddings, 'input_dir', prefix='embeddings')
 	_validate_non_empty_path(clustering, 'output_dir', prefix='clustering')
-	if 'k_values' in clustering:
-		_validate_positive_int_list(clustering, 'k_values', prefix='clustering')
-	if 'sample_tokens' in clustering:
-		_validate_positive_int(clustering, 'sample_tokens', prefix='clustering')
-	if 'minibatch_size' in clustering:
-		_validate_positive_int(clustering, 'minibatch_size', prefix='clustering')
+	_validate_clustering_normalization(clustering)
+	pca = _required_child_mapping(clustering, 'pca', prefix='clustering')
+	_validate_allowed_keys(pca, _CLUSTERING_PCA_KEYS, prefix='clustering.pca')
+	_validate_required_keys(
+		pca,
+		_CLUSTERING_PCA_KEYS,
+		prefix='clustering.pca',
+	)
+	_validate_bool(pca, 'enabled', prefix='clustering.pca')
+	_validate_positive_int(pca, 'n_components', prefix='clustering.pca')
+	_validate_bool(pca, 'whiten', prefix='clustering.pca')
+	_validate_positive_int(clustering, 'sample_tokens', prefix='clustering')
+	_validate_clustering_method(clustering)
+	_validate_unique_positive_int_list(
+		clustering,
+		'k_values',
+		prefix='clustering',
+	)
+	_validate_positive_int(clustering, 'minibatch_size', prefix='clustering')
 	if 'prediction_batch_size' in clustering:
 		_validate_positive_int(
 			clustering,
 			'prediction_batch_size',
 			prefix='clustering',
 		)
-	if 'seed' in clustering and not _is_int(clustering.get('seed')):
+	if not _is_int(clustering.get('seed')):
 		msg = f'clustering.seed must be an integer; got {clustering.get("seed")!r}'
 		raise ValueError(msg)
 	return resolved
@@ -293,11 +371,93 @@ def resolve_cluster_visualization_config(config: _T) -> Config:
 		config,
 		STAGE_CLUSTER_VISUALIZATION,
 		require_nopims_root=False,
+		allowed_path_keys=_DOWNSTREAM_PATH_KEYS,
 	)
 	clustering = _required_mapping(resolved, 'clustering')
 	visualization = _required_mapping(resolved, 'visualization')
+	_validate_allowed_keys(
+		clustering,
+		_VISUALIZATION_CLUSTERING_KEYS,
+		prefix='clustering',
+	)
+	_validate_allowed_keys(
+		visualization,
+		_VISUALIZATION_KEYS,
+		prefix='visualization',
+	)
+	_validate_required_keys(
+		visualization,
+		_VISUALIZATION_REQUIRED_KEYS,
+		prefix='visualization',
+	)
 	_validate_non_empty_path(clustering, 'input_dir', prefix='clustering')
 	_validate_non_empty_path(visualization, 'output_dir', prefix='visualization')
+	_validate_survey_id_list(visualization)
+	_validate_visualization_modes(visualization)
+	_validate_bool(visualization, 'reconstruct_voxel', prefix='visualization')
+	_validate_bool(
+		visualization,
+		'allow_all_surveys_for_voxel_reconstruction',
+		prefix='visualization',
+	)
+	_validate_bool(
+		visualization,
+		'skip_existing_voxel_labels',
+		prefix='visualization',
+	)
+	_validate_nonnegative_finite_number(
+		visualization,
+		'max_voxel_output_gib',
+		prefix='visualization',
+	)
+	_validate_bool(
+		visualization,
+		'allow_large_voxel_output',
+		prefix='visualization',
+	)
+	_validate_slice_coordinate_space(visualization)
+	_validate_nonnegative_int_list(visualization, 'xy_slices', prefix='visualization')
+	_validate_nonnegative_int_list(visualization, 'xz_slices', prefix='visualization')
+	_validate_positive_int(visualization, 'dpi', prefix='visualization')
+	_validate_non_empty_str(visualization, 'invalid_color', prefix='visualization')
+	underlay = _required_child_mapping(
+		visualization,
+		'amplitude_underlay',
+		prefix='visualization',
+	)
+	_validate_allowed_keys(
+		underlay,
+		_VISUALIZATION_UNDERLAY_KEYS,
+		prefix='visualization.amplitude_underlay',
+	)
+	_validate_required_keys(
+		underlay,
+		_VISUALIZATION_UNDERLAY_KEYS,
+		prefix='visualization.amplitude_underlay',
+	)
+	_validate_bool(underlay, 'enabled', prefix='visualization.amplitude_underlay')
+	_validate_fraction(underlay, 'alpha', prefix='visualization.amplitude_underlay')
+	summaries = _required_child_mapping(
+		visualization,
+		'summaries',
+		prefix='visualization',
+	)
+	_validate_allowed_keys(
+		summaries,
+		_VISUALIZATION_SUMMARY_KEYS,
+		prefix='visualization.summaries',
+	)
+	_validate_required_keys(
+		summaries,
+		_VISUALIZATION_SUMMARY_KEYS,
+		prefix='visualization.summaries',
+	)
+	_validate_bool(summaries, 'enabled', prefix='visualization.summaries')
+	_validate_bool(
+		summaries,
+		'include_amplitude_norm',
+		prefix='visualization.summaries',
+	)
 	return resolved
 
 
@@ -316,6 +476,7 @@ def _resolve_base(
 	stage: str,
 	*,
 	require_nopims_root: bool = True,
+	allowed_path_keys: frozenset[str] | None = None,
 ) -> tuple[Config, _ResolvedPaths]:
 	_validate_mapping(config)
 	_reject_legacy_attribute_config(config)
@@ -326,6 +487,7 @@ def _resolve_base(
 	paths = _validate_paths(
 		_required_mapping(resolved, 'paths'),
 		require_nopims_root=require_nopims_root,
+		allowed_keys=allowed_path_keys,
 	)
 	return resolved, paths
 
@@ -410,7 +572,10 @@ def _validate_paths(
 	paths: Mapping[str, object],
 	*,
 	require_nopims_root: bool,
+	allowed_keys: frozenset[str] | None,
 ) -> _ResolvedPaths:
+	if allowed_keys is not None:
+		_validate_allowed_keys(paths, allowed_keys, prefix='paths')
 	nopims_root: Path | None = None
 	if require_nopims_root or 'nopims_root' in paths:
 		nopims_root = _validate_absolute_path(paths, 'nopims_root', prefix='paths')
@@ -420,6 +585,31 @@ def _validate_paths(
 		artifact_root=_validate_absolute_path(paths, 'artifact_root', prefix='paths'),
 		nopims_root=nopims_root,
 	)
+
+
+def _validate_allowed_keys(
+	parent: Mapping[str, object],
+	allowed: frozenset[str],
+	*,
+	prefix: str,
+) -> None:
+	unexpected = sorted(set(parent) - allowed)
+	if unexpected:
+		msg = (
+			f'{prefix} key(s) not allowed: {unexpected!r}; '
+			f'allowed keys are {sorted(allowed)!r}'
+		)
+		raise ValueError(msg)
+
+
+def _validate_required_keys(
+	parent: Mapping[str, object],
+	keys: frozenset[str],
+	*,
+	prefix: str,
+) -> None:
+	for key in sorted(keys):
+		_validate_required_key(parent, key, prefix=prefix)
 
 
 def _validate_absolute_path(
@@ -673,6 +863,19 @@ def _required_mapping(
 	return value
 
 
+def _required_child_mapping(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> Mapping[str, object]:
+	value = parent.get(key)
+	if not isinstance(value, Mapping):
+		msg = f'{prefix}.{key} must be a mapping'
+		raise TypeError(msg)
+	return value
+
+
 def _validate_non_empty_str(
 	parent: Mapping[str, object],
 	key: str,
@@ -764,6 +967,38 @@ def _validate_positive_int_list(
 		raise ValueError(msg)
 
 
+def _validate_unique_positive_int_list(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	_validate_positive_int_list(parent, key, prefix=prefix)
+	value = parent.get(key)
+	if not isinstance(value, list):
+		msg = f'{prefix}.{key} must be a non-empty list of positive integers'
+		raise TypeError(msg)
+	values = [int(item) for item in value]
+	if len(set(values)) != len(values):
+		msg = f'{prefix}.{key} must not contain duplicates; got {values!r}'
+		raise ValueError(msg)
+
+
+def _validate_nonnegative_int_list(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	value = parent.get(key)
+	if (
+		not isinstance(value, list)
+		or any(not _is_int(item) or int(item) < 0 for item in value)
+	):
+		msg = f'{prefix}.{key} must be a list of nonnegative integers'
+		raise ValueError(msg)
+
+
 def _validate_positive_int(
 	parent: Mapping[str, object],
 	key: str,
@@ -823,6 +1058,77 @@ def _validate_nonnegative_number(
 		raise ValueError(msg)
 
 
+def _validate_nonnegative_finite_number(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	value = parent.get(key)
+	if (
+		not _is_number(value)
+		or float(value) < 0.0
+		or not math.isfinite(float(value))
+	):
+		msg = f'{prefix}.{key} must be a nonnegative finite number; got {value!r}'
+		raise ValueError(msg)
+
+
+def _validate_clustering_normalization(clustering: Mapping[str, object]) -> None:
+	value = clustering.get('embedding_normalization')
+	if value not in {'l2', 'none'}:
+		msg = (
+			'clustering.embedding_normalization must be "l2" or "none"; '
+			f'got {value!r}'
+		)
+		raise ValueError(msg)
+
+
+def _validate_clustering_method(clustering: Mapping[str, object]) -> None:
+	value = clustering.get('method')
+	if value != 'minibatch_kmeans':
+		msg = 'clustering.method must be "minibatch_kmeans"'
+		raise ValueError(msg)
+
+
+def _validate_survey_id_list(visualization: Mapping[str, object]) -> None:
+	value = visualization.get('survey_ids')
+	if not isinstance(value, list) or any(
+		not isinstance(item, str) or not item
+		for item in value
+	):
+		msg = 'visualization.survey_ids must be a list of non-empty strings'
+		raise ValueError(msg)
+
+
+def _validate_visualization_modes(visualization: Mapping[str, object]) -> None:
+	value = visualization.get('modes')
+	if (
+		not isinstance(value, list)
+		or not value
+		or any(not isinstance(item, str) for item in value)
+	):
+		msg = 'visualization.modes must be a non-empty list of strings'
+		raise ValueError(msg)
+	unknown = sorted(set(value) - {'token', 'voxel'})
+	if unknown:
+		msg = f'visualization.modes contains unsupported mode(s): {unknown!r}'
+		raise ValueError(msg)
+	if len(set(value)) != len(value):
+		msg = f'visualization.modes must not contain duplicates; got {value!r}'
+		raise ValueError(msg)
+
+
+def _validate_slice_coordinate_space(visualization: Mapping[str, object]) -> None:
+	value = visualization.get('slice_coordinate_space')
+	if value != 'voxel':
+		msg = (
+			'visualization.slice_coordinate_space must be "voxel"; '
+			f'got {value!r}'
+		)
+		raise ValueError(msg)
+
+
 def _validate_optional_fraction(
 	parent: Mapping[str, object],
 	key: str,
@@ -840,7 +1146,12 @@ def _validate_fraction(
 	prefix: str,
 ) -> None:
 	value = parent.get(key)
-	if not _is_number(value) or float(value) < 0.0 or float(value) > 1.0:
+	if (
+		not _is_number(value)
+		or float(value) < 0.0
+		or float(value) > 1.0
+		or not math.isfinite(float(value))
+	):
 		msg = f'{prefix}.{key} must be between 0 and 1; got {value!r}'
 		raise ValueError(msg)
 
