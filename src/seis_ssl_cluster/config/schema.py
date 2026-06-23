@@ -96,6 +96,52 @@ DEFAULT_MAE_TRAIN_OPTIONS: Final = {
 	'grad_clip_norm': 1.0,
 }
 
+DEFAULT_MAE_DEBUG_VISUALIZATION_COLUMNS: Final = (
+	'input',
+	'masked_input',
+	'target',
+	'prediction',
+	'abs_error',
+	'valid_mask',
+)
+
+MAE_DEBUG_VISUALIZATION_COLUMNS: Final = frozenset(
+	DEFAULT_MAE_DEBUG_VISUALIZATION_COLUMNS,
+)
+
+MAE_DEBUG_VISUALIZATION_KEYS: Final = frozenset(
+	{
+		'enabled',
+		'output_dir',
+		'every_steps',
+		'every_epochs',
+		'max_samples',
+		'xy_slice_index',
+		'xz_slice_y_index',
+		'dpi',
+		'clip_percentiles',
+		'columns',
+		'panel_width',
+		'panel_height',
+		'invalid_color',
+	},
+)
+
+DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS: Final = {
+	'enabled': False,
+	'every_steps': 1000,
+	'every_epochs': None,
+	'max_samples': 1,
+	'xy_slice_index': None,
+	'xz_slice_y_index': None,
+	'dpi': 160,
+	'clip_percentiles': (1.0, 99.0),
+	'columns': DEFAULT_MAE_DEBUG_VISUALIZATION_COLUMNS,
+	'panel_width': 2.6,
+	'panel_height': 2.4,
+	'invalid_color': 'lightgray',
+}
+
 LEGACY_ATTRIBUTE_KEY_PATHS: Final = {
 	'attributes.names',
 	'attributes.registry',

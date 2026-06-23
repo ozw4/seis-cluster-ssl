@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import pytest
 import torch
 
+import seis_ssl_cluster.training.mae as mae_training
 from seis_ssl_cluster.models.mae.patching import patchify_3d
 from seis_ssl_cluster.training.mae import run_mae_pretraining
 from seis_ssl_cluster.visualization.mae_debug import (
@@ -13,6 +15,7 @@ from seis_ssl_cluster.visualization.mae_debug import (
 	unpatchify_mae_predictions,
 )
 from tests.seis_ssl_cluster.test_training_smoke import _tiny_config
+
 
 def test_unpatchify_mae_predictions_produces_expected_dense_values() -> None:
 	pred_patches = torch.arange(16, dtype=torch.float32).reshape(1, 2, 1, 8)
@@ -117,3 +120,25 @@ def test_mae_training_disabled_debug_visualization_creates_no_directory(
 
 	assert checkpoint_path.is_file()
 	assert not (tmp_path / 'run' / 'visualizations' / 'mae_debug').exists()
+
+
+def test_mae_debug_trigger_helpers_reject_zero_intervals(tmp_path: Path) -> None:
+	config = MaeDebugVisualizationConfig(
+		output_dir=tmp_path,
+		every_steps=0,
+		every_epochs=0,
+	)
+	step_triggered = mae_training._mae_debug_step_triggered  # noqa: SLF001
+	epoch_triggered = mae_training._mae_debug_epoch_triggered  # noqa: SLF001
+
+	with pytest.raises(ValueError, match=r'mae_debug\.every_steps.*positive'):
+		step_triggered(
+			config=config,
+			global_step=1,
+		)
+	with pytest.raises(ValueError, match=r'mae_debug\.every_epochs.*positive'):
+		epoch_triggered(
+			config=config,
+			epoch=1,
+			already_triggered=False,
+		)

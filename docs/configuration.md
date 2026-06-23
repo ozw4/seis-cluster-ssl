@@ -200,6 +200,7 @@ train:
 visualization:
   mae_debug:
     enabled: false
+    output_dir: null
     every_steps: 1000
     every_epochs: null
     max_samples: 1
@@ -207,7 +208,16 @@ visualization:
     xz_slice_y_index: null
     dpi: 160
     clip_percentiles: [1.0, 99.0]
+    columns: [input, masked_input, target, prediction, abs_error, valid_mask]
+    panel_width: 2.6
+    panel_height: 2.4
+    invalid_color: lightgray
 ```
+
+When `visualization.mae_debug.enabled` is true, at least one of
+`every_steps` or `every_epochs` must be set to a positive integer. An explicit
+`output_dir` must be an absolute path under `paths.output_root`; `null` writes
+to `paths.output_root/visualizations/mae_debug`.
 
 ### Embedding Extraction
 

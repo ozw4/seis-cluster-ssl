@@ -256,6 +256,60 @@ def test_train_amp_mae_cli_overrides_are_resolved_before_dry_run() -> None:
 	assert 'train.device: cpu' in result.stdout
 
 
+def test_train_amp_mae_dry_run_rejects_invalid_mae_debug_config(
+	tmp_path: Path,
+) -> None:
+	config_path = tmp_path / 'invalid_mae_debug.yaml'
+	config_path.write_text(
+		Path('proc/configs/seis_ssl_cluster/train_amp_mae.yaml')
+		.read_text(encoding='utf-8')
+		.replace('every_steps: 1000', 'every_steps: 0'),
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_mae.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode != 0
+	assert 'visualization.mae_debug.every_steps' in result.stderr
+	assert 'stage:' not in result.stdout
+
+
+def test_train_amp_mae_dry_run_prints_enabled_mae_debug_summary(
+	tmp_path: Path,
+) -> None:
+	config_path = tmp_path / 'enabled_mae_debug.yaml'
+	config_path.write_text(
+		Path('proc/configs/seis_ssl_cluster/train_amp_mae.yaml')
+		.read_text(encoding='utf-8')
+		.replace('enabled: false', 'enabled: true')
+		.replace('every_steps: 1000', 'every_steps: 25'),
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_mae.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'visualization.mae_debug.enabled: true' in result.stdout
+	assert (
+		'visualization.mae_debug.output_dir: '
+		'/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1/'
+		'visualizations/mae_debug'
+	) in result.stdout
+	assert 'visualization.mae_debug.every_steps: 25' in result.stdout
+	assert 'visualization.mae_debug.every_epochs: null' in result.stdout
+	assert 'visualization.mae_debug.panel_width:' not in result.stdout
+
+
 @pytest.mark.parametrize(
 	'output_root',
 	[
