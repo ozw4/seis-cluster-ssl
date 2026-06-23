@@ -365,6 +365,11 @@ model:
 masking:
   spatial_mask_ratio: 0.75
   block_size_tokens: [2, 2, 2]
+
+loss:
+  reconstruction: huber
+  huber_delta: 1.0
+  gradient_weight: 0.05
 ```
 
 The fixed amplitude-only contract is injected internally and appears in the resolved config and checkpoint, not in raw YAML:
@@ -379,7 +384,6 @@ model.name = amp_mae3d
 model.in_channels = 1
 model.out_channels = 1
 masking.spatial_mask_mode = block
-loss.reconstruction = huber
 loss.valid_mask_mode = voxel
 ```
 
@@ -396,7 +400,7 @@ masked amplitude reconstruction loss
 + gradient_weight * valid masked gradient loss
 ```
 
-The default reconstruction loss is Huber loss. Both reconstruction and gradient terms exclude invalid voxels using `local_valid_mask`.
+Set `loss.reconstruction` in the training YAML to `huber`, `mse`, or `l1`. Huber requires `loss.huber_delta`; MSE and L1 must omit it. Both reconstruction and gradient terms exclude invalid voxels using `local_valid_mask`.
 
 Invalid regions include source padding and configured raw-amplitude zero-sample or zero-trace influence regions.
 

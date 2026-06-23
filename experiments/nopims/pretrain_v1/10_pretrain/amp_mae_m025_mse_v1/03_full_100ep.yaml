@@ -34,9 +34,8 @@ masking:
   - 2
   - 2
 loss:
-  huber_delta: 1.0
-  gradient_weight: 0.05
   reconstruction: mse
+  gradient_weight: 0.05
 train:
   batch_size: 4
   samples_per_epoch: 10000

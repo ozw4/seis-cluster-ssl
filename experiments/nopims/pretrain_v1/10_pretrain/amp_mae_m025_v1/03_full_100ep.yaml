@@ -34,6 +34,7 @@ masking:
   - 2
   - 2
 loss:
+  reconstruction: huber
   huber_delta: 1.0
   gradient_weight: 0.05
 train:

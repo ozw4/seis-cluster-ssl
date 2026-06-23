@@ -25,6 +25,7 @@ masking:
   spatial_mask_ratio: 0.75
   block_size_tokens: [2, 2, 2]
 loss:
+  reconstruction: huber
   huber_delta: 1.0
   gradient_weight: 0.05
 train:

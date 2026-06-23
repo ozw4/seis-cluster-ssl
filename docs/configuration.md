@@ -94,7 +94,6 @@ model.name = amp_mae3d
 model.in_channels = 1
 model.out_channels = 1
 masking.spatial_mask_mode = block
-loss.reconstruction = huber
 loss.valid_mask_mode = voxel
 ```
 
@@ -183,6 +182,7 @@ masking:
   spatial_mask_ratio: 0.75
   block_size_tokens: [2, 2, 2]
 loss:
+  reconstruction: huber
   huber_delta: 1.0
   gradient_weight: 0.05
 train:
@@ -213,6 +213,9 @@ visualization:
     panel_height: 2.4
     invalid_color: lightgray
 ```
+
+`loss.reconstruction` must be `huber`, `mse`, or `l1`. Huber requires
+`loss.huber_delta`; MSE and L1 must omit `loss.huber_delta`.
 
 When `visualization.mae_debug.enabled` is true, at least one of
 `every_steps` or `every_epochs` must be set to a positive integer. An explicit
@@ -306,7 +309,6 @@ visualization:
 | `model.in_channels` | Fixed internally |
 | `model.out_channels` | Fixed internally |
 | `masking.spatial_mask_mode` | Fixed internally |
-| `loss.reconstruction` | Fixed internally |
 | `loss.valid_mask_mode` | Fixed internally |
 | `model` or `train` sections in non-training YAMLs | Removed |
 | `data`, `masking`, `loss`, `train`, or `zero_mask` in extraction YAML | Loaded from checkpoint resolved config |

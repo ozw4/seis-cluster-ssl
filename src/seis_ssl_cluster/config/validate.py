@@ -12,10 +12,8 @@ from typing import TypeAlias, TypeVar
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
 	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
-	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
-	EXPECTED_RECONSTRUCTION_LOSS,
 	EXPECTED_VALID_MASK_MODE,
 	FIXED_DATA_CONTRACT,
 	FIXED_LOSS_CONTRACT,
@@ -34,6 +32,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_NORMALIZATION_QC,
 	STAGE_NORMALIZATION_STATS,
 	STAGE_PATH_KEYS,
+	SUPPORTED_RECONSTRUCTION_LOSSES,
 )
 
 Config: TypeAlias = dict[str, object]
@@ -237,7 +236,6 @@ def resolve_mae_training_config(config: _T) -> Config:
 	)
 	_reject_fixed_contract_keys(resolved)
 	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
-	_merge_section_defaults(resolved, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
 	_merge_section_defaults(resolved, 'train', DEFAULT_MAE_TRAIN_OPTIONS)
 	_merge_section_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
 
@@ -853,16 +851,25 @@ def _validate_optional_train_device(train: Mapping[str, object]) -> None:
 
 
 def _validate_loss(loss: Mapping[str, object]) -> None:
-	if (
-		'reconstruction' in loss
-		and loss.get('reconstruction') != EXPECTED_RECONSTRUCTION_LOSS
-	):
-		msg = "loss.reconstruction must be resolved internally as 'huber'"
+	_validate_required_key(loss, 'reconstruction', prefix='loss')
+	reconstruction = loss.get('reconstruction')
+	if reconstruction not in SUPPORTED_RECONSTRUCTION_LOSSES:
+		msg = (
+			'loss.reconstruction must be one of '
+			f'{sorted(SUPPORTED_RECONSTRUCTION_LOSSES)!r}; '
+			f'got {reconstruction!r}'
+		)
 		raise ValueError(msg)
-	if 'huber_delta' in loss:
-		_validate_positive_number(loss, 'huber_delta', prefix='loss')
-	if 'gradient_weight' in loss:
-		_validate_nonnegative_number(loss, 'gradient_weight', prefix='loss')
+
+	if reconstruction == 'huber':
+		_validate_required_key(loss, 'huber_delta', prefix='loss')
+		_validate_positive_finite_number(loss, 'huber_delta', prefix='loss')
+	elif 'huber_delta' in loss:
+		msg = 'loss.huber_delta must be omitted unless loss.reconstruction is huber'
+		raise ValueError(msg)
+
+	_validate_required_key(loss, 'gradient_weight', prefix='loss')
+	_validate_nonnegative_finite_number(loss, 'gradient_weight', prefix='loss')
 	if (
 		'valid_mask_mode' in loss
 		and loss.get('valid_mask_mode') != EXPECTED_VALID_MASK_MODE

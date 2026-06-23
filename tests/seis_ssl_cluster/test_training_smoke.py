@@ -350,12 +350,33 @@ def test_grad_clip_norm_calls_torch_clip_on_cpu(
 		device=torch.device('cpu'),
 		epoch=1,
 		patch_size_xyz=(2, 2, 2),
-		loss_config={'reconstruction': 'mse'},
+		loss_config={'reconstruction': 'mse', 'gradient_weight': 0.05},
 		grad_clip_norm=1.0,
 	)
 
 	assert calls == [1.0]
 	assert state.metrics['grad_norm'] == pytest.approx(0.25)
+
+
+def test_train_one_epoch_requires_loss_reconstruction() -> None:
+	dataloader = torch.utils.data.DataLoader(
+		[_mae_sample()],
+		batch_size=1,
+		collate_fn=mae_collate_fn,
+	)
+	model = _TinyAmpModel()
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+	with pytest.raises(ValueError, match=r'loss\.reconstruction is required'):
+		train_mae_one_epoch(
+			model=model,
+			dataloader=dataloader,
+			optimizer=optimizer,
+			device=torch.device('cpu'),
+			epoch=1,
+			patch_size_xyz=(2, 2, 2),
+			loss_config={'gradient_weight': 0.05},
+		)
 
 
 def test_nonfinite_loss_reports_survey_and_coordinates(
@@ -392,7 +413,7 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 			device=torch.device('cpu'),
 			epoch=3,
 			patch_size_xyz=(2, 2, 2),
-			loss_config={'reconstruction': 'mse'},
+			loss_config={'reconstruction': 'mse', 'gradient_weight': 0.05},
 			global_step=1042,
 			diagnostics_dir=diagnostics_dir,
 			run_config=run_config,
@@ -452,6 +473,7 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 			'block_size_tokens': [1, 1, 1],
 		},
 		'loss': {
+			'reconstruction': 'huber',
 			'huber_delta': 1.0,
 			'gradient_weight': 0.0,
 		},

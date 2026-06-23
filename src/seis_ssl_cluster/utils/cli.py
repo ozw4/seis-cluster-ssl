@@ -153,7 +153,13 @@ def _add_training_rows(
 			('model.encoder_depth', model.get('encoder_depth')),
 			('masking.spatial_mask_ratio', masking.get('spatial_mask_ratio')),
 			('masking.block_size_tokens', masking.get('block_size_tokens')),
-			('loss.huber_delta', loss.get('huber_delta')),
+			('loss.reconstruction', loss.get('reconstruction')),
+		],
+	)
+	if 'huber_delta' in loss:
+		rows.append(('loss.huber_delta', loss.get('huber_delta')))
+	rows.extend(
+		[
 			('loss.gradient_weight', loss.get('gradient_weight')),
 			('train.batch_size', train.get('batch_size')),
 			('train.epochs', train.get('epochs')),

@@ -76,6 +76,17 @@ def main() -> None:
 		msg = f'normalization QC input does not exist: {missing}'
 		raise FileNotFoundError(msg)
 
+	if args.dry_run:
+		print(f'normalization_qc.manifest_path: {manifest_path}')
+		print('normalization_qc.manifest_exists: true')
+		print(f'normalization_qc.source_split_path: {split_path}')
+		print('normalization_qc.source_split_exists: true')
+		print(f'normalization_qc.clean_manifest: {output_manifest_path}')
+		print(f'normalization_qc.clean_path_list: {output_split_path}')
+		print('normalization_qc.write: false')
+		print('normalization_qc.compute: skipped')
+		return
+
 	manifests = read_manifest_json(manifest_path)
 	path_entries = load_npy_path_list(split_path)
 	result = filter_manifests_by_stats_qc(

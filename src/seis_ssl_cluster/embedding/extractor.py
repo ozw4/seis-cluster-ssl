@@ -13,7 +13,6 @@ import torch
 
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
-	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
 	FIXED_DATA_CONTRACT,
@@ -21,6 +20,7 @@ from seis_ssl_cluster.config.schema import (
 	FIXED_MASKING_CONTRACT,
 	FIXED_MODEL_CONTRACT,
 	STAGE_MAE_TRAINING,
+	SUPPORTED_RECONSTRUCTION_LOSSES,
 )
 from seis_ssl_cluster.data.crop_sampler import (
 	expand_request_with_margin,
@@ -640,7 +640,6 @@ def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
 	)
 	_validate_required_checkpoint_keys(model, 'model', _CHECKPOINT_MODEL_GEOMETRY_KEYS)
 	_validate_required_checkpoint_keys(masking, 'masking', _CHECKPOINT_MASKING_KEYS)
-	_validate_required_checkpoint_keys(loss, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
 	_validate_required_checkpoint_keys(train, 'train', _CHECKPOINT_TRAIN_REQUIRED_KEYS)
 	_validate_required_checkpoint_keys(
 		zero_mask,
@@ -655,8 +654,7 @@ def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
 	for key in _CHECKPOINT_MODEL_GEOMETRY_KEYS[1:]:
 		_positive_int(model[key], f'model.{key}')
 	_validate_checkpoint_masking(masking)
-	_positive_number(loss['huber_delta'], 'loss.huber_delta')
-	_nonnegative_number(loss['gradient_weight'], 'loss.gradient_weight')
+	_validate_checkpoint_loss(loss)
 	_validate_checkpoint_train(train)
 	_zero_mask_from_mapping(zero_mask)
 
@@ -702,6 +700,32 @@ def _validate_checkpoint_masking(masking: Mapping[str, object]) -> None:
 		)
 		raise ValueError(msg)
 	_validate_positive_xyz(masking['block_size_tokens'], 'masking.block_size_tokens')
+
+
+def _validate_checkpoint_loss(loss: Mapping[str, object]) -> None:
+	_validate_required_checkpoint_keys(
+		loss,
+		'loss',
+		('reconstruction', 'gradient_weight'),
+	)
+	reconstruction = loss.get('reconstruction')
+	if reconstruction not in SUPPORTED_RECONSTRUCTION_LOSSES:
+		msg = (
+			'checkpoint config.loss.reconstruction must be one of '
+			f'{sorted(SUPPORTED_RECONSTRUCTION_LOSSES)!r}; '
+			f'got {reconstruction!r}'
+		)
+		raise ValueError(msg)
+	if reconstruction == 'huber':
+		_validate_required_checkpoint_keys(loss, 'loss', ('huber_delta',))
+		_positive_finite_number(loss['huber_delta'], 'loss.huber_delta')
+	elif 'huber_delta' in loss:
+		msg = (
+			'checkpoint config.loss.huber_delta must be omitted unless '
+			'loss.reconstruction is huber'
+		)
+		raise ValueError(msg)
+	_nonnegative_finite_number(loss['gradient_weight'], 'loss.gradient_weight')
 
 
 def _validate_checkpoint_train(train: Mapping[str, object]) -> None:
@@ -933,6 +957,14 @@ def _positive_number(value: object, name: str) -> float:
 	return number
 
 
+def _positive_finite_number(value: object, name: str) -> float:
+	number = _positive_number(value, name)
+	if not np.isfinite(number):
+		msg = f'{name} must be finite; got {number!r}'
+		raise ValueError(msg)
+	return number
+
+
 def _nonnegative_number(value: object, name: str) -> float:
 	if isinstance(value, bool) or not isinstance(value, Real):
 		msg = f'{name} must be a real number; got {value!r}'
@@ -940,6 +972,14 @@ def _nonnegative_number(value: object, name: str) -> float:
 	number = float(value)
 	if number < 0.0:
 		msg = f'{name} must be nonnegative; got {number!r}'
+		raise ValueError(msg)
+	return number
+
+
+def _nonnegative_finite_number(value: object, name: str) -> float:
+	number = _nonnegative_number(value, name)
+	if not np.isfinite(number):
+		msg = f'{name} must be finite; got {number!r}'
 		raise ValueError(msg)
 	return number
 

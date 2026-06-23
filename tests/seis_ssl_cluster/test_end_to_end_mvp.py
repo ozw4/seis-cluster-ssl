@@ -388,6 +388,7 @@ def _minimal_training_config(
 			'block_size_tokens': [1, 1, 1],
 		},
 		'loss': {
+			'reconstruction': 'huber',
 			'huber_delta': 1.0,
 			'gradient_weight': 0.0,
 		},
@@ -469,6 +470,7 @@ def _assert_training_run_snapshots_complete_config(
 	assert resolved_config['model']['decoder_dim'] == 12
 	assert resolved_config['masking']['spatial_mask_ratio'] == 0.5
 	assert resolved_config['masking']['block_size_tokens'] == [1, 1, 1]
+	assert resolved_config['loss']['reconstruction'] == 'huber'
 	assert resolved_config['loss']['huber_delta'] == 1.0
 	assert resolved_config['loss']['gradient_weight'] == 0.0
 	assert resolved_config['zero_mask'] == {

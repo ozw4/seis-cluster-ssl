@@ -207,6 +207,12 @@ def test_embedding_extraction_rejects_checkpoint_data_zero_mask_only(
 			'loss.*valid_mask_mode',
 		),
 		(
+			lambda checkpoint_config: checkpoint_config['loss'].pop(
+				'reconstruction',
+			),
+			'loss.*reconstruction',
+		),
+		(
 			lambda checkpoint_config: checkpoint_config['manifests'].pop(
 				'train_path_list',
 			),
@@ -227,6 +233,39 @@ def test_embedding_extraction_rejects_incomplete_checkpoint_resolved_config(
 	)
 
 	with pytest.raises(ValueError, match=error):
+		run_embedding_extraction(config, device='cpu')
+
+
+def test_embedding_extraction_accepts_mse_checkpoint_without_huber_delta(
+	tmp_path: Path,
+) -> None:
+	def use_mse(checkpoint_config: dict[str, object]) -> None:
+		loss = checkpoint_config['loss']
+		assert isinstance(loss, dict)
+		loss['reconstruction'] = 'mse'
+		loss.pop('huber_delta')
+
+	config = _write_fixture(tmp_path, checkpoint_config_modifier=use_mse)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+
+	assert result.metadata_path.is_file()
+
+
+def test_embedding_extraction_rejects_mse_checkpoint_huber_delta(
+	tmp_path: Path,
+) -> None:
+	def use_mse_with_huber_delta(checkpoint_config: dict[str, object]) -> None:
+		loss = checkpoint_config['loss']
+		assert isinstance(loss, dict)
+		loss['reconstruction'] = 'mse'
+
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_config_modifier=use_mse_with_huber_delta,
+	)
+
+	with pytest.raises(ValueError, match=r'loss\.huber_delta.*huber'):
 		run_embedding_extraction(config, device='cpu')
 
 

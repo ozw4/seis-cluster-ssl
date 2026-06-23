@@ -62,8 +62,9 @@ Raw YAML must not include a top-level `stage`. The selected proc script owns the
 stage identity.
 
 Fixed amplitude-only fields such as `data.grid_order`, model channel counts,
-`masking.spatial_mask_mode`, `loss.reconstruction`, and
-`loss.valid_mask_mode` are code-owned and appear only in the resolved config.
+`masking.spatial_mask_mode`, and `loss.valid_mask_mode` are code-owned and
+appear only in the resolved config. Training YAML owns `loss.reconstruction`
+and must set it to `huber`, `mse`, or `l1`.
 
 Embedding extraction is checkpoint-owned for model, zero-mask, masking, and loss
 settings. Configure only the checkpoint path, clean manifest, extraction
