@@ -12,6 +12,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
+from seis_ssl_cluster.config.schema import (
+	DEFAULT_MAE_DEBUG_VISUALIZATION_COLUMNS,
+	MAE_DEBUG_VISUALIZATION_COLUMNS,
+)
 from seis_ssl_cluster.models.mae.patching import unpatchify_3d
 from seis_ssl_cluster.visualization.common import (
 	ImagePanel,
@@ -28,16 +32,6 @@ from seis_ssl_cluster.visualization.common import (
 if TYPE_CHECKING:
 	from pathlib import Path
 
-_DEFAULT_COLUMNS = (
-	'input',
-	'masked_input',
-	'target',
-	'prediction',
-	'abs_error',
-	'valid_mask',
-)
-_COLUMN_SET = set(_DEFAULT_COLUMNS)
-
 
 @dataclass(frozen=True)
 class MaeDebugVisualizationConfig:
@@ -51,7 +45,7 @@ class MaeDebugVisualizationConfig:
 	xz_slice_y_index: int | None = None
 	dpi: int = 160
 	clip_percentiles: tuple[float, float] = (1.0, 99.0)
-	columns: tuple[str, ...] = _DEFAULT_COLUMNS
+	columns: tuple[str, ...] = DEFAULT_MAE_DEBUG_VISUALIZATION_COLUMNS
 	panel_width: float = 2.6
 	panel_height: float = 2.4
 	invalid_color: str = 'lightgray'
@@ -635,6 +629,7 @@ def _validate_render_inputs(
 	_validate_positive_float(config.panel_height, 'panel_height')
 	_validate_clip_percentiles(config.clip_percentiles)
 	_validate_columns(config.columns)
+	_validate_non_empty_string(config.invalid_color, 'invalid_color')
 
 
 def _validate_mask_shape(
@@ -652,7 +647,16 @@ def _validate_columns(columns: Sequence[str]) -> None:
 	if not columns:
 		msg = 'visualization columns must not be empty'
 		raise ValueError(msg)
-	unknown = sorted(set(columns) - _COLUMN_SET)
+	if any(not isinstance(column, str) or not column for column in columns):
+		msg = f'visualization columns must be non-empty strings; got {columns!r}'
+		raise ValueError(msg)
+	if len(set(columns)) != len(columns):
+		msg = (
+			'visualization columns must not contain duplicates; '
+			f'got {list(columns)!r}'
+		)
+		raise ValueError(msg)
+	unknown = sorted(set(columns) - MAE_DEBUG_VISUALIZATION_COLUMNS)
 	if unknown:
 		msg = f'unknown MAE debug columns: {unknown!r}'
 		raise ValueError(msg)
@@ -687,6 +691,12 @@ def _validate_positive_float(value: float, name: str) -> None:
 	if not math.isfinite(float(value)) or float(value) <= 0.0:
 		msg = f'{name} must be finite and positive; got {value!r}'
 		raise ValueError(msg)
+
+
+def _validate_non_empty_string(value: str, name: str) -> None:
+	if not isinstance(value, str) or not value:
+		msg = f'{name} must be a non-empty string; got {value!r}'
+		raise TypeError(msg)
 
 
 def _sample_coords(coords: object, sample_index: int) -> Mapping[str, object] | None:

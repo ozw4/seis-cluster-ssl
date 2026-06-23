@@ -9,6 +9,7 @@ from typing import Any
 
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.schema import (
+	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
 	STAGE_BUILD_MANIFESTS,
 	STAGE_CLUSTER_VISUALIZATION,
 	STAGE_CLUSTERING,
@@ -158,6 +159,55 @@ def _add_training_rows(
 			('train.epochs', train.get('epochs')),
 			('train.device', train.get('device')),
 		],
+	)
+	_add_mae_debug_visualization_rows(rows, cfg)
+
+
+def _add_mae_debug_visualization_rows(
+	rows: list[tuple[str, Any]],
+	cfg: Mapping[str, Any],
+) -> None:
+	visualization = _mapping(cfg.get('visualization'))
+	mae_debug_value = visualization.get('mae_debug')
+	if not isinstance(mae_debug_value, Mapping):
+		return
+	if mae_debug_value.get('enabled', False) is not True:
+		return
+	defaults = DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS
+	output_dir = mae_debug_value.get('output_dir')
+	if output_dir is None:
+		paths = _mapping(cfg.get('paths'))
+		output_root = paths.get('output_root')
+		if isinstance(output_root, str) and output_root:
+			output_dir = Path(output_root) / 'visualizations' / 'mae_debug'
+	rows.extend(
+		[
+			('visualization.mae_debug.enabled', True),
+			('visualization.mae_debug.output_dir', output_dir),
+			(
+				'visualization.mae_debug.every_steps',
+				mae_debug_value.get('every_steps', defaults['every_steps']),
+			),
+			(
+				'visualization.mae_debug.every_epochs',
+				mae_debug_value.get('every_epochs', defaults['every_epochs']),
+			),
+			(
+				'visualization.mae_debug.max_samples',
+				mae_debug_value.get('max_samples', defaults['max_samples']),
+			),
+		],
+	)
+	rows.extend(
+		(f'visualization.mae_debug.{key}', mae_debug_value.get(key))
+		for key in (
+			'xy_slice_index',
+			'xz_slice_y_index',
+			'dpi',
+			'clip_percentiles',
+			'columns',
+		)
+		if key in mae_debug_value and mae_debug_value.get(key) is not None
 	)
 
 

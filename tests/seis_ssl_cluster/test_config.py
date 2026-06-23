@@ -810,6 +810,122 @@ def test_no_output_paths_are_derived_from_dataset_or_version_names() -> None:
 	assert resolved['paths']['output_root'] == cfg['paths']['output_root']
 
 
+def test_mae_debug_visualization_enabled_step_trigger_resolves() -> None:
+	cfg = _minimal_training_config()
+	cfg['visualization'] = {
+		'mae_debug': {
+			'enabled': True,
+			'every_steps': 10,
+			'every_epochs': None,
+		},
+	}
+
+	resolved = resolve_mae_training_config(cfg)
+
+	assert resolved['visualization']['mae_debug']['every_steps'] == 10
+
+
+def test_mae_debug_visualization_enabled_epoch_trigger_resolves() -> None:
+	cfg = _minimal_training_config()
+	cfg['visualization'] = {
+		'mae_debug': {
+			'enabled': True,
+			'every_steps': None,
+			'every_epochs': 1,
+		},
+	}
+
+	resolved = resolve_mae_training_config(cfg)
+
+	assert resolved['visualization']['mae_debug']['every_epochs'] == 1
+
+
+@pytest.mark.parametrize(
+	('mae_debug', 'message'),
+	[
+		({'enabled': True, 'every_steps': 0}, r'mae_debug\.every_steps'),
+		(
+			{'enabled': True, 'every_steps': None, 'every_epochs': 0},
+			r'mae_debug\.every_epochs',
+		),
+		(
+			{'enabled': True, 'every_steps': None, 'every_epochs': None},
+			r'every_steps or every_epochs',
+		),
+		(
+			{'enabled': True, 'every_steps': 1, 'xy_slice_index': -1},
+			r'mae_debug\.xy_slice_index',
+		),
+		(
+			{'enabled': True, 'every_steps': 1, 'xz_slice_y_index': -1},
+			r'mae_debug\.xz_slice_y_index',
+		),
+		(
+			{'enabled': True, 'every_steps': 1, 'clip_percentiles': [99.0, 1.0]},
+			r'mae_debug\.clip_percentiles',
+		),
+		(
+			{'enabled': True, 'every_steps': 1, 'columns': ['target', 'target']},
+			r'mae_debug\.columns.*duplicates',
+		),
+		(
+			{'enabled': True, 'every_steps': 1, 'columns': ['target', 'bogus']},
+			r'mae_debug\.columns.*bogus',
+		),
+	],
+)
+def test_mae_debug_visualization_config_rejects_invalid_fields(
+	mae_debug: dict[str, object],
+	message: str,
+) -> None:
+	cfg = _minimal_training_config()
+	cfg['visualization'] = {'mae_debug': mae_debug}
+
+	with pytest.raises(ValueError, match=message):
+		resolve_mae_training_config(cfg)
+
+
+def test_mae_debug_visualization_rejects_unknown_visualization_key() -> None:
+	cfg = _minimal_training_config()
+	cfg['visualization'] = {
+		'mae_debug': {'enabled': False},
+		'unexpected': {},
+	}
+
+	with pytest.raises(ValueError, match=r'visualization\.unexpected'):
+		resolve_mae_training_config(cfg)
+
+
+def test_mae_debug_visualization_rejects_unknown_nested_key() -> None:
+	cfg = _minimal_training_config()
+	cfg['visualization'] = {
+		'mae_debug': {
+			'enabled': False,
+			'unexpected': True,
+		},
+	}
+
+	with pytest.raises(ValueError, match=r'visualization\.mae_debug\.unexpected'):
+		resolve_mae_training_config(cfg)
+
+
+def test_mae_debug_explicit_output_dir_must_stay_under_output_root() -> None:
+	cfg = _minimal_training_config()
+	cfg['visualization'] = {
+		'mae_debug': {
+			'enabled': True,
+			'every_steps': 1,
+			'output_dir': '/external/debug',
+		},
+	}
+
+	with pytest.raises(
+		ValueError,
+		match=r'visualization\.mae_debug\.output_dir.*paths\.output_root',
+	):
+		resolve_mae_training_config(cfg)
+
+
 def test_nondivisible_crop_patch_geometry_is_rejected() -> None:
 	cfg = _minimal_training_config()
 	cfg['model']['patch_size'] = [7, 8, 8]

@@ -19,6 +19,7 @@ import torch
 import seis_ssl_cluster
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
+	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
 	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
@@ -26,6 +27,8 @@ from seis_ssl_cluster.config.schema import (
 	FIXED_LOSS_CONTRACT,
 	FIXED_MASKING_CONTRACT,
 	FIXED_MODEL_CONTRACT,
+	MAE_DEBUG_VISUALIZATION_COLUMNS,
+	MAE_DEBUG_VISUALIZATION_KEYS,
 	STAGE_MAE_TRAINING,
 )
 from seis_ssl_cluster.data import NopimsAmplitudePretrainDataset, read_manifest_json
@@ -300,7 +303,6 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 ) -> Path:
 	"""Run amplitude-only MAE pretraining from ``config``."""
 	config = _complete_mae_training_config(config)
-	manifests = read_manifest_json(_manifest_train_path(config))
 	train_config = _mapping(config, 'train')
 	model_config = _mapping(config, 'model')
 	paths_config = _mapping(config, 'paths')
@@ -318,6 +320,9 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		'allow_overwrite_output',
 		default=False,
 	)
+	visualization_config = _mae_debug_visualization_config(config, output_root)
+
+	manifests = read_manifest_json(_manifest_train_path(config))
 	prepare_run_directory(
 		output_root=output_root,
 		resume=resume,
@@ -383,7 +388,6 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 	)
 	diagnostics_dir = _resolve_diagnostics_dir(train_config, output_root)
 	grad_clip_norm = _optional_positive_float_config(train_config, 'grad_clip_norm')
-	visualization_config = _mae_debug_visualization_config(config, output_root)
 	state: MaeTrainingState = MaeTrainingState(
 		epoch=resume_state.start_epoch - 1,
 		global_step=resume_state.global_step,
@@ -664,60 +668,107 @@ def _mae_debug_visualization_config(
 	if not isinstance(visualization, Mapping):
 		msg = f'visualization must be a mapping; got {visualization!r}'
 		raise TypeError(msg)
+	_reject_unknown_runtime_keys(
+		visualization,
+		frozenset({'mae_debug'}),
+		prefix='visualization',
+	)
 	mae_debug = visualization.get('mae_debug')
 	if mae_debug is None:
 		return None
 	if not isinstance(mae_debug, Mapping):
 		msg = f'visualization.mae_debug must be a mapping; got {mae_debug!r}'
 		raise TypeError(msg)
-	if not _bool_config(mae_debug, 'enabled', default=False):
-		return None
+	_reject_unknown_runtime_keys(
+		mae_debug,
+		MAE_DEBUG_VISUALIZATION_KEYS,
+		prefix='visualization.mae_debug',
+	)
+	defaults = DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS
+	enabled = _bool_config(
+		mae_debug,
+		'enabled',
+		default=bool(defaults['enabled']),
+	)
 
 	output_dir_value = mae_debug.get('output_dir')
 	if output_dir_value is None:
 		output_dir = output_root / 'visualizations' / 'mae_debug'
-	elif isinstance(output_dir_value, str):
+	elif isinstance(output_dir_value, str) and output_dir_value:
 		output_dir = Path(output_dir_value)
+		_validate_runtime_output_path_under_root(
+			output_dir,
+			'visualization.mae_debug.output_dir',
+			root=output_root,
+			root_label='paths.output_root',
+		)
 	else:
 		msg = (
-			'visualization.mae_debug.output_dir must be a string or null; '
+			'visualization.mae_debug.output_dir must be a non-empty string or null; '
 			f'got {output_dir_value!r}'
 		)
 		raise TypeError(msg)
 
-	return MaeDebugVisualizationConfig(
+	resolved = MaeDebugVisualizationConfig(
 		output_dir=output_dir,
-		every_steps=_optional_int_config(mae_debug, 'every_steps'),
-		every_epochs=_optional_int_config(mae_debug, 'every_epochs'),
-		max_samples=_int_config(mae_debug, 'max_samples', 1),
-		xy_slice_index=_optional_any_int_config(mae_debug, 'xy_slice_index'),
-		xz_slice_y_index=_optional_any_int_config(mae_debug, 'xz_slice_y_index'),
-		dpi=_int_config(mae_debug, 'dpi', 160),
+		every_steps=_optional_int_config_with_default(
+			mae_debug,
+			'every_steps',
+			default=defaults['every_steps'],
+		),
+		every_epochs=_optional_int_config_with_default(
+			mae_debug,
+			'every_epochs',
+			default=defaults['every_epochs'],
+		),
+		max_samples=_int_config(mae_debug, 'max_samples', int(defaults['max_samples'])),
+		xy_slice_index=_optional_nonnegative_int_config_with_default(
+			mae_debug,
+			'xy_slice_index',
+			default=defaults['xy_slice_index'],
+		),
+		xz_slice_y_index=_optional_nonnegative_int_config_with_default(
+			mae_debug,
+			'xz_slice_y_index',
+			default=defaults['xz_slice_y_index'],
+		),
+		dpi=_int_config(mae_debug, 'dpi', int(defaults['dpi'])),
 		clip_percentiles=_float_pair_config(
 			mae_debug,
 			'clip_percentiles',
-			default=(1.0, 99.0),
+			default=cast('tuple[float, float]', defaults['clip_percentiles']),
 		),
 		columns=_string_tuple_config(
 			mae_debug,
 			'columns',
-			default=(
-				'input',
-				'masked_input',
-				'target',
-				'prediction',
-				'abs_error',
-				'valid_mask',
-			),
+			default=cast('tuple[str, ...]', defaults['columns']),
 		),
-		panel_width=_float_config(mae_debug, 'panel_width', 2.6),
-		panel_height=_float_config(mae_debug, 'panel_height', 2.4),
+		panel_width=_positive_float_config(
+			mae_debug,
+			'panel_width',
+			float(defaults['panel_width']),
+		),
+		panel_height=_positive_float_config(
+			mae_debug,
+			'panel_height',
+			float(defaults['panel_height']),
+		),
 		invalid_color=_str_config_with_default(
 			mae_debug,
 			'invalid_color',
-			'lightgray',
+			str(defaults['invalid_color']),
 		),
 	)
+	_validate_mae_debug_columns(resolved.columns)
+	if not enabled:
+		return None
+	if resolved.every_steps is None and resolved.every_epochs is None:
+		msg = (
+			'visualization.mae_debug requires every_steps or every_epochs '
+			'when enabled is true'
+		)
+		raise ValueError(msg)
+	return resolved
 
 
 def _mae_debug_epoch_triggered(
@@ -728,7 +779,11 @@ def _mae_debug_epoch_triggered(
 ) -> bool:
 	if config.every_epochs is None or already_triggered:
 		return False
-	return epoch % config.every_epochs == 0
+	interval = _positive_int_value(
+		config.every_epochs,
+		'visualization.mae_debug.every_epochs',
+	)
+	return epoch % interval == 0
 
 
 def _mae_debug_step_triggered(
@@ -738,7 +793,11 @@ def _mae_debug_step_triggered(
 ) -> bool:
 	if config.every_steps is None:
 		return False
-	return global_step % config.every_steps == 0
+	interval = _positive_int_value(
+		config.every_steps,
+		'visualization.mae_debug.every_steps',
+	)
+	return global_step % interval == 0
 
 
 def _save_mae_debug_visualization(  # noqa: PLR0913
@@ -1575,6 +1634,18 @@ def _optional_int_config(parent: Mapping[str, object], key: str) -> int | None:
 	return _int_config(parent, key, 1)
 
 
+def _optional_int_config_with_default(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	default: object,
+) -> int | None:
+	value = parent.get(key, default)
+	if value is None:
+		return None
+	return _positive_int_value(value, key)
+
+
 def _optional_any_int_config(parent: Mapping[str, object], key: str) -> int | None:
 	value = parent.get(key)
 	if value is None:
@@ -1585,12 +1656,52 @@ def _optional_any_int_config(parent: Mapping[str, object], key: str) -> int | No
 	return value
 
 
+def _optional_nonnegative_int_config_with_default(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	default: object,
+) -> int | None:
+	value = parent.get(key, default)
+	if value is None:
+		return None
+	if not isinstance(value, int) or isinstance(value, bool):
+		msg = f'{key} must be an integer or null; got {value!r}'
+		raise TypeError(msg)
+	if value < 0:
+		msg = f'{key} must be nonnegative; got {value!r}'
+		raise ValueError(msg)
+	return value
+
+
+def _positive_int_value(value: object, key: str) -> int:
+	if not isinstance(value, int) or isinstance(value, bool):
+		msg = f'{key} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	if value <= 0:
+		msg = f'{key} must be positive; got {value!r}'
+		raise ValueError(msg)
+	return value
+
+
 def _float_config(parent: Mapping[str, object], key: str, default: float) -> float:
 	value = parent.get(key, default)
 	if not isinstance(value, float | int) or isinstance(value, bool):
 		msg = f'{key} must be a float; got {value!r}'
 		raise TypeError(msg)
 	return float(value)
+
+
+def _positive_float_config(
+	parent: Mapping[str, object],
+	key: str,
+	default: float,
+) -> float:
+	value = _float_config(parent, key, default)
+	if not math.isfinite(value) or value <= 0.0:
+		msg = f'{key} must be finite and positive; got {value!r}'
+		raise ValueError(msg)
+	return value
 
 
 def _float_pair_config(
@@ -1678,6 +1789,64 @@ def _string_tuple_config(
 			raise TypeError(msg)
 		resolved.append(item)
 	return tuple(resolved)
+
+
+def _reject_unknown_runtime_keys(
+	parent: Mapping[str, object],
+	allowed: frozenset[str],
+	*,
+	prefix: str,
+) -> None:
+	unexpected = sorted(set(parent) - allowed)
+	if unexpected:
+		labels = [f'{prefix}.{key}' for key in unexpected]
+		msg = (
+			f'{prefix} key(s) not allowed: {labels!r}; '
+			f'allowed keys are {sorted(allowed)!r}'
+		)
+		raise ValueError(msg)
+
+
+def _validate_runtime_output_path_under_root(
+	path: Path,
+	label: str,
+	*,
+	root: Path,
+	root_label: str,
+) -> None:
+	if not path.is_absolute():
+		msg = f'{label} must be an absolute path; got {path}'
+		raise ValueError(msg)
+	if not _runtime_path_is_relative_to(path, root):
+		msg = f'{label} must be under {root_label} ({root}); got {path}'
+		raise ValueError(msg)
+
+
+def _runtime_path_is_relative_to(path: Path, root: Path) -> bool:
+	try:
+		path.resolve(strict=False).relative_to(root.resolve(strict=False))
+	except ValueError:
+		return False
+	return True
+
+
+def _validate_mae_debug_columns(columns: Sequence[str]) -> None:
+	if not columns:
+		msg = 'visualization.mae_debug.columns must not be empty'
+		raise ValueError(msg)
+	if len(set(columns)) != len(columns):
+		msg = (
+			'visualization.mae_debug.columns must not contain duplicates; '
+			f'got {list(columns)!r}'
+		)
+		raise ValueError(msg)
+	unknown = sorted(set(columns) - MAE_DEBUG_VISUALIZATION_COLUMNS)
+	if unknown:
+		msg = (
+			'visualization.mae_debug.columns contains unsupported column(s): '
+			f'{unknown!r}'
+		)
+		raise ValueError(msg)
 
 
 def _xyz_config(parent: Mapping[str, object], key: str) -> tuple[int, int, int]:

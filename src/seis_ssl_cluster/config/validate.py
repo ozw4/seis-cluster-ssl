@@ -11,6 +11,7 @@ from typing import TypeAlias, TypeVar
 
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
+	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
 	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
@@ -23,6 +24,8 @@ from seis_ssl_cluster.config.schema import (
 	KNOWN_STAGES,
 	LEGACY_ATTRIBUTE_KEY_NAMES,
 	LEGACY_ATTRIBUTE_KEY_PATHS,
+	MAE_DEBUG_VISUALIZATION_COLUMNS,
+	MAE_DEBUG_VISUALIZATION_KEYS,
 	STAGE_BUILD_MANIFESTS,
 	STAGE_CLUSTER_VISUALIZATION,
 	STAGE_CLUSTERING,
@@ -130,6 +133,7 @@ _CLUSTERING_REQUIRED_KEYS = frozenset(
 )
 _CLUSTERING_PCA_KEYS = frozenset({'enabled', 'n_components', 'whiten'})
 _VISUALIZATION_CLUSTERING_KEYS = frozenset({'input_dir'})
+_MAE_TRAINING_VISUALIZATION_KEYS = frozenset({'mae_debug'})
 _VISUALIZATION_KEYS = frozenset(
 	{
 		'output_dir',
@@ -219,12 +223,14 @@ def resolve_mae_training_config(config: _T) -> Config:
 		STAGE_MAE_TRAINING,
 		require_nopims_root=False,
 	)
+	paths_config = _required_mapping(resolved, 'paths')
+	output_root = _validate_path(
+		paths_config,
+		'output_root',
+		prefix='paths',
+	)
 	_validate_artifact_output_path(
-		_validate_path(
-			_required_mapping(resolved, 'paths'),
-			'output_root',
-			prefix='paths',
-		),
+		output_root,
 		'paths.output_root',
 		artifact_root=paths.artifact_root,
 		nopims_root=paths.nopims_root,
@@ -266,7 +272,10 @@ def resolve_mae_training_config(config: _T) -> Config:
 	_validate_train(train)
 	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
 	if 'visualization' in resolved:
-		_required_mapping(resolved, 'visualization')
+		_validate_mae_training_visualization(
+			_required_mapping(resolved, 'visualization'),
+			output_root=output_root,
+		)
 
 	_merge_section_defaults(resolved, 'data', FIXED_DATA_CONTRACT)
 	_merge_section_defaults(resolved, 'model', FIXED_MODEL_CONTRACT)
@@ -678,6 +687,43 @@ def _validate_artifact_output_path(
 		raise ValueError(msg)
 
 
+def _validate_optional_output_path_under_root(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+	root: Path,
+	root_label: str,
+) -> None:
+	value = parent.get(key)
+	if value is None:
+		return
+	if not isinstance(value, str) or not value:
+		msg = f'{prefix}.{key} must be a non-empty string or null; got {value!r}'
+		raise TypeError(msg)
+	_validate_path_under_root(
+		Path(value),
+		f'{prefix}.{key}',
+		root=root,
+		root_label=root_label,
+	)
+
+
+def _validate_path_under_root(
+	path: Path,
+	label: str,
+	*,
+	root: Path,
+	root_label: str,
+) -> None:
+	if not path.is_absolute():
+		msg = f'{label} must be an absolute path; got {path}'
+		raise ValueError(msg)
+	if not _is_relative_to(path, root):
+		msg = f'{label} must be under {root_label} ({root}); got {path}'
+		raise ValueError(msg)
+
+
 def _is_relative_to(path: Path, root: Path) -> bool:
 	try:
 		path.resolve(strict=False).relative_to(root.resolve(strict=False))
@@ -833,6 +879,119 @@ def _validate_zero_mask(zero_mask: Mapping[str, object]) -> None:
 	for key in ('z_sample_influence_radius', 'xy_trace_influence_radius'):
 		if key in zero_mask:
 			_validate_nonnegative_int(zero_mask, key, prefix='zero_mask')
+
+
+def _validate_mae_training_visualization(
+	visualization: Mapping[str, object],
+	*,
+	output_root: Path,
+) -> None:
+	_validate_allowed_keys(
+		visualization,
+		_MAE_TRAINING_VISUALIZATION_KEYS,
+		prefix='visualization',
+	)
+	if 'mae_debug' not in visualization:
+		return
+	mae_debug = _required_child_mapping(
+		visualization,
+		'mae_debug',
+		prefix='visualization',
+	)
+	_validate_allowed_keys(
+		mae_debug,
+		MAE_DEBUG_VISUALIZATION_KEYS,
+		prefix='visualization.mae_debug',
+	)
+	_validate_mae_debug_general_fields(mae_debug, output_root=output_root)
+	_validate_mae_debug_triggers(mae_debug)
+	_validate_mae_debug_rendering_fields(mae_debug)
+
+
+def _validate_mae_debug_general_fields(
+	mae_debug: Mapping[str, object],
+	*,
+	output_root: Path,
+) -> None:
+	if 'enabled' in mae_debug:
+		_validate_bool(mae_debug, 'enabled', prefix='visualization.mae_debug')
+	if 'output_dir' in mae_debug:
+		_validate_optional_output_path_under_root(
+			mae_debug,
+			'output_dir',
+			prefix='visualization.mae_debug',
+			root=output_root,
+			root_label='paths.output_root',
+		)
+
+
+def _validate_mae_debug_triggers(mae_debug: Mapping[str, object]) -> None:
+	for key in ('every_steps', 'every_epochs'):
+		_validate_optional_positive_int(
+			mae_debug,
+			key,
+			prefix='visualization.mae_debug',
+		)
+	if _mae_debug_enabled(mae_debug) and not _mae_debug_has_trigger(mae_debug):
+		msg = (
+			'visualization.mae_debug requires every_steps or every_epochs '
+			'when enabled is true'
+		)
+		raise ValueError(msg)
+
+
+def _validate_mae_debug_rendering_fields(mae_debug: Mapping[str, object]) -> None:
+	if 'max_samples' in mae_debug:
+		_validate_positive_int(
+			mae_debug,
+			'max_samples',
+			prefix='visualization.mae_debug',
+		)
+	for key in ('xy_slice_index', 'xz_slice_y_index'):
+		_validate_optional_nonnegative_int(
+			mae_debug,
+			key,
+			prefix='visualization.mae_debug',
+		)
+	if 'dpi' in mae_debug:
+		_validate_positive_int(mae_debug, 'dpi', prefix='visualization.mae_debug')
+	if 'clip_percentiles' in mae_debug:
+		_validate_mae_debug_clip_percentiles(mae_debug)
+	if 'columns' in mae_debug:
+		_validate_mae_debug_columns(mae_debug)
+	for key in ('panel_width', 'panel_height'):
+		if key in mae_debug:
+			_validate_positive_finite_number(
+				mae_debug,
+				key,
+				prefix='visualization.mae_debug',
+			)
+	if 'invalid_color' in mae_debug:
+		_validate_non_empty_str(
+			mae_debug,
+			'invalid_color',
+			prefix='visualization.mae_debug',
+		)
+
+
+def _mae_debug_enabled(mae_debug: Mapping[str, object]) -> bool:
+	value = mae_debug.get(
+		'enabled',
+		DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS['enabled'],
+	)
+	return bool(value)
+
+
+def _mae_debug_has_trigger(mae_debug: Mapping[str, object]) -> bool:
+	every_steps = mae_debug.get(
+		'every_steps',
+		DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS['every_steps'],
+	)
+	every_epochs = mae_debug.get(
+		'every_epochs',
+		DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS['every_epochs'],
+	)
+	return every_steps is not None or every_epochs is not None
 
 
 def _validate_divisible_crop_patch(
@@ -1047,6 +1206,28 @@ def _validate_nonnegative_int(
 		raise ValueError(msg)
 
 
+def _validate_optional_positive_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	if key not in parent or parent.get(key) is None:
+		return
+	_validate_positive_int(parent, key, prefix=prefix)
+
+
+def _validate_optional_nonnegative_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	if key not in parent or parent.get(key) is None:
+		return
+	_validate_nonnegative_int(parent, key, prefix=prefix)
+
+
 def _validate_positive_number(
 	parent: Mapping[str, object],
 	key: str,
@@ -1068,6 +1249,22 @@ def _validate_nonnegative_number(
 	value = parent.get(key)
 	if not _is_number(value) or float(value) < 0.0:
 		msg = f'{prefix}.{key} must be nonnegative; got {value!r}'
+		raise ValueError(msg)
+
+
+def _validate_positive_finite_number(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	value = parent.get(key)
+	if (
+		not _is_number(value)
+		or float(value) <= 0.0
+		or not math.isfinite(float(value))
+	):
+		msg = f'{prefix}.{key} must be a finite positive number; got {value!r}'
 		raise ValueError(msg)
 
 
@@ -1129,6 +1326,70 @@ def _validate_visualization_modes(visualization: Mapping[str, object]) -> None:
 		raise ValueError(msg)
 	if len(set(value)) != len(value):
 		msg = f'visualization.modes must not contain duplicates; got {value!r}'
+		raise ValueError(msg)
+
+
+def _validate_mae_debug_clip_percentiles(
+	mae_debug: Mapping[str, object],
+) -> None:
+	value = mae_debug.get('clip_percentiles')
+	if (
+		not isinstance(value, Sequence)
+		or isinstance(value, str | bytes)
+		or len(value) != 2
+	):
+		msg = (
+			'visualization.mae_debug.clip_percentiles must contain two '
+			f'finite values; got {value!r}'
+		)
+		raise ValueError(msg)
+	low, high = value
+	if not _is_number(low) or not _is_number(high):
+		msg = (
+			'visualization.mae_debug.clip_percentiles must contain numeric '
+			f'values; got {value!r}'
+		)
+		raise ValueError(msg)
+	low_float = float(low)
+	high_float = float(high)
+	if (
+		not math.isfinite(low_float)
+		or not math.isfinite(high_float)
+		or not 0.0 <= low_float < high_float <= 100.0
+	):
+		msg = (
+			'visualization.mae_debug.clip_percentiles must satisfy '
+			f'0 <= low < high <= 100; got {value!r}'
+		)
+		raise ValueError(msg)
+
+
+def _validate_mae_debug_columns(mae_debug: Mapping[str, object]) -> None:
+	value = mae_debug.get('columns')
+	if (
+		not isinstance(value, Sequence)
+		or isinstance(value, str | bytes)
+		or not value
+		or any(not isinstance(item, str) or not item for item in value)
+	):
+		msg = (
+			'visualization.mae_debug.columns must be a non-empty sequence '
+			f'of strings; got {value!r}'
+		)
+		raise ValueError(msg)
+	if len(set(value)) != len(value):
+		msg = (
+			'visualization.mae_debug.columns must not contain duplicates; '
+			f'got {list(value)!r}'
+		)
+		raise ValueError(msg)
+	unknown = sorted(set(value) - MAE_DEBUG_VISUALIZATION_COLUMNS)
+	if unknown:
+		msg = (
+			'visualization.mae_debug.columns contains unsupported column(s): '
+			f'{unknown!r}; allowed columns are '
+			f'{sorted(MAE_DEBUG_VISUALIZATION_COLUMNS)!r}'
+		)
 		raise ValueError(msg)
 
 
