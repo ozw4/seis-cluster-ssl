@@ -1,0 +1,8 @@
+paths:
+  nopims_root: /home/dcuser/data/NOPIMS
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+manifest:
+  input_path_list: /workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1/train_npy_paths.txt
+  output_dir: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1
+  output_name: nopims_amplitude_manifests.json
+  normalization_stats_dir: /workspace/artifacts/seis_ssl_cluster/registry/normalization_stats/nopims/pretrain_v1

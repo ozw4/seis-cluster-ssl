@@ -1,0 +1,13 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+manifests:
+  input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
+embeddings:
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/runs/nopims/pretrain_v1/amp_mae_v1/full_100ep/mae_latest.pt
+  output_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1/amp_mae_v1/full
+embedding:
+  window_size: [128, 128, 128]
+  overlap: [64, 64, 64]
+  output_dtype: float16
+  batch_size: 1
+  min_token_valid_fraction: 0.5

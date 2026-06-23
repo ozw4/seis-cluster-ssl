@@ -1,0 +1,3 @@
+launcher: setsid nohup bash /workspace/artifacts/seis_ssl_cluster/control/nopims/pretrain_v1/amp_mae_v1/full_100ep/wrapper.sh >/dev/null 2>&1 < /dev/null &
+working_directory: /workspace
+training_command: PYTHONPATH=/workspace/src python proc/seis_ssl_cluster/train_amp_mae.py --config experiments/nopims/pretrain_v1/10_pretrain/amp_mae_v1/03_full_100ep.yaml

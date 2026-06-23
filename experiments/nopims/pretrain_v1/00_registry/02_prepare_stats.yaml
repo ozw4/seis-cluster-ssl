@@ -1,0 +1,10 @@
+paths:
+  nopims_root: /home/dcuser/data/NOPIMS
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+manifests:
+  train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1/nopims_amplitude_manifests.json
+normalization:
+  clipping_percentiles: [0.5, 99.5]
+  epsilon: 1.0e-6
+  max_samples: 1000000
+  seed: 42

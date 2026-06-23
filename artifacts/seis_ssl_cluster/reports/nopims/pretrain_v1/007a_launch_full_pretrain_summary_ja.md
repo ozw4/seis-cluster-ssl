@@ -1,0 +1,26 @@
+# Issue 007a 実行まとめ
+
+- 状態: 起動成功
+- repository commit: `0823330eeb451f392b4d77b25b4301b51d369bd0`
+- 使用config: `experiments/nopims/pretrain_v1/10_pretrain/amp_mae_v1/03_full_100ep.yaml`
+- output root: `/workspace/artifacts/seis_ssl_cluster/runs/nopims/pretrain_v1/amp_mae_v1/full_100ep`
+- 起動種別: 新規
+- launcher: nohup（永続化のため `setsid` 併用）
+- tmux session: なし（`tmux` は未インストール）
+- launcher PID: 1388466（wrapper）。学習 Python PID は 1388484、`tee` PID は 1388485。
+- log: `/workspace/artifacts/seis_ssl_cluster/logs/nopims/pretrain_v1/amp_mae_v1/full_100ep.log`
+- control directory: `/workspace/artifacts/seis_ssl_cluster/control/nopims/pretrain_v1/amp_mae_v1/full_100ep`
+- 開始UTC: 2026-06-23T05:17:49Z
+- 初期確認時刻: 2026-06-23T05:20:06Z
+- 初期epoch: 1
+- 初期global step: 1
+- 初期loss: 0.6209346652030945
+- reconstruction loss: 0.602638304233551
+- gradient loss: 0.3659267723560333
+- gradient norm: 0.7373120188713074
+- process生存: 生存。wrapper PID 1388466 は PPID 1、学習 Python PID 1388484 は wrapper 配下で実行中。
+- run snapshot: `resolved_config.json`、`manifest.json`、`inputs/train_npy_paths.txt`、`run_metadata.json` 生成済み。clean manifest/split と snapshot の SHA-256 は一致。`resolved_config.json` は `epochs=100`、`device=cuda`、`train.max_steps` なし、`output_root` は想定path、debug visualization は `enabled=true`、`every_epochs=1`、`every_steps=null`。
+- non-finite diagnostic: なし。初期 debug JSON metrics は finite。log に traceback/non-finite/nan/inf の該当なし。
+- exit code: 未生成（学習process実行中のため正常）
+- Issue 007bを実行できる状態か: 100 epoch 完了後に実行する状態。現時点では本学習が永続実行中で、007b の完了検収待ち。
+- 備考: Issue 006 の pilot checkpoint は `global_step=1000`、loss finite、読み込み可能、non-finite diagnostic なしを確認済み。既存 full run directory と同一run学習processはなく、新規起動した。正式学習コマンドでは `--max-steps`、`--output-root`、`--device` を指定していない。初回の単純な nohup 起動は wrapper 開始前に残存しなかったため、重複processとrun artifactがないことを確認した上で `setsid nohup` により再起動した。pilot/full の主要条件は、実行規模・出力先・debug周期の意図的差分を除き一致した。

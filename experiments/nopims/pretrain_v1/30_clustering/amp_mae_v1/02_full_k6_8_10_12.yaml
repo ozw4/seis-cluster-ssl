@@ -1,0 +1,17 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+embeddings:
+  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1/amp_mae_v1/full
+clustering:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_v1/full_k6_8_10_12
+  embedding_normalization: l2
+  pca:
+    enabled: true
+    n_components: 64
+    whiten: false
+  sample_tokens: 1000000
+  method: minibatch_kmeans
+  k_values: [6, 8, 10, 12]
+  minibatch_size: 8192
+  prediction_batch_size: 8192
+  seed: 42
