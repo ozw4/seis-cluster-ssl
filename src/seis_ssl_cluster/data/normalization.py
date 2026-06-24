@@ -206,9 +206,12 @@ def _sample_voxels(
 
 def _finite_values(values: np.ndarray, path: Path) -> np.ndarray:
 	finite = np.asarray(values, dtype=np.float64)
-	finite = finite[np.isfinite(finite)]
+	finite = finite[np.isfinite(finite) & (finite != 0.0)]
 	if finite.size == 0:
-		msg = f'normalization stats cannot be computed from no finite voxels: {path}'
+		msg = (
+			'normalization stats cannot be computed from no finite '
+			f'non-zero voxels: {path}'
+		)
 		raise ValueError(msg)
 	return finite
 

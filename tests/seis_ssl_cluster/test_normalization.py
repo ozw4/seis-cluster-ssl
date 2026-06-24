@@ -78,6 +78,50 @@ def test_compute_normalization_stats_samples_memmap_deterministically(
 	assert first.grid_order == GRID_ORDER_XYZ
 
 
+def test_normalization_stats_exclude_exact_zero_voxels(
+	tmp_path: Path,
+) -> None:
+	volume = np.array(
+		[
+			[[0.0, 1.0, 3.0], [0.0, 5.0, 7.0]],
+			[[0.0, 9.0, 11.0], [0.0, 13.0, 15.0]],
+		],
+		dtype=np.float32,
+	)
+	source = tmp_path / 'volume.npy'
+	np.save(source, volume)
+
+	stats = compute_normalization_stats(
+		source,
+		survey_id='survey-a',
+		clip_low_percentile=0.0,
+		clip_high_percentile=100.0,
+		max_samples=None,
+		seed=42,
+	)
+
+	# Used values: [1, 3, 5, 7, 9, 11, 13, 15]
+	assert stats.clip_low == pytest.approx(1.0)
+	assert stats.clip_high == pytest.approx(15.0)
+	assert stats.median == pytest.approx(8.0)
+	assert stats.iqr == pytest.approx(7.0)
+
+
+def test_normalization_stats_reject_all_zero_volume(
+	tmp_path: Path,
+) -> None:
+	source = tmp_path / 'zero.npy'
+	np.save(source, np.zeros((4, 4, 4), dtype=np.float32))
+
+	with pytest.raises(ValueError, match='no finite non-zero voxels'):
+		compute_normalization_stats(
+			source,
+			survey_id='zero-survey',
+			max_samples=None,
+			seed=42,
+		)
+
+
 def test_load_normalization_stats_rejects_legacy_center_scale(
 	tmp_path: Path,
 ) -> None:
