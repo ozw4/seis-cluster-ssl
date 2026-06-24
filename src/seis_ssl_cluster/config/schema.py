@@ -68,6 +68,10 @@ FIXED_LOSS_CONTRACT: Final = {
 	'valid_mask_mode': EXPECTED_VALID_MASK_MODE,
 }
 
+DEFAULT_MAE_LOSS_OPTIONS: Final = {
+	'visible_reconstruction_weight': 0.0,
+}
+
 DEFAULT_ZERO_MASK_CONTRACT: Final = {
 	'enabled': True,
 	'zero_atol': 0.0,

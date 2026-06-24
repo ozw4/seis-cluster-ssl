@@ -12,6 +12,7 @@ from typing import TypeAlias, TypeVar
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
 	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
+	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
 	EXPECTED_VALID_MASK_MODE,
@@ -238,6 +239,7 @@ def resolve_mae_training_config(config: _T) -> Config:
 	_reject_fixed_contract_keys(resolved)
 	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
 	_merge_section_defaults(resolved, 'train', DEFAULT_MAE_TRAIN_OPTIONS)
+	_merge_section_defaults(resolved, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
 	_merge_section_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
 
 	manifests = _required_mapping(resolved, 'manifests')
@@ -877,6 +879,12 @@ def _validate_loss(loss: Mapping[str, object]) -> None:
 
 	_validate_required_key(loss, 'gradient_weight', prefix='loss')
 	_validate_nonnegative_finite_number(loss, 'gradient_weight', prefix='loss')
+	_validate_required_key(loss, 'visible_reconstruction_weight', prefix='loss')
+	_validate_nonnegative_finite_number(
+		loss,
+		'visible_reconstruction_weight',
+		prefix='loss',
+	)
 	_validate_loss_target_normalization(loss)
 	if (
 		'valid_mask_mode' in loss

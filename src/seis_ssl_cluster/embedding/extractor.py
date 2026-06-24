@@ -745,6 +745,10 @@ def _validate_checkpoint_loss(loss: Mapping[str, object]) -> None:
 		)
 		raise ValueError(msg)
 	_nonnegative_finite_number(loss['gradient_weight'], 'loss.gradient_weight')
+	_nonnegative_finite_number(
+		loss.get('visible_reconstruction_weight', 0.0),
+		'loss.visible_reconstruction_weight',
+	)
 	_validate_checkpoint_target_normalization(loss)
 
 
@@ -793,6 +797,10 @@ def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 		'reconstruction': loss.get('reconstruction'),
 		'gradient_weight': float(loss.get('gradient_weight', 0.0)),
 	}
+	if 'visible_reconstruction_weight' in loss:
+		objective['visible_reconstruction_weight'] = float(
+			loss['visible_reconstruction_weight'],
+		)
 	if loss.get('reconstruction') == 'huber' and 'huber_delta' in loss:
 		objective['huber_delta'] = float(loss['huber_delta'])
 	target_normalization = loss.get('target_normalization')

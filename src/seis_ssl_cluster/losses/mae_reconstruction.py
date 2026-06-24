@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+from numbers import Real
 from typing import Literal
 
 import torch
@@ -85,6 +87,7 @@ def mae_pretraining_loss(  # noqa: PLR0913
 	reconstruction: LossMode = 'huber',
 	huber_delta: float = 1.0,
 	gradient_weight: float = 0.05,
+	visible_reconstruction_weight: float = 0.0,
 	target_normalization_mode: TargetNormalizationMode = 'none',
 	target_normalization_eps: float | None = None,
 	target_normalization_min_std: float | None = None,
@@ -93,25 +96,37 @@ def mae_pretraining_loss(  # noqa: PLR0913
 	if gradient_weight < 0:
 		msg = f'gradient_weight must be nonnegative; got {gradient_weight!r}'
 		raise ValueError(msg)
+	_validate_visible_reconstruction_weight(visible_reconstruction_weight)
 	_validate_target_normalization_mode(target_normalization_mode)
 	_validate_target_normalization_gradient_contract(
 		target_normalization_mode,
 		gradient_weight,
 	)
 
-	loss_reconstruction, valid_reconstruction_voxels, normalization_result, patch_selection = (
-		_masked_reconstruction_loss_and_count(
-			pred_patches=pred_patches,
-			target=target,
-			spatial_mask=spatial_mask,
-			local_valid_mask=local_valid_mask,
-			patch_size_xyz=patch_size_xyz,
-			reconstruction=reconstruction,
-			huber_delta=huber_delta,
-			target_normalization_mode=target_normalization_mode,
-			target_normalization_eps=target_normalization_eps,
-			target_normalization_min_std=target_normalization_min_std,
-		)
+	(
+		loss_reconstruction_masked,
+		loss_reconstruction_visible,
+		valid_reconstruction_voxels,
+		valid_visible_reconstruction_voxels,
+		normalization_result,
+		patch_selection,
+	) = _reconstruction_loss_components(
+		pred_patches=pred_patches,
+		target=target,
+		spatial_mask=spatial_mask,
+		local_valid_mask=local_valid_mask,
+		patch_size_xyz=patch_size_xyz,
+		reconstruction=reconstruction,
+		huber_delta=huber_delta,
+		target_normalization_mode=target_normalization_mode,
+		target_normalization_eps=target_normalization_eps,
+		target_normalization_min_std=target_normalization_min_std,
+	)
+	visible_weight = loss_reconstruction_masked.new_tensor(
+		float(visible_reconstruction_weight),
+	)
+	loss_reconstruction = (
+		loss_reconstruction_masked + visible_weight * loss_reconstruction_visible
 	)
 	if gradient_weight == 0.0:
 		loss_gradient = loss_reconstruction.detach().new_tensor(0.0)
@@ -130,9 +145,89 @@ def mae_pretraining_loss(  # noqa: PLR0913
 		'loss': loss,
 		'loss_reconstruction': loss_reconstruction,
 		'loss_gradient': loss_gradient,
+		'loss_reconstruction_masked': loss_reconstruction_masked,
+		'loss_reconstruction_visible': loss_reconstruction_visible,
+		'visible_reconstruction_weight': visible_weight,
 		'valid_reconstruction_voxels': valid_reconstruction_voxels,
+		'valid_visible_reconstruction_voxels': valid_visible_reconstruction_voxels,
 		**_target_normalization_metrics(normalization_result, patch_selection),
 	}
+
+
+def _reconstruction_loss_components(  # noqa: PLR0913
+	*,
+	pred_patches: torch.Tensor,
+	target: torch.Tensor,
+	spatial_mask: torch.Tensor,
+	local_valid_mask: torch.Tensor,
+	patch_size_xyz: tuple[int, int, int],
+	reconstruction: LossMode,
+	huber_delta: float,
+	target_normalization_mode: TargetNormalizationMode,
+	target_normalization_eps: float | None,
+	target_normalization_min_std: float | None,
+) -> tuple[
+	torch.Tensor,
+	torch.Tensor,
+	torch.Tensor,
+	torch.Tensor,
+	PatchTargetNormalizationResult,
+	torch.Tensor,
+]:
+	target_patches = _aligned_target_patches(pred_patches, target, patch_size_xyz)
+	local_valid_patch_voxels = _local_valid_patch_voxels(
+		local_valid_mask=local_valid_mask,
+		pred_patches=pred_patches,
+		target=target,
+		patch_size_xyz=patch_size_xyz,
+	)
+	_validate_spatial_mask(spatial_mask, pred_patches)
+	_validate_same_device(pred_patches, target, spatial_mask, local_valid_mask)
+
+	spatial_patch_mask = (
+		spatial_mask.reshape(pred_patches.shape[0], pred_patches.shape[1])
+		.unsqueeze(-1)
+		.unsqueeze(-1)
+	)
+	masked_selection = spatial_patch_mask & local_valid_patch_voxels
+	visible_selection = ~spatial_patch_mask & local_valid_patch_voxels
+	valid_reconstruction_voxels = masked_selection.sum()
+	if bool(valid_reconstruction_voxels.detach().eq(0).item()):
+		msg = (
+			'no valid masked voxels for reconstruction loss; check spatial_mask '
+			'and local_valid_mask'
+		)
+		raise ValueError(msg)
+
+	normalization_result = normalize_target_patches(
+		target_patches.to(dtype=pred_patches.dtype),
+		local_valid_patch_voxels,
+		mode=target_normalization_mode,
+		eps=target_normalization_eps,
+		min_std=target_normalization_min_std,
+	)
+	loss = _elementwise_loss(
+		pred_patches,
+		normalization_result.normalized_target,
+		reconstruction,
+		huber_delta,
+	)
+	loss_reconstruction_masked = loss.masked_select(masked_selection).mean()
+	valid_visible_reconstruction_voxels = visible_selection.sum()
+	loss_reconstruction_visible = _mean_or_zero(
+		loss,
+		visible_selection,
+		valid_visible_reconstruction_voxels,
+	)
+	patch_selection = spatial_patch_mask & normalization_result.valid_count.gt(0)
+	return (
+		loss_reconstruction_masked,
+		loss_reconstruction_visible,
+		valid_reconstruction_voxels,
+		valid_visible_reconstruction_voxels,
+		normalization_result,
+		patch_selection,
+	)
 
 
 def _masked_reconstruction_loss_and_count(  # noqa: PLR0913
@@ -153,55 +248,41 @@ def _masked_reconstruction_loss_and_count(  # noqa: PLR0913
 	PatchTargetNormalizationResult,
 	torch.Tensor,
 ]:
-	target_patches = _aligned_target_patches(pred_patches, target, patch_size_xyz)
-	local_valid_patch_voxels = _local_valid_patch_voxels(
-		local_valid_mask=local_valid_mask,
+	(
+		loss_reconstruction_masked,
+		_loss_reconstruction_visible,
+		valid_voxels,
+		_valid_visible_voxels,
+		normalization_result,
+		patch_selection,
+	) = _reconstruction_loss_components(
 		pred_patches=pred_patches,
 		target=target,
+		spatial_mask=spatial_mask,
+		local_valid_mask=local_valid_mask,
 		patch_size_xyz=patch_size_xyz,
-	)
-	_validate_spatial_mask(spatial_mask, pred_patches)
-	_validate_same_device(pred_patches, target, spatial_mask, local_valid_mask)
-
-	selection = (
-		spatial_mask.reshape(pred_patches.shape[0], pred_patches.shape[1])
-		.unsqueeze(-1)
-		.unsqueeze(-1)
-		& local_valid_patch_voxels
-	)
-	valid_voxels = selection.sum()
-	if bool(valid_voxels.detach().eq(0).item()):
-		msg = (
-			'no valid masked voxels for reconstruction loss; check spatial_mask '
-			'and local_valid_mask'
-		)
-		raise ValueError(msg)
-
-	normalization_result = normalize_target_patches(
-		target_patches.to(dtype=pred_patches.dtype),
-		local_valid_patch_voxels,
-		mode=target_normalization_mode,
-		eps=target_normalization_eps,
-		min_std=target_normalization_min_std,
-	)
-	loss = _elementwise_loss(
-		pred_patches,
-		normalization_result.normalized_target,
-		reconstruction,
-		huber_delta,
-	)
-	patch_selection = (
-		spatial_mask.reshape(pred_patches.shape[0], pred_patches.shape[1])
-		.unsqueeze(-1)
-		.unsqueeze(-1)
-		& normalization_result.valid_count.gt(0)
+		reconstruction=reconstruction,
+		huber_delta=huber_delta,
+		target_normalization_mode=target_normalization_mode,
+		target_normalization_eps=target_normalization_eps,
+		target_normalization_min_std=target_normalization_min_std,
 	)
 	return (
-		loss.masked_select(selection).mean(),
+		loss_reconstruction_masked,
 		valid_voxels,
 		normalization_result,
 		patch_selection,
 	)
+
+
+def _mean_or_zero(
+	loss: torch.Tensor,
+	selection: torch.Tensor,
+	valid_voxels: torch.Tensor,
+) -> torch.Tensor:
+	if bool(valid_voxels.detach().eq(0).item()):
+		return loss.detach().new_tensor(0.0)
+	return loss.masked_select(selection).mean()
 
 
 def _target_normalization_metrics(
@@ -235,6 +316,22 @@ def _validate_target_normalization_gradient_contract(
 			'loss.gradient_weight must be 0.0 when '
 			"loss.target_normalization.mode is 'patch_zscore'; "
 			'the current gradient loss operates in survey-normalized amplitude space'
+		)
+		raise ValueError(msg)
+
+
+def _validate_visible_reconstruction_weight(value: object) -> None:
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = (
+			'visible_reconstruction_weight must be a finite nonnegative real '
+			f'number; got {value!r}'
+		)
+		raise TypeError(msg)
+	weight = float(value)
+	if not math.isfinite(weight) or weight < 0.0:
+		msg = (
+			'visible_reconstruction_weight must be a finite nonnegative real '
+			f'number; got {value!r}'
 		)
 		raise ValueError(msg)
 

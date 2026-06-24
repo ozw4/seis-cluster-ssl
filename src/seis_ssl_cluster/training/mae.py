@@ -20,6 +20,7 @@ import seis_ssl_cluster
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
 	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
+	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
 	EXPECTED_VALID_MASK_MODE,
@@ -156,6 +157,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		reconstruction,
 		huber_delta,
 		gradient_weight,
+		visible_reconstruction_weight,
 		target_normalization_mode,
 		target_normalization_eps,
 		target_normalization_min_std,
@@ -185,6 +187,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				reconstruction=reconstruction,
 				huber_delta=huber_delta,
 				gradient_weight=gradient_weight,
+				visible_reconstruction_weight=visible_reconstruction_weight,
 				target_normalization_mode=target_normalization_mode,
 				target_normalization_eps=target_normalization_eps,
 				target_normalization_min_std=target_normalization_min_std,
@@ -1063,6 +1066,7 @@ def _loss_resume_compatibility_view(loss: Mapping[str, object]) -> dict[str, obj
 	view = dict(loss)
 	if 'target_normalization' not in view:
 		view['target_normalization'] = {'mode': 'none'}
+	view.setdefault('visible_reconstruction_weight', 0.0)
 	return view
 
 
@@ -1101,6 +1105,7 @@ def _complete_mae_training_config(config: Mapping[str, object]) -> dict[str, obj
 		_runtime_mapping(resolved, section)
 	_merge_runtime_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
 	_merge_runtime_defaults(resolved, 'train', DEFAULT_MAE_TRAIN_OPTIONS)
+	_merge_runtime_defaults(resolved, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
 	_merge_runtime_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
 	_validate_runtime_loss(_runtime_mapping(resolved, 'loss'))
 	_merge_runtime_fixed(resolved, 'data', FIXED_DATA_CONTRACT)
@@ -1721,7 +1726,15 @@ def _float_config(parent: Mapping[str, object], key: str, default: float) -> flo
 
 def _runtime_loss_values(
 	loss_config: Mapping[str, object],
-) -> tuple[Literal['huber', 'l1', 'mse'], float, float, str, float | None, float | None]:
+) -> tuple[
+	Literal['huber', 'l1', 'mse'],
+	float,
+	float,
+	float,
+	str,
+	float | None,
+	float | None,
+]:
 	_validate_runtime_loss(loss_config)
 	reconstruction = _loss_mode(loss_config['reconstruction'])
 	huber_delta = (
@@ -1737,6 +1750,11 @@ def _runtime_loss_values(
 		loss_config,
 		'gradient_weight',
 		label='loss.gradient_weight',
+	)
+	visible_reconstruction_weight = _required_nonnegative_float_config(
+		loss_config,
+		'visible_reconstruction_weight',
+		label='loss.visible_reconstruction_weight',
 	)
 	target_normalization = _required_mapping_config(
 		loss_config,
@@ -1762,7 +1780,15 @@ def _runtime_loss_values(
 		if mode == 'patch_zscore'
 		else None
 	)
-	return reconstruction, huber_delta, gradient_weight, mode, eps, min_std
+	return (
+		reconstruction,
+		huber_delta,
+		gradient_weight,
+		visible_reconstruction_weight,
+		mode,
+		eps,
+		min_std,
+	)
 
 
 def _validate_runtime_loss(loss_config: Mapping[str, object]) -> None:
@@ -1785,6 +1811,11 @@ def _validate_runtime_loss(loss_config: Mapping[str, object]) -> None:
 		loss_config,
 		'gradient_weight',
 		label='loss.gradient_weight',
+	)
+	_required_nonnegative_float_config(
+		loss_config,
+		'visible_reconstruction_weight',
+		label='loss.visible_reconstruction_weight',
 	)
 	target_normalization = _required_mapping_config(
 		loss_config,
