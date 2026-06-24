@@ -20,9 +20,9 @@ import seis_ssl_cluster
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
 	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
-	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
+	EXPECTED_VALID_MASK_MODE,
 	FIXED_DATA_CONTRACT,
 	FIXED_LOSS_CONTRACT,
 	FIXED_MASKING_CONTRACT,
@@ -30,6 +30,8 @@ from seis_ssl_cluster.config.schema import (
 	MAE_DEBUG_VISUALIZATION_COLUMNS,
 	MAE_DEBUG_VISUALIZATION_KEYS,
 	STAGE_MAE_TRAINING,
+	SUPPORTED_RECONSTRUCTION_LOSSES,
+	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
 from seis_ssl_cluster.data import NopimsAmplitudePretrainDataset, read_manifest_json
 from seis_ssl_cluster.losses import mae_pretraining_loss
@@ -150,6 +152,14 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	run_config: Mapping[str, object] | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
+	(
+		reconstruction,
+		huber_delta,
+		gradient_weight,
+		target_normalization_mode,
+		target_normalization_eps,
+		target_normalization_min_std,
+	) = _runtime_loss_values(loss_config)
 	model.train()
 	totals: dict[str, float] = {}
 	batches = 0
@@ -172,9 +182,12 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				spatial_mask=_required_tensor(batch, 'spatial_mask'),
 				local_valid_mask=_required_tensor(batch, 'local_valid_mask'),
 				patch_size_xyz=patch_size_xyz,
-				reconstruction=_loss_mode(loss_config.get('reconstruction', 'huber')),
-				huber_delta=_float_config(loss_config, 'huber_delta', 1.0),
-				gradient_weight=_float_config(loss_config, 'gradient_weight', 0.05),
+				reconstruction=reconstruction,
+				huber_delta=huber_delta,
+				gradient_weight=gradient_weight,
+				target_normalization_mode=target_normalization_mode,
+				target_normalization_eps=target_normalization_eps,
+				target_normalization_min_std=target_normalization_min_std,
 			)
 			loss = losses['loss']
 
@@ -267,6 +280,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					global_step=global_step,
 					config=visualization_config,
 					metrics=step_metrics,
+					target_normalization_config=loss_config.get('target_normalization'),
 				)
 				epoch_visualization_triggered = (
 					epoch_visualization_triggered or epoch_triggered
@@ -809,6 +823,7 @@ def _save_mae_debug_visualization(  # noqa: PLR0913
 	global_step: int,
 	config: MaeDebugVisualizationConfig,
 	metrics: Mapping[str, float],
+	target_normalization_config: object = None,
 ) -> None:
 	save_mae_debug_visualization_pngs(
 		batch=batch,
@@ -818,6 +833,7 @@ def _save_mae_debug_visualization(  # noqa: PLR0913
 		global_step=global_step,
 		config=config,
 		metrics=metrics,
+		target_normalization_config=target_normalization_config,
 	)
 
 
@@ -1026,7 +1042,11 @@ def _validate_resume_config_compatibility(
 def _resume_compatibility_view(config: Mapping[str, object]) -> dict[str, object]:
 	view: dict[str, object] = {'stage': config.get('stage')}
 	for section in _RESUME_COMPATIBILITY_SECTIONS:
-		view[section] = _json_safe(config.get(section))
+		value = config.get(section)
+		if section == 'loss' and isinstance(value, Mapping):
+			view[section] = _json_safe(_loss_resume_compatibility_view(value))
+		else:
+			view[section] = _json_safe(value)
 	train = config.get('train')
 	if isinstance(train, Mapping):
 		view['train'] = {
@@ -1036,6 +1056,13 @@ def _resume_compatibility_view(config: Mapping[str, object]) -> dict[str, object
 		}
 	else:
 		view['train'] = _json_safe(train)
+	return view
+
+
+def _loss_resume_compatibility_view(loss: Mapping[str, object]) -> dict[str, object]:
+	view = dict(loss)
+	if 'target_normalization' not in view:
+		view['target_normalization'] = {'mode': 'none'}
 	return view
 
 
@@ -1073,9 +1100,9 @@ def _complete_mae_training_config(config: Mapping[str, object]) -> dict[str, obj
 	for section in ('paths', 'manifests', 'data', 'model', 'masking', 'loss', 'train'):
 		_runtime_mapping(resolved, section)
 	_merge_runtime_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
-	_merge_runtime_defaults(resolved, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
 	_merge_runtime_defaults(resolved, 'train', DEFAULT_MAE_TRAIN_OPTIONS)
 	_merge_runtime_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
+	_validate_runtime_loss(_runtime_mapping(resolved, 'loss'))
 	_merge_runtime_fixed(resolved, 'data', FIXED_DATA_CONTRACT)
 	_merge_runtime_fixed(resolved, 'model', FIXED_MODEL_CONTRACT)
 	_merge_runtime_fixed(resolved, 'masking', FIXED_MASKING_CONTRACT)
@@ -1692,6 +1719,197 @@ def _float_config(parent: Mapping[str, object], key: str, default: float) -> flo
 	return float(value)
 
 
+def _runtime_loss_values(
+	loss_config: Mapping[str, object],
+) -> tuple[Literal['huber', 'l1', 'mse'], float, float, str, float | None, float | None]:
+	_validate_runtime_loss(loss_config)
+	reconstruction = _loss_mode(loss_config['reconstruction'])
+	huber_delta = (
+		_required_positive_float_config(
+			loss_config,
+			'huber_delta',
+			label='loss.huber_delta',
+		)
+		if reconstruction == 'huber'
+		else 1.0
+	)
+	gradient_weight = _required_nonnegative_float_config(
+		loss_config,
+		'gradient_weight',
+		label='loss.gradient_weight',
+	)
+	target_normalization = _required_mapping_config(
+		loss_config,
+		'target_normalization',
+		label='loss.target_normalization',
+	)
+	mode = _target_normalization_mode(target_normalization.get('mode'))
+	eps = (
+		_required_positive_float_config(
+			target_normalization,
+			'eps',
+			label='loss.target_normalization.eps',
+		)
+		if mode == 'patch_zscore'
+		else None
+	)
+	min_std = (
+		_required_positive_float_config(
+			target_normalization,
+			'min_std',
+			label='loss.target_normalization.min_std',
+		)
+		if mode == 'patch_zscore'
+		else None
+	)
+	return reconstruction, huber_delta, gradient_weight, mode, eps, min_std
+
+
+def _validate_runtime_loss(loss_config: Mapping[str, object]) -> None:
+	reconstruction = _required_config_value(
+		loss_config,
+		'reconstruction',
+		label='loss.reconstruction',
+	)
+	_loss_mode(reconstruction)
+	if reconstruction == 'huber':
+		_required_positive_float_config(
+			loss_config,
+			'huber_delta',
+			label='loss.huber_delta',
+		)
+	elif 'huber_delta' in loss_config:
+		msg = 'loss.huber_delta must be omitted unless loss.reconstruction is huber'
+		raise ValueError(msg)
+	gradient_weight = _required_nonnegative_float_config(
+		loss_config,
+		'gradient_weight',
+		label='loss.gradient_weight',
+	)
+	target_normalization = _required_mapping_config(
+		loss_config,
+		'target_normalization',
+		label='loss.target_normalization',
+	)
+	mode = _target_normalization_mode(
+		_required_config_value(
+			target_normalization,
+			'mode',
+			label='loss.target_normalization.mode',
+		),
+	)
+	if mode == 'none':
+		for key in ('eps', 'min_std'):
+			if key in target_normalization:
+				msg = (
+					f'loss.target_normalization.{key} must be omitted '
+					"when mode is 'none'"
+				)
+				raise ValueError(msg)
+	else:
+		_required_positive_float_config(
+			target_normalization,
+			'eps',
+			label='loss.target_normalization.eps',
+		)
+		_required_positive_float_config(
+			target_normalization,
+			'min_std',
+			label='loss.target_normalization.min_std',
+		)
+		if gradient_weight != 0.0:
+			msg = (
+				'loss.gradient_weight must be 0.0 when '
+				"loss.target_normalization.mode is 'patch_zscore'; "
+				'the current gradient loss operates in survey-normalized amplitude space'
+			)
+			raise ValueError(msg)
+	if (
+		'valid_mask_mode' in loss_config
+		and loss_config.get('valid_mask_mode') != EXPECTED_VALID_MASK_MODE
+	):
+		msg = "loss.valid_mask_mode must be resolved internally as 'voxel'"
+		raise ValueError(msg)
+
+
+def _required_config_value(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	label: str,
+) -> object:
+	if key not in parent:
+		msg = f'{label} is required'
+		raise ValueError(msg)
+	return parent[key]
+
+
+def _required_mapping_config(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	label: str,
+) -> Mapping[str, object]:
+	value = _required_config_value(parent, key, label=label)
+	if not isinstance(value, Mapping):
+		msg = f'{label} must be a mapping; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _target_normalization_mode(value: object) -> str:
+	if value not in SUPPORTED_TARGET_NORMALIZATION_MODES:
+		msg = (
+			'loss.target_normalization.mode must be one of '
+			f'{sorted(SUPPORTED_TARGET_NORMALIZATION_MODES)!r}; got {value!r}'
+		)
+		raise ValueError(msg)
+	return str(value)
+
+
+def _required_float_config(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	label: str,
+) -> float:
+	value = _required_config_value(parent, key, label=label)
+	if not isinstance(value, float | int) or isinstance(value, bool):
+		msg = f'{label} must be a float; got {value!r}'
+		raise TypeError(msg)
+	number = float(value)
+	if not math.isfinite(number):
+		msg = f'{label} must be finite; got {value!r}'
+		raise ValueError(msg)
+	return number
+
+
+def _required_positive_float_config(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	label: str,
+) -> float:
+	value = _required_float_config(parent, key, label=label)
+	if value <= 0.0:
+		msg = f'{label} must be positive; got {value!r}'
+		raise ValueError(msg)
+	return value
+
+
+def _required_nonnegative_float_config(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	label: str,
+) -> float:
+	value = _required_float_config(parent, key, label=label)
+	if value < 0.0:
+		msg = f'{label} must be nonnegative; got {value!r}'
+		raise ValueError(msg)
+	return value
+
+
 def _positive_float_config(
 	parent: Mapping[str, object],
 	key: str,
@@ -1866,8 +2084,11 @@ def _xyz_config(parent: Mapping[str, object], key: str) -> tuple[int, int, int]:
 
 
 def _loss_mode(value: object) -> Literal['huber', 'l1', 'mse']:
-	if value not in {'huber', 'l1', 'mse'}:
-		msg = f'reconstruction must be "huber", "l1", or "mse"; got {value!r}'
+	if value not in SUPPORTED_RECONSTRUCTION_LOSSES:
+		msg = (
+			'loss.reconstruction must be one of '
+			f'{sorted(SUPPORTED_RECONSTRUCTION_LOSSES)!r}; got {value!r}'
+		)
 		raise ValueError(msg)
 	return cast('Literal["huber", "l1", "mse"]', value)
 

@@ -79,6 +79,7 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	}
 	assert checkpoint['config']['model']['in_channels'] == 1
 	assert checkpoint['config']['loss']['valid_mask_mode'] == 'voxel'
+	assert checkpoint['config']['loss']['target_normalization'] == {'mode': 'none'}
 	assert (_path_like(cfg['paths']['output_root']) / 'manifest.json').is_file()
 	run_metadata_path = _path_like(cfg['paths']['output_root']) / 'run_metadata.json'
 	assert run_metadata_path.is_file()
@@ -154,6 +155,37 @@ def test_resume_rejects_incompatible_resolved_config(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='config is incompatible'):
 		run_mae_pretraining(resume_cfg, resume=checkpoint_path)
+
+
+def test_resume_rejects_target_normalization_change(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	checkpoint_path = run_mae_pretraining(cfg)
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['loss']['target_normalization'] = {
+		'mode': 'patch_zscore',
+		'eps': 1.0e-6,
+		'min_std': 0.05,
+	}
+
+	with pytest.raises(ValueError, match=r'loss\.target_normalization'):
+		run_mae_pretraining(resume_cfg, resume=checkpoint_path)
+
+
+def test_resume_allows_legacy_checkpoint_for_none_target_normalization(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	cfg['train']['max_steps'] = 1
+	checkpoint_path = run_mae_pretraining(cfg)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	del payload['config']['loss']['target_normalization']
+	legacy_path = tmp_path / 'legacy.pt'
+	torch.save(payload, legacy_path)
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['train']['max_steps'] = 2
+
+	resumed_path = run_mae_pretraining(resume_cfg, resume=legacy_path)
+	assert resumed_path.is_file()
 
 
 def test_step_checkpoint_resume_continues_unfinished_epoch(tmp_path: Path) -> None:
@@ -350,12 +382,37 @@ def test_grad_clip_norm_calls_torch_clip_on_cpu(
 		device=torch.device('cpu'),
 		epoch=1,
 		patch_size_xyz=(2, 2, 2),
-		loss_config={'reconstruction': 'mse'},
+		loss_config={
+			'reconstruction': 'mse',
+			'gradient_weight': 0.05,
+			'target_normalization': {'mode': 'none'},
+		},
 		grad_clip_norm=1.0,
 	)
 
 	assert calls == [1.0]
 	assert state.metrics['grad_norm'] == pytest.approx(0.25)
+
+
+def test_train_one_epoch_requires_loss_reconstruction() -> None:
+	dataloader = torch.utils.data.DataLoader(
+		[_mae_sample()],
+		batch_size=1,
+		collate_fn=mae_collate_fn,
+	)
+	model = _TinyAmpModel()
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+	with pytest.raises(ValueError, match=r'loss\.reconstruction is required'):
+		train_mae_one_epoch(
+			model=model,
+			dataloader=dataloader,
+			optimizer=optimizer,
+			device=torch.device('cpu'),
+			epoch=1,
+			patch_size_xyz=(2, 2, 2),
+			loss_config={'gradient_weight': 0.05, 'target_normalization': {'mode': 'none'}},
+		)
 
 
 def test_nonfinite_loss_reports_survey_and_coordinates(
@@ -392,7 +449,11 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 			device=torch.device('cpu'),
 			epoch=3,
 			patch_size_xyz=(2, 2, 2),
-			loss_config={'reconstruction': 'mse'},
+			loss_config={
+				'reconstruction': 'mse',
+				'gradient_weight': 0.05,
+				'target_normalization': {'mode': 'none'},
+			},
 			global_step=1042,
 			diagnostics_dir=diagnostics_dir,
 			run_config=run_config,
@@ -452,8 +513,10 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 			'block_size_tokens': [1, 1, 1],
 		},
 		'loss': {
+			'reconstruction': 'huber',
 			'huber_delta': 1.0,
 			'gradient_weight': 0.0,
+			'target_normalization': {'mode': 'none'},
 		},
 		'zero_mask': {'enabled': False},
 		'train': {

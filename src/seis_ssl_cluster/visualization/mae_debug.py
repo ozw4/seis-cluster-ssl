@@ -16,7 +16,11 @@ from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DEBUG_VISUALIZATION_COLUMNS,
 	MAE_DEBUG_VISUALIZATION_COLUMNS,
 )
-from seis_ssl_cluster.models.mae.patching import unpatchify_3d
+from seis_ssl_cluster.losses.target_normalization import (
+	denormalize_predicted_patches,
+	normalize_target_patches,
+)
+from seis_ssl_cluster.models.mae.patching import patchify_3d, unpatchify_3d
 from seis_ssl_cluster.visualization.common import (
 	ImagePanel,
 	apply_visual_invalid_mask,
@@ -60,6 +64,7 @@ def save_mae_debug_visualization_pngs(  # noqa: PLR0913
 	global_step: int,
 	config: MaeDebugVisualizationConfig,
 	metrics: Mapping[str, float] | None = None,
+	target_normalization_config: object = None,
 ) -> list[Path]:
 	"""Save XY and XZ debug PNGs for selected samples and return paths."""
 	_validate_render_inputs(
@@ -77,6 +82,9 @@ def save_mae_debug_visualization_pngs(  # noqa: PLR0913
 			target_tensor.shape[2:],
 			patch_size_xyz,
 		)
+		normalization_mode, oracle_denorm = _target_normalization_display_flags(
+			target_normalization_config,
+		)
 		created: list[Path] = []
 		for sample_index in range(sample_count):
 			sample = _sample_arrays(
@@ -86,6 +94,7 @@ def save_mae_debug_visualization_pngs(  # noqa: PLR0913
 				patch_size_xyz=patch_size_xyz,
 				token_grid_shape=token_grid_shape,
 				sample_index=sample_index,
+				target_normalization_config=target_normalization_config,
 			)
 			stem = _file_stem(
 				epoch=epoch,
@@ -105,6 +114,8 @@ def save_mae_debug_visualization_pngs(  # noqa: PLR0913
 					config=config,
 					metrics=metrics,
 					coords=batch.get('coords'),
+					target_normalization_mode=normalization_mode,
+					oracle_denormalization=oracle_denorm,
 				)
 				created.append(out_path)
 		return created
@@ -118,6 +129,7 @@ def _sample_arrays(  # noqa: PLR0913
 	patch_size_xyz: tuple[int, int, int],
 	token_grid_shape: tuple[int, int, int],
 	sample_index: int,
+	target_normalization_config: object = None,
 ) -> dict[str, np.ndarray | None]:
 	target = _sample_volume(batch, 'target', sample_index)
 	x = _sample_volume(batch, 'x', sample_index)
@@ -133,13 +145,27 @@ def _sample_arrays(  # noqa: PLR0913
 			f'got shape={target.shape!r}'
 		)
 		raise ValueError(msg)
+	pred_patches_for_display, pred_patches_norm = _prediction_patches_for_display(
+		batch=batch,
+		pred_patches=pred_patches,
+		patch_size_xyz=patch_size_xyz,
+		target_normalization_config=target_normalization_config,
+	)
 	prediction = as_numpy(
 		unpatchify_3d(
-			pred_patches[sample_index : sample_index + 1].detach(),
+			pred_patches_for_display[sample_index : sample_index + 1].detach(),
 			patch_size_xyz,
 			token_grid_shape,
 		)[0],
 		'prediction',
+	)
+	prediction_norm = as_numpy(
+		unpatchify_3d(
+			pred_patches_norm[sample_index : sample_index + 1].detach(),
+			patch_size_xyz,
+			token_grid_shape,
+		)[0],
+		'prediction_norm',
 	)
 	if prediction.shape != target.shape:
 		msg = (
@@ -165,6 +191,7 @@ def _sample_arrays(  # noqa: PLR0913
 		'x': x[0],
 		'target': target[0],
 		'prediction': prediction[0],
+		'prediction_norm': prediction_norm[0],
 		'local_valid_mask': local_valid_mask,
 		'spatial_mask_voxel': spatial_mask_voxel,
 	}
@@ -181,6 +208,8 @@ def _save_view_png(  # noqa: PLR0913
 	config: MaeDebugVisualizationConfig,
 	metrics: Mapping[str, float] | None,
 	coords: object,
+	target_normalization_mode: str,
+	oracle_denormalization: bool,
 ) -> None:
 	target = _required_sample_array(sample, 'target')
 	slice_index = _resolve_slice_index(view, target.shape, config)
@@ -198,6 +227,8 @@ def _save_view_png(  # noqa: PLR0913
 		global_step=global_step,
 		metrics=metrics,
 		coords=coords,
+		target_normalization_mode=target_normalization_mode,
+		oracle_denormalization=oracle_denormalization,
 	)
 	_plot_panels(
 		panels,
@@ -218,6 +249,8 @@ def _save_view_png(  # noqa: PLR0913
 		metrics=metrics,
 		coords=coords,
 		sample=sample,
+		target_normalization_mode=target_normalization_mode,
+		oracle_denormalization=oracle_denormalization,
 	)
 
 
@@ -232,6 +265,7 @@ def _build_panels(
 	x = _required_sample_array(sample, 'x')
 	target = _required_sample_array(sample, 'target')
 	prediction = _required_sample_array(sample, 'prediction')
+	prediction_norm = _required_sample_array(sample, 'prediction_norm')
 	local_valid_mask = sample.get('local_valid_mask')
 	spatial_mask = sample.get('spatial_mask_voxel')
 	valid_slice = slice_mask(local_valid_mask, view=view, slice_index=slice_index)
@@ -265,7 +299,7 @@ def _build_panels(
 					valid_mask=valid_slice,
 				),
 			)
-		elif column == 'prediction':
+		elif column in {'prediction', 'prediction_oracle_denorm'}:
 			panels.append(
 				ImagePanel(
 					'prediction',
@@ -273,7 +307,15 @@ def _build_panels(
 					valid_mask=valid_slice,
 				),
 			)
-		elif column == 'abs_error':
+		elif column == 'prediction_norm':
+			panels.append(
+				ImagePanel(
+					'prediction_norm',
+					slice_image(prediction_norm, view=view, slice_index=slice_index),
+					valid_mask=valid_slice,
+				),
+			)
+		elif column in {'abs_error', 'abs_error_oracle_denorm'}:
 			panels.append(
 				ImagePanel(
 					'abs_error',
@@ -408,9 +450,12 @@ def _write_metadata(  # noqa: PLR0913
 	metrics: Mapping[str, float] | None,
 	coords: object,
 	sample: Mapping[str, np.ndarray | None],
+	target_normalization_mode: str,
+	oracle_denormalization: bool,
 ) -> None:
 	target = _required_sample_array(sample, 'target')
 	prediction = _required_sample_array(sample, 'prediction')
+	prediction_norm = _required_sample_array(sample, 'prediction_norm')
 	valid_mask = sample.get('local_valid_mask')
 	valid_values = (
 		np.ones(target.shape, dtype=bool)
@@ -432,6 +477,11 @@ def _write_metadata(  # noqa: PLR0913
 		),
 		'metrics': _json_safe(dict(metrics or {})),
 		'valid_voxels': int(valid_values.sum()),
+		'prediction_space': 'survey_normalized_amplitude',
+		'target_normalization_mode': target_normalization_mode,
+		'oracle_target_statistics_used_for_denormalization': bool(
+			oracle_denormalization,
+		),
 		'abs_error_mae': (
 			None if error_values.size == 0 else float(np.mean(error_values))
 		),
@@ -451,10 +501,14 @@ def _figure_title(  # noqa: PLR0913
 	global_step: int,
 	metrics: Mapping[str, float] | None,
 	coords: object,
+	target_normalization_mode: str = 'none',
+	oracle_denormalization: bool = False,
 ) -> str:
 	loss_text = ''
 	if metrics is not None and 'loss' in metrics:
 		loss_text = f' loss={metrics["loss"]:.4g}'
+	if oracle_denormalization:
+		loss_text = f'{loss_text} target_norm={target_normalization_mode} oracle_denorm=true'
 	title = (
 		f'Amplitude MAE debug {view.upper()} sample={sample_index} '
 		f'epoch={epoch:04d} step={global_step:06d}{loss_text} '
@@ -544,6 +598,51 @@ def _resolve_token_grid_shape(
 		)
 		raise ValueError(msg)
 	return x_size // px_size, y_size // py_size, z_size // pz_size
+
+
+
+def _prediction_patches_for_display(  # noqa: PLR0913
+	*,
+	batch: Mapping[str, object],
+	pred_patches: torch.Tensor,
+	patch_size_xyz: tuple[int, int, int],
+	target_normalization_config: object,
+) -> tuple[torch.Tensor, torch.Tensor]:
+	mode, _oracle = _target_normalization_display_flags(target_normalization_config)
+	if mode == 'none':
+		return pred_patches, pred_patches
+	if not isinstance(target_normalization_config, Mapping):
+		msg = 'target_normalization_config must be a mapping for patch_zscore display'
+		raise TypeError(msg)
+	target = _required_tensor(batch, 'target')
+	local_valid_mask = _required_tensor(batch, 'local_valid_mask')
+	valid_patch_voxels = patchify_3d(local_valid_mask.unsqueeze(1), patch_size_xyz)
+	stats = normalize_target_patches(
+		patchify_3d(target, patch_size_xyz).to(dtype=pred_patches.dtype),
+		valid_patch_voxels,
+		mode='patch_zscore',
+		eps=float(target_normalization_config['eps']),
+		min_std=float(target_normalization_config['min_std']),
+	)
+	return (
+		denormalize_predicted_patches(
+			pred_patches,
+			patch_mean=stats.patch_mean,
+			patch_std_eff=stats.patch_std_eff,
+		),
+		pred_patches,
+	)
+
+
+def _target_normalization_display_flags(config: object) -> tuple[str, bool]:
+	if isinstance(config, Mapping):
+		mode = str(config.get('mode', 'none'))
+	else:
+		mode = 'none'
+	if mode not in {'none', 'patch_zscore'}:
+		msg = f'unsupported target normalization mode for debug display: {mode!r}'
+		raise ValueError(msg)
+	return mode, mode == 'patch_zscore'
 
 
 def _sample_volume(

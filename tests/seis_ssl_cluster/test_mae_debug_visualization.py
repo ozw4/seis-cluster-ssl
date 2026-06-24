@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
 import matplotlib.pyplot as plt
 import pytest
 import torch
@@ -142,3 +144,44 @@ def test_mae_debug_trigger_helpers_reject_zero_intervals(tmp_path: Path) -> None
 			epoch=1,
 			already_triggered=False,
 		)
+
+
+def test_mae_debug_patch_zscore_uses_oracle_denormalization(
+	tmp_path: Path,
+) -> None:
+	target = torch.arange(8, dtype=torch.float32).reshape(1, 1, 2, 2, 2)
+	local_valid_mask = torch.ones((1, 2, 2, 2), dtype=torch.bool)
+	valid_patches = patchify_3d(local_valid_mask.unsqueeze(1), (2, 2, 2))
+	target_patches = patchify_3d(target, (2, 2, 2))
+	mean = target_patches.mean(dim=-1, keepdim=True)
+	std = target_patches.std(dim=-1, keepdim=True, unbiased=False)
+	pred_norm = torch.where(valid_patches, (target_patches - mean) / std, torch.zeros_like(target_patches))
+
+	paths = save_mae_debug_visualization_pngs(
+		batch={
+			'x': target.clone(),
+			'target': target,
+			'spatial_mask': torch.ones((1, 1, 1, 1), dtype=torch.bool),
+			'local_valid_mask': local_valid_mask,
+		},
+		model_output={'pred_patches': pred_norm, 'token_grid_shape': (1, 1, 1)},
+		patch_size_xyz=(2, 2, 2),
+		epoch=1,
+		global_step=1,
+		config=MaeDebugVisualizationConfig(
+			output_dir=tmp_path,
+			dpi=30,
+			columns=('prediction_norm', 'prediction', 'abs_error'),
+		),
+		target_normalization_config={
+			'mode': 'patch_zscore',
+			'eps': 1.0e-12,
+			'min_std': 0.05,
+		},
+	)
+
+	metadata = json.loads(paths[0].with_suffix('.json').read_text(encoding='utf-8'))
+	assert metadata['prediction_space'] == 'survey_normalized_amplitude'
+	assert metadata['target_normalization_mode'] == 'patch_zscore'
+	assert metadata['oracle_target_statistics_used_for_denormalization'] is True
+	assert metadata['abs_error_mae'] == pytest.approx(0.0, abs=1e-5)

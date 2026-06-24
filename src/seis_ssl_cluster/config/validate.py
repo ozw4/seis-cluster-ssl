@@ -12,10 +12,8 @@ from typing import TypeAlias, TypeVar
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
 	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
-	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
-	EXPECTED_RECONSTRUCTION_LOSS,
 	EXPECTED_VALID_MASK_MODE,
 	FIXED_DATA_CONTRACT,
 	FIXED_LOSS_CONTRACT,
@@ -34,6 +32,8 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_NORMALIZATION_QC,
 	STAGE_NORMALIZATION_STATS,
 	STAGE_PATH_KEYS,
+	SUPPORTED_RECONSTRUCTION_LOSSES,
+	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
 
 Config: TypeAlias = dict[str, object]
@@ -237,7 +237,6 @@ def resolve_mae_training_config(config: _T) -> Config:
 	)
 	_reject_fixed_contract_keys(resolved)
 	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
-	_merge_section_defaults(resolved, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
 	_merge_section_defaults(resolved, 'train', DEFAULT_MAE_TRAIN_OPTIONS)
 	_merge_section_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
 
@@ -853,21 +852,92 @@ def _validate_optional_train_device(train: Mapping[str, object]) -> None:
 
 
 def _validate_loss(loss: Mapping[str, object]) -> None:
-	if (
-		'reconstruction' in loss
-		and loss.get('reconstruction') != EXPECTED_RECONSTRUCTION_LOSS
-	):
-		msg = "loss.reconstruction must be resolved internally as 'huber'"
+	_validate_required_key(loss, 'reconstruction', prefix='loss')
+	reconstruction = loss.get('reconstruction')
+	if reconstruction not in SUPPORTED_RECONSTRUCTION_LOSSES:
+		msg = (
+			'loss.reconstruction must be one of '
+			f'{sorted(SUPPORTED_RECONSTRUCTION_LOSSES)!r}; '
+			f'got {reconstruction!r}'
+		)
 		raise ValueError(msg)
-	if 'huber_delta' in loss:
-		_validate_positive_number(loss, 'huber_delta', prefix='loss')
-	if 'gradient_weight' in loss:
-		_validate_nonnegative_number(loss, 'gradient_weight', prefix='loss')
+
+	if reconstruction == 'huber':
+		_validate_required_key(loss, 'huber_delta', prefix='loss')
+		_validate_positive_finite_number(loss, 'huber_delta', prefix='loss')
+	elif 'huber_delta' in loss:
+		msg = 'loss.huber_delta must be omitted unless loss.reconstruction is huber'
+		raise ValueError(msg)
+
+	_validate_required_key(loss, 'gradient_weight', prefix='loss')
+	_validate_nonnegative_finite_number(loss, 'gradient_weight', prefix='loss')
+	_validate_loss_target_normalization(loss)
 	if (
 		'valid_mask_mode' in loss
 		and loss.get('valid_mask_mode') != EXPECTED_VALID_MASK_MODE
 	):
 		msg = "loss.valid_mask_mode must be resolved internally as 'voxel'"
+		raise ValueError(msg)
+
+
+def _validate_loss_target_normalization(loss: Mapping[str, object]) -> None:
+	target_normalization = _required_child_mapping(
+		loss,
+		'target_normalization',
+		prefix='loss',
+	)
+	_validate_allowed_keys(
+		target_normalization,
+		frozenset({'mode', 'eps', 'min_std'}),
+		prefix='loss.target_normalization',
+	)
+	_validate_required_key(
+		target_normalization,
+		'mode',
+		prefix='loss.target_normalization',
+	)
+	mode = target_normalization.get('mode')
+	if mode not in SUPPORTED_TARGET_NORMALIZATION_MODES:
+		msg = (
+			'loss.target_normalization.mode must be one of '
+			f'{sorted(SUPPORTED_TARGET_NORMALIZATION_MODES)!r}; got {mode!r}'
+		)
+		raise ValueError(msg)
+	if mode == 'none':
+		for key in ('eps', 'min_std'):
+			if key in target_normalization:
+				msg = (
+					f'loss.target_normalization.{key} must be omitted '
+					"when mode is 'none'"
+				)
+				raise ValueError(msg)
+		return
+	_validate_required_key(
+		target_normalization,
+		'eps',
+		prefix='loss.target_normalization',
+	)
+	_validate_required_key(
+		target_normalization,
+		'min_std',
+		prefix='loss.target_normalization',
+	)
+	_validate_positive_finite_number(
+		target_normalization,
+		'eps',
+		prefix='loss.target_normalization',
+	)
+	_validate_positive_finite_number(
+		target_normalization,
+		'min_std',
+		prefix='loss.target_normalization',
+	)
+	if float(loss.get('gradient_weight', 0.0)) != 0.0:
+		msg = (
+			'loss.gradient_weight must be 0.0 when '
+			"loss.target_normalization.mode is 'patch_zscore'; "
+			'the current gradient loss operates in survey-normalized amplitude space'
+		)
 		raise ValueError(msg)
 
 

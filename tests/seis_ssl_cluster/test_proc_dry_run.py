@@ -364,7 +364,10 @@ model:
 masking:
   spatial_mask_ratio: 0.75
   block_size_tokens: [2, 2, 2]
-loss: {}
+loss:
+  reconstruction: huber
+  huber_delta: 1.0
+  gradient_weight: 0.05
 train:
   batch_size: 4
   samples_per_epoch: 10000
@@ -411,7 +414,10 @@ model:
 masking:
   spatial_mask_ratio: 0.75
   block_size_tokens: [2, 2, 2]
-loss: {}
+loss:
+  reconstruction: huber
+  huber_delta: 1.0
+  gradient_weight: 0.05
 train:
   batch_size: 4
   samples_per_epoch: 10000

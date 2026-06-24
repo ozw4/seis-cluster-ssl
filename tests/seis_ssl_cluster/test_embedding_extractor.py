@@ -207,6 +207,12 @@ def test_embedding_extraction_rejects_checkpoint_data_zero_mask_only(
 			'loss.*valid_mask_mode',
 		),
 		(
+			lambda checkpoint_config: checkpoint_config['loss'].pop(
+				'reconstruction',
+			),
+			'loss.*reconstruction',
+		),
+		(
 			lambda checkpoint_config: checkpoint_config['manifests'].pop(
 				'train_path_list',
 			),
@@ -227,6 +233,39 @@ def test_embedding_extraction_rejects_incomplete_checkpoint_resolved_config(
 	)
 
 	with pytest.raises(ValueError, match=error):
+		run_embedding_extraction(config, device='cpu')
+
+
+def test_embedding_extraction_accepts_mse_checkpoint_without_huber_delta(
+	tmp_path: Path,
+) -> None:
+	def use_mse(checkpoint_config: dict[str, object]) -> None:
+		loss = checkpoint_config['loss']
+		assert isinstance(loss, dict)
+		loss['reconstruction'] = 'mse'
+		loss.pop('huber_delta')
+
+	config = _write_fixture(tmp_path, checkpoint_config_modifier=use_mse)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+
+	assert result.metadata_path.is_file()
+
+
+def test_embedding_extraction_rejects_mse_checkpoint_huber_delta(
+	tmp_path: Path,
+) -> None:
+	def use_mse_with_huber_delta(checkpoint_config: dict[str, object]) -> None:
+		loss = checkpoint_config['loss']
+		assert isinstance(loss, dict)
+		loss['reconstruction'] = 'mse'
+
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_config_modifier=use_mse_with_huber_delta,
+	)
+
+	with pytest.raises(ValueError, match=r'loss\.huber_delta.*huber'):
 		run_embedding_extraction(config, device='cpu')
 
 
@@ -295,6 +334,36 @@ def test_embedding_extraction_metadata_records_full_model_geometry(
 		'decoder_dim': 12,
 		'decoder_depth': 1,
 		'decoder_heads': 3,
+	}
+
+
+def test_embedding_extraction_accepts_patch_zscore_checkpoint_metadata(
+	tmp_path: Path,
+) -> None:
+	def use_patch_zscore(checkpoint_config: dict[str, object]) -> None:
+		loss = checkpoint_config['loss']
+		assert isinstance(loss, dict)
+		loss['reconstruction'] = 'mse'
+		loss.pop('huber_delta')
+		loss['gradient_weight'] = 0.0
+		loss['target_normalization'] = {
+			'mode': 'patch_zscore',
+			'eps': 1.0e-6,
+			'min_std': 0.05,
+		}
+
+	config = _write_fixture(tmp_path, checkpoint_config_modifier=use_patch_zscore)
+	result = run_embedding_extraction(config, device='cpu')[0]
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+
+	assert metadata['pretraining_objective'] == {
+		'reconstruction': 'mse',
+		'gradient_weight': 0.0,
+		'target_normalization': {
+			'mode': 'patch_zscore',
+			'eps': 1.0e-6,
+			'min_std': 0.05,
+		},
 	}
 
 
@@ -411,6 +480,7 @@ def _write_fixture(
 			'reconstruction': 'huber',
 			'huber_delta': 1.0,
 			'gradient_weight': 0.05,
+			'target_normalization': {'mode': 'none'},
 			'valid_mask_mode': 'voxel',
 		},
 		'train': {

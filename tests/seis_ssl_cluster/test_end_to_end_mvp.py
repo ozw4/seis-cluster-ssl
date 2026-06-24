@@ -384,12 +384,17 @@ def _minimal_training_config(
 			'decoder_heads': 3,
 		},
 		'masking': {
-			'spatial_mask_ratio': 0.5,
+			'spatial_mask_ratio': 0.25,
 			'block_size_tokens': [1, 1, 1],
 		},
 		'loss': {
-			'huber_delta': 1.0,
+			'reconstruction': 'mse',
 			'gradient_weight': 0.0,
+			'target_normalization': {
+				'mode': 'patch_zscore',
+				'eps': 1.0e-6,
+				'min_std': 0.05,
+			},
 		},
 		'train': {
 			'batch_size': 1,
@@ -467,10 +472,16 @@ def _assert_training_run_snapshots_complete_config(
 	assert resolved_config['model']['patch_size'] == [2, 2, 2]
 	assert resolved_config['model']['encoder_dim'] == 12
 	assert resolved_config['model']['decoder_dim'] == 12
-	assert resolved_config['masking']['spatial_mask_ratio'] == 0.5
+	assert resolved_config['masking']['spatial_mask_ratio'] == 0.25
 	assert resolved_config['masking']['block_size_tokens'] == [1, 1, 1]
-	assert resolved_config['loss']['huber_delta'] == 1.0
+	assert resolved_config['loss']['reconstruction'] == 'mse'
+	assert 'huber_delta' not in resolved_config['loss']
 	assert resolved_config['loss']['gradient_weight'] == 0.0
+	assert resolved_config['loss']['target_normalization'] == {
+		'mode': 'patch_zscore',
+		'eps': 1.0e-6,
+		'min_std': 0.05,
+	}
 	assert resolved_config['zero_mask'] == {
 		'enabled': False,
 		'zero_atol': 0.0,

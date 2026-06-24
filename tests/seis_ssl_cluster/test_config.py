@@ -211,7 +211,13 @@ def test_default_training_config_is_minimal_raw_user_config() -> None:
 	assert not {'grid_order', 'volume_format', 'input_channels'} & set(raw['data'])
 	assert not {'name', 'in_channels', 'out_channels'} & set(raw['model'])
 	assert 'spatial_mask_mode' not in raw['masking']
-	assert not {'reconstruction', 'valid_mask_mode'} & set(raw['loss'])
+	assert raw['loss'] == {
+		'reconstruction': 'huber',
+		'huber_delta': 1.0,
+		'gradient_weight': 0.05,
+		'target_normalization': {'mode': 'none'},
+	}
+	assert 'valid_mask_mode' not in raw['loss']
 
 
 def test_default_embedding_extraction_config_is_minimal_raw_user_config() -> None:
@@ -583,6 +589,14 @@ def test_fixed_contract_keys_are_rejected_from_raw_training_config() -> None:
 		resolve_mae_training_config(cfg)
 
 
+def test_loss_valid_mask_mode_is_rejected_from_raw_training_config() -> None:
+	cfg = _minimal_training_config()
+	cfg['loss']['valid_mask_mode'] = 'voxel'
+
+	with pytest.raises(ValueError, match=r'loss\.valid_mask_mode.*fixed'):
+		resolve_mae_training_config(cfg)
+
+
 def test_fixed_contracts_appear_in_resolved_training_config() -> None:
 	resolved = resolve_mae_training_config(_minimal_training_config())
 
@@ -603,6 +617,80 @@ def test_fixed_contracts_appear_in_resolved_training_config() -> None:
 		'z_sample_influence_radius': 16,
 		'xy_trace_influence_radius': 1,
 	}
+
+
+@pytest.mark.parametrize('reconstruction', ['huber', 'mse', 'l1'])
+def test_training_loss_reconstruction_modes_resolve(reconstruction: str) -> None:
+	cfg = _minimal_training_config()
+	cfg['loss']['reconstruction'] = reconstruction
+	if reconstruction == 'huber':
+		cfg['loss']['huber_delta'] = 1.0
+	else:
+		cfg['loss'].pop('huber_delta')
+
+	resolved = resolve_mae_training_config(cfg)
+
+	assert resolved['loss']['reconstruction'] == reconstruction
+	assert resolved['loss']['gradient_weight'] == 0.05
+	assert resolved['loss']['valid_mask_mode'] == 'voxel'
+	if reconstruction == 'huber':
+		assert resolved['loss']['huber_delta'] == 1.0
+	else:
+		assert 'huber_delta' not in resolved['loss']
+
+
+@pytest.mark.parametrize('key', ['reconstruction', 'gradient_weight'])
+def test_training_loss_user_keys_are_required(key: str) -> None:
+	cfg = _minimal_training_config()
+	del cfg['loss'][key]
+
+	with pytest.raises(ValueError, match=rf'loss\.{key} is required'):
+		resolve_mae_training_config(cfg)
+
+
+def test_training_loss_huber_delta_is_required_for_huber() -> None:
+	cfg = _minimal_training_config()
+	del cfg['loss']['huber_delta']
+
+	with pytest.raises(ValueError, match=r'loss\.huber_delta is required'):
+		resolve_mae_training_config(cfg)
+
+
+def test_training_loss_huber_delta_is_rejected_for_mse() -> None:
+	cfg = _minimal_training_config()
+	cfg['loss']['reconstruction'] = 'mse'
+
+	with pytest.raises(ValueError, match=r'loss\.huber_delta.*huber'):
+		resolve_mae_training_config(cfg)
+
+
+def test_training_loss_rejects_unsupported_reconstruction() -> None:
+	cfg = _minimal_training_config()
+	cfg['loss']['reconstruction'] = 'MSE'
+
+	with pytest.raises(ValueError, match=r'loss\.reconstruction.*MSE'):
+		resolve_mae_training_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('key', 'value', 'message'),
+	[
+		('huber_delta', 0.0, r'loss\.huber_delta'),
+		('huber_delta', float('inf'), r'loss\.huber_delta'),
+		('gradient_weight', -1.0, r'loss\.gradient_weight'),
+		('gradient_weight', float('inf'), r'loss\.gradient_weight'),
+	],
+)
+def test_training_loss_numbers_are_validated(
+	key: str,
+	value: object,
+	message: str,
+) -> None:
+	cfg = _minimal_training_config()
+	cfg['loss'][key] = value
+
+	with pytest.raises(ValueError, match=message):
+		resolve_mae_training_config(cfg)
 
 
 @pytest.mark.parametrize(
@@ -1058,7 +1146,12 @@ def _minimal_training_config() -> dict[str, object]:
 			'spatial_mask_ratio': 0.75,
 			'block_size_tokens': [2, 2, 2],
 		},
-		'loss': {},
+		'loss': {
+			'reconstruction': 'huber',
+			'huber_delta': 1.0,
+			'gradient_weight': 0.05,
+			'target_normalization': {'mode': 'none'},
+		},
 		'train': {
 			'batch_size': 4,
 			'samples_per_epoch': 10000,
@@ -1125,3 +1218,43 @@ def _minimal_visualization_config() -> dict[str, object]:
 			'summaries': {'enabled': True, 'include_amplitude_norm': False},
 		},
 	}
+
+
+def test_training_loss_target_normalization_validation() -> None:
+	raw = load_config(CONFIG_DIR / 'train_amp_mae.yaml')
+	patchnorm = deepcopy(raw)
+	patchnorm['loss'] = {
+		'reconstruction': 'mse',
+		'gradient_weight': 0.0,
+		'target_normalization': {
+			'mode': 'patch_zscore',
+			'eps': 1.0e-6,
+			'min_std': 0.05,
+		},
+	}
+	resolved = resolve_mae_training_config(patchnorm)
+	assert resolved['loss']['target_normalization'] == {
+		'mode': 'patch_zscore',
+		'eps': 1.0e-6,
+		'min_std': 0.05,
+	}
+
+	bad_cases = [
+		({'mode': 'bad'}, 'mode'),
+		({'mode': 'patch_zscore', 'min_std': 0.05}, 'eps'),
+		({'mode': 'patch_zscore', 'eps': 1.0e-6}, 'min_std'),
+		({'mode': 'patch_zscore', 'eps': 0.0, 'min_std': 0.05}, 'eps'),
+		({'mode': 'patch_zscore', 'eps': 1.0e-6, 'min_std': 0.0}, 'min_std'),
+		({'mode': 'none', 'eps': 1.0e-6}, 'eps'),
+		({'mode': 'none', 'min_std': 0.05}, 'min_std'),
+	]
+	for target_normalization, error in bad_cases:
+		cfg = deepcopy(raw)
+		cfg['loss']['target_normalization'] = target_normalization
+		with pytest.raises(ValueError, match=error):
+			resolve_mae_training_config(cfg)
+
+	bad_gradient = deepcopy(patchnorm)
+	bad_gradient['loss']['gradient_weight'] = 0.05
+	with pytest.raises(ValueError, match='gradient_weight must be 0.0'):
+		resolve_mae_training_config(bad_gradient)

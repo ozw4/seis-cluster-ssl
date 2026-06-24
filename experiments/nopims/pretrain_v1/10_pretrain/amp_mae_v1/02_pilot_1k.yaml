@@ -25,8 +25,11 @@ masking:
   spatial_mask_ratio: 0.75
   block_size_tokens: [2, 2, 2]
 loss:
+  reconstruction: huber
   huber_delta: 1.0
   gradient_weight: 0.05
+  target_normalization:
+    mode: none
 train:
   batch_size: 4
   samples_per_epoch: 4000

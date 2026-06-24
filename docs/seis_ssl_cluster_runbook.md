@@ -62,8 +62,9 @@ Raw YAML must not include a top-level `stage`. The selected proc script owns the
 stage identity.
 
 Fixed amplitude-only fields such as `data.grid_order`, model channel counts,
-`masking.spatial_mask_mode`, `loss.reconstruction`, and
-`loss.valid_mask_mode` are code-owned and appear only in the resolved config.
+`masking.spatial_mask_mode`, and `loss.valid_mask_mode` are code-owned and
+appear only in the resolved config. Training YAML owns `loss.reconstruction`
+and must set it to `huber`, `mse`, or `l1`.
 
 Embedding extraction is checkpoint-owned for model, zero-mask, masking, and loss
 settings. Configure only the checkpoint path, clean manifest, extraction
@@ -73,3 +74,8 @@ The visualization default is safe for repeated runs: token maps and summaries
 are enabled, while voxel reconstruction is disabled unless
 `visualization.reconstruct_voxel` is set to `true` and intended surveys are
 selected explicitly.
+
+
+## Patch-Wise Target Normalization
+
+Training YAML must include `loss.target_normalization`. `mode: none` is the historical behavior. `mode: patch_zscore` changes only the reconstruction-loss target: target patches are centered and scaled with mean and population variance computed over valid voxels from `local_valid_mask`; invalid voxels do not affect statistics and are zeroed after normalization. The model input `x` and dataset `target` remain survey-wise normalized amplitudes. In v1, `patch_zscore` requires `loss.gradient_weight: 0.0`. MAE debug visualization converts patch-z-score predictions back to survey-normalized amplitude space with target patch statistics and records `oracle_target_statistics_used_for_denormalization` in metadata. Embedding extraction uses encoder outputs only; it does not apply target normalization to inputs, but stores the checkpoint-owned pretraining objective in embedding metadata.

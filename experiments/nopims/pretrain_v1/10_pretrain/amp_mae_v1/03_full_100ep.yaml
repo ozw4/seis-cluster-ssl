@@ -22,33 +22,37 @@ model:
   decoder_depth: 4
   decoder_heads: 4
 masking:
-  spatial_mask_ratio: 0.75
-  block_size_tokens: [2, 2, 2]
+  spatial_mask_ratio: 0.25
+  block_size_tokens: [1, 1, 1]
 loss:
-  huber_delta: 1.0
-  gradient_weight: 0.05
+  reconstruction: mse
+  gradient_weight: 0.0
+  target_normalization:
+    mode: patch_zscore
+    eps: 1.0e-6
+    min_std: 0.05
 train:
   batch_size: 4
   samples_per_epoch: 10000
   epochs: 100
   num_workers: 8
   shuffle: true
-  lr: 3.0e-5
+  lr: 1.0e-4
   weight_decay: 0.05
   amp: false
   device: cuda
   seed: 42
-  grad_clip_norm: 1.0
+  grad_clip_norm: 2.0
 visualization:
   mae_debug:
     enabled: true
     output_dir: null
     every_steps: null
     every_epochs: 1
-    max_samples: 1
+    max_samples: 2
     xy_slice_index: null
     xz_slice_y_index: null
-    dpi: 160
+    dpi: 300
     clip_percentiles: [1.0, 99.0]
     columns: [input, masked_input, target, prediction, abs_error, valid_mask]
     panel_width: 2.6

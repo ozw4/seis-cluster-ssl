@@ -1,14 +1,11 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
-  output_root: /workspace/artifacts/seis_ssl_cluster/runs/nopims/pretrain_v1/amp_mae_m025_v1/full_100ep
+  output_root: /workspace/artifacts/seis_ssl_cluster/runs/nopims/pretrain_v1/amp_mae_m025_mse_g0_patchnorm_v1/full_100ep
 manifests:
   train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
   train_path_list: /workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1_clean/train_npy_paths.txt
 data:
-  local_crop_size:
-  - 128
-  - 128
-  - 128
+  local_crop_size: [128, 128, 128]
   min_valid_fraction: 0.1
   max_resample_attempts: 16
 zero_mask:
@@ -17,10 +14,7 @@ zero_mask:
   z_sample_influence_radius: 16
   xy_trace_influence_radius: 1
 model:
-  patch_size:
-  - 8
-  - 8
-  - 8
+  patch_size: [8, 8, 8]
   encoder_dim: 384
   encoder_depth: 8
   encoder_heads: 6
@@ -29,20 +23,21 @@ model:
   decoder_heads: 4
 masking:
   spatial_mask_ratio: 0.25
-  block_size_tokens:
-  - 2
-  - 2
-  - 2
+  block_size_tokens: [2, 2, 2]
 loss:
-  huber_delta: 1.0
-  gradient_weight: 0.05
+  reconstruction: mse
+  gradient_weight: 0.0
+  target_normalization:
+    mode: patch_zscore
+    eps: 1.0e-6
+    min_std: 0.05
 train:
   batch_size: 4
   samples_per_epoch: 10000
   epochs: 100
   num_workers: 8
   shuffle: true
-  lr: 3.0e-05
+  lr: 3.0e-5
   weight_decay: 0.05
   amp: false
   device: cuda
@@ -51,23 +46,14 @@ train:
 visualization:
   mae_debug:
     enabled: true
-    output_dir: null
-    every_steps: null
-    every_epochs: 1
+    every_steps: 1000
+    every_epochs: null
     max_samples: 1
     xy_slice_index: null
     xz_slice_y_index: null
     dpi: 160
-    clip_percentiles:
-    - 1.0
-    - 99.0
-    columns:
-    - input
-    - masked_input
-    - target
-    - prediction
-    - abs_error
-    - valid_mask
+    clip_percentiles: [1.0, 99.0]
+    columns: [input, masked_input, target, prediction, abs_error, valid_mask]
     panel_width: 2.6
     panel_height: 2.4
     invalid_color: lightgray
