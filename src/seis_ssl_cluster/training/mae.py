@@ -31,6 +31,7 @@ from seis_ssl_cluster.config.schema import (
 	MAE_DEBUG_VISUALIZATION_KEYS,
 	STAGE_MAE_TRAINING,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
+	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
 from seis_ssl_cluster.data import NopimsAmplitudePretrainDataset, read_manifest_json
 from seis_ssl_cluster.losses import mae_pretraining_loss
@@ -151,7 +152,14 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	run_config: Mapping[str, object] | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
-	reconstruction, huber_delta, gradient_weight = _runtime_loss_values(loss_config)
+	(
+		reconstruction,
+		huber_delta,
+		gradient_weight,
+		target_normalization_mode,
+		target_normalization_eps,
+		target_normalization_min_std,
+	) = _runtime_loss_values(loss_config)
 	model.train()
 	totals: dict[str, float] = {}
 	batches = 0
@@ -177,6 +185,9 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				reconstruction=reconstruction,
 				huber_delta=huber_delta,
 				gradient_weight=gradient_weight,
+				target_normalization_mode=target_normalization_mode,
+				target_normalization_eps=target_normalization_eps,
+				target_normalization_min_std=target_normalization_min_std,
 			)
 			loss = losses['loss']
 
@@ -269,6 +280,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					global_step=global_step,
 					config=visualization_config,
 					metrics=step_metrics,
+					target_normalization_config=loss_config.get('target_normalization'),
 				)
 				epoch_visualization_triggered = (
 					epoch_visualization_triggered or epoch_triggered
@@ -811,6 +823,7 @@ def _save_mae_debug_visualization(  # noqa: PLR0913
 	global_step: int,
 	config: MaeDebugVisualizationConfig,
 	metrics: Mapping[str, float],
+	target_normalization_config: object = None,
 ) -> None:
 	save_mae_debug_visualization_pngs(
 		batch=batch,
@@ -820,6 +833,7 @@ def _save_mae_debug_visualization(  # noqa: PLR0913
 		global_step=global_step,
 		config=config,
 		metrics=metrics,
+		target_normalization_config=target_normalization_config,
 	)
 
 
@@ -1028,7 +1042,11 @@ def _validate_resume_config_compatibility(
 def _resume_compatibility_view(config: Mapping[str, object]) -> dict[str, object]:
 	view: dict[str, object] = {'stage': config.get('stage')}
 	for section in _RESUME_COMPATIBILITY_SECTIONS:
-		view[section] = _json_safe(config.get(section))
+		value = config.get(section)
+		if section == 'loss' and isinstance(value, Mapping):
+			view[section] = _json_safe(_loss_resume_compatibility_view(value))
+		else:
+			view[section] = _json_safe(value)
 	train = config.get('train')
 	if isinstance(train, Mapping):
 		view['train'] = {
@@ -1038,6 +1056,13 @@ def _resume_compatibility_view(config: Mapping[str, object]) -> dict[str, object
 		}
 	else:
 		view['train'] = _json_safe(train)
+	return view
+
+
+def _loss_resume_compatibility_view(loss: Mapping[str, object]) -> dict[str, object]:
+	view = dict(loss)
+	if 'target_normalization' not in view:
+		view['target_normalization'] = {'mode': 'none'}
 	return view
 
 
@@ -1696,7 +1721,7 @@ def _float_config(parent: Mapping[str, object], key: str, default: float) -> flo
 
 def _runtime_loss_values(
 	loss_config: Mapping[str, object],
-) -> tuple[Literal['huber', 'l1', 'mse'], float, float]:
+) -> tuple[Literal['huber', 'l1', 'mse'], float, float, str, float | None, float | None]:
 	_validate_runtime_loss(loss_config)
 	reconstruction = _loss_mode(loss_config['reconstruction'])
 	huber_delta = (
@@ -1713,7 +1738,31 @@ def _runtime_loss_values(
 		'gradient_weight',
 		label='loss.gradient_weight',
 	)
-	return reconstruction, huber_delta, gradient_weight
+	target_normalization = _required_mapping_config(
+		loss_config,
+		'target_normalization',
+		label='loss.target_normalization',
+	)
+	mode = _target_normalization_mode(target_normalization.get('mode'))
+	eps = (
+		_required_positive_float_config(
+			target_normalization,
+			'eps',
+			label='loss.target_normalization.eps',
+		)
+		if mode == 'patch_zscore'
+		else None
+	)
+	min_std = (
+		_required_positive_float_config(
+			target_normalization,
+			'min_std',
+			label='loss.target_normalization.min_std',
+		)
+		if mode == 'patch_zscore'
+		else None
+	)
+	return reconstruction, huber_delta, gradient_weight, mode, eps, min_std
 
 
 def _validate_runtime_loss(loss_config: Mapping[str, object]) -> None:
@@ -1732,11 +1781,49 @@ def _validate_runtime_loss(loss_config: Mapping[str, object]) -> None:
 	elif 'huber_delta' in loss_config:
 		msg = 'loss.huber_delta must be omitted unless loss.reconstruction is huber'
 		raise ValueError(msg)
-	_required_nonnegative_float_config(
+	gradient_weight = _required_nonnegative_float_config(
 		loss_config,
 		'gradient_weight',
 		label='loss.gradient_weight',
 	)
+	target_normalization = _required_mapping_config(
+		loss_config,
+		'target_normalization',
+		label='loss.target_normalization',
+	)
+	mode = _target_normalization_mode(
+		_required_config_value(
+			target_normalization,
+			'mode',
+			label='loss.target_normalization.mode',
+		),
+	)
+	if mode == 'none':
+		for key in ('eps', 'min_std'):
+			if key in target_normalization:
+				msg = (
+					f'loss.target_normalization.{key} must be omitted '
+					"when mode is 'none'"
+				)
+				raise ValueError(msg)
+	else:
+		_required_positive_float_config(
+			target_normalization,
+			'eps',
+			label='loss.target_normalization.eps',
+		)
+		_required_positive_float_config(
+			target_normalization,
+			'min_std',
+			label='loss.target_normalization.min_std',
+		)
+		if gradient_weight != 0.0:
+			msg = (
+				'loss.gradient_weight must be 0.0 when '
+				"loss.target_normalization.mode is 'patch_zscore'; "
+				'the current gradient loss operates in survey-normalized amplitude space'
+			)
+			raise ValueError(msg)
 	if (
 		'valid_mask_mode' in loss_config
 		and loss_config.get('valid_mask_mode') != EXPECTED_VALID_MASK_MODE
@@ -1755,6 +1842,29 @@ def _required_config_value(
 		msg = f'{label} is required'
 		raise ValueError(msg)
 	return parent[key]
+
+
+def _required_mapping_config(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	label: str,
+) -> Mapping[str, object]:
+	value = _required_config_value(parent, key, label=label)
+	if not isinstance(value, Mapping):
+		msg = f'{label} must be a mapping; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _target_normalization_mode(value: object) -> str:
+	if value not in SUPPORTED_TARGET_NORMALIZATION_MODES:
+		msg = (
+			'loss.target_normalization.mode must be one of '
+			f'{sorted(SUPPORTED_TARGET_NORMALIZATION_MODES)!r}; got {value!r}'
+		)
+		raise ValueError(msg)
+	return str(value)
 
 
 def _required_float_config(

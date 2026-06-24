@@ -158,6 +158,21 @@ def _add_training_rows(
 	)
 	if 'huber_delta' in loss:
 		rows.append(('loss.huber_delta', loss.get('huber_delta')))
+	target_normalization = _mapping(loss.get('target_normalization'))
+	rows.append((
+		'loss.target_normalization.mode',
+		target_normalization.get('mode'),
+	))
+	if target_normalization.get('mode') == 'patch_zscore':
+		rows.extend(
+			[
+				('loss.target_normalization.eps', target_normalization.get('eps')),
+				(
+					'loss.target_normalization.min_std',
+					target_normalization.get('min_std'),
+				),
+			],
+		)
 	rows.extend(
 		[
 			('loss.gradient_weight', loss.get('gradient_weight')),

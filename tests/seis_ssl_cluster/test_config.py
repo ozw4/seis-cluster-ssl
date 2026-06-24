@@ -215,6 +215,7 @@ def test_default_training_config_is_minimal_raw_user_config() -> None:
 		'reconstruction': 'huber',
 		'huber_delta': 1.0,
 		'gradient_weight': 0.05,
+		'target_normalization': {'mode': 'none'},
 	}
 	assert 'valid_mask_mode' not in raw['loss']
 
@@ -1149,6 +1150,7 @@ def _minimal_training_config() -> dict[str, object]:
 			'reconstruction': 'huber',
 			'huber_delta': 1.0,
 			'gradient_weight': 0.05,
+			'target_normalization': {'mode': 'none'},
 		},
 		'train': {
 			'batch_size': 4,
@@ -1216,3 +1218,43 @@ def _minimal_visualization_config() -> dict[str, object]:
 			'summaries': {'enabled': True, 'include_amplitude_norm': False},
 		},
 	}
+
+
+def test_training_loss_target_normalization_validation() -> None:
+	raw = load_config(CONFIG_DIR / 'train_amp_mae.yaml')
+	patchnorm = deepcopy(raw)
+	patchnorm['loss'] = {
+		'reconstruction': 'mse',
+		'gradient_weight': 0.0,
+		'target_normalization': {
+			'mode': 'patch_zscore',
+			'eps': 1.0e-6,
+			'min_std': 0.05,
+		},
+	}
+	resolved = resolve_mae_training_config(patchnorm)
+	assert resolved['loss']['target_normalization'] == {
+		'mode': 'patch_zscore',
+		'eps': 1.0e-6,
+		'min_std': 0.05,
+	}
+
+	bad_cases = [
+		({'mode': 'bad'}, 'mode'),
+		({'mode': 'patch_zscore', 'min_std': 0.05}, 'eps'),
+		({'mode': 'patch_zscore', 'eps': 1.0e-6}, 'min_std'),
+		({'mode': 'patch_zscore', 'eps': 0.0, 'min_std': 0.05}, 'eps'),
+		({'mode': 'patch_zscore', 'eps': 1.0e-6, 'min_std': 0.0}, 'min_std'),
+		({'mode': 'none', 'eps': 1.0e-6}, 'eps'),
+		({'mode': 'none', 'min_std': 0.05}, 'min_std'),
+	]
+	for target_normalization, error in bad_cases:
+		cfg = deepcopy(raw)
+		cfg['loss']['target_normalization'] = target_normalization
+		with pytest.raises(ValueError, match=error):
+			resolve_mae_training_config(cfg)
+
+	bad_gradient = deepcopy(patchnorm)
+	bad_gradient['loss']['gradient_weight'] = 0.05
+	with pytest.raises(ValueError, match='gradient_weight must be 0.0'):
+		resolve_mae_training_config(bad_gradient)

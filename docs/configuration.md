@@ -185,6 +185,8 @@ loss:
   reconstruction: huber
   huber_delta: 1.0
   gradient_weight: 0.05
+  target_normalization:
+    mode: none
 train:
   batch_size: 4
   samples_per_epoch: 10000
@@ -314,3 +316,6 @@ visualization:
 | `data`, `masking`, `loss`, `train`, or `zero_mask` in extraction YAML | Loaded from checkpoint resolved config |
 
 Stale redundant sections now fail validation instead of being silently ignored.
+
+`loss.target_normalization.mode` is required. `none` preserves the existing MAE target, and `patch_zscore` normalizes only the patchified target used by reconstruction loss. Inputs and dataset targets stay in survey-wise normalized amplitude space. For `patch_zscore`, set positive finite `eps` and `min_std`; mean and population variance are computed from `local_valid_mask == true` voxels only, using `std_eff = max(sqrt(var + eps), min_std)`. `patch_zscore` is rejected when `loss.gradient_weight != 0.0` because the current gradient loss compares survey-normalized amplitude gradients.
+

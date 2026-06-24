@@ -15,6 +15,7 @@ EXPECTED_USE_CONTEXT: Final = False
 EXPECTED_MODEL_NAME: Final = 'amp_mae3d'
 EXPECTED_SPATIAL_MASK_MODE: Final = 'block'
 SUPPORTED_RECONSTRUCTION_LOSSES: Final = frozenset({'huber', 'mse', 'l1'})
+SUPPORTED_TARGET_NORMALIZATION_MODES: Final = frozenset({'none', 'patch_zscore'})
 EXPECTED_VALID_MASK_MODE: Final = 'voxel'
 
 STAGE_BUILD_MANIFESTS: Final = 'build_nopims_manifests'
@@ -100,7 +101,12 @@ DEFAULT_MAE_DEBUG_VISUALIZATION_COLUMNS: Final = (
 )
 
 MAE_DEBUG_VISUALIZATION_COLUMNS: Final = frozenset(
-	DEFAULT_MAE_DEBUG_VISUALIZATION_COLUMNS,
+	(
+		*DEFAULT_MAE_DEBUG_VISUALIZATION_COLUMNS,
+		'prediction_norm',
+		'prediction_oracle_denorm',
+		'abs_error_oracle_denorm',
+	),
 )
 
 MAE_DEBUG_VISUALIZATION_KEYS: Final = frozenset(

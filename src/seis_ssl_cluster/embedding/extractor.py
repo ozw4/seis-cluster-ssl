@@ -21,6 +21,7 @@ from seis_ssl_cluster.config.schema import (
 	FIXED_MODEL_CONTRACT,
 	STAGE_MAE_TRAINING,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
+	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
 from seis_ssl_cluster.data.crop_sampler import (
 	expand_request_with_margin,
@@ -389,6 +390,7 @@ def build_embedding_metadata(  # noqa: PLR0913
 			'z_sample_influence_radius': settings.zero_mask.z_sample_influence_radius,
 			'xy_trace_influence_radius': settings.zero_mask.xy_trace_influence_radius,
 		},
+		'pretraining_objective': _pretraining_objective(checkpoint_config),
 	}
 
 
@@ -726,6 +728,64 @@ def _validate_checkpoint_loss(loss: Mapping[str, object]) -> None:
 		)
 		raise ValueError(msg)
 	_nonnegative_finite_number(loss['gradient_weight'], 'loss.gradient_weight')
+	_validate_checkpoint_target_normalization(loss)
+
+
+def _validate_checkpoint_target_normalization(loss: Mapping[str, object]) -> None:
+	target_normalization = loss.get('target_normalization')
+	if target_normalization is None:
+		return
+	if not isinstance(target_normalization, Mapping):
+		msg = 'checkpoint config.loss.target_normalization must be a mapping'
+		raise TypeError(msg)
+	mode = target_normalization.get('mode')
+	if mode not in SUPPORTED_TARGET_NORMALIZATION_MODES:
+		msg = (
+			'checkpoint config.loss.target_normalization.mode must be one of '
+			f'{sorted(SUPPORTED_TARGET_NORMALIZATION_MODES)!r}; got {mode!r}'
+		)
+		raise ValueError(msg)
+	if mode == 'none':
+		for key in ('eps', 'min_std'):
+			if key in target_normalization:
+				msg = (
+					f'checkpoint config.loss.target_normalization.{key} must be '
+					"omitted when mode is 'none'"
+				)
+				raise ValueError(msg)
+		return
+	for key in ('eps', 'min_std'):
+		if key not in target_normalization:
+			msg = f'checkpoint config.loss.target_normalization.{key} is required'
+			raise ValueError(msg)
+		_positive_finite_number(
+			target_normalization[key],
+			f'loss.target_normalization.{key}',
+		)
+	if float(loss['gradient_weight']) != 0.0:
+		msg = (
+			'checkpoint config.loss.gradient_weight must be 0.0 when '
+			"loss.target_normalization.mode is 'patch_zscore'"
+		)
+		raise ValueError(msg)
+
+
+def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
+	loss = _required_mapping(config, 'loss')
+	objective: dict[str, object] = {
+		'reconstruction': loss.get('reconstruction'),
+		'gradient_weight': float(loss.get('gradient_weight', 0.0)),
+	}
+	if loss.get('reconstruction') == 'huber' and 'huber_delta' in loss:
+		objective['huber_delta'] = float(loss['huber_delta'])
+	target_normalization = loss.get('target_normalization')
+	if isinstance(target_normalization, Mapping):
+		objective['target_normalization'] = {
+			str(key): value for key, value in target_normalization.items()
+		}
+	else:
+		objective['target_normalization'] = {'mode': 'none'}
+	return objective
 
 
 def _validate_checkpoint_train(train: Mapping[str, object]) -> None:

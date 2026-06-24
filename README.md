@@ -370,6 +370,8 @@ loss:
   reconstruction: huber
   huber_delta: 1.0
   gradient_weight: 0.05
+  target_normalization:
+    mode: none
 ```
 
 The fixed amplitude-only contract is injected internally and appears in the resolved config and checkpoint, not in raw YAML:
@@ -401,6 +403,8 @@ masked amplitude reconstruction loss
 ```
 
 Set `loss.reconstruction` in the training YAML to `huber`, `mse`, or `l1`. Huber requires `loss.huber_delta`; MSE and L1 must omit it. Both reconstruction and gradient terms exclude invalid voxels using `local_valid_mask`.
+
+`loss.target_normalization.mode` is required. Use `mode: none` for the historical behavior. Use `mode: patch_zscore` with positive finite `eps` and `min_std` to z-score only the patchified loss target. The encoder input `x` and dataset `target` remain survey-wise normalized amplitudes; only `target_for_loss` is transformed as `(target_patch - valid_voxel_mean) / max(sqrt(valid_voxel_population_var + eps), min_std)`. Patch statistics use `local_valid_mask == true`; invalid voxels are excluded and zeroed in the normalized target. In v1, `patch_zscore` requires `loss.gradient_weight: 0.0` because the existing gradient loss operates in survey-normalized amplitude space. Debug MAE predictions are oracle-denormalized with target patch statistics before comparison and the JSON metadata records that oracle target statistics were used.
 
 Invalid regions include source padding and configured raw-amplitude zero-sample or zero-trace influence regions.
 

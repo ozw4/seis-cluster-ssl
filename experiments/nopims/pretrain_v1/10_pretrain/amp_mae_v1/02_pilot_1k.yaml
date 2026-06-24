@@ -28,6 +28,8 @@ loss:
   reconstruction: huber
   huber_delta: 1.0
   gradient_weight: 0.05
+  target_normalization:
+    mode: none
 train:
   batch_size: 4
   samples_per_epoch: 4000
