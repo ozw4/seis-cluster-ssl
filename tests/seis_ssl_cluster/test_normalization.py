@@ -46,6 +46,34 @@ def test_normalize_amplitude_clips_and_robust_scales() -> None:
 	)
 
 
+def test_normalize_amplitude_clips_normalized_values() -> None:
+	stats = SurveyNormalizationStats(
+		survey_id='survey',
+		source_path=Path('/tmp/survey.npy'),
+		grid_order=GRID_ORDER_XYZ,
+		clip_low_percentile=0.0,
+		clip_high_percentile=100.0,
+		clip_low=-100.0,
+		clip_high=100.0,
+		median=0.0,
+		iqr=1.0,
+		eps=1.0e-6,
+	)
+	crop = np.array([-20.0, -4.0, 0.0, 4.0, 20.0], dtype=np.float32)
+
+	result = normalize_amplitude(
+		crop,
+		stats,
+		normalized_clip_abs=8.0,
+	)
+
+	np.testing.assert_allclose(
+		result,
+		[-8.0, -4.0, 0.0, 4.0, 8.0],
+		atol=1.0e-4,
+	)
+
+
 def test_compute_normalization_stats_samples_memmap_deterministically(
 	tmp_path: Path,
 ) -> None:

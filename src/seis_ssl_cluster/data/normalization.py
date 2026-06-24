@@ -135,12 +135,24 @@ def write_normalization_stats(
 def normalize_amplitude(
 	crop: np.ndarray,
 	stats: SurveyNormalizationStats,
+	*,
+	normalized_clip_abs: float | None = None,
 ) -> np.ndarray:
 	"""Clip and robust-scale an amplitude crop without changing XYZ order."""
 	stats.validate()
+	if normalized_clip_abs is not None:
+		if not np.isfinite(normalized_clip_abs) or normalized_clip_abs <= 0.0:
+			msg = (
+				'normalized_clip_abs must be a finite positive number; '
+				f'got {normalized_clip_abs!r}'
+			)
+			raise ValueError(msg)
 	amplitude = np.asarray(crop, dtype=np.float32)
 	clipped = np.clip(amplitude, stats.clip_low, stats.clip_high)
 	normalized = (clipped - stats.median) / (stats.iqr + stats.eps)
+	if normalized_clip_abs is not None:
+		limit = np.float32(normalized_clip_abs)
+		normalized = np.clip(normalized, -limit, limit)
 	return normalized.astype(np.float32, copy=False)
 
 

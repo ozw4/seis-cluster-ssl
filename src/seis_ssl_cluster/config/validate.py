@@ -258,6 +258,12 @@ def resolve_mae_training_config(config: _T) -> Config:
 	_validate_optional_fraction(data, 'min_valid_fraction', prefix='data')
 	if 'max_resample_attempts' in data:
 		_validate_positive_int(data, 'max_resample_attempts', prefix='data')
+	if 'normalized_clip_abs' in data:
+		_validate_positive_finite_number(
+			data,
+			'normalized_clip_abs',
+			prefix='data',
+		)
 
 	patch_size = _validate_positive_int_triplet(
 		model,

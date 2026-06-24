@@ -57,6 +57,7 @@ class NopimsAmplitudePretrainDataset:
 		zero_mask: ZeroMaskConfig = DEFAULT_ZERO_MASK_CONFIG,
 		min_valid_fraction: float = 0.0,
 		max_resample_attempts: int = 16,
+		normalized_clip_abs: float | None = None,
 	) -> None:
 		self.manifests = tuple(manifests)
 		if not self.manifests:
@@ -112,6 +113,10 @@ class NopimsAmplitudePretrainDataset:
 			max_resample_attempts,
 			'max_resample_attempts',
 		)
+		self.normalized_clip_abs = _validate_optional_positive_float(
+			normalized_clip_abs,
+			'normalized_clip_abs',
+		)
 
 		self._store = NpyMemmapVolumeStore()
 		self._normalization_stats: dict[Path, SurveyNormalizationStats] = {}
@@ -151,6 +156,7 @@ class NopimsAmplitudePretrainDataset:
 			zero_mask=_zero_mask_from_config(config),
 			min_valid_fraction=data.get('min_valid_fraction', 0.0),
 			max_resample_attempts=data.get('max_resample_attempts', 16),
+			normalized_clip_abs=data.get('normalized_clip_abs'),
 		)
 
 	def __len__(self) -> int:
@@ -266,6 +272,7 @@ class NopimsAmplitudePretrainDataset:
 		amplitude_norm = normalize_amplitude(
 			raw_crop,
 			self._stats_for_manifest(manifest),
+			normalized_clip_abs=self.normalized_clip_abs,
 		)
 		amplitude_norm = amplitude_norm.astype(np.float32, copy=True)
 		amplitude_norm[~local_valid_mask] = 0.0
@@ -409,6 +416,22 @@ def _validate_open_fraction(value: object, name: str) -> float:
 		msg = f'{name} must be in (0, 1); got {fraction!r}'
 		raise ValueError(msg)
 	return fraction
+
+
+def _validate_optional_positive_float(
+	value: object,
+	name: str,
+) -> float | None:
+	if value is None:
+		return None
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'{name} must be a real number or None; got {value!r}'
+		raise TypeError(msg)
+	result = float(value)
+	if not np.isfinite(result) or result <= 0.0:
+		msg = f'{name} must be a finite positive number; got {value!r}'
+		raise ValueError(msg)
+	return result
 
 
 __all__ = [

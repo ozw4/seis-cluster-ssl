@@ -113,6 +113,7 @@ class EmbeddingExtractionSettings:
 	batch_size: int
 	min_token_valid_fraction: float
 	zero_mask: ZeroMaskConfig
+	normalized_clip_abs: float | None
 
 
 @dataclass(frozen=True)
@@ -184,6 +185,16 @@ def extraction_settings_from_config(
 	_validate_checkpoint_resolved_config(checkpoint_config)
 	embeddings = _required_mapping(config, 'embeddings')
 	embedding = _required_mapping(config, 'embedding')
+	checkpoint_data = _required_mapping(checkpoint_config, 'data')
+	normalized_clip_abs_value = checkpoint_data.get('normalized_clip_abs')
+	normalized_clip_abs = (
+		None
+		if normalized_clip_abs_value is None
+		else _positive_finite_number(
+			normalized_clip_abs_value,
+			'data.normalized_clip_abs',
+		)
+	)
 	checkpoint_path = _required_path(embeddings, 'checkpoint', 'embeddings')
 	output_dir = _required_path(embeddings, 'output_dir', 'embeddings')
 	window_size = _xyz_from_mapping(
@@ -227,6 +238,7 @@ def extraction_settings_from_config(
 			'embedding.min_token_valid_fraction',
 		),
 		zero_mask=_zero_mask_from_config(checkpoint_config),
+		normalized_clip_abs=normalized_clip_abs,
 	)
 
 
@@ -384,6 +396,7 @@ def build_embedding_metadata(  # noqa: PLR0913
 		'normalization_stats_path': str(stats_path),
 		'output_dtype': str(settings.output_dtype),
 		'min_token_valid_fraction': settings.min_token_valid_fraction,
+		'normalized_clip_abs': settings.normalized_clip_abs,
 		'zero_mask': {
 			'enabled': settings.zero_mask.enabled,
 			'zero_atol': settings.zero_mask.zero_atol,
@@ -481,7 +494,11 @@ def _read_window(  # noqa: PLR0913
 		config=settings.zero_mask,
 	)[payload_slices]
 	local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
-	amplitude_norm = normalize_amplitude(raw_crop, stats)
+	amplitude_norm = normalize_amplitude(
+		raw_crop,
+		stats,
+		normalized_clip_abs=settings.normalized_clip_abs,
+	)
 	amplitude_norm = amplitude_norm.astype(np.float32, copy=True)
 	amplitude_norm[~local_valid_mask] = 0.0
 	token_valid_mask = reduce_valid_mask_to_tokens(
