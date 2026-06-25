@@ -18,7 +18,9 @@ from seis_ssl_cluster.data.crop_sampler import (
 	validate_crop_fits,
 )
 from seis_ssl_cluster.data.normalization import (
+	AmplitudeAgcConfig,
 	SurveyNormalizationStats,
+	apply_configured_agc,
 	load_normalization_stats,
 	normalize_amplitude,
 )
@@ -58,6 +60,7 @@ class NopimsAmplitudePretrainDataset:
 		min_valid_fraction: float = 0.0,
 		max_resample_attempts: int = 16,
 		normalized_clip_abs: float | None = None,
+		amplitude_agc: AmplitudeAgcConfig | Mapping[str, object] | None = None,
 	) -> None:
 		self.manifests = tuple(manifests)
 		if not self.manifests:
@@ -117,6 +120,7 @@ class NopimsAmplitudePretrainDataset:
 			normalized_clip_abs,
 			'normalized_clip_abs',
 		)
+		self.amplitude_agc = _amplitude_agc_from_config(amplitude_agc)
 
 		self._store = NpyMemmapVolumeStore()
 		self._normalization_stats: dict[Path, SurveyNormalizationStats] = {}
@@ -157,6 +161,7 @@ class NopimsAmplitudePretrainDataset:
 			min_valid_fraction=data.get('min_valid_fraction', 0.0),
 			max_resample_attempts=data.get('max_resample_attempts', 16),
 			normalized_clip_abs=data.get('normalized_clip_abs'),
+			amplitude_agc=data.get('amplitude_agc'),
 		)
 
 	def __len__(self) -> int:
@@ -274,9 +279,13 @@ class NopimsAmplitudePretrainDataset:
 			self._stats_for_manifest(manifest),
 			normalized_clip_abs=self.normalized_clip_abs,
 		)
-		amplitude_norm = amplitude_norm.astype(np.float32, copy=True)
-		amplitude_norm[~local_valid_mask] = 0.0
-		x = amplitude_norm[np.newaxis, ...]
+		amplitude_model = apply_configured_agc(
+			amplitude_norm,
+			local_valid_mask,
+			self.amplitude_agc,
+		)
+		amplitude_model[~local_valid_mask] = 0.0
+		x = amplitude_model[np.newaxis, ...]
 		return {
 			'x': x,
 			'target': x.copy(),
@@ -337,6 +346,15 @@ def _zero_mask_from_config(config: Mapping[str, object]) -> ZeroMaskConfig:
 		msg = f'zero_mask config must be a mapping; got {value!r}'
 		raise TypeError(msg)
 	return ZeroMaskConfig(**dict(value))
+
+
+def _amplitude_agc_from_config(
+	value: AmplitudeAgcConfig | Mapping[str, object] | None,
+) -> AmplitudeAgcConfig:
+	if isinstance(value, AmplitudeAgcConfig):
+		value.validate()
+		return value
+	return AmplitudeAgcConfig.from_mapping(value)
 
 
 def _resolve_manifest_path(manifest: SurveyManifest, path: Path) -> Path:

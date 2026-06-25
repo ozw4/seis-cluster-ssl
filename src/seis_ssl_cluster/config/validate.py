@@ -105,6 +105,10 @@ _FIXED_DISABLED_NORMALIZATION_KEYS = frozenset(
 _CHECKPOINT_OWNED_EXTRACTION_SECTIONS = frozenset(
 	{'data', 'model', 'masking', 'loss', 'train', 'zero_mask'},
 )
+_AMPLITUDE_AGC_KEYS = frozenset(
+	{'enabled', 'mode', 'window_z', 'eps', 'clip_abs'},
+)
+_AMPLITUDE_AGC_ENABLED_REQUIRED_KEYS = _AMPLITUDE_AGC_KEYS
 
 _CLUSTERING_EMBEDDINGS_KEYS = frozenset({'input_dir'})
 _CLUSTERING_KEYS = frozenset(
@@ -268,6 +272,7 @@ def resolve_mae_training_config(config: _T) -> Config:
 			'normalized_clip_abs',
 			prefix='data',
 		)
+	_validate_amplitude_agc(data)
 
 	patch_size = _validate_positive_int_triplet(
 		model,
@@ -990,6 +995,54 @@ def _validate_zero_mask(zero_mask: Mapping[str, object]) -> None:
 	for key in ('z_sample_influence_radius', 'xy_trace_influence_radius'):
 		if key in zero_mask:
 			_validate_nonnegative_int(zero_mask, key, prefix='zero_mask')
+
+
+def _validate_amplitude_agc(data: Mapping[str, object]) -> None:
+	amplitude_agc = _required_child_mapping(
+		data,
+		'amplitude_agc',
+		prefix='data',
+	)
+	_validate_allowed_keys(
+		amplitude_agc,
+		_AMPLITUDE_AGC_KEYS,
+		prefix='data.amplitude_agc',
+	)
+	_validate_required_key(amplitude_agc, 'enabled', prefix='data.amplitude_agc')
+	_validate_bool(amplitude_agc, 'enabled', prefix='data.amplitude_agc')
+	if not amplitude_agc['enabled']:
+		extra = sorted(set(amplitude_agc) - {'enabled'})
+		if extra:
+			msg = (
+				'data.amplitude_agc fields must be omitted when disabled; '
+				f'got {extra!r}'
+			)
+			raise ValueError(msg)
+		return
+	_validate_required_keys(
+		amplitude_agc,
+		_AMPLITUDE_AGC_ENABLED_REQUIRED_KEYS,
+		prefix='data.amplitude_agc',
+	)
+	if amplitude_agc.get('mode') != 'trace_rms_z':
+		msg = (
+			"data.amplitude_agc.mode must be 'trace_rms_z'; "
+			f"got {amplitude_agc.get('mode')!r}"
+		)
+		raise ValueError(msg)
+	_validate_positive_int(amplitude_agc, 'window_z', prefix='data.amplitude_agc')
+	if int(amplitude_agc['window_z']) % 2 == 0:
+		msg = (
+			'data.amplitude_agc.window_z must be odd; '
+			f"got {amplitude_agc['window_z']!r}"
+		)
+		raise ValueError(msg)
+	_validate_positive_finite_number(amplitude_agc, 'eps', prefix='data.amplitude_agc')
+	_validate_positive_finite_number(
+		amplitude_agc,
+		'clip_abs',
+		prefix='data.amplitude_agc',
+	)
 
 
 def _validate_mae_training_visualization(

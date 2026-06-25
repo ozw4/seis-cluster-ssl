@@ -7,11 +7,15 @@ import pytest
 
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
+	AmplitudeAgcConfig,
 	AmplitudeVolumeRecord,
 	NopimsAmplitudePretrainDataset,
 	SurveyManifest,
 	SurveyNormalizationStats,
 	ZeroMaskConfig,
+	apply_trace_rms_agc,
+	load_normalization_stats,
+	normalize_amplitude,
 	write_normalization_stats,
 )
 from seis_ssl_cluster.training.dataloaders import build_mae_dataloader
@@ -159,6 +163,56 @@ def test_amplitude_dataset_zero_mask_uses_raw_amplitude_before_normalization(
 	assert sample['local_valid_mask'][:, :, :2].all()
 	assert sample['local_valid_mask'][:, :, 3:].all()
 	assert np.all(sample['x'][:, :, :, 2] == 0.0)
+
+
+def test_amplitude_dataset_applies_agc_to_input_and_target(
+	tmp_path: Path,
+) -> None:
+	volume = np.asarray([1.0, 1.0, 0.0, 10.0, 10.0], dtype=np.float32).reshape(
+		1,
+		1,
+		5,
+	)
+	manifest = _manifest(tmp_path, 'survey', volume)
+	dataset = NopimsAmplitudePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(1, 1, 5),
+		patch_size_xyz=(1, 1, 1),
+		spatial_mask_ratio=0.4,
+		block_size_tokens_xyz=(1, 1, 1),
+		zero_mask=ZeroMaskConfig(
+			enabled=True,
+			z_sample_influence_radius=0,
+			xy_trace_influence_radius=0,
+		),
+		amplitude_agc=AmplitudeAgcConfig(
+			enabled=True,
+			mode='trace_rms_z',
+			window_z=3,
+			eps=1.0e-6,
+			clip_abs=2.0,
+		),
+	)
+
+	sample = dataset[0]
+
+	valid = np.asarray([True, True, False, True, True]).reshape(1, 1, 5)
+	normalized = normalize_amplitude(
+		volume,
+		load_normalization_stats(manifest.amplitude.normalization_stats_path),
+	)
+	expected = apply_trace_rms_agc(
+		normalized,
+		valid,
+		window_z=3,
+		eps=1.0e-6,
+		clip_abs=2.0,
+	)
+	expected[~valid] = 0.0
+	np.testing.assert_allclose(sample['x'][0], expected, rtol=1.0e-6)
+	np.testing.assert_array_equal(sample['x'], sample['target'])
+	assert sample['x'][0, 0, 0, 2] == 0.0
+	assert np.max(np.abs(sample['x'])) <= 2.0
 
 
 def test_amplitude_dataset_set_epoch_changes_coords_deterministically(

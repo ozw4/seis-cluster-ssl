@@ -97,6 +97,7 @@ def save_cluster_comparison_pngs(  # noqa: PLR0913
 	output_dir: str | Path,
 	slices: ClusterSliceRequest,
 	amplitude: np.ndarray,
+	amplitude_display_space: str = 'amplitude',
 	amplitude_alpha: float = 0.35,
 	invalid_color: str = 'lightgray',
 	dpi: int = 160,
@@ -122,6 +123,7 @@ def save_cluster_comparison_pngs(  # noqa: PLR0913
 			voxel_slice_index=index.voxel_slice_index,
 			output_dir=root,
 			amplitude=amplitude,
+			amplitude_display_space=amplitude_display_space,
 			amplitude_alpha=amplitude_alpha,
 			invalid_color=invalid_color,
 			dpi=dpi,
@@ -140,6 +142,7 @@ def save_cluster_comparison_pngs(  # noqa: PLR0913
 				voxel_slice_index=index.voxel_slice_index,
 				output_dir=root,
 				amplitude=amplitude,
+				amplitude_display_space=amplitude_display_space,
 				amplitude_alpha=amplitude_alpha,
 				invalid_color=invalid_color,
 				dpi=dpi,
@@ -272,6 +275,7 @@ def _save_one_comparison_slice(  # noqa: PLR0913
 	voxel_slice_index: int,
 	output_dir: Path,
 	amplitude: np.ndarray,
+	amplitude_display_space: str,
 	amplitude_alpha: float,
 	invalid_color: str,
 	dpi: int,
@@ -305,7 +309,7 @@ def _save_one_comparison_slice(  # noqa: PLR0913
 		vmin=vmin,
 		vmax=vmax,
 	)
-	amp_ax.set_title('amplitude')
+	amp_ax.set_title(amplitude_display_space)
 	cluster_cmap = stable_cluster_colors(k, invalid_color=invalid_color)
 	norm = _matplotlib_colors().BoundaryNorm(
 		np.arange(-0.5, k + 1.5, 1.0),

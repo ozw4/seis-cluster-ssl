@@ -82,6 +82,7 @@ DEFAULT_ZERO_MASK_CONTRACT: Final = {
 DEFAULT_MAE_DATA_OPTIONS: Final = {
 	'min_valid_fraction': 0.1,
 	'max_resample_attempts': 16,
+	'amplitude_agc': {'enabled': False},
 }
 
 DEFAULT_MAE_TRAIN_OPTIONS: Final = {

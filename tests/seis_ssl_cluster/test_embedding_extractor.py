@@ -61,6 +61,8 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['overlap'] == [2, 2, 2]
 	assert metadata['output_dtype'] == 'float16'
 	assert metadata['min_token_valid_fraction'] == 0.5
+	assert metadata['preprocessing']['amplitude_agc'] == {'enabled': False}
+	assert metadata['amplitude_agc'] == {'enabled': False}
 
 
 def test_embedding_extraction_uses_checkpoint_floating_dtype(
@@ -174,6 +176,44 @@ def test_embedding_extraction_uses_checkpoint_zero_mask_settings(
 	valid_tokens = np.load(result.valid_tokens_path)
 	assert not valid_tokens[0, 0, :].any()
 	assert valid_tokens[1, 1, 1]
+
+
+def test_embedding_extraction_uses_checkpoint_amplitude_agc_settings(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	amplitude_agc = {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 3,
+		'eps': 1.0e-6,
+		'clip_abs': 0.75,
+	}
+	config = _write_fixture(tmp_path, checkpoint_amplitude_agc=amplitude_agc)
+	captured_inputs: list[np.ndarray] = []
+	original_encode_tokens = AmplitudeMAE3D.encode_tokens
+
+	def wrapped_encode_tokens(
+		self: AmplitudeMAE3D,
+		x: torch.Tensor,
+		*,
+		valid_mask: torch.Tensor | None = None,
+	) -> dict[str, torch.Tensor | tuple[int, int, int] | None]:
+		captured_inputs.append(x.detach().to(dtype=torch.float32).cpu().numpy())
+		return original_encode_tokens(self, x, valid_mask=valid_mask)
+
+	monkeypatch.setattr(AmplitudeMAE3D, 'encode_tokens', wrapped_encode_tokens)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+
+	assert captured_inputs
+	assert np.max(np.abs(captured_inputs[0])) <= amplitude_agc['clip_abs'] + 1.0e-6
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	assert metadata['amplitude_agc'] == amplitude_agc
+	assert metadata['preprocessing'] == {
+		'normalized_clip_abs': None,
+		'amplitude_agc': amplitude_agc,
+	}
 
 
 def test_embedding_extraction_rejects_checkpoint_data_zero_mask_only(
@@ -367,11 +407,12 @@ def test_embedding_extraction_accepts_patch_zscore_checkpoint_metadata(
 	}
 
 
-def _write_fixture(
+def _write_fixture(  # noqa: PLR0913
 	tmp_path: Path,
 	*,
 	checkpoint_dtype: torch.dtype = torch.float32,
 	checkpoint_zero_mask: dict[str, object] | None = None,
+	checkpoint_amplitude_agc: dict[str, object] | None = None,
 	checkpoint_config_modifier: Callable[[dict[str, object]], object] | None = None,
 	survey_count: int = 1,
 ) -> dict[str, object]:
@@ -497,6 +538,8 @@ def _write_fixture(
 			'grad_clip_norm': 1.0,
 		},
 	}
+	if checkpoint_amplitude_agc is not None:
+		checkpoint_config['data']['amplitude_agc'] = checkpoint_amplitude_agc
 	checkpoint_config['zero_mask'] = checkpoint_zero_mask
 	if checkpoint_config_modifier is not None:
 		checkpoint_config_modifier(checkpoint_config)

@@ -627,6 +627,128 @@ def test_fixed_contracts_appear_in_resolved_training_config() -> None:
 		'z_sample_influence_radius': 16,
 		'xy_trace_influence_radius': 1,
 	}
+	assert resolved['data']['amplitude_agc'] == {'enabled': False}
+
+
+def test_training_amplitude_agc_validation_accepts_disabled_and_enabled() -> None:
+	disabled = _minimal_training_config()
+	disabled['data']['amplitude_agc'] = {'enabled': False}
+	assert resolve_mae_training_config(disabled)['data']['amplitude_agc'] == {
+		'enabled': False,
+	}
+
+	enabled = _minimal_training_config()
+	enabled['data']['amplitude_agc'] = {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 65,
+		'eps': 1.0e-3,
+		'clip_abs': 5.0,
+	}
+
+	assert resolve_mae_training_config(enabled)['data']['amplitude_agc'] == {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 65,
+		'eps': 1.0e-3,
+		'clip_abs': 5.0,
+	}
+
+
+@pytest.mark.parametrize(
+	('amplitude_agc', 'error'),
+	[
+		({'enabled': 'true'}, TypeError),
+		(
+			{
+				'enabled': True,
+				'mode': 'unknown',
+				'window_z': 65,
+				'eps': 1.0e-3,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'eps': 1.0e-3,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 0,
+				'eps': 1.0e-3,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 64,
+				'eps': 1.0e-3,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 65,
+				'eps': 0.0,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 65,
+				'eps': float('inf'),
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 65,
+				'eps': float('nan'),
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 65,
+				'eps': 1.0e-3,
+				'clip_abs': 0.0,
+			},
+			ValueError,
+		),
+	],
+)
+def test_training_amplitude_agc_validation_rejects_invalid_values(
+	amplitude_agc: dict[str, object],
+	error: type[Exception],
+) -> None:
+	cfg = _minimal_training_config()
+	cfg['data']['amplitude_agc'] = amplitude_agc
+
+	with pytest.raises(error, match='amplitude_agc'):
+		resolve_mae_training_config(cfg)
 
 
 @pytest.mark.parametrize('reconstruction', ['huber', 'mse', 'l1'])

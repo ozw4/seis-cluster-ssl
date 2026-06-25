@@ -71,6 +71,7 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	assert checkpoint['config'] == resolved_config
 	assert checkpoint['config']['data']['min_valid_fraction'] == 0.1
 	assert checkpoint['config']['data']['max_resample_attempts'] == 16
+	assert checkpoint['config']['data']['amplitude_agc'] == {'enabled': False}
 	assert checkpoint['config']['zero_mask'] == {
 		'enabled': False,
 		'zero_atol': 0.0,
@@ -171,6 +172,35 @@ def test_resume_rejects_target_normalization_change(tmp_path: Path) -> None:
 		run_mae_pretraining(resume_cfg, resume=checkpoint_path)
 
 
+def test_resume_allows_same_amplitude_agc_settings(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	cfg['data']['amplitude_agc'] = _enabled_agc_config()
+	cfg['train']['max_steps'] = 1
+	checkpoint_path = run_mae_pretraining(cfg)
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['train']['max_steps'] = 2
+
+	resumed_path = run_mae_pretraining(resume_cfg, resume=checkpoint_path)
+
+	assert resumed_path.is_file()
+
+
+@pytest.mark.parametrize('key', ['window_z', 'eps'])
+def test_resume_rejects_amplitude_agc_change(tmp_path: Path, key: str) -> None:
+	cfg = _tiny_config(tmp_path)
+	cfg['data']['amplitude_agc'] = _enabled_agc_config()
+	checkpoint_path = run_mae_pretraining(cfg)
+	resume_cfg = deepcopy(cfg)
+	if key == 'window_z':
+		resume_cfg['data']['amplitude_agc']['window_z'] = 5
+	else:
+		resume_cfg['data']['amplitude_agc']['eps'] = 1.0e-5
+	resume_cfg['train']['epochs'] = 2
+
+	with pytest.raises(ValueError, match=rf'data\.amplitude_agc\.{key}'):
+		run_mae_pretraining(resume_cfg, resume=checkpoint_path)
+
+
 def test_resume_allows_legacy_checkpoint_for_none_target_normalization(
 	tmp_path: Path,
 ) -> None:
@@ -180,6 +210,23 @@ def test_resume_allows_legacy_checkpoint_for_none_target_normalization(
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
 	del payload['config']['loss']['target_normalization']
 	legacy_path = tmp_path / 'legacy.pt'
+	torch.save(payload, legacy_path)
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['train']['max_steps'] = 2
+
+	resumed_path = run_mae_pretraining(resume_cfg, resume=legacy_path)
+	assert resumed_path.is_file()
+
+
+def test_resume_allows_legacy_checkpoint_without_amplitude_agc(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	cfg['train']['max_steps'] = 1
+	checkpoint_path = run_mae_pretraining(cfg)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	del payload['config']['data']['amplitude_agc']
+	legacy_path = tmp_path / 'legacy_no_agc.pt'
 	torch.save(payload, legacy_path)
 	resume_cfg = deepcopy(cfg)
 	resume_cfg['train']['max_steps'] = 2
@@ -385,6 +432,7 @@ def test_grad_clip_norm_calls_torch_clip_on_cpu(
 		loss_config={
 			'reconstruction': 'mse',
 			'gradient_weight': 0.05,
+			'visible_reconstruction_weight': 0.0,
 			'target_normalization': {'mode': 'none'},
 		},
 		grad_clip_norm=1.0,
@@ -411,7 +459,10 @@ def test_train_one_epoch_requires_loss_reconstruction() -> None:
 			device=torch.device('cpu'),
 			epoch=1,
 			patch_size_xyz=(2, 2, 2),
-			loss_config={'gradient_weight': 0.05, 'target_normalization': {'mode': 'none'}},
+			loss_config={
+				'gradient_weight': 0.05,
+				'target_normalization': {'mode': 'none'},
+			},
 		)
 
 
@@ -452,6 +503,7 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 			loss_config={
 				'reconstruction': 'mse',
 				'gradient_weight': 0.05,
+				'visible_reconstruction_weight': 0.0,
 				'target_normalization': {'mode': 'none'},
 			},
 			global_step=1042,
@@ -532,6 +584,16 @@ def _tiny_config(tmp_path: Path) -> dict[str, object]:
 			'seed': 7,
 			'grad_clip_norm': 1.0,
 		},
+	}
+
+
+def _enabled_agc_config() -> dict[str, object]:
+	return {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 3,
+		'eps': 1.0e-6,
+		'clip_abs': 2.0,
 	}
 
 

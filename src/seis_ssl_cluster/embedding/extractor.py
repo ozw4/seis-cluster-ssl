@@ -28,6 +28,8 @@ from seis_ssl_cluster.data.crop_sampler import (
 	required_zero_mask_margin_xyz,
 )
 from seis_ssl_cluster.data.normalization import (
+	AmplitudeAgcConfig,
+	apply_configured_agc,
 	load_normalization_stats,
 	normalize_amplitude,
 )
@@ -114,6 +116,7 @@ class EmbeddingExtractionSettings:
 	min_token_valid_fraction: float
 	zero_mask: ZeroMaskConfig
 	normalized_clip_abs: float | None
+	amplitude_agc: AmplitudeAgcConfig
 
 
 @dataclass(frozen=True)
@@ -239,6 +242,7 @@ def extraction_settings_from_config(
 		),
 		zero_mask=_zero_mask_from_config(checkpoint_config),
 		normalized_clip_abs=normalized_clip_abs,
+		amplitude_agc=_amplitude_agc_from_config(checkpoint_config),
 	)
 
 
@@ -397,6 +401,11 @@ def build_embedding_metadata(  # noqa: PLR0913
 		'output_dtype': str(settings.output_dtype),
 		'min_token_valid_fraction': settings.min_token_valid_fraction,
 		'normalized_clip_abs': settings.normalized_clip_abs,
+		'amplitude_agc': settings.amplitude_agc.to_dict(),
+		'preprocessing': {
+			'normalized_clip_abs': settings.normalized_clip_abs,
+			'amplitude_agc': settings.amplitude_agc.to_dict(),
+		},
 		'zero_mask': {
 			'enabled': settings.zero_mask.enabled,
 			'zero_atol': settings.zero_mask.zero_atol,
@@ -499,7 +508,11 @@ def _read_window(  # noqa: PLR0913
 		stats,
 		normalized_clip_abs=settings.normalized_clip_abs,
 	)
-	amplitude_norm = amplitude_norm.astype(np.float32, copy=True)
+	amplitude_norm = apply_configured_agc(
+		amplitude_norm,
+		local_valid_mask,
+		settings.amplitude_agc,
+	)
 	amplitude_norm[~local_valid_mask] = 0.0
 	token_valid_mask = reduce_valid_mask_to_tokens(
 		local_valid_mask,
@@ -655,7 +668,14 @@ def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
 	_validate_required_checkpoint_keys(
 		data,
 		'data',
-		(*DEFAULT_MAE_DATA_OPTIONS, 'local_crop_size'),
+		(
+			*(
+				key
+				for key in DEFAULT_MAE_DATA_OPTIONS
+				if key != 'amplitude_agc'
+			),
+			'local_crop_size',
+		),
 	)
 	_validate_required_checkpoint_keys(model, 'model', _CHECKPOINT_MODEL_GEOMETRY_KEYS)
 	_validate_required_checkpoint_keys(masking, 'masking', _CHECKPOINT_MASKING_KEYS)
@@ -668,6 +688,12 @@ def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
 	_validate_positive_xyz(data['local_crop_size'], 'data.local_crop_size')
 	_fraction(data['min_valid_fraction'], 'data.min_valid_fraction')
 	_positive_int(data['max_resample_attempts'], 'data.max_resample_attempts')
+	if 'normalized_clip_abs' in data:
+		_positive_finite_number(
+			data['normalized_clip_abs'],
+			'data.normalized_clip_abs',
+		)
+	_validate_checkpoint_amplitude_agc(data)
 	_validate_checkpoint_model_contract(model)
 	_validate_positive_xyz(model['patch_size'], 'model.patch_size')
 	for key in _CHECKPOINT_MODEL_GEOMETRY_KEYS[1:]:
@@ -861,6 +887,21 @@ def _zero_mask_from_config(config: Mapping[str, object]) -> ZeroMaskConfig:
 		msg = 'checkpoint config is missing zero_mask'
 		raise ValueError(msg)
 	return _zero_mask_from_mapping(value)
+
+
+def _amplitude_agc_from_config(config: Mapping[str, object]) -> AmplitudeAgcConfig:
+	data = _required_mapping(config, 'data')
+	value = data.get('amplitude_agc')
+	return AmplitudeAgcConfig.from_mapping(
+		cast('Mapping[str, object] | None', value),
+	)
+
+
+def _validate_checkpoint_amplitude_agc(data: Mapping[str, object]) -> None:
+	value = data.get('amplitude_agc')
+	if value is None:
+		return
+	AmplitudeAgcConfig.from_mapping(cast('Mapping[str, object]', value))
 
 
 def _zero_mask_mapping_from_config(
