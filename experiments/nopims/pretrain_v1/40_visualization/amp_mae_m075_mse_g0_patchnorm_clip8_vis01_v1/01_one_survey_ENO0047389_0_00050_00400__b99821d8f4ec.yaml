@@ -18,7 +18,7 @@ visualization:
   - 750
   xz_slices:
   - 150
-  dpi: 160
+  dpi: 300
   invalid_color: lightgray
   amplitude_underlay:
     enabled: false
@@ -26,3 +26,6 @@ visualization:
   summaries:
     enabled: true
     include_amplitude_norm: false
+  amplitude_comparison:
+    enabled: true
+    alpha: 0.35

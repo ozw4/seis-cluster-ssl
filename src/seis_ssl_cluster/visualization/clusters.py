@@ -37,7 +37,7 @@ def save_cluster_slice_pngs(  # noqa: PLR0913
 	amplitude: np.ndarray | None = None,
 	amplitude_alpha: float = 0.35,
 	invalid_color: str = 'lightgray',
-	dpi: int = 160,
+	dpi: int = 300,
 ) -> list[Path]:
 	"""Render configured XY and XZ cluster-label slices as PNG files."""
 	label_array = _validate_labels(labels)
@@ -197,7 +197,9 @@ def _save_one_slice(  # noqa: PLR0913
 	plt = _plt()
 	label_slice = slice_image(labels, view=view, slice_index=slice_index)
 	display_labels = np.where(label_slice < 0, 0, label_slice + 1)
-	fig, ax = plt.subplots(figsize=(5.0, 4.2), dpi=dpi)
+	fig, ax = plt.subplots(figsize=_figsize_for_view(view, comparison=False), dpi=dpi)
+	origin = _imshow_origin_for_view(view)
+	aspect = _imshow_aspect_for_view(view)
 	underlay_alpha = None
 	if amplitude is not None:
 		underlay_alpha = _validate_alpha(amplitude_alpha)
@@ -206,7 +208,8 @@ def _save_one_slice(  # noqa: PLR0913
 		ax.imshow(
 			amp_slice,
 			cmap='gray',
-			origin='lower',
+			origin=origin,
+			aspect=aspect,
 			interpolation='none',
 			vmin=vmin,
 			vmax=vmax,
@@ -229,8 +232,9 @@ def _save_one_slice(  # noqa: PLR0913
 		display_labels,
 		cmap=cmap,
 		norm=norm,
-		origin='lower',
-		interpolation='none',
+		origin=origin,
+		aspect=aspect,
+		interpolation='nearest',
 	)
 	ax.set_title(
 		_slice_title(
@@ -243,7 +247,7 @@ def _save_one_slice(  # noqa: PLR0913
 		),
 	)
 	ax.set_xlabel('x')
-	ax.set_ylabel('y' if view == 'xy' else 'z')
+	ax.set_ylabel(_vertical_axis_label_for_view(view))
 	ax.tick_params(labelsize=7)
 	fig.tight_layout()
 	stem = (
@@ -278,16 +282,25 @@ def _save_one_comparison_slice(  # noqa: PLR0913
 	display_labels = np.where(label_slice < 0, 0, label_slice + 1)
 	amp_slice = slice_image(amplitude, view=view, slice_index=slice_index)
 	vmin, vmax = _robust_limits(amp_slice)
-	fig, axes = plt.subplots(1, 3, figsize=(12.0, 4.2), dpi=dpi)
+	fig, axes = plt.subplots(
+		1,
+		3,
+		figsize=_figsize_for_view(view, comparison=True),
+		dpi=dpi,
+		constrained_layout=True,
+	)
+	origin = _imshow_origin_for_view(view)
+	aspect = _imshow_aspect_for_view(view)
 	amp_ax, cluster_ax, overlay_ax = axes
 	for ax in axes:
 		ax.set_xlabel('x')
-		ax.set_ylabel('y' if view == 'xy' else 'z')
+		ax.set_ylabel(_vertical_axis_label_for_view(view))
 		ax.tick_params(labelsize=7)
 	amp_ax.imshow(
 		amp_slice,
 		cmap='gray',
-		origin='lower',
+		origin=origin,
+		aspect=aspect,
 		interpolation='none',
 		vmin=vmin,
 		vmax=vmax,
@@ -302,14 +315,16 @@ def _save_one_comparison_slice(  # noqa: PLR0913
 		display_labels,
 		cmap=cluster_cmap,
 		norm=norm,
-		origin='lower',
-		interpolation='none',
+		origin=origin,
+		aspect=aspect,
+		interpolation='nearest',
 	)
 	cluster_ax.set_title('clusters')
 	overlay_ax.imshow(
 		amp_slice,
 		cmap='gray',
-		origin='lower',
+		origin=origin,
+		aspect=aspect,
 		interpolation='none',
 		vmin=vmin,
 		vmax=vmax,
@@ -324,8 +339,9 @@ def _save_one_comparison_slice(  # noqa: PLR0913
 			name=f'clusters_k{k}_comparison_overlay',
 		),
 		norm=norm,
-		origin='lower',
-		interpolation='none',
+		origin=origin,
+		aspect=aspect,
+		interpolation='nearest',
 	)
 	overlay_ax.set_title('overlay')
 	fig.suptitle(
@@ -349,6 +365,47 @@ def _save_one_comparison_slice(  # noqa: PLR0913
 	fig.savefig(out_path)
 	plt.close(fig)
 	return out_path
+
+
+def _imshow_origin_for_view(view: str) -> str:
+	if view == 'xz':
+		return 'upper'
+	if view == 'xy':
+		return 'lower'
+	msg = f'unknown view: {view!r}'
+	raise ValueError(msg)
+
+
+def _imshow_aspect_for_view(view: str) -> str:
+	if view == 'xz':
+		return 'auto'
+	if view == 'xy':
+		return 'equal'
+	msg = f'unknown view: {view!r}'
+	raise ValueError(msg)
+
+
+def _vertical_axis_label_for_view(view: str) -> str:
+	if view == 'xz':
+		return 'z (down)'
+	if view == 'xy':
+		return 'y'
+	msg = f'unknown view: {view!r}'
+	raise ValueError(msg)
+
+
+
+def _figsize_for_view(view: str, *, comparison: bool) -> tuple[float, float]:
+	if view == 'xz':
+		if comparison:
+			return (12.0, 8.5)
+		return (6.0, 8.5)
+	if view == 'xy':
+		if comparison:
+			return (12.0, 4.5)
+		return (6.0, 6.0)
+	msg = f'unknown view: {view!r}'
+	raise ValueError(msg)
 
 
 def _normalize_slice_specs(
@@ -383,10 +440,7 @@ def _slice_title(  # noqa: PLR0913
 			f'{survey_id} k={k} token {view.upper()} '
 			f'voxel-{axis}={voxel_slice_index} token-{axis}={array_slice_index}'
 		)
-	return (
-		f'{survey_id} k={k} {mode} {view.upper()} '
-		f'voxel-{axis}={voxel_slice_index}'
-	)
+	return f'{survey_id} k={k} {mode} {view.upper()} voxel-{axis}={voxel_slice_index}'
 
 
 def _validate_labels(labels: np.ndarray) -> np.ndarray:

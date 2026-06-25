@@ -1,3 +1,4 @@
+# ruff: noqa: SLF001
 from __future__ import annotations
 
 import json
@@ -11,6 +12,7 @@ from proc.seis_ssl_cluster.visualize_clusters import (
 	run_cluster_visualization,
 )
 from seis_ssl_cluster.config import load_config
+from seis_ssl_cluster.visualization import clusters as cluster_vis
 from seis_ssl_cluster.visualization.clusters import (
 	ClusterSlice,
 	ClusterSliceRequest,
@@ -18,12 +20,82 @@ from seis_ssl_cluster.visualization.clusters import (
 	save_cluster_slice_pngs,
 	stable_cluster_colors,
 )
+from seis_ssl_cluster.visualization.common import slice_image
 
 if TYPE_CHECKING:
 	from pathlib import Path
 
 
 plt = pytest.importorskip('matplotlib.pyplot')
+
+
+def test_imshow_view_helpers_match_seismic_display_rules() -> None:
+	assert cluster_vis._imshow_origin_for_view('xy') == 'lower'
+	assert cluster_vis._imshow_aspect_for_view('xy') == 'equal'
+	assert cluster_vis._vertical_axis_label_for_view('xy') == 'y'
+	assert cluster_vis._imshow_origin_for_view('xz') == 'upper'
+	assert cluster_vis._imshow_aspect_for_view('xz') == 'auto'
+	assert cluster_vis._vertical_axis_label_for_view('xz') == 'z (down)'
+	assert cluster_vis._figsize_for_view('xy', comparison=False) == (6.0, 6.0)
+	assert cluster_vis._figsize_for_view('xz', comparison=False) == (6.0, 8.5)
+	assert cluster_vis._figsize_for_view('xy', comparison=True) == (12.0, 4.5)
+	assert cluster_vis._figsize_for_view('xz', comparison=True) == (12.0, 8.5)
+
+
+def test_xz_slice_keeps_shallow_z_first_row_and_uses_upper_origin() -> None:
+	volume = np.zeros((3, 2, 4), dtype=np.int32)
+	for z_index in range(volume.shape[2]):
+		volume[:, :, z_index] = z_index
+
+	image = slice_image(volume, view='xz', slice_index=1)
+
+	assert image.shape == (4, 3)
+	assert np.all(image[0, :] == 0)
+	assert np.all(image[-1, :] == 3)
+	assert cluster_vis._imshow_origin_for_view('xz') == 'upper'
+
+
+def test_comparison_panels_share_xz_origin_and_aspect(
+	monkeypatch: pytest.MonkeyPatch,
+	tmp_path: Path,
+) -> None:
+	fig, ax = plt.subplots()
+	axes_type = type(ax)
+	plt.close(fig)
+	calls = []
+	original_imshow = axes_type.imshow
+
+	def recording_imshow(self: object, *args: object, **kwargs: object) -> object:
+		calls.append(
+			{
+				'origin': kwargs.get('origin'),
+				'aspect': kwargs.get('aspect'),
+				'interpolation': kwargs.get('interpolation'),
+			},
+		)
+		return original_imshow(self, *args, **kwargs)
+
+	monkeypatch.setattr(axes_type, 'imshow', recording_imshow)
+	labels = np.arange(3 * 4 * 5, dtype=np.int32).reshape(3, 4, 5) % 3
+	amplitude = np.linspace(-1.0, 1.0, labels.size, dtype=np.float32).reshape(
+		labels.shape,
+	)
+
+	save_cluster_comparison_pngs(
+		labels,
+		survey_id='survey',
+		k=3,
+		mode='voxel',
+		output_dir=tmp_path,
+		slices=ClusterSliceRequest(xz_slices=(1,)),
+		amplitude=amplitude,
+	)
+
+	assert len(calls) == 4
+	assert {call['origin'] for call in calls} == {'upper'}
+	assert {call['aspect'] for call in calls} == {'auto'}
+	assert calls[1]['interpolation'] == 'nearest'
+	assert calls[3]['interpolation'] == 'nearest'
 
 
 def test_xy_and_xz_cluster_pngs_are_created(tmp_path: Path) -> None:

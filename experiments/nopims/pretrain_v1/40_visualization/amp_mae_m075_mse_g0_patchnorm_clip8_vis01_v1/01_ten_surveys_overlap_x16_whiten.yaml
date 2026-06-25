@@ -1,0 +1,40 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+clustering:
+  input_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/ten_surveys_overlap_x16_k6_8_whiten
+visualization:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/ten_surveys_overlap_x16_k6_8_whiten
+  survey_ids:
+  - ENO0047389_0_00050_00400__b99821d8f4ec
+  - ENO0047389_0_00050_00750__16ce86dbe1b7
+  - ENO0047389_0_00050_01100__db5088a33f45
+  - ENO0047389_0_00050_01450__afa9dc612e99
+  - ENO0047389_0_00400_01800__74016ae5e4eb
+  - ENO0047389_0_00400_02150__52705dfe8e51
+  - ENO0047389_0_00400_02500__e3c7cb30db3b
+  - ENO0047392_0_00100_00100__b9b9b3c4e054
+  - ENO0047392_0_00100_00450__64c503a3d543
+  - ENO0047392_0_00100_00800__e43ebaa0f439
+  modes:
+  - voxel
+  reconstruct_voxel: true
+  allow_all_surveys_for_voxel_reconstruction: false
+  skip_existing_voxel_labels: true
+  max_voxel_output_gib: 50.0
+  allow_large_voxel_output: false
+  slice_coordinate_space: voxel
+  xy_slices:
+  - 750
+  xz_slices:
+  - 150
+  dpi: 160
+  invalid_color: lightgray
+  amplitude_underlay:
+    enabled: false
+    alpha: 0.35
+  amplitude_comparison:
+    enabled: true
+    alpha: 0.35
+  summaries:
+    enabled: true
+    include_amplitude_norm: false
