@@ -280,6 +280,7 @@ def test_default_cluster_visualization_config_is_minimal_raw_user_config() -> No
 		'dpi': 160,
 		'invalid_color': 'lightgray',
 		'amplitude_underlay': {'enabled': False, 'alpha': 0.35},
+		'amplitude_comparison': {'enabled': False, 'alpha': 0.35},
 		'summaries': {'enabled': True, 'include_amplitude_norm': False},
 	}
 	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
@@ -341,8 +342,17 @@ def test_default_data_registry_handoff_paths_are_explicit() -> None:
 	assert qc['splits']['output'] == DEFAULT_CLEAN_SPLIT_PATH
 
 
+def test_cluster_visualization_config_rejects_invalid_comparison_alpha() -> None:
+	cfg = _minimal_visualization_config()
+	cfg['visualization']['amplitude_comparison']['alpha'] = float('nan')
+
+	with pytest.raises(ValueError, match=r'amplitude_comparison\.alpha'):
+		resolve_cluster_visualization_config(cfg)
+
+
 @pytest.mark.parametrize(
 	('resolver', 'raw_config'),
+
 	[
 		(resolve_manifest_build_config, lambda: _minimal_manifest_build_config()),
 		(
@@ -1215,6 +1225,7 @@ def _minimal_visualization_config() -> dict[str, object]:
 			'dpi': 160,
 			'invalid_color': 'lightgray',
 			'amplitude_underlay': {'enabled': False, 'alpha': 0.35},
+			'amplitude_comparison': {'enabled': False, 'alpha': 0.35},
 			'summaries': {'enabled': True, 'include_amplitude_norm': False},
 		},
 	}
@@ -1256,5 +1267,5 @@ def test_training_loss_target_normalization_validation() -> None:
 
 	bad_gradient = deepcopy(patchnorm)
 	bad_gradient['loss']['gradient_weight'] = 0.05
-	with pytest.raises(ValueError, match='gradient_weight must be 0.0'):
+	with pytest.raises(ValueError, match=r'gradient_weight must be 0\.0'):
 		resolve_mae_training_config(bad_gradient)

@@ -1,25 +1,25 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 clustering:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1
+  input_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/full_k6_8_10_12
 visualization:
-  output_dir: /workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/pretrain_v1
+  output_dir: /workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/selected_surveys
   survey_ids: []
-  modes: [token]
+  modes:
+  - token
   reconstruct_voxel: false
   allow_all_surveys_for_voxel_reconstruction: false
   skip_existing_voxel_labels: true
   max_voxel_output_gib: 50.0
   allow_large_voxel_output: false
   slice_coordinate_space: voxel
-  xy_slices: [750]
-  xz_slices: [150]
+  xy_slices:
+  - 750
+  xz_slices:
+  - 150
   dpi: 160
   invalid_color: lightgray
   amplitude_underlay:
-    enabled: false
-    alpha: 0.35
-  amplitude_comparison:
     enabled: false
     alpha: 0.35
   summaries:

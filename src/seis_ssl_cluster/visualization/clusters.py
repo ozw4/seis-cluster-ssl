@@ -88,6 +88,68 @@ def save_cluster_slice_pngs(  # noqa: PLR0913
 	return created
 
 
+def save_cluster_comparison_pngs(  # noqa: PLR0913
+	labels: np.ndarray,
+	*,
+	survey_id: str,
+	k: int,
+	mode: str,
+	output_dir: str | Path,
+	slices: ClusterSliceRequest,
+	amplitude: np.ndarray,
+	amplitude_alpha: float = 0.35,
+	invalid_color: str = 'lightgray',
+	dpi: int = 160,
+) -> list[Path]:
+	"""Render amplitude, cluster, and overlay comparison slices as PNG files."""
+	label_array = _validate_labels(labels)
+	if amplitude.shape != label_array.shape:
+		msg = (
+			'amplitude comparison shape must match label shape; '
+			f'got {amplitude.shape!r} and {label_array.shape!r}'
+		)
+		raise ValueError(msg)
+	root = Path(output_dir)
+	root.mkdir(parents=True, exist_ok=True)
+	created = [
+		_save_one_comparison_slice(
+			label_array,
+			survey_id=survey_id,
+			k=k,
+			mode=mode,
+			view='xy',
+			slice_index=index.array_slice_index,
+			voxel_slice_index=index.voxel_slice_index,
+			output_dir=root,
+			amplitude=amplitude,
+			amplitude_alpha=amplitude_alpha,
+			invalid_color=invalid_color,
+			dpi=dpi,
+		)
+		for index in _normalize_slice_specs(slices.xy_slices)
+	]
+	created.extend(
+		[
+			_save_one_comparison_slice(
+				label_array,
+				survey_id=survey_id,
+				k=k,
+				mode=mode,
+				view='xz',
+				slice_index=index.array_slice_index,
+				voxel_slice_index=index.voxel_slice_index,
+				output_dir=root,
+				amplitude=amplitude,
+				amplitude_alpha=amplitude_alpha,
+				invalid_color=invalid_color,
+				dpi=dpi,
+			)
+			for index in _normalize_slice_specs(slices.xz_slices)
+		],
+	)
+	return created
+
+
 def stable_cluster_colors(k: int, *, invalid_color: str = 'lightgray') -> object:
 	"""Return a discrete colormap with stable label-to-color mapping."""
 	return _cluster_colors(
@@ -195,6 +257,100 @@ def _save_one_slice(  # noqa: PLR0913
 	return out_path
 
 
+def _save_one_comparison_slice(  # noqa: PLR0913
+	labels: np.ndarray,
+	*,
+	survey_id: str,
+	k: int,
+	mode: str,
+	view: str,
+	slice_index: int,
+	voxel_slice_index: int,
+	output_dir: Path,
+	amplitude: np.ndarray,
+	amplitude_alpha: float,
+	invalid_color: str,
+	dpi: int,
+) -> Path:
+	_validate_slice_index(labels, view=view, slice_index=slice_index)
+	plt = _plt()
+	label_slice = slice_image(labels, view=view, slice_index=slice_index)
+	display_labels = np.where(label_slice < 0, 0, label_slice + 1)
+	amp_slice = slice_image(amplitude, view=view, slice_index=slice_index)
+	vmin, vmax = _robust_limits(amp_slice)
+	fig, axes = plt.subplots(1, 3, figsize=(12.0, 4.2), dpi=dpi)
+	amp_ax, cluster_ax, overlay_ax = axes
+	for ax in axes:
+		ax.set_xlabel('x')
+		ax.set_ylabel('y' if view == 'xy' else 'z')
+		ax.tick_params(labelsize=7)
+	amp_ax.imshow(
+		amp_slice,
+		cmap='gray',
+		origin='lower',
+		interpolation='none',
+		vmin=vmin,
+		vmax=vmax,
+	)
+	amp_ax.set_title('amplitude')
+	cluster_cmap = stable_cluster_colors(k, invalid_color=invalid_color)
+	norm = _matplotlib_colors().BoundaryNorm(
+		np.arange(-0.5, k + 1.5, 1.0),
+		k + 1,
+	)
+	cluster_ax.imshow(
+		display_labels,
+		cmap=cluster_cmap,
+		norm=norm,
+		origin='lower',
+		interpolation='none',
+	)
+	cluster_ax.set_title('clusters')
+	overlay_ax.imshow(
+		amp_slice,
+		cmap='gray',
+		origin='lower',
+		interpolation='none',
+		vmin=vmin,
+		vmax=vmax,
+	)
+	overlay_alpha = _validate_alpha(amplitude_alpha)
+	overlay_ax.imshow(
+		display_labels,
+		cmap=_cluster_colors(
+			k,
+			invalid_color=invalid_color,
+			cluster_alpha=1.0 - overlay_alpha,
+			name=f'clusters_k{k}_comparison_overlay',
+		),
+		norm=norm,
+		origin='lower',
+		interpolation='none',
+	)
+	overlay_ax.set_title('overlay')
+	fig.suptitle(
+		_slice_title(
+			survey_id=survey_id,
+			k=k,
+			mode=mode,
+			view=view,
+			array_slice_index=slice_index,
+			voxel_slice_index=voxel_slice_index,
+		),
+		fontsize=10,
+	)
+	fig.tight_layout()
+	stem = (
+		f'{survey_id}_k{k}_xy_z{voxel_slice_index}.png'
+		if view == 'xy'
+		else f'{survey_id}_k{k}_xz_y{voxel_slice_index}.png'
+	)
+	out_path = output_dir / stem
+	fig.savefig(out_path)
+	plt.close(fig)
+	return out_path
+
+
 def _normalize_slice_specs(
 	slices: tuple[int | ClusterSlice, ...],
 ) -> tuple[ClusterSlice, ...]:
@@ -287,6 +443,7 @@ def _matplotlib_colors() -> object:
 __all__ = [
 	'ClusterSlice',
 	'ClusterSliceRequest',
+	'save_cluster_comparison_pngs',
 	'save_cluster_slice_pngs',
 	'stable_cluster_colors',
 ]

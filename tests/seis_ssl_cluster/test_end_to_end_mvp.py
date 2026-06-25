@@ -289,6 +289,7 @@ def _visualize_clusters(
 			'dpi': 160,
 			'invalid_color': 'lightgray',
 			'amplitude_underlay': {'enabled': False, 'alpha': 0.35},
+			'amplitude_comparison': {'enabled': False, 'alpha': 0.35},
 			'summaries': {'enabled': True, 'include_amplitude_norm': False},
 		},
 	}

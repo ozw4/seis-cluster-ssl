@@ -151,11 +151,13 @@ _VISUALIZATION_KEYS = frozenset(
 		'dpi',
 		'invalid_color',
 		'amplitude_underlay',
+		'amplitude_comparison',
 		'summaries',
 	},
 )
 _VISUALIZATION_REQUIRED_KEYS = _VISUALIZATION_KEYS
 _VISUALIZATION_UNDERLAY_KEYS = frozenset({'enabled', 'alpha'})
+_VISUALIZATION_COMPARISON_KEYS = frozenset({'enabled', 'alpha'})
 _VISUALIZATION_SUMMARY_KEYS = frozenset({'enabled', 'include_amplitude_norm'})
 
 
@@ -466,6 +468,31 @@ def resolve_cluster_visualization_config(config: _T) -> Config:
 	)
 	_validate_bool(underlay, 'enabled', prefix='visualization.amplitude_underlay')
 	_validate_fraction(underlay, 'alpha', prefix='visualization.amplitude_underlay')
+	comparison = _required_child_mapping(
+		visualization,
+		'amplitude_comparison',
+		prefix='visualization',
+	)
+	_validate_allowed_keys(
+		comparison,
+		_VISUALIZATION_COMPARISON_KEYS,
+		prefix='visualization.amplitude_comparison',
+	)
+	_validate_required_keys(
+		comparison,
+		_VISUALIZATION_COMPARISON_KEYS,
+		prefix='visualization.amplitude_comparison',
+	)
+	_validate_bool(
+		comparison,
+		'enabled',
+		prefix='visualization.amplitude_comparison',
+	)
+	_validate_fraction(
+		comparison,
+		'alpha',
+		prefix='visualization.amplitude_comparison',
+	)
 	summaries = _required_child_mapping(
 		visualization,
 		'summaries',

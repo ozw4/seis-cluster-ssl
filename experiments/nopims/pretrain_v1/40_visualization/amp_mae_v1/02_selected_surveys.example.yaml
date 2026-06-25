@@ -19,6 +19,9 @@ visualization:
   amplitude_underlay:
     enabled: false
     alpha: 0.35
+  amplitude_comparison:
+    enabled: false
+    alpha: 0.35
   summaries:
     enabled: true
     include_amplitude_norm: false

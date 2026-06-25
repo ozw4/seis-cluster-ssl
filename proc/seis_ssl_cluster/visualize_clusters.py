@@ -123,6 +123,15 @@ def run_cluster_visualization(  # noqa: C901, PLR0912, PLR0915
 		underlay_cfg.get('alpha', 0.35),
 		'visualization.amplitude_underlay.alpha',
 	)
+	comparison_cfg = _optional_mapping(visualization, 'amplitude_comparison')
+	comparison_enabled = _bool(
+		comparison_cfg.get('enabled', False),
+		'visualization.amplitude_comparison.enabled',
+	)
+	comparison_alpha = _fraction(
+		comparison_cfg.get('alpha', 0.35),
+		'visualization.amplitude_comparison.alpha',
+	)
 	summary_cfg = _optional_mapping(visualization, 'summaries')
 	summaries_enabled = _bool(
 		summary_cfg.get('enabled', True),
@@ -177,7 +186,9 @@ def run_cluster_visualization(  # noqa: C901, PLR0912, PLR0915
 			)
 			token_labels = np.load(token_path, mmap_mode='r')
 			amplitude = (
-				_open_amplitude(embedding_metadata) if underlay_enabled else None
+				_open_amplitude(embedding_metadata)
+				if underlay_enabled or comparison_enabled
+				else None
 			)
 			needs_geometry = (
 				'token' in modes
@@ -216,12 +227,32 @@ def run_cluster_visualization(  # noqa: C901, PLR0912, PLR0915
 						mode='token',
 						output_dir=output_dir / 'token',
 						slices=token_slices,
-						amplitude=token_amplitude,
+						amplitude=token_amplitude if underlay_enabled else None,
 						amplitude_alpha=underlay_alpha,
 						invalid_color=invalid_color,
 						dpi=dpi,
 					),
 				)
+				if comparison_enabled:
+					comparison_amplitude = _require_amplitude_for_comparison(
+						token_amplitude,
+						survey_id=survey_id,
+						mode='token',
+					)
+					png_count += len(
+						clusters.save_cluster_comparison_pngs(
+							token_labels,
+							survey_id=survey_id,
+							k=k,
+							mode='token',
+							output_dir=output_dir / 'token_comparison',
+							slices=token_slices,
+							amplitude=comparison_amplitude,
+							amplitude_alpha=comparison_alpha,
+							invalid_color=invalid_color,
+							dpi=dpi,
+						),
+					)
 			voxel_path = artifact.k_dir / f'{survey_id}.cluster_labels_voxel.npy'
 			if reconstruct_voxel:
 				if geometry is None:
@@ -260,12 +291,32 @@ def run_cluster_visualization(  # noqa: C901, PLR0912, PLR0915
 						mode='voxel',
 						output_dir=output_dir / 'voxel',
 						slices=voxel_slices,
-						amplitude=amplitude,
+						amplitude=amplitude if underlay_enabled else None,
 						amplitude_alpha=underlay_alpha,
 						invalid_color=invalid_color,
 						dpi=dpi,
 					),
 				)
+				if comparison_enabled:
+					comparison_amplitude = _require_amplitude_for_comparison(
+						amplitude,
+						survey_id=survey_id,
+						mode='voxel',
+					)
+					png_count += len(
+						clusters.save_cluster_comparison_pngs(
+							voxel_labels,
+							survey_id=survey_id,
+							k=k,
+							mode='voxel',
+							output_dir=output_dir / 'voxel_comparison',
+							slices=voxel_slices,
+							amplitude=comparison_amplitude,
+							amplitude_alpha=comparison_alpha,
+							invalid_color=invalid_color,
+							dpi=dpi,
+						),
+					)
 		if summaries_enabled and summary_inputs:
 			summaries.write_cluster_summaries(
 				summary_inputs,
@@ -448,6 +499,22 @@ def _amplitude_underlay_for_labels(
 		)
 		raise ValueError(msg)
 	return _downsample_amplitude_to_tokens(amplitude, labels.shape, patch)
+
+
+def _require_amplitude_for_comparison(
+	amplitude: np.ndarray | None,
+	*,
+	survey_id: str,
+	mode: str,
+) -> np.ndarray:
+	if amplitude is None:
+		msg = (
+			'amplitude_comparison requested, but no amplitude array could be '
+			f'opened for survey {survey_id!r} in {mode} mode; ensure the '
+			'cluster label metadata points to a valid source_amplitude_path'
+		)
+		raise FileNotFoundError(msg)
+	return amplitude
 
 
 def _validate_slice_coordinate_space(value: object) -> None:

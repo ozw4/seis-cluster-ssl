@@ -268,7 +268,8 @@ clustering:
 ### Visualization
 
 The safe default renders token maps and summaries only. Voxel reconstruction is
-opt-in and should name selected surveys.
+opt-in and should name selected surveys. Set `amplitude_comparison.enabled: true`
+to write side-by-side amplitude, cluster, and overlay panels for the same slices.
 
 ```yaml
 paths:
@@ -290,6 +291,9 @@ visualization:
   dpi: 160
   invalid_color: lightgray
   amplitude_underlay:
+    enabled: false
+    alpha: 0.35
+  amplitude_comparison:
     enabled: false
     alpha: 0.35
   summaries:
