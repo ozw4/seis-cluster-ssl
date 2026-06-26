@@ -5,6 +5,8 @@ embeddings:
 clustering:
   output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1
   embedding_normalization: l2
+  residualization:
+    enabled: false
   pca:
     enabled: true
     n_components: 64

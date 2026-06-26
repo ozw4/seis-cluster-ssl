@@ -218,12 +218,67 @@ def test_run_embedding_clustering_reports_non_finite_feature_survey(
 		run_embedding_clustering(_config(input_dir, tmp_path / 'clusters'))
 
 
+def test_run_embedding_clustering_applies_residualization_before_pca_and_kmeans(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.array(
+			[
+				[[[10.0, 0.0], [11.0, 1.0]], [[0.0, 10.0], [1.0, 11.0]]],
+				[[[12.0, 0.0], [13.0, 1.0]], [[2.0, 10.0], [3.0, 11.0]]],
+			],
+			dtype=np.float32,
+		),
+		valid=np.ones((2, 2, 2), dtype=np.bool_),
+	)
+	config = _config(input_dir, output_dir)
+	config['clustering']['embedding_normalization'] = 'none'
+	config['clustering']['sample_tokens'] = 8
+	config['clustering']['k_values'] = [2]
+	config['clustering']['pca'] = {
+		'enabled': True,
+		'n_components': 2,
+		'whiten': False,
+	}
+	config['clustering']['residualization'] = {
+		'enabled': True,
+		'mode': 'local_token_position',
+		'group_by': 'token_phase',
+		'add_global_mean_back': True,
+		'min_group_count': 1,
+	}
+
+	result = run_embedding_clustering(config)
+
+	assert result.results[0].k == 2
+	assert (output_dir / 'models' / 'residualizer.npz').is_file()
+	metadata = json.loads(
+		(output_dir / 'models' / 'k2' / 'clustering_metadata.json').read_text(
+			encoding='utf-8',
+		),
+	)
+	assert metadata['residualization']['enabled'] is True
+	assert metadata['residualization']['group_by'] == 'token_phase'
+	assert metadata['pca']['enabled'] is True
+	labels = np.load(output_dir / 'labels' / 'k2' / 'survey_a.cluster_labels_token.npy')
+	assert labels.shape == (2, 2, 2)
+	assert np.all(labels >= 0)
+
+
 def _config(input_dir: Path, output_dir: Path) -> dict[str, object]:
 	return {
 		'embeddings': {'input_dir': str(input_dir)},
 		'clustering': {
 			'output_dir': str(output_dir),
 			'embedding_normalization': 'l2',
+			'residualization': {
+				'enabled': False,
+			},
 			'pca': {
 				'enabled': True,
 				'n_components': 2,

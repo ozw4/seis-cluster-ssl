@@ -17,6 +17,10 @@ from seis_ssl_cluster.clustering.features import (
 	valid_flat_indices,
 	validate_finite_feature_batch,
 )
+from seis_ssl_cluster.clustering.residualization import (
+	LocalTokenPositionResidualizer,
+	residualization_keys_for_flat_indices,
+)
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping, Sequence
@@ -57,6 +61,7 @@ def write_labels_for_k(  # noqa: PLR0913
 	output_dir: str | Path,
 	k: int,
 	embedding_inputs: Sequence[EmbeddingInput],
+	residualizer: LocalTokenPositionResidualizer | None,
 	preprocessor: object,
 	kmeans: object,
 	prediction_batch_size: int,
@@ -74,6 +79,7 @@ def write_labels_for_k(  # noqa: PLR0913
 			output_dir=output_dir,
 			k=k,
 			embedding_input=item,
+			residualizer=residualizer,
 			preprocessor=preprocessor,
 			kmeans=kmeans,
 			prediction_batch_size=prediction_batch_size,
@@ -98,6 +104,7 @@ def _write_survey_labels(  # noqa: PLR0913
 	output_dir: str | Path,
 	k: int,
 	embedding_input: EmbeddingInput,
+	residualizer: LocalTokenPositionResidualizer | None,
 	preprocessor: object,
 	kmeans: object,
 	prediction_batch_size: int,
@@ -122,6 +129,13 @@ def _write_survey_labels(  # noqa: PLR0913
 		batch_indices = indices[start : start + prediction_batch_size]
 		features = np.asarray(flat_embeddings[batch_indices], dtype=np.float32)
 		validate_finite_feature_batch(features, embedding_input.survey_id)
+		if residualizer is not None:
+			group_keys = residualization_keys_for_flat_indices(
+				embedding_input,
+				batch_indices,
+				group_by=residualizer.group_by,
+			)
+			features = residualizer.transform(features, group_keys)
 		prepared = preprocessor.transform(features)
 		predicted = np.asarray(kmeans.predict(prepared), dtype=np.int32)
 		flat_labels[batch_indices] = predicted

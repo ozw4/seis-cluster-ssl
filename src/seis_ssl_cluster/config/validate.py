@@ -115,6 +115,7 @@ _CLUSTERING_KEYS = frozenset(
 	{
 		'output_dir',
 		'embedding_normalization',
+		'residualization',
 		'pca',
 		'sample_tokens',
 		'method',
@@ -128,6 +129,7 @@ _CLUSTERING_REQUIRED_KEYS = frozenset(
 	{
 		'output_dir',
 		'embedding_normalization',
+		'residualization',
 		'pca',
 		'sample_tokens',
 		'method',
@@ -135,6 +137,18 @@ _CLUSTERING_REQUIRED_KEYS = frozenset(
 		'minibatch_size',
 		'seed',
 	},
+)
+_CLUSTERING_RESIDUALIZATION_KEYS = frozenset(
+	{
+		'enabled',
+		'mode',
+		'group_by',
+		'add_global_mean_back',
+		'min_group_count',
+	},
+)
+_CLUSTERING_RESIDUALIZATION_ENABLED_REQUIRED_KEYS = (
+	_CLUSTERING_RESIDUALIZATION_KEYS
 )
 _CLUSTERING_PCA_KEYS = frozenset({'enabled', 'n_components', 'whiten'})
 _VISUALIZATION_CLUSTERING_KEYS = frozenset({'input_dir'})
@@ -348,6 +362,9 @@ def resolve_clustering_config(config: _T) -> Config:
 	)
 	embeddings = _required_mapping(resolved, 'embeddings')
 	clustering = _required_mapping(resolved, 'clustering')
+	if 'residualization' not in clustering:
+		resolved['clustering']['residualization'] = {'enabled': False}
+		clustering = _required_mapping(resolved, 'clustering')
 	_validate_allowed_keys(
 		embeddings,
 		_CLUSTERING_EMBEDDINGS_KEYS,
@@ -367,6 +384,12 @@ def resolve_clustering_config(config: _T) -> Config:
 		nopims_root=paths.nopims_root,
 	)
 	_validate_clustering_normalization(clustering)
+	residualization = _required_child_mapping(
+		clustering,
+		'residualization',
+		prefix='clustering',
+	)
+	_validate_clustering_residualization(residualization)
 	pca = _required_child_mapping(clustering, 'pca', prefix='clustering')
 	_validate_allowed_keys(pca, _CLUSTERING_PCA_KEYS, prefix='clustering.pca')
 	_validate_required_keys(
@@ -626,6 +649,56 @@ def _reject_legacy_attribute_config(config: Mapping[str, object]) -> None:
 				'configuration from this config.'
 			)
 			raise ValueError(msg)
+
+
+def _validate_clustering_residualization(
+	residualization: Mapping[str, object],
+) -> None:
+	_validate_allowed_keys(
+		residualization,
+		_CLUSTERING_RESIDUALIZATION_KEYS,
+		prefix='clustering.residualization',
+	)
+	_validate_required_key(
+		residualization,
+		'enabled',
+		prefix='clustering.residualization',
+	)
+	_validate_bool(
+		residualization,
+		'enabled',
+		prefix='clustering.residualization',
+	)
+	if not residualization['enabled']:
+		return
+	_validate_required_keys(
+		residualization,
+		_CLUSTERING_RESIDUALIZATION_ENABLED_REQUIRED_KEYS,
+		prefix='clustering.residualization',
+	)
+	if residualization['mode'] != 'local_token_position':
+		msg = (
+			"clustering.residualization.mode must be 'local_token_position'; "
+			f'got {residualization["mode"]!r}'
+		)
+		raise ValueError(msg)
+	if residualization['group_by'] not in {'token_phase', 'local_token_position'}:
+		msg = (
+			'clustering.residualization.group_by must be '
+			"'token_phase' or 'local_token_position'; "
+			f'got {residualization["group_by"]!r}'
+		)
+		raise ValueError(msg)
+	_validate_bool(
+		residualization,
+		'add_global_mean_back',
+		prefix='clustering.residualization',
+	)
+	_validate_positive_int(
+		residualization,
+		'min_group_count',
+		prefix='clustering.residualization',
+	)
 
 
 def _validate_paths(

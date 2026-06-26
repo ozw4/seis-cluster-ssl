@@ -20,6 +20,13 @@ from seis_ssl_cluster.clustering.features import (
 	embedding_input_metadata,
 	validate_compatible_embedding_inputs,
 )
+from seis_ssl_cluster.clustering.residualization import (
+	LocalTokenPositionResidualizer,
+	fit_local_token_position_residualizer,
+	residualization_metadata_disabled,
+	sample_residualization_keys,
+	write_residualizer_npz,
+)
 from seis_ssl_cluster.clustering.sampling import (
 	SampledTokens,
 	sample_valid_embedding_tokens,
@@ -41,12 +48,24 @@ class PCASettings:
 
 
 @dataclass(frozen=True)
+class ResidualizationSettings:
+	"""Local token position residualization settings."""
+
+	enabled: bool
+	mode: str
+	group_by: str
+	add_global_mean_back: bool
+	min_group_count: int
+
+
+@dataclass(frozen=True)
 class ClusteringSettings:
 	"""Validated embedding clustering settings."""
 
 	input_dir: Path
 	output_dir: Path
 	embedding_normalization: str
+	residualization: ResidualizationSettings
 	pca: PCASettings
 	sample_tokens: int
 	method: str
@@ -86,22 +105,40 @@ def run_embedding_clustering(config: Mapping[str, object]) -> ClusteringRunResul
 		sample_tokens=settings.sample_tokens,
 		seed=settings.seed,
 	)
-	preprocessor = fit_preprocessor(
+	residualizer = fit_residualizer(
 		sample.features,
+		embedding_inputs=tuple(embedding_inputs),
+		per_survey_token_indices=sample.per_survey_token_indices,
+		settings=settings.residualization,
+	)
+	training_input_features = apply_residualizer_to_sample(
+		sample.features,
+		embedding_inputs=tuple(embedding_inputs),
+		per_survey_token_indices=sample.per_survey_token_indices,
+		residualizer=residualizer,
+	)
+	preprocessor = fit_preprocessor(
+		training_input_features,
 		normalization=settings.embedding_normalization,
 		pca=settings.pca,
 		seed=settings.seed,
 	)
 	training_features = np.asarray(
-		preprocessor.transform(sample.features),
+		preprocessor.transform(training_input_features),
 		dtype=np.float32,
 	)
+	residualizer_path: Path | None = None
+	if residualizer is not None:
+		residualizer_path = settings.output_dir / 'models' / 'residualizer.npz'
+		write_residualizer_npz(residualizer_path, residualizer)
 	common_metadata = _common_metadata(
 		settings=settings,
 		embedding_inputs=embedding_inputs,
 		compatibility_signature=compatibility_signature,
 		sample=sample,
 		preprocessor=preprocessor,
+		residualizer=residualizer,
+		residualizer_path=residualizer_path,
 	)
 	results: list[KClusteringResult] = []
 	for k in settings.k_values:
@@ -115,6 +152,7 @@ def run_embedding_clustering(config: Mapping[str, object]) -> ClusteringRunResul
 			output_dir=settings.output_dir,
 			k=k,
 			embedding_inputs=embedding_inputs,
+			residualizer=residualizer,
 			preprocessor=preprocessor,
 			kmeans=kmeans,
 			prediction_batch_size=settings.prediction_batch_size,
@@ -182,6 +220,9 @@ def clustering_settings_from_config(
 		embedding_normalization=_normalization_method(
 			clustering.get('embedding_normalization', 'l2'),
 		),
+		residualization=_residualization_settings(
+			_optional_mapping(clustering, 'residualization'),
+		),
 		pca=PCASettings(
 			enabled=_bool(pca_cfg.get('enabled', False), 'clustering.pca.enabled'),
 			n_components=_positive_int(
@@ -203,6 +244,48 @@ def clustering_settings_from_config(
 			'clustering.prediction_batch_size',
 		),
 	)
+
+
+def fit_residualizer(
+	features: np.ndarray,
+	*,
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	per_survey_token_indices: Mapping[str, np.ndarray],
+	settings: ResidualizationSettings,
+) -> LocalTokenPositionResidualizer | None:
+	"""Fit optional local token position residualization statistics."""
+	if not settings.enabled:
+		return None
+	group_keys = sample_residualization_keys(
+		embedding_inputs,
+		per_survey_token_indices,
+		group_by=settings.group_by,
+	)
+	return fit_local_token_position_residualizer(
+		features,
+		group_keys,
+		group_by=settings.group_by,
+		add_global_mean_back=settings.add_global_mean_back,
+		min_group_count=settings.min_group_count,
+	)
+
+
+def apply_residualizer_to_sample(
+	features: np.ndarray,
+	*,
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	per_survey_token_indices: Mapping[str, np.ndarray],
+	residualizer: LocalTokenPositionResidualizer | None,
+) -> np.ndarray:
+	"""Apply optional residualization to sampled features before preprocessing."""
+	if residualizer is None:
+		return np.asarray(features, dtype=np.float32)
+	group_keys = sample_residualization_keys(
+		embedding_inputs,
+		per_survey_token_indices,
+		group_by=residualizer.group_by,
+	)
+	return residualizer.transform(features, group_keys)
 
 
 def fit_preprocessor(
@@ -280,7 +363,17 @@ def _common_metadata(
 	compatibility_signature: Mapping[str, object],
 	sample: SampledTokens,
 	preprocessor: Pipeline,
+	residualizer: LocalTokenPositionResidualizer | None,
+	residualizer_path: Path | None,
 ) -> dict[str, object]:
+	residualization = (
+		residualization_metadata_disabled()
+		if residualizer is None
+		else {
+			**residualizer.summary(),
+			'npz_path': str(residualizer_path) if residualizer_path else None,
+		}
+	)
 	return {
 		'embedding_inputs': [
 			embedding_input_metadata(item)
@@ -288,6 +381,7 @@ def _common_metadata(
 		],
 		'embedding_compatibility_signature': dict(compatibility_signature),
 		'normalization': settings.embedding_normalization,
+		'residualization': residualization,
 		'pca': {
 			'enabled': settings.pca.enabled,
 			'n_components': settings.pca.n_components,
@@ -429,6 +523,48 @@ def _normalization_method(value: object) -> str:
 	return str(value)
 
 
+def _residualization_settings(
+	config: Mapping[str, object],
+) -> ResidualizationSettings:
+	enabled = _bool(config.get('enabled', False), 'clustering.residualization.enabled')
+	if not enabled:
+		return ResidualizationSettings(
+			enabled=False,
+			mode='local_token_position',
+			group_by='token_phase',
+			add_global_mean_back=True,
+			min_group_count=32,
+		)
+	mode = config.get('mode')
+	if mode != 'local_token_position':
+		msg = (
+			"clustering.residualization.mode must be 'local_token_position'; "
+			f'got {mode!r}'
+		)
+		raise ValueError(msg)
+	group_by = config.get('group_by')
+	if group_by not in {'token_phase', 'local_token_position'}:
+		msg = (
+			'clustering.residualization.group_by must be '
+			"'token_phase' or 'local_token_position'; "
+			f'got {group_by!r}'
+		)
+		raise ValueError(msg)
+	return ResidualizationSettings(
+		enabled=True,
+		mode=str(mode),
+		group_by=str(group_by),
+		add_global_mean_back=_bool(
+			config.get('add_global_mean_back'),
+			'clustering.residualization.add_global_mean_back',
+		),
+		min_group_count=_positive_int(
+			config.get('min_group_count'),
+			'clustering.residualization.min_group_count',
+		),
+	)
+
+
 def _method(value: object) -> str:
 	if value != 'minibatch_kmeans':
 		msg = "clustering.method must be 'minibatch_kmeans'"
@@ -455,8 +591,11 @@ __all__ = [
 	'ClusteringSettings',
 	'KClusteringResult',
 	'PCASettings',
+	'ResidualizationSettings',
+	'apply_residualizer_to_sample',
 	'clustering_settings_from_config',
 	'fit_minibatch_kmeans',
 	'fit_preprocessor',
+	'fit_residualizer',
 	'run_embedding_clustering',
 ]

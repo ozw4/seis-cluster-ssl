@@ -249,6 +249,7 @@ def test_default_clustering_config_is_minimal_raw_user_config() -> None:
 	assert raw['clustering'] == {
 		'output_dir': DEFAULT_CLUSTERING_DIR,
 		'embedding_normalization': 'l2',
+		'residualization': {'enabled': False},
 		'pca': {'enabled': True, 'n_components': 64, 'whiten': False},
 		'sample_tokens': 1000000,
 		'method': 'minibatch_kmeans',
@@ -461,6 +462,102 @@ def test_downstream_configs_reject_redundant_mae_sections(
 
 	with pytest.raises(ValueError, match=rf'top-level section.*{section}'):
 		resolver(cfg)
+
+
+def test_clustering_config_defaults_missing_residualization_to_disabled() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering'].pop('residualization', None)
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['residualization'] == {'enabled': False}
+
+
+def test_clustering_config_accepts_enabled_residualization() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['residualization'] = {
+		'enabled': True,
+		'mode': 'local_token_position',
+		'group_by': 'token_phase',
+		'add_global_mean_back': True,
+		'min_group_count': 32,
+	}
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['residualization']['enabled'] is True
+
+
+@pytest.mark.parametrize(
+	('updates', 'error', 'message'),
+	[
+		({'enabled': 'false'}, TypeError, 'enabled'),
+		(
+			{
+				'enabled': True,
+				'group_by': 'token_phase',
+				'add_global_mean_back': True,
+				'min_group_count': 32,
+			},
+			ValueError,
+			'mode',
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'unknown',
+				'group_by': 'token_phase',
+				'add_global_mean_back': True,
+				'min_group_count': 32,
+			},
+			ValueError,
+			'mode',
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'local_token_position',
+				'group_by': 'unknown',
+				'add_global_mean_back': True,
+				'min_group_count': 32,
+			},
+			ValueError,
+			'group_by',
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'local_token_position',
+				'group_by': 'token_phase',
+				'add_global_mean_back': 'true',
+				'min_group_count': 32,
+			},
+			TypeError,
+			'add_global_mean_back',
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'local_token_position',
+				'group_by': 'token_phase',
+				'add_global_mean_back': True,
+				'min_group_count': 0,
+			},
+			ValueError,
+			'min_group_count',
+		),
+	],
+)
+def test_clustering_config_validates_residualization(
+	updates: dict[str, object],
+	error: type[Exception],
+	message: str,
+) -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['residualization'] = updates
+
+	with pytest.raises(error, match=message):
+		resolve_clustering_config(cfg)
 
 
 def test_clustering_config_rejects_duplicate_k_values() -> None:
