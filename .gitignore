@@ -56,3 +56,7 @@ debug_*/
 .work/
 vendor/issue_forge
 vendor/issue_forge/
+*.joblib
+
+# Generated sklearn/joblib artifacts
+*.joblib
