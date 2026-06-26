@@ -120,11 +120,24 @@ Recommended layout:
 │   │   └── nopims/pretrain_v1/
 │   └── qc/
 │       └── nopims/pretrain_v1/
-├── runs/
+├── pretraining/
+│   └── nopims/pretrain_v1/<MODEL_TAG>/full_100ep/
 ├── embeddings/
+│   └── nopims/pretrain_v1/<MODEL_TAG>/<SUBSET>/<EMBED_SPEC>/
 ├── clustering/
+│   └── nopims/pretrain_v1/<MODEL_TAG>/<SUBSET>/<EMBED_SPEC>/<CLUSTER_SPEC>/
 └── visualizations/
+    └── clusters/nopims/pretrain_v1/<MODEL_TAG>/<SUBSET>/<EMBED_SPEC>/<CLUSTER_SPEC>/<VIZ_SPEC>/
 ```
+
+Artifact roles:
+
+| Directory | Contents |
+|---|---|
+| `pretraining/` | MAE checkpoints, resolved config, and training debug outputs |
+| `embeddings/` | Extracted encoder embeddings |
+| `clustering/` | KMeans models, clustering labels, and clustering metadata |
+| `visualizations/` | PNGs, visualization reports, summaries, and optional voxel labels |
 
 The configuration validator requires generated manifest and normalization-stat paths to be absolute, under `paths.artifact_root`, and outside `paths.nopims_root`.
 
@@ -248,7 +261,7 @@ python proc/seis_ssl_cluster/train_amp_mae.py \
   --config proc/configs/seis_ssl_cluster/train_amp_mae.yaml \
   --device cuda \
   --max-steps 2 \
-  --output-root /workspace/artifacts/seis_ssl_cluster/runs/smoke_amp_mae
+  --output-root /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/smoke_amp_mae
 ```
 
 The training config should reference the **clean manifest** produced by the QC stage.
@@ -260,7 +273,7 @@ python proc/seis_ssl_cluster/train_amp_mae.py \
   --config proc/configs/seis_ssl_cluster/train_amp_mae.yaml \
   --device cuda \
   --max-steps 1000 \
-  --output-root /workspace/artifacts/seis_ssl_cluster/runs/pilot_amp_mae_1000
+  --output-root /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/pilot_amp_mae_1000
 ```
 
 ### 7. Run full pretraining
@@ -269,7 +282,7 @@ python proc/seis_ssl_cluster/train_amp_mae.py \
 python proc/seis_ssl_cluster/train_amp_mae.py \
   --config proc/configs/seis_ssl_cluster/train_amp_mae.yaml \
   --device cuda \
-  --output-root /workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1
+  --output-root /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep
 ```
 
 Resume an interrupted run with the same resolved configuration and output directory:
@@ -278,8 +291,8 @@ Resume an interrupted run with the same resolved configuration and output direct
 python proc/seis_ssl_cluster/train_amp_mae.py \
   --config proc/configs/seis_ssl_cluster/train_amp_mae.yaml \
   --device cuda \
-  --output-root /workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1 \
-  --resume /workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1/mae_latest.pt
+  --output-root /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep \
+  --resume /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep/mae_latest.pt
 ```
 
 ### 8. Extract full-volume embeddings

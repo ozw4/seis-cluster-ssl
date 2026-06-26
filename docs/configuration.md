@@ -80,6 +80,17 @@ rewritten by the resolver and may point outside `artifact_root` when the stage
 intentionally supports that, such as raw NOPIMS path lists or an existing
 checkpoint path.
 
+Recommended artifact roles under `paths.artifact_root` are:
+
+| Directory | Contents |
+|---|---|
+| `pretraining/` | MAE checkpoints, resolved config, and training debug outputs |
+| `embeddings/` | Extracted encoder embeddings |
+| `clustering/` | KMeans models, clustering labels, and clustering metadata |
+| `visualizations/` | PNGs, visualization reports, summaries, and optional voxel labels |
+
+The standard pretraining checkpoint path is `pretraining/nopims/pretrain_v1/<MODEL_TAG>/full_100ep`; `runs/` is not used for active configs.
+
 ## Fixed And Checkpoint-Owned Settings
 
 These fixed amplitude-only contract fields are not valid in raw YAML:
@@ -157,7 +168,7 @@ qc:
 ```yaml
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
-  output_root: /workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1  # change per run
+  output_root: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep  # change per run
 manifests:
   train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
   train_path_list: /workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1_clean/train_npy_paths.txt
@@ -234,7 +245,7 @@ paths:
 manifests:
   input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
 embeddings:
-  checkpoint: /workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1/mae_latest.pt
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep/mae_latest.pt
   output_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1
 embedding:
   window_size: [128, 128, 128]

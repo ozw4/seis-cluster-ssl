@@ -3,7 +3,7 @@ paths:
 manifests:
   input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifest_ten_surveys.json
 embeddings:
-  checkpoint: /workspace/artifacts/seis_ssl_cluster/runs/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/full_100ep/mae_latest.pt
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/full_100ep/mae_latest.pt
   output_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/ten_surveys
 embedding:
   window_size:

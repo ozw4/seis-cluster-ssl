@@ -110,7 +110,7 @@ DEFAULT_CLEAN_SPLIT_PATH = (
 	'train_npy_paths.txt'
 )
 DEFAULT_EMBEDDING_CHECKPOINT_PATH = (
-	'/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1/'
+	'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep/'
 	'mae_latest.pt'
 )
 DEFAULT_EMBEDDING_DIR = (
@@ -164,7 +164,7 @@ def test_default_configs_resolve_without_mutating_raw(
 		assert 'nopims_root' not in resolved['paths']
 		assert (
 			resolved['paths']['output_root']
-			== '/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1'
+			== '/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep'
 		)
 	elif config_path in {
 		CONFIG_DIR / 'extract_embeddings.yaml',
@@ -195,7 +195,7 @@ def test_default_training_config_is_minimal_raw_user_config() -> None:
 	assert raw['paths'] == {
 		'artifact_root': '/workspace/artifacts/seis_ssl_cluster',
 		'output_root': (
-			'/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1'
+			'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep'
 		),
 	}
 	assert raw['manifests']['train'] == DEFAULT_CLEAN_MANIFEST_PATH
@@ -1355,7 +1355,7 @@ def _minimal_training_config() -> dict[str, object]:
 	return {
 		'paths': {
 			'artifact_root': '/artifacts',
-			'output_root': '/artifacts/runs/train_amp_mae',
+			'output_root': '/artifacts/pretraining/train_amp_mae',
 		},
 		'manifests': {
 			'train': '/artifacts/manifests/train.json',
@@ -1395,7 +1395,7 @@ def _minimal_embedding_config() -> dict[str, object]:
 		'paths': {'artifact_root': '/artifacts'},
 		'manifests': {'input': '/artifacts/manifests/train.json'},
 		'embeddings': {
-			'checkpoint': '/artifacts/runs/train_amp_mae/mae_latest.pt',
+			'checkpoint': '/artifacts/pretraining/train_amp_mae/mae_latest.pt',
 			'output_dir': '/artifacts/embeddings',
 		},
 		'embedding': {

@@ -43,7 +43,7 @@ python proc/seis_ssl_cluster/train_amp_mae.py \
   --config proc/configs/seis_ssl_cluster/train_amp_mae.yaml \
   --device cuda \
   --max-steps 2 \
-  --output-root /workspace/artifacts/seis_ssl_cluster/runs/smoke_amp_mae
+  --output-root /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/smoke_amp_mae
 
 python proc/seis_ssl_cluster/extract_embeddings.py \
   --config proc/configs/seis_ssl_cluster/extract_embeddings.yaml \

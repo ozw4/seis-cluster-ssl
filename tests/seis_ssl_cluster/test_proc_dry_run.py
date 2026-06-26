@@ -237,7 +237,7 @@ builtins.__import__ = _guarded_import
 
 def test_train_amp_mae_cli_overrides_are_resolved_before_dry_run() -> None:
 	output_root = Path(
-		'/workspace/artifacts/seis_ssl_cluster/runs/override-dry-run',
+		'/workspace/artifacts/seis_ssl_cluster/pretraining/override-dry-run',
 	)
 
 	result = run_python_proc(
@@ -302,7 +302,7 @@ def test_train_amp_mae_dry_run_prints_enabled_mae_debug_summary(
 	assert 'visualization.mae_debug.enabled: true' in result.stdout
 	assert (
 		'visualization.mae_debug.output_dir: '
-		'/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1/'
+		'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep/'
 		'visualizations/mae_debug'
 	) in result.stdout
 	assert 'visualization.mae_debug.every_steps: 25' in result.stdout
