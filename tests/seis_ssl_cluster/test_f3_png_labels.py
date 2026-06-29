@@ -113,11 +113,19 @@ def test_f3_png_label_outputs_and_figures_are_written(tmp_path: Path) -> None:
 		inventory_rows = list(csv.DictReader(file_obj))
 	with outputs.class_counts_csv.open(encoding='utf-8', newline='') as file_obj:
 		count_rows = list(csv.DictReader(file_obj))
+	inventory_json = json.loads(outputs.inventory_json.read_text(encoding='utf-8'))
+	palette = json.loads(outputs.palette_json.read_text(encoding='utf-8'))
 	summary = json.loads(outputs.summary_json.read_text(encoding='utf-8'))
 	markdown = outputs.summary_markdown.read_text(encoding='utf-8')
 
 	assert len(inventory_rows) == 2
 	assert inventory_rows[0]['split'] == 'train'
+	assert inventory_json['file_count'] == 2
+	assert inventory_json['files'][0]['relative_path'].endswith(
+		'0001_labels_inline_0250.PNG',
+	)
+	assert palette['class_count'] == 3
+	assert palette['classes'][0]['hex_color'] == '#010203'
 	assert any(
 		row['scope'] == 'per_png_file'
 		and row['class_id'] == '0'
@@ -151,6 +159,8 @@ def test_inspect_f3_png_labels_proc_writes_outputs(tmp_path: Path) -> None:
 			'candidate_extensions': ['.png'],
 			'allow_unknown_colors': False,
 			'inventory_csv': str(labels_dir / 'png_label_inventory.csv'),
+			'inventory_json': str(labels_dir / 'png_label_inventory.json'),
+			'palette_json': str(labels_dir / 'facies_palette.json'),
 			'class_counts_csv': str(labels_dir / 'png_label_class_counts.csv'),
 			'summary_json': str(labels_dir / 'png_label_summary.json'),
 			'summary_markdown': str(labels_dir / 'png_label_summary.md'),
@@ -178,6 +188,8 @@ def test_inspect_f3_png_labels_proc_writes_outputs(tmp_path: Path) -> None:
 
 	assert result.returncode == 0, result.stderr
 	assert (labels_dir / 'png_label_inventory.csv').is_file()
+	assert (labels_dir / 'png_label_inventory.json').is_file()
+	assert (labels_dir / 'facies_palette.json').is_file()
 	assert (labels_dir / 'png_label_class_counts.csv').is_file()
 	assert (labels_dir / 'png_label_summary.json').is_file()
 	assert (labels_dir / 'png_label_summary.md').is_file()
@@ -248,6 +260,8 @@ def _write_png(path: Path, image: np.ndarray) -> None:
 def _outputs(root: Path) -> F3PngLabelOutputConfig:
 	return F3PngLabelOutputConfig(
 		inventory_csv=root / 'labels' / 'png_label_inventory.csv',
+		inventory_json=root / 'labels' / 'png_label_inventory.json',
+		palette_json=root / 'labels' / 'facies_palette.json',
 		class_counts_csv=root / 'labels' / 'png_label_class_counts.csv',
 		summary_json=root / 'labels' / 'png_label_summary.json',
 		summary_markdown=root / 'labels' / 'png_label_summary.md',

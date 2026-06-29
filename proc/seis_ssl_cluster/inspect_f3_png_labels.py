@@ -75,6 +75,8 @@ def main() -> None:
 		f'{result.total_unknown_pixel_count()}',
 	)
 	print(f'wrote PNG label inventory: {outputs.inventory_csv}')
+	print(f'wrote PNG label inventory JSON: {outputs.inventory_json}')
+	print(f'wrote facies palette: {outputs.palette_json}')
 	print(f'wrote PNG label class counts: {outputs.class_counts_csv}')
 	print(f'wrote PNG label summary: {outputs.summary_json}')
 	print(f'wrote PNG label markdown: {outputs.summary_markdown}')
@@ -83,6 +85,8 @@ def main() -> None:
 def _output_config(inspection: Mapping[str, object]) -> F3PngLabelOutputConfig:
 	return F3PngLabelOutputConfig(
 		inventory_csv=Path(_required_str(inspection, 'inventory_csv')),
+		inventory_json=Path(_required_str(inspection, 'inventory_json')),
+		palette_json=Path(_required_str(inspection, 'palette_json')),
 		class_counts_csv=Path(_required_str(inspection, 'class_counts_csv')),
 		summary_json=Path(_required_str(inspection, 'summary_json')),
 		summary_markdown=Path(_required_str(inspection, 'summary_markdown')),
@@ -157,6 +161,8 @@ def _print_summary(
 	print(f'inspection.candidate_extensions: {", ".join(candidate_extensions)}')
 	print(f'inspection.allow_unknown_colors: {allow_unknown_colors}')
 	print(f'inspection.inventory_csv: {outputs.inventory_csv}')
+	print(f'inspection.inventory_json: {outputs.inventory_json}')
+	print(f'inspection.palette_json: {outputs.palette_json}')
 	print(f'inspection.class_counts_csv: {outputs.class_counts_csv}')
 	print(f'inspection.summary_json: {outputs.summary_json}')
 	print(f'inspection.summary_markdown: {outputs.summary_markdown}')

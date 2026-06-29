@@ -11,6 +11,8 @@ inspection:
     - .png
   allow_unknown_colors: false
   inventory_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_inventory.csv
+  inventory_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_inventory.json
+  palette_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/facies_palette.json
   class_counts_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_class_counts.csv
   summary_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_summary.json
   summary_markdown: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_summary.md

@@ -155,6 +155,22 @@ class PngLabelFileInspection:
 			'unknown_colors': _format_unknown_colors(self.unknown_colors),
 		}
 
+	def to_inventory_dict(self) -> dict[str, object]:
+		"""Return the JSON inventory record for this PNG label."""
+		return {
+			'relative_path': self.relative_path,
+			'absolute_path': self.absolute_path,
+			'split': self.split,
+			'slice_type': self.slice_type,
+			'slice_index': self.slice_index,
+			'width': self.width,
+			'height': self.height,
+			'pixel_count': self.pixel_count,
+			'unknown_pixel_count': self.unknown_pixel_count,
+			'unknown_color_count': len(self.unknown_colors),
+			'unknown_colors': [item.to_dict() for item in self.unknown_colors],
+		}
+
 	def to_dict(self, classes_by_id: Mapping[int, F3ClassInfo]) -> dict[str, object]:
 		"""Return a JSON-serializable per-file inspection record."""
 		return {
@@ -243,6 +259,8 @@ class F3PngLabelOutputConfig:
 	"""Destination paths for F3 PNG label inspection artifacts."""
 
 	inventory_csv: Path
+	inventory_json: Path
+	palette_json: Path
 	class_counts_csv: Path
 	summary_json: Path
 	summary_markdown: Path
@@ -474,6 +492,8 @@ def write_f3_png_label_inspection_outputs(
 ) -> None:
 	"""Write CSV, JSON, Markdown, and PNG figure artifacts."""
 	_write_inventory_csv(outputs.inventory_csv, inspection.files)
+	_write_json(outputs.inventory_json, png_label_inventory_to_dict(inspection))
+	_write_json(outputs.palette_json, facies_palette_to_dict(inspection))
 	_write_class_counts_csv(outputs.class_counts_csv, inspection)
 	_write_json(outputs.summary_json, png_label_inspection_to_dict(inspection))
 	_write_text(
@@ -481,6 +501,36 @@ def write_f3_png_label_inspection_outputs(
 		render_png_label_summary_markdown(inspection),
 	)
 	save_png_label_distribution_figures(inspection, outputs)
+
+
+def png_label_inventory_to_dict(
+	inspection: F3PngLabelInspection,
+) -> dict[str, object]:
+	"""Return the dedicated machine-readable PNG-label inventory."""
+	return {
+		'f3_root': str(inspection.f3_root),
+		'class_info_path': str(inspection.class_info_path),
+		'file_count': len(inspection.files),
+		'total_pixels': inspection.total_pixel_count(),
+		'total_unknown_pixels': inspection.total_unknown_pixel_count(),
+		'files': [
+			file_result.to_inventory_dict()
+			for file_result in inspection.files
+		],
+		'warnings': list(inspection.warnings),
+	}
+
+
+def facies_palette_to_dict(
+	inspection: F3PngLabelInspection,
+) -> dict[str, object]:
+	"""Return the fixed facies label palette derived from class-info RGBs."""
+	return {
+		'class_info_path': str(inspection.class_info_path),
+		'palette_source': 'interpretation/class_info.json exact RGB values',
+		'class_count': len(inspection.classes),
+		'classes': [item.to_dict() for item in inspection.classes],
+	}
 
 
 def save_png_label_distribution_figures(
