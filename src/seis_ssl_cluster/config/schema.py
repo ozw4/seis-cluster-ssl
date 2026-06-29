@@ -40,6 +40,7 @@ STAGE_F3_PNG_LABELS: Final = 'inspect_f3_png_labels'
 STAGE_F3_QUICKLOOK: Final = 'visualize_f3_quicklook'
 STAGE_F3_LABEL_CONSISTENCY: Final = 'check_f3_label_consistency'
 STAGE_F3_TOKENIZATION_PREVIEW: Final = 'preview_f3_tokenization'
+STAGE_F3_INSPECTION_REPORT: Final = 'build_f3_inspection_report'
 
 F3_FACIES_INSPECTION_STAGES: Final = frozenset(
 	{
@@ -49,6 +50,7 @@ F3_FACIES_INSPECTION_STAGES: Final = frozenset(
 		STAGE_F3_QUICKLOOK,
 		STAGE_F3_LABEL_CONSISTENCY,
 		STAGE_F3_TOKENIZATION_PREVIEW,
+		STAGE_F3_INSPECTION_REPORT,
 	},
 )
 

@@ -7,9 +7,9 @@ facies experiments.
 ## Scope
 
 This inspection stage records raw file inventory, SEGY geometry, PNG label
-metadata, quicklook figures, label consistency checks, and tokenization
-previews. It does not create formal NPY volumes, manifests, embeddings, or
-training runs.
+metadata, quicklook figures, label consistency checks, tokenization previews,
+and a consolidated Japanese report/runbook output. It does not create formal
+NPY volumes, manifests, embeddings, or training runs.
 
 ## Roots
 
@@ -55,7 +55,8 @@ stage and resolves the common contract.
 │   ├── consistency/
 │   └── tokenization/
 ├── stats/
-└── report.md
+├── report.md
+└── report.json
 ```
 
 ## Stages
@@ -68,6 +69,39 @@ stage and resolves the common contract.
 | 4 | `visualize_f3_quicklook.py` | `04_make_quicklook_figures.yaml` | `quicklook/seismic/`, `quicklook/labels/`, and `quicklook/overlays/` |
 | 5 | `check_f3_label_consistency.py` | `05_check_label_consistency.yaml` | `stats/label_consistency.{json,csv}` and `quicklook/consistency/` |
 | 6 | `preview_f3_tokenization.py` | `06_make_tokenization_preview.yaml` | `quicklook/tokenization/` and `stats/tokenization_preview.json` |
+| 7 | `build_f3_inspection_report.py` | `07_build_inspection_report.yaml` | `report.md` and `report.json` |
+
+## Runbook
+
+Run the inspection stages in order:
+
+```bash
+python proc/seis_ssl_cluster/inspect_f3_files.py \
+  --config experiments/f3/facies_benchmark_v1/00_inspection/01_inspect_files.yaml
+
+python proc/seis_ssl_cluster/inspect_f3_segy_geometry.py \
+  --config experiments/f3/facies_benchmark_v1/00_inspection/02_inspect_segy_geometry.yaml
+
+python proc/seis_ssl_cluster/inspect_f3_png_labels.py \
+  --config experiments/f3/facies_benchmark_v1/00_inspection/03_inspect_png_labels.yaml
+
+python proc/seis_ssl_cluster/visualize_f3_quicklook.py \
+  --config experiments/f3/facies_benchmark_v1/00_inspection/04_make_quicklook_figures.yaml
+
+python proc/seis_ssl_cluster/check_f3_label_consistency.py \
+  --config experiments/f3/facies_benchmark_v1/00_inspection/05_check_label_consistency.yaml
+
+python proc/seis_ssl_cluster/preview_f3_tokenization.py \
+  --config experiments/f3/facies_benchmark_v1/00_inspection/06_make_tokenization_preview.yaml
+
+python proc/seis_ssl_cluster/build_f3_inspection_report.py \
+  --config experiments/f3/facies_benchmark_v1/00_inspection/07_build_inspection_report.yaml
+```
+
+The final report links key figures by paths relative to the inspection root,
+including `quicklook/seismic/seismic_xz_y_mid.png`,
+`quicklook/overlays/train_inline_0250_overlay.png`, and
+`quicklook/tokenization/train_inline_0250_tokenization.png`.
 
 ## Figure Contract
 
