@@ -7,11 +7,14 @@ dataset:
   name: f3_facies_benchmark
   version: facies_benchmark_v1
 inspection:
-  inventory_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/file_inventory.json
-  labels_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels
-  output_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_inventory.json
-  output_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_inventory.csv
-  palette_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/facies_palette.json
   candidate_extensions:
     - .png
-  class_id_source: pixel_values
+  allow_unknown_colors: false
+  inventory_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_inventory.csv
+  class_counts_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_class_counts.csv
+  summary_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_summary.json
+  summary_markdown: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_summary.md
+  class_distribution_train_png: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/class_distribution_train.png
+  class_distribution_validation_png: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/class_distribution_validation.png
+  class_distribution_per_slice_png: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/class_distribution_per_slice.png
+  figure_dpi: 300
