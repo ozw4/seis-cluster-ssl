@@ -138,9 +138,21 @@ def test_inline_and_crossline_fixed_axis_mapping() -> None:
 		slice_index=16,
 		patch_size_xyz=(8, 4, 2),
 	)
+	offset_inline = token_plane_spec(
+		slice_type='inline',
+		slice_index=250,
+		array_index=2,
+		patch_size_xyz=(8, 4, 2),
+	)
 	crossline = token_plane_spec(
 		slice_type='crossline',
 		slice_index=10,
+		patch_size_xyz=(8, 4, 2),
+	)
+	offset_crossline = token_plane_spec(
+		slice_type='crossline',
+		slice_index=450,
+		array_index=10,
 		patch_size_xyz=(8, 4, 2),
 	)
 
@@ -148,10 +160,16 @@ def test_inline_and_crossline_fixed_axis_mapping() -> None:
 	assert inline.fixed_token_index == 2
 	assert inline.row_axis == 'y'
 	assert inline.row_patch_size == 4
+	assert offset_inline.slice_index == 250
+	assert offset_inline.array_index == 2
+	assert offset_inline.fixed_token_index == 0
 	assert crossline.fixed_axis == 'y'
 	assert crossline.fixed_token_index == 2
 	assert crossline.row_axis == 'x'
 	assert crossline.row_patch_size == 8
+	assert offset_crossline.slice_index == 450
+	assert offset_crossline.array_index == 10
+	assert offset_crossline.fixed_token_index == 2
 
 
 def test_tokenization_preview_outputs_figures_and_summaries(tmp_path: Path) -> None:
@@ -196,6 +214,9 @@ def test_tokenization_preview_outputs_figures_and_summaries(tmp_path: Path) -> N
 	assert json.loads(rows[0]['class_counts_retained'])['0'] == 2
 	assert metadata['png_label_file_count'] == 1
 	assert metadata['outputs'][0]['summary']['retained_fraction'] == 1.0
+	assert metadata['outputs'][0]['token_plane']['slice_index'] == 10
+	assert metadata['outputs'][0]['token_plane']['array_index'] == 2
+	assert metadata['outputs'][0]['token_plane']['fixed_token_index'] == 1
 	assert sidecar['figure_type'] == 'teacher_slice_tokenization_preview'
 	assert 'Per-slice results' in markdown
 
@@ -305,6 +326,16 @@ def _write_label_consistency_json(
 				'files': [
 					{
 						'relative_path': relative_path,
+						'segy_line_mapping': {
+							'slice_type': 'inline',
+							'slice_index': 10,
+							'array_index': 2,
+							'axis_name': 'inline',
+							'axis_count': 8,
+							'coordinate_min': 8,
+							'coordinate_max': 15,
+							'resolution': 'coordinate_offset',
+						},
 						'label_shape_alignment': {
 							'source_shape': [4, 4],
 							'output_shape': [4, 4],

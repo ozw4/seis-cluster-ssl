@@ -127,6 +127,7 @@ class F3TokenPlaneSpec:
 
 	slice_type: str
 	slice_index: int
+	array_index: int
 	fixed_axis: str
 	fixed_token_index: int
 	row_axis: str
@@ -141,6 +142,7 @@ class F3TokenPlaneSpec:
 		return {
 			'slice_type': self.slice_type,
 			'slice_index': self.slice_index,
+			'array_index': self.array_index,
 			'fixed_axis': self.fixed_axis,
 			'fixed_token_index': self.fixed_token_index,
 			'row_axis': self.row_axis,
@@ -161,6 +163,7 @@ class F3TokenizationAlignment:
 	tokenization_shape: tuple[int, int]
 	transform: str
 	transpose: bool
+	segy_array_index: int
 
 	def to_dict(self) -> dict[str, object]:
 		"""Return a JSON-serializable alignment payload."""
@@ -170,6 +173,7 @@ class F3TokenizationAlignment:
 			'output_shape': [int(axis) for axis in self.class_id_map.shape],
 			'transform': self.transform,
 			'transpose': self.transpose,
+			'segy_array_index': self.segy_array_index,
 		}
 
 
@@ -293,6 +297,7 @@ def token_plane_spec(
 	*,
 	slice_type: str,
 	slice_index: int,
+	array_index: int | None = None,
 	patch_size_xyz: Sequence[int],
 ) -> F3TokenPlaneSpec:
 	"""Return the fixed-axis token-plane mapping for an F3 teacher slice."""
@@ -300,18 +305,19 @@ def token_plane_spec(
 		patch_size_xyz,
 		label='patch_size_xyz',
 	)
-	if not isinstance(slice_index, int) or isinstance(slice_index, bool):
-		msg = f'slice_index must be an integer; got {slice_index!r}'
-		raise TypeError(msg)
-	if slice_index < 0:
-		msg = f'slice_index must be non-negative; got {slice_index!r}'
-		raise ValueError(msg)
+	slice_index = _validate_nonnegative_int(slice_index, label='slice_index')
+	resolved_array_index = (
+		slice_index
+		if array_index is None
+		else _validate_nonnegative_int(array_index, label='array_index')
+	)
 	if slice_type == 'inline':
 		return F3TokenPlaneSpec(
 			slice_type=slice_type,
 			slice_index=slice_index,
+			array_index=resolved_array_index,
 			fixed_axis='x',
-			fixed_token_index=slice_index // patch_x,
+			fixed_token_index=resolved_array_index // patch_x,
 			row_axis='y',
 			column_axis='z',
 			row_patch_size=patch_y,
@@ -323,8 +329,9 @@ def token_plane_spec(
 		return F3TokenPlaneSpec(
 			slice_type=slice_type,
 			slice_index=slice_index,
+			array_index=resolved_array_index,
 			fixed_axis='y',
-			fixed_token_index=slice_index // patch_y,
+			fixed_token_index=resolved_array_index // patch_y,
 			row_axis='x',
 			column_axis='z',
 			row_patch_size=patch_x,
@@ -341,6 +348,7 @@ def tokenize_label_slice(
 	*,
 	slice_type: str,
 	slice_index: int,
+	array_index: int | None = None,
 	config: F3TokenizationConfig,
 	classes: Sequence[F3ClassInfo] = (),
 ) -> F3TokenizationSliceResult:
@@ -349,6 +357,7 @@ def tokenize_label_slice(
 	plane = token_plane_spec(
 		slice_type=slice_type,
 		slice_index=slice_index,
+		array_index=array_index,
 		patch_size_xyz=config.patch_size_xyz,
 	)
 	row_tokens = _ceil_div(class_ids.shape[0], plane.row_patch_size)
@@ -439,8 +448,20 @@ def load_f3_label_consistency_alignments(
 				f'{relative_path}'
 			)
 			raise TypeError(msg)
+		segy_line_mapping = raw_record.get('segy_line_mapping')
+		if not isinstance(segy_line_mapping, Mapping):
+			msg = (
+				'label consistency record is missing SEGY line mapping: '
+				f'{relative_path}'
+			)
+			raise TypeError(msg)
 		alignments[relative_path] = _alignment_from_consistency_record(
 			shape_alignment,
+			array_index=_required_nonnegative_int(
+				segy_line_mapping,
+				'array_index',
+				label=f'{relative_path}.segy_line_mapping.array_index',
+			),
 			source=relative_path,
 		)
 	return alignments
@@ -578,6 +599,7 @@ def _tokenize_png_label_file(
 		alignment.class_id_map,
 		slice_type=file_result.slice_type,
 		slice_index=file_result.slice_index,
+		array_index=alignment.segy_array_index,
 		config=config,
 		classes=classes,
 	)
@@ -630,12 +652,14 @@ def apply_tokenization_alignment(
 		tokenization_shape=alignment.tokenization_shape,
 		transform=alignment.transform,
 		transpose=alignment.transpose,
+		segy_array_index=alignment.segy_array_index,
 	)
 
 
 def _alignment_from_consistency_record(
 	alignment: Mapping[str, object],
 	*,
+	array_index: int,
 	source: str,
 ) -> F3TokenizationAlignment:
 	transform = _required_str(alignment, 'transform')
@@ -649,6 +673,7 @@ def _alignment_from_consistency_record(
 		tokenization_shape=output_shape,
 		transform=transform,
 		transpose=transpose,
+		segy_array_index=array_index,
 	)
 
 
@@ -976,6 +1001,16 @@ def _shape_from_json(value: object, *, label: str) -> tuple[int, int]:
 	return shape[0], shape[1]
 
 
+def _validate_nonnegative_int(value: object, *, label: str) -> int:
+	if not isinstance(value, int) or isinstance(value, bool):
+		msg = f'{label} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	if value < 0:
+		msg = f'{label} must be non-negative; got {value!r}'
+		raise ValueError(msg)
+	return int(value)
+
+
 def _validate_positive_int_triplet(
 	value: Sequence[int],
 	*,
@@ -1020,6 +1055,15 @@ def _required_bool(parent: Mapping[str, object], key: str) -> bool:
 		msg = f'{key} must be a boolean; got {value!r}'
 		raise TypeError(msg)
 	return value
+
+
+def _required_nonnegative_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	label: str,
+) -> int:
+	return _validate_nonnegative_int(parent.get(key), label=label)
 
 
 def _ceil_div(numerator: int, denominator: int) -> int:
