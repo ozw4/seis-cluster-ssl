@@ -11,6 +11,10 @@ inspection:
   segy_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy
   output_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
   output_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.csv
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_metadata.json
+  summary_markdown: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_summary.md
+  seismic_amplitude_stats_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/seismic_amplitude_stats.json
+  label_unique_values_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/label_unique_values.json
   candidate_extensions:
     - .segy
     - .sgy

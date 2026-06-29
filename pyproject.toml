@@ -26,6 +26,9 @@ cluster = [
 visualization = [
 	"matplotlib>=3.7",
 ]
+segy = [
+	"segyio>=1.9",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
