@@ -34,6 +34,7 @@ Thumbs.db
 *.csv
 *.json
 *.npz
+*.joblib
 data/
 !src/seis_attr_ssl/data/
 !src/seis_attr_ssl/data/__init__.py
