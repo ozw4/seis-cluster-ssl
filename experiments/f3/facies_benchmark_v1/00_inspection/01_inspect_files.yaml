@@ -10,6 +10,9 @@ inspection:
   inventory_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory
   output_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/file_inventory.json
   output_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/file_inventory.csv
+  output_markdown: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/file_inventory.md
+  class_info_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+  label_png_inventory_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/label_png_inventory.csv
   include_globs:
     - "**/*"
   exclude_globs:
