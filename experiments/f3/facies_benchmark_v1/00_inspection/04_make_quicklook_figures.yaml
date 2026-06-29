@@ -16,7 +16,7 @@ inspection:
   overlays_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/overlays
   metadata_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/quicklook_metadata.json
   figure:
-    dpi: 200
+    dpi: 300
     final_candidate_dpi: 300
     background: white
     seismic_cmap: gray
