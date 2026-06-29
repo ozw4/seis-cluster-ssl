@@ -10,12 +10,13 @@ inspection:
   segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
   png_label_inventory_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_inventory.json
   consistency_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/consistency
-  output_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/label_consistency.json
-  output_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/label_consistency.csv
-  report_path: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/report.md
-  allow_missing_label_pairs: false
+  output_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/label_consistency_report.json
+  output_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/label_consistency_report.csv
+  report_path: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/label_consistency_report.md
+  consistency:
+    max_mismatch_rate: 0.001
   figure:
-    dpi: 200
+    dpi: 300
     background: white
     output_formats:
       - png
