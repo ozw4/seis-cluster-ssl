@@ -9,12 +9,24 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral
 from pathlib import Path
+from typing import Protocol
 
 import numpy as np
 
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_cluster_visualization_config,
+)
+from seis_ssl_cluster.data.normalization import (
+	AmplitudeAgcConfig,
+	SurveyNormalizationStats,
+	apply_configured_agc,
+	load_normalization_stats,
+	normalize_amplitude,
+)
+from seis_ssl_cluster.data.zero_mask import (
+	ZeroMaskConfig,
+	compute_zero_amplitude_invalid_mask,
 )
 from seis_ssl_cluster.utils.cli import print_config_summary
 
@@ -40,6 +52,153 @@ class _LabelArtifact:
 	survey_id: str
 	token_path: Path
 	metadata_path: Path
+
+
+@dataclass(frozen=True)
+class _SliceBound:
+	start: int
+	stop: int
+	scalar: bool = False
+
+
+class _SliceableAmplitude(Protocol):
+	shape: tuple[int, ...]
+
+	def __getitem__(self, key: object) -> np.ndarray:
+		"""Return a requested amplitude subset."""
+
+
+@dataclass(frozen=True)
+class _AmplitudeDisplay:
+	array: _SliceableAmplitude
+	display_space: str
+
+
+class _PreprocessedAmplitudeVolume:
+	def __init__(
+		self,
+		source: np.ndarray,
+		*,
+		stats: SurveyNormalizationStats,
+		normalized_clip_abs: float | None,
+		agc: AmplitudeAgcConfig,
+		zero_mask: ZeroMaskConfig | None,
+	) -> None:
+		self._source = source
+		self._stats = stats
+		self._normalized_clip_abs = normalized_clip_abs
+		self._agc = agc
+		self._zero_mask = zero_mask
+		self.shape = tuple(int(axis) for axis in source.shape)
+
+	def __getitem__(self, key: object) -> np.ndarray:
+		bounds = _volume_slice_bounds(key, self.shape)
+		context = (
+			_expand_bound(bounds[0], self.shape[0], self._xy_context_radius),
+			_expand_bound(bounds[1], self.shape[1], self._xy_context_radius),
+			_expand_bound(bounds[2], self.shape[2], self._z_context_radius),
+		)
+		raw = np.asarray(
+			self._source[
+				context[0][0] : context[0][1],
+				context[1][0] : context[1][1],
+				context[2][0] : context[2][1],
+			],
+			dtype=np.float32,
+		)
+		amplitude = _preprocess_amplitude_chunk(
+			raw,
+			stats=self._stats,
+			normalized_clip_abs=self._normalized_clip_abs,
+			agc=self._agc,
+			zero_mask=self._zero_mask,
+		)
+		result = amplitude[
+			bounds[0].start - context[0][0] : bounds[0].stop - context[0][0],
+			bounds[1].start - context[1][0] : bounds[1].stop - context[1][0],
+			bounds[2].start - context[2][0] : bounds[2].stop - context[2][0],
+		]
+		scalar_axes = tuple(
+			axis for axis, bound in enumerate(bounds) if bound.scalar
+		)
+		if scalar_axes:
+			result = np.squeeze(result, axis=scalar_axes)
+		return result.astype(np.float32, copy=False)
+
+	@property
+	def _z_context_radius(self) -> int:
+		radius = 0
+		if self._agc.enabled:
+			radius = max(radius, int(self._agc.window_z) // 2)
+		if self._zero_mask is not None and self._zero_mask.enabled:
+			radius = max(radius, self._zero_mask.z_sample_influence_radius)
+		return radius
+
+	@property
+	def _xy_context_radius(self) -> int:
+		if self._zero_mask is None or not self._zero_mask.enabled:
+			return 0
+		return self._zero_mask.xy_trace_influence_radius
+
+
+class _TokenAmplitudeUnderlay:
+	def __init__(
+		self,
+		amplitude: _SliceableAmplitude,
+		*,
+		token_shape: XYZ,
+		patch: XYZ,
+	) -> None:
+		self._amplitude = amplitude
+		self._patch = patch
+		self.shape = token_shape
+
+	def __getitem__(self, key: object) -> np.ndarray:
+		bounds = _volume_slice_bounds(key, self.shape)
+		if (
+			_full_slice(bounds[0], self.shape[0])
+			and _full_slice(bounds[1], self.shape[1])
+			and bounds[2].scalar
+		):
+			return self._xy_slice(bounds[2].start)
+		if (
+			_full_slice(bounds[0], self.shape[0])
+			and bounds[1].scalar
+			and _full_slice(bounds[2], self.shape[2])
+		):
+			return self._xz_slice(bounds[1].start)
+		msg = f'unsupported token amplitude slice: {key!r}'
+		raise IndexError(msg)
+
+	def _xy_slice(self, token_z: int) -> np.ndarray:
+		z_start = token_z * self._patch[2]
+		z_stop = min(z_start + self._patch[2], self._amplitude.shape[2])
+		if z_start >= self._amplitude.shape[2]:
+			return np.full(self.shape[:2], np.nan, dtype=np.float32)
+		amplitude = self._amplitude[:, :, z_start:z_stop]
+		tokens = _downsample_amplitude_to_tokens(
+			amplitude,
+			(self.shape[0], self.shape[1], 1),
+			self._patch,
+		)
+		return tokens[:, :, 0]
+
+	def _xz_slice(self, token_y: int) -> np.ndarray:
+		y_start = token_y * self._patch[1]
+		y_stop = min(y_start + self._patch[1], self._amplitude.shape[1])
+		if y_start >= self._amplitude.shape[1]:
+			return np.full(
+				(self.shape[0], self.shape[2]),
+				np.nan,
+				dtype=np.float32,
+			)
+		amplitude = self._amplitude[:, y_start:y_stop, :]
+		tokens = _downsample_amplitude_to_tokens(
+			amplitude,
+			(self.shape[0], 1, self.shape[2]),
+			self._patch,
+		)
+		return tokens[:, 0, :]
 
 
 def main() -> None:
@@ -185,10 +344,18 @@ def run_cluster_visualization(  # noqa: C901, PLR0912, PLR0915
 				),
 			)
 			token_labels = np.load(token_path, mmap_mode='r')
-			amplitude = (
-				_open_amplitude(embedding_metadata)
+			amplitude_display = (
+				_open_amplitude_display(embedding_metadata)
 				if underlay_enabled or comparison_enabled
 				else None
+			)
+			amplitude = (
+				None if amplitude_display is None else amplitude_display.array
+			)
+			amplitude_display_space = (
+				'amplitude'
+				if amplitude_display is None
+				else amplitude_display.display_space
 			)
 			needs_geometry = (
 				'token' in modes
@@ -248,6 +415,7 @@ def run_cluster_visualization(  # noqa: C901, PLR0912, PLR0915
 							output_dir=output_dir / 'token_comparison',
 							slices=token_slices,
 							amplitude=comparison_amplitude,
+							amplitude_display_space=amplitude_display_space,
 							amplitude_alpha=comparison_alpha,
 							invalid_color=invalid_color,
 							dpi=dpi,
@@ -312,6 +480,7 @@ def run_cluster_visualization(  # noqa: C901, PLR0912, PLR0915
 							output_dir=output_dir / 'voxel_comparison',
 							slices=voxel_slices,
 							amplitude=comparison_amplitude,
+							amplitude_display_space=amplitude_display_space,
 							amplitude_alpha=comparison_alpha,
 							invalid_color=invalid_color,
 							dpi=dpi,
@@ -461,21 +630,176 @@ def _embedding_metadata(label_metadata: Mapping[str, object]) -> dict[str, objec
 	return {**payload, **label_metadata}
 
 
-def _open_amplitude(metadata: Mapping[str, object]) -> np.ndarray | None:
+def _open_amplitude_display(metadata: Mapping[str, object]) -> _AmplitudeDisplay | None:
 	value = metadata.get('source_amplitude_path')
 	if not isinstance(value, str) or not Path(value).is_file():
 		return None
 	array = np.load(value, mmap_mode='r')
 	if array.ndim != 3:
 		return None
-	return array
+	preprocessing = metadata.get('preprocessing')
+	if not isinstance(preprocessing, Mapping):
+		return _AmplitudeDisplay(
+			array=array,
+			display_space='raw_amplitude',
+		)
+	agc = AmplitudeAgcConfig.from_mapping(preprocessing.get('amplitude_agc'))
+	stats_path = metadata.get('normalization_stats_path')
+	if not isinstance(stats_path, str) or not Path(stats_path).is_file():
+		return _AmplitudeDisplay(
+			array=array,
+			display_space='raw_amplitude',
+		)
+	normalized_clip_abs = _optional_positive_float(
+		preprocessing.get('normalized_clip_abs'),
+		'preprocessing.normalized_clip_abs',
+	)
+	return _AmplitudeDisplay(
+		array=_PreprocessedAmplitudeVolume(
+			array,
+			stats=load_normalization_stats(stats_path),
+			normalized_clip_abs=normalized_clip_abs,
+			agc=agc,
+			zero_mask=_zero_mask_config(metadata),
+		),
+		display_space=_amplitude_display_space(
+			normalized_clip_abs=normalized_clip_abs,
+			agc=agc,
+		),
+	)
+
+
+def _amplitude_valid_mask(
+	raw: np.ndarray,
+	zero_mask: ZeroMaskConfig | None,
+) -> np.ndarray:
+	valid_mask = np.ones(raw.shape, dtype=bool)
+	if zero_mask is None:
+		return valid_mask
+	zero_invalid = compute_zero_amplitude_invalid_mask(
+		raw,
+		valid_mask=valid_mask,
+		config=zero_mask,
+	)
+	return np.logical_and(valid_mask, ~zero_invalid)
+
+
+def _zero_mask_config(metadata: Mapping[str, object]) -> ZeroMaskConfig | None:
+	zero_mask = metadata.get('zero_mask')
+	if not isinstance(zero_mask, Mapping):
+		return None
+	config = ZeroMaskConfig(**dict(zero_mask))
+	config.validate()
+	return config
+
+
+def _preprocess_amplitude_chunk(
+	raw: np.ndarray,
+	*,
+	stats: SurveyNormalizationStats,
+	normalized_clip_abs: float | None,
+	agc: AmplitudeAgcConfig,
+	zero_mask: ZeroMaskConfig | None,
+) -> np.ndarray:
+	local_valid_mask = _amplitude_valid_mask(raw, zero_mask)
+	normalized = normalize_amplitude(
+		raw,
+		stats,
+		normalized_clip_abs=normalized_clip_abs,
+	)
+	amplitude = apply_configured_agc(normalized, local_valid_mask, agc)
+	amplitude[~local_valid_mask] = 0.0
+	return amplitude.astype(np.float32, copy=False)
+
+
+def _amplitude_display_space(
+	*,
+	normalized_clip_abs: float | None,
+	agc: AmplitudeAgcConfig,
+) -> str:
+	if agc.enabled:
+		return 'survey_normalized_clipped_agc'
+	if normalized_clip_abs is not None:
+		return 'survey_normalized_clipped'
+	return 'survey_normalized'
+
+
+def _optional_positive_float(value: object, name: str) -> float | None:
+	if value is None:
+		return None
+	if not isinstance(value, int | float) or isinstance(value, bool):
+		msg = f'{name} must be a number or null; got {value!r}'
+		raise TypeError(msg)
+	number = float(value)
+	if not np.isfinite(number) or number <= 0.0:
+		msg = f'{name} must be a finite positive number or null; got {value!r}'
+		raise ValueError(msg)
+	return number
+
+
+def _volume_slice_bounds(
+	key: object,
+	shape: tuple[int, ...],
+) -> tuple[_SliceBound, _SliceBound, _SliceBound]:
+	if len(shape) != 3:
+		msg = f'amplitude shape must be 3D; got {shape!r}'
+		raise ValueError(msg)
+	selectors = key if isinstance(key, tuple) else (key,)
+	if len(selectors) > 3:
+		msg = f'expected at most 3 slice selectors; got {key!r}'
+		raise IndexError(msg)
+	padded = (*selectors, *(slice(None) for _ in range(3 - len(selectors))))
+	return tuple(  # type: ignore[return-value]
+		_slice_bound(selector, size)
+		for selector, size in zip(padded, shape, strict=True)
+	)
+
+
+def _slice_bound(selector: object, size: int) -> _SliceBound:
+	if isinstance(selector, bool):
+		msg = f'boolean amplitude indices are not supported: {selector!r}'
+		raise TypeError(msg)
+	if isinstance(selector, Integral):
+		index = int(selector)
+		if index < 0:
+			index += size
+		if index < 0 or index >= size:
+			msg = f'amplitude index out of range: {selector!r}; size={size}'
+			raise IndexError(msg)
+		return _SliceBound(index, index + 1, scalar=True)
+	if isinstance(selector, slice):
+		start, stop, step = selector.indices(size)
+		if step != 1:
+			msg = f'amplitude slices must have step 1; got {selector!r}'
+			raise ValueError(msg)
+		if stop <= start:
+			msg = f'amplitude slice must be non-empty; got {selector!r}'
+			raise ValueError(msg)
+		return _SliceBound(start, stop)
+	msg = f'unsupported amplitude index: {selector!r}'
+	raise TypeError(msg)
+
+
+def _expand_bound(
+	bound: _SliceBound,
+	size: int,
+	radius: int,
+) -> tuple[int, int]:
+	return (
+		max(0, bound.start - radius),
+		min(size, bound.stop + radius),
+	)
+
+
+def _full_slice(bound: _SliceBound, size: int) -> bool:
+	return not bound.scalar and bound.start == 0 and bound.stop == size
 
 
 def _amplitude_underlay_for_labels(
-	amplitude: np.ndarray | None,
+	amplitude: _SliceableAmplitude | None,
 	labels: np.ndarray,
 	patch: XYZ,
-) -> np.ndarray | None:
+) -> _SliceableAmplitude | None:
 	if amplitude is None:
 		return None
 	if amplitude.shape == labels.shape:
@@ -498,15 +822,19 @@ def _amplitude_underlay_for_labels(
 			f'patch_size={patch!r}'
 		)
 		raise ValueError(msg)
-	return _downsample_amplitude_to_tokens(amplitude, labels.shape, patch)
+	return _TokenAmplitudeUnderlay(
+		amplitude,
+		token_shape=tuple(int(axis) for axis in labels.shape),
+		patch=patch,
+	)
 
 
 def _require_amplitude_for_comparison(
-	amplitude: np.ndarray | None,
+	amplitude: _SliceableAmplitude | None,
 	*,
 	survey_id: str,
 	mode: str,
-) -> np.ndarray:
+) -> _SliceableAmplitude:
 	if amplitude is None:
 		msg = (
 			'amplitude_comparison requested, but no amplitude array could be '

@@ -25,7 +25,10 @@ from seis_ssl_cluster.data.manifest_filter import (
 	filter_manifests_by_stats_qc,
 )
 from seis_ssl_cluster.data.normalization import (
+	AmplitudeAgcConfig,
 	SurveyNormalizationStats,
+	apply_configured_agc,
+	apply_trace_rms_agc,
 	compute_normalization_stats,
 	load_normalization_stats,
 	normalize_amplitude,
@@ -75,6 +78,7 @@ from seis_ssl_cluster.data.zero_mask import (
 __all__ = [
 	'DEFAULT_ZERO_MASK_CONFIG',
 	'GRID_ORDER_XYZ',
+	'AmplitudeAgcConfig',
 	'AmplitudePretrainDataset',
 	'AmplitudeVolumeRecord',
 	'CropRequest',
@@ -90,6 +94,8 @@ __all__ = [
 	'SurveyManifest',
 	'SurveyNormalizationStats',
 	'ZeroMaskConfig',
+	'apply_configured_agc',
+	'apply_trace_rms_agc',
 	'build_nopims_amplitude_manifests',
 	'build_nopims_manifests',
 	'compute_normalization_stats',

@@ -9,9 +9,11 @@ import yaml
 
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
+	AmplitudeAgcConfig,
 	AmplitudeVolumeRecord,
 	SurveyManifest,
 	SurveyNormalizationStats,
+	apply_trace_rms_agc,
 	compute_normalization_stats,
 	load_normalization_stats,
 	normalize_amplitude,
@@ -49,7 +51,7 @@ def test_normalize_amplitude_clips_and_robust_scales() -> None:
 def test_normalize_amplitude_clips_normalized_values() -> None:
 	stats = SurveyNormalizationStats(
 		survey_id='survey',
-		source_path=Path('/tmp/survey.npy'),
+		source_path=Path('survey.npy'),
 		grid_order=GRID_ORDER_XYZ,
 		clip_low_percentile=0.0,
 		clip_high_percentile=100.0,
@@ -72,6 +74,83 @@ def test_normalize_amplitude_clips_normalized_values() -> None:
 		[-8.0, -4.0, 0.0, 4.0, 8.0],
 		atol=1.0e-4,
 	)
+
+
+def test_trace_rms_agc_uses_centered_z_window() -> None:
+	amplitude = np.asarray([1.0, 1.0, 1.0, 10.0, 10.0, 10.0], dtype=np.float32)
+	amplitude = amplitude.reshape(1, 1, 6)
+	valid = np.ones_like(amplitude, dtype=bool)
+
+	result = apply_trace_rms_agc(
+		amplitude,
+		valid,
+		window_z=3,
+		eps=1.0e-6,
+		clip_abs=100.0,
+	)
+
+	expected_mean_power = np.asarray(
+		[1.0, 1.0, 34.0, 67.0, 100.0, 100.0],
+		dtype=np.float32,
+	)
+	expected = amplitude.reshape(-1) / np.sqrt(expected_mean_power + 1.0e-6)
+	np.testing.assert_allclose(result.reshape(-1), expected, rtol=1.0e-6)
+	assert result.dtype == np.float32
+
+
+def test_trace_rms_agc_excludes_invalid_voxels_and_zeros_invalid_output() -> None:
+	amplitude = np.asarray(
+		[
+			[[2.0, 1.0e20, 2.0]],
+			[[1.0e20, 1.0e20, 1.0e20]],
+		],
+		dtype=np.float32,
+	)
+	valid = np.asarray(
+		[
+			[[True, False, True]],
+			[[False, False, False]],
+		],
+		dtype=bool,
+	)
+
+	result = apply_trace_rms_agc(
+		amplitude,
+		valid,
+		window_z=3,
+		eps=1.0e-6,
+		clip_abs=5.0,
+	)
+
+	np.testing.assert_allclose(result[0, 0, [0, 2]], [1.0, 1.0], atol=1.0e-6)
+	assert result[0, 0, 1] == 0.0
+	assert np.all(result[1, 0, :] == 0.0)
+	assert np.isfinite(result).all()
+
+
+def test_amplitude_agc_config_serializes_disabled_and_enabled() -> None:
+	assert AmplitudeAgcConfig.from_mapping(None).to_dict() == {'enabled': False}
+	assert AmplitudeAgcConfig.from_mapping({'enabled': False}).to_dict() == {
+		'enabled': False,
+	}
+
+	enabled = AmplitudeAgcConfig.from_mapping(
+		{
+			'enabled': True,
+			'mode': 'trace_rms_z',
+			'window_z': 65,
+			'eps': 1.0e-3,
+			'clip_abs': 5.0,
+		},
+	)
+
+	assert enabled.to_dict() == {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 65,
+		'eps': 1.0e-3,
+		'clip_abs': 5.0,
+	}
 
 
 def test_compute_normalization_stats_samples_memmap_deterministically(

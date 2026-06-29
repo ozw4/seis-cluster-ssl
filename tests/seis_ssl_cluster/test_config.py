@@ -152,7 +152,7 @@ DEFAULT_CLEAN_SPLIT_PATH = (
 	'train_npy_paths.txt'
 )
 DEFAULT_EMBEDDING_CHECKPOINT_PATH = (
-	'/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1/'
+	'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep/'
 	'mae_latest.pt'
 )
 DEFAULT_EMBEDDING_DIR = (
@@ -206,7 +206,7 @@ def test_default_configs_resolve_without_mutating_raw(
 		assert 'nopims_root' not in resolved['paths']
 		assert (
 			resolved['paths']['output_root']
-			== '/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1'
+			== '/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep'
 		)
 	elif config_path in {
 		CONFIG_DIR / 'extract_embeddings.yaml',
@@ -345,7 +345,7 @@ def test_default_training_config_is_minimal_raw_user_config() -> None:
 	assert raw['paths'] == {
 		'artifact_root': '/workspace/artifacts/seis_ssl_cluster',
 		'output_root': (
-			'/workspace/artifacts/seis_ssl_cluster/runs/amp_mae_pretrain_v1'
+			'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep'
 		),
 	}
 	assert raw['manifests']['train'] == DEFAULT_CLEAN_MANIFEST_PATH
@@ -399,6 +399,7 @@ def test_default_clustering_config_is_minimal_raw_user_config() -> None:
 	assert raw['clustering'] == {
 		'output_dir': DEFAULT_CLUSTERING_DIR,
 		'embedding_normalization': 'l2',
+		'residualization': {'enabled': False},
 		'pca': {'enabled': True, 'n_components': 64, 'whiten': False},
 		'sample_tokens': 1000000,
 		'method': 'minibatch_kmeans',
@@ -613,6 +614,102 @@ def test_downstream_configs_reject_redundant_mae_sections(
 		resolver(cfg)
 
 
+def test_clustering_config_defaults_missing_residualization_to_disabled() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering'].pop('residualization', None)
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['residualization'] == {'enabled': False}
+
+
+def test_clustering_config_accepts_enabled_residualization() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['residualization'] = {
+		'enabled': True,
+		'mode': 'local_token_position',
+		'group_by': 'token_phase',
+		'add_global_mean_back': True,
+		'min_group_count': 32,
+	}
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['residualization']['enabled'] is True
+
+
+@pytest.mark.parametrize(
+	('updates', 'error', 'message'),
+	[
+		({'enabled': 'false'}, TypeError, 'enabled'),
+		(
+			{
+				'enabled': True,
+				'group_by': 'token_phase',
+				'add_global_mean_back': True,
+				'min_group_count': 32,
+			},
+			ValueError,
+			'mode',
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'unknown',
+				'group_by': 'token_phase',
+				'add_global_mean_back': True,
+				'min_group_count': 32,
+			},
+			ValueError,
+			'mode',
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'local_token_position',
+				'group_by': 'unknown',
+				'add_global_mean_back': True,
+				'min_group_count': 32,
+			},
+			ValueError,
+			'group_by',
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'local_token_position',
+				'group_by': 'token_phase',
+				'add_global_mean_back': 'true',
+				'min_group_count': 32,
+			},
+			TypeError,
+			'add_global_mean_back',
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'local_token_position',
+				'group_by': 'token_phase',
+				'add_global_mean_back': True,
+				'min_group_count': 0,
+			},
+			ValueError,
+			'min_group_count',
+		),
+	],
+)
+def test_clustering_config_validates_residualization(
+	updates: dict[str, object],
+	error: type[Exception],
+	message: str,
+) -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['residualization'] = updates
+
+	with pytest.raises(error, match=message):
+		resolve_clustering_config(cfg)
+
+
 def test_clustering_config_rejects_duplicate_k_values() -> None:
 	cfg = _minimal_clustering_config()
 	cfg['clustering']['k_values'] = [2, 3, 2]
@@ -777,6 +874,128 @@ def test_fixed_contracts_appear_in_resolved_training_config() -> None:
 		'z_sample_influence_radius': 16,
 		'xy_trace_influence_radius': 1,
 	}
+	assert resolved['data']['amplitude_agc'] == {'enabled': False}
+
+
+def test_training_amplitude_agc_validation_accepts_disabled_and_enabled() -> None:
+	disabled = _minimal_training_config()
+	disabled['data']['amplitude_agc'] = {'enabled': False}
+	assert resolve_mae_training_config(disabled)['data']['amplitude_agc'] == {
+		'enabled': False,
+	}
+
+	enabled = _minimal_training_config()
+	enabled['data']['amplitude_agc'] = {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 65,
+		'eps': 1.0e-3,
+		'clip_abs': 5.0,
+	}
+
+	assert resolve_mae_training_config(enabled)['data']['amplitude_agc'] == {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 65,
+		'eps': 1.0e-3,
+		'clip_abs': 5.0,
+	}
+
+
+@pytest.mark.parametrize(
+	('amplitude_agc', 'error'),
+	[
+		({'enabled': 'true'}, TypeError),
+		(
+			{
+				'enabled': True,
+				'mode': 'unknown',
+				'window_z': 65,
+				'eps': 1.0e-3,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'eps': 1.0e-3,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 0,
+				'eps': 1.0e-3,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 64,
+				'eps': 1.0e-3,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 65,
+				'eps': 0.0,
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 65,
+				'eps': float('inf'),
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 65,
+				'eps': float('nan'),
+				'clip_abs': 5.0,
+			},
+			ValueError,
+		),
+		(
+			{
+				'enabled': True,
+				'mode': 'trace_rms_z',
+				'window_z': 65,
+				'eps': 1.0e-3,
+				'clip_abs': 0.0,
+			},
+			ValueError,
+		),
+	],
+)
+def test_training_amplitude_agc_validation_rejects_invalid_values(
+	amplitude_agc: dict[str, object],
+	error: type[Exception],
+) -> None:
+	cfg = _minimal_training_config()
+	cfg['data']['amplitude_agc'] = amplitude_agc
+
+	with pytest.raises(error, match='amplitude_agc'):
+		resolve_mae_training_config(cfg)
 
 
 @pytest.mark.parametrize('reconstruction', ['huber', 'mse', 'l1'])
@@ -1286,7 +1505,7 @@ def _minimal_training_config() -> dict[str, object]:
 	return {
 		'paths': {
 			'artifact_root': '/artifacts',
-			'output_root': '/artifacts/runs/train_amp_mae',
+			'output_root': '/artifacts/pretraining/train_amp_mae',
 		},
 		'manifests': {
 			'train': '/artifacts/manifests/train.json',
@@ -1326,7 +1545,7 @@ def _minimal_embedding_config() -> dict[str, object]:
 		'paths': {'artifact_root': '/artifacts'},
 		'manifests': {'input': '/artifacts/manifests/train.json'},
 		'embeddings': {
-			'checkpoint': '/artifacts/runs/train_amp_mae/mae_latest.pt',
+			'checkpoint': '/artifacts/pretraining/train_amp_mae/mae_latest.pt',
 			'output_dir': '/artifacts/embeddings',
 		},
 		'embedding': {

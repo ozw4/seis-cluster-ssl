@@ -1048,6 +1048,8 @@ def _resume_compatibility_view(config: Mapping[str, object]) -> dict[str, object
 		value = config.get(section)
 		if section == 'loss' and isinstance(value, Mapping):
 			view[section] = _json_safe(_loss_resume_compatibility_view(value))
+		elif section == 'data' and isinstance(value, Mapping):
+			view[section] = _json_safe(_data_resume_compatibility_view(value))
 		else:
 			view[section] = _json_safe(value)
 	train = config.get('train')
@@ -1070,25 +1072,42 @@ def _loss_resume_compatibility_view(loss: Mapping[str, object]) -> dict[str, obj
 	return view
 
 
+def _data_resume_compatibility_view(data: Mapping[str, object]) -> dict[str, object]:
+	view = dict(data)
+	if 'amplitude_agc' not in view:
+		view['amplitude_agc'] = {'enabled': False}
+	return view
+
+
 def _first_compatibility_mismatch(
 	left: Mapping[str, object],
 	right: Mapping[str, object],
 ) -> str:
-	for key in left:
+	return _first_nested_mismatch(left, right, prefix='') or 'config'
+
+
+def _first_nested_mismatch(
+	left: Mapping[str, object],
+	right: Mapping[str, object],
+	*,
+	prefix: str,
+) -> str | None:
+	for key in sorted(left.keys() | right.keys(), key=str):
 		if left.get(key) == right.get(key):
 			continue
 		left_value = left.get(key)
 		right_value = right.get(key)
+		label = f'{prefix}.{key}' if prefix else str(key)
 		if isinstance(left_value, Mapping) and isinstance(right_value, Mapping):
-			child_keys = sorted(
-				left_value.keys() | right_value.keys(),
-				key=str,
+			nested = _first_nested_mismatch(
+				left_value,
+				right_value,
+				prefix=label,
 			)
-			for child_key in child_keys:
-				if left_value.get(child_key) != right_value.get(child_key):
-					return f'{key}.{child_key}'
-		return str(key)
-	return 'config'
+			if nested is not None:
+				return nested
+		return label
+	return None
 
 
 def _complete_mae_training_config(config: Mapping[str, object]) -> dict[str, object]:
@@ -1852,7 +1871,8 @@ def _validate_runtime_loss(loss_config: Mapping[str, object]) -> None:
 			msg = (
 				'loss.gradient_weight must be 0.0 when '
 				"loss.target_normalization.mode is 'patch_zscore'; "
-				'the current gradient loss operates in survey-normalized amplitude space'
+				'the current gradient loss operates in survey-normalized '
+				'amplitude space'
 			)
 			raise ValueError(msg)
 	if (

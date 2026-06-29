@@ -1,0 +1,26 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+embeddings:
+  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/ten_surveys/overlap_x16
+clustering:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/ten_surveys/overlap_x16/k4_6_8_lposres_phase_pca16_whiten_s100k
+  embedding_normalization: l2
+  pca:
+    enabled: true
+    n_components: 16
+    whiten: true
+  sample_tokens: 100000
+  method: minibatch_kmeans
+  k_values:
+  - 4
+  - 6
+  - 8
+  minibatch_size: 8192
+  prediction_batch_size: 8192
+  seed: 42
+  residualization:
+    enabled: true
+    mode: local_token_position
+    group_by: token_phase
+    add_global_mean_back: true
+    min_group_count: 32

@@ -9,9 +9,18 @@ import pytest
 
 from proc.seis_ssl_cluster.visualize_clusters import (
 	DEFAULT_CONFIG,
+	_open_amplitude_display,
 	run_cluster_visualization,
 )
 from seis_ssl_cluster.config import load_config
+from seis_ssl_cluster.data import (
+	GRID_ORDER_XYZ,
+	SurveyNormalizationStats,
+	apply_trace_rms_agc,
+	load_normalization_stats,
+	normalize_amplitude,
+	write_normalization_stats,
+)
 from seis_ssl_cluster.visualization import clusters as cluster_vis
 from seis_ssl_cluster.visualization.clusters import (
 	ClusterSlice,
@@ -240,6 +249,220 @@ def test_proc_visualization_token_mode_writes_amplitude_comparison(
 	assert (
 		output_dir / 'token_comparison' / 'survey_k1_xy_z0.png'
 	).is_file()
+
+
+def test_proc_visualization_amplitude_comparison_uses_agc_metadata(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	root = tmp_path / 'agc_comparison'
+	input_dir = root / 'cluster_run'
+	output_dir = root / 'figures'
+	labels_dir = input_dir / 'labels' / 'k1'
+	labels_dir.mkdir(parents=True)
+	np.save(
+		labels_dir / 'survey.cluster_labels_token.npy',
+		np.zeros((1, 1, 5), dtype=np.int32),
+	)
+	amplitude_path = root / 'survey.npy'
+	amplitude = np.asarray([1.0, 1.0, 1.0, 10.0, 10.0], dtype=np.float32).reshape(
+		1,
+		1,
+		5,
+	)
+	np.save(amplitude_path, amplitude)
+	stats_path = root / 'stats.json'
+	write_normalization_stats(
+		SurveyNormalizationStats(
+			survey_id='survey',
+			source_path=amplitude_path,
+			grid_order=GRID_ORDER_XYZ,
+			clip_low_percentile=0.0,
+			clip_high_percentile=100.0,
+			clip_low=-100.0,
+			clip_high=100.0,
+			median=0.0,
+			iqr=1.0,
+		),
+		stats_path,
+	)
+	amplitude_agc = {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 3,
+		'eps': 1.0e-6,
+		'clip_abs': 0.75,
+	}
+	(labels_dir / 'survey.cluster_label_metadata.json').write_text(
+		json.dumps(
+			{
+				'source_amplitude_path': str(amplitude_path),
+				'normalization_stats_path': str(stats_path),
+				'patch_size': [1, 1, 1],
+				'volume_shape_xyz': [1, 1, 5],
+				'preprocessing': {
+					'normalized_clip_abs': 8.0,
+					'amplitude_agc': amplitude_agc,
+				},
+				'zero_mask': {'enabled': False},
+			},
+		)
+		+ '\n',
+		encoding='utf-8',
+	)
+	fig, ax = plt.subplots()
+	axes_type = type(ax)
+	plt.close(fig)
+	images: list[np.ndarray] = []
+	titles: list[str] = []
+	original_imshow = axes_type.imshow
+	original_set_title = axes_type.set_title
+
+	def recording_imshow(self: object, *args: object, **kwargs: object) -> object:
+		images.append(np.asarray(args[0]).copy())
+		return original_imshow(self, *args, **kwargs)
+
+	def recording_set_title(
+		self: object,
+		label: str,
+		*args: object,
+		**kwargs: object,
+	) -> object:
+		titles.append(label)
+		return original_set_title(self, label, *args, **kwargs)
+
+	monkeypatch.setattr(axes_type, 'imshow', recording_imshow)
+	monkeypatch.setattr(axes_type, 'set_title', recording_set_title)
+
+	result = run_cluster_visualization(
+		{
+			'clustering': {'input_dir': str(input_dir)},
+			'visualization': {
+				'output_dir': str(output_dir),
+				'modes': ['token'],
+				'xy_slices': [],
+				'xz_slices': [0],
+				'summaries': {'enabled': False},
+				'amplitude_underlay': {'enabled': False},
+				'amplitude_comparison': {'enabled': True, 'alpha': 0.35},
+			},
+		},
+	)
+
+	normalized = normalize_amplitude(
+		amplitude,
+		load_normalization_stats(stats_path),
+		normalized_clip_abs=8.0,
+	)
+	expected = apply_trace_rms_agc(
+		normalized,
+		np.ones_like(amplitude, dtype=bool),
+		window_z=3,
+		eps=1.0e-6,
+		clip_abs=0.75,
+	)
+	assert result == {'png_count': 2, 'voxel_count': 0, 'summary_count': 0}
+	np.testing.assert_allclose(
+		images[1],
+		slice_image(expected, view='xz', slice_index=0),
+	)
+	assert 'survey_normalized_clipped_agc' in titles
+
+
+def test_open_amplitude_display_keeps_legacy_metadata_raw(
+	tmp_path: Path,
+) -> None:
+	amplitude = np.asarray([-10.0, 0.0, 10.0], dtype=np.float32).reshape(1, 1, 3)
+	amplitude_path = tmp_path / 'survey.npy'
+	np.save(amplitude_path, amplitude)
+	stats_path = tmp_path / 'stats.json'
+	write_normalization_stats(
+		SurveyNormalizationStats(
+			survey_id='survey',
+			source_path=amplitude_path,
+			grid_order=GRID_ORDER_XYZ,
+			clip_low_percentile=0.0,
+			clip_high_percentile=100.0,
+			clip_low=-100.0,
+			clip_high=100.0,
+			median=0.0,
+			iqr=10.0,
+		),
+		stats_path,
+	)
+
+	display = _open_amplitude_display(
+		{
+			'source_amplitude_path': str(amplitude_path),
+			'normalization_stats_path': str(stats_path),
+			'normalized_clip_abs': 0.5,
+		},
+	)
+
+	assert display is not None
+	assert display.display_space == 'raw_amplitude'
+	np.testing.assert_array_equal(display.array, amplitude)
+
+
+def test_open_amplitude_display_preprocesses_slices_lazily(
+	tmp_path: Path,
+) -> None:
+	amplitude = np.arange(2 * 3 * 5, dtype=np.float32).reshape(2, 3, 5)
+	amplitude_path = tmp_path / 'survey.npy'
+	np.save(amplitude_path, amplitude)
+	stats_path = tmp_path / 'stats.json'
+	write_normalization_stats(
+		SurveyNormalizationStats(
+			survey_id='survey',
+			source_path=amplitude_path,
+			grid_order=GRID_ORDER_XYZ,
+			clip_low_percentile=0.0,
+			clip_high_percentile=100.0,
+			clip_low=-100.0,
+			clip_high=100.0,
+			median=0.0,
+			iqr=1.0,
+		),
+		stats_path,
+	)
+	amplitude_agc = {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 3,
+		'eps': 1.0e-6,
+		'clip_abs': 0.75,
+	}
+
+	display = _open_amplitude_display(
+		{
+			'source_amplitude_path': str(amplitude_path),
+			'normalization_stats_path': str(stats_path),
+			'preprocessing': {
+				'normalized_clip_abs': 8.0,
+				'amplitude_agc': amplitude_agc,
+			},
+			'zero_mask': {'enabled': False},
+		},
+	)
+
+	normalized = normalize_amplitude(
+		amplitude,
+		load_normalization_stats(stats_path),
+		normalized_clip_abs=8.0,
+	)
+	expected = apply_trace_rms_agc(
+		normalized,
+		np.ones_like(amplitude, dtype=bool),
+		window_z=3,
+		eps=1.0e-6,
+		clip_abs=0.75,
+	)
+	assert display is not None
+	assert display.display_space == 'survey_normalized_clipped_agc'
+	assert display.array.shape == amplitude.shape
+	assert not isinstance(display.array, np.ndarray)
+	np.testing.assert_allclose(display.array[:, :, 2], expected[:, :, 2])
+	np.testing.assert_allclose(display.array[:, 1, :], expected[:, 1, :])
 
 
 def test_cluster_colormap_is_stable_for_same_k() -> None:
