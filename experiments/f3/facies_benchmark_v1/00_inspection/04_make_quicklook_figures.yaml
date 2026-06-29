@@ -1,0 +1,31 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+outputs:
+  inspection_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+inspection:
+  segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+  png_label_inventory_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_inventory.json
+  palette_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/facies_palette.json
+  quicklook_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook
+  seismic_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/seismic
+  labels_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/labels
+  overlays_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/overlays
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/quicklook_metadata.json
+  figure:
+    dpi: 200
+    final_candidate_dpi: 300
+    background: white
+    seismic_cmap: gray
+    clip_percentiles: [1.0, 99.0]
+    overlay_alpha: 0.45
+    output_formats:
+      - png
+    optional_vector_formats:
+      - pdf
+      - svg
+    xz_yz_origin: upper
+    axis_labels: true

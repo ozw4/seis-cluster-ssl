@@ -11,16 +11,33 @@ from seis_ssl_cluster.config import (
 	resolve_cluster_visualization_config,
 	resolve_clustering_config,
 	resolve_embedding_extraction_config,
+	resolve_f3_facies_inspection_config,
 	resolve_mae_training_config,
 	resolve_manifest_build_config,
 	resolve_normalization_qc_config,
 	resolve_normalization_stats_config,
+)
+from seis_ssl_cluster.config.schema import (
+	DEFAULT_ARTIFACT_ROOT,
+	DEFAULT_F3_FACIES_INSPECTION_DIR,
+	DEFAULT_F3_ROOT,
+	F3_FACIES_DATASET_NAME,
+	F3_FACIES_DATASET_VERSION,
+	STAGE_F3_INSPECT_FILES,
+	STAGE_F3_LABEL_CONSISTENCY,
+	STAGE_F3_PNG_LABELS,
+	STAGE_F3_QUICKLOOK,
+	STAGE_F3_SEGY_GEOMETRY,
+	STAGE_F3_TOKENIZATION_PREVIEW,
 )
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
 
 CONFIG_DIR = Path('proc/configs/seis_ssl_cluster')
+F3_INSPECTION_CONFIG_DIR = Path(
+	'experiments/f3/facies_benchmark_v1/00_inspection',
+)
 DEFAULT_CONFIGS = (
 	(
 		CONFIG_DIR / 'build_nopims_manifests.yaml',
@@ -38,6 +55,26 @@ DEFAULT_CONFIGS = (
 	(CONFIG_DIR / 'extract_embeddings.yaml', resolve_embedding_extraction_config),
 	(CONFIG_DIR / 'cluster_embeddings.yaml', resolve_clustering_config),
 	(CONFIG_DIR / 'visualize_clusters.yaml', resolve_cluster_visualization_config),
+)
+F3_INSPECTION_CONFIGS = (
+	(F3_INSPECTION_CONFIG_DIR / '01_inspect_files.yaml', STAGE_F3_INSPECT_FILES),
+	(
+		F3_INSPECTION_CONFIG_DIR / '02_inspect_segy_geometry.yaml',
+		STAGE_F3_SEGY_GEOMETRY,
+	),
+	(F3_INSPECTION_CONFIG_DIR / '03_inspect_png_labels.yaml', STAGE_F3_PNG_LABELS),
+	(
+		F3_INSPECTION_CONFIG_DIR / '04_make_quicklook_figures.yaml',
+		STAGE_F3_QUICKLOOK,
+	),
+	(
+		F3_INSPECTION_CONFIG_DIR / '05_check_label_consistency.yaml',
+		STAGE_F3_LABEL_CONSISTENCY,
+	),
+	(
+		F3_INSPECTION_CONFIG_DIR / '06_make_tokenization_preview.yaml',
+		STAGE_F3_TOKENIZATION_PREVIEW,
+	),
 )
 DEFAULT_CONFIG_TOP_LEVELS = {
 	CONFIG_DIR / 'build_nopims_manifests.yaml': {'paths', 'manifest'},
@@ -176,6 +213,44 @@ def test_default_configs_resolve_without_mutating_raw(
 	else:
 		assert resolved['paths']['nopims_root'] == '/home/dcuser/data/NOPIMS'
 	assert resolved['paths']['artifact_root'] == '/workspace/artifacts/seis_ssl_cluster'
+
+
+@pytest.mark.parametrize(('config_path', 'stage'), F3_INSPECTION_CONFIGS)
+def test_f3_inspection_configs_resolve_common_contract(
+	config_path: Path,
+	stage: str,
+) -> None:
+	raw = load_config(config_path)
+	original = deepcopy(raw)
+
+	resolved = resolve_f3_facies_inspection_config(raw, stage=stage)
+
+	assert raw == original
+	assert set(raw) == {'paths', 'outputs', 'dataset', 'inspection'}
+	assert 'stage' not in raw
+	assert raw['paths'] == {
+		'f3_root': DEFAULT_F3_ROOT,
+		'artifact_root': DEFAULT_ARTIFACT_ROOT,
+	}
+	assert raw['outputs'] == {'inspection_dir': DEFAULT_F3_FACIES_INSPECTION_DIR}
+	assert '/runs/' not in raw['outputs']['inspection_dir']
+	assert raw['dataset'] == {
+		'name': F3_FACIES_DATASET_NAME,
+		'version': F3_FACIES_DATASET_VERSION,
+	}
+	assert isinstance(raw['inspection'], dict)
+	assert raw['inspection']
+	assert resolved['stage'] == stage
+
+
+def test_f3_inspection_config_rejects_runs_output() -> None:
+	cfg = load_config(F3_INSPECTION_CONFIG_DIR / '01_inspect_files.yaml')
+	cfg['outputs']['inspection_dir'] = (
+		'/workspace/artifacts/seis_ssl_cluster/runs/f3/facies_benchmark_v1'
+	)
+
+	with pytest.raises(ValueError, match=r'outputs\.inspection_dir.*inspection/f3'):
+		resolve_f3_facies_inspection_config(cfg, stage=STAGE_F3_INSPECT_FILES)
 
 
 def test_default_training_config_is_minimal_raw_user_config() -> None:

@@ -1,0 +1,18 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+outputs:
+  inspection_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+inspection:
+  inventory_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/file_inventory.json
+  segy_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy
+  output_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+  output_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.csv
+  candidate_extensions:
+    - .segy
+    - .sgy
+  trace_sample_limit: 1000
+  header_sample_limit: 1000

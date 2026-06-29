@@ -1,4 +1,4 @@
-"""Amplitude-only MVP configuration constants."""
+"""SeisSSLCluster configuration constants."""
 
 from __future__ import annotations
 
@@ -6,6 +6,15 @@ from typing import Final
 
 DEFAULT_NOPIMS_ROOT: Final = '/home/dcuser/data/NOPIMS'
 DEFAULT_ARTIFACT_ROOT: Final = '/workspace/artifacts/seis_ssl_cluster'
+DEFAULT_F3_ROOT: Final = '/home/dcuser/data/public_data/field/F3'
+F3_FACIES_DATASET_NAME: Final = 'f3_facies_benchmark'
+F3_FACIES_DATASET_VERSION: Final = 'facies_benchmark_v1'
+F3_FACIES_INSPECTION_ARTIFACT_SUBDIR: Final = (
+	'inspection/f3/facies_benchmark_v1'
+)
+DEFAULT_F3_FACIES_INSPECTION_DIR: Final = (
+	f'{DEFAULT_ARTIFACT_ROOT}/{F3_FACIES_INSPECTION_ARTIFACT_SUBDIR}'
+)
 
 EXPECTED_GRID_ORDER: Final = ['x', 'y', 'z']
 EXPECTED_VOLUME_FORMAT: Final = 'npy_memmap'
@@ -25,6 +34,23 @@ STAGE_MAE_TRAINING: Final = 'train_amp_mae'
 STAGE_EMBEDDING_EXTRACTION: Final = 'extract_embeddings'
 STAGE_CLUSTERING: Final = 'cluster_embeddings'
 STAGE_CLUSTER_VISUALIZATION: Final = 'visualize_clusters'
+STAGE_F3_INSPECT_FILES: Final = 'inspect_f3_files'
+STAGE_F3_SEGY_GEOMETRY: Final = 'inspect_f3_segy_geometry'
+STAGE_F3_PNG_LABELS: Final = 'inspect_f3_png_labels'
+STAGE_F3_QUICKLOOK: Final = 'visualize_f3_quicklook'
+STAGE_F3_LABEL_CONSISTENCY: Final = 'check_f3_label_consistency'
+STAGE_F3_TOKENIZATION_PREVIEW: Final = 'preview_f3_tokenization'
+
+F3_FACIES_INSPECTION_STAGES: Final = frozenset(
+	{
+		STAGE_F3_INSPECT_FILES,
+		STAGE_F3_SEGY_GEOMETRY,
+		STAGE_F3_PNG_LABELS,
+		STAGE_F3_QUICKLOOK,
+		STAGE_F3_LABEL_CONSISTENCY,
+		STAGE_F3_TOKENIZATION_PREVIEW,
+	},
+)
 
 KNOWN_STAGES: Final = {
 	STAGE_BUILD_MANIFESTS,

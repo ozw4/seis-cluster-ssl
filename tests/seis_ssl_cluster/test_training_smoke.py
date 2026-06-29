@@ -385,6 +385,7 @@ def test_grad_clip_norm_calls_torch_clip_on_cpu(
 		loss_config={
 			'reconstruction': 'mse',
 			'gradient_weight': 0.05,
+			'visible_reconstruction_weight': 0.0,
 			'target_normalization': {'mode': 'none'},
 		},
 		grad_clip_norm=1.0,
@@ -452,6 +453,7 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 			loss_config={
 				'reconstruction': 'mse',
 				'gradient_weight': 0.05,
+				'visible_reconstruction_weight': 0.0,
 				'target_normalization': {'mode': 'none'},
 			},
 			global_step=1042,
