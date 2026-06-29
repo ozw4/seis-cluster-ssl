@@ -11,15 +11,14 @@ inspection:
   label_consistency_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/label_consistency.json
   tokenization_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/tokenization
   metadata_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/tokenization_preview.json
+  summary_csv: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/tokenization_summary.csv
+  summary_markdown: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/tokenization_summary.md
   tokenization:
-    local_crop_size: [128, 128, 128]
-    patch_size: [8, 8, 8]
-    preview_stride: [64, 64, 64]
+    patch_size_xyz: [8, 8, 8]
+    min_labeled_fraction: 0.5
+    min_majority_fraction: 0.7
   figure:
     dpi: 200
     background: white
-    seismic_cmap: gray
-    clip_percentiles: [1.0, 99.0]
-    overlay_alpha: 0.45
     output_formats:
       - png

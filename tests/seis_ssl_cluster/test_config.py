@@ -24,6 +24,7 @@ from seis_ssl_cluster.config.schema import (
 	F3_FACIES_DATASET_NAME,
 	F3_FACIES_DATASET_VERSION,
 	STAGE_F3_INSPECT_FILES,
+	STAGE_F3_INSPECTION_REPORT,
 	STAGE_F3_LABEL_CONSISTENCY,
 	STAGE_F3_PNG_LABELS,
 	STAGE_F3_QUICKLOOK,
@@ -74,6 +75,10 @@ F3_INSPECTION_CONFIGS = (
 	(
 		F3_INSPECTION_CONFIG_DIR / '06_make_tokenization_preview.yaml',
 		STAGE_F3_TOKENIZATION_PREVIEW,
+	),
+	(
+		F3_INSPECTION_CONFIG_DIR / '07_build_inspection_report.yaml',
+		STAGE_F3_INSPECTION_REPORT,
 	),
 )
 DEFAULT_CONFIG_TOP_LEVELS = {
@@ -285,6 +290,11 @@ def test_f3_inspection_config_rejects_runs_output() -> None:
 			F3_INSPECTION_CONFIG_DIR / '06_make_tokenization_preview.yaml',
 			STAGE_F3_TOKENIZATION_PREVIEW,
 			'tokenization_dir',
+		),
+		(
+			F3_INSPECTION_CONFIG_DIR / '07_build_inspection_report.yaml',
+			STAGE_F3_INSPECTION_REPORT,
+			'output_json',
 		),
 	],
 )

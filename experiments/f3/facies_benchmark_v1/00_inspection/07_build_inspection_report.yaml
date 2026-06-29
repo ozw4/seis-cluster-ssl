@@ -1,0 +1,25 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+outputs:
+  inspection_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+inspection:
+  file_inventory_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/file_inventory.json
+  class_info_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+  segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+  seismic_amplitude_stats_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/seismic_amplitude_stats.json
+  label_unique_values_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/label_unique_values.json
+  png_label_summary_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_summary.json
+  png_label_inventory_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_inventory.json
+  quicklook_metadata_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/quicklook_metadata.json
+  label_consistency_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/label_consistency.json
+  tokenization_preview_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/tokenization_preview.json
+  output_markdown: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/report.md
+  output_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/report.json
+  figure_paths:
+    - quicklook/seismic/seismic_xz_y_mid.png
+    - quicklook/overlays/train_inline_0250_overlay.png
+    - quicklook/tokenization/train_inline_0250_tokenization.png

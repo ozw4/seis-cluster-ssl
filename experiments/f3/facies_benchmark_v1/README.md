@@ -27,7 +27,8 @@ Inspection output layout:
 │   ├── consistency/
 │   └── tokenization/
 ├── stats/
-└── report.md
+├── report.md
+└── report.json
 ```
 
 Run the inspection stages in this order:
@@ -50,6 +51,9 @@ python proc/seis_ssl_cluster/check_f3_label_consistency.py \
 
 python proc/seis_ssl_cluster/preview_f3_tokenization.py \
   --config experiments/f3/facies_benchmark_v1/00_inspection/06_make_tokenization_preview.yaml
+
+python proc/seis_ssl_cluster/build_f3_inspection_report.py \
+  --config experiments/f3/facies_benchmark_v1/00_inspection/07_build_inspection_report.yaml
 ```
 
 See [docs/f3_facies_benchmark_inspection.md](../../../docs/f3_facies_benchmark_inspection.md)
