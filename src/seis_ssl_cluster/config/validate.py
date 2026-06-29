@@ -169,6 +169,14 @@ _F3_FACIES_INSPECTION_TOP_LEVEL = frozenset(
 _F3_FACIES_INSPECTION_PATH_KEYS = frozenset({'f3_root', 'artifact_root'})
 _F3_FACIES_INSPECTION_OUTPUT_KEYS = frozenset({'inspection_dir'})
 _F3_FACIES_INSPECTION_DATASET_KEYS = frozenset({'name', 'version'})
+_F3_FACIES_INSPECTION_PATH_KEY_SUFFIXES = (
+	'_dir',
+	'_json',
+	'_csv',
+	'_markdown',
+	'_png',
+	'_path',
+)
 
 
 def resolve_manifest_build_config(config: _T) -> Config:
@@ -545,7 +553,7 @@ def resolve_f3_facies_inspection_config(config: _T, *, stage: str) -> Config:
 	paths = _validate_f3_facies_inspection_paths(
 		_required_mapping(resolved, 'paths'),
 	)
-	_validate_f3_facies_inspection_outputs(
+	inspection_dir = _validate_f3_facies_inspection_outputs(
 		_required_mapping(resolved, 'outputs'),
 		paths=paths,
 	)
@@ -554,6 +562,10 @@ def resolve_f3_facies_inspection_config(config: _T, *, stage: str) -> Config:
 	if not inspection:
 		msg = 'inspection must contain stage-specific settings'
 		raise ValueError(msg)
+	_validate_f3_facies_inspection_artifact_paths(
+		inspection,
+		inspection_dir=inspection_dir,
+	)
 	return resolved
 
 
@@ -669,7 +681,7 @@ def _validate_f3_facies_inspection_outputs(
 	outputs: Mapping[str, object],
 	*,
 	paths: _ResolvedPaths,
-) -> None:
+) -> Path:
 	_validate_allowed_keys(
 		outputs,
 		_F3_FACIES_INSPECTION_OUTPUT_KEYS,
@@ -698,6 +710,39 @@ def _validate_f3_facies_inspection_outputs(
 			f'{F3_FACIES_INSPECTION_ARTIFACT_SUBDIR!r}; got {inspection_dir}'
 		)
 		raise ValueError(msg)
+	return inspection_dir
+
+
+def _validate_f3_facies_inspection_artifact_paths(
+	inspection: Mapping[str, object],
+	*,
+	inspection_dir: Path,
+	prefix: str = 'inspection',
+) -> None:
+	for key, value in inspection.items():
+		label = f'{prefix}.{key}'
+		if isinstance(value, Mapping):
+			_validate_f3_facies_inspection_artifact_paths(
+				value,
+				inspection_dir=inspection_dir,
+				prefix=label,
+			)
+			continue
+		if not _is_f3_facies_inspection_path_key(key):
+			continue
+		if not isinstance(value, str) or not value:
+			msg = f'{label} must be a non-empty string; got {value!r}'
+			raise TypeError(msg)
+		_validate_path_under_root(
+			Path(value),
+			label,
+			root=inspection_dir,
+			root_label='outputs.inspection_dir',
+		)
+
+
+def _is_f3_facies_inspection_path_key(key: str) -> bool:
+	return key.endswith(_F3_FACIES_INSPECTION_PATH_KEY_SUFFIXES)
 
 
 def _validate_f3_facies_dataset(dataset: Mapping[str, object]) -> None:

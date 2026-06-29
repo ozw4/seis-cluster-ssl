@@ -253,6 +253,71 @@ def test_f3_inspection_config_rejects_runs_output() -> None:
 		resolve_f3_facies_inspection_config(cfg, stage=STAGE_F3_INSPECT_FILES)
 
 
+@pytest.mark.parametrize(
+	('config_path', 'stage', 'inspection_key'),
+	[
+		(
+			F3_INSPECTION_CONFIG_DIR / '01_inspect_files.yaml',
+			STAGE_F3_INSPECT_FILES,
+			'output_json',
+		),
+		(
+			F3_INSPECTION_CONFIG_DIR / '02_inspect_segy_geometry.yaml',
+			STAGE_F3_SEGY_GEOMETRY,
+			'metadata_json',
+		),
+		(
+			F3_INSPECTION_CONFIG_DIR / '03_inspect_png_labels.yaml',
+			STAGE_F3_PNG_LABELS,
+			'class_distribution_train_png',
+		),
+		(
+			F3_INSPECTION_CONFIG_DIR / '04_make_quicklook_figures.yaml',
+			STAGE_F3_QUICKLOOK,
+			'quicklook_dir',
+		),
+		(
+			F3_INSPECTION_CONFIG_DIR / '05_check_label_consistency.yaml',
+			STAGE_F3_LABEL_CONSISTENCY,
+			'report_path',
+		),
+		(
+			F3_INSPECTION_CONFIG_DIR / '06_make_tokenization_preview.yaml',
+			STAGE_F3_TOKENIZATION_PREVIEW,
+			'tokenization_dir',
+		),
+	],
+)
+def test_f3_inspection_config_rejects_stage_paths_outside_inspection_dir(
+	config_path: Path,
+	stage: str,
+	inspection_key: str,
+) -> None:
+	cfg = load_config(config_path)
+	cfg['inspection'][inspection_key] = (
+		'/workspace/artifacts/seis_ssl_cluster/runs/f3/facies_benchmark_v1/out'
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=rf'inspection\.{inspection_key}.*outputs\.inspection_dir',
+	):
+		resolve_f3_facies_inspection_config(cfg, stage=stage)
+
+
+def test_f3_inspection_config_rejects_stage_output_under_raw_root() -> None:
+	cfg = load_config(F3_INSPECTION_CONFIG_DIR / '01_inspect_files.yaml')
+	cfg['inspection']['output_json'] = (
+		f'{DEFAULT_F3_ROOT}/inspection/f3/facies_benchmark_v1/file_inventory.json'
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=r'inspection\.output_json.*outputs\.inspection_dir',
+	):
+		resolve_f3_facies_inspection_config(cfg, stage=STAGE_F3_INSPECT_FILES)
+
+
 def test_default_training_config_is_minimal_raw_user_config() -> None:
 	raw = load_config(CONFIG_DIR / 'train_amp_mae.yaml')
 
