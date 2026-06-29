@@ -1,4 +1,4 @@
-"""Stage-specific validation and resolution for amplitude-only configs."""
+"""Stage-specific validation and resolution for SeisSSLCluster configs."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
 	EXPECTED_VALID_MASK_MODE,
+	F3_FACIES_DATASET_NAME,
+	F3_FACIES_DATASET_VERSION,
+	F3_FACIES_INSPECTION_ARTIFACT_SUBDIR,
+	F3_FACIES_INSPECTION_STAGES,
 	FIXED_DATA_CONTRACT,
 	FIXED_LOSS_CONTRACT,
 	FIXED_MASKING_CONTRACT,
@@ -159,6 +163,20 @@ _VISUALIZATION_REQUIRED_KEYS = _VISUALIZATION_KEYS
 _VISUALIZATION_UNDERLAY_KEYS = frozenset({'enabled', 'alpha'})
 _VISUALIZATION_COMPARISON_KEYS = frozenset({'enabled', 'alpha'})
 _VISUALIZATION_SUMMARY_KEYS = frozenset({'enabled', 'include_amplitude_norm'})
+_F3_FACIES_INSPECTION_TOP_LEVEL = frozenset(
+	{'paths', 'outputs', 'dataset', 'inspection'},
+)
+_F3_FACIES_INSPECTION_PATH_KEYS = frozenset({'f3_root', 'artifact_root'})
+_F3_FACIES_INSPECTION_OUTPUT_KEYS = frozenset({'inspection_dir'})
+_F3_FACIES_INSPECTION_DATASET_KEYS = frozenset({'name', 'version'})
+_F3_FACIES_INSPECTION_PATH_KEY_SUFFIXES = (
+	'_dir',
+	'_json',
+	'_csv',
+	'_markdown',
+	'_png',
+	'_path',
+)
 
 
 def resolve_manifest_build_config(config: _T) -> Config:
@@ -517,6 +535,40 @@ def resolve_cluster_visualization_config(config: _T) -> Config:
 	return resolved
 
 
+def resolve_f3_facies_inspection_config(config: _T, *, stage: str) -> Config:
+	"""Validate and resolve a raw config for an F3 facies inspection entrypoint."""
+	if stage not in F3_FACIES_INSPECTION_STAGES:
+		msg = (
+			f'stage must be one of {sorted(F3_FACIES_INSPECTION_STAGES)!r}; '
+			f'got {stage!r}'
+		)
+		raise ValueError(msg)
+	_validate_mapping(config)
+	_reject_legacy_attribute_config(config)
+	_reject_stage_key(config)
+	_validate_f3_facies_inspection_top_level_sections(config, stage)
+
+	resolved = deepcopy(dict(config))
+	resolved['stage'] = stage
+	paths = _validate_f3_facies_inspection_paths(
+		_required_mapping(resolved, 'paths'),
+	)
+	inspection_dir = _validate_f3_facies_inspection_outputs(
+		_required_mapping(resolved, 'outputs'),
+		paths=paths,
+	)
+	_validate_f3_facies_dataset(_required_mapping(resolved, 'dataset'))
+	inspection = _required_mapping(resolved, 'inspection')
+	if not inspection:
+		msg = 'inspection must contain stage-specific settings'
+		raise ValueError(msg)
+	_validate_f3_facies_inspection_artifact_paths(
+		inspection,
+		inspection_dir=inspection_dir,
+	)
+	return resolved
+
+
 def validate_config(config: _T, *, stage: str) -> Config:
 	"""Resolve raw config for an explicit stage selected by caller code."""
 	try:
@@ -548,8 +600,15 @@ def _resolve_base(
 
 
 class _ResolvedPaths:
-	def __init__(self, *, nopims_root: Path | None, artifact_root: Path) -> None:
+	def __init__(
+		self,
+		*,
+		artifact_root: Path,
+		nopims_root: Path | None = None,
+		f3_root: Path | None = None,
+	) -> None:
 		self.nopims_root = nopims_root
+		self.f3_root = f3_root
 		self.artifact_root = artifact_root
 
 
@@ -582,6 +641,132 @@ def _validate_top_level_sections(config: Mapping[str, object], stage: str) -> No
 	missing = sorted(required - keys)
 	if missing:
 		msg = f'missing required top-level section(s) for {stage}: {missing!r}'
+		raise ValueError(msg)
+
+
+def _validate_f3_facies_inspection_top_level_sections(
+	config: Mapping[str, object],
+	stage: str,
+) -> None:
+	keys = set(config)
+	unexpected = sorted(keys - _F3_FACIES_INSPECTION_TOP_LEVEL)
+	if unexpected:
+		msg = (
+			f'top-level section(s) not allowed for {stage}: {unexpected!r}; '
+			'allowed sections are '
+			f'{sorted(_F3_FACIES_INSPECTION_TOP_LEVEL)!r}'
+		)
+		raise ValueError(msg)
+	missing = sorted(_F3_FACIES_INSPECTION_TOP_LEVEL - keys)
+	if missing:
+		msg = f'missing required top-level section(s) for {stage}: {missing!r}'
+		raise ValueError(msg)
+
+
+def _validate_f3_facies_inspection_paths(
+	paths: Mapping[str, object],
+) -> _ResolvedPaths:
+	_validate_allowed_keys(
+		paths,
+		_F3_FACIES_INSPECTION_PATH_KEYS,
+		prefix='paths',
+	)
+	return _ResolvedPaths(
+		f3_root=_validate_absolute_path(paths, 'f3_root', prefix='paths'),
+		artifact_root=_validate_absolute_path(paths, 'artifact_root', prefix='paths'),
+	)
+
+
+def _validate_f3_facies_inspection_outputs(
+	outputs: Mapping[str, object],
+	*,
+	paths: _ResolvedPaths,
+) -> Path:
+	_validate_allowed_keys(
+		outputs,
+		_F3_FACIES_INSPECTION_OUTPUT_KEYS,
+		prefix='outputs',
+	)
+	_validate_required_keys(
+		outputs,
+		_F3_FACIES_INSPECTION_OUTPUT_KEYS,
+		prefix='outputs',
+	)
+	inspection_dir = _validate_path(outputs, 'inspection_dir', prefix='outputs')
+	_validate_artifact_output_path(
+		inspection_dir,
+		'outputs.inspection_dir',
+		artifact_root=paths.artifact_root,
+		nopims_root=paths.f3_root,
+		raw_root_label='paths.f3_root',
+	)
+	expected_relative = Path(F3_FACIES_INSPECTION_ARTIFACT_SUBDIR)
+	actual_relative = inspection_dir.resolve(strict=False).relative_to(
+		paths.artifact_root.resolve(strict=False),
+	)
+	if actual_relative != expected_relative:
+		msg = (
+			'outputs.inspection_dir must be paths.artifact_root / '
+			f'{F3_FACIES_INSPECTION_ARTIFACT_SUBDIR!r}; got {inspection_dir}'
+		)
+		raise ValueError(msg)
+	return inspection_dir
+
+
+def _validate_f3_facies_inspection_artifact_paths(
+	inspection: Mapping[str, object],
+	*,
+	inspection_dir: Path,
+	prefix: str = 'inspection',
+) -> None:
+	for key, value in inspection.items():
+		label = f'{prefix}.{key}'
+		if isinstance(value, Mapping):
+			_validate_f3_facies_inspection_artifact_paths(
+				value,
+				inspection_dir=inspection_dir,
+				prefix=label,
+			)
+			continue
+		if not _is_f3_facies_inspection_path_key(key):
+			continue
+		if not isinstance(value, str) or not value:
+			msg = f'{label} must be a non-empty string; got {value!r}'
+			raise TypeError(msg)
+		_validate_path_under_root(
+			Path(value),
+			label,
+			root=inspection_dir,
+			root_label='outputs.inspection_dir',
+		)
+
+
+def _is_f3_facies_inspection_path_key(key: str) -> bool:
+	return key.endswith(_F3_FACIES_INSPECTION_PATH_KEY_SUFFIXES)
+
+
+def _validate_f3_facies_dataset(dataset: Mapping[str, object]) -> None:
+	_validate_allowed_keys(
+		dataset,
+		_F3_FACIES_INSPECTION_DATASET_KEYS,
+		prefix='dataset',
+	)
+	_validate_required_keys(
+		dataset,
+		_F3_FACIES_INSPECTION_DATASET_KEYS,
+		prefix='dataset',
+	)
+	if dataset.get('name') != F3_FACIES_DATASET_NAME:
+		msg = (
+			f'dataset.name must be {F3_FACIES_DATASET_NAME!r}; '
+			f'got {dataset.get("name")!r}'
+		)
+		raise ValueError(msg)
+	if dataset.get('version') != F3_FACIES_DATASET_VERSION:
+		msg = (
+			f'dataset.version must be {F3_FACIES_DATASET_VERSION!r}; '
+			f'got {dataset.get("version")!r}'
+		)
 		raise ValueError(msg)
 
 
@@ -709,12 +894,13 @@ def _validate_artifact_output_path(
 	*,
 	artifact_root: Path,
 	nopims_root: Path | None,
+	raw_root_label: str = 'paths.nopims_root',
 ) -> None:
 	if not path.is_absolute():
 		msg = f'{label} must be an absolute artifact-registry path; got {path}'
 		raise ValueError(msg)
 	if nopims_root is not None and _is_relative_to(path, nopims_root):
-		msg = f'{label} must not be under paths.nopims_root; got {path}'
+		msg = f'{label} must not be under {raw_root_label}; got {path}'
 		raise ValueError(msg)
 	if not _is_relative_to(path, artifact_root):
 		msg = f'{label} must be under paths.artifact_root ({artifact_root}); got {path}'
@@ -1575,6 +1761,7 @@ __all__ = [
 	'resolve_cluster_visualization_config',
 	'resolve_clustering_config',
 	'resolve_embedding_extraction_config',
+	'resolve_f3_facies_inspection_config',
 	'resolve_mae_training_config',
 	'resolve_manifest_build_config',
 	'resolve_normalization_qc_config',

@@ -1,0 +1,25 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+outputs:
+  inspection_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+inspection:
+  segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+  label_consistency_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/label_consistency.json
+  tokenization_dir: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/tokenization
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/stats/tokenization_preview.json
+  tokenization:
+    local_crop_size: [128, 128, 128]
+    patch_size: [8, 8, 8]
+    preview_stride: [64, 64, 64]
+  figure:
+    dpi: 200
+    background: white
+    seismic_cmap: gray
+    clip_percentiles: [1.0, 99.0]
+    overlay_alpha: 0.45
+    output_formats:
+      - png
