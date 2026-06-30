@@ -38,6 +38,11 @@ token_dataset:
     min_labeled_fraction: 0.5
     min_majority_fraction: 0.7
     ignore_z_border_samples: 1
+  feature_source:
+    kind: pretrained_encoder
+    reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+    embedding_spec: overlap_x16
+    description: frozen NOPIMS-pretrained MAE encoder embeddings
   figure:
     dpi: 300
   split_source: png_label_inventory

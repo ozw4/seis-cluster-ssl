@@ -1,5 +1,16 @@
 """F3 facies benchmark inspection utilities."""
 
+from seis_ssl_cluster.f3.baseline_features import (
+	AMPLITUDE_STATISTICS,
+	BASELINE_FEATURE_KINDS,
+	F3BaselineFeatureConfig,
+	F3BaselineReferenceTokenDataset,
+	F3BaselineTokenDatasetOutputs,
+	F3LithologyBaselineTokenDatasetConfig,
+	F3LithologyBaselineTokenDatasetResult,
+	build_f3_lithology_baseline_token_dataset,
+	f3_lithology_baseline_token_dataset_config_from_mapping,
+)
 from seis_ssl_cluster.f3.consistency import (
 	CONSISTENCY_CSV_FIELDNAMES,
 	F3LabelConsistencyAlignment,
@@ -84,6 +95,7 @@ from seis_ssl_cluster.f3.lithology_tokens import (
 	F3LithologyTokenDatasetOutputs,
 	F3LithologyTokenDatasetResult,
 	F3LithologyTokenPolicy,
+	F3ReferenceTokenDataset,
 	F3SliceTokenization,
 	F3TokenArrays,
 	build_f3_lithology_token_dataset,

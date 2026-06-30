@@ -18,6 +18,12 @@ OVERALL_METRIC_COLUMNS = (
 	'mean_iou',
 )
 COMPARISON_ID_COLUMNS = ('MODEL_TAG', 'EMBED_SPEC', 'LABEL_SET', 'PROBE_SPEC')
+COMPARISON_FEATURE_SOURCE_COLUMNS = (
+	'FEATURE_SOURCE_KIND',
+	'FEATURE_SOURCE_REFERENCE_MODEL_TAG',
+	'FEATURE_SOURCE_EMBED_SPEC',
+	'FEATURE_SOURCE_DESCRIPTION',
+)
 _DEFAULT_PROBE_FIGURES = (
 	('confusion_matrix', Path('figures/confusion_matrix.png')),
 	('per_class_f1', Path('figures/per_class_f1.png')),
@@ -119,7 +125,12 @@ def build_f3_lithology_comparison_report(
 		probe_config = _read_optional_json(metrics_path.with_name(
 			'probe_config_resolved.json',
 		))
-		rows.append(_comparison_row(metrics_path, metrics, probe_config))
+		token_metadata = _read_optional_json(
+			_token_metadata_path_for_metrics(metrics_path, _mapping(probe_config)),
+		)
+		rows.append(
+			_comparison_row(metrics_path, metrics, probe_config, token_metadata),
+		)
 	rows = sorted(
 		rows,
 		key=lambda row: (
@@ -565,12 +576,14 @@ def _comparison_row(
 	metrics_path: Path,
 	metrics: Mapping[str, object],
 	probe_config: Mapping[str, object] | None,
+	token_metadata: Mapping[str, object] | None,
 ) -> dict[str, object]:
 	config = _mapping(probe_config)
 	model = _mapping(config.get('model'))
 	labels = _mapping(config.get('labels'))
 	probe = _mapping(config.get('probe'))
 	path_parts = _run_parts(metrics_path)
+	feature_source = _feature_source_summary(metrics, config, token_metadata)
 	row: dict[str, object] = {
 		'MODEL_TAG': _first_non_empty(model.get('tag'), path_parts.get('MODEL_TAG')),
 		'EMBED_SPEC': _first_non_empty(
@@ -581,6 +594,12 @@ def _comparison_row(
 		'PROBE_SPEC': _first_non_empty(probe.get('spec'), path_parts.get(
 			'PROBE_SPEC',
 		)),
+		'FEATURE_SOURCE_KIND': feature_source.get('kind'),
+		'FEATURE_SOURCE_REFERENCE_MODEL_TAG': feature_source.get(
+			'reference_model_tag',
+		),
+		'FEATURE_SOURCE_EMBED_SPEC': feature_source.get('embedding_spec'),
+		'FEATURE_SOURCE_DESCRIPTION': feature_source.get('description'),
 	}
 	for metric in OVERALL_METRIC_COLUMNS:
 		row[metric] = _float_or_none(metrics.get(metric))
@@ -599,7 +618,44 @@ def _comparison_fieldnames(rows: Sequence[Mapping[str, object]]) -> tuple[str, .
 		},
 		key=_class_metric_sort_key,
 	)
-	return (*COMPARISON_ID_COLUMNS, *OVERALL_METRIC_COLUMNS, *class_columns)
+	return (
+		*COMPARISON_ID_COLUMNS,
+		*COMPARISON_FEATURE_SOURCE_COLUMNS,
+		*OVERALL_METRIC_COLUMNS,
+		*class_columns,
+	)
+
+
+def _token_metadata_path_for_metrics(
+	metrics_path: Path,
+	probe_config: Mapping[str, object],
+) -> Path:
+	value = _mapping(probe_config.get('inputs')).get('token_dataset_metadata_json')
+	if isinstance(value, str) and value:
+		return Path(value)
+	return (
+		metrics_path.parent.parent.parent
+		/ 'token_dataset'
+		/ 'token_dataset_metadata.json'
+	)
+
+
+def _feature_source_summary(
+	metrics: Mapping[str, object],
+	probe_config: Mapping[str, object],
+	token_metadata: Mapping[str, object] | None,
+) -> Mapping[str, object]:
+	for candidate in (
+		_mapping(metrics.get('feature_source')),
+		_mapping(probe_config.get('feature_source')),
+		_mapping(_mapping(probe_config.get('token_dataset')).get('feature_source')),
+		_mapping(_mapping(probe_config.get('embeddings')).get('feature_source')),
+		_mapping(_mapping(probe_config.get('model')).get('feature_source')),
+		_mapping(_mapping(token_metadata).get('feature_source')),
+	):
+		if candidate:
+			return candidate
+	return {}
 
 
 def _write_comparison_csv(

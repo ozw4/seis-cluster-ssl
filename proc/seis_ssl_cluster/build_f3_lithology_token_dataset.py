@@ -13,6 +13,7 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyTokenDatasetInputs,
 	F3LithologyTokenDatasetOutputs,
 	F3LithologyTokenPolicy,
+	F3ReferenceTokenDataset,
 	build_f3_lithology_token_dataset,
 )
 
@@ -152,6 +153,8 @@ def f3_lithology_token_dataset_config_from_mapping(
 		dataset=dataset,
 		model=model,
 		figure_dpi=_figure_dpi(token_dataset),
+		feature_source=_feature_source(token_dataset),
+		reference_token_dataset=_reference_token_dataset_from_mapping(token_dataset),
 	)
 
 
@@ -232,6 +235,80 @@ def _figure_dpi(token_dataset: Mapping[str, object]) -> int:
 	)
 
 
+def _feature_source(token_dataset: Mapping[str, object]) -> Mapping[str, object] | None:
+	value = token_dataset.get('feature_source')
+	if value is None:
+		return None
+	if not isinstance(value, Mapping):
+		msg = f'token_dataset.feature_source must be a mapping; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _reference_token_dataset_from_mapping(
+	token_dataset: Mapping[str, object],
+) -> F3ReferenceTokenDataset | None:
+	value = token_dataset.get('reference_token_dataset')
+	if value is None:
+		return None
+	if not isinstance(value, Mapping):
+		msg = f'token_dataset.reference_token_dataset must be a mapping; got {value!r}'
+		raise TypeError(msg)
+	raw = value
+	root = _optional_absolute_path(
+		raw,
+		'root',
+		prefix='token_dataset.reference_token_dataset',
+	)
+	train_tokens = _optional_absolute_path(
+		raw,
+		'train_tokens',
+		prefix='token_dataset.reference_token_dataset',
+	)
+	validation_tokens = _optional_absolute_path(
+		raw,
+		'validation_tokens',
+		prefix='token_dataset.reference_token_dataset',
+	)
+	metadata_json = _optional_absolute_path(
+		raw,
+		'metadata_json',
+		prefix='token_dataset.reference_token_dataset',
+	)
+	split_manifest_json = _optional_absolute_path(
+		raw,
+		'split_manifest_json',
+		prefix='token_dataset.reference_token_dataset',
+	)
+	split_manifest = _optional_absolute_path(
+		raw,
+		'split_manifest',
+		prefix='token_dataset.reference_token_dataset',
+	)
+	if root is not None:
+		train_tokens = train_tokens or root / 'train_tokens.npz'
+		validation_tokens = validation_tokens or root / 'validation_tokens.npz'
+		metadata_json = metadata_json or root / 'token_dataset_metadata.json'
+		split_manifest_json = (
+			split_manifest_json or split_manifest or root / 'splits.json'
+		)
+	else:
+		split_manifest_json = split_manifest_json or split_manifest
+	if train_tokens is None or validation_tokens is None or metadata_json is None:
+		msg = (
+			'token_dataset.reference_token_dataset requires root or explicit '
+			'train_tokens, validation_tokens, and metadata_json paths'
+		)
+		raise KeyError(msg)
+	return F3ReferenceTokenDataset(
+		train_tokens=train_tokens,
+		validation_tokens=validation_tokens,
+		metadata_json=metadata_json,
+		split_manifest_json=split_manifest_json,
+		root=root,
+	)
+
+
 def _output_paths(
 	outputs: F3LithologyTokenDatasetOutputs,
 ) -> tuple[tuple[str, Path], ...]:
@@ -275,6 +352,21 @@ def _print_summary(config: F3LithologyTokenDatasetConfig) -> None:
 	print(f'token_dataset.split_manifest: {config.outputs.split_manifest_json}')
 	print(f'token_dataset.quicklook_dir: {config.outputs.quicklook_dir}')
 	print(f'token_dataset.figure.dpi: {config.figure_dpi}')
+	if config.feature_source is not None:
+		print(f'token_dataset.feature_source: {dict(config.feature_source)}')
+	if config.reference_token_dataset is not None:
+		reference = config.reference_token_dataset
+		print('token_dataset.split_source: reference_token_dataset')
+		print(f'token_dataset.reference.train_tokens: {reference.train_tokens}')
+		print(
+			'token_dataset.reference.validation_tokens: '
+			f'{reference.validation_tokens}',
+		)
+		print(f'token_dataset.reference.metadata_json: {reference.metadata_json}')
+		print(
+			'token_dataset.reference.split_manifest: '
+			f'{reference.split_manifest_json}',
+		)
 
 
 def _required_mapping(

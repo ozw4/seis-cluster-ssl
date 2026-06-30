@@ -1,0 +1,37 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+model:
+  tag: random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt
+  freeze_encoder: true
+  reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+labels:
+  set: png_slices_segy_labels_v1
+  source_label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
+  source_label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  png_label_role: train_validation_slice_selection_and_visual_qc
+lithology:
+  root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1
+probe:
+  spec: linear_balanced_v1
+  metrics_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.json
+  probe_config_resolved_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/probe_config_resolved.json
+reports:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1
+  output_markdown: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.md
+  output_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.json
+  token_dataset_metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset/token_dataset_metadata.json
+  feature_source:
+    kind: random_encoder
+    reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+    embedding_spec: overlap_x16
+    description: same MAE architecture with random seed 42 and no pretraining
+comparison:
+  search_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison_v1
+  output_csv: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison_v1/comparison_table.csv
+  output_markdown: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison_v1/comparison_report.md

@@ -633,7 +633,11 @@ def _write_probe_outputs(  # noqa: PLR0913
 	outputs.figures_dir.mkdir(parents=True, exist_ok=True)
 	joblib.dump(probe, outputs.probe_joblib)
 	joblib.dump(scaler, outputs.scaler_joblib)
-	_write_json(outputs.metrics_json, dict(metrics))
+	metrics_payload = dict(metrics)
+	feature_source = _feature_source_from_config(config)
+	if feature_source is not None:
+		metrics_payload['feature_source'] = feature_source
+	_write_json(outputs.metrics_json, metrics_payload)
 	write_metrics_csv(outputs.metrics_csv, metrics, config.classes)
 	write_confusion_matrix_csv(outputs.confusion_matrix_csv, metrics, config.classes)
 	outputs.classification_report_md.write_text(
@@ -665,7 +669,7 @@ def _resolved_config_payload(
 	train: _TokenDataset,
 	validation: _TokenDataset,
 ) -> dict[str, object]:
-	return {
+	payload: dict[str, object] = {
 		'artifact_type': 'f3_lithology_probe',
 		'dataset': dict(config.dataset),
 		'model': dict(config.model),
@@ -715,6 +719,27 @@ def _resolved_config_payload(
 			'validation_class_counts': _class_counts(validation.labels),
 		},
 	}
+	feature_source = _feature_source_from_config(config)
+	if feature_source is not None:
+		payload['feature_source'] = feature_source
+	return payload
+
+
+def _feature_source_from_config(
+	config: F3LithologyProbeConfig,
+) -> dict[str, object] | None:
+	for candidate in (
+		_mapping_or_none(config.token_dataset.get('feature_source')),
+		_mapping_or_none(config.embeddings.get('feature_source')),
+		_mapping_or_none(config.model.get('feature_source')),
+	):
+		if candidate:
+			return dict(candidate)
+	return None
+
+
+def _mapping_or_none(value: object) -> Mapping[str, object] | None:
+	return value if isinstance(value, Mapping) else None
 
 
 def _write_probe_figures(
