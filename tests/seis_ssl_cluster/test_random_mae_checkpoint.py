@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 import torch
 
+import seis_ssl_cluster.training.random_checkpoint as random_checkpoint_module
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
@@ -71,6 +72,42 @@ def test_create_random_mae_checkpoint_preserves_reference_config_and_metadata(
 		payload['model_state_dict'],
 		reference_payload['model_state_dict'],
 	)
+
+
+def test_create_random_mae_checkpoint_reads_metadata_not_reference_weights(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	reference_checkpoint = _write_reference_checkpoint(tmp_path)
+	output_checkpoint = tmp_path / 'artifacts' / 'pretraining' / 'random.pt'
+	read_names: list[str] = []
+	original_read = random_checkpoint_module.zipfile.ZipFile.read
+
+	def record_read(
+		self: random_checkpoint_module.zipfile.ZipFile,
+		name: str,
+		*args: object,
+		**kwargs: object,
+	) -> bytes:
+		read_names.append(name)
+		return original_read(self, name, *args, **kwargs)
+
+	def fail_torch_load(*_args: object, **_kwargs: object) -> None:
+		raise AssertionError('reference checkpoint must not be torch.load-ed')
+
+	monkeypatch.setattr(random_checkpoint_module.zipfile.ZipFile, 'read', record_read)
+	monkeypatch.setattr(random_checkpoint_module.torch, 'load', fail_torch_load)
+
+	result = create_random_mae_checkpoint(
+		reference_checkpoint=reference_checkpoint,
+		reference_model_tag='reference-model',
+		seed=42,
+		output_checkpoint=output_checkpoint,
+	)
+
+	assert result == output_checkpoint
+	assert any(name.endswith('/data.pkl') for name in read_names)
+	assert not any('/data/' in name for name in read_names)
 
 
 def test_create_random_mae_checkpoint_seed_determinism(tmp_path: Path) -> None:

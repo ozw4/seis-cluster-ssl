@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import io
 import os
+import pickle
 import tempfile
+import zipfile
 from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
@@ -14,7 +17,7 @@ import torch
 
 import seis_ssl_cluster
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-from seis_ssl_cluster.training.checkpoint import capture_rng_state, load_checkpoint
+from seis_ssl_cluster.training.checkpoint import capture_rng_state
 
 
 @dataclass(frozen=True)
@@ -25,6 +28,39 @@ class RandomMaeCheckpointConfig:
 	reference_model_tag: str
 	seed: int
 	output_checkpoint: Path
+
+
+class _SkippedCheckpointStorage:
+	"""Placeholder for tensor storage skipped while reading checkpoint metadata."""
+
+
+class _SkippedCheckpointTensor:
+	"""Placeholder for tensors skipped while reading checkpoint metadata."""
+
+
+def _skip_checkpoint_tensor(
+	*_args: object,
+	**_kwargs: object,
+) -> _SkippedCheckpointTensor:
+	return _SkippedCheckpointTensor()
+
+
+class _ConfigOnlyCheckpointUnpickler(pickle.Unpickler):
+	"""Unpickle checkpoint metadata while skipping tensor storage payloads."""
+
+	def persistent_load(self, _pid: object) -> _SkippedCheckpointStorage:
+		return _SkippedCheckpointStorage()
+
+	def find_class(self, module: str, name: str) -> object:
+		if module == 'torch._utils' and name in {
+			'_rebuild_parameter',
+			'_rebuild_parameter_with_state',
+			'_rebuild_tensor',
+			'_rebuild_tensor_v2',
+			'_rebuild_tensor_v3',
+		}:
+			return _skip_checkpoint_tensor
+		return super().find_class(module, name)
 
 
 def create_random_mae_checkpoint_from_config(
@@ -60,8 +96,7 @@ def create_random_mae_checkpoint(
 		'reference_model_tag',
 	)
 
-	reference_payload = load_checkpoint(reference_path, map_location='cpu')
-	reference_config = _checkpoint_config(reference_payload)
+	reference_config = _load_checkpoint_config_without_weights(reference_path)
 	model = _build_model(reference_config, seed=resolved_seed)
 	metadata = {
 		'random_encoder_baseline': True,
@@ -184,6 +219,24 @@ def _checkpoint_config(payload: Mapping[str, object]) -> Mapping[str, object]:
 		msg = 'reference checkpoint is missing a resolved config'
 		raise TypeError(msg)
 	return cast('Mapping[str, object]', value)
+
+
+def _load_checkpoint_config_without_weights(path: Path) -> Mapping[str, object]:
+	"""Read the resolved config from a torch checkpoint without tensor storages."""
+	with zipfile.ZipFile(path) as archive:
+		data_names = [
+			name for name in archive.namelist() if name.endswith('/data.pkl')
+		]
+		if len(data_names) != 1:
+			msg = f'reference checkpoint has invalid torch archive metadata: {path}'
+			raise ValueError(msg)
+		payload = _ConfigOnlyCheckpointUnpickler(
+			io.BytesIO(archive.read(data_names[0])),
+		).load()
+	if not isinstance(payload, Mapping):
+		msg = 'reference checkpoint payload must be a mapping'
+		raise TypeError(msg)
+	return _checkpoint_config(payload)
 
 
 def _first_mapping(

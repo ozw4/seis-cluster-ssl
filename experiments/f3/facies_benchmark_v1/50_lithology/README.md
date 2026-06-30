@@ -11,9 +11,9 @@ Source-of-truth inputs:
   and the converted label volume
 - Artifact root: `/workspace/artifacts/seis_ssl_cluster`
 - Frozen pretraining checkpoint:
-  `/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt`
+  `/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_best.pt`
 
-The configs intentionally require `mae_latest.pt`; if it is absent, stop and
+The configs intentionally require `mae_best.pt`; if it is absent, stop and
 choose an explicit checkpoint instead of falling back silently.
 
 PNG labels are used for train/validation slice selection and visual QC only.
