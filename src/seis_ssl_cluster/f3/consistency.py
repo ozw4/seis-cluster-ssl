@@ -46,6 +46,10 @@ CONSISTENCY_CSV_FIELDNAMES = (
 	'matched_pixel_count',
 	'mismatch_pixel_count',
 	'mismatch_rate',
+	'border_mismatch_pixel_count',
+	'interior_mismatch_pixel_count',
+	'effective_mismatch_rate',
+	'border_only_mismatch',
 	'unknown_png_pixel_count',
 	'unexpected_segy_label_values',
 	'exceeds_threshold',
@@ -152,6 +156,10 @@ class F3LabelConsistencyRecord:
 	matched_pixel_count: int
 	mismatch_pixel_count: int
 	mismatch_rate: float | None
+	border_mismatch_pixel_count: int
+	interior_mismatch_pixel_count: int
+	effective_mismatch_rate: float | None
+	border_only_mismatch: bool
 	unknown_png_pixel_count: int
 	unexpected_segy_label_values: tuple[int | float | str, ...]
 	exceeds_threshold: bool
@@ -192,6 +200,10 @@ class F3LabelConsistencyRecord:
 			'matched_pixel_count': self.matched_pixel_count,
 			'mismatch_pixel_count': self.mismatch_pixel_count,
 			'mismatch_rate': self.mismatch_rate,
+			'border_mismatch_pixel_count': self.border_mismatch_pixel_count,
+			'interior_mismatch_pixel_count': self.interior_mismatch_pixel_count,
+			'effective_mismatch_rate': self.effective_mismatch_rate,
+			'border_only_mismatch': self.border_only_mismatch,
 			'unknown_png_pixel_count': self.unknown_png_pixel_count,
 			'unexpected_segy_label_values': list(
 				self.unexpected_segy_label_values,
@@ -213,6 +225,14 @@ class F3LabelConsistencyRecord:
 			'matched_pixel_count': self.matched_pixel_count,
 			'mismatch_pixel_count': self.mismatch_pixel_count,
 			'mismatch_rate': '' if self.mismatch_rate is None else self.mismatch_rate,
+			'border_mismatch_pixel_count': self.border_mismatch_pixel_count,
+			'interior_mismatch_pixel_count': self.interior_mismatch_pixel_count,
+			'effective_mismatch_rate': (
+				''
+				if self.effective_mismatch_rate is None
+				else self.effective_mismatch_rate
+			),
+			'border_only_mismatch': self.border_only_mismatch,
 			'unknown_png_pixel_count': self.unknown_png_pixel_count,
 			'unexpected_segy_label_values': json.dumps(
 				list(self.unexpected_segy_label_values),
@@ -232,6 +252,7 @@ class F3LabelConsistencyReport:
 	label_cube: NDArray[np.generic]
 	label_geometry: F3SegyGeometry
 	max_mismatch_rate: float
+	ignore_border_samples_z: int
 	records: tuple[F3LabelConsistencyRecord, ...]
 	warnings: tuple[str, ...]
 
@@ -250,6 +271,17 @@ class F3LabelConsistencyReport:
 			record.mismatch_rate
 			for record in self.records
 			if record.mismatch_rate is not None
+		]
+		if not rates:
+			return None
+		return float(max(rates))
+
+	def max_observed_effective_mismatch_rate(self) -> float | None:
+		"""Return the largest non-null threshold mismatch rate in the report."""
+		rates = [
+			record.effective_mismatch_rate
+			for record in self.records
+			if record.effective_mismatch_rate is not None
 		]
 		if not rates:
 			return None
@@ -320,15 +352,18 @@ def check_f3_label_consistency(
 	png_labels: F3PngLabelInspection,
 	*,
 	max_mismatch_rate: float = 0.001,
+	ignore_border_samples_z: int = 0,
 ) -> F3LabelConsistencyReport:
 	"""Compare every F3 teacher PNG label with the dense SEGY label volume."""
 	threshold = _validate_mismatch_rate_threshold(max_mismatch_rate)
+	border_samples = _validate_ignore_border_samples_z(ignore_border_samples_z)
 	_validate_class_info_matches(segy.classes, png_labels.classes)
 	records = tuple(
 		_compare_png_label_file(
 			segy,
 			file_result,
 			max_mismatch_rate=threshold,
+			ignore_border_samples_z=border_samples,
 		)
 		for file_result in _sorted_png_label_files(png_labels.files)
 	)
@@ -340,6 +375,7 @@ def check_f3_label_consistency(
 		label_cube=segy.label.cube,
 		label_geometry=segy.label.geometry,
 		max_mismatch_rate=threshold,
+		ignore_border_samples_z=border_samples,
 		records=records,
 		warnings=(*png_labels.warnings, *_report_warnings(records)),
 	)
@@ -355,10 +391,14 @@ def label_consistency_report_to_dict(
 		'source_segy_label': str(report.source_segy_label),
 		'axis_mapping': axis_assumption_metadata(),
 		'max_mismatch_rate': report.max_mismatch_rate,
+		'ignore_border_samples_z': report.ignore_border_samples_z,
 		'passed': report.passed,
 		'png_label_file_count': len(report.records),
 		'total_mismatch_pixel_count': report.total_mismatch_pixel_count(),
 		'max_observed_mismatch_rate': report.max_observed_mismatch_rate(),
+		'max_observed_effective_mismatch_rate': (
+			report.max_observed_effective_mismatch_rate()
+		),
 		'warnings': list(report.warnings),
 		'files': [record.to_dict() for record in report.records],
 	}
@@ -379,17 +419,24 @@ def render_label_consistency_markdown(
 		f'- SEGY label volume: `{report.source_segy_label}`',
 		f'- PNG labels: {len(report.records)}',
 		f'- max mismatch threshold: {report.max_mismatch_rate}',
+		f'- ignored z-border samples: {report.ignore_border_samples_z}',
 		f'- max observed mismatch rate: {max_rate}',
+		(
+			'- max observed effective mismatch rate: '
+			f'{report.max_observed_effective_mismatch_rate()}'
+		),
 		f'- total mismatch pixels: {report.total_mismatch_pixel_count()}',
 		'',
 		'## Per-slice results',
 		'',
 		(
 			'| split | slice | orientation | png_shape | segy_shape | '
-			'matched | mismatched | mismatch_rate | unknown_png | '
-			'unexpected_segy | threshold |'
+			'matched | mismatched | raw_mismatch_rate | effective_mismatch_rate | '
+			'border_only_mismatch | border_mismatch_pixel_count | '
+			'interior_mismatch_pixel_count | '
+			'unknown_png | unexpected_segy | threshold |'
 		),
-		'|---|---|---|---|---|---:|---:|---:|---:|---|---|',
+		'|---|---|---|---|---|---:|---:|---:|---:|---|---:|---:|---:|---|---|',
 	]
 	lines.extend(_render_record_row(record) for record in report.records)
 	lines.extend(['', '## Warnings', ''])
@@ -439,6 +486,7 @@ def _compare_png_label_file(
 	file_result: PngLabelFileInspection,
 	*,
 	max_mismatch_rate: float,
+	ignore_border_samples_z: int,
 ) -> F3LabelConsistencyRecord:
 	if file_result.slice_type is None or file_result.slice_index is None:
 		msg = (
@@ -480,6 +528,10 @@ def _compare_png_label_file(
 			matched_pixel_count=0,
 			mismatch_pixel_count=0,
 			mismatch_rate=None,
+			border_mismatch_pixel_count=0,
+			interior_mismatch_pixel_count=0,
+			effective_mismatch_rate=None,
+			border_only_mismatch=False,
 			unknown_png_pixel_count=png_map.unknown_pixel_count,
 			unexpected_segy_label_values=normalized_segy.unexpected_values,
 			exceeds_threshold=True,
@@ -489,6 +541,18 @@ def _compare_png_label_file(
 	mismatch_count = int(np.count_nonzero(mismatch_mask))
 	total_count = int(mismatch_mask.size)
 	mismatch_rate = _fraction(mismatch_count, total_count)
+	interior_mask = _z_interior_mask(
+		mismatch_mask.shape,
+		ignore_border_samples_z=ignore_border_samples_z,
+	)
+	interior_mismatch_count = int(np.count_nonzero(mismatch_mask & interior_mask))
+	interior_total_count = int(np.count_nonzero(interior_mask))
+	border_mismatch_count = mismatch_count - interior_mismatch_count
+	effective_mismatch_rate = _fraction(
+		interior_mismatch_count,
+		interior_total_count,
+	)
+	border_only_mismatch = mismatch_count > 0 and interior_mismatch_count == 0
 	return F3LabelConsistencyRecord(
 		relative_path=file_result.relative_path,
 		absolute_path=file_result.absolute_path,
@@ -502,9 +566,13 @@ def _compare_png_label_file(
 		matched_pixel_count=total_count - mismatch_count,
 		mismatch_pixel_count=mismatch_count,
 		mismatch_rate=mismatch_rate,
+		border_mismatch_pixel_count=border_mismatch_count,
+		interior_mismatch_pixel_count=interior_mismatch_count,
+		effective_mismatch_rate=effective_mismatch_rate,
+		border_only_mismatch=border_only_mismatch,
 		unknown_png_pixel_count=png_map.unknown_pixel_count,
 		unexpected_segy_label_values=normalized_segy.unexpected_values,
-		exceeds_threshold=mismatch_rate > max_mismatch_rate,
+		exceeds_threshold=effective_mismatch_rate > max_mismatch_rate,
 	)
 
 
@@ -823,18 +891,34 @@ def _configure_slice_axes(ax: object, record: F3LabelConsistencyRecord) -> None:
 
 def _record_title(record: F3LabelConsistencyRecord) -> str:
 	rate = 'n/a' if record.mismatch_rate is None else f'{record.mismatch_rate:.6g}'
-	return f'{record.split} {record.slice_type} {record.slice_index} mismatch={rate}'
+	effective = (
+		'n/a'
+		if record.effective_mismatch_rate is None
+		else f'{record.effective_mismatch_rate:.6g}'
+	)
+	return (
+		f'{record.split} {record.slice_type} {record.slice_index} '
+		f'mismatch={rate} effective={effective}'
+	)
 
 
 def _render_record_row(record: F3LabelConsistencyRecord) -> str:
 	rate = '' if record.mismatch_rate is None else f'{record.mismatch_rate:.6g}'
+	effective = (
+		''
+		if record.effective_mismatch_rate is None
+		else f'{record.effective_mismatch_rate:.6g}'
+	)
+	border_only = 'yes' if record.border_only_mismatch else 'no'
 	unexpected = json.dumps(list(record.unexpected_segy_label_values))
 	threshold = 'FAIL' if record.exceeds_threshold else 'PASS'
 	return (
 		f'| {record.split} | {record.slice_type} {record.slice_index} | '
 		f'{record.orientation} | {list(record.png_label_shape)} | '
 		f'{list(record.segy_slice_shape)} | {record.matched_pixel_count} | '
-		f'{record.mismatch_pixel_count} | {rate} | '
+		f'{record.mismatch_pixel_count} | {rate} | {effective} | '
+		f'{border_only} | {record.border_mismatch_pixel_count} | '
+		f'{record.interior_mismatch_pixel_count} | '
 		f'{record.unknown_png_pixel_count} | `{unexpected}` | {threshold} |'
 	)
 
@@ -886,7 +970,7 @@ def _shape_2d(values: NDArray[np.generic]) -> tuple[int, int]:
 
 
 def _normalize_2d_shape(
-	shape: tuple[int, int],
+	shape: tuple[int, ...],
 	*,
 	label: str,
 ) -> tuple[int, int]:
@@ -894,6 +978,27 @@ def _normalize_2d_shape(
 		msg = f'{label} must contain two axes; got {shape!r}'
 		raise ValueError(msg)
 	return int(shape[0]), int(shape[1])
+
+
+def _z_interior_mask(
+	shape: tuple[int, ...],
+	*,
+	ignore_border_samples_z: int,
+) -> NDArray[np.bool_]:
+	rows, columns = _normalize_2d_shape(shape, label='mismatch_mask.shape')
+	mask = np.ones((rows, columns), dtype=np.bool_)
+	border = ignore_border_samples_z
+	if border <= 0:
+		return mask
+	if border * 2 >= columns:
+		msg = (
+			'ignore_border_samples_z is too large for z/sample axis; '
+			f'border={border}, z_size={columns}'
+		)
+		raise ValueError(msg)
+	mask[:, :border] = False
+	mask[:, -border:] = False
+	return mask
 
 
 def _fraction(numerator: int, denominator: int) -> float:
@@ -911,6 +1016,13 @@ def _validate_mismatch_rate_threshold(value: float) -> float:
 		msg = f'max_mismatch_rate must be in [0, 1]; got {value!r}'
 		raise ValueError(msg)
 	return threshold
+
+
+def _validate_ignore_border_samples_z(value: int) -> int:
+	if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+		msg = f'ignore_border_samples_z must be a nonnegative integer; got {value!r}'
+		raise ValueError(msg)
+	return value
 
 
 def _validate_class_info_matches(
@@ -933,6 +1045,11 @@ def _report_warnings(
 		warnings.append(
 			'one or more PNG labels required non-default orientation; '
 			'see per-slice JSON metadata',
+		)
+	if any(record.border_only_mismatch for record in records):
+		warnings.append(
+			'one or more PNG/SEGY label mismatches are confined to ignored '
+			'z-border samples',
 		)
 	if any(record.exceeds_threshold for record in records):
 		warnings.append('one or more slices exceed max_mismatch_rate')

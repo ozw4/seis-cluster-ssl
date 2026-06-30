@@ -388,13 +388,21 @@ def _consistency_summary(
 	components: Mapping[str, Mapping[str, object] | None],
 ) -> dict[str, object]:
 	payload = _mapping(components.get('label_consistency'))
+	files = _sequence_of_mappings(payload.get('files'))
 	return {
 		'available': bool(payload),
 		'passed': payload.get('passed'),
 		'png_label_file_count': payload.get('png_label_file_count'),
 		'max_mismatch_rate': payload.get('max_mismatch_rate'),
+		'ignore_border_samples_z': payload.get('ignore_border_samples_z'),
 		'max_observed_mismatch_rate': payload.get('max_observed_mismatch_rate'),
+		'max_observed_effective_mismatch_rate': payload.get(
+			'max_observed_effective_mismatch_rate',
+		),
 		'total_mismatch_pixel_count': payload.get('total_mismatch_pixel_count'),
+		'border_only_mismatch_count': sum(
+			1 for item in files if item.get('border_only_mismatch') is True
+		),
 		'warnings': _string_list(payload.get('warnings')),
 	}
 
@@ -449,7 +457,7 @@ def _tokenization_summary(
 	}
 
 
-def _readiness_summary(  # noqa: C901, PLR0915
+def _readiness_summary(  # noqa: C901, PLR0912, PLR0915
 	component_status: Sequence[Mapping[str, object]],
 	*,
 	amplitude: Mapping[str, object],
@@ -477,6 +485,14 @@ def _readiness_summary(  # noqa: C901, PLR0915
 		status = READINESS_STOP
 		reasons.append('PNG vs SEGY label consistencyがFAIL。')
 		required_fixes.append('PNG/SEGY label対応の不一致を修正する。')
+	else:
+		border_only_count = _int_or_none(
+			consistency.get('border_only_mismatch_count'),
+		)
+		if border_only_count and border_only_count > 0:
+			status = _max_readiness(status, READINESS_CAUTION)
+			reasons.append('raw mismatch is confined to ignored z-border samples.')
+			required_fixes.append('z-border sample差分の影響範囲を確認する。')
 	if tokenization.get('available') is not True:
 		status = _max_readiness(status, READINESS_CAUTION)
 		reasons.append('tokenization previewが未生成。')
@@ -725,8 +741,18 @@ def _render_consistency(consistency: Mapping[str, object]) -> list[str]:
 		f'{_display(consistency.get("max_mismatch_rate"))}',
 		'- max observed mismatch rate: '
 		f'{_display(consistency.get("max_observed_mismatch_rate"))}',
+		'- max observed effective mismatch rate: '
+		f'{_display(consistency.get("max_observed_effective_mismatch_rate"))}',
+		'- ignored z-border samples: '
+		f'{_display(consistency.get("ignore_border_samples_z"))}',
 		'- total mismatch pixels: '
 		f'{_display(consistency.get("total_mismatch_pixel_count"))}',
+		'- border-only mismatch slices: '
+		f'{_display(consistency.get("border_only_mismatch_count"))}',
+		(
+			'- note: raw mismatchはz-border sampleを含み、'
+			'readiness判定はeffective mismatch rateを使う。'
+		),
 	]
 	warnings = _string_list(consistency.get('warnings'))
 	lines.append('- warnings: ' + ('なし' if not warnings else '; '.join(warnings)))

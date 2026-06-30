@@ -70,6 +70,12 @@ def test_f3_inspection_report_readiness_uses_consistency_and_tokenization(
 
 	_write_json(
 		config.label_consistency_json,
+		_label_consistency_payload(passed=True, border_only_mismatch=True),
+	)
+	caution = build_f3_inspection_report(config).payload
+
+	_write_json(
+		config.label_consistency_json,
 		_label_consistency_payload(passed=False),
 	)
 	stop = build_f3_inspection_report(config).payload
@@ -99,6 +105,11 @@ def test_f3_inspection_report_readiness_uses_consistency_and_tokenization(
 	stop_from_zero_total_tokens = build_f3_inspection_report(config).payload
 
 	assert proceed['downstream_readiness']['status'] == READINESS_PROCEED
+	assert caution['downstream_readiness']['status'] == READINESS_CAUTION
+	assert any(
+		'ignored z-border samples' in reason
+		for reason in caution['downstream_readiness']['reasons']
+	)
 	assert stop['downstream_readiness']['status'] == READINESS_STOP
 	assert stop_from_tokens['downstream_readiness']['status'] == READINESS_STOP
 	assert (
@@ -395,14 +406,32 @@ def _png_label_summary_payload() -> dict[str, object]:
 	}
 
 
-def _label_consistency_payload(*, passed: bool) -> dict[str, object]:
+def _label_consistency_payload(
+	*,
+	passed: bool,
+	border_only_mismatch: bool = False,
+) -> dict[str, object]:
+	files = []
+	if border_only_mismatch:
+		files.append(
+			{
+				'border_only_mismatch': True,
+				'mismatch_rate': 0.2,
+				'effective_mismatch_rate': 0.0,
+			},
+		)
 	return {
 		'passed': passed,
 		'png_label_file_count': 2,
 		'max_mismatch_rate': 0.001,
+		'ignore_border_samples_z': 1 if border_only_mismatch else 0,
 		'max_observed_mismatch_rate': 0.0 if passed else 0.2,
+		'max_observed_effective_mismatch_rate': (
+			0.0 if passed else 0.2
+		),
 		'total_mismatch_pixel_count': 0 if passed else 8,
 		'warnings': [],
+		'files': files,
 	}
 
 
