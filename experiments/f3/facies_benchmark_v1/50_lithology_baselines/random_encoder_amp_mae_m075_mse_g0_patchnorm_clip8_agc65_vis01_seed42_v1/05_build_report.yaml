@@ -32,6 +32,6 @@ reports:
     description: same MAE architecture with random seed 42 and no pretraining
 comparison:
   search_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1
-  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison_v1
-  output_csv: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison_v1/comparison_table.csv
-  output_markdown: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison_v1/comparison_report.md
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison
+  output_csv: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_table.csv
+  output_markdown: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_report.md

@@ -24,6 +24,7 @@ REFERENCE_CHECKPOINT = (
 def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 	expected_files = (
 		Path('README.md'),
+		Path('05_build_baseline_comparison_report.yaml'),
 		Path('z_only_v1/01_build_baseline_token_dataset.yaml'),
 		Path('z_only_v1/02_train_linear_probe.yaml'),
 		Path('z_only_v1/03_build_report.yaml'),
@@ -47,8 +48,19 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 		payload = yaml.safe_load(yaml_path.read_text(encoding='utf-8'))
 		assert isinstance(payload, dict), yaml_path
 		assert 'stage' not in payload
-		if yaml_path.name != '02_extract_embeddings.yaml':
+		if yaml_path.name not in {
+			'02_extract_embeddings.yaml',
+			'05_build_baseline_comparison_report.yaml',
+		}:
 			assert _feature_sources(payload), yaml_path
+
+		if yaml_path.name == '05_build_baseline_comparison_report.yaml':
+			comparison = payload['comparison']
+			assert comparison['search_root'].endswith(
+				'/lithology/f3/facies_benchmark_v1',
+			)
+			assert '/reports/baseline_comparison/' in comparison['output_csv']
+			assert comparison['figure_dpi'] == 300
 
 		if yaml_path.name.endswith('train_linear_probe.yaml'):
 			feature_source = payload['token_dataset']['feature_source']
@@ -74,7 +86,7 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 			assert comparison['search_root'].endswith(
 				'/lithology/f3/facies_benchmark_v1',
 			)
-			assert '/reports/baseline_comparison_v1/' in comparison['output_csv']
+			assert '/reports/baseline_comparison/' in comparison['output_csv']
 
 		if yaml_path.name == '01_create_random_checkpoint.yaml':
 			assert payload['reference_model']['checkpoint'] == REFERENCE_CHECKPOINT

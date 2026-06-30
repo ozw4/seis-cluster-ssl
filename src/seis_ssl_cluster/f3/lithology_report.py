@@ -17,12 +17,35 @@ OVERALL_METRIC_COLUMNS = (
 	'weighted_f1',
 	'mean_iou',
 )
-COMPARISON_ID_COLUMNS = ('MODEL_TAG', 'EMBED_SPEC', 'LABEL_SET', 'PROBE_SPEC')
-COMPARISON_FEATURE_SOURCE_COLUMNS = (
+COMPARISON_ID_COLUMNS = (
+	'feature_kind',
+	'MODEL_TAG',
+	'BASELINE_TAG',
+	'EMBED_SPEC',
+	'LABEL_SET',
+	'PROBE_SPEC',
 	'FEATURE_SOURCE_KIND',
 	'FEATURE_SOURCE_REFERENCE_MODEL_TAG',
 	'FEATURE_SOURCE_EMBED_SPEC',
 	'FEATURE_SOURCE_DESCRIPTION',
+)
+COMPARISON_FIGURE_NAMES = (
+	'macro_f1_comparison',
+	'mean_iou_comparison',
+	'per_class_f1_comparison',
+)
+_COMPARISON_FEATURE_KIND_ORDER = {
+	'pretrained_encoder': 0,
+	'z_only': 1,
+	'amplitude_stats': 2,
+	'random_encoder': 3,
+}
+_BASELINE_FEATURE_KINDS = frozenset(
+	{
+		'z_only',
+		'amplitude_stats',
+		'random_encoder',
+	},
 )
 _DEFAULT_PROBE_FIGURES = (
 	('confusion_matrix', Path('figures/confusion_matrix.png')),
@@ -38,6 +61,7 @@ class F3LithologyComparisonReportConfig:
 	output_csv: Path
 	output_markdown: Path
 	metrics_paths: tuple[Path, ...] = ()
+	figure_dpi: int = 300
 
 
 @dataclass(frozen=True)
@@ -46,6 +70,7 @@ class F3LithologyComparisonReportResult:
 
 	comparison_csv: Path
 	comparison_markdown: Path
+	figure_paths: tuple[Path, ...]
 	rows: tuple[dict[str, object], ...]
 	warnings: tuple[str, ...]
 
@@ -122,6 +147,7 @@ def build_f3_lithology_comparison_report(
 		)
 		if metrics is None:
 			continue
+		warnings.extend(_comparison_metric_warnings(metrics_path, metrics))
 		probe_config = _read_optional_json(metrics_path.with_name(
 			'probe_config_resolved.json',
 		))
@@ -134,6 +160,8 @@ def build_f3_lithology_comparison_report(
 	rows = sorted(
 		rows,
 		key=lambda row: (
+			_COMPARISON_FEATURE_KIND_ORDER.get(str(row.get('feature_kind')), 99),
+			str(row.get('BASELINE_TAG', '')),
 			str(row.get('MODEL_TAG', '')),
 			str(row.get('EMBED_SPEC', '')),
 			str(row.get('LABEL_SET', '')),
@@ -141,14 +169,23 @@ def build_f3_lithology_comparison_report(
 		),
 	)
 	fieldnames = _comparison_fieldnames(rows)
+	figure_paths = _comparison_figure_paths(config.output_markdown)
+	warnings.extend(
+		_write_comparison_figures(
+			rows,
+			figure_paths,
+			dpi=max(config.figure_dpi, 300),
+		),
+	)
 	_write_comparison_csv(config.output_csv, rows, fieldnames)
 	_write_text(
 		config.output_markdown,
-		_render_comparison_markdown(rows, fieldnames, warnings),
+		_render_comparison_markdown(rows, fieldnames, figure_paths, warnings),
 	)
 	return F3LithologyComparisonReportResult(
 		comparison_csv=config.output_csv,
 		comparison_markdown=config.output_markdown,
+		figure_paths=tuple(figure_paths.values()),
 		rows=tuple(rows),
 		warnings=tuple(warnings),
 	)
@@ -307,6 +344,7 @@ def _comparison_payload(
 	return {
 		'comparison_table_csv': str(comparison.comparison_csv),
 		'comparison_report_markdown': str(comparison.comparison_markdown),
+		'figures': [str(path) for path in comparison.figure_paths],
 		'row_count': len(comparison.rows),
 		'warnings': list(comparison.warnings),
 	}
@@ -584,22 +622,48 @@ def _comparison_row(
 	probe = _mapping(config.get('probe'))
 	path_parts = _run_parts(metrics_path)
 	feature_source = _feature_source_summary(metrics, config, token_metadata)
+	model_tag = _first_non_empty(model.get('tag'), path_parts.get('MODEL_TAG'))
+	feature_kind = _feature_kind(
+		feature_source=feature_source,
+		model_tag=model_tag,
+		path_parts=path_parts,
+	)
+	baseline_tag = _baseline_tag(
+		feature_kind=feature_kind,
+		model_tag=model_tag,
+		path_parts=path_parts,
+		feature_source=feature_source,
+	)
+	embed_spec = _first_non_empty(
+		_embed_spec_from_config(config),
+		path_parts.get('EMBED_SPEC'),
+	)
 	row: dict[str, object] = {
-		'MODEL_TAG': _first_non_empty(model.get('tag'), path_parts.get('MODEL_TAG')),
-		'EMBED_SPEC': _first_non_empty(
-			_embed_spec_from_config(config),
-			path_parts.get('EMBED_SPEC'),
-		),
+		'feature_kind': feature_kind,
+		'MODEL_TAG': '' if feature_kind in _BASELINE_FEATURE_KINDS else model_tag,
+		'BASELINE_TAG': baseline_tag or '',
+		'EMBED_SPEC': embed_spec,
 		'LABEL_SET': _first_non_empty(labels.get('set'), path_parts.get('LABEL_SET')),
 		'PROBE_SPEC': _first_non_empty(probe.get('spec'), path_parts.get(
 			'PROBE_SPEC',
 		)),
-		'FEATURE_SOURCE_KIND': feature_source.get('kind'),
-		'FEATURE_SOURCE_REFERENCE_MODEL_TAG': feature_source.get(
-			'reference_model_tag',
+		'FEATURE_SOURCE_KIND': _first_non_empty(
+			feature_source.get('kind'),
+			feature_kind,
 		),
-		'FEATURE_SOURCE_EMBED_SPEC': feature_source.get('embedding_spec'),
-		'FEATURE_SOURCE_DESCRIPTION': feature_source.get('description'),
+		'FEATURE_SOURCE_REFERENCE_MODEL_TAG': _first_non_empty(
+			feature_source.get('reference_model_tag'),
+			'',
+		),
+		'FEATURE_SOURCE_EMBED_SPEC': _first_non_empty(
+			feature_source.get('embedding_spec'),
+			embed_spec,
+		),
+		'FEATURE_SOURCE_DESCRIPTION': _first_non_empty(
+			feature_source.get('description'),
+			'',
+		),
+		'_class_names': dict(_mapping(metrics.get('class_names'))),
 	}
 	for metric in OVERALL_METRIC_COLUMNS:
 		row[metric] = _float_or_none(metrics.get(metric))
@@ -620,7 +684,6 @@ def _comparison_fieldnames(rows: Sequence[Mapping[str, object]]) -> tuple[str, .
 	)
 	return (
 		*COMPARISON_ID_COLUMNS,
-		*COMPARISON_FEATURE_SOURCE_COLUMNS,
 		*OVERALL_METRIC_COLUMNS,
 		*class_columns,
 	)
@@ -638,6 +701,25 @@ def _token_metadata_path_for_metrics(
 		/ 'token_dataset'
 		/ 'token_dataset_metadata.json'
 	)
+
+
+def _comparison_metric_warnings(
+	metrics_path: Path,
+	metrics: Mapping[str, object],
+) -> list[str]:
+	missing = [
+		key
+		for key in (*OVERALL_METRIC_COLUMNS, 'per_class_f1')
+		if key not in metrics
+	]
+	if not missing:
+		return []
+	return [
+		(
+			'comparison metrics missing key(s): '
+			f'{", ".join(missing)} ({metrics_path})'
+		),
+	]
 
 
 def _feature_source_summary(
@@ -658,6 +740,216 @@ def _feature_source_summary(
 	return {}
 
 
+def _feature_kind(
+	*,
+	feature_source: Mapping[str, object],
+	model_tag: object,
+	path_parts: Mapping[str, str],
+) -> str:
+	kind = _string_or_none(feature_source.get('kind'))
+	if kind is not None:
+		return kind
+	baseline_tag = path_parts.get('BASELINE_TAG')
+	model = _string_or_none(model_tag)
+	for candidate in (baseline_tag, model):
+		if candidate is None:
+			continue
+		if candidate.startswith('z_only'):
+			return 'z_only'
+		if candidate.startswith('amplitude_stats'):
+			return 'amplitude_stats'
+		if candidate.startswith('random_encoder'):
+			return 'random_encoder'
+	return 'pretrained_encoder'
+
+
+def _baseline_tag(
+	*,
+	feature_kind: str,
+	model_tag: object,
+	path_parts: Mapping[str, str],
+	feature_source: Mapping[str, object],
+) -> object:
+	if feature_kind not in _BASELINE_FEATURE_KINDS:
+		return None
+	return _first_non_empty(
+		feature_source.get('baseline_tag'),
+		path_parts.get('BASELINE_TAG'),
+		model_tag,
+	)
+
+
+def _comparison_figure_paths(output_markdown: Path) -> dict[str, Path]:
+	figures_dir = output_markdown.parent / 'figures'
+	return {
+		name: figures_dir / f'{name}.png'
+		for name in COMPARISON_FIGURE_NAMES
+	}
+
+
+def _write_comparison_figures(
+	rows: Sequence[Mapping[str, object]],
+	figure_paths: Mapping[str, Path],
+	*,
+	dpi: int,
+) -> list[str]:
+	try:
+		plt = __import__('matplotlib.pyplot', fromlist=['pyplot'])
+	except ImportError as exc:
+		return [f'comparison figure generation requires matplotlib: {exc}']
+	for path in figure_paths.values():
+		path.parent.mkdir(parents=True, exist_ok=True)
+	_save_metric_comparison_bar(
+		rows,
+		metric='macro_f1',
+		title='Macro F1 comparison',
+		ylabel='Macro F1',
+		output_png=figure_paths['macro_f1_comparison'],
+		plt=plt,
+		dpi=dpi,
+	)
+	_save_metric_comparison_bar(
+		rows,
+		metric='mean_iou',
+		title='Mean IoU comparison',
+		ylabel='Mean IoU',
+		output_png=figure_paths['mean_iou_comparison'],
+		plt=plt,
+		dpi=dpi,
+	)
+	_save_per_class_f1_comparison(
+		rows,
+		output_png=figure_paths['per_class_f1_comparison'],
+		plt=plt,
+		dpi=dpi,
+	)
+	return []
+
+
+def _save_metric_comparison_bar(  # noqa: PLR0913
+	rows: Sequence[Mapping[str, object]],
+	*,
+	metric: str,
+	title: str,
+	ylabel: str,
+	output_png: Path,
+	plt: object,
+	dpi: int,
+) -> None:
+	plot_rows = [row for row in rows if _float_or_none(row.get(metric)) is not None]
+	labels = [_comparison_row_label(row) for row in plot_rows]
+	values = [_float_or_none(row.get(metric)) or 0.0 for row in plot_rows]
+	colors = [_comparison_row_color(row) for row in plot_rows]
+	fig_width = max(6.0, 1.1 * max(len(plot_rows), 1))
+	fig, axis = plt.subplots(figsize=(fig_width, 4.2), facecolor='white')
+	if plot_rows:
+		positions = list(range(len(plot_rows)))
+		axis.bar(positions, values, color=colors, edgecolor='black', linewidth=0.6)
+		axis.set_xticks(positions, labels=labels, rotation=35, ha='right')
+	else:
+		axis.text(0.5, 0.5, 'No metrics', ha='center', va='center')
+		axis.set_xticks([])
+	axis.set_title(title)
+	axis.set_ylabel(ylabel)
+	axis.set_ylim(0.0, 1.0)
+	axis.grid(axis='y', color='#D9D9D9', linewidth=0.8)
+	axis.set_axisbelow(True)
+	fig.tight_layout()
+	fig.savefig(output_png, dpi=dpi, facecolor='white')
+	plt.close(fig)
+
+
+def _save_per_class_f1_comparison(
+	rows: Sequence[Mapping[str, object]],
+	*,
+	output_png: Path,
+	plt: object,
+	dpi: int,
+) -> None:
+	class_columns = [
+		key
+		for key in _comparison_fieldnames(rows)
+		if key.startswith('class_') and key.endswith('_f1')
+	]
+	plot_rows = [
+		row
+		for row in rows
+		if any(_float_or_none(row.get(column)) is not None for column in class_columns)
+	]
+	fig_width = max(8.0, 1.35 * max(len(class_columns), 1))
+	fig, axis = plt.subplots(figsize=(fig_width, 4.8), facecolor='white')
+	if class_columns and plot_rows:
+		group_width = 0.82
+		bar_width = group_width / len(plot_rows)
+		for row_index, row in enumerate(plot_rows):
+			positions = [
+				class_index - (group_width / 2.0) + (bar_width / 2.0)
+				+ row_index * bar_width
+				for class_index in range(len(class_columns))
+			]
+			values = [
+				_float_or_none(row.get(column)) or 0.0
+				for column in class_columns
+			]
+			axis.bar(
+				positions,
+				values,
+				width=bar_width,
+				label=_comparison_row_label(row),
+				color=_comparison_row_color(row),
+				edgecolor='black',
+				linewidth=0.45,
+			)
+		axis.set_xticks(
+			list(range(len(class_columns))),
+			labels=[_class_f1_column_label(column, rows) for column in class_columns],
+			rotation=0,
+		)
+		axis.legend(frameon=False, fontsize=8)
+	else:
+		axis.text(0.5, 0.5, 'No per-class F1 metrics', ha='center', va='center')
+		axis.set_xticks([])
+	axis.set_title('Per-class F1 comparison')
+	axis.set_ylabel('F1')
+	axis.set_ylim(0.0, 1.0)
+	axis.grid(axis='y', color='#D9D9D9', linewidth=0.8)
+	axis.set_axisbelow(True)
+	fig.tight_layout()
+	fig.savefig(output_png, dpi=dpi, facecolor='white')
+	plt.close(fig)
+
+
+def _comparison_row_label(row: Mapping[str, object]) -> str:
+	feature_kind = str(row.get('feature_kind') or '')
+	if feature_kind == 'pretrained_encoder':
+		return str(_first_non_empty(row.get('MODEL_TAG'), 'pretrained_encoder'))
+	return str(_first_non_empty(row.get('BASELINE_TAG'), feature_kind))
+
+
+def _comparison_row_color(row: Mapping[str, object]) -> str:
+	return {
+		'pretrained_encoder': '#2563EB',
+		'z_only': '#6B7280',
+		'amplitude_stats': '#D97706',
+		'random_encoder': '#7C3AED',
+	}.get(str(row.get('feature_kind')), '#4B5563')
+
+
+def _class_f1_column_label(
+	column: str,
+	rows: Sequence[Mapping[str, object]],
+) -> str:
+	match = re.fullmatch(r'class_(\d+)_f1', column)
+	if match is None:
+		return column
+	class_id = match.group(1)
+	for row in rows:
+		class_name = _mapping(row.get('_class_names')).get(class_id)
+		if isinstance(class_name, str) and class_name:
+			return f'{class_id}\n{class_name}'
+	return f'class {class_id}'
+
+
 def _write_comparison_csv(
 	path: Path,
 	rows: Sequence[Mapping[str, object]],
@@ -674,12 +966,15 @@ def _write_comparison_csv(
 def _render_comparison_markdown(
 	rows: Sequence[Mapping[str, object]],
 	fieldnames: Sequence[str],
+	figure_paths: Mapping[str, Path],
 	warnings: Sequence[str],
 ) -> str:
 	lines = [
 		'# F3 lithology probe comparison report',
 		'',
 		f'集約run数: {len(rows)}',
+		'',
+		'## Comparison table',
 		'',
 		'| ' + ' | '.join(fieldnames) + ' |',
 		'|' + '|'.join('---' for _ in fieldnames) + '|',
@@ -692,12 +987,179 @@ def _render_comparison_markdown(
 		)
 		for row in rows
 	)
+	lines.extend(['', '## Figures', ''])
+	report_dir = (
+		next(iter(figure_paths.values())).parent.parent
+		if figure_paths
+		else Path()
+	)
+	lines.extend(
+		f'- [{name}]({_relative_path_for_markdown(path, report_dir)})'
+		for name, path in figure_paths.items()
+	)
+	lines.extend(['', '## Interpretation', ''])
+	lines.extend(_comparison_interpretation(rows))
 	lines.extend(['', '## Warnings', ''])
 	if warnings:
 		lines.extend(f'- {warning}' for warning in warnings)
 	else:
 		lines.append('- none')
 	return '\n'.join(lines) + '\n'
+
+
+def _comparison_interpretation(
+	rows: Sequence[Mapping[str, object]],
+) -> list[str]:
+	pretrained = _best_comparison_row(rows, 'pretrained_encoder', metric='macro_f1')
+	z_only = _best_comparison_row(rows, 'z_only', metric='macro_f1')
+	amplitude = _best_comparison_row(rows, 'amplitude_stats', metric='macro_f1')
+	random_encoder = _best_comparison_row(
+		rows,
+		'random_encoder',
+		metric='macro_f1',
+	)
+	return [
+		(
+			'- pretrained encoderがz-onlyを上回るか: '
+			f'{_comparison_delta_sentence(pretrained, z_only)}'
+		),
+		(
+			'- pretrained encoderがamplitude-onlyを上回るか: '
+			f'{_comparison_delta_sentence(pretrained, amplitude)}'
+		),
+		(
+			'- pretrained encoderがrandom encoderを上回るか: '
+			f'{_comparison_delta_sentence(pretrained, random_encoder)}'
+		),
+		(
+			'- class 3/5など弱いclassで改善があるか: '
+			f'{_weak_class_delta_sentence(rows, pretrained)}'
+		),
+		(
+			'- F3 faciesが深度だけで説明できる程度: '
+			f'{_depth_only_sentence(pretrained, z_only)}'
+		),
+	]
+
+
+def _best_comparison_row(
+	rows: Sequence[Mapping[str, object]],
+	feature_kind: str,
+	*,
+	metric: str,
+) -> Mapping[str, object] | None:
+	candidates = [
+		row
+		for row in rows
+		if row.get('feature_kind') == feature_kind
+		and _float_or_none(row.get(metric)) is not None
+	]
+	if not candidates:
+		return None
+	return max(candidates, key=lambda row: _float_or_none(row.get(metric)) or 0.0)
+
+
+def _comparison_delta_sentence(
+	pretrained: Mapping[str, object] | None,
+	baseline: Mapping[str, object] | None,
+) -> str:
+	if pretrained is None or baseline is None:
+		return '比較対象のmetricsが不足しているため未確認。'
+	macro_delta = _metric_delta(pretrained, baseline, 'macro_f1')
+	iou_delta = _metric_delta(pretrained, baseline, 'mean_iou')
+	if macro_delta is None:
+		return 'macro F1が不足しているため未確認。'
+	if macro_delta > 0.0:
+		relation = '上回る'
+	elif macro_delta == 0.0:
+		relation = '同等'
+	else:
+		relation = '下回る'
+	iou_text = (
+		'mean IoU差分 未確認'
+		if iou_delta is None
+		else f'mean IoU差分 {iou_delta:+.4f}'
+	)
+	return f'{relation} (macro F1差分 {macro_delta:+.4f}, {iou_text})。'
+
+
+def _weak_class_delta_sentence(
+	rows: Sequence[Mapping[str, object]],
+	pretrained: Mapping[str, object] | None,
+) -> str:
+	if pretrained is None:
+		return 'pretrained encoder metricsが不足しているため未確認。'
+	class_columns = [
+		column
+		for column in _comparison_fieldnames(rows)
+		if column.startswith('class_') and column.endswith('_f1')
+	]
+	priority = [
+		column for column in ('class_3_f1', 'class_5_f1') if column in class_columns
+	]
+	targets = priority or class_columns[:2]
+	if not targets:
+		return 'per-class F1が不足しているため未確認。'
+	parts = []
+	for column in targets:
+		pretrained_value = _float_or_none(pretrained.get(column))
+		baseline_value = _best_baseline_class_f1(rows, column)
+		if pretrained_value is None or baseline_value is None:
+			continue
+		class_label = column.removeprefix('class_').removesuffix('_f1')
+		parts.append(
+			f'class {class_label}: '
+			f'F1差分 {pretrained_value - baseline_value:+.4f}',
+		)
+	return '、'.join(parts) + '。' if parts else '比較可能なclass別F1が不足している。'
+
+
+def _best_baseline_class_f1(
+	rows: Sequence[Mapping[str, object]],
+	column: str,
+) -> float | None:
+	values = [
+		value
+		for row in rows
+		if row.get('feature_kind') in _BASELINE_FEATURE_KINDS
+		for value in (_float_or_none(row.get(column)),)
+		if value is not None
+	]
+	return max(values) if values else None
+
+
+def _depth_only_sentence(
+	pretrained: Mapping[str, object] | None,
+	z_only: Mapping[str, object] | None,
+) -> str:
+	if pretrained is None or z_only is None:
+		return 'z-onlyまたはpretrained encoder metricsが不足しているため未確認。'
+	pretrained_macro = _float_or_none(pretrained.get('macro_f1'))
+	z_macro = _float_or_none(z_only.get('macro_f1'))
+	if pretrained_macro is None or z_macro is None:
+		return 'macro F1が不足しているため未確認。'
+	delta = pretrained_macro - z_macro
+	if delta <= 0.02:
+		return (
+			f'z-onlyとの差が小さい (macro F1差分 {delta:+.4f}) ため、'
+			'深度で説明できる寄与が大きい。'
+		)
+	return (
+		f'z-onlyとの差がある (macro F1差分 {delta:+.4f}) ため、'
+		'深度以外の特徴が効いている可能性がある。'
+	)
+
+
+def _metric_delta(
+	left: Mapping[str, object],
+	right: Mapping[str, object],
+	metric: str,
+) -> float | None:
+	left_value = _float_or_none(left.get(metric))
+	right_value = _float_or_none(right.get(metric))
+	if left_value is None or right_value is None:
+		return None
+	return left_value - right_value
 
 
 def _render_dataset(dataset: Mapping[str, object]) -> list[str]:
@@ -968,8 +1430,8 @@ def _embed_spec(
 	probe_config: Mapping[str, object],
 ) -> str | None:
 	return _first_non_empty(
-		_embed_spec_from_lithology_root(lithology.get('root')),
 		_embed_spec_from_config(probe_config),
+		_embed_spec_from_lithology_root(lithology.get('root')),
 	)
 
 
@@ -1076,17 +1538,34 @@ def _run_parts(metrics_path: Path) -> dict[str, str]:
 		return {'PROBE_SPEC': metrics_path.parent.name}
 	index = parts.index('facies_benchmark_v1')
 	values: dict[str, str] = {}
+	if len(parts) > index + 1 and parts[index + 1] == 'baselines':
+		if len(parts) > index + 2:
+			values['BASELINE_TAG'] = parts[index + 2]
+		if len(parts) > index + 3:
+			values['LABEL_SET'] = parts[index + 3]
+		probe_spec = _probe_spec_from_parts(parts)
+		if probe_spec is not None:
+			values['PROBE_SPEC'] = probe_spec
+		return values
 	if len(parts) > index + 1:
 		values['MODEL_TAG'] = parts[index + 1]
 	if len(parts) > index + 2:
 		values['EMBED_SPEC'] = parts[index + 2]
 	if len(parts) > index + 3:
 		values['LABEL_SET'] = parts[index + 3]
-	if 'probes' in parts:
-		probe_index = parts.index('probes')
-		if len(parts) > probe_index + 1:
-			values['PROBE_SPEC'] = parts[probe_index + 1]
+	probe_spec = _probe_spec_from_parts(parts)
+	if probe_spec is not None:
+		values['PROBE_SPEC'] = probe_spec
 	return values
+
+
+def _probe_spec_from_parts(parts: Sequence[str]) -> str | None:
+	if 'probes' not in parts:
+		return None
+	probe_index = parts.index('probes')
+	if len(parts) <= probe_index + 1:
+		return None
+	return parts[probe_index + 1]
 
 
 def _class_metric_sort_key(value: str) -> tuple[int, str]:
