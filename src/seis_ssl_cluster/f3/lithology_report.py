@@ -24,6 +24,10 @@ COMPARISON_ID_COLUMNS = (
 	'EMBED_SPEC',
 	'LABEL_SET',
 	'PROBE_SPEC',
+	'FEATURE_SOURCE_KIND',
+	'FEATURE_SOURCE_REFERENCE_MODEL_TAG',
+	'FEATURE_SOURCE_EMBED_SPEC',
+	'FEATURE_SOURCE_DESCRIPTION',
 )
 COMPARISON_FIGURE_NAMES = (
 	'macro_f1_comparison',
@@ -630,18 +634,35 @@ def _comparison_row(
 		path_parts=path_parts,
 		feature_source=feature_source,
 	)
+	embed_spec = _first_non_empty(
+		_embed_spec_from_config(config),
+		path_parts.get('EMBED_SPEC'),
+	)
 	row: dict[str, object] = {
 		'feature_kind': feature_kind,
 		'MODEL_TAG': '' if feature_kind in _BASELINE_FEATURE_KINDS else model_tag,
 		'BASELINE_TAG': baseline_tag or '',
-		'EMBED_SPEC': _first_non_empty(
-			_embed_spec_from_config(config),
-			path_parts.get('EMBED_SPEC'),
-		),
+		'EMBED_SPEC': embed_spec,
 		'LABEL_SET': _first_non_empty(labels.get('set'), path_parts.get('LABEL_SET')),
 		'PROBE_SPEC': _first_non_empty(probe.get('spec'), path_parts.get(
 			'PROBE_SPEC',
 		)),
+		'FEATURE_SOURCE_KIND': _first_non_empty(
+			feature_source.get('kind'),
+			feature_kind,
+		),
+		'FEATURE_SOURCE_REFERENCE_MODEL_TAG': _first_non_empty(
+			feature_source.get('reference_model_tag'),
+			'',
+		),
+		'FEATURE_SOURCE_EMBED_SPEC': _first_non_empty(
+			feature_source.get('embedding_spec'),
+			embed_spec,
+		),
+		'FEATURE_SOURCE_DESCRIPTION': _first_non_empty(
+			feature_source.get('description'),
+			'',
+		),
 		'_class_names': dict(_mapping(metrics.get('class_names'))),
 	}
 	for metric in OVERALL_METRIC_COLUMNS:

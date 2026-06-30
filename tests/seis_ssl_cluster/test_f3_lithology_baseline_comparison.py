@@ -148,6 +148,46 @@ def test_build_f3_lithology_comparison_report_proc_dry_run(tmp_path: Path) -> No
 	assert 'execution: dry-run; F3 lithology comparison report skipped' in result.stdout
 
 
+def test_build_f3_lithology_comparison_report_proc_dry_run_with_config(
+	tmp_path: Path,
+) -> None:
+	search_root = _search_root(tmp_path)
+	output_dir = tmp_path / 'out' / 'baseline_comparison'
+	config_path = tmp_path / 'comparison.yaml'
+	config_path.write_text(
+		f"""
+paths:
+  artifact_root: {tmp_path / 'artifacts' / 'seis_ssl_cluster'}
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+comparison:
+  search_root: {search_root}
+  output_dir: {output_dir}
+  output_csv: {output_dir / 'comparison_table.csv'}
+  output_markdown: {output_dir / 'comparison_report.md'}
+  figure_dpi: 300
+""".lstrip(),
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'stage: build_f3_lithology_comparison_report' in result.stdout
+	assert f'comparison.search_root: {search_root}' in result.stdout
+	assert (
+		f'comparison.output_csv: {output_dir / "comparison_table.csv"}'
+		in result.stdout
+	)
+	assert 'comparison.figure_dpi: 300' in result.stdout
+
+
 def test_f3_lithology_probe_joblib_artifacts_are_gitignored() -> None:
 	gitignore = Path('.gitignore').read_text(encoding='utf-8')
 

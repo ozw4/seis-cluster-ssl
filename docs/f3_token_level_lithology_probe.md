@@ -150,6 +150,46 @@ python proc/seis_ssl_cluster/build_f3_lithology_report.py \
   --config $EXP/50_lithology/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/06_build_lithology_report.yaml
 ```
 
+## Baseline Comparison
+
+After the pretrained encoder token dataset and `linear_balanced_v1` probe are
+complete, run the baseline comparison from
+`experiments/f3/facies_benchmark_v1/50_lithology_baselines/README.md`.
+
+The comparison reuses the pretrained run's train/validation token split and
+label selection. `f3_labels.sgy` and
+`$ROOT/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy` remain the
+label source of truth; PNG labels remain limited to slice selection and visual
+QC.
+
+Required baseline stages:
+
+| Order | Baseline | Entrypoint | Config |
+|---|---|---|---|
+| 1 | z-only dataset | `build_f3_lithology_baseline_features.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/z_only_v1/01_build_baseline_token_dataset.yaml` |
+| 2 | z-only probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/z_only_v1/02_train_linear_probe.yaml` |
+| 3 | amplitude-only dataset | `build_f3_lithology_baseline_features.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/amplitude_stats_v1/01_build_baseline_token_dataset.yaml` |
+| 4 | amplitude-only probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/amplitude_stats_v1/02_train_linear_probe.yaml` |
+| 5 | random checkpoint | `create_random_mae_checkpoint.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/01_create_random_checkpoint.yaml` |
+| 6 | random embeddings | `extract_embeddings.py --device cuda --skip-existing` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/02_extract_embeddings.yaml` |
+| 7 | random token dataset | `build_f3_lithology_token_dataset.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/03_build_token_dataset.yaml` |
+| 8 | random probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/04_train_linear_probe.yaml` |
+| 9 | comparison report | `build_f3_lithology_comparison_report.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/05_build_baseline_comparison_report.yaml` |
+
+The comparison report is written under:
+
+```text
+$ROOT/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/
+```
+
+Read `macro_f1` as the primary class-balanced score, `mean_iou` as the
+secondary segmentation-style score, and per-class F1 columns to check whether
+weak classes improve. High z-only performance means depth or stratigraphic
+position may explain much of the task; high amplitude-only performance limits
+the added value of pretrained embeddings; high random-encoder performance means
+architecture or tokenization may be sufficient. The strongest claim for
+pretraining is when the pretrained encoder beats all baselines.
+
 ## Figure Contract
 
 - Figures use white backgrounds and fixed facies colors from the F3 inspection
