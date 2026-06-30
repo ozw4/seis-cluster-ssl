@@ -1,0 +1,21 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+reference_model:
+  tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_best.pt
+  architecture_source: reference_checkpoint_config
+random_checkpoint:
+  tag: random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1
+  seed: 42
+  initialization: random_weights_no_pretraining
+  output_dir: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init
+  output_checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt
+  feature_source:
+    kind: random_encoder
+    reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+    embedding_spec: overlap_x16
+    description: same MAE architecture with random seed 42 and no pretraining

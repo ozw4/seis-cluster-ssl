@@ -152,6 +152,7 @@ def f3_lithology_token_dataset_config_from_mapping(
 		dataset=dataset,
 		model=model,
 		figure_dpi=_figure_dpi(token_dataset),
+		feature_source=_feature_source(token_dataset),
 	)
 
 
@@ -232,6 +233,16 @@ def _figure_dpi(token_dataset: Mapping[str, object]) -> int:
 	)
 
 
+def _feature_source(token_dataset: Mapping[str, object]) -> Mapping[str, object] | None:
+	value = token_dataset.get('feature_source')
+	if value is None:
+		return None
+	if not isinstance(value, Mapping):
+		msg = f'token_dataset.feature_source must be a mapping; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
 def _output_paths(
 	outputs: F3LithologyTokenDatasetOutputs,
 ) -> tuple[tuple[str, Path], ...]:
@@ -275,6 +286,8 @@ def _print_summary(config: F3LithologyTokenDatasetConfig) -> None:
 	print(f'token_dataset.split_manifest: {config.outputs.split_manifest_json}')
 	print(f'token_dataset.quicklook_dir: {config.outputs.quicklook_dir}')
 	print(f'token_dataset.figure.dpi: {config.figure_dpi}')
+	if config.feature_source is not None:
+		print(f'token_dataset.feature_source: {dict(config.feature_source)}')
 
 
 def _required_mapping(

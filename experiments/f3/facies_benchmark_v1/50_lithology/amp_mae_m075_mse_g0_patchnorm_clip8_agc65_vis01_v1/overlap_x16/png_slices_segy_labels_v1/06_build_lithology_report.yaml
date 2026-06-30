@@ -27,3 +27,9 @@ reports:
   output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1
   output_markdown: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.md
   output_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.json
+  token_dataset_metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset/token_dataset_metadata.json
+  feature_source:
+    kind: pretrained_encoder
+    reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+    embedding_spec: overlap_x16
+    description: frozen NOPIMS-pretrained MAE encoder embeddings

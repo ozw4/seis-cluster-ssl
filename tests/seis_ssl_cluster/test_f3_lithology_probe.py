@@ -59,8 +59,11 @@ def test_logistic_regression_probe_trains_writes_and_reloads_artifacts(
 	assert probe.class_weight == 'balanced'
 
 	resolved = json.loads(result.config_json.read_text(encoding='utf-8'))
+	metrics = json.loads(result.metrics_json.read_text(encoding='utf-8'))
 	assert resolved['encoder_finetuning'] is False
 	assert resolved['probe']['type'] == 'logistic_regression'
+	assert resolved['feature_source'] == _feature_source()
+	assert metrics['feature_source'] == _feature_source()
 	assert resolved['training_summary']['class_weight'] == 'balanced'
 	report = result.classification_report_md.read_text(encoding='utf-8')
 	assert 'macro F1' in report
@@ -152,10 +155,22 @@ def _write_probe_fixture(
 		model={'tag': 'synthetic_encoder', 'freeze_encoder': True},
 		embeddings={'spec': 'synthetic_tokens'},
 		labels={'set': 'synthetic_labels'},
-		token_dataset={'input_dir': str(input_dir)},
+		token_dataset={
+			'input_dir': str(input_dir),
+			'feature_source': _feature_source(),
+		},
 		lithology={'root': str(tmp_path)},
 	)
 	return config, validation_features
+
+
+def _feature_source() -> dict[str, object]:
+	return {
+		'kind': 'pretrained_encoder',
+		'reference_model_tag': 'synthetic_encoder',
+		'embedding_spec': 'synthetic_tokens',
+		'description': 'fixture pretrained encoder features',
+	}
 
 
 def test_probe_training_rejects_overlapping_train_validation_token_xyz(

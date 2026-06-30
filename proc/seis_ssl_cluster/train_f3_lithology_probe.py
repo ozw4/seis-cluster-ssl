@@ -280,6 +280,9 @@ def _print_summary(config: F3LithologyProbeConfig) -> None:
 	print(f'token_dataset.train_tokens: {config.inputs.train_tokens}')
 	print(f'token_dataset.validation_tokens: {config.inputs.validation_tokens}')
 	print(f'token_dataset.metadata_json: {config.inputs.token_dataset_metadata_json}')
+	feature_source = config.token_dataset.get('feature_source')
+	if isinstance(feature_source, Mapping):
+		print(f'token_dataset.feature_source: {dict(feature_source)}')
 	print(f'labels.class_info: {config.inputs.class_info}')
 	print(f'model.tag: {config.model.get("tag")}')
 	print(f'model.checkpoint: {config.model.get("checkpoint")}')

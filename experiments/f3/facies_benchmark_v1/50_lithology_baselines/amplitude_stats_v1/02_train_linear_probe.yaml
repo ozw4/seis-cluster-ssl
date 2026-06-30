@@ -1,0 +1,46 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+model:
+  tag: amplitude_stats_v1
+  freeze_encoder: true
+  reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+embeddings:
+  spec: amplitude_stats_v1
+  reference_embedding_spec: overlap_x16
+labels:
+  set: png_slices_segy_labels_v1
+  source_label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
+  source_label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+  png_label_role: train_validation_slice_selection_and_visual_qc
+lithology:
+  root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/amplitude_stats_v1/png_slices_segy_labels_v1
+token_dataset:
+  input_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/amplitude_stats_v1/png_slices_segy_labels_v1/token_dataset
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/amplitude_stats_v1/png_slices_segy_labels_v1/token_dataset/token_dataset_metadata.json
+  feature_source:
+    kind: amplitude_stats
+    reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+    embedding_spec: overlap_x16
+    description: handcrafted seismic amplitude block statistics
+probe:
+  spec: linear_balanced_v1
+  type: logistic_regression
+  feature_scaling: standard
+  class_weight: balanced
+  max_iter: 2000
+  random_state: 42
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/amplitude_stats_v1/png_slices_segy_labels_v1/probes/linear_balanced_v1
+evaluation:
+  metrics:
+    - accuracy
+    - balanced_accuracy
+    - macro_f1
+    - weighted_f1
+    - mean_iou
+  figure:
+    dpi: 300

@@ -1,0 +1,52 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+model:
+  tag: random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt
+  freeze_encoder: true
+  reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+embeddings:
+  spec: overlap_x16
+  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16
+labels:
+  set: png_slices_segy_labels_v1
+  source_label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
+  source_label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  png_label_inventory: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/label_png_inventory.csv
+  class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+  segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+  png_label_role: train_validation_slice_selection_and_visual_qc
+registry:
+  seismic_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
+  label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_metadata.json
+lithology:
+  root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1
+token_dataset:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1/token_dataset
+  split_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1/token_dataset/splits.json
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1/token_dataset/token_dataset_metadata.json
+  class_counts_csv: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1/token_dataset/class_counts.csv
+  summary_markdown: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1/token_dataset/token_dataset_summary.md
+  quicklook_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1/token_dataset/quicklook
+  split_source: png_label_inventory_matching_reference_token_dataset
+  label_source_of_truth: segy_label_volume
+  reference_token_dataset:
+    root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset
+    metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset/token_dataset_metadata.json
+    split_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset/splits.json
+  tokenization:
+    min_labeled_fraction: 0.5
+    min_majority_fraction: 0.7
+    ignore_z_border_samples: 1
+  figure:
+    dpi: 300
+  feature_source:
+    kind: random_encoder
+    reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+    embedding_spec: overlap_x16
+    description: same MAE architecture with random seed 42 and no pretraining

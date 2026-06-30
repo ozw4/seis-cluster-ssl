@@ -132,6 +132,7 @@ class F3LithologyTokenDatasetConfig:
 	dataset: Mapping[str, object]
 	model: Mapping[str, object]
 	figure_dpi: int = 300
+	feature_source: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)
@@ -943,7 +944,7 @@ def _metadata_payload(  # noqa: PLR0913
 	all_arrays: F3TokenArrays,
 	overlap_resolution: Mapping[str, object],
 ) -> dict[str, object]:
-	return {
+	payload: dict[str, object] = {
 		'artifact_type': 'f3_lithology_token_dataset',
 		'dataset': dict(config.dataset),
 		'model': dict(config.model),
@@ -1018,6 +1019,9 @@ def _metadata_payload(  # noqa: PLR0913
 		},
 		'slices': [result.to_summary_dict() for result in slice_results],
 	}
+	if config.feature_source is not None:
+		payload['feature_source'] = dict(config.feature_source)
+	return payload
 
 
 def _render_summary_markdown(

@@ -118,6 +118,14 @@ def test_f3_lithology_comparison_table_aggregates_multiple_runs(
 		embed_spec='overlap_x16',
 		probe_spec='mlp_balanced_v1',
 		accuracy=0.65,
+		feature_source={
+			'kind': 'random_encoder',
+			'reference_model_tag': (
+				'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
+			),
+			'embedding_spec': 'overlap_x16',
+			'description': 'fixture random encoder features',
+		},
 	)
 	comparison_dir = root / 'lithology' / 'f3' / 'facies_benchmark_v1' / 'reports'
 	config = F3LithologyComparisonReportConfig(
@@ -135,11 +143,17 @@ def test_f3_lithology_comparison_table_aggregates_multiple_runs(
 	assert len(rows) == 2
 	assert rows[0]['MODEL_TAG'] == 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
 	assert rows[0]['PROBE_SPEC'] == 'mlp_balanced_v1'
+	assert rows[0]['FEATURE_SOURCE_KIND'] == 'random_encoder'
+	assert rows[0]['FEATURE_SOURCE_REFERENCE_MODEL_TAG'] == (
+		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
+	)
+	assert rows[0]['FEATURE_SOURCE_EMBED_SPEC'] == 'overlap_x16'
 	assert rows[0]['accuracy'] == '0.65'
 	assert rows[1]['MODEL_TAG'] == 'amp_mae_m075_mse_g0_patchnorm_clip8_vis00_v1'
 	assert rows[1]['PROBE_SPEC'] == 'linear_balanced_v1'
 	assert 'class_0_f1' in rows[0]
 	assert 'class_5_f1' in rows[0]
+	assert 'FEATURE_SOURCE_KIND' in markdown
 	assert '集約run数: 2' in markdown
 
 
@@ -273,6 +287,7 @@ def _write_probe_run(  # noqa: PLR0913
 	probe_spec: str,
 	accuracy: float = 0.625,
 	write_metrics: bool = True,
+	feature_source: dict[str, object] | None = None,
 ) -> dict[str, object]:
 	artifact_root = root / 'artifacts' / 'seis_ssl_cluster'
 	label_set = 'png_slices_segy_labels_v1'
@@ -311,8 +326,14 @@ def _write_probe_run(  # noqa: PLR0913
 		path.parent.mkdir(parents=True, exist_ok=True)
 		path.write_bytes(b'fake-png')
 	if write_metrics:
-		_write_json(metrics_json, _metrics_payload(accuracy=accuracy))
-	_write_json(token_metadata_json, _token_metadata_payload(model_tag))
+		_write_json(
+			metrics_json,
+			_metrics_payload(accuracy=accuracy, feature_source=feature_source),
+		)
+	_write_json(
+		token_metadata_json,
+		_token_metadata_payload(model_tag, feature_source=feature_source),
+	)
 	_write_json(
 		probe_config_json,
 		_probe_config_payload(
@@ -323,6 +344,7 @@ def _write_probe_run(  # noqa: PLR0913
 			probe_dir=probe_dir,
 			token_metadata_json=token_metadata_json,
 			checkpoint=checkpoint,
+			feature_source=feature_source,
 		),
 	)
 	prediction_metadata_json = prediction_dir / 'prediction_metadata.json'
@@ -358,8 +380,12 @@ def _write_probe_run(  # noqa: PLR0913
 	}
 
 
-def _metrics_payload(*, accuracy: float) -> dict[str, object]:
-	return {
+def _metrics_payload(
+	*,
+	accuracy: float,
+	feature_source: dict[str, object] | None = None,
+) -> dict[str, object]:
+	payload: dict[str, object] = {
 		'accuracy': accuracy,
 		'balanced_accuracy': 0.6,
 		'macro_f1': 0.58,
@@ -375,10 +401,17 @@ def _metrics_payload(*, accuracy: float) -> dict[str, object]:
 		'class_ids': [0, 5],
 		'class_names': {'0': 'Background', '5': 'Zechstein'},
 	}
+	if feature_source is not None:
+		payload['feature_source'] = dict(feature_source)
+	return payload
 
 
-def _token_metadata_payload(model_tag: str) -> dict[str, object]:
-	return {
+def _token_metadata_payload(
+	model_tag: str,
+	*,
+	feature_source: dict[str, object] | None = None,
+) -> dict[str, object]:
+	payload: dict[str, object] = {
 		'artifact_type': 'f3_lithology_token_dataset',
 		'dataset': {
 			'name': 'f3_facies_benchmark',
@@ -408,6 +441,9 @@ def _token_metadata_payload(model_tag: str) -> dict[str, object]:
 			{'split': 'validation', 'slice_type': 'inline', 'slice_index': 250},
 		],
 	}
+	if feature_source is not None:
+		payload['feature_source'] = dict(feature_source)
+	return payload
 
 
 def _probe_config_payload(  # noqa: PLR0913
@@ -419,8 +455,9 @@ def _probe_config_payload(  # noqa: PLR0913
 	probe_dir: Path,
 	token_metadata_json: Path,
 	checkpoint: Path,
+	feature_source: dict[str, object] | None = None,
 ) -> dict[str, object]:
-	return {
+	payload: dict[str, object] = {
 		'artifact_type': 'f3_lithology_probe',
 		'dataset': {
 			'name': 'f3_facies_benchmark',
@@ -434,7 +471,10 @@ def _probe_config_payload(  # noqa: PLR0913
 		'embeddings': {'spec': embed_spec},
 		'labels': {'set': 'png_slices_segy_labels_v1'},
 		'lithology': {'root': str(lithology_root)},
-		'token_dataset': {'input_dir': str(lithology_root / 'token_dataset')},
+		'token_dataset': {
+			'input_dir': str(lithology_root / 'token_dataset'),
+			'feature_source': dict(feature_source or {}),
+		},
 		'probe': {
 			'spec': probe_spec,
 			'type': 'logistic_regression',
@@ -459,6 +499,9 @@ def _probe_config_payload(  # noqa: PLR0913
 		},
 		'training_summary': {'trainer': 'sklearn.linear_model.LogisticRegression'},
 	}
+	if feature_source is not None:
+		payload['feature_source'] = dict(feature_source)
+	return payload
 
 
 def _classes() -> list[dict[str, object]]:

@@ -243,6 +243,7 @@ def test_build_f3_lithology_token_dataset_outputs_npz_metadata_and_figures(
 	assert metadata['png_label_role'] == (
 		'train_validation_slice_selection_and_visual_qc'
 	)
+	assert metadata['feature_source'] == _feature_source()
 	assert metadata['embedding']['patch_size_xyz'] == [2, 2, 2]
 	assert metadata['no_random_split'] is True
 	assert splits['no_random_split'] is True
@@ -369,6 +370,7 @@ def _write_dataset_fixture(tmp_path: Path) -> F3LithologyTokenDatasetConfig:
 		dataset={'name': 'f3_facies_benchmark', 'version': 'facies_benchmark_v1'},
 		model={'tag': 'model', 'freeze_encoder': True},
 		figure_dpi=40,
+		feature_source=_feature_source(),
 	)
 
 
@@ -409,7 +411,17 @@ def _config_mapping(config: F3LithologyTokenDatasetConfig) -> dict[str, object]:
 			'quicklook_dir': str(config.outputs.quicklook_dir),
 			'tokenization': config.policy.to_dict(),
 			'figure': {'dpi': config.figure_dpi},
+			'feature_source': dict(config.feature_source or {}),
 		},
+	}
+
+
+def _feature_source() -> dict[str, object]:
+	return {
+		'kind': 'pretrained_encoder',
+		'reference_model_tag': 'model',
+		'embedding_spec': 'embed',
+		'description': 'fixture pretrained encoder features',
 	}
 
 
