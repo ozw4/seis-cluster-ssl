@@ -128,11 +128,17 @@ def _write_probe_fixture(
 	output_dir = tmp_path / 'probes' / settings.spec
 	train_features, train_labels = _train_arrays()
 	validation_features, validation_labels = _validation_arrays()
-	_write_tokens(input_dir / 'train_tokens.npz', train_features, train_labels)
+	_write_tokens(
+		input_dir / 'train_tokens.npz',
+		train_features,
+		train_labels,
+		token_xyz_start=0,
+	)
 	_write_tokens(
 		input_dir / 'validation_tokens.npz',
 		validation_features,
 		validation_labels,
+		token_xyz_start=10_000,
 	)
 	config = F3LithologyProbeConfig(
 		inputs=F3LithologyProbeInputs(
@@ -150,6 +156,30 @@ def _write_probe_fixture(
 		lithology={'root': str(tmp_path)},
 	)
 	return config, validation_features
+
+
+def test_probe_training_rejects_overlapping_train_validation_token_xyz(
+	tmp_path: Path,
+) -> None:
+	config, _validation_features = _write_probe_fixture(
+		tmp_path,
+		F3LithologyProbeSettings(
+			spec='linear_overlap_test',
+			probe_type='logistic_regression',
+			max_iter=100,
+			random_state=7,
+		),
+	)
+	validation_features, validation_labels = _validation_arrays()
+	_write_tokens(
+		config.inputs.validation_tokens,
+		validation_features,
+		validation_labels,
+		token_xyz_start=0,
+	)
+
+	with pytest.raises(ValueError, match='share token_xyz rows'):
+		train_and_evaluate_f3_lithology_probe(config)
 
 
 def _train_arrays() -> tuple[np.ndarray, np.ndarray]:
@@ -216,13 +246,26 @@ def _validation_arrays() -> tuple[np.ndarray, np.ndarray]:
 	)
 
 
-def _write_tokens(path: Path, features: np.ndarray, labels: np.ndarray) -> None:
+def _write_tokens(
+	path: Path,
+	features: np.ndarray,
+	labels: np.ndarray,
+	*,
+	token_xyz_start: int,
+) -> None:
 	count = int(labels.shape[0])
+	token_indices = np.arange(token_xyz_start, token_xyz_start + count, dtype=np.int64)
 	np.savez_compressed(
 		path,
 		features=features,
 		labels=labels,
-		token_xyz=np.zeros((count, 3), dtype=np.int64),
+		token_xyz=np.column_stack(
+			(
+				token_indices,
+				np.zeros(count, dtype=np.int64),
+				np.zeros(count, dtype=np.int64),
+			),
+		),
 		voxel_center_xyz=np.zeros((count, 3), dtype=np.float32),
 	)
 

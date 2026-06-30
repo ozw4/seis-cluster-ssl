@@ -48,6 +48,10 @@ $ROOT/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
 PNG labels are used only to select train/validation slice locations and to
 visually confirm the selected labels.
 
+If train and validation inventory slices intersect at the same `token_xyz`,
+validation keeps precedence and matching train rows are removed before writing
+`train_tokens.npz`; the build metadata records the removed row count.
+
 ## Artifact Layout
 
 ```text

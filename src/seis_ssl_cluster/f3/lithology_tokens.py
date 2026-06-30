@@ -280,6 +280,9 @@ def build_f3_lithology_token_dataset(
 		)
 		for split in ('train', 'validation')
 	}
+	arrays_by_split, overlap_resolution = _resolve_cross_split_token_overlap(
+		arrays_by_split,
+	)
 	all_arrays = _concatenate_token_arrays(
 		list(arrays_by_split.values()),
 		embedding_dim=embedding.embedding_dim,
@@ -294,6 +297,7 @@ def build_f3_lithology_token_dataset(
 		slice_results=slice_results,
 		arrays_by_split=arrays_by_split,
 		all_arrays=all_arrays,
+		overlap_resolution=overlap_resolution,
 	)
 	quicklook_paths = write_f3_lithology_token_quicklooks(
 		slice_results,
@@ -742,6 +746,66 @@ def _concatenate_token_arrays(
 	)
 
 
+def _resolve_cross_split_token_overlap(
+	arrays_by_split: Mapping[str, F3TokenArrays],
+) -> tuple[dict[str, F3TokenArrays], dict[str, object]]:
+	train = arrays_by_split['train']
+	validation = arrays_by_split['validation']
+	validation_token_xyz = _token_xyz_set(validation.token_xyz)
+	overlap_token_xyz = _token_xyz_set(train.token_xyz) & validation_token_xyz
+	if overlap_token_xyz:
+		keep_train = np.asarray(
+			[
+				tuple(int(axis) for axis in token_xyz) not in overlap_token_xyz
+				for token_xyz in train.token_xyz
+			],
+			dtype=np.bool_,
+		)
+		filtered_train = _filter_token_arrays(train, keep_train)
+	else:
+		keep_train = np.ones((train.count,), dtype=np.bool_)
+		filtered_train = train
+	return (
+		{'train': filtered_train, 'validation': validation},
+		{
+			'strategy': 'validation_precedence_remove_train_duplicates',
+			'overlap_token_xyz_count': len(overlap_token_xyz),
+			'train_rows_removed': int(train.count - np.count_nonzero(keep_train)),
+			'validation_rows_removed': 0,
+		},
+	)
+
+
+def _token_xyz_set(token_xyz: NDArray[np.int64]) -> set[tuple[int, int, int]]:
+	if token_xyz.size == 0:
+		return set()
+	return {tuple(int(axis) for axis in row) for row in token_xyz}
+
+
+def _filter_token_arrays(
+	arrays: F3TokenArrays,
+	keep: NDArray[np.bool_],
+) -> F3TokenArrays:
+	if keep.shape != (arrays.count,):
+		msg = (
+			'token array filter must have one boolean per row; '
+			f'got {keep.shape!r}, expected={(arrays.count,)!r}'
+		)
+		raise ValueError(msg)
+	return F3TokenArrays(
+		features=arrays.features[keep],
+		labels=arrays.labels[keep],
+		survey_id=arrays.survey_id[keep],
+		split=arrays.split[keep],
+		slice_type=arrays.slice_type[keep],
+		slice_index=arrays.slice_index[keep],
+		token_xyz=arrays.token_xyz[keep],
+		voxel_center_xyz=arrays.voxel_center_xyz[keep],
+		majority_fraction=arrays.majority_fraction[keep],
+		labeled_fraction=arrays.labeled_fraction[keep],
+	)
+
+
 def _empty_token_arrays(embedding_dim: int) -> F3TokenArrays:
 	return F3TokenArrays(
 		features=np.empty((0, embedding_dim), dtype=np.float32),
@@ -772,6 +836,7 @@ def _write_outputs(  # noqa: PLR0913
 	slice_results: Sequence[F3SliceTokenization],
 	arrays_by_split: Mapping[str, F3TokenArrays],
 	all_arrays: F3TokenArrays,
+	overlap_resolution: Mapping[str, object],
 ) -> None:
 	outputs = config.outputs
 	outputs.output_dir.mkdir(parents=True, exist_ok=True)
@@ -790,6 +855,7 @@ def _write_outputs(  # noqa: PLR0913
 			arrays_by_split,
 			all_arrays=all_arrays,
 			slice_results=slice_results,
+			overlap_resolution=overlap_resolution,
 		),
 	)
 	_write_json(
@@ -802,6 +868,7 @@ def _write_outputs(  # noqa: PLR0913
 			slice_results=slice_results,
 			arrays_by_split=arrays_by_split,
 			all_arrays=all_arrays,
+			overlap_resolution=overlap_resolution,
 		),
 	)
 
@@ -874,6 +941,7 @@ def _metadata_payload(  # noqa: PLR0913
 	slice_results: Sequence[F3SliceTokenization],
 	arrays_by_split: Mapping[str, F3TokenArrays],
 	all_arrays: F3TokenArrays,
+	overlap_resolution: Mapping[str, object],
 ) -> dict[str, object]:
 	return {
 		'artifact_type': 'f3_lithology_token_dataset',
@@ -883,6 +951,7 @@ def _metadata_payload(  # noqa: PLR0913
 		'png_label_role': 'train_validation_slice_selection_and_visual_qc',
 		'split_strategy': 'png_label_inventory_slice_split_no_random_token_split',
 		'no_random_split': True,
+		'cross_split_token_overlap_resolution': dict(overlap_resolution),
 		'inputs': {
 			'embeddings_dir': str(config.inputs.embeddings_dir),
 			'label_volume': str(config.inputs.label_volume),
@@ -943,6 +1012,9 @@ def _metadata_payload(  # noqa: PLR0913
 			'total_invalid_embedding_tokens': int(
 				sum(result.invalid_embedding_token_count for result in slice_results),
 			),
+			'cross_split_duplicate_rows_removed_from_train': int(
+				overlap_resolution['train_rows_removed'],
+			),
 		},
 		'slices': [result.to_summary_dict() for result in slice_results],
 	}
@@ -953,6 +1025,7 @@ def _render_summary_markdown(
 	*,
 	all_arrays: F3TokenArrays,
 	slice_results: Sequence[F3SliceTokenization],
+	overlap_resolution: Mapping[str, object],
 ) -> str:
 	lines = [
 		'# F3 lithology token dataset',
@@ -962,6 +1035,11 @@ def _render_summary_markdown(
 		f'- all labeled tokens: {all_arrays.count}',
 		f'- supervised slices: {len(slice_results)}',
 		'- split strategy: png_label_inventory slice split; no random token split',
+		(
+			'- cross-split token overlap: validation precedence; '
+			f'removed {overlap_resolution["train_rows_removed"]} train rows '
+			f'for {overlap_resolution["overlap_token_xyz_count"]} token_xyz values'
+		),
 		'',
 		'## Per-slice tokenization',
 		'',

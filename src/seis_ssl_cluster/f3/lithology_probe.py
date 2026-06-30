@@ -329,6 +329,7 @@ def train_and_evaluate_f3_lithology_probe(
 		config.classes,
 		label='validation_tokens.labels',
 	)
+	_validate_disjoint_token_xyz(train, validation)
 	scaler, train_features, validation_features = _fit_scaler(
 		train.features,
 		validation.features,
@@ -409,6 +410,47 @@ def load_token_dataset(path: str | Path, *, label: str) -> _TokenDataset:
 		labels=labels,
 		metadata=metadata,
 	)
+
+
+def _validate_disjoint_token_xyz(
+	train: _TokenDataset,
+	validation: _TokenDataset,
+) -> None:
+	train_token_xyz = _required_token_xyz(train, label='train_tokens')
+	validation_token_xyz = _required_token_xyz(
+		validation,
+		label='validation_tokens',
+	)
+	overlap = _token_xyz_set(train_token_xyz) & _token_xyz_set(validation_token_xyz)
+	if overlap:
+		examples = sorted(overlap)[:5]
+		msg = (
+			'train_tokens and validation_tokens share token_xyz rows; '
+			'validation metrics would reuse training embeddings. '
+			f'overlap_count={len(overlap)}, examples={examples!r}'
+		)
+		raise ValueError(msg)
+
+
+def _required_token_xyz(dataset: _TokenDataset, *, label: str) -> NDArray[np.int64]:
+	if 'token_xyz' not in dataset.metadata:
+		msg = f'{label} must contain token_xyz for leakage validation'
+		raise KeyError(msg)
+	token_xyz = np.asarray(dataset.metadata['token_xyz'], dtype=np.int64)
+	expected_shape = (dataset.count, 3)
+	if token_xyz.shape != expected_shape:
+		msg = (
+			f'{label}.token_xyz must have shape {expected_shape!r}; '
+			f'got {token_xyz.shape!r}'
+		)
+		raise ValueError(msg)
+	return token_xyz
+
+
+def _token_xyz_set(token_xyz: NDArray[np.int64]) -> set[tuple[int, int, int]]:
+	if token_xyz.size == 0:
+		return set()
+	return {tuple(int(axis) for axis in row) for row in token_xyz}
 
 
 def _fit_scaler(

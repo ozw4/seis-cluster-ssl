@@ -19,6 +19,10 @@ choose an explicit checkpoint instead of falling back silently.
 PNG labels are used for train/validation slice selection and visual QC only.
 They are not the source of truth for voxel labels.
 
+If train and validation slices retain the same `token_xyz`, validation keeps
+precedence and matching train rows are removed before `train_tokens.npz` is
+written. The token dataset metadata records the removed row count.
+
 Fixed variables for the MVP:
 
 ```bash
