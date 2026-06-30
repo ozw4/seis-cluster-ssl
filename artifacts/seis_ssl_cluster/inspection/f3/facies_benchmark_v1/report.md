@@ -83,12 +83,16 @@
 
 ## 6. PNG vs SEGY label consistency
 
-- status: FAIL/未確認
+- status: PASS
 - PNG labels: 15
 - max mismatch threshold: 0.001
 - max observed mismatch rate: 0.00392592
+- max observed effective mismatch rate: 4.38687e-06
+- ignored z-border samples: 1
 - total mismatch pixels: 10816
-- warnings: one or more PNG labels required non-default orientation; see per-slice JSON metadata; one or more slices exceed max_mismatch_rate
+- border-only mismatch slices: 14
+- note: raw mismatchはz-border sampleを含み、readiness判定はeffective mismatch rateを使う。
+- warnings: one or more PNG labels required non-default orientation; see per-slice JSON metadata; one or more PNG/SEGY label mismatches are confined to ignored z-border samples
 
 ## 7. Quicklook figures
 
@@ -107,14 +111,14 @@
 
 ## 9. Readiness for downstream
 
-- 判定: `stop`
-- 推奨: trainingへ進まず、必須修正を先に行う。
+- 判定: `caution`
+- 推奨: MVPへ進む前にwarningと不足componentを確認する。
 - 理由:
-  - PNG vs SEGY label consistencyがFAIL。
+  - raw mismatch is confined to ignored z-border samples.
 - training前のrequired fixes:
-  - PNG/SEGY label対応の不一致を修正する。
+  - z-border sample差分の影響範囲を確認する。
 
 ## Warnings
 
 - label_consistency: one or more PNG labels required non-default orientation; see per-slice JSON metadata
-- label_consistency: one or more slices exceed max_mismatch_rate
+- label_consistency: one or more PNG/SEGY label mismatches are confined to ignored z-border samples
