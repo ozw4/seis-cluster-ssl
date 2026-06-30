@@ -51,6 +51,10 @@ def main() -> None:
 		consistency.get('max_mismatch_rate', 0.001),
 		'inspection.consistency.max_mismatch_rate',
 	)
+	ignore_border_samples_z = _optional_nonnegative_int(
+		consistency.get('ignore_border_samples_z', 0),
+		'inspection.consistency.ignore_border_samples_z',
+	)
 	segy_extensions = _string_sequence(
 		inspection.get('candidate_extensions', ['.segy', '.sgy']),
 		'inspection.candidate_extensions',
@@ -69,6 +73,7 @@ def main() -> None:
 			segy_extensions=segy_extensions,
 			png_extensions=png_extensions,
 			max_mismatch_rate=max_mismatch_rate,
+			ignore_border_samples_z=ignore_border_samples_z,
 		)
 		print('execution: dry-run; F3 label consistency check skipped')
 		return
@@ -86,10 +91,15 @@ def main() -> None:
 		segy,
 		png_labels,
 		max_mismatch_rate=max_mismatch_rate,
+		ignore_border_samples_z=ignore_border_samples_z,
 	)
 	result = write_f3_label_consistency_outputs(report, outputs, figure)
 	print(f'f3_label_consistency.png_count: {len(report.records)}')
 	print(f'f3_label_consistency.passed: {report.passed}')
+	print(
+		'f3_label_consistency.ignore_border_samples_z: '
+		f'{report.ignore_border_samples_z}',
+	)
 	print(
 		'f3_label_consistency.max_mismatch_rate: '
 		f'{report.max_observed_mismatch_rate()}',
@@ -152,6 +162,13 @@ def _optional_positive_int(value: object, label: str) -> int:
 	return value
 
 
+def _optional_nonnegative_int(value: object, label: str) -> int:
+	if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+		msg = f'{label} must be a nonnegative integer; got {value!r}'
+		raise ValueError(msg)
+	return value
+
+
 def _optional_fraction(value: object, label: str) -> float:
 	if not isinstance(value, int | float) or isinstance(value, bool):
 		msg = f'{label} must be a number in [0, 1]; got {value!r}'
@@ -183,6 +200,7 @@ def _print_summary(  # noqa: PLR0913
 	segy_extensions: Sequence[str],
 	png_extensions: Sequence[str],
 	max_mismatch_rate: float,
+	ignore_border_samples_z: int,
 ) -> None:
 	paths = _required_mapping(config, 'paths')
 	output_root = _required_mapping(config, 'outputs')
@@ -205,6 +223,10 @@ def _print_summary(  # noqa: PLR0913
 	print(
 		'inspection.consistency.max_mismatch_rate: '
 		f'{max_mismatch_rate}',
+	)
+	print(
+		'inspection.consistency.ignore_border_samples_z: '
+		f'{ignore_border_samples_z}',
 	)
 	print(f'inspection.figure.dpi: {figure.dpi}')
 

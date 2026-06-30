@@ -68,7 +68,102 @@ def test_label_consistency_detects_one_pixel_mismatch(tmp_path: Path) -> None:
 	assert record.matched_pixel_count == 14
 	assert record.mismatch_pixel_count == 1
 	assert record.mismatch_rate == pytest.approx(1 / 15)
+	assert record.border_mismatch_pixel_count == 0
+	assert record.interior_mismatch_pixel_count == 1
+	assert record.effective_mismatch_rate == pytest.approx(1 / 15)
+	assert record.border_only_mismatch is False
 	assert record.exceeds_threshold is True
+
+
+def test_label_consistency_treats_z_border_only_mismatch_as_warning(
+	tmp_path: Path,
+) -> None:
+	labels = _label_cube()
+	inline_png = labels[2, :, :].copy()
+	inline_png[:, -1] = (inline_png[:, -1] + 1) % 3
+	f3_root = _make_png_fixture(tmp_path, inline_ids=inline_png)
+
+	report = check_f3_label_consistency(
+		_segy_inspection(f3_root, labels),
+		inspect_f3_png_labels(f3_root),
+		max_mismatch_rate=0.001,
+		ignore_border_samples_z=1,
+	)
+	record = report.records[0]
+	summary = label_consistency_report_to_dict(report)
+
+	assert report.passed is True
+	assert record.mismatch_pixel_count == 5
+	assert record.mismatch_rate == pytest.approx(1 / 3)
+	assert record.border_mismatch_pixel_count == 5
+	assert record.interior_mismatch_pixel_count == 0
+	assert record.effective_mismatch_rate == 0.0
+	assert record.border_only_mismatch is True
+	assert record.exceeds_threshold is False
+	assert summary['ignore_border_samples_z'] == 1
+	assert summary['max_observed_effective_mismatch_rate'] == 0.0
+	assert any(
+		'confined to ignored z-border samples' in warning
+		for warning in report.warnings
+	)
+
+
+def test_label_consistency_still_fails_on_interior_mismatch(
+	tmp_path: Path,
+) -> None:
+	labels = _label_cube()
+	inline_png = labels[2, :, :].copy()
+	inline_png[0, 1] = (inline_png[0, 1] + 1) % 3
+	f3_root = _make_png_fixture(tmp_path, inline_ids=inline_png)
+
+	report = check_f3_label_consistency(
+		_segy_inspection(f3_root, labels),
+		inspect_f3_png_labels(f3_root),
+		max_mismatch_rate=0.001,
+		ignore_border_samples_z=1,
+	)
+	record = report.records[0]
+
+	assert report.passed is False
+	assert record.mismatch_pixel_count == 1
+	assert record.border_mismatch_pixel_count == 0
+	assert record.interior_mismatch_pixel_count == 1
+	assert record.effective_mismatch_rate == pytest.approx(1 / 5)
+	assert record.border_only_mismatch is False
+	assert record.exceeds_threshold is True
+
+
+@pytest.mark.parametrize('value', [-1, True, '1'])
+def test_label_consistency_rejects_invalid_ignore_border_samples_z(
+	tmp_path: Path,
+	value: object,
+) -> None:
+	labels = _label_cube()
+	f3_root = _make_png_fixture(tmp_path, inline_ids=labels[2, :, :])
+
+	with pytest.raises(
+		ValueError,
+		match='ignore_border_samples_z must be a nonnegative integer',
+	):
+		check_f3_label_consistency(
+			_segy_inspection(f3_root, labels),
+			inspect_f3_png_labels(f3_root),
+			ignore_border_samples_z=value,  # type: ignore[arg-type]
+		)
+
+
+def test_label_consistency_rejects_too_large_ignore_border_samples_z(
+	tmp_path: Path,
+) -> None:
+	labels = _label_cube()
+	f3_root = _make_png_fixture(tmp_path, inline_ids=labels[2, :, :])
+
+	with pytest.raises(ValueError, match='too large for z/sample axis'):
+		check_f3_label_consistency(
+			_segy_inspection(f3_root, labels),
+			inspect_f3_png_labels(f3_root),
+			ignore_border_samples_z=2,
+		)
 
 
 def test_extract_teacher_label_slice_supports_inline_and_crossline() -> None:
@@ -191,9 +286,18 @@ def test_label_consistency_outputs_reports_and_qc_figures(tmp_path: Path) -> Non
 
 	assert len(rows) == 1
 	assert rows[0]['mismatch_pixel_count'] == '0'
+	assert rows[0]['border_mismatch_pixel_count'] == '0'
+	assert rows[0]['interior_mismatch_pixel_count'] == '0'
+	assert rows[0]['effective_mismatch_rate'] == '0.0'
+	assert rows[0]['border_only_mismatch'] == 'False'
 	assert summary['png_label_file_count'] == 1
+	assert summary['ignore_border_samples_z'] == 0
+	assert summary['max_observed_effective_mismatch_rate'] == 0.0
 	assert per_slice['result']['orientation'] == 'none'
+	assert per_slice['result']['effective_mismatch_rate'] == 0.0
+	assert per_slice['result']['border_only_mismatch'] is False
 	assert 'Per-slice results' in markdown
+	assert 'effective_mismatch_rate' in markdown
 	assert outputs.consistency_dir.joinpath(
 		'train_inline_0102_png_label.png',
 	).is_file()
@@ -235,7 +339,10 @@ def test_check_f3_label_consistency_proc_dry_run(tmp_path: Path) -> None:
 			'report_path': str(
 				inspection_dir / 'labels' / 'label_consistency_report.md',
 			),
-			'consistency': {'max_mismatch_rate': 0.001},
+			'consistency': {
+				'max_mismatch_rate': 0.001,
+				'ignore_border_samples_z': 1,
+			},
 			'figure': {'dpi': 40, 'background': 'white', 'output_formats': ['png']},
 		},
 	}
@@ -252,6 +359,7 @@ def test_check_f3_label_consistency_proc_dry_run(tmp_path: Path) -> None:
 	assert result.returncode == 0, result.stderr
 	assert 'stage: check_f3_label_consistency' in result.stdout
 	assert 'inspection.consistency.max_mismatch_rate: 0.001' in result.stdout
+	assert 'inspection.consistency.ignore_border_samples_z: 1' in result.stdout
 	assert 'execution: dry-run; F3 label consistency check skipped' in result.stdout
 
 
