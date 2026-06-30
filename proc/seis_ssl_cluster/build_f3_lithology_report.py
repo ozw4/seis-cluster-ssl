@@ -180,7 +180,7 @@ def _comparison_config(
 		prefix='dataset',
 	)
 	default_search_root = artifact_root / 'lithology' / 'f3' / version
-	default_output_dir = default_search_root / 'reports'
+	default_output_dir = default_search_root / 'reports' / 'baseline_comparison'
 	search_root = _optional_absolute_path(
 		comparison,
 		'search_root',

@@ -141,19 +141,20 @@ def test_f3_lithology_comparison_table_aggregates_multiple_runs(
 	markdown = result.comparison_markdown.read_text(encoding='utf-8')
 
 	assert len(rows) == 2
-	assert rows[0]['MODEL_TAG'] == 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
-	assert rows[0]['PROBE_SPEC'] == 'mlp_balanced_v1'
-	assert rows[0]['FEATURE_SOURCE_KIND'] == 'random_encoder'
-	assert rows[0]['FEATURE_SOURCE_REFERENCE_MODEL_TAG'] == (
+	assert rows[0]['feature_kind'] == 'pretrained_encoder'
+	assert rows[0]['MODEL_TAG'] == 'amp_mae_m075_mse_g0_patchnorm_clip8_vis00_v1'
+	assert rows[0]['BASELINE_TAG'] == ''
+	assert rows[0]['PROBE_SPEC'] == 'linear_balanced_v1'
+	assert rows[1]['feature_kind'] == 'random_encoder'
+	assert rows[1]['MODEL_TAG'] == ''
+	assert rows[1]['BASELINE_TAG'] == (
 		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
 	)
-	assert rows[0]['FEATURE_SOURCE_EMBED_SPEC'] == 'overlap_x16'
-	assert rows[0]['accuracy'] == '0.65'
-	assert rows[1]['MODEL_TAG'] == 'amp_mae_m075_mse_g0_patchnorm_clip8_vis00_v1'
-	assert rows[1]['PROBE_SPEC'] == 'linear_balanced_v1'
+	assert rows[1]['PROBE_SPEC'] == 'mlp_balanced_v1'
+	assert rows[1]['accuracy'] == '0.65'
 	assert 'class_0_f1' in rows[0]
 	assert 'class_5_f1' in rows[0]
-	assert 'FEATURE_SOURCE_KIND' in markdown
+	assert 'feature_kind' in markdown
 	assert '集約run数: 2' in markdown
 
 

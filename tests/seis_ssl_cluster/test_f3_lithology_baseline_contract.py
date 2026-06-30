@@ -74,7 +74,7 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 			assert comparison['search_root'].endswith(
 				'/lithology/f3/facies_benchmark_v1',
 			)
-			assert '/reports/baseline_comparison_v1/' in comparison['output_csv']
+			assert '/reports/baseline_comparison/' in comparison['output_csv']
 
 		if yaml_path.name == '01_create_random_checkpoint.yaml':
 			assert payload['reference_model']['checkpoint'] == REFERENCE_CHECKPOINT
