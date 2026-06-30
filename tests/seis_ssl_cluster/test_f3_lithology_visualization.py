@@ -28,6 +28,12 @@ def test_visualize_f3_lithology_predictions_writes_png_sidecars_and_metadata(
 	pytest.importorskip('matplotlib.pyplot')
 	prediction_config = write_prediction_fixture(tmp_path)
 	prediction_result = predict_f3_lithology_tokens(prediction_config)
+	predictions = np.load(prediction_result.token_predictions)
+	probabilities = np.load(prediction_result.probability_volume)
+	predictions[:, :, 1] = -1
+	probabilities[:, :, 1, :] = np.nan
+	np.save(prediction_result.token_predictions, predictions)
+	np.save(prediction_result.probability_volume, probabilities)
 	seismic_path = prediction_config.inputs.label_volume.with_name('f3_seismic.npy')
 	np.save(
 		seismic_path,
@@ -90,6 +96,10 @@ def test_visualize_f3_lithology_predictions_writes_png_sidecars_and_metadata(
 	sidecar = json.loads(
 		validation_png.with_suffix('.json').read_text(encoding='utf-8'),
 	)
+	selected_sidecar_text = selected_png.with_suffix('.json').read_text(
+		encoding='utf-8',
+	)
+	selected_sidecar = json.loads(selected_sidecar_text)
 	metadata = json.loads(result.metadata_json.read_text(encoding='utf-8'))
 
 	assert validation_png.is_file()
@@ -108,5 +118,13 @@ def test_visualize_f3_lithology_predictions_writes_png_sidecars_and_metadata(
 	}
 	assert sidecar['token_metrics']['accuracy'] == '1.0'
 	assert sidecar['voxel_projection_metrics']['accuracy'] == 1.0
+	assert 'NaN' not in selected_sidecar_text
+	assert 'Infinity' not in selected_sidecar_text
+	assert selected_sidecar['voxel_projection_metrics']['pixel_count'] == 0
+	assert selected_sidecar['voxel_projection_metrics']['accuracy'] is None
+	assert selected_sidecar['voxel_projection_metrics']['balanced_accuracy'] is None
+	assert selected_sidecar['voxel_projection_metrics']['macro_f1'] is None
+	assert selected_sidecar['voxel_projection_metrics']['weighted_f1'] is None
+	assert selected_sidecar['voxel_projection_metrics']['mean_iou'] is None
 	assert metadata['artifact_type'] == 'f3_lithology_prediction_visualizations'
 	assert metadata['figures'][0]['group'] == 'validation'

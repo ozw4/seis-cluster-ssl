@@ -868,9 +868,34 @@ def _read_json(path: Path) -> Mapping[str, Any]:
 def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	path.write_text(
-		json.dumps(payload, indent=2, sort_keys=True, allow_nan=True) + '\n',
+		json.dumps(
+			_json_safe(payload),
+			indent=2,
+			sort_keys=True,
+			allow_nan=False,
+		)
+		+ '\n',
 		encoding='utf-8',
 	)
+
+
+def _json_safe(value: object) -> object:  # noqa: PLR0911
+	if isinstance(value, Mapping):
+		return {str(key): _json_safe(child) for key, child in value.items()}
+	if isinstance(value, tuple | list):
+		return [_json_safe(child) for child in value]
+	if isinstance(value, np.ndarray):
+		return _json_safe(value.tolist())
+	if isinstance(value, np.bool_):
+		return bool(value)
+	if isinstance(value, np.integer):
+		return int(value)
+	if isinstance(value, np.floating):
+		number = float(value)
+		return number if np.isfinite(number) else None
+	if isinstance(value, float):
+		return value if np.isfinite(value) else None
+	return value
 
 
 def _matplotlib_pyplot() -> object:

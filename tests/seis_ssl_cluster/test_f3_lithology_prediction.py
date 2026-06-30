@@ -78,6 +78,37 @@ def test_predict_f3_lithology_tokens_writes_grids_metadata_and_metrics(
 	assert all(float(row['accuracy']) == 1.0 for row in metric_rows)
 
 
+def test_predict_f3_lithology_tokens_writes_standard_json_for_empty_metrics(
+	tmp_path: Path,
+) -> None:
+	config = write_prediction_fixture(tmp_path)
+	valid_token_path = (
+		config.inputs.embeddings_dir / 'f3_facies_benchmark.valid_tokens.npy'
+	)
+	valid_tokens = np.load(valid_token_path)
+	valid_tokens[0, :, :] = False
+	np.save(valid_token_path, valid_tokens)
+
+	result = predict_f3_lithology_tokens(config)
+
+	text = result.metadata_json.read_text(encoding='utf-8')
+	metadata = json.loads(text)
+	inline_row = next(
+		row
+		for row in metadata['validation_slice_metrics']
+		if row['slice_type'] == 'inline'
+	)
+
+	assert 'NaN' not in text
+	assert 'Infinity' not in text
+	assert inline_row['token_count'] == 0
+	assert inline_row['accuracy'] is None
+	assert inline_row['balanced_accuracy'] is None
+	assert inline_row['macro_f1'] is None
+	assert inline_row['weighted_f1'] is None
+	assert inline_row['mean_iou'] is None
+
+
 def write_prediction_fixture(tmp_path: Path) -> F3LithologyPredictionConfig:
 	artifact_root = tmp_path / 'artifacts' / 'seis_ssl_cluster'
 	f3_root = tmp_path / 'F3'
