@@ -256,7 +256,7 @@ def test_build_f3_lithology_token_dataset_outputs_npz_metadata_and_figures(
 	).is_file()
 
 
-def test_build_f3_lithology_token_dataset_removes_cross_split_token_overlap(
+def test_build_f3_lithology_token_dataset_keeps_inventory_slice_split_tokens(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -275,18 +275,16 @@ def test_build_f3_lithology_token_dataset_removes_cross_split_token_overlap(
 	train_token_xyz = _token_xyz_set(train)
 	validation_token_xyz = _token_xyz_set(validation)
 
-	assert train_token_xyz.isdisjoint(validation_token_xyz)
 	assert {(0, 1, 0), (0, 1, 1)} <= validation_token_xyz
-	assert {(0, 1, 0), (0, 1, 1)}.isdisjoint(train_token_xyz)
-	assert (
-		metadata['cross_split_token_overlap_resolution'][
-			'unique_cross_split_duplicate_tokens'
-		]
-		== 2
+	assert {(0, 1, 0), (0, 1, 1)} <= train_token_xyz
+	assert train_token_xyz & validation_token_xyz == {(0, 1, 0), (0, 1, 1)}
+	assert train['labels'].shape[0] == 4
+	assert validation['labels'].shape[0] == 4
+	assert metadata['split_strategy'] == (
+		'png_label_inventory_slice_split_no_random_token_split'
 	)
-	assert (
-		metadata['summary']['cross_split_duplicate_rows_removed_from_train'] == 2
-	)
+	assert 'cross_split_token_overlap_resolution' not in metadata
+	assert 'cross_split_duplicate_rows_removed_from_train' not in metadata['summary']
 
 
 def test_build_f3_lithology_token_dataset_proc_dry_run(tmp_path: Path) -> None:
