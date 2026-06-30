@@ -14,6 +14,11 @@ BASELINE_ROOT = (
 RANDOM_ENCODER_TAG = (
 	'random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1'
 )
+REFERENCE_CHECKPOINT = (
+	'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/'
+	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/'
+	'mae_latest.pt'
+)
 
 
 def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
@@ -70,6 +75,9 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 				'/lithology/f3/facies_benchmark_v1',
 			)
 			assert '/reports/baseline_comparison_v1/' in comparison['output_csv']
+
+		if yaml_path.name == '01_create_random_checkpoint.yaml':
+			assert payload['reference_model']['checkpoint'] == REFERENCE_CHECKPOINT
 
 	readme = (BASELINE_ROOT / 'README.md').read_text(encoding='utf-8')
 	assert 'FEATURE_SOURCE_KIND' in readme

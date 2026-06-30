@@ -252,6 +252,19 @@ def test_default_lithology_report_config_uses_prediction_metadata_json() -> None
 	)
 
 
+def test_default_lithology_configs_use_latest_checkpoint_contract() -> None:
+	config_dir = _default_lithology_config_dir()
+	expected_checkpoint = (
+		'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/'
+		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/'
+		'mae_latest.pt'
+	)
+
+	for yaml_path in sorted(config_dir.glob('*.yaml')):
+		payload = yaml.safe_load(yaml_path.read_text(encoding='utf-8'))
+		assert payload['model']['checkpoint'] == expected_checkpoint
+
+
 def _report_config(run: dict[str, object]) -> F3LithologyReportConfig:
 	return F3LithologyReportConfig(
 		output_dir=Path(run['report_dir']),
