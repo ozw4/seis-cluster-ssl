@@ -602,6 +602,7 @@ def _sidecar_payload(
 		'array_index': figure.array_index,
 		'fixed_token_index': figure.fixed_token_index,
 		'display': figure.display_metadata(),
+		'probe': dict(config.probe),
 		'inputs': {
 			'seismic_volume': str(config.inputs.seismic_volume),
 			'label_volume': str(config.inputs.label_volume),

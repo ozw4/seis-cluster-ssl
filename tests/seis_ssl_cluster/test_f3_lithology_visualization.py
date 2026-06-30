@@ -100,6 +100,7 @@ def test_visualize_f3_lithology_predictions_writes_png_sidecars_and_metadata(
 	assert sidecar['display']['z_axis'] == 'down'
 	assert sidecar['display']['origin'] == 'upper'
 	assert sidecar['figure_config']['background'] == 'white'
+	assert sidecar['probe'] == dict(prediction_config.probe)
 	assert sidecar['class_legend'][0] == {
 		'class_id': 0,
 		'class_name': 'Class zero',
