@@ -1,0 +1,23 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+inputs:
+  seismic_segy: /home/dcuser/data/public_data/field/F3/f3_seismic.sgy
+  label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
+  class_info: /home/dcuser/data/public_data/field/F3/interpretation/class_info.json
+  inspection_report: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/report.json
+outputs:
+  volume_dir: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1
+  manifest_path: /workspace/artifacts/seis_ssl_cluster/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json
+  split_path: /workspace/artifacts/seis_ssl_cluster/registry/splits/f3/facies_benchmark_v1/f3_npy_paths.txt
+  normalization_stats_path: /workspace/artifacts/seis_ssl_cluster/registry/normalization_stats/f3/facies_benchmark_v1/f3_seismic.normalization_stats.json
+  metadata_path: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_metadata.json
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+  survey_id: f3_facies_benchmark
+normalization:
+  clipping_percentiles: [0.5, 99.5]
+  epsilon: 1.0e-6
+  max_samples: 1000000
+  seed: 42
