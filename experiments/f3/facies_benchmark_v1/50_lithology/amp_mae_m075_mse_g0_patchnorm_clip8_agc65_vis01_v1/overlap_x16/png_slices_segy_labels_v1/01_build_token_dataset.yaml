@@ -1,0 +1,36 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+model:
+  tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt
+  freeze_encoder: true
+embeddings:
+  spec: overlap_x16
+  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16
+labels:
+  set: png_slices_segy_labels_v1
+  source_label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
+  source_label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  png_label_inventory: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/png_label_inventory.json
+  png_label_role: train_validation_slice_selection_and_visual_qc
+registry:
+  seismic_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
+  label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_metadata.json
+  amplitude_manifest: /workspace/artifacts/seis_ssl_cluster/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json
+  normalization_stats: /workspace/artifacts/seis_ssl_cluster/registry/normalization_stats/f3/facies_benchmark_v1/f3_seismic.normalization_stats.json
+lithology:
+  root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1
+token_dataset:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset
+  split_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset/splits.json
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset/metadata.json
+  token_label_policy:
+    min_labeled_fraction: 0.5
+    min_majority_fraction: 0.7
+  split_source: png_label_inventory
+  label_source_of_truth: segy_label_volume

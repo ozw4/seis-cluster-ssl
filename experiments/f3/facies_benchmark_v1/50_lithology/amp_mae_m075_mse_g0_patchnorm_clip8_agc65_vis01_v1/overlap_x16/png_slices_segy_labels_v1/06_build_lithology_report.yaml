@@ -1,0 +1,29 @@
+paths:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+model:
+  tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt
+  freeze_encoder: true
+labels:
+  set: png_slices_segy_labels_v1
+  source_label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
+  source_label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  palette_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/labels/facies_palette.json
+  png_label_role: train_validation_slice_selection_and_visual_qc
+lithology:
+  root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1
+probe:
+  spec: linear_balanced_v1
+  metrics_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.json
+predictions:
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/predictions/linear_balanced_v1/metadata.json
+visualizations:
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/visualizations/linear_balanced_v1/metadata.json
+reports:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1
+  output_markdown: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.md
+  output_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.json
