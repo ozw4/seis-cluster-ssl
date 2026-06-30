@@ -5,9 +5,8 @@ lithology probe against simple baselines. This stage is for checking whether the
 pretrained MAE embedding adds value beyond token position, local amplitude
 statistics, or the same MAE architecture with random weights.
 
-This directory defines the layout and metadata contract only. The z-only,
-amplitude-statistics, and random-checkpoint creation implementations are out of
-scope for this issue.
+This directory defines the layout, metadata contract, configs, and run order for
+the z-only, amplitude-statistics, and random-encoder baseline comparisons.
 
 Source-of-truth inputs:
 
@@ -196,7 +195,7 @@ The random-encoder baseline uses the same MAE architecture as
 `$REFERENCE_MODEL_TAG`, initialized with seed `42` and no pretraining:
 
 ```bash
-python proc/seis_ssl_cluster/create_f3_random_mae_checkpoint.py \
+python proc/seis_ssl_cluster/create_random_mae_checkpoint.py \
   --config $EXP/50_lithology_baselines/$RANDOM_ENCODER_TAG/01_create_random_checkpoint.yaml
 
 python proc/seis_ssl_cluster/extract_embeddings.py \
@@ -212,6 +211,5 @@ python proc/seis_ssl_cluster/build_f3_lithology_report.py \
   --config $EXP/50_lithology_baselines/$RANDOM_ENCODER_TAG/05_build_report.yaml
 ```
 
-`build_f3_lithology_baseline_token_dataset.py` and
-`create_f3_random_mae_checkpoint.py` are reserved entrypoints for the later
-implementation issues.
+The baseline feature datasets and random MAE checkpoint are created by the proc
+entrypoints shown above.
