@@ -95,6 +95,7 @@ from seis_ssl_cluster.f3.lithology_tokens import (
 	F3LithologyTokenDatasetOutputs,
 	F3LithologyTokenDatasetResult,
 	F3LithologyTokenPolicy,
+	F3ReferenceTokenDataset,
 	F3SliceTokenization,
 	F3TokenArrays,
 	build_f3_lithology_token_dataset,

@@ -53,6 +53,11 @@ def test_create_random_mae_checkpoint_preserves_reference_config_and_metadata(
 		'eps': 1.0e-6,
 		'clip_abs': 2.0,
 	}
+	assert payload['config']['loss']['target_normalization'] == {
+		'mode': 'patch_zscore',
+		'eps': 1.0e-6,
+		'min_std': 0.05,
+	}
 	assert payload['metadata'] == {
 		'random_encoder_baseline': True,
 		'reference_checkpoint': str(reference_checkpoint),
@@ -176,6 +181,11 @@ def test_random_mae_checkpoint_is_readable_by_embedding_extractor(
 			'clip_abs': 2.0,
 		},
 	}
+	assert metadata['pretraining_objective']['target_normalization'] == {
+		'mode': 'patch_zscore',
+		'eps': 1.0e-6,
+		'min_std': 0.05,
+	}
 
 
 def _write_reference_checkpoint(tmp_path: Path) -> Path:
@@ -253,7 +263,11 @@ def _reference_checkpoint_config(tmp_path: Path) -> dict[str, object]:
 			'huber_delta': 1.0,
 			'gradient_weight': 0.0,
 			'visible_reconstruction_weight': 0.0,
-			'target_normalization': {'mode': 'none'},
+			'target_normalization': {
+				'mode': 'patch_zscore',
+				'eps': 1.0e-6,
+				'min_std': 0.05,
+			},
 			'valid_mask_mode': 'voxel',
 		},
 		'zero_mask': {

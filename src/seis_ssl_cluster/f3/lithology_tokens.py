@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -123,6 +124,17 @@ class F3LithologyTokenDatasetOutputs:
 
 
 @dataclass(frozen=True)
+class F3ReferenceTokenDataset:
+	"""Reference token rows whose split and labels are reused."""
+
+	train_tokens: Path
+	validation_tokens: Path
+	metadata_json: Path
+	split_manifest_json: Path | None = None
+	root: Path | None = None
+
+
+@dataclass(frozen=True)
 class F3LithologyTokenDatasetConfig:
 	"""Complete F3 lithology token dataset build configuration."""
 
@@ -133,6 +145,7 @@ class F3LithologyTokenDatasetConfig:
 	model: Mapping[str, object]
 	figure_dpi: int = 300
 	feature_source: Mapping[str, object] | None = None
+	reference_token_dataset: F3ReferenceTokenDataset | None = None
 
 
 @dataclass(frozen=True)
@@ -253,6 +266,13 @@ def build_f3_lithology_token_dataset(
 		geometry=geometry,
 		embedding=embedding,
 	)
+	if config.reference_token_dataset is not None:
+		return _build_from_reference_token_dataset(
+			config,
+			classes=classes,
+			geometry=geometry,
+			embedding=embedding,
+		)
 
 	slice_results = [
 		tokenize_f3_lithology_slice(
@@ -317,6 +337,60 @@ def build_f3_lithology_token_dataset(
 		summary_markdown=config.outputs.summary_markdown,
 		split_manifest_json=config.outputs.split_manifest_json,
 		quicklook_paths=quicklook_paths,
+		train_token_count=arrays_by_split['train'].count,
+		validation_token_count=arrays_by_split['validation'].count,
+	)
+
+
+def _build_from_reference_token_dataset(
+	config: F3LithologyTokenDatasetConfig,
+	*,
+	classes: Sequence[F3ClassInfo],
+	geometry: F3LineGeometry,
+	embedding: F3EmbeddingArtifact,
+) -> F3LithologyTokenDatasetResult:
+	reference = config.reference_token_dataset
+	if reference is None:
+		msg = 'reference_token_dataset is required'
+		raise ValueError(msg)
+	reference_metadata = _read_json(reference.metadata_json)
+	arrays_by_split = {
+		'train': _replace_reference_features(
+			_load_token_arrays_npz(reference.train_tokens, label='train_tokens'),
+			embedding=embedding,
+			label='train_tokens',
+		),
+		'validation': _replace_reference_features(
+			_load_token_arrays_npz(
+				reference.validation_tokens,
+				label='validation_tokens',
+			),
+			embedding=embedding,
+			label='validation_tokens',
+		),
+	}
+	all_arrays = _concatenate_token_arrays(
+		list(arrays_by_split.values()),
+		embedding_dim=embedding.embedding_dim,
+	)
+	_write_reference_reuse_outputs(
+		config,
+		classes=classes,
+		geometry=geometry,
+		embedding=embedding,
+		reference_metadata=reference_metadata,
+		arrays_by_split=arrays_by_split,
+		all_arrays=all_arrays,
+	)
+	return F3LithologyTokenDatasetResult(
+		train_npz=config.outputs.train_npz,
+		validation_npz=config.outputs.validation_npz,
+		all_labeled_npz=config.outputs.all_labeled_npz,
+		metadata_json=config.outputs.metadata_json,
+		class_counts_csv=config.outputs.class_counts_csv,
+		summary_markdown=config.outputs.summary_markdown,
+		split_manifest_json=config.outputs.split_manifest_json,
+		quicklook_paths=(),
 		train_token_count=arrays_by_split['train'].count,
 		validation_token_count=arrays_by_split['validation'].count,
 	)
@@ -827,6 +901,127 @@ def _string_array(value: str, count: int) -> NDArray[np.str_]:
 	return np.full(count, value, dtype=dtype)
 
 
+def _load_token_arrays_npz(path: Path, *, label: str) -> F3TokenArrays:
+	if not path.is_file():
+		msg = f'{label} reference token dataset does not exist: {path}'
+		raise FileNotFoundError(msg)
+	with np.load(path) as data:
+		required = (
+			'features',
+			'labels',
+			'survey_id',
+			'split',
+			'slice_type',
+			'slice_index',
+			'token_xyz',
+			'voxel_center_xyz',
+			'majority_fraction',
+			'labeled_fraction',
+		)
+		missing = [name for name in required if name not in data.files]
+		if missing:
+			msg = f'{label} missing required field(s): {missing!r}'
+			raise KeyError(msg)
+		return F3TokenArrays(
+			features=np.asarray(data['features'], dtype=np.float32),
+			labels=np.asarray(data['labels'], dtype=np.int64),
+			survey_id=np.asarray(data['survey_id']),
+			split=np.asarray(data['split']),
+			slice_type=np.asarray(data['slice_type']),
+			slice_index=np.asarray(data['slice_index'], dtype=np.int64),
+			token_xyz=np.asarray(data['token_xyz'], dtype=np.int64),
+			voxel_center_xyz=np.asarray(data['voxel_center_xyz'], dtype=np.float32),
+			majority_fraction=np.asarray(
+				data['majority_fraction'],
+				dtype=np.float32,
+			),
+			labeled_fraction=np.asarray(
+				data['labeled_fraction'],
+				dtype=np.float32,
+			),
+		)
+
+
+def _replace_reference_features(
+	reference: F3TokenArrays,
+	*,
+	embedding: F3EmbeddingArtifact,
+	label: str,
+) -> F3TokenArrays:
+	_validate_reference_token_arrays(reference, embedding=embedding, label=label)
+	return F3TokenArrays(
+		features=_features_for_tokens(embedding.embeddings, reference.token_xyz),
+		labels=reference.labels,
+		survey_id=reference.survey_id,
+		split=reference.split,
+		slice_type=reference.slice_type,
+		slice_index=reference.slice_index,
+		token_xyz=reference.token_xyz,
+		voxel_center_xyz=reference.voxel_center_xyz,
+		majority_fraction=reference.majority_fraction,
+		labeled_fraction=reference.labeled_fraction,
+	)
+
+
+def _validate_reference_token_arrays(
+	reference: F3TokenArrays,
+	*,
+	embedding: F3EmbeddingArtifact,
+	label: str,
+) -> None:
+	count = reference.count
+	for name, values in (
+		('features', reference.features),
+		('survey_id', reference.survey_id),
+		('split', reference.split),
+		('slice_type', reference.slice_type),
+		('slice_index', reference.slice_index),
+		('token_xyz', reference.token_xyz),
+		('voxel_center_xyz', reference.voxel_center_xyz),
+		('majority_fraction', reference.majority_fraction),
+		('labeled_fraction', reference.labeled_fraction),
+	):
+		if values.shape[0] != count:
+			msg = (
+				f'{label}.{name} row count must match labels; '
+				f'got {values.shape[0]}, expected={count}'
+			)
+			raise ValueError(msg)
+	if reference.features.ndim != 2:
+		msg = f'{label}.features must be a 2D matrix; got {reference.features.shape!r}'
+		raise ValueError(msg)
+	if reference.token_xyz.shape != (count, 3):
+		msg = (
+			f'{label}.token_xyz must have shape [{count}, 3]; '
+			f'got {reference.token_xyz.shape!r}'
+		)
+		raise ValueError(msg)
+	if reference.voxel_center_xyz.shape != (count, 3):
+		msg = (
+			f'{label}.voxel_center_xyz must have shape [{count}, 3]; '
+			f'got {reference.voxel_center_xyz.shape!r}'
+		)
+		raise ValueError(msg)
+	if count == 0:
+		return
+	token_xyz = reference.token_xyz
+	for axis, size in enumerate(embedding.token_grid_shape_xyz):
+		if np.any(token_xyz[:, axis] < 0) or np.any(token_xyz[:, axis] >= size):
+			msg = (
+				f'{label}.token_xyz axis {axis} is outside embedding token grid '
+				f'{embedding.token_grid_shape_xyz!r}'
+			)
+			raise ValueError(msg)
+	valid = embedding.valid_tokens[token_xyz[:, 0], token_xyz[:, 1], token_xyz[:, 2]]
+	if not np.all(valid):
+		invalid_count = int(np.count_nonzero(~valid))
+		msg = (
+			f'{label} contains {invalid_count} token(s) invalid in '
+			'the embedding valid-token mask'
+		)
+		raise ValueError(msg)
+
+
 def _write_outputs(  # noqa: PLR0913
 	config: F3LithologyTokenDatasetConfig,
 	*,
@@ -845,6 +1040,7 @@ def _write_outputs(  # noqa: PLR0913
 	outputs.class_counts_csv.parent.mkdir(parents=True, exist_ok=True)
 	outputs.summary_markdown.parent.mkdir(parents=True, exist_ok=True)
 	outputs.split_manifest_json.parent.mkdir(parents=True, exist_ok=True)
+	outputs.quicklook_dir.mkdir(parents=True, exist_ok=True)
 	_save_npz(outputs.train_npz, arrays_by_split['train'])
 	_save_npz(outputs.validation_npz, arrays_by_split['validation'])
 	_save_npz(outputs.all_labeled_npz, all_arrays)
@@ -872,6 +1068,70 @@ def _write_outputs(  # noqa: PLR0913
 			overlap_resolution=overlap_resolution,
 		),
 	)
+
+
+def _write_reference_reuse_outputs(  # noqa: PLR0913
+	config: F3LithologyTokenDatasetConfig,
+	*,
+	classes: Sequence[F3ClassInfo],
+	geometry: F3LineGeometry,
+	embedding: F3EmbeddingArtifact,
+	reference_metadata: Mapping[str, object],
+	arrays_by_split: Mapping[str, F3TokenArrays],
+	all_arrays: F3TokenArrays,
+) -> None:
+	outputs = config.outputs
+	outputs.output_dir.mkdir(parents=True, exist_ok=True)
+	outputs.metadata_json.parent.mkdir(parents=True, exist_ok=True)
+	outputs.class_counts_csv.parent.mkdir(parents=True, exist_ok=True)
+	outputs.summary_markdown.parent.mkdir(parents=True, exist_ok=True)
+	outputs.split_manifest_json.parent.mkdir(parents=True, exist_ok=True)
+	outputs.quicklook_dir.mkdir(parents=True, exist_ok=True)
+	_save_npz(outputs.train_npz, arrays_by_split['train'])
+	_save_npz(outputs.validation_npz, arrays_by_split['validation'])
+	_save_npz(outputs.all_labeled_npz, all_arrays)
+	_write_reference_split_manifest(config)
+	_write_class_counts_csv(outputs.class_counts_csv, classes, arrays_by_split)
+	_write_text(
+		outputs.summary_markdown,
+		_render_reference_reuse_summary_markdown(
+			arrays_by_split,
+			all_arrays=all_arrays,
+		),
+	)
+	_write_json(
+		outputs.metadata_json,
+		_reference_reuse_metadata_payload(
+			config,
+			classes=classes,
+			geometry=geometry,
+			embedding=embedding,
+			reference_metadata=reference_metadata,
+			arrays_by_split=arrays_by_split,
+			all_arrays=all_arrays,
+		),
+	)
+
+
+def _write_reference_split_manifest(config: F3LithologyTokenDatasetConfig) -> None:
+	reference = config.reference_token_dataset
+	if reference is None or reference.split_manifest_json is None:
+		_write_json(
+			config.outputs.split_manifest_json,
+			{
+				'split_unit': 'token',
+				'split_source': 'reference_token_dataset',
+				'no_random_split': True,
+			},
+		)
+		return
+	if not reference.split_manifest_json.is_file():
+		msg = (
+			'reference split manifest does not exist: '
+			f'{reference.split_manifest_json}'
+		)
+		raise FileNotFoundError(msg)
+	shutil.copyfile(reference.split_manifest_json, config.outputs.split_manifest_json)
 
 
 def _save_npz(path: Path, arrays: F3TokenArrays) -> None:
@@ -1024,6 +1284,116 @@ def _metadata_payload(  # noqa: PLR0913
 	return payload
 
 
+def _reference_reuse_metadata_payload(  # noqa: PLR0913
+	config: F3LithologyTokenDatasetConfig,
+	*,
+	classes: Sequence[F3ClassInfo],
+	geometry: F3LineGeometry,
+	embedding: F3EmbeddingArtifact,
+	reference_metadata: Mapping[str, object],
+	arrays_by_split: Mapping[str, F3TokenArrays],
+	all_arrays: F3TokenArrays,
+) -> dict[str, object]:
+	reference = config.reference_token_dataset
+	if reference is None:
+		msg = 'reference_token_dataset is required'
+		raise ValueError(msg)
+	reference_slices = reference_metadata.get('slices', [])
+	if not isinstance(reference_slices, Sequence) or isinstance(
+		reference_slices,
+		str | bytes,
+	):
+		reference_slices = []
+	reference_slices_list = list(reference_slices)
+	payload: dict[str, object] = {
+		'artifact_type': 'f3_lithology_token_dataset',
+		'dataset': dict(config.dataset),
+		'model': dict(config.model),
+		'label_source_of_truth': reference_metadata.get(
+			'label_source_of_truth',
+			'segy_label_volume',
+		),
+		'png_label_role': reference_metadata.get(
+			'png_label_role',
+			'train_validation_slice_selection_and_visual_qc',
+		),
+		'split_strategy': 'reference_token_dataset_train_validation_split',
+		'no_random_split': True,
+		'reference_token_dataset': {
+			'root': None if reference.root is None else str(reference.root),
+			'train_tokens': str(reference.train_tokens),
+			'validation_tokens': str(reference.validation_tokens),
+			'metadata_json': str(reference.metadata_json),
+			'split_manifest_json': (
+				None
+				if reference.split_manifest_json is None
+				else str(reference.split_manifest_json)
+			),
+		},
+		'inputs': {
+			'embeddings_dir': str(config.inputs.embeddings_dir),
+			'label_volume': str(config.inputs.label_volume),
+			'seismic_volume': str(config.inputs.seismic_volume),
+			'png_label_inventory': str(config.inputs.png_label_inventory),
+			'class_info': str(config.inputs.class_info),
+			'segy_geometry_json': str(config.inputs.segy_geometry_json),
+			'source_label_segy': (
+				None
+				if config.inputs.source_label_segy is None
+				else str(config.inputs.source_label_segy)
+			),
+			'volume_metadata_json': (
+				None
+				if config.inputs.volume_metadata_json is None
+				else str(config.inputs.volume_metadata_json)
+			),
+		},
+		'embedding': {
+			'survey_id': embedding.survey_id,
+			'embeddings_path': str(embedding.embeddings_path),
+			'valid_tokens_path': str(embedding.valid_tokens_path),
+			'metadata_path': str(embedding.metadata_path),
+			'patch_size_xyz': list(embedding.patch_size_xyz),
+			'token_grid_shape_xyz': list(embedding.token_grid_shape_xyz),
+			'embedding_dim': embedding.embedding_dim,
+		},
+		'geometry': geometry.to_dict(),
+		'tokenization': dict(
+			reference_metadata.get('tokenization', config.policy.to_dict()),
+		),
+		'classes': [class_info.to_dict() for class_info in classes],
+		'outputs': {
+			'train_tokens': str(config.outputs.train_npz),
+			'validation_tokens': str(config.outputs.validation_npz),
+			'all_labeled_tokens': str(config.outputs.all_labeled_npz),
+			'metadata_json': str(config.outputs.metadata_json),
+			'class_counts_csv': str(config.outputs.class_counts_csv),
+			'summary_markdown': str(config.outputs.summary_markdown),
+			'split_manifest_json': str(config.outputs.split_manifest_json),
+			'quicklook_dir': str(config.outputs.quicklook_dir),
+		},
+		'summary': {
+			'train_tokens': arrays_by_split['train'].count,
+			'validation_tokens': arrays_by_split['validation'].count,
+			'all_labeled_tokens': all_arrays.count,
+			'slice_count': len(reference_slices_list),
+			'total_dropped_tokens': 0,
+			'total_ambiguous_tokens': 0,
+			'total_empty_tokens': 0,
+			'total_invalid_embedding_tokens': 0,
+			'cross_split_duplicate_rows_removed_from_train': 0,
+		},
+		'slices': reference_slices_list,
+	}
+	if 'cross_split_token_overlap_resolution' in reference_metadata:
+		payload['cross_split_token_overlap_resolution'] = reference_metadata[
+			'cross_split_token_overlap_resolution'
+		]
+	if config.feature_source is not None:
+		payload['feature_source'] = dict(config.feature_source)
+	return payload
+
+
 def _render_summary_markdown(
 	arrays_by_split: Mapping[str, F3TokenArrays],
 	*,
@@ -1064,6 +1434,25 @@ def _render_summary_markdown(
 		for result in slice_results
 	)
 	return '\n'.join(lines) + '\n'
+
+
+def _render_reference_reuse_summary_markdown(
+	arrays_by_split: Mapping[str, F3TokenArrays],
+	*,
+	all_arrays: F3TokenArrays,
+) -> str:
+	return '\n'.join(
+		[
+			'# F3 lithology token dataset',
+			'',
+			f'- train tokens: {arrays_by_split["train"].count}',
+			f'- validation tokens: {arrays_by_split["validation"].count}',
+			f'- all labeled tokens: {all_arrays.count}',
+			'- split strategy: reference token dataset train/validation rows',
+			'- quicklooks: skipped; reference token rows were reused',
+			'',
+		],
+	)
 
 
 def _save_token_quicklook(  # noqa: PLR0913
@@ -1270,6 +1659,18 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
 	)
 
 
+def _read_json(path: Path) -> Mapping[str, object]:
+	if not path.is_file():
+		msg = f'JSON file does not exist: {path}'
+		raise FileNotFoundError(msg)
+	with path.open(encoding='utf-8') as file_obj:
+		payload = json.load(file_obj)
+	if not isinstance(payload, Mapping):
+		msg = f'JSON file must contain an object: {path}'
+		raise TypeError(msg)
+	return payload
+
+
 def _write_text(path: Path, text: str) -> None:
 	path.write_text(text, encoding='utf-8')
 
@@ -1384,6 +1785,7 @@ __all__ = [
 	'F3LithologyTokenDatasetOutputs',
 	'F3LithologyTokenDatasetResult',
 	'F3LithologyTokenPolicy',
+	'F3ReferenceTokenDataset',
 	'F3SliceTokenization',
 	'F3TokenArrays',
 	'build_f3_lithology_token_dataset',

@@ -15,6 +15,7 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyTokenDatasetInputs,
 	F3LithologyTokenDatasetOutputs,
 	F3LithologyTokenPolicy,
+	F3ReferenceTokenDataset,
 	F3SliceSplitRecord,
 	build_f3_lithology_token_dataset,
 	f3_slice_split_manifest,
@@ -293,6 +294,115 @@ def test_build_f3_lithology_token_dataset_removes_train_tokens_that_overlap_vali
 	assert metadata['summary']['cross_split_duplicate_rows_removed_from_train'] == 2
 
 
+def test_build_f3_lithology_token_dataset_reuses_reference_rows_for_random_encoder(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setattr(
+		lithology_tokens,
+		'write_f3_lithology_token_quicklooks',
+		lambda *_args, **_kwargs: (),
+	)
+	reference_config = _write_dataset_fixture(tmp_path)
+	reference_result = build_f3_lithology_token_dataset(reference_config)
+	random_embeddings_dir = tmp_path / 'artifacts' / 'seis_ssl_cluster' / 'random'
+	_write_embedding_artifacts(random_embeddings_dir, offset=1000.0)
+	output_dir = (
+		tmp_path
+		/ 'artifacts'
+		/ 'seis_ssl_cluster'
+		/ 'lithology'
+		/ 'f3'
+		/ 'facies_benchmark_v1'
+		/ 'random_encoder'
+		/ 'embed'
+		/ 'labels'
+		/ 'token_dataset'
+	)
+	random_config = F3LithologyTokenDatasetConfig(
+		inputs=F3LithologyTokenDatasetInputs(
+			embeddings_dir=random_embeddings_dir,
+			label_volume=reference_config.inputs.label_volume,
+			seismic_volume=reference_config.inputs.seismic_volume,
+			png_label_inventory=reference_config.inputs.png_label_inventory,
+			class_info=reference_config.inputs.class_info,
+			segy_geometry_json=reference_config.inputs.segy_geometry_json,
+			source_label_segy=reference_config.inputs.source_label_segy,
+			volume_metadata_json=reference_config.inputs.volume_metadata_json,
+		),
+		outputs=F3LithologyTokenDatasetOutputs(
+			output_dir=output_dir,
+			metadata_json=output_dir / 'token_dataset_metadata.json',
+			class_counts_csv=output_dir / 'class_counts.csv',
+			summary_markdown=output_dir / 'token_dataset_summary.md',
+			split_manifest_json=output_dir / 'splits.json',
+			quicklook_dir=output_dir / 'quicklook',
+		),
+		policy=reference_config.policy,
+		dataset=reference_config.dataset,
+		model={
+			'tag': 'random_encoder',
+			'reference_model_tag': 'model',
+			'freeze_encoder': True,
+		},
+		feature_source={
+			'kind': 'random_encoder',
+			'reference_model_tag': 'model',
+			'embedding_spec': 'embed',
+			'description': 'fixture random encoder features',
+		},
+		reference_token_dataset=F3ReferenceTokenDataset(
+			train_tokens=reference_result.train_npz,
+			validation_tokens=reference_result.validation_npz,
+			metadata_json=reference_result.metadata_json,
+			split_manifest_json=reference_result.split_manifest_json,
+			root=reference_config.outputs.output_dir,
+		),
+	)
+
+	result = build_f3_lithology_token_dataset(random_config)
+
+	reference_train = np.load(reference_result.train_npz)
+	random_train = np.load(result.train_npz)
+	random_embedding = np.load(
+		random_embeddings_dir / 'f3_facies_benchmark.embeddings.npy',
+	)
+	expected_features = random_embedding[
+		random_train['token_xyz'][:, 0],
+		random_train['token_xyz'][:, 1],
+		random_train['token_xyz'][:, 2],
+	].astype(np.float32)
+	metadata = json.loads(result.metadata_json.read_text(encoding='utf-8'))
+	summary = result.summary_markdown.read_text(encoding='utf-8')
+
+	for key in (
+		'labels',
+		'survey_id',
+		'split',
+		'slice_type',
+		'slice_index',
+		'token_xyz',
+		'voxel_center_xyz',
+		'majority_fraction',
+		'labeled_fraction',
+	):
+		np.testing.assert_array_equal(random_train[key], reference_train[key])
+	np.testing.assert_array_equal(random_train['features'], expected_features)
+	assert not np.array_equal(random_train['features'], reference_train['features'])
+	assert metadata['split_strategy'] == (
+		'reference_token_dataset_train_validation_split'
+	)
+	assert metadata['reference_token_dataset']['train_tokens'] == str(
+		reference_result.train_npz,
+	)
+	assert metadata['feature_source']['kind'] == 'random_encoder'
+	assert metadata['summary']['slice_count'] == 2
+	assert len(metadata['slices']) == 2
+	assert result.quicklook_paths == ()
+	assert random_config.outputs.quicklook_dir.is_dir()
+	assert 'reference token dataset train/validation rows' in summary
+
+
 def test_build_f3_lithology_token_dataset_proc_dry_run(tmp_path: Path) -> None:
 	config = _write_dataset_fixture(tmp_path)
 	config_path = tmp_path / 'build_f3_lithology_token_dataset.yaml'
@@ -314,6 +424,29 @@ def test_build_f3_lithology_token_dataset_proc_dry_run(tmp_path: Path) -> None:
 	assert 'execution: dry-run; F3 lithology token dataset build skipped' in (
 		result.stdout
 	)
+
+
+def test_build_f3_lithology_token_dataset_proc_dry_run_reports_reference_dataset(
+	tmp_path: Path,
+) -> None:
+	config = _write_dataset_fixture(tmp_path)
+	payload = _config_mapping(config)
+	payload['token_dataset']['reference_token_dataset'] = {
+		'root': str(config.outputs.output_dir),
+	}
+	config_path = tmp_path / 'build_random_lithology_token_dataset.yaml'
+	config_path.write_text(yaml.safe_dump(payload), encoding='utf-8')
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/build_f3_lithology_token_dataset.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'token_dataset.split_source: reference_token_dataset' in result.stdout
+	assert 'token_dataset.reference.train_tokens:' in result.stdout
 
 
 def _write_dataset_fixture(tmp_path: Path) -> F3LithologyTokenDatasetConfig:
@@ -448,9 +581,11 @@ def _label_volume() -> np.ndarray:
 	return labels
 
 
-def _write_embedding_artifacts(output_dir: Path) -> None:
+def _write_embedding_artifacts(output_dir: Path, *, offset: float = 0.0) -> None:
 	output_dir.mkdir(parents=True)
-	embeddings = np.arange(2 * 2 * 2 * 3, dtype=np.float16).reshape(2, 2, 2, 3)
+	embeddings = (
+		np.arange(2 * 2 * 2 * 3, dtype=np.float16).reshape(2, 2, 2, 3) + offset
+	)
 	np.save(output_dir / 'f3_facies_benchmark.embeddings.npy', embeddings)
 	np.save(
 		output_dir / 'f3_facies_benchmark.valid_tokens.npy',
