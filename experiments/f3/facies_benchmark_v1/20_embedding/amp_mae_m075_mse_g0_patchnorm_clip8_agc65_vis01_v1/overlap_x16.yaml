@@ -1,0 +1,13 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+manifests:
+  input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json
+embeddings:
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_best.pt
+  output_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16
+embedding:
+  window_size: [128, 128, 128]
+  overlap: [112, 64, 64]
+  output_dtype: float16
+  batch_size: 1
+  min_token_valid_fraction: 0.5
