@@ -167,7 +167,7 @@ class F3SliceTokenization:
 
 	@property
 	def dropped_tokens(self) -> int:
-		"""Return tokens dropped by label policy or embedding validity."""
+		"""Return tokens not written to the supervised dataset."""
 		return int(self.tokenization.total_tokens - self.retained_tokens)
 
 	@property
@@ -221,6 +221,25 @@ class F3TokenArrays:
 
 
 @dataclass(frozen=True)
+class F3SplitTokenOverlapResolution:
+	"""Record how duplicate token coordinates across supervised splits were handled."""
+
+	strategy: str
+	unique_cross_split_duplicate_tokens: int
+	removed_token_rows_by_split: Mapping[str, int]
+
+	def to_dict(self) -> dict[str, object]:
+		"""Return a JSON-serializable overlap-resolution record."""
+		return {
+			'strategy': self.strategy,
+			'unique_cross_split_duplicate_tokens': (
+				self.unique_cross_split_duplicate_tokens
+			),
+			'removed_token_rows_by_split': dict(self.removed_token_rows_by_split),
+		}
+
+
+@dataclass(frozen=True)
 class F3LithologyTokenDatasetResult:
 	"""Paths and counts written by the F3 lithology token dataset builder."""
 
@@ -265,6 +284,9 @@ def build_f3_lithology_token_dataset(
 		)
 		for record in slice_records
 	]
+	slice_results, split_overlap_resolution = _resolve_cross_split_token_overlaps(
+		slice_results,
+	)
 	arrays_by_split = {
 		split: _concatenate_token_arrays(
 			[
@@ -292,6 +314,7 @@ def build_f3_lithology_token_dataset(
 		embedding=embedding,
 		slice_records=slice_records,
 		slice_results=slice_results,
+		split_overlap_resolution=split_overlap_resolution,
 		arrays_by_split=arrays_by_split,
 		all_arrays=all_arrays,
 	)
@@ -757,6 +780,99 @@ def _empty_token_arrays(embedding_dim: int) -> F3TokenArrays:
 	)
 
 
+def _resolve_cross_split_token_overlaps(
+	slice_results: Sequence[F3SliceTokenization],
+) -> tuple[tuple[F3SliceTokenization, ...], F3SplitTokenOverlapResolution]:
+	validation_tokens = _retained_token_set(slice_results, split='validation')
+	train_tokens = _retained_token_set(slice_results, split='train')
+	overlap_tokens = train_tokens & validation_tokens
+	removed_by_split = {'train': 0, 'validation': 0}
+	strategy = 'validation_holdout_priority_exclude_duplicate_token_xyz_from_train'
+	if not overlap_tokens:
+		return (
+			tuple(slice_results),
+			F3SplitTokenOverlapResolution(
+				strategy=strategy,
+				unique_cross_split_duplicate_tokens=0,
+				removed_token_rows_by_split=removed_by_split,
+			),
+		)
+
+	adjusted: list[F3SliceTokenization] = []
+	for result in slice_results:
+		if result.record.split != 'train' or not np.any(result.usable_mask):
+			adjusted.append(result)
+			continue
+		retained_indices = np.argwhere(result.usable_mask)
+		token_xyz = _token_xyz_from_plane_indices(result, retained_indices)
+		drop_mask = np.fromiter(
+			(_token_key(xyz) in overlap_tokens for xyz in token_xyz),
+			dtype=np.bool_,
+			count=token_xyz.shape[0],
+		)
+		if not np.any(drop_mask):
+			adjusted.append(result)
+			continue
+		updated_usable_mask = np.array(result.usable_mask, dtype=np.bool_, copy=True)
+		drop_indices = retained_indices[drop_mask]
+		updated_usable_mask[drop_indices[:, 0], drop_indices[:, 1]] = False
+		removed_by_split['train'] += int(np.count_nonzero(drop_mask))
+		adjusted.append(
+			F3SliceTokenization(
+				record=result.record,
+				array_index=result.array_index,
+				tokenization=result.tokenization,
+				usable_mask=updated_usable_mask,
+				invalid_embedding_mask=result.invalid_embedding_mask,
+			),
+		)
+
+	adjusted_results = tuple(adjusted)
+	_validate_no_cross_split_token_overlap(adjusted_results)
+	return (
+		adjusted_results,
+		F3SplitTokenOverlapResolution(
+			strategy=strategy,
+			unique_cross_split_duplicate_tokens=len(overlap_tokens),
+			removed_token_rows_by_split=removed_by_split,
+		),
+	)
+
+
+def _retained_token_set(
+	slice_results: Sequence[F3SliceTokenization],
+	*,
+	split: str,
+) -> set[tuple[int, int, int]]:
+	tokens: set[tuple[int, int, int]] = set()
+	for result in slice_results:
+		if result.record.split != split or not np.any(result.usable_mask):
+			continue
+		indices = np.argwhere(result.usable_mask)
+		token_xyz = _token_xyz_from_plane_indices(result, indices)
+		tokens.update(_token_key(xyz) for xyz in token_xyz)
+	return tokens
+
+
+def _validate_no_cross_split_token_overlap(
+	slice_results: Sequence[F3SliceTokenization],
+) -> None:
+	overlap = _retained_token_set(
+		slice_results,
+		split='train',
+	) & _retained_token_set(slice_results, split='validation')
+	if overlap:
+		msg = (
+			'train and validation token datasets must be disjoint by token_xyz; '
+			f'found {len(overlap)} overlapping token coordinates'
+		)
+		raise ValueError(msg)
+
+
+def _token_key(token_xyz: NDArray[np.integer]) -> tuple[int, int, int]:
+	return tuple(int(axis) for axis in token_xyz)
+
+
 def _string_array(value: str, count: int) -> NDArray[np.str_]:
 	dtype = f'<U{max(1, len(value))}'
 	return np.full(count, value, dtype=dtype)
@@ -770,6 +886,7 @@ def _write_outputs(  # noqa: PLR0913
 	embedding: F3EmbeddingArtifact,
 	slice_records: Sequence[F3SliceSplitRecord],
 	slice_results: Sequence[F3SliceTokenization],
+	split_overlap_resolution: F3SplitTokenOverlapResolution,
 	arrays_by_split: Mapping[str, F3TokenArrays],
 	all_arrays: F3TokenArrays,
 ) -> None:
@@ -790,6 +907,7 @@ def _write_outputs(  # noqa: PLR0913
 			arrays_by_split,
 			all_arrays=all_arrays,
 			slice_results=slice_results,
+			split_overlap_resolution=split_overlap_resolution,
 		),
 	)
 	_write_json(
@@ -800,6 +918,7 @@ def _write_outputs(  # noqa: PLR0913
 			geometry=geometry,
 			embedding=embedding,
 			slice_results=slice_results,
+			split_overlap_resolution=split_overlap_resolution,
 			arrays_by_split=arrays_by_split,
 			all_arrays=all_arrays,
 		),
@@ -872,6 +991,7 @@ def _metadata_payload(  # noqa: PLR0913
 	geometry: F3LineGeometry,
 	embedding: F3EmbeddingArtifact,
 	slice_results: Sequence[F3SliceTokenization],
+	split_overlap_resolution: F3SplitTokenOverlapResolution,
 	arrays_by_split: Mapping[str, F3TokenArrays],
 	all_arrays: F3TokenArrays,
 ) -> dict[str, object]:
@@ -882,6 +1002,9 @@ def _metadata_payload(  # noqa: PLR0913
 		'label_source_of_truth': 'segy_label_volume',
 		'png_label_role': 'train_validation_slice_selection_and_visual_qc',
 		'split_strategy': 'png_label_inventory_slice_split_no_random_token_split',
+		'cross_split_token_overlap_resolution': (
+			split_overlap_resolution.to_dict()
+		),
 		'no_random_split': True,
 		'inputs': {
 			'embeddings_dir': str(config.inputs.embeddings_dir),
@@ -943,6 +1066,12 @@ def _metadata_payload(  # noqa: PLR0913
 			'total_invalid_embedding_tokens': int(
 				sum(result.invalid_embedding_token_count for result in slice_results),
 			),
+			'cross_split_duplicate_token_xyz': (
+				split_overlap_resolution.unique_cross_split_duplicate_tokens
+			),
+			'cross_split_duplicate_rows_removed_from_train': int(
+				split_overlap_resolution.removed_token_rows_by_split.get('train', 0),
+			),
 		},
 		'slices': [result.to_summary_dict() for result in slice_results],
 	}
@@ -953,6 +1082,7 @@ def _render_summary_markdown(
 	*,
 	all_arrays: F3TokenArrays,
 	slice_results: Sequence[F3SliceTokenization],
+	split_overlap_resolution: F3SplitTokenOverlapResolution,
 ) -> str:
 	lines = [
 		'# F3 lithology token dataset',
@@ -962,6 +1092,14 @@ def _render_summary_markdown(
 		f'- all labeled tokens: {all_arrays.count}',
 		f'- supervised slices: {len(slice_results)}',
 		'- split strategy: png_label_inventory slice split; no random token split',
+		(
+			'- cross-split duplicate token_xyz: '
+			f'{split_overlap_resolution.unique_cross_split_duplicate_tokens}'
+		),
+		(
+			'- train token rows removed for validation holdout: '
+			f'{split_overlap_resolution.removed_token_rows_by_split.get("train", 0)}'
+		),
 		'',
 		'## Per-slice tokenization',
 		'',

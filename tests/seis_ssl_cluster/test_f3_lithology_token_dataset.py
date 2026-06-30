@@ -18,6 +18,7 @@ from seis_ssl_cluster.f3 import (
 	F3SliceSplitRecord,
 	build_f3_lithology_token_dataset,
 	f3_slice_split_manifest,
+	lithology_tokens,
 	load_f3_slice_split_records,
 	resolve_f3_slice_array_index,
 	tokenize_f3_lithology_slice,
@@ -255,6 +256,39 @@ def test_build_f3_lithology_token_dataset_outputs_npz_metadata_and_figures(
 	).is_file()
 
 
+def test_build_f3_lithology_token_dataset_removes_cross_split_token_overlap(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _write_dataset_fixture(tmp_path)
+	monkeypatch.setattr(
+		lithology_tokens,
+		'write_f3_lithology_token_quicklooks',
+		lambda *_args, **_kwargs: (),
+	)
+
+	result = build_f3_lithology_token_dataset(config)
+
+	train = np.load(result.train_npz)
+	validation = np.load(result.validation_npz)
+	metadata = json.loads(result.metadata_json.read_text(encoding='utf-8'))
+	train_token_xyz = _token_xyz_set(train)
+	validation_token_xyz = _token_xyz_set(validation)
+
+	assert train_token_xyz.isdisjoint(validation_token_xyz)
+	assert {(0, 1, 0), (0, 1, 1)} <= validation_token_xyz
+	assert {(0, 1, 0), (0, 1, 1)}.isdisjoint(train_token_xyz)
+	assert (
+		metadata['cross_split_token_overlap_resolution'][
+			'unique_cross_split_duplicate_tokens'
+		]
+		== 2
+	)
+	assert (
+		metadata['summary']['cross_split_duplicate_rows_removed_from_train'] == 2
+	)
+
+
 def test_build_f3_lithology_token_dataset_proc_dry_run(tmp_path: Path) -> None:
 	config = _write_dataset_fixture(tmp_path)
 	config_path = tmp_path / 'build_f3_lithology_token_dataset.yaml'
@@ -333,6 +367,10 @@ def _write_dataset_fixture(tmp_path: Path) -> F3LithologyTokenDatasetConfig:
 		model={'tag': 'model', 'freeze_encoder': True},
 		figure_dpi=40,
 	)
+
+
+def _token_xyz_set(dataset: object) -> set[tuple[int, int, int]]:
+	return {tuple(int(axis) for axis in row) for row in dataset['token_xyz']}
 
 
 def _config_mapping(config: F3LithologyTokenDatasetConfig) -> dict[str, object]:
