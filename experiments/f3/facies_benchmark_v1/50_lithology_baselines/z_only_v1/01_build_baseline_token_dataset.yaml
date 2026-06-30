@@ -48,5 +48,5 @@ token_dataset:
 features:
   kind: z_only
   coordinate: token_center_z
-  normalization: volume_z_extent
+  normalization: minmax
   polynomial_degree: 1

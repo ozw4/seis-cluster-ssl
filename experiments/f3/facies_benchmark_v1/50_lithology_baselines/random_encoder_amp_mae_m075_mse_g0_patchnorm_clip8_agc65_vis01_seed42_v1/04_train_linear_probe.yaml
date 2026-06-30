@@ -19,10 +19,10 @@ labels:
   class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
   png_label_role: train_validation_slice_selection_and_visual_qc
 lithology:
-  root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1
+  root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1
 token_dataset:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1/token_dataset
-  metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1/token_dataset/token_dataset_metadata.json
+  input_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset
+  metadata_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset/token_dataset_metadata.json
   feature_source:
     kind: random_encoder
     reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
@@ -35,7 +35,7 @@ probe:
   class_weight: balanced
   max_iter: 2000
   random_state: 42
-  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/png_slices_segy_labels_v1/probes/linear_balanced_v1
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1
 evaluation:
   metrics:
     - accuracy

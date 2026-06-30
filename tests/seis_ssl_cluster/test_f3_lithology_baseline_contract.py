@@ -53,7 +53,16 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 				'random_encoder',
 			}
 			assert feature_source['embedding_spec'] == 'overlap_x16'
-			assert 'baselines' in payload['probe']['output_dir']
+			if feature_source['kind'] == 'random_encoder':
+				assert payload['token_dataset']['input_dir'].endswith(
+					f'/{RANDOM_ENCODER_TAG}/overlap_x16/png_slices_segy_labels_v1/token_dataset',
+				)
+				assert payload['probe']['output_dir'].endswith(
+					f'/{RANDOM_ENCODER_TAG}/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1',
+				)
+				assert '/baselines/' not in payload['token_dataset']['input_dir']
+			else:
+				assert 'baselines' in payload['probe']['output_dir']
 
 		if yaml_path.name.endswith('build_report.yaml'):
 			comparison = payload['comparison']

@@ -65,8 +65,8 @@ $EXP/50_lithology_baselines/
 
 ## Artifact Layout
 
-Baseline token datasets, probes, and per-run reports are written under
-`lithology/f3/.../baselines`:
+Z-only and amplitude-statistics token datasets, probes, and per-run reports are
+written under `lithology/f3/.../baselines`:
 
 ```text
 $ROOT/lithology/f3/facies_benchmark_v1/baselines/$BASELINE_TAG/$LABEL_SET/
@@ -80,6 +80,16 @@ The random encoder checkpoint and embeddings are written outside `runs/`:
 ```text
 $ROOT/pretraining/f3/facies_benchmark_v1/$RANDOM_ENCODER_TAG/random_init/mae_random_seed42.pt
 $ROOT/embeddings/f3/facies_benchmark_v1/$RANDOM_ENCODER_TAG/$EMBED_SPEC/
+```
+
+The random encoder lithology token dataset, probes, and per-run reports follow
+the encoder embedding hierarchy:
+
+```text
+$ROOT/lithology/f3/facies_benchmark_v1/$RANDOM_ENCODER_TAG/$EMBED_SPEC/$LABEL_SET/
+  token_dataset/
+  probes/$PROBE_SPEC/
+  reports/$PROBE_SPEC/
 ```
 
 The existing pretrained lithology hierarchy remains unchanged:
