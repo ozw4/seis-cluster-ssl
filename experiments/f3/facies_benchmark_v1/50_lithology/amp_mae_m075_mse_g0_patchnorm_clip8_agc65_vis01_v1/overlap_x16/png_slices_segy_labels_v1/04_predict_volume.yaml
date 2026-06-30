@@ -6,7 +6,7 @@ dataset:
   version: facies_benchmark_v1
 model:
   tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
-  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt
+  checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_best.pt
   freeze_encoder: true
 embeddings:
   spec: overlap_x16
@@ -20,7 +20,8 @@ lithology:
   root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1
 probe:
   spec: linear_balanced_v1
-  checkpoint: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/probe.pt
+  probe_joblib: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/probe.joblib
+  scaler_joblib: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/scaler.joblib
 predictions:
   output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/predictions/linear_balanced_v1
   token_predictions: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/predictions/linear_balanced_v1/token_predictions.npy

@@ -29,6 +29,11 @@ EMBEDDING_CONFIG = Path(
 	'experiments/f3/facies_benchmark_v1/20_embedding/'
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16.yaml',
 )
+PREDICT_CONFIG = Path(
+	'experiments/f3/facies_benchmark_v1/50_lithology/'
+	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/'
+	'png_slices_segy_labels_v1/04_predict_volume.yaml',
+)
 
 
 def test_prepare_f3_facies_volume_proc_writes_registry_artifacts(
@@ -97,6 +102,7 @@ def test_f3_prepare_and_embedding_configs_follow_path_contracts() -> None:
 	prepare_config = f3_prepare_volume_config_from_mapping(prepare_raw)
 	embedding_raw = load_config(EMBEDDING_CONFIG)
 	embedding_config = resolve_embedding_extraction_config(embedding_raw)
+	predict_raw = load_config(PREDICT_CONFIG)
 
 	assert prepare_config.outputs.volume_dir == Path(
 		'/workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/'
@@ -113,7 +119,7 @@ def test_f3_prepare_and_embedding_configs_follow_path_contracts() -> None:
 	assert embedding_config['embeddings']['checkpoint'] == (
 		'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/'
 		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/'
-		'mae_latest.pt'
+		'mae_best.pt'
 	)
 	assert embedding_config['embeddings']['output_dir'] == (
 		'/workspace/artifacts/seis_ssl_cluster/embeddings/f3/'
@@ -122,6 +128,14 @@ def test_f3_prepare_and_embedding_configs_follow_path_contracts() -> None:
 	)
 	assert '/runs/' not in json.dumps(prepare_raw)
 	assert '/runs/' not in json.dumps(embedding_raw)
+	assert predict_raw['probe']['probe_joblib'].endswith(
+		'/probes/linear_balanced_v1/probe.joblib',
+	)
+	assert predict_raw['probe']['scaler_joblib'].endswith(
+		'/probes/linear_balanced_v1/scaler.joblib',
+	)
+	assert 'probe.pt' not in json.dumps(predict_raw)
+	assert '/runs/' not in json.dumps(predict_raw)
 
 
 def test_prepare_f3_facies_volume_missing_segy_has_clear_error(

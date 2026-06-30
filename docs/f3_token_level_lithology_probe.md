@@ -28,7 +28,10 @@ PROBE_SPEC=linear_balanced_v1
 - Config root:
   `experiments/f3/facies_benchmark_v1/50_lithology/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET`
 - Frozen checkpoint:
-  `$ROOT/pretraining/nopims/pretrain_v1/$MODEL_TAG/full_100ep/mae_latest.pt`
+  `$ROOT/pretraining/nopims/pretrain_v1/$MODEL_TAG/full_100ep/mae_best.pt`
+
+The checked-in configs intentionally fail if `mae_best.pt` is absent; selecting
+`mae_latest.pt` must be an explicit config edit, not an implicit fallback.
 
 Do not write this workflow under `runs/`.
 
@@ -64,6 +67,8 @@ $ROOT/embeddings/f3/facies_benchmark_v1/$MODEL_TAG/$EMBED_SPEC/
 $ROOT/lithology/f3/facies_benchmark_v1/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/
   token_dataset/
   probes/$PROBE_SPEC/
+    probe.joblib
+    scaler.joblib
   predictions/$PROBE_SPEC/
   visualizations/$PROBE_SPEC/
   reports/$PROBE_SPEC/
