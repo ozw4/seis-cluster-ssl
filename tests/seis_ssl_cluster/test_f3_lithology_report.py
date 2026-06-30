@@ -45,6 +45,7 @@ def test_f3_lithology_report_outputs_markdown_json_and_relative_links(
 	assert payload['probe']['feature_scaling'] == 'standard'
 	assert payload['probe']['class_weighting'] == 'balanced'
 	assert payload['probe']['hyperparameters']['max_iter'] == 2000
+	assert payload['prediction_summary'] == {'valid_token_count': 16}
 	for section in (
 		'## Dataset',
 		'## Pretrained encoder',
@@ -216,7 +217,25 @@ def test_build_f3_lithology_report_proc_default_config_dry_run() -> None:
 	assert 'stage: build_f3_lithology_report' in result.stdout
 	assert 'reports.output_markdown:' in result.stdout
 	assert 'comparison.output_csv:' in result.stdout
+	assert 'prediction_metadata.json' in result.stdout
 	assert 'execution: dry-run; F3 lithology report skipped' in result.stdout
+
+
+def test_default_lithology_report_config_uses_prediction_metadata_json() -> None:
+	config_dir = _default_lithology_config_dir()
+	predict_config = yaml.safe_load(
+		(config_dir / '04_predict_volume.yaml').read_text(encoding='utf-8'),
+	)
+	report_config = yaml.safe_load(
+		(config_dir / '06_build_lithology_report.yaml').read_text(encoding='utf-8'),
+	)
+
+	assert report_config['predictions']['metadata_json'] == (
+		predict_config['predictions']['metadata_json']
+	)
+	assert report_config['predictions']['metadata_json'].endswith(
+		'/prediction_metadata.json',
+	)
 
 
 def _report_config(run: dict[str, object]) -> F3LithologyReportConfig:
@@ -306,7 +325,7 @@ def _write_probe_run(  # noqa: PLR0913
 			checkpoint=checkpoint,
 		),
 	)
-	prediction_metadata_json = prediction_dir / 'metadata.json'
+	prediction_metadata_json = prediction_dir / 'prediction_metadata.json'
 	_write_json(prediction_metadata_json, {'summary': {'valid_token_count': 16}})
 	visualization_metadata_json = visualization_dir / 'metadata.json'
 	_write_json(
@@ -454,6 +473,18 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
 	path.write_text(
 		json.dumps(payload, indent=2, sort_keys=True) + '\n',
 		encoding='utf-8',
+	)
+
+
+def _default_lithology_config_dir() -> Path:
+	return (
+		Path('experiments')
+		/ 'f3'
+		/ 'facies_benchmark_v1'
+		/ '50_lithology'
+		/ 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
+		/ 'overlap_x16'
+		/ 'png_slices_segy_labels_v1'
 	)
 
 
