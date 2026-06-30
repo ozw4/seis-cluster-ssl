@@ -206,6 +206,19 @@ def test_build_f3_lithology_report_proc_dry_run(tmp_path: Path) -> None:
 	assert 'execution: dry-run; F3 lithology report skipped' in result.stdout
 
 
+def test_build_f3_lithology_report_proc_default_config_dry_run() -> None:
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/build_f3_lithology_report.py'),
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'stage: build_f3_lithology_report' in result.stdout
+	assert 'reports.output_markdown:' in result.stdout
+	assert 'comparison.output_csv:' in result.stdout
+	assert 'execution: dry-run; F3 lithology report skipped' in result.stdout
+
+
 def _report_config(run: dict[str, object]) -> F3LithologyReportConfig:
 	return F3LithologyReportConfig(
 		output_dir=Path(run['report_dir']),
