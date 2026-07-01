@@ -14,3 +14,14 @@ artifacts. Keep only selected reports, metrics, comparison tables, and
 representative figures there. Do not commit checkpoints, embeddings, clustering
 models, `.npy`, `.npz`, `.pt`, `.joblib`, `.pkl`, raw SEGY files, path lists,
 normalization statistics, or full visualization dumps.
+
+Validate shared results before review:
+
+```bash
+python proc/seis_ssl_cluster/validate_results_artifacts.py \
+  --root results \
+  --max-file-size-mb 10
+```
+
+See [results_sharing_policy.md](results_sharing_policy.md) for the review
+workflow, required-file checks, and strict local-path validation.

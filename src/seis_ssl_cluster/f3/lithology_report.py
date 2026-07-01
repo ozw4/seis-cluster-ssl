@@ -80,6 +80,16 @@ class F3LithologyComparisonReportConfig:
 
 
 @dataclass(frozen=True)
+class F3LithologyComparisonPublishConfig:
+	"""Settings for publishing a lightweight F3 lithology comparison report."""
+
+	enabled: bool = False
+	output_dir: Path | None = None
+	include_figures: bool = True
+	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+
+
+@dataclass(frozen=True)
 class F3LithologyComparisonReportResult:
 	"""Paths and rows written by a lithology comparison report."""
 
@@ -88,6 +98,7 @@ class F3LithologyComparisonReportResult:
 	figure_paths: tuple[Path, ...]
 	rows: tuple[dict[str, object], ...]
 	warnings: tuple[str, ...]
+	publish_manifest: PublishManifest | None = None
 
 
 @dataclass(frozen=True)
@@ -196,6 +207,8 @@ def publish_f3_lithology_report(
 
 def build_f3_lithology_comparison_report(
 	config: F3LithologyComparisonReportConfig,
+	*,
+	publish_config: F3LithologyComparisonPublishConfig | None = None,
 ) -> F3LithologyComparisonReportResult:
 	"""Aggregate probe metrics into comparison CSV and Markdown reports."""
 	warnings: list[str] = []
@@ -243,12 +256,37 @@ def build_f3_lithology_comparison_report(
 		config.output_markdown,
 		_render_comparison_markdown(rows, fieldnames, figure_paths, warnings),
 	)
+	publish_manifest = publish_f3_lithology_comparison_report(
+		config,
+		publish_config,
+	)
 	return F3LithologyComparisonReportResult(
 		comparison_csv=config.output_csv,
 		comparison_markdown=config.output_markdown,
 		figure_paths=tuple(figure_paths.values()),
 		rows=tuple(rows),
 		warnings=tuple(warnings),
+		publish_manifest=publish_manifest,
+	)
+
+
+def publish_f3_lithology_comparison_report(
+	config: F3LithologyComparisonReportConfig,
+	publish_config: F3LithologyComparisonPublishConfig | None,
+) -> PublishManifest | None:
+	"""Publish lightweight F3 lithology comparison artifacts into ``results/``."""
+	if publish_config is None or not publish_config.enabled:
+		return None
+	if publish_config.output_dir is None:
+		msg = 'publish output_dir is required when publishing is enabled'
+		raise ValueError(msg)
+	return publish_selected_results(
+		items=_publish_items_for_f3_lithology_comparison_report(
+			config,
+			publish_config=publish_config,
+		),
+		output_dir=publish_config.output_dir,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
 
 
@@ -1531,6 +1569,30 @@ def _publish_items_for_f3_lithology_report(
 	)
 
 
+def _publish_items_for_f3_lithology_comparison_report(
+	config: F3LithologyComparisonReportConfig,
+	*,
+	publish_config: F3LithologyComparisonPublishConfig,
+) -> tuple[PublishItem, ...]:
+	items = [
+		PublishItem(config.output_markdown, Path('comparison_report.md')),
+		PublishItem(config.output_csv, Path('comparison_table.csv')),
+	]
+	optional_json = config.output_csv.with_suffix('.json')
+	if optional_json.is_file():
+		items.append(PublishItem(optional_json, Path('comparison_table.json')))
+	if publish_config.include_figures:
+		items.extend(
+			PublishItem(
+				source,
+				_PUBLISH_FIGURE_DIR / source.name,
+				required=False,
+			)
+			for source in _comparison_figure_paths(config.output_markdown).values()
+		)
+	return tuple(items)
+
+
 def _publish_figure_items_and_replacements(
 	config: F3LithologyReportConfig,
 	*,
@@ -1957,11 +2019,13 @@ def _write_text(path: str | Path, text: str) -> None:
 __all__ = [
 	'COMPARISON_ID_COLUMNS',
 	'OVERALL_METRIC_COLUMNS',
+	'F3LithologyComparisonPublishConfig',
 	'F3LithologyComparisonReportConfig',
 	'F3LithologyComparisonReportResult',
 	'F3LithologyReportConfig',
 	'F3LithologyReportResult',
 	'build_f3_lithology_comparison_report',
 	'build_f3_lithology_report',
+	'publish_f3_lithology_comparison_report',
 	'render_f3_lithology_report_markdown',
 ]

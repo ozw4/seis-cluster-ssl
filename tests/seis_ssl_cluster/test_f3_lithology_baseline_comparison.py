@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from seis_ssl_cluster.f3 import (
+	F3LithologyComparisonPublishConfig,
 	F3LithologyComparisonReportConfig,
 	build_f3_lithology_comparison_report,
+	publish_f3_lithology_comparison_report,
 )
 from tests.helpers import run_python_proc
 
@@ -55,6 +57,18 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 		per_class_f1={'3': 0.19, '5': 0.33},
 	)
 	output_dir = search_root / 'reports' / 'baseline_comparison'
+	publish_dir = (
+		tmp_path
+		/ 'results'
+		/ 'f3'
+		/ 'facies_benchmark_v1'
+		/ 'baseline_comparison'
+	)
+	output_dir.mkdir(parents=True, exist_ok=True)
+	_write_json(output_dir / 'comparison_table.json', {'rows': []})
+	(output_dir / 'encoder.pt').write_bytes(b'heavy')
+	(output_dir / 'embeddings.npy').write_bytes(b'heavy')
+	(output_dir / 'probe.joblib').write_bytes(b'heavy')
 
 	result = build_f3_lithology_comparison_report(
 		F3LithologyComparisonReportConfig(
@@ -62,10 +76,20 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 			output_csv=output_dir / 'comparison_table.csv',
 			output_markdown=output_dir / 'comparison_report.md',
 		),
+		publish_config=F3LithologyComparisonPublishConfig(
+			enabled=True,
+			output_dir=publish_dir,
+			include_figures=True,
+		),
 	)
 
 	rows = _read_csv(result.comparison_csv)
 	markdown = result.comparison_markdown.read_text(encoding='utf-8')
+	published_files = {
+		path.relative_to(publish_dir)
+		for path in publish_dir.rglob('*')
+		if path.is_file()
+	}
 
 	assert [row['feature_kind'] for row in rows] == [
 		'pretrained_encoder',
@@ -91,6 +115,77 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 	assert 'pretrained encoderがrandom encoderを上回るか' in markdown
 	assert 'class 5: F1差分 +0.1300' in markdown
 	assert 'F3 faciesが深度だけで説明できる程度' in markdown
+	assert result.publish_manifest is not None
+	assert published_files == {
+		Path('comparison_report.md'),
+		Path('comparison_table.csv'),
+		Path('comparison_table.json'),
+		Path('publish_manifest.json'),
+		Path('figures/macro_f1_comparison.png'),
+		Path('figures/mean_iou_comparison.png'),
+		Path('figures/per_class_f1_comparison.png'),
+	}
+	assert not any(
+		path.suffix in {'.pt', '.npy', '.npz', '.joblib', '.pkl'}
+		for path in published_files
+	)
+
+
+def test_f3_lithology_baseline_comparison_publish_warns_for_missing_optional_figure(
+	tmp_path: Path,
+) -> None:
+	output_dir = tmp_path / 'artifacts' / 'comparison'
+	publish_dir = tmp_path / 'results' / 'comparison'
+	output_dir.mkdir(parents=True)
+	(output_dir / 'comparison_report.md').write_text('# report\n', encoding='utf-8')
+	(output_dir / 'comparison_table.csv').write_text(
+		'feature_kind,macro_f1\npretrained_encoder,0.7\n',
+		encoding='utf-8',
+	)
+
+	manifest = publish_f3_lithology_comparison_report(
+		F3LithologyComparisonReportConfig(
+			search_root=tmp_path / 'artifacts',
+			output_csv=output_dir / 'comparison_table.csv',
+			output_markdown=output_dir / 'comparison_report.md',
+		),
+		F3LithologyComparisonPublishConfig(
+			enabled=True,
+			output_dir=publish_dir,
+			include_figures=True,
+		),
+	)
+
+	assert manifest is not None
+	assert (publish_dir / 'comparison_report.md').is_file()
+	assert (publish_dir / 'comparison_table.csv').is_file()
+	assert any(
+		'optional publish source does not exist' in warning
+		and 'macro_f1_comparison.png' in warning
+		for warning in manifest.warnings
+	)
+	assert not (publish_dir / 'figures/macro_f1_comparison.png').exists()
+
+
+def test_f3_lithology_baseline_comparison_publish_requires_comparison_table(
+	tmp_path: Path,
+) -> None:
+	output_dir = tmp_path / 'artifacts' / 'comparison'
+	output_dir.mkdir(parents=True)
+	(output_dir / 'comparison_report.md').write_text('# report\n', encoding='utf-8')
+
+	with pytest.raises(FileNotFoundError, match='required publish source'):
+		publish_f3_lithology_comparison_report(
+			F3LithologyComparisonReportConfig(
+				search_root=tmp_path / 'artifacts',
+				output_csv=output_dir / 'comparison_table.csv',
+				output_markdown=output_dir / 'comparison_report.md',
+			),
+			F3LithologyComparisonPublishConfig(
+				enabled=True,
+				output_dir=tmp_path / 'results' / 'comparison',
+			),
+		)
 
 
 def test_f3_lithology_baseline_comparison_warns_for_missing_metrics(
@@ -167,6 +262,11 @@ comparison:
   output_csv: {output_dir / 'comparison_table.csv'}
   output_markdown: {output_dir / 'comparison_report.md'}
   figure_dpi: 300
+publish:
+  enabled: true
+  output_dir: {tmp_path / 'results' / 'baseline_comparison'}
+  include_figures: true
+  max_file_size_mb: 10
 """.lstrip(),
 		encoding='utf-8',
 	)
@@ -186,6 +286,12 @@ comparison:
 		in result.stdout
 	)
 	assert 'comparison.figure_dpi: 300' in result.stdout
+	assert 'publish.enabled: True' in result.stdout
+	assert f"publish.output_dir: {tmp_path / 'results' / 'baseline_comparison'}" in (
+		result.stdout
+	)
+	assert 'publish.include_figures: True' in result.stdout
+	assert 'publish.max_file_size_bytes: 10485760' in result.stdout
 
 
 def test_f3_lithology_probe_joblib_artifacts_are_gitignored() -> None:
