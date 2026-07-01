@@ -181,10 +181,7 @@ def test_f3_inspection_report_publish_enabled_writes_lightweight_results(
 	manifest = json.loads(
 		(output_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
 	)
-	manifest_targets = {
-		Path(item['target']).relative_to(output_dir.resolve())
-		for item in manifest['items']
-	}
+	manifest_targets = {Path(item['target']) for item in manifest['items']}
 	assert manifest_targets == expected_files - {Path('publish_manifest.json')}
 	assert manifest['warnings'] == []
 	assert manifest['skipped_optional_items'] == []
