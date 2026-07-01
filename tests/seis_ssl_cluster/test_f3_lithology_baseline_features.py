@@ -152,6 +152,7 @@ def test_xyz_coordinates_baseline_features_use_voxel_centers_and_volume_extent(
 	result = build_f3_lithology_baseline_token_dataset(config)
 
 	source_train = np.load(config.reference.train_tokens)
+	source_validation = np.load(config.reference.validation_tokens)
 	train = np.load(result.train_npz)
 	validation = np.load(result.validation_npz)
 	metadata = json.loads(result.metadata_json.read_text(encoding='utf-8'))
@@ -191,6 +192,7 @@ def test_xyz_coordinates_baseline_features_use_voxel_centers_and_volume_extent(
 		'labeled_fraction',
 	):
 		np.testing.assert_array_equal(train[key], source_train[key])
+		np.testing.assert_array_equal(validation[key], source_validation[key])
 	assert train['features'].dtype == np.float32
 	assert metadata['feature_source']['kind'] == 'xyz_coordinates'
 	assert metadata['baseline']['feature_names'] == ['x_norm', 'y_norm', 'z_norm']
