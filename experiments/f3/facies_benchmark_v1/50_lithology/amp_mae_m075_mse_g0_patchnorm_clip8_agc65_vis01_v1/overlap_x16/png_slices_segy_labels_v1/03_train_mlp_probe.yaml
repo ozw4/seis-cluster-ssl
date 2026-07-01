@@ -26,7 +26,7 @@ token_dataset:
     kind: pretrained_encoder
     reference_model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
     embedding_spec: overlap_x16
-    description: frozen NOPIMS-pretrained MAE encoder embeddings
+    description: pretrained MAE encoder embedding
 probe:
   spec: mlp_balanced_v1
   type: mlp

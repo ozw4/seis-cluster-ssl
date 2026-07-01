@@ -167,6 +167,79 @@ def test_f3_lithology_baseline_comparison_publish_warns_for_missing_optional_fig
 	assert not (publish_dir / 'figures/macro_f1_comparison.png').exists()
 
 
+def test_f3_lithology_baseline_comparison_uses_pretrained_token_metadata(
+	tmp_path: Path,
+) -> None:
+	search_root = _search_root(tmp_path)
+	model_tag = 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
+	embed_spec = 'overlap_x16'
+	label_set = 'png_slices_segy_labels_v1'
+	probe_spec = 'linear_balanced_v1'
+	run_root = _run_root(
+		search_root,
+		feature_kind='pretrained_encoder',
+		model_tag=model_tag,
+		baseline_tag=None,
+		embed_spec=embed_spec,
+		label_set=label_set,
+	)
+	probe_dir = run_root / 'probes' / probe_spec
+	token_metadata = run_root / 'token_dataset' / 'token_dataset_metadata.json'
+	feature_source = {
+		'kind': 'pretrained_encoder',
+		'reference_model_tag': model_tag,
+		'embedding_spec': embed_spec,
+		'description': 'pretrained MAE encoder embedding',
+	}
+	_write_json(
+		probe_dir / 'metrics.json',
+		{
+			'accuracy': 0.72,
+			'balanced_accuracy': 0.71,
+			'macro_f1': 0.70,
+			'weighted_f1': 0.73,
+			'mean_iou': 0.52,
+			'per_class_f1': {'5': 0.54},
+			'class_names': {'5': 'Zechstein'},
+		},
+	)
+	_write_json(
+		probe_dir / 'probe_config_resolved.json',
+		{
+			'model': {'tag': model_tag},
+			'embeddings': {'spec': embed_spec},
+			'labels': {'set': label_set},
+			'probe': {'spec': probe_spec},
+			'inputs': {'token_dataset_metadata_json': str(token_metadata)},
+		},
+	)
+	_write_json(token_metadata, {'feature_source': feature_source})
+	output_dir = search_root / 'reports' / 'baseline_comparison'
+
+	result = build_f3_lithology_comparison_report(
+		F3LithologyComparisonReportConfig(
+			search_root=search_root,
+			output_csv=output_dir / 'comparison_table.csv',
+			output_markdown=output_dir / 'comparison_report.md',
+			metrics_paths=(probe_dir / 'metrics.json',),
+		),
+	)
+
+	rows = _read_csv(result.comparison_csv)
+	markdown = result.comparison_markdown.read_text(encoding='utf-8')
+	assert rows[0]['FEATURE_SOURCE_REFERENCE_MODEL_TAG'] == model_tag
+	assert rows[0]['FEATURE_SOURCE_DESCRIPTION'] == (
+		'pretrained MAE encoder embedding'
+	)
+	assert 'pretrained MAE encoder embedding' in markdown
+	table_row = next(
+		line
+		for line in markdown.splitlines()
+		if line.startswith('| pretrained_encoder |')
+	)
+	assert '未確認' not in table_row
+
+
 def test_f3_lithology_baseline_comparison_publish_requires_comparison_table(
 	tmp_path: Path,
 ) -> None:

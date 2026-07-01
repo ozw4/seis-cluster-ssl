@@ -633,8 +633,9 @@ def _write_probe_outputs(  # noqa: PLR0913
 	outputs.figures_dir.mkdir(parents=True, exist_ok=True)
 	joblib.dump(probe, outputs.probe_joblib)
 	joblib.dump(scaler, outputs.scaler_joblib)
+	token_metadata = _read_optional_json(config.inputs.token_dataset_metadata_json)
 	metrics_payload = dict(metrics)
-	feature_source = _feature_source_from_config(config)
+	feature_source = _feature_source_from_config(config, token_metadata)
 	if feature_source is not None:
 		metrics_payload['feature_source'] = feature_source
 	_write_json(outputs.metrics_json, metrics_payload)
@@ -658,6 +659,7 @@ def _write_probe_outputs(  # noqa: PLR0913
 			training_summary=training_summary,
 			train=train,
 			validation=validation,
+			token_metadata=token_metadata,
 		),
 	)
 
@@ -668,6 +670,7 @@ def _resolved_config_payload(
 	training_summary: Mapping[str, object],
 	train: _TokenDataset,
 	validation: _TokenDataset,
+	token_metadata: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
 	payload: dict[str, object] = {
 		'artifact_type': 'f3_lithology_probe',
@@ -719,7 +722,7 @@ def _resolved_config_payload(
 			'validation_class_counts': _class_counts(validation.labels),
 		},
 	}
-	feature_source = _feature_source_from_config(config)
+	feature_source = _feature_source_from_config(config, token_metadata)
 	if feature_source is not None:
 		payload['feature_source'] = feature_source
 	return payload
@@ -727,8 +730,11 @@ def _resolved_config_payload(
 
 def _feature_source_from_config(
 	config: F3LithologyProbeConfig,
+	token_metadata: Mapping[str, object] | None = None,
 ) -> dict[str, object] | None:
+	token_metadata_mapping = _mapping_or_none(token_metadata) or {}
 	for candidate in (
+		_mapping_or_none(token_metadata_mapping.get('feature_source')),
 		_mapping_or_none(config.token_dataset.get('feature_source')),
 		_mapping_or_none(config.embeddings.get('feature_source')),
 		_mapping_or_none(config.model.get('feature_source')),
@@ -736,6 +742,14 @@ def _feature_source_from_config(
 		if candidate:
 			return dict(candidate)
 	return None
+
+
+def _read_optional_json(path: Path | None) -> Mapping[str, object] | None:
+	if path is None or not path.is_file():
+		return None
+	with path.open(encoding='utf-8') as file_obj:
+		payload = json.load(file_obj)
+	return payload if isinstance(payload, Mapping) else None
 
 
 def _mapping_or_none(value: object) -> Mapping[str, object] | None:

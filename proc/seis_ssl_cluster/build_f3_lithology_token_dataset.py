@@ -86,6 +86,7 @@ def f3_lithology_token_dataset_config_from_mapping(
 				'registry',
 				'lithology',
 				'token_dataset',
+				'feature_source',
 			},
 		),
 		prefix='config',
@@ -146,6 +147,12 @@ def f3_lithology_token_dataset_config_from_mapping(
 		),
 	)
 	policy = _policy_from_mapping(_required_mapping(token_dataset, 'tokenization'))
+	reference_token_dataset = _reference_token_dataset_from_mapping(token_dataset)
+	feature_source = _feature_source(
+		config,
+		token_dataset,
+		reference_token_dataset=reference_token_dataset,
+	)
 	return F3LithologyTokenDatasetConfig(
 		inputs=inputs,
 		outputs=outputs,
@@ -153,8 +160,8 @@ def f3_lithology_token_dataset_config_from_mapping(
 		dataset=dataset,
 		model=model,
 		figure_dpi=_figure_dpi(token_dataset),
-		feature_source=_feature_source(token_dataset),
-		reference_token_dataset=_reference_token_dataset_from_mapping(token_dataset),
+		feature_source=feature_source,
+		reference_token_dataset=reference_token_dataset,
 	)
 
 
@@ -235,14 +242,47 @@ def _figure_dpi(token_dataset: Mapping[str, object]) -> int:
 	)
 
 
-def _feature_source(token_dataset: Mapping[str, object]) -> Mapping[str, object] | None:
-	value = token_dataset.get('feature_source')
+def _feature_source(
+	config: Mapping[str, object],
+	token_dataset: Mapping[str, object],
+	*,
+	reference_token_dataset: F3ReferenceTokenDataset | None,
+) -> Mapping[str, object] | None:
+	top_level = config.get('feature_source')
+	nested = token_dataset.get('feature_source')
+	if top_level is not None and nested is not None and top_level != nested:
+		msg = 'config.feature_source and token_dataset.feature_source must match'
+		raise ValueError(msg)
+	value = top_level if top_level is not None else nested
 	if value is None:
 		return None
 	if not isinstance(value, Mapping):
-		msg = f'token_dataset.feature_source must be a mapping; got {value!r}'
+		msg = f'feature_source must be a mapping; got {value!r}'
 		raise TypeError(msg)
-	return value
+	feature_source = {
+		'kind': _feature_source_str(value, 'kind'),
+		'reference_model_tag': _feature_source_str(value, 'reference_model_tag'),
+		'embedding_spec': _feature_source_str(value, 'embedding_spec'),
+		'description': _feature_source_str(value, 'description'),
+	}
+	if (
+		reference_token_dataset is None
+		and feature_source['kind'] != 'pretrained_encoder'
+	):
+		msg = (
+			'feature_source.kind must be "pretrained_encoder" for pretrained '
+			f'token datasets; got {feature_source["kind"]!r}'
+		)
+		raise ValueError(msg)
+	return feature_source
+
+
+def _feature_source_str(value: Mapping[str, object], key: str) -> str:
+	item = value.get(key)
+	if not isinstance(item, str) or not item:
+		msg = f'feature_source.{key} must be a non-empty string; got {item!r}'
+		raise TypeError(msg)
+	return item
 
 
 def _reference_token_dataset_from_mapping(

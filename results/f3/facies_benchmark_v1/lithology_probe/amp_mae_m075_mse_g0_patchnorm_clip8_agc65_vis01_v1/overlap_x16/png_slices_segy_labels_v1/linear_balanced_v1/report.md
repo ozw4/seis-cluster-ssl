@@ -49,25 +49,25 @@
 
 ## Metrics
 
-- accuracy: 0.8872
-- balanced accuracy: 0.8436
-- macro F1: 0.7537
-- weighted F1: 0.8961
-- mean IoU: 0.6509
+- accuracy: 0.8865
+- balanced accuracy: 0.8438
+- macro F1: 0.7533
+- weighted F1: 0.8955
+- mean IoU: 0.6501
 
 | class_id | class_name | F1 | IoU | support |
 |---:|---|---:|---:|---:|
 | 0 | Upper North Sea | 0.9653 | 0.9330 | 1226 |
-| 1 | Middle North Sea | 0.9322 | 0.8730 | 803 |
-| 2 | Lower North Sea | 0.9275 | 0.8647 | 3909 |
-| 3 | Rijnland/Chalk | 0.5332 | 0.3635 | 354 |
-| 4 | Scruff | 0.7687 | 0.6243 | 665 |
+| 1 | Middle North Sea | 0.9311 | 0.8712 | 803 |
+| 2 | Lower North Sea | 0.9267 | 0.8635 | 3909 |
+| 3 | Rijnland/Chalk | 0.5349 | 0.3651 | 354 |
+| 4 | Scruff | 0.7663 | 0.6211 | 665 |
 | 5 | Zechstein | 0.3956 | 0.2466 | 46 |
 
 - confusion matrix:
 
 ```text
-[[1184, 27, 7, 1, 7, 0], [12, 763, 27, 0, 1, 0], [30, 44, 3446, 222, 145, 22], [1, 0, 12, 229, 62, 50], [0, 0, 30, 52, 555, 28], [0, 0, 0, 1, 9, 36]]
+[[1184, 27, 7, 1, 7, 0], [12, 764, 26, 0, 1, 0], [30, 47, 3440, 222, 148, 22], [1, 0, 12, 230, 62, 49], [0, 0, 30, 52, 554, 29], [0, 0, 0, 1, 9, 36]]
 ```
 
 ## Figures
@@ -82,13 +82,13 @@
 
 ### 良い点
 
-- weighted F1は0.8961で、頻出classの性能を確認できる。
-- balanced accuracyは0.8436で、class imbalanceを考慮した比較指標になる。
+- weighted F1は0.8955で、頻出classの性能を確認できる。
+- balanced accuracyは0.8438で、class imbalanceを考慮した比較指標になる。
 
 ### 失敗しているclass
 
 - class 5 Zechstein: F1=0.3956, IoU=0.2466
-- class 3 Rijnland/Chalk: F1=0.5332, IoU=0.3635
+- class 3 Rijnland/Chalk: F1=0.5349, IoU=0.3651
 
 ### class imbalanceの影響
 

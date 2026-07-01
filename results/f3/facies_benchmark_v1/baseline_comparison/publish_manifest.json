@@ -1,15 +1,15 @@
 {
-  "created_at_utc": "2026-07-01T05:00:48.338791Z",
+  "created_at_utc": "2026-07-01T05:41:51.247603Z",
   "items": [
     {
-      "sha256": "09eef33de5936d0de0045de3b249aa95bbfdfbadc91b558eeefa26c442c46dba",
-      "size_bytes": 2733,
+      "sha256": "8f0d1ee1ab7f115a374c596c3e376546c3db91f2e363316de21e9cc4085ffd61",
+      "size_bytes": 2797,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_report.md",
       "target": "/workspace/results/f3/facies_benchmark_v1/baseline_comparison/comparison_report.md"
     },
     {
-      "sha256": "903682e0fdd02bcd22628e23744fce8148f4b187c5bc1381356d5634e0407699",
-      "size_bytes": 2001,
+      "sha256": "b6a4939399546d1930c7a033a005b9df246526bbec25a3abf813a547eef0d522",
+      "size_bytes": 2083,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_table.csv",
       "target": "/workspace/results/f3/facies_benchmark_v1/baseline_comparison/comparison_table.csv"
     },
@@ -26,8 +26,8 @@
       "target": "/workspace/results/f3/facies_benchmark_v1/baseline_comparison/figures/mean_iou_comparison.png"
     },
     {
-      "sha256": "89260ee66e3e73bd41a1354175fd232abfb8fb9300864ce1dde3208ee5b38e6c",
-      "size_bytes": 131967,
+      "sha256": "3ff24bbae62bcee829f61463c29ed6aef4bd6ea271fedd037746fe457f85e544",
+      "size_bytes": 131951,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/figures/per_class_f1_comparison.png",
       "target": "/workspace/results/f3/facies_benchmark_v1/baseline_comparison/figures/per_class_f1_comparison.png"
     }

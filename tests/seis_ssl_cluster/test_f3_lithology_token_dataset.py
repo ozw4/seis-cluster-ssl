@@ -24,6 +24,9 @@ from seis_ssl_cluster.f3 import (
 	resolve_f3_slice_array_index,
 	tokenize_f3_lithology_slice,
 )
+from proc.seis_ssl_cluster.build_f3_lithology_token_dataset import (
+	f3_lithology_token_dataset_config_from_mapping,
+)
 from tests.helpers import run_python_proc
 
 
@@ -424,6 +427,29 @@ def test_build_f3_lithology_token_dataset_proc_dry_run(tmp_path: Path) -> None:
 	assert 'execution: dry-run; F3 lithology token dataset build skipped' in (
 		result.stdout
 	)
+
+
+def test_pretrained_token_dataset_config_accepts_top_level_feature_source(
+	tmp_path: Path,
+) -> None:
+	config = _write_dataset_fixture(tmp_path)
+	payload = _config_mapping(config)
+	payload['feature_source'] = payload['token_dataset'].pop('feature_source')
+
+	parsed = f3_lithology_token_dataset_config_from_mapping(payload)
+
+	assert parsed.feature_source == _feature_source()
+
+
+def test_pretrained_token_dataset_config_rejects_non_pretrained_feature_source(
+	tmp_path: Path,
+) -> None:
+	config = _write_dataset_fixture(tmp_path)
+	payload = _config_mapping(config)
+	payload['token_dataset']['feature_source']['kind'] = 'z_only'
+
+	with pytest.raises(ValueError, match='feature_source.kind'):
+		f3_lithology_token_dataset_config_from_mapping(payload)
 
 
 def test_build_f3_lithology_token_dataset_proc_dry_run_reports_reference_dataset(
