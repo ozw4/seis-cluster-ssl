@@ -10,6 +10,7 @@ from typing import Any
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonReportConfig,
+	F3LithologyPublishConfig,
 	F3LithologyReportConfig,
 	build_f3_lithology_report,
 )
@@ -46,12 +47,15 @@ def main() -> None:
 
 	raw_config = load_config(args.config)
 	config = f3_lithology_report_config_from_mapping(raw_config)
+	publish_config = f3_lithology_publish_config_from_mapping(
+		raw_config.get('publish'),
+	)
 	if args.dry_run:
-		_print_summary(config)
+		_print_summary(config, publish_config=publish_config)
 		print('execution: dry-run; F3 lithology report skipped')
 		return
 
-	result = build_f3_lithology_report(config)
+	result = build_f3_lithology_report(config, publish_config=publish_config)
 	warnings = result.payload.get('warnings', [])
 	warning_count = len(warnings) if isinstance(warnings, Sequence) else 0
 	print(f'f3_lithology_report.warning_count: {warning_count}')
@@ -64,6 +68,9 @@ def main() -> None:
 			'f3_lithology_report.comparison_markdown: '
 			f'{result.comparison_markdown}',
 		)
+	if result.publish_manifest is not None:
+		print(f'published F3 lithology report: {result.publish_manifest.output_dir}')
+		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
 
 
 def f3_lithology_report_config_from_mapping(
@@ -84,6 +91,7 @@ def f3_lithology_report_config_from_mapping(
 				'visualizations',
 				'reports',
 				'comparison',
+				'publish',
 			},
 		),
 		prefix='config',
@@ -167,6 +175,34 @@ def f3_lithology_report_config_from_mapping(
 	)
 
 
+def f3_lithology_publish_config_from_mapping(
+	value: object,
+) -> F3LithologyPublishConfig:
+	"""Validate and normalize the optional F3 lithology publish config."""
+	if value is None:
+		return F3LithologyPublishConfig()
+	if not isinstance(value, Mapping):
+		msg = f'publish must be a mapping; got {value!r}'
+		raise TypeError(msg)
+	enabled = _optional_bool(value, 'enabled', default=False)
+	include_figures = _optional_bool(value, 'include_figures', default=True)
+	output_dir = _optional_path(value, 'output_dir')
+	if enabled and output_dir is None:
+		msg = 'publish.output_dir must be set when publish.enabled is true'
+		raise ValueError(msg)
+	return F3LithologyPublishConfig(
+		enabled=enabled,
+		output_dir=output_dir,
+		include_figures=include_figures,
+		max_file_size_bytes=_max_file_size_bytes(value),
+		max_prediction_figures=_optional_non_negative_int(
+			value,
+			'max_prediction_figures',
+			default=3,
+		),
+	)
+
+
 def _comparison_config(
 	comparison: Mapping[str, object],
 	*,
@@ -241,7 +277,11 @@ def _report_paths(  # noqa: PLR0913
 	return tuple(paths)
 
 
-def _print_summary(config: F3LithologyReportConfig) -> None:
+def _print_summary(
+	config: F3LithologyReportConfig,
+	*,
+	publish_config: F3LithologyPublishConfig,
+) -> None:
 	print(f'stage: {STAGE}')
 	print(f'model.tag: {config.model.get("tag")}')
 	print(f'model.checkpoint: {config.model.get("checkpoint")}')
@@ -258,6 +298,18 @@ def _print_summary(config: F3LithologyReportConfig) -> None:
 		print(f'comparison.search_root: {config.comparison.search_root}')
 		print(f'comparison.output_csv: {config.comparison.output_csv}')
 		print(f'comparison.output_markdown: {config.comparison.output_markdown}')
+	print(f'publish.enabled: {publish_config.enabled}')
+	if publish_config.output_dir is not None:
+		print(f'publish.output_dir: {publish_config.output_dir}')
+	print(f'publish.include_figures: {publish_config.include_figures}')
+	print(
+		'publish.max_file_size_bytes: '
+		f'{publish_config.max_file_size_bytes}',
+	)
+	print(
+		'publish.max_prediction_figures: '
+		f'{publish_config.max_prediction_figures}',
+	)
 
 
 def _required_mapping(
@@ -332,6 +384,16 @@ def _optional_absolute_path(
 	return path
 
 
+def _optional_path(parent: Mapping[str, object], key: str) -> Path | None:
+	value = parent.get(key)
+	if value is None:
+		return None
+	if not isinstance(value, str) or not value:
+		msg = f'publish.{key} must be a non-empty string; got {value!r}'
+		raise TypeError(msg)
+	return Path(value)
+
+
 def _required_str(
 	parent: Mapping[str, object],
 	key: str,
@@ -343,6 +405,40 @@ def _required_str(
 		msg = f'{prefix}.{key} must be a non-empty string; got {value!r}'
 		raise TypeError(msg)
 	return value
+
+
+def _optional_bool(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	default: bool,
+) -> bool:
+	value = parent.get(key, default)
+	if not isinstance(value, bool):
+		msg = f'publish.{key} must be a boolean; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _optional_non_negative_int(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	default: int,
+) -> int:
+	value = parent.get(key, default)
+	if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+		msg = f'publish.{key} must be a non-negative integer; got {value!r}'
+		raise ValueError(msg)
+	return value
+
+
+def _max_file_size_bytes(parent: Mapping[str, object]) -> int:
+	value = parent.get('max_file_size_mb', 10)
+	if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+		msg = f'publish.max_file_size_mb must be positive; got {value!r}'
+		raise ValueError(msg)
+	return int(value * 1024 * 1024)
 
 
 def _optional_str(

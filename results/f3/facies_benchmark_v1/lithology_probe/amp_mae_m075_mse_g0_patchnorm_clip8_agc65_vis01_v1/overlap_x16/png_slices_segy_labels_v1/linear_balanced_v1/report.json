@@ -1,0 +1,382 @@
+{
+  "artifact_type": "f3_lithology_probe_report",
+  "dataset": {
+    "class_imbalance": {
+      "class_counts": {},
+      "max_to_min_positive_ratio": null,
+      "total": 0
+    },
+    "classes": [
+      {
+        "class_id": 0,
+        "class_name": "Upper North Sea",
+        "hex_color": "#235CA7",
+        "rgb": [
+          35,
+          92,
+          167
+        ]
+      },
+      {
+        "class_id": 1,
+        "class_name": "Middle North Sea",
+        "hex_color": "#7DB4D5",
+        "rgb": [
+          125,
+          180,
+          213
+        ]
+      },
+      {
+        "class_id": 2,
+        "class_name": "Lower North Sea",
+        "hex_color": "#DBF1F7",
+        "rgb": [
+          219,
+          241,
+          247
+        ]
+      },
+      {
+        "class_id": 3,
+        "class_name": "Rijnland/Chalk",
+        "hex_color": "#FEDB7C",
+        "rgb": [
+          254,
+          219,
+          124
+        ]
+      },
+      {
+        "class_id": 4,
+        "class_name": "Scruff",
+        "hex_color": "#FC783B",
+        "rgb": [
+          252,
+          120,
+          59
+        ]
+      },
+      {
+        "class_id": 5,
+        "class_name": "Zechstein",
+        "hex_color": "#D00A00",
+        "rgb": [
+          208,
+          10,
+          0
+        ]
+      }
+    ],
+    "f3_shape": [
+      601,
+      901,
+      255
+    ],
+    "label_source_of_truth": "segy_label_volume",
+    "name": "f3_facies_benchmark",
+    "png_label_role": "train_validation_slice_selection_and_visual_qc",
+    "tokenization_thresholds": {
+      "ignore_z_border_samples": 1,
+      "min_labeled_fraction": 0.5,
+      "min_majority_fraction": 0.7
+    },
+    "train_validation_slices": {
+      "train": [
+        "inline 250",
+        "inline 350",
+        "inline 450",
+        "inline 550",
+        "inline 650",
+        "crossline 450",
+        "crossline 550",
+        "crossline 650",
+        "crossline 850",
+        "crossline 950",
+        "crossline 1050",
+        "crossline 1150"
+      ],
+      "validation": [
+        "inline 150",
+        "crossline 350",
+        "crossline 750"
+      ]
+    },
+    "version": "facies_benchmark_v1"
+  },
+  "figures": [
+    {
+      "exists": true,
+      "path": "figures/confusion_matrix.png",
+      "type": "confusion_matrix"
+    },
+    {
+      "exists": true,
+      "path": "figures/per_class_f1.png",
+      "type": "per_class_f1"
+    },
+    {
+      "exists": true,
+      "path": "figures/validation_inline_0150_prediction.png",
+      "type": "validation_slice_inline_150"
+    },
+    {
+      "exists": true,
+      "path": "figures/validation_crossline_0350_prediction.png",
+      "type": "validation_slice_crossline_350"
+    },
+    {
+      "exists": true,
+      "path": "figures/validation_crossline_0750_prediction.png",
+      "type": "validation_slice_crossline_750"
+    }
+  ],
+  "interpretation": {
+    "AGC\u3042\u308a/\u306a\u3057\u6bd4\u8f03": "\u3053\u306erun\u306fAGC\u3042\u308a\u3068\u3057\u3066\u96c6\u8a08\u3055\u308c\u308b\u3002AGC\u3042\u308a/\u306a\u3057\u306e\u512a\u52a3\u306fcomparison_table.csv\u3067\u540c\u3058EMBED_SPEC\u3001LABEL_SET\u3001PROBE_SPEC\u3092\u63c3\u3048\u3066\u6bd4\u8f03\u3059\u308b\u3002",
+    "class imbalance\u306e\u5f71\u97ff": "class count\u306e\u6700\u5927/\u6700\u5c0f\u6bd4\u304c40.1\u3067\u3001minor class\u306eF1\u4f4e\u4e0b\u306b\u6ce8\u610f\u3059\u308b\u3002",
+    "\u5931\u6557\u3057\u3066\u3044\u308bclass": [
+      "class 5 Zechstein: F1=0.3956, IoU=0.2466",
+      "class 3 Rijnland/Chalk: F1=0.5332, IoU=0.3635"
+    ],
+    "\u6b21\u306e\u6539\u5584\u5019\u88dc": [
+      "comparison_table.csv\u3067MODEL_TAG\u3001EMBED_SPEC\u3001PROBE_SPEC\u3054\u3068\u306emacro F1\u3068mean IoU\u3092\u6bd4\u8f03\u3059\u308b\u3002",
+      "\u4f4eF1 class\u306f\u6559\u5e2bslice\u8ffd\u52a0\u3001tokenization\u95be\u5024\u3001class weighting\u306e\u5f71\u97ff\u3092\u5207\u308a\u5206\u3051\u308b\u3002",
+      "linear probe\u3067\u982d\u6253\u3061\u306a\u3089\u540c\u3058frozen encoder\u4e0a\u3067MLP probe\u3092\u6bd4\u8f03\u3059\u308b\u3002"
+    ],
+    "\u826f\u3044\u70b9": [
+      "weighted F1\u306f0.8961\u3067\u3001\u983b\u51faclass\u306e\u6027\u80fd\u3092\u78ba\u8a8d\u3067\u304d\u308b\u3002",
+      "balanced accuracy\u306f0.8436\u3067\u3001class imbalance\u3092\u8003\u616e\u3057\u305f\u6bd4\u8f03\u6307\u6a19\u306b\u306a\u308b\u3002"
+    ]
+  },
+  "metrics": {
+    "available": true,
+    "confusion_matrix": [
+      [
+        1184,
+        27,
+        7,
+        1,
+        7,
+        0
+      ],
+      [
+        12,
+        763,
+        27,
+        0,
+        1,
+        0
+      ],
+      [
+        30,
+        44,
+        3446,
+        222,
+        145,
+        22
+      ],
+      [
+        1,
+        0,
+        12,
+        229,
+        62,
+        50
+      ],
+      [
+        0,
+        0,
+        30,
+        52,
+        555,
+        28
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        9,
+        36
+      ]
+    ],
+    "missing": [],
+    "overall": {
+      "accuracy": 0.887191203769813,
+      "balanced_accuracy": 0.843595375486522,
+      "macro_f1": 0.7537480300317339,
+      "mean_iou": 0.6508538317434741,
+      "weighted_f1": 0.8961388081944405
+    },
+    "per_class": [
+      {
+        "class_id": 0,
+        "class_name": "Upper North Sea",
+        "f1": 0.965348552792499,
+        "iou": 0.9330181245074862,
+        "precision": 0.9649551752241239,
+        "recall": 0.965742251223491,
+        "support": 1226
+      },
+      {
+        "class_id": 1,
+        "class_name": "Middle North Sea",
+        "f1": 0.9321930360415394,
+        "iou": 0.8729977116704806,
+        "precision": 0.9148681055155875,
+        "recall": 0.950186799501868,
+        "support": 803
+      },
+      {
+        "class_id": 2,
+        "class_name": "Lower North Sea",
+        "f1": 0.9274660207239941,
+        "iou": 0.8647427854454204,
+        "precision": 0.9784213515048268,
+        "recall": 0.8815553850089537,
+        "support": 3909
+      },
+      {
+        "class_id": 3,
+        "class_name": "Rijnland/Chalk",
+        "f1": 0.5331781140861467,
+        "iou": 0.3634920634920635,
+        "precision": 0.4534653465346535,
+        "recall": 0.6468926553672316,
+        "support": 354
+      },
+      {
+        "class_id": 4,
+        "class_name": "Scruff",
+        "f1": 0.7686980609418282,
+        "iou": 0.6242969628796401,
+        "precision": 0.7124518613607189,
+        "recall": 0.8345864661654135,
+        "support": 665
+      },
+      {
+        "class_id": 5,
+        "class_name": "Zechstein",
+        "f1": 0.3956043956043956,
+        "iou": 0.2465753424657534,
+        "precision": 0.2647058823529412,
+        "recall": 0.782608695652174,
+        "support": 46
+      }
+    ]
+  },
+  "prediction_summary": {
+    "invalid_token_count": 37591,
+    "probability_grid_shape": [
+      76,
+      113,
+      32,
+      6
+    ],
+    "token_grid_shape_xyz": [
+      76,
+      113,
+      32
+    ],
+    "valid_token_count": 237225,
+    "validation_slice_count": 3
+  },
+  "pretrained_encoder": {
+    "EMBED_SPEC": "overlap_x16",
+    "MODEL_TAG": "amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1",
+    "agc_enabled": true,
+    "freeze_encoder": true,
+    "mask_ratio": 0.75,
+    "visible_loss_enabled": true
+  },
+  "probe": {
+    "PROBE_SPEC": "linear_balanced_v1",
+    "class_weighting": "balanced",
+    "classifier_type": "logistic_regression",
+    "feature_scaling": "standard",
+    "hyperparameters": {
+      "batch_size": 1024,
+      "dropout": 0.2,
+      "early_stopping_patience": 20,
+      "hidden_dims": [
+        256,
+        128
+      ],
+      "learning_rate": 0.001,
+      "max_epochs": 200,
+      "max_iter": 2000,
+      "random_state": 42,
+      "weight_decay": 0.0
+    },
+    "training_summary": {
+      "class_counts": {
+        "0": 6428,
+        "1": 3286,
+        "2": 15942,
+        "3": 1460,
+        "4": 1159,
+        "5": 449
+      },
+      "class_weight": "balanced",
+      "classes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "n_iter": [
+        272
+      ],
+      "trainer": "sklearn.linear_model.LogisticRegression"
+    }
+  },
+  "token_dataset": {
+    "ambiguous_token_ratio": 0.0414512576793787,
+    "class_counts": {
+      "combined": {
+        "0": 7654,
+        "1": 4089,
+        "2": 19851,
+        "3": 1814,
+        "4": 1824,
+        "5": 495
+      },
+      "train": {
+        "0": 6428,
+        "1": 3286,
+        "2": 15942,
+        "3": 1460,
+        "4": 1159,
+        "5": 449
+      },
+      "validation": {
+        "0": 1226,
+        "1": 803,
+        "2": 3909,
+        "3": 354,
+        "4": 665,
+        "5": 46
+      }
+    },
+    "class_imbalance": {
+      "class_counts": {
+        "0": 7654,
+        "1": 4089,
+        "2": 19851,
+        "3": 1814,
+        "4": 1824,
+        "5": 495
+      },
+      "max_to_min_positive_ratio": 40.1030303030303,
+      "total": 35727
+    },
+    "dropped_token_ratio": 0.17173988640315288,
+    "total_ambiguous_tokens": 1788,
+    "total_dropped_tokens": 7408,
+    "train_token_count": 28724,
+    "validation_token_count": 7003
+  },
+  "warnings": []
+}

@@ -23,3 +23,8 @@ inspection:
     - quicklook/seismic/seismic_xz_y_mid.png
     - quicklook/overlays/train_inline_0250_overlay.png
     - quicklook/tokenization/train_inline_0250_tokenization.png
+publish:
+  enabled: true
+  output_dir: results/f3/facies_benchmark_v1/inspection
+  include_figures: true
+  max_file_size_mb: 10

@@ -1,0 +1,338 @@
+{
+  "artifact_type": "f3_inspection_report",
+  "component_status": [
+    {
+      "available": true,
+      "name": "file_inventory"
+    },
+    {
+      "available": true,
+      "name": "class_info"
+    },
+    {
+      "available": true,
+      "name": "segy_geometry"
+    },
+    {
+      "available": true,
+      "name": "seismic_amplitude_stats"
+    },
+    {
+      "available": true,
+      "name": "label_unique_values"
+    },
+    {
+      "available": true,
+      "name": "png_label_summary"
+    },
+    {
+      "available": true,
+      "name": "png_label_inventory"
+    },
+    {
+      "available": true,
+      "name": "quicklook_metadata"
+    },
+    {
+      "available": true,
+      "name": "label_consistency"
+    },
+    {
+      "available": true,
+      "name": "tokenization_preview"
+    }
+  ],
+  "dataset_files": {
+    "available": true,
+    "category_counts": {
+      "class_info": 1,
+      "label_png": 15,
+      "label_segy": 1,
+      "other": 0,
+      "seismic_segy": 1
+    },
+    "split_counts": {
+      "train": 12,
+      "validation": 3
+    },
+    "train_png_count": 12,
+    "validation_png_count": 3
+  },
+  "downstream_readiness": {
+    "reasons": [
+      "raw mismatch is confined to ignored z-border samples."
+    ],
+    "recommendation_ja": "MVP\u3078\u9032\u3080\u524d\u306bwarning\u3068\u4e0d\u8db3component\u3092\u78ba\u8a8d\u3059\u308b\u3002",
+    "required_fixes_before_training": [
+      "z-border sample\u5dee\u5206\u306e\u5f71\u97ff\u7bc4\u56f2\u3092\u78ba\u8a8d\u3059\u308b\u3002"
+    ],
+    "status": "caution"
+  },
+  "facies_classes": [
+    {
+      "class_id": 0,
+      "class_name": "Upper North Sea",
+      "hex_color": "#235CA7",
+      "pixel_count": 685639,
+      "rgb": [
+        35,
+        92,
+        167
+      ],
+      "voxel_count": 34940426
+    },
+    {
+      "class_id": 1,
+      "class_name": "Middle North Sea",
+      "hex_color": "#7DB4D5",
+      "pixel_count": 299281,
+      "rgb": [
+        125,
+        180,
+        213
+      ],
+      "voxel_count": 15112086
+    },
+    {
+      "class_id": 2,
+      "class_name": "Lower North Sea",
+      "hex_color": "#DBF1F7",
+      "pixel_count": 1374140,
+      "rgb": [
+        219,
+        241,
+        247
+      ],
+      "voxel_count": 68326029
+    },
+    {
+      "class_id": 3,
+      "class_name": "Rijnland/Chalk",
+      "hex_color": "#FEDB7C",
+      "pixel_count": 173265,
+      "rgb": [
+        254,
+        219,
+        124
+      ],
+      "voxel_count": 8651372
+    },
+    {
+      "class_id": 4,
+      "class_name": "Scruff",
+      "hex_color": "#FC783B",
+      "pixel_count": 173737,
+      "rgb": [
+        252,
+        120,
+        59
+      ],
+      "voxel_count": 8535595
+    },
+    {
+      "class_id": 5,
+      "class_name": "Zechstein",
+      "hex_color": "#D00A00",
+      "pixel_count": 51763,
+      "rgb": [
+        208,
+        10,
+        0
+      ],
+      "voxel_count": 2517247
+    }
+  ],
+  "label_consistency": {
+    "available": true,
+    "border_only_mismatch_count": 14,
+    "ignore_border_samples_z": 1,
+    "max_mismatch_rate": 0.001,
+    "max_observed_effective_mismatch_rate": 4.386869223041592e-06,
+    "max_observed_mismatch_rate": 0.003925921089856586,
+    "passed": true,
+    "png_label_file_count": 15,
+    "total_mismatch_pixel_count": 10816,
+    "warnings": [
+      "one or more PNG labels required non-default orientation; see per-slice JSON metadata",
+      "one or more PNG/SEGY label mismatches are confined to ignored z-border samples"
+    ]
+  },
+  "quicklook_figures": [
+    {
+      "exists": true,
+      "path": "figures/seismic_xz_y_mid.png"
+    },
+    {
+      "exists": true,
+      "path": "figures/train_inline_0250_overlay.png"
+    },
+    {
+      "exists": true,
+      "path": "figures/train_inline_0250_tokenization.png"
+    }
+  ],
+  "seismic_amplitude_statistics": {
+    "available": true,
+    "finite_count": 138082755,
+    "max": 1.0,
+    "min": -1.0,
+    "nonfinite_count": 0,
+    "p1": -0.6514441919326782,
+    "p50": 0.00696202740073204,
+    "p99": 0.5720649909973154,
+    "zero_count": 1083002
+  },
+  "tokenization_preview": {
+    "ambiguous_token_count": 1790,
+    "ambiguous_token_ratio": 0.041070117474302496,
+    "available": true,
+    "dropped_token_ratio": 0.041070117474302496,
+    "dropped_tokens": 1790,
+    "empty_token_count": 0,
+    "patch_size_xyz": [
+      8,
+      8,
+      8
+    ],
+    "retained_token_ratio": 0.9589298825256976,
+    "retained_tokens": 41794,
+    "total_tokens": 43584,
+    "warnings": [
+      "patch\u5358\u4f4d\u306e\u4ee3\u8868class\u306f\u7c97\u3044\u6559\u5e2b\u30e9\u30d9\u30eb\u3067\u3042\u308a\u3001\u5883\u754c\u4ed8\u8fd1\u3067\u306ffacies\u6df7\u5408\u3092\u542b\u3080\u53ef\u80fd\u6027\u304c\u3042\u308b\u3002"
+    ]
+  },
+  "train_validation_labels": {
+    "available": true,
+    "file_count": 15,
+    "imbalance_notes": [
+      "train: class imbalance ratio\u304c24.6\u3002",
+      "validation: class imbalance ratio\u304c39.9\u3002"
+    ],
+    "slice_list_omitted": true,
+    "splits": {
+      "train": {
+        "class_counts": [
+          {
+            "class_id": 0,
+            "class_name": "Upper North Sea",
+            "fraction": 0.25643421739678424,
+            "pixel_count": 569684
+          },
+          {
+            "class_id": 1,
+            "class_name": "Middle North Sea",
+            "fraction": 0.10857595563477916,
+            "pixel_count": 241208
+          },
+          {
+            "class_id": 2,
+            "class_name": "Lower North Sea",
+            "fraction": 0.5008358990979311,
+            "pixel_count": 1112637
+          },
+          {
+            "class_id": 3,
+            "class_name": "Rijnland/Chalk",
+            "fraction": 0.06106519742883379,
+            "pixel_count": 135660
+          },
+          {
+            "class_id": 4,
+            "class_name": "Scruff",
+            "fraction": 0.05273906624174004,
+            "pixel_count": 117163
+          },
+          {
+            "class_id": 5,
+            "class_name": "Zechstein",
+            "fraction": 0.020349664199931578,
+            "pixel_count": 45208
+          }
+        ],
+        "file_count": 12,
+        "total_pixels": 2221560,
+        "unknown_pixel_count": 0
+      },
+      "validation": {
+        "class_counts": [
+          {
+            "class_id": 0,
+            "class_name": "Upper North Sea",
+            "fraction": 0.2162270519239555,
+            "pixel_count": 115955
+          },
+          {
+            "class_id": 1,
+            "class_name": "Middle North Sea",
+            "fraction": 0.10829160955870698,
+            "pixel_count": 58073
+          },
+          {
+            "class_id": 2,
+            "class_name": "Lower North Sea",
+            "fraction": 0.48763764183752434,
+            "pixel_count": 261503
+          },
+          {
+            "class_id": 3,
+            "class_name": "Rijnland/Chalk",
+            "fraction": 0.07012391261782887,
+            "pixel_count": 37605
+          },
+          {
+            "class_id": 4,
+            "class_name": "Scruff",
+            "fraction": 0.10549634975245448,
+            "pixel_count": 56574
+          },
+          {
+            "class_id": 5,
+            "class_name": "Zechstein",
+            "fraction": 0.012223434309529803,
+            "pixel_count": 6555
+          }
+        ],
+        "file_count": 3,
+        "total_pixels": 536265,
+        "unknown_pixel_count": 0
+      }
+    },
+    "total_pixels": 2757825,
+    "total_unknown_pixels": 0
+  },
+  "volume_geometry": {
+    "available": true,
+    "axis_assumption": "repo internal axis assumption: x=inline, y=crossline, z=sample/time",
+    "crossline_range": {
+      "count": 901,
+      "max": 1200,
+      "min": 300
+    },
+    "inline_range": {
+      "count": 601,
+      "max": 700,
+      "min": 100
+    },
+    "label_shape": [
+      601,
+      901,
+      255
+    ],
+    "sample_range": {
+      "count": 255,
+      "max": 1270,
+      "min": 0
+    },
+    "shape": [
+      601,
+      901,
+      255
+    ],
+    "shape_matches": true,
+    "z_display_convention": "XZ/YZ\u65ad\u9762\u3067\u306fz/sample/time\u65b9\u5411\u304c\u4e0b\u5411\u304d\u306b\u5897\u3048\u308b\u8868\u793a\u306b\u3059\u308b\u3002"
+  },
+  "warnings": [
+    "label_consistency: one or more PNG labels required non-default orientation; see per-slice JSON metadata",
+    "label_consistency: one or more PNG/SEGY label mismatches are confined to ignored z-border samples"
+  ]
+}

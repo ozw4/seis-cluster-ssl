@@ -12,6 +12,7 @@ from seis_ssl_cluster.config import (
 )
 from seis_ssl_cluster.config.schema import STAGE_F3_INSPECTION_REPORT
 from seis_ssl_cluster.f3 import (
+	F3InspectionPublishConfig,
 	F3InspectionReportConfig,
 	build_f3_inspection_report,
 )
@@ -40,18 +41,24 @@ def main() -> None:
 	paths = _required_mapping(config, 'paths')
 	output_root = _required_mapping(config, 'outputs')
 	inspection = _required_mapping(config, 'inspection')
+	publish = config.get('publish')
 	report_config = _report_config(output_root, inspection)
+	publish_config = _publish_config(publish)
 
 	if args.dry_run:
 		_print_summary(
 			config=config,
 			f3_root=Path(_required_str(paths, 'f3_root')),
 			report_config=report_config,
+			publish_config=publish_config,
 		)
 		print('execution: dry-run; F3 inspection report skipped')
 		return
 
-	result = build_f3_inspection_report(report_config)
+	result = build_f3_inspection_report(
+		report_config,
+		publish_config=publish_config,
+	)
 	readiness = _required_mapping(result.payload, 'downstream_readiness')
 	warnings = result.payload.get('warnings', [])
 	warning_count = len(warnings) if isinstance(warnings, Sequence) else 0
@@ -59,6 +66,9 @@ def main() -> None:
 	print(f'f3_inspection_report.warning_count: {warning_count}')
 	print(f'wrote F3 inspection report Markdown: {result.report_markdown}')
 	print(f'wrote F3 inspection report JSON: {result.report_json}')
+	if result.publish_manifest is not None:
+		print(f'published F3 inspection report: {result.publish_manifest.output_dir}')
+		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
 
 
 def _report_config(
@@ -104,6 +114,26 @@ def _report_config(
 	)
 
 
+def _publish_config(value: object) -> F3InspectionPublishConfig:
+	if value is None:
+		return F3InspectionPublishConfig()
+	if not isinstance(value, Mapping):
+		msg = f'publish must be a mapping; got {value!r}'
+		raise TypeError(msg)
+	enabled = _optional_bool(value, 'enabled', default=False)
+	include_figures = _optional_bool(value, 'include_figures', default=True)
+	output_dir = _optional_path(value, 'output_dir')
+	if enabled and output_dir is None:
+		msg = 'publish.output_dir must be set when publish.enabled is true'
+		raise ValueError(msg)
+	return F3InspectionPublishConfig(
+		enabled=enabled,
+		output_dir=output_dir,
+		include_figures=include_figures,
+		max_file_size_bytes=_max_file_size_bytes(value),
+	)
+
+
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, Any]:
 	value = parent.get(key)
 	if not isinstance(value, Mapping):
@@ -131,11 +161,43 @@ def _string_sequence(value: object, label: str) -> tuple[str, ...]:
 	return values
 
 
+def _optional_bool(
+	parent: Mapping[str, object],
+	key: str,
+	*,
+	default: bool,
+) -> bool:
+	value = parent.get(key, default)
+	if not isinstance(value, bool):
+		msg = f'publish.{key} must be a boolean; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _optional_path(parent: Mapping[str, object], key: str) -> Path | None:
+	value = parent.get(key)
+	if value is None:
+		return None
+	if not isinstance(value, str) or not value:
+		msg = f'publish.{key} must be a non-empty string; got {value!r}'
+		raise TypeError(msg)
+	return Path(value)
+
+
+def _max_file_size_bytes(parent: Mapping[str, object]) -> int:
+	value = parent.get('max_file_size_mb', 10)
+	if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+		msg = f'publish.max_file_size_mb must be positive; got {value!r}'
+		raise ValueError(msg)
+	return int(value * 1024 * 1024)
+
+
 def _print_summary(
 	*,
 	config: Mapping[str, object],
 	f3_root: Path,
 	report_config: F3InspectionReportConfig,
+	publish_config: F3InspectionPublishConfig,
 ) -> None:
 	output_root = _required_mapping(config, 'outputs')
 	print(f'stage: {config.get("stage")}')
@@ -177,6 +239,14 @@ def _print_summary(
 	print(
 		'inspection.figure_paths: '
 		f'{", ".join(path.as_posix() for path in report_config.figure_paths)}',
+	)
+	print(f'publish.enabled: {publish_config.enabled}')
+	if publish_config.output_dir is not None:
+		print(f'publish.output_dir: {publish_config.output_dir}')
+	print(f'publish.include_figures: {publish_config.include_figures}')
+	print(
+		'publish.max_file_size_bytes: '
+		f'{publish_config.max_file_size_bytes}',
 	)
 
 

@@ -1,0 +1,30 @@
+metric,class_id,class_name,value
+accuracy,,,0.887191203769813
+balanced_accuracy,,,0.843595375486522
+macro_f1,,,0.7537480300317339
+weighted_f1,,,0.8961388081944405
+mean_iou,,,0.6508538317434741
+per_class_precision,0,Upper North Sea,0.9649551752241239
+per_class_precision,1,Middle North Sea,0.9148681055155875
+per_class_precision,2,Lower North Sea,0.9784213515048268
+per_class_precision,3,Rijnland/Chalk,0.4534653465346535
+per_class_precision,4,Scruff,0.7124518613607189
+per_class_precision,5,Zechstein,0.2647058823529412
+per_class_recall,0,Upper North Sea,0.965742251223491
+per_class_recall,1,Middle North Sea,0.950186799501868
+per_class_recall,2,Lower North Sea,0.8815553850089537
+per_class_recall,3,Rijnland/Chalk,0.6468926553672316
+per_class_recall,4,Scruff,0.8345864661654135
+per_class_recall,5,Zechstein,0.782608695652174
+per_class_f1,0,Upper North Sea,0.965348552792499
+per_class_f1,1,Middle North Sea,0.9321930360415394
+per_class_f1,2,Lower North Sea,0.9274660207239941
+per_class_f1,3,Rijnland/Chalk,0.5331781140861467
+per_class_f1,4,Scruff,0.7686980609418282
+per_class_f1,5,Zechstein,0.3956043956043956
+per_class_iou,0,Upper North Sea,0.9330181245074862
+per_class_iou,1,Middle North Sea,0.8729977116704806
+per_class_iou,2,Lower North Sea,0.8647427854454204
+per_class_iou,3,Rijnland/Chalk,0.3634920634920635
+per_class_iou,4,Scruff,0.6242969628796401
+per_class_iou,5,Zechstein,0.2465753424657534

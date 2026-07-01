@@ -3,14 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from seis_ssl_cluster.f3 import (
 	READINESS_CAUTION,
 	READINESS_PROCEED,
 	READINESS_STOP,
+	F3InspectionPublishConfig,
 	F3InspectionReportConfig,
 	build_f3_inspection_report,
+	publish_f3_inspection_report,
 )
 from tests.helpers import run_python_proc
 
@@ -118,6 +121,165 @@ def test_f3_inspection_report_readiness_uses_consistency_and_tokenization(
 	)
 
 
+def test_f3_inspection_report_publish_enabled_writes_lightweight_results(
+	tmp_path: Path,
+) -> None:
+	config = _report_config(tmp_path / 'artifacts' / 'seis_ssl_cluster')
+	_write_report_components(config)
+	_touch_figures(config)
+	consistency_figure = _write_file(
+		config.inspection_dir
+		/ 'quicklook'
+		/ 'consistency'
+		/ 'train_inline_0250_mismatch.png',
+		b'consistency-png',
+	)
+	_write_file(
+		config.inspection_dir / 'quicklook' / 'overlays' / 'extra_overlay.png',
+		b'extra-png',
+	)
+	_write_file(config.inspection_dir / 'checkpoint.pt', b'heavy')
+	_write_file(config.inspection_dir / 'embeddings.npy', b'heavy')
+	output_dir = (
+		tmp_path / 'results' / 'f3' / 'facies_benchmark_v1' / 'inspection'
+	)
+
+	result = build_f3_inspection_report(
+		config,
+		publish_config=F3InspectionPublishConfig(
+			enabled=True,
+			output_dir=output_dir,
+			include_figures=True,
+			max_file_size_bytes=10 * 1024 * 1024,
+		),
+	)
+
+	assert result.publish_manifest is not None
+	expected_files = {
+		Path('report.md'),
+		Path('report.json'),
+		Path('publish_manifest.json'),
+		Path('figures/seismic_xz_y_mid.png'),
+		Path('figures/train_inline_0250_overlay.png'),
+		Path('figures/train_inline_0250_tokenization.png'),
+		Path('figures/label_consistency_example.png'),
+	}
+	published_files = {
+		path.relative_to(output_dir)
+		for path in output_dir.rglob('*')
+		if path.is_file()
+	}
+	assert published_files == expected_files
+	assert (
+		output_dir / 'figures' / 'label_consistency_example.png'
+	).read_bytes() == consistency_figure.read_bytes()
+	assert not any(path.suffix in {'.pt', '.npy'} for path in output_dir.rglob('*'))
+
+	_assert_published_markdown_is_lightweight(output_dir, tmp_path)
+	_assert_published_json_is_lightweight(output_dir, tmp_path)
+
+	manifest = json.loads(
+		(output_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
+	)
+	manifest_targets = {
+		Path(item['target']).relative_to(output_dir.resolve())
+		for item in manifest['items']
+	}
+	assert manifest_targets == expected_files - {Path('publish_manifest.json')}
+	assert manifest['warnings'] == []
+	assert manifest['skipped_optional_items'] == []
+
+
+def test_f3_inspection_report_publish_disabled_writes_no_results(
+	tmp_path: Path,
+) -> None:
+	config = _report_config(tmp_path)
+	_write_report_components(config)
+	_touch_figures(config)
+	output_dir = tmp_path / 'results'
+
+	result = build_f3_inspection_report(
+		config,
+		publish_config=F3InspectionPublishConfig(
+			enabled=False,
+			output_dir=output_dir,
+		),
+	)
+
+	assert result.publish_manifest is None
+	assert not output_dir.exists()
+
+
+def test_f3_inspection_report_publish_include_figures_false_omits_links(
+	tmp_path: Path,
+) -> None:
+	config = _report_config(tmp_path)
+	_write_report_components(config)
+	_touch_figures(config)
+	output_dir = tmp_path / 'results'
+
+	result = build_f3_inspection_report(
+		config,
+		publish_config=F3InspectionPublishConfig(
+			enabled=True,
+			output_dir=output_dir,
+			include_figures=False,
+		),
+	)
+
+	assert result.publish_manifest is not None
+	assert (output_dir / 'report.md').is_file()
+	assert (output_dir / 'report.json').is_file()
+	assert not (output_dir / 'figures').exists()
+	markdown = (output_dir / 'report.md').read_text(encoding='utf-8')
+	assert 'quicklook/' not in _quicklook_section(markdown)
+	published_payload = json.loads(
+		(output_dir / 'report.json').read_text(encoding='utf-8'),
+	)
+	assert published_payload['quicklook_figures'] == []
+
+
+def test_f3_inspection_report_publish_missing_optional_figure_warns(
+	tmp_path: Path,
+) -> None:
+	config = _report_config(tmp_path)
+	_write_report_components(config)
+	output_dir = tmp_path / 'results'
+
+	result = build_f3_inspection_report(
+		config,
+		publish_config=F3InspectionPublishConfig(
+			enabled=True,
+			output_dir=output_dir,
+			include_figures=True,
+		),
+	)
+
+	assert result.publish_manifest is not None
+	manifest = result.publish_manifest
+	assert (output_dir / 'report.md').is_file()
+	assert (output_dir / 'report.json').is_file()
+	assert not (output_dir / 'figures').exists()
+	assert len(manifest.skipped_optional_items) == 4
+	assert any(
+		'optional publish source does not exist' in warning
+		for warning in manifest.warnings
+	)
+
+
+def test_f3_inspection_report_publish_requires_report_files(tmp_path: Path) -> None:
+	config = _report_config(tmp_path)
+
+	with pytest.raises(FileNotFoundError, match='required publish source'):
+		publish_f3_inspection_report(
+			config,
+			F3InspectionPublishConfig(
+				enabled=True,
+				output_dir=tmp_path / 'results',
+			),
+		)
+
+
 def test_build_f3_inspection_report_proc_dry_run(tmp_path: Path) -> None:
 	inspection_dir = tmp_path / 'artifacts' / 'seis_ssl_cluster' / 'inspection'
 	inspection_dir = inspection_dir / 'f3' / 'facies_benchmark_v1'
@@ -205,6 +367,54 @@ def _report_config(root: Path) -> F3InspectionReportConfig:
 			Path('quicklook/tokenization/train_inline_0250_tokenization.png'),
 		),
 	)
+
+
+def _assert_published_markdown_is_lightweight(
+	output_dir: Path,
+	tmp_path: Path,
+) -> None:
+	published_markdown = (output_dir / 'report.md').read_text(encoding='utf-8')
+	assert '(figures/seismic_xz_y_mid.png)' in published_markdown
+	assert '(figures/train_inline_0250_overlay.png)' in published_markdown
+	assert '(figures/train_inline_0250_tokenization.png)' in published_markdown
+	assert '(quicklook/seismic/seismic_xz_y_mid.png)' not in published_markdown
+	assert 'publish用の軽量reportでは省略' in published_markdown
+	assert 'interpretation/train/' not in published_markdown
+	assert 'interpretation/validation/' not in published_markdown
+	assert 'f3_seismic.segy' not in published_markdown
+	assert 'f3_labels.segy' not in published_markdown
+	assert '/data/F3' not in published_markdown
+	assert str(tmp_path) not in _quicklook_section(published_markdown)
+
+
+def _assert_published_json_is_lightweight(
+	output_dir: Path,
+	tmp_path: Path,
+) -> None:
+	published_json_text = (output_dir / 'report.json').read_text(encoding='utf-8')
+	published_json = json.loads(published_json_text)
+	assert 'inspection_dir' not in published_json
+	assert 'outputs' not in published_json
+	assert all(
+		'path' not in item
+		for item in published_json['component_status']
+	)
+	assert 'seismic_segy' not in published_json['dataset_files']
+	assert 'label_segy' not in published_json['dataset_files']
+	assert 'class_info' not in published_json['dataset_files']
+	assert 'seismic_path' not in published_json['volume_geometry']
+	assert 'label_path' not in published_json['volume_geometry']
+	assert 'slices' not in published_json['train_validation_labels']
+	assert published_json['train_validation_labels']['slice_list_omitted'] is True
+	assert published_json['quicklook_figures'][0]['path'] == (
+		'figures/seismic_xz_y_mid.png'
+	)
+	assert 'interpretation/train/' not in published_json_text
+	assert 'interpretation/validation/' not in published_json_text
+	assert 'f3_seismic.segy' not in published_json_text
+	assert 'f3_labels.segy' not in published_json_text
+	assert '/data/F3' not in published_json_text
+	assert str(tmp_path) not in published_json_text
 
 
 def _write_report_components(  # noqa: PLR0913
@@ -466,6 +676,12 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
 		json.dumps(payload, indent=2, sort_keys=True) + '\n',
 		encoding='utf-8',
 	)
+
+
+def _write_file(path: Path, content: bytes) -> Path:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_bytes(content)
+	return path
 
 
 def _quicklook_section(markdown: str) -> str:
