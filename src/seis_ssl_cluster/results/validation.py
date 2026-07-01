@@ -117,10 +117,7 @@ def validate_results_artifacts(
 		file_errors, file_warnings = _validate_file(path=path, rules=rules)
 		errors.extend(file_errors)
 		warnings.extend(file_warnings)
-		if (
-			path.name == PUBLISH_MANIFEST_NAME
-			and path.parent.resolve(strict=False) == root_resolved
-		):
+		if path.name == PUBLISH_MANIFEST_NAME:
 			errors.extend(_publish_manifest_findings(path=path, root=root_resolved))
 
 	return ResultsValidationReport(

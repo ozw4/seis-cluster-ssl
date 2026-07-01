@@ -17,7 +17,7 @@ RANDOM_ENCODER_TAG = (
 REFERENCE_CHECKPOINT = (
 	'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/'
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/'
-	'mae_best.pt'
+	'mae_latest.pt'
 )
 
 

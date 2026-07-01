@@ -103,9 +103,12 @@ def test_results_validation_detects_publish_manifest_target_mismatch(
 	tmp_path: Path,
 ) -> None:
 	root = tmp_path / 'results'
-	published = _write_file(root / 'summary.md', b'# summary\n')
+	published = _write_file(
+		root / 'f3/facies_benchmark_v1/baseline_comparison/summary.md',
+		b'# summary\n',
+	)
 	_write_file(
-		root / 'publish_manifest.json',
+		root / 'f3/facies_benchmark_v1/baseline_comparison/publish_manifest.json',
 		json.dumps(
 			{
 				'created_at_utc': '2026-07-01T00:00:00Z',
