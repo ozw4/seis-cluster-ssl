@@ -47,7 +47,7 @@ def test_publish_selected_results_copies_allowed_files_and_writes_manifest(
 	assert payload['warnings'] == []
 	assert payload['items'][0] == {
 		'source': str(report),
-		'target': str(output_dir.resolve() / 'summary.md'),
+		'target': 'summary.md',
 		'size_bytes': report.stat().st_size,
 		'sha256': hashlib.sha256(report.read_bytes()).hexdigest(),
 	}
@@ -113,7 +113,7 @@ def test_publish_selected_results_records_missing_optional_item(
 	assert payload['skipped_optional_items'] == [
 		{
 			'source': str(missing),
-			'target': str(output_dir.resolve() / 'optional.csv'),
+			'target': 'optional.csv',
 			'reason': 'source_missing',
 		}
 	]

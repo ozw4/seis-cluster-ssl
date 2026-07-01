@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from pathlib import Path
 
 from seis_ssl_cluster.results import validate_results_artifacts
@@ -117,7 +118,7 @@ def test_results_validation_detects_publish_manifest_target_mismatch(
 						'sha256': hashlib.sha256(b'old summary\n').hexdigest(),
 						'size_bytes': 999,
 						'source': str(tmp_path / 'artifacts' / 'summary.md'),
-						'target': str(published),
+						'target': published.name,
 					}
 				],
 				'output_dir': str(root),
@@ -139,6 +140,75 @@ def test_results_validation_detects_publish_manifest_target_mismatch(
 		'publish manifest items[0].sha256 mismatch' in item.message
 		for item in report.errors
 	)
+
+
+def test_results_validation_rejects_absolute_publish_manifest_target(
+	tmp_path: Path,
+) -> None:
+	root = tmp_path / 'results'
+	published = _write_file(root / 'summary.md', b'# summary\n')
+	_write_file(
+		root / 'publish_manifest.json',
+		json.dumps(
+			{
+				'created_at_utc': '2026-07-01T00:00:00Z',
+				'items': [
+					{
+						'sha256': hashlib.sha256(published.read_bytes()).hexdigest(),
+						'size_bytes': published.stat().st_size,
+						'source': str(tmp_path / 'artifacts' / 'summary.md'),
+						'target': str(published),
+					}
+				],
+				'output_dir': str(root),
+				'skipped_optional_items': [],
+				'source_artifact_root': str(tmp_path / 'artifacts'),
+				'warnings': [],
+			}
+		).encode('utf-8'),
+	)
+
+	report = validate_results_artifacts(root)
+
+	assert not report.ok
+	assert any(
+		'publish manifest items[0].target must be relative' in item.message
+		for item in report.errors
+	)
+
+
+def test_results_validation_resolves_publish_manifest_targets_after_relocation(
+	tmp_path: Path,
+) -> None:
+	source_root = tmp_path / 'workspace' / 'results'
+	publish_dir = source_root / 'f3/facies_benchmark_v1/baseline_comparison'
+	published = _write_file(publish_dir / 'summary.md', b'# summary\n')
+	_write_file(
+		publish_dir / 'publish_manifest.json',
+		json.dumps(
+			{
+				'created_at_utc': '2026-07-01T00:00:00Z',
+				'items': [
+					{
+						'sha256': hashlib.sha256(published.read_bytes()).hexdigest(),
+						'size_bytes': published.stat().st_size,
+						'source': str(tmp_path / 'artifacts' / 'summary.md'),
+						'target': published.name,
+					}
+				],
+				'output_dir': 'results/f3/facies_benchmark_v1/baseline_comparison',
+				'skipped_optional_items': [],
+				'source_artifact_root': str(tmp_path / 'artifacts'),
+				'warnings': [],
+			}
+		).encode('utf-8'),
+	)
+	relocated_root = tmp_path / 'checkout' / 'results'
+	shutil.copytree(source_root, relocated_root)
+
+	report = validate_results_artifacts(relocated_root)
+
+	assert report.ok
 
 
 def test_results_validation_rejects_artifacts_directory_inside_results(

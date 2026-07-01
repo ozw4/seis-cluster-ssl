@@ -309,17 +309,17 @@ def _manifest_item_target(
 		return None
 
 	target_path = Path(target)
-	if not target_path.is_absolute():
+	if target_path.is_absolute():
 		findings.append(
 			_finding(
 				'error',
 				manifest_path,
-				f'publish manifest {label}.target must be absolute: {target}',
+				f'publish manifest {label}.target must be relative: {target}',
 			)
 		)
 		return None
 
-	resolved = target_path.resolve(strict=False)
+	resolved = (manifest_path.parent / target_path).resolve(strict=False)
 	try:
 		resolved.relative_to(root)
 	except ValueError:

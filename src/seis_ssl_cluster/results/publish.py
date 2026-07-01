@@ -149,6 +149,7 @@ def publish_selected_results(
 
 def publish_manifest_to_dict(manifest: PublishManifest) -> dict[str, object]:
 	"""Convert a publish manifest to a JSON-compatible dictionary."""
+	manifest_dir = manifest.manifest_path.parent
 	return {
 		'created_at_utc': manifest.created_at_utc,
 		'source_artifact_root': (
@@ -160,7 +161,10 @@ def publish_manifest_to_dict(manifest: PublishManifest) -> dict[str, object]:
 		'items': [
 			{
 				'source': str(item.source),
-				'target': str(item.target),
+				'target': _manifest_relative_target(
+					target=item.target,
+					manifest_dir=manifest_dir,
+				),
 				'size_bytes': item.size_bytes,
 				'sha256': item.sha256,
 			}
@@ -169,13 +173,23 @@ def publish_manifest_to_dict(manifest: PublishManifest) -> dict[str, object]:
 		'skipped_optional_items': [
 			{
 				'source': str(item.source),
-				'target': str(item.target),
+				'target': _manifest_relative_target(
+					target=item.target,
+					manifest_dir=manifest_dir,
+				),
 				'reason': item.reason,
 			}
 			for item in manifest.skipped_optional_items
 		],
 		'warnings': list(manifest.warnings),
 	}
+
+
+def _manifest_relative_target(*, target: Path, manifest_dir: Path) -> str:
+	relative = target.resolve(strict=False).relative_to(
+		manifest_dir.resolve(strict=False)
+	)
+	return relative.as_posix()
 
 
 def _validate_max_file_size_bytes(max_file_size_bytes: int) -> None:
