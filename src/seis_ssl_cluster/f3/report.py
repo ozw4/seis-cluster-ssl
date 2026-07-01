@@ -590,6 +590,7 @@ def _publish_report_payload(
 	published['quicklook_figures'] = [
 		_publish_figure_payload(item, path_replacements=path_replacements)
 		for item in _sequence_of_mappings(published.get('quicklook_figures'))
+		if item.get('path') in path_replacements
 	]
 	return published
 

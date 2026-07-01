@@ -210,6 +210,35 @@ def test_f3_inspection_report_publish_disabled_writes_no_results(
 	assert not output_dir.exists()
 
 
+def test_f3_inspection_report_publish_include_figures_false_omits_links(
+	tmp_path: Path,
+) -> None:
+	config = _report_config(tmp_path)
+	_write_report_components(config)
+	_touch_figures(config)
+	output_dir = tmp_path / 'results'
+
+	result = build_f3_inspection_report(
+		config,
+		publish_config=F3InspectionPublishConfig(
+			enabled=True,
+			output_dir=output_dir,
+			include_figures=False,
+		),
+	)
+
+	assert result.publish_manifest is not None
+	assert (output_dir / 'report.md').is_file()
+	assert (output_dir / 'report.json').is_file()
+	assert not (output_dir / 'figures').exists()
+	markdown = (output_dir / 'report.md').read_text(encoding='utf-8')
+	assert 'quicklook/' not in _quicklook_section(markdown)
+	published_payload = json.loads(
+		(output_dir / 'report.json').read_text(encoding='utf-8'),
+	)
+	assert published_payload['quicklook_figures'] == []
+
+
 def test_f3_inspection_report_publish_missing_optional_figure_warns(
 	tmp_path: Path,
 ) -> None:
