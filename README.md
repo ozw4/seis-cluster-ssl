@@ -106,6 +106,15 @@ The repository does not redistribute NOPIMS or other seismic data. Users are res
 ## Artifact layout
 
 Generated metadata and run products should be stored outside the raw-data directory.
+The default local output root is `/workspace/artifacts/seis_ssl_cluster/`.
+The repository does not track `artifacts/`; it may contain checkpoints,
+embeddings, models, path lists, normalization statistics, large arrays, and
+machine-specific absolute paths.
+
+Use `results/` only for lightweight artifacts intended for GitHub review, such
+as selected reports, metrics, comparison tables, and representative figures.
+These files should be reproducible summaries, not raw data, checkpoints,
+embeddings, clustering models, full visualization dumps, or path lists.
 
 Recommended layout:
 
@@ -140,6 +149,9 @@ Artifact roles:
 | `visualizations/` | PNGs, visualization reports, summaries, and optional voxel labels |
 
 The configuration validator requires generated manifest and normalization-stat paths to be absolute, under `paths.artifact_root`, and outside `paths.nopims_root`.
+Publishing a report to the repository should copy only the selected lightweight
+outputs into `results/`; normal experiment output paths remain under
+`/workspace/artifacts/seis_ssl_cluster/`.
 
 ## Quick start
 

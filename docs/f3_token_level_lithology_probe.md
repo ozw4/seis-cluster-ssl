@@ -35,6 +35,12 @@ The checked-in configs intentionally fail if `mae_best.pt` is absent; selecting
 
 Do not write this workflow under `runs/`.
 
+`artifacts/` is local generated output and is not tracked by Git. For GitHub
+review, copy only lightweight lithology probe reports, metrics, comparison
+tables, and representative figures to `results/f3/facies_benchmark_v1/`; do
+not commit checkpoints, embeddings, probe models, `.npy`, `.npz`, `.joblib`,
+path lists, normalization statistics, raw SEGY, or full visualization dumps.
+
 ## Label Contract
 
 `f3_labels.sgy` and the converted label volume are the source of truth for
@@ -181,6 +187,9 @@ The comparison report is written under:
 ```text
 $ROOT/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/
 ```
+
+A lightweight shared copy, when needed, belongs under
+`results/f3/facies_benchmark_v1/baseline_comparison/`.
 
 Read `macro_f1` as the primary class-balanced score, `mean_iou` as the
 secondary segmentation-style score, and per-class F1 columns to check whether

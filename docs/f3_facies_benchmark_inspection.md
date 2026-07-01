@@ -19,6 +19,11 @@ NPY volumes, manifests, embeddings, or training runs.
 
 Do not write F3 inspection outputs under `runs/`.
 
+`artifacts/` is local generated output and is not tracked by Git. For GitHub
+review, copy only lightweight inspection summaries and representative figures
+to `results/f3/facies_benchmark_v1/inspection/`; do not commit raw data, SEGY,
+full dumps, path lists, or other generated local artifacts.
+
 ## Config Contract
 
 Every inspection YAML under

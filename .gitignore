@@ -20,21 +20,14 @@ Thumbs.db
 .env
 *.env
 
+# Local/generated experiment artifacts
+artifacts/
+
 # 実行ログや中間ファイル
-*.npz
 *.log
 *.out
 *.bak
-*.npy
 *.tdms
-*.sgy
-*.segy
-*.png
-*.pth
-*.csv
-*.json
-*.npz
-*.joblib
 data/
 !src/seis_attr_ssl/data/
 !src/seis_attr_ssl/data/__init__.py
@@ -46,18 +39,24 @@ data/
 result/
 tmp_code/
 debug_*/
+
+# Heavy/generated ML artifacts
+*.pt
+*.pth
+*.npy
+*.npz
+*.joblib
+*.pkl
+*.sgy
+*.segy
+
 # compiled コード
 *.so
 *.o
 *.a
-*.pt
 *patch
 *.db
 .work
 .work/
 vendor/issue_forge
 vendor/issue_forge/
-*.joblib
-
-# Generated sklearn/joblib artifacts
-*.joblib

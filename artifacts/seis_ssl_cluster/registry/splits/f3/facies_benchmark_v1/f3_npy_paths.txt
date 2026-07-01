@@ -1,1 +1,0 @@
-/workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
