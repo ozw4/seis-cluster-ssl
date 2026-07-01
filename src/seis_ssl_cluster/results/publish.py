@@ -31,6 +31,8 @@ class PublishItem:
 	source: Path
 	relative_target: Path
 	required: bool = True
+	text_replacements: tuple[tuple[str, str], ...] = ()
+	content_text: str | None = None
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,7 @@ class _PublishCopy:
 	source: Path
 	target: Path
 	size_bytes: int
+	content_bytes: bytes | None
 
 
 @dataclass(frozen=True)
@@ -247,13 +250,20 @@ def _plan_copy_for_item(
 	)
 	if not _source_exists_for_publish(source=source, required=item.required):
 		return None
+	content_bytes = _publish_content_bytes(source=source, item=item)
 	return _PublishCopy(
 		source=source,
 		target=target,
 		size_bytes=_validated_source_size(
 			source=source,
+			size_bytes=(
+				len(content_bytes)
+				if content_bytes is not None
+				else source.stat().st_size
+			),
 			max_file_size_bytes=constraints.max_file_size_bytes,
 		),
+		content_bytes=content_bytes,
 	)
 
 
@@ -275,9 +285,9 @@ def _source_exists_for_publish(*, source: Path, required: bool) -> bool:
 def _validated_source_size(
 	*,
 	source: Path,
+	size_bytes: int,
 	max_file_size_bytes: int,
 ) -> int:
-	size_bytes = source.stat().st_size
 	if size_bytes > max_file_size_bytes:
 		msg = (
 			'publish source exceeds max_file_size_bytes: '
@@ -286,6 +296,22 @@ def _validated_source_size(
 		)
 		raise ValueError(msg)
 	return size_bytes
+
+
+def _publish_content_bytes(*, source: Path, item: PublishItem) -> bytes | None:
+	if item.content_text is None and not item.text_replacements:
+		return None
+	text = (
+		source.read_text(encoding='utf-8')
+		if item.content_text is None
+		else item.content_text
+	)
+	for old, new in item.text_replacements:
+		if not old:
+			msg = f'text replacement source must be non-empty for {source}'
+			raise ValueError(msg)
+		text = text.replace(old, new)
+	return text.encode('utf-8')
 
 
 def _validate_publish_target(
@@ -317,13 +343,18 @@ def _copy_publish_items(copy_plan: Sequence[_PublishCopy]) -> list[PublishedItem
 		source = plan_item.source
 		target = plan_item.target
 		target.parent.mkdir(parents=True, exist_ok=True)
-		shutil.copy2(source, target)
+		if plan_item.content_bytes is None:
+			shutil.copy2(source, target)
+			sha256 = _sha256(source)
+		else:
+			target.write_bytes(plan_item.content_bytes)
+			sha256 = _sha256_bytes(plan_item.content_bytes)
 		published.append(
 			PublishedItem(
 				source=source,
 				target=target,
 				size_bytes=plan_item.size_bytes,
-				sha256=_sha256(source),
+				sha256=sha256,
 			)
 		)
 	return published
@@ -409,3 +440,7 @@ def _sha256(path: Path) -> str:
 		for chunk in iter(lambda: file_obj.read(1024 * 1024), b''):
 			hasher.update(chunk)
 	return hasher.hexdigest()
+
+
+def _sha256_bytes(content: bytes) -> str:
+	return hashlib.sha256(content).hexdigest()

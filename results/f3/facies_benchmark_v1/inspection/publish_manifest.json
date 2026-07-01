@@ -1,0 +1,45 @@
+{
+  "created_at_utc": "2026-07-01T03:15:11.177173Z",
+  "items": [
+    {
+      "sha256": "31a2bf923fd74db56dd8b989263d523f17045ea6ebd4e8c574b06d7f9a7715c2",
+      "size_bytes": 4067,
+      "source": "/workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/report.md",
+      "target": "/workspace/results/f3/facies_benchmark_v1/inspection/report.md"
+    },
+    {
+      "sha256": "6cba954f901d1eb3970c8c9b4d9c9c6245e177f8f174b0f35999311acf71f4c3",
+      "size_bytes": 8367,
+      "source": "/workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/report.json",
+      "target": "/workspace/results/f3/facies_benchmark_v1/inspection/report.json"
+    },
+    {
+      "sha256": "ddc61250f0d9423db461e9585fa32d20174999f4225a9d2ed1153061bd42d068",
+      "size_bytes": 367583,
+      "source": "/workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/seismic/seismic_xz_y_mid.png",
+      "target": "/workspace/results/f3/facies_benchmark_v1/inspection/figures/seismic_xz_y_mid.png"
+    },
+    {
+      "sha256": "fa19bc96f9665d4e7e21f1d981dc678a22a2df10b628a610117e515aefaab459",
+      "size_bytes": 920048,
+      "source": "/workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/overlays/train_inline_0250_overlay.png",
+      "target": "/workspace/results/f3/facies_benchmark_v1/inspection/figures/train_inline_0250_overlay.png"
+    },
+    {
+      "sha256": "4d57c4c6d78601bea9469b60a68f1d9a4d64654776aa4b62ff9605db9d7edd15",
+      "size_bytes": 106697,
+      "source": "/workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/tokenization/train_inline_0250_tokenization.png",
+      "target": "/workspace/results/f3/facies_benchmark_v1/inspection/figures/train_inline_0250_tokenization.png"
+    },
+    {
+      "sha256": "f0629a197220234d459547eb1b719112d81d1fd06bda1954262dbefe22ca5742",
+      "size_bytes": 134412,
+      "source": "/workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/quicklook/consistency/train_inline_0250_mismatch.png",
+      "target": "/workspace/results/f3/facies_benchmark_v1/inspection/figures/label_consistency_example.png"
+    }
+  ],
+  "output_dir": "results/f3/facies_benchmark_v1/inspection",
+  "skipped_optional_items": [],
+  "source_artifact_root": "/workspace/artifacts/seis_ssl_cluster",
+  "warnings": []
+}

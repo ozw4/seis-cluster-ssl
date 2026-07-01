@@ -5,8 +5,16 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
+
+from seis_ssl_cluster.results import (
+	DEFAULT_MAX_FILE_SIZE_BYTES,
+	PublishItem,
+	PublishManifest,
+	publish_selected_results,
+)
 
 READINESS_PROCEED = 'proceed'
 READINESS_CAUTION = 'caution'
@@ -16,6 +24,33 @@ _DEFAULT_FIGURE_PATHS = (
 	Path('quicklook/seismic/seismic_xz_y_mid.png'),
 	Path('quicklook/overlays/train_inline_0250_overlay.png'),
 	Path('quicklook/tokenization/train_inline_0250_tokenization.png'),
+)
+_PUBLISH_REPORT_TARGET = Path('report.md')
+_PUBLISH_JSON_TARGET = Path('report.json')
+_PUBLISH_FIGURE_TARGETS = (
+	(
+		Path('quicklook/seismic/seismic_xz_y_mid.png'),
+		Path('figures/seismic_xz_y_mid.png'),
+	),
+	(
+		Path('quicklook/overlays/train_inline_0250_overlay.png'),
+		Path('figures/train_inline_0250_overlay.png'),
+	),
+	(
+		Path('quicklook/tokenization/train_inline_0250_tokenization.png'),
+		Path('figures/train_inline_0250_tokenization.png'),
+	),
+)
+_PUBLISH_CONSISTENCY_FIGURE_TARGET = Path('figures/label_consistency_example.png')
+_PUBLISH_CONSISTENCY_PREFERRED = Path(
+	'quicklook/consistency/train_inline_0250_mismatch.png',
+)
+_PUBLISH_CONSISTENCY_MISSING_SENTINEL = Path(
+	'quicklook/consistency/label_consistency_example.png',
+)
+_PUBLISH_CONSISTENCY_GLOBS = (
+	'quicklook/consistency/*mismatch*.png',
+	'quicklook/consistency/*consistency*.png',
 )
 _REPORT_COMPONENTS = (
 	'file_inventory',
@@ -52,16 +87,29 @@ class F3InspectionReportConfig:
 
 
 @dataclass(frozen=True)
+class F3InspectionPublishConfig:
+	"""Settings for publishing a lightweight F3 inspection report copy."""
+
+	enabled: bool = False
+	output_dir: Path | None = None
+	include_figures: bool = True
+	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+
+
+@dataclass(frozen=True)
 class F3InspectionReportResult:
 	"""Paths and payload written by the F3 inspection report builder."""
 
 	report_markdown: Path
 	report_json: Path
 	payload: dict[str, object]
+	publish_manifest: PublishManifest | None = None
 
 
 def build_f3_inspection_report(
 	config: F3InspectionReportConfig,
+	*,
+	publish_config: F3InspectionPublishConfig | None = None,
 ) -> F3InspectionReportResult:
 	"""Build and write the F3 inspection Markdown and JSON reports."""
 	components, component_status, warnings = _load_report_components(config)
@@ -73,10 +121,42 @@ def build_f3_inspection_report(
 	)
 	_write_json(config.output_json, payload)
 	_write_text(config.output_markdown, render_f3_inspection_report_markdown(payload))
+	publish_manifest = publish_f3_inspection_report(
+		config,
+		publish_config,
+		payload=payload,
+	)
 	return F3InspectionReportResult(
 		report_markdown=config.output_markdown,
 		report_json=config.output_json,
 		payload=payload,
+		publish_manifest=publish_manifest,
+	)
+
+
+def publish_f3_inspection_report(
+	config: F3InspectionReportConfig,
+	publish_config: F3InspectionPublishConfig | None,
+	*,
+	payload: Mapping[str, object] | None = None,
+) -> PublishManifest | None:
+	"""Publish lightweight F3 inspection report artifacts into ``results/``."""
+	if publish_config is None or not publish_config.enabled:
+		return None
+	if publish_config.output_dir is None:
+		msg = 'publish output_dir is required when publishing is enabled'
+		raise ValueError(msg)
+	report_payload = payload
+	if report_payload is None:
+		report_payload = _read_publish_report_payload(config.output_json)
+	return publish_selected_results(
+		items=_publish_items_for_f3_inspection_report(
+			config,
+			include_figures=publish_config.include_figures,
+			payload=report_payload,
+		),
+		output_dir=publish_config.output_dir,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
 
 
@@ -428,6 +508,160 @@ def _figure_summary(
 	return figures, warnings
 
 
+def _publish_items_for_f3_inspection_report(
+	config: F3InspectionReportConfig,
+	*,
+	include_figures: bool,
+	payload: Mapping[str, object],
+) -> tuple[PublishItem, ...]:
+	figure_items, text_replacements = _publish_figure_items_and_replacements(
+		config,
+		include_figures=include_figures,
+	)
+	published_payload = _publish_report_payload(
+		payload,
+		text_replacements=text_replacements,
+	)
+	return (
+		PublishItem(
+			config.output_markdown,
+			_PUBLISH_REPORT_TARGET,
+			content_text=render_f3_inspection_report_markdown(published_payload),
+		),
+		PublishItem(
+			config.output_json,
+			_PUBLISH_JSON_TARGET,
+			content_text=(
+				json.dumps(published_payload, indent=2, sort_keys=True) + '\n'
+			),
+		),
+		*figure_items,
+	)
+
+
+def _read_publish_report_payload(path: Path) -> Mapping[str, object]:
+	if not path.is_file():
+		msg = f'required publish source does not exist: {path}'
+		raise FileNotFoundError(msg)
+	try:
+		payload = json.loads(path.read_text(encoding='utf-8'))
+	except json.JSONDecodeError as exc:
+		msg = f'publish report JSON is invalid: {path}: {exc.msg}'
+		raise ValueError(msg) from exc
+	if not isinstance(payload, Mapping):
+		msg = f'publish report JSON must be an object: {path}'
+		raise TypeError(msg)
+	return payload
+
+
+def _publish_report_payload(
+	payload: Mapping[str, object],
+	*,
+	text_replacements: Sequence[tuple[str, str]],
+) -> dict[str, object]:
+	published = deepcopy(dict(payload))
+	published.pop('inspection_dir', None)
+	published.pop('outputs', None)
+	published['component_status'] = [
+		{
+			'name': item.get('name'),
+			'available': item.get('available'),
+		}
+		for item in _sequence_of_mappings(published.get('component_status'))
+	]
+
+	dataset_files = dict(_mapping(published.get('dataset_files')))
+	for key in ('seismic_segy', 'label_segy', 'class_info'):
+		dataset_files.pop(key, None)
+	published['dataset_files'] = dataset_files
+
+	geometry = dict(_mapping(published.get('volume_geometry')))
+	geometry.pop('seismic_path', None)
+	geometry.pop('label_path', None)
+	published['volume_geometry'] = geometry
+
+	labels = dict(_mapping(published.get('train_validation_labels')))
+	if 'slices' in labels:
+		labels.pop('slices', None)
+		labels['slice_list_omitted'] = True
+	published['train_validation_labels'] = labels
+
+	path_replacements = dict(text_replacements)
+	published['quicklook_figures'] = [
+		_publish_figure_payload(item, path_replacements=path_replacements)
+		for item in _sequence_of_mappings(published.get('quicklook_figures'))
+	]
+	return published
+
+
+def _publish_figure_payload(
+	item: Mapping[str, object],
+	*,
+	path_replacements: Mapping[str, str],
+) -> dict[str, object]:
+	figure = dict(item)
+	path = figure.get('path')
+	if isinstance(path, str):
+		figure['path'] = path_replacements.get(path, path)
+	return figure
+
+
+def _publish_figure_items_and_replacements(
+	config: F3InspectionReportConfig,
+	*,
+	include_figures: bool,
+) -> tuple[tuple[PublishItem, ...], tuple[tuple[str, str], ...]]:
+	if not include_figures:
+		return (), ()
+
+	items: list[PublishItem] = []
+	replacements: list[tuple[str, str]] = []
+	for relative_source, relative_target in _PUBLISH_FIGURE_TARGETS:
+		source = config.inspection_dir / relative_source
+		items.append(PublishItem(source, relative_target, required=False))
+		replacements.append(
+			(
+				_relative_path_for_markdown(source, config.output_markdown.parent),
+				relative_target.as_posix(),
+			),
+		)
+
+	consistency_source = _select_publish_consistency_figure(config.inspection_dir)
+	if consistency_source is None:
+		consistency_source = (
+			config.inspection_dir / _PUBLISH_CONSISTENCY_MISSING_SENTINEL
+		)
+	else:
+		replacements.append(
+			(
+				_relative_path_for_markdown(
+					consistency_source,
+					config.output_markdown.parent,
+				),
+				_PUBLISH_CONSISTENCY_FIGURE_TARGET.as_posix(),
+			),
+		)
+	items.append(
+		PublishItem(
+			consistency_source,
+			_PUBLISH_CONSISTENCY_FIGURE_TARGET,
+			required=False,
+		),
+	)
+	return tuple(items), tuple(replacements)
+
+
+def _select_publish_consistency_figure(inspection_dir: Path) -> Path | None:
+	preferred = inspection_dir / _PUBLISH_CONSISTENCY_PREFERRED
+	if preferred.is_file():
+		return preferred
+	for pattern in _PUBLISH_CONSISTENCY_GLOBS:
+		for candidate in sorted(inspection_dir.glob(pattern)):
+			if candidate.is_file():
+				return candidate
+	return None
+
+
 def _tokenization_summary(
 	components: Mapping[str, Mapping[str, object] | None],
 ) -> dict[str, object]:
@@ -633,13 +867,23 @@ def _imbalance_notes(payload: Mapping[str, object]) -> list[str]:
 
 
 def _render_dataset_files(dataset_files: Mapping[str, object]) -> list[str]:
+	category_counts = _mapping(dataset_files.get('category_counts'))
+	seismic_count = _count_and_paths(
+		dataset_files.get('seismic_segy'),
+		count=category_counts.get('seismic_segy'),
+	)
+	label_count = _count_and_paths(
+		dataset_files.get('label_segy'),
+		count=category_counts.get('label_segy'),
+	)
+	class_info_count = _count_and_paths(
+		dataset_files.get('class_info'),
+		count=category_counts.get('class_info'),
+	)
 	return [
-		'- seismic SEGY: '
-		f'{_count_and_paths(dataset_files.get("seismic_segy"))}',
-		'- label SEGY: '
-		f'{_count_and_paths(dataset_files.get("label_segy"))}',
-		'- class_info: '
-		f'{_count_and_paths(dataset_files.get("class_info"))}',
+		f'- seismic SEGY: {seismic_count}',
+		f'- label SEGY: {label_count}',
+		f'- class_info: {class_info_count}',
 		f'- train PNG labels: {_display(dataset_files.get("train_png_count"))}件',
 		'- validation PNG labels: '
 		f'{_display(dataset_files.get("validation_png_count"))}件',
@@ -710,6 +954,8 @@ def _render_train_validation_labels(labels: Mapping[str, object]) -> list[str]:
 			)
 			for item in slices
 		)
+	elif labels.get('slice_list_omitted') is True:
+		lines.append('  - publish用の軽量reportでは省略')
 	else:
 		lines.append('  - 未確認')
 	lines.extend(['', '### Class distribution by split', ''])
@@ -808,10 +1054,11 @@ def _render_readiness(readiness: Mapping[str, object]) -> list[str]:
 	return lines
 
 
-def _count_and_paths(value: object) -> str:
+def _count_and_paths(value: object, *, count: object = None) -> str:
 	paths = _string_list(value)
 	if not paths:
-		return '0件'
+		count_value = _int_or_none(count)
+		return f'{count_value}件' if count_value is not None else '0件'
 	if len(paths) <= 3:
 		return f'{len(paths)}件 (' + ', '.join(f'`{path}`' for path in paths) + ')'
 	return f'{len(paths)}件 (例: `{paths[0]}`)'
@@ -916,8 +1163,10 @@ __all__ = [
 	'READINESS_CAUTION',
 	'READINESS_PROCEED',
 	'READINESS_STOP',
+	'F3InspectionPublishConfig',
 	'F3InspectionReportConfig',
 	'F3InspectionReportResult',
 	'build_f3_inspection_report',
+	'publish_f3_inspection_report',
 	'render_f3_inspection_report_markdown',
 ]

@@ -231,7 +231,9 @@ def test_f3_inspection_configs_resolve_common_contract(
 	resolved = resolve_f3_facies_inspection_config(raw, stage=stage)
 
 	assert raw == original
-	assert set(raw) == {'paths', 'outputs', 'dataset', 'inspection'}
+	required_top_level = {'paths', 'outputs', 'dataset', 'inspection'}
+	allowed_top_level = required_top_level | {'publish'}
+	assert required_top_level <= set(raw) <= allowed_top_level
 	assert 'stage' not in raw
 	assert raw['paths'] == {
 		'f3_root': DEFAULT_F3_ROOT,
@@ -243,6 +245,15 @@ def test_f3_inspection_configs_resolve_common_contract(
 		'name': F3_FACIES_DATASET_NAME,
 		'version': F3_FACIES_DATASET_VERSION,
 	}
+	if stage == STAGE_F3_INSPECTION_REPORT:
+		assert raw['publish'] == {
+			'enabled': True,
+			'output_dir': 'results/f3/facies_benchmark_v1/inspection',
+			'include_figures': True,
+			'max_file_size_mb': 10,
+		}
+	else:
+		assert 'publish' not in raw
 	assert isinstance(raw['inspection'], dict)
 	assert raw['inspection']
 	assert resolved['stage'] == stage

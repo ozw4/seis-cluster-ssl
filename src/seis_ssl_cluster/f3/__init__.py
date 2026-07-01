@@ -165,9 +165,11 @@ from seis_ssl_cluster.f3.report import (
 	READINESS_CAUTION,
 	READINESS_PROCEED,
 	READINESS_STOP,
+	F3InspectionPublishConfig,
 	F3InspectionReportConfig,
 	F3InspectionReportResult,
 	build_f3_inspection_report,
+	publish_f3_inspection_report,
 	render_f3_inspection_report_markdown,
 )
 from seis_ssl_cluster.f3.segy import (
@@ -269,6 +271,7 @@ __all__ = [
 	'F3FileInventory',
 	'F3FileRecord',
 	'F3IdentityScaler',
+	'F3InspectionPublishConfig',
 	'F3InspectionReportConfig',
 	'F3InspectionReportResult',
 	'F3InventoryOutputConfig',
@@ -383,6 +386,7 @@ __all__ = [
 	'png_label_inventory_to_dict',
 	'predict_f3_lithology_tokens',
 	'prepare_f3_facies_volume',
+	'publish_f3_inspection_report',
 	'read_class_info',
 	'read_f3_line_geometry',
 	'read_f3_lithology_class_info',
