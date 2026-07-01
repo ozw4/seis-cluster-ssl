@@ -16,7 +16,7 @@ import numpy as np
 if TYPE_CHECKING:
 	from numpy.typing import NDArray
 
-BASELINE_FEATURE_KINDS = frozenset({'z_only', 'amplitude_stats'})
+BASELINE_FEATURE_KINDS = frozenset({'z_only', 'amplitude_stats', 'xyz_coordinates'})
 AMPLITUDE_STATISTICS = (
 	'mean',
 	'std',
@@ -112,6 +112,7 @@ class F3BaselineFeatureConfig:
 	statistics: tuple[str, ...] = AMPLITUDE_STATISTICS
 	polynomial_degree: int = 1
 	normalization: str = 'minmax'
+	include_interactions: bool = False
 	seismic_path: Path | None = None
 	feature_space: str | None = None
 
@@ -123,16 +124,35 @@ class F3BaselineFeatureConfig:
 				f'got {self.kind!r}'
 			)
 			raise ValueError(msg)
+		if not isinstance(self.include_interactions, bool):
+			msg = (
+				'baseline include_interactions must be a boolean; '
+				f'got {self.include_interactions!r}'
+			)
+			raise TypeError(msg)
 		if (
 			not isinstance(self.polynomial_degree, int)
 			or isinstance(self.polynomial_degree, bool)
 			or self.polynomial_degree <= 0
 		):
 			msg = (
-				'baseline z_only polynomial_degree must be a positive integer; '
+				'baseline polynomial_degree must be a positive integer; '
 				f'got {self.polynomial_degree!r}'
 			)
 			raise ValueError(msg)
+		if self.kind == 'xyz_coordinates':
+			if self.normalization != 'minmax':
+				msg = (
+					'baseline xyz_coordinates normalize must be "minmax"; '
+					f'got {self.normalization!r}'
+				)
+				raise ValueError(msg)
+			if self.polynomial_degree not in {1, 2}:
+				msg = (
+					'baseline xyz_coordinates polynomial_degree must be 1 or 2; '
+					f'got {self.polynomial_degree!r}'
+				)
+				raise ValueError(msg)
 		unknown_statistics = sorted(set(self.statistics) - set(AMPLITUDE_STATISTICS))
 		if unknown_statistics:
 			msg = (
@@ -313,6 +333,13 @@ def _build_features(
 			validation=validation,
 			reference_metadata=reference_metadata,
 		)
+	if features.kind == 'xyz_coordinates':
+		return _build_xyz_coordinates_features(
+			features,
+			train=train,
+			validation=validation,
+			reference_metadata=reference_metadata,
+		)
 	return _build_amplitude_features(
 		features,
 		train=train,
@@ -374,6 +401,56 @@ def _build_z_only_features(
 			'z_max': z_max,
 			'polynomial_degree': features.polynomial_degree,
 		},
+	)
+
+
+def _build_xyz_coordinates_features(
+	features: F3BaselineFeatureConfig,
+	*,
+	train: _TokenDataset,
+	validation: _TokenDataset,
+	reference_metadata: Mapping[str, object],
+) -> tuple[dict[str, NDArray[np.float32]], tuple[str, ...], dict[str, object]]:
+	shape_xyz = _volume_shape_xyz(reference_metadata)
+	xyz_min = np.zeros(3, dtype=np.float64)
+	xyz_max = np.asarray(shape_xyz, dtype=np.float64) - 1.0
+	denominator = xyz_max - xyz_min
+	if np.any(denominator <= 0.0):
+		msg = (
+			'xyz normalization range must be positive; '
+			f'got min={xyz_min.tolist()}, max={xyz_max.tolist()}'
+		)
+		raise ValueError(msg)
+	feature_names = _xyz_feature_names(
+		degree=features.polynomial_degree,
+		include_interactions=features.include_interactions,
+	)
+	parameters = {
+		'normalize': features.normalization,
+		'polynomial_degree': features.polynomial_degree,
+		'include_interactions': features.include_interactions,
+		'xyz_min': xyz_min.tolist(),
+		'xyz_max': xyz_max.tolist(),
+	}
+	return (
+		{
+			'train': _xyz_polynomial_features(
+				_xyz_coordinates(train),
+				xyz_min=xyz_min,
+				denominator=denominator,
+				features=features,
+				label='train_tokens.features',
+			),
+			'validation': _xyz_polynomial_features(
+				_xyz_coordinates(validation),
+				xyz_min=xyz_min,
+				denominator=denominator,
+				features=features,
+				label='validation_tokens.features',
+			),
+		},
+		feature_names,
+		parameters,
 	)
 
 
@@ -482,6 +559,23 @@ def _z_coordinates(dataset: _TokenDataset) -> NDArray[np.float64]:
 	return z_values
 
 
+def _xyz_coordinates(dataset: _TokenDataset) -> NDArray[np.float64]:
+	if 'voxel_center_xyz' not in dataset.arrays:
+		msg = f'{dataset.path} must contain voxel_center_xyz for xyz_coordinates'
+		raise KeyError(msg)
+	centers = np.asarray(dataset.arrays['voxel_center_xyz'], dtype=np.float64)
+	if centers.shape != (dataset.count, 3):
+		msg = (
+			f'{dataset.path}.voxel_center_xyz must have shape '
+			f'{(dataset.count, 3)!r}; got {centers.shape!r}'
+		)
+		raise ValueError(msg)
+	if not np.all(np.isfinite(centers)):
+		msg = f'{dataset.path} contains non-finite xyz coordinates'
+		raise ValueError(msg)
+	return centers
+
+
 def _z_polynomial_features(
 	z_values: NDArray[np.float64],
 	*,
@@ -492,6 +586,54 @@ def _z_polynomial_features(
 	z_norm = (z_values - z_min) / denominator
 	matrix = np.column_stack([z_norm**power for power in range(1, degree + 1)])
 	return _finite_float32_features(matrix, label='z_only.features')
+
+
+def _xyz_polynomial_features(
+	xyz_values: NDArray[np.float64],
+	*,
+	xyz_min: NDArray[np.float64],
+	denominator: NDArray[np.float64],
+	features: F3BaselineFeatureConfig,
+	label: str,
+) -> NDArray[np.float32]:
+	normalized = (xyz_values - xyz_min) / denominator
+	columns = [normalized[:, index] for index in range(3)]
+	if features.polynomial_degree == 2:
+		columns.extend(normalized[:, index] ** 2 for index in range(3))
+		if features.include_interactions:
+			columns.extend(
+				(
+					normalized[:, 0] * normalized[:, 1],
+					normalized[:, 0] * normalized[:, 2],
+					normalized[:, 1] * normalized[:, 2],
+				),
+			)
+	matrix = np.column_stack(columns)
+	return _finite_float32_features(matrix, label=f'xyz_coordinates.{label}')
+
+
+def _xyz_feature_names(
+	*,
+	degree: int,
+	include_interactions: bool,
+) -> tuple[str, ...]:
+	base_names = ('x_norm', 'y_norm', 'z_norm')
+	if degree == 1:
+		return base_names
+	names = (
+		*base_names,
+		'x_norm_power_2',
+		'y_norm_power_2',
+		'z_norm_power_2',
+	)
+	if include_interactions:
+		names = (
+			*names,
+			'x_norm_y_norm',
+			'x_norm_z_norm',
+			'y_norm_z_norm',
+		)
+	return names
 
 
 def _amplitude_statistics_for_tokens(
@@ -750,6 +892,12 @@ def _metadata_payload(
 		payload['cross_split_token_overlap_resolution'] = reference_metadata[
 			'cross_split_token_overlap_resolution'
 		]
+	if config.features.kind == 'xyz_coordinates':
+		payload['xyz_coordinates'] = {
+			'normalize': config.features.normalization,
+			'polynomial_degree': config.features.polynomial_degree,
+			'include_interactions': config.features.include_interactions,
+		}
 	return payload
 
 
@@ -1087,6 +1235,37 @@ def _features_from_mapping(
 				),
 			),
 		)
+	if kind == 'xyz_coordinates':
+		return F3BaselineFeatureConfig(
+			kind=kind,
+			polynomial_degree=_optional_positive_int(
+				kind_options.get(
+					'polynomial_degree',
+					raw_features.get('polynomial_degree', 1),
+				),
+				'baseline.xyz_coordinates.polynomial_degree',
+			),
+			normalization=str(
+				kind_options.get(
+					'normalize',
+					kind_options.get(
+						'normalization',
+						raw_features.get(
+							'normalize',
+							raw_features.get('normalization', 'minmax'),
+						),
+					),
+				),
+			),
+			include_interactions=_optional_bool(
+				kind_options.get(
+					'include_interactions',
+					raw_features.get('include_interactions'),
+				),
+				'baseline.xyz_coordinates.include_interactions',
+				default=False,
+			),
+		)
 	if kind == 'amplitude_stats':
 		return F3BaselineFeatureConfig(
 			kind=kind,
@@ -1328,4 +1507,13 @@ def _optional_positive_int(value: object, label: str) -> int:
 	if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
 		msg = f'{label} must be a positive integer; got {value!r}'
 		raise ValueError(msg)
+	return value
+
+
+def _optional_bool(value: object, label: str, *, default: bool) -> bool:
+	if value is None:
+		return default
+	if not isinstance(value, bool):
+		msg = f'{label} must be a boolean; got {value!r}'
+		raise TypeError(msg)
 	return value

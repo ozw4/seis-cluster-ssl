@@ -45,12 +45,14 @@ COMPARISON_FIGURE_NAMES = (
 _COMPARISON_FEATURE_KIND_ORDER = {
 	'pretrained_encoder': 0,
 	'z_only': 1,
-	'amplitude_stats': 2,
-	'random_encoder': 3,
+	'xyz_coordinates': 2,
+	'amplitude_stats': 3,
+	'random_encoder': 4,
 }
 _BASELINE_FEATURE_KINDS = frozenset(
 	{
 		'z_only',
+		'xyz_coordinates',
 		'amplitude_stats',
 		'random_encoder',
 	},
@@ -855,6 +857,8 @@ def _feature_kind(
 			continue
 		if candidate.startswith('z_only'):
 			return 'z_only'
+		if candidate.startswith('xyz_coordinates'):
+			return 'xyz_coordinates'
 		if candidate.startswith('amplitude_stats'):
 			return 'amplitude_stats'
 		if candidate.startswith('random_encoder'):
@@ -1029,6 +1033,7 @@ def _comparison_row_color(row: Mapping[str, object]) -> str:
 	return {
 		'pretrained_encoder': '#2563EB',
 		'z_only': '#6B7280',
+		'xyz_coordinates': '#059669',
 		'amplitude_stats': '#D97706',
 		'random_encoder': '#7C3AED',
 	}.get(str(row.get('feature_kind')), '#4B5563')
@@ -1111,6 +1116,11 @@ def _comparison_interpretation(
 ) -> list[str]:
 	pretrained = _best_comparison_row(rows, 'pretrained_encoder', metric='macro_f1')
 	z_only = _best_comparison_row(rows, 'z_only', metric='macro_f1')
+	xyz_coordinates = _best_comparison_row(
+		rows,
+		'xyz_coordinates',
+		metric='macro_f1',
+	)
 	amplitude = _best_comparison_row(rows, 'amplitude_stats', metric='macro_f1')
 	random_encoder = _best_comparison_row(
 		rows,
@@ -1121,6 +1131,10 @@ def _comparison_interpretation(
 		(
 			'- pretrained encoderがz-onlyを上回るか: '
 			f'{_comparison_delta_sentence(pretrained, z_only)}'
+		),
+		(
+			'- pretrained encoderがxyz-coordinateを上回るか: '
+			f'{_comparison_delta_sentence(pretrained, xyz_coordinates)}'
 		),
 		(
 			'- pretrained encoderがamplitude-onlyを上回るか: '

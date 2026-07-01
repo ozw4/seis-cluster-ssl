@@ -119,7 +119,150 @@ def test_amplitude_stats_baseline_features_match_token_blocks(tmp_path: Path) ->
 	assert metadata['baseline']['parameters']['feature_space'] == 'survey_normalized'
 	assert (
 		load_token_dataset(result.validation_npz, label='validation_tokens').count == 2
+		)
+
+
+def test_xyz_coordinates_baseline_features_use_voxel_centers_and_volume_extent(
+	tmp_path: Path,
+) -> None:
+	reference = _write_reference_token_dataset(
+		tmp_path,
+		train_voxel_center_xyz=np.asarray(
+			[
+				[0.0, 0.0, 0.0],
+				[3.0, 1.5, 3.0],
+				[1.5, 3.0, 0.0],
+			],
+			dtype=np.float32,
+		),
+		validation_voxel_center_xyz=np.asarray(
+			[
+				[3.0, 3.0, 1.5],
+				[0.0, 1.5, 3.0],
+			],
+			dtype=np.float32,
+		),
 	)
+	config = _baseline_config(
+		tmp_path,
+		reference=reference,
+		features=F3BaselineFeatureConfig(kind='xyz_coordinates'),
+	)
+
+	result = build_f3_lithology_baseline_token_dataset(config)
+
+	source_train = np.load(config.reference.train_tokens)
+	train = np.load(result.train_npz)
+	validation = np.load(result.validation_npz)
+	metadata = json.loads(result.metadata_json.read_text(encoding='utf-8'))
+	feature_summary = json.loads(
+		result.feature_summary_json.read_text(encoding='utf-8'),
+	)
+
+	np.testing.assert_allclose(
+		train['features'],
+		np.asarray(
+			[
+				[0.0, 0.0, 0.0],
+				[1.0, 0.5, 1.0],
+				[0.5, 1.0, 0.0],
+			],
+			dtype=np.float32,
+		),
+	)
+	np.testing.assert_allclose(
+		validation['features'],
+		np.asarray(
+			[
+				[1.0, 1.0, 0.5],
+				[0.0, 0.5, 1.0],
+			],
+			dtype=np.float32,
+		),
+	)
+	for key in (
+		'labels',
+		'survey_id',
+		'slice_type',
+		'slice_index',
+		'token_xyz',
+		'voxel_center_xyz',
+		'majority_fraction',
+		'labeled_fraction',
+	):
+		np.testing.assert_array_equal(train[key], source_train[key])
+	assert train['features'].dtype == np.float32
+	assert metadata['feature_source']['kind'] == 'xyz_coordinates'
+	assert metadata['baseline']['feature_names'] == ['x_norm', 'y_norm', 'z_norm']
+	assert metadata['baseline']['parameters']['normalize'] == 'minmax'
+	assert metadata['xyz_coordinates'] == {
+		'normalize': 'minmax',
+		'polynomial_degree': 1,
+		'include_interactions': False,
+	}
+	assert feature_summary['baseline']['feature_dim'] == 3
+	loaded_train = load_token_dataset(result.train_npz, label='train_tokens')
+	assert loaded_train.features.shape == (3, 3)
+
+
+def test_xyz_coordinates_degree2_adds_squared_terms(tmp_path: Path) -> None:
+	config = _baseline_config(
+		tmp_path,
+		reference=_write_xyz_reference_token_dataset(tmp_path),
+		features=F3BaselineFeatureConfig(
+			kind='xyz_coordinates',
+			polynomial_degree=2,
+		),
+	)
+
+	result = build_f3_lithology_baseline_token_dataset(config)
+
+	train = np.load(result.train_npz)
+	metadata = json.loads(result.metadata_json.read_text(encoding='utf-8'))
+	np.testing.assert_allclose(
+		train['features'][1],
+		np.asarray([1.0, 0.5, 1.0, 1.0, 0.25, 1.0], dtype=np.float32),
+	)
+	assert train['features'].shape == (3, 6)
+	assert metadata['baseline']['feature_names'] == [
+		'x_norm',
+		'y_norm',
+		'z_norm',
+		'x_norm_power_2',
+		'y_norm_power_2',
+		'z_norm_power_2',
+	]
+
+
+def test_xyz_coordinates_degree2_can_include_interactions(tmp_path: Path) -> None:
+	config = _baseline_config(
+		tmp_path,
+		reference=_write_xyz_reference_token_dataset(tmp_path),
+		features=F3BaselineFeatureConfig(
+			kind='xyz_coordinates',
+			polynomial_degree=2,
+			include_interactions=True,
+		),
+	)
+
+	result = build_f3_lithology_baseline_token_dataset(config)
+
+	train = np.load(result.train_npz)
+	metadata = json.loads(result.metadata_json.read_text(encoding='utf-8'))
+	np.testing.assert_allclose(
+		train['features'][1],
+		np.asarray(
+			[1.0, 0.5, 1.0, 1.0, 0.25, 1.0, 0.5, 1.0, 0.5],
+			dtype=np.float32,
+		),
+	)
+	assert train['features'].shape == (3, 9)
+	assert metadata['baseline']['feature_names'][-3:] == [
+		'x_norm_y_norm',
+		'x_norm_z_norm',
+		'y_norm_z_norm',
+	]
+	assert metadata['xyz_coordinates']['include_interactions'] is True
 
 
 def test_baseline_config_rejects_invalid_kind(tmp_path: Path) -> None:
@@ -137,6 +280,46 @@ def test_baseline_config_rejects_invalid_kind(tmp_path: Path) -> None:
 				},
 			},
 		)
+
+
+def test_xyz_coordinates_config_rejects_invalid_options(tmp_path: Path) -> None:
+	reference = _write_reference_token_dataset(tmp_path)
+	output_dir = tmp_path / 'artifacts' / 'baselines' / 'xyz' / 'token_dataset'
+
+	with pytest.raises(ValueError, match='normalize'):
+		f3_lithology_baseline_token_dataset_config_from_mapping(
+			{
+				'paths': {'artifact_root': str(tmp_path / 'artifacts')},
+				'source_token_dataset': {'directory': str(reference.root)},
+				'baseline': {
+					'kind': 'xyz_coordinates',
+					'output_dir': str(output_dir),
+					'xyz_coordinates': {'normalize': 'standard'},
+				},
+			},
+		)
+	with pytest.raises(ValueError, match='polynomial_degree'):
+		F3BaselineFeatureConfig(kind='xyz_coordinates', polynomial_degree=3)
+
+
+def test_xyz_coordinates_baseline_errors_for_zero_volume_range(
+	tmp_path: Path,
+) -> None:
+	reference = _write_reference_token_dataset(tmp_path)
+	metadata = json.loads(reference.metadata_json.read_text(encoding='utf-8'))
+	metadata['geometry']['shape_xyz'] = [1, 4, 4]
+	reference.metadata_json.write_text(
+		json.dumps(metadata, indent=2, sort_keys=True) + '\n',
+		encoding='utf-8',
+	)
+	config = _baseline_config(
+		tmp_path,
+		reference=reference,
+		features=F3BaselineFeatureConfig(kind='xyz_coordinates'),
+	)
+
+	with pytest.raises(ValueError, match='xyz normalization range'):
+		build_f3_lithology_baseline_token_dataset(config)
 
 
 def test_baseline_features_proc_dry_run_accepts_issue_style_config(
@@ -179,12 +362,50 @@ def test_baseline_features_proc_dry_run_accepts_issue_style_config(
 	)
 
 
+def test_baseline_features_proc_dry_run_accepts_xyz_issue_style_config(
+	tmp_path: Path,
+) -> None:
+	reference = _write_reference_token_dataset(tmp_path)
+	config_path = tmp_path / 'build_xyz_baseline_features.yaml'
+	config_path.write_text(
+		yaml.safe_dump(
+			{
+				'paths': {'artifact_root': str(tmp_path / 'artifacts')},
+				'source_token_dataset': {'directory': str(reference.root)},
+				'baseline': {
+					'kind': 'xyz_coordinates',
+					'output_dir': str(
+						tmp_path / 'artifacts' / 'baselines' / 'xyz' / 'token_dataset',
+					),
+					'xyz_coordinates': {
+						'normalize': 'minmax',
+						'polynomial_degree': 1,
+						'include_interactions': False,
+					},
+				},
+			},
+		),
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/build_f3_lithology_baseline_features.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'baseline.kind: xyz_coordinates' in result.stdout
+
+
 def _baseline_config(
 	tmp_path: Path,
 	*,
 	features: F3BaselineFeatureConfig,
+	reference: F3BaselineReferenceTokenDataset | None = None,
 ) -> F3LithologyBaselineTokenDatasetConfig:
-	reference = _write_reference_token_dataset(tmp_path)
+	reference = reference or _write_reference_token_dataset(tmp_path)
 	output_dir = (
 		tmp_path
 		/ 'artifacts'
@@ -228,7 +449,12 @@ def _baseline_config(
 	)
 
 
-def _write_reference_token_dataset(tmp_path: Path) -> F3BaselineReferenceTokenDataset:
+def _write_reference_token_dataset(
+	tmp_path: Path,
+	*,
+	train_voxel_center_xyz: np.ndarray | None = None,
+	validation_voxel_center_xyz: np.ndarray | None = None,
+) -> F3BaselineReferenceTokenDataset:
 	root = tmp_path / 'artifacts' / 'reference' / 'token_dataset'
 	root.mkdir(parents=True, exist_ok=True)
 	_write_tokens(
@@ -236,14 +462,22 @@ def _write_reference_token_dataset(tmp_path: Path) -> F3BaselineReferenceTokenDa
 		labels=np.asarray([0, 1, 0], dtype=np.int64),
 		split='train',
 		token_xyz=np.asarray([[0, 0, 0], [0, 0, 1], [1, 0, 0]], dtype=np.int64),
-		voxel_center_z=np.asarray([0.5, 2.5, 0.5], dtype=np.float32),
+		voxel_center_xyz=(
+			train_voxel_center_xyz
+			if train_voxel_center_xyz is not None
+			else _voxel_center_xyz_from_z(np.asarray([0.5, 2.5, 0.5], dtype=np.float32))
+		),
 	)
 	_write_tokens(
 		root / 'validation_tokens.npz',
 		labels=np.asarray([1, 0], dtype=np.int64),
 		split='validation',
 		token_xyz=np.asarray([[1, 1, 1], [0, 1, 0]], dtype=np.int64),
-		voxel_center_z=np.asarray([2.5, 0.5], dtype=np.float32),
+		voxel_center_xyz=(
+			validation_voxel_center_xyz
+			if validation_voxel_center_xyz is not None
+			else _voxel_center_xyz_from_z(np.asarray([2.5, 0.5], dtype=np.float32))
+		),
 	)
 	metadata_json = root / 'token_dataset_metadata.json'
 	metadata_json.write_text(
@@ -304,13 +538,36 @@ def _write_reference_token_dataset(tmp_path: Path) -> F3BaselineReferenceTokenDa
 	)
 
 
+def _write_xyz_reference_token_dataset(
+	tmp_path: Path,
+) -> F3BaselineReferenceTokenDataset:
+	return _write_reference_token_dataset(
+		tmp_path,
+		train_voxel_center_xyz=np.asarray(
+			[
+				[0.0, 0.0, 0.0],
+				[3.0, 1.5, 3.0],
+				[1.5, 3.0, 0.0],
+			],
+			dtype=np.float32,
+		),
+		validation_voxel_center_xyz=np.asarray(
+			[
+				[3.0, 3.0, 1.5],
+				[0.0, 1.5, 3.0],
+			],
+			dtype=np.float32,
+		),
+	)
+
+
 def _write_tokens(
 	path: Path,
 	*,
 	labels: np.ndarray,
 	split: str,
 	token_xyz: np.ndarray,
-	voxel_center_z: np.ndarray,
+	voxel_center_xyz: np.ndarray,
 ) -> None:
 	count = int(labels.shape[0])
 	np.savez_compressed(
@@ -322,15 +579,20 @@ def _write_tokens(
 		slice_type=np.asarray(['inline'] * count),
 		slice_index=np.arange(count, dtype=np.int64),
 		token_xyz=token_xyz,
-		voxel_center_xyz=np.column_stack(
-			(
-				np.zeros(count, dtype=np.float32),
-				np.zeros(count, dtype=np.float32),
-				voxel_center_z,
-			),
-		),
+		voxel_center_xyz=np.asarray(voxel_center_xyz, dtype=np.float32),
 		majority_fraction=np.ones(count, dtype=np.float32),
 		labeled_fraction=np.ones(count, dtype=np.float32),
+	)
+
+
+def _voxel_center_xyz_from_z(voxel_center_z: np.ndarray) -> np.ndarray:
+	count = int(voxel_center_z.shape[0])
+	return np.column_stack(
+		(
+			np.zeros(count, dtype=np.float32),
+			np.zeros(count, dtype=np.float32),
+			voxel_center_z,
+		),
 	)
 
 

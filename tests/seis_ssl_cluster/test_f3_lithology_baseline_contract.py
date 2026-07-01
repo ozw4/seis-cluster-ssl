@@ -31,6 +31,9 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 		Path('amplitude_stats_v1/01_build_baseline_token_dataset.yaml'),
 		Path('amplitude_stats_v1/02_train_linear_probe.yaml'),
 		Path('amplitude_stats_v1/03_build_report.yaml'),
+		Path('xyz_coordinates_v1/01_build_baseline_token_dataset.yaml'),
+		Path('xyz_coordinates_v1/02_train_linear_probe.yaml'),
+		Path('xyz_coordinates_v1/03_build_report.yaml'),
 		Path(RANDOM_ENCODER_TAG) / '01_create_random_checkpoint.yaml',
 		Path(RANDOM_ENCODER_TAG) / '02_extract_embeddings.yaml',
 		Path(RANDOM_ENCODER_TAG) / '03_build_token_dataset.yaml',
@@ -74,6 +77,7 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 			feature_source = payload['token_dataset']['feature_source']
 			assert feature_source['kind'] in {
 				'z_only',
+				'xyz_coordinates',
 				'amplitude_stats',
 				'random_encoder',
 			}

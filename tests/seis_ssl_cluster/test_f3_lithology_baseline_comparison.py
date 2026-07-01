@@ -49,6 +49,15 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 	)
 	_write_probe_metrics(
 		search_root,
+		feature_kind='xyz_coordinates',
+		baseline_tag='xyz_coordinates_v1',
+		embed_spec='xyz_coordinates_degree1',
+		macro_f1=0.62,
+		mean_iou=0.45,
+		per_class_f1={'3': 0.24, '5': 0.38},
+	)
+	_write_probe_metrics(
+		search_root,
 		feature_kind='random_encoder',
 		baseline_tag='random_encoder_amp_mae_seed42_v1',
 		embed_spec='overlap_x16',
@@ -94,6 +103,7 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 	assert [row['feature_kind'] for row in rows] == [
 		'pretrained_encoder',
 		'z_only',
+		'xyz_coordinates',
 		'amplitude_stats',
 		'random_encoder',
 	]
@@ -103,7 +113,10 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 	assert rows[1]['BASELINE_TAG'] == 'z_only_v1'
 	assert rows[1]['MODEL_TAG'] == ''
 	assert rows[1]['EMBED_SPEC'] == 'z_only_degree1'
-	assert rows[3]['BASELINE_TAG'] == 'random_encoder_amp_mae_seed42_v1'
+	assert rows[2]['BASELINE_TAG'] == 'xyz_coordinates_v1'
+	assert rows[2]['MODEL_TAG'] == ''
+	assert rows[2]['EMBED_SPEC'] == 'xyz_coordinates_degree1'
+	assert rows[4]['BASELINE_TAG'] == 'random_encoder_amp_mae_seed42_v1'
 	assert 'class_3_f1' in rows[0]
 	assert 'class_5_f1' in rows[0]
 	assert len(result.figure_paths) == 3
@@ -112,6 +125,7 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 		assert figure_path.parent == output_dir / 'figures'
 	assert 'pretrained encoderがz-onlyを上回るか' in markdown
 	assert 'macro F1差分 +0.1200' in markdown
+	assert 'pretrained encoderがxyz-coordinateを上回るか' in markdown
 	assert 'pretrained encoderがrandom encoderを上回るか' in markdown
 	assert 'class 5: F1差分 +0.1300' in markdown
 	assert 'F3 faciesが深度だけで説明できる程度' in markdown
@@ -452,7 +466,7 @@ def _run_root(  # noqa: PLR0913
 	embed_spec: str,
 	label_set: str,
 ) -> Path:
-	if feature_kind in {'z_only', 'amplitude_stats'}:
+	if feature_kind in {'z_only', 'xyz_coordinates', 'amplitude_stats'}:
 		return search_root / 'baselines' / str(baseline_tag) / label_set
 	tag = model_tag or baseline_tag
 	return search_root / str(tag) / embed_spec / label_set
