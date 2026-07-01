@@ -61,6 +61,14 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 			)
 			assert '/reports/baseline_comparison/' in comparison['output_csv']
 			assert comparison['figure_dpi'] == 300
+			assert payload['publish'] == {
+				'enabled': True,
+				'output_dir': (
+					'results/f3/facies_benchmark_v1/baseline_comparison'
+				),
+				'include_figures': True,
+				'max_file_size_mb': 10,
+			}
 
 		if yaml_path.name.endswith('train_linear_probe.yaml'):
 			feature_source = payload['token_dataset']['feature_source']

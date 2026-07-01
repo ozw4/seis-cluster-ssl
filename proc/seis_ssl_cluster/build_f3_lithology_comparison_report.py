@@ -9,6 +9,7 @@ from typing import Any
 
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.f3 import (
+	F3LithologyComparisonPublishConfig,
 	F3LithologyComparisonReportConfig,
 	build_f3_lithology_comparison_report,
 )
@@ -80,22 +81,39 @@ def main() -> None:
 	)
 	args = parser.parse_args()
 
-	config = _config_from_args(args)
+	raw_config = load_config(args.config) if args.config is not None else None
+	config = _config_from_args(args, raw_config=raw_config)
+	publish_config = f3_lithology_comparison_publish_config_from_mapping(
+		None if raw_config is None else raw_config.get('publish'),
+	)
 	if args.dry_run:
-		_print_summary(config)
+		_print_summary(config, publish_config=publish_config)
 		print('execution: dry-run; F3 lithology comparison report skipped')
 		return
 
-	result = build_f3_lithology_comparison_report(config)
+	result = build_f3_lithology_comparison_report(
+		config,
+		publish_config=publish_config,
+	)
 	print(f'f3_lithology_comparison_report.warning_count: {len(result.warnings)}')
 	print(f'f3_lithology_comparison_report.rows: {len(result.rows)}')
 	print(f'f3_lithology_comparison_report.csv: {result.comparison_csv}')
 	print(f'f3_lithology_comparison_report.markdown: {result.comparison_markdown}')
 	for path in result.figure_paths:
 		print(f'f3_lithology_comparison_report.figure: {path}')
+	if result.publish_manifest is not None:
+		print(
+			'published F3 lithology comparison report: '
+			f'{result.publish_manifest.output_dir}',
+		)
+		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
 
 
-def _print_summary(config: F3LithologyComparisonReportConfig) -> None:
+def _print_summary(
+	config: F3LithologyComparisonReportConfig,
+	*,
+	publish_config: F3LithologyComparisonPublishConfig,
+) -> None:
 	print(f'stage: {STAGE}')
 	print(f'comparison.search_root: {config.search_root}')
 	print(f'comparison.output_csv: {config.output_csv}')
@@ -106,12 +124,27 @@ def _print_summary(config: F3LithologyComparisonReportConfig) -> None:
 			print(f'comparison.metrics_json: {path}')
 	else:
 		print('comparison.metrics_json: discovered from search_root')
+	print(f'publish.enabled: {publish_config.enabled}')
+	if publish_config.output_dir is not None:
+		print(f'publish.output_dir: {publish_config.output_dir}')
+	print(f'publish.include_figures: {publish_config.include_figures}')
+	print(
+		'publish.max_file_size_bytes: '
+		f'{publish_config.max_file_size_bytes}',
+	)
 
 
-def _config_from_args(args: Namespace) -> F3LithologyComparisonReportConfig:
+def _config_from_args(
+	args: Namespace,
+	*,
+	raw_config: Mapping[str, object] | None,
+) -> F3LithologyComparisonReportConfig:
 	if args.config is not None:
+		if raw_config is None:
+			msg = 'raw_config is required when args.config is set'
+			raise ValueError(msg)
 		config = f3_lithology_comparison_report_config_from_mapping(
-			load_config(args.config),
+			raw_config,
 		)
 	else:
 		output_dir = args.output_dir or DEFAULT_OUTPUT_DIR
@@ -143,7 +176,7 @@ def f3_lithology_comparison_report_config_from_mapping(
 	"""Validate and normalize the standalone F3 lithology comparison config."""
 	_validate_allowed_keys(
 		config,
-		frozenset({'paths', 'dataset', 'comparison'}),
+		frozenset({'paths', 'dataset', 'comparison', 'publish'}),
 		prefix='config',
 	)
 	paths = _optional_mapping(config, 'paths')
@@ -196,6 +229,34 @@ def f3_lithology_comparison_report_config_from_mapping(
 			prefix='comparison',
 			default=300,
 		),
+	)
+
+
+def f3_lithology_comparison_publish_config_from_mapping(
+	value: object,
+) -> F3LithologyComparisonPublishConfig:
+	"""Validate and normalize the optional F3 comparison publish config."""
+	if value is None:
+		return F3LithologyComparisonPublishConfig()
+	if not isinstance(value, Mapping):
+		msg = f'publish must be a mapping; got {value!r}'
+		raise TypeError(msg)
+	_validate_allowed_keys(
+		value,
+		frozenset({'enabled', 'output_dir', 'include_figures', 'max_file_size_mb'}),
+		prefix='publish',
+	)
+	enabled = _optional_bool(value, 'enabled', default=False)
+	include_figures = _optional_bool(value, 'include_figures', default=True)
+	output_dir = _optional_path(value, 'output_dir')
+	if enabled and output_dir is None:
+		msg = 'publish.output_dir must be set when publish.enabled is true'
+		raise ValueError(msg)
+	return F3LithologyComparisonPublishConfig(
+		enabled=enabled,
+		output_dir=output_dir,
+		include_figures=include_figures,
+		max_file_size_bytes=_max_file_size_bytes(value),
 	)
 
 
@@ -317,6 +378,37 @@ def _optional_int(
 		msg = f'{prefix}.{key} must be an integer; got {value!r}'
 		raise TypeError(msg)
 	return value
+
+
+def _optional_bool(
+	mapping: Mapping[str, object],
+	key: str,
+	*,
+	default: bool,
+) -> bool:
+	value = mapping.get(key, default)
+	if not isinstance(value, bool):
+		msg = f'publish.{key} must be a boolean; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _optional_path(mapping: Mapping[str, object], key: str) -> Path | None:
+	value = mapping.get(key)
+	if value is None:
+		return None
+	if not isinstance(value, str) or not value:
+		msg = f'publish.{key} must be a non-empty string path; got {value!r}'
+		raise TypeError(msg)
+	return Path(value)
+
+
+def _max_file_size_bytes(mapping: Mapping[str, object]) -> int:
+	value = mapping.get('max_file_size_mb', 10)
+	if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+		msg = f'publish.max_file_size_mb must be positive; got {value!r}'
+		raise ValueError(msg)
+	return int(value * 1024 * 1024)
 
 
 def _metrics_paths_from_mapping(mapping: Mapping[str, object]) -> tuple[Path, ...]:

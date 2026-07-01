@@ -79,6 +79,7 @@ from seis_ssl_cluster.f3.lithology_probe import (
 from seis_ssl_cluster.f3.lithology_report import (
 	COMPARISON_ID_COLUMNS,
 	OVERALL_METRIC_COLUMNS,
+	F3LithologyComparisonPublishConfig,
 	F3LithologyComparisonReportConfig,
 	F3LithologyComparisonReportResult,
 	F3LithologyPublishConfig,
@@ -86,6 +87,7 @@ from seis_ssl_cluster.f3.lithology_report import (
 	F3LithologyReportResult,
 	build_f3_lithology_comparison_report,
 	build_f3_lithology_report,
+	publish_f3_lithology_comparison_report,
 	publish_f3_lithology_report,
 	render_f3_lithology_report_markdown,
 )
@@ -285,6 +287,7 @@ __all__ = [
 	'F3LabelConsistencyReport',
 	'F3LabelSlice',
 	'F3LineGeometry',
+	'F3LithologyComparisonPublishConfig',
 	'F3LithologyComparisonReportConfig',
 	'F3LithologyComparisonReportResult',
 	'F3LithologyPredictionConfig',
@@ -390,6 +393,7 @@ __all__ = [
 	'predict_f3_lithology_tokens',
 	'prepare_f3_facies_volume',
 	'publish_f3_inspection_report',
+	'publish_f3_lithology_comparison_report',
 	'publish_f3_lithology_report',
 	'read_class_info',
 	'read_f3_line_geometry',
