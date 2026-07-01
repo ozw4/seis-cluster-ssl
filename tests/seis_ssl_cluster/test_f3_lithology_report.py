@@ -4,10 +4,12 @@ import csv
 import json
 from pathlib import Path
 
+import pytest
 import yaml
 
 from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonReportConfig,
+	F3LithologyPublishConfig,
 	F3LithologyReportConfig,
 	build_f3_lithology_comparison_report,
 	build_f3_lithology_report,
@@ -99,6 +101,133 @@ def test_f3_lithology_report_writes_warning_when_metrics_are_missing(
 	)
 	assert '## Warnings' in markdown
 	assert '- missing input report component: metrics' in markdown
+
+
+def test_f3_lithology_report_publish_writes_lightweight_results(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+		prediction_figures=(
+			('validation', 'inline', 150, True),
+			('validation', 'crossline', 350, True),
+			('validation', 'crossline', 750, True),
+			('validation', 'inline', 900, True),
+			('selected', 'inline', 100, True),
+		),
+	)
+	(run['probe_dir'] / 'probe.joblib').write_bytes(b'heavy')
+	(run['prediction_dir'] / 'f3_token_predictions.npy').write_bytes(b'heavy')
+	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+
+	result = build_f3_lithology_report(
+		_report_config(run),
+		publish_config=F3LithologyPublishConfig(
+			enabled=True,
+			output_dir=output_dir,
+			include_figures=True,
+			max_prediction_figures=3,
+		),
+	)
+
+	assert result.publish_manifest is not None
+	published_files = {
+		path.relative_to(output_dir)
+		for path in output_dir.rglob('*')
+		if path.is_file()
+	}
+	assert published_files == {
+		Path('report.md'),
+		Path('report.json'),
+		Path('metrics.json'),
+		Path('metrics.csv'),
+		Path('classification_report.md'),
+		Path('confusion_matrix.csv'),
+		Path('publish_manifest.json'),
+		Path('figures/confusion_matrix.png'),
+		Path('figures/per_class_f1.png'),
+		Path('figures/validation_inline_0150_prediction.png'),
+		Path('figures/validation_crossline_0350_prediction.png'),
+		Path('figures/validation_crossline_0750_prediction.png'),
+	}
+	assert not any(
+		path.suffix in {'.joblib', '.npy', '.npz'}
+		for path in published_files
+	)
+	markdown = (output_dir / 'report.md').read_text(encoding='utf-8')
+	assert '(figures/confusion_matrix.png)' in markdown
+	assert '(figures/validation_inline_0150_prediction.png)' in markdown
+	assert 'validation_inline_0900_prediction.png' not in markdown
+	assert 'selected_inline_0100_prediction.png' not in markdown
+	published_payload = json.loads(
+		(output_dir / 'report.json').read_text(encoding='utf-8'),
+	)
+	assert 'inputs' not in published_payload
+	assert 'outputs' not in published_payload
+	assert 'comparison' not in published_payload
+	assert 'checkpoint_path' not in published_payload['pretrained_encoder']
+	assert all('source_path' not in item for item in published_payload['figures'])
+
+
+def test_f3_lithology_report_publish_warns_for_missing_optional_prediction_figure(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+		prediction_figures=(
+			('validation', 'inline', 150, True),
+			('validation', 'crossline', 350, False),
+		),
+	)
+	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+
+	result = build_f3_lithology_report(
+		_report_config(run),
+		publish_config=F3LithologyPublishConfig(
+			enabled=True,
+			output_dir=output_dir,
+			include_figures=True,
+			max_prediction_figures=3,
+		),
+	)
+
+	assert result.publish_manifest is not None
+	assert any(
+		'optional publish source does not exist' in warning
+		and 'validation_crossline_0350_prediction.png' in warning
+		for warning in result.publish_manifest.warnings
+	)
+	missing_prediction = output_dir / 'figures/validation_crossline_0350_prediction.png'
+	assert not missing_prediction.exists()
+	markdown = (output_dir / 'report.md').read_text(encoding='utf-8')
+	assert 'validation_crossline_0350_prediction.png' not in _figures_section(markdown)
+
+
+def test_f3_lithology_report_publish_requires_metrics(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_vis00_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+		write_metrics=False,
+	)
+
+	with pytest.raises(FileNotFoundError, match='required publish source'):
+		build_f3_lithology_report(
+			_report_config(run),
+			publish_config=F3LithologyPublishConfig(
+				enabled=True,
+				output_dir=tmp_path / 'results' / 'f3' / 'lithology_probe',
+			),
+		)
 
 
 def test_f3_lithology_comparison_table_aggregates_multiple_runs(
@@ -253,6 +382,25 @@ def test_default_lithology_report_config_uses_prediction_metadata_json() -> None
 	)
 
 
+def test_default_lithology_report_config_publishes_summary_to_results() -> None:
+	config_dir = _default_lithology_config_dir()
+	report_config = yaml.safe_load(
+		(config_dir / '06_build_lithology_report.yaml').read_text(encoding='utf-8'),
+	)
+
+	assert report_config['publish'] == {
+		'enabled': True,
+		'output_dir': (
+			'results/f3/facies_benchmark_v1/lithology_probe/'
+			'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/'
+			'overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1'
+		),
+		'include_figures': True,
+		'max_file_size_mb': 10,
+		'max_prediction_figures': 3,
+	}
+
+
 def test_default_lithology_configs_use_best_checkpoint_contract() -> None:
 	config_dir = _default_lithology_config_dir()
 	expected_checkpoint = (
@@ -302,6 +450,7 @@ def _write_probe_run(  # noqa: PLR0913
 	accuracy: float = 0.625,
 	write_metrics: bool = True,
 	feature_source: dict[str, object] | None = None,
+	prediction_figures: tuple[tuple[str, str, int, bool], ...] | None = None,
 ) -> dict[str, object]:
 	artifact_root = root / 'artifacts' / 'seis_ssl_cluster'
 	label_set = 'png_slices_segy_labels_v1'
@@ -335,7 +484,6 @@ def _write_probe_run(  # noqa: PLR0913
 	for path in (
 		probe_dir / 'figures' / 'confusion_matrix.png',
 		probe_dir / 'figures' / 'per_class_f1.png',
-		visualization_dir / 'validation_inline_0250_prediction.png',
 	):
 		path.parent.mkdir(parents=True, exist_ok=True)
 		path.write_bytes(b'fake-png')
@@ -343,6 +491,18 @@ def _write_probe_run(  # noqa: PLR0913
 		_write_json(
 			metrics_json,
 			_metrics_payload(accuracy=accuracy, feature_source=feature_source),
+		)
+		(probe_dir / 'metrics.csv').write_text(
+			'metric,value\naccuracy,0.625\n',
+			encoding='utf-8',
+		)
+		(probe_dir / 'classification_report.md').write_text(
+			'# Classification report\n',
+			encoding='utf-8',
+		)
+		(probe_dir / 'confusion_matrix.csv').write_text(
+			'class_id,0,5\n0,8,2\n5,3,3\n',
+			encoding='utf-8',
 		)
 	_write_json(
 		token_metadata_json,
@@ -364,20 +524,27 @@ def _write_probe_run(  # noqa: PLR0913
 	prediction_metadata_json = prediction_dir / 'prediction_metadata.json'
 	_write_json(prediction_metadata_json, {'summary': {'valid_token_count': 16}})
 	visualization_metadata_json = visualization_dir / 'metadata.json'
+	if prediction_figures is None:
+		prediction_figures = (('validation', 'inline', 250, True),)
+	visualization_entries = []
+	for group, slice_type, slice_index, write_file in prediction_figures:
+		path = visualization_dir / (
+			f'{group}_{slice_type}_{slice_index:04d}_prediction.png'
+		)
+		if write_file:
+			path.parent.mkdir(parents=True, exist_ok=True)
+			path.write_bytes(b'fake-png')
+		visualization_entries.append(
+			{
+				'path': str(path),
+				'group': group,
+				'slice_type': slice_type,
+				'slice_index': slice_index,
+			},
+		)
 	_write_json(
 		visualization_metadata_json,
-		{
-			'figures': [
-				{
-					'path': str(
-						visualization_dir / 'validation_inline_0250_prediction.png'
-					),
-					'group': 'validation',
-					'slice_type': 'inline',
-					'slice_index': 250,
-				},
-			],
-		},
+		{'figures': visualization_entries},
 	)
 	return {
 		'artifact_root': artifact_root,
@@ -386,6 +553,8 @@ def _write_probe_run(  # noqa: PLR0913
 		'lithology_root': lithology_root,
 		'probe_dir': probe_dir,
 		'report_dir': report_dir,
+		'prediction_dir': prediction_dir,
+		'visualization_dir': visualization_dir,
 		'metrics_json': metrics_json,
 		'probe_config_json': probe_config_json,
 		'prediction_metadata_json': prediction_metadata_json,
