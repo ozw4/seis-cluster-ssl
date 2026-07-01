@@ -20,6 +20,7 @@
 ## Interpretation
 
 - pretrained encoderがz-onlyを上回るか: 上回る (macro F1差分 +0.3862, mean IoU差分 +0.3767)。
+- pretrained encoderがxyz-coordinateを上回るか: 比較対象のmetricsが不足しているため未確認。
 - pretrained encoderがamplitude-onlyを上回るか: 上回る (macro F1差分 +0.4206, mean IoU差分 +0.4308)。
 - pretrained encoderがrandom encoderを上回るか: 上回る (macro F1差分 +0.0607, mean IoU差分 +0.0845)。
 - class 3/5など弱いclassで改善があるか: class 3: F1差分 +0.0361、class 5: F1差分 +0.0213。

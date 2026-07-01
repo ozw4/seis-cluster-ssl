@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -9,6 +11,7 @@ from typing import Literal
 from seis_ssl_cluster.results.publish import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
 	FORBIDDEN_SUFFIXES,
+	PUBLISH_MANIFEST_NAME,
 )
 
 DEFAULT_LOCAL_PATH_MARKERS = (
@@ -114,6 +117,11 @@ def validate_results_artifacts(
 		file_errors, file_warnings = _validate_file(path=path, rules=rules)
 		errors.extend(file_errors)
 		warnings.extend(file_warnings)
+		if (
+			path.name == PUBLISH_MANIFEST_NAME
+			and path.parent.resolve(strict=False) == root_resolved
+		):
+			errors.extend(_publish_manifest_findings(path=path, root=root_resolved))
 
 	return ResultsValidationReport(
 		root=root,
@@ -168,6 +176,186 @@ def _validate_file(
 	return errors, warnings
 
 
+def _publish_manifest_findings(
+	*,
+	path: Path,
+	root: Path,
+) -> list[ResultsValidationFinding]:
+	payload, load_findings = _load_publish_manifest(path)
+	if load_findings:
+		return load_findings
+	if payload is None:
+		return []
+	items = payload.get('items')
+	if not isinstance(items, list):
+		return [_finding('error', path, 'publish manifest items must be a list')]
+
+	findings: list[ResultsValidationFinding] = []
+	for index, item in enumerate(items):
+		findings.extend(
+			_manifest_item_findings(
+				manifest_path=path,
+				root=root,
+				label=f'items[{index}]',
+				item=item,
+			)
+		)
+
+	return findings
+
+
+def _load_publish_manifest(
+	path: Path,
+) -> tuple[dict[str, object] | None, list[ResultsValidationFinding]]:
+	try:
+		payload = json.loads(path.read_text(encoding='utf-8'))
+	except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+		return None, [
+			_finding('error', path, f'publish manifest is not valid JSON: {exc}'),
+		]
+	if not isinstance(payload, dict):
+		return None, [
+			_finding('error', path, 'publish manifest must be a JSON object'),
+		]
+	return payload, []
+
+
+def _manifest_item_findings(
+	*,
+	manifest_path: Path,
+	root: Path,
+	label: str,
+	item: object,
+) -> list[ResultsValidationFinding]:
+	findings: list[ResultsValidationFinding] = []
+	if not isinstance(item, dict):
+		return [
+			_finding(
+				'error',
+				manifest_path,
+				f'publish manifest {label} must be an object',
+			)
+		]
+
+	target_path = _manifest_item_target(
+		manifest_path=manifest_path,
+		root=root,
+		label=label,
+		item=item,
+		findings=findings,
+	)
+	if target_path is None:
+		return findings
+
+	size_bytes = item.get('size_bytes')
+	if type(size_bytes) is not int:
+		findings.append(
+			_finding(
+				'error',
+				manifest_path,
+				f'publish manifest {label}.size_bytes must be an integer',
+			)
+		)
+	elif target_path.stat().st_size != size_bytes:
+		findings.append(
+			_finding(
+				'error',
+				manifest_path,
+				(
+					f'publish manifest {label}.size_bytes mismatch for '
+					f'{target_path}: expected {size_bytes}, got '
+					f'{target_path.stat().st_size}'
+				),
+			)
+		)
+
+	sha256 = item.get('sha256')
+	if not isinstance(sha256, str) or not sha256:
+		findings.append(
+			_finding(
+				'error',
+				manifest_path,
+				f'publish manifest {label}.sha256 must be a non-empty string',
+			)
+		)
+	elif _sha256(target_path) != sha256:
+		findings.append(
+			_finding(
+				'error',
+				manifest_path,
+				(
+					f'publish manifest {label}.sha256 mismatch for '
+					f'{target_path}'
+				),
+			)
+		)
+	return findings
+
+
+def _manifest_item_target(
+	*,
+	manifest_path: Path,
+	root: Path,
+	label: str,
+	item: dict[object, object],
+	findings: list[ResultsValidationFinding],
+) -> Path | None:
+	target = item.get('target')
+	if not isinstance(target, str) or not target:
+		findings.append(
+			_finding(
+				'error',
+				manifest_path,
+				f'publish manifest {label}.target must be a non-empty string',
+			)
+		)
+		return None
+
+	target_path = Path(target)
+	if not target_path.is_absolute():
+		findings.append(
+			_finding(
+				'error',
+				manifest_path,
+				f'publish manifest {label}.target must be absolute: {target}',
+			)
+		)
+		return None
+
+	resolved = target_path.resolve(strict=False)
+	try:
+		resolved.relative_to(root)
+	except ValueError:
+		findings.append(
+			_finding(
+				'error',
+				manifest_path,
+				f'publish manifest {label}.target must be under results root: {target}',
+			)
+		)
+		return None
+
+	if not resolved.exists():
+		findings.append(
+			_finding(
+				'error',
+				manifest_path,
+				f'publish manifest {label}.target is missing: {target}',
+			)
+		)
+		return None
+	if not resolved.is_file():
+		findings.append(
+			_finding(
+				'error',
+				manifest_path,
+				f'publish manifest {label}.target is not a file: {target}',
+			)
+		)
+		return None
+	return resolved
+
+
 def _required_file_findings(
 	*,
 	root: Path,
@@ -216,6 +404,14 @@ def _markers_found(path: Path, markers: tuple[str, ...]) -> tuple[str, ...]:
 					found.append(marker)
 			previous = window[-max(len(item) for item in marker_bytes) :]
 	return tuple(found)
+
+
+def _sha256(path: Path) -> str:
+	hasher = hashlib.sha256()
+	with path.open('rb') as file_obj:
+		for chunk in iter(lambda: file_obj.read(1024 * 1024), b''):
+			hasher.update(chunk)
+	return hasher.hexdigest()
 
 
 def _validate_max_file_size_bytes(max_file_size_bytes: int) -> None:

@@ -1,33 +1,33 @@
 {
-  "created_at_utc": "2026-07-01T05:41:51.247603Z",
+  "created_at_utc": "2026-07-01T06:29:48.717960Z",
   "items": [
     {
-      "sha256": "8f0d1ee1ab7f115a374c596c3e376546c3db91f2e363316de21e9cc4085ffd61",
-      "size_bytes": 2797,
+      "sha256": "45037220bd42a5beaf39fb25dba774df8f9138b39cb5a186e8a55cf2f382d276",
+      "size_bytes": 2913,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_report.md",
       "target": "/workspace/results/f3/facies_benchmark_v1/baseline_comparison/comparison_report.md"
     },
     {
-      "sha256": "b6a4939399546d1930c7a033a005b9df246526bbec25a3abf813a547eef0d522",
-      "size_bytes": 2083,
+      "sha256": "07fdcabed77839b42824c6824c6858c3c37444eeaea256ec8826e3cfb00869e6",
+      "size_bytes": 2078,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_table.csv",
       "target": "/workspace/results/f3/facies_benchmark_v1/baseline_comparison/comparison_table.csv"
     },
     {
-      "sha256": "c6875bc774024f731d89bdcdf8f0439055ef325473c33824828e7944def59260",
-      "size_bytes": 215845,
+      "sha256": "d3346d7e61060bfab161fec92d10c6f79ee4da4a3ed22239573bf99a6cb2b0f1",
+      "size_bytes": 78395,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/figures/macro_f1_comparison.png",
       "target": "/workspace/results/f3/facies_benchmark_v1/baseline_comparison/figures/macro_f1_comparison.png"
     },
     {
-      "sha256": "fc83606ddb2681d2911f3d206287fe87722f9a183b72ed072622b9f2010aedf0",
-      "size_bytes": 216760,
+      "sha256": "561a3181e25c4e3508d7f97e9d90494a1cd765a7acdf39a95251c11348c13eae",
+      "size_bytes": 79193,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/figures/mean_iou_comparison.png",
       "target": "/workspace/results/f3/facies_benchmark_v1/baseline_comparison/figures/mean_iou_comparison.png"
     },
     {
-      "sha256": "3ff24bbae62bcee829f61463c29ed6aef4bd6ea271fedd037746fe457f85e544",
-      "size_bytes": 131951,
+      "sha256": "67814337d03847e30e2faca3000f4d16662416efd7c260493a55b591c3376057",
+      "size_bytes": 112618,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/figures/per_class_f1_comparison.png",
       "target": "/workspace/results/f3/facies_benchmark_v1/baseline_comparison/figures/per_class_f1_comparison.png"
     }

@@ -9,9 +9,13 @@ from typing import Any
 
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.f3 import (
+	F3LithologyComparisonFigureFontSizes,
+	F3LithologyComparisonFigureSizes,
+	F3LithologyComparisonFigureStyle,
 	F3LithologyComparisonPublishConfig,
 	F3LithologyComparisonReportConfig,
 	build_f3_lithology_comparison_report,
+	default_f3_lithology_comparison_figure_style,
 )
 
 STAGE = 'build_f3_lithology_comparison_report'
@@ -208,6 +212,7 @@ def f3_lithology_comparison_report_config_from_mapping(
 		prefix='comparison',
 		default=default_output_dir,
 	)
+	figure_style = _comparison_figure_style_from_mapping(comparison)
 	return F3LithologyComparisonReportConfig(
 		search_root=search_root,
 		output_csv=_optional_absolute_path(
@@ -223,11 +228,117 @@ def f3_lithology_comparison_report_config_from_mapping(
 			default=output_dir / 'comparison_report.md',
 		),
 		metrics_paths=_metrics_paths_from_mapping(comparison),
-		figure_dpi=_optional_int(
-			comparison,
-			'figure_dpi',
-			prefix='comparison',
-			default=300,
+		figure_dpi=_comparison_figure_dpi_from_mapping(comparison),
+		figure_style=figure_style,
+	)
+
+
+def _comparison_figure_dpi_from_mapping(comparison: Mapping[str, object]) -> int:
+	legacy_dpi = _optional_int(
+		comparison,
+		'figure_dpi',
+		prefix='comparison',
+		default=300,
+	)
+	figures = _optional_mapping(comparison, 'figures')
+	return _optional_positive_int(
+		figures,
+		'dpi',
+		prefix='comparison.figures',
+		default=legacy_dpi,
+	)
+
+
+def _comparison_figure_style_from_mapping(
+	comparison: Mapping[str, object],
+) -> F3LithologyComparisonFigureStyle:
+	default = default_f3_lithology_comparison_figure_style()
+	figures = _optional_mapping(comparison, 'figures')
+	if not figures:
+		return default
+	_validate_allowed_keys(
+		figures,
+		frozenset({'dpi', 'font_sizes', 'figsize'}),
+		prefix='comparison.figures',
+	)
+	return F3LithologyComparisonFigureStyle(
+		font_sizes=_comparison_figure_font_sizes_from_mapping(
+			_optional_mapping(figures, 'font_sizes'),
+			default=default.font_sizes,
+		),
+		figsize=_comparison_figure_sizes_from_mapping(
+			_optional_mapping(figures, 'figsize'),
+			default=default.figsize,
+		),
+	)
+
+
+def _comparison_figure_font_sizes_from_mapping(
+	value: Mapping[str, object],
+	*,
+	default: F3LithologyComparisonFigureFontSizes,
+) -> F3LithologyComparisonFigureFontSizes:
+	_validate_allowed_keys(
+		value,
+		frozenset({'title', 'axis_label', 'tick', 'legend', 'bar_label'}),
+		prefix='comparison.figures.font_sizes',
+	)
+	return F3LithologyComparisonFigureFontSizes(
+		title=_optional_positive_int(
+			value,
+			'title',
+			prefix='comparison.figures.font_sizes',
+			default=default.title,
+		),
+		axis_label=_optional_positive_int(
+			value,
+			'axis_label',
+			prefix='comparison.figures.font_sizes',
+			default=default.axis_label,
+		),
+		tick=_optional_positive_int(
+			value,
+			'tick',
+			prefix='comparison.figures.font_sizes',
+			default=default.tick,
+		),
+		legend=_optional_positive_int(
+			value,
+			'legend',
+			prefix='comparison.figures.font_sizes',
+			default=default.legend,
+		),
+		bar_label=_optional_positive_int(
+			value,
+			'bar_label',
+			prefix='comparison.figures.font_sizes',
+			default=default.bar_label,
+		),
+	)
+
+
+def _comparison_figure_sizes_from_mapping(
+	value: Mapping[str, object],
+	*,
+	default: F3LithologyComparisonFigureSizes,
+) -> F3LithologyComparisonFigureSizes:
+	_validate_allowed_keys(
+		value,
+		frozenset({'metric', 'per_class'}),
+		prefix='comparison.figures.figsize',
+	)
+	return F3LithologyComparisonFigureSizes(
+		metric=_optional_figsize(
+			value,
+			'metric',
+			prefix='comparison.figures.figsize',
+			default=default.metric,
+		),
+		per_class=_optional_figsize(
+			value,
+			'per_class',
+			prefix='comparison.figures.figsize',
+			default=default.per_class,
 		),
 	)
 
@@ -285,6 +396,7 @@ def _config_with_overrides(  # noqa: PLR0913
 		),
 		metrics_paths=metrics_paths or config.metrics_paths,
 		figure_dpi=figure_dpi or config.figure_dpi,
+		figure_style=config.figure_style,
 	)
 
 
@@ -378,6 +490,46 @@ def _optional_int(
 		msg = f'{prefix}.{key} must be an integer; got {value!r}'
 		raise TypeError(msg)
 	return value
+
+
+def _optional_positive_int(
+	mapping: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+	default: int,
+) -> int:
+	value = _optional_int(mapping, key, prefix=prefix, default=default)
+	if value <= 0:
+		msg = f'{prefix}.{key} must be positive; got {value!r}'
+		raise ValueError(msg)
+	return value
+
+
+def _optional_figsize(
+	mapping: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+	default: tuple[float, float],
+) -> tuple[float, float]:
+	value = mapping.get(key)
+	if value is None:
+		return default
+	if not isinstance(value, Sequence) or isinstance(value, str) or len(value) != 2:
+		msg = f'{prefix}.{key} must be a two-item numeric sequence; got {value!r}'
+		raise TypeError(msg)
+	return (
+		_positive_float(value[0], label=f'{prefix}.{key}[0]'),
+		_positive_float(value[1], label=f'{prefix}.{key}[1]'),
+	)
+
+
+def _positive_float(value: object, *, label: str) -> float:
+	if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+		msg = f'{label} must be positive; got {value!r}'
+		raise ValueError(msg)
+	return float(value)
 
 
 def _optional_bool(

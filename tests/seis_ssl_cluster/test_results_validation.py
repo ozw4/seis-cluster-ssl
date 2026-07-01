@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 from seis_ssl_cluster.results import validate_results_artifacts
@@ -95,6 +97,45 @@ def test_results_validation_passes_valid_small_results_tree(
 	assert report.errors == ()
 	assert report.warnings == ()
 	assert report.file_count == 4
+
+
+def test_results_validation_detects_publish_manifest_target_mismatch(
+	tmp_path: Path,
+) -> None:
+	root = tmp_path / 'results'
+	published = _write_file(root / 'summary.md', b'# summary\n')
+	_write_file(
+		root / 'publish_manifest.json',
+		json.dumps(
+			{
+				'created_at_utc': '2026-07-01T00:00:00Z',
+				'items': [
+					{
+						'sha256': hashlib.sha256(b'old summary\n').hexdigest(),
+						'size_bytes': 999,
+						'source': str(tmp_path / 'artifacts' / 'summary.md'),
+						'target': str(published),
+					}
+				],
+				'output_dir': str(root),
+				'skipped_optional_items': [],
+				'source_artifact_root': str(tmp_path / 'artifacts'),
+				'warnings': [],
+			}
+		).encode('utf-8'),
+	)
+
+	report = validate_results_artifacts(root)
+
+	assert not report.ok
+	assert any(
+		'publish manifest items[0].size_bytes mismatch' in item.message
+		for item in report.errors
+	)
+	assert any(
+		'publish manifest items[0].sha256 mismatch' in item.message
+		for item in report.errors
+	)
 
 
 def test_results_validation_rejects_artifacts_directory_inside_results(

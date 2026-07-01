@@ -1,18 +1,188 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 
 import pytest
+import seis_ssl_cluster.f3.lithology_report as lithology_report_module
 
+from proc.seis_ssl_cluster.build_f3_lithology_comparison_report import (
+	f3_lithology_comparison_report_config_from_mapping,
+)
 from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonPublishConfig,
 	F3LithologyComparisonReportConfig,
 	build_f3_lithology_comparison_report,
+	default_f3_lithology_comparison_figure_style,
 	publish_f3_lithology_comparison_report,
 )
 from tests.helpers import run_python_proc
+
+
+def test_f3_lithology_comparison_default_figure_style() -> None:
+	style = default_f3_lithology_comparison_figure_style()
+
+	assert style.font_sizes.title == 10
+	assert style.font_sizes.axis_label == 9
+	assert style.font_sizes.tick == 8
+	assert style.font_sizes.legend == 8
+	assert style.font_sizes.bar_label == 7
+	assert style.figsize.metric == (6.5, 3.6)
+	assert style.figsize.per_class == (8.0, 4.2)
+
+
+def test_f3_lithology_metric_plot_uses_short_labels_and_unit_range(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	plt = pytest.importorskip('matplotlib.pyplot')
+	figure_module = pytest.importorskip('matplotlib.figure')
+	style = default_f3_lithology_comparison_figure_style()
+	output_png = tmp_path / 'macro_f1_comparison.png'
+	rows = [
+		{
+			'feature_kind': 'pretrained_encoder',
+			'MODEL_TAG': 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+			'macro_f1': 0.72,
+		},
+		{
+			'feature_kind': 'z_only',
+			'BASELINE_TAG': 'z_only_v1',
+			'macro_f1': 0.60,
+		},
+		{
+			'feature_kind': 'random_encoder',
+			'BASELINE_TAG': 'random_encoder_amp_mae_seed42_v1',
+			'macro_f1': 0.58,
+		},
+	]
+	closed_figures = []
+	savefig_kwargs = []
+	original_close = plt.close
+	original_savefig = figure_module.Figure.savefig
+
+	def _record_savefig(self: object, *args: object, **kwargs: object) -> object:
+		savefig_kwargs.append(dict(kwargs))
+		return original_savefig(self, *args, **kwargs)
+
+	def _record_close(figure: object | None = None) -> None:
+		if hasattr(figure, 'axes'):
+			closed_figures.append(figure)
+
+	monkeypatch.setattr(figure_module.Figure, 'savefig', _record_savefig)
+	monkeypatch.setattr(plt, 'close', _record_close)
+
+	lithology_report_module._save_metric_comparison_bar(
+		rows,
+		metric='macro_f1',
+		title='Macro F1',
+		ylabel='Macro F1',
+		output_png=output_png,
+		plt=plt,
+		dpi=300,
+		style=style,
+	)
+
+	axis = closed_figures[0].axes[0]
+	tick_labels = [tick.get_text() for tick in axis.get_xticklabels()]
+	assert tick_labels == ['Pretrained', 'Z only', 'Random encoder']
+	assert all('amp_mae_m075' not in label for label in tick_labels)
+	assert axis.get_ylim() == (0.0, 1.0)
+	assert savefig_kwargs[0]['dpi'] == 300
+	assert savefig_kwargs[0]['bbox_inches'] == 'tight'
+	assert output_png.stat().st_size > 0
+	original_close(closed_figures[0])
+
+
+def test_f3_lithology_per_class_plot_uses_display_legend_and_unit_range(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	plt = pytest.importorskip('matplotlib.pyplot')
+	style = default_f3_lithology_comparison_figure_style()
+	output_png = tmp_path / 'per_class_f1_comparison.png'
+	rows = [
+		{
+			'feature_kind': 'pretrained_encoder',
+			'MODEL_TAG': 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+			'class_3_f1': 0.31,
+			'class_5_f1': 0.54,
+			'_class_names': {'3': 'Scruff', '5': 'Zechstein'},
+		},
+		{
+			'feature_kind': 'amplitude_stats',
+			'BASELINE_TAG': 'amplitude_stats_v1',
+			'class_3_f1': 0.25,
+			'class_5_f1': 0.41,
+			'_class_names': {'3': 'Scruff', '5': 'Zechstein'},
+		},
+	]
+	closed_figures = []
+	original_close = plt.close
+
+	def _record_close(figure: object | None = None) -> None:
+		if hasattr(figure, 'axes'):
+			closed_figures.append(figure)
+
+	monkeypatch.setattr(plt, 'close', _record_close)
+
+	lithology_report_module._save_per_class_f1_comparison(
+		rows,
+		output_png=output_png,
+		plt=plt,
+		dpi=300,
+		style=style,
+	)
+
+	axis = closed_figures[0].axes[0]
+	legend_labels = [text.get_text() for text in axis.get_legend().get_texts()]
+	assert legend_labels == ['Pretrained', 'Amplitude stats']
+	assert axis.get_ylim() == (0.0, 1.0)
+	assert output_png.stat().st_size > 0
+	original_close(closed_figures[0])
+
+
+def test_f3_lithology_comparison_config_accepts_optional_figure_style(
+	tmp_path: Path,
+) -> None:
+	search_root = _search_root(tmp_path)
+	output_dir = tmp_path / 'out' / 'baseline_comparison'
+
+	config = f3_lithology_comparison_report_config_from_mapping(
+		{
+			'paths': {
+				'artifact_root': str(tmp_path / 'artifacts' / 'seis_ssl_cluster'),
+			},
+			'dataset': {'version': 'facies_benchmark_v1'},
+			'comparison': {
+				'search_root': str(search_root),
+				'output_dir': str(output_dir),
+				'figures': {
+					'dpi': 360,
+					'font_sizes': {
+						'title': 11,
+						'axis_label': 10,
+						'tick': 9,
+						'legend': 8,
+						'bar_label': 7,
+					},
+					'figsize': {
+						'metric': [7.0, 3.8],
+						'per_class': [8.5, 4.4],
+					},
+				},
+			},
+		},
+	)
+
+	assert config.figure_dpi == 360
+	assert config.figure_style.font_sizes.title == 11
+	assert config.figure_style.font_sizes.axis_label == 10
+	assert config.figure_style.font_sizes.tick == 9
+	assert config.figure_style.figsize.metric == (7.0, 3.8)
+	assert config.figure_style.figsize.per_class == (8.5, 4.4)
 
 
 def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
@@ -122,6 +292,7 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 	assert len(result.figure_paths) == 3
 	for figure_path in result.figure_paths:
 		assert figure_path.is_file()
+		assert figure_path.stat().st_size > 0
 		assert figure_path.parent == output_dir / 'figures'
 	assert 'pretrained encoderがz-onlyを上回るか' in markdown
 	assert 'macro F1差分 +0.1200' in markdown
@@ -143,6 +314,19 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 		path.suffix in {'.pt', '.npy', '.npz', '.joblib', '.pkl'}
 		for path in published_files
 	)
+	published_table = publish_dir / 'comparison_table.csv'
+	manifest_payload = json.loads(
+		(publish_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
+	)
+	table_entry = next(
+		item
+		for item in manifest_payload['items']
+		if Path(item['target']).name == 'comparison_table.csv'
+	)
+	table_bytes = published_table.read_bytes()
+	assert table_bytes == result.comparison_csv.read_bytes()
+	assert table_entry['size_bytes'] == len(table_bytes)
+	assert table_entry['sha256'] == hashlib.sha256(table_bytes).hexdigest()
 
 
 def test_f3_lithology_baseline_comparison_publish_warns_for_missing_optional_figure(
