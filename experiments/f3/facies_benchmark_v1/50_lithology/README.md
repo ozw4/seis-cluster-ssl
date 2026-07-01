@@ -135,6 +135,45 @@ python proc/seis_ssl_cluster/build_f3_lithology_report.py \
 the linear balanced MVP is working. Its probe spec is separate from
 `linear_balanced_v1`.
 
+## Baseline Comparison Regeneration
+
+After changing pretrained `feature_source` metadata, rebuild the pretrained
+token dataset and re-run the linear probe before regenerating the comparison.
+The probe `metrics.json` must carry the same `feature_source` as
+`token_dataset_metadata.json`.
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_token_dataset.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology/<MODEL_TAG>/<EMBED_SPEC>/<LABEL_SET>/01_build_token_dataset.yaml
+
+python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology/<MODEL_TAG>/<EMBED_SPEC>/<LABEL_SET>/02_train_linear_probe.yaml
+```
+
+For the current F3 baseline comparison, reuse z-only, amplitude-only, or random
+encoder outputs only when they already match the current train/validation token
+split and label selection. Always include the xyz-coordinate baseline:
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_baseline_features.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/01_build_baseline_token_dataset.yaml
+
+python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/02_train_linear_probe.yaml
+```
+
+Then regenerate the comparison report. The comparison config publishes selected
+lightweight outputs to `results/f3/facies_benchmark_v1/baseline_comparison/`.
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology_baselines/05_build_baseline_comparison_report.yaml
+
+python proc/seis_ssl_cluster/validate_results_artifacts.py \
+  --root results \
+  --max-file-size-mb 10
+```
+
 ## Figure Contract
 
 - Use white backgrounds and fixed facies colors from the F3 inspection palette.

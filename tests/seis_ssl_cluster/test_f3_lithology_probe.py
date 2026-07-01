@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from typing import TYPE_CHECKING
 
@@ -95,6 +96,43 @@ def test_mlp_probe_trains_with_balanced_class_weights(tmp_path: Path) -> None:
 	assert set(predicted.tolist()) <= {0, 1, 5}
 	assert probe.class_weight == {0: 0.5, 1: 2.0, 5: 2.0}
 	assert probe.training_epochs <= 80
+
+
+def test_probe_metrics_feature_source_comes_from_token_dataset_metadata(
+	tmp_path: Path,
+) -> None:
+	config, _validation_features = _write_probe_fixture(
+		tmp_path,
+		F3LithologyProbeSettings(
+			spec='linear_metadata_feature_source_test',
+			probe_type='logistic_regression',
+			max_iter=500,
+			random_state=7,
+		),
+	)
+	token_metadata_json = config.inputs.train_tokens.parent / (
+		'token_dataset_metadata.json'
+	)
+	token_metadata_json.write_text(
+		json.dumps({'feature_source': _feature_source()}, indent=2) + '\n',
+		encoding='utf-8',
+	)
+	config = replace(
+		config,
+		inputs=F3LithologyProbeInputs(
+			train_tokens=config.inputs.train_tokens,
+			validation_tokens=config.inputs.validation_tokens,
+			token_dataset_metadata_json=token_metadata_json,
+		),
+		token_dataset={'input_dir': str(config.inputs.train_tokens.parent)},
+	)
+
+	result = train_and_evaluate_f3_lithology_probe(config)
+
+	resolved = json.loads(result.config_json.read_text(encoding='utf-8'))
+	metrics = json.loads(result.metrics_json.read_text(encoding='utf-8'))
+	assert resolved['feature_source'] == _feature_source()
+	assert metrics['feature_source'] == _feature_source()
 
 
 def test_lithology_metrics_compute_iou_and_confusion_matrix() -> None:

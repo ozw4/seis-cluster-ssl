@@ -41,6 +41,10 @@ python proc/seis_ssl_cluster/validate_results_artifacts.py \
   --required-file f3/facies_benchmark_v1/baseline_comparison/comparison_report.md
 ```
 
+Publish manifest `target` entries are relative to the manifest file directory.
+The validator resolves them under the caller's `--root`, so committed
+`results/` artifacts remain valid after a checkout is relocated.
+
 Local absolute paths such as `/home/dcuser/` and `/workspace/artifacts/` are
 reported as warnings by default because some publish manifests record source
 locations. For stricter CI checks, use:

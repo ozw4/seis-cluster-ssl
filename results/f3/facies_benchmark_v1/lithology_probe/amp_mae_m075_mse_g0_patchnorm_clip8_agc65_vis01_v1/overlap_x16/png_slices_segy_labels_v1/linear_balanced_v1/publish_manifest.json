@@ -1,71 +1,71 @@
 {
-  "created_at_utc": "2026-07-01T03:43:08.609285Z",
+  "created_at_utc": "2026-07-01T05:42:17.833404Z",
   "items": [
     {
-      "sha256": "768b185a8a3d12536f01f2a4d49fc3788493e0c9dcafa99a2a6c40eb225e91bb",
+      "sha256": "6d90470be3022ff4214e636aa6661fbc4501ddfe9a760ae698a6010e69ddb147",
       "size_bytes": 4085,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.md",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/report.md"
+      "target": "report.md"
     },
     {
-      "sha256": "0710b89b948831e1cb41444c23e150cfeb34686af4fa3c2a01beb573edd3b55d",
+      "sha256": "50a42c94bd5f984019ce1bebff37b50ccc1d2f8cf415013075e8a7d032256a54",
       "size_bytes": 9069,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.json",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/report.json"
+      "target": "report.json"
     },
     {
-      "sha256": "f81fdef4f3439008a2c0ec5a12c6c07ae583d6e72d9b102c275c12f4d9689f3f",
-      "size_bytes": 2734,
+      "sha256": "4493e1dbae8d73c65a1e72b8d84f9c7dc6bdd59138ffaab1277e51fe81c599e7",
+      "size_bytes": 2963,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.json",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/metrics.json"
+      "target": "metrics.json"
     },
     {
-      "sha256": "57f81be2a05c013d2d13bbafe057c071eafcd09ad18566c64169203754eb50cb",
-      "size_bytes": 1431,
+      "sha256": "f7000560dc67b44f547f4262e7c0e3d9001b7b22d90a7366a56a74c3513ff363",
+      "size_bytes": 1401,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.csv",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/metrics.csv"
+      "target": "metrics.csv"
     },
     {
-      "sha256": "845deb41fa13766b5c679adaef824b4f2724e35d17cd0e20a833fb6b58c7f1e6",
+      "sha256": "00144bc2de1deb1a0c323cacd60b3857cd570b5154f5dd1d8af444b217116c32",
       "size_bytes": 696,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/classification_report.md",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/classification_report.md"
+      "target": "classification_report.md"
     },
     {
-      "sha256": "a265e2754facbcd40be2005c0840561c3a436c114066a207985cfd367cba9ac4",
-      "size_bytes": 304,
+      "sha256": "3f626ae3fab0cdde3cdc312df3a2fe5a0f63558e496d0bcb9bd2f148e85e8605",
+      "size_bytes": 297,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/confusion_matrix.csv",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/confusion_matrix.csv"
+      "target": "confusion_matrix.csv"
     },
     {
-      "sha256": "99b5f96296bafbd1ed02e409769d066930fa46d27ed7b4eea58ed1ed68af6d2d",
-      "size_bytes": 308276,
+      "sha256": "59b416537f000f77cc1ce480db64a50d8df77dfe3c8e9f1a1ad3f69f14f23850",
+      "size_bytes": 308887,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/figures/confusion_matrix.png",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/figures/confusion_matrix.png"
+      "target": "figures/confusion_matrix.png"
     },
     {
-      "sha256": "bd83128833d19b2c2c9be2852ee59881260d5dfef4fd6f9096ead00e0a0e6ae3",
-      "size_bytes": 115257,
+      "sha256": "42536449bc77222fe872f05710a0bce3a47b63b5f62187a20880e6fe4484352a",
+      "size_bytes": 115254,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/figures/per_class_f1.png",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/figures/per_class_f1.png"
+      "target": "figures/per_class_f1.png"
     },
     {
       "sha256": "bbd564b3cdde3fc8ec23b597f503682d44dee99180d30bc5eb6f6dc281ad3499",
       "size_bytes": 616941,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/visualizations/linear_balanced_v1/validation_inline_0150_prediction.png",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/figures/validation_inline_0150_prediction.png"
+      "target": "figures/validation_inline_0150_prediction.png"
     },
     {
       "sha256": "d407adce859f6d7dc0d5df8f98c3edc57ef84b53127390db026fe130baa80415",
       "size_bytes": 472797,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/visualizations/linear_balanced_v1/validation_crossline_0350_prediction.png",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/figures/validation_crossline_0350_prediction.png"
+      "target": "figures/validation_crossline_0350_prediction.png"
     },
     {
       "sha256": "cd6366573a24700dabbeb763b48534825a381aa0447479180c18efa7a167bd01",
       "size_bytes": 485887,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/visualizations/linear_balanced_v1/validation_crossline_0750_prediction.png",
-      "target": "/workspace/results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1/figures/validation_crossline_0750_prediction.png"
+      "target": "figures/validation_crossline_0750_prediction.png"
     }
   ],
   "output_dir": "results/f3/facies_benchmark_v1/lithology_probe/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1",
