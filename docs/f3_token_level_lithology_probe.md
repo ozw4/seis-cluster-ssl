@@ -161,6 +161,9 @@ python proc/seis_ssl_cluster/build_f3_lithology_report.py \
 After the pretrained encoder token dataset and `linear_balanced_v1` probe are
 complete, run the baseline comparison from
 `experiments/f3/facies_benchmark_v1/50_lithology_baselines/README.md`.
+If pretrained `feature_source` metadata changed, regenerate the pretrained
+token dataset and re-run the linear probe first so the probe `metrics.json`
+matches `token_dataset_metadata.json`.
 
 The comparison reuses the pretrained run's train/validation token split and
 label selection. `f3_labels.sgy` and
@@ -168,7 +171,17 @@ label selection. `f3_labels.sgy` and
 label source of truth; PNG labels remain limited to slice selection and visual
 QC.
 
-Required baseline stages:
+Pretrained regeneration commands:
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_token_dataset.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology/<MODEL_TAG>/<EMBED_SPEC>/<LABEL_SET>/01_build_token_dataset.yaml
+
+python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology/<MODEL_TAG>/<EMBED_SPEC>/<LABEL_SET>/02_train_linear_probe.yaml
+```
+
+Baseline stages for a complete comparison:
 
 | Order | Baseline | Entrypoint | Config |
 |---|---|---|---|
@@ -176,11 +189,33 @@ Required baseline stages:
 | 2 | z-only probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/z_only_v1/02_train_linear_probe.yaml` |
 | 3 | amplitude-only dataset | `build_f3_lithology_baseline_features.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/amplitude_stats_v1/01_build_baseline_token_dataset.yaml` |
 | 4 | amplitude-only probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/amplitude_stats_v1/02_train_linear_probe.yaml` |
-| 5 | random checkpoint | `create_random_mae_checkpoint.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/01_create_random_checkpoint.yaml` |
-| 6 | random embeddings | `extract_embeddings.py --device cuda --skip-existing` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/02_extract_embeddings.yaml` |
-| 7 | random token dataset | `build_f3_lithology_token_dataset.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/03_build_token_dataset.yaml` |
-| 8 | random probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/04_train_linear_probe.yaml` |
-| 9 | comparison report | `build_f3_lithology_comparison_report.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/05_build_baseline_comparison_report.yaml` |
+| 5 | xyz-coordinate dataset | `build_f3_lithology_baseline_features.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/01_build_baseline_token_dataset.yaml` |
+| 6 | xyz-coordinate probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/02_train_linear_probe.yaml` |
+| 7 | random checkpoint | `create_random_mae_checkpoint.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/01_create_random_checkpoint.yaml` |
+| 8 | random embeddings | `extract_embeddings.py --device cuda --skip-existing` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/02_extract_embeddings.yaml` |
+| 9 | random token dataset | `build_f3_lithology_token_dataset.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/03_build_token_dataset.yaml` |
+| 10 | random probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/04_train_linear_probe.yaml` |
+
+Z-only, amplitude-only, and random encoder outputs can be reused only when they
+already match the current pretrained train/validation token split and label
+selection. Always include `xyz_coordinates_v1` in the regenerated comparison.
+
+The xyz-coordinate commands are:
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_baseline_features.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/01_build_baseline_token_dataset.yaml
+
+python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/02_train_linear_probe.yaml
+```
+
+Then rebuild and publish the comparison:
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py \
+  --config experiments/f3/facies_benchmark_v1/50_lithology_baselines/05_build_baseline_comparison_report.yaml
+```
 
 The comparison report is written under:
 
@@ -189,15 +224,29 @@ $ROOT/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/
 ```
 
 A lightweight shared copy, when needed, belongs under
-`results/f3/facies_benchmark_v1/baseline_comparison/`.
+`results/f3/facies_benchmark_v1/baseline_comparison/`. The checked-in
+comparison config publishes this copy through its `publish` block.
+
+Validate shared results after publishing:
+
+```bash
+python proc/seis_ssl_cluster/validate_results_artifacts.py \
+  --root results \
+  --max-file-size-mb 10
+```
 
 Read `macro_f1` as the primary class-balanced score, `mean_iou` as the
 secondary segmentation-style score, and per-class F1 columns to check whether
 weak classes improve. High z-only performance means depth or stratigraphic
 position may explain much of the task; high amplitude-only performance limits
-the added value of pretrained embeddings; high random-encoder performance means
-architecture or tokenization may be sufficient. The strongest claim for
-pretraining is when the pretrained encoder beats all baselines.
+the added value of pretrained embeddings. High xyz-coordinate performance means
+spatial coordinates and stratigraphic position may explain much of the task.
+When the pretrained encoder beats xyz, seismic waveform or structural features
+beyond position are likely contributing. If random encoder and xyz are close,
+the random encoder may rely strongly on position or tokenization signal. High
+random-encoder performance means architecture or tokenization may be sufficient.
+The strongest claim for pretraining is when the pretrained encoder beats all
+baselines.
 
 ## Figure Contract
 
