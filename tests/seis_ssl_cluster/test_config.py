@@ -31,6 +31,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_F3_SEGY_GEOMETRY,
 	STAGE_F3_TOKENIZATION_PREVIEW,
 )
+from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
@@ -156,14 +157,17 @@ DEFAULT_EMBEDDING_CHECKPOINT_PATH = (
 	'mae_latest.pt'
 )
 DEFAULT_EMBEDDING_DIR = (
-	'/workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1'
+	'/workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1/'
+	'amp_mae_v1/full/overlap_x64'
 )
 DEFAULT_CLUSTERING_DIR = (
-	'/workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1'
+	'/workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/'
+	'amp_mae_v1/full/overlap_x64/k6_8_10_12_pca64_nowhiten_s1m'
 )
 DEFAULT_CLUSTER_VISUALIZATION_DIR = (
 	'/workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/'
-	'pretrain_v1'
+	'pretrain_v1/amp_mae_v1/full/overlap_x64/'
+	'k6_8_10_12_pca64_nowhiten_s1m/token_xy750_xz150'
 )
 FIXED_DISABLED_NORMALIZATION_KEYS = (
 	'smooth_time_depth_trend_correction',
@@ -265,7 +269,7 @@ def test_f3_inspection_config_rejects_runs_output() -> None:
 		'/workspace/artifacts/seis_ssl_cluster/runs/f3/facies_benchmark_v1'
 	)
 
-	with pytest.raises(ValueError, match=r'outputs\.inspection_dir.*inspection/f3'):
+	with pytest.raises(ValueError, match=r'outputs\.inspection_dir.*runs/ paths'):
 		resolve_f3_facies_inspection_config(cfg, stage=STAGE_F3_INSPECT_FILES)
 
 
@@ -446,6 +450,28 @@ def test_default_cluster_visualization_config_is_minimal_raw_user_config() -> No
 		'summaries': {'enabled': True, 'include_amplitude_norm': False},
 	}
 	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
+
+
+def test_default_nopims_paths_match_artifact_paths_contract() -> None:
+	paths = ArtifactPaths(Path(DEFAULT_ARTIFACT_ROOT))
+	key = ExperimentKey(
+		dataset='nopims',
+		version='pretrain_v1',
+		model_tag='amp_mae_v1',
+		subset='full',
+		embed_spec='overlap_x64',
+		cluster_spec='k6_8_10_12_pca64_nowhiten_s1m',
+		viz_spec='token_xy750_xz150',
+		run_spec='full_100ep',
+	)
+
+	assert Path(DEFAULT_EMBEDDING_DIR) == paths.embeddings(key)
+	assert Path(DEFAULT_CLUSTERING_DIR) == paths.clustering(key)
+	assert Path(DEFAULT_CLUSTER_VISUALIZATION_DIR) == paths.cluster_visualization(key)
+	assert (
+		Path(DEFAULT_EMBEDDING_CHECKPOINT_PATH).parent
+		== paths.pretraining(key)
+	)
 
 
 def test_default_clustering_input_matches_extraction_output() -> None:
@@ -1170,7 +1196,7 @@ def test_training_output_root_must_be_absolute() -> None:
 
 def test_training_output_root_must_be_under_artifact_root() -> None:
 	cfg = _minimal_training_config()
-	cfg['paths']['output_root'] = '/external/runs/train_amp_mae'
+	cfg['paths']['output_root'] = '/external/artifacts/train_amp_mae'
 
 	with pytest.raises(
 		ValueError,
@@ -1187,6 +1213,127 @@ def test_training_output_root_must_be_under_artifact_root() -> None:
 			lambda: _minimal_training_config(),
 			'paths',
 			'output_root',
+		),
+		(
+			resolve_embedding_extraction_config,
+			lambda: _minimal_embedding_config(),
+			'embeddings',
+			'output_dir',
+		),
+		(
+			resolve_clustering_config,
+			lambda: _minimal_clustering_config(),
+			'clustering',
+			'output_dir',
+		),
+		(
+			resolve_cluster_visualization_config,
+			lambda: _minimal_visualization_config(),
+			'visualization',
+			'output_dir',
+		),
+	],
+)
+def test_artifact_output_paths_reject_runs_component(
+	resolver: Callable[[dict[str, object]], dict[str, object]],
+	raw_config: Callable[[], dict[str, object]],
+	section: str,
+	key: str,
+) -> None:
+	cfg = raw_config()
+	cfg[section][key] = f'/artifacts/runs/{section}/{key}'
+
+	with pytest.raises(ValueError, match='runs/ paths'):
+		resolver(cfg)
+
+
+@pytest.mark.parametrize(
+	('resolver', 'raw_config', 'section', 'key', 'path', 'message'),
+	[
+		(
+			resolve_mae_training_config,
+			lambda: _minimal_training_config(),
+			'paths',
+			'output_root',
+			'/artifacts/pretraining/nopims/pretrain_v1/amp_mae_v1',
+			r'pretraining/nopims/pretrain_v1',
+		),
+		(
+			resolve_embedding_extraction_config,
+			lambda: _minimal_embedding_config(),
+			'embeddings',
+			'output_dir',
+			'/artifacts/embeddings/nopims/pretrain_v1/amp_mae_v1/full',
+			r'embeddings/nopims/pretrain_v1',
+		),
+		(
+			resolve_clustering_config,
+			lambda: _minimal_clustering_config(),
+			'clustering',
+			'output_dir',
+			'/artifacts/clustering/nopims/pretrain_v1/amp_mae_v1/full/overlap_x64',
+			r'clustering/nopims/pretrain_v1',
+		),
+		(
+			resolve_cluster_visualization_config,
+			lambda: _minimal_visualization_config(),
+			'visualization',
+			'output_dir',
+			'/artifacts/visualizations/clusters/nopims/pretrain_v1/amp_mae_v1/full/overlap_x64/k6_8',
+			r'visualizations/clusters/nopims/pretrain_v1',
+		),
+	],
+)
+def test_nopims_artifact_paths_must_match_artifact_paths_contract(
+	resolver: Callable[[dict[str, object]], dict[str, object]],
+	raw_config: Callable[[], dict[str, object]],
+	section: str,
+	key: str,
+	path: str,
+	message: str,
+) -> None:
+	cfg = raw_config()
+	cfg[section][key] = path
+
+	with pytest.raises(ValueError, match=message):
+		resolver(cfg)
+
+
+def test_embedding_checkpoint_rejects_runs_path() -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embeddings']['checkpoint'] = (
+		'/artifacts/runs/nopims/pretrain_v1/amp_mae_v1/full_100ep/'
+		'mae_latest.pt'
+	)
+
+	with pytest.raises(ValueError, match='runs/ paths'):
+		resolve_embedding_extraction_config(cfg)
+
+
+def test_embedding_checkpoint_parent_uses_nopims_pretraining_contract() -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embeddings']['checkpoint'] = (
+		'/artifacts/pretraining/nopims/pretrain_v1/amp_mae_v1/mae_latest.pt'
+	)
+
+	with pytest.raises(ValueError, match=r'pretraining/nopims/pretrain_v1'):
+		resolve_embedding_extraction_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('resolver', 'raw_config', 'section', 'key'),
+	[
+		(
+			resolve_mae_training_config,
+			lambda: _minimal_training_config(),
+			'paths',
+			'output_root',
+		),
+		(
+			resolve_embedding_extraction_config,
+			lambda: _minimal_embedding_config(),
+			'embeddings',
+			'output_dir',
 		),
 		(
 			resolve_clustering_config,

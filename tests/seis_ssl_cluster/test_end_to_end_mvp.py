@@ -179,7 +179,7 @@ def _train_tiny_mae(
 		yaml.safe_dump(raw_train_config, sort_keys=False),
 		encoding='utf-8',
 	)
-	output_root = artifact_root / 'runs' / 'synthetic_smoke'
+	output_root = artifact_root / 'pretraining' / 'synthetic_smoke'
 	result = run_python_proc(
 		Path('proc/seis_ssl_cluster/train_amp_mae.py'),
 		'--config',
@@ -218,7 +218,7 @@ def _extract_embeddings(
 		'manifests': {'input': str(clean_manifest_path)},
 		'embeddings': {
 			'checkpoint': str(checkpoint_path),
-			'output_dir': str(artifact_root / 'runs' / 'embeddings' / 'synthetic'),
+			'output_dir': str(artifact_root / 'embeddings' / 'synthetic'),
 		},
 		'embedding': {
 			'window_size': [4, 4, 4],
@@ -240,7 +240,7 @@ def _extract_embeddings(
 
 
 def _cluster_embeddings(artifact_root: Path, embedding_dir: Path) -> Path:
-	cluster_dir = artifact_root / 'runs' / 'clusters' / 'synthetic'
+	cluster_dir = artifact_root / 'clustering' / 'synthetic'
 	cluster_config = {
 		'paths': {'artifact_root': str(artifact_root)},
 		'embeddings': {'input_dir': str(embedding_dir)},
@@ -270,7 +270,7 @@ def _visualize_clusters(
 	*,
 	survey_ids: list[str],
 ) -> Path:
-	visualization_dir = artifact_root / 'runs' / 'figures' / 'synthetic'
+	visualization_dir = artifact_root / 'visualizations' / 'synthetic'
 	visualization_config = {
 		'paths': {'artifact_root': str(artifact_root)},
 		'clustering': {'input_dir': str(cluster_dir)},
@@ -365,7 +365,7 @@ def _minimal_training_config(
 	return {
 		'paths': {
 			'artifact_root': str(artifact_root),
-			'output_root': str(artifact_root / 'runs' / 'raw_config_output'),
+			'output_root': str(artifact_root / 'pretraining' / 'raw_config_output'),
 		},
 		'manifests': {
 			'train': str(clean_manifest_path),

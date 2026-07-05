@@ -15,6 +15,7 @@ from seis_ssl_cluster.paths import (
 )
 
 MODEL_TAG = 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
+NOPIMS_MODEL_TAG = 'amp_mae_v1'
 KEY = ExperimentKey(
 	dataset='f3',
 	version='facies_benchmark_v1',
@@ -26,6 +27,16 @@ KEY = ExperimentKey(
 	label_set='png_slices_segy_labels_v1',
 	probe_spec='linear_balanced_v1',
 	baseline_tag='z_only_v1',
+	run_spec='full_100ep',
+)
+NOPIMS_KEY = ExperimentKey(
+	dataset='nopims',
+	version='pretrain_v1',
+	model_tag=NOPIMS_MODEL_TAG,
+	subset='full',
+	embed_spec='overlap_x64',
+	cluster_spec='k6_8_10_12_pca64_nowhiten_s1m',
+	viz_spec='token_xy750_xz150',
 	run_spec='full_100ep',
 )
 
@@ -42,6 +53,50 @@ def test_pretraining_path_uses_pretraining_root_and_never_runs() -> None:
 		/ 'full_100ep'
 	)
 	assert 'runs' not in path.parts
+
+
+def test_nopims_stage_paths_follow_artifact_contract() -> None:
+	paths = ArtifactPaths()
+
+	assert paths.pretraining(NOPIMS_KEY) == (
+		DEFAULT_ARTIFACT_ROOT
+		/ 'pretraining'
+		/ 'nopims'
+		/ 'pretrain_v1'
+		/ NOPIMS_MODEL_TAG
+		/ 'full_100ep'
+	)
+	assert paths.embeddings(NOPIMS_KEY) == (
+		DEFAULT_ARTIFACT_ROOT
+		/ 'embeddings'
+		/ 'nopims'
+		/ 'pretrain_v1'
+		/ NOPIMS_MODEL_TAG
+		/ 'full'
+		/ 'overlap_x64'
+	)
+	assert paths.clustering(NOPIMS_KEY) == (
+		DEFAULT_ARTIFACT_ROOT
+		/ 'clustering'
+		/ 'nopims'
+		/ 'pretrain_v1'
+		/ NOPIMS_MODEL_TAG
+		/ 'full'
+		/ 'overlap_x64'
+		/ 'k6_8_10_12_pca64_nowhiten_s1m'
+	)
+	assert paths.cluster_visualization(NOPIMS_KEY) == (
+		DEFAULT_ARTIFACT_ROOT
+		/ 'visualizations'
+		/ 'clusters'
+		/ 'nopims'
+		/ 'pretrain_v1'
+		/ NOPIMS_MODEL_TAG
+		/ 'full'
+		/ 'overlap_x64'
+		/ 'k6_8_10_12_pca64_nowhiten_s1m'
+		/ 'token_xy750_xz150'
+	)
 
 
 def test_embeddings_path_separates_optional_subset_from_embed_spec() -> None:

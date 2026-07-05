@@ -1,9 +1,9 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 embeddings:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1
+  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1/amp_mae_v1/full/overlap_x64
 clustering:
-  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1
+  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_v1/full/overlap_x64/k6_8_10_12_pca64_nowhiten_s1m
   embedding_normalization: l2
   residualization:
     enabled: false

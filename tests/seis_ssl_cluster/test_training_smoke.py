@@ -108,6 +108,14 @@ def test_run_rejects_missing_train_path_list(tmp_path: Path) -> None:
 		run_mae_pretraining(cfg)
 
 
+def test_run_requires_explicit_output_root(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	del cfg['paths']['output_root']
+
+	with pytest.raises(TypeError, match=r'paths\.output_root'):
+		run_mae_pretraining(cfg)
+
+
 def test_run_rejects_missing_configured_train_path_list(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	missing = tmp_path / 'missing_train_paths.txt'

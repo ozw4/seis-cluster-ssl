@@ -4,7 +4,7 @@ manifests:
   input: /workspace/artifacts/seis_ssl_cluster/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
 embeddings:
   checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep/mae_latest.pt
-  output_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1
+  output_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1/amp_mae_v1/full/overlap_x64
 embedding:
   window_size: [128, 128, 128]
   overlap: [64, 64, 64]

@@ -40,6 +40,7 @@ from seis_ssl_cluster.config.schema import (
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
+from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey, reject_runs_path
 
 Config: TypeAlias = dict[str, object]
 _T = TypeVar('_T', bound=Mapping[str, object])
@@ -201,6 +202,8 @@ _F3_FACIES_INSPECTION_PATH_KEY_SUFFIXES = (
 	'_png',
 	'_path',
 )
+_NOPIMS_DATASET = 'nopims'
+_NOPIMS_PRETRAIN_VERSION = 'pretrain_v1'
 
 
 def resolve_manifest_build_config(config: _T) -> Config:
@@ -274,12 +277,6 @@ def resolve_mae_training_config(config: _T) -> Config:
 		'output_root',
 		prefix='paths',
 	)
-	_validate_artifact_output_path(
-		output_root,
-		'paths.output_root',
-		artifact_root=paths.artifact_root,
-		nopims_root=paths.nopims_root,
-	)
 	_reject_fixed_contract_keys(resolved)
 	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
 	_merge_section_defaults(resolved, 'train', DEFAULT_MAE_TRAIN_OPTIONS)
@@ -319,6 +316,17 @@ def resolve_mae_training_config(config: _T) -> Config:
 	)
 	_validate_model(model)
 	_validate_divisible_crop_patch(local_crop_size, patch_size)
+	_validate_artifact_output_path(
+		output_root,
+		'paths.output_root',
+		artifact_root=paths.artifact_root,
+		nopims_root=paths.nopims_root,
+	)
+	_validate_nopims_pretraining_path(
+		output_root,
+		'paths.output_root',
+		artifact_root=paths.artifact_root,
+	)
 	_validate_masking(masking)
 	_validate_loss(loss)
 	_validate_train(train)
@@ -347,12 +355,27 @@ def resolve_embedding_extraction_config(config: _T) -> Config:
 	manifests = _required_mapping(resolved, 'manifests')
 	embeddings = _required_mapping(resolved, 'embeddings')
 	_validate_non_empty_path(manifests, 'input', prefix='manifests')
-	_validate_non_empty_path(embeddings, 'checkpoint', prefix='embeddings')
+	checkpoint = _validate_non_empty_path(
+		embeddings,
+		'checkpoint',
+		prefix='embeddings',
+	)
+	_validate_nopims_checkpoint_path(
+		checkpoint,
+		'embeddings.checkpoint',
+		artifact_root=paths.artifact_root,
+	)
+	output_dir = _validate_path(embeddings, 'output_dir', prefix='embeddings')
 	_validate_artifact_output_path(
-		_validate_path(embeddings, 'output_dir', prefix='embeddings'),
+		output_dir,
 		'embeddings.output_dir',
 		artifact_root=paths.artifact_root,
 		nopims_root=paths.nopims_root,
+	)
+	_validate_nopims_embedding_path(
+		output_dir,
+		'embeddings.output_dir',
+		artifact_root=paths.artifact_root,
 	)
 
 	embedding = _required_mapping(resolved, 'embedding')
@@ -400,12 +423,29 @@ def resolve_clustering_config(config: _T) -> Config:
 		_CLUSTERING_REQUIRED_KEYS,
 		prefix='clustering',
 	)
-	_validate_non_empty_path(embeddings, 'input_dir', prefix='embeddings')
+	input_dir = _validate_path(embeddings, 'input_dir', prefix='embeddings')
 	_validate_artifact_output_path(
-		_validate_path(clustering, 'output_dir', prefix='clustering'),
+		input_dir,
+		'embeddings.input_dir',
+		artifact_root=paths.artifact_root,
+		nopims_root=paths.nopims_root,
+	)
+	_validate_nopims_embedding_path(
+		input_dir,
+		'embeddings.input_dir',
+		artifact_root=paths.artifact_root,
+	)
+	output_dir = _validate_path(clustering, 'output_dir', prefix='clustering')
+	_validate_artifact_output_path(
+		output_dir,
 		'clustering.output_dir',
 		artifact_root=paths.artifact_root,
 		nopims_root=paths.nopims_root,
+	)
+	_validate_nopims_clustering_path(
+		output_dir,
+		'clustering.output_dir',
+		artifact_root=paths.artifact_root,
 	)
 	_validate_clustering_normalization(clustering)
 	residualization = _required_child_mapping(
@@ -468,12 +508,33 @@ def resolve_cluster_visualization_config(config: _T) -> Config:
 		_VISUALIZATION_REQUIRED_KEYS,
 		prefix='visualization',
 	)
-	_validate_non_empty_path(clustering, 'input_dir', prefix='clustering')
+	input_dir = _validate_path(clustering, 'input_dir', prefix='clustering')
 	_validate_artifact_output_path(
-		_validate_path(visualization, 'output_dir', prefix='visualization'),
+		input_dir,
+		'clustering.input_dir',
+		artifact_root=paths.artifact_root,
+		nopims_root=paths.nopims_root,
+	)
+	_validate_nopims_clustering_path(
+		input_dir,
+		'clustering.input_dir',
+		artifact_root=paths.artifact_root,
+	)
+	output_dir = _validate_path(
+		visualization,
+		'output_dir',
+		prefix='visualization',
+	)
+	_validate_artifact_output_path(
+		output_dir,
 		'visualization.output_dir',
 		artifact_root=paths.artifact_root,
 		nopims_root=paths.nopims_root,
+	)
+	_validate_nopims_cluster_visualization_path(
+		output_dir,
+		'visualization.output_dir',
+		artifact_root=paths.artifact_root,
 	)
 	_validate_survey_id_list(visualization)
 	_validate_visualization_modes(visualization)
@@ -921,6 +982,195 @@ def _validate_clustering_residualization(
 	)
 
 
+def _validate_nopims_checkpoint_path(
+	path: Path,
+	label: str,
+	*,
+	artifact_root: Path,
+) -> None:
+	reject_runs_path(path, label=label)
+	_validate_nopims_pretraining_path(
+		path.parent,
+		f'{label} parent',
+		artifact_root=artifact_root,
+	)
+
+
+def _validate_nopims_pretraining_path(
+	path: Path,
+	label: str,
+	*,
+	artifact_root: Path,
+) -> None:
+	relative = _artifact_relative_path(path, artifact_root)
+	if relative is None:
+		return
+	parts = relative.parts
+	expected = (
+		'pretraining/nopims/pretrain_v1/<MODEL_TAG>/<RUN_SPEC>'
+	)
+	if not _is_nopims_artifact_path(parts, ('pretraining',)):
+		return
+	if len(parts) != 5 or parts[2] != _NOPIMS_PRETRAIN_VERSION:
+		_raise_nopims_artifact_path_error(label, path, expected)
+	key = ExperimentKey(
+		dataset=parts[1],
+		version=parts[2],
+		model_tag=parts[3],
+		run_spec=parts[4],
+	)
+	_validate_artifact_path_matches(
+		path,
+		ArtifactPaths(artifact_root).pretraining(key),
+		label=label,
+		expected=expected,
+	)
+
+
+def _validate_nopims_embedding_path(
+	path: Path,
+	label: str,
+	*,
+	artifact_root: Path,
+) -> None:
+	relative = _artifact_relative_path(path, artifact_root)
+	if relative is None:
+		return
+	parts = relative.parts
+	expected = (
+		'embeddings/nopims/pretrain_v1/'
+		'<MODEL_TAG>/<SUBSET>/<EMBED_SPEC>'
+	)
+	if not _is_nopims_artifact_path(parts, ('embeddings',)):
+		return
+	if len(parts) != 6 or parts[2] != _NOPIMS_PRETRAIN_VERSION:
+		_raise_nopims_artifact_path_error(label, path, expected)
+	key = ExperimentKey(
+		dataset=parts[1],
+		version=parts[2],
+		model_tag=parts[3],
+		subset=parts[4],
+		embed_spec=parts[5],
+	)
+	_validate_artifact_path_matches(
+		path,
+		ArtifactPaths(artifact_root).embeddings(key),
+		label=label,
+		expected=expected,
+	)
+
+
+def _validate_nopims_clustering_path(
+	path: Path,
+	label: str,
+	*,
+	artifact_root: Path,
+) -> None:
+	relative = _artifact_relative_path(path, artifact_root)
+	if relative is None:
+		return
+	parts = relative.parts
+	expected = (
+		'clustering/nopims/pretrain_v1/'
+		'<MODEL_TAG>/<SUBSET>/<EMBED_SPEC>/<CLUSTER_SPEC>'
+	)
+	if not _is_nopims_artifact_path(parts, ('clustering',)):
+		return
+	if len(parts) != 7 or parts[2] != _NOPIMS_PRETRAIN_VERSION:
+		_raise_nopims_artifact_path_error(label, path, expected)
+	key = ExperimentKey(
+		dataset=parts[1],
+		version=parts[2],
+		model_tag=parts[3],
+		subset=parts[4],
+		embed_spec=parts[5],
+		cluster_spec=parts[6],
+	)
+	_validate_artifact_path_matches(
+		path,
+		ArtifactPaths(artifact_root).clustering(key),
+		label=label,
+		expected=expected,
+	)
+
+
+def _validate_nopims_cluster_visualization_path(
+	path: Path,
+	label: str,
+	*,
+	artifact_root: Path,
+) -> None:
+	relative = _artifact_relative_path(path, artifact_root)
+	if relative is None:
+		return
+	parts = relative.parts
+	expected = (
+		'visualizations/clusters/nopims/pretrain_v1/'
+		'<MODEL_TAG>/<SUBSET>/<EMBED_SPEC>/<CLUSTER_SPEC>/<VIZ_SPEC>'
+	)
+	if not _is_nopims_artifact_path(parts, ('visualizations', 'clusters')):
+		return
+	if len(parts) != 9 or parts[3] != _NOPIMS_PRETRAIN_VERSION:
+		_raise_nopims_artifact_path_error(label, path, expected)
+	key = ExperimentKey(
+		dataset=parts[2],
+		version=parts[3],
+		model_tag=parts[4],
+		subset=parts[5],
+		embed_spec=parts[6],
+		cluster_spec=parts[7],
+		viz_spec=parts[8],
+	)
+	_validate_artifact_path_matches(
+		path,
+		ArtifactPaths(artifact_root).cluster_visualization(key),
+		label=label,
+		expected=expected,
+	)
+
+
+def _artifact_relative_path(path: Path, artifact_root: Path) -> Path | None:
+	try:
+		return path.resolve(strict=False).relative_to(
+			artifact_root.resolve(strict=False),
+		)
+	except ValueError:
+		return None
+
+
+def _is_nopims_artifact_path(
+	parts: tuple[str, ...],
+	stage_prefix: tuple[str, ...],
+) -> bool:
+	prefix_len = len(stage_prefix)
+	if len(parts) <= prefix_len:
+		return False
+	return (
+		parts[:prefix_len] == stage_prefix
+		and parts[prefix_len] == _NOPIMS_DATASET
+	)
+
+
+def _validate_artifact_path_matches(
+	path: Path,
+	expected_path: Path,
+	*,
+	label: str,
+	expected: str,
+) -> None:
+	if path.resolve(strict=False) != expected_path.resolve(strict=False):
+		_raise_nopims_artifact_path_error(label, path, expected)
+
+
+def _raise_nopims_artifact_path_error(
+	label: str,
+	path: Path,
+	expected: str,
+) -> None:
+	msg = f'{label} must follow ArtifactPaths {expected}; got {path}'
+	raise ValueError(msg)
+
+
 def _validate_paths(
 	paths: Mapping[str, object],
 	*,
@@ -1012,6 +1262,7 @@ def _validate_artifact_output_path(
 	if not path.is_absolute():
 		msg = f'{label} must be an absolute artifact-registry path; got {path}'
 		raise ValueError(msg)
+	reject_runs_path(path, label=label)
 	if nopims_root is not None and _is_relative_to(path, nopims_root):
 		msg = f'{label} must not be under {raw_root_label}; got {path}'
 		raise ValueError(msg)

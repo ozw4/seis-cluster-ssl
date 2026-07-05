@@ -1298,11 +1298,8 @@ def _resolve_output_root(paths_config: Mapping[str, object]) -> Path:
 	value = paths_config.get('output_root')
 	if isinstance(value, str) and value:
 		return Path(value)
-	artifact_root = paths_config.get('artifact_root')
-	if not isinstance(artifact_root, str) or not artifact_root:
-		msg = 'paths.artifact_root must be a non-empty string'
-		raise TypeError(msg)
-	return Path(artifact_root) / 'runs' / 'train_amp_mae'
+	msg = f'paths.output_root must be a non-empty string; got {value!r}'
+	raise TypeError(msg)
 
 
 def _resolve_device(train_config: Mapping[str, object]) -> torch.device:
