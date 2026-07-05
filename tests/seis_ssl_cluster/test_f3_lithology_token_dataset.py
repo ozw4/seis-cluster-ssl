@@ -8,6 +8,9 @@ import numpy as np
 import pytest
 import yaml
 
+from proc.seis_ssl_cluster.build_f3_lithology_token_dataset import (
+	f3_lithology_token_dataset_config_from_mapping,
+)
 from seis_ssl_cluster.f3 import (
 	F3ClassInfo,
 	F3LineGeometry,
@@ -24,9 +27,7 @@ from seis_ssl_cluster.f3 import (
 	resolve_f3_slice_array_index,
 	tokenize_f3_lithology_slice,
 )
-from proc.seis_ssl_cluster.build_f3_lithology_token_dataset import (
-	f3_lithology_token_dataset_config_from_mapping,
-)
+from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey
 from tests.helpers import run_python_proc
 
 
@@ -441,6 +442,49 @@ def test_pretrained_token_dataset_config_accepts_top_level_feature_source(
 	assert parsed.feature_source == _feature_source()
 
 
+def test_pretrained_token_dataset_output_matches_artifact_paths(
+	tmp_path: Path,
+) -> None:
+	config = _write_dataset_fixture(tmp_path)
+	payload = _config_mapping(config)
+	artifact_root = Path(payload['paths']['artifact_root'])
+	expected = ArtifactPaths(artifact_root).lithology_token_dataset(
+		ExperimentKey(
+			dataset='f3',
+			version='facies_benchmark_v1',
+			model_tag='model',
+			embed_spec='embed',
+			label_set='labels',
+		),
+	)
+
+	parsed = f3_lithology_token_dataset_config_from_mapping(payload)
+
+	assert parsed.outputs.output_dir == expected
+	assert parsed.outputs.metadata_json == expected / 'token_dataset_metadata.json'
+	assert 'runs' not in parsed.outputs.output_dir.parts
+
+
+def test_pretrained_token_dataset_config_respects_explicit_output_paths(
+	tmp_path: Path,
+) -> None:
+	config = _write_dataset_fixture(tmp_path)
+	payload = _config_mapping(config)
+	artifact_root = Path(payload['paths']['artifact_root'])
+	explicit = artifact_root / 'custom_lithology' / 'token_dataset'
+	token_dataset = payload['token_dataset']
+	token_dataset['output_dir'] = str(explicit)
+	token_dataset['split_manifest'] = str(explicit / 'splits.json')
+	token_dataset['metadata_json'] = str(explicit / 'token_dataset_metadata.json')
+	token_dataset['class_counts_csv'] = str(explicit / 'class_counts.csv')
+	token_dataset['summary_markdown'] = str(explicit / 'token_dataset_summary.md')
+	token_dataset['quicklook_dir'] = str(explicit / 'quicklook')
+
+	parsed = f3_lithology_token_dataset_config_from_mapping(payload)
+
+	assert parsed.outputs.output_dir == explicit
+
+
 def test_pretrained_token_dataset_config_rejects_non_pretrained_feature_source(
 	tmp_path: Path,
 ) -> None:
@@ -448,7 +492,7 @@ def test_pretrained_token_dataset_config_rejects_non_pretrained_feature_source(
 	payload = _config_mapping(config)
 	payload['token_dataset']['feature_source']['kind'] = 'z_only'
 
-	with pytest.raises(ValueError, match='feature_source.kind'):
+	with pytest.raises(ValueError, match=r'feature_source\.kind'):
 		f3_lithology_token_dataset_config_from_mapping(payload)
 
 

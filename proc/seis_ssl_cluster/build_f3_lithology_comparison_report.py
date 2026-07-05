@@ -17,17 +17,16 @@ from seis_ssl_cluster.f3 import (
 	build_f3_lithology_comparison_report,
 	default_f3_lithology_comparison_figure_style,
 )
+from seis_ssl_cluster.paths import (
+	DEFAULT_ARTIFACT_ROOT,
+	ArtifactPaths,
+	ExperimentKey,
+)
 
 STAGE = 'build_f3_lithology_comparison_report'
-DEFAULT_SEARCH_ROOT = (
-	Path('/workspace')
-	/ 'artifacts'
-	/ 'seis_ssl_cluster'
-	/ 'lithology'
-	/ 'f3'
-	/ 'facies_benchmark_v1'
-)
-DEFAULT_OUTPUT_DIR = DEFAULT_SEARCH_ROOT / 'reports' / 'baseline_comparison'
+DEFAULT_KEY = ExperimentKey(dataset='f3', version='facies_benchmark_v1')
+DEFAULT_SEARCH_ROOT = ArtifactPaths().lithology_dataset(DEFAULT_KEY)
+DEFAULT_OUTPUT_DIR = ArtifactPaths().baseline_comparison_report(DEFAULT_KEY)
 
 
 def main() -> None:
@@ -190,7 +189,7 @@ def f3_lithology_comparison_report_config_from_mapping(
 		paths,
 		'artifact_root',
 		prefix='paths',
-		default=Path('/workspace/artifacts/seis_ssl_cluster'),
+		default=DEFAULT_ARTIFACT_ROOT,
 	)
 	version = _optional_str(
 		dataset,
@@ -198,8 +197,10 @@ def f3_lithology_comparison_report_config_from_mapping(
 		prefix='dataset',
 		default='facies_benchmark_v1',
 	)
-	default_search_root = artifact_root / 'lithology' / 'f3' / version
-	default_output_dir = default_search_root / 'reports' / 'baseline_comparison'
+	default_key = ExperimentKey(dataset='f3', version=version)
+	default_paths = ArtifactPaths(artifact_root)
+	default_search_root = default_paths.lithology_dataset(default_key)
+	default_output_dir = default_paths.baseline_comparison_report(default_key)
 	search_root = _optional_absolute_path(
 		comparison,
 		'search_root',

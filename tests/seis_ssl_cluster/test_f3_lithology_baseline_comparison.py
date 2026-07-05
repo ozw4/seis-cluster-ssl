@@ -6,8 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
-import seis_ssl_cluster.f3.lithology_report as lithology_report_module
 
+import seis_ssl_cluster.f3.lithology_report as lithology_report_module
 from proc.seis_ssl_cluster.build_f3_lithology_comparison_report import (
 	f3_lithology_comparison_report_config_from_mapping,
 )
@@ -18,6 +18,7 @@ from seis_ssl_cluster.f3 import (
 	default_f3_lithology_comparison_figure_style,
 	publish_f3_lithology_comparison_report,
 )
+from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey, ResultsPaths
 from tests.helpers import run_python_proc
 
 
@@ -185,6 +186,31 @@ def test_f3_lithology_comparison_config_accepts_optional_figure_style(
 	assert config.figure_style.figsize.per_class == (8.5, 4.4)
 
 
+def test_f3_lithology_comparison_defaults_match_artifact_paths(
+	tmp_path: Path,
+) -> None:
+	artifact_root = tmp_path / 'artifacts' / 'seis_ssl_cluster'
+	key = ExperimentKey(dataset='f3', version='facies_benchmark_v1')
+	paths = ArtifactPaths(artifact_root)
+
+	config = f3_lithology_comparison_report_config_from_mapping(
+		{
+			'paths': {'artifact_root': str(artifact_root)},
+			'dataset': {'name': 'f3_facies_benchmark', 'version': key.version},
+			'comparison': {},
+		},
+	)
+
+	assert config.search_root == paths.lithology_dataset(key)
+	assert config.output_csv == (
+		paths.baseline_comparison_report(key) / 'comparison_table.csv'
+	)
+	assert config.output_markdown == (
+		paths.baseline_comparison_report(key) / 'comparison_report.md'
+	)
+	assert 'runs' not in config.output_csv.parts
+
+
 def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 	tmp_path: Path,
 ) -> None:
@@ -235,13 +261,9 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 		mean_iou=0.40,
 		per_class_f1={'3': 0.19, '5': 0.33},
 	)
-	output_dir = search_root / 'reports' / 'baseline_comparison'
-	publish_dir = (
-		tmp_path
-		/ 'results'
-		/ 'f3'
-		/ 'facies_benchmark_v1'
-		/ 'baseline_comparison'
+	output_dir = _comparison_output_dir(tmp_path)
+	publish_dir = ResultsPaths(tmp_path / 'results').baseline_comparison(
+		ExperimentKey(dataset='f3', version='facies_benchmark_v1'),
 	)
 	output_dir.mkdir(parents=True, exist_ok=True)
 	_write_json(output_dir / 'comparison_table.json', {'rows': []})
@@ -412,7 +434,7 @@ def test_f3_lithology_baseline_comparison_uses_pretrained_token_metadata(
 		},
 	)
 	_write_json(token_metadata, {'feature_source': feature_source})
-	output_dir = search_root / 'reports' / 'baseline_comparison'
+	output_dir = _comparison_output_dir(tmp_path)
 
 	result = build_f3_lithology_comparison_report(
 		F3LithologyComparisonReportConfig(
@@ -474,7 +496,7 @@ def test_f3_lithology_baseline_comparison_warns_for_missing_metrics(
 		metrics_override={'accuracy': 0.5},
 	)
 	missing_path = search_root / 'missing' / 'probes' / 'linear' / 'metrics.json'
-	output_dir = search_root / 'reports' / 'baseline_comparison'
+	output_dir = _comparison_output_dir(tmp_path)
 
 	result = build_f3_lithology_comparison_report(
 		F3LithologyComparisonReportConfig(
@@ -572,14 +594,19 @@ def test_f3_lithology_probe_joblib_artifacts_are_gitignored() -> None:
 
 
 def _search_root(root: Path) -> Path:
-	return (
-		root
-		/ 'artifacts'
-		/ 'seis_ssl_cluster'
-		/ 'lithology'
-		/ 'f3'
-		/ 'facies_benchmark_v1'
+	return _artifact_paths(root).lithology_dataset(
+		ExperimentKey(dataset='f3', version='facies_benchmark_v1'),
 	)
+
+
+def _comparison_output_dir(root: Path) -> Path:
+	return _artifact_paths(root).baseline_comparison_report(
+		ExperimentKey(dataset='f3', version='facies_benchmark_v1'),
+	)
+
+
+def _artifact_paths(root: Path) -> ArtifactPaths:
+	return ArtifactPaths(root / 'artifacts' / 'seis_ssl_cluster')
 
 
 def _write_probe_metrics(  # noqa: PLR0913

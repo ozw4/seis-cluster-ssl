@@ -144,6 +144,14 @@ def test_baseline_artifact_paths_are_stable() -> None:
 
 	assert paths.baseline_token_dataset(KEY) == base / 'token_dataset'
 	assert paths.baseline_probe(KEY) == base / 'probes' / 'linear_balanced_v1'
+	assert paths.baseline_comparison_report(KEY) == (
+		DEFAULT_ARTIFACT_ROOT
+		/ 'lithology'
+		/ 'f3'
+		/ 'facies_benchmark_v1'
+		/ 'reports'
+		/ 'baseline_comparison'
+	)
 
 
 def test_results_paths_are_stable() -> None:
@@ -174,6 +182,31 @@ def test_missing_required_key_raises_value_error() -> None:
 	)
 
 	with pytest.raises(ValueError, match='subset'):
+		ArtifactPaths().clustering(key)
+
+
+@pytest.mark.parametrize(
+	('field', 'value'),
+	[
+		('model_tag', 'bad/model'),
+		('subset', 'bad/subset'),
+	],
+)
+def test_invalid_experiment_key_components_raise_value_error(
+	field: str,
+	value: str,
+) -> None:
+	key = ExperimentKey(
+		dataset='f3',
+		version='facies_benchmark_v1',
+		model_tag=MODEL_TAG,
+		subset='overlap_x16',
+		embed_spec='tokens_v1',
+		cluster_spec='k4_6_8_whiten',
+	)
+	key = ExperimentKey(**{**key.__dict__, field: value})
+
+	with pytest.raises(ValueError, match=field):
 		ArtifactPaths().clustering(key)
 
 

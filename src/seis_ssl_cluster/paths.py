@@ -102,6 +102,15 @@ class ArtifactPaths:
 			self._component(key, 'viz_spec', 'cluster visualization'),
 		)
 
+	def lithology_dataset(self, key: ExperimentKey) -> Path:
+		"""Return ``lithology/<dataset>/<version>``."""
+		return self._build(
+			'lithology dataset',
+			'lithology',
+			self._component(key, 'dataset', 'lithology dataset'),
+			self._component(key, 'version', 'lithology dataset'),
+		)
+
 	def lithology_token_dataset(self, key: ExperimentKey) -> Path:
 		"""Return a lithology token dataset directory."""
 		return self._build(
@@ -171,6 +180,17 @@ class ArtifactPaths:
 			self._component(key, 'label_set', 'baseline probe'),
 			'probes',
 			self._component(key, 'probe_spec', 'baseline probe'),
+		)
+
+	def baseline_comparison_report(self, key: ExperimentKey) -> Path:
+		"""Return the baseline comparison report artifact directory."""
+		return self._build(
+			'baseline comparison report',
+			'lithology',
+			self._component(key, 'dataset', 'baseline comparison report'),
+			self._component(key, 'version', 'baseline comparison report'),
+			'reports',
+			'baseline_comparison',
 		)
 
 	def _lithology_components(

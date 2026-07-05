@@ -144,6 +144,16 @@ def test_publish_selected_results_rejects_target_outside_output_dir(
 		)
 
 
+def test_publish_selected_results_rejects_runs_output_dir(tmp_path: Path) -> None:
+	report = _write_file(tmp_path / 'artifacts' / 'summary.md', b'ok')
+
+	with pytest.raises(ValueError, match='runs/ paths'):
+		publish_selected_results(
+			items=(PublishItem(report, Path('summary.md')),),
+			output_dir=tmp_path / 'runs' / 'results',
+		)
+
+
 def test_publish_selected_results_rejects_existing_target_when_overwrite_disabled(
 	tmp_path: Path,
 ) -> None:

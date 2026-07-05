@@ -14,6 +14,7 @@ from seis_ssl_cluster.f3 import (
 	build_f3_lithology_comparison_report,
 	build_f3_lithology_report,
 )
+from seis_ssl_cluster.paths import ExperimentKey, ResultsPaths
 from tests.helpers import run_python_proc
 
 
@@ -387,14 +388,20 @@ def test_default_lithology_report_config_publishes_summary_to_results() -> None:
 	report_config = yaml.safe_load(
 		(config_dir / '06_build_lithology_report.yaml').read_text(encoding='utf-8'),
 	)
+	expected_output_dir = ResultsPaths().lithology_probe(
+		ExperimentKey(
+			dataset='f3',
+			version='facies_benchmark_v1',
+			model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+			embed_spec='overlap_x16',
+			label_set='png_slices_segy_labels_v1',
+			probe_spec='linear_balanced_v1',
+		),
+	)
 
 	assert report_config['publish'] == {
 		'enabled': True,
-		'output_dir': (
-			'results/f3/facies_benchmark_v1/lithology_probe/'
-			'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/'
-			'overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1'
-		),
+		'output_dir': expected_output_dir.as_posix(),
 		'include_figures': True,
 		'max_file_size_mb': 10,
 		'max_prediction_figures': 3,
