@@ -18,6 +18,12 @@ from seis_ssl_cluster.f3.labels import (
 	F3ClassInfo,
 	parse_class_info_payload,
 )
+from seis_ssl_cluster.f3.lithology.token_dataset import (
+	F3LithologyTokenDataset,
+	load_f3_lithology_token_dataset,
+	replace_token_features,
+	save_f3_lithology_token_dataset,
+)
 from seis_ssl_cluster.f3.splits import (
 	F3LineGeometry,
 	F3SliceSplitRecord,
@@ -905,41 +911,7 @@ def _load_token_arrays_npz(path: Path, *, label: str) -> F3TokenArrays:
 	if not path.is_file():
 		msg = f'{label} reference token dataset does not exist: {path}'
 		raise FileNotFoundError(msg)
-	with np.load(path) as data:
-		required = (
-			'features',
-			'labels',
-			'survey_id',
-			'split',
-			'slice_type',
-			'slice_index',
-			'token_xyz',
-			'voxel_center_xyz',
-			'majority_fraction',
-			'labeled_fraction',
-		)
-		missing = [name for name in required if name not in data.files]
-		if missing:
-			msg = f'{label} missing required field(s): {missing!r}'
-			raise KeyError(msg)
-		return F3TokenArrays(
-			features=np.asarray(data['features'], dtype=np.float32),
-			labels=np.asarray(data['labels'], dtype=np.int64),
-			survey_id=np.asarray(data['survey_id']),
-			split=np.asarray(data['split']),
-			slice_type=np.asarray(data['slice_type']),
-			slice_index=np.asarray(data['slice_index'], dtype=np.int64),
-			token_xyz=np.asarray(data['token_xyz'], dtype=np.int64),
-			voxel_center_xyz=np.asarray(data['voxel_center_xyz'], dtype=np.float32),
-			majority_fraction=np.asarray(
-				data['majority_fraction'],
-				dtype=np.float32,
-			),
-			labeled_fraction=np.asarray(
-				data['labeled_fraction'],
-				dtype=np.float32,
-			),
-		)
+	return _token_arrays_from_dataset(load_f3_lithology_token_dataset(path))
 
 
 def _replace_reference_features(
@@ -949,18 +921,12 @@ def _replace_reference_features(
 	label: str,
 ) -> F3TokenArrays:
 	_validate_reference_token_arrays(reference, embedding=embedding, label=label)
-	return F3TokenArrays(
-		features=_features_for_tokens(embedding.embeddings, reference.token_xyz),
-		labels=reference.labels,
-		survey_id=reference.survey_id,
-		split=reference.split,
-		slice_type=reference.slice_type,
-		slice_index=reference.slice_index,
-		token_xyz=reference.token_xyz,
-		voxel_center_xyz=reference.voxel_center_xyz,
-		majority_fraction=reference.majority_fraction,
-		labeled_fraction=reference.labeled_fraction,
+	updated = replace_token_features(
+		_token_dataset_from_arrays(reference),
+		_features_for_tokens(embedding.embeddings, reference.token_xyz),
+		feature_source={},
 	)
+	return _token_arrays_from_dataset(updated)
 
 
 def _validate_reference_token_arrays(
@@ -1135,8 +1101,11 @@ def _write_reference_split_manifest(config: F3LithologyTokenDatasetConfig) -> No
 
 
 def _save_npz(path: Path, arrays: F3TokenArrays) -> None:
-	np.savez_compressed(
-		path,
+	save_f3_lithology_token_dataset(_token_dataset_from_arrays(arrays), path)
+
+
+def _token_dataset_from_arrays(arrays: F3TokenArrays) -> F3LithologyTokenDataset:
+	return F3LithologyTokenDataset(
 		features=arrays.features,
 		labels=arrays.labels,
 		survey_id=arrays.survey_id,
@@ -1147,6 +1116,21 @@ def _save_npz(path: Path, arrays: F3TokenArrays) -> None:
 		voxel_center_xyz=arrays.voxel_center_xyz,
 		majority_fraction=arrays.majority_fraction,
 		labeled_fraction=arrays.labeled_fraction,
+	)
+
+
+def _token_arrays_from_dataset(dataset: F3LithologyTokenDataset) -> F3TokenArrays:
+	return F3TokenArrays(
+		features=np.asarray(dataset.features, dtype=np.float32),
+		labels=np.asarray(dataset.labels, dtype=np.int64),
+		survey_id=np.asarray(dataset.survey_id),
+		split=np.asarray(dataset.split),
+		slice_type=np.asarray(dataset.slice_type),
+		slice_index=np.asarray(dataset.slice_index, dtype=np.int64),
+		token_xyz=np.asarray(dataset.token_xyz, dtype=np.int64),
+		voxel_center_xyz=np.asarray(dataset.voxel_center_xyz, dtype=np.float32),
+		majority_fraction=np.asarray(dataset.majority_fraction, dtype=np.float32),
+		labeled_fraction=np.asarray(dataset.labeled_fraction, dtype=np.float32),
 	)
 
 
