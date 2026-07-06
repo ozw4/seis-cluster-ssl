@@ -194,7 +194,7 @@ class F3LithologyProbeConfig:
 
 	inputs: F3LithologyProbeInputs
 	outputs: F3LithologyProbeOutputs
-	classes: tuple[F3ClassInfo, ...]
+	classes: tuple[F3ClassInfo, ...] | None
 	probe: F3LithologyProbeSettings
 	dataset: Mapping[str, object]
 	model: Mapping[str, object]
@@ -317,16 +317,17 @@ def train_and_evaluate_f3_lithology_probe(
 	config: F3LithologyProbeConfig,
 ) -> F3LithologyProbeResult:
 	"""Train a linear or MLP lithology probe and write validation artifacts."""
+	classes = _required_runtime_classes(config.classes)
 	_validate_no_encoder_finetuning(config.model)
 	train = load_token_dataset(config.inputs.train_tokens, label='train_tokens')
 	validation = load_token_dataset(
 		config.inputs.validation_tokens,
 		label='validation_tokens',
 	)
-	_validate_label_classes(train.labels, config.classes, label='train_tokens.labels')
+	_validate_label_classes(train.labels, classes, label='train_tokens.labels')
 	_validate_label_classes(
 		validation.labels,
-		config.classes,
+		classes,
 		label='validation_tokens.labels',
 	)
 	_validate_disjoint_token_xyz(train, validation)
@@ -350,7 +351,7 @@ def train_and_evaluate_f3_lithology_probe(
 			settings=config.probe,
 		)
 	predicted = np.asarray(probe.predict(validation_features), dtype=np.int64)
-	metrics = compute_lithology_metrics(validation.labels, predicted, config.classes)
+	metrics = compute_lithology_metrics(validation.labels, predicted, classes)
 	_write_probe_outputs(
 		config,
 		scaler=scaler,
@@ -374,6 +375,18 @@ def train_and_evaluate_f3_lithology_probe(
 		validation_token_count=validation.count,
 		metrics=metrics,
 	)
+
+
+def _required_runtime_classes(
+	classes: tuple[F3ClassInfo, ...] | None,
+) -> tuple[F3ClassInfo, ...]:
+	if classes is None:
+		msg = 'F3 lithology probe runtime requires class_info to be loaded'
+		raise ValueError(msg)
+	if not classes:
+		msg = 'classes must contain at least one F3 class'
+		raise ValueError(msg)
+	return classes
 
 
 def load_token_dataset(path: str | Path, *, label: str) -> _TokenDataset:
@@ -628,6 +641,7 @@ def _write_probe_outputs(  # noqa: PLR0913
 ) -> None:
 	import joblib  # noqa: PLC0415
 
+	classes = _required_runtime_classes(config.classes)
 	outputs = config.outputs
 	outputs.output_dir.mkdir(parents=True, exist_ok=True)
 	outputs.figures_dir.mkdir(parents=True, exist_ok=True)
@@ -639,15 +653,15 @@ def _write_probe_outputs(  # noqa: PLR0913
 	if feature_source is not None:
 		metrics_payload['feature_source'] = feature_source
 	_write_json(outputs.metrics_json, metrics_payload)
-	write_metrics_csv(outputs.metrics_csv, metrics, config.classes)
-	write_confusion_matrix_csv(outputs.confusion_matrix_csv, metrics, config.classes)
+	write_metrics_csv(outputs.metrics_csv, metrics, classes)
+	write_confusion_matrix_csv(outputs.confusion_matrix_csv, metrics, classes)
 	outputs.classification_report_md.write_text(
-		render_classification_report_markdown(metrics, config.classes),
+		render_classification_report_markdown(metrics, classes),
 		encoding='utf-8',
 	)
 	_write_probe_figures(
 		metrics,
-		config.classes,
+		classes,
 		confusion_matrix_png=outputs.confusion_matrix_png,
 		per_class_f1_png=outputs.per_class_f1_png,
 		dpi=config.figure_dpi,
@@ -672,6 +686,7 @@ def _resolved_config_payload(
 	validation: _TokenDataset,
 	token_metadata: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
+	classes = _required_runtime_classes(config.classes)
 	payload: dict[str, object] = {
 		'artifact_type': 'f3_lithology_probe',
 		'dataset': dict(config.dataset),
@@ -710,7 +725,7 @@ def _resolved_config_payload(
 			'confusion_matrix_png': str(config.outputs.confusion_matrix_png),
 			'per_class_f1_png': str(config.outputs.per_class_f1_png),
 		},
-		'classes': [class_info.to_dict() for class_info in config.classes],
+		'classes': [class_info.to_dict() for class_info in classes],
 		'label_source_of_truth': 'segy_label_volume',
 		'png_label_role': 'train_validation_slice_selection_and_visual_qc',
 		'encoder_finetuning': False,

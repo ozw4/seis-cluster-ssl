@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import joblib
@@ -158,6 +158,19 @@ def test_lithology_metrics_compute_iou_and_confusion_matrix() -> None:
 def test_invalid_probe_type_raises() -> None:
 	with pytest.raises(ValueError, match='probe type'):
 		F3LithologyProbeSettings(spec='bad', probe_type='svm')
+
+
+def test_probe_training_requires_loaded_classes(tmp_path: Path) -> None:
+	config, _validation_features = _write_probe_fixture(
+		tmp_path,
+		F3LithologyProbeSettings(
+			spec='linear_missing_classes_test',
+			probe_type='logistic_regression',
+		),
+	)
+
+	with pytest.raises(ValueError, match='probe runtime requires class_info'):
+		train_and_evaluate_f3_lithology_probe(replace(config, classes=None))
 
 
 def _write_probe_fixture(

@@ -111,7 +111,7 @@ class F3LithologyVisualizationConfig:
 
 	inputs: F3LithologyVisualizationInputs
 	outputs: F3LithologyVisualizationOutputs
-	classes: tuple[F3ClassInfo, ...]
+	classes: tuple[F3ClassInfo, ...] | None
 	dataset: Mapping[str, object]
 	model: Mapping[str, object]
 	labels: Mapping[str, object]
@@ -180,10 +180,7 @@ def visualize_f3_lithology_predictions(
 	config: F3LithologyVisualizationConfig,
 ) -> F3LithologyVisualizationResult:
 	"""Write publication-oriented slice figures for F3 lithology predictions."""
-	classes = tuple(config.classes)
-	if not classes:
-		msg = 'classes must contain at least one F3 class'
-		raise ValueError(msg)
+	classes = _required_runtime_classes(config.classes)
 	seismic = np.load(config.inputs.seismic_volume, mmap_mode='r')
 	labels = np.load(config.inputs.label_volume, mmap_mode='r')
 	predictions = np.load(config.inputs.token_predictions, mmap_mode='r')
@@ -293,6 +290,18 @@ def read_f3_lithology_visualization_classes(
 ) -> tuple[F3ClassInfo, ...]:
 	"""Read class metadata for visualization configs."""
 	return read_f3_lithology_class_info(path)
+
+
+def _required_runtime_classes(
+	classes: tuple[F3ClassInfo, ...] | None,
+) -> tuple[F3ClassInfo, ...]:
+	if classes is None:
+		msg = 'F3 lithology visualization runtime requires class_info to be loaded'
+		raise ValueError(msg)
+	if not classes:
+		msg = 'classes must contain at least one F3 class'
+		raise ValueError(msg)
+	return classes
 
 
 def _validation_records(path: Path) -> tuple[F3SliceSplitRecord, ...]:
@@ -593,6 +602,7 @@ def _sidecar_payload(
 	group: str,
 	token_metrics: Mapping[str, object] | None,
 ) -> dict[str, object]:
+	classes = _required_runtime_classes(config.classes)
 	return {
 		'figure_type': 'f3_lithology_prediction_slice',
 		'output_path': str(path),
@@ -619,7 +629,7 @@ def _sidecar_payload(
 				'class_name': class_info.class_name,
 				'rgb': list(class_info.rgb),
 			}
-			for class_info in config.classes
+			for class_info in classes
 		],
 		'error_legend': {
 			'correct_rgb': list(_ERROR_CORRECT_RGB),
@@ -627,7 +637,7 @@ def _sidecar_payload(
 			'invalid_rgb': list(_ERROR_INVALID_RGB),
 		},
 		'token_metrics': None if token_metrics is None else dict(token_metrics),
-		'voxel_projection_metrics': _voxel_projection_metrics(figure, config.classes),
+		'voxel_projection_metrics': _voxel_projection_metrics(figure, classes),
 	}
 
 

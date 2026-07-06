@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -128,3 +129,52 @@ def test_visualize_f3_lithology_predictions_writes_png_sidecars_and_metadata(
 	assert selected_sidecar['voxel_projection_metrics']['mean_iou'] is None
 	assert metadata['artifact_type'] == 'f3_lithology_prediction_visualizations'
 	assert metadata['figures'][0]['group'] == 'validation'
+
+
+def test_visualize_f3_lithology_predictions_requires_loaded_classes(
+	tmp_path: Path,
+) -> None:
+	prediction_config = write_prediction_fixture(tmp_path)
+	visualization_config = F3LithologyVisualizationConfig(
+		inputs=F3LithologyVisualizationInputs(
+			seismic_volume=prediction_config.inputs.label_volume.with_name(
+				'f3_seismic.npy',
+			),
+			label_volume=prediction_config.inputs.label_volume,
+			class_info=prediction_config.inputs.class_info,
+			png_label_inventory=prediction_config.inputs.png_label_inventory,
+			segy_geometry_json=prediction_config.inputs.segy_geometry_json,
+			token_predictions=prediction_config.outputs.token_predictions,
+			probability_volume=prediction_config.outputs.probability_volume,
+			prediction_metadata_json=prediction_config.outputs.metadata_json,
+			validation_slice_metrics_csv=(
+				prediction_config.outputs.validation_slice_metrics_csv
+			),
+		),
+		outputs=F3LithologyVisualizationOutputs(
+			output_dir=prediction_config.outputs.output_dir.parent / 'visualizations',
+			metadata_json=(
+				prediction_config.outputs.output_dir.parent
+				/ 'visualizations'
+				/ 'metadata.json'
+			),
+			selected_slices_dir=(
+				prediction_config.outputs.output_dir.parent
+				/ 'visualizations'
+				/ 'selected_slices'
+			),
+		),
+		classes=prediction_config.classes,
+		dataset=prediction_config.dataset,
+		model=prediction_config.model,
+		labels=prediction_config.labels,
+		lithology=prediction_config.lithology,
+		probe=prediction_config.probe,
+		predictions={'input_dir': str(prediction_config.outputs.output_dir)},
+		selected_slices={'inline': (), 'crossline': (), 'z': ()},
+	)
+
+	with pytest.raises(ValueError, match='visualization runtime requires class_info'):
+		visualize_f3_lithology_predictions(
+			replace(visualization_config, classes=None),
+		)

@@ -214,21 +214,27 @@ def test_active_f3_random_encoder_configs_resolve(config_path: Path) -> None:
 	],
 )
 def test_active_f3_lithology_probe_configs_resolve(config_path: Path) -> None:
-	f3_lithology_probe_config_from_mapping(load_config(config_path))
+	f3_lithology_probe_config_from_mapping(load_config(config_path), load_classes=False)
 
 
 @pytest.mark.parametrize('config_path', F3_LITHOLOGY_PREDICTION_CONFIGS)
 def test_active_f3_lithology_prediction_configs_resolve(
 	config_path: Path,
 ) -> None:
-	f3_lithology_prediction_config_from_mapping(load_config(config_path))
+	f3_lithology_prediction_config_from_mapping(
+		load_config(config_path),
+		load_classes=False,
+	)
 
 
 @pytest.mark.parametrize('config_path', F3_LITHOLOGY_VISUALIZATION_CONFIGS)
 def test_active_f3_lithology_visualization_configs_resolve(
 	config_path: Path,
 ) -> None:
-	f3_lithology_visualization_config_from_mapping(load_config(config_path))
+	f3_lithology_visualization_config_from_mapping(
+		load_config(config_path),
+		load_classes=False,
+	)
 
 
 @pytest.mark.parametrize(
