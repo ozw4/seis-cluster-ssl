@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from argparse import ArgumentParser
 from pathlib import Path
 
+from seis_ssl_cluster.cli import (
+	add_device_argument,
+	add_path_argument,
+	build_config_parser,
+	load_config_for_cli,
+	parse_config_path,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_mae_training_config,
@@ -22,51 +29,44 @@ DEFAULT_CONFIG = (
 
 def main() -> None:
 	"""Run amplitude-only MAE pretraining or print a dry-run summary."""
-	parser = ArgumentParser(description='Train an amplitude-only MAE model.')
-	parser.add_argument(
-		'--config',
-		type=Path,
-		default=DEFAULT_CONFIG,
-		help='Path to a YAML configuration file.',
+	parser = build_config_parser(
+		'Train an amplitude-only MAE model.',
+		default_config=DEFAULT_CONFIG,
 	)
-	parser.add_argument(
-		'--dry-run',
-		action='store_true',
-		help='Validate the config and print a run summary without executing.',
-	)
-	parser.add_argument(
-		'--device',
-		choices=('auto', 'cpu', 'cuda'),
-		help='Training device override.',
-	)
+	add_device_argument(parser, help_text='Training device override.')
 	parser.add_argument(
 		'--max-steps',
 		type=int,
 		help='Stop after N optimizer steps for smoke runs.',
 	)
-	parser.add_argument(
+	add_path_argument(
+		parser,
 		'--output-root',
-		type=Path,
-		help=(
+		help_text=(
 			'Override paths.output_root for checkpoints and run snapshots; '
 			'must be absolute and under paths.artifact_root.'
 		),
 	)
-	parser.add_argument(
+	add_path_argument(
+		parser,
 		'--resume',
-		type=Path,
-		help='Resume amplitude MAE pretraining from a checkpoint.',
+		help_text='Resume amplitude MAE pretraining from a checkpoint.',
 	)
 	args = parser.parse_args()
 
-	raw_config = load_config(args.config)
+	config_path = parse_config_path(args)
+	raw_config = load_config_for_cli(config_path, loader=load_config)
 	_apply_cli_overrides(
 		raw_config,
 		device=args.device,
 		max_steps=args.max_steps,
 		output_root=args.output_root,
 	)
-	config = resolve_mae_training_config(raw_config)
+	config = resolve_config_for_cli(
+		raw_config,
+		resolver=resolve_mae_training_config,
+		config_path=config_path,
+	)
 	if args.resume is not None and not args.resume.is_file():
 		raise FileNotFoundError(f'resume checkpoint does not exist: {args.resume}')
 	if args.dry_run:

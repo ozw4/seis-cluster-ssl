@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
-from argparse import ArgumentParser
 from pathlib import Path
 
+from seis_ssl_cluster.cli import (
+	add_device_argument,
+	add_skip_existing_argument,
+	build_config_parser,
+	load_config_for_cli,
+	parse_config_path,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_embedding_extraction_config,
@@ -22,31 +29,24 @@ DEFAULT_CONFIG = (
 
 def main() -> None:
 	"""Run amplitude-only embedding extraction or print a dry-run summary."""
-	parser = ArgumentParser(description='Extract amplitude-only embeddings.')
-	parser.add_argument(
-		'--config',
-		type=Path,
-		default=DEFAULT_CONFIG,
-		help='Path to a YAML configuration file.',
+	parser = build_config_parser(
+		'Extract amplitude-only embeddings.',
+		default_config=DEFAULT_CONFIG,
 	)
-	parser.add_argument(
-		'--dry-run',
-		action='store_true',
-		help='Validate the config and print a run summary without executing.',
-	)
-	parser.add_argument(
-		'--device',
-		choices=('auto', 'cpu', 'cuda'),
-		help='Embedding extraction device override.',
-	)
-	parser.add_argument(
-		'--skip-existing',
-		action='store_true',
-		help='Skip survey outputs whose metadata already matches this run.',
+	add_device_argument(parser, help_text='Embedding extraction device override.')
+	add_skip_existing_argument(
+		parser,
+		help_text='Skip survey outputs whose metadata already matches this run.',
 	)
 	args = parser.parse_args()
 
-	config = resolve_embedding_extraction_config(load_config(args.config))
+	config_path = parse_config_path(args)
+	raw_config = load_config_for_cli(config_path, loader=load_config)
+	config = resolve_config_for_cli(
+		raw_config,
+		resolver=resolve_embedding_extraction_config,
+		config_path=config_path,
+	)
 	if args.dry_run:
 		print_config_summary(config, device_override=args.device)
 		print('execution: dry-run; extraction skipped')
