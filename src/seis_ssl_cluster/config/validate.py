@@ -7,17 +7,19 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TypeAlias, TypeVar
 
+from seis_ssl_cluster.config.artifact_paths import _validate_artifact_output_path
+from seis_ssl_cluster.config.base import (
+	_reject_legacy_attribute_config,
+	_reject_stage_key,
+	_resolve_base,
+	_ResolvedPaths,
+)
 from seis_ssl_cluster.config.common import (
 	_is_int,
 	_is_number,
-	_reject_legacy_attribute_config,
-	_reject_stage_key,
 	_required_mapping,
-	_resolve_base,
-	_ResolvedPaths,
 	_validate_absolute_path,
 	_validate_allowed_keys,
-	_validate_artifact_output_path,
 	_validate_bool,
 	_validate_mapping,
 	_validate_non_empty_path,

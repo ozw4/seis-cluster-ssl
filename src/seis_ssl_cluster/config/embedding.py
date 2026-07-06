@@ -5,15 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TypeAlias, TypeVar
 
+from seis_ssl_cluster.config.artifact_paths import (
+	_validate_artifact_output_path,
+	_validate_nopims_checkpoint_path,
+	_validate_nopims_embedding_path,
+)
+from seis_ssl_cluster.config.base import _resolve_base
 from seis_ssl_cluster.config.common import (
 	_required_mapping,
-	_resolve_base,
-	_validate_artifact_output_path,
 	_validate_fraction,
 	_validate_non_empty_path,
 	_validate_nonnegative_int_triplet,
-	_validate_nopims_checkpoint_path,
-	_validate_nopims_embedding_path,
 	_validate_path,
 	_validate_positive_int,
 	_validate_positive_int_triplet,

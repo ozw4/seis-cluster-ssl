@@ -62,14 +62,18 @@ Fixed contract and routing constants:
   `_F3_FACIES_INSPECTION_PATH_KEY_SUFFIXES`
 - Artifact path constants: `_NOPIMS_DATASET`, `_NOPIMS_PRETRAIN_VERSION`
 
-Common private helpers:
+Stage-aware base helpers:
 
 - `_resolve_base`
 - `_ResolvedPaths`
-- `_validate_mapping`
 - `_reject_stage_key`
 - `_validate_top_level_sections`
 - `_reject_legacy_attribute_config`
+- `_validate_paths`
+
+Common private helpers:
+
+- `_validate_mapping`
 - `_validate_allowed_keys`
 - `_validate_required_keys`
 - `_validate_required_key`
@@ -89,17 +93,16 @@ Common private helpers:
 
 Path validation helpers:
 
-- `_validate_paths`
 - `_validate_absolute_path`
 - `_validate_non_empty_path`
 - `_validate_path`
-- `_validate_artifact_output_path`
 - `_validate_optional_output_path_under_root`
 - `_validate_path_under_root`
 - `_is_relative_to`
 
 Artifact path validation helpers:
 
+- `_validate_artifact_output_path`
 - `_validate_nopims_checkpoint_path`
 - `_validate_nopims_pretraining_path`
 - `_validate_nopims_embedding_path`
@@ -159,8 +162,9 @@ Use names that match existing stage concepts and keep movement incremental.
 
 | Target module | Move from `validate.py` |
 | --- | --- |
-| `src/seis_ssl_cluster/config/common.py` | `Config`, `_T`, `_Resolver`, `_resolve_base`, `_ResolvedPaths`, top-level section validation, legacy-key rejection, mapping/key/default helpers, primitive scalar/list validators, and generic normalization validator if shared by multiple stages |
-| `src/seis_ssl_cluster/config/artifact_paths.py` | NOPIMS artifact constants and all `_validate_nopims_*`, `_artifact_relative_path`, `_is_nopims_artifact_path`, `_validate_artifact_path_matches`, `_raise_nopims_artifact_path_error`, plus generic path-root helpers if they remain path-only |
+| `src/seis_ssl_cluster/config/common.py` | Mapping/key/default helpers, primitive scalar/list validators, generic path parsing/root helpers, and generic normalization validator if shared by multiple stages |
+| `src/seis_ssl_cluster/config/base.py` | `Config`, `_resolve_base`, `_ResolvedPaths`, top-level section validation, legacy-key rejection, and stage path-key validation |
+| `src/seis_ssl_cluster/config/artifact_paths.py` | `_validate_artifact_output_path`, NOPIMS artifact constants and all `_validate_nopims_*`, `_artifact_relative_path`, `_is_nopims_artifact_path`, `_validate_artifact_path_matches`, `_raise_nopims_artifact_path_error`, plus artifact-registry path helpers |
 | `src/seis_ssl_cluster/config/manifest.py` | `resolve_manifest_build_config` and manifest-build-only checks |
 | `src/seis_ssl_cluster/config/normalization.py` | `resolve_normalization_stats_config`, `resolve_normalization_qc_config`, `_validate_normalization` if it is not kept in `common.py` |
 | `src/seis_ssl_cluster/config/pretraining.py` | `resolve_mae_training_config`, fixed raw/default contract checks, model/masking/train/loss/zero-mask/amplitude-AGC validation, MAE debug visualization helpers |
@@ -198,13 +202,16 @@ small dispatcher module and be re-exported from `validate.py`. In either case,
 
 To avoid circular imports:
 
-- `common.py` contains only type aliases, primitive validators, common mapping
-  helpers, common default merging, top-level validation helpers, and shared
-  config contracts. It must not import stage modules.
+- `common.py` contains only primitive validators, common mapping helpers,
+  common default merging, and generic path parsing/root helpers. It must not
+  import stage modules, stage contract constants, or `ArtifactPaths`.
+- `base.py` contains stage-aware top-level routing helpers and may import
+  `config.schema` plus primitive helpers from `common.py`. It must not import
+  stage modules.
 - `artifact_paths.py` contains path and `ArtifactPaths` contract validation. It
   may import `seis_ssl_cluster.paths` and common primitive helpers, but it must
   not import stage modules.
-- Stage modules may import `common.py`, `artifact_paths.py`,
+- Stage modules may import `common.py`, `base.py`, `artifact_paths.py`,
   `config.schema`, and `seis_ssl_cluster.paths`.
 - Stage modules must not import `validate.py`.
 - `validate.py` imports public symbols from stage modules and re-exports them
