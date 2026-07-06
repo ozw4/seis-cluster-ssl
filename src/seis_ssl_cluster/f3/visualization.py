@@ -10,13 +10,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from seis_ssl_cluster.f3.io.labels import read_png_rgb, rgb_to_class_id_map
 from seis_ssl_cluster.f3.labels import VALID_LABEL_SPLITS, F3ClassInfo
-from seis_ssl_cluster.f3.png_labels import (
-	F3PngLabelInspection,
-	PngLabelFileInspection,
-	read_png_rgb,
-	rgb_to_class_id_map,
-)
 from seis_ssl_cluster.f3.segy import (
 	F3SegyGeometry,
 	F3SegyInspection,
@@ -27,6 +22,10 @@ if TYPE_CHECKING:
 	from collections.abc import Mapping, Sequence
 
 	from numpy.typing import NDArray
+	from seis_ssl_cluster.f3.png_labels import (
+		F3PngLabelInspection,
+		PngLabelFileInspection,
+	)
 
 ORTHOGONAL_VIEWS = ('xy', 'xz', 'yz')
 
