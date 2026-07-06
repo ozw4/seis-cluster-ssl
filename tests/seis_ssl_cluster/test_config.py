@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 from copy import deepcopy
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -82,6 +83,24 @@ F3_INSPECTION_CONFIGS = (
 		STAGE_F3_INSPECTION_REPORT,
 	),
 )
+
+
+def test_validate_module_exports_public_resolvers() -> None:
+	validate_module = importlib.import_module('seis_ssl_cluster.config.validate')
+	expected = {
+		'resolve_cluster_visualization_config': resolve_cluster_visualization_config,
+		'resolve_clustering_config': resolve_clustering_config,
+		'resolve_embedding_extraction_config': resolve_embedding_extraction_config,
+		'resolve_f3_facies_inspection_config': resolve_f3_facies_inspection_config,
+		'resolve_mae_training_config': resolve_mae_training_config,
+		'resolve_manifest_build_config': resolve_manifest_build_config,
+		'resolve_normalization_qc_config': resolve_normalization_qc_config,
+		'resolve_normalization_stats_config': resolve_normalization_stats_config,
+	}
+
+	for name, resolver in expected.items():
+		assert getattr(validate_module, name) is resolver
+	assert set(expected) <= set(validate_module.__all__)
 DEFAULT_CONFIG_TOP_LEVELS = {
 	CONFIG_DIR / 'build_nopims_manifests.yaml': {'paths', 'manifest'},
 	CONFIG_DIR / 'prepare_nopims_normalization_stats.yaml': {
