@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser
-from pathlib import Path
 
+from seis_ssl_cluster.cli import (
+	add_path_argument,
+	add_store_true_argument,
+)
 from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT
 from seis_ssl_cluster.validation import (
 	ArtifactPathFinding,
@@ -19,23 +22,23 @@ def main() -> int:
 	parser = ArgumentParser(
 		description='Validate artifact path strings in configs, docs, and results.',
 	)
-	parser.add_argument(
+	add_path_argument(
+		parser,
 		'--root',
-		type=Path,
 		default=DEFAULT_ARTIFACT_ROOT,
-		help='Artifact root that path strings must follow.',
+		help_text='Artifact root that path strings must follow.',
 	)
-	parser.add_argument(
+	add_path_argument(
+		parser,
 		'--scan',
-		type=Path,
 		nargs='+',
 		default=list(DEFAULT_SCAN_PATHS),
-		help='Files or directories to scan.',
+		help_text='Files or directories to scan.',
 	)
-	parser.add_argument(
+	add_store_true_argument(
+		parser,
 		'--fail-on-runs',
-		action='store_true',
-		help='Treat runs/ artifact paths as errors.',
+		help_text='Treat runs/ artifact paths as errors.',
 	)
 	parser.add_argument(
 		'--allow-pattern',
@@ -43,10 +46,10 @@ def main() -> int:
 		default=[],
 		help='fnmatch pattern for files to skip. May be passed multiple times.',
 	)
-	parser.add_argument(
+	add_store_true_argument(
+		parser,
 		'--allow-test-fixtures',
-		action='store_true',
-		help='Skip test files that intentionally contain rejected path examples.',
+		help_text='Skip test files that intentionally contain rejected path examples.',
 	)
 	args = parser.parse_args()
 

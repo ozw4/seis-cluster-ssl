@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 if TYPE_CHECKING:
-	import argparse
 	from collections.abc import Callable, Mapping
 
 T = TypeVar('T')
@@ -17,6 +17,7 @@ def add_config_argument(
 	*,
 	default: str | Path | None = None,
 	required: bool | None = None,
+	help_text: str = 'Path to a YAML configuration file.',
 ) -> None:
 	"""Add the standard YAML config path argument."""
 	config_required = default is None if required is None else required
@@ -25,7 +26,7 @@ def add_config_argument(
 		type=Path,
 		default=Path(default) if default is not None else None,
 		required=config_required,
-		help='Path to a YAML configuration file.',
+		help=help_text,
 	)
 
 
@@ -74,6 +75,28 @@ def print_cli_summary(title: str, items: Mapping[str, object]) -> None:
 		print(f'{key}: {_format_cli_value(value)}')
 
 
+def build_config_parser(
+	description: str,
+	*,
+	default_config: str | Path | None = None,
+	config_required: bool | None = None,
+	config_help: str = 'Path to a YAML configuration file.',
+	dry_run_help: str = (
+		'Validate the config and print a run summary without executing.'
+	),
+) -> argparse.ArgumentParser:
+	"""Build an ArgumentParser with the common config and dry-run flags."""
+	parser = argparse.ArgumentParser(description=description)
+	add_config_argument(
+		parser,
+		default=default_config,
+		required=config_required,
+		help_text=config_help,
+	)
+	add_dry_run_argument(parser, help_text=dry_run_help)
+	return parser
+
+
 def add_device_argument(parser: argparse.ArgumentParser) -> None:
 	"""Add the common device override flag."""
 	parser.add_argument(
@@ -83,31 +106,93 @@ def add_device_argument(parser: argparse.ArgumentParser) -> None:
 	)
 
 
-def add_dry_run_argument(parser: argparse.ArgumentParser) -> None:
+def add_dry_run_argument(
+	parser: argparse.ArgumentParser,
+	*,
+	help_text: str = (
+		'Validate the config and print a run summary without executing.'
+	),
+) -> None:
 	"""Add the common dry-run flag."""
 	parser.add_argument(
 		'--dry-run',
 		action='store_true',
-		help='Validate the config and print a run summary without executing.',
+		help=help_text,
 	)
 
 
-def add_skip_existing_argument(parser: argparse.ArgumentParser) -> None:
+def add_skip_existing_argument(
+	parser: argparse.ArgumentParser,
+	*,
+	help_text: str = 'Skip outputs that already exist.',
+) -> None:
 	"""Add the common skip-existing flag."""
 	parser.add_argument(
 		'--skip-existing',
 		action='store_true',
-		help='Skip outputs that already exist.',
+		help=help_text,
 	)
 
 
-def add_overwrite_argument(parser: argparse.ArgumentParser) -> None:
+def add_overwrite_argument(
+	parser: argparse.ArgumentParser,
+	*,
+	help_text: str = 'Replace existing outputs.',
+) -> None:
 	"""Add the common overwrite flag."""
 	parser.add_argument(
 		'--overwrite',
 		action='store_true',
-		help='Replace existing outputs.',
+		help=help_text,
 	)
+
+
+def add_path_argument(
+	parser: argparse.ArgumentParser,
+	name: str,
+	*,
+	default: object = None,
+	nargs: str | None = None,
+	help_text: str,
+) -> None:
+	"""Add a Path-valued argument while preserving the caller's option name."""
+	resolved_default = (
+		Path(default) if isinstance(default, str | Path) else default
+	)
+	parser.add_argument(
+		name,
+		type=Path,
+		default=resolved_default,
+		nargs=nargs,
+		help=help_text,
+	)
+
+
+def add_append_path_argument(
+	parser: argparse.ArgumentParser,
+	name: str,
+	*,
+	default: list[Path] | None = None,
+	help_text: str,
+) -> None:
+	"""Add a repeatable Path-valued option."""
+	parser.add_argument(
+		name,
+		type=Path,
+		action='append',
+		default=[] if default is None else default,
+		help=help_text,
+	)
+
+
+def add_store_true_argument(
+	parser: argparse.ArgumentParser,
+	name: str,
+	*,
+	help_text: str,
+) -> None:
+	"""Add a store-true boolean option while preserving the caller's option name."""
+	parser.add_argument(name, action='store_true', help=help_text)
 
 
 def _format_cli_value(value: object) -> str:
@@ -121,11 +206,15 @@ def _format_cli_value(value: object) -> str:
 
 
 __all__ = [
+	'add_append_path_argument',
 	'add_config_argument',
 	'add_device_argument',
 	'add_dry_run_argument',
 	'add_overwrite_argument',
+	'add_path_argument',
 	'add_skip_existing_argument',
+	'add_store_true_argument',
+	'build_config_parser',
 	'load_config_for_cli',
 	'parse_config_path',
 	'print_cli_summary',

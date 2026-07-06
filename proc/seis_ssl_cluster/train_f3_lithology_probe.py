@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from argparse import ArgumentParser
 from collections.abc import Mapping
 from pathlib import Path
 
+from seis_ssl_cluster.cli import (
+	build_config_parser,
+	load_config_for_cli,
+	parse_config_path,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.f3_lithology import (
 	f3_lithology_probe_config_from_mapping,
@@ -31,22 +36,20 @@ DEFAULT_CONFIG = (
 
 def main() -> None:
 	"""Train an F3 lithology probe or print a dry-run summary."""
-	parser = ArgumentParser(description='Train an F3 token-level lithology probe.')
-	parser.add_argument(
-		'--config',
-		type=Path,
-		default=DEFAULT_CONFIG,
-		help='Path to a YAML configuration file.',
-	)
-	parser.add_argument(
-		'--dry-run',
-		action='store_true',
-		help='Validate the config and print a run summary without training.',
+	parser = build_config_parser(
+		'Train an F3 token-level lithology probe.',
+		default_config=DEFAULT_CONFIG,
+		dry_run_help='Validate the config and print a run summary without training.',
 	)
 	args = parser.parse_args()
 
-	raw_config = load_config(args.config)
-	config = f3_lithology_probe_config_from_mapping(raw_config)
+	config_path = parse_config_path(args)
+	raw_config = load_config_for_cli(config_path, loader=load_config)
+	config = resolve_config_for_cli(
+		raw_config,
+		resolver=f3_lithology_probe_config_from_mapping,
+		config_path=config_path,
+	)
 	if args.dry_run:
 		_print_summary(config)
 		print('execution: dry-run; F3 lithology probe training skipped')

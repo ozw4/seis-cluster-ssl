@@ -6,10 +6,14 @@ from pathlib import Path
 import pytest
 
 from seis_ssl_cluster.cli import (
+	add_append_path_argument,
 	add_config_argument,
 	add_device_argument,
 	add_overwrite_argument,
+	add_path_argument,
 	add_skip_existing_argument,
+	add_store_true_argument,
+	build_config_parser,
 	load_config_for_cli,
 	parse_config_path,
 	print_cli_summary,
@@ -81,6 +85,71 @@ def test_common_flag_helpers_add_existing_flag_names() -> None:
 	assert args.device == 'cpu'
 	assert args.skip_existing is True
 	assert args.overwrite is True
+
+
+def test_build_config_parser_preserves_default_config_and_dry_run() -> None:
+	parser = build_config_parser(
+		'Example command.',
+		default_config=Path('default.yaml'),
+		dry_run_help='Validate without writing outputs.',
+	)
+
+	args = parser.parse_args(['--dry-run'])
+
+	assert args.config == Path('default.yaml')
+	assert args.dry_run is True
+
+
+def test_build_config_parser_can_require_config() -> None:
+	parser = build_config_parser(
+		'Example command.',
+		config_help='Path to a required YAML configuration file.',
+	)
+
+	with pytest.raises(SystemExit):
+		parser.parse_args([])
+
+	args = parser.parse_args(['--config', 'required.yaml'])
+	assert args.config == Path('required.yaml')
+
+
+def test_build_config_parser_can_leave_config_optional() -> None:
+	parser = build_config_parser(
+		'Example command.',
+		default_config=None,
+		config_required=False,
+	)
+
+	args = parser.parse_args([])
+
+	assert args.config is None
+
+
+def test_generic_argument_helpers_preserve_option_shapes() -> None:
+	parser = argparse.ArgumentParser()
+	add_path_argument(parser, '--root', default=Path('results'), help_text='Root.')
+	add_append_path_argument(
+		parser,
+		'--required-file',
+		help_text='Required file.',
+	)
+	add_store_true_argument(parser, '--fail-on-runs', help_text='Fail on runs.')
+
+	args = parser.parse_args(
+		[
+			'--root',
+			'other-results',
+			'--required-file',
+			'a.json',
+			'--required-file',
+			'b.md',
+			'--fail-on-runs',
+		],
+	)
+
+	assert args.root == Path('other-results')
+	assert args.required_file == [Path('a.json'), Path('b.md')]
+	assert args.fail_on_runs is True
 
 
 def test_resolve_config_for_cli_returns_resolved_value() -> None:

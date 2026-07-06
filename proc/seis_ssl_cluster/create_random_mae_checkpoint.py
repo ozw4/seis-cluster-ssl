@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from argparse import ArgumentParser
-from pathlib import Path
-
+from seis_ssl_cluster.cli import (
+	build_config_parser,
+	load_config_for_cli,
+	parse_config_path,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.training.random_checkpoint import (
 	create_random_mae_checkpoint_from_config,
@@ -14,24 +17,20 @@ from seis_ssl_cluster.training.random_checkpoint import (
 
 def main() -> None:
 	"""Create a random MAE checkpoint or print a dry-run summary."""
-	parser = ArgumentParser(
-		description='Create a random-initialized MAE checkpoint baseline.',
-	)
-	parser.add_argument(
-		'--config',
-		type=Path,
-		required=True,
-		help='Path to a random checkpoint YAML configuration file.',
-	)
-	parser.add_argument(
-		'--dry-run',
-		action='store_true',
-		help='Validate the config and print a run summary without writing.',
+	parser = build_config_parser(
+		'Create a random-initialized MAE checkpoint baseline.',
+		config_help='Path to a random checkpoint YAML configuration file.',
+		dry_run_help='Validate the config and print a run summary without writing.',
 	)
 	args = parser.parse_args()
 
-	config = load_config(args.config)
-	settings = random_mae_checkpoint_config_from_mapping(config)
+	config_path = parse_config_path(args)
+	config = load_config_for_cli(config_path, loader=load_config)
+	settings = resolve_config_for_cli(
+		config,
+		resolver=random_mae_checkpoint_config_from_mapping,
+		config_path=config_path,
+	)
 	if args.dry_run:
 		print(f'reference.checkpoint: {settings.reference_checkpoint}')
 		print(f'reference.model_tag: {settings.reference_model_tag}')
