@@ -1,9 +1,9 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 clustering:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_v1/full_k6_8_10_12
+  input_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_v1/full/default/k6_8_10_12
 visualization:
-  output_dir: /workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/pretrain_v1/amp_mae_v1/selected_surveys
+  output_dir: /workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/pretrain_v1/amp_mae_v1/full/default/k6_8_10_12/token_xy750_xz150
   survey_ids: []
   modes: [token]
   reconstruct_voxel: false

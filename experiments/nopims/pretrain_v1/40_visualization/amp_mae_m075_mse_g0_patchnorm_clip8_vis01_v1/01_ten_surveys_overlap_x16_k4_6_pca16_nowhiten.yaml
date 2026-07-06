@@ -1,9 +1,9 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 clustering:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/ten_surveys_overlap_x16_k4_6_pca16_nowhiten
+  input_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/ten_surveys/overlap_x16/k4_6_pca16_nowhiten
 visualization:
-  output_dir: /workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/ten_surveys_overlap_x16_k4_6_pca16_nowhiten
+  output_dir: /workspace/artifacts/seis_ssl_cluster/visualizations/clusters/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/ten_surveys/overlap_x16/k4_6_pca16_nowhiten/voxel_cmp_xy750_xz150
   survey_ids:
   - ENO0047389_0_00050_00400__b99821d8f4ec
   - ENO0047389_0_00050_00750__16ce86dbe1b7
