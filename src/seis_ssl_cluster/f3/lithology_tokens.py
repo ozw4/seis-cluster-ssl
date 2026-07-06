@@ -365,6 +365,7 @@ def _build_from_reference_token_dataset(
 			_load_token_arrays_npz(reference.train_tokens, label='train_tokens'),
 			embedding=embedding,
 			label='train_tokens',
+			feature_source=config.feature_source,
 		),
 		'validation': _replace_reference_features(
 			_load_token_arrays_npz(
@@ -373,6 +374,7 @@ def _build_from_reference_token_dataset(
 			),
 			embedding=embedding,
 			label='validation_tokens',
+			feature_source=config.feature_source,
 		),
 	}
 	all_arrays = _concatenate_token_arrays(
@@ -919,12 +921,13 @@ def _replace_reference_features(
 	*,
 	embedding: F3EmbeddingArtifact,
 	label: str,
+	feature_source: Mapping[str, object] | None,
 ) -> F3TokenArrays:
 	_validate_reference_token_arrays(reference, embedding=embedding, label=label)
 	updated = replace_token_features(
 		_token_dataset_from_arrays(reference),
 		_features_for_tokens(embedding.embeddings, reference.token_xyz),
-		feature_source={},
+		feature_source=_token_dataset_feature_source(feature_source),
 	)
 	return _token_arrays_from_dataset(updated)
 
@@ -1007,9 +1010,21 @@ def _write_outputs(  # noqa: PLR0913
 	outputs.summary_markdown.parent.mkdir(parents=True, exist_ok=True)
 	outputs.split_manifest_json.parent.mkdir(parents=True, exist_ok=True)
 	outputs.quicklook_dir.mkdir(parents=True, exist_ok=True)
-	_save_npz(outputs.train_npz, arrays_by_split['train'])
-	_save_npz(outputs.validation_npz, arrays_by_split['validation'])
-	_save_npz(outputs.all_labeled_npz, all_arrays)
+	_save_npz(
+		outputs.train_npz,
+		arrays_by_split['train'],
+		feature_source=config.feature_source,
+	)
+	_save_npz(
+		outputs.validation_npz,
+		arrays_by_split['validation'],
+		feature_source=config.feature_source,
+	)
+	_save_npz(
+		outputs.all_labeled_npz,
+		all_arrays,
+		feature_source=config.feature_source,
+	)
 	_write_json(outputs.split_manifest_json, f3_slice_split_manifest(slice_records))
 	_write_class_counts_csv(outputs.class_counts_csv, classes, arrays_by_split)
 	_write_text(
@@ -1053,9 +1068,21 @@ def _write_reference_reuse_outputs(  # noqa: PLR0913
 	outputs.summary_markdown.parent.mkdir(parents=True, exist_ok=True)
 	outputs.split_manifest_json.parent.mkdir(parents=True, exist_ok=True)
 	outputs.quicklook_dir.mkdir(parents=True, exist_ok=True)
-	_save_npz(outputs.train_npz, arrays_by_split['train'])
-	_save_npz(outputs.validation_npz, arrays_by_split['validation'])
-	_save_npz(outputs.all_labeled_npz, all_arrays)
+	_save_npz(
+		outputs.train_npz,
+		arrays_by_split['train'],
+		feature_source=config.feature_source,
+	)
+	_save_npz(
+		outputs.validation_npz,
+		arrays_by_split['validation'],
+		feature_source=config.feature_source,
+	)
+	_save_npz(
+		outputs.all_labeled_npz,
+		all_arrays,
+		feature_source=config.feature_source,
+	)
 	_write_reference_split_manifest(config)
 	_write_class_counts_csv(outputs.class_counts_csv, classes, arrays_by_split)
 	_write_text(
@@ -1100,11 +1127,26 @@ def _write_reference_split_manifest(config: F3LithologyTokenDatasetConfig) -> No
 	shutil.copyfile(reference.split_manifest_json, config.outputs.split_manifest_json)
 
 
-def _save_npz(path: Path, arrays: F3TokenArrays) -> None:
-	save_f3_lithology_token_dataset(_token_dataset_from_arrays(arrays), path)
+def _save_npz(
+	path: Path,
+	arrays: F3TokenArrays,
+	*,
+	feature_source: Mapping[str, object] | None,
+) -> None:
+	save_f3_lithology_token_dataset(
+		_token_dataset_from_arrays(
+			arrays,
+			metadata=_token_dataset_npz_metadata(feature_source),
+		),
+		path,
+	)
 
 
-def _token_dataset_from_arrays(arrays: F3TokenArrays) -> F3LithologyTokenDataset:
+def _token_dataset_from_arrays(
+	arrays: F3TokenArrays,
+	*,
+	metadata: Mapping[str, object] | None = None,
+) -> F3LithologyTokenDataset:
 	return F3LithologyTokenDataset(
 		features=arrays.features,
 		labels=arrays.labels,
@@ -1116,7 +1158,24 @@ def _token_dataset_from_arrays(arrays: F3TokenArrays) -> F3LithologyTokenDataset
 		voxel_center_xyz=arrays.voxel_center_xyz,
 		majority_fraction=arrays.majority_fraction,
 		labeled_fraction=arrays.labeled_fraction,
+		metadata={} if metadata is None else dict(metadata),
 	)
+
+
+def _token_dataset_npz_metadata(
+	feature_source: Mapping[str, object] | None,
+) -> dict[str, object]:
+	if feature_source is None:
+		return {}
+	return {'feature_source': dict(feature_source)}
+
+
+def _token_dataset_feature_source(
+	feature_source: Mapping[str, object] | None,
+) -> Mapping[str, object]:
+	if feature_source is not None:
+		return dict(feature_source)
+	return {}
 
 
 def _token_arrays_from_dataset(dataset: F3LithologyTokenDataset) -> F3TokenArrays:

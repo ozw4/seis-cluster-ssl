@@ -23,6 +23,7 @@ from seis_ssl_cluster.f3 import (
 	build_f3_lithology_token_dataset,
 	f3_slice_split_manifest,
 	lithology_tokens,
+	load_f3_lithology_token_dataset,
 	load_f3_slice_split_records,
 	resolve_f3_slice_array_index,
 	tokenize_f3_lithology_slice,
@@ -249,6 +250,9 @@ def test_build_f3_lithology_token_dataset_outputs_npz_metadata_and_figures(
 		'train_validation_slice_selection_and_visual_qc'
 	)
 	assert metadata['feature_source'] == _feature_source()
+	assert load_f3_lithology_token_dataset(result.train_npz).metadata[
+		'feature_source'
+	] == _feature_source()
 	assert metadata['embedding']['patch_size_xyz'] == [2, 2, 2]
 	assert metadata['no_random_split'] is True
 	assert splits['no_random_split'] is True
@@ -400,6 +404,9 @@ def test_build_f3_lithology_token_dataset_reuses_reference_rows_for_random_encod
 		reference_result.train_npz,
 	)
 	assert metadata['feature_source']['kind'] == 'random_encoder'
+	assert load_f3_lithology_token_dataset(result.train_npz).metadata[
+		'feature_source'
+	] == random_config.feature_source
 	assert metadata['summary']['slice_count'] == 2
 	assert len(metadata['slices']) == 2
 	assert result.quicklook_paths == ()

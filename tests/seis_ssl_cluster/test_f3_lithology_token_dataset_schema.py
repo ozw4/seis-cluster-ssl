@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -31,6 +32,28 @@ def test_token_dataset_schema_round_trips_existing_npz_keys(tmp_path: Path) -> N
 	np.testing.assert_array_equal(loaded.labels, np.asarray([0, 1], dtype=np.int64))
 	np.testing.assert_array_equal(loaded.features, dataset.features)
 	assert loaded.count == 2
+
+
+def test_token_dataset_schema_round_trips_metadata_when_present(
+	tmp_path: Path,
+) -> None:
+	path = tmp_path / 'train_tokens.npz'
+	metadata = {
+		'feature_source': {
+			'kind': 'pretrained_encoder',
+			'reference_model_tag': 'model',
+			'embedding_spec': 'overlap_x16',
+			'description': 'fixture pretrained encoder features',
+		},
+	}
+
+	save_f3_lithology_token_dataset(_dataset(metadata=metadata), path)
+	loaded = load_f3_lithology_token_dataset(path)
+
+	assert loaded.metadata == metadata
+	with np.load(path) as payload:
+		assert 'metadata' in payload.files
+		assert json.loads(str(payload['metadata'].item())) == metadata
 
 
 def test_token_dataset_schema_accepts_class_zero_as_valid_label() -> None:
@@ -77,6 +100,7 @@ def _dataset(
 	*,
 	labels: np.ndarray | None = None,
 	token_xyz: np.ndarray | None = None,
+	metadata: dict[str, object] | None = None,
 ) -> F3LithologyTokenDataset:
 	count = 2
 	return F3LithologyTokenDataset(
@@ -101,4 +125,5 @@ def _dataset(
 		),
 		majority_fraction=np.ones(count, dtype=np.float32),
 		labeled_fraction=np.ones(count, dtype=np.float32),
+		metadata={} if metadata is None else metadata,
 	)

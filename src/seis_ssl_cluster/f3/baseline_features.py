@@ -713,12 +713,14 @@ def _write_outputs(
 		train,
 		built_features.features_by_split['train'],
 		label='train_tokens',
+		feature_source=config.feature_source,
 	)
 	_save_npz_with_features(
 		outputs.validation_npz,
 		validation,
 		built_features.features_by_split['validation'],
 		label='validation_tokens',
+		feature_source=config.feature_source,
 	)
 	if outputs.split_manifest_json is not None and config.reference.split_manifest:
 		shutil.copyfile(config.reference.split_manifest, outputs.split_manifest_json)
@@ -769,6 +771,7 @@ def _save_npz_with_features(
 	features: NDArray[np.float32],
 	*,
 	label: str,
+	feature_source: Mapping[str, object] | None,
 ) -> None:
 	if features.shape[0] != dataset.count:
 		msg = (
@@ -779,9 +782,17 @@ def _save_npz_with_features(
 	updated = replace_token_features(
 		dataset.dataset,
 		_finite_float32_features(features, label=f'{label}.features'),
-		feature_source={},
+		feature_source=_token_dataset_feature_source(feature_source),
 	)
 	save_f3_lithology_token_dataset(updated, path)
+
+
+def _token_dataset_feature_source(
+	feature_source: Mapping[str, object] | None,
+) -> Mapping[str, object]:
+	if feature_source is not None:
+		return dict(feature_source)
+	return {}
 
 
 def _metadata_payload(

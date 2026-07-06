@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -9,11 +11,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-	from collections.abc import Mapping
 	from pathlib import Path
 
 	from numpy.typing import NDArray
 
+NPZ_METADATA_FIELD = 'metadata'
 F3_LITHOLOGY_TOKEN_DATASET_KEYS = (
 	'features',
 	'labels',
@@ -93,6 +95,7 @@ def load_f3_lithology_token_dataset(path: Path) -> F3LithologyTokenDataset:
 				dtype=np.float32,
 			),
 			labeled_fraction=np.asarray(payload['labeled_fraction'], dtype=np.float32),
+			metadata=_metadata_from_npz(payload, path),
 		)
 	validate_f3_lithology_token_dataset(dataset)
 	return dataset
@@ -105,7 +108,11 @@ def save_f3_lithology_token_dataset(
 	"""Validate and save an F3 lithology token dataset NPZ."""
 	validate_f3_lithology_token_dataset(dataset)
 	path.parent.mkdir(parents=True, exist_ok=True)
-	np.savez_compressed(path, **dataset.to_npz_arrays())
+	arrays = dataset.to_npz_arrays()
+	metadata = _json_ready_metadata(dataset.metadata)
+	if metadata:
+		arrays[NPZ_METADATA_FIELD] = _metadata_to_npz(metadata)
+	np.savez_compressed(path, **arrays)
 
 
 def validate_f3_lithology_token_dataset(
@@ -214,7 +221,8 @@ def replace_token_features(
 		msg = 'replacement features must contain only finite values'
 		raise ValueError(msg)
 	metadata = dict(dataset.metadata)
-	metadata['feature_source'] = dict(feature_source)
+	if feature_source:
+		metadata['feature_source'] = dict(feature_source)
 	replaced = replace(
 		dataset,
 		features=replacement_features,
@@ -238,3 +246,61 @@ def _validate_xyz(values: NDArray[np.generic], count: int, name: str) -> None:
 	if np.asarray(values).shape != (count, 3):
 		msg = f'{name} must have shape {(count, 3)!r}; got {np.asarray(values).shape!r}'
 		raise ValueError(msg)
+
+
+def _metadata_from_npz(payload: object, path: Path) -> dict[str, object]:
+	if NPZ_METADATA_FIELD not in payload.files:
+		return {}
+	raw = np.asarray(payload[NPZ_METADATA_FIELD])
+	if raw.shape == ():
+		text = str(raw.item())
+	elif raw.shape == (1,):
+		text = str(raw.reshape(-1)[0])
+	else:
+		msg = (
+			'F3 lithology token dataset metadata must be a JSON scalar; '
+			f'got shape={raw.shape!r} in {path}'
+		)
+		raise ValueError(msg)
+	try:
+		metadata = json.loads(text)
+	except json.JSONDecodeError as exc:
+		msg = f'F3 lithology token dataset metadata is not valid JSON: {path}'
+		raise ValueError(msg) from exc
+	if not isinstance(metadata, Mapping):
+		msg = f'F3 lithology token dataset metadata must be an object: {path}'
+		raise TypeError(msg)
+	return dict(metadata)
+
+
+def _metadata_to_npz(metadata: Mapping[str, object]) -> NDArray[np.str_]:
+	try:
+		text = json.dumps(
+			metadata,
+			allow_nan=False,
+			sort_keys=True,
+			separators=(',', ':'),
+		)
+	except (TypeError, ValueError) as exc:
+		msg = 'F3 lithology token dataset metadata must be JSON-serializable'
+		raise TypeError(msg) from exc
+	return np.asarray(text)
+
+
+def _json_ready_metadata(metadata: Mapping[str, object]) -> dict[str, object]:
+	return {
+		str(key): _json_ready_value(value)
+		for key, value in metadata.items()
+	}
+
+
+def _json_ready_value(value: object) -> object:
+	if isinstance(value, Mapping):
+		return {str(key): _json_ready_value(item) for key, item in value.items()}
+	if isinstance(value, np.ndarray):
+		return value.tolist()
+	if isinstance(value, np.generic):
+		return value.item()
+	if isinstance(value, Sequence) and not isinstance(value, str | bytes):
+		return [_json_ready_value(item) for item in value]
+	return value
