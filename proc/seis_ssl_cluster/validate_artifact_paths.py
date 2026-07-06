@@ -17,8 +17,8 @@ from seis_ssl_cluster.validation import (
 from seis_ssl_cluster.validation.artifact_paths import DEFAULT_SCAN_PATHS
 
 
-def main() -> int:
-	"""Validate artifact path contracts and return a process exit code."""
+def build_parser() -> ArgumentParser:
+	"""Build the CLI parser for artifact path validation."""
 	parser = ArgumentParser(
 		description='Validate artifact path strings in configs, docs, and results.',
 	)
@@ -51,6 +51,12 @@ def main() -> int:
 		'--allow-test-fixtures',
 		help_text='Skip test files that intentionally contain rejected path examples.',
 	)
+	return parser
+
+
+def main() -> int:
+	"""Validate artifact path contracts and return a process exit code."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	report = validate_artifact_paths(

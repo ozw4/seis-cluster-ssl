@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -36,15 +37,20 @@ DEFAULT_CONFIG = (
 )
 
 
-def main() -> None:
-	"""Build an F3 lithology probe report or print a dry-run summary."""
-	parser = build_config_parser(
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for F3 lithology probe reports."""
+	return build_config_parser(
 		'Build an F3 lithology probe report.',
 		default_config=DEFAULT_CONFIG,
 		dry_run_help=(
 			'Validate the config and print a run summary without writing reports.'
 		),
 	)
+
+
+def main() -> None:
+	"""Build an F3 lithology probe report or print a dry-run summary."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	config_path = parse_config_path(args)

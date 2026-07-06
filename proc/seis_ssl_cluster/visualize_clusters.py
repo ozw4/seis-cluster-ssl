@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import json
 from collections.abc import Mapping, Sequence
@@ -42,6 +43,14 @@ DEFAULT_CONFIG = (
 	/ 'visualize_clusters.yaml'
 )
 XYZ = tuple[int, int, int]
+
+
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for amplitude-only cluster visualization."""
+	return build_config_parser(
+		'Visualize amplitude-only clusters.',
+		default_config=DEFAULT_CONFIG,
+	)
 
 
 @dataclass(frozen=True)
@@ -208,10 +217,7 @@ class _TokenAmplitudeUnderlay:
 
 def main() -> None:
 	"""Run amplitude-only cluster visualization or print a dry-run summary."""
-	parser = build_config_parser(
-		'Visualize amplitude-only clusters.',
-		default_config=DEFAULT_CONFIG,
-	)
+	parser = build_parser()
 	args = parser.parse_args()
 
 	config_path = parse_config_path(args)

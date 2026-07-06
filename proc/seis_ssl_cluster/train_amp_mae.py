@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from seis_ssl_cluster.cli import (
@@ -27,8 +28,8 @@ DEFAULT_CONFIG = (
 )
 
 
-def main() -> None:
-	"""Run amplitude-only MAE pretraining or print a dry-run summary."""
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for amplitude-only MAE training."""
 	parser = build_config_parser(
 		'Train an amplitude-only MAE model.',
 		default_config=DEFAULT_CONFIG,
@@ -52,6 +53,12 @@ def main() -> None:
 		'--resume',
 		help_text='Resume amplitude MAE pretraining from a checkpoint.',
 	)
+	return parser
+
+
+def main() -> None:
+	"""Run amplitude-only MAE pretraining or print a dry-run summary."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	config_path = parse_config_path(args)

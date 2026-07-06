@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from seis_ssl_cluster.cli import add_overwrite_argument, build_config_parser
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_normalization_stats_config,
@@ -49,7 +50,8 @@ class NormalizationTarget:
 
 def main() -> None:
 	"""Compute missing NOPIMS normalization stats sidecars."""
-	args = _parse_args()
+	parser = build_parser()
+	args = parser.parse_args()
 	config = resolve_normalization_stats_config(load_config(args.config))
 	paths = _required_mapping(config, 'paths')
 	artifact_root = Path(_required_str(paths, 'artifact_root'))
@@ -132,27 +134,18 @@ def main() -> None:
 	print(f'normalization_stats.skipped_existing_files: {skipped_count}')
 
 
-def _parse_args() -> argparse.Namespace:
-	parser = argparse.ArgumentParser(
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for NOPIMS normalization stats sidecars."""
+	parser = build_config_parser(
 		description='Prepare amplitude-only NOPIMS normalization statistics.',
+		default_config=DEFAULT_CONFIG,
+		dry_run_help='Validate inputs and print a run summary without writing stats.',
 	)
-	parser.add_argument(
-		'--config',
-		type=Path,
-		default=DEFAULT_CONFIG,
-		help='Path to a YAML configuration file.',
+	add_overwrite_argument(
+		parser,
+		help_text='Recompute stats files even when sidecars already exist.',
 	)
-	parser.add_argument(
-		'--dry-run',
-		action='store_true',
-		help='Validate inputs and print a run summary without writing stats.',
-	)
-	parser.add_argument(
-		'--overwrite',
-		action='store_true',
-		help='Recompute stats files even when sidecars already exist.',
-	)
-	return parser.parse_args()
+	return parser
 
 
 def _manifest_path(config: Mapping[str, object]) -> Path:

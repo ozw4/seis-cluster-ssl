@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -34,13 +35,18 @@ DEFAULT_CONFIG = (
 )
 
 
-def main() -> None:
-	"""Train an F3 lithology probe or print a dry-run summary."""
-	parser = build_config_parser(
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for F3 token-level lithology probe training."""
+	return build_config_parser(
 		'Train an F3 token-level lithology probe.',
 		default_config=DEFAULT_CONFIG,
 		dry_run_help='Validate the config and print a run summary without training.',
 	)
+
+
+def main() -> None:
+	"""Train an F3 lithology probe or print a dry-run summary."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	config_path = parse_config_path(args)

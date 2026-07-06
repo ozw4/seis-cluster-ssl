@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from seis_ssl_cluster.cli import (
@@ -27,8 +28,8 @@ DEFAULT_CONFIG = (
 )
 
 
-def main() -> None:
-	"""Run amplitude-only embedding extraction or print a dry-run summary."""
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for amplitude-only embedding extraction."""
 	parser = build_config_parser(
 		'Extract amplitude-only embeddings.',
 		default_config=DEFAULT_CONFIG,
@@ -38,6 +39,12 @@ def main() -> None:
 		parser,
 		help_text='Skip survey outputs whose metadata already matches this run.',
 	)
+	return parser
+
+
+def main() -> None:
+	"""Run amplitude-only embedding extraction or print a dry-run summary."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	config_path = parse_config_path(args)

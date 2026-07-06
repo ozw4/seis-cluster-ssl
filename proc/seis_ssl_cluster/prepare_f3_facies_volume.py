@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from seis_ssl_cluster.cli import (
@@ -28,8 +29,8 @@ DEFAULT_CONFIG = (
 )
 
 
-def main() -> None:
-	"""Prepare F3 facies benchmark NPY volumes or print a dry-run summary."""
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for F3 facies benchmark volume preparation."""
 	parser = build_config_parser(
 		'Prepare F3 facies benchmark NPY volumes.',
 		default_config=DEFAULT_CONFIG,
@@ -41,6 +42,12 @@ def main() -> None:
 		parser,
 		help_text='Replace existing F3 preparation outputs.',
 	)
+	return parser
+
+
+def main() -> None:
+	"""Prepare F3 facies benchmark NPY volumes or print a dry-run summary."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	config_path = parse_config_path(args)

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from seis_ssl_cluster.cli import build_config_parser
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_manifest_build_config,
@@ -15,10 +17,7 @@ from seis_ssl_cluster.data import (
 	scan_nopims_amplitude_manifests_from_path_list,
 	write_manifest_json,
 )
-from seis_ssl_cluster.utils.cli import (
-	parse_config_args,
-	print_config_summary,
-)
+from seis_ssl_cluster.utils.cli import print_config_summary
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[1]
@@ -28,12 +27,18 @@ DEFAULT_CONFIG = (
 )
 
 
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for NOPIMS manifest creation."""
+	return build_config_parser(
+		'Build amplitude-only NOPIMS manifests.',
+		default_config=DEFAULT_CONFIG,
+	)
+
+
 def main() -> None:
 	"""Build NOPIMS manifests or print a dry-run summary."""
-	args = parse_config_args(
-		'Build amplitude-only NOPIMS manifests.',
-		DEFAULT_CONFIG,
-	)
+	parser = build_parser()
+	args = parser.parse_args()
 	config = resolve_manifest_build_config(load_config(args.config))
 	paths = _required_mapping(config, 'paths')
 	manifest_cfg = _required_mapping(config, 'manifest')
