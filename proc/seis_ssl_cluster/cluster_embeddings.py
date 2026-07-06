@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import importlib
-from argparse import ArgumentParser
 from pathlib import Path
 
+from seis_ssl_cluster.cli import (
+	build_config_parser,
+	load_config_for_cli,
+	parse_config_path,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import load_config, resolve_clustering_config
 from seis_ssl_cluster.utils.cli import print_config_summary
 
@@ -19,21 +24,19 @@ DEFAULT_CONFIG = (
 
 def main() -> None:
 	"""Run embedding clustering or print a dry-run summary."""
-	parser = ArgumentParser(description='Cluster amplitude-only embeddings.')
-	parser.add_argument(
-		'--config',
-		type=Path,
-		default=DEFAULT_CONFIG,
-		help='Path to a YAML configuration file.',
-	)
-	parser.add_argument(
-		'--dry-run',
-		action='store_true',
-		help='Validate the config and print a run summary without executing.',
+	parser = build_config_parser(
+		'Cluster amplitude-only embeddings.',
+		default_config=DEFAULT_CONFIG,
 	)
 	args = parser.parse_args()
 
-	config = resolve_clustering_config(load_config(args.config))
+	config_path = parse_config_path(args)
+	raw_config = load_config_for_cli(config_path, loader=load_config)
+	config = resolve_config_for_cli(
+		raw_config,
+		resolver=resolve_clustering_config,
+		config_path=config_path,
+	)
 	if args.dry_run:
 		print_config_summary(config)
 		print('execution: dry-run; clustering skipped')

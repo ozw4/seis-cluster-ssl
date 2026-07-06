@@ -97,12 +97,16 @@ def build_config_parser(
 	return parser
 
 
-def add_device_argument(parser: argparse.ArgumentParser) -> None:
+def add_device_argument(
+	parser: argparse.ArgumentParser,
+	*,
+	help_text: str = 'Device override.',
+) -> None:
 	"""Add the common device override flag."""
 	parser.add_argument(
 		'--device',
 		choices=('auto', 'cpu', 'cuda'),
-		help='Device override.',
+		help=help_text,
 	)
 
 

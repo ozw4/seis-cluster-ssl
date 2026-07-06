@@ -1,0 +1,215 @@
+from __future__ import annotations
+
+import argparse
+import ast
+import importlib
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+PROC_DIR = REPO_ROOT / 'proc' / 'seis_ssl_cluster'
+
+PROC_SCRIPTS = tuple(
+	path
+	for path in sorted(PROC_DIR.glob('*.py'))
+	if path.name != '__init__.py'
+)
+
+HELP_FLAG_CONTRACTS = {
+	'build_f3_lithology_baseline_features.py': (
+		'--config',
+		'--dry-run',
+	),
+	'build_f3_lithology_baseline_token_dataset.py': (
+		'--config',
+		'--dry-run',
+	),
+	'build_f3_lithology_comparison_report.py': (
+		'--config',
+		'--dry-run',
+		'--search-root',
+		'--output-dir',
+		'--output-csv',
+		'--output-markdown',
+		'--metrics-json',
+		'--figure-dpi',
+	),
+	'build_f3_lithology_report.py': (
+		'--config',
+		'--dry-run',
+	),
+	'build_f3_lithology_token_dataset.py': (
+		'--config',
+		'--dry-run',
+	),
+	'build_nopims_manifests.py': (
+		'--config',
+		'--dry-run',
+	),
+	'cluster_embeddings.py': (
+		'--config',
+		'--dry-run',
+	),
+	'create_random_mae_checkpoint.py': (
+		'--config',
+		'--dry-run',
+	),
+	'extract_embeddings.py': (
+		'--config',
+		'--dry-run',
+		'--device',
+		'--skip-existing',
+	),
+	'prepare_f3_facies_volume.py': (
+		'--config',
+		'--dry-run',
+		'--overwrite',
+	),
+	'prepare_nopims_normalization_stats.py': (
+		'--config',
+		'--dry-run',
+		'--overwrite',
+	),
+	'train_amp_mae.py': (
+		'--config',
+		'--dry-run',
+		'--device',
+		'--max-steps',
+		'--output-root',
+		'--resume',
+	),
+	'train_f3_lithology_probe.py': (
+		'--config',
+		'--dry-run',
+	),
+	'validate_artifact_paths.py': (
+		'--root',
+		'--scan',
+		'--fail-on-runs',
+		'--allow-pattern',
+		'--allow-test-fixtures',
+	),
+	'validate_results_artifacts.py': (
+		'--root',
+		'--max-file-size-mb',
+		'--required-file',
+		'--local-path-policy',
+	),
+	'visualize_clusters.py': (
+		'--config',
+		'--dry-run',
+	),
+	'visualize_f3_lithology_predictions.py': (
+		'--config',
+		'--dry-run',
+	),
+}
+
+SMOKE_HELP_SCRIPTS = (
+	'train_amp_mae.py',
+	'extract_embeddings.py',
+	'build_f3_lithology_report.py',
+	'validate_results_artifacts.py',
+)
+
+
+def test_proc_modules_import_without_running_main(
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	for script in PROC_SCRIPTS:
+		module = importlib.import_module(_module_name(script))
+		assert hasattr(module, 'main')
+
+	captured = capsys.readouterr()
+	assert captured.out == ''
+	assert captured.err == ''
+
+
+def test_existing_build_parser_functions_construct_argparse_parsers() -> None:
+	for script in PROC_SCRIPTS:
+		module = importlib.import_module(_module_name(script))
+		build_parser = getattr(module, 'build_parser', None)
+		if build_parser is None:
+			continue
+
+		parser = build_parser()
+
+		assert isinstance(parser, argparse.ArgumentParser)
+
+
+@pytest.mark.parametrize(
+	('script_name', 'expected_flags'),
+	HELP_FLAG_CONTRACTS.items(),
+	ids=HELP_FLAG_CONTRACTS.keys(),
+)
+def test_primary_proc_help_preserves_existing_flags(
+	script_name: str,
+	expected_flags: tuple[str, ...],
+) -> None:
+	help_text = _help_text(PROC_DIR / script_name)
+
+	for flag in expected_flags:
+		assert flag in help_text
+
+
+@pytest.mark.parametrize('script_name', SMOKE_HELP_SCRIPTS)
+def test_issue_smoke_import_help_commands(script_name: str) -> None:
+	assert 'usage:' in _help_text(PROC_DIR / script_name)
+
+
+def test_proc_main_functions_stay_thin_entrypoints() -> None:
+	for script in PROC_SCRIPTS:
+		main = _main_function(script)
+		if main is None:
+			continue
+
+		statements = [
+			stmt
+			for stmt in main.body
+			if not (
+				isinstance(stmt, ast.Expr)
+				and isinstance(stmt.value, ast.Constant)
+				and isinstance(stmt.value.value, str)
+			)
+		]
+
+		assert len(statements) <= 35, script
+
+
+def _module_name(script: Path) -> str:
+	return f'proc.seis_ssl_cluster.{script.stem}'
+
+
+def _help_text(script: Path) -> str:
+	env = os.environ.copy()
+	env['PYTHONPATH'] = os.pathsep.join(
+		(
+			str(REPO_ROOT / 'src'),
+			env.get('PYTHONPATH', ''),
+		),
+	)
+	completed = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			str(script),
+			'--help',
+		],
+		cwd=REPO_ROOT,
+		env=env,
+		text=True,
+		capture_output=True,
+		check=True,
+	)
+	return completed.stdout + completed.stderr
+
+
+def _main_function(script: Path) -> ast.FunctionDef | None:
+	tree = ast.parse(script.read_text(encoding='utf-8'), filename=str(script))
+	for node in tree.body:
+		if isinstance(node, ast.FunctionDef) and node.name == 'main':
+			return node
+	return None

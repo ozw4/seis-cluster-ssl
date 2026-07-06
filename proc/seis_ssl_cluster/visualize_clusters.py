@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import json
-from argparse import ArgumentParser
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral
@@ -13,6 +12,12 @@ from typing import Protocol
 
 import numpy as np
 
+from seis_ssl_cluster.cli import (
+	build_config_parser,
+	load_config_for_cli,
+	parse_config_path,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_cluster_visualization_config,
@@ -203,21 +208,19 @@ class _TokenAmplitudeUnderlay:
 
 def main() -> None:
 	"""Run amplitude-only cluster visualization or print a dry-run summary."""
-	parser = ArgumentParser(description='Visualize amplitude-only clusters.')
-	parser.add_argument(
-		'--config',
-		type=Path,
-		default=DEFAULT_CONFIG,
-		help='Path to a YAML configuration file.',
-	)
-	parser.add_argument(
-		'--dry-run',
-		action='store_true',
-		help='Validate the config and print a run summary without executing.',
+	parser = build_config_parser(
+		'Visualize amplitude-only clusters.',
+		default_config=DEFAULT_CONFIG,
 	)
 	args = parser.parse_args()
 
-	config = resolve_cluster_visualization_config(load_config(args.config))
+	config_path = parse_config_path(args)
+	raw_config = load_config_for_cli(config_path, loader=load_config)
+	config = resolve_config_for_cli(
+		raw_config,
+		resolver=resolve_cluster_visualization_config,
+		config_path=config_path,
+	)
 	if args.dry_run:
 		print_config_summary(config)
 		print('execution: dry-run; visualization skipped')
