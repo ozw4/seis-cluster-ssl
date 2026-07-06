@@ -12,12 +12,19 @@ if TYPE_CHECKING:
 T = TypeVar('T')
 
 
-def add_config_argument(parser: argparse.ArgumentParser) -> None:
+def add_config_argument(
+	parser: argparse.ArgumentParser,
+	*,
+	default: str | Path | None = None,
+	required: bool | None = None,
+) -> None:
 	"""Add the standard YAML config path argument."""
+	config_required = default is None if required is None else required
 	parser.add_argument(
 		'--config',
 		type=Path,
-		required=True,
+		default=Path(default) if default is not None else None,
+		required=config_required,
 		help='Path to a YAML configuration file.',
 	)
 
@@ -76,6 +83,15 @@ def add_device_argument(parser: argparse.ArgumentParser) -> None:
 	)
 
 
+def add_dry_run_argument(parser: argparse.ArgumentParser) -> None:
+	"""Add the common dry-run flag."""
+	parser.add_argument(
+		'--dry-run',
+		action='store_true',
+		help='Validate the config and print a run summary without executing.',
+	)
+
+
 def add_skip_existing_argument(parser: argparse.ArgumentParser) -> None:
 	"""Add the common skip-existing flag."""
 	parser.add_argument(
@@ -107,6 +123,7 @@ def _format_cli_value(value: object) -> str:
 __all__ = [
 	'add_config_argument',
 	'add_device_argument',
+	'add_dry_run_argument',
 	'add_overwrite_argument',
 	'add_skip_existing_argument',
 	'load_config_for_cli',
