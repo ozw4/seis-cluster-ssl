@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import joblib
 import numpy as np
+import pytest
 
 from seis_ssl_cluster.f3 import (
 	F3ClassInfo,
@@ -107,6 +109,13 @@ def test_predict_f3_lithology_tokens_writes_standard_json_for_empty_metrics(
 	assert inline_row['macro_f1'] is None
 	assert inline_row['weighted_f1'] is None
 	assert inline_row['mean_iou'] is None
+
+
+def test_predict_f3_lithology_tokens_requires_loaded_classes(tmp_path: Path) -> None:
+	config = write_prediction_fixture(tmp_path)
+
+	with pytest.raises(ValueError, match='prediction runtime requires class_info'):
+		predict_f3_lithology_tokens(replace(config, classes=None))
 
 
 def write_prediction_fixture(tmp_path: Path) -> F3LithologyPredictionConfig:

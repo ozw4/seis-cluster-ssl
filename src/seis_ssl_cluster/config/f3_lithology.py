@@ -134,6 +134,8 @@ def f3_lithology_token_dataset_config_from_mapping(
 
 def f3_lithology_probe_config_from_mapping(
 	config: Mapping[str, object],
+	*,
+	load_classes: bool = True,
 ) -> F3LithologyProbeConfig:
 	"""Validate and normalize the F3 lithology probe config."""
 	_validate_allowed_keys(
@@ -199,7 +201,9 @@ def f3_lithology_probe_config_from_mapping(
 			token_dataset_metadata_json=token_dataset_metadata_json,
 		),
 		outputs=outputs,
-		classes=read_f3_lithology_class_info(class_info_path),
+		classes=(
+			read_f3_lithology_class_info(class_info_path) if load_classes else None
+		),
 		probe=_probe_settings_from_mapping(probe),
 		dataset=dataset,
 		model=model,
@@ -214,6 +218,8 @@ def f3_lithology_probe_config_from_mapping(
 
 def f3_lithology_prediction_config_from_mapping(
 	config: Mapping[str, object],
+	*,
+	load_classes: bool = True,
 ) -> F3LithologyPredictionConfig:
 	"""Validate and normalize the F3 lithology prediction config."""
 	_validate_allowed_keys(
@@ -292,7 +298,11 @@ def f3_lithology_prediction_config_from_mapping(
 	return F3LithologyPredictionConfig(
 		inputs=inputs,
 		outputs=outputs,
-		classes=read_f3_lithology_prediction_classes(inputs.class_info),
+		classes=(
+			read_f3_lithology_prediction_classes(inputs.class_info)
+			if load_classes
+			else None
+		),
 		token_policy=_prediction_token_policy_from_mapping(predictions),
 		dataset=dataset,
 		model=model,
@@ -309,6 +319,8 @@ def f3_lithology_prediction_config_from_mapping(
 
 def f3_lithology_visualization_config_from_mapping(
 	config: Mapping[str, object],
+	*,
+	load_classes: bool = True,
 ) -> F3LithologyVisualizationConfig:
 	"""Validate and normalize the F3 lithology visualization config."""
 	_validate_allowed_keys(
@@ -410,7 +422,11 @@ def f3_lithology_visualization_config_from_mapping(
 	return F3LithologyVisualizationConfig(
 		inputs=inputs,
 		outputs=outputs,
-		classes=read_f3_lithology_visualization_classes(inputs.class_info),
+		classes=(
+			read_f3_lithology_visualization_classes(inputs.class_info)
+			if load_classes
+			else None
+		),
 		dataset=dataset,
 		model=model,
 		labels=labels,

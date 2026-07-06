@@ -81,7 +81,7 @@ class F3LithologyPredictionConfig:
 
 	inputs: F3LithologyPredictionInputs
 	outputs: F3LithologyPredictionOutputs
-	classes: tuple[F3ClassInfo, ...]
+	classes: tuple[F3ClassInfo, ...] | None
 	token_policy: F3LithologyTokenPolicy
 	dataset: Mapping[str, object]
 	model: Mapping[str, object]
@@ -121,10 +121,7 @@ def predict_f3_lithology_tokens(
 	config: F3LithologyPredictionConfig,
 ) -> F3LithologyPredictionResult:
 	"""Apply a trained probe to every valid F3 token embedding."""
-	classes = tuple(config.classes)
-	if not classes:
-		msg = 'classes must contain at least one F3 class'
-		raise ValueError(msg)
+	classes = _required_runtime_classes(config.classes)
 	embedding = _single_embedding_artifact(config.inputs.embeddings_dir)
 	label_volume = np.load(config.inputs.label_volume, mmap_mode='r')
 	geometry = read_f3_line_geometry(config.inputs.segy_geometry_json)
@@ -186,6 +183,18 @@ def read_f3_lithology_prediction_classes(
 ) -> tuple[F3ClassInfo, ...]:
 	"""Read class metadata for prediction configs."""
 	return read_f3_lithology_class_info(path)
+
+
+def _required_runtime_classes(
+	classes: tuple[F3ClassInfo, ...] | None,
+) -> tuple[F3ClassInfo, ...]:
+	if classes is None:
+		msg = 'F3 lithology prediction runtime requires class_info to be loaded'
+		raise ValueError(msg)
+	if not classes:
+		msg = 'classes must contain at least one F3 class'
+		raise ValueError(msg)
+	return classes
 
 
 def _single_embedding_artifact(input_dir: Path) -> F3EmbeddingArtifact:
@@ -452,6 +461,7 @@ def _metadata_payload(  # noqa: PLR0913
 	probabilities: NDArray[np.float32],
 	metrics_rows: Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
+	classes = _required_runtime_classes(config.classes)
 	valid_count = int(np.count_nonzero(embedding.valid_tokens))
 	return {
 		'artifact_type': 'f3_lithology_token_predictions',
@@ -464,8 +474,8 @@ def _metadata_payload(  # noqa: PLR0913
 		'label_source_of_truth': 'segy_label_volume',
 		'png_label_role': 'train_validation_slice_selection_and_visual_qc',
 		'tokenization': config.token_policy.to_dict(),
-		'classes': [class_info.to_dict() for class_info in config.classes],
-		'class_probability_order': _class_ids(config.classes),
+		'classes': [class_info.to_dict() for class_info in classes],
+		'class_probability_order': _class_ids(classes),
 		'invalid_prediction_class_id': -1,
 		'invalid_probability_value': 'nan',
 		'inputs': {
