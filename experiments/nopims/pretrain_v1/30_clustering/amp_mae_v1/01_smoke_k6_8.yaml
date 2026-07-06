@@ -1,9 +1,9 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
 embeddings:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1/amp_mae_v1/smoke_1survey
+  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/nopims/pretrain_v1/amp_mae_v1/smoke_1survey/default
 clustering:
-  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_v1/smoke_k6_8
+  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/nopims/pretrain_v1/amp_mae_v1/smoke_1survey/default/k6_8
   embedding_normalization: l2
   pca:
     enabled: true
