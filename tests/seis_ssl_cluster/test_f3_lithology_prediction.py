@@ -111,6 +111,32 @@ def test_predict_f3_lithology_tokens_writes_standard_json_for_empty_metrics(
 	assert inline_row['mean_iou'] is None
 
 
+def test_predict_f3_lithology_tokens_can_score_validation_token_dataset(
+	tmp_path: Path,
+) -> None:
+	config = write_prediction_fixture(tmp_path)
+	validation_tokens = config.outputs.output_dir.parent / 'validation_tokens.npz'
+	_write_validation_tokens(validation_tokens)
+	np.save(config.inputs.label_volume, np.zeros((4, 4, 4), dtype=np.int32))
+	config = replace(
+		config,
+		inputs=replace(config.inputs, validation_tokens=validation_tokens),
+	)
+
+	result = predict_f3_lithology_tokens(config)
+
+	metadata = json.loads(result.metadata_json.read_text(encoding='utf-8'))
+	with result.validation_slice_metrics_csv.open(
+		encoding='utf-8',
+		newline='',
+	) as file_obj:
+		metric_rows = list(csv.DictReader(file_obj))
+
+	assert metadata['inputs']['validation_tokens'] == str(validation_tokens)
+	assert {row['slice_type'] for row in metric_rows} == {'inline', 'crossline'}
+	assert all(float(row['accuracy']) == 1.0 for row in metric_rows)
+
+
 def test_predict_f3_lithology_tokens_requires_loaded_classes(tmp_path: Path) -> None:
 	config = write_prediction_fixture(tmp_path)
 
@@ -227,6 +253,38 @@ def _token_classes() -> np.ndarray:
 			[[2, 0], [1, 2]],
 		],
 		dtype=np.int32,
+	)
+
+
+def _write_validation_tokens(path: Path) -> None:
+	rows = (
+		('inline', 101, (0, 0, 0)),
+		('inline', 101, (0, 0, 1)),
+		('inline', 101, (0, 1, 0)),
+		('inline', 101, (0, 1, 1)),
+		('crossline', 302, (0, 1, 0)),
+		('crossline', 302, (0, 1, 1)),
+		('crossline', 302, (1, 1, 0)),
+	)
+	token_xyz = np.asarray([row[2] for row in rows], dtype=np.int64)
+	count = int(token_xyz.shape[0])
+	path.parent.mkdir(parents=True, exist_ok=True)
+	np.savez_compressed(
+		path,
+		features=np.zeros((count, 2), dtype=np.float32),
+		labels=_token_classes()[
+			token_xyz[:, 0],
+			token_xyz[:, 1],
+			token_xyz[:, 2],
+		].astype(np.int64),
+		survey_id=np.asarray(['f3_facies_benchmark'] * count),
+		split=np.asarray(['validation'] * count),
+		slice_type=np.asarray([row[0] for row in rows]),
+		slice_index=np.asarray([row[1] for row in rows], dtype=np.int64),
+		token_xyz=token_xyz,
+		voxel_center_xyz=(token_xyz.astype(np.float32) * 2.0) + 0.5,
+		majority_fraction=np.ones(count, dtype=np.float32),
+		labeled_fraction=np.ones(count, dtype=np.float32),
 	)
 
 

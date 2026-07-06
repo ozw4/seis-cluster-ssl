@@ -7,11 +7,16 @@ import json
 import os
 import re
 import textwrap
+from collections import Counter
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from seis_ssl_cluster.f3.lithology.token_dataset import (
+	F3LithologyTokenDataset,
+	load_f3_lithology_token_dataset,
+)
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
 	PublishItem,
@@ -270,8 +275,18 @@ def build_f3_lithology_comparison_report(
 		token_metadata = _read_optional_json(
 			_token_metadata_path_for_metrics(metrics_path, _mapping(probe_config)),
 		)
+		token_datasets, token_dataset_warnings = _load_probe_token_datasets(
+			_mapping(probe_config),
+		)
+		warnings.extend(token_dataset_warnings)
 		rows.append(
-			_comparison_row(metrics_path, metrics, probe_config, token_metadata),
+			_comparison_row(
+				metrics_path,
+				metrics,
+				probe_config,
+				token_metadata,
+				token_datasets,
+			),
 		)
 	rows = sorted(
 		rows,
@@ -408,6 +423,10 @@ def _report_payload(config: F3LithologyReportConfig) -> dict[str, object]:
 		token_metadata_path,
 		warnings,
 	)
+	token_datasets, token_dataset_warnings = _load_probe_token_datasets(
+		_mapping(probe_config),
+	)
+	warnings.extend(token_dataset_warnings)
 	prediction_metadata = _read_optional_component(
 		'prediction_metadata',
 		config.prediction_metadata_json,
@@ -427,6 +446,7 @@ def _report_payload(config: F3LithologyReportConfig) -> dict[str, object]:
 	token_dataset = _token_dataset_summary(
 		_mapping(probe_config),
 		_mapping(token_metadata),
+		token_datasets=token_datasets,
 	)
 	pretrained = _pretrained_summary(config, _mapping(probe_config))
 	probe = _probe_summary(config, _mapping(probe_config))
@@ -549,19 +569,25 @@ def _pretrained_summary(
 def _token_dataset_summary(
 	probe_config: Mapping[str, object],
 	token_metadata: Mapping[str, object],
+	*,
+	token_datasets: Mapping[str, F3LithologyTokenDataset] | None = None,
 ) -> dict[str, object]:
 	token_summary = _mapping(token_metadata.get('summary'))
 	probe_summary = _mapping(probe_config.get('summary'))
+	dataset_summary = _loaded_token_dataset_summary(token_datasets)
 	train_counts = _prefer_mapping(
+		_mapping(dataset_summary.get('train_class_counts')),
 		_mapping(token_summary.get('train_class_counts')),
 		_mapping(probe_summary.get('train_class_counts')),
 	)
 	validation_counts = _prefer_mapping(
+		_mapping(dataset_summary.get('validation_class_counts')),
 		_mapping(token_summary.get('validation_class_counts')),
 		_mapping(probe_summary.get('validation_class_counts')),
 	)
 	retained = _int_or_none(
 		_first_non_empty(
+			dataset_summary.get('all_labeled_tokens'),
 			token_summary.get('all_labeled_tokens'),
 			_sum_ints((token_summary.get('train_tokens'), token_summary.get(
 				'validation_tokens',
@@ -573,10 +599,12 @@ def _token_dataset_summary(
 	total = None if retained is None or dropped is None else retained + dropped
 	return {
 		'train_token_count': _first_non_empty(
+			dataset_summary.get('train_tokens'),
 			token_summary.get('train_tokens'),
 			probe_summary.get('train_tokens'),
 		),
 		'validation_token_count': _first_non_empty(
+			dataset_summary.get('validation_tokens'),
 			token_summary.get('validation_tokens'),
 			probe_summary.get('validation_tokens'),
 		),
@@ -592,6 +620,69 @@ def _token_dataset_summary(
 		'class_imbalance': _class_imbalance(
 			_combined_counts(train_counts, validation_counts),
 		),
+	}
+
+
+def _load_probe_token_datasets(
+	probe_config: Mapping[str, object],
+) -> tuple[dict[str, F3LithologyTokenDataset], list[str]]:
+	paths = _probe_token_dataset_paths(probe_config)
+	if not paths:
+		return {}, []
+	datasets: dict[str, F3LithologyTokenDataset] = {}
+	warnings: list[str] = []
+	for split, path in paths.items():
+		try:
+			datasets[split] = load_f3_lithology_token_dataset(path)
+		except (OSError, KeyError, TypeError, ValueError) as exc:
+			warnings.append(
+				f'unable to load {split} token dataset component: {path} ({exc})',
+			)
+	return datasets, warnings
+
+
+def _probe_token_dataset_paths(
+	probe_config: Mapping[str, object],
+) -> dict[str, Path]:
+	inputs = _mapping(probe_config.get('inputs'))
+	paths: dict[str, Path] = {}
+	for split, key in (
+		('train', 'train_tokens'),
+		('validation', 'validation_tokens'),
+	):
+		value = inputs.get(key)
+		if isinstance(value, str) and value:
+			paths[split] = Path(value)
+	return paths
+
+
+def _loaded_token_dataset_summary(
+	token_datasets: Mapping[str, F3LithologyTokenDataset] | None,
+) -> dict[str, object]:
+	if not token_datasets:
+		return {}
+	train = token_datasets.get('train')
+	validation = token_datasets.get('validation')
+	summary: dict[str, object] = {}
+	if train is not None:
+		summary['train_tokens'] = train.count
+		summary['train_class_counts'] = _token_dataset_class_counts(train)
+	if validation is not None:
+		summary['validation_tokens'] = validation.count
+		summary['validation_class_counts'] = _token_dataset_class_counts(validation)
+	if train is not None and validation is not None:
+		summary['all_labeled_tokens'] = train.count + validation.count
+	return summary
+
+
+def _token_dataset_class_counts(
+	dataset: F3LithologyTokenDataset,
+) -> dict[int, int]:
+	return {
+		int(class_id): int(count)
+		for class_id, count in sorted(
+			Counter(int(label) for label in dataset.labels).items(),
+		)
 	}
 
 
@@ -757,13 +848,19 @@ def _comparison_row(
 	metrics: Mapping[str, object],
 	probe_config: Mapping[str, object] | None,
 	token_metadata: Mapping[str, object] | None,
+	token_datasets: Mapping[str, F3LithologyTokenDataset] | None = None,
 ) -> dict[str, object]:
 	config = _mapping(probe_config)
 	model = _mapping(config.get('model'))
 	labels = _mapping(config.get('labels'))
 	probe = _mapping(config.get('probe'))
 	path_parts = _run_parts(metrics_path)
-	feature_source = _feature_source_summary(metrics, config, token_metadata)
+	feature_source = _feature_source_summary(
+		metrics,
+		config,
+		token_metadata,
+		token_datasets,
+	)
 	model_tag = _first_non_empty(model.get('tag'), path_parts.get('MODEL_TAG'))
 	feature_kind = _feature_kind(
 		feature_source=feature_source,
@@ -868,6 +965,7 @@ def _feature_source_summary(
 	metrics: Mapping[str, object],
 	probe_config: Mapping[str, object],
 	token_metadata: Mapping[str, object] | None,
+	token_datasets: Mapping[str, F3LithologyTokenDataset] | None = None,
 ) -> Mapping[str, object]:
 	for candidate in (
 		_mapping(metrics.get('feature_source')),
@@ -876,9 +974,25 @@ def _feature_source_summary(
 		_mapping(_mapping(probe_config.get('embeddings')).get('feature_source')),
 		_mapping(_mapping(probe_config.get('model')).get('feature_source')),
 		_mapping(_mapping(token_metadata).get('feature_source')),
+		_token_dataset_feature_source(token_datasets),
 	):
 		if candidate:
 			return candidate
+	return {}
+
+
+def _token_dataset_feature_source(
+	token_datasets: Mapping[str, F3LithologyTokenDataset] | None,
+) -> Mapping[str, object]:
+	if not token_datasets:
+		return {}
+	for split in ('train', 'validation'):
+		dataset = token_datasets.get(split)
+		if dataset is None:
+			continue
+		feature_source = _mapping(dataset.metadata.get('feature_source'))
+		if feature_source:
+			return feature_source
 	return {}
 
 
@@ -2022,9 +2136,14 @@ def _class_metric_sort_key(value: str) -> tuple[int, str]:
 
 def _prefer_mapping(
 	preferred: Mapping[str, object],
-	fallback: Mapping[str, object],
+	*fallbacks: Mapping[str, object],
 ) -> Mapping[str, object]:
-	return preferred if preferred else fallback
+	if preferred:
+		return preferred
+	for fallback in fallbacks:
+		if fallback:
+			return fallback
+	return {}
 
 
 def _mapping(value: object) -> Mapping[str, object]:

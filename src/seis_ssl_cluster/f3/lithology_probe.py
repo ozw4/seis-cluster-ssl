@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from seis_ssl_cluster.f3.lithology.token_dataset import (
+	F3LithologyTokenDataset,
 	load_f3_lithology_token_dataset,
 )
 from seis_ssl_cluster.f3.metrics import (
@@ -307,13 +308,19 @@ class _TokenDataset:
 	"""Loaded token feature matrix, labels, and provenance arrays."""
 
 	path: Path
-	features: NDArray[np.float32]
-	labels: NDArray[np.int64]
-	metadata: dict[str, NDArray[np.generic]]
+	dataset: F3LithologyTokenDataset
 
 	@property
 	def count(self) -> int:
-		return int(self.labels.shape[0])
+		return self.dataset.count
+
+	@property
+	def features(self) -> NDArray[np.float32]:
+		return np.asarray(self.dataset.features, dtype=np.float32)
+
+	@property
+	def labels(self) -> NDArray[np.int64]:
+		return np.asarray(self.dataset.labels, dtype=np.int64)
 
 
 def train_and_evaluate_f3_lithology_probe(
@@ -401,11 +408,6 @@ def load_token_dataset(path: str | Path, *, label: str) -> _TokenDataset:
 	dataset = load_f3_lithology_token_dataset(token_path)
 	features = np.asarray(dataset.features, dtype=np.float32)
 	labels = np.asarray(dataset.labels, dtype=np.int64)
-	metadata = {
-		key: np.asarray(value)
-		for key, value in dataset.to_npz_arrays().items()
-		if key not in {'features', 'labels'}
-	}
 	features = _validate_feature_matrix(features, f'{label}.features')
 	labels = _validate_label_vector(labels, f'{label}.labels')
 	if features.shape[0] != labels.shape[0]:
@@ -419,9 +421,7 @@ def load_token_dataset(path: str | Path, *, label: str) -> _TokenDataset:
 		raise ValueError(msg)
 	return _TokenDataset(
 		path=token_path,
-		features=np.asarray(features, dtype=np.float32),
-		labels=labels,
-		metadata=metadata,
+		dataset=dataset,
 	)
 
 
@@ -446,10 +446,7 @@ def _validate_disjoint_token_xyz(
 
 
 def _required_token_xyz(dataset: _TokenDataset, *, label: str) -> NDArray[np.int64]:
-	if 'token_xyz' not in dataset.metadata:
-		msg = f'{label} must contain token_xyz for leakage validation'
-		raise KeyError(msg)
-	token_xyz = np.asarray(dataset.metadata['token_xyz'], dtype=np.int64)
+	token_xyz = np.asarray(dataset.dataset.token_xyz, dtype=np.int64)
 	expected_shape = (dataset.count, 3)
 	if token_xyz.shape != expected_shape:
 		msg = (
@@ -649,7 +646,12 @@ def _write_probe_outputs(  # noqa: PLR0913
 	joblib.dump(scaler, outputs.scaler_joblib)
 	token_metadata = _read_optional_json(config.inputs.token_dataset_metadata_json)
 	metrics_payload = dict(metrics)
-	feature_source = _feature_source_from_config(config, token_metadata)
+	feature_source = _feature_source_from_config(
+		config,
+		token_metadata,
+		train_token_metadata=train.dataset.metadata,
+		validation_token_metadata=validation.dataset.metadata,
+	)
 	if feature_source is not None:
 		metrics_payload['feature_source'] = feature_source
 	_write_json(outputs.metrics_json, metrics_payload)
@@ -737,7 +739,12 @@ def _resolved_config_payload(
 			'validation_class_counts': _class_counts(validation.labels),
 		},
 	}
-	feature_source = _feature_source_from_config(config, token_metadata)
+	feature_source = _feature_source_from_config(
+		config,
+		token_metadata,
+		train_token_metadata=train.dataset.metadata,
+		validation_token_metadata=validation.dataset.metadata,
+	)
 	if feature_source is not None:
 		payload['feature_source'] = feature_source
 	return payload
@@ -746,10 +753,21 @@ def _resolved_config_payload(
 def _feature_source_from_config(
 	config: F3LithologyProbeConfig,
 	token_metadata: Mapping[str, object] | None = None,
+	*,
+	train_token_metadata: Mapping[str, object] | None = None,
+	validation_token_metadata: Mapping[str, object] | None = None,
 ) -> dict[str, object] | None:
 	token_metadata_mapping = _mapping_or_none(token_metadata) or {}
 	for candidate in (
 		_mapping_or_none(token_metadata_mapping.get('feature_source')),
+		_mapping_or_none(
+			(_mapping_or_none(train_token_metadata) or {}).get('feature_source'),
+		),
+		_mapping_or_none(
+			(_mapping_or_none(validation_token_metadata) or {}).get(
+				'feature_source',
+			),
+		),
 		_mapping_or_none(config.token_dataset.get('feature_source')),
 		_mapping_or_none(config.embeddings.get('feature_source')),
 		_mapping_or_none(config.model.get('feature_source')),

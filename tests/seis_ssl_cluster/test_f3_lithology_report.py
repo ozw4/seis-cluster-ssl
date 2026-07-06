@@ -4,6 +4,7 @@ import csv
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
@@ -78,6 +79,37 @@ def test_f3_lithology_report_outputs_markdown_json_and_relative_links(
 		in markdown
 	)
 	assert str(tmp_path) not in _figures_section(markdown)
+
+
+def test_f3_lithology_report_summarizes_explicit_token_npz_paths(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	token_dir = run['lithology_root'] / 'token_dataset'
+	train_tokens = token_dir / 'train_tokens.npz'
+	validation_tokens = token_dir / 'validation_tokens.npz'
+	_write_token_npz(train_tokens, np.asarray([0, 5, 5], dtype=np.int64))
+	_write_token_npz(validation_tokens, np.asarray([0, 0], dtype=np.int64))
+	probe_config = json.loads(
+		run['probe_config_json'].read_text(encoding='utf-8'),
+	)
+	probe_config['inputs']['train_tokens'] = str(train_tokens)
+	probe_config['inputs']['validation_tokens'] = str(validation_tokens)
+	_write_json(run['probe_config_json'], probe_config)
+
+	result = build_f3_lithology_report(_report_config(run))
+
+	payload = json.loads(result.report_json.read_text(encoding='utf-8'))
+	token_dataset = payload['token_dataset']
+	assert token_dataset['train_token_count'] == 3
+	assert token_dataset['validation_token_count'] == 2
+	assert token_dataset['class_counts']['train'] == {'0': 1, '5': 2}
+	assert token_dataset['class_counts']['validation'] == {'0': 2}
 
 
 def test_f3_lithology_report_writes_warning_when_metrics_are_missing(
@@ -699,6 +731,30 @@ def _classes() -> list[dict[str, object]]:
 		{'class_id': 0, 'class_name': 'Background', 'rgb': [0, 0, 0]},
 		{'class_id': 5, 'class_name': 'Zechstein', 'rgb': [128, 64, 32]},
 	]
+
+
+def _write_token_npz(path: Path, labels: np.ndarray) -> None:
+	count = int(labels.shape[0])
+	path.parent.mkdir(parents=True, exist_ok=True)
+	np.savez_compressed(
+		path,
+		features=np.zeros((count, 2), dtype=np.float32),
+		labels=labels,
+		survey_id=np.asarray(['f3_facies_benchmark'] * count),
+		split=np.asarray(['train'] * count),
+		slice_type=np.asarray(['inline'] * count),
+		slice_index=np.arange(count, dtype=np.int64),
+		token_xyz=np.column_stack(
+			(
+				np.arange(count, dtype=np.int64),
+				np.zeros(count, dtype=np.int64),
+				np.zeros(count, dtype=np.int64),
+			),
+		),
+		voxel_center_xyz=np.zeros((count, 3), dtype=np.float32),
+		majority_fraction=np.ones(count, dtype=np.float32),
+		labeled_fraction=np.ones(count, dtype=np.float32),
+	)
 
 
 def _write_json(path: Path, payload: dict[str, object]) -> None:

@@ -16,6 +16,7 @@ from seis_ssl_cluster.f3 import (
 	visualize_f3_lithology_predictions,
 )
 from tests.seis_ssl_cluster.test_f3_lithology_prediction import (
+	_write_validation_tokens,
 	write_prediction_fixture,
 )
 
@@ -28,6 +29,17 @@ def test_visualize_f3_lithology_predictions_writes_png_sidecars_and_metadata(
 ) -> None:
 	pytest.importorskip('matplotlib.pyplot')
 	prediction_config = write_prediction_fixture(tmp_path)
+	validation_tokens = prediction_config.outputs.output_dir.parent / (
+		'validation_tokens.npz'
+	)
+	_write_validation_tokens(validation_tokens)
+	prediction_config = replace(
+		prediction_config,
+		inputs=replace(
+			prediction_config.inputs,
+			validation_tokens=validation_tokens,
+		),
+	)
 	prediction_result = predict_f3_lithology_tokens(prediction_config)
 	predictions = np.load(prediction_result.token_predictions)
 	probabilities = np.load(prediction_result.probability_volume)
@@ -128,6 +140,10 @@ def test_visualize_f3_lithology_predictions_writes_png_sidecars_and_metadata(
 	assert selected_sidecar['voxel_projection_metrics']['weighted_f1'] is None
 	assert selected_sidecar['voxel_projection_metrics']['mean_iou'] is None
 	assert metadata['artifact_type'] == 'f3_lithology_prediction_visualizations'
+	assert metadata['validation_token_dataset'] == {
+		'token_count': 7,
+		'class_counts': {'0': 1, '1': 4, '2': 2},
+	}
 	assert metadata['figures'][0]['group'] == 'validation'
 
 
