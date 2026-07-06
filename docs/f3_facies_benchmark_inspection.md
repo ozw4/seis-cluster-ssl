@@ -13,9 +13,14 @@ NPY volumes, manifests, embeddings, or training runs.
 
 ## Roots
 
+```bash
+ROOT=/workspace/artifacts/seis_ssl_cluster
+EXP=experiments/f3/facies_benchmark_v1
+```
+
 - Raw data root: `/home/dcuser/data/public_data/field/F3`
-- Artifact root: `/workspace/artifacts/seis_ssl_cluster`
-- Inspection root: `/workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1`
+- Artifact root: `$ROOT`
+- Inspection root: `$ROOT/inspection/f3/facies_benchmark_v1`
 
 Do not write F3 inspection outputs under `runs/`.
 
@@ -49,7 +54,7 @@ stage and resolves the common contract.
 ## Output Layout
 
 ```text
-/workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/
+$ROOT/inspection/f3/facies_benchmark_v1/
 ├── inventory/
 ├── segy/
 ├── labels/
@@ -82,25 +87,35 @@ Run the inspection stages in order:
 
 ```bash
 python proc/seis_ssl_cluster/inspect_f3_files.py \
-  --config experiments/f3/facies_benchmark_v1/00_inspection/01_inspect_files.yaml
+  --config $EXP/00_inspection/01_inspect_files.yaml
 
 python proc/seis_ssl_cluster/inspect_f3_segy_geometry.py \
-  --config experiments/f3/facies_benchmark_v1/00_inspection/02_inspect_segy_geometry.yaml
+  --config $EXP/00_inspection/02_inspect_segy_geometry.yaml
 
 python proc/seis_ssl_cluster/inspect_f3_png_labels.py \
-  --config experiments/f3/facies_benchmark_v1/00_inspection/03_inspect_png_labels.yaml
+  --config $EXP/00_inspection/03_inspect_png_labels.yaml
 
 python proc/seis_ssl_cluster/visualize_f3_quicklook.py \
-  --config experiments/f3/facies_benchmark_v1/00_inspection/04_make_quicklook_figures.yaml
+  --config $EXP/00_inspection/04_make_quicklook_figures.yaml
 
 python proc/seis_ssl_cluster/check_f3_label_consistency.py \
-  --config experiments/f3/facies_benchmark_v1/00_inspection/05_check_label_consistency.yaml
+  --config $EXP/00_inspection/05_check_label_consistency.yaml
 
 python proc/seis_ssl_cluster/preview_f3_tokenization.py \
-  --config experiments/f3/facies_benchmark_v1/00_inspection/06_make_tokenization_preview.yaml
+  --config $EXP/00_inspection/06_make_tokenization_preview.yaml
 
 python proc/seis_ssl_cluster/build_f3_inspection_report.py \
-  --config experiments/f3/facies_benchmark_v1/00_inspection/07_build_inspection_report.yaml
+  --config $EXP/00_inspection/07_build_inspection_report.yaml
+```
+
+Outputs:
+
+```text
+inspection:
+  $ROOT/inspection/f3/facies_benchmark_v1
+
+results:
+  results/f3/facies_benchmark_v1/inspection
 ```
 
 The final report links key figures by paths relative to the inspection root,

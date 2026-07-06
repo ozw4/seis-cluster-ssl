@@ -21,12 +21,16 @@ MODEL_TAG=amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
 EMBED_SPEC=overlap_x16
 LABEL_SET=png_slices_segy_labels_v1
 PROBE_SPEC=linear_balanced_v1
+Z_BASELINE_TAG=z_only_v1
+AMP_BASELINE_TAG=amplitude_stats_v1
+XYZ_BASELINE_TAG=xyz_coordinates_v1
+RANDOM_ENCODER_TAG=random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1
 ```
 
 - Raw data root: `/home/dcuser/data/public_data/field/F3`
-- Artifact root: `/workspace/artifacts/seis_ssl_cluster`
+- Artifact root: `$ROOT`
 - Config root:
-  `experiments/f3/facies_benchmark_v1/50_lithology/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET`
+  `$EXP/50_lithology/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET`
 - Frozen checkpoint:
   `$ROOT/pretraining/nopims/pretrain_v1/$MODEL_TAG/full_100ep/mae_best.pt`
 
@@ -135,10 +139,10 @@ the linear balanced MVP is established.
 
 ```bash
 python proc/seis_ssl_cluster/prepare_f3_facies_volume.py \
-  --config <f3-volume-registry-config>
+  --config $EXP/10_prepare/01_prepare_f3_volume.yaml
 
 python proc/seis_ssl_cluster/extract_embeddings.py \
-  --config <f3-embedding-config>
+  --config $EXP/20_embedding/$MODEL_TAG/$EMBED_SPEC.yaml
 
 python proc/seis_ssl_cluster/build_f3_lithology_token_dataset.py \
   --config $EXP/50_lithology/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/01_build_token_dataset.yaml
@@ -154,6 +158,25 @@ python proc/seis_ssl_cluster/visualize_f3_lithology_predictions.py \
 
 python proc/seis_ssl_cluster/build_f3_lithology_report.py \
   --config $EXP/50_lithology/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/06_build_lithology_report.yaml
+```
+
+Outputs:
+
+```text
+volume registry:
+  $ROOT/registry/volumes/f3/facies_benchmark_v1
+
+embedding:
+  $ROOT/embeddings/f3/facies_benchmark_v1/$MODEL_TAG/$EMBED_SPEC
+
+lithology probe:
+  $ROOT/lithology/f3/facies_benchmark_v1/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/probes/$PROBE_SPEC
+
+lithology report:
+  $ROOT/lithology/f3/facies_benchmark_v1/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/reports/$PROBE_SPEC
+
+results:
+  results/f3/facies_benchmark_v1/lithology_probe/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/$PROBE_SPEC
 ```
 
 ## Baseline Comparison
@@ -175,26 +198,26 @@ Pretrained regeneration commands:
 
 ```bash
 python proc/seis_ssl_cluster/build_f3_lithology_token_dataset.py \
-  --config experiments/f3/facies_benchmark_v1/50_lithology/<MODEL_TAG>/<EMBED_SPEC>/<LABEL_SET>/01_build_token_dataset.yaml
+  --config $EXP/50_lithology/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/01_build_token_dataset.yaml
 
 python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
-  --config experiments/f3/facies_benchmark_v1/50_lithology/<MODEL_TAG>/<EMBED_SPEC>/<LABEL_SET>/02_train_linear_probe.yaml
+  --config $EXP/50_lithology/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/02_train_linear_probe.yaml
 ```
 
 Baseline stages for a complete comparison:
 
 | Order | Baseline | Entrypoint | Config |
 |---|---|---|---|
-| 1 | z-only dataset | `build_f3_lithology_baseline_features.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/z_only_v1/01_build_baseline_token_dataset.yaml` |
-| 2 | z-only probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/z_only_v1/02_train_linear_probe.yaml` |
-| 3 | amplitude-only dataset | `build_f3_lithology_baseline_features.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/amplitude_stats_v1/01_build_baseline_token_dataset.yaml` |
-| 4 | amplitude-only probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/amplitude_stats_v1/02_train_linear_probe.yaml` |
-| 5 | xyz-coordinate dataset | `build_f3_lithology_baseline_features.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/01_build_baseline_token_dataset.yaml` |
-| 6 | xyz-coordinate probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/02_train_linear_probe.yaml` |
-| 7 | random checkpoint | `create_random_mae_checkpoint.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/01_create_random_checkpoint.yaml` |
-| 8 | random embeddings | `extract_embeddings.py --device cuda --skip-existing` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/02_extract_embeddings.yaml` |
-| 9 | random token dataset | `build_f3_lithology_token_dataset.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/03_build_token_dataset.yaml` |
-| 10 | random probe | `train_f3_lithology_probe.py` | `experiments/f3/facies_benchmark_v1/50_lithology_baselines/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/04_train_linear_probe.yaml` |
+| 1 | z-only dataset | `build_f3_lithology_baseline_features.py` | `$EXP/50_lithology_baselines/$Z_BASELINE_TAG/01_build_baseline_token_dataset.yaml` |
+| 2 | z-only probe | `train_f3_lithology_probe.py` | `$EXP/50_lithology_baselines/$Z_BASELINE_TAG/02_train_linear_probe.yaml` |
+| 3 | amplitude-only dataset | `build_f3_lithology_baseline_features.py` | `$EXP/50_lithology_baselines/$AMP_BASELINE_TAG/01_build_baseline_token_dataset.yaml` |
+| 4 | amplitude-only probe | `train_f3_lithology_probe.py` | `$EXP/50_lithology_baselines/$AMP_BASELINE_TAG/02_train_linear_probe.yaml` |
+| 5 | xyz-coordinate dataset | `build_f3_lithology_baseline_features.py` | `$EXP/50_lithology_baselines/$XYZ_BASELINE_TAG/01_build_baseline_token_dataset.yaml` |
+| 6 | xyz-coordinate probe | `train_f3_lithology_probe.py` | `$EXP/50_lithology_baselines/$XYZ_BASELINE_TAG/02_train_linear_probe.yaml` |
+| 7 | random checkpoint | `create_random_mae_checkpoint.py` | `$EXP/50_lithology_baselines/$RANDOM_ENCODER_TAG/01_create_random_checkpoint.yaml` |
+| 8 | random embeddings | `extract_embeddings.py --device cuda --skip-existing` | `$EXP/50_lithology_baselines/$RANDOM_ENCODER_TAG/02_extract_embeddings.yaml` |
+| 9 | random token dataset | `build_f3_lithology_token_dataset.py` | `$EXP/50_lithology_baselines/$RANDOM_ENCODER_TAG/03_build_token_dataset.yaml` |
+| 10 | random probe | `train_f3_lithology_probe.py` | `$EXP/50_lithology_baselines/$RANDOM_ENCODER_TAG/04_train_linear_probe.yaml` |
 
 Z-only, amplitude-only, and random encoder outputs can be reused only when they
 already match the current pretrained train/validation token split and label
@@ -204,17 +227,17 @@ The xyz-coordinate commands are:
 
 ```bash
 python proc/seis_ssl_cluster/build_f3_lithology_baseline_features.py \
-  --config experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/01_build_baseline_token_dataset.yaml
+  --config $EXP/50_lithology_baselines/$XYZ_BASELINE_TAG/01_build_baseline_token_dataset.yaml
 
 python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
-  --config experiments/f3/facies_benchmark_v1/50_lithology_baselines/xyz_coordinates_v1/02_train_linear_probe.yaml
+  --config $EXP/50_lithology_baselines/$XYZ_BASELINE_TAG/02_train_linear_probe.yaml
 ```
 
 Then rebuild and publish the comparison:
 
 ```bash
 python proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py \
-  --config experiments/f3/facies_benchmark_v1/50_lithology_baselines/05_build_baseline_comparison_report.yaml
+  --config $EXP/50_lithology_baselines/05_build_baseline_comparison_report.yaml
 ```
 
 The comparison report is written under:

@@ -3,10 +3,14 @@
 Use `artifacts/` for complete local outputs and `results/` for lightweight
 GitHub review artifacts.
 
+```bash
+ROOT=/workspace/artifacts/seis_ssl_cluster
+```
+
 ## Normal Runs
 
 Experiment, training, embedding, clustering, and visualization commands should
-continue to write full outputs under `/workspace/artifacts/seis_ssl_cluster/`.
+continue to write full outputs under `$ROOT/`.
 That tree is local generated output and is not tracked by Git.
 
 ## Sharing
