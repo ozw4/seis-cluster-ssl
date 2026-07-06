@@ -18,8 +18,8 @@ from seis_ssl_cluster.results import (
 BYTES_PER_MIB = 1024 * 1024
 
 
-def main() -> int:
-	"""Validate results artifacts and return a process exit code."""
+def build_parser() -> ArgumentParser:
+	"""Build the CLI parser for results artifact validation."""
 	parser = ArgumentParser(
 		description='Validate lightweight artifacts stored under results/.',
 	)
@@ -46,6 +46,12 @@ def main() -> int:
 		default=LOCAL_PATH_POLICY_WARNING,
 		help='Treat local absolute paths as warnings or errors.',
 	)
+	return parser
+
+
+def main() -> int:
+	"""Validate results artifacts and return a process exit code."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	report = validate_results_artifacts(

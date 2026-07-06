@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+
 from seis_ssl_cluster.cli import (
 	build_config_parser,
 	load_config_for_cli,
@@ -15,13 +17,18 @@ from seis_ssl_cluster.training.random_checkpoint import (
 )
 
 
-def main() -> None:
-	"""Create a random MAE checkpoint or print a dry-run summary."""
-	parser = build_config_parser(
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for random MAE checkpoint creation."""
+	return build_config_parser(
 		'Create a random-initialized MAE checkpoint baseline.',
 		config_help='Path to a random checkpoint YAML configuration file.',
 		dry_run_help='Validate the config and print a run summary without writing.',
 	)
+
+
+def main() -> None:
+	"""Create a random MAE checkpoint or print a dry-run summary."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	config_path = parse_config_path(args)

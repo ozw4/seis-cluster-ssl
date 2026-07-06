@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib
 from pathlib import Path
 
@@ -22,12 +23,17 @@ DEFAULT_CONFIG = (
 )
 
 
-def main() -> None:
-	"""Run embedding clustering or print a dry-run summary."""
-	parser = build_config_parser(
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for embedding clustering."""
+	return build_config_parser(
 		'Cluster amplitude-only embeddings.',
 		default_config=DEFAULT_CONFIG,
 	)
+
+
+def main() -> None:
+	"""Run embedding clustering or print a dry-run summary."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	config_path = parse_config_path(args)

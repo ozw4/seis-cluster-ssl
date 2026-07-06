@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from seis_ssl_cluster.cli import build_config_parser
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_normalization_qc_config,
@@ -24,10 +26,7 @@ from seis_ssl_cluster.data.schema import (
 	read_manifest_json,
 	write_manifest_json,
 )
-from seis_ssl_cluster.utils.cli import (
-	parse_config_args,
-	print_config_summary,
-)
+from seis_ssl_cluster.utils.cli import print_config_summary
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[1]
@@ -37,12 +36,18 @@ DEFAULT_CONFIG = (
 )
 
 
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for normalization stats QC filtering."""
+	return build_config_parser(
+		'Filter amplitude-only manifests by normalization QC.',
+		default_config=DEFAULT_CONFIG,
+	)
+
+
 def main() -> None:
 	"""Run normalization stats QC and write clean outputs."""
-	args = parse_config_args(
-		'Filter amplitude-only manifests by normalization QC.',
-		DEFAULT_CONFIG,
-	)
+	parser = build_parser()
+	args = parser.parse_args()
 	config = resolve_normalization_qc_config(load_config(args.config))
 	paths = _required_mapping(config, 'paths')
 	nopims_root = Path(_required_str(paths, 'nopims_root'))

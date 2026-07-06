@@ -133,8 +133,7 @@ def test_existing_build_parser_functions_construct_argparse_parsers() -> None:
 	for script in PROC_SCRIPTS:
 		module = importlib.import_module(_module_name(script))
 		build_parser = getattr(module, 'build_parser', None)
-		if build_parser is None:
-			continue
+		assert build_parser is not None, script
 
 		parser = build_parser()
 
@@ -150,7 +149,7 @@ def test_primary_proc_help_preserves_existing_flags(
 	script_name: str,
 	expected_flags: tuple[str, ...],
 ) -> None:
-	help_text = _help_text(PROC_DIR / script_name)
+	help_text = _parser_help_text(PROC_DIR / script_name)
 
 	for flag in expected_flags:
 		assert flag in help_text
@@ -192,19 +191,32 @@ def _help_text(script: Path) -> str:
 			env.get('PYTHONPATH', ''),
 		),
 	)
-	completed = subprocess.run(  # noqa: S603
-		[
-			sys.executable,
-			str(script),
-			'--help',
-		],
-		cwd=REPO_ROOT,
-		env=env,
-		text=True,
-		capture_output=True,
-		check=True,
-	)
+	try:
+		completed = subprocess.run(  # noqa: S603
+			[
+				sys.executable,
+				str(script),
+				'--help',
+			],
+			cwd=REPO_ROOT,
+			env=env,
+			text=True,
+			capture_output=True,
+			check=True,
+			timeout=30,
+		)
+	except subprocess.TimeoutExpired as exc:
+		raise AssertionError(f'--help timed out for {script.name}') from exc
 	return completed.stdout + completed.stderr
+
+
+def _parser_help_text(script: Path) -> str:
+	module = importlib.import_module(_module_name(script))
+	build_parser = getattr(module, 'build_parser', None)
+	assert build_parser is not None, script
+	parser = build_parser()
+	assert isinstance(parser, argparse.ArgumentParser)
+	return parser.format_help()
 
 
 def _main_function(script: Path) -> ast.FunctionDef | None:

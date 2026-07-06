@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 
 from seis_ssl_cluster.cli import (
@@ -33,15 +34,20 @@ DEFAULT_CONFIG = (
 )
 
 
-def main() -> None:
-	"""Write F3 lithology prediction figures or print a dry-run summary."""
-	parser = build_config_parser(
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for F3 lithology prediction visualization."""
+	return build_config_parser(
 		'Visualize F3 lithology predictions.',
 		default_config=DEFAULT_CONFIG,
 		dry_run_help=(
 			'Validate the config and print a run summary without writing figures.'
 		),
 	)
+
+
+def main() -> None:
+	"""Write F3 lithology prediction figures or print a dry-run summary."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	config_path = parse_config_path(args)

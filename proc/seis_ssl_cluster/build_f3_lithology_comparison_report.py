@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -37,8 +38,8 @@ DEFAULT_SEARCH_ROOT = ArtifactPaths().lithology_dataset(DEFAULT_KEY)
 DEFAULT_OUTPUT_DIR = ArtifactPaths().baseline_comparison_report(DEFAULT_KEY)
 
 
-def main() -> None:
-	"""Build an F3 lithology comparison report or print a dry-run summary."""
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the CLI parser for F3 lithology comparison reports."""
 	parser = build_config_parser(
 		'Build an F3 lithology pretrained-vs-baseline comparison report.',
 		config_required=False,
@@ -81,6 +82,12 @@ def main() -> None:
 		default=None,
 		help='Figure DPI. Values below 300 are raised to 300.',
 	)
+	return parser
+
+
+def main() -> None:
+	"""Build an F3 lithology comparison report or print a dry-run summary."""
+	parser = build_parser()
 	args = parser.parse_args()
 
 	raw_config = (
