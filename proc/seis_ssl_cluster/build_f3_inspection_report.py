@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from seis_ssl_cluster.cli import (
+	add_config_argument,
+	add_dry_run_argument,
+	load_config_for_cli,
+	parse_config_path,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_f3_facies_inspection_config,
@@ -16,7 +24,6 @@ from seis_ssl_cluster.f3 import (
 	F3InspectionReportConfig,
 	build_f3_inspection_report,
 )
-from seis_ssl_cluster.utils.cli import parse_config_args
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[2]
@@ -28,15 +35,29 @@ DEFAULT_CONFIG = (
 )
 
 
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the command line parser for the F3 inspection report."""
+	parser = argparse.ArgumentParser(
+		description='Build the consolidated F3 facies benchmark inspection report.',
+	)
+	add_config_argument(parser, default=DEFAULT_CONFIG)
+	add_dry_run_argument(parser)
+	return parser
+
+
 def main() -> None:
 	"""Build the consolidated F3 inspection Markdown and JSON reports."""
-	args = parse_config_args(
-		'Build the consolidated F3 facies benchmark inspection report.',
-		DEFAULT_CONFIG,
-	)
-	config = resolve_f3_facies_inspection_config(
-		load_config(args.config),
-		stage=STAGE_F3_INSPECTION_REPORT,
+	parser = build_parser()
+	args = parser.parse_args()
+	config_path = parse_config_path(args)
+	raw_config = load_config_for_cli(config_path, loader=load_config)
+	config = resolve_config_for_cli(
+		raw_config,
+		resolver=lambda cfg: resolve_f3_facies_inspection_config(
+			cfg,
+			stage=STAGE_F3_INSPECTION_REPORT,
+		),
+		config_path=config_path,
 	)
 	paths = _required_mapping(config, 'paths')
 	output_root = _required_mapping(config, 'outputs')

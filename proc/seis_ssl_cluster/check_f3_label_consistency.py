@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from seis_ssl_cluster.cli import (
+	add_config_argument,
+	add_dry_run_argument,
+	load_config_for_cli,
+	parse_config_path,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_f3_facies_inspection_config,
@@ -19,7 +27,6 @@ from seis_ssl_cluster.f3 import (
 	inspect_f3_segy_files,
 	write_f3_label_consistency_outputs,
 )
-from seis_ssl_cluster.utils.cli import parse_config_args
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[2]
@@ -31,15 +38,29 @@ DEFAULT_CONFIG = (
 )
 
 
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the command line parser for F3 label consistency checks."""
+	parser = argparse.ArgumentParser(
+		description='Check F3 PNG teacher labels against dense SEGY label slices.',
+	)
+	add_config_argument(parser, default=DEFAULT_CONFIG)
+	add_dry_run_argument(parser)
+	return parser
+
+
 def main() -> None:
 	"""Check F3 PNG labels against dense SEGY labels and write QC artifacts."""
-	args = parse_config_args(
-		'Check F3 PNG teacher labels against dense SEGY label slices.',
-		DEFAULT_CONFIG,
-	)
-	config = resolve_f3_facies_inspection_config(
-		load_config(args.config),
-		stage=STAGE_F3_LABEL_CONSISTENCY,
+	parser = build_parser()
+	args = parser.parse_args()
+	config_path = parse_config_path(args)
+	raw_config = load_config_for_cli(config_path, loader=load_config)
+	config = resolve_config_for_cli(
+		raw_config,
+		resolver=lambda cfg: resolve_f3_facies_inspection_config(
+			cfg,
+			stage=STAGE_F3_LABEL_CONSISTENCY,
+		),
+		config_path=config_path,
 	)
 	paths = _required_mapping(config, 'paths')
 	inspection = _required_mapping(config, 'inspection')

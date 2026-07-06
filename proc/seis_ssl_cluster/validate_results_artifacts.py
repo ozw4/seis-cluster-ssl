@@ -5,6 +5,7 @@ from __future__ import annotations
 from argparse import ArgumentParser
 from pathlib import Path
 
+from seis_ssl_cluster.cli import add_append_path_argument, add_path_argument
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
 	LOCAL_PATH_POLICY_ERROR,
@@ -22,11 +23,11 @@ def main() -> int:
 	parser = ArgumentParser(
 		description='Validate lightweight artifacts stored under results/.',
 	)
-	parser.add_argument(
+	add_path_argument(
+		parser,
 		'--root',
-		type=Path,
 		default=Path('results'),
-		help='Results directory to validate.',
+		help_text='Results directory to validate.',
 	)
 	parser.add_argument(
 		'--max-file-size-mb',
@@ -34,12 +35,10 @@ def main() -> int:
 		default=DEFAULT_MAX_FILE_SIZE_BYTES / BYTES_PER_MIB,
 		help='Maximum allowed file size in MiB.',
 	)
-	parser.add_argument(
+	add_append_path_argument(
+		parser,
 		'--required-file',
-		type=Path,
-		action='append',
-		default=[],
-		help='Required file path under --root. May be passed multiple times.',
+		help_text='Required file path under --root. May be passed multiple times.',
 	)
 	parser.add_argument(
 		'--local-path-policy',

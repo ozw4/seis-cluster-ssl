@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
-from argparse import ArgumentParser, Namespace
-from collections.abc import Mapping
-from pathlib import Path
+from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+	from argparse import Namespace
+	from collections.abc import Mapping
+	from pathlib import Path
+
+from seis_ssl_cluster.cli import (
+	add_append_path_argument,
+	add_path_argument,
+	build_config_parser,
+	load_config_for_cli,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.f3_baselines import (
 	f3_lithology_comparison_publish_config_from_mapping,
@@ -17,7 +27,6 @@ from seis_ssl_cluster.f3 import (
 	build_f3_lithology_comparison_report,
 )
 from seis_ssl_cluster.paths import (
-	DEFAULT_ARTIFACT_ROOT,
 	ArtifactPaths,
 	ExperimentKey,
 )
@@ -30,45 +39,41 @@ DEFAULT_OUTPUT_DIR = ArtifactPaths().baseline_comparison_report(DEFAULT_KEY)
 
 def main() -> None:
 	"""Build an F3 lithology comparison report or print a dry-run summary."""
-	parser = ArgumentParser(
-		description='Build an F3 lithology pretrained-vs-baseline comparison report.',
+	parser = build_config_parser(
+		'Build an F3 lithology pretrained-vs-baseline comparison report.',
+		config_required=False,
+		dry_run_help='Print the resolved outputs without writing reports.',
 	)
-	parser.add_argument(
-		'--config',
-		type=Path,
-		default=None,
-		help='Path to a YAML configuration file.',
-	)
-	parser.add_argument(
+	add_path_argument(
+		parser,
 		'--search-root',
-		type=Path,
 		default=None,
-		help='Artifact tree to search for probe metrics.json files.',
+		help_text='Artifact tree to search for probe metrics.json files.',
 	)
-	parser.add_argument(
+	add_path_argument(
+		parser,
 		'--output-dir',
-		type=Path,
 		default=None,
-		help='Directory for comparison_table.csv, comparison_report.md, and figures.',
+		help_text=(
+			'Directory for comparison_table.csv, comparison_report.md, and figures.'
+		),
 	)
-	parser.add_argument(
+	add_path_argument(
+		parser,
 		'--output-csv',
-		type=Path,
 		default=None,
-		help='Explicit comparison table output path.',
+		help_text='Explicit comparison table output path.',
 	)
-	parser.add_argument(
+	add_path_argument(
+		parser,
 		'--output-markdown',
-		type=Path,
 		default=None,
-		help='Explicit Markdown report output path.',
+		help_text='Explicit Markdown report output path.',
 	)
-	parser.add_argument(
+	add_append_path_argument(
+		parser,
 		'--metrics-json',
-		type=Path,
-		action='append',
-		default=[],
-		help='Explicit metrics.json path. May be passed multiple times.',
+		help_text='Explicit metrics.json path. May be passed multiple times.',
 	)
 	parser.add_argument(
 		'--figure-dpi',
@@ -76,15 +81,14 @@ def main() -> None:
 		default=None,
 		help='Figure DPI. Values below 300 are raised to 300.',
 	)
-	parser.add_argument(
-		'--dry-run',
-		action='store_true',
-		help='Print the resolved outputs without writing reports.',
-	)
 	args = parser.parse_args()
 
-	raw_config = load_config(args.config) if args.config is not None else None
-	config = _config_from_args(args, raw_config=raw_config)
+	raw_config = (
+		load_config_for_cli(args.config, loader=load_config)
+		if args.config is not None
+		else None
+	)
+	config = _config_from_args(args, raw_config=raw_config, config_path=args.config)
 	publish_config = f3_lithology_comparison_publish_config_from_mapping(
 		None if raw_config is None else raw_config.get('publish'),
 	)
@@ -140,13 +144,19 @@ def _config_from_args(
 	args: Namespace,
 	*,
 	raw_config: Mapping[str, object] | None,
+	config_path: Path | None,
 ) -> F3LithologyComparisonReportConfig:
 	if args.config is not None:
 		if raw_config is None:
 			msg = 'raw_config is required when args.config is set'
 			raise ValueError(msg)
-		config = f3_lithology_comparison_report_config_from_mapping(
+		if config_path is None:
+			msg = 'config_path is required when args.config is set'
+			raise ValueError(msg)
+		config = resolve_config_for_cli(
 			raw_config,
+			resolver=f3_lithology_comparison_report_config_from_mapping,
+			config_path=config_path,
 		)
 	else:
 		output_dir = args.output_dir or DEFAULT_OUTPUT_DIR

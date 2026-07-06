@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import argparse
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from seis_ssl_cluster.cli import (
+	add_config_argument,
+	add_dry_run_argument,
+	load_config_for_cli,
+	parse_config_path,
+	resolve_config_for_cli,
+)
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_f3_facies_inspection_config,
@@ -19,7 +27,6 @@ from seis_ssl_cluster.f3 import (
 	load_f3_label_consistency_alignments,
 	write_f3_tokenization_preview_outputs,
 )
-from seis_ssl_cluster.utils.cli import parse_config_args
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[2]
@@ -31,15 +38,29 @@ DEFAULT_CONFIG = (
 )
 
 
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the command line parser for F3 tokenization previews."""
+	parser = argparse.ArgumentParser(
+		description='Create F3 facies benchmark tokenization preview figures.',
+	)
+	add_config_argument(parser, default=DEFAULT_CONFIG)
+	add_dry_run_argument(parser)
+	return parser
+
+
 def main() -> None:
 	"""Write F3 teacher label tokenization preview figures and summaries."""
-	args = parse_config_args(
-		'Create F3 facies benchmark tokenization preview figures.',
-		DEFAULT_CONFIG,
-	)
-	config = resolve_f3_facies_inspection_config(
-		load_config(args.config),
-		stage=STAGE_F3_TOKENIZATION_PREVIEW,
+	parser = build_parser()
+	args = parser.parse_args()
+	config_path = parse_config_path(args)
+	raw_config = load_config_for_cli(config_path, loader=load_config)
+	config = resolve_config_for_cli(
+		raw_config,
+		resolver=lambda cfg: resolve_f3_facies_inspection_config(
+			cfg,
+			stage=STAGE_F3_TOKENIZATION_PREVIEW,
+		),
+		config_path=config_path,
 	)
 	paths = _required_mapping(config, 'paths')
 	inspection = _required_mapping(config, 'inspection')
