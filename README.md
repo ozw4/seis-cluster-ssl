@@ -116,10 +116,24 @@ as selected reports, metrics, comparison tables, and representative figures.
 These files should be reproducible summaries, not raw data, checkpoints,
 embeddings, clustering models, full visualization dumps, or path lists.
 
+Use these path-contract variables in runbook commands:
+
+```bash
+ROOT=/workspace/artifacts/seis_ssl_cluster
+EXP=experiments/nopims/pretrain_v1
+
+MODEL_TAG=amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+SUBSET=ten_surveys
+EMBED_SPEC=overlap_x16
+CLUSTER_SPEC=k4_6_8_pca16_whiten_s100k
+VIZ_SPEC=voxel_cmp_xy750_xz150
+SMOKE_MODEL_TAG=amp_mae_v1
+```
+
 Recommended layout:
 
 ```text
-/workspace/artifacts/seis_ssl_cluster/
+$ROOT/
 ├── registry/
 │   ├── splits/
 │   │   └── nopims/pretrain_v1/
@@ -130,13 +144,13 @@ Recommended layout:
 │   └── qc/
 │       └── nopims/pretrain_v1/
 ├── pretraining/
-│   └── nopims/pretrain_v1/<MODEL_TAG>/full_100ep/
+│   └── nopims/pretrain_v1/$MODEL_TAG/full_100ep/
 ├── embeddings/
-│   └── nopims/pretrain_v1/<MODEL_TAG>/<SUBSET>/<EMBED_SPEC>/
+│   └── nopims/pretrain_v1/$MODEL_TAG/$SUBSET/$EMBED_SPEC/
 ├── clustering/
-│   └── nopims/pretrain_v1/<MODEL_TAG>/<SUBSET>/<EMBED_SPEC>/<CLUSTER_SPEC>/
+│   └── nopims/pretrain_v1/$MODEL_TAG/$SUBSET/$EMBED_SPEC/$CLUSTER_SPEC/
 └── visualizations/
-    └── clusters/nopims/pretrain_v1/<MODEL_TAG>/<SUBSET>/<EMBED_SPEC>/<CLUSTER_SPEC>/<VIZ_SPEC>/
+    └── clusters/nopims/pretrain_v1/$MODEL_TAG/$SUBSET/$EMBED_SPEC/$CLUSTER_SPEC/$VIZ_SPEC/
 ```
 
 Artifact roles:
@@ -151,14 +165,14 @@ Artifact roles:
 The configuration validator requires generated manifest and normalization-stat paths to be absolute, under `paths.artifact_root`, and outside `paths.nopims_root`.
 Publishing a report to the repository should copy only the selected lightweight
 outputs into `results/`; normal experiment output paths remain under
-`/workspace/artifacts/seis_ssl_cluster/`.
+`$ROOT/`.
 
 ## Quick start
 
 Before running a stage, edit the corresponding YAML under:
 
 ```text
-proc/configs/seis_ssl_cluster/
+$EXP/
 ```
 
 At minimum, set the raw-data root where applicable, artifact root, input path-list, and stage-specific input/output paths. The full configuration guide is in [docs/configuration.md](docs/configuration.md), and the stage runbook is in [docs/seis_ssl_cluster_runbook.md](docs/seis_ssl_cluster_runbook.md).
@@ -201,7 +215,7 @@ Empty lines and full-line comments are ignored. Inline comments, missing files, 
 A recommended location is:
 
 ```text
-/workspace/artifacts/seis_ssl_cluster/registry/splits/nopims/pretrain_v1/train_npy_paths.txt
+$ROOT/registry/splits/nopims/pretrain_v1/train_npy_paths.txt
 ```
 
 ### 2. Build the amplitude manifest
@@ -210,7 +224,7 @@ Dry-run:
 
 ```bash
 python proc/seis_ssl_cluster/build_nopims_manifests.py \
-  --config proc/configs/seis_ssl_cluster/build_nopims_manifests.yaml \
+  --config $EXP/00_registry/01_build_manifest.yaml \
   --dry-run
 ```
 
@@ -218,7 +232,14 @@ Build:
 
 ```bash
 python proc/seis_ssl_cluster/build_nopims_manifests.py \
-  --config proc/configs/seis_ssl_cluster/build_nopims_manifests.yaml
+  --config $EXP/00_registry/01_build_manifest.yaml
+```
+
+Output:
+
+```text
+$ROOT/registry/manifests/nopims/pretrain_v1/nopims_amplitude_manifests.json
+$ROOT/registry/normalization_stats/nopims/pretrain_v1
 ```
 
 The manifest records, for every listed volume:
@@ -235,7 +256,13 @@ This stage does not calculate normalization statistics.
 
 ```bash
 python proc/seis_ssl_cluster/prepare_nopims_normalization_stats.py \
-  --config proc/configs/seis_ssl_cluster/prepare_nopims_normalization_stats.yaml
+  --config $EXP/00_registry/02_prepare_stats.yaml
+```
+
+Output:
+
+```text
+$ROOT/registry/normalization_stats/nopims/pretrain_v1
 ```
 
 The default normalization contract is:
@@ -252,7 +279,15 @@ Statistics are sampled deterministically from each memory-mapped volume and writ
 
 ```bash
 python proc/seis_ssl_cluster/filter_manifest_by_normalization_qc.py \
-  --config proc/configs/seis_ssl_cluster/filter_manifest_by_normalization_qc.yaml
+  --config $EXP/00_registry/03_filter_qc.yaml
+```
+
+Output:
+
+```text
+$ROOT/registry/manifests/nopims/pretrain_v1_clean/nopims_amplitude_manifests.json
+$ROOT/registry/splits/nopims/pretrain_v1_clean/train_npy_paths.txt
+$ROOT/registry/qc/nopims/pretrain_v1
 ```
 
 The QC stage produces:
@@ -270,10 +305,14 @@ Typical rejection criteria include non-finite statistics, a very small IQR, and 
 
 ```bash
 python proc/seis_ssl_cluster/train_amp_mae.py \
-  --config proc/configs/seis_ssl_cluster/train_amp_mae.yaml \
-  --device cuda \
-  --max-steps 2 \
-  --output-root /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/smoke_amp_mae
+  --config $EXP/10_pretrain/$SMOKE_MODEL_TAG/01_smoke_2step.yaml \
+  --device cuda
+```
+
+Output:
+
+```text
+$ROOT/pretraining/nopims/pretrain_v1/$SMOKE_MODEL_TAG/smoke_2step
 ```
 
 The training config should reference the **clean manifest** produced by the QC stage.
@@ -282,39 +321,54 @@ The training config should reference the **clean manifest** produced by the QC s
 
 ```bash
 python proc/seis_ssl_cluster/train_amp_mae.py \
-  --config proc/configs/seis_ssl_cluster/train_amp_mae.yaml \
-  --device cuda \
-  --max-steps 1000 \
-  --output-root /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/pilot_amp_mae_1000
+  --config $EXP/10_pretrain/$SMOKE_MODEL_TAG/02_pilot_1k.yaml \
+  --device cuda
+```
+
+Output:
+
+```text
+$ROOT/pretraining/nopims/pretrain_v1/$SMOKE_MODEL_TAG/pilot_1k
 ```
 
 ### 7. Run full pretraining
 
 ```bash
 python proc/seis_ssl_cluster/train_amp_mae.py \
-  --config proc/configs/seis_ssl_cluster/train_amp_mae.yaml \
-  --device cuda \
-  --output-root /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep
+  --config $EXP/10_pretrain/$MODEL_TAG/03_full_100ep.yaml \
+  --device cuda
+```
+
+Output:
+
+```text
+$ROOT/pretraining/nopims/pretrain_v1/$MODEL_TAG/full_100ep
 ```
 
 Resume an interrupted run with the same resolved configuration and output directory:
 
 ```bash
 python proc/seis_ssl_cluster/train_amp_mae.py \
-  --config proc/configs/seis_ssl_cluster/train_amp_mae.yaml \
+  --config $EXP/10_pretrain/$MODEL_TAG/03_full_100ep.yaml \
   --device cuda \
-  --output-root /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep \
-  --resume /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep/mae_latest.pt
+  --resume $ROOT/pretraining/nopims/pretrain_v1/$MODEL_TAG/full_100ep/mae_latest.pt
 ```
 
 ### 8. Extract full-volume embeddings
 
-Set the trained checkpoint, clean manifest, `embeddings.output_dir`, window size, and overlap in `extract_embeddings.yaml`.
+Set the trained checkpoint, clean manifest, `embeddings.output_dir`, window size, and overlap in the embedding YAML.
 
 ```bash
 python proc/seis_ssl_cluster/extract_embeddings.py \
-  --config proc/configs/seis_ssl_cluster/extract_embeddings.yaml \
-  --device cuda
+  --config $EXP/20_embedding/$MODEL_TAG/$SUBSET/$EMBED_SPEC.yaml \
+  --device cuda \
+  --skip-existing
+```
+
+Output:
+
+```text
+$ROOT/embeddings/nopims/pretrain_v1/$MODEL_TAG/$SUBSET/$EMBED_SPEC
 ```
 
 Use `--skip-existing` to retain complete survey embeddings whose metadata matches the requested extraction run.
@@ -327,7 +381,13 @@ Configure `embeddings.input_dir`, `clustering.output_dir`, requested cluster cou
 
 ```bash
 python proc/seis_ssl_cluster/cluster_embeddings.py \
-  --config proc/configs/seis_ssl_cluster/cluster_embeddings.yaml
+  --config $EXP/30_clustering/$MODEL_TAG/$SUBSET/$EMBED_SPEC/$CLUSTER_SPEC.yaml
+```
+
+Output:
+
+```text
+$ROOT/clustering/nopims/pretrain_v1/$MODEL_TAG/$SUBSET/$EMBED_SPEC/$CLUSTER_SPEC
 ```
 
 The MVP uses MiniBatchKMeans. Before fitting, it verifies that all embedding artifacts are mutually compatible.
@@ -349,7 +409,13 @@ Invalid tokens retain label `-1`.
 
 ```bash
 python proc/seis_ssl_cluster/visualize_clusters.py \
-  --config proc/configs/seis_ssl_cluster/visualize_clusters.yaml
+  --config $EXP/40_visualization/$MODEL_TAG/$SUBSET/$EMBED_SPEC/$CLUSTER_SPEC/$VIZ_SPEC.yaml
+```
+
+Output:
+
+```text
+$ROOT/visualizations/clusters/nopims/pretrain_v1/$MODEL_TAG/$SUBSET/$EMBED_SPEC/$CLUSTER_SPEC/$VIZ_SPEC
 ```
 
 The safe default renders token-level XY/XZ PNGs and summaries only.
