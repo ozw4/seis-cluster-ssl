@@ -96,6 +96,13 @@ def test_stage_modules_do_not_import_validate_module() -> None:
 		assert '.validate' not in imports
 
 
+def test_stage_modules_do_not_import_proc_modules() -> None:
+	for module_name in STAGE_MODULES:
+		imports = _imported_modules(CONFIG_ROOT / f'{module_name}.py')
+
+		assert not [name for name in imports if name.startswith('proc')]
+
+
 def test_common_module_does_not_import_stage_modules() -> None:
 	imports = _imported_modules(CONFIG_ROOT / 'common.py')
 	for module_name in STAGE_MODULES:

@@ -108,6 +108,36 @@ F3_BASELINE_REPORT_CONFIGS = sorted(
 F3_BASELINE_COMPARISON_CONFIGS = sorted(
 	F3_BASELINE_ROOT.rglob('05_build_baseline_comparison_report.yaml'),
 )
+REQUIRED_ACTIVE_CONFIG_GROUPS = (
+	('nopims pretraining', NOPIMS_PRETRAINING_CONFIGS),
+	('nopims embedding', NOPIMS_EMBEDDING_CONFIGS),
+	('nopims clustering', NOPIMS_CLUSTERING_CONFIGS),
+	('nopims visualization', NOPIMS_VISUALIZATION_CONFIGS),
+	('f3 inspection', F3_INSPECTION_CONFIGS),
+	('f3 prepare', F3_PREPARE_CONFIGS),
+	('f3 embedding', F3_EMBEDDING_CONFIGS),
+	('f3 lithology token dataset', F3_LITHOLOGY_TOKEN_CONFIGS),
+	('f3 lithology probe', F3_LITHOLOGY_PROBE_CONFIGS),
+	('f3 lithology prediction', F3_LITHOLOGY_PREDICTION_CONFIGS),
+	('f3 lithology visualization', F3_LITHOLOGY_VISUALIZATION_CONFIGS),
+	('f3 lithology report', F3_LITHOLOGY_REPORT_CONFIGS),
+	('f3 baseline token dataset', F3_BASELINE_TOKEN_CONFIGS),
+	('f3 random encoder', F3_RANDOM_ENCODER_CONFIGS),
+	('f3 random encoder embedding', F3_RANDOM_ENCODER_EMBEDDING_CONFIGS),
+	('f3 random encoder token dataset', F3_RANDOM_ENCODER_TOKEN_CONFIGS),
+	('f3 baseline probe', F3_BASELINE_PROBE_CONFIGS),
+	('f3 random encoder probe', F3_RANDOM_ENCODER_PROBE_CONFIGS),
+	('f3 baseline report', F3_BASELINE_REPORT_CONFIGS),
+	('f3 baseline comparison', F3_BASELINE_COMPARISON_CONFIGS),
+)
+
+
+@pytest.mark.parametrize(('group_name', 'configs'), REQUIRED_ACTIVE_CONFIG_GROUPS)
+def test_active_config_groups_are_not_empty(
+	group_name: str,
+	configs: list[Path] | list[tuple[Path, str]],
+) -> None:
+	assert configs, f'{group_name} active config list must not be empty'
 
 
 @pytest.mark.parametrize('config_path', NOPIMS_PRETRAINING_CONFIGS)
