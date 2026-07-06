@@ -15,6 +15,7 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyBaselineTokenDatasetConfig,
 	build_f3_lithology_baseline_token_dataset,
 	f3_lithology_baseline_token_dataset_config_from_mapping,
+	load_f3_lithology_token_dataset,
 	load_token_dataset,
 )
 from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey
@@ -63,6 +64,9 @@ def test_z_only_baseline_features_preserve_reference_split_and_labels(
 	np.testing.assert_array_equal(validation['labels'], np.asarray([1, 0]))
 	assert train['features'].dtype == np.float32
 	assert metadata['feature_source']['kind'] == 'z_only'
+	assert load_f3_lithology_token_dataset(result.train_npz).metadata[
+		'feature_source'
+	] == config.feature_source
 	assert metadata['baseline']['feature_names'] == ['z_norm', 'z_norm_power_2']
 	assert feature_summary['baseline']['feature_dim'] == 2
 	assert splits['split_unit'] == 'slice'
@@ -196,6 +200,9 @@ def test_xyz_coordinates_baseline_features_use_voxel_centers_and_volume_extent(
 		np.testing.assert_array_equal(validation[key], source_validation[key])
 	assert train['features'].dtype == np.float32
 	assert metadata['feature_source']['kind'] == 'xyz_coordinates'
+	assert load_f3_lithology_token_dataset(result.train_npz).metadata[
+		'feature_source'
+	] == config.feature_source
 	assert metadata['baseline']['feature_names'] == ['x_norm', 'y_norm', 'z_norm']
 	assert metadata['baseline']['parameters']['normalize'] == 'minmax'
 	assert metadata['xyz_coordinates'] == {

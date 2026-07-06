@@ -13,6 +13,13 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from seis_ssl_cluster.f3.lithology.token_dataset import (
+	F3LithologyTokenDataset,
+	load_f3_lithology_token_dataset,
+	replace_token_features,
+	save_f3_lithology_token_dataset,
+)
+
 if TYPE_CHECKING:
 	from numpy.typing import NDArray
 
@@ -199,19 +206,23 @@ class F3LithologyBaselineTokenDatasetResult:
 @dataclass(frozen=True)
 class _TokenDataset:
 	path: Path
-	arrays: Mapping[str, NDArray[np.generic]]
+	dataset: F3LithologyTokenDataset
+
+	@property
+	def arrays(self) -> dict[str, NDArray[np.generic]]:
+		return self.dataset.to_npz_arrays()
 
 	@property
 	def labels(self) -> NDArray[np.int64]:
-		return np.asarray(self.arrays['labels'], dtype=np.int64)
+		return np.asarray(self.dataset.labels, dtype=np.int64)
 
 	@property
 	def token_xyz(self) -> NDArray[np.int64]:
-		return np.asarray(self.arrays['token_xyz'], dtype=np.int64)
+		return np.asarray(self.dataset.token_xyz, dtype=np.int64)
 
 	@property
 	def count(self) -> int:
-		return int(self.labels.shape[0])
+		return self.dataset.count
 
 
 @dataclass(frozen=True)
@@ -501,35 +512,10 @@ def _load_token_dataset(path: Path, *, label: str) -> _TokenDataset:
 	if not path.is_file():
 		msg = f'{label} does not exist: {path}'
 		raise FileNotFoundError(msg)
-	with np.load(path) as payload:
-		arrays = {key: np.asarray(payload[key]) for key in payload.files}
-	for key in ('features', 'labels', 'token_xyz'):
-		if key not in arrays:
-			msg = f'{label} must contain {key!r}: {path}'
-			raise KeyError(msg)
-	features = np.asarray(arrays['features'])
-	labels = np.asarray(arrays['labels'])
-	token_xyz = np.asarray(arrays['token_xyz'])
-	if features.ndim != 2:
-		msg = f'{label}.features must be 2D; got shape={features.shape!r}'
-		raise ValueError(msg)
-	if labels.ndim != 1:
-		msg = f'{label}.labels must be 1D; got shape={labels.shape!r}'
-		raise ValueError(msg)
-	if token_xyz.shape != (labels.shape[0], 3):
-		msg = (
-			f'{label}.token_xyz must have shape {(labels.shape[0], 3)!r}; '
-			f'got {token_xyz.shape!r}'
-		)
-		raise ValueError(msg)
-	for key, array in arrays.items():
-		if array.shape[:1] != labels.shape[:1]:
-			msg = (
-				f'{label}.{key} row count must match labels; '
-				f'got {array.shape[:1]!r}, expected {labels.shape[:1]!r}'
-			)
-			raise ValueError(msg)
-	return _TokenDataset(path=path, arrays=arrays)
+	return _TokenDataset(
+		path=path,
+		dataset=load_f3_lithology_token_dataset(path),
+	)
 
 
 def _validate_reference_split(train: _TokenDataset, validation: _TokenDataset) -> None:
@@ -727,12 +713,14 @@ def _write_outputs(
 		train,
 		built_features.features_by_split['train'],
 		label='train_tokens',
+		feature_source=config.feature_source,
 	)
 	_save_npz_with_features(
 		outputs.validation_npz,
 		validation,
 		built_features.features_by_split['validation'],
 		label='validation_tokens',
+		feature_source=config.feature_source,
 	)
 	if outputs.split_manifest_json is not None and config.reference.split_manifest:
 		shutil.copyfile(config.reference.split_manifest, outputs.split_manifest_json)
@@ -783,6 +771,7 @@ def _save_npz_with_features(
 	features: NDArray[np.float32],
 	*,
 	label: str,
+	feature_source: Mapping[str, object] | None,
 ) -> None:
 	if features.shape[0] != dataset.count:
 		msg = (
@@ -790,9 +779,20 @@ def _save_npz_with_features(
 			f'features={features.shape[0]}, labels={dataset.count}'
 		)
 		raise ValueError(msg)
-	arrays = dict(dataset.arrays)
-	arrays['features'] = _finite_float32_features(features, label=f'{label}.features')
-	np.savez_compressed(path, **arrays)
+	updated = replace_token_features(
+		dataset.dataset,
+		_finite_float32_features(features, label=f'{label}.features'),
+		feature_source=_token_dataset_feature_source(feature_source),
+	)
+	save_f3_lithology_token_dataset(updated, path)
+
+
+def _token_dataset_feature_source(
+	feature_source: Mapping[str, object] | None,
+) -> Mapping[str, object]:
+	if feature_source is not None:
+		return dict(feature_source)
+	return {}
 
 
 def _metadata_payload(

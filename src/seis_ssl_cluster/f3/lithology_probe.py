@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from seis_ssl_cluster.f3.lithology.token_dataset import (
+	load_f3_lithology_token_dataset,
+)
 from seis_ssl_cluster.f3.metrics import (
 	compute_lithology_metrics,
 	render_classification_report_markdown,
@@ -395,17 +398,14 @@ def load_token_dataset(path: str | Path, *, label: str) -> _TokenDataset:
 	if not token_path.is_file():
 		msg = f'{label} does not exist: {token_path}'
 		raise FileNotFoundError(msg)
-	with np.load(token_path) as payload:
-		if 'features' not in payload or 'labels' not in payload:
-			msg = f'{label} must contain features and labels arrays: {token_path}'
-			raise KeyError(msg)
-		features = np.asarray(payload['features'], dtype=np.float32)
-		labels = np.asarray(payload['labels'], dtype=np.int64)
-		metadata = {
-			key: np.asarray(payload[key])
-			for key in payload.files
-			if key not in {'features', 'labels'}
-		}
+	dataset = load_f3_lithology_token_dataset(token_path)
+	features = np.asarray(dataset.features, dtype=np.float32)
+	labels = np.asarray(dataset.labels, dtype=np.int64)
+	metadata = {
+		key: np.asarray(value)
+		for key, value in dataset.to_npz_arrays().items()
+		if key not in {'features', 'labels'}
+	}
 	features = _validate_feature_matrix(features, f'{label}.features')
 	labels = _validate_label_vector(labels, f'{label}.labels')
 	if features.shape[0] != labels.shape[0]:

@@ -13,21 +13,24 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from seis_ssl_cluster.f3.inspection import find_class_info_file
-from seis_ssl_cluster.f3.labels import (
+from seis_ssl_cluster.f3.io.labels import (
+	RGB,
 	VALID_LABEL_SPLITS,
 	F3ClassInfo,
+	PngLabelMap,
+	PngLabelUnknownColor,
 	extract_label_split,
+	normalize_png_rgb,
 	parse_label_png_name,
 	read_class_info,
-	rgb_to_hex,
+	read_png_rgb,
+	rgb_to_class_id_map,
 )
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping, Sequence
 
 	from numpy.typing import NDArray
-
-RGB = tuple[int, int, int]
 
 PNG_LABEL_INVENTORY_FIELDNAMES = (
 	'relative_path',
@@ -61,27 +64,6 @@ _SLICE_TYPE_ORDER = {'inline': 0, 'crossline': 1, None: 2}
 
 
 @dataclass(frozen=True)
-class PngLabelUnknownColor:
-	"""One RGB color present in PNG labels but absent from class-info."""
-
-	rgb: RGB
-	pixel_count: int
-
-	@property
-	def hex_color(self) -> str:
-		"""Return the unknown RGB color as `#RRGGBB`."""
-		return rgb_to_hex(self.rgb)
-
-	def to_dict(self) -> dict[str, object]:
-		"""Return a JSON-serializable unknown-color record."""
-		return {
-			'rgb': list(self.rgb),
-			'hex_color': self.hex_color,
-			'pixel_count': self.pixel_count,
-		}
-
-
-@dataclass(frozen=True)
 class PngLabelClassCount:
 	"""Pixel count for one class in one PNG-label scope."""
 
@@ -104,19 +86,6 @@ class PngLabelClassCount:
 			'pixel_count': self.pixel_count,
 			'fraction': _fraction(self.pixel_count, total_pixels),
 		}
-
-
-@dataclass(frozen=True)
-class PngLabelMap:
-	"""Class-ID map converted from one RGB PNG label image."""
-
-	class_id_map: NDArray[np.int32]
-	unknown_colors: tuple[PngLabelUnknownColor, ...]
-
-	@property
-	def unknown_pixel_count(self) -> int:
-		"""Return the total number of unknown-color pixels."""
-		return int(sum(item.pixel_count for item in self.unknown_colors))
 
 
 @dataclass(frozen=True)
@@ -270,59 +239,6 @@ class F3PngLabelOutputConfig:
 	dpi: int = 300
 
 
-def rgb_to_class_id_map(
-	image: NDArray[np.generic],
-	classes: Sequence[F3ClassInfo],
-	*,
-	allow_unknown_colors: bool = False,
-) -> PngLabelMap:
-	"""Convert an RGB image to an integer class-ID map by exact RGB matching."""
-	rgb_image = normalize_png_rgb(image)
-	_lookup = _rgb_class_lookup(classes)
-	flat_codes = _pack_rgb_codes(rgb_image.reshape(-1, 3))
-	flat_class_ids = np.full(flat_codes.shape, -1, dtype=np.int32)
-	for rgb_code, class_id in _lookup.items():
-		flat_class_ids[flat_codes == rgb_code] = class_id
-	unknown_colors = _unknown_colors_from_codes(
-		flat_codes[flat_class_ids < 0],
-	)
-	if unknown_colors and not allow_unknown_colors:
-		msg = (
-			'PNG label contains RGB colors absent from class_info: '
-			f'{_format_unknown_colors(unknown_colors)}'
-		)
-		raise ValueError(msg)
-	return PngLabelMap(
-		class_id_map=flat_class_ids.reshape(rgb_image.shape[:2]),
-		unknown_colors=unknown_colors,
-	)
-
-
-def normalize_png_rgb(
-	image: NDArray[np.generic],
-	*,
-	source: str | Path = 'PNG label',
-) -> NDArray[np.uint8]:
-	"""Normalize a PNG image array to an `H x W x RGB uint8` array."""
-	array = np.asarray(image)
-	if array.ndim != 3 or array.shape[2] < 3:
-		msg = f'{source} must be an RGB or RGBA image; got shape={array.shape!r}'
-		raise ValueError(msg)
-	rgb = array[:, :, :3]
-	if np.issubdtype(rgb.dtype, np.floating):
-		if not np.isfinite(rgb).all() or rgb.min() < 0.0 or rgb.max() > 1.0:
-			msg = f'{source} floating RGB values must be finite and within [0, 1]'
-			raise ValueError(msg)
-		return np.rint(rgb * 255.0).astype(np.uint8)
-	if np.issubdtype(rgb.dtype, np.integer):
-		if rgb.min() < 0 or rgb.max() > 255:
-			msg = f'{source} integer RGB values must be within [0, 255]'
-			raise ValueError(msg)
-		return rgb.astype(np.uint8, copy=False)
-	msg = f'{source} RGB array must use integer or floating dtype; got {rgb.dtype}'
-	raise TypeError(msg)
-
-
 def count_class_pixels(
 	class_id_map: NDArray[np.integer],
 	classes: Sequence[F3ClassInfo],
@@ -335,15 +251,6 @@ def count_class_pixels(
 		)
 		for item in classes
 	)
-
-
-def read_png_rgb(path: str | Path) -> NDArray[np.uint8]:
-	"""Read a PNG label image and return its RGB channels as `uint8`."""
-	image_path = Path(path)
-	image_module = _matplotlib_image()
-	return normalize_png_rgb(image_module.imread(image_path), source=image_path)
-
-
 def inspect_f3_png_labels(
 	f3_root: str | Path,
 	*,
@@ -654,58 +561,6 @@ def _unknown_color_warnings(
 	if total == 0:
 		return ()
 	return (f'unknown PNG label colors detected: {total} pixels',)
-
-
-def _rgb_class_lookup(classes: Sequence[F3ClassInfo]) -> dict[int, int]:
-	lookup: dict[int, int] = {}
-	for item in classes:
-		code = _pack_rgb(item.rgb)
-		if code in lookup:
-			msg = (
-				'class_info contains duplicate RGB colors: '
-				f'{rgb_to_hex(item.rgb)}'
-			)
-			raise ValueError(msg)
-		lookup[code] = item.class_id
-	return lookup
-
-
-def _pack_rgb_codes(rgb: NDArray[np.uint8]) -> NDArray[np.uint32]:
-	values = rgb.astype(np.uint32, copy=False)
-	return (
-		(values[:, 0] << np.uint32(16))
-		| (values[:, 1] << np.uint32(8))
-		| values[:, 2]
-	)
-
-
-def _pack_rgb(rgb: RGB) -> int:
-	red, green, blue = rgb
-	return (red << 16) | (green << 8) | blue
-
-
-def _unpack_rgb(code: int) -> RGB:
-	return (
-		int((code >> 16) & 0xFF),
-		int((code >> 8) & 0xFF),
-		int(code & 0xFF),
-	)
-
-
-def _unknown_colors_from_codes(
-	codes: NDArray[np.uint32],
-) -> tuple[PngLabelUnknownColor, ...]:
-	if codes.size == 0:
-		return ()
-	unique_codes, counts = np.unique(codes, return_counts=True)
-	items = [
-		PngLabelUnknownColor(
-			rgb=_unpack_rgb(int(code)),
-			pixel_count=int(count),
-		)
-		for code, count in zip(unique_codes, counts, strict=True)
-	]
-	return tuple(sorted(items, key=lambda item: (-item.pixel_count, item.rgb)))
 
 
 def _split_summary(
@@ -1035,17 +890,6 @@ def _slice_tick_label(file_result: PngLabelFileInspection) -> str:
 	if file_result.slice_index is None:
 		return f'{prefix}?'
 	return f'{prefix}{file_result.slice_index}'
-
-
-def _matplotlib_image() -> object:
-	try:
-		return __import__('matplotlib.image', fromlist=['image'])
-	except ImportError as exc:
-		msg = (
-			'F3 PNG label inspection requires matplotlib; '
-			'install seis-cluster-ssl[visualization].'
-		)
-		raise ImportError(msg) from exc
 
 
 def _matplotlib_pyplot() -> object:

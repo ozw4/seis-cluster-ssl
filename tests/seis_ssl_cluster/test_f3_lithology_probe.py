@@ -325,6 +325,10 @@ def _write_tokens(
 		path,
 		features=features,
 		labels=labels,
+		survey_id=np.asarray(['f3_facies_benchmark'] * count),
+		split=np.asarray(['train'] * count),
+		slice_type=np.asarray(['inline'] * count),
+		slice_index=np.arange(count, dtype=np.int64),
 		token_xyz=np.column_stack(
 			(
 				token_indices,
@@ -333,6 +337,8 @@ def _write_tokens(
 			),
 		),
 		voxel_center_xyz=np.zeros((count, 3), dtype=np.float32),
+		majority_fraction=np.ones(count, dtype=np.float32),
+		labeled_fraction=np.ones(count, dtype=np.float32),
 	)
 
 
