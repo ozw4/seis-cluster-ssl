@@ -30,9 +30,26 @@ Current public helper or dispatcher functions:
 
 - `validate_config`
 
-After the split, `validate.py` should become a thin compatibility layer that
-imports these names from stage modules and re-exports the same `__all__`.
-Callers must not need to change imports.
+The split is complete for the public config validation entrypoints.
+`validate.py` is now a backward-compatible re-export layer with the
+`validate_config` dispatcher. Callers do not need to change imports.
+
+## Completed Module Ownership
+
+- `validate.py`: backward-compatible public API re-exports plus the small
+  `validate_config` stage dispatcher.
+- `common.py`: primitive validators, mapping/default helpers, and generic path
+  parsing/root checks. It does not import stage modules.
+- `base.py`: stage-aware top-level and path-section validation used by
+  resolvers.
+- `artifact_path_validation.py`: artifact path contract validation.
+- `manifest.py`: manifest-build validation implementation.
+- `normalization.py`: normalization stats and normalization QC validation
+  implementations.
+- Stage modules (`pretraining.py`, `embedding.py`, `clustering.py`,
+  `cluster_visualization.py`, `f3_inspection.py`, `f3_lithology.py`,
+  `f3_baselines.py`, `results.py`): stage/workflow-specific validation or
+  config-facing exports.
 
 ## Current Inventory
 
@@ -175,7 +192,7 @@ Use names that match existing stage concepts and keep movement incremental.
 | `src/seis_ssl_cluster/config/f3_lithology.py` | Reserved for future F3 lithology probe config validation; no current `validate.py` symbols to move |
 | `src/seis_ssl_cluster/config/f3_baselines.py` | Reserved for future F3 lithology baseline config validation; no current `validate.py` symbols to move |
 | `src/seis_ssl_cluster/config/results.py` | Reserved for future results publish/validation config validation; no current `validate.py` symbols to move |
-| `src/seis_ssl_cluster/config/validate.py` | Compatibility imports, `_STAGE_RESOLVERS`, `validate_config`, and `__all__` only after all stage modules exist |
+| `src/seis_ssl_cluster/config/validate.py` | Compatibility imports, lazy proc-owned compatibility exports, `_STAGE_RESOLVERS`, `validate_config`, and `__all__` |
 
 ## Compatibility Layer Shape
 
