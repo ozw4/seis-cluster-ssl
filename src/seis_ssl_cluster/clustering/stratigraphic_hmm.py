@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from numbers import Integral, Real
-from typing import TYPE_CHECKING, NoReturn
+from typing import NoReturn
 
 import numpy as np
 
-if TYPE_CHECKING:
-	from collections.abc import Mapping
+from seis_ssl_cluster.clustering.features import (
+	EmbeddingInput,
+	extract_token_features,
+	open_embedding_array,
+)
+from seis_ssl_cluster.clustering.kmeans import fit_minibatch_kmeans
+from seis_ssl_cluster.clustering.residualization import (
+	LocalTokenPositionResidualizer,
+	residualization_keys_for_flat_indices,
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +31,48 @@ class HMMTransitionSettings:
 	reverse_cost: float
 	forbid_reverse: bool
 	max_jump: int | None
+
+
+@dataclass(frozen=True)
+class StratigraphicHMMSettings:
+	"""Validated stratigraphic HMM backend settings."""
+
+	iterations: int
+	z_axis: int
+	z_direction: str
+	transition: HMMTransitionSettings
+	init_order_by: str
+	empty_cluster_policy: str
+
+
+def stratigraphic_hmm_settings_from_config(
+	config: Mapping[str, object],
+) -> StratigraphicHMMSettings:
+	"""Build stratigraphic HMM settings from a resolved config mapping."""
+	clustering = _required_mapping(config, 'clustering')
+	hmm = _required_mapping(clustering, 'stratigraphic_hmm')
+	transition = _required_mapping(hmm, 'transition')
+	init = _required_mapping(hmm, 'init')
+	update = _required_mapping(hmm, 'update')
+	return StratigraphicHMMSettings(
+		iterations=int(hmm['iterations']),
+		z_axis=int(hmm['z_axis']),
+		z_direction=str(hmm['z_direction']),
+		transition=HMMTransitionSettings(
+			same_cost=float(transition['same_cost']),
+			advance_cost=float(transition['advance_cost']),
+			jump_cost=float(transition['jump_cost']),
+			reverse_cost=float(transition['reverse_cost']),
+			forbid_reverse=bool(transition['forbid_reverse']),
+			max_jump=(
+				None
+				if transition['max_jump'] is None
+				else int(transition['max_jump'])
+			),
+		),
+		init_order_by=str(init['order_by']),
+		empty_cluster_policy=str(update['empty_cluster_policy']),
+	)
 
 
 def build_ordered_transition_costs(
@@ -55,6 +106,121 @@ def build_ordered_transition_costs(
 		costs[too_far & ~same] = np.inf
 
 	return costs
+
+
+def sample_token_z_coordinates(
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	per_survey_token_indices: Mapping[str, np.ndarray],
+) -> np.ndarray:
+	"""Return sampled token z coordinates ordered like sampled feature rows."""
+	inputs_by_survey = {item.survey_id: item for item in embedding_inputs}
+	unknown = sorted(set(per_survey_token_indices) - set(inputs_by_survey))
+	if unknown:
+		msg = f'per_survey_token_indices contains unknown survey ids: {unknown!r}'
+		raise ValueError(msg)
+
+	blocks: list[np.ndarray] = []
+	for item in embedding_inputs:
+		indices = np.asarray(
+			per_survey_token_indices.get(item.survey_id, np.empty(0, dtype=np.int64)),
+			dtype=np.int64,
+		)
+		if indices.ndim != 1:
+			msg = (
+				'per_survey_token_indices values must be 1D; '
+				f'{item.survey_id} has shape {indices.shape!r}'
+			)
+			raise ValueError(msg)
+		if indices.size == 0:
+			continue
+		token_shape_xyz = open_embedding_array(item).shape[:3]
+		coords = np.unravel_index(indices, token_shape_xyz)
+		blocks.append(np.asarray(coords[2], dtype=np.int32))
+	if not blocks:
+		return np.empty(0, dtype=np.int32)
+	return np.concatenate(blocks).astype(np.int32, copy=False)
+
+
+def initialize_ordered_centers(
+	training_features: np.ndarray,
+	sample_z: np.ndarray,
+	*,
+	k: int,
+	batch_size: int,
+	seed: int,
+) -> np.ndarray:
+	"""Initialize cluster centers ordered from shallow to deep mean sample z."""
+	matrix = np.asarray(training_features, dtype=np.float32)
+	z_coordinates = np.asarray(sample_z, dtype=np.int32)
+	if matrix.ndim != 2:
+		msg = f'training_features must be 2D; got shape {matrix.shape!r}'
+		raise ValueError(msg)
+	if z_coordinates.shape != (matrix.shape[0],):
+		msg = (
+			'sample_z must have one coordinate per training row; '
+			f'got {z_coordinates.shape!r} for {matrix.shape[0]} rows'
+		)
+		raise ValueError(msg)
+
+	kmeans = fit_minibatch_kmeans(
+		matrix,
+		k=k,
+		batch_size=batch_size,
+		seed=seed,
+	)
+	labels = kmeans.predict(matrix)
+	raw_centers = np.asarray(kmeans.cluster_centers_, dtype=np.float32)
+	mean_z = np.full(k, np.inf, dtype=np.float64)
+	is_empty = np.ones(k, dtype=np.bool_)
+	for label in range(k):
+		mask = labels == label
+		if np.any(mask):
+			mean_z[label] = float(np.mean(z_coordinates[mask], dtype=np.float64))
+			is_empty[label] = False
+	order = sorted(
+		range(k),
+		key=lambda label: (bool(is_empty[label]), mean_z[label], label),
+	)
+	return raw_centers[np.asarray(order, dtype=np.int64)].astype(np.float32, copy=False)
+
+
+def prepare_feature_batch_for_indices(
+	embedding_input: EmbeddingInput,
+	flat_indices: np.ndarray,
+	*,
+	residualizer: LocalTokenPositionResidualizer | None,
+	preprocessor: object,
+) -> np.ndarray:
+	"""Load, residualize, and preprocess one arbitrary batch of token features."""
+	indices = np.asarray(flat_indices, dtype=np.int64)
+	if indices.ndim != 1:
+		msg = f'flat_indices must be 1D; got shape {indices.shape!r}'
+		raise ValueError(msg)
+	if indices.size == 0:
+		return np.empty(
+			(0, _transformed_feature_dim(embedding_input, preprocessor)),
+			dtype=np.float32,
+		)
+
+	features = extract_token_features(embedding_input, indices)
+	if residualizer is not None:
+		group_keys = residualization_keys_for_flat_indices(
+			embedding_input,
+			indices,
+			group_by=residualizer.group_by,
+		)
+		features = residualizer.transform(features, group_keys)
+	transformed = np.asarray(preprocessor.transform(features), dtype=np.float32)
+	if transformed.ndim != 2:
+		msg = f'preprocessor output must be 2D; got shape {transformed.shape!r}'
+		raise ValueError(msg)
+	if not np.all(np.isfinite(transformed)):
+		msg = (
+			'preprocessed features must contain only finite values for '
+			f'{embedding_input.survey_id}'
+		)
+		raise ValueError(msg)
+	return transformed
 
 
 def viterbi_decode_costs(
@@ -198,11 +364,40 @@ def _as_float_matrix(value: np.ndarray, name: str) -> np.ndarray:
 	return array
 
 
+def _required_mapping(
+	parent: Mapping[str, object],
+	key: str,
+) -> Mapping[str, object]:
+	value = parent.get(key)
+	if not isinstance(value, Mapping):
+		msg = f'{key} must be a mapping'
+		raise TypeError(msg)
+	return value
+
+
+def _transformed_feature_dim(
+	embedding_input: EmbeddingInput,
+	preprocessor: object,
+) -> int:
+	if hasattr(preprocessor, 'named_steps'):
+		pipeline = preprocessor
+		named_steps = pipeline.named_steps
+		pca = named_steps.get('pca')
+		if pca is not None:
+			return int(getattr(pca, 'n_components_', pca.n_components))
+	return int(open_embedding_array(embedding_input).shape[-1])
+
+
 __all__ = [
 	'HMMTransitionSettings',
+	'StratigraphicHMMSettings',
 	'build_ordered_transition_costs',
 	'contiguous_true_segments',
 	'decode_trace_segments',
+	'initialize_ordered_centers',
+	'prepare_feature_batch_for_indices',
 	'run_stratigraphic_hmm_clustering',
+	'sample_token_z_coordinates',
+	'stratigraphic_hmm_settings_from_config',
 	'viterbi_decode_costs',
 ]

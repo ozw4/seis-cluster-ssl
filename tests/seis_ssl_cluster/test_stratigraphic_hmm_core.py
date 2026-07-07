@@ -8,6 +8,7 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	build_ordered_transition_costs,
 	contiguous_true_segments,
 	decode_trace_segments,
+	stratigraphic_hmm_settings_from_config,
 	viterbi_decode_costs,
 )
 
@@ -129,6 +130,38 @@ def test_contiguous_true_segments_returns_valid_spans() -> None:
 	)
 
 	assert segments == (slice(1, 3), slice(4, 5))
+
+
+def test_stratigraphic_hmm_settings_from_config_parses_resolved_config() -> None:
+	settings = stratigraphic_hmm_settings_from_config(
+		{
+			'clustering': {
+				'stratigraphic_hmm': {
+					'iterations': 3,
+					'z_axis': 2,
+					'z_direction': 'increasing_downward',
+					'transition': {
+						'same_cost': 0.0,
+						'advance_cost': 0.25,
+						'jump_cost': 1.0,
+						'reverse_cost': 1000000.0,
+						'forbid_reverse': True,
+						'max_jump': None,
+					},
+					'init': {'order_by': 'mean_z'},
+					'update': {'empty_cluster_policy': 'keep_previous'},
+				},
+			},
+		},
+	)
+
+	assert settings.iterations == 3
+	assert settings.z_axis == 2
+	assert settings.z_direction == 'increasing_downward'
+	assert settings.transition.advance_cost == 0.25
+	assert settings.transition.max_jump is None
+	assert settings.init_order_by == 'mean_z'
+	assert settings.empty_cluster_policy == 'keep_previous'
 
 
 @pytest.mark.parametrize(
