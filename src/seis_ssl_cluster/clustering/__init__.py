@@ -16,6 +16,10 @@ from seis_ssl_cluster.clustering.features import (
 	open_embedding_array,
 	valid_flat_indices,
 )
+from seis_ssl_cluster.clustering.ordered_diagnostics import (
+	ordered_boundary_summary,
+	ordered_label_diagnostics,
+)
 from seis_ssl_cluster.clustering.reconstruct import (
 	ReconstructedLabels,
 	reconstruct_labels_for_survey,
@@ -74,6 +78,8 @@ __all__ = [
 	'iter_valid_feature_batches',
 	'load_valid_tokens',
 	'open_embedding_array',
+	'ordered_boundary_summary',
+	'ordered_label_diagnostics',
 	'reconstruct_labels_for_survey',
 	'reconstruct_voxel_labels',
 	'resolve_volume_shape_xyz',

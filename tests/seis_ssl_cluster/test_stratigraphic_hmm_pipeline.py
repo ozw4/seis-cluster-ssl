@@ -246,6 +246,12 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 	assert metadata['method'] == 'stratigraphic_hmm_kmeans'
 	assert metadata['stratigraphic_hmm']['iteration_summaries']
 	assert metadata['stratigraphic_hmm']['init'] == {'order_by': 'mean_z'}
+	assert metadata['ordered_diagnostics']['aggregate'][
+		'reverse_transition_rate'
+	] == 0.0
+	assert metadata['ordered_diagnostics']['per_survey']['survey_a'][
+		'reverse_transition_rate'
+	] == 0.0
 
 	labels_a = np.load(
 		output_dir / 'labels' / 'k3' / 'survey_a.cluster_labels_token.npy',
@@ -269,6 +275,8 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 	)
 	assert label_metadata['method'] == 'stratigraphic_hmm_kmeans'
 	assert label_metadata['invalid_token_count'] == 1
+	assert label_metadata['ordered_diagnostics']['reverse_transition_rate'] == 0.0
+	assert '0_to_1' in label_metadata['ordered_boundary_summary']
 	assert sum(label_metadata['cluster_counts'].values()) == int(
 		np.count_nonzero(valid_a),
 	)

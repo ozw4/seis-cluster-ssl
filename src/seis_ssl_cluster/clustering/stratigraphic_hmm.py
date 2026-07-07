@@ -30,6 +30,11 @@ from seis_ssl_cluster.clustering.kmeans import (
 	fit_preprocessor,
 	fit_residualizer,
 )
+from seis_ssl_cluster.clustering.ordered_diagnostics import (
+	aggregate_ordered_label_diagnostics,
+	ordered_boundary_summary,
+	ordered_label_diagnostics,
+)
 from seis_ssl_cluster.clustering.residualization import (
 	LocalTokenPositionResidualizer,
 	residualization_keys_for_flat_indices,
@@ -589,6 +594,14 @@ def run_stratigraphic_hmm_clustering(
 		invalid_token_count = int(
 			sum(result.invalid_token_count for result in label_results),
 		)
+		per_survey_ordered_diagnostics = {
+			item.survey_id: ordered_label_diagnostics(
+				np.asarray(labels_by_survey[item.survey_id]),
+				k=k,
+				z_axis=hmm_settings.z_axis,
+			)
+			for item in embedding_inputs
+		}
 		hmm_metadata = _hmm_metadata(
 			hmm_settings=hmm_settings,
 			transition_costs=transition_costs,
@@ -600,6 +613,13 @@ def run_stratigraphic_hmm_clustering(
 			'cluster_counts': cluster_counts,
 			'invalid_token_count': invalid_token_count,
 			'stratigraphic_hmm': hmm_metadata,
+			'ordered_diagnostics': {
+				'per_survey': per_survey_ordered_diagnostics,
+				'aggregate': aggregate_ordered_label_diagnostics(
+					per_survey_ordered_diagnostics,
+					k=k,
+				),
+			},
 			'surveys': [
 				{
 					'survey_id': result.survey_id,
@@ -691,6 +711,7 @@ def _write_hmm_survey_labels(
 	}
 	valid = int(np.count_nonzero(labels >= 0))
 	invalid = int(labels.size - valid)
+	ordered_diagnostics = ordered_label_diagnostics(labels, k=k)
 	metadata_path = (
 		labels_dir / f'{embedding_input.survey_id}.cluster_label_metadata.json'
 	)
@@ -706,6 +727,8 @@ def _write_hmm_survey_labels(
 		'valid_token_count': valid,
 		'invalid_token_count': invalid,
 		'cluster_counts': cluster_counts,
+		'ordered_diagnostics': ordered_diagnostics,
+		'ordered_boundary_summary': ordered_boundary_summary(labels, k=k),
 	}
 	write_json(metadata_path, metadata)
 	return SurveyLabelResult(
