@@ -71,7 +71,7 @@ from seis_ssl_cluster.f3.lithology_prediction import (
 	predict_f3_lithology_tokens,
 	read_f3_lithology_prediction_classes,
 )
-from seis_ssl_cluster.f3.lithology_probe import (
+from seis_ssl_cluster.f3.lithology.probe import (
 	DEFAULT_EVALUATION_METRICS,
 	VALID_CLASS_WEIGHT,
 	VALID_FEATURE_SCALING,

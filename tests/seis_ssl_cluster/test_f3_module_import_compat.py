@@ -61,6 +61,7 @@ def test_f3_refactor_public_module_imports() -> None:
 		'seis_ssl_cluster.f3.lithology_tokens',
 		'seis_ssl_cluster.f3.baseline_features',
 		'seis_ssl_cluster.f3.lithology_probe',
+		'seis_ssl_cluster.f3.lithology.probe',
 		'seis_ssl_cluster.f3.lithology_report',
 		'seis_ssl_cluster.f3.metrics',
 		'seis_ssl_cluster.f3.io.segy',
@@ -107,3 +108,14 @@ def test_f3_lithology_metrics_import_compatibility() -> None:
 		compat_metrics.compute_lithology_metrics
 		is lithology_metrics.compute_lithology_metrics
 	)
+
+
+def test_f3_lithology_probe_module_import_compatibility() -> None:
+	compat_probe = importlib.import_module('seis_ssl_cluster.f3.lithology_probe')
+	lithology_probe = importlib.import_module('seis_ssl_cluster.f3.lithology.probe')
+
+	assert (
+		compat_probe.train_and_evaluate_f3_lithology_probe
+		is lithology_probe.train_and_evaluate_f3_lithology_probe
+	)
+	assert compat_probe.F3TorchMLPClassifier is lithology_probe.F3TorchMLPClassifier
