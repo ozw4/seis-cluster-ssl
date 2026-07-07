@@ -135,3 +135,17 @@ def test_f3_lithology_prediction_module_import_compatibility() -> None:
 		compat_prediction.predict_f3_lithology_tokens
 		is lithology_prediction.predict_f3_lithology_tokens
 	)
+
+
+def test_f3_lithology_visualization_module_import_compatibility() -> None:
+	compat_visualization = importlib.import_module(
+		'seis_ssl_cluster.f3.lithology_visualization',
+	)
+	lithology_visualization = importlib.import_module(
+		'seis_ssl_cluster.f3.lithology.visualization',
+	)
+
+	assert (
+		compat_visualization.visualize_f3_lithology_predictions
+		is lithology_visualization.visualize_f3_lithology_predictions
+	)

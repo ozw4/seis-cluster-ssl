@@ -69,6 +69,16 @@ from seis_ssl_cluster.f3.lithology.probe import (
 	load_token_dataset,
 	train_and_evaluate_f3_lithology_probe,
 )
+from seis_ssl_cluster.f3.lithology.visualization import (
+	F3LithologySliceFigure,
+	F3LithologyVisualizationConfig,
+	F3LithologyVisualizationFigureConfig,
+	F3LithologyVisualizationInputs,
+	F3LithologyVisualizationOutputs,
+	F3LithologyVisualizationResult,
+	read_f3_lithology_visualization_classes,
+	visualize_f3_lithology_predictions,
+)
 
 __all__ = [
 	'AMPLITUDE_STATISTICS',
@@ -92,6 +102,7 @@ __all__ = [
 	'F3LithologyProbeOutputs',
 	'F3LithologyProbeResult',
 	'F3LithologyProbeSettings',
+	'F3LithologySliceFigure',
 	'F3LithologyTokenDataset',
 	'F3LithologyTokenDatasetConfig',
 	'F3LithologyTokenDatasetInputs',
@@ -99,6 +110,11 @@ __all__ = [
 	'F3LithologyTokenDatasetResult',
 	'F3LithologyTokenDatasetSummary',
 	'F3LithologyTokenPolicy',
+	'F3LithologyVisualizationConfig',
+	'F3LithologyVisualizationFigureConfig',
+	'F3LithologyVisualizationInputs',
+	'F3LithologyVisualizationOutputs',
+	'F3LithologyVisualizationResult',
 	'F3ReferenceTokenDataset',
 	'F3SliceTokenization',
 	'F3TokenArrays',
@@ -117,6 +133,7 @@ __all__ = [
 	'load_f3_lithology_token_dataset_summary',
 	'load_token_dataset',
 	'predict_f3_lithology_tokens',
+	'read_f3_lithology_visualization_classes',
 	'read_f3_lithology_class_info',
 	'read_f3_lithology_prediction_classes',
 	'render_classification_report_markdown',
@@ -125,6 +142,7 @@ __all__ = [
 	'tokenize_f3_lithology_slice',
 	'train_and_evaluate_f3_lithology_probe',
 	'validate_f3_lithology_token_dataset',
+	'visualize_f3_lithology_predictions',
 	'write_confusion_matrix_csv',
 	'write_f3_lithology_token_quicklooks',
 	'write_metrics_csv',
