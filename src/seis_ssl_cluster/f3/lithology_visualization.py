@@ -906,7 +906,10 @@ def _load_prediction_validation_token_dataset(
 	value = inputs.get('validation_tokens')
 	if not isinstance(value, str) or not value:
 		return None
-	return load_f3_lithology_token_dataset(Path(value))
+	path = Path(value)
+	if not path.is_file():
+		return None
+	return load_f3_lithology_token_dataset(path)
 
 
 def _read_json(path: Path) -> Mapping[str, Any]:

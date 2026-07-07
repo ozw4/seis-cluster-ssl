@@ -12,10 +12,6 @@ import joblib
 import numpy as np
 
 from seis_ssl_cluster.embedding.sliding_window import token_grid_shape_xyz
-from seis_ssl_cluster.f3.lithology.token_dataset import (
-	F3LithologyTokenDataset,
-	load_f3_lithology_token_dataset,
-)
 from seis_ssl_cluster.f3.lithology_tokens import (
 	F3EmbeddingArtifact,
 	F3LithologyTokenPolicy,
@@ -29,7 +25,6 @@ from seis_ssl_cluster.f3.splits import (
 	F3SliceSplitRecord,
 	load_f3_slice_split_records,
 	read_f3_line_geometry,
-	resolve_f3_slice_array_index,
 )
 
 if TYPE_CHECKING:
@@ -325,14 +320,6 @@ def _validation_slice_metric_rows(  # noqa: PLR0913
 		for record in load_f3_slice_split_records(config.inputs.png_label_inventory)
 		if record.split == 'validation'
 	]
-	if config.inputs.validation_tokens is not None:
-		return _validation_slice_metric_rows_from_token_dataset(
-			config.inputs.validation_tokens,
-			records=records,
-			geometry=geometry,
-			predictions=predictions,
-			classes=classes,
-		)
 	rows: list[dict[str, object]] = []
 	for record in records:
 		tokenization = tokenize_f3_lithology_slice(
@@ -369,74 +356,6 @@ def _validation_slice_metric_rows(  # noqa: PLR0913
 			),
 		)
 	return rows
-
-
-def _validation_slice_metric_rows_from_token_dataset(
-	path: Path,
-	*,
-	records: Sequence[F3SliceSplitRecord],
-	geometry: F3LineGeometry,
-	predictions: NDArray[np.int16],
-	classes: Sequence[F3ClassInfo],
-) -> list[dict[str, object]]:
-	dataset = load_f3_lithology_token_dataset(path)
-	_validate_prediction_token_dataset(dataset, path=path, predictions=predictions)
-	splits = np.asarray(dataset.split).astype(str)
-	slice_types = np.asarray(dataset.slice_type).astype(str)
-	slice_indices = np.asarray(dataset.slice_index, dtype=np.int64)
-	rows: list[dict[str, object]] = []
-	for record in records:
-		mask = (
-			(splits == 'validation')
-			& (slice_types == record.slice_type)
-			& (slice_indices == int(record.slice_index))
-		)
-		token_xyz = np.asarray(dataset.token_xyz[mask], dtype=np.int64)
-		y_true = np.asarray(dataset.labels[mask], dtype=np.int64)
-		y_pred = _predictions_at_token_xyz(predictions, token_xyz)
-		rows.append(
-			_validation_metric_row(
-				record,
-				array_index=resolve_f3_slice_array_index(record, geometry),
-				y_true=y_true,
-				y_pred=y_pred,
-				classes=classes,
-			),
-		)
-	return rows
-
-
-def _validate_prediction_token_dataset(
-	dataset: F3LithologyTokenDataset,
-	*,
-	path: Path,
-	predictions: NDArray[np.int16],
-) -> None:
-	token_xyz = np.asarray(dataset.token_xyz, dtype=np.int64)
-	if token_xyz.size == 0:
-		return
-	if np.any(token_xyz < 0):
-		msg = f'{path}.token_xyz contains negative token coordinates'
-		raise ValueError(msg)
-	upper = np.asarray(predictions.shape, dtype=np.int64)
-	if np.any(token_xyz >= upper):
-		msg = (
-			f'{path}.token_xyz contains coordinates outside prediction grid '
-			f'{tuple(int(axis) for axis in predictions.shape)!r}'
-		)
-		raise ValueError(msg)
-
-
-def _predictions_at_token_xyz(
-	predictions: NDArray[np.int16],
-	token_xyz: NDArray[np.int64],
-) -> NDArray[np.int16]:
-	if token_xyz.shape[0] == 0:
-		return np.asarray([], dtype=np.int16)
-	return np.asarray(
-		predictions[token_xyz[:, 0], token_xyz[:, 1], token_xyz[:, 2]],
-		dtype=np.int16,
-	)
 
 
 def _prediction_plane(

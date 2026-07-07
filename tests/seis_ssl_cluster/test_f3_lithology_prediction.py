@@ -111,7 +111,7 @@ def test_predict_f3_lithology_tokens_writes_standard_json_for_empty_metrics(
 	assert inline_row['mean_iou'] is None
 
 
-def test_predict_f3_lithology_tokens_can_score_validation_token_dataset(
+def test_predict_f3_lithology_tokens_scores_validation_from_label_volume(
 	tmp_path: Path,
 ) -> None:
 	config = write_prediction_fixture(tmp_path)
@@ -134,7 +134,13 @@ def test_predict_f3_lithology_tokens_can_score_validation_token_dataset(
 
 	assert metadata['inputs']['validation_tokens'] == str(validation_tokens)
 	assert {row['slice_type'] for row in metric_rows} == {'inline', 'crossline'}
-	assert all(float(row['accuracy']) == 1.0 for row in metric_rows)
+	assert {
+		row['slice_type']: float(row['accuracy'])
+		for row in metric_rows
+	} == {
+		'inline': 0.25,
+		'crossline': 0.0,
+	}
 
 
 def test_predict_f3_lithology_tokens_requires_loaded_classes(tmp_path: Path) -> None:
