@@ -196,17 +196,14 @@ def test_run_embedding_clustering_rejects_duplicate_k_values(
 		run_embedding_clustering(config)
 
 
-def test_run_embedding_clustering_dispatches_stratigraphic_hmm_stub(
+def test_run_embedding_clustering_dispatches_stratigraphic_hmm_backend(
 	tmp_path: Path,
 ) -> None:
 	config = _config(tmp_path / 'embeddings', tmp_path / 'clusters')
 	config['clustering']['method'] = 'stratigraphic_hmm_kmeans'
 	config['clustering']['stratigraphic_hmm'] = _stratigraphic_hmm_config()
 
-	with pytest.raises(
-		NotImplementedError,
-		match='stratigraphic_hmm_kmeans is not implemented yet',
-	):
+	with pytest.raises(FileNotFoundError, match=r'embeddings\.input_dir'):
 		run_embedding_clustering(config)
 
 
