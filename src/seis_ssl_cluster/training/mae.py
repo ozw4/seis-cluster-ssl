@@ -25,12 +25,13 @@ from seis_ssl_cluster.training.dataloaders import build_mae_dataloader
 from seis_ssl_cluster.training.logging import print_epoch_metrics
 from seis_ssl_cluster.training.mae_checkpoint import (
 	ResumeState,
+	_best_metric_from_metrics,
 	_dataloader_generator_state,
 	_restore_dataloader_generator_state,
 	_restore_mae_checkpoint,
 	_rng_state_for_step_checkpoint,
 	_rng_state_with_dataloader,
-	_save_mae_checkpoint,
+	_save_mae_rolling_checkpoint,
 )
 from seis_ssl_cluster.training.mae_config_completion import (
 	_bool_config,
@@ -368,6 +369,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		completed_epoch=True,
 	)
 	checkpoint_path: Path | None = None
+	best_score = _load_existing_best_score(output_root)
 	for epoch in range(resume_state.start_epoch, epochs + 1):
 		set_epoch = getattr(dataset, 'set_epoch', None)
 		if callable(set_epoch):
@@ -388,14 +390,14 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			step_state: MaeStepState,
 			epoch_start_rng_state: torch.Tensor = epoch_start_dataloader_rng_state,
 		) -> None:
-			nonlocal checkpoint_path
+			nonlocal best_score, checkpoint_path
 			if (
 				checkpoint_every_steps is None
 				or step_state.global_step % checkpoint_every_steps != 0
 			):
 				return
-			checkpoint_path = _save_mae_checkpoint(
-				output_root / f'mae_step_{step_state.global_step:08d}.pt',
+			result = _save_mae_rolling_checkpoint(
+				output_root,
 				model=model,
 				optimizer=optimizer,
 				epoch=step_state.epoch,
@@ -411,7 +413,10 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 					epoch_start_dataloader_rng_state=epoch_start_rng_state,
 					batch_index=step_state.batch_index,
 				),
+				best_score=best_score,
 			)
+			best_score = result.best_score
+			checkpoint_path = result.latest_path
 
 		state = train_mae_one_epoch(
 			model=model,
@@ -436,8 +441,8 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		checkpoint_kind: Literal['step', 'epoch'] = (
 			'epoch' if state.completed_epoch else 'step'
 		)
-		checkpoint_path = _save_mae_checkpoint(
-			output_root / f'mae_epoch_{epoch:04d}.pt',
+		result = _save_mae_rolling_checkpoint(
+			output_root,
 			model=model,
 			optimizer=optimizer,
 			epoch=epoch,
@@ -457,7 +462,10 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 					batch_index=state.last_batch_index,
 				)
 			),
+			best_score=best_score,
 		)
+		best_score = result.best_score
+		checkpoint_path = result.latest_path
 		if max_steps is not None and state.global_step >= max_steps:
 			break
 
@@ -465,6 +473,18 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		msg = 'no MAE training epochs were run'
 		raise ValueError(msg)
 	return checkpoint_path
+
+
+def _load_existing_best_score(output_root: Path) -> float | None:
+	best_path = output_root / 'best.pt'
+	if not best_path.is_file():
+		return None
+	payload = load_checkpoint(best_path, map_location='cpu')
+	metrics = payload.get('metrics')
+	if not isinstance(metrics, Mapping):
+		return None
+	_, score = _best_metric_from_metrics(metrics)
+	return score
 
 
 def prepare_run_directory(

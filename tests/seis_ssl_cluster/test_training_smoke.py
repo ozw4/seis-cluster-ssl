@@ -52,9 +52,11 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 
 	checkpoint_path = run_mae_pretraining(cfg)
 
-	assert checkpoint_path.name == 'mae_epoch_0001.pt'
+	assert checkpoint_path.name == 'latest.pt'
 	assert checkpoint_path.is_file()
-	assert (_path_like(cfg['paths']['output_root']) / 'mae_latest.pt').is_file()
+	output_root = _path_like(cfg['paths']['output_root'])
+	assert (output_root / 'best.pt').is_file()
+	assert not list(output_root.glob('*epoch*.pt'))
 	checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
 	assert checkpoint['epoch'] == 1
 	assert checkpoint['global_step'] == 2
@@ -151,9 +153,34 @@ def test_resume_advances_global_step(tmp_path: Path) -> None:
 	resumed_path = run_mae_pretraining(resume_cfg, resume=checkpoint_path)
 
 	payload = load_checkpoint(resumed_path, map_location='cpu')
-	assert resumed_path.name == 'mae_epoch_0001.pt'
+	assert resumed_path.name == 'latest.pt'
 	assert payload['epoch'] == 1
 	assert payload['global_step'] == 2
+	assert payload['training_state']['checkpoint_kind'] == 'epoch'
+
+
+@pytest.mark.parametrize(
+	'checkpoint_name',
+	['latest.pt', 'best.pt', 'mae_epoch_0001.pt'],
+)
+def test_resume_accepts_rolling_and_legacy_epoch_paths(
+	tmp_path: Path,
+	checkpoint_name: str,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	checkpoint_path = run_mae_pretraining(cfg)
+	output_root = _path_like(cfg['paths']['output_root'])
+	resume_path = output_root / checkpoint_name
+	if checkpoint_name == 'mae_epoch_0001.pt':
+		torch.save(load_checkpoint(checkpoint_path, map_location='cpu'), resume_path)
+
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['train']['epochs'] = 2
+	resumed_path = run_mae_pretraining(resume_cfg, resume=resume_path)
+
+	payload = load_checkpoint(resumed_path, map_location='cpu')
+	assert resumed_path.name == 'latest.pt'
+	assert payload['epoch'] == 2
 	assert payload['training_state']['checkpoint_kind'] == 'epoch'
 
 
@@ -251,14 +278,19 @@ def test_step_checkpoint_resume_continues_unfinished_epoch(tmp_path: Path) -> No
 	cfg['train']['max_steps'] = 1
 	cfg['train']['checkpoint_every_steps'] = 1
 	run_mae_pretraining(cfg)
-	step_checkpoint = _path_like(cfg['paths']['output_root']) / 'mae_step_00000001.pt'
+	output_root = _path_like(cfg['paths']['output_root'])
+	assert sorted(path.name for path in output_root.glob('*.pt')) == [
+		'best.pt',
+		'latest.pt',
+	]
+	step_checkpoint = output_root / 'latest.pt'
 
 	resume_cfg = deepcopy(cfg)
 	resume_cfg['train']['max_steps'] = 2
 	resumed_path = run_mae_pretraining(resume_cfg, resume=step_checkpoint)
 
 	payload = load_checkpoint(resumed_path, map_location='cpu')
-	assert resumed_path.name == 'mae_epoch_0001.pt'
+	assert resumed_path.name == 'latest.pt'
 	assert payload['epoch'] == 1
 	assert payload['global_step'] == 2
 

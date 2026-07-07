@@ -68,6 +68,73 @@ class ResumeState:
 	skip_batches: int
 
 
+@dataclass(frozen=True)
+class RollingCheckpointResult:
+	"""Result of a rolling MAE checkpoint write."""
+
+	latest_path: Path
+	best_path: Path
+	best_score: float | None
+	best_updated: bool
+	best_metric_key: str | None
+
+
+_BEST_METRIC_KEYS = (
+	'val_loss',
+	'validation_loss',
+	'loss_val',
+	'loss',
+	'loss_reconstruction',
+)
+
+
+def _save_mae_rolling_checkpoint(  # noqa: PLR0913
+	checkpoint_dir: Path,
+	*,
+	model: torch.nn.Module,
+	optimizer: torch.optim.Optimizer,
+	epoch: int,
+	config: Mapping[str, object],
+	metrics: Mapping[str, float],
+	global_step: int,
+	amp_enabled: bool,
+	scaler: torch.amp.GradScaler | None,
+	checkpoint_kind: Literal['step', 'epoch'],
+	batch_index: int | None,
+	rng_state: Mapping[str, object] | None = None,
+	best_score: float | None = None,
+) -> RollingCheckpointResult:
+	"""Write rolling ``latest.pt`` and update ``best.pt`` on metric improvement."""
+	checkpoint_path = _save_mae_checkpoint(
+		checkpoint_dir / 'latest.pt',
+		model=model,
+		optimizer=optimizer,
+		epoch=epoch,
+		config=config,
+		metrics=metrics,
+		global_step=global_step,
+		amp_enabled=amp_enabled,
+		scaler=scaler,
+		checkpoint_kind=checkpoint_kind,
+		batch_index=batch_index,
+		rng_state=rng_state,
+	)
+	metric_key, metric_value = _best_metric_from_metrics(metrics)
+	best_updated = _is_improved_best_metric(metric_value, best_score)
+	resolved_best_score = best_score
+	best_path = checkpoint_dir / 'best.pt'
+	if best_updated:
+		_copy_checkpoint_atomic(checkpoint_path, best_path)
+		resolved_best_score = metric_value
+	return RollingCheckpointResult(
+		latest_path=checkpoint_path,
+		best_path=best_path,
+		best_score=resolved_best_score,
+		best_updated=best_updated,
+		best_metric_key=metric_key,
+	)
+
+
 def _save_mae_checkpoint(  # noqa: PLR0913
 	path: Path,
 	*,
@@ -83,7 +150,7 @@ def _save_mae_checkpoint(  # noqa: PLR0913
 	batch_index: int | None,
 	rng_state: Mapping[str, object] | None = None,
 ) -> Path:
-	checkpoint_path = save_checkpoint(
+	return save_checkpoint(
 		path,
 		model=model,
 		optimizer=optimizer,
@@ -102,11 +169,36 @@ def _save_mae_checkpoint(  # noqa: PLR0913
 		},
 		rng_state=rng_state,
 	)
-	_latest_path = checkpoint_path.parent / 'mae_latest.pt'
-	_tmp_latest = _latest_path.with_suffix('.pt.tmp')
-	shutil.copy2(checkpoint_path, _tmp_latest)
-	_tmp_latest.replace(_latest_path)
-	return checkpoint_path
+
+
+def _best_metric_from_metrics(
+	metrics: Mapping[str, float],
+) -> tuple[str | None, float | None]:
+	for key in _BEST_METRIC_KEYS:
+		value = metrics.get(key)
+		if isinstance(value, int | float) and not isinstance(value, bool):
+			score = float(value)
+			if math.isfinite(score):
+				return key, score
+	return None, None
+
+
+def _is_improved_best_metric(
+	score: float | None,
+	best_score: float | None,
+) -> bool:
+	if score is None:
+		return False
+	if best_score is None:
+		return True
+	return score < best_score
+
+
+def _copy_checkpoint_atomic(source: Path, target: Path) -> None:
+	target.parent.mkdir(parents=True, exist_ok=True)
+	tmp_path = target.with_suffix('.pt.tmp')
+	shutil.copy2(source, tmp_path)
+	tmp_path.replace(target)
 
 
 def _restore_mae_checkpoint(  # noqa: PLR0913
@@ -559,12 +651,15 @@ def _summarize_float_tensor(
 
 __all__ = [
 	'ResumeState',
+	'RollingCheckpointResult',
+	'_best_metric_from_metrics',
 	'_checkpoint_stage',
 	'_data_resume_compatibility_view',
 	'_dataloader_generator_state',
 	'_first_compatibility_mismatch',
 	'_first_nested_mismatch',
 	'_is_cuda_rng_state',
+	'_is_improved_best_metric',
 	'_is_numpy_rng_state',
 	'_loss_resume_compatibility_view',
 	'_require_resume_keys',
@@ -574,6 +669,7 @@ __all__ = [
 	'_rng_state_for_step_checkpoint',
 	'_rng_state_with_dataloader',
 	'_save_mae_checkpoint',
+	'_save_mae_rolling_checkpoint',
 	'_validate_resume_amp_state',
 	'_validate_resume_checkpoint_kind',
 	'_validate_resume_config_compatibility',
