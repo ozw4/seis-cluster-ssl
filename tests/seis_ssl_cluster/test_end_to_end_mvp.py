@@ -194,7 +194,7 @@ def _train_tiny_mae(
 		output_root,
 	)
 	assert result.returncode == 0, result.stderr
-	checkpoint_path = output_root / 'mae_latest.pt'
+	checkpoint_path = output_root / 'latest.pt'
 	assert checkpoint_path.is_file()
 	checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
 	assert checkpoint['global_step'] == 1

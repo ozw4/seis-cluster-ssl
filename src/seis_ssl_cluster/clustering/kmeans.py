@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral
@@ -96,7 +97,24 @@ class ClusteringRunResult:
 
 
 def run_embedding_clustering(config: Mapping[str, object]) -> ClusteringRunResult:
-	"""Run embedding-only clustering from a validated config mapping."""
+	"""Dispatch embedding-only clustering from a validated config mapping."""
+	clustering = _required_mapping(config, 'clustering')
+	method = _method(clustering.get('method', 'minibatch_kmeans'))
+	if method == 'minibatch_kmeans':
+		return run_minibatch_kmeans_clustering(config)
+	if method == 'stratigraphic_hmm_kmeans':
+		stratigraphic_hmm = importlib.import_module(
+			'seis_ssl_cluster.clustering.stratigraphic_hmm',
+		)
+		return stratigraphic_hmm.run_stratigraphic_hmm_clustering(config)
+	msg = f'unsupported clustering.method: {method!r}'
+	raise ValueError(msg)
+
+
+def run_minibatch_kmeans_clustering(
+	config: Mapping[str, object],
+) -> ClusteringRunResult:
+	"""Run embedding-only MiniBatchKMeans clustering from a validated config mapping."""
 	settings = clustering_settings_from_config(config)
 	embedding_inputs = discover_embedding_inputs(settings.input_dir)
 	compatibility_signature = validate_compatible_embedding_inputs(embedding_inputs)
@@ -566,8 +584,11 @@ def _residualization_settings(
 
 
 def _method(value: object) -> str:
-	if value != 'minibatch_kmeans':
-		msg = "clustering.method must be 'minibatch_kmeans'"
+	if value not in {'minibatch_kmeans', 'stratigraphic_hmm_kmeans'}:
+		msg = (
+			"clustering.method must be 'minibatch_kmeans' or "
+			f"'stratigraphic_hmm_kmeans'; got {value!r}"
+		)
 		raise ValueError(msg)
 	return str(value)
 
@@ -598,4 +619,5 @@ __all__ = [
 	'fit_preprocessor',
 	'fit_residualizer',
 	'run_embedding_clustering',
+	'run_minibatch_kmeans_clustering',
 ]

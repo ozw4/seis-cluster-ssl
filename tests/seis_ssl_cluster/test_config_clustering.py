@@ -11,7 +11,6 @@ from seis_ssl_cluster.config.validate import (
 	resolve_clustering_config as validate_resolve_clustering_config,
 )
 
-
 CONFIG_DIR = Path('proc/configs/seis_ssl_cluster')
 
 
@@ -21,6 +20,76 @@ def test_clustering_config_resolves_from_stage_module() -> None:
 	assert resolved['stage'] == 'cluster_embeddings'
 	assert resolved['clustering']['method'] == 'minibatch_kmeans'
 	assert resolved['clustering']['k_values'] == [4, 6, 8]
+
+
+def test_stratigraphic_hmm_clustering_config_resolves() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	cfg['clustering']['stratigraphic_hmm'] = _stratigraphic_hmm_config()
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['method'] == 'stratigraphic_hmm_kmeans'
+	assert resolved['clustering']['stratigraphic_hmm']['z_axis'] == 2
+
+
+def test_stratigraphic_hmm_clustering_config_requires_hmm_mapping() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+
+	with pytest.raises(ValueError, match=r'clustering\.stratigraphic_hmm'):
+		resolve_clustering_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('path', 'value', 'message'),
+	[
+		(('iterations',), 0, 'iterations'),
+		(('z_axis',), 1, 'z_axis'),
+		(('transition', 'reverse_cost'), -1.0, 'reverse_cost'),
+		(('transition', 'max_jump'), 0, 'max_jump'),
+		(('init', 'order_by'), 'depth', 'order_by'),
+	],
+)
+def test_stratigraphic_hmm_clustering_config_validates_nested_values(
+	path: tuple[str, ...],
+	value: object,
+	message: str,
+) -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	hmm = _stratigraphic_hmm_config()
+	_set_nested(hmm, path, value)
+	cfg['clustering']['stratigraphic_hmm'] = hmm
+
+	with pytest.raises(ValueError, match=message):
+		resolve_clustering_config(cfg)
+
+
+def test_stratigraphic_hmm_clustering_config_rejects_nested_unknown_key() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	hmm = _stratigraphic_hmm_config()
+	transition = hmm['transition']
+	assert isinstance(transition, dict)
+	transition['extra'] = 1
+	cfg['clustering']['stratigraphic_hmm'] = hmm
+
+	with pytest.raises(
+		ValueError,
+		match=r'clustering\.stratigraphic_hmm\.transition\.extra',
+	):
+		resolve_clustering_config(cfg)
+
+
+def test_minibatch_kmeans_clustering_config_does_not_require_hmm_mapping() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering'].pop('stratigraphic_hmm', None)
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['method'] == 'minibatch_kmeans'
+	assert 'stratigraphic_hmm' not in resolved['clustering']
 
 
 def test_clustering_config_validate_module_reexports_stage_resolver() -> None:
@@ -121,3 +190,33 @@ def _minimal_clustering_config() -> dict[str, object]:
 			},
 		},
 	)
+
+
+def _stratigraphic_hmm_config() -> dict[str, object]:
+	return {
+		'iterations': 10,
+		'z_axis': 2,
+		'z_direction': 'increasing_downward',
+		'transition': {
+			'same_cost': 0.0,
+			'advance_cost': 0.25,
+			'jump_cost': 1.0,
+			'reverse_cost': 1000000.0,
+			'forbid_reverse': True,
+			'max_jump': None,
+		},
+		'init': {'order_by': 'mean_z'},
+		'update': {'empty_cluster_policy': 'keep_previous'},
+	}
+
+
+def _set_nested(
+	parent: dict[str, object],
+	path: tuple[str, ...],
+	value: object,
+) -> None:
+	current = parent
+	for key in path[:-1]:
+		current = current[key]
+		assert isinstance(current, dict)
+	current[path[-1]] = value

@@ -196,6 +196,20 @@ def test_run_embedding_clustering_rejects_duplicate_k_values(
 		run_embedding_clustering(config)
 
 
+def test_run_embedding_clustering_dispatches_stratigraphic_hmm_stub(
+	tmp_path: Path,
+) -> None:
+	config = _config(tmp_path / 'embeddings', tmp_path / 'clusters')
+	config['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	config['clustering']['stratigraphic_hmm'] = _stratigraphic_hmm_config()
+
+	with pytest.raises(
+		NotImplementedError,
+		match='stratigraphic_hmm_kmeans is not implemented yet',
+	):
+		run_embedding_clustering(config)
+
+
 def test_run_embedding_clustering_reports_non_finite_feature_survey(
 	tmp_path: Path,
 ) -> None:
@@ -290,6 +304,24 @@ def _config(input_dir: Path, output_dir: Path) -> dict[str, object]:
 			'minibatch_size': 4,
 			'seed': 42,
 		},
+	}
+
+
+def _stratigraphic_hmm_config() -> dict[str, object]:
+	return {
+		'iterations': 10,
+		'z_axis': 2,
+		'z_direction': 'increasing_downward',
+		'transition': {
+			'same_cost': 0.0,
+			'advance_cost': 0.25,
+			'jump_cost': 1.0,
+			'reverse_cost': 1000000.0,
+			'forbid_reverse': True,
+			'max_jump': None,
+		},
+		'init': {'order_by': 'mean_z'},
+		'update': {'empty_cluster_policy': 'keep_previous'},
 	}
 
 
