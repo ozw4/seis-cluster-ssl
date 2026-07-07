@@ -68,9 +68,7 @@ _CLUSTERING_RESIDUALIZATION_KEYS = frozenset(
 		'min_group_count',
 	},
 )
-_CLUSTERING_RESIDUALIZATION_ENABLED_REQUIRED_KEYS = (
-	_CLUSTERING_RESIDUALIZATION_KEYS
-)
+_CLUSTERING_RESIDUALIZATION_ENABLED_REQUIRED_KEYS = _CLUSTERING_RESIDUALIZATION_KEYS
 _CLUSTERING_PCA_KEYS = frozenset({'enabled', 'n_components', 'whiten'})
 _CLUSTERING_METHODS = frozenset(
 	{
@@ -80,6 +78,7 @@ _CLUSTERING_METHODS = frozenset(
 )
 _STRATIGRAPHIC_HMM_KEYS = frozenset(
 	{
+		'emission_source',
 		'iterations',
 		'z_axis',
 		'z_direction',
@@ -88,6 +87,17 @@ _STRATIGRAPHIC_HMM_KEYS = frozenset(
 		'update',
 	},
 )
+_STRATIGRAPHIC_HMM_REQUIRED_KEYS = frozenset(
+	{
+		'iterations',
+		'z_axis',
+		'z_direction',
+		'transition',
+		'init',
+		'update',
+	},
+)
+_STRATIGRAPHIC_HMM_EMISSION_SOURCES = frozenset({'embedding', 'z_coordinate'})
 _STRATIGRAPHIC_HMM_TRANSITION_KEYS = frozenset(
 	{
 		'same_cost',
@@ -241,8 +251,7 @@ def _validate_clustering_normalization(clustering: Mapping[str, object]) -> None
 	value = clustering.get('embedding_normalization')
 	if value not in {'l2', 'none'}:
 		msg = (
-			'clustering.embedding_normalization must be "l2" or "none"; '
-			f'got {value!r}'
+			f'clustering.embedding_normalization must be "l2" or "none"; got {value!r}'
 		)
 		raise ValueError(msg)
 
@@ -278,9 +287,10 @@ def _validate_stratigraphic_hmm(clustering: Mapping[str, object]) -> None:
 	)
 	_validate_required_keys(
 		hmm,
-		_STRATIGRAPHIC_HMM_KEYS,
+		_STRATIGRAPHIC_HMM_REQUIRED_KEYS,
 		prefix='clustering.stratigraphic_hmm',
 	)
+	_validate_stratigraphic_hmm_emission_source(hmm)
 	_validate_positive_int(
 		hmm,
 		'iterations',
@@ -291,6 +301,19 @@ def _validate_stratigraphic_hmm(clustering: Mapping[str, object]) -> None:
 	_validate_stratigraphic_hmm_transition(hmm)
 	_validate_stratigraphic_hmm_init(hmm)
 	_validate_stratigraphic_hmm_update(hmm)
+
+
+def _validate_stratigraphic_hmm_emission_source(
+	hmm: Mapping[str, object],
+) -> None:
+	value = hmm.get('emission_source', 'embedding')
+	if value not in _STRATIGRAPHIC_HMM_EMISSION_SOURCES:
+		msg = (
+			'clustering.stratigraphic_hmm.emission_source must be '
+			"'embedding' or 'z_coordinate'; "
+			f'got {value!r}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_stratigraphic_hmm_z_axis(hmm: Mapping[str, object]) -> None:

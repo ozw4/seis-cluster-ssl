@@ -33,6 +33,30 @@ def test_stratigraphic_hmm_clustering_config_resolves() -> None:
 	assert resolved['clustering']['stratigraphic_hmm']['z_axis'] == 2
 
 
+def test_stratigraphic_hmm_clustering_config_allows_default_emission_source() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	cfg['clustering']['stratigraphic_hmm'] = _stratigraphic_hmm_config()
+	cfg['clustering']['stratigraphic_hmm'].pop('emission_source')
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert 'emission_source' not in resolved['clustering']['stratigraphic_hmm']
+
+
+def test_stratigraphic_hmm_clustering_config_accepts_z_coordinate_emission() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	cfg['clustering']['stratigraphic_hmm'] = _stratigraphic_hmm_config()
+	cfg['clustering']['stratigraphic_hmm']['emission_source'] = 'z_coordinate'
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert (
+		resolved['clustering']['stratigraphic_hmm']['emission_source'] == 'z_coordinate'
+	)
+
+
 def test_stratigraphic_hmm_clustering_config_requires_hmm_mapping() -> None:
 	cfg = _minimal_clustering_config()
 	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
@@ -49,6 +73,7 @@ def test_stratigraphic_hmm_clustering_config_requires_hmm_mapping() -> None:
 		(('transition', 'reverse_cost'), -1.0, 'reverse_cost'),
 		(('transition', 'max_jump'), 0, 'max_jump'),
 		(('init', 'order_by'), 'depth', 'order_by'),
+		(('emission_source',), 'depth', 'emission_source'),
 	],
 )
 def test_stratigraphic_hmm_clustering_config_validates_nested_values(
@@ -194,6 +219,7 @@ def _minimal_clustering_config() -> dict[str, object]:
 
 def _stratigraphic_hmm_config() -> dict[str, object]:
 	return {
+		'emission_source': 'embedding',
 		'iterations': 10,
 		'z_axis': 2,
 		'z_direction': 'increasing_downward',

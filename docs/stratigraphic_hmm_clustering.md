@@ -6,11 +6,11 @@ volume, not to assign supervised lithology or facies classes.
 
 ## Problem Definition
 
-Input embeddings are fixed features from a pretrained encoder. The clustering
-stage groups tokens into ordered units while encouraging each vertical trace to
-progress monotonically through cluster IDs. F3 lithology labels are not training
-inputs for this method; they can be used only after clustering for sanity-check
-evaluation.
+Input embeddings are fixed features from a pretrained encoder by default. The
+clustering stage groups tokens into ordered units while encouraging each
+vertical trace to progress monotonically through cluster IDs. F3 lithology labels
+are not training inputs for this method; they can be used only after clustering
+for sanity-check evaluation.
 
 Lithology or facies clustering tries to recover rock or facies categories.
 Stratigraphic HMM clustering instead treats cluster IDs as ordered units that may
@@ -24,6 +24,11 @@ and a lithology can recur in multiple stratigraphic units.
 3. Decode labels per vertical trace with Viterbi under the transition costs.
 4. Update cluster centers from decoded assignments.
 5. Repeat decode and update for the configured number of iterations.
+
+Set `clustering.stratigraphic_hmm.emission_source` to `embedding` for the main
+method, or to `z_coordinate` for the z-only guardrail. The z-only guardrail uses
+normalized token z coordinates as one-dimensional emissions while still using
+embedding artifacts for token grid shape and validity masks.
 
 ## Output Contract
 
@@ -40,6 +45,11 @@ by `k` value. Outputs follow the same contract as embedding clustering:
 
 The HMM can create plausible bands even when embeddings are weak. Run z-only and
 random guardrails before making geological claims.
+
+The z-only guardrail should produce ordered bands by construction. The embedding
+HMM result is only scientifically stronger if it differs from z-only in
+geologically meaningful ways, for example boundaries bending with reflectors or
+respecting structural offsets rather than remaining flat depth bands.
 
 Strict monotonicity can suppress repeated facies because this is a stratigraphic
 unit method, not a repeated-facies classifier.

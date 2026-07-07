@@ -18,6 +18,7 @@ clustering:
   prediction_batch_size: 65536
   seed: 42
   stratigraphic_hmm:
+    emission_source: embedding
     iterations: 10
     z_axis: 2
     z_direction: increasing_downward

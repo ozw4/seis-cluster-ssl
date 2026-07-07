@@ -22,6 +22,7 @@ from seis_ssl_cluster.clustering.residualization import (
 )
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	initialize_ordered_centers,
+	normalized_z_features_for_indices,
 	prepare_feature_batch_for_indices,
 	sample_token_z_coordinates,
 )
@@ -54,6 +55,32 @@ def test_sample_token_z_coordinates_preserves_sample_row_order(tmp_path: Path) -
 	z = sample_token_z_coordinates(embedding_inputs, per_survey)
 
 	np.testing.assert_array_equal(z, np.array([3, 0, 3, 2, 1], dtype=np.int32))
+
+
+def test_normalized_z_features_for_indices_uses_token_grid_shape(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.ones((2, 1, 4, 3), dtype=np.float32),
+		valid=np.ones((2, 1, 4), dtype=np.bool_),
+	)
+	embedding_input = discover_embedding_inputs(input_dir)[0]
+
+	features = normalized_z_features_for_indices(
+		embedding_input,
+		np.array([0, 1, 3, 4, 7], dtype=np.int64),
+	)
+
+	assert features.dtype == np.float32
+	assert features.shape == (5, 1)
+	np.testing.assert_allclose(
+		features[:, 0],
+		np.array([0.0, 1.0 / 3.0, 1.0, 0.0, 1.0], dtype=np.float32),
+	)
 
 
 def test_initialize_ordered_centers_orders_by_mean_z() -> None:
@@ -244,14 +271,19 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 	assert not (k_dir / 'kmeans.joblib').exists()
 	metadata = json.loads((k_dir / 'clustering_metadata.json').read_text())
 	assert metadata['method'] == 'stratigraphic_hmm_kmeans'
+	assert metadata['emission_source'] == 'embedding'
+	assert metadata['stratigraphic_hmm']['emission_source'] == 'embedding'
 	assert metadata['stratigraphic_hmm']['iteration_summaries']
 	assert metadata['stratigraphic_hmm']['init'] == {'order_by': 'mean_z'}
-	assert metadata['ordered_diagnostics']['aggregate'][
-		'reverse_transition_rate'
-	] == 0.0
-	assert metadata['ordered_diagnostics']['per_survey']['survey_a'][
-		'reverse_transition_rate'
-	] == 0.0
+	assert (
+		metadata['ordered_diagnostics']['aggregate']['reverse_transition_rate'] == 0.0
+	)
+	assert (
+		metadata['ordered_diagnostics']['per_survey']['survey_a'][
+			'reverse_transition_rate'
+		]
+		== 0.0
+	)
 
 	labels_a = np.load(
 		output_dir / 'labels' / 'k3' / 'survey_a.cluster_labels_token.npy',
@@ -267,13 +299,11 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 
 	label_metadata = json.loads(
 		(
-			output_dir
-			/ 'labels'
-			/ 'k3'
-			/ 'survey_a.cluster_label_metadata.json'
+			output_dir / 'labels' / 'k3' / 'survey_a.cluster_label_metadata.json'
 		).read_text(),
 	)
 	assert label_metadata['method'] == 'stratigraphic_hmm_kmeans'
+	assert label_metadata['emission_source'] == 'embedding'
 	assert label_metadata['invalid_token_count'] == 1
 	assert label_metadata['ordered_diagnostics']['reverse_transition_rate'] == 0.0
 	assert '0_to_1' in label_metadata['ordered_boundary_summary']
@@ -282,7 +312,81 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 	)
 
 
-def _hmm_config(input_dir: Path, output_dir: Path) -> dict[str, object]:
+def test_run_embedding_clustering_stratigraphic_hmm_zonly_writes_metadata(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.zeros((2, 2, 6, 2), dtype=np.float32),
+		valid=np.ones((2, 2, 6), dtype=np.bool_),
+	)
+
+	result = run_embedding_clustering(
+		_hmm_config(input_dir, output_dir, emission_source='z_coordinate'),
+	)
+
+	assert [item.k for item in result.results] == [3]
+	k_dir = output_dir / 'models' / 'k3'
+	assert (k_dir / 'preprocessor.joblib').is_file()
+	assert (k_dir / 'hmm_model.joblib').is_file()
+	metadata = json.loads((k_dir / 'clustering_metadata.json').read_text())
+	assert metadata['emission_source'] == 'z_coordinate'
+	assert (
+		metadata['emission_features']['embedding_features_used_for_emissions'] is False
+	)
+	assert metadata['emission_features']['embedding_artifacts_used_for'] == [
+		'token_grid_shape',
+		'validity_masks',
+	]
+	assert metadata['stratigraphic_hmm']['emission_source'] == 'z_coordinate'
+	assert metadata['normalization'] == 'none'
+	assert metadata['pca']['enabled'] is False
+
+	label_metadata = json.loads(
+		(
+			output_dir / 'labels' / 'k3' / 'survey_a.cluster_label_metadata.json'
+		).read_text(),
+	)
+	assert label_metadata['emission_source'] == 'z_coordinate'
+
+
+def test_stratigraphic_hmm_zonly_labels_are_monotone_when_reverse_forbidden(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.zeros((2, 2, 6, 2), dtype=np.float32),
+		valid=np.ones((2, 2, 6), dtype=np.bool_),
+	)
+
+	run_embedding_clustering(
+		_hmm_config(input_dir, output_dir, emission_source='z_coordinate'),
+	)
+
+	labels = np.load(
+		output_dir / 'labels' / 'k3' / 'survey_a.cluster_labels_token.npy',
+	)
+	for x_index in range(labels.shape[0]):
+		for y_index in range(labels.shape[1]):
+			trace = labels[x_index, y_index]
+			valid_trace = trace[trace >= 0]
+			assert np.all(np.diff(valid_trace) >= 0)
+
+
+def _hmm_config(
+	input_dir: Path,
+	output_dir: Path,
+	*,
+	emission_source: str = 'embedding',
+) -> dict[str, object]:
 	return {
 		'embeddings': {'input_dir': str(input_dir)},
 		'clustering': {
@@ -301,6 +405,7 @@ def _hmm_config(input_dir: Path, output_dir: Path) -> dict[str, object]:
 			'prediction_batch_size': 3,
 			'seed': 7,
 			'stratigraphic_hmm': {
+				'emission_source': emission_source,
 				'iterations': 2,
 				'z_axis': 2,
 				'z_direction': 'increasing_downward',

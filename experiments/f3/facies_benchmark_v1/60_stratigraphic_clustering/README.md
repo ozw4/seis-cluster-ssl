@@ -16,6 +16,7 @@ signals.
 ```text
 01_stratigraphic_hmm_kmeans.yaml
 01_stratigraphic_hmm_kmeans_smoke.yaml
+02_stratigraphic_hmm_zonly_guardrail.yaml
 ```
 
 The main config writes to:
@@ -26,6 +27,12 @@ The main config writes to:
 
 The `full` path component is kept so the output follows the generic clustering
 artifact shape.
+
+The z-only guardrail config writes to:
+
+```text
+/workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_zonly_k6_8_10_iter10
+```
 
 ## Run
 
@@ -56,6 +63,11 @@ python proc/seis_ssl_cluster/cluster_embeddings.py \
 
 The key comparison is against vanilla KMeans and z-only or random guardrails,
 not supervised probes.
+
+The z-only guardrail should produce ordered bands by construction. The embedding
+HMM result is only scientifically stronger if it differs from z-only in
+geologically meaningful ways, for example boundaries bending with reflectors or
+respecting structural offsets rather than remaining flat depth bands.
 
 Main diagnostics:
 

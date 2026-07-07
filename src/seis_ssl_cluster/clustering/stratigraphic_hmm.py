@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from numbers import Integral, Real
 from pathlib import Path
 
@@ -12,16 +12,20 @@ import numpy as np
 
 from seis_ssl_cluster.clustering.features import (
 	EmbeddingInput,
+	count_valid_tokens,
 	discover_embedding_inputs,
 	embedding_input_metadata,
 	extract_token_features,
 	load_valid_tokens,
 	open_embedding_array,
+	valid_flat_indices,
 	validate_compatible_embedding_inputs,
 )
 from seis_ssl_cluster.clustering.kmeans import (
 	ClusteringRunResult,
 	KClusteringResult,
+	PCASettings,
+	ResidualizationSettings,
 	_aggregate_counts,
 	_common_metadata,
 	apply_residualizer_to_sample,
@@ -40,7 +44,10 @@ from seis_ssl_cluster.clustering.residualization import (
 	residualization_keys_for_flat_indices,
 	write_residualizer_npz,
 )
-from seis_ssl_cluster.clustering.sampling import sample_valid_embedding_tokens
+from seis_ssl_cluster.clustering.sampling import (
+	SampledTokens,
+	sample_valid_embedding_tokens,
+)
 from seis_ssl_cluster.clustering.writer import SurveyLabelResult, write_json
 
 
@@ -60,6 +67,7 @@ class HMMTransitionSettings:
 class StratigraphicHMMSettings:
 	"""Validated stratigraphic HMM backend settings."""
 
+	emission_source: str
 	iterations: int
 	z_axis: int
 	z_direction: str
@@ -78,6 +86,7 @@ def stratigraphic_hmm_settings_from_config(
 	init = _required_mapping(hmm, 'init')
 	update = _required_mapping(hmm, 'update')
 	return StratigraphicHMMSettings(
+		emission_source=str(hmm.get('emission_source', 'embedding')),
 		iterations=int(hmm['iterations']),
 		z_axis=int(hmm['z_axis']),
 		z_direction=str(hmm['z_direction']),
@@ -88,9 +97,7 @@ def stratigraphic_hmm_settings_from_config(
 			reverse_cost=float(transition['reverse_cost']),
 			forbid_reverse=bool(transition['forbid_reverse']),
 			max_jump=(
-				None
-				if transition['max_jump'] is None
-				else int(transition['max_jump'])
+				None if transition['max_jump'] is None else int(transition['max_jump'])
 			),
 		),
 		init_order_by=str(init['order_by']),
@@ -164,6 +171,25 @@ def sample_token_z_coordinates(
 	return np.concatenate(blocks).astype(np.int32, copy=False)
 
 
+def normalized_z_features_for_indices(
+	embedding_input: EmbeddingInput,
+	flat_indices: np.ndarray,
+) -> np.ndarray:
+	"""Return normalized z-coordinate features for flattened token indices."""
+	indices = np.asarray(flat_indices, dtype=np.int64)
+	if indices.ndim != 1:
+		msg = f'flat_indices must be 1D; got shape {indices.shape!r}'
+		raise ValueError(msg)
+	if indices.size == 0:
+		return np.empty((0, 1), dtype=np.float32)
+	token_shape_xyz = open_embedding_array(embedding_input).shape[:3]
+	z_size = int(token_shape_xyz[2])
+	coords = np.unravel_index(indices, token_shape_xyz)
+	z_values = np.asarray(coords[2], dtype=np.float32)
+	denominator = np.float32(max(z_size - 1, 1))
+	return (z_values / denominator).reshape(-1, 1).astype(np.float32, copy=False)
+
+
 def initialize_ordered_centers(
 	training_features: np.ndarray,
 	sample_z: np.ndarray,
@@ -213,6 +239,7 @@ def prepare_feature_batch_for_indices(
 	*,
 	residualizer: LocalTokenPositionResidualizer | None,
 	preprocessor: object,
+	emission_source: str = 'embedding',
 ) -> np.ndarray:
 	"""Load, residualize, and preprocess one arbitrary batch of token features."""
 	indices = np.asarray(flat_indices, dtype=np.int64)
@@ -221,12 +248,26 @@ def prepare_feature_batch_for_indices(
 		raise ValueError(msg)
 	if indices.size == 0:
 		return np.empty(
-			(0, _transformed_feature_dim(embedding_input, preprocessor)),
+			(
+				0,
+				_transformed_feature_dim(
+					embedding_input, preprocessor, emission_source
+				),
+			),
 			dtype=np.float32,
 		)
 
-	features = extract_token_features(embedding_input, indices)
-	if residualizer is not None:
+	if emission_source == 'embedding':
+		features = extract_token_features(embedding_input, indices)
+	elif emission_source == 'z_coordinate':
+		features = normalized_z_features_for_indices(embedding_input, indices)
+	else:
+		msg = (
+			"emission_source must be 'embedding' or 'z_coordinate'; "
+			f'got {emission_source!r}'
+		)
+		raise ValueError(msg)
+	if residualizer is not None and emission_source == 'embedding':
 		group_keys = residualization_keys_for_flat_indices(
 			embedding_input,
 			indices,
@@ -261,8 +302,7 @@ def viterbi_decode_costs(
 	k = emissions.shape[1]
 	if transitions.shape != (k, k):
 		raise ValueError(
-			'transition_costs must have shape '
-			f'({k}, {k}); got {transitions.shape}'
+			f'transition_costs must have shape ({k}, {k}); got {transitions.shape}'
 		)
 	if np.isnan(transitions).any():
 		raise ValueError('transition_costs must not contain NaN values')
@@ -332,16 +372,14 @@ def decode_trace_segments(
 		raise TypeError('valid_mask must have boolean dtype')
 	if mask.shape != (emissions.shape[0],):
 		raise ValueError(
-			'valid_mask must have shape '
-			f'({emissions.shape[0]},); got {mask.shape}'
+			f'valid_mask must have shape ({emissions.shape[0]},); got {mask.shape}'
 		)
 
 	transitions = _as_float_matrix(transition_costs, 'transition_costs')
 	k = emissions.shape[1]
 	if transitions.shape != (k, k):
 		raise ValueError(
-			'transition_costs must have shape '
-			f'({k}, {k}); got {transitions.shape}'
+			f'transition_costs must have shape ({k}, {k}); got {transitions.shape}'
 		)
 	if np.isnan(transitions).any():
 		raise ValueError('transition_costs must not contain NaN values')
@@ -352,13 +390,14 @@ def decode_trace_segments(
 	return labels
 
 
-def decode_survey_ordered_labels(
+def decode_survey_ordered_labels(  # noqa: PLR0913
 	embedding_input: EmbeddingInput,
 	*,
 	centers: np.ndarray,
 	residualizer: LocalTokenPositionResidualizer | None,
 	preprocessor: object,
 	transition_costs: np.ndarray,
+	emission_source: str = 'embedding',
 ) -> np.ndarray:
 	"""Decode HMM labels for one survey without flattening all features at once."""
 	center_matrix = np.asarray(centers, dtype=np.float32)
@@ -390,6 +429,7 @@ def decode_survey_ordered_labels(
 				flat_indices,
 				residualizer=residualizer,
 				preprocessor=preprocessor,
+				emission_source=emission_source,
 			)
 			if prepared.shape[1] != center_matrix.shape[1]:
 				msg = (
@@ -417,6 +457,7 @@ def update_centers_from_labels(  # noqa: C901, PLR0913
 	preprocessor: object,
 	prediction_batch_size: int,
 	empty_cluster_policy: str,
+	emission_source: str = 'embedding',
 ) -> tuple[np.ndarray, dict[str, object]]:
 	"""Update centers as count-weighted means in transformed feature space."""
 	if prediction_batch_size <= 0:
@@ -467,6 +508,7 @@ def update_centers_from_labels(  # noqa: C901, PLR0913
 				batch_indices,
 				residualizer=residualizer,
 				preprocessor=preprocessor,
+				emission_source=emission_source,
 			)
 			if prepared.shape[1] != feature_dim:
 				msg = (
@@ -479,15 +521,14 @@ def update_centers_from_labels(  # noqa: C901, PLR0913
 
 	new_centers = center_matrix.copy()
 	non_empty = counts > 0
-	new_centers[non_empty] = (
-		sums[non_empty] / counts[non_empty, np.newaxis]
-	).astype(np.float32)
+	new_centers[non_empty] = (sums[non_empty] / counts[non_empty, np.newaxis]).astype(
+		np.float32
+	)
 	shifts = np.linalg.norm(new_centers - center_matrix, axis=1)
 	empty_clusters = [int(label) for label in np.flatnonzero(~non_empty)]
 	summary = {
 		'cluster_counts': {
-			int(label): int(count)
-			for label, count in enumerate(counts)
+			int(label): int(count) for label, count in enumerate(counts)
 		},
 		'empty_clusters': empty_clusters,
 		'center_shift_l2': [float(value) for value in shifts],
@@ -504,27 +545,55 @@ def run_stratigraphic_hmm_clustering(
 	hmm_settings = stratigraphic_hmm_settings_from_config(config)
 	embedding_inputs = tuple(discover_embedding_inputs(settings.input_dir))
 	compatibility_signature = validate_compatible_embedding_inputs(embedding_inputs)
-	sample = sample_valid_embedding_tokens(
-		embedding_inputs,
-		sample_tokens=settings.sample_tokens,
-		seed=settings.seed,
-	)
-	residualizer = fit_residualizer(
-		sample.features,
-		embedding_inputs=embedding_inputs,
-		per_survey_token_indices=sample.per_survey_token_indices,
-		settings=settings.residualization,
-	)
-	training_input_features = apply_residualizer_to_sample(
-		sample.features,
-		embedding_inputs=embedding_inputs,
-		per_survey_token_indices=sample.per_survey_token_indices,
-		residualizer=residualizer,
-	)
+	if hmm_settings.emission_source == 'embedding':
+		sample = sample_valid_embedding_tokens(
+			embedding_inputs,
+			sample_tokens=settings.sample_tokens,
+			seed=settings.seed,
+		)
+		residualizer = fit_residualizer(
+			sample.features,
+			embedding_inputs=embedding_inputs,
+			per_survey_token_indices=sample.per_survey_token_indices,
+			settings=settings.residualization,
+		)
+		training_input_features = apply_residualizer_to_sample(
+			sample.features,
+			embedding_inputs=embedding_inputs,
+			per_survey_token_indices=sample.per_survey_token_indices,
+			residualizer=residualizer,
+		)
+		metadata_settings = settings
+	elif hmm_settings.emission_source == 'z_coordinate':
+		sample = _sample_valid_z_tokens(
+			embedding_inputs,
+			sample_tokens=settings.sample_tokens,
+			seed=settings.seed,
+		)
+		residualizer = None
+		training_input_features = np.asarray(sample.features, dtype=np.float32)
+		metadata_settings = replace(
+			settings,
+			embedding_normalization='none',
+			residualization=ResidualizationSettings(
+				enabled=False,
+				mode='local_token_position',
+				group_by='token_phase',
+				add_global_mean_back=True,
+				min_group_count=32,
+			),
+			pca=PCASettings(enabled=False, n_components=1, whiten=False),
+		)
+	else:
+		msg = (
+			"clustering.stratigraphic_hmm.emission_source must be 'embedding' "
+			f"or 'z_coordinate'; got {hmm_settings.emission_source!r}"
+		)
+		raise ValueError(msg)
 	preprocessor = fit_preprocessor(
 		training_input_features,
-		normalization=settings.embedding_normalization,
-		pca=settings.pca,
+		normalization=metadata_settings.embedding_normalization,
+		pca=metadata_settings.pca,
 		seed=settings.seed,
 	)
 	training_features = np.asarray(
@@ -540,7 +609,7 @@ def run_stratigraphic_hmm_clustering(
 		residualizer_path = settings.output_dir / 'models' / 'residualizer.npz'
 		write_residualizer_npz(residualizer_path, residualizer)
 	common_metadata = _common_metadata(
-		settings=settings,
+		settings=metadata_settings,
 		embedding_inputs=embedding_inputs,
 		compatibility_signature=compatibility_signature,
 		sample=sample,
@@ -548,6 +617,11 @@ def run_stratigraphic_hmm_clustering(
 		residualizer=residualizer,
 		residualizer_path=residualizer_path,
 	)
+	common_metadata = {
+		**common_metadata,
+		'emission_source': hmm_settings.emission_source,
+		'emission_features': _emission_feature_metadata(hmm_settings.emission_source),
+	}
 
 	results: list[KClusteringResult] = []
 	for k in settings.k_values:
@@ -569,6 +643,7 @@ def run_stratigraphic_hmm_clustering(
 					residualizer=residualizer,
 					preprocessor=preprocessor,
 					transition_costs=transition_costs,
+					emission_source=hmm_settings.emission_source,
 				)
 				for item in embedding_inputs
 			}
@@ -580,6 +655,7 @@ def run_stratigraphic_hmm_clustering(
 				preprocessor=preprocessor,
 				prediction_batch_size=settings.prediction_batch_size,
 				empty_cluster_policy=hmm_settings.empty_cluster_policy,
+				emission_source=hmm_settings.emission_source,
 			)
 			iteration_summaries.append({'iteration': iteration, **summary})
 
@@ -639,6 +715,7 @@ def run_stratigraphic_hmm_clustering(
 			centers=centers,
 			hmm_model={
 				'method': 'stratigraphic_hmm_kmeans',
+				'emission_source': hmm_settings.emission_source,
 				'centers': centers,
 				'transition_settings': asdict(hmm_settings.transition),
 				'transition_costs': transition_costs,
@@ -661,6 +738,59 @@ def run_stratigraphic_hmm_clustering(
 		embedding_inputs=embedding_inputs,
 		sample=sample,
 		results=tuple(results),
+	)
+
+
+def _sample_valid_z_tokens(
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	*,
+	sample_tokens: int,
+	seed: int,
+) -> SampledTokens:
+	"""Sample valid token indices and use normalized z as training features."""
+	if sample_tokens <= 0:
+		msg = f'sample_tokens must be positive; got {sample_tokens!r}'
+		raise ValueError(msg)
+	if not embedding_inputs:
+		msg = 'at least one embedding input is required'
+		raise ValueError(msg)
+
+	valid_counts = [count_valid_tokens(item) for item in embedding_inputs]
+	total_valid = int(sum(valid_counts))
+	if total_valid == 0:
+		msg = 'cannot cluster embeddings because no valid tokens were found'
+		raise ValueError(msg)
+
+	sample_count = min(int(sample_tokens), total_valid)
+	rng = np.random.default_rng(seed)
+	selected_global = np.sort(
+		rng.choice(total_valid, size=sample_count, replace=False),
+	)
+	per_survey_indices: dict[str, np.ndarray] = {}
+	feature_blocks: list[np.ndarray] = []
+	offset = 0
+	for item, count in zip(embedding_inputs, valid_counts, strict=True):
+		stop = offset + count
+		mask = (selected_global >= offset) & (selected_global < stop)
+		local_valid_ordinals = selected_global[mask] - offset
+		if local_valid_ordinals.size:
+			all_valid_indices = valid_flat_indices(item)
+			token_indices = all_valid_indices[local_valid_ordinals]
+			per_survey_indices[item.survey_id] = token_indices
+			feature_blocks.append(
+				normalized_z_features_for_indices(item, token_indices)
+			)
+		else:
+			per_survey_indices[item.survey_id] = np.empty(0, dtype=np.int64)
+		offset = stop
+
+	features = np.concatenate(feature_blocks, axis=0)
+	return SampledTokens(
+		features=np.asarray(features, dtype=np.float32),
+		per_survey_token_indices=per_survey_indices,
+		requested_count=int(sample_tokens),
+		total_valid_count=total_valid,
+		sample_count=sample_count,
 	)
 
 
@@ -705,10 +835,7 @@ def _write_hmm_survey_labels(
 	labels_path = labels_dir / f'{embedding_input.survey_id}.cluster_labels_token.npy'
 	np.save(labels_path, np.asarray(labels, dtype=np.int32))
 	counts = np.bincount(labels[labels >= 0].astype(np.int64), minlength=k)
-	cluster_counts = {
-		int(label): int(count)
-		for label, count in enumerate(counts[:k])
-	}
+	cluster_counts = {int(label): int(count) for label, count in enumerate(counts[:k])}
 	valid = int(np.count_nonzero(labels >= 0))
 	invalid = int(labels.size - valid)
 	ordered_diagnostics = ordered_label_diagnostics(labels, k=k)
@@ -765,6 +892,7 @@ def _hmm_metadata(
 	iteration_summaries: list[dict[str, object]],
 ) -> dict[str, object]:
 	return {
+		'emission_source': hmm_settings.emission_source,
 		'iterations': hmm_settings.iterations,
 		'z_axis': hmm_settings.z_axis,
 		'z_direction': hmm_settings.z_direction,
@@ -773,6 +901,26 @@ def _hmm_metadata(
 		'init': {'order_by': hmm_settings.init_order_by},
 		'update': {'empty_cluster_policy': hmm_settings.empty_cluster_policy},
 		'iteration_summaries': iteration_summaries,
+	}
+
+
+def _emission_feature_metadata(emission_source: str) -> dict[str, object]:
+	if emission_source == 'z_coordinate':
+		return {
+			'source': 'z_coordinate',
+			'feature_dim': 1,
+			'normalization': 'z / max(z_size - 1, 1)',
+			'embedding_features_used_for_emissions': False,
+			'embedding_artifacts_used_for': ['token_grid_shape', 'validity_masks'],
+		}
+	return {
+		'source': 'embedding',
+		'embedding_features_used_for_emissions': True,
+		'embedding_artifacts_used_for': [
+			'token_grid_shape',
+			'validity_masks',
+			'embedding_features',
+		],
 	}
 
 
@@ -820,7 +968,10 @@ def _required_mapping(
 def _transformed_feature_dim(
 	embedding_input: EmbeddingInput,
 	preprocessor: object,
+	emission_source: str,
 ) -> int:
+	if emission_source == 'z_coordinate':
+		return 1
 	if hasattr(preprocessor, 'named_steps'):
 		pipeline = preprocessor
 		named_steps = pipeline.named_steps
@@ -838,6 +989,7 @@ __all__ = [
 	'decode_survey_ordered_labels',
 	'decode_trace_segments',
 	'initialize_ordered_centers',
+	'normalized_z_features_for_indices',
 	'prepare_feature_batch_for_indices',
 	'run_stratigraphic_hmm_clustering',
 	'sample_token_z_coordinates',
