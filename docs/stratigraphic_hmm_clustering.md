@@ -1,0 +1,49 @@
+# Stratigraphic HMM clustering
+
+This page documents ordered stratigraphic unit clustering from frozen seismic
+SSL embeddings. The goal is to discover vertically ordered units in an embedding
+volume, not to assign supervised lithology or facies classes.
+
+## Problem Definition
+
+Input embeddings are fixed features from a pretrained encoder. The clustering
+stage groups tokens into ordered units while encouraging each vertical trace to
+progress monotonically through cluster IDs. F3 lithology labels are not training
+inputs for this method; they can be used only after clustering for sanity-check
+evaluation.
+
+Lithology or facies clustering tries to recover rock or facies categories.
+Stratigraphic HMM clustering instead treats cluster IDs as ordered units that may
+track depositional or structural layering. A unit can contain mixed lithology,
+and a lithology can recur in multiple stratigraphic units.
+
+## Algorithm Summary
+
+1. Run KMeans on sampled frozen embeddings.
+2. Order centers by mean z.
+3. Decode labels per vertical trace with Viterbi under the transition costs.
+4. Update cluster centers from decoded assignments.
+5. Repeat decode and update for the configured number of iterations.
+
+## Output Contract
+
+The clustering entrypoint writes outputs under `clustering.output_dir`, grouped
+by `k` value. Outputs follow the same contract as embedding clustering:
+
+- fitted clustering model artifacts
+- per-survey token label files
+- resolved config and metadata
+- method-specific metadata for stratigraphic HMM settings and iteration
+  summaries
+
+## Interpretation Caveats
+
+The HMM can create plausible bands even when embeddings are weak. Run z-only and
+random guardrails before making geological claims.
+
+Strict monotonicity can suppress repeated facies because this is a stratigraphic
+unit method, not a repeated-facies classifier.
+
+Useful diagnostics include reverse transition rate, boundary continuity,
+boundary z summaries, visual salt-and-pepper reduction, and whether boundaries
+follow structure instead of collapsing into flat depth bands.

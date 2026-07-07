@@ -61,6 +61,9 @@ F3_INSPECTION_CONFIGS = [
 ]
 F3_PREPARE_CONFIGS = sorted((F3_ROOT / '10_prepare').rglob('*.yaml'))
 F3_EMBEDDING_CONFIGS = sorted((F3_ROOT / '20_embedding').rglob('*.yaml'))
+F3_STRATIGRAPHIC_CLUSTERING_CONFIGS = sorted(
+	(F3_ROOT / '60_stratigraphic_clustering').rglob('*.yaml'),
+)
 F3_LITHOLOGY_ROOT = F3_ROOT / '50_lithology'
 F3_LITHOLOGY_TOKEN_CONFIGS = sorted(
 	F3_LITHOLOGY_ROOT.rglob('01_build_token_dataset.yaml'),
@@ -116,6 +119,7 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	('f3 inspection', F3_INSPECTION_CONFIGS),
 	('f3 prepare', F3_PREPARE_CONFIGS),
 	('f3 embedding', F3_EMBEDDING_CONFIGS),
+	('f3 stratigraphic clustering', F3_STRATIGRAPHIC_CLUSTERING_CONFIGS),
 	('f3 lithology token dataset', F3_LITHOLOGY_TOKEN_CONFIGS),
 	('f3 lithology probe', F3_LITHOLOGY_PROBE_CONFIGS),
 	('f3 lithology prediction', F3_LITHOLOGY_PREDICTION_CONFIGS),
@@ -181,6 +185,13 @@ def test_active_f3_prepare_configs_resolve(config_path: Path) -> None:
 )
 def test_active_f3_embedding_configs_resolve(config_path: Path) -> None:
 	resolve_embedding_extraction_config(load_config(config_path))
+
+
+@pytest.mark.parametrize('config_path', F3_STRATIGRAPHIC_CLUSTERING_CONFIGS)
+def test_active_f3_stratigraphic_clustering_configs_resolve(
+	config_path: Path,
+) -> None:
+	resolve_clustering_config(load_config(config_path))
 
 
 @pytest.mark.parametrize(
