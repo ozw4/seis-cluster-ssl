@@ -37,7 +37,12 @@ DIRECT_STAGE_IMPORTS = (
 	('f3_baselines', 'f3_lithology_comparison_report_config_from_mapping'),
 	('f3_baselines', 'random_mae_checkpoint_config_from_mapping'),
 	('f3_inspection', 'resolve_f3_facies_inspection_config'),
+	('f3_lithology', 'f3_lithology_prediction_config_from_mapping'),
 	('f3_lithology', 'f3_lithology_probe_config_from_mapping'),
+	('f3_lithology', 'f3_lithology_publish_config_from_mapping'),
+	('f3_lithology', 'f3_lithology_report_config_from_mapping'),
+	('f3_lithology', 'f3_lithology_token_dataset_config_from_mapping'),
+	('f3_lithology', 'f3_lithology_visualization_config_from_mapping'),
 	('f3_lithology', 'f3_prepare_volume_config_from_mapping'),
 	('manifest', 'resolve_manifest_build_config'),
 	('normalization', 'resolve_normalization_qc_config'),
@@ -58,6 +63,24 @@ PROC_IMPORTS = (
 	'proc.seis_ssl_cluster.train_f3_lithology_probe',
 	'proc.seis_ssl_cluster.build_f3_lithology_comparison_report',
 )
+F3_LITHOLOGY_INTERNAL_IMPORTS = (
+	(
+		'f3_lithology_prediction',
+		'f3_lithology_prediction_config_from_mapping',
+	),
+	(
+		'f3_lithology_publish',
+		'f3_lithology_publish_config_from_mapping',
+	),
+	(
+		'f3_lithology_report',
+		'f3_lithology_report_config_from_mapping',
+	),
+	(
+		'f3_lithology_visualization',
+		'f3_lithology_visualization_config_from_mapping',
+	),
+)
 
 
 def test_validate_module_reexports_public_resolver() -> None:
@@ -66,6 +89,16 @@ def test_validate_module_reexports_public_resolver() -> None:
 
 @pytest.mark.parametrize(('module_name', 'symbol'), DIRECT_STAGE_IMPORTS)
 def test_stage_modules_export_public_config_symbols(
+	module_name: str,
+	symbol: str,
+) -> None:
+	module = importlib.import_module(f'{CONFIG_PACKAGE}.{module_name}')
+
+	assert getattr(module, symbol).__name__ == symbol
+
+
+@pytest.mark.parametrize(('module_name', 'symbol'), F3_LITHOLOGY_INTERNAL_IMPORTS)
+def test_f3_lithology_internal_modules_export_stage_resolvers(
 	module_name: str,
 	symbol: str,
 ) -> None:
