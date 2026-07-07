@@ -59,8 +59,10 @@ def test_f3_refactor_public_module_imports() -> None:
 		'seis_ssl_cluster.f3.png_labels',
 		'seis_ssl_cluster.f3.consistency',
 		'seis_ssl_cluster.f3.lithology_tokens',
+		'seis_ssl_cluster.f3.lithology_prediction',
 		'seis_ssl_cluster.f3.baseline_features',
 		'seis_ssl_cluster.f3.lithology_probe',
+		'seis_ssl_cluster.f3.lithology.prediction',
 		'seis_ssl_cluster.f3.lithology.probe',
 		'seis_ssl_cluster.f3.lithology_report',
 		'seis_ssl_cluster.f3.metrics',
@@ -119,3 +121,17 @@ def test_f3_lithology_probe_module_import_compatibility() -> None:
 		is lithology_probe.train_and_evaluate_f3_lithology_probe
 	)
 	assert compat_probe.F3TorchMLPClassifier is lithology_probe.F3TorchMLPClassifier
+
+
+def test_f3_lithology_prediction_module_import_compatibility() -> None:
+	compat_prediction = importlib.import_module(
+		'seis_ssl_cluster.f3.lithology_prediction',
+	)
+	lithology_prediction = importlib.import_module(
+		'seis_ssl_cluster.f3.lithology.prediction',
+	)
+
+	assert (
+		compat_prediction.predict_f3_lithology_tokens
+		is lithology_prediction.predict_f3_lithology_tokens
+	)

@@ -62,7 +62,7 @@ from seis_ssl_cluster.f3.lithology.token_dataset import (
 	save_f3_lithology_token_dataset,
 	validate_f3_lithology_token_dataset,
 )
-from seis_ssl_cluster.f3.lithology_prediction import (
+from seis_ssl_cluster.f3.lithology.prediction import (
 	VALIDATION_SLICE_METRIC_FIELDNAMES,
 	F3LithologyPredictionConfig,
 	F3LithologyPredictionInputs,
