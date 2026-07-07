@@ -37,16 +37,28 @@ def test_ordered_label_diagnostics_counts_reverse_transition() -> None:
 	assert diagnostics['reverse_transition_rate'] == pytest.approx(0.5)
 
 
-def test_ordered_label_diagnostics_invalid_gaps_do_not_bridge_pairs() -> None:
-	labels = np.array([[[0, -1, 1]]], dtype=np.int32)
+def test_ordered_label_diagnostics_invalid_gaps_do_not_reset_sequence() -> None:
+	labels = np.array([[[0, 1, -1, 0, 1]]], dtype=np.int32)
 
 	diagnostics = ordered_label_diagnostics(labels, k=2)
 
-	assert diagnostics['valid_token_count'] == 2
+	assert diagnostics['valid_token_count'] == 4
 	assert diagnostics['invalid_token_count'] == 1
-	assert diagnostics['vertical_adjacent_pair_count'] == 0
-	assert diagnostics['forward_transition_count'] == 0
-	assert diagnostics['mean_boundaries_per_valid_trace'] == 0.0
+	assert diagnostics['vertical_adjacent_pair_count'] == 3
+	assert diagnostics['reverse_transition_count'] == 1
+	assert diagnostics['reverse_transition_rate'] == pytest.approx(1 / 3)
+	assert diagnostics['mean_boundaries_per_valid_trace'] == 3.0
+
+
+def test_ordered_label_diagnostics_allows_monotone_sequence_across_gap() -> None:
+	labels = np.array([[[0, 1, -1, 1, 2]]], dtype=np.int32)
+
+	diagnostics = ordered_label_diagnostics(labels, k=3)
+
+	assert diagnostics['vertical_adjacent_pair_count'] == 3
+	assert diagnostics['forward_transition_count'] == 2
+	assert diagnostics['same_transition_count'] == 1
+	assert diagnostics['reverse_transition_count'] == 0
 
 
 def test_ordered_label_diagnostics_counts_jump_transitions() -> None:

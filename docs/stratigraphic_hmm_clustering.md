@@ -21,7 +21,8 @@ and a lithology can recur in multiple stratigraphic units.
 
 1. Run KMeans on sampled frozen embeddings.
 2. Order centers by mean z.
-3. Decode labels per vertical trace with Viterbi under the transition costs.
+3. Decode valid labels per vertical trace with Viterbi under the transition
+   costs.
 4. Update cluster centers from decoded assignments.
 5. Repeat decode and update for the configured number of iterations.
 
@@ -41,6 +42,12 @@ by `k` value. Outputs follow the same contract as embedding clustering:
 - method-specific metadata for stratigraphic HMM settings and iteration
   summaries
 
+Invalid tokens are omitted from the observed HMM sequence and remain `-1` in the
+output label grid. They do not reset the vertical trace state sequence. With
+`forbid_reverse: true`, monotonicity is enforced over consecutive valid
+observations in each trace, so `labels[labels >= 0]` is non-decreasing in z
+order for every decoded trace.
+
 ## Interpretation Caveats
 
 The HMM can create plausible bands even when embeddings are weak. Run z-only and
@@ -54,6 +61,7 @@ respecting structural offsets rather than remaining flat depth bands.
 Strict monotonicity can suppress repeated facies because this is a stratigraphic
 unit method, not a repeated-facies classifier.
 
-Useful diagnostics include reverse transition rate, boundary continuity,
-boundary z summaries, visual salt-and-pepper reduction, and whether boundaries
-follow structure instead of collapsing into flat depth bands.
+Useful diagnostics include reverse transition rate over consecutive valid trace
+observations, boundary continuity, boundary z summaries, visual salt-and-pepper
+reduction, and whether boundaries follow structure instead of collapsing into
+flat depth bands.

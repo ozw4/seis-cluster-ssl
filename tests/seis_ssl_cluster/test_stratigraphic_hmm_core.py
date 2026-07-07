@@ -6,7 +6,6 @@ import pytest
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	HMMTransitionSettings,
 	build_ordered_transition_costs,
-	contiguous_true_segments,
 	decode_trace_segments,
 	stratigraphic_hmm_settings_from_config,
 	viterbi_decode_costs,
@@ -127,15 +126,49 @@ def test_decode_trace_segments_preserves_invalid_positions_and_decodes_gaps() ->
 
 	labels = decode_trace_segments(emissions, valid_mask, transitions)
 
-	np.testing.assert_array_equal(labels, np.array([0, 1, -1, 0, 1], dtype=np.int32))
+	np.testing.assert_array_equal(labels, np.array([0, 0, -1, 0, 1], dtype=np.int32))
+	np.testing.assert_array_equal(labels[~valid_mask], np.array([-1], dtype=np.int32))
+	assert np.all(np.diff(labels[labels >= 0]) >= 0)
 
 
-def test_contiguous_true_segments_returns_valid_spans() -> None:
-	segments = contiguous_true_segments(
-		np.array([False, True, True, False, True], dtype=np.bool_),
+def test_decode_trace_segments_forbids_reverse_across_invalid_gap() -> None:
+	transitions = build_ordered_transition_costs(
+		2,
+		HMMTransitionSettings(
+			same_cost=0.0,
+			advance_cost=0.0,
+			jump_cost=1.0,
+			reverse_cost=100.0,
+			forbid_reverse=True,
+			max_jump=None,
+		),
+	)
+	emissions = np.array(
+		[
+			[0.0, 5.0],
+			[5.0, 0.0],
+			[9.0, 9.0],
+			[0.0, 5.0],
+			[5.0, 0.0],
+		],
+		dtype=np.float32,
+	)
+	valid_mask = np.array([True, True, False, True, True])
+
+	labels = decode_trace_segments(emissions, valid_mask, transitions)
+
+	assert not np.array_equal(labels, np.array([0, 1, -1, 0, 1], dtype=np.int32))
+	assert np.all(np.diff(labels[labels >= 0]) >= 0)
+
+
+def test_decode_trace_segments_returns_invalid_labels_when_no_valid_tokens() -> None:
+	labels = decode_trace_segments(
+		np.zeros((3, 2), dtype=np.float32),
+		np.zeros(3, dtype=np.bool_),
+		np.zeros((2, 2), dtype=np.float32),
 	)
 
-	assert segments == (slice(1, 3), slice(4, 5))
+	np.testing.assert_array_equal(labels, np.full(3, -1, dtype=np.int32))
 
 
 def test_stratigraphic_hmm_settings_from_config_parses_resolved_config() -> None:

@@ -332,33 +332,12 @@ def viterbi_decode_costs(
 	return path
 
 
-def contiguous_true_segments(mask: np.ndarray) -> tuple[slice, ...]:
-	"""Return contiguous true spans from a one-dimensional boolean mask."""
-	mask_array = np.asarray(mask)
-	if mask_array.ndim != 1:
-		raise ValueError(f'mask must be 1D; got shape {mask_array.shape}')
-	if mask_array.dtype != np.bool_:
-		raise TypeError('mask must have boolean dtype')
-
-	segments: list[slice] = []
-	start: int | None = None
-	for index, is_valid in enumerate(mask_array):
-		if bool(is_valid) and start is None:
-			start = index
-		elif not bool(is_valid) and start is not None:
-			segments.append(slice(start, index))
-			start = None
-	if start is not None:
-		segments.append(slice(start, mask_array.size))
-	return tuple(segments)
-
-
 def decode_trace_segments(
 	emission_costs: np.ndarray,
 	valid_mask: np.ndarray,
 	transition_costs: np.ndarray,
 ) -> np.ndarray:
-	"""Decode valid vertical trace segments independently."""
+	"""Decode valid vertical trace tokens as one sequence, preserving invalid gaps."""
 	emissions = _as_float_matrix(emission_costs, 'emission_costs')
 	if emissions.shape[0] == 0 or emissions.shape[1] == 0:
 		raise ValueError('emission_costs must be non-empty in both dimensions')
@@ -385,8 +364,9 @@ def decode_trace_segments(
 		raise ValueError('transition_costs must not contain NaN values')
 
 	labels = np.full(emissions.shape[0], -1, dtype=np.int32)
-	for segment in contiguous_true_segments(mask):
-		labels[segment] = viterbi_decode_costs(emissions[segment], transitions)
+	z_indices = np.flatnonzero(mask)
+	if z_indices.size:
+		labels[z_indices] = viterbi_decode_costs(emissions[z_indices], transitions)
 	return labels
 
 
@@ -1024,7 +1004,6 @@ __all__ = [
 	'HMMTransitionSettings',
 	'StratigraphicHMMSettings',
 	'build_ordered_transition_costs',
-	'contiguous_true_segments',
 	'decode_survey_ordered_labels',
 	'decode_trace_segments',
 	'initialize_ordered_centers',
