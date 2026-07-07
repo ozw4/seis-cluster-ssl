@@ -41,6 +41,7 @@ _KMEANS_EXPORTS = {
 	'fit_minibatch_kmeans',
 	'fit_preprocessor',
 	'run_embedding_clustering',
+	'run_minibatch_kmeans_clustering',
 }
 _WRITER_EXPORTS = {
 	'SurveyLabelResult',
@@ -77,6 +78,7 @@ __all__ = [
 	'reconstruct_voxel_labels',
 	'resolve_volume_shape_xyz',
 	'run_embedding_clustering',
+	'run_minibatch_kmeans_clustering',
 	'sample_valid_embedding_tokens',
 	'valid_flat_indices',
 	'write_cluster_summaries',
