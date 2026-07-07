@@ -132,7 +132,7 @@ from seis_ssl_cluster.f3.lithology_visualization import (
 	read_f3_lithology_visualization_classes,
 	visualize_f3_lithology_predictions,
 )
-from seis_ssl_cluster.f3.metrics import (
+from seis_ssl_cluster.f3.lithology.metrics import (
 	REQUIRED_LITHOLOGY_METRICS,
 	compute_lithology_metrics,
 	render_classification_report_markdown,

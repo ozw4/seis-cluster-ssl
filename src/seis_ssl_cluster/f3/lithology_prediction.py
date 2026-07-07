@@ -23,7 +23,7 @@ from seis_ssl_cluster.f3.lithology_tokens import (
 	read_f3_lithology_class_info,
 	tokenize_f3_lithology_slice,
 )
-from seis_ssl_cluster.f3.metrics import compute_lithology_metrics
+from seis_ssl_cluster.f3.lithology.metrics import compute_lithology_metrics
 from seis_ssl_cluster.f3.splits import (
 	F3LineGeometry,
 	F3SliceSplitRecord,
