@@ -448,6 +448,28 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 	return labels
 
 
+def _decode_all_surveys(  # noqa: PLR0913
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	*,
+	centers: np.ndarray,
+	residualizer: LocalTokenPositionResidualizer | None,
+	preprocessor: object,
+	transition_costs: np.ndarray,
+	emission_source: str,
+) -> dict[str, np.ndarray]:
+	return {
+		item.survey_id: decode_survey_ordered_labels(
+			item,
+			centers=centers,
+			residualizer=residualizer,
+			preprocessor=preprocessor,
+			transition_costs=transition_costs,
+			emission_source=emission_source,
+		)
+		for item in embedding_inputs
+	}
+
+
 def update_centers_from_labels(  # noqa: C901, PLR0913
 	embedding_inputs: tuple[EmbeddingInput, ...],
 	labels_by_survey: Mapping[str, np.ndarray],
@@ -636,17 +658,14 @@ def run_stratigraphic_hmm_clustering(
 		iteration_summaries: list[dict[str, object]] = []
 		labels_by_survey: dict[str, np.ndarray] = {}
 		for iteration in range(1, hmm_settings.iterations + 1):
-			labels_by_survey = {
-				item.survey_id: decode_survey_ordered_labels(
-					item,
-					centers=centers,
-					residualizer=residualizer,
-					preprocessor=preprocessor,
-					transition_costs=transition_costs,
-					emission_source=hmm_settings.emission_source,
-				)
-				for item in embedding_inputs
-			}
+			labels_by_survey = _decode_all_surveys(
+				embedding_inputs,
+				centers=centers,
+				residualizer=residualizer,
+				preprocessor=preprocessor,
+				transition_costs=transition_costs,
+				emission_source=hmm_settings.emission_source,
+			)
 			centers, summary = update_centers_from_labels(
 				embedding_inputs,
 				labels_by_survey,
@@ -658,6 +677,15 @@ def run_stratigraphic_hmm_clustering(
 				emission_source=hmm_settings.emission_source,
 			)
 			iteration_summaries.append({'iteration': iteration, **summary})
+
+		labels_by_survey = _decode_all_surveys(
+			embedding_inputs,
+			centers=centers,
+			residualizer=residualizer,
+			preprocessor=preprocessor,
+			transition_costs=transition_costs,
+			emission_source=hmm_settings.emission_source,
+		)
 
 		label_results = _write_hmm_labels_for_k(
 			output_dir=settings.output_dir,

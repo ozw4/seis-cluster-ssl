@@ -22,6 +22,7 @@ from seis_ssl_cluster.clustering.residualization import (
 	residualization_keys_for_flat_indices,
 )
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
+	decode_survey_ordered_labels,
 	initialize_ordered_centers,
 	normalized_z_features_for_indices,
 	prepare_feature_batch_for_indices,
@@ -311,6 +312,64 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 	assert sum(label_metadata['cluster_counts'].values()) == int(
 		np.count_nonzero(valid_a),
 	)
+
+
+def test_stratigraphic_hmm_saved_labels_decode_from_saved_centers(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	embeddings = np.array(
+		[
+			[
+				[
+					[-0.9456348, 0.0],
+					[-2.0896657, 0.0],
+					[-5.166128, 0.0],
+					[-1.9232596, 0.0],
+				],
+			],
+		],
+		dtype=np.float32,
+	)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=embeddings,
+		valid=np.ones((1, 1, 4), dtype=np.bool_),
+	)
+	config = _hmm_config(input_dir, output_dir)
+	config['clustering']['sample_tokens'] = 4
+	config['clustering']['minibatch_size'] = 4
+	hmm_config = config['clustering']['stratigraphic_hmm']
+	hmm_config['iterations'] = 1
+	hmm_config['transition']['advance_cost'] = 2.0
+	hmm_config['transition']['jump_cost'] = 5.0
+
+	run_embedding_clustering(config)
+
+	k_dir = output_dir / 'models' / 'k3'
+	labels = np.load(
+		output_dir / 'labels' / 'k3' / 'survey_a.cluster_labels_token.npy',
+	)
+	centers = np.load(k_dir / 'cluster_centers.npy')
+	preprocessor = joblib.load(k_dir / 'preprocessor.joblib')
+	hmm_model = joblib.load(k_dir / 'hmm_model.joblib')
+	embedding_input = discover_embedding_inputs(input_dir)[0]
+	decoded = decode_survey_ordered_labels(
+		embedding_input,
+		centers=centers,
+		residualizer=None,
+		preprocessor=preprocessor,
+		transition_costs=hmm_model['transition_costs'],
+		emission_source=hmm_model['emission_source'],
+	)
+
+	assert len(hmm_model['iteration_summaries']) == 1
+	assert hmm_model['iteration_summaries'][0]['total_center_shift_l2'] > 0.0
+	np.testing.assert_allclose(centers, hmm_model['centers'], rtol=0.0, atol=0.0)
+	np.testing.assert_array_equal(labels, decoded)
 
 
 def test_stratigraphic_hmm_metadata_is_strict_json_safe(
