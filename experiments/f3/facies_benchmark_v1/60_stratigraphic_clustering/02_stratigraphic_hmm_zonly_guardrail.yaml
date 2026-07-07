@@ -3,23 +3,23 @@ paths:
 embeddings:
   input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16
 clustering:
-  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca16_iter2_smoke
-  embedding_normalization: l2
+  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_zonly_k6_8_10_iter10
+  embedding_normalization: none
   residualization:
     enabled: false
   pca:
-    enabled: true
-    n_components: 16
+    enabled: false
+    n_components: 1
     whiten: false
-  sample_tokens: 10000
+  sample_tokens: 1000000
   method: stratigraphic_hmm_kmeans
-  k_values: [6]
+  k_values: [6, 8, 10]
   minibatch_size: 8192
   prediction_batch_size: 65536
   seed: 42
   stratigraphic_hmm:
-    emission_source: embedding
-    iterations: 2
+    emission_source: z_coordinate
+    iterations: 10
     z_axis: 2
     z_direction: increasing_downward
     transition:
