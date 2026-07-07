@@ -65,6 +65,7 @@ def test_f3_refactor_public_module_imports() -> None:
 		'seis_ssl_cluster.f3.metrics',
 		'seis_ssl_cluster.f3.io.segy',
 		'seis_ssl_cluster.f3.lithology.metrics',
+		'seis_ssl_cluster.f3.lithology.baselines',
 		'seis_ssl_cluster.f3.lithology.token_dataset',
 		'seis_ssl_cluster.f3.lithology.tokens',
 		'seis_ssl_cluster.f3.lithology.report.comparison',
@@ -79,6 +80,20 @@ def test_f3_lithology_token_module_import_compatibility() -> None:
 	assert (
 		compat_tokens.build_f3_lithology_token_dataset
 		is lithology_tokens.build_f3_lithology_token_dataset
+	)
+
+
+def test_f3_lithology_baseline_module_import_compatibility() -> None:
+	compat_baselines = importlib.import_module(
+		'seis_ssl_cluster.f3.baseline_features',
+	)
+	lithology_baselines = importlib.import_module(
+		'seis_ssl_cluster.f3.lithology.baselines',
+	)
+
+	assert (
+		compat_baselines.build_f3_lithology_baseline_token_dataset
+		is lithology_baselines.build_f3_lithology_baseline_token_dataset
 	)
 
 

@@ -1,6 +1,6 @@
 """F3 facies benchmark inspection utilities."""
 
-from seis_ssl_cluster.f3.baseline_features import (
+from seis_ssl_cluster.f3.lithology.baselines import (
 	AMPLITUDE_STATISTICS,
 	BASELINE_FEATURE_KINDS,
 	F3BaselineFeatureConfig,

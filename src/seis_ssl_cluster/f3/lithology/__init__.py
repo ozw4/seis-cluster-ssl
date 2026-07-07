@@ -1,5 +1,16 @@
 """Shared F3 lithology dataset helpers."""
 
+from seis_ssl_cluster.f3.lithology.baselines import (
+	AMPLITUDE_STATISTICS,
+	BASELINE_FEATURE_KINDS,
+	F3BaselineFeatureConfig,
+	F3BaselineReferenceTokenDataset,
+	F3BaselineTokenDatasetOutputs,
+	F3LithologyBaselineTokenDatasetConfig,
+	F3LithologyBaselineTokenDatasetResult,
+	build_f3_lithology_baseline_token_dataset,
+	f3_lithology_baseline_token_dataset_config_from_mapping,
+)
 from seis_ssl_cluster.f3.lithology.token_dataset import (
 	F3_LITHOLOGY_TOKEN_DATASET_KEYS,
 	F3LithologyTokenDataset,
@@ -36,9 +47,16 @@ from seis_ssl_cluster.f3.lithology.metrics import (
 )
 
 __all__ = [
+	'AMPLITUDE_STATISTICS',
+	'BASELINE_FEATURE_KINDS',
 	'CLASS_COUNTS_FIELDNAMES',
+	'F3BaselineFeatureConfig',
+	'F3BaselineReferenceTokenDataset',
+	'F3BaselineTokenDatasetOutputs',
 	'F3EmbeddingArtifact',
 	'F3_LITHOLOGY_TOKEN_DATASET_KEYS',
+	'F3LithologyBaselineTokenDatasetConfig',
+	'F3LithologyBaselineTokenDatasetResult',
 	'F3LithologyTokenDataset',
 	'F3LithologyTokenDatasetConfig',
 	'F3LithologyTokenDatasetInputs',
@@ -50,8 +68,10 @@ __all__ = [
 	'F3SliceTokenization',
 	'F3TokenArrays',
 	'REQUIRED_LITHOLOGY_METRICS',
+	'build_f3_lithology_baseline_token_dataset',
 	'build_f3_lithology_token_dataset',
 	'compute_lithology_metrics',
+	'f3_lithology_baseline_token_dataset_config_from_mapping',
 	'load_f3_embedding_artifacts',
 	'load_f3_lithology_token_dataset',
 	'load_f3_lithology_token_dataset_summary',

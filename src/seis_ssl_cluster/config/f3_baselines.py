@@ -14,7 +14,7 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonReportConfig,
 	default_f3_lithology_comparison_figure_style,
 )
-from seis_ssl_cluster.f3.baseline_features import (
+from seis_ssl_cluster.f3.lithology.baselines import (
 	f3_lithology_baseline_token_dataset_config_from_mapping,
 )
 from seis_ssl_cluster.paths import (
