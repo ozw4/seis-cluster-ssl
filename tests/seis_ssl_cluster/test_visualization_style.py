@@ -34,6 +34,12 @@ def test_origin_and_aspect_for_representative_views() -> None:
 	assert origin_for_view('crossline') == 'upper'
 
 
+def test_origin_for_f3_lithology_slice_views() -> None:
+	assert origin_for_view('inline') == 'upper'
+	assert origin_for_view('crossline') == 'upper'
+	assert origin_for_view('z') == 'lower'
+
+
 def test_unknown_view_raises_value_error() -> None:
 	with pytest.raises(ValueError, match='unknown view'):
 		origin_for_view('diagonal')
@@ -54,6 +60,17 @@ def test_amplitude_clip_limits_returns_safe_default_for_no_finite_values() -> No
 	values = np.asarray([np.nan, np.inf, -np.inf])
 
 	assert amplitude_clip_limits(values) == (0.0, 1.0)
+
+
+def test_amplitude_clip_limits_supports_f3_constant_policies() -> None:
+	values = np.asarray([2.0, 2.0, 2.0])
+
+	assert amplitude_clip_limits(
+		values,
+		constant_policy='unit',
+		constant_tolerance='exact',
+	) == (1.0, 3.0)
+	assert amplitude_clip_limits(values, constant_policy='none') == (None, None)
 
 
 def test_seismic_imshow_and_label_imshow_render_small_arrays() -> None:

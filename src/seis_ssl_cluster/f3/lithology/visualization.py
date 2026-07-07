@@ -24,7 +24,9 @@ from seis_ssl_cluster.f3.splits import (
 	read_f3_line_geometry,
 	resolve_f3_slice_array_index,
 )
-from seis_ssl_cluster.f3.visualization import class_id_image_to_rgb
+from seis_ssl_cluster.visualization.facies import label_imshow
+from seis_ssl_cluster.visualization.seismic import amplitude_clip_limits, seismic_imshow
+from seis_ssl_cluster.visualization.style import aspect_for_view, origin_for_view
 
 if TYPE_CHECKING:
 	from numpy.typing import NDArray
@@ -378,8 +380,8 @@ def _make_slice_figure(  # noqa: PLR0913
 			labels=_normalize_class_ids(labels[array_index, :, :]).T,
 			predictions=_normalize_class_ids(prediction_slice),
 			confidence=np.asarray(confidence_slice, dtype=np.float32),
-			origin='upper',
-			aspect='auto',
+			origin=origin_for_view(slice_type),
+			aspect=aspect_for_view(slice_type),
 			horizontal_axis='crossline index',
 			vertical_axis='sample/time index down',
 		)
@@ -408,8 +410,8 @@ def _make_slice_figure(  # noqa: PLR0913
 			labels=_normalize_class_ids(labels[:, array_index, :]).T,
 			predictions=_normalize_class_ids(prediction_slice),
 			confidence=np.asarray(confidence_slice, dtype=np.float32),
-			origin='upper',
-			aspect='auto',
+			origin=origin_for_view(slice_type),
+			aspect=aspect_for_view(slice_type),
 			horizontal_axis='inline index',
 			vertical_axis='sample/time index down',
 		)
@@ -437,8 +439,8 @@ def _make_slice_figure(  # noqa: PLR0913
 			labels=_normalize_class_ids(labels[:, :, array_index]).T,
 			predictions=_normalize_class_ids(prediction_slice),
 			confidence=np.asarray(confidence_slice, dtype=np.float32),
-			origin='lower',
-			aspect='equal',
+			origin=origin_for_view(slice_type),
+			aspect=aspect_for_view(slice_type),
 			horizontal_axis='inline index',
 			vertical_axis='crossline index',
 		)
@@ -522,40 +524,28 @@ def _save_slice_figure(
 		constrained_layout=True,
 	)
 	axes = np.ravel(axes)
-	vmin, vmax = _amplitude_limits(
+	seismic_image = seismic_imshow(
+		axes[0],
 		figure.seismic,
-		config.amplitude_clip_percentiles,
-	)
-	seismic_image = axes[0].imshow(
-		figure.seismic,
-		cmap='gray',
-		origin=figure.origin,
-		aspect=figure.aspect,
+		view=figure.slice_type,
+		clip_percentiles=config.amplitude_clip_percentiles,
+		constant_policy='none',
+		constant_tolerance='isclose',
 		interpolation='none',
-		vmin=vmin,
-		vmax=vmax,
 	)
 	axes[0].set_title('seismic amplitude')
-	axes[1].imshow(
-		class_id_image_to_rgb(
-			figure.labels,
-			classes,
-			invalid_rgb=_INVALID_LABEL_RGB,
-		),
-		origin=figure.origin,
-		aspect=figure.aspect,
-		interpolation='nearest',
+	label_imshow(
+		axes[1],
+		figure.labels,
+		classes=classes,
+		view=figure.slice_type,
 	)
 	axes[1].set_title('ground truth facies')
-	axes[2].imshow(
-		class_id_image_to_rgb(
-			figure.predictions,
-			classes,
-			invalid_rgb=_INVALID_LABEL_RGB,
-		),
-		origin=figure.origin,
-		aspect=figure.aspect,
-		interpolation='nearest',
+	label_imshow(
+		axes[2],
+		figure.predictions,
+		classes=classes,
+		view=figure.slice_type,
 	)
 	axes[2].set_title('predicted facies')
 	axes[3].imshow(
@@ -874,15 +864,12 @@ def _amplitude_limits(
 	image: NDArray[np.generic],
 	percentiles: tuple[float, float],
 ) -> tuple[float | None, float | None]:
-	_validate_percentiles(percentiles)
-	values = np.asarray(image, dtype=np.float64)
-	values = values[np.isfinite(values)]
-	if values.size == 0:
-		return None, None
-	vmin, vmax = np.percentile(values, percentiles)
-	if np.isclose(vmin, vmax):
-		return None, None
-	return float(vmin), float(vmax)
+	return amplitude_clip_limits(
+		image,
+		clip_percentiles=percentiles,
+		constant_policy='none',
+		constant_tolerance='isclose',
+	)
 
 
 def _validate_percentiles(value: tuple[float, float]) -> None:
