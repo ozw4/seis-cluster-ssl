@@ -3,22 +3,45 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from numbers import Integral, Real
-from typing import NoReturn
+from pathlib import Path
 
+import joblib
 import numpy as np
 
 from seis_ssl_cluster.clustering.features import (
 	EmbeddingInput,
+	discover_embedding_inputs,
+	embedding_input_metadata,
 	extract_token_features,
+	load_valid_tokens,
 	open_embedding_array,
+	validate_compatible_embedding_inputs,
 )
-from seis_ssl_cluster.clustering.kmeans import fit_minibatch_kmeans
+from seis_ssl_cluster.clustering.kmeans import (
+	ClusteringRunResult,
+	KClusteringResult,
+	_aggregate_counts,
+	_common_metadata,
+	apply_residualizer_to_sample,
+	clustering_settings_from_config,
+	fit_minibatch_kmeans,
+	fit_preprocessor,
+	fit_residualizer,
+)
+from seis_ssl_cluster.clustering.ordered_diagnostics import (
+	aggregate_ordered_label_diagnostics,
+	ordered_boundary_summary,
+	ordered_label_diagnostics,
+)
 from seis_ssl_cluster.clustering.residualization import (
 	LocalTokenPositionResidualizer,
 	residualization_keys_for_flat_indices,
+	write_residualizer_npz,
 )
+from seis_ssl_cluster.clustering.sampling import sample_valid_embedding_tokens
+from seis_ssl_cluster.clustering.writer import SurveyLabelResult, write_json
 
 
 @dataclass(frozen=True)
@@ -329,9 +352,428 @@ def decode_trace_segments(
 	return labels
 
 
-def run_stratigraphic_hmm_clustering(config: Mapping[str, object]) -> NoReturn:
+def decode_survey_ordered_labels(
+	embedding_input: EmbeddingInput,
+	*,
+	centers: np.ndarray,
+	residualizer: LocalTokenPositionResidualizer | None,
+	preprocessor: object,
+	transition_costs: np.ndarray,
+) -> np.ndarray:
+	"""Decode HMM labels for one survey without flattening all features at once."""
+	center_matrix = np.asarray(centers, dtype=np.float32)
+	if center_matrix.ndim != 2 or center_matrix.shape[0] == 0:
+		msg = f'centers must be a non-empty 2D matrix; got {center_matrix.shape!r}'
+		raise ValueError(msg)
+	embeddings = open_embedding_array(embedding_input)
+	valid = load_valid_tokens(embedding_input)
+	shape = embeddings.shape[:3]
+	labels = np.full(shape, -1, dtype=np.int32)
+	x_count, y_count, z_count = shape
+	k = center_matrix.shape[0]
+	for x_index in range(x_count):
+		for y_index in range(y_count):
+			trace_valid = np.asarray(valid[x_index, y_index, :], dtype=np.bool_)
+			if not np.any(trace_valid):
+				continue
+			z_indices = np.flatnonzero(trace_valid)
+			flat_indices = np.ravel_multi_index(
+				(
+					np.full(z_indices.shape, x_index, dtype=np.int64),
+					np.full(z_indices.shape, y_index, dtype=np.int64),
+					z_indices,
+				),
+				shape,
+			).astype(np.int64, copy=False)
+			prepared = prepare_feature_batch_for_indices(
+				embedding_input,
+				flat_indices,
+				residualizer=residualizer,
+				preprocessor=preprocessor,
+			)
+			if prepared.shape[1] != center_matrix.shape[1]:
+				msg = (
+					'prepared feature dimension must match centers; got '
+					f'{prepared.shape[1]} and {center_matrix.shape[1]}'
+				)
+				raise ValueError(msg)
+			emission_costs = np.zeros((z_count, k), dtype=np.float32)
+			deltas = prepared[:, np.newaxis, :] - center_matrix[np.newaxis, :, :]
+			emission_costs[z_indices] = np.sum(deltas * deltas, axis=2)
+			labels[x_index, y_index, :] = decode_trace_segments(
+				emission_costs,
+				trace_valid,
+				transition_costs,
+			)
+	return labels
+
+
+def update_centers_from_labels(  # noqa: C901, PLR0913
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	labels_by_survey: Mapping[str, np.ndarray],
+	*,
+	centers: np.ndarray,
+	residualizer: LocalTokenPositionResidualizer | None,
+	preprocessor: object,
+	prediction_batch_size: int,
+	empty_cluster_policy: str,
+) -> tuple[np.ndarray, dict[str, object]]:
+	"""Update centers as count-weighted means in transformed feature space."""
+	if prediction_batch_size <= 0:
+		msg = f'prediction_batch_size must be positive; got {prediction_batch_size!r}'
+		raise ValueError(msg)
+	if empty_cluster_policy != 'keep_previous':
+		msg = (
+			"empty_cluster_policy must be 'keep_previous'; "
+			f'got {empty_cluster_policy!r}'
+		)
+		raise ValueError(msg)
+	center_matrix = np.asarray(centers, dtype=np.float32)
+	if center_matrix.ndim != 2 or center_matrix.shape[0] == 0:
+		msg = f'centers must be a non-empty 2D matrix; got {center_matrix.shape!r}'
+		raise ValueError(msg)
+	k, feature_dim = center_matrix.shape
+	sums = np.zeros((k, feature_dim), dtype=np.float64)
+	counts = np.zeros(k, dtype=np.int64)
+	inputs_by_survey = {item.survey_id: item for item in embedding_inputs}
+	unknown = sorted(set(labels_by_survey) - set(inputs_by_survey))
+	if unknown:
+		msg = f'labels_by_survey contains unknown survey ids: {unknown!r}'
+		raise ValueError(msg)
+
+	for item in embedding_inputs:
+		if item.survey_id not in labels_by_survey:
+			msg = f'labels_by_survey missing survey id: {item.survey_id!r}'
+			raise ValueError(msg)
+		embeddings = open_embedding_array(item)
+		labels = np.asarray(labels_by_survey[item.survey_id])
+		if labels.shape != embeddings.shape[:3]:
+			msg = (
+				'label grid shape for '
+				f'{item.survey_id} must be {embeddings.shape[:3]!r}; '
+				f'got {labels.shape!r}'
+			)
+			raise ValueError(msg)
+		flat_labels = labels.reshape(-1)
+		labeled_indices = np.flatnonzero(flat_labels >= 0).astype(np.int64, copy=False)
+		for start in range(0, labeled_indices.size, prediction_batch_size):
+			batch_indices = labeled_indices[start : start + prediction_batch_size]
+			batch_labels = np.asarray(flat_labels[batch_indices], dtype=np.int64)
+			if np.any(batch_labels >= k):
+				msg = f'label id out of range for {item.survey_id}'
+				raise ValueError(msg)
+			prepared = prepare_feature_batch_for_indices(
+				item,
+				batch_indices,
+				residualizer=residualizer,
+				preprocessor=preprocessor,
+			)
+			if prepared.shape[1] != feature_dim:
+				msg = (
+					'prepared feature dimension must match centers; got '
+					f'{prepared.shape[1]} and {feature_dim}'
+				)
+				raise ValueError(msg)
+			np.add.at(sums, batch_labels, prepared.astype(np.float64, copy=False))
+			counts += np.bincount(batch_labels, minlength=k)
+
+	new_centers = center_matrix.copy()
+	non_empty = counts > 0
+	new_centers[non_empty] = (
+		sums[non_empty] / counts[non_empty, np.newaxis]
+	).astype(np.float32)
+	shifts = np.linalg.norm(new_centers - center_matrix, axis=1)
+	empty_clusters = [int(label) for label in np.flatnonzero(~non_empty)]
+	summary = {
+		'cluster_counts': {
+			int(label): int(count)
+			for label, count in enumerate(counts)
+		},
+		'empty_clusters': empty_clusters,
+		'center_shift_l2': [float(value) for value in shifts],
+		'total_center_shift_l2': float(np.linalg.norm(new_centers - center_matrix)),
+	}
+	return new_centers.astype(np.float32, copy=False), summary
+
+
+def run_stratigraphic_hmm_clustering(
+	config: Mapping[str, object],
+) -> ClusteringRunResult:
 	"""Run stratigraphic HMM clustering from a validated config mapping."""
-	raise NotImplementedError('stratigraphic_hmm_kmeans is not implemented yet')
+	settings = clustering_settings_from_config(config)
+	hmm_settings = stratigraphic_hmm_settings_from_config(config)
+	embedding_inputs = tuple(discover_embedding_inputs(settings.input_dir))
+	compatibility_signature = validate_compatible_embedding_inputs(embedding_inputs)
+	sample = sample_valid_embedding_tokens(
+		embedding_inputs,
+		sample_tokens=settings.sample_tokens,
+		seed=settings.seed,
+	)
+	residualizer = fit_residualizer(
+		sample.features,
+		embedding_inputs=embedding_inputs,
+		per_survey_token_indices=sample.per_survey_token_indices,
+		settings=settings.residualization,
+	)
+	training_input_features = apply_residualizer_to_sample(
+		sample.features,
+		embedding_inputs=embedding_inputs,
+		per_survey_token_indices=sample.per_survey_token_indices,
+		residualizer=residualizer,
+	)
+	preprocessor = fit_preprocessor(
+		training_input_features,
+		normalization=settings.embedding_normalization,
+		pca=settings.pca,
+		seed=settings.seed,
+	)
+	training_features = np.asarray(
+		preprocessor.transform(training_input_features),
+		dtype=np.float32,
+	)
+	sample_z = sample_token_z_coordinates(
+		embedding_inputs,
+		sample.per_survey_token_indices,
+	)
+	residualizer_path: Path | None = None
+	if residualizer is not None:
+		residualizer_path = settings.output_dir / 'models' / 'residualizer.npz'
+		write_residualizer_npz(residualizer_path, residualizer)
+	common_metadata = _common_metadata(
+		settings=settings,
+		embedding_inputs=embedding_inputs,
+		compatibility_signature=compatibility_signature,
+		sample=sample,
+		preprocessor=preprocessor,
+		residualizer=residualizer,
+		residualizer_path=residualizer_path,
+	)
+
+	results: list[KClusteringResult] = []
+	for k in settings.k_values:
+		transition_costs = build_ordered_transition_costs(k, hmm_settings.transition)
+		centers = initialize_ordered_centers(
+			training_features,
+			sample_z,
+			k=k,
+			batch_size=settings.minibatch_size,
+			seed=settings.seed,
+		)
+		iteration_summaries: list[dict[str, object]] = []
+		labels_by_survey: dict[str, np.ndarray] = {}
+		for iteration in range(1, hmm_settings.iterations + 1):
+			labels_by_survey = {
+				item.survey_id: decode_survey_ordered_labels(
+					item,
+					centers=centers,
+					residualizer=residualizer,
+					preprocessor=preprocessor,
+					transition_costs=transition_costs,
+				)
+				for item in embedding_inputs
+			}
+			centers, summary = update_centers_from_labels(
+				embedding_inputs,
+				labels_by_survey,
+				centers=centers,
+				residualizer=residualizer,
+				preprocessor=preprocessor,
+				prediction_batch_size=settings.prediction_batch_size,
+				empty_cluster_policy=hmm_settings.empty_cluster_policy,
+			)
+			iteration_summaries.append({'iteration': iteration, **summary})
+
+		label_results = _write_hmm_labels_for_k(
+			output_dir=settings.output_dir,
+			k=k,
+			embedding_inputs=embedding_inputs,
+			labels_by_survey=labels_by_survey,
+			label_metadata=common_metadata,
+		)
+		cluster_counts = _aggregate_counts(label_results, k)
+		invalid_token_count = int(
+			sum(result.invalid_token_count for result in label_results),
+		)
+		per_survey_ordered_diagnostics = {
+			item.survey_id: ordered_label_diagnostics(
+				np.asarray(labels_by_survey[item.survey_id]),
+				k=k,
+				z_axis=hmm_settings.z_axis,
+			)
+			for item in embedding_inputs
+		}
+		hmm_metadata = _hmm_metadata(
+			hmm_settings=hmm_settings,
+			transition_costs=transition_costs,
+			iteration_summaries=iteration_summaries,
+		)
+		metadata = {
+			**common_metadata,
+			'k': int(k),
+			'cluster_counts': cluster_counts,
+			'invalid_token_count': invalid_token_count,
+			'stratigraphic_hmm': hmm_metadata,
+			'ordered_diagnostics': {
+				'per_survey': per_survey_ordered_diagnostics,
+				'aggregate': aggregate_ordered_label_diagnostics(
+					per_survey_ordered_diagnostics,
+					k=k,
+				),
+			},
+			'surveys': [
+				{
+					'survey_id': result.survey_id,
+					'label_path': str(result.labels_path),
+					'label_metadata_path': str(result.metadata_path),
+					'valid_token_count': result.valid_token_count,
+					'invalid_token_count': result.invalid_token_count,
+					'cluster_counts': result.cluster_counts,
+				}
+				for result in label_results
+			],
+		}
+		_write_hmm_model_artifacts(
+			output_dir=settings.output_dir,
+			k=k,
+			preprocessor=preprocessor,
+			centers=centers,
+			hmm_model={
+				'method': 'stratigraphic_hmm_kmeans',
+				'centers': centers,
+				'transition_settings': asdict(hmm_settings.transition),
+				'transition_costs': transition_costs,
+				'iteration_count': hmm_settings.iterations,
+				'iteration_summaries': iteration_summaries,
+			},
+			metadata=metadata,
+		)
+		results.append(
+			KClusteringResult(
+				k=k,
+				model_dir=settings.output_dir / 'models' / f'k{k}',
+				label_results=tuple(label_results),
+				cluster_counts=cluster_counts,
+				invalid_token_count=invalid_token_count,
+			),
+		)
+
+	return ClusteringRunResult(
+		embedding_inputs=embedding_inputs,
+		sample=sample,
+		results=tuple(results),
+	)
+
+
+def _write_hmm_labels_for_k(
+	*,
+	output_dir: str | Path,
+	k: int,
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	labels_by_survey: Mapping[str, np.ndarray],
+	label_metadata: Mapping[str, object],
+) -> list[SurveyLabelResult]:
+	return [
+		_write_hmm_survey_labels(
+			output_dir=output_dir,
+			k=k,
+			embedding_input=item,
+			labels=np.asarray(labels_by_survey[item.survey_id]),
+			label_metadata=label_metadata,
+		)
+		for item in embedding_inputs
+	]
+
+
+def _write_hmm_survey_labels(
+	*,
+	output_dir: str | Path,
+	k: int,
+	embedding_input: EmbeddingInput,
+	labels: np.ndarray,
+	label_metadata: Mapping[str, object],
+) -> SurveyLabelResult:
+	embeddings = open_embedding_array(embedding_input)
+	if labels.shape != embeddings.shape[:3]:
+		msg = (
+			'label grid shape for '
+			f'{embedding_input.survey_id} must be {embeddings.shape[:3]!r}; '
+			f'got {labels.shape!r}'
+		)
+		raise ValueError(msg)
+	labels_dir = Path(output_dir) / 'labels' / f'k{k}'
+	labels_dir.mkdir(parents=True, exist_ok=True)
+	labels_path = labels_dir / f'{embedding_input.survey_id}.cluster_labels_token.npy'
+	np.save(labels_path, np.asarray(labels, dtype=np.int32))
+	counts = np.bincount(labels[labels >= 0].astype(np.int64), minlength=k)
+	cluster_counts = {
+		int(label): int(count)
+		for label, count in enumerate(counts[:k])
+	}
+	valid = int(np.count_nonzero(labels >= 0))
+	invalid = int(labels.size - valid)
+	ordered_diagnostics = ordered_label_diagnostics(labels, k=k)
+	metadata_path = (
+		labels_dir / f'{embedding_input.survey_id}.cluster_label_metadata.json'
+	)
+	metadata = {
+		**dict(label_metadata),
+		'method': 'stratigraphic_hmm_kmeans',
+		'k': int(k),
+		'survey_id': embedding_input.survey_id,
+		'embedding_input': embedding_input_metadata(embedding_input),
+		'label_path': str(labels_path),
+		'token_grid_shape': list(embeddings.shape[:3]),
+		'embedding_dim': int(embeddings.shape[-1]),
+		'valid_token_count': valid,
+		'invalid_token_count': invalid,
+		'cluster_counts': cluster_counts,
+		'ordered_diagnostics': ordered_diagnostics,
+		'ordered_boundary_summary': ordered_boundary_summary(labels, k=k),
+	}
+	write_json(metadata_path, metadata)
+	return SurveyLabelResult(
+		survey_id=embedding_input.survey_id,
+		labels_path=labels_path,
+		metadata_path=metadata_path,
+		cluster_counts=cluster_counts,
+		invalid_token_count=invalid,
+		valid_token_count=valid,
+	)
+
+
+def _write_hmm_model_artifacts(  # noqa: PLR0913
+	*,
+	output_dir: str | Path,
+	k: int,
+	preprocessor: object,
+	centers: np.ndarray,
+	hmm_model: Mapping[str, object],
+	metadata: Mapping[str, object],
+) -> None:
+	model_dir = Path(output_dir) / 'models' / f'k{k}'
+	model_dir.mkdir(parents=True, exist_ok=True)
+	joblib.dump(preprocessor, model_dir / 'preprocessor.joblib')
+	joblib.dump(dict(hmm_model), model_dir / 'hmm_model.joblib')
+	np.save(model_dir / 'cluster_centers.npy', np.asarray(centers, dtype=np.float32))
+	write_json(model_dir / 'clustering_metadata.json', metadata)
+
+
+def _hmm_metadata(
+	*,
+	hmm_settings: StratigraphicHMMSettings,
+	transition_costs: np.ndarray,
+	iteration_summaries: list[dict[str, object]],
+) -> dict[str, object]:
+	return {
+		'iterations': hmm_settings.iterations,
+		'z_axis': hmm_settings.z_axis,
+		'z_direction': hmm_settings.z_direction,
+		'transition': asdict(hmm_settings.transition),
+		'transition_costs': np.asarray(transition_costs, dtype=np.float32).tolist(),
+		'init': {'order_by': hmm_settings.init_order_by},
+		'update': {'empty_cluster_policy': hmm_settings.empty_cluster_policy},
+		'iteration_summaries': iteration_summaries,
+	}
 
 
 def _validate_transition_settings(settings: HMMTransitionSettings) -> None:
@@ -393,11 +835,13 @@ __all__ = [
 	'StratigraphicHMMSettings',
 	'build_ordered_transition_costs',
 	'contiguous_true_segments',
+	'decode_survey_ordered_labels',
 	'decode_trace_segments',
 	'initialize_ordered_centers',
 	'prepare_feature_batch_for_indices',
 	'run_stratigraphic_hmm_clustering',
 	'sample_token_z_coordinates',
 	'stratigraphic_hmm_settings_from_config',
+	'update_centers_from_labels',
 	'viterbi_decode_costs',
 ]

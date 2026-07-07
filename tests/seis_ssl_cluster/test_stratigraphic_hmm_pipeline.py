@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from seis_ssl_cluster.clustering import run_embedding_clustering
 from seis_ssl_cluster.clustering.features import (
 	discover_embedding_inputs,
 	extract_token_features,
@@ -191,6 +192,131 @@ def test_initialize_ordered_centers_places_empty_clusters_last_deterministic() -
 		rtol=1e-6,
 		atol=1e-6,
 	)
+
+
+def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	base_trace = np.array(
+		[
+			[0.0, 0.0],
+			[0.2, 0.0],
+			[4.0, 0.0],
+			[4.2, 0.0],
+			[8.0, 0.0],
+		],
+		dtype=np.float32,
+	)
+	embeddings_a = np.empty((2, 2, 5, 2), dtype=np.float32)
+	embeddings_b = np.empty((1, 2, 5, 2), dtype=np.float32)
+	for x_index in range(embeddings_a.shape[0]):
+		for y_index in range(embeddings_a.shape[1]):
+			embeddings_a[x_index, y_index] = base_trace + (0.05 * x_index)
+	for y_index in range(embeddings_b.shape[1]):
+		embeddings_b[0, y_index] = base_trace + (0.03 * y_index)
+	valid_a = np.ones((2, 2, 5), dtype=np.bool_)
+	valid_a[0, 1, 2] = False
+	valid_b = np.ones((1, 2, 5), dtype=np.bool_)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=embeddings_a,
+		valid=valid_a,
+	)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_b',
+		embeddings=embeddings_b,
+		valid=valid_b,
+	)
+
+	result = run_embedding_clustering(_hmm_config(input_dir, output_dir))
+
+	assert [item.k for item in result.results] == [3]
+	k_dir = output_dir / 'models' / 'k3'
+	assert (k_dir / 'preprocessor.joblib').is_file()
+	assert (k_dir / 'hmm_model.joblib').is_file()
+	assert (k_dir / 'cluster_centers.npy').is_file()
+	assert (k_dir / 'clustering_metadata.json').is_file()
+	assert not (k_dir / 'kmeans.joblib').exists()
+	metadata = json.loads((k_dir / 'clustering_metadata.json').read_text())
+	assert metadata['method'] == 'stratigraphic_hmm_kmeans'
+	assert metadata['stratigraphic_hmm']['iteration_summaries']
+	assert metadata['stratigraphic_hmm']['init'] == {'order_by': 'mean_z'}
+	assert metadata['ordered_diagnostics']['aggregate'][
+		'reverse_transition_rate'
+	] == 0.0
+	assert metadata['ordered_diagnostics']['per_survey']['survey_a'][
+		'reverse_transition_rate'
+	] == 0.0
+
+	labels_a = np.load(
+		output_dir / 'labels' / 'k3' / 'survey_a.cluster_labels_token.npy',
+	)
+	assert labels_a.dtype == np.int32
+	assert labels_a.shape == (2, 2, 5)
+	assert labels_a[0, 1, 2] == -1
+	for x_index in range(labels_a.shape[0]):
+		for y_index in range(labels_a.shape[1]):
+			trace = labels_a[x_index, y_index]
+			valid_trace = trace[trace >= 0]
+			assert np.all(np.diff(valid_trace) >= 0)
+
+	label_metadata = json.loads(
+		(
+			output_dir
+			/ 'labels'
+			/ 'k3'
+			/ 'survey_a.cluster_label_metadata.json'
+		).read_text(),
+	)
+	assert label_metadata['method'] == 'stratigraphic_hmm_kmeans'
+	assert label_metadata['invalid_token_count'] == 1
+	assert label_metadata['ordered_diagnostics']['reverse_transition_rate'] == 0.0
+	assert '0_to_1' in label_metadata['ordered_boundary_summary']
+	assert sum(label_metadata['cluster_counts'].values()) == int(
+		np.count_nonzero(valid_a),
+	)
+
+
+def _hmm_config(input_dir: Path, output_dir: Path) -> dict[str, object]:
+	return {
+		'embeddings': {'input_dir': str(input_dir)},
+		'clustering': {
+			'output_dir': str(output_dir),
+			'embedding_normalization': 'none',
+			'residualization': {'enabled': False},
+			'pca': {
+				'enabled': False,
+				'n_components': 2,
+				'whiten': False,
+			},
+			'sample_tokens': 100,
+			'method': 'stratigraphic_hmm_kmeans',
+			'k_values': [3],
+			'minibatch_size': 8,
+			'prediction_batch_size': 3,
+			'seed': 7,
+			'stratigraphic_hmm': {
+				'iterations': 2,
+				'z_axis': 2,
+				'z_direction': 'increasing_downward',
+				'transition': {
+					'same_cost': 0.0,
+					'advance_cost': 0.01,
+					'jump_cost': 0.02,
+					'reverse_cost': 1000000.0,
+					'forbid_reverse': True,
+					'max_jump': None,
+				},
+				'init': {'order_by': 'mean_z'},
+				'update': {'empty_cluster_policy': 'keep_previous'},
+			},
+		},
+	}
 
 
 def _write_embedding_artifacts(

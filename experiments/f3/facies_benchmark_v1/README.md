@@ -73,3 +73,8 @@ results:
 
 See [docs/f3_facies_benchmark_inspection.md](../../../docs/f3_facies_benchmark_inspection.md)
 for the shared config contract and figure conventions.
+
+## Downstream Stages
+
+- [F3 token-level lithology probe](../../../docs/f3_token_level_lithology_probe.md)
+- [Stratigraphic HMM clustering](../../../docs/stratigraphic_hmm_clustering.md)
