@@ -94,7 +94,7 @@ def write_json(path: str | Path, payload: Mapping[str, object]) -> None:
 	json_path = Path(path)
 	json_path.parent.mkdir(parents=True, exist_ok=True)
 	json_path.write_text(
-		json.dumps(payload, indent=2, sort_keys=True) + '\n',
+		json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + '\n',
 		encoding='utf-8',
 	)
 

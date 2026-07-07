@@ -11,6 +11,11 @@ ordered unit sequence per vertical trace, and centers are updated before the nex
 iteration. F3 lithology labels, if used later, are only sanity-check evaluation
 signals.
 
+Invalid tokens are skipped during Viterbi decoding and remain `-1` in the output
+label grid. They do not reset the trace sequence: when reverse transitions are
+forbidden, the consecutive valid labels in each vertical trace are
+non-decreasing in z order.
+
 ## Configs
 
 ```text
@@ -71,7 +76,7 @@ respecting structural offsets rather than remaining flat depth bands.
 
 Main diagnostics:
 
-- reverse transition rate
+- reverse transition rate over consecutive valid trace observations
 - boundary continuity and boundary z summary
 - salt-and-pepper reduction by visual inspection
 - whether boundaries follow structure rather than forming flat depth bands

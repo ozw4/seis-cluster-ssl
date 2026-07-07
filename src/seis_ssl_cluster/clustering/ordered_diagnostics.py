@@ -22,28 +22,28 @@ def ordered_label_diagnostics(
 		for label in range(k)
 	}
 
-	previous = grid[:, :, :-1]
-	next_label = grid[:, :, 1:]
-	valid_pairs = (previous >= 0) & (next_label >= 0)
-	pair_count = int(np.count_nonzero(valid_pairs))
-	previous_valid = previous[valid_pairs]
-	next_valid = next_label[valid_pairs]
-	delta = next_valid - previous_valid
-	same_count = int(np.count_nonzero(delta == 0))
-	forward_count = int(np.count_nonzero(delta > 0))
-	reverse_count = int(np.count_nonzero(delta < 0))
-	jump_count = int(np.count_nonzero(np.abs(delta) > 1))
-
 	trace_valid = np.any(valid, axis=2)
 	valid_trace_count = int(np.count_nonzero(trace_valid))
 	trace_count = int(grid.shape[0] * grid.shape[1])
-	if pair_count == 0:
-		changed_pair_counts = np.zeros((grid.shape[0], grid.shape[1]), dtype=np.int64)
-	else:
-		changed_pair_counts = np.count_nonzero(
-			valid_pairs & (previous != next_label),
-			axis=2,
-		)
+	pair_count = 0
+	same_count = 0
+	forward_count = 0
+	reverse_count = 0
+	jump_count = 0
+	changed_pair_counts = np.zeros((grid.shape[0], grid.shape[1]), dtype=np.int64)
+	for x_index in range(grid.shape[0]):
+		for y_index in range(grid.shape[1]):
+			trace = grid[x_index, y_index, :]
+			valid_trace = trace[trace >= 0]
+			if valid_trace.size < 2:
+				continue
+			delta = np.diff(valid_trace)
+			pair_count += int(delta.size)
+			same_count += int(np.count_nonzero(delta == 0))
+			forward_count += int(np.count_nonzero(delta > 0))
+			reverse_count += int(np.count_nonzero(delta < 0))
+			jump_count += int(np.count_nonzero(np.abs(delta) > 1))
+			changed_pair_counts[x_index, y_index] = int(np.count_nonzero(delta != 0))
 	valid_boundary_counts = changed_pair_counts[trace_valid]
 	if valid_boundary_counts.size == 0:
 		mean_boundaries = 0.0

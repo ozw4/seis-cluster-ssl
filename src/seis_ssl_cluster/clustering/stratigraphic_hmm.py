@@ -332,33 +332,12 @@ def viterbi_decode_costs(
 	return path
 
 
-def contiguous_true_segments(mask: np.ndarray) -> tuple[slice, ...]:
-	"""Return contiguous true spans from a one-dimensional boolean mask."""
-	mask_array = np.asarray(mask)
-	if mask_array.ndim != 1:
-		raise ValueError(f'mask must be 1D; got shape {mask_array.shape}')
-	if mask_array.dtype != np.bool_:
-		raise TypeError('mask must have boolean dtype')
-
-	segments: list[slice] = []
-	start: int | None = None
-	for index, is_valid in enumerate(mask_array):
-		if bool(is_valid) and start is None:
-			start = index
-		elif not bool(is_valid) and start is not None:
-			segments.append(slice(start, index))
-			start = None
-	if start is not None:
-		segments.append(slice(start, mask_array.size))
-	return tuple(segments)
-
-
 def decode_trace_segments(
 	emission_costs: np.ndarray,
 	valid_mask: np.ndarray,
 	transition_costs: np.ndarray,
 ) -> np.ndarray:
-	"""Decode valid vertical trace segments independently."""
+	"""Decode valid vertical trace tokens as one sequence, preserving invalid gaps."""
 	emissions = _as_float_matrix(emission_costs, 'emission_costs')
 	if emissions.shape[0] == 0 or emissions.shape[1] == 0:
 		raise ValueError('emission_costs must be non-empty in both dimensions')
@@ -385,8 +364,9 @@ def decode_trace_segments(
 		raise ValueError('transition_costs must not contain NaN values')
 
 	labels = np.full(emissions.shape[0], -1, dtype=np.int32)
-	for segment in contiguous_true_segments(mask):
-		labels[segment] = viterbi_decode_costs(emissions[segment], transitions)
+	z_indices = np.flatnonzero(mask)
+	if z_indices.size:
+		labels[z_indices] = viterbi_decode_costs(emissions[z_indices], transitions)
 	return labels
 
 
@@ -446,6 +426,28 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 				transition_costs,
 			)
 	return labels
+
+
+def _decode_all_surveys(  # noqa: PLR0913
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	*,
+	centers: np.ndarray,
+	residualizer: LocalTokenPositionResidualizer | None,
+	preprocessor: object,
+	transition_costs: np.ndarray,
+	emission_source: str,
+) -> dict[str, np.ndarray]:
+	return {
+		item.survey_id: decode_survey_ordered_labels(
+			item,
+			centers=centers,
+			residualizer=residualizer,
+			preprocessor=preprocessor,
+			transition_costs=transition_costs,
+			emission_source=emission_source,
+		)
+		for item in embedding_inputs
+	}
 
 
 def update_centers_from_labels(  # noqa: C901, PLR0913
@@ -636,17 +638,14 @@ def run_stratigraphic_hmm_clustering(
 		iteration_summaries: list[dict[str, object]] = []
 		labels_by_survey: dict[str, np.ndarray] = {}
 		for iteration in range(1, hmm_settings.iterations + 1):
-			labels_by_survey = {
-				item.survey_id: decode_survey_ordered_labels(
-					item,
-					centers=centers,
-					residualizer=residualizer,
-					preprocessor=preprocessor,
-					transition_costs=transition_costs,
-					emission_source=hmm_settings.emission_source,
-				)
-				for item in embedding_inputs
-			}
+			labels_by_survey = _decode_all_surveys(
+				embedding_inputs,
+				centers=centers,
+				residualizer=residualizer,
+				preprocessor=preprocessor,
+				transition_costs=transition_costs,
+				emission_source=hmm_settings.emission_source,
+			)
 			centers, summary = update_centers_from_labels(
 				embedding_inputs,
 				labels_by_survey,
@@ -658,6 +657,15 @@ def run_stratigraphic_hmm_clustering(
 				emission_source=hmm_settings.emission_source,
 			)
 			iteration_summaries.append({'iteration': iteration, **summary})
+
+		labels_by_survey = _decode_all_surveys(
+			embedding_inputs,
+			centers=centers,
+			residualizer=residualizer,
+			preprocessor=preprocessor,
+			transition_costs=transition_costs,
+			emission_source=hmm_settings.emission_source,
+		)
 
 		label_results = _write_hmm_labels_for_k(
 			output_dir=settings.output_dir,
@@ -897,11 +905,22 @@ def _hmm_metadata(
 		'z_axis': hmm_settings.z_axis,
 		'z_direction': hmm_settings.z_direction,
 		'transition': asdict(hmm_settings.transition),
-		'transition_costs': np.asarray(transition_costs, dtype=np.float32).tolist(),
+		'transition_costs': _json_safe_transition_costs(transition_costs),
 		'init': {'order_by': hmm_settings.init_order_by},
 		'update': {'empty_cluster_policy': hmm_settings.empty_cluster_policy},
 		'iteration_summaries': iteration_summaries,
 	}
+
+
+def _json_safe_transition_costs(costs: np.ndarray) -> list[list[float | None]]:
+	matrix = np.asarray(costs, dtype=np.float32)
+	if matrix.ndim != 2:
+		msg = f'transition_costs must be 2D; got shape {matrix.shape!r}'
+		raise ValueError(msg)
+	return [
+		[None if not np.isfinite(value) else float(value) for value in row]
+		for row in matrix
+	]
 
 
 def _emission_feature_metadata(emission_source: str) -> dict[str, object]:
@@ -985,7 +1004,6 @@ __all__ = [
 	'HMMTransitionSettings',
 	'StratigraphicHMMSettings',
 	'build_ordered_transition_costs',
-	'contiguous_true_segments',
 	'decode_survey_ordered_labels',
 	'decode_trace_segments',
 	'initialize_ordered_centers',
