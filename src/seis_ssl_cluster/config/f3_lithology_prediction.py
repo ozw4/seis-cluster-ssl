@@ -21,9 +21,9 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyPredictionConfig,
 	F3LithologyPredictionInputs,
 	F3LithologyPredictionOutputs,
-	F3LithologyTokenPolicy,
 	read_f3_lithology_prediction_classes,
 )
+from seis_ssl_cluster.f3.lithology.tokens import F3LithologyTokenPolicy
 
 if TYPE_CHECKING:
 	from pathlib import Path

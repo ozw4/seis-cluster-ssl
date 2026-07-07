@@ -30,8 +30,8 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyProbeInputs,
 	F3LithologyProbeOutputs,
 	F3LithologyProbeSettings,
-	read_f3_lithology_class_info,
 )
+from seis_ssl_cluster.f3.lithology.tokens import read_f3_lithology_class_info
 
 if TYPE_CHECKING:
 	from pathlib import Path

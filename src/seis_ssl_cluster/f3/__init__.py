@@ -105,7 +105,7 @@ from seis_ssl_cluster.f3.lithology_report import (
 	publish_f3_lithology_report,
 	render_f3_lithology_report_markdown,
 )
-from seis_ssl_cluster.f3.lithology_tokens import (
+from seis_ssl_cluster.f3.lithology.tokens import (
 	CLASS_COUNTS_FIELDNAMES,
 	F3EmbeddingArtifact,
 	F3LithologyTokenDatasetConfig,

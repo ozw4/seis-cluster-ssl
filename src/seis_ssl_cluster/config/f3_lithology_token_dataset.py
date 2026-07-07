@@ -15,7 +15,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_validate_allowed_keys,
 	_validate_artifact_path_not_f3,
 )
-from seis_ssl_cluster.f3 import (
+from seis_ssl_cluster.f3.lithology.tokens import (
 	F3LithologyTokenDatasetConfig,
 	F3LithologyTokenDatasetInputs,
 	F3LithologyTokenDatasetOutputs,

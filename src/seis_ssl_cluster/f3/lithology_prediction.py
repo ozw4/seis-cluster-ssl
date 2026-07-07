@@ -16,7 +16,7 @@ from seis_ssl_cluster.f3.lithology.token_dataset import (
 	F3LithologyTokenDataset,
 	load_f3_lithology_token_dataset,
 )
-from seis_ssl_cluster.f3.lithology_tokens import (
+from seis_ssl_cluster.f3.lithology.tokens import (
 	F3EmbeddingArtifact,
 	F3LithologyTokenPolicy,
 	load_f3_embedding_artifacts,
