@@ -16,6 +16,7 @@ from seis_ssl_cluster.config.validate import (
 CONFIG_PACKAGE = 'seis_ssl_cluster.config'
 CONFIG_ROOT = Path('src/seis_ssl_cluster/config')
 VALIDATE_PATH = CONFIG_ROOT / 'validate.py'
+F3_LITHOLOGY_COMMON_PATH = CONFIG_ROOT / 'f3_lithology_common.py'
 STAGE_MODULES = {
 	'cluster_visualization',
 	'clustering',
@@ -101,6 +102,14 @@ def test_stage_modules_do_not_import_proc_modules() -> None:
 		imports = _imported_modules(CONFIG_ROOT / f'{module_name}.py')
 
 		assert not [name for name in imports if name.startswith('proc')]
+
+
+def test_f3_lithology_common_does_not_import_validate_or_proc_modules() -> None:
+	imports = _imported_modules(F3_LITHOLOGY_COMMON_PATH)
+
+	assert 'seis_ssl_cluster.config.validate' not in imports
+	assert '.validate' not in imports
+	assert not [name for name in imports if name.startswith('proc')]
 
 
 def test_common_module_does_not_import_stage_modules() -> None:
