@@ -25,6 +25,8 @@ from seis_ssl_cluster.training import (
 	train_mae_one_epoch,
 )
 
+pytestmark = pytest.mark.smoke
+
 
 class _TinyAmpModel(torch.nn.Module):
 	def __init__(self) -> None:

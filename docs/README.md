@@ -25,3 +25,13 @@ python proc/seis_ssl_cluster/validate_results_artifacts.py \
 
 See [results_sharing_policy.md](results_sharing_policy.md) for the review
 workflow, required-file checks, and strict local-path validation.
+
+## Test Selection
+
+Use pytest markers to select the local validation granularity:
+
+```bash
+pytest -q -m "not slow and not requires_segy and not requires_cuda"
+pytest -q -m smoke
+pytest -q -m integration
+```
