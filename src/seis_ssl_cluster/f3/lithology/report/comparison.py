@@ -52,7 +52,9 @@ from seis_ssl_cluster.f3.lithology.report.publish import (
 if TYPE_CHECKING:
 	from collections.abc import Mapping, Sequence
 
-	from seis_ssl_cluster.f3.lithology.token_dataset import F3LithologyTokenDataset
+	from seis_ssl_cluster.f3.lithology.token_dataset import (
+		F3LithologyTokenDatasetSummary,
+	)
 	from seis_ssl_cluster.results import PublishManifest
 
 
@@ -180,7 +182,7 @@ def _comparison_row(
 	metrics: Mapping[str, object],
 	probe_config: Mapping[str, object] | None,
 	token_metadata: Mapping[str, object] | None,
-	token_datasets: Mapping[str, F3LithologyTokenDataset] | None = None,
+	token_datasets: Mapping[str, F3LithologyTokenDatasetSummary] | None = None,
 ) -> dict[str, object]:
 	config = _mapping(probe_config)
 	model = _mapping(config.get('model'))
@@ -293,7 +295,7 @@ def _feature_source_summary(
 	metrics: Mapping[str, object],
 	probe_config: Mapping[str, object],
 	token_metadata: Mapping[str, object] | None,
-	token_datasets: Mapping[str, F3LithologyTokenDataset] | None = None,
+	token_datasets: Mapping[str, F3LithologyTokenDatasetSummary] | None = None,
 ) -> Mapping[str, object]:
 	for candidate in (
 		_mapping(metrics.get('feature_source')),
@@ -309,7 +311,7 @@ def _feature_source_summary(
 	return {}
 
 def _token_dataset_feature_source(
-	token_datasets: Mapping[str, F3LithologyTokenDataset] | None,
+	token_datasets: Mapping[str, F3LithologyTokenDatasetSummary] | None,
 ) -> Mapping[str, object]:
 	if not token_datasets:
 		return {}

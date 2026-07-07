@@ -87,6 +87,9 @@ def test_f3_lithology_prediction_config_can_resolve_without_loading_classes(
 
 	assert config.classes is None
 	assert config.inputs.class_info == Path(payload['labels']['class_info'])
+	assert config.inputs.validation_tokens == (
+		Path(payload['lithology']['root']) / 'token_dataset' / 'validation_tokens.npz'
+	)
 
 
 def test_f3_lithology_prediction_config_loads_classes_by_default(

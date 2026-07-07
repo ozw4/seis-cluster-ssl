@@ -28,8 +28,8 @@ from seis_ssl_cluster.f3.lithology.report._common import (
 	_visible_loss_enabled,
 )
 from seis_ssl_cluster.f3.lithology.token_dataset import (
-	F3LithologyTokenDataset,
-	load_f3_lithology_token_dataset,
+	F3LithologyTokenDatasetSummary,
+	load_f3_lithology_token_dataset_summary,
 )
 
 if TYPE_CHECKING:
@@ -92,7 +92,7 @@ def _token_dataset_summary(
 	probe_config: Mapping[str, object],
 	token_metadata: Mapping[str, object],
 	*,
-	token_datasets: Mapping[str, F3LithologyTokenDataset] | None = None,
+	token_datasets: Mapping[str, F3LithologyTokenDatasetSummary] | None = None,
 ) -> dict[str, object]:
 	token_summary = _mapping(token_metadata.get('summary'))
 	probe_summary = _mapping(probe_config.get('summary'))
@@ -146,15 +146,15 @@ def _token_dataset_summary(
 
 def _load_probe_token_datasets(
 	probe_config: Mapping[str, object],
-) -> tuple[dict[str, F3LithologyTokenDataset], list[str]]:
+) -> tuple[dict[str, F3LithologyTokenDatasetSummary], list[str]]:
 	paths = _probe_token_dataset_paths(probe_config)
 	if not paths:
 		return {}, []
-	datasets: dict[str, F3LithologyTokenDataset] = {}
+	datasets: dict[str, F3LithologyTokenDatasetSummary] = {}
 	warnings: list[str] = []
 	for split, path in paths.items():
 		try:
-			datasets[split] = load_f3_lithology_token_dataset(path)
+			datasets[split] = load_f3_lithology_token_dataset_summary(path)
 		except (OSError, KeyError, TypeError, ValueError) as exc:  # noqa: PERF203
 			warnings.append(
 				f'unable to load {split} token dataset component: {path} ({exc})',
@@ -176,7 +176,7 @@ def _probe_token_dataset_paths(
 	return paths
 
 def _loaded_token_dataset_summary(
-	token_datasets: Mapping[str, F3LithologyTokenDataset] | None,
+	token_datasets: Mapping[str, F3LithologyTokenDatasetSummary] | None,
 ) -> dict[str, object]:
 	if not token_datasets:
 		return {}
@@ -194,7 +194,7 @@ def _loaded_token_dataset_summary(
 	return summary
 
 def _token_dataset_class_counts(
-	dataset: F3LithologyTokenDataset,
+	dataset: F3LithologyTokenDatasetSummary,
 ) -> dict[int, int]:
 	return {
 		int(class_id): int(count)

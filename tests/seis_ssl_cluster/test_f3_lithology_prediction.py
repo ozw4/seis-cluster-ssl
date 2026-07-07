@@ -111,7 +111,7 @@ def test_predict_f3_lithology_tokens_writes_standard_json_for_empty_metrics(
 	assert inline_row['mean_iou'] is None
 
 
-def test_predict_f3_lithology_tokens_scores_validation_from_label_volume(
+def test_predict_f3_lithology_tokens_scores_validation_from_token_dataset(
 	tmp_path: Path,
 ) -> None:
 	config = write_prediction_fixture(tmp_path)
@@ -138,9 +138,29 @@ def test_predict_f3_lithology_tokens_scores_validation_from_label_volume(
 		row['slice_type']: float(row['accuracy'])
 		for row in metric_rows
 	} == {
-		'inline': 0.25,
-		'crossline': 0.0,
+		'inline': 1.0,
+		'crossline': 1.0,
 	}
+
+
+def test_prediction_inputs_preserves_source_label_segy_positional_slot(
+	tmp_path: Path,
+) -> None:
+	source_label_segy = tmp_path / 'F3' / 'f3_labels.sgy'
+
+	inputs = F3LithologyPredictionInputs(
+		tmp_path / 'embeddings',
+		tmp_path / 'probe.joblib',
+		tmp_path / 'scaler.joblib',
+		tmp_path / 'labels.npy',
+		tmp_path / 'class_info.json',
+		tmp_path / 'png_label_inventory.csv',
+		tmp_path / 'segy_geometry.json',
+		source_label_segy,
+	)
+
+	assert inputs.source_label_segy == source_label_segy
+	assert inputs.validation_tokens is None
 
 
 def test_predict_f3_lithology_tokens_requires_loaded_classes(tmp_path: Path) -> None:

@@ -251,10 +251,14 @@ def f3_lithology_prediction_config_from_mapping(
 	token_dataset = _optional_mapping(config, 'token_dataset')
 	probe = _required_mapping(config, 'probe')
 	predictions = _required_mapping(config, 'predictions')
+	lithology_root = _optional_absolute_path(lithology, 'root', prefix='lithology')
 	token_dataset_dir = _optional_absolute_path(
 		token_dataset,
 		'input_dir',
 		prefix='token_dataset',
+		default=(
+			None if lithology_root is None else lithology_root / 'token_dataset'
+		),
 	)
 	validation_tokens = _optional_absolute_path(
 		token_dataset,
