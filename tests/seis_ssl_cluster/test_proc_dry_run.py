@@ -7,6 +7,8 @@ import pytest
 
 from tests.helpers import run_python_proc
 
+pytestmark = pytest.mark.integration
+
 PROC_SCRIPTS = (
 	Path('proc/seis_ssl_cluster/build_nopims_manifests.py'),
 	Path('proc/seis_ssl_cluster/prepare_nopims_normalization_stats.py'),

@@ -35,6 +35,8 @@ from seis_ssl_cluster.embedding import run_embedding_extraction
 from seis_ssl_cluster.training import load_checkpoint
 from tests.helpers import run_python_proc
 
+pytestmark = [pytest.mark.smoke, pytest.mark.integration]
+
 pytest.importorskip('matplotlib')
 
 
