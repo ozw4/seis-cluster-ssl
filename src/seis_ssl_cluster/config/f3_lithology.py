@@ -2,24 +2,18 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config import f3_lithology_common as _f3_lithology_common
 from seis_ssl_cluster.config.f3_lithology_common import (
-	_hidden_dims,
 	_int_tuple,
 	_max_file_size_bytes,
 	_optional_absolute_path,
 	_optional_bool_value,
-	_optional_fraction,
-	_optional_int,
 	_optional_mapping,
 	_optional_non_negative_int,
-	_optional_nonnegative_float,
-	_optional_nullable_str,
 	_optional_path,
-	_optional_positive_float,
 	_optional_positive_int,
 	_optional_str,
 	_percentiles,
@@ -28,35 +22,29 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_fraction,
 	_required_mapping,
 	_required_nonnegative_int,
-	_required_str,
-	_string_item,
 	_validate_allowed_keys,
 	_validate_artifact_or_f3_source_path,
 	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
 )
+from seis_ssl_cluster.config.f3_lithology_probe import (
+	f3_lithology_probe_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_token_dataset import (
+	f3_lithology_token_dataset_config_from_mapping,
+)
 from seis_ssl_cluster.f3 import (
-	DEFAULT_EVALUATION_METRICS,
 	F3LithologyComparisonReportConfig,
 	F3LithologyPredictionConfig,
 	F3LithologyPredictionInputs,
 	F3LithologyPredictionOutputs,
-	F3LithologyProbeConfig,
-	F3LithologyProbeInputs,
-	F3LithologyProbeOutputs,
-	F3LithologyProbeSettings,
 	F3LithologyPublishConfig,
 	F3LithologyReportConfig,
-	F3LithologyTokenDatasetConfig,
-	F3LithologyTokenDatasetInputs,
-	F3LithologyTokenDatasetOutputs,
 	F3LithologyTokenPolicy,
 	F3LithologyVisualizationConfig,
 	F3LithologyVisualizationFigureConfig,
 	F3LithologyVisualizationInputs,
 	F3LithologyVisualizationOutputs,
-	F3ReferenceTokenDataset,
-	read_f3_lithology_class_info,
 	read_f3_lithology_prediction_classes,
 	read_f3_lithology_visualization_classes,
 )
@@ -67,187 +55,6 @@ if TYPE_CHECKING:
 	from pathlib import Path
 
 _is_relative_to = _f3_lithology_common._is_relative_to  # noqa: SLF001
-
-
-def f3_lithology_token_dataset_config_from_mapping(
-	config: Mapping[str, object],
-) -> F3LithologyTokenDatasetConfig:
-	"""Validate and normalize the F3 lithology token dataset config."""
-	_validate_allowed_keys(
-		config,
-		frozenset(
-			{
-				'paths',
-				'dataset',
-				'model',
-				'embeddings',
-				'labels',
-				'registry',
-				'lithology',
-				'token_dataset',
-				'feature_source',
-			},
-		),
-		prefix='config',
-	)
-	paths = _required_mapping(config, 'paths')
-	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
-	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
-	dataset = _required_mapping(config, 'dataset')
-	model = _required_mapping(config, 'model')
-	embeddings = _required_mapping(config, 'embeddings')
-	labels = _required_mapping(config, 'labels')
-	registry = _required_mapping(config, 'registry')
-	token_dataset = _required_mapping(config, 'token_dataset')
-	outputs = _token_dataset_outputs_from_mapping(token_dataset)
-	for label, path in _token_dataset_output_paths(outputs):
-		_validate_artifact_path_not_f3(
-			path,
-			label,
-			artifact_root=artifact_root,
-			f3_root=f3_root,
-		)
-	inputs = F3LithologyTokenDatasetInputs(
-		embeddings_dir=_required_absolute_path(
-			embeddings,
-			'input_dir',
-			prefix='embeddings',
-		),
-		label_volume=_required_absolute_path(
-			labels,
-			'source_label_volume',
-			prefix='labels',
-		),
-		seismic_volume=_required_absolute_path(
-			registry,
-			'seismic_volume',
-			prefix='registry',
-		),
-		png_label_inventory=_required_absolute_path(
-			labels,
-			'png_label_inventory',
-			prefix='labels',
-		),
-		class_info=_required_absolute_path(labels, 'class_info', prefix='labels'),
-		segy_geometry_json=_required_absolute_path(
-			labels,
-			'segy_geometry_json',
-			prefix='labels',
-		),
-		source_label_segy=_optional_absolute_path(
-			labels,
-			'source_label_segy',
-			prefix='labels',
-		),
-		volume_metadata_json=_optional_absolute_path(
-			registry,
-			'metadata_json',
-			prefix='registry',
-		),
-	)
-	policy = _token_dataset_policy_from_mapping(
-		_required_mapping(token_dataset, 'tokenization'),
-	)
-	reference_token_dataset = _reference_token_dataset_from_mapping(token_dataset)
-	feature_source = _feature_source(
-		config,
-		token_dataset,
-		reference_token_dataset=reference_token_dataset,
-	)
-	return F3LithologyTokenDatasetConfig(
-		inputs=inputs,
-		outputs=outputs,
-		policy=policy,
-		dataset=dataset,
-		model=model,
-		figure_dpi=_token_dataset_figure_dpi(token_dataset),
-		feature_source=feature_source,
-		reference_token_dataset=reference_token_dataset,
-	)
-
-
-def f3_lithology_probe_config_from_mapping(
-	config: Mapping[str, object],
-	*,
-	load_classes: bool = True,
-) -> F3LithologyProbeConfig:
-	"""Validate and normalize the F3 lithology probe config."""
-	_validate_allowed_keys(
-		config,
-		frozenset(
-			{
-				'paths',
-				'dataset',
-				'model',
-				'embeddings',
-				'labels',
-				'lithology',
-				'token_dataset',
-				'probe',
-				'evaluation',
-			},
-		),
-		prefix='config',
-	)
-	paths = _required_mapping(config, 'paths')
-	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
-	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
-	dataset = _required_mapping(config, 'dataset')
-	model = _required_mapping(config, 'model')
-	_validate_frozen_encoder(model, stage='F3 lithology probe training')
-	embeddings = _required_mapping(config, 'embeddings')
-	labels = _required_mapping(config, 'labels')
-	lithology = _required_mapping(config, 'lithology')
-	token_dataset = _required_mapping(config, 'token_dataset')
-	probe = _required_mapping(config, 'probe')
-	evaluation = _optional_mapping(config, 'evaluation')
-	token_dataset_dir = _required_absolute_path(
-		token_dataset,
-		'input_dir',
-		prefix='token_dataset',
-	)
-	class_info_path = _required_absolute_path(labels, 'class_info', prefix='labels')
-	outputs = F3LithologyProbeOutputs(
-		output_dir=_required_absolute_path(probe, 'output_dir', prefix='probe'),
-	)
-	token_dataset_metadata_json = _optional_absolute_path(
-		token_dataset,
-		'metadata_json',
-		prefix='token_dataset',
-	)
-	for label, path in _probe_artifact_paths(
-		token_dataset_dir=token_dataset_dir,
-		class_info_path=class_info_path,
-		token_dataset_metadata_json=token_dataset_metadata_json,
-		outputs=outputs,
-	):
-		_validate_artifact_path_not_f3(
-			path,
-			label,
-			artifact_root=artifact_root,
-			f3_root=f3_root,
-		)
-	return F3LithologyProbeConfig(
-		inputs=F3LithologyProbeInputs(
-			train_tokens=token_dataset_dir / 'train_tokens.npz',
-			validation_tokens=token_dataset_dir / 'validation_tokens.npz',
-			class_info=class_info_path,
-			token_dataset_metadata_json=token_dataset_metadata_json,
-		),
-		outputs=outputs,
-		classes=(
-			read_f3_lithology_class_info(class_info_path) if load_classes else None
-		),
-		probe=_probe_settings_from_mapping(probe),
-		dataset=dataset,
-		model=model,
-		embeddings=embeddings,
-		labels=labels,
-		token_dataset=token_dataset,
-		lithology=lithology,
-		evaluation_metrics=_evaluation_metrics(evaluation),
-		figure_dpi=_probe_figure_dpi(evaluation),
-	)
 
 
 def f3_lithology_prediction_config_from_mapping(
@@ -626,322 +433,6 @@ def f3_lithology_publish_config_from_mapping(
 			default=3,
 		),
 	)
-
-
-def _token_dataset_outputs_from_mapping(
-	token_dataset: Mapping[str, object],
-) -> F3LithologyTokenDatasetOutputs:
-	return F3LithologyTokenDatasetOutputs(
-		output_dir=_required_absolute_path(
-			token_dataset,
-			'output_dir',
-			prefix='token_dataset',
-		),
-		metadata_json=_required_absolute_path(
-			token_dataset,
-			'metadata_json',
-			prefix='token_dataset',
-		),
-		class_counts_csv=_required_absolute_path(
-			token_dataset,
-			'class_counts_csv',
-			prefix='token_dataset',
-		),
-		summary_markdown=_required_absolute_path(
-			token_dataset,
-			'summary_markdown',
-			prefix='token_dataset',
-		),
-		split_manifest_json=_required_absolute_path(
-			token_dataset,
-			'split_manifest',
-			prefix='token_dataset',
-		),
-		quicklook_dir=_required_absolute_path(
-			token_dataset,
-			'quicklook_dir',
-			prefix='token_dataset',
-		),
-	)
-
-
-def _token_dataset_policy_from_mapping(
-	policy: Mapping[str, object],
-) -> F3LithologyTokenPolicy:
-	for key in ('patch_size', 'patch_size_xyz'):
-		if key in policy:
-			msg = (
-				'token_dataset.tokenization must not override patch size; '
-				'patch size is read from embedding metadata'
-			)
-			raise ValueError(msg)
-	return F3LithologyTokenPolicy(
-		min_labeled_fraction=_required_fraction(
-			policy,
-			'min_labeled_fraction',
-			prefix='token_dataset.tokenization',
-		),
-		min_majority_fraction=_required_fraction(
-			policy,
-			'min_majority_fraction',
-			prefix='token_dataset.tokenization',
-		),
-		ignore_z_border_samples=_required_nonnegative_int(
-			policy,
-			'ignore_z_border_samples',
-			prefix='token_dataset.tokenization',
-		),
-	)
-
-
-def _token_dataset_figure_dpi(token_dataset: Mapping[str, object]) -> int:
-	figure = token_dataset.get('figure')
-	if figure is None:
-		return 300
-	if not isinstance(figure, Mapping):
-		msg = f'token_dataset.figure must be a mapping; got {figure!r}'
-		raise TypeError(msg)
-	return _optional_positive_int(
-		figure.get('dpi', 300),
-		'token_dataset.figure.dpi',
-	)
-
-
-def _feature_source(
-	config: Mapping[str, object],
-	token_dataset: Mapping[str, object],
-	*,
-	reference_token_dataset: F3ReferenceTokenDataset | None,
-) -> Mapping[str, object] | None:
-	top_level = config.get('feature_source')
-	nested = token_dataset.get('feature_source')
-	if top_level is not None and nested is not None and top_level != nested:
-		msg = 'config.feature_source and token_dataset.feature_source must match'
-		raise ValueError(msg)
-	value = top_level if top_level is not None else nested
-	if value is None:
-		return None
-	if not isinstance(value, Mapping):
-		msg = f'feature_source must be a mapping; got {value!r}'
-		raise TypeError(msg)
-	feature_source = {
-		'kind': _feature_source_str(value, 'kind'),
-		'reference_model_tag': _feature_source_str(value, 'reference_model_tag'),
-		'embedding_spec': _feature_source_str(value, 'embedding_spec'),
-		'description': _feature_source_str(value, 'description'),
-	}
-	if (
-		reference_token_dataset is None
-		and feature_source['kind'] != 'pretrained_encoder'
-	):
-		msg = (
-			'feature_source.kind must be "pretrained_encoder" for pretrained '
-			f'token datasets; got {feature_source["kind"]!r}'
-		)
-		raise ValueError(msg)
-	return feature_source
-
-
-def _feature_source_str(value: Mapping[str, object], key: str) -> str:
-	item = value.get(key)
-	if not isinstance(item, str) or not item:
-		msg = f'feature_source.{key} must be a non-empty string; got {item!r}'
-		raise TypeError(msg)
-	return item
-
-
-def _reference_token_dataset_from_mapping(
-	token_dataset: Mapping[str, object],
-) -> F3ReferenceTokenDataset | None:
-	value = token_dataset.get('reference_token_dataset')
-	if value is None:
-		return None
-	if not isinstance(value, Mapping):
-		msg = f'token_dataset.reference_token_dataset must be a mapping; got {value!r}'
-		raise TypeError(msg)
-	root = _optional_absolute_path(
-		value,
-		'root',
-		prefix='token_dataset.reference_token_dataset',
-	)
-	train_tokens = _optional_absolute_path(
-		value,
-		'train_tokens',
-		prefix='token_dataset.reference_token_dataset',
-	)
-	validation_tokens = _optional_absolute_path(
-		value,
-		'validation_tokens',
-		prefix='token_dataset.reference_token_dataset',
-	)
-	metadata_json = _optional_absolute_path(
-		value,
-		'metadata_json',
-		prefix='token_dataset.reference_token_dataset',
-	)
-	split_manifest_json = _optional_absolute_path(
-		value,
-		'split_manifest_json',
-		prefix='token_dataset.reference_token_dataset',
-	)
-	split_manifest = _optional_absolute_path(
-		value,
-		'split_manifest',
-		prefix='token_dataset.reference_token_dataset',
-	)
-	if root is not None:
-		train_tokens = train_tokens or root / 'train_tokens.npz'
-		validation_tokens = validation_tokens or root / 'validation_tokens.npz'
-		metadata_json = metadata_json or root / 'token_dataset_metadata.json'
-		split_manifest_json = (
-			split_manifest_json or split_manifest or root / 'splits.json'
-		)
-	else:
-		split_manifest_json = split_manifest_json or split_manifest
-	if train_tokens is None or validation_tokens is None or metadata_json is None:
-		msg = (
-			'token_dataset.reference_token_dataset requires root or explicit '
-			'train_tokens, validation_tokens, and metadata_json paths'
-		)
-		raise KeyError(msg)
-	return F3ReferenceTokenDataset(
-		train_tokens=train_tokens,
-		validation_tokens=validation_tokens,
-		metadata_json=metadata_json,
-		split_manifest_json=split_manifest_json,
-		root=root,
-	)
-
-
-def _token_dataset_output_paths(
-	outputs: F3LithologyTokenDatasetOutputs,
-) -> tuple[tuple[str, Path], ...]:
-	return (
-		('token_dataset.output_dir', outputs.output_dir),
-		('token_dataset.metadata_json', outputs.metadata_json),
-		('token_dataset.class_counts_csv', outputs.class_counts_csv),
-		('token_dataset.summary_markdown', outputs.summary_markdown),
-		('token_dataset.split_manifest', outputs.split_manifest_json),
-		('token_dataset.quicklook_dir', outputs.quicklook_dir),
-	)
-
-
-def _probe_settings_from_mapping(
-	probe: Mapping[str, object],
-) -> F3LithologyProbeSettings:
-	_validate_allowed_keys(
-		probe,
-		frozenset(
-			{
-				'spec',
-				'type',
-				'feature_scaling',
-				'class_weight',
-				'max_iter',
-				'random_state',
-				'hidden_dims',
-				'dropout',
-				'max_epochs',
-				'early_stopping_patience',
-				'batch_size',
-				'learning_rate',
-				'weight_decay',
-				'output_dir',
-			},
-		),
-		prefix='probe',
-	)
-	return F3LithologyProbeSettings(
-		spec=_required_str(probe, 'spec', prefix='probe'),
-		probe_type=_required_str(probe, 'type', prefix='probe'),
-		feature_scaling=_optional_str(
-			probe,
-			'feature_scaling',
-			default='standard',
-			prefix='probe',
-		),
-		class_weight=_optional_nullable_str(
-			probe,
-			'class_weight',
-			default='balanced',
-			prefix='probe',
-		),
-		max_iter=_optional_positive_int(probe.get('max_iter', 2000), 'probe.max_iter'),
-		hidden_dims=_hidden_dims(probe.get('hidden_dims', (256, 128))),
-		dropout=_optional_fraction(probe.get('dropout', 0.2), 'probe.dropout'),
-		max_epochs=_optional_positive_int(
-			probe.get('max_epochs', 200),
-			'probe.max_epochs',
-		),
-		early_stopping_patience=_optional_positive_int(
-			probe.get('early_stopping_patience', 20),
-			'probe.early_stopping_patience',
-		),
-		batch_size=_optional_positive_int(
-			probe.get('batch_size', 1024),
-			'probe.batch_size',
-		),
-		learning_rate=_optional_positive_float(
-			probe.get('learning_rate', 1.0e-3),
-			'probe.learning_rate',
-		),
-		weight_decay=_optional_nonnegative_float(
-			probe.get('weight_decay', 0.0),
-			'probe.weight_decay',
-		),
-		random_state=_optional_int(
-			probe.get('random_state', 42),
-			'probe.random_state',
-		),
-	)
-
-
-def _evaluation_metrics(evaluation: Mapping[str, object]) -> tuple[str, ...]:
-	value = evaluation.get('metrics', DEFAULT_EVALUATION_METRICS)
-	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
-		msg = f'evaluation.metrics must be a list of metric names; got {value!r}'
-		raise TypeError(msg)
-	metrics = tuple(_string_item(item, 'evaluation.metrics') for item in value)
-	if not metrics:
-		msg = 'evaluation.metrics must contain at least one metric name'
-		raise ValueError(msg)
-	return metrics
-
-
-def _probe_figure_dpi(evaluation: Mapping[str, object]) -> int:
-	figure = evaluation.get('figure')
-	if figure is None:
-		return 300
-	if not isinstance(figure, Mapping):
-		msg = f'evaluation.figure must be a mapping; got {figure!r}'
-		raise TypeError(msg)
-	return _optional_positive_int(figure.get('dpi', 300), 'evaluation.figure.dpi')
-
-
-def _probe_artifact_paths(
-	*,
-	token_dataset_dir: Path,
-	class_info_path: Path,
-	token_dataset_metadata_json: Path | None,
-	outputs: F3LithologyProbeOutputs,
-) -> tuple[tuple[str, Path], ...]:
-	paths: list[tuple[str, Path]] = [
-		('token_dataset.input_dir', token_dataset_dir),
-		('labels.class_info', class_info_path),
-		('probe.output_dir', outputs.output_dir),
-		('probe.probe_joblib', outputs.probe_joblib),
-		('probe.scaler_joblib', outputs.scaler_joblib),
-		('probe.probe_config_resolved_json', outputs.config_json),
-		('probe.metrics_json', outputs.metrics_json),
-		('probe.metrics_csv', outputs.metrics_csv),
-		('probe.confusion_matrix_csv', outputs.confusion_matrix_csv),
-		('probe.classification_report_md', outputs.classification_report_md),
-		('probe.confusion_matrix_png', outputs.confusion_matrix_png),
-		('probe.per_class_f1_png', outputs.per_class_f1_png),
-	]
-	if token_dataset_metadata_json is not None:
-		paths.append(('token_dataset.metadata_json', token_dataset_metadata_json))
-	return tuple(paths)
 
 
 def _prediction_outputs_from_mapping(
