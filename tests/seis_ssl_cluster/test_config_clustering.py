@@ -66,6 +66,22 @@ def test_stratigraphic_hmm_clustering_config_validates_nested_values(
 		resolve_clustering_config(cfg)
 
 
+def test_stratigraphic_hmm_clustering_config_rejects_nested_unknown_key() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	hmm = _stratigraphic_hmm_config()
+	transition = hmm['transition']
+	assert isinstance(transition, dict)
+	transition['extra'] = 1
+	cfg['clustering']['stratigraphic_hmm'] = hmm
+
+	with pytest.raises(
+		ValueError,
+		match=r'clustering\.stratigraphic_hmm\.transition\.extra',
+	):
+		resolve_clustering_config(cfg)
+
+
 def test_minibatch_kmeans_clustering_config_does_not_require_hmm_mapping() -> None:
 	cfg = _minimal_clustering_config()
 	cfg['clustering'].pop('stratigraphic_hmm', None)
