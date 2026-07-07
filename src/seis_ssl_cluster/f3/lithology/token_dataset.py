@@ -67,6 +67,19 @@ class F3LithologyTokenDataset:
 		}
 
 
+@dataclass(frozen=True)
+class F3LithologyTokenDatasetSummary:
+	"""Lightweight token dataset summary for report aggregation."""
+
+	labels: NDArray[np.integer]
+	metadata: Mapping[str, object] = MappingProxyType({})
+
+	@property
+	def count(self) -> int:
+		"""Return number of token rows."""
+		return int(self.labels.shape[0])
+
+
 def load_f3_lithology_token_dataset(path: Path) -> F3LithologyTokenDataset:
 	"""Load and validate an F3 lithology token dataset NPZ."""
 	if not path.is_file():
@@ -101,6 +114,25 @@ def load_f3_lithology_token_dataset(path: Path) -> F3LithologyTokenDataset:
 	return dataset
 
 
+def load_f3_lithology_token_dataset_summary(
+	path: Path,
+) -> F3LithologyTokenDatasetSummary:
+	"""Load token labels and metadata without materializing feature matrices."""
+	if not path.is_file():
+		msg = f'F3 lithology token dataset does not exist: {path}'
+		raise FileNotFoundError(msg)
+	with np.load(path) as payload:
+		if 'labels' not in payload.files:
+			msg = "F3 lithology token dataset missing required field(s): ['labels']"
+			raise KeyError(msg)
+		summary = F3LithologyTokenDatasetSummary(
+			labels=np.asarray(payload['labels']),
+			metadata=_metadata_from_npz(payload, path),
+		)
+	_validate_token_dataset_summary(summary)
+	return summary
+
+
 def save_f3_lithology_token_dataset(
 	dataset: F3LithologyTokenDataset,
 	path: Path,
@@ -123,6 +155,18 @@ def validate_f3_lithology_token_dataset(
 	_validate_token_metadata_shapes(dataset, count)
 	_validate_token_metadata_dtypes(dataset)
 	_validate_finite_token_metadata(dataset)
+
+
+def _validate_token_dataset_summary(
+	summary: F3LithologyTokenDatasetSummary,
+) -> None:
+	labels = np.asarray(summary.labels)
+	if labels.ndim != 1:
+		msg = f'labels must be a 1D vector; got shape={labels.shape!r}'
+		raise ValueError(msg)
+	if not np.issubdtype(labels.dtype, np.integer):
+		msg = f'labels must be integer typed; got dtype={labels.dtype}'
+		raise TypeError(msg)
 
 
 def _validate_features_and_labels(

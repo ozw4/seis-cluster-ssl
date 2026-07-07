@@ -10,6 +10,7 @@ from seis_ssl_cluster.f3.lithology.token_dataset import (
 	F3_LITHOLOGY_TOKEN_DATASET_KEYS,
 	F3LithologyTokenDataset,
 	load_f3_lithology_token_dataset,
+	load_f3_lithology_token_dataset_summary,
 	replace_token_features,
 	save_f3_lithology_token_dataset,
 	validate_f3_lithology_token_dataset,
@@ -54,6 +55,18 @@ def test_token_dataset_schema_round_trips_metadata_when_present(
 	with np.load(path) as payload:
 		assert 'metadata' in payload.files
 		assert json.loads(str(payload['metadata'].item())) == metadata
+
+
+def test_token_dataset_summary_loads_labels_and_metadata(tmp_path: Path) -> None:
+	path = tmp_path / 'train_tokens.npz'
+	metadata = {'feature_source': {'kind': 'amplitude_statistics'}}
+
+	save_f3_lithology_token_dataset(_dataset(metadata=metadata), path)
+	summary = load_f3_lithology_token_dataset_summary(path)
+
+	assert summary.count == 2
+	np.testing.assert_array_equal(summary.labels, np.asarray([0, 1], dtype=np.int64))
+	assert summary.metadata == metadata
 
 
 def test_token_dataset_schema_accepts_class_zero_as_valid_label() -> None:

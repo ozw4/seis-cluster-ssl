@@ -209,10 +209,6 @@ class _TokenDataset:
 	dataset: F3LithologyTokenDataset
 
 	@property
-	def arrays(self) -> dict[str, NDArray[np.generic]]:
-		return self.dataset.to_npz_arrays()
-
-	@property
 	def labels(self) -> NDArray[np.int64]:
 		return np.asarray(self.dataset.labels, dtype=np.int64)
 
@@ -528,17 +524,14 @@ def _validate_reference_split(train: _TokenDataset, validation: _TokenDataset) -
 
 
 def _z_coordinates(dataset: _TokenDataset) -> NDArray[np.float64]:
-	if 'voxel_center_xyz' in dataset.arrays:
-		centers = np.asarray(dataset.arrays['voxel_center_xyz'], dtype=np.float64)
-		if centers.shape != (dataset.count, 3):
-			msg = (
-				f'{dataset.path}.voxel_center_xyz must have shape '
-				f'{(dataset.count, 3)!r}; got {centers.shape!r}'
-			)
-			raise ValueError(msg)
-		z_values = centers[:, 2]
-	else:
-		z_values = np.asarray(dataset.token_xyz[:, 2], dtype=np.float64)
+	centers = np.asarray(dataset.dataset.voxel_center_xyz, dtype=np.float64)
+	if centers.shape != (dataset.count, 3):
+		msg = (
+			f'{dataset.path}.voxel_center_xyz must have shape '
+			f'{(dataset.count, 3)!r}; got {centers.shape!r}'
+		)
+		raise ValueError(msg)
+	z_values = centers[:, 2]
 	if not np.all(np.isfinite(z_values)):
 		msg = f'{dataset.path} contains non-finite z coordinates'
 		raise ValueError(msg)
@@ -546,10 +539,7 @@ def _z_coordinates(dataset: _TokenDataset) -> NDArray[np.float64]:
 
 
 def _xyz_coordinates(dataset: _TokenDataset) -> NDArray[np.float64]:
-	if 'voxel_center_xyz' not in dataset.arrays:
-		msg = f'{dataset.path} must contain voxel_center_xyz for xyz_coordinates'
-		raise KeyError(msg)
-	centers = np.asarray(dataset.arrays['voxel_center_xyz'], dtype=np.float64)
+	centers = np.asarray(dataset.dataset.voxel_center_xyz, dtype=np.float64)
 	if centers.shape != (dataset.count, 3):
 		msg = (
 			f'{dataset.path}.voxel_center_xyz must have shape '

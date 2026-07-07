@@ -232,6 +232,7 @@ def f3_lithology_prediction_config_from_mapping(
 				'embeddings',
 				'labels',
 				'lithology',
+				'token_dataset',
 				'probe',
 				'predictions',
 			},
@@ -247,8 +248,28 @@ def f3_lithology_prediction_config_from_mapping(
 	embeddings = _required_mapping(config, 'embeddings')
 	labels = _required_mapping(config, 'labels')
 	lithology = _required_mapping(config, 'lithology')
+	token_dataset = _optional_mapping(config, 'token_dataset')
 	probe = _required_mapping(config, 'probe')
 	predictions = _required_mapping(config, 'predictions')
+	lithology_root = _optional_absolute_path(lithology, 'root', prefix='lithology')
+	token_dataset_dir = _optional_absolute_path(
+		token_dataset,
+		'input_dir',
+		prefix='token_dataset',
+		default=(
+			None if lithology_root is None else lithology_root / 'token_dataset'
+		),
+	)
+	validation_tokens = _optional_absolute_path(
+		token_dataset,
+		'validation_tokens',
+		prefix='token_dataset',
+		default=(
+			None
+			if token_dataset_dir is None
+			else token_dataset_dir / 'validation_tokens.npz'
+		),
+	)
 	inputs = F3LithologyPredictionInputs(
 		embeddings_dir=_required_absolute_path(
 			embeddings,
@@ -286,6 +307,7 @@ def f3_lithology_prediction_config_from_mapping(
 			'source_label_segy',
 			prefix='labels',
 		),
+		validation_tokens=validation_tokens,
 	)
 	outputs = _prediction_outputs_from_mapping(predictions)
 	for label, path in _prediction_paths(inputs, outputs):
@@ -978,6 +1000,8 @@ def _prediction_paths(
 	]
 	if inputs.source_label_segy is not None:
 		paths.append(('labels.source_label_segy', inputs.source_label_segy))
+	if inputs.validation_tokens is not None:
+		paths.append(('token_dataset.validation_tokens', inputs.validation_tokens))
 	return tuple(paths)
 
 

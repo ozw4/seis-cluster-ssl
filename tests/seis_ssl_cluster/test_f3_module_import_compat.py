@@ -51,3 +51,19 @@ def test_segy_stats_helper_public_import_matches_compat_module() -> None:
 		is io_segy.calculate_seismic_amplitude_stats
 	)
 	assert compat_segy.calculate_seismic_amplitude_stats(values)['finite_count'] == 2
+
+
+def test_f3_refactor_public_module_imports() -> None:
+	for module_name in (
+		'seis_ssl_cluster.f3.segy',
+		'seis_ssl_cluster.f3.png_labels',
+		'seis_ssl_cluster.f3.consistency',
+		'seis_ssl_cluster.f3.lithology_tokens',
+		'seis_ssl_cluster.f3.baseline_features',
+		'seis_ssl_cluster.f3.lithology_probe',
+		'seis_ssl_cluster.f3.lithology_report',
+		'seis_ssl_cluster.f3.io.segy',
+		'seis_ssl_cluster.f3.lithology.token_dataset',
+		'seis_ssl_cluster.f3.lithology.report.comparison',
+	):
+		importlib.import_module(module_name)

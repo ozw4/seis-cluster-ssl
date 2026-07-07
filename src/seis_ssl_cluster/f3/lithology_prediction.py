@@ -12,6 +12,10 @@ import joblib
 import numpy as np
 
 from seis_ssl_cluster.embedding.sliding_window import token_grid_shape_xyz
+from seis_ssl_cluster.f3.lithology.token_dataset import (
+	F3LithologyTokenDataset,
+	load_f3_lithology_token_dataset,
+)
 from seis_ssl_cluster.f3.lithology_tokens import (
 	F3EmbeddingArtifact,
 	F3LithologyTokenPolicy,
@@ -25,6 +29,7 @@ from seis_ssl_cluster.f3.splits import (
 	F3SliceSplitRecord,
 	load_f3_slice_split_records,
 	read_f3_line_geometry,
+	resolve_f3_slice_array_index,
 )
 
 if TYPE_CHECKING:
@@ -61,6 +66,7 @@ class F3LithologyPredictionInputs:
 	png_label_inventory: Path
 	segy_geometry_json: Path
 	source_label_segy: Path | None = None
+	validation_tokens: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -319,6 +325,17 @@ def _validation_slice_metric_rows(  # noqa: PLR0913
 		for record in load_f3_slice_split_records(config.inputs.png_label_inventory)
 		if record.split == 'validation'
 	]
+	if config.inputs.validation_tokens is not None:
+		validation_tokens = load_f3_lithology_token_dataset(
+			config.inputs.validation_tokens,
+		)
+		return _validation_token_dataset_metric_rows(
+			records,
+			validation_tokens,
+			geometry=geometry,
+			predictions=predictions,
+			classes=classes,
+		)
 	rows: list[dict[str, object]] = []
 	for record in records:
 		tokenization = tokenize_f3_lithology_slice(
@@ -355,6 +372,91 @@ def _validation_slice_metric_rows(  # noqa: PLR0913
 			),
 		)
 	return rows
+
+
+def _validation_token_dataset_metric_rows(
+	records: Sequence[F3SliceSplitRecord],
+	validation_tokens: F3LithologyTokenDataset,
+	*,
+	geometry: F3LineGeometry,
+	predictions: NDArray[np.int16],
+	classes: Sequence[F3ClassInfo],
+) -> list[dict[str, object]]:
+	rows_by_slice = _validation_token_rows_by_slice(validation_tokens)
+	rows: list[dict[str, object]] = []
+	for record in records:
+		row_indices = rows_by_slice.get(
+			(record.slice_type, int(record.slice_index)),
+			[],
+		)
+		token_xyz = np.asarray(
+			validation_tokens.token_xyz[row_indices],
+			dtype=np.int64,
+		)
+		y_true = np.asarray(validation_tokens.labels[row_indices])
+		y_pred = _predictions_for_token_xyz(
+			predictions,
+			token_xyz,
+			record=record,
+		)
+		predicted = y_pred >= 0
+		rows.append(
+			_validation_metric_row(
+				record,
+				array_index=resolve_f3_slice_array_index(record, geometry),
+				y_true=y_true[predicted],
+				y_pred=y_pred[predicted],
+				classes=classes,
+			),
+		)
+	return rows
+
+
+def _validation_token_rows_by_slice(
+	validation_tokens: F3LithologyTokenDataset,
+) -> dict[tuple[str, int], list[int]]:
+	rows_by_slice: dict[tuple[str, int], list[int]] = {}
+	splits = np.asarray(validation_tokens.split).astype(str)
+	slice_types = np.asarray(validation_tokens.slice_type).astype(str)
+	slice_indices = np.asarray(validation_tokens.slice_index, dtype=np.int64)
+	for row_index, split in enumerate(splits):
+		if split != 'validation':
+			continue
+		key = (str(slice_types[row_index]), int(slice_indices[row_index]))
+		rows_by_slice.setdefault(key, []).append(row_index)
+	return rows_by_slice
+
+
+def _predictions_for_token_xyz(
+	predictions: NDArray[np.int16],
+	token_xyz: NDArray[np.int64],
+	*,
+	record: F3SliceSplitRecord,
+) -> NDArray[np.int16]:
+	if token_xyz.size == 0:
+		return np.empty((0,), dtype=np.int16)
+	_validate_token_xyz_in_prediction_grid(token_xyz, predictions.shape, record=record)
+	return np.asarray(
+		predictions[token_xyz[:, 0], token_xyz[:, 1], token_xyz[:, 2]],
+		dtype=np.int16,
+	)
+
+
+def _validate_token_xyz_in_prediction_grid(
+	token_xyz: NDArray[np.int64],
+	grid_shape: tuple[int, int, int],
+	*,
+	record: F3SliceSplitRecord,
+) -> None:
+	too_low = token_xyz < 0
+	too_high = token_xyz >= np.asarray(grid_shape, dtype=np.int64)
+	if not (np.any(too_low) or np.any(too_high)):
+		return
+	msg = (
+		'validation token dataset contains token_xyz outside prediction grid for '
+		f'{record.slice_type} {record.slice_index}; grid_shape={grid_shape!r}'
+	)
+	raise ValueError(msg)
 
 
 def _prediction_plane(
@@ -489,6 +591,11 @@ def _metadata_payload(  # noqa: PLR0913
 			'class_info': str(config.inputs.class_info),
 			'png_label_inventory': str(config.inputs.png_label_inventory),
 			'segy_geometry_json': str(config.inputs.segy_geometry_json),
+			'validation_tokens': (
+				None
+				if config.inputs.validation_tokens is None
+				else str(config.inputs.validation_tokens)
+			),
 			'source_label_segy': (
 				None
 				if config.inputs.source_label_segy is None

@@ -1,10 +1,11 @@
 # F3 Module Refactor Plan
 
 This document inventories the current F3 inspection, lithology probe, and
-baseline comparison modules and records the intended module map for a future
-refactor. The first implementation batch keeps CLI names, YAML keys, artifact
-paths, result publishing, and metric definitions stable while adding the initial
-shared IO and lithology token dataset modules behind compatibility imports.
+baseline comparison modules and records the module map for the staged refactor.
+The implemented batches keep CLI names, YAML keys, artifact paths, result
+publishing, and metric definitions stable while adding shared IO helpers, a
+shared lithology token dataset schema module, and a lithology report subpackage
+behind compatibility imports.
 
 The existing F3 label source policy remains unchanged. Teacher labels come from
 `f3_labels.sgy` / `f3_facies_labels.npy`, and class `0` remains a valid class,
@@ -13,10 +14,11 @@ not an unlabeled sentinel.
 ## Current F3 Module Structure
 
 Most legacy public F3 library modules remain directly under
-`src/seis_ssl_cluster/f3/`. The current batch also adds
-`src/seis_ssl_cluster/f3/io/` for shared label/SEGY/prepare-volume helpers and
+`src/seis_ssl_cluster/f3/`. The current implementation also includes
+`src/seis_ssl_cluster/f3/io/` for shared label/SEGY/prepare-volume helpers,
 `src/seis_ssl_cluster/f3/lithology/token_dataset.py` for the shared token NPZ
-schema. Legacy direct imports remain compatibility wrappers where code has moved.
+schema, and `src/seis_ssl_cluster/f3/lithology/report/` for report internals.
+Legacy direct imports remain compatibility wrappers where code has moved.
 The proc entrypoints in `proc/seis_ssl_cluster/*f3*.py` load existing YAML
 contracts and call the library API, mostly through the aggregate
 `seis_ssl_cluster.f3` import surface.
@@ -44,7 +46,7 @@ contracts and call the library API, mostly through the aggregate
 | `src/seis_ssl_cluster/f3/tokenization.py` | Preview and apply tokenization of label slices. | `F3TokenizationConfig`, `F3TokenizationFigureConfig`, `F3TokenizationOutputConfig`, `F3TokenizationOutputResult`, `F3TokenPlaneSpec`, `F3TokenizationAlignment`, `F3TokenizationSliceResult`, `F3TokenizationPreviewRecord`, `token_plane_spec`, `tokenize_label_slice`, `load_f3_label_consistency_alignments`, `write_f3_tokenization_preview_outputs`, `render_tokenization_summary_markdown`, `apply_tokenization_alignment`. | `f3.png_labels`, `f3.visualization`. | `src/seis_ssl_cluster/f3/inspection/tokenization_preview.py` for preview/reporting and `src/seis_ssl_cluster/f3/lithology/tokens.py` for shared token helpers. | Yes, if moved. |
 | `src/seis_ssl_cluster/f3/visualization.py` | Shared F3 visualization helpers for quicklook, label alignment, RGB conversion, and legends. | `F3QuicklookFigureConfig`, `F3QuicklookOutputConfig`, `F3DisplaySlice`, `F3ResolvedLineIndex`, `F3PngLabelAlignment`, `F3QuicklookResult`, `make_orthogonal_display_slice`, `make_teacher_seismic_display_slice`, `resolve_teacher_line_index`, `align_png_label_to_seismic_slice`, `class_id_image_to_rgb`, `facies_legend_labels`, `write_f3_quicklook_outputs`. | `f3.labels`, `f3.png_labels`, `f3.segy`. | `src/seis_ssl_cluster/f3/inspection/visualization.py`; shared palette helpers may stay package-level if lithology still imports them. | Yes, if moved. |
 
-### Initial Shared Modules Added In This Batch
+### Shared Modules Added By The Refactor
 
 | Module | Responsibility | Main public API | Compatibility |
 | --- | --- | --- | --- |
@@ -52,6 +54,7 @@ contracts and call the library API, mostly through the aggregate
 | `src/seis_ssl_cluster/f3/io/prepare_volume.py` | Shared F3 volume preparation implementation. | `prepare_f3_facies_volume`, `f3_prepare_volume_config_from_mapping`, `default_f3_prepare_outputs`, and prepare-volume dataclasses. | Re-exported by `src/seis_ssl_cluster/f3/prepare_volume.py`. |
 | `src/seis_ssl_cluster/f3/io/segy.py` | Shared SEGY path, cube-read, axis, and stats helpers plus the current SEGY inspection facade. | `find_f3_segy_paths`, `read_f3_segy_file`, `calculate_seismic_amplitude_stats`, `calculate_label_unique_values`, `inspect_f3_segy_files`, `write_f3_segy_inspection_outputs`. | Re-exported by `src/seis_ssl_cluster/f3/segy.py`; a later inspection/io split should move inspection-only rendering and output writing out of `io`. |
 | `src/seis_ssl_cluster/f3/lithology/token_dataset.py` | Shared token NPZ schema load/save/validation and feature replacement helpers. | `F3LithologyTokenDataset`, `load_f3_lithology_token_dataset`, `save_f3_lithology_token_dataset`, `validate_f3_lithology_token_dataset`, `replace_token_features`. | Re-exported through `seis_ssl_cluster.f3` and `seis_ssl_cluster.f3.lithology`. |
+| `src/seis_ssl_cluster/f3/lithology/report/` | Lithology report internals split by metrics loading, figure generation, Markdown rendering, comparison aggregation, and publishing. | Package facade exports `F3LithologyReportConfig`, `F3LithologyComparisonReportConfig`, `build_f3_lithology_report`, `build_f3_lithology_comparison_report`, publish configs/functions, figure style helpers, and Markdown rendering. | Re-exported by `src/seis_ssl_cluster/f3/lithology_report.py`; the aggregate `seis_ssl_cluster.f3` surface remains unchanged. |
 
 ### Proc Entrypoints
 
@@ -219,14 +222,14 @@ Do not run `tests/test_proc_dry_run.py`.
 For future module moves, add or update focused tests around the moved module and
 then run the relevant F3 tests for that workflow. Keep at least one import test
 for the old direct module path and one import/export test for
-`seis_ssl_cluster.f3`.
+`seis_ssl_cluster.f3`. The current compatibility test covers old direct imports
+for SEGY, PNG labels, consistency, lithology tokens, baseline features,
+lithology probe, and lithology report, plus the implemented new imports under
+`f3.io`, `f3.lithology.token_dataset`, and `f3.lithology.report`.
 
 ## Non-Goals
 
-- No additional module moves beyond the initial IO wrappers and shared token
-  dataset helper introduced by this batch.
 - No token dataset artifact format migration.
-- No lithology report split in this step.
 - No changes to existing CLI names, proc entrypoints, YAML files, artifact
   layout, result publishing, metric definitions, or report contents.
 - No change to F3 label source policy.

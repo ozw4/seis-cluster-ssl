@@ -135,6 +135,57 @@ def test_probe_metrics_feature_source_comes_from_token_dataset_metadata(
 	assert metrics['feature_source'] == _feature_source()
 
 
+def test_probe_metrics_feature_source_comes_from_token_npz_metadata(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'token_dataset'
+	input_dir.mkdir()
+	output_dir = tmp_path / 'probes' / 'linear_npz_feature_source_test'
+	train_features, train_labels = _train_arrays()
+	validation_features, validation_labels = _validation_arrays()
+	_write_tokens(
+		input_dir / 'train_tokens.npz',
+		train_features,
+		train_labels,
+		token_xyz_start=0,
+		metadata={'feature_source': _feature_source()},
+	)
+	_write_tokens(
+		input_dir / 'validation_tokens.npz',
+		validation_features,
+		validation_labels,
+		token_xyz_start=10_000,
+		metadata={'feature_source': _feature_source()},
+	)
+	config = F3LithologyProbeConfig(
+		inputs=F3LithologyProbeInputs(
+			train_tokens=input_dir / 'train_tokens.npz',
+			validation_tokens=input_dir / 'validation_tokens.npz',
+		),
+		outputs=F3LithologyProbeOutputs(output_dir=output_dir),
+		classes=_classes(),
+		probe=F3LithologyProbeSettings(
+			spec='linear_npz_feature_source_test',
+			probe_type='logistic_regression',
+			max_iter=500,
+			random_state=7,
+		),
+		dataset={'name': 'synthetic_f3'},
+		model={'tag': 'synthetic_encoder', 'freeze_encoder': True},
+		embeddings={'spec': 'synthetic_tokens'},
+		labels={'set': 'synthetic_labels'},
+		token_dataset={'input_dir': str(input_dir)},
+		lithology={'root': str(tmp_path)},
+	)
+
+	result = train_and_evaluate_f3_lithology_probe(config)
+
+	resolved = json.loads(result.config_json.read_text(encoding='utf-8'))
+	metrics = json.loads(result.metrics_json.read_text(encoding='utf-8'))
+	assert resolved['feature_source'] == _feature_source()
+	assert metrics['feature_source'] == _feature_source()
+
+
 def test_lithology_metrics_compute_iou_and_confusion_matrix() -> None:
 	metrics = compute_lithology_metrics(
 		np.asarray([0, 0, 1, 1, 5, 5]),
@@ -318,28 +369,31 @@ def _write_tokens(
 	labels: np.ndarray,
 	*,
 	token_xyz_start: int,
+	metadata: dict[str, object] | None = None,
 ) -> None:
 	count = int(labels.shape[0])
 	token_indices = np.arange(token_xyz_start, token_xyz_start + count, dtype=np.int64)
-	np.savez_compressed(
-		path,
-		features=features,
-		labels=labels,
-		survey_id=np.asarray(['f3_facies_benchmark'] * count),
-		split=np.asarray(['train'] * count),
-		slice_type=np.asarray(['inline'] * count),
-		slice_index=np.arange(count, dtype=np.int64),
-		token_xyz=np.column_stack(
+	arrays = {
+		'features': features,
+		'labels': labels,
+		'survey_id': np.asarray(['f3_facies_benchmark'] * count),
+		'split': np.asarray(['train'] * count),
+		'slice_type': np.asarray(['inline'] * count),
+		'slice_index': np.arange(count, dtype=np.int64),
+		'token_xyz': np.column_stack(
 			(
 				token_indices,
 				np.zeros(count, dtype=np.int64),
 				np.zeros(count, dtype=np.int64),
 			),
 		),
-		voxel_center_xyz=np.zeros((count, 3), dtype=np.float32),
-		majority_fraction=np.ones(count, dtype=np.float32),
-		labeled_fraction=np.ones(count, dtype=np.float32),
-	)
+		'voxel_center_xyz': np.zeros((count, 3), dtype=np.float32),
+		'majority_fraction': np.ones(count, dtype=np.float32),
+		'labeled_fraction': np.ones(count, dtype=np.float32),
+	}
+	if metadata is not None:
+		arrays['metadata'] = np.asarray(json.dumps(metadata, sort_keys=True))
+	np.savez_compressed(path, **arrays)
 
 
 def _classes() -> tuple[F3ClassInfo, ...]:

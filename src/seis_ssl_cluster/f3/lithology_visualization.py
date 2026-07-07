@@ -6,10 +6,15 @@ import csv
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from seis_ssl_cluster.f3.lithology.token_dataset import (
+	F3LithologyTokenDataset,
+	load_f3_lithology_token_dataset,
+)
 from seis_ssl_cluster.f3.lithology_tokens import read_f3_lithology_class_info
 from seis_ssl_cluster.f3.metrics import compute_lithology_metrics
 from seis_ssl_cluster.f3.splits import (
@@ -22,8 +27,6 @@ from seis_ssl_cluster.f3.splits import (
 from seis_ssl_cluster.f3.visualization import class_id_image_to_rgb
 
 if TYPE_CHECKING:
-	from pathlib import Path
-
 	from numpy.typing import NDArray
 
 	from seis_ssl_cluster.f3.labels import F3ClassInfo
@@ -186,6 +189,7 @@ def visualize_f3_lithology_predictions(
 	predictions = np.load(config.inputs.token_predictions, mmap_mode='r')
 	probabilities = np.load(config.inputs.probability_volume, mmap_mode='r')
 	metadata = _read_json(config.inputs.prediction_metadata_json)
+	validation_tokens = _load_prediction_validation_token_dataset(metadata)
 	metrics_by_slice = _read_validation_metrics(
 		config.inputs.validation_slice_metrics_csv,
 	)
@@ -276,7 +280,12 @@ def visualize_f3_lithology_predictions(
 
 	_write_json(
 		config.outputs.metadata_json,
-		_summary_payload(config, prediction_metadata=metadata, entries=entries),
+		_summary_payload(
+			config,
+			prediction_metadata=metadata,
+			validation_tokens=validation_tokens,
+			entries=entries,
+		),
 	)
 	return F3LithologyVisualizationResult(
 		png_paths=tuple(png_paths),
@@ -674,6 +683,7 @@ def _summary_payload(
 	config: F3LithologyVisualizationConfig,
 	*,
 	prediction_metadata: Mapping[str, object],
+	validation_tokens: F3LithologyTokenDataset | None,
 	entries: Sequence[Mapping[str, object]],
 ) -> dict[str, object]:
 	return {
@@ -687,12 +697,33 @@ def _summary_payload(
 		'figure_config': config.figure.to_dict(),
 		'prediction_metadata_json': str(config.inputs.prediction_metadata_json),
 		'prediction_summary': prediction_metadata.get('summary'),
+		'validation_token_dataset': _validation_token_dataset_summary(
+			validation_tokens,
+		),
 		'outputs': {
 			'output_dir': str(config.outputs.output_dir),
 			'selected_slices_dir': str(config.outputs.selected_slices_dir),
 			'metadata_json': str(config.outputs.metadata_json),
 		},
 		'figures': list(entries),
+	}
+
+
+def _validation_token_dataset_summary(
+	dataset: F3LithologyTokenDataset | None,
+) -> dict[str, object] | None:
+	if dataset is None:
+		return None
+	labels, counts = np.unique(
+		np.asarray(dataset.labels, dtype=np.int64),
+		return_counts=True,
+	)
+	return {
+		'token_count': dataset.count,
+		'class_counts': {
+			int(label): int(count)
+			for label, count in zip(labels, counts, strict=True)
+		},
 	}
 
 
@@ -864,6 +895,21 @@ def _read_validation_metrics(
 		(row['slice_type'], int(row['slice_index'])): dict(row)
 		for row in rows
 	}
+
+
+def _load_prediction_validation_token_dataset(
+	prediction_metadata: Mapping[str, object],
+) -> F3LithologyTokenDataset | None:
+	inputs = prediction_metadata.get('inputs')
+	if not isinstance(inputs, Mapping):
+		return None
+	value = inputs.get('validation_tokens')
+	if not isinstance(value, str) or not value:
+		return None
+	path = Path(value)
+	if not path.is_file():
+		return None
+	return load_f3_lithology_token_dataset(path)
 
 
 def _read_json(path: Path) -> Mapping[str, Any]:

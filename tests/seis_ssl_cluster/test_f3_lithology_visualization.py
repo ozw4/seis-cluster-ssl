@@ -16,6 +16,7 @@ from seis_ssl_cluster.f3 import (
 	visualize_f3_lithology_predictions,
 )
 from tests.seis_ssl_cluster.test_f3_lithology_prediction import (
+	_write_validation_tokens,
 	write_prediction_fixture,
 )
 
@@ -28,6 +29,17 @@ def test_visualize_f3_lithology_predictions_writes_png_sidecars_and_metadata(
 ) -> None:
 	pytest.importorskip('matplotlib.pyplot')
 	prediction_config = write_prediction_fixture(tmp_path)
+	validation_tokens = prediction_config.outputs.output_dir.parent / (
+		'validation_tokens.npz'
+	)
+	_write_validation_tokens(validation_tokens)
+	prediction_config = replace(
+		prediction_config,
+		inputs=replace(
+			prediction_config.inputs,
+			validation_tokens=validation_tokens,
+		),
+	)
 	prediction_result = predict_f3_lithology_tokens(prediction_config)
 	predictions = np.load(prediction_result.token_predictions)
 	probabilities = np.load(prediction_result.probability_volume)
@@ -128,7 +140,82 @@ def test_visualize_f3_lithology_predictions_writes_png_sidecars_and_metadata(
 	assert selected_sidecar['voxel_projection_metrics']['weighted_f1'] is None
 	assert selected_sidecar['voxel_projection_metrics']['mean_iou'] is None
 	assert metadata['artifact_type'] == 'f3_lithology_prediction_visualizations'
+	assert metadata['validation_token_dataset'] == {
+		'token_count': 7,
+		'class_counts': {'0': 1, '1': 4, '2': 2},
+	}
 	assert metadata['figures'][0]['group'] == 'validation'
+
+
+def test_visualize_f3_lithology_predictions_allows_missing_validation_tokens(
+	tmp_path: Path,
+) -> None:
+	pytest.importorskip('matplotlib.pyplot')
+	prediction_config = write_prediction_fixture(tmp_path)
+	validation_tokens = prediction_config.outputs.output_dir.parent / (
+		'validation_tokens.npz'
+	)
+	_write_validation_tokens(validation_tokens)
+	prediction_config = replace(
+		prediction_config,
+		inputs=replace(
+			prediction_config.inputs,
+			validation_tokens=validation_tokens,
+		),
+	)
+	prediction_result = predict_f3_lithology_tokens(prediction_config)
+	validation_tokens.unlink()
+	seismic_path = prediction_config.inputs.label_volume.with_name('f3_seismic.npy')
+	np.save(
+		seismic_path,
+		np.arange(4 * 4 * 4, dtype=np.float32).reshape(4, 4, 4),
+	)
+	visualization_config = F3LithologyVisualizationConfig(
+		inputs=F3LithologyVisualizationInputs(
+			seismic_volume=seismic_path,
+			label_volume=prediction_config.inputs.label_volume,
+			class_info=prediction_config.inputs.class_info,
+			png_label_inventory=prediction_config.inputs.png_label_inventory,
+			segy_geometry_json=prediction_config.inputs.segy_geometry_json,
+			token_predictions=prediction_result.token_predictions,
+			probability_volume=prediction_result.probability_volume,
+			prediction_metadata_json=prediction_result.metadata_json,
+			validation_slice_metrics_csv=(
+				prediction_result.validation_slice_metrics_csv
+			),
+		),
+		outputs=F3LithologyVisualizationOutputs(
+			output_dir=(
+				prediction_config.outputs.output_dir.parent
+				/ 'visualizations_missing_tokens'
+			),
+			metadata_json=(
+				prediction_config.outputs.output_dir.parent
+				/ 'visualizations_missing_tokens'
+				/ 'metadata.json'
+			),
+			selected_slices_dir=(
+				prediction_config.outputs.output_dir.parent
+				/ 'visualizations_missing_tokens'
+				/ 'selected_slices'
+			),
+		),
+		classes=prediction_config.classes,
+		dataset=prediction_config.dataset,
+		model=prediction_config.model,
+		labels=prediction_config.labels,
+		lithology=prediction_config.lithology,
+		probe=prediction_config.probe,
+		predictions={'input_dir': str(prediction_config.outputs.output_dir)},
+		selected_slices={'inline': (), 'crossline': (), 'z': ()},
+		figure=F3LithologyVisualizationFigureConfig(dpi=40),
+	)
+
+	result = visualize_f3_lithology_predictions(visualization_config)
+
+	metadata = json.loads(result.metadata_json.read_text(encoding='utf-8'))
+	assert metadata['validation_token_dataset'] is None
+	assert len(result.png_paths) == 2
 
 
 def test_visualize_f3_lithology_predictions_requires_loaded_classes(
