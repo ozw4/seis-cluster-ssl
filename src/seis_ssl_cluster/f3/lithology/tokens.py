@@ -37,7 +37,9 @@ from seis_ssl_cluster.f3.tokenization import (
 	F3TokenizationSliceResult,
 	tokenize_label_slice,
 )
-from seis_ssl_cluster.f3.visualization import class_id_image_to_rgb
+from seis_ssl_cluster.visualization.facies import label_imshow
+from seis_ssl_cluster.visualization.seismic import amplitude_clip_limits, seismic_imshow
+from seis_ssl_cluster.visualization.style import aspect_for_view, origin_for_view
 
 if TYPE_CHECKING:
 	from numpy.typing import NDArray
@@ -1513,34 +1515,36 @@ def _save_token_quicklook(  # noqa: PLR0913
 	retained = _expanded_token_values(result).T
 	dropped = _expanded_token_mask(~result.usable_mask, result).T
 	clip_low, clip_high = _amplitude_clip(seismic)
+	view = result.record.slice_type
 	fig, axes = plt.subplots(1, 4, figsize=(13.6, 4.0), dpi=dpi, sharey=True)
-	axes[0].imshow(
+	seismic_imshow(
+		axes[0],
 		seismic,
-		cmap='gray',
+		view=view,
+		constant_policy='unit',
+		constant_tolerance='exact',
 		vmin=clip_low,
 		vmax=clip_high,
-		origin='upper',
-		aspect='auto',
 	)
 	axes[0].set_title('seismic')
-	axes[1].imshow(
-		class_id_image_to_rgb(dense_label, classes, invalid_rgb=_INVALID_LABEL_RGB),
-		origin='upper',
-		aspect='auto',
-		interpolation='nearest',
+	label_imshow(
+		axes[1],
+		dense_label,
+		classes=classes,
+		view=view,
 	)
 	axes[1].set_title('dense label')
-	axes[2].imshow(
-		class_id_image_to_rgb(retained, classes, invalid_rgb=_INVALID_LABEL_RGB),
-		origin='upper',
-		aspect='auto',
-		interpolation='nearest',
+	label_imshow(
+		axes[2],
+		retained,
+		classes=classes,
+		view=view,
 	)
 	axes[2].set_title('retained token labels')
 	axes[3].imshow(
 		_binary_mask_rgb(dropped, true_rgb=_DROPPED_RGB),
-		origin='upper',
-		aspect='auto',
+		origin=origin_for_view(view),
+		aspect=aspect_for_view(view),
 		interpolation='nearest',
 	)
 	axes[3].set_title('dropped/ambiguous')
@@ -1632,14 +1636,16 @@ def _configure_axes(ax: object, result: F3SliceTokenization) -> None:
 
 
 def _amplitude_clip(values: NDArray[np.generic]) -> tuple[float, float]:
-	array = np.asarray(values, dtype=np.float32)
-	finite = array[np.isfinite(array)]
-	if finite.size == 0:
-		return 0.0, 1.0
-	low, high = np.percentile(finite, [1.0, 99.0])
-	if float(low) == float(high):
-		return float(low) - 1.0, float(high) + 1.0
-	return float(low), float(high)
+	low, high = amplitude_clip_limits(
+		np.asarray(values, dtype=np.float32),
+		clip_percentiles=(1.0, 99.0),
+		constant_policy='unit',
+		constant_tolerance='exact',
+	)
+	if low is None or high is None:
+		msg = 'F3 lithology token quicklook amplitude clip must be finite'
+		raise ValueError(msg)
+	return low, high
 
 
 def _binary_mask_rgb(

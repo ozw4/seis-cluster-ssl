@@ -19,7 +19,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_validate_artifact_or_f3_source_path,
 	_validate_frozen_encoder,
 )
-from seis_ssl_cluster.f3 import (
+from seis_ssl_cluster.f3.lithology.visualization import (
 	F3LithologyVisualizationConfig,
 	F3LithologyVisualizationFigureConfig,
 	F3LithologyVisualizationInputs,

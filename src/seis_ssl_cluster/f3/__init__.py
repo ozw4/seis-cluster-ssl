@@ -122,7 +122,7 @@ from seis_ssl_cluster.f3.lithology.tokens import (
 	tokenize_f3_lithology_slice,
 	write_f3_lithology_token_quicklooks,
 )
-from seis_ssl_cluster.f3.lithology_visualization import (
+from seis_ssl_cluster.f3.lithology.visualization import (
 	F3LithologySliceFigure,
 	F3LithologyVisualizationConfig,
 	F3LithologyVisualizationFigureConfig,
