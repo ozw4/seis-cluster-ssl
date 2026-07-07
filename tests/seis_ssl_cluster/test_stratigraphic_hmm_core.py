@@ -11,6 +11,12 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	stratigraphic_hmm_settings_from_config,
 	viterbi_decode_costs,
 )
+from seis_ssl_cluster.clustering.writer import write_json
+
+
+def test_write_json_rejects_non_finite_floats(tmp_path) -> None:
+	with pytest.raises(ValueError, match='Out of range'):
+		write_json(tmp_path / 'metadata.json', {'x': float('inf')})
 
 
 def test_build_ordered_transition_costs_forbids_reverse_transitions() -> None:

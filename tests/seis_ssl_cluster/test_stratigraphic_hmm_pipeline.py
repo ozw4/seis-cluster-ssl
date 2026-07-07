@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+import joblib
 import numpy as np
 
 from seis_ssl_cluster.clustering import run_embedding_clustering
@@ -310,6 +311,41 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 	assert sum(label_metadata['cluster_counts'].values()) == int(
 		np.count_nonzero(valid_a),
 	)
+
+
+def test_stratigraphic_hmm_metadata_is_strict_json_safe(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.zeros((2, 2, 6, 2), dtype=np.float32),
+		valid=np.ones((2, 2, 6), dtype=np.bool_),
+	)
+
+	run_embedding_clustering(
+		_hmm_config(input_dir, output_dir, emission_source='z_coordinate'),
+	)
+
+	k_dir = output_dir / 'models' / 'k3'
+	metadata_paths = [
+		k_dir / 'clustering_metadata.json',
+		output_dir / 'labels' / 'k3' / 'survey_a.cluster_label_metadata.json',
+	]
+	for metadata_path in metadata_paths:
+		text = metadata_path.read_text(encoding='utf-8')
+		assert 'Infinity' not in text
+		assert '-Infinity' not in text
+		assert 'NaN' not in text
+		json.loads(text)
+
+	metadata = json.loads((k_dir / 'clustering_metadata.json').read_text())
+	assert metadata['stratigraphic_hmm']['transition_costs'][1][0] is None
+	model = joblib.load(k_dir / 'hmm_model.joblib')
+	assert np.isinf(model['transition_costs'][1, 0])
 
 
 def test_run_embedding_clustering_stratigraphic_hmm_zonly_writes_metadata(

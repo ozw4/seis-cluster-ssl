@@ -897,11 +897,22 @@ def _hmm_metadata(
 		'z_axis': hmm_settings.z_axis,
 		'z_direction': hmm_settings.z_direction,
 		'transition': asdict(hmm_settings.transition),
-		'transition_costs': np.asarray(transition_costs, dtype=np.float32).tolist(),
+		'transition_costs': _json_safe_transition_costs(transition_costs),
 		'init': {'order_by': hmm_settings.init_order_by},
 		'update': {'empty_cluster_policy': hmm_settings.empty_cluster_policy},
 		'iteration_summaries': iteration_summaries,
 	}
+
+
+def _json_safe_transition_costs(costs: np.ndarray) -> list[list[float | None]]:
+	matrix = np.asarray(costs, dtype=np.float32)
+	if matrix.ndim != 2:
+		msg = f'transition_costs must be 2D; got shape {matrix.shape!r}'
+		raise ValueError(msg)
+	return [
+		[None if not np.isfinite(value) else float(value) for value in row]
+		for row in matrix
+	]
 
 
 def _emission_feature_metadata(emission_source: str) -> dict[str, object]:
