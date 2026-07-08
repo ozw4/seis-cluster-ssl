@@ -31,6 +31,97 @@ def test_stratigraphic_hmm_clustering_config_resolves() -> None:
 
 	assert resolved['clustering']['method'] == 'stratigraphic_hmm_kmeans'
 	assert resolved['clustering']['stratigraphic_hmm']['z_axis'] == 2
+	assert 'edge_margin_tokens' not in resolved['clustering']['stratigraphic_hmm']
+	assert 'path_prior' not in resolved['clustering']['stratigraphic_hmm']
+
+
+def test_stratigraphic_hmm_clustering_config_accepts_edge_margin_tokens() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	cfg['clustering']['stratigraphic_hmm'] = _stratigraphic_hmm_config()
+	cfg['clustering']['stratigraphic_hmm']['edge_margin_tokens'] = [8, 8, 0]
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['stratigraphic_hmm']['edge_margin_tokens'] == [
+		8,
+		8,
+		0,
+	]
+
+
+@pytest.mark.parametrize(
+	'value',
+	[
+		[8, 8],
+		[8, -1, 0],
+		[8, True, 0],
+		[8, 2.5, 0],
+	],
+)
+def test_stratigraphic_hmm_clustering_config_rejects_invalid_edge_margin_tokens(
+	value: object,
+) -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	cfg['clustering']['stratigraphic_hmm'] = _stratigraphic_hmm_config()
+	cfg['clustering']['stratigraphic_hmm']['edge_margin_tokens'] = value
+
+	with pytest.raises(ValueError, match='edge_margin_tokens'):
+		resolve_clustering_config(cfg)
+
+
+def test_stratigraphic_hmm_clustering_config_accepts_enabled_path_prior() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	cfg['clustering']['stratigraphic_hmm'] = _stratigraphic_hmm_config()
+	cfg['clustering']['stratigraphic_hmm']['path_prior'] = _path_prior_config()
+
+	resolved = resolve_clustering_config(cfg)
+
+	path_prior = resolved['clustering']['stratigraphic_hmm']['path_prior']
+	assert path_prior['enabled'] is True
+	assert path_prior['initial_state']['mode'] == 'shallow_anchor'
+
+
+def test_stratigraphic_hmm_clustering_config_accepts_disabled_path_prior() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	cfg['clustering']['stratigraphic_hmm'] = _stratigraphic_hmm_config()
+	cfg['clustering']['stratigraphic_hmm']['path_prior'] = {'enabled': False}
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['stratigraphic_hmm']['path_prior'] == {
+		'enabled': False,
+	}
+
+
+@pytest.mark.parametrize(
+	('path', 'value', 'message'),
+	[
+		(('initial_state', 'extra'), 1, 'extra'),
+		(('initial_state', 'mode'), 'deep_anchor', 'initial_state.mode'),
+		(('terminal_state', 'mode'), 'shallow_anchor', 'terminal_state.mode'),
+		(('terminal_state', 'weight'), -0.1, 'terminal_state.weight'),
+		(('expected_boundaries', 'target'), 0, 'expected_boundaries.target'),
+	],
+)
+def test_stratigraphic_hmm_clustering_config_rejects_invalid_path_prior(
+	path: tuple[str, ...],
+	value: object,
+	message: str,
+) -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	hmm = _stratigraphic_hmm_config()
+	path_prior = _path_prior_config()
+	_set_nested(path_prior, path, value)
+	hmm['path_prior'] = path_prior
+	cfg['clustering']['stratigraphic_hmm'] = hmm
+
+	with pytest.raises(ValueError, match=message):
+		resolve_clustering_config(cfg)
 
 
 def test_stratigraphic_hmm_clustering_config_allows_default_emission_source() -> None:
@@ -233,6 +324,25 @@ def _stratigraphic_hmm_config() -> dict[str, object]:
 		},
 		'init': {'order_by': 'mean_z'},
 		'update': {'empty_cluster_policy': 'keep_previous'},
+	}
+
+
+def _path_prior_config() -> dict[str, object]:
+	return {
+		'enabled': True,
+		'initial_state': {
+			'mode': 'shallow_anchor',
+			'weight': 0.5,
+		},
+		'terminal_state': {
+			'mode': 'deep_anchor',
+			'weight': 0.5,
+		},
+		'expected_boundaries': {
+			'enabled': False,
+			'target': 'auto_k_minus_1',
+			'weight': 0.1,
+		},
 	}
 
 

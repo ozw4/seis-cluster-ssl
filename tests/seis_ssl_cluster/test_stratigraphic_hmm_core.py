@@ -4,6 +4,9 @@ import numpy as np
 import pytest
 
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
+	HMMAnchorPriorSettings,
+	HMMExpectedBoundariesSettings,
+	HMMPathPriorSettings,
 	HMMTransitionSettings,
 	build_ordered_transition_costs,
 	decode_trace_segments,
@@ -172,27 +175,7 @@ def test_decode_trace_segments_returns_invalid_labels_when_no_valid_tokens() -> 
 
 
 def test_stratigraphic_hmm_settings_from_config_parses_resolved_config() -> None:
-	settings = stratigraphic_hmm_settings_from_config(
-		{
-			'clustering': {
-				'stratigraphic_hmm': {
-					'iterations': 3,
-					'z_axis': 2,
-					'z_direction': 'increasing_downward',
-					'transition': {
-						'same_cost': 0.0,
-						'advance_cost': 0.25,
-						'jump_cost': 1.0,
-						'reverse_cost': 1000000.0,
-						'forbid_reverse': True,
-						'max_jump': None,
-					},
-					'init': {'order_by': 'mean_z'},
-					'update': {'empty_cluster_policy': 'keep_previous'},
-				},
-			},
-		},
-	)
+	settings = stratigraphic_hmm_settings_from_config(_hmm_settings_config())
 
 	assert settings.iterations == 3
 	assert settings.z_axis == 2
@@ -201,6 +184,47 @@ def test_stratigraphic_hmm_settings_from_config_parses_resolved_config() -> None
 	assert settings.transition.max_jump is None
 	assert settings.init_order_by == 'mean_z'
 	assert settings.empty_cluster_policy == 'keep_previous'
+	assert settings.edge_margin_tokens == (0, 0, 0)
+	assert settings.path_prior == HMMPathPriorSettings(
+		enabled=False,
+		initial_state=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		terminal_state=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		expected_boundaries=HMMExpectedBoundariesSettings(
+			enabled=False,
+			target='auto_k_minus_1',
+			weight=0.0,
+		),
+	)
+
+
+def test_stratigraphic_hmm_settings_from_config_preserves_path_prior() -> None:
+	cfg = _hmm_settings_config()
+	hmm = cfg['clustering']['stratigraphic_hmm']
+	hmm['edge_margin_tokens'] = [8, 8, 0]
+	hmm['path_prior'] = {
+		'enabled': True,
+		'initial_state': {'mode': 'shallow_anchor', 'weight': 0.5},
+		'terminal_state': {'mode': 'deep_anchor', 'weight': 0.25},
+		'expected_boundaries': {
+			'enabled': True,
+			'target': 3,
+			'weight': 0.1,
+		},
+	}
+
+	settings = stratigraphic_hmm_settings_from_config(cfg)
+
+	assert settings.edge_margin_tokens == (8, 8, 0)
+	assert settings.path_prior == HMMPathPriorSettings(
+		enabled=True,
+		initial_state=HMMAnchorPriorSettings(mode='shallow_anchor', weight=0.5),
+		terminal_state=HMMAnchorPriorSettings(mode='deep_anchor', weight=0.25),
+		expected_boundaries=HMMExpectedBoundariesSettings(
+			enabled=True,
+			target=3,
+			weight=0.1,
+		),
+	)
 
 
 @pytest.mark.parametrize(
@@ -235,3 +259,25 @@ def test_decode_trace_segments_rejects_invalid_mask_shape() -> None:
 			np.ones((2, 1), dtype=np.bool_),
 			np.zeros((2, 2), dtype=np.float32),
 		)
+
+
+def _hmm_settings_config() -> dict[str, object]:
+	return {
+		'clustering': {
+			'stratigraphic_hmm': {
+				'iterations': 3,
+				'z_axis': 2,
+				'z_direction': 'increasing_downward',
+				'transition': {
+					'same_cost': 0.0,
+					'advance_cost': 0.25,
+					'jump_cost': 1.0,
+					'reverse_cost': 1000000.0,
+					'forbid_reverse': True,
+					'max_jump': None,
+				},
+				'init': {'order_by': 'mean_z'},
+				'update': {'empty_cluster_policy': 'keep_previous'},
+			},
+		},
+	}

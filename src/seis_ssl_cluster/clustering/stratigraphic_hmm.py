@@ -64,6 +64,33 @@ class HMMTransitionSettings:
 
 
 @dataclass(frozen=True)
+class HMMAnchorPriorSettings:
+	"""Path-prior anchor settings for one endpoint."""
+
+	mode: str
+	weight: float
+
+
+@dataclass(frozen=True)
+class HMMExpectedBoundariesSettings:
+	"""Path-prior expected boundary count settings."""
+
+	enabled: bool
+	target: str | int
+	weight: float
+
+
+@dataclass(frozen=True)
+class HMMPathPriorSettings:
+	"""Optional path-prior settings for future HMM decoding."""
+
+	enabled: bool
+	initial_state: HMMAnchorPriorSettings
+	terminal_state: HMMAnchorPriorSettings
+	expected_boundaries: HMMExpectedBoundariesSettings
+
+
+@dataclass(frozen=True)
 class StratigraphicHMMSettings:
 	"""Validated stratigraphic HMM backend settings."""
 
@@ -74,6 +101,8 @@ class StratigraphicHMMSettings:
 	transition: HMMTransitionSettings
 	init_order_by: str
 	empty_cluster_policy: str
+	edge_margin_tokens: tuple[int, int, int]
+	path_prior: HMMPathPriorSettings
 
 
 def stratigraphic_hmm_settings_from_config(
@@ -85,6 +114,7 @@ def stratigraphic_hmm_settings_from_config(
 	transition = _required_mapping(hmm, 'transition')
 	init = _required_mapping(hmm, 'init')
 	update = _required_mapping(hmm, 'update')
+	path_prior = _path_prior_settings_from_hmm_config(hmm)
 	return StratigraphicHMMSettings(
 		emission_source=str(hmm.get('emission_source', 'embedding')),
 		iterations=int(hmm['iterations']),
@@ -102,6 +132,109 @@ def stratigraphic_hmm_settings_from_config(
 		),
 		init_order_by=str(init['order_by']),
 		empty_cluster_policy=str(update['empty_cluster_policy']),
+		edge_margin_tokens=_edge_margin_tokens_from_hmm_config(hmm),
+		path_prior=path_prior,
+	)
+
+
+def _edge_margin_tokens_from_hmm_config(
+	hmm: Mapping[str, object],
+) -> tuple[int, int, int]:
+	value = hmm.get('edge_margin_tokens', (0, 0, 0))
+	return (int(value[0]), int(value[1]), int(value[2]))  # type: ignore[index]
+
+
+def _path_prior_settings_from_hmm_config(
+	hmm: Mapping[str, object],
+) -> HMMPathPriorSettings:
+	if 'path_prior' not in hmm:
+		return _disabled_path_prior_settings()
+	path_prior = _required_mapping(hmm, 'path_prior')
+	if not bool(path_prior['enabled']):
+		return HMMPathPriorSettings(
+			enabled=False,
+			initial_state=_anchor_prior_settings_from_config(
+				path_prior,
+				'initial_state',
+				default=HMMAnchorPriorSettings(mode='none', weight=0.0),
+			),
+			terminal_state=_anchor_prior_settings_from_config(
+				path_prior,
+				'terminal_state',
+				default=HMMAnchorPriorSettings(mode='none', weight=0.0),
+			),
+			expected_boundaries=_expected_boundaries_settings_from_config(
+				path_prior,
+				default=HMMExpectedBoundariesSettings(
+					enabled=False,
+					target='auto_k_minus_1',
+					weight=0.0,
+				),
+			),
+		)
+	return HMMPathPriorSettings(
+		enabled=True,
+		initial_state=_anchor_prior_settings_from_config(
+			path_prior,
+			'initial_state',
+			default=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		),
+		terminal_state=_anchor_prior_settings_from_config(
+			path_prior,
+			'terminal_state',
+			default=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		),
+		expected_boundaries=_expected_boundaries_settings_from_config(
+			path_prior,
+			default=HMMExpectedBoundariesSettings(
+				enabled=False,
+				target='auto_k_minus_1',
+				weight=0.0,
+			),
+		),
+	)
+
+
+def _disabled_path_prior_settings() -> HMMPathPriorSettings:
+	return HMMPathPriorSettings(
+		enabled=False,
+		initial_state=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		terminal_state=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		expected_boundaries=HMMExpectedBoundariesSettings(
+			enabled=False,
+			target='auto_k_minus_1',
+			weight=0.0,
+		),
+	)
+
+
+def _anchor_prior_settings_from_config(
+	path_prior: Mapping[str, object],
+	key: str,
+	*,
+	default: HMMAnchorPriorSettings,
+) -> HMMAnchorPriorSettings:
+	if key not in path_prior:
+		return default
+	anchor = _required_mapping(path_prior, key)
+	return HMMAnchorPriorSettings(
+		mode=str(anchor['mode']),
+		weight=float(anchor['weight']),
+	)
+
+
+def _expected_boundaries_settings_from_config(
+	path_prior: Mapping[str, object],
+	*,
+	default: HMMExpectedBoundariesSettings,
+) -> HMMExpectedBoundariesSettings:
+	if 'expected_boundaries' not in path_prior:
+		return default
+	boundaries = _required_mapping(path_prior, 'expected_boundaries')
+	return HMMExpectedBoundariesSettings(
+		enabled=bool(boundaries['enabled']),
+		target=boundaries.get('target', default.target),
+		weight=float(boundaries.get('weight', default.weight)),
 	)
 
 
@@ -726,6 +859,8 @@ def run_stratigraphic_hmm_clustering(
 				'emission_source': hmm_settings.emission_source,
 				'centers': centers,
 				'transition_settings': asdict(hmm_settings.transition),
+				'edge_margin_tokens': hmm_settings.edge_margin_tokens,
+				'path_prior': asdict(hmm_settings.path_prior),
 				'transition_costs': transition_costs,
 				'iteration_count': hmm_settings.iterations,
 				'iteration_summaries': iteration_summaries,
@@ -908,6 +1043,8 @@ def _hmm_metadata(
 		'transition_costs': _json_safe_transition_costs(transition_costs),
 		'init': {'order_by': hmm_settings.init_order_by},
 		'update': {'empty_cluster_policy': hmm_settings.empty_cluster_policy},
+		'edge_margin_tokens': list(hmm_settings.edge_margin_tokens),
+		'path_prior': asdict(hmm_settings.path_prior),
 		'iteration_summaries': iteration_summaries,
 	}
 
@@ -1001,6 +1138,9 @@ def _transformed_feature_dim(
 
 
 __all__ = [
+	'HMMAnchorPriorSettings',
+	'HMMExpectedBoundariesSettings',
+	'HMMPathPriorSettings',
 	'HMMTransitionSettings',
 	'StratigraphicHMMSettings',
 	'build_ordered_transition_costs',
