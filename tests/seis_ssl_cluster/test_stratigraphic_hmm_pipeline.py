@@ -445,6 +445,7 @@ def test_run_embedding_clustering_stratigraphic_hmm_path_prior_metadata(
 		'enabled': False,
 		'target': 'auto_k_minus_1',
 		'weight': 0.1,
+		'target_resolution': 'per_trace_min_target_valid_length_minus_one',
 	}
 	np.testing.assert_allclose(path_prior['initial_state_costs'], [0.0, 0.25, 0.5])
 	np.testing.assert_allclose(path_prior['terminal_state_costs'], [0.5, 0.25, 0.0])
@@ -453,6 +454,76 @@ def test_run_embedding_clustering_stratigraphic_hmm_path_prior_metadata(
 	assert (
 		metadata['ordered_diagnostics']['aggregate']['reverse_transition_rate'] == 0.0
 	)
+
+
+def test_run_embedding_clustering_expected_boundary_prior_increases_boundaries(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	no_prior_output = tmp_path / 'clusters_no_prior'
+	prior_output = tmp_path / 'clusters_prior'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.zeros((2, 2, 6, 2), dtype=np.float32),
+		valid=np.ones((2, 2, 6), dtype=np.bool_),
+	)
+	no_prior_config = _hmm_config(
+		input_dir,
+		no_prior_output,
+		emission_source='z_coordinate',
+	)
+	prior_config = _hmm_config(
+		input_dir,
+		prior_output,
+		emission_source='z_coordinate',
+	)
+	for config in (no_prior_config, prior_config):
+		config['clustering']['sample_tokens'] = 24
+		config['clustering']['minibatch_size'] = 24
+		hmm_config = config['clustering']['stratigraphic_hmm']
+		hmm_config['iterations'] = 1
+		hmm_config['transition']['advance_cost'] = 5.0
+		hmm_config['transition']['jump_cost'] = 10.0
+	prior_config['clustering']['stratigraphic_hmm']['path_prior'] = {
+		'enabled': True,
+		'initial_state': {'mode': 'none', 'weight': 0.0},
+		'terminal_state': {'mode': 'none', 'weight': 0.0},
+		'expected_boundaries': {
+			'enabled': True,
+			'target': 'auto_k_minus_1',
+			'weight': 50.0,
+		},
+	}
+
+	run_embedding_clustering(no_prior_config)
+	run_embedding_clustering(prior_config)
+
+	no_prior_metadata = json.loads(
+		(no_prior_output / 'models' / 'k3' / 'clustering_metadata.json').read_text(),
+	)
+	prior_metadata = json.loads(
+		(prior_output / 'models' / 'k3' / 'clustering_metadata.json').read_text(),
+	)
+	no_prior_mean = no_prior_metadata['ordered_diagnostics']['aggregate'][
+		'mean_boundaries_per_valid_trace'
+	]
+	prior_mean = prior_metadata['ordered_diagnostics']['aggregate'][
+		'mean_boundaries_per_valid_trace'
+	]
+
+	assert prior_mean > no_prior_mean
+	assert (
+		prior_metadata['ordered_diagnostics']['aggregate']['reverse_transition_rate']
+		== 0.0
+	)
+	assert prior_metadata['stratigraphic_hmm']['path_prior']['expected_boundaries'] == {
+		'enabled': True,
+		'target': 'auto_k_minus_1',
+		'weight': 50.0,
+		'target_resolution': 'per_trace_min_target_valid_length_minus_one',
+	}
 
 
 def test_run_embedding_clustering_stratigraphic_hmm_zonly_writes_metadata(

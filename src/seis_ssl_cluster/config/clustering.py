@@ -571,9 +571,9 @@ def _validate_stratigraphic_hmm_expected_boundaries_target(
 	value = boundaries.get('target')
 	if value == 'auto_k_minus_1':
 		return
-	if not _is_int(value) or int(value) <= 0:
+	if not _is_int(value) or int(value) < 0:
 		msg = (
-			f"{prefix}.target must be 'auto_k_minus_1' or a positive integer; "
+			f"{prefix}.target must be 'auto_k_minus_1' or a non-negative integer; "
 			f'got {value!r}'
 		)
 		raise ValueError(msg)

@@ -97,6 +97,29 @@ def test_stratigraphic_hmm_clustering_config_accepts_disabled_path_prior() -> No
 	}
 
 
+def test_stratigraphic_hmm_clustering_config_accepts_zero_expected_boundary_target() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	hmm = _stratigraphic_hmm_config()
+	path_prior = _path_prior_config()
+	path_prior['expected_boundaries'] = {
+		'enabled': True,
+		'target': 0,
+		'weight': 0.1,
+	}
+	hmm['path_prior'] = path_prior
+	cfg['clustering']['stratigraphic_hmm'] = hmm
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert (
+		resolved['clustering']['stratigraphic_hmm']['path_prior'][
+			'expected_boundaries'
+		]['target']
+		== 0
+	)
+
+
 @pytest.mark.parametrize(
 	('path', 'value', 'message'),
 	[
@@ -104,7 +127,7 @@ def test_stratigraphic_hmm_clustering_config_accepts_disabled_path_prior() -> No
 		(('initial_state', 'mode'), 'deep_anchor', 'initial_state.mode'),
 		(('terminal_state', 'mode'), 'shallow_anchor', 'terminal_state.mode'),
 		(('terminal_state', 'weight'), -0.1, 'terminal_state.weight'),
-		(('expected_boundaries', 'target'), 0, 'expected_boundaries.target'),
+		(('expected_boundaries', 'target'), -1, 'expected_boundaries.target'),
 	],
 )
 def test_stratigraphic_hmm_clustering_config_rejects_invalid_path_prior(
