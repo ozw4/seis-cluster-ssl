@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from seis_ssl_cluster.cli import (
 	add_device_argument,
 	add_overwrite_argument,
+	add_skip_existing_argument,
 	build_config_parser,
 	load_config_for_cli,
 	parse_config_path,
@@ -32,6 +33,10 @@ def build_parser() -> argparse.ArgumentParser:
 		config_required=True,
 	)
 	add_device_argument(parser, help_text='Inference device override.')
+	add_skip_existing_argument(
+		parser,
+		help_text='Skip complete pseudo-target outputs with matching metadata.',
+	)
 	add_overwrite_argument(parser, help_text='Replace existing pseudo-target output.')
 	return parser
 
@@ -47,6 +52,7 @@ def main() -> None:
 		raw_config,
 		device=args.device,
 		overwrite=True if args.overwrite else None,
+		skip_existing=True if args.skip_existing else None,
 	)
 	config = resolve_config_for_cli(
 		raw_config,
@@ -55,6 +61,10 @@ def main() -> None:
 	)
 	if args.dry_run:
 		print_config_summary(config)
+		print(
+			'outputs.skip_existing: '
+			f"{str(_section(config, 'outputs')['skip_existing']).lower()}",
+		)
 		print('execution: dry-run; pseudo-target refresh skipped')
 		return
 
@@ -62,6 +72,7 @@ def main() -> None:
 		config,
 		device=args.device,
 		overwrite=True if args.overwrite else None,
+		skip_existing=True if args.skip_existing else None,
 	)
 	for output in outputs:
 		print(f'pseudo_target: {output}')
@@ -72,11 +83,14 @@ def _apply_cli_overrides(
 	*,
 	device: str | None,
 	overwrite: bool | None,
+	skip_existing: bool | None,
 ) -> None:
 	if device is not None:
 		_section(config, 'inference')['device'] = device
 	if overwrite is not None:
 		_section(config, 'outputs')['overwrite'] = overwrite
+	if skip_existing is not None:
+		_section(config, 'outputs')['skip_existing'] = skip_existing
 
 
 def _section(config: dict[str, object], key: str) -> dict[str, object]:

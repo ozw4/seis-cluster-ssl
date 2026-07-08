@@ -30,6 +30,7 @@ def test_strat_hmm_pseudo_target_config_resolves_minimal_valid_config(
 	assert resolved['inference']['device'] == 'auto'
 	assert resolved['hmm']['k'] == 6
 	assert resolved['outputs']['overwrite'] is False
+	assert resolved['outputs']['skip_existing'] is False
 
 
 def test_strat_hmm_pseudo_target_config_resolves_from_validate_compat_layer(
@@ -183,6 +184,34 @@ def test_strat_hmm_pseudo_target_cli_dry_run_resolves_without_builder(
 	assert 'execution: dry-run; pseudo-target refresh skipped' in stdout
 
 
+def test_strat_hmm_pseudo_target_cli_dry_run_accepts_skip_existing(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	config_path = tmp_path / 'config.yaml'
+	config_path.write_text(
+		yaml.safe_dump(_minimal_config(tmp_path)),
+		encoding='utf-8',
+	)
+	monkeypatch.setattr(
+		sys,
+		'argv',
+		[
+			'build_strat_hmm_pseudo_targets.py',
+			'--config',
+			str(config_path),
+			'--dry-run',
+			'--skip-existing',
+		],
+	)
+
+	build_strat_hmm_pseudo_targets.main()
+
+	stdout = capsys.readouterr().out
+	assert 'outputs.skip_existing: true' in stdout
+
+
 def _minimal_config(tmp_path: Path) -> dict[str, object]:
 	artifact_root = tmp_path / 'artifacts'
 	checkpoint = tmp_path / 'strat_latest.pt'
@@ -226,6 +255,7 @@ def _minimal_config(tmp_path: Path) -> dict[str, object]:
 					artifact_root / 'pseudo_targets' / 'strat_m1_refresh01',
 				),
 				'overwrite': False,
+				'skip_existing': False,
 			},
 		},
 	)

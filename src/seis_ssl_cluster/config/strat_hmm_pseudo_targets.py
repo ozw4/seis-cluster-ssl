@@ -51,7 +51,7 @@ _INFERENCE_KEYS = frozenset(
 )
 _HMM_KEYS = frozenset({'k', 'edge_margin_tokens', 'transition', 'path_prior'})
 _HMM_REQUIRED_KEYS = frozenset({'k', 'transition'})
-_OUTPUTS_KEYS = frozenset({'pseudo_target_root', 'overwrite'})
+_OUTPUTS_KEYS = frozenset({'pseudo_target_root', 'overwrite', 'skip_existing'})
 
 
 def resolve_strat_hmm_pseudo_target_config(config: _T) -> Config:
@@ -69,6 +69,8 @@ def resolve_strat_hmm_pseudo_target_config(config: _T) -> Config:
 	inference = _required_mapping(resolved, 'inference')
 	hmm = _required_mapping(resolved, 'hmm')
 	outputs = _required_mapping(resolved, 'outputs')
+	if 'skip_existing' not in outputs:
+		outputs['skip_existing'] = False
 
 	_validate_non_empty_path(manifests, 'train', prefix='manifests')
 	checkpoint_path = _validate_non_empty_path(
@@ -260,6 +262,10 @@ def _validate_outputs(outputs: Mapping[str, object], *, artifact_root: Path) -> 
 		nopims_root=None,
 	)
 	_validate_bool(outputs, 'overwrite', prefix='outputs')
+	_validate_bool(outputs, 'skip_existing', prefix='outputs')
+	if outputs['overwrite'] and outputs['skip_existing']:
+		msg = 'outputs.overwrite and outputs.skip_existing cannot both be true'
+		raise ValueError(msg)
 
 
 __all__ = ['resolve_strat_hmm_pseudo_target_config']
