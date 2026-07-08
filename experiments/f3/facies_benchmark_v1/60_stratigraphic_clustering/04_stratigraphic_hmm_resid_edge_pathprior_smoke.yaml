@@ -1,0 +1,58 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+
+embeddings:
+  input_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16
+
+clustering:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca16_resid_token_phase_edge8_pathprior_iter2_smoke
+  embedding_normalization: l2
+
+  residualization:
+    enabled: true
+    mode: local_token_position
+    group_by: token_phase
+    add_global_mean_back: true
+    min_group_count: 32
+
+  pca:
+    enabled: true
+    n_components: 16
+    whiten: false
+
+  sample_tokens: 10000
+  method: stratigraphic_hmm_kmeans
+  k_values: [6]
+  minibatch_size: 8192
+  prediction_batch_size: 65536
+  seed: 42
+
+  stratigraphic_hmm:
+    emission_source: embedding
+    iterations: 2
+    z_axis: 2
+    z_direction: increasing_downward
+    edge_margin_tokens: [8, 8, 0]
+    transition:
+      same_cost: 0.05
+      advance_cost: 0.0
+      jump_cost: 1.0
+      reverse_cost: 1000000.0
+      forbid_reverse: true
+      max_jump: 1
+    init:
+      order_by: mean_z
+    update:
+      empty_cluster_policy: keep_previous
+    path_prior:
+      enabled: true
+      initial_state:
+        mode: shallow_anchor
+        weight: 0.5
+      terminal_state:
+        mode: deep_anchor
+        weight: 0.5
+      expected_boundaries:
+        enabled: true
+        target: auto_k_minus_1
+        weight: 0.05
