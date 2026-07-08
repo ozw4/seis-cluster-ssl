@@ -25,6 +25,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_NORMALIZATION_STATS,
 	STAGE_PATH_KEYS,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
+	STAGE_STRAT_HMM_PSEUDO_TARGETS,
 )
 
 if TYPE_CHECKING:
@@ -67,6 +68,17 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 			'train',
 		},
 	),
+	STAGE_STRAT_HMM_PSEUDO_TARGETS: frozenset(
+		{
+			'paths',
+			'manifests',
+			'checkpoint',
+			'model',
+			'inference',
+			'hmm',
+			'outputs',
+		},
+	),
 	STAGE_EMBEDDING_EXTRACTION: frozenset(
 		{'paths', 'manifests', 'embeddings', 'embedding'},
 	),
@@ -97,6 +109,17 @@ _REQUIRED_TOP_LEVEL: dict[str, frozenset[str]] = {
 			'head',
 			'loss',
 			'train',
+		},
+	),
+	STAGE_STRAT_HMM_PSEUDO_TARGETS: frozenset(
+		{
+			'paths',
+			'manifests',
+			'checkpoint',
+			'model',
+			'inference',
+			'hmm',
+			'outputs',
 		},
 	),
 	STAGE_EMBEDDING_EXTRACTION: frozenset(

@@ -362,37 +362,39 @@ def _validate_stratigraphic_hmm_z_direction(
 
 def _validate_stratigraphic_hmm_transition(
 	hmm: Mapping[str, object],
+	*,
+	prefix: str = 'clustering.stratigraphic_hmm',
 ) -> None:
 	transition = _required_child_mapping(
 		hmm,
 		'transition',
-		prefix='clustering.stratigraphic_hmm',
+		prefix=prefix,
 	)
 	_validate_allowed_keys(
 		transition,
 		_STRATIGRAPHIC_HMM_TRANSITION_KEYS,
-		prefix='clustering.stratigraphic_hmm.transition',
+		prefix=f'{prefix}.transition',
 	)
 	_validate_required_keys(
 		transition,
 		_STRATIGRAPHIC_HMM_TRANSITION_KEYS,
-		prefix='clustering.stratigraphic_hmm.transition',
+		prefix=f'{prefix}.transition',
 	)
 	for key in ('same_cost', 'advance_cost', 'jump_cost', 'reverse_cost'):
 		_validate_nonnegative_finite_number(
 			transition,
 			key,
-			prefix='clustering.stratigraphic_hmm.transition',
+			prefix=f'{prefix}.transition',
 		)
 	_validate_bool(
 		transition,
 		'forbid_reverse',
-		prefix='clustering.stratigraphic_hmm.transition',
+		prefix=f'{prefix}.transition',
 	)
 	_validate_optional_positive_int(
 		transition,
 		'max_jump',
-		prefix='clustering.stratigraphic_hmm.transition',
+		prefix=f'{prefix}.transition',
 	)
 
 
@@ -448,6 +450,8 @@ def _validate_stratigraphic_hmm_update(hmm: Mapping[str, object]) -> None:
 
 def _validate_stratigraphic_hmm_edge_margin_tokens(
 	hmm: Mapping[str, object],
+	*,
+	prefix: str = 'clustering.stratigraphic_hmm',
 ) -> None:
 	if 'edge_margin_tokens' not in hmm:
 		return
@@ -459,56 +463,65 @@ def _validate_stratigraphic_hmm_edge_margin_tokens(
 		or any(not _is_int(item) or int(item) < 0 for item in value)
 	):
 		msg = (
-			'clustering.stratigraphic_hmm.edge_margin_tokens must be a sequence '
+			f'{prefix}.edge_margin_tokens must be a sequence '
 			f'of three nonnegative integers; got {value!r}'
 		)
 		raise ValueError(msg)
 
 
-def _validate_stratigraphic_hmm_path_prior(hmm: Mapping[str, object]) -> None:
+def _validate_stratigraphic_hmm_path_prior(
+	hmm: Mapping[str, object],
+	*,
+	prefix: str = 'clustering.stratigraphic_hmm',
+) -> None:
 	if 'path_prior' not in hmm:
 		return
 	path_prior = _required_child_mapping(
 		hmm,
 		'path_prior',
-		prefix='clustering.stratigraphic_hmm',
+		prefix=prefix,
 	)
 	_validate_allowed_keys(
 		path_prior,
 		_STRATIGRAPHIC_HMM_PATH_PRIOR_KEYS,
-		prefix='clustering.stratigraphic_hmm.path_prior',
+		prefix=f'{prefix}.path_prior',
 	)
 	_validate_required_key(
 		path_prior,
 		'enabled',
-		prefix='clustering.stratigraphic_hmm.path_prior',
+		prefix=f'{prefix}.path_prior',
 	)
 	_validate_bool(
 		path_prior,
 		'enabled',
-		prefix='clustering.stratigraphic_hmm.path_prior',
+		prefix=f'{prefix}.path_prior',
 	)
 	enabled = bool(path_prior['enabled'])
 	if enabled:
 		_validate_required_keys(
 			path_prior,
 			_STRATIGRAPHIC_HMM_PATH_PRIOR_KEYS,
-			prefix='clustering.stratigraphic_hmm.path_prior',
+			prefix=f'{prefix}.path_prior',
 		)
 	if 'initial_state' in path_prior:
 		_validate_stratigraphic_hmm_anchor_prior(
 			path_prior,
 			'initial_state',
 			allowed_modes=_STRATIGRAPHIC_HMM_INITIAL_MODES,
+			prefix=prefix,
 		)
 	if 'terminal_state' in path_prior:
 		_validate_stratigraphic_hmm_anchor_prior(
 			path_prior,
 			'terminal_state',
 			allowed_modes=_STRATIGRAPHIC_HMM_TERMINAL_MODES,
+			prefix=prefix,
 		)
 	if 'expected_boundaries' in path_prior:
-		_validate_stratigraphic_hmm_expected_boundaries(path_prior)
+		_validate_stratigraphic_hmm_expected_boundaries(
+			path_prior,
+			prefix=prefix,
+		)
 
 
 def _validate_stratigraphic_hmm_anchor_prior(
@@ -516,51 +529,66 @@ def _validate_stratigraphic_hmm_anchor_prior(
 	key: str,
 	*,
 	allowed_modes: frozenset[str],
+	prefix: str,
 ) -> None:
 	anchor = _required_child_mapping(
 		path_prior,
 		key,
-		prefix='clustering.stratigraphic_hmm.path_prior',
+		prefix=f'{prefix}.path_prior',
 	)
-	prefix = f'clustering.stratigraphic_hmm.path_prior.{key}'
-	_validate_allowed_keys(anchor, _STRATIGRAPHIC_HMM_ANCHOR_PRIOR_KEYS, prefix=prefix)
-	_validate_required_keys(anchor, _STRATIGRAPHIC_HMM_ANCHOR_PRIOR_KEYS, prefix=prefix)
+	anchor_prefix = f'{prefix}.path_prior.{key}'
+	_validate_allowed_keys(
+		anchor,
+		_STRATIGRAPHIC_HMM_ANCHOR_PRIOR_KEYS,
+		prefix=anchor_prefix,
+	)
+	_validate_required_keys(
+		anchor,
+		_STRATIGRAPHIC_HMM_ANCHOR_PRIOR_KEYS,
+		prefix=anchor_prefix,
+	)
 	if anchor.get('mode') not in allowed_modes:
 		modes = ' or '.join(f"'{mode}'" for mode in sorted(allowed_modes))
-		msg = f'{prefix}.mode must be {modes}; got {anchor.get("mode")!r}'
+		msg = f'{anchor_prefix}.mode must be {modes}; got {anchor.get("mode")!r}'
 		raise ValueError(msg)
-	_validate_nonnegative_finite_number(anchor, 'weight', prefix=prefix)
+	_validate_nonnegative_finite_number(anchor, 'weight', prefix=anchor_prefix)
 
 
 def _validate_stratigraphic_hmm_expected_boundaries(
 	path_prior: Mapping[str, object],
+	*,
+	prefix: str,
 ) -> None:
 	boundaries = _required_child_mapping(
 		path_prior,
 		'expected_boundaries',
-		prefix='clustering.stratigraphic_hmm.path_prior',
+		prefix=f'{prefix}.path_prior',
 	)
-	prefix = 'clustering.stratigraphic_hmm.path_prior.expected_boundaries'
+	boundaries_prefix = f'{prefix}.path_prior.expected_boundaries'
 	_validate_allowed_keys(
 		boundaries,
 		_STRATIGRAPHIC_HMM_EXPECTED_BOUNDARIES_KEYS,
-		prefix=prefix,
+		prefix=boundaries_prefix,
 	)
-	_validate_required_key(boundaries, 'enabled', prefix=prefix)
-	_validate_bool(boundaries, 'enabled', prefix=prefix)
+	_validate_required_key(boundaries, 'enabled', prefix=boundaries_prefix)
+	_validate_bool(boundaries, 'enabled', prefix=boundaries_prefix)
 	if boundaries['enabled']:
 		_validate_required_keys(
 			boundaries,
 			_STRATIGRAPHIC_HMM_EXPECTED_BOUNDARIES_KEYS,
-			prefix=prefix,
+			prefix=boundaries_prefix,
 		)
 	if 'target' in boundaries:
 		_validate_stratigraphic_hmm_expected_boundaries_target(
 			boundaries,
-			prefix=prefix,
+			prefix=boundaries_prefix,
 		)
 	if 'weight' in boundaries:
-		_validate_nonnegative_finite_number(boundaries, 'weight', prefix=prefix)
+		_validate_nonnegative_finite_number(
+			boundaries,
+			'weight',
+			prefix=boundaries_prefix,
+		)
 
 
 def _validate_stratigraphic_hmm_expected_boundaries_target(

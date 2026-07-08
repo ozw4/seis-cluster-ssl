@@ -22,6 +22,12 @@ PROC_SCRIPTS = tuple(
 )
 
 HELP_FLAG_CONTRACTS = {
+	'build_strat_hmm_pseudo_targets.py': (
+		'--config',
+		'--dry-run',
+		'--device',
+		'--overwrite',
+	),
 	'build_f3_lithology_baseline_features.py': (
 		'--config',
 		'--dry-run',

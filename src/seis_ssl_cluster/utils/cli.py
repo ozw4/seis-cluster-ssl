@@ -17,6 +17,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_MAE_TRAINING,
 	STAGE_NORMALIZATION_QC,
 	STAGE_NORMALIZATION_STATS,
+	STAGE_STRAT_HMM_PSEUDO_TARGETS,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 )
 
@@ -108,6 +109,8 @@ def print_config_summary(
 		_add_training_rows(rows, cfg)
 	elif stage == STAGE_STRAT_HMM_PRETEXT_TRAINING:
 		_add_strat_hmm_pretext_rows(rows, cfg)
+	elif stage == STAGE_STRAT_HMM_PSEUDO_TARGETS:
+		_add_strat_hmm_pseudo_target_rows(rows, cfg)
 	elif stage == STAGE_EMBEDDING_EXTRACTION:
 		manifests = _mapping(cfg.get('manifests'))
 		embeddings = _mapping(cfg.get('embeddings'))
@@ -215,6 +218,38 @@ def _add_strat_hmm_pretext_rows(
 			('train.batch_size', train.get('batch_size')),
 			('train.epochs', train.get('epochs')),
 			('train.device', train.get('device')),
+		],
+	)
+
+
+def _add_strat_hmm_pseudo_target_rows(
+	rows: list[tuple[str, Any]],
+	cfg: Mapping[str, Any],
+) -> None:
+	manifests = _mapping(cfg.get('manifests'))
+	checkpoint = _mapping(cfg.get('checkpoint'))
+	model = _mapping(cfg.get('model'))
+	inference = _mapping(cfg.get('inference'))
+	hmm = _mapping(cfg.get('hmm'))
+	outputs = _mapping(cfg.get('outputs'))
+	rows.extend(
+		[
+			('manifests.train', manifests.get('train')),
+			('checkpoint.path', checkpoint.get('path')),
+			('model.patch_size', model.get('patch_size')),
+			('inference.window_size', inference.get('window_size')),
+			('inference.overlap', inference.get('overlap')),
+			('inference.output_dtype', inference.get('output_dtype')),
+			('inference.batch_size', inference.get('batch_size')),
+			(
+				'inference.min_token_valid_fraction',
+				inference.get('min_token_valid_fraction'),
+			),
+			('inference.device', inference.get('device')),
+			('hmm.k', hmm.get('k')),
+			('hmm.edge_margin_tokens', hmm.get('edge_margin_tokens')),
+			('outputs.pseudo_target_root', outputs.get('pseudo_target_root')),
+			('outputs.overwrite', outputs.get('overwrite')),
 		],
 	)
 
