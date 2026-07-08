@@ -226,6 +226,32 @@ def test_invalid_pseudo_target_tokens_are_ignored(tmp_path: Path) -> None:
 	assert math.isfinite(payload['metrics']['loss'])
 
 
+def test_checkpoint_config_uses_strat_preprocessing_contract(
+	tmp_path: Path,
+) -> None:
+	config = _resolved_config(tmp_path, max_steps=1)
+	config['data']['normalized_clip_abs'] = 0.5
+	config['data']['amplitude_agc'] = {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 3,
+		'eps': 1.0e-6,
+		'clip_abs': 2.0,
+	}
+
+	checkpoint_path = run_strat_hmm_pretext_training(config)
+
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	assert payload['config']['data']['normalized_clip_abs'] == 0.5
+	assert payload['config']['data']['amplitude_agc'] == {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 3,
+		'eps': 1.0e-6,
+		'clip_abs': 2.0,
+	}
+
+
 def test_resume_advances_and_rejects_incompatible_head_config(tmp_path: Path) -> None:
 	config = _resolved_config(tmp_path, max_steps=1)
 
@@ -244,6 +270,27 @@ def test_resume_advances_and_rejects_incompatible_head_config(tmp_path: Path) ->
 	incompatible['head']['temperature'] = 0.25
 	with pytest.raises(ValueError, match=r'head\.temperature'):
 		run_strat_hmm_pretext_training(incompatible, resume=resumed_checkpoint)
+
+
+def test_resume_preserves_existing_best_score(tmp_path: Path) -> None:
+	config = _resolved_config(tmp_path, max_steps=1)
+
+	first_checkpoint = run_strat_hmm_pretext_training(config)
+	best_path = Path(config['paths']['output_root']) / 'best.pt'
+	best_payload = load_checkpoint(best_path, map_location='cpu')
+	best_payload['metrics']['loss'] = -1.0
+	torch.save(best_payload, best_path)
+	config['train']['max_steps'] = 2
+
+	resumed_checkpoint = run_strat_hmm_pretext_training(
+		config,
+		resume=first_checkpoint,
+	)
+
+	latest_payload = load_checkpoint(resumed_checkpoint, map_location='cpu')
+	resumed_best_payload = load_checkpoint(best_path, map_location='cpu')
+	assert latest_payload['global_step'] == 2
+	assert resumed_best_payload['metrics']['loss'] == -1.0
 
 
 def test_cli_non_dry_run_executes_one_step(tmp_path: Path) -> None:

@@ -173,10 +173,6 @@ class NopimsStratPseudoTargetDataset:
 		if missing_ids:
 			msg = f'missing pseudo-target inputs for surveys: {missing_ids!r}'
 			raise ValueError(msg)
-		extra_ids = sorted(pseudo_ids - manifest_ids)
-		if extra_ids:
-			msg = f'pseudo-target inputs do not match manifests: {extra_ids!r}'
-			raise ValueError(msg)
 
 		for manifest in self.manifests:
 			manifest.validate()

@@ -129,6 +129,41 @@ def test_strat_dataset_samples_have_at_least_one_valid_supervised_token(
 	assert np.count_nonzero(sample['strat_valid_mask']) == 1
 
 
+def test_strat_dataset_allows_extra_pseudo_target_surveys(
+	tmp_path: Path,
+) -> None:
+	labels = np.zeros((2, 2, 2), dtype=np.int32)
+	valid_tokens = np.ones(labels.shape, dtype=np.bool_)
+	write_pseudo_target(
+		tmp_path / 'pseudo',
+		k=1,
+		survey_id='survey',
+		labels=labels,
+		confidence=np.ones(labels.shape, dtype=np.float32),
+		valid_tokens=valid_tokens,
+	)
+	write_pseudo_target(
+		tmp_path / 'pseudo',
+		k=1,
+		survey_id='heldout',
+		labels=labels,
+		confidence=np.ones(labels.shape, dtype=np.float32),
+		valid_tokens=valid_tokens,
+	)
+	dataset = NopimsStratPseudoTargetDataset(
+		[_manifest(tmp_path, 'survey', np.ones((4, 4, 4), dtype=np.float32))],
+		discover_pseudo_target_inputs(tmp_path / 'pseudo', k=1),
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		zero_mask=ZeroMaskConfig(enabled=False),
+	)
+
+	sample = dataset[0]
+
+	assert sample['coords']['survey_id'] == 'survey'
+	assert sample['strat_valid_mask'].all()
+
+
 def test_strat_dataset_raises_when_no_valid_supervised_crop(
 	tmp_path: Path,
 ) -> None:

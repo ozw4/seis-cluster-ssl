@@ -114,6 +114,16 @@ def test_strat_hmm_pretext_config_enforces_crop_patch_divisibility(
 		resolve_strat_hmm_pretext_config(cfg)
 
 
+def test_strat_hmm_pretext_config_rejects_zero_checkpoint_interval(
+	tmp_path: Path,
+) -> None:
+	cfg = _minimal_config(tmp_path)
+	cfg['train']['checkpoint_every_steps'] = 0
+
+	with pytest.raises(ValueError, match=r'train\.checkpoint_every_steps'):
+		resolve_strat_hmm_pretext_config(cfg)
+
+
 def test_strat_hmm_pretext_config_validates_training_paths(
 	tmp_path: Path,
 ) -> None:

@@ -198,7 +198,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 			)
 	epochs = _int_config(train_config, 'epochs', 1)
 	max_steps = _optional_int_config(train_config, 'max_steps')
-	checkpoint_every_steps = _optional_int_config(
+	checkpoint_every_steps = _optional_positive_int_config(
 		train_config,
 		'checkpoint_every_steps',
 	)
@@ -212,7 +212,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 		completed_epoch=True,
 	)
 	checkpoint_path: Path | None = None
-	best_score: float | None = None
+	best_score = _load_existing_best_score(output_root) if resume is not None else None
 	for epoch in range(resume_state.start_epoch, epochs + 1):
 		set_epoch = getattr(dataset, 'set_epoch', None)
 		if callable(set_epoch):
@@ -409,6 +409,7 @@ def build_strat_hmm_head_only_components(
 		mae_checkpoint_config=_extraction_compatible_config(
 			teacher_config,
 			output_root=_path_config(_mapping(config, 'paths'), 'output_root'),
+			strat_data_config=_mapping(config, 'data'),
 		),
 		trainability_summary=trainability_summary,
 	)
@@ -1209,12 +1210,34 @@ def _extraction_compatible_config(
 	teacher_config: Mapping[str, object],
 	*,
 	output_root: Path,
+	strat_data_config: Mapping[str, object],
 ) -> Mapping[str, object]:
 	result = deepcopy(dict(teacher_config))
 	paths = dict(_mapping(result, 'paths'))
 	paths['output_root'] = str(output_root)
 	result['paths'] = paths
+	data = dict(_mapping(result, 'data'))
+	for key in ('normalized_clip_abs', 'amplitude_agc'):
+		if key in strat_data_config:
+			data[key] = deepcopy(strat_data_config[key])
+	result['data'] = data
 	return result
+
+
+def _load_existing_best_score(output_root: Path) -> float | None:
+	best_path = output_root / 'best.pt'
+	if not best_path.is_file():
+		return None
+	payload = load_checkpoint(best_path, map_location='cpu')
+	metrics = payload.get('metrics')
+	if not isinstance(metrics, Mapping):
+		return None
+	loss = metrics.get('loss')
+	if isinstance(loss, int | float) and not isinstance(loss, bool):
+		score = float(loss)
+		if math.isfinite(score):
+			return score
+	return None
 
 
 def _zero_mask_from_config(config: Mapping[str, object]) -> ZeroMaskConfig:
@@ -1359,6 +1382,17 @@ def _optional_int_config(config: Mapping[str, object], key: str) -> int | None:
 		msg = f'{key} must be an integer or None; got {value!r}'
 		raise TypeError(msg)
 	return int(value)
+
+
+def _optional_positive_int_config(
+	config: Mapping[str, object],
+	key: str,
+) -> int | None:
+	value = _optional_int_config(config, key)
+	if value is not None and value <= 0:
+		msg = f'{key} must be a positive integer or None; got {value!r}'
+		raise ValueError(msg)
+	return value
 
 
 def _float_config(config: Mapping[str, object], key: str, default: float) -> float:

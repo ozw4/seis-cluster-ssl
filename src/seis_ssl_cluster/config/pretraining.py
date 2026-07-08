@@ -438,8 +438,9 @@ def _validate_strat_hmm_pretext_cross_section_values(
 def _validate_strat_hmm_pretext_train(train: Mapping[str, object]) -> None:
 	for key in ('batch_size', 'samples_per_epoch', 'epochs'):
 		_validate_positive_int(train, key, prefix='train')
-	for key in ('num_workers', 'max_steps', 'checkpoint_every_steps'):
+	for key in ('num_workers', 'max_steps'):
 		_validate_optional_nonnegative_int(train, key, prefix='train')
+	_validate_optional_positive_int(train, 'checkpoint_every_steps', prefix='train')
 	for key in ('lr', 'encoder_lr', 'grad_clip_norm'):
 		_validate_positive_number(train, key, prefix='train')
 	_validate_nonnegative_number(train, 'weight_decay', prefix='train')
