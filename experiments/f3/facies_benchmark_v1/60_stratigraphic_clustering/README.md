@@ -27,6 +27,10 @@ costs used for that decode.
 01_stratigraphic_hmm_kmeans.yaml
 01_stratigraphic_hmm_kmeans_smoke.yaml
 02_stratigraphic_hmm_zonly_guardrail.yaml
+03_stratigraphic_hmm_k6_10_resid_token_phase.yaml
+03_stratigraphic_hmm_resid_edge_k6_10.yaml
+04_stratigraphic_hmm_resid_edge_pathprior_k6_10.yaml
+04_stratigraphic_hmm_resid_edge_pathprior_smoke.yaml
 ```
 
 The main config writes to:
@@ -42,6 +46,21 @@ The z-only guardrail config writes to:
 
 ```text
 /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_zonly_k6_8_10_iter10
+```
+
+The residualized HMM v2 configs standardize token-phase residualization with an
+8-token x/y backend edge exclusion. The no-prior config is the clean comparison
+against previous residualized runs with post-hoc visualization masking:
+
+```text
+/workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_10_pca64_resid_token_phase_edge8_iter10
+```
+
+The path-prior config adds conservative shallow/deep anchors and an expected
+boundary-count prior for the v2 baseline:
+
+```text
+/workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_10_pca64_resid_token_phase_edge8_pathprior_iter10
 ```
 
 ## Run
@@ -69,6 +88,36 @@ python proc/seis_ssl_cluster/cluster_embeddings.py \
   --dry-run
 ```
 
+Dry-run the HMM v2 path-prior smoke config first:
+
+```bash
+python proc/seis_ssl_cluster/cluster_embeddings.py \
+  --config experiments/f3/facies_benchmark_v1/60_stratigraphic_clustering/04_stratigraphic_hmm_resid_edge_pathprior_smoke.yaml \
+  --dry-run
+```
+
+Run the HMM v2 path-prior smoke config when the frozen F3 embedding artifacts
+are present:
+
+```bash
+python proc/seis_ssl_cluster/cluster_embeddings.py \
+  --config experiments/f3/facies_benchmark_v1/60_stratigraphic_clustering/04_stratigraphic_hmm_resid_edge_pathprior_smoke.yaml
+```
+
+Run the full HMM v2 no-prior comparison:
+
+```bash
+python proc/seis_ssl_cluster/cluster_embeddings.py \
+  --config experiments/f3/facies_benchmark_v1/60_stratigraphic_clustering/03_stratigraphic_hmm_resid_edge_k6_10.yaml
+```
+
+Run the full HMM v2 path-prior baseline:
+
+```bash
+python proc/seis_ssl_cluster/cluster_embeddings.py \
+  --config experiments/f3/facies_benchmark_v1/60_stratigraphic_clustering/04_stratigraphic_hmm_resid_edge_pathprior_k6_10.yaml
+```
+
 ## Comparisons And Diagnostics
 
 The key comparison is against vanilla KMeans and z-only or random guardrails,
@@ -85,6 +134,8 @@ Main diagnostics:
 - boundary continuity and boundary z summary
 - salt-and-pepper reduction by visual inspection
 - whether boundaries follow structure rather than forming flat depth bands
+- compare path-prior results against both the z-only guardrail and no-prior HMM
+- inspect XZ sections and XY slices before interpreting units
 
 See [docs/stratigraphic_hmm_clustering.md](../../../../docs/stratigraphic_hmm_clustering.md)
 for the shared method notes and interpretation caveats.

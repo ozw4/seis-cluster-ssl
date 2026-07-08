@@ -358,6 +358,40 @@ def build_terminal_state_costs(k: int, settings: HMMPathPriorSettings) -> np.nda
 	return _validate_state_costs(costs, k, 'terminal_state_costs').astype(np.float32)
 
 
+def _resolve_expected_boundary_count(
+	settings: HMMExpectedBoundariesSettings | None,
+	*,
+	k: int,
+	valid_trace_length: int,
+) -> int | None:
+	if settings is None or not settings.enabled or settings.weight == 0.0:
+		return None
+	_validate_positive_int(k, 'k')
+	_validate_positive_int(valid_trace_length, 'valid_trace_length')
+	_validate_nonnegative_finite_cost(settings.weight, 'expected_boundaries.weight')
+	if settings.target == 'auto_k_minus_1':
+		target = k - 1
+	elif isinstance(settings.target, bool) or not isinstance(settings.target, Integral):
+		msg = (
+			"expected_boundaries.target must be 'auto_k_minus_1' "
+			'or a non-negative integer'
+		)
+		raise TypeError(msg)
+	elif int(settings.target) < 0:
+		raise ValueError('expected_boundaries.target must be a non-negative integer')
+	else:
+		target = int(settings.target)
+	return min(target, valid_trace_length - 1)
+
+
+def _active_expected_boundaries(
+	settings: HMMPathPriorSettings,
+) -> HMMExpectedBoundariesSettings | None:
+	if not settings.enabled:
+		return None
+	return settings.expected_boundaries
+
+
 def sample_token_z_coordinates(
 	embedding_inputs: tuple[EmbeddingInput, ...],
 	per_survey_token_indices: Mapping[str, np.ndarray],
@@ -507,12 +541,14 @@ def prepare_feature_batch_for_indices(
 	return transformed
 
 
-def viterbi_decode_costs(
+def viterbi_decode_costs(  # noqa: C901, PLR0913
 	emission_costs: np.ndarray,
 	transition_costs: np.ndarray,
 	*,
 	initial_state_costs: np.ndarray | None = None,
 	terminal_state_costs: np.ndarray | None = None,
+	expected_boundary_count: int | None = None,
+	boundary_count_weight: float = 0.0,
 ) -> np.ndarray:
 	"""Decode the minimum-cost state path with deterministic tie-breaking."""
 	emissions = _as_float_matrix(emission_costs, 'emission_costs')
@@ -539,6 +575,24 @@ def viterbi_decode_costs(
 		k,
 		'terminal_state_costs',
 	)
+	_validate_nonnegative_finite_cost(boundary_count_weight, 'boundary_count_weight')
+	if expected_boundary_count is not None:
+		if isinstance(expected_boundary_count, bool) or not isinstance(
+			expected_boundary_count,
+			Integral,
+		):
+			raise TypeError('expected_boundary_count must be an integer')
+		if int(expected_boundary_count) < 0:
+			raise ValueError('expected_boundary_count must be non-negative')
+	if expected_boundary_count is not None and boundary_count_weight > 0.0:
+		return _viterbi_decode_costs_with_boundary_count(
+			emissions,
+			transitions,
+			initial_costs=initial_costs,
+			terminal_costs=terminal_costs,
+			expected_boundary_count=int(expected_boundary_count),
+			boundary_count_weight=float(boundary_count_weight),
+		)
 
 	t_count = emissions.shape[0]
 	dp = np.empty((t_count, k), dtype=np.float64)
@@ -566,13 +620,85 @@ def viterbi_decode_costs(
 	return path
 
 
-def decode_trace_segments(
+def _viterbi_decode_costs_with_boundary_count(  # noqa: C901, PLR0913
+	emissions: np.ndarray,
+	transitions: np.ndarray,
+	*,
+	initial_costs: np.ndarray,
+	terminal_costs: np.ndarray,
+	expected_boundary_count: int,
+	boundary_count_weight: float,
+) -> np.ndarray:
+	"""Decode with a final soft penalty on forward boundary count."""
+	t_count, k = emissions.shape
+	max_boundaries = min(k - 1, t_count - 1)
+	target = min(expected_boundary_count, max_boundaries)
+	dp = np.full((t_count, k, max_boundaries + 1), np.inf, dtype=np.float64)
+	back_state = np.zeros((t_count, k, max_boundaries + 1), dtype=np.int32)
+	back_count = np.zeros((t_count, k, max_boundaries + 1), dtype=np.int32)
+	dp[0, :, 0] = emissions[0] + initial_costs
+
+	for t_index in range(1, t_count):
+		for previous_state in range(k):
+			finite_counts = np.flatnonzero(
+				np.isfinite(dp[t_index - 1, previous_state]),
+			)
+			if finite_counts.size == 0:
+				continue
+			for next_state in range(k):
+				transition_cost = transitions[previous_state, next_state]
+				if not np.isfinite(transition_cost):
+					continue
+				boundary_increment = 1 if next_state > previous_state else 0
+				for previous_count in finite_counts:
+					next_count = int(previous_count) + boundary_increment
+					if next_count > max_boundaries:
+						continue
+					cost = (
+						dp[t_index - 1, previous_state, previous_count]
+						+ transition_cost
+						+ emissions[t_index, next_state]
+					)
+					if cost < dp[t_index, next_state, next_count]:
+						dp[t_index, next_state, next_count] = cost
+						back_state[t_index, next_state, next_count] = previous_state
+						back_count[t_index, next_state, next_count] = int(
+							previous_count,
+						)
+
+	boundary_penalty = boundary_count_weight * (
+		(np.arange(max_boundaries + 1, dtype=np.float64) - float(target)) ** 2
+	)
+	final_costs = dp[-1] + terminal_costs[:, np.newaxis] + boundary_penalty
+	final_flat = int(np.argmin(final_costs.reshape(-1)))
+	final_state, final_count = np.unravel_index(final_flat, final_costs.shape)
+	if not np.isfinite(final_costs[final_state, final_count]):
+		raise ValueError(
+			'no finite path exists for emission_costs and transition_costs',
+		)
+
+	path = np.empty(t_count, dtype=np.int32)
+	path[-1] = int(final_state)
+	current_state = int(final_state)
+	current_count = int(final_count)
+	for t_index in range(t_count - 1, 0, -1):
+		previous_state = int(back_state[t_index, current_state, current_count])
+		previous_count = int(back_count[t_index, current_state, current_count])
+		path[t_index - 1] = previous_state
+		current_state = previous_state
+		current_count = previous_count
+	return path
+
+
+def decode_trace_segments(  # noqa: PLR0913
 	emission_costs: np.ndarray,
 	valid_mask: np.ndarray,
 	transition_costs: np.ndarray,
 	*,
 	initial_state_costs: np.ndarray | None = None,
 	terminal_state_costs: np.ndarray | None = None,
+	expected_boundary_count: int | None = None,
+	boundary_count_weight: float = 0.0,
 ) -> np.ndarray:
 	"""Decode valid vertical trace tokens as one sequence, preserving invalid gaps."""
 	emissions = _as_float_matrix(emission_costs, 'emission_costs')
@@ -618,6 +744,8 @@ def decode_trace_segments(
 			transitions,
 			initial_state_costs=initial_costs,
 			terminal_state_costs=terminal_costs,
+			expected_boundary_count=expected_boundary_count,
+			boundary_count_weight=boundary_count_weight,
 		)
 	return labels
 
@@ -631,6 +759,7 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 	transition_costs: np.ndarray,
 	initial_state_costs: np.ndarray | None = None,
 	terminal_state_costs: np.ndarray | None = None,
+	expected_boundaries: HMMExpectedBoundariesSettings | None = None,
 	emission_source: str = 'embedding',
 	edge_margin_tokens: tuple[int, int, int] = (0, 0, 0),
 ) -> np.ndarray:
@@ -675,12 +804,22 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 			emission_costs = np.zeros((z_count, k), dtype=np.float32)
 			deltas = prepared[:, np.newaxis, :] - center_matrix[np.newaxis, :, :]
 			emission_costs[z_indices] = np.sum(deltas * deltas, axis=2)
+			expected_boundary_count = _resolve_expected_boundary_count(
+				expected_boundaries,
+				k=k,
+				valid_trace_length=int(z_indices.size),
+			)
+			boundary_count_weight = (
+				0.0 if expected_boundaries is None else expected_boundaries.weight
+			)
 			labels[x_index, y_index, :] = decode_trace_segments(
 				emission_costs,
 				trace_valid,
 				transition_costs,
 				initial_state_costs=initial_state_costs,
 				terminal_state_costs=terminal_state_costs,
+				expected_boundary_count=expected_boundary_count,
+				boundary_count_weight=boundary_count_weight,
 			)
 	return labels
 
@@ -694,6 +833,7 @@ def _decode_all_surveys(  # noqa: PLR0913
 	transition_costs: np.ndarray,
 	initial_state_costs: np.ndarray | None,
 	terminal_state_costs: np.ndarray | None,
+	expected_boundaries: HMMExpectedBoundariesSettings | None,
 	emission_source: str,
 	edge_margin_tokens: tuple[int, int, int],
 ) -> dict[str, np.ndarray]:
@@ -706,6 +846,7 @@ def _decode_all_surveys(  # noqa: PLR0913
 			transition_costs=transition_costs,
 			initial_state_costs=initial_state_costs,
 			terminal_state_costs=terminal_state_costs,
+			expected_boundaries=expected_boundaries,
 			emission_source=emission_source,
 			edge_margin_tokens=edge_margin_tokens,
 		)
@@ -901,6 +1042,7 @@ def run_stratigraphic_hmm_clustering(
 		transition_costs = build_ordered_transition_costs(k, hmm_settings.transition)
 		initial_state_costs = build_initial_state_costs(k, hmm_settings.path_prior)
 		terminal_state_costs = build_terminal_state_costs(k, hmm_settings.path_prior)
+		expected_boundaries = _active_expected_boundaries(hmm_settings.path_prior)
 		centers = initialize_ordered_centers(
 			training_features,
 			sample_z,
@@ -919,6 +1061,7 @@ def run_stratigraphic_hmm_clustering(
 				transition_costs=transition_costs,
 				initial_state_costs=initial_state_costs,
 				terminal_state_costs=terminal_state_costs,
+				expected_boundaries=expected_boundaries,
 				emission_source=hmm_settings.emission_source,
 				edge_margin_tokens=hmm_settings.edge_margin_tokens,
 			)
@@ -942,6 +1085,7 @@ def run_stratigraphic_hmm_clustering(
 			transition_costs=transition_costs,
 			initial_state_costs=initial_state_costs,
 			terminal_state_costs=terminal_state_costs,
+			expected_boundaries=expected_boundaries,
 			emission_source=hmm_settings.emission_source,
 			edge_margin_tokens=hmm_settings.edge_margin_tokens,
 		)
@@ -1231,8 +1375,14 @@ def _hmm_metadata(  # noqa: PLR0913
 	iteration_summaries: list[dict[str, object]],
 	edge_margin_excluded_valid_token_count: int,
 ) -> dict[str, object]:
+	path_prior_settings = asdict(hmm_settings.path_prior)
+	expected_boundaries = dict(path_prior_settings['expected_boundaries'])
+	expected_boundaries['target_resolution'] = (
+		'per_trace_min_target_valid_length_minus_one'
+	)
+	path_prior_settings['expected_boundaries'] = expected_boundaries
 	path_prior = {
-		**asdict(hmm_settings.path_prior),
+		**path_prior_settings,
 		'initial_state_costs': _json_safe_state_costs(
 			initial_state_costs,
 			'initial_state_costs',

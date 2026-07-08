@@ -14,6 +14,7 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	decode_trace_segments,
 	stratigraphic_hmm_settings_from_config,
 	viterbi_decode_costs,
+	_resolve_expected_boundary_count,
 )
 from seis_ssl_cluster.clustering.writer import write_json
 
@@ -161,6 +162,116 @@ def test_terminal_state_costs_can_shift_final_state_deeper() -> None:
 
 	assert without_prior[-1] == 0
 	assert with_prior[-1] == 1
+
+
+def test_expected_boundary_count_prior_can_add_boundaries() -> None:
+	transitions = build_ordered_transition_costs(
+		3,
+		HMMTransitionSettings(
+			same_cost=0.0,
+			advance_cost=0.1,
+			jump_cost=100.0,
+			reverse_cost=100.0,
+			forbid_reverse=True,
+			max_jump=1,
+		),
+	)
+	emissions = np.array(
+		[
+			[0.0, 0.2, 0.2],
+			[0.0, 0.2, 0.2],
+			[0.0, 0.2, 0.2],
+			[0.0, 0.2, 0.2],
+			[0.0, 0.2, 0.2],
+		],
+		dtype=np.float32,
+	)
+
+	without_prior = viterbi_decode_costs(emissions, transitions)
+	with_prior = viterbi_decode_costs(
+		emissions,
+		transitions,
+		expected_boundary_count=2,
+		boundary_count_weight=10.0,
+	)
+
+	assert _boundary_count(without_prior) == 0
+	assert _boundary_count(with_prior) == 2
+	assert abs(_boundary_count(with_prior) - 2) < abs(
+		_boundary_count(without_prior) - 2,
+	)
+
+
+def test_expected_boundary_count_clamps_to_trace_length_minus_one() -> None:
+	labels = viterbi_decode_costs(
+		np.zeros((3, 5), dtype=np.float32),
+		build_ordered_transition_costs(
+			5,
+			HMMTransitionSettings(
+				same_cost=0.0,
+				advance_cost=0.0,
+				jump_cost=0.0,
+				reverse_cost=100.0,
+				forbid_reverse=True,
+				max_jump=1,
+			),
+		),
+		expected_boundary_count=99,
+		boundary_count_weight=1.0,
+	)
+
+	assert _boundary_count(labels) == 2
+
+
+def test_expected_boundary_count_target_zero_is_valid() -> None:
+	assert (
+		_resolve_expected_boundary_count(
+			HMMExpectedBoundariesSettings(enabled=True, target=0, weight=0.1),
+			k=3,
+			valid_trace_length=5,
+		)
+		== 0
+	)
+
+
+def test_disabled_expected_boundary_count_prior_uses_fast_path_output() -> None:
+	emissions = np.array(
+		[
+			[0.0, 3.0, 6.0],
+			[3.0, 0.0, 6.0],
+			[0.0, 3.0, 6.0],
+			[6.0, 3.0, 0.0],
+		],
+		dtype=np.float32,
+	)
+	transitions = build_ordered_transition_costs(
+		3,
+		HMMTransitionSettings(
+			same_cost=0.0,
+			advance_cost=0.1,
+			jump_cost=5.0,
+			reverse_cost=100.0,
+			forbid_reverse=True,
+			max_jump=None,
+		),
+	)
+
+	fast = viterbi_decode_costs(emissions, transitions)
+	zero_weight = viterbi_decode_costs(
+		emissions,
+		transitions,
+		expected_boundary_count=2,
+		boundary_count_weight=0.0,
+	)
+	no_target = viterbi_decode_costs(
+		emissions,
+		transitions,
+		expected_boundary_count=None,
+		boundary_count_weight=10.0,
+	)
+
+	np.testing.assert_array_equal(zero_weight, fast)
+	np.testing.assert_array_equal(no_target, fast)
 
 
 def test_disabled_path_prior_builders_return_zero_vectors() -> None:
@@ -354,6 +465,10 @@ def test_decode_trace_segments_rejects_invalid_mask_shape() -> None:
 			np.ones((2, 1), dtype=np.bool_),
 			np.zeros((2, 2), dtype=np.float32),
 		)
+
+
+def _boundary_count(labels: np.ndarray) -> int:
+	return int(np.count_nonzero(np.diff(labels) > 0))
 
 
 def _hmm_settings_config() -> dict[str, object]:

@@ -56,10 +56,42 @@ output label grid. They do not reset the vertical trace state sequence. With
 observations in each trace, so `labels[labels >= 0]` is non-decreasing in z
 order for every decoded trace.
 
+## Edge Margin Tokens
+
+`clustering.stratigraphic_hmm.edge_margin_tokens` excludes otherwise valid
+tokens near the volume edges from HMM training and decoding. The value is a
+three-item token margin in x, y, and z order. For example, `[8, 8, 0]` removes
+the outer eight token columns in x and y while keeping the full z range.
+
+This is part of the clustering run itself. It is not post-hoc visualization
+masking: excluded edge tokens are not sampled for center fitting, are not
+decoded by Viterbi, and remain invalid in the output label grid.
+
+## Path Prior
+
+`clustering.stratigraphic_hmm.path_prior` adds soft sequence-level costs to the
+Viterbi decode. The initial-state prior can softly favor a shallow starting
+state, and the terminal-state prior can softly favor a deep ending state. These
+anchors bias the decoded trace path without replacing the embedding emissions
+or transition costs.
+
+When enabled, `expected_boundaries` adds a soft prior on the number of state
+transitions along a trace. `target: auto_k_minus_1` uses one fewer boundary than
+the current number of states, while an integer target pins the preferred count
+explicitly.
+
+These priors are for stratigraphic unit discovery. They are not lithology or
+facies classification targets, and they should not be interpreted as supervised
+class evidence.
+
 ## Interpretation Caveats
 
 The HMM can create plausible bands even when embeddings are weak. Run z-only and
 random guardrails before making geological claims.
+
+A path prior can create boundaries even when the embeddings provide weak
+support. Always compare path-prior results against the z-only guardrail and the
+matched no-path-prior run.
 
 The z-only guardrail should produce ordered bands by construction. The embedding
 HMM result is only scientifically stronger if it differs from z-only in
@@ -72,4 +104,6 @@ unit method, not a repeated-facies classifier.
 Useful diagnostics include reverse transition rate over consecutive valid trace
 observations, boundary continuity, boundary z summaries, visual salt-and-pepper
 reduction, and whether boundaries follow structure instead of collapsing into
-flat depth bands.
+flat depth bands. Inspect both XZ sections and XY slices: XZ sections reveal
+vertical monotonicity and depth collapse, while XY slices reveal lateral striping
+and edge artifacts.
