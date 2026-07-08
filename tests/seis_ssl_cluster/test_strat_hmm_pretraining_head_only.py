@@ -238,6 +238,12 @@ def test_checkpoint_config_uses_strat_preprocessing_contract(
 		'eps': 1.0e-6,
 		'clip_abs': 2.0,
 	}
+	config['zero_mask'] = {
+		'enabled': True,
+		'zero_atol': 0.125,
+		'z_sample_influence_radius': 0,
+		'xy_trace_influence_radius': 0,
+	}
 
 	checkpoint_path = run_strat_hmm_pretext_training(config)
 
@@ -249,6 +255,12 @@ def test_checkpoint_config_uses_strat_preprocessing_contract(
 		'window_z': 3,
 		'eps': 1.0e-6,
 		'clip_abs': 2.0,
+	}
+	assert payload['config']['zero_mask'] == {
+		'enabled': True,
+		'zero_atol': 0.125,
+		'z_sample_influence_radius': 0,
+		'xy_trace_influence_radius': 0,
 	}
 
 

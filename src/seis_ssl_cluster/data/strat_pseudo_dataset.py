@@ -61,6 +61,7 @@ class NopimsStratPseudoTargetDataset:
 		max_resample_attempts: int = 16,
 		normalized_clip_abs: float | None = None,
 		amplitude_agc: AmplitudeAgcConfig | Mapping[str, object] | None = None,
+		min_confidence: float = 0.0,
 	) -> None:
 		self.manifests = tuple(manifests)
 		if not self.manifests:
@@ -102,6 +103,7 @@ class NopimsStratPseudoTargetDataset:
 			'normalized_clip_abs',
 		)
 		self.amplitude_agc = _amplitude_agc_from_config(amplitude_agc)
+		self.min_confidence = _validate_fraction(min_confidence, 'min_confidence')
 
 		self._store = NpyMemmapVolumeStore()
 		self._normalization_stats: dict[Path, SurveyNormalizationStats] = {}
@@ -143,14 +145,15 @@ class NopimsStratPseudoTargetDataset:
 			if last_valid_fraction < self.min_valid_fraction:
 				continue
 			self._add_pseudo_targets(manifest.survey_id, local_request, sample)
-			if bool(np.any(sample['strat_valid_mask'])):
+			if self._has_confident_supervised_token(sample):
 				return sample
 
 		msg = (
 			f'survey {manifest.survey_id!r} did not produce a pseudo-target '
-			f'crop with at least one valid supervised token after '
-			f'{self.max_resample_attempts} attempts; last local valid '
-			f'fraction was {last_valid_fraction:.6f}'
+			f'crop with at least one valid supervised token at '
+			f'min_confidence={self.min_confidence:.6f} after '
+			f'{self.max_resample_attempts} attempts; last local valid fraction '
+			f'was {last_valid_fraction:.6f}'
 		)
 		raise ValueError(msg)
 
@@ -323,6 +326,17 @@ class NopimsStratPseudoTargetDataset:
 		coords['token_start_xyz'] = cast('XYZ', token_start)
 		coords['token_size_xyz'] = self.token_grid_shape_xyz
 
+	def _has_confident_supervised_token(self, sample: Mapping[str, object]) -> bool:
+		strat_valid = _require_bool_array(sample, 'strat_valid_mask')
+		confidence = _require_float_array(sample, 'strat_confidence')
+		if confidence.shape != strat_valid.shape:
+			msg = (
+				'strat_confidence shape must match strat_valid_mask shape; '
+				f'got {confidence.shape!r} and {strat_valid.shape!r}'
+			)
+			raise ValueError(msg)
+		return bool(np.any(strat_valid & (confidence >= self.min_confidence)))
+
 	def _pseudo_targets_for_survey(self, survey_id: str) -> StratPseudoTargetArrays:
 		if survey_id not in self._pseudo_target_arrays:
 			self._pseudo_target_arrays[survey_id] = load_pseudo_target_arrays(
@@ -406,6 +420,17 @@ def _require_bool_array(sample: Mapping[str, object], key: str) -> np.ndarray:
 		raise TypeError(msg)
 	if value.dtype != np.bool_:
 		msg = f'{key} dtype must be bool; got {value.dtype}'
+		raise TypeError(msg)
+	return value
+
+
+def _require_float_array(sample: Mapping[str, object], key: str) -> np.ndarray:
+	value = sample[key]
+	if not isinstance(value, np.ndarray):
+		msg = f'{key} must be a NumPy array; got {type(value).__name__}'
+		raise TypeError(msg)
+	if value.dtype.kind != 'f':
+		msg = f'{key} dtype must be floating point; got {value.dtype}'
 		raise TypeError(msg)
 	return value
 

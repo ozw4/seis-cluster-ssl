@@ -156,6 +156,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 		),
 		normalized_clip_abs=_optional_float_config(data_config, 'normalized_clip_abs'),
 		amplitude_agc=data_config.get('amplitude_agc'),
+		min_confidence=_float_config(pseudo_config, 'min_confidence', 0.0),
 	)
 	dataloader = build_strat_pseudo_target_dataloader(
 		dataset,
@@ -410,6 +411,7 @@ def build_strat_hmm_head_only_components(
 			teacher_config,
 			output_root=_path_config(_mapping(config, 'paths'), 'output_root'),
 			strat_data_config=_mapping(config, 'data'),
+			strat_zero_mask_config=_mapping(config, 'zero_mask'),
 		),
 		trainability_summary=trainability_summary,
 	)
@@ -1211,6 +1213,7 @@ def _extraction_compatible_config(
 	*,
 	output_root: Path,
 	strat_data_config: Mapping[str, object],
+	strat_zero_mask_config: Mapping[str, object],
 ) -> Mapping[str, object]:
 	result = deepcopy(dict(teacher_config))
 	paths = dict(_mapping(result, 'paths'))
@@ -1221,6 +1224,7 @@ def _extraction_compatible_config(
 		if key in strat_data_config:
 			data[key] = deepcopy(strat_data_config[key])
 	result['data'] = data
+	result['zero_mask'] = deepcopy(dict(strat_zero_mask_config))
 	return result
 
 

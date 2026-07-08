@@ -129,6 +129,27 @@ def test_strat_dataset_samples_have_at_least_one_valid_supervised_token(
 	assert np.count_nonzero(sample['strat_valid_mask']) == 1
 
 
+def test_strat_dataset_rejects_valid_tokens_below_min_confidence(
+	tmp_path: Path,
+) -> None:
+	labels = np.zeros((2, 2, 2), dtype=np.int32)
+	valid_tokens = np.ones(labels.shape, dtype=np.bool_)
+	dataset = _dataset(
+		tmp_path,
+		volume=np.ones((4, 4, 4), dtype=np.float32),
+		labels=labels,
+		valid_tokens=valid_tokens,
+		confidence=np.full(labels.shape, 0.25, dtype=np.float32),
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		min_confidence=0.5,
+		max_resample_attempts=2,
+	)
+
+	with pytest.raises(ValueError, match=r'min_confidence=0\.500000'):
+		dataset[0]
+
+
 def test_strat_dataset_allows_extra_pseudo_target_surveys(
 	tmp_path: Path,
 ) -> None:
@@ -233,12 +254,17 @@ def _dataset(  # noqa: PLR0913
 	valid_tokens: np.ndarray,
 	local_crop_size_xyz: tuple[int, int, int],
 	patch_size_xyz: tuple[int, int, int],
+	confidence: np.ndarray | None = None,
 	seed: int = 0,
 	zero_mask: ZeroMaskConfig | None = None,
 	max_resample_attempts: int = 16,
+	min_confidence: float = 0.0,
 ) -> NopimsStratPseudoTargetDataset:
 	manifest = _manifest(tmp_path, 'survey', volume)
-	confidence = np.where(valid_tokens, 1.0, 0.0).astype(np.float32)
+	if confidence is None:
+		confidence_array = np.where(valid_tokens, 1.0, 0.0).astype(np.float32)
+	else:
+		confidence_array = np.asarray(confidence, dtype=np.float32)
 	write_pseudo_target(
 		tmp_path / 'pseudo',
 		k=max(1, int(np.max(labels[valid_tokens])) + 1)
@@ -246,7 +272,7 @@ def _dataset(  # noqa: PLR0913
 		else 1,
 		survey_id='survey',
 		labels=labels,
-		confidence=confidence,
+		confidence=confidence_array,
 		valid_tokens=valid_tokens,
 	)
 	return NopimsStratPseudoTargetDataset(
@@ -262,6 +288,7 @@ def _dataset(  # noqa: PLR0913
 		seed=seed,
 		zero_mask=zero_mask or ZeroMaskConfig(enabled=False),
 		max_resample_attempts=max_resample_attempts,
+		min_confidence=min_confidence,
 	)
 
 
