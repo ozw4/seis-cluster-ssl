@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from numbers import Integral, Real
 from pathlib import Path
@@ -12,13 +12,11 @@ import numpy as np
 
 from seis_ssl_cluster.clustering.features import (
 	EmbeddingInput,
-	count_valid_tokens,
 	discover_embedding_inputs,
 	embedding_input_metadata,
 	extract_token_features,
 	load_valid_tokens,
 	open_embedding_array,
-	valid_flat_indices,
 	validate_compatible_embedding_inputs,
 )
 from seis_ssl_cluster.clustering.kmeans import (
@@ -46,7 +44,6 @@ from seis_ssl_cluster.clustering.residualization import (
 )
 from seis_ssl_cluster.clustering.sampling import (
 	SampledTokens,
-	sample_valid_embedding_tokens,
 )
 from seis_ssl_cluster.clustering.writer import SurveyLabelResult, write_json
 
@@ -142,6 +139,55 @@ def _edge_margin_tokens_from_hmm_config(
 ) -> tuple[int, int, int]:
 	value = hmm.get('edge_margin_tokens', (0, 0, 0))
 	return (int(value[0]), int(value[1]), int(value[2]))  # type: ignore[index]
+
+
+def edge_margin_mask_for_shape(
+	shape: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+) -> np.ndarray:
+	"""Return a boolean mask for tokens inside the configured edge margins."""
+	_validate_edge_margin_shape(shape, edge_margin_tokens, survey_id=None)
+	return _edge_margin_mask_for_validated_shape(shape, edge_margin_tokens)
+
+
+def _edge_margin_mask_for_validated_shape(
+	shape: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+) -> np.ndarray:
+	x_count, y_count, z_count = shape
+	mx, my, mz = edge_margin_tokens
+	mask = np.zeros(shape, dtype=np.bool_)
+	mask[
+		mx : x_count - mx,
+		my : y_count - my,
+		mz : z_count - mz,
+	] = True
+	return mask
+
+
+def hmm_valid_token_mask(
+	embedding_input: EmbeddingInput,
+	edge_margin_tokens: tuple[int, int, int],
+) -> np.ndarray:
+	"""Return original valid tokens after excluding configured HMM edge margins."""
+	valid = np.asarray(load_valid_tokens(embedding_input), dtype=np.bool_)
+	shape = valid.shape
+	_validate_edge_margin_shape(
+		shape,
+		edge_margin_tokens,
+		survey_id=embedding_input.survey_id,
+	)
+	return valid & edge_margin_mask_for_shape(shape, edge_margin_tokens)
+
+
+def hmm_valid_flat_indices(
+	embedding_input: EmbeddingInput,
+	edge_margin_tokens: tuple[int, int, int],
+) -> np.ndarray:
+	"""Return flattened HMM-valid token indices for one survey."""
+	return np.flatnonzero(
+		hmm_valid_token_mask(embedding_input, edge_margin_tokens).reshape(-1),
+	)
 
 
 def _path_prior_settings_from_hmm_config(
@@ -511,6 +557,7 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 	preprocessor: object,
 	transition_costs: np.ndarray,
 	emission_source: str = 'embedding',
+	edge_margin_tokens: tuple[int, int, int] = (0, 0, 0),
 ) -> np.ndarray:
 	"""Decode HMM labels for one survey without flattening all features at once."""
 	center_matrix = np.asarray(centers, dtype=np.float32)
@@ -518,7 +565,7 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 		msg = f'centers must be a non-empty 2D matrix; got {center_matrix.shape!r}'
 		raise ValueError(msg)
 	embeddings = open_embedding_array(embedding_input)
-	valid = load_valid_tokens(embedding_input)
+	valid = hmm_valid_token_mask(embedding_input, edge_margin_tokens)
 	shape = embeddings.shape[:3]
 	labels = np.full(shape, -1, dtype=np.int32)
 	x_count, y_count, z_count = shape
@@ -569,6 +616,7 @@ def _decode_all_surveys(  # noqa: PLR0913
 	preprocessor: object,
 	transition_costs: np.ndarray,
 	emission_source: str,
+	edge_margin_tokens: tuple[int, int, int],
 ) -> dict[str, np.ndarray]:
 	return {
 		item.survey_id: decode_survey_ordered_labels(
@@ -578,6 +626,7 @@ def _decode_all_surveys(  # noqa: PLR0913
 			preprocessor=preprocessor,
 			transition_costs=transition_costs,
 			emission_source=emission_source,
+			edge_margin_tokens=edge_margin_tokens,
 		)
 		for item in embedding_inputs
 	}
@@ -680,11 +729,18 @@ def run_stratigraphic_hmm_clustering(
 	hmm_settings = stratigraphic_hmm_settings_from_config(config)
 	embedding_inputs = tuple(discover_embedding_inputs(settings.input_dir))
 	compatibility_signature = validate_compatible_embedding_inputs(embedding_inputs)
+	edge_margin_excluded_valid_token_count = (
+		_edge_margin_excluded_valid_token_count(
+			embedding_inputs,
+			hmm_settings.edge_margin_tokens,
+		)
+	)
 	if hmm_settings.emission_source == 'embedding':
-		sample = sample_valid_embedding_tokens(
+		sample = _sample_valid_hmm_embedding_tokens(
 			embedding_inputs,
 			sample_tokens=settings.sample_tokens,
 			seed=settings.seed,
+			edge_margin_tokens=hmm_settings.edge_margin_tokens,
 		)
 		residualizer = fit_residualizer(
 			sample.features,
@@ -704,6 +760,7 @@ def run_stratigraphic_hmm_clustering(
 			embedding_inputs,
 			sample_tokens=settings.sample_tokens,
 			seed=settings.seed,
+			edge_margin_tokens=hmm_settings.edge_margin_tokens,
 		)
 		residualizer = None
 		training_input_features = np.asarray(sample.features, dtype=np.float32)
@@ -778,6 +835,7 @@ def run_stratigraphic_hmm_clustering(
 				preprocessor=preprocessor,
 				transition_costs=transition_costs,
 				emission_source=hmm_settings.emission_source,
+				edge_margin_tokens=hmm_settings.edge_margin_tokens,
 			)
 			centers, summary = update_centers_from_labels(
 				embedding_inputs,
@@ -798,6 +856,7 @@ def run_stratigraphic_hmm_clustering(
 			preprocessor=preprocessor,
 			transition_costs=transition_costs,
 			emission_source=hmm_settings.emission_source,
+			edge_margin_tokens=hmm_settings.edge_margin_tokens,
 		)
 
 		label_results = _write_hmm_labels_for_k(
@@ -823,6 +882,9 @@ def run_stratigraphic_hmm_clustering(
 			hmm_settings=hmm_settings,
 			transition_costs=transition_costs,
 			iteration_summaries=iteration_summaries,
+			edge_margin_excluded_valid_token_count=(
+				edge_margin_excluded_valid_token_count
+			),
 		)
 		metadata = {
 			**common_metadata,
@@ -884,13 +946,49 @@ def run_stratigraphic_hmm_clustering(
 	)
 
 
+def _sample_valid_hmm_embedding_tokens(
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	*,
+	sample_tokens: int,
+	seed: int,
+	edge_margin_tokens: tuple[int, int, int],
+) -> SampledTokens:
+	"""Sample HMM-valid token embeddings after edge-margin exclusion."""
+	return _sample_valid_hmm_tokens(
+		embedding_inputs,
+		sample_tokens=sample_tokens,
+		seed=seed,
+		edge_margin_tokens=edge_margin_tokens,
+		feature_loader=extract_token_features,
+	)
+
+
 def _sample_valid_z_tokens(
 	embedding_inputs: tuple[EmbeddingInput, ...],
 	*,
 	sample_tokens: int,
 	seed: int,
+	edge_margin_tokens: tuple[int, int, int],
 ) -> SampledTokens:
 	"""Sample valid token indices and use normalized z as training features."""
+	return _sample_valid_hmm_tokens(
+		embedding_inputs,
+		sample_tokens=sample_tokens,
+		seed=seed,
+		edge_margin_tokens=edge_margin_tokens,
+		feature_loader=normalized_z_features_for_indices,
+	)
+
+
+def _sample_valid_hmm_tokens(
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	*,
+	sample_tokens: int,
+	seed: int,
+	edge_margin_tokens: tuple[int, int, int],
+	feature_loader: Callable[[EmbeddingInput, np.ndarray], np.ndarray],
+) -> SampledTokens:
+	"""Sample HMM-valid token indices and load matching training features."""
 	if sample_tokens <= 0:
 		msg = f'sample_tokens must be positive; got {sample_tokens!r}'
 		raise ValueError(msg)
@@ -898,7 +996,14 @@ def _sample_valid_z_tokens(
 		msg = 'at least one embedding input is required'
 		raise ValueError(msg)
 
-	valid_counts = [count_valid_tokens(item) for item in embedding_inputs]
+	valid_indices_by_survey = {
+		item.survey_id: hmm_valid_flat_indices(item, edge_margin_tokens)
+		for item in embedding_inputs
+	}
+	valid_counts = [
+		int(valid_indices_by_survey[item.survey_id].size)
+		for item in embedding_inputs
+	]
 	total_valid = int(sum(valid_counts))
 	if total_valid == 0:
 		msg = 'cannot cluster embeddings because no valid tokens were found'
@@ -917,12 +1022,10 @@ def _sample_valid_z_tokens(
 		mask = (selected_global >= offset) & (selected_global < stop)
 		local_valid_ordinals = selected_global[mask] - offset
 		if local_valid_ordinals.size:
-			all_valid_indices = valid_flat_indices(item)
+			all_valid_indices = valid_indices_by_survey[item.survey_id]
 			token_indices = all_valid_indices[local_valid_ordinals]
 			per_survey_indices[item.survey_id] = token_indices
-			feature_blocks.append(
-				normalized_z_features_for_indices(item, token_indices)
-			)
+			feature_blocks.append(feature_loader(item, token_indices))
 		else:
 			per_survey_indices[item.survey_id] = np.empty(0, dtype=np.int64)
 		offset = stop
@@ -1033,6 +1136,7 @@ def _hmm_metadata(
 	hmm_settings: StratigraphicHMMSettings,
 	transition_costs: np.ndarray,
 	iteration_summaries: list[dict[str, object]],
+	edge_margin_excluded_valid_token_count: int,
 ) -> dict[str, object]:
 	return {
 		'emission_source': hmm_settings.emission_source,
@@ -1044,6 +1148,9 @@ def _hmm_metadata(
 		'init': {'order_by': hmm_settings.init_order_by},
 		'update': {'empty_cluster_policy': hmm_settings.empty_cluster_policy},
 		'edge_margin_tokens': list(hmm_settings.edge_margin_tokens),
+		'edge_margin_excluded_valid_token_count': int(
+			edge_margin_excluded_valid_token_count
+		),
 		'path_prior': asdict(hmm_settings.path_prior),
 		'iteration_summaries': iteration_summaries,
 	}
@@ -1078,6 +1185,63 @@ def _emission_feature_metadata(emission_source: str) -> dict[str, object]:
 			'embedding_features',
 		],
 	}
+
+
+def _edge_margin_excluded_valid_token_count(
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	edge_margin_tokens: tuple[int, int, int],
+) -> int:
+	count = 0
+	for item in embedding_inputs:
+		valid = np.asarray(load_valid_tokens(item), dtype=np.bool_)
+		_validate_edge_margin_shape(
+			valid.shape,
+			edge_margin_tokens,
+			survey_id=item.survey_id,
+		)
+		margin_mask = _edge_margin_mask_for_validated_shape(
+			valid.shape,
+			edge_margin_tokens,
+		)
+		count += int(np.count_nonzero(valid & ~margin_mask))
+	return count
+
+
+def _validate_edge_margin_shape(
+	shape: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+	*,
+	survey_id: str | None,
+) -> None:
+	if len(shape) != 3:
+		msg = f'token grid shape must have three axes; got {shape!r}'
+		raise ValueError(msg)
+	if len(edge_margin_tokens) != 3:
+		msg = (
+			'edge_margin_tokens must contain exactly three integers; '
+			f'got {edge_margin_tokens!r}'
+		)
+		raise ValueError(msg)
+	for value in edge_margin_tokens:
+		if value < 0:
+			msg = f'edge_margin_tokens must be non-negative; got {edge_margin_tokens!r}'
+			raise ValueError(msg)
+	if any(
+		(2 * margin) >= size
+		for size, margin in zip(shape, edge_margin_tokens, strict=True)
+	):
+		margin_text = '[' + ','.join(str(value) for value in edge_margin_tokens) + ']'
+		if survey_id is None:
+			msg = (
+				f'edge_margin_tokens {margin_text} leave no interior tokens '
+				f'for token grid shape {shape}'
+			)
+		else:
+			msg = (
+				f'edge_margin_tokens {margin_text} leave no interior tokens '
+				f'for survey {survey_id} with token grid shape {shape}'
+			)
+		raise ValueError(msg)
 
 
 def _validate_transition_settings(settings: HMMTransitionSettings) -> None:
