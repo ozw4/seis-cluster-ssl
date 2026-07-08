@@ -167,6 +167,7 @@ def run_embedding_extraction(
 			store=store,
 			settings=settings,
 			checkpoint_config=checkpoint_config,
+			checkpoint_payload=payload,
 			checkpoint_sha256=checkpoint_sha256,
 			device=resolved_device,
 			skip_existing=skip_existing,
@@ -288,6 +289,7 @@ def extract_survey_embeddings(  # noqa: PLR0913
 	store: NpyMemmapVolumeStore,
 	settings: EmbeddingExtractionSettings,
 	checkpoint_config: Mapping[str, object],
+	checkpoint_payload: Mapping[str, object],
 	checkpoint_sha256: str,
 	device: torch.device,
 	skip_existing: bool,
@@ -308,6 +310,7 @@ def extract_survey_embeddings(  # noqa: PLR0913
 		stats_path=stats_path,
 		settings=settings,
 		checkpoint_config=checkpoint_config,
+		checkpoint_payload=checkpoint_payload,
 		checkpoint_sha256=checkpoint_sha256,
 		model=model,
 		token_grid_shape=token_grid,
@@ -376,6 +379,7 @@ def build_embedding_metadata(  # noqa: PLR0913
 	stats_path: Path,
 	settings: EmbeddingExtractionSettings,
 	checkpoint_config: Mapping[str, object],
+	checkpoint_payload: Mapping[str, object] | None = None,
 	checkpoint_sha256: str | None = None,
 	model: AmplitudeMAE3D,
 	token_grid_shape: XYZ,
@@ -386,7 +390,7 @@ def build_embedding_metadata(  # noqa: PLR0913
 		if checkpoint_sha256 is None
 		else checkpoint_sha256
 	)
-	return {
+	metadata = {
 		'survey_id': manifest.survey_id,
 		'source_amplitude_path': str(amplitude_path),
 		'volume_shape_xyz': list(manifest.amplitude.shape_xyz),
@@ -414,6 +418,11 @@ def build_embedding_metadata(  # noqa: PLR0913
 		},
 		'pretraining_objective': _pretraining_objective(checkpoint_config),
 	}
+	if checkpoint_payload is not None:
+		stratigraphy_pretext = _stratigraphy_pretext_metadata(checkpoint_payload)
+		if stratigraphy_pretext is not None:
+			metadata['stratigraphy_pretext'] = stratigraphy_pretext
+	return metadata
 
 
 def _process_window_batch(  # noqa: PLR0913
@@ -837,6 +846,42 @@ def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 	else:
 		objective['target_normalization'] = {'mode': 'none'}
 	return objective
+
+
+def _stratigraphy_pretext_metadata(
+	payload: Mapping[str, object],
+) -> dict[str, object] | None:
+	if 'stratigraphy_config' not in payload:
+		return None
+	stratigraphy_config = payload['stratigraphy_config']
+	if not isinstance(stratigraphy_config, Mapping):
+		msg = 'checkpoint stratigraphy_config must be a mapping'
+		raise TypeError(msg)
+	head = _required_mapping(stratigraphy_config, 'head')
+	student = _required_mapping(stratigraphy_config, 'student')
+	loss = _required_mapping(stratigraphy_config, 'loss')
+	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
+	return {
+		'method': 'strat_hmm_pretext',
+		'base_objective': 'amp_mae3d',
+		'head_num_prototypes': _positive_int(
+			head.get('num_prototypes'),
+			'stratigraphy_config.head.num_prototypes',
+		),
+		'unfreeze_top_blocks': _nonnegative_int(
+			student.get('unfreeze_top_blocks'),
+			'stratigraphy_config.student.unfreeze_top_blocks',
+		),
+		'distillation_weight': _nonnegative_finite_number(
+			loss.get('distillation_weight'),
+			'stratigraphy_config.loss.distillation_weight',
+		),
+		'pseudo_target_input_dir': _required_non_empty_string(
+			pseudo_targets,
+			'input_dir',
+			'stratigraphy_config.pseudo_targets',
+		),
+	}
 
 
 def _validate_checkpoint_train(train: Mapping[str, object]) -> None:
