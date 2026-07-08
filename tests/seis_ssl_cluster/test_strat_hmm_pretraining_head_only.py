@@ -16,17 +16,26 @@ from seis_ssl_cluster.config.pretraining import resolve_strat_hmm_pretext_config
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
+	NopimsStratPseudoTargetDataset,
 	SurveyManifest,
 	SurveyNormalizationStats,
+	ZeroMaskConfig,
+	read_manifest_json,
 	write_manifest_json,
 	write_normalization_stats,
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-from seis_ssl_cluster.stratigraphy import write_pseudo_target
+from seis_ssl_cluster.stratigraphy import (
+	discover_pseudo_target_inputs,
+	write_pseudo_target,
+)
 from seis_ssl_cluster.training import load_checkpoint
+from seis_ssl_cluster.training.dataloaders import build_strat_pseudo_target_dataloader
 from seis_ssl_cluster.training.strat_hmm_pretraining import (
 	build_strat_hmm_head_only_components,
+	configure_student_trainability,
 	run_strat_hmm_pretext_training,
+	train_strat_hmm_head_only_one_epoch,
 )
 
 if TYPE_CHECKING:
@@ -51,6 +60,8 @@ def test_head_only_training_runs_cpu_writes_checkpoints_and_payloads(
 	assert math.isfinite(payload['metrics']['loss'])
 	assert math.isfinite(payload['metrics']['loss_prototype'])
 	assert math.isfinite(payload['metrics']['loss_usage'])
+	assert payload['metrics']['trainable_parameter_count'] == pytest.approx(0.0)
+	assert payload['trainability_summary']['trainable_names'] == []
 	assert set(payload['metrics']) >= {
 		'valid_supervised_token_fraction',
 		'target_usage_entropy',
@@ -87,6 +98,122 @@ def test_head_only_components_freeze_student_and_train_head(tmp_path: Path) -> N
 	assert optimizer_parameter_ids == head_parameter_ids
 
 
+def test_components_reject_unfreeze_without_distillation(tmp_path: Path) -> None:
+	config = _raw_config(
+		tmp_path,
+		encoder_depth=2,
+		unfreeze_top_blocks=1,
+		distillation_weight=0.0,
+	)
+
+	with pytest.raises(ValueError, match=r'loss\.distillation_weight'):
+		build_strat_hmm_head_only_components(config, device=torch.device('cpu'))
+
+
+def test_configure_student_trainability_unfreezes_only_top_blocks() -> None:
+	model = AmplitudeMAE3D(
+		in_channels=1,
+		out_channels=1,
+		patch_size_xyz=(2, 2, 2),
+		encoder_dim=12,
+		encoder_depth=3,
+		encoder_heads=3,
+		decoder_dim=12,
+		decoder_depth=1,
+		decoder_heads=3,
+	)
+
+	summary = configure_student_trainability(model, unfreeze_top_blocks=0)
+
+	assert summary.trainable_parameter_count == 0
+	assert summary.trainable_names == ()
+	assert all(not parameter.requires_grad for parameter in model.parameters())
+
+	summary = configure_student_trainability(model, unfreeze_top_blocks=2)
+
+	assert summary.trainable_parameter_count > 0
+	assert summary.trainable_names
+	assert all(
+		name.startswith(('encoder.layers.1.', 'encoder.layers.2.'))
+		for name in summary.trainable_names
+	)
+	assert all(
+		not parameter.requires_grad
+		for name, parameter in model.named_parameters()
+		if not name.startswith(('encoder.layers.1.', 'encoder.layers.2.'))
+	)
+
+	with pytest.raises(ValueError, match='unfreeze_top_blocks'):
+		configure_student_trainability(model, unfreeze_top_blocks=4)
+
+
+def test_unfreeze_top_block_optimizer_lrs_and_gradients(tmp_path: Path) -> None:
+	config = _resolved_config(
+		tmp_path,
+		encoder_depth=2,
+		unfreeze_top_blocks=1,
+		distillation_weight=0.25,
+	)
+	components = build_strat_hmm_head_only_components(
+		config,
+		device=torch.device('cpu'),
+	)
+	dataloader = _single_batch_dataloader(config)
+
+	state = train_strat_hmm_head_only_one_epoch(
+		student=components.student,
+		teacher=components.teacher,
+		head=components.head,
+		dataloader=dataloader,
+		optimizer=components.optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		loss_config=config['loss'],
+		pseudo_target_config=config['pseudo_targets'],
+		max_steps=1,
+	)
+
+	assert state.global_step == 1
+	assert state.metrics['loss_distillation'] >= -1.0e-6
+	assert [group['lr'] for group in components.optimizer.param_groups] == [
+		pytest.approx(config['train']['lr']),
+		pytest.approx(config['train']['encoder_lr']),
+	]
+	bottom_grads = [
+		parameter.grad
+		for parameter in components.student.encoder.layers[0].parameters()
+	]
+	top_grads = [
+		parameter.grad
+		for parameter in components.student.encoder.layers[-1].parameters()
+	]
+	assert all(grad is None for grad in bottom_grads)
+	assert any(
+		grad is not None and bool(grad.abs().sum().gt(0).item())
+		for grad in top_grads
+	)
+	assert components.teacher is not None
+	assert all(parameter.grad is None for parameter in components.teacher.parameters())
+
+
+def test_unfreeze_distillation_smoke_writes_checkpoint(tmp_path: Path) -> None:
+	config = _resolved_config(
+		tmp_path,
+		encoder_depth=2,
+		unfreeze_top_blocks=1,
+		distillation_weight=0.2,
+		max_steps=1,
+	)
+
+	checkpoint_path = run_strat_hmm_pretext_training(config)
+
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	assert payload['global_step'] == 1
+	assert math.isfinite(payload['metrics']['loss_distillation'])
+	assert payload['metrics']['trainable_parameter_count'] > 0.0
+	assert payload['trainability_summary']['trainable_names']
+
+
 def test_invalid_pseudo_target_tokens_are_ignored(tmp_path: Path) -> None:
 	config = _resolved_config(tmp_path, invalid_first_token=True, max_steps=1)
 
@@ -99,11 +226,24 @@ def test_invalid_pseudo_target_tokens_are_ignored(tmp_path: Path) -> None:
 	assert math.isfinite(payload['metrics']['loss'])
 
 
-def test_resume_is_rejected_clearly(tmp_path: Path) -> None:
-	config = _resolved_config(tmp_path)
+def test_resume_advances_and_rejects_incompatible_head_config(tmp_path: Path) -> None:
+	config = _resolved_config(tmp_path, max_steps=1)
 
-	with pytest.raises(NotImplementedError, match='resume'):
-		run_strat_hmm_pretext_training(config, resume=config['teacher']['checkpoint'])
+	first_checkpoint = run_strat_hmm_pretext_training(config)
+	config['train']['max_steps'] = 2
+	resumed_checkpoint = run_strat_hmm_pretext_training(
+		config,
+		resume=first_checkpoint,
+	)
+
+	payload = load_checkpoint(resumed_checkpoint, map_location='cpu')
+	assert payload['global_step'] == 2
+
+	incompatible = deepcopy(config)
+	incompatible['head'] = dict(config['head'])
+	incompatible['head']['temperature'] = 0.25
+	with pytest.raises(ValueError, match=r'head\.temperature'):
+		run_strat_hmm_pretext_training(incompatible, resume=resumed_checkpoint)
 
 
 def test_cli_non_dry_run_executes_one_step(tmp_path: Path) -> None:
@@ -137,30 +277,40 @@ def test_cli_non_dry_run_executes_one_step(tmp_path: Path) -> None:
 	assert payload['global_step'] == 1
 
 
-def _resolved_config(
+def _resolved_config(  # noqa: PLR0913
 	tmp_path: Path,
 	*,
 	invalid_first_token: bool = False,
 	max_steps: int | None = None,
+	encoder_depth: int = 1,
+	unfreeze_top_blocks: int = 0,
+	distillation_weight: float = 0.0,
 ) -> dict[str, object]:
 	return resolve_strat_hmm_pretext_config(
 		_raw_config(
 			tmp_path,
 			invalid_first_token=invalid_first_token,
 			max_steps=max_steps,
+			encoder_depth=encoder_depth,
+			unfreeze_top_blocks=unfreeze_top_blocks,
+			distillation_weight=distillation_weight,
 		),
 	)
 
 
-def _raw_config(
+def _raw_config(  # noqa: PLR0913
 	tmp_path: Path,
 	*,
 	invalid_first_token: bool = False,
 	max_steps: int | None = None,
+	encoder_depth: int = 1,
+	unfreeze_top_blocks: int = 0,
+	distillation_weight: float = 0.0,
 ) -> dict[str, object]:
 	paths = _write_fixture_files(
 		tmp_path,
 		invalid_first_token=invalid_first_token,
+		encoder_depth=encoder_depth,
 	)
 	artifact_root = tmp_path / 'artifacts'
 	output_root = artifact_root / 'pretraining' / 'strat_hmm_head_only'
@@ -181,7 +331,7 @@ def _raw_config(
 		'model': {
 			'patch_size': [2, 2, 2],
 			'encoder_dim': 12,
-			'encoder_depth': 1,
+			'encoder_depth': encoder_depth,
 			'encoder_heads': 3,
 			'decoder_dim': 12,
 			'decoder_depth': 1,
@@ -193,7 +343,7 @@ def _raw_config(
 			'min_confidence': 0.0,
 		},
 		'teacher': {'checkpoint': str(paths['teacher_checkpoint'])},
-		'student': {},
+		'student': {'unfreeze_top_blocks': unfreeze_top_blocks},
 		'head': {
 			'num_prototypes': 3,
 			'projection_dim': 6,
@@ -201,6 +351,7 @@ def _raw_config(
 		},
 		'loss': {
 			'usage_weight': 0.01,
+			'distillation_weight': distillation_weight,
 			'entropy_floor': None,
 		},
 		'train': {
@@ -210,6 +361,7 @@ def _raw_config(
 			'num_workers': 0,
 			'shuffle': False,
 			'lr': 1.0e-2,
+			'encoder_lr': 1.0e-3,
 			'weight_decay': 0.0,
 			'amp': False,
 			'device': 'cpu',
@@ -229,10 +381,45 @@ def _raw_config(
 	return config
 
 
+def _single_batch_dataloader(
+	config: Mapping[str, object],
+) -> torch.utils.data.DataLoader:
+	manifests = read_manifest_json(Path(config['manifests']['train']))
+	pseudo_inputs = discover_pseudo_target_inputs(
+		Path(config['pseudo_targets']['input_dir']),
+		k=int(config['pseudo_targets']['k']),
+	)
+	dataset = NopimsStratPseudoTargetDataset(
+		manifests,
+		pseudo_inputs,
+		local_crop_size_xyz=tuple(config['data']['local_crop_size']),
+		patch_size_xyz=tuple(config['model']['patch_size']),
+		seed=int(config['train']['seed']),
+		samples_per_epoch=1,
+		zero_mask=ZeroMaskConfig(
+			enabled=False,
+			zero_atol=0.0,
+			z_sample_influence_radius=0,
+			xy_trace_influence_radius=0,
+		),
+		min_valid_fraction=0.0,
+		max_resample_attempts=2,
+	)
+	return build_strat_pseudo_target_dataloader(
+		dataset,
+		batch_size=1,
+		num_workers=0,
+		shuffle=False,
+		seed=int(config['train']['seed']),
+		device='cpu',
+	)
+
+
 def _write_fixture_files(
 	tmp_path: Path,
 	*,
 	invalid_first_token: bool,
+	encoder_depth: int = 1,
 ) -> Mapping[str, Path]:
 	volume = np.linspace(-1.0, 1.0, num=4 * 4 * 4, dtype=np.float32).reshape(4, 4, 4)
 	volume_path = tmp_path / 'survey' / 'amplitude.npy'
@@ -291,6 +478,7 @@ def _write_fixture_files(
 		teacher_checkpoint,
 		manifest_path=manifest_path,
 		path_list=path_list,
+		encoder_depth=encoder_depth,
 	)
 	return {
 		'manifest': manifest_path,
@@ -305,6 +493,7 @@ def _write_teacher_checkpoint(
 	*,
 	manifest_path: Path,
 	path_list: Path,
+	encoder_depth: int = 1,
 ) -> None:
 	torch.manual_seed(5)
 	model = AmplitudeMAE3D(
@@ -312,7 +501,7 @@ def _write_teacher_checkpoint(
 		out_channels=1,
 		patch_size_xyz=(2, 2, 2),
 		encoder_dim=12,
-		encoder_depth=1,
+		encoder_depth=encoder_depth,
 		encoder_heads=3,
 		decoder_dim=12,
 		decoder_depth=1,
@@ -321,6 +510,7 @@ def _write_teacher_checkpoint(
 	checkpoint_config = _teacher_checkpoint_config(
 		manifest_path=manifest_path,
 		path_list=path_list,
+		encoder_depth=encoder_depth,
 	)
 	torch.save(
 		{
@@ -335,6 +525,7 @@ def _teacher_checkpoint_config(
 	*,
 	manifest_path: Path,
 	path_list: Path,
+	encoder_depth: int = 1,
 ) -> dict[str, object]:
 	return deepcopy(
 		{
@@ -361,7 +552,7 @@ def _teacher_checkpoint_config(
 				'out_channels': 1,
 				'patch_size': [2, 2, 2],
 				'encoder_dim': 12,
-				'encoder_depth': 1,
+				'encoder_depth': encoder_depth,
 				'encoder_heads': 3,
 				'decoder_dim': 12,
 				'decoder_depth': 1,

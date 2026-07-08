@@ -44,6 +44,7 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 	scaler: torch.amp.GradScaler | None = None,
 	rng_state: Mapping[str, object] | None = None,
 	best_score: float | None = None,
+	trainability_summary: Mapping[str, object] | None = None,
 ) -> StratRollingCheckpointResult:
 	"""Write rolling ``latest.pt`` and update ``best.pt`` on lower loss."""
 	checkpoint_root = Path(checkpoint_dir)
@@ -62,6 +63,7 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 		checkpoint_kind=checkpoint_kind,
 		batch_index=batch_index,
 		rng_state=rng_state,
+		trainability_summary=trainability_summary,
 	)
 	score = _loss_score(metrics)
 	best_updated = _is_improved(score, best_score)
@@ -94,6 +96,7 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	amp_enabled: bool = False,
 	scaler: torch.amp.GradScaler | None = None,
 	rng_state: Mapping[str, object] | None = None,
+	trainability_summary: Mapping[str, object] | None = None,
 ) -> Path:
 	"""Atomically save an extraction-compatible strat HMM checkpoint."""
 	checkpoint_path = Path(path)
@@ -110,6 +113,11 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 		'config': _to_plain_value(mae_config),
 		'package_version': getattr(seis_ssl_cluster, '__version__', None),
 		'metrics': dict(metrics),
+		'trainability_summary': (
+			{}
+			if trainability_summary is None
+			else _to_plain_value(trainability_summary)
+		),
 		'rng_state': dict(capture_rng_state() if rng_state is None else rng_state),
 		'training_state': {
 			'schema_version': 1,
