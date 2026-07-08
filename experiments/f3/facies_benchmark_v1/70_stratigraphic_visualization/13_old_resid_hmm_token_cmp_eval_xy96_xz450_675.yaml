@@ -1,0 +1,38 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+
+clustering:
+  input_dir: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_10_pca64_resid_token_phase_iter10
+
+visualization:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/visualizations/clusters/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_10_pca64_resid_token_phase_iter10/token_cmp_eval_xy96_xz450_675
+  survey_ids:
+    - f3_facies_benchmark
+
+  modes:
+    - token
+
+  reconstruct_voxel: false
+  allow_all_surveys_for_voxel_reconstruction: false
+  skip_existing_voxel_labels: true
+  max_voxel_output_gib: 50.0
+  allow_large_voxel_output: false
+
+  slice_coordinate_space: voxel
+  xy_slices: [96]
+  xz_slices: [450, 675]
+
+  dpi: 160
+  invalid_color: lightgray
+
+  amplitude_underlay:
+    enabled: false
+    alpha: 0.35
+
+  amplitude_comparison:
+    enabled: true
+    alpha: 0.35
+
+  summaries:
+    enabled: true
+    include_amplitude_norm: false
