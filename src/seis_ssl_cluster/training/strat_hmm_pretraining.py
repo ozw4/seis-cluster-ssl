@@ -8,7 +8,6 @@ import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
@@ -37,6 +36,12 @@ from seis_ssl_cluster.training.checkpoint import (
 from seis_ssl_cluster.training.collate import move_batch_to_device
 from seis_ssl_cluster.training.dataloaders import build_strat_pseudo_target_dataloader
 from seis_ssl_cluster.training.mae import prepare_run_directory
+from seis_ssl_cluster.training.strat_hmm.state import (
+	StratHmmHeadOnlyComponents,
+	StratHmmResumeState,
+	StratHmmTrainingState,
+	TrainabilitySummary,
+)
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	save_strat_hmm_rolling_checkpoint,
 )
@@ -56,47 +61,6 @@ MODEL_GEOMETRY_KEYS = (
 	'decoder_depth',
 	'decoder_heads',
 )
-
-
-@dataclass(frozen=True)
-class StratHmmTrainingState:
-	"""Summary state returned from one strat HMM training epoch."""
-
-	epoch: int
-	global_step: int
-	metrics: dict[str, float]
-	last_batch_index: int
-	completed_epoch: bool
-
-
-@dataclass(frozen=True)
-class StratHmmResumeState:
-	"""Resolved checkpoint resume location."""
-
-	start_epoch: int
-	global_step: int
-	skip_batches: int
-
-
-@dataclass(frozen=True)
-class TrainabilitySummary:
-	"""Summary of student MAE trainability after milestone-1 configuration."""
-
-	trainable_parameter_count: int
-	frozen_parameter_count: int
-	trainable_names: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class StratHmmHeadOnlyComponents:
-	"""Trainable components for strat HMM pretext training."""
-
-	student: AmplitudeMAE3D
-	teacher: AmplitudeMAE3D | None
-	head: OrderedPrototypeHead
-	optimizer: torch.optim.Optimizer
-	mae_checkpoint_config: Mapping[str, object]
-	trainability_summary: TrainabilitySummary
 
 
 def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
