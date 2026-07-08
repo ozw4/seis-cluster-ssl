@@ -88,6 +88,14 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'train_strat_hmm_pretext.py': (
+		'--config',
+		'--dry-run',
+		'--device',
+		'--max-steps',
+		'--output-root',
+		'--resume',
+	),
 	'validate_artifact_paths.py': (
 		'--root',
 		'--scan',

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from copy import deepcopy
-from pathlib import Path
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 from seis_ssl_cluster.config.common import (
 	_iter_mapping_keys,
@@ -26,7 +24,12 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_NORMALIZATION_QC,
 	STAGE_NORMALIZATION_STATS,
 	STAGE_PATH_KEYS,
+	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 )
+
+if TYPE_CHECKING:
+	from collections.abc import Mapping
+	from pathlib import Path
 
 Config: TypeAlias = dict[str, object]
 
@@ -49,6 +52,21 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 			'visualization',
 		},
 	),
+	STAGE_STRAT_HMM_PRETEXT_TRAINING: frozenset(
+		{
+			'paths',
+			'manifests',
+			'data',
+			'zero_mask',
+			'model',
+			'pseudo_targets',
+			'teacher',
+			'student',
+			'head',
+			'loss',
+			'train',
+		},
+	),
 	STAGE_EMBEDDING_EXTRACTION: frozenset(
 		{'paths', 'manifests', 'embeddings', 'embedding'},
 	),
@@ -66,6 +84,20 @@ _REQUIRED_TOP_LEVEL: dict[str, frozenset[str]] = {
 	STAGE_NORMALIZATION_QC: frozenset({'paths', 'manifests', 'splits', 'qc'}),
 	STAGE_MAE_TRAINING: frozenset(
 		{'paths', 'manifests', 'data', 'model', 'masking', 'loss', 'train'},
+	),
+	STAGE_STRAT_HMM_PRETEXT_TRAINING: frozenset(
+		{
+			'paths',
+			'manifests',
+			'data',
+			'model',
+			'pseudo_targets',
+			'teacher',
+			'student',
+			'head',
+			'loss',
+			'train',
+		},
 	),
 	STAGE_EMBEDDING_EXTRACTION: frozenset(
 		{'paths', 'manifests', 'embeddings', 'embedding'},

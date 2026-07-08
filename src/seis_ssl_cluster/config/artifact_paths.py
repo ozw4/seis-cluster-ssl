@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config.common import _is_relative_to
 from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey, reject_runs_path
+
+if TYPE_CHECKING:
+	from pathlib import Path
 
 _NOPIMS_DATASET = 'nopims'
 _NOPIMS_PRETRAIN_VERSION = 'pretrain_v1'

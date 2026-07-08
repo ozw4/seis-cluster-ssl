@@ -29,6 +29,24 @@ def mae_collate_fn(
 	}
 
 
+def strat_pseudo_target_collate_fn(
+	samples: Sequence[Mapping[str, object]],
+) -> dict[str, torch.Tensor | object]:
+	"""Collate token-aligned stratigraphic pseudo-target samples."""
+	if not samples:
+		msg = 'samples must contain at least one sample'
+		raise ValueError(msg)
+
+	return {
+		'x': _stack_arrays(samples, 'x'),
+		'local_valid_mask': _stack_arrays(samples, 'local_valid_mask'),
+		'strat_labels': _stack_arrays(samples, 'strat_labels'),
+		'strat_confidence': _stack_arrays(samples, 'strat_confidence'),
+		'strat_valid_mask': _stack_arrays(samples, 'strat_valid_mask'),
+		'coords': [sample.get('coords') for sample in samples],
+	}
+
+
 def move_batch_to_device(
 	batch: Mapping[str, object],
 	device: torch.device,
@@ -83,4 +101,8 @@ def _torch_dtype(array: np.ndarray) -> torch.dtype:
 	raise TypeError(msg)
 
 
-__all__ = ['mae_collate_fn', 'move_batch_to_device']
+__all__ = [
+	'mae_collate_fn',
+	'move_batch_to_device',
+	'strat_pseudo_target_collate_fn',
+]

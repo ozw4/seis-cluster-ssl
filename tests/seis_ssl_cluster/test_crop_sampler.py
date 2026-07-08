@@ -8,6 +8,7 @@ from seis_ssl_cluster.data import (
 	required_zero_mask_margin_xyz,
 	rng_for_sample,
 	sample_random_local_crop,
+	sample_random_token_aligned_local_crop,
 	select_round_robin_index,
 )
 from seis_ssl_cluster.data.schema import CropRequest
@@ -46,6 +47,50 @@ def test_sample_random_local_crop_rejects_crop_larger_than_volume() -> None:
 		sample_random_local_crop(
 			(4, 5, 6),
 			(4, 6, 6),
+			np.random.default_rng(0),
+		)
+
+
+def test_sample_random_token_aligned_local_crop_uses_patch_multiples() -> None:
+	requests = [
+		sample_random_token_aligned_local_crop(
+			(10, 11, 12),
+			(4, 6, 8),
+			(2, 3, 4),
+			rng_for_sample(13, 0, index),
+			survey_id='survey',
+		)
+		for index in range(20)
+	]
+
+	for request in requests:
+		assert request.survey_id == 'survey'
+		assert request.size_xyz == (4, 6, 8)
+		assert all(
+			start_axis % patch_axis == 0
+			for start_axis, patch_axis in zip(
+				request.start_xyz,
+				(2, 3, 4),
+				strict=True,
+			)
+		)
+		assert all(
+			0 <= start_axis <= shape_axis - size_axis
+			for start_axis, shape_axis, size_axis in zip(
+				request.start_xyz,
+				(10, 11, 12),
+				request.size_xyz,
+				strict=True,
+			)
+		)
+
+
+def test_sample_random_token_aligned_local_crop_rejects_non_divisible_crop() -> None:
+	with pytest.raises(ValueError, match='divisible'):
+		sample_random_token_aligned_local_crop(
+			(8, 8, 8),
+			(4, 5, 4),
+			(2, 2, 2),
 			np.random.default_rng(0),
 		)
 

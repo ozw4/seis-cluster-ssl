@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from seis_ssl_cluster.training.collate import mae_collate_fn
+from seis_ssl_cluster.training.collate import (
+	mae_collate_fn,
+	strat_pseudo_target_collate_fn,
+)
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
@@ -43,6 +46,35 @@ def build_mae_dataloader(  # noqa: PLR0913
 	)
 
 
+def build_strat_pseudo_target_dataloader(  # noqa: PLR0913
+	dataset: object,
+	*,
+	batch_size: int,
+	num_workers: int = 0,
+	shuffle: bool = True,
+	seed: int = 42,
+	device: str | torch.device = 'cpu',
+) -> torch.utils.data.DataLoader:
+	"""Build a deterministic stratigraphic pseudo-target DataLoader."""
+	if num_workers < 0:
+		msg = f'num_workers must be nonnegative; got {num_workers!r}'
+		raise ValueError(msg)
+	generator = torch.Generator()
+	generator.manual_seed(seed)
+	torch_device = torch.device(device)
+	return torch.utils.data.DataLoader(
+		dataset,
+		batch_size=batch_size,
+		shuffle=shuffle,
+		num_workers=num_workers,
+		collate_fn=strat_pseudo_target_collate_fn,
+		generator=generator,
+		pin_memory=torch_device.type == 'cuda',
+		persistent_workers=num_workers > 0,
+		worker_init_fn=_make_worker_init_fn(seed),
+	)
+
+
 def _make_worker_init_fn(seed: int) -> Callable[[int], None]:
 	def seed_worker(worker_id: int) -> None:
 		worker_seed = (int(seed) + int(worker_id)) % (2**32)
@@ -53,4 +85,4 @@ def _make_worker_init_fn(seed: int) -> Callable[[int], None]:
 	return seed_worker
 
 
-__all__ = ['build_mae_dataloader']
+__all__ = ['build_mae_dataloader', 'build_strat_pseudo_target_dataloader']

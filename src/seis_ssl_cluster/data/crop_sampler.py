@@ -53,6 +53,44 @@ def sample_random_local_crop(
 	)
 
 
+def sample_random_token_aligned_local_crop(
+	shape_xyz: Sequence[int],
+	local_size_xyz: Sequence[int],
+	patch_size_xyz: Sequence[int],
+	rng: np.random.Generator,
+	*,
+	survey_id: str = '',
+) -> CropRequest:
+	"""Sample an in-bounds local crop whose start lies on the token grid."""
+	shape = _validate_positive_xyz(shape_xyz, 'shape_xyz')
+	local_size = _validate_positive_xyz(local_size_xyz, 'local_size_xyz')
+	patch_size = _validate_positive_xyz(patch_size_xyz, 'patch_size_xyz')
+	_validate_crop_fits(shape, local_size)
+	if any(
+		size_axis % patch_axis != 0
+		for size_axis, patch_axis in zip(local_size, patch_size, strict=True)
+	):
+		msg = (
+			'local_size_xyz must be exactly divisible by patch_size_xyz; '
+			f'got {local_size!r} and {patch_size!r}'
+		)
+		raise ValueError(msg)
+	start = tuple(
+		patch_axis * int(rng.integers(0, ((shape_axis - size_axis) // patch_axis) + 1))
+		for shape_axis, size_axis, patch_axis in zip(
+			shape,
+			local_size,
+			patch_size,
+			strict=True,
+		)
+	)
+	return CropRequest(
+		survey_id=survey_id,
+		start_xyz=cast('XYZ', start),
+		size_xyz=local_size,
+	)
+
+
 def expand_request_with_margin(
 	request: CropRequest,
 	margin_xyz: Sequence[int],
@@ -181,6 +219,7 @@ __all__ = [
 	'required_zero_mask_margin_xyz',
 	'rng_for_sample',
 	'sample_random_local_crop',
+	'sample_random_token_aligned_local_crop',
 	'select_round_robin_index',
 	'validate_crop_fits',
 ]

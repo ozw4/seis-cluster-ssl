@@ -9,6 +9,7 @@ from seis_ssl_cluster.data.crop_sampler import (
 	required_zero_mask_margin_xyz,
 	rng_for_sample,
 	sample_random_local_crop,
+	sample_random_token_aligned_local_crop,
 	select_round_robin_index,
 	validate_crop_fits,
 )
@@ -57,6 +58,7 @@ from seis_ssl_cluster.data.schema import (
 	survey_manifest_to_dict,
 	write_manifest_json,
 )
+from seis_ssl_cluster.data.strat_pseudo_dataset import NopimsStratPseudoTargetDataset
 from seis_ssl_cluster.data.volume_store import (
 	NpyMemmapVolumeStore,
 	NpyVolumeInfo,
@@ -86,6 +88,7 @@ __all__ = [
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
 	'NopimsAmplitudePretrainDataset',
+	'NopimsStratPseudoTargetDataset',
 	'NormalizationStatsQcItem',
 	'NormalizationStatsQcReport',
 	'NormalizationStatsQcThresholds',
@@ -122,6 +125,7 @@ __all__ = [
 	'resolve_npy_path_list',
 	'rng_for_sample',
 	'sample_random_local_crop',
+	'sample_random_token_aligned_local_crop',
 	'scan_nopims_amplitude_manifests_from_path_list',
 	'select_round_robin_index',
 	'summarize_manifests',
