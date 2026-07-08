@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config.f3_lithology_common import (
@@ -28,6 +27,7 @@ from seis_ssl_cluster.f3.lithology.visualization import (
 )
 
 if TYPE_CHECKING:
+	from collections.abc import Mapping
 	from pathlib import Path
 
 

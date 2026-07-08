@@ -10,6 +10,7 @@ from seis_ssl_cluster.config.validate import (
 	resolve_manifest_build_config,
 	resolve_normalization_qc_config,
 	resolve_normalization_stats_config,
+	resolve_strat_hmm_pretext_config,
 	validate_config,
 )
 
@@ -23,5 +24,6 @@ __all__ = [
 	'resolve_manifest_build_config',
 	'resolve_normalization_qc_config',
 	'resolve_normalization_stats_config',
+	'resolve_strat_hmm_pretext_config',
 	'validate_config',
 ]

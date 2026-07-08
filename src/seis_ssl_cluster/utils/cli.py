@@ -17,6 +17,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_MAE_TRAINING,
 	STAGE_NORMALIZATION_QC,
 	STAGE_NORMALIZATION_STATS,
+	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 )
 
 
@@ -105,6 +106,8 @@ def print_config_summary(
 		)
 	elif stage == STAGE_MAE_TRAINING:
 		_add_training_rows(rows, cfg)
+	elif stage == STAGE_STRAT_HMM_PRETEXT_TRAINING:
+		_add_strat_hmm_pretext_rows(rows, cfg)
 	elif stage == STAGE_EMBEDDING_EXTRACTION:
 		manifests = _mapping(cfg.get('manifests'))
 		embeddings = _mapping(cfg.get('embeddings'))
@@ -182,6 +185,38 @@ def _add_training_rows(
 		],
 	)
 	_add_mae_debug_visualization_rows(rows, cfg)
+
+
+def _add_strat_hmm_pretext_rows(
+	rows: list[tuple[str, Any]],
+	cfg: Mapping[str, Any],
+) -> None:
+	manifests = _mapping(cfg.get('manifests'))
+	data = _mapping(cfg.get('data'))
+	model = _mapping(cfg.get('model'))
+	pseudo_targets = _mapping(cfg.get('pseudo_targets'))
+	teacher = _mapping(cfg.get('teacher'))
+	student = _mapping(cfg.get('student'))
+	head = _mapping(cfg.get('head'))
+	loss = _mapping(cfg.get('loss'))
+	train = _mapping(cfg.get('train'))
+	rows.extend(
+		[
+			('manifests.train', manifests.get('train')),
+			('pseudo_targets.input_dir', pseudo_targets.get('input_dir')),
+			('pseudo_targets.k', pseudo_targets.get('k')),
+			('teacher.checkpoint', teacher.get('checkpoint')),
+			('data.local_crop_size', data.get('local_crop_size')),
+			('model.patch_size', model.get('patch_size')),
+			('model.encoder_depth', model.get('encoder_depth')),
+			('student.unfreeze_top_blocks', student.get('unfreeze_top_blocks')),
+			('head.num_prototypes', head.get('num_prototypes')),
+			('loss.distillation_weight', loss.get('distillation_weight')),
+			('train.batch_size', train.get('batch_size')),
+			('train.epochs', train.get('epochs')),
+			('train.device', train.get('device')),
+		],
+	)
 
 
 def _add_mae_debug_visualization_rows(

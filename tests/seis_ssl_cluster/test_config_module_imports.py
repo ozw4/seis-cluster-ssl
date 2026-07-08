@@ -8,9 +8,15 @@ from pathlib import Path
 
 import pytest
 
-from seis_ssl_cluster.config.pretraining import resolve_mae_training_config
+from seis_ssl_cluster.config.pretraining import (
+	resolve_mae_training_config,
+	resolve_strat_hmm_pretext_config,
+)
 from seis_ssl_cluster.config.validate import (
 	resolve_mae_training_config as compat_mae_training_resolver,
+)
+from seis_ssl_cluster.config.validate import (
+	resolve_strat_hmm_pretext_config as compat_strat_hmm_pretext_resolver,
 )
 
 CONFIG_PACKAGE = 'seis_ssl_cluster.config'
@@ -48,6 +54,7 @@ DIRECT_STAGE_IMPORTS = (
 	('normalization', 'resolve_normalization_qc_config'),
 	('normalization', 'resolve_normalization_stats_config'),
 	('pretraining', 'resolve_mae_training_config'),
+	('pretraining', 'resolve_strat_hmm_pretext_config'),
 	('results', 'validate_results_artifacts'),
 )
 PROC_IMPORTS = (
@@ -55,6 +62,7 @@ PROC_IMPORTS = (
 	'proc.seis_ssl_cluster.prepare_nopims_normalization_stats',
 	'proc.seis_ssl_cluster.filter_manifest_by_normalization_qc',
 	'proc.seis_ssl_cluster.train_amp_mae',
+	'proc.seis_ssl_cluster.train_strat_hmm_pretext',
 	'proc.seis_ssl_cluster.extract_embeddings',
 	'proc.seis_ssl_cluster.cluster_embeddings',
 	'proc.seis_ssl_cluster.visualize_clusters',
@@ -85,6 +93,7 @@ F3_LITHOLOGY_INTERNAL_IMPORTS = (
 
 def test_validate_module_reexports_public_resolver() -> None:
 	assert compat_mae_training_resolver is resolve_mae_training_config
+	assert compat_strat_hmm_pretext_resolver is resolve_strat_hmm_pretext_config
 
 
 @pytest.mark.parametrize(('module_name', 'symbol'), DIRECT_STAGE_IMPORTS)

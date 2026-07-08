@@ -45,6 +45,12 @@ from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
 	DEFAULT_MAE_LOSS_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
+	DEFAULT_STRAT_HMM_PRETEXT_DATA_OPTIONS,
+	DEFAULT_STRAT_HMM_PRETEXT_HEAD_OPTIONS,
+	DEFAULT_STRAT_HMM_PRETEXT_LOSS_OPTIONS,
+	DEFAULT_STRAT_HMM_PRETEXT_PSEUDO_TARGET_OPTIONS,
+	DEFAULT_STRAT_HMM_PRETEXT_STUDENT_OPTIONS,
+	DEFAULT_STRAT_HMM_PRETEXT_TRAIN_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
 	EXPECTED_VALID_MASK_MODE,
 	FIXED_DATA_CONTRACT,
@@ -54,6 +60,7 @@ from seis_ssl_cluster.config.schema import (
 	MAE_DEBUG_VISUALIZATION_COLUMNS,
 	MAE_DEBUG_VISUALIZATION_KEYS,
 	STAGE_MAE_TRAINING,
+	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
@@ -72,6 +79,64 @@ _AMPLITUDE_AGC_KEYS = frozenset(
 )
 _AMPLITUDE_AGC_ENABLED_REQUIRED_KEYS = _AMPLITUDE_AGC_KEYS
 _MAE_TRAINING_VISUALIZATION_KEYS = frozenset({'mae_debug'})
+
+_STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
+	'manifests': frozenset({'train', 'train_path_list'}),
+	'data': frozenset(
+		{
+			'local_crop_size',
+			'min_valid_fraction',
+			'max_resample_attempts',
+			'normalized_clip_abs',
+			'amplitude_agc',
+		},
+	),
+	'model': frozenset(
+		{
+			'patch_size',
+			'encoder_dim',
+			'encoder_depth',
+			'encoder_heads',
+			'decoder_dim',
+			'decoder_depth',
+			'decoder_heads',
+		},
+	),
+	'pseudo_targets': frozenset({'input_dir', 'k', 'min_confidence'}),
+	'teacher': frozenset({'checkpoint'}),
+	'student': frozenset({'init_checkpoint', 'unfreeze_top_blocks'}),
+	'head': frozenset(
+		{'num_prototypes', 'projection_dim', 'temperature', 'normalize'},
+	),
+	'loss': frozenset(
+		{
+			'prototype_weight',
+			'usage_weight',
+			'entropy_floor',
+			'distillation_weight',
+		},
+	),
+	'train': frozenset(
+		{
+			'batch_size',
+			'samples_per_epoch',
+			'epochs',
+			'num_workers',
+			'shuffle',
+			'lr',
+			'encoder_lr',
+			'weight_decay',
+			'amp',
+			'device',
+			'seed',
+			'grad_clip_norm',
+			'checkpoint_every_steps',
+			'max_steps',
+			'allow_overwrite_output',
+		},
+	),
+	'zero_mask': frozenset(DEFAULT_ZERO_MASK_CONTRACT),
+}
 
 
 def resolve_mae_training_config(config: _T) -> Config:
@@ -152,6 +217,236 @@ def resolve_mae_training_config(config: _T) -> Config:
 	_merge_section_defaults(resolved, 'masking', FIXED_MASKING_CONTRACT)
 	_merge_section_defaults(resolved, 'loss', FIXED_LOSS_CONTRACT)
 	return resolved
+
+
+def resolve_strat_hmm_pretext_config(config: _T) -> Config:
+	"""Validate and resolve raw config for strat HMM pretext training."""
+	resolved, paths = _resolve_base(
+		config,
+		STAGE_STRAT_HMM_PRETEXT_TRAINING,
+		require_nopims_root=False,
+	)
+	paths_config = _required_mapping(resolved, 'paths')
+	output_root = _validate_path(
+		paths_config,
+		'output_root',
+		prefix='paths',
+	)
+	_reject_fixed_contract_keys(resolved)
+	_merge_strat_hmm_pretext_defaults(resolved)
+	_validate_strat_hmm_pretext_sections(resolved)
+
+	manifests = _required_mapping(resolved, 'manifests')
+	data = _required_mapping(resolved, 'data')
+	model = _required_mapping(resolved, 'model')
+	pseudo_targets = _required_mapping(resolved, 'pseudo_targets')
+	teacher = _required_mapping(resolved, 'teacher')
+	student = _required_mapping(resolved, 'student')
+	head = _required_mapping(resolved, 'head')
+	loss = _required_mapping(resolved, 'loss')
+	train = _required_mapping(resolved, 'train')
+
+	_validate_manifests(manifests)
+	local_crop_size = _validate_strat_hmm_pretext_data(data)
+	patch_size = _validate_positive_int_triplet(
+		model,
+		'patch_size',
+		prefix='model',
+	)
+	_validate_model(model)
+	_validate_divisible_crop_patch(local_crop_size, patch_size)
+	_validate_strat_hmm_pretext_pseudo_targets(pseudo_targets)
+	_validate_strat_hmm_pretext_teacher(teacher)
+	_validate_strat_hmm_pretext_student(
+		student,
+		encoder_depth=int(model['encoder_depth']),
+	)
+	_validate_strat_hmm_pretext_head(head)
+	_validate_strat_hmm_pretext_loss(
+		loss,
+		unfreeze_top_blocks=int(student['unfreeze_top_blocks']),
+	)
+	_validate_strat_hmm_pretext_cross_section_values(pseudo_targets, head)
+	_validate_strat_hmm_pretext_train(train)
+	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
+	_validate_artifact_output_path(
+		output_root,
+		'paths.output_root',
+		artifact_root=paths.artifact_root,
+		nopims_root=paths.nopims_root,
+	)
+	_validate_nopims_pretraining_path(
+		output_root,
+		'paths.output_root',
+		artifact_root=paths.artifact_root,
+	)
+
+	_merge_section_defaults(resolved, 'data', FIXED_DATA_CONTRACT)
+	_merge_section_defaults(resolved, 'model', FIXED_MODEL_CONTRACT)
+	_merge_section_defaults(resolved, 'loss', FIXED_LOSS_CONTRACT)
+	return resolved
+
+
+def _merge_strat_hmm_pretext_defaults(config: Config) -> None:
+	_merge_section_defaults(
+		config,
+		'data',
+		DEFAULT_STRAT_HMM_PRETEXT_DATA_OPTIONS,
+	)
+	_merge_section_defaults(
+		config,
+		'pseudo_targets',
+		DEFAULT_STRAT_HMM_PRETEXT_PSEUDO_TARGET_OPTIONS,
+	)
+	_merge_section_defaults(
+		config,
+		'student',
+		DEFAULT_STRAT_HMM_PRETEXT_STUDENT_OPTIONS,
+	)
+	_merge_section_defaults(config, 'head', DEFAULT_STRAT_HMM_PRETEXT_HEAD_OPTIONS)
+	_merge_section_defaults(config, 'loss', DEFAULT_STRAT_HMM_PRETEXT_LOSS_OPTIONS)
+	_merge_section_defaults(config, 'train', DEFAULT_STRAT_HMM_PRETEXT_TRAIN_OPTIONS)
+	_merge_section_defaults(config, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
+
+
+def _validate_strat_hmm_pretext_sections(config: Mapping[str, object]) -> None:
+	for section, allowed in _STRAT_HMM_PRETEXT_SECTION_KEYS.items():
+		value = config.get(section)
+		if not isinstance(value, Mapping):
+			continue
+		_validate_allowed_keys(value, allowed, prefix=section)
+
+
+def _validate_manifests(manifests: Mapping[str, object]) -> None:
+	_validate_non_empty_path(manifests, 'train', prefix='manifests')
+	_validate_non_empty_path(manifests, 'train_path_list', prefix='manifests')
+
+
+def _validate_strat_hmm_pretext_data(
+	data: Mapping[str, object],
+) -> tuple[int, int, int]:
+	local_crop_size = _validate_positive_int_triplet(
+		data,
+		'local_crop_size',
+		prefix='data',
+	)
+	_validate_optional_fraction(data, 'min_valid_fraction', prefix='data')
+	_validate_positive_int(data, 'max_resample_attempts', prefix='data')
+	if data.get('normalized_clip_abs') is not None:
+		_validate_positive_finite_number(
+			data,
+			'normalized_clip_abs',
+			prefix='data',
+		)
+	_validate_amplitude_agc(data)
+	return local_crop_size
+
+
+def _validate_strat_hmm_pretext_pseudo_targets(
+	pseudo_targets: Mapping[str, object],
+) -> None:
+	input_dir = _validate_non_empty_path(
+		pseudo_targets,
+		'input_dir',
+		prefix='pseudo_targets',
+	)
+	if not input_dir.is_dir():
+		msg = f'pseudo_targets.input_dir must exist and be a directory: {input_dir}'
+		raise FileNotFoundError(msg)
+	_validate_positive_int(pseudo_targets, 'k', prefix='pseudo_targets')
+	_validate_optional_fraction(
+		pseudo_targets,
+		'min_confidence',
+		prefix='pseudo_targets',
+	)
+
+
+def _validate_strat_hmm_pretext_teacher(teacher: Mapping[str, object]) -> None:
+	checkpoint = _validate_non_empty_path(teacher, 'checkpoint', prefix='teacher')
+	if not checkpoint.is_file():
+		msg = f'teacher.checkpoint must exist and be a file: {checkpoint}'
+		raise FileNotFoundError(msg)
+
+
+def _validate_strat_hmm_pretext_student(
+	student: Mapping[str, object],
+	*,
+	encoder_depth: int,
+) -> None:
+	_validate_nonnegative_int(
+		student,
+		'unfreeze_top_blocks',
+		prefix='student',
+	)
+	unfreeze_top_blocks = int(student['unfreeze_top_blocks'])
+	if unfreeze_top_blocks > encoder_depth:
+		msg = (
+			'student.unfreeze_top_blocks must be less than or equal to '
+			f'model.encoder_depth ({encoder_depth}); got {unfreeze_top_blocks}'
+		)
+		raise ValueError(msg)
+	init_checkpoint_value = student.get('init_checkpoint')
+	if init_checkpoint_value is None:
+		return
+	init_checkpoint = _validate_non_empty_path(
+		student,
+		'init_checkpoint',
+		prefix='student',
+	)
+	if not init_checkpoint.is_file():
+		msg = f'student.init_checkpoint must exist and be a file: {init_checkpoint}'
+		raise FileNotFoundError(msg)
+
+
+def _validate_strat_hmm_pretext_head(head: Mapping[str, object]) -> None:
+	_validate_positive_int(head, 'num_prototypes', prefix='head')
+	if head.get('projection_dim') is not None:
+		_validate_positive_int(head, 'projection_dim', prefix='head')
+	_validate_positive_finite_number(head, 'temperature', prefix='head')
+	_validate_bool(head, 'normalize', prefix='head')
+
+
+def _validate_strat_hmm_pretext_loss(
+	loss: Mapping[str, object],
+	*,
+	unfreeze_top_blocks: int,
+) -> None:
+	for key in ('prototype_weight', 'usage_weight', 'distillation_weight'):
+		_validate_nonnegative_finite_number(loss, key, prefix='loss')
+	if loss.get('entropy_floor') is not None:
+		_validate_nonnegative_finite_number(loss, 'entropy_floor', prefix='loss')
+	if unfreeze_top_blocks > 0 and float(loss['distillation_weight']) <= 0.0:
+		msg = (
+			'loss.distillation_weight must be positive when '
+			'student.unfreeze_top_blocks is greater than 0'
+		)
+		raise ValueError(msg)
+
+
+def _validate_strat_hmm_pretext_cross_section_values(
+	pseudo_targets: Mapping[str, object],
+	head: Mapping[str, object],
+) -> None:
+	if int(pseudo_targets['k']) != int(head['num_prototypes']):
+		msg = (
+			'pseudo_targets.k must equal head.num_prototypes; '
+			f"got {pseudo_targets['k']!r} and {head['num_prototypes']!r}"
+		)
+		raise ValueError(msg)
+
+
+def _validate_strat_hmm_pretext_train(train: Mapping[str, object]) -> None:
+	for key in ('batch_size', 'samples_per_epoch', 'epochs'):
+		_validate_positive_int(train, key, prefix='train')
+	for key in ('num_workers', 'max_steps', 'checkpoint_every_steps'):
+		_validate_optional_nonnegative_int(train, key, prefix='train')
+	for key in ('lr', 'encoder_lr', 'grad_clip_norm'):
+		_validate_positive_number(train, key, prefix='train')
+	_validate_nonnegative_number(train, 'weight_decay', prefix='train')
+	for key in ('amp', 'shuffle', 'allow_overwrite_output'):
+		_validate_bool(train, key, prefix='train')
+	_validate_optional_train_seed(train)
+	_validate_optional_train_device(train)
 
 
 def _reject_fixed_contract_keys(config: Mapping[str, object]) -> None:
@@ -582,4 +877,4 @@ def _validate_mae_debug_columns(mae_debug: Mapping[str, object]) -> None:
 		raise ValueError(msg)
 
 
-__all__ = ['resolve_mae_training_config']
+__all__ = ['resolve_mae_training_config', 'resolve_strat_hmm_pretext_config']
