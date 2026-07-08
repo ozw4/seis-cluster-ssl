@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from seis_ssl_cluster.stratigraphy.export import (
+	ExportedPseudoTargetResult,
+	export_hmm_cluster_labels_as_pseudo_targets,
+	prepare_hmm_cluster_label_pseudo_target_exports,
+)
 from seis_ssl_cluster.stratigraphy.hmm_decode import (
 	LogitHMMPseudoTarget,
 	decode_ordered_logits_survey,
@@ -30,6 +35,7 @@ from seis_ssl_cluster.stratigraphy.targets import (
 )
 
 __all__ = [
+	'ExportedPseudoTargetResult',
 	'LogitHMMPseudoTarget',
 	'OrderedPrototypeHead',
 	'OrderedPrototypeOutput',
@@ -39,10 +45,12 @@ __all__ = [
 	'decode_ordered_logits_survey',
 	'discover_pseudo_target_inputs',
 	'emission_costs_from_logits',
+	'export_hmm_cluster_labels_as_pseudo_targets',
 	'feature_distillation_loss',
 	'load_pseudo_target_arrays',
 	'load_pseudo_target_metadata',
 	'ordered_soft_coordinate',
+	'prepare_hmm_cluster_label_pseudo_target_exports',
 	'pseudo_target_paths',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
