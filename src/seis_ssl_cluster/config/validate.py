@@ -49,6 +49,10 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_NORMALIZATION_QC,
 	STAGE_NORMALIZATION_STATS,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
+	STAGE_STRAT_HMM_PSEUDO_TARGETS,
+)
+from seis_ssl_cluster.config.strat_hmm_pseudo_targets import (
+	resolve_strat_hmm_pseudo_target_config,
 )
 
 if TYPE_CHECKING:
@@ -138,6 +142,7 @@ _STAGE_RESOLVERS: dict[str, _Resolver] = {
 	STAGE_NORMALIZATION_QC: resolve_normalization_qc_config,
 	STAGE_MAE_TRAINING: resolve_mae_training_config,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING: resolve_strat_hmm_pretext_config,
+	STAGE_STRAT_HMM_PSEUDO_TARGETS: resolve_strat_hmm_pseudo_target_config,
 	STAGE_EMBEDDING_EXTRACTION: resolve_embedding_extraction_config,
 	STAGE_CLUSTERING: resolve_clustering_config,
 	STAGE_CLUSTER_VISUALIZATION: resolve_cluster_visualization_config,
@@ -179,6 +184,7 @@ __all__ = [
 	'resolve_normalization_qc_config',
 	'resolve_normalization_stats_config',
 	'resolve_strat_hmm_pretext_config',
+	'resolve_strat_hmm_pseudo_target_config',
 	'validate_config',
 	'validate_results_artifacts',
 ]

@@ -12,11 +12,17 @@ from seis_ssl_cluster.config.pretraining import (
 	resolve_mae_training_config,
 	resolve_strat_hmm_pretext_config,
 )
+from seis_ssl_cluster.config.strat_hmm_pseudo_targets import (
+	resolve_strat_hmm_pseudo_target_config,
+)
 from seis_ssl_cluster.config.validate import (
 	resolve_mae_training_config as compat_mae_training_resolver,
 )
 from seis_ssl_cluster.config.validate import (
 	resolve_strat_hmm_pretext_config as compat_strat_hmm_pretext_resolver,
+)
+from seis_ssl_cluster.config.validate import (
+	resolve_strat_hmm_pseudo_target_config as compat_strat_hmm_pseudo_target_resolver,
 )
 
 CONFIG_PACKAGE = 'seis_ssl_cluster.config'
@@ -34,6 +40,7 @@ STAGE_MODULES = {
 	'normalization',
 	'pretraining',
 	'results',
+	'strat_hmm_pseudo_targets',
 }
 DIRECT_STAGE_IMPORTS = (
 	('cluster_visualization', 'resolve_cluster_visualization_config'),
@@ -56,8 +63,10 @@ DIRECT_STAGE_IMPORTS = (
 	('pretraining', 'resolve_mae_training_config'),
 	('pretraining', 'resolve_strat_hmm_pretext_config'),
 	('results', 'validate_results_artifacts'),
+	('strat_hmm_pseudo_targets', 'resolve_strat_hmm_pseudo_target_config'),
 )
 PROC_IMPORTS = (
+	'proc.seis_ssl_cluster.build_strat_hmm_pseudo_targets',
 	'proc.seis_ssl_cluster.build_nopims_manifests',
 	'proc.seis_ssl_cluster.prepare_nopims_normalization_stats',
 	'proc.seis_ssl_cluster.filter_manifest_by_normalization_qc',
@@ -94,6 +103,10 @@ F3_LITHOLOGY_INTERNAL_IMPORTS = (
 def test_validate_module_reexports_public_resolver() -> None:
 	assert compat_mae_training_resolver is resolve_mae_training_config
 	assert compat_strat_hmm_pretext_resolver is resolve_strat_hmm_pretext_config
+	assert (
+		compat_strat_hmm_pseudo_target_resolver
+		is resolve_strat_hmm_pseudo_target_config
+	)
 
 
 @pytest.mark.parametrize(('module_name', 'symbol'), DIRECT_STAGE_IMPORTS)

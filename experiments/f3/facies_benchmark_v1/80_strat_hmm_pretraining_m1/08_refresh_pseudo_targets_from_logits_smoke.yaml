@@ -1,0 +1,41 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+manifests:
+  train: /workspace/artifacts/seis_ssl_cluster/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json
+checkpoint:
+  path: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m1_smoke_k6_topblock1_distill/latest.pt
+model:
+  patch_size: [8, 8, 8]
+inference:
+  window_size: [64, 64, 64]
+  overlap: [32, 32, 32]
+  batch_size: 1
+  output_dtype: float32
+  min_token_valid_fraction: 0.5
+  device: cpu
+hmm:
+  k: 6
+  edge_margin_tokens: [8, 8, 0]
+  transition:
+    same_cost: 0.05
+    advance_cost: 0.0
+    jump_cost: 1.0
+    reverse_cost: 1000000.0
+    forbid_reverse: true
+    max_jump: 1
+  path_prior:
+    enabled: true
+    initial_state:
+      mode: shallow_anchor
+      weight: 0.5
+    terminal_state:
+      mode: deep_anchor
+      weight: 0.5
+    expected_boundaries:
+      enabled: true
+      target: auto_k_minus_1
+      weight: 0.05
+outputs:
+  pseudo_target_root: /workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_pretext_m1_smoke_k6_topblock1_distill_refresh01
+  overwrite: true
+  skip_existing: false

@@ -32,6 +32,7 @@ STAGE_NORMALIZATION_STATS: Final = 'prepare_nopims_normalization_stats'
 STAGE_NORMALIZATION_QC: Final = 'filter_manifest_by_normalization_qc'
 STAGE_MAE_TRAINING: Final = 'train_amp_mae'
 STAGE_STRAT_HMM_PRETEXT_TRAINING: Final = 'train_strat_hmm_pretext'
+STAGE_STRAT_HMM_PSEUDO_TARGETS: Final = 'build_strat_hmm_pseudo_targets'
 STAGE_EMBEDDING_EXTRACTION: Final = 'extract_embeddings'
 STAGE_CLUSTERING: Final = 'cluster_embeddings'
 STAGE_CLUSTER_VISUALIZATION: Final = 'visualize_clusters'
@@ -61,6 +62,7 @@ KNOWN_STAGES: Final = {
 	STAGE_NORMALIZATION_QC,
 	STAGE_MAE_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
+	STAGE_STRAT_HMM_PSEUDO_TARGETS,
 	STAGE_EMBEDDING_EXTRACTION,
 	STAGE_CLUSTERING,
 	STAGE_CLUSTER_VISUALIZATION,
@@ -74,6 +76,7 @@ STAGE_PATH_KEYS: Final = {
 	STAGE_STRAT_HMM_PRETEXT_TRAINING: frozenset(
 		{'artifact_root', 'output_root'},
 	),
+	STAGE_STRAT_HMM_PSEUDO_TARGETS: frozenset({'artifact_root'}),
 	STAGE_EMBEDDING_EXTRACTION: frozenset({'artifact_root'}),
 	STAGE_CLUSTERING: frozenset({'artifact_root'}),
 	STAGE_CLUSTER_VISUALIZATION: frozenset({'artifact_root'}),

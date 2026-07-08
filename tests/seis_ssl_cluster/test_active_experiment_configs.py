@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import torch
 
 from seis_ssl_cluster.config import (
 	load_config,
@@ -11,6 +12,8 @@ from seis_ssl_cluster.config import (
 	resolve_embedding_extraction_config,
 	resolve_f3_facies_inspection_config,
 	resolve_mae_training_config,
+	resolve_strat_hmm_pretext_config,
+	resolve_strat_hmm_pseudo_target_config,
 )
 from seis_ssl_cluster.config.f3_baselines import (
 	f3_lithology_baseline_token_dataset_config_from_mapping,
@@ -63,6 +66,42 @@ F3_PREPARE_CONFIGS = sorted((F3_ROOT / '10_prepare').rglob('*.yaml'))
 F3_EMBEDDING_CONFIGS = sorted((F3_ROOT / '20_embedding').rglob('*.yaml'))
 F3_STRATIGRAPHIC_CLUSTERING_CONFIGS = sorted(
 	(F3_ROOT / '60_stratigraphic_clustering').rglob('*.yaml'),
+)
+F3_STRAT_HMM_PRETRAINING_M1_ROOT = F3_ROOT / '80_strat_hmm_pretraining_m1'
+F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
+	[
+		F3_STRAT_HMM_PRETRAINING_M1_ROOT
+		/ '02_train_single_head_topblock_distill_smoke.yaml',
+		F3_STRAT_HMM_PRETRAINING_M1_ROOT
+		/ '03_train_single_head_topblock_distill_full.yaml',
+	],
+)
+F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
+	[
+		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '04_extract_student_embeddings.yaml',
+	],
+)
+F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
+	[
+		F3_STRAT_HMM_PRETRAINING_M1_ROOT
+		/ '05_build_lithology_token_dataset.yaml',
+	],
+)
+F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS = sorted(
+	[
+		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '06_train_lithology_probe.yaml',
+	],
+)
+F3_STRAT_HMM_STUDENT_LITHOLOGY_REPORT_CONFIGS = sorted(
+	[
+		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '07_build_lithology_report.yaml',
+	],
+)
+F3_STRAT_HMM_PSEUDO_TARGET_REFRESH_CONFIGS = sorted(
+	[
+		F3_STRAT_HMM_PRETRAINING_M1_ROOT
+		/ '08_refresh_pseudo_targets_from_logits_smoke.yaml',
+	],
 )
 F3_LITHOLOGY_ROOT = F3_ROOT / '50_lithology'
 F3_LITHOLOGY_TOKEN_CONFIGS = sorted(
@@ -120,6 +159,27 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	('f3 prepare', F3_PREPARE_CONFIGS),
 	('f3 embedding', F3_EMBEDDING_CONFIGS),
 	('f3 stratigraphic clustering', F3_STRATIGRAPHIC_CLUSTERING_CONFIGS),
+	('f3 strat hmm pretext', F3_STRAT_HMM_PRETEXT_CONFIGS),
+	(
+		'f3 strat hmm student embedding',
+		F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS,
+	),
+	(
+		'f3 strat hmm student lithology token dataset',
+		F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS,
+	),
+	(
+		'f3 strat hmm student lithology probe',
+		F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS,
+	),
+	(
+		'f3 strat hmm student lithology report',
+		F3_STRAT_HMM_STUDENT_LITHOLOGY_REPORT_CONFIGS,
+	),
+	(
+		'f3 strat hmm pseudo-target refresh',
+		F3_STRAT_HMM_PSEUDO_TARGET_REFRESH_CONFIGS,
+	),
 	('f3 lithology token dataset', F3_LITHOLOGY_TOKEN_CONFIGS),
 	('f3 lithology probe', F3_LITHOLOGY_PROBE_CONFIGS),
 	('f3 lithology prediction', F3_LITHOLOGY_PREDICTION_CONFIGS),
@@ -181,7 +241,11 @@ def test_active_f3_prepare_configs_resolve(config_path: Path) -> None:
 
 @pytest.mark.parametrize(
 	'config_path',
-	[*F3_EMBEDDING_CONFIGS, *F3_RANDOM_ENCODER_EMBEDDING_CONFIGS],
+	[
+		*F3_EMBEDDING_CONFIGS,
+		*F3_RANDOM_ENCODER_EMBEDDING_CONFIGS,
+		*F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS,
+	],
 )
 def test_active_f3_embedding_configs_resolve(config_path: Path) -> None:
 	resolve_embedding_extraction_config(load_config(config_path))
@@ -194,9 +258,33 @@ def test_active_f3_stratigraphic_clustering_configs_resolve(
 	resolve_clustering_config(load_config(config_path))
 
 
+@pytest.mark.parametrize('config_path', F3_STRAT_HMM_PRETEXT_CONFIGS)
+def test_active_f3_strat_hmm_pretext_configs_resolve(
+	config_path: Path,
+	tmp_path: Path,
+) -> None:
+	resolve_strat_hmm_pretext_config(
+		_config_with_existing_strat_hmm_pretext_inputs(config_path, tmp_path),
+	)
+
+
+@pytest.mark.parametrize('config_path', F3_STRAT_HMM_PSEUDO_TARGET_REFRESH_CONFIGS)
+def test_active_f3_strat_hmm_pseudo_target_refresh_configs_resolve(
+	config_path: Path,
+	tmp_path: Path,
+) -> None:
+	resolve_strat_hmm_pseudo_target_config(
+		_config_with_existing_strat_hmm_refresh_inputs(config_path, tmp_path),
+	)
+
+
 @pytest.mark.parametrize(
 	'config_path',
-	[*F3_LITHOLOGY_TOKEN_CONFIGS, *F3_RANDOM_ENCODER_TOKEN_CONFIGS],
+	[
+		*F3_LITHOLOGY_TOKEN_CONFIGS,
+		*F3_RANDOM_ENCODER_TOKEN_CONFIGS,
+		*F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS,
+	],
 )
 def test_active_f3_lithology_token_dataset_configs_resolve(
 	config_path: Path,
@@ -222,6 +310,7 @@ def test_active_f3_random_encoder_configs_resolve(config_path: Path) -> None:
 		*F3_LITHOLOGY_PROBE_CONFIGS,
 		*F3_BASELINE_PROBE_CONFIGS,
 		*F3_RANDOM_ENCODER_PROBE_CONFIGS,
+		*F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS,
 	],
 )
 def test_active_f3_lithology_probe_configs_resolve(config_path: Path) -> None:
@@ -250,7 +339,11 @@ def test_active_f3_lithology_visualization_configs_resolve(
 
 @pytest.mark.parametrize(
 	'config_path',
-	[*F3_LITHOLOGY_REPORT_CONFIGS, *F3_BASELINE_REPORT_CONFIGS],
+	[
+		*F3_LITHOLOGY_REPORT_CONFIGS,
+		*F3_BASELINE_REPORT_CONFIGS,
+		*F3_STRAT_HMM_STUDENT_LITHOLOGY_REPORT_CONFIGS,
+	],
 )
 def test_active_f3_lithology_report_configs_resolve(config_path: Path) -> None:
 	raw = load_config(config_path)
@@ -309,3 +402,48 @@ def test_active_nopims_overlap_x16_paths_match_artifact_paths_contract() -> None
 		Path(visualization['visualization']['output_dir'])
 		== paths.cluster_visualization(key)
 	)
+
+
+def _config_with_existing_strat_hmm_pretext_inputs(
+	config_path: Path,
+	tmp_path: Path,
+) -> dict[str, object]:
+	config = load_config(config_path)
+	artifact_root = tmp_path / 'artifacts'
+	pseudo_target_dir = tmp_path / 'pseudo_targets'
+	pseudo_target_dir.mkdir()
+	checkpoint = tmp_path / 'mae_best.pt'
+	checkpoint.touch()
+
+	config['paths']['artifact_root'] = str(artifact_root)
+	config['paths']['output_root'] = str(
+		artifact_root / 'pretraining' / 'f3' / config_path.stem,
+	)
+	config['pseudo_targets']['input_dir'] = str(pseudo_target_dir)
+	config['teacher']['checkpoint'] = str(checkpoint)
+	config['student']['init_checkpoint'] = str(checkpoint)
+	return config
+
+
+def _config_with_existing_strat_hmm_refresh_inputs(
+	config_path: Path,
+	tmp_path: Path,
+) -> dict[str, object]:
+	config = load_config(config_path)
+	artifact_root = tmp_path / 'artifacts'
+	checkpoint = tmp_path / 'latest.pt'
+	torch.save(
+		{
+			'stratigraphy_config': {
+				'head': {'num_prototypes': config['hmm']['k']},
+			},
+		},
+		checkpoint,
+	)
+
+	config['paths']['artifact_root'] = str(artifact_root)
+	config['checkpoint']['path'] = str(checkpoint)
+	config['outputs']['pseudo_target_root'] = str(
+		artifact_root / 'pseudo_targets' / 'f3' / config_path.stem,
+	)
+	return config
