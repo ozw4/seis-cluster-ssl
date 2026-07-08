@@ -384,6 +384,14 @@ def _resolve_expected_boundary_count(
 	return min(target, valid_trace_length - 1)
 
 
+def _active_expected_boundaries(
+	settings: HMMPathPriorSettings,
+) -> HMMExpectedBoundariesSettings | None:
+	if not settings.enabled:
+		return None
+	return settings.expected_boundaries
+
+
 def sample_token_z_coordinates(
 	embedding_inputs: tuple[EmbeddingInput, ...],
 	per_survey_token_indices: Mapping[str, np.ndarray],
@@ -1034,6 +1042,7 @@ def run_stratigraphic_hmm_clustering(
 		transition_costs = build_ordered_transition_costs(k, hmm_settings.transition)
 		initial_state_costs = build_initial_state_costs(k, hmm_settings.path_prior)
 		terminal_state_costs = build_terminal_state_costs(k, hmm_settings.path_prior)
+		expected_boundaries = _active_expected_boundaries(hmm_settings.path_prior)
 		centers = initialize_ordered_centers(
 			training_features,
 			sample_z,
@@ -1052,7 +1061,7 @@ def run_stratigraphic_hmm_clustering(
 				transition_costs=transition_costs,
 				initial_state_costs=initial_state_costs,
 				terminal_state_costs=terminal_state_costs,
-				expected_boundaries=hmm_settings.path_prior.expected_boundaries,
+				expected_boundaries=expected_boundaries,
 				emission_source=hmm_settings.emission_source,
 				edge_margin_tokens=hmm_settings.edge_margin_tokens,
 			)
@@ -1076,7 +1085,7 @@ def run_stratigraphic_hmm_clustering(
 			transition_costs=transition_costs,
 			initial_state_costs=initial_state_costs,
 			terminal_state_costs=terminal_state_costs,
-			expected_boundaries=hmm_settings.path_prior.expected_boundaries,
+			expected_boundaries=expected_boundaries,
 			emission_source=hmm_settings.emission_source,
 			edge_margin_tokens=hmm_settings.edge_margin_tokens,
 		)
