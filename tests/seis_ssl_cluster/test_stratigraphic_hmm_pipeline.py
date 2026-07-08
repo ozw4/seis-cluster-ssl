@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 import joblib
 import numpy as np
+import pytest
 
 from seis_ssl_cluster.clustering import run_embedding_clustering
 from seis_ssl_cluster.clustering.features import (
@@ -407,6 +408,53 @@ def test_stratigraphic_hmm_metadata_is_strict_json_safe(
 	assert np.isinf(model['transition_costs'][1, 0])
 
 
+def test_run_embedding_clustering_stratigraphic_hmm_path_prior_metadata(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.zeros((2, 2, 6, 2), dtype=np.float32),
+		valid=np.ones((2, 2, 6), dtype=np.bool_),
+	)
+	config = _hmm_config(input_dir, output_dir, emission_source='z_coordinate')
+	config['clustering']['stratigraphic_hmm']['path_prior'] = {
+		'enabled': True,
+		'initial_state': {'mode': 'shallow_anchor', 'weight': 0.5},
+		'terminal_state': {'mode': 'deep_anchor', 'weight': 0.5},
+		'expected_boundaries': {
+			'enabled': False,
+			'target': 'auto_k_minus_1',
+			'weight': 0.1,
+		},
+	}
+
+	run_embedding_clustering(config)
+
+	metadata = json.loads(
+		(output_dir / 'models' / 'k3' / 'clustering_metadata.json').read_text(),
+	)
+	path_prior = metadata['stratigraphic_hmm']['path_prior']
+	assert path_prior['enabled'] is True
+	assert path_prior['initial_state'] == {'mode': 'shallow_anchor', 'weight': 0.5}
+	assert path_prior['terminal_state'] == {'mode': 'deep_anchor', 'weight': 0.5}
+	assert path_prior['expected_boundaries'] == {
+		'enabled': False,
+		'target': 'auto_k_minus_1',
+		'weight': 0.1,
+	}
+	np.testing.assert_allclose(path_prior['initial_state_costs'], [0.0, 0.25, 0.5])
+	np.testing.assert_allclose(path_prior['terminal_state_costs'], [0.5, 0.25, 0.0])
+	assert np.all(np.isfinite(path_prior['initial_state_costs']))
+	assert np.all(np.isfinite(path_prior['terminal_state_costs']))
+	assert (
+		metadata['ordered_diagnostics']['aggregate']['reverse_transition_rate'] == 0.0
+	)
+
+
 def test_run_embedding_clustering_stratigraphic_hmm_zonly_writes_metadata(
 	tmp_path: Path,
 ) -> None:
@@ -476,13 +524,135 @@ def test_stratigraphic_hmm_zonly_labels_are_monotone_when_reverse_forbidden(
 			assert np.all(np.diff(valid_trace) >= 0)
 
 
+def test_stratigraphic_hmm_edge_margin_excludes_embedding_tokens(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	embeddings = _edge_margin_embedding_grid((6, 5, 4), dim=2)
+	valid = np.ones((6, 5, 4), dtype=np.bool_)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=embeddings,
+		valid=valid,
+	)
+	config = _hmm_config(
+		input_dir,
+		output_dir,
+		edge_margin_tokens=[1, 1, 0],
+	)
+	config['clustering']['sample_tokens'] = 1000
+
+	result = run_embedding_clustering(config)
+
+	labels = np.load(
+		output_dir / 'labels' / 'k3' / 'survey_a.cluster_labels_token.npy',
+	)
+	interior = np.zeros(valid.shape, dtype=np.bool_)
+	interior[1:-1, 1:-1, :] = True
+	assert np.all(labels[~interior] == -1)
+	assert np.all(labels[interior & valid] >= 0)
+	interior_valid_count = int(np.count_nonzero(interior & valid))
+	assert result.sample.total_valid_count == interior_valid_count
+	assert result.sample.sample_count == interior_valid_count
+
+	model_metadata = json.loads(
+		(output_dir / 'models' / 'k3' / 'clustering_metadata.json').read_text(),
+	)
+	assert model_metadata['sample']['total_valid_count'] == interior_valid_count
+	assert model_metadata['sample']['count'] == interior_valid_count
+	assert model_metadata['stratigraphic_hmm']['edge_margin_tokens'] == [1, 1, 0]
+	assert (
+		model_metadata['stratigraphic_hmm'][
+			'edge_margin_excluded_valid_token_count'
+		]
+		== int(np.count_nonzero(valid & ~interior))
+	)
+	assert sum(model_metadata['cluster_counts'].values()) == interior_valid_count
+	label_metadata = json.loads(
+		(
+			output_dir / 'labels' / 'k3' / 'survey_a.cluster_label_metadata.json'
+		).read_text(),
+	)
+	assert label_metadata['valid_token_count'] == interior_valid_count
+	assert sum(label_metadata['cluster_counts'].values()) == interior_valid_count
+
+
+def test_stratigraphic_hmm_edge_margin_excludes_z_coordinate_tokens(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	valid = np.ones((6, 5, 4), dtype=np.bool_)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=_edge_margin_embedding_grid(valid.shape, dim=2),
+		valid=valid,
+	)
+	config = _hmm_config(
+		input_dir,
+		output_dir,
+		emission_source='z_coordinate',
+		edge_margin_tokens=[1, 1, 0],
+	)
+	config['clustering']['sample_tokens'] = 1000
+
+	run_embedding_clustering(config)
+
+	labels = np.load(
+		output_dir / 'labels' / 'k3' / 'survey_a.cluster_labels_token.npy',
+	)
+	interior = np.zeros(valid.shape, dtype=np.bool_)
+	interior[1:-1, 1:-1, :] = True
+	assert np.all(labels[~interior] == -1)
+	assert np.all(labels[interior] >= 0)
+	for x_index in range(1, labels.shape[0] - 1):
+		for y_index in range(1, labels.shape[1] - 1):
+			valid_trace = labels[x_index, y_index, :]
+			assert np.all(np.diff(valid_trace) >= 0)
+
+
+def test_stratigraphic_hmm_edge_margin_rejects_empty_interior(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=_edge_margin_embedding_grid((6, 5, 4), dim=2),
+		valid=np.ones((6, 5, 4), dtype=np.bool_),
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=(
+			r'edge_margin_tokens \[3,0,0\] leave no interior tokens '
+			r'for survey survey_a with token grid shape \(6, 5, 4\)'
+		),
+	):
+		run_embedding_clustering(
+			_hmm_config(
+				input_dir,
+				output_dir,
+				edge_margin_tokens=[3, 0, 0],
+			),
+		)
+
+
 def _hmm_config(
 	input_dir: Path,
 	output_dir: Path,
 	*,
 	emission_source: str = 'embedding',
+	edge_margin_tokens: list[int] | None = None,
 ) -> dict[str, object]:
-	return {
+	config: dict[str, object] = {
 		'embeddings': {'input_dir': str(input_dir)},
 		'clustering': {
 			'output_dir': str(output_dir),
@@ -517,6 +687,27 @@ def _hmm_config(
 			},
 		},
 	}
+	if edge_margin_tokens is not None:
+		config['clustering']['stratigraphic_hmm']['edge_margin_tokens'] = (
+			edge_margin_tokens
+		)
+	return config
+
+
+def _edge_margin_embedding_grid(
+	shape: tuple[int, int, int],
+	*,
+	dim: int,
+) -> np.ndarray:
+	embeddings = np.empty((*shape, dim), dtype=np.float32)
+	for x_index in range(shape[0]):
+		for y_index in range(shape[1]):
+			for z_index in range(shape[2]):
+				embeddings[x_index, y_index, z_index, 0] = float(z_index * 4)
+				embeddings[x_index, y_index, z_index, 1:] = float(
+					x_index + y_index
+				)
+	return embeddings
 
 
 def _write_embedding_artifacts(

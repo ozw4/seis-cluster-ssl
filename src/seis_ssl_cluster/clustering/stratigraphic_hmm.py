@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from numbers import Integral, Real
 from pathlib import Path
@@ -12,13 +12,11 @@ import numpy as np
 
 from seis_ssl_cluster.clustering.features import (
 	EmbeddingInput,
-	count_valid_tokens,
 	discover_embedding_inputs,
 	embedding_input_metadata,
 	extract_token_features,
 	load_valid_tokens,
 	open_embedding_array,
-	valid_flat_indices,
 	validate_compatible_embedding_inputs,
 )
 from seis_ssl_cluster.clustering.kmeans import (
@@ -46,7 +44,6 @@ from seis_ssl_cluster.clustering.residualization import (
 )
 from seis_ssl_cluster.clustering.sampling import (
 	SampledTokens,
-	sample_valid_embedding_tokens,
 )
 from seis_ssl_cluster.clustering.writer import SurveyLabelResult, write_json
 
@@ -64,6 +61,33 @@ class HMMTransitionSettings:
 
 
 @dataclass(frozen=True)
+class HMMAnchorPriorSettings:
+	"""Path-prior anchor settings for one endpoint."""
+
+	mode: str
+	weight: float
+
+
+@dataclass(frozen=True)
+class HMMExpectedBoundariesSettings:
+	"""Path-prior expected boundary count settings."""
+
+	enabled: bool
+	target: str | int
+	weight: float
+
+
+@dataclass(frozen=True)
+class HMMPathPriorSettings:
+	"""Optional path-prior settings for future HMM decoding."""
+
+	enabled: bool
+	initial_state: HMMAnchorPriorSettings
+	terminal_state: HMMAnchorPriorSettings
+	expected_boundaries: HMMExpectedBoundariesSettings
+
+
+@dataclass(frozen=True)
 class StratigraphicHMMSettings:
 	"""Validated stratigraphic HMM backend settings."""
 
@@ -74,6 +98,8 @@ class StratigraphicHMMSettings:
 	transition: HMMTransitionSettings
 	init_order_by: str
 	empty_cluster_policy: str
+	edge_margin_tokens: tuple[int, int, int]
+	path_prior: HMMPathPriorSettings
 
 
 def stratigraphic_hmm_settings_from_config(
@@ -85,6 +111,7 @@ def stratigraphic_hmm_settings_from_config(
 	transition = _required_mapping(hmm, 'transition')
 	init = _required_mapping(hmm, 'init')
 	update = _required_mapping(hmm, 'update')
+	path_prior = _path_prior_settings_from_hmm_config(hmm)
 	return StratigraphicHMMSettings(
 		emission_source=str(hmm.get('emission_source', 'embedding')),
 		iterations=int(hmm['iterations']),
@@ -102,6 +129,158 @@ def stratigraphic_hmm_settings_from_config(
 		),
 		init_order_by=str(init['order_by']),
 		empty_cluster_policy=str(update['empty_cluster_policy']),
+		edge_margin_tokens=_edge_margin_tokens_from_hmm_config(hmm),
+		path_prior=path_prior,
+	)
+
+
+def _edge_margin_tokens_from_hmm_config(
+	hmm: Mapping[str, object],
+) -> tuple[int, int, int]:
+	value = hmm.get('edge_margin_tokens', (0, 0, 0))
+	return (int(value[0]), int(value[1]), int(value[2]))  # type: ignore[index]
+
+
+def edge_margin_mask_for_shape(
+	shape: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+) -> np.ndarray:
+	"""Return a boolean mask for tokens inside the configured edge margins."""
+	_validate_edge_margin_shape(shape, edge_margin_tokens, survey_id=None)
+	return _edge_margin_mask_for_validated_shape(shape, edge_margin_tokens)
+
+
+def _edge_margin_mask_for_validated_shape(
+	shape: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+) -> np.ndarray:
+	x_count, y_count, z_count = shape
+	mx, my, mz = edge_margin_tokens
+	mask = np.zeros(shape, dtype=np.bool_)
+	mask[
+		mx : x_count - mx,
+		my : y_count - my,
+		mz : z_count - mz,
+	] = True
+	return mask
+
+
+def hmm_valid_token_mask(
+	embedding_input: EmbeddingInput,
+	edge_margin_tokens: tuple[int, int, int],
+) -> np.ndarray:
+	"""Return original valid tokens after excluding configured HMM edge margins."""
+	valid = np.asarray(load_valid_tokens(embedding_input), dtype=np.bool_)
+	shape = valid.shape
+	_validate_edge_margin_shape(
+		shape,
+		edge_margin_tokens,
+		survey_id=embedding_input.survey_id,
+	)
+	return valid & edge_margin_mask_for_shape(shape, edge_margin_tokens)
+
+
+def hmm_valid_flat_indices(
+	embedding_input: EmbeddingInput,
+	edge_margin_tokens: tuple[int, int, int],
+) -> np.ndarray:
+	"""Return flattened HMM-valid token indices for one survey."""
+	return np.flatnonzero(
+		hmm_valid_token_mask(embedding_input, edge_margin_tokens).reshape(-1),
+	)
+
+
+def _path_prior_settings_from_hmm_config(
+	hmm: Mapping[str, object],
+) -> HMMPathPriorSettings:
+	if 'path_prior' not in hmm:
+		return _disabled_path_prior_settings()
+	path_prior = _required_mapping(hmm, 'path_prior')
+	if not bool(path_prior['enabled']):
+		return HMMPathPriorSettings(
+			enabled=False,
+			initial_state=_anchor_prior_settings_from_config(
+				path_prior,
+				'initial_state',
+				default=HMMAnchorPriorSettings(mode='none', weight=0.0),
+			),
+			terminal_state=_anchor_prior_settings_from_config(
+				path_prior,
+				'terminal_state',
+				default=HMMAnchorPriorSettings(mode='none', weight=0.0),
+			),
+			expected_boundaries=_expected_boundaries_settings_from_config(
+				path_prior,
+				default=HMMExpectedBoundariesSettings(
+					enabled=False,
+					target='auto_k_minus_1',
+					weight=0.0,
+				),
+			),
+		)
+	return HMMPathPriorSettings(
+		enabled=True,
+		initial_state=_anchor_prior_settings_from_config(
+			path_prior,
+			'initial_state',
+			default=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		),
+		terminal_state=_anchor_prior_settings_from_config(
+			path_prior,
+			'terminal_state',
+			default=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		),
+		expected_boundaries=_expected_boundaries_settings_from_config(
+			path_prior,
+			default=HMMExpectedBoundariesSettings(
+				enabled=False,
+				target='auto_k_minus_1',
+				weight=0.0,
+			),
+		),
+	)
+
+
+def _disabled_path_prior_settings() -> HMMPathPriorSettings:
+	return HMMPathPriorSettings(
+		enabled=False,
+		initial_state=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		terminal_state=HMMAnchorPriorSettings(mode='none', weight=0.0),
+		expected_boundaries=HMMExpectedBoundariesSettings(
+			enabled=False,
+			target='auto_k_minus_1',
+			weight=0.0,
+		),
+	)
+
+
+def _anchor_prior_settings_from_config(
+	path_prior: Mapping[str, object],
+	key: str,
+	*,
+	default: HMMAnchorPriorSettings,
+) -> HMMAnchorPriorSettings:
+	if key not in path_prior:
+		return default
+	anchor = _required_mapping(path_prior, key)
+	return HMMAnchorPriorSettings(
+		mode=str(anchor['mode']),
+		weight=float(anchor['weight']),
+	)
+
+
+def _expected_boundaries_settings_from_config(
+	path_prior: Mapping[str, object],
+	*,
+	default: HMMExpectedBoundariesSettings,
+) -> HMMExpectedBoundariesSettings:
+	if 'expected_boundaries' not in path_prior:
+		return default
+	boundaries = _required_mapping(path_prior, 'expected_boundaries')
+	return HMMExpectedBoundariesSettings(
+		enabled=bool(boundaries['enabled']),
+		target=boundaries.get('target', default.target),
+		weight=float(boundaries.get('weight', default.weight)),
 	)
 
 
@@ -136,6 +315,47 @@ def build_ordered_transition_costs(
 		costs[too_far & ~same] = np.inf
 
 	return costs
+
+
+def build_initial_state_costs(k: int, settings: HMMPathPriorSettings) -> np.ndarray:
+	"""Build soft initial-state costs for ordered HMM decoding."""
+	_validate_positive_int(k, 'k')
+	if not settings.enabled or settings.initial_state.mode == 'none':
+		return np.zeros(k, dtype=np.float32)
+	if settings.initial_state.mode != 'shallow_anchor':
+		msg = (
+			'unsupported initial_state path prior mode: '
+			f'{settings.initial_state.mode!r}'
+		)
+		raise ValueError(msg)
+	_validate_nonnegative_finite_cost(
+		settings.initial_state.weight,
+		'initial_state.weight',
+	)
+	denominator = float(max(k - 1, 1))
+	costs = settings.initial_state.weight * np.arange(k, dtype=np.float32) / denominator
+	return _validate_state_costs(costs, k, 'initial_state_costs').astype(np.float32)
+
+
+def build_terminal_state_costs(k: int, settings: HMMPathPriorSettings) -> np.ndarray:
+	"""Build soft terminal-state costs for ordered HMM decoding."""
+	_validate_positive_int(k, 'k')
+	if not settings.enabled or settings.terminal_state.mode == 'none':
+		return np.zeros(k, dtype=np.float32)
+	if settings.terminal_state.mode != 'deep_anchor':
+		msg = (
+			'unsupported terminal_state path prior mode: '
+			f'{settings.terminal_state.mode!r}'
+		)
+		raise ValueError(msg)
+	_validate_nonnegative_finite_cost(
+		settings.terminal_state.weight,
+		'terminal_state.weight',
+	)
+	denominator = float(max(k - 1, 1))
+	states = np.arange(k, dtype=np.float32)
+	costs = settings.terminal_state.weight * (float(k - 1) - states) / denominator
+	return _validate_state_costs(costs, k, 'terminal_state_costs').astype(np.float32)
 
 
 def sample_token_z_coordinates(
@@ -290,6 +510,9 @@ def prepare_feature_batch_for_indices(
 def viterbi_decode_costs(
 	emission_costs: np.ndarray,
 	transition_costs: np.ndarray,
+	*,
+	initial_state_costs: np.ndarray | None = None,
+	terminal_state_costs: np.ndarray | None = None,
 ) -> np.ndarray:
 	"""Decode the minimum-cost state path with deterministic tie-breaking."""
 	emissions = _as_float_matrix(emission_costs, 'emission_costs')
@@ -306,11 +529,21 @@ def viterbi_decode_costs(
 		)
 	if np.isnan(transitions).any():
 		raise ValueError('transition_costs must not contain NaN values')
+	initial_costs = _optional_state_costs(
+		initial_state_costs,
+		k,
+		'initial_state_costs',
+	)
+	terminal_costs = _optional_state_costs(
+		terminal_state_costs,
+		k,
+		'terminal_state_costs',
+	)
 
 	t_count = emissions.shape[0]
 	dp = np.empty((t_count, k), dtype=np.float64)
 	backpointers = np.zeros((t_count, k), dtype=np.int32)
-	dp[0] = emissions[0]
+	dp[0] = emissions[0] + initial_costs
 
 	for t_index in range(1, t_count):
 		candidates = dp[t_index - 1, :, np.newaxis] + transitions
@@ -319,8 +552,9 @@ def viterbi_decode_costs(
 		dp[t_index] = best_transition_costs + emissions[t_index]
 		backpointers[t_index] = previous.astype(np.int32)
 
-	final_state = int(np.argmin(dp[-1]))
-	if not np.isfinite(dp[-1, final_state]):
+	final_costs = dp[-1] + terminal_costs
+	final_state = int(np.argmin(final_costs))
+	if not np.isfinite(final_costs[final_state]):
 		raise ValueError(
 			'no finite path exists for emission_costs and transition_costs',
 		)
@@ -336,6 +570,9 @@ def decode_trace_segments(
 	emission_costs: np.ndarray,
 	valid_mask: np.ndarray,
 	transition_costs: np.ndarray,
+	*,
+	initial_state_costs: np.ndarray | None = None,
+	terminal_state_costs: np.ndarray | None = None,
 ) -> np.ndarray:
 	"""Decode valid vertical trace tokens as one sequence, preserving invalid gaps."""
 	emissions = _as_float_matrix(emission_costs, 'emission_costs')
@@ -362,11 +599,26 @@ def decode_trace_segments(
 		)
 	if np.isnan(transitions).any():
 		raise ValueError('transition_costs must not contain NaN values')
+	initial_costs = _optional_state_costs(
+		initial_state_costs,
+		k,
+		'initial_state_costs',
+	)
+	terminal_costs = _optional_state_costs(
+		terminal_state_costs,
+		k,
+		'terminal_state_costs',
+	)
 
 	labels = np.full(emissions.shape[0], -1, dtype=np.int32)
 	z_indices = np.flatnonzero(mask)
 	if z_indices.size:
-		labels[z_indices] = viterbi_decode_costs(emissions[z_indices], transitions)
+		labels[z_indices] = viterbi_decode_costs(
+			emissions[z_indices],
+			transitions,
+			initial_state_costs=initial_costs,
+			terminal_state_costs=terminal_costs,
+		)
 	return labels
 
 
@@ -377,7 +629,10 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 	residualizer: LocalTokenPositionResidualizer | None,
 	preprocessor: object,
 	transition_costs: np.ndarray,
+	initial_state_costs: np.ndarray | None = None,
+	terminal_state_costs: np.ndarray | None = None,
 	emission_source: str = 'embedding',
+	edge_margin_tokens: tuple[int, int, int] = (0, 0, 0),
 ) -> np.ndarray:
 	"""Decode HMM labels for one survey without flattening all features at once."""
 	center_matrix = np.asarray(centers, dtype=np.float32)
@@ -385,7 +640,7 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 		msg = f'centers must be a non-empty 2D matrix; got {center_matrix.shape!r}'
 		raise ValueError(msg)
 	embeddings = open_embedding_array(embedding_input)
-	valid = load_valid_tokens(embedding_input)
+	valid = hmm_valid_token_mask(embedding_input, edge_margin_tokens)
 	shape = embeddings.shape[:3]
 	labels = np.full(shape, -1, dtype=np.int32)
 	x_count, y_count, z_count = shape
@@ -424,6 +679,8 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 				emission_costs,
 				trace_valid,
 				transition_costs,
+				initial_state_costs=initial_state_costs,
+				terminal_state_costs=terminal_state_costs,
 			)
 	return labels
 
@@ -435,7 +692,10 @@ def _decode_all_surveys(  # noqa: PLR0913
 	residualizer: LocalTokenPositionResidualizer | None,
 	preprocessor: object,
 	transition_costs: np.ndarray,
+	initial_state_costs: np.ndarray | None,
+	terminal_state_costs: np.ndarray | None,
 	emission_source: str,
+	edge_margin_tokens: tuple[int, int, int],
 ) -> dict[str, np.ndarray]:
 	return {
 		item.survey_id: decode_survey_ordered_labels(
@@ -444,7 +704,10 @@ def _decode_all_surveys(  # noqa: PLR0913
 			residualizer=residualizer,
 			preprocessor=preprocessor,
 			transition_costs=transition_costs,
+			initial_state_costs=initial_state_costs,
+			terminal_state_costs=terminal_state_costs,
 			emission_source=emission_source,
+			edge_margin_tokens=edge_margin_tokens,
 		)
 		for item in embedding_inputs
 	}
@@ -547,11 +810,18 @@ def run_stratigraphic_hmm_clustering(
 	hmm_settings = stratigraphic_hmm_settings_from_config(config)
 	embedding_inputs = tuple(discover_embedding_inputs(settings.input_dir))
 	compatibility_signature = validate_compatible_embedding_inputs(embedding_inputs)
+	edge_margin_excluded_valid_token_count = (
+		_edge_margin_excluded_valid_token_count(
+			embedding_inputs,
+			hmm_settings.edge_margin_tokens,
+		)
+	)
 	if hmm_settings.emission_source == 'embedding':
-		sample = sample_valid_embedding_tokens(
+		sample = _sample_valid_hmm_embedding_tokens(
 			embedding_inputs,
 			sample_tokens=settings.sample_tokens,
 			seed=settings.seed,
+			edge_margin_tokens=hmm_settings.edge_margin_tokens,
 		)
 		residualizer = fit_residualizer(
 			sample.features,
@@ -571,6 +841,7 @@ def run_stratigraphic_hmm_clustering(
 			embedding_inputs,
 			sample_tokens=settings.sample_tokens,
 			seed=settings.seed,
+			edge_margin_tokens=hmm_settings.edge_margin_tokens,
 		)
 		residualizer = None
 		training_input_features = np.asarray(sample.features, dtype=np.float32)
@@ -628,6 +899,8 @@ def run_stratigraphic_hmm_clustering(
 	results: list[KClusteringResult] = []
 	for k in settings.k_values:
 		transition_costs = build_ordered_transition_costs(k, hmm_settings.transition)
+		initial_state_costs = build_initial_state_costs(k, hmm_settings.path_prior)
+		terminal_state_costs = build_terminal_state_costs(k, hmm_settings.path_prior)
 		centers = initialize_ordered_centers(
 			training_features,
 			sample_z,
@@ -644,7 +917,10 @@ def run_stratigraphic_hmm_clustering(
 				residualizer=residualizer,
 				preprocessor=preprocessor,
 				transition_costs=transition_costs,
+				initial_state_costs=initial_state_costs,
+				terminal_state_costs=terminal_state_costs,
 				emission_source=hmm_settings.emission_source,
+				edge_margin_tokens=hmm_settings.edge_margin_tokens,
 			)
 			centers, summary = update_centers_from_labels(
 				embedding_inputs,
@@ -664,7 +940,10 @@ def run_stratigraphic_hmm_clustering(
 			residualizer=residualizer,
 			preprocessor=preprocessor,
 			transition_costs=transition_costs,
+			initial_state_costs=initial_state_costs,
+			terminal_state_costs=terminal_state_costs,
 			emission_source=hmm_settings.emission_source,
+			edge_margin_tokens=hmm_settings.edge_margin_tokens,
 		)
 
 		label_results = _write_hmm_labels_for_k(
@@ -689,7 +968,12 @@ def run_stratigraphic_hmm_clustering(
 		hmm_metadata = _hmm_metadata(
 			hmm_settings=hmm_settings,
 			transition_costs=transition_costs,
+			initial_state_costs=initial_state_costs,
+			terminal_state_costs=terminal_state_costs,
 			iteration_summaries=iteration_summaries,
+			edge_margin_excluded_valid_token_count=(
+				edge_margin_excluded_valid_token_count
+			),
 		)
 		metadata = {
 			**common_metadata,
@@ -726,7 +1010,11 @@ def run_stratigraphic_hmm_clustering(
 				'emission_source': hmm_settings.emission_source,
 				'centers': centers,
 				'transition_settings': asdict(hmm_settings.transition),
+				'edge_margin_tokens': hmm_settings.edge_margin_tokens,
+				'path_prior': asdict(hmm_settings.path_prior),
 				'transition_costs': transition_costs,
+				'initial_state_costs': initial_state_costs,
+				'terminal_state_costs': terminal_state_costs,
 				'iteration_count': hmm_settings.iterations,
 				'iteration_summaries': iteration_summaries,
 			},
@@ -749,13 +1037,49 @@ def run_stratigraphic_hmm_clustering(
 	)
 
 
+def _sample_valid_hmm_embedding_tokens(
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	*,
+	sample_tokens: int,
+	seed: int,
+	edge_margin_tokens: tuple[int, int, int],
+) -> SampledTokens:
+	"""Sample HMM-valid token embeddings after edge-margin exclusion."""
+	return _sample_valid_hmm_tokens(
+		embedding_inputs,
+		sample_tokens=sample_tokens,
+		seed=seed,
+		edge_margin_tokens=edge_margin_tokens,
+		feature_loader=extract_token_features,
+	)
+
+
 def _sample_valid_z_tokens(
 	embedding_inputs: tuple[EmbeddingInput, ...],
 	*,
 	sample_tokens: int,
 	seed: int,
+	edge_margin_tokens: tuple[int, int, int],
 ) -> SampledTokens:
 	"""Sample valid token indices and use normalized z as training features."""
+	return _sample_valid_hmm_tokens(
+		embedding_inputs,
+		sample_tokens=sample_tokens,
+		seed=seed,
+		edge_margin_tokens=edge_margin_tokens,
+		feature_loader=normalized_z_features_for_indices,
+	)
+
+
+def _sample_valid_hmm_tokens(
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	*,
+	sample_tokens: int,
+	seed: int,
+	edge_margin_tokens: tuple[int, int, int],
+	feature_loader: Callable[[EmbeddingInput, np.ndarray], np.ndarray],
+) -> SampledTokens:
+	"""Sample HMM-valid token indices and load matching training features."""
 	if sample_tokens <= 0:
 		msg = f'sample_tokens must be positive; got {sample_tokens!r}'
 		raise ValueError(msg)
@@ -763,7 +1087,14 @@ def _sample_valid_z_tokens(
 		msg = 'at least one embedding input is required'
 		raise ValueError(msg)
 
-	valid_counts = [count_valid_tokens(item) for item in embedding_inputs]
+	valid_indices_by_survey = {
+		item.survey_id: hmm_valid_flat_indices(item, edge_margin_tokens)
+		for item in embedding_inputs
+	}
+	valid_counts = [
+		int(valid_indices_by_survey[item.survey_id].size)
+		for item in embedding_inputs
+	]
 	total_valid = int(sum(valid_counts))
 	if total_valid == 0:
 		msg = 'cannot cluster embeddings because no valid tokens were found'
@@ -782,12 +1113,10 @@ def _sample_valid_z_tokens(
 		mask = (selected_global >= offset) & (selected_global < stop)
 		local_valid_ordinals = selected_global[mask] - offset
 		if local_valid_ordinals.size:
-			all_valid_indices = valid_flat_indices(item)
+			all_valid_indices = valid_indices_by_survey[item.survey_id]
 			token_indices = all_valid_indices[local_valid_ordinals]
 			per_survey_indices[item.survey_id] = token_indices
-			feature_blocks.append(
-				normalized_z_features_for_indices(item, token_indices)
-			)
+			feature_blocks.append(feature_loader(item, token_indices))
 		else:
 			per_survey_indices[item.survey_id] = np.empty(0, dtype=np.int64)
 		offset = stop
@@ -893,12 +1222,26 @@ def _write_hmm_model_artifacts(  # noqa: PLR0913
 	write_json(model_dir / 'clustering_metadata.json', metadata)
 
 
-def _hmm_metadata(
+def _hmm_metadata(  # noqa: PLR0913
 	*,
 	hmm_settings: StratigraphicHMMSettings,
 	transition_costs: np.ndarray,
+	initial_state_costs: np.ndarray,
+	terminal_state_costs: np.ndarray,
 	iteration_summaries: list[dict[str, object]],
+	edge_margin_excluded_valid_token_count: int,
 ) -> dict[str, object]:
+	path_prior = {
+		**asdict(hmm_settings.path_prior),
+		'initial_state_costs': _json_safe_state_costs(
+			initial_state_costs,
+			'initial_state_costs',
+		),
+		'terminal_state_costs': _json_safe_state_costs(
+			terminal_state_costs,
+			'terminal_state_costs',
+		),
+	}
 	return {
 		'emission_source': hmm_settings.emission_source,
 		'iterations': hmm_settings.iterations,
@@ -908,6 +1251,11 @@ def _hmm_metadata(
 		'transition_costs': _json_safe_transition_costs(transition_costs),
 		'init': {'order_by': hmm_settings.init_order_by},
 		'update': {'empty_cluster_policy': hmm_settings.empty_cluster_policy},
+		'edge_margin_tokens': list(hmm_settings.edge_margin_tokens),
+		'edge_margin_excluded_valid_token_count': int(
+			edge_margin_excluded_valid_token_count
+		),
+		'path_prior': path_prior,
 		'iteration_summaries': iteration_summaries,
 	}
 
@@ -921,6 +1269,12 @@ def _json_safe_transition_costs(costs: np.ndarray) -> list[list[float | None]]:
 		[None if not np.isfinite(value) else float(value) for value in row]
 		for row in matrix
 	]
+
+
+def _json_safe_state_costs(costs: np.ndarray, name: str) -> list[float]:
+	vector = np.asarray(costs, dtype=np.float64)
+	_validate_state_costs(vector, vector.size, name)
+	return [float(value) for value in vector]
 
 
 def _emission_feature_metadata(emission_source: str) -> dict[str, object]:
@@ -941,6 +1295,63 @@ def _emission_feature_metadata(emission_source: str) -> dict[str, object]:
 			'embedding_features',
 		],
 	}
+
+
+def _edge_margin_excluded_valid_token_count(
+	embedding_inputs: tuple[EmbeddingInput, ...],
+	edge_margin_tokens: tuple[int, int, int],
+) -> int:
+	count = 0
+	for item in embedding_inputs:
+		valid = np.asarray(load_valid_tokens(item), dtype=np.bool_)
+		_validate_edge_margin_shape(
+			valid.shape,
+			edge_margin_tokens,
+			survey_id=item.survey_id,
+		)
+		margin_mask = _edge_margin_mask_for_validated_shape(
+			valid.shape,
+			edge_margin_tokens,
+		)
+		count += int(np.count_nonzero(valid & ~margin_mask))
+	return count
+
+
+def _validate_edge_margin_shape(
+	shape: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+	*,
+	survey_id: str | None,
+) -> None:
+	if len(shape) != 3:
+		msg = f'token grid shape must have three axes; got {shape!r}'
+		raise ValueError(msg)
+	if len(edge_margin_tokens) != 3:
+		msg = (
+			'edge_margin_tokens must contain exactly three integers; '
+			f'got {edge_margin_tokens!r}'
+		)
+		raise ValueError(msg)
+	for value in edge_margin_tokens:
+		if value < 0:
+			msg = f'edge_margin_tokens must be non-negative; got {edge_margin_tokens!r}'
+			raise ValueError(msg)
+	if any(
+		(2 * margin) >= size
+		for size, margin in zip(shape, edge_margin_tokens, strict=True)
+	):
+		margin_text = '[' + ','.join(str(value) for value in edge_margin_tokens) + ']'
+		if survey_id is None:
+			msg = (
+				f'edge_margin_tokens {margin_text} leave no interior tokens '
+				f'for token grid shape {shape}'
+			)
+		else:
+			msg = (
+				f'edge_margin_tokens {margin_text} leave no interior tokens '
+				f'for survey {survey_id} with token grid shape {shape}'
+			)
+		raise ValueError(msg)
 
 
 def _validate_transition_settings(settings: HMMTransitionSettings) -> None:
@@ -973,6 +1384,28 @@ def _as_float_matrix(value: np.ndarray, name: str) -> np.ndarray:
 	return array
 
 
+def _optional_state_costs(
+	value: np.ndarray | None,
+	k: int,
+	name: str,
+) -> np.ndarray:
+	if value is None:
+		return np.zeros(k, dtype=np.float64)
+	return _validate_state_costs(np.asarray(value, dtype=np.float64), k, name)
+
+
+def _validate_state_costs(value: np.ndarray, k: int, name: str) -> np.ndarray:
+	if value.ndim != 1:
+		raise ValueError(f'{name} must be 1D; got shape {value.shape}')
+	if value.shape != (k,):
+		raise ValueError(f'{name} must have shape ({k},); got {value.shape}')
+	if not np.all(np.isfinite(value)):
+		raise ValueError(f'{name} must contain only finite values')
+	if np.any(value < 0.0):
+		raise ValueError(f'{name} must contain only non-negative values')
+	return value
+
+
 def _required_mapping(
 	parent: Mapping[str, object],
 	key: str,
@@ -1001,9 +1434,14 @@ def _transformed_feature_dim(
 
 
 __all__ = [
+	'HMMAnchorPriorSettings',
+	'HMMExpectedBoundariesSettings',
+	'HMMPathPriorSettings',
 	'HMMTransitionSettings',
 	'StratigraphicHMMSettings',
+	'build_initial_state_costs',
 	'build_ordered_transition_costs',
+	'build_terminal_state_costs',
 	'decode_survey_ordered_labels',
 	'decode_trace_segments',
 	'initialize_ordered_centers',
