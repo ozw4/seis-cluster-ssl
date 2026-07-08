@@ -42,6 +42,14 @@ by `k` value. Outputs follow the same contract as embedding clustering:
 - method-specific metadata for stratigraphic HMM settings and iteration
   summaries
 
+JSON metadata is written as strict JSON-safe text. Non-finite numerical values
+such as forbidden reverse-transition infinities are represented as `null` in
+metadata JSON, while `hmm_model.joblib` preserves the numerical transition-cost
+array used for decoding.
+
+Saved label grids are decoded from the saved final centers in
+`cluster_centers.npy`, matching the centers stored in `hmm_model.joblib`.
+
 Invalid tokens are omitted from the observed HMM sequence and remain `-1` in the
 output label grid. They do not reset the vertical trace state sequence. With
 `forbid_reverse: true`, monotonicity is enforced over consecutive valid

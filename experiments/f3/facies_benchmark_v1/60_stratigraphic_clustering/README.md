@@ -16,6 +16,11 @@ label grid. They do not reset the trace sequence: when reverse transitions are
 forbidden, the consecutive valid labels in each vertical trace are
 non-decreasing in z order.
 
+Metadata JSON is strict JSON-safe text, so non-finite values are not emitted as
+`Infinity` or `NaN`. Saved labels are decoded from the saved final centers in
+`cluster_centers.npy`, and `hmm_model.joblib` preserves the numerical transition
+costs used for that decode.
+
 ## Configs
 
 ```text
