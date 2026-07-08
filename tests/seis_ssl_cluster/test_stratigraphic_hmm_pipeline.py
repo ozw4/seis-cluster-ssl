@@ -408,6 +408,53 @@ def test_stratigraphic_hmm_metadata_is_strict_json_safe(
 	assert np.isinf(model['transition_costs'][1, 0])
 
 
+def test_run_embedding_clustering_stratigraphic_hmm_path_prior_metadata(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.zeros((2, 2, 6, 2), dtype=np.float32),
+		valid=np.ones((2, 2, 6), dtype=np.bool_),
+	)
+	config = _hmm_config(input_dir, output_dir, emission_source='z_coordinate')
+	config['clustering']['stratigraphic_hmm']['path_prior'] = {
+		'enabled': True,
+		'initial_state': {'mode': 'shallow_anchor', 'weight': 0.5},
+		'terminal_state': {'mode': 'deep_anchor', 'weight': 0.5},
+		'expected_boundaries': {
+			'enabled': False,
+			'target': 'auto_k_minus_1',
+			'weight': 0.1,
+		},
+	}
+
+	run_embedding_clustering(config)
+
+	metadata = json.loads(
+		(output_dir / 'models' / 'k3' / 'clustering_metadata.json').read_text(),
+	)
+	path_prior = metadata['stratigraphic_hmm']['path_prior']
+	assert path_prior['enabled'] is True
+	assert path_prior['initial_state'] == {'mode': 'shallow_anchor', 'weight': 0.5}
+	assert path_prior['terminal_state'] == {'mode': 'deep_anchor', 'weight': 0.5}
+	assert path_prior['expected_boundaries'] == {
+		'enabled': False,
+		'target': 'auto_k_minus_1',
+		'weight': 0.1,
+	}
+	np.testing.assert_allclose(path_prior['initial_state_costs'], [0.0, 0.25, 0.5])
+	np.testing.assert_allclose(path_prior['terminal_state_costs'], [0.5, 0.25, 0.0])
+	assert np.all(np.isfinite(path_prior['initial_state_costs']))
+	assert np.all(np.isfinite(path_prior['terminal_state_costs']))
+	assert (
+		metadata['ordered_diagnostics']['aggregate']['reverse_transition_rate'] == 0.0
+	)
+
+
 def test_run_embedding_clustering_stratigraphic_hmm_zonly_writes_metadata(
 	tmp_path: Path,
 ) -> None:
