@@ -1,0 +1,375 @@
+from __future__ import annotations
+
+import csv
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+from seis_ssl_cluster.f3.lithology.m1_results import (
+	F3StratHMMM1ResultsConfig,
+	consolidate_f3_strat_hmm_m1_results,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CLI = (
+	REPO_ROOT
+	/ 'proc'
+	/ 'seis_ssl_cluster'
+	/ 'summarize_f3_strat_hmm_m1_results.py'
+)
+
+
+def test_successful_summary_creation(tmp_path: Path) -> None:
+	config = _write_inputs(tmp_path)
+
+	result = consolidate_f3_strat_hmm_m1_results(config)
+
+	assert result.summary_json.is_file()
+	assert result.summary_markdown.is_file()
+	payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
+	assert payload['schema_version'] == 1
+	assert payload['baseline_model'] == 'mae_baseline'
+	assert payload['candidate_model'] == 'strat_hmm_m1'
+	assert payload['single_split']['delta']['macro_f1'] == pytest.approx(0.06)
+	assert payload['label_budget']['budgets'][0] == {
+		'budget_id': 'cap25',
+		'per_class_cap': 25,
+		'n_pairs': 2,
+		'mean_delta_macro_f1': pytest.approx(0.055),
+		'win_rate_macro_f1': 1.0,
+		'mean_delta_mean_iou': pytest.approx(0.05),
+		'win_rate_mean_iou': 1.0,
+		'mean_delta_balanced_accuracy': pytest.approx(0.035),
+		'win_rate_balanced_accuracy': 1.0,
+	}
+	assert payload['split_index']['win_rates'] == {
+		'macro_f1': 1.0,
+		'mean_iou': 1.0,
+		'balanced_accuracy': 0.5,
+	}
+	markdown = result.summary_markdown.read_text(encoding='utf-8')
+	assert 'HMM labels are a structured pretext signal' in markdown
+	assert 'Single-run result is strong positive' in markdown
+	assert 'Label-budget robustness is strongest in low-label regimes' in markdown
+	assert 'positive macro F1 and mean IoU deltas on all tested splits' in markdown
+
+
+def test_missing_required_input_file_raises_clear_error(tmp_path: Path) -> None:
+	config = _write_inputs(tmp_path)
+	config = F3StratHMMM1ResultsConfig(
+		baseline_comparison_csv=tmp_path / 'missing.csv',
+		label_budget_suite_root=config.label_budget_suite_root,
+		split_index_suite_root=config.split_index_suite_root,
+		output_dir=config.output_dir,
+		baseline_model=config.baseline_model,
+		candidate_model=config.candidate_model,
+	)
+
+	with pytest.raises(FileNotFoundError, match='required input file does not exist'):
+		consolidate_f3_strat_hmm_m1_results(config)
+
+
+def test_baseline_candidate_row_lookup_is_deterministic(tmp_path: Path) -> None:
+	config = _write_inputs(tmp_path, reverse_comparison_order=True)
+
+	payload = _summary_payload(config)
+
+	assert payload['single_split']['baseline']['accuracy'] == pytest.approx(0.70)
+	assert payload['single_split']['candidate']['accuracy'] == pytest.approx(0.76)
+
+
+def test_duplicate_comparison_row_fails_instead_of_guessing(tmp_path: Path) -> None:
+	config = _write_inputs(tmp_path)
+	_append_csv_row(
+		config.baseline_comparison_csv,
+		{
+			'MODEL_TAG': 'mae_baseline',
+			'BASELINE_TAG': '',
+			'accuracy': '0.50',
+			'balanced_accuracy': '0.50',
+			'macro_f1': '0.50',
+			'weighted_f1': '0.50',
+			'mean_iou': '0.50',
+		},
+	)
+
+	with pytest.raises(ValueError, match='expected exactly one comparison row'):
+		consolidate_f3_strat_hmm_m1_results(config)
+
+
+def test_decision_go_when_macro_f1_and_mean_iou_are_positive(
+	tmp_path: Path,
+) -> None:
+	config = _write_inputs(tmp_path)
+
+	payload = _summary_payload(config)
+
+	assert payload['decision']['guidance'] == 'go'
+	assert 'positive' in payload['decision']['summary']
+
+
+def test_full_budget_duplicate_seed_rows_are_collapsed_when_manifest_exposes_identity(
+	tmp_path: Path,
+) -> None:
+	config = _write_inputs(tmp_path, duplicate_full_identity=True)
+
+	payload = _summary_payload(config)
+
+	full = next(
+		row for row in payload['label_budget']['budgets'] if row['budget_id'] == 'full'
+	)
+	assert full['n_pairs'] == 1
+	assert full['mean_delta_macro_f1'] == pytest.approx(0.02)
+	assert any(
+		'full duplicate label-budget rows collapsed' in warning
+		for warning in payload['warnings']
+	)
+	assert any('balanced_accuracy' in warning for warning in payload['warnings'])
+
+
+def test_cli_supports_config_and_dry_run(tmp_path: Path) -> None:
+	config = _write_inputs(tmp_path)
+	config_path = tmp_path / 'config.yaml'
+	config_path.write_text(
+		'\n'.join(
+			(
+				'inputs:',
+				f'  baseline_comparison_csv: {config.baseline_comparison_csv}',
+				f'  label_budget_suite_root: {config.label_budget_suite_root}',
+				f'  split_index_suite_root: {config.split_index_suite_root}',
+				'models:',
+				'  baseline: mae_baseline',
+				'  candidate: strat_hmm_m1',
+				'outputs:',
+				f'  output_dir: {config.output_dir}',
+				'',
+			),
+		),
+		encoding='utf-8',
+	)
+	env = os.environ.copy()
+	env['PYTHONPATH'] = os.pathsep.join(
+		(str(REPO_ROOT / 'src'), env.get('PYTHONPATH', '')),
+	)
+
+	completed = subprocess.run(  # noqa: S603
+		[sys.executable, str(CLI), '--config', str(config_path), '--dry-run'],
+		cwd=REPO_ROOT,
+		env=env,
+		text=True,
+		capture_output=True,
+		check=True,
+		timeout=30,
+	)
+
+	assert 'stage: summarize_f3_strat_hmm_m1_results' in completed.stdout
+	assert 'execution: dry-run' in completed.stdout
+	assert not (config.output_dir / 'm1_results_summary.json').exists()
+
+
+def _summary_payload(config: F3StratHMMM1ResultsConfig) -> dict[str, object]:
+	result = consolidate_f3_strat_hmm_m1_results(config)
+	return json.loads(result.summary_json.read_text(encoding='utf-8'))
+
+
+def _write_inputs(
+	tmp_path: Path,
+	*,
+	reverse_comparison_order: bool = False,
+	duplicate_full_identity: bool = False,
+) -> F3StratHMMM1ResultsConfig:
+	baseline_csv = tmp_path / 'comparison_table.csv'
+	label_root = tmp_path / 'label_budget_m1_v1'
+	split_root = tmp_path / 'split_index_m1_v1'
+	output_dir = tmp_path / 'm1_results'
+	_write_comparison_csv(baseline_csv, reverse_order=reverse_comparison_order)
+	_write_label_budget(label_root, duplicate_full_identity=duplicate_full_identity)
+	_write_split_index(split_root)
+	return F3StratHMMM1ResultsConfig(
+		baseline_comparison_csv=baseline_csv,
+		label_budget_suite_root=label_root,
+		split_index_suite_root=split_root,
+		output_dir=output_dir,
+		baseline_model='mae_baseline',
+		candidate_model='strat_hmm_m1',
+	)
+
+
+def _write_comparison_csv(path: Path, *, reverse_order: bool) -> None:
+	rows = [
+		{
+			'MODEL_TAG': 'mae_baseline',
+			'BASELINE_TAG': '',
+			'accuracy': '0.70',
+			'balanced_accuracy': '0.62',
+			'macro_f1': '0.60',
+			'weighted_f1': '0.71',
+			'mean_iou': '0.52',
+		},
+		{
+			'MODEL_TAG': 'strat_hmm_m1',
+			'BASELINE_TAG': '',
+			'accuracy': '0.76',
+			'balanced_accuracy': '0.65',
+			'macro_f1': '0.66',
+			'weighted_f1': '0.77',
+			'mean_iou': '0.59',
+		},
+		{
+			'MODEL_TAG': '',
+			'BASELINE_TAG': 'z_only_v1',
+			'accuracy': '0.41',
+			'balanced_accuracy': '0.40',
+			'macro_f1': '0.35',
+			'weighted_f1': '0.43',
+			'mean_iou': '0.26',
+		},
+	]
+	if reverse_order:
+		rows.reverse()
+	_write_csv(
+		path,
+		(
+			'MODEL_TAG',
+			'BASELINE_TAG',
+			'accuracy',
+			'balanced_accuracy',
+			'macro_f1',
+			'weighted_f1',
+			'mean_iou',
+		),
+		rows,
+	)
+
+
+def _write_label_budget(root: Path, *, duplicate_full_identity: bool) -> None:
+	rows = [
+		{
+			'budget_id': 'cap25',
+			'per_class_cap': '25',
+			'subsample_seed': '0',
+			'delta_accuracy': '0.02',
+			'delta_balanced_accuracy': '0.04',
+			'delta_macro_f1': '0.05',
+			'delta_weighted_f1': '0.03',
+			'delta_mean_iou': '0.04',
+		},
+		{
+			'budget_id': 'cap25',
+			'per_class_cap': '25',
+			'subsample_seed': '1',
+			'delta_accuracy': '0.03',
+			'delta_balanced_accuracy': '0.03',
+			'delta_macro_f1': '0.06',
+			'delta_weighted_f1': '0.04',
+			'delta_mean_iou': '0.06',
+		},
+		{
+			'budget_id': 'full',
+			'per_class_cap': '',
+			'subsample_seed': '0',
+			'delta_accuracy': '0.01',
+			'delta_balanced_accuracy': '-0.02',
+			'delta_macro_f1': '0.02',
+			'delta_weighted_f1': '0.01',
+			'delta_mean_iou': '0.03',
+		},
+		{
+			'budget_id': 'full',
+			'per_class_cap': '',
+			'subsample_seed': '1',
+			'delta_accuracy': '0.01',
+			'delta_balanced_accuracy': '-0.02',
+			'delta_macro_f1': '0.02',
+			'delta_weighted_f1': '0.01',
+			'delta_mean_iou': '0.03',
+		},
+	]
+	_write_csv(
+		root / 'reports' / 'paired_deltas.csv',
+		(
+			'budget_id',
+			'per_class_cap',
+			'subsample_seed',
+			'delta_accuracy',
+			'delta_balanced_accuracy',
+			'delta_macro_f1',
+			'delta_weighted_f1',
+			'delta_mean_iou',
+		),
+		rows,
+	)
+	manifest_rows = []
+	for row in rows:
+		for role in ('baseline', 'candidate'):
+			identity = f'hash-{row["budget_id"]}-{row["subsample_seed"]}'
+			if duplicate_full_identity and row['budget_id'] == 'full':
+				identity = 'hash-full-duplicated'
+			manifest_rows.append(
+				{
+					'model_role': role,
+					'budget_id': row['budget_id'],
+					'subsample_seed': int(row['subsample_seed']),
+					'paired_identity_hash': identity,
+				},
+			)
+	_write_json(root / 'suite_manifest.json', {'rows': manifest_rows})
+
+
+def _write_split_index(root: Path) -> None:
+	_write_csv(
+		root / 'reports' / 'split_paired_deltas.csv',
+		(
+			'split_id',
+			'delta_accuracy',
+			'delta_balanced_accuracy',
+			'delta_macro_f1',
+			'delta_weighted_f1',
+			'delta_mean_iou',
+		),
+		[
+			{
+				'split_id': 'split_001',
+				'delta_accuracy': '0.01',
+				'delta_balanced_accuracy': '-0.01',
+				'delta_macro_f1': '0.02',
+				'delta_weighted_f1': '0.01',
+				'delta_mean_iou': '0.03',
+			},
+			{
+				'split_id': 'split_000',
+				'delta_accuracy': '0.02',
+				'delta_balanced_accuracy': '0.02',
+				'delta_macro_f1': '0.03',
+				'delta_weighted_f1': '0.02',
+				'delta_mean_iou': '0.04',
+			},
+		],
+	)
+
+
+def _write_csv(
+	path: Path,
+	fieldnames: tuple[str, ...],
+	rows: list[dict[str, str]],
+) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	with path.open('w', newline='', encoding='utf-8') as handle:
+		writer = csv.DictWriter(handle, fieldnames=fieldnames)
+		writer.writeheader()
+		writer.writerows(rows)
+
+
+def _append_csv_row(path: Path, row: dict[str, str]) -> None:
+	with path.open('a', newline='', encoding='utf-8') as handle:
+		writer = csv.DictWriter(handle, fieldnames=tuple(row))
+		writer.writerow(row)
+
+
+def _write_json(path: Path, payload: dict[str, object]) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
