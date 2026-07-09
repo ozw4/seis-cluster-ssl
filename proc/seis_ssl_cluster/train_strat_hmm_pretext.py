@@ -16,7 +16,7 @@ from seis_ssl_cluster.config import (
 	load_config,
 	resolve_strat_hmm_pretext_config,
 )
-from seis_ssl_cluster.training.strat_hmm_pretraining import (
+from seis_ssl_cluster.training.strat_hmm import (
 	run_strat_hmm_pretext_training,
 )
 from seis_ssl_cluster.utils.cli import print_config_summary
