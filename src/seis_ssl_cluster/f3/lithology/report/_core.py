@@ -151,12 +151,22 @@ def _report_payload(config: F3LithologyReportConfig) -> dict[str, object]:
 		_mapping(token_metadata),
 		_mapping(metrics),
 	)
-	dataset = _dataset_summary(config, _mapping(token_metadata), classes)
 	token_dataset = _token_dataset_summary(
 		_mapping(probe_config),
 		_mapping(token_metadata),
 		token_datasets=token_datasets,
 	)
+	dataset = _dataset_summary(
+		config,
+		_mapping(token_metadata),
+		classes,
+		token_dataset,
+	)
+	if not _mapping(_mapping(dataset.get('class_imbalance')).get('class_counts')):
+		warnings.append(
+			'dataset class imbalance unavailable: '
+			'no token dataset class counts were found',
+		)
 	pretrained = _pretrained_summary(config, _mapping(probe_config))
 	probe = _probe_summary(config, _mapping(probe_config))
 	metric_summary, metric_warnings = _metrics_summary(_mapping(metrics), classes)

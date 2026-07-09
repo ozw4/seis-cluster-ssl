@@ -50,6 +50,16 @@ def test_f3_lithology_report_outputs_markdown_json_and_relative_links(
 	assert payload['probe']['class_weighting'] == 'balanced'
 	assert payload['probe']['hyperparameters']['max_iter'] == 2000
 	assert payload['prediction_summary'] == {'valid_token_count': 16}
+	assert payload['dataset']['class_imbalance'] == {
+		'class_counts': {'0': 10, '5': 6},
+		'max_to_min_positive_ratio': 10 / 6,
+		'total': 16,
+	}
+	assert (
+		'- class imbalance: {"class_counts": {"0": 10, "5": 6}, '
+		'"max_to_min_positive_ratio": 1.6666666666666667, "total": 16}'
+		in markdown
+	)
 	for section in (
 		'## Dataset',
 		'## Pretrained encoder',
@@ -110,6 +120,98 @@ def test_f3_lithology_report_summarizes_explicit_token_npz_paths(
 	assert token_dataset['validation_token_count'] == 2
 	assert token_dataset['class_counts']['train'] == {'0': 1, '5': 2}
 	assert token_dataset['class_counts']['validation'] == {'0': 2}
+	assert payload['dataset']['class_imbalance'] == {
+		'class_counts': {'0': 3, '5': 2},
+		'max_to_min_positive_ratio': 1.5,
+		'total': 5,
+	}
+
+
+def test_f3_lithology_report_uses_available_split_counts(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	for path in (
+		Path(run['lithology_root']) / 'token_dataset/token_dataset_metadata.json',
+		Path(run['probe_config_json']),
+	):
+		payload = json.loads(path.read_text(encoding='utf-8'))
+		payload['summary'].pop('train_class_counts', None)
+		_write_json(path, payload)
+
+	result = build_f3_lithology_report(_report_config(run))
+
+	assert result.payload['dataset']['class_imbalance'] == {
+		'class_counts': {'0': 2, '5': 4},
+		'max_to_min_positive_ratio': 2.0,
+		'total': 6,
+	}
+
+
+def test_f3_lithology_report_warns_when_class_counts_are_missing(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	for path in (
+		Path(run['lithology_root']) / 'token_dataset/token_dataset_metadata.json',
+		Path(run['probe_config_json']),
+	):
+		payload = json.loads(path.read_text(encoding='utf-8'))
+		payload['summary'].pop('train_class_counts', None)
+		payload['summary'].pop('validation_class_counts', None)
+		_write_json(path, payload)
+
+	result = build_f3_lithology_report(_report_config(run))
+	markdown = result.report_markdown.read_text(encoding='utf-8')
+
+	assert result.payload['dataset']['class_imbalance'] == {
+		'class_counts': {},
+		'max_to_min_positive_ratio': None,
+		'total': 0,
+	}
+	warning = (
+		'dataset class imbalance unavailable: '
+		'no token dataset class counts were found'
+	)
+	assert warning in result.payload['warnings']
+	assert f'- {warning}' in markdown
+
+
+def test_f3_lithology_report_ignores_zero_counts_in_imbalance_ratio(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	for path in (
+		Path(run['lithology_root']) / 'token_dataset/token_dataset_metadata.json',
+		Path(run['probe_config_json']),
+	):
+		payload = json.loads(path.read_text(encoding='utf-8'))
+		payload['summary']['train_class_counts'] = {'0': 0, '5': 2}
+		payload['summary']['validation_class_counts'] = {'0': 0, '5': 4}
+		_write_json(path, payload)
+
+	result = build_f3_lithology_report(_report_config(run))
+
+	assert result.payload['dataset']['class_imbalance'] == {
+		'class_counts': {'0': 0, '5': 6},
+		'max_to_min_positive_ratio': 1.0,
+		'total': 6,
+	}
 
 
 def test_f3_lithology_report_writes_warning_when_metrics_are_missing(
