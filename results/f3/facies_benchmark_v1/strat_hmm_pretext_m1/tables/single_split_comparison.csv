@@ -1,0 +1,4 @@
+role,model,accuracy,balanced_accuracy,macro_f1,weighted_f1,mean_iou
+baseline,amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1,0.886477,0.843767,0.753325,0.895458,0.650059
+candidate,strat_hmm_pretext_m1_k6_topblock1_distill,0.896330,0.830964,0.758635,0.904414,0.660868
+delta,,0.009853,-0.012804,0.005309,0.008956,0.010809

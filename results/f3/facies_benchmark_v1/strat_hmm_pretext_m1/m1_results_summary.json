@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "baseline_model": "amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1",
+  "candidate_model": "strat_hmm_pretext_m1_k6_topblock1_distill",
+  "single_split": {
+    "baseline": {
+      "accuracy": 0.886477224046837,
+      "balanced_accuracy": 0.8437672938122368,
+      "macro_f1": 0.7533253475368245,
+      "weighted_f1": 0.8954578149247504,
+      "mean_iou": 0.6500590889768743
+    },
+    "candidate": {
+      "accuracy": 0.896330144223904,
+      "balanced_accuracy": 0.8309637226043725,
+      "macro_f1": 0.758634786483436,
+      "weighted_f1": 0.9044138790257537,
+      "mean_iou": 0.660868037039044
+    },
+    "delta": {
+      "accuracy": 0.00985292017706696,
+      "balanced_accuracy": -0.01280357120786435,
+      "macro_f1": 0.005309438946611511,
+      "weighted_f1": 0.008956064101003247,
+      "mean_iou": 0.010808948062169699
+    }
+  },
+  "label_budget": {
+    "budgets": [
+      {
+        "budget_id": "cap25",
+        "per_class_cap": 25,
+        "n_pairs": 5,
+        "mean_delta_macro_f1": 0.05384050988454266,
+        "win_rate_macro_f1": 1.0,
+        "mean_delta_mean_iou": 0.0540760460378523,
+        "win_rate_mean_iou": 1.0,
+        "mean_delta_balanced_accuracy": 0.060807851648903344,
+        "win_rate_balanced_accuracy": 1.0
+      },
+      {
+        "budget_id": "cap50",
+        "per_class_cap": 50,
+        "n_pairs": 5,
+        "mean_delta_macro_f1": 0.04676933976412676,
+        "win_rate_macro_f1": 1.0,
+        "mean_delta_mean_iou": 0.0513356455149256,
+        "win_rate_mean_iou": 1.0,
+        "mean_delta_balanced_accuracy": 0.04052654282982926,
+        "win_rate_balanced_accuracy": 1.0
+      },
+      {
+        "budget_id": "cap100",
+        "per_class_cap": 100,
+        "n_pairs": 5,
+        "mean_delta_macro_f1": 0.040306347322734394,
+        "win_rate_macro_f1": 1.0,
+        "mean_delta_mean_iou": 0.04821862796645286,
+        "win_rate_mean_iou": 1.0,
+        "mean_delta_balanced_accuracy": 0.039697603547034735,
+        "win_rate_balanced_accuracy": 1.0
+      },
+      {
+        "budget_id": "cap250",
+        "per_class_cap": 250,
+        "n_pairs": 5,
+        "mean_delta_macro_f1": 0.02679800617131698,
+        "win_rate_macro_f1": 1.0,
+        "mean_delta_mean_iou": 0.03434828038561497,
+        "win_rate_mean_iou": 1.0,
+        "mean_delta_balanced_accuracy": 0.02073940067602511,
+        "win_rate_balanced_accuracy": 1.0
+      },
+      {
+        "budget_id": "cap500",
+        "per_class_cap": 500,
+        "n_pairs": 5,
+        "mean_delta_macro_f1": 0.021574235526770312,
+        "win_rate_macro_f1": 1.0,
+        "mean_delta_mean_iou": 0.02916240621267403,
+        "win_rate_mean_iou": 1.0,
+        "mean_delta_balanced_accuracy": 0.015862434858493944,
+        "win_rate_balanced_accuracy": 1.0
+      },
+      {
+        "budget_id": "full",
+        "per_class_cap": null,
+        "n_pairs": 1,
+        "mean_delta_macro_f1": 0.005309438946611511,
+        "win_rate_macro_f1": 1.0,
+        "mean_delta_mean_iou": 0.010808948062169699,
+        "win_rate_mean_iou": 1.0,
+        "mean_delta_balanced_accuracy": -0.01280357120786435,
+        "win_rate_balanced_accuracy": 0.0
+      }
+    ]
+  },
+  "split_index": {
+    "splits": [
+      {
+        "split_id": "split_000",
+        "delta_macro_f1": 0.005309438946611511,
+        "delta_mean_iou": 0.010808948062169699,
+        "delta_balanced_accuracy": -0.01280357120786435
+      },
+      {
+        "split_id": "split_001",
+        "delta_macro_f1": 0.012173248680355964,
+        "delta_mean_iou": 0.015540118245443435,
+        "delta_balanced_accuracy": 0.0012870240552947942
+      },
+      {
+        "split_id": "split_002",
+        "delta_macro_f1": 0.020749119289144136,
+        "delta_mean_iou": 0.022291692350454806,
+        "delta_balanced_accuracy": 0.011071065385601209
+      },
+      {
+        "split_id": "split_003",
+        "delta_macro_f1": 0.017458492109275636,
+        "delta_mean_iou": 0.021267696919114343,
+        "delta_balanced_accuracy": 0.016686209358801607
+      },
+      {
+        "split_id": "split_004",
+        "delta_macro_f1": 0.0060093607190905285,
+        "delta_mean_iou": 0.0114002008422317,
+        "delta_balanced_accuracy": 0.0019412521057202703
+      },
+      {
+        "split_id": "split_005",
+        "delta_macro_f1": 0.0007395857167978859,
+        "delta_mean_iou": 0.006939302346869236,
+        "delta_balanced_accuracy": -0.0015705643503733935
+      }
+    ],
+    "win_rates": {
+      "macro_f1": 1.0,
+      "mean_iou": 1.0,
+      "balanced_accuracy": 0.6666666666666666
+    }
+  },
+  "decision": {
+    "guidance": "go",
+    "summary": "Strat-HMM M1 is positive on single-run macro F1/mean IoU, label-budget robustness, and split/index macro F1/mean IoU."
+  },
+  "warnings": [
+    "full duplicate label-budget rows collapsed by paired identity",
+    "full budget balanced_accuracy delta is negative; monitor this caveat"
+  ]
+}

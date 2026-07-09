@@ -7,9 +7,17 @@ import json
 import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
+
+from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
+from seis_ssl_cluster.results import (
+	DEFAULT_MAX_FILE_SIZE_BYTES,
+	PublishItem,
+	PublishManifest,
+	publish_selected_results,
+)
 
 CORE_METRICS = (
 	'accuracy',
@@ -34,6 +42,19 @@ BUDGET_DISPLAY_ORDER = (
 LABEL_BUDGET_FIGURE = 'label_budget_delta_curves.png'
 SPLIT_INDEX_FIGURE = 'split_index_deltas.png'
 SINGLE_RUN_FIGURE = 'single_run_metric_comparison.png'
+SINGLE_SPLIT_TABLE = 'single_split_comparison.csv'
+LABEL_BUDGET_TABLE = 'label_budget_summary.csv'
+SPLIT_INDEX_TABLE = 'split_index_deltas.csv'
+
+
+@dataclass(frozen=True)
+class F3StratHMMM1PublishConfig:
+	"""Settings for publishing lightweight M1 result artifacts."""
+
+	enabled: bool = False
+	output_dir: Path | None = None
+	include_figures: bool = True
+	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
 
 
 @dataclass(frozen=True)
@@ -46,6 +67,9 @@ class F3StratHMMM1ResultsConfig:
 	output_dir: Path
 	baseline_model: str
 	candidate_model: str
+	publish: F3StratHMMM1PublishConfig = field(
+		default_factory=F3StratHMMM1PublishConfig,
+	)
 
 
 @dataclass(frozen=True)
@@ -54,18 +78,25 @@ class F3StratHMMM1ResultsResult:
 
 	summary_json: Path
 	summary_markdown: Path
+	table_paths: tuple[Path, ...]
 	figure_paths: tuple[Path, ...]
 	warnings: tuple[str, ...]
+	publish_manifest: PublishManifest | None = None
 
 
 def f3_strat_hmm_m1_results_config_from_mapping(
 	config: Mapping[str, object],
 ) -> F3StratHMMM1ResultsConfig:
 	"""Validate and normalize an M1 result consolidation config mapping."""
-	_validate_allowed_keys(config, {'inputs', 'models', 'outputs'}, prefix='config')
+	_validate_allowed_keys(
+		config,
+		{'inputs', 'models', 'outputs', 'publish'},
+		prefix='config',
+	)
 	inputs = _required_mapping(config, 'inputs')
 	models = _required_mapping(config, 'models')
 	outputs = _required_mapping(config, 'outputs')
+	publish = _optional_mapping(config, 'publish')
 	_validate_allowed_keys(
 		inputs,
 		{
@@ -77,6 +108,11 @@ def f3_strat_hmm_m1_results_config_from_mapping(
 	)
 	_validate_allowed_keys(models, {'baseline', 'candidate'}, prefix='models')
 	_validate_allowed_keys(outputs, {'output_dir'}, prefix='outputs')
+	_validate_allowed_keys(
+		publish,
+		{'enabled', 'output_dir', 'include_figures', 'max_file_size_mb'},
+		prefix='publish',
+	)
 	resolved = F3StratHMMM1ResultsConfig(
 		baseline_comparison_csv=_required_path(
 			inputs,
@@ -96,6 +132,7 @@ def f3_strat_hmm_m1_results_config_from_mapping(
 		output_dir=_required_path(outputs, 'output_dir', prefix='outputs'),
 		baseline_model=_required_str(models, 'baseline', prefix='models'),
 		candidate_model=_required_str(models, 'candidate', prefix='models'),
+		publish=_publish_config_from_mapping(publish),
 	)
 	validate_f3_strat_hmm_m1_results_config(resolved)
 	return resolved
@@ -156,15 +193,100 @@ def consolidate_f3_strat_hmm_m1_results(
 		config.output_dir,
 		deterministic_anchor_budget_ids=deterministic_anchor_budget_ids,
 	)
+	table_paths = _write_tables(payload, config.output_dir)
 	json_path = config.output_dir / 'm1_results_summary.json'
 	markdown_path = config.output_dir / 'm1_results_summary.md'
 	json_path.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
 	markdown_path.write_text(_render_markdown(payload), encoding='utf-8')
+	result = F3StratHMMM1ResultsResult(
+		summary_json=json_path,
+		summary_markdown=markdown_path,
+		table_paths=table_paths,
+		figure_paths=figure_paths,
+		warnings=tuple(warnings),
+	)
+	publish_manifest = publish_f3_strat_hmm_m1_results(result, config.publish)
 	return F3StratHMMM1ResultsResult(
 		summary_json=json_path,
 		summary_markdown=markdown_path,
+		table_paths=table_paths,
 		figure_paths=figure_paths,
 		warnings=tuple(warnings),
+		publish_manifest=publish_manifest,
+	)
+
+
+def publish_f3_strat_hmm_m1_results(
+	result: F3StratHMMM1ResultsResult,
+	publish_config: F3StratHMMM1PublishConfig | None,
+) -> PublishManifest | None:
+	"""Publish lightweight M1 summary artifacts into ``results/``."""
+	if publish_config is None or not publish_config.enabled:
+		return None
+	if publish_config.output_dir is None:
+		msg = 'publish output_dir is required when publishing is enabled'
+		raise ValueError(msg)
+	_validate_publish_output_dir(publish_config.output_dir)
+	return publish_selected_results(
+		items=_publish_items_for_f3_strat_hmm_m1_results(
+			result,
+			include_figures=publish_config.include_figures,
+		),
+		output_dir=publish_config.output_dir,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+
+
+def _publish_items_for_f3_strat_hmm_m1_results(
+	result: F3StratHMMM1ResultsResult,
+	*,
+	include_figures: bool,
+) -> tuple[PublishItem, ...]:
+	items = [
+		PublishItem(result.summary_markdown, Path('m1_results_summary.md')),
+		PublishItem(result.summary_json, Path('m1_results_summary.json')),
+		*(
+			PublishItem(table_path, Path('tables') / table_path.name)
+			for table_path in result.table_paths
+		),
+	]
+	if include_figures:
+		items.extend(
+			PublishItem(figure_path, Path('figures') / figure_path.name)
+			for figure_path in result.figure_paths
+		)
+	return tuple(items)
+
+
+def _validate_publish_output_dir(output_dir: Path) -> None:
+	ensure_under_root(
+		output_dir,
+		root=DEFAULT_RESULTS_ROOT,
+		label='publish.output_dir',
+	)
+
+
+def _publish_config_from_mapping(
+	publish: Mapping[str, object],
+) -> F3StratHMMM1PublishConfig:
+	enabled = _optional_bool(publish, 'enabled', default=False, prefix='publish')
+	include_figures = _optional_bool(
+		publish,
+		'include_figures',
+		default=True,
+		prefix='publish',
+	)
+	output_dir = _optional_publish_path(publish, 'output_dir')
+	if enabled and output_dir is None:
+		msg = 'publish.output_dir must be set when publish.enabled is true'
+		raise ValueError(msg)
+	if output_dir is not None:
+		_validate_publish_output_dir(output_dir)
+	return F3StratHMMM1PublishConfig(
+		enabled=enabled,
+		output_dir=output_dir,
+		include_figures=include_figures,
+		max_file_size_bytes=_max_file_size_bytes(publish),
 	)
 
 
@@ -529,6 +651,90 @@ def _write_figures(
 	return figure_paths
 
 
+def _write_tables(payload: Mapping[str, object], output_dir: Path) -> tuple[Path, ...]:
+	tables_dir = output_dir / 'tables'
+	tables_dir.mkdir(parents=True, exist_ok=True)
+	table_paths = (
+		tables_dir / SINGLE_SPLIT_TABLE,
+		tables_dir / LABEL_BUDGET_TABLE,
+		tables_dir / SPLIT_INDEX_TABLE,
+	)
+	_write_single_split_table(payload, table_paths[0])
+	_write_label_budget_table(payload, table_paths[1])
+	_write_split_index_table(payload, table_paths[2])
+	return table_paths
+
+
+def _write_single_split_table(payload: Mapping[str, object], path: Path) -> None:
+	single = _mapping(payload['single_split'])
+	fieldnames = ('role', 'model', *CORE_METRICS)
+	rows = []
+	for role, model_key in (
+		('baseline', 'baseline_model'),
+		('candidate', 'candidate_model'),
+	):
+		metrics = _mapping(single[role])
+		rows.append(
+			{
+				'role': role,
+				'model': str(payload[model_key]),
+				**{
+					metric: _format_float(metrics[metric])
+					for metric in CORE_METRICS
+				},
+			}
+		)
+	delta = _mapping(single['delta'])
+	rows.append(
+		{
+			'role': 'delta',
+			'model': '',
+			**{metric: _format_float(delta[metric]) for metric in CORE_METRICS},
+		}
+	)
+	_write_csv_rows(path, fieldnames, rows)
+
+
+def _write_label_budget_table(payload: Mapping[str, object], path: Path) -> None:
+	label_budget = _mapping(payload['label_budget'])
+	fieldnames = (
+		'budget_id',
+		'per_class_cap',
+		'n_pairs',
+		'mean_delta_macro_f1',
+		'win_rate_macro_f1',
+		'mean_delta_mean_iou',
+		'win_rate_mean_iou',
+		'mean_delta_balanced_accuracy',
+		'win_rate_balanced_accuracy',
+	)
+	rows = []
+	for row in _sequence(label_budget['budgets']):
+		budget = _mapping(row)
+		rows.append(
+			{
+				key: _csv_cell(budget[key])
+				for key in fieldnames
+			}
+		)
+	_write_csv_rows(path, fieldnames, rows)
+
+
+def _write_split_index_table(payload: Mapping[str, object], path: Path) -> None:
+	split_index = _mapping(payload['split_index'])
+	fieldnames = (
+		'split_id',
+		'delta_macro_f1',
+		'delta_mean_iou',
+		'delta_balanced_accuracy',
+	)
+	rows = []
+	for row in _sequence(split_index['splits']):
+		split = _mapping(row)
+		rows.append({key: _csv_cell(split[key]) for key in fieldnames})
+	_write_csv_rows(path, fieldnames, rows)
+
+
 def _save_label_budget_delta_curves(
 	label_budget: Mapping[str, object],
 	output_png: Path,
@@ -745,6 +951,18 @@ def _read_csv(path: Path) -> tuple[Mapping[str, str], ...]:
 	return rows
 
 
+def _write_csv_rows(
+	path: Path,
+	fieldnames: Sequence[str],
+	rows: Sequence[Mapping[str, str]],
+) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	with path.open('w', newline='', encoding='utf-8') as handle:
+		writer = csv.DictWriter(handle, fieldnames=fieldnames)
+		writer.writeheader()
+		writer.writerows(rows)
+
+
 def _label_budget_paired_deltas_csv(config: F3StratHMMM1ResultsConfig) -> Path:
 	return config.label_budget_suite_root / 'reports' / 'paired_deltas.csv'
 
@@ -811,6 +1029,19 @@ def _required_mapping(mapping: Mapping[str, object], key: str) -> Mapping[str, o
 	return value
 
 
+def _optional_mapping(
+	mapping: Mapping[str, object],
+	key: str,
+) -> Mapping[str, object]:
+	value = mapping.get(key)
+	if value is None:
+		return {}
+	if not isinstance(value, Mapping):
+		msg = f'{key} must be a mapping'
+		raise TypeError(msg)
+	return value
+
+
 def _mapping(value: object) -> Mapping[str, object]:
 	if not isinstance(value, Mapping):
 		msg = f'expected mapping; got {value!r}'
@@ -843,6 +1074,38 @@ def _required_str(mapping: Mapping[str, object], key: str, *, prefix: str) -> st
 		msg = f'{prefix}.{key} must be a non-empty string'
 		raise TypeError(msg)
 	return value
+
+
+def _optional_publish_path(mapping: Mapping[str, object], key: str) -> Path | None:
+	value = mapping.get(key)
+	if value is None:
+		return None
+	if not isinstance(value, str | Path) or not str(value):
+		msg = f'publish.{key} must be a non-empty path string'
+		raise TypeError(msg)
+	return Path(value)
+
+
+def _optional_bool(
+	mapping: Mapping[str, object],
+	key: str,
+	*,
+	default: bool,
+	prefix: str,
+) -> bool:
+	value = mapping.get(key, default)
+	if not isinstance(value, bool):
+		msg = f'{prefix}.{key} must be a boolean; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _max_file_size_bytes(mapping: Mapping[str, object]) -> int:
+	value = mapping.get('max_file_size_mb', 10)
+	if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
+		msg = f'publish.max_file_size_mb must be positive; got {value!r}'
+		raise ValueError(msg)
+	return int(value * 1024 * 1024)
 
 
 def _required_object_str(mapping: Mapping[object, object], key: str) -> str:
@@ -896,6 +1159,14 @@ def _budget_sort_key(value: object) -> tuple[int, int | str]:
 
 def _display(value: object) -> str:
 	return '' if value is None else str(value)
+
+
+def _csv_cell(value: object) -> str:
+	if value is None:
+		return ''
+	if isinstance(value, int | float) and not isinstance(value, bool):
+		return _format_float(value)
+	return str(value)
 
 
 def _format_float(value: object) -> str:

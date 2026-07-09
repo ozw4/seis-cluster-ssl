@@ -132,7 +132,7 @@ def publish_selected_results(
 		),
 	)
 	manifest = PublishManifest(
-		created_at_utc=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+		created_at_utc=_publish_created_at_utc(manifest_path),
 		source_artifact_root=_resolve_source_artifact_root(
 			[copy.source for copy in plan.copy_plan]
 		),
@@ -148,6 +148,19 @@ def publish_selected_results(
 		encoding='utf-8',
 	)
 	return manifest
+
+
+def _publish_created_at_utc(manifest_path: Path) -> str:
+	if manifest_path.is_file():
+		try:
+			payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+		except json.JSONDecodeError:
+			payload = None
+		if isinstance(payload, dict):
+			created_at = payload.get('created_at_utc')
+			if isinstance(created_at, str) and created_at:
+				return created_at
+	return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
 
 
 def publish_manifest_to_dict(manifest: PublishManifest) -> dict[str, object]:

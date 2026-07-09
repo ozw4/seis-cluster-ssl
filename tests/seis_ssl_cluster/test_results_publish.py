@@ -170,6 +170,33 @@ def test_publish_selected_results_rejects_existing_target_when_overwrite_disable
 	assert target.read_bytes() == b'existing'
 
 
+def test_publish_selected_results_preserves_existing_manifest_timestamp(
+	tmp_path: Path,
+) -> None:
+	report = _write_file(tmp_path / 'artifacts' / 'summary.md', b'old')
+	output_dir = tmp_path / 'results'
+
+	publish_selected_results(
+		items=(PublishItem(report, Path('summary.md')),),
+		output_dir=output_dir,
+	)
+	first_payload = json.loads(
+		(output_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
+	)
+	report.write_bytes(b'new')
+
+	publish_selected_results(
+		items=(PublishItem(report, Path('summary.md')),),
+		output_dir=output_dir,
+	)
+	second_payload = json.loads(
+		(output_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
+	)
+
+	assert second_payload['created_at_utc'] == first_payload['created_at_utc']
+	assert second_payload['items'][0]['sha256'] != first_payload['items'][0]['sha256']
+
+
 def test_publish_selected_results_rejects_existing_target_directory(
 	tmp_path: Path,
 ) -> None:

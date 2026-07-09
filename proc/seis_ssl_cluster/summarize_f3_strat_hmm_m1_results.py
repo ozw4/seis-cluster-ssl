@@ -53,9 +53,17 @@ def main() -> None:
 	result = consolidate_f3_strat_hmm_m1_results(config)
 	print(f'f3_strat_hmm_m1_results.summary_json: {result.summary_json}')
 	print(f'f3_strat_hmm_m1_results.summary_markdown: {result.summary_markdown}')
+	for table_path in result.table_paths:
+		print(f'f3_strat_hmm_m1_results.table: {table_path}')
 	for figure_path in result.figure_paths:
 		print(f'f3_strat_hmm_m1_results.figure: {figure_path}')
 	print(f'f3_strat_hmm_m1_results.warning_count: {len(result.warnings)}')
+	if result.publish_manifest is not None:
+		print(
+			'published F3 strat-HMM M1 results: '
+			f'{result.publish_manifest.output_dir}',
+		)
+		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
 
 
 def _config_from_mapping(
@@ -79,7 +87,13 @@ def _print_summary(config: F3StratHMMM1ResultsConfig) -> None:
 	print(f'models.candidate: {config.candidate_model}')
 	print(f'outputs.summary_json: {config.output_dir / "m1_results_summary.json"}')
 	print(f'outputs.summary_markdown: {config.output_dir / "m1_results_summary.md"}')
+	print(f'outputs.tables_dir: {config.output_dir / "tables"}')
 	print(f'outputs.figures_dir: {config.output_dir / "figures"}')
+	print(f'publish.enabled: {config.publish.enabled}')
+	if config.publish.output_dir is not None:
+		print(f'publish.output_dir: {config.publish.output_dir}')
+	print(f'publish.include_figures: {config.publish.include_figures}')
+	print(f'publish.max_file_size_bytes: {config.publish.max_file_size_bytes}')
 
 
 if __name__ == '__main__':

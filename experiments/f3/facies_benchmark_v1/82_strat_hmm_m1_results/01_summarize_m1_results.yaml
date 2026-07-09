@@ -7,3 +7,8 @@ models:
   candidate: strat_hmm_pretext_m1_k6_topblock1_distill
 outputs:
   output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m1_results
+publish:
+  enabled: true
+  output_dir: results/f3/facies_benchmark_v1/strat_hmm_pretext_m1
+  include_figures: true
+  max_file_size_mb: 10

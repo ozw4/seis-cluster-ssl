@@ -10,8 +10,12 @@ from pathlib import Path
 import pytest
 
 from seis_ssl_cluster.f3.lithology.m1_results import (
+	F3StratHMMM1PublishConfig,
 	F3StratHMMM1ResultsConfig,
+	F3StratHMMM1ResultsResult,
 	consolidate_f3_strat_hmm_m1_results,
+	f3_strat_hmm_m1_results_config_from_mapping,
+	publish_f3_strat_hmm_m1_results,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -36,9 +40,25 @@ def test_successful_summary_creation(tmp_path: Path) -> None:
 		'split_index_deltas.png',
 		'single_run_metric_comparison.png',
 	}
+	assert {path.name for path in result.table_paths} == {
+		'single_split_comparison.csv',
+		'label_budget_summary.csv',
+		'split_index_deltas.csv',
+	}
+	for table_path in result.table_paths:
+		assert table_path.is_file()
 	for figure_path in result.figure_paths:
 		assert figure_path.is_file()
 		assert figure_path.stat().st_size > 0
+	single_split_rows = _read_csv(
+		config.output_dir / 'tables/single_split_comparison.csv',
+	)
+	assert [row['role'] for row in single_split_rows] == [
+		'baseline',
+		'candidate',
+		'delta',
+	]
+	assert single_split_rows[2]['macro_f1'] == '0.060000'
 	payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
 	assert payload['schema_version'] == 1
 	assert payload['baseline_model'] == 'mae_baseline'
@@ -70,6 +90,183 @@ def test_successful_summary_creation(tmp_path: Path) -> None:
 		in markdown
 	)
 	assert '![Split/index deltas](figures/split_index_deltas.png)' in markdown
+	assert result.publish_manifest is None
+
+
+def test_publish_copies_expected_small_files(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	_require_matplotlib_agg()
+	publish_dir = tmp_path / 'results' / 'f3' / 'facies_benchmark_v1' / 'm1'
+	monkeypatch.chdir(tmp_path)
+	config = _write_inputs(
+		tmp_path,
+		publish=F3StratHMMM1PublishConfig(
+			enabled=True,
+			output_dir=Path('results/f3/facies_benchmark_v1/m1'),
+			include_figures=True,
+		),
+	)
+
+	result = consolidate_f3_strat_hmm_m1_results(config)
+
+	published_files = {
+		path.relative_to(publish_dir)
+		for path in publish_dir.rglob('*')
+		if path.is_file()
+	}
+	assert result.publish_manifest is not None
+	assert published_files == {
+		Path('m1_results_summary.md'),
+		Path('m1_results_summary.json'),
+		Path('tables/single_split_comparison.csv'),
+		Path('tables/label_budget_summary.csv'),
+		Path('tables/split_index_deltas.csv'),
+		Path('figures/label_budget_delta_curves.png'),
+		Path('figures/split_index_deltas.png'),
+		Path('figures/single_run_metric_comparison.png'),
+		Path('publish_manifest.json'),
+	}
+	assert (
+		publish_dir / 'm1_results_summary.md'
+	).read_text(encoding='utf-8') == result.summary_markdown.read_text(
+		encoding='utf-8',
+	)
+	manifest_payload = json.loads(
+		(publish_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
+	)
+	assert sorted(item['target'] for item in manifest_payload['items']) == sorted(
+		str(path)
+		for path in published_files
+		if path.name != 'publish_manifest.json'
+	)
+
+
+def test_publish_disabled_does_nothing(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	_require_matplotlib_agg()
+	publish_dir = tmp_path / 'results' / 'disabled'
+	monkeypatch.chdir(tmp_path)
+	config = _write_inputs(
+		tmp_path,
+		publish=F3StratHMMM1PublishConfig(
+			enabled=False,
+			output_dir=Path('results/disabled'),
+		),
+	)
+
+	result = consolidate_f3_strat_hmm_m1_results(config)
+
+	assert result.publish_manifest is None
+	assert not publish_dir.exists()
+
+
+def test_publish_refuses_prohibited_suffix(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.chdir(tmp_path)
+	result = _write_publishable_result(tmp_path)
+	checkpoint = tmp_path / 'artifacts' / 'model.pt'
+	checkpoint.write_bytes(b'heavy')
+	result = F3StratHMMM1ResultsResult(
+		summary_json=result.summary_json,
+		summary_markdown=result.summary_markdown,
+		table_paths=(checkpoint,),
+		figure_paths=(),
+		warnings=(),
+	)
+
+	with pytest.raises(ValueError, match='forbidden suffix'):
+		publish_f3_strat_hmm_m1_results(
+			result,
+			F3StratHMMM1PublishConfig(
+				enabled=True,
+				output_dir=Path('results'),
+			),
+		)
+
+
+def test_publish_refuses_oversized_file(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.chdir(tmp_path)
+	result = _write_publishable_result(tmp_path)
+	large_table = tmp_path / 'artifacts' / 'large.csv'
+	large_table.write_bytes(b'12345')
+	result = F3StratHMMM1ResultsResult(
+		summary_json=result.summary_json,
+		summary_markdown=result.summary_markdown,
+		table_paths=(large_table,),
+		figure_paths=(),
+		warnings=(),
+	)
+
+	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
+		publish_f3_strat_hmm_m1_results(
+			result,
+			F3StratHMMM1PublishConfig(
+				enabled=True,
+				output_dir=Path('results'),
+				max_file_size_bytes=4,
+			),
+		)
+
+
+def test_relative_publish_path_must_stay_under_results(tmp_path: Path) -> None:
+	config = _write_inputs(tmp_path)
+
+	with pytest.raises(ValueError, match='under root'):
+		f3_strat_hmm_m1_results_config_from_mapping(
+			{
+				'inputs': {
+					'baseline_comparison_csv': str(config.baseline_comparison_csv),
+					'label_budget_suite_root': str(config.label_budget_suite_root),
+					'split_index_suite_root': str(config.split_index_suite_root),
+				},
+				'models': {
+					'baseline': config.baseline_model,
+					'candidate': config.candidate_model,
+				},
+				'outputs': {'output_dir': str(config.output_dir)},
+				'publish': {
+					'enabled': True,
+					'output_dir': 'artifacts/not-results',
+				},
+			}
+		)
+
+
+def test_absolute_publish_path_must_stay_under_repo_results(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.chdir(tmp_path)
+	config = _write_inputs(tmp_path)
+
+	with pytest.raises(ValueError, match='under root'):
+		f3_strat_hmm_m1_results_config_from_mapping(
+			{
+				'inputs': {
+					'baseline_comparison_csv': str(config.baseline_comparison_csv),
+					'label_budget_suite_root': str(config.label_budget_suite_root),
+					'split_index_suite_root': str(config.split_index_suite_root),
+				},
+				'models': {
+					'baseline': config.baseline_model,
+					'candidate': config.candidate_model,
+				},
+				'outputs': {'output_dir': str(config.output_dir)},
+				'publish': {
+					'enabled': True,
+					'output_dir': str(tmp_path / 'outside-results' / 'm1'),
+				},
+			}
+		)
 
 
 def test_missing_required_input_file_raises_clear_error(tmp_path: Path) -> None:
@@ -268,6 +465,7 @@ def _write_inputs(
 	reverse_comparison_order: bool = False,
 	duplicate_full_identity: bool = False,
 	single_split_index: bool = False,
+	publish: F3StratHMMM1PublishConfig | None = None,
 ) -> F3StratHMMM1ResultsConfig:
 	baseline_csv = tmp_path / 'comparison_table.csv'
 	label_root = tmp_path / 'label_budget_m1_v1'
@@ -283,6 +481,26 @@ def _write_inputs(
 		output_dir=output_dir,
 		baseline_model='mae_baseline',
 		candidate_model='strat_hmm_m1',
+		publish=F3StratHMMM1PublishConfig() if publish is None else publish,
+	)
+
+
+def _write_publishable_result(tmp_path: Path) -> F3StratHMMM1ResultsResult:
+	root = tmp_path / 'artifacts'
+	summary_json = root / 'm1_results_summary.json'
+	summary_markdown = root / 'm1_results_summary.md'
+	table = root / 'tables' / 'single_split_comparison.csv'
+	summary_json.parent.mkdir(parents=True, exist_ok=True)
+	table.parent.mkdir(parents=True, exist_ok=True)
+	summary_json.write_text('{"schema_version": 1}\n', encoding='utf-8')
+	summary_markdown.write_text('# summary\n', encoding='utf-8')
+	table.write_text('role,macro_f1\nbaseline,0.5\n', encoding='utf-8')
+	return F3StratHMMM1ResultsResult(
+		summary_json=summary_json,
+		summary_markdown=summary_markdown,
+		table_paths=(table,),
+		figure_paths=(),
+		warnings=(),
 	)
 
 
@@ -455,6 +673,11 @@ def _write_csv(
 		writer = csv.DictWriter(handle, fieldnames=fieldnames)
 		writer.writeheader()
 		writer.writerows(rows)
+
+
+def _read_csv(path: Path) -> list[dict[str, str]]:
+	with path.open(newline='', encoding='utf-8') as handle:
+		return list(csv.DictReader(handle))
 
 
 def _append_csv_row(path: Path, row: dict[str, str]) -> None:
