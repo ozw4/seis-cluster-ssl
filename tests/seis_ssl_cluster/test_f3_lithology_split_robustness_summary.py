@@ -123,6 +123,17 @@ def test_missing_split_pair_fails(tmp_path: Path) -> None:
 		summarize_split_robustness(suite_root)
 
 
+def test_inventory_split_without_dataset_or_probe_rows_fails(
+	tmp_path: Path,
+) -> None:
+	suite_root = _write_suite(tmp_path)
+	_append_inventory_split(suite_root, 'split_002')
+
+	with pytest.raises(ValueError, match='missing_manifest_splits') as exc_info:
+		summarize_split_robustness(suite_root)
+	assert 'split_002' in str(exc_info.value)
+
+
 def test_validation_class_counts_are_propagated(tmp_path: Path) -> None:
 	suite_root = _write_suite(tmp_path)
 
@@ -287,6 +298,35 @@ def _write_suite(tmp_path: Path) -> Path:
 		},
 	)
 	return suite_root
+
+
+def _append_inventory_split(suite_root: Path, split_id: str) -> None:
+	_write_split_metadata(suite_root, split_id)
+	manifest_path = suite_root / 'split_inventory_manifest.json'
+	manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+	manifest['rows'].append(
+		{
+			'split_id': split_id,
+			'random_seed': 2,
+			'png_label_inventory': str(
+				suite_root
+				/ 'split_inventories'
+				/ split_id
+				/ 'png_label_inventory.csv',
+			),
+			'split_metadata': str(
+				suite_root
+				/ 'split_inventories'
+				/ split_id
+				/ 'split_metadata.json',
+			),
+			'validation_slice_count': 1,
+		},
+	)
+	manifest_path.write_text(
+		json.dumps(manifest, indent=2) + '\n',
+		encoding='utf-8',
+	)
 
 
 def _write_split_metadata(suite_root: Path, split_id: str) -> None:

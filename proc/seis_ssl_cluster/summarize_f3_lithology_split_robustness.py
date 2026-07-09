@@ -265,6 +265,10 @@ def _joined_runs(
 			f'missing_probe={missing_probe!r}, missing_dataset={missing_dataset!r}'
 		)
 		raise ValueError(msg)
+	_validate_inventory_split_coverage(
+		inventory_split_ids=split_metadata,
+		manifest_split_ids={key[0] for key in dataset_by_key},
+	)
 
 	joined = []
 	for key in sorted(dataset_by_key, key=_run_key_sort_key):
@@ -348,6 +352,25 @@ def _validation_class_counts(row: Mapping[str, object]) -> Mapping[str, int]:
 		msg = f'class_counts_csv contains no validation counts: {path}'
 		raise ValueError(msg)
 	return dict(sorted(counts.items(), key=lambda item: _class_id_sort_key(item[0])))
+
+
+def _validate_inventory_split_coverage(
+	*,
+	inventory_split_ids: Iterable[str],
+	manifest_split_ids: Iterable[str],
+) -> None:
+	inventory = set(inventory_split_ids)
+	manifest = set(manifest_split_ids)
+	if inventory == manifest:
+		return
+	missing = sorted(inventory - manifest)
+	unexpected = sorted(manifest - inventory)
+	msg = (
+		'split inventory/manifest split mismatch; '
+		f'missing_manifest_splits={missing!r}, '
+		f'unexpected_manifest_splits={unexpected!r}'
+	)
+	raise ValueError(msg)
 
 
 def _validate_complete_pairs(runs: Sequence[_JoinedRun]) -> None:
