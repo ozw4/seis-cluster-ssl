@@ -67,6 +67,14 @@ from seis_ssl_cluster.data.volume_store import (
 	read_crop,
 	read_crop_with_padding,
 )
+from seis_ssl_cluster.data.window_preprocessing import (
+	AmplitudePreprocessSettings,
+	PreparedAmplitudeCrop,
+	read_amplitude_crop,
+	reduce_valid_mask_to_tokens,
+	resolve_manifest_path,
+	zero_mask_margin_xyz,
+)
 from seis_ssl_cluster.data.zero_mask import (
 	DEFAULT_ZERO_MASK_CONFIG,
 	ZeroMaskConfig,
@@ -81,6 +89,7 @@ __all__ = [
 	'DEFAULT_ZERO_MASK_CONFIG',
 	'GRID_ORDER_XYZ',
 	'AmplitudeAgcConfig',
+	'AmplitudePreprocessSettings',
 	'AmplitudePretrainDataset',
 	'AmplitudeVolumeRecord',
 	'CropRequest',
@@ -94,6 +103,7 @@ __all__ = [
 	'NormalizationStatsQcThresholds',
 	'NpyMemmapVolumeStore',
 	'NpyVolumeInfo',
+	'PreparedAmplitudeCrop',
 	'SurveyManifest',
 	'SurveyNormalizationStats',
 	'ZeroMaskConfig',
@@ -120,8 +130,11 @@ __all__ = [
 	'open',
 	'read_crop',
 	'read_crop_with_padding',
+	'read_amplitude_crop',
 	'read_manifest_json',
+	'reduce_valid_mask_to_tokens',
 	'required_zero_mask_margin_xyz',
+	'resolve_manifest_path',
 	'resolve_npy_path_list',
 	'rng_for_sample',
 	'sample_random_local_crop',
@@ -134,4 +147,5 @@ __all__ = [
 	'validate_crop_fits',
 	'write_manifest_json',
 	'write_normalization_stats',
+	'zero_mask_margin_xyz',
 ]
