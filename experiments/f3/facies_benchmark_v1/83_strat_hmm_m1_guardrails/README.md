@@ -32,20 +32,64 @@ The files are ordered by the intended workflow:
    `02_train_distillation_only_full.yaml` use the existing pretext trainer. The
    zero `prototype_weight` and `usage_weight` are the distillation-only
    contract.
-2. `03_build_shuffled_hmm_pseudo_targets.yaml` defines deterministic shuffle
+2. `03_extract_distillation_only_embeddings.yaml`,
+   `04_build_distillation_only_token_dataset.yaml`,
+   `05_train_distillation_only_probe.yaml`, and
+   `06_build_distillation_only_report.yaml` run the milestone-1 downstream
+   workflow under the isolated distillation-only model tag.
+3. `03_build_shuffled_hmm_pseudo_targets.yaml` defines deterministic shuffle
    inputs, preservation requirements, seed, and an isolated output root.
-3. `04_train_shuffled_hmm_full.yaml` is the matching training contract.
-4. `05_extract_guardrail_embeddings.yaml`,
+4. `04_train_shuffled_hmm_full.yaml` is the matching training contract.
+5. `05_extract_guardrail_embeddings.yaml`,
    `06_build_guardrail_token_datasets.yaml`, and
    `07_run_guardrail_probes.yaml` define the paired downstream routing and
    isolated roots for both guardrails.
-5. `08_summarize_guardrails.yaml` compares the five primary metrics:
+6. `08_summarize_guardrails.yaml` compares the five primary metrics:
    `macro_f1`, `mean_iou`, `balanced_accuracy`, `accuracy`, and `weighted_f1`.
 
 This issue intentionally adds contracts, not the shuffled-target builder or
 paired downstream runners. Those mechanics are implemented by the subsequent
 guardrail prompts. The distillation-only configs reuse mechanics already
 present in the trainer.
+
+## Distillation-only runbook
+
+Validate the smoke config without writing artifacts, then run its two CPU
+steps:
+
+```bash
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/01_train_distillation_only_smoke.yaml \
+  --dry-run --device cpu --max-steps 2
+
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/01_train_distillation_only_smoke.yaml \
+  --device cpu --max-steps 2
+```
+
+Run the full guardrail training:
+
+```bash
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/02_train_distillation_only_full.yaml
+```
+
+Extract embeddings and run the same token-dataset, probe, and report stages as
+milestone 1:
+
+```bash
+python proc/seis_ssl_cluster/extract_embeddings.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/03_extract_distillation_only_embeddings.yaml
+
+python proc/seis_ssl_cluster/build_f3_lithology_token_dataset.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/04_build_distillation_only_token_dataset.yaml
+
+python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/05_train_distillation_only_probe.yaml
+
+python proc/seis_ssl_cluster/build_f3_lithology_report.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/06_build_distillation_only_report.yaml
+```
 
 The summary is runnable now:
 

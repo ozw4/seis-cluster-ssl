@@ -78,33 +78,46 @@ F3_STRATIGRAPHIC_CLUSTERING_CONFIGS = sorted(
 	(F3_ROOT / '60_stratigraphic_clustering').rglob('*.yaml'),
 )
 F3_STRAT_HMM_PRETRAINING_M1_ROOT = F3_ROOT / '80_strat_hmm_pretraining_m1'
+F3_STRAT_HMM_M1_GUARDRAIL_ROOT = F3_ROOT / '83_strat_hmm_m1_guardrails'
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
 		/ '02_train_single_head_topblock_distill_smoke.yaml',
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
 		/ '03_train_single_head_topblock_distill_full.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+		/ '01_train_distillation_only_smoke.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+		/ '02_train_distillation_only_full.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '04_extract_student_embeddings.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+		/ '03_extract_distillation_only_embeddings.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
 		/ '05_build_lithology_token_dataset.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+		/ '04_build_distillation_only_token_dataset.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '06_train_lithology_probe.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+		/ '05_train_distillation_only_probe.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_REPORT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '07_build_lithology_report.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+		/ '06_build_distillation_only_report.yaml',
 	],
 )
 F3_STRAT_HMM_PSEUDO_TARGET_REFRESH_CONFIGS = sorted(
