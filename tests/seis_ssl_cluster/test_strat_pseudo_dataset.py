@@ -21,6 +21,12 @@ from seis_ssl_cluster.stratigraphy.targets import (
 	write_pseudo_target,
 )
 from seis_ssl_cluster.training.collate import strat_pseudo_target_collate_fn
+from tests.seis_ssl_cluster.helpers_window_preprocessing import (
+	PATCH_SIZE_XYZ,
+	WINDOW_SIZE_XYZ,
+	read_fixture_crop,
+	write_window_preprocessing_fixture,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -105,6 +111,55 @@ def test_strat_dataset_excludes_local_invalid_voxel_patches(
 	assert not sample['strat_valid_mask'][:, :, 0].any()
 	assert sample['strat_valid_mask'][:, :, 1].all()
 	assert np.all(sample['strat_labels'][:, :, 0] == -1)
+
+
+def test_strat_dataset_preprocessing_matches_shared_contract(
+	tmp_path: Path,
+) -> None:
+	fixture = write_window_preprocessing_fixture(tmp_path)
+	expected_dataset = read_fixture_crop(fixture, min_token_valid_fraction=1.0)
+	expected_extractor_builder = read_fixture_crop(
+		fixture,
+		min_token_valid_fraction=0.5,
+	)
+	labels = np.zeros(expected_dataset.token_valid_mask.shape, dtype=np.int32)
+	valid_tokens = np.ones(labels.shape, dtype=np.bool_)
+	write_pseudo_target(
+		tmp_path / 'pseudo-contract',
+		k=1,
+		survey_id=fixture.manifest.survey_id,
+		labels=labels,
+		confidence=np.ones(labels.shape, dtype=np.float32),
+		valid_tokens=valid_tokens,
+	)
+	dataset = NopimsStratPseudoTargetDataset(
+		[fixture.manifest],
+		discover_pseudo_target_inputs(tmp_path / 'pseudo-contract', k=1),
+		local_crop_size_xyz=WINDOW_SIZE_XYZ,
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		zero_mask=fixture.zero_mask,
+		normalized_clip_abs=fixture.normalized_clip_abs,
+		amplitude_agc=fixture.amplitude_agc,
+	)
+
+	sample = dataset[0]
+
+	assert sample['coords']['local_start_xyz'] == fixture.window.start_xyz
+	np.testing.assert_allclose(sample['x'], expected_dataset.x, rtol=1.0e-6)
+	np.testing.assert_array_equal(
+		sample['local_valid_mask'],
+		expected_dataset.local_valid_mask,
+	)
+	np.testing.assert_array_equal(
+		sample['strat_valid_mask'],
+		expected_dataset.token_valid_mask,
+	)
+	assert expected_extractor_builder.token_valid_mask[0, 0, 0]
+	assert not sample['strat_valid_mask'][0, 0, 0]
+	np.testing.assert_array_equal(
+		sample['x'][0][~expected_dataset.local_valid_mask],
+		0.0,
+	)
 
 
 def test_strat_dataset_samples_have_at_least_one_valid_supervised_token(

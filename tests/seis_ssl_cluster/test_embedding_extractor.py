@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -33,8 +34,16 @@ from seis_ssl_cluster.embedding import (
 	run_embedding_extraction,
 	token_grid_shape_xyz,
 )
+from seis_ssl_cluster.embedding import (
+	reduce_valid_mask_to_tokens as package_reduce_valid_mask_to_tokens,
+)
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
+from tests.seis_ssl_cluster.helpers_window_preprocessing import (
+	PATCH_SIZE_XYZ,
+	read_fixture_crop,
+	write_window_preprocessing_fixture,
+)
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
@@ -86,6 +95,34 @@ def test_reduce_valid_mask_to_tokens_legacy_import_path_is_shared() -> None:
 		extractor_module.reduce_valid_mask_to_tokens
 		is shared_reduce_valid_mask_to_tokens
 	)
+	assert package_reduce_valid_mask_to_tokens is shared_reduce_valid_mask_to_tokens
+
+
+def test_extractor_read_window_matches_shared_preprocessing(
+	tmp_path: Path,
+) -> None:
+	fixture = write_window_preprocessing_fixture(tmp_path)
+	expected = read_fixture_crop(fixture, min_token_valid_fraction=0.5)
+
+	window, x, token_valid_mask = extractor_module._read_window(  # noqa: SLF001
+		fixture.window,
+		manifest=fixture.manifest,
+		amplitude_path=fixture.amplitude_path,
+		stats=fixture.stats,
+		store=NpyMemmapVolumeStore(),
+		settings=SimpleNamespace(
+			zero_mask=fixture.zero_mask,
+			normalized_clip_abs=fixture.normalized_clip_abs,
+			amplitude_agc=fixture.amplitude_agc,
+			min_token_valid_fraction=0.5,
+		),
+		patch_size_xyz=PATCH_SIZE_XYZ,
+	)
+
+	assert window == fixture.window
+	np.testing.assert_allclose(x, expected.x, rtol=1.0e-6)
+	np.testing.assert_array_equal(token_valid_mask, expected.token_valid_mask)
+	np.testing.assert_array_equal(x[0][~expected.local_valid_mask], 0.0)
 
 
 def test_embedding_extraction_valid_tokens_match_shared_preprocessing(
