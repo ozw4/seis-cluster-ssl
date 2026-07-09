@@ -82,6 +82,27 @@ def test_builder_writes_expected_directory_structure(tmp_path: Path) -> None:
 		assert (expected_root / filename).is_file()
 
 
+def test_builder_preserves_source_dataset_metadata_in_generated_npzs(
+	tmp_path: Path,
+) -> None:
+	baseline, candidate = _write_paired_sources(tmp_path)
+	config = _config(baseline, candidate, tmp_path / 'out', caps=(2,), seeds=(0,))
+
+	build_f3_lithology_label_budget_datasets(config)
+
+	root = (
+		config.output_root
+		/ 'datasets/model=baseline_model/budget=cap2/subsample_seed=0'
+		/ 'token_dataset'
+	)
+	train = load_token_dataset_npz(root / 'train_tokens.npz')
+	validation = load_token_dataset_npz(root / 'validation_tokens.npz')
+	assert train.metadata['fixture'] is True
+	assert train.metadata['split_name'] == 'train'
+	assert validation.metadata['fixture'] is True
+	assert validation.metadata['split_name'] == 'validation'
+
+
 def test_paired_identity_hashes_match_across_models(tmp_path: Path) -> None:
 	baseline, candidate = _write_paired_sources(tmp_path)
 	config = _config(baseline, candidate, tmp_path / 'out', caps=(2,), seeds=(0,))
@@ -133,6 +154,20 @@ def test_overwrite_false_rejects_existing_outputs(tmp_path: Path) -> None:
 
 	with pytest.raises(FileExistsError, match='refusing to overwrite'):
 		build_f3_lithology_label_budget_datasets(config)
+
+
+def test_duplicate_per_class_caps_are_rejected(tmp_path: Path) -> None:
+	baseline, candidate = _write_paired_sources(tmp_path)
+
+	with pytest.raises(ValueError, match='per_class_caps.*duplicates'):
+		_config(baseline, candidate, tmp_path / 'out', caps=(2, 2), seeds=(0,))
+
+
+def test_duplicate_subsample_seeds_are_rejected(tmp_path: Path) -> None:
+	baseline, candidate = _write_paired_sources(tmp_path)
+
+	with pytest.raises(ValueError, match='subsample_seeds.*duplicates'):
+		_config(baseline, candidate, tmp_path / 'out', caps=(2,), seeds=(0, 0))
 
 
 def test_source_identity_mismatch_fails(tmp_path: Path) -> None:

@@ -78,6 +78,18 @@ def test_require_all_classes_rejects_missing_class() -> None:
 		)
 
 
+def test_full_budget_still_requires_requested_classes() -> None:
+	labels = np.asarray([0, 0, 1], dtype=np.int64)
+
+	with pytest.raises(ValueError, match='class_id 2 has zero rows'):
+		class_stratified_subset_indices(
+			labels,
+			per_class_cap=None,
+			seed=0,
+			class_ids=[0, 1, 2],
+		)
+
+
 def test_identity_validation_passes_for_same_rows_with_different_features() -> None:
 	reference = _dataset()
 	candidate = _dataset(features=np.full((6, 3), 42.0, dtype=np.float32))

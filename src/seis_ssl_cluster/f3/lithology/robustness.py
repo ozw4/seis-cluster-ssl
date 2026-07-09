@@ -431,18 +431,20 @@ def class_stratified_subset_indices(
 	if not isinstance(seed, int) or isinstance(seed, bool):
 		msg = f'seed must be an integer; got {seed!r}'
 		raise TypeError(msg)
+	classes = _class_ids(label_array, class_ids)
+	if require_all_classes:
+		for class_id in classes:
+			if not np.any(label_array == class_id):
+				msg = f'class_id {int(class_id)} has zero rows'
+				raise ValueError(msg)
 	if per_class_cap is None:
 		return np.arange(label_array.shape[0], dtype=np.int64)
 	_validate_positive_int(per_class_cap, 'per_class_cap')
-	classes = _class_ids(label_array, class_ids)
 	rng = np.random.default_rng(seed)
 	selected: list[NDArray[np.int64]] = []
 	for class_id in classes:
 		class_indices = np.flatnonzero(label_array == class_id).astype(np.int64)
 		if class_indices.size == 0:
-			if require_all_classes:
-				msg = f'class_id {int(class_id)} has zero rows'
-				raise ValueError(msg)
 			continue
 		if class_indices.size <= per_class_cap:
 			selected.append(class_indices)
@@ -836,18 +838,30 @@ def _write_label_budget_token_dataset(
 ) -> None:
 	root.mkdir(parents=True, exist_ok=True)
 	save_token_dataset_npz(
-		_dataset_with_metadata(train, metadata, split_name='train'),
+		_dataset_with_metadata(
+			train,
+			metadata,
+			split_name='train',
+		),
 		root / 'train_tokens.npz',
 	)
 	save_token_dataset_npz(
-		_dataset_with_metadata(validation, metadata, split_name='validation'),
+		_dataset_with_metadata(
+			validation,
+			metadata,
+			split_name='validation',
+		),
 		root / 'validation_tokens.npz',
 	)
 	save_token_dataset_npz(
 		_concat_token_datasets(
 			train,
 			validation,
-			metadata={**metadata, 'split_name': 'all_labeled'},
+			metadata=_merged_dataset_metadata(
+				train,
+				metadata,
+				split_name='all_labeled',
+			),
 		),
 		root / 'all_labeled_tokens.npz',
 	)
@@ -876,8 +890,17 @@ def _dataset_with_metadata(
 		voxel_center_xyz=np.asarray(dataset.voxel_center_xyz),
 		majority_fraction=np.asarray(dataset.majority_fraction),
 		labeled_fraction=np.asarray(dataset.labeled_fraction),
-		metadata={**metadata, 'split_name': split_name},
+		metadata=_merged_dataset_metadata(dataset, metadata, split_name=split_name),
 	)
+
+
+def _merged_dataset_metadata(
+	dataset: F3LithologyTokenDataset,
+	metadata: Mapping[str, object],
+	*,
+	split_name: str,
+) -> dict[str, object]:
+	return {**dict(dataset.metadata), **metadata, 'split_name': split_name}
 
 
 def _concat_token_datasets(
@@ -1070,6 +1093,7 @@ def _validate_per_class_caps(values: object) -> tuple[int | None, ...]:
 			caps.append(None)
 			continue
 		caps.append(_validate_positive_int(value, 'per_class_cap'))
+	_reject_duplicates(caps, 'per_class_caps')
 	return tuple(caps)
 
 
@@ -1128,7 +1152,20 @@ def _validate_int_sequence(values: object, label: str) -> tuple[int, ...]:
 	if not all(isinstance(item, int) and not isinstance(item, bool) for item in items):
 		msg = f'{label} must contain only integers; got {values!r}'
 		raise TypeError(msg)
+	_reject_duplicates(items, label)
 	return items
+
+
+def _reject_duplicates(values: Sequence[object], label: str) -> None:
+	seen: set[object] = set()
+	duplicates: list[object] = []
+	for value in values:
+		if value in seen and value not in duplicates:
+			duplicates.append(value)
+		seen.add(value)
+	if duplicates:
+		msg = f'{label} must not contain duplicates; got {duplicates!r}'
+		raise ValueError(msg)
 
 
 def _validate_str_sequence(values: object, label: str) -> tuple[str, ...]:
