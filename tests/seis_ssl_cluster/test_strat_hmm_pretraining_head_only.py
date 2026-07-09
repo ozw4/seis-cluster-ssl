@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import os
 import subprocess
 import sys
 from copy import deepcopy
@@ -334,6 +335,14 @@ def test_cli_non_dry_run_executes_one_step(tmp_path: Path) -> None:
 	config_path.write_text(yaml.safe_dump(raw_config), encoding='utf-8')
 	repo_root = Path(__file__).resolve().parents[2]
 	script = repo_root / 'proc' / 'seis_ssl_cluster' / 'train_strat_hmm_pretext.py'
+	env = os.environ.copy()
+	src_path = str(repo_root / 'src')
+	existing_pythonpath = env.get('PYTHONPATH')
+	env['PYTHONPATH'] = (
+		src_path
+		if not existing_pythonpath
+		else f'{src_path}{os.pathsep}{existing_pythonpath}'
+	)
 
 	result = subprocess.run(  # noqa: S603
 		[
@@ -347,6 +356,7 @@ def test_cli_non_dry_run_executes_one_step(tmp_path: Path) -> None:
 			'1',
 		],
 		cwd=repo_root,
+		env=env,
 		check=True,
 		capture_output=True,
 		text=True,
