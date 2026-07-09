@@ -179,6 +179,22 @@ def test_unfreeze_top_block_optimizer_lrs_and_gradients(tmp_path: Path) -> None:
 		pytest.approx(config['train']['lr']),
 		pytest.approx(config['train']['encoder_lr']),
 	]
+	assert all(
+		name.startswith('encoder.layers.1.')
+		for name in components.trainability_summary.trainable_names
+	)
+	trainable_parameter_ids = {
+		id(parameter)
+		for module in (components.student, components.head)
+		for parameter in module.parameters()
+		if parameter.requires_grad
+	}
+	optimizer_parameter_ids = {
+		id(parameter)
+		for group in components.optimizer.param_groups
+		for parameter in group['params']
+	}
+	assert optimizer_parameter_ids == trainable_parameter_ids
 	bottom_grads = [
 		parameter.grad
 		for parameter in components.student.encoder.layers[0].parameters()
