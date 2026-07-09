@@ -9,8 +9,6 @@ import numpy as np
 import torch
 
 from seis_ssl_cluster.data.crop_sampler import (
-	expand_request_with_margin,
-	required_zero_mask_margin_xyz,
 	rng_for_sample,
 	sample_random_token_aligned_local_crop,
 	select_round_robin_index,
@@ -19,15 +17,17 @@ from seis_ssl_cluster.data.crop_sampler import (
 from seis_ssl_cluster.data.normalization import (
 	AmplitudeAgcConfig,
 	SurveyNormalizationStats,
-	apply_configured_agc,
 	load_normalization_stats,
-	normalize_amplitude,
 )
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
+from seis_ssl_cluster.data.window_preprocessing import (
+	AmplitudePreprocessSettings,
+	read_amplitude_crop,
+	reduce_valid_mask_to_tokens,
+)
 from seis_ssl_cluster.data.zero_mask import (
 	DEFAULT_ZERO_MASK_CONFIG,
 	ZeroMaskConfig,
-	compute_zero_amplitude_invalid_mask,
 )
 from seis_ssl_cluster.masking import compute_token_grid_shape
 from seis_ssl_cluster.stratigraphy.targets import (
@@ -235,39 +235,22 @@ class NopimsStratPseudoTargetDataset:
 		local_request: CropRequest,
 	) -> dict[str, object]:
 		amplitude_path = _resolve_manifest_path(manifest, manifest.amplitude.path)
-		margin_xyz = self._zero_mask_margin_xyz()
-		compute_request, payload_slices = expand_request_with_margin(
-			local_request,
-			margin_xyz,
+		prepared = read_amplitude_crop(
+			request=local_request,
+			amplitude_path=amplitude_path,
+			stats=self._stats_for_manifest(manifest),
+			store=self._store,
+			patch_size_xyz=self.patch_size_xyz,
+			settings=AmplitudePreprocessSettings(
+				zero_mask=self.zero_mask,
+				normalized_clip_abs=self.normalized_clip_abs,
+				amplitude_agc=self.amplitude_agc,
+				min_token_valid_fraction=1.0,
+			),
 		)
-		raw_compute, compute_valid_mask = self._store.read_crop_with_padding(
-			amplitude_path,
-			compute_request.start_xyz,
-			compute_request.size_xyz,
-		)
-		raw_crop = raw_compute[payload_slices].astype(np.float32, copy=False)
-		source_valid_mask = compute_valid_mask[payload_slices]
-		zero_invalid = compute_zero_amplitude_invalid_mask(
-			raw_compute,
-			valid_mask=compute_valid_mask,
-			config=self.zero_mask,
-		)[payload_slices]
-		local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
-
-		amplitude_norm = normalize_amplitude(
-			raw_crop,
-			self._stats_for_manifest(manifest),
-			normalized_clip_abs=self.normalized_clip_abs,
-		)
-		amplitude_model = apply_configured_agc(
-			amplitude_norm,
-			local_valid_mask,
-			self.amplitude_agc,
-		)
-		amplitude_model[~local_valid_mask] = 0.0
 		return {
-			'x': amplitude_model[np.newaxis, ...].astype(np.float32, copy=False),
-			'local_valid_mask': local_valid_mask.astype(bool, copy=False),
+			'x': prepared.x,
+			'local_valid_mask': prepared.local_valid_mask,
 			'coords': {
 				'survey_id': manifest.survey_id,
 				'local_start_xyz': local_request.start_xyz,
@@ -309,9 +292,10 @@ class NopimsStratPseudoTargetDataset:
 		).copy()
 		pseudo_valid = np.asarray(arrays.valid_tokens[token_slices], dtype=bool)
 		local_valid_mask = _require_bool_array(sample, 'local_valid_mask')
-		token_valid = _token_valid_from_local_valid_mask(
+		token_valid = reduce_valid_mask_to_tokens(
 			local_valid_mask,
-			self.patch_size_xyz,
+			patch_size_xyz=self.patch_size_xyz,
+			min_valid_fraction=1.0,
 		)
 		strat_valid_mask = np.logical_and(pseudo_valid, token_valid)
 		labels[~strat_valid_mask] = -1
@@ -353,43 +337,6 @@ class NopimsStratPseudoTargetDataset:
 		if path not in self._normalization_stats:
 			self._normalization_stats[path] = load_normalization_stats(path)
 		return self._normalization_stats[path]
-
-	def _zero_mask_margin_xyz(self) -> XYZ:
-		if not self.zero_mask.enabled:
-			return (0, 0, 0)
-		return required_zero_mask_margin_xyz(
-			z_sample_influence_radius=self.zero_mask.z_sample_influence_radius,
-			xy_trace_influence_radius=self.zero_mask.xy_trace_influence_radius,
-		)
-
-
-def _token_valid_from_local_valid_mask(
-	local_valid_mask: np.ndarray,
-	patch_size_xyz: XYZ,
-) -> np.ndarray:
-	shape = _validate_xyz(local_valid_mask.shape, 'local_valid_mask.shape')
-	if any(
-		shape_axis % patch_axis != 0
-		for shape_axis, patch_axis in zip(shape, patch_size_xyz, strict=True)
-	):
-		msg = (
-			'local_valid_mask shape must be divisible by patch_size_xyz; '
-			f'got {shape!r} and {patch_size_xyz!r}'
-		)
-		raise ValueError(msg)
-	token_shape = tuple(
-		shape_axis // patch_axis
-		for shape_axis, patch_axis in zip(shape, patch_size_xyz, strict=True)
-	)
-	patch_view = local_valid_mask.reshape(
-		token_shape[0],
-		patch_size_xyz[0],
-		token_shape[1],
-		patch_size_xyz[1],
-		token_shape[2],
-		patch_size_xyz[2],
-	)
-	return np.all(patch_view, axis=(1, 3, 5))
 
 
 def _pseudo_targets_by_survey(
