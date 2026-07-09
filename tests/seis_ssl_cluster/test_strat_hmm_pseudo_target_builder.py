@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from copy import deepcopy
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -9,6 +10,7 @@ import pytest
 import torch
 import yaml
 
+import seis_ssl_cluster.stratigraphy.pseudo_target_builder as builder_module
 from proc.seis_ssl_cluster import build_strat_hmm_pseudo_targets as cli
 from seis_ssl_cluster.config.strat_hmm_pseudo_targets import (
 	resolve_strat_hmm_pseudo_target_config,
@@ -16,6 +18,7 @@ from seis_ssl_cluster.config.strat_hmm_pseudo_targets import (
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
+	NpyMemmapVolumeStore,
 	SurveyManifest,
 	SurveyNormalizationStats,
 	write_manifest_json,
@@ -32,6 +35,11 @@ from seis_ssl_cluster.stratigraphy.targets import (
 	load_pseudo_target_metadata,
 	pseudo_target_paths,
 	validate_pseudo_target_arrays,
+)
+from tests.seis_ssl_cluster.helpers_window_preprocessing import (
+	PATCH_SIZE_XYZ,
+	read_fixture_crop,
+	write_window_preprocessing_fixture,
 )
 
 if TYPE_CHECKING:
@@ -52,6 +60,31 @@ def test_tiny_survey_builds_pseudo_target_files_on_cpu(tmp_path: Path) -> None:
 	assert result.confidence_path.is_file()
 	assert result.valid_tokens_path.is_file()
 	assert result.metadata_path.is_file()
+
+
+def test_builder_read_window_matches_shared_preprocessing(tmp_path: Path) -> None:
+	fixture = write_window_preprocessing_fixture(tmp_path)
+	expected = read_fixture_crop(fixture, min_token_valid_fraction=0.5)
+
+	window, x, token_valid_mask = builder_module._read_window(  # noqa: SLF001
+		fixture.window,
+		manifest=fixture.manifest,
+		amplitude_path=fixture.amplitude_path,
+		stats=fixture.stats,
+		store=NpyMemmapVolumeStore(),
+		settings=SimpleNamespace(
+			zero_mask=fixture.zero_mask,
+			normalized_clip_abs=fixture.normalized_clip_abs,
+			amplitude_agc=fixture.amplitude_agc,
+			min_token_valid_fraction=0.5,
+		),
+		patch_size_xyz=PATCH_SIZE_XYZ,
+	)
+
+	assert window == fixture.window
+	np.testing.assert_allclose(x, expected.x, rtol=1.0e-6)
+	np.testing.assert_array_equal(token_valid_mask, expected.token_valid_mask)
+	np.testing.assert_array_equal(x[0][~expected.local_valid_mask], 0.0)
 
 
 def test_builder_outputs_validate_as_pseudo_target_arrays(tmp_path: Path) -> None:

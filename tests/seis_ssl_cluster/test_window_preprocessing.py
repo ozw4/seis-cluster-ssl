@@ -19,7 +19,11 @@ from seis_ssl_cluster.data import (
 	resolve_manifest_path,
 	zero_mask_margin_xyz,
 )
-from seis_ssl_cluster.data.normalization import AmplitudeAgcConfig
+from seis_ssl_cluster.data.normalization import AmplitudeAgcConfig, normalize_amplitude
+from tests.seis_ssl_cluster.helpers_window_preprocessing import (
+	read_fixture_crop,
+	write_window_preprocessing_fixture,
+)
 
 
 def test_reduce_valid_mask_to_tokens_applies_thresholds() -> None:
@@ -119,6 +123,55 @@ def test_read_amplitude_crop_returns_arrays_and_zero_fills_invalid_voxels(
 		prepared.x[0, 1, :, :],
 		volume[0, 0:2, 0:2],
 		rtol=1.0e-5,
+	)
+
+
+def test_read_amplitude_crop_zero_mask_invalid_voxels_are_zero_filled(
+	tmp_path: Path,
+) -> None:
+	fixture = write_window_preprocessing_fixture(tmp_path)
+
+	prepared = read_fixture_crop(fixture, min_token_valid_fraction=0.5)
+
+	assert not prepared.local_valid_mask[0, 0, :].any()
+	assert np.any(~prepared.local_valid_mask)
+	np.testing.assert_array_equal(
+		prepared.x[0][~prepared.local_valid_mask],
+		0.0,
+	)
+
+
+def test_read_amplitude_crop_agc_disabled_matches_normalization_noop(
+	tmp_path: Path,
+) -> None:
+	fixture = write_window_preprocessing_fixture(tmp_path)
+
+	prepared = read_fixture_crop(fixture, min_token_valid_fraction=0.5)
+	expected = normalize_amplitude(
+		fixture.volume,
+		fixture.stats,
+		normalized_clip_abs=fixture.normalized_clip_abs,
+	)
+	expected[~prepared.local_valid_mask] = 0.0
+
+	np.testing.assert_allclose(prepared.x[0], expected, rtol=1.0e-6)
+
+
+def test_read_amplitude_crop_min_token_valid_fraction_changes_token_mask(
+	tmp_path: Path,
+) -> None:
+	fixture = write_window_preprocessing_fixture(tmp_path)
+
+	threshold_half = read_fixture_crop(fixture, min_token_valid_fraction=0.5)
+	threshold_one = read_fixture_crop(fixture, min_token_valid_fraction=1.0)
+
+	assert threshold_half.token_valid_mask[0, 0, 0]
+	assert threshold_half.token_valid_mask[0, 0, 1]
+	assert not threshold_one.token_valid_mask[0, 0, 0]
+	assert not threshold_one.token_valid_mask[0, 0, 1]
+	np.testing.assert_array_equal(
+		threshold_one.token_valid_mask[1, :, :],
+		threshold_half.token_valid_mask[1, :, :],
 	)
 
 
