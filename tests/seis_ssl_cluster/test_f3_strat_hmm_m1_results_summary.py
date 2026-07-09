@@ -143,6 +143,34 @@ def test_publish_copies_expected_small_files(
 	)
 
 
+def test_publish_include_figures_false_omits_markdown_figure_links(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	_require_matplotlib_agg()
+	publish_dir = tmp_path / 'results' / 'f3' / 'facies_benchmark_v1' / 'm1'
+	monkeypatch.chdir(tmp_path)
+	config = _write_inputs(
+		tmp_path,
+		publish=F3StratHMMM1PublishConfig(
+			enabled=True,
+			output_dir=Path('results/f3/facies_benchmark_v1/m1'),
+			include_figures=False,
+		),
+	)
+
+	result = consolidate_f3_strat_hmm_m1_results(config)
+
+	assert result.publish_manifest is not None
+	assert not (publish_dir / 'figures').exists()
+	generated_markdown = result.summary_markdown.read_text(encoding='utf-8')
+	published_markdown = (publish_dir / 'm1_results_summary.md').read_text(
+		encoding='utf-8',
+	)
+	assert '(figures/' in generated_markdown
+	assert '(figures/' not in published_markdown
+
+
 def test_publish_disabled_does_nothing(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -343,6 +371,29 @@ def test_full_budget_duplicate_seed_rows_are_collapsed_when_manifest_exposes_ide
 		for warning in payload['warnings']
 	)
 	assert any('balanced_accuracy' in warning for warning in payload['warnings'])
+
+
+def test_full_budget_duplicate_seed_rows_warn_when_manifest_lacks_identity(
+	tmp_path: Path,
+) -> None:
+	_require_matplotlib_agg()
+	config = _write_inputs(tmp_path)
+	manifest_path = config.label_budget_suite_root / 'suite_manifest.json'
+	manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+	for row in manifest['rows']:
+		row.pop('paired_identity_hash')
+	_write_json(manifest_path, manifest)
+
+	payload = _summary_payload(config)
+
+	full = next(
+		row for row in payload['label_budget']['budgets'] if row['budget_id'] == 'full'
+	)
+	assert full['n_pairs'] == 2
+	assert any(
+		'duplicate independence cannot be inferred' in warning
+		for warning in payload['warnings']
+	)
 
 
 def test_empty_label_budget_rows_raise_clear_error(tmp_path: Path) -> None:
@@ -679,14 +730,13 @@ def _write_label_budget(root: Path, *, duplicate_full_identity: bool) -> None:
 			identity = f'hash-{row["budget_id"]}-{row["subsample_seed"]}'
 			if duplicate_full_identity and row['budget_id'] == 'full':
 				identity = 'hash-full-duplicated'
-			manifest_rows.append(
-				{
-					'model_role': role,
-					'budget_id': row['budget_id'],
-					'subsample_seed': int(row['subsample_seed']),
-					'paired_identity_hash': identity,
-				},
-			)
+			manifest_row = {
+				'model_role': role,
+				'budget_id': row['budget_id'],
+				'subsample_seed': int(row['subsample_seed']),
+				'paired_identity_hash': identity,
+			}
+			manifest_rows.append(manifest_row)
 	_write_json(root / 'suite_manifest.json', {'rows': manifest_rows})
 
 

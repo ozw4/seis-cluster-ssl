@@ -242,8 +242,17 @@ def _publish_items_for_f3_strat_hmm_m1_results(
 	*,
 	include_figures: bool,
 ) -> tuple[PublishItem, ...]:
+	markdown_content = (
+		None
+		if include_figures
+		else _publish_markdown_without_figure_links(result.summary_json)
+	)
 	items = [
-		PublishItem(result.summary_markdown, Path('m1_results_summary.md')),
+		PublishItem(
+			result.summary_markdown,
+			Path('m1_results_summary.md'),
+			content_text=markdown_content,
+		),
 		PublishItem(result.summary_json, Path('m1_results_summary.json')),
 		*(
 			PublishItem(table_path, Path('tables') / table_path.name)
@@ -459,7 +468,9 @@ def _label_budget_identity_by_condition(
 			raise TypeError(msg)
 		budget_id = _required_object_str(raw_row, 'budget_id')
 		seed = _required_object_int(raw_row, 'subsample_seed')
-		identity = _required_object_str(raw_row, 'paired_identity_hash')
+		identity = raw_row.get('paired_identity_hash')
+		if not isinstance(identity, str) or not identity:
+			return None
 		by_condition[(budget_id, seed)].add(identity)
 	result = {}
 	for condition, identities in by_condition.items():
@@ -525,7 +536,11 @@ def _decision(
 	return {'guidance': guidance, 'summary': summary}
 
 
-def _render_markdown(payload: Mapping[str, object]) -> str:
+def _render_markdown(
+	payload: Mapping[str, object],
+	*,
+	include_figure_links: bool = True,
+) -> str:
 	single = _mapping(payload['single_split'])
 	delta = _mapping(single['delta'])
 	label_budget = _mapping(payload['label_budget'])
@@ -554,14 +569,23 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 		'',
 		'## Label Budget',
 		'',
-		f'![Label-budget delta curves](figures/{LABEL_BUDGET_FIGURE})',
-		'',
-		(
-			'| budget_id | per_class_cap | n_pairs | mean_delta_macro_f1 | '
-			'mean_delta_mean_iou | mean_delta_balanced_accuracy |'
-		),
-		'| --- | ---: | ---: | ---: | ---: | ---: |',
 	]
+	if include_figure_links:
+		lines.extend(
+			(
+				f'![Label-budget delta curves](figures/{LABEL_BUDGET_FIGURE})',
+				'',
+			),
+		)
+	lines.extend(
+		(
+			(
+				'| budget_id | per_class_cap | n_pairs | mean_delta_macro_f1 | '
+				'mean_delta_mean_iou | mean_delta_balanced_accuracy |'
+			),
+			'| --- | ---: | ---: | ---: | ---: | ---: |',
+		),
+	)
 	for row in _sequence(label_budget['budgets']):
 		budget = _mapping(row)
 		lines.append(
@@ -573,13 +597,16 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 				f'{_format_float(budget["mean_delta_balanced_accuracy"])} |'
 			),
 		)
+	lines.extend(('', '## Split Index', ''))
+	if include_figure_links:
+		lines.extend(
+			(
+				f'![Split/index deltas](figures/{SPLIT_INDEX_FIGURE})',
+				'',
+			),
+		)
 	lines.extend(
 		(
-			'',
-			'## Split Index',
-			'',
-			f'![Split/index deltas](figures/{SPLIT_INDEX_FIGURE})',
-			'',
 			'| split_id | delta_macro_f1 | delta_mean_iou | delta_balanced_accuracy |',
 			'| --- | ---: | ---: | ---: |',
 		),
@@ -594,13 +621,16 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 				f'{_format_float(split["delta_balanced_accuracy"])} |'
 			),
 		)
+	lines.extend(('', '## Single-Run Metrics', ''))
+	if include_figure_links:
+		lines.extend(
+			(
+				f'![Single-run metric comparison](figures/{SINGLE_RUN_FIGURE})',
+				'',
+			),
+		)
 	lines.extend(
 		(
-			'',
-			'## Single-Run Metrics',
-			'',
-			f'![Single-run metric comparison](figures/{SINGLE_RUN_FIGURE})',
-			'',
 			'',
 			'## Decision',
 			'',
@@ -1106,6 +1136,19 @@ def _max_file_size_bytes(mapping: Mapping[str, object]) -> int:
 		msg = f'publish.max_file_size_mb must be positive; got {value!r}'
 		raise ValueError(msg)
 	return int(value * 1024 * 1024)
+
+
+def _publish_markdown_without_figure_links(summary_json: Path) -> str:
+	_require_file(summary_json, label='summary_json')
+	try:
+		payload = json.loads(summary_json.read_text(encoding='utf-8'))
+	except json.JSONDecodeError as exc:
+		msg = f'summary_json is invalid JSON: {summary_json}: {exc.msg}'
+		raise ValueError(msg) from exc
+	if not isinstance(payload, Mapping):
+		msg = f'summary_json must contain a mapping: {summary_json}'
+		raise TypeError(msg)
+	return _render_markdown(payload, include_figure_links=False)
 
 
 def _required_object_str(mapping: Mapping[object, object], key: str) -> str:
