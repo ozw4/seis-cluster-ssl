@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -133,6 +134,34 @@ def test_only_missing_skips_existing_metrics(tmp_path: Path) -> None:
 	run_f3_lithology_split_sweep_probes(config, only_missing=True)
 
 	assert json.loads(metrics_json.read_text(encoding='utf-8')) == {'sentinel': True}
+
+
+def test_only_missing_runs_missing_rows_when_run_manifest_exists(
+	tmp_path: Path,
+) -> None:
+	config_path, output_root = _write_suite_and_runner_config(tmp_path)
+	config = f3_lithology_split_sweep_probe_config_from_mapping(
+		_load_yaml(config_path),
+	)
+	run_f3_lithology_split_sweep_probes(config)
+	existing_metrics_json = config.probe_configs[0].outputs.metrics_json
+	existing_metrics_json.write_text(
+		json.dumps({'sentinel': True}) + '\n',
+		encoding='utf-8',
+	)
+	missing_config = config.probe_configs[1]
+	shutil.rmtree(missing_config.outputs.output_dir)
+
+	run_f3_lithology_split_sweep_probes(config, only_missing=True)
+
+	assert json.loads(existing_metrics_json.read_text(encoding='utf-8')) == {
+		'sentinel': True,
+	}
+	assert missing_config.outputs.metrics_json.is_file()
+	manifest = json.loads(
+		(output_root / 'split_probe_run_manifest.json').read_text(encoding='utf-8'),
+	)
+	assert len(manifest['rows']) == 4
 
 
 def test_existing_run_manifest_refuses_overwrite_before_training(

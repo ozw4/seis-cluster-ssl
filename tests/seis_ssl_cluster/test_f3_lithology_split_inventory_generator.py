@@ -204,7 +204,10 @@ def _write_fixture(tmp_path: Path) -> dict[str, Path]:
 		)
 	embedding_metadata = tmp_path / 'embedding_metadata.json'
 	if not embedding_metadata.exists():
-		embedding_metadata.write_text('{}', encoding='utf-8')
+		embedding_metadata.write_text(
+			json.dumps({'token_grid_shape': [6, 2, 1]}) + '\n',
+			encoding='utf-8',
+		)
 	return {
 		'inventory': inventory,
 		'label_volume': label_volume,

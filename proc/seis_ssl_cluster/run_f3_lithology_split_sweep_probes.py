@@ -123,6 +123,7 @@ def run_f3_lithology_split_sweep_probes(
 	if _skip_manifest_write(
 		manifest_path,
 		configs_to_run=configs_to_run,
+		only_missing=only_missing,
 		overwrite=config.overwrite,
 	):
 		return manifest_path
@@ -502,12 +503,15 @@ def _skip_manifest_write(
 	manifest_path: Path,
 	*,
 	configs_to_run: Sequence[F3LithologyProbeConfig],
+	only_missing: bool,
 	overwrite: bool,
 ) -> bool:
 	if overwrite or not manifest_path.exists():
 		return False
 	if not configs_to_run:
 		return True
+	if only_missing:
+		return False
 	msg = (
 		'refusing to overwrite existing split probe run manifest; '
 		f'path: {manifest_path}'

@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
-from seis_ssl_cluster.embedding.sliding_window import token_grid_shape_xyz
 from seis_ssl_cluster.f3.lithology.token_dataset import (
 	F3LithologyTokenDataset,
 	load_f3_lithology_token_dataset,
@@ -1103,9 +1102,8 @@ def _load_split_inventory_sources(
 		raise ValueError(msg)
 	classes = read_f3_lithology_class_info(config.inputs.class_info)
 	label_volume = np.load(config.inputs.source_label_volume)
-	geometry = read_f3_line_geometry(config.inputs.segy_geometry_json)
 	valid_tokens = np.ones(
-		token_grid_shape_xyz(geometry.shape_xyz, config.patch_size_xyz),
+		_reference_embedding_token_grid_shape(config.inputs.reference_embedding_metadata),
 		dtype=np.bool_,
 	)
 	counts = _estimated_slice_class_counts(
@@ -1125,6 +1123,14 @@ def _load_split_inventory_sources(
 		'class_counts_by_key': counts,
 		'validation_constraints': constraints,
 	}
+
+
+def _reference_embedding_token_grid_shape(path: Path) -> tuple[int, int, int]:
+	metadata = _read_json(path)
+	return _validate_positive_xyz(
+		metadata.get('token_grid_shape'),
+		'reference embedding metadata token_grid_shape',
+	)
 
 
 def _read_inventory_csv_rows(
