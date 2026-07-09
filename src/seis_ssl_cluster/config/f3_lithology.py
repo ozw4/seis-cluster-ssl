@@ -16,6 +16,7 @@ from seis_ssl_cluster.config.f3_lithology_report import (
 )
 from seis_ssl_cluster.config.f3_lithology_robustness import (
 	f3_lithology_label_budget_config_from_mapping,
+	f3_lithology_label_budget_probe_config_from_mapping,
 )
 from seis_ssl_cluster.config.f3_lithology_token_dataset import (
 	f3_lithology_token_dataset_config_from_mapping,
@@ -27,6 +28,7 @@ from seis_ssl_cluster.f3.prepare_volume import f3_prepare_volume_config_from_map
 
 __all__ = [
 	'f3_lithology_label_budget_config_from_mapping',
+	'f3_lithology_label_budget_probe_config_from_mapping',
 	'f3_lithology_prediction_config_from_mapping',
 	'f3_lithology_probe_config_from_mapping',
 	'f3_lithology_publish_config_from_mapping',

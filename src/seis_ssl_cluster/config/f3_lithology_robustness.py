@@ -2,26 +2,45 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from pathlib import Path
 
 from seis_ssl_cluster.config.f3_lithology_common import (
+	_hidden_dims,
+	_optional_fraction,
+	_optional_int,
+	_optional_mapping,
+	_optional_nonnegative_float,
+	_optional_nullable_str,
+	_optional_positive_float,
+	_optional_positive_int,
+	_optional_str,
 	_required_absolute_path,
 	_required_mapping,
 	_required_str,
+	_string_item,
 	_validate_allowed_keys,
 )
+from seis_ssl_cluster.f3 import (
+	DEFAULT_EVALUATION_METRICS,
+	F3ClassInfo,
+	F3LithologyProbeConfig,
+	F3LithologyProbeInputs,
+	F3LithologyProbeOutputs,
+	F3LithologyProbeSettings,
+)
 from seis_ssl_cluster.f3.lithology.robustness import (
+	F3_LABEL_BUDGET_SUITE_MANIFEST_ARTIFACT_TYPE,
 	F3_ROBUSTNESS_CONTRACT_VERSION,
 	F3LabelBudgetConfig,
 	F3LabelBudgetModelConfig,
 	F3RobustnessModelSpec,
 	F3RobustnessSuiteManifest,
 )
+from seis_ssl_cluster.f3.lithology.tokens import read_f3_lithology_class_info
 from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 F3_LITHOLOGY_ROBUSTNESS_ROOT = (
 	DEFAULT_ARTIFACT_ROOT / 'lithology/f3/facies_benchmark_v1/robustness'
@@ -33,6 +52,21 @@ F3_M1_CANDIDATE_MODEL_TAG = 'strat_hmm_pretext_m1_k6_topblock1_distill'
 F3_M1_EMBEDDING_SPEC = 'overlap_x16'
 F3_M1_LABEL_SET = 'png_slices_segy_labels_v1'
 F3_M1_PROBE_SPEC = 'linear_balanced_v1'
+
+
+@dataclass(frozen=True)
+class F3LabelBudgetProbeRunConfig:
+	"""Resolved config for running probes across a label-budget suite."""
+
+	manifest: Path
+	output_root: Path
+	probe: F3LithologyProbeSettings
+	labels_class_info: Path
+	evaluation_metrics: tuple[str, ...]
+	figure_dpi: int
+	overwrite: bool
+	rows: tuple[Mapping[str, object], ...]
+	probe_configs: tuple[F3LithologyProbeConfig, ...]
 
 
 def f3_m1_example_model_specs() -> tuple[F3RobustnessModelSpec, ...]:
@@ -141,6 +175,62 @@ def f3_lithology_label_budget_config_from_mapping(
 	)
 
 
+def f3_lithology_label_budget_probe_config_from_mapping(
+	config: Mapping[str, object],
+) -> F3LabelBudgetProbeRunConfig:
+	"""Validate and normalize a label-budget probe runner config."""
+	_validate_allowed_keys(
+		config,
+		frozenset({'suite', 'probe', 'labels', 'evaluation', 'outputs'}),
+		prefix='config',
+	)
+	suite = _required_mapping(config, 'suite')
+	probe_mapping = _required_mapping(config, 'probe')
+	labels = _required_mapping(config, 'labels')
+	evaluation = _optional_mapping(config, 'evaluation')
+	outputs = _required_mapping(config, 'outputs')
+	_validate_allowed_keys(
+		suite,
+		frozenset({'manifest', 'output_root'}),
+		prefix='suite',
+	)
+	_validate_allowed_keys(labels, frozenset({'class_info'}), prefix='labels')
+	_validate_allowed_keys(outputs, frozenset({'overwrite'}), prefix='outputs')
+
+	manifest = _required_absolute_path(suite, 'manifest', prefix='suite')
+	output_root = _required_absolute_path(suite, 'output_root', prefix='suite')
+	class_info = _required_absolute_path(labels, 'class_info', prefix='labels')
+	manifest_payload = _read_label_budget_suite_manifest(manifest)
+	rows = _manifest_rows(manifest_payload, manifest_path=manifest)
+	probe = _probe_settings_from_mapping(probe_mapping)
+	classes = read_f3_lithology_class_info(class_info)
+	evaluation_metrics = _evaluation_metrics(evaluation)
+	figure_dpi = _figure_dpi(evaluation)
+	probe_configs = tuple(
+		_probe_config_for_manifest_row(
+			row,
+			output_root=output_root,
+			probe=probe,
+			class_info=class_info,
+			classes=classes,
+			evaluation_metrics=evaluation_metrics,
+			figure_dpi=figure_dpi,
+		)
+		for row in rows
+	)
+	return F3LabelBudgetProbeRunConfig(
+		manifest=manifest,
+		output_root=output_root,
+		probe=probe,
+		labels_class_info=class_info,
+		evaluation_metrics=evaluation_metrics,
+		figure_dpi=figure_dpi,
+		overwrite=_optional_bool(outputs, 'overwrite', default=False, prefix='outputs'),
+		rows=rows,
+		probe_configs=probe_configs,
+	)
+
+
 def _label_budget_model_from_mapping(
 	role: str,
 	models: Mapping[str, object],
@@ -160,6 +250,270 @@ def _label_budget_model_from_mapping(
 			prefix=f'models.{role}',
 		),
 	)
+
+
+def _read_label_budget_suite_manifest(path: Path) -> Mapping[str, object]:
+	if not path.is_file():
+		msg = f'suite.manifest does not exist: {path}'
+		raise FileNotFoundError(msg)
+	with path.open(encoding='utf-8') as file_obj:
+		payload = json.load(file_obj)
+	if not isinstance(payload, Mapping):
+		msg = f'suite manifest must contain a JSON object: {path}'
+		raise TypeError(msg)
+	artifact_type = payload.get('artifact_type')
+	if artifact_type != F3_LABEL_BUDGET_SUITE_MANIFEST_ARTIFACT_TYPE:
+		msg = (
+			'suite manifest artifact_type must be '
+			f'{F3_LABEL_BUDGET_SUITE_MANIFEST_ARTIFACT_TYPE!r}; '
+			f'got {artifact_type!r}'
+		)
+		raise ValueError(msg)
+	return payload
+
+
+def _manifest_rows(
+	payload: Mapping[str, object],
+	*,
+	manifest_path: Path,
+) -> tuple[Mapping[str, object], ...]:
+	value = payload.get('rows')
+	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+		msg = f'suite manifest rows must be a list: {manifest_path}'
+		raise TypeError(msg)
+	rows: list[Mapping[str, object]] = []
+	for index, item in enumerate(value):
+		if not isinstance(item, Mapping):
+			msg = f'suite manifest row {index} must be a mapping'
+			raise TypeError(msg)
+		_validate_manifest_row(item, index=index)
+		rows.append(item)
+	if not rows:
+		msg = f'suite manifest contains no rows: {manifest_path}'
+		raise ValueError(msg)
+	return tuple(rows)
+
+
+def _validate_manifest_row(row: Mapping[str, object], *, index: int) -> None:
+	required = (
+		'model_role',
+		'model_tag',
+		'budget_id',
+		'per_class_cap',
+		'subsample_seed',
+		'token_dataset_root',
+		'train_tokens',
+		'validation_tokens',
+		'metadata_json',
+		'selected_train_token_count',
+		'validation_token_count',
+		'paired_identity_hash',
+	)
+	missing = [key for key in required if key not in row]
+	if missing:
+		msg = f'suite manifest row {index} missing key(s): {missing!r}'
+		raise ValueError(msg)
+	_required_str(row, 'model_role', prefix=f'rows[{index}]')
+	_required_str(row, 'model_tag', prefix=f'rows[{index}]')
+	_required_str(row, 'budget_id', prefix=f'rows[{index}]')
+	_required_str(row, 'paired_identity_hash', prefix=f'rows[{index}]')
+	_validate_int_value(row['subsample_seed'], f'rows[{index}].subsample_seed')
+	_validate_optional_positive_int_value(
+		row['per_class_cap'],
+		f'rows[{index}].per_class_cap',
+	)
+	_validate_nonnegative_count(
+		row['selected_train_token_count'],
+		f'rows[{index}].selected_train_token_count',
+	)
+	_validate_nonnegative_count(
+		row['validation_token_count'],
+		f'rows[{index}].validation_token_count',
+	)
+	for key in (
+		'token_dataset_root',
+		'train_tokens',
+		'validation_tokens',
+		'metadata_json',
+	):
+		value = Path(_required_str(row, key, prefix=f'rows[{index}]'))
+		if not value.is_absolute():
+			msg = f'rows[{index}].{key} must be an absolute path; got {value}'
+			raise ValueError(msg)
+
+
+def _probe_config_for_manifest_row(  # noqa: PLR0913
+	row: Mapping[str, object],
+	*,
+	output_root: Path,
+	probe: F3LithologyProbeSettings,
+	class_info: Path,
+	classes: tuple[F3ClassInfo, ...],
+	evaluation_metrics: tuple[str, ...],
+	figure_dpi: int,
+) -> F3LithologyProbeConfig:
+	token_dataset_root = Path(str(row['token_dataset_root']))
+	output_dir = (
+		output_root
+		/ 'probes'
+		/ f'model={row["model_tag"]}'
+		/ f'budget={row["budget_id"]}'
+		/ f'subsample_seed={row["subsample_seed"]}'
+		/ probe.spec
+	)
+	model_tag = str(row['model_tag'])
+	return F3LithologyProbeConfig(
+		inputs=F3LithologyProbeInputs(
+			train_tokens=Path(str(row['train_tokens'])),
+			validation_tokens=Path(str(row['validation_tokens'])),
+			class_info=class_info,
+			token_dataset_metadata_json=Path(str(row['metadata_json'])),
+		),
+		outputs=F3LithologyProbeOutputs(output_dir=output_dir),
+		classes=classes,
+		probe=probe,
+		dataset={'name': 'f3_facies_benchmark'},
+		model={
+			'tag': model_tag,
+			'role': str(row['model_role']),
+			'freeze_encoder': True,
+		},
+		embeddings={
+			'feature_source': {
+				'kind': 'label_budget_token_dataset',
+				'reference_model_tag': model_tag,
+			},
+		},
+		labels={'class_info': str(class_info)},
+		token_dataset={
+			'input_dir': str(token_dataset_root),
+			'metadata_json': str(row['metadata_json']),
+			'label_budget': {
+				'budget_id': row['budget_id'],
+				'per_class_cap': row['per_class_cap'],
+				'subsample_seed': row['subsample_seed'],
+			},
+			'paired_identity_hash': row['paired_identity_hash'],
+		},
+		lithology={'suite_output_root': str(output_root)},
+		evaluation_metrics=evaluation_metrics,
+		figure_dpi=figure_dpi,
+	)
+
+
+def _probe_settings_from_mapping(
+	probe: Mapping[str, object],
+) -> F3LithologyProbeSettings:
+	_validate_allowed_keys(
+		probe,
+		frozenset(
+			{
+				'spec',
+				'type',
+				'feature_scaling',
+				'class_weight',
+				'max_iter',
+				'random_state',
+				'hidden_dims',
+				'dropout',
+				'max_epochs',
+				'early_stopping_patience',
+				'batch_size',
+				'learning_rate',
+				'weight_decay',
+			},
+		),
+		prefix='probe',
+	)
+	return F3LithologyProbeSettings(
+		spec=_required_str(probe, 'spec', prefix='probe'),
+		probe_type=_required_str(probe, 'type', prefix='probe'),
+		feature_scaling=_optional_str(
+			probe,
+			'feature_scaling',
+			default='standard',
+			prefix='probe',
+		),
+		class_weight=_optional_nullable_str(
+			probe,
+			'class_weight',
+			default='balanced',
+			prefix='probe',
+		),
+		max_iter=_optional_positive_int(probe.get('max_iter', 2000), 'probe.max_iter'),
+		hidden_dims=_hidden_dims(probe.get('hidden_dims', (256, 128))),
+		dropout=_optional_fraction(probe.get('dropout', 0.2), 'probe.dropout'),
+		max_epochs=_optional_positive_int(
+			probe.get('max_epochs', 200),
+			'probe.max_epochs',
+		),
+		early_stopping_patience=_optional_positive_int(
+			probe.get('early_stopping_patience', 20),
+			'probe.early_stopping_patience',
+		),
+		batch_size=_optional_positive_int(
+			probe.get('batch_size', 1024),
+			'probe.batch_size',
+		),
+		learning_rate=_optional_positive_float(
+			probe.get('learning_rate', 1.0e-3),
+			'probe.learning_rate',
+		),
+		weight_decay=_optional_nonnegative_float(
+			probe.get('weight_decay', 0.0),
+			'probe.weight_decay',
+		),
+		random_state=_optional_int(
+			probe.get('random_state', 42),
+			'probe.random_state',
+		),
+	)
+
+
+def _evaluation_metrics(evaluation: Mapping[str, object]) -> tuple[str, ...]:
+	value = evaluation.get('metrics', DEFAULT_EVALUATION_METRICS)
+	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+		msg = f'evaluation.metrics must be a list of metric names; got {value!r}'
+		raise TypeError(msg)
+	metrics = tuple(_string_item(item, 'evaluation.metrics') for item in value)
+	if not metrics:
+		msg = 'evaluation.metrics must contain at least one metric name'
+		raise ValueError(msg)
+	return metrics
+
+
+def _figure_dpi(evaluation: Mapping[str, object]) -> int:
+	figure = evaluation.get('figure')
+	if figure is None:
+		return 300
+	if not isinstance(figure, Mapping):
+		msg = f'evaluation.figure must be a mapping; got {figure!r}'
+		raise TypeError(msg)
+	_validate_allowed_keys(figure, frozenset({'dpi'}), prefix='evaluation.figure')
+	return _optional_positive_int(figure.get('dpi', 300), 'evaluation.figure.dpi')
+
+
+def _validate_int_value(value: object, label: str) -> int:
+	if not isinstance(value, int) or isinstance(value, bool):
+		msg = f'{label} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _validate_optional_positive_int_value(value: object, label: str) -> int | None:
+	if value is None:
+		return None
+	if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+		msg = f'{label} must be a positive integer or null; got {value!r}'
+		raise ValueError(msg)
+	return value
+
+
+def _validate_nonnegative_count(value: object, label: str) -> int:
+	if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+		msg = f'{label} must be a nonnegative integer; got {value!r}'
+		raise ValueError(msg)
+	return value
 
 
 def _validate_label_budget_mapping(label_budget: Mapping[str, object]) -> None:
@@ -227,7 +581,9 @@ __all__ = [
 	'F3_M1_LABEL_SET',
 	'F3_M1_PROBE_SPEC',
 	'F3_SPLIT_INDEX_M1_SUITE_NAME',
+	'F3LabelBudgetProbeRunConfig',
 	'f3_lithology_label_budget_config_from_mapping',
+	'f3_lithology_label_budget_probe_config_from_mapping',
 	'f3_m1_example_model_specs',
 	'f3_m1_robustness_suite_manifest',
 ]
