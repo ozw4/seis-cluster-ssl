@@ -413,6 +413,12 @@ def _validate_strat_hmm_pretext_loss(
 ) -> None:
 	for key in ('prototype_weight', 'usage_weight', 'distillation_weight'):
 		_validate_nonnegative_finite_number(loss, key, prefix='loss')
+	if not any(
+		float(loss[key]) > 0.0
+		for key in ('prototype_weight', 'usage_weight', 'distillation_weight')
+	):
+		msg = 'at least one strat HMM pretext loss weight must be positive'
+		raise ValueError(msg)
 	if loss.get('entropy_floor') is not None:
 		_validate_nonnegative_finite_number(loss, 'entropy_floor', prefix='loss')
 	if unfreeze_top_blocks > 0 and float(loss['distillation_weight']) <= 0.0:

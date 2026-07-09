@@ -58,6 +58,10 @@ def build_strat_hmm_head_only_components(
 		0,
 	)
 	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
+	prototype_head_used = (
+		_float_config(loss_config, 'prototype_weight', 1.0) > 0.0
+		or _float_config(loss_config, 'usage_weight', 0.0) > 0.0
+	)
 	if unfreeze_top_blocks > 0 and distillation_weight <= 0.0:
 		msg = (
 			'loss.distillation_weight must be positive when '
@@ -97,6 +101,8 @@ def build_strat_hmm_head_only_components(
 		temperature=_float_config(head_config, 'temperature', 0.1),
 		normalize=_bool_config(head_config, 'normalize', default=True),
 	).to(resolved_device)
+	if not prototype_head_used:
+		head.requires_grad_(requires_grad=False)
 	param_groups = _optimizer_param_groups(
 		student=student,
 		head=head,
