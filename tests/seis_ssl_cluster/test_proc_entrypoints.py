@@ -38,6 +38,10 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'generate_f3_lithology_split_inventories.py': (
+		'--config',
+		'--dry-run',
+	),
 	'run_f3_lithology_label_budget_probes.py': (
 		'--config',
 		'--dry-run',
