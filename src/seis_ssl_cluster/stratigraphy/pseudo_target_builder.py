@@ -16,26 +16,20 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	HMMPathPriorSettings,
 	HMMTransitionSettings,
 )
-from seis_ssl_cluster.data.crop_sampler import (
-	expand_request_with_margin,
-	required_zero_mask_margin_xyz,
-)
 from seis_ssl_cluster.data.normalization import (
 	AmplitudeAgcConfig,
-	apply_configured_agc,
+	SurveyNormalizationStats,
 	load_normalization_stats,
-	normalize_amplitude,
 )
 from seis_ssl_cluster.data.schema import CropRequest, SurveyManifest, read_manifest_json
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
-from seis_ssl_cluster.data.zero_mask import (
-	ZeroMaskConfig,
-	compute_zero_amplitude_invalid_mask,
+from seis_ssl_cluster.data.window_preprocessing import (
+	AmplitudePreprocessSettings,
+	read_amplitude_crop,
+	resolve_manifest_path,
 )
-from seis_ssl_cluster.embedding.extractor import (
-	build_model_from_config,
-	reduce_valid_mask_to_tokens,
-)
+from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
+from seis_ssl_cluster.embedding.extractor import build_model_from_config
 from seis_ssl_cluster.embedding.sliding_window import (
 	SlidingWindow,
 	iter_sliding_windows,
@@ -226,8 +220,8 @@ def _build_survey_pseudo_targets(  # noqa: PLR0913
 		k=settings.hmm_k,
 		survey_id=manifest.survey_id,
 	)
-	amplitude_path = _resolve_manifest_path(manifest, manifest.amplitude.path)
-	stats_path = _resolve_manifest_path(
+	amplitude_path = resolve_manifest_path(manifest, manifest.amplitude.path)
+	stats_path = resolve_manifest_path(
 		manifest,
 		manifest.amplitude.normalization_stats_path,
 	)
@@ -321,7 +315,7 @@ def _survey_logits(  # noqa: PLR0913
 	manifest: SurveyManifest,
 	*,
 	amplitude_path: Path,
-	stats: object,
+	stats: SurveyNormalizationStats,
 	store: NpyMemmapVolumeStore,
 	model: torch.nn.Module,
 	head: OrderedPrototypeHead,
@@ -368,7 +362,7 @@ def _process_window_batch(  # noqa: PLR0913
 	*,
 	manifest: SurveyManifest,
 	amplitude_path: Path,
-	stats: object,
+	stats: SurveyNormalizationStats,
 	store: NpyMemmapVolumeStore,
 	model: AmplitudeMAE3DProtocol,
 	head: OrderedPrototypeHead,
@@ -424,48 +418,30 @@ def _read_window(  # noqa: PLR0913
 	*,
 	manifest: SurveyManifest,
 	amplitude_path: Path,
-	stats: object,
+	stats: SurveyNormalizationStats,
 	store: NpyMemmapVolumeStore,
 	settings: _BuilderSettings,
 	patch_size_xyz: XYZ,
 ) -> tuple[SlidingWindow, np.ndarray, np.ndarray]:
-	margin_xyz = _zero_mask_margin_xyz(settings.zero_mask)
 	request = CropRequest(
 		survey_id=manifest.survey_id,
 		start_xyz=window.start_xyz,
 		size_xyz=window.size_xyz,
 	)
-	compute_request, payload_slices = expand_request_with_margin(request, margin_xyz)
-	raw_compute, compute_valid_mask = store.read_crop_with_padding(
-		amplitude_path,
-		compute_request.start_xyz,
-		compute_request.size_xyz,
-	)
-	raw_crop = raw_compute[payload_slices].astype(np.float32, copy=False)
-	source_valid_mask = compute_valid_mask[payload_slices]
-	zero_invalid = compute_zero_amplitude_invalid_mask(
-		raw_compute,
-		valid_mask=compute_valid_mask,
-		config=settings.zero_mask,
-	)[payload_slices]
-	local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
-	amplitude_norm = normalize_amplitude(
-		raw_crop,
-		stats,
-		normalized_clip_abs=settings.normalized_clip_abs,
-	)
-	amplitude_norm = apply_configured_agc(
-		amplitude_norm,
-		local_valid_mask,
-		settings.amplitude_agc,
-	)
-	amplitude_norm[~local_valid_mask] = 0.0
-	token_valid_mask = reduce_valid_mask_to_tokens(
-		local_valid_mask,
+	prepared = read_amplitude_crop(
+		request=request,
+		amplitude_path=amplitude_path,
+		stats=stats,
+		store=store,
 		patch_size_xyz=patch_size_xyz,
-		min_valid_fraction=settings.min_token_valid_fraction,
+		settings=AmplitudePreprocessSettings(
+			zero_mask=settings.zero_mask,
+			normalized_clip_abs=settings.normalized_clip_abs,
+			amplitude_agc=settings.amplitude_agc,
+			min_token_valid_fraction=settings.min_token_valid_fraction,
+		),
 	)
-	return window, amplitude_norm[np.newaxis, ...], token_valid_mask
+	return window, prepared.x, prepared.token_valid_mask
 
 
 def _add_window_logits(  # noqa: PLR0913
@@ -883,15 +859,6 @@ def _normalized_clip_abs(config: Mapping[str, object]) -> float | None:
 	return None if value is None else float(value)
 
 
-def _zero_mask_margin_xyz(config: ZeroMaskConfig) -> XYZ:
-	if not config.enabled:
-		return (0, 0, 0)
-	return required_zero_mask_margin_xyz(
-		z_sample_influence_radius=config.z_sample_influence_radius,
-		xy_trace_influence_radius=config.xy_trace_influence_radius,
-	)
-
-
 def _checkpoint_training_stage(payload: Mapping[str, object]) -> object:
 	training_state = payload.get('training_state')
 	if isinstance(training_state, Mapping) and 'stage' in training_state:
@@ -920,12 +887,6 @@ def _checkpoint_path(config: Mapping[str, object]) -> Path:
 
 def _manifest_path(config: Mapping[str, object]) -> Path:
 	return Path(cast('str', _mapping(config, 'manifests')['train']))
-
-
-def _resolve_manifest_path(manifest: SurveyManifest, path: Path) -> Path:
-	if path.is_absolute():
-		return path
-	return manifest.root / path
 
 
 def _xyz_from_config_section(
