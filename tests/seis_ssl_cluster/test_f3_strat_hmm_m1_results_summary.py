@@ -19,12 +19,7 @@ from seis_ssl_cluster.f3.lithology.m1_results import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CLI = (
-	REPO_ROOT
-	/ 'proc'
-	/ 'seis_ssl_cluster'
-	/ 'summarize_f3_strat_hmm_m1_results.py'
-)
+CLI = REPO_ROOT / 'proc' / 'seis_ssl_cluster' / 'summarize_f3_strat_hmm_m1_results.py'
 
 
 def test_successful_summary_creation(tmp_path: Path) -> None:
@@ -64,6 +59,14 @@ def test_successful_summary_creation(tmp_path: Path) -> None:
 	assert payload['baseline_model'] == 'mae_baseline'
 	assert payload['candidate_model'] == 'strat_hmm_m1'
 	assert payload['single_split']['delta']['macro_f1'] == pytest.approx(0.06)
+	assert [row['budget_id'] for row in payload['label_budget']['budgets']] == [
+		'cap25',
+		'cap50',
+		'cap100',
+		'cap250',
+		'cap500',
+		'full',
+	]
 	assert payload['label_budget']['budgets'][0] == {
 		'budget_id': 'cap25',
 		'per_class_cap': 25,
@@ -128,18 +131,16 @@ def test_publish_copies_expected_small_files(
 		Path('figures/single_run_metric_comparison.png'),
 		Path('publish_manifest.json'),
 	}
-	assert (
-		publish_dir / 'm1_results_summary.md'
-	).read_text(encoding='utf-8') == result.summary_markdown.read_text(
+	assert (publish_dir / 'm1_results_summary.md').read_text(
+		encoding='utf-8'
+	) == result.summary_markdown.read_text(
 		encoding='utf-8',
 	)
 	manifest_payload = json.loads(
 		(publish_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
 	)
 	assert sorted(item['target'] for item in manifest_payload['items']) == sorted(
-		str(path)
-		for path in published_files
-		if path.name != 'publish_manifest.json'
+		str(path) for path in published_files if path.name != 'publish_manifest.json'
 	)
 
 
@@ -353,6 +354,34 @@ def test_decision_go_when_macro_f1_and_mean_iou_are_positive(
 	assert 'positive' in payload['decision']['summary']
 
 
+def test_markdown_uses_mixed_language_when_decision_is_hold(
+	tmp_path: Path,
+) -> None:
+	_require_matplotlib_agg()
+	config = _write_inputs(tmp_path)
+	comparison_rows = _read_csv(config.baseline_comparison_csv)
+	for row in comparison_rows:
+		if row['MODEL_TAG'] == 'strat_hmm_m1':
+			row['macro_f1'] = '0.55'
+	_write_csv(
+		config.baseline_comparison_csv, tuple(comparison_rows[0]), comparison_rows
+	)
+	split_deltas = config.split_index_suite_root / 'reports' / 'split_paired_deltas.csv'
+	split_rows = _read_csv(split_deltas)
+	split_rows[0]['delta_mean_iou'] = '-0.01'
+	_write_csv(split_deltas, tuple(split_rows[0]), split_rows)
+
+	result = consolidate_f3_strat_hmm_m1_results(config)
+
+	payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
+	markdown = result.summary_markdown.read_text(encoding='utf-8')
+	assert payload['decision']['guidance'] == 'hold'
+	assert 'Single-run result is mixed' in markdown
+	assert 'Single-run result is strong positive' not in markdown
+	assert 'Split/index robustness is mixed' in markdown
+	assert 'positive macro F1 and mean IoU deltas on all tested splits' not in markdown
+
+
 def test_full_budget_duplicate_seed_rows_are_collapsed_when_manifest_exposes_identity(
 	tmp_path: Path,
 ) -> None:
@@ -415,6 +444,23 @@ def test_empty_label_budget_rows_raise_clear_error(tmp_path: Path) -> None:
 	)
 
 	with pytest.raises(ValueError, match='csv file contains no rows'):
+		consolidate_f3_strat_hmm_m1_results(config)
+
+
+def test_missing_required_label_budget_raises_clear_error(tmp_path: Path) -> None:
+	config = _write_inputs(tmp_path)
+	paired_deltas = config.label_budget_suite_root / 'reports' / 'paired_deltas.csv'
+	rows = _read_csv(paired_deltas)
+	_write_csv(
+		paired_deltas,
+		tuple(rows[0]),
+		[row for row in rows if row['budget_id'] != 'cap50'],
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=r'missing required budget_id rows.*cap50',
+	):
 		consolidate_f3_strat_hmm_m1_results(config)
 
 
@@ -554,16 +600,12 @@ def test_cli_runs_end_to_end_and_publishes_synthetic_fixtures(
 	assert 'published F3 strat-HMM M1 results:' in completed.stdout
 	assert (config.output_dir / 'm1_results_summary.json').is_file()
 	assert (config.output_dir / 'm1_results_summary.md').is_file()
-	assert (
-		config.output_dir / 'figures' / 'label_budget_delta_curves.png'
-	).is_file()
+	assert (config.output_dir / 'figures' / 'label_budget_delta_curves.png').is_file()
 	assert (config.output_dir / 'figures' / 'split_index_deltas.png').is_file()
 	assert (publish_dir / 'm1_results_summary.json').is_file()
 	assert (publish_dir / 'm1_results_summary.md').is_file()
 	assert (publish_dir / 'tables' / 'label_budget_summary.csv').is_file()
-	assert (
-		publish_dir / 'figures' / 'label_budget_delta_curves.png'
-	).is_file()
+	assert (publish_dir / 'figures' / 'label_budget_delta_curves.png').is_file()
 	manifest = json.loads(
 		(publish_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
 	)
@@ -688,6 +730,46 @@ def _write_label_budget(root: Path, *, duplicate_full_identity: bool) -> None:
 			'delta_macro_f1': '0.06',
 			'delta_weighted_f1': '0.04',
 			'delta_mean_iou': '0.06',
+		},
+		{
+			'budget_id': 'cap50',
+			'per_class_cap': '50',
+			'subsample_seed': '0',
+			'delta_accuracy': '0.02',
+			'delta_balanced_accuracy': '0.03',
+			'delta_macro_f1': '0.05',
+			'delta_weighted_f1': '0.03',
+			'delta_mean_iou': '0.05',
+		},
+		{
+			'budget_id': 'cap100',
+			'per_class_cap': '100',
+			'subsample_seed': '0',
+			'delta_accuracy': '0.02',
+			'delta_balanced_accuracy': '0.03',
+			'delta_macro_f1': '0.04',
+			'delta_weighted_f1': '0.03',
+			'delta_mean_iou': '0.04',
+		},
+		{
+			'budget_id': 'cap250',
+			'per_class_cap': '250',
+			'subsample_seed': '0',
+			'delta_accuracy': '0.02',
+			'delta_balanced_accuracy': '0.02',
+			'delta_macro_f1': '0.03',
+			'delta_weighted_f1': '0.02',
+			'delta_mean_iou': '0.03',
+		},
+		{
+			'budget_id': 'cap500',
+			'per_class_cap': '500',
+			'subsample_seed': '0',
+			'delta_accuracy': '0.01',
+			'delta_balanced_accuracy': '0.01',
+			'delta_macro_f1': '0.02',
+			'delta_weighted_f1': '0.01',
+			'delta_mean_iou': '0.02',
 		},
 		{
 			'budget_id': 'full',

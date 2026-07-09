@@ -338,7 +338,11 @@ def _label_budget_summary(
 		by_budget[_required_cell(row, 'budget_id', path=paired_deltas_csv)].append(row)
 	budgets = []
 	deterministic_anchor_budget_ids = []
-	for budget_id in sorted(by_budget, key=_budget_sort_key):
+	for budget_id in _required_budget_ids_by_display_order(
+		by_budget,
+		label='label-budget paired_deltas_csv',
+		path=paired_deltas_csv,
+	):
 		raw_budget_rows = by_budget[budget_id]
 		if budget_id == 'full' and len(raw_budget_rows) > 1:
 			deterministic_anchor_budget_ids.append(budget_id)
@@ -547,25 +551,49 @@ def _render_markdown(
 	split_index = _mapping(payload['split_index'])
 	decision = _mapping(payload['decision'])
 	warnings = _sequence(payload['warnings'])
+	single_positive = float(delta['macro_f1']) > 0 and float(delta['mean_iou']) > 0
+	label_positive = _label_budget_macro_f1_mean_iou_positive(label_budget)
+	split_positive = _split_index_macro_f1_mean_iou_positive(split_index)
+	single_line = (
+		(
+			'- Single-run result is strong positive: '
+			if single_positive
+			else '- Single-run result is mixed: '
+		)
+		+ f'delta_macro_f1={_format_float(delta["macro_f1"])}, '
+		+ f'delta_mean_iou={_format_float(delta["mean_iou"])}.'
+	)
+	label_line = (
+		(
+			'- Label-budget robustness is strongest in low-label regimes; '
+			'monitor the full-budget balanced accuracy caveat.'
+		)
+		if label_positive
+		else (
+			'- Label-budget robustness is mixed across required budgets; '
+			'inspect budget-level deltas and monitor full-budget balanced accuracy.'
+		)
+	)
+	split_line = (
+		(
+			'- Split/index robustness shows positive macro F1 and mean IoU '
+			'deltas on all tested splits.'
+		)
+		if split_positive
+		else (
+			'- Split/index robustness is mixed; macro F1 or mean IoU is not '
+			'positive on every tested split.'
+		)
+	)
 	lines = [
 		'# F3 Strat-HMM Milestone-1 Results Summary',
 		'',
 		f'- baseline model: {payload["baseline_model"]}',
 		f'- candidate model: {payload["candidate_model"]}',
 		'- HMM labels are a structured pretext signal, not final lithology outputs.',
-		(
-			'- Single-run result is strong positive: '
-			f'delta_macro_f1={_format_float(delta["macro_f1"])}, '
-			f'delta_mean_iou={_format_float(delta["mean_iou"])}.'
-		),
-		(
-			'- Label-budget robustness is strongest in low-label regimes; '
-			'monitor the full-budget balanced accuracy caveat.'
-		),
-		(
-			'- Split/index robustness shows positive macro F1 and mean IoU '
-			'deltas on all tested splits.'
-		),
+		single_line,
+		label_line,
+		split_line,
 		'',
 		'## Label Budget',
 		'',
@@ -648,6 +676,28 @@ def _render_markdown(
 	return '\n'.join(lines)
 
 
+def _label_budget_macro_f1_mean_iou_positive(
+	label_budget: Mapping[str, object],
+) -> bool:
+	budgets = _sequence(label_budget['budgets'])
+	return bool(budgets) and all(
+		float(_mapping(row)['mean_delta_macro_f1']) > 0
+		and float(_mapping(row)['mean_delta_mean_iou']) > 0
+		for row in budgets
+	)
+
+
+def _split_index_macro_f1_mean_iou_positive(
+	split_index: Mapping[str, object],
+) -> bool:
+	splits = _sequence(split_index['splits'])
+	return bool(splits) and all(
+		float(_mapping(row)['delta_macro_f1']) > 0
+		and float(_mapping(row)['delta_mean_iou']) > 0
+		for row in splits
+	)
+
+
 def _write_figures(
 	payload: Mapping[str, object],
 	output_dir: Path,
@@ -708,10 +758,7 @@ def _write_single_split_table(payload: Mapping[str, object], path: Path) -> None
 			{
 				'role': role,
 				'model': str(payload[model_key]),
-				**{
-					metric: _format_float(metrics[metric])
-					for metric in CORE_METRICS
-				},
+				**{metric: _format_float(metrics[metric]) for metric in CORE_METRICS},
 			}
 		)
 	delta = _mapping(single['delta'])
@@ -741,12 +788,7 @@ def _write_label_budget_table(payload: Mapping[str, object], path: Path) -> None
 	rows = []
 	for row in _sequence(label_budget['budgets']):
 		budget = _mapping(row)
-		rows.append(
-			{
-				key: _csv_cell(budget[key])
-				for key in fieldnames
-			}
-		)
+		rows.append({key: _csv_cell(budget[key]) for key in fieldnames})
 	_write_csv_rows(path, fieldnames, rows)
 
 
@@ -899,9 +941,6 @@ def _ordered_budget_rows(
 	label_budget: Mapping[str, object],
 ) -> list[Mapping[str, object]]:
 	rows = [_mapping(row) for row in _sequence(label_budget.get('budgets'))]
-	if not rows:
-		msg = 'label-budget figure requires at least one budget row'
-		raise ValueError(msg)
 	by_budget: dict[str, Mapping[str, object]] = {}
 	for row in rows:
 		budget_id = row.get('budget_id')
@@ -912,23 +951,13 @@ def _ordered_budget_rows(
 			msg = f'label-budget figure has duplicate budget row: {budget_id}'
 			raise ValueError(msg)
 		by_budget[budget_id] = row
-	ordered = [
+	return [
 		by_budget[budget_id]
-		for budget_id in BUDGET_DISPLAY_ORDER
-		if budget_id in by_budget
-	]
-	ordered.extend(
-		row
-		for budget_id, row in sorted(
-			by_budget.items(),
-			key=lambda item: _budget_sort_key(item[0]),
+		for budget_id in _required_budget_ids_by_display_order(
+			by_budget,
+			label='label-budget figure',
 		)
-		if budget_id not in BUDGET_DISPLAY_ORDER
-	)
-	if not ordered:
-		msg = 'label-budget figure has no plottable budget rows'
-		raise ValueError(msg)
-	return ordered
+	]
 
 
 def _required_payload_float(row: Mapping[str, object], key: str) -> float:
@@ -1191,13 +1220,27 @@ def _require_dir(path: Path, *, label: str) -> None:
 		raise FileNotFoundError(msg)
 
 
-def _budget_sort_key(value: object) -> tuple[int, int | str]:
-	text = str(value)
-	if text == 'full':
-		return (1, 0)
-	if text.startswith('cap') and text[3:].isdigit():
-		return (0, int(text[3:]))
-	return (0, text)
+def _required_budget_ids_by_display_order(
+	by_budget: Mapping[str, object],
+	*,
+	label: str,
+	path: Path | None = None,
+) -> tuple[str, ...]:
+	missing = [
+		budget_id for budget_id in BUDGET_DISPLAY_ORDER if budget_id not in by_budget
+	]
+	if missing:
+		location = f': {path}' if path is not None else ''
+		msg = f'{label} missing required budget_id rows: {missing!r}{location}'
+		raise ValueError(msg)
+	unexpected = sorted(
+		budget_id for budget_id in by_budget if budget_id not in BUDGET_DISPLAY_ORDER
+	)
+	if unexpected:
+		location = f': {path}' if path is not None else ''
+		msg = f'{label} contains unexpected budget_id rows: {unexpected!r}{location}'
+		raise ValueError(msg)
+	return BUDGET_DISPLAY_ORDER
 
 
 def _display(value: object) -> str:
