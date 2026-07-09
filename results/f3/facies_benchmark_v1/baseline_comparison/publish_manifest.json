@@ -1,33 +1,33 @@
 {
-  "created_at_utc": "2026-07-01T07:04:48.225039Z",
+  "created_at_utc": "2026-07-09T01:37:19.348844Z",
   "items": [
     {
-      "sha256": "56effeb204fed1ec2ed40bf1ba33057aafb6aa8b41a624db647362b07ec0a845",
-      "size_bytes": 3260,
+      "sha256": "4c9095f25bc751aab050f4c1f13f5d941d94db66a8cdf50375bf48532fdb6def",
+      "size_bytes": 3617,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_report.md",
       "target": "comparison_report.md"
     },
     {
-      "sha256": "9989a6d0b7f09950a990629a9837ed3ca0bd4d43b44b78b7003c972f75f19ec2",
-      "size_bytes": 2513,
+      "sha256": "5abfd1c4292db5dd1dfff39b7c6c9193eb415c8d173b341fec06336de7d273b8",
+      "size_bytes": 2955,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_table.csv",
       "target": "comparison_table.csv"
     },
     {
-      "sha256": "b756e56fbd0efd67951a9382a0ec8480019825032670fe1e4748c83882a2c7f7",
-      "size_bytes": 84665,
+      "sha256": "1b55da1adef01da4fe0c33819edf31d6895b989e32dd19dc639d9a68a34aec54",
+      "size_bytes": 83785,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/figures/macro_f1_comparison.png",
       "target": "figures/macro_f1_comparison.png"
     },
     {
-      "sha256": "d3de813d0ccc406972a75bba0cd660476712887fa959495cb1ad1353f642da94",
-      "size_bytes": 85420,
+      "sha256": "f90b89a67afa7c97009f01f5c0d608a1476b92510457f7a6970bc01ebbb40d92",
+      "size_bytes": 84595,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/figures/mean_iou_comparison.png",
       "target": "figures/mean_iou_comparison.png"
     },
     {
-      "sha256": "b186ec8f78fb0759e6362c4498c0797fb78444b55c59fc0ec8f7e3108f44cb70",
-      "size_bytes": 117596,
+      "sha256": "3945904d08811f245f7cf10dbe49388338546d5025a203586a290038c7205f71",
+      "size_bytes": 122513,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/figures/per_class_f1_comparison.png",
       "target": "figures/per_class_f1_comparison.png"
     }

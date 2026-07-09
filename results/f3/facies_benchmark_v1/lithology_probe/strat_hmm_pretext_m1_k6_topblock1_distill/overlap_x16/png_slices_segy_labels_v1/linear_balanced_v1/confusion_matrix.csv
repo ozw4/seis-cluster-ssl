@@ -1,0 +1,7 @@
+true_class_id,true_class_name,pred_0,pred_1,pred_2,pred_3,pred_4,pred_5,total
+0,Upper North Sea,1202,22,1,0,1,0,1226
+1,Middle North Sea,14,762,26,0,1,0,803
+2,Lower North Sea,7,38,3492,226,132,14,3909
+3,Rijnland/Chalk,0,0,16,228,67,43,354
+4,Scruff,0,0,34,41,562,28,665
+5,Zechstein,0,0,0,4,11,31,46

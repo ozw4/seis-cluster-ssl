@@ -1,0 +1,57 @@
+{
+  "created_at_utc": "2026-07-09T01:37:16.777884Z",
+  "items": [
+    {
+      "sha256": "de342da2692833e5ab621d21bb731234b71ee52b7e253da9974b8bb06c9310fb",
+      "size_bytes": 3836,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.md",
+      "target": "report.md"
+    },
+    {
+      "sha256": "f82dd408d35a3544fb0d0714153036034747229e73ac760cba0d55d3acdb1adb",
+      "size_bytes": 8369,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/reports/linear_balanced_v1/report.json",
+      "target": "report.json"
+    },
+    {
+      "sha256": "945bc1fad7050a31b99bbe14a23beb253279f2db092dadc7c558dfb8607ab88a",
+      "size_bytes": 2931,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.json",
+      "target": "metrics.json"
+    },
+    {
+      "sha256": "9c3f0e610139e5291a8f9d1b3050739139abb2e2f5b77da8da87f1b5a096e86d",
+      "size_bytes": 1422,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.csv",
+      "target": "metrics.csv"
+    },
+    {
+      "sha256": "574581fae4121ed76e40416d3ce79245ba65e7f80e27d9dc491b8fd460fbf307",
+      "size_bytes": 696,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/classification_report.md",
+      "target": "classification_report.md"
+    },
+    {
+      "sha256": "d36367cc61305ceb8d69b28ef3c72bf3711f70d0b17865f7cb7884d0a3248e2d",
+      "size_bytes": 304,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/confusion_matrix.csv",
+      "target": "confusion_matrix.csv"
+    },
+    {
+      "sha256": "19289efbe3e8cefeff110b93a828f5999355723a02ea30dddfba146cfdfbec18",
+      "size_bytes": 308696,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/figures/confusion_matrix.png",
+      "target": "figures/confusion_matrix.png"
+    },
+    {
+      "sha256": "0adc1c95aa095a7328abbc8ff8424eb0d3180d4a36016c0597820bf53f5f146e",
+      "size_bytes": 115226,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/figures/per_class_f1.png",
+      "target": "figures/per_class_f1.png"
+    }
+  ],
+  "output_dir": "results/f3/facies_benchmark_v1/lithology_probe/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1",
+  "skipped_optional_items": [],
+  "source_artifact_root": "/workspace/artifacts/seis_ssl_cluster",
+  "warnings": []
+}

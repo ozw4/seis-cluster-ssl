@@ -1,12 +1,13 @@
 # F3 lithology probe comparison report
 
-集約run数: 5
+集約run数: 6
 
 ## Comparison table
 
 | feature_kind | MODEL_TAG | BASELINE_TAG | EMBED_SPEC | LABEL_SET | PROBE_SPEC | FEATURE_SOURCE_KIND | FEATURE_SOURCE_REFERENCE_MODEL_TAG | FEATURE_SOURCE_EMBED_SPEC | FEATURE_SOURCE_DESCRIPTION | accuracy | balanced_accuracy | macro_f1 | weighted_f1 | mean_iou | class_0_f1 | class_1_f1 | class_2_f1 | class_3_f1 | class_4_f1 | class_5_f1 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | pretrained_encoder | amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1 |  | overlap_x16 | png_slices_segy_labels_v1 | linear_balanced_v1 | pretrained_encoder | amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1 | overlap_x16 | pretrained MAE encoder embedding | 0.8865 | 0.8438 | 0.7533 | 0.8955 | 0.6501 | 0.9653 | 0.9311 | 0.9267 | 0.5349 | 0.7663 | 0.3956 |
+| pretrained_encoder | strat_hmm_pretext_m1_k6_topblock1_distill |  | overlap_x16 | png_slices_segy_labels_v1 | linear_balanced_v1 | pretrained_encoder | strat_hmm_pretext_m1_k6_topblock1_distill | overlap_x16 | strat HMM pretext student encoder embedding | 0.8963 | 0.8310 | 0.7586 | 0.9044 | 0.6609 | 0.9816 | 0.9378 | 0.9339 | 0.5346 | 0.7811 | 0.3827 |
 | z_only |  | z_only_v1 | z_only_degree1 | png_slices_segy_labels_v1 | linear_balanced_v1 | z_only | amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1 | overlap_x16 | normalized token center z with polynomial degree 1 | 0.5483 | 0.5541 | 0.3671 | 0.5797 | 0.2734 | 0.8400 | 0.4046 | 0.6730 | 0.1991 | 0.0000 | 0.0859 |
 | xyz_coordinates |  | xyz_coordinates_v1 | xyz_coordinates_degree1 | png_slices_segy_labels_v1 | linear_balanced_v1 | xyz_coordinates | amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1 | overlap_x16 | normalized x/y/z token center coordinates | 0.6620 | 0.6957 | 0.5296 | 0.6928 | 0.4079 | 0.9022 | 0.6866 | 0.7100 | 0.1596 | 0.5319 | 0.1873 |
 | amplitude_stats |  | amplitude_stats_v1 | amplitude_stats_v1 | png_slices_segy_labels_v1 | linear_balanced_v1 | amplitude_stats | amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1 | overlap_x16 | handcrafted seismic amplitude block statistics | 0.4765 | 0.3941 | 0.3327 | 0.5231 | 0.2193 | 0.4339 | 0.4818 | 0.6551 | 0.2275 | 0.1526 | 0.0457 |
@@ -20,12 +21,12 @@
 
 ## Interpretation
 
-- pretrained encoderがz-onlyを上回るか: 上回る (macro F1差分 +0.3862, mean IoU差分 +0.3767)。
-- pretrained encoderがxyz-coordinateを上回るか: 上回る (macro F1差分 +0.2237, mean IoU差分 +0.2422)。
-- pretrained encoderがamplitude-onlyを上回るか: 上回る (macro F1差分 +0.4206, mean IoU差分 +0.4308)。
-- pretrained encoderがrandom encoderを上回るか: 上回る (macro F1差分 +0.0607, mean IoU差分 +0.0845)。
-- class 3/5など弱いclassで改善があるか: class 3: F1差分 +0.0361、class 5: F1差分 +0.0213。
-- F3 faciesが深度だけで説明できる程度: z-onlyとの差がある (macro F1差分 +0.3862) ため、深度以外の特徴が効いている可能性がある。
+- pretrained encoderがz-onlyを上回るか: 上回る (macro F1差分 +0.3915, mean IoU差分 +0.3875)。
+- pretrained encoderがxyz-coordinateを上回るか: 上回る (macro F1差分 +0.2290, mean IoU差分 +0.2530)。
+- pretrained encoderがamplitude-onlyを上回るか: 上回る (macro F1差分 +0.4259, mean IoU差分 +0.4416)。
+- pretrained encoderがrandom encoderを上回るか: 上回る (macro F1差分 +0.0660, mean IoU差分 +0.0953)。
+- class 3/5など弱いclassで改善があるか: class 3: F1差分 +0.0358、class 5: F1差分 +0.0084。
+- F3 faciesが深度だけで説明できる程度: z-onlyとの差がある (macro F1差分 +0.3915) ため、深度以外の特徴が効いている可能性がある。
 
 ## Warnings
 
