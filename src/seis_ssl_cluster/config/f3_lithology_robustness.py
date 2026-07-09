@@ -18,7 +18,9 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_optional_positive_int,
 	_optional_str,
 	_required_absolute_path,
+	_required_fraction,
 	_required_mapping,
+	_required_nonnegative_int,
 	_required_str,
 	_string_item,
 	_validate_allowed_keys,
@@ -38,8 +40,15 @@ from seis_ssl_cluster.f3.lithology.robustness import (
 	F3LabelBudgetModelConfig,
 	F3RobustnessModelSpec,
 	F3RobustnessSuiteManifest,
+	F3SplitInventoryConfig,
+	F3SplitInventoryInputs,
+	F3SplitSweepDatasetConfig,
+	F3SplitSweepDatasetModelConfig,
 )
-from seis_ssl_cluster.f3.lithology.tokens import read_f3_lithology_class_info
+from seis_ssl_cluster.f3.lithology.tokens import (
+	F3LithologyTokenPolicy,
+	read_f3_lithology_class_info,
+)
 from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT
 
 F3_LITHOLOGY_ROBUSTNESS_ROOT = (
@@ -231,6 +240,299 @@ def f3_lithology_label_budget_probe_config_from_mapping(
 	)
 
 
+def f3_lithology_split_inventory_config_from_mapping(
+	config: Mapping[str, object],
+) -> F3SplitInventoryConfig:
+	"""Validate and normalize the F3 lithology split-inventory suite config."""
+	_validate_allowed_keys(
+		config,
+		frozenset({'paths', 'inputs', 'split_sweep', 'tokenization', 'outputs'}),
+		prefix='config',
+	)
+	paths = _required_mapping(config, 'paths')
+	inputs = _required_mapping(config, 'inputs')
+	split_sweep = _required_mapping(config, 'split_sweep')
+	tokenization = _required_mapping(config, 'tokenization')
+	outputs = _required_mapping(config, 'outputs')
+	_validate_allowed_keys(paths, frozenset({'artifact_root'}), prefix='paths')
+	_validate_allowed_keys(
+		inputs,
+		frozenset(
+			{
+				'base_png_label_inventory',
+				'source_label_volume',
+				'segy_geometry_json',
+				'class_info',
+				'reference_embedding_metadata',
+			},
+		),
+		prefix='inputs',
+	)
+	_validate_allowed_keys(
+		split_sweep,
+		frozenset(
+			{
+				'name',
+				'output_root',
+				'split_ids',
+				'random_seeds',
+				'validation_slice_count',
+				'require_validation_all_classes',
+				'min_validation_tokens_per_class',
+				'include_base_split_as_split_000',
+			},
+		),
+		prefix='split_sweep',
+	)
+	_validate_allowed_keys(
+		tokenization,
+		frozenset(
+			{
+				'min_labeled_fraction',
+				'min_majority_fraction',
+				'ignore_z_border_samples',
+				'patch_size',
+			},
+		),
+		prefix='tokenization',
+	)
+	_validate_allowed_keys(outputs, frozenset({'overwrite'}), prefix='outputs')
+	return F3SplitInventoryConfig(
+		artifact_root=_required_absolute_path(
+			paths,
+			'artifact_root',
+			prefix='paths',
+		),
+		inputs=F3SplitInventoryInputs(
+			base_png_label_inventory=_required_absolute_path(
+				inputs,
+				'base_png_label_inventory',
+				prefix='inputs',
+			),
+			source_label_volume=_required_absolute_path(
+				inputs,
+				'source_label_volume',
+				prefix='inputs',
+			),
+			segy_geometry_json=_required_absolute_path(
+				inputs,
+				'segy_geometry_json',
+				prefix='inputs',
+			),
+			class_info=_required_absolute_path(inputs, 'class_info', prefix='inputs'),
+			reference_embedding_metadata=_required_absolute_path(
+				inputs,
+				'reference_embedding_metadata',
+				prefix='inputs',
+			),
+		),
+		suite_name=_required_str(split_sweep, 'name', prefix='split_sweep'),
+		output_root=_required_absolute_path(
+			split_sweep,
+			'output_root',
+			prefix='split_sweep',
+		),
+		split_ids=_str_tuple(split_sweep.get('split_ids'), 'split_sweep.split_ids'),
+		random_seeds=_int_tuple(
+			split_sweep.get('random_seeds'),
+			'split_sweep.random_seeds',
+		),
+		validation_slice_count=_validate_int_value(
+			split_sweep.get('validation_slice_count'),
+			'split_sweep.validation_slice_count',
+		),
+		require_validation_all_classes=_optional_bool(
+			split_sweep,
+			'require_validation_all_classes',
+			default=True,
+			prefix='split_sweep',
+		),
+		min_validation_tokens_per_class=_min_validation_tokens_per_class(
+			split_sweep.get('min_validation_tokens_per_class', {'default': 1}),
+		),
+		include_base_split_as_split_000=_optional_bool(
+			split_sweep,
+			'include_base_split_as_split_000',
+			default=False,
+			prefix='split_sweep',
+		),
+		tokenization_policy=F3LithologyTokenPolicy(
+			min_labeled_fraction=_required_fraction(
+				tokenization,
+				'min_labeled_fraction',
+				prefix='tokenization',
+			),
+			min_majority_fraction=_required_fraction(
+				tokenization,
+				'min_majority_fraction',
+				prefix='tokenization',
+			),
+			ignore_z_border_samples=_required_nonnegative_int(
+				tokenization,
+				'ignore_z_border_samples',
+				prefix='tokenization',
+			),
+		),
+		patch_size_xyz=_positive_int_triplet(
+			tokenization.get('patch_size'),
+			'tokenization.patch_size',
+		),
+		overwrite=_optional_bool(outputs, 'overwrite', default=False, prefix='outputs'),
+	)
+
+
+def f3_lithology_split_sweep_dataset_config_from_mapping(
+	config: Mapping[str, object],
+) -> F3SplitSweepDatasetConfig:
+	"""Validate and normalize the split/index paired token dataset config."""
+	_validate_allowed_keys(
+		config,
+		frozenset({'suite', 'models', 'common', 'outputs'}),
+		prefix='config',
+	)
+	suite = _required_mapping(config, 'suite')
+	models = _required_mapping(config, 'models')
+	common = _required_mapping(config, 'common')
+	outputs = _required_mapping(config, 'outputs')
+	_validate_allowed_keys(
+		suite,
+		frozenset({'split_inventory_manifest', 'output_root'}),
+		prefix='suite',
+	)
+	_validate_allowed_keys(
+		models,
+		frozenset({'baseline', 'candidate'}),
+		prefix='models',
+	)
+	_validate_allowed_keys(
+		common,
+		frozenset(
+			{
+				'f3_root',
+				'artifact_root',
+				'dataset',
+				'labels',
+				'registry',
+				'tokenization',
+			},
+		),
+		prefix='common',
+	)
+	_validate_allowed_keys(outputs, frozenset({'overwrite'}), prefix='outputs')
+	dataset = _required_mapping(common, 'dataset')
+	labels = _required_mapping(common, 'labels')
+	registry = _required_mapping(common, 'registry')
+	tokenization = _required_mapping(common, 'tokenization')
+	_validate_allowed_keys(
+		dataset,
+		frozenset({'name', 'version'}),
+		prefix='common.dataset',
+	)
+	_validate_allowed_keys(
+		labels,
+		frozenset(
+			{
+				'source_label_segy',
+				'source_label_volume',
+				'class_info',
+				'segy_geometry_json',
+			},
+		),
+		prefix='common.labels',
+	)
+	_validate_allowed_keys(
+		registry,
+		frozenset({'seismic_volume', 'label_volume', 'metadata_json'}),
+		prefix='common.registry',
+	)
+	_validate_allowed_keys(
+		tokenization,
+		frozenset(
+			{
+				'min_labeled_fraction',
+				'min_majority_fraction',
+				'ignore_z_border_samples',
+			},
+		),
+		prefix='common.tokenization',
+	)
+	return F3SplitSweepDatasetConfig(
+		split_inventory_manifest=_required_absolute_path(
+			suite,
+			'split_inventory_manifest',
+			prefix='suite',
+		),
+		output_root=_required_absolute_path(suite, 'output_root', prefix='suite'),
+		models=(
+			_split_sweep_dataset_model_from_mapping('baseline', models),
+			_split_sweep_dataset_model_from_mapping('candidate', models),
+		),
+		f3_root=_required_absolute_path(common, 'f3_root', prefix='common'),
+		artifact_root=_required_absolute_path(
+			common,
+			'artifact_root',
+			prefix='common',
+		),
+		dataset={
+			'name': _required_str(dataset, 'name', prefix='common.dataset'),
+			'version': _required_str(dataset, 'version', prefix='common.dataset'),
+		},
+		source_label_segy=_required_absolute_path(
+			labels,
+			'source_label_segy',
+			prefix='common.labels',
+		),
+		source_label_volume=_required_absolute_path(
+			labels,
+			'source_label_volume',
+			prefix='common.labels',
+		),
+		class_info=_required_absolute_path(
+			labels,
+			'class_info',
+			prefix='common.labels',
+		),
+		segy_geometry_json=_required_absolute_path(
+			labels,
+			'segy_geometry_json',
+			prefix='common.labels',
+		),
+		seismic_volume=_required_absolute_path(
+			registry,
+			'seismic_volume',
+			prefix='common.registry',
+		),
+		label_volume=_required_absolute_path(
+			registry,
+			'label_volume',
+			prefix='common.registry',
+		),
+		volume_metadata_json=_required_absolute_path(
+			registry,
+			'metadata_json',
+			prefix='common.registry',
+		),
+		tokenization_policy=F3LithologyTokenPolicy(
+			min_labeled_fraction=_required_fraction(
+				tokenization,
+				'min_labeled_fraction',
+				prefix='common.tokenization',
+			),
+			min_majority_fraction=_required_fraction(
+				tokenization,
+				'min_majority_fraction',
+				prefix='common.tokenization',
+			),
+			ignore_z_border_samples=_required_nonnegative_int(
+				tokenization,
+				'ignore_z_border_samples',
+				prefix='common.tokenization',
+			),
+		),
+		overwrite=_optional_bool(outputs, 'overwrite', default=False, prefix='outputs'),
+	)
+
+
 def _label_budget_model_from_mapping(
 	role: str,
 	models: Mapping[str, object],
@@ -247,6 +549,32 @@ def _label_budget_model_from_mapping(
 		token_dataset_root=_required_absolute_path(
 			model,
 			'token_dataset_root',
+			prefix=f'models.{role}',
+		),
+	)
+
+
+def _split_sweep_dataset_model_from_mapping(
+	role: str,
+	models: Mapping[str, object],
+) -> F3SplitSweepDatasetModelConfig:
+	model = _required_mapping(models, role)
+	_validate_allowed_keys(
+		model,
+		frozenset({'model_tag', 'embeddings_dir', 'checkpoint'}),
+		prefix=f'models.{role}',
+	)
+	return F3SplitSweepDatasetModelConfig(
+		role=role,
+		model_tag=_required_str(model, 'model_tag', prefix=f'models.{role}'),
+		embeddings_dir=_required_absolute_path(
+			model,
+			'embeddings_dir',
+			prefix=f'models.{role}',
+		),
+		checkpoint=_required_absolute_path(
+			model,
+			'checkpoint',
 			prefix=f'models.{role}',
 		),
 	)
@@ -558,6 +886,61 @@ def _int_tuple(value: object, label: str) -> tuple[int, ...]:
 	return items
 
 
+def _str_tuple(value: object, label: str) -> tuple[str, ...]:
+	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+		msg = f'{label} must be a list of strings; got {value!r}'
+		raise TypeError(msg)
+	items = tuple(value)
+	if not all(isinstance(item, str) and item for item in items):
+		msg = f'{label} must contain only non-empty strings; got {value!r}'
+		raise TypeError(msg)
+	return items
+
+
+def _positive_int_triplet(value: object, label: str) -> tuple[int, int, int]:
+	if (
+		not isinstance(value, Sequence)
+		or isinstance(value, str | bytes)
+		or len(value) != 3
+	):
+		msg = f'{label} must contain three positive integers; got {value!r}'
+		raise TypeError(msg)
+	triplet = tuple(value)
+	if not all(
+		isinstance(item, int) and not isinstance(item, bool) and item > 0
+		for item in triplet
+	):
+		msg = f'{label} must contain three positive integers; got {value!r}'
+		raise ValueError(msg)
+	return (int(triplet[0]), int(triplet[1]), int(triplet[2]))
+
+
+def _min_validation_tokens_per_class(value: object) -> dict[str, int]:
+	if not isinstance(value, Mapping):
+		msg = (
+			'split_sweep.min_validation_tokens_per_class must be a mapping; '
+			f'got {value!r}'
+		)
+		raise TypeError(msg)
+	result: dict[str, int] = {}
+	for raw_key, raw_count in value.items():
+		key = str(raw_key)
+		if key != 'default':
+			try:
+				int(key)
+			except ValueError as exc:
+				msg = (
+					'split_sweep.min_validation_tokens_per_class keys must be '
+					f'class ids or "default"; got {raw_key!r}'
+				)
+				raise ValueError(msg) from exc
+		result[key] = _validate_nonnegative_count(
+			raw_count,
+			f'split_sweep.min_validation_tokens_per_class[{key!r}]',
+		)
+	return result
+
+
 def _optional_bool(
 	parent: Mapping[str, object],
 	key: str,
@@ -584,6 +967,8 @@ __all__ = [
 	'F3LabelBudgetProbeRunConfig',
 	'f3_lithology_label_budget_config_from_mapping',
 	'f3_lithology_label_budget_probe_config_from_mapping',
+	'f3_lithology_split_inventory_config_from_mapping',
+	'f3_lithology_split_sweep_dataset_config_from_mapping',
 	'f3_m1_example_model_specs',
 	'f3_m1_robustness_suite_manifest',
 ]

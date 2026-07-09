@@ -16,9 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PROC_DIR = REPO_ROOT / 'proc' / 'seis_ssl_cluster'
 
 PROC_SCRIPTS = tuple(
-	path
-	for path in sorted(PROC_DIR.glob('*.py'))
-	if path.name != '__init__.py'
+	path for path in sorted(PROC_DIR.glob('*.py')) if path.name != '__init__.py'
 )
 
 HELP_FLAG_CONTRACTS = {
@@ -40,10 +38,28 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'build_f3_lithology_split_sweep_datasets.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+	),
+	'generate_f3_lithology_split_inventories.py': (
+		'--config',
+		'--dry-run',
+	),
 	'run_f3_lithology_label_budget_probes.py': (
 		'--config',
 		'--dry-run',
 		'--only-missing',
+	),
+	'run_f3_lithology_split_sweep_probes.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+	),
+	'summarize_f3_lithology_label_budget_robustness.py': (
+		'--suite-root',
+		'--dry-run',
 	),
 	'build_f3_lithology_comparison_report.py': (
 		'--config',
