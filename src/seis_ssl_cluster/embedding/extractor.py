@@ -23,22 +23,20 @@ from seis_ssl_cluster.config.schema import (
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
-from seis_ssl_cluster.data.crop_sampler import (
-	expand_request_with_margin,
-	required_zero_mask_margin_xyz,
-)
 from seis_ssl_cluster.data.normalization import (
 	AmplitudeAgcConfig,
-	apply_configured_agc,
+	SurveyNormalizationStats,
 	load_normalization_stats,
-	normalize_amplitude,
 )
 from seis_ssl_cluster.data.schema import CropRequest, SurveyManifest, read_manifest_json
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
-from seis_ssl_cluster.data.zero_mask import (
-	ZeroMaskConfig,
-	compute_zero_amplitude_invalid_mask,
+from seis_ssl_cluster.data.window_preprocessing import (
+	AmplitudePreprocessSettings,
+	read_amplitude_crop,
+	reduce_valid_mask_to_tokens,
+	resolve_manifest_path,
 )
+from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
 from seis_ssl_cluster.embedding.merge import EmbeddingMerger
 from seis_ssl_cluster.embedding.sliding_window import (
 	SlidingWindow,
@@ -54,7 +52,6 @@ from seis_ssl_cluster.embedding.writer import (
 	prepare_outputs,
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-from seis_ssl_cluster.models.mae.patching import patchify_3d
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
 
 XYZ = tuple[int, int, int]
@@ -296,8 +293,8 @@ def extract_survey_embeddings(  # noqa: PLR0913
 ) -> SurveyEmbeddingResult:
 	"""Extract and write embeddings for one survey manifest."""
 	manifest.validate()
-	amplitude_path = _resolve_manifest_path(manifest, manifest.amplitude.path)
-	stats_path = _resolve_manifest_path(
+	amplitude_path = resolve_manifest_path(manifest, manifest.amplitude.path)
+	stats_path = resolve_manifest_path(
 		manifest,
 		manifest.amplitude.normalization_stats_path,
 	)
@@ -430,7 +427,7 @@ def _process_window_batch(  # noqa: PLR0913
 	*,
 	manifest: SurveyManifest,
 	amplitude_path: Path,
-	stats: object,
+	stats: SurveyNormalizationStats,
 	store: NpyMemmapVolumeStore,
 	model: AmplitudeMAE3D,
 	settings: EmbeddingExtractionSettings,
@@ -487,73 +484,30 @@ def _read_window(  # noqa: PLR0913
 	*,
 	manifest: SurveyManifest,
 	amplitude_path: Path,
-	stats: object,
+	stats: SurveyNormalizationStats,
 	store: NpyMemmapVolumeStore,
 	settings: EmbeddingExtractionSettings,
 	patch_size_xyz: XYZ,
 ) -> tuple[SlidingWindow, np.ndarray, np.ndarray]:
-	margin_xyz = _zero_mask_margin_xyz(settings.zero_mask)
 	request = CropRequest(
 		survey_id=manifest.survey_id,
 		start_xyz=window.start_xyz,
 		size_xyz=window.size_xyz,
 	)
-	compute_request, payload_slices = expand_request_with_margin(request, margin_xyz)
-	raw_compute, compute_valid_mask = store.read_crop_with_padding(
-		amplitude_path,
-		compute_request.start_xyz,
-		compute_request.size_xyz,
-	)
-	raw_crop = raw_compute[payload_slices].astype(np.float32, copy=False)
-	source_valid_mask = compute_valid_mask[payload_slices]
-	zero_invalid = compute_zero_amplitude_invalid_mask(
-		raw_compute,
-		valid_mask=compute_valid_mask,
-		config=settings.zero_mask,
-	)[payload_slices]
-	local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
-	amplitude_norm = normalize_amplitude(
-		raw_crop,
-		stats,
-		normalized_clip_abs=settings.normalized_clip_abs,
-	)
-	amplitude_norm = apply_configured_agc(
-		amplitude_norm,
-		local_valid_mask,
-		settings.amplitude_agc,
-	)
-	amplitude_norm[~local_valid_mask] = 0.0
-	token_valid_mask = reduce_valid_mask_to_tokens(
-		local_valid_mask,
+	prepared = read_amplitude_crop(
+		request=request,
+		amplitude_path=amplitude_path,
+		stats=stats,
+		store=store,
 		patch_size_xyz=patch_size_xyz,
-		min_valid_fraction=settings.min_token_valid_fraction,
+		settings=AmplitudePreprocessSettings(
+			zero_mask=settings.zero_mask,
+			normalized_clip_abs=settings.normalized_clip_abs,
+			amplitude_agc=settings.amplitude_agc,
+			min_token_valid_fraction=settings.min_token_valid_fraction,
+		),
 	)
-	return window, amplitude_norm[np.newaxis, ...], token_valid_mask
-
-
-def reduce_valid_mask_to_tokens(
-	valid_mask_xyz: np.ndarray,
-	*,
-	patch_size_xyz: Sequence[int],
-	min_valid_fraction: float,
-) -> np.ndarray:
-	"""Reduce a voxel-valid mask to token validity by patch valid fraction."""
-	patch = _validate_positive_xyz(patch_size_xyz, 'patch_size_xyz')
-	threshold = _fraction(min_valid_fraction, 'min_valid_fraction')
-	mask = np.asarray(valid_mask_xyz, dtype=bool)
-	if mask.ndim != 3:
-		msg = f'valid_mask_xyz must be 3D; got shape={mask.shape!r}'
-		raise ValueError(msg)
-	patches = patchify_3d(
-		torch.from_numpy(mask[np.newaxis, np.newaxis, ...].astype(np.float32)),
-		patch,
-	).numpy()
-	fractions = patches.reshape(-1, patch[0] * patch[1] * patch[2]).mean(axis=1)
-	token_grid = tuple(
-		axis // patch_axis
-		for axis, patch_axis in zip(mask.shape, patch, strict=True)
-	)
-	return (fractions.reshape(token_grid) >= threshold).astype(bool, copy=False)
+	return window, prepared.x, prepared.token_valid_mask
 
 
 def _checkpoint_config(payload: Mapping[str, object]) -> Mapping[str, object]:
@@ -983,21 +937,6 @@ def _zero_mask_from_mapping(value: object) -> ZeroMaskConfig:
 	zero_mask = ZeroMaskConfig(**dict(value))
 	zero_mask.validate()
 	return zero_mask
-
-
-def _zero_mask_margin_xyz(config: ZeroMaskConfig) -> XYZ:
-	if not config.enabled:
-		return (0, 0, 0)
-	return required_zero_mask_margin_xyz(
-		z_sample_influence_radius=config.z_sample_influence_radius,
-		xy_trace_influence_radius=config.xy_trace_influence_radius,
-	)
-
-
-def _resolve_manifest_path(manifest: SurveyManifest, path: Path) -> Path:
-	if path.is_absolute():
-		return path
-	return manifest.root / path
 
 
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, object]:
