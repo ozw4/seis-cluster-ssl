@@ -123,6 +123,29 @@ def test_missing_split_pair_fails(tmp_path: Path) -> None:
 		summarize_split_robustness(suite_root)
 
 
+def test_mixed_model_tag_within_role_fails(tmp_path: Path) -> None:
+	suite_root = _write_suite(tmp_path)
+	for manifest_name in (
+		'split_dataset_manifest.json',
+		'split_probe_run_manifest.json',
+	):
+		manifest_path = suite_root / manifest_name
+		manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+		for row in manifest['rows']:
+			if row['split_id'] == 'split_001' and row['model_role'] == 'candidate':
+				row['model_tag'] = 'strat_hmm_m2'
+		manifest_path.write_text(
+			json.dumps(manifest, indent=2) + '\n',
+			encoding='utf-8',
+		)
+
+	with pytest.raises(ValueError, match='one model_tag per model_role') as exc_info:
+		summarize_split_robustness(suite_root)
+	assert 'candidate' in str(exc_info.value)
+	assert 'strat_hmm_m1' in str(exc_info.value)
+	assert 'strat_hmm_m2' in str(exc_info.value)
+
+
 def test_inventory_split_without_dataset_or_probe_rows_fails(
 	tmp_path: Path,
 ) -> None:

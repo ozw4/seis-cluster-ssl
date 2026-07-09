@@ -768,9 +768,16 @@ def _win_rate(values: Sequence[float]) -> float:
 
 
 def _model_tags(runs: Sequence[_JoinedRun]) -> Mapping[str, str]:
-	tags = {}
+	tags: dict[str, str] = {}
 	for run in runs:
-		tags.setdefault(run.model_role, run.model_tag)
+		existing = tags.setdefault(run.model_role, run.model_tag)
+		if existing != run.model_tag:
+			msg = (
+				'split summary requires one model_tag per model_role; '
+				f'model_role={run.model_role!r}, '
+				f'model_tags={sorted({existing, run.model_tag})!r}'
+			)
+			raise ValueError(msg)
 	return tags
 
 
