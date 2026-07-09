@@ -20,7 +20,12 @@ from seis_ssl_cluster.f3.lithology.token_dataset import (
 	validate_f3_lithology_token_dataset,
 )
 from seis_ssl_cluster.f3.lithology.tokens import (
+	F3LithologyTokenDatasetConfig,
+	F3LithologyTokenDatasetInputs,
+	F3LithologyTokenDatasetOutputs,
 	F3LithologyTokenPolicy,
+	F3ReferenceTokenDataset,
+	build_f3_lithology_token_dataset,
 	read_f3_lithology_class_info,
 	tokenize_f3_lithology_slice,
 )
@@ -62,7 +67,19 @@ F3_LABEL_BUDGET_CLASS_COUNTS_FIELDNAMES = (
 F3_SPLIT_INVENTORY_MANIFEST_ARTIFACT_TYPE = (
 	'f3_lithology_split_inventory_manifest'
 )
+F3_SPLIT_DATASET_MANIFEST_ARTIFACT_TYPE = (
+	'f3_lithology_split_sweep_token_dataset_manifest'
+)
 F3_SPLIT_INVENTORY_MAX_ATTEMPTS = 1000
+F3_SPLIT_DATASET_REQUIRED_FILES = (
+	'train_tokens.npz',
+	'validation_tokens.npz',
+	'all_labeled_tokens.npz',
+	'token_dataset_metadata.json',
+	'class_counts.csv',
+	'token_dataset_summary.md',
+	'splits.json',
+)
 
 
 @dataclass(frozen=True)
@@ -341,6 +358,92 @@ class F3SplitInventoryConfig:
 
 
 @dataclass(frozen=True)
+class F3SplitSweepDatasetModelConfig:
+	"""One model whose token dataset is built for each split inventory."""
+
+	role: str
+	model_tag: str
+	embeddings_dir: Path
+	checkpoint: Path
+
+	def __post_init__(self) -> None:
+		"""Validate split-sweep model source fields."""
+		_validate_non_empty_str(self.role, 'role')
+		_validate_non_empty_str(self.model_tag, 'model_tag')
+		if self.role not in F3_M1_MODEL_ROLES:
+			msg = (
+				f'role must be one of {sorted(F3_M1_MODEL_ROLES)!r}; '
+				f'got {self.role!r}'
+			)
+			raise ValueError(msg)
+		for label, path in (
+			('embeddings_dir', self.embeddings_dir),
+			('checkpoint', self.checkpoint),
+		):
+			if not Path(path).is_absolute():
+				msg = f'{label} must be an absolute path; got {path}'
+				raise ValueError(msg)
+
+
+@dataclass(frozen=True)
+class F3SplitSweepDatasetConfig:
+	"""Resolved config for split/index paired token dataset builds."""
+
+	split_inventory_manifest: Path
+	output_root: Path
+	models: tuple[F3SplitSweepDatasetModelConfig, ...]
+	f3_root: Path
+	artifact_root: Path
+	dataset: Mapping[str, object]
+	source_label_segy: Path
+	source_label_volume: Path
+	class_info: Path
+	segy_geometry_json: Path
+	seismic_volume: Path
+	label_volume: Path
+	volume_metadata_json: Path
+	tokenization_policy: F3LithologyTokenPolicy
+	overwrite: bool = False
+
+	def __post_init__(self) -> None:
+		"""Validate split-sweep dataset build settings."""
+		for label, path in (
+			('split_inventory_manifest', self.split_inventory_manifest),
+			('output_root', self.output_root),
+			('f3_root', self.f3_root),
+			('artifact_root', self.artifact_root),
+			('source_label_segy', self.source_label_segy),
+			('source_label_volume', self.source_label_volume),
+			('class_info', self.class_info),
+			('segy_geometry_json', self.segy_geometry_json),
+			('seismic_volume', self.seismic_volume),
+			('label_volume', self.label_volume),
+			('volume_metadata_json', self.volume_metadata_json),
+		):
+			if not Path(path).is_absolute():
+				msg = f'{label} must be an absolute path; got {path}'
+				raise ValueError(msg)
+		validate_f3_robustness_output_root(self.output_root)
+		_validate_split_sweep_dataset_model_pair(self.models)
+		if not isinstance(self.dataset, Mapping):
+			msg = f'dataset must be a mapping; got {self.dataset!r}'
+			raise TypeError(msg)
+		if not isinstance(self.overwrite, bool):
+			msg = f'overwrite must be boolean; got {self.overwrite!r}'
+			raise TypeError(msg)
+
+	@property
+	def baseline(self) -> F3SplitSweepDatasetModelConfig:
+		"""Return the baseline model config."""
+		return _split_sweep_model_by_role(self.models, 'baseline')
+
+	@property
+	def candidate(self) -> F3SplitSweepDatasetModelConfig:
+		"""Return the candidate model config."""
+		return _split_sweep_model_by_role(self.models, 'candidate')
+
+
+@dataclass(frozen=True)
 class F3LabelBudgetBuildResult:
 	"""Output locations from a paired label-budget dataset build."""
 
@@ -356,6 +459,15 @@ class F3SplitInventoryBuildResult:
 	manifest_json: Path
 	inventory_paths: tuple[Path, ...]
 	metadata_paths: tuple[Path, ...]
+
+
+@dataclass(frozen=True)
+class F3SplitSweepDatasetBuildResult:
+	"""Output locations from a split/index paired token dataset build."""
+
+	manifest_json: Path
+	dataset_roots: tuple[Path, ...]
+	rows: tuple[Mapping[str, object], ...]
 
 
 @dataclass(frozen=True)
@@ -540,6 +652,140 @@ def split_inventory_dry_run_summary(
 		'expected output paths': [
 			str(path) for path in _planned_split_inventory_output_paths(config)
 		],
+	}
+
+
+def build_f3_lithology_split_sweep_datasets(
+	config: F3SplitSweepDatasetConfig,
+	*,
+	only_missing: bool = False,
+) -> F3SplitSweepDatasetBuildResult:
+	"""Build paired MAE/strat-HMM token datasets for split inventories."""
+	split_rows = _load_split_inventory_manifest_rows(config.split_inventory_manifest)
+	if not config.overwrite and not only_missing:
+		_refuse_existing_split_dataset_outputs(
+			_planned_split_dataset_output_paths(config, split_rows),
+		)
+	rows: list[dict[str, object]] = []
+	dataset_roots: list[Path] = []
+	for split_row in split_rows:
+		split_id = str(split_row['split_id'])
+		inventory = Path(str(split_row['png_label_inventory']))
+		split_hashes: dict[str, str] = {}
+		split_outputs: list[
+			tuple[
+				F3SplitSweepDatasetModelConfig,
+				Path,
+				Path | None,
+				object | None,
+			]
+		] = []
+		baseline_root = _split_sweep_token_dataset_root(
+			config,
+			split_id=split_id,
+			model_tag=config.baseline.model_tag,
+		)
+		for model in config.models:
+			root = _split_sweep_token_dataset_root(
+				config,
+				split_id=split_id,
+				model_tag=model.model_tag,
+			)
+			if model.role == 'candidate' and not _is_complete_token_dataset_root(
+				baseline_root,
+			):
+				msg = (
+					'candidate split-sweep token dataset requires complete '
+					f'baseline reference token dataset: {baseline_root}'
+				)
+				raise FileNotFoundError(msg)
+			if only_missing and _is_complete_token_dataset_root(root):
+				result = None
+			else:
+				result = build_f3_lithology_token_dataset(
+					_split_sweep_token_dataset_config(
+						config,
+						model,
+						split_id=split_id,
+						png_label_inventory=inventory,
+						reference_root=(
+							baseline_root if model.role == 'candidate' else None
+						),
+					),
+				)
+			split_outputs.append(
+				(
+					model,
+					root,
+					baseline_root if model.role == 'candidate' else None,
+					result,
+				),
+			)
+		for model, root, reference_root, result in split_outputs:
+			row = _split_dataset_manifest_row(
+				split_id=split_id,
+				model=model,
+				root=root,
+				reference_root=reference_root,
+				result=result,
+			)
+			split_hashes[model.role] = str(row['paired_identity_hash'])
+			rows.append(row)
+			dataset_roots.append(root)
+		if split_hashes['baseline'] != split_hashes['candidate']:
+			msg = (
+				'paired identity hash mismatch for split '
+				f'{split_id}: baseline={split_hashes["baseline"]}, '
+				f'candidate={split_hashes["candidate"]}'
+			)
+			raise ValueError(msg)
+	manifest_path = config.output_root / 'split_dataset_manifest.json'
+	_write_json(
+		manifest_path,
+		{
+			'artifact_type': F3_SPLIT_DATASET_MANIFEST_ARTIFACT_TYPE,
+			'contract_version': F3_ROBUSTNESS_CONTRACT_VERSION,
+			'suite': {
+				'output_root': str(config.output_root),
+				'split_inventory_manifest': str(config.split_inventory_manifest),
+			},
+			'rows': rows,
+		},
+	)
+	return F3SplitSweepDatasetBuildResult(
+		manifest_json=manifest_path,
+		dataset_roots=tuple(dataset_roots),
+		rows=tuple(rows),
+	)
+
+
+def split_sweep_dataset_dry_run_summary(
+	config: F3SplitSweepDatasetConfig,
+	*,
+	only_missing: bool = False,
+) -> dict[str, object]:
+	"""Return planned split-sweep token dataset paths for the dry-run CLI."""
+	split_rows = _load_split_inventory_manifest_rows(config.split_inventory_manifest)
+	planned_roots = [
+		str(
+			_split_sweep_token_dataset_root(
+				config,
+				split_id=str(row['split_id']),
+				model_tag=model.model_tag,
+			),
+		)
+		for row in split_rows
+		for model in config.models
+	]
+	return {
+		'split inventory manifest': config.split_inventory_manifest,
+		'output root': config.output_root,
+		'split count': len(split_rows),
+		'baseline model tag': config.baseline.model_tag,
+		'candidate model tag': config.candidate.model_tag,
+		'only missing': only_missing,
+		'expected dataset count': len(planned_roots),
+		'planned dataset roots': planned_roots,
 	}
 
 
@@ -1119,6 +1365,228 @@ def _refuse_existing_split_inventory_outputs(paths: Sequence[Path]) -> None:
 		raise FileExistsError(msg)
 
 
+def _load_split_inventory_manifest_rows(
+	path: Path,
+) -> tuple[Mapping[str, object], ...]:
+	if not path.is_file():
+		msg = f'suite.split_inventory_manifest does not exist: {path}'
+		raise FileNotFoundError(msg)
+	payload = _read_json(path)
+	artifact_type = payload.get('artifact_type')
+	if artifact_type != F3_SPLIT_INVENTORY_MANIFEST_ARTIFACT_TYPE:
+		msg = (
+			'split inventory manifest artifact_type must be '
+			f'{F3_SPLIT_INVENTORY_MANIFEST_ARTIFACT_TYPE!r}; '
+			f'got {artifact_type!r}'
+		)
+		raise ValueError(msg)
+	value = payload.get('rows')
+	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+		msg = f'split inventory manifest rows must be a list: {path}'
+		raise TypeError(msg)
+	rows: list[Mapping[str, object]] = []
+	for index, item in enumerate(value):
+		if not isinstance(item, Mapping):
+			msg = f'split inventory manifest row {index} must be a mapping'
+			raise TypeError(msg)
+		_validate_split_inventory_manifest_row(item, index=index)
+		rows.append(item)
+	if not rows:
+		msg = f'split inventory manifest contains no rows: {path}'
+		raise ValueError(msg)
+	return tuple(rows)
+
+
+def _validate_split_inventory_manifest_row(
+	row: Mapping[str, object],
+	*,
+	index: int,
+) -> None:
+	for key in ('split_id', 'png_label_inventory'):
+		_validate_non_empty_str(row.get(key), f'rows[{index}].{key}')
+	inventory = Path(str(row['png_label_inventory']))
+	if not inventory.is_absolute():
+		msg = (
+			f'rows[{index}].png_label_inventory must be an absolute path; '
+			f'got {inventory}'
+		)
+		raise ValueError(msg)
+
+
+def _planned_split_dataset_output_paths(
+	config: F3SplitSweepDatasetConfig,
+	split_rows: Sequence[Mapping[str, object]],
+) -> tuple[Path, ...]:
+	paths = [config.output_root / 'split_dataset_manifest.json']
+	for row in split_rows:
+		split_id = str(row['split_id'])
+		for model in config.models:
+			root = _split_sweep_token_dataset_root(
+				config,
+				split_id=split_id,
+				model_tag=model.model_tag,
+			)
+			paths.extend(
+				root / filename for filename in F3_SPLIT_DATASET_REQUIRED_FILES
+			)
+	return tuple(paths)
+
+
+def _refuse_existing_split_dataset_outputs(paths: Sequence[Path]) -> None:
+	existing = [path for path in paths if path.exists()]
+	if existing:
+		msg = (
+			'refusing to overwrite existing split-sweep dataset output(s); '
+			f'first existing path: {existing[0]}'
+		)
+		raise FileExistsError(msg)
+
+
+def _is_complete_token_dataset_root(root: Path) -> bool:
+	for filename in F3_SPLIT_DATASET_REQUIRED_FILES:
+		if not (root / filename).is_file():
+			return False
+	try:
+		metadata = _read_json(root / 'token_dataset_metadata.json')
+	except (OSError, TypeError, json.JSONDecodeError):
+		return False
+	outputs = metadata.get('outputs')
+	summary = metadata.get('summary')
+	if not isinstance(outputs, Mapping) or not isinstance(summary, Mapping):
+		return False
+	for key in (
+		'train_tokens',
+		'validation_tokens',
+		'all_labeled_tokens',
+		'metadata_json',
+		'class_counts_csv',
+		'summary_markdown',
+		'split_manifest_json',
+	):
+		if key not in outputs:
+			return False
+	for key in ('train_tokens', 'validation_tokens', 'all_labeled_tokens'):
+		if not isinstance(summary.get(key), int):
+			return False
+	return True
+
+
+def _split_sweep_token_dataset_root(
+	config: F3SplitSweepDatasetConfig,
+	*,
+	split_id: str,
+	model_tag: str,
+) -> Path:
+	return (
+		config.output_root
+		/ 'datasets'
+		/ f'split={split_id}'
+		/ f'model={model_tag}'
+		/ 'token_dataset'
+	)
+
+
+def _split_sweep_token_dataset_config(
+	config: F3SplitSweepDatasetConfig,
+	model: F3SplitSweepDatasetModelConfig,
+	*,
+	split_id: str,
+	png_label_inventory: Path,
+	reference_root: Path | None,
+) -> F3LithologyTokenDatasetConfig:
+	root = _split_sweep_token_dataset_root(
+		config,
+		split_id=split_id,
+		model_tag=model.model_tag,
+	)
+	return F3LithologyTokenDatasetConfig(
+		inputs=F3LithologyTokenDatasetInputs(
+			embeddings_dir=model.embeddings_dir,
+			label_volume=config.source_label_volume,
+			seismic_volume=config.seismic_volume,
+			png_label_inventory=png_label_inventory,
+			class_info=config.class_info,
+			segy_geometry_json=config.segy_geometry_json,
+			source_label_segy=config.source_label_segy,
+			volume_metadata_json=config.volume_metadata_json,
+		),
+		outputs=F3LithologyTokenDatasetOutputs(
+			output_dir=root,
+			metadata_json=root / 'token_dataset_metadata.json',
+			class_counts_csv=root / 'class_counts.csv',
+			summary_markdown=root / 'token_dataset_summary.md',
+			split_manifest_json=root / 'splits.json',
+			quicklook_dir=root / 'quicklook',
+		),
+		policy=config.tokenization_policy,
+		dataset=dict(config.dataset),
+		model={
+			'tag': model.model_tag,
+			'role': model.role,
+			'checkpoint': str(model.checkpoint),
+			'freeze_encoder': True,
+		},
+		feature_source={
+			'kind': 'pretrained_encoder',
+			'reference_model_tag': model.model_tag,
+			'embedding_spec': model.embeddings_dir.name,
+			'description': f'{model.role} split-index sweep encoder features',
+		},
+		reference_token_dataset=(
+			None
+			if reference_root is None
+			else F3ReferenceTokenDataset(
+				root=reference_root,
+				train_tokens=reference_root / 'train_tokens.npz',
+				validation_tokens=reference_root / 'validation_tokens.npz',
+				metadata_json=reference_root / 'token_dataset_metadata.json',
+				split_manifest_json=reference_root / 'splits.json',
+			)
+		),
+	)
+
+
+def _split_dataset_manifest_row(
+	*,
+	split_id: str,
+	model: F3SplitSweepDatasetModelConfig,
+	root: Path,
+	reference_root: Path | None,
+	result: object | None,
+) -> dict[str, object]:
+	train = load_token_dataset_npz(root / 'train_tokens.npz')
+	validation = load_token_dataset_npz(root / 'validation_tokens.npz')
+	paired_hash = paired_token_identity_hash(train, validation)
+	metadata = _read_json(root / 'token_dataset_metadata.json')
+	summary = metadata.get('summary', {})
+	train_count = (
+		result.train_token_count
+		if result is not None
+		else int(summary.get('train_tokens', train.count))
+	)
+	validation_count = (
+		result.validation_token_count
+		if result is not None
+		else int(summary.get('validation_tokens', validation.count))
+	)
+	row: dict[str, object] = {
+		'split_id': split_id,
+		'model_role': model.role,
+		'model_tag': model.model_tag,
+		'token_dataset_root': str(root),
+		'train_tokens': str(root / 'train_tokens.npz'),
+		'validation_tokens': str(root / 'validation_tokens.npz'),
+		'metadata_json': str(root / 'token_dataset_metadata.json'),
+		'class_counts_csv': str(root / 'class_counts.csv'),
+		'train_token_count': int(train_count),
+		'validation_token_count': int(validation_count),
+		'paired_identity_hash': paired_hash,
+	}
+	if reference_root is not None:
+		row['reference_token_dataset_root'] = str(reference_root)
+	return row
+
+
 def _require_source_token_dataset_files(model: F3LabelBudgetModelConfig) -> None:
 	for filename in F3_LABEL_BUDGET_REQUIRED_SOURCE_FILES:
 		path = model.token_dataset_root / filename
@@ -1548,6 +2016,17 @@ def _model_by_role(
 	raise ValueError(msg)
 
 
+def _split_sweep_model_by_role(
+	models: Sequence[F3SplitSweepDatasetModelConfig],
+	role: str,
+) -> F3SplitSweepDatasetModelConfig:
+	for model in models:
+		if model.role == role:
+			return model
+	msg = f'missing {role} model'
+	raise ValueError(msg)
+
+
 def _validate_label_budget_model_pair(
 	models: Sequence[F3LabelBudgetModelConfig],
 ) -> None:
@@ -1565,6 +2044,28 @@ def _validate_label_budget_model_pair(
 	if sorted(roles) != ['baseline', 'candidate']:
 		msg = (
 			'label-budget datasets require model roles '
+			f"['baseline', 'candidate']; got {roles!r}"
+		)
+		raise ValueError(msg)
+
+
+def _validate_split_sweep_dataset_model_pair(
+	models: Sequence[F3SplitSweepDatasetModelConfig],
+) -> None:
+	if isinstance(models, str | bytes):
+		msg = f'models must be a sequence of model configs; got {models!r}'
+		raise TypeError(msg)
+	model_tuple = tuple(models)
+	if len(model_tuple) != 2:
+		msg = (
+			'split-sweep datasets require exactly baseline and candidate models; '
+			f'got {len(model_tuple)}'
+		)
+		raise ValueError(msg)
+	roles = [model.role for model in model_tuple]
+	if sorted(roles) != ['baseline', 'candidate']:
+		msg = (
+			'split-sweep datasets require model roles '
 			f"['baseline', 'candidate']; got {roles!r}"
 		)
 		raise ValueError(msg)
@@ -1819,6 +2320,7 @@ __all__ = [
 	'F3_M1_MODEL_ROLES',
 	'F3_PAIRED_DELTA_FIELDS',
 	'F3_ROBUSTNESS_CONTRACT_VERSION',
+	'F3_SPLIT_DATASET_MANIFEST_ARTIFACT_TYPE',
 	'F3LabelBudgetBuildResult',
 	'F3LabelBudgetConfig',
 	'F3LabelBudgetModelConfig',
@@ -1829,10 +2331,14 @@ __all__ = [
 	'F3SplitInventoryBuildResult',
 	'F3SplitInventoryConfig',
 	'F3SplitInventoryInputs',
+	'F3SplitSweepDatasetBuildResult',
+	'F3SplitSweepDatasetConfig',
+	'F3SplitSweepDatasetModelConfig',
 	'assert_same_token_identity',
 	'budget_subset_metadata',
 	'build_f3_lithology_label_budget_datasets',
 	'build_f3_lithology_split_inventories',
+	'build_f3_lithology_split_sweep_datasets',
 	'class_count_dict',
 	'class_stratified_subset_indices',
 	'label_budget_dry_run_summary',
@@ -1841,6 +2347,7 @@ __all__ = [
 	'paired_token_identity_hash',
 	'save_token_dataset_npz',
 	'split_inventory_dry_run_summary',
+	'split_sweep_dataset_dry_run_summary',
 	'subset_token_dataset',
 	'token_identity_frame',
 	'validate_f3_m1_model_pair',

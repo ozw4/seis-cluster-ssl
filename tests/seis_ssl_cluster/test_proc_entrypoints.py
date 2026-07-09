@@ -38,6 +38,11 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'build_f3_lithology_split_sweep_datasets.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+	),
 	'generate_f3_lithology_split_inventories.py': (
 		'--config',
 		'--dry-run',

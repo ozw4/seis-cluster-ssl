@@ -42,6 +42,8 @@ from seis_ssl_cluster.f3.lithology.robustness import (
 	F3RobustnessSuiteManifest,
 	F3SplitInventoryConfig,
 	F3SplitInventoryInputs,
+	F3SplitSweepDatasetConfig,
+	F3SplitSweepDatasetModelConfig,
 )
 from seis_ssl_cluster.f3.lithology.tokens import (
 	F3LithologyTokenPolicy,
@@ -379,6 +381,158 @@ def f3_lithology_split_inventory_config_from_mapping(
 	)
 
 
+def f3_lithology_split_sweep_dataset_config_from_mapping(
+	config: Mapping[str, object],
+) -> F3SplitSweepDatasetConfig:
+	"""Validate and normalize the split/index paired token dataset config."""
+	_validate_allowed_keys(
+		config,
+		frozenset({'suite', 'models', 'common', 'outputs'}),
+		prefix='config',
+	)
+	suite = _required_mapping(config, 'suite')
+	models = _required_mapping(config, 'models')
+	common = _required_mapping(config, 'common')
+	outputs = _required_mapping(config, 'outputs')
+	_validate_allowed_keys(
+		suite,
+		frozenset({'split_inventory_manifest', 'output_root'}),
+		prefix='suite',
+	)
+	_validate_allowed_keys(
+		models,
+		frozenset({'baseline', 'candidate'}),
+		prefix='models',
+	)
+	_validate_allowed_keys(
+		common,
+		frozenset(
+			{
+				'f3_root',
+				'artifact_root',
+				'dataset',
+				'labels',
+				'registry',
+				'tokenization',
+			},
+		),
+		prefix='common',
+	)
+	_validate_allowed_keys(outputs, frozenset({'overwrite'}), prefix='outputs')
+	dataset = _required_mapping(common, 'dataset')
+	labels = _required_mapping(common, 'labels')
+	registry = _required_mapping(common, 'registry')
+	tokenization = _required_mapping(common, 'tokenization')
+	_validate_allowed_keys(
+		dataset,
+		frozenset({'name', 'version'}),
+		prefix='common.dataset',
+	)
+	_validate_allowed_keys(
+		labels,
+		frozenset(
+			{
+				'source_label_segy',
+				'source_label_volume',
+				'class_info',
+				'segy_geometry_json',
+			},
+		),
+		prefix='common.labels',
+	)
+	_validate_allowed_keys(
+		registry,
+		frozenset({'seismic_volume', 'label_volume', 'metadata_json'}),
+		prefix='common.registry',
+	)
+	_validate_allowed_keys(
+		tokenization,
+		frozenset(
+			{
+				'min_labeled_fraction',
+				'min_majority_fraction',
+				'ignore_z_border_samples',
+			},
+		),
+		prefix='common.tokenization',
+	)
+	return F3SplitSweepDatasetConfig(
+		split_inventory_manifest=_required_absolute_path(
+			suite,
+			'split_inventory_manifest',
+			prefix='suite',
+		),
+		output_root=_required_absolute_path(suite, 'output_root', prefix='suite'),
+		models=(
+			_split_sweep_dataset_model_from_mapping('baseline', models),
+			_split_sweep_dataset_model_from_mapping('candidate', models),
+		),
+		f3_root=_required_absolute_path(common, 'f3_root', prefix='common'),
+		artifact_root=_required_absolute_path(
+			common,
+			'artifact_root',
+			prefix='common',
+		),
+		dataset={
+			'name': _required_str(dataset, 'name', prefix='common.dataset'),
+			'version': _required_str(dataset, 'version', prefix='common.dataset'),
+		},
+		source_label_segy=_required_absolute_path(
+			labels,
+			'source_label_segy',
+			prefix='common.labels',
+		),
+		source_label_volume=_required_absolute_path(
+			labels,
+			'source_label_volume',
+			prefix='common.labels',
+		),
+		class_info=_required_absolute_path(
+			labels,
+			'class_info',
+			prefix='common.labels',
+		),
+		segy_geometry_json=_required_absolute_path(
+			labels,
+			'segy_geometry_json',
+			prefix='common.labels',
+		),
+		seismic_volume=_required_absolute_path(
+			registry,
+			'seismic_volume',
+			prefix='common.registry',
+		),
+		label_volume=_required_absolute_path(
+			registry,
+			'label_volume',
+			prefix='common.registry',
+		),
+		volume_metadata_json=_required_absolute_path(
+			registry,
+			'metadata_json',
+			prefix='common.registry',
+		),
+		tokenization_policy=F3LithologyTokenPolicy(
+			min_labeled_fraction=_required_fraction(
+				tokenization,
+				'min_labeled_fraction',
+				prefix='common.tokenization',
+			),
+			min_majority_fraction=_required_fraction(
+				tokenization,
+				'min_majority_fraction',
+				prefix='common.tokenization',
+			),
+			ignore_z_border_samples=_required_nonnegative_int(
+				tokenization,
+				'ignore_z_border_samples',
+				prefix='common.tokenization',
+			),
+		),
+		overwrite=_optional_bool(outputs, 'overwrite', default=False, prefix='outputs'),
+	)
+
+
 def _label_budget_model_from_mapping(
 	role: str,
 	models: Mapping[str, object],
@@ -395,6 +549,32 @@ def _label_budget_model_from_mapping(
 		token_dataset_root=_required_absolute_path(
 			model,
 			'token_dataset_root',
+			prefix=f'models.{role}',
+		),
+	)
+
+
+def _split_sweep_dataset_model_from_mapping(
+	role: str,
+	models: Mapping[str, object],
+) -> F3SplitSweepDatasetModelConfig:
+	model = _required_mapping(models, role)
+	_validate_allowed_keys(
+		model,
+		frozenset({'model_tag', 'embeddings_dir', 'checkpoint'}),
+		prefix=f'models.{role}',
+	)
+	return F3SplitSweepDatasetModelConfig(
+		role=role,
+		model_tag=_required_str(model, 'model_tag', prefix=f'models.{role}'),
+		embeddings_dir=_required_absolute_path(
+			model,
+			'embeddings_dir',
+			prefix=f'models.{role}',
+		),
+		checkpoint=_required_absolute_path(
+			model,
+			'checkpoint',
 			prefix=f'models.{role}',
 		),
 	)
@@ -788,6 +968,7 @@ __all__ = [
 	'f3_lithology_label_budget_config_from_mapping',
 	'f3_lithology_label_budget_probe_config_from_mapping',
 	'f3_lithology_split_inventory_config_from_mapping',
+	'f3_lithology_split_sweep_dataset_config_from_mapping',
 	'f3_m1_example_model_specs',
 	'f3_m1_robustness_suite_manifest',
 ]
