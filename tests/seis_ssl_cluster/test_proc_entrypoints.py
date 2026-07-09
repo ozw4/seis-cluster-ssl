@@ -52,6 +52,11 @@ HELP_FLAG_CONTRACTS = {
 		'--dry-run',
 		'--only-missing',
 	),
+	'run_f3_lithology_split_sweep_probes.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+	),
 	'summarize_f3_lithology_label_budget_robustness.py': (
 		'--suite-root',
 		'--dry-run',
