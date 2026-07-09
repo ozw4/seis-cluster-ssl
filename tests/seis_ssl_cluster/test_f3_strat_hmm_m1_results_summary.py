@@ -24,12 +24,21 @@ CLI = (
 
 
 def test_successful_summary_creation(tmp_path: Path) -> None:
+	_require_matplotlib_agg()
 	config = _write_inputs(tmp_path)
 
 	result = consolidate_f3_strat_hmm_m1_results(config)
 
 	assert result.summary_json.is_file()
 	assert result.summary_markdown.is_file()
+	assert {path.name for path in result.figure_paths} == {
+		'label_budget_delta_curves.png',
+		'split_index_deltas.png',
+		'single_run_metric_comparison.png',
+	}
+	for figure_path in result.figure_paths:
+		assert figure_path.is_file()
+		assert figure_path.stat().st_size > 0
 	payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
 	assert payload['schema_version'] == 1
 	assert payload['baseline_model'] == 'mae_baseline'
@@ -56,6 +65,11 @@ def test_successful_summary_creation(tmp_path: Path) -> None:
 	assert 'Single-run result is strong positive' in markdown
 	assert 'Label-budget robustness is strongest in low-label regimes' in markdown
 	assert 'positive macro F1 and mean IoU deltas on all tested splits' in markdown
+	assert (
+		'![Label-budget delta curves](figures/label_budget_delta_curves.png)'
+		in markdown
+	)
+	assert '![Split/index deltas](figures/split_index_deltas.png)' in markdown
 
 
 def test_missing_required_input_file_raises_clear_error(tmp_path: Path) -> None:
@@ -74,6 +88,7 @@ def test_missing_required_input_file_raises_clear_error(tmp_path: Path) -> None:
 
 
 def test_baseline_candidate_row_lookup_is_deterministic(tmp_path: Path) -> None:
+	_require_matplotlib_agg()
 	config = _write_inputs(tmp_path, reverse_comparison_order=True)
 
 	payload = _summary_payload(config)
@@ -104,6 +119,7 @@ def test_duplicate_comparison_row_fails_instead_of_guessing(tmp_path: Path) -> N
 def test_decision_go_when_macro_f1_and_mean_iou_are_positive(
 	tmp_path: Path,
 ) -> None:
+	_require_matplotlib_agg()
 	config = _write_inputs(tmp_path)
 
 	payload = _summary_payload(config)
@@ -115,6 +131,7 @@ def test_decision_go_when_macro_f1_and_mean_iou_are_positive(
 def test_full_budget_duplicate_seed_rows_are_collapsed_when_manifest_exposes_identity(
 	tmp_path: Path,
 ) -> None:
+	_require_matplotlib_agg()
 	config = _write_inputs(tmp_path, duplicate_full_identity=True)
 
 	payload = _summary_payload(config)
@@ -129,6 +146,74 @@ def test_full_budget_duplicate_seed_rows_are_collapsed_when_manifest_exposes_ide
 		for warning in payload['warnings']
 	)
 	assert any('balanced_accuracy' in warning for warning in payload['warnings'])
+
+
+def test_empty_label_budget_rows_raise_clear_error(tmp_path: Path) -> None:
+	_require_matplotlib_agg()
+	config = _write_inputs(tmp_path)
+	_write_csv(
+		config.label_budget_suite_root / 'reports' / 'paired_deltas.csv',
+		(
+			'budget_id',
+			'per_class_cap',
+			'subsample_seed',
+			'delta_accuracy',
+			'delta_balanced_accuracy',
+			'delta_macro_f1',
+			'delta_weighted_f1',
+			'delta_mean_iou',
+		),
+		[],
+	)
+
+	with pytest.raises(ValueError, match='csv file contains no rows'):
+		consolidate_f3_strat_hmm_m1_results(config)
+
+
+def test_missing_label_budget_row_id_raises_clear_error(tmp_path: Path) -> None:
+	config = _write_inputs(tmp_path)
+	_write_csv(
+		config.label_budget_suite_root / 'reports' / 'paired_deltas.csv',
+		(
+			'budget_id',
+			'per_class_cap',
+			'subsample_seed',
+			'delta_accuracy',
+			'delta_balanced_accuracy',
+			'delta_macro_f1',
+			'delta_weighted_f1',
+			'delta_mean_iou',
+		),
+		[
+			{
+				'budget_id': '',
+				'per_class_cap': '25',
+				'subsample_seed': '0',
+				'delta_accuracy': '0.02',
+				'delta_balanced_accuracy': '0.04',
+				'delta_macro_f1': '0.05',
+				'delta_weighted_f1': '0.03',
+				'delta_mean_iou': '0.04',
+			},
+		],
+	)
+
+	with pytest.raises(ValueError, match="missing required value for 'budget_id'"):
+		consolidate_f3_strat_hmm_m1_results(config)
+
+
+def test_split_index_figure_supports_single_split(tmp_path: Path) -> None:
+	_require_matplotlib_agg()
+	config = _write_inputs(tmp_path, single_split_index=True)
+
+	result = consolidate_f3_strat_hmm_m1_results(config)
+
+	split_figure = config.output_dir / 'figures' / 'split_index_deltas.png'
+	assert split_figure in result.figure_paths
+	assert split_figure.is_file()
+	assert split_figure.stat().st_size > 0
+	payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
+	assert len(payload['split_index']['splits']) == 1
 
 
 def test_cli_supports_config_and_dry_run(tmp_path: Path) -> None:
@@ -168,6 +253,7 @@ def test_cli_supports_config_and_dry_run(tmp_path: Path) -> None:
 
 	assert 'stage: summarize_f3_strat_hmm_m1_results' in completed.stdout
 	assert 'execution: dry-run' in completed.stdout
+	assert 'outputs.figures_dir:' in completed.stdout
 	assert not (config.output_dir / 'm1_results_summary.json').exists()
 
 
@@ -181,6 +267,7 @@ def _write_inputs(
 	*,
 	reverse_comparison_order: bool = False,
 	duplicate_full_identity: bool = False,
+	single_split_index: bool = False,
 ) -> F3StratHMMM1ResultsConfig:
 	baseline_csv = tmp_path / 'comparison_table.csv'
 	label_root = tmp_path / 'label_budget_m1_v1'
@@ -188,7 +275,7 @@ def _write_inputs(
 	output_dir = tmp_path / 'm1_results'
 	_write_comparison_csv(baseline_csv, reverse_order=reverse_comparison_order)
 	_write_label_budget(label_root, duplicate_full_identity=duplicate_full_identity)
-	_write_split_index(split_root)
+	_write_split_index(split_root, single_split=single_split_index)
 	return F3StratHMMM1ResultsConfig(
 		baseline_comparison_csv=baseline_csv,
 		label_budget_suite_root=label_root,
@@ -320,7 +407,25 @@ def _write_label_budget(root: Path, *, duplicate_full_identity: bool) -> None:
 	_write_json(root / 'suite_manifest.json', {'rows': manifest_rows})
 
 
-def _write_split_index(root: Path) -> None:
+def _write_split_index(root: Path, *, single_split: bool = False) -> None:
+	rows = [
+		{
+			'split_id': 'split_001',
+			'delta_accuracy': '0.01',
+			'delta_balanced_accuracy': '-0.01',
+			'delta_macro_f1': '0.02',
+			'delta_weighted_f1': '0.01',
+			'delta_mean_iou': '0.03',
+		},
+		{
+			'split_id': 'split_000',
+			'delta_accuracy': '0.02',
+			'delta_balanced_accuracy': '0.02',
+			'delta_macro_f1': '0.03',
+			'delta_weighted_f1': '0.02',
+			'delta_mean_iou': '0.04',
+		},
+	]
 	_write_csv(
 		root / 'reports' / 'split_paired_deltas.csv',
 		(
@@ -331,25 +436,13 @@ def _write_split_index(root: Path) -> None:
 			'delta_weighted_f1',
 			'delta_mean_iou',
 		),
-		[
-			{
-				'split_id': 'split_001',
-				'delta_accuracy': '0.01',
-				'delta_balanced_accuracy': '-0.01',
-				'delta_macro_f1': '0.02',
-				'delta_weighted_f1': '0.01',
-				'delta_mean_iou': '0.03',
-			},
-			{
-				'split_id': 'split_000',
-				'delta_accuracy': '0.02',
-				'delta_balanced_accuracy': '0.02',
-				'delta_macro_f1': '0.03',
-				'delta_weighted_f1': '0.02',
-				'delta_mean_iou': '0.04',
-			},
-		],
+		rows[:1] if single_split else rows,
 	)
+
+
+def _require_matplotlib_agg() -> None:
+	matplotlib = pytest.importorskip('matplotlib')
+	matplotlib.use('Agg', force=True)
 
 
 def _write_csv(

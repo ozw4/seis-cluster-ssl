@@ -23,6 +23,17 @@ DELTA_METRICS = (
 	'mean_iou',
 	'balanced_accuracy',
 )
+BUDGET_DISPLAY_ORDER = (
+	'cap25',
+	'cap50',
+	'cap100',
+	'cap250',
+	'cap500',
+	'full',
+)
+LABEL_BUDGET_FIGURE = 'label_budget_delta_curves.png'
+SPLIT_INDEX_FIGURE = 'split_index_deltas.png'
+SINGLE_RUN_FIGURE = 'single_run_metric_comparison.png'
 
 
 @dataclass(frozen=True)
@@ -43,6 +54,7 @@ class F3StratHMMM1ResultsResult:
 
 	summary_json: Path
 	summary_markdown: Path
+	figure_paths: tuple[Path, ...]
 	warnings: tuple[str, ...]
 
 
@@ -117,7 +129,7 @@ def consolidate_f3_strat_hmm_m1_results(
 		baseline_model=config.baseline_model,
 		candidate_model=config.candidate_model,
 	)
-	label_budget = _label_budget_summary(
+	label_budget, deterministic_anchor_budget_ids = _label_budget_summary(
 		_label_budget_paired_deltas_csv(config),
 		config.label_budget_suite_root / 'suite_manifest.json',
 		warnings=warnings,
@@ -139,6 +151,11 @@ def consolidate_f3_strat_hmm_m1_results(
 		'warnings': warnings,
 	}
 	config.output_dir.mkdir(parents=True, exist_ok=True)
+	figure_paths = _write_figures(
+		payload,
+		config.output_dir,
+		deterministic_anchor_budget_ids=deterministic_anchor_budget_ids,
+	)
 	json_path = config.output_dir / 'm1_results_summary.json'
 	markdown_path = config.output_dir / 'm1_results_summary.md'
 	json_path.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
@@ -146,6 +163,7 @@ def consolidate_f3_strat_hmm_m1_results(
 	return F3StratHMMM1ResultsResult(
 		summary_json=json_path,
 		summary_markdown=markdown_path,
+		figure_paths=figure_paths,
 		warnings=tuple(warnings),
 	)
 
@@ -176,7 +194,7 @@ def _label_budget_summary(
 	suite_manifest_json: Path,
 	*,
 	warnings: list[str],
-) -> dict[str, object]:
+) -> tuple[dict[str, object], tuple[str, ...]]:
 	rows = _read_csv(paired_deltas_csv)
 	identity_by_condition = _label_budget_identity_by_condition(suite_manifest_json)
 	if identity_by_condition is None and _has_repeated_full_budget(rows):
@@ -188,15 +206,25 @@ def _label_budget_summary(
 	for row in rows:
 		by_budget[_required_cell(row, 'budget_id', path=paired_deltas_csv)].append(row)
 	budgets = []
+	deterministic_anchor_budget_ids = []
 	for budget_id in sorted(by_budget, key=_budget_sort_key):
+		raw_budget_rows = by_budget[budget_id]
+		if budget_id == 'full' and len(raw_budget_rows) > 1:
+			deterministic_anchor_budget_ids.append(budget_id)
 		budget_rows = _deduplicated_budget_rows(
-			by_budget[budget_id],
+			raw_budget_rows,
 			identity_by_condition=identity_by_condition,
 			budget_id=budget_id,
 			warnings=warnings,
 		)
-		budgets.append(_budget_summary_row(budget_id, budget_rows, paired_deltas_csv))
-	return {'budgets': budgets}
+		budgets.append(
+			_budget_summary_row(
+				budget_id,
+				budget_rows,
+				paired_deltas_csv,
+			),
+		)
+	return {'budgets': budgets}, tuple(deterministic_anchor_budget_ids)
 
 
 def _split_index_summary(paired_deltas_csv: Path) -> dict[str, object]:
@@ -404,6 +432,8 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 		'',
 		'## Label Budget',
 		'',
+		f'![Label-budget delta curves](figures/{LABEL_BUDGET_FIGURE})',
+		'',
 		(
 			'| budget_id | per_class_cap | n_pairs | mean_delta_macro_f1 | '
 			'mean_delta_mean_iou | mean_delta_balanced_accuracy |'
@@ -426,6 +456,8 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 			'',
 			'## Split Index',
 			'',
+			f'![Split/index deltas](figures/{SPLIT_INDEX_FIGURE})',
+			'',
 			'| split_id | delta_macro_f1 | delta_mean_iou | delta_balanced_accuracy |',
 			'| --- | ---: | ---: | ---: |',
 		),
@@ -443,6 +475,11 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 	lines.extend(
 		(
 			'',
+			'## Single-Run Metrics',
+			'',
+			f'![Single-run metric comparison](figures/{SINGLE_RUN_FIGURE})',
+			'',
+			'',
 			'## Decision',
 			'',
 			f'- guidance: {decision["guidance"]}',
@@ -457,6 +494,221 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 		lines.append('- none')
 	lines.append('')
 	return '\n'.join(lines)
+
+
+def _write_figures(
+	payload: Mapping[str, object],
+	output_dir: Path,
+	*,
+	deterministic_anchor_budget_ids: Sequence[str],
+) -> tuple[Path, ...]:
+	figures_dir = output_dir / 'figures'
+	figures_dir.mkdir(parents=True, exist_ok=True)
+	figure_paths = (
+		figures_dir / LABEL_BUDGET_FIGURE,
+		figures_dir / SPLIT_INDEX_FIGURE,
+		figures_dir / SINGLE_RUN_FIGURE,
+	)
+	plt = _matplotlib_pyplot()
+	_save_label_budget_delta_curves(
+		_mapping(payload['label_budget']),
+		figure_paths[0],
+		deterministic_anchor_budget_ids=deterministic_anchor_budget_ids,
+		plt=plt,
+	)
+	_save_split_index_deltas(
+		_mapping(payload['split_index']),
+		figure_paths[1],
+		plt=plt,
+	)
+	_save_single_run_metric_comparison(
+		_mapping(payload['single_split']),
+		figure_paths[2],
+		plt=plt,
+	)
+	return figure_paths
+
+
+def _save_label_budget_delta_curves(
+	label_budget: Mapping[str, object],
+	output_png: Path,
+	*,
+	deterministic_anchor_budget_ids: Sequence[str],
+	plt: object,
+) -> None:
+	rows = _ordered_budget_rows(label_budget)
+	deterministic_anchor_budget_ids = set(deterministic_anchor_budget_ids)
+	positions = list(range(len(rows)))
+	labels = [
+		(
+			f'{row["budget_id"]}\nanchor'
+			if str(row['budget_id']) in deterministic_anchor_budget_ids
+			else str(row['budget_id'])
+		)
+		for row in rows
+	]
+	fig_width = max(6.0, 0.85 * len(rows))
+	fig, axis = plt.subplots(figsize=(fig_width, 3.6), facecolor='white')
+	axis.axhline(0.0, linewidth=0.8, linestyle='--')
+	for metric in (
+		'mean_delta_macro_f1',
+		'mean_delta_mean_iou',
+		'mean_delta_balanced_accuracy',
+	):
+		values = [_required_payload_float(row, metric) for row in rows]
+		(line,) = axis.plot(
+			positions,
+			values,
+			marker='o',
+			linewidth=1.4,
+			label=metric,
+		)
+		for index, row in enumerate(rows):
+			if str(row['budget_id']) in deterministic_anchor_budget_ids:
+				axis.scatter(
+					[index],
+					[values[index]],
+					marker='D',
+					color=line.get_color(),
+					zorder=3,
+				)
+	axis.set_title('Label-Budget Delta Curves')
+	axis.set_xlabel('Budget')
+	axis.set_ylabel('Candidate - baseline')
+	axis.set_xticks(positions, labels=labels)
+	axis.grid(axis='y', linewidth=0.6)
+	axis.legend(frameon=False, fontsize=8)
+	axis.spines['top'].set_visible(False)
+	axis.spines['right'].set_visible(False)
+	fig.tight_layout()
+	fig.savefig(output_png, dpi=300, facecolor='white', bbox_inches='tight')
+	plt.close(fig)
+
+
+def _save_split_index_deltas(
+	split_index: Mapping[str, object],
+	output_png: Path,
+	*,
+	plt: object,
+) -> None:
+	rows = [_mapping(row) for row in _sequence(split_index.get('splits'))]
+	if not rows:
+		msg = 'split-index figure requires at least one split row'
+		raise ValueError(msg)
+	positions = list(range(len(rows)))
+	labels = [str(row['split_id']) for row in rows]
+	fig_width = max(6.0, min(12.0, 0.55 * len(rows) + 3.5))
+	fig, axis = plt.subplots(figsize=(fig_width, 3.6), facecolor='white')
+	axis.axhline(0.0, linewidth=0.8, linestyle='--')
+	for metric in DELTA_METRICS:
+		values = [_required_payload_float(row, f'delta_{metric}') for row in rows]
+		axis.plot(positions, values, marker='o', linewidth=1.2, label=f'delta_{metric}')
+	axis.set_title('Split/Index Deltas')
+	axis.set_xlabel('Split ID')
+	axis.set_ylabel('Candidate - baseline')
+	axis.set_xticks(positions, labels=labels, rotation=35, ha='right')
+	axis.grid(axis='y', linewidth=0.6)
+	axis.legend(frameon=False, fontsize=8)
+	axis.spines['top'].set_visible(False)
+	axis.spines['right'].set_visible(False)
+	fig.tight_layout()
+	fig.savefig(output_png, dpi=300, facecolor='white', bbox_inches='tight')
+	plt.close(fig)
+
+
+def _save_single_run_metric_comparison(
+	single_split: Mapping[str, object],
+	output_png: Path,
+	*,
+	plt: object,
+) -> None:
+	baseline = _mapping(single_split['baseline'])
+	candidate = _mapping(single_split['candidate'])
+	positions = list(range(len(CORE_METRICS)))
+	bar_width = 0.38
+	baseline_values = [
+		_required_payload_float(baseline, metric) for metric in CORE_METRICS
+	]
+	candidate_values = [
+		_required_payload_float(candidate, metric) for metric in CORE_METRICS
+	]
+	fig, axis = plt.subplots(figsize=(7.0, 3.7), facecolor='white')
+	axis.bar(
+		[position - bar_width / 2.0 for position in positions],
+		baseline_values,
+		width=bar_width,
+		label='baseline',
+	)
+	axis.bar(
+		[position + bar_width / 2.0 for position in positions],
+		candidate_values,
+		width=bar_width,
+		label='candidate',
+	)
+	axis.set_title('Single-Run Metric Comparison')
+	axis.set_xlabel('Metric')
+	axis.set_ylabel('Score')
+	axis.set_ylim(0.0, 1.0)
+	axis.set_xticks(positions, labels=CORE_METRICS, rotation=35, ha='right')
+	axis.grid(axis='y', linewidth=0.6)
+	axis.legend(frameon=False, fontsize=8)
+	axis.spines['top'].set_visible(False)
+	axis.spines['right'].set_visible(False)
+	fig.tight_layout()
+	fig.savefig(output_png, dpi=300, facecolor='white', bbox_inches='tight')
+	plt.close(fig)
+
+
+def _ordered_budget_rows(
+	label_budget: Mapping[str, object],
+) -> list[Mapping[str, object]]:
+	rows = [_mapping(row) for row in _sequence(label_budget.get('budgets'))]
+	if not rows:
+		msg = 'label-budget figure requires at least one budget row'
+		raise ValueError(msg)
+	by_budget: dict[str, Mapping[str, object]] = {}
+	for row in rows:
+		budget_id = row.get('budget_id')
+		if not isinstance(budget_id, str) or not budget_id:
+			msg = 'label-budget figure row missing non-empty budget_id'
+			raise ValueError(msg)
+		if budget_id in by_budget:
+			msg = f'label-budget figure has duplicate budget row: {budget_id}'
+			raise ValueError(msg)
+		by_budget[budget_id] = row
+	ordered = [
+		by_budget[budget_id]
+		for budget_id in BUDGET_DISPLAY_ORDER
+		if budget_id in by_budget
+	]
+	ordered.extend(
+		row
+		for budget_id, row in sorted(
+			by_budget.items(),
+			key=lambda item: _budget_sort_key(item[0]),
+		)
+		if budget_id not in BUDGET_DISPLAY_ORDER
+	)
+	if not ordered:
+		msg = 'label-budget figure has no plottable budget rows'
+		raise ValueError(msg)
+	return ordered
+
+
+def _required_payload_float(row: Mapping[str, object], key: str) -> float:
+	value = row.get(key)
+	if not isinstance(value, int | float) or not math.isfinite(float(value)):
+		msg = f'figure payload field {key!r} must be a finite number'
+		raise ValueError(msg)
+	return float(value)
+
+
+def _matplotlib_pyplot() -> object:
+	try:
+		return __import__('matplotlib.pyplot', fromlist=['pyplot'])
+	except ImportError as exc:
+		msg = f'M1 robustness figure generation requires matplotlib: {exc}'
+		raise RuntimeError(msg) from exc
 
 
 def _full_budget_balanced_accuracy_caveat(

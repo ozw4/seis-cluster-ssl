@@ -53,6 +53,8 @@ def main() -> None:
 	result = consolidate_f3_strat_hmm_m1_results(config)
 	print(f'f3_strat_hmm_m1_results.summary_json: {result.summary_json}')
 	print(f'f3_strat_hmm_m1_results.summary_markdown: {result.summary_markdown}')
+	for figure_path in result.figure_paths:
+		print(f'f3_strat_hmm_m1_results.figure: {figure_path}')
 	print(f'f3_strat_hmm_m1_results.warning_count: {len(result.warnings)}')
 
 
@@ -77,6 +79,7 @@ def _print_summary(config: F3StratHMMM1ResultsConfig) -> None:
 	print(f'models.candidate: {config.candidate_model}')
 	print(f'outputs.summary_json: {config.output_dir / "m1_results_summary.json"}')
 	print(f'outputs.summary_markdown: {config.output_dir / "m1_results_summary.md"}')
+	print(f'outputs.figures_dir: {config.output_dir / "figures"}')
 
 
 if __name__ == '__main__':
