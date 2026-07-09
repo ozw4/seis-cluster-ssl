@@ -7,7 +7,6 @@ import json
 import os
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -24,6 +23,8 @@ FORBIDDEN_SUFFIXES = frozenset(
 )
 DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 PUBLISH_MANIFEST_NAME = 'publish_manifest.json'
+# Publish manifests are review artifacts; avoid wall-clock values in clean reruns.
+DETERMINISTIC_CREATED_AT_UTC = '1970-01-01T00:00:00Z'
 
 
 @dataclass(frozen=True)
@@ -160,7 +161,7 @@ def _publish_created_at_utc(manifest_path: Path) -> str:
 			created_at = payload.get('created_at_utc')
 			if isinstance(created_at, str) and created_at:
 				return created_at
-	return datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+	return DETERMINISTIC_CREATED_AT_UTC
 
 
 def publish_manifest_to_dict(manifest: PublishManifest) -> dict[str, object]:

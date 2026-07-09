@@ -454,6 +454,71 @@ def test_cli_supports_config_and_dry_run(tmp_path: Path) -> None:
 	assert not (config.output_dir / 'm1_results_summary.json').exists()
 
 
+def test_cli_runs_end_to_end_and_publishes_synthetic_fixtures(
+	tmp_path: Path,
+) -> None:
+	_require_matplotlib_agg()
+	config = _write_inputs(tmp_path)
+	publish_dir = tmp_path / 'results' / 'f3' / 'facies_benchmark_v1' / 'm1'
+	config_path = tmp_path / 'config.yaml'
+	config_path.write_text(
+		'\n'.join(
+			(
+				'inputs:',
+				f'  baseline_comparison_csv: {config.baseline_comparison_csv}',
+				f'  label_budget_suite_root: {config.label_budget_suite_root}',
+				f'  split_index_suite_root: {config.split_index_suite_root}',
+				'models:',
+				'  baseline: mae_baseline',
+				'  candidate: strat_hmm_m1',
+				'outputs:',
+				f'  output_dir: {config.output_dir}',
+				'publish:',
+				'  enabled: true',
+				'  output_dir: results/f3/facies_benchmark_v1/m1',
+				'  include_figures: true',
+				'  max_file_size_mb: 10',
+				'',
+			),
+		),
+		encoding='utf-8',
+	)
+	env = os.environ.copy()
+	env['PYTHONPATH'] = os.pathsep.join(
+		(str(REPO_ROOT / 'src'), env.get('PYTHONPATH', '')),
+	)
+	env['MPLBACKEND'] = 'Agg'
+
+	completed = subprocess.run(  # noqa: S603
+		[sys.executable, str(CLI), '--config', str(config_path)],
+		cwd=tmp_path,
+		env=env,
+		text=True,
+		capture_output=True,
+		check=True,
+		timeout=30,
+	)
+
+	assert 'f3_strat_hmm_m1_results.summary_json:' in completed.stdout
+	assert 'published F3 strat-HMM M1 results:' in completed.stdout
+	assert (config.output_dir / 'm1_results_summary.json').is_file()
+	assert (config.output_dir / 'm1_results_summary.md').is_file()
+	assert (
+		config.output_dir / 'figures' / 'label_budget_delta_curves.png'
+	).is_file()
+	assert (config.output_dir / 'figures' / 'split_index_deltas.png').is_file()
+	assert (publish_dir / 'm1_results_summary.json').is_file()
+	assert (publish_dir / 'm1_results_summary.md').is_file()
+	assert (publish_dir / 'tables' / 'label_budget_summary.csv').is_file()
+	assert (
+		publish_dir / 'figures' / 'label_budget_delta_curves.png'
+	).is_file()
+	manifest = json.loads(
+		(publish_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
+	)
+	assert manifest['created_at_utc'] == '1970-01-01T00:00:00Z'
+
+
 def _summary_payload(config: F3StratHMMM1ResultsConfig) -> dict[str, object]:
 	result = consolidate_f3_strat_hmm_m1_results(config)
 	return json.loads(result.summary_json.read_text(encoding='utf-8'))
