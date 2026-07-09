@@ -23,7 +23,6 @@ from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
 from seis_ssl_cluster.data.window_preprocessing import (
 	AmplitudePreprocessSettings,
 	read_amplitude_crop,
-	reduce_valid_mask_to_tokens,
 )
 from seis_ssl_cluster.data.zero_mask import (
 	DEFAULT_ZERO_MASK_CONFIG,
@@ -251,6 +250,7 @@ class NopimsStratPseudoTargetDataset:
 		return {
 			'x': prepared.x,
 			'local_valid_mask': prepared.local_valid_mask,
+			'_token_valid_mask': prepared.token_valid_mask,
 			'coords': {
 				'survey_id': manifest.survey_id,
 				'local_start_xyz': local_request.start_xyz,
@@ -291,12 +291,8 @@ class NopimsStratPseudoTargetDataset:
 			dtype=np.float32,
 		).copy()
 		pseudo_valid = np.asarray(arrays.valid_tokens[token_slices], dtype=bool)
-		local_valid_mask = _require_bool_array(sample, 'local_valid_mask')
-		token_valid = reduce_valid_mask_to_tokens(
-			local_valid_mask,
-			patch_size_xyz=self.patch_size_xyz,
-			min_valid_fraction=1.0,
-		)
+		token_valid = _require_bool_array(sample, '_token_valid_mask')
+		sample.pop('_token_valid_mask')
 		strat_valid_mask = np.logical_and(pseudo_valid, token_valid)
 		labels[~strat_valid_mask] = -1
 		confidence[~strat_valid_mask] = 0.0
