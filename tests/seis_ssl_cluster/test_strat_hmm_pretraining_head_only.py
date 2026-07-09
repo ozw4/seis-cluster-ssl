@@ -31,6 +31,9 @@ from seis_ssl_cluster.stratigraphy import (
 )
 from seis_ssl_cluster.training import load_checkpoint
 from seis_ssl_cluster.training.dataloaders import build_strat_pseudo_target_dataloader
+from seis_ssl_cluster.training.strat_hmm import (
+	run_strat_hmm_pretext_training as run_strat_hmm_pretext_training_new,
+)
 from seis_ssl_cluster.training.strat_hmm_pretraining import (
 	build_strat_hmm_head_only_components,
 	configure_student_trainability,
@@ -40,6 +43,10 @@ from seis_ssl_cluster.training.strat_hmm_pretraining import (
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping
+
+
+def test_strat_hmm_pretraining_legacy_import_path_is_supported() -> None:
+	assert run_strat_hmm_pretext_training is run_strat_hmm_pretext_training_new
 
 
 def test_head_only_training_runs_cpu_writes_checkpoints_and_payloads(
