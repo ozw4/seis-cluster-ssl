@@ -1,0 +1,23 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+suite:
+  name: label_budget_m1_v1
+  output_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/label_budget_m1_v1
+models:
+  baseline:
+    model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+    token_dataset_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/token_dataset
+  candidate:
+    model_tag: strat_hmm_pretext_m1_k6_topblock1_distill
+    token_dataset_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/token_dataset
+label_budget:
+  mode: per_class_cap
+  per_class_caps: [25, 50, 100, 250, 500, null]
+  # These seeds vary selected label indices. Probe initialization is fixed by
+  # probe.random_state in 02_run_label_budget_probes.yaml.
+  subsample_seeds: [0, 1, 2, 3, 4]
+  require_all_classes: true
+validation:
+  reuse_full_validation: true
+outputs:
+  overwrite: false

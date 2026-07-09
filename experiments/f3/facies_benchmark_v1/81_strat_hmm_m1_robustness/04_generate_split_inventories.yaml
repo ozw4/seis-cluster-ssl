@@ -1,0 +1,27 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+inputs:
+  base_png_label_inventory: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/label_png_inventory.csv
+  source_label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+  class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+  reference_embedding_metadata: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/f3_facies_benchmark.embedding_metadata.json
+split_sweep:
+  name: split_index_m1_v1
+  output_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/split_index_m1_v1
+  split_ids: [split_000, split_001, split_002, split_003, split_004, split_005]
+  include_base_split_as_split_000: true
+  random_seeds: [0, 1, 2, 3, 4]
+  validation_slice_count: 3
+  require_validation_all_classes: true
+  min_validation_tokens_per_class:
+    default: 1
+    "3": 100
+    "5": 20
+tokenization:
+  min_labeled_fraction: 0.5
+  min_majority_fraction: 0.7
+  ignore_z_border_samples: 1
+  patch_size: [8, 8, 8]
+outputs:
+  overwrite: false

@@ -61,6 +61,10 @@ HELP_FLAG_CONTRACTS = {
 		'--suite-root',
 		'--dry-run',
 	),
+	'summarize_f3_lithology_split_robustness.py': (
+		'--suite-root',
+		'--dry-run',
+	),
 	'build_f3_lithology_comparison_report.py': (
 		'--config',
 		'--dry-run',

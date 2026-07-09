@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 import torch
 
+from proc.seis_ssl_cluster.run_f3_lithology_split_sweep_probes import (
+	f3_lithology_split_sweep_probe_config_from_mapping,
+)
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_cluster_visualization_config,
@@ -29,6 +33,12 @@ from seis_ssl_cluster.config.f3_lithology import (
 	f3_lithology_token_dataset_config_from_mapping,
 	f3_lithology_visualization_config_from_mapping,
 	f3_prepare_volume_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_robustness import (
+	f3_lithology_label_budget_config_from_mapping,
+	f3_lithology_label_budget_probe_config_from_mapping,
+	f3_lithology_split_inventory_config_from_mapping,
+	f3_lithology_split_sweep_dataset_config_from_mapping,
 )
 from seis_ssl_cluster.config.schema import (
 	STAGE_F3_INSPECT_FILES,
@@ -103,6 +113,25 @@ F3_STRAT_HMM_PSEUDO_TARGET_REFRESH_CONFIGS = sorted(
 		/ '08_refresh_pseudo_targets_from_logits_smoke.yaml',
 	],
 )
+F3_STRAT_HMM_M1_ROBUSTNESS_ROOT = F3_ROOT / '81_strat_hmm_m1_robustness'
+F3_STRAT_HMM_M1_ROBUSTNESS_CONFIGS = sorted(
+	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT.rglob('*.yaml'),
+)
+F3_STRAT_HMM_M1_LABEL_BUDGET_BUILD_CONFIGS = [
+	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '01_build_label_budget_datasets.yaml',
+]
+F3_STRAT_HMM_M1_LABEL_BUDGET_PROBE_CONFIGS = [
+	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '02_run_label_budget_probes.yaml',
+]
+F3_STRAT_HMM_M1_SPLIT_INVENTORY_CONFIGS = [
+	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '04_generate_split_inventories.yaml',
+]
+F3_STRAT_HMM_M1_SPLIT_DATASET_CONFIGS = [
+	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '05_build_split_sweep_datasets.yaml',
+]
+F3_STRAT_HMM_M1_SPLIT_PROBE_CONFIGS = [
+	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '06_run_split_sweep_probes.yaml',
+]
 F3_LITHOLOGY_ROOT = F3_ROOT / '50_lithology'
 F3_LITHOLOGY_TOKEN_CONFIGS = sorted(
 	F3_LITHOLOGY_ROOT.rglob('01_build_token_dataset.yaml'),
@@ -180,6 +209,7 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 		'f3 strat hmm pseudo-target refresh',
 		F3_STRAT_HMM_PSEUDO_TARGET_REFRESH_CONFIGS,
 	),
+	('f3 strat hmm m1 robustness', F3_STRAT_HMM_M1_ROBUSTNESS_CONFIGS),
 	('f3 lithology token dataset', F3_LITHOLOGY_TOKEN_CONFIGS),
 	('f3 lithology probe', F3_LITHOLOGY_PROBE_CONFIGS),
 	('f3 lithology prediction', F3_LITHOLOGY_PREDICTION_CONFIGS),
@@ -276,6 +306,68 @@ def test_active_f3_strat_hmm_pseudo_target_refresh_configs_resolve(
 	resolve_strat_hmm_pseudo_target_config(
 		_config_with_existing_strat_hmm_refresh_inputs(config_path, tmp_path),
 	)
+
+
+@pytest.mark.parametrize('config_path', F3_STRAT_HMM_M1_ROBUSTNESS_CONFIGS)
+def test_active_f3_strat_hmm_m1_robustness_configs_parse(
+	config_path: Path,
+) -> None:
+	assert load_config(config_path)
+
+
+@pytest.mark.parametrize('config_path', F3_STRAT_HMM_M1_LABEL_BUDGET_BUILD_CONFIGS)
+def test_active_f3_strat_hmm_m1_label_budget_build_configs_resolve(
+	config_path: Path,
+) -> None:
+	f3_lithology_label_budget_config_from_mapping(load_config(config_path))
+
+
+@pytest.mark.parametrize('config_path', F3_STRAT_HMM_M1_LABEL_BUDGET_PROBE_CONFIGS)
+def test_active_f3_strat_hmm_m1_label_budget_probe_configs_resolve_schema(
+	config_path: Path,
+	tmp_path: Path,
+) -> None:
+	raw = load_config(config_path)
+	raw['suite']['manifest'] = str(_write_label_budget_manifest(tmp_path))
+	raw['labels']['class_info'] = str(_write_class_info(tmp_path))
+
+	config = f3_lithology_label_budget_probe_config_from_mapping(raw)
+
+	assert config.probe.random_state == 42
+	assert len(config.probe_configs) == 2
+
+
+@pytest.mark.parametrize('config_path', F3_STRAT_HMM_M1_SPLIT_INVENTORY_CONFIGS)
+def test_active_f3_strat_hmm_m1_split_inventory_configs_resolve(
+	config_path: Path,
+) -> None:
+	config = f3_lithology_split_inventory_config_from_mapping(load_config(config_path))
+
+	assert config.include_base_split_as_split_000 is True
+	assert config.random_seeds == (0, 1, 2, 3, 4)
+	assert config.min_validation_tokens_per_class == {'default': 1, '3': 100, '5': 20}
+
+
+@pytest.mark.parametrize('config_path', F3_STRAT_HMM_M1_SPLIT_DATASET_CONFIGS)
+def test_active_f3_strat_hmm_m1_split_dataset_configs_resolve(
+	config_path: Path,
+) -> None:
+	f3_lithology_split_sweep_dataset_config_from_mapping(load_config(config_path))
+
+
+@pytest.mark.parametrize('config_path', F3_STRAT_HMM_M1_SPLIT_PROBE_CONFIGS)
+def test_active_f3_strat_hmm_m1_split_probe_configs_resolve_schema(
+	config_path: Path,
+	tmp_path: Path,
+) -> None:
+	raw = load_config(config_path)
+	raw['suite']['dataset_manifest'] = str(_write_split_dataset_manifest(tmp_path))
+	raw['labels']['class_info'] = str(_write_class_info(tmp_path))
+
+	config = f3_lithology_split_sweep_probe_config_from_mapping(raw)
+
+	assert config.probe.random_state == 42
+	assert len(config.probe_configs) == 2
 
 
 @pytest.mark.parametrize(
@@ -447,3 +539,120 @@ def _config_with_existing_strat_hmm_refresh_inputs(
 		artifact_root / 'pseudo_targets' / 'f3' / config_path.stem,
 	)
 	return config
+
+
+def _write_class_info(tmp_path: Path) -> Path:
+	path = tmp_path / 'class_info.json'
+	path.write_text(
+		json.dumps(
+			{
+				'classes': [
+					{'class_id': 0, 'class_name': 'class 0', 'rgb': [230, 159, 0]},
+					{'class_id': 1, 'class_name': 'class 1', 'rgb': [86, 180, 233]},
+				],
+			},
+		)
+		+ '\n',
+		encoding='utf-8',
+	)
+	return path
+
+
+def _write_label_budget_manifest(tmp_path: Path) -> Path:
+	manifest = tmp_path / 'label_budget_suite_manifest.json'
+	token_dataset_root = tmp_path / 'tokens'
+	rows = [
+		_label_budget_manifest_row(
+			role='baseline',
+			model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+			token_dataset_root=token_dataset_root / 'baseline',
+		),
+		_label_budget_manifest_row(
+			role='candidate',
+			model_tag='strat_hmm_pretext_m1_k6_topblock1_distill',
+			token_dataset_root=token_dataset_root / 'candidate',
+		),
+	]
+	_write_json(
+		manifest,
+		{
+			'artifact_type': 'f3_lithology_label_budget_suite_manifest',
+			'rows': rows,
+		},
+	)
+	return manifest
+
+
+def _label_budget_manifest_row(
+	*,
+	role: str,
+	model_tag: str,
+	token_dataset_root: Path,
+) -> dict[str, object]:
+	return {
+		'model_role': role,
+		'model_tag': model_tag,
+		'budget_id': 'cap_25',
+		'per_class_cap': 25,
+		'subsample_seed': 0,
+		'token_dataset_root': str(token_dataset_root),
+		'train_tokens': str(token_dataset_root / 'train_tokens.npz'),
+		'validation_tokens': str(token_dataset_root / 'validation_tokens.npz'),
+		'metadata_json': str(token_dataset_root / 'token_dataset_metadata.json'),
+		'selected_train_token_count': 50,
+		'validation_token_count': 20,
+		'paired_identity_hash': 'paired-hash',
+	}
+
+
+def _write_split_dataset_manifest(tmp_path: Path) -> Path:
+	manifest = tmp_path / 'split_dataset_manifest.json'
+	token_dataset_root = tmp_path / 'split_tokens'
+	rows = [
+		_split_dataset_manifest_row(
+			role='baseline',
+			model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+			token_dataset_root=token_dataset_root / 'baseline',
+		),
+		_split_dataset_manifest_row(
+			role='candidate',
+			model_tag='strat_hmm_pretext_m1_k6_topblock1_distill',
+			token_dataset_root=token_dataset_root / 'candidate',
+		),
+	]
+	_write_json(
+		manifest,
+		{
+			'artifact_type': 'f3_lithology_split_sweep_token_dataset_manifest',
+			'rows': rows,
+		},
+	)
+	return manifest
+
+
+def _split_dataset_manifest_row(
+	*,
+	role: str,
+	model_tag: str,
+	token_dataset_root: Path,
+) -> dict[str, object]:
+	return {
+		'split_id': 'split_000',
+		'model_role': role,
+		'model_tag': model_tag,
+		'token_dataset_root': str(token_dataset_root),
+		'train_tokens': str(token_dataset_root / 'train_tokens.npz'),
+		'validation_tokens': str(token_dataset_root / 'validation_tokens.npz'),
+		'metadata_json': str(token_dataset_root / 'token_dataset_metadata.json'),
+		'train_token_count': 50,
+		'validation_token_count': 20,
+		'paired_identity_hash': 'paired-hash',
+	}
+
+
+def _write_json(path: Path, payload: dict[str, object]) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_text(
+		json.dumps(payload, indent=2, sort_keys=True) + '\n',
+		encoding='utf-8',
+	)
