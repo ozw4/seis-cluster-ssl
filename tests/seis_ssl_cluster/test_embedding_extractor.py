@@ -11,14 +11,30 @@ import torch
 import seis_ssl_cluster.embedding.extractor as extractor_module
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
+	AmplitudePreprocessSettings,
 	AmplitudeVolumeRecord,
+	CropRequest,
+	NpyMemmapVolumeStore,
 	SurveyManifest,
 	SurveyNormalizationStats,
+	load_normalization_stats,
+	read_amplitude_crop,
+	read_manifest_json,
+	resolve_manifest_path,
 	write_manifest_json,
 	write_normalization_stats,
 )
-from seis_ssl_cluster.embedding import run_embedding_extraction
+from seis_ssl_cluster.data.window_preprocessing import (
+	reduce_valid_mask_to_tokens as shared_reduce_valid_mask_to_tokens,
+)
+from seis_ssl_cluster.embedding import (
+	EmbeddingMerger,
+	iter_sliding_windows,
+	run_embedding_extraction,
+	token_grid_shape_xyz,
+)
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
+from seis_ssl_cluster.training.checkpoint import load_checkpoint
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
@@ -63,6 +79,25 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['min_token_valid_fraction'] == 0.5
 	assert metadata['preprocessing']['amplitude_agc'] == {'enabled': False}
 	assert metadata['amplitude_agc'] == {'enabled': False}
+
+
+def test_reduce_valid_mask_to_tokens_legacy_import_path_is_shared() -> None:
+	assert (
+		extractor_module.reduce_valid_mask_to_tokens
+		is shared_reduce_valid_mask_to_tokens
+	)
+
+
+def test_embedding_extraction_valid_tokens_match_shared_preprocessing(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+
+	actual = np.load(result.valid_tokens_path)
+	expected = _expected_valid_tokens_from_shared_preprocessing(config)
+	np.testing.assert_array_equal(actual, expected)
 
 
 def test_embedding_extraction_uses_checkpoint_floating_dtype(
@@ -568,6 +603,75 @@ def _write_fixture(  # noqa: PLR0913
 		},
 	}
 	return config
+
+
+def _expected_valid_tokens_from_shared_preprocessing(
+	config: dict[str, object],
+) -> np.ndarray:
+	manifests_config = config['manifests']
+	embeddings_config = config['embeddings']
+	assert isinstance(manifests_config, dict)
+	assert isinstance(embeddings_config, dict)
+	manifest_path = Path(manifests_config['input'])
+	manifest = read_manifest_json(manifest_path)[0]
+	payload = load_checkpoint(
+		Path(embeddings_config['checkpoint']),
+		map_location='cpu',
+	)
+	checkpoint_config = payload['config']
+	assert isinstance(checkpoint_config, dict)
+	settings = extractor_module.extraction_settings_from_config(
+		config,
+		checkpoint_config=checkpoint_config,
+	)
+	model_config = checkpoint_config['model']
+	assert isinstance(model_config, dict)
+	patch_size = tuple(model_config['patch_size'])
+	amplitude_path = resolve_manifest_path(manifest, manifest.amplitude.path)
+	stats_path = resolve_manifest_path(
+		manifest,
+		manifest.amplitude.normalization_stats_path,
+	)
+	stats = load_normalization_stats(stats_path)
+	merger = EmbeddingMerger(
+		token_grid_shape_xyz=token_grid_shape_xyz(
+			manifest.amplitude.shape_xyz,
+			patch_size,
+		),
+		embedding_dim=1,
+	)
+	preprocess_settings = AmplitudePreprocessSettings(
+		zero_mask=settings.zero_mask,
+		normalized_clip_abs=settings.normalized_clip_abs,
+		amplitude_agc=settings.amplitude_agc,
+		min_token_valid_fraction=settings.min_token_valid_fraction,
+	)
+	store = NpyMemmapVolumeStore()
+	for window in iter_sliding_windows(
+		manifest.amplitude.shape_xyz,
+		window_size_xyz=settings.window_size_xyz,
+		overlap_xyz=settings.overlap_xyz,
+		patch_size_xyz=patch_size,
+	):
+		prepared = read_amplitude_crop(
+			request=CropRequest(
+				survey_id=manifest.survey_id,
+				start_xyz=window.start_xyz,
+				size_xyz=window.size_xyz,
+			),
+			amplitude_path=amplitude_path,
+			stats=stats,
+			store=store,
+			patch_size_xyz=patch_size,
+			settings=preprocess_settings,
+		)
+		merger.add_window(
+			window,
+			patch_size_xyz=patch_size,
+			token_embeddings=np.ones((*prepared.token_valid_mask.shape, 1)),
+			token_valid_mask=prepared.token_valid_mask,
+		)
+	return merger.finalize(output_dtype=np.float32)[1]
 
 
 def _move_zero_mask_to_data(checkpoint_config: dict[str, object]) -> None:
