@@ -1,4 +1,4 @@
-"""Compatibility imports for strat HMM pretext training."""
+"""Compatibility wrapper for legacy strat HMM pretext training imports."""
 
 from seis_ssl_cluster.training.strat_hmm.components import (
 	build_strat_hmm_head_only_components,
