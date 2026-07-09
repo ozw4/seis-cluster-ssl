@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -197,13 +198,14 @@ def test_publish_selected_results_preserves_existing_manifest_timestamp(
 	assert second_payload['items'][0]['sha256'] != first_payload['items'][0]['sha256']
 
 
-def test_publish_selected_results_uses_deterministic_timestamp_for_fresh_dirs(
+def test_publish_selected_results_records_current_timestamp_for_fresh_dirs(
 	tmp_path: Path,
 ) -> None:
 	report = _write_file(tmp_path / 'artifacts' / 'summary.md', b'# summary\n')
 	output_a = tmp_path / 'results_a'
 	output_b = tmp_path / 'results_b'
 
+	before = datetime.now(timezone.utc)
 	publish_selected_results(
 		items=(PublishItem(report, Path('summary.md')),),
 		output_dir=output_a,
@@ -212,6 +214,7 @@ def test_publish_selected_results_uses_deterministic_timestamp_for_fresh_dirs(
 		items=(PublishItem(report, Path('summary.md')),),
 		output_dir=output_b,
 	)
+	after = datetime.now(timezone.utc)
 
 	payload_a = json.loads(
 		(output_a / 'publish_manifest.json').read_text(encoding='utf-8'),
@@ -219,8 +222,9 @@ def test_publish_selected_results_uses_deterministic_timestamp_for_fresh_dirs(
 	payload_b = json.loads(
 		(output_b / 'publish_manifest.json').read_text(encoding='utf-8'),
 	)
-	assert payload_a['created_at_utc'] == '1970-01-01T00:00:00Z'
-	assert payload_b['created_at_utc'] == payload_a['created_at_utc']
+	for payload in (payload_a, payload_b):
+		created_at = _parse_created_at_utc(payload['created_at_utc'])
+		assert before <= created_at <= after
 
 
 def test_publish_selected_results_rejects_existing_target_directory(
@@ -257,3 +261,10 @@ def _write_file(path: Path, content: bytes) -> Path:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	path.write_bytes(content)
 	return path
+
+
+def _parse_created_at_utc(value: object) -> datetime:
+	assert isinstance(value, str)
+	created_at = datetime.fromisoformat(value.replace('Z', '+00:00'))
+	assert created_at.tzinfo == timezone.utc
+	return created_at

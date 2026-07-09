@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -609,12 +610,19 @@ def test_cli_runs_end_to_end_and_publishes_synthetic_fixtures(
 	manifest = json.loads(
 		(publish_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
 	)
-	assert manifest['created_at_utc'] == '1970-01-01T00:00:00Z'
+	created_at = _parse_created_at_utc(manifest['created_at_utc'])
+	assert created_at.tzinfo == timezone.utc
+	assert manifest['created_at_utc'] != '1970-01-01T00:00:00Z'
 
 
 def _summary_payload(config: F3StratHMMM1ResultsConfig) -> dict[str, object]:
 	result = consolidate_f3_strat_hmm_m1_results(config)
 	return json.loads(result.summary_json.read_text(encoding='utf-8'))
+
+
+def _parse_created_at_utc(value: object) -> datetime:
+	assert isinstance(value, str)
+	return datetime.fromisoformat(value.replace('Z', '+00:00'))
 
 
 def _write_inputs(
