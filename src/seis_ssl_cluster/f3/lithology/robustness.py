@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
@@ -30,6 +31,22 @@ F3_PAIRED_DELTA_FIELDS = (
 	'delta_mean_iou',
 	'delta_balanced_accuracy',
 	'delta_accuracy',
+)
+F3_LABEL_BUDGET_ARTIFACT_TYPE = 'f3_lithology_label_budget_token_dataset'
+F3_LABEL_BUDGET_SUITE_MANIFEST_ARTIFACT_TYPE = (
+	'f3_lithology_label_budget_suite_manifest'
+)
+F3_LABEL_BUDGET_REQUIRED_SOURCE_FILES = (
+	'train_tokens.npz',
+	'validation_tokens.npz',
+	'token_dataset_metadata.json',
+)
+F3_LABEL_BUDGET_CLASS_COUNTS_FIELDNAMES = (
+	'split',
+	'class_id',
+	'class_name',
+	'count',
+	'fraction',
 )
 
 
@@ -103,6 +120,121 @@ class F3RobustnessSuiteManifest:
 
 
 @dataclass(frozen=True)
+class F3LabelBudgetModelConfig:
+	"""One source token dataset participating in a paired label-budget suite."""
+
+	role: str
+	model_tag: str
+	token_dataset_root: Path
+
+	def __post_init__(self) -> None:
+		"""Validate model source fields."""
+		_validate_non_empty_str(self.role, 'role')
+		_validate_non_empty_str(self.model_tag, 'model_tag')
+		if self.role not in F3_M1_MODEL_ROLES:
+			msg = (
+				f'role must be one of {sorted(F3_M1_MODEL_ROLES)!r}; '
+				f'got {self.role!r}'
+			)
+			raise ValueError(msg)
+		if not Path(self.token_dataset_root).is_absolute():
+			msg = (
+				'token_dataset_root must be an absolute path; '
+				f'got {self.token_dataset_root}'
+			)
+			raise ValueError(msg)
+
+	@property
+	def train_tokens(self) -> Path:
+		"""Return the source train token dataset path."""
+		return self.token_dataset_root / 'train_tokens.npz'
+
+	@property
+	def validation_tokens(self) -> Path:
+		"""Return the source validation token dataset path."""
+		return self.token_dataset_root / 'validation_tokens.npz'
+
+	@property
+	def metadata_json(self) -> Path:
+		"""Return the source token dataset metadata path."""
+		return self.token_dataset_root / 'token_dataset_metadata.json'
+
+
+@dataclass(frozen=True)
+class F3LabelBudgetConfig:
+	"""Resolved config for paired F3 lithology label-budget datasets."""
+
+	artifact_root: Path
+	suite_name: str
+	output_root: Path
+	models: tuple[F3LabelBudgetModelConfig, ...]
+	per_class_caps: tuple[int | None, ...]
+	subsample_seeds: tuple[int, ...]
+	require_all_classes: bool
+	reuse_full_validation: bool
+	overwrite: bool = False
+
+	def __post_init__(self) -> None:
+		"""Validate suite-level label-budget settings."""
+		if not Path(self.artifact_root).is_absolute():
+			msg = f'artifact_root must be an absolute path; got {self.artifact_root}'
+			raise ValueError(msg)
+		validate_f3_robustness_suite_name(self.suite_name)
+		validate_f3_robustness_output_root(self.output_root)
+		_validate_label_budget_model_pair(self.models)
+		_validate_per_class_caps(self.per_class_caps)
+		_validate_int_sequence(self.subsample_seeds, 'subsample_seeds')
+		if not self.per_class_caps:
+			msg = 'per_class_caps must contain at least one budget'
+			raise ValueError(msg)
+		if not self.subsample_seeds:
+			msg = 'subsample_seeds must contain at least one seed'
+			raise ValueError(msg)
+		if not isinstance(self.require_all_classes, bool):
+			msg = (
+				'require_all_classes must be boolean; '
+				f'got {self.require_all_classes!r}'
+			)
+			raise TypeError(msg)
+		if not isinstance(self.reuse_full_validation, bool):
+			msg = (
+				'reuse_full_validation must be boolean; '
+				f'got {self.reuse_full_validation!r}'
+			)
+			raise TypeError(msg)
+		if not self.reuse_full_validation:
+			msg = 'validation.reuse_full_validation must be true'
+			raise ValueError(msg)
+		if not isinstance(self.overwrite, bool):
+			msg = f'overwrite must be boolean; got {self.overwrite!r}'
+			raise TypeError(msg)
+
+	@property
+	def baseline(self) -> F3LabelBudgetModelConfig:
+		"""Return the baseline model config."""
+		return _model_by_role(self.models, 'baseline')
+
+	@property
+	def candidate(self) -> F3LabelBudgetModelConfig:
+		"""Return the candidate model config."""
+		return _model_by_role(self.models, 'candidate')
+
+	@property
+	def expected_dataset_count(self) -> int:
+		"""Return the number of model/budget/seed datasets to write."""
+		return len(self.models) * len(self.per_class_caps) * len(self.subsample_seeds)
+
+
+@dataclass(frozen=True)
+class F3LabelBudgetBuildResult:
+	"""Output locations from a paired label-budget dataset build."""
+
+	suite_manifest_json: Path
+	dataset_roots: tuple[Path, ...]
+	rows: tuple[Mapping[str, object], ...]
+
+
+@dataclass(frozen=True)
 class F3PairedMetricRow:
 	"""One paired metric row comparing strat-HMM against MAE."""
 
@@ -122,6 +254,87 @@ class F3PairedMetricRow:
 		_validate_non_empty_str(self.baseline_model_tag, 'baseline_model_tag')
 		_validate_non_empty_str(self.candidate_model_tag, 'candidate_model_tag')
 		_validate_non_empty_str(self.metric_name, 'metric_name')
+
+
+def build_f3_lithology_label_budget_datasets(
+	config: F3LabelBudgetConfig,
+) -> F3LabelBudgetBuildResult:
+	"""Write paired MAE/strat-HMM token datasets for label-budget conditions."""
+	sources = _load_label_budget_sources(config)
+	_validate_source_identity_matches(sources)
+	_plan = _planned_label_budget_output_paths(config)
+	if not config.overwrite:
+		_refuse_existing_outputs(_plan)
+	rows: list[dict[str, object]] = []
+	dataset_roots: list[Path] = []
+	baseline_train = sources['baseline']['train']
+	if not isinstance(baseline_train, F3LithologyTokenDataset):
+		raise TypeError('baseline train dataset missing')
+	for per_class_cap in config.per_class_caps:
+		budget_id = label_budget_id(per_class_cap)
+		for subsample_seed in config.subsample_seeds:
+			indices = class_stratified_subset_indices(
+				baseline_train.labels,
+				per_class_cap=per_class_cap,
+				seed=subsample_seed,
+				require_all_classes=config.require_all_classes,
+			)
+			condition_rows, condition_roots = _write_label_budget_condition(
+				config,
+				sources,
+				budget_id=budget_id,
+				per_class_cap=per_class_cap,
+				subsample_seed=subsample_seed,
+				indices=indices,
+			)
+			rows.extend(condition_rows)
+			dataset_roots.extend(condition_roots)
+	manifest_path = config.output_root / 'suite_manifest.json'
+	_write_json(
+		manifest_path,
+		{
+			'artifact_type': F3_LABEL_BUDGET_SUITE_MANIFEST_ARTIFACT_TYPE,
+			'contract_version': F3_ROBUSTNESS_CONTRACT_VERSION,
+			'suite': {
+				'name': config.suite_name,
+				'output_root': str(config.output_root),
+			},
+			'rows': rows,
+		},
+	)
+	return F3LabelBudgetBuildResult(
+		suite_manifest_json=manifest_path,
+		dataset_roots=tuple(dataset_roots),
+		rows=tuple(rows),
+	)
+
+
+def label_budget_id(per_class_cap: int | None) -> str:
+	"""Return the stable output id for a per-class-cap budget."""
+	return 'full' if per_class_cap is None else f'cap{per_class_cap}'
+
+
+def label_budget_dry_run_summary(config: F3LabelBudgetConfig) -> dict[str, object]:
+	"""Return source counts and config fields used by the dry-run CLI summary."""
+	sources = _load_label_budget_sources(config)
+	_validate_source_identity_matches(sources)
+	return {
+		'suite name': config.suite_name,
+		'output root': config.output_root,
+		'baseline model tag': config.baseline.model_tag,
+		'candidate model tag': config.candidate.model_tag,
+		'budgets': [label_budget_id(cap) for cap in config.per_class_caps],
+		'subsample seeds': list(config.subsample_seeds),
+		'source train counts': {
+			role: int(_source_dataset(payload, 'train').count)
+			for role, payload in sources.items()
+		},
+		'source validation counts': {
+			role: int(_source_dataset(payload, 'validation').count)
+			for role, payload in sources.items()
+		},
+		'expected dataset count': config.expected_dataset_count,
+	}
 
 
 def load_token_dataset_npz(path: str | Path) -> F3LithologyTokenDataset:
@@ -402,6 +615,486 @@ def validate_f3_robustness_config_keys(
 			validate_f3_robustness_config_keys(value, prefix=f'{prefix}.{key}')
 
 
+def _load_label_budget_sources(
+	config: F3LabelBudgetConfig,
+) -> dict[str, dict[str, object]]:
+	sources: dict[str, dict[str, object]] = {}
+	for model in config.models:
+		_require_source_token_dataset_files(model)
+		sources[model.role] = {
+			'model': model,
+			'train': load_token_dataset_npz(model.train_tokens),
+			'validation': load_token_dataset_npz(model.validation_tokens),
+			'metadata': _read_json(model.metadata_json),
+		}
+	return sources
+
+
+def _require_source_token_dataset_files(model: F3LabelBudgetModelConfig) -> None:
+	for filename in F3_LABEL_BUDGET_REQUIRED_SOURCE_FILES:
+		path = model.token_dataset_root / filename
+		if not path.is_file():
+			msg = (
+				f'source token dataset for {model.role} model '
+				f'{model.model_tag!r} is missing required file: {path}'
+			)
+			raise FileNotFoundError(msg)
+
+
+def _validate_source_identity_matches(
+	sources: Mapping[str, Mapping[str, object]],
+) -> None:
+	try:
+		assert_same_token_identity(
+			_source_dataset(sources['baseline'], 'train'),
+			_source_dataset(sources['candidate'], 'train'),
+			reference_label='baseline train',
+			candidate_label='candidate train',
+		)
+		assert_same_token_identity(
+			_source_dataset(sources['baseline'], 'validation'),
+			_source_dataset(sources['candidate'], 'validation'),
+			reference_label='baseline validation',
+			candidate_label='candidate validation',
+		)
+	except ValueError as exc:
+		msg = (
+			f'{exc}; rebuild the candidate token dataset using the baseline as '
+			'reference_token_dataset'
+		)
+		raise ValueError(msg) from exc
+
+
+def _planned_label_budget_output_paths(config: F3LabelBudgetConfig) -> tuple[Path, ...]:
+	paths = [config.output_root / 'suite_manifest.json']
+	for model in config.models:
+		for per_class_cap in config.per_class_caps:
+			for subsample_seed in config.subsample_seeds:
+				root = _budget_token_dataset_root(
+					config,
+					model,
+					budget_id=label_budget_id(per_class_cap),
+					subsample_seed=subsample_seed,
+				)
+				paths.extend(
+					[
+						root / 'train_tokens.npz',
+						root / 'validation_tokens.npz',
+						root / 'all_labeled_tokens.npz',
+						root / 'token_dataset_metadata.json',
+						root / 'class_counts.csv',
+						root / 'token_dataset_summary.md',
+					],
+				)
+	return tuple(paths)
+
+
+def _refuse_existing_outputs(paths: Sequence[Path]) -> None:
+	existing = [path for path in paths if path.exists()]
+	if existing:
+		msg = (
+			'refusing to overwrite existing label-budget output(s); '
+			f'first existing path: {existing[0]}'
+		)
+		raise FileExistsError(msg)
+
+
+def _write_label_budget_condition(  # noqa: PLR0913
+	config: F3LabelBudgetConfig,
+	sources: Mapping[str, Mapping[str, object]],
+	*,
+	budget_id: str,
+	per_class_cap: int | None,
+	subsample_seed: int,
+	indices: NDArray[np.generic],
+) -> tuple[list[dict[str, object]], list[Path]]:
+	rows: list[dict[str, object]] = []
+	roots: list[Path] = []
+	condition_hash = paired_token_identity_hash(
+		subset_token_dataset(_source_dataset(sources['baseline'], 'train'), indices),
+		_source_dataset(sources['baseline'], 'validation'),
+	)
+	for model in config.models:
+		source = sources[model.role]
+		train = subset_token_dataset(_source_dataset(source, 'train'), indices)
+		validation = _source_dataset(source, 'validation')
+		model_hash = paired_token_identity_hash(train, validation)
+		if model_hash != condition_hash:
+			msg = (
+				'paired identity hash mismatch after subsetting; '
+				f'baseline={condition_hash}, {model.role}={model_hash}'
+			)
+			raise ValueError(msg)
+		root = _budget_token_dataset_root(
+			config,
+			model,
+			budget_id=budget_id,
+			subsample_seed=subsample_seed,
+		)
+		metadata = _label_budget_metadata_payload(
+			config,
+			model,
+			source,
+			budget_id=budget_id,
+			per_class_cap=per_class_cap,
+			subsample_seed=subsample_seed,
+			selected_train_dataset=train,
+			validation_dataset=validation,
+			paired_identity_hash=condition_hash,
+			token_dataset_root=root,
+		)
+		_write_label_budget_token_dataset(root, train, validation, metadata)
+		rows.append(
+			_suite_manifest_row(
+				model,
+				root,
+				budget_id=budget_id,
+				per_class_cap=per_class_cap,
+				subsample_seed=subsample_seed,
+				metadata=metadata,
+			),
+		)
+		roots.append(root)
+	return rows, roots
+
+
+def _label_budget_metadata_payload(  # noqa: PLR0913
+	config: F3LabelBudgetConfig,
+	model: F3LabelBudgetModelConfig,
+	source: Mapping[str, object],
+	*,
+	budget_id: str,
+	per_class_cap: int | None,
+	subsample_seed: int,
+	selected_train_dataset: F3LithologyTokenDataset,
+	validation_dataset: F3LithologyTokenDataset,
+	paired_identity_hash: str,
+	token_dataset_root: Path,
+) -> dict[str, object]:
+	subset_metadata = budget_subset_metadata(
+		source_train_tokens=model.train_tokens,
+		source_validation_tokens=model.validation_tokens,
+		per_class_cap=per_class_cap,
+		subsample_seed=subsample_seed,
+		selected_train_dataset=selected_train_dataset,
+		validation_dataset=validation_dataset,
+		paired_identity_hash=paired_identity_hash,
+	)
+	return {
+		'artifact_type': F3_LABEL_BUDGET_ARTIFACT_TYPE,
+		'contract_version': F3_ROBUSTNESS_CONTRACT_VERSION,
+		'suite': {
+			'name': config.suite_name,
+			'output_root': str(config.output_root),
+		},
+		'model': {
+			'role': model.role,
+			'model_tag': model.model_tag,
+		},
+		'label_budget': {
+			'budget_id': budget_id,
+			'per_class_cap': None if per_class_cap is None else int(per_class_cap),
+			'subsample_seed': int(subsample_seed),
+			'require_all_classes': config.require_all_classes,
+		},
+		'validation': {
+			'reuse_full_validation': config.reuse_full_validation,
+		},
+		'source_token_dataset': {
+			'root': str(model.token_dataset_root),
+			'train_tokens': str(model.train_tokens),
+			'validation_tokens': str(model.validation_tokens),
+			'metadata_json': str(model.metadata_json),
+			'metadata': source.get('metadata', {}),
+		},
+		'outputs': {
+			'token_dataset_root': str(token_dataset_root),
+			'train_tokens': str(token_dataset_root / 'train_tokens.npz'),
+			'validation_tokens': str(token_dataset_root / 'validation_tokens.npz'),
+			'all_labeled_tokens': str(token_dataset_root / 'all_labeled_tokens.npz'),
+			'metadata_json': str(token_dataset_root / 'token_dataset_metadata.json'),
+			'class_counts_csv': str(token_dataset_root / 'class_counts.csv'),
+			'summary_markdown': str(token_dataset_root / 'token_dataset_summary.md'),
+		},
+		'summary': {
+			'train_tokens': subset_metadata['selected_train_token_count'],
+			'validation_tokens': subset_metadata['validation_token_count'],
+			'all_labeled_tokens': (
+				int(subset_metadata['selected_train_token_count'])
+				+ int(subset_metadata['validation_token_count'])
+			),
+		},
+		**subset_metadata,
+	}
+
+
+def _write_label_budget_token_dataset(
+	root: Path,
+	train: F3LithologyTokenDataset,
+	validation: F3LithologyTokenDataset,
+	metadata: Mapping[str, object],
+) -> None:
+	root.mkdir(parents=True, exist_ok=True)
+	save_token_dataset_npz(
+		_dataset_with_metadata(train, metadata, split_name='train'),
+		root / 'train_tokens.npz',
+	)
+	save_token_dataset_npz(
+		_dataset_with_metadata(validation, metadata, split_name='validation'),
+		root / 'validation_tokens.npz',
+	)
+	save_token_dataset_npz(
+		_concat_token_datasets(
+			train,
+			validation,
+			metadata={**metadata, 'split_name': 'all_labeled'},
+		),
+		root / 'all_labeled_tokens.npz',
+	)
+	_write_json(root / 'token_dataset_metadata.json', metadata)
+	_write_label_budget_class_counts_csv(root / 'class_counts.csv', train, validation)
+	_write_text(
+		root / 'token_dataset_summary.md',
+		_render_label_budget_summary_markdown(metadata),
+	)
+
+
+def _dataset_with_metadata(
+	dataset: F3LithologyTokenDataset,
+	metadata: Mapping[str, object],
+	*,
+	split_name: str,
+) -> F3LithologyTokenDataset:
+	return F3LithologyTokenDataset(
+		features=np.asarray(dataset.features),
+		labels=np.asarray(dataset.labels),
+		survey_id=np.asarray(dataset.survey_id),
+		split=np.asarray(dataset.split),
+		slice_type=np.asarray(dataset.slice_type),
+		slice_index=np.asarray(dataset.slice_index),
+		token_xyz=np.asarray(dataset.token_xyz),
+		voxel_center_xyz=np.asarray(dataset.voxel_center_xyz),
+		majority_fraction=np.asarray(dataset.majority_fraction),
+		labeled_fraction=np.asarray(dataset.labeled_fraction),
+		metadata={**metadata, 'split_name': split_name},
+	)
+
+
+def _concat_token_datasets(
+	train: F3LithologyTokenDataset,
+	validation: F3LithologyTokenDataset,
+	*,
+	metadata: Mapping[str, object],
+) -> F3LithologyTokenDataset:
+	return F3LithologyTokenDataset(
+		features=np.concatenate([train.features, validation.features], axis=0),
+		labels=np.concatenate([train.labels, validation.labels], axis=0),
+		survey_id=np.concatenate([train.survey_id, validation.survey_id], axis=0),
+		split=np.concatenate([train.split, validation.split], axis=0),
+		slice_type=np.concatenate([train.slice_type, validation.slice_type], axis=0),
+		slice_index=np.concatenate([train.slice_index, validation.slice_index], axis=0),
+		token_xyz=np.concatenate([train.token_xyz, validation.token_xyz], axis=0),
+		voxel_center_xyz=np.concatenate(
+			[train.voxel_center_xyz, validation.voxel_center_xyz],
+			axis=0,
+		),
+		majority_fraction=np.concatenate(
+			[train.majority_fraction, validation.majority_fraction],
+			axis=0,
+		),
+		labeled_fraction=np.concatenate(
+			[train.labeled_fraction, validation.labeled_fraction],
+			axis=0,
+		),
+		metadata=dict(metadata),
+	)
+
+
+def _write_label_budget_class_counts_csv(
+	path: Path,
+	train: F3LithologyTokenDataset,
+	validation: F3LithologyTokenDataset,
+) -> None:
+	rows: list[dict[str, object]] = []
+	rows.extend(_label_budget_class_count_rows('train', train.labels))
+	rows.extend(_label_budget_class_count_rows('validation', validation.labels))
+	rows.extend(
+		_label_budget_class_count_rows(
+			'all_labeled',
+			np.concatenate([train.labels, validation.labels], axis=0),
+		),
+	)
+	with path.open('w', encoding='utf-8', newline='') as file_obj:
+		writer = csv.DictWriter(
+			file_obj,
+			fieldnames=F3_LABEL_BUDGET_CLASS_COUNTS_FIELDNAMES,
+		)
+		writer.writeheader()
+		writer.writerows(rows)
+
+
+def _label_budget_class_count_rows(
+	split: str,
+	labels: NDArray[np.generic],
+) -> list[dict[str, object]]:
+	counts = class_count_dict(labels)
+	total = int(np.asarray(labels).shape[0])
+	rows: list[dict[str, object]] = []
+	for class_id in sorted((int(value) for value in counts), key=int):
+		count = int(counts[str(class_id)])
+		rows.append(
+			{
+				'split': split,
+				'class_id': class_id,
+				'class_name': f'class_{class_id}',
+				'count': count,
+				'fraction': 0.0 if total == 0 else count / total,
+			},
+		)
+	return rows
+
+
+def _render_label_budget_summary_markdown(metadata: Mapping[str, object]) -> str:
+	return '\n'.join(
+		[
+			'# F3 lithology label-budget token dataset',
+			'',
+			f'- suite: {metadata["suite"]["name"]}',
+			f'- model role: {metadata["model"]["role"]}',
+			f'- model tag: {metadata["model"]["model_tag"]}',
+			f'- budget: {metadata["label_budget"]["budget_id"]}',
+			f'- subsample seed: {metadata["label_budget"]["subsample_seed"]}',
+			f'- train tokens: {metadata["selected_train_token_count"]}',
+			f'- validation tokens: {metadata["validation_token_count"]}',
+			f'- paired identity hash: {metadata["paired_identity_hash"]}',
+			'',
+		],
+	)
+
+
+def _suite_manifest_row(  # noqa: PLR0913
+	model: F3LabelBudgetModelConfig,
+	root: Path,
+	*,
+	budget_id: str,
+	per_class_cap: int | None,
+	subsample_seed: int,
+	metadata: Mapping[str, object],
+) -> dict[str, object]:
+	return {
+		'model_role': model.role,
+		'model_tag': model.model_tag,
+		'budget_id': budget_id,
+		'per_class_cap': None if per_class_cap is None else int(per_class_cap),
+		'subsample_seed': int(subsample_seed),
+		'token_dataset_root': str(root),
+		'train_tokens': str(root / 'train_tokens.npz'),
+		'validation_tokens': str(root / 'validation_tokens.npz'),
+		'metadata_json': str(root / 'token_dataset_metadata.json'),
+		'selected_train_token_count': metadata['selected_train_token_count'],
+		'validation_token_count': metadata['validation_token_count'],
+		'selected_class_counts': metadata['selected_class_counts'],
+		'validation_class_counts': metadata['validation_class_counts'],
+		'paired_identity_hash': metadata['paired_identity_hash'],
+	}
+
+
+def _budget_token_dataset_root(
+	config: F3LabelBudgetConfig,
+	model: F3LabelBudgetModelConfig,
+	*,
+	budget_id: str,
+	subsample_seed: int,
+) -> Path:
+	return (
+		config.output_root
+		/ 'datasets'
+		/ f'model={model.model_tag}'
+		/ f'budget={budget_id}'
+		/ f'subsample_seed={subsample_seed}'
+		/ 'token_dataset'
+	)
+
+
+def _source_dataset(
+	source: Mapping[str, object],
+	key: str,
+) -> F3LithologyTokenDataset:
+	value = source.get(key)
+	if not isinstance(value, F3LithologyTokenDataset):
+		msg = f'source {key} dataset is missing'
+		raise TypeError(msg)
+	return value
+
+
+def _model_by_role(
+	models: Sequence[F3LabelBudgetModelConfig],
+	role: str,
+) -> F3LabelBudgetModelConfig:
+	for model in models:
+		if model.role == role:
+			return model
+	msg = f'missing {role} model'
+	raise ValueError(msg)
+
+
+def _validate_label_budget_model_pair(
+	models: Sequence[F3LabelBudgetModelConfig],
+) -> None:
+	if isinstance(models, str | bytes):
+		msg = f'models must be a sequence of model configs; got {models!r}'
+		raise TypeError(msg)
+	model_tuple = tuple(models)
+	if len(model_tuple) != 2:
+		msg = (
+			'label-budget datasets require exactly baseline and candidate models; '
+			f'got {len(model_tuple)}'
+		)
+		raise ValueError(msg)
+	roles = [model.role for model in model_tuple]
+	if sorted(roles) != ['baseline', 'candidate']:
+		msg = (
+			'label-budget datasets require model roles '
+			f"['baseline', 'candidate']; got {roles!r}"
+		)
+		raise ValueError(msg)
+
+
+def _validate_per_class_caps(values: object) -> tuple[int | None, ...]:
+	if not isinstance(values, Sequence) or isinstance(values, str | bytes):
+		msg = f'per_class_caps must be a sequence; got {values!r}'
+		raise TypeError(msg)
+	caps: list[int | None] = []
+	for value in values:
+		if value is None:
+			caps.append(None)
+			continue
+		caps.append(_validate_positive_int(value, 'per_class_cap'))
+	return tuple(caps)
+
+
+def _write_json(path: Path, payload: Mapping[str, object]) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_text(
+		json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + '\n',
+		encoding='utf-8',
+	)
+
+
+def _read_json(path: Path) -> Mapping[str, object]:
+	with path.open(encoding='utf-8') as file_obj:
+		payload = json.load(file_obj)
+	if not isinstance(payload, Mapping):
+		msg = f'JSON file must contain an object: {path}'
+		raise TypeError(msg)
+	return dict(payload)
+
+
+def _write_text(path: Path, text: str) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_text(text, encoding='utf-8')
+
+
 def _validate_non_empty_str(value: object, label: str) -> str:
 	if not isinstance(value, str) or not value:
 		msg = f'{label} must be a non-empty string; got {value!r}'
@@ -563,14 +1256,20 @@ __all__ = [
 	'F3_M1_MODEL_ROLES',
 	'F3_PAIRED_DELTA_FIELDS',
 	'F3_ROBUSTNESS_CONTRACT_VERSION',
+	'F3LabelBudgetBuildResult',
+	'F3LabelBudgetConfig',
+	'F3LabelBudgetModelConfig',
 	'F3LabelBudgetSpec',
 	'F3PairedMetricRow',
 	'F3RobustnessModelSpec',
 	'F3RobustnessSuiteManifest',
 	'assert_same_token_identity',
 	'budget_subset_metadata',
+	'build_f3_lithology_label_budget_datasets',
 	'class_count_dict',
 	'class_stratified_subset_indices',
+	'label_budget_dry_run_summary',
+	'label_budget_id',
 	'load_token_dataset_npz',
 	'paired_token_identity_hash',
 	'save_token_dataset_npz',

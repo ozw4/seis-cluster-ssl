@@ -36,6 +36,10 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'build_f3_lithology_label_budget_datasets.py': (
+		'--config',
+		'--dry-run',
+	),
 	'build_f3_lithology_comparison_report.py': (
 		'--config',
 		'--dry-run',
