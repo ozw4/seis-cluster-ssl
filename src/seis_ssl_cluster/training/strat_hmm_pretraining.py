@@ -2,101 +2,68 @@
 
 from __future__ import annotations
 
-import json
-import math
-import shutil
-import subprocess
-from collections.abc import Callable, Mapping, Sequence
-from copy import deepcopy
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import TYPE_CHECKING, Literal, cast
+from collections.abc import Callable, Mapping
+from typing import TYPE_CHECKING, Literal
 
 import torch
 
-import seis_ssl_cluster
 from seis_ssl_cluster.data import (
 	NopimsStratPseudoTargetDataset,
-	ZeroMaskConfig,
 	read_manifest_json,
 )
-from seis_ssl_cluster.embedding.extractor import build_model_from_config
 from seis_ssl_cluster.stratigraphy import (
 	OrderedPrototypeHead,
 	discover_pseudo_target_inputs,
-	feature_distillation_loss,
-	structured_hmm_prototype_loss,
-	usage_entropy_floor_loss,
 )
-from seis_ssl_cluster.training.checkpoint import (
-	capture_rng_state,
-	load_checkpoint,
-	restore_rng_state,
-)
+from seis_ssl_cluster.training.checkpoint import load_checkpoint, restore_rng_state
 from seis_ssl_cluster.training.collate import move_batch_to_device
 from seis_ssl_cluster.training.dataloaders import build_strat_pseudo_target_dataloader
 from seis_ssl_cluster.training.mae import prepare_run_directory
+from seis_ssl_cluster.training.strat_hmm.components import (
+	_trainability_metrics,
+	build_strat_hmm_head_only_components,
+	configure_student_trainability,
+)
+from seis_ssl_cluster.training.strat_hmm.losses import (
+	compute_strat_hmm_pretext_losses,
+)
+from seis_ssl_cluster.training.strat_hmm.runtime import (
+	_bool_config,
+	_dataloader_generator_state,
+	_float_config,
+	_int_config,
+	_load_existing_best_score,
+	_mapping,
+	_optional_float_config,
+	_optional_int_config,
+	_optional_positive_int_config,
+	_path_config,
+	_required_tensor,
+	_resolve_device,
+	_restore_dataloader_generator_state,
+	_rng_state_for_step_checkpoint,
+	_rng_state_with_dataloader,
+	_snapshot_run_inputs,
+	_to_json_safe,
+	_trainability_summary_payload,
+	_write_run_metadata,
+	_xyz_config,
+	_zero_mask_from_config,
+)
+from seis_ssl_cluster.training.strat_hmm.state import (
+	StratHmmHeadOnlyComponents,
+	StratHmmResumeState,
+	StratHmmTrainingState,
+	TrainabilitySummary,
+)
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	save_strat_hmm_rolling_checkpoint,
 )
 
 if TYPE_CHECKING:
+	from pathlib import Path
+
 	from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-
-MODEL_GEOMETRY_KEYS = (
-	'name',
-	'in_channels',
-	'out_channels',
-	'patch_size',
-	'encoder_dim',
-	'encoder_depth',
-	'encoder_heads',
-	'decoder_dim',
-	'decoder_depth',
-	'decoder_heads',
-)
-
-
-@dataclass(frozen=True)
-class StratHmmTrainingState:
-	"""Summary state returned from one strat HMM training epoch."""
-
-	epoch: int
-	global_step: int
-	metrics: dict[str, float]
-	last_batch_index: int
-	completed_epoch: bool
-
-
-@dataclass(frozen=True)
-class StratHmmResumeState:
-	"""Resolved checkpoint resume location."""
-
-	start_epoch: int
-	global_step: int
-	skip_batches: int
-
-
-@dataclass(frozen=True)
-class TrainabilitySummary:
-	"""Summary of student MAE trainability after milestone-1 configuration."""
-
-	trainable_parameter_count: int
-	frozen_parameter_count: int
-	trainable_names: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class StratHmmHeadOnlyComponents:
-	"""Trainable components for strat HMM pretext training."""
-
-	student: AmplitudeMAE3D
-	teacher: AmplitudeMAE3D | None
-	head: OrderedPrototypeHead
-	optimizer: torch.optim.Optimizer
-	mae_checkpoint_config: Mapping[str, object]
-	trainability_summary: TrainabilitySummary
 
 
 def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
@@ -335,183 +302,6 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 	return checkpoint_path
 
 
-def build_strat_hmm_head_only_components(
-	config: Mapping[str, object],
-	*,
-	device: torch.device | str,
-) -> StratHmmHeadOnlyComponents:
-	"""Build student MAE, optional teacher, ordered prototype head, and optimizer."""
-	resolved_device = torch.device(device)
-	student_config = _mapping(config, 'student')
-	loss_config = _mapping(config, 'loss')
-	unfreeze_top_blocks = _int_config(
-		student_config,
-		'unfreeze_top_blocks',
-		0,
-	)
-	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
-	if unfreeze_top_blocks > 0 and distillation_weight <= 0.0:
-		msg = (
-			'loss.distillation_weight must be positive when '
-			'student.unfreeze_top_blocks is greater than 0'
-		)
-		raise ValueError(msg)
-	teacher_payload = load_checkpoint(
-		_path_config(_mapping(config, 'teacher'), 'checkpoint'),
-		map_location='cpu',
-	)
-	teacher_config = _checkpoint_config(teacher_payload)
-	_verify_model_geometry(teacher_config, _mapping(config, 'model'))
-	student = cast('AmplitudeMAE3D', build_model_from_config(teacher_config))
-	init_checkpoint = _student_init_checkpoint(config)
-	init_payload = load_checkpoint(init_checkpoint, map_location='cpu')
-	student.load_state_dict(_model_state_dict(init_payload))
-	trainability_summary = configure_student_trainability(
-		student,
-		unfreeze_top_blocks=unfreeze_top_blocks,
-	)
-	student.to(resolved_device)
-	student.eval()
-
-	teacher = None
-	if distillation_weight > 0.0:
-		teacher = cast('AmplitudeMAE3D', build_model_from_config(teacher_config))
-		teacher.load_state_dict(_model_state_dict(teacher_payload))
-		teacher.requires_grad_(requires_grad=False)
-		teacher.to(resolved_device)
-		teacher.eval()
-
-	head_config = _mapping(config, 'head')
-	head = OrderedPrototypeHead(
-		feature_dim=student.encoder_dim,
-		num_prototypes=_int_config(head_config, 'num_prototypes', 1),
-		projection_dim=_optional_int_config(head_config, 'projection_dim'),
-		temperature=_float_config(head_config, 'temperature', 0.1),
-		normalize=_bool_config(head_config, 'normalize', default=True),
-	).to(resolved_device)
-	param_groups = _optimizer_param_groups(
-		student=student,
-		head=head,
-		train_config=_mapping(config, 'train'),
-	)
-	if not param_groups:
-		msg = 'ordered prototype head has no trainable parameters'
-		raise ValueError(msg)
-	train_config = _mapping(config, 'train')
-	optimizer = torch.optim.AdamW(
-		param_groups,
-		weight_decay=_float_config(train_config, 'weight_decay', 0.05),
-	)
-	return StratHmmHeadOnlyComponents(
-		student=student,
-		teacher=teacher,
-		head=head,
-		optimizer=optimizer,
-		mae_checkpoint_config=_extraction_compatible_config(
-			teacher_config,
-			output_root=_path_config(_mapping(config, 'paths'), 'output_root'),
-			strat_data_config=_mapping(config, 'data'),
-			strat_zero_mask_config=_mapping(config, 'zero_mask'),
-		),
-		trainability_summary=trainability_summary,
-	)
-
-
-def configure_student_trainability(
-	model: AmplitudeMAE3D,
-	*,
-	unfreeze_top_blocks: int,
-) -> TrainabilitySummary:
-	"""Freeze all student params, then unfreeze only the last N encoder blocks."""
-	if isinstance(unfreeze_top_blocks, bool) or not isinstance(
-		unfreeze_top_blocks,
-		int,
-	):
-		msg = f'unfreeze_top_blocks must be an integer; got {unfreeze_top_blocks!r}'
-		raise TypeError(msg)
-	if unfreeze_top_blocks < 0:
-		msg = f'unfreeze_top_blocks must be nonnegative; got {unfreeze_top_blocks!r}'
-		raise ValueError(msg)
-	if unfreeze_top_blocks > model.encoder.depth:
-		msg = (
-			'unfreeze_top_blocks must be less than or equal to '
-			f'model.encoder.depth ({model.encoder.depth}); got {unfreeze_top_blocks}'
-		)
-		raise ValueError(msg)
-
-	for parameter in model.parameters():
-		parameter.requires_grad_(requires_grad=False)
-	if unfreeze_top_blocks > 0:
-		for layer in model.encoder.layers[-unfreeze_top_blocks:]:
-			for parameter in layer.parameters():
-				parameter.requires_grad_(requires_grad=True)
-
-	trainable_names = tuple(
-		name for name, parameter in model.named_parameters() if parameter.requires_grad
-	)
-	trainable_count = sum(
-		parameter.numel() for parameter in model.parameters() if parameter.requires_grad
-	)
-	frozen_count = sum(
-		parameter.numel()
-		for parameter in model.parameters()
-		if not parameter.requires_grad
-	)
-	return TrainabilitySummary(
-		trainable_parameter_count=trainable_count,
-		frozen_parameter_count=frozen_count,
-		trainable_names=trainable_names,
-	)
-
-
-def _optimizer_param_groups(
-	*,
-	student: AmplitudeMAE3D,
-	head: OrderedPrototypeHead,
-	train_config: Mapping[str, object],
-) -> list[dict[str, object]]:
-	head_params = [
-		parameter for parameter in head.parameters() if parameter.requires_grad
-	]
-	encoder_params = [
-		parameter
-		for parameter in student.encoder.parameters()
-		if parameter.requires_grad
-	]
-	param_groups: list[dict[str, object]] = []
-	if head_params:
-		param_groups.append(
-			{
-				'params': head_params,
-				'lr': _float_config(train_config, 'lr', 3.0e-4),
-				'name': 'head',
-			},
-		)
-	if encoder_params:
-		param_groups.append(
-			{
-				'params': encoder_params,
-				'lr': _float_config(train_config, 'encoder_lr', 3.0e-5),
-				'name': 'encoder',
-			},
-		)
-	_trainable_ids = {
-		id(parameter)
-		for module in (student, head)
-		for parameter in module.parameters()
-		if parameter.requires_grad
-	}
-	_group_ids = {
-		id(parameter)
-		for group in param_groups
-		for parameter in cast('Sequence[torch.nn.Parameter]', group['params'])
-	}
-	if _group_ids != _trainable_ids:
-		msg = 'optimizer parameter groups do not exactly match trainable parameters'
-		raise ValueError(msg)
-	return param_groups
-
-
 def train_strat_hmm_head_only_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	*,
 	student: AmplitudeMAE3D,
@@ -567,7 +357,7 @@ def train_strat_hmm_head_only_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR091
 					valid_mask=_required_tensor(batch, 'local_valid_mask'),
 				)
 		with torch.amp.autocast('cuda', enabled=amp_enabled):
-			losses = _strat_head_losses(
+			losses = compute_strat_hmm_pretext_losses(
 				head=head,
 				encoded=encoded,
 				teacher_encoded=teacher_encoded,
@@ -646,168 +436,6 @@ def train_strat_hmm_head_only_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR091
 	)
 
 
-def _strat_head_losses(  # noqa: PLR0913
-	*,
-	head: OrderedPrototypeHead,
-	encoded: Mapping[str, object],
-	teacher_encoded: Mapping[str, object] | None,
-	batch: Mapping[str, object],
-	loss_config: Mapping[str, object],
-	pseudo_target_config: Mapping[str, object],
-) -> dict[str, torch.Tensor]:
-	tokens = _encoded_tokens(encoded)
-	logits = head(tokens).logits
-	labels = _flatten_token_tensor(
-		_required_tensor(batch, 'strat_labels'),
-		logits,
-		'strat_labels',
-	).long()
-	confidence = _flatten_token_tensor(
-		_required_tensor(batch, 'strat_confidence'),
-		logits,
-		'strat_confidence',
-	).to(dtype=logits.dtype)
-	valid_mask = _flatten_token_tensor(
-		_required_tensor(batch, 'strat_valid_mask'),
-		logits,
-		'strat_valid_mask',
-	).bool()
-	distillation_valid_mask = valid_mask
-	token_valid_mask = encoded.get('token_valid_mask')
-	if token_valid_mask is not None:
-		student_valid_mask = _encoded_token_valid_mask(token_valid_mask, logits)
-		valid_mask = valid_mask & student_valid_mask
-		distillation_valid_mask = distillation_valid_mask & student_valid_mask
-	if teacher_encoded is not None:
-		teacher_token_valid_mask = teacher_encoded.get('token_valid_mask')
-		if teacher_token_valid_mask is not None:
-			teacher_valid_mask = _encoded_token_valid_mask(
-				teacher_token_valid_mask,
-				logits,
-			)
-			distillation_valid_mask = distillation_valid_mask & teacher_valid_mask
-	min_confidence = _float_config(pseudo_target_config, 'min_confidence', 0.0)
-	if min_confidence > 0.0:
-		valid_mask = valid_mask & confidence.ge(min_confidence)
-
-	prototype_loss = structured_hmm_prototype_loss(
-		logits,
-		labels,
-		valid_mask=valid_mask,
-		confidence=confidence,
-	)
-	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
-	if usage_weight > 0.0:
-		probs = torch.nn.functional.softmax(logits, dim=-1)
-		entropy_floor = loss_config.get('entropy_floor')
-		if entropy_floor is None:
-			# Prompt-07 default: a weak half-uniform floor if usage loss is enabled.
-			entropy_floor_value = 0.5 * math.log(logits.shape[-1])
-		else:
-			entropy_floor_value = float(entropy_floor)
-		usage_loss = usage_entropy_floor_loss(
-			probs,
-			valid_mask=valid_mask,
-			entropy_floor=entropy_floor_value,
-		)
-	else:
-		probs = torch.nn.functional.softmax(logits, dim=-1)
-		usage_loss = logits.new_zeros(())
-	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
-	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
-	if distillation_weight > 0.0:
-		if teacher_encoded is None:
-			msg = 'teacher encoded tokens are required for feature distillation'
-			raise ValueError(msg)
-		distillation_loss = feature_distillation_loss(
-			tokens,
-			_encoded_tokens(teacher_encoded),
-			valid_mask=distillation_valid_mask,
-		)
-	else:
-		distillation_loss = logits.new_zeros(())
-	total_loss = (
-		prototype_weight * prototype_loss
-		+ usage_weight * usage_loss
-		+ distillation_weight * distillation_loss
-	)
-	return {
-		'loss': total_loss,
-		'loss_prototype': prototype_loss,
-		'loss_usage': usage_loss,
-		'loss_distillation': distillation_loss,
-		'valid_supervised_token_fraction': valid_mask.float().mean(),
-		'valid_distillation_token_fraction': distillation_valid_mask.float().mean(),
-		'target_usage_entropy': _target_usage_entropy(
-			labels,
-			valid_mask,
-			num_prototypes=logits.shape[-1],
-		),
-		'prototype_usage_entropy': _prototype_usage_entropy(probs, valid_mask),
-	}
-
-
-def _encoded_tokens(encoded: Mapping[str, object]) -> torch.Tensor:
-	value = encoded.get('tokens')
-	if not isinstance(value, torch.Tensor):
-		msg = 'encoded output is missing tensor key "tokens"'
-		raise TypeError(msg)
-	return value
-
-
-def _encoded_token_valid_mask(value: object, logits: torch.Tensor) -> torch.Tensor:
-	if not isinstance(value, torch.Tensor):
-		msg = 'encoded token_valid_mask must be a tensor or None'
-		raise TypeError(msg)
-	mask = value.bool()
-	if tuple(mask.shape) != tuple(logits.shape[:-1]):
-		msg = (
-			'encoded token_valid_mask shape must match token logits prefix; '
-			f'got {tuple(mask.shape)!r}, expected {tuple(logits.shape[:-1])!r}'
-		)
-		raise ValueError(msg)
-	return mask
-
-
-def _flatten_token_tensor(
-	tensor: torch.Tensor,
-	logits: torch.Tensor,
-	name: str,
-) -> torch.Tensor:
-	if tensor.shape[0] != logits.shape[0]:
-		msg = f'{name} batch dimension must match logits'
-		raise ValueError(msg)
-	return tensor.reshape(logits.shape[0], -1)
-
-
-def _target_usage_entropy(
-	labels: torch.Tensor,
-	valid_mask: torch.Tensor,
-	*,
-	num_prototypes: int,
-) -> torch.Tensor:
-	selected = labels[valid_mask]
-	if selected.numel() == 0:
-		return labels.new_tensor(0.0, dtype=torch.float32)
-	counts = torch.bincount(
-		selected.clamp_min(0),
-		minlength=num_prototypes,
-	).to(dtype=torch.float32, device=labels.device)
-	probs = counts / counts.sum().clamp_min(1.0)
-	return -(probs * (probs + 1.0e-8).log()).sum()
-
-
-def _prototype_usage_entropy(
-	probs: torch.Tensor,
-	valid_mask: torch.Tensor,
-) -> torch.Tensor:
-	selected = probs.reshape(-1, probs.shape[-1])[valid_mask.reshape(-1)]
-	if selected.numel() == 0:
-		return probs.new_zeros(())
-	q_bar = selected.mean(dim=0)
-	return -(q_bar * (q_bar + 1.0e-8).log()).sum()
-
-
 def _clip_gradients(  # noqa: PLR0913
 	student: torch.nn.Module,
 	head: torch.nn.Module,
@@ -831,23 +459,6 @@ def _clip_gradients(  # noqa: PLR0913
 		f'epoch {epoch}, step {global_step}, batch {batch_index}'
 	)
 	raise FloatingPointError(msg)
-
-
-def _trainability_metrics(summary: TrainabilitySummary) -> dict[str, float]:
-	return {
-		'trainable_parameter_count': float(summary.trainable_parameter_count),
-		'frozen_parameter_count': float(summary.frozen_parameter_count),
-	}
-
-
-def _trainability_summary_payload(
-	summary: TrainabilitySummary,
-) -> dict[str, object]:
-	return {
-		'trainable_parameter_count': summary.trainable_parameter_count,
-		'frozen_parameter_count': summary.frozen_parameter_count,
-		'trainable_names': list(summary.trainable_names),
-	}
 
 
 def _restore_strat_hmm_checkpoint(  # noqa: PLR0913
@@ -1098,370 +709,6 @@ def _first_compatibility_mismatch(
 		elif left_value != right_value:
 			return label
 	return ''
-
-
-def _rng_state_for_step_checkpoint(
-	*,
-	dataloader: torch.utils.data.DataLoader,
-	epoch_start_dataloader_rng_state: torch.Tensor,
-	batch_index: int,
-) -> dict[str, object]:
-	if batch_index >= len(dataloader) - 1:
-		return _rng_state_with_dataloader(dataloader)
-	return _rng_state_with_dataloader(
-		dataloader,
-		dataloader_generator_state=epoch_start_dataloader_rng_state,
-	)
-
-
-def _rng_state_with_dataloader(
-	dataloader: torch.utils.data.DataLoader,
-	*,
-	dataloader_generator_state: torch.Tensor | None = None,
-) -> dict[str, object]:
-	rng_state = capture_rng_state()
-	rng_state['dataloader_generator'] = (
-		_dataloader_generator_state(dataloader)
-		if dataloader_generator_state is None
-		else dataloader_generator_state.clone()
-	)
-	return rng_state
-
-
-def _dataloader_generator_state(
-	dataloader: torch.utils.data.DataLoader,
-) -> torch.Tensor:
-	generator = getattr(dataloader, 'generator', None)
-	if not isinstance(generator, torch.Generator):
-		msg = 'strat HMM dataloader must expose a torch.Generator for resume'
-		raise TypeError(msg)
-	return generator.get_state().clone()
-
-
-def _restore_dataloader_generator_state(
-	*,
-	payload: Mapping[str, object],
-	dataloader: torch.utils.data.DataLoader,
-) -> None:
-	rng_state = payload['rng_state']
-	if not isinstance(rng_state, Mapping):
-		msg = 'resume checkpoint rng_state must be a mapping'
-		raise TypeError(msg)
-	generator_state = rng_state['dataloader_generator']
-	if not isinstance(generator_state, torch.Tensor):
-		msg = 'resume checkpoint rng_state.dataloader_generator must be a tensor'
-		raise TypeError(msg)
-	generator = getattr(dataloader, 'generator', None)
-	if not isinstance(generator, torch.Generator):
-		msg = 'strat HMM dataloader must expose a torch.Generator for resume'
-		raise TypeError(msg)
-	generator.set_state(generator_state.cpu())
-
-
-def _checkpoint_config(payload: Mapping[str, object]) -> Mapping[str, object]:
-	value = payload.get('config')
-	if not isinstance(value, Mapping):
-		msg = 'teacher checkpoint is missing MAE resolved config'
-		raise TypeError(msg)
-	return cast('Mapping[str, object]', value)
-
-
-def _model_state_dict(payload: Mapping[str, object]) -> Mapping[str, torch.Tensor]:
-	value = payload.get('model_state_dict')
-	if not isinstance(value, Mapping):
-		msg = 'checkpoint is missing model_state_dict'
-		raise TypeError(msg)
-	return cast('Mapping[str, torch.Tensor]', value)
-
-
-def _verify_model_geometry(
-	teacher_config: Mapping[str, object],
-	resolved_model_config: Mapping[str, object],
-) -> None:
-	teacher_model = _mapping(teacher_config, 'model')
-	mismatches = [
-		f'{key}: checkpoint={teacher_model.get(key)!r}, '
-		f'resolved={resolved_model_config.get(key)!r}'
-		for key in MODEL_GEOMETRY_KEYS
-		if _geometry_value(teacher_model.get(key))
-		!= _geometry_value(
-			resolved_model_config.get(key),
-		)
-	]
-	if mismatches:
-		msg = 'teacher checkpoint model geometry does not match config: '
-		msg += '; '.join(mismatches)
-		raise ValueError(msg)
-
-
-def _geometry_value(value: object) -> object:
-	if isinstance(value, tuple):
-		return list(value)
-	return value
-
-
-def _student_init_checkpoint(config: Mapping[str, object]) -> Path:
-	student = _mapping(config, 'student')
-	value = student.get('init_checkpoint')
-	if value is None:
-		return _path_config(_mapping(config, 'teacher'), 'checkpoint')
-	return Path(_non_empty_string(value, 'student.init_checkpoint'))
-
-
-def _extraction_compatible_config(
-	teacher_config: Mapping[str, object],
-	*,
-	output_root: Path,
-	strat_data_config: Mapping[str, object],
-	strat_zero_mask_config: Mapping[str, object],
-) -> Mapping[str, object]:
-	result = deepcopy(dict(teacher_config))
-	paths = dict(_mapping(result, 'paths'))
-	paths['output_root'] = str(output_root)
-	result['paths'] = paths
-	data = dict(_mapping(result, 'data'))
-	for key in ('normalized_clip_abs', 'amplitude_agc'):
-		if key in strat_data_config:
-			data[key] = deepcopy(strat_data_config[key])
-	result['data'] = data
-	result['zero_mask'] = deepcopy(dict(strat_zero_mask_config))
-	return result
-
-
-def _load_existing_best_score(output_root: Path) -> float | None:
-	best_path = output_root / 'best.pt'
-	if not best_path.is_file():
-		return None
-	payload = load_checkpoint(best_path, map_location='cpu')
-	metrics = payload.get('metrics')
-	if not isinstance(metrics, Mapping):
-		return None
-	loss = metrics.get('loss')
-	if isinstance(loss, int | float) and not isinstance(loss, bool):
-		score = float(loss)
-		if math.isfinite(score):
-			return score
-	return None
-
-
-def _zero_mask_from_config(config: Mapping[str, object]) -> ZeroMaskConfig:
-	value = _mapping(config, 'zero_mask')
-	zero_mask = ZeroMaskConfig(
-		enabled=_bool_config(value, 'enabled', default=True),
-		zero_atol=_float_config(value, 'zero_atol', 0.0),
-		z_sample_influence_radius=_int_config(
-			value,
-			'z_sample_influence_radius',
-			16,
-		),
-		xy_trace_influence_radius=_int_config(
-			value,
-			'xy_trace_influence_radius',
-			1,
-		),
-	)
-	zero_mask.validate()
-	return zero_mask
-
-
-def _snapshot_run_inputs(
-	*,
-	output_root: Path,
-	config: Mapping[str, object],
-	overwrite: bool = False,
-) -> None:
-	_write_json(
-		output_root / 'resolved_config.json',
-		_to_json_safe(config),
-		overwrite=overwrite,
-	)
-	_write_json(
-		output_root / 'run_metadata.json',
-		_run_metadata_payload(),
-		overwrite=overwrite,
-	)
-
-
-def _write_run_metadata(
-	*,
-	output_root: Path,
-	trainability_summary: TrainabilitySummary,
-	overwrite: bool,
-) -> None:
-	payload = _run_metadata_payload()
-	payload['trainability_summary'] = _trainability_summary_payload(
-		trainability_summary,
-	)
-	_write_json(output_root / 'run_metadata.json', payload, overwrite=overwrite)
-
-
-def _run_metadata_payload() -> dict[str, object]:
-	return {
-		'created_at_utc': datetime.now(timezone.utc).isoformat(),
-		'git_commit': _git_commit(),
-		'package_version': getattr(seis_ssl_cluster, '__version__', None),
-	}
-
-
-def _write_json(path: Path, payload: object, *, overwrite: bool = False) -> None:
-	path.parent.mkdir(parents=True, exist_ok=True)
-	if path.exists() and not overwrite:
-		return
-	text = json.dumps(payload, indent=2, sort_keys=True, allow_nan=False)
-	path.write_text(f'{text}\n', encoding='utf-8')
-
-
-def _git_commit() -> str | None:
-	git = shutil.which('git')
-	if git is None:
-		return None
-	try:
-		return subprocess.check_output(  # noqa: S603
-			[git, 'rev-parse', 'HEAD'],
-			cwd=Path(__file__).resolve().parents[3],
-			text=True,
-			stderr=subprocess.DEVNULL,
-		).strip()
-	except (OSError, subprocess.CalledProcessError):
-		return None
-
-
-def _resolve_device(train_config: Mapping[str, object]) -> torch.device:
-	device_name = train_config.get('device')
-	if device_name is None or device_name == 'auto':
-		return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-	if not isinstance(device_name, str):
-		msg = f'train.device must be a string; got {device_name!r}'
-		raise TypeError(msg)
-	if device_name not in {'cpu', 'cuda'}:
-		msg = 'train.device must be "auto", "cpu", or "cuda"'
-		raise ValueError(msg)
-	device = torch.device(device_name)
-	if device.type == 'cuda' and not torch.cuda.is_available():
-		msg = 'train.device requested CUDA, but CUDA is not available'
-		raise ValueError(msg)
-	return device
-
-
-def _required_tensor(batch: Mapping[str, object], key: str) -> torch.Tensor:
-	value = batch.get(key)
-	if not isinstance(value, torch.Tensor):
-		msg = f'batch key {key!r} must be a tensor'
-		raise TypeError(msg)
-	return value
-
-
-def _mapping(parent: Mapping[str, object], key: str) -> Mapping[str, object]:
-	value = parent.get(key)
-	if not isinstance(value, Mapping):
-		msg = f'{key} must be a mapping'
-		raise TypeError(msg)
-	return cast('Mapping[str, object]', value)
-
-
-def _non_empty_string(value: object, name: str) -> str:
-	if not isinstance(value, str) or not value:
-		msg = f'{name} must be a non-empty string; got {value!r}'
-		raise TypeError(msg)
-	return value
-
-
-def _path_config(config: Mapping[str, object], key: str) -> Path:
-	return Path(_non_empty_string(config.get(key), key))
-
-
-def _int_config(config: Mapping[str, object], key: str, default: int) -> int:
-	value = config.get(key, default)
-	if isinstance(value, bool) or not isinstance(value, int):
-		msg = f'{key} must be an integer; got {value!r}'
-		raise TypeError(msg)
-	return int(value)
-
-
-def _optional_int_config(config: Mapping[str, object], key: str) -> int | None:
-	value = config.get(key)
-	if value is None:
-		return None
-	if isinstance(value, bool) or not isinstance(value, int):
-		msg = f'{key} must be an integer or None; got {value!r}'
-		raise TypeError(msg)
-	return int(value)
-
-
-def _optional_positive_int_config(
-	config: Mapping[str, object],
-	key: str,
-) -> int | None:
-	value = _optional_int_config(config, key)
-	if value is not None and value <= 0:
-		msg = f'{key} must be a positive integer or None; got {value!r}'
-		raise ValueError(msg)
-	return value
-
-
-def _float_config(config: Mapping[str, object], key: str, default: float) -> float:
-	value = config.get(key, default)
-	if isinstance(value, bool) or not isinstance(value, int | float):
-		msg = f'{key} must be a float; got {value!r}'
-		raise TypeError(msg)
-	result = float(value)
-	if not math.isfinite(result):
-		msg = f'{key} must be finite; got {value!r}'
-		raise ValueError(msg)
-	return result
-
-
-def _optional_float_config(
-	config: Mapping[str, object],
-	key: str,
-) -> float | None:
-	value = config.get(key)
-	if value is None:
-		return None
-	return _float_config(config, key, 0.0)
-
-
-def _bool_config(
-	config: Mapping[str, object],
-	key: str,
-	*,
-	default: bool,
-) -> bool:
-	value = config.get(key, default)
-	if not isinstance(value, bool):
-		msg = f'{key} must be a boolean; got {value!r}'
-		raise TypeError(msg)
-	return value
-
-
-def _xyz_config(
-	config: Mapping[str, object],
-	key: str,
-) -> tuple[int, int, int]:
-	value = config.get(key)
-	if (
-		not isinstance(value, Sequence)
-		or isinstance(value, str)
-		or len(value) != 3
-		or any(isinstance(axis, bool) or not isinstance(axis, int) for axis in value)
-	):
-		msg = f'{key} must be a length-3 integer sequence; got {value!r}'
-		raise TypeError(msg)
-	xyz = tuple(int(axis) for axis in value)
-	if any(axis <= 0 for axis in xyz):
-		msg = f'{key} values must be positive; got {xyz!r}'
-		raise ValueError(msg)
-	return cast('tuple[int, int, int]', xyz)
-
-
-def _to_json_safe(value: object) -> object:
-	if isinstance(value, Mapping):
-		return {str(key): _to_json_safe(child) for key, child in value.items()}
-	if isinstance(value, list | tuple):
-		return [_to_json_safe(child) for child in value]
-	if isinstance(value, Path):
-		return str(value)
-	return value
 
 
 __all__ = [
