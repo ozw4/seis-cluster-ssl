@@ -19,7 +19,7 @@ F3_STRAT_HMM_M1_DISTILL_ONLY_MODEL_TAG = (
 	'strat_hmm_m1_guardrail_distill_only'
 )
 F3_STRAT_HMM_M1_SHUFFLED_HMM_MODEL_TAG = (
-	'strat_hmm_m1_guardrail_shuffled_hmm'
+	'strat_hmm_m1_guardrail_shuffled_hmm_seed42'
 )
 F3_STRAT_HMM_M1_GUARDRAIL_ROLES = (
 	'baseline',
