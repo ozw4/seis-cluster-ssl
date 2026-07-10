@@ -29,7 +29,7 @@ model:
   decoder_depth: 4
   decoder_heads: 4
 pseudo_targets:
-  input_dir: /workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_m1_guardrail_shuffled_hmm
+  input_dir: /workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_m1_guardrail_shuffled_hmm_seed42
   k: 6
   min_confidence: 0.0
 teacher:

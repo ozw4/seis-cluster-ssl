@@ -18,7 +18,7 @@ valid-token mask, global label histogram, and confidence values, but assigns
 the label/confidence pairs to valid tokens using one deterministic global
 shuffle. It answers: *does the ordered spatial/stratigraphic assignment matter?*
 It does not test the label-count distribution, because that distribution is
-held fixed. The shuffle seed is `188`; repeated builds must produce
+held fixed. The shuffle seed is `42`; repeated builds must produce
 byte-equivalent arrays and metadata apart from explicitly recorded provenance
 fields.
 
@@ -55,6 +55,10 @@ The files are ordered by the intended workflow:
    isolated roots for both guardrails.
 7. `08_summarize_guardrails.yaml` compares the five primary metrics:
    `macro_f1`, `mean_iou`, `balanced_accuracy`, `accuracy`, and `weighted_f1`.
+8. `14_build_distillation_only_label_budget_datasets.yaml` through
+   `17_run_shuffled_hmm_label_budget_probes.yaml` run paired `cap25`, `cap100`,
+   `cap500`, and `full` probes. `13_summarize_guardrails.yaml` consumes their
+   existing `summary_by_budget.csv` and suite-manifest artifacts.
 
 The shuffled-target builder and training workflow reuse the existing
 milestone-1 artifact and trainer contracts.
@@ -106,10 +110,10 @@ python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
   --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/13_summarize_guardrails.yaml
 ```
 
-With `suite.strict: false`, missing model metrics or configured robustness JSON
+With `suite.strict: false`, missing model metrics or configured robustness
 artifacts are recorded as `pending`. With `suite.strict: true`, any configured
-missing artifact is an error. Label-budget and split/index summaries are
-included when their optional JSON paths are configured and available.
+missing artifact is an error. Label-budget summaries are read directly from
+the CSV and manifest artifacts emitted by the existing robustness workflow.
 
 ## Shuffled-HMM runbook
 
@@ -150,6 +154,43 @@ python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
 
 python proc/seis_ssl_cluster/build_f3_lithology_report.py \
   --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/12_build_shuffled_hmm_report.yaml
+```
+
+## Paired low-budget runbook
+
+Each guardrail suite uses the baseline token dataset, the same subsample seeds
+as the milestone-1 label-budget suite, and budgets `cap25`, `cap100`, `cap500`,
+and `full`. The shared baseline-selected indices make the candidate-minus-
+guardrail deltas directly paired; the final summary verifies their identity
+hashes before reporting them.
+
+Build and run the distillation-only suite, then emit its standard CSV/Markdown
+summary:
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_label_budget_datasets.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/14_build_distillation_only_label_budget_datasets.yaml
+
+python proc/seis_ssl_cluster/run_f3_lithology_label_budget_probes.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/15_run_distillation_only_label_budget_probes.yaml \
+  --only-missing
+
+python proc/seis_ssl_cluster/summarize_f3_lithology_label_budget_robustness.py \
+  --suite-root /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/guardrails/strat_hmm_m1_guardrails_v1/label_budget/distillation_only
+```
+
+Repeat for shuffled-HMM:
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_label_budget_datasets.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/16_build_shuffled_hmm_label_budget_datasets.yaml
+
+python proc/seis_ssl_cluster/run_f3_lithology_label_budget_probes.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/17_run_shuffled_hmm_label_budget_probes.yaml \
+  --only-missing
+
+python proc/seis_ssl_cluster/summarize_f3_lithology_label_budget_robustness.py \
+  --suite-root /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/guardrails/strat_hmm_m1_guardrails_v1/label_budget/shuffled_hmm
 ```
 
 ## Artifact isolation

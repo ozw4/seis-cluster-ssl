@@ -36,6 +36,7 @@ F3_STRAT_HMM_M1_GUARDRAIL_METRICS = (
 	'mean_iou',
 )
 F3_STRAT_HMM_M1_PRIMARY_METRIC = 'macro_f1'
+F3_STRAT_HMM_M1_LOW_BUDGET_IDS = ('cap25', 'cap100', 'cap500', 'full')
 F3_STRAT_HMM_M1_CLASS_F1_METRICS = tuple(
 	f'class_{class_id}_f1' for class_id in range(6)
 )
@@ -87,7 +88,7 @@ class F3GuardrailResultInput:
 	role: str
 	model_tag: str
 	metrics_json: Path
-	label_budget_summary_json: Path | None = None
+	label_budget_summary_csv: Path | None = None
 	label_budget_suite_manifest_json: Path | None = None
 	split_index_summary_json: Path | None = None
 
@@ -245,13 +246,13 @@ def f3_guardrail_summary_config_from_mapping(
 			{
 				'model_tag',
 				'metrics_json',
-				'label_budget_summary_json',
+				'label_budget_summary_csv',
 				'label_budget_suite_manifest_json',
 				'split_index_summary_json',
 			},
 			f'models.{role}',
 			allow_missing={
-				'label_budget_summary_json',
+				'label_budget_summary_csv',
 				'label_budget_suite_manifest_json',
 				'split_index_summary_json',
 			},
@@ -261,9 +262,9 @@ def f3_guardrail_summary_config_from_mapping(
 				role=role,
 				model_tag=_stable_model_tag(role, raw, prefix=f'models.{role}'),
 				metrics_json=_absolute_path(raw, 'metrics_json', f'models.{role}'),
-				label_budget_summary_json=_optional_absolute_path(
+				label_budget_summary_csv=_optional_absolute_path(
 					raw,
-					'label_budget_summary_json',
+					'label_budget_summary_csv',
 					f'models.{role}',
 				),
 				label_budget_suite_manifest_json=_optional_absolute_path(
@@ -428,8 +429,8 @@ def _robustness_payload(
 	warnings: list[str],
 ) -> dict[str, object]:
 	return {
-		'label_budget': _optional_json_artifact(
-			model.label_budget_summary_json,
+		'label_budget': _optional_label_budget_csv_artifact(
+			model.label_budget_summary_csv,
 			strict=strict,
 			label=f'{model.role} label-budget summary',
 			warnings=warnings,
@@ -447,6 +448,51 @@ def _robustness_payload(
 			warnings=warnings,
 		),
 	}
+
+
+def _optional_label_budget_csv_artifact(
+	path: Path | None,
+	*,
+	strict: bool,
+	label: str,
+	warnings: list[str],
+) -> dict[str, object]:
+	if path is None:
+		return {'status': 'not_configured', 'summary': None}
+	if not path.is_file():
+		if strict:
+			raise FileNotFoundError(f'missing {label}: {path}')
+		warnings.append(f'{label} is pending: {path}')
+		return {'status': 'pending', 'summary': None}
+	return {'status': 'complete', 'summary': _read_label_budget_csv(path)}
+
+
+def _read_label_budget_csv(path: Path) -> dict[str, object]:
+	with path.open(newline='', encoding='utf-8') as handle:
+		reader = csv.DictReader(handle)
+		fieldnames = set(reader.fieldnames or ())
+		required = {'budget_id', 'mean_delta_macro_f1'}
+		missing = sorted(required - fieldnames)
+		if missing:
+			raise ValueError(
+				f'{path}: missing label-budget summary column(s): {missing!r}',
+			)
+		rows: list[dict[str, object]] = []
+		for index, raw in enumerate(reader):
+			row: dict[str, object] = {'budget_id': raw.get('budget_id', '')}
+			for metric in ('macro_f1', 'mean_iou', 'balanced_accuracy'):
+				key = f'mean_delta_{metric}'
+				value = raw.get(key)
+				if value in (None, ''):
+					continue
+				try:
+					row[key] = float(value)
+				except ValueError as exc:
+					raise ValueError(
+						f'{path}: row {index + 2} column {key} must be numeric',
+					) from exc
+			rows.append(row)
+	return {'budgets': rows}
 
 
 def _optional_json_artifact(
@@ -707,7 +753,7 @@ def _low_budget_payload(  # noqa: C901, PLR0912, PLR0915
 	]
 	expected_comparison_keys = {
 		(budget_id, guardrail_role)
-		for budget_id in candidate
+		for budget_id in F3_STRAT_HMM_M1_LOW_BUDGET_IDS
 		for guardrail_role in ('distillation_only', 'shuffled_hmm')
 	}
 	missing_comparison_keys = expected_comparison_keys - verified_comparison_keys
@@ -724,8 +770,6 @@ def _low_budget_payload(  # noqa: C901, PLR0912, PLR0915
 			'label-budget comparisons are missing for expected candidate budgets: '
 			f'{formatted}',
 		)
-	elif not expected_comparison_keys:
-		warnings.append('candidate label-budget summary has no usable budgets')
 	status = (
 		'complete'
 		if all(
@@ -828,7 +872,7 @@ def _label_budget_identity_by_budget(  # noqa: C901, PLR0912
 	return {budget_id: tuple(conditions) for budget_id, conditions in result.items()}
 
 
-def _budget_delta_rows(  # noqa: C901
+def _budget_delta_rows(  # noqa: C901, PLR0912
 	payload: Mapping[str, object],
 	*,
 	role: str,
@@ -850,6 +894,8 @@ def _budget_delta_rows(  # noqa: C901
 			raise TypeError(
 				f'{role} label-budget budgets[{index}].budget_id must be a string',
 			)
+		if budget_id not in F3_STRAT_HMM_M1_LOW_BUDGET_IDS:
+			continue
 		if budget_id in result:
 			raise ValueError(f'{role} label-budget has duplicate budget {budget_id!r}')
 		metrics: dict[str, float] = {}

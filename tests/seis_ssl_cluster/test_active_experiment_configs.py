@@ -151,9 +151,17 @@ F3_STRAT_HMM_M1_ROBUSTNESS_CONFIGS = sorted(
 )
 F3_STRAT_HMM_M1_LABEL_BUDGET_BUILD_CONFIGS = [
 	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '01_build_label_budget_datasets.yaml',
+	F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+	/ '14_build_distillation_only_label_budget_datasets.yaml',
+	F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+	/ '16_build_shuffled_hmm_label_budget_datasets.yaml',
 ]
 F3_STRAT_HMM_M1_LABEL_BUDGET_PROBE_CONFIGS = [
 	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '02_run_label_budget_probes.yaml',
+	F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+	/ '15_run_distillation_only_label_budget_probes.yaml',
+	F3_STRAT_HMM_M1_GUARDRAIL_ROOT
+	/ '17_run_shuffled_hmm_label_budget_probes.yaml',
 ]
 F3_STRAT_HMM_M1_SPLIT_INVENTORY_CONFIGS = [
 	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '04_generate_split_inventories.yaml',

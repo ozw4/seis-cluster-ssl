@@ -56,6 +56,33 @@ python proc/seis_ssl_cluster/build_f3_lithology_report.py \
   --config "$EXP/12_build_shuffled_hmm_report.yaml"
 ```
 
+## Paired low-budget guardrails
+
+Run the existing label-budget pipeline for each guardrail. Both suites use
+`cap25`, `cap100`, `cap500`, and `full`, with the milestone-1 baseline and the
+same subsample seeds so pairing can be verified from the suite manifests.
+
+```bash
+export EXP=experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails
+export ROOT=/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/guardrails/strat_hmm_m1_guardrails_v1/label_budget
+
+python proc/seis_ssl_cluster/build_f3_lithology_label_budget_datasets.py \
+  --config "$EXP/14_build_distillation_only_label_budget_datasets.yaml"
+python proc/seis_ssl_cluster/run_f3_lithology_label_budget_probes.py \
+  --config "$EXP/15_run_distillation_only_label_budget_probes.yaml" \
+  --only-missing
+python proc/seis_ssl_cluster/summarize_f3_lithology_label_budget_robustness.py \
+  --suite-root "$ROOT/distillation_only"
+
+python proc/seis_ssl_cluster/build_f3_lithology_label_budget_datasets.py \
+  --config "$EXP/16_build_shuffled_hmm_label_budget_datasets.yaml"
+python proc/seis_ssl_cluster/run_f3_lithology_label_budget_probes.py \
+  --config "$EXP/17_run_shuffled_hmm_label_budget_probes.yaml" \
+  --only-missing
+python proc/seis_ssl_cluster/summarize_f3_lithology_label_budget_robustness.py \
+  --suite-root "$ROOT/shuffled_hmm"
+```
+
 ## Summarize guardrails
 
 Validate the summary routing, then write the four-model comparison:
@@ -69,8 +96,9 @@ python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
   --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/13_summarize_guardrails.yaml
 ```
 
-With `suite.strict: false`, absent guardrail metrics are reported as `pending`.
-Use `suite.strict: true` for the final decision so missing configured metrics
-fail rather than being mistaken for evidence. Proceed to method extensions only
-after both guardrail results are complete and support the structured-HMM
-interpretation.
+The final summary reads the low-budget pipeline's `summary_by_budget.csv` and
+`suite_manifest.json` directly. With `suite.strict: false`, absent guardrail
+artifacts are reported as `pending`. Use `suite.strict: true` for the final
+decision so missing configured metrics fail rather than being mistaken for
+evidence. Proceed to method extensions only after both guardrail results are
+complete and support the structured-HMM interpretation.

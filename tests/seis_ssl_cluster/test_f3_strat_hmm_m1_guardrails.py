@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 
 from seis_ssl_cluster.config import load_config
+from seis_ssl_cluster.config.f3_lithology_robustness import (
+	f3_lithology_label_budget_config_from_mapping,
+)
 from seis_ssl_cluster.config.pretraining import resolve_strat_hmm_pretext_config
 from seis_ssl_cluster.f3.lithology.guardrails import (
 	F3_STRAT_HMM_M1_BASELINE_MODEL_TAG,
@@ -37,7 +40,6 @@ ROOT = Path('experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails')
 	[
 		'01_train_distillation_only_smoke.yaml',
 		'02_train_distillation_only_full.yaml',
-		'04_train_shuffled_hmm_full.yaml',
 		'07_train_shuffled_hmm_smoke.yaml',
 		'08_train_shuffled_hmm_full.yaml',
 	],
@@ -90,7 +92,7 @@ def test_shuffled_target_contract_resolves_with_preservation_guarantees() -> Non
 	)
 
 	assert config.suite_name == F3_STRAT_HMM_M1_GUARDRAIL_SUITE_NAME
-	assert config.seed == 188
+	assert config.seed == 42
 	assert config.shuffle_scope == 'global_valid_tokens'
 	assert config.source_root != config.output_root
 	assert config.overwrite is False
@@ -112,7 +114,7 @@ def test_training_accepts_generated_shuffled_pseudo_target_artifacts(
 		source_root,
 		shuffled_root,
 		k=3,
-		seed=188,
+		seed=42,
 	)
 	raw['pseudo_targets']['input_dir'] = str(shuffled_root)
 	config = resolve_strat_hmm_pretext_config(raw)
@@ -152,6 +154,49 @@ def test_guardrail_downstream_contracts_have_stable_isolated_names(
 		'strat_hmm_pretext_m1_k6_topblock1_distill' not in job.output_path.parts
 		for job in config.jobs
 	)
+
+
+@pytest.mark.parametrize(
+	('filename', 'expected_model_tag'),
+	[
+		(
+			'14_build_distillation_only_label_budget_datasets.yaml',
+			F3_STRAT_HMM_M1_DISTILL_ONLY_MODEL_TAG,
+		),
+		(
+			'16_build_shuffled_hmm_label_budget_datasets.yaml',
+			F3_STRAT_HMM_M1_SHUFFLED_HMM_MODEL_TAG,
+		),
+	],
+)
+def test_guardrail_label_budget_configs_use_required_paired_conditions(
+	filename: str,
+	expected_model_tag: str,
+) -> None:
+	config = f3_lithology_label_budget_config_from_mapping(
+		load_config(ROOT / filename),
+	)
+
+	assert config.per_class_caps == (25, 100, 500, None)
+	assert config.subsample_seeds == (0, 1, 2, 3, 4)
+	assert config.baseline.model_tag == F3_STRAT_HMM_M1_BASELINE_MODEL_TAG
+	assert config.candidate.model_tag == expected_model_tag
+
+
+def test_guardrail_summary_configures_existing_label_budget_artifacts() -> None:
+	config = f3_guardrail_summary_config_from_mapping(
+		load_config(ROOT / '13_summarize_guardrails.yaml'),
+	)
+	by_role = {model.role: model for model in config.models}
+
+	for role in ('candidate', 'distillation_only', 'shuffled_hmm'):
+		assert by_role[role].label_budget_summary_csv is not None
+		assert by_role[role].label_budget_summary_csv.name == 'summary_by_budget.csv'
+		assert by_role[role].label_budget_suite_manifest_json is not None
+		assert (
+			by_role[role].label_budget_suite_manifest_json.name
+			== 'suite_manifest.json'
+		)
 
 
 def test_guardrail_summary_reports_missing_outputs_as_pending(
@@ -253,9 +298,9 @@ def test_guardrail_low_budget_deltas_are_aggregated(tmp_path: Path) -> None:
 		'distillation_only': 0.04,
 		'shuffled_hmm': 0.02,
 	}.items():
-		path = tmp_path / role / 'label_budget.json'
+		path = tmp_path / role / 'summary_by_budget.csv'
 		_write_label_budget(path, delta=delta)
-		raw['models'][role]['label_budget_summary_json'] = str(path)
+		raw['models'][role]['label_budget_summary_csv'] = str(path)
 		manifest = tmp_path / role / 'suite_manifest.json'
 		_write_label_budget_manifest(manifest, role=role)
 		raw['models'][role]['label_budget_suite_manifest_json'] = str(manifest)
@@ -287,9 +332,9 @@ def test_guardrail_low_budget_requires_expected_budget_overlap(
 		_write_metrics(Path(raw['models'][role]['metrics_json']), offset=0.0)
 	for role in ('candidate', 'distillation_only', 'shuffled_hmm'):
 		budget_ids = ('cap25',) if role == 'candidate' else ('cap100',)
-		summary = tmp_path / role / 'label_budget.json'
+		summary = tmp_path / role / 'summary_by_budget.csv'
 		_write_label_budget(summary, delta=0.1, budget_ids=budget_ids)
-		raw['models'][role]['label_budget_summary_json'] = str(summary)
+		raw['models'][role]['label_budget_summary_csv'] = str(summary)
 		manifest = tmp_path / role / 'suite_manifest.json'
 		_write_label_budget_manifest(manifest, role=role, budget_ids=budget_ids)
 		raw['models'][role]['label_budget_suite_manifest_json'] = str(manifest)
@@ -315,9 +360,9 @@ def test_guardrail_low_budget_rejects_unpaired_subsampling_indices(
 	for role in F3_STRAT_HMM_M1_GUARDRAIL_ROLES:
 		_write_metrics(Path(raw['models'][role]['metrics_json']), offset=0.0)
 	for role in ('candidate', 'distillation_only'):
-		summary = tmp_path / role / 'label_budget.json'
+		summary = tmp_path / role / 'summary_by_budget.csv'
 		_write_label_budget(summary, delta=0.1)
-		raw['models'][role]['label_budget_summary_json'] = str(summary)
+		raw['models'][role]['label_budget_summary_csv'] = str(summary)
 		manifest = tmp_path / role / 'suite_manifest.json'
 		_write_label_budget_manifest(
 			manifest,
@@ -336,9 +381,9 @@ def test_guardrail_low_budget_requires_pairing_provenance(tmp_path: Path) -> Non
 	raw = _summary_config(tmp_path, strict=True)
 	for role in F3_STRAT_HMM_M1_GUARDRAIL_ROLES:
 		_write_metrics(Path(raw['models'][role]['metrics_json']), offset=0.0)
-	path = tmp_path / 'candidate' / 'label_budget.json'
+	path = tmp_path / 'candidate' / 'summary_by_budget.csv'
 	_write_label_budget(path, delta=0.1)
-	raw['models']['candidate']['label_budget_summary_json'] = str(path)
+	raw['models']['candidate']['label_budget_summary_csv'] = str(path)
 
 	with pytest.raises(ValueError, match='requires a suite manifest'):
 		summarize_f3_strat_hmm_m1_guardrails(
@@ -357,9 +402,9 @@ def test_guardrail_low_budget_rejects_manifest_without_expected_model_row(
 	for role in F3_STRAT_HMM_M1_GUARDRAIL_ROLES:
 		_write_metrics(Path(raw['models'][role]['metrics_json']), offset=0.0)
 	for role in ('candidate', 'distillation_only'):
-		summary = tmp_path / role / 'label_budget.json'
+		summary = tmp_path / role / 'summary_by_budget.csv'
 		_write_label_budget(summary, delta=0.1)
-		raw['models'][role]['label_budget_summary_json'] = str(summary)
+		raw['models'][role]['label_budget_summary_csv'] = str(summary)
 		manifest = tmp_path / role / 'suite_manifest.json'
 		_write_label_budget_manifest(
 			manifest,
@@ -453,6 +498,8 @@ def _summary_config(tmp_path: Path, *, strict: bool) -> dict[str, object]:
 	raw['suite']['strict'] = strict
 	for role in F3_STRAT_HMM_M1_GUARDRAIL_ROLES:
 		raw['models'][role]['metrics_json'] = str(tmp_path / role / 'metrics.json')
+		raw['models'][role].pop('label_budget_summary_csv', None)
+		raw['models'][role].pop('label_budget_suite_manifest_json', None)
 	raw['outputs']['output_dir'] = str(tmp_path / 'guardrail_summary')
 	return raw
 
@@ -485,23 +532,26 @@ def _write_label_budget(
 	budget_ids: tuple[str, ...] = ('cap25', 'cap100', 'cap500', 'full'),
 ) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
-	path.write_text(
-		json.dumps(
-			{
-				'budgets': [
-					{
-						'budget_id': budget_id,
-						'mean_delta_macro_f1': delta,
-						'mean_delta_mean_iou': delta - 0.01,
-						'mean_delta_balanced_accuracy': delta + 0.01,
-					}
-					for budget_id in budget_ids
-				],
-			},
+	with path.open('w', newline='', encoding='utf-8') as handle:
+		writer = csv.DictWriter(
+			handle,
+			fieldnames=(
+				'budget_id',
+				'mean_delta_macro_f1',
+				'mean_delta_mean_iou',
+				'mean_delta_balanced_accuracy',
+			),
 		)
-		+ '\n',
-		encoding='utf-8',
-	)
+		writer.writeheader()
+		for budget_id in budget_ids:
+			writer.writerow(
+				{
+					'budget_id': budget_id,
+					'mean_delta_macro_f1': delta,
+					'mean_delta_mean_iou': delta - 0.01,
+					'mean_delta_balanced_accuracy': delta + 0.01,
+				},
+			)
 
 
 def _write_label_budget_manifest(  # noqa: PLR0913
