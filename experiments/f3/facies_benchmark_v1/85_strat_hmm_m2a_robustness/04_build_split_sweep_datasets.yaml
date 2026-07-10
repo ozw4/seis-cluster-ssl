@@ -1,0 +1,34 @@
+suite:
+  # Reuse the M1 six-split inventory; do not regenerate comparison conditions.
+  split_inventory_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/split_index_m1_v1/split_inventory_manifest.json
+  output_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/split_index_m2a_boundary_vs_m1_v1
+models:
+  baseline:
+    model_tag: strat_hmm_pretext_m1_k6_topblock1_distill
+    embeddings_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16
+    checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/best.pt
+  candidate:
+    model_tag: strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill
+    embeddings_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16
+    checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/best.pt
+common:
+  f3_root: /home/dcuser/data/public_data/field/F3
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+  dataset:
+    name: f3_facies_benchmark
+    version: facies_benchmark_v1
+  labels:
+    source_label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
+    source_label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+    class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+    segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+  registry:
+    seismic_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
+    label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+    metadata_json: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_metadata.json
+  tokenization:
+    min_labeled_fraction: 0.5
+    min_majority_fraction: 0.7
+    ignore_z_border_samples: 1
+outputs:
+  overwrite: false

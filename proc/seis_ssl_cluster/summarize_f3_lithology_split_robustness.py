@@ -12,6 +12,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from statistics import mean, median, stdev
 
+from seis_ssl_cluster.cli import load_config_for_cli, resolve_config_for_cli
+from seis_ssl_cluster.config import load_config
+from seis_ssl_cluster.config.f3_lithology_robustness import (
+	f3_lithology_split_summary_config_from_mapping,
+)
+
 STAGE = 'summarize_f3_lithology_split_robustness'
 SPLIT_INVENTORY_ARTIFACT_TYPE = 'f3_lithology_split_inventory_manifest'
 SPLIT_DATASET_ARTIFACT_TYPE = 'f3_lithology_split_sweep_token_dataset_manifest'
@@ -80,10 +86,15 @@ def build_parser() -> argparse.ArgumentParser:
 	parser = argparse.ArgumentParser(
 		description='Summarize paired F3 lithology split/index robustness metrics.',
 	)
-	parser.add_argument(
+	source = parser.add_mutually_exclusive_group(required=True)
+	source.add_argument(
+		'--config',
+		type=Path,
+		help='Path to a YAML summary configuration file.',
+	)
+	source.add_argument(
 		'--suite-root',
 		type=Path,
-		required=True,
 		help=(
 			'Directory containing split_dataset_manifest.json and '
 			'split_probe_run_manifest.json; the dataset manifest must point to '
@@ -102,11 +113,20 @@ def main() -> None:
 	"""Summarize paired split/index probe metrics."""
 	parser = build_parser()
 	args = parser.parse_args()
+	suite_root = args.suite_root
+	if args.config is not None:
+		raw_config = load_config_for_cli(args.config, loader=load_config)
+		config = resolve_config_for_cli(
+			raw_config,
+			resolver=f3_lithology_split_summary_config_from_mapping,
+			config_path=args.config,
+		)
+		suite_root = config.suite_root
 	if args.dry_run:
-		_print_dry_run(args.suite_root)
+		_print_dry_run(suite_root)
 		print('execution: dry-run; split robustness summary skipped')
 		return
-	result = summarize_split_robustness(args.suite_root)
+	result = summarize_split_robustness(suite_root)
 	print(f'f3_lithology_split_summary.paired_rows: {result.paired_metric_count}')
 	print(f'f3_lithology_split_summary.pairs: {result.pair_count}')
 	print(f'f3_lithology_split_summary.paired_metrics_csv: {result.paired_metrics_csv}')

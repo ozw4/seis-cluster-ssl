@@ -78,6 +78,72 @@ class F3LabelBudgetProbeRunConfig:
 	probe_configs: tuple[F3LithologyProbeConfig, ...]
 
 
+@dataclass(frozen=True)
+class F3RobustnessSummaryConfig:
+	"""Resolved paths for a paired robustness summary."""
+
+	suite_name: str
+	suite_root: Path
+	inputs: Mapping[str, Path]
+	reports: Mapping[str, Path]
+
+
+def f3_lithology_label_budget_summary_config_from_mapping(
+	config: Mapping[str, object],
+) -> F3RobustnessSummaryConfig:
+	"""Validate and normalize a label-budget summary config."""
+	return _robustness_summary_config_from_mapping(
+		config,
+		input_names=('suite_manifest', 'probe_run_manifest'),
+		report_names=(
+			'paired_metrics_csv',
+			'paired_deltas_csv',
+			'summary_by_budget_csv',
+			'summary_markdown',
+		),
+		relative_inputs={
+			'suite_manifest': 'suite_manifest.json',
+			'probe_run_manifest': 'probe_run_manifest.json',
+		},
+		relative_reports={
+			'paired_metrics_csv': 'reports/paired_metrics.csv',
+			'paired_deltas_csv': 'reports/paired_deltas.csv',
+			'summary_by_budget_csv': 'reports/summary_by_budget.csv',
+			'summary_markdown': 'reports/summary.md',
+		},
+	)
+
+
+def f3_lithology_split_summary_config_from_mapping(
+	config: Mapping[str, object],
+) -> F3RobustnessSummaryConfig:
+	"""Validate and normalize a split/index summary config."""
+	return _robustness_summary_config_from_mapping(
+		config,
+		input_names=(
+			'split_inventory_manifest',
+			'split_dataset_manifest',
+			'split_probe_run_manifest',
+		),
+		report_names=(
+			'paired_metrics_csv',
+			'paired_deltas_csv',
+			'summary_csv',
+			'summary_markdown',
+		),
+		relative_inputs={
+			'split_dataset_manifest': 'split_dataset_manifest.json',
+			'split_probe_run_manifest': 'split_probe_run_manifest.json',
+		},
+		relative_reports={
+			'paired_metrics_csv': 'reports/split_paired_metrics.csv',
+			'paired_deltas_csv': 'reports/split_paired_deltas.csv',
+			'summary_csv': 'reports/split_summary.csv',
+			'summary_markdown': 'reports/summary.md',
+		},
+	)
+
+
 def f3_m1_example_model_specs() -> tuple[F3RobustnessModelSpec, ...]:
 	"""Return the example MAE baseline and strat-HMM candidate specs."""
 	return (
@@ -915,6 +981,60 @@ def _positive_int_triplet(value: object, label: str) -> tuple[int, int, int]:
 	return (int(triplet[0]), int(triplet[1]), int(triplet[2]))
 
 
+def _robustness_summary_config_from_mapping(
+	config: Mapping[str, object],
+	*,
+	input_names: tuple[str, ...],
+	report_names: tuple[str, ...],
+	relative_inputs: Mapping[str, str],
+	relative_reports: Mapping[str, str],
+) -> F3RobustnessSummaryConfig:
+	_validate_allowed_keys(
+		config,
+		frozenset({'suite', 'inputs', 'reports'}),
+		prefix='config',
+	)
+	suite = _required_mapping(config, 'suite')
+	inputs = _required_mapping(config, 'inputs')
+	reports = _required_mapping(config, 'reports')
+	_validate_allowed_keys(suite, frozenset({'name', 'suite_root'}), prefix='suite')
+	_validate_allowed_keys(inputs, frozenset(input_names), prefix='inputs')
+	_validate_allowed_keys(reports, frozenset(report_names), prefix='reports')
+	suite_root = _required_absolute_path(suite, 'suite_root', prefix='suite')
+	resolved_inputs = {
+		name: _required_absolute_path(inputs, name, prefix='inputs')
+		for name in input_names
+	}
+	resolved_reports = {
+		name: _required_absolute_path(reports, name, prefix='reports')
+		for name in report_names
+	}
+	for name, relative_path in relative_inputs.items():
+		_expected_summary_path(
+			resolved_inputs[name],
+			suite_root / relative_path,
+			label=f'inputs.{name}',
+		)
+	for name, relative_path in relative_reports.items():
+		_expected_summary_path(
+			resolved_reports[name],
+			suite_root / relative_path,
+			label=f'reports.{name}',
+		)
+	return F3RobustnessSummaryConfig(
+		suite_name=_required_str(suite, 'name', prefix='suite'),
+		suite_root=suite_root,
+		inputs=resolved_inputs,
+		reports=resolved_reports,
+	)
+
+
+def _expected_summary_path(actual: Path, expected: Path, *, label: str) -> None:
+	if actual != expected:
+		msg = f'{label} must be {expected}; got {actual}'
+		raise ValueError(msg)
+
+
 def _min_validation_tokens_per_class(value: object) -> dict[str, int]:
 	if not isinstance(value, Mapping):
 		msg = (
@@ -965,9 +1085,12 @@ __all__ = [
 	'F3_M1_PROBE_SPEC',
 	'F3_SPLIT_INDEX_M1_SUITE_NAME',
 	'F3LabelBudgetProbeRunConfig',
+	'F3RobustnessSummaryConfig',
 	'f3_lithology_label_budget_config_from_mapping',
 	'f3_lithology_label_budget_probe_config_from_mapping',
+	'f3_lithology_label_budget_summary_config_from_mapping',
 	'f3_lithology_split_inventory_config_from_mapping',
+	'f3_lithology_split_summary_config_from_mapping',
 	'f3_lithology_split_sweep_dataset_config_from_mapping',
 	'f3_m1_example_model_specs',
 	'f3_m1_robustness_suite_manifest',

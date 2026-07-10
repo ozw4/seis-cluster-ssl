@@ -37,7 +37,9 @@ from seis_ssl_cluster.config.f3_lithology import (
 from seis_ssl_cluster.config.f3_lithology_robustness import (
 	f3_lithology_label_budget_config_from_mapping,
 	f3_lithology_label_budget_probe_config_from_mapping,
+	f3_lithology_label_budget_summary_config_from_mapping,
 	f3_lithology_split_inventory_config_from_mapping,
+	f3_lithology_split_summary_config_from_mapping,
 	f3_lithology_split_sweep_dataset_config_from_mapping,
 )
 from seis_ssl_cluster.config.schema import (
@@ -184,6 +186,28 @@ F3_STRAT_HMM_M1_SPLIT_DATASET_CONFIGS = [
 F3_STRAT_HMM_M1_SPLIT_PROBE_CONFIGS = [
 	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '06_run_split_sweep_probes.yaml',
 ]
+F3_STRAT_HMM_M2A_ROBUSTNESS_ROOT = F3_ROOT / '85_strat_hmm_m2a_robustness'
+F3_STRAT_HMM_M2A_ROBUSTNESS_CONFIGS = sorted(
+	F3_STRAT_HMM_M2A_ROBUSTNESS_ROOT.rglob('*.yaml'),
+)
+F3_STRAT_HMM_M2A_LABEL_BUDGET_BUILD_CONFIG = (
+	F3_STRAT_HMM_M2A_ROBUSTNESS_ROOT / '01_build_label_budget_datasets.yaml'
+)
+F3_STRAT_HMM_M2A_LABEL_BUDGET_PROBE_CONFIG = (
+	F3_STRAT_HMM_M2A_ROBUSTNESS_ROOT / '02_run_label_budget_probes.yaml'
+)
+F3_STRAT_HMM_M2A_LABEL_BUDGET_SUMMARY_CONFIG = (
+	F3_STRAT_HMM_M2A_ROBUSTNESS_ROOT / '03_summarize_label_budget.yaml'
+)
+F3_STRAT_HMM_M2A_SPLIT_DATASET_CONFIG = (
+	F3_STRAT_HMM_M2A_ROBUSTNESS_ROOT / '04_build_split_sweep_datasets.yaml'
+)
+F3_STRAT_HMM_M2A_SPLIT_PROBE_CONFIG = (
+	F3_STRAT_HMM_M2A_ROBUSTNESS_ROOT / '05_run_split_sweep_probes.yaml'
+)
+F3_STRAT_HMM_M2A_SPLIT_SUMMARY_CONFIG = (
+	F3_STRAT_HMM_M2A_ROBUSTNESS_ROOT / '06_summarize_split_sweep.yaml'
+)
 F3_LITHOLOGY_ROOT = F3_ROOT / '50_lithology'
 F3_LITHOLOGY_TOKEN_CONFIGS = sorted(
 	F3_LITHOLOGY_ROOT.rglob('01_build_token_dataset.yaml'),
@@ -263,6 +287,7 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 		F3_STRAT_HMM_PSEUDO_TARGET_REFRESH_CONFIGS,
 	),
 	('f3 strat hmm m1 robustness', F3_STRAT_HMM_M1_ROBUSTNESS_CONFIGS),
+	('f3 strat hmm m2a robustness', F3_STRAT_HMM_M2A_ROBUSTNESS_CONFIGS),
 	('f3 lithology token dataset', F3_LITHOLOGY_TOKEN_CONFIGS),
 	('f3 lithology probe', F3_LITHOLOGY_PROBE_CONFIGS),
 	('f3 lithology prediction', F3_LITHOLOGY_PREDICTION_CONFIGS),
@@ -428,6 +453,91 @@ def test_active_f3_strat_hmm_m1_split_probe_configs_resolve_schema(
 
 	assert config.probe.random_state == 42
 	assert len(config.probe_configs) == 2
+
+
+def test_active_f3_strat_hmm_m2a_robustness_pair_contract(
+	tmp_path: Path,
+) -> None:
+	baseline_tag = 'strat_hmm_pretext_m1_k6_topblock1_distill'
+	candidate_tag = 'strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill'
+	m1_inventory = (
+		'/workspace/artifacts/seis_ssl_cluster/lithology/f3/'
+		'facies_benchmark_v1/robustness/split_index_m1_v1/'
+		'split_inventory_manifest.json'
+	)
+
+	label_raw = load_config(F3_STRAT_HMM_M2A_LABEL_BUDGET_BUILD_CONFIG)
+	label_config = f3_lithology_label_budget_config_from_mapping(label_raw)
+	assert label_config.baseline.model_tag == baseline_tag
+	assert label_config.candidate.model_tag == candidate_tag
+	assert label_config.per_class_caps == (25, 50, 100, None)
+	assert label_config.subsample_seeds == (0, 1, 2, 3, 4)
+	assert label_config.reuse_full_validation is True
+	assert label_config.baseline.token_dataset_root != (
+		label_config.candidate.token_dataset_root
+	)
+
+	split_raw = load_config(F3_STRAT_HMM_M2A_SPLIT_DATASET_CONFIG)
+	split_config = f3_lithology_split_sweep_dataset_config_from_mapping(split_raw)
+	assert split_config.baseline.model_tag == baseline_tag
+	assert split_config.candidate.model_tag == candidate_tag
+	assert str(split_config.split_inventory_manifest) == m1_inventory
+	assert split_config.baseline.checkpoint.name == 'best.pt'
+	assert split_config.candidate.checkpoint.name == 'best.pt'
+	assert split_config.baseline.embeddings_dir.name == 'overlap_x16'
+	assert split_config.candidate.embeddings_dir.name == 'overlap_x16'
+	assert split_config.baseline.embeddings_dir != split_config.candidate.embeddings_dir
+	assert split_config.baseline.checkpoint != split_config.candidate.checkpoint
+
+	m1_split_raw = load_config(
+		F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '04_generate_split_inventories.yaml',
+	)
+	assert m1_split_raw['split_sweep']['split_ids'] == [
+		f'split_{index:03d}' for index in range(6)
+	]
+	assert 'amp_mae_' not in (
+		F3_STRAT_HMM_M2A_LABEL_BUDGET_BUILD_CONFIG.read_text()
+		+ F3_STRAT_HMM_M2A_SPLIT_DATASET_CONFIG.read_text()
+	)
+
+	label_probe_raw = load_config(F3_STRAT_HMM_M2A_LABEL_BUDGET_PROBE_CONFIG)
+	label_probe_raw['suite']['manifest'] = str(
+		_write_label_budget_manifest(tmp_path),
+	)
+	label_probe_raw['labels']['class_info'] = str(_write_class_info(tmp_path))
+	label_probe = f3_lithology_label_budget_probe_config_from_mapping(
+		label_probe_raw,
+	)
+	assert label_probe.probe.random_state == 42
+	assert label_probe.probe.feature_scaling == 'standard'
+	assert label_probe.probe.class_weight == 'balanced'
+
+	split_probe_raw = load_config(F3_STRAT_HMM_M2A_SPLIT_PROBE_CONFIG)
+	split_probe_raw['suite']['dataset_manifest'] = str(
+		_write_split_dataset_manifest(tmp_path),
+	)
+	split_probe_raw['labels']['class_info'] = str(_write_class_info(tmp_path))
+	split_probe = f3_lithology_split_sweep_probe_config_from_mapping(
+		split_probe_raw,
+	)
+	assert split_probe.probe == label_probe.probe
+
+	label_summary = f3_lithology_label_budget_summary_config_from_mapping(
+		load_config(F3_STRAT_HMM_M2A_LABEL_BUDGET_SUMMARY_CONFIG),
+	)
+	assert label_summary.suite_root == label_config.output_root
+	assert label_summary.inputs['suite_manifest'] == (
+		label_config.output_root / 'suite_manifest.json'
+	)
+
+	split_summary = f3_lithology_split_summary_config_from_mapping(
+		load_config(F3_STRAT_HMM_M2A_SPLIT_SUMMARY_CONFIG),
+	)
+	assert split_summary.suite_root == split_config.output_root
+	assert (
+		split_summary.inputs['split_inventory_manifest']
+		== split_config.split_inventory_manifest
+	)
 
 
 @pytest.mark.parametrize(
