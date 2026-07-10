@@ -235,6 +235,7 @@ def test_guardrail_summary_writes_four_model_publishable_comparison(
 			Path(raw['models'][role]['metrics_json']),
 			offset=index / 100,
 		)
+	_write_complete_label_budget_inputs(raw, tmp_path)
 	config = f3_guardrail_summary_config_from_mapping(raw)
 
 	result = summarize_f3_strat_hmm_m1_guardrails(config)
@@ -280,6 +281,7 @@ def test_guardrail_decision_changes_with_guardrail_performance(
 		'shuffled_hmm': shuffled_offset,
 	}.items():
 		_write_metrics(Path(raw['models'][role]['metrics_json']), offset=offset)
+	_write_complete_label_budget_inputs(raw, tmp_path)
 
 	result = summarize_f3_strat_hmm_m1_guardrails(
 		f3_guardrail_summary_config_from_mapping(raw),
@@ -351,6 +353,29 @@ def test_guardrail_low_budget_requires_expected_budget_overlap(
 		'missing for expected candidate budgets' in warning
 		for warning in payload['warnings']
 	)
+
+
+def test_guardrail_strict_summary_rejects_missing_expected_budget_comparisons(
+	tmp_path: Path,
+) -> None:
+	raw = _summary_config(tmp_path, strict=True)
+	for role in F3_STRAT_HMM_M1_GUARDRAIL_ROLES:
+		_write_metrics(Path(raw['models'][role]['metrics_json']), offset=0.0)
+	for role in ('candidate', 'distillation_only', 'shuffled_hmm'):
+		summary = tmp_path / role / 'summary_by_budget.csv'
+		_write_label_budget(summary, delta=0.1, budget_ids=('cap25',))
+		raw['models'][role]['label_budget_summary_csv'] = str(summary)
+		manifest = tmp_path / role / 'suite_manifest.json'
+		_write_label_budget_manifest(manifest, role=role, budget_ids=('cap25',))
+		raw['models'][role]['label_budget_suite_manifest_json'] = str(manifest)
+
+	with pytest.raises(
+		ValueError,
+		match=r'missing.*cap100:distillation_only',
+	):
+		summarize_f3_strat_hmm_m1_guardrails(
+			f3_guardrail_summary_config_from_mapping(raw),
+		)
 
 
 def test_guardrail_low_budget_rejects_unpaired_subsampling_indices(
@@ -590,3 +615,16 @@ def _write_label_budget_manifest(  # noqa: PLR0913
 		+ '\n',
 		encoding='utf-8',
 	)
+
+
+def _write_complete_label_budget_inputs(
+	raw: dict[str, object],
+	tmp_path: Path,
+) -> None:
+	for role in ('candidate', 'distillation_only', 'shuffled_hmm'):
+		summary = tmp_path / role / 'summary_by_budget.csv'
+		_write_label_budget(summary, delta=0.1)
+		raw['models'][role]['label_budget_summary_csv'] = str(summary)
+		manifest = tmp_path / role / 'suite_manifest.json'
+		_write_label_budget_manifest(manifest, role=role)
+		raw['models'][role]['label_budget_suite_manifest_json'] = str(manifest)

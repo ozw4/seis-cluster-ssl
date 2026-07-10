@@ -202,7 +202,7 @@ def _prepare_outputs(
 	*,
 	overwrite: bool,
 ) -> None:
-	existing = [
+	expected = {
 		path
 		for output in outputs
 		for path in (
@@ -211,7 +211,29 @@ def _prepare_outputs(
 			output.valid_tokens,
 			output.metadata,
 		)
-		if path.exists()
+	}
+	output_dir = outputs[0].labels.parent
+	artifact_patterns = (
+		'*.hmm_labels_token.npy',
+		'*.hmm_confidence_token.npy',
+		'*.valid_tokens.npy',
+		'*.pseudo_target_metadata.json',
+	)
+	unplanned = sorted(
+		{
+			path
+			for pattern in artifact_patterns
+			for path in output_dir.glob(pattern)
+			if path not in expected
+		},
+	)
+	if unplanned:
+		raise FileExistsError(
+			'shuffled pseudo-target output contains unplanned survey artifacts: '
+			+ ', '.join(str(path) for path in unplanned),
+		)
+	existing = [
+		path for path in sorted(expected) if path.exists()
 	]
 	if existing and not overwrite:
 		raise FileExistsError(

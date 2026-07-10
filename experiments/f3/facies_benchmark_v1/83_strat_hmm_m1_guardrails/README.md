@@ -53,12 +53,11 @@ The files are ordered by the intended workflow:
    `06_build_guardrail_token_datasets.yaml`, and
    `07_run_guardrail_probes.yaml` define the paired downstream routing and
    isolated roots for both guardrails.
-7. `08_summarize_guardrails.yaml` compares the five primary metrics:
-   `macro_f1`, `mean_iou`, `balanced_accuracy`, `accuracy`, and `weighted_f1`.
-8. `14_build_distillation_only_label_budget_datasets.yaml` through
+7. `14_build_distillation_only_label_budget_datasets.yaml` through
    `17_run_shuffled_hmm_label_budget_probes.yaml` run paired `cap25`, `cap100`,
-   `cap500`, and `full` probes. `13_summarize_guardrails.yaml` consumes their
-   existing `summary_by_budget.csv` and suite-manifest artifacts.
+   `cap500`, and `full` probes. `13_summarize_guardrails.yaml` compares the five
+   primary full-budget metrics and consumes the low-budget
+   `summary_by_budget.csv` and suite-manifest artifacts.
 
 The shuffled-target builder and training workflow reuse the existing
 milestone-1 artifact and trainer contracts.
@@ -112,8 +111,10 @@ python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
 
 With `suite.strict: false`, missing model metrics or configured robustness
 artifacts are recorded as `pending`. With `suite.strict: true`, any configured
-missing artifact is an error. Label-budget summaries are read directly from
-the CSV and manifest artifacts emitted by the existing robustness workflow.
+missing artifact is an error, and verified comparisons are required for
+`cap25`, `cap100`, `cap500`, and `full` against both guardrails. Label-budget
+summaries are read directly from the CSV and manifest artifacts emitted by the
+existing robustness workflow.
 
 ## Shuffled-HMM runbook
 
@@ -229,7 +230,7 @@ python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
 ```
 
 For a final decision, set `suite.strict: true` in the explicit config so absent
-metrics fail instead of remaining `pending`. Proceed to next-stage method
-extensions only if the completed guardrails support the structured-HMM
-interpretation. HMM maps remain diagnostic pretext targets, never the final
-evaluated lithology output.
+metrics or expected budget comparisons fail instead of remaining `pending` or
+`partial`. Proceed to next-stage method extensions only if the completed
+guardrails support the structured-HMM interpretation. HMM maps remain
+diagnostic pretext targets, never the final evaluated lithology output.

@@ -99,6 +99,7 @@ python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
 The final summary reads the low-budget pipeline's `summary_by_budget.csv` and
 `suite_manifest.json` directly. With `suite.strict: false`, absent guardrail
 artifacts are reported as `pending`. Use `suite.strict: true` for the final
-decision so missing configured metrics fail rather than being mistaken for
-evidence. Proceed to method extensions only after both guardrail results are
-complete and support the structured-HMM interpretation.
+decision so missing metrics or verified `cap25`, `cap100`, `cap500`, and `full`
+comparisons fail rather than being mistaken for evidence. Proceed to method
+extensions only after both guardrail results are complete and support the
+structured-HMM interpretation.

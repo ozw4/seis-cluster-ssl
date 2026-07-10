@@ -657,12 +657,23 @@ def _low_budget_payload(  # noqa: C901, PLR0912, PLR0915
 				raise ValueError(message)
 			warnings.append(message)
 	if not configured:
+		if strict:
+			raise ValueError(
+				'strict guardrail summary requires label-budget comparisons for '
+				+ ', '.join(F3_STRAT_HMM_M1_LOW_BUDGET_IDS),
+			)
 		return {
 			'status': 'not_configured',
 			'pairing_provenance': {'status': 'not_configured'},
 			'budgets': [],
 		}
 	if 'candidate' not in summaries or 'candidate' not in manifests:
+		if strict:
+			raise ValueError(
+				'strict guardrail summary requires candidate label-budget '
+				'comparisons for '
+				+ ', '.join(F3_STRAT_HMM_M1_LOW_BUDGET_IDS),
+			)
 		return {
 			'status': 'pending',
 			'pairing_provenance': {'status': 'pending'},
@@ -766,10 +777,13 @@ def _low_budget_payload(  # noqa: C901, PLR0912, PLR0915
 				key=lambda item: (_budget_sort_key(item[0]), item[1]),
 			)
 		)
-		warnings.append(
+		message = (
 			'label-budget comparisons are missing for expected candidate budgets: '
-			f'{formatted}',
+			f'{formatted}'
 		)
+		if strict:
+			raise ValueError(message)
+		warnings.append(message)
 	status = (
 		'complete'
 		if all(

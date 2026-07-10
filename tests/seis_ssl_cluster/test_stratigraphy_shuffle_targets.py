@@ -133,6 +133,40 @@ def test_build_writes_metadata_and_requires_explicit_overwrite(tmp_path: Path) -
 	)
 
 
+def test_build_rejects_unplanned_output_survey_even_with_overwrite(
+	tmp_path: Path,
+) -> None:
+	source_root = tmp_path / 'source'
+	output_root = tmp_path / 'output'
+	labels, confidence, valid = _arrays()
+	write_pseudo_target(
+		source_root,
+		k=3,
+		survey_id='survey_a',
+		labels=labels,
+		confidence=confidence,
+		valid_tokens=valid,
+	)
+	for survey_id in ('survey_a', 'orphaned_survey'):
+		write_pseudo_target(
+			output_root,
+			k=3,
+			survey_id=survey_id,
+			labels=labels,
+			confidence=confidence,
+			valid_tokens=valid,
+		)
+
+	with pytest.raises(FileExistsError, match='unplanned survey artifacts'):
+		shuffle_strat_hmm_pseudo_targets(
+			source_root,
+			output_root,
+			k=3,
+			seed=42,
+			overwrite=True,
+		)
+
+
 def test_cli_dry_run_validates_and_prints_planned_outputs(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
