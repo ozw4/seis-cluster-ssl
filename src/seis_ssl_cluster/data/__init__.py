@@ -1,5 +1,6 @@
 """Data components for seismic SSL clustering."""
 
+from seis_ssl_cluster.data.amplitude_crop_dataset import NopimsAmplitudeCropDataset
 from seis_ssl_cluster.data.amplitude_dataset import (
 	AmplitudePretrainDataset,
 	NopimsAmplitudePretrainDataset,
@@ -59,6 +60,12 @@ from seis_ssl_cluster.data.schema import (
 	write_manifest_json,
 )
 from seis_ssl_cluster.data.strat_pseudo_dataset import NopimsStratPseudoTargetDataset
+from seis_ssl_cluster.data.target_providers import (
+	NoTargetProvider,
+	StratPseudoTargetProvider,
+	TargetProvider,
+	TargetProviderContext,
+)
 from seis_ssl_cluster.data.volume_store import (
 	NpyMemmapVolumeStore,
 	NpyVolumeInfo,
@@ -96,6 +103,8 @@ __all__ = [
 	'FilteredManifestStatsQcResult',
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
+	'NoTargetProvider',
+	'NopimsAmplitudeCropDataset',
 	'NopimsAmplitudePretrainDataset',
 	'NopimsStratPseudoTargetDataset',
 	'NormalizationStatsQcItem',
@@ -104,8 +113,11 @@ __all__ = [
 	'NpyMemmapVolumeStore',
 	'NpyVolumeInfo',
 	'PreparedAmplitudeCrop',
+	'StratPseudoTargetProvider',
 	'SurveyManifest',
 	'SurveyNormalizationStats',
+	'TargetProvider',
+	'TargetProviderContext',
 	'ZeroMaskConfig',
 	'apply_configured_agc',
 	'apply_trace_rms_agc',
@@ -128,9 +140,9 @@ __all__ = [
 	'normalization_qc_report_to_dict',
 	'normalize_amplitude',
 	'open',
+	'read_amplitude_crop',
 	'read_crop',
 	'read_crop_with_padding',
-	'read_amplitude_crop',
 	'read_manifest_json',
 	'reduce_valid_mask_to_tokens',
 	'required_zero_mask_margin_xyz',
