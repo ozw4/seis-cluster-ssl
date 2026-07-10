@@ -1,0 +1,18 @@
+inputs:
+  baseline_comparison_csv: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_table.csv
+  m1_metrics_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.json
+  m2a_metrics_json: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.json
+  label_budget_suite_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/label_budget_m2a_boundary_vs_m1_v1
+  split_index_suite_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/split_index_m2a_boundary_vs_m1_v1
+  class_info_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+  monitored_class_ids: [3, 5]
+models:
+  baseline: strat_hmm_pretext_m1_k6_topblock1_distill
+  candidate: strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill
+outputs:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results
+publish:
+  enabled: true
+  output_dir: results/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary
+  include_figures: true
+  max_file_size_mb: 10
