@@ -200,6 +200,10 @@ class StratPseudoTargetProvider:
 			arrays.confidence[token_slices],
 			dtype=np.float32,
 		).copy()
+		boundary_weight = np.asarray(
+			arrays.boundary_weight[token_slices],
+			dtype=np.float32,
+		).copy()
 		pseudo_valid = np.asarray(arrays.valid_tokens[token_slices], dtype=bool)
 		token_valid = _require_bool_array(
 			{'token_valid_mask': context.token_valid_mask},
@@ -208,8 +212,11 @@ class StratPseudoTargetProvider:
 		strat_valid_mask = np.logical_and(pseudo_valid, token_valid)
 		labels[~strat_valid_mask] = -1
 		confidence[~strat_valid_mask] = 0.0
+		boundary_weight[~strat_valid_mask] = 0.0
+		_validate_boundary_weight_sample(boundary_weight, strat_valid_mask)
 		sample['strat_labels'] = labels
 		sample['strat_confidence'] = confidence
+		sample['strat_boundary_weight'] = boundary_weight
 		sample['strat_valid_mask'] = strat_valid_mask.astype(bool, copy=False)
 
 		coords = sample['coords']
@@ -229,7 +236,15 @@ class StratPseudoTargetProvider:
 				f'got {confidence.shape!r} and {strat_valid.shape!r}'
 			)
 			raise ValueError(msg)
-		return bool(np.any(strat_valid & (confidence >= self.min_confidence)))
+		boundary_weight = _require_float32_array(sample, 'strat_boundary_weight')
+		_validate_boundary_weight_sample(boundary_weight, strat_valid)
+		return bool(
+			np.any(
+				strat_valid
+				& (confidence >= self.min_confidence)
+				& (boundary_weight > 0.0)
+			),
+		)
 
 	def rejection_message(
 		self,
@@ -243,7 +258,9 @@ class StratPseudoTargetProvider:
 			f'survey {survey_id!r} did not produce a pseudo-target crop with at '
 			f'least one valid supervised token at '
 			f'min_confidence={self.min_confidence:.6f} after '
-			f'max_resample_attempts={max_resample_attempts}; last local valid '
+			f'max_resample_attempts={max_resample_attempts}; no positive '
+			f'boundary/effective weight token satisfied the confidence threshold; '
+			f'last local valid '
 			f'fraction was {last_valid_fraction:.6f}.'
 		)
 
@@ -300,6 +317,38 @@ def _require_float_array(sample: Mapping[str, object], key: str) -> np.ndarray:
 		msg = f'{key} dtype must be floating point; got {value.dtype}'
 		raise TypeError(msg)
 	return value
+
+
+def _require_float32_array(sample: Mapping[str, object], key: str) -> np.ndarray:
+	value = sample[key]
+	if not isinstance(value, np.ndarray):
+		msg = f'{key} must be a NumPy array; got {type(value).__name__}'
+		raise TypeError(msg)
+	if value.dtype != np.float32:
+		msg = f'{key} dtype must be float32; got {value.dtype}'
+		raise TypeError(msg)
+	return value
+
+
+def _validate_boundary_weight_sample(
+	boundary_weight: np.ndarray,
+	strat_valid_mask: np.ndarray,
+) -> None:
+	if boundary_weight.shape != strat_valid_mask.shape:
+		msg = (
+			'strat_boundary_weight shape must match strat_valid_mask shape; '
+			f'got {boundary_weight.shape!r} and {strat_valid_mask.shape!r}'
+		)
+		raise ValueError(msg)
+	if not np.all(np.isfinite(boundary_weight)):
+		msg = 'strat_boundary_weight must be finite'
+		raise ValueError(msg)
+	if np.any((boundary_weight < 0.0) | (boundary_weight > 1.0)):
+		msg = 'strat_boundary_weight values must be in [0, 1]'
+		raise ValueError(msg)
+	if np.any(boundary_weight[~strat_valid_mask] != 0.0):
+		msg = 'strat_boundary_weight must be 0.0 where strat_valid_mask is false'
+		raise ValueError(msg)
 
 
 def _validate_fraction(value: object, name: str) -> float:

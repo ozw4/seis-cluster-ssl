@@ -37,16 +37,23 @@ def shuffle_pseudo_target_arrays(  # noqa: PLR0913
 	confidence: np.ndarray,
 	valid_tokens: np.ndarray,
 	*,
+	boundary_weight: np.ndarray | None = None,
 	k: int,
 	seed: int,
 	survey_id: str | None = None,
 ) -> StratPseudoTargetArrays:
-	"""Shuffle label/confidence pairs over valid positions in one survey."""
+	"""Shuffle target tuples over valid positions in one survey."""
 	_validate_seed(seed)
+	boundary_weight_array = (
+		np.asarray(boundary_weight)
+		if boundary_weight is not None
+		else np.asarray(valid_tokens, dtype=np.float32)
+	)
 	validate_pseudo_target_arrays(
 		labels,
 		confidence,
 		valid_tokens,
+		boundary_weight=boundary_weight_array,
 		k=k,
 		survey_id=survey_id,
 	)
@@ -55,23 +62,30 @@ def shuffle_pseudo_target_arrays(  # noqa: PLR0913
 	valid_array = np.asarray(valid_tokens)
 	shuffled_labels = labels_array.copy(order='K')
 	shuffled_confidence = confidence_array.copy(order='K')
+	shuffled_boundary_weight = boundary_weight_array.copy(order='K')
 	valid_flat_indices = np.flatnonzero(valid_array)
 	permutation = np.random.default_rng(seed).permutation(valid_flat_indices.size)
 
 	source_labels = labels_array.flat[valid_flat_indices].copy()
 	source_confidence = confidence_array.flat[valid_flat_indices].copy()
+	source_boundary_weight = boundary_weight_array.flat[valid_flat_indices].copy()
 	shuffled_labels.flat[valid_flat_indices] = source_labels[permutation]
 	shuffled_confidence.flat[valid_flat_indices] = source_confidence[permutation]
+	shuffled_boundary_weight.flat[valid_flat_indices] = source_boundary_weight[
+		permutation
+	]
 
 	result = StratPseudoTargetArrays(
 		labels=shuffled_labels,
 		confidence=shuffled_confidence,
 		valid_tokens=valid_array.copy(),
-		boundary_weight=valid_array.astype(np.float32),
+		boundary_weight=shuffled_boundary_weight,
 	)
 	_assert_preserved(
 		labels_array,
+		confidence_array,
 		valid_array,
+		boundary_weight_array,
 		result,
 		k=k,
 		survey_id=survey_id,
@@ -150,6 +164,7 @@ def _shuffle_input(
 		source_arrays.labels,
 		source_arrays.confidence,
 		source_arrays.valid_tokens,
+		boundary_weight=source_arrays.boundary_weight,
 		k=item.k,
 		seed=seed,
 		survey_id=item.survey_id,
@@ -246,9 +261,11 @@ def _prepare_outputs(
 		)
 
 
-def _assert_preserved(
+def _assert_preserved(  # noqa: PLR0913
 	source_labels: np.ndarray,
+	source_confidence: np.ndarray,
 	source_valid: np.ndarray,
+	source_boundary_weight: np.ndarray,
 	shuffled: StratPseudoTargetArrays,
 	*,
 	k: int,
@@ -263,6 +280,43 @@ def _assert_preserved(
 	)
 	if not np.array_equal(source_counts, shuffled_counts):
 		raise AssertionError('label counts changed during pseudo-target shuffle')
+	if not np.array_equal(
+		np.sort(source_confidence[source_valid]),
+		np.sort(shuffled.confidence[shuffled.valid_tokens]),
+	):
+		raise AssertionError('confidence distribution changed during shuffle')
+	if not np.array_equal(
+		np.sort(source_boundary_weight[source_valid]),
+		np.sort(shuffled.boundary_weight[shuffled.valid_tokens]),
+	):
+		raise AssertionError('boundary-weight distribution changed during shuffle')
+	source_order = np.lexsort(
+		(
+			source_boundary_weight[source_valid],
+			source_confidence[source_valid],
+			source_labels[source_valid],
+		),
+	)
+	shuffled_order = np.lexsort(
+		(
+			shuffled.boundary_weight[shuffled.valid_tokens],
+			shuffled.confidence[shuffled.valid_tokens],
+			shuffled.labels[shuffled.valid_tokens],
+		),
+	)
+	for source, target in (
+		(source_labels[source_valid], shuffled.labels[shuffled.valid_tokens]),
+		(
+			source_confidence[source_valid],
+			shuffled.confidence[shuffled.valid_tokens],
+		),
+		(
+			source_boundary_weight[source_valid],
+			shuffled.boundary_weight[shuffled.valid_tokens],
+		),
+	):
+		if not np.array_equal(source[source_order], target[shuffled_order]):
+			raise AssertionError('target tuples changed during pseudo-target shuffle')
 	if np.any(shuffled.confidence[~shuffled.valid_tokens] != 0.0):
 		raise AssertionError('invalid-token confidence changed during shuffle')
 	validate_pseudo_target_arrays(
@@ -287,6 +341,8 @@ def _add_shuffle_metadata(
 		'enabled': True,
 		'label_counts_preserved': True,
 		'mode': mode,
+		'preserve_boundary_weight_distribution': True,
+		'preserve_label_confidence_boundary_weight_tuples': True,
 		'preserve_label_confidence_pairs': True,
 		'seed': seed,
 		'source_pseudo_target_root': str(source_root),

@@ -96,6 +96,9 @@ def test_head_only_training_runs_cpu_writes_checkpoints_and_payloads(
 		'loss_distillation',
 		'loss_prototype',
 		'loss_usage',
+		'mean_boundary_weight_valid',
+		'mean_effective_prototype_weight',
+		'positive_effective_weight_fraction',
 		'prototype_usage_entropy',
 		'target_usage_entropy',
 		'trainable_parameter_count',
@@ -275,6 +278,7 @@ def test_distillation_only_skips_prototype_head_and_invalid_labels() -> None:
 		batch={
 			'strat_labels': torch.full((1, 3), 99),
 			'strat_confidence': torch.ones(1, 3),
+			'strat_boundary_weight': torch.zeros(1, 3),
 			'strat_valid_mask': torch.ones(1, 3, dtype=torch.bool),
 		},
 		loss_config={
@@ -296,6 +300,83 @@ def test_distillation_only_skips_prototype_head_and_invalid_labels() -> None:
 	losses['loss'].backward()
 	assert student_tokens.grad is not None
 	assert all(parameter.grad is None for parameter in head.parameters())
+
+
+def test_min_confidence_precedes_boundary_weight_and_reports_metrics() -> None:
+	torch.manual_seed(7)
+	tokens = torch.randn(1, 3, 4)
+	head = OrderedPrototypeHead(feature_dim=4, num_prototypes=3)
+	confidence = torch.tensor([[0.9, 0.4, 0.8]])
+	boundary_weight = torch.tensor([[0.0, 1.0, 0.5]])
+	losses = compute_strat_hmm_pretext_losses(
+		head=head,
+		encoded={'tokens': tokens},
+		teacher_encoded=None,
+		batch={
+			'strat_labels': torch.tensor([[0, 1, 2]]),
+			'strat_confidence': confidence,
+			'strat_boundary_weight': boundary_weight,
+			'strat_valid_mask': torch.ones(1, 3, dtype=torch.bool),
+		},
+		loss_config={
+			'prototype_weight': 1.0,
+			'usage_weight': 0.0,
+			'distillation_weight': 0.0,
+		},
+		pseudo_target_config={'min_confidence': 0.5},
+	)
+	expected = torch.nn.functional.cross_entropy(
+		head(tokens).logits[:, 2],
+		torch.tensor([2]),
+	)
+
+	assert torch.allclose(losses['loss_prototype'], expected)
+	assert losses['valid_supervised_token_fraction'].item() == pytest.approx(2 / 3)
+	assert losses['mean_boundary_weight_valid'].item() == pytest.approx(0.25)
+	assert losses['mean_effective_prototype_weight'].item() == pytest.approx(0.2)
+	assert losses['positive_effective_weight_fraction'].item() == pytest.approx(0.5)
+
+
+def test_usage_and_distillation_do_not_depend_on_boundary_weight() -> None:
+	torch.manual_seed(13)
+	student_tokens = torch.randn(1, 3, 4)
+	teacher_tokens = torch.randn(1, 3, 4)
+	head = OrderedPrototypeHead(feature_dim=4, num_prototypes=3)
+	common = {
+		'head': head,
+		'encoded': {'tokens': student_tokens},
+		'teacher_encoded': {'tokens': teacher_tokens},
+		'loss_config': {
+			'prototype_weight': 0.0,
+			'usage_weight': 0.2,
+			'distillation_weight': 0.3,
+			'entropy_floor': 0.5,
+		},
+		'pseudo_target_config': {'min_confidence': 0.0},
+	}
+	batch = {
+		'strat_labels': torch.tensor([[0, 1, 2]]),
+		'strat_confidence': torch.ones(1, 3),
+		'strat_valid_mask': torch.ones(1, 3, dtype=torch.bool),
+	}
+	zero_boundary = compute_strat_hmm_pretext_losses(
+		**common,
+		batch={**batch, 'strat_boundary_weight': torch.zeros(1, 3)},
+	)
+	varied_boundary = compute_strat_hmm_pretext_losses(
+		**common,
+		batch={
+			**batch,
+			'strat_boundary_weight': torch.tensor([[0.1, 0.5, 1.0]]),
+		},
+	)
+
+	assert zero_boundary['loss_prototype'].item() == 0.0
+	assert torch.equal(zero_boundary['loss_usage'], varied_boundary['loss_usage'])
+	assert torch.equal(
+		zero_boundary['loss_distillation'],
+		varied_boundary['loss_distillation'],
+	)
 
 
 def test_distillation_only_trains_top_block_and_omits_head_optimizer_group(

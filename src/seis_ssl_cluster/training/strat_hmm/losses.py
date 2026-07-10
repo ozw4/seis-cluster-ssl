@@ -31,7 +31,12 @@ def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	loss_config: Mapping[str, object],
 	pseudo_target_config: Mapping[str, object],
 ) -> dict[str, torch.Tensor]:
-	"""Compute training-batch losses and metrics for strat HMM pretext learning."""
+	"""Compute strat HMM losses and valid-supervised-token weight metrics.
+
+	The three boundary/effective-weight metrics use the supervised ``valid_mask``
+	after student-token and minimum-confidence filtering as their denominator.
+	They are zero when that mask is empty.
+	"""
 	tokens = _encoded_tokens(encoded)
 	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
 	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
@@ -50,7 +55,15 @@ def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		_required_tensor(batch, 'strat_confidence'),
 		reference,
 		'strat_confidence',
-	).to(dtype=reference.dtype)
+	)
+	boundary_weight = _flatten_token_tensor(
+		_required_tensor(batch, 'strat_boundary_weight'),
+		reference,
+		'strat_boundary_weight',
+	)
+	_validate_weight_tensor_pair(confidence, boundary_weight, reference)
+	confidence = confidence.to(dtype=reference.dtype)
+	boundary_weight = boundary_weight.to(dtype=reference.dtype)
 	valid_mask = _flatten_token_tensor(
 		_required_tensor(batch, 'strat_valid_mask'),
 		reference,
@@ -82,6 +95,7 @@ def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			labels,
 			valid_mask=valid_mask,
 			confidence=confidence,
+			boundary_weight=boundary_weight,
 		)
 	else:
 		prototype_loss = tokens.new_zeros(())
@@ -124,6 +138,11 @@ def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		+ usage_weight * usage_loss
 		+ distillation_weight * distillation_loss
 	)
+	effective_weight = confidence * boundary_weight
+	valid_weight_count = valid_mask.sum()
+	valid_weight_denominator = valid_weight_count.clamp_min(1).to(
+		dtype=reference.dtype,
+	)
 	return {
 		'loss': total_loss,
 		'loss_prototype': prototype_loss,
@@ -131,6 +150,16 @@ def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		'loss_distillation': distillation_loss,
 		'valid_supervised_token_fraction': valid_mask.float().mean(),
 		'valid_distillation_token_fraction': distillation_valid_mask.float().mean(),
+		'mean_boundary_weight_valid': (
+			boundary_weight[valid_mask].sum() / valid_weight_denominator
+		),
+		'mean_effective_prototype_weight': (
+			effective_weight[valid_mask].sum() / valid_weight_denominator
+		),
+		'positive_effective_weight_fraction': (
+			(effective_weight[valid_mask] > 0).sum().to(dtype=reference.dtype)
+			/ valid_weight_denominator
+		),
 		'target_usage_entropy': _target_usage_entropy(
 			labels,
 			valid_mask,
@@ -182,6 +211,32 @@ def _flatten_token_tensor(
 		)
 		raise ValueError(msg)
 	return flattened
+
+
+def _validate_weight_tensor_pair(
+	confidence: torch.Tensor,
+	boundary_weight: torch.Tensor,
+	reference: torch.Tensor,
+) -> None:
+	for name, tensor in (
+		('strat_confidence', confidence),
+		('strat_boundary_weight', boundary_weight),
+	):
+		if not torch.is_floating_point(tensor):
+			msg = f'{name} must be floating point; got {tensor.dtype}'
+			raise TypeError(msg)
+		if tensor.device != reference.device:
+			msg = (
+				f'{name} must be on the encoded-token device; '
+				f'got {tensor.device}, expected {reference.device}'
+			)
+			raise ValueError(msg)
+	if boundary_weight.dtype != confidence.dtype:
+		msg = (
+			'strat_boundary_weight dtype must match strat_confidence dtype; '
+			f'got {boundary_weight.dtype}, expected {confidence.dtype}'
+		)
+		raise TypeError(msg)
 
 
 def _target_usage_entropy(

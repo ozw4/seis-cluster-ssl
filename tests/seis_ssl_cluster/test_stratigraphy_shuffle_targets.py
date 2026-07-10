@@ -24,11 +24,13 @@ if TYPE_CHECKING:
 
 def test_global_shuffle_is_deterministic_and_preserves_contract() -> None:
 	labels, confidence, valid = _arrays()
+	boundary_weight = _boundary_weight(valid)
 
 	first = shuffle_pseudo_target_arrays(
 		labels,
 		confidence,
 		valid,
+		boundary_weight=boundary_weight,
 		k=3,
 		seed=42,
 	)
@@ -36,6 +38,7 @@ def test_global_shuffle_is_deterministic_and_preserves_contract() -> None:
 		labels,
 		confidence,
 		valid,
+		boundary_weight=boundary_weight,
 		k=3,
 		seed=42,
 	)
@@ -43,12 +46,14 @@ def test_global_shuffle_is_deterministic_and_preserves_contract() -> None:
 		labels,
 		confidence,
 		valid,
+		boundary_weight=boundary_weight,
 		k=3,
 		seed=188,
 	)
 
 	np.testing.assert_array_equal(first.labels, second.labels)
 	np.testing.assert_array_equal(first.confidence, second.confidence)
+	np.testing.assert_array_equal(first.boundary_weight, second.boundary_weight)
 	np.testing.assert_array_equal(first.valid_tokens, valid)
 	assert not np.array_equal(first.labels[valid], different.labels[valid])
 	np.testing.assert_array_equal(
@@ -57,8 +62,21 @@ def test_global_shuffle_is_deterministic_and_preserves_contract() -> None:
 	)
 	assert np.all(first.labels[~valid] == -1)
 	assert np.all(first.confidence[~valid] == 0.0)
-	assert sorted(zip(first.labels[valid], first.confidence[valid], strict=True)) == (
-		sorted(zip(labels[valid], confidence[valid], strict=True))
+	assert np.all(first.boundary_weight[~valid] == 0.0)
+	assert sorted(
+		zip(
+			first.labels[valid],
+			first.confidence[valid],
+			first.boundary_weight[valid],
+			strict=True,
+		),
+	) == sorted(
+		zip(
+			labels[valid],
+			confidence[valid],
+			boundary_weight[valid],
+			strict=True,
+		),
 	)
 
 
@@ -85,6 +103,7 @@ def test_build_writes_metadata_and_requires_explicit_overwrite(tmp_path: Path) -
 	source_root = tmp_path / 'source'
 	output_root = tmp_path / 'output'
 	labels, confidence, valid = _arrays()
+	boundary_weight = _boundary_weight(valid)
 	write_pseudo_target(
 		source_root,
 		k=3,
@@ -92,6 +111,7 @@ def test_build_writes_metadata_and_requires_explicit_overwrite(tmp_path: Path) -
 		labels=labels,
 		confidence=confidence,
 		valid_tokens=valid,
+		boundary_weight=boundary_weight,
 		metadata={'run_id': 'source-run'},
 	)
 
@@ -107,11 +127,38 @@ def test_build_writes_metadata_and_requires_explicit_overwrite(tmp_path: Path) -
 	metadata = load_pseudo_target_metadata(results[0].paths)
 
 	np.testing.assert_array_equal(output.valid_tokens, valid)
+	assert all(
+		path.is_file()
+		for path in (
+			results[0].paths.labels,
+			results[0].paths.confidence,
+			results[0].paths.valid_tokens,
+			results[0].paths.boundary_weight,
+			results[0].paths.metadata,
+		)
+	)
+	assert sorted(
+		zip(
+			output.labels[valid],
+			output.confidence[valid],
+			output.boundary_weight[valid],
+			strict=True,
+		),
+	) == sorted(
+		zip(
+			labels[valid],
+			confidence[valid],
+			boundary_weight[valid],
+			strict=True,
+		),
+	)
 	assert metadata['source']['source']['run_id'] == 'source-run'
 	assert metadata['shuffle'] == {
 		'enabled': True,
 		'label_counts_preserved': True,
 		'mode': 'global_valid_tokens',
+		'preserve_boundary_weight_distribution': True,
+		'preserve_label_confidence_boundary_weight_tuples': True,
 		'preserve_label_confidence_pairs': True,
 		'seed': 42,
 		'source_pseudo_target_root': str(source_root.resolve()),
@@ -297,3 +344,13 @@ def _arrays() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
 	confidence = np.zeros(labels.shape, dtype=np.float32)
 	confidence[valid] = np.linspace(0.1, 1.0, num=np.count_nonzero(valid))
 	return labels, confidence, valid
+
+
+def _boundary_weight(valid: np.ndarray) -> np.ndarray:
+	boundary_weight = np.zeros(valid.shape, dtype=np.float32)
+	boundary_weight[valid] = np.linspace(
+		0.2,
+		1.0,
+		num=np.count_nonzero(valid),
+	)
+	return boundary_weight

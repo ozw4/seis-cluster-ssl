@@ -21,15 +21,30 @@ from seis_ssl_cluster.stratigraphy.targets import (
 
 def test_provider_adds_token_slice_and_coords(tmp_path: Path) -> None:
 	labels = np.arange(4 * 4 * 4, dtype=np.int32).reshape(4, 4, 4)
-	provider = _provider(tmp_path, labels=labels)
+	boundary_weight = np.linspace(
+		0.0,
+		1.0,
+		labels.size,
+		dtype=np.float32,
+	).reshape(labels.shape)
+	provider = _provider(
+		tmp_path,
+		labels=labels,
+		boundary_weight=boundary_weight,
+	)
 	sample: dict[str, object] = {'coords': {'survey_id': 's1'}}
 	context = _context(tmp_path, token_start_xyz=(1, 1, 1))
 
 	provider.add_targets(sample, context)
 
 	np.testing.assert_array_equal(sample['strat_labels'], labels[1:3, 1:3, 1:3])
+	np.testing.assert_array_equal(
+		sample['strat_boundary_weight'],
+		boundary_weight[1:3, 1:3, 1:3],
+	)
 	assert sample['strat_labels'].dtype == np.int64
 	assert sample['strat_confidence'].dtype == np.float32
+	assert sample['strat_boundary_weight'].dtype == np.float32
 	assert sample['strat_valid_mask'].dtype == np.bool_
 	assert sample['coords']['token_start_xyz'] == (1, 1, 1)
 	assert sample['coords']['token_size_xyz'] == (2, 2, 2)
@@ -49,6 +64,7 @@ def test_provider_excludes_context_invalid_tokens(tmp_path: Path) -> None:
 
 	assert sample['strat_labels'][0, 1, 0] == -1
 	assert sample['strat_confidence'][0, 1, 0] == 0.0
+	assert sample['strat_boundary_weight'][0, 1, 0] == 0.0
 	assert not sample['strat_valid_mask'][0, 1, 0]
 	assert np.count_nonzero(sample['strat_valid_mask']) == 7
 
@@ -65,6 +81,30 @@ def test_provider_rejects_tokens_below_min_confidence(tmp_path: Path) -> None:
 	provider.add_targets(sample, _context(tmp_path))
 
 	assert provider.sample_is_acceptable(sample) is False
+
+
+def test_provider_requires_confidence_and_positive_boundary_weight(
+	tmp_path: Path,
+) -> None:
+	labels = np.zeros((2, 2, 2), dtype=np.int32)
+	confidence = np.full(labels.shape, 0.25, dtype=np.float32)
+	confidence[0, 0, 0] = 0.75
+	boundary_weight = np.ones(labels.shape, dtype=np.float32)
+	boundary_weight[0, 0, 0] = 0.0
+	provider = _provider(
+		tmp_path,
+		labels=labels,
+		confidence=confidence,
+		boundary_weight=boundary_weight,
+		min_confidence=0.5,
+	)
+	sample: dict[str, object] = {'coords': {}}
+	provider.add_targets(sample, _context(tmp_path))
+
+	assert provider.sample_is_acceptable(sample) is False
+
+	sample['strat_boundary_weight'][0, 0, 0] = 0.5
+	assert provider.sample_is_acceptable(sample) is True
 
 
 def test_provider_validate_manifests_rejects_missing_survey(
@@ -109,6 +149,7 @@ def _provider(
 	*,
 	labels: np.ndarray,
 	confidence: np.ndarray | None = None,
+	boundary_weight: np.ndarray | None = None,
 	min_confidence: float = 0.0,
 ) -> StratPseudoTargetProvider:
 	return StratPseudoTargetProvider(
@@ -117,6 +158,7 @@ def _provider(
 				tmp_path,
 				labels=labels,
 				confidence=confidence,
+				boundary_weight=boundary_weight,
 			)
 		],
 		min_confidence=min_confidence,
@@ -128,6 +170,7 @@ def _pseudo_target_input(
 	*,
 	labels: np.ndarray,
 	confidence: np.ndarray | None = None,
+	boundary_weight: np.ndarray | None = None,
 ) -> StratPseudoTargetInput:
 	if confidence is None:
 		confidence = np.ones(labels.shape, dtype=np.float32)
@@ -139,6 +182,7 @@ def _pseudo_target_input(
 		labels=labels,
 		confidence=confidence,
 		valid_tokens=np.ones(labels.shape, dtype=bool),
+		boundary_weight=boundary_weight,
 	)
 	return StratPseudoTargetInput(
 		survey_id='s1',

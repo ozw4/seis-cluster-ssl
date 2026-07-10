@@ -29,18 +29,26 @@ def structured_hmm_prototype_loss(  # noqa: PLR0913
 	labels: torch.Tensor,
 	*,
 	valid_mask: torch.Tensor,
+	boundary_weight: torch.Tensor,
 	confidence: torch.Tensor | None = None,
 	ignore_index: int = -1,
 	eps: float = 1.0e-8,
 ) -> torch.Tensor:
-	"""Return weighted CE against valid HMM pseudo-label tokens."""
+	"""Return confidence-times-boundary weighted CE for valid HMM targets."""
 	_validate_eps(eps)
 	_validate_logits(logits)
 	prefix_shape = logits.shape[:-1]
 	num_prototypes = logits.shape[-1]
 	_validate_labels(labels, prefix_shape)
 	_validate_valid_mask(valid_mask, prefix_shape, logits.device)
-	_validate_same_device(logits, labels, valid_mask)
+	_validate_weight_tensor(
+		boundary_weight,
+		prefix_shape,
+		logits.device,
+		name='boundary_weight',
+	)
+	_validate_same_device(logits, labels, valid_mask, boundary_weight)
+	_validate_weights(boundary_weight, name='boundary')
 
 	selection = valid_mask & labels.ne(ignore_index)
 	flat_selection = selection.reshape(-1)
@@ -53,11 +61,28 @@ def structured_hmm_prototype_loss(  # noqa: PLR0913
 	_validate_selected_labels(selected_labels, num_prototypes, ignore_index)
 
 	if confidence is None:
-		selected_weights = logits.new_ones(selected_labels.shape)
+		selected_confidence = logits.new_ones(selected_labels.shape)
 	else:
-		_validate_confidence(confidence, prefix_shape, logits.device)
-		selected_weights = confidence.reshape(-1)[flat_selection].to(dtype=logits.dtype)
-		_validate_weights(selected_weights)
+		_validate_weight_tensor(
+			confidence,
+			prefix_shape,
+			logits.device,
+			name='confidence',
+		)
+		if confidence.dtype != boundary_weight.dtype:
+			msg = (
+				'boundary_weight dtype must match confidence dtype; '
+				f'got {boundary_weight.dtype}, expected {confidence.dtype}'
+			)
+			raise TypeError(msg)
+		selected_confidence = confidence.reshape(-1)[flat_selection].to(
+			dtype=logits.dtype,
+		)
+		_validate_weights(selected_confidence, name='confidence')
+	selected_boundary_weight = boundary_weight.reshape(-1)[flat_selection].to(
+		dtype=logits.dtype,
+	)
+	selected_weights = selected_confidence * selected_boundary_weight
 
 	positive_weight = selected_weights > 0
 	total_weight = selected_weights[positive_weight].sum()
@@ -212,37 +237,39 @@ def _validate_selected_labels(
 		raise ValueError(msg)
 
 
-def _validate_confidence(
-	confidence: torch.Tensor,
+def _validate_weight_tensor(
+	weight: torch.Tensor,
 	prefix_shape: torch.Size,
 	device: torch.device,
+	*,
+	name: str,
 ) -> None:
-	if not isinstance(confidence, torch.Tensor):
-		msg = f'confidence must be a torch.Tensor; got {type(confidence)!r}'
+	if not isinstance(weight, torch.Tensor):
+		msg = f'{name} must be a torch.Tensor; got {type(weight)!r}'
 		raise TypeError(msg)
-	if tuple(confidence.shape) != tuple(prefix_shape):
+	if tuple(weight.shape) != tuple(prefix_shape):
 		msg = (
-			f'confidence shape must match logits prefix {tuple(prefix_shape)!r}; '
-			f'got {tuple(confidence.shape)!r}'
+			f'{name} shape must match logits prefix {tuple(prefix_shape)!r}; '
+			f'got {tuple(weight.shape)!r}'
 		)
 		raise ValueError(msg)
-	if not torch.is_floating_point(confidence):
-		msg = f'confidence must be floating point; got {confidence.dtype}'
+	if not torch.is_floating_point(weight):
+		msg = f'{name} must be floating point; got {weight.dtype}'
 		raise TypeError(msg)
-	if confidence.device != device:
+	if weight.device != device:
 		msg = (
-			'confidence must be on the same device as logits; '
-			f'got confidence_device={confidence.device}, logits_device={device}'
+			f'{name} must be on the same device as logits; '
+			f'got {name}_device={weight.device}, logits_device={device}'
 		)
 		raise ValueError(msg)
 
 
-def _validate_weights(weights: torch.Tensor) -> None:
+def _validate_weights(weights: torch.Tensor, *, name: str) -> None:
 	if not bool(torch.isfinite(weights).all().item()):
-		msg = 'confidence weights must be finite'
+		msg = f'{name} weights must be finite'
 		raise ValueError(msg)
 	if bool(weights.lt(0).any().item()):
-		msg = 'confidence weights must be nonnegative'
+		msg = f'{name} weights must be nonnegative'
 		raise ValueError(msg)
 
 
