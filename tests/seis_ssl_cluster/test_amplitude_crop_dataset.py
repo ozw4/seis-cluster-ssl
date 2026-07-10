@@ -9,6 +9,7 @@ from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
 	NopimsAmplitudeCropDataset,
+	NoTargetProvider,
 	SurveyManifest,
 	SurveyNormalizationStats,
 	write_normalization_stats,
@@ -22,10 +23,20 @@ if TYPE_CHECKING:
 
 
 class _FakeTargetProvider:
-	def __init__(self, *, acceptable: bool = True) -> None:
+	def __init__(
+		self,
+		*,
+		acceptable: bool = True,
+		reject_attempts: int = 0,
+		validation_error: str | None = None,
+	) -> None:
 		self.acceptable = acceptable
+		self.reject_attempts = reject_attempts
+		self.validation_error = validation_error
 		self.validated = False
 		self.context: TargetProviderContext | None = None
+		self.add_targets_calls = 0
+		self.acceptability_calls = 0
 
 	def validate_manifests(
 		self,
@@ -36,6 +47,8 @@ class _FakeTargetProvider:
 		token_grid_shape_xyz: tuple[int, int, int],
 	) -> None:
 		self.validated = True
+		if self.validation_error is not None:
+			raise ValueError(self.validation_error)
 		assert len(manifests) == 1
 		assert local_crop_size_xyz == (4, 4, 4)
 		assert patch_size_xyz == (2, 2, 2)
@@ -47,11 +60,17 @@ class _FakeTargetProvider:
 		context: TargetProviderContext,
 	) -> None:
 		self.context = context
-		sample['fake_target'] = np.ones(context.token_size_xyz, dtype=np.int64)
+		self.add_targets_calls += 1
+		sample['fake_target'] = np.full(
+			context.token_size_xyz,
+			self.add_targets_calls,
+			dtype=np.int64,
+		)
 
 	def sample_is_acceptable(self, sample: Mapping[str, object]) -> bool:
 		assert 'fake_target' in sample
-		return self.acceptable
+		self.acceptability_calls += 1
+		return self.acceptable and self.acceptability_calls > self.reject_attempts
 
 	def rejection_message(
 		self,
@@ -67,7 +86,11 @@ class _FakeTargetProvider:
 
 
 def test_no_target_provider_returns_only_base_sample_fields(tmp_path: Path) -> None:
-	dataset = _dataset(tmp_path, np.ones((8, 8, 8), dtype=np.float32))
+	dataset = _dataset(
+		tmp_path,
+		np.ones((8, 8, 8), dtype=np.float32),
+		target_provider=NoTargetProvider(),
+	)
 
 	sample = dataset[0]
 
@@ -81,6 +104,13 @@ def test_no_target_provider_returns_only_base_sample_fields(tmp_path: Path) -> N
 		'local_start_xyz',
 		'local_size_xyz',
 	}
+	for key in (
+		'strat_labels',
+		'strat_confidence',
+		'strat_valid_mask',
+		'_token_valid_mask',
+	):
+		assert key not in sample
 
 
 def test_crop_start_is_patch_aligned(tmp_path: Path) -> None:
@@ -152,6 +182,35 @@ def test_target_provider_validation_is_called(tmp_path: Path) -> None:
 	)
 
 	assert provider.validated
+
+
+def test_target_provider_validation_error_fails_dataset_init(tmp_path: Path) -> None:
+	provider = _FakeTargetProvider(validation_error='invalid provider manifests')
+
+	with pytest.raises(ValueError, match='invalid provider manifests'):
+		_dataset(
+			tmp_path,
+			np.ones((4, 4, 4), dtype=np.float32),
+			target_provider=provider,
+		)
+
+	assert provider.validated
+
+
+def test_target_provider_rejection_resamples_until_accepted(tmp_path: Path) -> None:
+	provider = _FakeTargetProvider(reject_attempts=1)
+	dataset = _dataset(
+		tmp_path,
+		np.ones((8, 8, 8), dtype=np.float32),
+		target_provider=provider,
+		max_resample_attempts=2,
+	)
+
+	sample = dataset[0]
+
+	assert provider.add_targets_calls == 2
+	assert provider.acceptability_calls == 2
+	np.testing.assert_array_equal(sample['fake_target'], 2)
 
 
 def test_target_provider_fields_are_returned_without_private_mask(

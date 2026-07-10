@@ -9,8 +9,10 @@ import torch
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
+	NopimsAmplitudeCropDataset,
 	NopimsAmplitudePretrainDataset,
 	NopimsStratPseudoTargetDataset,
+	StratPseudoTargetProvider,
 	SurveyManifest,
 	SurveyNormalizationStats,
 	ZeroMaskConfig,
@@ -60,6 +62,78 @@ def test_strat_dataset_slices_pseudo_targets_from_token_start(
 	assert token_start == (2, 2, 2)
 	assert token_size == (2, 2, 2)
 	assert sample['strat_valid_mask'].all()
+
+
+def test_wrapper_matches_generic_dataset_with_strat_provider(
+	tmp_path: Path,
+) -> None:
+	volume = np.arange(10 * 8 * 8, dtype=np.float32).reshape(10, 8, 8) + 1.0
+	labels = np.arange(5 * 4 * 4, dtype=np.int32).reshape(5, 4, 4)
+	valid_tokens = np.ones(labels.shape, dtype=np.bool_)
+	valid_tokens[3, 2, 2] = False
+	labels[~valid_tokens] = -1
+	confidence = np.linspace(
+		0.5,
+		1.0,
+		labels.size,
+		dtype=np.float32,
+	).reshape(labels.shape)
+	confidence[~valid_tokens] = 0.0
+	manifest = _manifest(tmp_path, 'survey', volume)
+	write_pseudo_target(
+		tmp_path / 'pseudo-composition',
+		k=int(labels.max()) + 1,
+		survey_id='survey',
+		labels=labels,
+		confidence=confidence,
+		valid_tokens=valid_tokens,
+	)
+	pseudo_target_inputs = discover_pseudo_target_inputs(
+		tmp_path / 'pseudo-composition',
+		k=int(labels.max()) + 1,
+	)
+	wrapper = NopimsStratPseudoTargetDataset(
+		[manifest],
+		pseudo_target_inputs,
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		seed=4,
+		zero_mask=ZeroMaskConfig(enabled=False),
+	)
+	composed = NopimsAmplitudeCropDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		seed=4,
+		zero_mask=ZeroMaskConfig(enabled=False),
+		target_provider=StratPseudoTargetProvider(pseudo_target_inputs),
+	)
+
+	wrapper_sample = wrapper[0]
+	composed_sample = composed[0]
+
+	assert set(wrapper_sample) == {
+		'x',
+		'local_valid_mask',
+		'strat_labels',
+		'strat_confidence',
+		'strat_valid_mask',
+		'coords',
+	}
+	assert set(composed_sample) == set(wrapper_sample)
+	for key in (
+		'x',
+		'local_valid_mask',
+		'strat_labels',
+		'strat_confidence',
+		'strat_valid_mask',
+	):
+		np.testing.assert_array_equal(wrapper_sample[key], composed_sample[key])
+	assert wrapper_sample['coords'] == composed_sample['coords']
+	for sample in (wrapper_sample, composed_sample):
+		assert '_token_valid_mask' not in sample
+		batch = strat_pseudo_target_collate_fn([sample])
+		assert '_token_valid_mask' not in batch
 
 
 def test_strat_dataset_excludes_invalid_pseudo_tokens_and_sets_label_minus_one(
@@ -274,10 +348,21 @@ def test_strat_pseudo_target_collate_stacks_pseudo_target_fields(
 
 	batch = strat_pseudo_target_collate_fn(samples)
 
+	assert set(batch) == {
+		'x',
+		'local_valid_mask',
+		'strat_labels',
+		'strat_confidence',
+		'strat_valid_mask',
+		'coords',
+	}
 	assert batch['x'].shape == (2, 1, 4, 4, 4)
+	assert batch['local_valid_mask'].shape == (2, 4, 4, 4)
 	assert batch['strat_labels'].shape == (2, 2, 2, 2)
 	assert batch['strat_confidence'].shape == (2, 2, 2, 2)
 	assert batch['strat_valid_mask'].shape == (2, 2, 2, 2)
+	assert batch['x'].dtype == torch.float32
+	assert batch['local_valid_mask'].dtype == torch.bool
 	assert batch['strat_labels'].dtype == torch.long
 	assert batch['strat_confidence'].dtype == torch.float32
 	assert batch['strat_valid_mask'].dtype == torch.bool
