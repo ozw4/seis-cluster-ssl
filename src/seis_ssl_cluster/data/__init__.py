@@ -62,6 +62,7 @@ from seis_ssl_cluster.data.schema import (
 from seis_ssl_cluster.data.strat_pseudo_dataset import NopimsStratPseudoTargetDataset
 from seis_ssl_cluster.data.target_providers import (
 	NoTargetProvider,
+	StratPseudoTargetProvider,
 	TargetProvider,
 	TargetProviderContext,
 )
@@ -112,6 +113,7 @@ __all__ = [
 	'NpyMemmapVolumeStore',
 	'NpyVolumeInfo',
 	'PreparedAmplitudeCrop',
+	'StratPseudoTargetProvider',
 	'SurveyManifest',
 	'SurveyNormalizationStats',
 	'TargetProvider',
@@ -138,9 +140,9 @@ __all__ = [
 	'normalization_qc_report_to_dict',
 	'normalize_amplitude',
 	'open',
+	'read_amplitude_crop',
 	'read_crop',
 	'read_crop_with_padding',
-	'read_amplitude_crop',
 	'read_manifest_json',
 	'reduce_valid_mask_to_tokens',
 	'required_zero_mask_margin_xyz',
