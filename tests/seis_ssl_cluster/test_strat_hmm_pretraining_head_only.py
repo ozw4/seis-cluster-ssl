@@ -13,6 +13,7 @@ import pytest
 import torch
 import yaml
 
+import seis_ssl_cluster.training.strat_hmm.runner as strat_hmm_runner
 from seis_ssl_cluster.config.pretraining import resolve_strat_hmm_pretext_config
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
@@ -63,6 +64,22 @@ def test_head_only_training_runs_cpu_writes_checkpoints_and_payloads(
 	assert checkpoint_path.is_file()
 	assert (Path(config['paths']['output_root']) / 'best.pt').is_file()
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	assert set(payload) == {
+		'amp_enabled',
+		'config',
+		'epoch',
+		'global_step',
+		'metrics',
+		'model_state_dict',
+		'optimizer_state_dict',
+		'package_version',
+		'rng_state',
+		'scaler_state_dict',
+		'stratigraphy_config',
+		'stratigraphy_state_dict',
+		'trainability_summary',
+		'training_state',
+	}
 	assert payload['global_step'] == 2
 	assert payload['training_state']['stage'] == 'train_strat_hmm_pretext'
 	assert payload['config']['stage'] == 'train_amp_mae'
@@ -72,10 +89,18 @@ def test_head_only_training_runs_cpu_writes_checkpoints_and_payloads(
 	assert math.isfinite(payload['metrics']['loss_usage'])
 	assert payload['metrics']['trainable_parameter_count'] == pytest.approx(0.0)
 	assert payload['trainability_summary']['trainable_names'] == []
-	assert set(payload['metrics']) >= {
-		'valid_supervised_token_fraction',
-		'target_usage_entropy',
+	assert set(payload['metrics']) == {
+		'amp_enabled',
+		'frozen_parameter_count',
+		'loss',
+		'loss_distillation',
+		'loss_prototype',
+		'loss_usage',
 		'prototype_usage_entropy',
+		'target_usage_entropy',
+		'trainable_parameter_count',
+		'valid_distillation_token_fraction',
+		'valid_supervised_token_fraction',
 	}
 	model_keys = set(payload['model_state_dict'])
 	head_keys = set(payload['stratigraphy_state_dict'])
@@ -83,6 +108,17 @@ def test_head_only_training_runs_cpu_writes_checkpoints_and_payloads(
 	assert 'prediction_head.weight' in model_keys
 	assert not (model_keys & {'prototypes', 'projection.weight', 'projection.bias'})
 	assert {'prototypes', 'projection.weight', 'projection.bias'} <= head_keys
+
+
+def test_training_runner_keeps_dataset_import_and_batch_schema(tmp_path: Path) -> None:
+	assert (
+		strat_hmm_runner.NopimsStratPseudoTargetDataset
+		is NopimsStratPseudoTargetDataset
+	)
+
+	batch = next(iter(_single_batch_dataloader(_resolved_config(tmp_path))))
+
+	assert '_token_valid_mask' not in batch
 
 
 def test_head_only_components_freeze_student_and_train_head(tmp_path: Path) -> None:
