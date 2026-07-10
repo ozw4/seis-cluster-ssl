@@ -19,6 +19,7 @@ from seis_ssl_cluster.data import (
 	ZeroMaskConfig,
 	write_normalization_stats,
 )
+from seis_ssl_cluster.stratigraphy.losses import structured_hmm_prototype_loss
 from seis_ssl_cluster.stratigraphy.targets import (
 	discover_pseudo_target_inputs,
 	pseudo_target_paths,
@@ -345,6 +346,123 @@ def test_strat_dataset_schema_v1_uses_unity_boundary_weight(
 		sample['strat_boundary_weight'],
 		np.ones(labels.shape, dtype=np.float32),
 	)
+
+
+def test_schema_v1_and_unity_v2_match_through_dataset_collate_and_loss(
+	tmp_path: Path,
+) -> None:
+	labels = (np.arange(8).reshape(2, 2, 2) % 2).astype(np.int32)
+	confidence = np.linspace(0.2, 1.0, labels.size, dtype=np.float32).reshape(
+		labels.shape,
+	)
+	valid_tokens = np.ones(labels.shape, dtype=np.bool_)
+	manifest = _manifest(tmp_path, 'survey', np.ones((4, 4, 4), dtype=np.float32))
+	v1_root = tmp_path / 'pseudo-v1-loss'
+	v1_paths = pseudo_target_paths(v1_root, k=2, survey_id='survey')
+	v1_paths.labels.parent.mkdir(parents=True)
+	np.save(v1_paths.labels, labels)
+	np.save(v1_paths.confidence, confidence)
+	np.save(v1_paths.valid_tokens, valid_tokens)
+	v1_paths.metadata.write_text(
+		json.dumps({'schema_version': 1}) + '\n',
+		encoding='utf-8',
+	)
+	v2_root = tmp_path / 'pseudo-v2-unity-loss'
+	write_pseudo_target(
+		v2_root,
+		k=2,
+		survey_id='survey',
+		labels=labels,
+		confidence=confidence,
+		valid_tokens=valid_tokens,
+		boundary_weight=np.ones(labels.shape, dtype=np.float32),
+		metadata={'boundary_weighting': {'alpha': 0.0}},
+	)
+
+	batches = []
+	for root in (v1_root, v2_root):
+		dataset = NopimsStratPseudoTargetDataset(
+			[manifest],
+			discover_pseudo_target_inputs(root, k=2),
+			local_crop_size_xyz=(4, 4, 4),
+			patch_size_xyz=(2, 2, 2),
+			zero_mask=ZeroMaskConfig(enabled=False),
+		)
+		batches.append(strat_pseudo_target_collate_fn([dataset[0]]))
+	logits = torch.linspace(-1.0, 1.0, 16).reshape(1, 2, 2, 2, 2)
+	losses = [
+		structured_hmm_prototype_loss(
+			logits,
+			batch['strat_labels'],
+			valid_mask=batch['strat_valid_mask'],
+			confidence=batch['strat_confidence'],
+			boundary_weight=batch['strat_boundary_weight'],
+		)
+		for batch in batches
+	]
+
+	assert torch.equal(
+		batches[0]['strat_boundary_weight'],
+		torch.ones_like(batches[0]['strat_boundary_weight']),
+	)
+	assert torch.equal(
+		batches[0]['strat_boundary_weight'],
+		batches[1]['strat_boundary_weight'],
+	)
+	torch.testing.assert_close(losses[0], losses[1])
+
+
+def test_weighted_v2_matches_expected_loss_through_dataset_and_collate(
+	tmp_path: Path,
+) -> None:
+	labels = (np.arange(8).reshape(2, 2, 2) % 2).astype(np.int32)
+	confidence = np.linspace(0.2, 1.0, labels.size, dtype=np.float32).reshape(
+		labels.shape,
+	)
+	boundary_weight = np.linspace(
+		0.1,
+		0.8,
+		labels.size,
+		dtype=np.float32,
+	).reshape(labels.shape)
+	root = tmp_path / 'pseudo-v2-weighted-loss'
+	write_pseudo_target(
+		root,
+		k=2,
+		survey_id='survey',
+		labels=labels,
+		confidence=confidence,
+		valid_tokens=np.ones(labels.shape, dtype=np.bool_),
+		boundary_weight=boundary_weight,
+	)
+	dataset = NopimsStratPseudoTargetDataset(
+		[_manifest(tmp_path, 'survey', np.ones((4, 4, 4), dtype=np.float32))],
+		discover_pseudo_target_inputs(root, k=2),
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		zero_mask=ZeroMaskConfig(enabled=False),
+	)
+	batch = strat_pseudo_target_collate_fn([dataset[0]])
+	logits = torch.linspace(-1.0, 1.0, 16).reshape(1, 2, 2, 2, 2)
+
+	actual = structured_hmm_prototype_loss(
+		logits,
+		batch['strat_labels'],
+		valid_mask=batch['strat_valid_mask'],
+		confidence=batch['strat_confidence'],
+		boundary_weight=batch['strat_boundary_weight'],
+	)
+	token_loss = torch.nn.functional.cross_entropy(
+		logits.reshape(-1, 2),
+		batch['strat_labels'].reshape(-1),
+		reduction='none',
+	)
+	effective_weight = (
+		batch['strat_confidence'] * batch['strat_boundary_weight']
+	).reshape(-1)
+	expected = (token_loss * effective_weight).sum() / effective_weight.sum()
+
+	torch.testing.assert_close(actual, expected)
 
 
 def test_strat_dataset_allows_extra_pseudo_target_surveys(
