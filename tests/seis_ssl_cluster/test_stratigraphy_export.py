@@ -42,12 +42,50 @@ def test_export_from_synthetic_hmm_labels(tmp_path: Path) -> None:
 	assert result.labels_path.is_file()
 	assert result.confidence_path.is_file()
 	assert result.valid_tokens_path.is_file()
+	assert result.boundary_weight_path.is_file()
 	assert result.metadata_path.is_file()
 	arrays = load_pseudo_target_arrays(
 		pseudo_target_paths(tmp_path / 'pseudo', k=3, survey_id='survey_a'),
 	)
 	np.testing.assert_array_equal(arrays.labels, labels)
 	np.testing.assert_array_equal(arrays.valid_tokens, labels >= 0)
+	np.testing.assert_array_equal(
+		arrays.boundary_weight,
+		(labels >= 0).astype(np.float32),
+	)
+
+
+def test_export_saves_boundary_weights_without_crossing_invalid_gaps(
+	tmp_path: Path,
+) -> None:
+	labels = np.array([[[0, 1, -1, 1, 1]]], dtype=np.int32)
+	clustering_dir = _write_hmm_labels(tmp_path, 'survey_a', k=2, labels=labels)
+
+	export_hmm_cluster_labels_as_pseudo_targets(
+		clustering_output_dir=clustering_dir,
+		pseudo_target_root=tmp_path / 'pseudo',
+		k=2,
+		boundary_alpha=0.5,
+		boundary_tau=2.0,
+	)
+
+	arrays = load_pseudo_target_arrays(
+		pseudo_target_paths(tmp_path / 'pseudo', k=2, survey_id='survey_a'),
+	)
+	np.testing.assert_array_equal(
+		arrays.boundary_weight,
+		np.array([[[0.5, 0.5, 0.0, 1.0, 1.0]]], dtype=np.float32),
+	)
+	metadata = load_pseudo_target_metadata(
+		pseudo_target_paths(tmp_path / 'pseudo', k=2, survey_id='survey_a'),
+	)
+	assert metadata['source']['boundary_weighting'] == {
+		'adjacent_transition_distance': 0,
+		'alpha': 0.5,
+		'invalid_gap_crossing': False,
+		'method': 'transition_distance_exponential',
+		'tau': 2.0,
+	}
 
 
 def test_export_confidence_is_constant_on_valid_and_zero_on_invalid(
@@ -100,6 +138,13 @@ def test_export_includes_source_metadata_provenance(tmp_path: Path) -> None:
 		pseudo_target_paths(tmp_path / 'pseudo', k=3, survey_id='survey_a'),
 	)
 	assert metadata['source'] == {
+		'boundary_weighting': {
+			'adjacent_transition_distance': 0,
+			'alpha': 0.0,
+			'invalid_gap_crossing': False,
+			'method': 'transition_distance_exponential',
+			'tau': 1.0,
+		},
 		'export_confidence': 0.75,
 		'source_clustering_output_dir': str(clustering_dir),
 		'source_label_path': str(
@@ -141,6 +186,20 @@ def test_export_rejects_existing_outputs_without_overwrite(tmp_path: Path) -> No
 	assert results[0].metadata_path.is_file()
 
 
+def test_export_boundary_weight_blocks_overwrite(tmp_path: Path) -> None:
+	clustering_dir = _write_hmm_labels(tmp_path, 'survey_a')
+	paths = pseudo_target_paths(tmp_path / 'pseudo', k=3, survey_id='survey_a')
+	paths.boundary_weight.parent.mkdir(parents=True)
+	np.save(paths.boundary_weight, np.ones((1, 1, 3), dtype=np.float32))
+
+	with pytest.raises(FileExistsError, match=r'hmm_boundary_weight_token\.npy'):
+		export_hmm_cluster_labels_as_pseudo_targets(
+			clustering_output_dir=clustering_dir,
+			pseudo_target_root=tmp_path / 'pseudo',
+			k=3,
+		)
+
+
 def test_cli_dry_run_validates_and_does_not_create_files(tmp_path: Path) -> None:
 	clustering_dir = _write_hmm_labels(tmp_path, 'survey_a')
 	pseudo_root = tmp_path / 'pseudo'
@@ -152,11 +211,17 @@ def test_cli_dry_run_validates_and_does_not_create_files(tmp_path: Path) -> None
 		str(pseudo_root),
 		'--k',
 		'3',
+		'--boundary-alpha',
+		'0.5',
+		'--boundary-tau',
+		'2.0',
 		'--dry-run',
 	)
 
 	assert completed.returncode == 0
 	assert 'execution: dry-run; no files written' in completed.stdout
+	assert 'boundary_weighting: alpha=0.5 tau=2.0' in completed.stdout
+	assert 'boundary_weight=' in completed.stdout
 	assert not pseudo_root.exists()
 
 
@@ -173,6 +238,8 @@ def test_cli_execution_writes_expected_pseudo_target_files(tmp_path: Path) -> No
 		'3',
 		'--confidence',
 		'0.5',
+		'--boundary-alpha',
+		'0.5',
 	)
 
 	assert completed.returncode == 0
@@ -181,11 +248,74 @@ def test_cli_execution_writes_expected_pseudo_target_files(tmp_path: Path) -> No
 	assert paths.labels.is_file()
 	assert paths.confidence.is_file()
 	assert paths.valid_tokens.is_file()
+	assert paths.boundary_weight.is_file()
 	assert paths.metadata.is_file()
 	np.testing.assert_array_equal(
 		np.load(paths.confidence),
 		np.array([[[0.5, 0.0, 0.5]]], dtype=np.float32),
 	)
+	np.testing.assert_array_equal(
+		np.load(paths.boundary_weight),
+		np.array([[[1.0, 0.0, 1.0]]], dtype=np.float32),
+	)
+
+
+@pytest.mark.parametrize(
+	('argument', 'value', 'message'),
+	[
+		('boundary_alpha', -0.1, 'alpha must be finite and in'),
+		('boundary_tau', 0.0, 'tau must be finite and positive'),
+	],
+)
+def test_export_rejects_invalid_boundary_parameters(
+	tmp_path: Path,
+	argument: str,
+	value: float,
+	message: str,
+) -> None:
+	clustering_dir = _write_hmm_labels(tmp_path, 'survey_a')
+	kwargs = {argument: value}
+
+	with pytest.raises(ValueError, match=message):
+		export_hmm_cluster_labels_as_pseudo_targets(
+			clustering_output_dir=clustering_dir,
+			pseudo_target_root=tmp_path / 'pseudo',
+			k=3,
+			**kwargs,
+		)
+
+
+@pytest.mark.parametrize(
+	('flag', 'value', 'message'),
+	[
+		('--boundary-alpha', '1.1', 'alpha must be finite and in'),
+		('--boundary-tau', '0', 'tau must be finite and positive'),
+	],
+)
+def test_cli_dry_run_rejects_invalid_boundary_parameters(
+	tmp_path: Path,
+	flag: str,
+	value: str,
+	message: str,
+) -> None:
+	clustering_dir = _write_hmm_labels(tmp_path, 'survey_a')
+	pseudo_root = tmp_path / 'pseudo'
+
+	completed = _run_cli(
+		'--clustering-output-dir',
+		str(clustering_dir),
+		'--pseudo-target-root',
+		str(pseudo_root),
+		'--k',
+		'3',
+		flag,
+		value,
+		'--dry-run',
+	)
+
+	assert completed.returncode != 0
+	assert message in completed.stderr
+	assert not pseudo_root.exists()
 
 
 def _write_hmm_labels(
