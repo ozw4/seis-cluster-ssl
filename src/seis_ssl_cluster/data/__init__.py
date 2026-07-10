@@ -59,6 +59,11 @@ from seis_ssl_cluster.data.schema import (
 	write_manifest_json,
 )
 from seis_ssl_cluster.data.strat_pseudo_dataset import NopimsStratPseudoTargetDataset
+from seis_ssl_cluster.data.target_providers import (
+	NoTargetProvider,
+	TargetProvider,
+	TargetProviderContext,
+)
 from seis_ssl_cluster.data.volume_store import (
 	NpyMemmapVolumeStore,
 	NpyVolumeInfo,
@@ -96,6 +101,7 @@ __all__ = [
 	'FilteredManifestStatsQcResult',
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
+	'NoTargetProvider',
 	'NopimsAmplitudePretrainDataset',
 	'NopimsStratPseudoTargetDataset',
 	'NormalizationStatsQcItem',
@@ -106,6 +112,8 @@ __all__ = [
 	'PreparedAmplitudeCrop',
 	'SurveyManifest',
 	'SurveyNormalizationStats',
+	'TargetProvider',
+	'TargetProviderContext',
 	'ZeroMaskConfig',
 	'apply_configured_agc',
 	'apply_trace_rms_agc',
