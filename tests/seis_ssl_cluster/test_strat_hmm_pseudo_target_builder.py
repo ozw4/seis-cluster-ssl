@@ -59,6 +59,7 @@ def test_tiny_survey_builds_pseudo_target_files_on_cpu(tmp_path: Path) -> None:
 	assert result.labels_path.is_file()
 	assert result.confidence_path.is_file()
 	assert result.valid_tokens_path.is_file()
+	assert result.boundary_weight_path.is_file()
 	assert result.metadata_path.is_file()
 
 
@@ -102,6 +103,7 @@ def test_builder_outputs_validate_as_pseudo_target_arrays(tmp_path: Path) -> Non
 		arrays.labels,
 		arrays.confidence,
 		arrays.valid_tokens,
+		boundary_weight=arrays.boundary_weight,
 		k=3,
 		survey_id='survey-a',
 	)
@@ -144,7 +146,7 @@ def test_existing_outputs_are_rejected_unless_overwrite_is_true(
 def test_skip_existing_rejects_metadata_mismatch(tmp_path: Path) -> None:
 	config = _resolved_config(tmp_path)
 	build_strat_hmm_pseudo_target_results(config, device='cpu')
-	config['hmm']['edge_margin_tokens'] = [0, 0, 1]
+	config['hmm']['boundary_weighting']['alpha'] = 0.5
 
 	with pytest.raises(ValueError, match='metadata does not match'):
 		build_strat_hmm_pseudo_target_results(
@@ -159,13 +161,13 @@ def test_partial_existing_outputs_are_rejected_without_overwrite(
 ) -> None:
 	config = _resolved_config(tmp_path)
 	first = build_strat_hmm_pseudo_target_results(config, device='cpu')[0]
-	first.confidence_path.unlink()
+	first.boundary_weight_path.unlink()
 
 	with pytest.raises(ValueError, match='incomplete existing pseudo-target output'):
 		build_strat_hmm_pseudo_target_results(config, device='cpu')
 
 	assert first.labels_path.is_file()
-	assert not first.confidence_path.exists()
+	assert not first.boundary_weight_path.exists()
 
 
 def test_edge_margins_reduce_valid_token_count(tmp_path: Path) -> None:
@@ -205,7 +207,9 @@ def test_metadata_records_checkpoint_provenance_and_hmm_settings(
 	assert source['checkpoint_training_stage'] == 'train_strat_hmm_pretext'
 	assert source['head_config']['num_prototypes'] == 3
 	assert source['hmm']['transition']['max_jump'] == 1
+	assert source['hmm']['boundary_weighting'] == {'alpha': 0.0, 'tau': 1.0}
 	assert source['hmm']['path_prior'] is None
+	assert source['decode']['boundary_weight_summary']['transition_boundary_count'] >= 0
 	assert source['inference']['window_size'] == [4, 4, 4]
 	assert source['valid_summary']['decoded_valid_token_count'] == 12
 	assert source['confidence_summary']['min'] >= 0.0

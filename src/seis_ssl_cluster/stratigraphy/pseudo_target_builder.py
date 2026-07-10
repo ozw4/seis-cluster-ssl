@@ -58,6 +58,7 @@ class BuiltPseudoTargetResult:
 	labels_path: Path
 	confidence_path: Path
 	valid_tokens_path: Path
+	boundary_weight_path: Path
 	metadata_path: Path
 	valid_token_count: int
 	skipped: bool = False
@@ -81,6 +82,8 @@ class _BuilderSettings:
 	transition: HMMTransitionSettings
 	path_prior: HMMPathPriorSettings | None
 	expected_boundaries: HMMExpectedBoundariesSettings | None
+	boundary_alpha: float
+	boundary_tau: float
 
 
 def build_strat_hmm_pseudo_targets(
@@ -270,6 +273,8 @@ def _build_survey_pseudo_targets(  # noqa: PLR0913
 		path_prior=settings.path_prior,
 		edge_margin_tokens=settings.edge_margin_tokens,
 		expected_boundaries=settings.expected_boundaries,
+		boundary_alpha=settings.boundary_alpha,
+		boundary_tau=settings.boundary_tau,
 	)
 	metadata = _pseudo_target_source_metadata(
 		request_metadata=request_metadata,
@@ -283,6 +288,7 @@ def _build_survey_pseudo_targets(  # noqa: PLR0913
 		labels=decoded.labels,
 		confidence=decoded.confidence,
 		valid_tokens=decoded.valid_tokens,
+		boundary_weight=decoded.boundary_weight,
 		metadata=metadata,
 	)
 	return BuiltPseudoTargetResult(
@@ -290,6 +296,7 @@ def _build_survey_pseudo_targets(  # noqa: PLR0913
 		labels_path=written.labels,
 		confidence_path=written.confidence,
 		valid_tokens_path=written.valid_tokens,
+		boundary_weight_path=written.boundary_weight,
 		metadata_path=written.metadata,
 		valid_token_count=int(np.count_nonzero(decoded.valid_tokens)),
 	)
@@ -480,7 +487,13 @@ def _prepare_output_paths(
 	paths.labels.parent.mkdir(parents=True, exist_ok=True)
 	existing = [
 		path
-		for path in (paths.labels, paths.confidence, paths.valid_tokens, paths.metadata)
+		for path in (
+			paths.labels,
+			paths.confidence,
+			paths.valid_tokens,
+			paths.boundary_weight,
+			paths.metadata,
+		)
 		if path.exists()
 	]
 	if not existing:
@@ -489,6 +502,7 @@ def _prepare_output_paths(
 		paths.labels.exists()
 		and paths.confidence.exists()
 		and paths.valid_tokens.exists()
+		and paths.boundary_weight.exists()
 		and paths.metadata.exists()
 	)
 	if not complete_outputs:
@@ -555,6 +569,7 @@ def _skipped_result(
 		labels_path=paths.labels,
 		confidence_path=paths.confidence,
 		valid_tokens_path=paths.valid_tokens,
+		boundary_weight_path=paths.boundary_weight,
 		metadata_path=paths.metadata,
 		valid_token_count=int(valid_token_count),
 		skipped=True,
@@ -643,6 +658,10 @@ def _hmm_metadata(settings: _BuilderSettings) -> dict[str, object]:
 			else asdict(settings.expected_boundaries)
 		),
 		'k': settings.hmm_k,
+		'boundary_weighting': {
+			'alpha': settings.boundary_alpha,
+			'tau': settings.boundary_tau,
+		},
 		'path_prior': (
 			None if settings.path_prior is None else asdict(settings.path_prior)
 		),
@@ -682,6 +701,14 @@ def _settings_from_config(
 		msg = 'overwrite and skip_existing cannot both be true'
 		raise ValueError(msg)
 	path_prior = _path_prior_from_config(hmm)
+	boundary_weighting_value = hmm.get('boundary_weighting')
+	if boundary_weighting_value is None:
+		boundary_weighting: Mapping[str, object] = {'alpha': 0.0, 'tau': 1.0}
+	elif isinstance(boundary_weighting_value, Mapping):
+		boundary_weighting = boundary_weighting_value
+	else:
+		msg = 'hmm.boundary_weighting must be a mapping'
+		raise TypeError(msg)
 	expected_boundaries = (
 		None
 		if path_prior is None or not path_prior.enabled
@@ -709,6 +736,8 @@ def _settings_from_config(
 		transition=_transition_from_config(_mapping(hmm, 'transition')),
 		path_prior=path_prior,
 		expected_boundaries=expected_boundaries,
+		boundary_alpha=float(boundary_weighting.get('alpha', 0.0)),
+		boundary_tau=float(boundary_weighting.get('tau', 1.0)),
 	)
 
 
