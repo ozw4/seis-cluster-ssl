@@ -1,5 +1,6 @@
 """Data components for seismic SSL clustering."""
 
+from seis_ssl_cluster.data.amplitude_crop_dataset import NopimsAmplitudeCropDataset
 from seis_ssl_cluster.data.amplitude_dataset import (
 	AmplitudePretrainDataset,
 	NopimsAmplitudePretrainDataset,
@@ -102,6 +103,7 @@ __all__ = [
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
 	'NoTargetProvider',
+	'NopimsAmplitudeCropDataset',
 	'NopimsAmplitudePretrainDataset',
 	'NopimsStratPseudoTargetDataset',
 	'NormalizationStatsQcItem',

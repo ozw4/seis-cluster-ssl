@@ -1,0 +1,229 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+import pytest
+
+from seis_ssl_cluster.data import (
+	GRID_ORDER_XYZ,
+	AmplitudeVolumeRecord,
+	NopimsAmplitudeCropDataset,
+	SurveyManifest,
+	SurveyNormalizationStats,
+	write_normalization_stats,
+)
+
+if TYPE_CHECKING:
+	from collections.abc import Mapping, MutableMapping, Sequence
+	from pathlib import Path
+
+	from seis_ssl_cluster.data import TargetProviderContext
+
+
+class _FakeTargetProvider:
+	def __init__(self, *, acceptable: bool = True) -> None:
+		self.acceptable = acceptable
+		self.validated = False
+		self.context: TargetProviderContext | None = None
+
+	def validate_manifests(
+		self,
+		manifests: Sequence[SurveyManifest],
+		*,
+		local_crop_size_xyz: tuple[int, int, int],
+		patch_size_xyz: tuple[int, int, int],
+		token_grid_shape_xyz: tuple[int, int, int],
+	) -> None:
+		self.validated = True
+		assert len(manifests) == 1
+		assert local_crop_size_xyz == (4, 4, 4)
+		assert patch_size_xyz == (2, 2, 2)
+		assert token_grid_shape_xyz == (2, 2, 2)
+
+	def add_targets(
+		self,
+		sample: MutableMapping[str, object],
+		context: TargetProviderContext,
+	) -> None:
+		self.context = context
+		sample['fake_target'] = np.ones(context.token_size_xyz, dtype=np.int64)
+
+	def sample_is_acceptable(self, sample: Mapping[str, object]) -> bool:
+		assert 'fake_target' in sample
+		return self.acceptable
+
+	def rejection_message(
+		self,
+		*,
+		survey_id: str,
+		max_resample_attempts: int,
+		last_valid_fraction: float,
+	) -> str:
+		return (
+			f'provider rejected {survey_id} after {max_resample_attempts} attempts '
+			f'at {last_valid_fraction:.6f}.'
+		)
+
+
+def test_no_target_provider_returns_only_base_sample_fields(tmp_path: Path) -> None:
+	dataset = _dataset(tmp_path, np.ones((8, 8, 8), dtype=np.float32))
+
+	sample = dataset[0]
+
+	assert set(sample) == {'x', 'local_valid_mask', 'coords'}
+	assert sample['x'].shape == (1, 4, 4, 4)
+	assert sample['x'].dtype == np.float32
+	assert sample['local_valid_mask'].shape == (4, 4, 4)
+	assert sample['local_valid_mask'].dtype == np.bool_
+	assert set(sample['coords']) == {
+		'survey_id',
+		'local_start_xyz',
+		'local_size_xyz',
+	}
+
+
+def test_crop_start_is_patch_aligned(tmp_path: Path) -> None:
+	dataset = _dataset(tmp_path, np.ones((10, 12, 14), dtype=np.float32))
+
+	start_xyz = dataset[0]['coords']['local_start_xyz']
+
+	assert all(axis % 2 == 0 for axis in start_xyz)
+
+
+def test_set_epoch_changes_sampling_deterministically(tmp_path: Path) -> None:
+	dataset = _dataset(tmp_path, np.ones((20, 20, 20), dtype=np.float32))
+
+	dataset.set_epoch(3)
+	first = dataset[0]['coords']['local_start_xyz']
+	dataset.set_epoch(4)
+	changed = dataset[0]['coords']['local_start_xyz']
+	dataset.set_epoch(3)
+	repeated = dataset[0]['coords']['local_start_xyz']
+
+	assert changed != first
+	assert repeated == first
+
+
+def test_min_valid_fraction_retries_then_raises(tmp_path: Path) -> None:
+	dataset = _dataset(
+		tmp_path,
+		np.zeros((4, 4, 4), dtype=np.float32),
+		min_valid_fraction=1.0,
+		max_resample_attempts=2,
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=r'min_valid_fraction=1\.000000.*last local valid fraction was 0\.000000',
+	):
+		dataset[0]
+
+
+def test_missing_amplitude_file_raises(tmp_path: Path) -> None:
+	manifest = _manifest(tmp_path, write_amplitude=False, write_stats=True)
+
+	with pytest.raises(FileNotFoundError, match='amplitude file does not exist'):
+		NopimsAmplitudeCropDataset(
+			[manifest],
+			local_crop_size_xyz=(4, 4, 4),
+			patch_size_xyz=(2, 2, 2),
+		)
+
+
+def test_missing_normalization_stats_raises(tmp_path: Path) -> None:
+	manifest = _manifest(tmp_path, write_amplitude=True, write_stats=False)
+
+	with pytest.raises(FileNotFoundError, match='normalization stats file'):
+		NopimsAmplitudeCropDataset(
+			[manifest],
+			local_crop_size_xyz=(4, 4, 4),
+			patch_size_xyz=(2, 2, 2),
+		)
+
+
+def test_target_provider_validation_is_called(tmp_path: Path) -> None:
+	provider = _FakeTargetProvider()
+
+	_dataset(
+		tmp_path,
+		np.ones((4, 4, 4), dtype=np.float32),
+		target_provider=provider,
+	)
+
+	assert provider.validated
+
+
+def test_target_provider_fields_are_returned_without_private_mask(
+	tmp_path: Path,
+) -> None:
+	volume = np.ones((4, 4, 4), dtype=np.float32)
+	volume[0, 0, :] = 0.0
+	provider = _FakeTargetProvider()
+	dataset = _dataset(tmp_path, volume, target_provider=provider)
+
+	sample = dataset[0]
+
+	assert 'fake_target' in sample
+	assert '_token_valid_mask' not in sample
+	assert provider.context is not None
+	assert provider.context.token_valid_mask.shape == (2, 2, 2)
+	assert not provider.context.token_valid_mask[0, 0, 0]
+
+
+def _dataset(
+	tmp_path: Path,
+	volume: np.ndarray,
+	**kwargs: object,
+) -> NopimsAmplitudeCropDataset:
+	manifest = _manifest(tmp_path, volume=volume)
+	return NopimsAmplitudeCropDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		**kwargs,
+	)
+
+
+def _manifest(
+	tmp_path: Path,
+	*,
+	volume: np.ndarray | None = None,
+	write_amplitude: bool = True,
+	write_stats: bool = True,
+) -> SurveyManifest:
+	root = tmp_path / 'survey'
+	root.mkdir()
+	amplitude_path = root / 'amplitude.npy'
+	if volume is None:
+		volume = np.ones((4, 4, 4), dtype=np.float32)
+	if write_amplitude:
+		np.save(amplitude_path, volume)
+	stats_path = root / 'stats.json'
+	if write_stats:
+		write_normalization_stats(
+			SurveyNormalizationStats(
+				survey_id='survey',
+				source_path=amplitude_path,
+				grid_order=GRID_ORDER_XYZ,
+				clip_low_percentile=0.0,
+				clip_high_percentile=100.0,
+				clip_low=-10.0,
+				clip_high=10.0,
+				median=0.0,
+				iqr=1.0,
+			),
+			stats_path,
+		)
+	return SurveyManifest(
+		survey_id='survey',
+		root=root,
+		amplitude=AmplitudeVolumeRecord(
+			survey_id='survey',
+			path=amplitude_path,
+			shape_xyz=tuple(volume.shape),
+			dtype='float32',
+			grid_order=GRID_ORDER_XYZ,
+			normalization_stats_path=stats_path,
+		),
+	)
