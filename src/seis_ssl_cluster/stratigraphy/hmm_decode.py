@@ -18,6 +18,7 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	decode_trace_segments,
 	edge_margin_mask_for_shape,
 )
+from seis_ssl_cluster.stratigraphy.boundary_weights import boundary_weight_tokens
 
 
 @dataclass(frozen=True)
@@ -27,6 +28,7 @@ class LogitHMMPseudoTarget:
 	labels: np.ndarray
 	confidence: np.ndarray
 	valid_tokens: np.ndarray
+	boundary_weight: np.ndarray
 	metadata: dict[str, object]
 
 
@@ -53,6 +55,8 @@ def decode_ordered_logits_survey(  # noqa: PLR0913
 	path_prior: HMMPathPriorSettings | None = None,
 	edge_margin_tokens: tuple[int, int, int] = (0, 0, 0),
 	expected_boundaries: HMMExpectedBoundariesSettings | None = None,
+	boundary_alpha: float = 0.0,
+	boundary_tau: float = 1.0,
 	eps: float = 1.0e-8,
 ) -> LogitHMMPseudoTarget:
 	"""Decode one survey's prototype logits into ordered HMM pseudo-target arrays."""
@@ -112,13 +116,21 @@ def decode_ordered_logits_survey(  # noqa: PLR0913
 		z_coords,
 		decoded_labels,
 	].astype(np.float32, copy=False)
+	boundary_weight = boundary_weight_tokens(
+		labels,
+		effective_valid,
+		alpha=boundary_alpha,
+		tau=boundary_tau,
+	)
 
 	return LogitHMMPseudoTarget(
 		labels=labels,
 		confidence=confidence,
 		valid_tokens=effective_valid.astype(np.bool_, copy=False),
+		boundary_weight=boundary_weight,
 		metadata=_metadata(
 			k=k,
+			labels=labels,
 			token_grid_shape=valid.shape,
 			transition=transition,
 			path_prior=path_prior,
@@ -127,6 +139,9 @@ def decode_ordered_logits_survey(  # noqa: PLR0913
 			effective_valid_tokens=effective_valid,
 			confidence=confidence,
 			expected_boundaries=expected_boundaries,
+			boundary_weight=boundary_weight,
+			boundary_alpha=float(boundary_alpha),
+			boundary_tau=float(boundary_tau),
 		),
 	)
 
@@ -215,6 +230,7 @@ def _validate_eps(eps: float) -> None:
 def _metadata(  # noqa: PLR0913
 	*,
 	k: int,
+	labels: np.ndarray,
 	token_grid_shape: tuple[int, int, int],
 	transition: HMMTransitionSettings,
 	path_prior: HMMPathPriorSettings | None,
@@ -223,9 +239,39 @@ def _metadata(  # noqa: PLR0913
 	effective_valid_tokens: np.ndarray,
 	confidence: np.ndarray,
 	expected_boundaries: HMMExpectedBoundariesSettings | None,
+	boundary_weight: np.ndarray,
+	boundary_alpha: float,
+	boundary_tau: float,
 ) -> dict[str, object]:
 	decoded_confidence = confidence[effective_valid_tokens]
+	valid_boundary_weight = boundary_weight[effective_valid_tokens]
+	transition_count = int(
+		np.count_nonzero(
+			effective_valid_tokens[..., :-1]
+			& effective_valid_tokens[..., 1:]
+			& (labels[..., :-1] != labels[..., 1:]),
+		),
+	)
 	return {
+		'boundary_weight_summary': {
+			'downweighted_valid_token_count': int(
+				np.count_nonzero(valid_boundary_weight < 1.0),
+			),
+			'max': float(np.max(valid_boundary_weight)),
+			'mean': float(np.mean(valid_boundary_weight, dtype=np.float64)),
+			'min': float(np.min(valid_boundary_weight)),
+			'transition_boundary_count': transition_count,
+			'zero_weight_valid_token_count': int(
+				np.count_nonzero(valid_boundary_weight == 0.0),
+			),
+		},
+		'boundary_weighting': {
+			'adjacent_transition_distance': 0,
+			'alpha': boundary_alpha,
+			'invalid_gap_crossing': False,
+			'method': 'transition_distance_exponential',
+			'tau': boundary_tau,
+		},
 		'confidence_note': (
 			'confidence is the decoded-label softmax probability and should be '
 			'treated as a training weight, not a calibrated probability'

@@ -44,6 +44,18 @@ def build_parser() -> argparse.ArgumentParser:
 		default=1.0,
 		help='Constant confidence assigned to valid tokens.',
 	)
+	parser.add_argument(
+		'--boundary-alpha',
+		type=float,
+		default=0.0,
+		help='Boundary downweighting strength in [0, 1].',
+	)
+	parser.add_argument(
+		'--boundary-tau',
+		type=float,
+		default=1.0,
+		help='Positive exponential boundary-distance scale.',
+	)
 	add_overwrite_argument(parser)
 	add_dry_run_argument(
 		parser,
@@ -62,9 +74,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 			pseudo_target_root=args.pseudo_target_root,
 			k=args.k,
 			confidence=args.confidence,
+			boundary_alpha=args.boundary_alpha,
+			boundary_tau=args.boundary_tau,
 			overwrite=args.overwrite,
 		)
-		_print_summary(results, dry_run=True)
+		_print_summary(
+			results,
+			dry_run=True,
+			boundary_alpha=args.boundary_alpha,
+			boundary_tau=args.boundary_tau,
+		)
 		return 0
 
 	results = export_hmm_cluster_labels_as_pseudo_targets(
@@ -72,9 +91,16 @@ def main(argv: Sequence[str] | None = None) -> int:
 		pseudo_target_root=args.pseudo_target_root,
 		k=args.k,
 		confidence=args.confidence,
+		boundary_alpha=args.boundary_alpha,
+		boundary_tau=args.boundary_tau,
 		overwrite=args.overwrite,
 	)
-	_print_summary(results, dry_run=False)
+	_print_summary(
+		results,
+		dry_run=False,
+		boundary_alpha=args.boundary_alpha,
+		boundary_tau=args.boundary_tau,
+	)
 	return 0
 
 
@@ -82,15 +108,19 @@ def _print_summary(
 	results: Iterable[ExportedPseudoTargetResult],
 	*,
 	dry_run: bool,
+	boundary_alpha: float,
+	boundary_tau: float,
 ) -> None:
 	result_list = list(results)
 	status = 'dry-run; no files written' if dry_run else 'written'
 	print(f'pseudo_target_exports: {len(result_list)}')
 	print(f'execution: {status}')
+	print(f'boundary_weighting: alpha={boundary_alpha} tau={boundary_tau}')
 	for item in result_list:
 		print(
 			f'{item.survey_id}: valid_tokens={item.valid_token_count} '
-			f'labels={item.labels_path}',
+			f'labels={item.labels_path} '
+			f'boundary_weight={item.boundary_weight_path}',
 		)
 
 

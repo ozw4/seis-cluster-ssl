@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from seis_ssl_cluster.stratigraphy.boundary_weights import (
+	boundary_distance_tokens,
+	boundary_weight_tokens,
+)
 from seis_ssl_cluster.stratigraphy.export import (
 	ExportedPseudoTargetResult,
 	export_hmm_cluster_labels_as_pseudo_targets,
@@ -51,6 +55,8 @@ __all__ = [
 	'StratPseudoTargetArrays',
 	'StratPseudoTargetInput',
 	'StratPseudoTargetPaths',
+	'boundary_distance_tokens',
+	'boundary_weight_tokens',
 	'decode_ordered_logits_survey',
 	'discover_pseudo_target_inputs',
 	'emission_costs_from_logits',

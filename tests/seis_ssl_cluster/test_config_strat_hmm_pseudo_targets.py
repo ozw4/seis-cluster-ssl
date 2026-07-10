@@ -29,6 +29,7 @@ def test_strat_hmm_pseudo_target_config_resolves_minimal_valid_config(
 	assert resolved['checkpoint']['path'].endswith('strat_latest.pt')
 	assert resolved['inference']['device'] == 'auto'
 	assert resolved['hmm']['k'] == 6
+	assert resolved['hmm']['boundary_weighting'] == {'alpha': 0.0, 'tau': 1.0}
 	assert resolved['outputs']['overwrite'] is False
 	assert resolved['outputs']['skip_existing'] is False
 
@@ -57,6 +58,36 @@ def test_strat_hmm_pseudo_target_config_rejects_unknown_keys(
 	cfg['inference']['extra'] = True
 
 	with pytest.raises(ValueError, match=r'inference key\(s\) not allowed'):
+		resolve_strat_hmm_pseudo_target_config(cfg)
+
+	cfg = _minimal_config(tmp_path)
+	cfg['hmm']['boundary_weighting'] = {'alpha': 0.5, 'tau': 1.0, 'extra': 1}
+
+	with pytest.raises(
+		ValueError,
+		match=r'hmm\.boundary_weighting key\(s\) not allowed',
+	):
+		resolve_strat_hmm_pseudo_target_config(cfg)
+
+
+@pytest.mark.parametrize(
+	('boundary_weighting', 'match'),
+	[
+		({'alpha': -0.1, 'tau': 1.0}, r'hmm\.boundary_weighting\.alpha'),
+		({'alpha': 1.1, 'tau': 1.0}, r'hmm\.boundary_weighting\.alpha'),
+		({'alpha': 0.5, 'tau': 0.0}, r'hmm\.boundary_weighting\.tau'),
+		({'alpha': 0.5, 'tau': float('inf')}, r'hmm\.boundary_weighting\.tau'),
+	],
+)
+def test_strat_hmm_pseudo_target_config_rejects_invalid_boundary_weighting(
+	tmp_path: Path,
+	boundary_weighting: dict[str, float],
+	match: str,
+) -> None:
+	cfg = _minimal_config(tmp_path)
+	cfg['hmm']['boundary_weighting'] = boundary_weighting
+
+	with pytest.raises(ValueError, match=match):
 		resolve_strat_hmm_pseudo_target_config(cfg)
 
 

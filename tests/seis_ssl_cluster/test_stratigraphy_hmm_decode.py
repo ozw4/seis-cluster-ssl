@@ -96,6 +96,74 @@ def test_invalid_trace_gaps_are_preserved_while_valid_segments_decode() -> None:
 	)
 	np.testing.assert_array_equal(target.valid_tokens, valid)
 	assert target.confidence[0, 0, 1] == 0.0
+	assert target.boundary_weight[0, 0, 1] == 0.0
+
+
+def test_boundary_weights_downweight_transition_neighborhood() -> None:
+	target = decode_ordered_logits_survey(
+		_logits_for_labels([0, 0, 1, 1, 1], k=2),
+		np.ones((1, 1, 5), dtype=np.bool_),
+		transition=_transition(k=2),
+		boundary_alpha=0.5,
+		boundary_tau=1.0,
+	)
+
+	np.testing.assert_allclose(
+		target.boundary_weight,
+		np.array(
+			[[[1.0 - 0.5 / np.e, 0.5, 0.5, 1.0 - 0.5 / np.e, 1.0 - 0.5 / np.e**2]]],
+			dtype=np.float32,
+		),
+	)
+	assert target.metadata['boundary_weight_summary'] == {
+		'downweighted_valid_token_count': 5,
+		'max': pytest.approx(1.0 - 0.5 / np.e**2),
+		'mean': pytest.approx(float(np.mean(target.boundary_weight))),
+		'min': 0.5,
+		'transition_boundary_count': 1,
+		'zero_weight_valid_token_count': 0,
+	}
+
+
+def test_boundary_weights_do_not_cross_invalid_gap() -> None:
+	valid = np.array([[[True, True, False, True, True, True]]], dtype=np.bool_)
+	target = decode_ordered_logits_survey(
+		_logits_for_labels([0, 1, 0, 2, 2, 2], k=3),
+		valid,
+		transition=_transition(forbid_reverse=True),
+		boundary_alpha=0.5,
+		boundary_tau=1.0,
+	)
+
+	np.testing.assert_allclose(
+		target.boundary_weight,
+		np.array([[[0.5, 0.5, 0.0, 1.0, 1.0, 1.0]]], dtype=np.float32),
+	)
+
+
+def test_zero_boundary_alpha_preserves_existing_decode_outputs() -> None:
+	logits = _logits_for_labels([0, 0, 1, 2], k=3)
+	valid = np.array([[[True, False, True, True]]], dtype=np.bool_)
+	default = decode_ordered_logits_survey(
+		logits,
+		valid,
+		transition=_transition(),
+	)
+	explicit = decode_ordered_logits_survey(
+		logits,
+		valid,
+		transition=_transition(),
+		boundary_alpha=0.0,
+		boundary_tau=3.0,
+	)
+
+	np.testing.assert_array_equal(explicit.labels, default.labels)
+	np.testing.assert_array_equal(explicit.confidence, default.confidence)
+	np.testing.assert_array_equal(explicit.valid_tokens, default.valid_tokens)
+	np.testing.assert_array_equal(
+		explicit.boundary_weight,
+		explicit.valid_tokens.astype(np.float32),
+	)
 
 
 def test_confidence_equals_assigned_softmax_probability_for_decoded_tokens() -> None:

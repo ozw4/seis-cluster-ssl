@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from seis_ssl_cluster.stratigraphy.boundary_weights import boundary_weight_tokens
 from seis_ssl_cluster.stratigraphy.targets import (
 	StratPseudoTargetPaths,
 	pseudo_target_paths,
@@ -33,6 +34,7 @@ class ExportedPseudoTargetResult:
 	labels_path: Path
 	confidence_path: Path
 	valid_tokens_path: Path
+	boundary_weight_path: Path
 	metadata_path: Path
 	valid_token_count: int
 
@@ -43,17 +45,20 @@ class _PreparedPseudoTargetExport:
 	labels: np.ndarray
 	confidence: np.ndarray
 	valid_tokens: np.ndarray
+	boundary_weight: np.ndarray
 	output_paths: StratPseudoTargetPaths
 	source_metadata: Mapping[str, object]
 	valid_token_count: int
 
 
-def export_hmm_cluster_labels_as_pseudo_targets(
+def export_hmm_cluster_labels_as_pseudo_targets(  # noqa: PLR0913
 	*,
 	clustering_output_dir: str | Path,
 	pseudo_target_root: str | Path,
 	k: int,
 	confidence: float = 1.0,
+	boundary_alpha: float = 0.0,
+	boundary_tau: float = 1.0,
 	overwrite: bool = False,
 ) -> list[ExportedPseudoTargetResult]:
 	"""Export existing stratigraphic HMM cluster labels as pseudo-targets."""
@@ -62,6 +67,8 @@ def export_hmm_cluster_labels_as_pseudo_targets(
 		pseudo_target_root=pseudo_target_root,
 		k=k,
 		confidence=confidence,
+		boundary_alpha=boundary_alpha,
+		boundary_tau=boundary_tau,
 		overwrite=overwrite,
 	)
 	results: list[ExportedPseudoTargetResult] = []
@@ -73,6 +80,7 @@ def export_hmm_cluster_labels_as_pseudo_targets(
 			labels=item.labels,
 			confidence=item.confidence,
 			valid_tokens=item.valid_tokens,
+			boundary_weight=item.boundary_weight,
 			metadata=item.source_metadata,
 		)
 		results.append(
@@ -81,6 +89,7 @@ def export_hmm_cluster_labels_as_pseudo_targets(
 				labels_path=paths.labels,
 				confidence_path=paths.confidence,
 				valid_tokens_path=paths.valid_tokens,
+				boundary_weight_path=paths.boundary_weight,
 				metadata_path=paths.metadata,
 				valid_token_count=item.valid_token_count,
 			),
@@ -88,12 +97,14 @@ def export_hmm_cluster_labels_as_pseudo_targets(
 	return results
 
 
-def prepare_hmm_cluster_label_pseudo_target_exports(
+def prepare_hmm_cluster_label_pseudo_target_exports(  # noqa: PLR0913
 	*,
 	clustering_output_dir: str | Path,
 	pseudo_target_root: str | Path,
 	k: int,
 	confidence: float = 1.0,
+	boundary_alpha: float = 0.0,
+	boundary_tau: float = 1.0,
 	overwrite: bool = False,
 ) -> list[ExportedPseudoTargetResult]:
 	"""Validate an export run and return output paths without writing files."""
@@ -102,6 +113,8 @@ def prepare_hmm_cluster_label_pseudo_target_exports(
 		pseudo_target_root=pseudo_target_root,
 		k=k,
 		confidence=confidence,
+		boundary_alpha=boundary_alpha,
+		boundary_tau=boundary_tau,
 		overwrite=overwrite,
 	)
 	return [
@@ -110,6 +123,7 @@ def prepare_hmm_cluster_label_pseudo_target_exports(
 			labels_path=item.output_paths.labels,
 			confidence_path=item.output_paths.confidence,
 			valid_tokens_path=item.output_paths.valid_tokens,
+			boundary_weight_path=item.output_paths.boundary_weight,
 			metadata_path=item.output_paths.metadata,
 			valid_token_count=item.valid_token_count,
 		)
@@ -117,12 +131,14 @@ def prepare_hmm_cluster_label_pseudo_target_exports(
 	]
 
 
-def _prepare_exports(
+def _prepare_exports(  # noqa: PLR0913
 	*,
 	clustering_output_dir: str | Path,
 	pseudo_target_root: str | Path,
 	k: int,
 	confidence: float,
+	boundary_alpha: float,
+	boundary_tau: float,
 	overwrite: bool,
 ) -> list[_PreparedPseudoTargetExport]:
 	confidence_value = _validate_confidence(confidence)
@@ -134,6 +150,8 @@ def _prepare_exports(
 			pseudo_target_root=pseudo_target_root,
 			k=k,
 			confidence=confidence_value,
+			boundary_alpha=boundary_alpha,
+			boundary_tau=boundary_tau,
 		)
 		for label_path in label_paths
 	]
@@ -157,23 +175,32 @@ def _discover_label_paths(
 	return label_paths
 
 
-def _prepare_export(
+def _prepare_export(  # noqa: PLR0913
 	*,
 	label_path: Path,
 	clustering_output_dir: str | Path,
 	pseudo_target_root: str | Path,
 	k: int,
 	confidence: float,
+	boundary_alpha: float,
+	boundary_tau: float,
 ) -> _PreparedPseudoTargetExport:
 	survey_id = label_path.name.removesuffix(LABEL_SUFFIX)
 	labels = np.asarray(np.load(label_path))
 	valid_tokens = labels >= 0
 	confidence_array = np.zeros(labels.shape, dtype=np.float32)
 	confidence_array[valid_tokens] = np.float32(confidence)
+	boundary_weight = boundary_weight_tokens(
+		labels,
+		valid_tokens,
+		alpha=boundary_alpha,
+		tau=boundary_tau,
+	)
 	validate_pseudo_target_arrays(
 		labels,
 		confidence_array,
 		valid_tokens,
+		boundary_weight=boundary_weight,
 		k=k,
 		survey_id=survey_id,
 	)
@@ -182,26 +209,38 @@ def _prepare_export(
 		labels=labels,
 		confidence=confidence_array,
 		valid_tokens=valid_tokens,
+		boundary_weight=boundary_weight,
 		output_paths=pseudo_target_paths(pseudo_target_root, k=k, survey_id=survey_id),
 		source_metadata=_source_metadata(
 			clustering_output_dir=clustering_output_dir,
 			label_path=label_path,
 			survey_id=survey_id,
 			confidence=confidence,
+			boundary_alpha=float(boundary_alpha),
+			boundary_tau=float(boundary_tau),
 		),
 		valid_token_count=int(np.count_nonzero(valid_tokens)),
 	)
 
 
-def _source_metadata(
+def _source_metadata(  # noqa: PLR0913
 	*,
 	clustering_output_dir: str | Path,
 	label_path: Path,
 	survey_id: str,
 	confidence: float,
+	boundary_alpha: float,
+	boundary_tau: float,
 ) -> dict[str, object]:
 	metadata_path = label_path.with_name(f'{survey_id}{METADATA_SUFFIX}')
 	payload: dict[str, object] = {
+		'boundary_weighting': {
+			'adjacent_transition_distance': 0,
+			'alpha': boundary_alpha,
+			'invalid_gap_crossing': False,
+			'method': 'transition_distance_exponential',
+			'tau': boundary_tau,
+		},
 		'export_confidence': confidence,
 		'source_clustering_output_dir': str(Path(clustering_output_dir)),
 		'source_label_path': str(label_path),
@@ -253,6 +292,7 @@ def _validate_output_paths_available(
 			item.output_paths.labels,
 			item.output_paths.confidence,
 			item.output_paths.valid_tokens,
+			item.output_paths.boundary_weight,
 			item.output_paths.metadata,
 		)
 		if path.exists()

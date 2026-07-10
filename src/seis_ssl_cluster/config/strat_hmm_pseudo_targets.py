@@ -25,6 +25,7 @@ from seis_ssl_cluster.config.common import (
 	_validate_non_empty_path,
 	_validate_nonnegative_int_triplet,
 	_validate_path,
+	_validate_positive_finite_number,
 	_validate_positive_int,
 	_validate_positive_int_triplet,
 )
@@ -49,8 +50,11 @@ _INFERENCE_KEYS = frozenset(
 		'device',
 	},
 )
-_HMM_KEYS = frozenset({'k', 'edge_margin_tokens', 'transition', 'path_prior'})
+_HMM_KEYS = frozenset(
+	{'k', 'edge_margin_tokens', 'transition', 'path_prior', 'boundary_weighting'},
+)
 _HMM_REQUIRED_KEYS = frozenset({'k', 'transition'})
+_BOUNDARY_WEIGHTING_KEYS = frozenset({'alpha', 'tau'})
 _OUTPUTS_KEYS = frozenset({'pseudo_target_root', 'overwrite', 'skip_existing'})
 
 
@@ -69,6 +73,18 @@ def resolve_strat_hmm_pseudo_target_config(config: _T) -> Config:
 	inference = _required_mapping(resolved, 'inference')
 	hmm = _required_mapping(resolved, 'hmm')
 	outputs = _required_mapping(resolved, 'outputs')
+	if not isinstance(hmm, dict):
+		msg = 'hmm must be a mapping'
+		raise TypeError(msg)
+	if 'boundary_weighting' not in hmm:
+		hmm['boundary_weighting'] = {'alpha': 0.0, 'tau': 1.0}
+	else:
+		boundary_weighting = hmm.get('boundary_weighting')
+		if not isinstance(boundary_weighting, dict):
+			msg = 'hmm.boundary_weighting must be a mapping'
+			raise TypeError(msg)
+		boundary_weighting.setdefault('alpha', 0.0)
+		boundary_weighting.setdefault('tau', 1.0)
 	if 'skip_existing' not in outputs:
 		outputs['skip_existing'] = False
 
@@ -190,7 +206,26 @@ def _validate_hmm(
 	_validate_stratigraphic_hmm_edge_margin_tokens(hmm, prefix='hmm')
 	_validate_stratigraphic_hmm_transition(hmm, prefix='hmm')
 	_validate_stratigraphic_hmm_path_prior(hmm, prefix='hmm')
+	_validate_boundary_weighting(hmm)
 	_validate_checkpoint_prototype_count(checkpoint_path, k=int(hmm['k']))
+
+
+def _validate_boundary_weighting(hmm: Mapping[str, object]) -> None:
+	value = hmm.get('boundary_weighting')
+	if not isinstance(value, Mapping):
+		msg = 'hmm.boundary_weighting must be a mapping'
+		raise TypeError(msg)
+	_validate_allowed_keys(
+		value,
+		_BOUNDARY_WEIGHTING_KEYS,
+		prefix='hmm.boundary_weighting',
+	)
+	_validate_fraction(value, 'alpha', prefix='hmm.boundary_weighting')
+	_validate_positive_finite_number(
+		value,
+		'tau',
+		prefix='hmm.boundary_weighting',
+	)
 
 
 def _validate_checkpoint_prototype_count(checkpoint_path: Path, *, k: int) -> None:

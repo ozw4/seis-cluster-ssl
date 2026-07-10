@@ -146,6 +146,7 @@ def _pseudo_target_input(
 		labels_path=paths.labels,
 		confidence_path=paths.confidence,
 		valid_tokens_path=paths.valid_tokens,
+		boundary_weight_path=paths.boundary_weight,
 		metadata_path=paths.metadata,
 	)
 
