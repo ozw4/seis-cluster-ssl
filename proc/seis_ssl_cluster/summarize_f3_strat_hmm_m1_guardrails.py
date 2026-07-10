@@ -20,7 +20,7 @@ DEFAULT_CONFIG = (
 	/ 'f3'
 	/ 'facies_benchmark_v1'
 	/ '83_strat_hmm_m1_guardrails'
-	/ '08_summarize_guardrails.yaml'
+	/ '13_summarize_guardrails.yaml'
 )
 
 
@@ -40,15 +40,27 @@ def main() -> None:
 	config = f3_guardrail_summary_config_from_mapping(raw)
 	print(f'suite.name: {config.suite_name}')
 	print(f'suite.strict: {config.strict}')
-	print(f'outputs.summary_json: {config.output_dir / "guardrail_summary.json"}')
-	print(f'outputs.summary_markdown: {config.output_dir / "guardrail_summary.md"}')
+	print(
+		f'outputs.comparison_table: '
+		f'{config.output_dir / "guardrail_comparison_table.csv"}'
+	)
+	print(
+		f'outputs.summary_json: '
+		f'{config.output_dir / "guardrail_comparison_summary.json"}'
+	)
+	print(
+		f'outputs.summary_markdown: '
+		f'{config.output_dir / "guardrail_comparison_report.md"}'
+	)
 	if args.dry_run:
 		print('execution: dry-run; guardrail summary skipped')
 		return
 	result = summarize_f3_strat_hmm_m1_guardrails(config)
+	print(f'guardrails.comparison_table: {result.comparison_table}')
 	print(f'guardrails.summary_json: {result.summary_json}')
 	print(f'guardrails.summary_markdown: {result.summary_markdown}')
 	print(f'guardrails.pending_roles: {list(result.pending_roles)}')
+	print(f'guardrails.warnings: {list(result.warnings)}')
 
 
 if __name__ == '__main__':

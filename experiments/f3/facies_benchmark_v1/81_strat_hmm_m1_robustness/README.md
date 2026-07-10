@@ -38,3 +38,29 @@ Hold:
 
 Stop:
   improvements disappear under label-budget or split-index perturbations.
+
+## Final result
+
+B label-budget robustness is **Go**. Gains are largest in the low-label regime:
+at `cap25`, `delta_macro_f1=+0.053841` and
+`delta_mean_iou=+0.054076`.
+
+C split/index robustness is **Go**. Macro F1 and mean IoU deltas are positive on
+every tested split.
+
+These outcomes establish robustness within the tested F3 evidence scope, not
+cross-survey generalization. Full-budget balanced accuracy on the original
+split is lower, while class 5 Zechstein and class 3 Rijnland/Chalk remain
+monitoring items. HMM label maps are diagnostic pretext artifacts, not the
+final evaluated lithology output.
+
+After both summaries have been generated, consolidate and publish milestone 1:
+
+```bash
+python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_results.py \
+  --config experiments/f3/facies_benchmark_v1/82_strat_hmm_m1_results/01_summarize_m1_results.yaml
+```
+
+Then run guardrail validation using
+`experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/README.md` before
+starting method extensions.

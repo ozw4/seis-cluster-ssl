@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import math
 from collections.abc import Mapping, Sequence
@@ -12,15 +13,9 @@ F3_STRAT_HMM_M1_GUARDRAIL_SUITE_NAME = 'strat_hmm_m1_guardrails_v1'
 F3_STRAT_HMM_M1_BASELINE_MODEL_TAG = (
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
 )
-F3_STRAT_HMM_M1_CANDIDATE_MODEL_TAG = (
-	'strat_hmm_pretext_m1_k6_topblock1_distill'
-)
-F3_STRAT_HMM_M1_DISTILL_ONLY_MODEL_TAG = (
-	'strat_hmm_m1_guardrail_distill_only'
-)
-F3_STRAT_HMM_M1_SHUFFLED_HMM_MODEL_TAG = (
-	'strat_hmm_m1_guardrail_shuffled_hmm'
-)
+F3_STRAT_HMM_M1_CANDIDATE_MODEL_TAG = 'strat_hmm_pretext_m1_k6_topblock1_distill'
+F3_STRAT_HMM_M1_DISTILL_ONLY_MODEL_TAG = 'strat_hmm_m1_guardrail_distill_only'
+F3_STRAT_HMM_M1_SHUFFLED_HMM_MODEL_TAG = 'strat_hmm_m1_guardrail_shuffled_hmm_seed42'
 F3_STRAT_HMM_M1_GUARDRAIL_ROLES = (
 	'baseline',
 	'candidate',
@@ -34,11 +29,16 @@ F3_STRAT_HMM_M1_GUARDRAIL_MODEL_TAGS = {
 	'shuffled_hmm': F3_STRAT_HMM_M1_SHUFFLED_HMM_MODEL_TAG,
 }
 F3_STRAT_HMM_M1_GUARDRAIL_METRICS = (
-	'macro_f1',
-	'mean_iou',
-	'balanced_accuracy',
 	'accuracy',
+	'balanced_accuracy',
+	'macro_f1',
 	'weighted_f1',
+	'mean_iou',
+)
+F3_STRAT_HMM_M1_PRIMARY_METRIC = 'macro_f1'
+F3_STRAT_HMM_M1_LOW_BUDGET_IDS = ('cap25', 'cap100', 'cap500', 'full')
+F3_STRAT_HMM_M1_CLASS_F1_METRICS = tuple(
+	f'class_{class_id}_f1' for class_id in range(6)
 )
 F3_STRAT_HMM_M1_GUARDRAIL_JOB_STAGES = frozenset(
 	{
@@ -59,6 +59,7 @@ class F3ShuffledHMMTargetConfig:
 	k: int
 	seed: int
 	shuffle_scope: str
+	overwrite: bool
 
 
 @dataclass(frozen=True)
@@ -87,7 +88,8 @@ class F3GuardrailResultInput:
 	role: str
 	model_tag: str
 	metrics_json: Path
-	label_budget_summary_json: Path | None = None
+	label_budget_summary_csv: Path | None = None
+	label_budget_suite_manifest_json: Path | None = None
 	split_index_summary_json: Path | None = None
 
 
@@ -105,9 +107,11 @@ class F3GuardrailSummaryConfig:
 class F3GuardrailSummaryResult:
 	"""Paths written by guardrail result consolidation."""
 
+	comparison_table: Path
 	summary_json: Path
 	summary_markdown: Path
 	pending_roles: tuple[str, ...]
+	warnings: tuple[str, ...]
 
 
 def f3_shuffled_hmm_target_config_from_mapping(
@@ -133,7 +137,7 @@ def f3_shuffled_hmm_target_config_from_mapping(
 		},
 		'shuffle',
 	)
-	_validate_keys(outputs, {'pseudo_target_root'}, 'outputs')
+	_validate_keys(outputs, {'pseudo_target_root', 'overwrite'}, 'outputs')
 	suite_name = _stable_suite_name(suite)
 	source_root = _absolute_path(source, 'pseudo_target_root', 'source')
 	output_root = _absolute_path(outputs, 'pseudo_target_root', 'outputs')
@@ -155,6 +159,11 @@ def f3_shuffled_hmm_target_config_from_mapping(
 	):
 		if shuffle.get(key) is not True:
 			raise ValueError(f'shuffle.{key} must be true for the M1 contract')
+	overwrite = outputs['overwrite']
+	if not isinstance(overwrite, bool):
+		raise TypeError(
+			f'outputs.overwrite must be a boolean; got {overwrite!r}',
+		)
 	return F3ShuffledHMMTargetConfig(
 		suite_name=suite_name,
 		source_root=source_root,
@@ -162,6 +171,7 @@ def f3_shuffled_hmm_target_config_from_mapping(
 		k=k,
 		seed=seed,
 		shuffle_scope=scope,
+		overwrite=overwrite,
 	)
 
 
@@ -236,12 +246,14 @@ def f3_guardrail_summary_config_from_mapping(
 			{
 				'model_tag',
 				'metrics_json',
-				'label_budget_summary_json',
+				'label_budget_summary_csv',
+				'label_budget_suite_manifest_json',
 				'split_index_summary_json',
 			},
 			f'models.{role}',
 			allow_missing={
-				'label_budget_summary_json',
+				'label_budget_summary_csv',
+				'label_budget_suite_manifest_json',
 				'split_index_summary_json',
 			},
 		)
@@ -250,9 +262,14 @@ def f3_guardrail_summary_config_from_mapping(
 				role=role,
 				model_tag=_stable_model_tag(role, raw, prefix=f'models.{role}'),
 				metrics_json=_absolute_path(raw, 'metrics_json', f'models.{role}'),
-				label_budget_summary_json=_optional_absolute_path(
+				label_budget_summary_csv=_optional_absolute_path(
 					raw,
-					'label_budget_summary_json',
+					'label_budget_summary_csv',
+					f'models.{role}',
+				),
+				label_budget_suite_manifest_json=_optional_absolute_path(
+					raw,
+					'label_budget_suite_manifest_json',
 					f'models.{role}',
 				),
 				split_index_summary_json=_optional_absolute_path(
@@ -283,6 +300,7 @@ def summarize_f3_strat_hmm_m1_guardrails(
 	"""Write a deterministic summary, reporting absent artifacts as pending."""
 	rows: list[dict[str, object]] = []
 	pending: list[str] = []
+	warnings: list[str] = []
 	for model in config.models:
 		if not model.metrics_json.is_file():
 			if config.strict:
@@ -290,51 +308,116 @@ def summarize_f3_strat_hmm_m1_guardrails(
 					f'missing guardrail metrics for {model.role}: {model.metrics_json}',
 				)
 			pending.append(model.role)
+			warnings.append(
+				f'{model.role}: full-budget metrics are pending: {model.metrics_json}',
+			)
 			rows.append(
 				{
 					'role': model.role,
 					'model_tag': model.model_tag,
 					'status': 'pending',
 					'metrics': None,
-					'robustness': _robustness_payload(model, strict=False),
+					'robustness': _robustness_payload(
+						model,
+						strict=False,
+						warnings=warnings,
+					),
 				},
 			)
 			continue
-		metrics = _read_metrics(model.metrics_json)
+		metrics = _read_metrics(
+			model.metrics_json,
+			strict=config.strict,
+			warnings=warnings,
+		)
+		status = (
+			'complete'
+			if all(
+				metrics[metric] is not None
+				for metric in F3_STRAT_HMM_M1_GUARDRAIL_METRICS
+			)
+			else 'incomplete'
+		)
 		rows.append(
 			{
 				'role': model.role,
 				'model_tag': model.model_tag,
-				'status': 'complete',
+				'status': status,
 				'metrics': metrics,
-				'robustness': _robustness_payload(model, strict=config.strict),
+				'robustness': _robustness_payload(
+					model,
+					strict=config.strict,
+					warnings=warnings,
+				),
 			},
 		)
+	decision = _decision_payload(rows)
+	low_budget = _low_budget_payload(rows, strict=config.strict, warnings=warnings)
 	payload = {
-		'schema_version': 1,
+		'schema_version': 2,
 		'suite_name': config.suite_name,
 		'strict': config.strict,
 		'models': rows,
 		'pending_roles': pending,
+		'low_budget': low_budget,
+		'decision': decision,
+		'warnings': warnings,
 	}
 	config.output_dir.mkdir(parents=True, exist_ok=True)
-	json_path = config.output_dir / 'guardrail_summary.json'
-	markdown_path = config.output_dir / 'guardrail_summary.md'
+	table_path = config.output_dir / 'guardrail_comparison_table.csv'
+	json_path = config.output_dir / 'guardrail_comparison_summary.json'
+	markdown_path = config.output_dir / 'guardrail_comparison_report.md'
+	_write_comparison_csv(table_path, rows)
 	json_path.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
 	markdown_path.write_text(_render_markdown(payload), encoding='utf-8')
-	return F3GuardrailSummaryResult(json_path, markdown_path, tuple(pending))
+	return F3GuardrailSummaryResult(
+		table_path,
+		json_path,
+		markdown_path,
+		tuple(pending),
+		tuple(warnings),
+	)
 
 
-def _read_metrics(path: Path) -> dict[str, float]:
+def _read_metrics(  # noqa: C901
+	path: Path,
+	*,
+	strict: bool,
+	warnings: list[str],
+) -> dict[str, float | None]:
 	payload = _read_json_object(path)
-	metrics: dict[str, float] = {}
+	metrics: dict[str, float | None] = {}
 	for metric in F3_STRAT_HMM_M1_GUARDRAIL_METRICS:
 		value = payload.get(metric)
+		if value is None:
+			message = f'{path}: missing required full-budget metric {metric}'
+			if strict:
+				raise ValueError(message)
+			warnings.append(message)
+			metrics[metric] = None
+			continue
 		if not isinstance(value, int | float) or isinstance(value, bool):
 			raise TypeError(f'{path}: {metric} must be numeric; got {value!r}')
 		value = float(value)
 		if not math.isfinite(value):
 			raise ValueError(f'{path}: {metric} must be finite; got {value!r}')
+		metrics[metric] = value
+	per_class = payload.get('per_class_f1')
+	if per_class is not None and not isinstance(per_class, Mapping):
+		raise TypeError(f'{path}: per_class_f1 must be a mapping; got {per_class!r}')
+	for class_id, metric in enumerate(F3_STRAT_HMM_M1_CLASS_F1_METRICS):
+		value = None if per_class is None else per_class.get(str(class_id))
+		if value is None:
+			continue
+		if not isinstance(value, int | float) or isinstance(value, bool):
+			raise TypeError(
+				f'{path}: per_class_f1[{class_id!r}] must be numeric; got {value!r}',
+			)
+		value = float(value)
+		if not math.isfinite(value):
+			raise ValueError(
+				f'{path}: per_class_f1[{class_id!r}] must be finite; got {value!r}',
+			)
 		metrics[metric] = value
 	return metrics
 
@@ -343,19 +426,73 @@ def _robustness_payload(
 	model: F3GuardrailResultInput,
 	*,
 	strict: bool,
+	warnings: list[str],
 ) -> dict[str, object]:
 	return {
-		'label_budget': _optional_json_artifact(
-			model.label_budget_summary_json,
+		'label_budget': _optional_label_budget_csv_artifact(
+			model.label_budget_summary_csv,
 			strict=strict,
 			label=f'{model.role} label-budget summary',
+			warnings=warnings,
+		),
+		'label_budget_suite_manifest': _optional_json_artifact(
+			model.label_budget_suite_manifest_json,
+			strict=strict,
+			label=f'{model.role} label-budget suite manifest',
+			warnings=warnings,
 		),
 		'split_index': _optional_json_artifact(
 			model.split_index_summary_json,
 			strict=strict,
 			label=f'{model.role} split/index summary',
+			warnings=warnings,
 		),
 	}
+
+
+def _optional_label_budget_csv_artifact(
+	path: Path | None,
+	*,
+	strict: bool,
+	label: str,
+	warnings: list[str],
+) -> dict[str, object]:
+	if path is None:
+		return {'status': 'not_configured', 'summary': None}
+	if not path.is_file():
+		if strict:
+			raise FileNotFoundError(f'missing {label}: {path}')
+		warnings.append(f'{label} is pending: {path}')
+		return {'status': 'pending', 'summary': None}
+	return {'status': 'complete', 'summary': _read_label_budget_csv(path)}
+
+
+def _read_label_budget_csv(path: Path) -> dict[str, object]:
+	with path.open(newline='', encoding='utf-8') as handle:
+		reader = csv.DictReader(handle)
+		fieldnames = set(reader.fieldnames or ())
+		required = {'budget_id', 'mean_delta_macro_f1'}
+		missing = sorted(required - fieldnames)
+		if missing:
+			raise ValueError(
+				f'{path}: missing label-budget summary column(s): {missing!r}',
+			)
+		rows: list[dict[str, object]] = []
+		for index, raw in enumerate(reader):
+			row: dict[str, object] = {'budget_id': raw.get('budget_id', '')}
+			for metric in ('macro_f1', 'mean_iou', 'balanced_accuracy'):
+				key = f'mean_delta_{metric}'
+				value = raw.get(key)
+				if value in (None, ''):
+					continue
+				try:
+					row[key] = float(value)
+				except ValueError as exc:
+					raise ValueError(
+						f'{path}: row {index + 2} column {key} must be numeric',
+					) from exc
+			rows.append(row)
+	return {'budgets': rows}
 
 
 def _optional_json_artifact(
@@ -363,12 +500,14 @@ def _optional_json_artifact(
 	*,
 	strict: bool,
 	label: str,
+	warnings: list[str],
 ) -> dict[str, object]:
 	if path is None:
 		return {'status': 'not_configured', 'summary': None}
 	if not path.is_file():
 		if strict:
 			raise FileNotFoundError(f'missing {label}: {path}')
+		warnings.append(f'{label} is pending: {path}')
 		return {'status': 'pending', 'summary': None}
 	return {'status': 'complete', 'summary': _read_json_object(path)}
 
@@ -383,33 +522,539 @@ def _read_json_object(path: Path) -> dict[str, object]:
 	return payload
 
 
-def _render_markdown(payload: Mapping[str, object]) -> str:
-	lines = [
-		'# F3 Strat-HMM Milestone-1 Guardrails',
-		'',
-		'| role | status | macro_f1 | mean_iou | balanced_accuracy | accuracy '
-		'| weighted_f1 |',
-		'|---|---|---:|---:|---:|---:|---:|',
+def _write_comparison_csv(
+	path: Path,
+	rows: Sequence[Mapping[str, object]],
+) -> None:
+	class_metrics = tuple(
+		metric
+		for metric in F3_STRAT_HMM_M1_CLASS_F1_METRICS
+		if any(
+			isinstance(row.get('metrics'), Mapping) and metric in row['metrics']
+			for row in rows
+		)
+	)
+	fieldnames = (
+		'role',
+		'model_tag',
+		'status',
+		*F3_STRAT_HMM_M1_GUARDRAIL_METRICS,
+		*class_metrics,
+	)
+	with path.open('w', newline='', encoding='utf-8') as handle:
+		writer = csv.DictWriter(handle, fieldnames=fieldnames)
+		writer.writeheader()
+		for row in rows:
+			metrics = row.get('metrics')
+			writer.writerow(
+				{
+					'role': row['role'],
+					'model_tag': row['model_tag'],
+					'status': row['status'],
+					**(
+						{
+							metric: metrics.get(metric, '')
+							for metric in (
+								*F3_STRAT_HMM_M1_GUARDRAIL_METRICS,
+								*class_metrics,
+							)
+						}
+						if isinstance(metrics, Mapping)
+						else {}
+					),
+				},
+			)
+
+
+def _decision_payload(rows: Sequence[Mapping[str, object]]) -> dict[str, str]:
+	by_role = {str(row['role']): row for row in rows}
+	values: dict[str, float] = {}
+	for role in ('candidate', 'distillation_only', 'shuffled_hmm'):
+		metrics = by_role[role].get('metrics')
+		value = (
+			metrics.get(F3_STRAT_HMM_M1_PRIMARY_METRIC)
+			if isinstance(metrics, Mapping)
+			else None
+		)
+		if not isinstance(value, int | float) or isinstance(value, bool):
+			return {
+				'status': 'pending',
+				'primary_metric': F3_STRAT_HMM_M1_PRIMARY_METRIC,
+				'interpretation': (
+					'Guardrail evidence is pending until candidate, distillation-only, '
+					'and shuffled-HMM full-budget metrics are available.'
+				),
+			}
+		values[role] = float(value)
+	distillation_matches = values['distillation_only'] >= values['candidate']
+	shuffled_matches = values['shuffled_hmm'] >= values['candidate']
+	if not distillation_matches and not shuffled_matches:
+		interpretation = (
+			'Strat-HMM beats both guardrails; evidence supports an ordered structured '
+			'HMM pretext contribution.'
+		)
+	elif distillation_matches and not shuffled_matches:
+		interpretation = (
+			'Distillation-only matches or exceeds strat-HMM; improvement may be '
+			'generic top-block adaptation, not HMM structure.'
+		)
+	elif shuffled_matches and not distillation_matches:
+		interpretation = (
+			'Shuffled-HMM matches or exceeds strat-HMM; improvement may be extra CE '
+			'regularization or label histogram effects, not ordered structure.'
+		)
+	else:
+		interpretation = (
+			'Both guardrails match or exceed strat-HMM; the result does not isolate '
+			'an ordered structured HMM pretext contribution.'
+		)
+	return {
+		'status': 'complete',
+		'primary_metric': F3_STRAT_HMM_M1_PRIMARY_METRIC,
+		'interpretation': interpretation,
+	}
+
+
+def _low_budget_payload(  # noqa: C901, PLR0912, PLR0915
+	rows: Sequence[Mapping[str, object]],
+	*,
+	strict: bool,
+	warnings: list[str],
+) -> dict[str, object]:
+	summaries: dict[str, Mapping[str, object]] = {}
+	manifests: dict[str, Mapping[str, object]] = {}
+	configured = False
+	for row in rows:
+		robustness = row.get('robustness')
+		label_budget = (
+			robustness.get('label_budget') if isinstance(robustness, Mapping) else None
+		)
+		manifest = (
+			robustness.get('label_budget_suite_manifest')
+			if isinstance(robustness, Mapping)
+			else None
+		)
+		if not isinstance(label_budget, Mapping) or not isinstance(manifest, Mapping):
+			continue
+		role = str(row['role'])
+		status = label_budget.get('status')
+		manifest_status = manifest.get('status')
+		configured = configured or any(
+			value != 'not_configured' for value in (status, manifest_status)
+		)
+		summary = label_budget.get('summary')
+		if status == 'complete' and isinstance(summary, Mapping):
+			summaries[role] = summary
+		manifest_payload = manifest.get('summary')
+		if manifest_status == 'complete' and isinstance(manifest_payload, Mapping):
+			manifests[role] = manifest_payload
+		if status == 'complete' and manifest_status != 'complete':
+			message = (
+				f'{role}: label-budget comparison requires a suite manifest to '
+				'validate shared baseline subsampling indices'
+			)
+			if strict:
+				raise ValueError(message)
+			warnings.append(message)
+	if not configured:
+		if strict:
+			raise ValueError(
+				'strict guardrail summary requires label-budget comparisons for '
+				+ ', '.join(F3_STRAT_HMM_M1_LOW_BUDGET_IDS),
+			)
+		return {
+			'status': 'not_configured',
+			'pairing_provenance': {'status': 'not_configured'},
+			'budgets': [],
+		}
+	if 'candidate' not in summaries or 'candidate' not in manifests:
+		if strict:
+			raise ValueError(
+				'strict guardrail summary requires candidate label-budget '
+				'comparisons for '
+				+ ', '.join(F3_STRAT_HMM_M1_LOW_BUDGET_IDS),
+			)
+		return {
+			'status': 'pending',
+			'pairing_provenance': {'status': 'pending'},
+			'budgets': [],
+		}
+
+	candidate = _budget_delta_rows(
+		summaries['candidate'],
+		role='candidate',
+		strict=strict,
+		warnings=warnings,
+	)
+	candidate_identity = _label_budget_identity_by_budget(
+		manifests['candidate'],
+		role='candidate',
+		expected_model_tag=F3_STRAT_HMM_M1_CANDIDATE_MODEL_TAG,
+	)
+	comparison_rows: dict[str, dict[str, object]] = {}
+	verified_comparisons: list[dict[str, object]] = []
+	verified_comparison_keys: set[tuple[str, str]] = set()
+	provenance_failed = False
+	for guardrail_role in ('distillation_only', 'shuffled_hmm'):
+		summary = summaries.get(guardrail_role)
+		manifest = manifests.get(guardrail_role)
+		if summary is None or manifest is None:
+			continue
+		guardrail = _budget_delta_rows(
+			summary,
+			role=guardrail_role,
+			strict=strict,
+			warnings=warnings,
+		)
+		guardrail_identity = _label_budget_identity_by_budget(
+			manifest,
+			role=guardrail_role,
+			expected_model_tag=F3_STRAT_HMM_M1_GUARDRAIL_MODEL_TAGS[
+				guardrail_role
+			],
+		)
+		for budget_id in sorted(
+			set(candidate) & set(guardrail),
+			key=_budget_sort_key,
+		):
+			candidate_conditions = candidate_identity.get(budget_id)
+			guardrail_conditions = guardrail_identity.get(budget_id)
+			if (
+				candidate_conditions is None
+				or guardrail_conditions is None
+				or candidate_conditions != guardrail_conditions
+			):
+				message = (
+					'label-budget pairing provenance mismatch for '
+					f'candidate vs {guardrail_role}, budget_id={budget_id!r}; '
+					f'candidate={candidate_conditions!r}, '
+					f'{guardrail_role}={guardrail_conditions!r}'
+				)
+				if strict:
+					raise ValueError(message)
+				warnings.append(message)
+				provenance_failed = True
+				continue
+			candidate_row = candidate[budget_id]
+			guardrail_row = guardrail[budget_id]
+			deltas = {
+				metric: candidate_row[metric] - guardrail_row[metric]
+				for metric in candidate_row.keys() & guardrail_row.keys()
+			}
+			comparison_rows.setdefault(budget_id, {'budget_id': budget_id})[
+				f'candidate_minus_{guardrail_role}'
+			] = dict(sorted(deltas.items()))
+			verified_comparisons.append(
+				{
+					'budget_id': budget_id,
+					'guardrail_role': guardrail_role,
+					'conditions': [
+						{
+							'subsample_seed': seed,
+							'paired_identity_hash': identity,
+						}
+						for seed, identity in candidate_conditions
+					],
+				},
+			)
+			verified_comparison_keys.add((budget_id, guardrail_role))
+	budgets = [
+		comparison_rows[budget_id]
+		for budget_id in sorted(comparison_rows, key=_budget_sort_key)
 	]
+	expected_comparison_keys = {
+		(budget_id, guardrail_role)
+		for budget_id in F3_STRAT_HMM_M1_LOW_BUDGET_IDS
+		for guardrail_role in ('distillation_only', 'shuffled_hmm')
+	}
+	missing_comparison_keys = expected_comparison_keys - verified_comparison_keys
+	coverage_complete = bool(expected_comparison_keys) and not missing_comparison_keys
+	if missing_comparison_keys:
+		formatted = ', '.join(
+			f'{budget_id}:{guardrail_role}'
+			for budget_id, guardrail_role in sorted(
+				missing_comparison_keys,
+				key=lambda item: (_budget_sort_key(item[0]), item[1]),
+			)
+		)
+		message = (
+			'label-budget comparisons are missing for expected candidate budgets: '
+			f'{formatted}'
+		)
+		if strict:
+			raise ValueError(message)
+		warnings.append(message)
+	status = (
+		'complete'
+		if all(
+			role in summaries and role in manifests
+			for role in ('distillation_only', 'shuffled_hmm')
+		)
+		and not provenance_failed
+		and coverage_complete
+		else 'partial'
+	)
+	return {
+		'status': status,
+		'basis': 'difference_of_shared_baseline_paired_mean_deltas',
+		'pairing_provenance': {
+			'status': 'verified' if verified_comparisons else 'unverified',
+			'baseline_model_tag': F3_STRAT_HMM_M1_BASELINE_MODEL_TAG,
+			'identity_field': 'paired_identity_hash',
+			'comparisons': verified_comparisons,
+		},
+		'budgets': budgets,
+	}
+
+
+def _label_budget_identity_by_budget(  # noqa: C901, PLR0912
+	payload: Mapping[str, object],
+	*,
+	role: str,
+	expected_model_tag: str,
+) -> dict[str, tuple[tuple[int, str], ...]]:
+	if payload.get('artifact_type') != 'f3_lithology_label_budget_suite_manifest':
+		raise ValueError(
+			f'{role} label-budget suite manifest has unexpected artifact_type',
+		)
+	rows = payload.get('rows')
+	if not isinstance(rows, Sequence) or isinstance(rows, str | bytes):
+		raise TypeError(f'{role} label-budget suite manifest rows must be a list')
+	by_condition: dict[tuple[str, int], set[str]] = {}
+	baseline_conditions: set[tuple[str, int]] = set()
+	comparison_conditions: set[tuple[str, int]] = set()
+	for index, raw in enumerate(rows):
+		if not isinstance(raw, Mapping):
+			raise TypeError(
+				f'{role} label-budget manifest rows[{index}] must be a mapping',
+			)
+		budget_id = raw.get('budget_id')
+		if not isinstance(budget_id, str) or not budget_id:
+			raise TypeError(
+				f'{role} label-budget manifest rows[{index}].budget_id must be '
+				'a string',
+			)
+		seed = raw.get('subsample_seed')
+		if not isinstance(seed, int) or isinstance(seed, bool):
+			raise TypeError(
+				f'{role} label-budget manifest rows[{index}].subsample_seed must '
+				'be an integer',
+			)
+		identity = raw.get('paired_identity_hash')
+		if not isinstance(identity, str) or not identity:
+			raise TypeError(
+				f'{role} label-budget manifest rows[{index}].paired_identity_hash '
+				'must be a string',
+			)
+		condition = (budget_id, seed)
+		by_condition.setdefault(condition, set()).add(identity)
+		if raw.get('model_role') == 'baseline':
+			model_tag = raw.get('model_tag')
+			if model_tag != F3_STRAT_HMM_M1_BASELINE_MODEL_TAG:
+				raise ValueError(
+					f'{role} label-budget manifest baseline model_tag must be '
+					f'{F3_STRAT_HMM_M1_BASELINE_MODEL_TAG!r}; got {model_tag!r}',
+				)
+			baseline_conditions.add(condition)
+		elif raw.get('model_role') == 'candidate':
+			model_tag = raw.get('model_tag')
+			if model_tag != expected_model_tag:
+				raise ValueError(
+					f'{role} label-budget manifest candidate model_tag must be '
+					f'{expected_model_tag!r}; got {model_tag!r}',
+				)
+			comparison_conditions.add(condition)
+	result: dict[str, list[tuple[int, str]]] = {}
+	for (budget_id, seed), identities in sorted(by_condition.items()):
+		if (budget_id, seed) not in baseline_conditions:
+			raise ValueError(
+				f'{role} label-budget manifest has no common baseline row for '
+				f'budget_id={budget_id!r}, subsample_seed={seed}',
+			)
+		if (budget_id, seed) not in comparison_conditions:
+			raise ValueError(
+				f'{role} label-budget manifest has no candidate row for '
+				f'model_tag={expected_model_tag!r}, budget_id={budget_id!r}, '
+				f'subsample_seed={seed}',
+			)
+		if len(identities) != 1:
+			raise ValueError(
+				f'{role} label-budget manifest has inconsistent paired identity for '
+				f'budget_id={budget_id!r}, subsample_seed={seed}',
+			)
+		result.setdefault(budget_id, []).append((seed, next(iter(identities))))
+	return {budget_id: tuple(conditions) for budget_id, conditions in result.items()}
+
+
+def _budget_delta_rows(  # noqa: C901, PLR0912
+	payload: Mapping[str, object],
+	*,
+	role: str,
+	strict: bool,
+	warnings: list[str],
+) -> dict[str, dict[str, float]]:
+	container = payload.get('label_budget', payload)
+	if not isinstance(container, Mapping):
+		raise TypeError(f'{role} label-budget summary label_budget must be a mapping')
+	rows = container.get('budgets')
+	if not isinstance(rows, Sequence) or isinstance(rows, str | bytes):
+		raise TypeError(f'{role} label-budget summary budgets must be a list')
+	result: dict[str, dict[str, float]] = {}
+	for index, raw in enumerate(rows):
+		if not isinstance(raw, Mapping):
+			raise TypeError(f'{role} label-budget budgets[{index}] must be a mapping')
+		budget_id = raw.get('budget_id')
+		if not isinstance(budget_id, str) or not budget_id:
+			raise TypeError(
+				f'{role} label-budget budgets[{index}].budget_id must be a string',
+			)
+		if budget_id not in F3_STRAT_HMM_M1_LOW_BUDGET_IDS:
+			continue
+		if budget_id in result:
+			raise ValueError(f'{role} label-budget has duplicate budget {budget_id!r}')
+		metrics: dict[str, float] = {}
+		for metric in ('macro_f1', 'mean_iou', 'balanced_accuracy'):
+			key = f'mean_delta_{metric}'
+			value = raw.get(key)
+			if value is None:
+				continue
+			if not isinstance(value, int | float) or isinstance(value, bool):
+				raise TypeError(f'{role} {budget_id} {key} must be numeric')
+			value = float(value)
+			if not math.isfinite(value):
+				raise ValueError(f'{role} {budget_id} {key} must be finite')
+			metrics[metric] = value
+		if F3_STRAT_HMM_M1_PRIMARY_METRIC not in metrics:
+			message = (
+				f'{role} label-budget {budget_id} is missing '
+				f'mean_delta_{F3_STRAT_HMM_M1_PRIMARY_METRIC}'
+			)
+			if strict:
+				raise ValueError(message)
+			warnings.append(message)
+			continue
+		result[budget_id] = metrics
+	return result
+
+
+def _budget_sort_key(budget_id: str) -> tuple[int, int, str]:
+	if budget_id == 'full':
+		return (2, 0, budget_id)
+	if budget_id.startswith('cap') and budget_id[3:].isdigit():
+		return (0, int(budget_id[3:]), budget_id)
+	return (1, 0, budget_id)
+
+
+def _render_markdown(payload: Mapping[str, object]) -> str:
 	models = payload['models']
 	if not isinstance(models, list):
 		raise TypeError('summary models must be a list')
+	class_metrics = tuple(
+		metric
+		for metric in F3_STRAT_HMM_M1_CLASS_F1_METRICS
+		if any(
+			isinstance(row, Mapping)
+			and isinstance(row.get('metrics'), Mapping)
+			and metric in row['metrics']
+			for row in models
+		)
+	)
+	table_metrics = (*F3_STRAT_HMM_M1_GUARDRAIL_METRICS, *class_metrics)
+	lines = [
+		'# F3 Strat-HMM Milestone-1 Guardrails',
+		'',
+		'## Full-budget comparison',
+		'',
+		'| role | status | ' + ' | '.join(table_metrics) + ' |',
+		'|---|---|' + '|'.join('---:' for _ in table_metrics) + '|',
+	]
 	for row in models:
 		if not isinstance(row, Mapping):
 			raise TypeError('summary model row must be a mapping')
 		metrics = row['metrics']
 		values = (
-			['pending'] * len(F3_STRAT_HMM_M1_GUARDRAIL_METRICS)
+			['pending'] * len(table_metrics)
 			if metrics is None
 			else [
-				f'{float(metrics[name]):.6f}'
-				for name in F3_STRAT_HMM_M1_GUARDRAIL_METRICS
+				(
+					'pending'
+					if metrics.get(name) is None
+					else f'{float(metrics[name]):.6f}'
+				)
+				for name in table_metrics
 			]
 		)
 		lines.append(
 			f'| {row["role"]} | {row["status"]} | ' + ' | '.join(values) + ' |',
 		)
+	lines.extend(['', '## Low-budget guardrail deltas', ''])
+	low_budget = payload.get('low_budget')
+	if not isinstance(low_budget, Mapping) or not low_budget.get('budgets'):
+		status = (
+			low_budget.get('status', 'not_configured')
+			if isinstance(
+				low_budget,
+				Mapping,
+			)
+			else 'not_configured'
+		)
+		lines.append(f'Low-budget evaluation status: {status}.')
+	else:
+		lines.extend(
+			[
+				'Positive values favor strat-HMM. Deltas subtract each guardrail from '
+				'the candidate after aggregation over verified identical baseline '
+				'subsampling selections.',
+				'',
+				'| budget_id | candidate - distillation-only macro_f1 | candidate - '
+				'shuffled-HMM macro_f1 |',
+				'|---|---:|---:|',
+			],
+		)
+		for budget in low_budget['budgets']:
+			if not isinstance(budget, Mapping):
+				continue
+			distillation = budget.get('candidate_minus_distillation_only')
+			shuffled = budget.get('candidate_minus_shuffled_hmm')
+			lines.append(
+				f'| {budget["budget_id"]} | '
+				f'{_markdown_delta(distillation, F3_STRAT_HMM_M1_PRIMARY_METRIC)} | '
+				f'{_markdown_delta(shuffled, F3_STRAT_HMM_M1_PRIMARY_METRIC)} |',
+			)
+	decision = payload.get('decision')
+	if not isinstance(decision, Mapping):
+		raise TypeError('summary decision must be a mapping')
+	lines.extend(
+		[
+			'',
+			'## Decision',
+			'',
+			str(decision['interpretation']),
+			'',
+			'Interpretation guide:',
+			'',
+			'- If distillation-only matches strat-HMM, improvement may be generic '
+			'top-block adaptation, not HMM structure.',
+			'- If shuffled-HMM matches strat-HMM, improvement may be extra CE '
+			'regularization or label histogram effects, not ordered structure.',
+			'- If strat-HMM beats both, evidence supports an ordered structured HMM '
+			'pretext contribution.',
+		],
+	)
+	warnings = payload.get('warnings')
+	if isinstance(warnings, Sequence) and warnings:
+		lines.extend(['', '## Warnings', ''])
+		lines.extend(f'- {warning}' for warning in warnings)
 	return '\n'.join(lines) + '\n'
+
+
+def _markdown_delta(value: object, metric: str) -> str:
+	if not isinstance(value, Mapping):
+		return 'pending'
+	metric_value = value.get(metric)
+	if not isinstance(metric_value, int | float) or isinstance(metric_value, bool):
+		return 'pending'
+	return f'{float(metric_value):.6f}'
 
 
 def _stable_suite_name(config: Mapping[str, object]) -> str:

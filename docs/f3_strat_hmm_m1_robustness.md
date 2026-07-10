@@ -41,3 +41,28 @@ Expected run order:
 2. Materialize the paired label-budget subsets or split/index assignments.
 3. Run the MAE baseline and strat-HMM candidate with matched probe settings for each condition.
 4. Aggregate `paired_metrics.csv`, `paired_deltas.csv`, and `summary.md`.
+
+## Final decision
+
+Both robustness suites are **Go**.
+
+- Label-budget robustness shows larger gains in low-label regimes. At `cap25`,
+  `delta_macro_f1=+0.053841` and `delta_mean_iou=+0.054076`.
+- Split/index robustness has positive macro F1 and mean IoU deltas on every
+  tested split.
+
+This is strong F3 robustness evidence, but its scope is not cross-survey
+generalization. Full-budget balanced accuracy on the original split is lower
+(`delta=-0.012804`), and class 5 Zechstein and class 3 Rijnland/Chalk remain
+monitoring items. The HMM maps are diagnostic pretext artifacts, not final
+lithology labels or final evaluated outputs.
+
+After both suites, regenerate and publish the consolidated result:
+
+```bash
+python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_results.py \
+  --config experiments/f3/facies_benchmark_v1/82_strat_hmm_m1_results/01_summarize_m1_results.yaml
+```
+
+The next step is guardrail validation, not immediate method expansion. Use the
+runbook in `docs/f3_strat_hmm_m1_guardrails.md`.

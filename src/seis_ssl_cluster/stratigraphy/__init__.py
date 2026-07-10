@@ -22,6 +22,13 @@ from seis_ssl_cluster.stratigraphy.prototypes import (
 	OrderedPrototypeHead,
 	OrderedPrototypeOutput,
 )
+from seis_ssl_cluster.stratigraphy.shuffle_targets import (
+	GLOBAL_VALID_TOKENS,
+	ShuffledPseudoTargetResult,
+	plan_shuffled_hmm_pseudo_targets,
+	shuffle_pseudo_target_arrays,
+	shuffle_strat_hmm_pseudo_targets,
+)
 from seis_ssl_cluster.stratigraphy.targets import (
 	StratPseudoTargetArrays,
 	StratPseudoTargetInput,
@@ -35,10 +42,12 @@ from seis_ssl_cluster.stratigraphy.targets import (
 )
 
 __all__ = [
+	'GLOBAL_VALID_TOKENS',
 	'ExportedPseudoTargetResult',
 	'LogitHMMPseudoTarget',
 	'OrderedPrototypeHead',
 	'OrderedPrototypeOutput',
+	'ShuffledPseudoTargetResult',
 	'StratPseudoTargetArrays',
 	'StratPseudoTargetInput',
 	'StratPseudoTargetPaths',
@@ -50,8 +59,11 @@ __all__ = [
 	'load_pseudo_target_arrays',
 	'load_pseudo_target_metadata',
 	'ordered_soft_coordinate',
+	'plan_shuffled_hmm_pseudo_targets',
 	'prepare_hmm_cluster_label_pseudo_target_exports',
 	'pseudo_target_paths',
+	'shuffle_pseudo_target_arrays',
+	'shuffle_strat_hmm_pseudo_targets',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
 	'validate_pseudo_target_arrays',

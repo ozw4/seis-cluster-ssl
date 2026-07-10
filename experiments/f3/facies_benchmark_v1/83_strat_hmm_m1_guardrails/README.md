@@ -17,8 +17,10 @@ The **shuffled-HMM** guardrail retains the pseudo-target artifact schema,
 valid-token mask, global label histogram, and confidence values, but assigns
 the label/confidence pairs to valid tokens using one deterministic global
 shuffle. It answers: *does the ordered spatial/stratigraphic assignment matter?*
-The shuffle seed is `188`; repeated builds must produce byte-equivalent arrays
-and metadata apart from explicitly recorded provenance fields.
+It does not test the label-count distribution, because that distribution is
+held fixed. The shuffle seed is `42`; repeated builds must produce
+byte-equivalent arrays and metadata apart from explicitly recorded provenance
+fields.
 
 Neither guardrail is a new final predictor. HMM labels remain pretext targets,
 and downstream evaluation uses frozen encoder embeddings and the same
@@ -39,18 +41,26 @@ The files are ordered by the intended workflow:
    workflow under the isolated distillation-only model tag.
 3. `03_build_shuffled_hmm_pseudo_targets.yaml` defines deterministic shuffle
    inputs, preservation requirements, seed, and an isolated output root.
-4. `04_train_shuffled_hmm_full.yaml` is the matching training contract.
-5. `05_extract_guardrail_embeddings.yaml`,
+4. `07_train_shuffled_hmm_smoke.yaml` and
+   `08_train_shuffled_hmm_full.yaml` train against the shuffled artifacts using
+   the milestone-1 geometry and loss weights.
+5. `09_extract_shuffled_hmm_embeddings.yaml`,
+   `10_build_shuffled_hmm_token_dataset.yaml`,
+   `11_train_shuffled_hmm_probe.yaml`, and
+   `12_build_shuffled_hmm_report.yaml` run the standard downstream workflow
+   under the seed-qualified shuffled-HMM model tag.
+6. `05_extract_guardrail_embeddings.yaml`,
    `06_build_guardrail_token_datasets.yaml`, and
    `07_run_guardrail_probes.yaml` define the paired downstream routing and
    isolated roots for both guardrails.
-6. `08_summarize_guardrails.yaml` compares the five primary metrics:
-   `macro_f1`, `mean_iou`, `balanced_accuracy`, `accuracy`, and `weighted_f1`.
+7. `14_build_distillation_only_label_budget_datasets.yaml` through
+   `17_run_shuffled_hmm_label_budget_probes.yaml` run paired `cap25`, `cap100`,
+   `cap500`, and `full` probes. `13_summarize_guardrails.yaml` compares the five
+   primary full-budget metrics and consumes the low-budget
+   `summary_by_budget.csv` and suite-manifest artifacts.
 
-This issue intentionally adds contracts, not the shuffled-target builder or
-paired downstream runners. Those mechanics are implemented by the subsequent
-guardrail prompts. The distillation-only configs reuse mechanics already
-present in the trainer.
+The shuffled-target builder and training workflow reuse the existing
+milestone-1 artifact and trainer contracts.
 
 ## Distillation-only runbook
 
@@ -91,24 +101,105 @@ python proc/seis_ssl_cluster/build_f3_lithology_report.py \
   --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/06_build_distillation_only_report.yaml
 ```
 
-The summary is runnable now:
+At any point, inspect the current execution state; incomplete guardrails are
+reported as pending:
 
 ```bash
 python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
-  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/08_summarize_guardrails.yaml
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/13_summarize_guardrails.yaml
 ```
 
-With `suite.strict: false`, missing model metrics or configured robustness JSON
+With `suite.strict: false`, missing model metrics or configured robustness
 artifacts are recorded as `pending`. With `suite.strict: true`, any configured
-missing artifact is an error. Label-budget and split/index summaries are
-included when their optional JSON paths are configured and available.
+missing artifact is an error, and verified comparisons are required for
+`cap25`, `cap100`, `cap500`, and `full` against both guardrails. Label-budget
+summaries are read directly from the CSV and manifest artifacts emitted by the
+existing robustness workflow.
+
+## Shuffled-HMM runbook
+
+Validate and then build the deterministic shuffled pseudo-target artifacts:
+
+```bash
+python proc/seis_ssl_cluster/shuffle_strat_hmm_pseudo_targets.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/03_build_shuffled_hmm_pseudo_targets.yaml \
+  --dry-run
+
+python proc/seis_ssl_cluster/shuffle_strat_hmm_pseudo_targets.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/03_build_shuffled_hmm_pseudo_targets.yaml
+```
+
+Run the two-step CPU smoke test, then full training:
+
+```bash
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/07_train_shuffled_hmm_smoke.yaml \
+  --device cpu --max-steps 2
+
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/08_train_shuffled_hmm_full.yaml
+```
+
+Extract frozen embeddings, build the token dataset, train the standard probe,
+and build its report:
+
+```bash
+python proc/seis_ssl_cluster/extract_embeddings.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/09_extract_shuffled_hmm_embeddings.yaml
+
+python proc/seis_ssl_cluster/build_f3_lithology_token_dataset.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/10_build_shuffled_hmm_token_dataset.yaml
+
+python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/11_train_shuffled_hmm_probe.yaml
+
+python proc/seis_ssl_cluster/build_f3_lithology_report.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/12_build_shuffled_hmm_report.yaml
+```
+
+## Paired low-budget runbook
+
+Each guardrail suite uses the baseline token dataset, the same subsample seeds
+as the milestone-1 label-budget suite, and budgets `cap25`, `cap100`, `cap500`,
+and `full`. The shared baseline-selected indices make the candidate-minus-
+guardrail deltas directly paired; the final summary verifies their identity
+hashes before reporting them.
+
+Build and run the distillation-only suite, then emit its standard CSV/Markdown
+summary:
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_label_budget_datasets.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/14_build_distillation_only_label_budget_datasets.yaml
+
+python proc/seis_ssl_cluster/run_f3_lithology_label_budget_probes.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/15_run_distillation_only_label_budget_probes.yaml \
+  --only-missing
+
+python proc/seis_ssl_cluster/summarize_f3_lithology_label_budget_robustness.py \
+  --suite-root /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/guardrails/strat_hmm_m1_guardrails_v1/label_budget/distillation_only
+```
+
+Repeat for shuffled-HMM:
+
+```bash
+python proc/seis_ssl_cluster/build_f3_lithology_label_budget_datasets.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/16_build_shuffled_hmm_label_budget_datasets.yaml
+
+python proc/seis_ssl_cluster/run_f3_lithology_label_budget_probes.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/17_run_shuffled_hmm_label_budget_probes.yaml \
+  --only-missing
+
+python proc/seis_ssl_cluster/summarize_f3_lithology_label_budget_robustness.py \
+  --suite-root /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/guardrails/strat_hmm_m1_guardrails_v1/label_budget/shuffled_hmm
+```
 
 ## Artifact isolation
 
 Stable model tags are:
 
 - `strat_hmm_m1_guardrail_distill_only`
-- `strat_hmm_m1_guardrail_shuffled_hmm`
+- `strat_hmm_m1_guardrail_shuffled_hmm_seed42`
 
 Their pretraining, embedding, and lithology outputs live under their own model
 tag components. The shuffled pseudo-target root and the summary report root are
@@ -118,3 +209,28 @@ milestone-1 candidate outputs.
 
 Lateral smoothing, multi-resolution heads, HMM-map-as-final-output evaluation,
 and the optional later guardrails are outside this suite.
+
+## Milestone context and final guardrail summary
+
+Milestone 1 passed before these guardrails: the main result is strong positive,
+B label-budget robustness is **Go**, and C split/index robustness is **Go**.
+Guardrails are the next step before method expansion. This evidence is F3-only,
+full-budget balanced accuracy on the original split is lower, and class 5
+Zechstein plus class 3 Rijnland/Chalk remain monitoring items.
+
+After both guardrail probe reports exist, validate and summarize them:
+
+```bash
+python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/13_summarize_guardrails.yaml \
+  --dry-run
+
+python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/13_summarize_guardrails.yaml
+```
+
+For a final decision, set `suite.strict: true` in the explicit config so absent
+metrics or expected budget comparisons fail instead of remaining `pending` or
+`partial`. Proceed to next-stage method extensions only if the completed
+guardrails support the structured-HMM interpretation. HMM maps remain
+diagnostic pretext targets, never the final evaluated lithology output.

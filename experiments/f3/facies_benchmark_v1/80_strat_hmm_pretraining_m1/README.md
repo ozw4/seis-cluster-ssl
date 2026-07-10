@@ -119,3 +119,31 @@ Guardrails to run or report before expanding the method:
 
 If HMM maps look cleaner but the downstream few-label probe does not improve, do
 not proceed to lateral smoothing or multi-resolution heads.
+
+## Final Milestone-1 Interpretation
+
+Milestone 1 passed. On the single full-budget F3 lithology probe, the strat-HMM
+pretext student improves over the existing MAE baseline: accuracy increases
+from `0.886477` to `0.896330`, and mean IoU increases from `0.650059` to
+`0.660868`.
+
+The result is also robust in the tested F3 conditions. Label-budget robustness
+is a **Go**, with larger gains in low-label regimes (`cap25`
+`delta_macro_f1=+0.053841`, `delta_mean_iou=+0.054076`). Split/index robustness
+is a **Go**, with positive macro F1 and mean IoU deltas on every tested split.
+
+The evidence is limited to F3 and does not establish cross-survey
+generalization. Full-budget balanced accuracy on the original split is lower;
+class 5 Zechstein and class 3 Rijnland/Chalk remain monitoring items. HMM
+pseudo-label maps are diagnostic pretext artifacts and are not final lithology
+outputs.
+
+Proceed to the guardrails in
+`experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/README.md`. Only
+after they pass should next-stage method extensions begin. To regenerate and
+publish the consolidated milestone result, run:
+
+```bash
+python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_results.py \
+  --config experiments/f3/facies_benchmark_v1/82_strat_hmm_m1_results/01_summarize_m1_results.yaml
+```
