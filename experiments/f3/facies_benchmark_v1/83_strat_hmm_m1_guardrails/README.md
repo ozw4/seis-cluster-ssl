@@ -98,11 +98,12 @@ python proc/seis_ssl_cluster/build_f3_lithology_report.py \
   --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/06_build_distillation_only_report.yaml
 ```
 
-The summary is runnable now:
+At any point, inspect the current execution state; incomplete guardrails are
+reported as pending:
 
 ```bash
 python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
-  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/08_summarize_guardrails.yaml
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/13_summarize_guardrails.yaml
 ```
 
 With `suite.strict: false`, missing model metrics or configured robustness JSON
@@ -166,3 +167,28 @@ milestone-1 candidate outputs.
 
 Lateral smoothing, multi-resolution heads, HMM-map-as-final-output evaluation,
 and the optional later guardrails are outside this suite.
+
+## Milestone context and final guardrail summary
+
+Milestone 1 passed before these guardrails: the main result is strong positive,
+B label-budget robustness is **Go**, and C split/index robustness is **Go**.
+Guardrails are the next step before method expansion. This evidence is F3-only,
+full-budget balanced accuracy on the original split is lower, and class 5
+Zechstein plus class 3 Rijnland/Chalk remain monitoring items.
+
+After both guardrail probe reports exist, validate and summarize them:
+
+```bash
+python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/13_summarize_guardrails.yaml \
+  --dry-run
+
+python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails.py \
+  --config experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/13_summarize_guardrails.yaml
+```
+
+For a final decision, set `suite.strict: true` in the explicit config so absent
+metrics fail instead of remaining `pending`. Proceed to next-stage method
+extensions only if the completed guardrails support the structured-HMM
+interpretation. HMM maps remain diagnostic pretext targets, never the final
+evaluated lithology output.
