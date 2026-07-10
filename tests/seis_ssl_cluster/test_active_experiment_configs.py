@@ -82,6 +82,9 @@ F3_STRATIGRAPHIC_CLUSTERING_CONFIGS = sorted(
 )
 F3_STRAT_HMM_PRETRAINING_M1_ROOT = F3_ROOT / '80_strat_hmm_pretraining_m1'
 F3_STRAT_HMM_M1_GUARDRAIL_ROOT = F3_ROOT / '83_strat_hmm_m1_guardrails'
+F3_STRAT_HMM_PRETRAINING_M2A_ROOT = (
+	F3_ROOT / '84_strat_hmm_pretraining_m2a_boundary'
+)
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
@@ -96,6 +99,8 @@ F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 		/ '07_train_shuffled_hmm_smoke.yaml',
 		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
 		/ '08_train_shuffled_hmm_full.yaml',
+		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '03_train_boundary_smoke.yaml',
+		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '04_train_boundary_full.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
@@ -105,6 +110,8 @@ F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
 		/ '03_extract_distillation_only_embeddings.yaml',
 		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
 		/ '09_extract_shuffled_hmm_embeddings.yaml',
+		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
+		/ '05_extract_student_embeddings.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
@@ -115,6 +122,8 @@ F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
 		/ '04_build_distillation_only_token_dataset.yaml',
 		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
 		/ '10_build_shuffled_hmm_token_dataset.yaml',
+		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
+		/ '06_build_lithology_token_dataset.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS = sorted(
@@ -124,6 +133,7 @@ F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS = sorted(
 		/ '05_train_distillation_only_probe.yaml',
 		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
 		/ '11_train_shuffled_hmm_probe.yaml',
+		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '07_train_lithology_probe.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_REPORT_CONFIGS = sorted(
@@ -133,6 +143,8 @@ F3_STRAT_HMM_STUDENT_LITHOLOGY_REPORT_CONFIGS = sorted(
 		/ '06_build_distillation_only_report.yaml',
 		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
 		/ '12_build_shuffled_hmm_report.yaml',
+		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
+		/ '08_build_lithology_report.yaml',
 	],
 )
 F3_STRAT_HMM_SHUFFLED_TARGET_CONFIGS = [
