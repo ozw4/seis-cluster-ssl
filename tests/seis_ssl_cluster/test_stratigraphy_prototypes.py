@@ -72,12 +72,14 @@ def test_structured_hmm_prototype_loss_ignores_invalid_and_zero_confidence() -> 
 	labels = torch.tensor([[0, -1, 1], [1, 0, 1]])
 	valid_mask = torch.tensor([[True, True, False], [True, True, True]])
 	confidence = torch.tensor([[1.0, 1.0, 1.0], [0.5, 0.0, 1.0]])
+	boundary_weight = torch.ones_like(confidence)
 
 	loss = structured_hmm_prototype_loss(
 		logits,
 		labels,
 		valid_mask=valid_mask,
 		confidence=confidence,
+		boundary_weight=boundary_weight,
 	)
 
 	token_loss = torch.nn.functional.cross_entropy(
@@ -89,16 +91,82 @@ def test_structured_hmm_prototype_loss_ignores_invalid_and_zero_confidence() -> 
 	assert torch.allclose(loss, expected)
 
 
+def test_structured_hmm_prototype_loss_uses_effective_weight_and_gradient() -> None:
+	logits = torch.tensor(
+		[[[2.0, 0.0], [0.0, 1.0]]],
+		requires_grad=True,
+	)
+	labels = torch.tensor([[0, 0]])
+	confidence = torch.tensor([[0.5, 1.0]])
+	boundary_weight = torch.tensor([[0.25, 0.0]])
+
+	loss = structured_hmm_prototype_loss(
+		logits,
+		labels,
+		valid_mask=torch.ones(1, 2, dtype=torch.bool),
+		confidence=confidence,
+		boundary_weight=boundary_weight,
+	)
+
+	token_loss = torch.nn.functional.cross_entropy(
+		logits.detach().reshape(2, 2),
+		labels.reshape(-1),
+		reduction='none',
+	)
+	expected = (token_loss * torch.tensor([0.125, 0.0])).sum() / 0.125
+	assert torch.allclose(loss, expected)
+	loss.backward()
+	assert logits.grad is not None
+	assert bool(logits.grad[0, 0].abs().sum().gt(0).item())
+	assert bool(logits.grad[0, 1].eq(0).all().item())
+
+
+def test_structured_hmm_prototype_loss_unity_boundary_matches_m1() -> None:
+	logits = torch.tensor([[[1.0, -1.0], [0.5, 0.0]]])
+	labels = torch.tensor([[0, 1]])
+	confidence = torch.tensor([[0.25, 0.75]])
+	token_loss = torch.nn.functional.cross_entropy(
+		logits.reshape(2, 2),
+		labels.reshape(-1),
+		reduction='none',
+	)
+	m1_loss = (token_loss * confidence.reshape(-1)).sum() / confidence.sum()
+
+	loss = structured_hmm_prototype_loss(
+		logits,
+		labels,
+		valid_mask=torch.ones(1, 2, dtype=torch.bool),
+		confidence=confidence,
+		boundary_weight=torch.ones_like(confidence),
+	)
+
+	assert torch.allclose(loss, m1_loss, atol=1.0e-7, rtol=0.0)
+
+
 @pytest.mark.parametrize(
-	('valid_mask', 'confidence'),
+	('valid_mask', 'confidence', 'boundary_weight'),
 	[
-		(torch.zeros(2, 3, dtype=torch.bool), None),
-		(torch.ones(2, 3, dtype=torch.bool), torch.zeros(2, 3)),
+		(
+			torch.zeros(2, 3, dtype=torch.bool),
+			None,
+			torch.ones(2, 3),
+		),
+		(
+			torch.ones(2, 3, dtype=torch.bool),
+			torch.zeros(2, 3),
+			torch.ones(2, 3),
+		),
+		(
+			torch.ones(2, 3, dtype=torch.bool),
+			torch.ones(2, 3),
+			torch.zeros(2, 3),
+		),
 	],
 )
 def test_structured_hmm_prototype_loss_raises_without_positive_weight_tokens(
 	valid_mask: torch.Tensor,
 	confidence: torch.Tensor | None,
+	boundary_weight: torch.Tensor,
 ) -> None:
 	logits = torch.randn(2, 3, 2)
 	labels = torch.zeros(2, 3, dtype=torch.long)
@@ -109,6 +177,7 @@ def test_structured_hmm_prototype_loss_raises_without_positive_weight_tokens(
 			labels,
 			valid_mask=valid_mask,
 			confidence=confidence,
+			boundary_weight=boundary_weight,
 		)
 
 
