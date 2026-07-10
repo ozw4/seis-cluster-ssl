@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -20,6 +21,7 @@ from seis_ssl_cluster.data import (
 )
 from seis_ssl_cluster.stratigraphy.targets import (
 	discover_pseudo_target_inputs,
+	pseudo_target_paths,
 	write_pseudo_target,
 )
 from seis_ssl_cluster.training.collate import strat_pseudo_target_collate_fn
@@ -39,11 +41,18 @@ def test_strat_dataset_slices_pseudo_targets_from_token_start(
 ) -> None:
 	volume = np.ones((10, 8, 8), dtype=np.float32)
 	labels = np.arange(5 * 4 * 4, dtype=np.int32).reshape(5, 4, 4)
+	boundary_weight = np.linspace(
+		0.0,
+		1.0,
+		labels.size,
+		dtype=np.float32,
+	).reshape(labels.shape)
 	dataset = _dataset(
 		tmp_path,
 		volume=volume,
 		labels=labels,
 		valid_tokens=np.ones(labels.shape, dtype=np.bool_),
+		boundary_weight=boundary_weight,
 		local_crop_size_xyz=(4, 4, 4),
 		patch_size_xyz=(2, 2, 2),
 		seed=4,
@@ -58,6 +67,10 @@ def test_strat_dataset_slices_pseudo_targets_from_token_start(
 		for start, size in zip(token_start, token_size, strict=True)
 	)
 	np.testing.assert_array_equal(sample['strat_labels'], labels[expected_slices])
+	np.testing.assert_array_equal(
+		sample['strat_boundary_weight'],
+		boundary_weight[expected_slices],
+	)
 	assert sample['coords']['local_start_xyz'] == (4, 4, 4)
 	assert token_start == (2, 2, 2)
 	assert token_size == (2, 2, 2)
@@ -117,6 +130,7 @@ def test_wrapper_matches_generic_dataset_with_strat_provider(
 		'local_valid_mask',
 		'strat_labels',
 		'strat_confidence',
+		'strat_boundary_weight',
 		'strat_valid_mask',
 		'coords',
 	}
@@ -126,6 +140,7 @@ def test_wrapper_matches_generic_dataset_with_strat_provider(
 		'local_valid_mask',
 		'strat_labels',
 		'strat_confidence',
+		'strat_boundary_weight',
 		'strat_valid_mask',
 	):
 		np.testing.assert_array_equal(wrapper_sample[key], composed_sample[key])
@@ -156,6 +171,7 @@ def test_strat_dataset_excludes_invalid_pseudo_tokens_and_sets_label_minus_one(
 
 	assert sample['strat_labels'][0, 0, 0] == -1
 	assert sample['strat_confidence'][0, 0, 0] == 0.0
+	assert sample['strat_boundary_weight'][0, 0, 0] == 0.0
 	assert not sample['strat_valid_mask'][0, 0, 0]
 	assert np.count_nonzero(sample['strat_valid_mask']) == 7
 
@@ -185,6 +201,7 @@ def test_strat_dataset_excludes_local_invalid_voxel_patches(
 	assert not sample['strat_valid_mask'][:, :, 0].any()
 	assert sample['strat_valid_mask'][:, :, 1].all()
 	assert np.all(sample['strat_labels'][:, :, 0] == -1)
+	assert np.all(sample['strat_boundary_weight'][:, :, 0] == 0.0)
 
 
 def test_strat_dataset_preprocessing_matches_shared_contract(
@@ -279,6 +296,57 @@ def test_strat_dataset_rejects_valid_tokens_below_min_confidence(
 		dataset[0]
 
 
+def test_strat_dataset_rejects_crop_with_only_zero_boundary_weight(
+	tmp_path: Path,
+) -> None:
+	labels = np.zeros((2, 2, 2), dtype=np.int32)
+	valid_tokens = np.ones(labels.shape, dtype=np.bool_)
+	dataset = _dataset(
+		tmp_path,
+		volume=np.ones((4, 4, 4), dtype=np.float32),
+		labels=labels,
+		valid_tokens=valid_tokens,
+		boundary_weight=np.zeros(labels.shape, dtype=np.float32),
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		max_resample_attempts=2,
+	)
+
+	with pytest.raises(ValueError, match='positive boundary/effective weight'):
+		dataset[0]
+
+
+def test_strat_dataset_schema_v1_uses_unity_boundary_weight(
+	tmp_path: Path,
+) -> None:
+	labels = np.zeros((2, 2, 2), dtype=np.int32)
+	valid_tokens = np.ones(labels.shape, dtype=np.bool_)
+	manifest = _manifest(tmp_path, 'survey', np.ones((4, 4, 4), dtype=np.float32))
+	paths = pseudo_target_paths(tmp_path / 'pseudo-v1', k=1, survey_id='survey')
+	paths.labels.parent.mkdir(parents=True)
+	np.save(paths.labels, labels)
+	np.save(paths.confidence, np.ones(labels.shape, dtype=np.float32))
+	np.save(paths.valid_tokens, valid_tokens)
+	paths.metadata.write_text(
+		json.dumps({'schema_version': 1}) + '\n',
+		encoding='utf-8',
+	)
+	dataset = NopimsStratPseudoTargetDataset(
+		[manifest],
+		discover_pseudo_target_inputs(tmp_path / 'pseudo-v1', k=1),
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		zero_mask=ZeroMaskConfig(enabled=False),
+	)
+
+	sample = dataset[0]
+
+	np.testing.assert_array_equal(
+		sample['strat_boundary_weight'],
+		np.ones(labels.shape, dtype=np.float32),
+	)
+
+
 def test_strat_dataset_allows_extra_pseudo_target_surveys(
 	tmp_path: Path,
 ) -> None:
@@ -353,6 +421,7 @@ def test_strat_pseudo_target_collate_stacks_pseudo_target_fields(
 		'local_valid_mask',
 		'strat_labels',
 		'strat_confidence',
+		'strat_boundary_weight',
 		'strat_valid_mask',
 		'coords',
 	}
@@ -360,11 +429,13 @@ def test_strat_pseudo_target_collate_stacks_pseudo_target_fields(
 	assert batch['local_valid_mask'].shape == (2, 4, 4, 4)
 	assert batch['strat_labels'].shape == (2, 2, 2, 2)
 	assert batch['strat_confidence'].shape == (2, 2, 2, 2)
+	assert batch['strat_boundary_weight'].shape == (2, 2, 2, 2)
 	assert batch['strat_valid_mask'].shape == (2, 2, 2, 2)
 	assert batch['x'].dtype == torch.float32
 	assert batch['local_valid_mask'].dtype == torch.bool
 	assert batch['strat_labels'].dtype == torch.long
 	assert batch['strat_confidence'].dtype == torch.float32
+	assert batch['strat_boundary_weight'].dtype == torch.float32
 	assert batch['strat_valid_mask'].dtype == torch.bool
 	assert batch['coords'] == [sample['coords'] for sample in samples]
 
@@ -395,6 +466,7 @@ def _dataset(  # noqa: PLR0913
 	local_crop_size_xyz: tuple[int, int, int],
 	patch_size_xyz: tuple[int, int, int],
 	confidence: np.ndarray | None = None,
+	boundary_weight: np.ndarray | None = None,
 	seed: int = 0,
 	zero_mask: ZeroMaskConfig | None = None,
 	max_resample_attempts: int = 16,
@@ -414,6 +486,7 @@ def _dataset(  # noqa: PLR0913
 		labels=labels,
 		confidence=confidence_array,
 		valid_tokens=valid_tokens,
+		boundary_weight=boundary_weight,
 	)
 	return NopimsStratPseudoTargetDataset(
 		[manifest],

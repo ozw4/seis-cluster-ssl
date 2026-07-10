@@ -42,6 +42,10 @@ def strat_pseudo_target_collate_fn(
 		'local_valid_mask': _stack_arrays(samples, 'local_valid_mask'),
 		'strat_labels': _stack_arrays(samples, 'strat_labels'),
 		'strat_confidence': _stack_arrays(samples, 'strat_confidence'),
+		'strat_boundary_weight': _stack_arrays(
+			samples,
+			'strat_boundary_weight',
+		),
 		'strat_valid_mask': _stack_arrays(samples, 'strat_valid_mask'),
 		'coords': [sample.get('coords') for sample in samples],
 	}

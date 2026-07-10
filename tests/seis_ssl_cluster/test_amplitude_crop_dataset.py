@@ -107,6 +107,7 @@ def test_no_target_provider_returns_only_base_sample_fields(tmp_path: Path) -> N
 	for key in (
 		'strat_labels',
 		'strat_confidence',
+		'strat_boundary_weight',
 		'strat_valid_mask',
 		'_token_valid_mask',
 	):
