@@ -65,6 +65,7 @@ def test_shuffled_target_contract_resolves_with_preservation_guarantees() -> Non
 	assert config.seed == 188
 	assert config.shuffle_scope == 'global_valid_tokens'
 	assert config.source_root != config.output_root
+	assert config.overwrite is False
 
 
 @pytest.mark.parametrize(

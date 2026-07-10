@@ -59,6 +59,7 @@ class F3ShuffledHMMTargetConfig:
 	k: int
 	seed: int
 	shuffle_scope: str
+	overwrite: bool
 
 
 @dataclass(frozen=True)
@@ -133,7 +134,7 @@ def f3_shuffled_hmm_target_config_from_mapping(
 		},
 		'shuffle',
 	)
-	_validate_keys(outputs, {'pseudo_target_root'}, 'outputs')
+	_validate_keys(outputs, {'pseudo_target_root', 'overwrite'}, 'outputs')
 	suite_name = _stable_suite_name(suite)
 	source_root = _absolute_path(source, 'pseudo_target_root', 'source')
 	output_root = _absolute_path(outputs, 'pseudo_target_root', 'outputs')
@@ -155,6 +156,11 @@ def f3_shuffled_hmm_target_config_from_mapping(
 	):
 		if shuffle.get(key) is not True:
 			raise ValueError(f'shuffle.{key} must be true for the M1 contract')
+	overwrite = outputs['overwrite']
+	if not isinstance(overwrite, bool):
+		raise TypeError(
+			f'outputs.overwrite must be a boolean; got {overwrite!r}',
+		)
 	return F3ShuffledHMMTargetConfig(
 		suite_name=suite_name,
 		source_root=source_root,
@@ -162,6 +168,7 @@ def f3_shuffled_hmm_target_config_from_mapping(
 		k=k,
 		seed=seed,
 		shuffle_scope=scope,
+		overwrite=overwrite,
 	)
 
 
