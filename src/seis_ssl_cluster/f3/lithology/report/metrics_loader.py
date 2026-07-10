@@ -40,9 +40,9 @@ def _dataset_summary(
 	config: F3LithologyReportConfig,
 	token_metadata: Mapping[str, object],
 	classes: Sequence[Mapping[str, object]],
+	token_dataset: Mapping[str, object],
 ) -> dict[str, object]:
 	geometry = _mapping(token_metadata.get('geometry'))
-	summary = _mapping(token_metadata.get('summary'))
 	return {
 		'name': _first_non_empty(
 			config.dataset.get('name'),
@@ -56,12 +56,7 @@ def _dataset_summary(
 		'classes': [dict(item) for item in classes],
 		'train_validation_slices': _slice_summary(token_metadata),
 		'tokenization_thresholds': dict(_mapping(token_metadata.get('tokenization'))),
-		'class_imbalance': _class_imbalance(
-			_combined_counts(
-				_mapping(summary.get('train_class_counts')),
-				_mapping(summary.get('validation_class_counts')),
-			),
-		),
+		'class_imbalance': _class_imbalance(_dataset_class_counts(token_dataset)),
 		'label_source_of_truth': _first_non_empty(
 			token_metadata.get('label_source_of_truth'),
 			'segy_label_volume',
@@ -71,6 +66,17 @@ def _dataset_summary(
 			token_metadata.get('png_label_role'),
 		),
 	}
+
+def _dataset_class_counts(token_dataset: Mapping[str, object]) -> dict[str, int]:
+	class_counts = _mapping(token_dataset.get('class_counts'))
+	combined = _mapping(class_counts.get('combined'))
+	if combined:
+		return _combined_counts(combined, {})
+	train = _mapping(class_counts.get('train'))
+	validation = _mapping(class_counts.get('validation'))
+	if train or validation:
+		return _combined_counts(train, validation)
+	return {}
 
 def _pretrained_summary(
 	config: F3LithologyReportConfig,

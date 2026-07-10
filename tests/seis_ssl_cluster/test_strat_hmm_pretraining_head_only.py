@@ -27,11 +27,13 @@ from seis_ssl_cluster.data import (
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.stratigraphy import (
+	OrderedPrototypeHead,
 	discover_pseudo_target_inputs,
 	write_pseudo_target,
 )
 from seis_ssl_cluster.training import load_checkpoint
 from seis_ssl_cluster.training.dataloaders import build_strat_pseudo_target_dataloader
+from seis_ssl_cluster.training.strat_hmm import compute_strat_hmm_pretext_losses
 from seis_ssl_cluster.training.strat_hmm import (
 	run_strat_hmm_pretext_training as run_strat_hmm_pretext_training_new,
 )
@@ -220,11 +222,97 @@ def test_unfreeze_top_block_optimizer_lrs_and_gradients(tmp_path: Path) -> None:
 	assert all(parameter.grad is None for parameter in components.teacher.parameters())
 
 
+def test_distillation_only_skips_prototype_head_and_invalid_labels() -> None:
+	student_tokens = torch.randn(1, 3, 4, requires_grad=True)
+	teacher_tokens = torch.randn(1, 3, 4)
+	head = OrderedPrototypeHead(feature_dim=4, num_prototypes=3)
+	losses = compute_strat_hmm_pretext_losses(
+		head=head,
+		encoded={
+			'tokens': student_tokens,
+			'token_valid_mask': torch.tensor([[True, True, False]]),
+		},
+		teacher_encoded={
+			'tokens': teacher_tokens,
+			'token_valid_mask': torch.tensor([[True, False, True]]),
+		},
+		batch={
+			'strat_labels': torch.full((1, 3), 99),
+			'strat_confidence': torch.ones(1, 3),
+			'strat_valid_mask': torch.ones(1, 3, dtype=torch.bool),
+		},
+		loss_config={
+			'prototype_weight': 0.0,
+			'usage_weight': 0.0,
+			'distillation_weight': 0.2,
+		},
+		pseudo_target_config={'min_confidence': 0.0},
+	)
+
+	assert losses['loss_prototype'].item() == 0.0
+	assert losses['loss_usage'].item() == 0.0
+	assert losses['valid_distillation_token_fraction'].item() == pytest.approx(
+		1.0 / 3.0,
+	)
+	assert losses['loss'].item() == pytest.approx(
+		0.2 * losses['loss_distillation'].item(),
+	)
+	losses['loss'].backward()
+	assert student_tokens.grad is not None
+	assert all(parameter.grad is None for parameter in head.parameters())
+
+
+def test_distillation_only_trains_top_block_and_omits_head_optimizer_group(
+	tmp_path: Path,
+) -> None:
+	config = _resolved_config(
+		tmp_path,
+		encoder_depth=2,
+		unfreeze_top_blocks=1,
+		prototype_weight=0.0,
+		usage_weight=0.0,
+		distillation_weight=0.2,
+	)
+	components = build_strat_hmm_head_only_components(
+		config,
+		device=torch.device('cpu'),
+	)
+
+	state = train_strat_hmm_head_only_one_epoch(
+		student=components.student,
+		teacher=components.teacher,
+		head=components.head,
+		dataloader=_single_batch_dataloader(config),
+		optimizer=components.optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		loss_config=config['loss'],
+		pseudo_target_config=config['pseudo_targets'],
+		max_steps=1,
+	)
+
+	assert [group['name'] for group in components.optimizer.param_groups] == [
+		'encoder',
+	]
+	assert state.metrics['loss'] == pytest.approx(
+		config['loss']['distillation_weight']
+		* state.metrics['loss_distillation'],
+	)
+	assert any(
+		parameter.grad is not None
+		and bool(parameter.grad.abs().sum().gt(0).item())
+		for parameter in components.student.encoder.layers[-1].parameters()
+	)
+	assert all(parameter.grad is None for parameter in components.head.parameters())
+
+
 def test_unfreeze_distillation_smoke_writes_checkpoint(tmp_path: Path) -> None:
 	config = _resolved_config(
 		tmp_path,
 		encoder_depth=2,
 		unfreeze_top_blocks=1,
+		prototype_weight=0.0,
+		usage_weight=0.0,
 		distillation_weight=0.2,
 		max_steps=1,
 	)
@@ -234,7 +322,13 @@ def test_unfreeze_distillation_smoke_writes_checkpoint(tmp_path: Path) -> None:
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
 	assert payload['global_step'] == 1
 	assert math.isfinite(payload['metrics']['loss_distillation'])
+	assert payload['metrics']['loss_prototype'] == 0.0
+	assert payload['metrics']['loss_usage'] == 0.0
+	assert payload['metrics']['loss'] == pytest.approx(
+		0.2 * payload['metrics']['loss_distillation'],
+	)
 	assert payload['metrics']['trainable_parameter_count'] > 0.0
+	assert payload['metrics']['frozen_parameter_count'] > 0.0
 	assert payload['trainability_summary']['trainable_names']
 
 
@@ -376,6 +470,8 @@ def _resolved_config(  # noqa: PLR0913
 	max_steps: int | None = None,
 	encoder_depth: int = 1,
 	unfreeze_top_blocks: int = 0,
+	prototype_weight: float = 1.0,
+	usage_weight: float = 0.01,
 	distillation_weight: float = 0.0,
 ) -> dict[str, object]:
 	return resolve_strat_hmm_pretext_config(
@@ -385,6 +481,8 @@ def _resolved_config(  # noqa: PLR0913
 			max_steps=max_steps,
 			encoder_depth=encoder_depth,
 			unfreeze_top_blocks=unfreeze_top_blocks,
+			prototype_weight=prototype_weight,
+			usage_weight=usage_weight,
 			distillation_weight=distillation_weight,
 		),
 	)
@@ -397,6 +495,8 @@ def _raw_config(  # noqa: PLR0913
 	max_steps: int | None = None,
 	encoder_depth: int = 1,
 	unfreeze_top_blocks: int = 0,
+	prototype_weight: float = 1.0,
+	usage_weight: float = 0.01,
 	distillation_weight: float = 0.0,
 ) -> dict[str, object]:
 	paths = _write_fixture_files(
@@ -442,7 +542,8 @@ def _raw_config(  # noqa: PLR0913
 			'temperature': 0.5,
 		},
 		'loss': {
-			'usage_weight': 0.01,
+			'prototype_weight': prototype_weight,
+			'usage_weight': usage_weight,
 			'distillation_weight': distillation_weight,
 			'entropy_floor': None,
 		},

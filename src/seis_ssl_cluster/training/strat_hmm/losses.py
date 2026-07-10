@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 	from collections.abc import Mapping
 
 
-def compute_strat_hmm_pretext_losses(  # noqa: PLR0913
+def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	*,
 	head: OrderedPrototypeHead,
 	encoded: Mapping[str, object],
@@ -33,26 +33,33 @@ def compute_strat_hmm_pretext_losses(  # noqa: PLR0913
 ) -> dict[str, torch.Tensor]:
 	"""Compute training-batch losses and metrics for strat HMM pretext learning."""
 	tokens = _encoded_tokens(encoded)
-	logits = head(tokens).logits
+	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
+	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
+	logits = (
+		head(tokens).logits
+		if prototype_weight > 0.0 or usage_weight > 0.0
+		else None
+	)
+	reference = logits if logits is not None else tokens
 	labels = _flatten_token_tensor(
 		_required_tensor(batch, 'strat_labels'),
-		logits,
+		reference,
 		'strat_labels',
 	).long()
 	confidence = _flatten_token_tensor(
 		_required_tensor(batch, 'strat_confidence'),
-		logits,
+		reference,
 		'strat_confidence',
-	).to(dtype=logits.dtype)
+	).to(dtype=reference.dtype)
 	valid_mask = _flatten_token_tensor(
 		_required_tensor(batch, 'strat_valid_mask'),
-		logits,
+		reference,
 		'strat_valid_mask',
 	).bool()
 	distillation_valid_mask = valid_mask
 	token_valid_mask = encoded.get('token_valid_mask')
 	if token_valid_mask is not None:
-		student_valid_mask = _encoded_token_valid_mask(token_valid_mask, logits)
+		student_valid_mask = _encoded_token_valid_mask(token_valid_mask, reference)
 		valid_mask = valid_mask & student_valid_mask
 		distillation_valid_mask = distillation_valid_mask & student_valid_mask
 	if teacher_encoded is not None:
@@ -60,21 +67,27 @@ def compute_strat_hmm_pretext_losses(  # noqa: PLR0913
 		if teacher_token_valid_mask is not None:
 			teacher_valid_mask = _encoded_token_valid_mask(
 				teacher_token_valid_mask,
-				logits,
+				reference,
 			)
 			distillation_valid_mask = distillation_valid_mask & teacher_valid_mask
 	min_confidence = _float_config(pseudo_target_config, 'min_confidence', 0.0)
 	if min_confidence > 0.0:
 		valid_mask = valid_mask & confidence.ge(min_confidence)
 
-	prototype_loss = structured_hmm_prototype_loss(
-		logits,
-		labels,
-		valid_mask=valid_mask,
-		confidence=confidence,
-	)
-	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
+	if prototype_weight > 0.0:
+		if logits is None:  # pragma: no cover - guarded by logits construction
+			raise AssertionError('prototype logits were not computed')
+		prototype_loss = structured_hmm_prototype_loss(
+			logits,
+			labels,
+			valid_mask=valid_mask,
+			confidence=confidence,
+		)
+	else:
+		prototype_loss = tokens.new_zeros(())
 	if usage_weight > 0.0:
+		if logits is None:  # pragma: no cover - guarded by logits construction
+			raise AssertionError('prototype logits were not computed')
 		probs = torch.nn.functional.softmax(logits, dim=-1)
 		entropy_floor = loss_config.get('entropy_floor')
 		if entropy_floor is None:
@@ -88,9 +101,12 @@ def compute_strat_hmm_pretext_losses(  # noqa: PLR0913
 			entropy_floor=entropy_floor_value,
 		)
 	else:
-		probs = torch.nn.functional.softmax(logits, dim=-1)
-		usage_loss = logits.new_zeros(())
-	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
+		probs = (
+			torch.nn.functional.softmax(logits, dim=-1)
+			if logits is not None
+			else None
+		)
+		usage_loss = tokens.new_zeros(())
 	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
 	if distillation_weight > 0.0:
 		if teacher_encoded is None:
@@ -102,7 +118,7 @@ def compute_strat_hmm_pretext_losses(  # noqa: PLR0913
 			valid_mask=distillation_valid_mask,
 		)
 	else:
-		distillation_loss = logits.new_zeros(())
+		distillation_loss = tokens.new_zeros(())
 	total_loss = (
 		prototype_weight * prototype_loss
 		+ usage_weight * usage_loss
@@ -118,9 +134,13 @@ def compute_strat_hmm_pretext_losses(  # noqa: PLR0913
 		'target_usage_entropy': _target_usage_entropy(
 			labels,
 			valid_mask,
-			num_prototypes=logits.shape[-1],
+			num_prototypes=head.num_prototypes,
 		),
-		'prototype_usage_entropy': _prototype_usage_entropy(probs, valid_mask),
+		'prototype_usage_entropy': (
+			_prototype_usage_entropy(probs, valid_mask)
+			if probs is not None
+			else tokens.new_zeros(())
+		),
 	}
 
 
@@ -170,7 +190,9 @@ def _target_usage_entropy(
 	*,
 	num_prototypes: int,
 ) -> torch.Tensor:
-	selected = labels[valid_mask]
+	selected = labels[
+		valid_mask & labels.ge(0) & labels.lt(num_prototypes)
+	]
 	if selected.numel() == 0:
 		return labels.new_tensor(0.0, dtype=torch.float32)
 	counts = torch.bincount(

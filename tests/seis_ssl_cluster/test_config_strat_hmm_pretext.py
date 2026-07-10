@@ -104,6 +104,20 @@ def test_strat_hmm_pretext_config_requires_distillation_when_unfrozen(
 	assert resolved['loss']['distillation_weight'] == 0.2
 
 
+def test_strat_hmm_pretext_config_rejects_all_zero_loss_weights(
+	tmp_path: Path,
+) -> None:
+	cfg = _minimal_config(tmp_path)
+	cfg['loss'].update(
+		prototype_weight=0.0,
+		usage_weight=0.0,
+		distillation_weight=0.0,
+	)
+
+	with pytest.raises(ValueError, match=r'at least one.*loss weight'):
+		resolve_strat_hmm_pretext_config(cfg)
+
+
 def test_strat_hmm_pretext_config_enforces_crop_patch_divisibility(
 	tmp_path: Path,
 ) -> None:
