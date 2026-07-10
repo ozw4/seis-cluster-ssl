@@ -2,9 +2,16 @@
   "artifact_type": "f3_lithology_probe_report",
   "dataset": {
     "class_imbalance": {
-      "class_counts": {},
-      "max_to_min_positive_ratio": null,
-      "total": 0
+      "class_counts": {
+        "0": 7654,
+        "1": 4089,
+        "2": 19851,
+        "3": 1814,
+        "4": 1824,
+        "5": 495
+      },
+      "max_to_min_positive_ratio": 40.1030303030303,
+      "total": 35727
     },
     "classes": [
       {

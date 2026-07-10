@@ -10,7 +10,7 @@
 - PNG label role: train_validation_slice_selection_and_visual_qc
 - train/validation slices: {"train": ["inline 250", "inline 350", "inline 450", "inline 550", "inline 650", "crossline 450", "crossline 550", "crossline 650", "crossline 850", "crossline 950", "crossline 1050", "crossline 1150"], "validation": ["inline 150", "crossline 350", "crossline 750"]}
 - tokenization thresholds: {"ignore_z_border_samples": 1, "min_labeled_fraction": 0.5, "min_majority_fraction": 0.7}
-- class imbalance: {"class_counts": {}, "max_to_min_positive_ratio": null, "total": 0}
+- class imbalance: {"class_counts": {"0": 7654, "1": 4089, "2": 19851, "3": 1814, "4": 1824, "5": 495}, "max_to_min_positive_ratio": 40.1030303030303, "total": 35727}
 
 | class_id | class_name | rgb |
 |---:|---|---|
