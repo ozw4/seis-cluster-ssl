@@ -253,6 +253,7 @@ def _validate_output_paths_available(
 			item.output_paths.labels,
 			item.output_paths.confidence,
 			item.output_paths.valid_tokens,
+			item.output_paths.boundary_weight,
 			item.output_paths.metadata,
 		)
 		if path.exists()

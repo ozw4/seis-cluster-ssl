@@ -67,6 +67,7 @@ def shuffle_pseudo_target_arrays(  # noqa: PLR0913
 		labels=shuffled_labels,
 		confidence=shuffled_confidence,
 		valid_tokens=valid_array.copy(),
+		boundary_weight=valid_array.astype(np.float32),
 	)
 	_assert_preserved(
 		labels_array,
@@ -161,6 +162,7 @@ def _shuffle_input(
 		labels=shuffled.labels,
 		confidence=shuffled.confidence,
 		valid_tokens=shuffled.valid_tokens,
+		boundary_weight=shuffled.boundary_weight,
 		metadata=source_metadata,
 	)
 	_add_shuffle_metadata(
@@ -209,6 +211,7 @@ def _prepare_outputs(
 			output.labels,
 			output.confidence,
 			output.valid_tokens,
+			output.boundary_weight,
 			output.metadata,
 		)
 	}
@@ -217,6 +220,7 @@ def _prepare_outputs(
 		'*.hmm_labels_token.npy',
 		'*.hmm_confidence_token.npy',
 		'*.valid_tokens.npy',
+		'*.hmm_boundary_weight_token.npy',
 		'*.pseudo_target_metadata.json',
 	)
 	unplanned = sorted(
@@ -265,6 +269,7 @@ def _assert_preserved(
 		shuffled.labels,
 		shuffled.confidence,
 		shuffled.valid_tokens,
+		boundary_weight=shuffled.boundary_weight,
 		k=k,
 		survey_id=survey_id,
 	)
