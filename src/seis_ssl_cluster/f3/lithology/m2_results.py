@@ -21,9 +21,29 @@ from seis_ssl_cluster.results import (
 )
 
 REQUIRED_LOW_BUDGETS = ('cap25', 'cap50', 'cap100')
+REQUIRED_BUDGETS = (*REQUIRED_LOW_BUDGETS, 'full')
+REQUIRED_SUBSAMPLE_SEEDS = (0, 1, 2, 3, 4)
+REQUIRED_SPLIT_IDS = tuple(f'split_{index:03d}' for index in range(6))
 REQUIRED_MONITORED_CLASS_IDS = frozenset((3, 5))
 MONITORED_CLASS_FIGURE = 'monitored_class_deltas.png'
 MONITORED_CLASS_TABLE = 'monitored_class_deltas.csv'
+M2_RESULTS_PUBLISH_SUFFIXES = frozenset({'.md', '.json', '.csv', '.png'})
+M2_RESULTS_TABLE_NAMES = frozenset(
+	{
+		m1.SINGLE_SPLIT_TABLE,
+		m1.LABEL_BUDGET_TABLE,
+		m1.SPLIT_INDEX_TABLE,
+		MONITORED_CLASS_TABLE,
+	}
+)
+M2_RESULTS_FIGURE_NAMES = frozenset(
+	{
+		m1.SINGLE_RUN_FIGURE,
+		m1.LABEL_BUDGET_FIGURE,
+		m1.SPLIT_INDEX_FIGURE,
+		MONITORED_CLASS_FIGURE,
+	}
+)
 
 
 @dataclass(frozen=True)
@@ -408,6 +428,7 @@ def publish_f3_strat_hmm_m2_results(
 	ensure_under_root(
 		publish_config.output_dir, root=DEFAULT_RESULTS_ROOT, label='publish.output_dir'
 	)
+	_validate_m2_publish_contract(result)
 	markdown_without_figures = None
 	if not publish_config.include_figures:
 		markdown_without_figures = (
@@ -439,8 +460,60 @@ def publish_f3_strat_hmm_m2_results(
 	return publish_selected_results(
 		items=tuple(items),
 		output_dir=publish_config.output_dir,
+		allowed_suffixes=M2_RESULTS_PUBLISH_SUFFIXES,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
+
+
+def _validate_m2_publish_contract(result: F3StratHMMM2ResultsResult) -> None:
+	root = result.summary_json.parent.resolve(strict=False)
+	expected_summaries = (
+		(result.summary_json.resolve(strict=False), root / 'm2a_results_summary.json'),
+		(
+			result.summary_markdown.resolve(strict=False),
+			root / 'm2a_results_summary.md',
+		),
+	)
+	for actual, expected in expected_summaries:
+		if actual != expected:
+			raise ValueError(
+				'M2-A publish summary path does not match the required contract: '
+				f'expected {expected}, got {actual}'
+			)
+	_validate_named_publish_paths(
+		result.table_paths,
+		expected_names=M2_RESULTS_TABLE_NAMES,
+		expected_parent=root / 'tables',
+		label='table',
+	)
+	_validate_named_publish_paths(
+		result.figure_paths,
+		expected_names=M2_RESULTS_FIGURE_NAMES,
+		expected_parent=root / 'figures',
+		label='figure',
+	)
+
+
+def _validate_named_publish_paths(
+	paths: Sequence[Path],
+	*,
+	expected_names: frozenset[str],
+	expected_parent: Path,
+	label: str,
+) -> None:
+	by_name = {path.name: path.resolve(strict=False) for path in paths}
+	if len(by_name) != len(paths) or set(by_name) != expected_names:
+		raise ValueError(
+			f'M2-A publish {label} allowlist must be exactly '
+			f'{sorted(expected_names)!r}; got {sorted(path.name for path in paths)!r}'
+		)
+	for name, path in by_name.items():
+		expected = expected_parent / name
+		if path != expected:
+			raise ValueError(
+				f'M2-A publish {label} path does not match the required contract: '
+				f'expected {expected}, got {path}'
+			)
 
 
 def _publish_config(raw: Mapping[str, object]) -> F3StratHMMM2PublishConfig:
@@ -526,6 +599,14 @@ def _label_budget_manifest_conditions(
 		baseline_model=config.baseline_model,
 		candidate_model=config.candidate_model,
 	)
+	expected_conditions = {
+		(budget_id, seed)
+		for budget_id in REQUIRED_BUDGETS
+		for seed in REQUIRED_SUBSAMPLE_SEEDS
+	}
+	_validate_registered_inventory(
+		'label-budget', manifest_conditions, expected_conditions, manifest_path
+	)
 	_validate_condition_coverage(
 		'label-budget', set(csv_conditions), manifest_conditions, manifest_path
 	)
@@ -546,8 +627,28 @@ def _split_manifest_ids(config: F3StratHMMM2ResultsConfig) -> None:
 		baseline_model=config.baseline_model,
 		candidate_model=config.candidate_model,
 	)
+	expected_ids = {(split_id,) for split_id in REQUIRED_SPLIT_IDS}
+	_validate_registered_inventory(
+		'split/index', manifest_ids, expected_ids, manifest_path
+	)
 	_validate_condition_coverage(
 		'split/index', set(csv_ids), manifest_ids, manifest_path
+	)
+
+
+def _validate_registered_inventory(
+	label: str,
+	actual: set[tuple[object, ...]],
+	expected: set[tuple[object, ...]],
+	path: Path,
+) -> None:
+	if actual == expected:
+		return
+	missing = sorted(expected - actual)
+	unexpected = sorted(actual - expected)
+	raise ValueError(
+		f'{label} manifest does not match the preregistered condition inventory in '
+		f'{path}; missing={missing!r}, unexpected={unexpected!r}'
 	)
 
 

@@ -295,6 +295,54 @@ def test_guardrail_summary_publishes_only_lightweight_summary_files(
 	}
 
 
+def test_guardrail_publish_requires_strict_complete_summary(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	publish_root = tmp_path / 'results'
+	monkeypatch.setattr(guardrails, 'DEFAULT_RESULTS_ROOT', publish_root)
+	raw = _summary_config(tmp_path, strict=False)
+	raw['publish'] = {
+		'enabled': True,
+		'output_dir': str(publish_root / 'guardrails'),
+	}
+	with pytest.raises(ValueError, match=r'publishing requires suite\.strict: true'):
+		f3_guardrail_summary_config_from_mapping(raw)
+
+	raw['suite']['strict'] = True
+	config = f3_guardrail_summary_config_from_mapping(raw)
+	summary_json = tmp_path / 'guardrail_comparison_summary.json'
+	summary_markdown = tmp_path / 'guardrail_comparison_report.md'
+	comparison_table = tmp_path / 'guardrail_comparison_table.csv'
+	summary_json.write_text(
+		json.dumps(
+			{
+				'strict': True,
+				'pending_roles': [],
+				'models': [
+					{
+						'role': role,
+						'status': 'incomplete' if role == 'candidate' else 'complete',
+					}
+					for role in F3_STRAT_HMM_M1_GUARDRAIL_ROLES
+				],
+				'low_budget': {'status': 'complete'},
+			}
+		)
+		+ '\n',
+		encoding='utf-8',
+	)
+	summary_markdown.write_text('summary\n', encoding='utf-8')
+	comparison_table.write_text('role,status\n', encoding='utf-8')
+	with pytest.raises(ValueError, match='all roles to be complete'):
+		guardrails.publish_f3_strat_hmm_m1_guardrails(
+			comparison_table=comparison_table,
+			summary_json=summary_json,
+			summary_markdown=summary_markdown,
+			publish_config=config.publish,
+		)
+
+
 @pytest.mark.parametrize(
 	('distillation_offset', 'shuffled_offset', 'expected'),
 	[

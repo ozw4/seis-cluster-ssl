@@ -312,6 +312,8 @@ def f3_guardrail_summary_config_from_mapping(
 			'guardrail summary must not use the milestone-1 candidate root',
 		)
 	publish = _publish_config(config.get('publish'))
+	if publish.enabled and not strict:
+		raise ValueError('guardrail publishing requires suite.strict: true')
 	return F3GuardrailSummaryConfig(
 		suite_name=suite_name,
 		strict=strict,
@@ -380,6 +382,7 @@ def summarize_f3_strat_hmm_m1_guardrails(
 		)
 	decision = _decision_payload(rows)
 	low_budget = _low_budget_payload(rows, strict=config.strict, warnings=warnings)
+	_validate_guardrail_publish_readiness(config, rows, low_budget)
 	payload = {
 		'schema_version': 2,
 		'suite_name': config.suite_name,
@@ -428,6 +431,7 @@ def publish_f3_strat_hmm_m1_guardrails(
 		root=DEFAULT_RESULTS_ROOT,
 		label='publish.output_dir',
 	)
+	_validate_guardrail_publish_payload(summary_json)
 	return publish_selected_results(
 		items=(
 			PublishItem(summary_markdown, Path(summary_markdown.name)),
@@ -438,6 +442,61 @@ def publish_f3_strat_hmm_m1_guardrails(
 		allowed_suffixes=F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_SUFFIXES,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
+
+
+def _validate_guardrail_publish_readiness(
+	config: F3GuardrailSummaryConfig,
+	rows: Sequence[Mapping[str, object]],
+	low_budget: Mapping[str, object],
+) -> None:
+	if not config.publish.enabled:
+		return
+	if not config.strict:
+		raise ValueError('guardrail publishing requires suite.strict: true')
+	incomplete_roles = [
+		str(row.get('role')) for row in rows if row.get('status') != 'complete'
+	]
+	if incomplete_roles:
+		raise ValueError(
+			'guardrail publishing requires all roles to be complete; '
+			f'incomplete roles: {incomplete_roles!r}'
+		)
+	if low_budget.get('status') != 'complete':
+		raise ValueError('guardrail publishing requires complete robustness evidence')
+
+
+def _validate_guardrail_publish_payload(path: Path) -> None:
+	payload = _read_json_object(path)
+	if payload.get('strict') is not True:
+		raise ValueError('guardrail publishing requires a strict summary payload')
+	pending = payload.get('pending_roles')
+	if not isinstance(pending, Sequence) or isinstance(pending, str | bytes):
+		raise TypeError('guardrail summary pending_roles must be a list')
+	if pending:
+		raise ValueError(
+			f'guardrail publishing requires no pending roles; got {list(pending)!r}'
+		)
+	models = payload.get('models')
+	if not isinstance(models, Sequence) or isinstance(models, str | bytes):
+		raise TypeError('guardrail summary models must be a list')
+	model_rows = [row for row in models if isinstance(row, Mapping)]
+	roles = tuple(row.get('role') for row in model_rows)
+	if len(model_rows) != len(models) or roles != F3_STRAT_HMM_M1_GUARDRAIL_ROLES:
+		raise ValueError(
+			'guardrail publishing requires the exact registered role inventory; '
+			f'got {roles!r}'
+		)
+	incomplete = [
+		str(row['role']) for row in model_rows if row.get('status') != 'complete'
+	]
+	if incomplete:
+		raise ValueError(
+			'guardrail publishing requires all roles to be complete; '
+			f'incomplete roles: {incomplete!r}'
+		)
+	low_budget = payload.get('low_budget')
+	if not isinstance(low_budget, Mapping) or low_budget.get('status') != 'complete':
+		raise ValueError('guardrail publishing requires complete robustness evidence')
 
 
 def _publish_config(value: object) -> F3GuardrailPublishConfig:

@@ -7,6 +7,9 @@ JSON files, the paired robustness suite roots, and monitored class IDs.
 The label-budget root must contain `suite_manifest.json`; the split/index root
 must contain `split_dataset_manifest.json`. Their condition inventories and
 baseline/candidate model tags must exactly match the paired-delta CSVs.
+The decision contract also requires the exact preregistered inventory:
+`cap25`, `cap50`, `cap100`, and `full` at every seed 0 through 4, plus
+`split_000` through `split_005`.
 
 Run:
 

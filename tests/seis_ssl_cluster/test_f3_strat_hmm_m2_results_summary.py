@@ -7,9 +7,12 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from seis_ssl_cluster.f3.lithology import m2_results
 from seis_ssl_cluster.f3.lithology.m2_results import (
+	F3StratHMMM2PublishConfig,
 	F3StratHMMM2ResultsConfig,
 	consolidate_f3_strat_hmm_m2_results,
+	publish_f3_strat_hmm_m2_results,
 )
 
 if TYPE_CHECKING:
@@ -51,10 +54,15 @@ def test_m2a_decision_cases(tmp_path: Path, mutation: str, expected: str) -> Non
 	if mutation == 'negative_full_balanced_accuracy':
 		_rewrite_comparison(config.baseline_comparison_csv, candidate_balanced=0.59)
 	elif mutation == 'split_majority_missing':
-		_write_split(config.split_index_suite_root, (0.02, -0.01, 0.0))
+		_write_split(
+			config.split_index_suite_root, (0.02, 0.02, 0.02, -0.01, -0.01, 0.0)
+		)
 	else:
 		_write_budgets(config.label_budget_suite_root, delta=-0.02)
-		_write_split(config.split_index_suite_root, (-0.02, -0.01, -0.02))
+		_write_split(
+			config.split_index_suite_root,
+			(-0.02, -0.01, -0.02, -0.02, -0.01, -0.02),
+		)
 	result = consolidate_f3_strat_hmm_m2_results(config)
 	assert result.decision == expected
 
@@ -95,6 +103,54 @@ def test_m2a_rejects_split_evidence_missing_from_csv(tmp_path: Path) -> None:
 		consolidate_f3_strat_hmm_m2_results(config)
 
 
+@pytest.mark.parametrize('condition_kind', ['full_budget', 'budget_seed', 'split'])
+def test_m2a_rejects_incomplete_preregistered_inventory(
+	tmp_path: Path, condition_kind: str
+) -> None:
+	config = _fixture(tmp_path)
+	if condition_kind in {'full_budget', 'budget_seed'}:
+		csv_path = config.label_budget_suite_root / 'reports' / 'paired_deltas.csv'
+		manifest_path = config.label_budget_suite_root / 'suite_manifest.json'
+		if condition_kind == 'full_budget':
+			csv_rows = [
+				row for row in _read_csv(csv_path) if row['budget_id'] != 'full'
+			]
+		else:
+			csv_rows = [
+				row
+				for row in _read_csv(csv_path)
+				if not (
+					row['budget_id'] == 'cap25' and row['subsample_seed'] == '4'
+				)
+			]
+	else:
+		csv_path = config.split_index_suite_root / 'reports' / 'split_paired_deltas.csv'
+		manifest_path = config.split_index_suite_root / 'split_dataset_manifest.json'
+		csv_rows = [
+			row for row in _read_csv(csv_path) if row['split_id'] != 'split_005'
+		]
+	_write_csv(csv_path, tuple(csv_rows[0]), csv_rows)
+	manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+	if condition_kind == 'full_budget':
+		manifest['rows'] = [
+			row for row in manifest['rows'] if row['budget_id'] != 'full'
+		]
+	elif condition_kind == 'budget_seed':
+		manifest['rows'] = [
+			row
+			for row in manifest['rows']
+			if not (row['budget_id'] == 'cap25' and row['subsample_seed'] == 4)
+		]
+	else:
+		manifest['rows'] = [
+			row for row in manifest['rows'] if row['split_id'] != 'split_005'
+		]
+	_write_json(manifest_path, manifest)
+
+	with pytest.raises(ValueError, match='preregistered condition inventory'):
+		consolidate_f3_strat_hmm_m2_results(config)
+
+
 def test_m2a_rejects_missing_suite_manifest(tmp_path: Path) -> None:
 	config = _fixture(tmp_path)
 	(config.label_budget_suite_root / 'suite_manifest.json').unlink()
@@ -131,6 +187,46 @@ def test_m2a_rejects_paired_identity_hash_mismatch(
 		consolidate_f3_strat_hmm_m2_results(config)
 
 
+def test_m2a_publish_wrapper_enforces_exact_allowlist_and_size_guard(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	pytest.importorskip('matplotlib').use('Agg', force=True)
+	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
+	publish_root = tmp_path / 'results'
+	monkeypatch.setattr(m2_results, 'DEFAULT_RESULTS_ROOT', publish_root)
+	publish_config = F3StratHMMM2PublishConfig(
+		enabled=True,
+		output_dir=publish_root / 'm2a',
+		max_file_size_bytes=10 * 1024 * 1024,
+	)
+
+	manifest = publish_f3_strat_hmm_m2_results(result, publish_config)
+	assert manifest is not None
+	assert {
+		item.target.relative_to(publish_config.output_dir).as_posix()
+		for item in manifest.items
+	} == {
+		'm2a_results_summary.md',
+		'm2a_results_summary.json',
+		*(f'tables/{name}' for name in m2_results.M2_RESULTS_TABLE_NAMES),
+		*(f'figures/{name}' for name in m2_results.M2_RESULTS_FIGURE_NAMES),
+	}
+
+	wrong_tables = replace(
+		result,
+		table_paths=(
+			*result.table_paths[:-1],
+			result.table_paths[-1].with_name('extra.csv'),
+		),
+	)
+	with pytest.raises(ValueError, match='table allowlist must be exactly'):
+		publish_f3_strat_hmm_m2_results(wrong_tables, publish_config)
+	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
+		publish_f3_strat_hmm_m2_results(
+			result, replace(publish_config, max_file_size_bytes=1)
+		)
+
+
 def _fixture(tmp_path: Path) -> F3StratHMMM2ResultsConfig:
 	comparison = tmp_path / 'comparison.csv'
 	label_root = tmp_path / 'label'
@@ -139,7 +235,7 @@ def _fixture(tmp_path: Path) -> F3StratHMMM2ResultsConfig:
 	m2_metrics = tmp_path / 'm2_metrics.json'
 	_rewrite_comparison(comparison, candidate_balanced=0.62)
 	_write_budgets(label_root, delta=0.02)
-	_write_split(split_root, (0.03, 0.02, -0.01))
+	_write_split(split_root, (0.03, 0.02, 0.01, 0.01, -0.01, -0.01))
 	_write_json(m1_metrics, _metrics('M1', f1=(0.40, 0.50), iou=(0.30, 0.40)))
 	_write_json(m2_metrics, _metrics('M2-A', f1=(0.42, 0.48), iou=(0.31, 0.39)))
 	return F3StratHMMM2ResultsConfig(
@@ -175,13 +271,14 @@ def _write_budgets(root: Path, *, delta: float) -> None:
 	rows = [
 		{
 			'budget_id': budget,
-			'per_class_cap': budget.removeprefix('cap'),
-			'subsample_seed': '0',
+			'per_class_cap': '' if budget == 'full' else budget.removeprefix('cap'),
+			'subsample_seed': str(seed),
 			'delta_macro_f1': delta,
 			'delta_mean_iou': delta,
 			'delta_balanced_accuracy': delta,
 		}
-		for budget in ('cap25', 'cap50', 'cap100')
+		for budget in ('cap25', 'cap50', 'cap100', 'full')
+		for seed in range(5)
 	]
 	_write_csv(root / 'reports' / 'paired_deltas.csv', tuple(rows[0]), rows)
 	_write_suite_manifest(
