@@ -53,6 +53,9 @@ def test_m2a_decision_cases(tmp_path: Path, mutation: str, expected: str) -> Non
 	config = _fixture(tmp_path)
 	if mutation == 'negative_full_balanced_accuracy':
 		_rewrite_comparison(config.baseline_comparison_csv, candidate_balanced=0.59)
+		payload = json.loads(config.m2a_metrics_json.read_text(encoding='utf-8'))
+		payload['balanced_accuracy'] = 0.59
+		_write_json(config.m2a_metrics_json, payload)
 	elif mutation == 'split_majority_missing':
 		_write_split(
 			config.split_index_suite_root, (0.02, 0.02, 0.02, -0.01, -0.01, 0.0)
@@ -73,6 +76,23 @@ def test_m2a_rejects_model_identity_mismatch(tmp_path: Path) -> None:
 	payload['model']['tag'] = 'wrong-model'
 	_write_json(config.m2a_metrics_json, payload)
 	with pytest.raises(ValueError, match='identity mismatch'):
+		consolidate_f3_strat_hmm_m2_results(config)
+
+
+@pytest.mark.parametrize(
+	('metrics_attribute', 'metric'),
+	[('m1_metrics_json', 'accuracy'), ('m2a_metrics_json', 'mean_iou')],
+)
+def test_m2a_rejects_single_split_metric_mismatch(
+	tmp_path: Path, metrics_attribute: str, metric: str
+) -> None:
+	config = _fixture(tmp_path)
+	path = getattr(config, metrics_attribute)
+	payload = json.loads(path.read_text(encoding='utf-8'))
+	payload[metric] += 0.01
+	_write_json(path, payload)
+
+	with pytest.raises(ValueError, match=rf'single-split metric mismatch.*{metric}'):
 		consolidate_f3_strat_hmm_m2_results(config)
 
 
@@ -236,8 +256,24 @@ def _fixture(tmp_path: Path) -> F3StratHMMM2ResultsConfig:
 	_rewrite_comparison(comparison, candidate_balanced=0.62)
 	_write_budgets(label_root, delta=0.02)
 	_write_split(split_root, (0.03, 0.02, 0.01, 0.01, -0.01, -0.01))
-	_write_json(m1_metrics, _metrics('M1', f1=(0.40, 0.50), iou=(0.30, 0.40)))
-	_write_json(m2_metrics, _metrics('M2-A', f1=(0.42, 0.48), iou=(0.31, 0.39)))
+	_write_json(
+		m1_metrics,
+		_metrics(
+			'M1',
+			f1=(0.40, 0.50),
+			iou=(0.30, 0.40),
+			overall=_overall_metrics(offset=0.0, balanced_accuracy=0.60),
+		),
+	)
+	_write_json(
+		m2_metrics,
+		_metrics(
+			'M2-A',
+			f1=(0.42, 0.48),
+			iou=(0.31, 0.39),
+			overall=_overall_metrics(offset=0.04, balanced_accuracy=0.62),
+		),
+	)
 	return F3StratHMMM2ResultsConfig(
 		baseline_comparison_csv=comparison,
 		m1_metrics_json=m1_metrics,
@@ -331,13 +367,28 @@ def _write_suite_manifest(
 
 
 def _metrics(
-	model: str, *, f1: tuple[float, float], iou: tuple[float, float]
+	model: str,
+	*,
+	f1: tuple[float, float],
+	iou: tuple[float, float],
+	overall: dict[str, float],
 ) -> dict[str, object]:
 	return {
 		'model': {'tag': model},
+		**overall,
 		'per_class_f1': {'3': f1[0], '5': f1[1]},
 		'per_class_iou': {'3': iou[0], '5': iou[1]},
 		'per_class_support': {'3': 20, '5': 10},
+	}
+
+
+def _overall_metrics(*, offset: float, balanced_accuracy: float) -> dict[str, float]:
+	return {
+		'accuracy': 0.65 + offset,
+		'balanced_accuracy': balanced_accuracy,
+		'macro_f1': 0.55 + offset,
+		'weighted_f1': 0.64 + offset,
+		'mean_iou': 0.45 + offset,
 	}
 
 

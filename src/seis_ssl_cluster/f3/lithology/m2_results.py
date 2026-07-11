@@ -216,6 +216,12 @@ def consolidate_f3_strat_hmm_m2_results(
 		baseline_model=config.baseline_model,
 		candidate_model=config.candidate_model,
 	)
+	_validate_single_split_metrics(
+		single,
+		baseline_metrics=baseline_metrics,
+		candidate_metrics=candidate_metrics,
+		config=config,
+	)
 	warnings: list[str] = []
 	label_budget, anchors = _label_budget_summary(
 		config.label_budget_suite_root / 'reports' / 'paired_deltas.csv',
@@ -344,6 +350,32 @@ def _decision(
 		},
 		'summary': f'M2-A versus M1 mechanical decision: {guidance.upper()}.',
 	}
+
+
+def _validate_single_split_metrics(
+	single: Mapping[str, object],
+	*,
+	baseline_metrics: Mapping[str, object],
+	candidate_metrics: Mapping[str, object],
+	config: F3StratHMMM2ResultsConfig,
+) -> None:
+	for role, metrics, metrics_path in (
+		('baseline', baseline_metrics, config.m1_metrics_json),
+		('candidate', candidate_metrics, config.m2a_metrics_json),
+	):
+		comparison_metrics = single[role]
+		if not isinstance(comparison_metrics, Mapping):
+			raise TypeError(f'single_split.{role} must be a mapping')
+		for metric in m1.CORE_METRICS:
+			json_value = _finite(metrics.get(metric), f'{metrics_path}:{metric}')
+			csv_value = float(comparison_metrics[metric])
+			if csv_value != json_value:
+				raise ValueError(
+					'single-split metric mismatch for '
+					f'{role}.{metric}: {config.baseline_comparison_csv} has '
+					f'{csv_value!r}, '
+					f'{metrics_path} has {json_value!r}'
+				)
 
 
 def _monitored_classes(
