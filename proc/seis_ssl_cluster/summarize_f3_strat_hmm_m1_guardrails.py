@@ -52,6 +52,8 @@ def main() -> None:
 		f'outputs.summary_markdown: '
 		f'{config.output_dir / "guardrail_comparison_report.md"}'
 	)
+	print(f'publish.enabled: {config.publish.enabled}')
+	print(f'publish.output_dir: {config.publish.output_dir}')
 	if args.dry_run:
 		print('execution: dry-run; guardrail summary skipped')
 		return
@@ -61,6 +63,8 @@ def main() -> None:
 	print(f'guardrails.summary_markdown: {result.summary_markdown}')
 	print(f'guardrails.pending_roles: {list(result.pending_roles)}')
 	print(f'guardrails.warnings: {list(result.warnings)}')
+	if result.publish_manifest is not None:
+		print(f'guardrails.publish_manifest: {result.publish_manifest.manifest_path}')
 
 
 if __name__ == '__main__':

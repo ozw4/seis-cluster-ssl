@@ -6,8 +6,16 @@ import csv
 import json
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+
+from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
+from seis_ssl_cluster.results import (
+	DEFAULT_MAX_FILE_SIZE_BYTES,
+	PublishItem,
+	PublishManifest,
+	publish_selected_results,
+)
 
 F3_STRAT_HMM_M1_GUARDRAIL_SUITE_NAME = 'strat_hmm_m1_guardrails_v1'
 F3_STRAT_HMM_M1_BASELINE_MODEL_TAG = (
@@ -46,6 +54,12 @@ F3_STRAT_HMM_M1_GUARDRAIL_JOB_STAGES = frozenset(
 		'build_guardrail_token_datasets',
 		'run_guardrail_probes',
 	},
+)
+F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_DIR = (
+	DEFAULT_RESULTS_ROOT / 'f3/facies_benchmark_v1/strat_hmm_m1_guardrails'
+)
+F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_SUFFIXES = frozenset(
+	{'.md', '.json', '.csv', '.png'}
 )
 
 
@@ -94,6 +108,15 @@ class F3GuardrailResultInput:
 
 
 @dataclass(frozen=True)
+class F3GuardrailPublishConfig:
+	"""Settings for publishing a lightweight guardrail summary."""
+
+	enabled: bool = False
+	output_dir: Path = F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_DIR
+	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+
+
+@dataclass(frozen=True)
 class F3GuardrailSummaryConfig:
 	"""Resolved guardrail result-summary contract."""
 
@@ -101,6 +124,7 @@ class F3GuardrailSummaryConfig:
 	strict: bool
 	models: tuple[F3GuardrailResultInput, ...]
 	output_dir: Path
+	publish: F3GuardrailPublishConfig = field(default_factory=F3GuardrailPublishConfig)
 
 
 @dataclass(frozen=True)
@@ -112,6 +136,7 @@ class F3GuardrailSummaryResult:
 	summary_markdown: Path
 	pending_roles: tuple[str, ...]
 	warnings: tuple[str, ...]
+	publish_manifest: PublishManifest | None = None
 
 
 def f3_shuffled_hmm_target_config_from_mapping(
@@ -229,7 +254,7 @@ def f3_guardrail_summary_config_from_mapping(
 	config: Mapping[str, object],
 ) -> F3GuardrailSummaryConfig:
 	"""Validate and normalize an M1 guardrail summary config."""
-	_validate_keys(config, {'suite', 'models', 'outputs'}, 'config')
+	_validate_keys(config, {'suite', 'models', 'outputs', 'publish'}, 'config')
 	suite = _mapping(config, 'suite')
 	_validate_keys(suite, {'name', 'strict'}, 'suite')
 	suite_name = _stable_suite_name(suite)
@@ -286,11 +311,13 @@ def f3_guardrail_summary_config_from_mapping(
 		raise ValueError(
 			'guardrail summary must not use the milestone-1 candidate root',
 		)
+	publish = _publish_config(config.get('publish'))
 	return F3GuardrailSummaryConfig(
 		suite_name=suite_name,
 		strict=strict,
 		models=tuple(resolved_models),
 		output_dir=output_dir,
+		publish=publish,
 	)
 
 
@@ -370,12 +397,81 @@ def summarize_f3_strat_hmm_m1_guardrails(
 	_write_comparison_csv(table_path, rows)
 	json_path.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
 	markdown_path.write_text(_render_markdown(payload), encoding='utf-8')
+	publish_manifest = publish_f3_strat_hmm_m1_guardrails(
+		comparison_table=table_path,
+		summary_json=json_path,
+		summary_markdown=markdown_path,
+		publish_config=config.publish,
+	)
 	return F3GuardrailSummaryResult(
 		table_path,
 		json_path,
 		markdown_path,
 		tuple(pending),
 		tuple(warnings),
+		publish_manifest,
+	)
+
+
+def publish_f3_strat_hmm_m1_guardrails(
+	*,
+	comparison_table: Path,
+	summary_json: Path,
+	summary_markdown: Path,
+	publish_config: F3GuardrailPublishConfig,
+) -> PublishManifest | None:
+	"""Publish only lightweight guardrail summary formats into ``results/``."""
+	if not publish_config.enabled:
+		return None
+	ensure_under_root(
+		publish_config.output_dir,
+		root=DEFAULT_RESULTS_ROOT,
+		label='publish.output_dir',
+	)
+	return publish_selected_results(
+		items=(
+			PublishItem(summary_markdown, Path(summary_markdown.name)),
+			PublishItem(summary_json, Path(summary_json.name)),
+			PublishItem(comparison_table, Path(comparison_table.name)),
+		),
+		output_dir=publish_config.output_dir,
+		allowed_suffixes=F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_SUFFIXES,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+
+
+def _publish_config(value: object) -> F3GuardrailPublishConfig:
+	if value is None:
+		return F3GuardrailPublishConfig()
+	if not isinstance(value, Mapping):
+		raise TypeError(f'publish must be a mapping; got {value!r}')
+	_publish_keys = {'enabled', 'output_dir', 'max_file_size_mb'}
+	_validate_keys(value, _publish_keys, 'publish', allow_missing=_publish_keys)
+	enabled = value.get('enabled', False)
+	if not isinstance(enabled, bool):
+		raise TypeError(f'publish.enabled must be a boolean; got {enabled!r}')
+	output_raw = value.get('output_dir', F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_DIR)
+	if not isinstance(output_raw, str | Path) or not str(output_raw):
+		raise TypeError('publish.output_dir must be a non-empty path string')
+	output_dir = Path(output_raw)
+	ensure_under_root(
+		output_dir,
+		root=DEFAULT_RESULTS_ROOT,
+		label='publish.output_dir',
+	)
+	max_size = value.get('max_file_size_mb', 10)
+	if (
+		isinstance(max_size, bool)
+		or not isinstance(max_size, int | float)
+		or max_size <= 0
+	):
+		raise ValueError(
+			f'publish.max_file_size_mb must be positive; got {max_size!r}'
+		)
+	return F3GuardrailPublishConfig(
+		enabled=enabled,
+		output_dir=output_dir,
+		max_file_size_bytes=int(max_size * 1024 * 1024),
 	)
 
 
@@ -1146,11 +1242,14 @@ __all__ = [
 	'F3_STRAT_HMM_M1_DISTILL_ONLY_MODEL_TAG',
 	'F3_STRAT_HMM_M1_GUARDRAIL_METRICS',
 	'F3_STRAT_HMM_M1_GUARDRAIL_MODEL_TAGS',
+	'F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_DIR',
+	'F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_SUFFIXES',
 	'F3_STRAT_HMM_M1_GUARDRAIL_ROLES',
 	'F3_STRAT_HMM_M1_GUARDRAIL_SUITE_NAME',
 	'F3_STRAT_HMM_M1_SHUFFLED_HMM_MODEL_TAG',
 	'F3GuardrailJob',
 	'F3GuardrailJobsConfig',
+	'F3GuardrailPublishConfig',
 	'F3GuardrailResultInput',
 	'F3GuardrailSummaryConfig',
 	'F3GuardrailSummaryResult',
@@ -1158,5 +1257,6 @@ __all__ = [
 	'f3_guardrail_jobs_config_from_mapping',
 	'f3_guardrail_summary_config_from_mapping',
 	'f3_shuffled_hmm_target_config_from_mapping',
+	'publish_f3_strat_hmm_m1_guardrails',
 	'summarize_f3_strat_hmm_m1_guardrails',
 ]

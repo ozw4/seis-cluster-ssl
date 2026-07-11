@@ -91,7 +91,7 @@ def test_f3_lithology_report_outputs_markdown_json_and_relative_links(
 	assert str(tmp_path) not in _figures_section(markdown)
 
 
-def test_f3_lithology_report_summarizes_explicit_token_npz_paths(
+def test_m1_structured_report_uses_token_dataset_counts_for_class_imbalance(
 	tmp_path: Path,
 ) -> None:
 	run = _write_probe_run(
@@ -120,6 +120,11 @@ def test_f3_lithology_report_summarizes_explicit_token_npz_paths(
 	assert token_dataset['validation_token_count'] == 2
 	assert token_dataset['class_counts']['train'] == {'0': 1, '5': 2}
 	assert token_dataset['class_counts']['validation'] == {'0': 2}
+	assert token_dataset['class_imbalance'] == {
+		'class_counts': {'0': 3, '5': 2},
+		'max_to_min_positive_ratio': 1.5,
+		'total': 5,
+	}
 	assert payload['dataset']['class_imbalance'] == {
 		'class_counts': {'0': 3, '5': 2},
 		'max_to_min_positive_ratio': 1.5,

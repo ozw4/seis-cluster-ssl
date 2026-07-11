@@ -5,7 +5,7 @@ models:
   baseline:
     model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
     embeddings_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16
-    checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_best.pt
+    checkpoint: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt
   candidate:
     model_tag: strat_hmm_pretext_m1_k6_topblock1_distill
     embeddings_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16

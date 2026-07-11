@@ -11,10 +11,12 @@ from seis_ssl_cluster.config.f3_lithology_robustness import (
 	f3_lithology_label_budget_config_from_mapping,
 )
 from seis_ssl_cluster.config.pretraining import resolve_strat_hmm_pretext_config
+from seis_ssl_cluster.f3.lithology import guardrails
 from seis_ssl_cluster.f3.lithology.guardrails import (
 	F3_STRAT_HMM_M1_BASELINE_MODEL_TAG,
 	F3_STRAT_HMM_M1_DISTILL_ONLY_MODEL_TAG,
 	F3_STRAT_HMM_M1_GUARDRAIL_MODEL_TAGS,
+	F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_DIR,
 	F3_STRAT_HMM_M1_GUARDRAIL_ROLES,
 	F3_STRAT_HMM_M1_GUARDRAIL_SUITE_NAME,
 	F3_STRAT_HMM_M1_SHUFFLED_HMM_MODEL_TAG,
@@ -197,6 +199,8 @@ def test_guardrail_summary_configures_existing_label_budget_artifacts() -> None:
 			by_role[role].label_budget_suite_manifest_json.name
 			== 'suite_manifest.json'
 		)
+	assert config.publish.enabled is False
+	assert config.publish.output_dir == F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_DIR
 
 
 def test_guardrail_summary_reports_missing_outputs_as_pending(
@@ -257,6 +261,38 @@ def test_guardrail_summary_writes_four_model_publishable_comparison(
 		'mean_iou',
 		*(f'class_{class_id}_f1' for class_id in range(6)),
 	)
+
+
+def test_guardrail_summary_publishes_only_lightweight_summary_files(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	raw = _summary_config(tmp_path, strict=True)
+	for index, role in enumerate(F3_STRAT_HMM_M1_GUARDRAIL_ROLES):
+		_write_metrics(Path(raw['models'][role]['metrics_json']), offset=index / 100)
+	_write_complete_label_budget_inputs(raw, tmp_path)
+	publish_dir = tmp_path / 'results' / 'f3' / 'guardrails'
+	monkeypatch.setattr(guardrails, 'DEFAULT_RESULTS_ROOT', tmp_path / 'results')
+	raw['publish'] = {
+		'enabled': True,
+		'output_dir': str(publish_dir),
+	}
+
+	result = summarize_f3_strat_hmm_m1_guardrails(
+		f3_guardrail_summary_config_from_mapping(raw),
+	)
+
+	assert result.publish_manifest is not None
+	assert {
+		path.relative_to(publish_dir)
+		for path in publish_dir.iterdir()
+		if path.is_file()
+	} == {
+		Path('guardrail_comparison_report.md'),
+		Path('guardrail_comparison_summary.json'),
+		Path('guardrail_comparison_table.csv'),
+		Path('publish_manifest.json'),
+	}
 
 
 @pytest.mark.parametrize(

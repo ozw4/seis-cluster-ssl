@@ -1,5 +1,9 @@
 # F3 Strat-HMM M2-A versus M1 robustness
 
+Follow this stage only after the export, smoke, full training, embedding, and
+full-probe stages in the
+[`M2-A runbook`](../../../../docs/f3_strat_hmm_m2a_boundary_weighting.md).
+
 Run this paired comparison after the M1 and M2-A full-split token datasets
 exist. The generic robustness builders fail if baseline and candidate token
 identities differ. The split suite reuses the M1 `split_000` through

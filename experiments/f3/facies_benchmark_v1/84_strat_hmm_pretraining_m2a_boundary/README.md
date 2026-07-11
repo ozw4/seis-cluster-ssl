@@ -1,5 +1,9 @@
 # F3 Strat HMM Pretraining M2-A Boundary Weighting
 
+The complete ordered/resumable runbook and failure policy are in
+[`docs/f3_strat_hmm_m2a_boundary_weighting.md`](../../../../docs/f3_strat_hmm_m2a_boundary_weighting.md).
+M1 is complete/strong positive and is not rerun as part of this experiment.
+
 This experiment changes only the pseudo-target boundary weight from the M1
 pretraining condition. The preregistered candidate uses `alpha=0.5` and
 `tau=2.0` tokens, so tokens adjacent to a transition have weight `0.5` and the
