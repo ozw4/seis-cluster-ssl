@@ -177,8 +177,16 @@ def validate_f3_strat_hmm_m2_results_config(config: F3StratHMMM2ResultsConfig) -
 		m1._require_dir(root, label=label)
 	for label, path in (
 		(
+			'label-budget paired_metrics_csv',
+			config.label_budget_suite_root / 'reports' / 'paired_metrics.csv',
+		),
+		(
 			'label-budget paired_deltas_csv',
 			config.label_budget_suite_root / 'reports' / 'paired_deltas.csv',
+		),
+		(
+			'split/index paired_metrics_csv',
+			config.split_index_suite_root / 'reports' / 'split_paired_metrics.csv',
 		),
 		(
 			'split/index paired_deltas_csv',
@@ -609,6 +617,112 @@ def _label_budget_summary(
 def _validate_suite_evidence(config: F3StratHMMM2ResultsConfig) -> None:
 	_label_budget_manifest_conditions(config)
 	_split_manifest_ids(config)
+	_validate_paired_report_provenance(
+		label='label-budget',
+		paired_metrics_csv=(
+			config.label_budget_suite_root / 'reports' / 'paired_metrics.csv'
+		),
+		paired_deltas_csv=(
+			config.label_budget_suite_root / 'reports' / 'paired_deltas.csv'
+		),
+		condition_keys=('budget_id', 'subsample_seed'),
+		expected_tags={
+			'baseline': config.baseline_model,
+			'candidate': config.candidate_model,
+		},
+	)
+	_validate_paired_report_provenance(
+		label='split/index',
+		paired_metrics_csv=(
+			config.split_index_suite_root / 'reports' / 'split_paired_metrics.csv'
+		),
+		paired_deltas_csv=(
+			config.split_index_suite_root / 'reports' / 'split_paired_deltas.csv'
+		),
+		condition_keys=('split_id',),
+		expected_tags={
+			'baseline': config.baseline_model,
+			'candidate': config.candidate_model,
+		},
+	)
+
+
+def _validate_paired_report_provenance(
+	*,
+	label: str,
+	paired_metrics_csv: Path,
+	paired_deltas_csv: Path,
+	condition_keys: tuple[str, ...],
+	expected_tags: Mapping[str, str],
+) -> None:
+	metrics_by_condition = _paired_metrics_provenance(
+		paired_metrics_csv, condition_keys, expected_tags
+	)
+	delta_conditions: set[tuple[str, ...]] = set()
+	for row in m1._read_csv(paired_deltas_csv):
+		condition = tuple(
+			m1._required_cell(row, key, path=paired_deltas_csv)
+			for key in condition_keys
+		)
+		if condition in delta_conditions:
+			raise ValueError(f'{paired_deltas_csv} has duplicate row for {condition!r}')
+		delta_conditions.add(condition)
+		if condition not in metrics_by_condition:
+			raise ValueError(
+				f'{label} paired report condition {condition!r} is missing from '
+				f'{paired_metrics_csv}'
+			)
+		for role in expected_tags:
+			column = f'{role}_metrics_json'
+			actual = m1._required_cell(row, column, path=paired_deltas_csv)
+			expected = metrics_by_condition[condition][role]
+			if actual != expected:
+				raise ValueError(
+					f'{label} metrics provenance mismatch for {condition!r} '
+					f'{role}: expected {expected!r}, got {actual!r}'
+				)
+	if delta_conditions != set(metrics_by_condition):
+		missing = sorted(set(metrics_by_condition) - delta_conditions)
+		raise ValueError(
+			f'{label} paired metrics conditions are missing from '
+			f'{paired_deltas_csv}: {missing!r}'
+		)
+
+
+def _paired_metrics_provenance(
+	paired_metrics_csv: Path,
+	condition_keys: tuple[str, ...],
+	expected_tags: Mapping[str, str],
+) -> dict[tuple[str, ...], dict[str, str]]:
+	metrics_by_condition: dict[tuple[str, ...], dict[str, str]] = defaultdict(dict)
+	for row in m1._read_csv(paired_metrics_csv):
+		condition = tuple(
+			m1._required_cell(row, key, path=paired_metrics_csv)
+			for key in condition_keys
+		)
+		role = m1._required_cell(row, 'model_role', path=paired_metrics_csv)
+		if role not in expected_tags:
+			raise ValueError(f'{paired_metrics_csv} has unexpected model_role={role!r}')
+		tag = m1._required_cell(row, 'model_tag', path=paired_metrics_csv)
+		if tag != expected_tags[role]:
+			raise ValueError(
+				f'{paired_metrics_csv} {role} model identity mismatch: expected '
+				f'{expected_tags[role]!r}, got {tag!r}'
+			)
+		if role in metrics_by_condition[condition]:
+			raise ValueError(
+				f'{paired_metrics_csv} has duplicate {role} row for {condition!r}'
+			)
+		metrics_by_condition[condition][role] = m1._required_cell(
+			row, 'metrics_json', path=paired_metrics_csv
+		)
+	for condition, roles in metrics_by_condition.items():
+		if set(roles) != set(expected_tags):
+			raise ValueError(
+				f'{paired_metrics_csv} condition {condition!r} requires baseline '
+				'and candidate rows'
+			)
+	return dict(metrics_by_condition)
 
 
 def _label_budget_manifest_conditions(

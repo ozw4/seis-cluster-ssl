@@ -207,6 +207,46 @@ def test_m2a_rejects_paired_identity_hash_mismatch(
 		consolidate_f3_strat_hmm_m2_results(config)
 
 
+@pytest.mark.parametrize(
+	('suite_attribute', 'deltas_name'),
+	[
+		('label_budget_suite_root', 'paired_deltas.csv'),
+		('split_index_suite_root', 'split_paired_deltas.csv'),
+	],
+)
+def test_m2a_rejects_stale_paired_delta_metrics_provenance(
+	tmp_path: Path, suite_attribute: str, deltas_name: str
+) -> None:
+	config = _fixture(tmp_path)
+	path = getattr(config, suite_attribute) / 'reports' / deltas_name
+	rows = _read_csv(path)
+	rows[0]['candidate_metrics_json'] = '/stale/mae/metrics.json'
+	_write_csv(path, tuple(rows[0]), rows)
+
+	with pytest.raises(ValueError, match='metrics provenance mismatch'):
+		consolidate_f3_strat_hmm_m2_results(config)
+
+
+@pytest.mark.parametrize(
+	('suite_attribute', 'metrics_name'),
+	[
+		('label_budget_suite_root', 'paired_metrics.csv'),
+		('split_index_suite_root', 'split_paired_metrics.csv'),
+	],
+)
+def test_m2a_rejects_stale_paired_metrics_model_pair(
+	tmp_path: Path, suite_attribute: str, metrics_name: str
+) -> None:
+	config = _fixture(tmp_path)
+	path = getattr(config, suite_attribute) / 'reports' / metrics_name
+	rows = _read_csv(path)
+	next(row for row in rows if row['model_role'] == 'candidate')['model_tag'] = 'MAE'
+	_write_csv(path, tuple(rows[0]), rows)
+
+	with pytest.raises(ValueError, match='model identity mismatch'):
+		consolidate_f3_strat_hmm_m2_results(config)
+
+
 def test_m2a_publish_wrapper_enforces_exact_allowlist_and_size_guard(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -312,10 +352,17 @@ def _write_budgets(root: Path, *, delta: float) -> None:
 			'delta_macro_f1': delta,
 			'delta_mean_iou': delta,
 			'delta_balanced_accuracy': delta,
+			'baseline_metrics_json': f'/metrics/M1/{budget}/{seed}.json',
+			'candidate_metrics_json': f'/metrics/M2-A/{budget}/{seed}.json',
 		}
 		for budget in ('cap25', 'cap50', 'cap100', 'full')
 		for seed in range(5)
 	]
+	_write_paired_metrics(
+		root / 'reports' / 'paired_metrics.csv',
+		rows,
+		condition_keys=('budget_id', 'subsample_seed'),
+	)
 	_write_csv(root / 'reports' / 'paired_deltas.csv', tuple(rows[0]), rows)
 	_write_suite_manifest(
 		root / 'suite_manifest.json',
@@ -331,13 +378,41 @@ def _write_split(root: Path, deltas: tuple[float, ...]) -> None:
 			'delta_macro_f1': delta,
 			'delta_mean_iou': delta,
 			'delta_balanced_accuracy': delta,
+			'baseline_metrics_json': f'/metrics/M1/split_{index:03d}.json',
+			'candidate_metrics_json': f'/metrics/M2-A/split_{index:03d}.json',
 		}
 		for index, delta in enumerate(deltas)
 	]
+	_write_paired_metrics(
+		root / 'reports' / 'split_paired_metrics.csv',
+		rows,
+		condition_keys=('split_id',),
+	)
 	_write_csv(root / 'reports' / 'split_paired_deltas.csv', tuple(rows[0]), rows)
 	_write_suite_manifest(
 		root / 'split_dataset_manifest.json', rows, condition_keys=('split_id',)
 	)
+
+
+def _write_paired_metrics(
+	path: Path,
+	rows: list[dict[str, object]],
+	*,
+	condition_keys: tuple[str, ...],
+) -> None:
+	metric_rows = []
+	for row in rows:
+		condition = {key: row[key] for key in condition_keys}
+		for role, model in (('baseline', 'M1'), ('candidate', 'M2-A')):
+			metric_rows.append(
+				{
+					**condition,
+					'model_role': role,
+					'model_tag': model,
+					'metrics_json': row[f'{role}_metrics_json'],
+				}
+			)
+	_write_csv(path, tuple(metric_rows[0]), metric_rows)
 
 
 def _write_suite_manifest(
