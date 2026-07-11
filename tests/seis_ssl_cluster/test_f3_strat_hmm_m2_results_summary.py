@@ -70,6 +70,51 @@ def test_m2a_decision_cases(tmp_path: Path, mutation: str, expected: str) -> Non
 	assert result.decision == expected
 
 
+def test_m2a_holds_without_monitored_class_pareto_improvement(
+	tmp_path: Path,
+) -> None:
+	pytest.importorskip('matplotlib').use('Agg', force=True)
+	config = _fixture(tmp_path)
+	payload = json.loads(config.m2a_metrics_json.read_text(encoding='utf-8'))
+	payload['per_class_f1']['3'] = 0.39
+	payload['per_class_iou']['3'] = 0.30
+	_write_json(config.m2a_metrics_json, payload)
+
+	result = consolidate_f3_strat_hmm_m2_results(config)
+	result_payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
+	assert result.decision == 'hold'
+	assert result_payload['decision']['evidence']['pareto_improved_class_ids'] == []
+	assert result_payload['decision']['stop_checks'][
+		'all_monitored_classes_worse_without_primary_improvement'
+	] is False
+
+
+def test_m2a_stops_when_both_classes_worsen_without_primary_improvement(
+	tmp_path: Path,
+) -> None:
+	pytest.importorskip('matplotlib').use('Agg', force=True)
+	config = _fixture(tmp_path)
+	_write_budgets(
+		config.label_budget_suite_root,
+		delta=0.02,
+		budget_deltas={'cap25': -0.02},
+	)
+	_write_split(
+		config.split_index_suite_root, (0.02, 0.02, 0.02, -0.01, -0.01, -0.01)
+	)
+	payload = json.loads(config.m2a_metrics_json.read_text(encoding='utf-8'))
+	payload['per_class_f1'] = {'3': 0.39, '5': 0.49}
+	payload['per_class_iou'] = {'3': 0.29, '5': 0.39}
+	_write_json(config.m2a_metrics_json, payload)
+
+	result = consolidate_f3_strat_hmm_m2_results(config)
+	result_payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
+	assert result.decision == 'stop'
+	assert result_payload['decision']['reason_codes'] == [
+		'all_monitored_classes_worse_without_primary_improvement'
+	]
+
+
 def test_m2a_rejects_model_identity_mismatch(tmp_path: Path) -> None:
 	config = _fixture(tmp_path)
 	payload = json.loads(config.m2a_metrics_json.read_text(encoding='utf-8'))
@@ -247,6 +292,27 @@ def test_m2a_rejects_stale_paired_metrics_model_pair(
 		consolidate_f3_strat_hmm_m2_results(config)
 
 
+@pytest.mark.parametrize(
+	('suite_attribute', 'metrics_name'),
+	[
+		('label_budget_suite_root', 'paired_metrics.csv'),
+		('split_index_suite_root', 'split_paired_metrics.csv'),
+	],
+)
+def test_m2a_rejects_stale_paired_delta_values(
+	tmp_path: Path, suite_attribute: str, metrics_name: str
+) -> None:
+	config = _fixture(tmp_path)
+	path = getattr(config, suite_attribute) / 'reports' / metrics_name
+	rows = _read_csv(path)
+	candidate = next(row for row in rows if row['model_role'] == 'candidate')
+	candidate['macro_f1'] = str(float(candidate['macro_f1']) - 0.04)
+	_write_csv(path, tuple(rows[0]), rows)
+
+	with pytest.raises(ValueError, match=r'paired delta mismatch.*macro_f1'):
+		consolidate_f3_strat_hmm_m2_results(config)
+
+
 def test_m2a_publish_wrapper_enforces_exact_allowlist_and_size_guard(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -343,15 +409,21 @@ def _rewrite_comparison(path: Path, *, candidate_balanced: float) -> None:
 	_write_csv(path, tuple(rows[0]), rows)
 
 
-def _write_budgets(root: Path, *, delta: float) -> None:
+def _write_budgets(
+	root: Path,
+	*,
+	delta: float,
+	budget_deltas: dict[str, float] | None = None,
+) -> None:
+	budget_deltas = budget_deltas or {}
 	rows = [
 		{
 			'budget_id': budget,
 			'per_class_cap': '' if budget == 'full' else budget.removeprefix('cap'),
 			'subsample_seed': str(seed),
-			'delta_macro_f1': delta,
-			'delta_mean_iou': delta,
-			'delta_balanced_accuracy': delta,
+			'delta_macro_f1': budget_deltas.get(budget, delta),
+			'delta_mean_iou': budget_deltas.get(budget, delta),
+			'delta_balanced_accuracy': budget_deltas.get(budget, delta),
 			'baseline_metrics_json': f'/metrics/M1/{budget}/{seed}.json',
 			'candidate_metrics_json': f'/metrics/M2-A/{budget}/{seed}.json',
 		}
@@ -404,11 +476,19 @@ def _write_paired_metrics(
 	for row in rows:
 		condition = {key: row[key] for key in condition_keys}
 		for role, model in (('baseline', 'M1'), ('candidate', 'M2-A')):
+			metrics = {
+				key.removeprefix('delta_'): (
+					0.5 if role == 'baseline' else 0.5 + float(value)
+				)
+				for key, value in row.items()
+				if key.startswith('delta_')
+			}
 			metric_rows.append(
 				{
 					**condition,
 					'model_role': role,
 					'model_tag': model,
+					**metrics,
 					'metrics_json': row[f'{role}_metrics_json'],
 				}
 			)

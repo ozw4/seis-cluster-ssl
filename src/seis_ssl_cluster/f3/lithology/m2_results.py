@@ -675,12 +675,19 @@ def _validate_paired_report_provenance(
 		for role in expected_tags:
 			column = f'{role}_metrics_json'
 			actual = m1._required_cell(row, column, path=paired_deltas_csv)
-			expected = metrics_by_condition[condition][role]
+			expected = metrics_by_condition[condition][role]['metrics_json']
 			if actual != expected:
 				raise ValueError(
 					f'{label} metrics provenance mismatch for {condition!r} '
 					f'{role}: expected {expected!r}, got {actual!r}'
 				)
+		_validate_paired_delta_values(
+			condition=condition,
+			delta_row=row,
+			metric_rows=metrics_by_condition[condition],
+			paired_metrics_csv=paired_metrics_csv,
+			paired_deltas_csv=paired_deltas_csv,
+		)
 	if delta_conditions != set(metrics_by_condition):
 		missing = sorted(set(metrics_by_condition) - delta_conditions)
 		raise ValueError(
@@ -693,8 +700,10 @@ def _paired_metrics_provenance(
 	paired_metrics_csv: Path,
 	condition_keys: tuple[str, ...],
 	expected_tags: Mapping[str, str],
-) -> dict[tuple[str, ...], dict[str, str]]:
-	metrics_by_condition: dict[tuple[str, ...], dict[str, str]] = defaultdict(dict)
+) -> dict[tuple[str, ...], dict[str, dict[str, str]]]:
+	metrics_by_condition: dict[tuple[str, ...], dict[str, dict[str, str]]] = (
+		defaultdict(dict)
+	)
 	for row in m1._read_csv(paired_metrics_csv):
 		condition = tuple(
 			m1._required_cell(row, key, path=paired_metrics_csv)
@@ -713,9 +722,8 @@ def _paired_metrics_provenance(
 			raise ValueError(
 				f'{paired_metrics_csv} has duplicate {role} row for {condition!r}'
 			)
-		metrics_by_condition[condition][role] = m1._required_cell(
-			row, 'metrics_json', path=paired_metrics_csv
-		)
+		m1._required_cell(row, 'metrics_json', path=paired_metrics_csv)
+		metrics_by_condition[condition][role] = dict(row)
 	for condition, roles in metrics_by_condition.items():
 		if set(roles) != set(expected_tags):
 			raise ValueError(
@@ -723,6 +731,51 @@ def _paired_metrics_provenance(
 				'and candidate rows'
 			)
 	return dict(metrics_by_condition)
+
+
+def _validate_paired_delta_values(
+	*,
+	condition: tuple[str, ...],
+	delta_row: Mapping[str, str],
+	metric_rows: Mapping[str, Mapping[str, str]],
+	paired_metrics_csv: Path,
+	paired_deltas_csv: Path,
+) -> None:
+	baseline = metric_rows['baseline']
+	candidate = metric_rows['candidate']
+	for delta_column in (key for key in delta_row if key.startswith('delta_')):
+		metric = delta_column.removeprefix('delta_')
+		if metric not in baseline or metric not in candidate:
+			raise ValueError(
+				f'paired metric column {metric!r} for {condition!r} is '
+				f'missing from {paired_metrics_csv}'
+			)
+		values = (baseline[metric], candidate[metric], delta_row[delta_column])
+		if all(value in (None, '') for value in values):
+			continue
+		if any(value in (None, '') for value in values):
+			raise ValueError(
+				f'paired delta mismatch for {condition!r} {metric}: '
+				'baseline, candidate, and delta values must all be present'
+			)
+		baseline_value = m1._required_float(
+			baseline, metric, path=paired_metrics_csv
+		)
+		candidate_value = m1._required_float(
+			candidate, metric, path=paired_metrics_csv
+		)
+		actual_delta = m1._required_float(
+			delta_row, delta_column, path=paired_deltas_csv
+		)
+		expected_delta = candidate_value - baseline_value
+		if not math.isclose(
+			actual_delta, expected_delta, rel_tol=1e-12, abs_tol=1e-12
+		):
+			raise ValueError(
+				f'paired delta mismatch for {condition!r} {metric}: '
+				f'expected {expected_delta!r} from {paired_metrics_csv}, got '
+				f'{actual_delta!r} in {paired_deltas_csv}'
+			)
 
 
 def _label_budget_manifest_conditions(
