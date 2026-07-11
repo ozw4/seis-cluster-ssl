@@ -87,6 +87,19 @@ class F3StratHMMM2ResultsResult:
 	publish_manifest: PublishManifest | None = None
 
 
+@dataclass(frozen=True)
+class _RunManifestContract:
+	label: str
+	dataset_manifest: Path
+	probe_manifest: Path
+	paired_metrics_csv: Path
+	condition_keys: tuple[str, ...]
+	dataset_artifact_type: str
+	probe_artifact_type: str
+	probe_dataset_field: str
+	expected_tags: Mapping[str, str]
+
+
 def f3_strat_hmm_m2_results_config_from_mapping(
 	config: Mapping[str, object],
 ) -> F3StratHMMM2ResultsConfig:
@@ -197,8 +210,16 @@ def validate_f3_strat_hmm_m2_results_config(config: F3StratHMMM2ResultsConfig) -
 			config.label_budget_suite_root / 'suite_manifest.json',
 		),
 		(
+			'label-budget probe_run_manifest_json',
+			config.label_budget_suite_root / 'probe_run_manifest.json',
+		),
+		(
 			'split/index split_dataset_manifest_json',
 			config.split_index_suite_root / 'split_dataset_manifest.json',
+		),
+		(
+			'split/index split_probe_run_manifest_json',
+			config.split_index_suite_root / 'split_probe_run_manifest.json',
 		),
 	):
 		m1._require_file(path, label=label)
@@ -328,7 +349,11 @@ def _decision(
 	all_classes_worse = all(
 		float(row['delta_f1']) < 0 and float(row['delta_iou']) < 0 for row in monitored
 	)
-	primary_improvement = low_positive or split_majority
+	primary_improvement = any(
+		float(budgets[key]['mean_delta_macro_f1']) > 0
+		and float(budgets[key]['mean_delta_mean_iou']) > 0
+		for key in REQUIRED_LOW_BUDGETS
+	) or bool(joint_split_wins)
 	stop_checks = {
 		'all_low_budgets_nonpositive': all_low_nonpositive,
 		'split_joint_loss_rate_strict_majority': split_majority_negative,
@@ -617,6 +642,46 @@ def _label_budget_summary(
 def _validate_suite_evidence(config: F3StratHMMM2ResultsConfig) -> None:
 	_label_budget_manifest_conditions(config)
 	_split_manifest_ids(config)
+	_validate_run_manifest_binding(
+		_RunManifestContract(
+			label='label-budget',
+			dataset_manifest=config.label_budget_suite_root / 'suite_manifest.json',
+			probe_manifest=config.label_budget_suite_root / 'probe_run_manifest.json',
+			paired_metrics_csv=(
+				config.label_budget_suite_root / 'reports' / 'paired_metrics.csv'
+			),
+			condition_keys=('budget_id', 'subsample_seed'),
+			dataset_artifact_type='f3_lithology_label_budget_suite_manifest',
+			probe_artifact_type='f3_lithology_label_budget_probe_run_manifest',
+			probe_dataset_field='suite_manifest',
+			expected_tags={
+				'baseline': config.baseline_model,
+				'candidate': config.candidate_model,
+			},
+		),
+	)
+	_validate_run_manifest_binding(
+		_RunManifestContract(
+			label='split/index',
+			dataset_manifest=(
+				config.split_index_suite_root / 'split_dataset_manifest.json'
+			),
+			probe_manifest=(
+				config.split_index_suite_root / 'split_probe_run_manifest.json'
+			),
+			paired_metrics_csv=(
+				config.split_index_suite_root / 'reports' / 'split_paired_metrics.csv'
+			),
+			condition_keys=('split_id',),
+			dataset_artifact_type='f3_lithology_split_sweep_token_dataset_manifest',
+			probe_artifact_type='f3_lithology_split_probe_run_manifest',
+			probe_dataset_field='dataset_manifest',
+			expected_tags={
+				'baseline': config.baseline_model,
+				'candidate': config.candidate_model,
+			},
+		),
+	)
 	_validate_paired_report_provenance(
 		label='label-budget',
 		paired_metrics_csv=(
@@ -645,6 +710,160 @@ def _validate_suite_evidence(config: F3StratHMMM2ResultsConfig) -> None:
 			'candidate': config.candidate_model,
 		},
 	)
+
+
+def _validate_run_manifest_binding(contract: _RunManifestContract) -> None:
+	dataset_payload = _read_json_object(contract.dataset_manifest)
+	probe_payload = _read_json_object(contract.probe_manifest)
+	for path, payload, expected_type in (
+		(
+			contract.dataset_manifest,
+			dataset_payload,
+			contract.dataset_artifact_type,
+		),
+		(contract.probe_manifest, probe_payload, contract.probe_artifact_type),
+	):
+		if payload.get('artifact_type') != expected_type:
+			raise ValueError(
+				f'{path} artifact_type mismatch: expected {expected_type!r}'
+			)
+	linked_manifest = _required_manifest_string(
+		probe_payload, contract.probe_dataset_field, contract.probe_manifest
+	)
+	if Path(linked_manifest).resolve(strict=False) != contract.dataset_manifest.resolve(
+		strict=False
+	):
+		raise ValueError(
+			f'{contract.label} probe manifest does not reference '
+			f'{contract.dataset_manifest}: '
+			f'{linked_manifest!r}'
+		)
+	dataset_rows = _evidence_manifest_rows(
+		dataset_payload,
+		path=contract.dataset_manifest,
+		condition_keys=contract.condition_keys,
+		expected_tags=contract.expected_tags,
+	)
+	probe_rows = _evidence_manifest_rows(
+		probe_payload,
+		path=contract.probe_manifest,
+		condition_keys=contract.condition_keys,
+		expected_tags=contract.expected_tags,
+	)
+	if set(dataset_rows) != set(probe_rows):
+		raise ValueError(
+			f'{contract.label} dataset/probe manifest row mismatch; '
+			f'missing_probe={sorted(set(dataset_rows) - set(probe_rows))!r}, '
+			f'missing_dataset={sorted(set(probe_rows) - set(dataset_rows))!r}'
+		)
+	_validate_dataset_probe_rows(contract, dataset_rows, probe_rows)
+	_validate_probe_report_rows(contract, probe_rows)
+
+
+def _validate_dataset_probe_rows(
+	contract: _RunManifestContract,
+	dataset_rows: Mapping[tuple[str, ...], Mapping[str, object]],
+	probe_rows: Mapping[tuple[str, ...], Mapping[str, object]],
+) -> None:
+	for key, dataset_row in dataset_rows.items():
+		probe_row = probe_rows[key]
+		for field_name in ('model_tag', 'paired_identity_hash', 'token_dataset_root'):
+			dataset_value = _required_manifest_string(
+				dataset_row, field_name, contract.dataset_manifest
+			)
+			probe_value = _required_manifest_string(
+				probe_row, field_name, contract.probe_manifest
+			)
+			if dataset_value != probe_value:
+				raise ValueError(
+					f'{contract.label} dataset/probe manifest {field_name} '
+					'mismatch for '
+					f'{key!r}: dataset={dataset_value!r}, probe={probe_value!r}'
+				)
+
+
+def _validate_probe_report_rows(
+	contract: _RunManifestContract,
+	probe_rows: Mapping[tuple[str, ...], Mapping[str, object]],
+) -> None:
+	report_rows = _evidence_report_rows(
+		contract.paired_metrics_csv,
+		condition_keys=contract.condition_keys,
+		expected_tags=contract.expected_tags,
+	)
+	if set(report_rows) != set(probe_rows):
+		raise ValueError(
+			f'{contract.label} probe manifest/paired report row mismatch; '
+			f'missing_report={sorted(set(probe_rows) - set(report_rows))!r}, '
+			f'missing_probe={sorted(set(report_rows) - set(probe_rows))!r}'
+		)
+	for key, report_row in report_rows.items():
+		expected_metrics = _required_manifest_string(
+			probe_rows[key], 'metrics_json', contract.probe_manifest
+		)
+		actual_metrics = m1._required_cell(
+			report_row, 'metrics_json', path=contract.paired_metrics_csv
+		)
+		if actual_metrics != expected_metrics:
+			raise ValueError(
+				f'{contract.label} probe/paired report metrics provenance '
+				'mismatch for '
+				f'{key!r}: expected {expected_metrics!r}, got {actual_metrics!r}'
+			)
+
+
+def _evidence_manifest_rows(
+	payload: Mapping[str, object],
+	*,
+	path: Path,
+	condition_keys: tuple[str, ...],
+	expected_tags: Mapping[str, str],
+) -> dict[tuple[str, ...], Mapping[str, object]]:
+	rows = payload.get('rows')
+	if not isinstance(rows, Sequence) or isinstance(rows, str | bytes):
+		raise TypeError(f'{path} rows must be a list')
+	result: dict[tuple[str, ...], Mapping[str, object]] = {}
+	for row in rows:
+		if not isinstance(row, Mapping):
+			raise TypeError(f'{path} row must be a mapping')
+		condition = tuple(
+			str(_required_manifest_value(row, key, path)) for key in condition_keys
+		)
+		role = _required_manifest_string(row, 'model_role', path)
+		if role not in expected_tags:
+			raise ValueError(f'{path} has unexpected model_role={role!r}')
+		tag = _required_manifest_string(row, 'model_tag', path)
+		if tag != expected_tags[role]:
+			raise ValueError(
+				f'{path} {role} model identity mismatch: expected '
+				f'{expected_tags[role]!r}, got {tag!r}'
+			)
+		key = (*condition, role)
+		if key in result:
+			raise ValueError(f'{path} has duplicate row for {key!r}')
+		result[key] = row
+	return result
+
+
+def _evidence_report_rows(
+	path: Path,
+	*,
+	condition_keys: tuple[str, ...],
+	expected_tags: Mapping[str, str],
+) -> dict[tuple[str, ...], Mapping[str, str]]:
+	result: dict[tuple[str, ...], Mapping[str, str]] = {}
+	for row in m1._read_csv(path):
+		condition = tuple(
+			m1._required_cell(row, key, path=path) for key in condition_keys
+		)
+		role = m1._required_cell(row, 'model_role', path=path)
+		if role not in expected_tags:
+			raise ValueError(f'{path} has unexpected model_role={role!r}')
+		key = (*condition, role)
+		if key in result:
+			raise ValueError(f'{path} has duplicate row for {key!r}')
+		result[key] = row
+	return result
 
 
 def _validate_paired_report_provenance(
@@ -758,19 +977,13 @@ def _validate_paired_delta_values(
 				f'paired delta mismatch for {condition!r} {metric}: '
 				'baseline, candidate, and delta values must all be present'
 			)
-		baseline_value = m1._required_float(
-			baseline, metric, path=paired_metrics_csv
-		)
-		candidate_value = m1._required_float(
-			candidate, metric, path=paired_metrics_csv
-		)
+		baseline_value = m1._required_float(baseline, metric, path=paired_metrics_csv)
+		candidate_value = m1._required_float(candidate, metric, path=paired_metrics_csv)
 		actual_delta = m1._required_float(
 			delta_row, delta_column, path=paired_deltas_csv
 		)
 		expected_delta = candidate_value - baseline_value
-		if not math.isclose(
-			actual_delta, expected_delta, rel_tol=1e-12, abs_tol=1e-12
-		):
+		if not math.isclose(actual_delta, expected_delta, rel_tol=1e-12, abs_tol=1e-12):
 			raise ValueError(
 				f'paired delta mismatch for {condition!r} {metric}: '
 				f'expected {expected_delta!r} from {paired_metrics_csv}, got '
@@ -874,9 +1087,7 @@ def _manifest_conditions_by_role(
 		)
 		role = _required_manifest_string(row, 'model_role', path)
 		tag = _required_manifest_string(row, 'model_tag', path)
-		paired_identity = _required_manifest_string(
-			row, 'paired_identity_hash', path
-		)
+		paired_identity = _required_manifest_string(row, 'paired_identity_hash', path)
 		if role not in expected_tags:
 			raise ValueError(f'{path} has unexpected model_role={role!r}')
 		if tag != expected_tags[role]:
@@ -900,9 +1111,7 @@ def _manifest_conditions_by_role(
 	return set(by_condition)
 
 
-def _required_manifest_value(
-	row: Mapping[str, object], key: str, path: Path
-) -> object:
+def _required_manifest_value(row: Mapping[str, object], key: str, path: Path) -> object:
 	value = row.get(key)
 	if key == 'subsample_seed':
 		if isinstance(value, bool) or not isinstance(value, int):
@@ -913,9 +1122,7 @@ def _required_manifest_value(
 	return value
 
 
-def _required_manifest_string(
-	row: Mapping[str, object], key: str, path: Path
-) -> str:
+def _required_manifest_string(row: Mapping[str, object], key: str, path: Path) -> str:
 	value = _required_manifest_value(row, key, path)
 	if not isinstance(value, str):
 		raise TypeError(f'{path} row {key} must be a string')

@@ -573,6 +573,7 @@ def _validate_manifest_row_agreement(
 		'budget_id',
 		'per_class_cap',
 		'subsample_seed',
+		'paired_identity_hash',
 	):
 		if suite_row.get(key) != probe_row.get(key):
 			msg = f'suite/probe manifest value mismatch for {key}: {suite_row!r}'

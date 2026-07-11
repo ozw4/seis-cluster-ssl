@@ -209,6 +209,7 @@ def _probe_run_manifest_row(
 			if validation_token_count is None
 			else int(validation_token_count)
 		),
+		'paired_identity_hash': row['paired_identity_hash'],
 	}
 
 

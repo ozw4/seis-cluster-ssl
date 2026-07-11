@@ -7,11 +7,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from proc.seis_ssl_cluster.summarize_f3_strat_hmm_m2_results import DEFAULT_CONFIG
+from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.f3.lithology import m2_results
 from seis_ssl_cluster.f3.lithology.m2_results import (
 	F3StratHMMM2PublishConfig,
 	F3StratHMMM2ResultsConfig,
 	consolidate_f3_strat_hmm_m2_results,
+	f3_strat_hmm_m2_results_config_from_mapping,
 	publish_f3_strat_hmm_m2_results,
 )
 
@@ -84,12 +87,15 @@ def test_m2a_holds_without_monitored_class_pareto_improvement(
 	result_payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
 	assert result.decision == 'hold'
 	assert result_payload['decision']['evidence']['pareto_improved_class_ids'] == []
-	assert result_payload['decision']['stop_checks'][
-		'all_monitored_classes_worse_without_primary_improvement'
-	] is False
+	assert (
+		result_payload['decision']['stop_checks'][
+			'all_monitored_classes_worse_without_primary_improvement'
+		]
+		is False
+	)
 
 
-def test_m2a_stops_when_both_classes_worsen_without_primary_improvement(
+def test_m2a_holds_for_mixed_positive_robustness_when_both_classes_worsen(
 	tmp_path: Path,
 ) -> None:
 	pytest.importorskip('matplotlib').use('Agg', force=True)
@@ -99,9 +105,7 @@ def test_m2a_stops_when_both_classes_worsen_without_primary_improvement(
 		delta=0.02,
 		budget_deltas={'cap25': -0.02},
 	)
-	_write_split(
-		config.split_index_suite_root, (0.02, 0.02, 0.02, -0.01, -0.01, -0.01)
-	)
+	_write_split(config.split_index_suite_root, (0.02, 0.02, 0.02, -0.01, -0.01, -0.01))
 	payload = json.loads(config.m2a_metrics_json.read_text(encoding='utf-8'))
 	payload['per_class_f1'] = {'3': 0.39, '5': 0.49}
 	payload['per_class_iou'] = {'3': 0.29, '5': 0.39}
@@ -109,10 +113,37 @@ def test_m2a_stops_when_both_classes_worsen_without_primary_improvement(
 
 	result = consolidate_f3_strat_hmm_m2_results(config)
 	result_payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
-	assert result.decision == 'stop'
-	assert result_payload['decision']['reason_codes'] == [
-		'all_monitored_classes_worse_without_primary_improvement'
-	]
+	assert result.decision == 'hold'
+	assert (
+		result_payload['decision']['stop_checks'][
+			'all_monitored_classes_worse_without_primary_improvement'
+		]
+		is False
+	)
+
+
+def test_shipped_m2a_results_config_resolves_through_mapping(tmp_path: Path) -> None:
+	fixture = _fixture(tmp_path)
+	raw = load_config(DEFAULT_CONFIG)
+	raw['inputs'] = {
+		'baseline_comparison_csv': str(fixture.baseline_comparison_csv),
+		'm1_metrics_json': str(fixture.m1_metrics_json),
+		'm2a_metrics_json': str(fixture.m2a_metrics_json),
+		'label_budget_suite_root': str(fixture.label_budget_suite_root),
+		'split_index_suite_root': str(fixture.split_index_suite_root),
+		'class_info_json': None,
+		'monitored_class_ids': [3, 5],
+	}
+	raw['outputs'] = {'output_dir': str(tmp_path / 'mapped-output')}
+	raw['publish'] = {'enabled': False}
+
+	config = f3_strat_hmm_m2_results_config_from_mapping(raw)
+
+	assert config.baseline_model == 'strat_hmm_pretext_m1_k6_topblock1_distill'
+	assert config.candidate_model == (
+		'strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill'
+	)
+	assert config.monitored_class_ids == (3, 5)
 
 
 def test_m2a_rejects_model_identity_mismatch(tmp_path: Path) -> None:
@@ -184,9 +215,7 @@ def test_m2a_rejects_incomplete_preregistered_inventory(
 			csv_rows = [
 				row
 				for row in _read_csv(csv_path)
-				if not (
-					row['budget_id'] == 'cap25' and row['subsample_seed'] == '4'
-				)
+				if not (row['budget_id'] == 'cap25' and row['subsample_seed'] == '4')
 			]
 	else:
 		csv_path = config.split_index_suite_root / 'reports' / 'split_paired_deltas.csv'
@@ -253,6 +282,29 @@ def test_m2a_rejects_paired_identity_hash_mismatch(
 
 
 @pytest.mark.parametrize(
+	('suite_attribute', 'manifest_name'),
+	[
+		('label_budget_suite_root', 'probe_run_manifest.json'),
+		('split_index_suite_root', 'split_probe_run_manifest.json'),
+	],
+)
+def test_m2a_rejects_stale_probe_manifest_identity_hash(
+	tmp_path: Path, suite_attribute: str, manifest_name: str
+) -> None:
+	config = _fixture(tmp_path)
+	path = getattr(config, suite_attribute) / manifest_name
+	payload = json.loads(path.read_text(encoding='utf-8'))
+	payload['rows'][0]['paired_identity_hash'] = 'stale-paired-identity'
+	payload['rows'][1]['paired_identity_hash'] = 'stale-paired-identity'
+	_write_json(path, payload)
+
+	with pytest.raises(
+		ValueError, match=r'dataset/probe.*paired_identity_hash mismatch'
+	):
+		consolidate_f3_strat_hmm_m2_results(config)
+
+
+@pytest.mark.parametrize(
 	('suite_attribute', 'deltas_name'),
 	[
 		('label_budget_suite_root', 'paired_deltas.csv'),
@@ -289,6 +341,38 @@ def test_m2a_rejects_stale_paired_metrics_model_pair(
 	_write_csv(path, tuple(rows[0]), rows)
 
 	with pytest.raises(ValueError, match='model identity mismatch'):
+		consolidate_f3_strat_hmm_m2_results(config)
+
+
+@pytest.mark.parametrize(
+	('suite_attribute', 'metrics_name', 'deltas_name'),
+	[
+		('label_budget_suite_root', 'paired_metrics.csv', 'paired_deltas.csv'),
+		(
+			'split_index_suite_root',
+			'split_paired_metrics.csv',
+			'split_paired_deltas.csv',
+		),
+	],
+)
+def test_m2a_rejects_stale_paired_report_against_probe_manifest(
+	tmp_path: Path,
+	suite_attribute: str,
+	metrics_name: str,
+	deltas_name: str,
+) -> None:
+	config = _fixture(tmp_path)
+	root = getattr(config, suite_attribute)
+	metrics_path = root / 'reports' / metrics_name
+	metrics_rows = _read_csv(metrics_path)
+	metrics_rows[0]['metrics_json'] = '/stale/run/metrics.json'
+	_write_csv(metrics_path, tuple(metrics_rows[0]), metrics_rows)
+	deltas_path = root / 'reports' / deltas_name
+	delta_rows = _read_csv(deltas_path)
+	delta_rows[0]['baseline_metrics_json'] = '/stale/run/metrics.json'
+	_write_csv(deltas_path, tuple(delta_rows[0]), delta_rows)
+
+	with pytest.raises(ValueError, match='probe/paired report metrics provenance'):
 		consolidate_f3_strat_hmm_m2_results(config)
 
 
@@ -502,23 +586,55 @@ def _write_suite_manifest(
 	condition_keys: tuple[str, ...],
 ) -> None:
 	manifest_rows = []
+	probe_rows = []
 	for row in rows:
 		for role, model in (('baseline', 'M1'), ('candidate', 'M2-A')):
 			condition = {
 				key: int(row[key]) if key == 'subsample_seed' else row[key]
 				for key in condition_keys
 			}
+			paired_identity_hash = '-'.join(str(row[key]) for key in condition_keys)
+			token_dataset_root = '/tokens/' + '/'.join(
+				(model, *(str(row[key]) for key in condition_keys))
+			)
 			manifest_rows.append(
 				{
 					**condition,
 					'model_role': role,
 					'model_tag': model,
-					'paired_identity_hash': '-'.join(
-						str(row[key]) for key in condition_keys
-					),
+					'token_dataset_root': token_dataset_root,
+					'paired_identity_hash': paired_identity_hash,
 				}
 			)
-	_write_json(path, {'rows': manifest_rows})
+			probe_rows.append(
+				{
+					**condition,
+					'model_role': role,
+					'model_tag': model,
+					'token_dataset_root': token_dataset_root,
+					'metrics_json': row[f'{role}_metrics_json'],
+					'paired_identity_hash': paired_identity_hash,
+				}
+			)
+	if path.name == 'suite_manifest.json':
+		artifact_type = 'f3_lithology_label_budget_suite_manifest'
+		probe_name = 'probe_run_manifest.json'
+		probe_artifact_type = 'f3_lithology_label_budget_probe_run_manifest'
+		probe_dataset_field = 'suite_manifest'
+	else:
+		artifact_type = 'f3_lithology_split_sweep_token_dataset_manifest'
+		probe_name = 'split_probe_run_manifest.json'
+		probe_artifact_type = 'f3_lithology_split_probe_run_manifest'
+		probe_dataset_field = 'dataset_manifest'
+	_write_json(path, {'artifact_type': artifact_type, 'rows': manifest_rows})
+	_write_json(
+		path.with_name(probe_name),
+		{
+			'artifact_type': probe_artifact_type,
+			probe_dataset_field: str(path),
+			'rows': probe_rows,
+		},
+	)
 
 
 def _metrics(

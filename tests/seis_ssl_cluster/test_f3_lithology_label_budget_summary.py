@@ -248,6 +248,7 @@ def _write_suite(tmp_path: Path) -> Path:
 					'metrics_json': str(metrics_path),
 					'train_token_count': 12 if per_class_cap else 60,
 					'validation_token_count': 30,
+					'paired_identity_hash': paired_hash,
 				},
 			)
 	_write_json(
