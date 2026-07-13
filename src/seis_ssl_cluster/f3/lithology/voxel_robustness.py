@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import statistics
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
+
+import numpy as np
 
 from seis_ssl_cluster.config.f3_lithology_voxel_dataset import (
 	F3LithologyVoxelDatasetConfig,
@@ -466,6 +469,7 @@ def summarize_f3_lithology_voxel_split_robustness(
 			'raw_rows': paired,
 			'aggregates': aggregates,
 			'provisional_status': status,
+			'm2a_vs_m1_voxel_robustness': status,
 			'status_reasons': reasons,
 		},
 	)
@@ -658,9 +662,11 @@ def _run_v0_job(  # noqa: PLR0913
 	)
 	projection_dir = root / 'voxel_predictions'
 	if only_missing and _complete_prediction(projection_dir):
-		validate_f3_voxel_prediction_artifact(projection_dir)
+		projection = validate_f3_voxel_prediction_artifact(projection_dir)
 	else:
 		project_f3_lithology_tokens_to_voxels(token_dir, projection_dir)
+		projection = validate_f3_voxel_prediction_artifact(projection_dir)
+	_validate_v0_prediction_source(projection.metadata, token_dir=token_dir)
 	evaluation = _evaluation_config(
 		config, voxel_row, projection_dir, root / 'evaluation'
 	)
@@ -726,9 +732,11 @@ def _run_v1_job(  # noqa: PLR0913
 		overwrite=config.overwrite,
 	)
 	if only_missing and _complete_prediction(prediction_dir):
-		validate_f3_voxel_prediction_artifact(prediction_dir)
+		prediction = validate_f3_voxel_prediction_artifact(prediction_dir)
 	else:
 		predict_f3_lithology_voxels(inference, device=device)
+		prediction = validate_f3_voxel_prediction_artifact(prediction_dir)
+	_validate_v1_prediction_source(prediction.metadata, decoder_dir=decoder_dir)
 	evaluation = _evaluation_config(
 		config, voxel_row, prediction_dir, job.output_root / 'evaluation'
 	)
@@ -915,6 +923,38 @@ def _validate_recorded_identity(
 		raise ValueError(f'{label} path identity mismatch')
 	if value.get('sha256') != file_sha256(expected_path):
 		raise ValueError(f'{label} hash identity mismatch')
+
+
+def _validate_v0_prediction_source(
+	metadata: Mapping[str, object], *, token_dir: Path
+) -> None:
+	source = _mapping_value(metadata, 'source_identity')
+	files = _mapping_value(source, 'token_artifact_files')
+	for key, name in (
+		('token_predictions', 'f3_token_predictions.npy'),
+		('token_probabilities', 'f3_token_probabilities.npy'),
+		('valid_token_grid', 'f3_valid_token_grid.npy'),
+		('prediction_metadata', 'prediction_metadata.json'),
+	):
+		_validate_recorded_identity(
+			files.get(key), token_dir / name, label=f'V0 prediction source {key}'
+		)
+	inputs = _mapping_value(metadata, 'inputs')
+	if Path(str(inputs.get('token_prediction_dir'))).resolve(strict=False) != (
+		token_dir.resolve(strict=False)
+	):
+		raise ValueError('V0 prediction token source directory mismatch')
+
+
+def _validate_v1_prediction_source(
+	metadata: Mapping[str, object], *, decoder_dir: Path
+) -> None:
+	source = _mapping_value(metadata, 'source_identity')
+	_validate_recorded_identity(
+		source.get('decoder_checkpoint'),
+		decoder_dir / 'best.pt',
+		label='V1 prediction decoder checkpoint',
+	)
 
 
 def _voxel_dataset_row(
@@ -1423,10 +1463,11 @@ def _complete_voxel_dataset(root: Path) -> bool:
 	)
 
 
-def _validate_existing_voxel_dataset(  # noqa: C901
+def _validate_existing_voxel_dataset(  # noqa: C901, PLR0912
 	config: F3LithologyVoxelDatasetConfig,
 ) -> None:
 	root = config.output_dir
+	inspection = inspect_f3_lithology_voxel_dataset(config)
 	metadata = _read_json(root / VOXEL_METADATA_NAME)
 	if metadata.get('artifact_type') != 'f3_lithology_voxel_supervision':
 		raise ValueError('existing voxel dataset artifact_type mismatch')
@@ -1458,6 +1499,15 @@ def _validate_existing_voxel_dataset(  # noqa: C901
 		raise ValueError('existing voxel dataset class identity mismatch')
 	if metadata.get('ignore_z_border_samples') != config.ignore_z_border_samples:
 		raise ValueError('existing voxel dataset border policy identity mismatch')
+	grid = np.load(root / GRID_NAME, mmap_mode='r', allow_pickle=False)
+	if not np.array_equal(grid, inspection.split.split_grid):
+		raise ValueError(
+			'existing voxel dataset split grid does not match the source inventory'
+		)
+	if _mapping_value(metadata, 'summary') != asdict(inspection.split.summary):
+		raise ValueError(
+			'existing voxel dataset summary does not match the source inventory'
+		)
 	outputs = _mapping_value(metadata, 'outputs')
 	expected_outputs = {
 		'supervision_split_grid': root / GRID_NAME,
@@ -1476,11 +1526,36 @@ def _complete_evaluation(root: Path) -> bool:
 		return False
 	try:
 		metadata = _read_json(root / EVALUATION_METADATA_JSON)
-		_read_json(root / METRICS_JSON)
+		metrics = _read_json(root / METRICS_JSON)
 		_read_json(root / BOUNDARY_METRICS_JSON)
-	except (OSError, TypeError, ValueError, json.JSONDecodeError):
+		if metadata.get('artifact_type') != 'f3_lithology_voxel_evaluation':
+			return False
+		for metric in PRIMARY_METRICS:
+			_require_finite_metric(metrics.get(metric), label=f'evaluation {metric}')
+		outputs = _mapping_value(metadata, 'outputs')
+		for name in EVALUATION_OUTPUT_FILES:
+			_validate_recorded_identity(
+				outputs.get(name), root / name, label=f'evaluation output {name}'
+			)
+		summary = _mapping_value(metadata, 'summary')
+		voxel_count = summary.get('unique_validation_voxel_count')
+		if (
+			not isinstance(voxel_count, int)
+			or isinstance(voxel_count, bool)
+			or voxel_count <= 0
+			or metrics.get('evaluation_voxel_count') != voxel_count
+		):
+			return False
+		if metrics.get('aggregation_unit') != 'unique_validation_voxel':
+			return False
+	except (
+		OSError,
+		TypeError,
+		ValueError,
+		json.JSONDecodeError,
+	):
 		return False
-	return metadata.get('artifact_type') == 'f3_lithology_voxel_evaluation'
+	return True
 
 
 def _complete_token_prediction(root: Path) -> bool:
@@ -1574,7 +1649,7 @@ def _prior_run_rows(
 	)
 
 
-def _complete_paired_run_rows(  # noqa: C901
+def _complete_paired_run_rows(  # noqa: C901, PLR0912
 	path: Path, artifact_type: str
 ) -> dict[tuple[str, str], Mapping[str, object]]:
 	expected_prediction_kind = {
@@ -1586,12 +1661,16 @@ def _complete_paired_run_rows(  # noqa: C901
 		'model_role',
 		'model_tag',
 		'voxel_dataset_identity',
+		'prediction_dir',
 		'evaluation_dir',
 		'status',
 	]
+	if artifact_type == V0_RUN_MANIFEST_TYPE:
+		required.append('token_prediction_dir')
 	if artifact_type == V1_RUN_MANIFEST_TYPE:
 		required.extend(
 			(
+				'decoder_dir',
 				'source_valid_tokens',
 				'class_weights',
 				'train_tile_manifest',
@@ -1634,6 +1713,14 @@ def _complete_paired_run_rows(  # noqa: C901
 			inputs.get('prediction_metadata'),
 			label='evaluation prediction_metadata',
 		)
+		prediction_dir = Path(str(row['prediction_dir']))
+		if prediction_metadata_path.resolve(strict=False) != (
+			prediction_dir / 'prediction_metadata.json'
+		).resolve(strict=False):
+			raise ValueError(
+				'existing evaluation prediction path does not match run row: '
+				f'{row["split_id"]}/{row["model_role"]}'
+			)
 		prediction_metadata = _read_json(prediction_metadata_path)
 		for key, expected in (
 			('model_tag', row['model_tag']),
@@ -1644,7 +1731,15 @@ def _complete_paired_run_rows(  # noqa: C901
 					f'prediction metadata {key} does not match run row: '
 					f'{row["split_id"]}/{row["model_role"]}'
 				)
-		if artifact_type == V1_RUN_MANIFEST_TYPE:
+		if artifact_type == V0_RUN_MANIFEST_TYPE:
+			_validate_v0_prediction_source(
+				prediction_metadata,
+				token_dir=Path(str(row['token_prediction_dir'])),
+			)
+		else:
+			_validate_v1_prediction_source(
+				prediction_metadata, decoder_dir=Path(str(row['decoder_dir']))
+			)
 			_validate_v1_summary_row(row, prediction_metadata)
 	result = _rows_by_key(rows)
 	if artifact_type == V1_RUN_MANIFEST_TYPE:
@@ -1859,6 +1954,15 @@ def _number(value: object) -> float | None:
 	if isinstance(value, bool) or not isinstance(value, str | int | float):
 		raise TypeError(f'metric must be numeric or null; got {value!r}')
 	return float(value)
+
+
+def _require_finite_metric(value: object, *, label: str) -> float:
+	if isinstance(value, bool) or not isinstance(value, int | float):
+		raise TypeError(f'{label} must be numeric')
+	result = float(value)
+	if not math.isfinite(result):
+		raise ValueError(f'{label} must be finite')
+	return result
 
 
 def _read_json(path: Path) -> Mapping[str, object]:

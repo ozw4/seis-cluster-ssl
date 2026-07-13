@@ -90,7 +90,64 @@ def test_two_split_voxel_workflow_runs_end_to_end(tmp_path: Path) -> None:
 	with pytest.raises(ValueError, match='lithology identity does not match config'):
 		run_f3_lithology_voxel_v0_split_suite(v0_config, only_missing=True)
 	validation_tokens.write_bytes(_token_bytes)
+	baseline_v0 = next(
+		row
+		for row in v0.rows
+		if row['split_id'] == 'split_000' and row['model_role'] == 'baseline'
+	)
+	candidate_v0 = next(
+		row
+		for row in v0.rows
+		if row['split_id'] == 'split_000' and row['model_role'] == 'candidate'
+	)
+	projection_metadata = (
+		Path(str(baseline_v0['prediction_dir'])) / 'prediction_metadata.json'
+	)
+	projection_bytes = projection_metadata.read_bytes()
+	projection_payload = json.loads(projection_bytes)
+	candidate_token_dir = Path(str(candidate_v0['token_prediction_dir']))
+	projection_payload['inputs']['token_prediction_dir'] = str(candidate_token_dir)
+	projection_payload['source_identity']['token_artifact_files'] = {
+		key: _file_identity(candidate_token_dir / name)
+		for key, name in (
+			('token_predictions', 'f3_token_predictions.npy'),
+			('token_probabilities', 'f3_token_probabilities.npy'),
+			('valid_token_grid', 'f3_valid_token_grid.npy'),
+			('prediction_metadata', 'prediction_metadata.json'),
+		)
+	}
+	projection_metadata.write_text(json.dumps(projection_payload), encoding='utf-8')
+	with pytest.raises(ValueError, match='V0 prediction source token_predictions path'):
+		run_f3_lithology_voxel_v0_split_suite(v0_config, only_missing=True)
+	projection_metadata.write_bytes(projection_bytes)
 	v1 = run_f3_lithology_voxel_decoder_split_suite(v1_config, device='cpu')
+	baseline_v1 = next(
+		row
+		for row in v1.rows
+		if row['split_id'] == 'split_000' and row['model_role'] == 'baseline'
+	)
+	candidate_v1 = next(
+		row
+		for row in v1.rows
+		if row['split_id'] == 'split_000' and row['model_role'] == 'candidate'
+	)
+	decoder_prediction_metadata = (
+		Path(str(baseline_v1['prediction_dir'])) / 'prediction_metadata.json'
+	)
+	decoder_prediction_bytes = decoder_prediction_metadata.read_bytes()
+	decoder_prediction_payload = json.loads(decoder_prediction_bytes)
+	candidate_best = Path(str(candidate_v1['decoder_dir'])) / 'best.pt'
+	decoder_prediction_payload['source_identity']['decoder_checkpoint'] = (
+		_file_identity(candidate_best)
+	)
+	decoder_prediction_metadata.write_text(
+		json.dumps(decoder_prediction_payload), encoding='utf-8'
+	)
+	with pytest.raises(ValueError, match='V1 prediction decoder checkpoint path'):
+		run_f3_lithology_voxel_decoder_split_suite(
+			v1_config, only_missing=True, device='cpu'
+		)
+	decoder_prediction_metadata.write_bytes(decoder_prediction_bytes)
 
 	assert [row['split_id'] for row in datasets.rows] == [
 		'split_000',
@@ -154,6 +211,20 @@ def test_only_missing_rejects_stale_split_dataset_inventory(tmp_path: Path) -> N
 	)
 
 	with pytest.raises(ValueError, match='voxel inventory path identity mismatch'):
+		build_f3_lithology_voxel_split_datasets(build_config, only_missing=True)
+
+
+def test_only_missing_rejects_altered_split_grid(tmp_path: Path) -> None:
+	build_config, _, _ = _synthetic_workflow_configs(tmp_path)
+	result = build_f3_lithology_voxel_split_datasets(build_config)
+	grid_path = Path(str(result.rows[0]['split_grid']['path']))
+	grid = np.load(grid_path)
+	grid.flat[0] = (int(grid.flat[0]) + 1) % 3
+	np.save(grid_path, grid, allow_pickle=False)
+
+	with pytest.raises(
+		ValueError, match='split grid does not match the source inventory'
+	):
 		build_f3_lithology_voxel_split_datasets(build_config, only_missing=True)
 
 
@@ -233,6 +304,7 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 
 	payload = json.loads(result.summary_json.read_text(encoding='utf-8'))
 	assert result.status == 'positive'
+	assert payload['m2a_vs_m1_voxel_robustness'] == 'positive'
 	assert payload['statistical_unit'] == 'split'
 	assert payload['voxel_level_significance_computed'] is False
 	assert payload['p_values_computed'] is False
@@ -248,6 +320,42 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 	assert any(
 		row['comparison'] == 'candidate_v1_minus_v0' for row in payload['raw_rows']
 	)
+	first_metrics = Path(v1_rows[0]['evaluation_dir']) / 'metrics.json'
+	first_metadata = Path(v1_rows[0]['evaluation_dir']) / 'evaluation_metadata.json'
+	metrics_bytes = first_metrics.read_bytes()
+	metadata_bytes = first_metadata.read_bytes()
+	partial_metrics = json.loads(metrics_bytes)
+	partial_metrics['macro_f1'] = None
+	first_metrics.write_text(json.dumps(partial_metrics), encoding='utf-8')
+	partial_metadata = json.loads(metadata_bytes)
+	partial_metadata['outputs']['metrics.json'] = _file_identity(first_metrics)
+	first_metadata.write_text(json.dumps(partial_metadata), encoding='utf-8')
+	with pytest.raises(ValueError, match='incomplete run row'):
+		summarize_f3_lithology_voxel_split_robustness(
+			F3VoxelSplitRobustnessSummaryConfig(
+				suite_root=tmp_path / 'null-primary-suite',
+				v0_run_manifest=v0_manifest,
+				v1_run_manifest=v1_manifest,
+				baseline_model_tag=BASELINE_MODEL_TAG,
+				candidate_model_tag=CANDIDATE_MODEL_TAG,
+			)
+		)
+	first_metrics.write_bytes(metrics_bytes)
+	first_metadata.write_bytes(metadata_bytes)
+	tampered_metrics = json.loads(metrics_bytes)
+	tampered_metrics['macro_f1'] += 0.01
+	first_metrics.write_text(json.dumps(tampered_metrics), encoding='utf-8')
+	with pytest.raises(ValueError, match='incomplete run row'):
+		summarize_f3_lithology_voxel_split_robustness(
+			F3VoxelSplitRobustnessSummaryConfig(
+				suite_root=tmp_path / 'tampered-metrics-suite',
+				v0_run_manifest=v0_manifest,
+				v1_run_manifest=v1_manifest,
+				baseline_model_tag=BASELINE_MODEL_TAG,
+				candidate_model_tag=CANDIDATE_MODEL_TAG,
+			)
+		)
+	first_metrics.write_bytes(metrics_bytes)
 	original = tmp_path / 'original'
 	_write_original_summary_bundle(tmp_path / 'original-runs', original)
 	publish_dir = tmp_path / 'results' / 'voxel'
@@ -293,6 +401,20 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 	first_evaluation.write_text(json.dumps(evaluation_payload), encoding='utf-8')
 
 	v1_payload = json.loads(v1_manifest.read_text(encoding='utf-8'))
+	v1_payload['rows'][0]['decoder_dir'] = str(tmp_path / 'other-decoder')
+	v1_manifest.write_text(json.dumps(v1_payload), encoding='utf-8')
+	with pytest.raises(ValueError, match='V1 prediction decoder checkpoint path'):
+		summarize_f3_lithology_voxel_split_robustness(
+			F3VoxelSplitRobustnessSummaryConfig(
+				suite_root=tmp_path / 'wrong-decoder-suite',
+				v0_run_manifest=v0_manifest,
+				v1_run_manifest=v1_manifest,
+				baseline_model_tag=BASELINE_MODEL_TAG,
+				candidate_model_tag=CANDIDATE_MODEL_TAG,
+			)
+		)
+	v1_payload['rows'][0]['decoder_dir'] = v1_rows[0]['decoder_dir']
+	v1_manifest.write_text(json.dumps(v1_payload), encoding='utf-8')
 	v1_payload['rows'][0]['voxel_dataset_identity'] = 'different-voxel-dataset'
 	v1_manifest.write_text(json.dumps(v1_payload), encoding='utf-8')
 	with pytest.raises(ValueError, match='split-grid identity'):
@@ -534,6 +656,8 @@ def _write_evaluation(  # noqa: PLR0913
 		'balanced_accuracy': score,
 		'per_class_f1': {'3': score, '5': score},
 		'per_class_iou': {'3': score, '5': score},
+		'evaluation_voxel_count': 10,
+		'aggregation_unit': 'unique_validation_voxel',
 	}
 	boundary = {
 		'vertical_boundary_f1_at_2': score,
@@ -552,7 +676,7 @@ def _write_evaluation(  # noqa: PLR0913
 		'model_tag': model_tag,
 		'prediction_kind': prediction_kind,
 	}
-	row_identity: dict[str, object] = {}
+	row_identity: dict[str, object] = {'prediction_dir': str(root)}
 	if prediction_kind == 'frozen_embedding_decoder':
 		sources = root / 'decoder_sources'
 		sources.mkdir()
@@ -576,26 +700,32 @@ def _write_evaluation(  # noqa: PLR0913
 			},
 		}
 		row_identity = {
+			**row_identity,
+			'decoder_dir': str(sources),
 			'source_valid_tokens': _file_identity(valid_tokens),
 			'train_tile_manifest': _file_identity(train_tiles),
 			'validation_tile_manifest': _file_identity(validation_tiles),
 			'class_weights': class_weights,
 		}
+	else:
+		sources = root / 'token_sources'
+		sources.mkdir()
+		source_files = {}
+		for key, name in (
+			('token_predictions', 'f3_token_predictions.npy'),
+			('token_probabilities', 'f3_token_probabilities.npy'),
+			('valid_token_grid', 'f3_valid_token_grid.npy'),
+			('prediction_metadata', 'prediction_metadata.json'),
+		):
+			path = sources / name
+			path.write_bytes(f'{model_tag}:{key}'.encode())
+			source_files[key] = _file_identity(path)
+		prediction_payload['inputs'] = {'token_prediction_dir': str(sources)}
+		prediction_payload['source_identity'] = {
+			'token_artifact_files': source_files
+		}
+		row_identity['token_prediction_dir'] = str(sources)
 	prediction_metadata.write_text(json.dumps(prediction_payload), encoding='utf-8')
-	(root / 'evaluation_metadata.json').write_text(
-		json.dumps(
-			{
-				'artifact_type': 'f3_lithology_voxel_evaluation',
-				'model_tag': model_tag,
-				'prediction_kind': prediction_kind,
-				'inputs': {
-					'prediction_metadata': _file_identity(prediction_metadata),
-					'voxel_split_grid': _file_identity(split_grid),
-				},
-			}
-		),
-		encoding='utf-8',
-	)
 	with (root / 'boundary_region_metrics.csv').open(
 		'w', encoding='utf-8', newline=''
 	) as file_obj:
@@ -618,6 +748,25 @@ def _write_evaluation(  # noqa: PLR0913
 			path.write_text(
 				'{}\n' if path.suffix == '.json' else '\n', encoding='utf-8'
 			)
+	(root / 'evaluation_metadata.json').write_text(
+		json.dumps(
+			{
+				'artifact_type': 'f3_lithology_voxel_evaluation',
+				'model_tag': model_tag,
+				'prediction_kind': prediction_kind,
+				'inputs': {
+					'prediction_metadata': _file_identity(prediction_metadata),
+					'voxel_split_grid': _file_identity(split_grid),
+				},
+				'summary': {'unique_validation_voxel_count': 10},
+				'outputs': {
+					name: _file_identity(root / name)
+					for name in EVALUATION_OUTPUT_FILES
+				},
+			}
+		),
+		encoding='utf-8',
+	)
 	return row_identity
 
 
