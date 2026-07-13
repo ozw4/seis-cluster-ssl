@@ -37,14 +37,6 @@ def compute_lithology_metrics(
 	classes: Sequence[F3ClassInfo],
 ) -> dict[str, object]:
 	"""Compute F3 lithology classification metrics using fixed class ordering."""
-	from sklearn.metrics import (  # noqa: PLC0415
-		accuracy_score,
-		balanced_accuracy_score,
-		confusion_matrix,
-		f1_score,
-		precision_recall_fscore_support,
-	)
-
 	true = _label_vector(y_true, 'y_true')
 	pred = _label_vector(y_pred, 'y_pred')
 	if true.shape != pred.shape:
@@ -57,30 +49,44 @@ def compute_lithology_metrics(
 		msg = 'metrics require at least one labeled validation token'
 		raise ValueError(msg)
 	class_ids = _class_ids(classes)
-	precision, recall, f1, support = precision_recall_fscore_support(
+	matrix = np.zeros((len(class_ids), len(class_ids)), dtype=np.int64)
+	from seis_ssl_cluster.f3.lithology.voxel_metrics import (  # noqa: PLC0415
+		update_confusion_matrix,
+	)
+
+	update_confusion_matrix(
+		matrix,
 		true,
 		pred,
-		labels=class_ids,
-		zero_division=0,
+		valid_mask=np.ones(true.shape, dtype=bool),
+		class_ids=class_ids,
 	)
-	matrix = confusion_matrix(true, pred, labels=class_ids)
-	per_class_iou = _per_class_iou(matrix)
-	row_normalized = _row_normalized_confusion_matrix(matrix)
+	return lithology_metrics_from_confusion_matrix(matrix, classes)
+
+
+def lithology_metrics_from_confusion_matrix(
+	matrix: NDArray[np.generic],
+	classes: Sequence[F3ClassInfo],
+) -> dict[str, object]:
+	"""Return lithology metrics from a fixed-class-order confusion matrix."""
+	class_ids = _class_ids(classes)
+	counts = _validated_confusion_matrix(matrix, len(class_ids))
+	exact_counts = counts.astype(object)
+	support = exact_counts.sum(axis=1)
+	predicted = exact_counts.sum(axis=0)
+	true_positive = np.diag(exact_counts)
+	precision = _safe_ratio(true_positive, predicted)
+	recall = _safe_ratio(true_positive, support)
+	f1 = _safe_ratio(2 * true_positive, support + predicted)
+	per_class_iou = _safe_ratio(true_positive, support + predicted - true_positive)
+	row_normalized = _row_normalized_confusion_matrix(counts, support)
+	total = sum(int(value) for value in support)
+	supported = support != 0
 	return {
-		'accuracy': float(accuracy_score(true, pred)),
-		'balanced_accuracy': float(balanced_accuracy_score(true, pred)),
-		'macro_f1': float(
-			f1_score(true, pred, labels=class_ids, average='macro', zero_division=0),
-		),
-		'weighted_f1': float(
-			f1_score(
-				true,
-				pred,
-				labels=class_ids,
-				average='weighted',
-				zero_division=0,
-			),
-		),
+		'accuracy': float(sum(int(value) for value in true_positive) / total),
+		'balanced_accuracy': float(np.mean(recall[supported])),
+		'macro_f1': float(np.mean(f1)),
+		'weighted_f1': float(np.average(f1, weights=_as_float_array(support))),
 		'per_class_precision': _per_class_metric(class_ids, precision),
 		'per_class_recall': _per_class_metric(class_ids, recall),
 		'per_class_f1': _per_class_metric(class_ids, f1),
@@ -90,7 +96,7 @@ def compute_lithology_metrics(
 			for class_id, value in zip(class_ids, support, strict=True)
 		},
 		'mean_iou': float(np.mean(per_class_iou)),
-		'confusion_matrix': matrix.astype(int).tolist(),
+		'confusion_matrix': counts.tolist(),
 		'confusion_matrix_row_normalized': row_normalized.tolist(),
 		'class_ids': [int(class_id) for class_id in class_ids],
 		'class_names': {
@@ -278,21 +284,50 @@ def _class_ids(classes: Sequence[F3ClassInfo]) -> list[int]:
 	return class_ids
 
 
-def _per_class_iou(matrix: NDArray[np.int64]) -> NDArray[np.float64]:
-	true_positive = np.diag(matrix).astype(np.float64)
-	false_positive = matrix.sum(axis=0).astype(np.float64) - true_positive
-	false_negative = matrix.sum(axis=1).astype(np.float64) - true_positive
-	denominator = true_positive + false_positive + false_negative
+def _validated_confusion_matrix(
+	matrix: NDArray[np.generic],
+	n_classes: int,
+) -> NDArray[np.int64]:
+	counts = np.asarray(matrix)
+	expected_shape = (n_classes, n_classes)
+	if counts.shape != expected_shape:
+		msg = f'confusion matrix must have shape {expected_shape}; got {counts.shape}'
+		raise ValueError(msg)
+	if counts.dtype != np.dtype(np.int64):
+		msg = 'confusion matrix must have dtype int64'
+		raise TypeError(msg)
+	if np.any(counts < 0):
+		msg = 'confusion matrix counts must be non-negative'
+		raise ValueError(msg)
+	if not np.any(counts):
+		msg = 'metrics require at least one labeled evaluation voxel'
+		raise ValueError(msg)
+	return counts
+
+
+def _safe_ratio(
+	numerator: NDArray[np.generic],
+	denominator: NDArray[np.generic],
+) -> NDArray[np.float64]:
+	float_numerator = _as_float_array(numerator)
+	float_denominator = _as_float_array(denominator)
 	return np.divide(
-		true_positive,
-		denominator,
-		out=np.zeros_like(true_positive, dtype=np.float64),
-		where=denominator != 0,
+		float_numerator,
+		float_denominator,
+		out=np.zeros(float_numerator.shape, dtype=np.float64),
+		where=float_denominator != 0,
 	)
 
 
-def _row_normalized_confusion_matrix(matrix: NDArray[np.int64]) -> NDArray[np.float64]:
-	row_totals = matrix.sum(axis=1, keepdims=True).astype(np.float64)
+def _as_float_array(values: NDArray[np.generic]) -> NDArray[np.float64]:
+	return np.asarray(values, dtype=np.float64)
+
+
+def _row_normalized_confusion_matrix(
+	matrix: NDArray[np.int64],
+	exact_row_totals: NDArray[np.generic],
+) -> NDArray[np.float64]:
+	row_totals = _as_float_array(exact_row_totals)[:, None]
 	return np.divide(
 		matrix.astype(np.float64),
 		row_totals,
@@ -332,6 +367,7 @@ def _format_float(value: float) -> str:
 __all__ = [
 	'REQUIRED_LITHOLOGY_METRICS',
 	'compute_lithology_metrics',
+	'lithology_metrics_from_confusion_matrix',
 	'render_classification_report_markdown',
 	'write_confusion_matrix_csv',
 	'write_metrics_csv',
