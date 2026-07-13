@@ -1,0 +1,346 @@
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from copy import deepcopy
+from pathlib import Path
+
+import numpy as np
+import pytest
+import torch
+
+import seis_ssl_cluster.training.voxel_decoder.runner as voxel_decoder_runner
+from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
+	f3_lithology_voxel_decoder_config_from_mapping,
+)
+from seis_ssl_cluster.embedding.writer import file_sha256
+from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
+	load_voxel_decoder_checkpoint,
+)
+from seis_ssl_cluster.training.voxel_decoder.runner import (
+	inspect_f3_lithology_voxel_decoder,
+	run_f3_lithology_voxel_decoder,
+)
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+CLI = REPO_ROOT / 'proc' / 'seis_ssl_cluster' / 'train_f3_lithology_voxel_decoder.py'
+
+
+def _job(tmp_path, name: str, *, epochs: int = 2):
+	root = tmp_path / 'artifacts'
+	embedding_dir = (
+		root / 'embeddings' / 'f3' / 'v1' / 'encoder-v1' / 'tiny-spec'
+	)
+	voxel_dir = root / 'voxel'
+	embedding_dir.mkdir(parents=True)
+	voxel_dir.mkdir(parents=True)
+	embeddings = np.array(
+		[[[[1.0, -1.0]]], [[[0.5, -0.5]]], [[[-1.0, 1.0]]], [[[1.0, 1.0]]]],
+		dtype=np.float32,
+	)
+	valid = np.ones((4, 1, 1), dtype=np.bool_)
+	labels = np.array([0, 1, 0, 1], dtype=np.int16).reshape(4, 1, 1)
+	split = np.array([1, 1, 1, 2], dtype=np.uint8).reshape(4, 1, 1)
+	embedding_path = embedding_dir / 'tiny.embeddings.npy'
+	valid_path = embedding_dir / 'tiny.valid_tokens.npy'
+	metadata_path = embedding_dir / 'tiny.embedding_metadata.json'
+	label_path = root / 'labels.npy'
+	np.save(embedding_path, embeddings, allow_pickle=False)
+	np.save(valid_path, valid, allow_pickle=False)
+	np.save(label_path, labels, allow_pickle=False)
+	np.save(voxel_dir / 'supervision_split_grid.npy', split, allow_pickle=False)
+	metadata = {
+		'volume_shape_xyz': [4, 1, 1],
+		'patch_size': [1, 1, 1],
+		'token_grid_shape': [4, 1, 1],
+		'embedding_dim': 2,
+		'checkpoint_path': str(
+			root / 'pretraining' / 'f3' / 'v1' / 'encoder-v1' / 'best.pt'
+		),
+		'preprocessing': {'kind': 'tiny'},
+		'zero_mask': {'enabled': True},
+	}
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+	voxel_metadata = {
+		'classes': [
+			{'class_id': 0, 'class_name': 'zero'},
+			{'class_id': 1, 'class_name': 'one'},
+		],
+		'reference_embedding': {
+			'path': str(metadata_path),
+			'sha256': file_sha256(metadata_path),
+			'metadata': metadata,
+		},
+		'reference_valid_tokens': {
+			'path': str(valid_path),
+			'sha256': file_sha256(valid_path),
+		},
+		'label_volume': {'path': str(label_path), 'sha256': file_sha256(label_path)},
+	}
+	(voxel_dir / 'voxel_dataset_metadata.json').write_text(
+		json.dumps(voxel_metadata), encoding='utf-8'
+	)
+	raw = {
+		'paths': {'artifact_root': str(root), 'f3_root': str(tmp_path / 'f3')},
+		'dataset': {'name': 'tiny', 'version': 'v1'},
+		'model': {'tag': 'encoder-v1', 'freeze_encoder': True},
+		'embeddings': {'input_dir': str(embedding_dir)},
+		'voxel_dataset': {'input_dir': str(voxel_dir)},
+		'decoder': {
+			'spec': 'frozen_embedding_decoder_v1',
+			'embedding_dim': 2,
+			'class_count': 2,
+			'hidden_channels': [2],
+			'upsample_factors': [[1, 1, 1]],
+		},
+		'tiles': {'core_size_tokens': [1, 1, 1], 'context_halo_tokens': [0, 0, 0]},
+		'train': {
+			'epochs': epochs,
+			'batch_size': 1,
+			'learning_rate': 0.01,
+			'weight_decay': 0.0,
+			'class_weight': 'balanced',
+			'seed': 7,
+			'num_workers': 0,
+			'amp': False,
+			'gradient_clip_norm': 1.0,
+		},
+		'outputs': {'output_dir': str(root / name)},
+	}
+	return raw, embedding_path
+
+
+def test_cpu_step_resume_matches_uninterrupted_run(tmp_path) -> None:
+	raw, embedding_path = _job(tmp_path, 'full')
+	before = file_sha256(embedding_path)
+	full = run_f3_lithology_voxel_decoder(
+		f3_lithology_voxel_decoder_config_from_mapping(raw), device='cpu'
+	)
+	resume_raw = deepcopy(raw)
+	resume_raw['outputs']['output_dir'] = str(tmp_path / 'artifacts' / 'resumed')
+	resume_config = f3_lithology_voxel_decoder_config_from_mapping(resume_raw)
+	partial = run_f3_lithology_voxel_decoder(
+		resume_config, device='cpu', max_steps=2
+	)
+	assert not partial.completed
+	resumed = run_f3_lithology_voxel_decoder(
+		resume_config, device='cpu', resume=partial.latest_checkpoint
+	)
+	assert resumed.completed
+	full_payload = load_voxel_decoder_checkpoint(full.latest_checkpoint)
+	resumed_payload = load_voxel_decoder_checkpoint(resumed.latest_checkpoint)
+	for key, tensor in full_payload['model_state_dict'].items():
+		assert torch.equal(tensor, resumed_payload['model_state_dict'][key])
+	assert file_sha256(embedding_path) == before
+	assert resumed.history_csv.read_text(encoding='utf-8').startswith(
+		'epoch,global_step,'
+	)
+
+
+def test_dry_run_inspection_does_not_create_output(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'dry-run')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	plan = inspect_f3_lithology_voxel_decoder(config)
+	assert plan.token_grid_shape_xyz == (4, 1, 1)
+	assert not config.output_dir.exists()
+
+
+def test_cli_dry_run_does_not_write_output(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'cli-dry-run')
+	config_path = tmp_path / 'decoder.yaml'
+	config_path.write_text(json.dumps(raw), encoding='utf-8')
+	env = os.environ.copy()
+	env['PYTHONPATH'] = os.pathsep.join(
+		(str(REPO_ROOT / 'src'), env.get('PYTHONPATH', ''))
+	)
+	completed = subprocess.run(  # noqa: S603
+		[sys.executable, str(CLI), '--config', str(config_path), '--dry-run'],
+		cwd=REPO_ROOT,
+		env=env,
+		text=True,
+		capture_output=True,
+		check=True,
+		timeout=30,
+	)
+	assert 'execution: dry-run' in completed.stdout
+	assert not Path(raw['outputs']['output_dir']).exists()
+
+
+def test_nonempty_output_collision_is_rejected(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'collision')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	config.output_dir.mkdir()
+	(config.output_dir / 'sentinel.txt').write_text('keep', encoding='utf-8')
+	with pytest.raises(FileExistsError, match='non-empty'):
+		run_f3_lithology_voxel_decoder(config, device='cpu')
+	assert (config.output_dir / 'sentinel.txt').read_text(encoding='utf-8') == 'keep'
+
+
+def test_resume_rejects_decoder_identity_mismatch(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'identity-mismatch')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	partial = run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=1)
+	mismatched_raw = deepcopy(raw)
+	mismatched_raw['decoder']['hidden_channels'] = [3]
+	mismatched = f3_lithology_voxel_decoder_config_from_mapping(mismatched_raw)
+	with pytest.raises(ValueError, match='resume identity mismatch: decoder'):
+		run_f3_lithology_voxel_decoder(
+			mismatched, device='cpu', resume=partial.latest_checkpoint
+		)
+
+
+@pytest.mark.parametrize(('setting', 'value'), [('batch_size', 2), ('seed', 8)])
+def test_resume_rejects_training_identity_mismatch(
+	tmp_path, setting: str, value: object
+) -> None:
+	raw, _ = _job(tmp_path, f'train-identity-{setting}')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	partial = run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=1)
+	mismatched_raw = deepcopy(raw)
+	mismatched_raw['train'][setting] = value
+	mismatched = f3_lithology_voxel_decoder_config_from_mapping(mismatched_raw)
+	with pytest.raises(ValueError, match='resume identity mismatch: train'):
+		run_f3_lithology_voxel_decoder(
+			mismatched, device='cpu', resume=partial.latest_checkpoint
+		)
+
+
+def test_inspection_rejects_model_tag_mismatch(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'model-tag-mismatch')
+	raw['model']['tag'] = 'other-encoder'
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	with pytest.raises(ValueError, match=r'model\.tag does not match'):
+		inspect_f3_lithology_voxel_decoder(config)
+
+
+def test_inspection_rejects_embedding_checkpoint_tag_mismatch(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'checkpoint-tag-mismatch')
+	embedding_dir = Path(raw['embeddings']['input_dir'])
+	embedding_metadata_path = embedding_dir / 'tiny.embedding_metadata.json'
+	embedding_metadata = json.loads(
+		embedding_metadata_path.read_text(encoding='utf-8')
+	)
+	embedding_metadata['checkpoint_path'] = str(
+		tmp_path / 'pretraining' / 'other-encoder' / 'best.pt'
+	)
+	embedding_metadata_path.write_text(
+		json.dumps(embedding_metadata), encoding='utf-8'
+	)
+	voxel_metadata_path = (
+		Path(raw['voxel_dataset']['input_dir']) / 'voxel_dataset_metadata.json'
+	)
+	voxel_metadata = json.loads(voxel_metadata_path.read_text(encoding='utf-8'))
+	voxel_metadata['reference_embedding'].update(
+		{
+			'sha256': file_sha256(embedding_metadata_path),
+			'metadata': embedding_metadata,
+		}
+	)
+	voxel_metadata_path.write_text(json.dumps(voxel_metadata), encoding='utf-8')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	with pytest.raises(ValueError, match='checkpoint_path'):
+		inspect_f3_lithology_voxel_decoder(config)
+
+
+def test_inspection_rejects_voxel_source_identity_mismatch(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'source-identity-mismatch')
+	metadata_path = (
+		Path(raw['voxel_dataset']['input_dir']) / 'voxel_dataset_metadata.json'
+	)
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['reference_valid_tokens']['path'] = str(tmp_path / 'other.npy')
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	with pytest.raises(ValueError, match='reference_valid_tokens path'):
+		inspect_f3_lithology_voxel_decoder(config)
+
+
+def test_run_rejects_voxel_source_hash_mismatch(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'source-hash-mismatch')
+	metadata_path = (
+		Path(raw['voxel_dataset']['input_dir']) / 'voxel_dataset_metadata.json'
+	)
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['reference_valid_tokens']['sha256'] = '0' * 64
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	with pytest.raises(ValueError, match='reference_valid_tokens hash'):
+		run_f3_lithology_voxel_decoder(config, device='cpu')
+
+
+def test_run_rejects_label_volume_hash_mismatch(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'label-hash-mismatch')
+	metadata_path = (
+		Path(raw['voxel_dataset']['input_dir']) / 'voxel_dataset_metadata.json'
+	)
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	label_path = Path(metadata['label_volume']['path'])
+	labels = np.load(label_path, allow_pickle=False)
+	labels[0, 0, 0] = 1
+	np.save(label_path, labels, allow_pickle=False)
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	with pytest.raises(ValueError, match='label_volume hash'):
+		run_f3_lithology_voxel_decoder(config, device='cpu')
+
+
+def test_latest_and_best_checkpoints_follow_selection_rule(
+	tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	raw, _ = _job(tmp_path, 'selection')
+	actual_validate = voxel_decoder_runner.validate_voxel_decoder_one_epoch
+	validation_calls = 0
+
+	def controlled_validate(**kwargs):
+		nonlocal validation_calls
+		metrics = dict(actual_validate(**kwargs))
+		metrics['macro_f1'] = 1.0 if validation_calls == 0 else 0.0
+		validation_calls += 1
+		return metrics
+
+	monkeypatch.setattr(
+		voxel_decoder_runner,
+		'validate_voxel_decoder_one_epoch',
+		controlled_validate,
+	)
+	result = run_f3_lithology_voxel_decoder(
+		f3_lithology_voxel_decoder_config_from_mapping(raw), device='cpu'
+	)
+	latest = load_voxel_decoder_checkpoint(result.latest_checkpoint)
+	best = load_voxel_decoder_checkpoint(result.best_checkpoint)
+	assert latest['epoch'] == 1
+	assert latest['checkpoint_kind'] == 'completed'
+	assert latest['best_selection_state']['epoch'] == 0
+	assert best['epoch'] == 0
+	assert best['checkpoint_kind'] == 'epoch'
+	assert best['current_metrics']['validation']['macro_f1'] == 1.0
+
+
+def test_run_json_artifacts_are_strict_standard_json(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'standard-json')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=1)
+
+	def reject_constant(value: str) -> None:
+		raise AssertionError(f'non-standard JSON constant: {value}')
+
+	for name in (
+		'resolved_config.json',
+		'run_metadata.json',
+		'train_tile_manifest.json',
+		'validation_tile_manifest.json',
+	):
+		text = (config.output_dir / name).read_text(encoding='utf-8')
+		assert text.endswith('\n')
+		assert isinstance(json.loads(text, parse_constant=reject_constant), dict)
+
+
+def test_completed_checkpoint_cannot_be_resumed(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'completed', epochs=1)
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	result = run_f3_lithology_voxel_decoder(config, device='cpu')
+	with pytest.raises(ValueError, match='completed'):
+		run_f3_lithology_voxel_decoder(
+			config, device='cpu', resume=result.latest_checkpoint
+		)

@@ -177,6 +177,7 @@ def _run_epoch(  # noqa: C901, PLR0913
 	metrics.update(
 		{
 			'loss': total_weighted_ce_sum / total_weight_sum,
+			'weighted_cross_entropy': total_weighted_ce_sum / total_weight_sum,
 			'unweighted_cross_entropy': total_unweighted_ce_sum / total_voxels,
 			'class_weight_sum': total_weight_sum,
 			'supervised_voxel_count': total_voxels,
