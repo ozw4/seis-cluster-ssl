@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
+import seis_ssl_cluster.f3.lithology.voxel_report as voxel_report_module
 from seis_ssl_cluster.config.f3_lithology_voxel_report import _selected_slices
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.labels import F3ClassInfo
+from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
+	EVALUATION_METADATA_JSON,
+	EVALUATION_OUTPUT_FILES,
+	METRICS_JSON,
+	evaluate_f3_lithology_voxels,
+)
 from seis_ssl_cluster.f3.lithology.voxel_report import (
 	VOXEL_EVALUATION_PUBLISH_FILES,
 	F3LithologyVoxelPublishConfig,
@@ -17,16 +24,19 @@ from seis_ssl_cluster.f3.lithology.voxel_report import (
 	_selected_slice_pairs,
 	_validate_identity_summary,
 	_write_aggregate_figures,
+	build_f3_lithology_voxel_report,
 	build_f3_lithology_voxel_report_payload,
+	inspect_f3_lithology_voxel_report,
 	publish_f3_lithology_voxel_report,
 	render_f3_lithology_voxel_report_markdown,
 )
 from seis_ssl_cluster.f3.lithology.voxel_visualization import (
 	F3LithologyVoxelFigureConfig,
 )
-
-if TYPE_CHECKING:
-	from pathlib import Path
+from tests.helpers import run_python_proc
+from tests.seis_ssl_cluster.test_f3_lithology_voxel_evaluation import (
+	_fixture as evaluation_fixture,
+)
 
 
 def test_empty_selected_slices_preserve_validation_slice_fallback() -> None:
@@ -208,6 +218,74 @@ def test_voxel_report_checks_evaluation_input_paths_and_hashes(
 		)
 
 
+def test_voxel_report_rejects_numeric_output_hash_mismatch(tmp_path: Path) -> None:
+	config, _ = _evaluated_report_job(tmp_path)
+	inspect_f3_lithology_voxel_report(config)
+	(config.evaluation_input_dir / METRICS_JSON).write_text(
+		'{}\n', encoding='utf-8'
+	)
+
+	with pytest.raises(ValueError, match=r'metrics\.json hash'):
+		inspect_f3_lithology_voxel_report(config)
+
+
+def test_voxel_report_overwrite_removes_obsolete_selected_slice(
+	tmp_path: Path,
+) -> None:
+	config, _ = _evaluated_report_job(tmp_path)
+	build_f3_lithology_voxel_report(config)
+	obsolete = config.output_dir / 'figures' / 'selected_slices' / 'obsolete.png'
+	obsolete.write_bytes(b'obsolete')
+
+	build_f3_lithology_voxel_report(replace(config, overwrite=True))
+
+	assert not obsolete.exists()
+
+
+def test_voxel_report_failure_leaves_existing_output_untouched(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config, _ = _evaluated_report_job(tmp_path)
+	config.output_dir.mkdir(parents=True)
+	marker = config.output_dir / 'existing.txt'
+	marker.write_text('existing\n', encoding='utf-8')
+
+	def fail_after_partial_write(output_dir: Path, **_: object) -> tuple[Path, ...]:
+		(output_dir / 'partial.png').write_bytes(b'partial')
+		raise RuntimeError('synthetic report failure')
+
+	monkeypatch.setattr(
+		voxel_report_module,
+		'_write_aggregate_figures',
+		fail_after_partial_write,
+	)
+	with pytest.raises(RuntimeError, match='synthetic report failure'):
+		build_f3_lithology_voxel_report(replace(config, overwrite=True))
+
+	assert marker.read_text(encoding='utf-8') == 'existing\n'
+	assert not (config.output_dir / 'partial.png').exists()
+	assert not tuple(
+		config.output_dir.parent.glob(f'.{config.output_dir.name}.staging-*')
+	)
+
+
+def test_voxel_report_cli_dry_run_does_not_write(tmp_path: Path) -> None:
+	config, raw = _evaluated_report_job(tmp_path)
+	config_path = tmp_path / 'report.json'
+	config_path.write_text(json.dumps(raw), encoding='utf-8')
+
+	completed = run_python_proc(
+		Path('proc/seis_ssl_cluster/build_f3_lithology_voxel_report.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert completed.returncode == 0, completed.stderr
+	assert 'execution: dry-run; F3 voxel lithology report skipped' in completed.stdout
+	assert not config.output_dir.exists()
+
+
 def _payload(*, kind: str) -> dict[str, object]:
 	metrics = {
 		'accuracy': 1.0,
@@ -269,8 +347,21 @@ def _publish_config(
 	dummy = tmp_path / 'unused'
 	evaluation_dir = tmp_path / 'evaluation'
 	evaluation_dir.mkdir(exist_ok=True)
-	for name in VOXEL_EVALUATION_PUBLISH_FILES:
+	for name in EVALUATION_OUTPUT_FILES:
 		(evaluation_dir / name).write_text('{}\n', encoding='utf-8')
+	(evaluation_dir / EVALUATION_METADATA_JSON).write_text(
+		json.dumps(
+			{
+				'artifact_type': 'f3_lithology_voxel_evaluation',
+				'schema_version': 2,
+				'outputs': {
+					name: _identity(evaluation_dir / name)
+					for name in EVALUATION_OUTPUT_FILES
+				},
+			}
+		),
+		encoding='utf-8',
+	)
 	return F3LithologyVoxelReportConfig(
 		prediction_input_dir=dummy,
 		voxel_dataset_input_dir=dummy,
@@ -342,3 +433,57 @@ def _evaluation_identity_paths(
 
 def _identity(path: Path) -> dict[str, str]:
 	return {'path': str(path), 'sha256': file_sha256(path)}
+
+
+def _evaluated_report_job(
+	tmp_path: Path,
+) -> tuple[F3LithologyVoxelReportConfig, dict[str, object]]:
+	evaluation_config = evaluation_fixture(tmp_path / 'evaluation-job')
+	evaluate_f3_lithology_voxels(evaluation_config)
+	output_dir = evaluation_config.artifact_root / 'report'
+	config = F3LithologyVoxelReportConfig(
+		prediction_input_dir=evaluation_config.prediction_input_dir,
+		voxel_dataset_input_dir=evaluation_config.voxel_dataset_input_dir,
+		evaluation_input_dir=evaluation_config.output_dir,
+		seismic_volume=evaluation_config.source_label_volume,
+		label_volume=evaluation_config.source_label_volume,
+		class_info=evaluation_config.class_info,
+		png_label_inventory=evaluation_config.png_label_inventory,
+		segy_geometry_json=evaluation_config.segy_geometry_json,
+		output_dir=output_dir,
+		dataset=dict(evaluation_config.dataset),
+		figure=F3LithologyVoxelFigureConfig(dpi=35),
+	)
+	raw = {
+		'paths': {
+			'artifact_root': str(evaluation_config.artifact_root),
+			'f3_root': str(evaluation_config.f3_root),
+			'results_root': str(tmp_path / 'results'),
+		},
+		'dataset': dict(evaluation_config.dataset),
+		'labels': {
+			'seismic_volume': str(evaluation_config.source_label_volume),
+			'source_label_volume': str(evaluation_config.source_label_volume),
+			'class_info': str(evaluation_config.class_info),
+			'png_label_inventory': str(
+				evaluation_config.png_label_inventory
+			),
+			'segy_geometry_json': str(evaluation_config.segy_geometry_json),
+		},
+		'voxel_predictions': {
+			'input_dir': str(evaluation_config.prediction_input_dir)
+		},
+		'voxel_dataset': {
+			'input_dir': str(evaluation_config.voxel_dataset_input_dir)
+		},
+		'evaluation': {'input_dir': str(evaluation_config.output_dir)},
+		'report': {
+			'selected_slices': {},
+			'dpi': 35,
+			'include_confidence': False,
+			'amplitude_clip_percentiles': [1.0, 99.0],
+		},
+		'outputs': {'output_dir': str(output_dir), 'overwrite': False},
+		'publish': {'enabled': False},
+	}
+	return config, raw

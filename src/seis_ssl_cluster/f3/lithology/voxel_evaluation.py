@@ -58,6 +58,17 @@ BOUNDARY_REGION_METRICS_CSV = 'boundary_region_metrics.csv'
 VALIDATION_SLICE_METRICS_CSV = 'validation_slice_metrics.csv'
 VALIDATION_TRACE_METRICS_CSV = 'validation_trace_metrics.csv'
 EVALUATION_METADATA_JSON = 'evaluation_metadata.json'
+EVALUATION_OUTPUT_FILES = (
+	METRICS_JSON,
+	METRICS_CSV,
+	CONFUSION_MATRIX_CSV,
+	CLASSIFICATION_REPORT_MD,
+	BOUNDARY_METRICS_JSON,
+	BOUNDARY_METRICS_CSV,
+	BOUNDARY_REGION_METRICS_CSV,
+	VALIDATION_SLICE_METRICS_CSV,
+	VALIDATION_TRACE_METRICS_CSV,
+)
 
 
 @dataclass(frozen=True)
@@ -257,6 +268,7 @@ def _write_evaluation(
 		output_dir / EVALUATION_METADATA_JSON,
 		_evaluation_metadata(
 			config,
+			output_dir=output_dir,
 			inspection=inspection,
 			slice_count=len(slice_rows),
 			trace_count=len(trace_rows),
@@ -878,13 +890,14 @@ def _with_undefined_reasons(
 def _evaluation_metadata(
 	config: F3LithologyVoxelEvaluationConfig,
 	*,
+	output_dir: Path,
 	inspection: F3LithologyVoxelEvaluationInspection,
 	slice_count: int,
 	trace_count: int,
 ) -> dict[str, object]:
 	return {
 		'artifact_type': 'f3_lithology_voxel_evaluation',
-		'schema_version': 1,
+		'schema_version': 2,
 		'dataset': dict(config.dataset),
 		'prediction_kind': inspection.prediction_artifact.metadata['prediction_kind'],
 		'model_tag': inspection.prediction_artifact.metadata['model_tag'],
@@ -922,20 +935,13 @@ def _evaluation_metadata(
 			'validation_trace_row_count': trace_count,
 		},
 		'outputs': {
-			name: str(config.output_dir / name)
-			for name in (
-				METRICS_JSON,
-				METRICS_CSV,
-				CONFUSION_MATRIX_CSV,
-				CLASSIFICATION_REPORT_MD,
-				BOUNDARY_METRICS_JSON,
-				BOUNDARY_METRICS_CSV,
-				BOUNDARY_REGION_METRICS_CSV,
-				VALIDATION_SLICE_METRICS_CSV,
-				VALIDATION_TRACE_METRICS_CSV,
-				EVALUATION_METADATA_JSON,
-			)
+			name: {
+				'path': str(config.output_dir / name),
+				'sha256': file_sha256(output_dir / name),
+			}
+			for name in EVALUATION_OUTPUT_FILES
 		},
+		'metadata_path': str(config.output_dir / EVALUATION_METADATA_JSON),
 	}
 
 

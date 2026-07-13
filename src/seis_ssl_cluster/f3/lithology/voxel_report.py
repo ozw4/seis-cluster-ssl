@@ -7,6 +7,8 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,16 +19,12 @@ import numpy as np
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
 from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
-	BOUNDARY_METRICS_CSV,
 	BOUNDARY_METRICS_JSON,
 	BOUNDARY_REGION_METRICS_CSV,
-	CLASSIFICATION_REPORT_MD,
-	CONFUSION_MATRIX_CSV,
 	EVALUATION_METADATA_JSON,
-	METRICS_CSV,
+	EVALUATION_OUTPUT_FILES,
 	METRICS_JSON,
 	VALIDATION_SLICE_METRICS_CSV,
-	VALIDATION_TRACE_METRICS_CSV,
 )
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	METADATA_NAME as PREDICTION_METADATA_NAME,
@@ -60,15 +58,7 @@ FIGURES_DIR = 'figures'
 SELECTED_SLICES_DIR = 'selected_slices'
 VOXEL_REPORT_PUBLISH_SUFFIXES = frozenset({'.md', '.json', '.csv', '.png'})
 VOXEL_EVALUATION_PUBLISH_FILES = (
-	METRICS_JSON,
-	METRICS_CSV,
-	CONFUSION_MATRIX_CSV,
-	CLASSIFICATION_REPORT_MD,
-	BOUNDARY_METRICS_JSON,
-	BOUNDARY_METRICS_CSV,
-	BOUNDARY_REGION_METRICS_CSV,
-	VALIDATION_SLICE_METRICS_CSV,
-	VALIDATION_TRACE_METRICS_CSV,
+	*EVALUATION_OUTPUT_FILES,
 	EVALUATION_METADATA_JSON,
 )
 KNOWN_LIMITATIONS = (
@@ -159,12 +149,15 @@ def inspect_f3_lithology_voxel_report(
 ) -> F3LithologyVoxelReportInspection:
 	"""Validate every report input and selected validation-slice identity."""
 	_validate_input_files(config)
+	evaluation = _read_json_object(
+		config.evaluation_input_dir / EVALUATION_METADATA_JSON
+	)
+	_validate_evaluation_output_identities(
+		evaluation, evaluation_input_dir=config.evaluation_input_dir
+	)
 	metrics = _read_json_object(config.evaluation_input_dir / METRICS_JSON)
 	boundary = _read_json_object(
 		config.evaluation_input_dir / BOUNDARY_METRICS_JSON
-	)
-	evaluation = _read_json_object(
-		config.evaluation_input_dir / EVALUATION_METADATA_JSON
 	)
 	regions = tuple(
 		_read_csv(config.evaluation_input_dir / BOUNDARY_REGION_METRICS_CSV)
@@ -206,8 +199,48 @@ def build_f3_lithology_voxel_report(
 		raise FileExistsError(
 			f'refusing to overwrite existing output: {config.output_dir}'
 		)
-	config.output_dir.mkdir(parents=True, exist_ok=True)
-	figures_dir = config.output_dir / FIGURES_DIR
+	config.output_dir.parent.mkdir(parents=True, exist_ok=True)
+	staging = Path(
+		tempfile.mkdtemp(
+			prefix=f'.{config.output_dir.name}.staging-', dir=config.output_dir.parent
+		)
+	)
+	try:
+		staged_result = _write_f3_lithology_voxel_report(
+			staging, config=config, inspection=inspection
+		)
+		figure_paths = tuple(
+			config.output_dir / path.relative_to(staging)
+			for path in staged_result.figure_paths
+		)
+		_commit_directory(staging, config.output_dir, overwrite=config.overwrite)
+	except BaseException:
+		shutil.rmtree(staging, ignore_errors=True)
+		raise
+	result = F3LithologyVoxelReportResult(
+		config.output_dir / REPORT_MARKDOWN,
+		config.output_dir / REPORT_JSON,
+		figure_paths,
+		staged_result.payload,
+	)
+	manifest = publish_f3_lithology_voxel_report(result, config=config)
+	return F3LithologyVoxelReportResult(
+		result.report_markdown,
+		result.report_json,
+		result.figure_paths,
+		result.payload,
+		manifest,
+	)
+
+
+def _write_f3_lithology_voxel_report(
+	output_dir: Path,
+	*,
+	config: F3LithologyVoxelReportConfig,
+	inspection: F3LithologyVoxelReportInspection,
+) -> F3LithologyVoxelReportResult:
+	"""Write a complete report into a new staging directory."""
+	figures_dir = output_dir / FIGURES_DIR
 	selected_dir = figures_dir / SELECTED_SLICES_DIR
 	figures_dir.mkdir(parents=True, exist_ok=True)
 	selected_dir.mkdir(parents=True, exist_ok=True)
@@ -257,20 +290,16 @@ def build_f3_lithology_voxel_report(
 		evaluation_metadata=evaluation,
 		supervision_metadata=supervision,
 		figure_paths=figure_paths,
-		output_dir=config.output_dir,
+		output_dir=output_dir,
 	)
-	markdown_path = config.output_dir / REPORT_MARKDOWN
-	json_path = config.output_dir / REPORT_JSON
+	markdown_path = output_dir / REPORT_MARKDOWN
+	json_path = output_dir / REPORT_JSON
 	markdown_path.write_text(
 		render_f3_lithology_voxel_report_markdown(payload), encoding='utf-8'
 	)
 	_write_json(json_path, payload)
-	result = F3LithologyVoxelReportResult(
-		markdown_path, json_path, tuple(figure_paths), payload
-	)
-	manifest = publish_f3_lithology_voxel_report(result, config=config)
 	return F3LithologyVoxelReportResult(
-		markdown_path, json_path, tuple(figure_paths), payload, manifest
+		markdown_path, json_path, tuple(figure_paths), payload
 	)
 
 
@@ -462,6 +491,12 @@ def publish_f3_lithology_voxel_report(
 	policy = config.publish
 	if not policy.enabled:
 		return None
+	evaluation = _read_json_object(
+		config.evaluation_input_dir / EVALUATION_METADATA_JSON
+	)
+	_validate_evaluation_output_identities(
+		evaluation, evaluation_input_dir=config.evaluation_input_dir
+	)
 	prediction = _mapping(result.payload.get('prediction'), 'prediction')
 	output_dir = policy.output_dir or default_f3_lithology_voxel_publish_dir(
 		results_root=policy.results_root,
@@ -763,6 +798,31 @@ def _validate_identity_summary(
 	)
 
 
+def _validate_evaluation_output_identities(
+	evaluation: Mapping[str, object], *, evaluation_input_dir: Path
+) -> None:
+	if evaluation.get('artifact_type') != 'f3_lithology_voxel_evaluation':
+		raise ValueError('invalid voxel evaluation artifact_type')
+	if evaluation.get('schema_version') != 2:
+		raise ValueError('unsupported voxel evaluation schema_version')
+	outputs = _mapping(evaluation.get('outputs'), 'evaluation outputs')
+	for name in EVALUATION_OUTPUT_FILES:
+		identity = _mapping(outputs.get(name), f'evaluation output {name}')
+		path = evaluation_input_dir / name
+		recorded_path = identity.get('path')
+		if not isinstance(recorded_path, str) or Path(recorded_path).resolve(
+			strict=False
+		) != path.resolve(strict=False):
+			raise ValueError(
+				f'voxel report evaluation output identity mismatch: {name} path'
+			)
+		sha256 = identity.get('sha256')
+		if not isinstance(sha256, str) or sha256 != file_sha256(path):
+			raise ValueError(
+				f'voxel report evaluation output identity mismatch: {name} hash'
+			)
+
+
 def _validate_evaluation_input_identity(
 	value: object, *, path: Path, label: str
 ) -> None:
@@ -808,6 +868,24 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
 		json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + '\n',
 		encoding='utf-8',
 	)
+
+
+def _commit_directory(staging: Path, target: Path, *, overwrite: bool) -> None:
+	if not target.exists():
+		staging.replace(target)
+		return
+	if not overwrite:
+		raise FileExistsError(f'refusing to overwrite existing output: {target}')
+	backup = target.with_name(f'.{target.name}.backup')
+	if backup.exists():
+		shutil.rmtree(backup)
+	target.replace(backup)
+	try:
+		staging.replace(target)
+	except BaseException:
+		backup.replace(target)
+		raise
+	shutil.rmtree(backup)
 
 
 def _validate_finite(value: object) -> None:

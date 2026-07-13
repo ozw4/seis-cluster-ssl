@@ -13,6 +13,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_evaluation import (
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.io.labels import read_class_info
 from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
+	EVALUATION_OUTPUT_FILES,
 	evaluate_f3_lithology_voxels,
 	inspect_f3_lithology_voxel_evaluation,
 )
@@ -43,6 +44,15 @@ def test_perfect_evaluation_uses_unique_aggregate_and_duplicate_slices(
 	assert boundary['vertical_boundary_class_3_recall_at_1'] == 1.0
 	assert boundary['vertical_boundary_class_5_recall_at_1'] == 1.0
 	assert json.dumps(boundary, allow_nan=False)
+	metadata = json.loads(
+		result.evaluation_metadata_json.read_text(encoding='utf-8')
+	)
+	assert metadata['schema_version'] == 2
+	for name in EVALUATION_OUTPUT_FILES:
+		assert metadata['outputs'][name] == {
+			'path': str(result.output_dir / name),
+			'sha256': file_sha256(result.output_dir / name),
+		}
 
 
 def test_chunk_size_is_metric_invariant(tmp_path: Path) -> None:
@@ -61,6 +71,9 @@ def test_error_prediction_matches_direct_unique_voxel_accuracy(tmp_path: Path) -
 	result = evaluate_f3_lithology_voxels(config)
 	metrics = json.loads(result.metrics_json.read_text(encoding='utf-8'))
 	assert metrics['accuracy'] == pytest.approx(11 / 12)
+	boundary = json.loads(result.boundary_metrics_json.read_text(encoding='utf-8'))
+	assert boundary['vertical_boundary_precision_at_1'] == pytest.approx(6 / 7)
+	assert boundary['vertical_boundary_f1_at_1'] == pytest.approx(12 / 13)
 
 
 def test_no_boundary_and_zero_support_use_standard_json_nulls(tmp_path: Path) -> None:
