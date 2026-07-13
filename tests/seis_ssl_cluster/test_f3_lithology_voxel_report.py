@@ -7,11 +7,15 @@ from typing import TYPE_CHECKING
 import pytest
 
 from seis_ssl_cluster.config.f3_lithology_voxel_report import _selected_slices
+from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.labels import F3ClassInfo
 from seis_ssl_cluster.f3.lithology.voxel_report import (
+	VOXEL_EVALUATION_PUBLISH_FILES,
 	F3LithologyVoxelPublishConfig,
 	F3LithologyVoxelReportConfig,
 	F3LithologyVoxelReportResult,
+	_selected_slice_pairs,
+	_validate_identity_summary,
 	_write_aggregate_figures,
 	build_f3_lithology_voxel_report_payload,
 	publish_f3_lithology_voxel_report,
@@ -111,7 +115,12 @@ def test_voxel_publish_excludes_raw_volume_and_enforces_size_guard(
 
 	assert manifest is not None
 	targets = [item.target.name for item in manifest.items]
-	assert targets == ['report.md', 'report.json', 'confusion_matrix.png']
+	assert targets == [
+		'report.md',
+		'report.json',
+		*VOXEL_EVALUATION_PUBLISH_FILES,
+		'confusion_matrix.png',
+	]
 	assert 'raw.npy' not in targets
 	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
 		publish_f3_lithology_voxel_report(
@@ -133,6 +142,69 @@ def test_voxel_publish_output_must_be_under_results_root(tmp_path: Path) -> None
 			enabled=True,
 			results_root=tmp_path / 'results',
 			output_dir=tmp_path / 'outside-results',
+		)
+
+
+def test_selected_slices_must_have_validation_metrics(tmp_path: Path) -> None:
+	config = replace(
+		_publish_config(tmp_path, report_dir=tmp_path / 'report'),
+		selected_slices={'inline': (999,)},
+	)
+	with pytest.raises(ValueError, match='must be validation slices'):
+		_selected_slice_pairs(
+			config,
+			slice_rows=({'slice_type': 'inline', 'slice_index': '100'},),
+		)
+
+
+def test_voxel_report_checks_evaluation_input_paths_and_hashes(
+	tmp_path: Path,
+) -> None:
+	config = _identity_config(tmp_path)
+	supervision = {
+		'dataset': dict(config.dataset),
+		'labels': {
+			'source_label_segy': str(config.label_volume.with_name('labels.sgy'))
+		},
+	}
+	prediction = {
+		'prediction_kind': 'token_projection_nearest',
+		'model_tag': 'model',
+	}
+	inputs = {
+		name: _identity(path)
+		for name, path in _evaluation_identity_paths(config).items()
+	}
+	evaluation = {
+		'prediction_kind': 'token_projection_nearest',
+		'model_tag': 'model',
+		'dataset': dict(config.dataset),
+		'inputs': inputs,
+	}
+	_validate_identity_summary(
+		prediction,
+		evaluation=evaluation,
+		supervision=supervision,
+		config=config,
+	)
+
+	inputs['prediction_metadata']['sha256'] = '0' * 64
+	with pytest.raises(ValueError, match='prediction_metadata hash'):
+		_validate_identity_summary(
+			prediction,
+			evaluation=evaluation,
+			supervision=supervision,
+			config=config,
+		)
+	inputs['prediction_metadata'] = _identity(
+		config.label_volume.with_name('labels.sgy')
+	)
+	with pytest.raises(ValueError, match='prediction_metadata path'):
+		_validate_identity_summary(
+			prediction,
+			evaluation=evaluation,
+			supervision=supervision,
+			config=config,
 		)
 
 
@@ -195,10 +267,14 @@ def _publish_config(
 	tmp_path: Path, *, report_dir: Path
 ) -> F3LithologyVoxelReportConfig:
 	dummy = tmp_path / 'unused'
+	evaluation_dir = tmp_path / 'evaluation'
+	evaluation_dir.mkdir(exist_ok=True)
+	for name in VOXEL_EVALUATION_PUBLISH_FILES:
+		(evaluation_dir / name).write_text('{}\n', encoding='utf-8')
 	return F3LithologyVoxelReportConfig(
 		prediction_input_dir=dummy,
 		voxel_dataset_input_dir=dummy,
-		evaluation_input_dir=dummy,
+		evaluation_input_dir=evaluation_dir,
 		seismic_volume=dummy,
 		label_volume=dummy,
 		class_info=dummy,
@@ -212,3 +288,57 @@ def _publish_config(
 			output_dir=tmp_path / 'results' / 'published',
 		),
 	)
+
+
+def _identity_config(tmp_path: Path) -> F3LithologyVoxelReportConfig:
+	config = _publish_config(tmp_path, report_dir=tmp_path / 'report')
+	prediction_dir = tmp_path / 'prediction'
+	voxel_dataset_dir = tmp_path / 'voxel_dataset'
+	prediction_dir.mkdir()
+	voxel_dataset_dir.mkdir()
+	paths = {
+		'prediction_metadata': prediction_dir / 'prediction_metadata.json',
+		'voxel_dataset_metadata': voxel_dataset_dir / 'voxel_dataset_metadata.json',
+		'voxel_split_grid': voxel_dataset_dir / 'supervision_split_grid.npy',
+		'label_volume': tmp_path / 'labels.npy',
+		'png_label_inventory': tmp_path / 'inventory.csv',
+		'segy_geometry_json': tmp_path / 'geometry.json',
+		'class_info': tmp_path / 'class_info.json',
+	}
+	for path in paths.values():
+		path.write_bytes(b'identity')
+	source_label_segy = tmp_path / 'labels.sgy'
+	source_label_segy.write_bytes(b'segy')
+	return replace(
+		config,
+		prediction_input_dir=prediction_dir,
+		voxel_dataset_input_dir=voxel_dataset_dir,
+		label_volume=paths['label_volume'],
+		png_label_inventory=paths['png_label_inventory'],
+		segy_geometry_json=paths['segy_geometry_json'],
+		class_info=paths['class_info'],
+		dataset={'name': 'f3', 'version': 'test'},
+	)
+
+
+def _evaluation_identity_paths(
+	config: F3LithologyVoxelReportConfig,
+) -> dict[str, Path]:
+	return {
+		'prediction_metadata': config.prediction_input_dir / 'prediction_metadata.json',
+		'voxel_dataset_metadata': (
+			config.voxel_dataset_input_dir / 'voxel_dataset_metadata.json'
+		),
+		'voxel_split_grid': (
+			config.voxel_dataset_input_dir / 'supervision_split_grid.npy'
+		),
+		'label_volume': config.label_volume,
+		'png_label_inventory': config.png_label_inventory,
+		'segy_geometry_json': config.segy_geometry_json,
+		'class_info': config.class_info,
+		'source_label_segy': config.label_volume.with_name('labels.sgy'),
+	}
+
+
+def _identity(path: Path) -> dict[str, str]:
+	return {'path': str(path), 'sha256': file_sha256(path)}

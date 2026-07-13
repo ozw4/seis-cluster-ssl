@@ -21,6 +21,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_report import (
 )
 from seis_ssl_cluster.f3.lithology.voxel_report import (
 	build_f3_lithology_voxel_report,
+	inspect_f3_lithology_voxel_report,
 )
 
 STAGE = 'build_f3_lithology_voxel_report'
@@ -49,6 +50,7 @@ def main() -> None:
 		config_path=config_path,
 	)
 	if args.dry_run:
+		inspect_f3_lithology_voxel_report(config)
 		_print_summary(config)
 		print('execution: dry-run; F3 voxel lithology report skipped')
 		return

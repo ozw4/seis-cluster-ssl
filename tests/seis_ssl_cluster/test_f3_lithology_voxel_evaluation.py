@@ -82,6 +82,26 @@ def test_v0_token_projection_uses_the_same_evaluator(tmp_path: Path) -> None:
 	assert metrics['accuracy'] == 1.0
 
 
+def test_v0_token_projection_allows_model_specific_embedding_sources(
+	tmp_path: Path,
+) -> None:
+	config = _fixture(tmp_path, prediction_kind='token_projection_nearest')
+	metadata_path = _token_metadata_path(config.prediction_input_dir)
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	model_metadata = tmp_path / 'model.embedding_metadata.json'
+	model_metadata.write_text('{}\n', encoding='utf-8')
+	model_valid_tokens = tmp_path / 'model.valid_tokens.npy'
+	np.save(model_valid_tokens, np.ones((1, 1, 2), dtype=np.bool_))
+	metadata['inputs']['embedding_metadata_json'] = str(model_metadata)
+	metadata['inputs']['valid_tokens_path'] = str(model_valid_tokens)
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+	_refresh_token_metadata_identity(config.prediction_input_dir, metadata_path)
+
+	inspection = inspect_f3_lithology_voxel_evaluation(config)
+
+	assert inspection.validation_voxel_count == 12
+
+
 def test_v0_token_projection_requires_source_dataset_identity(
 	tmp_path: Path,
 ) -> None:

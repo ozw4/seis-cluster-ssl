@@ -756,13 +756,12 @@ def _validate_source_identities(
 				class_identity, config.class_info, label='prediction class_info'
 			)
 		return
-	_token_projection_source_check(prediction, metadata=metadata, config=config)
+	_token_projection_source_check(prediction, config=config)
 
 
 def _token_projection_source_check(
 	prediction: F3VoxelPredictionArtifact,
 	*,
-	metadata: Mapping[str, object],
 	config: F3LithologyVoxelEvaluationConfig,
 ) -> None:
 	files = _mapping(
@@ -794,17 +793,6 @@ def _token_projection_source_check(
 		('source_label_segy', config.source_label_segy),
 	):
 		_assert_same_path(inputs.get(key), selected, f'token source {key}')
-	reference = _mapping(metadata.get('reference_embedding'), 'reference_embedding')
-	valid_tokens = _mapping(
-		metadata.get('reference_valid_tokens'), 'reference_valid_tokens'
-	)
-	for key, identity in (
-		('embedding_metadata_json', reference),
-		('valid_tokens_path', valid_tokens),
-	):
-		_assert_same_path(
-			inputs.get(key), Path(cast('str', identity['path'])), key
-		)
 
 
 def config_geometry(config: F3LithologyVoxelEvaluationConfig) -> Mapping[str, object]:

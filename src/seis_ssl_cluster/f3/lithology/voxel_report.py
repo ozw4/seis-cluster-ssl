@@ -14,15 +14,25 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
+from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
 from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
+	BOUNDARY_METRICS_CSV,
 	BOUNDARY_METRICS_JSON,
 	BOUNDARY_REGION_METRICS_CSV,
+	CLASSIFICATION_REPORT_MD,
+	CONFUSION_MATRIX_CSV,
 	EVALUATION_METADATA_JSON,
+	METRICS_CSV,
 	METRICS_JSON,
 	VALIDATION_SLICE_METRICS_CSV,
+	VALIDATION_TRACE_METRICS_CSV,
 )
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	METADATA_NAME as PREDICTION_METADATA_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	F3VoxelPredictionArtifact,
 	validate_f3_voxel_prediction_artifact,
 )
 from seis_ssl_cluster.f3.lithology.voxel_visualization import (
@@ -49,6 +59,18 @@ REPORT_JSON = 'report.json'
 FIGURES_DIR = 'figures'
 SELECTED_SLICES_DIR = 'selected_slices'
 VOXEL_REPORT_PUBLISH_SUFFIXES = frozenset({'.md', '.json', '.csv', '.png'})
+VOXEL_EVALUATION_PUBLISH_FILES = (
+	METRICS_JSON,
+	METRICS_CSV,
+	CONFUSION_MATRIX_CSV,
+	CLASSIFICATION_REPORT_MD,
+	BOUNDARY_METRICS_JSON,
+	BOUNDARY_METRICS_CSV,
+	BOUNDARY_REGION_METRICS_CSV,
+	VALIDATION_SLICE_METRICS_CSV,
+	VALIDATION_TRACE_METRICS_CSV,
+	EVALUATION_METADATA_JSON,
+)
 KNOWN_LIMITATIONS = (
 	'Evaluation is limited to supervised planes.',
 	'Spatially correlated voxels are not treated as independent samples for '
@@ -117,11 +139,69 @@ class F3LithologyVoxelReportResult:
 	publish_manifest: PublishManifest | None = None
 
 
+@dataclass(frozen=True)
+class F3LithologyVoxelReportInspection:
+	"""Identity-validated numeric and volume inputs for one report."""
+
+	metrics: Mapping[str, object]
+	boundary_metrics: Mapping[str, object]
+	evaluation_metadata: Mapping[str, object]
+	boundary_region_rows: tuple[Mapping[str, object], ...]
+	validation_slice_rows: tuple[Mapping[str, object], ...]
+	prediction_artifact: F3VoxelPredictionArtifact
+	supervision_metadata: Mapping[str, object]
+	classes: tuple[F3ClassInfo, ...]
+	selected_slices: tuple[tuple[str, int], ...]
+
+
+def inspect_f3_lithology_voxel_report(
+	config: F3LithologyVoxelReportConfig,
+) -> F3LithologyVoxelReportInspection:
+	"""Validate every report input and selected validation-slice identity."""
+	_validate_input_files(config)
+	metrics = _read_json_object(config.evaluation_input_dir / METRICS_JSON)
+	boundary = _read_json_object(
+		config.evaluation_input_dir / BOUNDARY_METRICS_JSON
+	)
+	evaluation = _read_json_object(
+		config.evaluation_input_dir / EVALUATION_METADATA_JSON
+	)
+	regions = tuple(
+		_read_csv(config.evaluation_input_dir / BOUNDARY_REGION_METRICS_CSV)
+	)
+	slices = tuple(
+		_read_csv(config.evaluation_input_dir / VALIDATION_SLICE_METRICS_CSV)
+	)
+	prediction = validate_f3_voxel_prediction_artifact(
+		config.prediction_input_dir, mmap_mode='r'
+	)
+	supervision = _read_json_object(config.voxel_dataset_input_dir / METADATA_NAME)
+	_validate_identity_summary(
+		prediction.metadata,
+		evaluation=evaluation,
+		supervision=supervision,
+		config=config,
+	)
+	classes = _read_classes(config.class_info)
+	selected = _selected_slice_pairs(config, slice_rows=slices)
+	return F3LithologyVoxelReportInspection(
+		metrics=metrics,
+		boundary_metrics=boundary,
+		evaluation_metadata=evaluation,
+		boundary_region_rows=regions,
+		validation_slice_rows=slices,
+		prediction_artifact=prediction,
+		supervision_metadata=supervision,
+		classes=classes,
+		selected_slices=selected,
+	)
+
+
 def build_f3_lithology_voxel_report(
 	config: F3LithologyVoxelReportConfig,
 ) -> F3LithologyVoxelReportResult:
 	"""Build aggregate plots, selected sections, report files, and publish copy."""
-	_validate_input_files(config)
+	inspection = inspect_f3_lithology_voxel_report(config)
 	if config.output_dir.exists() and not config.overwrite:
 		raise FileExistsError(
 			f'refusing to overwrite existing output: {config.output_dir}'
@@ -132,21 +212,14 @@ def build_f3_lithology_voxel_report(
 	figures_dir.mkdir(parents=True, exist_ok=True)
 	selected_dir.mkdir(parents=True, exist_ok=True)
 
-	metrics = _read_json_object(config.evaluation_input_dir / METRICS_JSON)
-	boundary = _read_json_object(config.evaluation_input_dir / BOUNDARY_METRICS_JSON)
-	evaluation = _read_json_object(
-		config.evaluation_input_dir / EVALUATION_METADATA_JSON
-	)
-	regions = _read_csv(config.evaluation_input_dir / BOUNDARY_REGION_METRICS_CSV)
-	slices = _read_csv(config.evaluation_input_dir / VALIDATION_SLICE_METRICS_CSV)
-	prediction = validate_f3_voxel_prediction_artifact(
-		config.prediction_input_dir, mmap_mode='r'
-	)
-	supervision = _read_json_object(config.voxel_dataset_input_dir / METADATA_NAME)
-	_validate_identity_summary(
-		prediction.metadata, evaluation=evaluation, supervision=supervision
-	)
-	classes = _read_classes(config.class_info)
+	metrics = inspection.metrics
+	boundary = inspection.boundary_metrics
+	evaluation = inspection.evaluation_metadata
+	regions = inspection.boundary_region_rows
+	slices = inspection.validation_slice_rows
+	prediction = inspection.prediction_artifact
+	supervision = inspection.supervision_metadata
+	classes = inspection.classes
 
 	aggregate_figures = _write_aggregate_figures(
 		figures_dir,
@@ -156,7 +229,6 @@ def build_f3_lithology_voxel_report(
 		classes=classes,
 		config=config.figure,
 	)
-	selected = _selected_slice_pairs(config, slice_rows=slices)
 	visualization = visualize_f3_lithology_voxel_slices(
 		seismic=np.load(config.seismic_volume, mmap_mode='r', allow_pickle=False),
 		labels=np.load(config.label_volume, mmap_mode='r', allow_pickle=False),
@@ -170,7 +242,7 @@ def build_f3_lithology_voxel_report(
 		prediction_valid_mask=prediction.arrays.valid_mask,
 		geometry=read_f3_line_geometry(config.segy_geometry_json),
 		classes=classes,
-		slices=selected,
+		slices=inspection.selected_slices,
 		output_dir=selected_dir,
 		config=config.figure,
 		metrics_by_slice=_metrics_by_slice(slices),
@@ -386,7 +458,7 @@ def publish_f3_lithology_voxel_report(
 	*,
 	config: F3LithologyVoxelReportConfig,
 ) -> PublishManifest | None:
-	"""Publish only report text/JSON and PNG figures; never raw volumes."""
+	"""Publish report, numeric evaluation artifacts, and PNG figures."""
 	policy = config.publish
 	if not policy.enabled:
 		return None
@@ -401,6 +473,10 @@ def publish_f3_lithology_voxel_report(
 		PublishItem(result.report_markdown, Path(REPORT_MARKDOWN)),
 		PublishItem(result.report_json, Path(REPORT_JSON)),
 	]
+	items.extend(
+		PublishItem(config.evaluation_input_dir / name, Path(name))
+		for name in VOXEL_EVALUATION_PUBLISH_FILES
+	)
 	items.extend(
 		PublishItem(path, path.relative_to(config.output_dir))
 		for path in result.figure_paths
@@ -537,11 +613,21 @@ def _selected_slice_pairs(
 	slice_rows: Sequence[Mapping[str, object]],
 ) -> tuple[tuple[str, int], ...]:
 	if config.selected_slices:
-		return tuple(
+		selected = tuple(
 			(slice_type, int(index))
 			for slice_type in ('inline', 'crossline')
 			for index in config.selected_slices.get(slice_type, ())
 		)
+		available = {
+			(str(row['slice_type']), int(row['slice_index'])) for row in slice_rows
+		}
+		missing = tuple(item for item in selected if item not in available)
+		if missing:
+			raise ValueError(
+				'report.selected_slices must be validation slices present in '
+				f'validation_slice_metrics.csv; missing={missing!r}'
+			)
+		return selected
 	available = {
 		(str(row['slice_type']), int(row['slice_index'])) for row in slice_rows
 	}
@@ -626,13 +712,7 @@ def _validate_input_files(config: F3LithologyVoxelReportConfig) -> None:
 		config.voxel_dataset_input_dir / METADATA_NAME,
 		*(
 			config.evaluation_input_dir / name
-			for name in (
-				METRICS_JSON,
-				BOUNDARY_METRICS_JSON,
-				BOUNDARY_REGION_METRICS_CSV,
-				VALIDATION_SLICE_METRICS_CSV,
-				EVALUATION_METADATA_JSON,
-			)
+			for name in VOXEL_EVALUATION_PUBLISH_FILES
 		),
 	)
 	for path in paths:
@@ -645,6 +725,7 @@ def _validate_identity_summary(
 	*,
 	evaluation: Mapping[str, object],
 	supervision: Mapping[str, object],
+	config: F3LithologyVoxelReportConfig,
 ) -> None:
 	if evaluation.get('prediction_kind') != prediction.get('prediction_kind'):
 		raise ValueError('voxel report prediction/evaluation kind mismatch')
@@ -652,6 +733,52 @@ def _validate_identity_summary(
 		raise ValueError('voxel report prediction/evaluation model mismatch')
 	if evaluation.get('dataset') != supervision.get('dataset'):
 		raise ValueError('voxel report evaluation/supervision dataset mismatch')
+	if evaluation.get('dataset') != dict(config.dataset):
+		raise ValueError('voxel report evaluation/config dataset mismatch')
+	inputs = _mapping(evaluation.get('inputs'), 'evaluation inputs')
+	for name, path in (
+		(
+			'prediction_metadata',
+			config.prediction_input_dir / PREDICTION_METADATA_NAME,
+		),
+		('voxel_dataset_metadata', config.voxel_dataset_input_dir / METADATA_NAME),
+		('voxel_split_grid', config.voxel_dataset_input_dir / GRID_NAME),
+		('label_volume', config.label_volume),
+		('png_label_inventory', config.png_label_inventory),
+		('segy_geometry_json', config.segy_geometry_json),
+		('class_info', config.class_info),
+	):
+		_validate_evaluation_input_identity(inputs.get(name), path=path, label=name)
+	source_label_segy = _mapping(
+		inputs.get('source_label_segy'), 'evaluation input source_label_segy'
+	)
+	labels = _mapping(supervision.get('labels'), 'supervision labels')
+	path_value = labels.get('source_label_segy')
+	if not isinstance(path_value, str):
+		raise TypeError('supervision labels.source_label_segy must be a string')
+	_validate_evaluation_input_identity(
+		source_label_segy,
+		path=Path(path_value),
+		label='source_label_segy',
+	)
+
+
+def _validate_evaluation_input_identity(
+	value: object, *, path: Path, label: str
+) -> None:
+	identity = _mapping(value, f'evaluation input {label}')
+	recorded_path = identity.get('path')
+	if not isinstance(recorded_path, str) or Path(recorded_path).resolve(
+		strict=False
+	) != path.resolve(strict=False):
+		raise ValueError(
+			f'voxel report evaluation input identity mismatch: {label} path'
+		)
+	sha256 = identity.get('sha256')
+	if not isinstance(sha256, str) or sha256 != file_sha256(path):
+		raise ValueError(
+			f'voxel report evaluation input identity mismatch: {label} hash'
+		)
 
 
 def _read_classes(path: Path) -> tuple[F3ClassInfo, ...]:

@@ -734,6 +734,12 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 		Path(config['probe']['probe_joblib']).parent.name == 'linear_balanced_v1'
 		for config in token_configs
 	)
+	voxel_dataset_raw = load_config(F3_VOXEL_DATASET_CONFIGS[0])
+	assert all(
+		config['labels']['png_label_inventory']
+		== voxel_dataset_raw['labels']['png_label_inventory']
+		for config in token_configs
+	)
 	assert len(
 		{config['predictions']['output_dir'] for config in token_configs}
 	) == len(token_configs)
