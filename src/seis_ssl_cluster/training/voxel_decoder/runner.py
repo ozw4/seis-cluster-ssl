@@ -111,6 +111,7 @@ def inspect_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912
 		config,
 		embedding_payload=embedding_payload,
 	)
+	_validate_voxel_dataset_identity(config, voxel_payload)
 	label_identity = voxel_payload.get('label_volume')
 	if not isinstance(label_identity, Mapping):
 		raise TypeError('voxel dataset metadata label_volume must be a mapping')
@@ -183,6 +184,7 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 		raise ValueError('max_steps must be a positive integer')
 	plan = inspect_f3_lithology_voxel_decoder(config)
 	_validate_input_files(plan)
+	_validate_source_hashes(plan)
 	output_dir = config.output_dir
 	resume_path = None if resume is None else Path(resume)
 	_validate_output_collision(output_dir, resume_path)
@@ -524,6 +526,19 @@ def _validate_source_provenance(
 		)
 
 
+def _validate_voxel_dataset_identity(
+	config: F3LithologyVoxelDecoderConfig,
+	voxel_payload: Mapping[str, object],
+) -> None:
+	dataset = voxel_payload.get('dataset')
+	if not isinstance(dataset, Mapping):
+		raise TypeError('voxel dataset metadata dataset must be a mapping')
+	if dataset != config.dataset:
+		raise ValueError(
+			'voxel dataset metadata dataset does not match configured dataset'
+		)
+
+
 def _validate_inspected_arrays(  # noqa: PLR0913
 	*,
 	embeddings: Path,
@@ -585,9 +600,22 @@ def _validate_inspected_arrays(  # noqa: PLR0913
 		reference_metadata=voxel_payload,
 		candidate_valid_tokens_path=valid_tokens,
 		candidate_embedding_shape=embedding_array.shape,
+		verify_valid_token_hash=False,
 	)
+
+
+def _validate_source_hashes(plan: VoxelDecoderInputPlan) -> None:
+	voxel_payload = _read_json_object(plan.voxel_metadata)
+	reference_valid_tokens = _required_metadata_mapping(
+		voxel_payload, 'reference_valid_tokens'
+	)
+	if reference_valid_tokens.get('sha256') != file_sha256(plan.valid_tokens):
+		raise ValueError(
+			'voxel dataset valid-token hash does not match selected valid-token '
+			'artifact'
+		)
 	declared_label = _required_metadata_mapping(voxel_payload, 'label_volume')
-	if declared_label.get('sha256') != file_sha256(label_volume):
+	if declared_label.get('sha256') != file_sha256(plan.label_volume):
 		raise ValueError(
 			'voxel dataset label_volume hash does not match selected label-volume '
 			'artifact'

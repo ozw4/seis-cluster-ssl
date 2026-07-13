@@ -255,13 +255,14 @@ class F3VoxelDecoderDataset(Dataset[dict[str, Any]]):
 		return value
 
 
-def validate_encoder_pairing(  # noqa: C901
+def validate_encoder_pairing(  # noqa: C901, PLR0913
 	*,
 	candidate_metadata: Mapping[str, object],
 	reference_metadata: Mapping[str, object],
 	candidate_valid_tokens_path: str | Path,
 	candidate_embedding_shape: Sequence[int],
 	reference_valid_tokens_path: str | Path | None = None,
+	verify_valid_token_hash: bool = True,
 ) -> None:
 	"""Reject any candidate that could silently change decoder evaluation geometry."""
 	reference_embedding = reference_metadata.get('reference_embedding')
@@ -291,7 +292,10 @@ def validate_encoder_pairing(  # noqa: C901
 		raise ValueError(
 			'supervision metadata must contain reference_valid_tokens.sha256'
 		)
-	if file_sha256(candidate_valid_tokens_path) != expected_sha:
+	if (
+		verify_valid_token_hash
+		and file_sha256(candidate_valid_tokens_path) != expected_sha
+	):
 		raise ValueError('candidate valid-token hash does not match canonical hash')
 	if reference_valid_tokens_path is not None:
 		candidate = np.load(

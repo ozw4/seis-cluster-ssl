@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
 from typing import TYPE_CHECKING
@@ -261,17 +262,17 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 			batch_size=_optional_positive_int(
 				train.get('batch_size'), 'train.batch_size'
 			),
-			learning_rate=_optional_positive_float(
+			learning_rate=_finite_positive_float(
 				train.get('learning_rate'), 'train.learning_rate'
 			),
-			weight_decay=_optional_nonnegative_float(
+			weight_decay=_finite_nonnegative_float(
 				train.get('weight_decay'), 'train.weight_decay'
 			),
 			class_weight=class_weight,
 			seed=seed,
 			num_workers=num_workers,
 			amp=amp,
-			gradient_clip_norm=_optional_positive_float(
+			gradient_clip_norm=_finite_positive_float(
 				train.get('gradient_clip_norm'), 'train.gradient_clip_norm'
 			),
 		),
@@ -284,6 +285,20 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 			)
 		},
 	)
+
+
+def _finite_positive_float(value: object, label: str) -> float:
+	result = _optional_positive_float(value, label)
+	if not math.isfinite(result):
+		raise ValueError(f'{label} must be finite; got {value!r}')
+	return result
+
+
+def _finite_nonnegative_float(value: object, label: str) -> float:
+	result = _optional_nonnegative_float(value, label)
+	if not math.isfinite(result):
+		raise ValueError(f'{label} must be finite; got {value!r}')
+	return result
 
 
 def _positive_sequence(value: object, label: str) -> tuple[int, ...]:

@@ -234,7 +234,28 @@ def test_inspection_rejects_checkpoint_embedding_identity_mismatch(
 	config = f3_lithology_voxel_inference_config_from_mapping(raw)
 
 	with pytest.raises(ValueError, match='embeddings hash'):
-		inspect_f3_lithology_voxel_inference(config)
+		inspect_f3_lithology_voxel_inference(config, verify_array_hashes=True)
+
+
+def test_dry_run_inspection_does_not_hash_array_contents(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	raw, _ = _write_job(tmp_path)
+	config = f3_lithology_voxel_inference_config_from_mapping(raw)
+	actual_file_sha256 = file_sha256
+
+	def reject_array_hash(path: str | Path) -> str:
+		if Path(path).suffix == '.npy':
+			raise AssertionError('dry-run hashed an array artifact')
+		return actual_file_sha256(path)
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.f3.lithology.voxel_decoder_inference.file_sha256',
+		reject_array_hash,
+	)
+	plan = inspect_f3_lithology_voxel_inference(config)
+
+	assert plan.token_grid_shape_xyz == (3, 1, 1)
 
 
 def test_cli_dry_run_does_not_write(tmp_path: Path) -> None:
@@ -295,6 +316,7 @@ def _write_job(tmp_path: Path) -> tuple[dict[str, object], Path]:
 	}
 	embedding_metadata_path.write_text(json.dumps(embedding_metadata), encoding='utf-8')
 	voxel_metadata = {
+		'dataset': {'name': 'tiny', 'version': 'v1'},
 		'classes': [
 			{'class_id': 0, 'class_name': 'zero'},
 			{'class_id': 1, 'class_name': 'one'},

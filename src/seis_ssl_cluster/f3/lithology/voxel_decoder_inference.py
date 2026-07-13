@@ -88,6 +88,8 @@ class _InferenceTile:
 
 def inspect_f3_lithology_voxel_inference(
 	config: F3LithologyVoxelInferenceConfig,
+	*,
+	verify_array_hashes: bool = False,
 ) -> VoxelDecoderInferencePlan:
 	"""Validate small source artifacts and checkpoint-bound identities."""
 	if config.checkpoint.name != 'best.pt':
@@ -127,6 +129,7 @@ def inspect_f3_lithology_voxel_inference(
 		embeddings=files.embeddings,
 		valid_tokens=files.valid_tokens,
 		embedding_metadata=files.metadata,
+		verify_array_hashes=verify_array_hashes,
 	)
 	_validate_manifest_identities(
 		checkpoint,
@@ -181,7 +184,7 @@ def predict_f3_lithology_voxels(
 	overwrite: bool | None = None,
 ) -> VoxelDecoderInferenceResult:
 	"""Run exact-once core-tile inference and atomically publish its artifact."""
-	plan = inspect_f3_lithology_voxel_inference(config)
+	plan = inspect_f3_lithology_voxel_inference(config, verify_array_hashes=True)
 	probabilities_enabled = (
 		config.write_probabilities
 		if write_probabilities is None
@@ -472,6 +475,7 @@ def _validate_artifact_identities(
 	embeddings: Path,
 	valid_tokens: Path,
 	embedding_metadata: Path,
+	verify_array_hashes: bool,
 ) -> None:
 	selected = {
 		'embeddings': embeddings,
@@ -496,7 +500,9 @@ def _validate_artifact_identities(
 		path = Path(path_value)
 		if not path.is_file():
 			raise FileNotFoundError(f'checkpoint-bound source is missing: {path}')
-		if file_sha256(path) != hash_value:
+		if (verify_array_hashes or path.suffix != '.npy') and (
+			file_sha256(path) != hash_value
+		):
 			raise ValueError(f'checkpoint/source identity mismatch: {key} hash')
 
 

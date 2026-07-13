@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from copy import deepcopy
 
 import pytest
@@ -58,4 +59,24 @@ def test_voxel_decoder_config_requires_frozen_encoder(tmp_path) -> None:
 	raw = deepcopy(_config(tmp_path))
 	raw['model']['freeze_encoder'] = False
 	with pytest.raises(ValueError, match='freeze_encoder'):
+		f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+
+@pytest.mark.parametrize(
+	('setting', 'value'),
+	[
+		('learning_rate', math.nan),
+		('learning_rate', math.inf),
+		('weight_decay', math.nan),
+		('weight_decay', math.inf),
+		('gradient_clip_norm', math.nan),
+		('gradient_clip_norm', math.inf),
+	],
+)
+def test_voxel_decoder_config_rejects_nonfinite_train_numbers(
+	tmp_path, setting: str, value: float
+) -> None:
+	raw = deepcopy(_config(tmp_path))
+	raw['train'][setting] = value
+	with pytest.raises(ValueError, match=rf'train\.{setting}.*finite'):
 		f3_lithology_voxel_decoder_config_from_mapping(raw)

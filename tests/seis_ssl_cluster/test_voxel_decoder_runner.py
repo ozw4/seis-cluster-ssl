@@ -65,6 +65,7 @@ def _job(tmp_path, name: str, *, epochs: int = 2):
 	}
 	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
 	voxel_metadata = {
+		'dataset': {'name': 'tiny', 'version': 'v1'},
 		'classes': [
 			{'class_id': 0, 'class_name': 'zero'},
 			{'class_id': 1, 'class_name': 'one'},
@@ -148,6 +149,23 @@ def test_dry_run_inspection_does_not_create_output(tmp_path) -> None:
 	assert not config.output_dir.exists()
 
 
+def test_dry_run_inspection_does_not_hash_array_contents(
+	tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	raw, _ = _job(tmp_path, 'dry-run-no-array-hash')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+	def reject_array_hash(path: str | Path) -> str:
+		if Path(path).suffix == '.npy':
+			raise AssertionError('dry-run hashed an array artifact')
+		return file_sha256(path)
+
+	monkeypatch.setattr(voxel_decoder_runner, 'file_sha256', reject_array_hash)
+	plan = inspect_f3_lithology_voxel_decoder(config)
+
+	assert plan.volume_shape_xyz == (4, 1, 1)
+
+
 def test_cli_dry_run_does_not_write_output(tmp_path) -> None:
 	raw, _ = _job(tmp_path, 'cli-dry-run')
 	config_path = tmp_path / 'decoder.yaml'
@@ -213,6 +231,20 @@ def test_inspection_rejects_model_tag_mismatch(tmp_path) -> None:
 	raw['model']['tag'] = 'other-encoder'
 	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
 	with pytest.raises(ValueError, match=r'model\.tag does not match'):
+		inspect_f3_lithology_voxel_decoder(config)
+
+
+def test_inspection_rejects_voxel_dataset_identity_mismatch(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'dataset-mismatch')
+	metadata_path = (
+		Path(raw['voxel_dataset']['input_dir']) / 'voxel_dataset_metadata.json'
+	)
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['dataset']['version'] = 'other-version'
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+	with pytest.raises(ValueError, match='dataset does not match'):
 		inspect_f3_lithology_voxel_decoder(config)
 
 

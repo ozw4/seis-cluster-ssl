@@ -14,7 +14,10 @@ import torch
 from seis_ssl_cluster.training.checkpoint import capture_rng_state, restore_rng_state
 
 BEST_SELECTION_EPSILON = 1.0e-12
-CHECKPOINT_SCHEMA_VERSION = 1
+# Version 2 binds checkpoints to the voxelwise-LayerNorm/nearest-upsample
+# implementation. Version 1 used GroupNorm/trilinear semantics with compatible
+# state-dict keys and therefore must not be loaded by this implementation.
+CHECKPOINT_SCHEMA_VERSION = 2
 
 
 def validation_is_better(
