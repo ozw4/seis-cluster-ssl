@@ -14,6 +14,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_robustness import (
 	f3_lithology_voxel_split_summary_config_from_mapping,
 )
 from seis_ssl_cluster.f3.lithology.voxel_robustness import (
+	inspect_f3_lithology_voxel_split_robustness,
 	summarize_f3_lithology_voxel_split_robustness,
 )
 
@@ -26,7 +27,7 @@ def build_parser() -> argparse.ArgumentParser:
 	return build_config_parser(
 		'Summarize paired F3 voxel split robustness.',
 		config_required=True,
-		dry_run_help='Resolve and print summary inputs without reading run outputs.',
+		dry_run_help='Validate all run identities and print the summary plan.',
 	)
 
 
@@ -36,6 +37,7 @@ def main() -> None:
 	raw = load_config_for_cli(parse_config_path(args), loader=load_config)
 	config = f3_lithology_voxel_split_summary_config_from_mapping(raw)
 	if args.dry_run:
+		inspection = inspect_f3_lithology_voxel_split_robustness(config)
 		print('stage: summarize_f3_lithology_voxel_split_robustness')
 		print(f'inputs.v0_run_manifest: {config.v0_run_manifest}')
 		print(f'inputs.v1_run_manifest: {config.v1_run_manifest}')
@@ -44,6 +46,7 @@ def main() -> None:
 		print(f'publish.enabled: {config.publish.enabled}')
 		print(f'publish.output_dir: {config.publish.output_dir}')
 		print('statistical_unit: split')
+		print(f'provisional_status: {inspection.status}')
 		print('execution: dry-run')
 		return
 	result = summarize_f3_lithology_voxel_split_robustness(config)

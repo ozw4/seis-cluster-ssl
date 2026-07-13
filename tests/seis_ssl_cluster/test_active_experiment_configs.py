@@ -65,7 +65,10 @@ from seis_ssl_cluster.config.f3_lithology_voxel_results import (
 	f3_lithology_voxel_results_config_from_mapping,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_robustness import (
+	f3_lithology_voxel_decoder_split_suite_config_from_mapping,
+	f3_lithology_voxel_split_dataset_config_from_mapping,
 	f3_lithology_voxel_split_summary_config_from_mapping,
+	f3_lithology_voxel_v0_split_suite_config_from_mapping,
 )
 from seis_ssl_cluster.config.schema import (
 	STAGE_F3_INSPECT_FILES,
@@ -256,6 +259,14 @@ F3_VOXEL_V0_ROOT = F3_ROOT / '87_f3_voxel_benchmark_v0'
 F3_VOXEL_V1_ROOT = F3_ROOT / '88_f3_voxel_decoder_v1'
 F3_VOXEL_ROBUSTNESS_ROOT = F3_ROOT / '89_f3_voxel_split_robustness'
 F3_VOXEL_RESULTS_ROOT = F3_ROOT / '90_f3_voxel_results'
+F3_VOXEL_ROBUSTNESS_CONFIGS = [
+	F3_VOXEL_ROBUSTNESS_ROOT / f'{index:02d}_{name}.yaml'
+	for index, name in (
+		(1, 'build_voxel_split_datasets'),
+		(2, 'run_v0_split_projections'),
+		(3, 'run_v1_split_decoders'),
+	)
+]
 F3_VOXEL_DATASET_CONFIGS = [F3_VOXEL_V0_ROOT / '01_build_voxel_supervision.yaml']
 F3_VOXEL_TOKEN_PREDICTION_CONFIGS = [
 	F3_VOXEL_V0_ROOT / name
@@ -800,6 +811,56 @@ def test_active_f3_voxel_final_summary_publish_order_contract() -> None:
 	assert robustness.publish.enabled is True
 	assert robustness.original_summary_dir == original.output_dir
 	assert robustness.publish.output_dir == original.publish.output_dir
+	assert robustness.artifact_root is not None
+	assert robustness.f3_root is not None
+	robustness.suite_root.relative_to(robustness.artifact_root)
+	with pytest.raises(ValueError, match='is not in the subpath'):
+		robustness.suite_root.relative_to(robustness.f3_root)
+
+
+def test_active_f3_voxel_robustness_stage_configs_resolve() -> None:
+	build = f3_lithology_voxel_split_dataset_config_from_mapping(
+		load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[0])
+	)
+	v0 = f3_lithology_voxel_v0_split_suite_config_from_mapping(
+		load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[1])
+	)
+	v1 = f3_lithology_voxel_decoder_split_suite_config_from_mapping(
+		load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[2])
+	)
+
+	assert build.split_inventory_manifest.name == 'split_inventory_manifest.json'
+	assert v0.voxel_dataset_manifest == v1.voxel_dataset_manifest
+	assert v0.output_root == v1.output_root == build.output_root
+	assert v0.split_dataset_manifest.name == 'split_dataset_manifest.json'
+	assert v0.probe_run_manifest.name == 'split_probe_run_manifest.json'
+	assert all(model.checkpoint is not None for model in v0.models)
+	assert all(model.checkpoint is None for model in v1.models)
+	assert tuple(model.embeddings_dir for model in v0.models) == tuple(
+		model.embeddings_dir for model in v1.models
+	)
+	for config in (build, v0, v1):
+		config.output_root.relative_to(config.artifact_root)
+		with pytest.raises(ValueError, match='is not in the subpath'):
+			config.output_root.relative_to(config.f3_root)
+
+
+def test_f3_voxel_robustness_output_root_must_stay_under_artifacts() -> None:
+	raw = load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[0])
+	raw['suite']['output_root'] = '/outside-artifacts'
+
+	with pytest.raises(ValueError, match=r'suite\.output_root must be under root'):
+		f3_lithology_voxel_split_dataset_config_from_mapping(raw)
+
+
+def test_f3_voxel_robustness_output_root_must_stay_outside_raw_f3() -> None:
+	raw = load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[0])
+	f3_root = Path(raw['paths']['f3_root'])
+	raw['paths']['artifact_root'] = str(f3_root)
+	raw['suite']['output_root'] = str(f3_root / 'generated')
+
+	with pytest.raises(ValueError, match=r'suite\.output_root must be outside f3_root'):
+		f3_lithology_voxel_split_dataset_config_from_mapping(raw)
 
 
 @pytest.mark.parametrize('config_path', F3_BASELINE_COMPARISON_CONFIGS)

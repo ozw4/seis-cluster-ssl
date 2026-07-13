@@ -29,16 +29,13 @@ from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology import voxel_robustness
 from seis_ssl_cluster.f3.lithology.voxel_evaluation import EVALUATION_OUTPUT_FILES
 from seis_ssl_cluster.f3.lithology.voxel_results import (
-	FIGURE_NAMES as ORIGINAL_FIGURE_NAMES,
+	EXPECTED_MODEL_TAGS,
+	F3LithologyVoxelResultsConfig,
+	F3LithologyVoxelResultsRun,
+	summarize_f3_lithology_voxel_results,
 )
 from seis_ssl_cluster.f3.lithology.voxel_results import (
 	SUMMARY_JSON as ORIGINAL_SUMMARY_JSON,
-)
-from seis_ssl_cluster.f3.lithology.voxel_results import (
-	SUMMARY_MARKDOWN as ORIGINAL_SUMMARY_MARKDOWN,
-)
-from seis_ssl_cluster.f3.lithology.voxel_results import (
-	TABLE_NAMES as ORIGINAL_TABLE_NAMES,
 )
 from seis_ssl_cluster.f3.lithology.voxel_robustness import (
 	V0_RUN_MANIFEST_TYPE,
@@ -122,6 +119,24 @@ def test_v0_rejects_cross_model_paired_identity_mismatch(tmp_path: Path) -> None
 
 	with pytest.raises(ValueError, match='paired identity hash mismatch for split_000'):
 		voxel_robustness.voxel_v0_split_jobs(v0_config)
+
+
+def test_only_missing_rejects_stale_split_dataset_inventory(tmp_path: Path) -> None:
+	build_config, _, _ = _synthetic_workflow_configs(tmp_path)
+	build_f3_lithology_voxel_split_datasets(build_config)
+	manifest = json.loads(
+		build_config.split_inventory_manifest.read_text(encoding='utf-8')
+	)
+	stale_source = Path(manifest['rows'][0]['png_label_inventory'])
+	replacement = stale_source.with_name('replacement_inventory.csv')
+	replacement.write_bytes(stale_source.read_bytes())
+	manifest['rows'][0]['png_label_inventory'] = str(replacement)
+	build_config.split_inventory_manifest.write_text(
+		json.dumps(manifest), encoding='utf-8'
+	)
+
+	with pytest.raises(ValueError, match='voxel inventory path identity mismatch'):
+		build_f3_lithology_voxel_split_datasets(build_config, only_missing=True)
 
 
 def test_v0_rejects_token_suite_from_different_split_inventory(
@@ -216,14 +231,7 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 		row['comparison'] == 'candidate_v1_minus_v0' for row in payload['raw_rows']
 	)
 	original = tmp_path / 'original'
-	for path in (
-		original / ORIGINAL_SUMMARY_JSON,
-		original / ORIGINAL_SUMMARY_MARKDOWN,
-		*(original / 'tables' / name for name in ORIGINAL_TABLE_NAMES),
-		*(original / 'figures' / name for name in ORIGINAL_FIGURE_NAMES),
-	):
-		path.parent.mkdir(parents=True, exist_ok=True)
-		path.write_bytes(b'lightweight evidence\n')
+	_write_original_summary_bundle(tmp_path / 'original-runs', original)
 	publish_dir = tmp_path / 'results' / 'voxel'
 	published = summarize_f3_lithology_voxel_split_robustness(
 		F3VoxelSplitRobustnessSummaryConfig(
@@ -279,6 +287,35 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 				candidate_model_tag=CANDIDATE_MODEL_TAG,
 			)
 		)
+
+
+def test_publish_rejects_corrupt_original_summary_bundle(tmp_path: Path) -> None:
+	original = tmp_path / 'original'
+	original.mkdir()
+	(original / ORIGINAL_SUMMARY_JSON).write_text('not JSON', encoding='utf-8')
+	result = voxel_robustness.VoxelSplitRobustnessSummaryResult(
+		output_dir=tmp_path / 'suite',
+		summary_json=tmp_path / 'suite' / 'summary.json',
+		paired_rows_csv=tmp_path / 'suite' / 'paired.csv',
+		aggregates_csv=tmp_path / 'suite' / 'aggregates.csv',
+		status='hold',
+	)
+	config = F3VoxelSplitRobustnessSummaryConfig(
+		suite_root=tmp_path / 'suite',
+		v0_run_manifest=tmp_path / 'v0.json',
+		v1_run_manifest=tmp_path / 'v1.json',
+		baseline_model_tag=BASELINE_MODEL_TAG,
+		candidate_model_tag=CANDIDATE_MODEL_TAG,
+		original_summary_dir=original,
+		publish=F3VoxelSplitRobustnessPublishConfig(
+			enabled=True,
+			results_root=tmp_path / 'results',
+			output_dir=tmp_path / 'results' / 'voxel',
+		),
+	)
+
+	with pytest.raises(json.JSONDecodeError):
+		voxel_robustness._publish_robustness_summary(result, config)  # noqa: SLF001
 
 
 def test_partial_split_summary_is_rejected(tmp_path: Path) -> None:
@@ -582,6 +619,42 @@ def _write_manifest(
 	)
 
 
+def _write_original_summary_bundle(run_root: Path, output_dir: Path) -> None:
+	grid = run_root / 'supervision_split_grid.npy'
+	grid.parent.mkdir(parents=True)
+	np.save(grid, np.ones((1,), dtype=np.uint8))
+	runs = []
+	for model_index, model in enumerate(('MAE', 'M1', 'M2-A')):
+		for version in ('V0', 'V1'):
+			input_dir = run_root / model.replace('-', '') / version
+			score = 0.5 + model_index * 0.05 + (0.02 if version == 'V1' else 0.0)
+			_write_evaluation(
+				input_dir,
+				score=score,
+				boundary_mae=1.0 - score,
+				model_tag=EXPECTED_MODEL_TAGS[model],
+				prediction_kind=(
+					'token_projection_nearest'
+					if version == 'V0'
+					else 'frozen_embedding_decoder'
+				),
+				split_grid=grid,
+			)
+			metrics_path = input_dir / 'metrics.json'
+			metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+			metrics['class_ids'] = [3, 5]
+			metrics['evaluation_voxel_count'] = 10
+			metrics_path.write_text(json.dumps(metrics), encoding='utf-8')
+			metadata_path = input_dir / 'evaluation_metadata.json'
+			metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+			metadata['summary'] = {'unique_validation_voxel_count': 10}
+			metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+			runs.append(F3LithologyVoxelResultsRun(model, version, input_dir))
+	summarize_f3_lithology_voxel_results(
+		F3LithologyVoxelResultsConfig(runs=tuple(runs), output_dir=output_dir)
+	)
+
+
 def _synthetic_workflow_configs(  # noqa: PLR0915
 	tmp_path: Path,
 ) -> tuple[
@@ -740,23 +813,53 @@ def _synthetic_workflow_configs(  # noqa: PLR0915
 	probe_rows = []
 	for split_index in range(2):
 		split_id = f'split_{split_index:03d}'
-		paired_hash = f'synthetic-paired-{split_id}'
 		for role, model_tag in model_specs:
 			token_root = artifact_root / 'tokens' / split_id / role
 			token_root.mkdir(parents=True)
+			train_tokens_path = token_root / 'train_tokens.npz'
 			validation_tokens_path = token_root / 'validation_tokens.npz'
+			_write_empty_validation_tokens(train_tokens_path, dataset['name'])
 			_write_empty_validation_tokens(validation_tokens_path, dataset['name'])
+			metadata_path = token_root / 'token_dataset_metadata.json'
+			metadata_path.write_text('{}\n', encoding='utf-8')
+			paired_hash = voxel_robustness.paired_token_identity_hash(
+				voxel_robustness.load_token_dataset_npz(train_tokens_path),
+				voxel_robustness.load_token_dataset_npz(validation_tokens_path),
+			)
 			probe_dir = artifact_root / 'probes' / split_id / role
 			probe_dir.mkdir(parents=True)
 			joblib.dump(_SyntheticProbe(), probe_dir / 'probe.joblib')
 			joblib.dump(_IdentityScaler(), probe_dir / 'scaler.joblib')
+			(probe_dir / 'probe_config_resolved.json').write_text(
+				json.dumps(
+					{
+						'model': {'tag': model_tag, 'role': role},
+						'token_dataset': {
+							'input_dir': str(token_root),
+							'split_id': split_id,
+							'paired_identity_hash': paired_hash,
+						},
+						'inputs': {
+							'train_tokens': str(train_tokens_path),
+							'validation_tokens': str(validation_tokens_path),
+						},
+						'outputs': {
+							'probe_joblib': str(probe_dir / 'probe.joblib'),
+							'scaler_joblib': str(probe_dir / 'scaler.joblib'),
+						},
+					}
+				),
+				encoding='utf-8',
+			)
 			dataset_rows.append(
 				{
 					'split_id': split_id,
 					'model_role': role,
 					'model_tag': model_tag,
 					'token_dataset_root': str(token_root),
+					'train_tokens': str(train_tokens_path),
 					'validation_tokens': str(validation_tokens_path),
+					'metadata_json': str(metadata_path),
 					'paired_identity_hash': paired_hash,
 				}
 			)

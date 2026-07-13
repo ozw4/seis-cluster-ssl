@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import zlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -210,6 +211,81 @@ def summarize_f3_lithology_voxel_results(
 	)
 	manifest = _publish(result, config.publish)
 	return replace(result, publish_manifest=manifest)
+
+
+def validate_f3_lithology_voxel_results_inputs(
+	config: F3LithologyVoxelResultsConfig,
+) -> None:
+	"""Validate the six original-split evaluations without writing a summary."""
+	_load_and_validate_runs(config)
+
+
+def validate_f3_lithology_voxel_results_bundle(  # noqa: C901, PLR0912
+	root: Path,
+) -> None:
+	"""Validate a complete lightweight original-split bundle before release."""
+	summary_path = root / SUMMARY_JSON
+	payload = _read_json(summary_path)
+	if payload.get('artifact_type') != 'f3_lithology_voxel_results_summary':
+		raise ValueError('original voxel summary artifact_type mismatch')
+	if payload.get('schema_version') != 1:
+		raise ValueError('original voxel summary schema_version mismatch')
+	if payload.get('scope') != {'split': 'original', 'provisional': True}:
+		raise ValueError('original voxel summary scope contract mismatch')
+	if payload.get('prediction_versions') != {
+		'V0': 'voxel-shaped token baseline',
+		'V1': 'learned sub-token decoder',
+	}:
+		raise ValueError('original voxel summary prediction-version contract mismatch')
+	identity = _mapping(payload.get('identity'), 'original summary identity')
+	grid_hash = identity.get('supervision_split_grid_sha256')
+	if not isinstance(grid_hash, str) or len(grid_hash) != 64:
+		raise ValueError('original voxel summary split-grid identity is invalid')
+	_integer_sequence(identity.get('class_order'), 'original summary class_order')
+	voxel_count = identity.get('validation_voxel_count')
+	if (
+		not isinstance(voxel_count, int)
+		or isinstance(voxel_count, bool)
+		or voxel_count <= 0
+	):
+		raise ValueError('original voxel summary validation voxel count is invalid')
+	runs = _mapping_sequence(payload.get('runs'), 'original summary runs')
+	keys = {
+		f'{item.get("model")} {item.get("version")}'
+		for item in runs
+	}
+	expected_keys = {
+		f'{model} {version}'
+		for model in REQUIRED_MODELS
+		for version in REQUIRED_VERSIONS
+	}
+	if len(runs) != len(expected_keys) or keys != expected_keys:
+		raise ValueError('original voxel summary six-run matrix is incomplete')
+	decision = _mapping(
+		payload.get('provisional_decision'), 'original summary provisional_decision'
+	)
+	if decision.get('provisional') is not True or any(
+		decision.get(key) not in {'positive', 'hold', 'negative'}
+		for key in ('decoder_value', 'm2a_vs_m1_voxel')
+	):
+		raise ValueError('original voxel summary provisional decision is invalid')
+	for key, expected_count in (
+		('decoder_comparisons', 3),
+		('encoder_comparisons', 3),
+		('monitored_class_comparisons', 12),
+	):
+		rows = _mapping_sequence(payload.get(key), f'original summary {key}')
+		if len(rows) != expected_count:
+			raise ValueError(f'original voxel summary {key} is incomplete')
+	markdown = root / SUMMARY_MARKDOWN
+	if not markdown.is_file() or not markdown.read_text(encoding='utf-8').startswith(
+		'# F3 original-split voxel benchmark summary\n'
+	):
+		raise ValueError('original voxel summary markdown contract mismatch')
+	for name in TABLE_NAMES:
+		_validate_summary_csv(root / 'tables' / name)
+	for name in FIGURE_NAMES:
+		_validate_png(root / 'figures' / name)
 
 
 def _load_and_validate_runs(
@@ -723,6 +799,59 @@ def _read_json(path: Path) -> Mapping[str, object]:
 	return value
 
 
+def _mapping_sequence(value: object, label: str) -> tuple[Mapping[str, object], ...]:
+	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+		raise TypeError(f'{label} must be a sequence')
+	if any(not isinstance(item, Mapping) for item in value):
+		raise TypeError(f'{label} entries must be mappings')
+	return tuple(cast('Sequence[Mapping[str, object]]', value))
+
+
+def _validate_summary_csv(path: Path) -> None:
+	if not path.is_file():
+		raise FileNotFoundError(f'missing original voxel summary table: {path}')
+	with path.open(newline='', encoding='utf-8') as handle:
+		reader = csv.DictReader(handle)
+		rows = list(reader)
+	if not reader.fieldnames or not rows:
+		raise ValueError(f'original voxel summary table is empty: {path}')
+
+
+def _validate_png(path: Path) -> None:
+	if not path.is_file():
+		raise FileNotFoundError(f'missing original voxel summary figure: {path}')
+	data = path.read_bytes()
+	if not data.startswith(b'\x89PNG\r\n\x1a\n'):
+		raise ValueError(f'original voxel summary figure is not PNG: {path}')
+	offset = 8
+	chunk_types: list[bytes] = []
+	while offset < len(data):
+		if offset + 12 > len(data):
+			raise ValueError(f'original voxel summary PNG is truncated: {path}')
+		length = int.from_bytes(data[offset : offset + 4], 'big')
+		chunk_type = data[offset + 4 : offset + 8]
+		chunk_end = offset + 12 + length
+		if chunk_end > len(data):
+			raise ValueError(f'original voxel summary PNG is truncated: {path}')
+		chunk = data[offset + 8 : offset + 8 + length]
+		recorded_crc = int.from_bytes(data[offset + 8 + length : chunk_end], 'big')
+		actual_crc = zlib.crc32(chunk, zlib.crc32(chunk_type)) & 0xFFFFFFFF
+		if recorded_crc != actual_crc:
+			raise ValueError(f'original voxel summary PNG CRC mismatch: {path}')
+		chunk_types.append(chunk_type)
+		offset = chunk_end
+		if chunk_type == b'IEND':
+			break
+	if (
+		offset != len(data)
+		or not chunk_types
+		or chunk_types[0] != b'IHDR'
+		or b'IDAT' not in chunk_types
+		or chunk_types[-1] != b'IEND'
+	):
+		raise ValueError(f'original voxel summary PNG chunk contract mismatch: {path}')
+
+
 def _mapping(value: object, label: str) -> Mapping[str, object]:
 	if not isinstance(value, Mapping):
 		raise TypeError(f'{label} must be a mapping')
@@ -809,4 +938,6 @@ __all__ = [
 	'F3LithologyVoxelResultsResult',
 	'F3LithologyVoxelResultsRun',
 	'summarize_f3_lithology_voxel_results',
+	'validate_f3_lithology_voxel_results_bundle',
+	'validate_f3_lithology_voxel_results_inputs',
 ]

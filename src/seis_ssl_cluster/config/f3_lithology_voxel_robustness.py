@@ -58,6 +58,15 @@ class F3VoxelSplitDatasetSuiteConfig:
 	ignore_z_border_samples: int
 	overwrite: bool
 
+	def __post_init__(self) -> None:
+		"""Keep generated split supervision under the artifact root."""
+		_validate_suite_output_root(
+			self.output_root,
+			artifact_root=self.artifact_root,
+			f3_root=self.f3_root,
+			label='suite.output_root',
+		)
+
 
 @dataclass(frozen=True)
 class F3VoxelV0SplitSuiteConfig:
@@ -80,6 +89,15 @@ class F3VoxelV0SplitSuiteConfig:
 	evaluation: Mapping[str, object]
 	overwrite: bool
 
+	def __post_init__(self) -> None:
+		"""Keep generated V0 artifacts under the artifact root."""
+		_validate_suite_output_root(
+			self.output_root,
+			artifact_root=self.artifact_root,
+			f3_root=self.f3_root,
+			label='suite.output_root',
+		)
+
 
 @dataclass(frozen=True)
 class F3VoxelDecoderSplitSuiteConfig:
@@ -101,6 +119,15 @@ class F3VoxelDecoderSplitSuiteConfig:
 	evaluation: Mapping[str, object]
 	write_probabilities: bool
 	overwrite: bool
+
+	def __post_init__(self) -> None:
+		"""Keep generated decoder artifacts under the artifact root."""
+		_validate_suite_output_root(
+			self.output_root,
+			artifact_root=self.artifact_root,
+			f3_root=self.f3_root,
+			label='suite.output_root',
+		)
 
 
 @dataclass(frozen=True)
@@ -136,10 +163,24 @@ class F3VoxelSplitRobustnessSummaryConfig:
 	v1_run_manifest: Path
 	baseline_model_tag: str
 	candidate_model_tag: str
+	artifact_root: Path | None = None
+	f3_root: Path | None = None
 	original_summary_dir: Path | None = None
 	publish: F3VoxelSplitRobustnessPublishConfig = field(
 		default_factory=F3VoxelSplitRobustnessPublishConfig
 	)
+
+	def __post_init__(self) -> None:
+		"""Validate the report root when its configured roots are available."""
+		if (self.artifact_root is None) != (self.f3_root is None):
+			raise ValueError('artifact_root and f3_root must be provided together')
+		if self.artifact_root is not None and self.f3_root is not None:
+			_validate_suite_output_root(
+				self.suite_root,
+				artifact_root=self.artifact_root,
+				f3_root=self.f3_root,
+				label='suite.root',
+			)
 
 
 def f3_lithology_voxel_split_dataset_config_from_mapping(
@@ -310,7 +351,7 @@ def f3_lithology_voxel_split_summary_config_from_mapping(
 	models = _mapping(config, 'models')
 	publish = _mapping(config, 'publish')
 	_exact_keys(suite, {'root'}, 'suite')
-	_exact_keys(paths, {'results_root'}, 'paths')
+	_exact_keys(paths, {'artifact_root', 'f3_root', 'results_root'}, 'paths')
 	_exact_keys(
 		inputs,
 		{'v0_run_manifest', 'v1_run_manifest', 'original_summary_dir'},
@@ -333,6 +374,8 @@ def f3_lithology_voxel_split_summary_config_from_mapping(
 		v1_run_manifest=_path(inputs, 'v1_run_manifest'),
 		baseline_model_tag=baseline,
 		candidate_model_tag=candidate,
+		artifact_root=_path(paths, 'artifact_root'),
+		f3_root=_path(paths, 'f3_root'),
 		original_summary_dir=_path(inputs, 'original_summary_dir'),
 		publish=F3VoxelSplitRobustnessPublishConfig(
 			enabled=_publish_optional_bool(publish, 'enabled', default=False),
@@ -549,6 +592,26 @@ def _path(parent: Mapping[str, object], key: str) -> Path:
 	if not path.is_absolute():
 		raise ValueError(f'{key} must be an absolute path; got {path}')
 	return path
+
+
+def _validate_suite_output_root(
+	path: Path,
+	*,
+	artifact_root: Path,
+	f3_root: Path,
+	label: str,
+) -> None:
+	output = Path(path)
+	if not output.is_absolute():
+		raise ValueError(f'{label} must be an absolute path; got {output}')
+	ensure_under_root(output, root=artifact_root, label=label)
+	resolved = output.resolve(strict=False)
+	resolved_f3 = Path(f3_root).resolve(strict=False)
+	try:
+		resolved.relative_to(resolved_f3)
+	except ValueError:
+		return
+	raise ValueError(f'{label} must be outside f3_root ({resolved_f3}); got {resolved}')
 
 
 def _boolean(parent: Mapping[str, object], key: str) -> bool:

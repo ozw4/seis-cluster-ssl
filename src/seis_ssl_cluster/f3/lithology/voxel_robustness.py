@@ -30,8 +30,13 @@ from seis_ssl_cluster.f3.lithology.prediction import (
 	F3LithologyPredictionOutputs,
 	predict_f3_lithology_tokens,
 )
+from seis_ssl_cluster.f3.lithology.robustness import (
+	load_token_dataset_npz,
+	paired_token_identity_hash,
+)
 from seis_ssl_cluster.f3.lithology.tokens import (
 	F3LithologyTokenPolicy,
+	load_f3_embedding_artifacts,
 	read_f3_lithology_class_info,
 )
 from seis_ssl_cluster.f3.lithology.voxel_dataset import (
@@ -40,6 +45,7 @@ from seis_ssl_cluster.f3.lithology.voxel_dataset import (
 	MANIFEST_NAME,
 	SUMMARY_NAME,
 	build_f3_lithology_voxel_dataset,
+	inspect_f3_lithology_voxel_dataset,
 )
 from seis_ssl_cluster.f3.lithology.voxel_dataset import (
 	METADATA_NAME as VOXEL_METADATA_NAME,
@@ -75,12 +81,17 @@ from seis_ssl_cluster.f3.lithology.voxel_results import (
 from seis_ssl_cluster.f3.lithology.voxel_results import (
 	TABLE_NAMES as ORIGINAL_TABLE_NAMES,
 )
+from seis_ssl_cluster.f3.lithology.voxel_results import (
+	validate_f3_lithology_voxel_results_bundle,
+)
+from seis_ssl_cluster.f3.splits import read_f3_line_geometry
 from seis_ssl_cluster.results import (
 	PublishItem,
 	PublishManifest,
 	publish_selected_results,
 )
 from seis_ssl_cluster.training.voxel_decoder.runner import (
+	inspect_f3_lithology_voxel_decoder,
 	run_f3_lithology_voxel_decoder,
 )
 
@@ -158,6 +169,16 @@ class VoxelSplitRobustnessSummaryResult:
 	publish_manifest: PublishManifest | None = None
 
 
+@dataclass(frozen=True)
+class VoxelSplitRobustnessInspection:
+	"""Validated split-level rows and decision computed without writing."""
+
+	paired_rows: tuple[Mapping[str, object], ...]
+	aggregates: tuple[Mapping[str, object], ...]
+	status: str
+	reasons: tuple[str, ...]
+
+
 def build_f3_lithology_voxel_split_datasets(
 	config: F3VoxelSplitDatasetSuiteConfig,
 	*,
@@ -173,23 +194,11 @@ def build_f3_lithology_voxel_split_datasets(
 	for source in inventory:
 		split_id = _split_id(source)
 		output_dir = config.output_root / 'voxel_datasets' / split_id
-		job_config = F3LithologyVoxelDatasetConfig(
-			artifact_root=config.artifact_root,
-			f3_root=config.f3_root,
-			dataset=config.dataset,
-			source_label_volume=config.source_label_volume,
-			source_label_segy=config.source_label_segy,
-			png_label_inventory=Path(str(source['png_label_inventory'])),
-			class_info=config.class_info,
-			segy_geometry_json=config.segy_geometry_json,
-			reference_metadata_json=config.reference_metadata_json,
-			reference_valid_tokens=config.reference_valid_tokens,
-			output_dir=output_dir,
-			ignore_z_border_samples=config.ignore_z_border_samples,
-			overwrite=config.overwrite,
-		)
+		job_config = _split_dataset_job_config(config, source, output_dir)
 		complete = _complete_voxel_dataset(output_dir)
-		if not (only_missing and complete):
+		if only_missing and complete:
+			_validate_existing_voxel_dataset(job_config)
+		else:
 			build_f3_lithology_voxel_dataset(job_config)
 		row = _voxel_dataset_row(split_id, source, output_dir)
 		if _mapping_value(row, 'reference_valid_tokens').get('sha256') != file_sha256(
@@ -217,6 +226,28 @@ def build_f3_lithology_voxel_split_datasets(
 	return VoxelSplitSuiteResult(manifest, tuple(rows))
 
 
+def _split_dataset_job_config(
+	config: F3VoxelSplitDatasetSuiteConfig,
+	source: Mapping[str, object],
+	output_dir: Path,
+) -> F3LithologyVoxelDatasetConfig:
+	return F3LithologyVoxelDatasetConfig(
+		artifact_root=config.artifact_root,
+		f3_root=config.f3_root,
+		dataset=config.dataset,
+		source_label_volume=config.source_label_volume,
+		source_label_segy=config.source_label_segy,
+		png_label_inventory=Path(str(source['png_label_inventory'])),
+		class_info=config.class_info,
+		segy_geometry_json=config.segy_geometry_json,
+		reference_metadata_json=config.reference_metadata_json,
+		reference_valid_tokens=config.reference_valid_tokens,
+		output_dir=output_dir,
+		ignore_z_border_samples=config.ignore_z_border_samples,
+		overwrite=config.overwrite,
+	)
+
+
 def voxel_split_dataset_jobs(
 	config: F3VoxelSplitDatasetSuiteConfig,
 ) -> tuple[VoxelSplitJob, ...]:
@@ -226,15 +257,22 @@ def voxel_split_dataset_jobs(
 		artifact_type=INVENTORY_ARTIFACT_TYPE,
 		required=('split_id', 'png_label_inventory'),
 	)
-	return tuple(
-		VoxelSplitJob(
-			_split_id(row),
-			'shared',
-			'shared_voxel_supervision',
-			config.output_root / 'voxel_datasets' / _split_id(row),
+	jobs = []
+	for row in rows:
+		split_id = _split_id(row)
+		output_root = config.output_root / 'voxel_datasets' / split_id
+		inspect_f3_lithology_voxel_dataset(
+			_split_dataset_job_config(config, row, output_root)
 		)
-		for row in rows
-	)
+		jobs.append(
+			VoxelSplitJob(
+				split_id,
+				'shared',
+				'shared_voxel_supervision',
+				output_root,
+			)
+		)
+	return tuple(jobs)
 
 
 def voxel_v0_split_jobs(
@@ -270,6 +308,7 @@ def voxel_v0_split_jobs(
 		),
 	)
 	_validate_job_sources(voxel_rows, dataset_rows, probe_rows, config.models)
+	_validate_v0_source_artifacts(config, voxel_rows, dataset_rows, probe_rows)
 	return tuple(
 		VoxelSplitJob(
 			str(row['split_id']),
@@ -321,19 +360,23 @@ def voxel_decoder_split_jobs(
 	"""Validate shared V1 inputs and return the paired decoder job matrix."""
 	voxel_rows = _voxel_rows(config.voxel_dataset_manifest)
 	_validate_embedding_valid_masks(config.models, dataset_name=config.dataset['name'])
-	return tuple(
-		VoxelSplitJob(
-			str(row['split_id']),
-			model.role,
-			model.model_tag,
-			config.output_root
-			/ 'v1'
-			/ f'split={row["split_id"]}'
-			/ f'model={model.model_tag}',
-		)
-		for row in voxel_rows
-		for model in config.models
-	)
+	jobs = []
+	for row in voxel_rows:
+		for model in config.models:
+			job = VoxelSplitJob(
+				str(row['split_id']),
+				model.role,
+				model.model_tag,
+				config.output_root
+				/ 'v1'
+				/ f'split={row["split_id"]}'
+				/ f'model={model.model_tag}',
+			)
+			inspect_f3_lithology_voxel_decoder(
+				_decoder_job_config(config, job, model=model, voxel_row=row)
+			)
+			jobs.append(job)
+	return tuple(jobs)
 
 
 def run_f3_lithology_voxel_decoder_split_suite(
@@ -395,6 +438,47 @@ def summarize_f3_lithology_voxel_split_robustness(
 	config: F3VoxelSplitRobustnessSummaryConfig,
 ) -> VoxelSplitRobustnessSummaryResult:
 	"""Aggregate paired metrics with split, never voxel, as statistical unit."""
+	inspection = inspect_f3_lithology_voxel_split_robustness(config)
+	paired = inspection.paired_rows
+	aggregates = inspection.aggregates
+	status = inspection.status
+	reasons = inspection.reasons
+	output_dir = config.suite_root / 'reports'
+	paired_csv = output_dir / 'voxel_split_paired_metrics.csv'
+	aggregates_csv = output_dir / 'voxel_split_aggregates.csv'
+	_write_csv(paired_csv, paired)
+	_write_csv(aggregates_csv, aggregates)
+	summary_json = output_dir / 'voxel_split_robustness_summary.json'
+	_write_json(
+		summary_json,
+		{
+			'artifact_type': SUMMARY_ARTIFACT_TYPE,
+			'schema_version': SCHEMA_VERSION,
+			'comparison': {
+				'baseline': config.baseline_model_tag,
+				'candidate': config.candidate_model_tag,
+			},
+			'statistical_unit': 'split',
+			'voxel_level_significance_computed': False,
+			'confidence_intervals_computed': False,
+			'p_values_computed': False,
+			'split_count': len({str(row['split_id']) for row in paired}),
+			'raw_rows': paired,
+			'aggregates': aggregates,
+			'provisional_status': status,
+			'status_reasons': reasons,
+		},
+	)
+	result = VoxelSplitRobustnessSummaryResult(
+		output_dir, summary_json, paired_csv, aggregates_csv, status
+	)
+	return replace(result, publish_manifest=_publish_robustness_summary(result, config))
+
+
+def inspect_f3_lithology_voxel_split_robustness(
+	config: F3VoxelSplitRobustnessSummaryConfig,
+) -> VoxelSplitRobustnessInspection:
+	"""Validate all summary inputs and compute the split decision without writes."""
 	v0 = _complete_paired_run_rows(config.v0_run_manifest, V0_RUN_MANIFEST_TYPE)
 	v1 = _complete_paired_run_rows(config.v1_run_manifest, V1_RUN_MANIFEST_TYPE)
 	expected_keys = {
@@ -448,36 +532,15 @@ def summarize_f3_lithology_voxel_split_robustness(
 	paired = _paired_metric_rows(metric_rows)
 	aggregates = _aggregate_metric_rows(paired)
 	status, reasons = _provisional_status(paired, aggregates)
-	output_dir = config.suite_root / 'reports'
-	paired_csv = output_dir / 'voxel_split_paired_metrics.csv'
-	aggregates_csv = output_dir / 'voxel_split_aggregates.csv'
-	_write_csv(paired_csv, paired)
-	_write_csv(aggregates_csv, aggregates)
-	summary_json = output_dir / 'voxel_split_robustness_summary.json'
-	_write_json(
-		summary_json,
-		{
-			'artifact_type': SUMMARY_ARTIFACT_TYPE,
-			'schema_version': SCHEMA_VERSION,
-			'comparison': {
-				'baseline': config.baseline_model_tag,
-				'candidate': config.candidate_model_tag,
-			},
-			'statistical_unit': 'split',
-			'voxel_level_significance_computed': False,
-			'confidence_intervals_computed': False,
-			'p_values_computed': False,
-			'split_count': len({str(row['split_id']) for row in paired}),
-			'raw_rows': paired,
-			'aggregates': aggregates,
-			'provisional_status': status,
-			'status_reasons': reasons,
-		},
+	if config.publish.enabled:
+		if config.original_summary_dir is None:
+			raise ValueError(
+				'final publish requires inputs.original_summary_dir'
+			)
+		validate_f3_lithology_voxel_results_bundle(config.original_summary_dir)
+	return VoxelSplitRobustnessInspection(
+		tuple(paired), tuple(aggregates), status, tuple(reasons)
 	)
-	result = VoxelSplitRobustnessSummaryResult(
-		output_dir, summary_json, paired_csv, aggregates_csv, status
-	)
-	return replace(result, publish_manifest=_publish_robustness_summary(result, config))
 
 
 def _publish_robustness_summary(
@@ -492,6 +555,7 @@ def _publish_robustness_summary(
 			'final publish requires publish.output_dir and inputs.original_summary_dir'
 		)
 	original = config.original_summary_dir
+	validate_f3_lithology_voxel_results_bundle(original)
 	items = [
 		PublishItem(
 			original / ORIGINAL_SUMMARY_MARKDOWN,
@@ -631,19 +695,8 @@ def _run_v1_job(  # noqa: PLR0913
 	only_missing: bool,
 ) -> None:
 	decoder_dir = job.output_root / 'decoder'
-	voxel_dir = Path(str(voxel_row['voxel_dataset_root']))
-	train_config = F3LithologyVoxelDecoderConfig(
-		artifact_root=config.artifact_root,
-		f3_root=config.f3_root,
-		dataset=config.dataset,
-		model={'tag': model.model_tag, 'freeze_encoder': True},
-		embeddings_input_dir=model.embeddings_dir,
-		voxel_dataset_input_dir=voxel_dir,
-		decoder=config.decoder,
-		tiles=config.tiles,
-		train=config.train,
-		output_dir=decoder_dir,
-		embeddings={'spec': 'overlap_x16'},
+	train_config = _decoder_job_config(
+		config, job, model=model, voxel_row=voxel_row
 	)
 	if only_missing and _complete_decoder(decoder_dir):
 		_validate_existing_decoder(train_config, decoder_dir)
@@ -684,6 +737,28 @@ def _run_v1_job(  # noqa: PLR0913
 		expected_model_tag=model.model_tag,
 		expected_prediction_kind='frozen_embedding_decoder',
 		only_missing=only_missing,
+	)
+
+
+def _decoder_job_config(
+	config: F3VoxelDecoderSplitSuiteConfig,
+	job: VoxelSplitJob,
+	*,
+	model: VoxelRobustnessModel,
+	voxel_row: Mapping[str, object],
+) -> F3LithologyVoxelDecoderConfig:
+	return F3LithologyVoxelDecoderConfig(
+		artifact_root=config.artifact_root,
+		f3_root=config.f3_root,
+		dataset=config.dataset,
+		model={'tag': model.model_tag, 'freeze_encoder': True},
+		embeddings_input_dir=model.embeddings_dir,
+		voxel_dataset_input_dir=Path(str(voxel_row['voxel_dataset_root'])),
+		decoder=config.decoder,
+		tiles=config.tiles,
+		train=config.train,
+		output_dir=job.output_root / 'decoder',
+		embeddings={'spec': 'overlap_x16'},
 	)
 
 
@@ -978,6 +1053,96 @@ def _validate_job_sources(
 			raise ValueError(f'paired identity hash mismatch for {split_id}')
 
 
+def _validate_v0_source_artifacts(
+	config: F3VoxelV0SplitSuiteConfig,
+	voxel_rows: Sequence[Mapping[str, object]],
+	dataset_rows: Sequence[Mapping[str, object]],
+	probe_rows: Sequence[Mapping[str, object]],
+) -> None:
+	for path in (
+		config.source_label_volume,
+		config.source_label_segy,
+		config.class_info,
+		config.segy_geometry_json,
+	):
+		if not path.is_file():
+			raise FileNotFoundError(f'missing V0 suite input: {path}')
+	for model in config.models:
+		_validate_model_embedding_checkpoint(model, dataset_name=config.dataset['name'])
+		artifacts = load_f3_embedding_artifacts(model.embeddings_dir)
+		if len(artifacts) != 1:
+			raise ValueError(
+				f'V0 suite expects one embedding artifact for {model.model_tag}'
+			)
+	for row in voxel_rows:
+		_validate_voxel_manifest_row(row)
+	probes = _rows_by_key(probe_rows)
+	for dataset in dataset_rows:
+		key = (str(dataset['split_id']), str(dataset['model_role']))
+		root = Path(str(dataset['token_dataset_root']))
+		train_path = Path(str(dataset.get('train_tokens', root / 'train_tokens.npz')))
+		validation_path = Path(str(dataset['validation_tokens']))
+		metadata_path = Path(
+			str(dataset.get('metadata_json', root / 'token_dataset_metadata.json'))
+		)
+		for path in (train_path, validation_path, metadata_path):
+			if not path.is_file():
+				raise FileNotFoundError(f'missing split token dataset input: {path}')
+		actual_pair = paired_token_identity_hash(
+			load_token_dataset_npz(train_path),
+			load_token_dataset_npz(validation_path),
+		)
+		if actual_pair != dataset['paired_identity_hash']:
+			raise ValueError(f'token dataset paired identity mismatch for {key!r}')
+		_validate_probe_artifact(dataset, probes[key])
+
+
+def _validate_probe_artifact(  # noqa: C901
+	dataset: Mapping[str, object], probe: Mapping[str, object]
+) -> None:
+	root = Path(str(probe['probe_output_dir']))
+	probe_path = root / 'probe.joblib'
+	scaler_path = root / 'scaler.joblib'
+	config_path = root / 'probe_config_resolved.json'
+	for path in (probe_path, scaler_path, config_path):
+		if not path.is_file():
+			raise FileNotFoundError(f'missing split probe input: {path}')
+	resolved = _read_json(config_path)
+	model = _mapping_value(resolved, 'model')
+	for key in ('model_tag', 'model_role'):
+		expected = dataset['model_tag' if key == 'model_tag' else 'model_role']
+		resolved_key = 'tag' if key == 'model_tag' else 'role'
+		if model.get(resolved_key) != expected:
+			raise ValueError(f'probe {key} identity mismatch')
+	token_dataset = _mapping_value(resolved, 'token_dataset')
+	expected_token_values = {
+		'input_dir': str(dataset['token_dataset_root']),
+		'split_id': str(dataset['split_id']),
+		'paired_identity_hash': str(dataset['paired_identity_hash']),
+	}
+	for key, expected in expected_token_values.items():
+		if token_dataset.get(key) != expected:
+			raise ValueError(f'probe token dataset {key} identity mismatch')
+	inputs = _mapping_value(resolved, 'inputs')
+	root_dataset = Path(str(dataset['token_dataset_root']))
+	for key, expected in (
+		(
+			'train_tokens',
+			dataset.get('train_tokens', root_dataset / 'train_tokens.npz'),
+		),
+		('validation_tokens', dataset['validation_tokens']),
+	):
+		if inputs.get(key) != str(expected):
+			raise ValueError(f'probe input {key} identity mismatch')
+	outputs = _mapping_value(resolved, 'outputs')
+	for key, expected in (
+		('probe_joblib', probe_path),
+		('scaler_joblib', scaler_path),
+	):
+		if outputs.get(key) != str(expected):
+			raise ValueError(f'probe output {key} identity mismatch')
+
+
 def _validate_split_inventory_identity(
 	voxel_manifest_path: Path, token_manifest_path: Path
 ) -> None:
@@ -1236,6 +1401,54 @@ def _complete_voxel_dataset(root: Path) -> bool:
 	)
 
 
+def _validate_existing_voxel_dataset(  # noqa: C901
+	config: F3LithologyVoxelDatasetConfig,
+) -> None:
+	root = config.output_dir
+	metadata = _read_json(root / VOXEL_METADATA_NAME)
+	if metadata.get('artifact_type') != 'f3_lithology_voxel_supervision':
+		raise ValueError('existing voxel dataset artifact_type mismatch')
+	if metadata.get('schema_version') != 1:
+		raise ValueError('existing voxel dataset schema_version mismatch')
+	if metadata.get('dataset') != dict(config.dataset):
+		raise ValueError('existing voxel dataset dataset identity mismatch')
+	for key, path in (
+		('reference_embedding', config.reference_metadata_json),
+		('reference_valid_tokens', config.reference_valid_tokens),
+		('label_volume', config.source_label_volume),
+		('inventory', config.png_label_inventory),
+	):
+		_validate_recorded_identity(metadata.get(key), path, label=f'voxel {key}')
+	labels = _mapping_value(metadata, 'labels')
+	for key, path in (
+		('source_label_segy', config.source_label_segy),
+		('class_info', config.class_info),
+	):
+		if labels.get(key) != str(path):
+			raise ValueError(f'existing voxel dataset labels.{key} identity mismatch')
+	if metadata.get('geometry') != read_f3_line_geometry(
+		config.segy_geometry_json
+	).to_dict():
+		raise ValueError('existing voxel dataset geometry identity mismatch')
+	if metadata.get('classes') != [
+		item.to_dict() for item in read_f3_lithology_class_info(config.class_info)
+	]:
+		raise ValueError('existing voxel dataset class identity mismatch')
+	if metadata.get('ignore_z_border_samples') != config.ignore_z_border_samples:
+		raise ValueError('existing voxel dataset border policy identity mismatch')
+	outputs = _mapping_value(metadata, 'outputs')
+	expected_outputs = {
+		'supervision_split_grid': root / GRID_NAME,
+		'metadata_json': root / VOXEL_METADATA_NAME,
+		'class_counts_csv': root / COUNTS_NAME,
+		'split_manifest_json': root / MANIFEST_NAME,
+		'summary_markdown': root / SUMMARY_NAME,
+	}
+	for key, path in expected_outputs.items():
+		if outputs.get(key) != str(path):
+			raise ValueError(f'existing voxel dataset output {key} identity mismatch')
+
+
 def _complete_evaluation(root: Path) -> bool:
 	if not all((root / name).is_file() for name in EVALUATION_OUTPUT_FILES):
 		return False
@@ -1479,7 +1692,7 @@ def _class_weight_vector(value: object) -> list[float]:
 
 
 def _voxel_rows(path: Path) -> tuple[Mapping[str, object], ...]:
-	return _read_manifest_rows(
+	rows = _read_manifest_rows(
 		path,
 		artifact_type=SPLIT_DATASET_MANIFEST_TYPE,
 		required=(
@@ -1488,7 +1701,29 @@ def _voxel_rows(path: Path) -> tuple[Mapping[str, object], ...]:
 			'voxel_dataset_root',
 			'split_grid',
 			'class_counts',
+			'slice_split_manifest',
+			'metadata',
+			'reference_valid_tokens',
 		),
+	)
+	for row in rows:
+		_validate_voxel_manifest_row(row)
+	return rows
+
+
+def _validate_voxel_manifest_row(row: Mapping[str, object]) -> None:
+	root = Path(str(row['voxel_dataset_root']))
+	for key, name in (
+		('split_grid', GRID_NAME),
+		('class_counts', COUNTS_NAME),
+		('slice_split_manifest', MANIFEST_NAME),
+		('metadata', VOXEL_METADATA_NAME),
+	):
+		path = _validated_recorded_identity(row.get(key), label=f'voxel row {key}')
+		if path.resolve(strict=False) != (root / name).resolve(strict=False):
+			raise ValueError(f'voxel row {key} path does not match dataset root')
+	_validated_recorded_identity(
+		row.get('reference_valid_tokens'), label='voxel row reference_valid_tokens'
 	)
 
 
@@ -1638,9 +1873,11 @@ def _write_csv(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
 __all__ = [
 	'SUMMARY_METRICS',
 	'VoxelSplitJob',
+	'VoxelSplitRobustnessInspection',
 	'VoxelSplitRobustnessSummaryResult',
 	'VoxelSplitSuiteResult',
 	'build_f3_lithology_voxel_split_datasets',
+	'inspect_f3_lithology_voxel_split_robustness',
 	'run_f3_lithology_voxel_decoder_split_suite',
 	'run_f3_lithology_voxel_v0_split_suite',
 	'summarize_f3_lithology_voxel_split_robustness',

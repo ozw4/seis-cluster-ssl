@@ -17,6 +17,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_results import (
 from seis_ssl_cluster.f3.lithology.voxel_results import (
 	F3LithologyVoxelResultsConfig,
 	summarize_f3_lithology_voxel_results,
+	validate_f3_lithology_voxel_results_inputs,
 )
 
 if TYPE_CHECKING:
@@ -67,6 +68,7 @@ def main() -> None:
 	raw = load_config_for_cli(args.config, loader=load_config)
 	config = _config_from_mapping(raw, config_path=args.config)
 	if args.dry_run:
+		validate_f3_lithology_voxel_results_inputs(config)
 		_print_summary(config)
 		print('execution: dry-run; F3 voxel result summary skipped')
 		return
