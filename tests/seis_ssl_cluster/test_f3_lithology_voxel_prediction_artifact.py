@@ -1,16 +1,12 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import numpy as np
 import pytest
 
 from seis_ssl_cluster.f3.lithology import voxel_prediction_artifact as artifact_module
-
-if TYPE_CHECKING:
-	from pathlib import Path
-
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	F3VoxelPredictionArrays,
 	commit_f3_voxel_prediction_artifact,
@@ -312,6 +308,34 @@ def test_atomic_overwrite_rejects_unsupported_platform_without_data_loss(
 		'invalid_voxel_count': 4,
 		'class_prediction_counts': {'2': 4, '5': 0},
 	}
+
+
+def test_non_overwrite_commit_does_not_replace_racing_target(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	target = tmp_path / 'run'
+	staging = create_f3_voxel_prediction_staging_paths(target)
+	_write_artifact(staging.output_dir)
+	original_exists = Path.exists
+	target_checks = 0
+
+	def create_target_after_checks(path: Path) -> bool:
+		nonlocal target_checks
+		if path == target:
+			target_checks += 1
+			if target_checks == 2:
+				target.mkdir()
+				(target / 'marker').write_text('existing', encoding='utf-8')
+				return False
+		return original_exists(path)
+
+	monkeypatch.setattr(Path, 'exists', create_target_after_checks)
+	with pytest.raises(FileExistsError, match='refusing to overwrite'):
+		commit_f3_voxel_prediction_artifact(staging, target)
+
+	assert target_checks == 2
+	assert staging.output_dir.is_dir()
+	assert (target / 'marker').read_text(encoding='utf-8') == 'existing'
 
 
 def test_metadata_is_standard_json_and_rejects_nan(tmp_path: Path) -> None:

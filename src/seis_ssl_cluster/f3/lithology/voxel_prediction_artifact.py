@@ -31,6 +31,7 @@ METADATA_NAME = 'prediction_metadata.json'
 INVALID_PREDICTION_CLASS_ID = -1
 INVALID_CONFIDENCE_VALUE = 'nan'
 _AT_FDCWD = -100
+_RENAME_NOREPLACE = 1
 _RENAME_EXCHANGE = 2
 
 
@@ -360,21 +361,57 @@ def commit_f3_voxel_prediction_artifact(
 	if target.exists() and not overwrite:
 		raise FileExistsError(f'refusing to overwrite existing output: {target}')
 	if not target.exists():
-		staging.output_dir.replace(target)
+		_rename_directory_no_replace(staging.output_dir, target)
 		return f3_voxel_prediction_artifact_paths(target)
 	_exchange_directories(staging.output_dir, target)
 	shutil.rmtree(staging.output_dir)
 	return f3_voxel_prediction_artifact_paths(target)
 
 
+def _rename_directory_no_replace(source: Path, target: Path) -> None:
+	"""Atomically publish a directory only when the target is still absent."""
+	try:
+		_rename_directories(
+			source,
+			target,
+			flags=_RENAME_NOREPLACE,
+			operation='no-replace publish',
+			flag_name='RENAME_NOREPLACE',
+		)
+	except OSError as error:
+		if error.errno == errno.EEXIST:
+			raise FileExistsError(
+				f'refusing to overwrite existing output: {target}'
+			) from error
+		raise
+
+
 def _exchange_directories(source: Path, target: Path) -> None:
 	"""Atomically exchange two same-filesystem directory entries."""
+	_rename_directories(
+		source,
+		target,
+		flags=_RENAME_EXCHANGE,
+		operation='overwrite',
+		flag_name='RENAME_EXCHANGE',
+	)
+
+
+def _rename_directories(
+	source: Path,
+	target: Path,
+	*,
+	flags: int,
+	operation: str,
+	flag_name: str,
+) -> None:
+	"""Invoke Linux renameat2 with the requested atomic directory semantics."""
 	libc = ctypes.CDLL(None, use_errno=True)
 	try:
 		renameat2 = libc.renameat2
 	except AttributeError as error:
 		raise NotImplementedError(
-			'atomic directory overwrite requires renameat2(RENAME_EXCHANGE)'
+			f'atomic directory {operation} requires renameat2({flag_name})'
 		) from error
 	renameat2.argtypes = (
 		ctypes.c_int,
@@ -389,7 +426,7 @@ def _exchange_directories(source: Path, target: Path) -> None:
 		os.fsencode(source),
 		_AT_FDCWD,
 		os.fsencode(target),
-		_RENAME_EXCHANGE,
+		flags,
 	)
 	if result != 0:
 		error_number = ctypes.get_errno()
@@ -399,7 +436,7 @@ def _exchange_directories(source: Path, target: Path) -> None:
 			errno.EOPNOTSUPP,
 		}:
 			raise NotImplementedError(
-				'atomic directory overwrite is not supported by this platform '
+				f'atomic directory {operation} is not supported by this platform '
 				'or filesystem'
 			) from OSError(error_number, os.strerror(error_number))
 		raise OSError(

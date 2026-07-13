@@ -155,3 +155,22 @@ def test_projection_config_rejects_existing_output_without_overwrite(
 	output_dir.mkdir()
 	with pytest.raises(FileExistsError, match='refusing to overwrite'):
 		f3_lithology_voxel_projection_config_from_mapping(config)
+
+
+def test_projection_config_rejects_output_containing_class_info_with_overwrite(
+	tmp_path: Path,
+) -> None:
+	config = projection_config(tmp_path)
+	class_info = Path(config['labels']['class_info'])  # type: ignore[index]
+	labels_dir = class_info.parent / 'labels'
+	labels_dir.mkdir()
+	moved_class_info = labels_dir / class_info.name
+	class_info.replace(moved_class_info)
+	config['labels']['class_info'] = str(moved_class_info)  # type: ignore[index]
+	config['voxel_projection']['output_dir'] = str(labels_dir)  # type: ignore[index]
+	config['voxel_projection']['overwrite'] = True  # type: ignore[index]
+
+	with pytest.raises(ValueError, match=r'must not overlap labels\.class_info'):
+		f3_lithology_voxel_projection_config_from_mapping(config)
+
+	assert moved_class_info.is_file()

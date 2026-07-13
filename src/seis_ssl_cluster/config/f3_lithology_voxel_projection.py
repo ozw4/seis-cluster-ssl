@@ -143,7 +143,11 @@ def f3_lithology_voxel_projection_config_from_mapping(
 		artifact_root=artifact_root,
 		f3_root=f3_root,
 	)
-	_validate_output_collision(input_dir, output_dir)
+	_validate_output_collision(
+		input_dir,
+		class_info=class_info,
+		output_dir=output_dir,
+	)
 	mode = projection.get('mode', PROJECTION_MODE_NEAREST)
 	if not isinstance(mode, str):
 		raise TypeError(f'voxel_projection.mode must be a string; got {mode!r}')
@@ -310,8 +314,14 @@ def _metadata_mapping(
 	return cast('Mapping[str, object]', value)
 
 
-def _validate_output_collision(input_dir: Path, output_dir: Path) -> None:
+def _validate_output_collision(
+	input_dir: Path,
+	*,
+	class_info: Path,
+	output_dir: Path,
+) -> None:
 	source = input_dir.resolve(strict=False)
+	classes = class_info.resolve(strict=False)
 	output = output_dir.resolve(strict=False)
 	if source == output or source.is_relative_to(output):
 		raise ValueError(
@@ -322,6 +332,12 @@ def _validate_output_collision(input_dir: Path, output_dir: Path) -> None:
 		raise ValueError(
 			'voxel_projection.output_dir must not be inside '
 			'token_predictions.input_dir'
+		)
+	if classes == output or classes.is_relative_to(output) or output.is_relative_to(
+		classes
+	):
+		raise ValueError(
+			'voxel_projection.output_dir must not overlap labels.class_info'
 		)
 
 
