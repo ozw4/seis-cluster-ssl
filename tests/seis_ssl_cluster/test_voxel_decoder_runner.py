@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from copy import deepcopy
@@ -244,17 +245,33 @@ def test_inspection_rejects_embedding_checkpoint_tag_mismatch(tmp_path) -> None:
 		inspect_f3_lithology_voxel_decoder(config)
 
 
-def test_inspection_rejects_voxel_source_identity_mismatch(tmp_path) -> None:
-	raw, _ = _job(tmp_path, 'source-identity-mismatch')
+def test_inspection_allows_model_independent_reference_artifact_paths(
+	tmp_path,
+) -> None:
+	raw, _ = _job(tmp_path, 'model-independent-reference')
+	embedding_metadata_path = (
+		Path(raw['embeddings']['input_dir']) / 'tiny.embedding_metadata.json'
+	)
+	embedding_metadata = json.loads(
+		embedding_metadata_path.read_text(encoding='utf-8')
+	)
+	embedding_metadata['candidate_encoder_identity'] = 'model-b'
+	embedding_metadata_path.write_text(
+		json.dumps(embedding_metadata), encoding='utf-8'
+	)
 	metadata_path = (
 		Path(raw['voxel_dataset']['input_dir']) / 'voxel_dataset_metadata.json'
 	)
 	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['reference_embedding']['path'] = str(tmp_path / 'model-a.json')
+	metadata['reference_embedding']['sha256'] = '0' * 64
 	metadata['reference_valid_tokens']['path'] = str(tmp_path / 'other.npy')
 	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
 	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
-	with pytest.raises(ValueError, match='reference_valid_tokens path'):
-		inspect_f3_lithology_voxel_decoder(config)
+
+	plan = inspect_f3_lithology_voxel_decoder(config)
+
+	assert plan.embedding_metadata == embedding_metadata_path
 
 
 def test_run_rejects_voxel_source_hash_mismatch(tmp_path) -> None:
@@ -266,8 +283,47 @@ def test_run_rejects_voxel_source_hash_mismatch(tmp_path) -> None:
 	metadata['reference_valid_tokens']['sha256'] = '0' * 64
 	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
 	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
-	with pytest.raises(ValueError, match='reference_valid_tokens hash'):
+	with pytest.raises(ValueError, match='valid-token hash'):
 		run_f3_lithology_voxel_decoder(config, device='cpu')
+
+
+@pytest.mark.parametrize(
+	'source', ['embeddings', 'valid_tokens', 'split_grid', 'labels']
+)
+def test_dry_run_inspection_rejects_missing_source_arrays(
+	tmp_path, source: str
+) -> None:
+	raw, embedding_path = _job(tmp_path, f'missing-{source}')
+	voxel_dir = Path(raw['voxel_dataset']['input_dir'])
+	metadata = json.loads(
+		(voxel_dir / 'voxel_dataset_metadata.json').read_text(encoding='utf-8')
+	)
+	paths = {
+		'embeddings': embedding_path,
+		'valid_tokens': Path(raw['embeddings']['input_dir'])
+		/ 'tiny.valid_tokens.npy',
+		'split_grid': voxel_dir / 'supervision_split_grid.npy',
+		'labels': Path(metadata['label_volume']['path']),
+	}
+	paths[source].unlink()
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+	with pytest.raises(FileNotFoundError, match='missing voxel decoder input'):
+		inspect_f3_lithology_voxel_decoder(config)
+
+
+def test_dry_run_inspection_rejects_malformed_source_array(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'malformed-split')
+	voxel_dir = Path(raw['voxel_dataset']['input_dir'])
+	np.save(
+		voxel_dir / 'supervision_split_grid.npy',
+		np.ones((3, 1, 1), dtype=np.uint8),
+		allow_pickle=False,
+	)
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+	with pytest.raises(ValueError, match='shape does not match label_volume'):
+		inspect_f3_lithology_voxel_decoder(config)
 
 
 def test_run_rejects_label_volume_hash_mismatch(tmp_path) -> None:
@@ -341,6 +397,17 @@ def test_completed_checkpoint_cannot_be_resumed(tmp_path) -> None:
 	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
 	result = run_f3_lithology_voxel_decoder(config, device='cpu')
 	with pytest.raises(ValueError, match='completed'):
-		run_f3_lithology_voxel_decoder(
+			run_f3_lithology_voxel_decoder(
 			config, device='cpu', resume=result.latest_checkpoint
 		)
+
+
+def test_resume_rejects_best_checkpoint_path(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'resume-best')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	partial = run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=1)
+	best_path = config.output_dir / 'best.pt'
+	shutil.copy2(partial.latest_checkpoint, best_path)
+
+	with pytest.raises(ValueError, match=r'must be latest\.pt'):
+		run_f3_lithology_voxel_decoder(config, device='cpu', resume=best_path)

@@ -27,7 +27,6 @@ def test_default_decoder_upsamples_each_axis_by_eight() -> None:
 	logits = model(embeddings)
 
 	assert logits.shape == (1, 6, 16, 8, 24)
-	assert model.group_norm_groups == (8, 8, 8)
 
 
 @pytest.mark.parametrize(
@@ -71,7 +70,6 @@ def test_decoder_supports_singleton_crop_with_one_value_per_group() -> None:
 
 	logits = model(embeddings)
 
-	assert model.group_norm_groups == (8,)
 	assert logits.shape == (1, 2, 1, 1, 1)
 	assert torch.isfinite(logits).all()
 
@@ -125,21 +123,14 @@ def test_malformed_architecture_settings_raise(kwargs: dict[str, object]) -> Non
 		VoxelDecoder3D(**kwargs)  # type: ignore[arg-type]
 
 
-def test_group_counts_are_deterministic_divisors() -> None:
+def test_upsample_blocks_use_voxelwise_channel_normalization() -> None:
 	model = VoxelDecoder3D(
 		hidden_channels=(10, 7, 12),
-		max_group_count=8,
 	)
 
-	assert model.group_norm_groups == (5, 7, 6)
-	assert all(
-		channels % groups == 0
-		for channels, groups in zip(
-			model.hidden_channels,
-			model.group_norm_groups,
-			strict=True,
-		)
-	)
+	assert [
+		block.normalization.normalized_shape for block in model.upsample_blocks
+	] == [(10,), (7,), (12,)]
 
 
 def test_state_dict_round_trip_preserves_output() -> None:

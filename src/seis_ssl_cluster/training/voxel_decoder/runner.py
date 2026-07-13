@@ -20,6 +20,7 @@ import seis_ssl_cluster
 from seis_ssl_cluster.data.f3_voxel_decoder_dataset import (
 	F3VoxelDecoderDataset,
 	build_f3_voxel_decoder_dataloader,
+	validate_encoder_pairing,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.io.labels import F3ClassInfo
@@ -88,23 +89,27 @@ class VoxelDecoderRunResult:
 	completed: bool
 
 
-def inspect_f3_lithology_voxel_decoder(  # noqa: C901
+def inspect_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912
 	config: F3LithologyVoxelDecoderConfig,
 ) -> VoxelDecoderInputPlan:
-	"""Read only small metadata files and resolve the dry-run plan."""
+	"""Inspect source metadata and memory-mapped array headers for a dry-run."""
 	embedding_files = output_paths(config.embeddings_input_dir, config.survey_id)
 	voxel_metadata = config.voxel_dataset_input_dir / METADATA_NAME
-	for path in (embedding_files.metadata, voxel_metadata):
+	split_grid = config.voxel_dataset_input_dir / GRID_NAME
+	for path in (
+		embedding_files.embeddings,
+		embedding_files.valid_tokens,
+		embedding_files.metadata,
+		voxel_metadata,
+		split_grid,
+	):
 		if not path.is_file():
-			raise FileNotFoundError(f'missing voxel decoder metadata input: {path}')
+			raise FileNotFoundError(f'missing voxel decoder input: {path}')
 	embedding_payload = _read_json_object(embedding_files.metadata)
 	voxel_payload = _read_json_object(voxel_metadata)
 	_validate_source_provenance(
 		config,
-		embedding_metadata=embedding_files.metadata,
-		valid_tokens=embedding_files.valid_tokens,
 		embedding_payload=embedding_payload,
-		voxel_payload=voxel_payload,
 	)
 	label_identity = voxel_payload.get('label_volume')
 	if not isinstance(label_identity, Mapping):
@@ -112,6 +117,9 @@ def inspect_f3_lithology_voxel_decoder(  # noqa: C901
 	label_path_value = label_identity.get('path')
 	if not isinstance(label_path_value, str) or not label_path_value:
 		raise ValueError('voxel dataset metadata label_volume.path is required')
+	label_volume = Path(label_path_value)
+	if not label_volume.is_file():
+		raise FileNotFoundError(f'missing voxel decoder input: {label_volume}')
 	classes_value = voxel_payload.get('classes')
 	if not isinstance(classes_value, Sequence) or isinstance(
 		classes_value, str | bytes
@@ -137,13 +145,22 @@ def inspect_f3_lithology_voxel_decoder(  # noqa: C901
 	geometry = _metadata_geometry(embedding_payload)
 	if config.decoder.embedding_dim != _embedding_dim(embedding_payload):
 		raise ValueError('decoder.embedding_dim does not match embedding metadata')
+	_validate_inspected_arrays(
+		embeddings=embedding_files.embeddings,
+		valid_tokens=embedding_files.valid_tokens,
+		label_volume=label_volume,
+		split_grid=split_grid,
+		embedding_payload=embedding_payload,
+		voxel_payload=voxel_payload,
+		geometry=geometry,
+	)
 	return VoxelDecoderInputPlan(
 		embeddings=embedding_files.embeddings,
 		valid_tokens=embedding_files.valid_tokens,
 		embedding_metadata=embedding_files.metadata,
 		voxel_metadata=voxel_metadata,
-		split_grid=config.voxel_dataset_input_dir / GRID_NAME,
-		label_volume=Path(label_path_value),
+		split_grid=split_grid,
+		label_volume=label_volume,
 		patch_size_xyz=geometry[0],
 		token_grid_shape_xyz=geometry[1],
 		volume_shape_xyz=geometry[2],
@@ -172,7 +189,6 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 	run_device = _resolve_device(device)
 	_seed_everything(config.train.seed)
 	identities = _artifact_identities(plan)
-	_validate_voxel_source_hashes(plan, identities)
 
 	labels = np.load(plan.label_volume, mmap_mode='r', allow_pickle=False)
 	split_grid = np.load(plan.split_grid, mmap_mode='r', allow_pickle=False)
@@ -477,10 +493,7 @@ def _identity(path: Path) -> dict[str, str]:
 def _validate_source_provenance(
 	config: F3LithologyVoxelDecoderConfig,
 	*,
-	embedding_metadata: Path,
-	valid_tokens: Path,
 	embedding_payload: Mapping[str, object],
-	voxel_payload: Mapping[str, object],
 ) -> None:
 	expected_root = (
 		config.artifact_root
@@ -510,54 +523,71 @@ def _validate_source_provenance(
 			f'config={config.model["tag"]!r}'
 		)
 
-	reference_embedding = _required_metadata_mapping(
-		voxel_payload, 'reference_embedding'
-	)
-	_validate_referenced_path(
-		reference_embedding,
-		embedding_metadata,
-		label='voxel dataset reference_embedding',
-	)
-	if reference_embedding.get('sha256') != file_sha256(embedding_metadata):
-		raise ValueError(
-			'voxel dataset reference_embedding hash does not match selected '
-			'embedding metadata'
-		)
-	if reference_embedding.get('metadata') != embedding_payload:
-		raise ValueError(
-			'voxel dataset reference_embedding metadata does not match selected '
-			'embedding metadata'
-		)
-	reference_valid_tokens = _required_metadata_mapping(
-		voxel_payload, 'reference_valid_tokens'
-	)
-	_validate_referenced_path(
-		reference_valid_tokens,
-		valid_tokens,
-		label='voxel dataset reference_valid_tokens',
-	)
 
-
-def _validate_voxel_source_hashes(
-	plan: VoxelDecoderInputPlan, identities: Mapping[str, object]
+def _validate_inspected_arrays(  # noqa: PLR0913
+	*,
+	embeddings: Path,
+	valid_tokens: Path,
+	label_volume: Path,
+	split_grid: Path,
+	embedding_payload: Mapping[str, object],
+	voxel_payload: Mapping[str, object],
+	geometry: tuple[
+		tuple[int, int, int],
+		tuple[int, int, int],
+		tuple[int, int, int],
+	],
 ) -> None:
-	voxel_payload = _read_json_object(plan.voxel_metadata)
-	reference_valid_tokens = _required_metadata_mapping(
-		voxel_payload, 'reference_valid_tokens'
+	"""Validate array geometry and canonical identities without copying arrays."""
+	embedding_array = np.load(embeddings, mmap_mode='r', allow_pickle=False)
+	valid_array = np.load(valid_tokens, mmap_mode='r', allow_pickle=False)
+	label_array = np.load(label_volume, mmap_mode='r', allow_pickle=False)
+	split_array = np.load(split_grid, mmap_mode='r', allow_pickle=False)
+	patch_size, token_shape, volume_shape = geometry
+	if embedding_array.ndim != 4 or not np.issubdtype(
+		embedding_array.dtype, np.floating
+	):
+		raise TypeError('embeddings must be floating [TX,TY,TZ,D]')
+	expected_embedding_shape = (
+		*token_shape,
+		_embedding_dim(embedding_payload),
 	)
-	valid_identity = identities.get('valid_tokens')
-	if not isinstance(valid_identity, Mapping):
-		raise TypeError('valid-token artifact identity must be a mapping')
-	if reference_valid_tokens.get('sha256') != valid_identity.get('sha256'):
-		raise ValueError(
-			'voxel dataset reference_valid_tokens hash does not match selected '
-			'valid-token artifact'
+	if tuple(embedding_array.shape) != expected_embedding_shape:
+		raise ValueError('embedding array shape does not match embedding metadata')
+	if valid_array.dtype != np.bool_ or tuple(valid_array.shape) != token_shape:
+		raise TypeError(
+			'valid_tokens must be bool with the metadata token-grid shape'
 		)
-	label_volume = _required_metadata_mapping(voxel_payload, 'label_volume')
-	label_identity = identities.get('label_volume')
-	if not isinstance(label_identity, Mapping):
-		raise TypeError('label-volume artifact identity must be a mapping')
-	if label_volume.get('sha256') != label_identity.get('sha256'):
+	if (
+		label_array.ndim != 3
+		or not np.issubdtype(label_array.dtype, np.integer)
+		or label_array.dtype == np.bool_
+	):
+		raise TypeError('label_volume must be a 3D integer array')
+	if tuple(label_array.shape) != volume_shape:
+		raise ValueError('label_volume shape does not match embedding metadata')
+	if (
+		split_array.ndim != 3
+		or not np.issubdtype(split_array.dtype, np.integer)
+		or split_array.dtype == np.bool_
+	):
+		raise TypeError('supervision_split_grid must be a 3D integer array')
+	if split_array.shape != label_array.shape:
+		raise ValueError('supervision_split_grid shape does not match label_volume')
+	expected_tokens = tuple(
+		(size + step - 1) // step
+		for size, step in zip(volume_shape, patch_size, strict=True)
+	)
+	if expected_tokens != token_shape:
+		raise ValueError('embedding token grid is inconsistent with volume geometry')
+	validate_encoder_pairing(
+		candidate_metadata=embedding_payload,
+		reference_metadata=voxel_payload,
+		candidate_valid_tokens_path=valid_tokens,
+		candidate_embedding_shape=embedding_array.shape,
+	)
+	declared_label = _required_metadata_mapping(voxel_payload, 'label_volume')
+	if declared_label.get('sha256') != file_sha256(label_volume):
 		raise ValueError(
 			'voxel dataset label_volume hash does not match selected label-volume '
 			'artifact'
@@ -571,16 +601,6 @@ def _required_metadata_mapping(
 	if not isinstance(value, Mapping):
 		raise TypeError(f'voxel dataset metadata {key} must be a mapping')
 	return value
-
-
-def _validate_referenced_path(
-	identity: Mapping[str, object], actual: Path, *, label: str
-) -> None:
-	value = identity.get('path')
-	if not isinstance(value, str) or not value:
-		raise ValueError(f'{label}.path is required')
-	if Path(value).resolve(strict=False) != actual.resolve(strict=False):
-		raise ValueError(f'{label} path does not match selected artifact')
 
 
 def _snapshot_run(
@@ -658,8 +678,10 @@ def _validate_output_collision(output_dir: Path, resume: Path | None) -> None:
 		return
 	if not resume.is_file():
 		raise FileNotFoundError(f'resume checkpoint does not exist: {resume}')
+	if resume.name != LATEST_NAME:
+		raise ValueError(f'resume checkpoint must be {LATEST_NAME}')
 	if resume.parent.resolve() != output_dir.resolve():
-		raise ValueError('resume checkpoint must be inside outputs.output_dir')
+		raise ValueError(f'resume checkpoint must be outputs.output_dir/{LATEST_NAME}')
 
 
 def _validate_input_files(plan: VoxelDecoderInputPlan) -> None:

@@ -120,6 +120,82 @@ def test_tiled_core_outputs_match_whole_grid_forward() -> None:
 	assert coverage['written_voxel_count'] == np.prod(shape)
 
 
+def test_production_decoder_tiled_outputs_match_whole_grid_forward() -> None:
+	torch.manual_seed(232)
+	token_shape = (5, 3, 2)
+	patch_size = (8, 8, 8)
+	volume_shape = tuple(
+		tokens * patch
+		for tokens, patch in zip(token_shape, patch_size, strict=True)
+	)
+	embedding_dim = 4
+	class_count = 3
+	embeddings = torch.randn(1, embedding_dim, *token_shape)
+	valid_tokens = torch.ones((1, *token_shape), dtype=torch.bool)
+	model = VoxelDecoder3D(
+		embedding_dim=embedding_dim,
+		class_count=class_count,
+		hidden_channels=(8, 4, 4),
+		upsample_factors=((2, 2, 2),) * 3,
+		patch_size_xyz=patch_size,
+	).eval()
+	with torch.inference_mode():
+		whole_probabilities = torch.softmax(
+			model(embeddings, valid_tokens), dim=1
+		)[0]
+		whole_confidence, whole_indices = whole_probabilities.max(dim=0)
+
+	arrays = F3VoxelPredictionArrays(
+		predictions=np.full(volume_shape, -1, dtype=np.int16),
+		confidence=np.full(volume_shape, np.nan, dtype=np.float16),
+		valid_mask=np.zeros(volume_shape, dtype=np.bool_),
+		probabilities=np.full(
+			(*volume_shape, class_count), np.nan, dtype=np.float16
+		),
+	)
+	plan = VoxelDecoderInferencePlan(
+		embeddings=Path('embeddings.npy'),
+		valid_tokens=Path('valid_tokens.npy'),
+		embedding_metadata=Path('embedding_metadata.json'),
+		checkpoint=Path('best.pt'),
+		resolved_decoder_config=Path('resolved_config.json'),
+		train_tile_manifest=Path('train_tile_manifest.json'),
+		validation_tile_manifest=Path('validation_tile_manifest.json'),
+		volume_shape_xyz=volume_shape,
+		token_grid_shape_xyz=token_shape,
+		patch_size_xyz=patch_size,
+		embedding_dim=embedding_dim,
+		class_ids=(3, 7, 9),
+		classes=(),
+		decoder_spec={},
+		checkpoint_payload={},
+		artifact_identities={},
+	)
+
+	_write_inference_tiles(
+		model,
+		embeddings=embeddings[0].movedim(0, -1).numpy(),
+		valid_tokens=valid_tokens[0].numpy(),
+		arrays=arrays,
+		plan=plan,
+		core_size_tokens=(2, 2, 1),
+		context_halo_tokens=(1, 1, 1),
+		device=torch.device('cpu'),
+	)
+
+	expected_predictions = np.asarray((3, 7, 9), dtype=np.int16)[
+		whole_indices.numpy()
+	]
+	np.testing.assert_array_equal(arrays.predictions, expected_predictions)
+	np.testing.assert_array_equal(
+		arrays.confidence, whole_confidence.numpy().astype(np.float16)
+	)
+	np.testing.assert_array_equal(
+		arrays.probabilities,
+		whole_probabilities.movedim(0, -1).numpy().astype(np.float16),
+	)
+
+
 def test_cpu_chunked_inference_crops_volume_and_masks_invalid_tokens(
 	tmp_path: Path,
 ) -> None:

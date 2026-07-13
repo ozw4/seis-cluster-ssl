@@ -9,22 +9,12 @@ from torch import nn
 from torch.nn.functional import interpolate
 
 
-class _SingletonSafeGroupNorm(nn.GroupNorm):
-	"""Apply GroupNorm when a group contains only one scalar value."""
+class _VoxelwiseLayerNorm(nn.LayerNorm):
+	"""Normalize channels independently at each voxel location."""
 
 	def forward(self, x: torch.Tensor) -> torch.Tensor:
-		"""Return the mathematically defined affine output for singleton groups."""
-		values_per_group = (x.shape[1] // self.num_groups) * _product(x.shape[2:])
-		if values_per_group != 1:
-			return super().forward(x)
-
-		output = x * 0.0
-		if self.affine:
-			broadcast_shape = (1, -1, *(1 for _ in x.shape[2:]))
-			weight = self.weight.to(dtype=x.dtype).view(broadcast_shape)
-			bias = self.bias.to(dtype=x.dtype).view(broadcast_shape)
-			output = output * weight + bias
-		return output
+		"""Apply layer normalization without spatially coupling tiles."""
+		return super().forward(x.movedim(1, -1)).movedim(-1, 1)
 
 
 class _UpsampleBlock(nn.Module):
@@ -35,7 +25,6 @@ class _UpsampleBlock(nn.Module):
 		in_channels: int,
 		out_channels: int,
 		upsample_factor: tuple[int, int, int],
-		group_count: int,
 	) -> None:
 		super().__init__()
 		self.upsample_factor = upsample_factor
@@ -45,7 +34,7 @@ class _UpsampleBlock(nn.Module):
 			kernel_size=3,
 			padding=1,
 		)
-		self.normalization = _SingletonSafeGroupNorm(group_count, out_channels)
+		self.normalization = _VoxelwiseLayerNorm(out_channels)
 		self.activation = nn.GELU()
 
 	def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -53,8 +42,7 @@ class _UpsampleBlock(nn.Module):
 		x = interpolate(
 			x,
 			scale_factor=self.upsample_factor,
-			mode='trilinear',
-			align_corners=False,
+			mode='nearest',
 		)
 		return self.activation(self.normalization(self.convolution(x)))
 
@@ -62,7 +50,7 @@ class _UpsampleBlock(nn.Module):
 class VoxelDecoder3D(nn.Module):
 	"""Decode frozen encoder embeddings into dense voxel-class logits."""
 
-	def __init__(  # noqa: PLR0913
+	def __init__(
 		self,
 		*,
 		embedding_dim: int = 384,
@@ -74,7 +62,6 @@ class VoxelDecoder3D(nn.Module):
 			(2, 2, 2),
 		),
 		patch_size_xyz: Sequence[int] = (8, 8, 8),
-		max_group_count: int = 8,
 	) -> None:
 		"""Initialize the projection, upsampling blocks, and logits head."""
 		super().__init__()
@@ -89,7 +76,6 @@ class VoxelDecoder3D(nn.Module):
 			patch_size_xyz,
 			'patch_size_xyz',
 		)
-		self.max_group_count = _positive_int(max_group_count, 'max_group_count')
 
 		if len(self.hidden_channels) != len(self.upsample_factors):
 			msg = (
@@ -109,10 +95,6 @@ class VoxelDecoder3D(nn.Module):
 			)
 			raise ValueError(msg)
 
-		self.group_norm_groups = tuple(
-			_resolve_group_count(channels, self.max_group_count)
-			for channels in self.hidden_channels
-		)
 		self.token_normalization = nn.LayerNorm(self.embedding_dim)
 		self.input_projection = nn.Conv3d(
 			self.embedding_dim,
@@ -121,12 +103,11 @@ class VoxelDecoder3D(nn.Module):
 		)
 		stage_inputs = (self.hidden_channels[0], *self.hidden_channels[:-1])
 		self.upsample_blocks = nn.ModuleList(
-			_UpsampleBlock(in_channels, out_channels, factor, group_count)
-			for in_channels, out_channels, factor, group_count in zip(
+			_UpsampleBlock(in_channels, out_channels, factor)
+			for in_channels, out_channels, factor in zip(
 				stage_inputs,
 				self.hidden_channels,
 				self.upsample_factors,
-				self.group_norm_groups,
 				strict=True,
 			)
 		)
@@ -148,12 +129,24 @@ class VoxelDecoder3D(nn.Module):
 		if token_valid_mask is not None:
 			invalid_tokens = ~token_valid_mask.unsqueeze(1)
 			embeddings = embeddings.masked_fill(invalid_tokens, 0.0)
+			valid_voxels = token_valid_mask.unsqueeze(1)
+		else:
+			valid_voxels = None
 		x = self.token_normalization(embeddings.movedim(1, -1)).movedim(-1, 1)
 		if token_valid_mask is not None:
 			x = x.masked_fill(invalid_tokens, 0.0)
 		x = self.input_projection(x)
+		if token_valid_mask is not None:
+			x = x.masked_fill(invalid_tokens, 0.0)
 		for block in self.upsample_blocks:
 			x = block(x)
+			if valid_voxels is not None:
+				valid_voxels = interpolate(
+					valid_voxels.to(dtype=x.dtype),
+					scale_factor=block.upsample_factor,
+					mode='nearest',
+				).to(dtype=torch.bool)
+				x = x.masked_fill(~valid_voxels, 0.0)
 		return self.logits_head(x)
 
 
@@ -242,14 +235,6 @@ def _factor_sequence(
 		raise ValueError(msg)
 	return tuple(
 		_positive_int_triple(factor, 'upsample_factors') for factor in value
-	)
-
-
-def _resolve_group_count(channels: int, max_group_count: int) -> int:
-	return next(
-		group_count
-		for group_count in range(min(channels, max_group_count), 0, -1)
-		if channels % group_count == 0
 	)
 
 
