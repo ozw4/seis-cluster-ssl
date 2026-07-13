@@ -132,6 +132,18 @@ from seis_ssl_cluster.f3.lithology.visualization import (
 	read_f3_lithology_visualization_classes,
 	visualize_f3_lithology_predictions,
 )
+from seis_ssl_cluster.f3.lithology.voxel_geometry import (
+	project_token_grid_nearest,
+	valid_tokens_to_voxel_mask,
+)
+from seis_ssl_cluster.f3.lithology.voxel_split import (
+	TRAIN_VOXEL_SPLIT,
+	UNSUPERVISED_VOXEL_SPLIT,
+	VALIDATION_VOXEL_SPLIT,
+	F3VoxelSupervisionSplit,
+	F3VoxelSupervisionSplitSummary,
+	build_f3_voxel_supervision_split,
+)
 from seis_ssl_cluster.f3.lithology.metrics import (
 	REQUIRED_LITHOLOGY_METRICS,
 	compute_lithology_metrics,
@@ -280,7 +292,10 @@ __all__ = [
 	'READINESS_STOP',
 	'REQUIRED_LITHOLOGY_METRICS',
 	'TOKENIZATION_SUMMARY_FIELDNAMES',
+	'TRAIN_VOXEL_SPLIT',
+	'UNSUPERVISED_VOXEL_SPLIT',
 	'VALIDATION_SLICE_METRIC_FIELDNAMES',
+	'VALIDATION_VOXEL_SPLIT',
 	'VALID_CLASS_WEIGHT',
 	'VALID_FEATURE_SCALING',
 	'VALID_PROBE_TYPES',
@@ -361,6 +376,8 @@ __all__ = [
 	'F3TokenizationPreviewRecord',
 	'F3TokenizationSliceResult',
 	'F3TorchMLPClassifier',
+	'F3VoxelSupervisionSplit',
+	'F3VoxelSupervisionSplitSummary',
 	'LabelPngNameParts',
 	'PngLabelClassCount',
 	'PngLabelFileInspection',
@@ -374,6 +391,7 @@ __all__ = [
 	'build_f3_lithology_comparison_report',
 	'build_f3_lithology_report',
 	'build_f3_lithology_token_dataset',
+	'build_f3_voxel_supervision_split',
 	'calculate_label_unique_values',
 	'calculate_seismic_amplitude_stats',
 	'check_f3_label_consistency',
@@ -411,6 +429,7 @@ __all__ = [
 	'png_label_inventory_to_dict',
 	'predict_f3_lithology_tokens',
 	'prepare_f3_facies_volume',
+	'project_token_grid_nearest',
 	'publish_f3_inspection_report',
 	'publish_f3_lithology_comparison_report',
 	'publish_f3_lithology_report',
@@ -443,6 +462,7 @@ __all__ = [
 	'tokenize_f3_lithology_slice',
 	'tokenize_label_slice',
 	'train_and_evaluate_f3_lithology_probe',
+	'valid_tokens_to_voxel_mask',
 	'validate_f3_lithology_token_dataset',
 	'visualize_f3_lithology_predictions',
 	'write_confusion_matrix_csv',
