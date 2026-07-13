@@ -1,0 +1,22 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+  f3_root: /home/dcuser/data/public_data/field/F3
+  results_root: results
+runs:
+  mae:
+    v0: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/voxel_evaluations/token_projection_nearest_v1
+    v1: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/voxel_evaluations/frozen_embedding_decoder_v1
+  m1:
+    v0: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/voxel_evaluations/token_projection_nearest_v1
+    v1: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/voxel_evaluations/frozen_embedding_decoder_v1
+  m2a:
+    v0: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/voxel_evaluations/token_projection_nearest_v1
+    v1: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/voxel_evaluations/frozen_embedding_decoder_v1
+outputs:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/voxel_benchmark_v1
+  overwrite: false
+publish:
+  enabled: true
+  output_dir: results/f3/facies_benchmark_v1/voxel_lithology_benchmark_v1
+  max_file_size_mb: 10
+  overwrite: true
