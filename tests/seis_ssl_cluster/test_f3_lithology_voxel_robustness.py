@@ -75,7 +75,7 @@ def test_two_split_voxel_workflow_runs_end_to_end(tmp_path: Path) -> None:
 	)
 	_probe_bytes = probe_path.read_bytes()
 	probe_path.write_bytes(_probe_bytes + b'tampered')
-	with pytest.raises(ValueError, match='probe identity does not match config'):
+	with pytest.raises(ValueError, match='probe_joblib hash identity mismatch'):
 		run_f3_lithology_voxel_v0_split_suite(v0_config, only_missing=True)
 	probe_path.write_bytes(_probe_bytes)
 	validation_tokens = (
@@ -175,6 +175,33 @@ def test_v0_rejects_cross_model_paired_identity_mismatch(tmp_path: Path) -> None
 		path.write_text(json.dumps(payload), encoding='utf-8')
 
 	with pytest.raises(ValueError, match='paired identity hash mismatch for split_000'):
+		voxel_robustness.voxel_v0_split_jobs(v0_config)
+
+
+def test_v0_rejects_noncanonical_probe_spec(tmp_path: Path) -> None:
+	build_config, v0_config, _ = _synthetic_workflow_configs(tmp_path)
+	build_f3_lithology_voxel_split_datasets(build_config)
+	payload = json.loads(v0_config.probe_run_manifest.read_text(encoding='utf-8'))
+	payload['probe']['spec'] = 'replacement_probe'
+	v0_config.probe_run_manifest.write_text(json.dumps(payload), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='must use probe spec'):
+		voxel_robustness.voxel_v0_split_jobs(v0_config)
+
+
+def test_v0_rejects_probe_settings_different_from_manifest(tmp_path: Path) -> None:
+	build_config, v0_config, _ = _synthetic_workflow_configs(tmp_path)
+	build_f3_lithology_voxel_split_datasets(build_config)
+	payload = json.loads(v0_config.probe_run_manifest.read_text(encoding='utf-8'))
+	row = payload['rows'][0]
+	resolved_path = Path(row['probe_output_dir']) / 'probe_config_resolved.json'
+	resolved = json.loads(resolved_path.read_text(encoding='utf-8'))
+	resolved['probe']['random_state'] = 7
+	resolved_path.write_text(json.dumps(resolved), encoding='utf-8')
+
+	with pytest.raises(
+		ValueError, match='settings do not match the prior run manifest'
+	):
 		voxel_robustness.voxel_v0_split_jobs(v0_config)
 
 
@@ -752,8 +779,16 @@ def _write_evaluation(  # noqa: PLR0913
 		json.dumps(
 			{
 				'artifact_type': 'f3_lithology_voxel_evaluation',
+				'schema_version': 2,
 				'model_tag': model_tag,
 				'prediction_kind': prediction_kind,
+				'aggregation': {
+					'primary_unit': 'unique_validation_voxel',
+					'split_code': 2,
+					'intersection_voxels_counted_once': True,
+					'per_slice_planes_evaluated_independently': True,
+					'voxel_independence_p_values_computed': False,
+				},
 				'inputs': {
 					'prediction_metadata': _file_identity(prediction_metadata),
 					'voxel_split_grid': _file_identity(split_grid),
@@ -815,6 +850,7 @@ def _write_original_summary_bundle(run_root: Path, output_dir: Path) -> None:
 			metadata_path = input_dir / 'evaluation_metadata.json'
 			metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
 			metadata['summary'] = {'unique_validation_voxel_count': 10}
+			metadata['outputs']['metrics.json'] = _file_identity(metrics_path)
 			metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
 			runs.append(F3LithologyVoxelResultsRun(model, version, input_dir))
 	summarize_f3_lithology_voxel_results(
@@ -978,6 +1014,21 @@ def _synthetic_workflow_configs(  # noqa: PLR0915
 	)
 	dataset_rows = []
 	probe_rows = []
+	probe_settings = {
+		'spec': 'linear_balanced_v1',
+		'type': 'logistic_regression',
+		'feature_scaling': 'standard',
+		'class_weight': 'balanced',
+		'max_iter': 2000,
+		'hidden_dims': [256, 128],
+		'dropout': 0.2,
+		'max_epochs': 200,
+		'early_stopping_patience': 20,
+		'batch_size': 1024,
+		'learning_rate': 1.0e-3,
+		'weight_decay': 0.0,
+		'random_state': 42,
+	}
 	for split_index in range(2):
 		split_id = f'split_{split_index:03d}'
 		for role, model_tag in model_specs:
@@ -1000,7 +1051,9 @@ def _synthetic_workflow_configs(  # noqa: PLR0915
 			(probe_dir / 'probe_config_resolved.json').write_text(
 				json.dumps(
 					{
+						'artifact_type': 'f3_lithology_probe',
 						'model': {'tag': model_tag, 'role': role},
+						'probe': probe_settings,
 						'token_dataset': {
 							'input_dir': str(token_root),
 							'split_id': split_id,
@@ -1037,6 +1090,9 @@ def _synthetic_workflow_configs(  # noqa: PLR0915
 					'model_tag': model_tag,
 					'token_dataset_root': str(token_root),
 					'probe_output_dir': str(probe_dir),
+					'probe_spec': 'linear_balanced_v1',
+					'probe_joblib': _file_identity(probe_dir / 'probe.joblib'),
+					'scaler_joblib': _file_identity(probe_dir / 'scaler.joblib'),
 					'paired_identity_hash': paired_hash,
 				}
 			)
@@ -1048,7 +1104,12 @@ def _synthetic_workflow_configs(  # noqa: PLR0915
 		dataset_rows,
 		suite={'split_inventory_manifest': str(inventory_manifest)},
 	)
-	_write_manifest(probe_manifest, 'f3_lithology_split_probe_run_manifest', probe_rows)
+	_write_manifest(
+		probe_manifest,
+		'f3_lithology_split_probe_run_manifest',
+		probe_rows,
+		probe=probe_settings,
+	)
 	evaluation = {
 		'monitored_class_ids': [3, 5],
 		'boundary_tolerances': [2, 4],

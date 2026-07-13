@@ -116,6 +116,7 @@ SUMMARY_ARTIFACT_TYPE = 'f3_lithology_voxel_split_robustness_summary'
 INVENTORY_ARTIFACT_TYPE = 'f3_lithology_split_inventory_manifest'
 SCHEMA_VERSION = 1
 SOURCE_SPLIT_IDS = frozenset(f'split_{index:03d}' for index in range(6))
+V0_PROBE_SPEC = 'linear_balanced_v1'
 
 PRIMARY_METRICS = ('macro_f1', 'mean_iou')
 SUMMARY_METRICS = (
@@ -307,6 +308,9 @@ def voxel_v0_split_jobs(
 			'model_tag',
 			'token_dataset_root',
 			'probe_output_dir',
+			'probe_spec',
+			'probe_joblib',
+			'scaler_joblib',
 			'paired_identity_hash',
 		),
 	)
@@ -1108,6 +1112,7 @@ def _validate_v0_source_artifacts(
 		if not path.is_file():
 			raise FileNotFoundError(f'missing V0 suite input: {path}')
 	_validate_v0_embedding_artifacts(config, voxel_rows)
+	probe_settings = _probe_manifest_settings(config.probe_run_manifest)
 	for row in voxel_rows:
 		_validate_voxel_manifest_row(row)
 	probes = _rows_by_key(probe_rows)
@@ -1128,7 +1133,7 @@ def _validate_v0_source_artifacts(
 		)
 		if actual_pair != dataset['paired_identity_hash']:
 			raise ValueError(f'token dataset paired identity mismatch for {key!r}')
-		_validate_probe_artifact(dataset, probes[key])
+		_validate_probe_artifact(dataset, probes[key], probe_settings=probe_settings)
 
 
 def _validate_v0_embedding_artifacts(
@@ -1159,8 +1164,21 @@ def _validate_v0_embedding_artifacts(
 			)
 
 
-def _validate_probe_artifact(  # noqa: C901
-	dataset: Mapping[str, object], probe: Mapping[str, object]
+def _probe_manifest_settings(path: Path) -> Mapping[str, object]:
+	payload = _read_json(path)
+	probe = _mapping_value(payload, 'probe')
+	if probe.get('spec') != V0_PROBE_SPEC:
+		raise ValueError(
+			f'V0 probe manifest must use probe spec {V0_PROBE_SPEC!r}'
+		)
+	return probe
+
+
+def _validate_probe_artifact(  # noqa: C901, PLR0912
+	dataset: Mapping[str, object],
+	probe: Mapping[str, object],
+	*,
+	probe_settings: Mapping[str, object],
 ) -> None:
 	root = Path(str(probe['probe_output_dir']))
 	probe_path = root / 'probe.joblib'
@@ -1170,6 +1188,21 @@ def _validate_probe_artifact(  # noqa: C901
 		if not path.is_file():
 			raise FileNotFoundError(f'missing split probe input: {path}')
 	resolved = _read_json(config_path)
+	if resolved.get('artifact_type') != 'f3_lithology_probe':
+		raise ValueError('probe resolved config artifact_type mismatch')
+	if probe.get('probe_spec') != V0_PROBE_SPEC:
+		raise ValueError(f'V0 probe row must use probe spec {V0_PROBE_SPEC!r}')
+	resolved_probe = _mapping_value(resolved, 'probe')
+	if resolved_probe != probe_settings:
+		raise ValueError('probe settings do not match the prior run manifest')
+	if resolved_probe.get('spec') != V0_PROBE_SPEC:
+		raise ValueError(f'V0 resolved probe must use spec {V0_PROBE_SPEC!r}')
+	_validate_recorded_identity(
+		probe.get('probe_joblib'), probe_path, label='probe manifest probe_joblib'
+	)
+	_validate_recorded_identity(
+		probe.get('scaler_joblib'), scaler_path, label='probe manifest scaler_joblib'
+	)
 	model = _mapping_value(resolved, 'model')
 	for key in ('model_tag', 'model_role'):
 		expected = dataset['model_tag' if key == 'model_tag' else 'model_role']

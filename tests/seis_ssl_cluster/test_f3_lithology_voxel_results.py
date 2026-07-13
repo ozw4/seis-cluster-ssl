@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from seis_ssl_cluster.embedding.writer import file_sha256
+from seis_ssl_cluster.f3.lithology.voxel_evaluation import EVALUATION_OUTPUT_FILES
 from seis_ssl_cluster.f3.lithology.voxel_results import (
 	EXPECTED_MODEL_TAGS,
 	FIGURE_NAMES,
@@ -83,6 +85,8 @@ def test_rejects_shared_evaluation_identity_mismatch(
 		metadata['summary']['unique_validation_voxel_count'] = 101
 	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
 	metrics_path.write_text(json.dumps(metrics), encoding='utf-8')
+	if field in {'classes', 'count'}:
+		_refresh_output_identity(run.input_dir, 'metrics.json')
 
 	with pytest.raises(ValueError, match=wording):
 		summarize_f3_lithology_voxel_results(config)
@@ -141,11 +145,13 @@ def test_m2a_decision_boundary_f1_gate_independently_forces_hold(
 	boundary_v0['vertical_boundary_f1_at_2'] = 0.49
 	boundary_v0['vertical_boundary_f1_at_4'] = 0.49
 	boundary_v0_path.write_text(json.dumps(boundary_v0), encoding='utf-8')
+	_refresh_output_identity(m2a_v0.input_dir, 'boundary_metrics.json')
 	boundary_path = m2a_v1.input_dir / 'boundary_metrics.json'
 	boundary = json.loads(boundary_path.read_text(encoding='utf-8'))
 	boundary['vertical_boundary_f1_at_2'] = 0.50
 	boundary['vertical_boundary_f1_at_4'] = 0.50
 	boundary_path.write_text(json.dumps(boundary), encoding='utf-8')
+	_refresh_output_identity(m2a_v1.input_dir, 'boundary_metrics.json')
 
 	result = summarize_f3_lithology_voxel_results(config)
 
@@ -166,6 +172,7 @@ def test_m2a_decision_monitored_class_gate_independently_forces_hold(
 		metrics['per_class_f1'][class_id] = 0.50
 		metrics['per_class_iou'][class_id] = 0.50
 	metrics_path.write_text(json.dumps(metrics), encoding='utf-8')
+	_refresh_output_identity(m2a_v1.input_dir, 'metrics.json')
 
 	result = summarize_f3_lithology_voxel_results(config)
 
@@ -198,6 +205,46 @@ def test_publish_uses_exact_lightweight_allowlist(tmp_path: Path) -> None:
 		*(f'figures/{name}' for name in FIGURE_NAMES),
 	}
 	assert not any(target.endswith(('.pt', '.npy', '.npz')) for target in targets)
+
+
+@pytest.mark.parametrize(
+	('field', 'value', 'wording'),
+	[
+		('artifact_type', 'not-an-evaluation', 'artifact_type mismatch'),
+		('schema_version', 1, 'schema_version mismatch'),
+		('aggregation', {}, 'unique-validation-voxel aggregation mismatch'),
+	],
+)
+def test_rejects_noncanonical_evaluation_contract(
+	tmp_path: Path, field: str, value: object, wording: str
+) -> None:
+	config = _fixture(tmp_path, mode='positive')
+	metadata_path = config.runs[0].input_dir / 'evaluation_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata[field] = value
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+
+	with pytest.raises(ValueError, match=wording):
+		summarize_f3_lithology_voxel_results(config)
+
+
+@pytest.mark.parametrize(
+	'output_name',
+	[
+		'metrics.json',
+		'boundary_metrics.json',
+		'boundary_region_metrics.csv',
+	],
+)
+def test_rejects_evaluation_output_modified_after_metadata(
+	tmp_path: Path, output_name: str
+) -> None:
+	config = _fixture(tmp_path, mode='positive')
+	path = config.runs[0].input_dir / output_name
+	path.write_bytes(path.read_bytes() + b' ')
+
+	with pytest.raises(ValueError, match=f'{output_name} hash identity mismatch'):
+		summarize_f3_lithology_voxel_results(config)
 
 
 def _fixture(tmp_path: Path, *, mode: str) -> F3LithologyVoxelResultsConfig:
@@ -237,6 +284,7 @@ def _write_run(path: Path, *, model: str, version: str, mode: str) -> None:
 		- (0.02 if mode == 'hold' and model == 'M1' and version == 'V1' else 0),
 		'balanced_accuracy': score,
 		'evaluation_voxel_count': 100,
+		'aggregation_unit': 'unique_validation_voxel',
 		'class_ids': [0, 1, 2, 3, 4, 5],
 		'per_class_f1': {str(class_id): score for class_id in range(6)},
 		'per_class_iou': {str(class_id): score for class_id in range(6)},
@@ -251,23 +299,8 @@ def _write_run(path: Path, *, model: str, version: str, mode: str) -> None:
 			boundary[f'vertical_boundary_class_{class_id}_recall_at_{tolerance}'] = (
 				score
 			)
-	metadata = {
-		'artifact_type': 'f3_lithology_voxel_evaluation',
-		'schema_version': 2,
-		'prediction_kind': (
-			'token_projection_nearest'
-			if version == 'V0'
-			else 'frozen_embedding_decoder'
-		),
-		'model_tag': EXPECTED_MODEL_TAGS[model],
-		'inputs': {'voxel_split_grid': {'sha256': 'a' * 64}},
-		'summary': {'unique_validation_voxel_count': 100},
-	}
 	(path / 'metrics.json').write_text(json.dumps(metrics), encoding='utf-8')
 	(path / 'boundary_metrics.json').write_text(json.dumps(boundary), encoding='utf-8')
-	(path / 'evaluation_metadata.json').write_text(
-		json.dumps(metadata), encoding='utf-8'
-	)
 	with (path / 'boundary_region_metrics.csv').open(
 		'w', newline='', encoding='utf-8'
 	) as handle:
@@ -284,6 +317,46 @@ def _write_run(path: Path, *, model: str, version: str, mode: str) -> None:
 					'mean_iou': score,
 				}
 			)
+	for name in EVALUATION_OUTPUT_FILES:
+		output = path / name
+		if not output.exists():
+			output.write_text('{}\n' if output.suffix == '.json' else '\n')
+	metadata = {
+		'artifact_type': 'f3_lithology_voxel_evaluation',
+		'schema_version': 2,
+		'prediction_kind': (
+			'token_projection_nearest'
+			if version == 'V0'
+			else 'frozen_embedding_decoder'
+		),
+		'model_tag': EXPECTED_MODEL_TAGS[model],
+		'aggregation': {
+			'primary_unit': 'unique_validation_voxel',
+			'split_code': 2,
+			'intersection_voxels_counted_once': True,
+			'per_slice_planes_evaluated_independently': True,
+			'voxel_independence_p_values_computed': False,
+		},
+		'inputs': {'voxel_split_grid': {'sha256': 'a' * 64}},
+		'summary': {'unique_validation_voxel_count': 100},
+		'outputs': {
+			name: {'path': str(path / name), 'sha256': file_sha256(path / name)}
+			for name in EVALUATION_OUTPUT_FILES
+		},
+	}
+	(path / 'evaluation_metadata.json').write_text(
+		json.dumps(metadata), encoding='utf-8'
+	)
+
+
+def _refresh_output_identity(root: Path, name: str) -> None:
+	metadata_path = root / 'evaluation_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['outputs'][name] = {
+		'path': str(root / name),
+		'sha256': file_sha256(root / name),
+	}
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
 
 
 def _csv_rows(path: Path) -> list[dict[str, str]]:

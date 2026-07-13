@@ -11,12 +11,15 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import cast
 
+from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
 	BOUNDARY_METRICS_JSON,
 	BOUNDARY_REGION_METRICS_CSV,
 	EVALUATION_METADATA_JSON,
+	EVALUATION_OUTPUT_FILES,
 	METRICS_JSON,
 )
+from seis_ssl_cluster.f3.lithology.voxel_split import VALIDATION_VOXEL_SPLIT
 from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
@@ -332,6 +335,7 @@ def _load_run(run: F3LithologyVoxelResultsRun) -> _LoadedRun:  # noqa: C901
 	metrics = _read_json(paths['metrics'])
 	boundary = _read_json(paths['boundary'])
 	metadata = _read_json(paths['metadata'])
+	_validate_evaluation_artifact(run.key, run.input_dir, metadata, metrics)
 	expected_kind = (
 		'token_projection_nearest'
 		if run.version == 'V0'
@@ -366,6 +370,43 @@ def _load_run(run: F3LithologyVoxelResultsRun) -> _LoadedRun:  # noqa: C901
 	return _LoadedRun(
 		run, model_tag, grid_hash, class_order, count, metrics, boundary, regions
 	)
+
+
+def _validate_evaluation_artifact(
+	key: str,
+	root: Path,
+	metadata: Mapping[str, object],
+	metrics: Mapping[str, object],
+) -> None:
+	if metadata.get('artifact_type') != 'f3_lithology_voxel_evaluation':
+		raise ValueError(f'{key} evaluation artifact_type mismatch')
+	if metadata.get('schema_version') != 2:
+		raise ValueError(f'{key} evaluation schema_version mismatch')
+	expected_aggregation = {
+		'primary_unit': 'unique_validation_voxel',
+		'split_code': int(VALIDATION_VOXEL_SPLIT),
+		'intersection_voxels_counted_once': True,
+		'per_slice_planes_evaluated_independently': True,
+		'voxel_independence_p_values_computed': False,
+	}
+	aggregation = _mapping(metadata.get('aggregation'), f'{key} metadata.aggregation')
+	if aggregation != expected_aggregation:
+		raise ValueError(f'{key} unique-validation-voxel aggregation mismatch')
+	if metrics.get('aggregation_unit') != 'unique_validation_voxel':
+		raise ValueError(f'{key} metrics aggregation_unit mismatch')
+	outputs = _mapping(metadata.get('outputs'), f'{key} metadata.outputs')
+	for name in EVALUATION_OUTPUT_FILES:
+		path = root / name
+		if not path.is_file():
+			raise FileNotFoundError(f'missing {key} evaluation output: {path}')
+		identity = _mapping(outputs.get(name), f'{key} output {name}')
+		recorded_path = identity.get('path')
+		if not isinstance(recorded_path, str) or Path(recorded_path).resolve(
+			strict=False
+		) != path.resolve(strict=False):
+			raise ValueError(f'{key} output {name} path identity mismatch')
+		if identity.get('sha256') != file_sha256(path):
+			raise ValueError(f'{key} output {name} hash identity mismatch')
 
 
 def _validate_required_metrics(
