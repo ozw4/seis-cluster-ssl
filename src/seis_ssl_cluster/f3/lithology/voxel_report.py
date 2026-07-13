@@ -68,6 +68,10 @@ KNOWN_LIMITATIONS = (
 	'V0 is voxel-shaped output at token resolution.',
 	'V1 has no raw-amplitude skip connection.',
 )
+VOXEL_PREDICTION_SPEC_BY_KIND = {
+	'token_projection_nearest': 'token_projection_nearest_v1',
+	'frozen_embedding_decoder': 'frozen_embedding_decoder_v1',
+}
 
 
 @dataclass(frozen=True)
@@ -502,7 +506,7 @@ def publish_f3_lithology_voxel_report(
 		results_root=policy.results_root,
 		dataset_version=config.dataset.get('version', 'facies_benchmark_v1'),
 		model_tag=str(prediction.get('model_tag') or 'unknown_model'),
-		prediction_spec=str(prediction.get('kind')),
+		prediction_spec=VOXEL_PREDICTION_SPEC_BY_KIND[str(prediction.get('kind'))],
 	)
 	items = [
 		PublishItem(result.report_markdown, Path(REPORT_MARKDOWN)),

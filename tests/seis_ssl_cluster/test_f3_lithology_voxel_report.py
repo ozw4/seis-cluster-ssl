@@ -146,6 +146,50 @@ def test_voxel_publish_excludes_raw_volume_and_enforces_size_guard(
 		)
 
 
+@pytest.mark.parametrize(
+	('kind', 'prediction_spec'),
+	[
+		('token_projection_nearest', 'token_projection_nearest_v1'),
+		('frozen_embedding_decoder', 'frozen_embedding_decoder_v1'),
+	],
+)
+def test_voxel_publish_default_dir_uses_versioned_prediction_spec(
+	tmp_path: Path, kind: str, prediction_spec: str
+) -> None:
+	report_dir = tmp_path / 'artifacts' / 'report'
+	figure = report_dir / 'figures' / 'confusion_matrix.png'
+	figure.parent.mkdir(parents=True)
+	markdown = report_dir / 'report.md'
+	json_path = report_dir / 'report.json'
+	markdown.write_text('# report\n', encoding='utf-8')
+	json_path.write_text('{}\n', encoding='utf-8')
+	figure.write_bytes(b'png')
+	result = F3LithologyVoxelReportResult(
+		markdown,
+		json_path,
+		(figure,),
+		_payload(kind=kind),
+	)
+	config = _publish_config(tmp_path, report_dir=report_dir)
+	config = replace(
+		config,
+		publish=replace(config.publish, output_dir=None),
+	)
+
+	manifest = publish_f3_lithology_voxel_report(result, config=config)
+
+	assert manifest is not None
+	assert manifest.output_dir == (
+		tmp_path
+		/ 'results'
+		/ 'f3'
+		/ 'test'
+		/ 'voxel_lithology'
+		/ 'model'
+		/ prediction_spec
+	)
+
+
 def test_voxel_publish_output_must_be_under_results_root(tmp_path: Path) -> None:
 	with pytest.raises(ValueError, match=r'publish\.output_dir must be under root'):
 		F3LithologyVoxelPublishConfig(

@@ -6,23 +6,29 @@ a voxel decoder. All three encoders use `overlap_x16` and the one shared
 `voxel_supervision/png_slices_segy_labels_v1` artifact. M2-A's preregistered
 primary comparison is M1.
 
-Run from the repository root. Each dry-run validates its upstream artifacts and
-writes nothing:
+Run from the repository root. On a fresh workflow, validate and execute each
+stage before moving to the next one: later dry-runs require the real outputs of
+the preceding stages. Each dry-run writes nothing. For MAE, the exact order is:
 
 ```bash
 python proc/seis_ssl_cluster/build_f3_lithology_voxel_dataset.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/01_build_voxel_supervision.yaml --dry-run
+python proc/seis_ssl_cluster/build_f3_lithology_voxel_dataset.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/01_build_voxel_supervision.yaml
 python proc/seis_ssl_cluster/predict_f3_lithology_tokens.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/02_predict_mae_tokens.yaml --dry-run
+python proc/seis_ssl_cluster/predict_f3_lithology_tokens.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/02_predict_mae_tokens.yaml
 python proc/seis_ssl_cluster/project_f3_lithology_tokens_to_voxels.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/03_project_mae_nearest.yaml --dry-run
+python proc/seis_ssl_cluster/project_f3_lithology_tokens_to_voxels.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/03_project_mae_nearest.yaml
 python proc/seis_ssl_cluster/evaluate_f3_lithology_voxels.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/04_evaluate_mae_nearest.yaml --dry-run
+python proc/seis_ssl_cluster/evaluate_f3_lithology_voxels.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/04_evaluate_mae_nearest.yaml
 python proc/seis_ssl_cluster/build_f3_lithology_voxel_report.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/05_report_mae_nearest.yaml --dry-run
+python proc/seis_ssl_cluster/build_f3_lithology_voxel_report.py --config experiments/f3/facies_benchmark_v1/87_f3_voxel_benchmark_v0/05_report_mae_nearest.yaml
 ```
 
-Use the same commands without `--dry-run`, in numeric order. Then repeat the
-prediction/project/evaluate/report sequence for M1 (`06`–`09`) and M2-A
-(`10`–`13`). The MAE prediction config intentionally repeats the established
-MAE source identity and conditions; it may be omitted only after complete
-artifact validation succeeds. Do not use `--skip-existing` for a partial or
-unvalidated directory.
+Repeat the same dry-run/real-run pairing for the prediction, projection,
+evaluation, and report configs for M1 (`06`–`09`) and then M2-A (`10`–`13`).
+The MAE prediction config intentionally repeats the established MAE source
+identity and conditions; it may be omitted only after complete artifact
+validation succeeds. Do not use `--skip-existing` for a partial or unvalidated
+directory.
 
 Outputs live below each model's
 `lithology/f3/facies_benchmark_v1/<MODEL>/overlap_x16/png_slices_segy_labels_v1/`
