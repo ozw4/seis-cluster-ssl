@@ -39,13 +39,19 @@ def main() -> None:
 		print('stage: summarize_f3_lithology_voxel_split_robustness')
 		print(f'inputs.v0_run_manifest: {config.v0_run_manifest}')
 		print(f'inputs.v1_run_manifest: {config.v1_run_manifest}')
+		print(f'inputs.original_summary_dir: {config.original_summary_dir}')
 		print(f'outputs.root: {config.suite_root / "reports"}')
+		print(f'publish.enabled: {config.publish.enabled}')
+		print(f'publish.output_dir: {config.publish.output_dir}')
 		print('statistical_unit: split')
 		print('execution: dry-run')
 		return
 	result = summarize_f3_lithology_voxel_split_robustness(config)
 	print(f'voxel_split_robustness.summary: {result.summary_json}')
 	print(f'voxel_split_robustness.status: {result.status}')
+	if result.publish_manifest is not None:
+		print(f'voxel_split_robustness.published: {result.publish_manifest.output_dir}')
+		print(f'publish_manifest: {result.publish_manifest.manifest_path}')
 
 
 if __name__ == '__main__':

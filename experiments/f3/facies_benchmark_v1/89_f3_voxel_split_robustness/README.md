@@ -16,6 +16,11 @@ python proc/seis_ssl_cluster/run_f3_lithology_voxel_v0_split_suite.py --config "
 python proc/seis_ssl_cluster/run_f3_lithology_voxel_v0_split_suite.py --config "$EXP/02_run_v0_split_projections.yaml" --only-missing
 python proc/seis_ssl_cluster/run_f3_lithology_voxel_decoder_split_suite.py --config "$EXP/03_run_v1_split_decoders.yaml" --dry-run --only-missing --device auto
 python proc/seis_ssl_cluster/run_f3_lithology_voxel_decoder_split_suite.py --config "$EXP/03_run_v1_split_decoders.yaml" --only-missing --device auto
+```
+
+After every split job is complete, run the final summary/publish step:
+
+```bash
 python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_split_robustness.py --config "$EXP/04_summarize_voxel_split_robustness.yaml" --dry-run
 python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_split_robustness.py --config "$EXP/04_summarize_voxel_split_robustness.yaml"
 ```
@@ -24,7 +29,9 @@ The V1 manifest records `latest.pt` as the resume path after every attempted
 job. `--only-missing` skips only jobs with a complete evaluation artifact.
 The summary reports raw split rows, paired deltas, win rates, and a provisional
 `positive`, `negative`, or `hold` status. Its statistical unit is the split;
-it does not compute voxel-level p-values or confidence intervals.
+it does not compute voxel-level p-values or confidence intervals. Its final
+publish manifest includes both this six-split evidence and the original-split
+summary; no result is published before this step.
 
 Do not redraw the six splits. A valid pair has the same canonical valid-token
 hash, split-grid identity, class weights, and tile order. Any mismatch stops the

@@ -26,6 +26,11 @@ from seis_ssl_cluster.results import (
 
 REQUIRED_MODELS = ('MAE', 'M1', 'M2-A')
 REQUIRED_VERSIONS = ('V0', 'V1')
+EXPECTED_MODEL_TAGS = {
+	'MAE': 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+	'M1': 'strat_hmm_pretext_m1_k6_topblock1_distill',
+	'M2-A': 'strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill',
+}
 REQUIRED_RUN_KEYS = tuple(
 	f'{model.lower().replace("-", "")}_{version.lower()}'
 	for model in REQUIRED_MODELS
@@ -228,6 +233,11 @@ def _load_and_validate_runs(
 		tags = {item.model_tag for item in loaded if item.run.model == model}
 		if len(tags) != 1:
 			raise ValueError(f'{model} V0/V1 model identity mismatch')
+		if tags != {EXPECTED_MODEL_TAGS[model]}:
+			raise ValueError(
+				f'{model} source model identity mismatch: '
+				f'expected {EXPECTED_MODEL_TAGS[model]!r}, got {sorted(tags)!r}'
+			)
 	return loaded
 
 
@@ -786,6 +796,7 @@ def _format(value: object) -> str:
 
 
 __all__ = [
+	'EXPECTED_MODEL_TAGS',
 	'FIGURE_NAMES',
 	'PUBLISH_SUFFIXES',
 	'REQUIRED_MODELS',

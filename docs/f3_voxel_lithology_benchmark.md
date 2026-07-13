@@ -187,8 +187,8 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_results.py --config ex
 python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_results.py --config experiments/f3/facies_benchmark_v1/90_f3_voxel_results/01_summarize_original_split.yaml
 ```
 
-This writes a provisional original-split comparison and publishes only its
-lightweight Markdown, JSON, CSV, and PNG products.
+This writes the provisional original-split comparison to the artifact root.
+Publication is deferred until the six-split evidence has also been summarized.
 
 ### 8. Six-split suite
 
@@ -200,18 +200,26 @@ python proc/seis_ssl_cluster/run_f3_lithology_voxel_v0_split_suite.py --config "
 python proc/seis_ssl_cluster/run_f3_lithology_voxel_v0_split_suite.py --config "$EXP/02_run_v0_split_projections.yaml" --only-missing
 python proc/seis_ssl_cluster/run_f3_lithology_voxel_decoder_split_suite.py --config "$EXP/03_run_v1_split_decoders.yaml" --dry-run --only-missing --device auto
 python proc/seis_ssl_cluster/run_f3_lithology_voxel_decoder_split_suite.py --config "$EXP/03_run_v1_split_decoders.yaml" --only-missing --device auto
-python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_split_robustness.py --config "$EXP/04_summarize_voxel_split_robustness.yaml" --dry-run
-python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_split_robustness.py --config "$EXP/04_summarize_voxel_split_robustness.yaml"
 ```
 
 `--only-missing` skips a job only after its complete terminal artifact and
 identities validate. The V1 run manifest records `latest.pt` for interrupted
 jobs; invoke the same suite command again with `--only-missing` to resume.
 
-### 9. Final summary and publish checks
+### 9. Final summary, publish, and checks
 
-The original and split summaries are the two final evidence artifacts. Validate
-the repository-managed publication after both exist:
+After all split jobs are complete, build the split summary and publish it
+together with the already-written original-split summary. This is the only
+publication step:
+
+```bash
+EXP=experiments/f3/facies_benchmark_v1/89_f3_voxel_split_robustness
+python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_split_robustness.py --config "$EXP/04_summarize_voxel_split_robustness.yaml" --dry-run
+python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_split_robustness.py --config "$EXP/04_summarize_voxel_split_robustness.yaml"
+```
+
+The final publish manifest covers both original-split products and the
+six-split summary/tables. Validate that repository-managed publication:
 
 ```bash
 python proc/seis_ssl_cluster/validate_results_artifacts.py --root results --max-file-size-mb 10

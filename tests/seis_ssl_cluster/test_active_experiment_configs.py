@@ -61,6 +61,12 @@ from seis_ssl_cluster.config.f3_lithology_voxel_projection import (
 from seis_ssl_cluster.config.f3_lithology_voxel_report import (
 	f3_lithology_voxel_report_config_from_mapping,
 )
+from seis_ssl_cluster.config.f3_lithology_voxel_results import (
+	f3_lithology_voxel_results_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_voxel_robustness import (
+	f3_lithology_voxel_split_summary_config_from_mapping,
+)
 from seis_ssl_cluster.config.schema import (
 	STAGE_F3_INSPECT_FILES,
 	STAGE_F3_INSPECTION_REPORT,
@@ -248,6 +254,8 @@ F3_LITHOLOGY_REPORT_CONFIGS = sorted(
 )
 F3_VOXEL_V0_ROOT = F3_ROOT / '87_f3_voxel_benchmark_v0'
 F3_VOXEL_V1_ROOT = F3_ROOT / '88_f3_voxel_decoder_v1'
+F3_VOXEL_ROBUSTNESS_ROOT = F3_ROOT / '89_f3_voxel_split_robustness'
+F3_VOXEL_RESULTS_ROOT = F3_ROOT / '90_f3_voxel_results'
 F3_VOXEL_DATASET_CONFIGS = [F3_VOXEL_V0_ROOT / '01_build_voxel_supervision.yaml']
 F3_VOXEL_TOKEN_PREDICTION_CONFIGS = [
 	F3_VOXEL_V0_ROOT / name
@@ -776,6 +784,22 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 	assert len({config.output_dir for config in inference_configs}) == 3
 	assert model_tags[1] in str(inference_configs[1].output_dir)
 	assert model_tags[2] in str(inference_configs[2].output_dir)
+
+
+def test_active_f3_voxel_final_summary_publish_order_contract() -> None:
+	original = f3_lithology_voxel_results_config_from_mapping(
+		load_config(F3_VOXEL_RESULTS_ROOT / '01_summarize_original_split.yaml')
+	)
+	robustness = f3_lithology_voxel_split_summary_config_from_mapping(
+		load_config(
+			F3_VOXEL_ROBUSTNESS_ROOT / '04_summarize_voxel_split_robustness.yaml'
+		)
+	)
+
+	assert original.publish.enabled is False
+	assert robustness.publish.enabled is True
+	assert robustness.original_summary_dir == original.output_dir
+	assert robustness.publish.output_dir == original.publish.output_dir
 
 
 @pytest.mark.parametrize('config_path', F3_BASELINE_COMPARISON_CONFIGS)

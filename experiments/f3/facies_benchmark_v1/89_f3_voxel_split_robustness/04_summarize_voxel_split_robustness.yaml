@@ -1,7 +1,14 @@
 suite: {root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1}
+paths: {results_root: results}
 inputs:
   v0_run_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1/v0_split_run_manifest.json
   v1_run_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1/v1_split_run_manifest.json
+  original_summary_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/voxel_benchmark_v1
 models:
   baseline: strat_hmm_pretext_m1_k6_topblock1_distill
   candidate: strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill
+publish:
+  enabled: true
+  output_dir: results/f3/facies_benchmark_v1/voxel_lithology_benchmark_v1
+  max_file_size_mb: 10
+  overwrite: true

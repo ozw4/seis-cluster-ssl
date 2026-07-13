@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
 
-from seis_ssl_cluster.config.f3_lithology_common import _optional_positive_int
+from seis_ssl_cluster.config.f3_lithology_common import (
+	_max_file_size_bytes,
+	_optional_positive_int,
+	_publish_optional_bool,
+)
 from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
 	VoxelDecoderSpec,
 	VoxelDecoderTileSettings,
@@ -18,6 +22,8 @@ from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
 	_positive_sequence,
 	_triplet,
 )
+from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
+from seis_ssl_cluster.results import DEFAULT_MAX_FILE_SIZE_BYTES
 
 BASELINE_MODEL_TAG = 'strat_hmm_pretext_m1_k6_topblock1_distill'
 CANDIDATE_MODEL_TAG = 'strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill'
@@ -98,6 +104,30 @@ class F3VoxelDecoderSplitSuiteConfig:
 
 
 @dataclass(frozen=True)
+class F3VoxelSplitRobustnessPublishConfig:
+	"""Final lightweight publication settings for original and split evidence."""
+
+	enabled: bool = False
+	results_root: Path = DEFAULT_RESULTS_ROOT
+	output_dir: Path | None = None
+	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+	overwrite: bool = True
+
+	def __post_init__(self) -> None:
+		"""Require final publication to remain under the results root."""
+		if self.enabled and self.output_dir is None:
+			raise ValueError(
+				'publish.output_dir is required when publishing is enabled'
+			)
+		if self.output_dir is not None:
+			ensure_under_root(
+				self.output_dir,
+				root=self.results_root,
+				label='publish.output_dir',
+			)
+
+
+@dataclass(frozen=True)
 class F3VoxelSplitRobustnessSummaryConfig:
 	"""Inputs for split-level paired V0/V1 aggregation."""
 
@@ -106,6 +136,10 @@ class F3VoxelSplitRobustnessSummaryConfig:
 	v1_run_manifest: Path
 	baseline_model_tag: str
 	candidate_model_tag: str
+	original_summary_dir: Path | None = None
+	publish: F3VoxelSplitRobustnessPublishConfig = field(
+		default_factory=F3VoxelSplitRobustnessPublishConfig
+	)
 
 
 def f3_lithology_voxel_split_dataset_config_from_mapping(
@@ -269,22 +303,44 @@ def f3_lithology_voxel_split_summary_config_from_mapping(
 	config: Mapping[str, object],
 ) -> F3VoxelSplitRobustnessSummaryConfig:
 	"""Resolve split-level robustness summary inputs."""
-	_exact_keys(config, {'suite', 'inputs', 'models'}, 'config')
+	_exact_keys(config, {'suite', 'paths', 'inputs', 'models', 'publish'}, 'config')
 	suite = _mapping(config, 'suite')
+	paths = _mapping(config, 'paths')
 	inputs = _mapping(config, 'inputs')
 	models = _mapping(config, 'models')
+	publish = _mapping(config, 'publish')
 	_exact_keys(suite, {'root'}, 'suite')
-	_exact_keys(inputs, {'v0_run_manifest', 'v1_run_manifest'}, 'inputs')
+	_exact_keys(paths, {'results_root'}, 'paths')
+	_exact_keys(
+		inputs,
+		{'v0_run_manifest', 'v1_run_manifest', 'original_summary_dir'},
+		'inputs',
+	)
 	_exact_keys(models, set(MODEL_ROLES), 'models')
+	_exact_keys(
+		publish,
+		{'enabled', 'output_dir', 'max_file_size_mb', 'overwrite'},
+		'publish',
+	)
 	baseline = _string(models, 'baseline')
 	candidate = _string(models, 'candidate')
 	_validate_model_tags(baseline, candidate)
+	results_root = Path(_string(paths, 'results_root'))
+	publish_output = Path(_string(publish, 'output_dir'))
 	return F3VoxelSplitRobustnessSummaryConfig(
 		suite_root=_path(suite, 'root'),
 		v0_run_manifest=_path(inputs, 'v0_run_manifest'),
 		v1_run_manifest=_path(inputs, 'v1_run_manifest'),
 		baseline_model_tag=baseline,
 		candidate_model_tag=candidate,
+		original_summary_dir=_path(inputs, 'original_summary_dir'),
+		publish=F3VoxelSplitRobustnessPublishConfig(
+			enabled=_publish_optional_bool(publish, 'enabled', default=False),
+			results_root=results_root,
+			output_dir=publish_output,
+			max_file_size_bytes=_max_file_size_bytes(publish),
+			overwrite=_boolean(publish, 'overwrite'),
+		),
 	)
 
 
@@ -539,6 +595,7 @@ __all__ = [
 	'CANDIDATE_MODEL_TAG',
 	'F3VoxelDecoderSplitSuiteConfig',
 	'F3VoxelSplitDatasetSuiteConfig',
+	'F3VoxelSplitRobustnessPublishConfig',
 	'F3VoxelSplitRobustnessSummaryConfig',
 	'F3VoxelV0SplitSuiteConfig',
 	'VoxelRobustnessModel',

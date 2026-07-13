@@ -7,7 +7,7 @@ import json
 import statistics
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -63,6 +63,23 @@ from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 from seis_ssl_cluster.f3.lithology.voxel_projection import (
 	project_f3_lithology_tokens_to_voxels,
 )
+from seis_ssl_cluster.f3.lithology.voxel_results import (
+	FIGURE_NAMES as ORIGINAL_FIGURE_NAMES,
+)
+from seis_ssl_cluster.f3.lithology.voxel_results import (
+	SUMMARY_JSON as ORIGINAL_SUMMARY_JSON,
+)
+from seis_ssl_cluster.f3.lithology.voxel_results import (
+	SUMMARY_MARKDOWN as ORIGINAL_SUMMARY_MARKDOWN,
+)
+from seis_ssl_cluster.f3.lithology.voxel_results import (
+	TABLE_NAMES as ORIGINAL_TABLE_NAMES,
+)
+from seis_ssl_cluster.results import (
+	PublishItem,
+	PublishManifest,
+	publish_selected_results,
+)
 from seis_ssl_cluster.training.voxel_decoder.runner import (
 	run_f3_lithology_voxel_decoder,
 )
@@ -108,6 +125,7 @@ SUMMARY_METRICS = (
 	'class_5_boundary_recall_tolerance_4',
 )
 LOWER_IS_BETTER = frozenset({'boundary_position_mae'})
+PUBLISH_SUFFIXES = frozenset({'.md', '.json', '.csv', '.png'})
 
 
 @dataclass(frozen=True)
@@ -137,6 +155,7 @@ class VoxelSplitRobustnessSummaryResult:
 	paired_rows_csv: Path
 	aggregates_csv: Path
 	status: str
+	publish_manifest: PublishManifest | None = None
 
 
 def build_f3_lithology_voxel_split_datasets(
@@ -455,8 +474,57 @@ def summarize_f3_lithology_voxel_split_robustness(
 			'status_reasons': reasons,
 		},
 	)
-	return VoxelSplitRobustnessSummaryResult(
+	result = VoxelSplitRobustnessSummaryResult(
 		output_dir, summary_json, paired_csv, aggregates_csv, status
+	)
+	return replace(result, publish_manifest=_publish_robustness_summary(result, config))
+
+
+def _publish_robustness_summary(
+	result: VoxelSplitRobustnessSummaryResult,
+	config: F3VoxelSplitRobustnessSummaryConfig,
+) -> PublishManifest | None:
+	policy = config.publish
+	if not policy.enabled:
+		return None
+	if policy.output_dir is None or config.original_summary_dir is None:
+		raise ValueError(
+			'final publish requires publish.output_dir and inputs.original_summary_dir'
+		)
+	original = config.original_summary_dir
+	items = [
+		PublishItem(
+			original / ORIGINAL_SUMMARY_MARKDOWN,
+			Path(ORIGINAL_SUMMARY_MARKDOWN),
+		),
+		PublishItem(original / ORIGINAL_SUMMARY_JSON, Path(ORIGINAL_SUMMARY_JSON)),
+		*(
+			PublishItem(original / 'tables' / name, Path('tables') / name)
+			for name in ORIGINAL_TABLE_NAMES
+		),
+		*(
+			PublishItem(original / 'figures' / name, Path('figures') / name)
+			for name in ORIGINAL_FIGURE_NAMES
+		),
+		PublishItem(
+			result.summary_json,
+			Path('robustness') / result.summary_json.name,
+		),
+		PublishItem(
+			result.paired_rows_csv,
+			Path('robustness') / 'tables' / result.paired_rows_csv.name,
+		),
+		PublishItem(
+			result.aggregates_csv,
+			Path('robustness') / 'tables' / result.aggregates_csv.name,
+		),
+	]
+	return publish_selected_results(
+		items=items,
+		output_dir=policy.output_dir,
+		allowed_suffixes=PUBLISH_SUFFIXES,
+		max_file_size_bytes=policy.max_file_size_bytes,
+		overwrite=policy.overwrite,
 	)
 
 
@@ -1125,11 +1193,6 @@ def _provisional_status(
 		primary_rows
 		and all(
 			row['delta'] is not None
-			and _is_win(str(row['metric']), float(row['delta'])) is not True
-			for row in primary_rows
-		)
-		and any(
-			row['delta'] is not None
 			and _is_loss(str(row['metric']), float(row['delta']))
 			for row in primary_rows
 		)
@@ -1276,37 +1339,143 @@ def _prior_run_rows(
 	)
 
 
-def _complete_paired_run_rows(
+def _complete_paired_run_rows(  # noqa: C901
 	path: Path, artifact_type: str
 ) -> dict[tuple[str, str], Mapping[str, object]]:
+	expected_prediction_kind = {
+		V0_RUN_MANIFEST_TYPE: 'token_projection_nearest',
+		V1_RUN_MANIFEST_TYPE: 'frozen_embedding_decoder',
+	}[artifact_type]
+	required = [
+		'split_id',
+		'model_role',
+		'model_tag',
+		'voxel_dataset_identity',
+		'evaluation_dir',
+		'status',
+	]
+	if artifact_type == V1_RUN_MANIFEST_TYPE:
+		required.extend(
+			(
+				'source_valid_tokens',
+				'class_weights',
+				'train_tile_manifest',
+				'validation_tile_manifest',
+			)
+		)
 	rows = _paired_rows(
 		path,
 		artifact_type=artifact_type,
-		required=(
-			'split_id',
-			'model_role',
-			'model_tag',
-			'voxel_dataset_identity',
-			'evaluation_dir',
-			'status',
-		),
+		required=required,
 	)
 	for row in rows:
-		if row['status'] != 'complete' or not _complete_evaluation(
-			Path(str(row['evaluation_dir']))
-		):
+		evaluation_dir = Path(str(row['evaluation_dir']))
+		if row['status'] != 'complete' or not _complete_evaluation(evaluation_dir):
 			raise ValueError(
 				f'incomplete run row: {row["split_id"]}/{row["model_role"]}'
 			)
 		evaluation_metadata = _read_json(
-			Path(str(row['evaluation_dir'])) / EVALUATION_METADATA_JSON
+			evaluation_dir / EVALUATION_METADATA_JSON
 		)
 		if evaluation_metadata.get('model_tag') != row['model_tag']:
 			raise ValueError(
 				'existing evaluation model identity does not match run row: '
 				f'{row["split_id"]}/{row["model_role"]}'
 			)
-	return _rows_by_key(rows)
+		if evaluation_metadata.get('prediction_kind') != expected_prediction_kind:
+			raise ValueError(
+				'existing evaluation prediction kind does not match run stage: '
+				f'{row["split_id"]}/{row["model_role"]}'
+			)
+		inputs = _mapping_value(evaluation_metadata, 'inputs')
+		grid = _mapping_value(inputs, 'voxel_split_grid')
+		_validated_recorded_identity(grid, label='evaluation voxel_split_grid')
+		if grid.get('sha256') != row['voxel_dataset_identity']:
+			raise ValueError(
+				'existing evaluation split-grid identity does not match run row: '
+				f'{row["split_id"]}/{row["model_role"]}'
+			)
+		prediction_metadata_path = _validated_recorded_identity(
+			inputs.get('prediction_metadata'),
+			label='evaluation prediction_metadata',
+		)
+		prediction_metadata = _read_json(prediction_metadata_path)
+		for key, expected in (
+			('model_tag', row['model_tag']),
+			('prediction_kind', expected_prediction_kind),
+		):
+			if prediction_metadata.get(key) != expected:
+				raise ValueError(
+					f'prediction metadata {key} does not match run row: '
+					f'{row["split_id"]}/{row["model_role"]}'
+				)
+		if artifact_type == V1_RUN_MANIFEST_TYPE:
+			_validate_v1_summary_row(row, prediction_metadata)
+	result = _rows_by_key(rows)
+	if artifact_type == V1_RUN_MANIFEST_TYPE:
+		for split_id in {key[0] for key in result}:
+			_validate_paired_decoder_identity(tuple(result.values()), split_id=split_id)
+	return result
+
+
+def _validate_v1_summary_row(
+	row: Mapping[str, object], prediction_metadata: Mapping[str, object]
+) -> None:
+	valid_tokens = _validated_recorded_identity(
+		row.get('source_valid_tokens'), label='run source_valid_tokens'
+	)
+	train_tiles = _validated_recorded_identity(
+		row.get('train_tile_manifest'), label='run train_tile_manifest'
+	)
+	validation_tiles = _validated_recorded_identity(
+		row.get('validation_tile_manifest'), label='run validation_tile_manifest'
+	)
+	source = _mapping_value(prediction_metadata, 'source_identity')
+	artifacts = _mapping_value(source, 'artifact_identities')
+	manifests = _mapping_value(source, 'tile_manifests')
+	for recorded, expected_path, label in (
+		(artifacts.get('valid_tokens'), valid_tokens, 'prediction valid_tokens'),
+		(manifests.get('train'), train_tiles, 'prediction train tile manifest'),
+		(
+			manifests.get('validation'),
+			validation_tiles,
+			'prediction validation tile manifest',
+		),
+	):
+		path = _validated_recorded_identity(recorded, label=label)
+		if file_sha256(path) != file_sha256(expected_path):
+			raise ValueError(f'{label} identity does not match run row')
+	checkpoint = _validated_recorded_identity(
+		source.get('decoder_checkpoint'), label='prediction decoder_checkpoint'
+	)
+	if _checkpoint_class_weights(checkpoint) != _class_weight_vector(
+		row.get('class_weights')
+	):
+		raise ValueError('prediction decoder class_weights do not match run row')
+
+
+def _validated_recorded_identity(value: object, *, label: str) -> Path:
+	if not isinstance(value, Mapping):
+		raise TypeError(f'{label} identity must be a mapping')
+	path_value = value.get('path')
+	if not isinstance(path_value, str) or not path_value:
+		raise TypeError(f'{label} identity path must be a non-empty string')
+	path = Path(path_value)
+	if not path.is_file():
+		raise FileNotFoundError(f'missing {label}: {path}')
+	if value.get('sha256') != file_sha256(path):
+		raise ValueError(f'{label} hash identity mismatch')
+	return path
+
+
+def _class_weight_vector(value: object) -> list[float]:
+	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+		raise TypeError('run class_weights must be a vector')
+	if any(
+		isinstance(item, bool) or not isinstance(item, int | float) for item in value
+	):
+		raise TypeError('run class_weights must be a numeric vector')
+	return [float(item) for item in value]
 
 
 def _voxel_rows(path: Path) -> tuple[Mapping[str, object], ...]:

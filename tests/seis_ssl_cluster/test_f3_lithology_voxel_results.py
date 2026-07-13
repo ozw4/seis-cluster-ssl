@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from seis_ssl_cluster.f3.lithology.voxel_results import (
+	EXPECTED_MODEL_TAGS,
 	FIGURE_NAMES,
 	SUMMARY_JSON,
 	TABLE_NAMES,
@@ -84,6 +85,20 @@ def test_rejects_shared_evaluation_identity_mismatch(
 	metrics_path.write_text(json.dumps(metrics), encoding='utf-8')
 
 	with pytest.raises(ValueError, match=wording):
+		summarize_f3_lithology_voxel_results(config)
+
+
+def test_rejects_relabelled_source_encoder(tmp_path: Path) -> None:
+	config = _fixture(tmp_path, mode='positive')
+	for run in config.runs:
+		if run.model != 'M1':
+			continue
+		metadata_path = run.input_dir / 'evaluation_metadata.json'
+		metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+		metadata['model_tag'] = EXPECTED_MODEL_TAGS['MAE']
+		metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='M1 source model identity mismatch'):
 		summarize_f3_lithology_voxel_results(config)
 
 
@@ -197,7 +212,7 @@ def _write_run(path: Path, *, model: str, version: str, mode: str) -> None:
 			if version == 'V0'
 			else 'frozen_embedding_decoder'
 		),
-		'model_tag': f'{model.lower()}_model',
+		'model_tag': EXPECTED_MODEL_TAGS[model],
 		'inputs': {'voxel_split_grid': {'sha256': 'a' * 64}},
 		'summary': {'unique_validation_voxel_count': 100},
 	}

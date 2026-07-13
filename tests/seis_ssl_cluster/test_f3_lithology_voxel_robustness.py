@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import csv
 import json
+from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import joblib
 import numpy as np
 import pytest
+import torch
 
 from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
 	VoxelDecoderSpec,
@@ -19,6 +20,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_robustness import (
 	CANDIDATE_MODEL_TAG,
 	F3VoxelDecoderSplitSuiteConfig,
 	F3VoxelSplitDatasetSuiteConfig,
+	F3VoxelSplitRobustnessPublishConfig,
 	F3VoxelSplitRobustnessSummaryConfig,
 	F3VoxelV0SplitSuiteConfig,
 	VoxelRobustnessModel,
@@ -26,10 +28,21 @@ from seis_ssl_cluster.config.f3_lithology_voxel_robustness import (
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology import voxel_robustness
 from seis_ssl_cluster.f3.lithology.voxel_evaluation import EVALUATION_OUTPUT_FILES
+from seis_ssl_cluster.f3.lithology.voxel_results import (
+	FIGURE_NAMES as ORIGINAL_FIGURE_NAMES,
+)
+from seis_ssl_cluster.f3.lithology.voxel_results import (
+	SUMMARY_JSON as ORIGINAL_SUMMARY_JSON,
+)
+from seis_ssl_cluster.f3.lithology.voxel_results import (
+	SUMMARY_MARKDOWN as ORIGINAL_SUMMARY_MARKDOWN,
+)
+from seis_ssl_cluster.f3.lithology.voxel_results import (
+	TABLE_NAMES as ORIGINAL_TABLE_NAMES,
+)
 from seis_ssl_cluster.f3.lithology.voxel_robustness import (
 	V0_RUN_MANIFEST_TYPE,
 	V1_RUN_MANIFEST_TYPE,
-	VoxelSplitJob,
 	_read_manifest_rows,
 	build_f3_lithology_voxel_split_datasets,
 	run_f3_lithology_voxel_decoder_split_suite,
@@ -124,38 +137,52 @@ def test_v0_rejects_token_suite_from_different_split_inventory(
 		voxel_robustness.voxel_v0_split_jobs(v0_config)
 
 
-def test_synthetic_split_summary_uses_paired_split_deltas(tmp_path: Path) -> None:
+def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
+	tmp_path: Path,
+) -> None:
 	v0_rows = []
 	v1_rows = []
 	for split_index in range(6):
 		split_id = f'split_{split_index:03d}'
+		grid = tmp_path / 'grids' / f'{split_id}.npy'
+		grid.parent.mkdir(parents=True, exist_ok=True)
+		np.save(grid, np.full((1,), split_index, dtype=np.uint8))
+		voxel_identity = file_sha256(grid)
 		for role, tag, offset in (
 			('baseline', BASELINE_MODEL_TAG, 0.0),
 			('candidate', CANDIDATE_MODEL_TAG, 0.04),
 		):
 			v0_dir = tmp_path / 'v0' / split_id / role
 			v1_dir = tmp_path / 'v1' / split_id / role
-			_write_evaluation(
+			v0_identity = _write_evaluation(
 				v0_dir,
 				score=0.50 + offset,
 				boundary_mae=2.0 - offset,
 				model_tag=tag,
+				prediction_kind='token_projection_nearest',
+				split_grid=grid,
 			)
-			_write_evaluation(
+			v1_identity = _write_evaluation(
 				v1_dir,
 				score=0.60 + offset,
 				boundary_mae=1.5 - offset,
 				model_tag=tag,
+				prediction_kind='frozen_embedding_decoder',
+				split_grid=grid,
 			)
 			base = {
 				'split_id': split_id,
 				'model_role': role,
 				'model_tag': tag,
-				'voxel_dataset_identity': f'voxel-{split_id}',
+				'voxel_dataset_identity': voxel_identity,
 				'status': 'complete',
 			}
-			v0_rows.append({**base, 'evaluation_dir': str(v0_dir)})
-			v1_rows.append({**base, 'evaluation_dir': str(v1_dir)})
+			v0_rows.append(
+				{**base, **v0_identity, 'evaluation_dir': str(v0_dir)}
+			)
+			v1_rows.append(
+				{**base, **v1_identity, 'evaluation_dir': str(v1_dir)}
+			)
 	v0_manifest = tmp_path / 'v0.json'
 	v1_manifest = tmp_path / 'v1.json'
 	_write_manifest(v0_manifest, V0_RUN_MANIFEST_TYPE, v0_rows)
@@ -188,10 +215,61 @@ def test_synthetic_split_summary_uses_paired_split_deltas(tmp_path: Path) -> Non
 	assert any(
 		row['comparison'] == 'candidate_v1_minus_v0' for row in payload['raw_rows']
 	)
+	original = tmp_path / 'original'
+	for path in (
+		original / ORIGINAL_SUMMARY_JSON,
+		original / ORIGINAL_SUMMARY_MARKDOWN,
+		*(original / 'tables' / name for name in ORIGINAL_TABLE_NAMES),
+		*(original / 'figures' / name for name in ORIGINAL_FIGURE_NAMES),
+	):
+		path.parent.mkdir(parents=True, exist_ok=True)
+		path.write_bytes(b'lightweight evidence\n')
+	publish_dir = tmp_path / 'results' / 'voxel'
+	published = summarize_f3_lithology_voxel_split_robustness(
+		F3VoxelSplitRobustnessSummaryConfig(
+			suite_root=tmp_path / 'published-suite',
+			v0_run_manifest=v0_manifest,
+			v1_run_manifest=v1_manifest,
+			baseline_model_tag=BASELINE_MODEL_TAG,
+			candidate_model_tag=CANDIDATE_MODEL_TAG,
+			original_summary_dir=original,
+			publish=F3VoxelSplitRobustnessPublishConfig(
+				enabled=True,
+				results_root=tmp_path / 'results',
+				output_dir=publish_dir,
+			),
+		)
+	)
+	assert published.publish_manifest is not None
+	targets = {
+		item.target.relative_to(publish_dir).as_posix()
+		for item in published.publish_manifest.items
+	}
+	assert f'robustness/{published.summary_json.name}' in targets
+	assert ORIGINAL_SUMMARY_JSON in targets
+	assert not any(target.endswith(('.npy', '.pt', '.joblib')) for target in targets)
+
+	first_evaluation = Path(v1_rows[0]['evaluation_dir']) / 'evaluation_metadata.json'
+	evaluation_payload = json.loads(first_evaluation.read_text(encoding='utf-8'))
+	evaluation_payload['prediction_kind'] = 'token_projection_nearest'
+	first_evaluation.write_text(json.dumps(evaluation_payload), encoding='utf-8')
+	with pytest.raises(ValueError, match='prediction kind'):
+		summarize_f3_lithology_voxel_split_robustness(
+			F3VoxelSplitRobustnessSummaryConfig(
+				suite_root=tmp_path / 'wrong-kind-suite',
+				v0_run_manifest=v0_manifest,
+				v1_run_manifest=v1_manifest,
+				baseline_model_tag=BASELINE_MODEL_TAG,
+				candidate_model_tag=CANDIDATE_MODEL_TAG,
+			)
+		)
+	evaluation_payload['prediction_kind'] = 'frozen_embedding_decoder'
+	first_evaluation.write_text(json.dumps(evaluation_payload), encoding='utf-8')
+
 	v1_payload = json.loads(v1_manifest.read_text(encoding='utf-8'))
 	v1_payload['rows'][0]['voxel_dataset_identity'] = 'different-voxel-dataset'
 	v1_manifest.write_text(json.dumps(v1_payload), encoding='utf-8')
-	with pytest.raises(ValueError, match='voxel dataset identity mismatch'):
+	with pytest.raises(ValueError, match='split-grid identity'):
 		summarize_f3_lithology_voxel_split_robustness(
 			F3VoxelSplitRobustnessSummaryConfig(
 				suite_root=tmp_path / 'rejected-suite',
@@ -204,27 +282,42 @@ def test_synthetic_split_summary_uses_paired_split_deltas(tmp_path: Path) -> Non
 
 
 def test_partial_split_summary_is_rejected(tmp_path: Path) -> None:
-	rows = []
+	v0_rows = []
+	v1_rows = []
+	grid = tmp_path / 'grid.npy'
+	np.save(grid, np.zeros((1,), dtype=np.uint8))
 	for role, tag in (
 		('baseline', BASELINE_MODEL_TAG),
 		('candidate', CANDIDATE_MODEL_TAG),
 	):
-		evaluation = tmp_path / role
-		_write_evaluation(evaluation, score=0.5, boundary_mae=2.0, model_tag=tag)
-		rows.append(
+		for prediction_kind, rows, stage in (
+			('token_projection_nearest', v0_rows, 'v0'),
+			('frozen_embedding_decoder', v1_rows, 'v1'),
+		):
+			evaluation = tmp_path / stage / role
+			identity = _write_evaluation(
+				evaluation,
+				score=0.5,
+				boundary_mae=2.0,
+				model_tag=tag,
+				prediction_kind=prediction_kind,
+				split_grid=grid,
+			)
+			rows.append(
 			{
 				'split_id': 'split_000',
 				'model_role': role,
 				'model_tag': tag,
-				'voxel_dataset_identity': 'voxel-split_000',
+				'voxel_dataset_identity': file_sha256(grid),
 				'evaluation_dir': str(evaluation),
 				'status': 'complete',
+				**identity,
 			}
-		)
+			)
 	v0_manifest = tmp_path / 'v0.json'
 	v1_manifest = tmp_path / 'v1.json'
-	_write_manifest(v0_manifest, V0_RUN_MANIFEST_TYPE, rows)
-	_write_manifest(v1_manifest, V1_RUN_MANIFEST_TYPE, rows)
+	_write_manifest(v0_manifest, V0_RUN_MANIFEST_TYPE, v0_rows)
+	_write_manifest(v1_manifest, V1_RUN_MANIFEST_TYPE, v1_rows)
 
 	with pytest.raises(ValueError, match='all six'):
 		summarize_f3_lithology_voxel_split_robustness(
@@ -293,6 +386,26 @@ def test_all_tied_primary_result_remains_hold() -> None:
 	assert status == 'hold'
 
 
+def test_one_loss_with_all_other_metrics_tied_remains_hold() -> None:
+	rows = [
+		{
+			'split_id': f'split_{split_index:03d}',
+			'comparison': 'v1_candidate_minus_baseline',
+			'metric': metric,
+			'delta': -0.1 if split_index == 0 and metric == 'macro_f1' else 0.0,
+		}
+		for split_index in range(6)
+		for metric in voxel_robustness.SUMMARY_METRICS
+	]
+
+	aggregates = voxel_robustness._aggregate_metric_rows(rows)  # noqa: SLF001
+	status, _ = voxel_robustness._provisional_status(  # noqa: SLF001
+		rows, aggregates
+	)
+
+	assert status == 'hold'
+
+
 def test_duplicate_split_run_is_rejected(tmp_path: Path) -> None:
 	path = tmp_path / 'manifest.json'
 	row = {
@@ -312,78 +425,53 @@ def test_duplicate_split_run_is_rejected(tmp_path: Path) -> None:
 def test_v1_paired_identity_failure_is_recorded_for_resume(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-	models = (
-		SimpleNamespace(role='baseline', model_tag=BASELINE_MODEL_TAG),
-		SimpleNamespace(role='candidate', model_tag=CANDIDATE_MODEL_TAG),
-	)
-	config = SimpleNamespace(
-		output_root=tmp_path,
-		voxel_dataset_manifest=tmp_path / 'voxel.json',
-		dataset={'name': 'f3'},
-		models=models,
-	)
-	jobs = tuple(
-		VoxelSplitJob(
-			'split_000',
-			model.role,
-			model.model_tag,
-			tmp_path / model.role,
-		)
-		for model in models
-	)
-	voxel_row = {'split_id': 'split_000'}
-	monkeypatch.setattr(voxel_robustness, 'voxel_decoder_split_jobs', lambda _: jobs)
-	monkeypatch.setattr(voxel_robustness, '_voxel_rows', lambda _: (voxel_row,))
+	build_config, _, config = _synthetic_workflow_configs(tmp_path)
+	build_f3_lithology_voxel_split_datasets(build_config)
+	config = replace(config, train=replace(config.train, epochs=2))
+	real_runner = voxel_robustness.run_f3_lithology_voxel_decoder
 
-	def skip_job(  # noqa: PLR0913
-		config, job, *, model, voxel_row, device, resume, only_missing
-	):
-		del config, job, model, voxel_row, device, resume, only_missing
-
-	monkeypatch.setattr(voxel_robustness, '_run_v1_job', skip_job)
-
-	def manifest_row(  # noqa: PLR0913
-		job, voxel_row, *, model, dataset_name, status, failure=None
-	):
-		del voxel_row, model, dataset_name
-		row = {
-			'split_id': job.split_id,
-			'model_role': job.model_role,
-			'model_tag': job.model_tag,
-			'status': status,
-			'resume_path': str(job.output_root / 'decoder' / 'latest.pt'),
-		}
-		if failure is not None:
-			row['failure'] = failure
-		return row
-
-	monkeypatch.setattr(voxel_robustness, '_v1_manifest_row', manifest_row)
-
-	def reject_mismatched_pair(rows, *, split_id):
-		if len(rows) == 2:
-			raise ValueError(f'paired decoder class_weights mismatch for {split_id}')
+	def interrupt_first_job(config, *, device, resume=None):
+		return real_runner(config, device=device, resume=resume, max_steps=1)
 
 	monkeypatch.setattr(
 		voxel_robustness,
-		'_validate_paired_decoder_identity',
-		reject_mismatched_pair,
+		'run_f3_lithology_voxel_decoder',
+		interrupt_first_job,
 	)
 
-	with pytest.raises(ValueError, match='class_weights mismatch'):
-		run_f3_lithology_voxel_decoder_split_suite(config)
+	with pytest.raises(RuntimeError, match='decoder job did not complete'):
+		run_f3_lithology_voxel_decoder_split_suite(config, device='cpu')
 
 	payload = json.loads(
-		(tmp_path / 'v1_split_run_manifest.json').read_text(encoding='utf-8')
+		(config.output_root / 'v1_split_run_manifest.json').read_text(encoding='utf-8')
 	)
-	assert [row['status'] for row in payload['rows']] == ['complete', 'failed']
-	failed = payload['rows'][1]
-	assert failed['resume_path'].endswith('/candidate/decoder/latest.pt')
-	assert failed['failure'].startswith('ValueError: paired decoder class_weights')
+	assert [row['status'] for row in payload['rows']] == ['failed']
+	failed = payload['rows'][0]
+	resume_path = Path(failed['resume_path'])
+	assert resume_path.name == 'latest.pt'
+	assert torch.load(resume_path, weights_only=False)['checkpoint_kind'] != 'completed'
+
+	monkeypatch.setattr(
+		voxel_robustness,
+		'run_f3_lithology_voxel_decoder',
+		real_runner,
+	)
+	resumed = run_f3_lithology_voxel_decoder_split_suite(
+		config, only_missing=True, device='cpu'
+	)
+	assert all(row['status'] == 'complete' for row in resumed.rows)
+	assert torch.load(resume_path, weights_only=False)['checkpoint_kind'] == 'completed'
 
 
-def _write_evaluation(
-	root: Path, *, score: float, boundary_mae: float, model_tag: str
-) -> None:
+def _write_evaluation(  # noqa: PLR0913
+	root: Path,
+	*,
+	score: float,
+	boundary_mae: float,
+	model_tag: str,
+	prediction_kind: str,
+	split_grid: Path,
+) -> dict[str, object]:
 	root.mkdir(parents=True)
 	metrics = {
 		'macro_f1': score,
@@ -403,11 +491,52 @@ def _write_evaluation(
 	}
 	(root / 'metrics.json').write_text(json.dumps(metrics), encoding='utf-8')
 	(root / 'boundary_metrics.json').write_text(json.dumps(boundary), encoding='utf-8')
+	prediction_metadata = root / 'prediction_metadata.json'
+	prediction_payload: dict[str, object] = {
+		'artifact_type': 'f3_lithology_voxel_prediction',
+		'model_tag': model_tag,
+		'prediction_kind': prediction_kind,
+	}
+	row_identity: dict[str, object] = {}
+	if prediction_kind == 'frozen_embedding_decoder':
+		sources = root / 'decoder_sources'
+		sources.mkdir()
+		valid_tokens = sources / 'valid_tokens.npy'
+		np.save(valid_tokens, np.ones((1,), dtype=np.bool_))
+		train_tiles = sources / 'train_tile_manifest.json'
+		validation_tiles = sources / 'validation_tile_manifest.json'
+		train_tiles.write_text('{"tiles":[0]}\n', encoding='utf-8')
+		validation_tiles.write_text('{"tiles":[1]}\n', encoding='utf-8')
+		checkpoint = sources / 'best.pt'
+		class_weights = [1.0, 2.0]
+		torch.save({'class_weights': torch.tensor(class_weights)}, checkpoint)
+		prediction_payload['source_identity'] = {
+			'decoder_checkpoint': _file_identity(checkpoint),
+			'artifact_identities': {
+				'valid_tokens': _file_identity(valid_tokens),
+			},
+			'tile_manifests': {
+				'train': _file_identity(train_tiles),
+				'validation': _file_identity(validation_tiles),
+			},
+		}
+		row_identity = {
+			'source_valid_tokens': _file_identity(valid_tokens),
+			'train_tile_manifest': _file_identity(train_tiles),
+			'validation_tile_manifest': _file_identity(validation_tiles),
+			'class_weights': class_weights,
+		}
+	prediction_metadata.write_text(json.dumps(prediction_payload), encoding='utf-8')
 	(root / 'evaluation_metadata.json').write_text(
 		json.dumps(
 			{
 				'artifact_type': 'f3_lithology_voxel_evaluation',
 				'model_tag': model_tag,
+				'prediction_kind': prediction_kind,
+				'inputs': {
+					'prediction_metadata': _file_identity(prediction_metadata),
+					'voxel_split_grid': _file_identity(split_grid),
+				},
 			}
 		),
 		encoding='utf-8',
@@ -434,6 +563,11 @@ def _write_evaluation(
 			path.write_text(
 				'{}\n' if path.suffix == '.json' else '\n', encoding='utf-8'
 			)
+	return row_identity
+
+
+def _file_identity(path: Path) -> dict[str, str]:
+	return {'path': str(path), 'sha256': file_sha256(path)}
 
 
 def _write_manifest(
