@@ -63,6 +63,7 @@ def _dataset(tmp_path) -> F3VoxelDecoderDataset:
 		core_size_tokens=(2, 2, 2),
 		context_halo_tokens=(1, 1, 1),
 		class_ids=(0,),
+		canonical_valid_tokens=valid,
 	)
 	return F3VoxelDecoderDataset(
 		paths['embeddings'],

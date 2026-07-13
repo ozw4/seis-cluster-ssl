@@ -31,6 +31,7 @@ from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
 from seis_ssl_cluster.f3.lithology.voxel_tiles import (
 	VoxelTileManifest,
 	build_voxel_tile_manifests,
+	read_voxel_tile_manifest,
 	write_voxel_tile_manifest,
 )
 from seis_ssl_cluster.models.voxel_decoder import VoxelDecoder3D
@@ -194,6 +195,9 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 
 	labels = np.load(plan.label_volume, mmap_mode='r', allow_pickle=False)
 	split_grid = np.load(plan.split_grid, mmap_mode='r', allow_pickle=False)
+	canonical_valid_tokens = np.load(
+		plan.valid_tokens, mmap_mode='r', allow_pickle=False
+	)
 	manifests = build_voxel_tile_manifests(
 		split_grid,
 		labels,
@@ -202,6 +206,7 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 		core_size_tokens=config.tiles.core_size_tokens,
 		context_halo_tokens=config.tiles.context_halo_tokens,
 		class_ids=plan.class_ids,
+		canonical_valid_tokens=canonical_valid_tokens,
 	)
 	if not manifests['train'].tiles or not manifests['validation'].tiles:
 		raise ValueError('train and validation must each contain at least one tile')
@@ -238,6 +243,7 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 	start_batch = 0
 	global_step = 0
 	partial_accumulator: _TrainAccumulator | None = None
+	best_checkpoint_sha256: str | None = None
 	if resume_path is not None:
 		payload = load_voxel_decoder_checkpoint(resume_path, map_location=run_device)
 		if payload['checkpoint_kind'] == 'completed':
@@ -249,6 +255,16 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 			artifact_identities=identities,
 			tile_manifest_hashes=manifest_hashes,
 		)
+		_validate_resume_snapshot(
+			output_dir,
+			resolved_config=resolved_config,
+			manifests=manifests,
+			resume_payload=payload,
+			class_weights=class_weights,
+			artifact_identities=identities,
+			manifest_hashes=manifest_hashes,
+		)
+		best_checkpoint_sha256 = payload['best_checkpoint_sha256']
 		restore_voxel_decoder_checkpoint(
 			payload, model=decoder, optimizer=optimizer, amp_scaler=scaler
 		)
@@ -268,9 +284,8 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 			start_epoch = int(payload['epoch']) + 1
 
 	output_dir.mkdir(parents=True, exist_ok=True)
-	_snapshot_run(
-		output_dir, resolved_config, plan, manifests, resume=resume_path is not None
-	)
+	if resume_path is None:
+		_snapshot_run(output_dir, resolved_config, plan, manifests)
 
 	train_dataset = _dataset(plan, manifests['train'])
 	validation_dataset = _dataset(plan, manifests['validation'])
@@ -327,6 +342,7 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 						checkpoint_kind='step',
 						amp_scaler=scaler,
 						batch_index=batch_index,
+						best_checkpoint_sha256=best_checkpoint_sha256,
 					)
 					_write_history(output_dir / HISTORY_NAME, history)
 					return _result(output_dir, global_step, completed=False)
@@ -376,15 +392,18 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 			'checkpoint_kind': kind,
 			'amp_scaler': scaler,
 		}
-		save_voxel_decoder_checkpoint(
-			output_dir / LATEST_NAME,
-			**checkpoint_arguments,  # type: ignore[arg-type]
-		)
 		if improved:
 			save_voxel_decoder_checkpoint(
 				output_dir / BEST_NAME,
 				**checkpoint_arguments,  # type: ignore[arg-type]
+				best_checkpoint_sha256=None,
 			)
+		best_checkpoint_sha256 = file_sha256(output_dir / BEST_NAME)
+		save_voxel_decoder_checkpoint(
+			output_dir / LATEST_NAME,
+			**checkpoint_arguments,  # type: ignore[arg-type]
+			best_checkpoint_sha256=best_checkpoint_sha256,
+		)
 		_write_history(output_dir / HISTORY_NAME, history)
 		if max_steps is not None and global_step >= max_steps:
 			return _result(output_dir, global_step, completed=kind == 'completed')
@@ -636,26 +655,74 @@ def _snapshot_run(
 	resolved_config: Mapping[str, object],
 	plan: VoxelDecoderInputPlan,
 	manifests: Mapping[str, VoxelTileManifest],
-	*,
-	resume: bool,
 ) -> None:
-	if not resume:
-		_write_json(output_dir / 'resolved_config.json', resolved_config)
-		_write_json(
-			output_dir / 'run_metadata.json',
-			{
-				'created_at_utc': datetime.now(timezone.utc).isoformat(),
-				'git_commit': _git_commit(),
-				'package_version': getattr(seis_ssl_cluster, '__version__', None),
-				'source_embedding_metadata': str(plan.embedding_metadata),
-				'source_valid_tokens': str(plan.valid_tokens),
-				'voxel_dataset_metadata': str(plan.voxel_metadata),
-			},
-		)
+	_write_json(output_dir / 'resolved_config.json', resolved_config)
+	_write_json(
+		output_dir / 'run_metadata.json',
+		{
+			'created_at_utc': datetime.now(timezone.utc).isoformat(),
+			'git_commit': _git_commit(),
+			'package_version': getattr(seis_ssl_cluster, '__version__', None),
+			'source_embedding_metadata': str(plan.embedding_metadata),
+			'source_valid_tokens': str(plan.valid_tokens),
+			'voxel_dataset_metadata': str(plan.voxel_metadata),
+		},
+	)
 	for split, manifest in manifests.items():
 		path = output_dir / f'{split}_tile_manifest.json'
-		if not resume:
-			write_voxel_tile_manifest(path, manifest)
+		write_voxel_tile_manifest(path, manifest)
+
+
+def _validate_resume_snapshot(  # noqa: C901, PLR0912, PLR0913
+	output_dir: Path,
+	*,
+	resolved_config: Mapping[str, object],
+	manifests: Mapping[str, VoxelTileManifest],
+	resume_payload: Mapping[str, object],
+	class_weights: torch.Tensor,
+	artifact_identities: Mapping[str, object],
+	manifest_hashes: Mapping[str, str],
+) -> None:
+	resolved_path = output_dir / 'resolved_config.json'
+	if not resolved_path.is_file():
+		raise FileNotFoundError(f'missing resume snapshot: {resolved_path}')
+	if _read_json_object(resolved_path) != dict(resolved_config):
+		raise ValueError('resume snapshot mismatch: resolved_config.json')
+	for split, expected in manifests.items():
+		path = output_dir / f'{split}_tile_manifest.json'
+		if not path.is_file():
+			raise FileNotFoundError(f'missing resume snapshot: {path}')
+		persisted = read_voxel_tile_manifest(path)
+		if persisted.identity_sha256 != expected.identity_sha256:
+			raise ValueError(f'resume snapshot mismatch: {path.name}')
+
+	best_state = resume_payload.get('best_selection_state')
+	expected_best_hash = resume_payload.get('best_checkpoint_sha256')
+	if best_state is None:
+		if expected_best_hash is not None:
+			raise ValueError('resume snapshot has a best hash without best state')
+		return
+	if not isinstance(best_state, Mapping):
+		raise TypeError('checkpoint best_selection_state must be a mapping')
+	if not isinstance(expected_best_hash, str):
+		raise TypeError('resume checkpoint is missing the best.pt identity')
+	best_path = output_dir / BEST_NAME
+	if not best_path.is_file():
+		raise FileNotFoundError(f'missing resume snapshot: {best_path}')
+	if file_sha256(best_path) != expected_best_hash:
+		raise ValueError('resume snapshot mismatch: best.pt')
+	best_payload = load_voxel_decoder_checkpoint(best_path, map_location='cpu')
+	validate_resume_identity(
+		best_payload,
+		resolved_config=resolved_config,
+		class_weights=class_weights,
+		artifact_identities=artifact_identities,
+		tile_manifest_hashes=manifest_hashes,
+	)
+	if best_payload.get('best_selection_state') != dict(best_state):
+		raise ValueError('resume snapshot mismatch: best.pt selection state')
+	if best_payload.get('epoch') != best_state.get('epoch'):
+		raise ValueError('resume snapshot mismatch: best.pt epoch')
 
 
 def _history_row(

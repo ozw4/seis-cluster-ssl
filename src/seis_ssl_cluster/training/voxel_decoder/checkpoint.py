@@ -14,10 +14,9 @@ import torch
 from seis_ssl_cluster.training.checkpoint import capture_rng_state, restore_rng_state
 
 BEST_SELECTION_EPSILON = 1.0e-12
-# Version 2 binds checkpoints to the voxelwise-LayerNorm/nearest-upsample
-# implementation. Version 1 used GroupNorm/trilinear semantics with compatible
-# state-dict keys and therefore must not be loaded by this implementation.
-CHECKPOINT_SCHEMA_VERSION = 2
+# Version 3 also binds resumable checkpoints to the persisted best checkpoint.
+# Earlier versions do not contain that integrity identity.
+CHECKPOINT_SCHEMA_VERSION = 3
 
 
 def validation_is_better(
@@ -92,6 +91,7 @@ def save_voxel_decoder_checkpoint(  # noqa: PLR0913
 	amp_scaler: torch.amp.GradScaler | None = None,
 	batch_index: int | None = None,
 	rng_state: Mapping[str, object] | None = None,
+	best_checkpoint_sha256: str | None = None,
 ) -> Path:
 	"""Atomically save the complete resumable decoder state."""
 	if checkpoint_kind not in {'step', 'epoch', 'completed'}:
@@ -120,6 +120,7 @@ def save_voxel_decoder_checkpoint(  # noqa: PLR0913
 		'rng_states': dict(capture_rng_state() if rng_state is None else rng_state),
 		'checkpoint_kind': checkpoint_kind,
 		'batch_index': batch_index,
+		'best_checkpoint_sha256': _optional_sha256(best_checkpoint_sha256),
 	}
 	payload['rng_state'] = payload['rng_states']
 	checkpoint_path = Path(path)
@@ -147,6 +148,8 @@ def load_voxel_decoder_checkpoint(
 	payload = torch.load(Path(path), map_location=map_location, weights_only=False)
 	if not isinstance(payload, dict):
 		raise TypeError('voxel decoder checkpoint must contain a mapping')
+	if payload.get('schema_version') != CHECKPOINT_SCHEMA_VERSION:
+		raise ValueError('unsupported voxel decoder checkpoint schema_version')
 	required = {
 		'schema_version',
 		'epoch',
@@ -162,14 +165,14 @@ def load_voxel_decoder_checkpoint(
 		'tile_manifest_hashes',
 		'rng_states',
 		'checkpoint_kind',
+		'best_checkpoint_sha256',
 	}
 	missing = sorted(required - payload.keys())
 	if missing:
 		raise ValueError(f'voxel decoder checkpoint missing fields: {missing!r}')
-	if payload['schema_version'] != CHECKPOINT_SCHEMA_VERSION:
-		raise ValueError('unsupported voxel decoder checkpoint schema_version')
 	if payload['checkpoint_kind'] not in {'step', 'epoch', 'completed'}:
 		raise ValueError('invalid voxel decoder checkpoint_kind')
+	_optional_sha256(payload['best_checkpoint_sha256'])
 	return payload
 
 
@@ -247,6 +250,20 @@ def _plain_metrics(metrics: Mapping[str, object]) -> dict[str, object]:
 		else:
 			plain[key] = value
 	return plain
+
+
+def _optional_sha256(value: object) -> str | None:
+	if value is None:
+		return None
+	if (
+		not isinstance(value, str)
+		or len(value) != 64
+		or any(character not in '0123456789abcdef' for character in value)
+	):
+		raise ValueError(
+			'best_checkpoint_sha256 must be a lowercase SHA-256 hex digest'
+		)
+	return value
 
 
 # Concise compatibility names for callers that operate only on decoder checkpoints.

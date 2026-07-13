@@ -150,6 +150,23 @@ class VoxelDecoder3D(nn.Module):
 		return self.logits_head(x)
 
 
+def required_context_halo_tokens(
+	upsample_factors: Sequence[Sequence[int]],
+) -> tuple[int, int, int]:
+	"""Return the token halo needed by the decoder's full receptive field."""
+	factors = _factor_sequence(upsample_factors)
+	required: list[int] = []
+	for axis in range(3):
+		voxel_width = _product(factor[axis] for factor in factors)
+		lower = 0
+		upper = voxel_width - 1
+		for factor in reversed(factors):
+			lower = (lower - 1) // factor[axis]
+			upper = (upper + 1) // factor[axis]
+		required.append(max(-lower, upper))
+	return (required[0], required[1], required[2])
+
+
 def _validate_embeddings(embeddings: torch.Tensor, embedding_dim: int) -> None:
 	if not isinstance(embeddings, torch.Tensor):
 		msg = f'embeddings must be a torch.Tensor; got {type(embeddings).__name__}'
@@ -245,4 +262,4 @@ def _product(values: Iterable[int]) -> int:
 	return result
 
 
-__all__ = ['VoxelDecoder3D']
+__all__ = ['VoxelDecoder3D', 'required_context_halo_tokens']

@@ -443,3 +443,43 @@ def test_resume_rejects_best_checkpoint_path(tmp_path) -> None:
 
 	with pytest.raises(ValueError, match=r'must be latest\.pt'):
 		run_f3_lithology_voxel_decoder(config, device='cpu', resume=best_path)
+
+
+def test_resume_rejects_missing_resolved_config_snapshot(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'resume-missing-config')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	partial = run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=1)
+	(config.output_dir / 'resolved_config.json').unlink()
+
+	with pytest.raises(FileNotFoundError, match=r'resolved_config\.json'):
+		run_f3_lithology_voxel_decoder(
+			config, device='cpu', resume=partial.latest_checkpoint
+		)
+
+
+def test_resume_rejects_modified_tile_manifest_snapshot(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'resume-modified-manifest')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	partial = run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=1)
+	path = config.output_dir / 'train_tile_manifest.json'
+	payload = json.loads(path.read_text(encoding='utf-8'))
+	payload['tile_count'] += 1
+	path.write_text(json.dumps(payload), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='tile_count'):
+		run_f3_lithology_voxel_decoder(
+			config, device='cpu', resume=partial.latest_checkpoint
+		)
+
+
+def test_resume_rejects_modified_best_checkpoint_snapshot(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'resume-modified-best')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	partial = run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=4)
+	best_path = config.output_dir / 'best.pt'
+	best_path.write_bytes(best_path.read_bytes() + b'tampered')
+
+	with pytest.raises(ValueError, match=r'best\.pt'):
+		run_f3_lithology_voxel_decoder(
+			config, device='cpu', resume=partial.latest_checkpoint
+		)

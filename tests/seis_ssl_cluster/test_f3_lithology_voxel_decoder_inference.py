@@ -13,6 +13,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_inference import (
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_decoder_inference import (
 	VoxelDecoderInferencePlan,
+	_validate_context_halo,
 	_write_inference_tiles,
 	inspect_f3_lithology_voxel_inference,
 	predict_f3_lithology_voxels,
@@ -196,6 +197,16 @@ def test_production_decoder_tiled_outputs_match_whole_grid_forward() -> None:
 	)
 
 
+def test_inference_rejects_halo_smaller_than_decoder_receptive_field() -> None:
+	with pytest.raises(ValueError, match='decoder receptive field'):
+		_validate_context_halo(
+			context_halo_tokens=(1, 0, 0),
+			core_size_tokens=(2, 1, 1),
+			token_grid_shape_xyz=(5, 1, 1),
+			upsample_factors=((1, 1, 1), (1, 1, 1)),
+		)
+
+
 def test_cpu_chunked_inference_crops_volume_and_masks_invalid_tokens(
 	tmp_path: Path,
 ) -> None:
@@ -372,6 +383,7 @@ def _write_job(tmp_path: Path) -> tuple[dict[str, object], Path]:
 		core_size_tokens=(2, 1, 1),
 		context_halo_tokens=(1, 0, 0),
 		class_ids=(0, 1),
+		canonical_valid_tokens=valid_tokens,
 	)
 	for name, manifest in manifests.items():
 		write_voxel_tile_manifest(decoder_dir / f'{name}_tile_manifest.json', manifest)

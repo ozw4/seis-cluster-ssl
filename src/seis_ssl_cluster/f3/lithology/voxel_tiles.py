@@ -25,6 +25,8 @@ _SPLIT_CODES = {
 	'train': int(TRAIN_VOXEL_SPLIT),
 	'validation': int(VALIDATION_VOXEL_SPLIT),
 }
+_ARTIFACT_TYPE = 'f3_voxel_tile_manifest'
+_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -61,7 +63,7 @@ class VoxelTileManifest:
 	context_halo_tokens: tuple[int, int, int]
 	class_ids: tuple[int, ...]
 	tiles: tuple[VoxelTileRecord, ...]
-	schema_version: int = 1
+	schema_version: int = _SCHEMA_VERSION
 
 	@property
 	def identity_sha256(self) -> str:
@@ -71,7 +73,7 @@ class VoxelTileManifest:
 	def to_dict(self, *, include_identity: bool = True) -> dict[str, object]:
 		"""Return a stable, JSON-compatible manifest mapping."""
 		payload: dict[str, object] = {
-			'artifact_type': 'f3_voxel_tile_manifest',
+			'artifact_type': _ARTIFACT_TYPE,
 			'schema_version': self.schema_version,
 			'split': self.split,
 			'volume_shape_xyz': list(self.volume_shape_xyz),
@@ -91,7 +93,7 @@ class VoxelTileManifest:
 		return payload
 
 
-def build_voxel_tile_manifest(  # noqa: C901, PLR0913
+def build_voxel_tile_manifest(  # noqa: C901, PLR0912, PLR0913
 	supervision_split_grid: np.ndarray,
 	label_volume: np.ndarray,
 	*,
@@ -101,6 +103,7 @@ def build_voxel_tile_manifest(  # noqa: C901, PLR0913
 	core_size_tokens: Sequence[int] = (8, 8, 8),
 	context_halo_tokens: Sequence[int] = (1, 1, 1),
 	class_ids: Sequence[int],
+	canonical_valid_tokens: np.ndarray,
 ) -> VoxelTileManifest:
 	"""Partition a token grid and retain cores containing requested supervision."""
 	if split not in _SPLIT_CODES:
@@ -132,7 +135,22 @@ def build_voxel_tile_manifest(  # noqa: C901, PLR0913
 			f'expected {expected_tokens!r}, got {token_shape!r}'
 		)
 	known_ids = _class_ids(class_ids)
-	requested = (grid == _SPLIT_CODES[split]) & np.isin(labels, known_ids)
+	valid_tokens = np.asarray(canonical_valid_tokens)
+	if valid_tokens.dtype != np.bool_ or valid_tokens.ndim != 3:
+		raise TypeError('canonical_valid_tokens must be a 3D bool array')
+	if tuple(valid_tokens.shape) != token_shape:
+		raise ValueError(
+			'canonical_valid_tokens shape must match token_grid_shape_xyz'
+		)
+	valid_voxels = valid_tokens
+	for axis, repeats in enumerate(patch):
+		valid_voxels = np.repeat(valid_voxels, repeats, axis=axis)
+	valid_voxels = valid_voxels[_slices((0, 0, 0), tuple(grid.shape))]
+	requested = (
+		(grid == _SPLIT_CODES[split])
+		& np.isin(labels, known_ids)
+		& valid_voxels
+	)
 
 	tiles: list[VoxelTileRecord] = []
 	covered = np.zeros(grid.shape, dtype=np.uint8)
@@ -212,6 +230,7 @@ def build_voxel_tile_manifests(  # noqa: PLR0913
 	core_size_tokens: Sequence[int] = (8, 8, 8),
 	context_halo_tokens: Sequence[int] = (1, 1, 1),
 	class_ids: Sequence[int],
+	canonical_valid_tokens: np.ndarray,
 ) -> dict[str, VoxelTileManifest]:
 	"""Build independent train and validation manifests from common geometry."""
 	return {
@@ -224,6 +243,7 @@ def build_voxel_tile_manifests(  # noqa: PLR0913
 			core_size_tokens=core_size_tokens,
 			context_halo_tokens=context_halo_tokens,
 			class_ids=class_ids,
+			canonical_valid_tokens=canonical_valid_tokens,
 		)
 		for split in ('train', 'validation')
 	}
@@ -254,10 +274,31 @@ def read_voxel_tile_manifest(path: str | Path) -> VoxelTileManifest:
 		payload = json.load(file_obj)
 	if not isinstance(payload, dict):
 		raise TypeError('voxel tile manifest must contain an object')
+	if payload.get('artifact_type') != _ARTIFACT_TYPE:
+		raise ValueError(
+			f'voxel tile manifest artifact_type must be {_ARTIFACT_TYPE!r}'
+		)
+	schema_version = payload.get('schema_version')
+	if (
+		not isinstance(schema_version, Integral)
+		or isinstance(schema_version, bool)
+		or int(schema_version) != _SCHEMA_VERSION
+	):
+		raise ValueError('unsupported voxel tile manifest schema_version')
 	tiles_value = payload.get('tiles')
 	if not isinstance(tiles_value, list):
 		raise TypeError('voxel tile manifest tiles must be a list')
+	declared_tile_count = _required_nonnegative_int(payload, 'tile_count')
+	if declared_tile_count != len(tiles_value):
+		raise ValueError('voxel tile manifest tile_count mismatch')
 	tiles = tuple(_record_from_mapping(item) for item in tiles_value)
+	declared_voxel_count = _required_nonnegative_int(
+		payload, 'supervised_voxel_count'
+	)
+	if declared_voxel_count != sum(
+		tile.supervised_voxel_count for tile in tiles
+	):
+		raise ValueError('voxel tile manifest supervised_voxel_count mismatch')
 	manifest = VoxelTileManifest(
 		split=_required_str(payload, 'split'),
 		volume_shape_xyz=_payload_triplet(payload, 'volume_shape_xyz'),
@@ -269,10 +310,12 @@ def read_voxel_tile_manifest(path: str | Path) -> VoxelTileManifest:
 		),
 		class_ids=_class_ids(payload.get('class_ids', ())),
 		tiles=tiles,
-		schema_version=int(payload.get('schema_version', 0)),
+		schema_version=_SCHEMA_VERSION,
 	)
 	identity = payload.get('identity_sha256')
-	if identity is not None and identity != manifest.identity_sha256:
+	if not isinstance(identity, str) or not identity:
+		raise ValueError('voxel tile manifest identity_sha256 is required')
+	if identity != manifest.identity_sha256:
 		raise ValueError('voxel tile manifest identity_sha256 mismatch')
 	return manifest
 
@@ -316,6 +359,13 @@ def _required_str(mapping: Mapping[str, Any], key: str) -> str:
 	if not isinstance(value, str) or not value:
 		raise TypeError(f'{key} must be a non-empty string')
 	return value
+
+
+def _required_nonnegative_int(mapping: Mapping[str, Any], key: str) -> int:
+	value = mapping.get(key)
+	if not isinstance(value, Integral) or isinstance(value, bool) or value < 0:
+		raise TypeError(f'{key} must be a non-negative integer')
+	return int(value)
 
 
 def _payload_triplet(
