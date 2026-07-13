@@ -30,7 +30,7 @@ from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 from seis_ssl_cluster.f3.lithology.voxel_tiles import read_voxel_tile_manifest
 from seis_ssl_cluster.models.voxel_decoder import (
 	VoxelDecoder3D,
-	required_context_halo_tokens,
+	validate_context_halo_tokens,
 )
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	load_voxel_decoder_checkpoint,
@@ -154,7 +154,7 @@ def inspect_f3_lithology_voxel_inference(
 	decoder_spec = _mapping(resolved_config.get('decoder'), 'resolved decoder config')
 	if decoder_spec.get('embedding_dim') != embedding_dim:
 		raise ValueError('decoder embedding_dim does not match selected embeddings')
-	_validate_context_halo(
+	validate_context_halo_tokens(
 		context_halo_tokens=config.tiles.context_halo_tokens,
 		core_size_tokens=config.tiles.core_size_tokens,
 		token_grid_shape_xyz=token_shape,
@@ -543,35 +543,13 @@ def _validate_checkpoint_classes(
 	values = metadata.get('classes')
 	if not isinstance(values, Sequence) or isinstance(values, str | bytes):
 		raise TypeError('voxel dataset metadata classes must be a sequence')
-	expected = tuple((item.class_id, item.class_name) for item in classes)
-	actual: list[tuple[object, object]] = []
+	expected = tuple(item.to_dict() for item in classes)
+	actual: list[dict[str, object]] = []
 	for value in values:
 		entry = _mapping(value, 'voxel dataset class')
-		actual.append((entry.get('class_id'), entry.get('class_name')))
+		actual.append(dict(entry))
 	if tuple(actual) != expected:
 		raise ValueError('class_info does not match checkpoint supervision classes')
-
-
-def _validate_context_halo(
-	*,
-	context_halo_tokens: tuple[int, int, int],
-	core_size_tokens: tuple[int, int, int],
-	token_grid_shape_xyz: tuple[int, int, int],
-	upsample_factors: Sequence[Sequence[int]],
-) -> None:
-	required = required_context_halo_tokens(upsample_factors)
-	insufficient = tuple(
-		axis
-		for axis in range(3)
-		if token_grid_shape_xyz[axis] > core_size_tokens[axis]
-		and context_halo_tokens[axis] < required[axis]
-	)
-	if insufficient:
-		raise ValueError(
-			'tiles.context_halo_tokens does not cover the decoder receptive field; '
-			f'required={required!r}, configured={context_halo_tokens!r}, '
-			f'tiled_axes={insufficient!r}'
-		)
 
 
 def _prediction_metadata(

@@ -167,6 +167,29 @@ def required_context_halo_tokens(
 	return (required[0], required[1], required[2])
 
 
+def validate_context_halo_tokens(
+	*,
+	context_halo_tokens: tuple[int, int, int],
+	core_size_tokens: tuple[int, int, int],
+	token_grid_shape_xyz: tuple[int, int, int],
+	upsample_factors: Sequence[Sequence[int]],
+) -> None:
+	"""Require enough halo on every axis partitioned into multiple core tiles."""
+	required = required_context_halo_tokens(upsample_factors)
+	insufficient = tuple(
+		axis
+		for axis in range(3)
+		if token_grid_shape_xyz[axis] > core_size_tokens[axis]
+		and context_halo_tokens[axis] < required[axis]
+	)
+	if insufficient:
+		raise ValueError(
+			'tiles.context_halo_tokens does not cover the decoder receptive field; '
+			f'required={required!r}, configured={context_halo_tokens!r}, '
+			f'tiled_axes={insufficient!r}'
+		)
+
+
 def _validate_embeddings(embeddings: torch.Tensor, embedding_dim: int) -> None:
 	if not isinstance(embeddings, torch.Tensor):
 		msg = f'embeddings must be a torch.Tensor; got {type(embeddings).__name__}'
@@ -262,4 +285,8 @@ def _product(values: Iterable[int]) -> int:
 	return result
 
 
-__all__ = ['VoxelDecoder3D', 'required_context_halo_tokens']
+__all__ = [
+	'VoxelDecoder3D',
+	'required_context_halo_tokens',
+	'validate_context_halo_tokens',
+]

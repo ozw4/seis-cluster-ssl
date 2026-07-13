@@ -16,7 +16,13 @@ import seis_ssl_cluster.training.voxel_decoder.runner as voxel_decoder_runner
 from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
 	f3_lithology_voxel_decoder_config_from_mapping,
 )
+from seis_ssl_cluster.config.f3_lithology_voxel_inference import (
+	f3_lithology_voxel_inference_config_from_mapping,
+)
 from seis_ssl_cluster.embedding.writer import file_sha256
+from seis_ssl_cluster.f3.lithology.voxel_decoder_inference import (
+	predict_f3_lithology_voxels,
+)
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	load_voxel_decoder_checkpoint,
 )
@@ -64,12 +70,33 @@ def _job(tmp_path, name: str, *, epochs: int = 2):
 		'zero_mask': {'enabled': True},
 	}
 	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+	classes = [
+		{
+			'class_id': 0,
+			'class_name': 'zero',
+			'rgb': [0, 0, 0],
+			'hex_color': '#000000',
+		},
+		{
+			'class_id': 1,
+			'class_name': 'one',
+			'rgb': [1, 1, 1],
+			'hex_color': '#010101',
+		},
+	]
+	class_info_path = root / 'class_info.json'
+	class_info_path.write_text(
+		json.dumps(
+			{
+				'0': {'name': 'zero', 'color': [0, 0, 0]},
+				'1': {'name': 'one', 'color': [1, 1, 1]},
+			}
+		),
+		encoding='utf-8',
+	)
 	voxel_metadata = {
 		'dataset': {'name': 'tiny', 'version': 'v1'},
-		'classes': [
-			{'class_id': 0, 'class_name': 'zero'},
-			{'class_id': 1, 'class_name': 'one'},
-		],
+		'classes': classes,
 		'reference_embedding': {
 			'path': str(metadata_path),
 			'sha256': file_sha256(metadata_path),
@@ -97,7 +124,7 @@ def _job(tmp_path, name: str, *, epochs: int = 2):
 			'hidden_channels': [2],
 			'upsample_factors': [[1, 1, 1]],
 		},
-		'tiles': {'core_size_tokens': [1, 1, 1], 'context_halo_tokens': [0, 0, 0]},
+		'tiles': {'core_size_tokens': [1, 1, 1], 'context_halo_tokens': [1, 0, 0]},
 		'train': {
 			'epochs': epochs,
 			'batch_size': 1,
@@ -147,6 +174,42 @@ def test_dry_run_inspection_does_not_create_output(tmp_path) -> None:
 	plan = inspect_f3_lithology_voxel_decoder(config)
 	assert plan.token_grid_shape_xyz == (4, 1, 1)
 	assert not config.output_dir.exists()
+
+
+def test_training_inspection_rejects_insufficient_context_halo(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'insufficient-halo')
+	raw['tiles']['context_halo_tokens'] = [0, 0, 0]
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+	with pytest.raises(ValueError, match='decoder receptive field'):
+		inspect_f3_lithology_voxel_decoder(config)
+
+
+def test_completed_training_checkpoint_runs_chunked_inference(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'train-to-inference', epochs=1)
+	training = run_f3_lithology_voxel_decoder(
+		f3_lithology_voxel_decoder_config_from_mapping(raw), device='cpu'
+	)
+	artifact_root = Path(raw['paths']['artifact_root'])
+	inference_raw = {
+		'paths': raw['paths'],
+		'dataset': raw['dataset'],
+		'model': raw['model'],
+		'labels': {'class_info': str(artifact_root / 'class_info.json')},
+		'embeddings': raw['embeddings'],
+		'decoder': {'checkpoint': str(training.best_checkpoint)},
+		'tiles': raw['tiles'],
+		'inference': {'write_probabilities': False, 'overwrite': False},
+		'outputs': {'output_dir': str(artifact_root / 'predictions')},
+	}
+
+	result = predict_f3_lithology_voxels(
+		f3_lithology_voxel_inference_config_from_mapping(inference_raw),
+		device='cpu',
+	)
+
+	assert result.valid_voxel_count == 4
+	assert result.tile_count == 4
 
 
 def test_dry_run_inspection_does_not_hash_array_contents(

@@ -13,7 +13,6 @@ from seis_ssl_cluster.config.f3_lithology_voxel_inference import (
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_decoder_inference import (
 	VoxelDecoderInferencePlan,
-	_validate_context_halo,
 	_write_inference_tiles,
 	inspect_f3_lithology_voxel_inference,
 	predict_f3_lithology_voxels,
@@ -26,7 +25,10 @@ from seis_ssl_cluster.f3.lithology.voxel_tiles import (
 	build_voxel_tile_manifests,
 	write_voxel_tile_manifest,
 )
-from seis_ssl_cluster.models.voxel_decoder import VoxelDecoder3D
+from seis_ssl_cluster.models.voxel_decoder import (
+	VoxelDecoder3D,
+	validate_context_halo_tokens,
+)
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	save_voxel_decoder_checkpoint,
 )
@@ -199,7 +201,7 @@ def test_production_decoder_tiled_outputs_match_whole_grid_forward() -> None:
 
 def test_inference_rejects_halo_smaller_than_decoder_receptive_field() -> None:
 	with pytest.raises(ValueError, match='decoder receptive field'):
-		_validate_context_halo(
+		validate_context_halo_tokens(
 			context_halo_tokens=(1, 0, 0),
 			core_size_tokens=(2, 1, 1),
 			token_grid_shape_xyz=(5, 1, 1),
@@ -246,6 +248,18 @@ def test_inspection_rejects_checkpoint_embedding_identity_mismatch(
 
 	with pytest.raises(ValueError, match='embeddings hash'):
 		inspect_f3_lithology_voxel_inference(config, verify_array_hashes=True)
+
+
+def test_inspection_rejects_class_palette_mismatch(tmp_path: Path) -> None:
+	raw, _ = _write_job(tmp_path)
+	class_info_path = Path(raw['labels']['class_info'])
+	class_info = json.loads(class_info_path.read_text(encoding='utf-8'))
+	class_info['0']['color'] = [9, 9, 9]
+	class_info_path.write_text(json.dumps(class_info), encoding='utf-8')
+	config = f3_lithology_voxel_inference_config_from_mapping(raw)
+
+	with pytest.raises(ValueError, match='class_info does not match'):
+		inspect_f3_lithology_voxel_inference(config)
 
 
 def test_dry_run_inspection_does_not_hash_array_contents(
@@ -329,8 +343,18 @@ def _write_job(tmp_path: Path) -> tuple[dict[str, object], Path]:
 	voxel_metadata = {
 		'dataset': {'name': 'tiny', 'version': 'v1'},
 		'classes': [
-			{'class_id': 0, 'class_name': 'zero'},
-			{'class_id': 1, 'class_name': 'one'},
+			{
+				'class_id': 0,
+				'class_name': 'zero',
+				'rgb': [0, 0, 0],
+				'hex_color': '#000000',
+			},
+			{
+				'class_id': 1,
+				'class_name': 'one',
+				'rgb': [1, 1, 1],
+				'hex_color': '#010101',
+			},
 		],
 		'reference_embedding': {
 			'path': str(embedding_metadata_path),

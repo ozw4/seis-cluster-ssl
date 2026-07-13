@@ -34,7 +34,10 @@ from seis_ssl_cluster.f3.lithology.voxel_tiles import (
 	read_voxel_tile_manifest,
 	write_voxel_tile_manifest,
 )
-from seis_ssl_cluster.models.voxel_decoder import VoxelDecoder3D
+from seis_ssl_cluster.models.voxel_decoder import (
+	VoxelDecoder3D,
+	validate_context_halo_tokens,
+)
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	best_state_is_improved,
 	load_voxel_decoder_checkpoint,
@@ -147,6 +150,12 @@ def inspect_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912
 	geometry = _metadata_geometry(embedding_payload)
 	if config.decoder.embedding_dim != _embedding_dim(embedding_payload):
 		raise ValueError('decoder.embedding_dim does not match embedding metadata')
+	validate_context_halo_tokens(
+		context_halo_tokens=config.tiles.context_halo_tokens,
+		core_size_tokens=config.tiles.core_size_tokens,
+		token_grid_shape_xyz=geometry[1],
+		upsample_factors=config.decoder.upsample_factors,
+	)
 	_validate_inspected_arrays(
 		embeddings=embedding_files.embeddings,
 		valid_tokens=embedding_files.valid_tokens,
