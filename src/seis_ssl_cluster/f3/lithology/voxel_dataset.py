@@ -55,6 +55,7 @@ class F3LithologyVoxelDatasetInspection:
 	geometry: F3LineGeometry
 	classes: tuple[F3ClassInfo, ...]
 	records: tuple[F3SliceSplitRecord, ...]
+	split: F3VoxelSupervisionSplit
 
 
 @dataclass(frozen=True)
@@ -127,6 +128,17 @@ def inspect_f3_lithology_voxel_dataset(
 			'embedding patch_size/token_grid_shape/volume_shape_xyz are inconsistent; '
 			f'expected token grid {expected!r}'
 		)
+	classes = read_f3_lithology_class_info(config.class_info)
+	records = load_f3_slice_split_records(config.png_label_inventory)
+	split = build_f3_voxel_supervision_split(
+		records,
+		geometry=geometry,
+		label_volume=labels,
+		class_ids=tuple(item.class_id for item in classes),
+		valid_tokens=valid_tokens,
+		patch_size_xyz=patch,
+		ignore_z_border_samples=config.ignore_z_border_samples,
+	)
 	return F3LithologyVoxelDatasetInspection(
 		patch_size_xyz=patch,
 		token_grid_shape_xyz=token_shape,
@@ -135,8 +147,9 @@ def inspect_f3_lithology_voxel_dataset(
 		valid_tokens=valid_tokens,
 		metadata=cast('Mapping[str, object]', metadata),
 		geometry=geometry,
-		classes=read_f3_lithology_class_info(config.class_info),
-		records=load_f3_slice_split_records(config.png_label_inventory),
+		classes=classes,
+		records=records,
+		split=split,
 	)
 
 
@@ -149,15 +162,7 @@ def build_f3_lithology_voxel_dataset(
 		raise FileExistsError(
 			f'refusing to overwrite existing output: {config.output_dir}'
 		)
-	split = build_f3_voxel_supervision_split(
-		inspection.records,
-		geometry=inspection.geometry,
-		label_volume=inspection.label_volume,
-		class_ids=tuple(item.class_id for item in inspection.classes),
-		valid_tokens=inspection.valid_tokens,
-		patch_size_xyz=inspection.patch_size_xyz,
-		ignore_z_border_samples=config.ignore_z_border_samples,
-	)
+	split = inspection.split
 	config.output_dir.parent.mkdir(parents=True, exist_ok=True)
 	staging = Path(
 		tempfile.mkdtemp(

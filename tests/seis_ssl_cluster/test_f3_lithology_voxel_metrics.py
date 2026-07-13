@@ -79,6 +79,19 @@ def test_empty_chunk_is_ignored_but_empty_matrix_is_rejected() -> None:
 		lithology_metrics_from_confusion_matrix(matrix, _classes())
 
 
+@pytest.mark.parametrize('class_ids', [(0, 1.9), (0, '1'), (0, True)])
+def test_class_ids_reject_non_integer_values(class_ids: tuple[object, ...]) -> None:
+	matrix = np.zeros((2, 2), dtype=np.int64)
+	with pytest.raises(TypeError, match='class_ids must contain integers'):
+		update_confusion_matrix(
+			matrix,
+			np.asarray([0]),
+			np.asarray([0]),
+			valid_mask=np.ones(1, dtype=bool),
+			class_ids=class_ids,  # type: ignore[arg-type]
+		)
+
+
 def test_confusion_matrix_preserves_counts_larger_than_int32() -> None:
 	large = 2**31 + 17
 	matrix = np.asarray([[large, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.int64)

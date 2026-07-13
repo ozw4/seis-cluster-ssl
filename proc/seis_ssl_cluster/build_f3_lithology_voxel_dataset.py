@@ -75,6 +75,14 @@ def _print_summary(
 	print(f'reference_embedding.patch_size: {inspection.patch_size_xyz}')
 	print(f'reference_embedding.token_grid_shape: {inspection.token_grid_shape_xyz}')
 	print(f'reference_embedding.volume_shape_xyz: {inspection.volume_shape_xyz}')
+	print(
+		'voxel_dataset.train_voxel_count: '
+		f'{inspection.split.summary.final_train_voxels}'
+	)
+	print(
+		'voxel_dataset.validation_voxel_count: '
+		f'{inspection.split.summary.final_validation_voxels}'
+	)
 	print(f'voxel_dataset.output_dir: {config.output_dir}')
 	for name in (
 		'supervision_split_grid.npy',

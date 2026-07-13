@@ -153,5 +153,42 @@ def test_rejects_embedding_geometry_mismatch(tmp_path: Path) -> None:
 		inspect_f3_lithology_voxel_dataset(config)
 
 
+def test_dry_inspection_constructs_and_fully_validates_split(tmp_path: Path) -> None:
+	config = _fixture(tmp_path)
+	inspection = inspect_f3_lithology_voxel_dataset(config)
+	assert inspection.split.summary.final_train_voxels > 0
+	assert inspection.split.summary.final_validation_voxels > 0
+
+	labels = np.load(config.source_label_volume).astype(np.float32)
+	np.save(config.source_label_volume, labels)
+	with pytest.raises(TypeError, match='label_volume dtype must be integer'):
+		inspect_f3_lithology_voxel_dataset(config)
+
+
+def test_dry_inspection_rejects_invalid_physical_slice_index(tmp_path: Path) -> None:
+	config = _fixture(tmp_path)
+	rows = list(csv.DictReader(config.png_label_inventory.open()))
+	rows[0]['slice_index'] = '99'
+	with config.png_label_inventory.open(
+		'w', encoding='utf-8', newline=''
+	) as file_obj:
+		writer = csv.DictWriter(file_obj, fieldnames=rows[0])
+		writer.writeheader()
+		writer.writerows(rows)
+
+	with pytest.raises(ValueError, match='resolves outside F3 cube axis'):
+		inspect_f3_lithology_voxel_dataset(config)
+
+
+def test_dry_inspection_rejects_empty_supervision_split(tmp_path: Path) -> None:
+	config = _fixture(tmp_path)
+	valid_tokens = np.load(config.reference_valid_tokens)
+	valid_tokens[0, :, :] = False
+	np.save(config.reference_valid_tokens, valid_tokens)
+
+	with pytest.raises(ValueError, match='at least one train voxel'):
+		inspect_f3_lithology_voxel_dataset(config)
+
+
 def _write_json(path: Path, payload: object) -> None:
 	path.write_text(json.dumps(payload), encoding='utf-8')

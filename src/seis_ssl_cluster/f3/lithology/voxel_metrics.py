@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from numbers import Integral
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -93,7 +94,14 @@ def _class_indices(
 
 
 def _validated_class_ids(class_ids: Sequence[int]) -> tuple[int, ...]:
-	values = tuple(int(class_id) for class_id in class_ids)
+	raw_values = tuple(class_ids)
+	if any(
+		not isinstance(class_id, Integral) or isinstance(class_id, bool)
+		for class_id in raw_values
+	):
+		msg = 'class_ids must contain integers'
+		raise TypeError(msg)
+	values = tuple(int(class_id) for class_id in raw_values)
 	if not values:
 		msg = 'class_ids must contain at least one class'
 		raise ValueError(msg)
