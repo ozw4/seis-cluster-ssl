@@ -79,6 +79,18 @@ from seis_ssl_cluster.f3.lithology.visualization import (
 	read_f3_lithology_visualization_classes,
 	visualize_f3_lithology_predictions,
 )
+from seis_ssl_cluster.f3.lithology.voxel_geometry import (
+	project_token_grid_nearest,
+	valid_tokens_to_voxel_mask,
+)
+from seis_ssl_cluster.f3.lithology.voxel_split import (
+	TRAIN_VOXEL_SPLIT,
+	UNSUPERVISED_VOXEL_SPLIT,
+	VALIDATION_VOXEL_SPLIT,
+	F3VoxelSupervisionSplit,
+	F3VoxelSupervisionSplitSummary,
+	build_f3_voxel_supervision_split,
+)
 
 __all__ = [
 	'AMPLITUDE_STATISTICS',
@@ -119,13 +131,19 @@ __all__ = [
 	'F3SliceTokenization',
 	'F3TokenArrays',
 	'F3TorchMLPClassifier',
+	'F3VoxelSupervisionSplit',
+	'F3VoxelSupervisionSplitSummary',
 	'REQUIRED_LITHOLOGY_METRICS',
+	'TRAIN_VOXEL_SPLIT',
+	'UNSUPERVISED_VOXEL_SPLIT',
 	'VALIDATION_SLICE_METRIC_FIELDNAMES',
+	'VALIDATION_VOXEL_SPLIT',
 	'VALID_CLASS_WEIGHT',
 	'VALID_FEATURE_SCALING',
 	'VALID_PROBE_TYPES',
 	'build_f3_lithology_baseline_token_dataset',
 	'build_f3_lithology_token_dataset',
+	'build_f3_voxel_supervision_split',
 	'compute_lithology_metrics',
 	'f3_lithology_baseline_token_dataset_config_from_mapping',
 	'load_f3_embedding_artifacts',
@@ -133,6 +151,7 @@ __all__ = [
 	'load_f3_lithology_token_dataset_summary',
 	'load_token_dataset',
 	'predict_f3_lithology_tokens',
+	'project_token_grid_nearest',
 	'read_f3_lithology_visualization_classes',
 	'read_f3_lithology_class_info',
 	'read_f3_lithology_prediction_classes',
@@ -141,6 +160,7 @@ __all__ = [
 	'save_f3_lithology_token_dataset',
 	'tokenize_f3_lithology_slice',
 	'train_and_evaluate_f3_lithology_probe',
+	'valid_tokens_to_voxel_mask',
 	'validate_f3_lithology_token_dataset',
 	'visualize_f3_lithology_predictions',
 	'write_confusion_matrix_csv',
