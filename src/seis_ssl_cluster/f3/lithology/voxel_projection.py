@@ -52,6 +52,23 @@ class F3VoxelProjectionResult:
 
 
 @dataclass(frozen=True)
+class F3VoxelProjectionSourceInfo:
+	"""Validated identity and geometry of one token-prediction artifact."""
+
+	input_dir: Path
+	predictions: Path
+	probabilities: Path
+	valid_tokens: Path
+	metadata_json: Path
+	metadata: Mapping[str, object]
+	volume_shape_xyz: tuple[int, int, int]
+	patch_size_xyz: tuple[int, int, int]
+	token_grid_shape_xyz: tuple[int, int, int]
+	class_probability_order: tuple[int, ...]
+	model_tag: str
+
+
+@dataclass(frozen=True)
 class _TokenPredictionArtifact:
 	root: Path
 	metadata_path: Path
@@ -68,6 +85,26 @@ class _TokenPredictionArtifact:
 	class_probability_order: tuple[int, ...]
 	classes: tuple[Mapping[str, object], ...]
 	model_tag: str
+
+
+def inspect_f3_lithology_token_projection_source(
+	token_prediction_dir: str | Path,
+) -> F3VoxelProjectionSourceInfo:
+	"""Validate a token artifact and return its projection-relevant identity."""
+	source = _load_and_validate_token_artifact(Path(token_prediction_dir))
+	return F3VoxelProjectionSourceInfo(
+		input_dir=source.root,
+		predictions=source.predictions_path,
+		probabilities=source.probabilities_path,
+		valid_tokens=source.valid_tokens_path,
+		metadata_json=source.metadata_path,
+		metadata=source.metadata,
+		volume_shape_xyz=source.volume_shape_xyz,
+		patch_size_xyz=source.patch_size_xyz,
+		token_grid_shape_xyz=source.token_grid_shape_xyz,
+		class_probability_order=source.class_probability_order,
+		model_tag=source.model_tag,
+	)
 
 
 def project_f3_lithology_tokens_to_voxels(
@@ -514,5 +551,7 @@ def _reject_json_constant(value: str) -> None:
 
 __all__ = [
 	'F3VoxelProjectionResult',
+	'F3VoxelProjectionSourceInfo',
+	'inspect_f3_lithology_token_projection_source',
 	'project_f3_lithology_tokens_to_voxels',
 ]

@@ -25,6 +25,9 @@ from seis_ssl_cluster.config.f3_lithology_token_dataset import (
 from seis_ssl_cluster.config.f3_lithology_visualization import (
 	f3_lithology_visualization_config_from_mapping,
 )
+from seis_ssl_cluster.config.f3_lithology_voxel_projection import (
+	f3_lithology_voxel_projection_config_from_mapping,
+)
 from seis_ssl_cluster.f3.prepare_volume import f3_prepare_volume_config_from_mapping
 
 __all__ = [
@@ -37,5 +40,6 @@ __all__ = [
 	'f3_lithology_split_inventory_config_from_mapping',
 	'f3_lithology_token_dataset_config_from_mapping',
 	'f3_lithology_visualization_config_from_mapping',
+	'f3_lithology_voxel_projection_config_from_mapping',
 	'f3_prepare_volume_config_from_mapping',
 ]
