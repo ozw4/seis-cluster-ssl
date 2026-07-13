@@ -152,6 +152,24 @@ def test_rejects_metadata_geometry_mismatch(tmp_path: Path) -> None:
 		project_f3_lithology_tokens_to_voxels(source, tmp_path / 'voxels')
 
 
+def test_rejects_token_metadata_output_mismatch_before_writing(
+	tmp_path: Path,
+) -> None:
+	source = _write_token_artifact(tmp_path / 'tokens')
+	metadata_path = source / 'prediction_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['outputs']['token_predictions'] = str(source / 'other.npy')
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+	output = tmp_path / 'voxels'
+
+	with pytest.raises(
+		ValueError, match=r'outputs\.token_predictions does not identify'
+	):
+		project_f3_lithology_tokens_to_voxels(source, output)
+
+	assert not output.exists()
+
+
 def test_rejects_output_dir_equal_to_source_without_modifying_source(
 	tmp_path: Path,
 ) -> None:
@@ -238,6 +256,12 @@ def _write_token_artifact(root: Path) -> Path:
 			'embedding_dim': 4,
 		},
 		'geometry': {'shape_xyz': list(VOLUME_SHAPE)},
+		'outputs': {
+			'token_predictions': str(root / 'f3_token_predictions.npy'),
+			'probability_volume': str(root / 'f3_token_probabilities.npy'),
+			'valid_token_grid': str(root / 'f3_valid_token_grid.npy'),
+			'metadata_json': str(root / 'prediction_metadata.json'),
+		},
 		'summary': {
 			'token_grid_shape_xyz': list(TOKEN_SHAPE),
 			'probability_grid_shape': [*TOKEN_SHAPE, 3],

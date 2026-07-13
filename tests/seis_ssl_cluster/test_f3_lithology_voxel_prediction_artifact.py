@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+from seis_ssl_cluster.f3.lithology import voxel_prediction_artifact as artifact_module
+
 if TYPE_CHECKING:
 	from pathlib import Path
 
@@ -26,8 +28,10 @@ SHAPE = (2, 2, 2)
 CLASS_IDS = (2, 5)
 
 
-def _metadata(summary: dict[str, object]) -> dict[str, object]:
-	return {
+def _metadata(
+	summary: dict[str, object], *, include_probabilities: bool = False
+) -> dict[str, object]:
+	metadata = {
 		'artifact_type': 'f3_lithology_voxel_predictions',
 		'schema_version': 1,
 		'prediction_kind': 'token_projection_nearest',
@@ -50,6 +54,9 @@ def _metadata(summary: dict[str, object]) -> dict[str, object]:
 		},
 		'summary': summary,
 	}
+	if include_probabilities:
+		metadata['outputs']['probabilities'] = 'f3_voxel_probabilities.npy'
+	return metadata
 
 
 def _write_artifact(
@@ -84,7 +91,10 @@ def _write_artifact(
 		class_probability_order=CLASS_IDS,
 		chunk_voxels=3,
 	)
-	write_f3_voxel_prediction_metadata(paths.metadata, _metadata(summary))
+	write_f3_voxel_prediction_metadata(
+		paths.metadata,
+		_metadata(summary, include_probabilities=include_probabilities),
+	)
 
 
 def _valid_arrays(*, probabilities: bool = False) -> F3VoxelPredictionArrays:
@@ -192,6 +202,52 @@ def test_class_order_mismatch_is_rejected(tmp_path: Path) -> None:
 		validate_f3_voxel_prediction_artifact(output_dir)
 
 
+@pytest.mark.parametrize(
+	('outputs', 'error', 'match'),
+	[
+		({}, TypeError, 'outputs.predictions'),
+		(
+			{
+				'predictions': 'other.npy',
+				'confidence': 'f3_voxel_confidence.npy',
+				'valid_mask': 'f3_valid_voxel_mask.npy',
+			},
+			ValueError,
+			'outputs.predictions does not identify',
+		),
+	],
+)
+def test_metadata_outputs_are_required_and_bound_to_artifact_paths(
+	tmp_path: Path,
+	outputs: dict[str, str],
+	error: type[Exception],
+	match: str,
+) -> None:
+	output_dir = tmp_path / 'predictions'
+	_write_artifact(output_dir)
+	paths = f3_voxel_prediction_artifact_paths(output_dir)
+	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata['outputs'] = outputs
+	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+
+	with pytest.raises(error, match=match):
+		validate_f3_voxel_prediction_artifact(output_dir)
+
+
+def test_metadata_declared_probability_file_must_exist(tmp_path: Path) -> None:
+	output_dir = tmp_path / 'predictions'
+	_write_artifact(output_dir)
+	paths = f3_voxel_prediction_artifact_paths(output_dir)
+	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	outputs = dict(metadata['outputs'])  # type: ignore[arg-type]
+	outputs['probabilities'] = 'f3_voxel_probabilities.npy'
+	metadata['outputs'] = outputs
+	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+
+	with pytest.raises(FileNotFoundError, match='metadata declares'):
+		validate_f3_voxel_prediction_artifact(output_dir)
+
+
 @pytest.mark.parametrize('metadata_only', [False, True])
 def test_partial_artifact_is_rejected(
 	tmp_path: Path, metadata_only
@@ -230,6 +286,31 @@ def test_staged_commit_and_overwrite_safety(tmp_path: Path) -> None:
 		'valid_voxel_count': 4,
 		'invalid_voxel_count': 4,
 		'class_prediction_counts': {'2': 0, '5': 4},
+	}
+
+
+def test_atomic_overwrite_rejects_unsupported_platform_without_data_loss(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	target = tmp_path / 'run'
+	staging = create_f3_voxel_prediction_staging_paths(target)
+	_write_artifact(staging.output_dir)
+	commit_f3_voxel_prediction_artifact(staging, target)
+	replacement = create_f3_voxel_prediction_staging_paths(target, overwrite=True)
+	_write_artifact(replacement.output_dir, first_class=5)
+
+	def unsupported_libc(*_args: object, **_kwargs: object) -> object:
+		return object()
+
+	monkeypatch.setattr(artifact_module.ctypes, 'CDLL', unsupported_libc)
+	with pytest.raises(NotImplementedError, match=r'requires renameat2'):
+		commit_f3_voxel_prediction_artifact(replacement, target, overwrite=True)
+
+	assert replacement.output_dir.is_dir()
+	assert validate_f3_voxel_prediction_artifact(target).metadata['summary'] == {
+		'valid_voxel_count': 4,
+		'invalid_voxel_count': 4,
+		'class_prediction_counts': {'2': 4, '5': 0},
 	}
 
 

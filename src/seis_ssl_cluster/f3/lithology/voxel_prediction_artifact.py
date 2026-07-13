@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ctypes
+import errno
 import json
 import os
 import shutil
@@ -288,6 +289,19 @@ def validate_f3_voxel_prediction_artifact(
 ) -> F3VoxelPredictionArtifact:
 	"""Load and validate one complete artifact, rejecting partial output."""
 	paths = _coerce_paths(paths_or_dir)
+	return _validate_f3_voxel_prediction_artifact(
+		paths,
+		metadata_paths=paths,
+		mmap_mode=mmap_mode,
+	)
+
+
+def _validate_f3_voxel_prediction_artifact(
+	paths: F3VoxelPredictionArtifactPaths,
+	*,
+	metadata_paths: F3VoxelPredictionArtifactPaths,
+	mmap_mode: str | None,
+) -> F3VoxelPredictionArtifact:
 	required = (paths.predictions, paths.confidence, paths.valid_mask, paths.metadata)
 	missing = [path.name for path in required if not path.is_file()]
 	if missing:
@@ -296,6 +310,11 @@ def validate_f3_voxel_prediction_artifact(
 		)
 	metadata = read_f3_voxel_prediction_metadata(paths.metadata)
 	shape, class_ids = _validate_metadata(metadata)
+	_validate_metadata_output_binding(
+		metadata,
+		paths=metadata_paths,
+		probabilities_present=paths.probabilities.is_file(),
+	)
 	arrays = F3VoxelPredictionArrays(
 		predictions=np.load(paths.predictions, mmap_mode=mmap_mode, allow_pickle=False),
 		confidence=np.load(paths.confidence, mmap_mode=mmap_mode, allow_pickle=False),
@@ -333,7 +352,11 @@ def commit_f3_voxel_prediction_artifact(
 		raise ValueError('staging and output directories must be different')
 	if staging.output_dir.parent.resolve() != target.parent.resolve():
 		raise ValueError('staging and output directories must have the same parent')
-	validate_f3_voxel_prediction_artifact(staging)
+	_validate_f3_voxel_prediction_artifact(
+		staging,
+		metadata_paths=f3_voxel_prediction_artifact_paths(target),
+		mmap_mode='r',
+	)
 	if target.exists() and not overwrite:
 		raise FileExistsError(f'refusing to overwrite existing output: {target}')
 	if not target.exists():
@@ -347,7 +370,12 @@ def commit_f3_voxel_prediction_artifact(
 def _exchange_directories(source: Path, target: Path) -> None:
 	"""Atomically exchange two same-filesystem directory entries."""
 	libc = ctypes.CDLL(None, use_errno=True)
-	renameat2 = libc.renameat2
+	try:
+		renameat2 = libc.renameat2
+	except AttributeError as error:
+		raise NotImplementedError(
+			'atomic directory overwrite requires renameat2(RENAME_EXCHANGE)'
+		) from error
 	renameat2.argtypes = (
 		ctypes.c_int,
 		ctypes.c_char_p,
@@ -365,6 +393,15 @@ def _exchange_directories(source: Path, target: Path) -> None:
 	)
 	if result != 0:
 		error_number = ctypes.get_errno()
+		if error_number in {
+			errno.EINVAL,
+			errno.ENOSYS,
+			errno.EOPNOTSUPP,
+		}:
+			raise NotImplementedError(
+				'atomic directory overwrite is not supported by this platform '
+				'or filesystem'
+			) from OSError(error_number, os.strerror(error_number))
 		raise OSError(
 			error_number,
 			os.strerror(error_number),
@@ -516,6 +553,67 @@ def _validate_metadata(  # noqa: C901, PLR0912
 			f'classes={metadata_class_ids!r}, order={class_ids!r}'
 		)
 	return shape, class_ids
+
+
+def _validate_metadata_output_binding(
+	metadata: Mapping[str, object],
+	*,
+	paths: F3VoxelPredictionArtifactPaths,
+	probabilities_present: bool,
+) -> None:
+	outputs = cast('Mapping[str, object]', metadata['outputs'])
+	expected = {
+		'predictions': paths.predictions,
+		'confidence': paths.confidence,
+		'valid_mask': paths.valid_mask,
+	}
+	for key, expected_path in expected.items():
+		_validate_metadata_output_path(
+			outputs,
+			key=key,
+			expected_path=expected_path,
+			output_dir=paths.output_dir,
+		)
+	probabilities_declared = 'probabilities' in outputs
+	if probabilities_declared and not probabilities_present:
+		raise FileNotFoundError(
+			'incomplete voxel prediction artifact; metadata declares '
+			f'{PROBABILITIES_NAME}, but the file is missing'
+		)
+	if probabilities_present and not probabilities_declared:
+		raise ValueError(
+			'incomplete voxel prediction metadata; outputs.probabilities is '
+			f'required when {PROBABILITIES_NAME} exists'
+		)
+	if probabilities_declared:
+		_validate_metadata_output_path(
+			outputs,
+			key='probabilities',
+			expected_path=paths.probabilities,
+			output_dir=paths.output_dir,
+		)
+
+
+def _validate_metadata_output_path(
+	outputs: Mapping[str, object],
+	*,
+	key: str,
+	expected_path: Path,
+	output_dir: Path,
+) -> None:
+	value = outputs.get(key)
+	if not isinstance(value, str) or not value:
+		raise TypeError(
+			f'voxel prediction metadata outputs.{key} must be a non-empty path string'
+		)
+	declared_path = Path(value)
+	if not declared_path.is_absolute():
+		declared_path = output_dir / declared_path
+	if declared_path.resolve(strict=False) != expected_path.resolve(strict=False):
+		raise ValueError(
+			f'voxel prediction metadata outputs.{key} does not identify '
+			f'{expected_path}'
+		)
 
 
 def _metadata_class_id(value: object) -> int:

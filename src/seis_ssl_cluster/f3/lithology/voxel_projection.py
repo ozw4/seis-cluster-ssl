@@ -213,6 +213,7 @@ def _load_and_validate_token_artifact(root: Path) -> _TokenPredictionArtifact:
 			"token prediction metadata artifact_type must be "
 			"'f3_lithology_token_predictions'"
 		)
+	_validate_token_metadata_output_binding(metadata, paths=paths)
 
 	geometry = _mapping(metadata.get('geometry'), 'geometry')
 	embedding = _mapping(metadata.get('embedding'), 'embedding')
@@ -429,14 +430,15 @@ def _projection_metadata(
 	write_probabilities: bool,
 	summary: Mapping[str, object],
 ) -> dict[str, object]:
+	resolved_output_dir = output_dir.resolve(strict=False)
 	output_files = {
-		'predictions': str(output_dir / 'f3_voxel_predictions.npy'),
-		'confidence': str(output_dir / 'f3_voxel_confidence.npy'),
-		'valid_mask': str(output_dir / 'f3_valid_voxel_mask.npy'),
+		'predictions': str(resolved_output_dir / 'f3_voxel_predictions.npy'),
+		'confidence': str(resolved_output_dir / 'f3_voxel_confidence.npy'),
+		'valid_mask': str(resolved_output_dir / 'f3_valid_voxel_mask.npy'),
 	}
 	if write_probabilities:
 		output_files['probabilities'] = str(
-			output_dir / 'f3_voxel_probabilities.npy'
+			resolved_output_dir / 'f3_voxel_probabilities.npy'
 		)
 	source_files = {
 		'token_predictions': _identity(source.predictions_path),
@@ -484,6 +486,29 @@ def _mapping(value: object, label: str) -> Mapping[str, object]:
 	if not isinstance(value, Mapping):
 		raise TypeError(f'token prediction metadata {label} must be a mapping')
 	return cast('Mapping[str, object]', value)
+
+
+def _validate_token_metadata_output_binding(
+	metadata: Mapping[str, object], *, paths: Mapping[str, Path]
+) -> None:
+	outputs = _mapping(metadata.get('outputs'), 'outputs')
+	for metadata_key, path_key in (
+		('token_predictions', 'predictions'),
+		('probability_volume', 'probabilities'),
+		('valid_token_grid', 'valid_tokens'),
+		('metadata_json', 'metadata'),
+	):
+		value = outputs.get(metadata_key)
+		if not isinstance(value, str) or not value:
+			raise TypeError(
+				f'token prediction metadata outputs.{metadata_key} '
+				'must be a non-empty path string'
+			)
+		if Path(value).resolve(strict=False) != paths[path_key].resolve(strict=False):
+			raise ValueError(
+				f'token prediction metadata outputs.{metadata_key} does not '
+				f'identify {paths[path_key]}'
+			)
 
 
 def _positive_triplet(value: object, label: str) -> tuple[int, int, int]:
