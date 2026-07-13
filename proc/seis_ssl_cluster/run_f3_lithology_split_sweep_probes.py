@@ -33,6 +33,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_string_item,
 	_validate_allowed_keys,
 )
+from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3 import (
 	DEFAULT_EVALUATION_METRICS,
 	F3ClassInfo,
@@ -540,12 +541,23 @@ def _probe_run_manifest_row(
 	train_token_count: int | None = None,
 	validation_token_count: int | None = None,
 ) -> dict[str, object]:
+	probe_joblib = probe_config.outputs.probe_joblib
+	scaler_joblib = probe_config.outputs.scaler_joblib
 	return {
 		'split_id': row['split_id'],
 		'model_role': row['model_role'],
 		'model_tag': row['model_tag'],
 		'token_dataset_root': row['token_dataset_root'],
 		'probe_output_dir': str(probe_config.outputs.output_dir),
+		'probe_spec': probe_config.probe.spec,
+		'probe_joblib': {
+			'path': str(probe_joblib),
+			'sha256': file_sha256(probe_joblib),
+		},
+		'scaler_joblib': {
+			'path': str(scaler_joblib),
+			'sha256': file_sha256(scaler_joblib),
+		},
 		'metrics_json': str(probe_config.outputs.metrics_json),
 		'train_token_count': (
 			int(row['train_token_count'])

@@ -75,6 +75,13 @@ def test_runner_trains_all_split_model_rows_and_writes_fixed_random_state(
 		)
 		assert resolved['probe']['random_state'] == 42
 		assert row['paired_identity_hash']
+		assert row['probe_spec'] == 'linear_balanced_v1'
+		for key, name in (
+			('probe_joblib', 'probe.joblib'),
+			('scaler_joblib', 'scaler.joblib'),
+		):
+			assert row[key]['path'] == str(metrics_json.parent / name)
+			assert row[key]['sha256']
 	assert (
 		output_root
 		/ 'probes/split=split_000/model=baseline_model'

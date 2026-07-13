@@ -1,5 +1,8 @@
 # F3 original-split V0 benchmark
 
+The complete M3-V workflow, identity/failure policy, and release checks are in
+[`docs/f3_voxel_lithology_benchmark.md`](../../../../docs/f3_voxel_lithology_benchmark.md).
+
 V0 is the fixed token-probe baseline: the existing `linear_balanced_v1` token
 predictions are expanded to voxels by nearest patch repetition. It does not train
 a voxel decoder. All three encoders use `overlap_x16` and the one shared
@@ -37,6 +40,14 @@ Outputs live below each model's
 root. Token predictions are under `predictions/linear_balanced_v1`; V0 voxel
 predictions, evaluations, and reports use `token_projection_nearest_v1` in
 their respective directories.
+
+Every projection emits `f3_voxel_predictions.npy`,
+`f3_voxel_confidence.npy`, `f3_valid_voxel_mask.npy`, and
+`prediction_metadata.json`; full probability volumes are intentionally disabled.
+Evaluation is over each unique voxel marked validation by the common split grid,
+after requiring complete prediction coverage. Per-slice and per-trace CSVs are
+diagnostics and do not make their voxels independent observations. Classes 3
+and 5 and boundary metrics remain explicitly monitored.
 
 The stages are idempotent by refusal: an existing output is not overwritten.
 To resume, retain a complete stage and restart at the first missing stage. For
