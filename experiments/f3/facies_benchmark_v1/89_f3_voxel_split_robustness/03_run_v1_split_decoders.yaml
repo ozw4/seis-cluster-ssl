@@ -1,0 +1,19 @@
+suite:
+  voxel_dataset_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1/voxel_split_dataset_manifest.json
+  output_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1
+paths: {artifact_root: /workspace/artifacts/seis_ssl_cluster, f3_root: /home/dcuser/data/public_data/field/F3}
+dataset: {name: f3_facies_benchmark, version: facies_benchmark_v1}
+models:
+  baseline: {model_tag: strat_hmm_pretext_m1_k6_topblock1_distill, embeddings_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16}
+  candidate: {model_tag: strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill, embeddings_dir: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16}
+labels:
+  source_label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  source_label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
+  class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+  segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+decoder: {spec: frozen_embedding_decoder_v1, embedding_dim: 384, class_count: 6, hidden_channels: [128, 64, 32], upsample_factors: [[2, 2, 2], [2, 2, 2], [2, 2, 2]]}
+tiles: {core_size_tokens: [8, 8, 8], context_halo_tokens: [1, 1, 1]}
+train: {epochs: 50, batch_size: 1, learning_rate: 0.001, weight_decay: 0.0001, class_weight: balanced, seed: 42, num_workers: 0, amp: true, gradient_clip_norm: 1.0}
+inference: {write_probabilities: false}
+evaluation: {monitored_class_ids: [3, 5], boundary_tolerances: [2, 4], boundary_region_radii: [2, 4], chunk_size_x: 8}
+outputs: {overwrite: false}
