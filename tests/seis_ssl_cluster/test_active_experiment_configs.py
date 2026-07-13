@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 
@@ -41,6 +42,24 @@ from seis_ssl_cluster.config.f3_lithology_robustness import (
 	f3_lithology_split_inventory_config_from_mapping,
 	f3_lithology_split_summary_config_from_mapping,
 	f3_lithology_split_sweep_dataset_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_voxel_dataset import (
+	f3_lithology_voxel_dataset_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
+	f3_lithology_voxel_decoder_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_voxel_evaluation import (
+	f3_lithology_voxel_evaluation_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_voxel_inference import (
+	f3_lithology_voxel_inference_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_voxel_projection import (
+	f3_lithology_voxel_projection_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_voxel_report import (
+	f3_lithology_voxel_report_config_from_mapping,
 )
 from seis_ssl_cluster.config.schema import (
 	STAGE_F3_INSPECT_FILES,
@@ -227,6 +246,39 @@ F3_LITHOLOGY_VISUALIZATION_CONFIGS = sorted(
 F3_LITHOLOGY_REPORT_CONFIGS = sorted(
 	F3_LITHOLOGY_ROOT.rglob('06_build_lithology_report.yaml'),
 )
+F3_VOXEL_V0_ROOT = F3_ROOT / '87_f3_voxel_benchmark_v0'
+F3_VOXEL_V1_ROOT = F3_ROOT / '88_f3_voxel_decoder_v1'
+F3_VOXEL_DATASET_CONFIGS = [F3_VOXEL_V0_ROOT / '01_build_voxel_supervision.yaml']
+F3_VOXEL_TOKEN_PREDICTION_CONFIGS = [
+	F3_VOXEL_V0_ROOT / name
+	for name in (
+		'02_predict_mae_tokens.yaml',
+		'06_predict_m1_tokens.yaml',
+		'10_predict_m2a_tokens.yaml',
+	)
+]
+F3_VOXEL_PROJECTION_CONFIGS = [
+	F3_VOXEL_V0_ROOT / name
+	for name in (
+		'03_project_mae_nearest.yaml',
+		'07_project_m1_nearest.yaml',
+		'11_project_m2a_nearest.yaml',
+	)
+]
+F3_VOXEL_DECODER_CONFIGS = sorted(F3_VOXEL_V1_ROOT.glob('*_train_*.yaml'))
+F3_VOXEL_INFERENCE_CONFIGS = sorted(F3_VOXEL_V1_ROOT.glob('*_predict_*_voxels.yaml'))
+F3_VOXEL_EVALUATION_CONFIGS = sorted(
+	[
+		*F3_VOXEL_V0_ROOT.glob('*_evaluate_*.yaml'),
+		*F3_VOXEL_V1_ROOT.glob('*_evaluate_*.yaml'),
+	]
+)
+F3_VOXEL_REPORT_CONFIGS = sorted(
+	[
+		*F3_VOXEL_V0_ROOT.glob('*_report_*.yaml'),
+		*F3_VOXEL_V1_ROOT.glob('*_report_*.yaml'),
+	]
+)
 F3_BASELINE_ROOT = F3_ROOT / '50_lithology_baselines'
 F3_BASELINE_TOKEN_CONFIGS = sorted(
 	F3_BASELINE_ROOT.rglob('01_build_baseline_token_dataset.yaml'),
@@ -293,6 +345,13 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	('f3 lithology prediction', F3_LITHOLOGY_PREDICTION_CONFIGS),
 	('f3 lithology visualization', F3_LITHOLOGY_VISUALIZATION_CONFIGS),
 	('f3 lithology report', F3_LITHOLOGY_REPORT_CONFIGS),
+	('f3 voxel dataset', F3_VOXEL_DATASET_CONFIGS),
+	('f3 voxel token prediction', F3_VOXEL_TOKEN_PREDICTION_CONFIGS),
+	('f3 voxel projection', F3_VOXEL_PROJECTION_CONFIGS),
+	('f3 voxel decoder', F3_VOXEL_DECODER_CONFIGS),
+	('f3 voxel inference', F3_VOXEL_INFERENCE_CONFIGS),
+	('f3 voxel evaluation', F3_VOXEL_EVALUATION_CONFIGS),
+	('f3 voxel report', F3_VOXEL_REPORT_CONFIGS),
 	('f3 baseline token dataset', F3_BASELINE_TOKEN_CONFIGS),
 	('f3 random encoder', F3_RANDOM_ENCODER_CONFIGS),
 	('f3 random encoder embedding', F3_RANDOM_ENCODER_EMBEDDING_CONFIGS),
@@ -614,6 +673,105 @@ def test_active_f3_lithology_report_configs_resolve(config_path: Path) -> None:
 	f3_lithology_publish_config_from_mapping(raw.get('publish'))
 
 
+@pytest.mark.parametrize('config_path', F3_VOXEL_DATASET_CONFIGS)
+def test_active_f3_voxel_dataset_configs_resolve(config_path: Path) -> None:
+	f3_lithology_voxel_dataset_config_from_mapping(load_config(config_path))
+
+
+@pytest.mark.parametrize('config_path', F3_VOXEL_TOKEN_PREDICTION_CONFIGS)
+def test_active_f3_voxel_token_prediction_configs_resolve(
+	config_path: Path,
+) -> None:
+	f3_lithology_prediction_config_from_mapping(
+		load_config(config_path), load_classes=False
+	)
+
+
+@pytest.mark.parametrize('config_path', F3_VOXEL_PROJECTION_CONFIGS)
+def test_active_f3_voxel_projection_configs_resolve(
+	config_path: Path, tmp_path: Path
+) -> None:
+	raw = _projection_config_with_synthetic_source(config_path, tmp_path)
+	f3_lithology_voxel_projection_config_from_mapping(raw)
+
+
+@pytest.mark.parametrize('config_path', F3_VOXEL_DECODER_CONFIGS)
+def test_active_f3_voxel_decoder_configs_resolve(config_path: Path) -> None:
+	f3_lithology_voxel_decoder_config_from_mapping(load_config(config_path))
+
+
+@pytest.mark.parametrize('config_path', F3_VOXEL_INFERENCE_CONFIGS)
+def test_active_f3_voxel_inference_configs_resolve(config_path: Path) -> None:
+	f3_lithology_voxel_inference_config_from_mapping(load_config(config_path))
+
+
+@pytest.mark.parametrize('config_path', F3_VOXEL_EVALUATION_CONFIGS)
+def test_active_f3_voxel_evaluation_configs_resolve(config_path: Path) -> None:
+	f3_lithology_voxel_evaluation_config_from_mapping(load_config(config_path))
+
+
+@pytest.mark.parametrize('config_path', F3_VOXEL_REPORT_CONFIGS)
+def test_active_f3_voxel_report_configs_resolve(config_path: Path) -> None:
+	f3_lithology_voxel_report_config_from_mapping(load_config(config_path))
+
+
+def test_active_f3_voxel_paired_experiment_contract() -> None:
+	model_tags = (
+		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		'strat_hmm_pretext_m1_k6_topblock1_distill',
+		'strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill',
+	)
+	token_configs = [load_config(path) for path in F3_VOXEL_TOKEN_PREDICTION_CONFIGS]
+	assert tuple(config['model']['tag'] for config in token_configs) == model_tags
+	assert all(config['model']['freeze_encoder'] is True for config in token_configs)
+	assert all(
+		config['embeddings']['spec'] == 'overlap_x16' for config in token_configs
+	)
+	assert all(
+		config['probe']['spec'] == 'linear_balanced_v1' for config in token_configs
+	)
+	assert all(
+		Path(config['probe']['probe_joblib']).parent.name == 'linear_balanced_v1'
+		for config in token_configs
+	)
+	assert len(
+		{config['predictions']['output_dir'] for config in token_configs}
+	) == len(token_configs)
+
+	voxel_dataset = f3_lithology_voxel_dataset_config_from_mapping(
+		load_config(F3_VOXEL_DATASET_CONFIGS[0])
+	)
+	full_configs = [
+		f3_lithology_voxel_decoder_config_from_mapping(load_config(path))
+		for path in F3_VOXEL_DECODER_CONFIGS
+		if path.name.endswith('_full.yaml')
+	]
+	assert tuple(config.model['tag'] for config in full_configs) == model_tags
+	assert all(config.model['freeze_encoder'] is True for config in full_configs)
+	assert all(config.embeddings['spec'] == 'overlap_x16' for config in full_configs)
+	assert len({config.voxel_dataset_input_dir for config in full_configs}) == 1
+	assert full_configs[0].voxel_dataset_input_dir == voxel_dataset.output_dir
+	assert len({config.decoder for config in full_configs}) == 1
+	assert len({config.tiles for config in full_configs}) == 1
+	assert len({config.train for config in full_configs}) == 1
+	assert len({config.output_dir for config in full_configs}) == 3
+	assert all(config.train.seed == 42 for config in full_configs)
+
+	inference_configs = [
+		f3_lithology_voxel_inference_config_from_mapping(load_config(path))
+		for path in F3_VOXEL_INFERENCE_CONFIGS
+	]
+	assert tuple(config.model['tag'] for config in inference_configs) == model_tags
+	assert all(config.checkpoint.name == 'best.pt' for config in inference_configs)
+	assert all(
+		'mae_latest.pt' not in str(config.checkpoint)
+		for config in inference_configs
+	)
+	assert len({config.output_dir for config in inference_configs}) == 3
+	assert model_tags[1] in str(inference_configs[1].output_dir)
+	assert model_tags[2] in str(inference_configs[2].output_dir)
+
+
 @pytest.mark.parametrize('config_path', F3_BASELINE_COMPARISON_CONFIGS)
 def test_active_f3_baseline_comparison_configs_resolve(
 	config_path: Path,
@@ -664,6 +822,74 @@ def test_active_nopims_overlap_x16_paths_match_artifact_paths_contract() -> None
 		Path(visualization['visualization']['output_dir'])
 		== paths.cluster_visualization(key)
 	)
+
+
+def _projection_config_with_synthetic_source(
+	config_path: Path, tmp_path: Path
+) -> dict[str, object]:
+	raw = load_config(config_path)
+	artifact_root = tmp_path / 'artifacts'
+	source = artifact_root / 'token_predictions'
+	source.mkdir(parents=True)
+	class_info = artifact_root / 'class_info.json'
+	class_info.write_text(
+		json.dumps({'1': {'name': 'one', 'color': [1, 2, 3]}}),
+		encoding='utf-8',
+	)
+	predictions = source / 'f3_token_predictions.npy'
+	probabilities = source / 'f3_token_probabilities.npy'
+	valid_tokens = source / 'f3_valid_token_grid.npy'
+	metadata_json = source / 'prediction_metadata.json'
+	np.save(predictions, np.ones((1, 1, 1), dtype=np.int16))
+	np.save(probabilities, np.ones((1, 1, 1, 1), dtype=np.float32))
+	np.save(valid_tokens, np.ones((1, 1, 1), dtype=np.bool_))
+	metadata_json.write_text(
+		json.dumps(
+			{
+				'artifact_type': 'f3_lithology_token_predictions',
+				'dataset': dict(raw['dataset']),
+				'model': {'tag': raw['model']['tag'], 'freeze_encoder': True},
+				'embeddings': {'spec': 'overlap_x16'},
+				'probe': {'spec': 'linear_balanced_v1'},
+				'classes': [{'class_id': 1, 'class_name': 'one'}],
+				'class_probability_order': [1],
+				'invalid_prediction_class_id': -1,
+				'invalid_probability_value': 'nan',
+				'embedding': {
+					'patch_size_xyz': [8, 8, 8],
+					'token_grid_shape_xyz': [1, 1, 1],
+				},
+				'geometry': {'shape_xyz': [8, 8, 8]},
+				'outputs': {
+					'token_predictions': str(predictions),
+					'probability_volume': str(probabilities),
+					'valid_token_grid': str(valid_tokens),
+					'metadata_json': str(metadata_json),
+				},
+				'summary': {
+					'token_grid_shape_xyz': [1, 1, 1],
+					'probability_grid_shape': [1, 1, 1, 1],
+					'valid_token_count': 1,
+					'invalid_token_count': 0,
+				},
+			}
+		),
+		encoding='utf-8',
+	)
+	raw['paths'] = {
+		'artifact_root': str(artifact_root),
+		'f3_root': str(tmp_path / 'f3'),
+	}
+	raw['labels']['class_info'] = str(class_info)
+	raw['token_predictions'] = {
+		'input_dir': str(source),
+		'predictions': str(predictions),
+		'probabilities': str(probabilities),
+		'valid_tokens': str(valid_tokens),
+		'metadata_json': str(metadata_json),
+	}
+	raw['voxel_projection']['output_dir'] = str(artifact_root / 'voxel_predictions')
+	return raw
 
 
 def _config_with_existing_strat_hmm_pretext_inputs(
