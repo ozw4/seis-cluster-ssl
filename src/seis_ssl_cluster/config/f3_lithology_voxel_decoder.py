@@ -196,6 +196,10 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 		_validate_artifact_path_not_f3(
 			path, label, artifact_root=artifact_root, f3_root=f3_root
 		)
+	_validate_no_output_overlap(
+		output_dir,
+		sources=(embeddings_dir, voxel_dir),
+	)
 
 	spec = _required_str(decoder, 'spec', prefix='decoder')
 	if spec != 'frozen_embedding_decoder_v1':
@@ -292,6 +296,20 @@ def _finite_positive_float(value: object, label: str) -> float:
 	if not math.isfinite(result):
 		raise ValueError(f'{label} must be finite; got {value!r}')
 	return result
+
+
+def _validate_no_output_overlap(
+	output_dir: Path, *, sources: tuple[Path, ...]
+) -> None:
+	output = output_dir.resolve(strict=False)
+	for source_path in sources:
+		source = source_path.resolve(strict=False)
+		if (
+			output == source
+			or output.is_relative_to(source)
+			or source.is_relative_to(output)
+		):
+			raise ValueError('outputs.output_dir must not overlap a training source')
 
 
 def _finite_nonnegative_float(value: object, label: str) -> float:

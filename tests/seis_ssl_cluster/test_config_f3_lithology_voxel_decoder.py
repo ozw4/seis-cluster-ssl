@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -59,6 +60,22 @@ def test_voxel_decoder_config_requires_frozen_encoder(tmp_path) -> None:
 	raw = deepcopy(_config(tmp_path))
 	raw['model']['freeze_encoder'] = False
 	with pytest.raises(ValueError, match='freeze_encoder'):
+		f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+
+@pytest.mark.parametrize(
+	'source_key',
+	['embeddings', 'voxel_dataset'],
+)
+def test_voxel_decoder_config_rejects_output_inside_source_directory(
+	tmp_path, source_key: str
+) -> None:
+	raw = deepcopy(_config(tmp_path))
+	raw['outputs']['output_dir'] = str(
+		Path(raw[source_key]['input_dir']) / 'decoder-output'
+	)
+
+	with pytest.raises(ValueError, match='must not overlap a training source'):
 		f3_lithology_voxel_decoder_config_from_mapping(raw)
 
 

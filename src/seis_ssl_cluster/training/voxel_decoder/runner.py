@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import random
 import shutil
 import subprocess
@@ -37,6 +38,7 @@ from seis_ssl_cluster.f3.lithology.voxel_tiles import (
 from seis_ssl_cluster.models.voxel_decoder import (
 	VoxelDecoder3D,
 	validate_context_halo_tokens,
+	validate_voxel_decoder_architecture,
 )
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	best_state_is_improved,
@@ -150,6 +152,11 @@ def inspect_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912
 	geometry = _metadata_geometry(embedding_payload)
 	if config.decoder.embedding_dim != _embedding_dim(embedding_payload):
 		raise ValueError('decoder.embedding_dim does not match embedding metadata')
+	validate_voxel_decoder_architecture(
+		hidden_channels=config.decoder.hidden_channels,
+		upsample_factors=config.decoder.upsample_factors,
+		patch_size_xyz=geometry[0],
+	)
 	validate_context_halo_tokens(
 		context_halo_tokens=config.tiles.context_halo_tokens,
 		core_size_tokens=config.tiles.core_size_tokens,
@@ -199,6 +206,7 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 	resume_path = None if resume is None else Path(resume)
 	_validate_output_collision(output_dir, resume_path)
 	run_device = _resolve_device(device)
+	_configure_deterministic_execution()
 	_seed_everything(config.train.seed)
 	identities = _artifact_identities(plan)
 
@@ -825,6 +833,14 @@ def _seed_everything(seed: int) -> None:
 	torch.manual_seed(seed)
 	if torch.cuda.is_available():
 		torch.cuda.manual_seed_all(seed)
+
+
+def _configure_deterministic_execution() -> None:
+	"""Require deterministic kernels for repeated and resumed training runs."""
+	os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+	torch.use_deterministic_algorithms(mode=True)
+	torch.backends.cudnn.benchmark = False
+	torch.backends.cudnn.deterministic = True
 
 
 def _metadata_geometry(

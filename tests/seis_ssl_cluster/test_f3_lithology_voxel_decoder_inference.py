@@ -283,6 +283,24 @@ def test_dry_run_inspection_does_not_hash_array_contents(
 	assert plan.token_grid_shape_xyz == (3, 1, 1)
 
 
+def test_inference_inspection_rejects_incompatible_decoder_stages(
+	tmp_path: Path,
+) -> None:
+	raw, _ = _write_job(tmp_path)
+	checkpoint_path = Path(raw['decoder']['checkpoint'])
+	payload = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+	payload['resolved_config']['decoder']['hidden_channels'] = [4, 4]
+	torch.save(payload, checkpoint_path)
+	resolved_path = checkpoint_path.parent / 'resolved_config.json'
+	resolved = json.loads(resolved_path.read_text(encoding='utf-8'))
+	resolved['decoder']['hidden_channels'] = [4, 4]
+	resolved_path.write_text(json.dumps(resolved), encoding='utf-8')
+	config = f3_lithology_voxel_inference_config_from_mapping(raw)
+
+	with pytest.raises(ValueError, match='must have the same length'):
+		inspect_f3_lithology_voxel_inference(config)
+
+
 def test_cli_dry_run_does_not_write(tmp_path: Path) -> None:
 	raw, _ = _write_job(tmp_path)
 	config_path = tmp_path / 'inference.json'

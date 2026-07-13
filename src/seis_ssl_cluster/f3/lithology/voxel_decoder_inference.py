@@ -31,6 +31,7 @@ from seis_ssl_cluster.f3.lithology.voxel_tiles import read_voxel_tile_manifest
 from seis_ssl_cluster.models.voxel_decoder import (
 	VoxelDecoder3D,
 	validate_context_halo_tokens,
+	validate_voxel_decoder_architecture,
 )
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	load_voxel_decoder_checkpoint,
@@ -154,6 +155,13 @@ def inspect_f3_lithology_voxel_inference(
 	decoder_spec = _mapping(resolved_config.get('decoder'), 'resolved decoder config')
 	if decoder_spec.get('embedding_dim') != embedding_dim:
 		raise ValueError('decoder embedding_dim does not match selected embeddings')
+	validate_voxel_decoder_architecture(
+		hidden_channels=_positive_sequence(
+			decoder_spec.get('hidden_channels'), 'decoder.hidden_channels'
+		),
+		upsample_factors=_factor_sequence(decoder_spec.get('upsample_factors')),
+		patch_size_xyz=patch_size,
+	)
 	validate_context_halo_tokens(
 		context_halo_tokens=config.tiles.context_halo_tokens,
 		core_size_tokens=config.tiles.core_size_tokens,

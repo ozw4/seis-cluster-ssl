@@ -14,9 +14,8 @@ import torch
 from seis_ssl_cluster.training.checkpoint import capture_rng_state, restore_rng_state
 
 BEST_SELECTION_EPSILON = 1.0e-12
-# Version 3 also binds resumable checkpoints to the persisted best checkpoint.
-# Earlier versions do not contain that integrity identity.
-CHECKPOINT_SCHEMA_VERSION = 3
+# Version 4 also binds exact resume to its device and AMP-scaler semantics.
+CHECKPOINT_SCHEMA_VERSION = 4
 
 
 def validation_is_better(
@@ -106,6 +105,7 @@ def save_voxel_decoder_checkpoint(  # noqa: PLR0913
 		'amp_scaler_state_dict': (
 			None if amp_scaler is None else amp_scaler.state_dict()
 		),
+		'runtime_identity': _runtime_identity(model, amp_scaler),
 		'best_selection_state': (
 			None if best_selection_state is None else dict(best_selection_state)
 		),
@@ -156,6 +156,8 @@ def load_voxel_decoder_checkpoint(
 		'global_step',
 		'model_state_dict',
 		'optimizer_state_dict',
+		'amp_scaler_state_dict',
+		'runtime_identity',
 		'best_selection_state',
 		'training_history',
 		'current_metrics',
@@ -211,6 +213,15 @@ def restore_voxel_decoder_checkpoint(
 	amp_scaler: torch.amp.GradScaler | None = None,
 ) -> None:
 	"""Restore model, optimizer, optional scaler, and all RNG streams."""
+	expected_runtime = payload.get('runtime_identity')
+	if not isinstance(expected_runtime, Mapping):
+		raise TypeError('checkpoint runtime_identity must be a mapping')
+	actual_runtime = _runtime_identity(model, amp_scaler)
+	if expected_runtime != actual_runtime:
+		raise ValueError(
+			'resume runtime mismatch: '
+			f'checkpoint={dict(expected_runtime)!r}, current={actual_runtime!r}'
+		)
 	model.load_state_dict(payload['model_state_dict'])  # type: ignore[arg-type]
 	optimizer.load_state_dict(payload['optimizer_state_dict'])  # type: ignore[arg-type]
 	scaler_state = payload.get('amp_scaler_state_dict')
@@ -218,6 +229,8 @@ def restore_voxel_decoder_checkpoint(
 		if not isinstance(scaler_state, Mapping):
 			raise ValueError('AMP resume requires amp_scaler_state_dict')
 		amp_scaler.load_state_dict(dict(scaler_state))
+	elif scaler_state is not None:
+		raise ValueError('non-AMP resume cannot restore amp_scaler_state_dict')
 	rng_states = payload.get('rng_states')
 	if not isinstance(rng_states, Mapping):
 		raise TypeError('checkpoint rng_states must be a mapping')
@@ -264,6 +277,18 @@ def _optional_sha256(value: object) -> str | None:
 			'best_checkpoint_sha256 must be a lowercase SHA-256 hex digest'
 		)
 	return value
+
+
+def _runtime_identity(
+	model: torch.nn.Module,
+	amp_scaler: torch.amp.GradScaler | None,
+) -> dict[str, object]:
+	parameter = next(model.parameters(), None)
+	device = torch.device('cpu') if parameter is None else parameter.device
+	return {
+		'device': str(device),
+		'amp_scaler': amp_scaler is not None,
+	}
 
 
 # Concise compatibility names for callers that operate only on decoder checkpoints.

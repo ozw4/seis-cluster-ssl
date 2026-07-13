@@ -4,10 +4,12 @@ from seis_ssl_cluster.models.voxel_decoder.model import (
 	VoxelDecoder3D,
 	required_context_halo_tokens,
 	validate_context_halo_tokens,
+	validate_voxel_decoder_architecture,
 )
 
 __all__ = [
 	'VoxelDecoder3D',
 	'required_context_halo_tokens',
 	'validate_context_halo_tokens',
+	'validate_voxel_decoder_architecture',
 ]

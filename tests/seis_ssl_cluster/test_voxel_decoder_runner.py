@@ -185,6 +185,15 @@ def test_training_inspection_rejects_insufficient_context_halo(tmp_path) -> None
 		inspect_f3_lithology_voxel_decoder(config)
 
 
+def test_training_inspection_rejects_incompatible_decoder_geometry(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'incompatible-decoder')
+	raw['decoder']['upsample_factors'] = [[2, 1, 1]]
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+	with pytest.raises(ValueError, match='products must equal patch_size_xyz'):
+		inspect_f3_lithology_voxel_decoder(config)
+
+
 def test_completed_training_checkpoint_runs_chunked_inference(tmp_path) -> None:
 	raw, _ = _job(tmp_path, 'train-to-inference', epochs=1)
 	training = run_f3_lithology_voxel_decoder(
@@ -271,6 +280,45 @@ def test_resume_rejects_decoder_identity_mismatch(tmp_path) -> None:
 		run_f3_lithology_voxel_decoder(
 			mismatched, device='cpu', resume=partial.latest_checkpoint
 		)
+
+
+def test_resume_rejects_runtime_device_and_scaler_mismatch(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'runtime-mismatch')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	partial = run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=1)
+	payload = torch.load(
+		partial.latest_checkpoint,
+		map_location='cpu',
+		weights_only=False,
+	)
+	payload['runtime_identity'] = {'device': 'cuda:0', 'amp_scaler': True}
+	torch.save(payload, partial.latest_checkpoint)
+
+	with pytest.raises(ValueError, match='resume runtime mismatch'):
+		run_f3_lithology_voxel_decoder(
+			config,
+			device='cpu',
+			resume=partial.latest_checkpoint,
+		)
+
+
+def test_training_enables_deterministic_torch_execution(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'deterministic-execution')
+	result = run_f3_lithology_voxel_decoder(
+		f3_lithology_voxel_decoder_config_from_mapping(raw),
+		device='cpu',
+		max_steps=1,
+	)
+	payload = load_voxel_decoder_checkpoint(result.latest_checkpoint)
+
+	assert torch.are_deterministic_algorithms_enabled()
+	assert torch.backends.cudnn.deterministic
+	assert not torch.backends.cudnn.benchmark
+	assert os.environ['CUBLAS_WORKSPACE_CONFIG'] == ':4096:8'
+	assert payload['runtime_identity'] == {
+		'device': 'cpu',
+		'amp_scaler': False,
+	}
 
 
 @pytest.mark.parametrize(('setting', 'value'), [('batch_size', 2), ('seed', 8)])

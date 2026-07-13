@@ -67,33 +67,15 @@ class VoxelDecoder3D(nn.Module):
 		super().__init__()
 		self.embedding_dim = _positive_int(embedding_dim, 'embedding_dim')
 		self.class_count = _positive_int(class_count, 'class_count')
-		self.hidden_channels = _positive_int_sequence(
+		(
+			self.hidden_channels,
+			self.upsample_factors,
+			self.patch_size_xyz,
+		) = _validated_voxel_decoder_architecture(
 			hidden_channels,
-			'hidden_channels',
-		)
-		self.upsample_factors = _factor_sequence(upsample_factors)
-		self.patch_size_xyz = _positive_int_triple(
+			upsample_factors,
 			patch_size_xyz,
-			'patch_size_xyz',
 		)
-
-		if len(self.hidden_channels) != len(self.upsample_factors):
-			msg = (
-				'hidden_channels and upsample_factors must have the same length; '
-				f'got {len(self.hidden_channels)} and {len(self.upsample_factors)}'
-			)
-			raise ValueError(msg)
-		_factor_product = tuple(
-			_product(factor[axis] for factor in self.upsample_factors)
-			for axis in range(3)
-		)
-		if _factor_product != self.patch_size_xyz:
-			msg = (
-				'upsample factor products must equal patch_size_xyz; '
-				f'got products={_factor_product!r}, '
-				f'patch_size_xyz={self.patch_size_xyz!r}'
-			)
-			raise ValueError(msg)
 
 		self.token_normalization = nn.LayerNorm(self.embedding_dim)
 		self.input_projection = nn.Conv3d(
@@ -165,6 +147,20 @@ def required_context_halo_tokens(
 			upper = (upper + 1) // factor[axis]
 		required.append(max(-lower, upper))
 	return (required[0], required[1], required[2])
+
+
+def validate_voxel_decoder_architecture(
+	*,
+	hidden_channels: Sequence[int],
+	upsample_factors: Sequence[Sequence[int]],
+	patch_size_xyz: Sequence[int],
+) -> None:
+	"""Validate decoder stage counts and aggregate upsampling geometry."""
+	_validated_voxel_decoder_architecture(
+		hidden_channels,
+		upsample_factors,
+		patch_size_xyz,
+	)
 
 
 def validate_context_halo_tokens(
@@ -278,6 +274,36 @@ def _factor_sequence(
 	)
 
 
+def _validated_voxel_decoder_architecture(
+	hidden_channels: Sequence[int],
+	upsample_factors: Sequence[Sequence[int]],
+	patch_size_xyz: Sequence[int],
+) -> tuple[
+	tuple[int, ...],
+	tuple[tuple[int, int, int], ...],
+	tuple[int, int, int],
+]:
+	channels = _positive_int_sequence(hidden_channels, 'hidden_channels')
+	factors = _factor_sequence(upsample_factors)
+	patch_size = _positive_int_triple(patch_size_xyz, 'patch_size_xyz')
+	if len(channels) != len(factors):
+		msg = (
+			'hidden_channels and upsample_factors must have the same length; '
+			f'got {len(channels)} and {len(factors)}'
+		)
+		raise ValueError(msg)
+	factor_product = tuple(
+		_product(factor[axis] for factor in factors) for axis in range(3)
+	)
+	if factor_product != patch_size:
+		msg = (
+			'upsample factor products must equal patch_size_xyz; '
+			f'got products={factor_product!r}, patch_size_xyz={patch_size!r}'
+		)
+		raise ValueError(msg)
+	return channels, factors, patch_size
+
+
 def _product(values: Iterable[int]) -> int:
 	result = 1
 	for value in values:
@@ -289,4 +315,5 @@ __all__ = [
 	'VoxelDecoder3D',
 	'required_context_halo_tokens',
 	'validate_context_halo_tokens',
+	'validate_voxel_decoder_architecture',
 ]
