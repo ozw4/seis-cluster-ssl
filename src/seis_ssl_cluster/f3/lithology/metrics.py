@@ -200,6 +200,8 @@ def write_confusion_matrix_csv(
 def render_classification_report_markdown(
 	metrics: Mapping[str, object],
 	classes: Sequence[F3ClassInfo],
+	*,
+	title: str = 'F3 lithology probe validation report',
 ) -> str:
 	"""Render a compact validation report emphasizing macro F1 and Zechstein."""
 	precision = _metric_mapping(metrics['per_class_precision'], 'per_class_precision')
@@ -208,7 +210,7 @@ def render_classification_report_markdown(
 	iou = _metric_mapping(metrics['per_class_iou'], 'per_class_iou')
 	support = _metric_mapping(metrics['per_class_support'], 'per_class_support')
 	lines = [
-		'# F3 lithology probe validation report',
+		f'# {title}',
 		'',
 		'## Highlights',
 		'',

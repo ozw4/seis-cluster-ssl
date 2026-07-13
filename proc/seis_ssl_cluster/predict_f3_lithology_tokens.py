@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.cli import (
+	add_skip_existing_argument,
 	build_config_parser,
 	load_config_for_cli,
 	parse_config_path,
@@ -19,6 +20,9 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyPredictionConfig,
 	predict_f3_lithology_tokens,
 )
+
+if TYPE_CHECKING:
+	import argparse
 
 STAGE = 'predict_f3_lithology_tokens'
 DEFAULT_CONFIG = (
@@ -36,13 +40,21 @@ DEFAULT_CONFIG = (
 
 def build_parser() -> argparse.ArgumentParser:
 	"""Build the CLI parser for F3 lithology token prediction."""
-	return build_config_parser(
+	parser = build_config_parser(
 		'Predict F3 lithology classes for all tokens.',
 		default_config=DEFAULT_CONFIG,
 		dry_run_help=(
 			'Validate the config and print a run summary without writing outputs.'
 		),
 	)
+	add_skip_existing_argument(
+		parser,
+		help_text=(
+			'Reuse only a complete existing token artifact whose arrays and '
+			'config identity validate.'
+		),
+	)
+	return parser
 
 
 def main() -> None:
@@ -62,7 +74,9 @@ def main() -> None:
 		print('execution: dry-run; F3 lithology token prediction skipped')
 		return
 
-	result = predict_f3_lithology_tokens(config)
+	result = predict_f3_lithology_tokens(
+		config, skip_existing=args.skip_existing
+	)
 	print(f'f3_lithology_prediction.token_predictions: {result.token_predictions}')
 	print(f'f3_lithology_prediction.probability_volume: {result.probability_volume}')
 	print(f'f3_lithology_prediction.valid_token_grid: {result.valid_token_grid}')

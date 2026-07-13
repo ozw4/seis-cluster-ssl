@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 import seis_ssl_cluster.f3.lithology.voxel_report as voxel_report_module
@@ -273,6 +274,23 @@ def test_voxel_report_rejects_numeric_output_hash_mismatch(tmp_path: Path) -> No
 		inspect_f3_lithology_voxel_report(config)
 
 
+def test_voxel_report_rejects_rearranged_prediction_array(tmp_path: Path) -> None:
+	config, _ = _evaluated_report_job(tmp_path)
+	inspect_f3_lithology_voxel_report(config)
+	predictions = np.load(
+		config.prediction_input_dir / 'f3_voxel_predictions.npy',
+		mmap_mode='r+',
+	)
+	flat = predictions.reshape(-1)
+	first = int(np.flatnonzero(flat == 3)[0])
+	second = int(np.flatnonzero(flat == 5)[0])
+	flat[first], flat[second] = flat[second], flat[first]
+	predictions.flush()
+
+	with pytest.raises(ValueError, match='voxel_predictions hash'):
+		inspect_f3_lithology_voxel_report(config)
+
+
 def test_voxel_report_overwrite_removes_obsolete_selected_slice(
 	tmp_path: Path,
 ) -> None:
@@ -433,6 +451,9 @@ def _identity_config(tmp_path: Path) -> F3LithologyVoxelReportConfig:
 	voxel_dataset_dir.mkdir()
 	paths = {
 		'prediction_metadata': prediction_dir / 'prediction_metadata.json',
+		'voxel_predictions': prediction_dir / 'f3_voxel_predictions.npy',
+		'voxel_confidence': prediction_dir / 'f3_voxel_confidence.npy',
+		'voxel_valid_mask': prediction_dir / 'f3_valid_voxel_mask.npy',
 		'voxel_dataset_metadata': voxel_dataset_dir / 'voxel_dataset_metadata.json',
 		'voxel_split_grid': voxel_dataset_dir / 'supervision_split_grid.npy',
 		'label_volume': tmp_path / 'labels.npy',
@@ -461,6 +482,9 @@ def _evaluation_identity_paths(
 ) -> dict[str, Path]:
 	return {
 		'prediction_metadata': config.prediction_input_dir / 'prediction_metadata.json',
+		'voxel_predictions': config.prediction_input_dir / 'f3_voxel_predictions.npy',
+		'voxel_confidence': config.prediction_input_dir / 'f3_voxel_confidence.npy',
+		'voxel_valid_mask': config.prediction_input_dir / 'f3_valid_voxel_mask.npy',
 		'voxel_dataset_metadata': (
 			config.voxel_dataset_input_dir / 'voxel_dataset_metadata.json'
 		),

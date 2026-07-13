@@ -27,8 +27,10 @@ Repeat the same dry-run/real-run pairing for the prediction, projection,
 evaluation, and report configs for M1 (`06`–`09`) and then M2-A (`10`–`13`).
 The MAE prediction config intentionally repeats the established MAE source
 identity and conditions; it may be omitted only after complete artifact
-validation succeeds. Do not use `--skip-existing` for a partial or unvalidated
-directory.
+validation succeeds. To validate and reuse a complete token prediction, rerun
+its prediction command with `--skip-existing`; the command rejects partial
+artifacts and config/source-identity mismatches. Do not use `--skip-existing`
+for a partial or unvalidated directory.
 
 Outputs live below each model's
 `lithology/f3/facies_benchmark_v1/<MODEL>/overlap_x16/png_slices_segy_labels_v1/`

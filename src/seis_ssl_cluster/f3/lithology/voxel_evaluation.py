@@ -239,7 +239,11 @@ def _write_evaluation(
 		output_dir / CONFUSION_MATRIX_CSV, metrics, inspection.classes
 	)
 	(output_dir / CLASSIFICATION_REPORT_MD).write_text(
-		render_classification_report_markdown(metrics, inspection.classes),
+		render_classification_report_markdown(
+			metrics,
+			inspection.classes,
+			title='F3 lithology voxel validation report',
+		),
 		encoding='utf-8',
 	)
 	boundary = _aggregate_boundary_metrics(
@@ -1013,6 +1017,15 @@ def _evaluation_metadata(
 		'inputs': {
 			'prediction_metadata': _identity(
 				inspection.prediction_artifact.paths.metadata
+			),
+			'voxel_predictions': _identity(
+				inspection.prediction_artifact.paths.predictions
+			),
+			'voxel_confidence': _identity(
+				inspection.prediction_artifact.paths.confidence
+			),
+			'voxel_valid_mask': _identity(
+				inspection.prediction_artifact.paths.valid_mask
 			),
 			'voxel_dataset_metadata': _identity(
 				config.voxel_dataset_input_dir / METADATA_NAME

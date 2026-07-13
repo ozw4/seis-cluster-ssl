@@ -49,6 +49,19 @@ def test_perfect_evaluation_uses_unique_aggregate_and_duplicate_slices(
 		result.evaluation_metadata_json.read_text(encoding='utf-8')
 	)
 	assert metadata['schema_version'] == 2
+	for name, path in (
+		('voxel_predictions', config.prediction_input_dir / 'f3_voxel_predictions.npy'),
+		('voxel_confidence', config.prediction_input_dir / 'f3_voxel_confidence.npy'),
+		('voxel_valid_mask', config.prediction_input_dir / 'f3_valid_voxel_mask.npy'),
+	):
+		assert metadata['inputs'][name] == {
+			'path': str(path),
+			'sha256': file_sha256(path),
+		}
+	report_text = (result.output_dir / 'classification_report.md').read_text(
+		encoding='utf-8'
+	)
+	assert report_text.startswith('# F3 lithology voxel validation report\n')
 	for name in EVALUATION_OUTPUT_FILES:
 		assert metadata['outputs'][name] == {
 			'path': str(result.output_dir / name),

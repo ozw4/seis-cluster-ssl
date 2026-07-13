@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
+import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import joblib
 import numpy as np
 
 from seis_ssl_cluster.embedding.sliding_window import token_grid_shape_xyz
+from seis_ssl_cluster.f3.lithology.metrics import compute_lithology_metrics
 from seis_ssl_cluster.f3.lithology.token_dataset import (
 	F3LithologyTokenDataset,
 	load_f3_lithology_token_dataset,
@@ -23,7 +27,6 @@ from seis_ssl_cluster.f3.lithology.tokens import (
 	read_f3_lithology_class_info,
 	tokenize_f3_lithology_slice,
 )
-from seis_ssl_cluster.f3.lithology.metrics import compute_lithology_metrics
 from seis_ssl_cluster.f3.splits import (
 	F3LineGeometry,
 	F3SliceSplitRecord,
@@ -33,11 +36,12 @@ from seis_ssl_cluster.f3.splits import (
 )
 
 if TYPE_CHECKING:
-	from pathlib import Path
-
 	from numpy.typing import NDArray
 
 	from seis_ssl_cluster.f3.labels import F3ClassInfo
+	from seis_ssl_cluster.f3.lithology.voxel_projection import (
+		F3VoxelProjectionSourceInfo,
+	)
 
 
 VALIDATION_SLICE_METRIC_FIELDNAMES = (
@@ -125,8 +129,20 @@ class F3LithologyPredictionResult:
 
 def predict_f3_lithology_tokens(
 	config: F3LithologyPredictionConfig,
+	*,
+	skip_existing: bool = False,
 ) -> F3LithologyPredictionResult:
 	"""Apply a trained probe to every valid F3 token embedding."""
+	if not isinstance(skip_existing, bool):
+		raise TypeError('skip_existing must be bool')
+	_validate_output_layout(config.outputs)
+	if config.outputs.output_dir.exists():
+		if not skip_existing:
+			raise FileExistsError(
+				'refusing to overwrite existing output: '
+				f'{config.outputs.output_dir}'
+			)
+		return _validated_existing_prediction_result(config)
 	classes = _required_runtime_classes(config.classes)
 	embedding = _single_embedding_artifact(config.inputs.embeddings_dir)
 	label_volume = np.load(config.inputs.label_volume, mmap_mode='r')
@@ -162,7 +178,7 @@ def predict_f3_lithology_tokens(
 		predictions=predictions,
 		classes=classes,
 	)
-	_write_outputs(
+	_publish_outputs_atomically(
 		config,
 		embedding=embedding,
 		geometry=geometry,
@@ -526,6 +542,7 @@ def _validation_metric_row(
 def _write_outputs(  # noqa: PLR0913
 	config: F3LithologyPredictionConfig,
 	*,
+	metadata_config: F3LithologyPredictionConfig,
 	embedding: F3EmbeddingArtifact,
 	geometry: F3LineGeometry,
 	predictions: NDArray[np.int16],
@@ -544,7 +561,7 @@ def _write_outputs(  # noqa: PLR0913
 	_write_json(
 		outputs.metadata_json,
 		_metadata_payload(
-			config,
+			metadata_config,
 			embedding=embedding,
 			geometry=geometry,
 			predictions=predictions,
@@ -552,6 +569,274 @@ def _write_outputs(  # noqa: PLR0913
 			metrics_rows=metrics_rows,
 		),
 	)
+
+
+def _publish_outputs_atomically(  # noqa: PLR0913
+	config: F3LithologyPredictionConfig,
+	*,
+	embedding: F3EmbeddingArtifact,
+	geometry: F3LineGeometry,
+	predictions: NDArray[np.int16],
+	probabilities: NDArray[np.float32],
+	metrics_rows: Sequence[Mapping[str, object]],
+) -> None:
+	target = config.outputs.output_dir
+	target.parent.mkdir(parents=True, exist_ok=True)
+	staging = Path(
+		tempfile.mkdtemp(prefix=f'.{target.name}.staging-', dir=target.parent)
+	)
+	staging_outputs = _staging_outputs(config.outputs, staging=staging)
+	staging_config = replace(config, outputs=staging_outputs)
+	try:
+		_write_outputs(
+			staging_config,
+			metadata_config=config,
+			embedding=embedding,
+			geometry=geometry,
+			predictions=predictions,
+			probabilities=probabilities,
+			metrics_rows=metrics_rows,
+		)
+		_commit_staged_prediction(
+			staging,
+			target=target,
+			outputs=staging_outputs,
+		)
+	except BaseException:
+		shutil.rmtree(staging, ignore_errors=True)
+		raise
+
+
+def _commit_staged_prediction(
+	staging: Path,
+	*,
+	target: Path,
+	outputs: F3LithologyPredictionOutputs,
+) -> None:
+	missing = [
+		path.name for path in _prediction_output_files(outputs) if not path.is_file()
+	]
+	if missing:
+		raise RuntimeError(
+			'incomplete staged token prediction artifact; missing: '
+			+ ', '.join(missing)
+		)
+	if target.exists():
+		raise FileExistsError(f'refusing to overwrite existing output: {target}')
+	staging.rename(target)
+
+
+def _staging_outputs(
+	outputs: F3LithologyPredictionOutputs,
+	*,
+	staging: Path,
+) -> F3LithologyPredictionOutputs:
+	return F3LithologyPredictionOutputs(
+		output_dir=staging,
+		token_predictions=_staged_path(
+			outputs.token_predictions, outputs.output_dir, staging
+		),
+		probability_volume=_staged_path(
+			outputs.probability_volume, outputs.output_dir, staging
+		),
+		valid_token_grid=_staged_path(
+			outputs.valid_token_grid, outputs.output_dir, staging
+		),
+		metadata_json=_staged_path(
+			outputs.metadata_json, outputs.output_dir, staging
+		),
+		validation_slice_metrics_csv=_staged_path(
+			outputs.validation_slice_metrics_csv, outputs.output_dir, staging
+		),
+	)
+
+
+def _staged_path(path: Path, output_dir: Path, staging: Path) -> Path:
+	relative = path.resolve(strict=False).relative_to(
+		output_dir.resolve(strict=False)
+	)
+	if relative == Path():
+		raise ValueError('token prediction output file cannot equal output_dir')
+	return staging / relative
+
+
+def _validate_output_layout(outputs: F3LithologyPredictionOutputs) -> None:
+	root = outputs.output_dir.resolve(strict=False)
+	for path in _prediction_output_files(outputs):
+		resolved = path.resolve(strict=False)
+		if resolved == root or not resolved.is_relative_to(root):
+			raise ValueError(
+				'token prediction output files must be inside predictions.output_dir; '
+				f'got {path}'
+			)
+
+
+def _prediction_output_files(
+	outputs: F3LithologyPredictionOutputs,
+) -> tuple[Path, ...]:
+	return (
+		outputs.token_predictions,
+		outputs.probability_volume,
+		outputs.valid_token_grid,
+		outputs.metadata_json,
+		outputs.validation_slice_metrics_csv,
+	)
+
+
+def _validated_existing_prediction_result(
+	config: F3LithologyPredictionConfig,
+) -> F3LithologyPredictionResult:
+	from seis_ssl_cluster.f3.lithology.voxel_projection import (  # noqa: PLC0415
+		inspect_f3_lithology_token_projection_source,
+	)
+
+	source = inspect_f3_lithology_token_projection_source(
+		config.outputs.output_dir
+	)
+	_validate_existing_output_paths(config, source=source)
+	_validate_existing_config_identity(config, metadata=source.metadata)
+	if not config.outputs.validation_slice_metrics_csv.is_file():
+		raise FileNotFoundError(
+			'incomplete token prediction artifact; missing: '
+			f'{config.outputs.validation_slice_metrics_csv.name}'
+		)
+	summary = _required_mapping_value(source.metadata, 'summary')
+	validation_slice_count = _required_nonnegative_metadata_int(
+		summary.get('validation_slice_count'),
+		'summary.validation_slice_count',
+	)
+	with config.outputs.validation_slice_metrics_csv.open(
+		newline='', encoding='utf-8'
+	) as file_obj:
+		metric_rows = list(csv.DictReader(file_obj))
+	if len(metric_rows) != validation_slice_count:
+		raise ValueError(
+			'token prediction validation metrics row count does not match metadata'
+		)
+	return F3LithologyPredictionResult(
+		token_predictions=config.outputs.token_predictions,
+		probability_volume=config.outputs.probability_volume,
+		valid_token_grid=config.outputs.valid_token_grid,
+		metadata_json=config.outputs.metadata_json,
+		validation_slice_metrics_csv=config.outputs.validation_slice_metrics_csv,
+		token_grid_shape_xyz=source.token_grid_shape_xyz,
+		valid_token_count=_required_nonnegative_metadata_int(
+			summary.get('valid_token_count'), 'summary.valid_token_count'
+		),
+		invalid_token_count=_required_nonnegative_metadata_int(
+			summary.get('invalid_token_count'), 'summary.invalid_token_count'
+		),
+		validation_slice_count=validation_slice_count,
+	)
+
+
+def _validate_existing_output_paths(
+	config: F3LithologyPredictionConfig,
+	*,
+	source: F3VoxelProjectionSourceInfo,
+) -> None:
+	for existing, configured, label in (
+		(source.predictions, config.outputs.token_predictions, 'predictions'),
+		(
+			source.probabilities,
+			config.outputs.probability_volume,
+			'probabilities',
+		),
+		(source.valid_tokens, config.outputs.valid_token_grid, 'valid grid'),
+		(source.metadata_json, config.outputs.metadata_json, 'metadata'),
+	):
+		if existing.resolve(strict=False) != configured.resolve(strict=False):
+			raise ValueError(
+				f'existing token prediction {label} path does not match config'
+			)
+
+
+def _validate_existing_config_identity(
+	config: F3LithologyPredictionConfig,
+	*,
+	metadata: Mapping[str, object],
+) -> None:
+	classes = _required_runtime_classes(config.classes)
+	expected_values: tuple[tuple[str, object], ...] = (
+		('dataset', dict(config.dataset)),
+		('model', dict(config.model)),
+		('embeddings', dict(config.embeddings)),
+		('labels', dict(config.labels)),
+		('lithology', dict(config.lithology)),
+		('probe', dict(config.probe)),
+		('tokenization', config.token_policy.to_dict()),
+		('classes', [item.to_dict() for item in classes]),
+		('class_probability_order', list(_class_ids(classes))),
+	)
+	for name, expected in expected_values:
+		if metadata.get(name) != expected:
+			raise ValueError(
+				f'existing token prediction {name} identity does not match config'
+			)
+	expected_inputs = {
+		'embeddings_dir': str(config.inputs.embeddings_dir),
+		'probe_joblib': str(config.inputs.probe_joblib),
+		'scaler_joblib': str(config.inputs.scaler_joblib),
+		'label_volume': str(config.inputs.label_volume),
+		'class_info': str(config.inputs.class_info),
+		'png_label_inventory': str(config.inputs.png_label_inventory),
+		'segy_geometry_json': str(config.inputs.segy_geometry_json),
+		'validation_tokens': (
+			None
+			if config.inputs.validation_tokens is None
+			else str(config.inputs.validation_tokens)
+		),
+		'source_label_segy': (
+			None
+			if config.inputs.source_label_segy is None
+			else str(config.inputs.source_label_segy)
+		),
+	}
+	inputs = _required_mapping_value(metadata, 'inputs')
+	for name, expected in expected_inputs.items():
+		if inputs.get(name) != expected:
+			raise ValueError(
+				f'existing token prediction input {name} does not match config'
+			)
+	outputs = _required_mapping_value(metadata, 'outputs')
+	for name, expected in (
+		('token_predictions', config.outputs.token_predictions),
+		('probability_volume', config.outputs.probability_volume),
+		('valid_token_grid', config.outputs.valid_token_grid),
+		('metadata_json', config.outputs.metadata_json),
+		(
+			'validation_slice_metrics_csv',
+			config.outputs.validation_slice_metrics_csv,
+		),
+	):
+		value = outputs.get(name)
+		if not isinstance(value, str) or Path(value).resolve(
+			strict=False
+		) != expected.resolve(strict=False):
+			raise ValueError(
+				f'existing token prediction output {name} does not match config'
+			)
+
+
+def _required_mapping_value(
+	metadata: Mapping[str, object], name: str
+) -> Mapping[str, object]:
+	value = metadata.get(name)
+	if not isinstance(value, Mapping):
+		raise TypeError(f'token prediction metadata {name} must be a mapping')
+	return value
+
+
+def _required_nonnegative_metadata_int(value: object, label: str) -> int:
+	if (
+		not isinstance(value, int)
+		or isinstance(value, bool)
+		or value < 0
+	):
+		raise TypeError(
+			f'token prediction metadata {label} must be a nonnegative integer'
+		)
+	return value
 
 
 def _write_validation_metrics_csv(

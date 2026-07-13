@@ -27,7 +27,16 @@ from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
 	VALIDATION_SLICE_METRICS_CSV,
 )
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	CONFIDENCE_NAME as PREDICTION_CONFIDENCE_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	METADATA_NAME as PREDICTION_METADATA_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	PREDICTIONS_NAME as VOXEL_PREDICTIONS_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	VALID_MASK_NAME as PREDICTION_VALID_MASK_NAME,
 )
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	F3VoxelPredictionArtifact,
@@ -779,6 +788,18 @@ def _validate_identity_summary(
 		(
 			'prediction_metadata',
 			config.prediction_input_dir / PREDICTION_METADATA_NAME,
+		),
+		(
+			'voxel_predictions',
+			config.prediction_input_dir / VOXEL_PREDICTIONS_NAME,
+		),
+		(
+			'voxel_confidence',
+			config.prediction_input_dir / PREDICTION_CONFIDENCE_NAME,
+		),
+		(
+			'voxel_valid_mask',
+			config.prediction_input_dir / PREDICTION_VALID_MASK_NAME,
 		),
 		('voxel_dataset_metadata', config.voxel_dataset_input_dir / METADATA_NAME),
 		('voxel_split_grid', config.voxel_dataset_input_dir / GRID_NAME),

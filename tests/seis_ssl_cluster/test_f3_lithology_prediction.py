@@ -9,6 +9,7 @@ import joblib
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.f3.lithology.prediction as prediction_module
 from seis_ssl_cluster.f3 import (
 	F3ClassInfo,
 	F3LithologyPredictionConfig,
@@ -168,6 +169,96 @@ def test_predict_f3_lithology_tokens_requires_loaded_classes(tmp_path: Path) -> 
 
 	with pytest.raises(ValueError, match='prediction runtime requires class_info'):
 		predict_f3_lithology_tokens(replace(config, classes=None))
+
+
+def test_token_prediction_refuses_to_overwrite_complete_artifact(
+	tmp_path: Path,
+) -> None:
+	config = write_prediction_fixture(tmp_path)
+	result = predict_f3_lithology_tokens(config)
+	before = {
+		path: path.read_bytes()
+		for path in (
+			result.token_predictions,
+			result.probability_volume,
+			result.valid_token_grid,
+			result.metadata_json,
+			result.validation_slice_metrics_csv,
+		)
+	}
+
+	with pytest.raises(FileExistsError, match='refusing to overwrite'):
+		predict_f3_lithology_tokens(config)
+
+	assert {path: path.read_bytes() for path in before} == before
+
+
+def test_token_prediction_skip_existing_validates_complete_matching_artifact(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = write_prediction_fixture(tmp_path)
+	expected = predict_f3_lithology_tokens(config)
+
+	def reject_model_load(path: object) -> None:
+		raise AssertionError(f'skip-existing loaded model input {path}')
+
+	monkeypatch.setattr(joblib, 'load', reject_model_load)
+	actual = predict_f3_lithology_tokens(config, skip_existing=True)
+
+	assert actual == expected
+
+
+def test_token_prediction_skip_existing_rejects_partial_artifact(
+	tmp_path: Path,
+) -> None:
+	config = write_prediction_fixture(tmp_path)
+	config.outputs.output_dir.mkdir(parents=True)
+	config.outputs.token_predictions.write_bytes(b'partial')
+
+	with pytest.raises(FileNotFoundError, match='incomplete token prediction'):
+		predict_f3_lithology_tokens(config, skip_existing=True)
+
+	assert config.outputs.token_predictions.read_bytes() == b'partial'
+
+
+def test_token_prediction_skip_existing_rejects_config_identity_mismatch(
+	tmp_path: Path,
+) -> None:
+	config = write_prediction_fixture(tmp_path)
+	predict_f3_lithology_tokens(config)
+	mismatched = replace(
+		config,
+		model={'tag': 'different-encoder', 'freeze_encoder': True},
+	)
+
+	with pytest.raises(ValueError, match='model identity does not match config'):
+		predict_f3_lithology_tokens(mismatched, skip_existing=True)
+
+
+def test_token_prediction_failure_leaves_no_partial_artifact(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = write_prediction_fixture(tmp_path)
+
+	def fail_metrics_write(path: object, rows: object) -> None:
+		raise RuntimeError(f'synthetic write failure for {path}: {rows!r}')
+
+	monkeypatch.setattr(
+		prediction_module,
+		'_write_validation_metrics_csv',
+		fail_metrics_write,
+	)
+	with pytest.raises(RuntimeError, match='synthetic write failure'):
+		predict_f3_lithology_tokens(config)
+
+	assert not config.outputs.output_dir.exists()
+	assert not list(
+		config.outputs.output_dir.parent.glob(
+			f'.{config.outputs.output_dir.name}.staging-*'
+		)
+	)
 
 
 def write_prediction_fixture(tmp_path: Path) -> F3LithologyPredictionConfig:
