@@ -121,6 +121,24 @@ def test_v0_rejects_cross_model_paired_identity_mismatch(tmp_path: Path) -> None
 		voxel_robustness.voxel_v0_split_jobs(v0_config)
 
 
+def test_v0_rejects_model_valid_mask_different_from_canonical(
+	tmp_path: Path,
+) -> None:
+	build_config, v0_config, _ = _synthetic_workflow_configs(tmp_path)
+	build_f3_lithology_voxel_split_datasets(build_config)
+	candidate = next(model for model in v0_config.models if model.role == 'candidate')
+	valid_tokens = (
+		candidate.embeddings_dir / f'{v0_config.dataset["name"]}.valid_tokens.npy'
+	)
+	np.save(valid_tokens, np.zeros((2, 2, 2), dtype=np.bool_), allow_pickle=False)
+
+	with pytest.raises(
+		ValueError,
+		match='does not match the voxel dataset canonical valid-token identity',
+	):
+		voxel_robustness.voxel_v0_split_jobs(v0_config)
+
+
 def test_only_missing_rejects_stale_split_dataset_inventory(tmp_path: Path) -> None:
 	build_config, _, _ = _synthetic_workflow_configs(tmp_path)
 	build_f3_lithology_voxel_split_datasets(build_config)

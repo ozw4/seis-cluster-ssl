@@ -1067,13 +1067,7 @@ def _validate_v0_source_artifacts(
 	):
 		if not path.is_file():
 			raise FileNotFoundError(f'missing V0 suite input: {path}')
-	for model in config.models:
-		_validate_model_embedding_checkpoint(model, dataset_name=config.dataset['name'])
-		artifacts = load_f3_embedding_artifacts(model.embeddings_dir)
-		if len(artifacts) != 1:
-			raise ValueError(
-				f'V0 suite expects one embedding artifact for {model.model_tag}'
-			)
+	_validate_v0_embedding_artifacts(config, voxel_rows)
 	for row in voxel_rows:
 		_validate_voxel_manifest_row(row)
 	probes = _rows_by_key(probe_rows)
@@ -1095,6 +1089,34 @@ def _validate_v0_source_artifacts(
 		if actual_pair != dataset['paired_identity_hash']:
 			raise ValueError(f'token dataset paired identity mismatch for {key!r}')
 		_validate_probe_artifact(dataset, probes[key])
+
+
+def _validate_v0_embedding_artifacts(
+	config: F3VoxelV0SplitSuiteConfig,
+	voxel_rows: Sequence[Mapping[str, object]],
+) -> None:
+	canonical_valid_token_hashes = {
+		str(_mapping_value(row, 'reference_valid_tokens')['sha256'])
+		for row in voxel_rows
+	}
+	if len(canonical_valid_token_hashes) != 1:
+		raise ValueError('voxel datasets have different canonical valid-token masks')
+	canonical_valid_token_hash = next(iter(canonical_valid_token_hashes))
+	for model in config.models:
+		_validate_model_embedding_checkpoint(model, dataset_name=config.dataset['name'])
+		artifacts = load_f3_embedding_artifacts(model.embeddings_dir)
+		if len(artifacts) != 1:
+			raise ValueError(
+				f'V0 suite expects one embedding artifact for {model.model_tag}'
+			)
+		valid_tokens = (
+			model.embeddings_dir / f'{config.dataset["name"]}.valid_tokens.npy'
+		)
+		if file_sha256(valid_tokens) != canonical_valid_token_hash:
+			raise ValueError(
+				'V0 source embedding valid mask does not match the voxel dataset '
+				f'canonical valid-token identity for {model.model_tag}'
+			)
 
 
 def _validate_probe_artifact(  # noqa: C901

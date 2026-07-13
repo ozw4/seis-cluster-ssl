@@ -126,6 +126,53 @@ def test_delta_tables_include_decoder_encoder_boundary_and_class_conditions(
 	assert float(class_3['boundary_recall_t4']) > 0
 
 
+def test_m2a_decision_boundary_f1_gate_independently_forces_hold(
+	tmp_path: Path,
+) -> None:
+	config = _fixture(tmp_path, mode='positive')
+	m2a_v0 = next(
+		run for run in config.runs if (run.model, run.version) == ('M2-A', 'V0')
+	)
+	m2a_v1 = next(
+		run for run in config.runs if (run.model, run.version) == ('M2-A', 'V1')
+	)
+	boundary_v0_path = m2a_v0.input_dir / 'boundary_metrics.json'
+	boundary_v0 = json.loads(boundary_v0_path.read_text(encoding='utf-8'))
+	boundary_v0['vertical_boundary_f1_at_2'] = 0.49
+	boundary_v0['vertical_boundary_f1_at_4'] = 0.49
+	boundary_v0_path.write_text(json.dumps(boundary_v0), encoding='utf-8')
+	boundary_path = m2a_v1.input_dir / 'boundary_metrics.json'
+	boundary = json.loads(boundary_path.read_text(encoding='utf-8'))
+	boundary['vertical_boundary_f1_at_2'] = 0.50
+	boundary['vertical_boundary_f1_at_4'] = 0.50
+	boundary_path.write_text(json.dumps(boundary), encoding='utf-8')
+
+	result = summarize_f3_lithology_voxel_results(config)
+
+	assert result.decoder_value == 'positive'
+	assert result.m2a_vs_m1_voxel == 'hold'
+
+
+def test_m2a_decision_monitored_class_gate_independently_forces_hold(
+	tmp_path: Path,
+) -> None:
+	config = _fixture(tmp_path, mode='positive')
+	m2a_v1 = next(
+		run for run in config.runs if (run.model, run.version) == ('M2-A', 'V1')
+	)
+	metrics_path = m2a_v1.input_dir / 'metrics.json'
+	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+	for class_id in ('3', '5'):
+		metrics['per_class_f1'][class_id] = 0.50
+		metrics['per_class_iou'][class_id] = 0.50
+	metrics_path.write_text(json.dumps(metrics), encoding='utf-8')
+
+	result = summarize_f3_lithology_voxel_results(config)
+
+	assert result.decoder_value == 'positive'
+	assert result.m2a_vs_m1_voxel == 'hold'
+
+
 def test_publish_uses_exact_lightweight_allowlist(tmp_path: Path) -> None:
 	config = _fixture(tmp_path, mode='positive')
 	publish_dir = tmp_path / 'results' / 'f3' / 'voxel'
