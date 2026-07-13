@@ -1,5 +1,9 @@
 # F3 original-split V1 frozen-embedding decoder
 
+The complete M3-V workflow, identity/failure policy, storage estimate, and
+release checks are in
+[`docs/f3_voxel_lithology_benchmark.md`](../../../../docs/f3_voxel_lithology_benchmark.md).
+
 V1 trains the same lightweight decoder independently on the precomputed,
 frozen `overlap_x16` embeddings from MAE, M1, and M2-A. It is not encoder
 fine-tuning and has no raw-amplitude, coordinate, augmentation, boundary-loss,
@@ -10,6 +14,7 @@ seed 42. M2-A's primary comparison is M1.
 For each model, run the smoke config on CPU for two steps before the full job:
 
 ```bash
+python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py --config experiments/f3/facies_benchmark_v1/88_f3_voxel_decoder_v1/01_train_mae_smoke.yaml --dry-run --device cpu --max-steps 2
 python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py --config experiments/f3/facies_benchmark_v1/88_f3_voxel_decoder_v1/01_train_mae_smoke.yaml --device cpu --max-steps 2
 python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py --config experiments/f3/facies_benchmark_v1/88_f3_voxel_decoder_v1/02_train_mae_full.yaml --dry-run
 python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py --config experiments/f3/facies_benchmark_v1/88_f3_voxel_decoder_v1/02_train_mae_full.yaml --device auto
