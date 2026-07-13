@@ -1,0 +1,32 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+  f3_root: /home/dcuser/data/public_data/field/F3
+  results_root: results
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v1
+labels:
+  seismic_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
+  source_label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+  png_label_inventory: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/label_png_inventory.csv
+  segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+voxel_predictions:
+  input_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_predictions/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/token_projection_nearest_v1
+voxel_dataset:
+  input_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_supervision/png_slices_segy_labels_v1
+evaluation:
+  input_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_evaluation/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/token_projection_nearest_v1
+report:
+  selected_slices: {}
+  dpi: 150
+  include_confidence: false
+  amplitude_clip_percentiles: [1.0, 99.0]
+outputs:
+  output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_reports/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/token_projection_nearest_v1
+  overwrite: false
+publish:
+  enabled: true
+  output_dir: results/f3/facies_benchmark_v1/voxel_lithology/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/token_projection_nearest
+  max_file_size_mb: 10
+  overwrite: true
