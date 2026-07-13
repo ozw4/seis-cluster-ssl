@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "baseline_model": "strat_hmm_pretext_m1_k6_topblock1_distill",
+  "candidate_model": "strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill",
+  "monitored_class_ids": [
+    3,
+    5
+  ],
+  "single_split": {
+    "baseline": {
+      "accuracy": 0.896330144223904,
+      "balanced_accuracy": 0.8309637226043725,
+      "macro_f1": 0.758634786483436,
+      "weighted_f1": 0.9044138790257537,
+      "mean_iou": 0.660868037039044
+    },
+    "candidate": {
+      "accuracy": 0.897186919891475,
+      "balanced_accuracy": 0.8363859104026424,
+      "macro_f1": 0.7616465807965578,
+      "weighted_f1": 0.9052488178874972,
+      "mean_iou": 0.663642786186902
+    },
+    "delta": {
+      "accuracy": 0.0008567756675710303,
+      "balanced_accuracy": 0.005422187798269973,
+      "macro_f1": 0.0030117943131218183,
+      "weighted_f1": 0.0008349388617435727,
+      "mean_iou": 0.0027747491478580244
+    }
+  },
+  "per_class": {
+    "classes": [
+      {
+        "class_id": 3,
+        "class_name": "Rijnland/Chalk",
+        "baseline_f1": 0.5345838218053928,
+        "candidate_f1": 0.5416178194607268,
+        "delta_f1": 0.007033997655334079,
+        "baseline_iou": 0.3648,
+        "candidate_iou": 0.37138263665594856,
+        "delta_iou": 0.006582636655948548,
+        "support": 354
+      },
+      {
+        "class_id": 5,
+        "class_name": "Zechstein",
+        "baseline_f1": 0.38271604938271603,
+        "candidate_f1": 0.39263803680981596,
+        "delta_f1": 0.009921987427099932,
+        "baseline_iou": 0.2366412213740458,
+        "candidate_iou": 0.24427480916030533,
+        "delta_iou": 0.007633587786259527,
+        "support": 46
+      }
+    ]
+  },
+  "label_budget": {
+    "budgets": [
+      {
+        "budget_id": "cap25",
+        "per_class_cap": 25,
+        "n_pairs": 5,
+        "mean_delta_macro_f1": 0.0022456321043903492,
+        "win_rate_macro_f1": 1.0,
+        "mean_delta_mean_iou": 0.0020031830274889082,
+        "win_rate_mean_iou": 1.0,
+        "mean_delta_balanced_accuracy": 0.0022112267237771157,
+        "win_rate_balanced_accuracy": 0.8
+      },
+      {
+        "budget_id": "cap50",
+        "per_class_cap": 50,
+        "n_pairs": 5,
+        "mean_delta_macro_f1": 0.001293219407777335,
+        "win_rate_macro_f1": 0.8,
+        "mean_delta_mean_iou": 0.0013373731797625132,
+        "win_rate_mean_iou": 0.8,
+        "mean_delta_balanced_accuracy": 0.0012988809391269785,
+        "win_rate_balanced_accuracy": 0.8
+      },
+      {
+        "budget_id": "cap100",
+        "per_class_cap": 100,
+        "n_pairs": 5,
+        "mean_delta_macro_f1": 0.0004934798421900366,
+        "win_rate_macro_f1": 0.6,
+        "mean_delta_mean_iou": 0.0005024103269917091,
+        "win_rate_mean_iou": 0.6,
+        "mean_delta_balanced_accuracy": -0.00028487934871197497,
+        "win_rate_balanced_accuracy": 0.6
+      },
+      {
+        "budget_id": "full",
+        "per_class_cap": null,
+        "n_pairs": 1,
+        "mean_delta_macro_f1": 0.0031160686251827663,
+        "win_rate_macro_f1": 1.0,
+        "mean_delta_mean_iou": 0.0028003420006673663,
+        "win_rate_mean_iou": 1.0,
+        "mean_delta_balanced_accuracy": 0.00550789601307522,
+        "win_rate_balanced_accuracy": 1.0
+      }
+    ]
+  },
+  "split_index": {
+    "splits": [
+      {
+        "split_id": "split_000",
+        "delta_macro_f1": 0.0031160686251827663,
+        "delta_mean_iou": 0.0028003420006673663,
+        "delta_balanced_accuracy": 0.00550789601307522
+      },
+      {
+        "split_id": "split_001",
+        "delta_macro_f1": 0.003429641044139786,
+        "delta_mean_iou": 0.0026091218869480626,
+        "delta_balanced_accuracy": 0.0032375552151084896
+      },
+      {
+        "split_id": "split_002",
+        "delta_macro_f1": 0.0011083149357832278,
+        "delta_mean_iou": 0.001540703740483207,
+        "delta_balanced_accuracy": -0.00016844338806087933
+      },
+      {
+        "split_id": "split_003",
+        "delta_macro_f1": 0.00044144534891898957,
+        "delta_mean_iou": 0.00018020543136976208,
+        "delta_balanced_accuracy": -0.0011637982746336428
+      },
+      {
+        "split_id": "split_004",
+        "delta_macro_f1": 0.005282634335105341,
+        "delta_mean_iou": 0.005585291129436509,
+        "delta_balanced_accuracy": 0.005500412046386294
+      },
+      {
+        "split_id": "split_005",
+        "delta_macro_f1": 0.0018665760994623914,
+        "delta_mean_iou": 0.0005686833218618847,
+        "delta_balanced_accuracy": 0.004424706088358987
+      }
+    ],
+    "win_rates": {
+      "macro_f1": 1.0,
+      "mean_iou": 1.0,
+      "balanced_accuracy": 0.6666666666666666
+    },
+    "mean_deltas": {
+      "macro_f1": 0.002540780064765417,
+      "mean_iou": 0.002214057918461132,
+      "balanced_accuracy": 0.0028897212833724115
+    },
+    "joint_win_rate_macro_f1_mean_iou": 1.0
+  },
+  "decision": {
+    "guidance": "go",
+    "reason_codes": [
+      "all_go_conditions_met"
+    ],
+    "go_checks": {
+      "low_budget_positive": true,
+      "split_joint_win_rate_strict_majority": true,
+      "full_split_balanced_accuracy_nonnegative": true,
+      "monitored_class_pareto_improvement": true
+    },
+    "stop_checks": {
+      "all_low_budgets_nonpositive": false,
+      "split_joint_loss_rate_strict_majority": false,
+      "all_monitored_classes_worse_without_primary_improvement": false
+    },
+    "evidence": {
+      "split_joint_win_count": 6,
+      "split_joint_win_rate": 1.0,
+      "split_joint_loss_count": 0,
+      "split_joint_loss_rate": 0.0,
+      "pareto_improved_class_ids": [
+        3,
+        5
+      ]
+    },
+    "summary": "M2-A versus M1 mechanical decision: GO."
+  },
+  "warnings": [
+    "full duplicate label-budget rows collapsed by paired identity"
+  ]
+}

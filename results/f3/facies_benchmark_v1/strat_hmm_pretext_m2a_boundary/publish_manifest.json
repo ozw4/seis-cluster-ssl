@@ -1,0 +1,69 @@
+{
+  "created_at_utc": "2026-07-13T00:54:20.720253Z",
+  "items": [
+    {
+      "sha256": "8a9c8ff024038e0e4c042c39d4f0c20628611033c8a4b764614bffe1b86faadf",
+      "size_bytes": 1327,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/m2a_results_summary.md",
+      "target": "m2a_results_summary.md"
+    },
+    {
+      "sha256": "efb526494736d2fa7507c715e7485f843e5ccc9545588cbd7880eb2ab4635b62",
+      "size_bytes": 5738,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/m2a_results_summary.json",
+      "target": "m2a_results_summary.json"
+    },
+    {
+      "sha256": "62f29a5b34a6c5495f9721175d2bfd642407ae176976b852342e188adaacf2a6",
+      "size_bytes": 335,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/tables/single_split_comparison.csv",
+      "target": "tables/single_split_comparison.csv"
+    },
+    {
+      "sha256": "ccb3b50afc6451da4784cfbdd6f454bc46ee9242b03eb33b5a9f926fa35b467c",
+      "size_bytes": 478,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/tables/label_budget_summary.csv",
+      "target": "tables/label_budget_summary.csv"
+    },
+    {
+      "sha256": "5ed19c539ca1ee098adb015caad338eaba1f301c909940910aaca803c736558b",
+      "size_bytes": 294,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/tables/split_index_deltas.csv",
+      "target": "tables/split_index_deltas.csv"
+    },
+    {
+      "sha256": "ad8a3ecca54d58be6c57be615f7b1d5dc7c119602add68f347d797abff6d80ae",
+      "size_bytes": 274,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/tables/monitored_class_deltas.csv",
+      "target": "tables/monitored_class_deltas.csv"
+    },
+    {
+      "sha256": "57e67cb8c759b526fe1012194becc6b023be3900b1594983dd722faf7dd7c7c7",
+      "size_bytes": 146279,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/figures/label_budget_delta_curves.png",
+      "target": "figures/label_budget_delta_curves.png"
+    },
+    {
+      "sha256": "21560949a8d3f8a7895d0f22de7cced55fa3d7ac251ee6fa6706f741b24f56e4",
+      "size_bytes": 187204,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/figures/split_index_deltas.png",
+      "target": "figures/split_index_deltas.png"
+    },
+    {
+      "sha256": "003813efc4755cd670deec84376b271d53bcfcf52b64ca68f4215e7c7859124b",
+      "size_bytes": 120673,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/figures/single_run_metric_comparison.png",
+      "target": "figures/single_run_metric_comparison.png"
+    },
+    {
+      "sha256": "980bab1917f0a6f17b6d0d11e272604486e8a2e70dfbcac21538a84631f05359",
+      "size_bytes": 68057,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/figures/monitored_class_deltas.png",
+      "target": "figures/monitored_class_deltas.png"
+    }
+  ],
+  "output_dir": "results/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary",
+  "skipped_optional_items": [],
+  "source_artifact_root": "/workspace/artifacts/seis_ssl_cluster",
+  "warnings": []
+}

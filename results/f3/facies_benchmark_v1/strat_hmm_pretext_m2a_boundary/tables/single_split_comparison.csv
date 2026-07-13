@@ -1,0 +1,4 @@
+role,model,accuracy,balanced_accuracy,macro_f1,weighted_f1,mean_iou
+baseline,strat_hmm_pretext_m1_k6_topblock1_distill,0.896330,0.830964,0.758635,0.904414,0.660868
+candidate,strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill,0.897187,0.836386,0.761647,0.905249,0.663643
+delta,,0.000857,0.005422,0.003012,0.000835,0.002775
