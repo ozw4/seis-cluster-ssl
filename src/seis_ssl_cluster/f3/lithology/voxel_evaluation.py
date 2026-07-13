@@ -752,23 +752,108 @@ def _validate_source_identities(
 	source_identity = _mapping(
 		prediction.metadata.get('source_identity'), 'source_identity'
 	)
-	artifact_identities = source_identity.get('artifact_identities')
-	if isinstance(artifact_identities, Mapping):
-		for key, selected in (
-			('voxel_dataset_metadata', metadata_path),
-			('voxel_split_grid', grid_path),
-			('label_volume', config.source_label_volume),
-		):
-			_validate_identity(
-				_mapping(artifact_identities.get(key), key), selected, label=key
-			)
-		class_identity = source_identity.get('class_info')
-		if isinstance(class_identity, Mapping):
-			_validate_identity(
-				class_identity, config.class_info, label='prediction class_info'
-			)
+	if prediction.metadata['prediction_kind'] == 'frozen_embedding_decoder':
+		_decoder_source_identity_check(
+			prediction,
+			source_identity=source_identity,
+			metadata=metadata,
+			grid_path=grid_path,
+			metadata_path=metadata_path,
+			config=config,
+		)
 		return
 	_token_projection_source_check(prediction, config=config)
+
+
+def _decoder_source_identity_check(  # noqa: PLR0913
+	prediction: F3VoxelPredictionArtifact,
+	*,
+	source_identity: Mapping[str, object],
+	metadata: Mapping[str, object],
+	grid_path: Path,
+	metadata_path: Path,
+	config: F3LithologyVoxelEvaluationConfig,
+) -> None:
+	artifact_identities = _mapping(
+		source_identity.get('artifact_identities'), 'artifact_identities'
+	)
+	if artifact_identities.get('name') != 'f3_voxel_decoder_sources':
+		raise ValueError('invalid V1 decoder artifact identity name')
+	required_artifacts = (
+		'embeddings',
+		'embedding_metadata',
+		'valid_tokens',
+		'voxel_dataset_metadata',
+		'voxel_split_grid',
+		'label_volume',
+	)
+	artifact_paths = {
+		key: _validate_referenced_identity(
+			artifact_identities.get(key), label=f'decoder artifact {key}'
+		)
+		for key in required_artifacts
+	}
+	for key, value in artifact_identities.items():
+		if key != 'name' and key not in artifact_paths:
+			_validate_referenced_identity(value, label=f'decoder artifact {key}')
+	for key, selected in (
+		('voxel_dataset_metadata', metadata_path),
+		('voxel_split_grid', grid_path),
+		('label_volume', config.source_label_volume),
+	):
+		_assert_same_path(str(artifact_paths[key]), selected, key)
+
+	inputs = _mapping(prediction.metadata.get('inputs'), 'prediction inputs')
+	for key in ('embeddings', 'embedding_metadata', 'valid_tokens'):
+		_assert_same_path(
+			inputs.get(key), artifact_paths[key], f'prediction input {key}'
+		)
+	valid_tokens = _mapping(
+		metadata.get('reference_valid_tokens'), 'reference_valid_tokens'
+	)
+	valid_token_identity = _mapping(
+		artifact_identities.get('valid_tokens'), 'decoder artifact valid_tokens'
+	)
+	if valid_tokens.get('sha256') != valid_token_identity.get('sha256'):
+		raise ValueError(
+			'prediction/supervision source identity mismatch: valid_tokens hash'
+		)
+
+	checkpoint_path = _validate_referenced_identity(
+		source_identity.get('decoder_checkpoint'), label='decoder checkpoint'
+	)
+	_assert_same_path(
+		inputs.get('decoder_checkpoint'),
+		checkpoint_path,
+		'prediction decoder checkpoint',
+	)
+	resolved_config = _validate_referenced_identity(
+		source_identity.get('resolved_decoder_config'),
+		label='resolved decoder config',
+	)
+	_assert_same_path(
+		str(resolved_config),
+		checkpoint_path.parent / 'resolved_config.json',
+		'resolved decoder config',
+	)
+	class_info = _validate_referenced_identity(
+		source_identity.get('class_info'), label='prediction class_info'
+	)
+	_assert_same_path(str(class_info), config.class_info, 'prediction class_info')
+	_assert_same_path(
+		inputs.get('class_info'), class_info, 'prediction input class_info'
+	)
+
+	manifests = _mapping(source_identity.get('tile_manifests'), 'tile_manifests')
+	for split in ('train', 'validation'):
+		path = _validate_referenced_identity(
+			manifests.get(split), label=f'{split} tile manifest'
+		)
+		_assert_same_path(
+			str(path),
+			checkpoint_path.parent / f'{split}_tile_manifest.json',
+			f'{split} tile manifest',
+		)
 
 
 def _token_projection_source_check(
@@ -837,6 +922,16 @@ def _validate_identity(
 		raise ValueError(
 			f'prediction/supervision source identity mismatch: {label} hash'
 		)
+
+
+def _validate_referenced_identity(value: object, *, label: str) -> Path:
+	identity = _mapping(value, label)
+	path_value = identity.get('path')
+	if not isinstance(path_value, str) or not path_value:
+		raise TypeError(f'{label} identity requires a path')
+	path = Path(path_value)
+	_validate_identity(identity, path, label=label)
+	return path
 
 
 def _assert_same_path(value: object, path: Path, label: str) -> None:

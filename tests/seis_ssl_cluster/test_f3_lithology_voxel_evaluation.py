@@ -170,6 +170,60 @@ def test_prediction_supervision_identity_mismatch_is_rejected(
 		inspect_f3_lithology_voxel_evaluation(config)
 
 
+@pytest.mark.parametrize(
+	'identity_path',
+	[
+		('decoder_checkpoint',),
+		('resolved_decoder_config',),
+		('class_info',),
+		('artifact_identities', 'embeddings'),
+		('artifact_identities', 'embedding_metadata'),
+		('artifact_identities', 'valid_tokens'),
+		('tile_manifests', 'train'),
+		('tile_manifests', 'validation'),
+	],
+)
+def test_v1_requires_complete_decoder_source_identity(
+	tmp_path: Path, identity_path: tuple[str, ...]
+) -> None:
+	config = _fixture(tmp_path)
+	metadata_path = config.prediction_input_dir / 'prediction_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	container = _nested_mapping(
+		metadata['source_identity'], identity_path[:-1]
+	)
+	del container[identity_path[-1]]
+	write_f3_voxel_prediction_metadata(metadata_path, metadata)
+
+	with pytest.raises((TypeError, ValueError)):
+		inspect_f3_lithology_voxel_evaluation(config)
+
+
+@pytest.mark.parametrize(
+	'identity_path',
+	[
+		('decoder_checkpoint',),
+		('resolved_decoder_config',),
+		('artifact_identities', 'embeddings'),
+		('artifact_identities', 'embedding_metadata'),
+		('artifact_identities', 'valid_tokens'),
+		('tile_manifests', 'train'),
+	],
+)
+def test_v1_rejects_tampered_decoder_source_identity(
+	tmp_path: Path, identity_path: tuple[str, ...]
+) -> None:
+	config = _fixture(tmp_path)
+	metadata_path = config.prediction_input_dir / 'prediction_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	identity = _nested_mapping(metadata['source_identity'], identity_path)
+	identity['sha256'] = '0' * 64
+	write_f3_voxel_prediction_metadata(metadata_path, metadata)
+
+	with pytest.raises(ValueError, match='source identity mismatch'):
+		inspect_f3_lithology_voxel_evaluation(config)
+
+
 def test_evaluator_cli_dry_run_validates_without_writing(tmp_path: Path) -> None:
 	config = _fixture(tmp_path)
 	raw = {
@@ -329,6 +383,7 @@ def _fixture(  # noqa: PLR0913, PLR0915
 		volume_shape_xyz=labels.shape,
 		class_probability_order=[item.class_id for item in classes],
 	)
+	prediction_inputs: dict[str, str] = {}
 	if prediction_kind == 'token_projection_nearest':
 		source_identity = _token_source_identity(
 			artifact_root / 'tokens',
@@ -342,22 +397,15 @@ def _fixture(  # noqa: PLR0913, PLR0915
 			valid_tokens=valid_tokens,
 		)
 	else:
-		source_identity = {
-			'artifact_identities': {
-				'voxel_dataset_metadata': {
-					'path': str(supervision_metadata_path),
-					'sha256': file_sha256(supervision_metadata_path),
-				},
-				'voxel_split_grid': {
-					'path': str(grid_path),
-					'sha256': file_sha256(grid_path),
-				},
-				'label_volume': {
-					'path': str(label_path),
-					'sha256': file_sha256(label_path),
-				},
-			}
-		}
+		source_identity, prediction_inputs = _decoder_source_identity(
+			artifact_root,
+			supervision_metadata=supervision_metadata_path,
+			split_grid=grid_path,
+			label_volume=label_path,
+			embedding_metadata=reference_metadata,
+			valid_tokens=valid_tokens,
+			class_info=class_info,
+		)
 	prediction_metadata = {
 		'artifact_type': 'f3_lithology_voxel_predictions',
 		'schema_version': 1,
@@ -369,7 +417,7 @@ def _fixture(  # noqa: PLR0913, PLR0915
 		'patch_size_xyz': [1, 1, 2],
 		'invalid_prediction_class_id': -1,
 		'invalid_confidence_value': 'nan',
-		'inputs': {},
+		'inputs': prediction_inputs,
 		'source_identity': source_identity,
 		'outputs': {
 			'predictions': str(predictions_dir / 'f3_voxel_predictions.npy'),
@@ -402,6 +450,59 @@ def _fixture(  # noqa: PLR0913, PLR0915
 		'outputs': {'output_dir': str(artifact_root / 'evaluation')},
 	}
 	return f3_lithology_voxel_evaluation_config_from_mapping(raw)
+
+
+def _decoder_source_identity(  # noqa: PLR0913
+	artifact_root: Path,
+	*,
+	supervision_metadata: Path,
+	split_grid: Path,
+	label_volume: Path,
+	embedding_metadata: Path,
+	valid_tokens: Path,
+	class_info: Path,
+) -> tuple[dict[str, object], dict[str, str]]:
+	embeddings = artifact_root / 'embeddings.npy'
+	np.save(embeddings, np.zeros((1, 1, 2, 4), dtype=np.float32))
+	decoder_dir = artifact_root / 'decoder'
+	decoder_dir.mkdir()
+	checkpoint = decoder_dir / 'best.pt'
+	checkpoint.write_bytes(b'synthetic decoder checkpoint')
+	resolved_config = decoder_dir / 'resolved_config.json'
+	resolved_config.write_text('{"model":{"tag":"test-model"}}\n', encoding='utf-8')
+	train_manifest = decoder_dir / 'train_tile_manifest.json'
+	train_manifest.write_text('{"split":"train"}\n', encoding='utf-8')
+	validation_manifest = decoder_dir / 'validation_tile_manifest.json'
+	validation_manifest.write_text('{"split":"validation"}\n', encoding='utf-8')
+	artifact_paths = {
+		'embeddings': embeddings,
+		'embedding_metadata': embedding_metadata,
+		'valid_tokens': valid_tokens,
+		'voxel_dataset_metadata': supervision_metadata,
+		'voxel_split_grid': split_grid,
+		'label_volume': label_volume,
+	}
+	source_identity: dict[str, object] = {
+		'decoder_checkpoint': _identity(checkpoint),
+		'resolved_decoder_config': _identity(resolved_config),
+		'class_info': _identity(class_info),
+		'artifact_identities': {
+			'name': 'f3_voxel_decoder_sources',
+			**{name: _identity(path) for name, path in artifact_paths.items()},
+		},
+		'tile_manifests': {
+			'train': _identity(train_manifest),
+			'validation': _identity(validation_manifest),
+		},
+	}
+	inputs = {
+		'embeddings': str(embeddings),
+		'embedding_metadata': str(embedding_metadata),
+		'valid_tokens': str(valid_tokens),
+		'class_info': str(class_info),
+		'decoder_checkpoint': str(checkpoint),
+	}
+	return source_identity, inputs
 
 
 def _token_source_identity(  # noqa: PLR0913
@@ -473,3 +574,19 @@ def _refresh_token_metadata_identity(
 		'sha256'
 	] = file_sha256(token_metadata_path)
 	write_f3_voxel_prediction_metadata(metadata_path, metadata)
+
+
+def _identity(path: Path) -> dict[str, str]:
+	return {'path': str(path), 'sha256': file_sha256(path)}
+
+
+def _nested_mapping(
+	value: object, keys: tuple[str, ...]
+) -> dict[str, object]:
+	assert isinstance(value, dict)
+	current = value
+	for key in keys:
+		nested = current[key]
+		assert isinstance(nested, dict)
+		current = nested
+	return current
