@@ -382,6 +382,7 @@ def voxel_decoder_split_jobs(
 				model.model_tag,
 				config.output_root
 				/ 'v1'
+				/ config.decoder.spec
 				/ f'split={row["split_id"]}'
 				/ f'model={model.model_tag}',
 			)

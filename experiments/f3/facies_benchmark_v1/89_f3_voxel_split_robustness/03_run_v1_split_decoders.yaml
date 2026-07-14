@@ -11,7 +11,7 @@ labels:
   source_label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
   class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
   segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
-decoder: {spec: frozen_embedding_decoder_v1, embedding_dim: 384, class_count: 6, hidden_channels: [128, 64, 32], upsample_factors: [[2, 2, 2], [2, 2, 2], [2, 2, 2]]}
+decoder: {spec: frozen_embedding_decoder_nearest_voxel_ln_v1, embedding_dim: 384, class_count: 6, hidden_channels: [128, 64, 32], upsample_factors: [[2, 2, 2], [2, 2, 2], [2, 2, 2]], upsample_mode: nearest, normalization: voxelwise_layer_norm}
 tiles: {core_size_tokens: [8, 8, 8], context_halo_tokens: [1, 1, 1]}
 train: {epochs: 50, batch_size: 1, learning_rate: 0.001, weight_decay: 0.0001, class_weight: balanced, seed: 42, num_workers: 0, amp: true, gradient_clip_norm: 1.0}
 inference: {write_probabilities: false}

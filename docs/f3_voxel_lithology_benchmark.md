@@ -26,9 +26,16 @@ and one common original-split voxel-supervision artifact.
 
 - **V0, `token_projection_nearest_v1`:** apply the fixed token probe and repeat
   each token prediction over its patch. There is no learned sub-token decoder.
-- **V1, `frozen_embedding_decoder_v1`:** train the same lightweight 3-D decoder
-  independently on each model's precomputed frozen embeddings. The decoder can
-  learn sub-token structure, but gradients never update the encoder.
+- **V1, `frozen_embedding_decoder_nearest_voxel_ln_v1`:** train the same
+  lightweight 3-D decoder independently on each model's precomputed frozen
+  embeddings. It uses nearest-neighbor upsampling and voxelwise LayerNorm. The
+  decoder can learn sub-token structure, but gradients never update the encoder.
+
+Trilinear upsampling plus GroupNorm is not the M3-V benchmark implementation.
+Voxelwise LayerNorm was selected because it does not depend on tile-level
+spatial statistics and therefore preserves whole-grid/tiled consistency. The
+experiment directory name `88_f3_voxel_decoder_v1` remains as the milestone
+number; decoder checkpoint and artifact identity is the exact spec above.
 
 Thus V1 minus V0 measures learned downstream decoding value for a fixed
 representation, while M2-A V1 minus M1 V1 is the primary representation
@@ -146,8 +153,8 @@ python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py --config experi
 python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py --config experiments/f3/facies_benchmark_v1/88_f3_voxel_decoder_v1/11_train_m2a_smoke.yaml --device cpu --max-steps 2
 ```
 
-Smoke outputs use `frozen_embedding_decoder_v1_smoke` and are never scientific
-results.
+Smoke outputs use `frozen_embedding_decoder_nearest_voxel_ln_v1_smoke` and are
+never scientific results.
 
 ### 5. V1 full training: MAE, M1, M2-A
 
@@ -163,6 +170,12 @@ python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py --config experi
 Full runs use identical hidden channels `[128, 64, 32]`, three `[2, 2, 2]`
 upsampling stages, `[8, 8, 8]` token cores, `[1, 1, 1]` halos, balanced weights,
 AdamW, 50 epochs, seed 42, and no augmentation or early stopping.
+
+All new and resumed decoder jobs require checkpoint schema 5 or later. The old
+`frozen_embedding_decoder_v1` checkpoint/artifact identity is incomplete and
+is excluded from resume, inference, evaluation, and summaries. Do not manually
+copy or rename old artifacts into the new path; regenerate the smoke stage and
+then every downstream stage under the canonical spec.
 
 ### 6. V1 inference, evaluation, and report
 
@@ -242,12 +255,13 @@ $MODEL_ROOT/predictions/linear_balanced_v1/                 token predictions
 $MODEL_ROOT/voxel_predictions/token_projection_nearest_v1/ V0 predictions
 $MODEL_ROOT/voxel_evaluations/token_projection_nearest_v1/ V0 metrics
 $MODEL_ROOT/voxel_reports/token_projection_nearest_v1/     V0 report
-$MODEL_ROOT/voxel_decoders/frozen_embedding_decoder_v1/    V1 checkpoints
-$MODEL_ROOT/voxel_predictions/frozen_embedding_decoder_v1/ V1 predictions
-$MODEL_ROOT/voxel_evaluations/frozen_embedding_decoder_v1/ V1 metrics
-$MODEL_ROOT/voxel_reports/frozen_embedding_decoder_v1/     V1 report
+$MODEL_ROOT/voxel_decoders/frozen_embedding_decoder_nearest_voxel_ln_v1/    V1 checkpoints
+$MODEL_ROOT/voxel_predictions/frozen_embedding_decoder_nearest_voxel_ln_v1/ V1 predictions
+$MODEL_ROOT/voxel_evaluations/frozen_embedding_decoder_nearest_voxel_ln_v1/ V1 metrics
+$MODEL_ROOT/voxel_reports/frozen_embedding_decoder_nearest_voxel_ln_v1/     V1 report
 $ROOT/lithology/f3/facies_benchmark_v1/reports/voxel_benchmark_v1/
 $ROOT/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1/
+  v1/frozen_embedding_decoder_nearest_voxel_ln_v1/split=<SPLIT>/model=<MODEL_TAG>/
 results/f3/facies_benchmark_v1/voxel_lithology_benchmark_v1/
 ```
 
@@ -262,7 +276,7 @@ Training writes `latest.pt` after each epoch for exact continuation and
 ```bash
 python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py \
   --config <FULL_CONFIG> --device auto \
-  --resume <MODEL_ROOT>/voxel_decoders/frozen_embedding_decoder_v1/latest.pt
+  --resume <MODEL_ROOT>/voxel_decoders/frozen_embedding_decoder_nearest_voxel_ln_v1/latest.pt
 ```
 
 Never resume training from `best.pt`, and never infer from `latest.pt`. All

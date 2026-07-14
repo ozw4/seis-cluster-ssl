@@ -11,6 +11,14 @@ or early-stopping input. The full jobs share the same voxel supervision,
 architecture, tiles, balanced class weights, AdamW settings, 50 epochs, and
 seed 42. M2-A's primary comparison is M1.
 
+The exact decoder spec is
+`frozen_embedding_decoder_nearest_voxel_ln_v1`: nearest-neighbor upsampling
+followed by voxelwise LayerNorm. Trilinear upsampling plus GroupNorm is not the
+benchmark implementation. Voxelwise LayerNorm avoids dependence on each
+tile's spatial statistics, preserving whole-grid/tiled consistency. The
+directory name `88_f3_voxel_decoder_v1` is a milestone number, not the decoder
+artifact identity.
+
 For each model, run the smoke config on CPU for two steps before the full job:
 
 ```bash
@@ -30,18 +38,24 @@ training consumes embeddings, not an MAE `mae_latest.pt` or pretext `best.pt`;
 decoder inference alone consumes the decoder run's `best.pt`.
 
 Each model root contains
-`voxel_decoders/frozen_embedding_decoder_v1`,
-`voxel_predictions/frozen_embedding_decoder_v1`,
-`voxel_evaluations/frozen_embedding_decoder_v1`, and
-`voxel_reports/frozen_embedding_decoder_v1`. Smoke checkpoints use the distinct
-`frozen_embedding_decoder_v1_smoke` directory and cannot collide with full
-scientific outputs.
+`voxel_decoders/frozen_embedding_decoder_nearest_voxel_ln_v1`,
+`voxel_predictions/frozen_embedding_decoder_nearest_voxel_ln_v1`,
+`voxel_evaluations/frozen_embedding_decoder_nearest_voxel_ln_v1`, and
+`voxel_reports/frozen_embedding_decoder_nearest_voxel_ln_v1`. Smoke checkpoints
+use the distinct `frozen_embedding_decoder_nearest_voxel_ln_v1_smoke` directory
+and cannot collide with full scientific outputs.
+
+The old `frozen_embedding_decoder_v1` checkpoint/artifact name is not eligible
+for resume or evaluation because it does not identify upsampling and
+normalization. Do not copy or rename old artifacts into the canonical path.
+Regenerate from the smoke stage under the new spec and use checkpoint schema 5
+or later.
 
 Training writes `latest.pt` for exact continuation and `best.pt` for inference.
 Resume an interrupted full run with:
 
 ```bash
-python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py --config <FULL_CONFIG> --device auto --resume <MODEL_ROOT>/voxel_decoders/frozen_embedding_decoder_v1/latest.pt
+python proc/seis_ssl_cluster/train_f3_lithology_voxel_decoder.py --config <FULL_CONFIG> --device auto --resume <MODEL_ROOT>/voxel_decoders/frozen_embedding_decoder_nearest_voxel_ln_v1/latest.pt
 ```
 
 Do not resume from `best.pt`. Prediction/evaluation/report stages refuse existing

@@ -82,7 +82,15 @@ from seis_ssl_cluster.config.schema import (
 from seis_ssl_cluster.f3.lithology.guardrails import (
 	f3_shuffled_hmm_target_config_from_mapping,
 )
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_SPEC,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+)
 from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT, ArtifactPaths, ExperimentKey
+
+VOXEL_DECODER_SMOKE_SPEC = f'{VOXEL_DECODER_SPEC}_smoke'
+OLD_VOXEL_DECODER_SPEC = 'frozen_embedding_decoder_v1'
 
 NOPIMS_ROOT = Path('experiments/nopims/pretrain_v1')
 NOPIMS_PRETRAINING_CONFIGS = sorted((NOPIMS_ROOT / '10_pretrain').rglob('*.yaml'))
@@ -715,14 +723,22 @@ def test_active_f3_voxel_projection_configs_resolve(
 
 
 @pytest.mark.parametrize('config_path', F3_VOXEL_DECODER_CONFIGS)
-def test_active_f3_voxel_decoder_configs_require_identity_migration(
+def test_active_f3_voxel_decoder_configs_use_canonical_identity(
 	config_path: Path,
 ) -> None:
-	with pytest.raises(
-		ValueError,
-		match=r'decoder\.spec must be .*nearest_voxel_ln_v1',
-	):
-		f3_lithology_voxel_decoder_config_from_mapping(load_config(config_path))
+	raw = load_config(config_path)
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+	assert config.decoder.spec == VOXEL_DECODER_SPEC
+	assert config.decoder.upsample_mode == VOXEL_DECODER_UPSAMPLE_MODE
+	assert config.decoder.normalization == VOXEL_DECODER_NORMALIZATION
+	expected_dir = (
+		VOXEL_DECODER_SMOKE_SPEC
+		if config_path.name.endswith('_smoke.yaml')
+		else VOXEL_DECODER_SPEC
+	)
+	assert config.output_dir.name == expected_dir
+	assert OLD_VOXEL_DECODER_SPEC not in config_path.read_text(encoding='utf-8')
 
 
 @pytest.mark.parametrize('config_path', F3_VOXEL_INFERENCE_CONFIGS)
@@ -772,9 +788,16 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 	voxel_dataset = f3_lithology_voxel_dataset_config_from_mapping(
 		load_config(F3_VOXEL_DATASET_CONFIGS[0])
 	)
+	training_configs = [load_config(path) for path in F3_VOXEL_DECODER_CONFIGS]
+	assert all(
+		config['decoder'] == training_configs[0]['decoder']
+		for config in training_configs
+	)
 	full_configs = [
-		load_config(path)
-		for path in F3_VOXEL_DECODER_CONFIGS
+		config
+		for path, config in zip(
+			F3_VOXEL_DECODER_CONFIGS, training_configs, strict=True
+		)
 		if path.name.endswith('_full.yaml')
 	]
 	assert tuple(config['model']['tag'] for config in full_configs) == model_tags
@@ -794,6 +817,10 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 	assert all(config['train'] == full_configs[0]['train'] for config in full_configs)
 	assert len({config['outputs']['output_dir'] for config in full_configs}) == 3
 	assert all(config['train']['seed'] == 42 for config in full_configs)
+	assert all(
+		Path(config['outputs']['output_dir']).name == VOXEL_DECODER_SPEC
+		for config in full_configs
+	)
 
 	inference_configs = [
 		f3_lithology_voxel_inference_config_from_mapping(load_config(path))
@@ -802,12 +829,37 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 	assert tuple(config.model['tag'] for config in inference_configs) == model_tags
 	assert all(config.checkpoint.name == 'best.pt' for config in inference_configs)
 	assert all(
+		config.checkpoint.parent.name == VOXEL_DECODER_SPEC
+		for config in inference_configs
+	)
+	assert all(
+		config.output_dir.name == VOXEL_DECODER_SPEC
+		for config in inference_configs
+	)
+	assert all(
 		'mae_latest.pt' not in str(config.checkpoint)
 		for config in inference_configs
 	)
 	assert len({config.output_dir for config in inference_configs}) == 3
 	assert model_tags[1] in str(inference_configs[1].output_dir)
 	assert model_tags[2] in str(inference_configs[2].output_dir)
+
+	for config_path in F3_VOXEL_V1_ROOT.glob('*_evaluate_*.yaml'):
+		raw = load_config(config_path)
+		assert Path(raw['voxel_predictions']['input_dir']).name == VOXEL_DECODER_SPEC
+		assert Path(raw['outputs']['output_dir']).name == VOXEL_DECODER_SPEC
+	for config_path in F3_VOXEL_V1_ROOT.glob('*_report_*.yaml'):
+		raw = load_config(config_path)
+		assert Path(raw['voxel_predictions']['input_dir']).name == VOXEL_DECODER_SPEC
+		assert Path(raw['evaluation']['input_dir']).name == VOXEL_DECODER_SPEC
+		assert Path(raw['outputs']['output_dir']).name == VOXEL_DECODER_SPEC
+		assert Path(raw['publish']['output_dir']).name == VOXEL_DECODER_SPEC
+	for config_path in (
+		*F3_VOXEL_V1_ROOT.glob('*.yaml'),
+		F3_VOXEL_ROBUSTNESS_CONFIGS[2],
+		F3_VOXEL_RESULTS_ROOT / '01_summarize_original_split.yaml',
+	):
+		assert OLD_VOXEL_DECODER_SPEC not in config_path.read_text(encoding='utf-8')
 
 
 def test_active_f3_voxel_final_summary_publish_order_contract() -> None:
@@ -829,6 +881,11 @@ def test_active_f3_voxel_final_summary_publish_order_contract() -> None:
 	robustness.suite_root.relative_to(robustness.artifact_root)
 	with pytest.raises(ValueError, match='is not in the subpath'):
 		robustness.suite_root.relative_to(robustness.f3_root)
+	assert all(
+		run.input_dir.name == VOXEL_DECODER_SPEC
+		for run in original.runs
+		if run.version == 'V1'
+	)
 
 
 def test_active_f3_voxel_robustness_stage_configs_resolve() -> None:
@@ -839,11 +896,7 @@ def test_active_f3_voxel_robustness_stage_configs_resolve() -> None:
 		load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[1])
 	)
 	v1_raw = load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[2])
-	with pytest.raises(
-		ValueError,
-		match=r"decoder missing required key\(s\): .*upsample_mode",
-	):
-		f3_lithology_voxel_decoder_split_suite_config_from_mapping(v1_raw)
+	v1 = f3_lithology_voxel_decoder_split_suite_config_from_mapping(v1_raw)
 
 	assert build.split_inventory_manifest.name == 'split_inventory_manifest.json'
 	assert v0.voxel_dataset_manifest == Path(
@@ -857,7 +910,16 @@ def test_active_f3_voxel_robustness_stage_configs_resolve() -> None:
 	assert tuple(model.embeddings_dir for model in v0.models) == tuple(
 		Path(model['embeddings_dir']) for model in v1_raw['models'].values()
 	)
-	for config in (build, v0):
+	assert v1.decoder.spec == VOXEL_DECODER_SPEC
+	assert v1.decoder.upsample_mode == VOXEL_DECODER_UPSAMPLE_MODE
+	assert v1.decoder.normalization == VOXEL_DECODER_NORMALIZATION
+	assert v1_raw['decoder'] == load_config(
+		F3_VOXEL_V1_ROOT / '02_train_mae_full.yaml'
+	)['decoder']
+	assert OLD_VOXEL_DECODER_SPEC not in F3_VOXEL_ROBUSTNESS_CONFIGS[2].read_text(
+		encoding='utf-8'
+	)
+	for config in (build, v0, v1):
 		config.output_root.relative_to(config.artifact_root)
 		with pytest.raises(ValueError, match='is not in the subpath'):
 			config.output_root.relative_to(config.f3_root)

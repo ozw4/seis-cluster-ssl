@@ -8,6 +8,11 @@ does not generate or redraw split conditions. V0 and V1 use the same
 split-specific voxel supervision, and every model comparison is paired by
 split.
 
+V1 uses the exact `frozen_embedding_decoder_nearest_voxel_ln_v1` identity:
+nearest-neighbor upsampling and voxelwise LayerNorm. Each generated V1 job path
+includes that spec before its split and model segments, and its run-manifest
+row records the same canonical architecture.
+
 ```bash
 EXP=experiments/f3/facies_benchmark_v1/89_f3_voxel_split_robustness
 python proc/seis_ssl_cluster/build_f3_lithology_voxel_split_datasets.py --config "$EXP/01_build_voxel_split_datasets.yaml" --dry-run --only-missing
@@ -27,6 +32,9 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_split_robustness.py --
 
 The V1 manifest records `latest.pt` as the resume path after every attempted
 job. `--only-missing` skips only jobs with a complete evaluation artifact.
+Checkpoints under the old `frozen_embedding_decoder_v1` identity are excluded;
+do not copy or rename them into the new path. Start again with the canonical
+smoke jobs and checkpoint schema 5 or later.
 The summary reports raw split rows, paired deltas, win rates, and a provisional
 `positive`, `negative`, or `hold` status. Its statistical unit is the split;
 it does not compute voxel-level p-values or confidence intervals. Its final

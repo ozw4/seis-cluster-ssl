@@ -47,6 +47,7 @@ from seis_ssl_cluster.f3.lithology.voxel_robustness import (
 	summarize_f3_lithology_voxel_split_robustness,
 )
 from seis_ssl_cluster.models.voxel_decoder import (
+	VOXEL_DECODER_SPEC,
 	voxel_decoder_architecture_mapping,
 )
 
@@ -158,6 +159,10 @@ def test_two_split_voxel_workflow_runs_end_to_end(tmp_path: Path) -> None:
 	]
 	assert len(v0.rows) == len(resumed_v0.rows) == len(v1.rows) == 4
 	assert all(row['status'] == 'complete' for row in (*v0.rows, *v1.rows))
+	assert all(
+		VOXEL_DECODER_SPEC in Path(str(row['decoder_dir'])).parts
+		for row in v1.rows
+	)
 	assert all(
 		Path(str(row['evaluation_dir']), 'evaluation_metadata.json').is_file()
 		for row in (*v0.rows, *v1.rows)

@@ -6,6 +6,10 @@ one common split-grid hash, class order, and validation voxel count across all
 six runs. Missing or mismatched evidence is an error; it does not produce a
 partial metric or result.
 
+Every V1 input is read from the canonical
+`voxel_evaluations/frozen_embedding_decoder_nearest_voxel_ln_v1` path. The old
+`frozen_embedding_decoder_v1` identity is not a summary input.
+
 Run after every original-split evaluation is complete:
 
 ```bash
