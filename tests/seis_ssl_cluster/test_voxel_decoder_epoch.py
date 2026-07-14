@@ -30,6 +30,21 @@ class _PointDecoder(torch.nn.Module):
 		return self.projection(embeddings.masked_fill(~token_valid_mask[:, None], 0))
 
 
+class _NonFiniteGradientDecoder(torch.nn.Module):
+	def __init__(self) -> None:
+		super().__init__()
+		self.weight = torch.nn.Parameter(torch.zeros(()))
+		self.weight.register_hook(
+			lambda gradient: torch.full_like(gradient, float('inf'))
+		)
+
+	def forward(
+		self, embeddings: torch.Tensor, _token_valid_mask: torch.Tensor
+	) -> torch.Tensor:
+		value = self.weight.expand((embeddings.shape[0], *embeddings.shape[2:]))
+		return torch.stack((value, -value), dim=1)
+
+
 class _ValidationTiles(Dataset[dict[str, object]]):
 	def __init__(self) -> None:
 		self.samples = (
@@ -114,6 +129,43 @@ def test_train_step_updates_decoder_but_not_embedding_input() -> None:
 	assert metrics['supervised_voxel_count'] == 2
 
 
+def test_amp_nonfinite_gradient_skips_step_and_backs_off_scale() -> None:
+	decoder = _NonFiniteGradientDecoder()
+	optimizer = torch.optim.SGD(decoder.parameters(), lr=0.1)
+	scaler = torch.amp.GradScaler('cpu')
+	initial_scale = scaler.get_scale()
+
+	metrics = train_voxel_decoder_one_epoch(
+		decoder=decoder,
+		dataloader=[_single_voxel_batch()],  # type: ignore[arg-type]
+		optimizer=optimizer,
+		class_weights=torch.ones(2),
+		amp_enabled=True,
+		scaler=scaler,
+		grad_clip_norm=1.0,
+	)
+
+	assert decoder.weight.item() == 0.0
+	assert scaler.get_scale() == initial_scale * 0.5
+	assert np.isfinite(metrics['loss'])
+
+
+def test_non_amp_nonfinite_gradient_remains_a_hard_failure() -> None:
+	decoder = _NonFiniteGradientDecoder()
+	optimizer = torch.optim.SGD(decoder.parameters(), lr=0.1)
+
+	with pytest.raises(
+		FloatingPointError, match='non-finite voxel decoder gradient norm'
+	):
+		train_voxel_decoder_one_epoch(
+			decoder=decoder,
+			dataloader=[_single_voxel_batch()],  # type: ignore[arg-type]
+			optimizer=optimizer,
+			class_weights=torch.ones(2),
+			grad_clip_norm=1.0,
+		)
+
+
 def test_validation_confusion_and_metrics_are_batch_size_invariant() -> None:
 	decoder = _PointDecoder()
 	dataset = _ValidationTiles()
@@ -156,3 +208,13 @@ def test_cpu_amp_smoke() -> None:
 		amp_enabled=True,
 	)
 	assert np.isfinite(metrics['loss'])
+
+
+def _single_voxel_batch() -> dict[str, torch.Tensor]:
+	return {
+		'embeddings': torch.zeros(1, 1, 1, 1, 1),
+		'token_valid_mask': torch.ones(1, 1, 1, 1, dtype=torch.bool),
+		'labels': torch.zeros(1, 1, 1, 1, dtype=torch.long),
+		'supervision_mask': torch.ones(1, 1, 1, 1, dtype=torch.bool),
+		'core_mask': torch.ones(1, 1, 1, 1, dtype=torch.bool),
+	}

@@ -747,13 +747,19 @@ def test_active_f3_voxel_inference_configs_resolve(config_path: Path) -> None:
 
 
 @pytest.mark.parametrize('config_path', F3_VOXEL_EVALUATION_CONFIGS)
-def test_active_f3_voxel_evaluation_configs_resolve(config_path: Path) -> None:
-	f3_lithology_voxel_evaluation_config_from_mapping(load_config(config_path))
+def test_active_f3_voxel_evaluation_configs_resolve(
+	config_path: Path, tmp_path: Path
+) -> None:
+	raw = _config_with_available_output(config_path, tmp_path)
+	f3_lithology_voxel_evaluation_config_from_mapping(raw)
 
 
 @pytest.mark.parametrize('config_path', F3_VOXEL_REPORT_CONFIGS)
-def test_active_f3_voxel_report_configs_resolve(config_path: Path) -> None:
-	f3_lithology_voxel_report_config_from_mapping(load_config(config_path))
+def test_active_f3_voxel_report_configs_resolve(
+	config_path: Path, tmp_path: Path
+) -> None:
+	raw = _config_with_available_output(config_path, tmp_path)
+	f3_lithology_voxel_report_config_from_mapping(raw)
 
 
 def test_active_f3_voxel_paired_experiment_contract() -> None:
@@ -792,6 +798,17 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 	assert all(
 		config['decoder'] == training_configs[0]['decoder']
 		for config in training_configs
+	)
+	smoke_configs = [
+		config
+		for path, config in zip(
+			F3_VOXEL_DECODER_CONFIGS, training_configs, strict=True
+		)
+		if path.name.endswith('_smoke.yaml')
+	]
+	assert all(
+		config['tiles']['context_halo_tokens'] == [1, 1, 1]
+		for config in smoke_configs
 	)
 	full_configs = [
 		config
@@ -854,6 +871,7 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 		assert Path(raw['evaluation']['input_dir']).name == VOXEL_DECODER_SPEC
 		assert Path(raw['outputs']['output_dir']).name == VOXEL_DECODER_SPEC
 		assert Path(raw['publish']['output_dir']).name == VOXEL_DECODER_SPEC
+		assert raw['publish']['enabled'] is False
 	for config_path in (
 		*F3_VOXEL_V1_ROOT.glob('*.yaml'),
 		F3_VOXEL_ROBUSTNESS_CONFIGS[2],
@@ -993,6 +1011,23 @@ def test_active_nopims_overlap_x16_paths_match_artifact_paths_contract() -> None
 		Path(visualization['visualization']['output_dir'])
 		== paths.cluster_visualization(key)
 	)
+
+
+def _config_with_available_output(
+	config_path: Path, tmp_path: Path
+) -> dict[str, object]:
+	config = load_config(config_path)
+	outputs = config.get('outputs')
+	assert isinstance(outputs, dict)
+	assert outputs.get('overwrite') is False
+	output_value = outputs.get('output_dir')
+	assert isinstance(output_value, str)
+	output_dir = Path(output_value)
+	if output_dir.exists():
+		replacement = output_dir.parent / f'.{output_dir.name}.{tmp_path.name}'
+		assert not replacement.exists()
+		outputs['output_dir'] = str(replacement)
+	return config
 
 
 def _projection_config_with_synthetic_source(

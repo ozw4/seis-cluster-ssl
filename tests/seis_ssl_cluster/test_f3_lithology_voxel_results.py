@@ -13,7 +13,9 @@ from seis_ssl_cluster.f3.lithology.voxel_results import (
 	EXPECTED_MODEL_TAGS,
 	FIGURE_NAMES,
 	SUMMARY_JSON,
+	SUMMARY_MARKDOWN,
 	TABLE_NAMES,
+	V0_HANDOFF_NAME,
 	F3LithologyVoxelResultsConfig,
 	F3LithologyVoxelResultsPublishConfig,
 	F3LithologyVoxelResultsRun,
@@ -54,6 +56,43 @@ def test_complete_decision_fixtures_and_outputs(
 	assert all(
 		path.stat().st_size > 0 for path in (*result.table_paths, *result.figure_paths)
 	)
+
+
+def test_summary_coexists_with_v0_handoff_without_overwrite(tmp_path: Path) -> None:
+	config = _fixture(tmp_path, mode='positive')
+	config.output_dir.mkdir(parents=True)
+	handoff = config.output_dir / V0_HANDOFF_NAME
+	handoff_contents = b'completed V0 handoff\n'
+	handoff.write_bytes(handoff_contents)
+
+	result = summarize_f3_lithology_voxel_results(config)
+
+	assert result.summary_json.is_file()
+	assert handoff.read_bytes() == handoff_contents
+
+
+@pytest.mark.parametrize(
+	'conflict_name',
+	[SUMMARY_JSON, SUMMARY_MARKDOWN, 'tables', 'figures', 'unexpected.txt'],
+)
+def test_rejects_partial_or_conflicting_summary_output_without_touching_handoff(
+	tmp_path: Path, conflict_name: str
+) -> None:
+	config = _fixture(tmp_path, mode='positive')
+	config.output_dir.mkdir(parents=True)
+	handoff = config.output_dir / V0_HANDOFF_NAME
+	handoff_contents = b'completed V0 handoff\n'
+	handoff.write_bytes(handoff_contents)
+	conflict = config.output_dir / conflict_name
+	if conflict_name in {'tables', 'figures'}:
+		conflict.mkdir()
+	else:
+		conflict.write_text('partial\n', encoding='utf-8')
+
+	with pytest.raises(FileExistsError, match='partial or conflicting'):
+		summarize_f3_lithology_voxel_results(config)
+
+	assert handoff.read_bytes() == handoff_contents
 
 
 def test_rejects_missing_one_of_six_runs(tmp_path: Path) -> None:
@@ -143,6 +182,71 @@ def test_delta_tables_include_decoder_encoder_boundary_and_class_conditions(
 	assert float(class_3['f1']) > 0
 	assert float(class_3['iou']) > 0
 	assert float(class_3['boundary_recall_t4']) > 0
+
+
+def test_monitored_class_delta_schema_preserves_source_identity_and_order(
+	tmp_path: Path,
+) -> None:
+	result = summarize_f3_lithology_voxel_results(_fixture(tmp_path, mode='positive'))
+	decoder = _csv_rows(result.table_paths[1])
+	encoder = _csv_rows(result.table_paths[2])
+	classes = _csv_rows(result.table_paths[3])
+
+	assert list(classes[0]) == [
+		'comparison',
+		'role',
+		'baseline_model',
+		'baseline_version',
+		'candidate_model',
+		'candidate_version',
+		'class_id',
+		'f1',
+		'iou',
+		'boundary_recall_t2',
+		'boundary_recall_t4',
+	]
+	expected = [
+		(source, class_id)
+		for source in (*decoder, *encoder)
+		for class_id in ('3', '5')
+	]
+	assert [
+		(
+			row['comparison'],
+			row['role'],
+			row['baseline_model'],
+			row['baseline_version'],
+			row['candidate_model'],
+			row['candidate_version'],
+			row['class_id'],
+		)
+		for row in classes
+	] == [
+		(
+			source['comparison'],
+			source['role'],
+			source['baseline_model'],
+			source['baseline_version'],
+			source['candidate_model'],
+			source['candidate_version'],
+			class_id,
+		)
+		for source, class_id in expected
+	]
+	for row, (source, class_id) in zip(classes, expected, strict=True):
+		for target, source_key in (
+			('f1', f'class_{class_id}_f1'),
+			('iou', f'class_{class_id}_iou'),
+			(
+				'boundary_recall_t2',
+				f'class_{class_id}_boundary_recall_t2',
+			),
+			(
+				'boundary_recall_t4',
+				f'class_{class_id}_boundary_recall_t4',
+			),
+		):
+			assert float(row[target]) == float(source[source_key])
 
 
 def test_m2a_decision_boundary_f1_gate_independently_forces_hold(

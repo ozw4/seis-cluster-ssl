@@ -60,6 +60,7 @@ FIGURE_NAMES = (
 	'boundary_metrics.png',
 	'monitored_classes.png',
 )
+V0_HANDOFF_NAME = 'v0_experiment_handoff.md'
 PUBLISH_SUFFIXES = frozenset({'.md', '.json', '.csv', '.png'})
 
 
@@ -193,8 +194,7 @@ def summarize_f3_lithology_voxel_results(
 		],
 	}
 	output = config.output_dir
-	if output.exists() and not config.overwrite:
-		raise FileExistsError(f'refusing to overwrite existing output: {output}')
+	_validate_summary_output_availability(config)
 	output.mkdir(parents=True, exist_ok=True)
 	table_dir = output / 'tables'
 	figure_dir = output / 'figures'
@@ -221,6 +221,36 @@ def summarize_f3_lithology_voxel_results(
 	)
 	manifest = _publish(result, config.publish)
 	return replace(result, publish_manifest=manifest)
+
+
+def _validate_summary_output_availability(
+	config: F3LithologyVoxelResultsConfig,
+) -> None:
+	"""Allow the V0 handoff, but reject existing summary-owned output."""
+	if config.overwrite:
+		return
+	output = config.output_dir
+	if not output.exists():
+		return
+	if not output.is_dir():
+		raise FileExistsError(
+			f'original voxel summary output is not a directory: {output}'
+		)
+	conflicts = [
+		path
+		for path in output.iterdir()
+		if not (
+			path.name == V0_HANDOFF_NAME
+			and path.is_file()
+			and not path.is_symlink()
+		)
+	]
+	if conflicts:
+		display = ', '.join(str(path) for path in sorted(conflicts))
+		raise FileExistsError(
+			'refusing partial or conflicting original voxel summary output: '
+			f'{display}'
+		)
 
 
 def validate_f3_lithology_voxel_results_inputs(
@@ -584,6 +614,10 @@ def _monitored_delta_rows(
 		{
 			'comparison': comparison['comparison'],
 			'role': comparison['role'],
+			'baseline_model': comparison['baseline_model'],
+			'baseline_version': comparison['baseline_version'],
+			'candidate_model': comparison['candidate_model'],
+			'candidate_version': comparison['candidate_version'],
 			'class_id': class_id,
 			'f1': comparison[f'class_{class_id}_f1'],
 			'iou': comparison[f'class_{class_id}_iou'],
@@ -1069,6 +1103,7 @@ __all__ = [
 	'SUMMARY_JSON',
 	'SUMMARY_MARKDOWN',
 	'TABLE_NAMES',
+	'V0_HANDOFF_NAME',
 	'F3LithologyVoxelResultsConfig',
 	'F3LithologyVoxelResultsPublishConfig',
 	'F3LithologyVoxelResultsResult',

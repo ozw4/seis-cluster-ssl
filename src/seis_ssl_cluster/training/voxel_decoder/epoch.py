@@ -241,7 +241,8 @@ def _backward_and_step(
 		if scaler is not None:
 			scaler.unscale_(optimizer)
 		grad_norm = torch.nn.utils.clip_grad_norm_(decoder.parameters(), grad_clip_norm)
-		if not torch.isfinite(grad_norm):
+		# GradScaler owns overflow recovery after unscale_ records found_inf.
+		if scaler is None and not torch.isfinite(grad_norm):
 			raise FloatingPointError('non-finite voxel decoder gradient norm')
 	if scaler is None:
 		optimizer.step()

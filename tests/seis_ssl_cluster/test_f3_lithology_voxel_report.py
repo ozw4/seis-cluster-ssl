@@ -8,7 +8,10 @@ import numpy as np
 import pytest
 
 import seis_ssl_cluster.f3.lithology.voxel_report as voxel_report_module
-from seis_ssl_cluster.config.f3_lithology_voxel_report import _selected_slices
+from seis_ssl_cluster.config.f3_lithology_voxel_report import (
+	_selected_slices,
+	f3_lithology_voxel_report_config_from_mapping,
+)
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.labels import F3ClassInfo
 from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
@@ -374,6 +377,14 @@ def test_voxel_report_cli_dry_run_does_not_write(tmp_path: Path) -> None:
 	assert completed.returncode == 0, completed.stderr
 	assert 'execution: dry-run; F3 voxel lithology report skipped' in completed.stdout
 	assert not config.output_dir.exists()
+
+
+def test_voxel_report_config_rejects_existing_output(tmp_path: Path) -> None:
+	config, raw = _evaluated_report_job(tmp_path)
+	config.output_dir.mkdir(parents=True)
+
+	with pytest.raises(FileExistsError, match='refusing to overwrite'):
+		f3_lithology_voxel_report_config_from_mapping(raw)
 
 
 def _payload(*, kind: str) -> dict[str, object]:
