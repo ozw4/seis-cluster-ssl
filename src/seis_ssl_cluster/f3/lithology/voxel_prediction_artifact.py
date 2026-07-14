@@ -346,7 +346,12 @@ def commit_f3_voxel_prediction_artifact(
 	*,
 	overwrite: bool = False,
 ) -> F3VoxelPredictionArtifactPaths:
-	"""Validate and atomically publish a same-filesystem staging directory."""
+	"""Validate and transactionally publish a same-filesystem staging directory.
+
+	An atomic directory exchange is used for overwrite when the platform and
+	filesystem support it. Otherwise, the previous artifact is kept at a unique
+	backup path until promotion of the validated staging directory succeeds.
+	"""
 	staging = _coerce_paths(staging_paths_or_dir)
 	target = Path(output_dir)
 	if staging.output_dir.resolve() == target.resolve():
@@ -363,9 +368,43 @@ def commit_f3_voxel_prediction_artifact(
 	if not target.exists():
 		_rename_directory_no_replace(staging.output_dir, target)
 		return f3_voxel_prediction_artifact_paths(target)
-	_exchange_directories(staging.output_dir, target)
-	shutil.rmtree(staging.output_dir)
+	try:
+		_exchange_directories(staging.output_dir, target)
+	except NotImplementedError:
+		_replace_directory_portably(staging.output_dir, target)
+	else:
+		shutil.rmtree(staging.output_dir)
 	return f3_voxel_prediction_artifact_paths(target)
+
+
+def _replace_directory_portably(source: Path, target: Path) -> None:
+	"""Replace ``target`` while retaining it until ``source`` is promoted."""
+	backup = Path(
+		tempfile.mkdtemp(prefix=f'.{target.name}.backup-', dir=target.parent)
+	)
+	try:
+		target.rename(backup)
+	except Exception:
+		backup.rmdir()
+		raise
+	try:
+		_promote_staging_directory(source, target)
+	except Exception as promotion_error:
+		try:
+			backup.rename(target)
+		except Exception as rollback_error:
+			raise RuntimeError(
+				f'failed to promote staging directory {source} to {target}: '
+				f'{promotion_error}; rollback also failed; the previous artifact '
+				f'remains at {backup}'
+			) from rollback_error
+		raise
+	shutil.rmtree(backup)
+
+
+def _promote_staging_directory(source: Path, target: Path) -> None:
+	"""Rename validated staging into the now-vacant target path."""
+	source.rename(target)
 
 
 def _rename_directory_no_replace(source: Path, target: Path) -> None:
