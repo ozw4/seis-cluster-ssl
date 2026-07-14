@@ -11,11 +11,14 @@ from typing import Any
 
 import torch
 
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	validate_voxel_decoder_architecture_mapping,
+)
 from seis_ssl_cluster.training.checkpoint import capture_rng_state, restore_rng_state
 
 BEST_SELECTION_EPSILON = 1.0e-12
-# Version 4 also binds exact resume to its device and AMP-scaler semantics.
-CHECKPOINT_SCHEMA_VERSION = 4
+# Version 5 binds the canonical decoder architecture explicitly.
+CHECKPOINT_SCHEMA_VERSION = 5
 
 
 def validation_is_better(
@@ -95,6 +98,7 @@ def save_voxel_decoder_checkpoint(  # noqa: PLR0913
 	"""Atomically save the complete resumable decoder state."""
 	if checkpoint_kind not in {'step', 'epoch', 'completed'}:
 		raise ValueError('checkpoint_kind must be step, epoch, or completed')
+	decoder_architecture = _resolved_decoder_architecture(resolved_config)
 	weights = torch.as_tensor(class_weights, dtype=torch.float32).cpu().tolist()
 	payload: dict[str, object] = {
 		'schema_version': CHECKPOINT_SCHEMA_VERSION,
@@ -114,6 +118,7 @@ def save_voxel_decoder_checkpoint(  # noqa: PLR0913
 		'current_metrics': dict(current_metrics),
 		'metrics': dict(current_metrics),
 		'resolved_config': dict(resolved_config),
+		'decoder_architecture': decoder_architecture,
 		'class_weights': weights,
 		'artifact_identities': dict(artifact_identities),
 		'tile_manifest_hashes': dict(tile_manifest_hashes),
@@ -162,6 +167,7 @@ def load_voxel_decoder_checkpoint(
 		'training_history',
 		'current_metrics',
 		'resolved_config',
+		'decoder_architecture',
 		'class_weights',
 		'artifact_identities',
 		'tile_manifest_hashes',
@@ -174,6 +180,18 @@ def load_voxel_decoder_checkpoint(
 		raise ValueError(f'voxel decoder checkpoint missing fields: {missing!r}')
 	if payload['checkpoint_kind'] not in {'step', 'epoch', 'completed'}:
 		raise ValueError('invalid voxel decoder checkpoint_kind')
+	resolved_config = payload['resolved_config']
+	if not isinstance(resolved_config, Mapping):
+		raise TypeError('checkpoint resolved_config must be a mapping')
+	resolved_architecture = _resolved_decoder_architecture(resolved_config)
+	checkpoint_architecture = validate_voxel_decoder_architecture_mapping(
+		payload['decoder_architecture'],
+		field_prefix='checkpoint decoder_architecture',
+	)
+	if checkpoint_architecture != resolved_architecture:
+		raise ValueError(
+			'checkpoint decoder_architecture does not match resolved_config.decoder'
+		)
 	_optional_sha256(payload['best_checkpoint_sha256'])
 	return payload
 
@@ -190,6 +208,13 @@ def validate_resume_identity(
 	checkpoint_config = payload.get('resolved_config')
 	if not isinstance(checkpoint_config, Mapping):
 		raise TypeError('checkpoint resolved_config must be a mapping')
+	checkpoint_architecture = validate_voxel_decoder_architecture_mapping(
+		payload.get('decoder_architecture'),
+		field_prefix='checkpoint decoder_architecture',
+	)
+	current_architecture = _resolved_decoder_architecture(resolved_config)
+	if checkpoint_architecture != current_architecture:
+		raise ValueError('resume identity mismatch: decoder architecture')
 	for section in ('model', 'decoder', 'tiles', 'dataset', 'train'):
 		if checkpoint_config.get(section) != resolved_config.get(section):
 			raise ValueError(f'resume identity mismatch: {section}')
@@ -201,8 +226,16 @@ def validate_resume_identity(
 	actual_weights = torch.as_tensor(payload.get('class_weights'), dtype=torch.float32)
 	if actual_weights.shape != expected_weights.shape or not torch.equal(
 		actual_weights, expected_weights
-	):
-		raise ValueError('resume identity mismatch: class weights')
+		):
+			raise ValueError('resume identity mismatch: class weights')
+
+
+def _resolved_decoder_architecture(
+	resolved_config: Mapping[str, object],
+) -> dict[str, object]:
+	return validate_voxel_decoder_architecture_mapping(
+		resolved_config.get('decoder'), field_prefix='resolved_config.decoder'
+	)
 
 
 def restore_voxel_decoder_checkpoint(

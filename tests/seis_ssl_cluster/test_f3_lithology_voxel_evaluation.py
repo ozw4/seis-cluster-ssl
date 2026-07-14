@@ -22,6 +22,9 @@ from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	validate_f3_voxel_prediction_arrays,
 	write_f3_voxel_prediction_metadata,
 )
+from seis_ssl_cluster.models.voxel_decoder import (
+	voxel_decoder_architecture_mapping,
+)
 from tests.helpers import run_python_proc
 
 
@@ -439,6 +442,15 @@ def _fixture(  # noqa: PLR0913, PLR0915
 		},
 		'summary': summary,
 	}
+	if prediction_kind == 'frozen_embedding_decoder':
+		prediction_metadata['decoder_architecture'] = (
+			voxel_decoder_architecture_mapping(
+				embedding_dim=4,
+				class_count=len(classes),
+				hidden_channels=(4,),
+				upsample_factors=((1, 1, 2),),
+			)
+		)
 	write_f3_voxel_prediction_metadata(
 		predictions_dir / 'prediction_metadata.json', prediction_metadata
 	)

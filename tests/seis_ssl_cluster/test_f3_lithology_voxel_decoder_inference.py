@@ -13,6 +13,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_inference import (
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_decoder_inference import (
 	VoxelDecoderInferencePlan,
+	_load_decoder,
 	_write_inference_tiles,
 	inspect_f3_lithology_voxel_inference,
 	predict_f3_lithology_voxels,
@@ -26,6 +27,9 @@ from seis_ssl_cluster.f3.lithology.voxel_tiles import (
 	write_voxel_tile_manifest,
 )
 from seis_ssl_cluster.models.voxel_decoder import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_SPEC,
+	VOXEL_DECODER_UPSAMPLE_MODE,
 	VoxelDecoder3D,
 	validate_context_halo_tokens,
 )
@@ -215,6 +219,10 @@ def test_cpu_chunked_inference_crops_volume_and_masks_invalid_tokens(
 	raw, embedding_path = _write_job(tmp_path)
 	config = f3_lithology_voxel_inference_config_from_mapping(raw)
 	before = embedding_path.read_bytes()
+	plan = inspect_f3_lithology_voxel_inference(config)
+	model_architecture = _load_decoder(
+		plan, device=torch.device('cpu')
+	).architecture
 
 	result = predict_f3_lithology_voxels(config, device='cpu')
 	artifact = validate_f3_voxel_prediction_artifact(result.paths)
@@ -232,9 +240,49 @@ def test_cpu_chunked_inference_crops_volume_and_masks_invalid_tokens(
 	assert np.all(np.isnan(artifact.arrays.confidence[~artifact.arrays.valid_mask]))
 	assert artifact.arrays.probabilities is not None
 	assert artifact.metadata['prediction_kind'] == 'frozen_embedding_decoder'
+	assert artifact.metadata['decoder_architecture'] == model_architecture
 	assert artifact.metadata['coverage']['exact_once'] is True
 	assert artifact.metadata['coverage']['written_voxel_count'] == 5
 	assert embedding_path.read_bytes() == before
+	assert model_architecture == plan.decoder_spec
+
+
+@pytest.mark.parametrize(
+	('field', 'value'),
+	[
+		('spec', 'frozen_embedding_decoder_v1'),
+		('upsample_mode', 'trilinear'),
+		('normalization', 'batch_norm'),
+	],
+)
+def test_inspection_rejects_tampered_decoder_implementation_identity(
+	tmp_path: Path, field: str, value: str
+) -> None:
+	raw, _ = _write_job(tmp_path)
+	checkpoint_path = Path(raw['decoder']['checkpoint'])
+	resolved_path = checkpoint_path.parent / 'resolved_config.json'
+	resolved = json.loads(resolved_path.read_text(encoding='utf-8'))
+	resolved['decoder'][field] = value
+	resolved_path.write_text(json.dumps(resolved), encoding='utf-8')
+	config = f3_lithology_voxel_inference_config_from_mapping(raw)
+
+	with pytest.raises(ValueError, match=field):
+		inspect_f3_lithology_voxel_inference(config)
+
+
+def test_inspection_rejects_checkpoint_and_resolved_architecture_mismatch(
+	tmp_path: Path,
+) -> None:
+	raw, _ = _write_job(tmp_path)
+	checkpoint_path = Path(raw['decoder']['checkpoint'])
+	resolved_path = checkpoint_path.parent / 'resolved_config.json'
+	resolved = json.loads(resolved_path.read_text(encoding='utf-8'))
+	resolved['decoder']['hidden_channels'] = [5]
+	resolved_path.write_text(json.dumps(resolved), encoding='utf-8')
+	config = f3_lithology_voxel_inference_config_from_mapping(raw)
+
+	with pytest.raises(ValueError, match='architecture identity mismatch'):
+		inspect_f3_lithology_voxel_inference(config)
 
 
 def test_inspection_rejects_checkpoint_embedding_identity_mismatch(
@@ -290,6 +338,7 @@ def test_inference_inspection_rejects_incompatible_decoder_stages(
 	checkpoint_path = Path(raw['decoder']['checkpoint'])
 	payload = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
 	payload['resolved_config']['decoder']['hidden_channels'] = [4, 4]
+	payload['decoder_architecture']['hidden_channels'] = [4, 4]
 	torch.save(payload, checkpoint_path)
 	resolved_path = checkpoint_path.parent / 'resolved_config.json'
 	resolved = json.loads(resolved_path.read_text(encoding='utf-8'))
@@ -316,6 +365,15 @@ def test_cli_dry_run_does_not_write(tmp_path: Path) -> None:
 
 	assert completed.returncode == 0, completed.stderr
 	assert 'execution: dry-run; voxel decoder inference skipped' in completed.stdout
+	assert f'decoder.spec: {VOXEL_DECODER_SPEC}' in completed.stdout
+	assert (
+		f'decoder.upsample_mode: {VOXEL_DECODER_UPSAMPLE_MODE}'
+		in completed.stdout
+	)
+	assert (
+		f'decoder.normalization: {VOXEL_DECODER_NORMALIZATION}'
+		in completed.stdout
+	)
 	assert not config.output_dir.exists()
 
 
@@ -403,11 +461,13 @@ def _write_job(tmp_path: Path) -> tuple[dict[str, object], Path]:
 		'embeddings': {'input_dir': str(embedding_dir)},
 		'voxel_dataset': {'input_dir': str(voxel_dir)},
 		'decoder': {
-			'spec': 'frozen_embedding_decoder_v1',
+			'spec': VOXEL_DECODER_SPEC,
 			'embedding_dim': 4,
 			'class_count': 2,
 			'hidden_channels': [4],
 			'upsample_factors': [[2, 1, 1]],
+			'upsample_mode': VOXEL_DECODER_UPSAMPLE_MODE,
+			'normalization': VOXEL_DECODER_NORMALIZATION,
 		},
 		'tiles': {'core_size_tokens': [2, 1, 1], 'context_halo_tokens': [1, 0, 0]},
 		'train': {'epochs': 1},

@@ -19,6 +19,10 @@ from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	validate_f3_voxel_prediction_artifact,
 	write_f3_voxel_prediction_metadata,
 )
+from seis_ssl_cluster.models.voxel_decoder import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+)
 
 SHAPE = (2, 2, 2)
 CLASS_IDS = (2, 5)
@@ -196,6 +200,53 @@ def test_class_order_mismatch_is_rejected(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='classes order must match'):
 		validate_f3_voxel_prediction_artifact(output_dir)
+
+
+def test_learned_decoder_metadata_requires_architecture(tmp_path: Path) -> None:
+	output_dir = tmp_path / 'predictions'
+	_write_artifact(output_dir)
+	paths = f3_voxel_prediction_artifact_paths(output_dir)
+	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata['prediction_kind'] = 'frozen_embedding_decoder'
+	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+
+	with pytest.raises(ValueError, match='decoder_architecture'):
+		validate_f3_voxel_prediction_artifact(output_dir)
+
+
+def test_learned_decoder_metadata_rejects_old_architecture_spec(
+	tmp_path: Path,
+) -> None:
+	output_dir = tmp_path / 'predictions'
+	_write_artifact(output_dir)
+	paths = f3_voxel_prediction_artifact_paths(output_dir)
+	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata['prediction_kind'] = 'frozen_embedding_decoder'
+	metadata['decoder_architecture'] = {
+		'spec': 'frozen_embedding_decoder_v1',
+		'embedding_dim': 2,
+		'class_count': 2,
+		'hidden_channels': [2],
+		'upsample_factors': [[1, 1, 1]],
+		'upsample_mode': VOXEL_DECODER_UPSAMPLE_MODE,
+		'normalization': VOXEL_DECODER_NORMALIZATION,
+	}
+	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+
+	with pytest.raises(ValueError, match=r'decoder_architecture\.spec'):
+		validate_f3_voxel_prediction_artifact(output_dir)
+
+
+def test_projection_metadata_does_not_require_decoder_architecture(
+	tmp_path: Path,
+) -> None:
+	output_dir = tmp_path / 'predictions'
+	_write_artifact(output_dir)
+
+	artifact = validate_f3_voxel_prediction_artifact(output_dir)
+
+	assert artifact.metadata['prediction_kind'] == 'token_projection_nearest'
+	assert 'decoder_architecture' not in artifact.metadata
 
 
 @pytest.mark.parametrize(

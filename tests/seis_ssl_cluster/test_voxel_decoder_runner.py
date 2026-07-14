@@ -175,6 +175,26 @@ def test_cpu_step_resume_matches_uninterrupted_run(tmp_path) -> None:
 	)
 
 
+def test_run_passes_decoder_architecture_identity_to_model(
+	tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	raw, _ = _job(tmp_path, 'architecture-identity')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	actual_decoder = voxel_decoder_runner.VoxelDecoder3D
+	construction: dict[str, object] = {}
+
+	def capture_decoder(**kwargs):
+		construction.update(kwargs)
+		return actual_decoder(**kwargs)
+
+	monkeypatch.setattr(voxel_decoder_runner, 'VoxelDecoder3D', capture_decoder)
+	run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=1)
+
+	assert construction['spec'] == config.decoder.spec
+	assert construction['upsample_mode'] == config.decoder.upsample_mode
+	assert construction['normalization'] == config.decoder.normalization
+
+
 def test_dry_run_inspection_does_not_create_output(tmp_path) -> None:
 	raw, _ = _job(tmp_path, 'dry-run')
 	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
@@ -263,6 +283,15 @@ def test_cli_dry_run_does_not_write_output(tmp_path) -> None:
 		timeout=30,
 	)
 	assert 'execution: dry-run' in completed.stdout
+	assert f'decoder.spec: {VOXEL_DECODER_SPEC}' in completed.stdout
+	assert (
+		f'decoder.upsample_mode: {VOXEL_DECODER_UPSAMPLE_MODE}'
+		in completed.stdout
+	)
+	assert (
+		f'decoder.normalization: {VOXEL_DECODER_NORMALIZATION}'
+		in completed.stdout
+	)
 	assert not Path(raw['outputs']['output_dir']).exists()
 
 
@@ -515,6 +544,13 @@ def test_latest_and_best_checkpoints_follow_selection_rule(
 	)
 	latest = load_voxel_decoder_checkpoint(result.latest_checkpoint)
 	best = load_voxel_decoder_checkpoint(result.best_checkpoint)
+	resolved = json.loads(
+		(Path(raw['outputs']['output_dir']) / 'resolved_config.json').read_text(
+			encoding='utf-8'
+		)
+	)
+	assert latest['decoder_architecture'] == resolved['decoder']
+	assert best['decoder_architecture'] == resolved['decoder']
 	assert latest['epoch'] == 1
 	assert latest['checkpoint_kind'] == 'completed'
 	assert latest['best_selection_state']['epoch'] == 0
@@ -572,6 +608,32 @@ def test_resume_rejects_missing_resolved_config_snapshot(tmp_path) -> None:
 	with pytest.raises(FileNotFoundError, match=r'resolved_config\.json'):
 		run_f3_lithology_voxel_decoder(
 			config, device='cpu', resume=partial.latest_checkpoint
+		)
+
+
+def test_resume_rejects_architecture_change_before_model_restore(
+	tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	raw, _ = _job(tmp_path, 'resume-architecture')
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	partial = run_f3_lithology_voxel_decoder(
+		config, device='cpu', max_steps=1
+	)
+	changed_raw = deepcopy(raw)
+	changed_raw['decoder']['hidden_channels'] = [3]
+	changed_config = f3_lithology_voxel_decoder_config_from_mapping(changed_raw)
+
+	def reject_restore(*_args, **_kwargs):
+		raise AssertionError('model restore ran before identity validation')
+
+	monkeypatch.setattr(
+		voxel_decoder_runner,
+		'restore_voxel_decoder_checkpoint',
+		reject_restore,
+	)
+	with pytest.raises(ValueError, match='decoder architecture'):
+		run_f3_lithology_voxel_decoder(
+			changed_config, device='cpu', resume=partial.latest_checkpoint
 		)
 
 

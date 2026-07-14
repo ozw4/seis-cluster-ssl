@@ -9,6 +9,7 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_NORMALIZATION,
 	VOXEL_DECODER_SPEC,
 	VOXEL_DECODER_UPSAMPLE_MODE,
+	validate_voxel_decoder_architecture_mapping,
 	validate_voxel_decoder_implementation,
 	voxel_decoder_architecture_mapping,
 )
@@ -49,6 +50,7 @@ __all__ = [
 	'required_context_halo_tokens',
 	'validate_context_halo_tokens',
 	'validate_voxel_decoder_architecture',
+	'validate_voxel_decoder_architecture_mapping',
 	'validate_voxel_decoder_implementation',
 	'voxel_decoder_architecture_mapping',
 ]

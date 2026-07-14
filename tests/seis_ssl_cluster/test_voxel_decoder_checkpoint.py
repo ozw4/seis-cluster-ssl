@@ -1,14 +1,67 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import pytest
 import torch
 
+from seis_ssl_cluster.models.voxel_decoder import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_SPEC,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+	VoxelDecoder3D,
+)
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	BEST_SELECTION_EPSILON,
 	CHECKPOINT_SCHEMA_VERSION,
 	load_voxel_decoder_checkpoint,
+	save_voxel_decoder_checkpoint,
+	validate_resume_identity,
 	validation_is_better,
 )
+
+
+def _architecture() -> dict[str, object]:
+	return {
+		'spec': VOXEL_DECODER_SPEC,
+		'embedding_dim': 2,
+		'class_count': 2,
+		'hidden_channels': [2],
+		'upsample_factors': [[1, 1, 1]],
+		'upsample_mode': VOXEL_DECODER_UPSAMPLE_MODE,
+		'normalization': VOXEL_DECODER_NORMALIZATION,
+	}
+
+
+def _save_checkpoint(tmp_path, *, architecture=None):
+	model = VoxelDecoder3D(
+		embedding_dim=2,
+		class_count=2,
+		hidden_channels=(2,),
+		upsample_factors=((1, 1, 1),),
+		patch_size_xyz=(1, 1, 1),
+	)
+	optimizer = torch.optim.AdamW(model.parameters())
+	resolved_config = {
+		'decoder': _architecture() if architecture is None else architecture
+	}
+	path = tmp_path / 'checkpoint.pt'
+	save_voxel_decoder_checkpoint(
+		path,
+		model=model,
+		optimizer=optimizer,
+		epoch=0,
+		global_step=1,
+		resolved_config=resolved_config,
+		class_weights=(1.0, 1.0),
+		artifact_identities={},
+		tile_manifest_hashes={},
+		best_selection_state=None,
+		training_history=[],
+		current_metrics={},
+		checkpoint_kind='epoch',
+	)
+	return path, resolved_config
 
 
 def test_best_selection_uses_fixed_lexicographic_rule() -> None:
@@ -59,3 +112,56 @@ def test_loader_rejects_previous_model_semantics_schema(tmp_path) -> None:
 
 	with pytest.raises(ValueError, match=r'unsupported.*schema_version'):
 		load_voxel_decoder_checkpoint(path)
+
+
+def test_schema_five_round_trip_binds_decoder_architecture(tmp_path) -> None:
+	path, resolved_config = _save_checkpoint(tmp_path)
+
+	payload = load_voxel_decoder_checkpoint(path)
+
+	assert payload['schema_version'] == 5 == CHECKPOINT_SCHEMA_VERSION
+	assert payload['decoder_architecture'] == resolved_config['decoder']
+
+
+@pytest.mark.parametrize(
+	('field', 'value'),
+	[
+		('spec', 'frozen_embedding_decoder_v1'),
+		('upsample_mode', 'trilinear'),
+		('normalization', 'batch_norm'),
+	],
+)
+def test_save_rejects_noncanonical_decoder_identity(
+	tmp_path, field: str, value: str
+) -> None:
+	architecture = _architecture()
+	architecture[field] = value
+
+	with pytest.raises(ValueError, match=field):
+		_save_checkpoint(tmp_path, architecture=architecture)
+
+
+def test_loader_rejects_architecture_not_matching_resolved_config(tmp_path) -> None:
+	path, _ = _save_checkpoint(tmp_path)
+	payload = torch.load(path, map_location='cpu', weights_only=False)
+	payload['decoder_architecture']['hidden_channels'] = [3]
+	torch.save(payload, path)
+
+	with pytest.raises(ValueError, match='does not match'):
+		load_voxel_decoder_checkpoint(path)
+
+
+def test_resume_identity_rejects_decoder_config_change(tmp_path) -> None:
+	path, resolved_config = _save_checkpoint(tmp_path)
+	payload = load_voxel_decoder_checkpoint(path)
+	changed = deepcopy(resolved_config)
+	changed['decoder']['hidden_channels'] = [3]
+
+	with pytest.raises(ValueError, match='decoder architecture'):
+		validate_resume_identity(
+			payload,
+			resolved_config=changed,
+			class_weights=(1.0, 1.0),
+			artifact_identities={},
+			tile_manifest_hashes={},
+		)

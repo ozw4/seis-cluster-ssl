@@ -15,6 +15,10 @@ from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	validate_voxel_decoder_architecture_mapping,
+)
+
 if TYPE_CHECKING:
 	from numpy.typing import NDArray
 
@@ -593,6 +597,16 @@ def _validate_metadata(  # noqa: C901, PLR0912
 	if metadata['prediction_kind'] not in PREDICTION_KINDS:
 		raise ValueError(
 			f'unsupported prediction_kind: {metadata["prediction_kind"]!r}'
+		)
+	if metadata['prediction_kind'] == 'frozen_embedding_decoder':
+		if 'decoder_architecture' not in metadata:
+			raise ValueError(
+				'voxel prediction metadata is missing keys: '
+				"['decoder_architecture']"
+			)
+		validate_voxel_decoder_architecture_mapping(
+			metadata['decoder_architecture'],
+			field_prefix='decoder_architecture',
 		)
 	if not isinstance(metadata['model_tag'], str) or not metadata['model_tag']:
 		raise TypeError('model_tag must be a non-empty string')
