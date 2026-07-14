@@ -39,6 +39,12 @@ from seis_ssl_cluster.f3.splits import (
 	read_f3_line_geometry,
 	resolve_f3_slice_array_index,
 )
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	validate_voxel_decoder_architecture_mapping,
+)
+from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
+	load_voxel_decoder_checkpoint,
+)
 
 if TYPE_CHECKING:
 	from numpy.typing import NDArray
@@ -840,6 +846,11 @@ def _decoder_source_identity_check(  # noqa: PLR0913
 		checkpoint_path.parent / 'resolved_config.json',
 		'resolved decoder config',
 	)
+	_validate_decoder_architecture_identity(
+		prediction,
+		resolved_config_path=resolved_config,
+		checkpoint_path=checkpoint_path,
+	)
 	class_info = _validate_referenced_identity(
 		source_identity.get('class_info'), label='prediction class_info'
 	)
@@ -858,6 +869,42 @@ def _decoder_source_identity_check(  # noqa: PLR0913
 			checkpoint_path.parent / f'{split}_tile_manifest.json',
 			f'{split} tile manifest',
 		)
+
+
+def _validate_decoder_architecture_identity(
+	prediction: F3VoxelPredictionArtifact,
+	*,
+	resolved_config_path: Path,
+	checkpoint_path: Path,
+) -> None:
+	"""Require all four hash-bound V1 architecture records to be identical."""
+	resolved_config = _read_json_object(
+		resolved_config_path, 'resolved decoder config'
+	)
+	checkpoint = load_voxel_decoder_checkpoint(checkpoint_path, map_location='cpu')
+	checkpoint_config = _mapping(
+		checkpoint.get('resolved_config'), 'checkpoint resolved_config'
+	)
+	architectures = (
+		validate_voxel_decoder_architecture_mapping(
+			prediction.metadata.get('decoder_architecture'),
+			field_prefix='prediction_metadata.decoder_architecture',
+		),
+		validate_voxel_decoder_architecture_mapping(
+			resolved_config.get('decoder'),
+			field_prefix='resolved_decoder_config.decoder',
+		),
+		validate_voxel_decoder_architecture_mapping(
+			checkpoint.get('decoder_architecture'),
+			field_prefix='checkpoint.decoder_architecture',
+		),
+		validate_voxel_decoder_architecture_mapping(
+			checkpoint_config.get('decoder'),
+			field_prefix='checkpoint.resolved_config.decoder',
+		),
+	)
+	if any(architecture != architectures[0] for architecture in architectures[1:]):
+		raise ValueError('V1 decoder architecture identity mismatch')
 
 
 def _token_projection_source_check(
@@ -994,7 +1041,7 @@ def _evaluation_metadata(
 	slice_count: int,
 	trace_count: int,
 ) -> dict[str, object]:
-	return {
+	metadata: dict[str, object] = {
 		'artifact_type': 'f3_lithology_voxel_evaluation',
 		'schema_version': 2,
 		'dataset': dict(config.dataset),
@@ -1051,6 +1098,14 @@ def _evaluation_metadata(
 		},
 		'metadata_path': str(config.output_dir / EVALUATION_METADATA_JSON),
 	}
+	if metadata['prediction_kind'] == 'frozen_embedding_decoder':
+		metadata['decoder_architecture'] = dict(
+			_mapping(
+				inspection.prediction_artifact.metadata.get('decoder_architecture'),
+				'prediction decoder_architecture',
+			)
+		)
+	return metadata
 
 
 def _identity(path: Path) -> dict[str, str]:

@@ -88,6 +88,9 @@ from seis_ssl_cluster.f3.lithology.voxel_results import (
 	validate_f3_lithology_voxel_results_bundle,
 )
 from seis_ssl_cluster.f3.splits import read_f3_line_geometry
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	validate_voxel_decoder_architecture_mapping,
+)
 from seis_ssl_cluster.results import (
 	PublishItem,
 	PublishManifest,
@@ -141,6 +144,7 @@ SUMMARY_METRICS = (
 )
 LOWER_IS_BETTER = frozenset({'boundary_position_mae'})
 PUBLISH_SUFFIXES = frozenset({'.md', '.json', '.csv', '.png'})
+ROBUSTNESS_SUMMARY_MARKDOWN = 'voxel_split_robustness_summary.md'
 
 
 @dataclass(frozen=True)
@@ -170,6 +174,7 @@ class VoxelSplitRobustnessSummaryResult:
 	paired_rows_csv: Path
 	aggregates_csv: Path
 	status: str
+	summary_markdown: Path | None = None
 	publish_manifest: PublishManifest | None = None
 
 
@@ -181,6 +186,7 @@ class VoxelSplitRobustnessInspection:
 	aggregates: tuple[Mapping[str, object], ...]
 	status: str
 	reasons: tuple[str, ...]
+	decoder_architecture: Mapping[str, object]
 
 
 def build_f3_lithology_voxel_split_datasets(
@@ -465,6 +471,7 @@ def summarize_f3_lithology_voxel_split_robustness(
 				'baseline': config.baseline_model_tag,
 				'candidate': config.candidate_model_tag,
 			},
+			'decoder_architecture': dict(inspection.decoder_architecture),
 			'statistical_unit': 'split',
 			'voxel_level_significance_computed': False,
 			'confidence_intervals_computed': False,
@@ -477,8 +484,22 @@ def summarize_f3_lithology_voxel_split_robustness(
 			'status_reasons': reasons,
 		},
 	)
+	summary_markdown = output_dir / ROBUSTNESS_SUMMARY_MARKDOWN
+	summary_markdown.write_text(
+		_render_robustness_markdown(
+			decoder_architecture=inspection.decoder_architecture,
+			status=status,
+			split_count=len({str(row['split_id']) for row in paired}),
+		),
+		encoding='utf-8',
+	)
 	result = VoxelSplitRobustnessSummaryResult(
-		output_dir, summary_json, paired_csv, aggregates_csv, status
+		output_dir,
+		summary_json,
+		paired_csv,
+		aggregates_csv,
+		status,
+		summary_markdown,
 	)
 	return replace(result, publish_manifest=_publish_robustness_summary(result, config))
 
@@ -546,8 +567,16 @@ def inspect_f3_lithology_voxel_split_robustness(
 				'final publish requires inputs.original_summary_dir'
 			)
 		validate_f3_lithology_voxel_results_bundle(config.original_summary_dir)
+	decoder_architecture = validate_voxel_decoder_architecture_mapping(
+		next(iter(v1.values())).get('decoder_architecture'),
+		field_prefix='V1 split decoder_architecture',
+	)
 	return VoxelSplitRobustnessInspection(
-		tuple(paired), tuple(aggregates), status, tuple(reasons)
+		tuple(paired),
+		tuple(aggregates),
+		status,
+		tuple(reasons),
+		decoder_architecture,
 	)
 
 
@@ -581,6 +610,16 @@ def _publish_robustness_summary(
 		PublishItem(
 			result.summary_json,
 			Path('robustness') / result.summary_json.name,
+		),
+		*(
+			(
+				PublishItem(
+					result.summary_markdown,
+					Path('robustness') / result.summary_markdown.name,
+				),
+			)
+			if result.summary_markdown is not None
+			else ()
 		),
 		PublishItem(
 			result.paired_rows_csv,
@@ -1015,6 +1054,13 @@ def _v1_manifest_row(  # noqa: PLR0913
 			row[f'{split}_tile_manifest'] = _identity(path)
 	if status == 'complete' and _complete_decoder(decoder):
 		row['class_weights'] = _checkpoint_class_weights(decoder / 'latest.pt')
+		evaluation_metadata = _read_json(
+			job.output_root / 'evaluation' / EVALUATION_METADATA_JSON
+		)
+		row['decoder_architecture'] = validate_voxel_decoder_architecture_mapping(
+			evaluation_metadata.get('decoder_architecture'),
+			field_prefix='evaluation decoder_architecture',
+		)
 	return row
 
 
@@ -1034,6 +1080,7 @@ def _validate_paired_decoder_identity(
 		'class_weights',
 		'train_tile_manifest',
 		'validation_tile_manifest',
+		'decoder_architecture',
 	):
 		values = [row.get(key) for row in selected]
 		if key.endswith('_manifest') or key == 'source_valid_tokens':
@@ -1041,7 +1088,7 @@ def _validate_paired_decoder_identity(
 				value.get('sha256') if isinstance(value, Mapping) else None
 				for value in values
 			]
-		elif key == 'class_weights':
+		elif key in {'class_weights', 'decoder_architecture'}:
 			values = [
 				json.dumps(value, sort_keys=True, allow_nan=False) for value in values
 			]
@@ -1461,6 +1508,31 @@ def _provisional_status(
 	return 'hold', reasons
 
 
+def _render_robustness_markdown(
+	*, decoder_architecture: Mapping[str, object], status: str, split_count: int
+) -> str:
+	return '\n'.join(
+		(
+			'# F3 voxel split robustness summary',
+			'',
+			'## Decoder identity',
+			'',
+			f'- spec: `{decoder_architecture["spec"]}`',
+			f'- upsample mode: `{decoder_architecture["upsample_mode"]}`',
+			f'- normalization: `{decoder_architecture["normalization"]}`',
+			'',
+			'## Result',
+			'',
+			f'- split count: `{split_count}`',
+			f'- provisional status: **{status}**',
+			'',
+			'Paired metrics and win rates use split, not voxel, as the '
+			'statistical unit.',
+			'',
+		)
+	)
+
+
 def _numeric_comparison(value: object, *, lower_bound: float, strict: bool) -> bool:
 	if not isinstance(value, int | float) or isinstance(value, bool):
 		return False
@@ -1708,6 +1780,7 @@ def _complete_paired_run_rows(  # noqa: C901, PLR0912
 				'class_weights',
 				'train_tile_manifest',
 				'validation_tile_manifest',
+				'decoder_architecture',
 			)
 		)
 	rows = _paired_rows(
@@ -1774,10 +1847,31 @@ def _complete_paired_run_rows(  # noqa: C901, PLR0912
 				prediction_metadata, decoder_dir=Path(str(row['decoder_dir']))
 			)
 			_validate_v1_summary_row(row, prediction_metadata)
+			evaluation_architecture = validate_voxel_decoder_architecture_mapping(
+				evaluation_metadata.get('decoder_architecture'),
+				field_prefix='evaluation decoder_architecture',
+			)
+			prediction_architecture = validate_voxel_decoder_architecture_mapping(
+				prediction_metadata.get('decoder_architecture'),
+				field_prefix='prediction decoder_architecture',
+			)
+			manifest_architecture = validate_voxel_decoder_architecture_mapping(
+				row.get('decoder_architecture'),
+				field_prefix='run decoder_architecture',
+			)
+			if not (
+				evaluation_architecture
+				== prediction_architecture
+				== manifest_architecture
+			):
+				raise ValueError('V1 run decoder architecture identity mismatch')
 	result = _rows_by_key(rows)
 	if artifact_type == V1_RUN_MANIFEST_TYPE:
 		for split_id in {key[0] for key in result}:
 			_validate_paired_decoder_identity(tuple(result.values()), split_id=split_id)
+		architectures = [row.get('decoder_architecture') for row in result.values()]
+		if any(value != architectures[0] for value in architectures[1:]):
+			raise ValueError('V1 decoder architecture mismatch across splits')
 	return result
 
 

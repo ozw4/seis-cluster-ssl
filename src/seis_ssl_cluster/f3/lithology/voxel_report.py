@@ -50,6 +50,9 @@ from seis_ssl_cluster.f3.splits import (
 	load_f3_slice_split_records,
 	read_f3_line_geometry,
 )
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	validate_voxel_decoder_architecture_mapping,
+)
 from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
@@ -77,10 +80,7 @@ KNOWN_LIMITATIONS = (
 	'V0 is voxel-shaped output at token resolution.',
 	'V1 has no raw-amplitude skip connection.',
 )
-VOXEL_PREDICTION_SPEC_BY_KIND = {
-	'token_projection_nearest': 'token_projection_nearest_v1',
-	'frozen_embedding_decoder': 'frozen_embedding_decoder_v1',
-}
+V0_PREDICTION_SPEC = 'token_projection_nearest_v1'
 
 
 @dataclass(frozen=True)
@@ -337,6 +337,11 @@ def build_f3_lithology_voxel_report_payload(  # noqa: PLR0913
 		if kind == 'token_projection_nearest'
 		else 'V1 learned frozen-embedding decoder'
 	)
+	decoder = _report_decoder_identity(
+		kind=kind,
+		prediction_metadata=prediction_metadata,
+		evaluation_metadata=evaluation_metadata,
+	)
 	monitored = [
 		_monitored_class_row(
 			class_id,
@@ -352,6 +357,7 @@ def build_f3_lithology_voxel_report_payload(  # noqa: PLR0913
 		'prediction': {
 			'kind': kind,
 			'label': prediction_label,
+			'decoder': decoder,
 			'model_tag': prediction_metadata.get('model_tag'),
 			'source_identity': prediction_metadata.get('source_identity'),
 			'inputs': prediction_metadata.get('inputs'),
@@ -377,6 +383,39 @@ def build_f3_lithology_voxel_report_payload(  # noqa: PLR0913
 	}
 
 
+def _report_decoder_identity(
+	*,
+	kind: object,
+	prediction_metadata: Mapping[str, object],
+	evaluation_metadata: Mapping[str, object],
+) -> dict[str, object]:
+	if kind == 'token_projection_nearest':
+		if evaluation_metadata.get('decoder_architecture') is not None:
+			raise ValueError('V0 evaluation must not record decoder_architecture')
+		return {
+			'spec': V0_PREDICTION_SPEC,
+			'learned': False,
+			'representation': 'voxel-shaped token projection',
+			'upsample_mode': 'nearest',
+			'normalization': 'N/A',
+			'hidden_channels': 'N/A',
+			'upsample_factors': 'N/A',
+		}
+	if kind != 'frozen_embedding_decoder':
+		raise ValueError(f'unsupported voxel prediction kind: {kind!r}')
+	prediction_architecture = validate_voxel_decoder_architecture_mapping(
+		prediction_metadata.get('decoder_architecture'),
+		field_prefix='prediction decoder_architecture',
+	)
+	evaluation_architecture = validate_voxel_decoder_architecture_mapping(
+		evaluation_metadata.get('decoder_architecture'),
+		field_prefix='evaluation decoder_architecture',
+	)
+	if prediction_architecture != evaluation_architecture:
+		raise ValueError('voxel report prediction/evaluation decoder identity mismatch')
+	return {**evaluation_architecture, 'learned': True}
+
+
 def render_f3_lithology_voxel_report_markdown(
 	payload: Mapping[str, object],
 ) -> str:
@@ -390,8 +429,17 @@ def render_f3_lithology_voxel_report_markdown(
 		'',
 		'## Prediction identity',
 		'',
-		f'- prediction kind: {prediction.get("label")}',
+		f'- prediction kind: {prediction.get("kind")} ({prediction.get("label")})',
 		f'- model tag: {prediction.get("model_tag")}',
+		f'- decoder spec: {_mapping(prediction.get("decoder"), "decoder").get("spec")}',
+		'- upsample mode: '
+		f'{_mapping(prediction.get("decoder"), "decoder").get("upsample_mode")}',
+		'- normalization: '
+		f'{_mapping(prediction.get("decoder"), "decoder").get("normalization")}',
+		'- hidden channels: '
+		f'{_mapping(prediction.get("decoder"), "decoder").get("hidden_channels")}',
+		'- upsample factors: '
+		f'{_mapping(prediction.get("decoder"), "decoder").get("upsample_factors")}',
 		'- source model and embedding identities are recorded in '
 		'`report.json` under `prediction.source_identity`.',
 		'- decoder identity is recorded there for V1; V0 has no learned decoder.',
@@ -511,11 +559,17 @@ def publish_f3_lithology_voxel_report(
 		evaluation, evaluation_input_dir=config.evaluation_input_dir
 	)
 	prediction = _mapping(result.payload.get('prediction'), 'prediction')
+	decoder = _mapping(prediction.get('decoder'), 'prediction decoder')
+	prediction_spec = (
+		V0_PREDICTION_SPEC
+		if prediction.get('kind') == 'token_projection_nearest'
+		else str(decoder.get('spec'))
+	)
 	output_dir = policy.output_dir or default_f3_lithology_voxel_publish_dir(
 		results_root=policy.results_root,
 		dataset_version=config.dataset.get('version', 'facies_benchmark_v1'),
 		model_tag=str(prediction.get('model_tag') or 'unknown_model'),
-		prediction_spec=VOXEL_PREDICTION_SPEC_BY_KIND[str(prediction.get('kind'))],
+		prediction_spec=prediction_spec,
 	)
 	items = [
 		PublishItem(result.report_markdown, Path(REPORT_MARKDOWN)),
@@ -779,6 +833,11 @@ def _validate_identity_summary(
 		raise ValueError('voxel report prediction/evaluation kind mismatch')
 	if evaluation.get('model_tag') != prediction.get('model_tag'):
 		raise ValueError('voxel report prediction/evaluation model mismatch')
+	_report_decoder_identity(
+		kind=prediction.get('prediction_kind'),
+		prediction_metadata=prediction,
+		evaluation_metadata=evaluation,
+	)
 	if evaluation.get('dataset') != supervision.get('dataset'):
 		raise ValueError('voxel report evaluation/supervision dataset mismatch')
 	if evaluation.get('dataset') != dict(config.dataset):

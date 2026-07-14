@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 
 from seis_ssl_cluster.config.f3_lithology_voxel_evaluation import (
 	f3_lithology_voxel_evaluation_config_from_mapping,
@@ -52,6 +53,9 @@ def test_perfect_evaluation_uses_unique_aggregate_and_duplicate_slices(
 		result.evaluation_metadata_json.read_text(encoding='utf-8')
 	)
 	assert metadata['schema_version'] == 2
+	assert metadata['decoder_architecture']['spec'] == (
+		'frozen_embedding_decoder_nearest_voxel_ln_v1'
+	)
 	for name, path in (
 		('voxel_predictions', config.prediction_input_dir / 'f3_voxel_predictions.npy'),
 		('voxel_confidence', config.prediction_input_dir / 'f3_voxel_confidence.npy'),
@@ -110,6 +114,59 @@ def test_v0_token_projection_uses_the_same_evaluator(tmp_path: Path) -> None:
 	result = evaluate_f3_lithology_voxels(config)
 	metrics = json.loads(result.metrics_json.read_text(encoding='utf-8'))
 	assert metrics['accuracy'] == 1.0
+	metadata = json.loads(result.evaluation_metadata_json.read_text(encoding='utf-8'))
+	assert 'decoder_architecture' not in metadata
+
+
+@pytest.mark.parametrize('field', ['spec', 'upsample_mode', 'normalization'])
+def test_v1_rejects_tampered_prediction_decoder_identity(
+	tmp_path: Path, field: str
+) -> None:
+	config = _fixture(tmp_path)
+	metadata_path = config.prediction_input_dir / 'prediction_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['decoder_architecture'][field] = 'tampered'
+	write_f3_voxel_prediction_metadata(metadata_path, metadata)
+
+	with pytest.raises(ValueError, match=field):
+		inspect_f3_lithology_voxel_evaluation(config)
+
+
+def test_v1_rejects_resolved_config_decoder_mismatch(tmp_path: Path) -> None:
+	config = _fixture(tmp_path)
+	metadata_path = config.prediction_input_dir / 'prediction_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	resolved_path = Path(
+		metadata['source_identity']['resolved_decoder_config']['path']
+	)
+	resolved = json.loads(resolved_path.read_text(encoding='utf-8'))
+	resolved['decoder']['hidden_channels'] = [8]
+	resolved_path.write_text(json.dumps(resolved), encoding='utf-8')
+	metadata['source_identity']['resolved_decoder_config']['sha256'] = file_sha256(
+		resolved_path
+	)
+	write_f3_voxel_prediction_metadata(metadata_path, metadata)
+
+	with pytest.raises(ValueError, match='architecture identity mismatch'):
+		inspect_f3_lithology_voxel_evaluation(config)
+
+
+def test_v1_rejects_checkpoint_decoder_mismatch(tmp_path: Path) -> None:
+	config = _fixture(tmp_path)
+	metadata_path = config.prediction_input_dir / 'prediction_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	checkpoint_path = Path(metadata['source_identity']['decoder_checkpoint']['path'])
+	checkpoint = torch.load(checkpoint_path, weights_only=False)
+	checkpoint['decoder_architecture']['hidden_channels'] = [8]
+	checkpoint['resolved_config']['decoder']['hidden_channels'] = [8]
+	torch.save(checkpoint, checkpoint_path)
+	metadata['source_identity']['decoder_checkpoint']['sha256'] = file_sha256(
+		checkpoint_path
+	)
+	write_f3_voxel_prediction_metadata(metadata_path, metadata)
+
+	with pytest.raises(ValueError, match='architecture identity mismatch'):
+		inspect_f3_lithology_voxel_evaluation(config)
 
 
 def test_v0_token_projection_allows_model_specific_embedding_sources(
@@ -491,10 +548,39 @@ def _decoder_source_identity(  # noqa: PLR0913
 	np.save(embeddings, np.zeros((1, 1, 2, 4), dtype=np.float32))
 	decoder_dir = artifact_root / 'decoder'
 	decoder_dir.mkdir()
+	architecture = voxel_decoder_architecture_mapping(
+		embedding_dim=4,
+		class_count=3,
+		hidden_channels=(4,),
+		upsample_factors=((1, 1, 2),),
+	)
+	resolved_payload = {'model': {'tag': 'test-model'}, 'decoder': architecture}
 	checkpoint = decoder_dir / 'best.pt'
-	checkpoint.write_bytes(b'synthetic decoder checkpoint')
+	torch.save(
+		{
+			'schema_version': 5,
+			'epoch': 1,
+			'global_step': 1,
+			'model_state_dict': {},
+			'optimizer_state_dict': {},
+			'amp_scaler_state_dict': None,
+			'runtime_identity': {},
+			'best_selection_state': None,
+			'training_history': [],
+			'current_metrics': {},
+			'resolved_config': resolved_payload,
+			'decoder_architecture': architecture,
+			'class_weights': [1.0, 1.0, 1.0],
+			'artifact_identities': {},
+			'tile_manifest_hashes': {},
+			'rng_states': {},
+			'checkpoint_kind': 'completed',
+			'best_checkpoint_sha256': None,
+		},
+		checkpoint,
+	)
 	resolved_config = decoder_dir / 'resolved_config.json'
-	resolved_config.write_text('{"model":{"tag":"test-model"}}\n', encoding='utf-8')
+	resolved_config.write_text(json.dumps(resolved_payload) + '\n', encoding='utf-8')
 	train_manifest = decoder_dir / 'train_tile_manifest.json'
 	train_manifest.write_text('{"split":"train"}\n', encoding='utf-8')
 	validation_manifest = decoder_dir / 'validation_tile_manifest.json'

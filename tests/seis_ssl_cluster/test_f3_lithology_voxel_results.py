@@ -19,6 +19,9 @@ from seis_ssl_cluster.f3.lithology.voxel_results import (
 	F3LithologyVoxelResultsRun,
 	summarize_f3_lithology_voxel_results,
 )
+from seis_ssl_cluster.models.voxel_decoder import (
+	voxel_decoder_architecture_mapping,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -57,6 +60,18 @@ def test_rejects_missing_one_of_six_runs(tmp_path: Path) -> None:
 	config = _fixture(tmp_path, mode='positive')
 	with pytest.raises(ValueError, match='incomplete six-run matrix'):
 		summarize_f3_lithology_voxel_results(replace(config, runs=config.runs[:-1]))
+
+
+def test_rejects_one_v1_decoder_architecture_mismatch(tmp_path: Path) -> None:
+	config = _fixture(tmp_path, mode='positive')
+	run = next(item for item in config.runs if item.key == 'm2a_v1')
+	metadata_path = run.input_dir / 'evaluation_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['decoder_architecture']['hidden_channels'] = [16]
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='architecture identity mismatch'):
+		summarize_f3_lithology_voxel_results(config)
 
 
 @pytest.mark.parametrize(
@@ -344,6 +359,13 @@ def _write_run(path: Path, *, model: str, version: str, mode: str) -> None:
 			for name in EVALUATION_OUTPUT_FILES
 		},
 	}
+	if version == 'V1':
+		metadata['decoder_architecture'] = voxel_decoder_architecture_mapping(
+			embedding_dim=4,
+			class_count=6,
+			hidden_channels=(8,),
+			upsample_factors=((5, 5, 5),),
+		)
 	(path / 'evaluation_metadata.json').write_text(
 		json.dumps(metadata), encoding='utf-8'
 	)

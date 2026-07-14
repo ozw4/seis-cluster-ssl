@@ -34,6 +34,9 @@ from seis_ssl_cluster.f3.lithology.voxel_report import (
 from seis_ssl_cluster.f3.lithology.voxel_visualization import (
 	F3LithologyVoxelFigureConfig,
 )
+from seis_ssl_cluster.models.voxel_decoder import (
+	voxel_decoder_architecture_mapping,
+)
 from tests.helpers import run_python_proc
 from tests.seis_ssl_cluster.test_f3_lithology_voxel_evaluation import (
 	_fixture as evaluation_fixture,
@@ -58,11 +61,15 @@ def test_voxel_report_is_complete_standard_json_with_v0_v1_wording(
 	markdown = render_f3_lithology_voxel_report_markdown(payload)
 
 	assert payload['prediction']['label'] == wording
+	assert 'decoder' in payload['prediction']
 	assert payload['supervision']['validation_precedence'] is True
 	assert payload['overall_voxel_metrics']['accuracy'] == 1.0
 	assert len(payload['per_slice_metrics']) == 1
 	assert 'unique validation voxels' in markdown
 	assert 'plane-level; not aggregate' in markdown
+	if kind == 'frozen_embedding_decoder':
+		assert 'frozen_embedding_decoder_nearest_voxel_ln_v1' in markdown
+		assert 'frozen_embedding_decoder_v1' not in markdown
 	assert json.dumps(payload, allow_nan=False)
 
 
@@ -81,6 +88,24 @@ def test_voxel_report_handles_missing_and_zero_support_classes() -> None:
 	assert classes[1]['class_id'] == 5
 	assert classes[1]['status'] == 'missing_class'
 	assert classes[1]['support'] is None
+
+
+def test_voxel_report_rejects_evaluation_prediction_decoder_mismatch() -> None:
+	architecture = voxel_decoder_architecture_mapping(
+		embedding_dim=4,
+		class_count=3,
+		hidden_channels=(4,),
+		upsample_factors=((1, 1, 2),),
+	)
+	evaluation_architecture = {**architecture, 'hidden_channels': [8]}
+	with pytest.raises(ValueError, match='decoder identity mismatch'):
+		voxel_report_module._report_decoder_identity(  # noqa: SLF001
+			kind='frozen_embedding_decoder',
+			prediction_metadata={'decoder_architecture': architecture},
+			evaluation_metadata={
+				'decoder_architecture': evaluation_architecture
+			},
+		)
 
 
 def test_aggregate_figures_handle_class_missing_from_metric_maps(
@@ -151,7 +176,10 @@ def test_voxel_publish_excludes_raw_volume_and_enforces_size_guard(
 	('kind', 'prediction_spec'),
 	[
 		('token_projection_nearest', 'token_projection_nearest_v1'),
-		('frozen_embedding_decoder', 'frozen_embedding_decoder_v1'),
+		(
+			'frozen_embedding_decoder',
+			'frozen_embedding_decoder_nearest_voxel_ln_v1',
+		),
 	],
 )
 def test_voxel_publish_default_dir_uses_versioned_prediction_spec(
@@ -366,6 +394,24 @@ def _payload(*, kind: str) -> dict[str, object]:
 		'vertical_boundary_f1_at_1': None,
 		'vertical_boundary_class_3_recall_at_1': None,
 	}
+	architecture = voxel_decoder_architecture_mapping(
+		embedding_dim=4,
+		class_count=3,
+		hidden_channels=(4,),
+		upsample_factors=((1, 1, 2),),
+	)
+	prediction_metadata = {
+		'prediction_kind': kind,
+		'model_tag': 'model',
+		'source_identity': {'embedding': 'identity'},
+		'inputs': {'decoder_checkpoint': 'best.pt'},
+	}
+	evaluation_metadata: dict[str, object] = {
+		'policy': {'boundary_tolerances': [1]}
+	}
+	if kind == 'frozen_embedding_decoder':
+		prediction_metadata['decoder_architecture'] = architecture
+		evaluation_metadata['decoder_architecture'] = architecture
 	return build_f3_lithology_voxel_report_payload(
 		metrics=metrics,
 		boundary_metrics=boundary,
@@ -388,13 +434,8 @@ def _payload(*, kind: str) -> dict[str, object]:
 				'mean_iou': '0.5',
 			},
 		),
-		prediction_metadata={
-			'prediction_kind': kind,
-			'model_tag': 'model',
-			'source_identity': {'embedding': 'identity'},
-			'inputs': {'decoder_checkpoint': 'best.pt'},
-		},
-		evaluation_metadata={'policy': {'boundary_tolerances': [1]}},
+		prediction_metadata=prediction_metadata,
+		evaluation_metadata=evaluation_metadata,
 		supervision_metadata={
 			'split_strategy': 'planes',
 			'split_codes': {'unsupervised': 0, 'train': 1, 'validation': 2},

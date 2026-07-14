@@ -20,6 +20,9 @@ from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
 	METRICS_JSON,
 )
 from seis_ssl_cluster.f3.lithology.voxel_split import VALIDATION_VOXEL_SPLIT
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	validate_voxel_decoder_architecture_mapping,
+)
 from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
@@ -133,6 +136,7 @@ class _LoadedRun:
 	metrics: Mapping[str, object]
 	boundary: Mapping[str, object]
 	regions: Mapping[int, Mapping[str, object]]
+	decoder_architecture: Mapping[str, object] | None
 
 
 def summarize_f3_lithology_voxel_results(
@@ -162,6 +166,9 @@ def summarize_f3_lithology_voxel_results(
 		'supervision_split_grid_sha256': runs[0].split_grid_sha256,
 		'class_order': list(runs[0].class_order),
 		'validation_voxel_count': runs[0].validation_voxel_count,
+		'decoder_architecture': dict(
+			cast('Mapping[str, object]', by_key['mae_v1'].decoder_architecture)
+		),
 	}
 	payload: dict[str, object] = {
 		'artifact_type': 'f3_lithology_voxel_results_summary',
@@ -252,6 +259,10 @@ def validate_f3_lithology_voxel_results_bundle(  # noqa: C901, PLR0912
 		or voxel_count <= 0
 	):
 		raise ValueError('original voxel summary validation voxel count is invalid')
+	decoder_architecture = validate_voxel_decoder_architecture_mapping(
+		identity.get('decoder_architecture'),
+		field_prefix='original summary identity.decoder_architecture',
+	)
 	runs = _mapping_sequence(payload.get('runs'), 'original summary runs')
 	keys = {
 		f'{item.get("model")} {item.get("version")}'
@@ -264,6 +275,19 @@ def validate_f3_lithology_voxel_results_bundle(  # noqa: C901, PLR0912
 	}
 	if len(runs) != len(expected_keys) or keys != expected_keys:
 		raise ValueError('original voxel summary six-run matrix is incomplete')
+	for row in runs:
+		expected = decoder_architecture if row.get('version') == 'V1' else {}
+		actual = {
+			'spec': row.get('decoder_spec'),
+			'upsample_mode': row.get('decoder_upsample_mode'),
+			'normalization': row.get('decoder_normalization'),
+		}
+		if actual != {
+			'spec': expected.get('spec', ''),
+			'upsample_mode': expected.get('upsample_mode', ''),
+			'normalization': expected.get('normalization', ''),
+		}:
+			raise ValueError('original voxel summary run decoder identity mismatch')
 	decision = _mapping(
 		payload.get('provisional_decision'), 'original summary provisional_decision'
 	)
@@ -317,10 +341,19 @@ def _load_and_validate_runs(
 				f'{model} source model identity mismatch: '
 				f'expected {EXPECTED_MODEL_TAGS[model]!r}, got {sorted(tags)!r}'
 			)
+	v1_architectures = [
+		item.decoder_architecture for item in loaded if item.run.version == 'V1'
+	]
+	if any(value is None for value in v1_architectures) or any(
+		value != v1_architectures[0] for value in v1_architectures[1:]
+	):
+		raise ValueError('V1 decoder architecture identity mismatch across models')
 	return loaded
 
 
-def _load_run(run: F3LithologyVoxelResultsRun) -> _LoadedRun:  # noqa: C901
+def _load_run(  # noqa: C901, PLR0912
+	run: F3LithologyVoxelResultsRun,
+) -> _LoadedRun:
 	if run.model not in REQUIRED_MODELS or run.version not in REQUIRED_VERSIONS:
 		raise ValueError(f'unsupported run identity: {run.model} {run.version}')
 	paths = {
@@ -358,6 +391,12 @@ def _load_run(run: F3LithologyVoxelResultsRun) -> _LoadedRun:  # noqa: C901
 	model_tag = metadata.get('model_tag')
 	if not isinstance(model_tag, str) or not model_tag:
 		raise ValueError(f'{run.key} model_tag is missing')
+	decoder_architecture = None
+	if run.version == 'V1':
+		decoder_architecture = validate_voxel_decoder_architecture_mapping(
+			metadata.get('decoder_architecture'),
+			field_prefix=f'{run.key} evaluation decoder_architecture',
+		)
 	regions: dict[int, Mapping[str, object]] = {}
 	with paths['regions'].open(newline='', encoding='utf-8') as handle:
 		for row in csv.DictReader(handle):
@@ -368,7 +407,15 @@ def _load_run(run: F3LithologyVoxelResultsRun) -> _LoadedRun:  # noqa: C901
 			raise ValueError(f'{run.key} is missing boundary radius {radius}')
 	_validate_required_metrics(run.key, metrics, boundary, regions)
 	return _LoadedRun(
-		run, model_tag, grid_hash, class_order, count, metrics, boundary, regions
+		run,
+		model_tag,
+		grid_hash,
+		class_order,
+		count,
+		metrics,
+		boundary,
+		regions,
+		decoder_architecture,
 	)
 
 
@@ -443,6 +490,7 @@ def _validate_required_metrics(
 
 
 def _model_row(item: _LoadedRun) -> dict[str, object]:
+	decoder = item.decoder_architecture or {}
 	row: dict[str, object] = {
 		'model': item.run.model,
 		'version': item.run.version,
@@ -452,6 +500,9 @@ def _model_row(item: _LoadedRun) -> dict[str, object]:
 			if item.run.version == 'V0'
 			else 'learned sub-token decoder'
 		),
+		'decoder_spec': decoder.get('spec', ''),
+		'decoder_upsample_mode': decoder.get('upsample_mode', ''),
+		'decoder_normalization': decoder.get('normalization', ''),
 		'macro_f1': _number(item.metrics.get('macro_f1')),
 		'mean_iou': _number(item.metrics.get('mean_iou')),
 		'balanced_accuracy': _number(item.metrics.get('balanced_accuracy')),
@@ -502,11 +553,22 @@ def _delta_row(
 		'baseline_version': baseline.run.version,
 		'candidate_model': candidate.run.model,
 		'candidate_version': candidate.run.version,
+		'decoder_spec': cand['decoder_spec'],
+		'decoder_upsample_mode': cand['decoder_upsample_mode'],
+		'decoder_normalization': cand['decoder_normalization'],
 	}
 	for key in base:
 		if key not in cand:
 			continue
-		if key in {'model', 'version', 'model_tag', 'prediction_label'}:
+		if key in {
+			'model',
+			'version',
+			'model_tag',
+			'prediction_label',
+			'decoder_spec',
+			'decoder_upsample_mode',
+			'decoder_normalization',
+		}:
 			continue
 		row[key] = _delta(base[key], cand[key])
 	return row
@@ -715,6 +777,7 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 	identity = cast('Mapping[str, object]', payload['identity'])
 	decoder = cast('Sequence[Mapping[str, object]]', payload['decoder_comparisons'])
 	encoders = cast('Sequence[Mapping[str, object]]', payload['encoder_comparisons'])
+	runs = cast('Sequence[Mapping[str, object]]', payload['runs'])
 	classes = cast(
 		'Sequence[Mapping[str, object]]', payload['monitored_class_comparisons']
 	)
@@ -729,6 +792,30 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 		f'`{identity["supervision_split_grid_sha256"]}`',
 		f'- class order: `{identity["class_order"]}`',
 		f'- validation voxel count: `{identity["validation_voxel_count"]}`',
+		'- decoder spec: '
+		f'`{_mapping(identity["decoder_architecture"], "decoder")["spec"]}`',
+		'- decoder upsample mode: '
+		f'`{_mapping(identity["decoder_architecture"], "decoder")["upsample_mode"]}`',
+		'- decoder normalization: '
+		f'`{_mapping(identity["decoder_architecture"], "decoder")["normalization"]}`',
+		'',
+		'## Model table',
+		'',
+		'| model | version | decoder spec | upsample mode | normalization |',
+		'|---|---|---|---|---|',
+	]
+	lines.extend(
+		'| {} | {} | {} | {} | {} |'.format(
+			row['model'],
+			row['version'],
+			row.get('decoder_spec', ''),
+			row.get('decoder_upsample_mode', ''),
+			row.get('decoder_normalization', ''),
+		)
+		for row in runs
+	)
+	lines.extend(
+		[
 		'',
 		'## Provisional decisions',
 		'',
@@ -740,13 +827,18 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 		'',
 		'## Q1: learned decoder value (V1 - V0)',
 		'',
-		'| encoder | macro F1 | mean IoU | balanced accuracy | '
-		'boundary F1 t2 | boundary F1 t4 | position MAE |',
-		'|---|---:|---:|---:|---:|---:|---:|',
-	]
+		'| encoder | decoder spec | upsample mode | normalization | macro F1 | '
+		'mean IoU | balanced accuracy | boundary F1 t2 | boundary F1 t4 | '
+		'position MAE |',
+		'|---|---|---|---|---:|---:|---:|---:|---:|---:|',
+		]
+	)
 	lines.extend(
-		'| {} | {} | {} | {} | {} | {} | {} |'.format(
+		'| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |'.format(
 			row['candidate_model'],
+			row['decoder_spec'],
+			row['decoder_upsample_mode'],
+			row['decoder_normalization'],
 			_format(row.get('macro_f1')),
 			_format(row.get('mean_iou')),
 			_format(row.get('balanced_accuracy')),
@@ -765,15 +857,18 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 			'',
 			'## Q2: representation comparison at voxel resolution',
 			'',
-			'| role | comparison | macro F1 | mean IoU | boundary F1 t2 | '
-			'boundary F1 t4 |',
-			'|---|---|---:|---:|---:|---:|',
+			'| role | comparison | decoder spec | upsample mode | normalization | '
+			'macro F1 | mean IoU | boundary F1 t2 | boundary F1 t4 |',
+			'|---|---|---|---|---|---:|---:|---:|---:|',
 		]
 	)
 	lines.extend(
-		'| {} | {} | {} | {} | {} | {} |'.format(
+		'| {} | {} | {} | {} | {} | {} | {} | {} | {} |'.format(
 			row['role'],
 			row['comparison'],
+			row['decoder_spec'],
+			row['decoder_upsample_mode'],
+			row['decoder_normalization'],
 			_format(row.get('macro_f1')),
 			_format(row.get('mean_iou')),
 			_format(row.get('vertical_boundary_f1_t2')),

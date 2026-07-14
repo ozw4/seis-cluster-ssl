@@ -46,6 +46,9 @@ from seis_ssl_cluster.f3.lithology.voxel_robustness import (
 	run_f3_lithology_voxel_v0_split_suite,
 	summarize_f3_lithology_voxel_split_robustness,
 )
+from seis_ssl_cluster.models.voxel_decoder import (
+	voxel_decoder_architecture_mapping,
+)
 
 
 class _SyntheticProbe:
@@ -336,6 +339,11 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 	assert payload['voxel_level_significance_computed'] is False
 	assert payload['p_values_computed'] is False
 	assert payload['confidence_intervals_computed'] is False
+	assert payload['decoder_architecture']['upsample_mode'] == 'nearest'
+	assert result.summary_markdown is not None
+	assert 'voxelwise_layer_norm' in result.summary_markdown.read_text(
+		encoding='utf-8'
+	)
 	primary = next(
 		row
 		for row in payload['aggregates']
@@ -535,6 +543,36 @@ def test_partial_split_summary_is_rejected(tmp_path: Path) -> None:
 		)
 
 
+def test_v1_baseline_candidate_decoder_architecture_mismatch_is_rejected() -> None:
+	architecture = voxel_decoder_architecture_mapping(
+		embedding_dim=2,
+		class_count=2,
+		hidden_channels=(2,),
+		upsample_factors=((2, 2, 2),),
+	)
+	rows = (
+		{
+			'split_id': 'split_000',
+			'model_role': 'baseline',
+			'status': 'complete',
+			'decoder_architecture': architecture,
+		},
+		{
+			'split_id': 'split_000',
+			'model_role': 'candidate',
+			'status': 'complete',
+			'decoder_architecture': {
+				**architecture,
+				'hidden_channels': [4],
+			},
+		},
+	)
+	with pytest.raises(ValueError, match='paired decoder decoder_architecture'):
+		voxel_robustness._validate_paired_decoder_identity(  # noqa: SLF001
+			rows, split_id='split_000'
+		)
+
+
 def test_null_deltas_remain_in_split_denominators() -> None:
 	rows = []
 	for split_index in range(6):
@@ -705,6 +743,13 @@ def _write_evaluation(  # noqa: PLR0913
 	}
 	row_identity: dict[str, object] = {'prediction_dir': str(root)}
 	if prediction_kind == 'frozen_embedding_decoder':
+		architecture = voxel_decoder_architecture_mapping(
+			embedding_dim=2,
+			class_count=2,
+			hidden_channels=(2,),
+			upsample_factors=((2, 2, 2),),
+		)
+		prediction_payload['decoder_architecture'] = architecture
 		sources = root / 'decoder_sources'
 		sources.mkdir()
 		valid_tokens = sources / 'valid_tokens.npy'
@@ -733,6 +778,7 @@ def _write_evaluation(  # noqa: PLR0913
 			'train_tile_manifest': _file_identity(train_tiles),
 			'validation_tile_manifest': _file_identity(validation_tiles),
 			'class_weights': class_weights,
+			'decoder_architecture': architecture,
 		}
 	else:
 		sources = root / 'token_sources'
@@ -775,30 +821,32 @@ def _write_evaluation(  # noqa: PLR0913
 			path.write_text(
 				'{}\n' if path.suffix == '.json' else '\n', encoding='utf-8'
 			)
+	evaluation_payload: dict[str, object] = {
+		'artifact_type': 'f3_lithology_voxel_evaluation',
+		'schema_version': 2,
+		'model_tag': model_tag,
+		'prediction_kind': prediction_kind,
+		'aggregation': {
+			'primary_unit': 'unique_validation_voxel',
+			'split_code': 2,
+			'intersection_voxels_counted_once': True,
+			'per_slice_planes_evaluated_independently': True,
+			'voxel_independence_p_values_computed': False,
+		},
+		'inputs': {
+			'prediction_metadata': _file_identity(prediction_metadata),
+			'voxel_split_grid': _file_identity(split_grid),
+		},
+		'summary': {'unique_validation_voxel_count': 10},
+		'outputs': {
+			name: _file_identity(root / name) for name in EVALUATION_OUTPUT_FILES
+		},
+	}
+	if prediction_kind == 'frozen_embedding_decoder':
+		evaluation_payload['decoder_architecture'] = architecture
 	(root / 'evaluation_metadata.json').write_text(
 		json.dumps(
-			{
-				'artifact_type': 'f3_lithology_voxel_evaluation',
-				'schema_version': 2,
-				'model_tag': model_tag,
-				'prediction_kind': prediction_kind,
-				'aggregation': {
-					'primary_unit': 'unique_validation_voxel',
-					'split_code': 2,
-					'intersection_voxels_counted_once': True,
-					'per_slice_planes_evaluated_independently': True,
-					'voxel_independence_p_values_computed': False,
-				},
-				'inputs': {
-					'prediction_metadata': _file_identity(prediction_metadata),
-					'voxel_split_grid': _file_identity(split_grid),
-				},
-				'summary': {'unique_validation_voxel_count': 10},
-				'outputs': {
-					name: _file_identity(root / name)
-					for name in EVALUATION_OUTPUT_FILES
-				},
-			}
+			evaluation_payload
 		),
 		encoding='utf-8',
 	)
