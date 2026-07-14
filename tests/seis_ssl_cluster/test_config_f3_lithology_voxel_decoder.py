@@ -9,6 +9,12 @@ import pytest
 from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
 	f3_lithology_voxel_decoder_config_from_mapping,
 )
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_SPEC,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+	voxel_decoder_architecture_mapping,
+)
 
 
 def _config(tmp_path):
@@ -20,11 +26,13 @@ def _config(tmp_path):
 		'embeddings': {'input_dir': str(root / 'embeddings')},
 		'voxel_dataset': {'input_dir': str(root / 'voxel_supervision')},
 		'decoder': {
-			'spec': 'frozen_embedding_decoder_v1',
+			'spec': VOXEL_DECODER_SPEC,
 			'embedding_dim': 2,
 			'class_count': 2,
 			'hidden_channels': [4],
 			'upsample_factors': [[1, 1, 1]],
+			'upsample_mode': VOXEL_DECODER_UPSAMPLE_MODE,
+			'normalization': VOXEL_DECODER_NORMALIZATION,
 		},
 		'tiles': {'core_size_tokens': [1, 1, 1], 'context_halo_tokens': [0, 0, 0]},
 		'train': {
@@ -44,9 +52,48 @@ def _config(tmp_path):
 
 def test_voxel_decoder_config_resolves_strict_settings(tmp_path) -> None:
 	config = f3_lithology_voxel_decoder_config_from_mapping(_config(tmp_path))
+	assert config.decoder.spec == VOXEL_DECODER_SPEC
+	assert config.decoder.upsample_mode == VOXEL_DECODER_UPSAMPLE_MODE
+	assert config.decoder.normalization == VOXEL_DECODER_NORMALIZATION
 	assert config.decoder.hidden_channels == (4,)
 	assert config.tiles.context_halo_tokens == (0, 0, 0)
-	assert config.to_dict()['decoder']['upsample_factors'] == [[1, 1, 1]]
+	assert config.to_dict()['decoder'] == voxel_decoder_architecture_mapping(
+		embedding_dim=2,
+		class_count=2,
+		hidden_channels=(4,),
+		upsample_factors=((1, 1, 1),),
+	)
+
+
+@pytest.mark.parametrize('field', ['upsample_mode', 'normalization'])
+def test_voxel_decoder_config_requires_implementation_identity(
+	tmp_path, field: str
+) -> None:
+	raw = deepcopy(_config(tmp_path))
+	del raw['decoder'][field]
+
+	with pytest.raises(ValueError, match=rf'decoder\.{field} must be'):
+		f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+
+@pytest.mark.parametrize(
+	('field', 'value', 'expected'),
+	[
+		('spec', 'frozen_embedding_decoder_v1', VOXEL_DECODER_SPEC),
+		('upsample_mode', 'trilinear', VOXEL_DECODER_UPSAMPLE_MODE),
+		('normalization', 'group_norm', VOXEL_DECODER_NORMALIZATION),
+	],
+)
+def test_voxel_decoder_config_rejects_unsupported_implementation(
+	tmp_path, field: str, value: str, expected: str
+) -> None:
+	raw = deepcopy(_config(tmp_path))
+	raw['decoder'][field] = value
+
+	with pytest.raises(
+		ValueError, match=rf'decoder\.{field} must be {expected!r}'
+	):
+		f3_lithology_voxel_decoder_config_from_mapping(raw)
 
 
 def test_voxel_decoder_config_rejects_unknown_keys(tmp_path) -> None:

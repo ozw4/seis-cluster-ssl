@@ -18,6 +18,13 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
 )
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_SPEC,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+	validate_voxel_decoder_implementation,
+	voxel_decoder_architecture_mapping,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -25,13 +32,15 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class VoxelDecoderSpec:
-	"""Architecture of the V1 dense decoder."""
+	"""Canonical architecture of the dense decoder."""
 
 	spec: str
 	embedding_dim: int
 	class_count: int
 	hidden_channels: tuple[int, ...]
 	upsample_factors: tuple[tuple[int, int, int], ...]
+	upsample_mode: str
+	normalization: str
 
 
 @dataclass(frozen=True)
@@ -92,7 +101,15 @@ class F3LithologyVoxelDecoderConfig:
 				'input_dir': str(self.embeddings_input_dir),
 			},
 			'voxel_dataset': {'input_dir': str(self.voxel_dataset_input_dir)},
-			'decoder': _plain_dataclass(self.decoder),
+			'decoder': voxel_decoder_architecture_mapping(
+				spec=self.decoder.spec,
+				embedding_dim=self.decoder.embedding_dim,
+				class_count=self.decoder.class_count,
+				hidden_channels=self.decoder.hidden_channels,
+				upsample_factors=self.decoder.upsample_factors,
+				upsample_mode=self.decoder.upsample_mode,
+				normalization=self.decoder.normalization,
+			),
 			'tiles': _plain_dataclass(self.tiles),
 			'train': _plain_dataclass(self.train),
 			'outputs': {'output_dir': str(self.output_dir)},
@@ -150,6 +167,8 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 				'class_count',
 				'hidden_channels',
 				'upsample_factors',
+				'upsample_mode',
+				'normalization',
 			}
 		),
 		prefix='decoder',
@@ -201,11 +220,12 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 		sources=(embeddings_dir, voxel_dir),
 	)
 
-	spec = _required_str(decoder, 'spec', prefix='decoder')
-	if spec != 'frozen_embedding_decoder_v1':
-		raise ValueError(
-			f'decoder.spec must be frozen_embedding_decoder_v1; got {spec!r}'
-		)
+	validate_voxel_decoder_implementation(
+		spec=decoder.get('spec'),
+		upsample_mode=decoder.get('upsample_mode'),
+		normalization=decoder.get('normalization'),
+		field_prefix='decoder',
+	)
 	class_weight = _required_str(train, 'class_weight', prefix='train')
 	if class_weight != 'balanced':
 		raise ValueError("train.class_weight must be 'balanced'")
@@ -239,7 +259,7 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 		embeddings_input_dir=embeddings_dir,
 		voxel_dataset_input_dir=voxel_dir,
 		decoder=VoxelDecoderSpec(
-			spec=spec,
+			spec=VOXEL_DECODER_SPEC,
 			embedding_dim=_optional_positive_int(
 				decoder.get('embedding_dim'), 'decoder.embedding_dim'
 			),
@@ -250,6 +270,8 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 				decoder.get('hidden_channels'), 'decoder.hidden_channels'
 			),
 			upsample_factors=_factor_sequence(decoder.get('upsample_factors')),
+			upsample_mode=VOXEL_DECODER_UPSAMPLE_MODE,
+			normalization=VOXEL_DECODER_NORMALIZATION,
 		),
 		tiles=VoxelDecoderTileSettings(
 			core_size_tokens=_triplet(

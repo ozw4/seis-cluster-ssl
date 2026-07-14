@@ -76,6 +76,8 @@ def _print_dry_run(config: F3LithologyVoxelDecoderConfig) -> None:
 	print(f'voxel_dataset.metadata: {plan.voxel_metadata}')
 	print(f'voxel_dataset.split_grid: {plan.split_grid}')
 	print(f'decoder.spec: {config.decoder.spec}')
+	print(f'decoder.upsample_mode: {config.decoder.upsample_mode}')
+	print(f'decoder.normalization: {config.decoder.normalization}')
 	print(f'decoder.class_count: {config.decoder.class_count}')
 	print(f'outputs.output_dir: {config.output_dir}')
 	for name in (

@@ -1154,11 +1154,13 @@ def _synthetic_workflow_configs(  # noqa: PLR0915
 		class_info=class_info,
 		segy_geometry_json=geometry,
 		decoder=VoxelDecoderSpec(
-			spec='frozen_embedding_decoder_v1',
+			spec='frozen_embedding_decoder_nearest_voxel_ln_v1',
 			embedding_dim=2,
 			class_count=2,
 			hidden_channels=(2,),
 			upsample_factors=((2, 2, 2),),
+			upsample_mode='nearest',
+			normalization='voxelwise_layer_norm',
 		),
 		tiles=VoxelDecoderTileSettings(
 			core_size_tokens=(2, 2, 2), context_halo_tokens=(0, 0, 0)

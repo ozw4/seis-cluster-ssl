@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from io import BytesIO
 
 import pytest
 import torch
 
-from seis_ssl_cluster.models.voxel_decoder import VoxelDecoder3D
+from seis_ssl_cluster.models.voxel_decoder import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_SPEC,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+	VoxelDecoder3D,
+)
 
 
 def _small_model() -> VoxelDecoder3D:
@@ -27,6 +33,22 @@ def test_default_decoder_upsamples_each_axis_by_eight() -> None:
 	logits = model(embeddings)
 
 	assert logits.shape == (1, 6, 16, 8, 24)
+
+
+def test_default_decoder_has_canonical_implementation_identity() -> None:
+	model = VoxelDecoder3D()
+
+	assert model.spec == VOXEL_DECODER_SPEC
+	assert model.upsample_mode == VOXEL_DECODER_UPSAMPLE_MODE
+	assert model.normalization == VOXEL_DECODER_NORMALIZATION
+	assert all(
+		block.upsample_mode == VOXEL_DECODER_UPSAMPLE_MODE
+		for block in model.upsample_blocks
+	)
+	assert all(
+		block.normalization_name == VOXEL_DECODER_NORMALIZATION
+		for block in model.upsample_blocks
+	)
 
 
 @pytest.mark.parametrize(
@@ -131,6 +153,35 @@ def test_upsample_blocks_use_voxelwise_channel_normalization() -> None:
 	assert [
 		block.normalization.normalized_shape for block in model.upsample_blocks
 	] == [(10,), (7,), (12,)]
+
+
+@pytest.mark.parametrize(
+	('field', 'value'),
+	[
+		('spec', 'frozen_embedding_decoder_v1'),
+		('upsample_mode', 'trilinear'),
+		('normalization', 'group_norm'),
+	],
+)
+def test_decoder_rejects_unsupported_implementation(
+	field: str, value: str
+) -> None:
+	with pytest.raises(ValueError, match=rf'{field} must be'):
+		VoxelDecoder3D(**{field: value})
+
+
+def test_architecture_mapping_is_json_compatible_and_matches_constructor() -> None:
+	model = _small_model()
+
+	assert json.loads(json.dumps(model.architecture)) == {
+		'spec': VOXEL_DECODER_SPEC,
+		'embedding_dim': 8,
+		'class_count': 3,
+		'hidden_channels': [8, 4],
+		'upsample_factors': [[2, 1, 1], [1, 2, 2]],
+		'upsample_mode': VOXEL_DECODER_UPSAMPLE_MODE,
+		'normalization': VOXEL_DECODER_NORMALIZATION,
+	}
 
 
 def test_state_dict_round_trip_preserves_output() -> None:

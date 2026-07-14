@@ -19,6 +19,10 @@ from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	validate_f3_voxel_prediction_artifact,
 	write_f3_voxel_prediction_metadata,
 )
+from seis_ssl_cluster.models.voxel_decoder import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+)
 
 SHAPE = (2, 2, 2)
 CLASS_IDS = (2, 5)
@@ -198,6 +202,53 @@ def test_class_order_mismatch_is_rejected(tmp_path: Path) -> None:
 		validate_f3_voxel_prediction_artifact(output_dir)
 
 
+def test_learned_decoder_metadata_requires_architecture(tmp_path: Path) -> None:
+	output_dir = tmp_path / 'predictions'
+	_write_artifact(output_dir)
+	paths = f3_voxel_prediction_artifact_paths(output_dir)
+	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata['prediction_kind'] = 'frozen_embedding_decoder'
+	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+
+	with pytest.raises(ValueError, match='decoder_architecture'):
+		validate_f3_voxel_prediction_artifact(output_dir)
+
+
+def test_learned_decoder_metadata_rejects_old_architecture_spec(
+	tmp_path: Path,
+) -> None:
+	output_dir = tmp_path / 'predictions'
+	_write_artifact(output_dir)
+	paths = f3_voxel_prediction_artifact_paths(output_dir)
+	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata['prediction_kind'] = 'frozen_embedding_decoder'
+	metadata['decoder_architecture'] = {
+		'spec': 'frozen_embedding_decoder_v1',
+		'embedding_dim': 2,
+		'class_count': 2,
+		'hidden_channels': [2],
+		'upsample_factors': [[1, 1, 1]],
+		'upsample_mode': VOXEL_DECODER_UPSAMPLE_MODE,
+		'normalization': VOXEL_DECODER_NORMALIZATION,
+	}
+	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+
+	with pytest.raises(ValueError, match=r'decoder_architecture\.spec'):
+		validate_f3_voxel_prediction_artifact(output_dir)
+
+
+def test_projection_metadata_does_not_require_decoder_architecture(
+	tmp_path: Path,
+) -> None:
+	output_dir = tmp_path / 'predictions'
+	_write_artifact(output_dir)
+
+	artifact = validate_f3_voxel_prediction_artifact(output_dir)
+
+	assert artifact.metadata['prediction_kind'] == 'token_projection_nearest'
+	assert 'decoder_architecture' not in artifact.metadata
+
+
 @pytest.mark.parametrize(
 	('outputs', 'error', 'match'),
 	[
@@ -285,7 +336,7 @@ def test_staged_commit_and_overwrite_safety(tmp_path: Path) -> None:
 	}
 
 
-def test_atomic_overwrite_rejects_unsupported_platform_without_data_loss(
+def test_overwrite_falls_back_when_atomic_exchange_is_unsupported(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	target = tmp_path / 'run'
@@ -295,18 +346,93 @@ def test_atomic_overwrite_rejects_unsupported_platform_without_data_loss(
 	replacement = create_f3_voxel_prediction_staging_paths(target, overwrite=True)
 	_write_artifact(replacement.output_dir, first_class=5)
 
-	def unsupported_libc(*_args: object, **_kwargs: object) -> object:
-		return object()
+	def unsupported_exchange(_source: Path, _target: Path) -> None:
+		raise NotImplementedError('RENAME_EXCHANGE is unsupported')
 
-	monkeypatch.setattr(artifact_module.ctypes, 'CDLL', unsupported_libc)
-	with pytest.raises(NotImplementedError, match=r'requires renameat2'):
-		commit_f3_voxel_prediction_artifact(replacement, target, overwrite=True)
+	monkeypatch.setattr(
+		artifact_module, '_exchange_directories', unsupported_exchange
+	)
+	commit_f3_voxel_prediction_artifact(replacement, target, overwrite=True)
 
-	assert replacement.output_dir.is_dir()
+	assert not replacement.output_dir.exists()
+	assert not list(tmp_path.glob('.run.backup-*'))
 	assert validate_f3_voxel_prediction_artifact(target).metadata['summary'] == {
 		'valid_voxel_count': 4,
 		'invalid_voxel_count': 4,
+		'class_prediction_counts': {'2': 0, '5': 4},
+	}
+
+
+def test_portable_overwrite_rolls_back_failed_promotion(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	target = tmp_path / 'run'
+	staging = create_f3_voxel_prediction_staging_paths(target)
+	_write_artifact(staging.output_dir, include_probabilities=True)
+	commit_f3_voxel_prediction_artifact(staging, target)
+	replacement = create_f3_voxel_prediction_staging_paths(target, overwrite=True)
+	_write_artifact(
+		replacement.output_dir, include_probabilities=True, first_class=5
+	)
+
+	def unsupported_exchange(_source: Path, _target: Path) -> None:
+		raise NotImplementedError('RENAME_EXCHANGE is unsupported')
+
+	def fail_promotion(_source: Path, destination: Path) -> None:
+		assert not destination.exists()
+		assert len(list(tmp_path.glob('.run.backup-*'))) == 1
+		raise OSError('injected promotion failure')
+
+	monkeypatch.setattr(
+		artifact_module, '_exchange_directories', unsupported_exchange
+	)
+	monkeypatch.setattr(
+		artifact_module, '_promote_staging_directory', fail_promotion
+	)
+	with pytest.raises(OSError, match='injected promotion failure'):
+		commit_f3_voxel_prediction_artifact(replacement, target, overwrite=True)
+
+	artifact = validate_f3_voxel_prediction_artifact(target)
+	assert artifact.metadata['summary'] == {
+		'valid_voxel_count': 4,
+		'invalid_voxel_count': 4,
 		'class_prediction_counts': {'2': 4, '5': 0},
+	}
+	assert np.all(artifact.arrays.predictions[0] == 2)
+	assert artifact.arrays.probabilities is not None
+	assert np.all(artifact.arrays.probabilities[0, :, :, 0] == np.float16(0.75))
+	assert replacement.output_dir.is_dir()
+	assert not list(tmp_path.glob('.run.backup-*'))
+
+
+def test_atomic_exchange_overwrite_removes_old_target(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	target = tmp_path / 'run'
+	staging = create_f3_voxel_prediction_staging_paths(target)
+	_write_artifact(staging.output_dir)
+	commit_f3_voxel_prediction_artifact(staging, target)
+	replacement = create_f3_voxel_prediction_staging_paths(target, overwrite=True)
+	_write_artifact(replacement.output_dir, first_class=5)
+	exchanged = False
+
+	def exchange(source: Path, destination: Path) -> None:
+		nonlocal exchanged
+		swap = tmp_path / '.exchange'
+		source.rename(swap)
+		destination.rename(source)
+		swap.rename(destination)
+		exchanged = True
+
+	monkeypatch.setattr(artifact_module, '_exchange_directories', exchange)
+	commit_f3_voxel_prediction_artifact(replacement, target, overwrite=True)
+
+	assert exchanged
+	assert not replacement.output_dir.exists()
+	assert validate_f3_voxel_prediction_artifact(target).metadata['summary'] == {
+		'valid_voxel_count': 4,
+		'invalid_voxel_count': 4,
+		'class_prediction_counts': {'2': 0, '5': 4},
 	}
 
 

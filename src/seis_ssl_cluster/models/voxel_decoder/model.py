@@ -8,6 +8,14 @@ import torch
 from torch import nn
 from torch.nn.functional import interpolate
 
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_SPEC,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+	validate_voxel_decoder_implementation,
+	voxel_decoder_architecture_mapping,
+)
+
 
 class _VoxelwiseLayerNorm(nn.LayerNorm):
 	"""Normalize channels independently at each voxel location."""
@@ -25,9 +33,19 @@ class _UpsampleBlock(nn.Module):
 		in_channels: int,
 		out_channels: int,
 		upsample_factor: tuple[int, int, int],
+		*,
+		upsample_mode: str,
+		normalization: str,
 	) -> None:
 		super().__init__()
+		validate_voxel_decoder_implementation(
+			spec=VOXEL_DECODER_SPEC,
+			upsample_mode=upsample_mode,
+			normalization=normalization,
+		)
 		self.upsample_factor = upsample_factor
+		self.upsample_mode = upsample_mode
+		self.normalization_name = normalization
 		self.convolution = nn.Conv3d(
 			in_channels,
 			out_channels,
@@ -42,7 +60,7 @@ class _UpsampleBlock(nn.Module):
 		x = interpolate(
 			x,
 			scale_factor=self.upsample_factor,
-			mode='nearest',
+			mode=self.upsample_mode,
 		)
 		return self.activation(self.normalization(self.convolution(x)))
 
@@ -50,7 +68,7 @@ class _UpsampleBlock(nn.Module):
 class VoxelDecoder3D(nn.Module):
 	"""Decode frozen encoder embeddings into dense voxel-class logits."""
 
-	def __init__(
+	def __init__(  # noqa: PLR0913
 		self,
 		*,
 		embedding_dim: int = 384,
@@ -62,9 +80,20 @@ class VoxelDecoder3D(nn.Module):
 			(2, 2, 2),
 		),
 		patch_size_xyz: Sequence[int] = (8, 8, 8),
+		spec: str = VOXEL_DECODER_SPEC,
+		upsample_mode: str = VOXEL_DECODER_UPSAMPLE_MODE,
+		normalization: str = VOXEL_DECODER_NORMALIZATION,
 	) -> None:
 		"""Initialize the projection, upsampling blocks, and logits head."""
 		super().__init__()
+		validate_voxel_decoder_implementation(
+			spec=spec,
+			upsample_mode=upsample_mode,
+			normalization=normalization,
+		)
+		self.spec = spec
+		self.upsample_mode = upsample_mode
+		self.normalization = normalization
 		self.embedding_dim = _positive_int(embedding_dim, 'embedding_dim')
 		self.class_count = _positive_int(class_count, 'class_count')
 		(
@@ -85,7 +114,13 @@ class VoxelDecoder3D(nn.Module):
 		)
 		stage_inputs = (self.hidden_channels[0], *self.hidden_channels[:-1])
 		self.upsample_blocks = nn.ModuleList(
-			_UpsampleBlock(in_channels, out_channels, factor)
+			_UpsampleBlock(
+				in_channels,
+				out_channels,
+				factor,
+				upsample_mode=self.upsample_mode,
+				normalization=self.normalization,
+			)
 			for in_channels, out_channels, factor in zip(
 				stage_inputs,
 				self.hidden_channels,
@@ -97,6 +132,19 @@ class VoxelDecoder3D(nn.Module):
 			self.hidden_channels[-1],
 			self.class_count,
 			kernel_size=1,
+		)
+
+	@property
+	def architecture(self) -> dict[str, object]:
+		"""Return this decoder's canonical JSON-compatible architecture."""
+		return voxel_decoder_architecture_mapping(
+			spec=self.spec,
+			embedding_dim=self.embedding_dim,
+			class_count=self.class_count,
+			hidden_channels=self.hidden_channels,
+			upsample_factors=self.upsample_factors,
+			upsample_mode=self.upsample_mode,
+			normalization=self.normalization,
 		)
 
 	def forward(
@@ -126,7 +174,7 @@ class VoxelDecoder3D(nn.Module):
 				valid_voxels = interpolate(
 					valid_voxels.to(dtype=x.dtype),
 					scale_factor=block.upsample_factor,
-					mode='nearest',
+					mode=self.upsample_mode,
 				).to(dtype=torch.bool)
 				x = x.masked_fill(~valid_voxels, 0.0)
 		return self.logits_head(x)

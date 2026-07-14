@@ -32,6 +32,7 @@ from seis_ssl_cluster.models.voxel_decoder import (
 	VoxelDecoder3D,
 	validate_context_halo_tokens,
 	validate_voxel_decoder_architecture,
+	validate_voxel_decoder_architecture_mapping,
 )
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	load_voxel_decoder_checkpoint,
@@ -122,6 +123,24 @@ def inspect_f3_lithology_voxel_inference(
 	checkpoint_config = _mapping(
 		checkpoint.get('resolved_config'), 'checkpoint resolved_config'
 	)
+	checkpoint_architecture = validate_voxel_decoder_architecture_mapping(
+		checkpoint.get('decoder_architecture'),
+		field_prefix='checkpoint decoder_architecture',
+	)
+	checkpoint_config_architecture = validate_voxel_decoder_architecture_mapping(
+		checkpoint_config.get('decoder'),
+		field_prefix='checkpoint resolved_config.decoder',
+	)
+	resolved_architecture = validate_voxel_decoder_architecture_mapping(
+		resolved_config.get('decoder'),
+		field_prefix='resolved_config.json.decoder',
+	)
+	if not (
+		checkpoint_architecture
+		== checkpoint_config_architecture
+		== resolved_architecture
+	):
+		raise ValueError('decoder architecture identity mismatch')
 	if checkpoint_config != resolved_config:
 		raise ValueError('decoder resolved config does not match checkpoint')
 	_validate_config_binding(config, resolved_config)
@@ -152,7 +171,7 @@ def inspect_f3_lithology_voxel_inference(
 		embedding_metadata.get('patch_size'), 'embedding patch_size'
 	)
 	embedding_dim = _embedding_dim(embedding_metadata)
-	decoder_spec = _mapping(resolved_config.get('decoder'), 'resolved decoder config')
+	decoder_spec = resolved_architecture
 	if decoder_spec.get('embedding_dim') != embedding_dim:
 		raise ValueError('decoder embedding_dim does not match selected embeddings')
 	validate_voxel_decoder_architecture(
@@ -447,12 +466,19 @@ def _load_decoder(
 ) -> VoxelDecoder3D:
 	spec = plan.decoder_spec
 	model = VoxelDecoder3D(
+		spec=_nonempty_str(spec.get('spec'), 'decoder.spec'),
 		embedding_dim=_positive_int(spec.get('embedding_dim'), 'decoder.embedding_dim'),
 		class_count=_positive_int(spec.get('class_count'), 'decoder.class_count'),
 		hidden_channels=_positive_sequence(
 			spec.get('hidden_channels'), 'decoder.hidden_channels'
 		),
 		upsample_factors=_factor_sequence(spec.get('upsample_factors')),
+		upsample_mode=_nonempty_str(
+			spec.get('upsample_mode'), 'decoder.upsample_mode'
+		),
+		normalization=_nonempty_str(
+			spec.get('normalization'), 'decoder.normalization'
+		),
 		patch_size_xyz=plan.patch_size_xyz,
 	).to(device)
 	state = plan.checkpoint_payload.get('model_state_dict')
@@ -580,6 +606,7 @@ def _prediction_metadata(
 		'artifact_type': ARTIFACT_TYPE,
 		'schema_version': SCHEMA_VERSION,
 		'prediction_kind': 'frozen_embedding_decoder',
+		'decoder_architecture': dict(plan.decoder_spec),
 		'model_tag': config.model['tag'],
 		'class_probability_order': list(plan.class_ids),
 		'classes': [item.to_dict() for item in plan.classes],
@@ -711,6 +738,12 @@ def _embedding_dim(metadata: Mapping[str, object]) -> int:
 def _bool(value: object, label: str) -> bool:
 	if not isinstance(value, bool):
 		raise TypeError(f'{label} must be boolean')
+	return value
+
+
+def _nonempty_str(value: object, label: str) -> str:
+	if not isinstance(value, str) or not value:
+		raise TypeError(f'{label} must be a non-empty string')
 	return value
 
 
