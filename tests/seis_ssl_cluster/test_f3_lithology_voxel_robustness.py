@@ -197,6 +197,32 @@ def test_v0_rejects_noncanonical_probe_spec(tmp_path: Path) -> None:
 		voxel_robustness.voxel_v0_split_jobs(v0_config)
 
 
+def test_v0_normalizes_legacy_probe_manifest_rows_with_strict_identity(
+	tmp_path: Path,
+) -> None:
+	build_config, v0_config, _ = _synthetic_workflow_configs(tmp_path)
+	build_f3_lithology_voxel_split_datasets(build_config)
+	payload = json.loads(v0_config.probe_run_manifest.read_text(encoding='utf-8'))
+	for row in payload['rows']:
+		for key in ('probe_spec', 'probe_joblib', 'scaler_joblib'):
+			row.pop(key)
+	v0_config.probe_run_manifest.write_text(json.dumps(payload), encoding='utf-8')
+
+	jobs = voxel_robustness.voxel_v0_split_jobs(v0_config)
+
+	assert len(jobs) == 4
+	resolved_path = (
+		Path(payload['rows'][0]['probe_output_dir']) / 'probe_config_resolved.json'
+	)
+	resolved = json.loads(resolved_path.read_text(encoding='utf-8'))
+	resolved['outputs']['probe_joblib'] = str(tmp_path / 'unbound-probe.joblib')
+	resolved_path.write_text(json.dumps(resolved), encoding='utf-8')
+	with pytest.raises(
+		ValueError, match='legacy probe output probe_joblib path identity mismatch'
+	):
+		voxel_robustness.voxel_v0_split_jobs(v0_config)
+
+
 def test_v0_rejects_probe_settings_different_from_manifest(tmp_path: Path) -> None:
 	build_config, v0_config, _ = _synthetic_workflow_configs(tmp_path)
 	build_f3_lithology_voxel_split_datasets(build_config)

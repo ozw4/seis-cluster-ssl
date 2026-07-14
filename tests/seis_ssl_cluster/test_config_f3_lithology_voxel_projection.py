@@ -105,6 +105,40 @@ def test_projection_config_resolves_geometry_and_defaults(tmp_path: Path) -> Non
 	assert resolved.output_paths.predictions.name == 'f3_voxel_predictions.npy'
 
 
+def test_projection_config_accepts_inventory_class_info_payload(
+	tmp_path: Path,
+) -> None:
+	config = projection_config(tmp_path)
+	class_info = Path(config['labels']['class_info'])  # type: ignore[index]
+	class_info.write_text(
+		json.dumps(
+			{
+				'class_count': 2,
+				'classes': [
+					{
+						'class_id': 2,
+						'class_name': 'class-two',
+						'hex_color': '#010203',
+						'rgb': [1, 2, 3],
+					},
+					{
+						'class_id': 5,
+						'class_name': 'class-five',
+						'hex_color': '#040506',
+						'rgb': [4, 5, 6],
+					},
+				],
+				'source_path': '/source/F3/interpretation/class_info.json',
+			}
+		),
+		encoding='utf-8',
+	)
+
+	resolved = f3_lithology_voxel_projection_config_from_mapping(config)
+
+	assert resolved.source.class_probability_order == (2, 5)
+
+
 @pytest.mark.parametrize(
 	('section', 'key', 'value', 'error'),
 	[

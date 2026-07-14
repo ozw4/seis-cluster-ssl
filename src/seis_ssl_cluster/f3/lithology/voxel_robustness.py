@@ -305,21 +305,7 @@ def voxel_v0_split_jobs(
 			'paired_identity_hash',
 		),
 	)
-	probe_rows = _paired_rows(
-		config.probe_run_manifest,
-		artifact_type='f3_lithology_split_probe_run_manifest',
-		required=(
-			'split_id',
-			'model_role',
-			'model_tag',
-			'token_dataset_root',
-			'probe_output_dir',
-			'probe_spec',
-			'probe_joblib',
-			'scaler_joblib',
-			'paired_identity_hash',
-		),
-	)
+	probe_rows = _probe_rows(config.probe_run_manifest)
 	_validate_job_sources(voxel_rows, dataset_rows, probe_rows, config.models)
 	_validate_v0_source_artifacts(config, voxel_rows, dataset_rows, probe_rows)
 	return tuple(
@@ -344,7 +330,7 @@ def run_f3_lithology_voxel_v0_split_suite(
 		str(row['split_id']): row for row in _voxel_rows(config.voxel_dataset_manifest)
 	}
 	dataset_by_key = _rows_by_key(_manifest_rows(config.split_dataset_manifest))
-	probe_by_key = _rows_by_key(_manifest_rows(config.probe_run_manifest))
+	probe_by_key = _rows_by_key(_probe_rows(config.probe_run_manifest))
 	models = {model.role: model for model in config.models}
 	rows: list[dict[str, object]] = []
 	manifest = config.output_root / 'v0_split_run_manifest.json'
@@ -1220,6 +1206,86 @@ def _probe_manifest_settings(path: Path) -> Mapping[str, object]:
 			f'V0 probe manifest must use probe spec {V0_PROBE_SPEC!r}'
 		)
 	return probe
+
+
+def _probe_rows(path: Path) -> tuple[Mapping[str, object], ...]:
+	probe_settings = _probe_manifest_settings(path)
+	rows = _paired_rows(
+		path,
+		artifact_type='f3_lithology_split_probe_run_manifest',
+		required=(
+			'split_id',
+			'model_role',
+			'model_tag',
+			'token_dataset_root',
+			'probe_output_dir',
+			'paired_identity_hash',
+		),
+	)
+	identity_keys = frozenset({'probe_spec', 'probe_joblib', 'scaler_joblib'})
+	normalized = []
+	for index, row in enumerate(rows):
+		present = identity_keys.intersection(row)
+		if present == identity_keys:
+			normalized.append(row)
+			continue
+		if present:
+			missing = sorted(identity_keys - present)
+			raise ValueError(
+				f'probe manifest row {index} has partial identity fields; '
+				f'missing: {missing!r}'
+			)
+		normalized.append(
+			_normalize_legacy_probe_row(row, probe_settings=probe_settings)
+		)
+	return tuple(normalized)
+
+
+def _normalize_legacy_probe_row(  # noqa: C901
+	row: Mapping[str, object], *, probe_settings: Mapping[str, object]
+) -> Mapping[str, object]:
+	root_value = row.get('probe_output_dir')
+	if not isinstance(root_value, str) or not root_value:
+		raise TypeError('legacy probe output directory must be a non-empty path')
+	root = Path(root_value)
+	probe_path = root / 'probe.joblib'
+	scaler_path = root / 'scaler.joblib'
+	config_path = root / 'probe_config_resolved.json'
+	for artifact_path in (probe_path, scaler_path, config_path):
+		if not artifact_path.is_file():
+			raise FileNotFoundError(
+				f'missing legacy split probe input: {artifact_path}'
+			)
+	resolved = _read_json(config_path)
+	if resolved.get('artifact_type') != 'f3_lithology_probe':
+		raise ValueError('legacy probe resolved config artifact_type mismatch')
+	if _mapping_value(resolved, 'probe') != probe_settings:
+		raise ValueError('legacy probe settings do not match the run manifest')
+	model = _mapping_value(resolved, 'model')
+	for row_key, resolved_key in (('model_tag', 'tag'), ('model_role', 'role')):
+		if model.get(resolved_key) != row[row_key]:
+			raise ValueError(f'legacy probe {row_key} identity mismatch')
+	token_dataset = _mapping_value(resolved, 'token_dataset')
+	for key, expected in (
+		('input_dir', row['token_dataset_root']),
+		('split_id', row['split_id']),
+		('paired_identity_hash', row['paired_identity_hash']),
+	):
+		if token_dataset.get(key) != expected:
+			raise ValueError(f'legacy probe token dataset {key} identity mismatch')
+	outputs = _mapping_value(resolved, 'outputs')
+	for key, expected in (
+		('probe_joblib', probe_path),
+		('scaler_joblib', scaler_path),
+	):
+		if outputs.get(key) != str(expected):
+			raise ValueError(f'legacy probe output {key} path identity mismatch')
+	return {
+		**row,
+		'probe_spec': probe_settings['spec'],
+		'probe_joblib': _identity(probe_path),
+		'scaler_joblib': _identity(scaler_path),
+	}
 
 
 def _validate_probe_artifact(  # noqa: C901, PLR0912

@@ -13,6 +13,9 @@ from seis_ssl_cluster.config.f3_lithology_voxel_evaluation import (
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.io.labels import read_class_info
+from seis_ssl_cluster.f3.lithology.voxel_boundary_metrics import (
+	compute_vertical_boundary_metrics,
+)
 from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
 	EVALUATION_OUTPUT_FILES,
 	evaluate_f3_lithology_voxels,
@@ -95,6 +98,37 @@ def test_error_prediction_matches_direct_unique_voxel_accuracy(tmp_path: Path) -
 	boundary = json.loads(result.boundary_metrics_json.read_text(encoding='utf-8'))
 	assert boundary['vertical_boundary_precision_at_1'] == pytest.approx(6 / 7)
 	assert boundary['vertical_boundary_f1_at_1'] == pytest.approx(12 / 13)
+
+
+def test_aggregate_boundary_position_metrics_match_direct_at_each_tolerance(
+	tmp_path: Path,
+) -> None:
+	config = _fixture(tmp_path, boundary_tolerances=(1, 4, 8))
+	result = evaluate_f3_lithology_voxels(config)
+	boundary = json.loads(result.boundary_metrics_json.read_text(encoding='utf-8'))
+	labels = np.load(config.source_label_volume)
+	predictions = np.load(
+		config.prediction_input_dir / 'f3_voxel_predictions.npy'
+	)
+	grid = np.load(
+		config.voxel_dataset_input_dir / 'supervision_split_grid.npy'
+	)
+	mask = grid == 2
+	direct = compute_vertical_boundary_metrics(
+		labels,
+		predictions,
+		evaluation_mask=mask,
+		prediction_valid_mask=mask,
+		class_ids=(0, 3, 5),
+		tolerances=config.boundary_tolerances,
+		monitored_class_ids=config.monitored_class_ids,
+	)
+
+	for tolerance in config.boundary_tolerances:
+		for metric in ('position_mae', 'position_median_ae', 'miss_rate'):
+			key = f'vertical_boundary_{metric}_at_{tolerance}'
+			assert boundary[key] == direct[key]
+	assert boundary['vertical_boundary_position_mae_at_8'] == 0.0
 
 
 def test_no_boundary_and_zero_support_use_standard_json_nulls(tmp_path: Path) -> None:
@@ -341,6 +375,7 @@ def _fixture(  # noqa: PLR0913, PLR0915
 	root: Path,
 	*,
 	chunk_size_x: int = 1,
+	boundary_tolerances: tuple[int, ...] = (1, 2),
 	invalid_coordinate: tuple[int, int, int] | None = None,
 	error_coordinate: tuple[int, int, int] | None = None,
 	constant_labels: bool = False,
@@ -525,7 +560,7 @@ def _fixture(  # noqa: PLR0913, PLR0915
 		'voxel_dataset': {'input_dir': str(supervision)},
 		'evaluation': {
 			'monitored_class_ids': [3, 5],
-			'boundary_tolerances': [1, 2],
+			'boundary_tolerances': list(boundary_tolerances),
 			'boundary_region_radii': [1, 2],
 			'chunk_size_x': chunk_size_x,
 		},

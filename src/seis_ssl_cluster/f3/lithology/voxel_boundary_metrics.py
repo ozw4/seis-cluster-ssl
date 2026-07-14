@@ -49,7 +49,6 @@ def compute_vertical_boundary_metrics(  # noqa: PLR0913
 		'vertical_boundary_true_count': true_count,
 		'vertical_boundary_pred_count': pred_count,
 	}
-	distances_at_max: list[int] = []
 	for tolerance in tolerance_values:
 		distances = _match_volume_boundaries(
 			true_boundaries, pred_boundaries, tolerance
@@ -67,21 +66,15 @@ def compute_vertical_boundary_metrics(  # noqa: PLR0913
 			if true_count + pred_count == 0
 			else 2.0 * matched / (true_count + pred_count)
 		)
-		if tolerance == max(tolerance_values):
-			distances_at_max = distances
-
-	max_tolerance = max(tolerance_values)
-	metrics[f'vertical_boundary_position_mae_at_{max_tolerance}'] = (
-		float(np.mean(distances_at_max)) if distances_at_max else None
-	)
-	metrics[f'vertical_boundary_position_median_ae_at_{max_tolerance}'] = (
-		float(np.median(distances_at_max)) if distances_at_max else None
-	)
-	metrics[f'vertical_boundary_miss_rate_at_{max_tolerance}'] = (
-		None
-		if true_count == 0
-		else (true_count - len(distances_at_max)) / true_count
-	)
+		metrics[f'vertical_boundary_position_mae_at_{tolerance}'] = (
+			float(np.mean(distances)) if distances else None
+		)
+		metrics[f'vertical_boundary_position_median_ae_at_{tolerance}'] = (
+			float(np.median(distances)) if distances else None
+		)
+		metrics[f'vertical_boundary_miss_rate_at_{tolerance}'] = (
+			None if true_count == 0 else (true_count - matched) / true_count
+		)
 
 	for class_id in monitored:
 		class_true = _class_boundaries_by_trace(

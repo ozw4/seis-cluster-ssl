@@ -16,7 +16,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
 )
-from seis_ssl_cluster.f3.io.labels import read_class_info
+from seis_ssl_cluster.f3.lithology.tokens import read_f3_lithology_class_info
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	F3VoxelPredictionArtifactPaths,
 	f3_voxel_prediction_artifact_paths,
@@ -296,7 +296,9 @@ def _validate_metadata_config_identity(
 			'model.tag does not match token metadata model.tag; '
 			f'config={model_tag!r}, metadata={source.model_tag!r}'
 		)
-	class_order = tuple(item.class_id for item in read_class_info(class_info))
+	class_order = tuple(
+		item.class_id for item in read_f3_lithology_class_info(class_info)
+	)
 	if class_order != source.class_probability_order:
 		raise ValueError(
 			'class_info class order must match token metadata '

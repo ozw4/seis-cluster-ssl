@@ -44,6 +44,25 @@ def test_dp_maximises_cardinality_before_minimising_distance() -> None:
 	assert metrics['vertical_boundary_position_mae_at_2'] == pytest.approx(1.5)
 
 
+def test_position_metrics_are_emitted_for_every_configured_tolerance() -> None:
+	true = _trace(20, (2, 10))
+	pred = _trace(20, (3, 16))
+	metrics = _metrics(true, pred, tolerances=(1, 4, 8))
+
+	for tolerance in (1, 4):
+		assert metrics[f'vertical_boundary_position_mae_at_{tolerance}'] == 1.0
+		assert (
+			metrics[f'vertical_boundary_position_median_ae_at_{tolerance}']
+			== 1.0
+		)
+		assert metrics[f'vertical_boundary_miss_rate_at_{tolerance}'] == 0.5
+	assert metrics['vertical_boundary_position_mae_at_8'] == pytest.approx(3.5)
+	assert metrics['vertical_boundary_position_median_ae_at_8'] == pytest.approx(
+		3.5
+	)
+	assert metrics['vertical_boundary_miss_rate_at_8'] == 0.0
+
+
 def test_evaluation_and_prediction_gaps_do_not_create_boundaries() -> None:
 	true = _trace(7, (2,))
 	pred = true.copy()

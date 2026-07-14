@@ -306,7 +306,7 @@ def _aggregate_confusion(
 	return matrix
 
 
-def _aggregate_boundary_metrics(  # noqa: C901
+def _aggregate_boundary_metrics(
 	inspection: F3LithologyVoxelEvaluationInspection,
 	*,
 	tolerances: Sequence[int],
@@ -314,14 +314,15 @@ def _aggregate_boundary_metrics(  # noqa: C901
 ) -> dict[str, int | float | None]:
 	true_count = pred_count = 0
 	matched = dict.fromkeys(tolerances, 0)
-	distances_at_max: list[int] = []
+	distances_by_tolerance: dict[int, list[int]] = {
+		tolerance: [] for tolerance in tolerances
+	}
 	class_true = dict.fromkeys(monitored_class_ids, 0)
 	class_matched = {
 		(class_id, tolerance): 0
 		for class_id in monitored_class_ids
 		for tolerance in tolerances
 	}
-	maximum = max(tolerances)
 	for x in range(inspection.split_grid.shape[0]):
 		for y in range(inspection.split_grid.shape[1]):
 			mask = inspection.split_grid[x, y] == VALIDATION_VOXEL_SPLIT
@@ -338,8 +339,7 @@ def _aggregate_boundary_metrics(  # noqa: C901
 					true_boundaries, pred_boundaries, tolerance
 				)
 				matched[tolerance] += len(distances)
-				if tolerance == maximum:
-					distances_at_max.extend(distances)
+				distances_by_tolerance[tolerance].extend(distances)
 			for class_id in monitored_class_ids:
 				selected_true = _class_boundaries(true_boundaries, true, class_id)
 				selected_pred = _class_boundaries(pred_boundaries, pred, class_id)
@@ -356,6 +356,7 @@ def _aggregate_boundary_metrics(  # noqa: C901
 	}
 	for tolerance in tolerances:
 		count = matched[tolerance]
+		distances = distances_by_tolerance[tolerance]
 		result[f'vertical_boundary_matched_count_at_{tolerance}'] = count
 		result[f'vertical_boundary_precision_at_{tolerance}'] = _ratio(
 			count, pred_count
@@ -368,17 +369,15 @@ def _aggregate_boundary_metrics(  # noqa: C901
 			if true_count + pred_count == 0
 			else 2.0 * count / (true_count + pred_count)
 		)
-	result[f'vertical_boundary_position_mae_at_{maximum}'] = (
-		float(np.mean(distances_at_max)) if distances_at_max else None
-	)
-	result[f'vertical_boundary_position_median_ae_at_{maximum}'] = (
-		float(np.median(distances_at_max)) if distances_at_max else None
-	)
-	result[f'vertical_boundary_miss_rate_at_{maximum}'] = (
-		None
-		if true_count == 0
-		else (true_count - len(distances_at_max)) / true_count
-	)
+		result[f'vertical_boundary_position_mae_at_{tolerance}'] = (
+			float(np.mean(distances)) if distances else None
+		)
+		result[f'vertical_boundary_position_median_ae_at_{tolerance}'] = (
+			float(np.median(distances)) if distances else None
+		)
+		result[f'vertical_boundary_miss_rate_at_{tolerance}'] = (
+			None if true_count == 0 else (true_count - count) / true_count
+		)
 	for class_id in monitored_class_ids:
 		count = class_true[class_id]
 		result[f'vertical_boundary_class_{class_id}_true_count'] = count
