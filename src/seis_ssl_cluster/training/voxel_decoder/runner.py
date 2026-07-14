@@ -241,10 +241,13 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 	resolved_config = config.to_dict()
 
 	decoder = VoxelDecoder3D(
+		spec=config.decoder.spec,
 		embedding_dim=config.decoder.embedding_dim,
 		class_count=config.decoder.class_count,
 		hidden_channels=config.decoder.hidden_channels,
 		upsample_factors=config.decoder.upsample_factors,
+		upsample_mode=config.decoder.upsample_mode,
+		normalization=config.decoder.normalization,
 		patch_size_xyz=plan.patch_size_xyz,
 	).to(run_device)
 	optimizer = torch.optim.AdamW(

@@ -23,6 +23,11 @@ from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_decoder_inference import (
 	predict_f3_lithology_voxels,
 )
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_SPEC,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+)
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	load_voxel_decoder_checkpoint,
 )
@@ -118,11 +123,13 @@ def _job(tmp_path, name: str, *, epochs: int = 2):
 		'embeddings': {'input_dir': str(embedding_dir)},
 		'voxel_dataset': {'input_dir': str(voxel_dir)},
 		'decoder': {
-			'spec': 'frozen_embedding_decoder_v1',
+			'spec': VOXEL_DECODER_SPEC,
 			'embedding_dim': 2,
 			'class_count': 2,
 			'hidden_channels': [2],
 			'upsample_factors': [[1, 1, 1]],
+			'upsample_mode': VOXEL_DECODER_UPSAMPLE_MODE,
+			'normalization': VOXEL_DECODER_NORMALIZATION,
 		},
 		'tiles': {'core_size_tokens': [1, 1, 1], 'context_halo_tokens': [1, 0, 0]},
 		'train': {

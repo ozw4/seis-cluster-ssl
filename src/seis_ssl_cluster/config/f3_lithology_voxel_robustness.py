@@ -22,6 +22,12 @@ from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
 	_positive_sequence,
 	_triplet,
 )
+from seis_ssl_cluster.models.voxel_decoder.spec import (
+	VOXEL_DECODER_NORMALIZATION,
+	VOXEL_DECODER_SPEC,
+	VOXEL_DECODER_UPSAMPLE_MODE,
+	validate_voxel_decoder_implementation,
+)
 from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import DEFAULT_MAX_FILE_SIZE_BYTES
 
@@ -464,14 +470,25 @@ def _tokenization(predictions: Mapping[str, object]) -> Mapping[str, object]:
 def _decoder_settings(value: Mapping[str, object]) -> VoxelDecoderSpec:
 	_exact_keys(
 		value,
-		{'spec', 'embedding_dim', 'class_count', 'hidden_channels', 'upsample_factors'},
+		{
+			'spec',
+			'embedding_dim',
+			'class_count',
+			'hidden_channels',
+			'upsample_factors',
+			'upsample_mode',
+			'normalization',
+		},
 		'decoder',
 	)
-	spec = _string(value, 'spec')
-	if spec != 'frozen_embedding_decoder_v1':
-		raise ValueError("decoder.spec must be 'frozen_embedding_decoder_v1'")
+	validate_voxel_decoder_implementation(
+		spec=value.get('spec'),
+		upsample_mode=value.get('upsample_mode'),
+		normalization=value.get('normalization'),
+		field_prefix='decoder',
+	)
 	return VoxelDecoderSpec(
-		spec=spec,
+		spec=VOXEL_DECODER_SPEC,
 		embedding_dim=_optional_positive_int(
 			value.get('embedding_dim'), 'decoder.embedding_dim'
 		),
@@ -482,6 +499,8 @@ def _decoder_settings(value: Mapping[str, object]) -> VoxelDecoderSpec:
 			value.get('hidden_channels'), 'decoder.hidden_channels'
 		),
 		upsample_factors=_factor_sequence(value.get('upsample_factors')),
+		upsample_mode=VOXEL_DECODER_UPSAMPLE_MODE,
+		normalization=VOXEL_DECODER_NORMALIZATION,
 	)
 
 

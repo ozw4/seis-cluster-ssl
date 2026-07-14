@@ -715,8 +715,14 @@ def test_active_f3_voxel_projection_configs_resolve(
 
 
 @pytest.mark.parametrize('config_path', F3_VOXEL_DECODER_CONFIGS)
-def test_active_f3_voxel_decoder_configs_resolve(config_path: Path) -> None:
-	f3_lithology_voxel_decoder_config_from_mapping(load_config(config_path))
+def test_active_f3_voxel_decoder_configs_require_identity_migration(
+	config_path: Path,
+) -> None:
+	with pytest.raises(
+		ValueError,
+		match=r'decoder\.spec must be .*nearest_voxel_ln_v1',
+	):
+		f3_lithology_voxel_decoder_config_from_mapping(load_config(config_path))
 
 
 @pytest.mark.parametrize('config_path', F3_VOXEL_INFERENCE_CONFIGS)
@@ -767,20 +773,27 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 		load_config(F3_VOXEL_DATASET_CONFIGS[0])
 	)
 	full_configs = [
-		f3_lithology_voxel_decoder_config_from_mapping(load_config(path))
+		load_config(path)
 		for path in F3_VOXEL_DECODER_CONFIGS
 		if path.name.endswith('_full.yaml')
 	]
-	assert tuple(config.model['tag'] for config in full_configs) == model_tags
-	assert all(config.model['freeze_encoder'] is True for config in full_configs)
-	assert all(config.embeddings['spec'] == 'overlap_x16' for config in full_configs)
-	assert len({config.voxel_dataset_input_dir for config in full_configs}) == 1
-	assert full_configs[0].voxel_dataset_input_dir == voxel_dataset.output_dir
-	assert len({config.decoder for config in full_configs}) == 1
-	assert len({config.tiles for config in full_configs}) == 1
-	assert len({config.train for config in full_configs}) == 1
-	assert len({config.output_dir for config in full_configs}) == 3
-	assert all(config.train.seed == 42 for config in full_configs)
+	assert tuple(config['model']['tag'] for config in full_configs) == model_tags
+	assert all(config['model']['freeze_encoder'] is True for config in full_configs)
+	assert all(config['embeddings']['spec'] == 'overlap_x16' for config in full_configs)
+	assert len(
+		{config['voxel_dataset']['input_dir'] for config in full_configs}
+	) == 1
+	assert (
+		Path(full_configs[0]['voxel_dataset']['input_dir'])
+		== voxel_dataset.output_dir
+	)
+	assert all(
+		config['decoder'] == full_configs[0]['decoder'] for config in full_configs
+	)
+	assert all(config['tiles'] == full_configs[0]['tiles'] for config in full_configs)
+	assert all(config['train'] == full_configs[0]['train'] for config in full_configs)
+	assert len({config['outputs']['output_dir'] for config in full_configs}) == 3
+	assert all(config['train']['seed'] == 42 for config in full_configs)
 
 	inference_configs = [
 		f3_lithology_voxel_inference_config_from_mapping(load_config(path))
@@ -825,21 +838,26 @@ def test_active_f3_voxel_robustness_stage_configs_resolve() -> None:
 	v0 = f3_lithology_voxel_v0_split_suite_config_from_mapping(
 		load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[1])
 	)
-	v1 = f3_lithology_voxel_decoder_split_suite_config_from_mapping(
-		load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[2])
-	)
+	v1_raw = load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[2])
+	with pytest.raises(
+		ValueError,
+		match=r"decoder missing required key\(s\): .*upsample_mode",
+	):
+		f3_lithology_voxel_decoder_split_suite_config_from_mapping(v1_raw)
 
 	assert build.split_inventory_manifest.name == 'split_inventory_manifest.json'
-	assert v0.voxel_dataset_manifest == v1.voxel_dataset_manifest
-	assert v0.output_root == v1.output_root == build.output_root
+	assert v0.voxel_dataset_manifest == Path(
+		v1_raw['suite']['voxel_dataset_manifest']
+	)
+	assert v0.output_root == Path(v1_raw['suite']['output_root']) == build.output_root
 	assert v0.split_dataset_manifest.name == 'split_dataset_manifest.json'
 	assert v0.probe_run_manifest.name == 'split_probe_run_manifest.json'
 	assert all(model.checkpoint is not None for model in v0.models)
-	assert all(model.checkpoint is None for model in v1.models)
+	assert all('checkpoint' not in model for model in v1_raw['models'].values())
 	assert tuple(model.embeddings_dir for model in v0.models) == tuple(
-		model.embeddings_dir for model in v1.models
+		Path(model['embeddings_dir']) for model in v1_raw['models'].values()
 	)
-	for config in (build, v0, v1):
+	for config in (build, v0):
 		config.output_root.relative_to(config.artifact_root)
 		with pytest.raises(ValueError, match='is not in the subpath'):
 			config.output_root.relative_to(config.f3_root)
