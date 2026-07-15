@@ -64,9 +64,7 @@ def test_tiled_core_outputs_match_whole_grid_forward() -> None:
 	valid_tokens = torch.ones((1, 5, 3, 2), dtype=torch.bool)
 	model = _LocalVoxelModel().eval()
 	with torch.inference_mode():
-		whole_probabilities = torch.softmax(
-			model(embeddings, valid_tokens), dim=1
-		)[0]
+		whole_probabilities = torch.softmax(model(embeddings, valid_tokens), dim=1)[0]
 		whole_confidence, whole_indices = whole_probabilities.max(dim=0)
 
 	shape = (5, 3, 2)
@@ -106,9 +104,7 @@ def test_tiled_core_outputs_match_whole_grid_forward() -> None:
 		device=torch.device('cpu'),
 	)
 
-	expected_predictions = np.asarray((3, 7), dtype=np.int16)[
-		whole_indices.numpy()
-	]
+	expected_predictions = np.asarray((3, 7), dtype=np.int16)[whole_indices.numpy()]
 	np.testing.assert_array_equal(arrays.predictions, expected_predictions)
 	np.testing.assert_array_equal(arrays.valid_mask, np.ones(shape, dtype=np.bool_))
 	np.testing.assert_allclose(
@@ -132,8 +128,7 @@ def test_production_decoder_tiled_outputs_match_whole_grid_forward() -> None:
 	token_shape = (5, 3, 2)
 	patch_size = (8, 8, 8)
 	volume_shape = tuple(
-		tokens * patch
-		for tokens, patch in zip(token_shape, patch_size, strict=True)
+		tokens * patch for tokens, patch in zip(token_shape, patch_size, strict=True)
 	)
 	embedding_dim = 4
 	class_count = 3
@@ -147,18 +142,14 @@ def test_production_decoder_tiled_outputs_match_whole_grid_forward() -> None:
 		patch_size_xyz=patch_size,
 	).eval()
 	with torch.inference_mode():
-		whole_probabilities = torch.softmax(
-			model(embeddings, valid_tokens), dim=1
-		)[0]
+		whole_probabilities = torch.softmax(model(embeddings, valid_tokens), dim=1)[0]
 		whole_confidence, whole_indices = whole_probabilities.max(dim=0)
 
 	arrays = F3VoxelPredictionArrays(
 		predictions=np.full(volume_shape, -1, dtype=np.int16),
 		confidence=np.full(volume_shape, np.nan, dtype=np.float16),
 		valid_mask=np.zeros(volume_shape, dtype=np.bool_),
-		probabilities=np.full(
-			(*volume_shape, class_count), np.nan, dtype=np.float16
-		),
+		probabilities=np.full((*volume_shape, class_count), np.nan, dtype=np.float16),
 	)
 	plan = VoxelDecoderInferencePlan(
 		embeddings=Path('embeddings.npy'),
@@ -190,9 +181,7 @@ def test_production_decoder_tiled_outputs_match_whole_grid_forward() -> None:
 		device=torch.device('cpu'),
 	)
 
-	expected_predictions = np.asarray((3, 7, 9), dtype=np.int16)[
-		whole_indices.numpy()
-	]
+	expected_predictions = np.asarray((3, 7, 9), dtype=np.int16)[whole_indices.numpy()]
 	np.testing.assert_array_equal(arrays.predictions, expected_predictions)
 	np.testing.assert_array_equal(
 		arrays.confidence, whole_confidence.numpy().astype(np.float16)
@@ -213,6 +202,17 @@ def test_inference_rejects_halo_smaller_than_decoder_receptive_field() -> None:
 		)
 
 
+def test_inference_requires_best_checkpoint_path(tmp_path: Path) -> None:
+	raw, _ = _write_job(tmp_path)
+	raw['decoder']['checkpoint'] = str(
+		Path(raw['decoder']['checkpoint']).with_name('latest.pt')
+	)
+	config = f3_lithology_voxel_inference_config_from_mapping(raw)
+
+	with pytest.raises(ValueError, match=r'best\.pt'):
+		inspect_f3_lithology_voxel_inference(config)
+
+
 def test_cpu_chunked_inference_crops_volume_and_masks_invalid_tokens(
 	tmp_path: Path,
 ) -> None:
@@ -220,9 +220,7 @@ def test_cpu_chunked_inference_crops_volume_and_masks_invalid_tokens(
 	config = f3_lithology_voxel_inference_config_from_mapping(raw)
 	before = embedding_path.read_bytes()
 	plan = inspect_f3_lithology_voxel_inference(config)
-	model_architecture = _load_decoder(
-		plan, device=torch.device('cpu')
-	).architecture
+	model_architecture = _load_decoder(plan, device=torch.device('cpu')).architecture
 
 	result = predict_f3_lithology_voxels(config, device='cpu')
 	artifact = validate_f3_voxel_prediction_artifact(result.paths)
@@ -241,6 +239,17 @@ def test_cpu_chunked_inference_crops_volume_and_masks_invalid_tokens(
 	assert artifact.arrays.probabilities is not None
 	assert artifact.metadata['prediction_kind'] == 'frozen_embedding_decoder'
 	assert artifact.metadata['decoder_architecture'] == model_architecture
+	assert artifact.metadata['training_sampling'] == {
+		'sampling_mode': 'uniform_tiles_with_replacement',
+		'steps_per_epoch': 3,
+		'train_seed': 11,
+		'train_tile_manifest_sha256': plan.checkpoint_payload['tile_manifest_hashes'][
+			'train'
+		],
+		'validation_tile_manifest_sha256': plan.checkpoint_payload[
+			'tile_manifest_hashes'
+		]['validation'],
+	}
 	assert artifact.metadata['coverage']['exact_once'] is True
 	assert artifact.metadata['coverage']['written_voxel_count'] == 5
 	assert embedding_path.read_bytes() == before
@@ -366,14 +375,8 @@ def test_cli_dry_run_does_not_write(tmp_path: Path) -> None:
 	assert completed.returncode == 0, completed.stderr
 	assert 'execution: dry-run; voxel decoder inference skipped' in completed.stdout
 	assert f'decoder.spec: {VOXEL_DECODER_SPEC}' in completed.stdout
-	assert (
-		f'decoder.upsample_mode: {VOXEL_DECODER_UPSAMPLE_MODE}'
-		in completed.stdout
-	)
-	assert (
-		f'decoder.normalization: {VOXEL_DECODER_NORMALIZATION}'
-		in completed.stdout
-	)
+	assert f'decoder.upsample_mode: {VOXEL_DECODER_UPSAMPLE_MODE}' in completed.stdout
+	assert f'decoder.normalization: {VOXEL_DECODER_NORMALIZATION}' in completed.stdout
 	assert not config.output_dir.exists()
 
 
@@ -470,7 +473,12 @@ def _write_job(tmp_path: Path) -> tuple[dict[str, object], Path]:
 			'normalization': VOXEL_DECODER_NORMALIZATION,
 		},
 		'tiles': {'core_size_tokens': [2, 1, 1], 'context_halo_tokens': [1, 0, 0]},
-		'train': {'epochs': 1},
+		'train': {
+			'epochs': 1,
+			'sampling_mode': 'uniform_tiles_with_replacement',
+			'steps_per_epoch': 3,
+			'seed': 11,
+		},
 		'outputs': {'output_dir': str(decoder_dir)},
 	}
 	(decoder_dir / 'resolved_config.json').write_text(

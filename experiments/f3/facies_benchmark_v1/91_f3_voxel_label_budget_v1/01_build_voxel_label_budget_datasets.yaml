@@ -1,0 +1,20 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+suite:
+  name: f3_voxel_label_budget_original_v1
+  output_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split
+inputs:
+  common_voxel_dataset: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_supervision/png_slices_segy_labels_v1
+  mae_m1_label_budget_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/label_budget_m1_v1/suite_manifest.json
+  m1_m2a_label_budget_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/label_budget_m2a_boundary_vs_m1_v1/suite_manifest.json
+models:
+  mae: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+  m1: strat_hmm_pretext_m1_k6_topblock1_distill
+  m2a: strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill
+label_budget:
+  budgets: [cap25, cap50, cap100]
+  subsample_seeds: [0, 1, 2, 3, 4]
+  patch_size_xyz: [8, 8, 8]
+  require_all_classes: true
+outputs:
+  overwrite: false

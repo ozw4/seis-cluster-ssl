@@ -55,6 +55,15 @@ from seis_ssl_cluster.config.f3_lithology_voxel_evaluation import (
 from seis_ssl_cluster.config.f3_lithology_voxel_inference import (
 	f3_lithology_voxel_inference_config_from_mapping,
 )
+from seis_ssl_cluster.config.f3_lithology_voxel_label_budget import (
+	f3_lithology_voxel_label_budget_dataset_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_results import (
+	f3_lithology_voxel_label_budget_results_config_from_mapping,
+)
+from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_suite import (
+	f3_lithology_voxel_label_budget_suite_config_from_mapping,
+)
 from seis_ssl_cluster.config.f3_lithology_voxel_projection import (
 	f3_lithology_voxel_projection_config_from_mapping,
 )
@@ -267,6 +276,12 @@ F3_VOXEL_V0_ROOT = F3_ROOT / '87_f3_voxel_benchmark_v0'
 F3_VOXEL_V1_ROOT = F3_ROOT / '88_f3_voxel_decoder_v1'
 F3_VOXEL_ROBUSTNESS_ROOT = F3_ROOT / '89_f3_voxel_split_robustness'
 F3_VOXEL_RESULTS_ROOT = F3_ROOT / '90_f3_voxel_results'
+F3_VOXEL_LABEL_BUDGET_ROOT = F3_ROOT / '91_f3_voxel_label_budget_v1'
+F3_VOXEL_LABEL_BUDGET_CONFIGS = [
+	F3_VOXEL_LABEL_BUDGET_ROOT / '01_build_voxel_label_budget_datasets.yaml',
+	F3_VOXEL_LABEL_BUDGET_ROOT / '02_run_voxel_label_budget_suite.yaml',
+	F3_VOXEL_LABEL_BUDGET_ROOT / '03_summarize_voxel_label_budget.yaml',
+]
 F3_VOXEL_ROBUSTNESS_CONFIGS = [
 	F3_VOXEL_ROBUSTNESS_ROOT / f'{index:02d}_{name}.yaml'
 	for index, name in (
@@ -379,6 +394,7 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	('f3 voxel inference', F3_VOXEL_INFERENCE_CONFIGS),
 	('f3 voxel evaluation', F3_VOXEL_EVALUATION_CONFIGS),
 	('f3 voxel report', F3_VOXEL_REPORT_CONFIGS),
+	('f3 voxel label budget', F3_VOXEL_LABEL_BUDGET_CONFIGS),
 	('f3 baseline token dataset', F3_BASELINE_TOKEN_CONFIGS),
 	('f3 random encoder', F3_RANDOM_ENCODER_CONFIGS),
 	('f3 random encoder embedding', F3_RANDOM_ENCODER_EMBEDDING_CONFIGS),
@@ -760,6 +776,56 @@ def test_active_f3_voxel_report_configs_resolve(
 ) -> None:
 	raw = _config_with_available_output(config_path, tmp_path)
 	f3_lithology_voxel_report_config_from_mapping(raw)
+
+
+def test_active_f3_voxel_label_budget_dataset_config_resolves() -> None:
+	config = f3_lithology_voxel_label_budget_dataset_config_from_mapping(
+		load_config(F3_VOXEL_LABEL_BUDGET_CONFIGS[0])
+	)
+
+	assert config.suite_name == 'f3_voxel_label_budget_original_v1'
+	assert config.budgets == ('cap25', 'cap50', 'cap100')
+	assert config.subsample_seeds == (0, 1, 2, 3, 4)
+	assert config.patch_size_xyz == (8, 8, 8)
+	assert config.require_all_classes is True
+	assert config.overwrite is False
+
+
+def test_active_f3_voxel_label_budget_suite_config_resolves() -> None:
+	config = f3_lithology_voxel_label_budget_suite_config_from_mapping(
+		load_config(F3_VOXEL_LABEL_BUDGET_CONFIGS[1])
+	)
+
+	assert config.budgets == ('cap25', 'cap50', 'cap100')
+	assert config.subsample_seeds == (0, 1, 2, 3, 4)
+	assert config.base_seed == 42000
+	assert config.add_subsample_seed is True
+	assert config.train.epochs == 50
+	assert config.train.batch_size == 1
+	assert config.train.sampling_mode == 'uniform_tiles_with_replacement'
+	assert config.train.steps_per_epoch == 440
+	assert config.train.seed == 42000
+	assert config.write_probabilities is False
+	assert config.publish_individual_reports is False
+	assert tuple(model.role for model in config.models) == ('mae', 'm1', 'm2a')
+	assert len(set(config.full_label_decoder_runs.values())) == 3
+
+
+def test_active_f3_voxel_label_budget_summary_config_resolves() -> None:
+	config = f3_lithology_voxel_label_budget_results_config_from_mapping(
+		load_config(F3_VOXEL_LABEL_BUDGET_CONFIGS[2])
+	)
+
+	assert config.decision.minimum_positive_budgets == 2
+	assert config.decision.minimum_primary_wins == 4
+	assert config.decision.negative_budget_count == 2
+	assert config.decision.monitored_class_ids == (3, 5)
+	assert config.decision.major_degradation_delta == -0.05
+	assert config.decision.systematic_degradation_budget_count == 2
+	assert config.publish.enabled is True
+	assert config.publish.output_dir == Path(
+		'results/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1'
+	)
 
 
 def test_active_f3_voxel_paired_experiment_contract() -> None:

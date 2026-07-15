@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import os
 import random
 import shutil
@@ -46,6 +47,7 @@ from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	make_best_selection_state,
 	restore_voxel_decoder_checkpoint,
 	save_voxel_decoder_checkpoint,
+	stable_model_state_sha256,
 	validate_resume_identity,
 )
 from seis_ssl_cluster.training.voxel_decoder.epoch import (
@@ -187,6 +189,85 @@ def inspect_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912
 	)
 
 
+def validate_f3_lithology_voxel_decoder_resume(
+	config: F3LithologyVoxelDecoderConfig,
+	checkpoint: str | Path,
+) -> Mapping[str, object]:
+	"""Fully validate a resumable checkpoint and its immutable run snapshot."""
+	plan = inspect_f3_lithology_voxel_decoder(config)
+	_validate_input_files(plan)
+	_validate_source_hashes(plan)
+	identities = _artifact_identities(plan)
+	labels = np.load(plan.label_volume, mmap_mode='r', allow_pickle=False)
+	split_grid = np.load(plan.split_grid, mmap_mode='r', allow_pickle=False)
+	valid_tokens = np.load(plan.valid_tokens, mmap_mode='r', allow_pickle=False)
+	manifests = build_voxel_tile_manifests(
+		split_grid,
+		labels,
+		patch_size_xyz=plan.patch_size_xyz,
+		token_grid_shape_xyz=plan.token_grid_shape_xyz,
+		core_size_tokens=config.tiles.core_size_tokens,
+		context_halo_tokens=config.tiles.context_halo_tokens,
+		class_ids=plan.class_ids,
+		canonical_valid_tokens=valid_tokens,
+	)
+	class_counts = tuple(
+		sum(
+			tile.per_class_supervised_counts[str(class_id)]
+			for tile in manifests['train'].tiles
+		)
+		for class_id in plan.class_ids
+	)
+	class_weights = balanced_class_weights_from_counts(class_counts)
+	manifest_hashes = {
+		split: manifest.identity_sha256 for split, manifest in manifests.items()
+	}
+	resolved_config = config.to_dict()
+	payload = load_voxel_decoder_checkpoint(checkpoint, map_location='cpu')
+	if payload['checkpoint_kind'] == 'completed':
+		raise ValueError('completed checkpoint is not resumable')
+	validate_resume_identity(
+		payload,
+		resolved_config=resolved_config,
+		class_weights=class_weights,
+		artifact_identities=identities,
+		tile_manifest_hashes=manifest_hashes,
+	)
+	_configure_deterministic_execution()
+	_seed_everything(config.train.seed)
+	decoder = VoxelDecoder3D(
+		spec=config.decoder.spec,
+		embedding_dim=config.decoder.embedding_dim,
+		class_count=config.decoder.class_count,
+		hidden_channels=config.decoder.hidden_channels,
+		upsample_factors=config.decoder.upsample_factors,
+		upsample_mode=config.decoder.upsample_mode,
+		normalization=config.decoder.normalization,
+		patch_size_xyz=plan.patch_size_xyz,
+	)
+	_validate_resume_snapshot(
+		config.output_dir,
+		resolved_config=resolved_config,
+		manifests=manifests,
+		resume_payload=payload,
+		class_weights=class_weights,
+		artifact_identities=identities,
+		manifest_hashes=manifest_hashes,
+		initial_model_state_sha256=stable_model_state_sha256(decoder),
+	)
+	_validate_resume_progress(
+		payload,
+		output_dir=config.output_dir,
+		epochs=config.train.epochs,
+		steps_per_epoch=(
+			config.train.steps_per_epoch
+			if config.train.steps_per_epoch is not None
+			else math.ceil(len(manifests['train'].tiles) / config.train.batch_size)
+		),
+	)
+	return payload
+
+
 def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 	config: F3LithologyVoxelDecoderConfig,
 	*,
@@ -249,7 +330,9 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 		upsample_mode=config.decoder.upsample_mode,
 		normalization=config.decoder.normalization,
 		patch_size_xyz=plan.patch_size_xyz,
-	).to(run_device)
+	)
+	initial_model_state_sha256 = stable_model_state_sha256(decoder)
+	decoder = decoder.to(run_device)
 	optimizer = torch.optim.AdamW(
 		decoder.parameters(),
 		lr=config.train.learning_rate,
@@ -283,6 +366,7 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 			class_weights=class_weights,
 			artifact_identities=identities,
 			manifest_hashes=manifest_hashes,
+			initial_model_state_sha256=initial_model_state_sha256,
 		)
 		best_checkpoint_sha256 = payload['best_checkpoint_sha256']
 		restore_voxel_decoder_checkpoint(
@@ -305,7 +389,17 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 
 	output_dir.mkdir(parents=True, exist_ok=True)
 	if resume_path is None:
-		_snapshot_run(output_dir, resolved_config, plan, manifests)
+		_snapshot_run(
+			output_dir,
+			resolved_config,
+			plan,
+			manifests,
+			initial_model_state_sha256=initial_model_state_sha256,
+			sampling_mode=config.train.sampling_mode,
+			steps_per_epoch=config.train.steps_per_epoch,
+			train_seed=config.train.seed,
+			manifest_hashes=manifest_hashes,
+		)
 
 	train_dataset = _dataset(plan, manifests['train'])
 	validation_dataset = _dataset(plan, manifests['validation'])
@@ -317,7 +411,16 @@ def run_f3_lithology_voxel_decoder(  # noqa: C901, PLR0912, PLR0915
 			shuffle=True,
 			seed=config.train.seed + epoch,
 			num_workers=config.train.num_workers,
+			sampling_mode=config.train.sampling_mode,
+			steps_per_epoch=config.train.steps_per_epoch,
 		)
+		if (
+			config.train.steps_per_epoch is not None
+			and len(train_loader) != config.train.steps_per_epoch
+		):
+			raise AssertionError(
+				'replacement sampler batch count does not match steps_per_epoch'
+			)
 		accumulator = (
 			partial_accumulator
 			if epoch == start_epoch and partial_accumulator is not None
@@ -537,10 +640,7 @@ def _validate_source_provenance(
 	embedding_payload: Mapping[str, object],
 ) -> None:
 	expected_root = (
-		config.artifact_root
-		/ 'embeddings'
-		/ 'f3'
-		/ config.dataset['version']
+		config.artifact_root / 'embeddings' / 'f3' / config.dataset['version']
 	)
 	try:
 		relative = config.embeddings_input_dir.resolve(strict=False).relative_to(
@@ -609,9 +709,7 @@ def _validate_inspected_arrays(  # noqa: PLR0913
 	if tuple(embedding_array.shape) != expected_embedding_shape:
 		raise ValueError('embedding array shape does not match embedding metadata')
 	if valid_array.dtype != np.bool_ or tuple(valid_array.shape) != token_shape:
-		raise TypeError(
-			'valid_tokens must be bool with the metadata token-grid shape'
-		)
+		raise TypeError('valid_tokens must be bool with the metadata token-grid shape')
 	if (
 		label_array.ndim != 3
 		or not np.issubdtype(label_array.dtype, np.integer)
@@ -670,11 +768,17 @@ def _required_metadata_mapping(
 	return value
 
 
-def _snapshot_run(
+def _snapshot_run(  # noqa: PLR0913
 	output_dir: Path,
 	resolved_config: Mapping[str, object],
 	plan: VoxelDecoderInputPlan,
 	manifests: Mapping[str, VoxelTileManifest],
+	*,
+	initial_model_state_sha256: str,
+	sampling_mode: str,
+	steps_per_epoch: int | None,
+	train_seed: int,
+	manifest_hashes: Mapping[str, str],
 ) -> None:
 	_write_json(output_dir / 'resolved_config.json', resolved_config)
 	_write_json(
@@ -686,6 +790,12 @@ def _snapshot_run(
 			'source_embedding_metadata': str(plan.embedding_metadata),
 			'source_valid_tokens': str(plan.valid_tokens),
 			'voxel_dataset_metadata': str(plan.voxel_metadata),
+			'initial_model_state_sha256': initial_model_state_sha256,
+			'sampling_mode': sampling_mode,
+			'steps_per_epoch': steps_per_epoch,
+			'train_seed': train_seed,
+			'train_tile_manifest_sha256': manifest_hashes['train'],
+			'validation_tile_manifest_sha256': manifest_hashes['validation'],
 		},
 	)
 	for split, manifest in manifests.items():
@@ -702,12 +812,19 @@ def _validate_resume_snapshot(  # noqa: C901, PLR0912, PLR0913
 	class_weights: torch.Tensor,
 	artifact_identities: Mapping[str, object],
 	manifest_hashes: Mapping[str, str],
+	initial_model_state_sha256: str,
 ) -> None:
 	resolved_path = output_dir / 'resolved_config.json'
 	if not resolved_path.is_file():
 		raise FileNotFoundError(f'missing resume snapshot: {resolved_path}')
 	if _read_json_object(resolved_path) != dict(resolved_config):
 		raise ValueError('resume snapshot mismatch: resolved_config.json')
+	_validate_run_metadata_snapshot(
+		output_dir / 'run_metadata.json',
+		resolved_config=resolved_config,
+		manifest_hashes=manifest_hashes,
+		initial_model_state_sha256=initial_model_state_sha256,
+	)
 	for split, expected in manifests.items():
 		path = output_dir / f'{split}_tile_manifest.json'
 		if not path.is_file():
@@ -743,6 +860,107 @@ def _validate_resume_snapshot(  # noqa: C901, PLR0912, PLR0913
 		raise ValueError('resume snapshot mismatch: best.pt selection state')
 	if best_payload.get('epoch') != best_state.get('epoch'):
 		raise ValueError('resume snapshot mismatch: best.pt epoch')
+
+
+def _validate_run_metadata_snapshot(
+	path: Path,
+	*,
+	resolved_config: Mapping[str, object],
+	manifest_hashes: Mapping[str, str],
+	initial_model_state_sha256: str,
+) -> None:
+	if not path.is_file():
+		raise FileNotFoundError(f'missing resume snapshot: {path}')
+	metadata = _read_json_object(path)
+	train = resolved_config.get('train')
+	if not isinstance(train, Mapping):
+		raise TypeError('resolved_config.train must be a mapping')
+	sampling_mode = train.get('sampling_mode', 'all_tiles_once')
+	steps_per_epoch = train.get('steps_per_epoch')
+	expected = {
+		'initial_model_state_sha256': initial_model_state_sha256,
+		'sampling_mode': sampling_mode,
+		'steps_per_epoch': steps_per_epoch,
+		'train_seed': train.get('seed'),
+		'train_tile_manifest_sha256': manifest_hashes['train'],
+		'validation_tile_manifest_sha256': manifest_hashes['validation'],
+	}
+	contract_present = any(key in metadata for key in expected)
+	if sampling_mode == 'uniform_tiles_with_replacement' or contract_present:
+		for key, value in expected.items():
+			if metadata.get(key) != value:
+				raise ValueError(f'resume snapshot mismatch: run_metadata.json {key}')
+
+
+def _validate_resume_progress(  # noqa: C901, PLR0912
+	payload: Mapping[str, object],
+	*,
+	output_dir: Path,
+	epochs: int,
+	steps_per_epoch: int,
+) -> None:
+	"""Validate checkpoint/history progress before the suite allows a resume."""
+	kind = payload.get('checkpoint_kind')
+	epoch = payload.get('epoch')
+	global_step = payload.get('global_step')
+	batch_index = payload.get('batch_index')
+	if not isinstance(epoch, int) or isinstance(epoch, bool) or not 0 <= epoch < epochs:
+		raise ValueError('resume progress has an invalid epoch')
+	if not isinstance(global_step, int) or isinstance(global_step, bool):
+		raise TypeError('resume progress global_step must be an integer')
+	if kind == 'step':
+		if (
+			not isinstance(batch_index, int)
+			or isinstance(batch_index, bool)
+			or not 0 <= batch_index < steps_per_epoch
+		):
+			raise ValueError('step checkpoint has an invalid batch_index')
+		expected_step = epoch * steps_per_epoch + batch_index + 1
+		expected_history_rows = epoch
+		current = payload.get('current_metrics')
+		if not isinstance(current, Mapping) or not isinstance(
+			current.get('train_accumulator'), Mapping
+		):
+			raise ValueError('step checkpoint is missing its train accumulator')
+	elif kind == 'epoch':
+		if batch_index is not None:
+			raise ValueError('epoch checkpoint must not carry a batch_index')
+		expected_step = (epoch + 1) * steps_per_epoch
+		expected_history_rows = epoch + 1
+	else:
+		raise ValueError('resume checkpoint kind must be step or epoch')
+	if global_step != expected_step:
+		raise ValueError('resume checkpoint global_step is incoherent')
+	history = payload.get('training_history')
+	if not isinstance(history, Sequence) or isinstance(history, str | bytes):
+		raise TypeError('resume checkpoint training_history must be a list')
+	if len(history) != expected_history_rows or any(
+		not isinstance(row, Mapping) for row in history
+	):
+		raise ValueError('resume checkpoint training_history is incoherent')
+	history_path = output_dir / HISTORY_NAME
+	if not history_path.is_file():
+		raise FileNotFoundError(f'missing resume snapshot: {history_path}')
+	with history_path.open(encoding='utf-8', newline='') as file_obj:
+		history_rows = list(csv.DictReader(file_obj))
+	if len(history_rows) != expected_history_rows:
+		raise ValueError('resume history.csv row count is incoherent')
+	for index, row in enumerate(history_rows):
+		if int(row.get('epoch', -1)) != index:
+			raise ValueError('resume history.csv epoch sequence is incoherent')
+		if int(row.get('global_step', -1)) != (index + 1) * steps_per_epoch:
+			raise ValueError('resume history.csv global_step sequence is incoherent')
+	best_state = payload.get('best_selection_state')
+	if best_state is not None:
+		if not isinstance(best_state, Mapping):
+			raise TypeError('resume best_selection_state must be a mapping')
+		best_epoch = best_state.get('epoch')
+		if (
+			not isinstance(best_epoch, int)
+			or isinstance(best_epoch, bool)
+			or not 0 <= best_epoch < expected_history_rows
+		):
+			raise ValueError('resume best-selection epoch is incoherent')
 
 
 def _history_row(
@@ -944,4 +1162,5 @@ __all__ = [
 	'VoxelDecoderRunResult',
 	'inspect_f3_lithology_voxel_decoder',
 	'run_f3_lithology_voxel_decoder',
+	'validate_f3_lithology_voxel_decoder_resume',
 ]

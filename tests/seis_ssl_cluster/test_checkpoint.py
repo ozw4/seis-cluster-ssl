@@ -105,3 +105,20 @@ def test_restore_rng_state_rejects_partial_rng_payload() -> None:
 
 	with pytest.raises(TypeError, match=r'rng_state\.torch'):
 		restore_rng_state(payload)
+
+
+def test_restore_rng_state_passes_cpu_byte_tensors_to_cuda(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""CUDA RNG restoration normalizes map-location-moved tensors to CPU."""
+	payload = {'rng_state': capture_rng_state()}
+	rng_state = payload['rng_state']
+	assert isinstance(rng_state, dict)
+	rng_state['torch_cuda'] = [torch.tensor([1, 2, 3], dtype=torch.uint8)]
+	restored: list[list[torch.Tensor]] = []
+	monkeypatch.setattr(torch.cuda, 'is_available', lambda: True)
+	monkeypatch.setattr(torch.cuda, 'set_rng_state_all', restored.append)
+	restore_rng_state(payload)
+	assert len(restored) == 1
+	assert all(state.device.type == 'cpu' for state in restored[0])
+	assert all(state.dtype == torch.uint8 for state in restored[0])

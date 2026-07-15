@@ -22,9 +22,9 @@ XYZ_BASELINE_TAG=xyz_coordinates_v1
   and the converted label volume
 - Artifact root: `$ROOT`
 - Frozen pretraining checkpoint:
-  `$ROOT/pretraining/nopims/pretrain_v1/$MODEL_TAG/full_100ep/mae_best.pt`
+  `$ROOT/pretraining/nopims/pretrain_v1/$MODEL_TAG/full_100ep/mae_latest.pt`
 
-The configs intentionally require `mae_best.pt`; if it is absent, stop and
+The configs intentionally require `mae_latest.pt`; if it is absent, stop and
 choose an explicit checkpoint instead of falling back silently.
 
 PNG labels are used for train/validation slice selection and visual QC only.

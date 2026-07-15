@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import os
 import shutil
@@ -14,6 +15,7 @@ import torch
 
 import seis_ssl_cluster.training.voxel_decoder.runner as voxel_decoder_runner
 from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
+	UNIFORM_TILES_WITH_REPLACEMENT,
 	f3_lithology_voxel_decoder_config_from_mapping,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_inference import (
@@ -42,9 +44,7 @@ CLI = REPO_ROOT / 'proc' / 'seis_ssl_cluster' / 'train_f3_lithology_voxel_decode
 
 def _job(tmp_path, name: str, *, epochs: int = 2):
 	root = tmp_path / 'artifacts'
-	embedding_dir = (
-		root / 'embeddings' / 'f3' / 'v1' / 'encoder-v1' / 'tiny-spec'
-	)
+	embedding_dir = root / 'embeddings' / 'f3' / 'v1' / 'encoder-v1' / 'tiny-spec'
 	voxel_dir = root / 'voxel'
 	embedding_dir.mkdir(parents=True)
 	voxel_dir.mkdir(parents=True)
@@ -157,9 +157,7 @@ def test_cpu_step_resume_matches_uninterrupted_run(tmp_path) -> None:
 	resume_raw = deepcopy(raw)
 	resume_raw['outputs']['output_dir'] = str(tmp_path / 'artifacts' / 'resumed')
 	resume_config = f3_lithology_voxel_decoder_config_from_mapping(resume_raw)
-	partial = run_f3_lithology_voxel_decoder(
-		resume_config, device='cpu', max_steps=2
-	)
+	partial = run_f3_lithology_voxel_decoder(resume_config, device='cpu', max_steps=2)
 	assert not partial.completed
 	resumed = run_f3_lithology_voxel_decoder(
 		resume_config, device='cpu', resume=partial.latest_checkpoint
@@ -172,6 +170,88 @@ def test_cpu_step_resume_matches_uninterrupted_run(tmp_path) -> None:
 	assert file_sha256(embedding_path) == before
 	assert resumed.history_csv.read_text(encoding='utf-8').startswith(
 		'epoch,global_step,'
+	)
+
+
+def test_replacement_sampling_has_fixed_steps_and_run_identity(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'replacement-fixed-steps', epochs=2)
+	raw['train']['sampling_mode'] = UNIFORM_TILES_WITH_REPLACEMENT
+	raw['train']['steps_per_epoch'] = 4
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+	result = run_f3_lithology_voxel_decoder(config, device='cpu')
+
+	assert result.completed
+	assert result.global_step == 8
+	with result.history_csv.open(encoding='utf-8', newline='') as file_obj:
+		history = list(csv.DictReader(file_obj))
+	assert [int(row['global_step']) for row in history] == [4, 8]
+	latest = load_voxel_decoder_checkpoint(result.latest_checkpoint)
+	best = load_voxel_decoder_checkpoint(result.best_checkpoint)
+	for payload in (latest, best):
+		assert payload['resolved_config']['train']['sampling_mode'] == (
+			UNIFORM_TILES_WITH_REPLACEMENT
+		)
+		assert payload['resolved_config']['train']['steps_per_epoch'] == 4
+	metadata = json.loads(
+		(config.output_dir / 'run_metadata.json').read_text(encoding='utf-8')
+	)
+	train_manifest = json.loads(
+		(config.output_dir / 'train_tile_manifest.json').read_text(encoding='utf-8')
+	)
+	validation_manifest = json.loads(
+		(config.output_dir / 'validation_tile_manifest.json').read_text(
+			encoding='utf-8'
+		)
+	)
+	assert len(metadata['initial_model_state_sha256']) == 64
+	assert metadata['sampling_mode'] == UNIFORM_TILES_WITH_REPLACEMENT
+	assert metadata['steps_per_epoch'] == 4
+	assert metadata['train_seed'] == 7
+	assert metadata['train_tile_manifest_sha256'] == train_manifest['identity_sha256']
+	assert (
+		metadata['validation_tile_manifest_sha256']
+		== validation_manifest['identity_sha256']
+	)
+
+
+def test_replacement_mid_epoch_resume_matches_uninterrupted_run(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'replacement-full', epochs=2)
+	raw['train']['sampling_mode'] = UNIFORM_TILES_WITH_REPLACEMENT
+	raw['train']['steps_per_epoch'] = 4
+	full = run_f3_lithology_voxel_decoder(
+		f3_lithology_voxel_decoder_config_from_mapping(raw), device='cpu'
+	)
+	resume_raw = deepcopy(raw)
+	resume_raw['outputs']['output_dir'] = str(
+		tmp_path / 'artifacts' / 'replacement-resumed'
+	)
+	resume_config = f3_lithology_voxel_decoder_config_from_mapping(resume_raw)
+	partial = run_f3_lithology_voxel_decoder(resume_config, device='cpu', max_steps=3)
+	assert not partial.completed
+
+	resumed = run_f3_lithology_voxel_decoder(
+		resume_config, device='cpu', resume=partial.latest_checkpoint
+	)
+
+	assert resumed.completed
+	assert full.global_step == resumed.global_step == 8
+	full_payload = load_voxel_decoder_checkpoint(full.latest_checkpoint)
+	resumed_payload = load_voxel_decoder_checkpoint(resumed.latest_checkpoint)
+	for key, tensor in full_payload['model_state_dict'].items():
+		assert torch.equal(tensor, resumed_payload['model_state_dict'][key])
+	assert full_payload['training_history'] == resumed_payload['training_history']
+	full_metadata = json.loads(
+		(Path(raw['outputs']['output_dir']) / 'run_metadata.json').read_text(
+			encoding='utf-8'
+		)
+	)
+	resumed_metadata = json.loads(
+		(resume_config.output_dir / 'run_metadata.json').read_text(encoding='utf-8')
+	)
+	assert (
+		full_metadata['initial_model_state_sha256']
+		== resumed_metadata['initial_model_state_sha256']
 	)
 
 
@@ -284,14 +364,8 @@ def test_cli_dry_run_does_not_write_output(tmp_path) -> None:
 	)
 	assert 'execution: dry-run' in completed.stdout
 	assert f'decoder.spec: {VOXEL_DECODER_SPEC}' in completed.stdout
-	assert (
-		f'decoder.upsample_mode: {VOXEL_DECODER_UPSAMPLE_MODE}'
-		in completed.stdout
-	)
-	assert (
-		f'decoder.normalization: {VOXEL_DECODER_NORMALIZATION}'
-		in completed.stdout
-	)
+	assert f'decoder.upsample_mode: {VOXEL_DECODER_UPSAMPLE_MODE}' in completed.stdout
+	assert f'decoder.normalization: {VOXEL_DECODER_NORMALIZATION}' in completed.stdout
 	assert not Path(raw['outputs']['output_dir']).exists()
 
 
@@ -399,15 +473,11 @@ def test_inspection_rejects_embedding_checkpoint_tag_mismatch(tmp_path) -> None:
 	raw, _ = _job(tmp_path, 'checkpoint-tag-mismatch')
 	embedding_dir = Path(raw['embeddings']['input_dir'])
 	embedding_metadata_path = embedding_dir / 'tiny.embedding_metadata.json'
-	embedding_metadata = json.loads(
-		embedding_metadata_path.read_text(encoding='utf-8')
-	)
+	embedding_metadata = json.loads(embedding_metadata_path.read_text(encoding='utf-8'))
 	embedding_metadata['checkpoint_path'] = str(
 		tmp_path / 'pretraining' / 'other-encoder' / 'best.pt'
 	)
-	embedding_metadata_path.write_text(
-		json.dumps(embedding_metadata), encoding='utf-8'
-	)
+	embedding_metadata_path.write_text(json.dumps(embedding_metadata), encoding='utf-8')
 	voxel_metadata_path = (
 		Path(raw['voxel_dataset']['input_dir']) / 'voxel_dataset_metadata.json'
 	)
@@ -431,13 +501,9 @@ def test_inspection_allows_model_independent_reference_artifact_paths(
 	embedding_metadata_path = (
 		Path(raw['embeddings']['input_dir']) / 'tiny.embedding_metadata.json'
 	)
-	embedding_metadata = json.loads(
-		embedding_metadata_path.read_text(encoding='utf-8')
-	)
+	embedding_metadata = json.loads(embedding_metadata_path.read_text(encoding='utf-8'))
 	embedding_metadata['candidate_encoder_identity'] = 'model-b'
-	embedding_metadata_path.write_text(
-		json.dumps(embedding_metadata), encoding='utf-8'
-	)
+	embedding_metadata_path.write_text(json.dumps(embedding_metadata), encoding='utf-8')
 	metadata_path = (
 		Path(raw['voxel_dataset']['input_dir']) / 'voxel_dataset_metadata.json'
 	)
@@ -479,8 +545,7 @@ def test_dry_run_inspection_rejects_missing_source_arrays(
 	)
 	paths = {
 		'embeddings': embedding_path,
-		'valid_tokens': Path(raw['embeddings']['input_dir'])
-		/ 'tiny.valid_tokens.npy',
+		'valid_tokens': Path(raw['embeddings']['input_dir']) / 'tiny.valid_tokens.npy',
 		'split_grid': voxel_dir / 'supervision_split_grid.npy',
 		'labels': Path(metadata['label_volume']['path']),
 	}
@@ -583,7 +648,7 @@ def test_completed_checkpoint_cannot_be_resumed(tmp_path) -> None:
 	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
 	result = run_f3_lithology_voxel_decoder(config, device='cpu')
 	with pytest.raises(ValueError, match='completed'):
-			run_f3_lithology_voxel_decoder(
+		run_f3_lithology_voxel_decoder(
 			config, device='cpu', resume=result.latest_checkpoint
 		)
 
@@ -616,9 +681,7 @@ def test_resume_rejects_architecture_change_before_model_restore(
 ) -> None:
 	raw, _ = _job(tmp_path, 'resume-architecture')
 	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
-	partial = run_f3_lithology_voxel_decoder(
-		config, device='cpu', max_steps=1
-	)
+	partial = run_f3_lithology_voxel_decoder(config, device='cpu', max_steps=1)
 	changed_raw = deepcopy(raw)
 	changed_raw['decoder']['hidden_channels'] = [3]
 	changed_config = f3_lithology_voxel_decoder_config_from_mapping(changed_raw)

@@ -122,7 +122,9 @@ def restore_rng_state(payload: Mapping[str, object]) -> None:
 	np.random.set_state(numpy_state)  # noqa: NPY002
 	torch.set_rng_state(torch_state.cpu())
 	if torch.cuda.is_available() and isinstance(cuda_state, list):
-		torch.cuda.set_rng_state_all(cuda_state)
+		# A checkpoint loaded with ``map_location='cuda'`` moves these byte
+		# tensors to CUDA, while PyTorch's RNG setter requires CPU ByteTensors.
+		torch.cuda.set_rng_state_all([state.cpu() for state in cuda_state])
 
 
 def _required_rng_value(rng_state: Mapping[str, object], key: str) -> object:

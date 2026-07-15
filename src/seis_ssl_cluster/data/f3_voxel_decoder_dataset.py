@@ -10,8 +10,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, RandomSampler
 
+from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
+	ALL_TILES_ONCE,
+	UNIFORM_TILES_WITH_REPLACEMENT,
+)
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_tiles import (
 	VoxelTileManifest,
@@ -188,9 +192,7 @@ class F3VoxelDecoderDataset(Dataset[dict[str, Any]]):
 			self.supervision_metadata_path,
 		)
 		extra = tuple(
-			path
-			for path in (self.canonical_valid_tokens_path,)
-			if path is not None
+			path for path in (self.canonical_valid_tokens_path,) if path is not None
 		)
 		return (*paths, *extra)
 
@@ -308,16 +310,18 @@ def validate_encoder_pairing(  # noqa: C901, PLR0913
 			raise ValueError('candidate valid_tokens are not bitwise identical')
 
 
-def build_f3_voxel_decoder_dataloader(
+def build_f3_voxel_decoder_dataloader(  # noqa: PLR0913
 	dataset: F3VoxelDecoderDataset,
 	*,
 	batch_size: int,
 	shuffle: bool,
 	seed: int,
 	num_workers: int = 0,
+	sampling_mode: str = ALL_TILES_ONCE,
+	steps_per_epoch: int | None = None,
 	**kwargs: object,
 ) -> DataLoader[dict[str, Any]]:
-	"""Build a DataLoader whose optional tile shuffle is controlled only by seed."""
+	"""Build a deterministic all-tiles or replacement-sampled DataLoader."""
 	for value, name, allow_zero in (
 		(batch_size, 'batch_size', False),
 		(seed, 'seed', True),
@@ -330,14 +334,55 @@ def build_f3_voxel_decoder_dataloader(
 		):
 			qualifier = 'non-negative' if allow_zero else 'positive'
 			raise ValueError(f'{name} must be a {qualifier} integer')
-	generator = torch.Generator()
-	generator.manual_seed(int(seed))
+	if sampling_mode == ALL_TILES_ONCE:
+		if steps_per_epoch is not None:
+			raise ValueError('steps_per_epoch must be null for all_tiles_once sampling')
+		# Keep the legacy generator coupling intact: DataLoader consumes this
+		# generator for its worker base seed before RandomSampler draws the order.
+		generator = torch.Generator()
+		generator.manual_seed(int(seed))
+		return DataLoader(
+			dataset,
+			batch_size=int(batch_size),
+			shuffle=shuffle,
+			num_workers=int(num_workers),
+			generator=generator,
+			**kwargs,
+		)
+	if sampling_mode != UNIFORM_TILES_WITH_REPLACEMENT:
+		raise ValueError(
+			'sampling_mode must be all_tiles_once or uniform_tiles_with_replacement'
+		)
+	if (
+		not isinstance(steps_per_epoch, Integral)
+		or isinstance(steps_per_epoch, bool)
+		or steps_per_epoch <= 0
+	):
+		raise ValueError(
+			'steps_per_epoch must be a positive integer for replacement sampling'
+		)
+	if not shuffle:
+		raise ValueError('replacement sampling requires shuffle=True')
+
+	# The sampler and DataLoader worker generators are deliberately separate.
+	# This makes the first sampled tile a direct function of ``seed`` instead of
+	# also depending on DataLoader's internal worker-base-seed draw.
+	sampler_generator = torch.Generator()
+	sampler_generator.manual_seed(int(seed))
+	worker_generator = torch.Generator()
+	worker_generator.manual_seed(int(seed))
+	sampler = RandomSampler(
+		dataset,
+		replacement=True,
+		num_samples=int(steps_per_epoch) * int(batch_size),
+		generator=sampler_generator,
+	)
 	return DataLoader(
 		dataset,
 		batch_size=int(batch_size),
-		shuffle=shuffle,
+		sampler=sampler,
 		num_workers=int(num_workers),
-		generator=generator,
+		generator=worker_generator,
 		**kwargs,
 	)
 

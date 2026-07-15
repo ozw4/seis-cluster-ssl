@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import os
 import tempfile
@@ -19,6 +21,34 @@ from seis_ssl_cluster.training.checkpoint import capture_rng_state, restore_rng_
 BEST_SELECTION_EPSILON = 1.0e-12
 # Version 5 binds the canonical decoder architecture explicitly.
 CHECKPOINT_SCHEMA_VERSION = 5
+
+
+def stable_model_state_sha256(model: torch.nn.Module) -> str:
+	"""Hash model tensors canonically, independent of device and torch.save."""
+	digest = hashlib.sha256()
+	digest.update(b'seis_ssl_cluster_model_state_v1\x00')
+	for name, value in sorted(model.state_dict().items()):
+		if not isinstance(value, torch.Tensor):
+			raise TypeError(f'model state entry {name!r} must be a tensor')
+		tensor = (
+			value.detach().resolve_conj().resolve_neg().to(device='cpu').contiguous()
+		)
+		header = json.dumps(
+			{
+				'name': name,
+				'dtype': str(tensor.dtype),
+				'shape': list(tensor.shape),
+			},
+			allow_nan=False,
+			sort_keys=True,
+			separators=(',', ':'),
+		).encode()
+		content = tensor.view(torch.uint8).numpy().tobytes(order='C')
+		digest.update(len(header).to_bytes(8, byteorder='big'))
+		digest.update(header)
+		digest.update(len(content).to_bytes(8, byteorder='big'))
+		digest.update(content)
+	return digest.hexdigest()
 
 
 def validation_is_better(
@@ -226,8 +256,8 @@ def validate_resume_identity(
 	actual_weights = torch.as_tensor(payload.get('class_weights'), dtype=torch.float32)
 	if actual_weights.shape != expected_weights.shape or not torch.equal(
 		actual_weights, expected_weights
-		):
-			raise ValueError('resume identity mismatch: class weights')
+	):
+		raise ValueError('resume identity mismatch: class weights')
 
 
 def _resolved_decoder_architecture(
@@ -343,6 +373,7 @@ __all__ = [
 	'restore_voxel_decoder_checkpoint',
 	'save_checkpoint',
 	'save_voxel_decoder_checkpoint',
+	'stable_model_state_sha256',
 	'validate_resume_identity',
 	'validation_is_better',
 ]

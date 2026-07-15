@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 
 from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
+	ALL_TILES_ONCE,
+	UNIFORM_TILES_WITH_REPLACEMENT,
 	f3_lithology_voxel_decoder_config_from_mapping,
 )
 from seis_ssl_cluster.models.voxel_decoder.spec import (
@@ -57,12 +59,52 @@ def test_voxel_decoder_config_resolves_strict_settings(tmp_path) -> None:
 	assert config.decoder.normalization == VOXEL_DECODER_NORMALIZATION
 	assert config.decoder.hidden_channels == (4,)
 	assert config.tiles.context_halo_tokens == (0, 0, 0)
+	assert config.train.sampling_mode == ALL_TILES_ONCE
+	assert config.train.steps_per_epoch is None
+	assert 'sampling_mode' not in config.to_dict()['train']
+	assert 'steps_per_epoch' not in config.to_dict()['train']
 	assert config.to_dict()['decoder'] == voxel_decoder_architecture_mapping(
 		embedding_dim=2,
 		class_count=2,
 		hidden_channels=(4,),
 		upsample_factors=((1, 1, 1),),
 	)
+
+
+def test_voxel_decoder_config_binds_replacement_sampling(tmp_path) -> None:
+	raw = deepcopy(_config(tmp_path))
+	raw['train']['sampling_mode'] = UNIFORM_TILES_WITH_REPLACEMENT
+	raw['train']['steps_per_epoch'] = 440
+
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+
+	assert config.train.sampling_mode == UNIFORM_TILES_WITH_REPLACEMENT
+	assert config.train.steps_per_epoch == 440
+	assert config.to_dict()['train']['sampling_mode'] == (
+		UNIFORM_TILES_WITH_REPLACEMENT
+	)
+	assert config.to_dict()['train']['steps_per_epoch'] == 440
+
+
+@pytest.mark.parametrize(
+	('sampling_mode', 'steps_per_epoch'),
+	[
+		(ALL_TILES_ONCE, 1),
+		(UNIFORM_TILES_WITH_REPLACEMENT, None),
+		(UNIFORM_TILES_WITH_REPLACEMENT, 0),
+		(UNIFORM_TILES_WITH_REPLACEMENT, True),
+		('random', None),
+	],
+)
+def test_voxel_decoder_config_rejects_invalid_sampling_contract(
+	tmp_path, sampling_mode: str, steps_per_epoch: object
+) -> None:
+	raw = deepcopy(_config(tmp_path))
+	raw['train']['sampling_mode'] = sampling_mode
+	raw['train']['steps_per_epoch'] = steps_per_epoch
+
+	with pytest.raises(ValueError, match=r'sampling_mode|steps_per_epoch'):
+		f3_lithology_voxel_decoder_config_from_mapping(raw)
 
 
 @pytest.mark.parametrize('field', ['upsample_mode', 'normalization'])
@@ -90,9 +132,7 @@ def test_voxel_decoder_config_rejects_unsupported_implementation(
 	raw = deepcopy(_config(tmp_path))
 	raw['decoder'][field] = value
 
-	with pytest.raises(
-		ValueError, match=rf'decoder\.{field} must be {expected!r}'
-	):
+	with pytest.raises(ValueError, match=rf'decoder\.{field} must be {expected!r}'):
 		f3_lithology_voxel_decoder_config_from_mapping(raw)
 
 

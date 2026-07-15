@@ -43,6 +43,11 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'build_f3_lithology_voxel_label_budget_datasets.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+	),
 	'build_f3_lithology_split_sweep_datasets.py': (
 		'--config',
 		'--dry-run',
@@ -57,6 +62,16 @@ HELP_FLAG_CONTRACTS = {
 		'--dry-run',
 		'--only-missing',
 	),
+	'run_f3_lithology_voxel_label_budget_suite.py': (
+		'--config',
+		'--dry-run',
+		'--device',
+		'--only-missing',
+		'--smoke-only',
+		'--budget',
+		'--subsample-seed',
+		'--model',
+	),
 	'run_f3_lithology_split_sweep_probes.py': (
 		'--config',
 		'--dry-run',
@@ -64,6 +79,10 @@ HELP_FLAG_CONTRACTS = {
 	),
 	'summarize_f3_lithology_label_budget_robustness.py': (
 		'--suite-root',
+		'--dry-run',
+	),
+	'summarize_f3_lithology_voxel_label_budget.py': (
+		'--config',
 		'--dry-run',
 	),
 	'summarize_f3_lithology_split_robustness.py': (

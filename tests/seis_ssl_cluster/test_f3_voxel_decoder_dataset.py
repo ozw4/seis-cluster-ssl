@@ -5,7 +5,11 @@ import json
 import numpy as np
 import pytest
 import torch
+from torch.utils.data import DataLoader, RandomSampler
 
+from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
+	UNIFORM_TILES_WITH_REPLACEMENT,
+)
 from seis_ssl_cluster.data.f3_voxel_decoder_dataset import (
 	F3VoxelDecoderDataset,
 	build_f3_voxel_decoder_dataloader,
@@ -108,6 +112,70 @@ def test_dataset_collates_and_shuffle_is_seeded(tmp_path) -> None:
 		)
 		orders.append([item['tile_id'][0] for item in loader])
 	assert orders[0] == orders[1]
+
+
+def test_all_tiles_once_preserves_legacy_dataloader_order(tmp_path) -> None:
+	dataset = _dataset(tmp_path)
+	generator = torch.Generator()
+	generator.manual_seed(23)
+	legacy = DataLoader(
+		dataset,
+		batch_size=1,
+		shuffle=True,
+		num_workers=0,
+		generator=generator,
+	)
+	actual = build_f3_voxel_decoder_dataloader(
+		dataset, batch_size=1, shuffle=True, seed=23
+	)
+
+	assert [batch['tile_id'][0] for batch in actual] == [
+		batch['tile_id'][0] for batch in legacy
+	]
+
+
+def test_replacement_sampling_has_fixed_seeded_tile_sequence(tmp_path) -> None:
+	dataset = _dataset(tmp_path)
+	steps = 9
+	seed = 31
+	loader = build_f3_voxel_decoder_dataloader(
+		dataset,
+		batch_size=1,
+		shuffle=True,
+		seed=seed,
+		sampling_mode=UNIFORM_TILES_WITH_REPLACEMENT,
+		steps_per_epoch=steps,
+	)
+	expected_generator = torch.Generator()
+	expected_generator.manual_seed(seed)
+	expected_sampler = RandomSampler(
+		dataset,
+		replacement=True,
+		num_samples=steps,
+		generator=expected_generator,
+	)
+	expected = [dataset.manifest.tiles[index].tile_id for index in expected_sampler]
+
+	assert len(loader) == steps
+	assert [batch['tile_id'][0] for batch in loader] == expected
+	repeated = build_f3_voxel_decoder_dataloader(
+		dataset,
+		batch_size=1,
+		shuffle=True,
+		seed=seed,
+		sampling_mode=UNIFORM_TILES_WITH_REPLACEMENT,
+		steps_per_epoch=steps,
+	)
+	changed = build_f3_voxel_decoder_dataloader(
+		dataset,
+		batch_size=1,
+		shuffle=True,
+		seed=seed + 1,
+		sampling_mode=UNIFORM_TILES_WITH_REPLACEMENT,
+		steps_per_epoch=steps,
+	)
+	assert [batch['tile_id'][0] for batch in repeated] == expected
+	assert [batch['tile_id'][0] for batch in changed] != expected
 
 
 def test_dataset_rejects_valid_token_hash_mismatch(tmp_path) -> None:

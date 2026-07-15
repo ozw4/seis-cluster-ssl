@@ -16,6 +16,7 @@ from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	CHECKPOINT_SCHEMA_VERSION,
 	load_voxel_decoder_checkpoint,
 	save_voxel_decoder_checkpoint,
+	stable_model_state_sha256,
 	validate_resume_identity,
 	validation_is_better,
 )
@@ -66,15 +67,9 @@ def _save_checkpoint(tmp_path, *, architecture=None):
 
 def test_best_selection_uses_fixed_lexicographic_rule() -> None:
 	best = {'macro_f1': 0.5, 'mean_iou': 0.4, 'loss': 1.0}
-	assert validation_is_better(
-		{'macro_f1': 0.6, 'mean_iou': 0.0, 'loss': 9.0}, best
-	)
-	assert validation_is_better(
-		{'macro_f1': 0.5, 'mean_iou': 0.5, 'loss': 9.0}, best
-	)
-	assert validation_is_better(
-		{'macro_f1': 0.5, 'mean_iou': 0.4, 'loss': 0.9}, best
-	)
+	assert validation_is_better({'macro_f1': 0.6, 'mean_iou': 0.0, 'loss': 9.0}, best)
+	assert validation_is_better({'macro_f1': 0.5, 'mean_iou': 0.5, 'loss': 9.0}, best)
+	assert validation_is_better({'macro_f1': 0.5, 'mean_iou': 0.4, 'loss': 0.9}, best)
 	assert not validation_is_better(dict(best), best)
 
 
@@ -121,6 +116,32 @@ def test_schema_five_round_trip_binds_decoder_architecture(tmp_path) -> None:
 
 	assert payload['schema_version'] == 5 == CHECKPOINT_SCHEMA_VERSION
 	assert payload['decoder_architecture'] == resolved_config['decoder']
+
+
+def test_stable_model_state_hash_tracks_tensor_content() -> None:
+	torch.manual_seed(17)
+	first = VoxelDecoder3D(
+		embedding_dim=2,
+		class_count=2,
+		hidden_channels=(2,),
+		upsample_factors=((1, 1, 1),),
+		patch_size_xyz=(1, 1, 1),
+	)
+	torch.manual_seed(17)
+	second = VoxelDecoder3D(
+		embedding_dim=2,
+		class_count=2,
+		hidden_channels=(2,),
+		upsample_factors=((1, 1, 1),),
+		patch_size_xyz=(1, 1, 1),
+	)
+
+	first_hash = stable_model_state_sha256(first)
+	assert len(first_hash) == 64
+	assert stable_model_state_sha256(second) == first_hash
+	with torch.no_grad():
+		next(second.parameters()).view(-1)[0] += 1.0
+	assert stable_model_state_sha256(second) != first_hash
 
 
 @pytest.mark.parametrize(

@@ -30,6 +30,10 @@ if TYPE_CHECKING:
 	from pathlib import Path
 
 
+ALL_TILES_ONCE = 'all_tiles_once'
+UNIFORM_TILES_WITH_REPLACEMENT = 'uniform_tiles_with_replacement'
+
+
 @dataclass(frozen=True)
 class VoxelDecoderSpec:
 	"""Canonical architecture of the dense decoder."""
@@ -64,6 +68,8 @@ class VoxelDecoderTrainSettings:
 	num_workers: int
 	amp: bool
 	gradient_clip_norm: float
+	sampling_mode: str = ALL_TILES_ONCE
+	steps_per_epoch: int | None = None
 
 
 @dataclass(frozen=True)
@@ -89,6 +95,15 @@ class F3LithologyVoxelDecoderConfig:
 
 	def to_dict(self) -> dict[str, object]:
 		"""Return the canonical JSON-compatible resolved config."""
+		train = _plain_dataclass(self.train)
+		# Preserve the exact schema-5 full-label identity when legacy configs omit
+		# the sampling contract. Replacement runs always serialize it explicitly.
+		if (
+			self.train.sampling_mode == ALL_TILES_ONCE
+			and self.train.steps_per_epoch is None
+		):
+			train.pop('sampling_mode')
+			train.pop('steps_per_epoch')
 		return {
 			'paths': {
 				'artifact_root': str(self.artifact_root),
@@ -111,7 +126,7 @@ class F3LithologyVoxelDecoderConfig:
 				normalization=self.decoder.normalization,
 			),
 			'tiles': _plain_dataclass(self.tiles),
-			'train': _plain_dataclass(self.train),
+			'train': train,
 			'outputs': {'output_dir': str(self.output_dir)},
 		}
 
@@ -191,6 +206,8 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 				'num_workers',
 				'amp',
 				'gradient_clip_norm',
+				'sampling_mode',
+				'steps_per_epoch',
 			}
 		),
 		prefix='train',
@@ -244,6 +261,7 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 		raise ValueError(
 			f'train.num_workers must be a non-negative integer; got {num_workers!r}'
 		)
+	sampling_mode, steps_per_epoch = _sampling_contract(train)
 
 	return F3LithologyVoxelDecoderConfig(
 		artifact_root=artifact_root,
@@ -301,6 +319,8 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 			gradient_clip_norm=_finite_positive_float(
 				train.get('gradient_clip_norm'), 'train.gradient_clip_norm'
 			),
+			sampling_mode=sampling_mode,
+			steps_per_epoch=steps_per_epoch,
 		),
 		output_dir=output_dir,
 		embeddings={
@@ -320,9 +340,36 @@ def _finite_positive_float(value: object, label: str) -> float:
 	return result
 
 
-def _validate_no_output_overlap(
-	output_dir: Path, *, sources: tuple[Path, ...]
-) -> None:
+def _sampling_contract(
+	train: Mapping[str, object],
+) -> tuple[str, int | None]:
+	value = train.get('sampling_mode', ALL_TILES_ONCE)
+	if not isinstance(value, str):
+		raise TypeError(f'train.sampling_mode must be a string; got {value!r}')
+	if value not in {ALL_TILES_ONCE, UNIFORM_TILES_WITH_REPLACEMENT}:
+		raise ValueError(
+			'train.sampling_mode must be '
+			f'{ALL_TILES_ONCE!r} or {UNIFORM_TILES_WITH_REPLACEMENT!r}; '
+			f'got {value!r}'
+		)
+	steps = train.get('steps_per_epoch')
+	if value == ALL_TILES_ONCE:
+		if steps is not None:
+			raise ValueError(
+				'train.steps_per_epoch must be null when '
+				f'train.sampling_mode is {ALL_TILES_ONCE!r}'
+			)
+		return value, None
+	if not isinstance(steps, int) or isinstance(steps, bool) or steps <= 0:
+		raise ValueError(
+			'train.steps_per_epoch must be a positive integer when '
+			f'train.sampling_mode is {UNIFORM_TILES_WITH_REPLACEMENT!r}; '
+			f'got {steps!r}'
+		)
+	return value, steps
+
+
+def _validate_no_output_overlap(output_dir: Path, *, sources: tuple[Path, ...]) -> None:
 	output = output_dir.resolve(strict=False)
 	for source_path in sources:
 		source = source_path.resolve(strict=False)
@@ -384,6 +431,8 @@ def _plain_dataclass(value: object) -> dict[str, object]:
 
 
 __all__ = [
+	'ALL_TILES_ONCE',
+	'UNIFORM_TILES_WITH_REPLACEMENT',
 	'F3LithologyVoxelDecoderConfig',
 	'VoxelDecoderSpec',
 	'VoxelDecoderTileSettings',

@@ -119,7 +119,7 @@ def test_f3_prepare_and_embedding_configs_follow_path_contracts() -> None:
 	assert embedding_config['embeddings']['checkpoint'] == (
 		'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/'
 		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/'
-		'mae_best.pt'
+		'mae_latest.pt'
 	)
 	assert embedding_config['embeddings']['output_dir'] == (
 		'/workspace/artifacts/seis_ssl_cluster/embeddings/f3/'

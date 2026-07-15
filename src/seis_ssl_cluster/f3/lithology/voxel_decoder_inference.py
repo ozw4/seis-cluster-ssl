@@ -299,8 +299,7 @@ def _write_inference_tiles(  # noqa: PLR0913
 	tile_count = 0
 	class_ids = np.asarray(plan.class_ids, dtype=np.int16)
 	input_shape = tuple(
-		core_size_tokens[axis] + 2 * context_halo_tokens[axis]
-		for axis in range(3)
+		core_size_tokens[axis] + 2 * context_halo_tokens[axis] for axis in range(3)
 	)
 	with torch.inference_mode():
 		for tile in _inference_tiles(
@@ -357,8 +356,7 @@ def _write_inference_tiles(  # noqa: PLR0913
 				valid_core = np.repeat(valid_core, repeat, axis=axis)
 			valid_core = valid_core[_slices((0, 0, 0), core_voxel_shape)]
 			voxel_start = tuple(
-				tile.core_start[axis] * plan.patch_size_xyz[axis]
-				for axis in range(3)
+				tile.core_start[axis] * plan.patch_size_xyz[axis] for axis in range(3)
 			)
 			voxel_stop = tuple(
 				voxel_start[axis] + core_voxel_shape[axis] for axis in range(3)
@@ -416,8 +414,7 @@ def _inference_tiles(
 					max(0, start[axis] - halo[axis]) for axis in range(3)
 				)
 				desired_stop = tuple(
-					start[axis] + core_size[axis] + halo[axis]
-					for axis in range(3)
+					start[axis] + core_size[axis] + halo[axis] for axis in range(3)
 				)
 				input_stop = tuple(
 					min(token_shape[axis], desired_stop[axis]) for axis in range(3)
@@ -437,8 +434,7 @@ def _inference_tiles(
 					padding_after=cast(
 						'tuple[int, int, int]',
 						tuple(
-							desired_stop[axis] - input_stop[axis]
-							for axis in range(3)
+							desired_stop[axis] - input_stop[axis] for axis in range(3)
 						),
 					),
 				)
@@ -473,12 +469,8 @@ def _load_decoder(
 			spec.get('hidden_channels'), 'decoder.hidden_channels'
 		),
 		upsample_factors=_factor_sequence(spec.get('upsample_factors')),
-		upsample_mode=_nonempty_str(
-			spec.get('upsample_mode'), 'decoder.upsample_mode'
-		),
-		normalization=_nonempty_str(
-			spec.get('normalization'), 'decoder.normalization'
-		),
+		upsample_mode=_nonempty_str(spec.get('upsample_mode'), 'decoder.upsample_mode'),
+		normalization=_nonempty_str(spec.get('normalization'), 'decoder.normalization'),
 		patch_size_xyz=plan.patch_size_xyz,
 	).to(device)
 	state = plan.checkpoint_payload.get('model_state_dict')
@@ -607,6 +599,7 @@ def _prediction_metadata(
 		'schema_version': SCHEMA_VERSION,
 		'prediction_kind': 'frozen_embedding_decoder',
 		'decoder_architecture': dict(plan.decoder_spec),
+		'training_sampling': _training_sampling_metadata(plan),
 		'model_tag': config.model['tag'],
 		'class_probability_order': list(plan.class_ids),
 		'classes': [item.to_dict() for item in plan.classes],
@@ -655,6 +648,27 @@ def _prediction_metadata(
 		'coverage': dict(coverage),
 		'outputs': outputs,
 		'summary': dict(summary),
+	}
+
+
+def _training_sampling_metadata(
+	plan: VoxelDecoderInferencePlan,
+) -> dict[str, object]:
+	resolved = _mapping(
+		plan.checkpoint_payload.get('resolved_config'),
+		'checkpoint resolved_config',
+	)
+	train = _mapping(resolved.get('train'), 'checkpoint resolved_config.train')
+	manifest_hashes = _mapping(
+		plan.checkpoint_payload.get('tile_manifest_hashes'),
+		'checkpoint tile_manifest_hashes',
+	)
+	return {
+		'sampling_mode': train.get('sampling_mode', 'all_tiles_once'),
+		'steps_per_epoch': train.get('steps_per_epoch'),
+		'train_seed': train.get('seed'),
+		'train_tile_manifest_sha256': manifest_hashes.get('train'),
+		'validation_tile_manifest_sha256': manifest_hashes.get('validation'),
 	}
 
 
@@ -747,9 +761,7 @@ def _nonempty_str(value: object, label: str) -> str:
 	return value
 
 
-def _slices(
-	start: Sequence[int], stop: Sequence[int]
-) -> tuple[slice, slice, slice]:
+def _slices(start: Sequence[int], stop: Sequence[int]) -> tuple[slice, slice, slice]:
 	return cast(
 		'tuple[slice, slice, slice]',
 		tuple(slice(begin, end) for begin, end in zip(start, stop, strict=True)),
