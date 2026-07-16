@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 import torch
@@ -17,6 +18,15 @@ from seis_ssl_cluster.models.mae.positional_encoding import (
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping
+
+
+_POSITION_EMBEDDING_CACHE_CAPACITY = 8
+_PositionEmbeddingCacheKey = tuple[
+	tuple[int, int, int],
+	int,
+	torch.device,
+	torch.dtype,
+]
 
 
 class AmplitudeMAE3D(nn.Module):
@@ -66,6 +76,10 @@ class AmplitudeMAE3D(nn.Module):
 			self.decoder_dim,
 			self.out_channels * self.patch_volume,
 		)
+		self._position_embedding_cache: OrderedDict[
+			_PositionEmbeddingCacheKey,
+			torch.Tensor,
+		] = OrderedDict()
 		self.reset_parameters()
 
 	def reset_parameters(self) -> None:
@@ -89,30 +103,34 @@ class AmplitudeMAE3D(nn.Module):
 		)
 		visible_spatial_mask = ~spatial_mask
 
-		encoder_pos = build_3d_sincos_position_embedding(
+		encoder_pos = self._position_embedding(
 			token_grid_shape,
 			self.encoder_dim,
-		).to(device=local_tokens.device, dtype=local_tokens.dtype)
+			local_tokens,
+		)
 		visible_tokens, visible_pos, visible_valid_mask = select_visible_tokens(
 			local_tokens,
 			encoder_pos,
 			visible_spatial_mask,
+			equal_visible_count=True,
 		)
 		encoded_visible_tokens = self.encoder(
 			visible_tokens + visible_pos,
-			~visible_valid_mask,
+			None if visible_valid_mask is None else ~visible_valid_mask,
 		)
 
 		decoder_visible = self.encoder_to_decoder(encoded_visible_tokens)
-		decoder_pos = build_3d_sincos_position_embedding(
+		decoder_pos = self._position_embedding(
 			token_grid_shape,
 			self.decoder_dim,
-		).to(device=decoder_visible.device, dtype=decoder_visible.dtype)
+			decoder_visible,
+		)
 		decoder_tokens, _masked_token_mask = restore_decoder_sequence(
 			decoder_visible,
 			decoder_pos,
 			visible_spatial_mask,
 			self.mask_token.to(dtype=decoder_visible.dtype),
+			equal_visible_count=True,
 		)
 		decoded = self.decoder(decoder_tokens)
 		pred_patches = self.prediction_head(decoded).reshape(
@@ -137,10 +155,11 @@ class AmplitudeMAE3D(nn.Module):
 	) -> dict[str, torch.Tensor | tuple[int, int, int] | None]:
 		"""Encode all spatial tokens without MAE masking."""
 		_target_patches, tokens, token_grid_shape = self._project_patches(x)
-		pos = build_3d_sincos_position_embedding(
+		pos = self._position_embedding(
 			token_grid_shape,
 			self.encoder_dim,
-		).to(device=tokens.device, dtype=tokens.dtype)
+			tokens,
+		)
 		token_valid_mask = _token_valid_mask(
 			valid_mask,
 			x,
@@ -175,6 +194,29 @@ class AmplitudeMAE3D(nn.Module):
 			self.in_channels * self.patch_volume,
 		))
 		return patches, projected, token_grid_shape
+
+	def _position_embedding(
+		self,
+		grid_shape_xyz: tuple[int, int, int],
+		embed_dim: int,
+		reference: torch.Tensor,
+	) -> torch.Tensor:
+		key = (grid_shape_xyz, embed_dim, reference.device, reference.dtype)
+		cached = self._position_embedding_cache.get(key)
+		if cached is not None:
+			self._position_embedding_cache.move_to_end(key)
+			return cached
+
+		embedding = build_3d_sincos_position_embedding(
+			grid_shape_xyz,
+			embed_dim,
+			device=reference.device,
+			dtype=reference.dtype,
+		)
+		self._position_embedding_cache[key] = embedding
+		while len(self._position_embedding_cache) > _POSITION_EMBEDDING_CACHE_CAPACITY:
+			self._position_embedding_cache.popitem(last=False)
+		return embedding
 
 
 def _required_tensor(

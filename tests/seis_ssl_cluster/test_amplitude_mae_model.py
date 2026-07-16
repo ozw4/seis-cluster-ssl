@@ -73,16 +73,106 @@ def test_encoder_receives_only_visible_tokens(
 		key_padding_mask: torch.Tensor | None = None,
 	) -> torch.Tensor:
 		captured['tokens'] = tokens
-		assert key_padding_mask is not None
-		captured['key_padding_mask'] = key_padding_mask
+		assert key_padding_mask is None
 		return tokens
 
 	monkeypatch.setattr(model.encoder, 'forward', capture_encoder)
 	model(batch)
 
 	assert captured['tokens'].shape == (1, 62, 32)
-	assert captured['key_padding_mask'].shape == (1, 62)
-	assert not captured['key_padding_mask'].any()
+
+
+def test_position_embeddings_are_cached_across_forward_modes(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model()
+	build_position_embedding = mae_model_module.build_3d_sincos_position_embedding
+	call_count = 0
+
+	def counted_build_position_embedding(
+		grid_shape_xyz: tuple[int, int, int],
+		embed_dim: int,
+		*,
+		device: torch.device | str | None = None,
+		dtype: torch.dtype = torch.float32,
+	) -> torch.Tensor:
+		nonlocal call_count
+		call_count += 1
+		return build_position_embedding(
+			grid_shape_xyz,
+			embed_dim,
+			device=device,
+			dtype=dtype,
+		)
+
+	monkeypatch.setattr(
+		mae_model_module,
+		'build_3d_sincos_position_embedding',
+		counted_build_position_embedding,
+	)
+	x = torch.randn((1, 1, 16, 16, 16))
+	model.encode_tokens(x)
+	model.encode_tokens(x)
+	model(_make_batch(batch_size=1))
+
+	assert call_count == 2
+	assert len(model._position_embedding_cache) == 2  # noqa: SLF001
+	assert not (set(model.state_dict()) & {'_position_embedding_cache'})
+
+
+def test_position_embedding_cache_misses_and_is_bounded(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model()
+	build_position_embedding = mae_model_module.build_3d_sincos_position_embedding
+	call_count = 0
+
+	def counted_build_position_embedding(
+		grid_shape_xyz: tuple[int, int, int],
+		embed_dim: int,
+		*,
+		device: torch.device | str | None = None,
+		dtype: torch.dtype = torch.float32,
+	) -> torch.Tensor:
+		nonlocal call_count
+		call_count += 1
+		return build_position_embedding(
+			grid_shape_xyz,
+			embed_dim,
+			device=device,
+			dtype=dtype,
+		)
+
+	monkeypatch.setattr(
+		mae_model_module,
+		'build_3d_sincos_position_embedding',
+		counted_build_position_embedding,
+	)
+	cpu_float = torch.empty((), dtype=torch.float32)
+	cache_inputs = [
+		((1, 1, 1), 4, cpu_float),
+		((1, 1, 1), 4, cpu_float),
+		((2, 1, 1), 4, cpu_float),
+		((1, 1, 1), 6, cpu_float),
+		((1, 1, 1), 4, torch.empty((), dtype=torch.float64)),
+		((1, 1, 1), 4, torch.empty((), device='meta')),
+		*[
+			((size, 2, 1), 4, cpu_float)
+			for size in range(3, 8)
+		],
+	]
+	for grid_shape, embed_dim, reference in cache_inputs:
+		model._position_embedding(  # noqa: SLF001
+			grid_shape,
+			embed_dim,
+			reference,
+		)
+
+	assert call_count == 10
+	assert len(model._position_embedding_cache) == 8  # noqa: SLF001
+	cache_keys = set(model._position_embedding_cache)  # noqa: SLF001
+	assert any(key[2].type == 'meta' for key in cache_keys)
+	assert any(key[3] == torch.float64 for key in cache_keys)
 
 
 def test_encode_tokens_returns_all_token_embeddings() -> None:
