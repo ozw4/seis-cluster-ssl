@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Final, Literal, get_args
 
 import torch
 
@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 	from collections.abc import Callable
 
 RuntimeCheckMode = Literal['strict', 'once', 'minimal']
-SUPPORTED_RUNTIME_CHECK_MODES = frozenset({'strict', 'once', 'minimal'})
+SUPPORTED_RUNTIME_CHECK_MODES: Final = frozenset(get_args(RuntimeCheckMode))
 
 
 @dataclass

@@ -107,6 +107,7 @@ class AmplitudeMAE3D(nn.Module):
 			local_tokens.device,
 		)
 		visible_spatial_mask = ~spatial_mask
+		equal_visible_count = _has_equal_visible_count(visible_spatial_mask)
 
 		encoder_pos = self._position_embedding(
 			token_grid_shape,
@@ -117,7 +118,7 @@ class AmplitudeMAE3D(nn.Module):
 			local_tokens,
 			encoder_pos,
 			visible_spatial_mask,
-			equal_visible_count=True,
+			equal_visible_count=equal_visible_count,
 			runtime_checks=self.runtime_checks,
 		)
 		encoded_visible_tokens = self.encoder(
@@ -136,7 +137,7 @@ class AmplitudeMAE3D(nn.Module):
 			decoder_pos,
 			visible_spatial_mask,
 			self.mask_token.to(dtype=decoder_visible.dtype),
-			equal_visible_count=True,
+			equal_visible_count=equal_visible_count,
 			runtime_checks=self.runtime_checks,
 		)
 		decoded = self.decoder(decoder_tokens)
@@ -240,6 +241,14 @@ def _required_tensor(
 		msg = f'batch key {key!r} must be a tensor; got {type(value).__name__}'
 		raise TypeError(msg)
 	return value
+
+
+def _has_equal_visible_count(visible_spatial_mask: torch.Tensor) -> bool:
+	visible_counts = visible_spatial_mask.flatten(start_dim=1).sum(dim=1)
+	return torch.equal(
+		visible_counts,
+		visible_counts[:1].expand_as(visible_counts),
+	)
 
 
 def _validate_spatial_mask(

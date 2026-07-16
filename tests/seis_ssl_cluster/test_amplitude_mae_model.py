@@ -82,6 +82,44 @@ def test_encoder_receives_only_visible_tokens(
 	assert captured['tokens'].shape == (1, 62, 32)
 
 
+def test_forward_routes_unequal_visible_counts_through_padded_fallback(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model().eval()
+	batch = _make_batch()
+	batch['spatial_mask'][1, 2, 2, 2] = True
+	captured_padding_masks: list[torch.Tensor | None] = []
+	original_encoder_forward = model.encoder.forward
+
+	def capture_encoder(
+		tokens: torch.Tensor,
+		key_padding_mask: torch.Tensor | None = None,
+	) -> torch.Tensor:
+		captured_padding_masks.append(key_padding_mask)
+		return original_encoder_forward(tokens, key_padding_mask)
+
+	monkeypatch.setattr(model.encoder, 'forward', capture_encoder)
+	batched_output = model(batch)
+
+	assert len(captured_padding_masks) == 1
+	padding_mask = captured_padding_masks[0]
+	assert padding_mask is not None
+	assert torch.equal(padding_mask.sum(dim=1), torch.tensor([0, 1]))
+	for batch_index in range(2):
+		sample_output = model(
+			{
+				'x': batch['x'][batch_index : batch_index + 1],
+				'spatial_mask': batch['spatial_mask'][
+					batch_index : batch_index + 1
+				],
+			},
+		)
+		torch.testing.assert_close(
+			batched_output['pred_patches'][batch_index],
+			sample_output['pred_patches'][0],
+		)
+
+
 def test_position_embeddings_are_cached_across_forward_modes(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Final
 
+from seis_ssl_cluster.runtime_checks import (
+	SUPPORTED_RUNTIME_CHECK_MODES as _SUPPORTED_RUNTIME_CHECK_MODES,
+)
+
 DEFAULT_NOPIMS_ROOT: Final = '/home/dcuser/data/NOPIMS'
 DEFAULT_ARTIFACT_ROOT: Final = '/workspace/artifacts/seis_ssl_cluster'
 DEFAULT_F3_ROOT: Final = '/home/dcuser/data/public_data/field/F3'
@@ -26,7 +30,7 @@ EXPECTED_SPATIAL_MASK_MODE: Final = 'block'
 SUPPORTED_RECONSTRUCTION_LOSSES: Final = frozenset({'huber', 'mse', 'l1'})
 SUPPORTED_TARGET_NORMALIZATION_MODES: Final = frozenset({'none', 'patch_zscore'})
 SUPPORTED_FINITE_CHECK_MODES: Final = frozenset({'strict', 'output_only', 'off'})
-SUPPORTED_RUNTIME_CHECK_MODES: Final = frozenset({'strict', 'once', 'minimal'})
+SUPPORTED_RUNTIME_CHECK_MODES: Final = _SUPPORTED_RUNTIME_CHECK_MODES
 EXPECTED_VALID_MASK_MODE: Final = 'voxel'
 
 STAGE_BUILD_MANIFESTS: Final = 'build_nopims_manifests'
