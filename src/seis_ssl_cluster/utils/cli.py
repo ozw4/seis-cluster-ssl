@@ -17,8 +17,8 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_MAE_TRAINING,
 	STAGE_NORMALIZATION_QC,
 	STAGE_NORMALIZATION_STATS,
-	STAGE_STRAT_HMM_PSEUDO_TARGETS,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
+	STAGE_STRAT_HMM_PSEUDO_TARGETS,
 )
 
 
@@ -43,7 +43,7 @@ def parse_config_args(
 	return parser.parse_args()
 
 
-def print_config_summary(
+def print_config_summary(  # noqa: C901
 	cfg: Mapping[str, Any],
 	*,
 	device_override: str | None = None,
@@ -124,6 +124,16 @@ def print_config_summary(
 				('embedding.overlap', embedding.get('overlap')),
 				('embedding.output_dtype', embedding.get('output_dtype')),
 				('embedding.batch_size', embedding.get('batch_size')),
+				(
+					'embedding.prefetch_queue_depth',
+					embedding.get('prefetch_queue_depth', 0),
+				),
+				('embedding.amp', embedding.get('amp', False)),
+				('embedding.amp_dtype', embedding.get('amp_dtype', 'auto')),
+				(
+					'embedding.stage_timing',
+					embedding.get('stage_timing', False),
+				),
 				(
 					'embedding.min_token_valid_fraction',
 					embedding.get('min_token_valid_fraction'),

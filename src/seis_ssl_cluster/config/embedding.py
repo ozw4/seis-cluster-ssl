@@ -13,8 +13,10 @@ from seis_ssl_cluster.config.artifact_paths import (
 from seis_ssl_cluster.config.base import _resolve_base
 from seis_ssl_cluster.config.common import (
 	_required_mapping,
+	_validate_bool,
 	_validate_fraction,
 	_validate_non_empty_path,
+	_validate_nonnegative_int,
 	_validate_nonnegative_int_triplet,
 	_validate_path,
 	_validate_positive_int,
@@ -78,6 +80,22 @@ def resolve_embedding_extraction_config(config: _T) -> Config:
 	_validate_overlap_less_than_window(overlap, window_size)
 	_validate_embedding_output_dtype(embedding)
 	_validate_positive_int(embedding, 'batch_size', prefix='embedding')
+	if 'prefetch_queue_depth' in embedding:
+		_validate_nonnegative_int(
+			embedding,
+			'prefetch_queue_depth',
+			prefix='embedding',
+		)
+	for key in ('amp', 'stage_timing'):
+		if key in embedding:
+			_validate_bool(embedding, key, prefix='embedding')
+	amp_dtype = embedding.get('amp_dtype', 'auto')
+	if amp_dtype not in {'auto', 'bfloat16', 'float16'}:
+		msg = (
+			'embedding.amp_dtype must be one of '
+			f"['auto', 'bfloat16', 'float16']; got {amp_dtype!r}"
+		)
+		raise ValueError(msg)
 	_validate_fraction(
 		embedding,
 		'min_token_valid_fraction',

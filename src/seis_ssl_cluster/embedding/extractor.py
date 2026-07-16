@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+import queue
+import threading
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 from numbers import Integral, Real
 from pathlib import Path
@@ -54,6 +57,7 @@ from seis_ssl_cluster.embedding.writer import (
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
+from seis_ssl_cluster.utils import StageTimer
 
 XYZ = tuple[int, int, int]
 _CHECKPOINT_ALLOWED_TOP_LEVEL = frozenset(
@@ -122,6 +126,10 @@ class EmbeddingExtractionSettings:
 	overlap_xyz: XYZ
 	output_dtype: np.dtype
 	batch_size: int
+	prefetch_queue_depth: int
+	amp: bool
+	amp_dtype: str
+	stage_timing: bool
 	min_token_valid_fraction: float
 	zero_mask: ZeroMaskConfig
 	normalized_clip_abs: float | None
@@ -170,20 +178,36 @@ def run_embedding_extraction(
 	model.eval()
 
 	store = NpyMemmapVolumeStore()
-	return [
-		extract_survey_embeddings(
-			manifest,
-			model=model,
-			store=store,
-			settings=settings,
-			checkpoint_config=checkpoint_config,
-			checkpoint_payload=payload,
-			checkpoint_sha256=checkpoint_sha256,
-			device=resolved_device,
-			skip_existing=skip_existing,
-		)
-		for manifest in manifests
-	]
+	timer = StageTimer(
+		enabled=settings.stage_timing,
+		synchronize=(
+			torch.cuda.synchronize if resolved_device.type == 'cuda' else None
+		),
+	)
+	producer_timer = StageTimer(
+		enabled=settings.stage_timing,
+		accumulator=timer.accumulator,
+	)
+	try:
+		return [
+			extract_survey_embeddings(
+				manifest,
+				model=model,
+				store=store,
+				settings=settings,
+				checkpoint_config=checkpoint_config,
+				checkpoint_payload=payload,
+				checkpoint_sha256=checkpoint_sha256,
+				device=resolved_device,
+				skip_existing=skip_existing,
+				timer=timer,
+				producer_timer=producer_timer,
+			)
+			for manifest in manifests
+		]
+	finally:
+		if settings.stage_timing:
+			timer.write_json(settings.output_dir / 'stage_timings.json')
 
 
 def extraction_settings_from_config(
@@ -247,6 +271,16 @@ def extraction_settings_from_config(
 			embedding.get('batch_size'),
 			'embedding.batch_size',
 		),
+		prefetch_queue_depth=_nonnegative_int(
+			embedding.get('prefetch_queue_depth', 0),
+			'embedding.prefetch_queue_depth',
+		),
+		amp=_bool(embedding.get('amp', False), 'embedding.amp'),
+		amp_dtype=_amp_dtype(embedding.get('amp_dtype', 'auto')),
+		stage_timing=_bool(
+			embedding.get('stage_timing', False),
+			'embedding.stage_timing',
+		),
 		min_token_valid_fraction=_fraction(
 			embedding.get('min_token_valid_fraction'),
 			'embedding.min_token_valid_fraction',
@@ -304,6 +338,8 @@ def extract_survey_embeddings(  # noqa: PLR0913
 	checkpoint_sha256: str,
 	device: torch.device,
 	skip_existing: bool,
+	timer: StageTimer | None = None,
+	producer_timer: StageTimer | None = None,
 ) -> SurveyEmbeddingResult:
 	"""Extract and write embeddings for one survey manifest."""
 	manifest.validate()
@@ -347,31 +383,47 @@ def extract_survey_embeddings(  # noqa: PLR0913
 		sum_array=sum_array,
 		count_array=count_array,
 	)
-	windows = list(
-		iter_sliding_windows(
-			manifest.amplitude.shape_xyz,
-			window_size_xyz=settings.window_size_xyz,
-			overlap_xyz=settings.overlap_xyz,
-			patch_size_xyz=patch_size,
-		),
+	timer = timer or StageTimer(enabled=settings.stage_timing)
+	producer_timer = producer_timer or StageTimer(
+		enabled=settings.stage_timing,
+		accumulator=timer.accumulator,
 	)
-	for batch_start in range(0, len(windows), settings.batch_size):
-		_process_window_batch(
-			windows[batch_start : batch_start + settings.batch_size],
-			manifest=manifest,
-			amplitude_path=amplitude_path,
-			stats=stats,
-			store=store,
+	windows = iter_sliding_windows(
+		manifest.amplitude.shape_xyz,
+		window_size_xyz=settings.window_size_xyz,
+		overlap_xyz=settings.overlap_xyz,
+		patch_size_xyz=patch_size,
+	)
+	prepared_batches = _iter_prepared_batches(
+		windows,
+		manifest=manifest,
+		amplitude_path=amplitude_path,
+		stats=stats,
+		store=store,
+		settings=settings,
+		patch_size_xyz=patch_size,
+		pin_memory=device.type == 'cuda',
+		producer_timer=producer_timer,
+	)
+	for prepared_batch in _prefetch_batches(
+		prepared_batches,
+		queue_depth=settings.prefetch_queue_depth,
+		timer=timer,
+	):
+		_process_prepared_batch(
+			prepared_batch,
 			model=model,
 			settings=settings,
 			device=device,
 			merger=merger,
+			timer=timer,
 		)
-	merger.write_average(
-		embedding_path=paths.embeddings_tmp,
-		valid_tokens_path=paths.valid_tokens_tmp,
-		output_dtype=settings.output_dtype,
-	)
+	with timer.stage('merge_write'):
+		merger.write_average(
+			embedding_path=paths.embeddings_tmp,
+			valid_tokens_path=paths.valid_tokens_tmp,
+			output_dtype=settings.output_dtype,
+		)
 	commit_staged_outputs(paths, metadata)
 	cleanup_temp_outputs(paths)
 	return SurveyEmbeddingResult(
@@ -438,61 +490,203 @@ def build_embedding_metadata(  # noqa: PLR0913
 	return metadata
 
 
-def _process_window_batch(  # noqa: PLR0913
-	windows: Sequence[SlidingWindow],
+@dataclass(frozen=True)
+class _PreparedBatch:
+	windows: tuple[SlidingWindow, ...]
+	x: torch.Tensor
+	token_valid_masks: torch.Tensor
+
+
+def _iter_prepared_batches(  # noqa: PLR0913
+	windows: Iterable[SlidingWindow],
 	*,
 	manifest: SurveyManifest,
 	amplitude_path: Path,
 	stats: SurveyNormalizationStats,
 	store: NpyMemmapVolumeStore,
-	model: AmplitudeMAE3D,
 	settings: EmbeddingExtractionSettings,
-	device: torch.device,
-	merger: EmbeddingMerger,
-) -> None:
-	prepared = [
-		_read_window(
+	patch_size_xyz: XYZ,
+	pin_memory: bool,
+	producer_timer: StageTimer,
+) -> Iterator[_PreparedBatch]:
+	prepared: list[tuple[SlidingWindow, np.ndarray, np.ndarray]] = []
+	for window in windows:
+		with producer_timer.stage('read_preprocess'):
+			item = _read_window(
 			window,
 			manifest=manifest,
 			amplitude_path=amplitude_path,
 			stats=stats,
 			store=store,
 			settings=settings,
-			patch_size_xyz=model.patch_size_xyz,
+			patch_size_xyz=patch_size_xyz,
 		)
-		for window in windows
-	]
-	usable = [item for item in prepared if item[2].any()]
-	if not usable:
+		if not item[2].any():
+			continue
+		prepared.append(item)
+		if len(prepared) == settings.batch_size:
+			yield _stack_prepared_batch(prepared, pin_memory=pin_memory)
+			prepared = []
+	if prepared:
+		yield _stack_prepared_batch(prepared, pin_memory=pin_memory)
+
+
+def _stack_prepared_batch(
+	prepared: Sequence[tuple[SlidingWindow, np.ndarray, np.ndarray]],
+	*,
+	pin_memory: bool,
+) -> _PreparedBatch:
+	x = torch.from_numpy(np.stack([item[1] for item in prepared], axis=0))
+	token_valid_masks = torch.from_numpy(
+		np.stack([item[2] for item in prepared], axis=0),
+	)
+	if pin_memory:
+		x = x.pin_memory()
+		token_valid_masks = token_valid_masks.pin_memory()
+	return _PreparedBatch(
+		windows=tuple(item[0] for item in prepared),
+		x=x,
+		token_valid_masks=token_valid_masks,
+	)
+
+
+def _process_prepared_batch(  # noqa: PLR0913
+	prepared: _PreparedBatch,
+	*,
+	model: AmplitudeMAE3D,
+	settings: EmbeddingExtractionSettings,
+	device: torch.device,
+	merger: EmbeddingMerger,
+	timer: StageTimer,
+) -> None:
+	non_blocking = device.type == 'cuda' and prepared.x.is_pinned()
+	with timer.stage('h2d'):
+		x = prepared.x.to(
+			device=device,
+			dtype=_model_floating_dtype(model),
+			non_blocking=non_blocking,
+		)
+		token_masks = prepared.token_valid_masks.to(
+			device=device,
+			non_blocking=non_blocking,
+		)
+	autocast_dtype = _resolve_autocast_dtype(settings, device=device)
+	with (
+		timer.stage('encode'),
+		torch.inference_mode(),
+		torch.amp.autocast(
+			device.type,
+			enabled=autocast_dtype is not None,
+			dtype=autocast_dtype,
+		),
+	):
+		output = model.encode_tokens(x, valid_mask=token_masks)
+	with timer.stage('d2h'):
+		tokens = (
+			cast('torch.Tensor', output['tokens'])
+			.detach()
+			.to(device='cpu', dtype=torch.float32)
+			.numpy()
+		)
+	window_token_shape = cast('tuple[int, int, int]', output['token_grid_shape'])
+	with timer.stage('merge_write'):
+		for index, window in enumerate(prepared.windows):
+			merger.add_window(
+				window,
+				patch_size_xyz=model.patch_size_xyz,
+				token_embeddings=tokens[index].reshape(
+					*window_token_shape,
+					model.encoder_dim,
+				),
+				token_valid_mask=prepared.token_valid_masks[index].numpy(),
+			)
+
+
+@dataclass(frozen=True)
+class _ProducerFailure:
+	error: BaseException
+
+
+_QUEUE_END = object()
+
+
+def _prefetch_batches(  # noqa: C901
+	batches: Iterable[_PreparedBatch],
+	*,
+	queue_depth: int,
+	timer: StageTimer,
+) -> Iterator[_PreparedBatch]:
+	if queue_depth == 0:
+		iterator = iter(batches)
+		end = object()
+		while True:
+			with timer.stage('queue_wait'):
+				batch = next(iterator, end)
+			if batch is end:
+				return
+			yield cast('_PreparedBatch', batch)
 		return
 
-	x = torch.from_numpy(np.stack([item[1] for item in usable], axis=0)).to(
-		device=device,
-		dtype=_model_floating_dtype(model),
+	batch_queue: queue.Queue[object] = queue.Queue(maxsize=queue_depth)
+	cancelled = threading.Event()
+
+	def put(item: object) -> bool:
+		while not cancelled.is_set():
+			try:
+				batch_queue.put(item, timeout=0.05)
+			except queue.Full:
+				continue
+			return True
+		return False
+
+	def produce() -> None:
+		try:
+			for batch in batches:
+				if not put(batch):
+					return
+		except BaseException as exc:  # noqa: BLE001
+			put(_ProducerFailure(exc))
+		finally:
+			put(_QUEUE_END)
+
+	producer = threading.Thread(
+		target=produce,
+		name='embedding-prefetch',
+		daemon=False,
 	)
-	token_masks = torch.from_numpy(
-		np.stack([item[2] for item in usable], axis=0),
-	).to(device)
-	with torch.no_grad():
-		output = model.encode_tokens(x, valid_mask=token_masks)
-	tokens = (
-		cast('torch.Tensor', output['tokens'])
-		.detach()
-		.to(dtype=torch.float32)
-		.cpu()
-		.numpy()
-	)
-	window_token_shape = cast('tuple[int, int, int]', output['token_grid_shape'])
-	for index, (window, _x, token_valid) in enumerate(usable):
-		merger.add_window(
-			window,
-			patch_size_xyz=model.patch_size_xyz,
-			token_embeddings=tokens[index].reshape(
-				*window_token_shape,
-				model.encoder_dim,
-			),
-			token_valid_mask=token_valid,
-		)
+	producer.start()
+	try:
+		while True:
+			with timer.stage('queue_wait'):
+				item = batch_queue.get()
+			if item is _QUEUE_END:
+				return
+			if isinstance(item, _ProducerFailure):
+				raise item.error
+			yield cast('_PreparedBatch', item)
+	finally:
+		cancelled.set()
+		while producer.is_alive():
+			with suppress(queue.Empty):
+				batch_queue.get_nowait()
+			producer.join(timeout=0.05)
+
+
+def _resolve_autocast_dtype(
+	settings: EmbeddingExtractionSettings,
+	*,
+	device: torch.device,
+) -> torch.dtype | None:
+	if not settings.amp or device.type != 'cuda':
+		return None
+	if settings.amp_dtype == 'bfloat16':
+		if not torch.cuda.is_bf16_supported():
+			msg = 'embedding.amp_dtype=bfloat16 is not supported by the CUDA device'
+			raise ValueError(msg)
+		return torch.bfloat16
+	if settings.amp_dtype == 'float16':
+		return torch.float16
+	return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
 
 
 def _read_window(  # noqa: PLR0913
@@ -1131,6 +1325,16 @@ def _bool(value: object, name: str) -> bool:
 		msg = f'{name} must be a boolean; got {value!r}'
 		raise TypeError(msg)
 	return value
+
+
+def _amp_dtype(value: object) -> str:
+	if value not in {'auto', 'bfloat16', 'float16'}:
+		msg = (
+			'embedding.amp_dtype must be one of '
+			f"['auto', 'bfloat16', 'float16']; got {value!r}"
+		)
+		raise ValueError(msg)
+	return cast('str', value)
 
 
 def _required_non_empty_string(

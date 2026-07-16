@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -88,6 +90,166 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['min_token_valid_fraction'] == 0.5
 	assert metadata['preprocessing']['amplitude_agc'] == {'enabled': False}
 	assert metadata['amplitude_agc'] == {'enabled': False}
+
+
+@pytest.mark.parametrize(
+	('batch_size', 'prefetch_queue_depth'),
+	[(1, 0), (2, 1), (5, 3)],
+)
+def test_batched_prefetch_matches_synchronous_reference(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	batch_size: int,
+	prefetch_queue_depth: int,
+) -> None:
+	reference_root = tmp_path / 'reference'
+	reference_root.mkdir()
+	reference_config = _write_fixture(reference_root)
+	reference_config['embedding']['batch_size'] = 1
+	reference_config['embedding']['prefetch_queue_depth'] = 0
+	reference = run_embedding_extraction(reference_config, device='cpu')[0]
+	reference_embeddings = np.load(reference.embeddings_path)
+	reference_valid = np.load(reference.valid_tokens_path)
+
+	actual_root = tmp_path / 'actual'
+	actual_root.mkdir()
+	config = _write_fixture(actual_root)
+	config['embedding']['batch_size'] = batch_size
+	config['embedding']['prefetch_queue_depth'] = prefetch_queue_depth
+	encode_batch_sizes: list[int] = []
+	original_encode_tokens = AmplitudeMAE3D.encode_tokens
+
+	def wrapped_encode_tokens(
+		self: AmplitudeMAE3D,
+		x: torch.Tensor,
+		*,
+		valid_mask: torch.Tensor | None = None,
+	) -> dict[str, torch.Tensor | tuple[int, int, int] | None]:
+		encode_batch_sizes.append(int(x.shape[0]))
+		return original_encode_tokens(self, x, valid_mask=valid_mask)
+
+	monkeypatch.setattr(AmplitudeMAE3D, 'encode_tokens', wrapped_encode_tokens)
+	actual = run_embedding_extraction(config, device='cpu')[0]
+
+	np.testing.assert_array_equal(np.load(actual.embeddings_path), reference_embeddings)
+	np.testing.assert_array_equal(np.load(actual.valid_tokens_path), reference_valid)
+	assert sum(encode_batch_sizes) == 12
+	assert len(encode_batch_sizes) == math.ceil(12 / batch_size)
+	assert encode_batch_sizes[-1] == (12 % batch_size or batch_size)
+
+
+@pytest.mark.parametrize('prefetch_queue_depth', [0, 2])
+def test_batched_prefetch_skips_all_invalid_windows(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	prefetch_queue_depth: int,
+) -> None:
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_zero_mask={
+			'enabled': True,
+			'zero_atol': 0.0,
+			'z_sample_influence_radius': 0,
+			'xy_trace_influence_radius': 0,
+		},
+	)
+	manifest = read_manifest_json(Path(config['manifests']['input']))[0]
+	np.save(manifest.amplitude.path, np.zeros(manifest.amplitude.shape_xyz, np.float32))
+	config['embedding']['min_token_valid_fraction'] = 1.0
+	config['embedding']['prefetch_queue_depth'] = prefetch_queue_depth
+	encode_calls = 0
+
+	def unexpected_encode(*_args: object, **_kwargs: object) -> None:
+		nonlocal encode_calls
+		encode_calls += 1
+
+	monkeypatch.setattr(AmplitudeMAE3D, 'encode_tokens', unexpected_encode)
+	result = run_embedding_extraction(config, device='cpu')[0]
+
+	assert encode_calls == 0
+	assert not np.load(result.valid_tokens_path).any()
+	assert not np.load(result.embeddings_path).any()
+
+
+def test_prefetch_producer_exception_stops_worker(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['prefetch_queue_depth'] = 1
+
+	def failing_read(*_args: object, **_kwargs: object) -> None:
+		msg = 'injected producer failure'
+		raise RuntimeError(msg)
+
+	monkeypatch.setattr(extractor_module, '_read_window', failing_read)
+	with pytest.raises(RuntimeError, match='injected producer failure'):
+		run_embedding_extraction(config, device='cpu')
+
+	assert all(
+		thread.name != 'embedding-prefetch' for thread in threading.enumerate()
+	)
+
+
+@pytest.mark.parametrize('error_type', [RuntimeError, KeyboardInterrupt])
+def test_prefetch_consumer_exception_stops_worker(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	error_type: type[BaseException],
+) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['prefetch_queue_depth'] = 2
+
+	def failing_encode(*_args: object, **_kwargs: object) -> None:
+		msg = 'injected consumer failure'
+		raise error_type(msg)
+
+	monkeypatch.setattr(AmplitudeMAE3D, 'encode_tokens', failing_encode)
+	with pytest.raises(error_type, match='injected consumer failure'):
+		run_embedding_extraction(config, device='cpu')
+
+	assert all(
+		thread.name != 'embedding-prefetch' for thread in threading.enumerate()
+	)
+
+
+def test_prefetch_pipeline_records_stages_and_uses_inference_mode(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['prefetch_queue_depth'] = 1
+	config['embedding']['stage_timing'] = True
+	inference_modes: list[bool] = []
+	original_encode_tokens = AmplitudeMAE3D.encode_tokens
+
+	def wrapped_encode_tokens(
+		self: AmplitudeMAE3D,
+		x: torch.Tensor,
+		*,
+		valid_mask: torch.Tensor | None = None,
+	) -> dict[str, torch.Tensor | tuple[int, int, int] | None]:
+		inference_modes.append(torch.is_inference_mode_enabled())
+		return original_encode_tokens(self, x, valid_mask=valid_mask)
+
+	monkeypatch.setattr(AmplitudeMAE3D, 'encode_tokens', wrapped_encode_tokens)
+	run_embedding_extraction(config, device='cpu')
+
+	assert inference_modes
+	assert all(inference_modes)
+	timings = json.loads(
+		(tmp_path / 'embeddings' / 'stage_timings.json').read_text(
+			encoding='utf-8',
+		),
+	)
+	assert set(timings['stages']) == {
+		'd2h',
+		'encode',
+		'h2d',
+		'merge_write',
+		'queue_wait',
+		'read_preprocess',
+	}
 
 
 def test_reduce_valid_mask_to_tokens_legacy_import_path_is_shared() -> None:

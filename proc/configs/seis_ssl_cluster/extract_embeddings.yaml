@@ -10,4 +10,8 @@ embedding:
   overlap: [64, 64, 64]
   output_dtype: float16
   batch_size: 1
+  prefetch_queue_depth: 0
+  amp: false
+  amp_dtype: auto
+  stage_timing: false
   min_token_valid_fraction: 0.5

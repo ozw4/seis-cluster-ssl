@@ -63,6 +63,27 @@ def test_embedding_config_validates_window_overlap() -> None:
 		resolve_embedding_extraction_config(cfg)
 
 
+@pytest.mark.parametrize(
+	('key', 'value', 'error'),
+	[
+		('prefetch_queue_depth', -1, 'prefetch_queue_depth'),
+		('amp', 1, r'embedding\.amp'),
+		('amp_dtype', 'float32', r'embedding\.amp_dtype'),
+		('stage_timing', 'yes', r'embedding\.stage_timing'),
+	],
+)
+def test_embedding_config_validates_prefetch_and_precision_options(
+	key: str,
+	value: object,
+	error: str,
+) -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embedding'][key] = value
+
+	with pytest.raises((TypeError, ValueError), match=error):
+		resolve_embedding_extraction_config(cfg)
+
+
 def _minimal_embedding_config() -> dict[str, object]:
 	return deepcopy(
 		{

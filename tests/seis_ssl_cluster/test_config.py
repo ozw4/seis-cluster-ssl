@@ -419,6 +419,10 @@ def test_default_embedding_extraction_config_is_minimal_raw_user_config() -> Non
 		'overlap': [64, 64, 64],
 		'output_dtype': 'float16',
 		'batch_size': 1,
+		'prefetch_queue_depth': 0,
+		'amp': False,
+		'amp_dtype': 'auto',
+		'stage_timing': False,
 		'min_token_valid_fraction': 0.5,
 	}
 	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
