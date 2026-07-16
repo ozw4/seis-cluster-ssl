@@ -26,6 +26,7 @@ EXPECTED_SPATIAL_MASK_MODE: Final = 'block'
 SUPPORTED_RECONSTRUCTION_LOSSES: Final = frozenset({'huber', 'mse', 'l1'})
 SUPPORTED_TARGET_NORMALIZATION_MODES: Final = frozenset({'none', 'patch_zscore'})
 SUPPORTED_FINITE_CHECK_MODES: Final = frozenset({'strict', 'output_only', 'off'})
+SUPPORTED_RUNTIME_CHECK_MODES: Final = frozenset({'strict', 'once', 'minimal'})
 EXPECTED_VALID_MASK_MODE: Final = 'voxel'
 
 STAGE_BUILD_MANIFESTS: Final = 'build_nopims_manifests'
@@ -132,6 +133,7 @@ DEFAULT_MAE_TRAIN_OPTIONS: Final = {
 	'device': 'cuda',
 	'seed': 42,
 	'grad_clip_norm': 1.0,
+	'runtime_check_mode': 'once',
 }
 
 DEFAULT_STRAT_HMM_PRETEXT_DATA_OPTIONS: Final = {

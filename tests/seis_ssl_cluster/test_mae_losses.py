@@ -10,6 +10,7 @@ from seis_ssl_cluster.losses import (
 	reconstruction_target_patches_for_loss,
 )
 from seis_ssl_cluster.models.mae.patching import patchify_3d
+from seis_ssl_cluster.runtime_checks import RuntimeChecks
 
 PATCH_SIZE_XYZ = (2, 2, 2)
 
@@ -128,6 +129,47 @@ def test_reconstruction_loss_raises_when_no_valid_masked_voxels() -> None:
 			local_valid_mask=local_valid_mask,
 			patch_size_xyz=PATCH_SIZE_XYZ,
 		)
+
+
+def test_once_reconstruction_validity_check_runs_only_on_first_call() -> None:
+	target = torch.zeros((1, 1, 4, 4, 4))
+	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ)
+	checks = RuntimeChecks('once')
+	masked_patch_reconstruction_loss(
+		pred_patches=pred_patches,
+		target_patches=pred_patches,
+		spatial_mask=_spatial_mask(),
+		local_valid_mask=torch.ones((1, 4, 4, 4), dtype=torch.bool),
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		runtime_checks=checks,
+	)
+
+	loss = masked_patch_reconstruction_loss(
+		pred_patches=pred_patches,
+		target_patches=pred_patches,
+		spatial_mask=_spatial_mask(),
+		local_valid_mask=torch.zeros((1, 4, 4, 4), dtype=torch.bool),
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		runtime_checks=checks,
+	)
+
+	assert loss == torch.tensor(0.0)
+
+
+def test_minimal_reconstruction_skips_tensor_value_validity_check() -> None:
+	target = torch.zeros((1, 1, 4, 4, 4))
+	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ)
+
+	loss = masked_patch_reconstruction_loss(
+		pred_patches=pred_patches,
+		target_patches=pred_patches,
+		spatial_mask=_spatial_mask(),
+		local_valid_mask=torch.zeros((1, 4, 4, 4), dtype=torch.bool),
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		runtime_check_mode='minimal',
+	)
+
+	assert loss == torch.tensor(0.0)
 
 
 def test_gradient_loss_excludes_pairs_crossing_invalid_voxels() -> None:

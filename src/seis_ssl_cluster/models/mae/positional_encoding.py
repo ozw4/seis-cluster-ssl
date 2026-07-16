@@ -6,6 +6,8 @@ import math
 
 import torch
 
+from seis_ssl_cluster.runtime_checks import RuntimeChecks
+
 
 def build_3d_sincos_position_embedding(
 	grid_shape_xyz: tuple[int, int, int],
@@ -45,6 +47,7 @@ def select_visible_tokens(
 	visible_spatial_mask: torch.Tensor,
 	*,
 	equal_visible_count: bool = False,
+	runtime_checks: RuntimeChecks | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
 	"""Pack visible spatial tokens and positions, padding to the batch maximum."""
 	batch_size, num_tokens, embed_dim = _validate_tokens(tokens, 'tokens')
@@ -57,9 +60,13 @@ def select_visible_tokens(
 	)
 	visible_counts = flat_visible_mask.sum(dim=1)
 	if equal_visible_count:
-		torch._assert_async(  # noqa: SLF001
-			(visible_counts == visible_counts[:1]).all(),
-			'equal_visible_count requires the same visible count in every sample',
+		runtime_checks = runtime_checks or RuntimeChecks('strict')
+		runtime_checks.assert_async(
+			'select_visible_equal_count',
+			lambda: (visible_counts == visible_counts[:1]).all(),
+			message=(
+				'equal_visible_count requires the same visible count in every sample'
+			),
 		)
 		expanded_pos = pos.unsqueeze(0).expand(batch_size, -1, -1)
 		return (
@@ -89,13 +96,14 @@ def select_visible_tokens(
 	return visible_tokens, visible_pos, valid_mask
 
 
-def restore_decoder_sequence(
+def restore_decoder_sequence(  # noqa: PLR0913
 	visible_tokens: torch.Tensor,
 	pos: torch.Tensor,
 	visible_spatial_mask: torch.Tensor,
 	mask_token: torch.Tensor | None = None,
 	*,
 	equal_visible_count: bool = False,
+	runtime_checks: RuntimeChecks | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
 	"""Scatter packed visible tokens into full XYZ order for the decoder."""
 	batch_size, max_visible_tokens, embed_dim = _validate_tokens(
@@ -112,9 +120,13 @@ def restore_decoder_sequence(
 	)
 	visible_counts = flat_visible_mask.sum(dim=1)
 	if equal_visible_count:
-		torch._assert_async(  # noqa: SLF001
-			(visible_counts == max_visible_tokens).all(),
-			'equal_visible_count requires visible_tokens to match every sample',
+		runtime_checks = runtime_checks or RuntimeChecks('strict')
+		runtime_checks.assert_async(
+			'restore_visible_equal_count',
+			lambda: (visible_counts == max_visible_tokens).all(),
+			message=(
+				'equal_visible_count requires visible_tokens to match every sample'
+			),
 		)
 		normalized_mask_token = _normalize_mask_token(
 			mask_token,

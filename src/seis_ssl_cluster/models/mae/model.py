@@ -15,6 +15,7 @@ from seis_ssl_cluster.models.mae.positional_encoding import (
 	restore_decoder_sequence,
 	select_visible_tokens,
 )
+from seis_ssl_cluster.runtime_checks import RuntimeCheckMode, RuntimeChecks
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping
@@ -44,6 +45,7 @@ class AmplitudeMAE3D(nn.Module):
 		decoder_dim: int = 256,
 		decoder_depth: int = 4,
 		decoder_heads: int = 4,
+		runtime_check_mode: RuntimeCheckMode = 'once',
 	) -> None:
 		"""Initialize patch projection, transformer stacks, and prediction head."""
 		super().__init__()
@@ -55,6 +57,7 @@ class AmplitudeMAE3D(nn.Module):
 		self.patch_volume = (
 			self.patch_size_xyz[0] * self.patch_size_xyz[1] * self.patch_size_xyz[2]
 		)
+		self.runtime_checks = RuntimeChecks(runtime_check_mode)
 
 		self.patch_projection = nn.Linear(
 			self.in_channels * self.patch_volume,
@@ -64,6 +67,7 @@ class AmplitudeMAE3D(nn.Module):
 			embed_dim=self.encoder_dim,
 			num_heads=encoder_heads,
 			depth=encoder_depth,
+			runtime_check_mode=runtime_check_mode,
 		)
 		self.encoder_to_decoder = nn.Linear(self.encoder_dim, self.decoder_dim)
 		self.mask_token = nn.Parameter(torch.empty(self.decoder_dim))
@@ -71,6 +75,7 @@ class AmplitudeMAE3D(nn.Module):
 			embed_dim=self.decoder_dim,
 			num_heads=decoder_heads,
 			depth=decoder_depth,
+			runtime_check_mode=runtime_check_mode,
 		)
 		self.prediction_head = nn.Linear(
 			self.decoder_dim,
@@ -113,6 +118,7 @@ class AmplitudeMAE3D(nn.Module):
 			encoder_pos,
 			visible_spatial_mask,
 			equal_visible_count=True,
+			runtime_checks=self.runtime_checks,
 		)
 		encoded_visible_tokens = self.encoder(
 			visible_tokens + visible_pos,
@@ -131,6 +137,7 @@ class AmplitudeMAE3D(nn.Module):
 			visible_spatial_mask,
 			self.mask_token.to(dtype=decoder_visible.dtype),
 			equal_visible_count=True,
+			runtime_checks=self.runtime_checks,
 		)
 		decoded = self.decoder(decoder_tokens)
 		pred_patches = self.prediction_head(decoded).reshape(
@@ -165,6 +172,7 @@ class AmplitudeMAE3D(nn.Module):
 			x,
 			self.patch_size_xyz,
 			token_grid_shape,
+			self.runtime_checks,
 		)
 		key_padding_mask = None
 		if token_valid_mask is not None:
@@ -263,6 +271,7 @@ def _token_valid_mask(
 	x: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
 	token_grid_shape: tuple[int, int, int],
+	runtime_checks: RuntimeChecks,
 ) -> torch.Tensor | None:
 	if valid_mask is None:
 		return None
@@ -282,9 +291,11 @@ def _token_valid_mask(
 		patch_size_xyz,
 	)
 	token_valid_mask = mask_patches.squeeze(2).all(dim=-1)
-	if not token_valid_mask.any(dim=1).all():
-		msg = 'each sample must contain at least one valid token'
-		raise ValueError(msg)
+	runtime_checks.check(
+		'token_valid_mask_has_valid_token',
+		lambda: token_valid_mask.any(dim=1).all(),
+		error=ValueError('each sample must contain at least one valid token'),
+	)
 	return token_valid_mask
 
 

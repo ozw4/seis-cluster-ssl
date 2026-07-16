@@ -48,6 +48,19 @@ class _TinyAmpModel(torch.nn.Module):
 		}
 
 
+class _FiniteLossNanGradient(torch.autograd.Function):
+	@staticmethod
+	def forward(_context: object, value: torch.Tensor) -> torch.Tensor:
+		return value.new_zeros(())
+
+	@staticmethod
+	def backward(
+		_context: object,
+		grad_output: torch.Tensor,
+	) -> tuple[torch.Tensor]:
+		return (torch.full_like(grad_output, float('nan')),)
+
+
 def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	cfg['train']['max_steps'] = 2
@@ -92,6 +105,8 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	assert run_metadata_path.is_file()
 	run_metadata = json.loads(run_metadata_path.read_text(encoding='utf-8'))
 	assert run_metadata['package_version'] == __version__
+	assert run_metadata['runtime_check_mode'] == 'once'
+	assert checkpoint['config']['train']['runtime_check_mode'] == 'once'
 
 
 def test_run_snapshots_configured_train_path_list(tmp_path: Path) -> None:
@@ -486,6 +501,51 @@ def test_grad_clip_norm_calls_torch_clip_on_cpu(
 	assert state.metrics['grad_norm'] == pytest.approx(0.25)
 
 
+def test_step_callback_materializes_metrics_only_at_interval(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	samples = [_mae_sample(), _mae_sample(), _mae_sample()]
+	for sample in samples:
+		sample['x'] = np.zeros((1, 4, 4, 4), dtype=np.float32)
+	dataloader = torch.utils.data.DataLoader(
+		samples,
+		batch_size=1,
+		collate_fn=mae_collate_fn,
+	)
+	model = _TinyAmpModel()
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.0)
+	callbacks: list[int] = []
+	materializations = 0
+	original = mae_training._materialize_metrics  # noqa: SLF001
+
+	def counted(metrics: object) -> dict[str, float]:
+		nonlocal materializations
+		materializations += 1
+		return original(metrics)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(mae_training, '_materialize_metrics', counted)
+	state = train_mae_one_epoch(
+		model=model,
+		dataloader=dataloader,
+		optimizer=optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		patch_size_xyz=(2, 2, 2),
+		loss_config={
+			'reconstruction': 'mse',
+			'gradient_weight': 0.0,
+			'visible_reconstruction_weight': 0.0,
+			'target_normalization': {'mode': 'none'},
+		},
+		step_callback=lambda step: callbacks.append(step.global_step),
+		step_callback_interval=2,
+	)
+
+	assert callbacks == [2]
+	assert materializations == 2  # callback step and epoch boundary
+	assert state.metrics['loss'] == pytest.approx(1.0)
+
+
 def test_train_one_epoch_requires_loss_reconstruction() -> None:
 	dataloader = torch.utils.data.DataLoader(
 		[_mae_sample()],
@@ -530,6 +590,13 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 	)
 	model = _TinyAmpModel()
 	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+	optimizer_steps = 0
+
+	def optimizer_step() -> None:
+		nonlocal optimizer_steps
+		optimizer_steps += 1
+
+	monkeypatch.setattr(optimizer, 'step', optimizer_step)
 	diagnostics_dir = tmp_path / 'diagnostics'
 	run_config = {
 		'stage': 'train_amp_mae',
@@ -574,6 +641,53 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 		'repr': 'nan',
 	}
 	assert payload['config'] == run_config
+	assert optimizer_steps == 0
+
+
+def test_nonfinite_gradient_skips_optimizer_step(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	def nan_gradient_loss(**kwargs: object) -> dict[str, torch.Tensor]:
+		pred_patches = kwargs['pred_patches']
+		if not isinstance(pred_patches, torch.Tensor):
+			raise TypeError
+		return {'loss': _FiniteLossNanGradient.apply(pred_patches.sum())}
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.training.mae.mae_pretraining_loss',
+		nan_gradient_loss,
+	)
+	dataloader = torch.utils.data.DataLoader(
+		[_mae_sample()],
+		batch_size=1,
+		collate_fn=mae_collate_fn,
+	)
+	model = _TinyAmpModel()
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+	optimizer_steps = 0
+
+	def optimizer_step() -> None:
+		nonlocal optimizer_steps
+		optimizer_steps += 1
+
+	monkeypatch.setattr(optimizer, 'step', optimizer_step)
+	with pytest.raises(FloatingPointError, match='non-finite MAE gradient norm'):
+		train_mae_one_epoch(
+			model=model,
+			dataloader=dataloader,
+			optimizer=optimizer,
+			device=torch.device('cpu'),
+			epoch=1,
+			patch_size_xyz=(2, 2, 2),
+			loss_config={
+				'reconstruction': 'mse',
+				'gradient_weight': 0.0,
+				'visible_reconstruction_weight': 0.0,
+				'target_normalization': {'mode': 'none'},
+			},
+		)
+
+	assert optimizer_steps == 0
 
 
 def _tiny_config(tmp_path: Path) -> dict[str, object]:

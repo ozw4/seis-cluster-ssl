@@ -19,6 +19,7 @@ from seis_ssl_cluster.data import NopimsAmplitudePretrainDataset, read_manifest_
 from seis_ssl_cluster.losses import mae_pretraining_loss
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.mae.patching import unpatchify_3d
+from seis_ssl_cluster.runtime_checks import RuntimeCheckMode, RuntimeChecks
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
 from seis_ssl_cluster.training.collate import move_batch_to_device
 from seis_ssl_cluster.training.dataloaders import build_mae_dataloader
@@ -87,6 +88,27 @@ class MaeStepState:
 StepCallback = Callable[[MaeStepState], None]
 
 
+def _accumulate_metric_tensors(
+	totals: dict[str, torch.Tensor],
+	metrics: Mapping[str, torch.Tensor],
+) -> None:
+	for key, value in metrics.items():
+		if key in totals:
+			totals[key].add_(value)
+		else:
+			totals[key] = value.clone()
+
+
+def _materialize_metrics(
+	metrics: Mapping[str, torch.Tensor],
+) -> dict[str, float]:
+	if not metrics:
+		return {}
+	keys = tuple(metrics)
+	values = torch.stack([metrics[key].reshape(()) for key in keys]).cpu().tolist()
+	return dict(zip(keys, map(float, values), strict=True))
+
+
 def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	*,
 	model: torch.nn.Module,
@@ -105,7 +127,9 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	skip_batches: int = 0,
 	visualization_config: MaeDebugVisualizationConfig | None = None,
 	step_callback: StepCallback | None = None,
+	step_callback_interval: int | None = None,
 	run_config: Mapping[str, object] | None = None,
+	runtime_checks: RuntimeChecks | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
 	(
@@ -117,8 +141,12 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		target_normalization_eps,
 		target_normalization_min_std,
 	) = _runtime_loss_values(loss_config)
+	if step_callback_interval is not None and step_callback_interval <= 0:
+		msg = 'step_callback_interval must be positive when provided'
+		raise ValueError(msg)
+	runtime_checks = runtime_checks or RuntimeChecks('once')
 	model.train()
-	totals: dict[str, float] = {}
+	totals: dict[str, torch.Tensor] = {}
 	batches = 0
 	last_batch_index = -1
 	epoch_visualization_triggered = False
@@ -147,10 +175,11 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				target_normalization_mode=target_normalization_mode,
 				target_normalization_eps=target_normalization_eps,
 				target_normalization_min_std=target_normalization_min_std,
+				runtime_checks=runtime_checks,
 			)
 			loss = losses['loss']
 
-		if not torch.isfinite(loss).all():
+		if not bool(torch.isfinite(loss).all()):
 			_raise_nonfinite(
 				kind='loss',
 				global_step=global_step,
@@ -165,61 +194,61 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				run_config=run_config,
 			)
 
-		current_grad_norm: float | None = None
+		current_grad_norm: torch.Tensor | None = None
 		if amp_enabled:
 			if scaler is None:
 				msg = 'scaler is required when amp_enabled is true'
 				raise ValueError(msg)
 			scaler.scale(loss).backward()
-			if grad_clip_norm is not None:
-				scaler.unscale_(optimizer)
-				current_grad_norm = _clip_and_check_gradients(
-					model=model,
-					grad_clip_norm=grad_clip_norm,
-					global_step=global_step,
-					epoch=epoch,
-					batch_index=batch_index,
-					batch=batch,
-					output=output,
-					losses=losses,
-					amp_enabled=amp_enabled,
-					diagnostics_dir=diagnostics_dir,
-					patch_size_xyz=patch_size_xyz,
-					run_config=run_config,
-				)
-				totals['grad_norm'] = totals.get('grad_norm', 0.0) + current_grad_norm
+			scaler.unscale_(optimizer)
+			current_grad_norm = _clip_and_check_gradients(
+				model=model,
+				grad_clip_norm=grad_clip_norm,
+				global_step=global_step,
+				epoch=epoch,
+				batch_index=batch_index,
+				batch=batch,
+				output=output,
+				losses=losses,
+				amp_enabled=amp_enabled,
+				diagnostics_dir=diagnostics_dir,
+				patch_size_xyz=patch_size_xyz,
+				run_config=run_config,
+			)
 			scaler.step(optimizer)
 			scaler.update()
 		else:
 			loss.backward()
-			if grad_clip_norm is not None:
-				current_grad_norm = _clip_and_check_gradients(
-					model=model,
-					grad_clip_norm=grad_clip_norm,
-					global_step=global_step,
-					epoch=epoch,
-					batch_index=batch_index,
-					batch=batch,
-					output=output,
-					losses=losses,
-					amp_enabled=amp_enabled,
-					diagnostics_dir=diagnostics_dir,
-					patch_size_xyz=patch_size_xyz,
-					run_config=run_config,
-				)
-				totals['grad_norm'] = totals.get('grad_norm', 0.0) + current_grad_norm
+			current_grad_norm = _clip_and_check_gradients(
+				model=model,
+				grad_clip_norm=grad_clip_norm,
+				global_step=global_step,
+				epoch=epoch,
+				batch_index=batch_index,
+				batch=batch,
+				output=output,
+				losses=losses,
+				amp_enabled=amp_enabled,
+				diagnostics_dir=diagnostics_dir,
+				patch_size_xyz=patch_size_xyz,
+				run_config=run_config,
+			)
 			optimizer.step()
 
-		step_metrics: dict[str, float] = {}
-		for key, value in losses.items():
-			metric = float(value.detach().cpu().item())
-			step_metrics[key] = metric
-			totals[key] = totals.get(key, 0.0) + metric
+		metric_tensors = {
+			key: value.detach().to(dtype=torch.float64)
+			for key, value in losses.items()
+		}
 		if current_grad_norm is not None:
-			step_metrics['grad_norm'] = current_grad_norm
+			metric_tensors['grad_norm'] = current_grad_norm.detach().to(
+				dtype=torch.float64,
+			)
+		_accumulate_metric_tensors(totals, metric_tensors)
 		batches += 1
 		global_step += 1
 		last_batch_index = batch_index
+		epoch_triggered = False
+		step_triggered = False
 		if visualization_config is not None:
 			epoch_triggered = _mae_debug_epoch_triggered(
 				config=visualization_config,
@@ -230,6 +259,12 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				config=visualization_config,
 				global_step=global_step,
 			)
+		callback_triggered = step_callback is not None and (
+			step_callback_interval is None
+			or global_step % step_callback_interval == 0
+		)
+		if epoch_triggered or step_triggered or callback_triggered:
+			step_metrics = _materialize_metrics(metric_tensors)
 			if epoch_triggered or step_triggered:
 				_save_mae_debug_visualization(
 					batch=batch,
@@ -244,7 +279,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				epoch_visualization_triggered = (
 					epoch_visualization_triggered or epoch_triggered
 				)
-		if step_callback is not None:
+		if callback_triggered and step_callback is not None:
 			step_callback(
 				MaeStepState(
 					epoch=epoch,
@@ -262,7 +297,9 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	return MaeTrainingState(
 		epoch=epoch,
 		global_step=global_step,
-		metrics={key: total / batches for key, total in totals.items()},
+		metrics=_materialize_metrics(
+			{key: total / batches for key, total in totals.items()},
+		),
 		amp_enabled=amp_enabled,
 		last_batch_index=last_batch_index,
 		completed_epoch=last_batch_index >= len(dataloader) - 1,
@@ -322,7 +359,15 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		device=device,
 	)
 
-	model = _build_model(model_config).to(device)
+	runtime_check_mode = cast(
+		'RuntimeCheckMode',
+		train_config.get('runtime_check_mode', 'once'),
+	)
+	runtime_checks = RuntimeChecks(runtime_check_mode)
+	model = _build_model(
+		model_config,
+		runtime_check_mode=runtime_check_mode,
+	).to(device)
 	optimizer = torch.optim.AdamW(
 		model.parameters(),
 		lr=_float_config(train_config, 'lr', 3.0e-5),
@@ -435,8 +480,12 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			grad_clip_norm=grad_clip_norm,
 			skip_batches=skip_batches,
 			visualization_config=visualization_config,
-			step_callback=save_step_checkpoint,
+			step_callback=(
+				save_step_checkpoint if checkpoint_every_steps is not None else None
+			),
+			step_callback_interval=checkpoint_every_steps,
 			run_config=config,
+			runtime_checks=runtime_checks,
 		)
 		print_epoch_metrics(epoch, state.metrics)
 		checkpoint_kind: Literal['step', 'epoch'] = (
@@ -507,7 +556,11 @@ def prepare_run_directory(
 		raise FileExistsError(msg)
 
 
-def _build_model(model_config: Mapping[str, object]) -> AmplitudeMAE3D:
+def _build_model(
+	model_config: Mapping[str, object],
+	*,
+	runtime_check_mode: RuntimeCheckMode = 'once',
+) -> AmplitudeMAE3D:
 	return AmplitudeMAE3D(
 		in_channels=_int_config(model_config, 'in_channels', 1),
 		out_channels=_int_config(model_config, 'out_channels', 1),
@@ -518,6 +571,7 @@ def _build_model(model_config: Mapping[str, object]) -> AmplitudeMAE3D:
 		decoder_dim=_int_config(model_config, 'decoder_dim', 256),
 		decoder_depth=_int_config(model_config, 'decoder_depth', 4),
 		decoder_heads=_int_config(model_config, 'decoder_heads', 4),
+		runtime_check_mode=runtime_check_mode,
 	)
 
 
@@ -544,6 +598,10 @@ def _snapshot_run_inputs(
 			'created_at_utc': datetime.now(timezone.utc).isoformat(),
 			'git_commit': _git_commit(),
 			'package_version': getattr(seis_ssl_cluster, '__version__', None),
+			'runtime_check_mode': _mapping(config, 'train').get(
+				'runtime_check_mode',
+				'once',
+			),
 		},
 		overwrite=overwrite,
 	)
@@ -669,7 +727,7 @@ def _resolve_diagnostics_dir(
 def _clip_and_check_gradients(  # noqa: PLR0913
 	*,
 	model: torch.nn.Module,
-	grad_clip_norm: float,
+	grad_clip_norm: float | None,
 	global_step: int,
 	epoch: int,
 	batch_index: int,
@@ -680,10 +738,31 @@ def _clip_and_check_gradients(  # noqa: PLR0913
 	diagnostics_dir: Path | None,
 	patch_size_xyz: tuple[int, int, int],
 	run_config: Mapping[str, object] | None,
-) -> float:
+) -> torch.Tensor | None:
+	if grad_clip_norm is None:
+		gradient_finite = [
+			torch.isfinite(parameter.grad).all()
+			for parameter in model.parameters()
+			if parameter.grad is not None
+		]
+		if not gradient_finite or bool(torch.stack(gradient_finite).all()):
+			return None
+		_raise_nonfinite(
+			kind='gradient norm',
+			global_step=global_step,
+			epoch=epoch,
+			batch_index=batch_index,
+			batch=batch,
+			output=output,
+			losses=losses,
+			amp_enabled=amp_enabled,
+			diagnostics_dir=diagnostics_dir,
+			patch_size_xyz=patch_size_xyz,
+			run_config=run_config,
+		)
 	grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
-	if torch.isfinite(grad_norm.detach()).all():
-		return float(grad_norm.detach().float().cpu().item())
+	if bool(torch.isfinite(grad_norm.detach()).all()):
+		return grad_norm.detach()
 	_raise_nonfinite(
 		kind='gradient norm',
 		global_step=global_step,

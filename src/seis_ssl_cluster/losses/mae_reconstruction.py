@@ -15,6 +15,7 @@ from seis_ssl_cluster.losses.target_normalization import (
 	normalize_target_patches,
 )
 from seis_ssl_cluster.models.mae.patching import compute_num_patches
+from seis_ssl_cluster.runtime_checks import RuntimeCheckMode, RuntimeChecks
 
 LossMode = Literal['huber', 'l1', 'mse']
 
@@ -31,8 +32,11 @@ def masked_patch_reconstruction_loss(  # noqa: PLR0913
 	target_normalization_mode: TargetNormalizationMode = 'none',
 	target_normalization_eps: float | None = None,
 	target_normalization_min_std: float | None = None,
+	runtime_check_mode: RuntimeCheckMode = 'strict',
+	runtime_checks: RuntimeChecks | None = None,
 ) -> torch.Tensor:
 	"""Return reconstruction loss over valid voxels in masked spatial patches."""
+	runtime_checks = runtime_checks or RuntimeChecks(runtime_check_mode)
 	loss, _valid_voxels, _normalization_result, _patch_selection = (
 		_masked_reconstruction_loss_and_count(
 			pred_patches=pred_patches,
@@ -45,6 +49,7 @@ def masked_patch_reconstruction_loss(  # noqa: PLR0913
 			target_normalization_mode=target_normalization_mode,
 			target_normalization_eps=target_normalization_eps,
 			target_normalization_min_std=target_normalization_min_std,
+			runtime_checks=runtime_checks,
 		)
 	)
 	return loss
@@ -92,8 +97,11 @@ def mae_pretraining_loss(  # noqa: PLR0913
 	target_normalization_mode: TargetNormalizationMode = 'none',
 	target_normalization_eps: float | None = None,
 	target_normalization_min_std: float | None = None,
+	runtime_check_mode: RuntimeCheckMode = 'strict',
+	runtime_checks: RuntimeChecks | None = None,
 ) -> dict[str, torch.Tensor]:
 	"""Return total amplitude-only MAE loss and component scalars."""
+	runtime_checks = runtime_checks or RuntimeChecks(runtime_check_mode)
 	if gradient_weight < 0:
 		msg = f'gradient_weight must be nonnegative; got {gradient_weight!r}'
 		raise ValueError(msg)
@@ -122,6 +130,7 @@ def mae_pretraining_loss(  # noqa: PLR0913
 		target_normalization_mode=target_normalization_mode,
 		target_normalization_eps=target_normalization_eps,
 		target_normalization_min_std=target_normalization_min_std,
+		runtime_checks=runtime_checks,
 	)
 	visible_weight = loss_reconstruction_masked.new_tensor(
 		float(visible_reconstruction_weight),
@@ -167,6 +176,7 @@ def _reconstruction_loss_components(  # noqa: PLR0913
 	target_normalization_mode: TargetNormalizationMode,
 	target_normalization_eps: float | None,
 	target_normalization_min_std: float | None,
+	runtime_checks: RuntimeChecks,
 ) -> tuple[
 	torch.Tensor,
 	torch.Tensor,
@@ -198,12 +208,14 @@ def _reconstruction_loss_components(  # noqa: PLR0913
 	masked_selection = spatial_patch_mask & local_valid_patch_voxels
 	visible_selection = ~spatial_patch_mask & local_valid_patch_voxels
 	valid_reconstruction_voxels = masked_selection.sum()
-	if bool(valid_reconstruction_voxels.detach().eq(0).item()):
-		msg = (
+	runtime_checks.check(
+		'valid_masked_reconstruction_voxels',
+		lambda: valid_reconstruction_voxels.ne(0),
+		error=ValueError(
 			'no valid masked voxels for reconstruction loss; check spatial_mask '
-			'and local_valid_mask'
-		)
-		raise ValueError(msg)
+			'and local_valid_mask',
+		),
+	)
 
 	normalization_result = normalize_target_patches(
 		target_patches.detach().to(dtype=pred_patches.dtype),
@@ -218,7 +230,10 @@ def _reconstruction_loss_components(  # noqa: PLR0913
 		reconstruction,
 		huber_delta,
 	)
-	loss_reconstruction_masked = loss.masked_select(masked_selection).mean()
+	loss_reconstruction_masked = (
+		loss.masked_select(masked_selection).sum()
+		/ valid_reconstruction_voxels.clamp_min(1)
+	)
 	valid_visible_reconstruction_voxels = visible_selection.sum()
 	loss_reconstruction_visible = _mean_or_zero(
 		loss,
@@ -248,6 +263,7 @@ def _masked_reconstruction_loss_and_count(  # noqa: PLR0913
 	target_normalization_mode: TargetNormalizationMode,
 	target_normalization_eps: float | None,
 	target_normalization_min_std: float | None,
+	runtime_checks: RuntimeChecks,
 ) -> tuple[
 	torch.Tensor,
 	torch.Tensor,
@@ -272,6 +288,7 @@ def _masked_reconstruction_loss_and_count(  # noqa: PLR0913
 		target_normalization_mode=target_normalization_mode,
 		target_normalization_eps=target_normalization_eps,
 		target_normalization_min_std=target_normalization_min_std,
+		runtime_checks=runtime_checks,
 	)
 	return (
 		loss_reconstruction_masked,
@@ -286,9 +303,7 @@ def _mean_or_zero(
 	selection: torch.Tensor,
 	valid_voxels: torch.Tensor,
 ) -> torch.Tensor:
-	if bool(valid_voxels.detach().eq(0).item()):
-		return loss.detach().new_tensor(0.0)
-	return loss.masked_select(selection).mean()
+	return loss.masked_select(selection).sum() / valid_voxels.clamp_min(1)
 
 
 def _target_normalization_metrics(
