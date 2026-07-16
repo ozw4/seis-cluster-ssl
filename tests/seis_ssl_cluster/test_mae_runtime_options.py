@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 # ruff: noqa: FBT001
+from contextlib import nullcontext
+
 import pytest
 import torch
 
@@ -125,6 +127,27 @@ def test_auto_amp_selects_cuda_precision_without_allocating_cuda(
 
 	assert precision.resolved_dtype == expected_dtype
 	assert precision.scaler_enabled is expected_scaler
+
+
+def test_auto_amp_queries_configured_indexed_cuda_device(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	queried_devices: list[torch.device] = []
+
+	def cuda_device(device: torch.device) -> nullcontext[None]:
+		queried_devices.append(device)
+		return nullcontext()
+
+	monkeypatch.setattr(torch.cuda, 'device', cuda_device)
+	monkeypatch.setattr(torch.cuda, 'is_bf16_supported', lambda: True)
+
+	precision = mae_training._resolve_amp_precision(  # noqa: SLF001
+		{'amp': True, 'amp_dtype': 'auto'},
+		device=torch.device('cuda:1'),
+	)
+
+	assert precision.resolved_dtype == 'bfloat16'
+	assert queried_devices == [torch.device('cuda:1')]
 
 
 @pytest.mark.parametrize(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -322,6 +323,51 @@ def test_memmap_preprocessing_cache_normalizes_by_chunk_and_reuses(
 	assert not cache_path.exists()
 
 
+def test_memmap_preprocessing_cache_removes_interrupted_build(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['preprocessing_cache'] = {
+		'mode': 'memmap',
+		'cleanup': True,
+	}
+	manifest = read_manifest_json(Path(config['manifests']['input']))[0]
+	payload = load_checkpoint(
+		Path(config['embeddings']['checkpoint']),
+		map_location='cpu',
+	)
+	settings = extractor_module.extraction_settings_from_config(
+		config,
+		checkpoint_config=payload['config'],
+	)
+	amplitude_path = resolve_manifest_path(manifest, manifest.amplitude.path)
+	stats = load_normalization_stats(
+		resolve_manifest_path(
+			manifest,
+			manifest.amplitude.normalization_stats_path,
+		),
+	)
+	plan = cache_module.plan_survey_preprocessing_cache(
+		amplitude_path=amplitude_path,
+		stats=stats,
+		preprocess_settings=extractor_module._amplitude_preprocess_settings(  # noqa: SLF001
+			settings,
+		),
+		cache_settings=settings.preprocessing_cache,
+		default_cache_root=tmp_path / 'embeddings' / '.preprocessing_cache',
+	)
+	assert plan.cache_root is not None
+	assert plan.fingerprint is not None
+	staging = plan.cache_root / f'.{plan.fingerprint}.building-interrupted'
+	staging.mkdir(parents=True)
+	(staging / 'partial.npy').write_bytes(b'partial')
+
+	run_embedding_extraction(config, device='cpu')
+
+	assert not staging.exists()
+	assert not (plan.cache_root / plan.fingerprint).exists()
+
+
 def test_preprocessing_cache_fingerprint_tracks_source_and_config(
 	tmp_path: Path,
 ) -> None:
@@ -549,6 +595,28 @@ def test_prefetch_pipeline_records_stages_and_uses_inference_mode(
 		'queue_wait',
 		'read_preprocess',
 	}
+
+
+def test_embedding_auto_amp_queries_configured_indexed_cuda_device(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	queried_devices: list[torch.device] = []
+
+	def cuda_device(device: torch.device) -> nullcontext[None]:
+		queried_devices.append(device)
+		return nullcontext()
+
+	monkeypatch.setattr(torch.cuda, 'device', cuda_device)
+	monkeypatch.setattr(torch.cuda, 'is_bf16_supported', lambda: True)
+	settings = SimpleNamespace(amp=True, amp_dtype='auto')
+
+	dtype = extractor_module._resolve_autocast_dtype(  # noqa: SLF001
+		settings,
+		device=torch.device('cuda:1'),
+	)
+
+	assert dtype == torch.bfloat16
+	assert queried_devices == [torch.device('cuda:1')]
 
 
 def test_reduce_valid_mask_to_tokens_legacy_import_path_is_shared() -> None:

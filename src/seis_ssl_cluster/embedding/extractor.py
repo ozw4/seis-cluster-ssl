@@ -68,6 +68,7 @@ from seis_ssl_cluster.embedding.writer import (
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
 from seis_ssl_cluster.utils import StageTimer
+from seis_ssl_cluster.utils.cuda import cuda_device_supports_bfloat16
 
 XYZ = tuple[int, int, int]
 _CHECKPOINT_ALLOWED_TOP_LEVEL = frozenset(
@@ -740,13 +741,17 @@ def _resolve_autocast_dtype(
 	if not settings.amp or device.type != 'cuda':
 		return None
 	if settings.amp_dtype == 'bfloat16':
-		if not torch.cuda.is_bf16_supported():
+		if not cuda_device_supports_bfloat16(device):
 			msg = 'embedding.amp_dtype=bfloat16 is not supported by the CUDA device'
 			raise ValueError(msg)
 		return torch.bfloat16
 	if settings.amp_dtype == 'float16':
 		return torch.float16
-	return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+	return (
+		torch.bfloat16
+		if cuda_device_supports_bfloat16(device)
+		else torch.float16
+	)
 
 
 def _embedding_precision_metadata(

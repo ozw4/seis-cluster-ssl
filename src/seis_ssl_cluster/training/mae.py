@@ -54,6 +54,7 @@ from seis_ssl_cluster.training.mae_visualization_hooks import (
 	_save_mae_debug_visualization,
 )
 from seis_ssl_cluster.utils import StageTimer
+from seis_ssl_cluster.utils.cuda import cuda_device_supports_bfloat16
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.visualization.mae_debug import MaeDebugVisualizationConfig
@@ -798,7 +799,7 @@ def _resolve_amp_precision(
 			scaler_enabled=False,
 		)
 
-	bf16_supported = torch.cuda.is_bf16_supported()
+	bf16_supported = cuda_device_supports_bfloat16(device)
 	if requested_dtype == 'bfloat16' and not bf16_supported:
 		msg = 'train.amp_dtype=bfloat16 is not supported by the CUDA device'
 		raise ValueError(msg)

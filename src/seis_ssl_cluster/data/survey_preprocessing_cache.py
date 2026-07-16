@@ -191,6 +191,8 @@ def prepare_survey_preprocessing_cache(  # noqa: PLR0913
 	if plan.cache_root is None:
 		raise RuntimeError('memmap preprocessing cache plan has no cache root')
 	cache_path = plan.cache_root / plan.fingerprint
+	cache_path.parent.mkdir(parents=True, exist_ok=True)
+	_remove_interrupted_builds(cache_path)
 	if cache_settings.reuse:
 		reused = _open_complete_cache(cache_path, shape, plan.fingerprint)
 		if reused is not None:
@@ -198,7 +200,6 @@ def prepare_survey_preprocessing_cache(  # noqa: PLR0913
 			return reused
 	if cache_path.exists():
 		shutil.rmtree(cache_path)
-	cache_path.parent.mkdir(parents=True, exist_ok=True)
 	staging = cache_path.with_name(f'.{cache_path.name}.building-{uuid.uuid4().hex}')
 	staging.mkdir()
 	try:
@@ -254,6 +255,12 @@ def prepare_survey_preprocessing_cache(  # noqa: PLR0913
 	prepared.cleanup = cache_settings.cleanup
 	prepared.reused = False
 	return prepared
+
+
+def _remove_interrupted_builds(cache_path: Path) -> None:
+	pattern = f'.{cache_path.name}.building-*'
+	for staging in cache_path.parent.glob(pattern):
+		shutil.rmtree(staging, ignore_errors=True)
 
 
 def _build_arrays(  # noqa: PLR0913

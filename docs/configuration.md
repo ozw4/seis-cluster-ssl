@@ -274,9 +274,41 @@ embedding:
   window_size: [128, 128, 128]
   overlap: [64, 64, 64]
   output_dtype: float16
+  average_chunk_size_x: 16
   batch_size: 1
+  prefetch_queue_depth: 0
+  amp: false
+  amp_dtype: auto
+  stage_timing: false
   min_token_valid_fraction: 0.5
+  preprocessing_cache:
+    mode: 'off'
+    chunk_size_x: 16
+    reuse: true
+    cleanup: false
 ```
+
+Valid windows are encoded in batches of `batch_size`; an incomplete final batch
+is retained. `prefetch_queue_depth: 0` uses synchronous read/preprocessing,
+while a positive value bounds the producer queue by that many prepared batches.
+CUDA extraction pins prepared batches and requests non-blocking H2D transfers.
+
+Extraction remains FP32 by default. With `amp: true` on CUDA, `amp_dtype` accepts
+`auto`, `bfloat16`, or `float16`; `auto` selects BF16 when supported by the
+selected device and otherwise FP16. The resolved precision is saved in each
+survey's metadata. Set `stage_timing: true` to write `stage_timings.json` with
+read/preprocessing, queue wait, H2D, encode, D2H, cache preparation, and
+merge/write summaries.
+
+`average_chunk_size_x` bounds overlap averaging along the token-grid x axis.
+The preprocessing cache modes are `off`, `memory`, and `memmap`. `memory` keeps
+survey-scoped normalized amplitude and zero-mask arrays in RAM; `memmap` builds
+them in `chunk_size_x` source-volume slabs under the output cache directory (or
+an explicit `directory`). `reuse` permits completed fingerprint-matched memmaps
+to be reopened, and `cleanup` removes the selected cache after extraction.
+Interrupted memmap builds are never reused. Settings that cannot safely share
+window-invariant preprocessing fall back to the uncached path and record the
+reason in metadata.
 
 ### Clustering
 
