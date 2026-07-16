@@ -68,7 +68,7 @@ def build_spatial_masking_plan(  # noqa: PLR0913
 	return plan
 
 
-def generate_spatial_block_mask(
+def generate_spatial_block_mask(  # noqa: C901
 	token_grid_shape_xyz: Sequence[int],
 	mask_ratio: float,
 	block_size_tokens_xyz: Sequence[int],
@@ -93,7 +93,6 @@ def generate_spatial_block_mask(
 		msg = f'rng must be a NumPy Generator; got {type(rng).__name__}'
 		raise TypeError(msg)
 
-	mask = np.zeros(token_grid_shape, dtype=np.bool_)
 	num_tokens = int(np.prod(token_grid_shape))
 	if num_tokens < 2:
 		msg = (
@@ -105,7 +104,13 @@ def generate_spatial_block_mask(
 		max(1, round(float(mask_ratio) * num_tokens)),
 		num_tokens - 1,
 	)
+	if block_size == (1, 1, 1):
+		flat_mask = np.zeros(num_tokens, dtype=np.bool_)
+		masked = rng.choice(num_tokens, size=target_masked_tokens, replace=False)
+		flat_mask[masked] = True
+		return flat_mask.reshape(token_grid_shape)
 
+	mask = np.zeros(token_grid_shape, dtype=np.bool_)
 	max_attempts = max(1000, target_masked_tokens * 10)
 	for _ in range(max_attempts):
 		if int(mask.sum()) >= target_masked_tokens:
