@@ -97,7 +97,11 @@ _CHECKPOINT_TRAIN_REQUIRED_KEYS = (
 	'batch_size',
 	'samples_per_epoch',
 	'epochs',
-	*DEFAULT_MAE_TRAIN_OPTIONS,
+	*(
+		key
+		for key in DEFAULT_MAE_TRAIN_OPTIONS
+		if key != 'runtime_check_mode'
+	),
 )
 
 

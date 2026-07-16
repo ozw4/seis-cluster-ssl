@@ -6,10 +6,15 @@ import math
 
 import torch
 
+from seis_ssl_cluster.runtime_checks import RuntimeChecks
+
 
 def build_3d_sincos_position_embedding(
 	grid_shape_xyz: tuple[int, int, int],
 	embed_dim: int,
+	*,
+	device: torch.device | str | None = None,
+	dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
 	"""Return fixed 3D sin-cos embeddings with shape ``[TX * TY * TZ, D]``."""
 	tx_size, ty_size, tz_size = _validate_positive_int_triple(
@@ -20,9 +25,9 @@ def build_3d_sincos_position_embedding(
 	axis_embed_dim = 2 * math.ceil(math.ceil(embed_dim / 3) / 2)
 
 	x_coords, y_coords, z_coords = torch.meshgrid(
-		torch.arange(tx_size, dtype=torch.float32),
-		torch.arange(ty_size, dtype=torch.float32),
-		torch.arange(tz_size, dtype=torch.float32),
+		torch.arange(tx_size, device=device, dtype=torch.float32),
+		torch.arange(ty_size, device=device, dtype=torch.float32),
+		torch.arange(tz_size, device=device, dtype=torch.float32),
 		indexing='ij',
 	)
 	embeddings = torch.cat(
@@ -33,14 +38,17 @@ def build_3d_sincos_position_embedding(
 		],
 		dim=1,
 	)
-	return embeddings[:, :embed_dim].contiguous()
+	return embeddings[:, :embed_dim].to(dtype=dtype).contiguous()
 
 
 def select_visible_tokens(
 	tokens: torch.Tensor,
 	pos: torch.Tensor,
 	visible_spatial_mask: torch.Tensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+	*,
+	equal_visible_count: bool = False,
+	runtime_checks: RuntimeChecks | None = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None]:
 	"""Pack visible spatial tokens and positions, padding to the batch maximum."""
 	batch_size, num_tokens, embed_dim = _validate_tokens(tokens, 'tokens')
 	_validate_positions(pos, num_tokens, embed_dim, tokens.device)
@@ -51,9 +59,21 @@ def select_visible_tokens(
 		tokens.device,
 	)
 	visible_counts = flat_visible_mask.sum(dim=1)
-	if not (visible_counts > 0).all():
-		msg = 'each sample must contain at least one visible spatial token'
-		raise ValueError(msg)
+	if equal_visible_count:
+		runtime_checks = runtime_checks or RuntimeChecks('strict')
+		runtime_checks.assert_async(
+			'select_visible_equal_count',
+			lambda: (visible_counts == visible_counts[:1]).all(),
+			message=(
+				'equal_visible_count requires the same visible count in every sample'
+			),
+		)
+		expanded_pos = pos.unsqueeze(0).expand(batch_size, -1, -1)
+		return (
+			tokens[flat_visible_mask].reshape(batch_size, -1, embed_dim),
+			expanded_pos[flat_visible_mask].reshape(batch_size, -1, embed_dim),
+			None,
+		)
 
 	max_visible_tokens = int(visible_counts.max().item())
 	visible_tokens = tokens.new_zeros((batch_size, max_visible_tokens, embed_dim))
@@ -76,16 +96,20 @@ def select_visible_tokens(
 	return visible_tokens, visible_pos, valid_mask
 
 
-def restore_decoder_sequence(
+def restore_decoder_sequence(  # noqa: PLR0913
 	visible_tokens: torch.Tensor,
 	pos: torch.Tensor,
 	visible_spatial_mask: torch.Tensor,
 	mask_token: torch.Tensor | None = None,
+	*,
+	equal_visible_count: bool = False,
+	runtime_checks: RuntimeChecks | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
 	"""Scatter packed visible tokens into full XYZ order for the decoder."""
 	batch_size, max_visible_tokens, embed_dim = _validate_tokens(
 		visible_tokens,
 		'visible_tokens',
+		allow_empty=True,
 	)
 	num_tokens = _validate_positions_only(pos, embed_dim, visible_tokens.device)
 	flat_visible_mask = _flatten_visible_spatial_mask(
@@ -95,10 +119,29 @@ def restore_decoder_sequence(
 		visible_tokens.device,
 	)
 	visible_counts = flat_visible_mask.sum(dim=1)
-	if not (visible_counts > 0).all():
-		msg = 'each sample must contain at least one visible spatial token'
-		raise ValueError(msg)
-	if int(visible_counts.max().item()) > max_visible_tokens:
+	if equal_visible_count:
+		runtime_checks = runtime_checks or RuntimeChecks('strict')
+		runtime_checks.assert_async(
+			'restore_visible_equal_count',
+			lambda: (visible_counts == max_visible_tokens).all(),
+			message=(
+				'equal_visible_count requires visible_tokens to match every sample'
+			),
+		)
+		normalized_mask_token = _normalize_mask_token(
+			mask_token,
+			embed_dim,
+			visible_tokens,
+		)
+		decoder_tokens = normalized_mask_token.view(1, 1, embed_dim).expand(
+			batch_size,
+			num_tokens,
+			embed_dim,
+		).clone()
+		decoder_tokens[flat_visible_mask] = visible_tokens.reshape(-1, embed_dim)
+		return decoder_tokens + pos.unsqueeze(0), ~flat_visible_mask
+
+	if (visible_counts > max_visible_tokens).any():
 		msg = (
 			'visible_tokens does not contain enough packed tokens; '
 			f'got max_visible_tokens={max_visible_tokens!r}, '
@@ -131,7 +174,11 @@ def restore_decoder_sequence(
 
 def _sincos_1d(positions: torch.Tensor, embed_dim: int) -> torch.Tensor:
 	half_dim = embed_dim // 2
-	frequencies = torch.arange(half_dim, dtype=torch.float32)
+	frequencies = torch.arange(
+		half_dim,
+		device=positions.device,
+		dtype=positions.dtype,
+	)
 	frequencies = 1.0 / (10_000 ** (frequencies / half_dim))
 	angles = positions.unsqueeze(1) * frequencies.unsqueeze(0)
 	return torch.cat([torch.sin(angles), torch.cos(angles)], dim=1)
@@ -162,7 +209,12 @@ def _validate_positive_int_triple(
 	return value
 
 
-def _validate_tokens(tokens: torch.Tensor, name: str) -> tuple[int, int, int]:
+def _validate_tokens(
+	tokens: torch.Tensor,
+	name: str,
+	*,
+	allow_empty: bool = False,
+) -> tuple[int, int, int]:
 	if tokens.ndim != 3:
 		msg = (
 			f'{name} must be a 3D tensor with shape [B, N, D]; '
@@ -170,7 +222,7 @@ def _validate_tokens(tokens: torch.Tensor, name: str) -> tuple[int, int, int]:
 		)
 		raise ValueError(msg)
 	batch_size, num_tokens, embed_dim = tokens.shape
-	if num_tokens <= 0:
+	if num_tokens <= 0 and not allow_empty:
 		msg = f'{name} must contain at least one token'
 		raise ValueError(msg)
 	if embed_dim <= 0:

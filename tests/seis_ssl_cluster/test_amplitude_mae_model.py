@@ -3,16 +3,22 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING
 
+import pytest
 import torch
 
+import seis_ssl_cluster.models.mae.model as mae_model_module
+from seis_ssl_cluster.losses import mae_pretraining_loss
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-from seis_ssl_cluster.models.mae.patching import compute_num_patches
+from seis_ssl_cluster.models.mae.patching import compute_num_patches, patchify_3d
 
 if TYPE_CHECKING:
-	import pytest
+	from seis_ssl_cluster.runtime_checks import RuntimeCheckMode
 
 
-def _make_model() -> AmplitudeMAE3D:
+def _make_model(
+	*,
+	runtime_check_mode: RuntimeCheckMode = 'once',
+) -> AmplitudeMAE3D:
 	return AmplitudeMAE3D(
 		patch_size_xyz=(4, 4, 4),
 		encoder_dim=32,
@@ -21,10 +27,11 @@ def _make_model() -> AmplitudeMAE3D:
 		decoder_dim=16,
 		decoder_depth=1,
 		decoder_heads=4,
+		runtime_check_mode=runtime_check_mode,
 	)
 
 
-def _make_batch(batch_size: int = 2) -> dict[str, torch.Tensor]:
+def _make_batch(batch_size: int = 2) -> dict[str, object]:
 	x = torch.randn((batch_size, 1, 16, 16, 16))
 	spatial_mask = torch.zeros((batch_size, 4, 4, 4), dtype=torch.bool)
 	spatial_mask[:, 0, 0, 0] = True
@@ -32,16 +39,25 @@ def _make_batch(batch_size: int = 2) -> dict[str, torch.Tensor]:
 	return {
 		'x': x,
 		'spatial_mask': spatial_mask,
-		'visible_spatial_mask': ~spatial_mask,
+		'equal_visible_count': True,
 	}
 
 
 def test_forward_pass_returns_single_channel_patch_predictions() -> None:
 	model = _make_model()
+	batch = _make_batch()
+	x = batch['x']
+	assert isinstance(x, torch.Tensor)
 
-	out = model(_make_batch())
+	out = model(batch)
 
 	assert out['pred_patches'].shape == (2, 64, 1, 64)
+	assert out['target_patches'].shape == (2, 64, 1, 64)
+	assert not out['target_patches'].requires_grad
+	torch.testing.assert_close(
+		out['target_patches'],
+		patchify_3d(x, model.patch_size_xyz),
+	)
 	assert out['encoded_visible_tokens'].shape == (2, 62, 32)
 	assert out['spatial_mask'].shape == (2, 4, 4, 4)
 	assert out['token_grid_shape'] == (4, 4, 4)
@@ -65,16 +81,175 @@ def test_encoder_receives_only_visible_tokens(
 		key_padding_mask: torch.Tensor | None = None,
 	) -> torch.Tensor:
 		captured['tokens'] = tokens
-		assert key_padding_mask is not None
-		captured['key_padding_mask'] = key_padding_mask
+		assert key_padding_mask is None
 		return tokens
 
 	monkeypatch.setattr(model.encoder, 'forward', capture_encoder)
 	model(batch)
 
 	assert captured['tokens'].shape == (1, 62, 32)
-	assert captured['key_padding_mask'].shape == (1, 62)
-	assert not captured['key_padding_mask'].any()
+
+
+def test_forward_routes_unequal_visible_counts_through_padded_fallback(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model().eval()
+	batch = _make_batch()
+	spatial_mask = batch['spatial_mask']
+	x = batch['x']
+	assert isinstance(spatial_mask, torch.Tensor)
+	assert isinstance(x, torch.Tensor)
+	spatial_mask[1, 2, 2, 2] = True
+	batch['equal_visible_count'] = False
+	captured_padding_masks: list[torch.Tensor | None] = []
+	original_encoder_forward = model.encoder.forward
+
+	def capture_encoder(
+		tokens: torch.Tensor,
+		key_padding_mask: torch.Tensor | None = None,
+	) -> torch.Tensor:
+		captured_padding_masks.append(key_padding_mask)
+		return original_encoder_forward(tokens, key_padding_mask)
+
+	monkeypatch.setattr(model.encoder, 'forward', capture_encoder)
+	batched_output = model(batch)
+
+	assert len(captured_padding_masks) == 1
+	padding_mask = captured_padding_masks[0]
+	assert padding_mask is not None
+	assert torch.equal(padding_mask.sum(dim=1), torch.tensor([0, 1]))
+	for batch_index in range(2):
+		sample_output = model(
+			{
+				'x': x[batch_index : batch_index + 1],
+				'spatial_mask': spatial_mask[batch_index : batch_index + 1],
+				'equal_visible_count': True,
+			},
+		)
+		torch.testing.assert_close(
+			batched_output['pred_patches'][batch_index],
+			sample_output['pred_patches'][0],
+		)
+
+
+def test_position_embeddings_are_cached_across_forward_modes(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model()
+	build_position_embedding = mae_model_module.build_3d_sincos_position_embedding
+	call_count = 0
+
+	def counted_build_position_embedding(
+		grid_shape_xyz: tuple[int, int, int],
+		embed_dim: int,
+		*,
+		device: torch.device | str | None = None,
+		dtype: torch.dtype = torch.float32,
+	) -> torch.Tensor:
+		nonlocal call_count
+		call_count += 1
+		return build_position_embedding(
+			grid_shape_xyz,
+			embed_dim,
+			device=device,
+			dtype=dtype,
+		)
+
+	monkeypatch.setattr(
+		mae_model_module,
+		'build_3d_sincos_position_embedding',
+		counted_build_position_embedding,
+	)
+	x = torch.randn((1, 1, 16, 16, 16))
+	model.encode_tokens(x)
+	model.encode_tokens(x)
+	model(_make_batch(batch_size=1))
+
+	assert call_count == 2
+	assert len(model._position_embedding_cache) == 2  # noqa: SLF001
+	assert not (set(model.state_dict()) & {'_position_embedding_cache'})
+
+
+@pytest.mark.requires_cuda
+@pytest.mark.parametrize('runtime_check_mode', ['once', 'minimal'])
+def test_normal_cuda_forward_does_not_materialize_device_scalars(
+	runtime_check_mode: RuntimeCheckMode,
+) -> None:
+	if not torch.cuda.is_available():
+		pytest.skip('CUDA is not available')
+	model = _make_model(runtime_check_mode=runtime_check_mode).cuda().eval()
+	batch = {
+		key: value.cuda() if isinstance(value, torch.Tensor) else value
+		for key, value in _make_batch().items()
+	}
+
+	with torch.profiler.profile(
+		activities=[
+			torch.profiler.ProfilerActivity.CPU,
+			torch.profiler.ProfilerActivity.CUDA,
+		],
+	) as profile, torch.no_grad():
+		model(batch)
+
+	event_names = {event.key for event in profile.key_averages()}
+	assert 'aten::equal' not in event_names
+	assert 'aten::item' not in event_names
+	assert 'aten::_local_scalar_dense' not in event_names
+
+
+def test_position_embedding_cache_misses_and_is_bounded(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model()
+	build_position_embedding = mae_model_module.build_3d_sincos_position_embedding
+	call_count = 0
+
+	def counted_build_position_embedding(
+		grid_shape_xyz: tuple[int, int, int],
+		embed_dim: int,
+		*,
+		device: torch.device | str | None = None,
+		dtype: torch.dtype = torch.float32,
+	) -> torch.Tensor:
+		nonlocal call_count
+		call_count += 1
+		return build_position_embedding(
+			grid_shape_xyz,
+			embed_dim,
+			device=device,
+			dtype=dtype,
+		)
+
+	monkeypatch.setattr(
+		mae_model_module,
+		'build_3d_sincos_position_embedding',
+		counted_build_position_embedding,
+	)
+	cpu_float = torch.empty((), dtype=torch.float32)
+	cache_inputs = [
+		((1, 1, 1), 4, cpu_float),
+		((1, 1, 1), 4, cpu_float),
+		((2, 1, 1), 4, cpu_float),
+		((1, 1, 1), 6, cpu_float),
+		((1, 1, 1), 4, torch.empty((), dtype=torch.float64)),
+		((1, 1, 1), 4, torch.empty((), device='meta')),
+		*[
+			((size, 2, 1), 4, cpu_float)
+			for size in range(3, 8)
+		],
+	]
+	for grid_shape, embed_dim, reference in cache_inputs:
+		model._position_embedding(  # noqa: SLF001
+			grid_shape,
+			embed_dim,
+			reference,
+		)
+
+	assert call_count == 10
+	assert len(model._position_embedding_cache) == 8  # noqa: SLF001
+	cache_keys = set(model._position_embedding_cache)  # noqa: SLF001
+	assert any(key[2].type == 'meta' for key in cache_keys)
+	assert any(key[3] == torch.float64 for key in cache_keys)
 
 
 def test_encode_tokens_returns_all_token_embeddings() -> None:
@@ -125,9 +300,78 @@ def test_gradients_flow_from_pred_patches_sum() -> None:
 	assert model.patch_projection.weight.grad is not None
 
 
+def test_training_path_patchifies_input_once(monkeypatch: pytest.MonkeyPatch) -> None:
+	model = _make_model()
+	batch = _make_batch(batch_size=1)
+	patchify = mae_model_module.patchify_3d
+	call_count = 0
+
+	def counted_patchify(
+		x: torch.Tensor,
+		patch_size_xyz: tuple[int, int, int],
+	) -> torch.Tensor:
+		nonlocal call_count
+		call_count += 1
+		return patchify(x, patch_size_xyz)
+
+	monkeypatch.setattr(mae_model_module, 'patchify_3d', counted_patchify)
+	output = model(batch)
+	mae_pretraining_loss(
+		pred_patches=output['pred_patches'],
+		target_patches=output['target_patches'],
+		x=batch['x'],
+		spatial_mask=batch['spatial_mask'],
+		local_valid_mask=torch.ones((1, 16, 16, 16), dtype=torch.bool),
+		patch_size_xyz=model.patch_size_xyz,
+		gradient_weight=0.0,
+	)
+
+	assert call_count == 1
+
+
+def test_state_dict_keys_and_strict_checkpoint_load_are_unchanged() -> None:
+	expected_keys = {
+		'mask_token',
+		'patch_projection.weight',
+		'patch_projection.bias',
+		'encoder.layers.0.norm1.weight',
+		'encoder.layers.0.norm1.bias',
+		'encoder.layers.0.attention.in_proj_weight',
+		'encoder.layers.0.attention.in_proj_bias',
+		'encoder.layers.0.attention.out_proj.weight',
+		'encoder.layers.0.attention.out_proj.bias',
+		'encoder.layers.0.norm2.weight',
+		'encoder.layers.0.norm2.bias',
+		'encoder.layers.0.mlp.0.weight',
+		'encoder.layers.0.mlp.0.bias',
+		'encoder.layers.0.mlp.3.weight',
+		'encoder.layers.0.mlp.3.bias',
+		'encoder_to_decoder.weight',
+		'encoder_to_decoder.bias',
+		'decoder.layers.0.norm1.weight',
+		'decoder.layers.0.norm1.bias',
+		'decoder.layers.0.attention.in_proj_weight',
+		'decoder.layers.0.attention.in_proj_bias',
+		'decoder.layers.0.attention.out_proj.weight',
+		'decoder.layers.0.attention.out_proj.bias',
+		'decoder.layers.0.norm2.weight',
+		'decoder.layers.0.norm2.bias',
+		'decoder.layers.0.mlp.0.weight',
+		'decoder.layers.0.mlp.0.bias',
+		'decoder.layers.0.mlp.3.weight',
+		'decoder.layers.0.mlp.3.bias',
+		'prediction_head.weight',
+		'prediction_head.bias',
+	}
+	checkpoint_state = _make_model().state_dict()
+
+	assert set(checkpoint_state) == expected_keys
+	_make_model().load_state_dict(checkpoint_state, strict=True)
+
+
 def test_constructor_and_batch_contract_do_not_use_excluded_names() -> None:
 	parameter_names = set(inspect.signature(AmplitudeMAE3D).parameters)
 	forbidden = {'attribute_ids', 'num_attributes', 'context', 'num_context_tokens'}
 
 	assert parameter_names.isdisjoint(forbidden)
-	assert set(_make_batch()) == {'x', 'spatial_mask', 'visible_spatial_mask'}
+	assert set(_make_batch()) == {'x', 'spatial_mask', 'equal_visible_count'}

@@ -10,8 +10,6 @@ import numpy as np
 import torch
 
 from seis_ssl_cluster.data.crop_sampler import (
-	expand_request_with_margin,
-	required_zero_mask_margin_xyz,
 	rng_for_sample,
 	sample_random_local_crop,
 	select_round_robin_index,
@@ -20,15 +18,20 @@ from seis_ssl_cluster.data.crop_sampler import (
 from seis_ssl_cluster.data.normalization import (
 	AmplitudeAgcConfig,
 	SurveyNormalizationStats,
-	_normalize_amplitude_inplace,
-	apply_configured_agc,
 	load_normalization_stats,
 )
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
+from seis_ssl_cluster.data.window_preprocessing import (
+	AmplitudeCropCandidate,
+	AmplitudePreprocessSettings,
+	FiniteCheckMode,
+	finalize_amplitude_crop,
+	read_amplitude_crop_candidate,
+	resolve_manifest_path,
+)
 from seis_ssl_cluster.data.zero_mask import (
 	DEFAULT_ZERO_MASK_CONFIG,
 	ZeroMaskConfig,
-	compute_zero_amplitude_invalid_mask,
 )
 from seis_ssl_cluster.masking import (
 	build_spatial_masking_plan,
@@ -39,7 +42,6 @@ if TYPE_CHECKING:
 	from pathlib import Path
 
 	from seis_ssl_cluster.data.schema import CropRequest, SurveyManifest
-	from seis_ssl_cluster.data.window_preprocessing import FiniteCheckMode
 
 XYZ = tuple[int, int, int]
 
@@ -124,6 +126,13 @@ class NopimsAmplitudePretrainDataset:
 		)
 		self.amplitude_agc = _amplitude_agc_from_config(amplitude_agc)
 		self.finite_check_mode = _validate_finite_check_mode(finite_check_mode)
+		self._preprocess_settings = AmplitudePreprocessSettings(
+			zero_mask=self.zero_mask,
+			normalized_clip_abs=self.normalized_clip_abs,
+			amplitude_agc=self.amplitude_agc,
+			min_token_valid_fraction=1.0,
+			finite_check_mode=self.finite_check_mode,
+		)
 
 		self._store = NpyMemmapVolumeStore()
 		self._normalization_stats: dict[Path, SurveyNormalizationStats] = {}
@@ -191,7 +200,6 @@ class NopimsAmplitudePretrainDataset:
 			select_round_robin_index(len(self.manifests), index)
 		]
 		rng = rng_for_sample(self.seed, self.epoch, index)
-		last_sample: dict[str, object] | None = None
 		last_valid_fraction = 0.0
 		for _ in range(self.max_resample_attempts):
 			local_request = sample_random_local_crop(
@@ -200,13 +208,15 @@ class NopimsAmplitudePretrainDataset:
 				rng,
 				survey_id=manifest.survey_id,
 			)
-			sample = self._read_sample(manifest, local_request)
-			valid_fraction = float(np.mean(sample['local_valid_mask']))
-			if valid_fraction >= self.min_valid_fraction:
+			candidate = self._read_amplitude_crop_candidate(
+				manifest,
+				local_request,
+			)
+			last_valid_fraction = candidate.valid_fraction
+			if last_valid_fraction >= self.min_valid_fraction:
+				sample = self._finalize_sample(manifest, candidate)
 				self._add_spatial_masks(sample, rng)
 				return sample
-			last_sample = sample
-			last_valid_fraction = valid_fraction
 
 		msg = (
 			f'survey {manifest.survey_id!r} did not produce a crop with '
@@ -214,8 +224,6 @@ class NopimsAmplitudePretrainDataset:
 			f'{self.max_resample_attempts} attempts; last fraction was '
 			f'{last_valid_fraction:.6f}'
 		)
-		if last_sample is None:
-			raise RuntimeError(msg)
 		raise ValueError(msg)
 
 	def _normalize_index(self, index: int) -> int:
@@ -237,14 +245,14 @@ class NopimsAmplitudePretrainDataset:
 				manifest.amplitude.shape_xyz,
 				self.local_crop_size_xyz,
 			)
-			amplitude_path = _resolve_manifest_path(manifest, manifest.amplitude.path)
+			amplitude_path = resolve_manifest_path(manifest, manifest.amplitude.path)
 			if not amplitude_path.is_file():
 				msg = (
 					f'survey {manifest.survey_id!r} amplitude file does not '
 					f'exist: {amplitude_path}'
 				)
 				raise FileNotFoundError(msg)
-			stats_path = _resolve_manifest_path(
+			stats_path = resolve_manifest_path(
 				manifest,
 				manifest.amplitude.normalization_stats_path,
 			)
@@ -255,71 +263,39 @@ class NopimsAmplitudePretrainDataset:
 				)
 				raise FileNotFoundError(msg)
 
-	def _read_sample(
+	def _read_amplitude_crop_candidate(
 		self,
 		manifest: SurveyManifest,
 		local_request: CropRequest,
+	) -> AmplitudeCropCandidate:
+		return read_amplitude_crop_candidate(
+			request=local_request,
+			amplitude_path=resolve_manifest_path(
+				manifest,
+				manifest.amplitude.path,
+			),
+			store=self._store,
+			settings=self._preprocess_settings,
+		)
+
+	def _finalize_sample(
+		self,
+		manifest: SurveyManifest,
+		candidate: AmplitudeCropCandidate,
 	) -> dict[str, object]:
-		amplitude_path = _resolve_manifest_path(manifest, manifest.amplitude.path)
-		margin_xyz = self._zero_mask_margin_xyz()
-		compute_request, payload_slices = expand_request_with_margin(
-			local_request,
-			margin_xyz,
+		prepared = finalize_amplitude_crop(
+			candidate=candidate,
+			stats=self._stats_for_manifest(manifest),
+			patch_size_xyz=self.patch_size_xyz,
+			settings=self._preprocess_settings,
 		)
-		raw_compute, compute_valid_mask = self._store.read_crop_with_padding(
-			amplitude_path,
-			compute_request.start_xyz,
-			compute_request.size_xyz,
-		)
-		if self.finite_check_mode == 'strict':
-			_validate_finite_valid_voxels(
-				raw_compute,
-				compute_valid_mask,
-				amplitude_path,
-			)
-		raw_crop = raw_compute[payload_slices]
-		source_valid_mask = compute_valid_mask[payload_slices]
-
-		if self.zero_mask.enabled:
-			zero_invalid = compute_zero_amplitude_invalid_mask(
-				raw_compute,
-				valid_mask=compute_valid_mask,
-				config=self.zero_mask,
-			)[payload_slices]
-			local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
-		else:
-			local_valid_mask = source_valid_mask
-
-		work_buffer = np.array(raw_crop, dtype=np.float32, copy=True)
-		amplitude_norm = _normalize_amplitude_inplace(
-			work_buffer,
-			self._stats_for_manifest(manifest),
-			normalized_clip_abs=self.normalized_clip_abs,
-		)
-		if self.finite_check_mode == 'strict':
-			_validate_finite_array(amplitude_norm, 'normalized amplitude')
-		if self.amplitude_agc.enabled:
-			amplitude_model = apply_configured_agc(
-				amplitude_norm,
-				local_valid_mask,
-				self.amplitude_agc,
-			)
-		else:
-			amplitude_model = amplitude_norm
-		if self.finite_check_mode == 'strict' and self.amplitude_agc.enabled:
-			_validate_finite_array(amplitude_model, 'AGC amplitude')
-		amplitude_model[~local_valid_mask] = 0.0
-		if self.finite_check_mode == 'output_only':
-			_validate_finite_array(amplitude_model, 'preprocessed amplitude')
-		x = amplitude_model[np.newaxis, ...]
 		return {
-			'x': x,
-			'target': x.copy(),
-			'local_valid_mask': local_valid_mask.astype(bool, copy=False),
+			'x': prepared.x,
+			'local_valid_mask': prepared.local_valid_mask,
 			'coords': {
 				'survey_id': manifest.survey_id,
-				'local_start_xyz': local_request.start_xyz,
-				'local_size_xyz': local_request.size_xyz,
+				'local_start_xyz': candidate.request.start_xyz,
+				'local_size_xyz': candidate.request.size_xyz,
 			},
 		}
 
@@ -337,18 +313,9 @@ class NopimsAmplitudePretrainDataset:
 			rng=rng,
 		)
 		sample['spatial_mask'] = plan.spatial_mask
-		sample['visible_spatial_mask'] = plan.visible_spatial_mask
-
-	def _zero_mask_margin_xyz(self) -> XYZ:
-		if not self.zero_mask.enabled:
-			return (0, 0, 0)
-		return required_zero_mask_margin_xyz(
-			z_sample_influence_radius=self.zero_mask.z_sample_influence_radius,
-			xy_trace_influence_radius=self.zero_mask.xy_trace_influence_radius,
-		)
 
 	def _stats_for_manifest(self, manifest: SurveyManifest) -> SurveyNormalizationStats:
-		path = _resolve_manifest_path(
+		path = resolve_manifest_path(
 			manifest,
 			manifest.amplitude.normalization_stats_path,
 		)
@@ -391,29 +358,6 @@ def _validate_finite_check_mode(value: object) -> FiniteCheckMode:
 		)
 		raise ValueError(msg)
 	return cast('FiniteCheckMode', value)
-
-
-def _validate_finite_valid_voxels(
-	values: np.ndarray,
-	valid_mask: np.ndarray,
-	path: Path,
-) -> None:
-	valid_values = np.asarray(values)[np.asarray(valid_mask, dtype=bool)]
-	if not np.isfinite(valid_values).all():
-		msg = f'amplitude crop contains non-finite source voxels: {path}'
-		raise ValueError(msg)
-
-
-def _validate_finite_array(values: np.ndarray, label: str) -> None:
-	if not np.isfinite(values).all():
-		msg = f'{label} contains non-finite values'
-		raise ValueError(msg)
-
-
-def _resolve_manifest_path(manifest: SurveyManifest, path: Path) -> Path:
-	if path.is_absolute():
-		return path
-	return manifest.root / path
 
 
 def _require_config_mapping(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import TYPE_CHECKING
 
 import torch
@@ -14,9 +15,19 @@ from seis_ssl_cluster.models.mae.positional_encoding import (
 	restore_decoder_sequence,
 	select_visible_tokens,
 )
+from seis_ssl_cluster.runtime_checks import RuntimeCheckMode, RuntimeChecks
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping
+
+
+_POSITION_EMBEDDING_CACHE_CAPACITY = 8
+_PositionEmbeddingCacheKey = tuple[
+	tuple[int, int, int],
+	int,
+	torch.device,
+	torch.dtype,
+]
 
 
 class AmplitudeMAE3D(nn.Module):
@@ -34,6 +45,7 @@ class AmplitudeMAE3D(nn.Module):
 		decoder_dim: int = 256,
 		decoder_depth: int = 4,
 		decoder_heads: int = 4,
+		runtime_check_mode: RuntimeCheckMode = 'once',
 	) -> None:
 		"""Initialize patch projection, transformer stacks, and prediction head."""
 		super().__init__()
@@ -45,6 +57,7 @@ class AmplitudeMAE3D(nn.Module):
 		self.patch_volume = (
 			self.patch_size_xyz[0] * self.patch_size_xyz[1] * self.patch_size_xyz[2]
 		)
+		self.runtime_checks = RuntimeChecks(runtime_check_mode)
 
 		self.patch_projection = nn.Linear(
 			self.in_channels * self.patch_volume,
@@ -54,6 +67,7 @@ class AmplitudeMAE3D(nn.Module):
 			embed_dim=self.encoder_dim,
 			num_heads=encoder_heads,
 			depth=encoder_depth,
+			runtime_check_mode=runtime_check_mode,
 		)
 		self.encoder_to_decoder = nn.Linear(self.encoder_dim, self.decoder_dim)
 		self.mask_token = nn.Parameter(torch.empty(self.decoder_dim))
@@ -61,11 +75,16 @@ class AmplitudeMAE3D(nn.Module):
 			embed_dim=self.decoder_dim,
 			num_heads=decoder_heads,
 			depth=decoder_depth,
+			runtime_check_mode=runtime_check_mode,
 		)
 		self.prediction_head = nn.Linear(
 			self.decoder_dim,
 			self.out_channels * self.patch_volume,
 		)
+		self._position_embedding_cache: OrderedDict[
+			_PositionEmbeddingCacheKey,
+			torch.Tensor,
+		] = OrderedDict()
 		self.reset_parameters()
 
 	def reset_parameters(self) -> None:
@@ -74,46 +93,52 @@ class AmplitudeMAE3D(nn.Module):
 
 	def forward(
 		self,
-		batch: Mapping[str, torch.Tensor],
+		batch: Mapping[str, object],
 	) -> dict[str, torch.Tensor | tuple[int, int, int]]:
 		"""Return full-grid MAE patch predictions for the provided batch."""
 		x = _required_tensor(batch, 'x')
 		spatial_mask = _required_tensor(batch, 'spatial_mask')
-		visible_spatial_mask = _required_tensor(batch, 'visible_spatial_mask')
+		equal_visible_count = _required_bool(batch, 'equal_visible_count')
 
-		local_tokens, token_grid_shape = self._project_patches(x)
-		_validate_spatial_masks(
+		target_patches, local_tokens, token_grid_shape = self._project_patches(x)
+		_validate_spatial_mask(
 			spatial_mask,
-			visible_spatial_mask,
 			local_tokens.shape[0],
 			token_grid_shape,
 			local_tokens.device,
 		)
+		visible_spatial_mask = ~spatial_mask
 
-		encoder_pos = build_3d_sincos_position_embedding(
+		encoder_pos = self._position_embedding(
 			token_grid_shape,
 			self.encoder_dim,
-		).to(device=local_tokens.device, dtype=local_tokens.dtype)
+			local_tokens,
+		)
 		visible_tokens, visible_pos, visible_valid_mask = select_visible_tokens(
 			local_tokens,
 			encoder_pos,
 			visible_spatial_mask,
+			equal_visible_count=equal_visible_count,
+			runtime_checks=self.runtime_checks,
 		)
 		encoded_visible_tokens = self.encoder(
 			visible_tokens + visible_pos,
-			~visible_valid_mask,
+			None if visible_valid_mask is None else ~visible_valid_mask,
 		)
 
 		decoder_visible = self.encoder_to_decoder(encoded_visible_tokens)
-		decoder_pos = build_3d_sincos_position_embedding(
+		decoder_pos = self._position_embedding(
 			token_grid_shape,
 			self.decoder_dim,
-		).to(device=decoder_visible.device, dtype=decoder_visible.dtype)
+			decoder_visible,
+		)
 		decoder_tokens, _masked_token_mask = restore_decoder_sequence(
 			decoder_visible,
 			decoder_pos,
 			visible_spatial_mask,
 			self.mask_token.to(dtype=decoder_visible.dtype),
+			equal_visible_count=equal_visible_count,
+			runtime_checks=self.runtime_checks,
 		)
 		decoded = self.decoder(decoder_tokens)
 		pred_patches = self.prediction_head(decoded).reshape(
@@ -124,6 +149,7 @@ class AmplitudeMAE3D(nn.Module):
 		)
 		return {
 			'pred_patches': pred_patches,
+			'target_patches': target_patches.detach(),
 			'encoded_visible_tokens': encoded_visible_tokens,
 			'token_grid_shape': token_grid_shape,
 			'spatial_mask': spatial_mask,
@@ -136,16 +162,18 @@ class AmplitudeMAE3D(nn.Module):
 		valid_mask: torch.Tensor | None = None,
 	) -> dict[str, torch.Tensor | tuple[int, int, int] | None]:
 		"""Encode all spatial tokens without MAE masking."""
-		tokens, token_grid_shape = self._project_patches(x)
-		pos = build_3d_sincos_position_embedding(
+		_target_patches, tokens, token_grid_shape = self._project_patches(x)
+		pos = self._position_embedding(
 			token_grid_shape,
 			self.encoder_dim,
-		).to(device=tokens.device, dtype=tokens.dtype)
+			tokens,
+		)
 		token_valid_mask = _token_valid_mask(
 			valid_mask,
 			x,
 			self.patch_size_xyz,
 			token_grid_shape,
+			self.runtime_checks,
 		)
 		key_padding_mask = None
 		if token_valid_mask is not None:
@@ -161,23 +189,47 @@ class AmplitudeMAE3D(nn.Module):
 	def _project_patches(
 		self,
 		x: torch.Tensor,
-	) -> tuple[torch.Tensor, tuple[int, int, int]]:
+	) -> tuple[torch.Tensor, torch.Tensor, tuple[int, int, int]]:
 		_validate_input_volume(x, self.in_channels)
 		batch_size, _channels, x_size, y_size, z_size = x.shape
 		token_grid_shape = compute_num_patches(
 			(int(x_size), int(y_size), int(z_size)),
 			self.patch_size_xyz,
 		)[:3]
-		patches = patchify_3d(x, self.patch_size_xyz).reshape(
+		patches = patchify_3d(x, self.patch_size_xyz)
+		projected = self.patch_projection(patches.reshape(
 			batch_size,
 			-1,
 			self.in_channels * self.patch_volume,
+		))
+		return patches, projected, token_grid_shape
+
+	def _position_embedding(
+		self,
+		grid_shape_xyz: tuple[int, int, int],
+		embed_dim: int,
+		reference: torch.Tensor,
+	) -> torch.Tensor:
+		key = (grid_shape_xyz, embed_dim, reference.device, reference.dtype)
+		cached = self._position_embedding_cache.get(key)
+		if cached is not None:
+			self._position_embedding_cache.move_to_end(key)
+			return cached
+
+		embedding = build_3d_sincos_position_embedding(
+			grid_shape_xyz,
+			embed_dim,
+			device=reference.device,
+			dtype=reference.dtype,
 		)
-		return self.patch_projection(patches), token_grid_shape
+		self._position_embedding_cache[key] = embedding
+		while len(self._position_embedding_cache) > _POSITION_EMBEDDING_CACHE_CAPACITY:
+			self._position_embedding_cache.popitem(last=False)
+		return embedding
 
 
 def _required_tensor(
-	batch: Mapping[str, torch.Tensor],
+	batch: Mapping[str, object],
 	key: str,
 ) -> torch.Tensor:
 	try:
@@ -191,35 +243,39 @@ def _required_tensor(
 	return value
 
 
-def _validate_spatial_masks(
+def _required_bool(batch: Mapping[str, object], key: str) -> bool:
+	try:
+		value = batch[key]
+	except KeyError as exc:
+		msg = f'batch is missing required key {key!r}'
+		raise KeyError(msg) from exc
+	if not isinstance(value, bool):
+		msg = f'batch key {key!r} must be a bool; got {type(value).__name__}'
+		raise TypeError(msg)
+	return value
+
+
+def _validate_spatial_mask(
 	spatial_mask: torch.Tensor,
-	visible_spatial_mask: torch.Tensor,
 	batch_size: int,
 	token_grid_shape: tuple[int, int, int],
 	device: torch.device,
 ) -> None:
 	expected_shape = (batch_size, *token_grid_shape)
-	for name, mask in (
-		('spatial_mask', spatial_mask),
-		('visible_spatial_mask', visible_spatial_mask),
-	):
-		if mask.ndim != 4 or tuple(mask.shape) != expected_shape:
-			msg = (
-				f'{name} must have shape [B, TX, TY, TZ]; '
-				f'got shape={tuple(mask.shape)!r}, expected={expected_shape!r}'
-			)
-			raise ValueError(msg)
-		if mask.dtype != torch.bool:
-			msg = f'{name} dtype must be bool; got {mask.dtype}'
-			raise TypeError(msg)
-		if mask.device != device:
-			msg = (
-				f'{name} must be on the same device as x; '
-				f'got mask_device={mask.device}, x_device={device}'
-			)
-			raise ValueError(msg)
-	if not torch.equal(visible_spatial_mask, ~spatial_mask):
-		msg = 'visible_spatial_mask must equal ~spatial_mask'
+	if spatial_mask.ndim != 4 or tuple(spatial_mask.shape) != expected_shape:
+		msg = (
+			'spatial_mask must have shape [B, TX, TY, TZ]; '
+			f'got shape={tuple(spatial_mask.shape)!r}, expected={expected_shape!r}'
+		)
+		raise ValueError(msg)
+	if spatial_mask.dtype != torch.bool:
+		msg = f'spatial_mask dtype must be bool; got {spatial_mask.dtype}'
+		raise TypeError(msg)
+	if spatial_mask.device != device:
+		msg = (
+			'spatial_mask must be on the same device as x; '
+			f'got mask_device={spatial_mask.device}, x_device={device}'
+		)
 		raise ValueError(msg)
 
 
@@ -228,6 +284,7 @@ def _token_valid_mask(
 	x: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
 	token_grid_shape: tuple[int, int, int],
+	runtime_checks: RuntimeChecks,
 ) -> torch.Tensor | None:
 	if valid_mask is None:
 		return None
@@ -247,9 +304,11 @@ def _token_valid_mask(
 		patch_size_xyz,
 	)
 	token_valid_mask = mask_patches.squeeze(2).all(dim=-1)
-	if not token_valid_mask.any(dim=1).all():
-		msg = 'each sample must contain at least one valid token'
-		raise ValueError(msg)
+	runtime_checks.check(
+		'token_valid_mask_has_valid_token',
+		lambda: token_valid_mask.any(dim=1).all(),
+		error=ValueError('each sample must contain at least one valid token'),
+	)
 	return token_valid_mask
 
 

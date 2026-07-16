@@ -19,11 +19,11 @@ def mae_collate_fn(
 		msg = 'samples must contain at least one sample'
 		raise ValueError(msg)
 
+	spatial_mask = _stack_arrays(samples, 'spatial_mask')
 	return {
 		'x': _stack_arrays(samples, 'x'),
-		'target': _stack_arrays(samples, 'target'),
-		'spatial_mask': _stack_arrays(samples, 'spatial_mask'),
-		'visible_spatial_mask': _stack_arrays(samples, 'visible_spatial_mask'),
+		'spatial_mask': spatial_mask,
+		'equal_visible_count': _has_equal_visible_count(spatial_mask),
 		'local_valid_mask': _stack_arrays(samples, 'local_valid_mask'),
 		'coords': [sample.get('coords') for sample in samples],
 	}
@@ -92,6 +92,14 @@ def _require_array(sample: Mapping[str, object], key: str) -> np.ndarray:
 
 def _to_tensor(array: np.ndarray) -> torch.Tensor:
 	return torch.as_tensor(array, dtype=_torch_dtype(array))
+
+
+def _has_equal_visible_count(mask: torch.Tensor) -> bool:
+	visible_counts = (~mask).reshape(mask.shape[0], -1).sum(dim=1)
+	return torch.equal(
+		visible_counts,
+		visible_counts[:1].expand_as(visible_counts),
+	)
 
 
 def _torch_dtype(array: np.ndarray) -> torch.dtype:

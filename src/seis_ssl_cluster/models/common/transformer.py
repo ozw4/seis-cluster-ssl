@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 import torch
 from torch import nn
+
+from seis_ssl_cluster.runtime_checks import RuntimeCheckMode, RuntimeChecks
+
+_PREVALIDATED_BLOCK_IDS: ContextVar[frozenset[int]] = ContextVar(
+	'prevalidated_transformer_block_ids',
+	default=frozenset(),
+)
 
 
 class TransformerBlock(nn.Module):
@@ -16,6 +25,7 @@ class TransformerBlock(nn.Module):
 		num_heads: int,
 		mlp_ratio: float = 4.0,
 		dropout: float = 0.0,
+		runtime_check_mode: RuntimeCheckMode = 'once',
 	) -> None:
 		"""Initialize self-attention, MLP, and normalization layers."""
 		super().__init__()
@@ -30,6 +40,7 @@ class TransformerBlock(nn.Module):
 
 		self.mlp_ratio = _validate_positive_float(mlp_ratio, 'mlp_ratio')
 		self.dropout_prob = _validate_dropout(dropout)
+		self.runtime_checks = RuntimeChecks(runtime_check_mode)
 		hidden_dim = int(self.embed_dim * self.mlp_ratio)
 		if hidden_dim <= 0:
 			msg = (
@@ -61,14 +72,23 @@ class TransformerBlock(nn.Module):
 		key_padding_mask: torch.Tensor | None = None,
 	) -> torch.Tensor:
 		"""Return transformed tokens with the same shape as ``tokens``."""
-		batch_size, num_tokens = _validate_tokens(tokens, self.embed_dim)
-		_validate_key_padding_mask(
-			key_padding_mask,
-			batch_size,
-			num_tokens,
-			tokens.device,
-		)
+		if id(self) not in _PREVALIDATED_BLOCK_IDS.get():
+			batch_size, num_tokens = _validate_tokens(tokens, self.embed_dim)
+			_validate_key_padding_mask(
+				key_padding_mask,
+				batch_size,
+				num_tokens,
+				tokens.device,
+				self.runtime_checks,
+			)
+		return self._forward_unchecked(tokens, key_padding_mask)
 
+	def _forward_unchecked(
+		self,
+		tokens: torch.Tensor,
+		key_padding_mask: torch.Tensor | None,
+	) -> torch.Tensor:
+		"""Apply the block after its public caller has validated tensor contracts."""
 		attention_input = self.norm1(tokens)
 		attention_output, _attention_weights = self.attention(
 			attention_input,
@@ -84,7 +104,7 @@ class TransformerBlock(nn.Module):
 class TransformerStack(nn.Module):
 	"""Stack of pre-norm transformer blocks."""
 
-	def __init__(
+	def __init__(  # noqa: PLR0913
 		self,
 		*,
 		embed_dim: int,
@@ -92,12 +112,14 @@ class TransformerStack(nn.Module):
 		depth: int,
 		mlp_ratio: float = 4.0,
 		dropout: float = 0.0,
+		runtime_check_mode: RuntimeCheckMode = 'once',
 	) -> None:
 		"""Initialize ``depth`` identical transformer blocks."""
 		super().__init__()
 		self.embed_dim = _validate_positive_int(embed_dim, 'embed_dim')
 		self.num_heads = _validate_positive_int(num_heads, 'num_heads')
 		self.depth = _validate_positive_int(depth, 'depth')
+		self.runtime_checks = RuntimeChecks(runtime_check_mode)
 		self.layers = nn.ModuleList(
 			[
 				TransformerBlock(
@@ -105,6 +127,7 @@ class TransformerStack(nn.Module):
 					num_heads=self.num_heads,
 					mlp_ratio=mlp_ratio,
 					dropout=dropout,
+					runtime_check_mode=runtime_check_mode,
 				)
 				for _layer_index in range(self.depth)
 			],
@@ -116,9 +139,23 @@ class TransformerStack(nn.Module):
 		key_padding_mask: torch.Tensor | None = None,
 	) -> torch.Tensor:
 		"""Apply each transformer block in sequence."""
-		for layer in self.layers:
-			tokens = layer(tokens, key_padding_mask)
-		return tokens
+		batch_size, num_tokens = _validate_tokens(tokens, self.embed_dim)
+		_validate_key_padding_mask(
+			key_padding_mask,
+			batch_size,
+			num_tokens,
+			tokens.device,
+			self.runtime_checks,
+		)
+		context_token = _PREVALIDATED_BLOCK_IDS.set(
+			frozenset(id(layer) for layer in self.layers),
+		)
+		try:
+			for layer in self.layers:
+				tokens = layer(tokens, key_padding_mask)
+			return tokens
+		finally:
+			_PREVALIDATED_BLOCK_IDS.reset(context_token)
 
 
 def _validate_positive_int(value: int, name: str) -> int:
@@ -178,6 +215,7 @@ def _validate_key_padding_mask(
 	batch_size: int,
 	num_tokens: int,
 	device: torch.device,
+	runtime_checks: RuntimeChecks,
 ) -> None:
 	if key_padding_mask is None:
 		return
@@ -200,9 +238,11 @@ def _validate_key_padding_mask(
 			f'got mask_device={key_padding_mask.device}, tokens_device={device}'
 		)
 		raise ValueError(msg)
-	if key_padding_mask.all(dim=1).any():
-		msg = 'each sample must contain at least one unmasked token'
-		raise ValueError(msg)
+	runtime_checks.check(
+		'key_padding_mask_has_unmasked_token',
+		lambda: ~key_padding_mask.all(dim=1).any(),
+		error=ValueError('each sample must contain at least one unmasked token'),
+	)
 
 
 __all__ = ['TransformerBlock', 'TransformerStack']

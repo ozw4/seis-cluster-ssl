@@ -63,6 +63,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 	SUPPORTED_FINITE_CHECK_MODES,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
+	SUPPORTED_RUNTIME_CHECK_MODES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
 
@@ -525,6 +526,17 @@ def _validate_train(train: Mapping[str, object]) -> None:
 			_validate_bool(train, key, prefix='train')
 	_validate_optional_train_seed(train)
 	_validate_optional_train_device(train)
+	_validate_runtime_check_mode(train)
+
+
+def _validate_runtime_check_mode(train: Mapping[str, object]) -> None:
+	mode = train.get('runtime_check_mode')
+	if mode not in SUPPORTED_RUNTIME_CHECK_MODES:
+		msg = (
+			'train.runtime_check_mode must be one of '
+			f'{sorted(SUPPORTED_RUNTIME_CHECK_MODES)!r}; got {mode!r}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_optional_train_numbers(train: Mapping[str, object]) -> None:

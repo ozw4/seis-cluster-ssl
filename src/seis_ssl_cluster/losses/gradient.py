@@ -61,9 +61,7 @@ def gradient_loss_xyz(  # noqa: PLR0913
 		numerator = numerator + (loss * weight).sum()
 		denominator = denominator + weight.sum()
 
-	if bool(denominator.detach().eq(0).item()):
-		return pred_patches.sum() * 0.0
-	return numerator / denominator
+	return numerator / denominator.clamp_min(1)
 
 
 def _elementwise_loss(
