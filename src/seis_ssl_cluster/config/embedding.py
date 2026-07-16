@@ -101,7 +101,44 @@ def resolve_embedding_extraction_config(config: _T) -> Config:
 		'min_token_valid_fraction',
 		prefix='embedding',
 	)
+	_validate_preprocessing_cache(embedding)
 	return resolved
+
+
+def _validate_preprocessing_cache(embedding: Mapping[str, object]) -> None:
+	value = embedding.get('preprocessing_cache')
+	if value is None:
+		return
+	if not isinstance(value, Mapping):
+		raise TypeError('embedding.preprocessing_cache must be a mapping')
+	unexpected = sorted(
+		set(value) - {'mode', 'chunk_size_x', 'reuse', 'cleanup', 'directory'},
+	)
+	if unexpected:
+		msg = f'embedding.preprocessing_cache key(s) not allowed: {unexpected!r}'
+		raise ValueError(msg)
+	mode = value.get('mode', 'off')
+	if mode not in {'off', 'memory', 'memmap'}:
+		msg = (
+			'embedding.preprocessing_cache.mode must be "off", "memory", or '
+			f'"memmap"; got {mode!r}'
+		)
+		raise ValueError(msg)
+	if 'chunk_size_x' in value:
+		_validate_positive_int(
+			value,
+			'chunk_size_x',
+			prefix='embedding.preprocessing_cache',
+		)
+	for key in ('reuse', 'cleanup'):
+		if key in value:
+			_validate_bool(value, key, prefix='embedding.preprocessing_cache')
+	if 'directory' in value:
+		_validate_non_empty_path(
+			value,
+			'directory',
+			prefix='embedding.preprocessing_cache',
+		)
 
 
 def _reject_checkpoint_owned_extraction_sections(

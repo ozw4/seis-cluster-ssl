@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from numbers import Integral, Real
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -148,6 +148,86 @@ def read_amplitude_crop(  # noqa: PLR0913
 	)
 
 
+def read_prepared_survey_amplitude_crop(
+	*,
+	request: CropRequest,
+	normalized_amplitude: np.ndarray,
+	zero_like_mask: np.ndarray,
+	patch_size_xyz: Sequence[int],
+	settings: AmplitudePreprocessSettings,
+) -> PreparedAmplitudeCrop:
+	"""Slice cached survey data and finish the window-local preprocessing."""
+	_validate_settings(settings)
+	patch = _validate_positive_xyz(patch_size_xyz, 'patch_size_xyz')
+	normalized = np.asarray(normalized_amplitude)
+	zero_like = np.asarray(zero_like_mask, dtype=bool)
+	if normalized.ndim != 3 or zero_like.shape != normalized.shape:
+		msg = (
+			'prepared survey amplitude and zero-like mask must be matching 3D '
+			f'arrays; got {normalized.shape!r} and {zero_like.shape!r}'
+		)
+		raise ValueError(msg)
+	margin_xyz = zero_mask_margin_xyz(settings.zero_mask)
+	compute_request, payload_slices = expand_request_with_margin(request, margin_xyz)
+	normalized_compute, compute_valid_mask = _slice_array_with_padding(
+		normalized,
+		compute_request.start_xyz,
+		compute_request.size_xyz,
+		pad_value=0.0,
+	)
+	if settings.finite_check_mode == 'strict':
+		_validate_finite_valid_voxels(
+			normalized_compute,
+			compute_valid_mask,
+			'prepared survey amplitude',
+		)
+	source_valid_mask = compute_valid_mask[payload_slices]
+	if settings.zero_mask.enabled:
+		zero_compute, _ = _slice_array_with_padding(
+			zero_like,
+			compute_request.start_xyz,
+			compute_request.size_xyz,
+			pad_value=True,
+		)
+		zero_proxy = np.logical_not(zero_compute).astype(np.float32)
+		zero_invalid = compute_zero_amplitude_invalid_mask(
+			zero_proxy,
+			valid_mask=compute_valid_mask,
+			config=replace(settings.zero_mask, zero_atol=0.0),
+		)[payload_slices]
+		local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
+	else:
+		local_valid_mask = source_valid_mask
+	local_valid_mask = local_valid_mask.astype(bool, copy=False)
+	amplitude_model = np.array(
+		normalized_compute[payload_slices],
+		dtype=np.float32,
+		copy=True,
+	)
+	if settings.amplitude_agc.enabled:
+		amplitude_model = apply_configured_agc(
+			amplitude_model,
+			local_valid_mask,
+			settings.amplitude_agc,
+		)
+	if settings.finite_check_mode == 'strict' and settings.amplitude_agc.enabled:
+		_validate_finite_array(amplitude_model, 'AGC amplitude')
+	amplitude_model[~local_valid_mask] = 0.0
+	if settings.finite_check_mode == 'output_only':
+		_validate_finite_array(amplitude_model, 'preprocessed amplitude')
+	token_valid_mask = reduce_valid_mask_to_tokens(
+		local_valid_mask,
+		patch_size_xyz=patch,
+		min_valid_fraction=settings.min_token_valid_fraction,
+	)
+	return PreparedAmplitudeCrop(
+		request=request,
+		x=amplitude_model[np.newaxis, ...],
+		local_valid_mask=local_valid_mask,
+		token_valid_mask=token_valid_mask,
+	)
+
+
 def read_amplitude_crop_candidate(
 	*,
 	request: CropRequest,
@@ -271,7 +351,7 @@ def _validate_settings(settings: AmplitudePreprocessSettings) -> None:
 def _validate_finite_valid_voxels(
 	values: np.ndarray,
 	valid_mask: np.ndarray,
-	path: Path,
+	path: object,
 ) -> None:
 	valid_values = np.asarray(values)[np.asarray(valid_mask, dtype=bool)]
 	if not np.isfinite(valid_values).all():
@@ -283,6 +363,53 @@ def _validate_finite_array(values: np.ndarray, label: str) -> None:
 	if not np.isfinite(values).all():
 		msg = f'{label} contains non-finite values'
 		raise ValueError(msg)
+
+
+def _slice_array_with_padding(
+	array: np.ndarray,
+	start_xyz: XYZ,
+	size_xyz: XYZ,
+	*,
+	pad_value: float | bool,
+) -> tuple[np.ndarray, np.ndarray]:
+	stop_xyz = tuple(
+		start + size for start, size in zip(start_xyz, size_xyz, strict=True)
+	)
+	source_start = tuple(max(start, 0) for start in start_xyz)
+	source_stop = tuple(
+		min(stop, shape)
+		for stop, shape in zip(stop_xyz, array.shape, strict=True)
+	)
+	result = np.full(size_xyz, pad_value, dtype=array.dtype)
+	valid = np.zeros(size_xyz, dtype=bool)
+	if not all(
+		stop > start for start, stop in zip(source_start, source_stop, strict=True)
+	):
+		return result, valid
+	dest_start = tuple(
+		source - requested
+		for source, requested in zip(source_start, start_xyz, strict=True)
+	)
+	dest_stop = tuple(
+		dest + stop - start
+		for dest, start, stop in zip(
+			dest_start,
+			source_start,
+			source_stop,
+			strict=True,
+		)
+	)
+	source_slices = tuple(
+		slice(start, stop)
+		for start, stop in zip(source_start, source_stop, strict=True)
+	)
+	dest_slices = tuple(
+		slice(start, stop)
+		for start, stop in zip(dest_start, dest_stop, strict=True)
+	)
+	result[dest_slices] = array[source_slices]
+	valid[dest_slices] = True
+	return result, valid
 
 
 def _validate_positive_xyz(value: Sequence[int], name: str) -> XYZ:
@@ -334,6 +461,7 @@ __all__ = [
 	'finalize_amplitude_crop',
 	'read_amplitude_crop',
 	'read_amplitude_crop_candidate',
+	'read_prepared_survey_amplitude_crop',
 	'reduce_valid_mask_to_tokens',
 	'resolve_manifest_path',
 	'zero_mask_margin_xyz',

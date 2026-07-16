@@ -32,11 +32,20 @@ from seis_ssl_cluster.data.normalization import (
 	load_normalization_stats,
 )
 from seis_ssl_cluster.data.schema import CropRequest, SurveyManifest, read_manifest_json
+from seis_ssl_cluster.data.survey_preprocessing_cache import (
+	PreparedSurveyAmplitude,
+	SurveyPreprocessingCacheMode,
+	SurveyPreprocessingCachePlan,
+	SurveyPreprocessingCacheSettings,
+	plan_survey_preprocessing_cache,
+	prepare_survey_preprocessing_cache,
+)
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
 from seis_ssl_cluster.data.window_preprocessing import (
 	AmplitudePreprocessSettings,
 	FiniteCheckMode,
 	read_amplitude_crop,
+	read_prepared_survey_amplitude_crop,
 	reduce_valid_mask_to_tokens,
 	resolve_manifest_path,
 )
@@ -135,6 +144,7 @@ class EmbeddingExtractionSettings:
 	normalized_clip_abs: float | None
 	amplitude_agc: AmplitudeAgcConfig
 	finite_check_mode: FiniteCheckMode
+	preprocessing_cache: SurveyPreprocessingCacheSettings
 
 
 @dataclass(frozen=True)
@@ -289,6 +299,7 @@ def extraction_settings_from_config(
 		normalized_clip_abs=normalized_clip_abs,
 		amplitude_agc=_amplitude_agc_from_config(checkpoint_config),
 		finite_check_mode=_finite_check_mode_from_config(checkpoint_config),
+		preprocessing_cache=_preprocessing_cache_settings(embedding),
 	)
 
 
@@ -349,6 +360,14 @@ def extract_survey_embeddings(  # noqa: PLR0913
 		manifest.amplitude.normalization_stats_path,
 	)
 	stats = load_normalization_stats(stats_path)
+	preprocess_settings = _amplitude_preprocess_settings(settings)
+	cache_plan = plan_survey_preprocessing_cache(
+		amplitude_path=amplitude_path,
+		stats=stats,
+		preprocess_settings=preprocess_settings,
+		cache_settings=settings.preprocessing_cache,
+		default_cache_root=settings.output_dir / '.preprocessing_cache',
+	)
 	patch_size = model.patch_size_xyz
 	token_grid = token_grid_shape_xyz(manifest.amplitude.shape_xyz, patch_size)
 	metadata = build_embedding_metadata(
@@ -361,6 +380,7 @@ def extract_survey_embeddings(  # noqa: PLR0913
 		checkpoint_sha256=checkpoint_sha256,
 		model=model,
 		token_grid_shape=token_grid,
+		preprocessing_cache_plan=cache_plan,
 	)
 	paths = output_paths(settings.output_dir, manifest.survey_id)
 	if prepare_outputs(paths, metadata, skip_existing=skip_existing):
@@ -388,36 +408,53 @@ def extract_survey_embeddings(  # noqa: PLR0913
 		enabled=settings.stage_timing,
 		accumulator=timer.accumulator,
 	)
-	windows = iter_sliding_windows(
-		manifest.amplitude.shape_xyz,
-		window_size_xyz=settings.window_size_xyz,
-		overlap_xyz=settings.overlap_xyz,
-		patch_size_xyz=patch_size,
-	)
-	prepared_batches = _iter_prepared_batches(
-		windows,
-		manifest=manifest,
-		amplitude_path=amplitude_path,
-		stats=stats,
-		store=store,
-		settings=settings,
-		patch_size_xyz=patch_size,
-		pin_memory=device.type == 'cuda',
-		producer_timer=producer_timer,
-	)
-	for prepared_batch in _prefetch_batches(
-		prepared_batches,
-		queue_depth=settings.prefetch_queue_depth,
-		timer=timer,
-	):
-		_process_prepared_batch(
-			prepared_batch,
-			model=model,
-			settings=settings,
-			device=device,
-			merger=merger,
-			timer=timer,
+	if cache_plan.effective_mode == 'off':
+		prepared_survey = None
+	else:
+		with producer_timer.stage('prepare_survey_cache'):
+			prepared_survey = prepare_survey_preprocessing_cache(
+				plan=cache_plan,
+				amplitude_path=amplitude_path,
+				stats=stats,
+				preprocess_settings=preprocess_settings,
+				cache_settings=settings.preprocessing_cache,
+				store=store,
+			)
+	try:
+		windows = iter_sliding_windows(
+			manifest.amplitude.shape_xyz,
+			window_size_xyz=settings.window_size_xyz,
+			overlap_xyz=settings.overlap_xyz,
+			patch_size_xyz=patch_size,
 		)
+		prepared_batches = _iter_prepared_batches(
+			windows,
+			manifest=manifest,
+			amplitude_path=amplitude_path,
+			stats=stats,
+			store=store,
+			settings=settings,
+			patch_size_xyz=patch_size,
+			pin_memory=device.type == 'cuda',
+			producer_timer=producer_timer,
+			prepared_survey=prepared_survey,
+		)
+		for prepared_batch in _prefetch_batches(
+			prepared_batches,
+			queue_depth=settings.prefetch_queue_depth,
+			timer=timer,
+		):
+			_process_prepared_batch(
+				prepared_batch,
+				model=model,
+				settings=settings,
+				device=device,
+				merger=merger,
+				timer=timer,
+			)
+	finally:
+		if prepared_survey is not None:
+			prepared_survey.close()
 	with timer.stage('merge_write'):
 		merger.write_average(
 			embedding_path=paths.embeddings_tmp,
@@ -446,12 +483,20 @@ def build_embedding_metadata(  # noqa: PLR0913
 	checkpoint_sha256: str | None = None,
 	model: AmplitudeMAE3D,
 	token_grid_shape: XYZ,
+	preprocessing_cache_plan: SurveyPreprocessingCachePlan | None = None,
 ) -> dict[str, object]:
 	"""Return deterministic metadata for one survey output."""
 	resolved_checkpoint_sha256 = (
 		file_sha256(settings.checkpoint_path)
 		if checkpoint_sha256 is None
 		else checkpoint_sha256
+	)
+	cache_plan = preprocessing_cache_plan or SurveyPreprocessingCachePlan(
+		'off',
+		'off',
+		None,
+		None,
+		None,
 	)
 	metadata = {
 		'survey_id': manifest.survey_id,
@@ -475,6 +520,7 @@ def build_embedding_metadata(  # noqa: PLR0913
 			'amplitude_agc': settings.amplitude_agc.to_dict(),
 			'finite_check_mode': settings.finite_check_mode,
 		},
+		'preprocessing_cache': cache_plan.to_metadata(),
 		'zero_mask': {
 			'enabled': settings.zero_mask.enabled,
 			'zero_atol': settings.zero_mask.zero_atol,
@@ -508,6 +554,7 @@ def _iter_prepared_batches(  # noqa: PLR0913
 	patch_size_xyz: XYZ,
 	pin_memory: bool,
 	producer_timer: StageTimer,
+	prepared_survey: PreparedSurveyAmplitude | None,
 ) -> Iterator[_PreparedBatch]:
 	prepared: list[tuple[SlidingWindow, np.ndarray, np.ndarray]] = []
 	for window in windows:
@@ -520,6 +567,7 @@ def _iter_prepared_batches(  # noqa: PLR0913
 			store=store,
 			settings=settings,
 			patch_size_xyz=patch_size_xyz,
+			prepared_survey=prepared_survey,
 		)
 		if not item[2].any():
 			continue
@@ -698,26 +746,31 @@ def _read_window(  # noqa: PLR0913
 	store: NpyMemmapVolumeStore,
 	settings: EmbeddingExtractionSettings,
 	patch_size_xyz: XYZ,
+	prepared_survey: PreparedSurveyAmplitude | None = None,
 ) -> tuple[SlidingWindow, np.ndarray, np.ndarray]:
 	request = CropRequest(
 		survey_id=manifest.survey_id,
 		start_xyz=window.start_xyz,
 		size_xyz=window.size_xyz,
 	)
-	prepared = read_amplitude_crop(
-		request=request,
-		amplitude_path=amplitude_path,
-		stats=stats,
-		store=store,
-		patch_size_xyz=patch_size_xyz,
-		settings=AmplitudePreprocessSettings(
-			zero_mask=settings.zero_mask,
-			normalized_clip_abs=settings.normalized_clip_abs,
-			amplitude_agc=settings.amplitude_agc,
-			min_token_valid_fraction=settings.min_token_valid_fraction,
-			finite_check_mode=settings.finite_check_mode,
-		),
-	)
+	preprocess_settings = _amplitude_preprocess_settings(settings)
+	if prepared_survey is None:
+		prepared = read_amplitude_crop(
+			request=request,
+			amplitude_path=amplitude_path,
+			stats=stats,
+			store=store,
+			patch_size_xyz=patch_size_xyz,
+			settings=preprocess_settings,
+		)
+	else:
+		prepared = read_prepared_survey_amplitude_crop(
+			request=request,
+			normalized_amplitude=prepared_survey.normalized_amplitude,
+			zero_like_mask=prepared_survey.zero_like_mask,
+			patch_size_xyz=patch_size_xyz,
+			settings=preprocess_settings,
+		)
 	return window, prepared.x, prepared.token_valid_mask
 
 
@@ -1181,6 +1234,57 @@ def _optional_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, ob
 		msg = f'{key} must be a mapping'
 		raise TypeError(msg)
 	return cast('Mapping[str, object]', value)
+
+
+def _preprocessing_cache_settings(
+	embedding: Mapping[str, object],
+) -> SurveyPreprocessingCacheSettings:
+	value = _optional_mapping(embedding, 'preprocessing_cache')
+	mode = value.get('mode', 'off')
+	if mode not in {'off', 'memory', 'memmap'}:
+		msg = (
+			'embedding.preprocessing_cache.mode must be "off", "memory", or '
+			f'"memmap"; got {mode!r}'
+		)
+		raise ValueError(msg)
+	directory_value = value.get('directory')
+	if directory_value is not None and (
+		not isinstance(directory_value, str) or not directory_value
+	):
+		msg = 'embedding.preprocessing_cache.directory must be a non-empty path'
+		raise TypeError(msg)
+	settings = SurveyPreprocessingCacheSettings(
+		mode=cast('SurveyPreprocessingCacheMode', mode),
+		chunk_size_x=_positive_int(
+			value.get('chunk_size_x', 16),
+			'embedding.preprocessing_cache.chunk_size_x',
+		),
+		reuse=_bool(
+			value.get('reuse', True),
+			'embedding.preprocessing_cache.reuse',
+		),
+		cleanup=_bool(
+			value.get('cleanup', False),
+			'embedding.preprocessing_cache.cleanup',
+		),
+		directory=(
+			None if directory_value is None else Path(directory_value)
+		),
+	)
+	settings.validate()
+	return settings
+
+
+def _amplitude_preprocess_settings(
+	settings: EmbeddingExtractionSettings,
+) -> AmplitudePreprocessSettings:
+	return AmplitudePreprocessSettings(
+		zero_mask=settings.zero_mask,
+		normalized_clip_abs=settings.normalized_clip_abs,
+		amplitude_agc=settings.amplitude_agc,
+		min_token_valid_fraction=settings.min_token_valid_fraction,
+		finite_check_mode=settings.finite_check_mode,
+	)
 
 
 def _required_path(parent: Mapping[str, object], key: str, prefix: str) -> Path:

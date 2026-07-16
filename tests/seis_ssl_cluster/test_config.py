@@ -424,6 +424,12 @@ def test_default_embedding_extraction_config_is_minimal_raw_user_config() -> Non
 		'amp_dtype': 'auto',
 		'stage_timing': False,
 		'min_token_valid_fraction': 0.5,
+		'preprocessing_cache': {
+			'mode': 'off',
+			'chunk_size_x': 16,
+			'reuse': True,
+			'cleanup': False,
+		},
 	}
 	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
 

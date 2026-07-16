@@ -15,3 +15,8 @@ embedding:
   amp_dtype: auto
   stage_timing: false
   min_token_valid_fraction: 0.5
+  preprocessing_cache:
+    mode: 'off'
+    chunk_size_x: 16
+    reuse: true
+    cleanup: false

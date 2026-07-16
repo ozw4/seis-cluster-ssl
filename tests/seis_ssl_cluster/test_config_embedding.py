@@ -63,6 +63,41 @@ def test_embedding_config_validates_window_overlap() -> None:
 		resolve_embedding_extraction_config(cfg)
 
 
+def test_embedding_config_accepts_preprocessing_cache_policy() -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embedding']['preprocessing_cache'] = {
+		'mode': 'memmap',
+		'chunk_size_x': 8,
+		'reuse': True,
+		'cleanup': False,
+	}
+
+	resolved = resolve_embedding_extraction_config(cfg)
+
+	assert resolved['embedding']['preprocessing_cache']['mode'] == 'memmap'
+
+
+@pytest.mark.parametrize(
+	('key', 'value'),
+	[
+		('mode', 'disk'),
+		('chunk_size_x', 0),
+		('reuse', 1),
+		('cleanup', 'false'),
+		('unknown', True),
+	],
+)
+def test_embedding_config_rejects_invalid_preprocessing_cache(
+	key: str,
+	value: object,
+) -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embedding']['preprocessing_cache'] = {key: value}
+
+	with pytest.raises((TypeError, ValueError), match='preprocessing_cache'):
+		resolve_embedding_extraction_config(cfg)
+
+
 @pytest.mark.parametrize(
 	('key', 'value', 'error'),
 	[

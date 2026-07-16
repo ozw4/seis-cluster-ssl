@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import threading
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
@@ -11,6 +12,7 @@ import numpy as np
 import pytest
 import torch
 
+import seis_ssl_cluster.data.survey_preprocessing_cache as cache_module
 import seis_ssl_cluster.embedding.extractor as extractor_module
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
@@ -23,6 +25,7 @@ from seis_ssl_cluster.data import (
 	load_normalization_stats,
 	read_amplitude_crop,
 	read_manifest_json,
+	read_prepared_survey_amplitude_crop,
 	resolve_manifest_path,
 	write_manifest_json,
 	write_normalization_stats,
@@ -90,6 +93,280 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['min_token_valid_fraction'] == 0.5
 	assert metadata['preprocessing']['amplitude_agc'] == {'enabled': False}
 	assert metadata['amplitude_agc'] == {'enabled': False}
+
+
+@pytest.mark.parametrize('mode', ['memory', 'memmap'])
+@pytest.mark.parametrize('zero_mask_enabled', [False, True])
+def test_survey_preprocessing_cache_matches_legacy_windows(
+	tmp_path: Path,
+	mode: str,
+	zero_mask_enabled: bool,  # noqa: FBT001
+) -> None:
+	zero_mask = {
+		'enabled': zero_mask_enabled,
+		'zero_atol': 0.0,
+		'z_sample_influence_radius': 1,
+		'xy_trace_influence_radius': 1,
+	}
+	agc = {
+		'enabled': True,
+		'mode': 'trace_rms_z',
+		'window_z': 3,
+		'eps': 1.0e-3,
+		'clip_abs': 5.0,
+	}
+	reference_root = tmp_path / 'reference'
+	reference_root.mkdir()
+	reference_config = _write_fixture(
+		reference_root,
+		checkpoint_zero_mask=zero_mask,
+		checkpoint_amplitude_agc=agc,
+	)
+	reference = run_embedding_extraction(reference_config, device='cpu')[0]
+
+	actual_root = tmp_path / 'actual'
+	actual_root.mkdir()
+	actual_config = _write_fixture(
+		actual_root,
+		checkpoint_zero_mask=zero_mask,
+		checkpoint_amplitude_agc=agc,
+	)
+	actual_config['embedding']['preprocessing_cache'] = {
+		'mode': mode,
+		'chunk_size_x': 2,
+		'reuse': True,
+		'cleanup': False,
+	}
+	actual = run_embedding_extraction(actual_config, device='cpu')[0]
+
+	np.testing.assert_allclose(
+		np.load(actual.embeddings_path),
+		np.load(reference.embeddings_path),
+		rtol=1.0e-3,
+		atol=1.0e-3,
+	)
+	np.testing.assert_array_equal(
+		np.load(actual.valid_tokens_path),
+		np.load(reference.valid_tokens_path),
+	)
+	metadata = json.loads(actual.metadata_path.read_text(encoding='utf-8'))
+	assert metadata['preprocessing_cache']['requested_mode'] == mode
+	assert metadata['preprocessing_cache']['effective_mode'] == mode
+	assert len(metadata['preprocessing_cache']['fingerprint']) == 64
+
+
+@pytest.mark.parametrize('zero_mask_enabled', [False, True])
+@pytest.mark.parametrize('agc_enabled', [False, True])
+@pytest.mark.parametrize('zero_atol', [0.0, 1.0])
+def test_cached_window_amplitude_and_masks_match_legacy_exactly(
+	tmp_path: Path,
+	zero_mask_enabled: bool,  # noqa: FBT001
+	agc_enabled: bool,  # noqa: FBT001
+	zero_atol: float,
+) -> None:
+	zero_mask = {
+		'enabled': zero_mask_enabled,
+		'zero_atol': zero_atol,
+		'z_sample_influence_radius': 1,
+		'xy_trace_influence_radius': 1,
+	}
+	agc = (
+		{
+			'enabled': True,
+			'mode': 'trace_rms_z',
+			'window_z': 3,
+			'eps': 1.0e-3,
+			'clip_abs': 5.0,
+		}
+		if agc_enabled
+		else {'enabled': False}
+	)
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_zero_mask=zero_mask,
+		checkpoint_amplitude_agc=agc,
+	)
+	config['embedding']['preprocessing_cache'] = {
+		'mode': 'memory',
+		'chunk_size_x': 2,
+	}
+	manifest = read_manifest_json(Path(config['manifests']['input']))[0]
+	payload = load_checkpoint(
+		Path(config['embeddings']['checkpoint']),
+		map_location='cpu',
+	)
+	settings = extractor_module.extraction_settings_from_config(
+		config,
+		checkpoint_config=payload['config'],
+	)
+	preprocess = extractor_module._amplitude_preprocess_settings(settings)  # noqa: SLF001
+	amplitude_path = resolve_manifest_path(manifest, manifest.amplitude.path)
+	stats = load_normalization_stats(
+		resolve_manifest_path(
+			manifest,
+			manifest.amplitude.normalization_stats_path,
+		),
+	)
+	store = NpyMemmapVolumeStore()
+	plan = cache_module.plan_survey_preprocessing_cache(
+		amplitude_path=amplitude_path,
+		stats=stats,
+		preprocess_settings=preprocess,
+		cache_settings=settings.preprocessing_cache,
+		default_cache_root=tmp_path / 'cache',
+	)
+	prepared_survey = cache_module.prepare_survey_preprocessing_cache(
+		plan=plan,
+		amplitude_path=amplitude_path,
+		stats=stats,
+		preprocess_settings=preprocess,
+		cache_settings=settings.preprocessing_cache,
+		store=store,
+	)
+	assert prepared_survey is not None
+	windows = list(
+		iter_sliding_windows(
+			manifest.amplitude.shape_xyz,
+			window_size_xyz=settings.window_size_xyz,
+			overlap_xyz=settings.overlap_xyz,
+			patch_size_xyz=(2, 2, 2),
+		),
+	)
+	assert any(
+		any(start + size > shape for start, size, shape in zip(
+			window.start_xyz,
+			window.size_xyz,
+			manifest.amplitude.shape_xyz,
+			strict=True,
+		))
+		for window in windows
+	)
+	for window in windows:
+		request = CropRequest(
+			survey_id=manifest.survey_id,
+			start_xyz=window.start_xyz,
+			size_xyz=window.size_xyz,
+		)
+		legacy = read_amplitude_crop(
+			request=request,
+			amplitude_path=amplitude_path,
+			stats=stats,
+			store=store,
+			patch_size_xyz=(2, 2, 2),
+			settings=preprocess,
+		)
+		cached = read_prepared_survey_amplitude_crop(
+			request=request,
+			normalized_amplitude=prepared_survey.normalized_amplitude,
+			zero_like_mask=prepared_survey.zero_like_mask,
+			patch_size_xyz=(2, 2, 2),
+			settings=preprocess,
+		)
+		np.testing.assert_allclose(cached.x, legacy.x, rtol=1.0e-6, atol=1.0e-6)
+		np.testing.assert_array_equal(
+			cached.local_valid_mask,
+			legacy.local_valid_mask,
+		)
+		np.testing.assert_array_equal(
+			cached.token_valid_mask,
+			legacy.token_valid_mask,
+		)
+
+
+def test_memmap_preprocessing_cache_normalizes_by_chunk_and_reuses(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['preprocessing_cache'] = {
+		'mode': 'memmap',
+		'chunk_size_x': 2,
+		'reuse': True,
+		'cleanup': False,
+	}
+	calls = 0
+	original = cache_module._normalize_amplitude_inplace  # noqa: SLF001
+
+	def count_normalization(*args: object, **kwargs: object) -> np.ndarray:
+		nonlocal calls
+		calls += 1
+		return original(*args, **kwargs)
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.data.survey_preprocessing_cache._normalize_amplitude_inplace',
+		count_normalization,
+	)
+	run_embedding_extraction(config, device='cpu')
+	assert calls == 3
+	run_embedding_extraction(config, device='cpu')
+	assert calls == 3
+
+	config['embedding']['preprocessing_cache']['chunk_size_x'] = 4
+	run_embedding_extraction(config, device='cpu')
+	assert calls == 3
+
+	cache_root = tmp_path / 'embeddings' / '.preprocessing_cache'
+	cache_path = next(cache_root.iterdir())
+	(cache_path / 'metadata.json').unlink()
+	run_embedding_extraction(config, device='cpu')
+	assert calls == 5
+
+	config['embedding']['preprocessing_cache']['cleanup'] = True
+	run_embedding_extraction(config, device='cpu')
+	assert not cache_path.exists()
+
+
+def test_preprocessing_cache_fingerprint_tracks_source_and_config(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['preprocessing_cache'] = {'mode': 'memory'}
+	manifest = read_manifest_json(Path(config['manifests']['input']))[0]
+	payload = load_checkpoint(
+		Path(config['embeddings']['checkpoint']),
+		map_location='cpu',
+	)
+	settings = extractor_module.extraction_settings_from_config(
+		config,
+		checkpoint_config=payload['config'],
+	)
+	amplitude_path = resolve_manifest_path(manifest, manifest.amplitude.path)
+	stats = load_normalization_stats(
+		resolve_manifest_path(
+			manifest,
+			manifest.amplitude.normalization_stats_path,
+		),
+	)
+	preprocess = extractor_module._amplitude_preprocess_settings(settings)  # noqa: SLF001
+
+	def plan(
+		current_stats: SurveyNormalizationStats,
+		current_preprocess: AmplitudePreprocessSettings = preprocess,
+	) -> str:
+		value = cache_module.plan_survey_preprocessing_cache(
+			amplitude_path=amplitude_path,
+			stats=current_stats,
+			preprocess_settings=current_preprocess,
+			cache_settings=settings.preprocessing_cache,
+			default_cache_root=tmp_path / 'cache',
+		)
+		assert value.fingerprint is not None
+		return value.fingerprint
+
+	initial = plan(stats)
+	changed_stats = plan(replace(stats, median=stats.median + 1.0))
+	changed_finite_check_mode = plan(
+		stats,
+		replace(preprocess, finite_check_mode='off'),
+	)
+	volume = np.load(amplitude_path)
+	volume[1, 1, 1] += 1.0
+	np.save(amplitude_path, volume)
+	changed_source = plan(stats)
+
+	assert changed_stats != initial
+	assert changed_finite_check_mode != initial
+	assert changed_source != initial
 
 
 @pytest.mark.parametrize(
