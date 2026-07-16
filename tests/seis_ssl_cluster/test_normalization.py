@@ -20,6 +20,7 @@ from seis_ssl_cluster.data import (
 	write_manifest_json,
 	write_normalization_stats,
 )
+from seis_ssl_cluster.data.normalization import _normalize_amplitude_inplace
 from tests.helpers import run_python_proc
 
 
@@ -74,6 +75,25 @@ def test_normalize_amplitude_clips_normalized_values() -> None:
 		[-8.0, -4.0, 0.0, 4.0, 8.0],
 		atol=1.0e-4,
 	)
+
+
+def test_normalize_amplitude_preserves_input_and_inplace_api_reuses_buffer() -> None:
+	stats = _stats('survey', source_path=Path('survey.npy'))
+	values = np.asarray([-10.0, 0.0, 10.0], dtype=np.float32)
+	original = values.copy()
+
+	result = normalize_amplitude(values, stats, normalized_clip_abs=2.0)
+	work = values.copy()
+	inplace = _normalize_amplitude_inplace(
+		work,
+		stats,
+		normalized_clip_abs=2.0,
+	)
+
+	assert result is not values
+	assert inplace is work
+	np.testing.assert_array_equal(values, original)
+	np.testing.assert_allclose(inplace, result)
 
 
 def test_trace_rms_agc_uses_centered_z_window() -> None:

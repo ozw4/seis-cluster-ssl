@@ -855,6 +855,7 @@ def _teacher_checkpoint_config(
 				'min_valid_fraction': 0.0,
 				'max_resample_attempts': 2,
 				'amplitude_agc': {'enabled': False},
+				'finite_check_mode': 'strict',
 			},
 			'model': {
 				'name': 'amp_mae3d',

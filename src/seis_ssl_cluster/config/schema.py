@@ -25,6 +25,7 @@ EXPECTED_MODEL_NAME: Final = 'amp_mae3d'
 EXPECTED_SPATIAL_MASK_MODE: Final = 'block'
 SUPPORTED_RECONSTRUCTION_LOSSES: Final = frozenset({'huber', 'mse', 'l1'})
 SUPPORTED_TARGET_NORMALIZATION_MODES: Final = frozenset({'none', 'patch_zscore'})
+SUPPORTED_FINITE_CHECK_MODES: Final = frozenset({'strict', 'output_only', 'off'})
 EXPECTED_VALID_MASK_MODE: Final = 'voxel'
 
 STAGE_BUILD_MANIFESTS: Final = 'build_nopims_manifests'
@@ -119,6 +120,7 @@ DEFAULT_MAE_DATA_OPTIONS: Final = {
 	'min_valid_fraction': 0.1,
 	'max_resample_attempts': 16,
 	'amplitude_agc': {'enabled': False},
+	'finite_check_mode': 'strict',
 }
 
 DEFAULT_MAE_TRAIN_OPTIONS: Final = {
@@ -137,6 +139,7 @@ DEFAULT_STRAT_HMM_PRETEXT_DATA_OPTIONS: Final = {
 	'max_resample_attempts': 32,
 	'normalized_clip_abs': None,
 	'amplitude_agc': {'enabled': False},
+	'finite_check_mode': 'strict',
 }
 
 DEFAULT_STRAT_HMM_PRETEXT_PSEUDO_TARGET_OPTIONS: Final = {

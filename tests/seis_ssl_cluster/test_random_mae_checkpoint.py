@@ -217,6 +217,7 @@ def test_random_mae_checkpoint_is_readable_by_embedding_extractor(
 			'eps': 1.0e-6,
 			'clip_abs': 2.0,
 		},
+		'finite_check_mode': 'strict',
 	}
 	assert metadata['pretraining_objective']['target_normalization'] == {
 		'mode': 'patch_zscore',
@@ -269,6 +270,7 @@ def _reference_checkpoint_config(tmp_path: Path) -> dict[str, object]:
 			'local_crop_size': [4, 4, 4],
 			'min_valid_fraction': 0.1,
 			'max_resample_attempts': 16,
+			'finite_check_mode': 'strict',
 			'normalized_clip_abs': 8.0,
 			'amplitude_agc': {
 				'enabled': True,

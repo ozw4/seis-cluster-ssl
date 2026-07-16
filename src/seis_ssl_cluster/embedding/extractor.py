@@ -32,6 +32,7 @@ from seis_ssl_cluster.data.schema import CropRequest, SurveyManifest, read_manif
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
 from seis_ssl_cluster.data.window_preprocessing import (
 	AmplitudePreprocessSettings,
+	FiniteCheckMode,
 	read_amplitude_crop,
 	reduce_valid_mask_to_tokens,
 	resolve_manifest_path,
@@ -114,6 +115,7 @@ class EmbeddingExtractionSettings:
 	zero_mask: ZeroMaskConfig
 	normalized_clip_abs: float | None
 	amplitude_agc: AmplitudeAgcConfig
+	finite_check_mode: FiniteCheckMode
 
 
 @dataclass(frozen=True)
@@ -241,6 +243,7 @@ def extraction_settings_from_config(
 		zero_mask=_zero_mask_from_config(checkpoint_config),
 		normalized_clip_abs=normalized_clip_abs,
 		amplitude_agc=_amplitude_agc_from_config(checkpoint_config),
+		finite_check_mode=_finite_check_mode_from_config(checkpoint_config),
 	)
 
 
@@ -403,9 +406,11 @@ def build_embedding_metadata(  # noqa: PLR0913
 		'min_token_valid_fraction': settings.min_token_valid_fraction,
 		'normalized_clip_abs': settings.normalized_clip_abs,
 		'amplitude_agc': settings.amplitude_agc.to_dict(),
+		'finite_check_mode': settings.finite_check_mode,
 		'preprocessing': {
 			'normalized_clip_abs': settings.normalized_clip_abs,
 			'amplitude_agc': settings.amplitude_agc.to_dict(),
+			'finite_check_mode': settings.finite_check_mode,
 		},
 		'zero_mask': {
 			'enabled': settings.zero_mask.enabled,
@@ -505,6 +510,7 @@ def _read_window(  # noqa: PLR0913
 			normalized_clip_abs=settings.normalized_clip_abs,
 			amplitude_agc=settings.amplitude_agc,
 			min_token_valid_fraction=settings.min_token_valid_fraction,
+			finite_check_mode=settings.finite_check_mode,
 		),
 	)
 	return window, prepared.x, prepared.token_valid_mask
@@ -635,7 +641,7 @@ def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
 			*(
 				key
 				for key in DEFAULT_MAE_DATA_OPTIONS
-				if key != 'amplitude_agc'
+				if key not in {'amplitude_agc', 'finite_check_mode'}
 			),
 			'local_crop_size',
 		),
@@ -657,6 +663,7 @@ def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
 			'data.normalized_clip_abs',
 		)
 	_validate_checkpoint_amplitude_agc(data)
+	_finite_check_mode_from_config(config)
 	_validate_checkpoint_model_contract(model)
 	_validate_positive_xyz(model['patch_size'], 'model.patch_size')
 	for key in _CHECKPOINT_MODEL_GEOMETRY_KEYS[1:]:
@@ -894,6 +901,20 @@ def _amplitude_agc_from_config(config: Mapping[str, object]) -> AmplitudeAgcConf
 	return AmplitudeAgcConfig.from_mapping(
 		cast('Mapping[str, object] | None', value),
 	)
+
+
+def _finite_check_mode_from_config(
+	config: Mapping[str, object],
+) -> FiniteCheckMode:
+	data = _required_mapping(config, 'data')
+	value = data.get('finite_check_mode', 'strict')
+	if value not in {'strict', 'output_only', 'off'}:
+		msg = (
+			'data.finite_check_mode must be "strict", "output_only", or "off"; '
+			f'got {value!r}'
+		)
+		raise ValueError(msg)
+	return cast('FiniteCheckMode', value)
 
 
 def _validate_checkpoint_amplitude_agc(data: Mapping[str, object]) -> None:

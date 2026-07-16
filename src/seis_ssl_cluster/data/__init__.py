@@ -76,6 +76,7 @@ from seis_ssl_cluster.data.volume_store import (
 )
 from seis_ssl_cluster.data.window_preprocessing import (
 	AmplitudePreprocessSettings,
+	FiniteCheckMode,
 	PreparedAmplitudeCrop,
 	read_amplitude_crop,
 	reduce_valid_mask_to_tokens,
@@ -101,6 +102,7 @@ __all__ = [
 	'AmplitudeVolumeRecord',
 	'CropRequest',
 	'FilteredManifestStatsQcResult',
+	'FiniteCheckMode',
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
 	'NoTargetProvider',

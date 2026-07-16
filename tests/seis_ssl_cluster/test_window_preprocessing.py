@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.data.window_preprocessing as preprocessing_module
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudePreprocessSettings,
@@ -124,6 +125,7 @@ def test_read_amplitude_crop_returns_arrays_and_zero_fills_invalid_voxels(
 		volume[0, 0:2, 0:2],
 		rtol=1.0e-5,
 	)
+	np.testing.assert_array_equal(np.load(manifest.amplitude.path), volume)
 
 
 def test_read_amplitude_crop_zero_mask_invalid_voxels_are_zero_filled(
@@ -200,6 +202,106 @@ def test_read_amplitude_crop_rejects_non_finite_source_voxels(
 				min_token_valid_fraction=0.0,
 			),
 		)
+
+
+@pytest.mark.parametrize('mode', ['strict', 'output_only'])
+def test_read_amplitude_crop_finite_checks_reject_nonfinite_output(
+	tmp_path: Path,
+	mode: str,
+) -> None:
+	volume = np.ones((2, 2, 2), dtype=np.float32)
+	volume[0, 0, 0] = np.nan
+	manifest = _manifest(tmp_path, volume)
+
+	with pytest.raises(ValueError, match='non-finite'):
+		read_amplitude_crop(
+			request=CropRequest(
+				survey_id=manifest.survey_id,
+				start_xyz=(0, 0, 0),
+				size_xyz=(2, 2, 2),
+			),
+			amplitude_path=manifest.amplitude.path,
+			stats=_stats(manifest.amplitude.path),
+			store=NpyMemmapVolumeStore(),
+			patch_size_xyz=(1, 1, 1),
+			settings=AmplitudePreprocessSettings(
+				zero_mask=ZeroMaskConfig(enabled=False),
+				normalized_clip_abs=None,
+				amplitude_agc=AmplitudeAgcConfig(),
+				min_token_valid_fraction=0.0,
+				finite_check_mode=mode,
+			),
+		)
+
+
+def test_read_amplitude_crop_off_skips_finite_scans(tmp_path: Path) -> None:
+	volume = np.ones((2, 2, 2), dtype=np.float32)
+	volume[0, 0, 0] = np.nan
+	manifest = _manifest(tmp_path, volume)
+
+	prepared = read_amplitude_crop(
+		request=CropRequest(
+			survey_id=manifest.survey_id,
+			start_xyz=(0, 0, 0),
+			size_xyz=(2, 2, 2),
+		),
+		amplitude_path=manifest.amplitude.path,
+		stats=_stats(manifest.amplitude.path),
+		store=NpyMemmapVolumeStore(),
+		patch_size_xyz=(1, 1, 1),
+		settings=AmplitudePreprocessSettings(
+			zero_mask=ZeroMaskConfig(enabled=False),
+			normalized_clip_abs=None,
+			amplitude_agc=AmplitudeAgcConfig(),
+			min_token_valid_fraction=0.0,
+			finite_check_mode='off',
+		),
+	)
+
+	assert np.isnan(prepared.x[0, 0, 0, 0])
+
+
+def test_read_amplitude_crop_disabled_agc_reuses_normalization_buffer(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	manifest = _manifest(tmp_path, np.ones((2, 2, 2), dtype=np.float32))
+	finite_scan_labels: list[str] = []
+	original_finite_check = preprocessing_module._validate_finite_array  # noqa: SLF001
+
+	def fail_if_called(*_args: object, **_kwargs: object) -> np.ndarray:
+		raise AssertionError('disabled AGC should not call the copying public API')
+
+	def counted_finite_check(values: np.ndarray, label: str) -> None:
+		finite_scan_labels.append(label)
+		original_finite_check(values, label)
+
+	monkeypatch.setattr(preprocessing_module, 'apply_configured_agc', fail_if_called)
+	monkeypatch.setattr(
+		preprocessing_module,
+		'_validate_finite_array',
+		counted_finite_check,
+	)
+	prepared = read_amplitude_crop(
+		request=CropRequest(
+			survey_id=manifest.survey_id,
+			start_xyz=(0, 0, 0),
+			size_xyz=(2, 2, 2),
+		),
+		amplitude_path=manifest.amplitude.path,
+		stats=_stats(manifest.amplitude.path),
+		store=NpyMemmapVolumeStore(),
+		patch_size_xyz=(1, 1, 1),
+		settings=AmplitudePreprocessSettings(
+			zero_mask=ZeroMaskConfig(enabled=False),
+			normalized_clip_abs=None,
+			amplitude_agc=AmplitudeAgcConfig(),
+			min_token_valid_fraction=0.0,
+		),
+	)
+
+	assert prepared.x.dtype == np.float32
+	assert finite_scan_labels == ['normalized amplitude']
 
 
 def _manifest(tmp_path: Path, volume: np.ndarray) -> SurveyManifest:

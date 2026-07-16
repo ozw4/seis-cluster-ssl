@@ -14,6 +14,20 @@ from seis_ssl_cluster.masking import (
 )
 
 
+class _ChoiceSpyGenerator(np.random.Generator):
+	def __init__(self, seed: int) -> None:
+		super().__init__(np.random.PCG64(seed))
+		self.choice_calls: list[tuple[int, int, bool]] = []
+
+	def choice(self, a: int, **kwargs: object) -> np.ndarray:  # type: ignore[override]
+		size = kwargs['size']
+		replace = kwargs['replace']
+		assert isinstance(size, int)
+		assert isinstance(replace, bool)
+		self.choice_calls.append((a, size, replace))
+		return super().choice(a, **kwargs)
+
+
 def _build_plan(seed: int = 123) -> SpatialMaskingPlan:
 	return build_spatial_masking_plan(
 		local_crop_size_xyz=(128, 128, 128),
@@ -76,6 +90,69 @@ def test_generate_spatial_block_mask_keeps_visible_and_masked_tokens() -> None:
 
 	assert np.any(mask)
 	assert np.any(np.logical_not(mask))
+
+
+@pytest.mark.parametrize(
+	('token_grid_shape', 'mask_ratio', 'expected_count'),
+	[
+		((16, 16, 16), 0.75, 3072),
+		((16, 16, 16), 0.00001, 1),
+		((16, 16, 16), 0.99999, 4095),
+		((2, 3, 4), 0.5, 12),
+		((1, 1, 2), 0.5, 1),
+	],
+)
+def test_generate_unit_block_mask_has_exact_target_count(
+	token_grid_shape: tuple[int, int, int],
+	mask_ratio: float,
+	expected_count: int,
+) -> None:
+	mask = generate_spatial_block_mask(
+		token_grid_shape,
+		mask_ratio,
+		(1, 1, 1),
+		np.random.default_rng(123),
+	)
+
+	assert mask.shape == token_grid_shape
+	assert np.count_nonzero(mask) == expected_count
+
+
+def test_generate_unit_block_mask_is_deterministic_for_seed() -> None:
+	first = generate_spatial_block_mask(
+		(5, 4, 3),
+		0.75,
+		(1, 1, 1),
+		np.random.default_rng(999),
+	)
+	second = generate_spatial_block_mask(
+		(5, 4, 3),
+		0.75,
+		(1, 1, 1),
+		np.random.default_rng(999),
+	)
+
+	np.testing.assert_array_equal(first, second)
+
+
+def test_generate_unit_block_mask_samples_once_without_replacement() -> None:
+	rng = _ChoiceSpyGenerator(seed=123)
+
+	mask = generate_spatial_block_mask((16, 16, 16), 0.75, (1, 1, 1), rng)
+
+	assert rng.choice_calls == [(4096, 3072, False)]
+	assert np.count_nonzero(mask) == 3072
+
+
+def test_generate_general_block_mask_preserves_golden_result() -> None:
+	mask = generate_spatial_block_mask(
+		(3, 3, 3),
+		0.4,
+		(2, 2, 2),
+		np.random.default_rng(123),
+	)
+
+	assert np.flatnonzero(mask).tolist() == [3, 4, 5, 7, 8, 12, 13, 14, 15, 16, 17]
 
 
 def test_compute_token_grid_shape_rejects_non_divisible_sizes() -> None:

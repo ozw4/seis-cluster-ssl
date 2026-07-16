@@ -26,6 +26,7 @@ from seis_ssl_cluster.data.target_providers import (
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
 from seis_ssl_cluster.data.window_preprocessing import (
 	AmplitudePreprocessSettings,
+	FiniteCheckMode,
 	PreparedAmplitudeCrop,
 	read_amplitude_crop,
 	resolve_manifest_path,
@@ -62,6 +63,7 @@ class NopimsAmplitudeCropDataset:
 		max_resample_attempts: int = 16,
 		normalized_clip_abs: float | None = None,
 		amplitude_agc: AmplitudeAgcConfig | Mapping[str, object] | None = None,
+		finite_check_mode: FiniteCheckMode = 'strict',
 		target_provider: TargetProvider | None = None,
 	) -> None:
 		self.manifests = tuple(manifests)
@@ -104,6 +106,7 @@ class NopimsAmplitudeCropDataset:
 			'normalized_clip_abs',
 		)
 		self.amplitude_agc = _amplitude_agc_from_config(amplitude_agc)
+		self.finite_check_mode = _validate_finite_check_mode(finite_check_mode)
 		self.target_provider = (
 			NoTargetProvider() if target_provider is None else target_provider
 		)
@@ -245,6 +248,7 @@ class NopimsAmplitudeCropDataset:
 				normalized_clip_abs=self.normalized_clip_abs,
 				amplitude_agc=self.amplitude_agc,
 				min_token_valid_fraction=1.0,
+				finite_check_mode=self.finite_check_mode,
 			),
 		)
 
@@ -265,6 +269,16 @@ def _amplitude_agc_from_config(
 		value.validate()
 		return value
 	return AmplitudeAgcConfig.from_mapping(value)
+
+
+def _validate_finite_check_mode(value: object) -> FiniteCheckMode:
+	if value not in {'strict', 'output_only', 'off'}:
+		msg = (
+			'finite_check_mode must be "strict", "output_only", or "off"; '
+			f'got {value!r}'
+		)
+		raise ValueError(msg)
+	return cast('FiniteCheckMode', value)
 
 
 def _validate_xyz(value: Sequence[int], name: str) -> XYZ:

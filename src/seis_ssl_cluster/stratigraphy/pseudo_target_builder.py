@@ -25,6 +25,7 @@ from seis_ssl_cluster.data.schema import CropRequest, SurveyManifest, read_manif
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
 from seis_ssl_cluster.data.window_preprocessing import (
 	AmplitudePreprocessSettings,
+	FiniteCheckMode,
 	read_amplitude_crop,
 	resolve_manifest_path,
 )
@@ -77,6 +78,7 @@ class _BuilderSettings:
 	zero_mask: ZeroMaskConfig
 	normalized_clip_abs: float | None
 	amplitude_agc: AmplitudeAgcConfig
+	finite_check_mode: FiniteCheckMode
 	hmm_k: int
 	edge_margin_tokens: XYZ
 	transition: HMMTransitionSettings
@@ -446,6 +448,7 @@ def _read_window(  # noqa: PLR0913
 			normalized_clip_abs=settings.normalized_clip_abs,
 			amplitude_agc=settings.amplitude_agc,
 			min_token_valid_fraction=settings.min_token_valid_fraction,
+			finite_check_mode=settings.finite_check_mode,
 		),
 	)
 	return window, prepared.x, prepared.token_valid_mask
@@ -607,6 +610,7 @@ def _pseudo_target_request_metadata(  # noqa: PLR0913
 		'normalization_stats_path': str(stats_path),
 		'preprocessing': {
 			'amplitude_agc': settings.amplitude_agc.to_dict(),
+			'finite_check_mode': settings.finite_check_mode,
 			'normalized_clip_abs': settings.normalized_clip_abs,
 			'zero_mask': _zero_mask_metadata(settings.zero_mask),
 		},
@@ -726,6 +730,7 @@ def _settings_from_config(
 		zero_mask=_zero_mask_from_config(mae_config),
 		normalized_clip_abs=_normalized_clip_abs(mae_config),
 		amplitude_agc=_amplitude_agc_from_config(mae_config),
+		finite_check_mode=_finite_check_mode_from_config(mae_config),
 		hmm_k=_positive_int(hmm.get('k'), 'hmm.k'),
 		edge_margin_tokens=_xyz_from_mapping(
 			hmm,
@@ -886,6 +891,14 @@ def _normalized_clip_abs(config: Mapping[str, object]) -> float | None:
 	data = _mapping(config, 'data')
 	value = data.get('normalized_clip_abs')
 	return None if value is None else float(value)
+
+
+def _finite_check_mode_from_config(config: Mapping[str, object]) -> FiniteCheckMode:
+	value = _mapping(config, 'data').get('finite_check_mode', 'strict')
+	if value not in {'strict', 'output_only', 'off'}:
+		msg = f'checkpoint data.finite_check_mode is invalid: {value!r}'
+		raise ValueError(msg)
+	return cast('FiniteCheckMode', value)
 
 
 def _checkpoint_training_stage(payload: Mapping[str, object]) -> object:

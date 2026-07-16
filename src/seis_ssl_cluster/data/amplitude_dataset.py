@@ -20,9 +20,9 @@ from seis_ssl_cluster.data.crop_sampler import (
 from seis_ssl_cluster.data.normalization import (
 	AmplitudeAgcConfig,
 	SurveyNormalizationStats,
+	_normalize_amplitude_inplace,
 	apply_configured_agc,
 	load_normalization_stats,
-	normalize_amplitude,
 )
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
 from seis_ssl_cluster.data.zero_mask import (
@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 	from pathlib import Path
 
 	from seis_ssl_cluster.data.schema import CropRequest, SurveyManifest
+	from seis_ssl_cluster.data.window_preprocessing import FiniteCheckMode
 
 XYZ = tuple[int, int, int]
 
@@ -61,6 +62,7 @@ class NopimsAmplitudePretrainDataset:
 		max_resample_attempts: int = 16,
 		normalized_clip_abs: float | None = None,
 		amplitude_agc: AmplitudeAgcConfig | Mapping[str, object] | None = None,
+		finite_check_mode: FiniteCheckMode = 'strict',
 	) -> None:
 		self.manifests = tuple(manifests)
 		if not self.manifests:
@@ -121,6 +123,7 @@ class NopimsAmplitudePretrainDataset:
 			'normalized_clip_abs',
 		)
 		self.amplitude_agc = _amplitude_agc_from_config(amplitude_agc)
+		self.finite_check_mode = _validate_finite_check_mode(finite_check_mode)
 
 		self._store = NpyMemmapVolumeStore()
 		self._normalization_stats: dict[Path, SurveyNormalizationStats] = {}
@@ -162,6 +165,10 @@ class NopimsAmplitudePretrainDataset:
 			max_resample_attempts=data.get('max_resample_attempts', 16),
 			normalized_clip_abs=data.get('normalized_clip_abs'),
 			amplitude_agc=data.get('amplitude_agc'),
+			finite_check_mode=cast(
+				'FiniteCheckMode',
+				data.get('finite_check_mode', 'strict'),
+			),
 		)
 
 	def __len__(self) -> int:
@@ -264,27 +271,46 @@ class NopimsAmplitudePretrainDataset:
 			compute_request.start_xyz,
 			compute_request.size_xyz,
 		)
-		raw_crop = raw_compute[payload_slices].astype(np.float32, copy=False)
+		if self.finite_check_mode == 'strict':
+			_validate_finite_valid_voxels(
+				raw_compute,
+				compute_valid_mask,
+				amplitude_path,
+			)
+		raw_crop = raw_compute[payload_slices]
 		source_valid_mask = compute_valid_mask[payload_slices]
 
-		zero_invalid = compute_zero_amplitude_invalid_mask(
-			raw_compute,
-			valid_mask=compute_valid_mask,
-			config=self.zero_mask,
-		)[payload_slices]
-		local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
+		if self.zero_mask.enabled:
+			zero_invalid = compute_zero_amplitude_invalid_mask(
+				raw_compute,
+				valid_mask=compute_valid_mask,
+				config=self.zero_mask,
+			)[payload_slices]
+			local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
+		else:
+			local_valid_mask = source_valid_mask
 
-		amplitude_norm = normalize_amplitude(
-			raw_crop,
+		work_buffer = np.array(raw_crop, dtype=np.float32, copy=True)
+		amplitude_norm = _normalize_amplitude_inplace(
+			work_buffer,
 			self._stats_for_manifest(manifest),
 			normalized_clip_abs=self.normalized_clip_abs,
 		)
-		amplitude_model = apply_configured_agc(
-			amplitude_norm,
-			local_valid_mask,
-			self.amplitude_agc,
-		)
+		if self.finite_check_mode == 'strict':
+			_validate_finite_array(amplitude_norm, 'normalized amplitude')
+		if self.amplitude_agc.enabled:
+			amplitude_model = apply_configured_agc(
+				amplitude_norm,
+				local_valid_mask,
+				self.amplitude_agc,
+			)
+		else:
+			amplitude_model = amplitude_norm
+		if self.finite_check_mode == 'strict' and self.amplitude_agc.enabled:
+			_validate_finite_array(amplitude_model, 'AGC amplitude')
 		amplitude_model[~local_valid_mask] = 0.0
+		if self.finite_check_mode == 'output_only':
+			_validate_finite_array(amplitude_model, 'preprocessed amplitude')
 		x = amplitude_model[np.newaxis, ...]
 		return {
 			'x': x,
@@ -355,6 +381,33 @@ def _amplitude_agc_from_config(
 		value.validate()
 		return value
 	return AmplitudeAgcConfig.from_mapping(value)
+
+
+def _validate_finite_check_mode(value: object) -> FiniteCheckMode:
+	if value not in {'strict', 'output_only', 'off'}:
+		msg = (
+			'finite_check_mode must be "strict", "output_only", or "off"; '
+			f'got {value!r}'
+		)
+		raise ValueError(msg)
+	return cast('FiniteCheckMode', value)
+
+
+def _validate_finite_valid_voxels(
+	values: np.ndarray,
+	valid_mask: np.ndarray,
+	path: Path,
+) -> None:
+	valid_values = np.asarray(values)[np.asarray(valid_mask, dtype=bool)]
+	if not np.isfinite(valid_values).all():
+		msg = f'amplitude crop contains non-finite source voxels: {path}'
+		raise ValueError(msg)
+
+
+def _validate_finite_array(values: np.ndarray, label: str) -> None:
+	if not np.isfinite(values).all():
+		msg = f'{label} contains non-finite values'
+		raise ValueError(msg)
 
 
 def _resolve_manifest_path(manifest: SurveyManifest, path: Path) -> Path:

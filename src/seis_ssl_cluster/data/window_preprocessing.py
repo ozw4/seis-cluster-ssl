@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from numbers import Integral, Real
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 import numpy as np
 
@@ -16,8 +16,8 @@ from seis_ssl_cluster.data.crop_sampler import (
 from seis_ssl_cluster.data.normalization import (
 	AmplitudeAgcConfig,
 	SurveyNormalizationStats,
+	_normalize_amplitude_inplace,
 	apply_configured_agc,
-	normalize_amplitude,
 )
 from seis_ssl_cluster.data.zero_mask import (
 	ZeroMaskConfig,
@@ -31,6 +31,7 @@ if TYPE_CHECKING:
 	from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
 
 XYZ = tuple[int, int, int]
+FiniteCheckMode = Literal['strict', 'output_only', 'off']
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class AmplitudePreprocessSettings:
 	normalized_clip_abs: float | None
 	amplitude_agc: AmplitudeAgcConfig
 	min_token_valid_fraction: float
+	finite_check_mode: FiniteCheckMode = 'strict'
 
 
 @dataclass(frozen=True)
@@ -131,28 +133,40 @@ def read_amplitude_crop(  # noqa: PLR0913
 		compute_request.start_xyz,
 		compute_request.size_xyz,
 	)
-	_validate_finite_valid_voxels(raw_compute, compute_valid_mask, amplitude_path)
-	raw_crop = raw_compute[payload_slices].astype(np.float32, copy=False)
+	if settings.finite_check_mode == 'strict':
+		_validate_finite_valid_voxels(raw_compute, compute_valid_mask, amplitude_path)
+	raw_crop = raw_compute[payload_slices]
 	source_valid_mask = compute_valid_mask[payload_slices]
-	zero_invalid = compute_zero_amplitude_invalid_mask(
-		raw_compute,
-		valid_mask=compute_valid_mask,
-		config=settings.zero_mask,
-	)[payload_slices]
-	local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
-	amplitude_norm = normalize_amplitude(
-		raw_crop,
+	if settings.zero_mask.enabled:
+		zero_invalid = compute_zero_amplitude_invalid_mask(
+			raw_compute,
+			valid_mask=compute_valid_mask,
+			config=settings.zero_mask,
+		)[payload_slices]
+		local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
+	else:
+		local_valid_mask = source_valid_mask
+	work_buffer = np.array(raw_crop, dtype=np.float32, copy=True)
+	amplitude_norm = _normalize_amplitude_inplace(
+		work_buffer,
 		stats,
 		normalized_clip_abs=settings.normalized_clip_abs,
 	)
-	_validate_finite_array(amplitude_norm, 'normalized amplitude')
-	amplitude_model = apply_configured_agc(
-		amplitude_norm,
-		local_valid_mask,
-		settings.amplitude_agc,
-	)
-	_validate_finite_array(amplitude_model, 'AGC amplitude')
+	if settings.finite_check_mode == 'strict':
+		_validate_finite_array(amplitude_norm, 'normalized amplitude')
+	if settings.amplitude_agc.enabled:
+		amplitude_model = apply_configured_agc(
+			amplitude_norm,
+			local_valid_mask,
+			settings.amplitude_agc,
+		)
+	else:
+		amplitude_model = amplitude_norm
+	if settings.finite_check_mode == 'strict' and settings.amplitude_agc.enabled:
+		_validate_finite_array(amplitude_model, 'AGC amplitude')
 	amplitude_model[~local_valid_mask] = 0.0
+	if settings.finite_check_mode == 'output_only':
+		_validate_finite_array(amplitude_model, 'preprocessed amplitude')
 	token_valid_mask = reduce_valid_mask_to_tokens(
 		local_valid_mask,
 		patch_size_xyz=patch,
@@ -184,6 +198,12 @@ def _validate_settings(settings: AmplitudePreprocessSettings) -> None:
 		)
 		raise TypeError(msg)
 	settings.amplitude_agc.validate()
+	if settings.finite_check_mode not in {'strict', 'output_only', 'off'}:
+		msg = (
+			'settings.finite_check_mode must be "strict", "output_only", or '
+			f'"off"; got {settings.finite_check_mode!r}'
+		)
+		raise ValueError(msg)
 	if settings.normalized_clip_abs is not None:
 		_validate_positive_finite_float(
 			settings.normalized_clip_abs,
@@ -255,6 +275,7 @@ def _validate_positive_finite_float(value: object, name: str) -> float:
 
 __all__ = [
 	'AmplitudePreprocessSettings',
+	'FiniteCheckMode',
 	'PreparedAmplitudeCrop',
 	'read_amplitude_crop',
 	'reduce_valid_mask_to_tokens',
