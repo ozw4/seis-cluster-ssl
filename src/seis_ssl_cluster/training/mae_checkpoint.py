@@ -55,7 +55,11 @@ _RESUME_ALLOWED_TRAIN_OVERRIDES = frozenset(
 		'allow_overwrite_output',
 		'diagnostics_dir',
 		'device',
+		'amp_dtype',
+		'prefetch_factor',
+		'persistent_workers',
 		'runtime_check_mode',
+		'stage_timing',
 	},
 )
 

@@ -317,6 +317,31 @@ def test_resume_allows_legacy_checkpoint_without_amplitude_agc(
 	assert resumed_path.is_file()
 
 
+def test_resume_allows_legacy_checkpoint_without_runtime_train_options(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	cfg['train']['max_steps'] = 1
+	checkpoint_path = run_mae_pretraining(cfg)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	checkpoint_train = payload['config']['train']
+	for key in (
+		'amp_dtype',
+		'prefetch_factor',
+		'persistent_workers',
+		'stage_timing',
+	):
+		del checkpoint_train[key]
+	legacy_path = tmp_path / 'legacy_runtime_options.pt'
+	torch.save(payload, legacy_path)
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['train']['max_steps'] = 2
+
+	resumed_path = run_mae_pretraining(resume_cfg, resume=legacy_path)
+
+	assert resumed_path.is_file()
+
+
 def test_step_checkpoint_resume_continues_unfinished_epoch(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	cfg['train']['samples_per_epoch'] = 2

@@ -9,6 +9,7 @@ import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -466,6 +467,11 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 	best_score = _load_existing_best_score(output_root)
 	timer = StageTimer(
 		enabled=_bool_config(train_config, 'stage_timing', default=False),
+		synchronize=(
+			partial(torch.cuda.synchronize, device)
+			if device.type == 'cuda'
+			else None
+		),
 	)
 	for epoch in range(resume_state.start_epoch, epochs + 1):
 		set_epoch = getattr(dataset, 'set_epoch', None)

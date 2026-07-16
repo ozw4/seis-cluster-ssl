@@ -90,6 +90,12 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['window_size'] == [4, 4, 4]
 	assert metadata['overlap'] == [2, 2, 2]
 	assert metadata['output_dtype'] == 'float16'
+	assert metadata['precision'] == {
+		'amp_requested': False,
+		'amp_dtype_requested': 'auto',
+		'resolved_dtype': 'float32',
+		'amp_enabled': False,
+	}
 	assert metadata['min_token_valid_fraction'] == 0.5
 	assert metadata['preprocessing']['amplitude_agc'] == {'enabled': False}
 	assert metadata['amplitude_agc'] == {'enabled': False}
@@ -627,6 +633,23 @@ def test_embedding_extraction_skip_existing_uses_matching_metadata(
 	result = run_embedding_extraction(config, skip_existing=True, device='cpu')
 
 	assert result[0].skipped is True
+
+
+@pytest.mark.parametrize(
+	('key', 'value'),
+	[('amp', True), ('amp_dtype', 'float16')],
+)
+def test_embedding_extraction_skip_existing_rejects_precision_change(
+	tmp_path: Path,
+	key: str,
+	value: object,
+) -> None:
+	config = _write_fixture(tmp_path)
+	run_embedding_extraction(config, device='cpu')
+	config['embedding'][key] = value
+
+	with pytest.raises(ValueError, match='metadata does not match'):
+		run_embedding_extraction(config, skip_existing=True, device='cpu')
 
 
 def test_embedding_extraction_skip_existing_restarts_incomplete_final_outputs(

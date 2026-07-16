@@ -7,6 +7,7 @@ import threading
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import suppress
 from dataclasses import dataclass
+from functools import partial
 from numbers import Integral, Real
 from pathlib import Path
 from typing import cast
@@ -192,7 +193,9 @@ def run_embedding_extraction(
 	timer = StageTimer(
 		enabled=settings.stage_timing,
 		synchronize=(
-			torch.cuda.synchronize if resolved_device.type == 'cuda' else None
+			partial(torch.cuda.synchronize, resolved_device)
+			if resolved_device.type == 'cuda'
+			else None
 		),
 	)
 	producer_timer = StageTimer(
@@ -386,6 +389,7 @@ def extract_survey_embeddings(  # noqa: PLR0913
 		model=model,
 		token_grid_shape=token_grid,
 		preprocessing_cache_plan=cache_plan,
+		device=device,
 	)
 	paths = output_paths(settings.output_dir, manifest.survey_id)
 	if prepare_outputs(paths, metadata, skip_existing=skip_existing):
@@ -489,6 +493,7 @@ def build_embedding_metadata(  # noqa: PLR0913
 	checkpoint_sha256: str | None = None,
 	model: AmplitudeMAE3D,
 	token_grid_shape: XYZ,
+	device: torch.device,
 	preprocessing_cache_plan: SurveyPreprocessingCachePlan | None = None,
 ) -> dict[str, object]:
 	"""Return deterministic metadata for one survey output."""
@@ -517,6 +522,7 @@ def build_embedding_metadata(  # noqa: PLR0913
 		'overlap': list(settings.overlap_xyz),
 		'normalization_stats_path': str(stats_path),
 		'output_dtype': str(settings.output_dtype),
+		'precision': _embedding_precision_metadata(settings, device=device),
 		'min_token_valid_fraction': settings.min_token_valid_fraction,
 		'normalized_clip_abs': settings.normalized_clip_abs,
 		'amplitude_agc': settings.amplitude_agc.to_dict(),
@@ -741,6 +747,24 @@ def _resolve_autocast_dtype(
 	if settings.amp_dtype == 'float16':
 		return torch.float16
 	return torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+
+
+def _embedding_precision_metadata(
+	settings: EmbeddingExtractionSettings,
+	*,
+	device: torch.device,
+) -> dict[str, object]:
+	autocast_dtype = _resolve_autocast_dtype(settings, device=device)
+	return {
+		'amp_requested': settings.amp,
+		'amp_dtype_requested': settings.amp_dtype,
+		'resolved_dtype': (
+			str(autocast_dtype).removeprefix('torch.')
+			if autocast_dtype is not None
+			else 'float32'
+		),
+		'amp_enabled': autocast_dtype is not None,
+	}
 
 
 def _read_window(  # noqa: PLR0913
