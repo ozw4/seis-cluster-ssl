@@ -25,6 +25,7 @@ from seis_ssl_cluster.training import (
 	run_mae_pretraining,
 	train_mae_one_epoch,
 )
+from seis_ssl_cluster.utils import StageTimer
 
 pytestmark = pytest.mark.smoke
 
@@ -64,6 +65,7 @@ class _FiniteLossNanGradient(torch.autograd.Function):
 def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	cfg['train']['max_steps'] = 2
+	cfg['train']['stage_timing'] = True
 
 	checkpoint_path = run_mae_pretraining(cfg)
 
@@ -106,7 +108,33 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 	run_metadata = json.loads(run_metadata_path.read_text(encoding='utf-8'))
 	assert run_metadata['package_version'] == __version__
 	assert run_metadata['runtime_check_mode'] == 'once'
+	assert run_metadata['precision'] == {
+		'amp_requested': False,
+		'amp_dtype_requested': 'auto',
+		'resolved_dtype': 'float32',
+		'amp_enabled': False,
+		'grad_scaler_enabled': False,
+	}
+	assert run_metadata['data_loading'] == {
+		'num_workers': 0,
+		'pin_memory': False,
+		'pin_memory_device': '',
+		'prefetch_factor': None,
+		'persistent_workers': False,
+		'non_blocking_h2d': False,
+	}
 	assert checkpoint['config']['train']['runtime_check_mode'] == 'once'
+	assert checkpoint['config']['train']['amp_dtype'] == 'auto'
+	stage_timings = json.loads(
+		(output_root / 'stage_timings.json').read_text(encoding='utf-8'),
+	)
+	assert set(stage_timings['stages']) == {
+		'data_wait',
+		'h2d',
+		'forward_loss',
+		'backward',
+		'optimizer',
+	}
 
 
 def test_run_snapshots_configured_train_path_list(tmp_path: Path) -> None:
@@ -499,6 +527,102 @@ def test_grad_clip_norm_calls_torch_clip_on_cpu(
 
 	assert calls == [1.0]
 	assert state.metrics['grad_norm'] == pytest.approx(0.25)
+
+
+def test_mae_epoch_records_each_training_stage() -> None:
+	dataloader = torch.utils.data.DataLoader(
+		[_mae_sample()],
+		batch_size=1,
+		collate_fn=mae_collate_fn,
+	)
+	model = _TinyAmpModel()
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+	timer = StageTimer(enabled=True)
+
+	state = train_mae_one_epoch(
+		model=model,
+		dataloader=dataloader,
+		optimizer=optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		patch_size_xyz=(2, 2, 2),
+		loss_config={
+			'reconstruction': 'mse',
+			'gradient_weight': 0.0,
+			'visible_reconstruction_weight': 0.0,
+			'target_normalization': {'mode': 'none'},
+		},
+		timer=timer,
+	)
+
+	assert np.isfinite(state.metrics['loss'])
+	assert set(timer.to_dict()['stages']) == {
+		'data_wait',
+		'h2d',
+		'forward_loss',
+		'backward',
+		'optimizer',
+	}
+
+
+@pytest.mark.requires_cuda
+def test_cuda_fp32_and_auto_amp_one_step_are_finite_and_close() -> None:
+	if not torch.cuda.is_available():
+		pytest.skip('CUDA is not available')
+	dataloader = torch.utils.data.DataLoader(
+		[_mae_sample()],
+		batch_size=1,
+		collate_fn=mae_collate_fn,
+	)
+	device = torch.device('cuda')
+	fp32_model = _TinyAmpModel().to(device)
+	amp_model = _TinyAmpModel().to(device)
+	amp_model.load_state_dict(fp32_model.state_dict())
+	loss_config = {
+		'reconstruction': 'mse',
+		'gradient_weight': 0.0,
+		'visible_reconstruction_weight': 0.0,
+		'target_normalization': {'mode': 'none'},
+	}
+	fp32_state = train_mae_one_epoch(
+		model=fp32_model,
+		dataloader=dataloader,
+		optimizer=torch.optim.SGD(fp32_model.parameters(), lr=1.0e-4),
+		device=device,
+		epoch=1,
+		patch_size_xyz=(2, 2, 2),
+		loss_config=loss_config,
+	)
+	precision = mae_training._resolve_amp_precision(  # noqa: SLF001
+		{'amp': True, 'amp_dtype': 'auto'},
+		device=device,
+	)
+	scaler = (
+		torch.amp.GradScaler('cuda') if precision.scaler_enabled else None
+	)
+	amp_state = train_mae_one_epoch(
+		model=amp_model,
+		dataloader=dataloader,
+		optimizer=torch.optim.SGD(amp_model.parameters(), lr=1.0e-4),
+		device=device,
+		epoch=1,
+		patch_size_xyz=(2, 2, 2),
+		loss_config=loss_config,
+		amp_enabled=True,
+		amp_dtype=precision.autocast_dtype,
+		scaler=scaler,
+	)
+
+	assert np.isfinite(fp32_state.metrics['loss'])
+	assert np.isfinite(amp_state.metrics['loss'])
+	assert torch.isfinite(fp32_model.weight).all()
+	assert torch.isfinite(amp_model.weight).all()
+	torch.testing.assert_close(
+		amp_model.weight,
+		fp32_model.weight,
+		rtol=5.0e-2,
+		atol=5.0e-2,
+	)
 
 
 def test_step_callback_materializes_metrics_only_at_interval(

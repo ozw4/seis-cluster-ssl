@@ -25,11 +25,26 @@ def build_mae_dataloader(  # noqa: PLR0913
 	shuffle: bool = True,
 	seed: int = 42,
 	device: str | torch.device = 'cpu',
+	prefetch_factor: int | None = 2,
+	persistent_workers: bool = True,
 ) -> torch.utils.data.DataLoader:
 	"""Build a deterministic amplitude MAE DataLoader."""
 	if num_workers < 0:
 		msg = f'num_workers must be nonnegative; got {num_workers!r}'
 		raise ValueError(msg)
+	if prefetch_factor is not None and (
+		isinstance(prefetch_factor, bool)
+		or not isinstance(prefetch_factor, int)
+		or prefetch_factor <= 0
+	):
+		msg = (
+			'prefetch_factor must be a positive integer or None; '
+			f'got {prefetch_factor!r}'
+		)
+		raise ValueError(msg)
+	if not isinstance(persistent_workers, bool):
+		msg = f'persistent_workers must be a bool; got {persistent_workers!r}'
+		raise TypeError(msg)
 	generator = torch.Generator()
 	generator.manual_seed(seed)
 	torch_device = torch.device(device)
@@ -41,7 +56,8 @@ def build_mae_dataloader(  # noqa: PLR0913
 		collate_fn=mae_collate_fn,
 		generator=generator,
 		pin_memory=torch_device.type == 'cuda',
-		persistent_workers=num_workers > 0,
+		prefetch_factor=prefetch_factor if num_workers > 0 else None,
+		persistent_workers=persistent_workers and num_workers > 0,
 		worker_init_fn=_make_worker_init_fn(seed),
 	)
 

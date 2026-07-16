@@ -41,6 +41,7 @@ from seis_ssl_cluster.training.mae_config_completion import (
 	_int_config,
 	_nonnegative_int_config,
 	_optional_int_config,
+	_optional_int_config_with_default,
 	_optional_positive_float_config,
 	_runtime_loss_values,
 	_xyz_config,
@@ -51,6 +52,7 @@ from seis_ssl_cluster.training.mae_visualization_hooks import (
 	_mae_debug_visualization_config,
 	_save_mae_debug_visualization,
 )
+from seis_ssl_cluster.utils import StageTimer
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.visualization.mae_debug import MaeDebugVisualizationConfig
@@ -88,6 +90,16 @@ class MaeStepState:
 StepCallback = Callable[[MaeStepState], None]
 
 
+@dataclass(frozen=True)
+class _MaePrecision:
+	amp_requested: bool
+	requested_dtype: Literal['auto', 'bfloat16', 'float16']
+	resolved_dtype: Literal['float32', 'bfloat16', 'float16']
+	amp_enabled: bool
+	autocast_dtype: torch.dtype | None
+	scaler_enabled: bool
+
+
 def _accumulate_metric_tensors(
 	totals: dict[str, torch.Tensor],
 	metrics: Mapping[str, torch.Tensor],
@@ -119,6 +131,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	patch_size_xyz: tuple[int, int, int],
 	loss_config: Mapping[str, object],
 	amp_enabled: bool = False,
+	amp_dtype: torch.dtype | None = None,
 	scaler: torch.amp.GradScaler | None = None,
 	global_step: int = 0,
 	max_steps: int | None = None,
@@ -130,6 +143,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	step_callback_interval: int | None = None,
 	run_config: Mapping[str, object] | None = None,
 	runtime_checks: RuntimeChecks | None = None,
+	timer: StageTimer | None = None,
 ) -> MaeTrainingState:
 	"""Train ``model`` for one epoch and return averaged loss metrics."""
 	(
@@ -145,21 +159,48 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		msg = 'step_callback_interval must be positive when provided'
 		raise ValueError(msg)
 	runtime_checks = runtime_checks or RuntimeChecks('once')
+	timer = timer or StageTimer()
+	if amp_enabled and amp_dtype is None:
+		amp_dtype = torch.float16
+	if amp_enabled and device.type != 'cuda':
+		msg = 'amp_enabled is supported only for CUDA MAE training'
+		raise ValueError(msg)
+	if amp_enabled and amp_dtype not in (torch.bfloat16, torch.float16):
+		msg = f'unsupported AMP dtype: {amp_dtype!r}'
+		raise ValueError(msg)
+	if amp_enabled and amp_dtype is torch.float16 and scaler is None:
+		msg = 'scaler is required for float16 AMP'
+		raise ValueError(msg)
+	if scaler is not None and (not amp_enabled or amp_dtype is not torch.float16):
+		msg = 'scaler is supported only for float16 AMP'
+		raise ValueError(msg)
 	model.train()
 	totals: dict[str, torch.Tensor] = {}
 	batches = 0
 	last_batch_index = -1
 	epoch_visualization_triggered = False
 
-	for batch_index, raw_batch in enumerate(dataloader):
+	dataloader_iterator = iter(dataloader)
+	for batch_index in range(len(dataloader)):
+		with timer.stage('data_wait'):
+			raw_batch = next(dataloader_iterator)
 		if batch_index < skip_batches:
 			continue
 		if max_steps is not None and batches >= max_steps:
 			break
-		batch = move_batch_to_device(raw_batch, device)
+		with timer.stage('h2d'):
+			batch = move_batch_to_device(
+				raw_batch,
+				device,
+				non_blocking=True,
+			)
 		optimizer.zero_grad(set_to_none=True)
 
-		with torch.amp.autocast('cuda', enabled=amp_enabled):
+		with timer.stage('forward_loss'), torch.amp.autocast(
+			device.type,
+			enabled=amp_enabled,
+			dtype=amp_dtype,
+		):
 			output = model(cast('Mapping[str, object]', batch))
 			losses = mae_pretraining_loss(
 				pred_patches=_required_tensor(output, 'pred_patches'),
@@ -195,12 +236,12 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			)
 
 		current_grad_norm: torch.Tensor | None = None
-		if amp_enabled:
-			if scaler is None:
-				msg = 'scaler is required when amp_enabled is true'
-				raise ValueError(msg)
-			scaler.scale(loss).backward()
-			scaler.unscale_(optimizer)
+		with timer.stage('backward'):
+			if scaler is not None:
+				scaler.scale(loss).backward()
+				scaler.unscale_(optimizer)
+			else:
+				loss.backward()
 			current_grad_norm = _clip_and_check_gradients(
 				model=model,
 				grad_clip_norm=grad_clip_norm,
@@ -215,25 +256,12 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				patch_size_xyz=patch_size_xyz,
 				run_config=run_config,
 			)
-			scaler.step(optimizer)
-			scaler.update()
-		else:
-			loss.backward()
-			current_grad_norm = _clip_and_check_gradients(
-				model=model,
-				grad_clip_norm=grad_clip_norm,
-				global_step=global_step,
-				epoch=epoch,
-				batch_index=batch_index,
-				batch=batch,
-				output=output,
-				losses=losses,
-				amp_enabled=amp_enabled,
-				diagnostics_dir=diagnostics_dir,
-				patch_size_xyz=patch_size_xyz,
-				run_config=run_config,
-			)
-			optimizer.step()
+		with timer.stage('optimizer'):
+			if scaler is not None:
+				scaler.step(optimizer)
+				scaler.update()
+			else:
+				optimizer.step()
 
 		metric_tensors = {
 			key: value.detach().to(dtype=torch.float64)
@@ -338,11 +366,6 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		resume=resume,
 		allow_overwrite=allow_overwrite_output,
 	)
-	_snapshot_run_inputs(
-		output_root=output_root,
-		config=config,
-		overwrite=allow_overwrite_output and resume is None,
-	)
 
 	samples_per_epoch = _optional_int_config(train_config, 'samples_per_epoch')
 	dataset = NopimsAmplitudePretrainDataset.from_config(
@@ -350,13 +373,42 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		config,
 		samples_per_epoch=samples_per_epoch,
 	)
+	num_workers = _nonnegative_int_config(train_config, 'num_workers', 0)
+	prefetch_factor = _optional_int_config_with_default(
+		train_config,
+		'prefetch_factor',
+		default=2,
+	)
+	persistent_workers = _bool_config(
+		train_config,
+		'persistent_workers',
+		default=True,
+	)
 	dataloader = build_mae_dataloader(
 		dataset,
 		batch_size=_int_config(train_config, 'batch_size', 4),
-		num_workers=_nonnegative_int_config(train_config, 'num_workers', 0),
+		num_workers=num_workers,
 		shuffle=_bool_config(train_config, 'shuffle', default=True),
 		seed=seed,
 		device=device,
+		prefetch_factor=prefetch_factor,
+		persistent_workers=persistent_workers,
+	)
+	precision = _resolve_amp_precision(train_config, device=device)
+	scaler = (
+		torch.amp.GradScaler('cuda', enabled=True)
+		if precision.scaler_enabled
+		else None
+	)
+	_snapshot_run_inputs(
+		output_root=output_root,
+		config=config,
+		runtime_metadata=_mae_runtime_metadata(
+			precision=precision,
+			dataloader=dataloader,
+			device=device,
+		),
+		overwrite=allow_overwrite_output and resume is None,
 	)
 
 	runtime_check_mode = cast(
@@ -373,12 +425,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		lr=_float_config(train_config, 'lr', 3.0e-5),
 		weight_decay=_float_config(train_config, 'weight_decay', 0.05),
 	)
-	amp_enabled = (
-		_bool_config(train_config, 'amp', default=False)
-		and device.type == 'cuda'
-		and torch.cuda.is_available()
-	)
-	scaler = torch.amp.GradScaler('cuda', enabled=amp_enabled) if amp_enabled else None
+	amp_enabled = precision.amp_enabled
 	resume_state = ResumeState(start_epoch=1, global_step=0, skip_batches=0)
 	if resume is not None:
 		payload = load_checkpoint(resume, map_location=device)
@@ -388,6 +435,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			optimizer=optimizer,
 			scaler=scaler,
 			amp_enabled=amp_enabled,
+			scaler_required=precision.scaler_enabled,
 			config=config,
 		)
 		_restore_dataloader_generator_state(payload=payload, dataloader=dataloader)
@@ -416,6 +464,9 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 	)
 	checkpoint_path: Path | None = None
 	best_score = _load_existing_best_score(output_root)
+	timer = StageTimer(
+		enabled=_bool_config(train_config, 'stage_timing', default=False),
+	)
 	for epoch in range(resume_state.start_epoch, epochs + 1):
 		set_epoch = getattr(dataset, 'set_epoch', None)
 		if callable(set_epoch):
@@ -473,6 +524,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			patch_size_xyz=_xyz_config(model_config, 'patch_size'),
 			loss_config=loss_config,
 			amp_enabled=amp_enabled,
+			amp_dtype=precision.autocast_dtype,
 			scaler=scaler,
 			global_step=state.global_step,
 			max_steps=remaining_steps,
@@ -486,7 +538,10 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			step_callback_interval=checkpoint_every_steps,
 			run_config=config,
 			runtime_checks=runtime_checks,
+			timer=timer,
 		)
+		if timer.enabled:
+			timer.write_json(output_root / 'stage_timings.json')
 		print_epoch_metrics(epoch, state.metrics)
 		checkpoint_kind: Literal['step', 'epoch'] = (
 			'epoch' if state.completed_epoch else 'step'
@@ -579,6 +634,7 @@ def _snapshot_run_inputs(
 	*,
 	output_root: Path,
 	config: Mapping[str, object],
+	runtime_metadata: Mapping[str, object],
 	overwrite: bool = False,
 ) -> None:
 	_write_json_snapshot(
@@ -602,6 +658,7 @@ def _snapshot_run_inputs(
 				'runtime_check_mode',
 				'once',
 			),
+			**dict(runtime_metadata),
 		},
 		overwrite=overwrite,
 	)
@@ -706,6 +763,81 @@ def _resolve_device(train_config: Mapping[str, object]) -> torch.device:
 		msg = 'train.device requested CUDA, but CUDA is not available'
 		raise ValueError(msg)
 	return device
+
+
+def _resolve_amp_precision(
+	train_config: Mapping[str, object],
+	*,
+	device: torch.device,
+) -> _MaePrecision:
+	amp = _bool_config(train_config, 'amp', default=False)
+	requested = train_config.get('amp_dtype', 'auto')
+	if requested not in ('auto', 'bfloat16', 'float16'):
+		msg = (
+			'train.amp_dtype must be one of '
+			f"['auto', 'bfloat16', 'float16']; got {requested!r}"
+		)
+		raise ValueError(msg)
+	requested_dtype = cast(
+		"Literal['auto', 'bfloat16', 'float16']",
+		requested,
+	)
+	if not amp or device.type != 'cuda':
+		return _MaePrecision(
+			amp_requested=amp,
+			requested_dtype=requested_dtype,
+			resolved_dtype='float32',
+			amp_enabled=False,
+			autocast_dtype=None,
+			scaler_enabled=False,
+		)
+
+	bf16_supported = torch.cuda.is_bf16_supported()
+	if requested_dtype == 'bfloat16' and not bf16_supported:
+		msg = 'train.amp_dtype=bfloat16 is not supported by the CUDA device'
+		raise ValueError(msg)
+	resolved_dtype: Literal['bfloat16', 'float16'] = (
+		'bfloat16'
+		if requested_dtype == 'bfloat16'
+		or (requested_dtype == 'auto' and bf16_supported)
+		else 'float16'
+	)
+	return _MaePrecision(
+		amp_requested=amp,
+		requested_dtype=requested_dtype,
+		resolved_dtype=resolved_dtype,
+		amp_enabled=True,
+		autocast_dtype=(
+			torch.bfloat16 if resolved_dtype == 'bfloat16' else torch.float16
+		),
+		scaler_enabled=resolved_dtype == 'float16',
+	)
+
+
+def _mae_runtime_metadata(
+	*,
+	precision: _MaePrecision,
+	dataloader: torch.utils.data.DataLoader,
+	device: torch.device,
+) -> dict[str, object]:
+	pin_memory = bool(dataloader.pin_memory)
+	return {
+		'precision': {
+			'amp_requested': precision.amp_requested,
+			'amp_dtype_requested': precision.requested_dtype,
+			'resolved_dtype': precision.resolved_dtype,
+			'amp_enabled': precision.amp_enabled,
+			'grad_scaler_enabled': precision.scaler_enabled,
+		},
+		'data_loading': {
+			'num_workers': dataloader.num_workers,
+			'pin_memory': pin_memory,
+			'pin_memory_device': getattr(dataloader, 'pin_memory_device', ''),
+			'prefetch_factor': dataloader.prefetch_factor,
+			'persistent_workers': dataloader.persistent_workers,
+			'non_blocking_h2d': device.type == 'cuda' and pin_memory,
+		},
+	}
 
 
 def _resolve_diagnostics_dir(

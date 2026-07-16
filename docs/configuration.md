@@ -230,6 +230,29 @@ visualization:
 `loss.reconstruction` must be `huber`, `mse`, or `l1`. Huber requires
 `loss.huber_delta`; MSE and L1 must omit `loss.huber_delta`.
 
+For a new CUDA experiment, override the training runtime without rewriting
+existing experiment configs:
+
+```yaml
+train:
+  num_workers: 8
+  prefetch_factor: 2
+  persistent_workers: true
+  amp: true
+  amp_dtype: auto
+  stage_timing: false
+```
+
+`amp_dtype` accepts `auto`, `bfloat16`, or `float16`. On CUDA, `auto` selects
+BF16 when the device supports it and otherwise selects FP16; FP16 uses a
+gradient scaler. CPU training remains FP32. `prefetch_factor` is applied only
+when `num_workers` is positive, and persistent workers are disabled when
+`num_workers` is zero. CUDA batches use pinned memory and request non-blocking
+H2D transfer only for tensors that are actually pinned. These resolved runtime
+choices are recorded in `run_metadata.json`. Set `stage_timing: true` to write
+`stage_timings.json` with data-wait, H2D, forward/loss, backward, and optimizer
+stage summaries.
+
 When `visualization.mae_debug.enabled` is true, at least one of
 `every_steps` or `every_epochs` must be set to a positive integer. An explicit
 `output_dir` must be an absolute path under `paths.output_root`; `null` writes
@@ -333,4 +356,3 @@ visualization:
 Stale redundant sections now fail validation instead of being silently ignored.
 
 `loss.target_normalization.mode` is required. `none` preserves the existing MAE target, and `patch_zscore` normalizes only the patchified target used by reconstruction loss. Inputs and dataset targets stay in survey-wise normalized amplitude space. For `patch_zscore`, set positive finite `eps` and `min_std`; mean and population variance are computed from `local_valid_mask == true` voxels only, using `std_eff = max(sqrt(var + eps), min_std)`. `patch_zscore` is rejected when `loss.gradient_weight != 0.0` because the current gradient loss compares survey-normalized amplitude gradients.
-

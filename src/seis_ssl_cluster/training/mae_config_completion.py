@@ -18,6 +18,7 @@ from seis_ssl_cluster.config.schema import (
 	FIXED_MASKING_CONTRACT,
 	FIXED_MODEL_CONTRACT,
 	STAGE_MAE_TRAINING,
+	SUPPORTED_AMP_DTYPES,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_RUNTIME_CHECK_MODES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
@@ -41,7 +42,9 @@ def _complete_mae_training_config(config: Mapping[str, object]) -> dict[str, obj
 		_runtime_mapping(resolved, section)
 	_merge_runtime_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
 	_merge_runtime_defaults(resolved, 'train', DEFAULT_MAE_TRAIN_OPTIONS)
-	_validate_runtime_check_mode(_runtime_mapping(resolved, 'train'))
+	train = _runtime_mapping(resolved, 'train')
+	_validate_runtime_check_mode(train)
+	_validate_amp_dtype(train)
 	_merge_runtime_defaults(resolved, 'loss', DEFAULT_MAE_LOSS_OPTIONS)
 	_merge_runtime_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
 	_validate_runtime_loss(_runtime_mapping(resolved, 'loss'))
@@ -58,6 +61,16 @@ def _validate_runtime_check_mode(train: Mapping[str, object]) -> None:
 		msg = (
 			'train.runtime_check_mode must be one of '
 			f'{sorted(SUPPORTED_RUNTIME_CHECK_MODES)!r}; got {mode!r}'
+		)
+		raise ValueError(msg)
+
+
+def _validate_amp_dtype(train: Mapping[str, object]) -> None:
+	value = train.get('amp_dtype')
+	if value not in SUPPORTED_AMP_DTYPES:
+		msg = (
+			'train.amp_dtype must be one of '
+			f'{sorted(SUPPORTED_AMP_DTYPES)!r}; got {value!r}'
 		)
 		raise ValueError(msg)
 

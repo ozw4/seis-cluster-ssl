@@ -100,7 +100,14 @@ _CHECKPOINT_TRAIN_REQUIRED_KEYS = (
 	*(
 		key
 		for key in DEFAULT_MAE_TRAIN_OPTIONS
-		if key != 'runtime_check_mode'
+		if key
+		not in {
+			'amp_dtype',
+			'persistent_workers',
+			'prefetch_factor',
+			'runtime_check_mode',
+			'stage_timing',
+		}
 	),
 )
 

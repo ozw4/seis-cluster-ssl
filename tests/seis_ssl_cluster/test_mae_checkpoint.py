@@ -77,6 +77,29 @@ def test_best_metric_comparison_minimizes_loss() -> None:
 	assert _is_improved_best_metric(1.5, 1.0) is False
 
 
+def test_bfloat16_amp_checkpoint_does_not_require_scaler(tmp_path: Path) -> None:
+	model = torch.nn.Linear(1, 1)
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+	result = _save_mae_rolling_checkpoint(
+		tmp_path,
+		model=model,
+		optimizer=optimizer,
+		epoch=1,
+		config={'stage': 'train_amp_mae', 'train': {'amp_dtype': 'bfloat16'}},
+		metrics={'loss': 1.0},
+		global_step=1,
+		amp_enabled=True,
+		scaler=None,
+		checkpoint_kind='epoch',
+		batch_index=None,
+	)
+
+	payload = load_checkpoint(result.latest_path, map_location='cpu')
+	assert payload['amp_enabled'] is True
+	assert payload['scaler_state_dict'] is None
+
+
 def test_best_metric_prefers_validation_loss_when_present() -> None:
 	key, score = _best_metric_from_metrics({'loss': 0.1, 'val_loss': 0.2})
 

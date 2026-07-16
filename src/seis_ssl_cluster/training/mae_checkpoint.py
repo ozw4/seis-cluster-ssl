@@ -162,6 +162,7 @@ def _save_mae_checkpoint(  # noqa: PLR0913
 		global_step=global_step,
 		amp_enabled=amp_enabled,
 		scaler=scaler,
+		scaler_required=scaler is not None,
 		training_state={
 			'schema_version': 1,
 			'stage': 'train_amp_mae',
@@ -209,9 +210,17 @@ def _restore_mae_checkpoint(  # noqa: PLR0913
 	optimizer: torch.optim.Optimizer,
 	scaler: torch.amp.GradScaler | None,
 	amp_enabled: bool,
+	scaler_required: bool | None = None,
 	config: Mapping[str, object] | None = None,
 ) -> ResumeState:
-	_validate_resume_payload(payload, amp_enabled=amp_enabled)
+	resolved_scaler_required = (
+		amp_enabled if scaler_required is None else scaler_required
+	)
+	_validate_resume_payload(
+		payload,
+		amp_enabled=amp_enabled,
+		scaler_required=resolved_scaler_required,
+	)
 	if config is not None:
 		_validate_resume_config_compatibility(payload, config)
 	try:
@@ -220,7 +229,7 @@ def _restore_mae_checkpoint(  # noqa: PLR0913
 		msg = f'incompatible model geometry for resume checkpoint: {exc}'
 		raise ValueError(msg) from exc
 	optimizer.load_state_dict(payload['optimizer_state_dict'])
-	if amp_enabled:
+	if resolved_scaler_required:
 		if scaler is None:
 			msg = 'scaler is required when amp_enabled is true'
 			raise ValueError(msg)
@@ -308,13 +317,19 @@ def _validate_resume_payload(
 	payload: Mapping[str, object],
 	*,
 	amp_enabled: bool,
+	scaler_required: bool | None = None,
 ) -> None:
 	_require_resume_keys(payload)
 	_validate_resume_mapping_fields(payload)
 	_validate_resume_counters(payload)
 	_validate_resume_rng_state(payload)
 	_validate_resume_training_state(payload)
-	_validate_resume_amp_state(payload, amp_enabled=amp_enabled)
+	_validate_resume_amp_state(
+		payload,
+		scaler_required=(
+			amp_enabled if scaler_required is None else scaler_required
+		),
+	)
 	stage = _checkpoint_stage(payload)
 	if stage is not None and stage != 'train_amp_mae':
 		msg = f'resume checkpoint stage must be train_amp_mae; got {stage!r}'
@@ -356,12 +371,12 @@ def _validate_resume_counters(payload: Mapping[str, object]) -> None:
 def _validate_resume_amp_state(
 	payload: Mapping[str, object],
 	*,
-	amp_enabled: bool,
+	scaler_required: bool,
 ) -> None:
 	if not isinstance(payload['amp_enabled'], bool):
 		msg = 'resume checkpoint amp_enabled must be a bool'
 		raise TypeError(msg)
-	if amp_enabled and not isinstance(payload['scaler_state_dict'], Mapping):
+	if scaler_required and not isinstance(payload['scaler_state_dict'], Mapping):
 		msg = 'resume checkpoint is missing scaler_state_dict for AMP resume'
 		raise ValueError(msg)
 

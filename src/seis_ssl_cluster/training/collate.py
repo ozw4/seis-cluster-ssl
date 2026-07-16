@@ -54,12 +54,32 @@ def strat_pseudo_target_collate_fn(
 def move_batch_to_device(
 	batch: Mapping[str, object],
 	device: torch.device,
+	*,
+	non_blocking: bool = False,
 ) -> dict[str, object]:
 	"""Move tensor values in a batch to ``device`` while preserving metadata."""
 	return {
-		key: value.to(device) if isinstance(value, torch.Tensor) else value
+		key: _move_tensor_to_device(
+			value,
+			device,
+			non_blocking=non_blocking,
+		)
+		if isinstance(value, torch.Tensor)
+		else value
 		for key, value in batch.items()
 	}
+
+
+def _move_tensor_to_device(
+	value: torch.Tensor,
+	device: torch.device,
+	*,
+	non_blocking: bool,
+) -> torch.Tensor:
+	use_non_blocking = (
+		non_blocking and device.type == 'cuda' and value.is_pinned()
+	)
+	return value.to(device, non_blocking=use_non_blocking)
 
 
 def _stack_arrays(

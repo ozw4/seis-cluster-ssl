@@ -61,6 +61,7 @@ from seis_ssl_cluster.config.schema import (
 	MAE_DEBUG_VISUALIZATION_KEYS,
 	STAGE_MAE_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
+	SUPPORTED_AMP_DTYPES,
 	SUPPORTED_FINITE_CHECK_MODES,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_RUNTIME_CHECK_MODES,
@@ -521,7 +522,19 @@ def _validate_train(train: Mapping[str, object]) -> None:
 		_validate_positive_int(train, key, prefix='train')
 	_validate_optional_train_numbers(train)
 	_validate_bool(train, 'amp', prefix='train')
-	for key in ('shuffle', 'allow_overwrite_output'):
+	amp_dtype = train.get('amp_dtype')
+	if amp_dtype not in SUPPORTED_AMP_DTYPES:
+		msg = (
+			'train.amp_dtype must be one of '
+			f'{sorted(SUPPORTED_AMP_DTYPES)!r}; got {amp_dtype!r}'
+		)
+		raise ValueError(msg)
+	for key in (
+		'shuffle',
+		'allow_overwrite_output',
+		'persistent_workers',
+		'stage_timing',
+	):
 		if key in train:
 			_validate_bool(train, key, prefix='train')
 	_validate_optional_train_seed(train)
@@ -543,6 +556,8 @@ def _validate_optional_train_numbers(train: Mapping[str, object]) -> None:
 	for key in ('num_workers', 'max_steps', 'checkpoint_every_steps'):
 		if key in train:
 			_validate_nonnegative_int(train, key, prefix='train')
+	if train.get('prefetch_factor') is not None:
+		_validate_positive_int(train, 'prefetch_factor', prefix='train')
 	for key in ('lr', 'grad_clip_norm'):
 		if key in train:
 			_validate_positive_number(train, key, prefix='train')

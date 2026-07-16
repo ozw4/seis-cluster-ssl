@@ -25,6 +25,7 @@ def save_checkpoint(  # noqa: PLR0913
 	global_step: int | None = None,
 	amp_enabled: bool | None = None,
 	scaler: torch.amp.GradScaler | None = None,
+	scaler_required: bool | None = None,
 	training_state: Mapping[str, object] | None = None,
 	rng_state: Mapping[str, object] | None = None,
 ) -> Path:
@@ -32,7 +33,10 @@ def save_checkpoint(  # noqa: PLR0913
 	checkpoint_path = Path(path)
 	checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 	resolved_amp_enabled = False if amp_enabled is None else bool(amp_enabled)
-	if resolved_amp_enabled and scaler is None:
+	resolved_scaler_required = (
+		resolved_amp_enabled if scaler_required is None else scaler_required
+	)
+	if resolved_scaler_required and scaler is None:
 		msg = 'scaler is required when amp_enabled is true'
 		raise ValueError(msg)
 	payload: dict[str, object] = {
