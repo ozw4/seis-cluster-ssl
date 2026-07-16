@@ -25,10 +25,12 @@ from seis_ssl_cluster.data.target_providers import (
 )
 from seis_ssl_cluster.data.volume_store import NpyMemmapVolumeStore
 from seis_ssl_cluster.data.window_preprocessing import (
+	AmplitudeCropCandidate,
 	AmplitudePreprocessSettings,
 	FiniteCheckMode,
 	PreparedAmplitudeCrop,
-	read_amplitude_crop,
+	finalize_amplitude_crop,
+	read_amplitude_crop_candidate,
 	resolve_manifest_path,
 )
 from seis_ssl_cluster.data.zero_mask import (
@@ -107,6 +109,13 @@ class NopimsAmplitudeCropDataset:
 		)
 		self.amplitude_agc = _amplitude_agc_from_config(amplitude_agc)
 		self.finite_check_mode = _validate_finite_check_mode(finite_check_mode)
+		self._preprocess_settings = AmplitudePreprocessSettings(
+			zero_mask=self.zero_mask,
+			normalized_clip_abs=self.normalized_clip_abs,
+			amplitude_agc=self.amplitude_agc,
+			min_token_valid_fraction=1.0,
+			finite_check_mode=self.finite_check_mode,
+		)
 		self.target_provider = (
 			NoTargetProvider() if target_provider is None else target_provider
 		)
@@ -144,10 +153,11 @@ class NopimsAmplitudeCropDataset:
 				rng,
 				survey_id=manifest.survey_id,
 			)
-			prepared = self._read_amplitude_crop(manifest, request)
-			last_valid_fraction = float(np.mean(prepared.local_valid_mask))
+			candidate = self._read_amplitude_crop_candidate(manifest, request)
+			last_valid_fraction = candidate.valid_fraction
 			if last_valid_fraction < self.min_valid_fraction:
 				continue
+			prepared = self._finalize_amplitude_crop(manifest, candidate)
 			sample: dict[str, object] = {
 				'x': prepared.x,
 				'local_valid_mask': prepared.local_valid_mask,
@@ -232,24 +242,28 @@ class NopimsAmplitudeCropDataset:
 			token_grid_shape_xyz=self.token_grid_shape_xyz,
 		)
 
-	def _read_amplitude_crop(
+	def _read_amplitude_crop_candidate(
 		self,
 		manifest: SurveyManifest,
 		request: CropRequest,
-	) -> PreparedAmplitudeCrop:
-		return read_amplitude_crop(
+	) -> AmplitudeCropCandidate:
+		return read_amplitude_crop_candidate(
 			request=request,
 			amplitude_path=resolve_manifest_path(manifest, manifest.amplitude.path),
-			stats=self._stats_for_manifest(manifest),
 			store=self._store,
+			settings=self._preprocess_settings,
+		)
+
+	def _finalize_amplitude_crop(
+		self,
+		manifest: SurveyManifest,
+		candidate: AmplitudeCropCandidate,
+	) -> PreparedAmplitudeCrop:
+		return finalize_amplitude_crop(
+			candidate=candidate,
+			stats=self._stats_for_manifest(manifest),
 			patch_size_xyz=self.patch_size_xyz,
-			settings=AmplitudePreprocessSettings(
-				zero_mask=self.zero_mask,
-				normalized_clip_abs=self.normalized_clip_abs,
-				amplitude_agc=self.amplitude_agc,
-				min_token_valid_fraction=1.0,
-				finite_check_mode=self.finite_check_mode,
-			),
+			settings=self._preprocess_settings,
 		)
 
 	def _stats_for_manifest(self, manifest: SurveyManifest) -> SurveyNormalizationStats:

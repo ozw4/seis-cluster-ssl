@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.data.amplitude_dataset as amplitude_dataset_module
+import seis_ssl_cluster.data.window_preprocessing as preprocessing_module
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeAgcConfig,
 	AmplitudeVolumeRecord,
+	CropRequest,
 	NopimsAmplitudePretrainDataset,
 	SurveyManifest,
 	SurveyNormalizationStats,
@@ -298,6 +302,52 @@ def test_amplitude_dataset_respects_min_valid_fraction(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='min_valid_fraction'):
 		dataset[0]
+
+
+def test_amplitude_dataset_skips_expensive_preprocessing_for_rejected_crop(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	volume = np.ones((4, 2, 2), dtype=np.float32)
+	volume[:2] = 0.0
+	dataset = NopimsAmplitudePretrainDataset(
+		[_manifest(tmp_path, 'survey', volume)],
+		local_crop_size_xyz=(2, 2, 2),
+		patch_size_xyz=(1, 1, 1),
+		zero_mask=ZeroMaskConfig(
+			z_sample_influence_radius=0,
+			xy_trace_influence_radius=0,
+		),
+		min_valid_fraction=1.0,
+		max_resample_attempts=2,
+		amplitude_agc=AmplitudeAgcConfig(
+			enabled=True,
+			mode='trace_rms_z',
+			window_z=3,
+			eps=1.0e-6,
+			clip_abs=2.0,
+		),
+	)
+	sampler = Mock(
+		side_effect=[
+			CropRequest('survey', (0, 0, 0), (2, 2, 2)),
+			CropRequest('survey', (2, 0, 0), (2, 2, 2)),
+		],
+	)
+	normalize = Mock(
+		wraps=preprocessing_module._normalize_amplitude_inplace,  # noqa: SLF001
+	)
+	agc = Mock(wraps=preprocessing_module.apply_configured_agc)
+	monkeypatch.setattr(amplitude_dataset_module, 'sample_random_local_crop', sampler)
+	monkeypatch.setattr(preprocessing_module, '_normalize_amplitude_inplace', normalize)
+	monkeypatch.setattr(preprocessing_module, 'apply_configured_agc', agc)
+
+	sample = dataset[0]
+
+	assert sample['coords']['local_start_xyz'] == (2, 0, 0)
+	assert sampler.call_count == 2
+	assert normalize.call_count == 1
+	assert agc.call_count == 1
 
 
 def test_amplitude_dataset_masks_are_deterministic_for_seed_epoch_index(

@@ -55,6 +55,16 @@ class PreparedAmplitudeCrop:
 	token_valid_mask: np.ndarray
 
 
+@dataclass(frozen=True)
+class AmplitudeCropCandidate:
+	"""A cheaply prepared crop awaiting amplitude preprocessing."""
+
+	request: CropRequest
+	raw_crop: np.ndarray
+	local_valid_mask: np.ndarray
+	valid_fraction: float
+
+
 def zero_mask_margin_xyz(config: ZeroMaskConfig) -> XYZ:
 	"""Return the halo margin needed for zero-mask preprocessing."""
 	if not isinstance(config, ZeroMaskConfig):
@@ -124,7 +134,28 @@ def read_amplitude_crop(  # noqa: PLR0913
 	settings: AmplitudePreprocessSettings,
 ) -> PreparedAmplitudeCrop:
 	"""Read and preprocess one amplitude crop in `[1, X, Y, Z]` format."""
-	patch = _validate_positive_xyz(patch_size_xyz, 'patch_size_xyz')
+	candidate = read_amplitude_crop_candidate(
+		request=request,
+		amplitude_path=amplitude_path,
+		store=store,
+		settings=settings,
+	)
+	return finalize_amplitude_crop(
+		candidate=candidate,
+		stats=stats,
+		patch_size_xyz=patch_size_xyz,
+		settings=settings,
+	)
+
+
+def read_amplitude_crop_candidate(
+	*,
+	request: CropRequest,
+	amplitude_path: Path,
+	store: NpyMemmapVolumeStore,
+	settings: AmplitudePreprocessSettings,
+) -> AmplitudeCropCandidate:
+	"""Read a crop and compute validity without amplitude transformations."""
 	_validate_settings(settings)
 	margin_xyz = zero_mask_margin_xyz(settings.zero_mask)
 	compute_request, payload_slices = expand_request_with_margin(request, margin_xyz)
@@ -146,7 +177,29 @@ def read_amplitude_crop(  # noqa: PLR0913
 		local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
 	else:
 		local_valid_mask = source_valid_mask
-	work_buffer = np.array(raw_crop, dtype=np.float32, copy=True)
+	local_valid_mask = local_valid_mask.astype(bool, copy=False)
+	return AmplitudeCropCandidate(
+		request=request,
+		raw_crop=raw_crop,
+		local_valid_mask=local_valid_mask,
+		valid_fraction=float(np.mean(local_valid_mask)),
+	)
+
+
+def finalize_amplitude_crop(
+	*,
+	candidate: AmplitudeCropCandidate,
+	stats: SurveyNormalizationStats,
+	patch_size_xyz: Sequence[int],
+	settings: AmplitudePreprocessSettings,
+) -> PreparedAmplitudeCrop:
+	"""Apply expensive amplitude transforms to a previously read candidate."""
+	if not isinstance(candidate, AmplitudeCropCandidate):
+		msg = f'candidate must be an AmplitudeCropCandidate; got {candidate!r}'
+		raise TypeError(msg)
+	patch = _validate_positive_xyz(patch_size_xyz, 'patch_size_xyz')
+	_validate_settings(settings)
+	work_buffer = np.array(candidate.raw_crop, dtype=np.float32, copy=True)
 	amplitude_norm = _normalize_amplitude_inplace(
 		work_buffer,
 		stats,
@@ -157,25 +210,25 @@ def read_amplitude_crop(  # noqa: PLR0913
 	if settings.amplitude_agc.enabled:
 		amplitude_model = apply_configured_agc(
 			amplitude_norm,
-			local_valid_mask,
+			candidate.local_valid_mask,
 			settings.amplitude_agc,
 		)
 	else:
 		amplitude_model = amplitude_norm
 	if settings.finite_check_mode == 'strict' and settings.amplitude_agc.enabled:
 		_validate_finite_array(amplitude_model, 'AGC amplitude')
-	amplitude_model[~local_valid_mask] = 0.0
+	amplitude_model[~candidate.local_valid_mask] = 0.0
 	if settings.finite_check_mode == 'output_only':
 		_validate_finite_array(amplitude_model, 'preprocessed amplitude')
 	token_valid_mask = reduce_valid_mask_to_tokens(
-		local_valid_mask,
+		candidate.local_valid_mask,
 		patch_size_xyz=patch,
 		min_valid_fraction=settings.min_token_valid_fraction,
 	)
 	return PreparedAmplitudeCrop(
-		request=request,
+		request=candidate.request,
 		x=amplitude_model[np.newaxis, ...].astype(np.float32, copy=False),
-		local_valid_mask=local_valid_mask.astype(bool, copy=False),
+		local_valid_mask=candidate.local_valid_mask,
 		token_valid_mask=token_valid_mask,
 	)
 
@@ -274,10 +327,13 @@ def _validate_positive_finite_float(value: object, name: str) -> float:
 
 
 __all__ = [
+	'AmplitudeCropCandidate',
 	'AmplitudePreprocessSettings',
 	'FiniteCheckMode',
 	'PreparedAmplitudeCrop',
+	'finalize_amplitude_crop',
 	'read_amplitude_crop',
+	'read_amplitude_crop_candidate',
 	'reduce_valid_mask_to_tokens',
 	'resolve_manifest_path',
 	'zero_mask_margin_xyz',

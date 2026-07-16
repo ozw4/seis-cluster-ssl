@@ -1,17 +1,24 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.data.amplitude_crop_dataset as crop_dataset_module
+import seis_ssl_cluster.data.window_preprocessing as preprocessing_module
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
+	AmplitudeAgcConfig,
 	AmplitudeVolumeRecord,
+	CropRequest,
 	NopimsAmplitudeCropDataset,
+	NopimsAmplitudePretrainDataset,
 	NoTargetProvider,
 	SurveyManifest,
 	SurveyNormalizationStats,
+	ZeroMaskConfig,
 	write_normalization_stats,
 )
 
@@ -149,6 +156,80 @@ def test_min_valid_fraction_retries_then_raises(tmp_path: Path) -> None:
 		match=r'min_valid_fraction=1\.000000.*last local valid fraction was 0\.000000',
 	):
 		dataset[0]
+
+
+def test_crop_dataset_skips_expensive_preprocessing_for_rejected_crop(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	volume = np.ones((8, 4, 4), dtype=np.float32)
+	volume[:4] = 0.0
+	dataset = _dataset(
+		tmp_path,
+		volume,
+		zero_mask=ZeroMaskConfig(
+			z_sample_influence_radius=0,
+			xy_trace_influence_radius=0,
+		),
+		min_valid_fraction=1.0,
+		max_resample_attempts=2,
+		amplitude_agc=AmplitudeAgcConfig(
+			enabled=True,
+			mode='trace_rms_z',
+			window_z=3,
+			eps=1.0e-6,
+			clip_abs=2.0,
+		),
+	)
+	sampler = Mock(
+		side_effect=[
+			CropRequest('survey', (0, 0, 0), (4, 4, 4)),
+			CropRequest('survey', (4, 0, 0), (4, 4, 4)),
+		],
+	)
+	normalize = Mock(
+		wraps=preprocessing_module._normalize_amplitude_inplace,  # noqa: SLF001
+	)
+	agc = Mock(wraps=preprocessing_module.apply_configured_agc)
+	monkeypatch.setattr(
+		crop_dataset_module,
+		'sample_random_token_aligned_local_crop',
+		sampler,
+	)
+	monkeypatch.setattr(preprocessing_module, '_normalize_amplitude_inplace', normalize)
+	monkeypatch.setattr(preprocessing_module, 'apply_configured_agc', agc)
+
+	sample = dataset[0]
+
+	assert sample['coords']['local_start_xyz'] == (4, 0, 0)
+	assert sampler.call_count == 2
+	assert normalize.call_count == 1
+	assert agc.call_count == 1
+
+
+def test_crop_and_pretrain_datasets_share_amplitude_preprocessing(
+	tmp_path: Path,
+) -> None:
+	volume = np.arange(4 * 4 * 4, dtype=np.float32).reshape((4, 4, 4))
+	manifest = _manifest(tmp_path, volume=volume)
+	shared = {
+		'local_crop_size_xyz': (4, 4, 4),
+		'patch_size_xyz': (2, 2, 2),
+		'zero_mask': ZeroMaskConfig(enabled=False),
+		'normalized_clip_abs': 3.0,
+	}
+	crop_dataset = NopimsAmplitudeCropDataset([manifest], **shared)
+	pretrain_dataset = NopimsAmplitudePretrainDataset([manifest], **shared)
+
+	crop_sample = crop_dataset[0]
+	pretrain_sample = pretrain_dataset[0]
+
+	np.testing.assert_array_equal(crop_sample['x'], pretrain_sample['x'])
+	np.testing.assert_array_equal(
+		crop_sample['local_valid_mask'],
+		pretrain_sample['local_valid_mask'],
+	)
+	assert crop_sample['coords'] == pretrain_sample['coords']
 
 
 def test_missing_amplitude_file_raises(tmp_path: Path) -> None:
