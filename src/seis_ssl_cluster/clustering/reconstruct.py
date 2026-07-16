@@ -34,11 +34,16 @@ def reconstruct_voxel_labels(
 	patch_size_xyz: Sequence[int],
 	volume_shape_xyz: Sequence[int],
 	output_path: str | Path | None = None,
+	token_axis_chunk_size: int = 16,
 ) -> np.ndarray:
 	"""Nearest-neighbor upsample token labels to the clipped voxel grid."""
 	labels = _validate_token_labels(token_labels)
 	patch = _validate_positive_xyz(patch_size_xyz, 'patch_size_xyz')
 	volume_shape = _validate_positive_xyz(volume_shape_xyz, 'volume_shape_xyz')
+	chunk_size = _validate_positive_int(
+		token_axis_chunk_size,
+		'token_axis_chunk_size',
+	)
 	padded_shape = cast(
 		'XYZ',
 		tuple(
@@ -75,18 +80,27 @@ def reconstruct_voxel_labels(
 			for volume_axis, patch_axis in zip(volume_shape, patch, strict=True)
 		),
 	)
-	for token_x in range(token_limits[0]):
-		x_start = token_x * patch[0]
-		x_stop = min(x_start + patch[0], volume_shape[0])
-		for token_y in range(token_limits[1]):
-			y_start = token_y * patch[1]
-			y_stop = min(y_start + patch[1], volume_shape[1])
-			for token_z in range(token_limits[2]):
-				z_start = token_z * patch[2]
-				z_stop = min(z_start + patch[2], volume_shape[2])
-				voxels[x_start:x_stop, y_start:y_stop, z_start:z_stop] = np.int32(
-					labels[token_x, token_y, token_z],
-				)
+	for token_x_start in range(0, token_limits[0], chunk_size):
+		token_x_stop = min(token_x_start + chunk_size, token_limits[0])
+		slab = labels[
+			token_x_start:token_x_stop,
+			: token_limits[1],
+			: token_limits[2],
+		]
+		expanded_shape = tuple(
+			slab.shape[axis] * patch[axis] for axis in range(3)
+		)
+		slab = np.broadcast_to(
+			slab[..., np.newaxis, np.newaxis, np.newaxis],
+			(*slab.shape, *patch),
+		).transpose(0, 3, 1, 4, 2, 5).reshape(expanded_shape)
+		voxel_x_start = token_x_start * patch[0]
+		voxel_x_stop = min(token_x_stop * patch[0], volume_shape[0])
+		voxels[voxel_x_start:voxel_x_stop] = slab[
+			: voxel_x_stop - voxel_x_start,
+			: volume_shape[1],
+			: volume_shape[2],
+		]
 	if hasattr(voxels, 'flush'):
 		voxels.flush()
 	return voxels
@@ -241,6 +255,17 @@ def _validate_positive_xyz(value: Sequence[int], name: str) -> XYZ:
 
 def _min_token_count(volume_axis: int, patch_axis: int) -> int:
 	return (volume_axis + patch_axis - 1) // patch_axis
+
+
+def _validate_positive_int(value: int, name: str) -> int:
+	if isinstance(value, bool) or not isinstance(value, Integral):
+		msg = f'{name} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	integer = int(value)
+	if integer <= 0:
+		msg = f'{name} must be positive; got {integer!r}'
+		raise ValueError(msg)
+	return integer
 
 
 __all__ = [

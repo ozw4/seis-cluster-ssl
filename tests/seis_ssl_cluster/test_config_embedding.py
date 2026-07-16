@@ -77,6 +77,24 @@ def test_embedding_config_accepts_preprocessing_cache_policy() -> None:
 	assert resolved['embedding']['preprocessing_cache']['mode'] == 'memmap'
 
 
+def test_embedding_config_accepts_average_chunk_size() -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embedding']['average_chunk_size_x'] = 7
+
+	resolved = resolve_embedding_extraction_config(cfg)
+
+	assert resolved['embedding']['average_chunk_size_x'] == 7
+
+
+@pytest.mark.parametrize('value', [0, -1, True, 1.5])
+def test_embedding_config_rejects_invalid_average_chunk_size(value: object) -> None:
+	cfg = _minimal_embedding_config()
+	cfg['embedding']['average_chunk_size_x'] = value
+
+	with pytest.raises((TypeError, ValueError), match='average_chunk_size_x'):
+		resolve_embedding_extraction_config(cfg)
+
+
 @pytest.mark.parametrize(
 	('key', 'value'),
 	[

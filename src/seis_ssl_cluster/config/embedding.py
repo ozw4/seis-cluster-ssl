@@ -79,6 +79,12 @@ def resolve_embedding_extraction_config(config: _T) -> Config:
 	)
 	_validate_overlap_less_than_window(overlap, window_size)
 	_validate_embedding_output_dtype(embedding)
+	if 'average_chunk_size_x' in embedding:
+		_validate_positive_int(
+			embedding,
+			'average_chunk_size_x',
+			prefix='embedding',
+		)
 	_validate_positive_int(embedding, 'batch_size', prefix='embedding')
 	if 'prefetch_queue_depth' in embedding:
 		_validate_nonnegative_int(

@@ -369,6 +369,22 @@ def test_preprocessing_cache_fingerprint_tracks_source_and_config(
 	assert changed_source != initial
 
 
+def test_extraction_settings_resolve_average_chunk_size(tmp_path: Path) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['average_chunk_size_x'] = 3
+	payload = load_checkpoint(
+		Path(config['embeddings']['checkpoint']),
+		map_location='cpu',
+	)
+
+	settings = extractor_module.extraction_settings_from_config(
+		config,
+		checkpoint_config=payload['config'],
+	)
+
+	assert settings.average_chunk_size_x == 3
+
+
 @pytest.mark.parametrize(
 	('batch_size', 'prefetch_queue_depth'),
 	[(1, 0), (2, 1), (5, 3)],

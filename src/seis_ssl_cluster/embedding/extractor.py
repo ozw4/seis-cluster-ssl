@@ -134,6 +134,7 @@ class EmbeddingExtractionSettings:
 	window_size_xyz: XYZ
 	overlap_xyz: XYZ
 	output_dtype: np.dtype
+	average_chunk_size_x: int
 	batch_size: int
 	prefetch_queue_depth: int
 	amp: bool
@@ -277,6 +278,10 @@ def extraction_settings_from_config(
 		window_size_xyz=window_size,
 		overlap_xyz=overlap,
 		output_dtype=output_dtype,
+		average_chunk_size_x=_positive_int(
+			embedding.get('average_chunk_size_x', 16),
+			'embedding.average_chunk_size_x',
+		),
 		batch_size=_positive_int(
 			embedding.get('batch_size'),
 			'embedding.batch_size',
@@ -460,6 +465,7 @@ def extract_survey_embeddings(  # noqa: PLR0913
 			embedding_path=paths.embeddings_tmp,
 			valid_tokens_path=paths.valid_tokens_tmp,
 			output_dtype=settings.output_dtype,
+			chunk_size_x=settings.average_chunk_size_x,
 		)
 	commit_staged_outputs(paths, metadata)
 	cleanup_temp_outputs(paths)

@@ -97,24 +97,39 @@ class EmbeddingMerger:
 		target = cast('tuple[slice, slice, slice]', target_slices)
 		source = cast('tuple[slice, slice, slice]', source_slices)
 		valid_source = valid[source]
-		self.sums[target] += embeddings[source] * valid_source[..., np.newaxis]
-		self.counts[target] += valid_source.astype(np.uint32, copy=False)
+		target_sums = self.sums[target]
+		target_counts = self.counts[target]
+		if valid_source.all():
+			np.add(target_sums, embeddings[source], out=target_sums)
+			np.add(target_counts, 1, out=target_counts)
+		else:
+			np.add(
+				target_sums,
+				embeddings[source],
+				out=target_sums,
+				where=valid_source[..., np.newaxis],
+			)
+			np.add(target_counts, 1, out=target_counts, where=valid_source)
 
 	def finalize(
 		self,
 		*,
 		output_dtype: np.dtype | str = np.float16,
+		chunk_size_x: int = 16,
 	) -> tuple[np.ndarray, np.ndarray]:
 		"""Return averaged embeddings and the derived valid-token mask."""
 		dtype = np.dtype(output_dtype)
-		valid = self.counts > 0
+		chunk_size = _validate_positive_int(chunk_size_x, 'chunk_size_x')
+		valid = np.empty(self.token_grid_shape_xyz, dtype=np.bool_)
 		embeddings = np.zeros(
 			(*self.token_grid_shape_xyz, self.embedding_dim),
 			dtype=dtype,
 		)
-		with np.errstate(divide='ignore', invalid='ignore'):
-			averaged = self.sums / np.maximum(self.counts[..., np.newaxis], 1)
-		embeddings[valid] = averaged[valid].astype(dtype, copy=False)
+		self._average_chunks(
+			embeddings,
+			valid,
+			chunk_size_x=chunk_size,
+		)
 		return embeddings, valid
 
 	def write_average(
@@ -123,9 +138,11 @@ class EmbeddingMerger:
 		embedding_path: Path,
 		valid_tokens_path: Path,
 		output_dtype: np.dtype | str,
+		chunk_size_x: int = 16,
 	) -> None:
 		"""Write averaged embeddings and valid mask as `.npy` memmaps."""
 		dtype = np.dtype(output_dtype)
+		chunk_size = _validate_positive_int(chunk_size_x, 'chunk_size_x')
 		embedding_path.parent.mkdir(parents=True, exist_ok=True)
 		valid_tokens_path.parent.mkdir(parents=True, exist_ok=True)
 		embeddings = np.lib.format.open_memmap(
@@ -140,18 +157,37 @@ class EmbeddingMerger:
 			dtype=np.bool_,
 			shape=self.token_grid_shape_xyz,
 		)
-		for x_index in range(self.token_grid_shape_xyz[0]):
-			counts = self.counts[x_index]
-			valid = counts > 0
-			out = np.zeros(
-				(*self.token_grid_shape_xyz[1:], self.embedding_dim),
-				dtype=np.float32,
-			)
-			out[valid] = self.sums[x_index][valid] / counts[valid, np.newaxis]
-			embeddings[x_index] = out.astype(dtype, copy=False)
-			valid_tokens[x_index] = valid
+		embeddings[...] = 0
+		self._average_chunks(
+			embeddings,
+			valid_tokens,
+			chunk_size_x=chunk_size,
+		)
 		embeddings.flush()
 		valid_tokens.flush()
+
+	def _average_chunks(
+		self,
+		embeddings: np.ndarray,
+		valid_tokens: np.ndarray,
+		*,
+		chunk_size_x: int,
+	) -> None:
+		for x_start in range(0, self.token_grid_shape_xyz[0], chunk_size_x):
+			x_slice = slice(
+				x_start,
+				min(x_start + chunk_size_x, self.token_grid_shape_xyz[0]),
+			)
+			counts = self.counts[x_slice]
+			valid = counts > 0
+			valid_tokens[x_slice] = valid
+			with np.errstate(divide='ignore', invalid='ignore'):
+				np.divide(
+					self.sums[x_slice],
+					counts[..., np.newaxis],
+					out=embeddings[x_slice],
+					where=valid[..., np.newaxis],
+				)
 
 
 def _merge_slices(

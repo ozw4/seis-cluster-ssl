@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.clustering.reconstruct as reconstruct_module
 import seis_ssl_cluster.clustering.summaries as summaries_module
 from seis_ssl_cluster.clustering.reconstruct import (
 	reconstruct_labels_for_survey,
@@ -52,6 +53,122 @@ def test_token_labels_upsample_to_clipped_voxel_shape_and_keep_invalid(
 	assert voxels[0, 3, 0] == 1
 	assert voxels[2, 3, 0] == -1
 	np.testing.assert_array_equal(np.load(voxel_path), voxels)
+
+
+@pytest.mark.parametrize(
+	('patch_size', 'volume_shape'),
+	[
+		((1, 1, 1), (3, 4, 5)),
+		((2, 3, 1), (5, 10, 5)),
+		((3, 1, 4), (8, 4, 17)),
+	],
+)
+@pytest.mark.parametrize('label_dtype', [np.int8, np.uint8, np.int32, np.int64])
+@pytest.mark.parametrize('chunk_size', [1, 2, 8])
+def test_vectorized_voxel_reconstruction_matches_reference_loop(
+	tmp_path: Path,
+	patch_size: tuple[int, int, int],
+	volume_shape: tuple[int, int, int],
+	label_dtype: np.dtype,
+	chunk_size: int,
+) -> None:
+	token_shape = tuple(
+		(volume_axis + patch_axis - 1) // patch_axis
+		for volume_axis, patch_axis in zip(
+			volume_shape,
+			patch_size,
+			strict=True,
+		)
+	)
+	labels = (
+		np.arange(np.prod(token_shape), dtype=np.int64).reshape(token_shape) % 7 - 1
+	).astype(label_dtype)
+	reference = _reference_voxel_reconstruction(
+		labels,
+		patch_size=patch_size,
+		volume_shape=volume_shape,
+	)
+
+	in_memory = reconstruct_voxel_labels(
+		labels,
+		patch_size_xyz=patch_size,
+		volume_shape_xyz=volume_shape,
+		token_axis_chunk_size=chunk_size,
+	)
+	output_path = tmp_path / (
+		f'voxels-{patch_size}-{label_dtype}-{chunk_size}.npy'
+	)
+	memmap = reconstruct_voxel_labels(
+		labels,
+		patch_size_xyz=patch_size,
+		volume_shape_xyz=volume_shape,
+		output_path=output_path,
+		token_axis_chunk_size=chunk_size,
+	)
+
+	assert in_memory.dtype == np.dtype(np.int32)
+	assert memmap.dtype == np.dtype(np.int32)
+	np.testing.assert_array_equal(in_memory, reference)
+	np.testing.assert_array_equal(memmap, reference)
+	np.testing.assert_array_equal(np.load(output_path), reference)
+
+
+def test_voxel_reconstruction_rejects_invalid_chunk_size() -> None:
+	with pytest.raises(ValueError, match='token_axis_chunk_size must be positive'):
+		reconstruct_voxel_labels(
+			np.zeros((1, 1, 1), dtype=np.int32),
+			patch_size_xyz=(1, 1, 1),
+			volume_shape_xyz=(1, 1, 1),
+			token_axis_chunk_size=0,
+		)
+
+
+def test_voxel_reconstruction_temporary_is_token_chunk_bounded(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	labels = np.arange(7 * 2 * 2, dtype=np.int32).reshape(7, 2, 2)
+	original_broadcast_to = np.broadcast_to
+	broadcast_shapes: list[tuple[int, ...]] = []
+
+	def tracked_broadcast_to(
+		array: np.ndarray,
+		shape: tuple[int, ...],
+	) -> np.ndarray:
+		broadcast_shapes.append(shape)
+		return original_broadcast_to(array, shape)
+
+	monkeypatch.setattr(reconstruct_module.np, 'broadcast_to', tracked_broadcast_to)
+
+	reconstruct_voxel_labels(
+		labels,
+		patch_size_xyz=(3, 2, 4),
+		volume_shape_xyz=(20, 4, 8),
+		token_axis_chunk_size=2,
+	)
+
+	assert broadcast_shapes
+	assert all(shape[0] <= 2 for shape in broadcast_shapes)
+
+
+def _reference_voxel_reconstruction(
+	labels: np.ndarray,
+	*,
+	patch_size: tuple[int, int, int],
+	volume_shape: tuple[int, int, int],
+) -> np.ndarray:
+	output = np.empty(volume_shape, dtype=np.int32)
+	for x_index in range(labels.shape[0]):
+		for y_index in range(labels.shape[1]):
+			for z_index in range(labels.shape[2]):
+				x_start = x_index * patch_size[0]
+				y_start = y_index * patch_size[1]
+				z_start = z_index * patch_size[2]
+				output[
+					x_start : min(x_start + patch_size[0], volume_shape[0]),
+					y_start : min(y_start + patch_size[1], volume_shape[1]),
+					z_start : min(z_start + patch_size[2], volume_shape[2]),
+				] = labels[x_index, y_index, z_index]
+	return output
 
 
 def test_reconstruct_labels_for_survey_uses_embedding_metadata_shape(
