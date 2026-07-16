@@ -385,6 +385,8 @@ def test_resume_allows_legacy_checkpoint_without_runtime_train_options(
 		'stage_timing',
 	):
 		del checkpoint_train[key]
+	payload['training_state']['schema_version'] = 1
+	del payload['training_state']['resolved_precision']
 	legacy_path = tmp_path / 'legacy_runtime_options.pt'
 	torch.save(payload, legacy_path)
 	resume_cfg = deepcopy(cfg)

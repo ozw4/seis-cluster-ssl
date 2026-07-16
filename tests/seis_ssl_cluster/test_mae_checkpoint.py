@@ -100,7 +100,50 @@ def test_bfloat16_amp_checkpoint_does_not_require_scaler(tmp_path: Path) -> None
 	payload = load_checkpoint(result.latest_path, map_location='cpu')
 	assert payload['amp_enabled'] is True
 	assert payload['scaler_state_dict'] is None
+	assert payload['training_state']['schema_version'] == 2
 	assert payload['training_state']['resolved_precision'] == 'bfloat16'
+
+
+@pytest.mark.parametrize('amp_enabled', [False, True])
+def test_schema_v1_checkpoint_without_precision_resumes(
+	tmp_path: Path,
+	*,
+	amp_enabled: bool,
+) -> None:
+	model = torch.nn.Linear(1, 1)
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+	scaler = torch.amp.GradScaler('cpu') if amp_enabled else None
+	result = _save_mae_rolling_checkpoint(
+		tmp_path,
+		model=model,
+		optimizer=optimizer,
+		epoch=1,
+		config={'stage': 'train_amp_mae'},
+		metrics={'loss': 1.0},
+		global_step=1,
+		amp_enabled=amp_enabled,
+		scaler=scaler,
+		checkpoint_kind='epoch',
+		batch_index=None,
+	)
+	payload = load_checkpoint(result.latest_path, map_location='cpu')
+	payload['training_state']['schema_version'] = 1
+	payload['training_state'].pop('resolved_precision')
+	payload['rng_state']['dataloader_generator'] = torch.Generator().get_state()
+	resume_model = torch.nn.Linear(1, 1)
+	resume_optimizer = torch.optim.SGD(resume_model.parameters(), lr=0.1)
+
+	state = _restore_mae_checkpoint(
+		payload=payload,
+		model=resume_model,
+		optimizer=resume_optimizer,
+		scaler=scaler,
+		amp_enabled=amp_enabled,
+		scaler_required=amp_enabled,
+	)
+
+	assert state.start_epoch == 2
+	assert state.global_step == 1
 
 
 def test_auto_bfloat16_checkpoint_rejects_float16_resume_without_cuda(

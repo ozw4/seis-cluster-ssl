@@ -569,12 +569,14 @@ def test_prefetch_consumer_exception_stops_worker(
 	)
 
 
+@pytest.mark.parametrize('prefetch_queue_depth', [0, 1])
 def test_prefetch_pipeline_records_stages_and_uses_inference_mode(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
+	prefetch_queue_depth: int,
 ) -> None:
 	config = _write_fixture(tmp_path)
-	config['embedding']['prefetch_queue_depth'] = 1
+	config['embedding']['prefetch_queue_depth'] = prefetch_queue_depth
 	config['embedding']['stage_timing'] = True
 	inference_modes: list[bool] = []
 	original_encode_tokens = AmplitudeMAE3D.encode_tokens
@@ -598,14 +600,16 @@ def test_prefetch_pipeline_records_stages_and_uses_inference_mode(
 			encoding='utf-8',
 		),
 	)
-	assert set(timings['stages']) == {
+	expected_stages = {
 		'd2h',
 		'encode',
 		'h2d',
 		'merge_write',
-		'queue_wait',
 		'read_preprocess',
 	}
+	if prefetch_queue_depth > 0:
+		expected_stages.add('queue_wait')
+	assert set(timings['stages']) == expected_stages
 
 
 def test_embedding_auto_amp_queries_configured_indexed_cuda_device(

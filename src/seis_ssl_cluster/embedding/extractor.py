@@ -678,14 +678,7 @@ def _prefetch_batches(  # noqa: C901
 	timer: StageTimer,
 ) -> Iterator[_PreparedBatch]:
 	if queue_depth == 0:
-		iterator = iter(batches)
-		end = object()
-		while True:
-			with timer.stage('queue_wait'):
-				batch = next(iterator, end)
-			if batch is end:
-				return
-			yield cast('_PreparedBatch', batch)
+		yield from batches
 		return
 
 	batch_queue: queue.Queue[object] = queue.Queue(maxsize=queue_depth)
