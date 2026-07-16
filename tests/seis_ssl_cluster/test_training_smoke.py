@@ -204,6 +204,59 @@ def test_resume_advances_global_step(tmp_path: Path) -> None:
 	assert payload['training_state']['checkpoint_kind'] == 'epoch'
 
 
+def test_resume_refreshes_runtime_metadata_for_allowed_overrides(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	cfg['train'].update(
+		{
+			'amp': True,
+			'max_steps': 1,
+			'num_workers': 1,
+			'persistent_workers': True,
+			'prefetch_factor': 2,
+		},
+	)
+	checkpoint_path = run_mae_pretraining(cfg)
+	output_root = _path_like(cfg['paths']['output_root'])
+
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['train'].update(
+		{
+			'amp_dtype': 'float16',
+			'max_steps': 2,
+			'persistent_workers': False,
+			'prefetch_factor': 4,
+		},
+	)
+	run_mae_pretraining(resume_cfg, resume=checkpoint_path)
+
+	run_metadata = json.loads(
+		(output_root / 'run_metadata.json').read_text(encoding='utf-8'),
+	)
+	assert run_metadata['precision'] == {
+		'amp_requested': True,
+		'amp_dtype_requested': 'float16',
+		'resolved_dtype': 'float32',
+		'amp_enabled': False,
+		'grad_scaler_enabled': False,
+	}
+	assert run_metadata['data_loading'] == {
+		'num_workers': 1,
+		'pin_memory': False,
+		'pin_memory_device': '',
+		'prefetch_factor': 4,
+		'persistent_workers': False,
+		'non_blocking_h2d': False,
+	}
+	resolved_config = json.loads(
+		(output_root / 'resolved_config.json').read_text(encoding='utf-8'),
+	)
+	assert resolved_config['train']['amp_dtype'] == 'auto'
+	assert resolved_config['train']['prefetch_factor'] == 2
+	assert resolved_config['train']['persistent_workers'] is True
+
+
 @pytest.mark.parametrize(
 	'checkpoint_name',
 	['latest.pt', 'best.pt', 'mae_epoch_0001.pt'],

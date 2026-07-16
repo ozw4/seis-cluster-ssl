@@ -402,14 +402,15 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		if precision.scaler_enabled
 		else None
 	)
+	runtime_metadata = _mae_runtime_metadata(
+		precision=precision,
+		dataloader=dataloader,
+		device=device,
+	)
 	_snapshot_run_inputs(
 		output_root=output_root,
 		config=config,
-		runtime_metadata=_mae_runtime_metadata(
-			precision=precision,
-			dataloader=dataloader,
-			device=device,
-		),
+		runtime_metadata=runtime_metadata,
 		overwrite=allow_overwrite_output and resume is None,
 	)
 
@@ -441,6 +442,12 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			config=config,
 		)
 		_restore_dataloader_generator_state(payload=payload, dataloader=dataloader)
+		_write_run_metadata(
+			output_root=output_root,
+			config=config,
+			runtime_metadata=runtime_metadata,
+			overwrite=True,
+		)
 		if resume_state.skip_batches >= len(dataloader):
 			resume_state = ResumeState(
 				start_epoch=resume_state.start_epoch + 1,
@@ -655,6 +662,21 @@ def _snapshot_run_inputs(
 	inputs_dir = output_root / 'inputs'
 	inputs_dir.mkdir(parents=True, exist_ok=True)
 	_copy_snapshot(path_list, inputs_dir / path_list.name, overwrite=overwrite)
+	_write_run_metadata(
+		output_root=output_root,
+		config=config,
+		runtime_metadata=runtime_metadata,
+		overwrite=overwrite,
+	)
+
+
+def _write_run_metadata(
+	*,
+	output_root: Path,
+	config: Mapping[str, object],
+	runtime_metadata: Mapping[str, object],
+	overwrite: bool,
+) -> None:
 	_write_json_snapshot(
 		output_root / 'run_metadata.json',
 		{
