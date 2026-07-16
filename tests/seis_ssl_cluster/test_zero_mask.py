@@ -110,6 +110,37 @@ def test_vectorized_dilation_matches_reference(radius: int) -> None:
 	)
 
 
+def test_dilation_caps_large_radius_before_padding(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	original_pad = np.pad
+	observed_pad_widths: list[list[tuple[int, int]]] = []
+
+	def guarded_pad(
+		array: np.ndarray,
+		pad_width: list[tuple[int, int]],
+		**kwargs: object,
+	) -> np.ndarray:
+		for axis, (before, after) in enumerate(pad_width):
+			maximum_meaningful_radius = max(0, array.shape[axis] - 1)
+			assert before <= maximum_meaningful_radius
+			assert after <= maximum_meaningful_radius
+		observed_pad_widths.append(pad_width)
+		return original_pad(array, pad_width, **kwargs)
+
+	monkeypatch.setattr(zero_mask_module.np, 'pad', guarded_pad)
+	zero_z = np.asarray([False, True, False], dtype=bool)
+
+	result = dilate_zero_sample_mask(
+		zero_z,
+		(2, 2, 3),
+		radius_z=10**9,
+	)
+
+	assert observed_pad_widths == [[(2, 2)]]
+	assert result.all()
+
+
 def test_combined_zero_mask_prepares_amplitude_once(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:

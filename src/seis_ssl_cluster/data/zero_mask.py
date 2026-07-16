@@ -214,11 +214,18 @@ def _dilate_boolean_axis(
 	*,
 	axis: int,
 ) -> np.ndarray:
-	if radius == 0:
-		return np.asarray(mask, dtype=bool)
-	pad_width = [(0, 0)] * mask.ndim
-	pad_width[axis] = (radius, radius)
-	padded = np.pad(mask, pad_width, mode='constant', constant_values=False)
+	boolean_mask = np.asarray(mask, dtype=bool)
+	effective_radius = min(radius, max(0, boolean_mask.shape[axis] - 1))
+	if effective_radius == 0:
+		return boolean_mask
+	pad_width = [(0, 0)] * boolean_mask.ndim
+	pad_width[axis] = (effective_radius, effective_radius)
+	padded = np.pad(
+		boolean_mask,
+		pad_width,
+		mode='constant',
+		constant_values=False,
+	)
 	cumulative = np.cumsum(padded, axis=axis, dtype=np.int32)
 	zero_shape = list(cumulative.shape)
 	zero_shape[axis] = 1
@@ -226,9 +233,9 @@ def _dilate_boolean_axis(
 		(np.zeros(zero_shape, dtype=np.int32), cumulative),
 		axis=axis,
 	)
-	window = 2 * radius + 1
-	upper = [slice(None)] * mask.ndim
-	lower = [slice(None)] * mask.ndim
+	window = 2 * effective_radius + 1
+	upper = [slice(None)] * boolean_mask.ndim
+	lower = [slice(None)] * boolean_mask.ndim
 	upper[axis] = slice(window, None)
 	lower[axis] = slice(None, -window)
 	return (cumulative[tuple(upper)] - cumulative[tuple(lower)]) > 0

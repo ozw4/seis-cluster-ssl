@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -70,8 +71,13 @@ def build_parser() -> argparse.ArgumentParser:
 def run_benchmarks(*, seed: int, warm_up: int, repeat: int) -> dict[str, object]:
 	"""Run every synthetic case and return a JSON-compatible report."""
 	_validate_counts(warm_up=warm_up, repeat=repeat)
-	with tempfile.TemporaryDirectory(prefix='seis_ssl_cluster_benchmark_') as temp_dir:
-		cases = _build_cases(seed, Path(temp_dir))
+	with (
+		tempfile.TemporaryDirectory(
+			prefix='seis_ssl_cluster_benchmark_',
+		) as temp_dir,
+		ExitStack() as resources,
+	):
+		cases = _build_cases(seed, Path(temp_dir), resources)
 		case_results = [
 			_benchmark_case(case, warm_up=warm_up, repeat=repeat) for case in cases
 		]
@@ -106,7 +112,11 @@ def main(argv: Sequence[str] | None = None) -> None:
 	print(f'benchmark JSON: {output_path}')
 
 
-def _build_cases(seed: int, temp_dir: Path) -> tuple[BenchmarkCase, ...]:
+def _build_cases(
+	seed: int,
+	temp_dir: Path,
+	resources: ExitStack,
+) -> tuple[BenchmarkCase, ...]:
 	seed_sequences = np.random.SeedSequence(seed).spawn(6)
 	case_seeds = tuple(int(item.generate_state(1)[0]) for item in seed_sequences)
 	volume_path = temp_dir / 'synthetic_amplitude.npy'
@@ -115,17 +125,25 @@ def _build_cases(seed: int, temp_dir: Path) -> tuple[BenchmarkCase, ...]:
 	np.save(volume_path, volume)
 	del volume
 	return (
-		_memmap_case(volume_path),
+		_memmap_case(
+			volume_path,
+			resources.enter_context(NpyMemmapVolumeStore()),
+		),
 		_spatial_mask_case(case_seeds[1]),
-		_amplitude_preprocessing_case(volume_path),
+		_amplitude_preprocessing_case(
+			volume_path,
+			resources.enter_context(NpyMemmapVolumeStore()),
+		),
 		_position_visible_case(case_seeds[3]),
 		_embedding_merge_case(case_seeds[4]),
 		_residualization_case(case_seeds[5]),
 	)
 
 
-def _memmap_case(volume_path: Path) -> BenchmarkCase:
-	store = NpyMemmapVolumeStore()
+def _memmap_case(
+	volume_path: Path,
+	store: NpyMemmapVolumeStore,
+) -> BenchmarkCase:
 	starts = ((0, 0, 0), (8, 8, 8), (16, 16, 16), (24, 24, 24))
 
 	def run() -> float:
@@ -166,7 +184,10 @@ def _spatial_mask_case(seed: int) -> BenchmarkCase:
 	)
 
 
-def _amplitude_preprocessing_case(volume_path: Path) -> BenchmarkCase:
+def _amplitude_preprocessing_case(
+	volume_path: Path,
+	store: NpyMemmapVolumeStore,
+) -> BenchmarkCase:
 	settings = AmplitudePreprocessSettings(
 		zero_mask=ZeroMaskConfig(enabled=False),
 		normalized_clip_abs=8.0,
@@ -195,8 +216,6 @@ def _amplitude_preprocessing_case(volume_path: Path) -> BenchmarkCase:
 		start_xyz=(16, 16, 16),
 		size_xyz=VOXEL_SHAPE,
 	)
-	store = NpyMemmapVolumeStore()
-
 	def run() -> object:
 		return read_amplitude_crop(
 			request=request,

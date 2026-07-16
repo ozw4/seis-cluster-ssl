@@ -84,3 +84,57 @@ def test_zero_samples_and_empty_accumulator_are_strict_json() -> None:
 	payload = json.loads(accumulator.to_json())
 	assert payload['stages']['empty_batch']['sample_count'] == 0
 	assert payload['stages']['empty_batch']['seconds_per_sample'] is None
+
+
+@pytest.mark.parametrize('duration', [float('nan'), float('inf'), float('-inf')])
+def test_accumulator_rejects_nonfinite_durations(duration: float) -> None:
+	accumulator = StageTimingAccumulator()
+
+	with pytest.raises(ValueError, match='finite and nonnegative'):
+		accumulator.add('invalid', duration)
+
+	assert accumulator.to_dict() == {'stages': {}}
+
+
+def test_enter_synchronize_failure_does_not_corrupt_nested_paths() -> None:
+	synchronize_calls = 0
+
+	def synchronize() -> None:
+		nonlocal synchronize_calls
+		synchronize_calls += 1
+		if synchronize_calls == 1:
+			raise RuntimeError('synchronize failed')
+
+	timer = StageTimer(
+		enabled=True,
+		clock=_Clock([1.0, 2.0]),
+		synchronize=synchronize,
+	)
+
+	with pytest.raises(RuntimeError, match='synchronize failed'), timer.stage('failed'):
+		pass
+	with timer.stage('next'):
+		pass
+
+	assert set(timer.to_dict()['stages']) == {'next'}
+
+
+def test_enter_clock_failure_does_not_corrupt_nested_paths() -> None:
+	values = iter([1.0, 2.0])
+	clock_calls = 0
+
+	def clock() -> float:
+		nonlocal clock_calls
+		clock_calls += 1
+		if clock_calls == 1:
+			raise RuntimeError('clock failed')
+		return next(values)
+
+	timer = StageTimer(enabled=True, clock=clock)
+
+	with pytest.raises(RuntimeError, match='clock failed'), timer.stage('failed'):
+		pass
+	with timer.stage('next'):
+		pass
+
+	assert set(timer.to_dict()['stages']) == {'next'}

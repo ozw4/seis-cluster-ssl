@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -38,12 +39,16 @@ class StageTimingAccumulator:
 	) -> None:
 		"""Add one completed stage observation."""
 		_validate_stage_path(name)
-		if duration_seconds < 0.0:
-			msg = f'duration_seconds must be nonnegative; got {duration_seconds!r}'
+		duration = float(duration_seconds)
+		if not math.isfinite(duration) or duration < 0.0:
+			msg = (
+				'duration_seconds must be finite and nonnegative; '
+				f'got {duration_seconds!r}'
+			)
 			raise ValueError(msg)
 		_validate_sample_count(sample_count)
 		samples = self._stages.setdefault(name, _StageSamples())
-		samples.durations_seconds.append(float(duration_seconds))
+		samples.durations_seconds.append(duration)
 		samples.sample_count += sample_count
 		samples.failure_count += int(failed)
 
@@ -143,9 +148,9 @@ class _ActiveStage(AbstractContextManager[None]):
 	def __enter__(self) -> None:
 		stack = self._timer._stage_stack  # noqa: SLF001
 		self._path = '/'.join((*stack, self._name))
-		stack.append(self._name)
 		self._sync()
 		self._started_at = float(self._timer._clock())  # noqa: SLF001
+		stack.append(self._name)
 
 	def __exit__(
 		self,

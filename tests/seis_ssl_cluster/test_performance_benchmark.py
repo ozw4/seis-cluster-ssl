@@ -5,8 +5,13 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
+import tools.benchmark_seis_ssl_cluster as benchmark_module
+
 if TYPE_CHECKING:
 	from pathlib import Path
+	from types import TracebackType
+
+	import pytest
 
 
 def test_synthetic_benchmark_cli_writes_reproducible_case_contract(
@@ -54,3 +59,50 @@ def test_synthetic_benchmark_cli_writes_reproducible_case_contract(
 		assert case['p25_seconds'] >= 0.0
 		assert case['p75_seconds'] >= 0.0
 	assert first['environment']['device'] == 'cpu'
+
+
+def test_benchmark_resources_close_before_temporary_directory(
+	monkeypatch: pytest.MonkeyPatch,
+	tmp_path: Path,
+) -> None:
+	closed: list[str] = []
+
+	class TrackedTemporaryDirectory:
+		def __init__(self, *, prefix: str) -> None:
+			assert prefix
+
+		def __enter__(self) -> str:
+			return str(tmp_path)
+
+		def __exit__(
+			self,
+			exc_type: type[BaseException] | None,
+			exc_value: BaseException | None,
+			traceback: TracebackType | None,
+		) -> None:
+			assert closed == ['amplitude_store', 'memmap_store']
+
+	def build_cases(
+		seed: int,
+		temp_dir: Path,
+		resources: benchmark_module.ExitStack,
+	) -> tuple[benchmark_module.BenchmarkCase, ...]:
+		assert seed == 7
+		assert temp_dir == tmp_path
+		resources.callback(closed.append, 'memmap_store')
+		resources.callback(closed.append, 'amplitude_store')
+		return (
+			benchmark_module.BenchmarkCase(name='noop', shape={}, run=lambda: None),
+		)
+
+	monkeypatch.setattr(
+		benchmark_module.tempfile,
+		'TemporaryDirectory',
+		TrackedTemporaryDirectory,
+	)
+	monkeypatch.setattr(benchmark_module, '_build_cases', build_cases)
+	monkeypatch.setattr(benchmark_module, '_git_commit', lambda: None)
+
+	report = benchmark_module.run_benchmarks(seed=7, warm_up=0, repeat=1)
+
+	assert [case['name'] for case in report['cases']] == ['noop']
