@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import json
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pytest
@@ -46,7 +45,6 @@ def test_save_mae_debug_visualization_pngs_writes_xy_and_xz(
 	paths = save_mae_debug_visualization_pngs(
 		batch={
 			'x': target.clone(),
-			'target': target,
 			'spatial_mask': spatial_mask,
 			'local_valid_mask': local_valid_mask,
 			'coords': [
@@ -58,6 +56,7 @@ def test_save_mae_debug_visualization_pngs_writes_xy_and_xz(
 		},
 		model_output={
 			'pred_patches': pred_patches,
+			'target_patches': patchify_3d(target, (2, 2, 2)),
 			'token_grid_shape': (2, 2, 2),
 		},
 		patch_size_xyz=(2, 2, 2),
@@ -155,16 +154,23 @@ def test_mae_debug_patch_zscore_uses_oracle_denormalization(
 	target_patches = patchify_3d(target, (2, 2, 2))
 	mean = target_patches.mean(dim=-1, keepdim=True)
 	std = target_patches.std(dim=-1, keepdim=True, unbiased=False)
-	pred_norm = torch.where(valid_patches, (target_patches - mean) / std, torch.zeros_like(target_patches))
+	pred_norm = torch.where(
+		valid_patches,
+		(target_patches - mean) / std,
+		torch.zeros_like(target_patches),
+	)
 
 	paths = save_mae_debug_visualization_pngs(
 		batch={
 			'x': target.clone(),
-			'target': target,
 			'spatial_mask': torch.ones((1, 1, 1, 1), dtype=torch.bool),
 			'local_valid_mask': local_valid_mask,
 		},
-		model_output={'pred_patches': pred_norm, 'token_grid_shape': (1, 1, 1)},
+		model_output={
+			'pred_patches': pred_norm,
+			'target_patches': target_patches,
+			'token_grid_shape': (1, 1, 1),
+		},
 		patch_size_xyz=(2, 2, 2),
 		epoch=1,
 		global_step=1,

@@ -18,6 +18,7 @@ from seis_ssl_cluster.data import (
 	write_manifest_json,
 	write_normalization_stats,
 )
+from seis_ssl_cluster.models.mae.patching import patchify_3d
 from seis_ssl_cluster.training import (
 	load_checkpoint,
 	mae_collate_fn,
@@ -34,14 +35,15 @@ class _TinyAmpModel(torch.nn.Module):
 		self.weight = torch.nn.Parameter(torch.tensor(1.0))
 
 	def forward(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-		target = batch['target']
+		x = batch['x']
 		pred = self.weight * torch.ones(
-			(target.shape[0], 8, 1, 8),
-			dtype=target.dtype,
-			device=target.device,
+			(x.shape[0], 8, 1, 8),
+			dtype=x.dtype,
+			device=x.device,
 		)
 		return {
 			'pred_patches': pred,
+			'target_patches': patchify_3d(x, (2, 2, 2)).detach(),
 			'spatial_mask': batch['spatial_mask'],
 		}
 
@@ -563,7 +565,7 @@ def test_nonfinite_loss_reports_survey_and_coordinates(
 	assert payload['coords'][0]['survey_id'] == 'survey-a'
 	assert payload['valid_voxel_count'] == 64
 	assert payload['tensors']['x']['all_finite'] is True
-	assert payload['tensors']['target']['all_finite'] is True
+	assert payload['tensors']['target_patches']['all_finite'] is True
 	assert payload['tensors']['prediction']['all_finite'] is True
 	assert payload['tensors']['prediction']['shape'] == [1, 1, 4, 4, 4]
 	assert payload['losses']['loss'] == {
@@ -679,9 +681,7 @@ def _write_synthetic_manifest(root: Path) -> Path:
 def _mae_sample() -> dict[str, object]:
 	return {
 		'x': np.ones((1, 4, 4, 4), dtype=np.float32),
-		'target': np.ones((1, 4, 4, 4), dtype=np.float32),
 		'spatial_mask': np.ones((2, 2, 2), dtype=np.bool_),
-		'visible_spatial_mask': np.zeros((2, 2, 2), dtype=np.bool_),
 		'local_valid_mask': np.ones((4, 4, 4), dtype=np.bool_),
 		'coords': {
 			'survey_id': 'survey-a',

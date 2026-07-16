@@ -135,7 +135,8 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			output = model(cast('Mapping[str, torch.Tensor]', batch))
 			losses = mae_pretraining_loss(
 				pred_patches=_required_tensor(output, 'pred_patches'),
-				target=_required_tensor(batch, 'target'),
+				target_patches=_required_tensor(output, 'target_patches'),
+				x=_required_tensor(batch, 'x'),
 				spatial_mask=_required_tensor(batch, 'spatial_mask'),
 				local_valid_mask=_required_tensor(batch, 'local_valid_mask'),
 				patch_size_xyz=patch_size_xyz,
@@ -765,18 +766,15 @@ def _build_nonfinite_diagnostic(  # noqa: PLR0913
 		'losses': _summarize_loss_components(losses),
 		'tensors': {
 			'x': _summarize_tensor(batch.get('x')),
-			'target': _summarize_tensor(batch.get('target')),
+			'target_patches': _summarize_tensor(output.get('target_patches')),
 			'prediction': _summarize_prediction(
 				output.get('pred_patches'),
-				batch.get('target'),
+				batch.get('x'),
 				patch_size_xyz,
 			),
 			'pred_patches': _summarize_tensor(output.get('pred_patches')),
 			'local_valid_mask': _summarize_tensor(batch.get('local_valid_mask')),
 			'spatial_mask': _summarize_tensor(batch.get('spatial_mask')),
-			'visible_spatial_mask': _summarize_tensor(
-				batch.get('visible_spatial_mask'),
-			),
 		},
 		'valid_voxel_count': _valid_voxel_count(batch.get('local_valid_mask')),
 		'grad_norm': _summarize_tensor(grad_norm),
@@ -789,20 +787,20 @@ def _build_nonfinite_diagnostic(  # noqa: PLR0913
 
 def _summarize_prediction(
 	pred_patches: object,
-	target: object,
+	x: object,
 	patch_size_xyz: tuple[int, int, int],
 ) -> dict[str, object]:
 	if not isinstance(pred_patches, torch.Tensor):
 		return {'present': False, 'reason': 'pred_patches is not a tensor'}
-	if not isinstance(target, torch.Tensor):
-		return {'present': False, 'reason': 'target is not a tensor'}
-	if target.ndim != 5:
+	if not isinstance(x, torch.Tensor):
+		return {'present': False, 'reason': 'x is not a tensor'}
+	if x.ndim != 5:
 		return {
 			'present': False,
-			'reason': f'target shape is not [B, C, X, Y, Z]: {tuple(target.shape)!r}',
+			'reason': f'x shape is not [B, C, X, Y, Z]: {tuple(x.shape)!r}',
 		}
 
-	spatial_shape = tuple(int(dim) for dim in target.shape[2:])
+	spatial_shape = tuple(int(dim) for dim in x.shape[2:])
 	if any(
 		size % patch != 0
 		for size, patch in zip(spatial_shape, patch_size_xyz, strict=True)
@@ -810,7 +808,7 @@ def _summarize_prediction(
 		return {
 			'present': False,
 			'reason': (
-				'target spatial shape is not divisible by patch_size_xyz: '
+				'x spatial shape is not divisible by patch_size_xyz: '
 				f'{spatial_shape!r} vs {patch_size_xyz!r}'
 			),
 		}

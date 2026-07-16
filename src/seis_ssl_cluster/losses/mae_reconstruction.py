@@ -14,7 +14,7 @@ from seis_ssl_cluster.losses.target_normalization import (
 	TargetNormalizationMode,
 	normalize_target_patches,
 )
-from seis_ssl_cluster.models.mae.patching import patchify_3d
+from seis_ssl_cluster.models.mae.patching import compute_num_patches
 
 LossMode = Literal['huber', 'l1', 'mse']
 
@@ -22,7 +22,7 @@ LossMode = Literal['huber', 'l1', 'mse']
 def masked_patch_reconstruction_loss(  # noqa: PLR0913
 	*,
 	pred_patches: torch.Tensor,
-	target: torch.Tensor,
+	target_patches: torch.Tensor,
 	spatial_mask: torch.Tensor,
 	local_valid_mask: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
@@ -36,7 +36,7 @@ def masked_patch_reconstruction_loss(  # noqa: PLR0913
 	loss, _valid_voxels, _normalization_result, _patch_selection = (
 		_masked_reconstruction_loss_and_count(
 			pred_patches=pred_patches,
-			target=target,
+			target_patches=target_patches,
 			spatial_mask=spatial_mask,
 			local_valid_mask=local_valid_mask,
 			patch_size_xyz=patch_size_xyz,
@@ -52,7 +52,7 @@ def masked_patch_reconstruction_loss(  # noqa: PLR0913
 
 def reconstruction_target_patches_for_loss(  # noqa: PLR0913
 	*,
-	target: torch.Tensor,
+	target_patches: torch.Tensor,
 	pred_patches: torch.Tensor,
 	local_valid_mask: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
@@ -61,15 +61,15 @@ def reconstruction_target_patches_for_loss(  # noqa: PLR0913
 	target_normalization_min_std: float | None = None,
 ) -> PatchTargetNormalizationResult:
 	"""Return target patches as used by reconstruction loss."""
-	target_patches = _aligned_target_patches(pred_patches, target, patch_size_xyz)
+	target_patches = _aligned_target_patches(pred_patches, target_patches)
 	local_valid_patch_voxels = _local_valid_patch_voxels(
 		local_valid_mask=local_valid_mask,
 		pred_patches=pred_patches,
-		target=target,
+		spatial_mask=None,
 		patch_size_xyz=patch_size_xyz,
 	)
 	return normalize_target_patches(
-		target_patches.to(dtype=pred_patches.dtype),
+		target_patches.detach().to(dtype=pred_patches.dtype),
 		local_valid_patch_voxels,
 		mode=target_normalization_mode,
 		eps=target_normalization_eps,
@@ -80,7 +80,8 @@ def reconstruction_target_patches_for_loss(  # noqa: PLR0913
 def mae_pretraining_loss(  # noqa: PLR0913
 	*,
 	pred_patches: torch.Tensor,
-	target: torch.Tensor,
+	target_patches: torch.Tensor,
+	x: torch.Tensor,
 	spatial_mask: torch.Tensor,
 	local_valid_mask: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
@@ -112,7 +113,7 @@ def mae_pretraining_loss(  # noqa: PLR0913
 		patch_selection,
 	) = _reconstruction_loss_components(
 		pred_patches=pred_patches,
-		target=target,
+		target_patches=target_patches,
 		spatial_mask=spatial_mask,
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=patch_size_xyz,
@@ -133,7 +134,7 @@ def mae_pretraining_loss(  # noqa: PLR0913
 	else:
 		loss_gradient = gradient_loss_xyz(
 			pred_patches=pred_patches,
-			target=target,
+			target=x.detach(),
 			spatial_mask=spatial_mask,
 			local_valid_mask=local_valid_mask,
 			patch_size_xyz=patch_size_xyz,
@@ -157,7 +158,7 @@ def mae_pretraining_loss(  # noqa: PLR0913
 def _reconstruction_loss_components(  # noqa: PLR0913
 	*,
 	pred_patches: torch.Tensor,
-	target: torch.Tensor,
+	target_patches: torch.Tensor,
 	spatial_mask: torch.Tensor,
 	local_valid_mask: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
@@ -174,15 +175,20 @@ def _reconstruction_loss_components(  # noqa: PLR0913
 	PatchTargetNormalizationResult,
 	torch.Tensor,
 ]:
-	target_patches = _aligned_target_patches(pred_patches, target, patch_size_xyz)
+	target_patches = _aligned_target_patches(pred_patches, target_patches)
 	local_valid_patch_voxels = _local_valid_patch_voxels(
 		local_valid_mask=local_valid_mask,
 		pred_patches=pred_patches,
-		target=target,
+		spatial_mask=spatial_mask,
 		patch_size_xyz=patch_size_xyz,
 	)
 	_validate_spatial_mask(spatial_mask, pred_patches)
-	_validate_same_device(pred_patches, target, spatial_mask, local_valid_mask)
+	_validate_same_device(
+		pred_patches,
+		target_patches,
+		spatial_mask,
+		local_valid_mask,
+	)
 
 	spatial_patch_mask = (
 		spatial_mask.reshape(pred_patches.shape[0], pred_patches.shape[1])
@@ -200,7 +206,7 @@ def _reconstruction_loss_components(  # noqa: PLR0913
 		raise ValueError(msg)
 
 	normalization_result = normalize_target_patches(
-		target_patches.to(dtype=pred_patches.dtype),
+		target_patches.detach().to(dtype=pred_patches.dtype),
 		local_valid_patch_voxels,
 		mode=target_normalization_mode,
 		eps=target_normalization_eps,
@@ -233,7 +239,7 @@ def _reconstruction_loss_components(  # noqa: PLR0913
 def _masked_reconstruction_loss_and_count(  # noqa: PLR0913
 	*,
 	pred_patches: torch.Tensor,
-	target: torch.Tensor,
+	target_patches: torch.Tensor,
 	spatial_mask: torch.Tensor,
 	local_valid_mask: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
@@ -257,7 +263,7 @@ def _masked_reconstruction_loss_and_count(  # noqa: PLR0913
 		patch_selection,
 	) = _reconstruction_loss_components(
 		pred_patches=pred_patches,
-		target=target,
+		target_patches=target_patches,
 		spatial_mask=spatial_mask,
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=patch_size_xyz,
@@ -347,14 +353,12 @@ def _validate_target_normalization_mode(mode: TargetNormalizationMode) -> None:
 
 def _aligned_target_patches(
 	pred_patches: torch.Tensor,
-	target: torch.Tensor,
-	patch_size_xyz: tuple[int, int, int],
+	target_patches: torch.Tensor,
 ) -> torch.Tensor:
-	_validate_prediction_and_target(pred_patches, target)
-	target_patches = patchify_3d(target, patch_size_xyz)
+	_validate_prediction_and_target_patches(pred_patches, target_patches)
 	if target_patches.shape != pred_patches.shape:
 		msg = (
-			'patchified target must match pred_patches shape; '
+			'target_patches must match pred_patches shape; '
 			f'got {tuple(target_patches.shape)!r} and {tuple(pred_patches.shape)!r}'
 		)
 		raise ValueError(msg)
@@ -365,11 +369,15 @@ def _local_valid_patch_voxels(
 	*,
 	local_valid_mask: torch.Tensor,
 	pred_patches: torch.Tensor,
-	target: torch.Tensor,
+	spatial_mask: torch.Tensor | None,
 	patch_size_xyz: tuple[int, int, int],
 ) -> torch.Tensor:
-	_validate_local_valid_mask(local_valid_mask, target)
-	patch_voxels = patchify_3d(local_valid_mask.unsqueeze(1), patch_size_xyz)
+	patch_voxels = _reshape_local_valid_mask_to_patches(
+		local_valid_mask,
+		pred_patches,
+		spatial_mask,
+		patch_size_xyz,
+	)
 	expected_shape = (
 		pred_patches.shape[0],
 		pred_patches.shape[1],
@@ -383,6 +391,59 @@ def _local_valid_patch_voxels(
 		)
 		raise ValueError(msg)
 	return patch_voxels
+
+
+def _reshape_local_valid_mask_to_patches(
+	local_valid_mask: torch.Tensor,
+	pred_patches: torch.Tensor,
+	spatial_mask: torch.Tensor | None,
+	patch_size_xyz: tuple[int, int, int],
+) -> torch.Tensor:
+	if local_valid_mask.dtype != torch.bool:
+		msg = (
+			'local_valid_mask must have dtype torch.bool; '
+			f'got {local_valid_mask.dtype!r}'
+		)
+		raise TypeError(msg)
+	if local_valid_mask.ndim != 4:
+		msg = (
+			'local_valid_mask must have shape [B, X, Y, Z]; '
+			f'got {tuple(local_valid_mask.shape)!r}'
+		)
+		raise ValueError(msg)
+	px_size, py_size, pz_size = patch_size_xyz
+	batch_size, x_size, y_size, z_size = local_valid_mask.shape
+	token_grid_shape = compute_num_patches(
+		(int(x_size), int(y_size), int(z_size)),
+		patch_size_xyz,
+	)[:3]
+	if spatial_mask is not None and tuple(spatial_mask.shape[1:]) != token_grid_shape:
+		msg = (
+			'local_valid_mask patch grid must match spatial_mask; '
+			f'got {token_grid_shape!r} and {tuple(spatial_mask.shape[1:])!r}'
+		)
+		raise ValueError(msg)
+	if batch_size != pred_patches.shape[0]:
+		msg = (
+			'local_valid_mask batch dimension must match pred_patches; '
+			f'got {batch_size} and {pred_patches.shape[0]}'
+		)
+		raise ValueError(msg)
+	tx_size, ty_size, tz_size = token_grid_shape
+	return (
+		local_valid_mask.reshape(
+			batch_size,
+			tx_size,
+			px_size,
+			ty_size,
+			py_size,
+			tz_size,
+			pz_size,
+		)
+		.permute(0, 1, 3, 5, 2, 4, 6)
+		.contiguous()
+		.reshape(batch_size, tx_size * ty_size * tz_size, 1, -1)
+	)
 
 
 def _elementwise_loss(
@@ -409,9 +470,9 @@ def _elementwise_loss(
 	raise ValueError(msg)
 
 
-def _validate_prediction_and_target(
+def _validate_prediction_and_target_patches(
 	pred_patches: torch.Tensor,
-	target: torch.Tensor,
+	target_patches: torch.Tensor,
 ) -> None:
 	if pred_patches.ndim != 4:
 		msg = (
@@ -419,46 +480,23 @@ def _validate_prediction_and_target(
 			f'[B, N, 1, patch_volume]; got {tuple(pred_patches.shape)!r}'
 		)
 		raise ValueError(msg)
-	if target.ndim != 5:
+	if target_patches.ndim != 4:
 		msg = (
-			'target must be a 5D tensor with shape [B, 1, X, Y, Z]; '
-			f'got {tuple(target.shape)!r}'
+			'target_patches must be a 4D tensor with shape '
+			f'[B, N, 1, patch_volume]; got {tuple(target_patches.shape)!r}'
 		)
 		raise ValueError(msg)
-	if pred_patches.shape[2] != 1 or target.shape[1] != 1:
+	if pred_patches.shape[2] != 1 or target_patches.shape[2] != 1:
 		msg = (
 			'amplitude MAE losses require one channel; got '
-			f'pred_channels={pred_patches.shape[2]}, target_channels={target.shape[1]}'
+			f'pred_channels={pred_patches.shape[2]}, '
+			f'target_channels={target_patches.shape[2]}'
 		)
 		raise ValueError(msg)
-	if pred_patches.shape[0] != target.shape[0]:
+	if pred_patches.shape[0] != target_patches.shape[0]:
 		msg = (
-			'pred_patches and target batch dimensions must match; '
-			f'got {pred_patches.shape[0]} and {target.shape[0]}'
-		)
-		raise ValueError(msg)
-
-
-def _validate_local_valid_mask(
-	local_valid_mask: torch.Tensor,
-	target: torch.Tensor,
-) -> None:
-	if local_valid_mask.dtype != torch.bool:
-		msg = (
-			'local_valid_mask must have dtype torch.bool; '
-			f'got {local_valid_mask.dtype!r}'
-		)
-		raise TypeError(msg)
-	expected_shape = (
-		target.shape[0],
-		target.shape[2],
-		target.shape[3],
-		target.shape[4],
-	)
-	if tuple(local_valid_mask.shape) != expected_shape:
-		msg = (
-			f'local_valid_mask shape must be {expected_shape!r}; '
-			f'got {tuple(local_valid_mask.shape)!r}'
+			'pred_patches and target_patches batch dimensions must match; '
+			f'got {pred_patches.shape[0]} and {target_patches.shape[0]}'
 		)
 		raise ValueError(msg)
 

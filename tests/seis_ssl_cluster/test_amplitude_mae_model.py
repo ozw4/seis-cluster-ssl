@@ -5,8 +5,10 @@ from typing import TYPE_CHECKING
 
 import torch
 
+import seis_ssl_cluster.models.mae.model as mae_model_module
+from seis_ssl_cluster.losses import mae_pretraining_loss
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-from seis_ssl_cluster.models.mae.patching import compute_num_patches
+from seis_ssl_cluster.models.mae.patching import compute_num_patches, patchify_3d
 
 if TYPE_CHECKING:
 	import pytest
@@ -32,16 +34,22 @@ def _make_batch(batch_size: int = 2) -> dict[str, torch.Tensor]:
 	return {
 		'x': x,
 		'spatial_mask': spatial_mask,
-		'visible_spatial_mask': ~spatial_mask,
 	}
 
 
 def test_forward_pass_returns_single_channel_patch_predictions() -> None:
 	model = _make_model()
+	batch = _make_batch()
 
-	out = model(_make_batch())
+	out = model(batch)
 
 	assert out['pred_patches'].shape == (2, 64, 1, 64)
+	assert out['target_patches'].shape == (2, 64, 1, 64)
+	assert not out['target_patches'].requires_grad
+	torch.testing.assert_close(
+		out['target_patches'],
+		patchify_3d(batch['x'], model.patch_size_xyz),
+	)
 	assert out['encoded_visible_tokens'].shape == (2, 62, 32)
 	assert out['spatial_mask'].shape == (2, 4, 4, 4)
 	assert out['token_grid_shape'] == (4, 4, 4)
@@ -125,9 +133,78 @@ def test_gradients_flow_from_pred_patches_sum() -> None:
 	assert model.patch_projection.weight.grad is not None
 
 
+def test_training_path_patchifies_input_once(monkeypatch: pytest.MonkeyPatch) -> None:
+	model = _make_model()
+	batch = _make_batch(batch_size=1)
+	patchify = mae_model_module.patchify_3d
+	call_count = 0
+
+	def counted_patchify(
+		x: torch.Tensor,
+		patch_size_xyz: tuple[int, int, int],
+	) -> torch.Tensor:
+		nonlocal call_count
+		call_count += 1
+		return patchify(x, patch_size_xyz)
+
+	monkeypatch.setattr(mae_model_module, 'patchify_3d', counted_patchify)
+	output = model(batch)
+	mae_pretraining_loss(
+		pred_patches=output['pred_patches'],
+		target_patches=output['target_patches'],
+		x=batch['x'],
+		spatial_mask=batch['spatial_mask'],
+		local_valid_mask=torch.ones((1, 16, 16, 16), dtype=torch.bool),
+		patch_size_xyz=model.patch_size_xyz,
+		gradient_weight=0.0,
+	)
+
+	assert call_count == 1
+
+
+def test_state_dict_keys_and_strict_checkpoint_load_are_unchanged() -> None:
+	expected_keys = {
+		'mask_token',
+		'patch_projection.weight',
+		'patch_projection.bias',
+		'encoder.layers.0.norm1.weight',
+		'encoder.layers.0.norm1.bias',
+		'encoder.layers.0.attention.in_proj_weight',
+		'encoder.layers.0.attention.in_proj_bias',
+		'encoder.layers.0.attention.out_proj.weight',
+		'encoder.layers.0.attention.out_proj.bias',
+		'encoder.layers.0.norm2.weight',
+		'encoder.layers.0.norm2.bias',
+		'encoder.layers.0.mlp.0.weight',
+		'encoder.layers.0.mlp.0.bias',
+		'encoder.layers.0.mlp.3.weight',
+		'encoder.layers.0.mlp.3.bias',
+		'encoder_to_decoder.weight',
+		'encoder_to_decoder.bias',
+		'decoder.layers.0.norm1.weight',
+		'decoder.layers.0.norm1.bias',
+		'decoder.layers.0.attention.in_proj_weight',
+		'decoder.layers.0.attention.in_proj_bias',
+		'decoder.layers.0.attention.out_proj.weight',
+		'decoder.layers.0.attention.out_proj.bias',
+		'decoder.layers.0.norm2.weight',
+		'decoder.layers.0.norm2.bias',
+		'decoder.layers.0.mlp.0.weight',
+		'decoder.layers.0.mlp.0.bias',
+		'decoder.layers.0.mlp.3.weight',
+		'decoder.layers.0.mlp.3.bias',
+		'prediction_head.weight',
+		'prediction_head.bias',
+	}
+	checkpoint_state = _make_model().state_dict()
+
+	assert set(checkpoint_state) == expected_keys
+	_make_model().load_state_dict(checkpoint_state, strict=True)
+
+
 def test_constructor_and_batch_contract_do_not_use_excluded_names() -> None:
 	parameter_names = set(inspect.signature(AmplitudeMAE3D).parameters)
 	forbidden = {'attribute_ids', 'num_attributes', 'context', 'num_context_tokens'}
 
 	assert parameter_names.isdisjoint(forbidden)
-	assert set(_make_batch()) == {'x', 'spatial_mask', 'visible_spatial_mask'}
+	assert set(_make_batch()) == {'x', 'spatial_mask'}

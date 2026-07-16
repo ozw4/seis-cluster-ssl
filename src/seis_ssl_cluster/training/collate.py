@@ -21,9 +21,7 @@ def mae_collate_fn(
 
 	return {
 		'x': _stack_arrays(samples, 'x'),
-		'target': _stack_arrays(samples, 'target'),
 		'spatial_mask': _stack_arrays(samples, 'spatial_mask'),
-		'visible_spatial_mask': _stack_arrays(samples, 'visible_spatial_mask'),
 		'local_valid_mask': _stack_arrays(samples, 'local_valid_mask'),
 		'coords': [sample.get('coords') for sample in samples],
 	}

@@ -74,7 +74,7 @@ def save_mae_debug_visualization_pngs(  # noqa: PLR0913
 		config=config,
 	)
 	with torch.no_grad():
-		target_tensor = _required_tensor(batch, 'target')
+		target_tensor = _required_tensor(batch, 'x')
 		pred_patches = _required_tensor(model_output, 'pred_patches')
 		sample_count = min(config.max_samples, int(target_tensor.shape[0]))
 		token_grid_shape = _resolve_token_grid_shape(
@@ -131,14 +131,8 @@ def _sample_arrays(  # noqa: PLR0913
 	sample_index: int,
 	target_normalization_config: object = None,
 ) -> dict[str, np.ndarray | None]:
-	target = _sample_volume(batch, 'target', sample_index)
-	x = _sample_volume(batch, 'x', sample_index)
-	if target.shape != x.shape:
-		msg = (
-			'x and target shapes must match; '
-			f'got x={x.shape!r}, target={target.shape!r}'
-		)
-		raise ValueError(msg)
+	target = _sample_volume(batch, 'x', sample_index)
+	x = target
 	if target.ndim != 4 or target.shape[0] != 1:
 		msg = (
 			'amplitude MAE target must have shape [1, X, Y, Z] per sample; '
@@ -148,6 +142,7 @@ def _sample_arrays(  # noqa: PLR0913
 	pred_patches_for_display, pred_patches_norm = _prediction_patches_for_display(
 		batch=batch,
 		pred_patches=pred_patches,
+		target_patches=_required_tensor(model_output, 'target_patches'),
 		patch_size_xyz=patch_size_xyz,
 		target_normalization_config=target_normalization_config,
 	)
@@ -254,7 +249,7 @@ def _save_view_png(  # noqa: PLR0913
 	)
 
 
-def _build_panels(
+def _build_panels(  # noqa: C901
 	*,
 	sample: Mapping[str, np.ndarray | None],
 	view: str,
@@ -455,7 +450,6 @@ def _write_metadata(  # noqa: PLR0913
 ) -> None:
 	target = _required_sample_array(sample, 'target')
 	prediction = _required_sample_array(sample, 'prediction')
-	prediction_norm = _required_sample_array(sample, 'prediction_norm')
 	valid_mask = sample.get('local_valid_mask')
 	valid_values = (
 		np.ones(target.shape, dtype=bool)
@@ -508,7 +502,10 @@ def _figure_title(  # noqa: PLR0913
 	if metrics is not None and 'loss' in metrics:
 		loss_text = f' loss={metrics["loss"]:.4g}'
 	if oracle_denormalization:
-		loss_text = f'{loss_text} target_norm={target_normalization_mode} oracle_denorm=true'
+		loss_text = (
+			f'{loss_text} target_norm={target_normalization_mode} '
+			'oracle_denorm=true'
+		)
 	title = (
 		f'Amplitude MAE debug {view.upper()} sample={sample_index} '
 		f'epoch={epoch:04d} step={global_step:06d}{loss_text} '
@@ -601,10 +598,11 @@ def _resolve_token_grid_shape(
 
 
 
-def _prediction_patches_for_display(  # noqa: PLR0913
+def _prediction_patches_for_display(
 	*,
 	batch: Mapping[str, object],
 	pred_patches: torch.Tensor,
+	target_patches: torch.Tensor,
 	patch_size_xyz: tuple[int, int, int],
 	target_normalization_config: object,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -614,11 +612,10 @@ def _prediction_patches_for_display(  # noqa: PLR0913
 	if not isinstance(target_normalization_config, Mapping):
 		msg = 'target_normalization_config must be a mapping for patch_zscore display'
 		raise TypeError(msg)
-	target = _required_tensor(batch, 'target')
 	local_valid_mask = _required_tensor(batch, 'local_valid_mask')
 	valid_patch_voxels = patchify_3d(local_valid_mask.unsqueeze(1), patch_size_xyz)
 	stats = normalize_target_patches(
-		patchify_3d(target, patch_size_xyz).to(dtype=pred_patches.dtype),
+		target_patches.to(dtype=pred_patches.dtype),
 		valid_patch_voxels,
 		mode='patch_zscore',
 		eps=float(target_normalization_config['eps']),
@@ -635,10 +632,7 @@ def _prediction_patches_for_display(  # noqa: PLR0913
 
 
 def _target_normalization_display_flags(config: object) -> tuple[str, bool]:
-	if isinstance(config, Mapping):
-		mode = str(config.get('mode', 'none'))
-	else:
-		mode = 'none'
+	mode = str(config.get('mode', 'none')) if isinstance(config, Mapping) else 'none'
 	if mode not in {'none', 'patch_zscore'}:
 		msg = f'unsupported target normalization mode for debug display: {mode!r}'
 		raise ValueError(msg)

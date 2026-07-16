@@ -103,24 +103,17 @@ def test_amplitude_dataset_returns_one_channel_sample_contract(tmp_path: Path) -
 
 	assert set(sample) == {
 		'x',
-		'target',
 		'local_valid_mask',
 		'coords',
 		'spatial_mask',
-		'visible_spatial_mask',
 	}
 	assert sample['x'].shape == (1, 4, 4, 4)
 	assert sample['x'].dtype == np.float32
-	np.testing.assert_array_equal(sample['x'], sample['target'])
 	assert sample['local_valid_mask'].shape == (4, 4, 4)
 	assert sample['local_valid_mask'].dtype == np.bool_
 	assert sample['local_valid_mask'].all()
 	assert sample['spatial_mask'].shape == (2, 2, 2)
 	assert sample['spatial_mask'].dtype == np.bool_
-	np.testing.assert_array_equal(
-		sample['visible_spatial_mask'],
-		np.logical_not(sample['spatial_mask']),
-	)
 	assert sample['coords']['survey_id'] == 'survey'
 	assert sample['coords']['local_size_xyz'] == (4, 4, 4)
 	assert not any('attribute' in key for key in sample)
@@ -169,7 +162,7 @@ def test_amplitude_dataset_zero_mask_uses_raw_amplitude_before_normalization(
 	assert np.all(sample['x'][:, :, :, 2] == 0.0)
 
 
-def test_amplitude_dataset_applies_agc_to_input_and_target(
+def test_amplitude_dataset_applies_agc_to_input(
 	tmp_path: Path,
 ) -> None:
 	volume = np.asarray([1.0, 1.0, 0.0, 10.0, 10.0], dtype=np.float32).reshape(
@@ -214,7 +207,6 @@ def test_amplitude_dataset_applies_agc_to_input_and_target(
 	)
 	expected[~valid] = 0.0
 	np.testing.assert_allclose(sample['x'][0], expected, rtol=1.0e-6)
-	np.testing.assert_array_equal(sample['x'], sample['target'])
 	assert sample['x'][0, 0, 0, 2] == 0.0
 	assert np.max(np.abs(sample['x'])) <= 2.0
 

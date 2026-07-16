@@ -31,7 +31,7 @@ def test_invalid_voxels_do_not_change_reconstruction_loss() -> None:
 
 	loss = masked_patch_reconstruction_loss(
 		pred_patches=pred_patches,
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		spatial_mask=_spatial_mask(),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -39,7 +39,7 @@ def test_invalid_voxels_do_not_change_reconstruction_loss() -> None:
 	)
 	loss_with_invalid_error = masked_patch_reconstruction_loss(
 		pred_patches=invalid_error_pred,
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		spatial_mask=_spatial_mask(),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -58,7 +58,7 @@ def test_valid_masked_voxel_changes_reconstruction_loss() -> None:
 
 	base_loss = masked_patch_reconstruction_loss(
 		pred_patches=pred_patches,
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		spatial_mask=_spatial_mask(),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -66,7 +66,7 @@ def test_valid_masked_voxel_changes_reconstruction_loss() -> None:
 	)
 	changed_loss = masked_patch_reconstruction_loss(
 		pred_patches=changed_pred,
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		spatial_mask=_spatial_mask(),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -85,7 +85,7 @@ def test_visible_tokens_do_not_contribute_to_reconstruction_loss() -> None:
 
 	loss = masked_patch_reconstruction_loss(
 		pred_patches=pred_patches,
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		spatial_mask=_spatial_mask(),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -103,7 +103,8 @@ def test_valid_reconstruction_voxels_are_reported() -> None:
 
 	losses = mae_pretraining_loss(
 		pred_patches=pred_patches,
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
+		x=target,
 		spatial_mask=_spatial_mask(),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -122,7 +123,7 @@ def test_reconstruction_loss_raises_when_no_valid_masked_voxels() -> None:
 	with pytest.raises(ValueError, match='no valid masked voxels'):
 		masked_patch_reconstruction_loss(
 			pred_patches=pred_patches,
-			target=target,
+			target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 			spatial_mask=_spatial_mask(),
 			local_valid_mask=local_valid_mask,
 			patch_size_xyz=PATCH_SIZE_XYZ,
@@ -155,7 +156,7 @@ def test_reconstruction_modes_work(reconstruction: str) -> None:
 
 	loss = masked_patch_reconstruction_loss(
 		pred_patches=pred_patches,
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -171,7 +172,7 @@ def test_patch_zscore_normalizes_loss_target_only_valid_voxels() -> None:
 	local_valid_mask[:, 0, 0, 0] = False
 	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ)
 	result = reconstruction_target_patches_for_loss(
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		pred_patches=pred_patches,
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -184,7 +185,12 @@ def test_patch_zscore_normalizes_loss_target_only_valid_voxels() -> None:
 	]
 
 	assert target[0, 0, 0, 0, 0] == 0.0
-	torch.testing.assert_close(valid_values.mean(), torch.tensor(0.0), atol=1e-6, rtol=0)
+	torch.testing.assert_close(
+		valid_values.mean(),
+		torch.tensor(0.0),
+		atol=1e-6,
+		rtol=0,
+	)
 	torch.testing.assert_close(
 		valid_values.std(unbiased=False),
 		torch.tensor(1.0),
@@ -200,7 +206,7 @@ def test_patch_zscore_invalid_voxel_value_does_not_change_loss() -> None:
 	local_valid_mask[:, 0, 0, 0] = False
 	valid_patch_voxels = patchify_3d(local_valid_mask.unsqueeze(1), PATCH_SIZE_XYZ)
 	base_norm = reconstruction_target_patches_for_loss(
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		pred_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -211,7 +217,7 @@ def test_patch_zscore_invalid_voxel_value_does_not_change_loss() -> None:
 	changed_target = target.clone()
 	changed_target[:, :, 0, 0, 0] = 10000.0
 	changed_norm = reconstruction_target_patches_for_loss(
-		target=changed_target,
+		target_patches=patchify_3d(changed_target, PATCH_SIZE_XYZ),
 		pred_patches=patchify_3d(changed_target, PATCH_SIZE_XYZ),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -223,7 +229,7 @@ def test_patch_zscore_invalid_voxel_value_does_not_change_loss() -> None:
 
 	base_loss = masked_patch_reconstruction_loss(
 		pred_patches=pred,
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -234,7 +240,7 @@ def test_patch_zscore_invalid_voxel_value_does_not_change_loss() -> None:
 	)
 	changed_loss = masked_patch_reconstruction_loss(
 		pred_patches=pred,
-		target=changed_target,
+		target_patches=patchify_3d(changed_target, PATCH_SIZE_XYZ),
 		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -244,7 +250,10 @@ def test_patch_zscore_invalid_voxel_value_does_not_change_loss() -> None:
 		target_normalization_min_std=0.05,
 	)
 
-	torch.testing.assert_close(base_norm[valid_patch_voxels], changed_norm[valid_patch_voxels])
+	torch.testing.assert_close(
+		base_norm[valid_patch_voxels],
+		changed_norm[valid_patch_voxels],
+	)
 	assert base_loss == changed_loss == torch.tensor(0.0)
 
 
@@ -254,7 +263,7 @@ def test_patch_zscore_low_std_and_fully_invalid_are_finite() -> None:
 	local_valid_mask[:, 2:, :, :] = False
 	pred_patches = patchify_3d(target, PATCH_SIZE_XYZ)
 	result = reconstruction_target_patches_for_loss(
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
 		pred_patches=pred_patches,
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -274,10 +283,11 @@ def test_patch_zscore_low_std_and_fully_invalid_are_finite() -> None:
 def test_patch_zscore_gradient_loss_combination_is_rejected() -> None:
 	target = torch.zeros((1, 1, 2, 2, 2))
 	local_valid_mask = torch.ones((1, 2, 2, 2), dtype=torch.bool)
-	with pytest.raises(ValueError, match='gradient_weight must be 0.0'):
+	with pytest.raises(ValueError, match=r'gradient_weight must be 0\.0'):
 		mae_pretraining_loss(
 			pred_patches=patchify_3d(target, PATCH_SIZE_XYZ),
-			target=target,
+			target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
+			x=target,
 			spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
 			local_valid_mask=local_valid_mask,
 			patch_size_xyz=PATCH_SIZE_XYZ,
@@ -296,7 +306,8 @@ def test_patch_zscore_backward_step_is_finite() -> None:
 	optimizer = torch.optim.SGD([parameter], lr=0.1)
 	losses = mae_pretraining_loss(
 		pred_patches=parameter,
-		target=target,
+		target_patches=patchify_3d(target, PATCH_SIZE_XYZ),
+		x=target,
 		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
 		local_valid_mask=local_valid_mask,
 		patch_size_xyz=PATCH_SIZE_XYZ,
@@ -319,3 +330,32 @@ def test_patch_zscore_backward_step_is_finite() -> None:
 		'target_patch_low_std_fraction',
 	):
 		assert torch.isfinite(losses[key]).all()
+
+
+def test_reconstruction_loss_matches_reference_gradient_and_detaches_target() -> None:
+	target_patches = torch.nn.Parameter(
+		torch.arange(8, dtype=torch.float32).reshape(1, 1, 1, 8),
+	)
+	pred_patches = torch.nn.Parameter(torch.ones((1, 1, 1, 8)))
+	x = torch.nn.Parameter(torch.zeros((1, 1, 2, 2, 2)))
+	local_valid_mask = torch.ones((1, 2, 2, 2), dtype=torch.bool)
+	reference_pred = pred_patches.detach().clone().requires_grad_()
+	reference_loss = (reference_pred - target_patches.detach()).square().mean()
+	reference_loss.backward()
+
+	losses = mae_pretraining_loss(
+		pred_patches=pred_patches,
+		target_patches=target_patches,
+		x=x,
+		spatial_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool),
+		local_valid_mask=local_valid_mask,
+		patch_size_xyz=PATCH_SIZE_XYZ,
+		reconstruction='mse',
+		gradient_weight=0.0,
+	)
+	losses['loss'].backward()
+
+	torch.testing.assert_close(losses['loss'], reference_loss)
+	torch.testing.assert_close(pred_patches.grad, reference_pred.grad)
+	assert target_patches.grad is None
+	assert x.grad is None

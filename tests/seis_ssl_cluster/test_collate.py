@@ -11,12 +11,8 @@ def _sample(coords: dict[str, object] | None = None) -> dict[str, object]:
 	shape = (4, 4, 4)
 	return {
 		'x': np.ones((1, *shape), dtype=np.float32),
-		'target': np.ones((1, *shape), dtype=np.float32),
 		'spatial_mask': np.asarray(
 			[[[True, False], [False, False]], [[False, False], [False, False]]],
-		),
-		'visible_spatial_mask': np.asarray(
-			[[[False, True], [True, True]], [[True, True], [True, True]]],
 		),
 		'local_valid_mask': np.ones(shape, dtype=bool),
 		'coords': coords or {'survey_id': 'survey-a'},
@@ -27,9 +23,9 @@ def test_mae_collate_fn_stacks_amplitude_batch_contract() -> None:
 	batch = mae_collate_fn([_sample(), _sample({'survey_id': 'survey-b'})])
 
 	assert batch['x'].shape == (2, 1, 4, 4, 4)
-	assert batch['target'].shape == (2, 1, 4, 4, 4)
 	assert batch['spatial_mask'].shape == (2, 2, 2, 2)
-	assert batch['visible_spatial_mask'].shape == (2, 2, 2, 2)
+	assert 'target' not in batch
+	assert 'visible_spatial_mask' not in batch
 	assert batch['local_valid_mask'].shape == (2, 4, 4, 4)
 	assert batch['x'].dtype == torch.float32
 	assert batch['spatial_mask'].dtype == torch.bool

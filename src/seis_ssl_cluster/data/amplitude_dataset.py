@@ -289,10 +289,8 @@ class NopimsAmplitudePretrainDataset:
 			patch_size_xyz=self.patch_size_xyz,
 			settings=self._preprocess_settings,
 		)
-		x = prepared.x
 		return {
-			'x': x,
-			'target': x.copy(),
+			'x': prepared.x,
 			'local_valid_mask': prepared.local_valid_mask,
 			'coords': {
 				'survey_id': manifest.survey_id,
@@ -315,7 +313,6 @@ class NopimsAmplitudePretrainDataset:
 			rng=rng,
 		)
 		sample['spatial_mask'] = plan.spatial_mask
-		sample['visible_spatial_mask'] = plan.visible_spatial_mask
 
 	def _stats_for_manifest(self, manifest: SurveyManifest) -> SurveyNormalizationStats:
 		path = resolve_manifest_path(
