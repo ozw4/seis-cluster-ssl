@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import threading
 from contextlib import nullcontext
 from dataclasses import replace
@@ -411,9 +412,19 @@ def test_preprocessing_cache_fingerprint_tracks_source_and_config(
 		stats,
 		replace(preprocess, finite_check_mode='off'),
 	)
+	original_stat = amplitude_path.stat()
 	volume = np.load(amplitude_path)
 	volume[1, 1, 1] += 1.0
-	np.save(amplitude_path, volume)
+	replacement_path = amplitude_path.with_name('replacement.npy')
+	np.save(replacement_path, volume)
+	assert replacement_path.stat().st_size == original_stat.st_size
+	os.utime(
+		replacement_path,
+		ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns),
+	)
+	replacement_path.replace(amplitude_path)
+	assert amplitude_path.stat().st_size == original_stat.st_size
+	assert amplitude_path.stat().st_mtime_ns == original_stat.st_mtime_ns
 	changed_source = plan(stats)
 
 	assert changed_stats != initial

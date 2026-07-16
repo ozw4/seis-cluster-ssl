@@ -524,7 +524,13 @@ def test_resume_rejects_partial_checkpoint_payload(tmp_path: Path) -> None:
 	with pytest.raises(ValueError, match='dataloader_generator'):
 		run_mae_pretraining(cfg, resume=partial_path)
 
-	for key in ('schema_version', 'stage', 'checkpoint_kind', 'batch_index'):
+	for key in (
+		'schema_version',
+		'stage',
+		'checkpoint_kind',
+		'batch_index',
+		'resolved_precision',
+	):
 		partial_path = tmp_path / f'missing-training-state-{key}.pt'
 		partial_payload = dict(payload)
 		training_state = dict(payload['training_state'])
@@ -551,6 +557,8 @@ def test_amp_resume_requires_scaler_state(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	checkpoint_path = run_mae_pretraining(cfg)
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	payload['amp_enabled'] = True
+	payload['training_state']['resolved_precision'] = 'float16'
 
 	with pytest.raises(ValueError, match='scaler_state_dict'):
 		mae_training._restore_mae_checkpoint(  # noqa: SLF001

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 import torch
 
 from seis_ssl_cluster.training import load_checkpoint
 from seis_ssl_cluster.training.mae_checkpoint import (
 	_best_metric_from_metrics,
 	_is_improved_best_metric,
+	_restore_mae_checkpoint,
 	_save_mae_rolling_checkpoint,
 )
 
@@ -98,6 +100,44 @@ def test_bfloat16_amp_checkpoint_does_not_require_scaler(tmp_path: Path) -> None
 	payload = load_checkpoint(result.latest_path, map_location='cpu')
 	assert payload['amp_enabled'] is True
 	assert payload['scaler_state_dict'] is None
+	assert payload['training_state']['resolved_precision'] == 'bfloat16'
+
+
+def test_auto_bfloat16_checkpoint_rejects_float16_resume_without_cuda(
+	tmp_path: Path,
+) -> None:
+	model = torch.nn.Linear(1, 1)
+	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+	result = _save_mae_rolling_checkpoint(
+		tmp_path,
+		model=model,
+		optimizer=optimizer,
+		epoch=1,
+		config={'stage': 'train_amp_mae', 'train': {'amp_dtype': 'auto'}},
+		metrics={'loss': 1.0},
+		global_step=1,
+		amp_enabled=True,
+		scaler=None,
+		checkpoint_kind='epoch',
+		batch_index=None,
+	)
+	payload = load_checkpoint(result.latest_path, map_location='cpu')
+	payload['rng_state']['dataloader_generator'] = torch.Generator().get_state()
+	resume_model = torch.nn.Linear(1, 1)
+	resume_optimizer = torch.optim.SGD(resume_model.parameters(), lr=0.1)
+
+	with pytest.raises(
+		ValueError,
+		match="checkpoint='bfloat16', current='float16'",
+	):
+		_restore_mae_checkpoint(
+			payload=payload,
+			model=resume_model,
+			optimizer=resume_optimizer,
+			scaler=torch.amp.GradScaler('cpu'),
+			amp_enabled=True,
+			scaler_required=True,
+		)
 
 
 def test_best_metric_prefers_validation_loss_when_present() -> None:

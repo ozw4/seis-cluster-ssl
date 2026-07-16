@@ -92,6 +92,8 @@ _BEST_METRIC_KEYS = (
 	'loss_reconstruction',
 )
 
+_RESOLVED_PRECISIONS = frozenset({'float32', 'bfloat16', 'float16'})
+
 
 def _save_mae_rolling_checkpoint(  # noqa: PLR0913
 	checkpoint_dir: Path,
@@ -172,6 +174,10 @@ def _save_mae_checkpoint(  # noqa: PLR0913
 			'stage': 'train_amp_mae',
 			'checkpoint_kind': checkpoint_kind,
 			'batch_index': batch_index,
+			'resolved_precision': _resolved_precision_from_amp_state(
+				amp_enabled=amp_enabled,
+				scaler_required=scaler is not None,
+			),
 		},
 		rng_state=rng_state,
 	)
@@ -220,10 +226,15 @@ def _restore_mae_checkpoint(  # noqa: PLR0913
 	resolved_scaler_required = (
 		amp_enabled if scaler_required is None else scaler_required
 	)
+	resolved_precision = _resolved_precision_from_amp_state(
+		amp_enabled=amp_enabled,
+		scaler_required=resolved_scaler_required,
+	)
 	_validate_resume_payload(
 		payload,
 		amp_enabled=amp_enabled,
 		scaler_required=resolved_scaler_required,
+		resolved_precision=resolved_precision,
 	)
 	if config is not None:
 		_validate_resume_config_compatibility(payload, config)
@@ -321,18 +332,21 @@ def _validate_resume_payload(
 	payload: Mapping[str, object],
 	*,
 	amp_enabled: bool,
+	resolved_precision: str,
 	scaler_required: bool | None = None,
 ) -> None:
+	resolved_scaler_required = (
+		amp_enabled if scaler_required is None else scaler_required
+	)
 	_require_resume_keys(payload)
 	_validate_resume_mapping_fields(payload)
 	_validate_resume_counters(payload)
 	_validate_resume_rng_state(payload)
 	_validate_resume_training_state(payload)
+	_validate_resume_precision(payload, resolved_precision=resolved_precision)
 	_validate_resume_amp_state(
 		payload,
-		scaler_required=(
-			amp_enabled if scaler_required is None else scaler_required
-		),
+		scaler_required=resolved_scaler_required,
 	)
 	stage = _checkpoint_stage(payload)
 	if stage is not None and stage != 'train_amp_mae':
@@ -385,6 +399,40 @@ def _validate_resume_amp_state(
 		raise ValueError(msg)
 
 
+def _validate_resume_precision(
+	payload: Mapping[str, object],
+	*,
+	resolved_precision: str,
+) -> None:
+	training_state = payload['training_state']
+	if not isinstance(training_state, Mapping):
+		msg = 'resume checkpoint training_state must be a mapping'
+		raise TypeError(msg)
+	checkpoint_precision = training_state['resolved_precision']
+	if checkpoint_precision != resolved_precision:
+		msg = (
+			'resume checkpoint resolved precision is incompatible with the '
+			'current runtime: '
+			f'checkpoint={checkpoint_precision!r}, current={resolved_precision!r}'
+		)
+		raise ValueError(msg)
+	expected_amp_enabled = checkpoint_precision != 'float32'
+	if payload['amp_enabled'] is not expected_amp_enabled:
+		msg = (
+			'resume checkpoint amp_enabled is inconsistent with '
+			f'resolved_precision={checkpoint_precision!r}'
+		)
+		raise ValueError(msg)
+	expected_scaler = checkpoint_precision == 'float16'
+	has_scaler = isinstance(payload['scaler_state_dict'], Mapping)
+	if has_scaler is not expected_scaler:
+		msg = (
+			'resume checkpoint scaler_state_dict is inconsistent with '
+			f'resolved_precision={checkpoint_precision!r}'
+		)
+		raise ValueError(msg)
+
+
 def _validate_resume_rng_state(payload: Mapping[str, object]) -> None:
 	rng_state = payload['rng_state']
 	if not isinstance(rng_state, Mapping):
@@ -417,7 +465,13 @@ def _validate_resume_training_state(payload: Mapping[str, object]) -> None:
 	if not isinstance(training_state, Mapping):
 		msg = 'resume checkpoint training_state must be a mapping'
 		raise TypeError(msg)
-	for key in ('schema_version', 'stage', 'checkpoint_kind', 'batch_index'):
+	for key in (
+		'schema_version',
+		'stage',
+		'checkpoint_kind',
+		'batch_index',
+		'resolved_precision',
+	):
 		if key not in training_state:
 			msg = f'resume checkpoint training_state is missing {key}'
 			raise ValueError(msg)
@@ -431,6 +485,13 @@ def _validate_resume_training_state(payload: Mapping[str, object]) -> None:
 		msg = (
 			'resume checkpoint training_state.stage must be train_amp_mae; '
 			f"got {training_state['stage']!r}"
+		)
+		raise ValueError(msg)
+	if training_state['resolved_precision'] not in _RESOLVED_PRECISIONS:
+		msg = (
+			'resume checkpoint training_state.resolved_precision must be one of '
+			f'{sorted(_RESOLVED_PRECISIONS)!r}; '
+			f"got {training_state['resolved_precision']!r}"
 		)
 		raise ValueError(msg)
 
@@ -475,6 +536,16 @@ def _validate_resume_training_batch_index(
 	if batch_index < 0:
 		msg = 'resume checkpoint training_state.batch_index must be nonnegative'
 		raise ValueError(msg)
+
+
+def _resolved_precision_from_amp_state(
+	*,
+	amp_enabled: bool,
+	scaler_required: bool,
+) -> str:
+	if not amp_enabled:
+		return 'float32'
+	return 'float16' if scaler_required else 'bfloat16'
 
 
 def _is_numpy_rng_state(value: object) -> bool:
