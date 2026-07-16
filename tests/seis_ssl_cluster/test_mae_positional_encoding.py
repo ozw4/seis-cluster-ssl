@@ -4,6 +4,7 @@ import pytest
 import torch
 
 from seis_ssl_cluster.models.mae.positional_encoding import (
+	build_3d_sincos_position_embedding,
 	restore_decoder_sequence,
 	select_visible_tokens,
 )
@@ -34,6 +35,20 @@ def _reference_restore(
 		row[row_mask] = visible_tokens[batch_index]
 		rows.append(row + pos)
 	return torch.stack(rows)
+
+
+@pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
+def test_position_embedding_generates_in_float32_before_cast(
+	dtype: torch.dtype,
+) -> None:
+	reference = build_3d_sincos_position_embedding((16, 2, 2), 24)
+	actual = build_3d_sincos_position_embedding(
+		(16, 2, 2),
+		24,
+		dtype=dtype,
+	)
+
+	assert torch.equal(actual, reference.to(dtype=dtype))
 
 
 def test_equal_count_vectorization_matches_reference_and_gradients() -> None:

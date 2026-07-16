@@ -77,6 +77,39 @@ def test_transformer_stack_validates_once_at_public_boundary(
 	assert calls == 1
 
 
+def test_transformer_stack_preserves_layer_module_call_semantics(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	stack = TransformerStack(embed_dim=8, num_heads=2, depth=1)
+	layer = stack.layers[0]
+	original_forward = layer.forward
+	forward_calls = 0
+	hook_calls = 0
+
+	def overridden_forward(
+		tokens: torch.Tensor,
+		key_padding_mask: torch.Tensor | None = None,
+	) -> torch.Tensor:
+		nonlocal forward_calls
+		forward_calls += 1
+		return original_forward(tokens, key_padding_mask)
+
+	def forward_hook(
+		_module: torch.nn.Module,
+		_inputs: tuple[object, ...],
+		_output: torch.Tensor,
+	) -> None:
+		nonlocal hook_calls
+		hook_calls += 1
+
+	monkeypatch.setattr(layer, 'forward', overridden_forward)
+	layer.register_forward_hook(forward_hook)
+	stack(torch.zeros((1, 2, 8)))
+
+	assert forward_calls == 1
+	assert hook_calls == 1
+
+
 def test_minimal_mode_keeps_structural_transformer_checks() -> None:
 	stack = TransformerStack(
 		embed_dim=8,

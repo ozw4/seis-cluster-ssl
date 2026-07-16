@@ -25,9 +25,9 @@ def build_3d_sincos_position_embedding(
 	axis_embed_dim = 2 * math.ceil(math.ceil(embed_dim / 3) / 2)
 
 	x_coords, y_coords, z_coords = torch.meshgrid(
-		torch.arange(tx_size, device=device, dtype=dtype),
-		torch.arange(ty_size, device=device, dtype=dtype),
-		torch.arange(tz_size, device=device, dtype=dtype),
+		torch.arange(tx_size, device=device, dtype=torch.float32),
+		torch.arange(ty_size, device=device, dtype=torch.float32),
+		torch.arange(tz_size, device=device, dtype=torch.float32),
 		indexing='ij',
 	)
 	embeddings = torch.cat(
@@ -38,7 +38,7 @@ def build_3d_sincos_position_embedding(
 		],
 		dim=1,
 	)
-	return embeddings[:, :embed_dim].contiguous()
+	return embeddings[:, :embed_dim].to(dtype=dtype).contiguous()
 
 
 def select_visible_tokens(

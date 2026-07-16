@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+from contextvars import ContextVar
+
 import torch
 from torch import nn
 
 from seis_ssl_cluster.runtime_checks import RuntimeCheckMode, RuntimeChecks
+
+_PREVALIDATED_BLOCK_IDS: ContextVar[frozenset[int]] = ContextVar(
+	'prevalidated_transformer_block_ids',
+	default=frozenset(),
+)
 
 
 class TransformerBlock(nn.Module):
@@ -65,14 +72,15 @@ class TransformerBlock(nn.Module):
 		key_padding_mask: torch.Tensor | None = None,
 	) -> torch.Tensor:
 		"""Return transformed tokens with the same shape as ``tokens``."""
-		batch_size, num_tokens = _validate_tokens(tokens, self.embed_dim)
-		_validate_key_padding_mask(
-			key_padding_mask,
-			batch_size,
-			num_tokens,
-			tokens.device,
-			self.runtime_checks,
-		)
+		if id(self) not in _PREVALIDATED_BLOCK_IDS.get():
+			batch_size, num_tokens = _validate_tokens(tokens, self.embed_dim)
+			_validate_key_padding_mask(
+				key_padding_mask,
+				batch_size,
+				num_tokens,
+				tokens.device,
+				self.runtime_checks,
+			)
 		return self._forward_unchecked(tokens, key_padding_mask)
 
 	def _forward_unchecked(
@@ -139,9 +147,15 @@ class TransformerStack(nn.Module):
 			tokens.device,
 			self.runtime_checks,
 		)
-		for layer in self.layers:
-			tokens = layer._forward_unchecked(tokens, key_padding_mask)  # noqa: SLF001
-		return tokens
+		context_token = _PREVALIDATED_BLOCK_IDS.set(
+			frozenset(id(layer) for layer in self.layers),
+		)
+		try:
+			for layer in self.layers:
+				tokens = layer(tokens, key_padding_mask)
+			return tokens
+		finally:
+			_PREVALIDATED_BLOCK_IDS.reset(context_token)
 
 
 def _validate_positive_int(value: int, name: str) -> int:
