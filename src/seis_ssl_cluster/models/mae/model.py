@@ -93,11 +93,12 @@ class AmplitudeMAE3D(nn.Module):
 
 	def forward(
 		self,
-		batch: Mapping[str, torch.Tensor],
+		batch: Mapping[str, object],
 	) -> dict[str, torch.Tensor | tuple[int, int, int]]:
 		"""Return full-grid MAE patch predictions for the provided batch."""
 		x = _required_tensor(batch, 'x')
 		spatial_mask = _required_tensor(batch, 'spatial_mask')
+		equal_visible_count = _required_bool(batch, 'equal_visible_count')
 
 		target_patches, local_tokens, token_grid_shape = self._project_patches(x)
 		_validate_spatial_mask(
@@ -107,7 +108,6 @@ class AmplitudeMAE3D(nn.Module):
 			local_tokens.device,
 		)
 		visible_spatial_mask = ~spatial_mask
-		equal_visible_count = _has_equal_visible_count(visible_spatial_mask)
 
 		encoder_pos = self._position_embedding(
 			token_grid_shape,
@@ -229,7 +229,7 @@ class AmplitudeMAE3D(nn.Module):
 
 
 def _required_tensor(
-	batch: Mapping[str, torch.Tensor],
+	batch: Mapping[str, object],
 	key: str,
 ) -> torch.Tensor:
 	try:
@@ -243,12 +243,16 @@ def _required_tensor(
 	return value
 
 
-def _has_equal_visible_count(visible_spatial_mask: torch.Tensor) -> bool:
-	visible_counts = visible_spatial_mask.flatten(start_dim=1).sum(dim=1)
-	return torch.equal(
-		visible_counts,
-		visible_counts[:1].expand_as(visible_counts),
-	)
+def _required_bool(batch: Mapping[str, object], key: str) -> bool:
+	try:
+		value = batch[key]
+	except KeyError as exc:
+		msg = f'batch is missing required key {key!r}'
+		raise KeyError(msg) from exc
+	if not isinstance(value, bool):
+		msg = f'batch key {key!r} must be a bool; got {type(value).__name__}'
+		raise TypeError(msg)
+	return value
 
 
 def _validate_spatial_mask(

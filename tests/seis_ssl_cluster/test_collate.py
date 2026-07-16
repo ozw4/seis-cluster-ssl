@@ -24,6 +24,7 @@ def test_mae_collate_fn_stacks_amplitude_batch_contract() -> None:
 
 	assert batch['x'].shape == (2, 1, 4, 4, 4)
 	assert batch['spatial_mask'].shape == (2, 2, 2, 2)
+	assert batch['equal_visible_count'] is True
 	assert 'target' not in batch
 	assert 'visible_spatial_mask' not in batch
 	assert batch['local_valid_mask'].shape == (2, 4, 4, 4)
@@ -48,7 +49,18 @@ def test_move_batch_to_device_moves_tensors_and_preserves_coords() -> None:
 	moved = move_batch_to_device(batch, torch.device('cpu'))
 
 	assert moved['x'].device == torch.device('cpu')
+	assert moved['equal_visible_count'] is True
 	assert moved['coords'] is batch['coords']
+
+
+def test_mae_collate_fn_records_unequal_visible_counts_on_cpu() -> None:
+	first = _sample()
+	second = _sample()
+	second['spatial_mask'] = np.ones((2, 2, 2), dtype=np.bool_)
+
+	batch = mae_collate_fn([first, second])
+
+	assert batch['equal_visible_count'] is False
 
 
 def test_mae_collate_fn_rejects_empty_samples() -> None:

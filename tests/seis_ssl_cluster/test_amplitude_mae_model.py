@@ -3,6 +3,7 @@ from __future__ import annotations
 import inspect
 from typing import TYPE_CHECKING
 
+import pytest
 import torch
 
 import seis_ssl_cluster.models.mae.model as mae_model_module
@@ -11,10 +12,13 @@ from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.mae.patching import compute_num_patches, patchify_3d
 
 if TYPE_CHECKING:
-	import pytest
+	from seis_ssl_cluster.runtime_checks import RuntimeCheckMode
 
 
-def _make_model() -> AmplitudeMAE3D:
+def _make_model(
+	*,
+	runtime_check_mode: RuntimeCheckMode = 'once',
+) -> AmplitudeMAE3D:
 	return AmplitudeMAE3D(
 		patch_size_xyz=(4, 4, 4),
 		encoder_dim=32,
@@ -23,10 +27,11 @@ def _make_model() -> AmplitudeMAE3D:
 		decoder_dim=16,
 		decoder_depth=1,
 		decoder_heads=4,
+		runtime_check_mode=runtime_check_mode,
 	)
 
 
-def _make_batch(batch_size: int = 2) -> dict[str, torch.Tensor]:
+def _make_batch(batch_size: int = 2) -> dict[str, object]:
 	x = torch.randn((batch_size, 1, 16, 16, 16))
 	spatial_mask = torch.zeros((batch_size, 4, 4, 4), dtype=torch.bool)
 	spatial_mask[:, 0, 0, 0] = True
@@ -34,12 +39,15 @@ def _make_batch(batch_size: int = 2) -> dict[str, torch.Tensor]:
 	return {
 		'x': x,
 		'spatial_mask': spatial_mask,
+		'equal_visible_count': True,
 	}
 
 
 def test_forward_pass_returns_single_channel_patch_predictions() -> None:
 	model = _make_model()
 	batch = _make_batch()
+	x = batch['x']
+	assert isinstance(x, torch.Tensor)
 
 	out = model(batch)
 
@@ -48,7 +56,7 @@ def test_forward_pass_returns_single_channel_patch_predictions() -> None:
 	assert not out['target_patches'].requires_grad
 	torch.testing.assert_close(
 		out['target_patches'],
-		patchify_3d(batch['x'], model.patch_size_xyz),
+		patchify_3d(x, model.patch_size_xyz),
 	)
 	assert out['encoded_visible_tokens'].shape == (2, 62, 32)
 	assert out['spatial_mask'].shape == (2, 4, 4, 4)
@@ -87,7 +95,12 @@ def test_forward_routes_unequal_visible_counts_through_padded_fallback(
 ) -> None:
 	model = _make_model().eval()
 	batch = _make_batch()
-	batch['spatial_mask'][1, 2, 2, 2] = True
+	spatial_mask = batch['spatial_mask']
+	x = batch['x']
+	assert isinstance(spatial_mask, torch.Tensor)
+	assert isinstance(x, torch.Tensor)
+	spatial_mask[1, 2, 2, 2] = True
+	batch['equal_visible_count'] = False
 	captured_padding_masks: list[torch.Tensor | None] = []
 	original_encoder_forward = model.encoder.forward
 
@@ -108,10 +121,9 @@ def test_forward_routes_unequal_visible_counts_through_padded_fallback(
 	for batch_index in range(2):
 		sample_output = model(
 			{
-				'x': batch['x'][batch_index : batch_index + 1],
-				'spatial_mask': batch['spatial_mask'][
-					batch_index : batch_index + 1
-				],
+				'x': x[batch_index : batch_index + 1],
+				'spatial_mask': spatial_mask[batch_index : batch_index + 1],
+				'equal_visible_count': True,
 			},
 		)
 		torch.testing.assert_close(
@@ -156,6 +168,33 @@ def test_position_embeddings_are_cached_across_forward_modes(
 	assert call_count == 2
 	assert len(model._position_embedding_cache) == 2  # noqa: SLF001
 	assert not (set(model.state_dict()) & {'_position_embedding_cache'})
+
+
+@pytest.mark.requires_cuda
+@pytest.mark.parametrize('runtime_check_mode', ['once', 'minimal'])
+def test_normal_cuda_forward_does_not_materialize_device_scalars(
+	runtime_check_mode: RuntimeCheckMode,
+) -> None:
+	if not torch.cuda.is_available():
+		pytest.skip('CUDA is not available')
+	model = _make_model(runtime_check_mode=runtime_check_mode).cuda().eval()
+	batch = {
+		key: value.cuda() if isinstance(value, torch.Tensor) else value
+		for key, value in _make_batch().items()
+	}
+
+	with torch.profiler.profile(
+		activities=[
+			torch.profiler.ProfilerActivity.CPU,
+			torch.profiler.ProfilerActivity.CUDA,
+		],
+	) as profile, torch.no_grad():
+		model(batch)
+
+	event_names = {event.key for event in profile.key_averages()}
+	assert 'aten::equal' not in event_names
+	assert 'aten::item' not in event_names
+	assert 'aten::_local_scalar_dense' not in event_names
 
 
 def test_position_embedding_cache_misses_and_is_bounded(
@@ -335,4 +374,4 @@ def test_constructor_and_batch_contract_do_not_use_excluded_names() -> None:
 	forbidden = {'attribute_ids', 'num_attributes', 'context', 'num_context_tokens'}
 
 	assert parameter_names.isdisjoint(forbidden)
-	assert set(_make_batch()) == {'x', 'spatial_mask'}
+	assert set(_make_batch()) == {'x', 'spatial_mask', 'equal_visible_count'}

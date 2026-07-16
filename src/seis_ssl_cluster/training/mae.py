@@ -160,7 +160,7 @@ def train_mae_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		optimizer.zero_grad(set_to_none=True)
 
 		with torch.amp.autocast('cuda', enabled=amp_enabled):
-			output = model(cast('Mapping[str, torch.Tensor]', batch))
+			output = model(cast('Mapping[str, object]', batch))
 			losses = mae_pretraining_loss(
 				pred_patches=_required_tensor(output, 'pred_patches'),
 				target_patches=_required_tensor(output, 'target_patches'),
