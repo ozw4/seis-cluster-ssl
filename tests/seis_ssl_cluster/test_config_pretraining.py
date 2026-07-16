@@ -12,6 +12,7 @@ def test_pretraining_config_resolves_from_stage_module() -> None:
 
 	assert resolved['stage'] == 'train_amp_mae'
 	assert resolved['data']['amplitude_agc'] == {'enabled': False}
+	assert resolved['data']['finite_check_mode'] == 'strict'
 	assert resolved['loss']['visible_reconstruction_weight'] == 0.0
 	assert resolved['loss']['target_normalization'] == {'mode': 'none'}
 
@@ -29,6 +30,16 @@ def test_pretraining_config_accepts_enabled_agc() -> None:
 	resolved = resolve_mae_training_config(cfg)
 
 	assert resolved['data']['amplitude_agc']['enabled'] is True
+
+
+@pytest.mark.parametrize('mode', ['strict', 'output_only', 'off'])
+def test_pretraining_config_accepts_finite_check_modes(mode: str) -> None:
+	cfg = _minimal_training_config()
+	cfg['data']['finite_check_mode'] = mode
+
+	resolved = resolve_mae_training_config(cfg)
+
+	assert resolved['data']['finite_check_mode'] == mode
 
 
 def test_pretraining_config_validates_visible_reconstruction_weight() -> None:

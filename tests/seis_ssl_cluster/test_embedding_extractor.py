@@ -115,6 +115,7 @@ def test_extractor_read_window_matches_shared_preprocessing(
 			normalized_clip_abs=fixture.normalized_clip_abs,
 			amplitude_agc=fixture.amplitude_agc,
 			min_token_valid_fraction=0.5,
+			finite_check_mode='strict',
 		),
 		patch_size_xyz=PATCH_SIZE_XYZ,
 	)
@@ -285,7 +286,28 @@ def test_embedding_extraction_uses_checkpoint_amplitude_agc_settings(
 	assert metadata['preprocessing'] == {
 		'normalized_clip_abs': None,
 		'amplitude_agc': amplitude_agc,
+		'finite_check_mode': 'strict',
 	}
+
+
+def test_embedding_extraction_defaults_legacy_finite_check_mode_to_strict(
+	tmp_path: Path,
+) -> None:
+	def remove_finite_check_mode(checkpoint_config: dict[str, object]) -> None:
+		data = checkpoint_config['data']
+		assert isinstance(data, dict)
+		data.pop('finite_check_mode')
+
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_config_modifier=remove_finite_check_mode,
+	)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+
+	assert metadata['finite_check_mode'] == 'strict'
+	assert metadata['preprocessing']['finite_check_mode'] == 'strict'
 
 
 def test_embedding_extraction_rejects_checkpoint_data_zero_mask_only(
@@ -582,6 +604,7 @@ def _write_fixture(  # noqa: PLR0913
 			'local_crop_size': [4, 4, 4],
 			'min_valid_fraction': 0.1,
 			'max_resample_attempts': 16,
+			'finite_check_mode': 'strict',
 		},
 		'model': model_config,
 		'masking': {
@@ -682,6 +705,7 @@ def _expected_valid_tokens_from_shared_preprocessing(
 		normalized_clip_abs=settings.normalized_clip_abs,
 		amplitude_agc=settings.amplitude_agc,
 		min_token_valid_fraction=settings.min_token_valid_fraction,
+		finite_check_mode=settings.finite_check_mode,
 	)
 	store = NpyMemmapVolumeStore()
 	for window in iter_sliding_windows(

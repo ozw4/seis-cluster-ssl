@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 	from seis_ssl_cluster.data.normalization import AmplitudeAgcConfig
 	from seis_ssl_cluster.data.schema import SurveyManifest
+	from seis_ssl_cluster.data.window_preprocessing import FiniteCheckMode
 	from seis_ssl_cluster.stratigraphy.targets import StratPseudoTargetInput
 
 
@@ -35,6 +36,7 @@ class NopimsStratPseudoTargetDataset:
 		max_resample_attempts: int = 16,
 		normalized_clip_abs: float | None = None,
 		amplitude_agc: AmplitudeAgcConfig | Mapping[str, object] | None = None,
+		finite_check_mode: FiniteCheckMode = 'strict',
 		min_confidence: float = 0.0,
 	) -> None:
 		provider = StratPseudoTargetProvider(
@@ -52,6 +54,7 @@ class NopimsStratPseudoTargetDataset:
 			max_resample_attempts=max_resample_attempts,
 			normalized_clip_abs=normalized_clip_abs,
 			amplitude_agc=amplitude_agc,
+			finite_check_mode=finite_check_mode,
 			target_provider=provider,
 		)
 

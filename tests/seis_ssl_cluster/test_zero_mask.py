@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+import seis_ssl_cluster.data.zero_mask as zero_mask_module
 from seis_ssl_cluster.data import (
 	ZeroMaskConfig,
 	compute_zero_amplitude_invalid_mask,
 	detect_all_zero_traces,
 	detect_all_zero_z_samples,
+	dilate_zero_sample_mask,
+	dilate_zero_trace_mask,
 )
 
 
@@ -76,3 +80,55 @@ def test_all_zero_trace_detection_respects_zero_atol() -> None:
 
 	assert not detect_all_zero_traces(amplitude, zero_atol=0.0)[1, 1]
 	assert detect_all_zero_traces(amplitude, zero_atol=0.1)[1, 1]
+
+
+@pytest.mark.parametrize('radius', [0, 1, 2, 3, 4])
+def test_vectorized_dilation_matches_reference(radius: int) -> None:
+	zero_z = np.asarray([True, False, False, True, False], dtype=bool)
+	zero_traces = np.zeros((4, 5), dtype=bool)
+	zero_traces[0, 0] = True
+	zero_traces[2, 3] = True
+	shape = (4, 5, 5)
+	expected_z = np.zeros(shape, dtype=bool)
+	for z_index in np.flatnonzero(zero_z):
+		expected_z[:, :, max(0, z_index - radius) : z_index + radius + 1] = True
+	expected_traces = np.zeros(shape, dtype=bool)
+	for x_index, y_index in zip(*np.nonzero(zero_traces), strict=True):
+		expected_traces[
+			max(0, x_index - radius) : x_index + radius + 1,
+			max(0, y_index - radius) : y_index + radius + 1,
+			:,
+		] = True
+
+	np.testing.assert_array_equal(
+		dilate_zero_sample_mask(zero_z, shape, radius_z=radius),
+		expected_z,
+	)
+	np.testing.assert_array_equal(
+		dilate_zero_trace_mask(zero_traces, shape, radius_xy=radius),
+		expected_traces,
+	)
+
+
+def test_combined_zero_mask_prepares_amplitude_once(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	calls = 0
+	original = zero_mask_module._as_amplitude_and_valid_mask  # noqa: SLF001
+
+	def counted_prepare(
+		amplitude: np.ndarray,
+		valid_mask: np.ndarray | None,
+	) -> tuple[np.ndarray, np.ndarray | None]:
+		nonlocal calls
+		calls += 1
+		return original(amplitude, valid_mask)
+
+	monkeypatch.setattr(
+		zero_mask_module,
+		'_as_amplitude_and_valid_mask',
+		counted_prepare,
+	)
+	compute_zero_amplitude_invalid_mask(np.ones((3, 4, 5), dtype=np.float32))
+
+	assert calls == 1

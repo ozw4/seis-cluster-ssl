@@ -61,6 +61,7 @@ from seis_ssl_cluster.config.schema import (
 	MAE_DEBUG_VISUALIZATION_KEYS,
 	STAGE_MAE_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
+	SUPPORTED_FINITE_CHECK_MODES,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
@@ -89,6 +90,7 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 			'max_resample_attempts',
 			'normalized_clip_abs',
 			'amplitude_agc',
+			'finite_check_mode',
 		},
 	),
 	'model': frozenset(
@@ -183,6 +185,7 @@ def resolve_mae_training_config(config: _T) -> Config:
 			prefix='data',
 		)
 	_validate_amplitude_agc(data)
+	_validate_finite_check_mode(data)
 
 	patch_size = _validate_positive_int_triplet(
 		model,
@@ -339,7 +342,18 @@ def _validate_strat_hmm_pretext_data(
 			prefix='data',
 		)
 	_validate_amplitude_agc(data)
+	_validate_finite_check_mode(data)
 	return local_crop_size
+
+
+def _validate_finite_check_mode(data: Mapping[str, object]) -> None:
+	mode = data.get('finite_check_mode')
+	if mode not in SUPPORTED_FINITE_CHECK_MODES:
+		msg = (
+			'data.finite_check_mode must be one of '
+			f'{sorted(SUPPORTED_FINITE_CHECK_MODES)!r}; got {mode!r}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_strat_hmm_pretext_pseudo_targets(

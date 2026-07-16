@@ -43,31 +43,35 @@ def compute_zero_amplitude_invalid_mask(
 	config: ZeroMaskConfig = DEFAULT_ZERO_MASK_CONFIG,
 ) -> np.ndarray:
 	"""Return a boolean [x, y, z] invalid mask for raw zero regions."""
-	amplitude, valid = _prepare_amplitude_and_valid_mask(amplitude_xyz, valid_mask)
 	config.validate()
+	amplitude, valid = _as_amplitude_and_valid_mask(amplitude_xyz, valid_mask)
 	if not config.enabled:
 		return np.zeros(amplitude.shape, dtype=bool)
 
-	invalid = np.zeros(amplitude.shape, dtype=bool)
-	zero_z_samples = detect_all_zero_z_samples(
-		amplitude,
-		valid_mask=valid,
-		zero_atol=config.zero_atol,
-	)
-	invalid |= dilate_zero_sample_mask(
+	amplitude = _replace_nonfinite_with_zero(amplitude)
+	np.abs(amplitude, out=amplitude)
+	zero_like = np.less_equal(amplitude, np.float32(config.zero_atol))
+	zero_z_samples = _detect_all_zero_z_samples(zero_like, valid)
+	zero_traces = _detect_all_zero_traces(zero_like, valid)
+	dilated_z = _dilate_boolean_axis(
 		zero_z_samples,
-		amplitude.shape,
-		radius_z=config.z_sample_influence_radius,
+		config.z_sample_influence_radius,
+		axis=0,
 	)
-	zero_traces = detect_all_zero_traces(
-		amplitude,
-		valid_mask=valid,
-		zero_atol=config.zero_atol,
+	dilated_traces = _dilate_boolean_axis(
+		_dilate_boolean_axis(
+			zero_traces,
+			config.xy_trace_influence_radius,
+			axis=0,
+		),
+		config.xy_trace_influence_radius,
+		axis=1,
 	)
-	invalid |= dilate_zero_trace_mask(
-		zero_traces,
-		amplitude.shape,
-		radius_xy=config.xy_trace_influence_radius,
+	invalid = np.empty(amplitude.shape, dtype=bool)
+	np.logical_or(
+		dilated_z[np.newaxis, np.newaxis, :],
+		dilated_traces[:, :, np.newaxis],
+		out=invalid,
 	)
 	return invalid
 
@@ -82,9 +86,7 @@ def detect_all_zero_z_samples(
 	amplitude, valid = _prepare_amplitude_and_valid_mask(amplitude_xyz, valid_mask)
 	_validate_zero_atol(zero_atol)
 	zero_like = np.abs(amplitude) <= np.float32(zero_atol)
-	any_valid = np.any(valid, axis=(0, 1))
-	all_valid_zero = np.all(zero_like | ~valid, axis=(0, 1))
-	return (any_valid & all_valid_zero).astype(bool, copy=False)
+	return _detect_all_zero_z_samples(zero_like, valid)
 
 
 def detect_all_zero_traces(
@@ -97,9 +99,7 @@ def detect_all_zero_traces(
 	amplitude, valid = _prepare_amplitude_and_valid_mask(amplitude_xyz, valid_mask)
 	_validate_zero_atol(zero_atol)
 	zero_like = np.abs(amplitude) <= np.float32(zero_atol)
-	any_valid = np.any(valid, axis=2)
-	all_valid_zero = np.all(zero_like | ~valid, axis=2)
-	return (any_valid & all_valid_zero).astype(bool, copy=False)
+	return _detect_all_zero_traces(zero_like, valid)
 
 
 def dilate_zero_sample_mask(
@@ -116,12 +116,8 @@ def dilate_zero_sample_mask(
 		msg = f'zero_z_samples shape must be {(shape[2],)!r}; got {zero_z.shape!r}'
 		raise ValueError(msg)
 
-	invalid = np.zeros(shape, dtype=bool)
-	for z_index in np.flatnonzero(zero_z):
-		start = max(0, int(z_index) - radius)
-		stop = min(shape[2], int(z_index) + radius + 1)
-		invalid[:, :, start:stop] = True
-	return invalid
+	dilated = _dilate_boolean_axis(zero_z, radius, axis=0)
+	return np.broadcast_to(dilated, shape).copy()
 
 
 def dilate_zero_trace_mask(
@@ -138,20 +134,26 @@ def dilate_zero_trace_mask(
 		msg = f'zero_traces_xy shape must be {shape[:2]!r}; got {zero_traces.shape!r}'
 		raise ValueError(msg)
 
-	invalid = np.zeros(shape, dtype=bool)
-	for x_index, y_index in zip(*np.nonzero(zero_traces), strict=True):
-		x_start = max(0, int(x_index) - radius)
-		x_stop = min(shape[0], int(x_index) + radius + 1)
-		y_start = max(0, int(y_index) - radius)
-		y_stop = min(shape[1], int(y_index) + radius + 1)
-		invalid[x_start:x_stop, y_start:y_stop, :] = True
-	return invalid
+	dilated = _dilate_boolean_axis(
+		_dilate_boolean_axis(zero_traces, radius, axis=0),
+		radius,
+		axis=1,
+	)
+	return np.broadcast_to(dilated[:, :, np.newaxis], shape).copy()
 
 
 def _prepare_amplitude_and_valid_mask(
 	amplitude_xyz: np.ndarray,
 	valid_mask: np.ndarray | None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray | None]:
+	amplitude, valid = _as_amplitude_and_valid_mask(amplitude_xyz, valid_mask)
+	return _replace_nonfinite_with_zero(amplitude), valid
+
+
+def _as_amplitude_and_valid_mask(
+	amplitude_xyz: np.ndarray,
+	valid_mask: np.ndarray | None,
+) -> tuple[np.ndarray, np.ndarray | None]:
 	amplitude = np.asarray(amplitude_xyz, dtype=np.float32)
 	if amplitude.ndim != 3:
 		msg = f'amplitude_xyz must be a 3D [x, y, z] array; got ndim={amplitude.ndim}'
@@ -163,7 +165,7 @@ def _prepare_amplitude_and_valid_mask(
 		)
 		raise ValueError(msg)
 	if valid_mask is None:
-		valid = np.ones(amplitude.shape, dtype=bool)
+		valid = None
 	else:
 		valid = np.asarray(valid_mask, dtype=bool)
 		if valid.shape != amplitude.shape:
@@ -172,13 +174,64 @@ def _prepare_amplitude_and_valid_mask(
 				f'{valid.shape!r} and {amplitude.shape!r}'
 			)
 			raise ValueError(msg)
-	amplitude = np.nan_to_num(
+	return amplitude, valid
+
+
+def _replace_nonfinite_with_zero(amplitude: np.ndarray) -> np.ndarray:
+	return np.nan_to_num(
 		amplitude,
 		nan=0.0,
 		posinf=0.0,
 		neginf=0.0,
 	).astype(np.float32, copy=False)
-	return amplitude, valid
+
+
+def _detect_all_zero_z_samples(
+	zero_like: np.ndarray,
+	valid: np.ndarray | None,
+) -> np.ndarray:
+	if valid is None:
+		return np.all(zero_like, axis=(0, 1))
+	any_valid = np.any(valid, axis=(0, 1))
+	all_valid_zero = np.all(zero_like | ~valid, axis=(0, 1))
+	return (any_valid & all_valid_zero).astype(bool, copy=False)
+
+
+def _detect_all_zero_traces(
+	zero_like: np.ndarray,
+	valid: np.ndarray | None,
+) -> np.ndarray:
+	if valid is None:
+		return np.all(zero_like, axis=2)
+	any_valid = np.any(valid, axis=2)
+	all_valid_zero = np.all(zero_like | ~valid, axis=2)
+	return (any_valid & all_valid_zero).astype(bool, copy=False)
+
+
+def _dilate_boolean_axis(
+	mask: np.ndarray,
+	radius: int,
+	*,
+	axis: int,
+) -> np.ndarray:
+	if radius == 0:
+		return np.asarray(mask, dtype=bool)
+	pad_width = [(0, 0)] * mask.ndim
+	pad_width[axis] = (radius, radius)
+	padded = np.pad(mask, pad_width, mode='constant', constant_values=False)
+	cumulative = np.cumsum(padded, axis=axis, dtype=np.int32)
+	zero_shape = list(cumulative.shape)
+	zero_shape[axis] = 1
+	cumulative = np.concatenate(
+		(np.zeros(zero_shape, dtype=np.int32), cumulative),
+		axis=axis,
+	)
+	window = 2 * radius + 1
+	upper = [slice(None)] * mask.ndim
+	lower = [slice(None)] * mask.ndim
+	upper[axis] = slice(window, None)
+	lower[axis] = slice(None, -window)
+	return (cumulative[tuple(upper)] - cumulative[tuple(lower)]) > 0
 
 
 def _validate_shape_xyz(shape_xyz: tuple[int, int, int]) -> tuple[int, int, int]:

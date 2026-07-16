@@ -232,7 +232,25 @@ def normalize_amplitude(
 	normalized_clip_abs: float | None = None,
 ) -> np.ndarray:
 	"""Clip and robust-scale an amplitude crop without changing XYZ order."""
+	buffer = np.array(crop, dtype=np.float32, copy=True)
+	return _normalize_amplitude_inplace(
+		buffer,
+		stats,
+		normalized_clip_abs=normalized_clip_abs,
+	)
+
+
+def _normalize_amplitude_inplace(
+	buffer: np.ndarray,
+	stats: SurveyNormalizationStats,
+	*,
+	normalized_clip_abs: float | None = None,
+) -> np.ndarray:
+	"""Normalize a writable float32 work buffer in place."""
 	stats.validate()
+	if buffer.dtype != np.dtype(np.float32) or not buffer.flags.writeable:
+		msg = 'buffer must be a writable float32 array'
+		raise ValueError(msg)
 	if (
 		normalized_clip_abs is not None
 		and (not np.isfinite(normalized_clip_abs) or normalized_clip_abs <= 0.0)
@@ -242,13 +260,13 @@ def normalize_amplitude(
 			f'got {normalized_clip_abs!r}'
 		)
 		raise ValueError(msg)
-	amplitude = np.asarray(crop, dtype=np.float32)
-	clipped = np.clip(amplitude, stats.clip_low, stats.clip_high)
-	normalized = (clipped - stats.median) / (stats.iqr + stats.eps)
+	np.clip(buffer, stats.clip_low, stats.clip_high, out=buffer)
+	np.subtract(buffer, np.float32(stats.median), out=buffer)
+	np.divide(buffer, np.float32(stats.iqr + stats.eps), out=buffer)
 	if normalized_clip_abs is not None:
 		limit = np.float32(normalized_clip_abs)
-		normalized = np.clip(normalized, -limit, limit)
-	return normalized.astype(np.float32, copy=False)
+		np.clip(buffer, -limit, limit, out=buffer)
+	return buffer
 
 
 def apply_configured_agc(

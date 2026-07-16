@@ -36,6 +36,7 @@ from seis_ssl_cluster.stratigraphy.targets import (
 	pseudo_target_paths,
 	validate_pseudo_target_arrays,
 )
+from seis_ssl_cluster.training.checkpoint import load_checkpoint
 from tests.seis_ssl_cluster.helpers_window_preprocessing import (
 	PATCH_SIZE_XYZ,
 	read_fixture_crop,
@@ -78,6 +79,7 @@ def test_builder_read_window_matches_shared_preprocessing(tmp_path: Path) -> Non
 			normalized_clip_abs=fixture.normalized_clip_abs,
 			amplitude_agc=fixture.amplitude_agc,
 			min_token_valid_fraction=0.5,
+			finite_check_mode='strict',
 		),
 		patch_size_xyz=PATCH_SIZE_XYZ,
 	)
@@ -213,6 +215,27 @@ def test_metadata_records_checkpoint_provenance_and_hmm_settings(
 	assert source['inference']['window_size'] == [4, 4, 4]
 	assert source['valid_summary']['decoded_valid_token_count'] == 12
 	assert source['confidence_summary']['min'] >= 0.0
+
+
+def test_builder_defaults_legacy_finite_check_mode_to_strict(tmp_path: Path) -> None:
+	config = _resolved_config(tmp_path)
+	checkpoint_path = config['checkpoint']['path']
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	data = payload['config']['data']
+	assert isinstance(data, dict)
+	data.pop('finite_check_mode')
+	torch.save(payload, checkpoint_path)
+
+	build_strat_hmm_pseudo_targets(config, device='cpu')
+
+	metadata = load_pseudo_target_metadata(
+		pseudo_target_paths(
+			config['outputs']['pseudo_target_root'],
+			k=3,
+			survey_id='survey-a',
+		),
+	)
+	assert metadata['source']['preprocessing']['finite_check_mode'] == 'strict'
 
 
 def test_cli_non_dry_run_executes_one_survey_tiny_config(
@@ -410,6 +433,7 @@ def _mae_config(
 				'local_crop_size': [4, 4, 4],
 				'min_valid_fraction': 0.0,
 				'max_resample_attempts': 2,
+				'finite_check_mode': 'strict',
 			},
 			'model': {
 				'name': 'amp_mae3d',

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 import torch
 
@@ -58,6 +58,8 @@ from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 if TYPE_CHECKING:
 	from collections.abc import Mapping
 	from pathlib import Path
+
+	from seis_ssl_cluster.data.window_preprocessing import FiniteCheckMode
 
 
 def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
@@ -117,6 +119,10 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 		),
 		normalized_clip_abs=_optional_float_config(data_config, 'normalized_clip_abs'),
 		amplitude_agc=data_config.get('amplitude_agc'),
+		finite_check_mode=cast(
+			'FiniteCheckMode',
+			data_config.get('finite_check_mode', 'strict'),
+		),
 		min_confidence=_float_config(pseudo_config, 'min_confidence', 0.0),
 	)
 	dataloader = build_strat_pseudo_target_dataloader(
