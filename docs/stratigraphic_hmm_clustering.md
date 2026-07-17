@@ -67,6 +67,40 @@ This is part of the clustering run itself. It is not post-hoc visualization
 masking: excluded edge tokens are not sampled for center fitting, are not
 decoded by Viterbi, and remain invalid in the output label grid.
 
+## Prepared Feature Cache
+
+For embedding emissions, the HMM residualizes and preprocesses each valid token
+once, then stores the resulting float32 features and their flat token indices as
+memmaps. Every requested `k` and HMM iteration reads this prepared representation
+instead of repeating residualization and PCA. The default cache root is
+`clustering.output_dir/prepared_features`, and completed fingerprint directories
+are persistent and reusable by default. This output can be substantial: in
+addition to the indices, feature storage is approximately four bytes times the
+valid-token count times the transformed feature dimension.
+
+Configure its lifecycle under `clustering.stratigraphic_hmm`:
+
+```yaml
+prepared_feature_cache:
+  chunk_size_tokens: 65536
+  reuse: true
+  force_rebuild: false
+  cleanup: false
+  persist: true
+  # directory: /custom/cache/root
+```
+
+`reuse` accepts a completed cache only when its fingerprint matches the source
+embedding and valid mask, residualizer, preprocessor, feature mode, edge margin,
+dtype, and schema. `force_rebuild` bypasses a matching cache. Set `cleanup: true`
+and `persist: false` to remove completed cache directories when the run closes;
+the two settings must be complementary. `directory` overrides the default cache
+root. Builds use a temporary directory and become reusable only after atomic
+completion, so interrupted partial directories are not treated as valid caches.
+
+The `z_coordinate` guardrail computes its one-dimensional feature directly and
+does not create a prepared-feature disk cache.
+
 ## Path Prior
 
 `clustering.stratigraphic_hmm.path_prior` adds soft sequence-level costs to the

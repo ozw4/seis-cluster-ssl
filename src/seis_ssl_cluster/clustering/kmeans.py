@@ -25,8 +25,7 @@ from seis_ssl_cluster.clustering.residualization import (
 	LocalTokenPositionResidualizer,
 	fit_local_token_position_residualizer,
 	residualization_metadata_disabled,
-	sample_residualization_keys,
-	write_residualizer_npz,
+	sample_residualization_group_ids,
 )
 from seis_ssl_cluster.clustering.sampling import (
 	SampledTokens,
@@ -34,9 +33,9 @@ from seis_ssl_cluster.clustering.sampling import (
 )
 from seis_ssl_cluster.clustering.writer import (
 	SurveyLabelResult,
-	write_labels_for_k,
-	write_model_artifacts,
+	write_clustering_artifacts_for_models,
 )
+from seis_ssl_cluster.utils import StageTimer
 
 
 @dataclass(frozen=True)
@@ -74,6 +73,7 @@ class ClusteringSettings:
 	minibatch_size: int
 	seed: int
 	prediction_batch_size: int
+	stage_timing: bool
 
 
 @dataclass(frozen=True)
@@ -148,7 +148,6 @@ def run_minibatch_kmeans_clustering(
 	residualizer_path: Path | None = None
 	if residualizer is not None:
 		residualizer_path = settings.output_dir / 'models' / 'residualizer.npz'
-		write_residualizer_npz(residualizer_path, residualizer)
 	common_metadata = _common_metadata(
 		settings=settings,
 		embedding_inputs=embedding_inputs,
@@ -158,52 +157,44 @@ def run_minibatch_kmeans_clustering(
 		residualizer=residualizer,
 		residualizer_path=residualizer_path,
 	)
-	results: list[KClusteringResult] = []
-	for k in settings.k_values:
-		kmeans = fit_minibatch_kmeans(
+	kmeans_by_k = {
+		k: fit_minibatch_kmeans(
 			training_features,
 			k=k,
 			batch_size=settings.minibatch_size,
 			seed=settings.seed,
 		)
-		label_results = write_labels_for_k(
+		for k in settings.k_values
+	}
+	timer = StageTimer(enabled=settings.stage_timing)
+	try:
+		label_results_by_k = write_clustering_artifacts_for_models(
 			output_dir=settings.output_dir,
-			k=k,
+			kmeans_by_k=kmeans_by_k,
 			embedding_inputs=embedding_inputs,
 			residualizer=residualizer,
+			residualizer_path=residualizer_path,
 			preprocessor=preprocessor,
-			kmeans=kmeans,
 			prediction_batch_size=settings.prediction_batch_size,
 			label_metadata=common_metadata,
+			model_metadata_for_k=lambda k, label_results: _model_metadata(
+				common_metadata=common_metadata,
+				settings=settings,
+				k=k,
+				kmeans=kmeans_by_k[k],
+				label_results=label_results,
+			),
+			timer=timer,
 		)
+	finally:
+		if timer.enabled:
+			timer.write_json(settings.output_dir / 'stage_timings.json')
+	results: list[KClusteringResult] = []
+	for k in settings.k_values:
+		label_results = label_results_by_k[k]
 		cluster_counts = _aggregate_counts(label_results, k)
 		invalid_token_count = int(
 			sum(result.invalid_token_count for result in label_results),
-		)
-		metadata = {
-			**common_metadata,
-			'k': int(k),
-			'kmeans': _kmeans_metadata(kmeans, settings=settings, k=k),
-			'cluster_counts': cluster_counts,
-			'invalid_token_count': invalid_token_count,
-			'surveys': [
-				{
-					'survey_id': result.survey_id,
-					'label_path': str(result.labels_path),
-					'label_metadata_path': str(result.metadata_path),
-					'valid_token_count': result.valid_token_count,
-					'invalid_token_count': result.invalid_token_count,
-					'cluster_counts': result.cluster_counts,
-				}
-				for result in label_results
-			],
-		}
-		write_model_artifacts(
-			output_dir=settings.output_dir,
-			k=k,
-			preprocessor=preprocessor,
-			kmeans=kmeans,
-			metadata=metadata,
 		)
 		results.append(
 			KClusteringResult(
@@ -261,6 +252,10 @@ def clustering_settings_from_config(
 			clustering.get('prediction_batch_size', minibatch_size),
 			'clustering.prediction_batch_size',
 		),
+		stage_timing=_bool(
+			clustering.get('stage_timing', False),
+			'clustering.stage_timing',
+		),
 	)
 
 
@@ -274,17 +269,18 @@ def fit_residualizer(
 	"""Fit optional local token position residualization statistics."""
 	if not settings.enabled:
 		return None
-	group_keys = sample_residualization_keys(
+	group_ids, group_shape = sample_residualization_group_ids(
 		embedding_inputs,
 		per_survey_token_indices,
 		group_by=settings.group_by,
 	)
 	return fit_local_token_position_residualizer(
 		features,
-		group_keys,
+		group_ids,
 		group_by=settings.group_by,
 		add_global_mean_back=settings.add_global_mean_back,
 		min_group_count=settings.min_group_count,
+		group_shape=group_shape,
 	)
 
 
@@ -297,13 +293,19 @@ def apply_residualizer_to_sample(
 ) -> np.ndarray:
 	"""Apply optional residualization to sampled features before preprocessing."""
 	if residualizer is None:
-		return np.asarray(features, dtype=np.float32)
-	group_keys = sample_residualization_keys(
+		return features
+	group_ids, group_shape = sample_residualization_group_ids(
 		embedding_inputs,
 		per_survey_token_indices,
 		group_by=residualizer.group_by,
 	)
-	return residualizer.transform(features, group_keys)
+	if group_shape != residualizer.group_shape:
+		msg = (
+			'residualization group shape changed between fit and transform; '
+			f'got {group_shape!r} and {residualizer.group_shape!r}'
+		)
+		raise ValueError(msg)
+	return residualizer.transform(features, group_ids)
 
 
 def fit_preprocessor(
@@ -374,7 +376,7 @@ def fit_minibatch_kmeans(
 	return model
 
 
-def _common_metadata(
+def _common_metadata(  # noqa: PLR0913
 	*,
 	settings: ClusteringSettings,
 	embedding_inputs: Sequence[EmbeddingInput],
@@ -419,6 +421,7 @@ def _common_metadata(
 		'k_values': list(settings.k_values),
 		'minibatch_size': settings.minibatch_size,
 		'prediction_batch_size': settings.prediction_batch_size,
+		'stage_timing': settings.stage_timing,
 		'random_seed': settings.seed,
 	}
 
@@ -436,6 +439,36 @@ def _kmeans_metadata(
 		'random_state': settings.seed,
 		'n_iter': int(kmeans.n_iter_),
 		'inertia': float(kmeans.inertia_),
+	}
+
+
+def _model_metadata(
+	*,
+	common_metadata: Mapping[str, object],
+	settings: ClusteringSettings,
+	k: int,
+	kmeans: MiniBatchKMeans,
+	label_results: Sequence[SurveyLabelResult],
+) -> dict[str, object]:
+	return {
+		**common_metadata,
+		'k': int(k),
+		'kmeans': _kmeans_metadata(kmeans, settings=settings, k=k),
+		'cluster_counts': _aggregate_counts(label_results, k),
+		'invalid_token_count': int(
+			sum(result.invalid_token_count for result in label_results),
+		),
+		'surveys': [
+			{
+				'survey_id': result.survey_id,
+				'label_path': str(result.labels_path),
+				'label_metadata_path': str(result.metadata_path),
+				'valid_token_count': result.valid_token_count,
+				'invalid_token_count': result.invalid_token_count,
+				'cluster_counts': result.cluster_counts,
+			}
+			for result in label_results
+		],
 	}
 
 

@@ -22,6 +22,23 @@ def test_clustering_config_resolves_from_stage_module() -> None:
 	assert resolved['clustering']['k_values'] == [4, 6, 8]
 
 
+def test_clustering_config_accepts_opt_in_stage_timing() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['stage_timing'] = True
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['stage_timing'] is True
+
+
+def test_clustering_config_rejects_non_boolean_stage_timing() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['stage_timing'] = 'true'
+
+	with pytest.raises(TypeError, match='stage_timing'):
+		resolve_clustering_config(cfg)
+
+
 def test_stratigraphic_hmm_clustering_config_resolves() -> None:
 	cfg = _minimal_clustering_config()
 	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
@@ -48,6 +65,51 @@ def test_stratigraphic_hmm_clustering_config_accepts_edge_margin_tokens() -> Non
 		8,
 		0,
 	]
+
+
+def test_stratigraphic_hmm_clustering_config_accepts_prepared_feature_cache() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	hmm = _stratigraphic_hmm_config()
+	hmm['prepared_feature_cache'] = {
+		'chunk_size_tokens': 128,
+		'reuse': True,
+		'force_rebuild': False,
+		'cleanup': True,
+		'persist': False,
+		'directory': 'artifacts/prepared',
+	}
+	cfg['clustering']['stratigraphic_hmm'] = hmm
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert (
+		resolved['clustering']['stratigraphic_hmm']['prepared_feature_cache']
+		== hmm['prepared_feature_cache']
+	)
+
+
+@pytest.mark.parametrize(
+	'cache',
+	[
+		{'chunk_size_tokens': 0},
+		{'reuse': 'true'},
+		{'cleanup': True, 'persist': True},
+		{'directory': ''},
+		{'unknown': True},
+	],
+)
+def test_stratigraphic_hmm_clustering_config_rejects_invalid_prepared_cache(
+	cache: object,
+) -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
+	hmm = _stratigraphic_hmm_config()
+	hmm['prepared_feature_cache'] = cache
+	cfg['clustering']['stratigraphic_hmm'] = hmm
+
+	with pytest.raises((TypeError, ValueError), match='prepared_feature_cache'):
+		resolve_clustering_config(cfg)
 
 
 @pytest.mark.parametrize(
@@ -97,7 +159,7 @@ def test_stratigraphic_hmm_clustering_config_accepts_disabled_path_prior() -> No
 	}
 
 
-def test_stratigraphic_hmm_clustering_config_accepts_zero_expected_boundary_target() -> None:
+def test_hmm_config_accepts_zero_expected_boundary_target() -> None:
 	cfg = _minimal_clustering_config()
 	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'
 	hmm = _stratigraphic_hmm_config()

@@ -37,9 +37,15 @@ from seis_ssl_cluster.clustering.ordered_diagnostics import (
 	ordered_boundary_summary,
 	ordered_label_diagnostics,
 )
+from seis_ssl_cluster.clustering.prepared_features import (
+	PreparedFeatureCacheSettings,
+	PreparedFeatureStore,
+	PreparedSurveyFeatures,
+	prepare_feature_store,
+)
 from seis_ssl_cluster.clustering.residualization import (
 	LocalTokenPositionResidualizer,
-	residualization_keys_for_flat_indices,
+	residualization_groups_for_flat_indices,
 	write_residualizer_npz,
 )
 from seis_ssl_cluster.clustering.sampling import (
@@ -100,6 +106,7 @@ class StratigraphicHMMSettings:
 	empty_cluster_policy: str
 	edge_margin_tokens: tuple[int, int, int]
 	path_prior: HMMPathPriorSettings
+	prepared_feature_cache: PreparedFeatureCacheSettings
 
 
 def stratigraphic_hmm_settings_from_config(
@@ -131,7 +138,32 @@ def stratigraphic_hmm_settings_from_config(
 		empty_cluster_policy=str(update['empty_cluster_policy']),
 		edge_margin_tokens=_edge_margin_tokens_from_hmm_config(hmm),
 		path_prior=path_prior,
+		prepared_feature_cache=_prepared_feature_cache_settings_from_hmm_config(hmm),
 	)
+
+
+def _prepared_feature_cache_settings_from_hmm_config(
+	hmm: Mapping[str, object],
+) -> PreparedFeatureCacheSettings:
+	value = hmm.get('prepared_feature_cache', {})
+	if not isinstance(value, Mapping):
+		raise TypeError('prepared_feature_cache must be a mapping')
+	if 'cleanup' in value:
+		cleanup = bool(value['cleanup'])
+	else:
+		cleanup = not bool(value.get('persist', True))
+	persist = bool(value['persist']) if 'persist' in value else not cleanup
+	directory = value.get('directory')
+	settings = PreparedFeatureCacheSettings(
+		chunk_size_tokens=int(value.get('chunk_size_tokens', 65536)),
+		reuse=bool(value.get('reuse', True)),
+		force_rebuild=bool(value.get('force_rebuild', False)),
+		cleanup=cleanup,
+		persist=persist,
+		directory=None if directory is None else Path(str(directory)),
+	)
+	settings.validate()
+	return settings
 
 
 def _edge_margin_tokens_from_hmm_config(
@@ -522,12 +554,12 @@ def prepare_feature_batch_for_indices(
 		)
 		raise ValueError(msg)
 	if residualizer is not None and emission_source == 'embedding':
-		group_keys = residualization_keys_for_flat_indices(
+		groups = residualization_groups_for_flat_indices(
 			embedding_input,
 			indices,
-			group_by=residualizer.group_by,
+			residualizer=residualizer,
 		)
-		features = residualizer.transform(features, group_keys)
+		features = residualizer.transform(features, groups)
 	transformed = np.asarray(preprocessor.transform(features), dtype=np.float32)
 	if transformed.ndim != 2:
 		msg = f'preprocessor output must be 2D; got shape {transformed.shape!r}'
@@ -824,33 +856,138 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 	return labels
 
 
-def _decode_all_surveys(  # noqa: PLR0913
-	embedding_inputs: tuple[EmbeddingInput, ...],
+def decode_prepared_survey_ordered_labels(  # noqa: PLR0913
+	prepared_survey: PreparedSurveyFeatures,
 	*,
 	centers: np.ndarray,
-	residualizer: LocalTokenPositionResidualizer | None,
-	preprocessor: object,
 	transition_costs: np.ndarray,
 	initial_state_costs: np.ndarray | None,
 	terminal_state_costs: np.ndarray | None,
 	expected_boundaries: HMMExpectedBoundariesSettings | None,
-	emission_source: str,
-	edge_margin_tokens: tuple[int, int, int],
+) -> np.ndarray:
+	"""Decode one survey using only prepared feature rows."""
+	center_matrix = np.asarray(centers, dtype=np.float32)
+	if center_matrix.ndim != 2 or center_matrix.shape[0] == 0:
+		raise ValueError(
+			f'centers must be a non-empty 2D matrix; got {center_matrix.shape!r}'
+		)
+	shape = prepared_survey.token_shape_xyz
+	labels = np.full(shape, -1, dtype=np.int32)
+	k = center_matrix.shape[0]
+	with prepared_survey.open() as opened:
+		for x_index in range(shape[0]):
+			for y_index in range(shape[1]):
+				z_indices, features = opened.trace_features(x_index, y_index)
+				if z_indices.size == 0:
+					continue
+				if features.shape[1] != center_matrix.shape[1]:
+					raise ValueError(
+						'prepared feature dimension must match centers; got '
+						f'{features.shape[1]} and {center_matrix.shape[1]}',
+					)
+				trace_valid = np.zeros(shape[2], dtype=np.bool_)
+				trace_valid[z_indices] = True
+				emission_costs = np.zeros((shape[2], k), dtype=np.float32)
+				deltas = features[:, np.newaxis, :] - center_matrix[np.newaxis, :, :]
+				emission_costs[z_indices] = np.sum(deltas * deltas, axis=2)
+				labels[x_index, y_index, :] = decode_trace_segments(
+					emission_costs,
+					trace_valid,
+					transition_costs,
+					initial_state_costs=initial_state_costs,
+					terminal_state_costs=terminal_state_costs,
+					expected_boundary_count=_resolve_expected_boundary_count(
+						expected_boundaries,
+						k=k,
+						valid_trace_length=int(z_indices.size),
+					),
+					boundary_count_weight=(
+						0.0
+						if expected_boundaries is None
+						else expected_boundaries.weight
+					),
+				)
+	return labels
+
+
+def _decode_all_surveys(  # noqa: PLR0913
+	prepared_features: PreparedFeatureStore,
+	*,
+	centers: np.ndarray,
+	transition_costs: np.ndarray,
+	initial_state_costs: np.ndarray | None,
+	terminal_state_costs: np.ndarray | None,
+	expected_boundaries: HMMExpectedBoundariesSettings | None,
 ) -> dict[str, np.ndarray]:
 	return {
-		item.survey_id: decode_survey_ordered_labels(
-			item,
+		survey.embedding_input.survey_id: decode_prepared_survey_ordered_labels(
+			survey,
 			centers=centers,
-			residualizer=residualizer,
-			preprocessor=preprocessor,
 			transition_costs=transition_costs,
 			initial_state_costs=initial_state_costs,
 			terminal_state_costs=terminal_state_costs,
 			expected_boundaries=expected_boundaries,
-			emission_source=emission_source,
-			edge_margin_tokens=edge_margin_tokens,
 		)
-		for item in embedding_inputs
+		for survey in prepared_features.surveys
+	}
+
+
+def update_centers_from_prepared_labels(  # noqa: C901
+	prepared_features: PreparedFeatureStore,
+	labels_by_survey: Mapping[str, np.ndarray],
+	*,
+	centers: np.ndarray,
+	prediction_batch_size: int,
+	empty_cluster_policy: str,
+) -> tuple[np.ndarray, dict[str, object]]:
+	"""Update centers using only previously prepared feature rows."""
+	center_matrix = np.asarray(centers, dtype=np.float32)
+	if prediction_batch_size <= 0:
+		raise ValueError('prediction_batch_size must be positive')
+	if empty_cluster_policy != 'keep_previous':
+		raise ValueError("empty_cluster_policy must be 'keep_previous'")
+	k, feature_dim = center_matrix.shape
+	sums = np.zeros((k, feature_dim), dtype=np.float64)
+	counts = np.zeros(k, dtype=np.int64)
+	known = {survey.embedding_input.survey_id for survey in prepared_features.surveys}
+	if unknown := sorted(set(labels_by_survey) - known):
+		raise ValueError(f'labels_by_survey contains unknown survey ids: {unknown!r}')
+	for survey in prepared_features.surveys:
+		survey_id = survey.embedding_input.survey_id
+		if survey_id not in labels_by_survey:
+			raise ValueError(f'labels_by_survey missing survey id: {survey_id!r}')
+		labels = np.asarray(labels_by_survey[survey_id])
+		if labels.shape != survey.token_shape_xyz:
+			raise ValueError(f'label grid shape is invalid for {survey_id}')
+		flat_labels = labels.reshape(-1)
+		with survey.open() as opened:
+			for start in range(0, flat_labels.size, prediction_batch_size):
+				stop = min(start + prediction_batch_size, flat_labels.size)
+				local_indices = np.flatnonzero(flat_labels[start:stop] >= 0)
+				if local_indices.size == 0:
+					continue
+				indices = local_indices.astype(np.int64, copy=False) + start
+				batch_labels = np.asarray(flat_labels[indices], dtype=np.int64)
+				if np.any(batch_labels >= k):
+					raise ValueError(f'label id out of range for {survey_id}')
+				features = opened.features_for_flat_indices(indices)
+				if features.shape[1] != feature_dim:
+					raise ValueError('prepared feature dimension must match centers')
+				np.add.at(sums, batch_labels, features.astype(np.float64, copy=False))
+				counts += np.bincount(batch_labels, minlength=k)
+	new_centers = center_matrix.copy()
+	non_empty = counts > 0
+	new_centers[non_empty] = (sums[non_empty] / counts[non_empty, np.newaxis]).astype(
+		np.float32
+	)
+	shifts = np.linalg.norm(new_centers - center_matrix, axis=1)
+	return new_centers, {
+		'cluster_counts': {
+			int(label): int(count) for label, count in enumerate(counts)
+		},
+		'empty_clusters': [int(label) for label in np.flatnonzero(~non_empty)],
+		'center_shift_l2': [float(value) for value in shifts],
+		'total_center_shift_l2': float(np.linalg.norm(new_centers - center_matrix)),
 	}
 
 
@@ -943,7 +1080,7 @@ def update_centers_from_labels(  # noqa: C901, PLR0913
 	return new_centers.astype(np.float32, copy=False), summary
 
 
-def run_stratigraphic_hmm_clustering(
+def run_stratigraphic_hmm_clustering(  # noqa: PLR0915
 	config: Mapping[str, object],
 ) -> ClusteringRunResult:
 	"""Run stratigraphic HMM clustering from a validated config mapping."""
@@ -951,11 +1088,9 @@ def run_stratigraphic_hmm_clustering(
 	hmm_settings = stratigraphic_hmm_settings_from_config(config)
 	embedding_inputs = tuple(discover_embedding_inputs(settings.input_dir))
 	compatibility_signature = validate_compatible_embedding_inputs(embedding_inputs)
-	edge_margin_excluded_valid_token_count = (
-		_edge_margin_excluded_valid_token_count(
-			embedding_inputs,
-			hmm_settings.edge_margin_tokens,
-		)
+	edge_margin_excluded_valid_token_count = _edge_margin_excluded_valid_token_count(
+		embedding_inputs,
+		hmm_settings.edge_margin_tokens,
 	)
 	if hmm_settings.emission_source == 'embedding':
 		sample = _sample_valid_hmm_embedding_tokens(
@@ -1014,171 +1149,190 @@ def run_stratigraphic_hmm_clustering(
 		preprocessor.transform(training_input_features),
 		dtype=np.float32,
 	)
-	sample_z = sample_token_z_coordinates(
-		embedding_inputs,
-		sample.per_survey_token_indices,
-	)
-	residualizer_path: Path | None = None
-	if residualizer is not None:
-		residualizer_path = settings.output_dir / 'models' / 'residualizer.npz'
-		write_residualizer_npz(residualizer_path, residualizer)
-	common_metadata = _common_metadata(
-		settings=metadata_settings,
+	prepared_features = prepare_feature_store(
 		embedding_inputs=embedding_inputs,
-		compatibility_signature=compatibility_signature,
-		sample=sample,
-		preprocessor=preprocessor,
+		feature_dim=int(training_features.shape[1]),
+		feature_mode=hmm_settings.emission_source,
 		residualizer=residualizer,
-		residualizer_path=residualizer_path,
+		preprocessor=preprocessor,
+		edge_margin_tokens=hmm_settings.edge_margin_tokens,
+		settings=hmm_settings.prepared_feature_cache,
+		default_cache_root=settings.output_dir / 'prepared_features',
+		prepare_batch=lambda item, indices: prepare_feature_batch_for_indices(
+			item,
+			indices,
+			residualizer=residualizer,
+			preprocessor=preprocessor,
+			emission_source=hmm_settings.emission_source,
+		),
 	)
-	common_metadata = {
-		**common_metadata,
-		'emission_source': hmm_settings.emission_source,
-		'emission_features': _emission_feature_metadata(hmm_settings.emission_source),
-	}
-
-	results: list[KClusteringResult] = []
-	for k in settings.k_values:
-		transition_costs = build_ordered_transition_costs(k, hmm_settings.transition)
-		initial_state_costs = build_initial_state_costs(k, hmm_settings.path_prior)
-		terminal_state_costs = build_terminal_state_costs(k, hmm_settings.path_prior)
-		expected_boundaries = _active_expected_boundaries(hmm_settings.path_prior)
-		centers = initialize_ordered_centers(
-			training_features,
-			sample_z,
-			k=k,
-			batch_size=settings.minibatch_size,
-			seed=settings.seed,
+	try:
+		sample_z = sample_token_z_coordinates(
+			embedding_inputs,
+			sample.per_survey_token_indices,
 		)
-		iteration_summaries: list[dict[str, object]] = []
-		labels_by_survey: dict[str, np.ndarray] = {}
-		for iteration in range(1, hmm_settings.iterations + 1):
+		residualizer_path: Path | None = None
+		if residualizer is not None:
+			residualizer_path = settings.output_dir / 'models' / 'residualizer.npz'
+			write_residualizer_npz(residualizer_path, residualizer)
+		common_metadata = _common_metadata(
+			settings=metadata_settings,
+			embedding_inputs=embedding_inputs,
+			compatibility_signature=compatibility_signature,
+			sample=sample,
+			preprocessor=preprocessor,
+			residualizer=residualizer,
+			residualizer_path=residualizer_path,
+		)
+		common_metadata = {
+			**common_metadata,
+			'emission_source': hmm_settings.emission_source,
+			'emission_features': _emission_feature_metadata(
+				hmm_settings.emission_source
+			),
+			'prepared_feature_cache': prepared_features.to_metadata(),
+		}
+
+		results: list[KClusteringResult] = []
+		for k in settings.k_values:
+			transition_costs = build_ordered_transition_costs(
+				k,
+				hmm_settings.transition,
+			)
+			initial_state_costs = build_initial_state_costs(k, hmm_settings.path_prior)
+			terminal_state_costs = build_terminal_state_costs(
+				k,
+				hmm_settings.path_prior,
+			)
+			expected_boundaries = _active_expected_boundaries(hmm_settings.path_prior)
+			centers = initialize_ordered_centers(
+				training_features,
+				sample_z,
+				k=k,
+				batch_size=settings.minibatch_size,
+				seed=settings.seed,
+			)
+			iteration_summaries: list[dict[str, object]] = []
+			labels_by_survey: dict[str, np.ndarray] = {}
+			for iteration in range(1, hmm_settings.iterations + 1):
+				labels_by_survey = _decode_all_surveys(
+					prepared_features,
+					centers=centers,
+					transition_costs=transition_costs,
+					initial_state_costs=initial_state_costs,
+					terminal_state_costs=terminal_state_costs,
+					expected_boundaries=expected_boundaries,
+				)
+				centers, summary = update_centers_from_prepared_labels(
+					prepared_features,
+					labels_by_survey,
+					centers=centers,
+					prediction_batch_size=settings.prediction_batch_size,
+					empty_cluster_policy=hmm_settings.empty_cluster_policy,
+				)
+				iteration_summaries.append({'iteration': iteration, **summary})
+
 			labels_by_survey = _decode_all_surveys(
-				embedding_inputs,
+				prepared_features,
 				centers=centers,
-				residualizer=residualizer,
-				preprocessor=preprocessor,
 				transition_costs=transition_costs,
 				initial_state_costs=initial_state_costs,
 				terminal_state_costs=terminal_state_costs,
 				expected_boundaries=expected_boundaries,
-				emission_source=hmm_settings.emission_source,
-				edge_margin_tokens=hmm_settings.edge_margin_tokens,
 			)
-			centers, summary = update_centers_from_labels(
-				embedding_inputs,
-				labels_by_survey,
-				centers=centers,
-				residualizer=residualizer,
-				preprocessor=preprocessor,
-				prediction_batch_size=settings.prediction_batch_size,
-				empty_cluster_policy=hmm_settings.empty_cluster_policy,
-				emission_source=hmm_settings.emission_source,
-			)
-			iteration_summaries.append({'iteration': iteration, **summary})
 
-		labels_by_survey = _decode_all_surveys(
-			embedding_inputs,
-			centers=centers,
-			residualizer=residualizer,
-			preprocessor=preprocessor,
-			transition_costs=transition_costs,
-			initial_state_costs=initial_state_costs,
-			terminal_state_costs=terminal_state_costs,
-			expected_boundaries=expected_boundaries,
-			emission_source=hmm_settings.emission_source,
-			edge_margin_tokens=hmm_settings.edge_margin_tokens,
-		)
-
-		label_results = _write_hmm_labels_for_k(
-			output_dir=settings.output_dir,
-			k=k,
-			embedding_inputs=embedding_inputs,
-			labels_by_survey=labels_by_survey,
-			label_metadata=common_metadata,
-		)
-		cluster_counts = _aggregate_counts(label_results, k)
-		invalid_token_count = int(
-			sum(result.invalid_token_count for result in label_results),
-		)
-		per_survey_ordered_diagnostics = {
-			item.survey_id: ordered_label_diagnostics(
-				np.asarray(labels_by_survey[item.survey_id]),
+			label_results = _write_hmm_labels_for_k(
+				output_dir=settings.output_dir,
 				k=k,
-				z_axis=hmm_settings.z_axis,
+				embedding_inputs=embedding_inputs,
+				labels_by_survey=labels_by_survey,
+				label_metadata=common_metadata,
 			)
-			for item in embedding_inputs
-		}
-		hmm_metadata = _hmm_metadata(
-			hmm_settings=hmm_settings,
-			transition_costs=transition_costs,
-			initial_state_costs=initial_state_costs,
-			terminal_state_costs=terminal_state_costs,
-			iteration_summaries=iteration_summaries,
-			edge_margin_excluded_valid_token_count=(
-				edge_margin_excluded_valid_token_count
-			),
-		)
-		metadata = {
-			**common_metadata,
-			'k': int(k),
-			'cluster_counts': cluster_counts,
-			'invalid_token_count': invalid_token_count,
-			'stratigraphic_hmm': hmm_metadata,
-			'ordered_diagnostics': {
-				'per_survey': per_survey_ordered_diagnostics,
-				'aggregate': aggregate_ordered_label_diagnostics(
-					per_survey_ordered_diagnostics,
+			cluster_counts = _aggregate_counts(label_results, k)
+			invalid_token_count = int(
+				sum(result.invalid_token_count for result in label_results),
+			)
+			per_survey_ordered_diagnostics = {
+				item.survey_id: ordered_label_diagnostics(
+					np.asarray(labels_by_survey[item.survey_id]),
 					k=k,
+					z_axis=hmm_settings.z_axis,
+				)
+				for item in embedding_inputs
+			}
+			hmm_metadata = _hmm_metadata(
+				hmm_settings=hmm_settings,
+				transition_costs=transition_costs,
+				initial_state_costs=initial_state_costs,
+				terminal_state_costs=terminal_state_costs,
+				iteration_summaries=iteration_summaries,
+				edge_margin_excluded_valid_token_count=(
+					edge_margin_excluded_valid_token_count
 				),
-			},
-			'surveys': [
-				{
-					'survey_id': result.survey_id,
-					'label_path': str(result.labels_path),
-					'label_metadata_path': str(result.metadata_path),
-					'valid_token_count': result.valid_token_count,
-					'invalid_token_count': result.invalid_token_count,
-					'cluster_counts': result.cluster_counts,
-				}
-				for result in label_results
-			],
-		}
-		_write_hmm_model_artifacts(
-			output_dir=settings.output_dir,
-			k=k,
-			preprocessor=preprocessor,
-			centers=centers,
-			hmm_model={
-				'method': 'stratigraphic_hmm_kmeans',
-				'emission_source': hmm_settings.emission_source,
-				'centers': centers,
-				'transition_settings': asdict(hmm_settings.transition),
-				'edge_margin_tokens': hmm_settings.edge_margin_tokens,
-				'path_prior': asdict(hmm_settings.path_prior),
-				'transition_costs': transition_costs,
-				'initial_state_costs': initial_state_costs,
-				'terminal_state_costs': terminal_state_costs,
-				'iteration_count': hmm_settings.iterations,
-				'iteration_summaries': iteration_summaries,
-			},
-			metadata=metadata,
-		)
-		results.append(
-			KClusteringResult(
+				prepared_feature_cache=prepared_features.to_metadata(),
+			)
+			metadata = {
+				**common_metadata,
+				'k': int(k),
+				'cluster_counts': cluster_counts,
+				'invalid_token_count': invalid_token_count,
+				'stratigraphic_hmm': hmm_metadata,
+				'ordered_diagnostics': {
+					'per_survey': per_survey_ordered_diagnostics,
+					'aggregate': aggregate_ordered_label_diagnostics(
+						per_survey_ordered_diagnostics,
+						k=k,
+					),
+				},
+				'surveys': [
+					{
+						'survey_id': result.survey_id,
+						'label_path': str(result.labels_path),
+						'label_metadata_path': str(result.metadata_path),
+						'valid_token_count': result.valid_token_count,
+						'invalid_token_count': result.invalid_token_count,
+						'cluster_counts': result.cluster_counts,
+					}
+					for result in label_results
+				],
+			}
+			_write_hmm_model_artifacts(
+				output_dir=settings.output_dir,
 				k=k,
-				model_dir=settings.output_dir / 'models' / f'k{k}',
-				label_results=tuple(label_results),
-				cluster_counts=cluster_counts,
-				invalid_token_count=invalid_token_count,
-			),
-		)
+				preprocessor=preprocessor,
+				centers=centers,
+				hmm_model={
+					'method': 'stratigraphic_hmm_kmeans',
+					'emission_source': hmm_settings.emission_source,
+					'centers': centers,
+					'transition_settings': asdict(hmm_settings.transition),
+					'edge_margin_tokens': hmm_settings.edge_margin_tokens,
+					'path_prior': asdict(hmm_settings.path_prior),
+					'transition_costs': transition_costs,
+					'initial_state_costs': initial_state_costs,
+					'terminal_state_costs': terminal_state_costs,
+					'iteration_count': hmm_settings.iterations,
+					'iteration_summaries': iteration_summaries,
+				},
+				metadata=metadata,
+			)
+			results.append(
+				KClusteringResult(
+					k=k,
+					model_dir=settings.output_dir / 'models' / f'k{k}',
+					label_results=tuple(label_results),
+					cluster_counts=cluster_counts,
+					invalid_token_count=invalid_token_count,
+				),
+			)
 
-	return ClusteringRunResult(
-		embedding_inputs=embedding_inputs,
-		sample=sample,
-		results=tuple(results),
-	)
+		return ClusteringRunResult(
+			embedding_inputs=embedding_inputs,
+			sample=sample,
+			results=tuple(results),
+		)
+	finally:
+		prepared_features.close()
 
 
 def _sample_valid_hmm_embedding_tokens(
@@ -1231,12 +1385,8 @@ def _sample_valid_hmm_tokens(
 		msg = 'at least one embedding input is required'
 		raise ValueError(msg)
 
-	valid_indices_by_survey = {
-		item.survey_id: hmm_valid_flat_indices(item, edge_margin_tokens)
-		for item in embedding_inputs
-	}
 	valid_counts = [
-		int(valid_indices_by_survey[item.survey_id].size)
+		int(hmm_valid_flat_indices(item, edge_margin_tokens).size)
 		for item in embedding_inputs
 	]
 	total_valid = int(sum(valid_counts))
@@ -1257,7 +1407,7 @@ def _sample_valid_hmm_tokens(
 		mask = (selected_global >= offset) & (selected_global < stop)
 		local_valid_ordinals = selected_global[mask] - offset
 		if local_valid_ordinals.size:
-			all_valid_indices = valid_indices_by_survey[item.survey_id]
+			all_valid_indices = hmm_valid_flat_indices(item, edge_margin_tokens)
 			token_indices = all_valid_indices[local_valid_ordinals]
 			per_survey_indices[item.survey_id] = token_indices
 			feature_blocks.append(feature_loader(item, token_indices))
@@ -1374,6 +1524,7 @@ def _hmm_metadata(  # noqa: PLR0913
 	terminal_state_costs: np.ndarray,
 	iteration_summaries: list[dict[str, object]],
 	edge_margin_excluded_valid_token_count: int,
+	prepared_feature_cache: Mapping[str, object],
 ) -> dict[str, object]:
 	path_prior_settings = asdict(hmm_settings.path_prior)
 	expected_boundaries = dict(path_prior_settings['expected_boundaries'])
@@ -1407,6 +1558,7 @@ def _hmm_metadata(  # noqa: PLR0913
 		),
 		'path_prior': path_prior,
 		'iteration_summaries': iteration_summaries,
+		'prepared_feature_cache': dict(prepared_feature_cache),
 	}
 
 
@@ -1592,6 +1744,7 @@ __all__ = [
 	'build_initial_state_costs',
 	'build_ordered_transition_costs',
 	'build_terminal_state_costs',
+	'decode_prepared_survey_ordered_labels',
 	'decode_survey_ordered_labels',
 	'decode_trace_segments',
 	'initialize_ordered_centers',
@@ -1601,5 +1754,6 @@ __all__ = [
 	'sample_token_z_coordinates',
 	'stratigraphic_hmm_settings_from_config',
 	'update_centers_from_labels',
+	'update_centers_from_prepared_labels',
 	'viterbi_decode_costs',
 ]

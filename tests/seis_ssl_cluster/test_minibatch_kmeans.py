@@ -6,10 +6,259 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.clustering.kmeans as kmeans_module
+import seis_ssl_cluster.clustering.writer as writer_module
 from seis_ssl_cluster.clustering import run_embedding_clustering
+from seis_ssl_cluster.clustering.features import (
+	EmbeddingInput,
+	discover_embedding_inputs,
+	embedding_input_metadata,
+)
+from seis_ssl_cluster.clustering.kmeans import apply_residualizer_to_sample
+from seis_ssl_cluster.clustering.residualization import LocalTokenPositionResidualizer
+from seis_ssl_cluster.clustering.writer import (
+	write_labels_for_k,
+	write_labels_for_models,
+)
+from seis_ssl_cluster.utils import StageTimer
 
 if TYPE_CHECKING:
 	from pathlib import Path
+
+
+def test_disabled_residualization_skips_group_ids_and_copy(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	features = np.ones((2, 3), dtype=np.float64)
+
+	def fail_group_ids() -> None:
+		raise AssertionError('group IDs must not be generated')
+
+	monkeypatch.setattr(
+		kmeans_module,
+		'sample_residualization_group_ids',
+		fail_group_ids,
+	)
+	actual = apply_residualizer_to_sample(
+		features,
+		embedding_inputs=(),
+		per_survey_token_indices={},
+		residualizer=None,
+	)
+
+	assert actual is features
+
+
+def test_label_writer_applies_legacy_residualizer_with_coordinate_keys(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.array([[[[10.0, 20.0], [11.0, 21.0]]]], dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+	legacy = LocalTokenPositionResidualizer(
+		mode='local_token_position',
+		group_by='token_phase',
+		add_global_mean_back=True,
+		min_group_count=1,
+		means=np.array([[1.0, 2.0]], dtype=np.float32),
+		counts=np.array([2], dtype=np.int64),
+		group_shape=None,
+		fallback_mean=np.array([5.0, 6.0], dtype=np.float32),
+		legacy_group_keys=np.array([[0, 0, 0]], dtype=np.int64),
+	)
+
+	results = write_labels_for_k(
+		output_dir=tmp_path / 'clusters',
+		k=1,
+		embedding_inputs=discover_embedding_inputs(input_dir),
+		residualizer=legacy,
+		preprocessor=_IdentityPreprocessor(),
+		kmeans=_ZeroKMeans(),
+		prediction_batch_size=1,
+		label_metadata={},
+	)
+
+	assert results[0].cluster_counts == {0: 2}
+	labels = np.load(results[0].labels_path)
+	np.testing.assert_array_equal(labels, np.zeros((1, 1, 2), dtype=np.int32))
+
+
+def test_multi_model_label_writer_matches_single_passes_and_transforms_once(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.arange(18, dtype=np.float32).reshape(1, 2, 3, 3),
+		valid=np.array([[[True, False, True], [True, True, True]]]),
+	)
+	inputs = discover_embedding_inputs(input_dir)
+	multi_preprocessor = _CountingPreprocessor()
+	timer = StageTimer(enabled=True)
+	multi = write_labels_for_models(
+		output_dir=tmp_path / 'multi',
+		kmeans_by_k={3: _ModuloKMeans(3), 1: _ModuloKMeans(1)},
+		embedding_inputs=inputs,
+		residualizer=None,
+		preprocessor=multi_preprocessor,
+		prediction_batch_size=2,
+		label_metadata={'source': 'test'},
+		timer=timer,
+	)
+
+	assert list(multi) == [3, 1]
+	assert multi_preprocessor.call_count == 3
+	assert set(timer.to_dict()['stages']) == {
+		'feature_read',
+		'predict_k1',
+		'predict_k3',
+		'preprocess',
+		'write',
+	}
+	for k in (3, 1):
+		reference_labels, reference_counts, reference_metadata = (
+			_reference_labels_for_model(
+				inputs[0],
+				k=k,
+				prediction_batch_size=2,
+				label_metadata={'source': 'test'},
+			)
+		)
+		np.testing.assert_array_equal(
+			np.load(multi[k][0].labels_path),
+			reference_labels,
+		)
+		assert multi[k][0].cluster_counts == reference_counts
+		multi_metadata = json.loads(
+			multi[k][0].metadata_path.read_text(encoding='utf-8'),
+		)
+		multi_metadata.pop('label_path')
+		assert multi_metadata == reference_metadata
+
+
+def test_multi_model_label_writer_removes_partial_outputs_on_predict_failure(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.ones((1, 1, 3, 2), dtype=np.float32),
+		valid=np.ones((1, 1, 3), dtype=np.bool_),
+	)
+	output_dir = tmp_path / 'clusters'
+
+	with pytest.raises(RuntimeError, match='injected predict failure'):
+		write_labels_for_models(
+			output_dir=output_dir,
+			kmeans_by_k={1: _ZeroKMeans(), 2: _FailingKMeans()},
+			embedding_inputs=discover_embedding_inputs(input_dir),
+			residualizer=None,
+			preprocessor=_IdentityPreprocessor(),
+			prediction_batch_size=2,
+			label_metadata={},
+		)
+
+	assert not list(output_dir.rglob('*.npy'))
+	assert not list(output_dir.rglob('*.json'))
+	assert not list(output_dir.rglob('*.partial'))
+
+
+def test_multi_model_label_writer_rolls_back_publication_failure(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.ones((1, 1, 2, 1), dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+	output_dir = tmp_path / 'clusters'
+	labels_dir = output_dir / 'labels' / 'k1'
+	labels_dir.mkdir(parents=True)
+	labels_path = labels_dir / 'survey_a.cluster_labels_token.npy'
+	metadata_path = labels_dir / 'survey_a.cluster_label_metadata.json'
+	old_labels = np.full((1, 1, 2), 7, dtype=np.int32)
+	np.save(labels_path, old_labels)
+	metadata_path.write_text('{"old": true}\n', encoding='utf-8')
+	path_type = type(tmp_path)
+	original_replace = path_type.replace
+	publication_count = 0
+
+	def fail_second_publication(source: Path, target: Path) -> Path:
+		nonlocal publication_count
+		if source.name.endswith('.partial'):
+			publication_count += 1
+			if publication_count == 2:
+				raise OSError('injected publication failure')
+		return original_replace(source, target)
+
+	monkeypatch.setattr(path_type, 'replace', fail_second_publication)
+	with pytest.raises(OSError, match='injected publication failure'):
+		write_labels_for_models(
+			output_dir=output_dir,
+			kmeans_by_k={1: _ZeroKMeans()},
+			embedding_inputs=discover_embedding_inputs(input_dir),
+			residualizer=None,
+			preprocessor=_IdentityPreprocessor(),
+			prediction_batch_size=2,
+			label_metadata={},
+		)
+
+	np.testing.assert_array_equal(np.load(labels_path), old_labels)
+	assert metadata_path.read_text(encoding='utf-8') == '{"old": true}\n'
+	assert not list(output_dir.rglob('*.partial'))
+	assert not list(output_dir.rglob('*.backup'))
+
+
+def test_run_clustering_does_not_publish_labels_when_later_model_write_fails(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.array(
+			[[[[1.0, 0.0], [0.0, 1.0], [0.8, 0.2], [0.2, 0.8]]]],
+			dtype=np.float32,
+		),
+		valid=np.ones((1, 1, 4), dtype=np.bool_),
+	)
+	output_dir = tmp_path / 'clusters'
+	config = _config(input_dir, output_dir)
+	config['clustering']['sample_tokens'] = 4
+	config['clustering']['k_values'] = [2, 3]
+	original_dump = writer_module.joblib.dump
+	dump_count = 0
+
+	def fail_third_dump(value: object, path: Path) -> list[str]:
+		nonlocal dump_count
+		dump_count += 1
+		if dump_count == 3:
+			raise OSError('injected model write failure')
+		return original_dump(value, path)
+
+	monkeypatch.setattr(writer_module.joblib, 'dump', fail_third_dump)
+	with pytest.raises(OSError, match='injected model write failure'):
+		run_embedding_clustering(config)
+
+	assert not list((output_dir / 'labels').rglob('*.npy'))
+	assert not list((output_dir / 'labels').rglob('*.json'))
+	assert not list((output_dir / 'models').glob('k*'))
+	assert not list(output_dir.rglob('*.partial'))
 
 
 def test_run_embedding_clustering_writes_deterministic_labels_for_multiple_k(
@@ -45,12 +294,16 @@ def test_run_embedding_clustering_writes_deterministic_labels_for_multiple_k(
 	)
 
 	first = run_embedding_clustering(_config(input_dir, first_output))
-	second = run_embedding_clustering(_config(input_dir, second_output))
+	second_config = _config(input_dir, second_output)
+	second_config['clustering']['stage_timing'] = True
+	second = run_embedding_clustering(second_config)
 
 	assert [result.k for result in first.results] == [2, 3]
 	assert [result.k for result in second.results] == [2, 3]
 	assert first.sample.sample_count == 7
 	assert first.sample.total_valid_count == 7
+	assert not (first_output / 'stage_timings.json').exists()
+	assert (second_output / 'stage_timings.json').is_file()
 	for output_dir in (first_output, second_output):
 		for k in (2, 3):
 			assert (output_dir / 'models' / f'k{k}' / 'preprocessor.joblib').is_file()
@@ -370,3 +623,79 @@ def _embedding_metadata(
 			'xy_trace_influence_radius': 1,
 		},
 	}
+
+
+class _IdentityPreprocessor:
+	@staticmethod
+	def transform(features: np.ndarray) -> np.ndarray:
+		return features
+
+
+class _ZeroKMeans:
+	@staticmethod
+	def predict(features: np.ndarray) -> np.ndarray:
+		return np.zeros(features.shape[0], dtype=np.int32)
+
+
+class _ModuloKMeans:
+	def __init__(self, k: int) -> None:
+		self.k = k
+
+	def predict(self, features: np.ndarray) -> np.ndarray:
+		return np.arange(features.shape[0], dtype=np.int32) % self.k
+
+
+class _FailingKMeans:
+	@staticmethod
+	def predict(features: np.ndarray) -> np.ndarray:
+		del features
+		msg = 'injected predict failure'
+		raise RuntimeError(msg)
+
+
+class _CountingPreprocessor:
+	def __init__(self) -> None:
+		self.call_count = 0
+
+	def transform(self, features: np.ndarray) -> np.ndarray:
+		self.call_count += 1
+		return features
+
+
+def _reference_labels_for_model(
+	item: EmbeddingInput,
+	*,
+	k: int,
+	prediction_batch_size: int,
+	label_metadata: dict[str, object],
+) -> tuple[np.ndarray, dict[int, int], dict[str, object]]:
+	"""Run an independent single-model, multi-pass label reference."""
+	embeddings = np.load(item.embeddings_path)
+	valid = np.load(item.valid_tokens_path)
+	indices = np.flatnonzero(valid.reshape(-1))
+	labels = np.full(embeddings.shape[:3], -1, dtype=np.int32)
+	flat_embeddings = embeddings.reshape((-1, embeddings.shape[-1]))
+	flat_labels = labels.reshape(-1)
+	model = _ModuloKMeans(k)
+	preprocessor = _IdentityPreprocessor()
+	for start in range(0, indices.size, prediction_batch_size):
+		batch_indices = indices[start : start + prediction_batch_size]
+		features = np.asarray(flat_embeddings[batch_indices], dtype=np.float32)
+		flat_labels[batch_indices] = model.predict(preprocessor.transform(features))
+	counts_array = np.bincount(flat_labels[indices], minlength=k)
+	counts = {
+		label: int(count)
+		for label, count in enumerate(counts_array)
+	}
+	metadata = {
+		**label_metadata,
+		'k': k,
+		'survey_id': item.survey_id,
+		'embedding_input': embedding_input_metadata(item),
+		'token_grid_shape': list(embeddings.shape[:3]),
+		'embedding_dim': int(embeddings.shape[-1]),
+		'valid_token_count': int(indices.size),
+		'invalid_token_count': int(valid.size - indices.size),
+		'cluster_counts': {str(label): count for label, count in counts.items()},
+	}
+	return labels, counts, metadata
