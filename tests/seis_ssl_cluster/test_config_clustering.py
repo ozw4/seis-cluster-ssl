@@ -22,6 +22,23 @@ def test_clustering_config_resolves_from_stage_module() -> None:
 	assert resolved['clustering']['k_values'] == [4, 6, 8]
 
 
+def test_clustering_config_accepts_opt_in_stage_timing() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['stage_timing'] = True
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['stage_timing'] is True
+
+
+def test_clustering_config_rejects_non_boolean_stage_timing() -> None:
+	cfg = _minimal_clustering_config()
+	cfg['clustering']['stage_timing'] = 'true'
+
+	with pytest.raises(TypeError, match='stage_timing'):
+		resolve_clustering_config(cfg)
+
+
 def test_stratigraphic_hmm_clustering_config_resolves() -> None:
 	cfg = _minimal_clustering_config()
 	cfg['clustering']['method'] = 'stratigraphic_hmm_kmeans'

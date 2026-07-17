@@ -122,9 +122,7 @@ def write_labels_for_models(  # noqa: PLR0913
 			pending.extend(survey_pending)
 			for k, result in survey_results.items():
 				results[k].append(result)
-		for partial, final in pending:
-			partial.replace(final)
-			partial_paths.remove(partial)
+		_publish_pending_artifacts(pending)
 	except BaseException:
 		for path in partial_paths:
 			path.unlink(missing_ok=True)
@@ -262,6 +260,31 @@ def _validated_models(kmeans_by_k: Mapping[int, object]) -> dict[int, object]:
 
 def _partial_path(path: Path) -> Path:
 	return path.with_name(f'.{path.name}.{uuid4().hex}.partial')
+
+
+def _publish_pending_artifacts(pending: list[tuple[Path, Path]]) -> None:
+	"""Publish a batch of artifacts, restoring the prior state on failure."""
+	backups: list[tuple[Path, Path]] = []
+	published: list[Path] = []
+	try:
+		for _, final in pending:
+			if final.exists():
+				backup = final.with_name(f'.{final.name}.{uuid4().hex}.backup')
+				final.replace(backup)
+				backups.append((backup, final))
+		for partial, final in pending:
+			partial.replace(final)
+			published.append(final)
+	except BaseException:
+		for final in published:
+			final.unlink(missing_ok=True)
+		for backup, final in reversed(backups):
+			if backup.exists():
+				backup.replace(final)
+		raise
+	else:
+		for backup, _ in backups:
+			backup.unlink(missing_ok=True)
 
 
 __all__ = [

@@ -42,6 +42,7 @@ _CLUSTERING_KEYS = frozenset(
 		'k_values',
 		'minibatch_size',
 		'prediction_batch_size',
+		'stage_timing',
 		'seed',
 		'stratigraphic_hmm',
 	},
@@ -222,6 +223,8 @@ def resolve_clustering_config(config: _T) -> Config:
 			'prediction_batch_size',
 			prefix='clustering',
 		)
+	if 'stage_timing' in clustering:
+		_validate_bool(clustering, 'stage_timing', prefix='clustering')
 	if not _is_int(clustering.get('seed')):
 		msg = f'clustering.seed must be an integer; got {clustering.get("seed")!r}'
 		raise ValueError(msg)

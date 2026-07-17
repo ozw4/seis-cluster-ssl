@@ -6,16 +6,21 @@ import hashlib
 import json
 import shutil
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import joblib
 import numpy as np
 
-from seis_ssl_cluster.clustering.features import EmbeddingInput, open_embedding_array
+from seis_ssl_cluster.clustering.features import (
+	EmbeddingInput,
+	load_valid_tokens,
+	open_embedding_array,
+)
 
 if TYPE_CHECKING:
-	from collections.abc import Callable, Mapping
+	from collections.abc import Callable, Iterator, Mapping
 	from pathlib import Path
 
 	from typing_extensions import Self
@@ -60,14 +65,14 @@ class PreparedFeatureCacheSettings:
 
 @dataclass
 class PreparedSurveyFeatures:
-	"""Prepared valid rows and their token-grid index mapping for one survey."""
+	"""Descriptor for one survey's prepared features."""
 
 	embedding_input: EmbeddingInput
 	_token_shape_xyz: tuple[int, int, int]
-	valid_flat_indices: np.ndarray
-	features: np.ndarray | None
+	valid_token_count: int
 	feature_dim: int
 	feature_mode: str
+	edge_margin_tokens: tuple[int, int, int]
 	fingerprint: str | None = None
 	cache_path: Path | None = None
 	reused: bool = False
@@ -79,18 +84,74 @@ class PreparedSurveyFeatures:
 
 	def features_for_flat_indices(self, flat_indices: np.ndarray) -> np.ndarray:
 		"""Return prepared rows for sorted or unsorted valid flattened indices."""
+		with self.open() as opened:
+			return opened.features_for_flat_indices(flat_indices).copy()
+
+	def trace_features(
+		self,
+		x_index: int,
+		y_index: int,
+	) -> tuple[np.ndarray, np.ndarray]:
+		"""Return valid z indices and prepared rows for one vertical trace."""
+		with self.open() as opened:
+			z_indices, rows = opened.trace_features(x_index, y_index)
+			return z_indices.copy(), rows.copy()
+
+	@contextmanager
+	def open(self) -> Iterator[_OpenedPreparedSurveyFeatures]:
+		"""Open at most this survey's two prepared memmaps for bounded access."""
+		indices: np.ndarray | None = None
+		features: np.ndarray | None = None
+		try:
+			if self.feature_mode == 'embedding':
+				if self.cache_path is None:
+					raise RuntimeError('prepared embedding cache path is missing')
+				mmap_mode = None if self.valid_token_count == 0 else 'r'
+				indices = np.load(
+					self.cache_path / 'valid_flat_indices.npy',
+					mmap_mode=mmap_mode,
+				)
+				features = np.load(
+					self.cache_path / 'features.npy',
+					mmap_mode=mmap_mode,
+				)
+			yield _OpenedPreparedSurveyFeatures(self, indices, features)
+		finally:
+			if indices is not None:
+				_close_memmap(indices)
+			if features is not None:
+				_close_memmap(features)
+
+	def close(self) -> None:
+		"""Close this descriptor (it owns no persistent open mappings)."""
+
+
+@dataclass(frozen=True)
+class _OpenedPreparedSurveyFeatures:
+	"""Prepared feature arrays open for one bounded survey operation."""
+
+	descriptor: PreparedSurveyFeatures
+	valid_flat_indices: np.ndarray | None
+	features: np.ndarray | None
+
+	def features_for_flat_indices(self, flat_indices: np.ndarray) -> np.ndarray:
 		indices = np.asarray(flat_indices, dtype=np.int64)
 		if indices.ndim != 1:
 			raise ValueError(f'flat_indices must be 1D; got shape {indices.shape!r}')
 		if indices.size == 0:
-			return np.empty((0, self.feature_dim), dtype=PREPARED_FEATURE_DTYPE)
-		if self.feature_mode == 'z_coordinate':
-			z_size = self.token_shape_xyz[2]
-			z = np.asarray(np.unravel_index(indices, self.token_shape_xyz)[2])
+			return np.empty(
+				(0, self.descriptor.feature_dim), dtype=PREPARED_FEATURE_DTYPE
+			)
+		if self.descriptor.feature_mode == 'z_coordinate':
+			_validate_direct_indices(self.descriptor, indices)
+			z_size = self.descriptor.token_shape_xyz[2]
+			z = np.asarray(
+				np.unravel_index(indices, self.descriptor.token_shape_xyz)[2]
+			)
 			return (
 				z.astype(PREPARED_FEATURE_DTYPE) / np.float32(max(z_size - 1, 1))
 			).reshape(-1, 1)
-		if self.features is None:
+		if self.valid_flat_indices is None or self.features is None:
 			raise RuntimeError('prepared embedding features are not open')
 		ordinals = np.searchsorted(self.valid_flat_indices, indices)
 		in_range = ordinals < self.valid_flat_indices.size
@@ -109,32 +170,27 @@ class PreparedSurveyFeatures:
 		x_index: int,
 		y_index: int,
 	) -> tuple[np.ndarray, np.ndarray]:
-		"""Return valid z indices and prepared rows for one vertical trace."""
-		x_count, y_count, z_count = self.token_shape_xyz
+		x_count, y_count, z_count = self.descriptor.token_shape_xyz
 		if not 0 <= x_index < x_count or not 0 <= y_index < y_count:
 			raise IndexError('trace index is outside the token grid')
+		if self.descriptor.feature_mode == 'z_coordinate':
+			z_indices = _direct_trace_z_indices(self.descriptor, x_index, y_index)
+			rows = (
+				z_indices.astype(PREPARED_FEATURE_DTYPE)
+				/ np.float32(max(z_count - 1, 1))
+			).reshape(-1, 1)
+			return z_indices, rows
+		if self.valid_flat_indices is None or self.features is None:
+			raise RuntimeError('prepared embedding features are not open')
 		start = (x_index * y_count + y_index) * z_count
 		stop = start + z_count
 		left = int(np.searchsorted(self.valid_flat_indices, start, side='left'))
 		right = int(np.searchsorted(self.valid_flat_indices, stop, side='left'))
 		flat = self.valid_flat_indices[left:right]
-		z_indices = np.asarray(flat - start, dtype=np.int64)
-		if self.feature_mode == 'z_coordinate':
-			rows = (
-				z_indices.astype(PREPARED_FEATURE_DTYPE)
-				/ np.float32(max(z_count - 1, 1))
-			).reshape(-1, 1)
-		else:
-			if self.features is None:
-				raise RuntimeError('prepared embedding features are not open')
-			rows = np.asarray(self.features[left:right], dtype=PREPARED_FEATURE_DTYPE)
-		return z_indices, rows
-
-	def close(self) -> None:
-		"""Close memory mappings owned by this prepared survey."""
-		for array in (self.valid_flat_indices, self.features):
-			if array is not None:
-				_close_memmap(array)
+		return (
+			np.asarray(flat - start, dtype=np.int64),
+			np.asarray(self.features[left:right], dtype=PREPARED_FEATURE_DTYPE),
+		)
 
 
 @dataclass
@@ -184,7 +240,7 @@ class PreparedFeatureStore:
 				{
 					'survey_id': survey.embedding_input.survey_id,
 					'fingerprint': survey.fingerprint,
-					'valid_token_count': int(survey.valid_flat_indices.size),
+					'valid_token_count': survey.valid_token_count,
 					'feature_dim': survey.feature_dim,
 					'reused': survey.reused,
 					'cache_path': (
@@ -199,7 +255,7 @@ class PreparedFeatureStore:
 def prepare_feature_store(  # noqa: PLR0913
 	*,
 	embedding_inputs: tuple[EmbeddingInput, ...],
-	valid_indices_by_survey: Mapping[str, np.ndarray],
+	valid_indices_for_survey: Callable[[EmbeddingInput], np.ndarray],
 	feature_dim: int,
 	feature_mode: str,
 	residualizer: object | None,
@@ -212,17 +268,30 @@ def prepare_feature_store(  # noqa: PLR0913
 	"""Build or reuse prepared valid feature rows for every survey."""
 	settings.validate()
 	if feature_mode == 'z_coordinate':
-		surveys = tuple(
-			PreparedSurveyFeatures(
-				item,
-				_token_shape(item),
-				_validate_valid_indices(valid_indices_by_survey[item.survey_id]),
-				None,
-				1,
-				feature_mode,
+		surveys_list: list[PreparedSurveyFeatures] = []
+		for item in embedding_inputs:
+			token_shape_xyz = _token_shape(item)
+			valid_indices = _validate_valid_indices(
+				valid_indices_for_survey(item),
+				token_shape_xyz,
 			)
-			for item in embedding_inputs
-		)
+			_validate_direct_valid_set(
+				item,
+				token_shape_xyz,
+				edge_margin_tokens,
+				valid_indices,
+			)
+			surveys_list.append(
+				PreparedSurveyFeatures(
+					item,
+					token_shape_xyz,
+					int(valid_indices.size),
+					1,
+					feature_mode,
+					edge_margin_tokens,
+				)
+			)
+		surveys = tuple(surveys_list)
 		return PreparedFeatureStore(surveys, settings, None, feature_mode)
 	if feature_mode != 'embedding':
 		raise ValueError(f'unsupported prepared feature mode: {feature_mode!r}')
@@ -234,7 +303,8 @@ def prepare_feature_store(  # noqa: PLR0913
 		for item in embedding_inputs:
 			token_shape_xyz = _token_shape(item)
 			valid_indices = _validate_valid_indices(
-				valid_indices_by_survey[item.survey_id],
+				valid_indices_for_survey(item),
+				token_shape_xyz,
 			)
 			payload = _fingerprint_payload(
 				item=item,
@@ -257,12 +327,15 @@ def prepare_feature_store(  # noqa: PLR0913
 					fingerprint_payload=payload,
 					cache_root=cache_root,
 					settings=settings,
+					edge_margin_tokens=edge_margin_tokens,
 					prepare_batch=prepare_batch,
 				),
 			)
 	except BaseException:
 		for survey in prepared_surveys:
 			survey.close()
+			if settings.cleanup and survey.cache_path is not None:
+				shutil.rmtree(survey.cache_path, ignore_errors=True)
 		raise
 	return PreparedFeatureStore(
 		tuple(prepared_surveys), settings, cache_root, feature_mode
@@ -279,6 +352,7 @@ def _prepare_one_survey(  # noqa: PLR0913
 	fingerprint_payload: Mapping[str, object],
 	cache_root: Path,
 	settings: PreparedFeatureCacheSettings,
+	edge_margin_tokens: tuple[int, int, int],
 	prepare_batch: Callable[[EmbeddingInput, np.ndarray], np.ndarray],
 ) -> PreparedSurveyFeatures:
 	cache_path = cache_root / fingerprint
@@ -291,6 +365,7 @@ def _prepare_one_survey(  # noqa: PLR0913
 			fingerprint,
 			valid_indices,
 			feature_dim,
+			edge_margin_tokens,
 		)
 		if reused is not None:
 			return reused
@@ -352,6 +427,7 @@ def _prepare_one_survey(  # noqa: PLR0913
 		fingerprint,
 		valid_indices,
 		feature_dim,
+		edge_margin_tokens,
 	)
 	if prepared is None:
 		raise RuntimeError(
@@ -368,7 +444,10 @@ def _open_complete_cache(  # noqa: PLR0913
 	fingerprint: str,
 	expected_indices: np.ndarray,
 	feature_dim: int,
+	edge_margin_tokens: tuple[int, int, int],
 ) -> PreparedSurveyFeatures | None:
+	indices: np.ndarray | None = None
+	features: np.ndarray | None = None
 	try:
 		metadata = json.loads(
 			(cache_path / 'metadata.json').read_text(encoding='utf-8')
@@ -388,24 +467,29 @@ def _open_complete_cache(  # noqa: PLR0913
 		indices = np.load(cache_path / 'valid_flat_indices.npy', mmap_mode=mmap_mode)
 		features = np.load(cache_path / 'features.npy', mmap_mode=mmap_mode)
 	except (FileNotFoundError, OSError, TypeError, ValueError, json.JSONDecodeError):
+		if indices is not None:
+			_close_memmap(indices)
+		if features is not None:
+			_close_memmap(features)
 		return None
-	if (
-		indices.dtype != np.dtype(np.int64)
-		or indices.shape != expected_indices.shape
-		or not np.array_equal(indices, expected_indices)
-		or features.dtype != PREPARED_FEATURE_DTYPE
-		or features.shape != (expected_indices.size, feature_dim)
-	):
-		_close_memmap(indices)
-		_close_memmap(features)
+	valid_cache = (
+		indices.dtype == np.dtype(np.int64)
+		and indices.shape == expected_indices.shape
+		and np.array_equal(indices, expected_indices)
+		and features.dtype == PREPARED_FEATURE_DTYPE
+		and features.shape == (expected_indices.size, feature_dim)
+	)
+	_close_memmap(indices)
+	_close_memmap(features)
+	if not valid_cache:
 		return None
 	return PreparedSurveyFeatures(
 		item,
 		token_shape_xyz,
-		indices,
-		features,
+		int(expected_indices.size),
 		feature_dim,
 		'embedding',
+		edge_margin_tokens,
 		fingerprint=fingerprint,
 		cache_path=cache_path,
 		reused=True,
@@ -452,13 +536,79 @@ def _token_shape(item: EmbeddingInput) -> tuple[int, int, int]:
 	return (int(shape[0]), int(shape[1]), int(shape[2]))
 
 
-def _validate_valid_indices(value: np.ndarray) -> np.ndarray:
+def _validate_valid_indices(
+	value: np.ndarray,
+	token_shape_xyz: tuple[int, int, int],
+) -> np.ndarray:
 	indices = np.asarray(value, dtype=np.int64)
 	if indices.ndim != 1:
 		raise ValueError(f'valid token indices must be 1D; got {indices.shape!r}')
 	if indices.size > 1 and np.any(indices[1:] <= indices[:-1]):
 		raise ValueError('valid token indices must be strictly increasing')
+	if indices.size and (
+		indices[0] < 0 or indices[-1] >= int(np.prod(token_shape_xyz))
+	):
+		raise ValueError('valid token indices are outside the token grid')
 	return indices
+
+
+def _validate_direct_indices(
+	survey: PreparedSurveyFeatures,
+	indices: np.ndarray,
+) -> None:
+	shape = survey.token_shape_xyz
+	token_count = int(np.prod(shape))
+	if np.any(indices < 0) or np.any(indices >= token_count):
+		raise ValueError('flat_indices contain tokens outside the prepared valid set')
+	x, y, z = np.unravel_index(indices, shape)
+	mx, my, mz = survey.edge_margin_tokens
+	inside_margin = (
+		(np.asarray(x) >= mx)
+		& (np.asarray(x) < shape[0] - mx)
+		& (np.asarray(y) >= my)
+		& (np.asarray(y) < shape[1] - my)
+		& (np.asarray(z) >= mz)
+		& (np.asarray(z) < shape[2] - mz)
+	)
+	valid = load_valid_tokens(survey.embedding_input).reshape(-1)
+	if not np.all(inside_margin) or not np.all(valid[indices]):
+		raise ValueError('flat_indices contain tokens outside the prepared valid set')
+
+
+def _validate_direct_valid_set(
+	item: EmbeddingInput,
+	shape: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+	indices: np.ndarray,
+) -> None:
+	valid = load_valid_tokens(item)
+	mx, my, mz = edge_margin_tokens
+	inside = np.zeros(shape, dtype=np.bool_)
+	inside[mx : shape[0] - mx, my : shape[1] - my, mz : shape[2] - mz] = True
+	expected = np.flatnonzero((valid & inside).reshape(-1))
+	if not np.array_equal(indices, expected):
+		raise ValueError(
+			'valid token indices do not match the source mask and edge margins'
+		)
+
+
+def _direct_trace_z_indices(
+	survey: PreparedSurveyFeatures,
+	x_index: int,
+	y_index: int,
+) -> np.ndarray:
+	shape = survey.token_shape_xyz
+	mx, my, mz = survey.edge_margin_tokens
+	if (
+		x_index < mx
+		or x_index >= shape[0] - mx
+		or y_index < my
+		or y_index >= shape[1] - my
+	):
+		return np.empty(0, dtype=np.int64)
+	valid = load_valid_tokens(survey.embedding_input)
+	inside = np.asarray(valid[x_index, y_index, mz : shape[2] - mz])
+	return np.flatnonzero(inside).astype(np.int64, copy=False) + mz
 
 
 def _validate_prepared_batch_shape(

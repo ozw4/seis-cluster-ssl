@@ -173,6 +173,56 @@ def test_multi_model_label_writer_removes_partial_outputs_on_predict_failure(
 	assert not list(output_dir.rglob('*.partial'))
 
 
+def test_multi_model_label_writer_rolls_back_publication_failure(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.ones((1, 1, 2, 1), dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+	output_dir = tmp_path / 'clusters'
+	labels_dir = output_dir / 'labels' / 'k1'
+	labels_dir.mkdir(parents=True)
+	labels_path = labels_dir / 'survey_a.cluster_labels_token.npy'
+	metadata_path = labels_dir / 'survey_a.cluster_label_metadata.json'
+	old_labels = np.full((1, 1, 2), 7, dtype=np.int32)
+	np.save(labels_path, old_labels)
+	metadata_path.write_text('{"old": true}\n', encoding='utf-8')
+	path_type = type(tmp_path)
+	original_replace = path_type.replace
+	publication_count = 0
+
+	def fail_second_publication(source: Path, target: Path) -> Path:
+		nonlocal publication_count
+		if source.name.endswith('.partial'):
+			publication_count += 1
+			if publication_count == 2:
+				raise OSError('injected publication failure')
+		return original_replace(source, target)
+
+	monkeypatch.setattr(path_type, 'replace', fail_second_publication)
+	with pytest.raises(OSError, match='injected publication failure'):
+		write_labels_for_models(
+			output_dir=output_dir,
+			kmeans_by_k={1: _ZeroKMeans()},
+			embedding_inputs=discover_embedding_inputs(input_dir),
+			residualizer=None,
+			preprocessor=_IdentityPreprocessor(),
+			prediction_batch_size=2,
+			label_metadata={},
+		)
+
+	np.testing.assert_array_equal(np.load(labels_path), old_labels)
+	assert metadata_path.read_text(encoding='utf-8') == '{"old": true}\n'
+	assert not list(output_dir.rglob('*.partial'))
+	assert not list(output_dir.rglob('*.backup'))
+
+
 def test_run_embedding_clustering_writes_deterministic_labels_for_multiple_k(
 	tmp_path: Path,
 ) -> None:
@@ -206,12 +256,16 @@ def test_run_embedding_clustering_writes_deterministic_labels_for_multiple_k(
 	)
 
 	first = run_embedding_clustering(_config(input_dir, first_output))
-	second = run_embedding_clustering(_config(input_dir, second_output))
+	second_config = _config(input_dir, second_output)
+	second_config['clustering']['stage_timing'] = True
+	second = run_embedding_clustering(second_config)
 
 	assert [result.k for result in first.results] == [2, 3]
 	assert [result.k for result in second.results] == [2, 3]
 	assert first.sample.sample_count == 7
 	assert first.sample.total_valid_count == 7
+	assert not (first_output / 'stage_timings.json').exists()
+	assert (second_output / 'stage_timings.json').is_file()
 	for output_dir in (first_output, second_output):
 		for k in (2, 3):
 			assert (output_dir / 'models' / f'k{k}' / 'preprocessor.joblib').is_file()

@@ -1,21 +1,24 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 from seis_ssl_cluster.clustering.features import EmbeddingInput, extract_token_features
 from seis_ssl_cluster.clustering.prepared_features import (
 	PreparedFeatureCacheSettings,
+	PreparedSurveyFeatures,
 	prepare_feature_store,
 )
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	HMMTransitionSettings,
 	build_ordered_transition_costs,
+	decode_prepared_survey_ordered_labels,
 	decode_survey_ordered_labels,
-	decode_survey_ordered_labels_on_the_fly,
 	update_centers_from_labels,
-	update_centers_from_labels_on_the_fly,
+	update_centers_from_prepared_labels,
 )
 
 if TYPE_CHECKING:
@@ -44,7 +47,7 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 
 	store = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_by_survey={item.survey_id: valid_indices},
+		valid_indices_for_survey=lambda _: valid_indices,
 		feature_dim=1,
 		feature_mode='embedding',
 		residualizer=None,
@@ -70,7 +73,7 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 			max_jump=1,
 		),
 	)
-	prepared_labels = decode_survey_ordered_labels(
+	prepared_labels = decode_prepared_survey_ordered_labels(
 		store.surveys[0],
 		centers=centers,
 		transition_costs=transitions,
@@ -78,7 +81,7 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 		terminal_state_costs=None,
 		expected_boundaries=None,
 	)
-	reference_labels = decode_survey_ordered_labels_on_the_fly(
+	reference_labels = decode_survey_ordered_labels(
 		item,
 		centers=centers,
 		residualizer=None,
@@ -87,14 +90,14 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 		emission_source='embedding',
 	)
 	np.testing.assert_array_equal(prepared_labels, reference_labels)
-	prepared_centers, prepared_summary = update_centers_from_labels(
+	prepared_centers, prepared_summary = update_centers_from_prepared_labels(
 		store,
 		{item.survey_id: prepared_labels},
 		centers=centers,
 		prediction_batch_size=2,
 		empty_cluster_policy='keep_previous',
 	)
-	reference_centers, reference_summary = update_centers_from_labels_on_the_fly(
+	reference_centers, reference_summary = update_centers_from_labels(
 		(item,),
 		{item.survey_id: reference_labels},
 		centers=centers,
@@ -120,6 +123,62 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 	store.close()
 
 
+def test_prepared_feature_store_opens_only_one_survey_at_a_time(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	items = (
+		_write_input(tmp_path, 'survey_a', shape=(1, 1, 2, 1)),
+		_write_input(tmp_path, 'survey_b', shape=(1, 1, 2, 1)),
+	)
+	store = prepare_feature_store(
+		embedding_inputs=items,
+		valid_indices_for_survey=lambda _: np.array([0, 1], dtype=np.int64),
+		feature_dim=1,
+		feature_mode='embedding',
+		residualizer=None,
+		preprocessor=_IdentityPreprocessor(),
+		edge_margin_tokens=(0, 0, 0),
+		settings=PreparedFeatureCacheSettings(directory=tmp_path / 'prepared'),
+		default_cache_root=tmp_path / 'unused',
+		prepare_batch=extract_token_features,
+	)
+	assert all(
+		not any(isinstance(value, np.ndarray) for value in vars(survey).values())
+		for survey in store.surveys
+	)
+	original_open = PreparedSurveyFeatures.open
+	active = 0
+	max_active = 0
+
+	@contextmanager
+	def tracked_open(survey: PreparedSurveyFeatures):
+		nonlocal active, max_active
+		active += 1
+		max_active = max(max_active, active)
+		try:
+			with original_open(survey) as opened:
+				yield opened
+		finally:
+			active -= 1
+
+	monkeypatch.setattr(PreparedSurveyFeatures, 'open', tracked_open)
+	update_centers_from_prepared_labels(
+		store,
+		{
+			item.survey_id: np.zeros((1, 1, 2), dtype=np.int32)
+			for item in items
+		},
+		centers=np.zeros((1, 1), dtype=np.float32),
+		prediction_batch_size=1,
+		empty_cluster_policy='keep_previous',
+	)
+
+	assert active == 0
+	assert max_active == 1
+	store.close()
+
+
 def test_prepared_feature_store_build_reuse_force_and_index_mapping(
 	tmp_path: Path,
 ) -> None:
@@ -142,7 +201,7 @@ def test_prepared_feature_store_build_reuse_force_and_index_mapping(
 	)
 	store = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_by_survey={item.survey_id: valid_indices},
+		valid_indices_for_survey=lambda _: valid_indices,
 		feature_dim=2,
 		feature_mode='embedding',
 		residualizer=None,
@@ -177,7 +236,7 @@ def test_prepared_feature_store_build_reuse_force_and_index_mapping(
 
 	reused = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_by_survey={item.survey_id: valid_indices},
+		valid_indices_for_survey=lambda _: valid_indices,
 		feature_dim=2,
 		feature_mode='embedding',
 		residualizer=None,
@@ -194,7 +253,7 @@ def test_prepared_feature_store_build_reuse_force_and_index_mapping(
 	calls.clear()
 	forced = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_by_survey={item.survey_id: valid_indices},
+		valid_indices_for_survey=lambda _: valid_indices,
 		feature_dim=2,
 		feature_mode='embedding',
 		residualizer=None,
@@ -222,7 +281,7 @@ def test_prepared_feature_store_partial_cleanup_fingerprint_and_cleanup_policy(
 	settings = PreparedFeatureCacheSettings(directory=cache_root)
 	kwargs = {
 		'embedding_inputs': (item,),
-		'valid_indices_by_survey': {item.survey_id: valid_indices},
+		'valid_indices_for_survey': lambda _: valid_indices,
 		'feature_dim': 1,
 		'feature_mode': 'embedding',
 		'residualizer': None,
@@ -264,6 +323,40 @@ def test_prepared_feature_store_partial_cleanup_fingerprint_and_cleanup_policy(
 	assert not cleanup_path.exists()
 
 
+def test_prepared_feature_store_cleans_completed_surveys_after_later_failure(
+	tmp_path: Path,
+) -> None:
+	first = _write_input(tmp_path, 'survey_a', shape=(1, 1, 2, 1))
+	second = _write_input(tmp_path, 'survey_b', shape=(1, 1, 2, 1))
+	cache_root = tmp_path / 'prepared'
+
+	def prepare_batch(item: EmbeddingInput, indices: np.ndarray) -> np.ndarray:
+		if item.survey_id == 'survey_b':
+			raise RuntimeError('injected second-survey failure')
+		return extract_token_features(item, indices)
+
+	with pytest.raises(RuntimeError, match='second-survey failure'):
+		prepare_feature_store(
+			embedding_inputs=(first, second),
+			valid_indices_for_survey=lambda _: np.array([0, 1], dtype=np.int64),
+			feature_dim=1,
+			feature_mode='embedding',
+			residualizer=None,
+			preprocessor=_IdentityPreprocessor(),
+			edge_margin_tokens=(0, 0, 0),
+			settings=PreparedFeatureCacheSettings(
+				cleanup=True,
+				persist=False,
+				directory=cache_root,
+			),
+			default_cache_root=tmp_path / 'unused',
+			prepare_batch=prepare_batch,
+		)
+
+	assert cache_root.is_dir()
+	assert not any(cache_root.iterdir())
+
+
 def test_prepared_feature_store_zero_valid_and_z_coordinate_fast_path(
 	tmp_path: Path,
 ) -> None:
@@ -271,7 +364,7 @@ def test_prepared_feature_store_zero_valid_and_z_coordinate_fast_path(
 	cache_root = tmp_path / 'prepared'
 	zero = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_by_survey={item.survey_id: np.empty(0, dtype=np.int64)},
+		valid_indices_for_survey=lambda _: np.empty(0, dtype=np.int64),
 		feature_dim=2,
 		feature_mode='embedding',
 		residualizer=None,
@@ -281,16 +374,18 @@ def test_prepared_feature_store_zero_valid_and_z_coordinate_fast_path(
 		default_cache_root=tmp_path / 'unused',
 		prepare_batch=lambda *_: (_ for _ in ()).throw(AssertionError()),
 	)
-	assert zero.surveys[0].features is not None
-	assert zero.surveys[0].features.shape == (0, 2)
+	assert zero.surveys[0].valid_token_count == 0
+	with zero.surveys[0].open() as opened:
+		assert opened.features is not None
+		assert opened.features.shape == (0, 2)
 	zero.close()
 
+	valid = np.array([True, False, True, True], dtype=np.bool_)
+	np.save(item.valid_tokens_path, valid.reshape((1, 1, 4)))
 	direct_root = tmp_path / 'direct-must-not-exist'
 	direct = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_by_survey={
-			item.survey_id: np.array([0, 2, 3], dtype=np.int64),
-		},
+		valid_indices_for_survey=lambda _: np.array([0, 2, 3], dtype=np.int64),
 		feature_dim=1,
 		feature_mode='z_coordinate',
 		residualizer=None,
@@ -306,6 +401,8 @@ def test_prepared_feature_store_zero_valid_and_z_coordinate_fast_path(
 		direct.surveys[0].features_for_flat_indices(np.array([0, 3])),
 		np.array([[0.0], [1.0]], dtype=np.float32),
 	)
+	with pytest.raises(ValueError, match='prepared valid set'):
+		direct.surveys[0].features_for_flat_indices(np.array([1]))
 	direct.close()
 
 

@@ -126,7 +126,7 @@ class LocalTokenPositionResidualizer:
 			'group_by': self.group_by,
 			'add_global_mean_back': self.add_global_mean_back,
 			'min_group_count': self.min_group_count,
-			'groups': int(self.counts.size),
+			'groups': int(observed_counts.size),
 			'observed_groups': int(observed_counts.size),
 			'group_shape': (
 				list(self.group_shape) if self.group_shape is not None else None

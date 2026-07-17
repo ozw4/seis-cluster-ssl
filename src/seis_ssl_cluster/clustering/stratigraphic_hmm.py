@@ -782,7 +782,7 @@ def decode_trace_segments(  # noqa: PLR0913
 	return labels
 
 
-def decode_survey_ordered_labels_on_the_fly(  # noqa: PLR0913
+def decode_survey_ordered_labels(  # noqa: PLR0913
 	embedding_input: EmbeddingInput,
 	*,
 	centers: np.ndarray,
@@ -795,7 +795,7 @@ def decode_survey_ordered_labels_on_the_fly(  # noqa: PLR0913
 	emission_source: str = 'embedding',
 	edge_margin_tokens: tuple[int, int, int] = (0, 0, 0),
 ) -> np.ndarray:
-	"""Decode one survey by preparing raw trace features as a reference path."""
+	"""Decode HMM labels for one survey without flattening all features at once."""
 	center_matrix = np.asarray(centers, dtype=np.float32)
 	if center_matrix.ndim != 2 or center_matrix.shape[0] == 0:
 		msg = f'centers must be a non-empty 2D matrix; got {center_matrix.shape!r}'
@@ -856,7 +856,7 @@ def decode_survey_ordered_labels_on_the_fly(  # noqa: PLR0913
 	return labels
 
 
-def decode_survey_ordered_labels(  # noqa: PLR0913
+def decode_prepared_survey_ordered_labels(  # noqa: PLR0913
 	prepared_survey: PreparedSurveyFeatures,
 	*,
 	centers: np.ndarray,
@@ -874,36 +874,39 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 	shape = prepared_survey.token_shape_xyz
 	labels = np.full(shape, -1, dtype=np.int32)
 	k = center_matrix.shape[0]
-	for x_index in range(shape[0]):
-		for y_index in range(shape[1]):
-			z_indices, features = prepared_survey.trace_features(x_index, y_index)
-			if z_indices.size == 0:
-				continue
-			if features.shape[1] != center_matrix.shape[1]:
-				raise ValueError(
-					'prepared feature dimension must match centers; got '
-					f'{features.shape[1]} and {center_matrix.shape[1]}',
+	with prepared_survey.open() as opened:
+		for x_index in range(shape[0]):
+			for y_index in range(shape[1]):
+				z_indices, features = opened.trace_features(x_index, y_index)
+				if z_indices.size == 0:
+					continue
+				if features.shape[1] != center_matrix.shape[1]:
+					raise ValueError(
+						'prepared feature dimension must match centers; got '
+						f'{features.shape[1]} and {center_matrix.shape[1]}',
+					)
+				trace_valid = np.zeros(shape[2], dtype=np.bool_)
+				trace_valid[z_indices] = True
+				emission_costs = np.zeros((shape[2], k), dtype=np.float32)
+				deltas = features[:, np.newaxis, :] - center_matrix[np.newaxis, :, :]
+				emission_costs[z_indices] = np.sum(deltas * deltas, axis=2)
+				labels[x_index, y_index, :] = decode_trace_segments(
+					emission_costs,
+					trace_valid,
+					transition_costs,
+					initial_state_costs=initial_state_costs,
+					terminal_state_costs=terminal_state_costs,
+					expected_boundary_count=_resolve_expected_boundary_count(
+						expected_boundaries,
+						k=k,
+						valid_trace_length=int(z_indices.size),
+					),
+					boundary_count_weight=(
+						0.0
+						if expected_boundaries is None
+						else expected_boundaries.weight
+					),
 				)
-			trace_valid = np.zeros(shape[2], dtype=np.bool_)
-			trace_valid[z_indices] = True
-			emission_costs = np.zeros((shape[2], k), dtype=np.float32)
-			deltas = features[:, np.newaxis, :] - center_matrix[np.newaxis, :, :]
-			emission_costs[z_indices] = np.sum(deltas * deltas, axis=2)
-			labels[x_index, y_index, :] = decode_trace_segments(
-				emission_costs,
-				trace_valid,
-				transition_costs,
-				initial_state_costs=initial_state_costs,
-				terminal_state_costs=terminal_state_costs,
-				expected_boundary_count=_resolve_expected_boundary_count(
-					expected_boundaries,
-					k=k,
-					valid_trace_length=int(z_indices.size),
-				),
-				boundary_count_weight=(
-					0.0 if expected_boundaries is None else expected_boundaries.weight
-				),
-			)
 	return labels
 
 
@@ -917,7 +920,7 @@ def _decode_all_surveys(  # noqa: PLR0913
 	expected_boundaries: HMMExpectedBoundariesSettings | None,
 ) -> dict[str, np.ndarray]:
 	return {
-		survey.embedding_input.survey_id: decode_survey_ordered_labels(
+		survey.embedding_input.survey_id: decode_prepared_survey_ordered_labels(
 			survey,
 			centers=centers,
 			transition_costs=transition_costs,
@@ -929,7 +932,7 @@ def _decode_all_surveys(  # noqa: PLR0913
 	}
 
 
-def update_centers_from_labels(
+def update_centers_from_prepared_labels(  # noqa: C901
 	prepared_features: PreparedFeatureStore,
 	labels_by_survey: Mapping[str, np.ndarray],
 	*,
@@ -957,17 +960,21 @@ def update_centers_from_labels(
 		if labels.shape != survey.token_shape_xyz:
 			raise ValueError(f'label grid shape is invalid for {survey_id}')
 		flat_labels = labels.reshape(-1)
-		labeled_indices = np.flatnonzero(flat_labels >= 0).astype(np.int64, copy=False)
-		for start in range(0, labeled_indices.size, prediction_batch_size):
-			indices = labeled_indices[start : start + prediction_batch_size]
-			batch_labels = np.asarray(flat_labels[indices], dtype=np.int64)
-			if np.any(batch_labels >= k):
-				raise ValueError(f'label id out of range for {survey_id}')
-			features = survey.features_for_flat_indices(indices)
-			if features.shape[1] != feature_dim:
-				raise ValueError('prepared feature dimension must match centers')
-			np.add.at(sums, batch_labels, features.astype(np.float64, copy=False))
-			counts += np.bincount(batch_labels, minlength=k)
+		with survey.open() as opened:
+			for start in range(0, flat_labels.size, prediction_batch_size):
+				stop = min(start + prediction_batch_size, flat_labels.size)
+				local_indices = np.flatnonzero(flat_labels[start:stop] >= 0)
+				if local_indices.size == 0:
+					continue
+				indices = local_indices.astype(np.int64, copy=False) + start
+				batch_labels = np.asarray(flat_labels[indices], dtype=np.int64)
+				if np.any(batch_labels >= k):
+					raise ValueError(f'label id out of range for {survey_id}')
+				features = opened.features_for_flat_indices(indices)
+				if features.shape[1] != feature_dim:
+					raise ValueError('prepared feature dimension must match centers')
+				np.add.at(sums, batch_labels, features.astype(np.float64, copy=False))
+				counts += np.bincount(batch_labels, minlength=k)
 	new_centers = center_matrix.copy()
 	non_empty = counts > 0
 	new_centers[non_empty] = (sums[non_empty] / counts[non_empty, np.newaxis]).astype(
@@ -984,7 +991,7 @@ def update_centers_from_labels(
 	}
 
 
-def update_centers_from_labels_on_the_fly(  # noqa: C901, PLR0913
+def update_centers_from_labels(  # noqa: C901, PLR0913
 	embedding_inputs: tuple[EmbeddingInput, ...],
 	labels_by_survey: Mapping[str, np.ndarray],
 	*,
@@ -1142,16 +1149,12 @@ def run_stratigraphic_hmm_clustering(  # noqa: PLR0915
 		preprocessor.transform(training_input_features),
 		dtype=np.float32,
 	)
-	valid_indices_by_survey = {
-		item.survey_id: hmm_valid_flat_indices(
-			item,
-			hmm_settings.edge_margin_tokens,
-		)
-		for item in embedding_inputs
-	}
 	prepared_features = prepare_feature_store(
 		embedding_inputs=embedding_inputs,
-		valid_indices_by_survey=valid_indices_by_survey,
+		valid_indices_for_survey=lambda item: hmm_valid_flat_indices(
+			item,
+			hmm_settings.edge_margin_tokens,
+		),
 		feature_dim=int(training_features.shape[1]),
 		feature_mode=hmm_settings.emission_source,
 		residualizer=residualizer,
@@ -1224,7 +1227,7 @@ def run_stratigraphic_hmm_clustering(  # noqa: PLR0915
 					terminal_state_costs=terminal_state_costs,
 					expected_boundaries=expected_boundaries,
 				)
-				centers, summary = update_centers_from_labels(
+				centers, summary = update_centers_from_prepared_labels(
 					prepared_features,
 					labels_by_survey,
 					centers=centers,
@@ -1386,12 +1389,9 @@ def _sample_valid_hmm_tokens(
 		msg = 'at least one embedding input is required'
 		raise ValueError(msg)
 
-	valid_indices_by_survey = {
-		item.survey_id: hmm_valid_flat_indices(item, edge_margin_tokens)
-		for item in embedding_inputs
-	}
 	valid_counts = [
-		int(valid_indices_by_survey[item.survey_id].size) for item in embedding_inputs
+		int(hmm_valid_flat_indices(item, edge_margin_tokens).size)
+		for item in embedding_inputs
 	]
 	total_valid = int(sum(valid_counts))
 	if total_valid == 0:
@@ -1411,7 +1411,7 @@ def _sample_valid_hmm_tokens(
 		mask = (selected_global >= offset) & (selected_global < stop)
 		local_valid_ordinals = selected_global[mask] - offset
 		if local_valid_ordinals.size:
-			all_valid_indices = valid_indices_by_survey[item.survey_id]
+			all_valid_indices = hmm_valid_flat_indices(item, edge_margin_tokens)
 			token_indices = all_valid_indices[local_valid_ordinals]
 			per_survey_indices[item.survey_id] = token_indices
 			feature_blocks.append(feature_loader(item, token_indices))
@@ -1748,8 +1748,8 @@ __all__ = [
 	'build_initial_state_costs',
 	'build_ordered_transition_costs',
 	'build_terminal_state_costs',
+	'decode_prepared_survey_ordered_labels',
 	'decode_survey_ordered_labels',
-	'decode_survey_ordered_labels_on_the_fly',
 	'decode_trace_segments',
 	'initialize_ordered_centers',
 	'normalized_z_features_for_indices',
@@ -1758,6 +1758,6 @@ __all__ = [
 	'sample_token_z_coordinates',
 	'stratigraphic_hmm_settings_from_config',
 	'update_centers_from_labels',
-	'update_centers_from_labels_on_the_fly',
+	'update_centers_from_prepared_labels',
 	'viterbi_decode_costs',
 ]

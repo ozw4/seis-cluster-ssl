@@ -75,6 +75,7 @@ class ClusteringSettings:
 	minibatch_size: int
 	seed: int
 	prediction_batch_size: int
+	stage_timing: bool
 
 
 @dataclass(frozen=True)
@@ -168,7 +169,7 @@ def run_minibatch_kmeans_clustering(
 		)
 		for k in settings.k_values
 	}
-	timer = StageTimer(enabled=True)
+	timer = StageTimer(enabled=settings.stage_timing)
 	try:
 		label_results_by_k = write_labels_for_models(
 			output_dir=settings.output_dir,
@@ -181,7 +182,8 @@ def run_minibatch_kmeans_clustering(
 			timer=timer,
 		)
 	finally:
-		timer.write_json(settings.output_dir / 'stage_timings.json')
+		if timer.enabled:
+			timer.write_json(settings.output_dir / 'stage_timings.json')
 	results: list[KClusteringResult] = []
 	for k in settings.k_values:
 		kmeans = kmeans_by_k[k]
@@ -270,6 +272,10 @@ def clustering_settings_from_config(
 		prediction_batch_size=_positive_int(
 			clustering.get('prediction_batch_size', minibatch_size),
 			'clustering.prediction_batch_size',
+		),
+		stage_timing=_bool(
+			clustering.get('stage_timing', False),
+			'clustering.stage_timing',
 		),
 	)
 
@@ -436,6 +442,7 @@ def _common_metadata(  # noqa: PLR0913
 		'k_values': list(settings.k_values),
 		'minibatch_size': settings.minibatch_size,
 		'prediction_batch_size': settings.prediction_batch_size,
+		'stage_timing': settings.stage_timing,
 		'random_seed': settings.seed,
 	}
 

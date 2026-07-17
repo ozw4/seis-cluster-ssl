@@ -24,7 +24,7 @@ from seis_ssl_cluster.clustering.residualization import (
 	residualization_keys_for_flat_indices,
 )
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
-	decode_survey_ordered_labels_on_the_fly,
+	decode_survey_ordered_labels,
 	initialize_ordered_centers,
 	normalized_z_features_for_indices,
 	prepare_feature_batch_for_indices,
@@ -447,7 +447,7 @@ def test_stratigraphic_hmm_saved_labels_decode_from_saved_centers(
 	preprocessor = joblib.load(k_dir / 'preprocessor.joblib')
 	hmm_model = joblib.load(k_dir / 'hmm_model.joblib')
 	embedding_input = discover_embedding_inputs(input_dir)[0]
-	decoded = decode_survey_ordered_labels_on_the_fly(
+	decoded = decode_survey_ordered_labels(
 		embedding_input,
 		centers=centers,
 		residualizer=None,
