@@ -39,7 +39,7 @@ from seis_ssl_cluster.clustering.ordered_diagnostics import (
 )
 from seis_ssl_cluster.clustering.residualization import (
 	LocalTokenPositionResidualizer,
-	residualization_keys_for_flat_indices,
+	residualization_groups_for_flat_indices,
 	write_residualizer_npz,
 )
 from seis_ssl_cluster.clustering.sampling import (
@@ -522,12 +522,12 @@ def prepare_feature_batch_for_indices(
 		)
 		raise ValueError(msg)
 	if residualizer is not None and emission_source == 'embedding':
-		group_keys = residualization_keys_for_flat_indices(
+		groups = residualization_groups_for_flat_indices(
 			embedding_input,
 			indices,
-			group_by=residualizer.group_by,
+			residualizer=residualizer,
 		)
-		features = residualizer.transform(features, group_keys)
+		features = residualizer.transform(features, groups)
 	transformed = np.asarray(preprocessor.transform(features), dtype=np.float32)
 	if transformed.ndim != 2:
 		msg = f'preprocessor output must be 2D; got shape {transformed.shape!r}'

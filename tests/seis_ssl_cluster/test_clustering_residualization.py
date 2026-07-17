@@ -6,8 +6,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from seis_ssl_cluster.clustering.features import discover_embedding_inputs, valid_flat_indices
+from seis_ssl_cluster.clustering.features import (
+	discover_embedding_inputs,
+	valid_flat_indices,
+)
 from seis_ssl_cluster.clustering.residualization import (
+	RESIDUALIZER_SCHEMA_VERSION,
+	encode_dense_group_ids,
 	fit_local_token_position_residualizer,
 	read_residualizer_npz,
 	residualization_keys_for_flat_indices,
@@ -128,7 +133,9 @@ def test_min_group_count_uses_global_mean_as_untrusted_group_mean() -> None:
 	)
 
 
-def test_valid_mask_false_tokens_are_excluded_from_generated_keys(tmp_path: Path) -> None:
+def test_valid_mask_false_tokens_are_excluded_from_generated_keys(
+	tmp_path: Path,
+) -> None:
 	_write_embedding_artifacts(
 		tmp_path,
 		'survey_a',
@@ -170,10 +177,109 @@ def test_residualizer_npz_round_trip_preserves_transform(tmp_path: Path) -> None
 	path = tmp_path / 'residualizer.npz'
 	write_residualizer_npz(path, residualizer)
 	loaded = read_residualizer_npz(path)
+	with np.load(path, allow_pickle=False) as payload:
+		assert int(payload['schema_version']) == RESIDUALIZER_SCHEMA_VERSION
+		assert set(payload.files) >= {
+			'means',
+			'counts',
+			'group_shape',
+			'fallback_mean',
+		}
 
 	np.testing.assert_allclose(
 		loaded.transform(embeddings, group_keys),
 		residualizer.transform(embeddings, group_keys),
+	)
+
+
+@pytest.mark.parametrize('chunk_size', [1, 2, 7, 100])
+def test_dense_fit_and_transform_match_reference(chunk_size: int) -> None:
+	group_shape = (2, 3, 1)
+	group_keys = np.array(
+		[[0, 0, 0], [0, 0, 0], [0, 2, 0], [1, 1, 0], [1, 1, 0]],
+		dtype=np.int64,
+	)
+	embeddings = np.arange(15, dtype=np.float32).reshape(5, 3)
+	group_ids = encode_dense_group_ids(group_keys, group_shape)
+	residualizer = fit_local_token_position_residualizer(
+		embeddings,
+		group_ids,
+		group_by='token_phase',
+		add_global_mean_back=False,
+		min_group_count=2,
+		group_shape=group_shape,
+		chunk_size=chunk_size,
+	)
+	fallback = embeddings.mean(axis=0)
+	expected_means = np.broadcast_to(fallback, (6, 3)).copy()
+	expected_counts = np.bincount(group_ids, minlength=6)
+	for group_id in range(6):
+		if expected_counts[group_id] >= 2:
+			expected_means[group_id] = embeddings[group_ids == group_id].mean(axis=0)
+
+	np.testing.assert_allclose(residualizer.means, expected_means)
+	np.testing.assert_array_equal(residualizer.counts, expected_counts)
+	np.testing.assert_allclose(
+		residualizer.transform(embeddings, group_ids),
+		embeddings - expected_means[group_ids],
+	)
+
+
+def test_dense_groups_handle_empty_and_single_group() -> None:
+	empty = fit_local_token_position_residualizer(
+		np.empty((0, 2), dtype=np.float32),
+		np.empty(0, dtype=np.int64),
+		group_by='token_phase',
+		add_global_mean_back=True,
+		min_group_count=1,
+		group_shape=(2, 1, 1),
+	)
+	np.testing.assert_array_equal(empty.counts, [0, 0])
+	np.testing.assert_array_equal(empty.fallback_mean, [0.0, 0.0])
+	assert empty.transform(
+		np.empty((0, 2), dtype=np.float32), np.empty(0, dtype=np.int64)
+	).shape == (0, 2)
+
+	single = fit_local_token_position_residualizer(
+		np.array([[1.0, 3.0], [3.0, 5.0]], dtype=np.float32),
+		np.zeros(2, dtype=np.int64),
+		group_by='token_phase',
+		add_global_mean_back=False,
+		min_group_count=1,
+		group_shape=(1, 1, 1),
+	)
+	np.testing.assert_allclose(single.means, [[2.0, 4.0]])
+
+
+def test_dense_group_encoding_rejects_invalid_coordinates() -> None:
+	with pytest.raises(ValueError, match='outside group_shape'):
+		encode_dense_group_ids(np.array([[1, 3, 0]]), (2, 3, 1))
+
+
+def test_legacy_residualizer_artifact_preserves_sparse_fallback(tmp_path: Path) -> None:
+	path = tmp_path / 'legacy.npz'
+	np.savez(
+		path,
+		global_mean=np.array([5.0, 6.0], dtype=np.float32),
+		group_keys=np.array([[0, 0, 0], [1, 0, 0]], dtype=np.int64),
+		group_means=np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32),
+		group_counts=np.array([2, 3], dtype=np.int64),
+		mode=np.asarray('local_token_position'),
+		group_by=np.asarray('token_phase'),
+		add_global_mean_back=np.asarray(1, dtype=np.bool_),
+		min_group_count=np.asarray(1, dtype=np.int64),
+	)
+
+	loaded = read_residualizer_npz(path)
+
+	assert loaded.group_shape is None
+	np.testing.assert_array_equal(loaded.counts, [2, 3])
+	np.testing.assert_array_equal(loaded.fallback_mean, [5.0, 6.0])
+	features = np.array([[10.0, 20.0], [10.0, 20.0]], dtype=np.float32)
+	groups = np.array([[1, 0, 0], [0, 2, 3]], dtype=np.int64)
+	np.testing.assert_array_equal(
+		loaded.transform(features, groups),
+		[[12.0, 22.0], [10.0, 20.0]],
 	)
 
 

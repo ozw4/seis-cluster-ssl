@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -12,6 +15,126 @@ import numpy as np
 
 if TYPE_CHECKING:
 	from collections.abc import Iterator, Sequence
+	from types import TracebackType
+
+	from typing_extensions import Self
+
+
+_DEFAULT_MAX_OPEN_ARRAYS = 16
+_CacheKey = tuple[Path, int, int, int, int]
+
+
+class EmbeddingMemmapCache:
+	"""Bounded process-local cache for clustering input memmaps."""
+
+	def __init__(self, max_open_arrays: int = _DEFAULT_MAX_OPEN_ARRAYS) -> None:
+		"""Initialize a bounded process-local cache."""
+		if isinstance(max_open_arrays, bool) or not isinstance(max_open_arrays, int):
+			msg = 'max_open_arrays must be a nonnegative integer'
+			raise TypeError(msg)
+		if max_open_arrays < 0:
+			msg = 'max_open_arrays must be a nonnegative integer'
+			raise ValueError(msg)
+		self.max_open_arrays = max_open_arrays
+		self._initialize_process_state()
+
+	def __enter__(self) -> Self:
+		"""Return this cache for context-manager use."""
+		self._ensure_current_process()
+		return self
+
+	def __exit__(
+		self,
+		exc_type: type[BaseException] | None,
+		exc_value: BaseException | None,
+		traceback: TracebackType | None,
+	) -> None:
+		"""Close cached mappings when leaving a context."""
+		self.close()
+
+	def __getstate__(self) -> dict[str, int]:
+		"""Exclude process-owned mappings and locks from serialized state."""
+		return {'max_open_arrays': self.max_open_arrays}
+
+	def __setstate__(self, state: dict[str, int]) -> None:
+		"""Create empty process-local state after deserialization."""
+		self.max_open_arrays = state['max_open_arrays']
+		self._initialize_process_state()
+
+	def close(self) -> None:
+		"""Close all mappings owned by this process-local cache."""
+		self._ensure_current_process()
+		with self._cache_lock:
+			arrays = tuple(self._cache.values())
+			self._cache.clear()
+		for array in arrays:
+			_close_memmap(array)
+
+	def open(self, path: str | Path) -> np.ndarray:
+		"""Open one `.npy` file, reusing an unchanged process-local mapping."""
+		resolved_path = Path(path).resolve(strict=True)
+		self._ensure_current_process()
+		if self.max_open_arrays == 0:
+			return _load_memmap(resolved_path)
+
+		while True:
+			key = _cache_key(resolved_path)
+			with self._cache_lock:
+				cached = self._cache.get(key)
+				if cached is not None:
+					self._cache.move_to_end(key)
+					return cached
+			array = _load_memmap(resolved_path)
+			try:
+				current_key = _cache_key(resolved_path)
+			except OSError:
+				_close_memmap(array)
+				raise
+			if current_key == key:
+				break
+			_close_memmap(array)
+
+		cached = self._store(key, array)
+		if cached is not None:
+			_close_memmap(array)
+			return cached
+		return array
+
+	def _store(
+		self,
+		key: _CacheKey,
+		array: np.ndarray,
+	) -> np.ndarray | None:
+		with self._cache_lock:
+			cached = self._cache.get(key)
+			if cached is not None:
+				self._cache.move_to_end(key)
+				return cached
+			stale_keys = tuple(
+				cached_key for cached_key in self._cache if cached_key[0] == key[0]
+			)
+			for stale_key in stale_keys:
+				self._cache.pop(stale_key)
+			self._cache[key] = array
+			while len(self._cache) > self.max_open_arrays:
+				self._cache.popitem(last=False)
+		return None
+
+	def _initialize_process_state(self) -> None:
+		self._pid = os.getpid()
+		self._cache: OrderedDict[_CacheKey, np.ndarray] = OrderedDict()
+		self._cache_lock = threading.Lock()
+
+	def _ensure_current_process(self) -> None:
+		pid = os.getpid()
+		if pid == self._pid:
+			return
+		inherited_arrays = tuple(self._cache.values())
+		self._cache = OrderedDict()
+		self._cache_lock = threading.Lock()
+		self._pid = pid
+		for array in inherited_arrays:
+			_close_memmap(array)
 
 
 @dataclass(frozen=True)
@@ -42,6 +165,8 @@ COMPATIBILITY_METADATA_FIELDS = (
 	'min_token_valid_fraction',
 	'zero_mask',
 )
+
+_MEMMAP_CACHE = EmbeddingMemmapCache()
 
 
 def discover_embedding_inputs(input_dir: str | Path) -> list[EmbeddingInput]:
@@ -80,9 +205,13 @@ def embedding_dim(embedding_input: EmbeddingInput) -> int:
 	return int(embeddings.shape[-1])
 
 
-def load_valid_tokens(embedding_input: EmbeddingInput) -> np.ndarray:
+def load_valid_tokens(
+	embedding_input: EmbeddingInput,
+	*,
+	cache: EmbeddingMemmapCache | None = None,
+) -> np.ndarray:
 	"""Load a survey valid-token mask as a memory-mapped array."""
-	valid = np.load(embedding_input.valid_tokens_path, mmap_mode='r')
+	valid = (cache or _MEMMAP_CACHE).open(embedding_input.valid_tokens_path)
 	if valid.dtype != np.bool_:
 		msg = (
 			f'valid_tokens dtype must be bool for {embedding_input.survey_id}; '
@@ -98,9 +227,14 @@ def load_valid_tokens(embedding_input: EmbeddingInput) -> np.ndarray:
 	return valid
 
 
-def open_embedding_array(embedding_input: EmbeddingInput) -> np.ndarray:
+def open_embedding_array(
+	embedding_input: EmbeddingInput,
+	*,
+	cache: EmbeddingMemmapCache | None = None,
+) -> np.ndarray:
 	"""Open a survey embedding grid as a memory-mapped array."""
-	embeddings = np.load(embedding_input.embeddings_path, mmap_mode='r')
+	selected_cache = cache or _MEMMAP_CACHE
+	embeddings = selected_cache.open(embedding_input.embeddings_path)
 	if embeddings.ndim != 4:
 		msg = (
 			f'embeddings must be 4D for {embedding_input.survey_id}; '
@@ -113,7 +247,7 @@ def open_embedding_array(embedding_input: EmbeddingInput) -> np.ndarray:
 			f'got {embeddings.dtype}'
 		)
 		raise TypeError(msg)
-	valid = load_valid_tokens(embedding_input)
+	valid = load_valid_tokens(embedding_input, cache=selected_cache)
 	if embeddings.shape[:3] != valid.shape:
 		msg = (
 			f'embeddings token grid must match valid_tokens for '
@@ -174,6 +308,26 @@ def file_sha256(path: str | Path) -> str:
 		for block in iter(lambda: file_obj.read(1024 * 1024), b''):
 			digest.update(block)
 	return digest.hexdigest()
+
+
+def close_embedding_memmap_cache() -> None:
+	"""Close process-local mappings held by clustering convenience helpers."""
+	_MEMMAP_CACHE.close()
+
+
+def _load_memmap(path: Path) -> np.ndarray:
+	return np.load(path, mmap_mode='r', allow_pickle=False)
+
+
+def _cache_key(path: Path) -> _CacheKey:
+	stat = path.stat()
+	return (path, stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
+
+
+def _close_memmap(array: np.ndarray) -> None:
+	mapping = getattr(array, '_mmap', None)
+	if mapping is not None:
+		mapping.close()
 
 
 def embedding_input_metadata(embedding_input: EmbeddingInput) -> dict[str, object]:
@@ -291,7 +445,9 @@ def _validate_finite_features(features: np.ndarray, survey_id: str) -> None:
 __all__ = [
 	'COMPATIBILITY_METADATA_FIELDS',
 	'EmbeddingInput',
+	'EmbeddingMemmapCache',
 	'FeatureBatch',
+	'close_embedding_memmap_cache',
 	'count_valid_tokens',
 	'discover_embedding_inputs',
 	'embedding_compatibility_signature',

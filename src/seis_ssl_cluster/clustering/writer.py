@@ -19,7 +19,7 @@ from seis_ssl_cluster.clustering.features import (
 )
 from seis_ssl_cluster.clustering.residualization import (
 	LocalTokenPositionResidualizer,
-	residualization_keys_for_flat_indices,
+	residualization_groups_for_flat_indices,
 )
 
 if TYPE_CHECKING:
@@ -130,12 +130,12 @@ def _write_survey_labels(  # noqa: PLR0913
 		features = np.asarray(flat_embeddings[batch_indices], dtype=np.float32)
 		validate_finite_feature_batch(features, embedding_input.survey_id)
 		if residualizer is not None:
-			group_keys = residualization_keys_for_flat_indices(
+			groups = residualization_groups_for_flat_indices(
 				embedding_input,
 				batch_indices,
-				group_by=residualizer.group_by,
+				residualizer=residualizer,
 			)
-			features = residualizer.transform(features, group_keys)
+			features = residualizer.transform(features, groups)
 		prepared = preprocessor.transform(features)
 		predicted = np.asarray(kmeans.predict(prepared), dtype=np.int32)
 		flat_labels[batch_indices] = predicted

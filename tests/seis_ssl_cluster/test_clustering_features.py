@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
+import pickle
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.clustering.features as features_module
 from seis_ssl_cluster.clustering.features import (
+	EmbeddingMemmapCache,
 	discover_embedding_inputs,
 	extract_token_features,
 	iter_valid_feature_batches,
+	open_embedding_array,
 	valid_flat_indices,
 	validate_compatible_embedding_inputs,
 )
@@ -101,6 +106,96 @@ def test_extract_token_features_reports_non_finite_survey(
 
 	with pytest.raises(ValueError, match='survey_bad'):
 		extract_token_features(embedding_input, [0])
+
+
+def test_embedding_memmap_cache_loads_only_on_cache_miss(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	path_a = tmp_path / 'a.npy'
+	path_b = tmp_path / 'b.npy'
+	np.save(path_a, np.zeros((1, 1, 1), dtype=np.float32))
+	np.save(path_b, np.ones((1, 1, 1), dtype=np.float32))
+	load_calls = 0
+	original_load = np.load
+
+	def counting_load(*args: object, **kwargs: object) -> np.ndarray:
+		nonlocal load_calls
+		load_calls += 1
+		return original_load(*args, **kwargs)
+
+	monkeypatch.setattr(features_module.np, 'load', counting_load)
+	with EmbeddingMemmapCache(max_open_arrays=1) as cache:
+		first = cache.open(path_a)
+		assert cache.open(path_a) is first
+		cache.open(path_b)
+		assert not first._mmap.closed  # noqa: SLF001
+		second = cache.open(path_a)
+		assert second is not first
+
+	assert load_calls == 3
+	assert not first._mmap.closed  # noqa: SLF001
+	assert second._mmap.closed  # noqa: SLF001
+	first._mmap.close()  # noqa: SLF001
+
+
+def test_open_embedding_array_keeps_embedding_valid_when_mask_evicts_it(
+	tmp_path: Path,
+) -> None:
+	_write_embedding_artifacts(
+		tmp_path,
+		'survey_a',
+		embeddings=np.arange(2, dtype=np.float32).reshape(1, 1, 1, 2),
+		valid=np.ones((1, 1, 1), dtype=np.bool_),
+	)
+	embedding_input = discover_embedding_inputs(tmp_path)[0]
+
+	with EmbeddingMemmapCache(max_open_arrays=1) as cache:
+		embeddings = open_embedding_array(embedding_input, cache=cache)
+		assert not embeddings._mmap.closed  # noqa: SLF001
+		np.testing.assert_array_equal(embeddings, [[[[0.0, 1.0]]]])
+
+	assert not embeddings._mmap.closed  # noqa: SLF001
+	embeddings._mmap.close()  # noqa: SLF001
+
+
+def test_embedding_memmap_cache_invalidates_replaced_file(tmp_path: Path) -> None:
+	path = tmp_path / 'embeddings.npy'
+	np.save(path, np.zeros((1, 1, 1, 1), dtype=np.float32))
+	cache = EmbeddingMemmapCache()
+	old = cache.open(path)
+	replacement = tmp_path / 'replacement.npy'
+	np.save(replacement, np.ones((1, 1, 1, 1), dtype=np.float32))
+	replacement.replace(path)
+
+	new = cache.open(path)
+
+	assert new is not old
+	assert not old._mmap.closed  # noqa: SLF001
+	np.testing.assert_array_equal(new, 1.0)
+	cache.close()
+	assert new._mmap.closed  # noqa: SLF001
+	old._mmap.close()  # noqa: SLF001
+
+
+def test_embedding_memmap_cache_reopens_after_pid_change_and_pickle(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	path = tmp_path / 'embeddings.npy'
+	np.save(path, np.zeros((1, 1, 1, 1), dtype=np.float32))
+	cache = EmbeddingMemmapCache()
+	inherited = cache.open(path)
+	child_pid = os.getpid() + 1
+	monkeypatch.setattr(features_module.os, 'getpid', lambda: child_pid)
+	child_mapping = cache.open(path)
+
+	assert child_mapping is not inherited
+	assert inherited._mmap.closed  # noqa: SLF001
+	restored = pickle.loads(pickle.dumps(cache))  # noqa: S301
+	assert restored.open(path) is not child_mapping
+	cache.close()
+	restored.close()
 
 
 def _write_embedding_artifacts(

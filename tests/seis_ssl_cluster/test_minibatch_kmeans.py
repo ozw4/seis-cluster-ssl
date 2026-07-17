@@ -6,10 +6,77 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.clustering.kmeans as kmeans_module
 from seis_ssl_cluster.clustering import run_embedding_clustering
+from seis_ssl_cluster.clustering.features import discover_embedding_inputs
+from seis_ssl_cluster.clustering.kmeans import apply_residualizer_to_sample
+from seis_ssl_cluster.clustering.residualization import LocalTokenPositionResidualizer
+from seis_ssl_cluster.clustering.writer import write_labels_for_k
 
 if TYPE_CHECKING:
 	from pathlib import Path
+
+
+def test_disabled_residualization_skips_group_ids_and_copy(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	features = np.ones((2, 3), dtype=np.float64)
+
+	def fail_group_ids() -> None:
+		raise AssertionError('group IDs must not be generated')
+
+	monkeypatch.setattr(
+		kmeans_module,
+		'sample_residualization_group_ids',
+		fail_group_ids,
+	)
+	actual = apply_residualizer_to_sample(
+		features,
+		embedding_inputs=(),
+		per_survey_token_indices={},
+		residualizer=None,
+	)
+
+	assert actual is features
+
+
+def test_label_writer_applies_legacy_residualizer_with_coordinate_keys(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.array([[[[10.0, 20.0], [11.0, 21.0]]]], dtype=np.float32),
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+	legacy = LocalTokenPositionResidualizer(
+		mode='local_token_position',
+		group_by='token_phase',
+		add_global_mean_back=True,
+		min_group_count=1,
+		means=np.array([[1.0, 2.0]], dtype=np.float32),
+		counts=np.array([2], dtype=np.int64),
+		group_shape=None,
+		fallback_mean=np.array([5.0, 6.0], dtype=np.float32),
+		legacy_group_keys=np.array([[0, 0, 0]], dtype=np.int64),
+	)
+
+	results = write_labels_for_k(
+		output_dir=tmp_path / 'clusters',
+		k=1,
+		embedding_inputs=discover_embedding_inputs(input_dir),
+		residualizer=legacy,
+		preprocessor=_IdentityPreprocessor(),
+		kmeans=_ZeroKMeans(),
+		prediction_batch_size=1,
+		label_metadata={},
+	)
+
+	assert results[0].cluster_counts == {0: 2}
+	labels = np.load(results[0].labels_path)
+	np.testing.assert_array_equal(labels, np.zeros((1, 1, 2), dtype=np.int32))
 
 
 def test_run_embedding_clustering_writes_deterministic_labels_for_multiple_k(
@@ -370,3 +437,15 @@ def _embedding_metadata(
 			'xy_trace_influence_radius': 1,
 		},
 	}
+
+
+class _IdentityPreprocessor:
+	@staticmethod
+	def transform(features: np.ndarray) -> np.ndarray:
+		return features
+
+
+class _ZeroKMeans:
+	@staticmethod
+	def predict(features: np.ndarray) -> np.ndarray:
+		return np.zeros(features.shape[0], dtype=np.int32)

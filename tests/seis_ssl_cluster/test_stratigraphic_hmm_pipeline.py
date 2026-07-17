@@ -20,6 +20,7 @@ from seis_ssl_cluster.clustering.kmeans import (
 	fit_residualizer,
 )
 from seis_ssl_cluster.clustering.residualization import (
+	LocalTokenPositionResidualizer,
 	residualization_keys_for_flat_indices,
 )
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
@@ -187,6 +188,47 @@ def test_prepare_feature_batch_for_indices_matches_kmeans_preprocessing(
 	)
 	assert empty.shape == (0, 2)
 	assert empty.dtype == np.float32
+
+
+def test_prepare_feature_batch_supports_legacy_residualizer_artifact(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	embeddings = np.array([[[[10.0, 20.0], [11.0, 21.0]]]], dtype=np.float32)
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=embeddings,
+		valid=np.ones((1, 1, 2), dtype=np.bool_),
+	)
+	embedding_input = discover_embedding_inputs(input_dir)[0]
+	legacy = LocalTokenPositionResidualizer(
+		mode='local_token_position',
+		group_by='token_phase',
+		add_global_mean_back=True,
+		min_group_count=1,
+		means=np.array([[1.0, 2.0]], dtype=np.float32),
+		counts=np.array([2], dtype=np.int64),
+		group_shape=None,
+		fallback_mean=np.array([5.0, 6.0], dtype=np.float32),
+		legacy_group_keys=np.array([[0, 0, 0]], dtype=np.int64),
+	)
+	preprocessor = fit_preprocessor(
+		embeddings.reshape((-1, 2)),
+		normalization='none',
+		pca=PCASettings(enabled=False, n_components=2, whiten=False),
+		seed=7,
+	)
+
+	batch = prepare_feature_batch_for_indices(
+		embedding_input,
+		np.array([0, 1], dtype=np.int64),
+		residualizer=legacy,
+		preprocessor=preprocessor,
+	)
+
+	np.testing.assert_allclose(batch, embeddings.reshape((-1, 2)) + 4.0)
 
 
 def test_initialize_ordered_centers_places_empty_clusters_last_deterministic() -> None:

@@ -25,7 +25,7 @@ from seis_ssl_cluster.clustering.residualization import (
 	LocalTokenPositionResidualizer,
 	fit_local_token_position_residualizer,
 	residualization_metadata_disabled,
-	sample_residualization_keys,
+	sample_residualization_group_ids,
 	write_residualizer_npz,
 )
 from seis_ssl_cluster.clustering.sampling import (
@@ -274,17 +274,18 @@ def fit_residualizer(
 	"""Fit optional local token position residualization statistics."""
 	if not settings.enabled:
 		return None
-	group_keys = sample_residualization_keys(
+	group_ids, group_shape = sample_residualization_group_ids(
 		embedding_inputs,
 		per_survey_token_indices,
 		group_by=settings.group_by,
 	)
 	return fit_local_token_position_residualizer(
 		features,
-		group_keys,
+		group_ids,
 		group_by=settings.group_by,
 		add_global_mean_back=settings.add_global_mean_back,
 		min_group_count=settings.min_group_count,
+		group_shape=group_shape,
 	)
 
 
@@ -297,13 +298,19 @@ def apply_residualizer_to_sample(
 ) -> np.ndarray:
 	"""Apply optional residualization to sampled features before preprocessing."""
 	if residualizer is None:
-		return np.asarray(features, dtype=np.float32)
-	group_keys = sample_residualization_keys(
+		return features
+	group_ids, group_shape = sample_residualization_group_ids(
 		embedding_inputs,
 		per_survey_token_indices,
 		group_by=residualizer.group_by,
 	)
-	return residualizer.transform(features, group_keys)
+	if group_shape != residualizer.group_shape:
+		msg = (
+			'residualization group shape changed between fit and transform; '
+			f'got {group_shape!r} and {residualizer.group_shape!r}'
+		)
+		raise ValueError(msg)
+	return residualizer.transform(features, group_ids)
 
 
 def fit_preprocessor(
