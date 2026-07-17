@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.clustering.prepared_features as prepared_features_module
 from seis_ssl_cluster.clustering.features import EmbeddingInput, extract_token_features
 from seis_ssl_cluster.clustering.prepared_features import (
 	PreparedFeatureCacheSettings,
@@ -391,6 +392,46 @@ def test_prepared_feature_store_cleans_completed_surveys_after_later_failure(
 
 	assert cache_root.is_dir()
 	assert not any(cache_root.iterdir())
+
+
+def test_prepared_feature_store_reports_configured_cleanup_failure(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	item = _write_input(tmp_path, 'survey_a', shape=(1, 1, 2, 1))
+	store = prepare_feature_store(
+		embedding_inputs=(item,),
+		feature_dim=1,
+		feature_mode='embedding',
+		residualizer=None,
+		preprocessor=_IdentityPreprocessor(),
+		edge_margin_tokens=(0, 0, 0),
+		settings=PreparedFeatureCacheSettings(
+			cleanup=True,
+			persist=False,
+			directory=tmp_path / 'prepared',
+		),
+		default_cache_root=tmp_path / 'unused',
+		prepare_batch=extract_token_features,
+	)
+	cache_path = store.surveys[0].cache_path
+	assert cache_path is not None
+	original_rmtree = prepared_features_module.shutil.rmtree
+
+	def fail_configured_cleanup(path: Path) -> None:
+		if path == cache_path:
+			raise OSError('injected prepared-cache cleanup failure')
+		original_rmtree(path)
+
+	monkeypatch.setattr(
+		prepared_features_module.shutil,
+		'rmtree',
+		fail_configured_cleanup,
+	)
+	with pytest.raises(OSError, match='prepared-cache cleanup failure'):
+		store.close()
+	assert cache_path.exists()
+	original_rmtree(cache_path)
 
 
 def test_prepared_feature_store_zero_valid_and_z_coordinate_fast_path(

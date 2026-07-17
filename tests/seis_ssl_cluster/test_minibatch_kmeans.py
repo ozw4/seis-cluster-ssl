@@ -8,7 +8,11 @@ import pytest
 
 import seis_ssl_cluster.clustering.kmeans as kmeans_module
 from seis_ssl_cluster.clustering import run_embedding_clustering
-from seis_ssl_cluster.clustering.features import discover_embedding_inputs
+from seis_ssl_cluster.clustering.features import (
+	EmbeddingInput,
+	discover_embedding_inputs,
+	embedding_input_metadata,
+)
 from seis_ssl_cluster.clustering.kmeans import apply_residualizer_to_sample
 from seis_ssl_cluster.clustering.residualization import LocalTokenPositionResidualizer
 from seis_ssl_cluster.clustering.writer import (
@@ -118,29 +122,23 @@ def test_multi_model_label_writer_matches_single_passes_and_transforms_once(
 		'write',
 	}
 	for k in (3, 1):
-		reference = write_labels_for_k(
-			output_dir=tmp_path / 'reference',
-			k=k,
-			embedding_inputs=inputs,
-			residualizer=None,
-			preprocessor=_IdentityPreprocessor(),
-			kmeans=_ModuloKMeans(k),
-			prediction_batch_size=2,
-			label_metadata={'source': 'test'},
+		reference_labels, reference_counts, reference_metadata = (
+			_reference_labels_for_model(
+				inputs[0],
+				k=k,
+				prediction_batch_size=2,
+				label_metadata={'source': 'test'},
+			)
 		)
 		np.testing.assert_array_equal(
 			np.load(multi[k][0].labels_path),
-			np.load(reference[0].labels_path),
+			reference_labels,
 		)
-		assert multi[k][0].cluster_counts == reference[0].cluster_counts
+		assert multi[k][0].cluster_counts == reference_counts
 		multi_metadata = json.loads(
 			multi[k][0].metadata_path.read_text(encoding='utf-8'),
 		)
-		reference_metadata = json.loads(
-			reference[0].metadata_path.read_text(encoding='utf-8'),
-		)
 		multi_metadata.pop('label_path')
-		reference_metadata.pop('label_path')
 		assert multi_metadata == reference_metadata
 
 
@@ -622,3 +620,42 @@ class _CountingPreprocessor:
 	def transform(self, features: np.ndarray) -> np.ndarray:
 		self.call_count += 1
 		return features
+
+
+def _reference_labels_for_model(
+	item: EmbeddingInput,
+	*,
+	k: int,
+	prediction_batch_size: int,
+	label_metadata: dict[str, object],
+) -> tuple[np.ndarray, dict[int, int], dict[str, object]]:
+	"""Run an independent single-model, multi-pass label reference."""
+	embeddings = np.load(item.embeddings_path)
+	valid = np.load(item.valid_tokens_path)
+	indices = np.flatnonzero(valid.reshape(-1))
+	labels = np.full(embeddings.shape[:3], -1, dtype=np.int32)
+	flat_embeddings = embeddings.reshape((-1, embeddings.shape[-1]))
+	flat_labels = labels.reshape(-1)
+	model = _ModuloKMeans(k)
+	preprocessor = _IdentityPreprocessor()
+	for start in range(0, indices.size, prediction_batch_size):
+		batch_indices = indices[start : start + prediction_batch_size]
+		features = np.asarray(flat_embeddings[batch_indices], dtype=np.float32)
+		flat_labels[batch_indices] = model.predict(preprocessor.transform(features))
+	counts_array = np.bincount(flat_labels[indices], minlength=k)
+	counts = {
+		label: int(count)
+		for label, count in enumerate(counts_array)
+	}
+	metadata = {
+		**label_metadata,
+		'k': k,
+		'survey_id': item.survey_id,
+		'embedding_input': embedding_input_metadata(item),
+		'token_grid_shape': list(embeddings.shape[:3]),
+		'embedding_dim': int(embeddings.shape[-1]),
+		'valid_token_count': int(indices.size),
+		'invalid_token_count': int(valid.size - indices.size),
+		'cluster_counts': {str(label): count for label, count in counts.items()},
+	}
+	return labels, counts, metadata

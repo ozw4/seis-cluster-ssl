@@ -62,13 +62,11 @@ class EmbeddingMemmapCache:
 		self._initialize_process_state()
 
 	def close(self) -> None:
-		"""Close all mappings owned by this process-local cache."""
+		"""Release cached mappings without invalidating arrays held by callers."""
 		self._ensure_current_process()
 		with self._cache_lock:
-			arrays = tuple(self._cache.values())
+			# Borrowers keep the memmap alive after cache ownership is released.
 			self._cache.clear()
-		for array in arrays:
-			_close_memmap(array)
 
 	def open(self, path: str | Path) -> np.ndarray:
 		"""Open one `.npy` file, reusing an unchanged process-local mapping."""
@@ -105,7 +103,6 @@ class EmbeddingMemmapCache:
 		key: _CacheKey,
 		array: np.ndarray,
 	) -> np.ndarray | None:
-		removed: list[np.ndarray] = []
 		with self._cache_lock:
 			cached = self._cache.get(key)
 			if cached is not None:
@@ -114,13 +111,12 @@ class EmbeddingMemmapCache:
 			stale_keys = tuple(
 				cached_key for cached_key in self._cache if cached_key[0] == key[0]
 			)
-			removed.extend(self._cache.pop(stale_key) for stale_key in stale_keys)
+			for stale_key in stale_keys:
+				self._cache.pop(stale_key)
 			self._cache[key] = array
 			while len(self._cache) > self.max_open_arrays:
-				_, evicted = self._cache.popitem(last=False)
-				removed.append(evicted)
-		for removed_array in removed:
-			_close_memmap(removed_array)
+				# Never close a mapping that may still be held by a caller.
+				self._cache.popitem(last=False)
 		return None
 
 	def _initialize_process_state(self) -> None:
@@ -132,12 +128,9 @@ class EmbeddingMemmapCache:
 		pid = os.getpid()
 		if pid == self._pid:
 			return
-		inherited_arrays = tuple(self._cache.values())
 		self._cache = OrderedDict()
 		self._cache_lock = threading.Lock()
 		self._pid = pid
-		for array in inherited_arrays:
-			_close_memmap(array)
 
 
 @dataclass(frozen=True)

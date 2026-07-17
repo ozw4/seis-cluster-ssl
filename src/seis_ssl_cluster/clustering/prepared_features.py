@@ -214,8 +214,9 @@ class PreparedFeatureStore:
 		"""Close mappings and apply the configured completed-cache policy."""
 		for survey in self.surveys:
 			survey.close()
+		for survey in self.surveys:
 			if self.settings.cleanup and survey.cache_path is not None:
-				shutil.rmtree(survey.cache_path, ignore_errors=True)
+				shutil.rmtree(survey.cache_path)
 
 	def by_survey_id(self) -> dict[str, PreparedSurveyFeatures]:
 		"""Return prepared surveys keyed by their unique survey ids."""
@@ -332,7 +333,7 @@ def prepare_feature_store(  # noqa: PLR0913
 		for survey in prepared_surveys:
 			survey.close()
 			if settings.cleanup and survey.cache_path is not None:
-				shutil.rmtree(survey.cache_path, ignore_errors=True)
+				shutil.rmtree(survey.cache_path)
 		raise
 	return PreparedFeatureStore(
 		tuple(prepared_surveys), settings, cache_root, feature_mode

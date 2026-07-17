@@ -129,13 +129,17 @@ def test_embedding_memmap_cache_loads_only_on_cache_miss(
 		first = cache.open(path_a)
 		assert cache.open(path_a) is first
 		cache.open(path_b)
-		assert first._mmap.closed  # noqa: SLF001
+		assert not first._mmap.closed  # noqa: SLF001
+		np.testing.assert_array_equal(first, 0.0)
 		second = cache.open(path_a)
 		assert second is not first
 
 	assert load_calls == 3
-	assert first._mmap.closed  # noqa: SLF001
-	assert second._mmap.closed  # noqa: SLF001
+	assert not first._mmap.closed  # noqa: SLF001
+	assert not second._mmap.closed  # noqa: SLF001
+	np.testing.assert_array_equal(first, second)
+	first._mmap.close()  # noqa: SLF001
+	second._mmap.close()  # noqa: SLF001
 
 
 def test_open_embedding_array_keeps_embedding_valid_when_mask_evicts_it(
@@ -154,7 +158,9 @@ def test_open_embedding_array_keeps_embedding_valid_when_mask_evicts_it(
 		assert not embeddings._mmap.closed  # noqa: SLF001
 		np.testing.assert_array_equal(embeddings, [[[[0.0, 1.0]]]])
 
-	assert embeddings._mmap.closed  # noqa: SLF001
+	assert not embeddings._mmap.closed  # noqa: SLF001
+	np.testing.assert_array_equal(embeddings, [[[[0.0, 1.0]]]])
+	embeddings._mmap.close()  # noqa: SLF001
 
 
 def test_embedding_memmap_cache_invalidates_replaced_file(tmp_path: Path) -> None:
@@ -169,10 +175,13 @@ def test_embedding_memmap_cache_invalidates_replaced_file(tmp_path: Path) -> Non
 	new = cache.open(path)
 
 	assert new is not old
-	assert old._mmap.closed  # noqa: SLF001
+	assert not old._mmap.closed  # noqa: SLF001
+	np.testing.assert_array_equal(old, 0.0)
 	np.testing.assert_array_equal(new, 1.0)
 	cache.close()
-	assert new._mmap.closed  # noqa: SLF001
+	assert not new._mmap.closed  # noqa: SLF001
+	old._mmap.close()  # noqa: SLF001
+	new._mmap.close()  # noqa: SLF001
 
 
 def test_embedding_memmap_cache_reopens_after_pid_change_and_pickle(
@@ -188,11 +197,14 @@ def test_embedding_memmap_cache_reopens_after_pid_change_and_pickle(
 	child_mapping = cache.open(path)
 
 	assert child_mapping is not inherited
-	assert inherited._mmap.closed  # noqa: SLF001
+	assert not inherited._mmap.closed  # noqa: SLF001
+	np.testing.assert_array_equal(inherited, 0.0)
 	restored = pickle.loads(pickle.dumps(cache))  # noqa: S301
 	assert restored.open(path) is not child_mapping
 	cache.close()
 	restored.close()
+	inherited._mmap.close()  # noqa: SLF001
+	child_mapping._mmap.close()  # noqa: SLF001
 
 
 def _write_embedding_artifacts(
