@@ -51,6 +51,7 @@ _WRITER_EXPORTS = {
 	'SurveyLabelResult',
 	'write_json',
 	'write_labels_for_k',
+	'write_labels_for_models',
 	'write_model_artifacts',
 }
 
@@ -90,6 +91,7 @@ __all__ = [
 	'write_cluster_summaries',
 	'write_json',
 	'write_labels_for_k',
+	'write_labels_for_models',
 	'write_model_artifacts',
 ]
 

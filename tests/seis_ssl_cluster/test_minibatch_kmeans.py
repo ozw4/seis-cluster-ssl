@@ -11,7 +11,11 @@ from seis_ssl_cluster.clustering import run_embedding_clustering
 from seis_ssl_cluster.clustering.features import discover_embedding_inputs
 from seis_ssl_cluster.clustering.kmeans import apply_residualizer_to_sample
 from seis_ssl_cluster.clustering.residualization import LocalTokenPositionResidualizer
-from seis_ssl_cluster.clustering.writer import write_labels_for_k
+from seis_ssl_cluster.clustering.writer import (
+	write_labels_for_k,
+	write_labels_for_models,
+)
+from seis_ssl_cluster.utils import StageTimer
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -77,6 +81,96 @@ def test_label_writer_applies_legacy_residualizer_with_coordinate_keys(
 	assert results[0].cluster_counts == {0: 2}
 	labels = np.load(results[0].labels_path)
 	np.testing.assert_array_equal(labels, np.zeros((1, 1, 2), dtype=np.int32))
+
+
+def test_multi_model_label_writer_matches_single_passes_and_transforms_once(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.arange(18, dtype=np.float32).reshape(1, 2, 3, 3),
+		valid=np.array([[[True, False, True], [True, True, True]]]),
+	)
+	inputs = discover_embedding_inputs(input_dir)
+	multi_preprocessor = _CountingPreprocessor()
+	timer = StageTimer(enabled=True)
+	multi = write_labels_for_models(
+		output_dir=tmp_path / 'multi',
+		kmeans_by_k={3: _ModuloKMeans(3), 1: _ModuloKMeans(1)},
+		embedding_inputs=inputs,
+		residualizer=None,
+		preprocessor=multi_preprocessor,
+		prediction_batch_size=2,
+		label_metadata={'source': 'test'},
+		timer=timer,
+	)
+
+	assert list(multi) == [3, 1]
+	assert multi_preprocessor.call_count == 3
+	assert set(timer.to_dict()['stages']) == {
+		'feature_read',
+		'predict_k1',
+		'predict_k3',
+		'preprocess',
+		'write',
+	}
+	for k in (3, 1):
+		reference = write_labels_for_k(
+			output_dir=tmp_path / 'reference',
+			k=k,
+			embedding_inputs=inputs,
+			residualizer=None,
+			preprocessor=_IdentityPreprocessor(),
+			kmeans=_ModuloKMeans(k),
+			prediction_batch_size=2,
+			label_metadata={'source': 'test'},
+		)
+		np.testing.assert_array_equal(
+			np.load(multi[k][0].labels_path),
+			np.load(reference[0].labels_path),
+		)
+		assert multi[k][0].cluster_counts == reference[0].cluster_counts
+		multi_metadata = json.loads(
+			multi[k][0].metadata_path.read_text(encoding='utf-8'),
+		)
+		reference_metadata = json.loads(
+			reference[0].metadata_path.read_text(encoding='utf-8'),
+		)
+		multi_metadata.pop('label_path')
+		reference_metadata.pop('label_path')
+		assert multi_metadata == reference_metadata
+
+
+def test_multi_model_label_writer_removes_partial_outputs_on_predict_failure(
+	tmp_path: Path,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.ones((1, 1, 3, 2), dtype=np.float32),
+		valid=np.ones((1, 1, 3), dtype=np.bool_),
+	)
+	output_dir = tmp_path / 'clusters'
+
+	with pytest.raises(RuntimeError, match='injected predict failure'):
+		write_labels_for_models(
+			output_dir=output_dir,
+			kmeans_by_k={1: _ZeroKMeans(), 2: _FailingKMeans()},
+			embedding_inputs=discover_embedding_inputs(input_dir),
+			residualizer=None,
+			preprocessor=_IdentityPreprocessor(),
+			prediction_batch_size=2,
+			label_metadata={},
+		)
+
+	assert not list(output_dir.rglob('*.npy'))
+	assert not list(output_dir.rglob('*.json'))
+	assert not list(output_dir.rglob('*.partial'))
 
 
 def test_run_embedding_clustering_writes_deterministic_labels_for_multiple_k(
@@ -449,3 +543,28 @@ class _ZeroKMeans:
 	@staticmethod
 	def predict(features: np.ndarray) -> np.ndarray:
 		return np.zeros(features.shape[0], dtype=np.int32)
+
+
+class _ModuloKMeans:
+	def __init__(self, k: int) -> None:
+		self.k = k
+
+	def predict(self, features: np.ndarray) -> np.ndarray:
+		return np.arange(features.shape[0], dtype=np.int32) % self.k
+
+
+class _FailingKMeans:
+	@staticmethod
+	def predict(features: np.ndarray) -> np.ndarray:
+		del features
+		msg = 'injected predict failure'
+		raise RuntimeError(msg)
+
+
+class _CountingPreprocessor:
+	def __init__(self) -> None:
+		self.call_count = 0
+
+	def transform(self, features: np.ndarray) -> np.ndarray:
+		self.call_count += 1
+		return features

@@ -34,9 +34,10 @@ from seis_ssl_cluster.clustering.sampling import (
 )
 from seis_ssl_cluster.clustering.writer import (
 	SurveyLabelResult,
-	write_labels_for_k,
+	write_labels_for_models,
 	write_model_artifacts,
 )
+from seis_ssl_cluster.utils import StageTimer
 
 
 @dataclass(frozen=True)
@@ -158,24 +159,33 @@ def run_minibatch_kmeans_clustering(
 		residualizer=residualizer,
 		residualizer_path=residualizer_path,
 	)
-	results: list[KClusteringResult] = []
-	for k in settings.k_values:
-		kmeans = fit_minibatch_kmeans(
+	kmeans_by_k = {
+		k: fit_minibatch_kmeans(
 			training_features,
 			k=k,
 			batch_size=settings.minibatch_size,
 			seed=settings.seed,
 		)
-		label_results = write_labels_for_k(
+		for k in settings.k_values
+	}
+	timer = StageTimer(enabled=True)
+	try:
+		label_results_by_k = write_labels_for_models(
 			output_dir=settings.output_dir,
-			k=k,
+			kmeans_by_k=kmeans_by_k,
 			embedding_inputs=embedding_inputs,
 			residualizer=residualizer,
 			preprocessor=preprocessor,
-			kmeans=kmeans,
 			prediction_batch_size=settings.prediction_batch_size,
 			label_metadata=common_metadata,
+			timer=timer,
 		)
+	finally:
+		timer.write_json(settings.output_dir / 'stage_timings.json')
+	results: list[KClusteringResult] = []
+	for k in settings.k_values:
+		kmeans = kmeans_by_k[k]
+		label_results = label_results_by_k[k]
 		cluster_counts = _aggregate_counts(label_results, k)
 		invalid_token_count = int(
 			sum(result.invalid_token_count for result in label_results),
@@ -381,7 +391,7 @@ def fit_minibatch_kmeans(
 	return model
 
 
-def _common_metadata(
+def _common_metadata(  # noqa: PLR0913
 	*,
 	settings: ClusteringSettings,
 	embedding_inputs: Sequence[EmbeddingInput],
