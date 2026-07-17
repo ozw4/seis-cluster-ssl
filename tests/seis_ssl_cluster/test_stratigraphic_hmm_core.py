@@ -121,6 +121,41 @@ def test_float32_emissions_preserve_legacy_complete_tie() -> None:
 	assert int(np.argmin(costs[0])) == 0
 
 
+def test_float32_emissions_preserve_nonminimum_tie_for_viterbi() -> None:
+	features = np.array([[-0.99506694, 2.0499198]], dtype=np.float32)
+	centers = np.array(
+		[
+			[-0.99506694, 2.0499198],
+			[0.49659768, 0.81159914],
+			[0.49659854, 0.8116002],
+		],
+		dtype=np.float32,
+	)
+	reference = np.sum(
+		(features[:, np.newaxis, :] - centers[np.newaxis, :, :]) ** 2,
+		axis=2,
+	)
+
+	costs = squared_euclidean_emission_costs(features, centers)
+	initial_costs = np.array([100.0, 0.0, 0.0], dtype=np.float32)
+	transitions = np.zeros((3, 3), dtype=np.float32)
+
+	assert reference[0, 1] == reference[0, 2]
+	np.testing.assert_array_equal(costs, reference)
+	np.testing.assert_array_equal(
+		viterbi_decode_costs(
+			costs,
+			transitions,
+			initial_state_costs=initial_costs,
+		),
+		viterbi_decode_costs(
+			reference,
+			transitions,
+			initial_state_costs=initial_costs,
+		),
+	)
+
+
 def test_emission_kernel_does_not_form_three_dimensional_pairwise_deltas() -> None:
 	source = inspect.getsource(
 		_squared_euclidean_emission_costs_with_center_norms,

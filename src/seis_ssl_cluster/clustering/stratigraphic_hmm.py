@@ -629,7 +629,7 @@ def _correct_cancellation_prone_emission_costs(
 	feature_squared_norms: np.ndarray,
 	center_squared_norms: np.ndarray,
 ) -> None:
-	"""Recompute entries whose norm expansion cannot resolve the winner."""
+	"""Recompute entries whose norm expansion cannot resolve their ordering."""
 	error_scale = (
 		np.asarray(8.0, dtype=costs.dtype)
 		* np.finfo(costs.dtype).eps
@@ -640,19 +640,35 @@ def _correct_cancellation_prone_emission_costs(
 		+ center_squared_norms[np.newaxis, :]
 	)
 	suspect = costs <= error_bounds
-	row_min_indices = np.argmin(costs, axis=1)
-	row_min_costs = costs[np.arange(costs.shape[0]), row_min_indices]
-	row_min_error_bounds = error_bounds[
-		np.arange(error_bounds.shape[0]),
-		row_min_indices,
-	]
-	winner_candidates = costs <= (
-		row_min_costs[:, np.newaxis]
-		+ error_bounds
-		+ row_min_error_bounds[:, np.newaxis]
-	)
-	ambiguous_rows = np.count_nonzero(winner_candidates, axis=1) > 1
-	suspect |= winner_candidates & ambiguous_rows[:, np.newaxis]
+	if costs.shape[1] > 1:
+		lower_bounds = costs - error_bounds
+		upper_bounds = costs + error_bounds
+		interval_order = np.argsort(lower_bounds, axis=1, kind='stable')
+		sorted_lower_bounds = np.take_along_axis(
+			lower_bounds,
+			interval_order,
+			axis=1,
+		)
+		sorted_upper_bounds = np.take_along_axis(
+			upper_bounds,
+			interval_order,
+			axis=1,
+		)
+		overlaps_previous = sorted_lower_bounds[:, 1:] <= np.maximum.accumulate(
+			sorted_upper_bounds[:, :-1],
+			axis=1,
+		)
+		sorted_ambiguous = np.zeros_like(suspect)
+		sorted_ambiguous[:, 1:] |= overlaps_previous
+		sorted_ambiguous[:, :-1] |= overlaps_previous
+		ambiguous = np.zeros_like(suspect)
+		np.put_along_axis(
+			ambiguous,
+			interval_order,
+			sorted_ambiguous,
+			axis=1,
+		)
+		suspect |= ambiguous
 	feature_indices, center_indices = np.nonzero(suspect)
 	if feature_indices.size == 0:
 		return
