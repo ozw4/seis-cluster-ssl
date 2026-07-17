@@ -26,7 +26,6 @@ from seis_ssl_cluster.clustering.residualization import (
 	fit_local_token_position_residualizer,
 	residualization_metadata_disabled,
 	sample_residualization_group_ids,
-	write_residualizer_npz,
 )
 from seis_ssl_cluster.clustering.sampling import (
 	SampledTokens,
@@ -34,8 +33,7 @@ from seis_ssl_cluster.clustering.sampling import (
 )
 from seis_ssl_cluster.clustering.writer import (
 	SurveyLabelResult,
-	write_labels_for_models,
-	write_model_artifacts,
+	write_clustering_artifacts_for_models,
 )
 from seis_ssl_cluster.utils import StageTimer
 
@@ -150,7 +148,6 @@ def run_minibatch_kmeans_clustering(
 	residualizer_path: Path | None = None
 	if residualizer is not None:
 		residualizer_path = settings.output_dir / 'models' / 'residualizer.npz'
-		write_residualizer_npz(residualizer_path, residualizer)
 	common_metadata = _common_metadata(
 		settings=settings,
 		embedding_inputs=embedding_inputs,
@@ -171,14 +168,22 @@ def run_minibatch_kmeans_clustering(
 	}
 	timer = StageTimer(enabled=settings.stage_timing)
 	try:
-		label_results_by_k = write_labels_for_models(
+		label_results_by_k = write_clustering_artifacts_for_models(
 			output_dir=settings.output_dir,
 			kmeans_by_k=kmeans_by_k,
 			embedding_inputs=embedding_inputs,
 			residualizer=residualizer,
+			residualizer_path=residualizer_path,
 			preprocessor=preprocessor,
 			prediction_batch_size=settings.prediction_batch_size,
 			label_metadata=common_metadata,
+			model_metadata_for_k=lambda k, label_results: _model_metadata(
+				common_metadata=common_metadata,
+				settings=settings,
+				k=k,
+				kmeans=kmeans_by_k[k],
+				label_results=label_results,
+			),
 			timer=timer,
 		)
 	finally:
@@ -186,36 +191,10 @@ def run_minibatch_kmeans_clustering(
 			timer.write_json(settings.output_dir / 'stage_timings.json')
 	results: list[KClusteringResult] = []
 	for k in settings.k_values:
-		kmeans = kmeans_by_k[k]
 		label_results = label_results_by_k[k]
 		cluster_counts = _aggregate_counts(label_results, k)
 		invalid_token_count = int(
 			sum(result.invalid_token_count for result in label_results),
-		)
-		metadata = {
-			**common_metadata,
-			'k': int(k),
-			'kmeans': _kmeans_metadata(kmeans, settings=settings, k=k),
-			'cluster_counts': cluster_counts,
-			'invalid_token_count': invalid_token_count,
-			'surveys': [
-				{
-					'survey_id': result.survey_id,
-					'label_path': str(result.labels_path),
-					'label_metadata_path': str(result.metadata_path),
-					'valid_token_count': result.valid_token_count,
-					'invalid_token_count': result.invalid_token_count,
-					'cluster_counts': result.cluster_counts,
-				}
-				for result in label_results
-			],
-		}
-		write_model_artifacts(
-			output_dir=settings.output_dir,
-			k=k,
-			preprocessor=preprocessor,
-			kmeans=kmeans,
-			metadata=metadata,
 		)
 		results.append(
 			KClusteringResult(
@@ -460,6 +439,36 @@ def _kmeans_metadata(
 		'random_state': settings.seed,
 		'n_iter': int(kmeans.n_iter_),
 		'inertia': float(kmeans.inertia_),
+	}
+
+
+def _model_metadata(
+	*,
+	common_metadata: Mapping[str, object],
+	settings: ClusteringSettings,
+	k: int,
+	kmeans: MiniBatchKMeans,
+	label_results: Sequence[SurveyLabelResult],
+) -> dict[str, object]:
+	return {
+		**common_metadata,
+		'k': int(k),
+		'kmeans': _kmeans_metadata(kmeans, settings=settings, k=k),
+		'cluster_counts': _aggregate_counts(label_results, k),
+		'invalid_token_count': int(
+			sum(result.invalid_token_count for result in label_results),
+		),
+		'surveys': [
+			{
+				'survey_id': result.survey_id,
+				'label_path': str(result.labels_path),
+				'label_metadata_path': str(result.metadata_path),
+				'valid_token_count': result.valid_token_count,
+				'invalid_token_count': result.invalid_token_count,
+				'cluster_counts': result.cluster_counts,
+			}
+			for result in label_results
+		],
 	}
 
 

@@ -165,13 +165,62 @@ def fit_local_token_position_residualizer(  # noqa: PLR0913
 	if matrix.ndim != 2:
 		msg = f'embeddings must be a 2D matrix; got {matrix.shape!r}'
 		raise ValueError(msg)
-	resolved_shape = _resolve_group_shape(groups, group_shape, matrix.shape[0])
+	if group_shape is None:
+		keys = _sparse_group_keys(groups, expected_count=matrix.shape[0])
+		unique_keys, group_ids = np.unique(keys, axis=0, return_inverse=True)
+		means, counts, fallback_mean = _fit_group_statistics(
+			matrix,
+			group_ids.astype(np.int64, copy=False),
+			group_count=unique_keys.shape[0],
+			min_group_count=min_group_count,
+			chunk_size=chunk_size,
+		)
+		return LocalTokenPositionResidualizer(
+			mode='local_token_position',
+			group_by=group_by,
+			add_global_mean_back=add_global_mean_back,
+			min_group_count=int(min_group_count),
+			means=means,
+			counts=counts,
+			group_shape=None,
+			fallback_mean=fallback_mean,
+			legacy_group_keys=unique_keys,
+		)
+	resolved_shape = _positive_int_triplet(group_shape, 'group_shape')
 	group_ids = _group_ids(
 		groups,
 		group_shape=resolved_shape,
 		expected_count=matrix.shape[0],
 	)
 	group_count = int(np.prod(resolved_shape))
+	means, counts, fallback_mean = _fit_group_statistics(
+		matrix,
+		group_ids,
+		group_count=group_count,
+		min_group_count=min_group_count,
+		chunk_size=chunk_size,
+	)
+	return LocalTokenPositionResidualizer(
+		mode='local_token_position',
+		group_by=group_by,
+		add_global_mean_back=add_global_mean_back,
+		min_group_count=int(min_group_count),
+		means=means,
+		counts=counts,
+		group_shape=resolved_shape,
+		fallback_mean=fallback_mean,
+	)
+
+
+def _fit_group_statistics(
+	matrix: np.ndarray,
+	group_ids: np.ndarray,
+	*,
+	group_count: int,
+	min_group_count: int,
+	chunk_size: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+	"""Accumulate dense group statistics in one chunked feature scan."""
 	sums = np.zeros((group_count, matrix.shape[1]), dtype=np.float64)
 	counts = np.zeros(group_count, dtype=np.int64)
 	fallback_sum = np.zeros(matrix.shape[1], dtype=np.float64)
@@ -189,15 +238,10 @@ def fit_local_token_position_residualizer(  # noqa: PLR0913
 	means = np.broadcast_to(fallback_mean, sums.shape).copy()
 	trusted = counts >= min_group_count
 	means[trusted] = sums[trusted] / counts[trusted, np.newaxis]
-	return LocalTokenPositionResidualizer(
-		mode='local_token_position',
-		group_by=group_by,
-		add_global_mean_back=add_global_mean_back,
-		min_group_count=int(min_group_count),
-		means=means.astype(np.float32, copy=False),
-		counts=counts,
-		group_shape=resolved_shape,
-		fallback_mean=fallback_mean,
+	return (
+		means.astype(np.float32, copy=False),
+		counts,
+		fallback_mean,
 	)
 
 
@@ -431,23 +475,49 @@ def write_residualizer_npz(
 	residualizer: LocalTokenPositionResidualizer,
 ) -> None:
 	"""Persist residualizer statistics in a reusable compact NPZ file."""
-	if residualizer.group_shape is None:
-		msg = 'legacy residualizers without a finite group shape cannot be rewritten'
-		raise ValueError(msg)
 	npz_path = Path(path)
 	npz_path.parent.mkdir(parents=True, exist_ok=True)
-	np.savez(
-		npz_path,
-		schema_version=np.asarray(RESIDUALIZER_SCHEMA_VERSION, dtype=np.int64),
-		means=np.asarray(residualizer.means, dtype=np.float32),
-		counts=np.asarray(residualizer.counts, dtype=np.int64),
-		group_shape=np.asarray(residualizer.group_shape, dtype=np.int64),
-		fallback_mean=np.asarray(residualizer.fallback_mean, dtype=np.float32),
-		mode=np.asarray(residualizer.mode),
-		group_by=np.asarray(residualizer.group_by),
-		add_global_mean_back=np.asarray(residualizer.add_global_mean_back),
-		min_group_count=np.asarray(residualizer.min_group_count, dtype=np.int64),
-	)
+	if residualizer.group_shape is None:
+		group_keys = residualizer.legacy_group_keys
+		if group_keys is None:
+			msg = 'sparse residualizer is missing coordinate group keys'
+			raise ValueError(msg)
+		with npz_path.open('wb') as stream:
+			np.savez(
+				stream,
+				global_mean=np.asarray(
+					residualizer.fallback_mean, dtype=np.float32
+				),
+				group_keys=np.asarray(group_keys, dtype=np.int64),
+				group_means=np.asarray(residualizer.means, dtype=np.float32),
+				group_counts=np.asarray(residualizer.counts, dtype=np.int64),
+				mode=np.asarray(residualizer.mode),
+				group_by=np.asarray(residualizer.group_by),
+				add_global_mean_back=np.asarray(
+					residualizer.add_global_mean_back
+				),
+				min_group_count=np.asarray(
+					residualizer.min_group_count, dtype=np.int64
+				),
+			)
+		return
+	with npz_path.open('wb') as stream:
+		np.savez(
+			stream,
+			schema_version=np.asarray(
+				RESIDUALIZER_SCHEMA_VERSION, dtype=np.int64
+			),
+			means=np.asarray(residualizer.means, dtype=np.float32),
+			counts=np.asarray(residualizer.counts, dtype=np.int64),
+			group_shape=np.asarray(residualizer.group_shape, dtype=np.int64),
+			fallback_mean=np.asarray(residualizer.fallback_mean, dtype=np.float32),
+			mode=np.asarray(residualizer.mode),
+			group_by=np.asarray(residualizer.group_by),
+			add_global_mean_back=np.asarray(residualizer.add_global_mean_back),
+			min_group_count=np.asarray(
+				residualizer.min_group_count, dtype=np.int64
+			),
+		)
 
 
 def read_residualizer_npz(path: str | Path) -> LocalTokenPositionResidualizer:
@@ -732,13 +802,12 @@ def _nonnegative_int_triplet(
 	return tuple(int(item) for item in value)
 
 
-def _resolve_group_shape(
+def _sparse_group_keys(
 	groups: np.ndarray,
-	group_shape: tuple[int, int, int] | None,
+	*,
 	expected_count: int,
-) -> tuple[int, int, int]:
-	if group_shape is not None:
-		return _positive_int_triplet(group_shape, 'group_shape')
+) -> np.ndarray:
+	"""Validate coordinate keys for the shape-less compatibility API."""
 	values = np.asarray(groups)
 	if values.shape != (expected_count, 3):
 		msg = 'group_shape is required when groups are dense IDs'
@@ -752,7 +821,7 @@ def _resolve_group_shape(
 	if np.any(values < 0):
 		msg = 'group keys must be nonnegative'
 		raise ValueError(msg)
-	return tuple(int(value) + 1 for value in values.max(axis=0))
+	return values.astype(np.int64, copy=False)
 
 
 def _group_ids(

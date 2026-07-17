@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,11 +22,12 @@ from seis_ssl_cluster.clustering.features import (
 from seis_ssl_cluster.clustering.residualization import (
 	LocalTokenPositionResidualizer,
 	residualization_groups_for_flat_indices,
+	write_residualizer_npz,
 )
 from seis_ssl_cluster.utils import StageTimer
 
 if TYPE_CHECKING:
-	from collections.abc import Mapping, Sequence
+	from collections.abc import Callable, Mapping, Sequence
 
 
 @dataclass(frozen=True)
@@ -49,13 +51,23 @@ def write_model_artifacts(
 	metadata: Mapping[str, object],
 ) -> None:
 	"""Write model artifacts for one k value."""
-	model_dir = Path(output_dir) / 'models' / f'k{k}'
-	model_dir.mkdir(parents=True, exist_ok=True)
-	joblib.dump(preprocessor, model_dir / 'preprocessor.joblib')
-	joblib.dump(kmeans, model_dir / 'kmeans.joblib')
-	centers = np.asarray(kmeans.cluster_centers_, dtype=np.float32)
-	np.save(model_dir / 'cluster_centers.npy', centers)
-	write_json(model_dir / 'clustering_metadata.json', metadata)
+	cleanup_paths: list[Path] = []
+	pending: list[tuple[Path, Path]] = []
+	try:
+		pending.append(
+			_stage_model_artifacts(
+				output_dir=output_dir,
+				k=k,
+				preprocessor=preprocessor,
+				kmeans=kmeans,
+				metadata=metadata,
+				cleanup_paths=cleanup_paths,
+			),
+		)
+		_publish_pending_artifacts(pending)
+	except BaseException:
+		_cleanup_paths(cleanup_paths)
+		raise
 
 
 def write_labels_for_k(  # noqa: PLR0913
@@ -102,30 +114,86 @@ def write_labels_for_models(  # noqa: PLR0913
 		)
 		raise ValueError(msg)
 	models = _validated_models(kmeans_by_k)
-	stage_timer = timer or StageTimer()
-	results = {k: [] for k in models}
 	partial_paths: list[Path] = []
-	pending: list[tuple[Path, Path]] = []
 	try:
-		for item in embedding_inputs:
-			survey_results, survey_pending = _write_survey_labels_for_models(
-				output_dir=output_dir,
-				models=models,
-				embedding_input=item,
-				residualizer=residualizer,
-				preprocessor=preprocessor,
-				prediction_batch_size=prediction_batch_size,
-				label_metadata=label_metadata,
-				timer=stage_timer,
-				cleanup_paths=partial_paths,
-			)
-			pending.extend(survey_pending)
-			for k, result in survey_results.items():
-				results[k].append(result)
+		results, pending = _stage_labels_for_models(
+			output_dir=output_dir,
+			models=models,
+			embedding_inputs=embedding_inputs,
+			residualizer=residualizer,
+			preprocessor=preprocessor,
+			prediction_batch_size=prediction_batch_size,
+			label_metadata=label_metadata,
+			timer=timer or StageTimer(),
+			cleanup_paths=partial_paths,
+		)
 		_publish_pending_artifacts(pending)
 	except BaseException:
-		for path in partial_paths:
-			path.unlink(missing_ok=True)
+		_cleanup_paths(partial_paths)
+		raise
+	return results
+
+
+def write_clustering_artifacts_for_models(  # noqa: PLR0913
+	*,
+	output_dir: str | Path,
+	kmeans_by_k: Mapping[int, object],
+	embedding_inputs: Sequence[EmbeddingInput],
+	residualizer: LocalTokenPositionResidualizer | None,
+	residualizer_path: Path | None,
+	preprocessor: object,
+	prediction_batch_size: int,
+	label_metadata: Mapping[str, object],
+	model_metadata_for_k: Callable[
+		[int, Sequence[SurveyLabelResult]], Mapping[str, object]
+	],
+	timer: StageTimer | None = None,
+) -> dict[int, list[SurveyLabelResult]]:
+	"""Stage and atomically publish labels and all matching model artifacts."""
+	if prediction_batch_size <= 0:
+		msg = (
+			'prediction_batch_size must be positive; '
+			f'got {prediction_batch_size!r}'
+		)
+		raise ValueError(msg)
+	if (residualizer is None) != (residualizer_path is None):
+		msg = (
+			'residualizer and residualizer_path must either both be set or both be None'
+		)
+		raise ValueError(msg)
+	models = _validated_models(kmeans_by_k)
+	cleanup_paths: list[Path] = []
+	try:
+		results, pending = _stage_labels_for_models(
+			output_dir=output_dir,
+			models=models,
+			embedding_inputs=embedding_inputs,
+			residualizer=residualizer,
+			preprocessor=preprocessor,
+			prediction_batch_size=prediction_batch_size,
+			label_metadata=label_metadata,
+			timer=timer or StageTimer(),
+			cleanup_paths=cleanup_paths,
+		)
+		if residualizer is not None and residualizer_path is not None:
+			partial_residualizer = _partial_path(residualizer_path)
+			cleanup_paths.append(partial_residualizer)
+			write_residualizer_npz(partial_residualizer, residualizer)
+			pending.append((partial_residualizer, residualizer_path))
+		for k, kmeans in models.items():
+			pending.append(
+				_stage_model_artifacts(
+					output_dir=output_dir,
+					k=k,
+					preprocessor=preprocessor,
+					kmeans=kmeans,
+					metadata=model_metadata_for_k(k, results[k]),
+					cleanup_paths=cleanup_paths,
+				),
+			)
+		_publish_pending_artifacts(pending)
+	except BaseException:
+		_cleanup_paths(cleanup_paths)
 		raise
 	return results
 
@@ -138,6 +206,61 @@ def write_json(path: str | Path, payload: Mapping[str, object]) -> None:
 		json.dumps(payload, allow_nan=False, indent=2, sort_keys=True) + '\n',
 		encoding='utf-8',
 	)
+
+
+def _stage_labels_for_models(  # noqa: PLR0913
+	*,
+	output_dir: str | Path,
+	models: Mapping[int, object],
+	embedding_inputs: Sequence[EmbeddingInput],
+	residualizer: LocalTokenPositionResidualizer | None,
+	preprocessor: object,
+	prediction_batch_size: int,
+	label_metadata: Mapping[str, object],
+	timer: StageTimer,
+	cleanup_paths: list[Path],
+) -> tuple[dict[int, list[SurveyLabelResult]], list[tuple[Path, Path]]]:
+	results = {k: [] for k in models}
+	pending: list[tuple[Path, Path]] = []
+	for item in embedding_inputs:
+		survey_results, survey_pending = _write_survey_labels_for_models(
+			output_dir=output_dir,
+			models=models,
+			embedding_input=item,
+			residualizer=residualizer,
+			preprocessor=preprocessor,
+			prediction_batch_size=prediction_batch_size,
+			label_metadata=label_metadata,
+			timer=timer,
+			cleanup_paths=cleanup_paths,
+		)
+		pending.extend(survey_pending)
+		for k, result in survey_results.items():
+			results[k].append(result)
+	return results, pending
+
+
+def _stage_model_artifacts(  # noqa: PLR0913
+	*,
+	output_dir: str | Path,
+	k: int,
+	preprocessor: object,
+	kmeans: object,
+	metadata: Mapping[str, object],
+	cleanup_paths: list[Path],
+) -> tuple[Path, Path]:
+	models_dir = Path(output_dir) / 'models'
+	models_dir.mkdir(parents=True, exist_ok=True)
+	model_dir = models_dir / f'k{k}'
+	partial_dir = _partial_path(model_dir)
+	partial_dir.mkdir()
+	cleanup_paths.append(partial_dir)
+	joblib.dump(preprocessor, partial_dir / 'preprocessor.joblib')
+	joblib.dump(kmeans, partial_dir / 'kmeans.joblib')
+	centers = np.asarray(kmeans.cluster_centers_, dtype=np.float32)
+	np.save(partial_dir / 'cluster_centers.npy', centers)
+	write_json(partial_dir / 'clustering_metadata.json', metadata)
+	return partial_dir, model_dir
 
 
 def _write_survey_labels_for_models(  # noqa: PLR0913
@@ -277,18 +400,31 @@ def _publish_pending_artifacts(pending: list[tuple[Path, Path]]) -> None:
 			published.append(final)
 	except BaseException:
 		for final in published:
-			final.unlink(missing_ok=True)
+			_remove_path(final)
 		for backup, final in reversed(backups):
 			if backup.exists():
 				backup.replace(final)
 		raise
 	else:
 		for backup, _ in backups:
-			backup.unlink(missing_ok=True)
+			_remove_path(backup)
+
+
+def _cleanup_paths(paths: Sequence[Path]) -> None:
+	for path in paths:
+		_remove_path(path)
+
+
+def _remove_path(path: Path) -> None:
+	if path.is_dir() and not path.is_symlink():
+		shutil.rmtree(path)
+	else:
+		path.unlink(missing_ok=True)
 
 
 __all__ = [
 	'SurveyLabelResult',
+	'write_clustering_artifacts_for_models',
 	'write_json',
 	'write_labels_for_k',
 	'write_labels_for_models',

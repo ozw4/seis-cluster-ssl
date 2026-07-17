@@ -105,6 +105,26 @@ def test_residualizer_without_global_mean_back_centers_groups_at_zero() -> None:
 		np.testing.assert_allclose(transformed[group].mean(axis=0), 0.0)
 
 
+def test_shape_less_coordinate_fit_uses_fallback_for_unobserved_group() -> None:
+	group_keys = np.array([[0, 0, 0], [0, 0, 0]], dtype=np.int64)
+	embeddings = np.array([[2.0, 4.0], [4.0, 8.0]], dtype=np.float32)
+	residualizer = fit_local_token_position_residualizer(
+		embeddings,
+		group_keys,
+		group_by='token_phase',
+		add_global_mean_back=True,
+		min_group_count=1,
+	)
+
+	assert residualizer.group_shape is None
+	unseen = np.array([[1, 2, 3]], dtype=np.int64)
+	features = np.array([[10.0, 20.0]], dtype=np.float32)
+	np.testing.assert_array_equal(
+		residualizer.transform(features, unseen),
+		features,
+	)
+
+
 def test_min_group_count_uses_global_mean_as_untrusted_group_mean() -> None:
 	group_keys = np.array(
 		[[0, 0, 0], [0, 0, 0], [1, 0, 0]],
@@ -172,6 +192,7 @@ def test_residualizer_npz_round_trip_preserves_transform(tmp_path: Path) -> None
 		group_by='token_phase',
 		add_global_mean_back=True,
 		min_group_count=1,
+		group_shape=(2, 1, 1),
 	)
 
 	path = tmp_path / 'residualizer.npz'

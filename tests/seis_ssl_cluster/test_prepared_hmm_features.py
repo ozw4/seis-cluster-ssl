@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -8,16 +9,23 @@ import pytest
 
 import seis_ssl_cluster.clustering.prepared_features as prepared_features_module
 from seis_ssl_cluster.clustering.features import EmbeddingInput, extract_token_features
+from seis_ssl_cluster.clustering.kmeans import PCASettings, fit_preprocessor
 from seis_ssl_cluster.clustering.prepared_features import (
 	PreparedFeatureCacheSettings,
 	PreparedSurveyFeatures,
 	prepare_feature_store,
+)
+from seis_ssl_cluster.clustering.residualization import (
+	fit_local_token_position_residualizer,
+	residualization_group_ids_for_flat_indices,
+	residualization_group_shape,
 )
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	HMMTransitionSettings,
 	build_ordered_transition_costs,
 	decode_prepared_survey_ordered_labels,
 	decode_survey_ordered_labels,
+	prepare_feature_batch_for_indices,
 	update_centers_from_labels,
 	update_centers_from_prepared_labels,
 )
@@ -123,6 +131,132 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 	)
 	assert prepared_objective == reference_objective
 	assert prepare_calls == 3
+	store.close()
+
+
+def test_prepared_decode_update_matches_dense_residualization_and_pca(
+	tmp_path: Path,
+) -> None:
+	item = _write_input(tmp_path, 'survey_a', shape=(2, 2, 4, 3))
+	valid = np.ones(16, dtype=np.bool_)
+	valid[[2, 9, 12]] = False
+	np.save(item.valid_tokens_path, valid.reshape((2, 2, 4)))
+	valid_indices = np.flatnonzero(valid).astype(np.int64, copy=False)
+	raw_features = extract_token_features(item, valid_indices)
+	group_shape = residualization_group_shape(item, group_by='token_phase')
+	group_ids = residualization_group_ids_for_flat_indices(
+		item,
+		valid_indices,
+		group_by='token_phase',
+	)
+	residualizer = fit_local_token_position_residualizer(
+		raw_features,
+		group_ids,
+		group_by='token_phase',
+		add_global_mean_back=True,
+		min_group_count=1,
+		group_shape=group_shape,
+	)
+	preprocessor = fit_preprocessor(
+		residualizer.transform(raw_features, group_ids),
+		normalization='none',
+		pca=PCASettings(enabled=True, n_components=2, whiten=False),
+		seed=7,
+	)
+	prepare_calls = 0
+
+	def prepare_batch(source: EmbeddingInput, indices: np.ndarray) -> np.ndarray:
+		nonlocal prepare_calls
+		prepare_calls += 1
+		return prepare_feature_batch_for_indices(
+			source,
+			indices,
+			residualizer=residualizer,
+			preprocessor=preprocessor,
+		)
+
+	store = prepare_feature_store(
+		embedding_inputs=(item,),
+		feature_dim=2,
+		feature_mode='embedding',
+		residualizer=residualizer,
+		preprocessor=preprocessor,
+		edge_margin_tokens=(0, 0, 0),
+		settings=PreparedFeatureCacheSettings(
+			chunk_size_tokens=3,
+			directory=tmp_path / 'prepared',
+		),
+		default_cache_root=tmp_path / 'unused',
+		prepare_batch=prepare_batch,
+	)
+	assert prepare_calls == 5
+	expected_features = prepare_feature_batch_for_indices(
+		item,
+		valid_indices,
+		residualizer=residualizer,
+		preprocessor=preprocessor,
+	)
+	prepared_features = store.surveys[0].features_for_flat_indices(valid_indices)
+	np.testing.assert_allclose(prepared_features, expected_features, atol=1e-6)
+	centers = expected_features[[0, -1]]
+	transitions = build_ordered_transition_costs(
+		2,
+		HMMTransitionSettings(
+			same_cost=0.0,
+			advance_cost=0.0,
+			jump_cost=1.0,
+			reverse_cost=10.0,
+			forbid_reverse=True,
+			max_jump=1,
+		),
+	)
+	prepared_labels = decode_prepared_survey_ordered_labels(
+		store.surveys[0],
+		centers=centers,
+		transition_costs=transitions,
+		initial_state_costs=None,
+		terminal_state_costs=None,
+		expected_boundaries=None,
+	)
+	prepared_centers, prepared_summary = update_centers_from_prepared_labels(
+		store,
+		{item.survey_id: prepared_labels},
+		centers=centers,
+		prediction_batch_size=3,
+		empty_cluster_policy='keep_previous',
+	)
+	assert prepare_calls == 5
+	reference_labels = decode_survey_ordered_labels(
+		item,
+		centers=centers,
+		residualizer=residualizer,
+		preprocessor=preprocessor,
+		transition_costs=transitions,
+		emission_source='embedding',
+	)
+	reference_centers, reference_summary = update_centers_from_labels(
+		(item,),
+		{item.survey_id: reference_labels},
+		centers=centers,
+		residualizer=residualizer,
+		preprocessor=preprocessor,
+		prediction_batch_size=3,
+		empty_cluster_policy='keep_previous',
+	)
+	np.testing.assert_array_equal(prepared_labels, reference_labels)
+	np.testing.assert_allclose(prepared_centers, reference_centers, atol=1e-6)
+	assert prepared_summary == reference_summary
+	prepared_objective = _squared_feature_objective(
+		prepared_features,
+		prepared_labels.reshape(-1)[valid_indices],
+		prepared_centers,
+	)
+	reference_objective = _squared_feature_objective(
+		expected_features,
+		reference_labels.reshape(-1)[valid_indices],
+		reference_centers,
+	)
+	assert prepared_objective == pytest.approx(reference_objective)
 	store.close()
 
 
@@ -493,7 +627,18 @@ def _write_input(
 	metadata_path = root / f'{survey_id}.embedding_metadata.json'
 	np.save(embeddings_path, np.arange(np.prod(shape), dtype=np.float32).reshape(shape))
 	np.save(valid_path, np.ones(shape[:3], dtype=np.bool_))
-	metadata_path.write_text('{}\n', encoding='utf-8')
+	metadata_path.write_text(
+		json.dumps(
+			{
+				'token_grid_shape': list(shape[:3]),
+				'patch_size': [1, 1, 1],
+				'window_size': [3, 3, 3],
+				'overlap': [1, 1, 1],
+			},
+		)
+		+ '\n',
+		encoding='utf-8',
+	)
 	return EmbeddingInput(survey_id, embeddings_path, valid_path, metadata_path)
 
 

@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 import seis_ssl_cluster.clustering.kmeans as kmeans_module
+import seis_ssl_cluster.clustering.writer as writer_module
 from seis_ssl_cluster.clustering import run_embedding_clustering
 from seis_ssl_cluster.clustering.features import (
 	EmbeddingInput,
@@ -219,6 +220,45 @@ def test_multi_model_label_writer_rolls_back_publication_failure(
 	assert metadata_path.read_text(encoding='utf-8') == '{"old": true}\n'
 	assert not list(output_dir.rglob('*.partial'))
 	assert not list(output_dir.rglob('*.backup'))
+
+
+def test_run_clustering_does_not_publish_labels_when_later_model_write_fails(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.array(
+			[[[[1.0, 0.0], [0.0, 1.0], [0.8, 0.2], [0.2, 0.8]]]],
+			dtype=np.float32,
+		),
+		valid=np.ones((1, 1, 4), dtype=np.bool_),
+	)
+	output_dir = tmp_path / 'clusters'
+	config = _config(input_dir, output_dir)
+	config['clustering']['sample_tokens'] = 4
+	config['clustering']['k_values'] = [2, 3]
+	original_dump = writer_module.joblib.dump
+	dump_count = 0
+
+	def fail_third_dump(value: object, path: Path) -> list[str]:
+		nonlocal dump_count
+		dump_count += 1
+		if dump_count == 3:
+			raise OSError('injected model write failure')
+		return original_dump(value, path)
+
+	monkeypatch.setattr(writer_module.joblib, 'dump', fail_third_dump)
+	with pytest.raises(OSError, match='injected model write failure'):
+		run_embedding_clustering(config)
+
+	assert not list((output_dir / 'labels').rglob('*.npy'))
+	assert not list((output_dir / 'labels').rglob('*.json'))
+	assert not list((output_dir / 'models').glob('k*'))
+	assert not list(output_dir.rglob('*.partial'))
 
 
 def test_run_embedding_clustering_writes_deterministic_labels_for_multiple_k(
