@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import inspect
+
 import numpy as np
 import pytest
 
@@ -10,6 +12,7 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	HMMTransitionSettings,
 	_decode_compacted_trace,
 	_resolve_expected_boundary_count,
+	_squared_euclidean_emission_costs_with_center_norms,
 	build_initial_state_costs,
 	build_ordered_transition_costs,
 	build_terminal_state_costs,
@@ -95,6 +98,37 @@ def test_squared_euclidean_emissions_preserve_near_tie_winner() -> None:
 		viterbi_decode_costs(costs, np.zeros((2, 2), dtype=np.float32)),
 		viterbi_decode_costs(reference, np.zeros((2, 2), dtype=np.float32)),
 	)
+
+
+def test_float32_emissions_preserve_legacy_complete_tie() -> None:
+	features = np.array([[-0.46287498, 0.9438414]], dtype=np.float32)
+	centers = np.array(
+		[
+			[0.3468315, 0.84368396],
+			[0.34683147, 0.84368384],
+		],
+		dtype=np.float32,
+	)
+	reference = np.sum(
+		(features[:, np.newaxis, :] - centers[np.newaxis, :, :]) ** 2,
+		axis=2,
+	)
+
+	costs = squared_euclidean_emission_costs(features, centers)
+
+	assert reference[0, 0] == reference[0, 1]
+	np.testing.assert_array_equal(costs, reference)
+	assert int(np.argmin(costs[0])) == 0
+
+
+def test_emission_kernel_does_not_form_three_dimensional_pairwise_deltas() -> None:
+	source = inspect.getsource(
+		_squared_euclidean_emission_costs_with_center_norms,
+	)
+
+	assert 'features @ centers.T' in source
+	assert 'features[:, np.newaxis, :]' not in source
+	assert 'centers[np.newaxis, :, :]' not in source
 
 
 def test_write_json_rejects_non_finite_floats(tmp_path) -> None:
@@ -193,7 +227,8 @@ def test_viterbi_decode_costs_accepts_single_sample_and_state() -> None:
 	np.testing.assert_array_equal(labels, np.array([0], dtype=np.int32))
 
 
-def test_compacted_trace_decode_restarts_transitions_and_priors_at_gaps() -> None:
+def test_compacted_trace_decode_preserves_transitions_and_trace_priors_at_gaps(
+) -> None:
 	z_indices = np.array([0, 1, 3, 4], dtype=np.int64)
 	transition_emissions = np.array(
 		[[0.0, 5.0], [5.0, 0.0], [0.0, 5.0], [5.0, 0.0]]
@@ -227,12 +262,12 @@ def test_compacted_trace_decode_restarts_transitions_and_priors_at_gaps() -> Non
 		expected_boundaries=None,
 	)
 
-	np.testing.assert_array_equal(transition_labels, np.array([0, 1, 0, 1]))
-	np.testing.assert_array_equal(prior_labels, np.zeros(4, dtype=np.int32))
-	np.testing.assert_array_equal(terminal_labels, np.ones(4, dtype=np.int32))
+	np.testing.assert_array_equal(transition_labels, np.array([0, 0, 0, 1]))
+	np.testing.assert_array_equal(prior_labels, np.ones(4, dtype=np.int32))
+	np.testing.assert_array_equal(terminal_labels, np.zeros(4, dtype=np.int32))
 
 
-def test_compacted_trace_decode_resolves_boundary_target_per_segment(
+def test_compacted_trace_decode_resolves_boundary_target_for_complete_trace(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	calls: list[tuple[int, object]] = []
@@ -262,7 +297,7 @@ def test_compacted_trace_decode_resolves_boundary_target_per_segment(
 		),
 	)
 
-	assert calls == [(2, 1), (3, 2)]
+	assert calls == [(5, 4)]
 
 
 def test_viterbi_decode_costs_accepts_omitted_path_prior_costs() -> None:
@@ -494,11 +529,11 @@ def test_decode_trace_segments_preserves_invalid_positions_and_decodes_gaps() ->
 
 	labels = decode_trace_segments(emissions, valid_mask, transitions)
 
-	np.testing.assert_array_equal(labels, np.array([0, 1, -1, 0, 1], dtype=np.int32))
+	np.testing.assert_array_equal(labels, np.array([0, 0, -1, 0, 1], dtype=np.int32))
 	np.testing.assert_array_equal(labels[~valid_mask], np.array([-1], dtype=np.int32))
 
 
-def test_decode_trace_segments_reapplies_initial_prior_after_gap() -> None:
+def test_decode_trace_segments_applies_initial_prior_once_across_gap() -> None:
 	emissions = np.array(
 		[
 			[100.0, 0.0],
@@ -518,7 +553,7 @@ def test_decode_trace_segments_reapplies_initial_prior_after_gap() -> None:
 		initial_state_costs=np.array([0.0, 250.0]),
 	)
 
-	np.testing.assert_array_equal(labels, np.array([0, 0, -1, 0, 0]))
+	np.testing.assert_array_equal(labels, np.array([1, 1, -1, 1, 1]))
 
 
 def test_decode_trace_segments_returns_invalid_labels_when_no_valid_tokens() -> None:

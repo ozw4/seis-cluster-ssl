@@ -61,7 +61,10 @@ def test_synthetic_benchmark_cli_writes_reproducible_case_contract(
 		'hmm_squared_euclidean_emission',
 	]
 	for case in first['cases']:
-		assert case['version'] == 1
+		expected_version = (
+			2 if case['name'] == 'hmm_squared_euclidean_emission' else 1
+		)
+		assert case['version'] == expected_version
 		assert len(case['input_fingerprint']) == 16
 		assert case['median_seconds'] >= 0.0
 		assert case['p25_seconds'] >= 0.0
@@ -170,6 +173,36 @@ def test_case_fingerprint_covers_array_contents_and_complete_settings() -> None:
 		fingerprint(changed, setting=1),
 		fingerprint(base, setting=2),
 	}) == 3
+
+
+def test_hmm_benchmark_runs_production_emission_kernel_with_precomputed_norms(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	calls: list[tuple[np.dtype, np.dtype, np.dtype]] = []
+
+	def record_kernel(
+		features: np.ndarray,
+		centers: np.ndarray,
+		center_squared_norms: np.ndarray,
+	) -> np.ndarray:
+		calls.append((features.dtype, centers.dtype, center_squared_norms.dtype))
+		np.testing.assert_allclose(
+			center_squared_norms,
+			np.einsum('kd,kd->k', centers, centers, optimize=True),
+		)
+		return np.empty((features.shape[0], centers.shape[0]), dtype=features.dtype)
+
+	monkeypatch.setattr(
+		benchmark_module,
+		'_squared_euclidean_emission_costs_with_center_norms',
+		record_kernel,
+	)
+	case = benchmark_module._hmm_emission_case(13)  # noqa: SLF001
+
+	case.run()
+
+	assert case.version == 2
+	assert calls == [(np.dtype(np.float32),) * 3]
 
 
 def test_zero_current_median_omits_speedup_multiplier() -> None:

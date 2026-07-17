@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, replace
 from numbers import Integral, Real
 from pathlib import Path
@@ -580,22 +580,17 @@ def squared_euclidean_emission_costs(
 ) -> np.ndarray:
 	"""Return pairwise squared Euclidean costs without a ``[T, K, D]`` array."""
 	feature_matrix, center_matrix = _emission_matrices(features, centers)
-	output_dtype = feature_matrix.dtype
-	if output_dtype == np.dtype(np.float32):
-		feature_matrix = feature_matrix.astype(np.float64)
-		center_matrix = center_matrix.astype(np.float64)
 	center_squared_norms = np.einsum(
 		'kd,kd->k',
 		center_matrix,
 		center_matrix,
 		optimize=True,
 	)
-	costs = _squared_euclidean_emission_costs_with_center_norms(
+	return _squared_euclidean_emission_costs_with_center_norms(
 		feature_matrix,
 		center_matrix,
 		center_squared_norms,
 	)
-	return costs.astype(output_dtype, copy=False)
 
 
 def _squared_euclidean_emission_costs_with_center_norms(
@@ -862,7 +857,7 @@ def decode_trace_segments(  # noqa: PLR0913
 	expected_boundary_count: int | None = None,
 	boundary_count_weight: float = 0.0,
 ) -> np.ndarray:
-	"""Decode contiguous valid trace segments independently, preserving gaps."""
+	"""Decode valid vertical trace tokens as one sequence, preserving gaps."""
 	emissions = _as_float_matrix(emission_costs, 'emission_costs')
 	if emissions.shape[0] == 0 or emissions.shape[1] == 0:
 		raise ValueError('emission_costs must be non-empty in both dimensions')
@@ -899,12 +894,9 @@ def decode_trace_segments(  # noqa: PLR0913
 	)
 
 	labels = np.full(emissions.shape[0], -1, dtype=np.int32)
-	z_indices = np.flatnonzero(mask)
-	for compact_segment in _contiguous_segment_slices(z_indices):
-		segment_z = z_indices[compact_segment]
-		segment = slice(int(segment_z[0]), int(segment_z[-1]) + 1)
-		labels[segment] = viterbi_decode_costs(
-			emissions[segment],
+	if np.any(mask):
+		labels[mask] = viterbi_decode_costs(
+			emissions[mask],
 			transitions,
 			initial_state_costs=initial_costs,
 			terminal_state_costs=terminal_costs,
@@ -912,16 +904,6 @@ def decode_trace_segments(  # noqa: PLR0913
 			boundary_count_weight=boundary_count_weight,
 		)
 	return labels
-
-
-def _contiguous_segment_slices(z_indices: np.ndarray) -> Iterator[slice]:
-	"""Yield compact-array slices separated by gaps in sorted z indices."""
-	start = 0
-	for stop in np.flatnonzero(z_indices[1:] != z_indices[:-1] + 1) + 1:
-		yield slice(start, int(stop))
-		start = int(stop)
-	if start < z_indices.size:
-		yield slice(start, int(z_indices.size))
 
 
 def _decode_compacted_trace(  # noqa: PLR0913
@@ -933,7 +915,7 @@ def _decode_compacted_trace(  # noqa: PLR0913
 	terminal_state_costs: np.ndarray | None,
 	expected_boundaries: HMMExpectedBoundariesSettings | None,
 ) -> np.ndarray:
-	"""Decode contiguous slices of compacted valid trace rows independently."""
+	"""Decode compacted valid trace rows as one sequence."""
 	z = np.asarray(z_indices, dtype=np.int64)
 	if z.ndim != 1 or z.shape[0] != emission_costs.shape[0]:
 		raise ValueError('z_indices must align with emission_costs rows')
@@ -945,22 +927,19 @@ def _decode_compacted_trace(  # noqa: PLR0913
 	boundary_count_weight = (
 		0.0 if expected_boundaries is None else expected_boundaries.weight
 	)
-	labels = np.empty(z.size, dtype=np.int32)
-	for segment in _contiguous_segment_slices(z):
-		expected_boundary_count = _resolve_expected_boundary_count(
-			expected_boundaries,
-			k=k,
-			valid_trace_length=segment.stop - segment.start,
-		)
-		labels[segment] = viterbi_decode_costs(
-			emission_costs[segment],
-			transition_costs,
-			initial_state_costs=initial_state_costs,
-			terminal_state_costs=terminal_state_costs,
-			expected_boundary_count=expected_boundary_count,
-			boundary_count_weight=boundary_count_weight,
-		)
-	return labels
+	expected_boundary_count = _resolve_expected_boundary_count(
+		expected_boundaries,
+		k=k,
+		valid_trace_length=z.size,
+	)
+	return viterbi_decode_costs(
+		emission_costs,
+		transition_costs,
+		initial_state_costs=initial_state_costs,
+		terminal_state_costs=terminal_state_costs,
+		expected_boundary_count=expected_boundary_count,
+		boundary_count_weight=boundary_count_weight,
+	)
 
 
 def decode_survey_ordered_labels(  # noqa: PLR0913
@@ -986,11 +965,10 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 	shape = embeddings.shape[:3]
 	labels = np.full(shape, -1, dtype=np.int32)
 	x_count, y_count, z_count = shape
-	center_matrix64 = center_matrix.astype(np.float64)
 	center_squared_norms = np.einsum(
 		'kd,kd->k',
-		center_matrix64,
-		center_matrix64,
+		center_matrix,
+		center_matrix,
 		optimize=True,
 	)
 	for x_index in range(x_count):
@@ -1052,15 +1030,17 @@ def decode_prepared_survey_ordered_labels(  # noqa: PLR0913
 	labels = np.full(shape, -1, dtype=np.int32)
 	k = center_matrix.shape[0]
 	if center_squared_norms is None:
-		center_matrix64 = center_matrix.astype(np.float64)
 		center_squared_norms = np.einsum(
 			'kd,kd->k',
-			center_matrix64,
-			center_matrix64,
+			center_matrix,
+			center_matrix,
 			optimize=True,
 		)
 	else:
-		center_squared_norms = np.asarray(center_squared_norms, dtype=np.float64)
+		center_squared_norms = np.asarray(
+			center_squared_norms,
+			dtype=center_matrix.dtype,
+		)
 		if center_squared_norms.shape != (k,):
 			raise ValueError(f'center_squared_norms must have shape ({k},)')
 	active_timer = timer or StageTimer()
@@ -1102,11 +1082,10 @@ def _decode_all_surveys(  # noqa: PLR0913
 	timer: StageTimer | None = None,
 ) -> dict[str, np.ndarray]:
 	center_matrix = np.asarray(centers, dtype=np.float32)
-	center_matrix64 = center_matrix.astype(np.float64)
 	center_squared_norms = np.einsum(
 		'kd,kd->k',
-		center_matrix64,
-		center_matrix64,
+		center_matrix,
+		center_matrix,
 		optimize=True,
 	)
 	return {
@@ -1158,19 +1137,27 @@ def update_centers_from_prepared_labels(  # noqa: C901, PLR0913
 			if labels.shape != survey.token_shape_xyz:
 				raise ValueError(f'label grid shape is invalid for {survey_id}')
 			flat_labels = labels.reshape(-1)
-			if np.any(flat_labels >= k):
-				raise ValueError(f'label id out of range for {survey_id}')
-			labeled_count = int(np.count_nonzero(flat_labels >= 0))
+			grid_labeled_count = 0
 			prepared_labeled_count = 0
+			label_cursor = 0
 			with survey.open() as opened:
 				for indices, features in opened.iter_feature_chunks(
 					prediction_batch_size
 				):
+					if indices.size == 0:
+						continue
+					window_stop = int(indices[-1]) + 1
+					grid_labeled_count += int(
+						np.count_nonzero(flat_labels[label_cursor:window_stop] >= 0)
+					)
+					label_cursor = window_stop
 					batch_labels = np.asarray(flat_labels[indices], dtype=np.int64)
 					labeled = batch_labels >= 0
 					prepared_labeled_count += int(np.count_nonzero(labeled))
 					if not np.any(labeled):
 						continue
+					if np.any(batch_labels[labeled] >= k):
+						raise ValueError(f'label id out of range for {survey_id}')
 					if features.shape[1] != feature_dim:
 						raise ValueError(
 							'prepared feature dimension must match centers'
@@ -1181,7 +1168,10 @@ def update_centers_from_prepared_labels(  # noqa: C901, PLR0913
 						features[labeled].astype(np.float64, copy=False),
 					)
 					counts += np.bincount(batch_labels[labeled], minlength=k)
-			if prepared_labeled_count != labeled_count:
+			grid_labeled_count += int(
+				np.count_nonzero(flat_labels[label_cursor:] >= 0)
+			)
+			if prepared_labeled_count != grid_labeled_count:
 				raise ValueError(
 					f'labels reference tokens without prepared features for {survey_id}'
 				)

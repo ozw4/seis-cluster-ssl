@@ -25,7 +25,7 @@ from seis_ssl_cluster.clustering.residualization import (
 	token_phase_keys_for_grid,
 )
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
-	squared_euclidean_emission_costs,
+	_squared_euclidean_emission_costs_with_center_norms,
 )
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
@@ -442,12 +442,23 @@ def _hmm_emission_case(seed: int) -> BenchmarkCase:
 	rng = np.random.default_rng(seed)
 	features = rng.normal(size=(4096, EMBEDDING_DIM)).astype(np.float32)
 	centers = rng.normal(size=(12, EMBEDDING_DIM)).astype(np.float32)
+	center_squared_norms = np.einsum(
+		'kd,kd->k',
+		centers,
+		centers,
+		optimize=True,
+	)
 
 	def run() -> np.ndarray:
-		return squared_euclidean_emission_costs(features, centers)
+		return _squared_euclidean_emission_costs_with_center_norms(
+			features,
+			centers,
+			center_squared_norms,
+		)
 
 	return _case(
 		name='hmm_squared_euclidean_emission',
+		version=2,
 		shape={
 			'tokens': int(features.shape[0]),
 			'states': int(centers.shape[0]),
@@ -457,6 +468,7 @@ def _hmm_emission_case(seed: int) -> BenchmarkCase:
 		inputs={
 			'features': _array_descriptor(features),
 			'centers': _array_descriptor(centers),
+			'center_squared_norms': _array_descriptor(center_squared_norms),
 		},
 		run=run,
 	)
@@ -468,10 +480,11 @@ def _case(
 	shape: dict[str, object],
 	inputs: dict[str, object],
 	run: Callable[[], object],
+	version: int = 1,
 ) -> BenchmarkCase:
 	return BenchmarkCase(
 		name=name,
-		version=1,
+		version=version,
 		shape=shape,
 		input_fingerprint=_fingerprint({'name': name, 'inputs': inputs}),
 		run=run,

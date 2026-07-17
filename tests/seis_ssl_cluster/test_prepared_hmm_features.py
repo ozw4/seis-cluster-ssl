@@ -33,6 +33,7 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 )
 
 if TYPE_CHECKING:
+	from collections.abc import Iterator
 	from pathlib import Path
 
 
@@ -136,7 +137,7 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 	store.close()
 
 
-def test_prepared_and_on_the_fly_decode_reset_at_validity_gap(
+def test_prepared_and_on_the_fly_decode_preserve_sequence_across_validity_gap(
 	tmp_path: Path,
 ) -> None:
 	item = _write_input(tmp_path, 'survey_a', shape=(1, 1, 5, 1))
@@ -195,8 +196,49 @@ def test_prepared_and_on_the_fly_decode_reset_at_validity_gap(
 		valid,
 		transitions,
 	).reshape((1, 1, 5))
+	np.testing.assert_array_equal(
+		expected,
+		np.array([[[0, 0, -1, 0, 1]]], dtype=np.int32),
+	)
 	np.testing.assert_array_equal(prepared_labels, expected)
 	np.testing.assert_array_equal(on_the_fly_labels, expected)
+
+
+def test_prepared_float32_decode_preserves_legacy_emission_tie(
+	tmp_path: Path,
+) -> None:
+	item = _write_input(tmp_path, 'survey_a', shape=(1, 1, 1, 2))
+	feature = np.array([-0.46287498, 0.9438414], dtype=np.float32)
+	centers = np.array(
+		[
+			[0.3468315, 0.84368396],
+			[0.34683147, 0.84368384],
+		],
+		dtype=np.float32,
+	)
+	np.save(item.embeddings_path, feature.reshape((1, 1, 1, 2)))
+
+	with prepare_feature_store(
+		embedding_inputs=(item,),
+		feature_dim=2,
+		feature_mode='embedding',
+		residualizer=None,
+		preprocessor=_IdentityPreprocessor(),
+		edge_margin_tokens=(0, 0, 0),
+		settings=PreparedFeatureCacheSettings(directory=tmp_path / 'prepared'),
+		default_cache_root=tmp_path / 'unused',
+		prepare_batch=extract_token_features,
+	) as store:
+		labels = decode_prepared_survey_ordered_labels(
+			store.surveys[0],
+			centers=centers,
+			transition_costs=np.zeros((2, 2), dtype=np.float32),
+			initial_state_costs=None,
+			terminal_state_costs=None,
+			expected_boundaries=None,
+		)
+
+	np.testing.assert_array_equal(labels, np.array([[[0]]], dtype=np.int32))
 
 
 def test_prepared_decode_update_matches_dense_residualization_and_pca(
@@ -377,6 +419,51 @@ def test_prepared_feature_store_opens_only_one_survey_at_a_time(
 
 	assert active == 0
 	assert max_active == 1
+	store.close()
+
+
+def test_prepared_center_update_scans_feature_rows_once(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	item = _write_input(tmp_path, 'survey_a', shape=(1, 1, 5, 1))
+	store = prepare_feature_store(
+		embedding_inputs=(item,),
+		feature_dim=1,
+		feature_mode='embedding',
+		residualizer=None,
+		preprocessor=_IdentityPreprocessor(),
+		edge_margin_tokens=(0, 0, 0),
+		settings=PreparedFeatureCacheSettings(directory=tmp_path / 'prepared'),
+		default_cache_root=tmp_path / 'unused',
+		prepare_batch=extract_token_features,
+	)
+	opened_type = prepared_features_module._OpenedPreparedSurveyFeatures  # noqa: SLF001
+	original_iter = opened_type.iter_feature_chunks
+	iter_calls = 0
+	seen_indices: list[int] = []
+
+	def tracked_iter_feature_chunks(
+		opened: object,
+		chunk_size: int,
+	) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+		nonlocal iter_calls
+		iter_calls += 1
+		for indices, features in original_iter(opened, chunk_size):
+			seen_indices.extend(int(index) for index in indices)
+			yield indices, features
+
+	monkeypatch.setattr(opened_type, 'iter_feature_chunks', tracked_iter_feature_chunks)
+	update_centers_from_prepared_labels(
+		store,
+		{'survey_a': np.array([[[0, 1, 2, 3, 0]]], dtype=np.int32)},
+		centers=np.zeros((4, 1), dtype=np.float32),
+		prediction_batch_size=2,
+		empty_cluster_policy='keep_previous',
+	)
+
+	assert iter_calls == 1
+	assert seen_indices == [0, 1, 2, 3, 4]
 	store.close()
 
 
