@@ -87,6 +87,7 @@ _STRATIGRAPHIC_HMM_KEYS = frozenset(
 		'update',
 		'edge_margin_tokens',
 		'path_prior',
+		'prepared_feature_cache',
 	},
 )
 _STRATIGRAPHIC_HMM_REQUIRED_KEYS = frozenset(
@@ -112,6 +113,16 @@ _STRATIGRAPHIC_HMM_TRANSITION_KEYS = frozenset(
 )
 _STRATIGRAPHIC_HMM_INIT_KEYS = frozenset({'order_by'})
 _STRATIGRAPHIC_HMM_UPDATE_KEYS = frozenset({'empty_cluster_policy'})
+_STRATIGRAPHIC_HMM_PREPARED_FEATURE_CACHE_KEYS = frozenset(
+	{
+		'chunk_size_tokens',
+		'reuse',
+		'force_rebuild',
+		'cleanup',
+		'persist',
+		'directory',
+	},
+)
 _STRATIGRAPHIC_HMM_PATH_PRIOR_KEYS = frozenset(
 	{
 		'enabled',
@@ -323,6 +334,42 @@ def _validate_stratigraphic_hmm(clustering: Mapping[str, object]) -> None:
 	_validate_stratigraphic_hmm_update(hmm)
 	_validate_stratigraphic_hmm_edge_margin_tokens(hmm)
 	_validate_stratigraphic_hmm_path_prior(hmm)
+	_validate_stratigraphic_hmm_prepared_feature_cache(hmm)
+
+
+def _validate_stratigraphic_hmm_prepared_feature_cache(
+	hmm: Mapping[str, object],
+) -> None:
+	if 'prepared_feature_cache' not in hmm:
+		return
+	cache = _required_child_mapping(
+		hmm,
+		'prepared_feature_cache',
+		prefix='clustering.stratigraphic_hmm',
+	)
+	prefix = 'clustering.stratigraphic_hmm.prepared_feature_cache'
+	_validate_allowed_keys(
+		cache,
+		_STRATIGRAPHIC_HMM_PREPARED_FEATURE_CACHE_KEYS,
+		prefix=prefix,
+	)
+	if 'chunk_size_tokens' in cache:
+		_validate_positive_int(cache, 'chunk_size_tokens', prefix=prefix)
+	for key in ('reuse', 'force_rebuild', 'cleanup', 'persist'):
+		if key in cache:
+			_validate_bool(cache, key, prefix=prefix)
+	if (
+		'cleanup' in cache
+		and 'persist' in cache
+		and bool(cache['cleanup']) == bool(cache['persist'])
+	):
+		raise ValueError(
+			f'{prefix}.cleanup and persist must be complementary',
+		)
+	if 'directory' in cache:
+		value = cache['directory']
+		if not isinstance(value, str) or not value:
+			raise TypeError(f'{prefix}.directory must be a non-empty path')
 
 
 def _validate_stratigraphic_hmm_emission_source(

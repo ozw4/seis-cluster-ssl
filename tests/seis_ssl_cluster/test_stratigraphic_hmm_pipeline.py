@@ -7,7 +7,7 @@ import joblib
 import numpy as np
 import pytest
 
-from seis_ssl_cluster.clustering import run_embedding_clustering
+from seis_ssl_cluster.clustering import run_embedding_clustering, stratigraphic_hmm
 from seis_ssl_cluster.clustering.features import (
 	discover_embedding_inputs,
 	extract_token_features,
@@ -24,7 +24,7 @@ from seis_ssl_cluster.clustering.residualization import (
 	residualization_keys_for_flat_indices,
 )
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
-	decode_survey_ordered_labels,
+	decode_survey_ordered_labels_on_the_fly,
 	initialize_ordered_centers,
 	normalized_z_features_for_indices,
 	prepare_feature_batch_for_indices,
@@ -318,6 +318,9 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 	assert metadata['method'] == 'stratigraphic_hmm_kmeans'
 	assert metadata['emission_source'] == 'embedding'
 	assert metadata['stratigraphic_hmm']['emission_source'] == 'embedding'
+	prepared_cache = metadata['stratigraphic_hmm']['prepared_feature_cache']
+	assert prepared_cache['effective_mode'] == 'memmap'
+	assert len(prepared_cache['surveys'][0]['fingerprint']) == 64
 	assert metadata['stratigraphic_hmm']['iteration_summaries']
 	assert metadata['stratigraphic_hmm']['init'] == {'order_by': 'mean_z'}
 	assert (
@@ -355,6 +358,50 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 	assert sum(label_metadata['cluster_counts'].values()) == int(
 		np.count_nonzero(valid_a),
 	)
+
+
+def test_stratigraphic_hmm_closes_prepared_features_on_failure(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.arange(10, dtype=np.float32).reshape(1, 1, 5, 2),
+		valid=np.ones((1, 1, 5), dtype=np.bool_),
+	)
+	config = _hmm_config(input_dir, output_dir)
+	config['clustering']['stratigraphic_hmm']['prepared_feature_cache'] = {
+		'cleanup': True,
+		'persist': False,
+	}
+	closed = False
+	original_close = stratigraphic_hmm.PreparedFeatureStore.close
+
+	def record_close(store: stratigraphic_hmm.PreparedFeatureStore) -> None:
+		nonlocal closed
+		closed = True
+		original_close(store)
+
+	def fail_decode(*args: object, **kwargs: object) -> dict[str, np.ndarray]:
+		del args, kwargs
+		raise RuntimeError('decode failed')
+
+	monkeypatch.setattr(
+		stratigraphic_hmm.PreparedFeatureStore,
+		'close',
+		record_close,
+	)
+	monkeypatch.setattr(stratigraphic_hmm, '_decode_all_surveys', fail_decode)
+
+	with pytest.raises(RuntimeError, match='decode failed'):
+		run_embedding_clustering(config)
+
+	assert closed
+	assert list((output_dir / 'prepared_features').iterdir()) == []
 
 
 def test_stratigraphic_hmm_saved_labels_decode_from_saved_centers(
@@ -400,7 +447,7 @@ def test_stratigraphic_hmm_saved_labels_decode_from_saved_centers(
 	preprocessor = joblib.load(k_dir / 'preprocessor.joblib')
 	hmm_model = joblib.load(k_dir / 'hmm_model.joblib')
 	embedding_input = discover_embedding_inputs(input_dir)[0]
-	decoded = decode_survey_ordered_labels(
+	decoded = decode_survey_ordered_labels_on_the_fly(
 		embedding_input,
 		centers=centers,
 		residualizer=None,
@@ -668,6 +715,10 @@ def test_run_embedding_clustering_stratigraphic_hmm_zonly_writes_metadata(
 		'validity_masks',
 	]
 	assert metadata['stratigraphic_hmm']['emission_source'] == 'z_coordinate'
+	assert (
+		metadata['stratigraphic_hmm']['prepared_feature_cache']['effective_mode']
+		== 'direct'
+	)
 	assert metadata['normalization'] == 'none'
 	assert metadata['pca']['enabled'] is False
 
