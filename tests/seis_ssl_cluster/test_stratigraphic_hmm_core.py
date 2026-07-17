@@ -8,15 +8,66 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	HMMExpectedBoundariesSettings,
 	HMMPathPriorSettings,
 	HMMTransitionSettings,
+	_decode_compacted_trace_segments,
+	_resolve_expected_boundary_count,
 	build_initial_state_costs,
 	build_ordered_transition_costs,
 	build_terminal_state_costs,
 	decode_trace_segments,
+	squared_euclidean_emission_costs,
 	stratigraphic_hmm_settings_from_config,
 	viterbi_decode_costs,
-	_resolve_expected_boundary_count,
 )
 from seis_ssl_cluster.clustering.writer import write_json
+
+
+@pytest.mark.parametrize('dtype', [np.float32, np.float64])
+def test_squared_euclidean_emissions_match_broadcast_reference(dtype) -> None:
+	features = np.array(
+		[[0.0, 0.0, 0.0], [1.5, -2.0, 3.0], [1.0e8, -2.0e8, 3.0e8]],
+		dtype=dtype,
+	)
+	centers = np.array(
+		[[0.0, 0.0, 0.0], [-4.0, 5.0, -6.0], [-1.0e8, 2.0e8, -3.0e8]],
+		dtype=dtype,
+	)
+	reference = np.sum(
+		(features[:, np.newaxis, :] - centers[np.newaxis, :, :]) ** 2,
+		axis=2,
+	)
+
+	costs = squared_euclidean_emission_costs(features, centers)
+
+	assert costs.dtype == dtype
+	np.testing.assert_allclose(costs, reference, rtol=2e-6, atol=1e-12)
+
+
+@pytest.mark.parametrize('dtype', [np.float32, np.float64])
+def test_squared_euclidean_emissions_preserve_nearby_large_magnitude_distance(
+	dtype,
+) -> None:
+	features = np.array([[1.0e8, 1.0]], dtype=dtype)
+	centers = np.array([[1.0e8, 0.0]], dtype=dtype)
+
+	costs = squared_euclidean_emission_costs(features, centers)
+
+	assert costs[0, 0] == 1.0
+
+
+def test_squared_euclidean_emissions_correct_cancellation_roundoff() -> None:
+	features = np.array(
+		[[-0.6562850109290311, -0.6720146806586559]],
+		dtype=np.float64,
+	)
+	centers = np.array(
+		[[-0.6562850071271402, -0.6720146817592428]],
+		dtype=np.float64,
+	)
+
+	costs = squared_euclidean_emission_costs(features, centers)
+	reference = np.sum((features[0] - centers[0]) ** 2)
+
+	assert costs[0, 0] == reference
 
 
 def test_write_json_rejects_non_finite_floats(tmp_path) -> None:
@@ -104,6 +155,71 @@ def test_viterbi_decode_costs_ties_choose_smaller_previous_state() -> None:
 	)
 
 	np.testing.assert_array_equal(labels, np.array([0, 1], dtype=np.int32))
+
+
+def test_viterbi_decode_costs_accepts_single_sample_and_state() -> None:
+	labels = viterbi_decode_costs(
+		np.array([[0.0]], dtype=np.float32),
+		np.array([[0.0]], dtype=np.float32),
+	)
+
+	np.testing.assert_array_equal(labels, np.array([0], dtype=np.int32))
+
+
+def test_compacted_trace_decode_resets_transitions_and_priors_at_gaps() -> None:
+	z_indices = np.array([0, 1, 3, 4], dtype=np.int64)
+	transition_labels = _decode_compacted_trace_segments(
+		np.array([[0.0, 5.0], [5.0, 0.0], [0.0, 5.0], [5.0, 0.0]]),
+		z_indices,
+		np.array([[0.0, 0.0], [np.inf, 0.0]]),
+		initial_state_costs=None,
+		terminal_state_costs=None,
+		expected_boundaries=None,
+	)
+	prior_labels = _decode_compacted_trace_segments(
+		np.array([[100.0, 0.0]] * 4),
+		z_indices,
+		np.array([[0.0, np.inf], [np.inf, 0.0]]),
+		initial_state_costs=np.array([0.0, 250.0]),
+		terminal_state_costs=None,
+		expected_boundaries=None,
+	)
+
+	np.testing.assert_array_equal(transition_labels, np.array([0, 1, 0, 1]))
+	np.testing.assert_array_equal(prior_labels, np.zeros(4, dtype=np.int32))
+
+
+def test_compacted_trace_decode_reuses_trace_boundary_target_for_segments(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	targets: list[object] = []
+
+	def record_target(
+		emission_costs: np.ndarray,
+		*_args: object,
+		**kwargs: object,
+	) -> np.ndarray:
+		targets.append(kwargs['expected_boundary_count'])
+		return np.zeros(emission_costs.shape[0], dtype=np.int32)
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.clustering.stratigraphic_hmm.viterbi_decode_costs',
+		record_target,
+	)
+	_decode_compacted_trace_segments(
+		np.zeros((5, 6), dtype=np.float32),
+		np.array([0, 1, 3, 4, 5], dtype=np.int64),
+		np.zeros((6, 6), dtype=np.float32),
+		initial_state_costs=None,
+		terminal_state_costs=None,
+		expected_boundaries=HMMExpectedBoundariesSettings(
+			enabled=True,
+			target='auto_k_minus_1',
+			weight=1.0,
+		),
+	)
+
+	assert targets == [4, 4]
 
 
 def test_viterbi_decode_costs_accepts_omitted_path_prior_costs() -> None:

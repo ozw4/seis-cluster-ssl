@@ -192,6 +192,79 @@ class _OpenedPreparedSurveyFeatures:
 			np.asarray(self.features[left:right], dtype=PREPARED_FEATURE_DTYPE),
 		)
 
+	def iter_trace_features(
+		self,
+	) -> Iterator[tuple[int, int, np.ndarray, np.ndarray]]:
+		"""Yield each non-empty trace as slices of the prepared feature rows."""
+		x_count, y_count, z_count = self.descriptor.token_shape_xyz
+		if self.descriptor.feature_mode == 'z_coordinate':
+			mx, my, mz = self.descriptor.edge_margin_tokens
+			valid = load_valid_tokens(self.descriptor.embedding_input)
+			for x_index in range(mx, x_count - mx):
+				for y_index in range(my, y_count - my):
+					trace = np.asarray(valid[x_index, y_index, mz : z_count - mz])
+					z_indices = np.flatnonzero(trace).astype(np.int64, copy=False) + mz
+					if z_indices.size:
+						rows = (
+							z_indices.astype(PREPARED_FEATURE_DTYPE)
+							/ np.float32(max(z_count - 1, 1))
+						).reshape(-1, 1)
+						yield x_index, y_index, z_indices, rows
+			return
+		if self.valid_flat_indices is None or self.features is None:
+			raise RuntimeError('prepared embedding features are not open')
+		cursor = 0
+		while cursor < self.valid_flat_indices.size:
+			trace_linear = int(self.valid_flat_indices[cursor]) // z_count
+			trace_start = trace_linear * z_count
+			right = int(
+				np.searchsorted(
+					self.valid_flat_indices,
+					trace_start + z_count,
+					side='left',
+				)
+			)
+			yield (
+				trace_linear // y_count,
+				trace_linear % y_count,
+				np.asarray(
+					self.valid_flat_indices[cursor:right] - trace_start,
+					dtype=np.int64,
+				),
+				np.asarray(self.features[cursor:right], dtype=PREPARED_FEATURE_DTYPE),
+			)
+			cursor = right
+
+	def iter_feature_chunks(
+		self,
+		chunk_size: int,
+	) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+		"""Yield aligned flat indices and prepared rows exactly once."""
+		if chunk_size <= 0:
+			raise ValueError('chunk_size must be positive')
+		if self.descriptor.feature_mode == 'z_coordinate':
+			z_count = self.descriptor.token_shape_xyz[2]
+			for indices in _iter_valid_index_chunks(
+				self.descriptor.embedding_input,
+				self.descriptor.token_shape_xyz,
+				self.descriptor.edge_margin_tokens,
+				chunk_size,
+			):
+				rows = (
+					(indices % z_count).astype(PREPARED_FEATURE_DTYPE)
+					/ np.float32(max(z_count - 1, 1))
+				).reshape(-1, 1)
+				yield indices, rows
+			return
+		if self.valid_flat_indices is None or self.features is None:
+			raise RuntimeError('prepared embedding features are not open')
+		for start in range(0, self.valid_flat_indices.size, chunk_size):
+			stop = min(start + chunk_size, self.valid_flat_indices.size)
+			yield (
+				np.asarray(self.valid_flat_indices[start:stop], dtype=np.int64),
+				np.asarray(self.features[start:stop], dtype=PREPARED_FEATURE_DTYPE),
+			)
+
 
 @dataclass
 class PreparedFeatureStore:

@@ -52,6 +52,7 @@ from seis_ssl_cluster.clustering.sampling import (
 	SampledTokens,
 )
 from seis_ssl_cluster.clustering.writer import SurveyLabelResult, write_json
+from seis_ssl_cluster.utils import StageTimer
 
 
 @dataclass(frozen=True)
@@ -573,6 +574,121 @@ def prepare_feature_batch_for_indices(
 	return transformed
 
 
+def squared_euclidean_emission_costs(
+	features: np.ndarray,
+	centers: np.ndarray,
+) -> np.ndarray:
+	"""Return pairwise squared Euclidean costs without a ``[T, K, D]`` array."""
+	feature_matrix, center_matrix = _emission_matrices(features, centers)
+	output_dtype = feature_matrix.dtype
+	if output_dtype == np.dtype(np.float32):
+		feature_matrix = feature_matrix.astype(np.float64)
+		center_matrix = center_matrix.astype(np.float64)
+	center_squared_norms = np.einsum(
+		'kd,kd->k',
+		center_matrix,
+		center_matrix,
+		optimize=True,
+	)
+	costs = _squared_euclidean_emission_costs_with_center_norms(
+		feature_matrix,
+		center_matrix,
+		center_squared_norms,
+	)
+	return costs.astype(output_dtype, copy=False)
+
+
+def _squared_euclidean_emission_costs_with_center_norms(
+	features: np.ndarray,
+	centers: np.ndarray,
+	center_squared_norms: np.ndarray,
+) -> np.ndarray:
+	dtype = np.result_type(features.dtype, centers.dtype, center_squared_norms.dtype)
+	features = np.asarray(features, dtype=dtype)
+	centers = np.asarray(centers, dtype=dtype)
+	center_squared_norms = np.asarray(center_squared_norms, dtype=dtype)
+	feature_squared_norms = np.einsum(
+		'td,td->t',
+		features,
+		features,
+		optimize=True,
+	)
+	costs = feature_squared_norms[:, np.newaxis] + center_squared_norms[np.newaxis, :]
+	costs -= np.asarray(2.0, dtype=costs.dtype) * (features @ centers.T)
+	_correct_cancellation_prone_emission_costs(
+		costs,
+		features,
+		centers,
+		feature_squared_norms,
+		center_squared_norms,
+	)
+	if np.any(costs < 0.0):
+		np.maximum(costs, 0.0, out=costs)
+	return costs
+
+
+def _correct_cancellation_prone_emission_costs(
+	costs: np.ndarray,
+	features: np.ndarray,
+	centers: np.ndarray,
+	feature_squared_norms: np.ndarray,
+	center_squared_norms: np.ndarray,
+) -> None:
+	"""Recompute entries whose norm expansion cannot resolve the distance."""
+	error_scale = (
+		np.asarray(8.0, dtype=costs.dtype)
+		* np.finfo(costs.dtype).eps
+		* max(features.shape[1], 1)
+	)
+	suspect = costs <= error_scale * (
+		feature_squared_norms[:, np.newaxis]
+		+ center_squared_norms[np.newaxis, :]
+	)
+	feature_indices, center_indices = np.nonzero(suspect)
+	if feature_indices.size == 0:
+		return
+	pairs_per_chunk = max(1, 65_536 // max(features.shape[1], 1))
+	for start in range(0, feature_indices.size, pairs_per_chunk):
+		stop = min(start + pairs_per_chunk, feature_indices.size)
+		feature_chunk = feature_indices[start:stop]
+		center_chunk = center_indices[start:stop]
+		differences = features[feature_chunk] - centers[center_chunk]
+		costs[feature_chunk, center_chunk] = np.einsum(
+			'pd,pd->p',
+			differences,
+			differences,
+			optimize=True,
+		)
+
+
+def _emission_matrices(
+	features: np.ndarray,
+	centers: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+	feature_array = np.asarray(features)
+	center_array = np.asarray(centers)
+	if feature_array.ndim != 2 or center_array.ndim != 2:
+		raise ValueError('features and centers must both be 2D')
+	if feature_array.shape[1] != center_array.shape[1]:
+		raise ValueError(
+			'feature dimension must match centers; got '
+			f'{feature_array.shape[1]} and {center_array.shape[1]}'
+		)
+	if not np.issubdtype(feature_array.dtype, np.number) or not np.issubdtype(
+		center_array.dtype,
+		np.number,
+	):
+		raise TypeError('features and centers must have numeric dtype')
+	dtype = np.result_type(feature_array.dtype, center_array.dtype, np.float32)
+	feature_matrix = np.asarray(feature_array, dtype=dtype)
+	center_matrix = np.asarray(center_array, dtype=dtype)
+	if not np.all(np.isfinite(feature_matrix)) or not np.all(
+		np.isfinite(center_matrix)
+	):
+		raise ValueError('features and centers must contain only finite values')
+	return feature_matrix, center_matrix
+
+
 def viterbi_decode_costs(  # noqa: C901, PLR0913
 	emission_costs: np.ndarray,
 	transition_costs: np.ndarray,
@@ -782,6 +898,53 @@ def decode_trace_segments(  # noqa: PLR0913
 	return labels
 
 
+def _decode_compacted_trace_segments(  # noqa: PLR0913
+	emission_costs: np.ndarray,
+	z_indices: np.ndarray,
+	transition_costs: np.ndarray,
+	*,
+	initial_state_costs: np.ndarray | None,
+	terminal_state_costs: np.ndarray | None,
+	expected_boundaries: HMMExpectedBoundariesSettings | None,
+) -> np.ndarray:
+	"""Decode contiguous slices of compacted valid trace rows independently."""
+	z = np.asarray(z_indices, dtype=np.int64)
+	if z.ndim != 1 or z.shape[0] != emission_costs.shape[0]:
+		raise ValueError('z_indices must align with emission_costs rows')
+	if z.size == 0:
+		return np.empty(0, dtype=np.int32)
+	segment_starts = np.concatenate(
+		(
+			np.array([0], dtype=np.int64),
+			np.flatnonzero(z[1:] != z[:-1] + 1).astype(np.int64, copy=False) + 1,
+		)
+	)
+	segment_stops = np.concatenate(
+		(segment_starts[1:], np.array([z.size], dtype=np.int64))
+	)
+	labels = np.empty(z.size, dtype=np.int32)
+	k = emission_costs.shape[1]
+	boundary_count_weight = (
+		0.0 if expected_boundaries is None else expected_boundaries.weight
+	)
+	expected_boundary_count = _resolve_expected_boundary_count(
+		expected_boundaries,
+		k=k,
+		valid_trace_length=int(z.size),
+	)
+	for start, stop in zip(segment_starts, segment_stops, strict=True):
+		segment = slice(int(start), int(stop))
+		labels[segment] = viterbi_decode_costs(
+			emission_costs[segment],
+			transition_costs,
+			initial_state_costs=initial_state_costs,
+			terminal_state_costs=terminal_state_costs,
+			expected_boundary_count=expected_boundary_count,
+			boundary_count_weight=boundary_count_weight,
+		)
+	return labels
+
+
 def decode_survey_ordered_labels(  # noqa: PLR0913
 	embedding_input: EmbeddingInput,
 	*,
@@ -805,20 +968,21 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 	shape = embeddings.shape[:3]
 	labels = np.full(shape, -1, dtype=np.int32)
 	x_count, y_count, z_count = shape
-	k = center_matrix.shape[0]
+	center_matrix64 = center_matrix.astype(np.float64)
+	center_squared_norms = np.einsum(
+		'kd,kd->k',
+		center_matrix64,
+		center_matrix64,
+		optimize=True,
+	)
 	for x_index in range(x_count):
 		for y_index in range(y_count):
 			trace_valid = np.asarray(valid[x_index, y_index, :], dtype=np.bool_)
 			if not np.any(trace_valid):
 				continue
 			z_indices = np.flatnonzero(trace_valid)
-			flat_indices = np.ravel_multi_index(
-				(
-					np.full(z_indices.shape, x_index, dtype=np.int64),
-					np.full(z_indices.shape, y_index, dtype=np.int64),
-					z_indices,
-				),
-				shape,
+			flat_indices = (
+				(x_index * y_count + y_index) * z_count + z_indices
 			).astype(np.int64, copy=False)
 			prepared = prepare_feature_batch_for_indices(
 				embedding_input,
@@ -833,25 +997,18 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 					f'{prepared.shape[1]} and {center_matrix.shape[1]}'
 				)
 				raise ValueError(msg)
-			emission_costs = np.zeros((z_count, k), dtype=np.float32)
-			deltas = prepared[:, np.newaxis, :] - center_matrix[np.newaxis, :, :]
-			emission_costs[z_indices] = np.sum(deltas * deltas, axis=2)
-			expected_boundary_count = _resolve_expected_boundary_count(
-				expected_boundaries,
-				k=k,
-				valid_trace_length=int(z_indices.size),
+			emission_costs = _squared_euclidean_emission_costs_with_center_norms(
+				prepared,
+				center_matrix,
+				center_squared_norms,
 			)
-			boundary_count_weight = (
-				0.0 if expected_boundaries is None else expected_boundaries.weight
-			)
-			labels[x_index, y_index, :] = decode_trace_segments(
+			labels[x_index, y_index, z_indices] = _decode_compacted_trace_segments(
 				emission_costs,
-				trace_valid,
+				z_indices,
 				transition_costs,
 				initial_state_costs=initial_state_costs,
 				terminal_state_costs=terminal_state_costs,
-				expected_boundary_count=expected_boundary_count,
-				boundary_count_weight=boundary_count_weight,
+				expected_boundaries=expected_boundaries,
 			)
 	return labels
 
@@ -864,6 +1021,8 @@ def decode_prepared_survey_ordered_labels(  # noqa: PLR0913
 	initial_state_costs: np.ndarray | None,
 	terminal_state_costs: np.ndarray | None,
 	expected_boundaries: HMMExpectedBoundariesSettings | None,
+	center_squared_norms: np.ndarray | None = None,
+	timer: StageTimer | None = None,
 ) -> np.ndarray:
 	"""Decode one survey using only prepared feature rows."""
 	center_matrix = np.asarray(centers, dtype=np.float32)
@@ -874,38 +1033,42 @@ def decode_prepared_survey_ordered_labels(  # noqa: PLR0913
 	shape = prepared_survey.token_shape_xyz
 	labels = np.full(shape, -1, dtype=np.int32)
 	k = center_matrix.shape[0]
+	if center_squared_norms is None:
+		center_matrix64 = center_matrix.astype(np.float64)
+		center_squared_norms = np.einsum(
+			'kd,kd->k',
+			center_matrix64,
+			center_matrix64,
+			optimize=True,
+		)
+	else:
+		center_squared_norms = np.asarray(center_squared_norms, dtype=np.float64)
+		if center_squared_norms.shape != (k,):
+			raise ValueError(f'center_squared_norms must have shape ({k},)')
+	active_timer = timer or StageTimer()
 	with prepared_survey.open() as opened:
-		for x_index in range(shape[0]):
-			for y_index in range(shape[1]):
-				z_indices, features = opened.trace_features(x_index, y_index)
-				if z_indices.size == 0:
-					continue
-				if features.shape[1] != center_matrix.shape[1]:
-					raise ValueError(
-						'prepared feature dimension must match centers; got '
-						f'{features.shape[1]} and {center_matrix.shape[1]}',
+		for x_index, y_index, z_indices, features in opened.iter_trace_features():
+			if features.shape[1] != center_matrix.shape[1]:
+				raise ValueError(
+					'prepared feature dimension must match centers; got '
+					f'{features.shape[1]} and {center_matrix.shape[1]}',
+				)
+			with active_timer.stage('emission', sample_count=int(z_indices.size)):
+				emission_costs = _squared_euclidean_emission_costs_with_center_norms(
+					features,
+					center_matrix,
+					center_squared_norms,
+				)
+			with active_timer.stage('viterbi', sample_count=int(z_indices.size)):
+				labels[x_index, y_index, z_indices] = (
+					_decode_compacted_trace_segments(
+						emission_costs,
+						z_indices,
+						transition_costs,
+						initial_state_costs=initial_state_costs,
+						terminal_state_costs=terminal_state_costs,
+						expected_boundaries=expected_boundaries,
 					)
-				trace_valid = np.zeros(shape[2], dtype=np.bool_)
-				trace_valid[z_indices] = True
-				emission_costs = np.zeros((shape[2], k), dtype=np.float32)
-				deltas = features[:, np.newaxis, :] - center_matrix[np.newaxis, :, :]
-				emission_costs[z_indices] = np.sum(deltas * deltas, axis=2)
-				labels[x_index, y_index, :] = decode_trace_segments(
-					emission_costs,
-					trace_valid,
-					transition_costs,
-					initial_state_costs=initial_state_costs,
-					terminal_state_costs=terminal_state_costs,
-					expected_boundary_count=_resolve_expected_boundary_count(
-						expected_boundaries,
-						k=k,
-						valid_trace_length=int(z_indices.size),
-					),
-					boundary_count_weight=(
-						0.0
-						if expected_boundaries is None
-						else expected_boundaries.weight
-					),
 				)
 	return labels
 
@@ -918,7 +1081,16 @@ def _decode_all_surveys(  # noqa: PLR0913
 	initial_state_costs: np.ndarray | None,
 	terminal_state_costs: np.ndarray | None,
 	expected_boundaries: HMMExpectedBoundariesSettings | None,
+	timer: StageTimer | None = None,
 ) -> dict[str, np.ndarray]:
+	center_matrix = np.asarray(centers, dtype=np.float32)
+	center_matrix64 = center_matrix.astype(np.float64)
+	center_squared_norms = np.einsum(
+		'kd,kd->k',
+		center_matrix64,
+		center_matrix64,
+		optimize=True,
+	)
 	return {
 		survey.embedding_input.survey_id: decode_prepared_survey_ordered_labels(
 			survey,
@@ -927,18 +1099,21 @@ def _decode_all_surveys(  # noqa: PLR0913
 			initial_state_costs=initial_state_costs,
 			terminal_state_costs=terminal_state_costs,
 			expected_boundaries=expected_boundaries,
+			center_squared_norms=center_squared_norms,
+			timer=timer,
 		)
 		for survey in prepared_features.surveys
 	}
 
 
-def update_centers_from_prepared_labels(  # noqa: C901
+def update_centers_from_prepared_labels(  # noqa: PLR0913
 	prepared_features: PreparedFeatureStore,
 	labels_by_survey: Mapping[str, np.ndarray],
 	*,
 	centers: np.ndarray,
 	prediction_batch_size: int,
 	empty_cluster_policy: str,
+	timer: StageTimer | None = None,
 ) -> tuple[np.ndarray, dict[str, object]]:
 	"""Update centers using only previously prepared feature rows."""
 	center_matrix = np.asarray(centers, dtype=np.float32)
@@ -952,35 +1127,43 @@ def update_centers_from_prepared_labels(  # noqa: C901
 	known = {survey.embedding_input.survey_id for survey in prepared_features.surveys}
 	if unknown := sorted(set(labels_by_survey) - known):
 		raise ValueError(f'labels_by_survey contains unknown survey ids: {unknown!r}')
-	for survey in prepared_features.surveys:
-		survey_id = survey.embedding_input.survey_id
-		if survey_id not in labels_by_survey:
-			raise ValueError(f'labels_by_survey missing survey id: {survey_id!r}')
-		labels = np.asarray(labels_by_survey[survey_id])
-		if labels.shape != survey.token_shape_xyz:
-			raise ValueError(f'label grid shape is invalid for {survey_id}')
-		flat_labels = labels.reshape(-1)
-		with survey.open() as opened:
-			for start in range(0, flat_labels.size, prediction_batch_size):
-				stop = min(start + prediction_batch_size, flat_labels.size)
-				local_indices = np.flatnonzero(flat_labels[start:stop] >= 0)
-				if local_indices.size == 0:
-					continue
-				indices = local_indices.astype(np.int64, copy=False) + start
-				batch_labels = np.asarray(flat_labels[indices], dtype=np.int64)
-				if np.any(batch_labels >= k):
-					raise ValueError(f'label id out of range for {survey_id}')
-				features = opened.features_for_flat_indices(indices)
-				if features.shape[1] != feature_dim:
-					raise ValueError('prepared feature dimension must match centers')
-				np.add.at(sums, batch_labels, features.astype(np.float64, copy=False))
-				counts += np.bincount(batch_labels, minlength=k)
-	new_centers = center_matrix.copy()
-	non_empty = counts > 0
-	new_centers[non_empty] = (sums[non_empty] / counts[non_empty, np.newaxis]).astype(
-		np.float32
+	active_timer = timer or StageTimer()
+	prepared_row_count = sum(
+		survey.valid_token_count for survey in prepared_features.surveys
 	)
-	shifts = np.linalg.norm(new_centers - center_matrix, axis=1)
+	with active_timer.stage('center_accumulation', sample_count=prepared_row_count):
+		for survey in prepared_features.surveys:
+			survey_id = survey.embedding_input.survey_id
+			if survey_id not in labels_by_survey:
+				raise ValueError(f'labels_by_survey missing survey id: {survey_id!r}')
+			labels = np.asarray(labels_by_survey[survey_id])
+			if labels.shape != survey.token_shape_xyz:
+				raise ValueError(f'label grid shape is invalid for {survey_id}')
+			flat_labels = labels.reshape(-1)
+			with survey.open() as opened:
+				for indices, features in opened.iter_feature_chunks(
+					prediction_batch_size
+				):
+					batch_labels = np.asarray(flat_labels[indices], dtype=np.int64)
+					if np.any(batch_labels < 0) or np.any(batch_labels >= k):
+						raise ValueError(f'label id out of range for {survey_id}')
+					if features.shape[1] != feature_dim:
+						raise ValueError(
+							'prepared feature dimension must match centers'
+						)
+					np.add.at(
+						sums,
+						batch_labels,
+						features.astype(np.float64, copy=False),
+					)
+					counts += np.bincount(batch_labels, minlength=k)
+	with active_timer.stage('center_finalize', sample_count=k):
+		new_centers = center_matrix.copy()
+		non_empty = counts > 0
+		new_centers[non_empty] = (
+			sums[non_empty] / counts[non_empty, np.newaxis]
+		).astype(np.float32)
+		shifts = np.linalg.norm(new_centers - center_matrix, axis=1)
 	return new_centers, {
 		'cluster_counts': {
 			int(label): int(count) for label, count in enumerate(counts)
@@ -1166,6 +1349,7 @@ def run_stratigraphic_hmm_clustering(  # noqa: PLR0915
 			emission_source=hmm_settings.emission_source,
 		),
 	)
+	timer = StageTimer(enabled=settings.stage_timing)
 	try:
 		sample_z = sample_token_z_coordinates(
 			embedding_inputs,
@@ -1222,6 +1406,7 @@ def run_stratigraphic_hmm_clustering(  # noqa: PLR0915
 					initial_state_costs=initial_state_costs,
 					terminal_state_costs=terminal_state_costs,
 					expected_boundaries=expected_boundaries,
+					timer=timer,
 				)
 				centers, summary = update_centers_from_prepared_labels(
 					prepared_features,
@@ -1229,6 +1414,7 @@ def run_stratigraphic_hmm_clustering(  # noqa: PLR0915
 					centers=centers,
 					prediction_batch_size=settings.prediction_batch_size,
 					empty_cluster_policy=hmm_settings.empty_cluster_policy,
+					timer=timer,
 				)
 				iteration_summaries.append({'iteration': iteration, **summary})
 
@@ -1239,6 +1425,7 @@ def run_stratigraphic_hmm_clustering(  # noqa: PLR0915
 				initial_state_costs=initial_state_costs,
 				terminal_state_costs=terminal_state_costs,
 				expected_boundaries=expected_boundaries,
+				timer=timer,
 			)
 
 			label_results = _write_hmm_labels_for_k(
@@ -1333,6 +1520,8 @@ def run_stratigraphic_hmm_clustering(  # noqa: PLR0915
 		)
 	finally:
 		prepared_features.close()
+		if timer.enabled:
+			timer.write_json(settings.output_dir / 'stage_timings.json')
 
 
 def _sample_valid_hmm_embedding_tokens(
@@ -1752,6 +1941,7 @@ __all__ = [
 	'prepare_feature_batch_for_indices',
 	'run_stratigraphic_hmm_clustering',
 	'sample_token_z_coordinates',
+	'squared_euclidean_emission_costs',
 	'stratigraphic_hmm_settings_from_config',
 	'update_centers_from_labels',
 	'update_centers_from_prepared_labels',

@@ -134,6 +134,63 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 	store.close()
 
 
+def test_prepared_and_on_the_fly_decode_reset_across_validity_gap(
+	tmp_path: Path,
+) -> None:
+	item = _write_input(tmp_path, 'survey_a', shape=(1, 1, 5, 1))
+	np.save(
+		item.embeddings_path,
+		np.array([0.0, 10.0, 99.0, 0.0, 10.0], dtype=np.float32).reshape(
+			(1, 1, 5, 1)
+		),
+	)
+	np.save(
+		item.valid_tokens_path,
+		np.array([True, True, False, True, True]).reshape((1, 1, 5)),
+	)
+	centers = np.array([[0.0], [10.0]], dtype=np.float32)
+	transitions = build_ordered_transition_costs(
+		2,
+		HMMTransitionSettings(
+			same_cost=0.0,
+			advance_cost=0.0,
+			jump_cost=1.0,
+			reverse_cost=10.0,
+			forbid_reverse=True,
+			max_jump=1,
+		),
+	)
+	with prepare_feature_store(
+		embedding_inputs=(item,),
+		feature_dim=1,
+		feature_mode='embedding',
+		residualizer=None,
+		preprocessor=_IdentityPreprocessor(),
+		edge_margin_tokens=(0, 0, 0),
+		settings=PreparedFeatureCacheSettings(directory=tmp_path / 'prepared'),
+		default_cache_root=tmp_path / 'unused',
+		prepare_batch=extract_token_features,
+	) as store:
+		prepared_labels = decode_prepared_survey_ordered_labels(
+			store.surveys[0],
+			centers=centers,
+			transition_costs=transitions,
+			initial_state_costs=None,
+			terminal_state_costs=None,
+			expected_boundaries=None,
+		)
+	on_the_fly_labels = decode_survey_ordered_labels(
+		item,
+		centers=centers,
+		residualizer=None,
+		preprocessor=_IdentityPreprocessor(),
+		transition_costs=transitions,
+	)
+	expected = np.array([[[0, 1, -1, 0, 1]]], dtype=np.int32)
+	np.testing.assert_array_equal(prepared_labels, expected)
+	np.testing.assert_array_equal(on_the_fly_labels, expected)
+
+
 def test_prepared_decode_update_matches_dense_residualization_and_pca(
 	tmp_path: Path,
 ) -> None:

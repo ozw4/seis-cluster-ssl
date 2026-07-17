@@ -305,7 +305,9 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 		valid=valid_b,
 	)
 
-	result = run_embedding_clustering(_hmm_config(input_dir, output_dir))
+	config = _hmm_config(input_dir, output_dir)
+	config['clustering']['stage_timing'] = True
+	result = run_embedding_clustering(config)
 
 	assert [item.k for item in result.results] == [3]
 	k_dir = output_dir / 'models' / 'k3'
@@ -314,6 +316,13 @@ def test_run_embedding_clustering_stratigraphic_hmm_writes_artifacts(
 	assert (k_dir / 'cluster_centers.npy').is_file()
 	assert (k_dir / 'clustering_metadata.json').is_file()
 	assert not (k_dir / 'kmeans.joblib').exists()
+	timings = json.loads((output_dir / 'stage_timings.json').read_text())
+	assert set(timings['stages']) == {
+		'center_accumulation',
+		'center_finalize',
+		'emission',
+		'viterbi',
+	}
 	metadata = json.loads((k_dir / 'clustering_metadata.json').read_text())
 	assert metadata['method'] == 'stratigraphic_hmm_kmeans'
 	assert metadata['emission_source'] == 'embedding'
