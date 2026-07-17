@@ -634,16 +634,30 @@ def _correct_cancellation_prone_emission_costs(
 	feature_squared_norms: np.ndarray,
 	center_squared_norms: np.ndarray,
 ) -> None:
-	"""Recompute entries whose norm expansion cannot resolve the distance."""
+	"""Recompute entries whose norm expansion cannot resolve the winner."""
 	error_scale = (
 		np.asarray(8.0, dtype=costs.dtype)
 		* np.finfo(costs.dtype).eps
 		* max(features.shape[1], 1)
 	)
-	suspect = costs <= error_scale * (
+	error_bounds = error_scale * (
 		feature_squared_norms[:, np.newaxis]
 		+ center_squared_norms[np.newaxis, :]
 	)
+	suspect = costs <= error_bounds
+	row_min_indices = np.argmin(costs, axis=1)
+	row_min_costs = costs[np.arange(costs.shape[0]), row_min_indices]
+	row_min_error_bounds = error_bounds[
+		np.arange(error_bounds.shape[0]),
+		row_min_indices,
+	]
+	winner_candidates = costs <= (
+		row_min_costs[:, np.newaxis]
+		+ error_bounds
+		+ row_min_error_bounds[:, np.newaxis]
+	)
+	ambiguous_rows = np.count_nonzero(winner_candidates, axis=1) > 1
+	suspect |= winner_candidates & ambiguous_rows[:, np.newaxis]
 	feature_indices, center_indices = np.nonzero(suspect)
 	if feature_indices.size == 0:
 		return
@@ -1093,7 +1107,7 @@ def _decode_all_surveys(  # noqa: PLR0913
 	}
 
 
-def update_centers_from_prepared_labels(  # noqa: PLR0913
+def update_centers_from_prepared_labels(  # noqa: C901, PLR0913
 	prepared_features: PreparedFeatureStore,
 	labels_by_survey: Mapping[str, np.ndarray],
 	*,
@@ -1127,23 +1141,33 @@ def update_centers_from_prepared_labels(  # noqa: PLR0913
 			if labels.shape != survey.token_shape_xyz:
 				raise ValueError(f'label grid shape is invalid for {survey_id}')
 			flat_labels = labels.reshape(-1)
+			if np.any(flat_labels >= k):
+				raise ValueError(f'label id out of range for {survey_id}')
+			labeled_count = int(np.count_nonzero(flat_labels >= 0))
+			prepared_labeled_count = 0
 			with survey.open() as opened:
 				for indices, features in opened.iter_feature_chunks(
 					prediction_batch_size
 				):
 					batch_labels = np.asarray(flat_labels[indices], dtype=np.int64)
-					if np.any(batch_labels < 0) or np.any(batch_labels >= k):
-						raise ValueError(f'label id out of range for {survey_id}')
+					labeled = batch_labels >= 0
+					prepared_labeled_count += int(np.count_nonzero(labeled))
+					if not np.any(labeled):
+						continue
 					if features.shape[1] != feature_dim:
 						raise ValueError(
 							'prepared feature dimension must match centers'
 						)
 					np.add.at(
 						sums,
-						batch_labels,
-						features.astype(np.float64, copy=False),
+						batch_labels[labeled],
+						features[labeled].astype(np.float64, copy=False),
 					)
-					counts += np.bincount(batch_labels, minlength=k)
+					counts += np.bincount(batch_labels[labeled], minlength=k)
+			if prepared_labeled_count != labeled_count:
+				raise ValueError(
+					f'labels reference tokens without prepared features for {survey_id}'
+				)
 	with active_timer.stage('center_finalize', sample_count=k):
 		new_centers = center_matrix.copy()
 		non_empty = counts > 0

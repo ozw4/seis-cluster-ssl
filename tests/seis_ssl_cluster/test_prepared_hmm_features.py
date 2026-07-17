@@ -381,6 +381,43 @@ def test_prepared_feature_store_opens_only_one_survey_at_a_time(
 	store.close()
 
 
+def test_prepared_center_update_preserves_sparse_label_grid_contract(
+	tmp_path: Path,
+) -> None:
+	item = _write_input(tmp_path, 'survey_a', shape=(1, 1, 3, 1))
+	valid = np.array([True, False, True], dtype=np.bool_)
+	np.save(item.valid_tokens_path, valid.reshape((1, 1, 3)))
+	with prepare_feature_store(
+		embedding_inputs=(item,),
+		feature_dim=1,
+		feature_mode='embedding',
+		residualizer=None,
+		preprocessor=_IdentityPreprocessor(),
+		edge_margin_tokens=(0, 0, 0),
+		settings=PreparedFeatureCacheSettings(directory=tmp_path / 'prepared'),
+		default_cache_root=tmp_path / 'unused',
+		prepare_batch=extract_token_features,
+	) as store:
+		centers, summary = update_centers_from_prepared_labels(
+			store,
+			{'survey_a': np.array([[[-1, -1, 0]]], dtype=np.int32)},
+			centers=np.array([[0.0], [1.0]], dtype=np.float32),
+			prediction_batch_size=2,
+			empty_cluster_policy='keep_previous',
+		)
+		np.testing.assert_allclose(centers, np.array([[2.0], [1.0]]))
+		assert summary['cluster_counts'] == {0: 1, 1: 0}
+
+		with pytest.raises(ValueError, match='without prepared features'):
+			update_centers_from_prepared_labels(
+				store,
+				{'survey_a': np.array([[[-1, 1, -1]]], dtype=np.int32)},
+				centers=np.array([[0.0], [1.0]], dtype=np.float32),
+				prediction_batch_size=2,
+				empty_cluster_policy='keep_previous',
+			)
+
+
 def test_prepared_feature_store_build_reuse_force_and_index_mapping(
 	tmp_path: Path,
 ) -> None:

@@ -10,6 +10,10 @@ import torch
 from proc.seis_ssl_cluster.run_f3_lithology_split_sweep_probes import (
 	f3_lithology_split_sweep_probe_config_from_mapping,
 )
+from seis_ssl_cluster.clustering.kmeans import clustering_settings_from_config
+from seis_ssl_cluster.clustering.stratigraphic_hmm import (
+	stratigraphic_hmm_settings_from_config,
+)
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_cluster_visualization_config,
@@ -88,6 +92,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_F3_SEGY_GEOMETRY,
 	STAGE_F3_TOKENIZATION_PREVIEW,
 )
+from seis_ssl_cluster.embedding.extractor import extraction_settings_from_config
 from seis_ssl_cluster.f3.lithology.guardrails import (
 	f3_shuffled_hmm_target_config_from_mapping,
 )
@@ -108,6 +113,29 @@ ALL_CONFIGS = sorted(
 		*Path('experiments/f3').rglob('*.yaml'),
 	],
 )
+
+CORE_CONFIG_RESOLVERS = {
+	frozenset(
+		{
+			'paths',
+			'manifests',
+			'data',
+			'zero_mask',
+			'model',
+			'masking',
+			'loss',
+			'train',
+			'visualization',
+		}
+	): resolve_mae_training_config,
+	frozenset({'paths', 'manifests', 'embeddings', 'embedding'}): (
+		resolve_embedding_extraction_config
+	),
+	frozenset({'paths', 'embeddings', 'clustering'}): resolve_clustering_config,
+	frozenset({'paths', 'clustering', 'visualization'}): (
+		resolve_cluster_visualization_config
+	),
+}
 
 NOPIMS_ROOT = Path('experiments/nopims/pretrain_v1')
 NOPIMS_PRETRAINING_CONFIGS = sorted((NOPIMS_ROOT / '10_pretrain').rglob('*.yaml'))
@@ -415,11 +443,83 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 
 
 @pytest.mark.parametrize('config_path', ALL_CONFIGS, ids=str)
-def test_all_repository_configs_load_as_mappings(config_path: Path) -> None:
+def test_all_repository_configs_load_and_resolve_supported_stages(
+	config_path: Path,
+) -> None:
 	config = load_config(config_path)
 
 	assert isinstance(config, dict)
 	assert config
+	resolver = CORE_CONFIG_RESOLVERS.get(frozenset(config))
+	if resolver is not None:
+		resolved = resolver(config)
+		assert resolved['stage']
+
+
+def test_repository_configs_preserve_legacy_optimization_defaults() -> None:
+	training = resolve_mae_training_config(
+		load_config(Path('proc/configs/seis_ssl_cluster/train_amp_mae.yaml')),
+	)
+	assert training['data']['finite_check_mode'] == 'strict'
+	assert {
+		key: training['train'][key]
+		for key in (
+			'prefetch_factor',
+			'persistent_workers',
+			'amp_dtype',
+			'runtime_check_mode',
+			'stage_timing',
+		)
+	} == {
+		'prefetch_factor': 2,
+		'persistent_workers': True,
+		'amp_dtype': 'auto',
+		'runtime_check_mode': 'once',
+		'stage_timing': False,
+	}
+
+	embedding_raw = load_config(
+		Path('proc/configs/seis_ssl_cluster/extract_embeddings.yaml'),
+	)
+	for key in (
+		'prefetch_queue_depth',
+		'amp',
+		'amp_dtype',
+		'stage_timing',
+		'preprocessing_cache',
+	):
+		embedding_raw['embedding'].pop(key)
+	embedding = resolve_embedding_extraction_config(embedding_raw)
+	embedding_settings = extraction_settings_from_config(
+		embedding,
+		checkpoint_config=training,
+	)
+	assert embedding_settings.average_chunk_size_x == 16
+	assert embedding_settings.prefetch_queue_depth == 0
+	assert embedding_settings.amp is False
+	assert embedding_settings.amp_dtype == 'auto'
+	assert embedding_settings.stage_timing is False
+	assert embedding_settings.preprocessing_cache.mode == 'off'
+	assert embedding_settings.preprocessing_cache.chunk_size_x == 16
+	assert embedding_settings.preprocessing_cache.reuse is True
+	assert embedding_settings.preprocessing_cache.cleanup is False
+
+	hmm_raw = load_config(F3_STRATIGRAPHIC_CLUSTERING_CONFIGS[0])
+	hmm_raw['clustering'].pop('stage_timing', None)
+	hmm_raw['clustering']['stratigraphic_hmm'].pop(
+		'prepared_feature_cache',
+		None,
+	)
+	hmm = resolve_clustering_config(hmm_raw)
+	assert clustering_settings_from_config(hmm).stage_timing is False
+	prepared_cache = stratigraphic_hmm_settings_from_config(
+		hmm,
+	).prepared_feature_cache
+	assert prepared_cache.chunk_size_tokens == 65_536
+	assert prepared_cache.reuse is True
+	assert prepared_cache.force_rebuild is False
+	assert prepared_cache.cleanup is False
+	assert prepared_cache.persist is True
 
 
 @pytest.mark.parametrize(('group_name', 'configs'), REQUIRED_ACTIVE_CONFIG_GROUPS)

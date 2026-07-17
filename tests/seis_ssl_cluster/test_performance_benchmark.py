@@ -205,6 +205,11 @@ def test_smoke_cli_writes_json_and_markdown(tmp_path: Path) -> None:
 	assert json.loads(json_path.read_text(encoding='utf-8'))['repeat'] == 1
 	markdown = markdown_path.read_text(encoding='utf-8')
 	assert 'Input conditions' in markdown
+	assert '| Case | Shape and settings |' in markdown
+	assert (
+		'`{"dtype":"float32","feature_dim":128,"states":12,"tokens":4096}`'
+		in markdown
+	)
 	assert 'Median (s)' in markdown
 	assert 'Comparable' in markdown
 	assert 'Speedup' in markdown

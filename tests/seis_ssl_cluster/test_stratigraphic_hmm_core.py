@@ -70,6 +70,33 @@ def test_squared_euclidean_emissions_correct_cancellation_roundoff() -> None:
 	assert costs[0, 0] == reference
 
 
+def test_squared_euclidean_emissions_preserve_near_tie_winner() -> None:
+	features = np.array(
+		[[1.012420654296875, 0.12154181301593781]],
+		dtype=np.float32,
+	)
+	centers = np.array(
+		[
+			[1.0124208927154541, 0.12154107540845871],
+			[1.0124211311340332, 0.12154120206832886],
+		],
+		dtype=np.float32,
+	)
+	reference = np.sum(
+		(features[:, np.newaxis, :] - centers[np.newaxis, :, :]) ** 2,
+		axis=2,
+	)
+
+	costs = squared_euclidean_emission_costs(features, centers)
+
+	assert int(np.argmin(reference[0])) == 1
+	assert int(np.argmin(costs[0])) == 1
+	np.testing.assert_array_equal(
+		viterbi_decode_costs(costs, np.zeros((2, 2), dtype=np.float32)),
+		viterbi_decode_costs(reference, np.zeros((2, 2), dtype=np.float32)),
+	)
+
+
 def test_write_json_rejects_non_finite_floats(tmp_path) -> None:
 	with pytest.raises(ValueError, match='Out of range'):
 		write_json(tmp_path / 'metadata.json', {'x': float('inf')})

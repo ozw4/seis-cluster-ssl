@@ -562,6 +562,13 @@ def render_markdown(report: dict[str, object]) -> str:
 		f"- Measured iterations: {report.get('repeat')}",
 		f"- Environment: `{_compact_json(report.get('environment'))}`",
 		'',
+		'| Case | Shape and settings |',
+		'|---|---|',
+		*(
+			f"| {case.get('name')} | `{_compact_json(case.get('shape'))}` |"
+			for case in _case_mappings(report)
+		),
+		'',
 		'## Results',
 		'',
 		'| Case | Version | Input fingerprint | Median (s) | P25-P75 (s) '
