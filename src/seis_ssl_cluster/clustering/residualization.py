@@ -385,11 +385,25 @@ def residualization_groups_for_flat_indices(
 			token_indices,
 			group_by=residualizer.group_by,
 		)
-	return residualization_group_ids_for_flat_indices(
-		embedding_input,
-		token_indices,
+	indices = np.asarray(token_indices, dtype=np.int64)
+	if indices.ndim != 1:
+		msg = f'token_indices must be 1D; got {indices.shape!r}'
+		raise ValueError(msg)
+	metadata = load_embedding_metadata(embedding_input)
+	group_shape = _residualization_group_shape_from_metadata(
+		metadata,
 		group_by=residualizer.group_by,
+		metadata_path=embedding_input.metadata_path,
 	)
+	if group_shape != residualizer.group_shape:
+		msg = (
+			f'residualization group shape mismatch for '
+			f'{embedding_input.survey_id}: embedding metadata declares '
+			f'{group_shape!r}, but the residualizer requires '
+			f'{residualizer.group_shape!r}'
+		)
+		raise ValueError(msg)
+	return _token_phase_group_ids_for_flat_indices(metadata, indices)
 
 
 def residualization_group_shape(
@@ -398,8 +412,22 @@ def residualization_group_shape(
 	group_by: str,
 ) -> tuple[int, int, int]:
 	"""Return the finite dense group grid declared by embedding metadata."""
+	metadata = load_embedding_metadata(embedding_input)
+	return _residualization_group_shape_from_metadata(
+		metadata,
+		group_by=group_by,
+		metadata_path=embedding_input.metadata_path,
+	)
+
+
+def _residualization_group_shape_from_metadata(
+	metadata: Mapping[str, object],
+	*,
+	group_by: str,
+	metadata_path: Path,
+) -> tuple[int, int, int]:
+	"""Return a dense group grid from already-loaded embedding metadata."""
 	if group_by == 'token_phase':
-		metadata = load_embedding_metadata(embedding_input)
 		return _stride_tokens(
 			patch_size_xyz=_metadata_triplet(metadata, 'patch_size'),
 			window_size_xyz=_metadata_triplet(metadata, 'window_size'),
@@ -409,7 +437,7 @@ def residualization_group_shape(
 		msg = (
 			'clustering.residualization.group_by=local_token_position requires '
 			'exact per-token local position metadata, which is not present in '
-			f'{embedding_input.metadata_path}'
+			f'{metadata_path}'
 		)
 		raise ValueError(msg)
 	msg = f'unsupported residualization group_by: {group_by!r}'

@@ -15,6 +15,7 @@ from seis_ssl_cluster.clustering.residualization import (
 	encode_dense_group_ids,
 	fit_local_token_position_residualizer,
 	read_residualizer_npz,
+	residualization_groups_for_flat_indices,
 	residualization_keys_for_flat_indices,
 	token_phase_keys_for_grid,
 	write_residualizer_npz,
@@ -275,6 +276,36 @@ def test_dense_groups_handle_empty_and_single_group() -> None:
 def test_dense_group_encoding_rejects_invalid_coordinates() -> None:
 	with pytest.raises(ValueError, match='outside group_shape'):
 		encode_dense_group_ids(np.array([[1, 3, 0]]), (2, 3, 1))
+
+
+def test_dense_residualizer_rejects_different_equal_sized_group_grid(
+	tmp_path: Path,
+) -> None:
+	_write_embedding_artifacts(
+		tmp_path,
+		'survey_a',
+		embeddings=np.ones((2, 2, 2, 2), dtype=np.float32),
+		valid=np.ones((2, 2, 2), dtype=np.bool_),
+	)
+	embedding_input = discover_embedding_inputs(tmp_path)[0]
+	residualizer = fit_local_token_position_residualizer(
+		np.ones((1, 2), dtype=np.float32),
+		np.zeros(1, dtype=np.int64),
+		group_by='token_phase',
+		add_global_mean_back=True,
+		min_group_count=1,
+		group_shape=(1, 4, 2),
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=r'group shape mismatch.*\(2, 2, 2\).*\(1, 4, 2\)',
+	):
+		residualization_groups_for_flat_indices(
+			embedding_input,
+			np.array([0], dtype=np.int64),
+			residualizer=residualizer,
+		)
 
 
 def test_legacy_residualizer_artifact_preserves_sparse_fallback(tmp_path: Path) -> None:
