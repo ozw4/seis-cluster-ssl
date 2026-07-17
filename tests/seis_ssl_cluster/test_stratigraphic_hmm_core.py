@@ -8,7 +8,7 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	HMMExpectedBoundariesSettings,
 	HMMPathPriorSettings,
 	HMMTransitionSettings,
-	_decode_compacted_trace_segments,
+	_decode_compacted_trace,
 	_resolve_expected_boundary_count,
 	build_initial_state_costs,
 	build_ordered_transition_costs,
@@ -166,47 +166,65 @@ def test_viterbi_decode_costs_accepts_single_sample_and_state() -> None:
 	np.testing.assert_array_equal(labels, np.array([0], dtype=np.int32))
 
 
-def test_compacted_trace_decode_resets_transitions_and_priors_at_gaps() -> None:
+def test_compacted_trace_decode_matches_single_sequence_across_gaps() -> None:
 	z_indices = np.array([0, 1, 3, 4], dtype=np.int64)
-	transition_labels = _decode_compacted_trace_segments(
-		np.array([[0.0, 5.0], [5.0, 0.0], [0.0, 5.0], [5.0, 0.0]]),
+	transition_emissions = np.array(
+		[[0.0, 5.0], [5.0, 0.0], [0.0, 5.0], [5.0, 0.0]]
+	)
+	transitions = np.array([[0.0, 0.0], [np.inf, 0.0]])
+	transition_labels = _decode_compacted_trace(
+		transition_emissions,
 		z_indices,
-		np.array([[0.0, 0.0], [np.inf, 0.0]]),
+		transitions,
 		initial_state_costs=None,
 		terminal_state_costs=None,
 		expected_boundaries=None,
 	)
-	prior_labels = _decode_compacted_trace_segments(
-		np.array([[100.0, 0.0]] * 4),
+	prior_emissions = np.array([[100.0, 0.0]] * 4)
+	prior_transitions = np.array([[0.0, np.inf], [np.inf, 0.0]])
+	initial_costs = np.array([0.0, 250.0])
+	prior_labels = _decode_compacted_trace(
+		prior_emissions,
 		z_indices,
-		np.array([[0.0, np.inf], [np.inf, 0.0]]),
-		initial_state_costs=np.array([0.0, 250.0]),
+		prior_transitions,
+		initial_state_costs=initial_costs,
 		terminal_state_costs=None,
 		expected_boundaries=None,
 	)
 
-	np.testing.assert_array_equal(transition_labels, np.array([0, 1, 0, 1]))
-	np.testing.assert_array_equal(prior_labels, np.zeros(4, dtype=np.int32))
+	np.testing.assert_array_equal(
+		transition_labels,
+		viterbi_decode_costs(transition_emissions, transitions),
+	)
+	np.testing.assert_array_equal(
+		prior_labels,
+		viterbi_decode_costs(
+			prior_emissions,
+			prior_transitions,
+			initial_state_costs=initial_costs,
+		),
+	)
+	assert np.all(np.diff(transition_labels) >= 0)
 
 
-def test_compacted_trace_decode_reuses_trace_boundary_target_for_segments(
+def test_compacted_trace_decode_applies_trace_boundary_target_once(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	targets: list[object] = []
+	calls: list[tuple[int, object]] = []
 
 	def record_target(
 		emission_costs: np.ndarray,
 		*_args: object,
 		**kwargs: object,
 	) -> np.ndarray:
-		targets.append(kwargs['expected_boundary_count'])
+		calls.append((emission_costs.shape[0], kwargs['expected_boundary_count']))
 		return np.zeros(emission_costs.shape[0], dtype=np.int32)
 
 	monkeypatch.setattr(
 		'seis_ssl_cluster.clustering.stratigraphic_hmm.viterbi_decode_costs',
 		record_target,
 	)
-	_decode_compacted_trace_segments(
+	_decode_compacted_trace(
 		np.zeros((5, 6), dtype=np.float32),
 		np.array([0, 1, 3, 4, 5], dtype=np.int64),
 		np.zeros((6, 6), dtype=np.float32),
@@ -219,7 +237,7 @@ def test_compacted_trace_decode_reuses_trace_boundary_target_for_segments(
 		),
 	)
 
-	assert targets == [4, 4]
+	assert calls == [(5, 4)]
 
 
 def test_viterbi_decode_costs_accepts_omitted_path_prior_costs() -> None:

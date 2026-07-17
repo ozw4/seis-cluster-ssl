@@ -898,7 +898,7 @@ def decode_trace_segments(  # noqa: PLR0913
 	return labels
 
 
-def _decode_compacted_trace_segments(  # noqa: PLR0913
+def _decode_compacted_trace(  # noqa: PLR0913
 	emission_costs: np.ndarray,
 	z_indices: np.ndarray,
 	transition_costs: np.ndarray,
@@ -907,22 +907,12 @@ def _decode_compacted_trace_segments(  # noqa: PLR0913
 	terminal_state_costs: np.ndarray | None,
 	expected_boundaries: HMMExpectedBoundariesSettings | None,
 ) -> np.ndarray:
-	"""Decode contiguous slices of compacted valid trace rows independently."""
+	"""Decode compacted valid trace rows as one state sequence."""
 	z = np.asarray(z_indices, dtype=np.int64)
 	if z.ndim != 1 or z.shape[0] != emission_costs.shape[0]:
 		raise ValueError('z_indices must align with emission_costs rows')
 	if z.size == 0:
 		return np.empty(0, dtype=np.int32)
-	segment_starts = np.concatenate(
-		(
-			np.array([0], dtype=np.int64),
-			np.flatnonzero(z[1:] != z[:-1] + 1).astype(np.int64, copy=False) + 1,
-		)
-	)
-	segment_stops = np.concatenate(
-		(segment_starts[1:], np.array([z.size], dtype=np.int64))
-	)
-	labels = np.empty(z.size, dtype=np.int32)
 	k = emission_costs.shape[1]
 	boundary_count_weight = (
 		0.0 if expected_boundaries is None else expected_boundaries.weight
@@ -932,17 +922,14 @@ def _decode_compacted_trace_segments(  # noqa: PLR0913
 		k=k,
 		valid_trace_length=int(z.size),
 	)
-	for start, stop in zip(segment_starts, segment_stops, strict=True):
-		segment = slice(int(start), int(stop))
-		labels[segment] = viterbi_decode_costs(
-			emission_costs[segment],
-			transition_costs,
-			initial_state_costs=initial_state_costs,
-			terminal_state_costs=terminal_state_costs,
-			expected_boundary_count=expected_boundary_count,
-			boundary_count_weight=boundary_count_weight,
-		)
-	return labels
+	return viterbi_decode_costs(
+		emission_costs,
+		transition_costs,
+		initial_state_costs=initial_state_costs,
+		terminal_state_costs=terminal_state_costs,
+		expected_boundary_count=expected_boundary_count,
+		boundary_count_weight=boundary_count_weight,
+	)
 
 
 def decode_survey_ordered_labels(  # noqa: PLR0913
@@ -1002,7 +989,7 @@ def decode_survey_ordered_labels(  # noqa: PLR0913
 				center_matrix,
 				center_squared_norms,
 			)
-			labels[x_index, y_index, z_indices] = _decode_compacted_trace_segments(
+			labels[x_index, y_index, z_indices] = _decode_compacted_trace(
 				emission_costs,
 				z_indices,
 				transition_costs,
@@ -1061,7 +1048,7 @@ def decode_prepared_survey_ordered_labels(  # noqa: PLR0913
 				)
 			with active_timer.stage('viterbi', sample_count=int(z_indices.size)):
 				labels[x_index, y_index, z_indices] = (
-					_decode_compacted_trace_segments(
+					_decode_compacted_trace(
 						emission_costs,
 						z_indices,
 						transition_costs,
