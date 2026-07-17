@@ -67,6 +67,7 @@ def test_synthetic_amplitude_mvp_flow(tmp_path: Path) -> None:
 		survey_ids=survey_ids,
 	)
 	cluster_dir = _cluster_embeddings(artifact_root, embedding_dir)
+	hmm_cluster_dir = _cluster_hmm_embeddings(artifact_root, embedding_dir)
 	visualization_dir = _visualize_clusters(
 		artifact_root,
 		cluster_dir,
@@ -74,6 +75,7 @@ def test_synthetic_amplitude_mvp_flow(tmp_path: Path) -> None:
 	)
 	_assert_end_to_end_outputs(
 		cluster_dir=cluster_dir,
+		hmm_cluster_dir=hmm_cluster_dir,
 		visualization_dir=visualization_dir,
 		survey_id=survey_ids[0],
 	)
@@ -266,6 +268,55 @@ def _cluster_embeddings(artifact_root: Path, embedding_dir: Path) -> Path:
 	return cluster_dir
 
 
+def _cluster_hmm_embeddings(artifact_root: Path, embedding_dir: Path) -> Path:
+	cluster_dir = artifact_root / 'clustering' / 'synthetic_hmm'
+	cluster_config = {
+		'paths': {'artifact_root': str(artifact_root)},
+		'embeddings': {'input_dir': str(embedding_dir)},
+		'clustering': {
+			'output_dir': str(cluster_dir),
+			'embedding_normalization': 'l2',
+			'residualization': {'enabled': False},
+			'pca': {'enabled': True, 'n_components': 2, 'whiten': False},
+			'sample_tokens': 32,
+			'method': 'stratigraphic_hmm_kmeans',
+			'k_values': [2],
+			'minibatch_size': 4,
+			'prediction_batch_size': 8,
+			'seed': 11,
+			'stratigraphic_hmm': {
+				'emission_source': 'embedding',
+				'iterations': 1,
+				'z_axis': 2,
+				'z_direction': 'increasing_downward',
+				'transition': {
+					'same_cost': 0.0,
+					'advance_cost': 0.25,
+					'jump_cost': 1.0,
+					'reverse_cost': 1_000_000.0,
+					'forbid_reverse': True,
+					'max_jump': None,
+				},
+				'init': {'order_by': 'mean_z'},
+				'update': {'empty_cluster_policy': 'keep_previous'},
+				'prepared_feature_cache': {
+					'chunk_size_tokens': 8,
+					'reuse': True,
+					'force_rebuild': False,
+					'cleanup': True,
+					'persist': False,
+				},
+			},
+		},
+	}
+	cluster_result = run_embedding_clustering(
+		resolve_clustering_config(cluster_config),
+	)
+	assert cluster_result.results[0].k == 2
+	assert cluster_result.results[0].label_results[0].labels_path.is_file()
+	return cluster_dir
+
+
 def _visualize_clusters(
 	artifact_root: Path,
 	cluster_dir: Path,
@@ -309,6 +360,7 @@ def _visualize_clusters(
 def _assert_end_to_end_outputs(
 	*,
 	cluster_dir: Path,
+	hmm_cluster_dir: Path,
 	visualization_dir: Path,
 	survey_id: str,
 ) -> None:
@@ -320,6 +372,13 @@ def _assert_end_to_end_outputs(
 	)
 	assert token_labels.ndim == 3
 	assert voxel_labels.shape == (8, 8, 8)
+	hmm_labels = np.load(
+		hmm_cluster_dir
+		/ 'labels'
+		/ 'k2'
+		/ f'{survey_id}.cluster_labels_token.npy',
+	)
+	assert hmm_labels.shape == token_labels.shape
 	assert (
 		visualization_dir / 'token' / f'{survey_id}_k2_xy_z1.png'
 	).is_file()
@@ -337,6 +396,15 @@ def _assert_end_to_end_outputs(
 	)
 	assert metadata['method'] == 'minibatch_kmeans'
 	assert metadata['sample']['count'] > 0
+	hmm_metadata = json.loads(
+		(
+			hmm_cluster_dir
+			/ 'models'
+			/ 'k2'
+			/ 'clustering_metadata.json'
+		).read_text(encoding='utf-8'),
+	)
+	assert hmm_metadata['method'] == 'stratigraphic_hmm_kmeans'
 
 
 def _write_synthetic_nopims_inputs(nopims_root: Path) -> Path:

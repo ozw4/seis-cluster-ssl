@@ -8,7 +8,7 @@ do not modify the benchmarked merge or reconstruction implementation.
 Command:
 
 ```text
-python tools/benchmark_seis_ssl_cluster.py \
+python tools/benchmark_seis_ssl_cluster_performance.py \
   --seed 259 --warm-up 2 --repeat 10 --output-json <output.json>
 ```
 

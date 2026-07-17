@@ -101,6 +101,14 @@ from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT, ArtifactPaths, Experim
 VOXEL_DECODER_SMOKE_SPEC = f'{VOXEL_DECODER_SPEC}_smoke'
 OLD_VOXEL_DECODER_SPEC = 'frozen_embedding_decoder_v1'
 
+ALL_CONFIGS = sorted(
+	[
+		*Path('proc/configs/seis_ssl_cluster').rglob('*.yaml'),
+		*Path('experiments/nopims').rglob('*.yaml'),
+		*Path('experiments/f3').rglob('*.yaml'),
+	],
+)
+
 NOPIMS_ROOT = Path('experiments/nopims/pretrain_v1')
 NOPIMS_PRETRAINING_CONFIGS = sorted((NOPIMS_ROOT / '10_pretrain').rglob('*.yaml'))
 NOPIMS_EMBEDDING_CONFIGS = sorted((NOPIMS_ROOT / '20_embedding').rglob('*.yaml'))
@@ -404,6 +412,14 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	('f3 baseline report', F3_BASELINE_REPORT_CONFIGS),
 	('f3 baseline comparison', F3_BASELINE_COMPARISON_CONFIGS),
 )
+
+
+@pytest.mark.parametrize('config_path', ALL_CONFIGS, ids=str)
+def test_all_repository_configs_load_as_mappings(config_path: Path) -> None:
+	config = load_config(config_path)
+
+	assert isinstance(config, dict)
+	assert config
 
 
 @pytest.mark.parametrize(('group_name', 'configs'), REQUIRED_ACTIVE_CONFIG_GROUPS)

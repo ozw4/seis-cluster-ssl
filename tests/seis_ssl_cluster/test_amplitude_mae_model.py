@@ -330,42 +330,44 @@ def test_training_path_patchifies_input_once(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_state_dict_keys_and_strict_checkpoint_load_are_unchanged() -> None:
-	expected_keys = {
-		'mask_token',
-		'patch_projection.weight',
-		'patch_projection.bias',
-		'encoder.layers.0.norm1.weight',
-		'encoder.layers.0.norm1.bias',
-		'encoder.layers.0.attention.in_proj_weight',
-		'encoder.layers.0.attention.in_proj_bias',
-		'encoder.layers.0.attention.out_proj.weight',
-		'encoder.layers.0.attention.out_proj.bias',
-		'encoder.layers.0.norm2.weight',
-		'encoder.layers.0.norm2.bias',
-		'encoder.layers.0.mlp.0.weight',
-		'encoder.layers.0.mlp.0.bias',
-		'encoder.layers.0.mlp.3.weight',
-		'encoder.layers.0.mlp.3.bias',
-		'encoder_to_decoder.weight',
-		'encoder_to_decoder.bias',
-		'decoder.layers.0.norm1.weight',
-		'decoder.layers.0.norm1.bias',
-		'decoder.layers.0.attention.in_proj_weight',
-		'decoder.layers.0.attention.in_proj_bias',
-		'decoder.layers.0.attention.out_proj.weight',
-		'decoder.layers.0.attention.out_proj.bias',
-		'decoder.layers.0.norm2.weight',
-		'decoder.layers.0.norm2.bias',
-		'decoder.layers.0.mlp.0.weight',
-		'decoder.layers.0.mlp.0.bias',
-		'decoder.layers.0.mlp.3.weight',
-		'decoder.layers.0.mlp.3.bias',
-		'prediction_head.weight',
-		'prediction_head.bias',
+	expected_shapes = {
+		'mask_token': (16,),
+		'patch_projection.weight': (32, 64),
+		'patch_projection.bias': (32,),
+		'encoder.layers.0.norm1.weight': (32,),
+		'encoder.layers.0.norm1.bias': (32,),
+		'encoder.layers.0.attention.in_proj_weight': (96, 32),
+		'encoder.layers.0.attention.in_proj_bias': (96,),
+		'encoder.layers.0.attention.out_proj.weight': (32, 32),
+		'encoder.layers.0.attention.out_proj.bias': (32,),
+		'encoder.layers.0.norm2.weight': (32,),
+		'encoder.layers.0.norm2.bias': (32,),
+		'encoder.layers.0.mlp.0.weight': (128, 32),
+		'encoder.layers.0.mlp.0.bias': (128,),
+		'encoder.layers.0.mlp.3.weight': (32, 128),
+		'encoder.layers.0.mlp.3.bias': (32,),
+		'encoder_to_decoder.weight': (16, 32),
+		'encoder_to_decoder.bias': (16,),
+		'decoder.layers.0.norm1.weight': (16,),
+		'decoder.layers.0.norm1.bias': (16,),
+		'decoder.layers.0.attention.in_proj_weight': (48, 16),
+		'decoder.layers.0.attention.in_proj_bias': (48,),
+		'decoder.layers.0.attention.out_proj.weight': (16, 16),
+		'decoder.layers.0.attention.out_proj.bias': (16,),
+		'decoder.layers.0.norm2.weight': (16,),
+		'decoder.layers.0.norm2.bias': (16,),
+		'decoder.layers.0.mlp.0.weight': (64, 16),
+		'decoder.layers.0.mlp.0.bias': (64,),
+		'decoder.layers.0.mlp.3.weight': (16, 64),
+		'decoder.layers.0.mlp.3.bias': (16,),
+		'prediction_head.weight': (64, 16),
+		'prediction_head.bias': (64,),
 	}
 	checkpoint_state = _make_model().state_dict()
 
-	assert set(checkpoint_state) == expected_keys
+	assert {key: tuple(value.shape) for key, value in checkpoint_state.items()} == (
+		expected_shapes
+	)
 	_make_model().load_state_dict(checkpoint_state, strict=True)
 
 
