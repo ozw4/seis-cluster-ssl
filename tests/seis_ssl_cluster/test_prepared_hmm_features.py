@@ -136,7 +136,7 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 	store.close()
 
 
-def test_prepared_and_on_the_fly_decode_preserve_state_across_validity_gap(
+def test_prepared_and_on_the_fly_decode_reset_at_validity_gap(
 	tmp_path: Path,
 ) -> None:
 	item = _write_input(tmp_path, 'survey_a', shape=(1, 1, 5, 1))
@@ -197,7 +197,6 @@ def test_prepared_and_on_the_fly_decode_preserve_state_across_validity_gap(
 	).reshape((1, 1, 5))
 	np.testing.assert_array_equal(prepared_labels, expected)
 	np.testing.assert_array_equal(on_the_fly_labels, expected)
-	assert np.all(np.diff(expected[expected >= 0]) >= 0)
 
 
 def test_prepared_decode_update_matches_dense_residualization_and_pca(

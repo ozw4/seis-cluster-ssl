@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import asdict, dataclass, replace
 from numbers import Integral, Real
 from pathlib import Path
@@ -862,7 +862,7 @@ def decode_trace_segments(  # noqa: PLR0913
 	expected_boundary_count: int | None = None,
 	boundary_count_weight: float = 0.0,
 ) -> np.ndarray:
-	"""Decode valid vertical trace tokens as one sequence, preserving invalid gaps."""
+	"""Decode contiguous valid trace segments independently, preserving gaps."""
 	emissions = _as_float_matrix(emission_costs, 'emission_costs')
 	if emissions.shape[0] == 0 or emissions.shape[1] == 0:
 		raise ValueError('emission_costs must be non-empty in both dimensions')
@@ -900,9 +900,11 @@ def decode_trace_segments(  # noqa: PLR0913
 
 	labels = np.full(emissions.shape[0], -1, dtype=np.int32)
 	z_indices = np.flatnonzero(mask)
-	if z_indices.size:
-		labels[z_indices] = viterbi_decode_costs(
-			emissions[z_indices],
+	for compact_segment in _contiguous_segment_slices(z_indices):
+		segment_z = z_indices[compact_segment]
+		segment = slice(int(segment_z[0]), int(segment_z[-1]) + 1)
+		labels[segment] = viterbi_decode_costs(
+			emissions[segment],
 			transitions,
 			initial_state_costs=initial_costs,
 			terminal_state_costs=terminal_costs,
@@ -910,6 +912,16 @@ def decode_trace_segments(  # noqa: PLR0913
 			boundary_count_weight=boundary_count_weight,
 		)
 	return labels
+
+
+def _contiguous_segment_slices(z_indices: np.ndarray) -> Iterator[slice]:
+	"""Yield compact-array slices separated by gaps in sorted z indices."""
+	start = 0
+	for stop in np.flatnonzero(z_indices[1:] != z_indices[:-1] + 1) + 1:
+		yield slice(start, int(stop))
+		start = int(stop)
+	if start < z_indices.size:
+		yield slice(start, int(z_indices.size))
 
 
 def _decode_compacted_trace(  # noqa: PLR0913
@@ -921,29 +933,34 @@ def _decode_compacted_trace(  # noqa: PLR0913
 	terminal_state_costs: np.ndarray | None,
 	expected_boundaries: HMMExpectedBoundariesSettings | None,
 ) -> np.ndarray:
-	"""Decode compacted valid trace rows as one state sequence."""
+	"""Decode contiguous slices of compacted valid trace rows independently."""
 	z = np.asarray(z_indices, dtype=np.int64)
 	if z.ndim != 1 or z.shape[0] != emission_costs.shape[0]:
 		raise ValueError('z_indices must align with emission_costs rows')
 	if z.size == 0:
 		return np.empty(0, dtype=np.int32)
+	if z[0] < 0 or np.any(z[1:] <= z[:-1]):
+		raise ValueError('z_indices must be non-negative and strictly increasing')
 	k = emission_costs.shape[1]
 	boundary_count_weight = (
 		0.0 if expected_boundaries is None else expected_boundaries.weight
 	)
-	expected_boundary_count = _resolve_expected_boundary_count(
-		expected_boundaries,
-		k=k,
-		valid_trace_length=int(z.size),
-	)
-	return viterbi_decode_costs(
-		emission_costs,
-		transition_costs,
-		initial_state_costs=initial_state_costs,
-		terminal_state_costs=terminal_state_costs,
-		expected_boundary_count=expected_boundary_count,
-		boundary_count_weight=boundary_count_weight,
-	)
+	labels = np.empty(z.size, dtype=np.int32)
+	for segment in _contiguous_segment_slices(z):
+		expected_boundary_count = _resolve_expected_boundary_count(
+			expected_boundaries,
+			k=k,
+			valid_trace_length=segment.stop - segment.start,
+		)
+		labels[segment] = viterbi_decode_costs(
+			emission_costs[segment],
+			transition_costs,
+			initial_state_costs=initial_state_costs,
+			terminal_state_costs=terminal_state_costs,
+			expected_boundary_count=expected_boundary_count,
+			boundary_count_weight=boundary_count_weight,
+		)
+	return labels
 
 
 def decode_survey_ordered_labels(  # noqa: PLR0913

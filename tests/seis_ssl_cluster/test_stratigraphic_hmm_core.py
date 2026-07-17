@@ -193,7 +193,7 @@ def test_viterbi_decode_costs_accepts_single_sample_and_state() -> None:
 	np.testing.assert_array_equal(labels, np.array([0], dtype=np.int32))
 
 
-def test_compacted_trace_decode_matches_single_sequence_across_gaps() -> None:
+def test_compacted_trace_decode_restarts_transitions_and_priors_at_gaps() -> None:
 	z_indices = np.array([0, 1, 3, 4], dtype=np.int64)
 	transition_emissions = np.array(
 		[[0.0, 5.0], [5.0, 0.0], [0.0, 5.0], [5.0, 0.0]]
@@ -218,23 +218,21 @@ def test_compacted_trace_decode_matches_single_sequence_across_gaps() -> None:
 		terminal_state_costs=None,
 		expected_boundaries=None,
 	)
-
-	np.testing.assert_array_equal(
-		transition_labels,
-		viterbi_decode_costs(transition_emissions, transitions),
+	terminal_labels = _decode_compacted_trace(
+		np.array([[0.0, 100.0]] * 4),
+		z_indices,
+		prior_transitions,
+		initial_state_costs=None,
+		terminal_state_costs=np.array([250.0, 0.0]),
+		expected_boundaries=None,
 	)
-	np.testing.assert_array_equal(
-		prior_labels,
-		viterbi_decode_costs(
-			prior_emissions,
-			prior_transitions,
-			initial_state_costs=initial_costs,
-		),
-	)
-	assert np.all(np.diff(transition_labels) >= 0)
+
+	np.testing.assert_array_equal(transition_labels, np.array([0, 1, 0, 1]))
+	np.testing.assert_array_equal(prior_labels, np.zeros(4, dtype=np.int32))
+	np.testing.assert_array_equal(terminal_labels, np.ones(4, dtype=np.int32))
 
 
-def test_compacted_trace_decode_applies_trace_boundary_target_once(
+def test_compacted_trace_decode_resolves_boundary_target_per_segment(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	calls: list[tuple[int, object]] = []
@@ -264,7 +262,7 @@ def test_compacted_trace_decode_applies_trace_boundary_target_once(
 		),
 	)
 
-	assert calls == [(5, 4)]
+	assert calls == [(2, 1), (3, 2)]
 
 
 def test_viterbi_decode_costs_accepts_omitted_path_prior_costs() -> None:
@@ -496,39 +494,31 @@ def test_decode_trace_segments_preserves_invalid_positions_and_decodes_gaps() ->
 
 	labels = decode_trace_segments(emissions, valid_mask, transitions)
 
-	np.testing.assert_array_equal(labels, np.array([0, 0, -1, 0, 1], dtype=np.int32))
+	np.testing.assert_array_equal(labels, np.array([0, 1, -1, 0, 1], dtype=np.int32))
 	np.testing.assert_array_equal(labels[~valid_mask], np.array([-1], dtype=np.int32))
-	assert np.all(np.diff(labels[labels >= 0]) >= 0)
 
 
-def test_decode_trace_segments_forbids_reverse_across_invalid_gap() -> None:
-	transitions = build_ordered_transition_costs(
-		2,
-		HMMTransitionSettings(
-			same_cost=0.0,
-			advance_cost=0.0,
-			jump_cost=1.0,
-			reverse_cost=100.0,
-			forbid_reverse=True,
-			max_jump=None,
-		),
-	)
+def test_decode_trace_segments_reapplies_initial_prior_after_gap() -> None:
 	emissions = np.array(
 		[
-			[0.0, 5.0],
-			[5.0, 0.0],
+			[100.0, 0.0],
+			[100.0, 0.0],
 			[9.0, 9.0],
-			[0.0, 5.0],
-			[5.0, 0.0],
+			[100.0, 0.0],
+			[100.0, 0.0],
 		],
 		dtype=np.float32,
 	)
 	valid_mask = np.array([True, True, False, True, True])
 
-	labels = decode_trace_segments(emissions, valid_mask, transitions)
+	labels = decode_trace_segments(
+		emissions,
+		valid_mask,
+		np.array([[0.0, np.inf], [np.inf, 0.0]]),
+		initial_state_costs=np.array([0.0, 250.0]),
+	)
 
-	assert not np.array_equal(labels, np.array([0, 1, -1, 0, 1], dtype=np.int32))
-	assert np.all(np.diff(labels[labels >= 0]) >= 0)
+	np.testing.assert_array_equal(labels, np.array([0, 0, -1, 0, 0]))
 
 
 def test_decode_trace_segments_returns_invalid_labels_when_no_valid_tokens() -> None:
