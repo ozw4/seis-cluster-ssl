@@ -1151,10 +1151,6 @@ def run_stratigraphic_hmm_clustering(  # noqa: PLR0915
 	)
 	prepared_features = prepare_feature_store(
 		embedding_inputs=embedding_inputs,
-		valid_indices_for_survey=lambda item: hmm_valid_flat_indices(
-			item,
-			hmm_settings.edge_margin_tokens,
-		),
 		feature_dim=int(training_features.shape[1]),
 		feature_mode=hmm_settings.emission_source,
 		residualizer=residualizer,

@@ -105,6 +105,7 @@ class EmbeddingMemmapCache:
 		key: _CacheKey,
 		array: np.ndarray,
 	) -> np.ndarray | None:
+		removed: list[np.ndarray] = []
 		with self._cache_lock:
 			cached = self._cache.get(key)
 			if cached is not None:
@@ -113,11 +114,13 @@ class EmbeddingMemmapCache:
 			stale_keys = tuple(
 				cached_key for cached_key in self._cache if cached_key[0] == key[0]
 			)
-			for stale_key in stale_keys:
-				self._cache.pop(stale_key)
+			removed.extend(self._cache.pop(stale_key) for stale_key in stale_keys)
 			self._cache[key] = array
 			while len(self._cache) > self.max_open_arrays:
-				self._cache.popitem(last=False)
+				_, evicted = self._cache.popitem(last=False)
+				removed.append(evicted)
+		for removed_array in removed:
+			_close_memmap(removed_array)
 		return None
 
 	def _initialize_process_state(self) -> None:
@@ -234,6 +237,8 @@ def open_embedding_array(
 ) -> np.ndarray:
 	"""Open a survey embedding grid as a memory-mapped array."""
 	selected_cache = cache or _MEMMAP_CACHE
+	valid = load_valid_tokens(embedding_input, cache=selected_cache)
+	valid_shape = valid.shape
 	embeddings = selected_cache.open(embedding_input.embeddings_path)
 	if embeddings.ndim != 4:
 		msg = (
@@ -247,12 +252,11 @@ def open_embedding_array(
 			f'got {embeddings.dtype}'
 		)
 		raise TypeError(msg)
-	valid = load_valid_tokens(embedding_input, cache=selected_cache)
-	if embeddings.shape[:3] != valid.shape:
+	if embeddings.shape[:3] != valid_shape:
 		msg = (
 			f'embeddings token grid must match valid_tokens for '
 			f'{embedding_input.survey_id}; got {embeddings.shape[:3]!r} and '
-			f'{valid.shape!r}'
+			f'{valid_shape!r}'
 		)
 		raise ValueError(msg)
 	return embeddings

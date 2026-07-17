@@ -255,7 +255,6 @@ class PreparedFeatureStore:
 def prepare_feature_store(  # noqa: PLR0913
 	*,
 	embedding_inputs: tuple[EmbeddingInput, ...],
-	valid_indices_for_survey: Callable[[EmbeddingInput], np.ndarray],
 	feature_dim: int,
 	feature_mode: str,
 	residualizer: object | None,
@@ -271,21 +270,17 @@ def prepare_feature_store(  # noqa: PLR0913
 		surveys_list: list[PreparedSurveyFeatures] = []
 		for item in embedding_inputs:
 			token_shape_xyz = _token_shape(item)
-			valid_indices = _validate_valid_indices(
-				valid_indices_for_survey(item),
-				token_shape_xyz,
-			)
-			_validate_direct_valid_set(
+			valid_token_count = _count_valid_indices(
 				item,
 				token_shape_xyz,
 				edge_margin_tokens,
-				valid_indices,
+				settings.chunk_size_tokens,
 			)
 			surveys_list.append(
 				PreparedSurveyFeatures(
 					item,
 					token_shape_xyz,
-					int(valid_indices.size),
+					valid_token_count,
 					1,
 					feature_mode,
 					edge_margin_tokens,
@@ -302,9 +297,11 @@ def prepare_feature_store(  # noqa: PLR0913
 	try:
 		for item in embedding_inputs:
 			token_shape_xyz = _token_shape(item)
-			valid_indices = _validate_valid_indices(
-				valid_indices_for_survey(item),
+			valid_token_count = _count_valid_indices(
+				item,
 				token_shape_xyz,
+				edge_margin_tokens,
+				settings.chunk_size_tokens,
 			)
 			payload = _fingerprint_payload(
 				item=item,
@@ -321,7 +318,7 @@ def prepare_feature_store(  # noqa: PLR0913
 				_prepare_one_survey(
 					item=item,
 					token_shape_xyz=token_shape_xyz,
-					valid_indices=valid_indices,
+					valid_token_count=valid_token_count,
 					feature_dim=feature_dim,
 					fingerprint=fingerprint,
 					fingerprint_payload=payload,
@@ -346,7 +343,7 @@ def _prepare_one_survey(  # noqa: PLR0913
 	*,
 	item: EmbeddingInput,
 	token_shape_xyz: tuple[int, int, int],
-	valid_indices: np.ndarray,
+	valid_token_count: int,
 	feature_dim: int,
 	fingerprint: str,
 	fingerprint_payload: Mapping[str, object],
@@ -363,9 +360,10 @@ def _prepare_one_survey(  # noqa: PLR0913
 			token_shape_xyz,
 			cache_path,
 			fingerprint,
-			valid_indices,
+			valid_token_count,
 			feature_dim,
 			edge_margin_tokens,
+			settings.chunk_size_tokens,
 		)
 		if reused is not None:
 			return reused
@@ -374,26 +372,51 @@ def _prepare_one_survey(  # noqa: PLR0913
 	staging = cache_path.with_name(f'.{cache_path.name}.building-{uuid.uuid4().hex}')
 	staging.mkdir()
 	try:
-		np.save(staging / 'valid_flat_indices.npy', valid_indices)
+		indices_path = staging / 'valid_flat_indices.npy'
 		feature_path = staging / 'features.npy'
-		if valid_indices.size:
+		if valid_token_count:
+			indices = np.lib.format.open_memmap(
+				indices_path,
+				mode='w+',
+				dtype=np.int64,
+				shape=(valid_token_count,),
+			)
 			features = np.lib.format.open_memmap(
 				feature_path,
 				mode='w+',
 				dtype=PREPARED_FEATURE_DTYPE,
-				shape=(valid_indices.size, feature_dim),
+				shape=(valid_token_count, feature_dim),
 			)
-			for start in range(0, valid_indices.size, settings.chunk_size_tokens):
-				stop = min(start + settings.chunk_size_tokens, valid_indices.size)
-				rows = np.asarray(
-					prepare_batch(item, valid_indices[start:stop]),
-					dtype=PREPARED_FEATURE_DTYPE,
-				)
-				_validate_prepared_batch_shape(rows, stop - start, feature_dim)
-				features[start:stop] = rows
-			features.flush()
-			_close_memmap(features)
+			try:
+				row_offset = 0
+				for index_chunk in _iter_valid_index_chunks(
+					item,
+					token_shape_xyz,
+					edge_margin_tokens,
+					settings.chunk_size_tokens,
+				):
+					stop = row_offset + index_chunk.size
+					rows = np.asarray(
+						prepare_batch(item, index_chunk),
+						dtype=PREPARED_FEATURE_DTYPE,
+					)
+					_validate_prepared_batch_shape(
+						rows, index_chunk.size, feature_dim
+					)
+					indices[row_offset:stop] = index_chunk
+					features[row_offset:stop] = rows
+					row_offset = stop
+				if row_offset != valid_token_count:
+					raise RuntimeError(
+						'valid token count changed while building prepared features'
+					)
+				indices.flush()
+				features.flush()
+			finally:
+				_close_memmap(indices)
+				_close_memmap(features)
 		else:
+			np.save(indices_path, np.empty(0, dtype=np.int64))
 			np.save(
 				feature_path, np.empty((0, feature_dim), dtype=PREPARED_FEATURE_DTYPE)
 			)
@@ -408,7 +431,7 @@ def _prepare_one_survey(  # noqa: PLR0913
 					'schema_version': PREPARED_FEATURE_SCHEMA_VERSION,
 					'survey_id': item.survey_id,
 					'token_shape_xyz': list(token_shape_xyz),
-					'valid_token_count': int(valid_indices.size),
+					'valid_token_count': valid_token_count,
 				},
 				indent=2,
 				sort_keys=True,
@@ -425,9 +448,10 @@ def _prepare_one_survey(  # noqa: PLR0913
 		token_shape_xyz,
 		cache_path,
 		fingerprint,
-		valid_indices,
+		valid_token_count,
 		feature_dim,
 		edge_margin_tokens,
+		settings.chunk_size_tokens,
 	)
 	if prepared is None:
 		raise RuntimeError(
@@ -442,9 +466,10 @@ def _open_complete_cache(  # noqa: PLR0913
 	token_shape_xyz: tuple[int, int, int],
 	cache_path: Path,
 	fingerprint: str,
-	expected_indices: np.ndarray,
+	expected_valid_token_count: int,
 	feature_dim: int,
 	edge_margin_tokens: tuple[int, int, int],
+	chunk_size_tokens: int,
 ) -> PreparedSurveyFeatures | None:
 	indices: np.ndarray | None = None
 	features: np.ndarray | None = None
@@ -460,10 +485,10 @@ def _open_complete_cache(  # noqa: PLR0913
 			or metadata.get('feature_dim') != feature_dim
 			or metadata.get('survey_id') != item.survey_id
 			or metadata.get('token_shape_xyz') != list(token_shape_xyz)
-			or metadata.get('valid_token_count') != int(expected_indices.size)
+			or metadata.get('valid_token_count') != expected_valid_token_count
 		):
 			return None
-		mmap_mode = None if expected_indices.size == 0 else 'r'
+		mmap_mode = None if expected_valid_token_count == 0 else 'r'
 		indices = np.load(cache_path / 'valid_flat_indices.npy', mmap_mode=mmap_mode)
 		features = np.load(cache_path / 'features.npy', mmap_mode=mmap_mode)
 	except (FileNotFoundError, OSError, TypeError, ValueError, json.JSONDecodeError):
@@ -474,10 +499,16 @@ def _open_complete_cache(  # noqa: PLR0913
 		return None
 	valid_cache = (
 		indices.dtype == np.dtype(np.int64)
-		and indices.shape == expected_indices.shape
-		and np.array_equal(indices, expected_indices)
+		and indices.shape == (expected_valid_token_count,)
+		and _cached_indices_match(
+			indices,
+			item,
+			token_shape_xyz,
+			edge_margin_tokens,
+			chunk_size_tokens,
+		)
 		and features.dtype == PREPARED_FEATURE_DTYPE
-		and features.shape == (expected_indices.size, feature_dim)
+		and features.shape == (expected_valid_token_count, feature_dim)
 	)
 	_close_memmap(indices)
 	_close_memmap(features)
@@ -486,7 +517,7 @@ def _open_complete_cache(  # noqa: PLR0913
 	return PreparedSurveyFeatures(
 		item,
 		token_shape_xyz,
-		int(expected_indices.size),
+		expected_valid_token_count,
 		feature_dim,
 		'embedding',
 		edge_margin_tokens,
@@ -536,20 +567,118 @@ def _token_shape(item: EmbeddingInput) -> tuple[int, int, int]:
 	return (int(shape[0]), int(shape[1]), int(shape[2]))
 
 
-def _validate_valid_indices(
-	value: np.ndarray,
+def _count_valid_indices(
+	item: EmbeddingInput,
 	token_shape_xyz: tuple[int, int, int],
-) -> np.ndarray:
-	indices = np.asarray(value, dtype=np.int64)
-	if indices.ndim != 1:
-		raise ValueError(f'valid token indices must be 1D; got {indices.shape!r}')
-	if indices.size > 1 and np.any(indices[1:] <= indices[:-1]):
-		raise ValueError('valid token indices must be strictly increasing')
-	if indices.size and (
-		indices[0] < 0 or indices[-1] >= int(np.prod(token_shape_xyz))
+	edge_margin_tokens: tuple[int, int, int],
+	chunk_size_tokens: int,
+) -> int:
+	return sum(
+		int(indices.size)
+		for indices in _iter_valid_index_chunks(
+			item,
+			token_shape_xyz,
+			edge_margin_tokens,
+			chunk_size_tokens,
+		)
+	)
+
+
+def _iter_valid_index_chunks(
+	item: EmbeddingInput,
+	token_shape_xyz: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+	chunk_size_tokens: int,
+) -> Iterator[np.ndarray]:
+	valid = load_valid_tokens(item)
+	if valid.shape != token_shape_xyz:
+		raise ValueError(
+			'valid token grid shape changed while preparing features; '
+			f'got {valid.shape!r}, expected {token_shape_xyz!r}'
+		)
+	_validate_edge_margins(item, token_shape_xyz, edge_margin_tokens)
+	flat_valid = valid.reshape(-1)
+	token_count = flat_valid.size
+	mx, my, mz = edge_margin_tokens
+	buffer = np.empty(chunk_size_tokens, dtype=np.int64)
+	buffered = 0
+	for start in range(0, token_count, chunk_size_tokens):
+		stop = min(start + chunk_size_tokens, token_count)
+		indices = np.flatnonzero(flat_valid[start:stop]).astype(np.int64, copy=False)
+		indices += start
+		if indices.size and (mx or my or mz):
+			x, y, z = np.unravel_index(indices, token_shape_xyz)
+			inside = (
+				(np.asarray(x) >= mx)
+				& (np.asarray(x) < token_shape_xyz[0] - mx)
+				& (np.asarray(y) >= my)
+				& (np.asarray(y) < token_shape_xyz[1] - my)
+				& (np.asarray(z) >= mz)
+				& (np.asarray(z) < token_shape_xyz[2] - mz)
+			)
+			indices = indices[inside]
+		index_offset = 0
+		while index_offset < indices.size:
+			copied = min(chunk_size_tokens - buffered, indices.size - index_offset)
+			buffer[buffered : buffered + copied] = indices[
+				index_offset : index_offset + copied
+			]
+			buffered += copied
+			index_offset += copied
+			if buffered == chunk_size_tokens:
+				yield buffer
+				buffer = np.empty(chunk_size_tokens, dtype=np.int64)
+				buffered = 0
+	if buffered:
+		yield buffer[:buffered].copy()
+
+
+def _validate_edge_margins(
+	item: EmbeddingInput,
+	token_shape_xyz: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+) -> None:
+	if len(edge_margin_tokens) != 3 or any(
+		isinstance(margin, bool) or not isinstance(margin, int) or margin < 0
+		for margin in edge_margin_tokens
 	):
-		raise ValueError('valid token indices are outside the token grid')
-	return indices
+		raise ValueError(
+			'edge_margin_tokens must contain three nonnegative integers; '
+			f'got {edge_margin_tokens!r}'
+		)
+	if any(
+		2 * margin >= size
+		for size, margin in zip(
+			token_shape_xyz, edge_margin_tokens, strict=True
+		)
+	):
+		raise ValueError(
+			f'edge_margin_tokens {edge_margin_tokens!r} leave no interior tokens '
+			f'for survey {item.survey_id} with token grid shape {token_shape_xyz!r}'
+		)
+
+
+def _cached_indices_match(
+	cached_indices: np.ndarray,
+	item: EmbeddingInput,
+	token_shape_xyz: tuple[int, int, int],
+	edge_margin_tokens: tuple[int, int, int],
+	chunk_size_tokens: int,
+) -> bool:
+	offset = 0
+	for expected in _iter_valid_index_chunks(
+		item,
+		token_shape_xyz,
+		edge_margin_tokens,
+		chunk_size_tokens,
+	):
+		stop = offset + expected.size
+		if stop > cached_indices.size or not np.array_equal(
+			cached_indices[offset:stop], expected
+		):
+			return False
+		offset = stop
+	return offset == cached_indices.size
 
 
 def _validate_direct_indices(
@@ -573,23 +702,6 @@ def _validate_direct_indices(
 	valid = load_valid_tokens(survey.embedding_input).reshape(-1)
 	if not np.all(inside_margin) or not np.all(valid[indices]):
 		raise ValueError('flat_indices contain tokens outside the prepared valid set')
-
-
-def _validate_direct_valid_set(
-	item: EmbeddingInput,
-	shape: tuple[int, int, int],
-	edge_margin_tokens: tuple[int, int, int],
-	indices: np.ndarray,
-) -> None:
-	valid = load_valid_tokens(item)
-	mx, my, mz = edge_margin_tokens
-	inside = np.zeros(shape, dtype=np.bool_)
-	inside[mx : shape[0] - mx, my : shape[1] - my, mz : shape[2] - mz] = True
-	expected = np.flatnonzero((valid & inside).reshape(-1))
-	if not np.array_equal(indices, expected):
-		raise ValueError(
-			'valid token indices do not match the source mask and edge margins'
-		)
 
 
 def _direct_trace_z_indices(

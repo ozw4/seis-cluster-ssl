@@ -26,6 +26,9 @@ if TYPE_CHECKING:
 
 
 class _IdentityPreprocessor:
+	def __init__(self, version: int = 0) -> None:
+		self.version = version
+
 	def transform(self, features: np.ndarray) -> np.ndarray:
 		return features
 
@@ -47,7 +50,6 @@ def test_prepared_decode_update_and_objective_match_on_the_fly_reference(
 
 	store = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_for_survey=lambda _: valid_indices,
 		feature_dim=1,
 		feature_mode='embedding',
 		residualizer=None,
@@ -133,7 +135,6 @@ def test_prepared_feature_store_opens_only_one_survey_at_a_time(
 	)
 	store = prepare_feature_store(
 		embedding_inputs=items,
-		valid_indices_for_survey=lambda _: np.array([0, 1], dtype=np.int64),
 		feature_dim=1,
 		feature_mode='embedding',
 		residualizer=None,
@@ -188,6 +189,9 @@ def test_prepared_feature_store_build_reuse_force_and_index_mapping(
 		shape=(2, 2, 3, 2),
 	)
 	valid_indices = np.array([0, 2, 3, 5, 7, 8, 11], dtype=np.int64)
+	valid = np.zeros(12, dtype=np.bool_)
+	valid[valid_indices] = True
+	np.save(item.valid_tokens_path, valid.reshape((2, 2, 3)))
 	cache_root = tmp_path / 'prepared'
 	calls: list[np.ndarray] = []
 
@@ -201,7 +205,6 @@ def test_prepared_feature_store_build_reuse_force_and_index_mapping(
 	)
 	store = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_for_survey=lambda _: valid_indices,
 		feature_dim=2,
 		feature_mode='embedding',
 		residualizer=None,
@@ -236,7 +239,6 @@ def test_prepared_feature_store_build_reuse_force_and_index_mapping(
 
 	reused = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_for_survey=lambda _: valid_indices,
 		feature_dim=2,
 		feature_mode='embedding',
 		residualizer=None,
@@ -253,7 +255,6 @@ def test_prepared_feature_store_build_reuse_force_and_index_mapping(
 	calls.clear()
 	forced = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_for_survey=lambda _: valid_indices,
 		feature_dim=2,
 		feature_mode='embedding',
 		residualizer=None,
@@ -276,12 +277,14 @@ def test_prepared_feature_store_partial_cleanup_fingerprint_and_cleanup_policy(
 	tmp_path: Path,
 ) -> None:
 	item = _write_input(tmp_path, 'survey_a', shape=(1, 1, 3, 1))
-	valid_indices = np.array([0, 2], dtype=np.int64)
+	np.save(
+		item.valid_tokens_path,
+		np.array([True, False, True], dtype=np.bool_).reshape((1, 1, 3)),
+	)
 	cache_root = tmp_path / 'prepared'
 	settings = PreparedFeatureCacheSettings(directory=cache_root)
 	kwargs = {
 		'embedding_inputs': (item,),
-		'valid_indices_for_survey': lambda _: valid_indices,
 		'feature_dim': 1,
 		'feature_mode': 'embedding',
 		'residualizer': None,
@@ -303,6 +306,40 @@ def test_prepared_feature_store_partial_cleanup_fingerprint_and_cleanup_policy(
 	margin_changed = prepare_feature_store(edge_margin_tokens=(0, 0, 1), **kwargs)
 	assert margin_changed.surveys[0].fingerprint != first_path.name
 	margin_changed.close()
+
+	embedding_replacement = tmp_path / 'embedding-replacement.npy'
+	np.save(embedding_replacement, np.full((1, 1, 3, 1), 4.0, dtype=np.float32))
+	embedding_replacement.replace(item.embeddings_path)
+	embedding_changed = prepare_feature_store(edge_margin_tokens=(0, 0, 0), **kwargs)
+	embedding_fingerprint = embedding_changed.surveys[0].fingerprint
+	assert embedding_fingerprint != first_path.name
+	assert not embedding_changed.surveys[0].reused
+	embedding_changed.close()
+
+	mask_replacement = tmp_path / 'mask-replacement.npy'
+	np.save(mask_replacement, np.ones((1, 1, 3), dtype=np.bool_))
+	mask_replacement.replace(item.valid_tokens_path)
+	mask_changed = prepare_feature_store(edge_margin_tokens=(0, 0, 0), **kwargs)
+	mask_fingerprint = mask_changed.surveys[0].fingerprint
+	assert mask_fingerprint != embedding_fingerprint
+	assert not mask_changed.surveys[0].reused
+	mask_changed.close()
+
+	residualizer_changed = prepare_feature_store(
+		edge_margin_tokens=(0, 0, 0),
+		**{**kwargs, 'residualizer': {'version': 1}},
+	)
+	assert residualizer_changed.surveys[0].fingerprint != mask_fingerprint
+	assert not residualizer_changed.surveys[0].reused
+	residualizer_changed.close()
+
+	preprocessor_changed = prepare_feature_store(
+		edge_margin_tokens=(0, 0, 0),
+		**{**kwargs, 'preprocessor': _IdentityPreprocessor(version=1)},
+	)
+	assert preprocessor_changed.surveys[0].fingerprint != mask_fingerprint
+	assert not preprocessor_changed.surveys[0].reused
+	preprocessor_changed.close()
 
 	cleanup = prepare_feature_store(
 		edge_margin_tokens=(0, 0, 0),
@@ -338,7 +375,6 @@ def test_prepared_feature_store_cleans_completed_surveys_after_later_failure(
 	with pytest.raises(RuntimeError, match='second-survey failure'):
 		prepare_feature_store(
 			embedding_inputs=(first, second),
-			valid_indices_for_survey=lambda _: np.array([0, 1], dtype=np.int64),
 			feature_dim=1,
 			feature_mode='embedding',
 			residualizer=None,
@@ -362,9 +398,9 @@ def test_prepared_feature_store_zero_valid_and_z_coordinate_fast_path(
 ) -> None:
 	item = _write_input(tmp_path, 'survey_a', shape=(1, 1, 4, 2))
 	cache_root = tmp_path / 'prepared'
+	np.save(item.valid_tokens_path, np.zeros((1, 1, 4), dtype=np.bool_))
 	zero = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_for_survey=lambda _: np.empty(0, dtype=np.int64),
 		feature_dim=2,
 		feature_mode='embedding',
 		residualizer=None,
@@ -385,7 +421,6 @@ def test_prepared_feature_store_zero_valid_and_z_coordinate_fast_path(
 	direct_root = tmp_path / 'direct-must-not-exist'
 	direct = prepare_feature_store(
 		embedding_inputs=(item,),
-		valid_indices_for_survey=lambda _: np.array([0, 2, 3], dtype=np.int64),
 		feature_dim=1,
 		feature_mode='z_coordinate',
 		residualizer=None,
