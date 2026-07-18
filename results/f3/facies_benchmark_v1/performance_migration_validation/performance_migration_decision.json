@@ -1,0 +1,21 @@
+{
+  "artifact_type": "performance_migration_validation",
+  "complete": true,
+  "current_git_sha": "332478be21a021e46ee6c1d9423f14859b0cd819",
+  "historical_baseline_sha": "7731f341a293ea0c5cb5c5dfabba574148861e3a",
+  "multi_head_baseline_policy": "train a current-code single-head K=6 control under the same conditions before comparing multi-head K=6/8/10.",
+  "priority_order": [
+    "BLOCKED_NUMERIC_CONTRACT",
+    "REBUILD_M1_REQUIRED",
+    "REEXTRACT_REQUIRED",
+    "PASS_WITH_NUMERIC_DRIFT",
+    "PASS_REUSE_EXISTING"
+  ],
+  "reasons": [
+    "small numeric artifact drift with downstream labels and predictions exact"
+  ],
+  "required_rerun_scope": "no historical rerun; add a future current-code K=6 control",
+  "schema_version": 1,
+  "stage": "migration_decision",
+  "status": "PASS_WITH_NUMERIC_DRIFT"
+}

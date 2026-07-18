@@ -168,6 +168,15 @@ HELP_FLAG_CONTRACTS = {
 		'--required-file',
 		'--local-path-policy',
 	),
+	'validate_performance_migration.py': (
+		'--config',
+		'--stage',
+		'--embedding-config',
+		'--hmm-config',
+		'--device',
+		'--dry-run',
+		'--only-missing',
+	),
 	'visualize_clusters.py': (
 		'--config',
 		'--dry-run',

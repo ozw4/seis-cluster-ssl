@@ -166,8 +166,17 @@ def run_embedding_extraction(
 	*,
 	skip_existing: bool = False,
 	device: str | torch.device | None = None,
+	checkpoint_config_override: Mapping[str, object] | None = None,
 ) -> list[SurveyEmbeddingResult]:
-	"""Extract MAE encoder embeddings for all surveys in a manifest."""
+	"""Extract MAE encoder embeddings for all surveys in a manifest.
+
+	``checkpoint_config_override`` is a library-only, fully resolved checkpoint
+	config replacement.  It exists for audited migration readers of legacy
+	checkpoints whose serialized config is incomplete.  Callers are responsible
+	for validating the override's provenance and scientific identity; ordinary
+	extraction must leave it as ``None`` and uses the serialized checkpoint
+	config unchanged.
+	"""
 	checkpoint_path = _checkpoint_path(config)
 	manifests = read_manifest_json(_manifest_path(config))
 	if not manifests:
@@ -176,6 +185,8 @@ def run_embedding_extraction(
 
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
 	checkpoint_config = _checkpoint_config(payload)
+	if checkpoint_config_override is not None:
+		checkpoint_config = _checkpoint_config_override(checkpoint_config_override)
 	settings = extraction_settings_from_config(
 		config,
 		checkpoint_config=checkpoint_config,
@@ -810,6 +821,18 @@ def _checkpoint_config(payload: Mapping[str, object]) -> Mapping[str, object]:
 		return config
 	msg = 'checkpoint is missing a resolved config'
 	raise TypeError(msg)
+
+
+def _checkpoint_config_override(
+	override: Mapping[str, object],
+) -> Mapping[str, object]:
+	"""Validate an explicit library-level checkpoint config replacement."""
+	if not isinstance(override, Mapping):
+		msg = 'checkpoint_config_override must be a resolved config mapping'
+		raise TypeError(msg)
+	config = cast('Mapping[str, object]', override)
+	_validate_checkpoint_resolved_config(config)
+	return config
 
 
 def _model_state_dict(payload: Mapping[str, object]) -> Mapping[str, torch.Tensor]:

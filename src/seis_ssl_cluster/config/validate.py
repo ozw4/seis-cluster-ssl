@@ -71,12 +71,18 @@ if TYPE_CHECKING:
 		f3_lithology_visualization_config_from_mapping,
 		f3_prepare_volume_config_from_mapping,
 	)
+	from seis_ssl_cluster.config.performance_migration_validation import (
+		performance_migration_validation_config_from_mapping,
+	)
 
 Config: TypeAlias = dict[str, object]
 _T = TypeVar('_T', bound=Mapping[str, object])
 _Resolver: TypeAlias = Callable[[Mapping[str, object]], Config]
 
 _LAZY_COMPAT_EXPORTS = {
+	'performance_migration_validation_config_from_mapping': (
+		'seis_ssl_cluster.config.performance_migration_validation'
+	),
 	'f3_lithology_baseline_token_dataset_config_from_mapping': (
 		'seis_ssl_cluster.config.f3_baselines'
 	),
@@ -172,6 +178,7 @@ __all__ = [
 	'f3_lithology_token_dataset_config_from_mapping',
 	'f3_lithology_visualization_config_from_mapping',
 	'f3_prepare_volume_config_from_mapping',
+	'performance_migration_validation_config_from_mapping',
 	'publish_manifest_to_dict',
 	'publish_selected_results',
 	'random_mae_checkpoint_config_from_mapping',

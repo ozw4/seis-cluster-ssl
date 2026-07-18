@@ -83,6 +83,9 @@ from seis_ssl_cluster.config.f3_lithology_voxel_robustness import (
 	f3_lithology_voxel_split_summary_config_from_mapping,
 	f3_lithology_voxel_v0_split_suite_config_from_mapping,
 )
+from seis_ssl_cluster.config.performance_migration_validation import (
+	performance_migration_validation_config_from_mapping,
+)
 from seis_ssl_cluster.config.schema import (
 	STAGE_F3_INSPECT_FILES,
 	STAGE_F3_INSPECTION_REPORT,
@@ -318,6 +321,26 @@ F3_VOXEL_LABEL_BUDGET_CONFIGS = [
 	F3_VOXEL_LABEL_BUDGET_ROOT / '02_run_voxel_label_budget_suite.yaml',
 	F3_VOXEL_LABEL_BUDGET_ROOT / '03_summarize_voxel_label_budget.yaml',
 ]
+F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT = (
+	F3_ROOT / '92_performance_migration_validation'
+)
+F3_PERFORMANCE_MIGRATION_SHARED_CONFIGS = [
+	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT / '01_checkpoint_smoke.yaml',
+	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT
+	/ '06_summarize_performance_migration.yaml',
+]
+F3_PERFORMANCE_MIGRATION_EMBEDDING_CONFIGS = [
+	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT / '02_extract_m1_cache_off.yaml',
+	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT
+	/ '03_extract_m1_cache_memmap.yaml',
+]
+F3_PERFORMANCE_MIGRATION_CLUSTERING_CONFIGS = [
+	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT / '04_replay_m1_k6_hmm.yaml',
+]
+F3_PERFORMANCE_MIGRATION_PSEUDO_TARGET_CONFIGS = [
+	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT
+	/ '05_export_m1_k6_pseudo_targets.yaml',
+]
 F3_VOXEL_ROBUSTNESS_CONFIGS = [
 	F3_VOXEL_ROBUSTNESS_ROOT / f'{index:02d}_{name}.yaml'
 	for index, name in (
@@ -431,6 +454,22 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	('f3 voxel evaluation', F3_VOXEL_EVALUATION_CONFIGS),
 	('f3 voxel report', F3_VOXEL_REPORT_CONFIGS),
 	('f3 voxel label budget', F3_VOXEL_LABEL_BUDGET_CONFIGS),
+	(
+		'f3 performance migration shared',
+		F3_PERFORMANCE_MIGRATION_SHARED_CONFIGS,
+	),
+	(
+		'f3 performance migration embedding',
+		F3_PERFORMANCE_MIGRATION_EMBEDDING_CONFIGS,
+	),
+	(
+		'f3 performance migration clustering',
+		F3_PERFORMANCE_MIGRATION_CLUSTERING_CONFIGS,
+	),
+	(
+		'f3 performance migration pseudo targets',
+		F3_PERFORMANCE_MIGRATION_PSEUDO_TARGET_CONFIGS,
+	),
 	('f3 baseline token dataset', F3_BASELINE_TOKEN_CONFIGS),
 	('f3 random encoder', F3_RANDOM_ENCODER_CONFIGS),
 	('f3 random encoder embedding', F3_RANDOM_ENCODER_EMBEDDING_CONFIGS),
@@ -582,6 +621,72 @@ def test_active_f3_stratigraphic_clustering_configs_resolve(
 	config_path: Path,
 ) -> None:
 	resolve_clustering_config(load_config(config_path))
+
+
+@pytest.mark.parametrize('config_path', F3_PERFORMANCE_MIGRATION_SHARED_CONFIGS)
+def test_active_f3_performance_migration_shared_configs_resolve(
+	config_path: Path,
+) -> None:
+	config = performance_migration_validation_config_from_mapping(
+		load_config(config_path),
+	)
+
+	assert config.current_git_sha == '332478be21a021e46ee6c1d9423f14859b0cd819'
+	assert config.historical_baseline_sha == '7731f341a293ea0c5cb5c5dfabba574148861e3a'
+	assert config.compatibility['m1_historical_finite_check_mode'] == 'off'
+
+
+@pytest.mark.parametrize(
+	'config_path',
+	F3_PERFORMANCE_MIGRATION_EMBEDDING_CONFIGS,
+)
+def test_active_f3_performance_migration_embedding_configs_resolve(
+	config_path: Path,
+) -> None:
+	config = resolve_embedding_extraction_config(load_config(config_path))
+
+	assert config['embedding']['window_size'] == [128, 128, 128]
+	assert config['embedding']['overlap'] == [112, 64, 64]
+	assert config['embedding']['amp'] is False
+	assert config['embedding']['prefetch_queue_depth'] == 0
+
+
+@pytest.mark.parametrize(
+	'config_path',
+	F3_PERFORMANCE_MIGRATION_CLUSTERING_CONFIGS,
+)
+def test_active_f3_performance_migration_clustering_configs_resolve(
+	config_path: Path,
+) -> None:
+	config = resolve_clustering_config(load_config(config_path))
+
+	assert config['clustering']['k_values'] == [6]
+	assert config['clustering']['stratigraphic_hmm']['iterations'] == 10
+
+
+@pytest.mark.parametrize(
+	'config_path',
+	F3_PERFORMANCE_MIGRATION_PSEUDO_TARGET_CONFIGS,
+)
+def test_active_f3_performance_migration_pseudo_target_configs_load(
+	config_path: Path,
+) -> None:
+	config = load_config(config_path)
+
+	assert config['export'] == {
+		'output_root': (
+			'/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/'
+			'facies_benchmark_v1/main_332478be/pseudo_targets/'
+			'm1_k6_current_replay'
+		),
+		'k': 6,
+		'survey_id': 'f3_facies_benchmark',
+		'confidence': 1.0,
+		'schema_version': 1,
+		'write_boundary_weight': False,
+		'only_missing': True,
+		'overwrite': False,
+	}
 
 
 @pytest.mark.parametrize('config_path', F3_STRAT_HMM_PRETEXT_CONFIGS)

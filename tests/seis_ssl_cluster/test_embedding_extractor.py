@@ -5,6 +5,7 @@ import math
 import os
 import threading
 from contextlib import nullcontext
+from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -869,6 +870,32 @@ def test_embedding_extraction_defaults_legacy_finite_check_mode_to_strict(
 
 	assert metadata['finite_check_mode'] == 'strict'
 	assert metadata['preprocessing']['finite_check_mode'] == 'strict'
+
+
+def test_embedding_extraction_uses_explicit_checkpoint_config_override(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	payload = load_checkpoint(config['embeddings']['checkpoint'], map_location='cpu')
+	serialized_config = payload['config']
+	assert isinstance(serialized_config, dict)
+	checkpoint_config_override = deepcopy(serialized_config)
+	override_data = checkpoint_config_override['data']
+	assert isinstance(override_data, dict)
+	override_data['finite_check_mode'] = 'off'
+
+	result = run_embedding_extraction(
+		config,
+		device='cpu',
+		checkpoint_config_override=checkpoint_config_override,
+	)[0]
+
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	assert metadata['finite_check_mode'] == 'off'
+	assert metadata['preprocessing']['finite_check_mode'] == 'off'
+	serialized_data = serialized_config['data']
+	assert isinstance(serialized_data, dict)
+	assert serialized_data['finite_check_mode'] == 'strict'
 
 
 def test_embedding_extraction_rejects_checkpoint_data_zero_mask_only(

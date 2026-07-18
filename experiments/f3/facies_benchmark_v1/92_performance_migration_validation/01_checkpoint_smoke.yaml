@@ -1,0 +1,63 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+  migration_root: /workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be
+  publish_root: /workspace/results/f3/facies_benchmark_v1/performance_migration_validation
+
+migration:
+  current_git_sha: 332478be21a021e46ee6c1d9423f14859b0cd819
+  historical_baseline_sha: 7731f341a293ea0c5cb5c5dfabba574148861e3a
+
+inputs:
+  checkpoints:
+    mae: /workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt
+    m1: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/best.pt
+    m2a: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/best.pt
+  historical_embeddings:
+    mae: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16
+    m1: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16
+    m2a: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16
+  m1_probe:
+    token_dataset_metadata: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/token_dataset/token_dataset_metadata.json
+    train_tokens: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/token_dataset/train_tokens.npz
+    validation_tokens: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/token_dataset/validation_tokens.npz
+    scaler: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/scaler.joblib
+    probe: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/probe.joblib
+    prediction_metadata: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/predictions/linear_balanced_v1/prediction_metadata.json
+    predictions: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/predictions/linear_balanced_v1/f3_token_predictions.npy
+    probabilities: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/predictions/linear_balanced_v1/f3_token_probabilities.npy
+    valid_grid: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/predictions/linear_balanced_v1/f3_valid_token_grid.npy
+    metrics: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.json
+  hmm:
+    historical_root: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10
+    labels: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10/labels/k6/f3_facies_benchmark.cluster_labels_token.npy
+    label_metadata: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10/labels/k6/f3_facies_benchmark.cluster_label_metadata.json
+    centers: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10/models/k6/cluster_centers.npy
+    clustering_metadata: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10/models/k6/clustering_metadata.json
+    hmm_model: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10/models/k6/hmm_model.joblib
+    preprocessor: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10/models/k6/preprocessor.joblib
+    residualizer: /workspace/artifacts/seis_ssl_cluster/clustering/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full/overlap_x16/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10/models/residualizer.npz
+  pseudo_targets:
+    historical_root: /workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap
+    labels: /workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap/k6/f3_facies_benchmark.hmm_labels_token.npy
+    confidence: /workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap/k6/f3_facies_benchmark.hmm_confidence_token.npy
+    valid_tokens: /workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap/k6/f3_facies_benchmark.valid_tokens.npy
+    metadata: /workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap/k6/f3_facies_benchmark.pseudo_target_metadata.json
+  f3:
+    amplitude_manifest: /workspace/artifacts/seis_ssl_cluster/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json
+    normalization_stats: /workspace/artifacts/seis_ssl_cluster/registry/normalization_stats/f3/facies_benchmark_v1/f3_seismic.normalization_stats.json
+    class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+    volume_metadata: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_metadata.json
+    amplitude_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
+    label_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+
+compatibility:
+  m1_historical_finite_check_mode: 'off'
+  historical_finite_check_evidence_commit: 5b3d8398edff968e28f5224858a8abc2805ad909
+  historical_finite_check_evidence_path: src/seis_ssl_cluster/embedding/extractor.py
+  historical_pseudo_target_schema_version: 1
+
+benchmark:
+  seed: 248
+  warm_up: 3
+  repeat: 20
+  threads: 1

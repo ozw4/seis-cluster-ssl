@@ -1,0 +1,223 @@
+{
+  "artifact_type": "performance_migration_validation",
+  "created_at_utc": "2026-07-17T15:40:34.412109+00:00",
+  "current_git_sha": "332478be21a021e46ee6c1d9423f14859b0cd819",
+  "files": [
+    {
+      "byte_size": 802,
+      "published_sha256": "972425d4261385043adceaf3699501412efd49695681a33b663d9386f5e9da5f",
+      "relative_path": "performance_migration_summary.md",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_summary.md",
+      "source_sha256": "972425d4261385043adceaf3699501412efd49695681a33b663d9386f5e9da5f"
+    },
+    {
+      "byte_size": 500216,
+      "published_sha256": "b9177219084252d8b1cc6b2ab03dcc5efdfc150cf0337fa0738af5193ad9ded4",
+      "relative_path": "performance_migration_summary.json",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_summary.json",
+      "source_sha256": "b9177219084252d8b1cc6b2ab03dcc5efdfc150cf0337fa0738af5193ad9ded4"
+    },
+    {
+      "byte_size": 2980,
+      "published_sha256": "3137731684c220c20947469f82cc2a151661dd00180f15c84383e94dcadd027c",
+      "relative_path": "performance_migration_manifest.json",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_manifest.json",
+      "source_sha256": "3137731684c220c20947469f82cc2a151661dd00180f15c84383e94dcadd027c"
+    },
+    {
+      "byte_size": 812,
+      "published_sha256": "f740cadf505913fd04414642fae61c5add5e6856aaf79f9627ffc25883a50b3d",
+      "relative_path": "performance_migration_decision.json",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_decision.json",
+      "source_sha256": "f740cadf505913fd04414642fae61c5add5e6856aaf79f9627ffc25883a50b3d"
+    },
+    {
+      "byte_size": 2189,
+      "published_sha256": "a7dab0211b352fbbc4aa20a751ab733cf8047b64008781bd997d64e3c657d6a9",
+      "relative_path": "performance_migration_handoff.md",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_handoff.md",
+      "source_sha256": "a7dab0211b352fbbc4aa20a751ab733cf8047b64008781bd997d64e3c657d6a9"
+    },
+    {
+      "byte_size": 12187,
+      "published_sha256": "729b0d02f35798d3b743d782e7b64f3ca23baef3b24c3e6a291359a97e70ec3c",
+      "relative_path": "input_inventory.md",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/preflight/input_inventory.md",
+      "source_sha256": "729b0d02f35798d3b743d782e7b64f3ca23baef3b24c3e6a291359a97e70ec3c"
+    },
+    {
+      "byte_size": 567,
+      "published_sha256": "dee1830ce36ab3325a48eea239dd22af33cc55b5def3ef3f124b5c8779cea5ac",
+      "relative_path": "embedding_parity.md",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/embedding_parity/embedding_parity.md",
+      "source_sha256": "dee1830ce36ab3325a48eea239dd22af33cc55b5def3ef3f124b5c8779cea5ac"
+    },
+    {
+      "byte_size": 196501,
+      "published_sha256": "dfeaf723a4b661c78d02fca1fbb2a80c3a9947f8bdf7c4e8f56d9411fd0c2139",
+      "relative_path": "embedding_parity.json",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/embedding_parity/embedding_parity.json",
+      "source_sha256": "dfeaf723a4b661c78d02fca1fbb2a80c3a9947f8bdf7c4e8f56d9411fd0c2139"
+    },
+    {
+      "byte_size": 440,
+      "published_sha256": "f6eec204205df870d176df906236b8b0fe04371f9ebcd2fe0ec9dcc3ef24f677",
+      "relative_path": "probe_parity.md",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/probe_parity/probe_parity.md",
+      "source_sha256": "f6eec204205df870d176df906236b8b0fe04371f9ebcd2fe0ec9dcc3ef24f677"
+    },
+    {
+      "byte_size": 14396,
+      "published_sha256": "889846396465d6fa3a70fe61c69c3d58ab9903b97ea3e266aa3ecd20a98bdcdd",
+      "relative_path": "probe_parity.json",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/probe_parity/probe_parity.json",
+      "source_sha256": "889846396465d6fa3a70fe61c69c3d58ab9903b97ea3e266aa3ecd20a98bdcdd"
+    },
+    {
+      "byte_size": 256,
+      "published_sha256": "6892b4f433eab8f68fd95370c1cb0850519cc80f16b642fba15ed85d3af55e65",
+      "relative_path": "hmm_parity.md",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/clustering/hmm_parity.md",
+      "source_sha256": "6892b4f433eab8f68fd95370c1cb0850519cc80f16b642fba15ed85d3af55e65"
+    },
+    {
+      "byte_size": 114015,
+      "published_sha256": "4e5daf195727818b5e0224cc785ef0c9cd8d9cc9f346c0761f0e9d02d8de124a",
+      "relative_path": "hmm_parity.json",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/clustering/hmm_parity.json",
+      "source_sha256": "4e5daf195727818b5e0224cc785ef0c9cd8d9cc9f346c0761f0e9d02d8de124a"
+    },
+    {
+      "byte_size": 165,
+      "published_sha256": "41b8415c906ef81d24f90a6f6c6bb66f6cf7e8986296e44bc8cafaf588f8b0f5",
+      "relative_path": "pseudo_target_parity.md",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/pseudo_targets/pseudo_target_parity.md",
+      "source_sha256": "41b8415c906ef81d24f90a6f6c6bb66f6cf7e8986296e44bc8cafaf588f8b0f5"
+    },
+    {
+      "byte_size": 2244,
+      "published_sha256": "d37e00a558e9cea8609c0f7dfe8d02bc9c6415371cb7c0ad0edc2e26787e79b7",
+      "relative_path": "pseudo_target_parity.json",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/pseudo_targets/pseudo_target_parity.json",
+      "source_sha256": "d37e00a558e9cea8609c0f7dfe8d02bc9c6415371cb7c0ad0edc2e26787e79b7"
+    },
+    {
+      "byte_size": 2852,
+      "published_sha256": "82d9b617e022fc09915fccd705350ce81f1b6039e7e4a0d75537916fe7eaed5e",
+      "relative_path": "current.md",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/benchmark/current.md",
+      "source_sha256": "82d9b617e022fc09915fccd705350ce81f1b6039e7e4a0d75537916fe7eaed5e"
+    },
+    {
+      "byte_size": 3594,
+      "published_sha256": "4088ecb9218463cec6ab5629c0201e8035fb1ea7f98eac3d255419b0eda1dd9a",
+      "relative_path": "current.json",
+      "source_artifact_path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/benchmark/current.json",
+      "source_sha256": "4088ecb9218463cec6ab5629c0201e8035fb1ea7f98eac3d255419b0eda1dd9a"
+    }
+  ],
+  "historical_baseline_sha": "7731f341a293ea0c5cb5c5dfabba574148861e3a",
+  "items": [
+    {
+      "sha256": "972425d4261385043adceaf3699501412efd49695681a33b663d9386f5e9da5f",
+      "size_bytes": 802,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_summary.md",
+      "target": "performance_migration_summary.md"
+    },
+    {
+      "sha256": "b9177219084252d8b1cc6b2ab03dcc5efdfc150cf0337fa0738af5193ad9ded4",
+      "size_bytes": 500216,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_summary.json",
+      "target": "performance_migration_summary.json"
+    },
+    {
+      "sha256": "3137731684c220c20947469f82cc2a151661dd00180f15c84383e94dcadd027c",
+      "size_bytes": 2980,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_manifest.json",
+      "target": "performance_migration_manifest.json"
+    },
+    {
+      "sha256": "f740cadf505913fd04414642fae61c5add5e6856aaf79f9627ffc25883a50b3d",
+      "size_bytes": 812,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_decision.json",
+      "target": "performance_migration_decision.json"
+    },
+    {
+      "sha256": "a7dab0211b352fbbc4aa20a751ab733cf8047b64008781bd997d64e3c657d6a9",
+      "size_bytes": 2189,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_handoff.md",
+      "target": "performance_migration_handoff.md"
+    },
+    {
+      "sha256": "729b0d02f35798d3b743d782e7b64f3ca23baef3b24c3e6a291359a97e70ec3c",
+      "size_bytes": 12187,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/preflight/input_inventory.md",
+      "target": "input_inventory.md"
+    },
+    {
+      "sha256": "dee1830ce36ab3325a48eea239dd22af33cc55b5def3ef3f124b5c8779cea5ac",
+      "size_bytes": 567,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/embedding_parity/embedding_parity.md",
+      "target": "embedding_parity.md"
+    },
+    {
+      "sha256": "dfeaf723a4b661c78d02fca1fbb2a80c3a9947f8bdf7c4e8f56d9411fd0c2139",
+      "size_bytes": 196501,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/embedding_parity/embedding_parity.json",
+      "target": "embedding_parity.json"
+    },
+    {
+      "sha256": "f6eec204205df870d176df906236b8b0fe04371f9ebcd2fe0ec9dcc3ef24f677",
+      "size_bytes": 440,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/probe_parity/probe_parity.md",
+      "target": "probe_parity.md"
+    },
+    {
+      "sha256": "889846396465d6fa3a70fe61c69c3d58ab9903b97ea3e266aa3ecd20a98bdcdd",
+      "size_bytes": 14396,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/probe_parity/probe_parity.json",
+      "target": "probe_parity.json"
+    },
+    {
+      "sha256": "6892b4f433eab8f68fd95370c1cb0850519cc80f16b642fba15ed85d3af55e65",
+      "size_bytes": 256,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/clustering/hmm_parity.md",
+      "target": "hmm_parity.md"
+    },
+    {
+      "sha256": "4e5daf195727818b5e0224cc785ef0c9cd8d9cc9f346c0761f0e9d02d8de124a",
+      "size_bytes": 114015,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/clustering/hmm_parity.json",
+      "target": "hmm_parity.json"
+    },
+    {
+      "sha256": "41b8415c906ef81d24f90a6f6c6bb66f6cf7e8986296e44bc8cafaf588f8b0f5",
+      "size_bytes": 165,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/pseudo_targets/pseudo_target_parity.md",
+      "target": "pseudo_target_parity.md"
+    },
+    {
+      "sha256": "d37e00a558e9cea8609c0f7dfe8d02bc9c6415371cb7c0ad0edc2e26787e79b7",
+      "size_bytes": 2244,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/pseudo_targets/pseudo_target_parity.json",
+      "target": "pseudo_target_parity.json"
+    },
+    {
+      "sha256": "82d9b617e022fc09915fccd705350ce81f1b6039e7e4a0d75537916fe7eaed5e",
+      "size_bytes": 2852,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/benchmark/current.md",
+      "target": "current.md"
+    },
+    {
+      "sha256": "4088ecb9218463cec6ab5629c0201e8035fb1ea7f98eac3d255419b0eda1dd9a",
+      "size_bytes": 3594,
+      "source": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/benchmark/current.json",
+      "target": "current.json"
+    }
+  ],
+  "output_dir": "/workspace/results/f3/facies_benchmark_v1/performance_migration_validation",
+  "schema_version": 1,
+  "skipped_optional_items": [],
+  "source_artifact_root": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be",
+  "warnings": []
+}

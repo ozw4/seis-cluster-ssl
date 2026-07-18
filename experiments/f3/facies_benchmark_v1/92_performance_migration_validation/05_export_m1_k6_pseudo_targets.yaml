@@ -1,0 +1,21 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+  migration_root: /workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be
+
+migration:
+  current_git_sha: 332478be21a021e46ee6c1d9423f14859b0cd819
+  historical_baseline_sha: 7731f341a293ea0c5cb5c5dfabba574148861e3a
+
+inputs:
+  clustering_output_dir: /workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/clustering/m1_k6_current_replay
+  historical_pseudo_target_root: /workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap
+
+export:
+  output_root: /workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/pseudo_targets/m1_k6_current_replay
+  k: 6
+  survey_id: f3_facies_benchmark
+  confidence: 1.0
+  schema_version: 1
+  write_boundary_weight: false
+  only_missing: true
+  overwrite: false
