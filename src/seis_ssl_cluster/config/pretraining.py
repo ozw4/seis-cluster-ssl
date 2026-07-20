@@ -164,6 +164,7 @@ _STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY = 'normalized_order_smooth_l1_v1'
 MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS = frozenset(
 	{
 		'experiment_role',
+		'variant',
 		'head_spec',
 		'head_ks',
 		'head_projection_dim',
@@ -452,6 +453,7 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912
 	)
 	for key in (
 		'experiment_role',
+		'variant',
 		'head_spec',
 		'head_ks',
 		'target_manifest_sha256',
@@ -462,6 +464,18 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912
 		raise ValueError(
 			'identity.scientific_identity.experiment_role must be '
 			"'multi_head_ordered_pretext'"
+		)
+	if scientific['variant'] not in {'nocons', 'cons010'}:
+		raise ValueError(
+			'identity.scientific_identity.variant must be "nocons" or "cons010"'
+		)
+	expected_tag = {
+		'nocons': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+		'cons010': 'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
+	}[scientific['variant']]
+	if model_tag != expected_tag:
+		raise ValueError(
+			'identity.model_tag does not match identity.scientific_identity.variant'
 		)
 	if scientific['head_spec'] != _STRAT_HMM_MULTI_HEAD_SPEC:
 		raise ValueError(

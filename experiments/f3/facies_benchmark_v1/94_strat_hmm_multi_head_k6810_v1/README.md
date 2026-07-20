@@ -1,82 +1,48 @@
-# K=6/8/10 HMM multi-head target bundle
+# F3 K=6/8/10 multi-head pretraining
 
-This stage replays the fixed MAE embedding condition once for K=6/8/10. The
-prepared feature cache is shared by the HMM backend; K is the only changed
-scientific variable. The immutable historical K=6 target remains the training
-reference. The replayed K=6 output is parity evidence only.
+This stage trains two otherwise identical ordered-prototype encoders using the
+same F3 inputs, MAE initialization, and K=6/8/10 target manifest:
 
-The subsequent multi-head pretext configurations must use the explicit
-`multi_resolution_ordered_prototypes_v1` head spec, the generated manifest,
-and a scientific identity whose `target_manifest_sha256` matches that exact
-manifest file. The no-consistency and main runs differ only in
-`loss.consistency_weight` (0.0 and 0.1 respectively) and their model/output
-identity. Prototype and usage weights apply to the mean across heads, while
-the consistency weight applies to the mean over head pairs. K=6/8/10 denotes
-pretext ordered-state cardinality; downstream F3 lithology `class_count`
-remains 6.
+- `strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1` uses
+  `consistency_weight: 0.0`.
+- `strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1` uses
+  `consistency_weight: 0.1`.
 
-The resolved scientific identity binds the head projection/temperature/
-normalization, all loss weights, teacher/student initialization, and effective
-model, preprocessing, and scientific training settings. Device, workers,
-timing, cache location, and resume path remain runtime-only identity.
+The current-code single-head control,
+`strat_hmm_pretext_m1_current_k6_topblock1_distill_v1`, remains the primary
+baseline. This stage does not run voxel-decoder evaluation or tune the
+consistency weight.
 
-Set `SEIS_SSL_CLUSTER_ARTIFACT_ROOT` to the absolute artifact-registry root for
-the current environment before running this stage. The replay config resolves
-that variable at load time.
-
-First run the replay config, then export K=6, K=8, and K=10 as schema-v1,
-bootstrap-semantics pseudo-targets with no boundary-weight artifact. The K=6
-export is replay parity evidence only; the historical K=6 target remains the
-manifest's training reference:
+Set the manifest digest after the K=6/8/10 target bundle has passed the
+migration and current-control gates. `01_build_multi_head_targets.yaml` is a
+runner input for `build_strat_hmm_multi_head_targets.py`; use its paths as the
+corresponding command-line arguments.
 
 ```bash
-export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/absolute/path/to/artifacts/seis_ssl_cluster
-
-python proc/seis_ssl_cluster/cluster_embeddings.py \
-  --config experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/01_replay_hmm_k6810.yaml --dry-run
-
-python proc/seis_ssl_cluster/export_strat_hmm_pseudo_targets.py \
-  --clustering-output-dir "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1" \
-  --pseudo-target-root "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1" \
-  --k 6 --confidence 1.0 --schema-version 1 --no-boundary-weight
-```
-
-Repeat the export for K=8 and K=10. Publish the manifest only after both required
-preflight decisions are positive. `--only-missing` revalidates a complete
-manifest only when its embedding, head roots, and replay root match the requested
-inputs; `--quarantine-invalid` moves an invalid prior manifest aside.
-
-```bash
-python proc/seis_ssl_cluster/build_strat_hmm_multi_head_targets.py \
-  --source-embedding-dir "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16" \
-  --head-root "6=$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap" \
-  --head-root "8=$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1" \
-  --head-root "10=$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1" \
-  --replay-k6-root "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1" \
-  --migration-decision "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/migration_validation/f3/facies_benchmark_v1/main_332478be/performance_migration_decision.json" \
-  --control-summary "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/lithology/f3/facies_benchmark_v1/voxel_label_budget_current_k6_control_v1/original_split/reports/current_k6_control_summary.json" \
-  --manifest "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json" \
-  --only-missing --quarantine-invalid
-```
-
-The paired pretext configs are `02_train_multi_head_no_consistency.yaml` and
-`03_train_multi_head_consistency.yaml`. Before either is resolved, bind its
-identity to the generated manifest's actual digest; the resolver rejects a
-stale or incorrect value.
-
-```bash
+export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/path/to/artifacts/seis_ssl_cluster
 export SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256="$(sha256sum \
-  "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json" \
+  "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT"/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json \
   | awk '{print $1}')"
+export EXP=experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1
 
-python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
-  --config experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/02_train_multi_head_no_consistency.yaml --dry-run
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/02_train_nocons_smoke.yaml" --dry-run --device cpu --max-steps 2
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/02_train_nocons_smoke.yaml" --device cpu --max-steps 2
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/03_train_cons010_smoke.yaml" --dry-run --device cpu --max-steps 2
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/03_train_cons010_smoke.yaml" --device cpu --max-steps 2
 
-python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
-  --config experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/03_train_multi_head_consistency.yaml --dry-run
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/04_train_nocons_full.yaml" --dry-run
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/04_train_nocons_full.yaml"
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/05_train_cons010_full.yaml" --dry-run
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/05_train_cons010_full.yaml"
+
+python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/06_extract_nocons_embeddings.yaml" --dry-run
+python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/06_extract_nocons_embeddings.yaml" --skip-existing
+python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/07_extract_cons010_embeddings.yaml" --dry-run
+python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/07_extract_cons010_embeddings.yaml" --skip-existing
 ```
 
-The configs are intentionally paired: their only scientific setting difference
-is `loss.consistency_weight` (`0.0` versus `0.1`); their no-consistency and
-main model/output identities are distinct. Both keep the downstream lithology
-`class_count` at 6.
+Smoke output roots are intentionally separate and must never be resumed by a
+full run. A full run may resume only from its own `latest.pt`; the checkpoint
+identity rejects cross-variant resumes. The four scientific differences between
+the full configs are `loss.consistency_weight`, `identity.model_tag`,
+`identity.scientific_identity.variant`, and `paths.output_root`.

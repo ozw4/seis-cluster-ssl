@@ -202,9 +202,10 @@ F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '04_train_boundary_full.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '01_train_current_k6_smoke.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '02_train_current_k6_full.yaml',
-		F3_STRAT_HMM_MULTI_HEAD_ROOT
-		/ '02_train_multi_head_no_consistency.yaml',
-		F3_STRAT_HMM_MULTI_HEAD_ROOT / '03_train_multi_head_consistency.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '02_train_nocons_smoke.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '03_train_cons010_smoke.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '04_train_nocons_full.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '05_train_cons010_full.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
@@ -217,6 +218,8 @@ F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
 		/ '05_extract_student_embeddings.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '03_extract_current_k6_embeddings.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '06_extract_nocons_embeddings.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '07_extract_cons010_embeddings.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
@@ -651,7 +654,14 @@ def test_active_f3_prepare_configs_resolve(config_path: Path) -> None:
 		*F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS,
 	],
 )
-def test_active_f3_embedding_configs_resolve(config_path: Path) -> None:
+def test_active_f3_embedding_configs_resolve(
+	config_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
 	resolve_embedding_extraction_config(load_config(config_path))
 
 
@@ -760,16 +770,15 @@ def test_active_f3_multi_head_pretext_config_contract(
 		'0' * 64,
 	)
 	config_paths = [
-		F3_STRAT_HMM_MULTI_HEAD_ROOT
-		/ '02_train_multi_head_no_consistency.yaml',
-		F3_STRAT_HMM_MULTI_HEAD_ROOT / '03_train_multi_head_consistency.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '04_train_nocons_full.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '05_train_cons010_full.yaml',
 	]
 	for config_path, consistency_weight, model_tag in zip(
 		config_paths,
 		(0.0, 0.1),
 		(
-			'strat_hmm_multi_k6810_no_consistency_v1',
-			'strat_hmm_multi_k6810_main_v1',
+			'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+			'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
 		),
 		strict=True,
 	):
@@ -777,6 +786,7 @@ def test_active_f3_multi_head_pretext_config_contract(
 		assert raw['identity']['model_tag'] == model_tag
 		assert raw['identity']['scientific_identity'] == {
 			'experiment_role': 'multi_head_ordered_pretext',
+			'variant': 'nocons' if consistency_weight == 0.0 else 'cons010',
 			'head_spec': 'multi_resolution_ordered_prototypes_v1',
 			'head_ks': [6, 8, 10],
 			'target_manifest_sha256': '0' * 64,
@@ -807,6 +817,7 @@ def test_active_f3_multi_head_pretext_config_contract(
 	comparison = deepcopy(main)
 	comparison['loss']['consistency_weight'] = 0.0
 	comparison['identity']['scientific_identity']['consistency_weight'] = 0.0
+	comparison['identity']['scientific_identity']['variant'] = 'nocons'
 	comparison['identity']['model_tag'] = no_consistency['identity']['model_tag']
 	comparison['paths']['output_root'] = no_consistency['paths']['output_root']
 	comparison['pseudo_targets']['manifest'] = no_consistency['pseudo_targets'][

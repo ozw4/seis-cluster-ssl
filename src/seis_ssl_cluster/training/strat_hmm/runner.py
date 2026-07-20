@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import math
 from typing import TYPE_CHECKING, Literal, cast
 
 import torch
@@ -401,6 +403,13 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		)
 		best_score = result.best_score
 		checkpoint_path = result.latest_path
+		if is_multi_head and state.completed_epoch:
+			_append_multi_head_epoch_metrics(
+				output_root=output_root,
+				epoch=epoch,
+				global_step=state.global_step,
+				metrics=state.metrics,
+			)
 		if max_steps is not None and state.global_step >= max_steps:
 			break
 
@@ -408,6 +417,39 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		msg = 'no strat HMM pretext training steps were run'
 		raise ValueError(msg)
 	return checkpoint_path
+
+
+def _append_multi_head_epoch_metrics(
+	*,
+	output_root: Path,
+	epoch: int,
+	global_step: int,
+	metrics: Mapping[str, float],
+) -> None:
+	"""Append finite multi-head epoch diagnostics without duplicating resumes."""
+	if not all(math.isfinite(float(value)) for value in metrics.values()):
+		raise ValueError('multi-head epoch metrics must be finite')
+	path = output_root / 'multi_head_epoch_metrics.csv'
+	fieldnames = ['epoch', 'global_step', *sorted(metrics)]
+	if path.is_file():
+		with path.open(newline='', encoding='utf-8') as handle:
+			rows = list(csv.DictReader(handle))
+		if rows and list(rows[0]) != fieldnames:
+			raise ValueError('multi-head epoch metrics schema changed during resume')
+		if any(int(row['epoch']) == epoch for row in rows):
+			return
+	else:
+		rows = []
+	row = {
+		'epoch': str(epoch),
+		'global_step': str(global_step),
+		**{key: str(value) for key, value in metrics.items()},
+	}
+	with path.open('a', newline='', encoding='utf-8') as handle:
+		writer = csv.DictWriter(handle, fieldnames=fieldnames)
+		if not rows:
+			writer.writeheader()
+		writer.writerow(row)
 
 
 def _preflight_only_output_root(output_root: Path) -> bool:

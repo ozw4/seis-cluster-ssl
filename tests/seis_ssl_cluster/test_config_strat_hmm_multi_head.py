@@ -129,7 +129,10 @@ def test_k6810_no_consistency_and_main_configs_have_a_pure_scientific_diff(
 	no_consistency = _multi_head_config(tmp_path)
 	main = deepcopy(no_consistency)
 	main['paths']['output_root'] = str(tmp_path / 'artifacts' / 'pretraining' / 'main')
-	main['identity']['model_tag'] = 'strat_hmm_multi_k6810_main_v1'
+	main['identity']['model_tag'] = (
+		'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1'
+	)
+	main['identity']['scientific_identity']['variant'] = 'cons010'
 	main['loss']['consistency_weight'] = 0.1
 
 	no_consistency_resolved = resolve_strat_hmm_pretext_config(no_consistency)
@@ -148,6 +151,7 @@ def test_k6810_no_consistency_and_main_configs_have_a_pure_scientific_diff(
 
 	main_resolved['loss']['consistency_weight'] = 0.0
 	main_resolved['identity']['scientific_identity']['consistency_weight'] = 0.0
+	main_resolved['identity']['scientific_identity']['variant'] = 'nocons'
 	main_resolved['identity']['model_tag'] = no_consistency_resolved['identity'][
 		'model_tag'
 	]
@@ -187,9 +191,10 @@ def _multi_head_config(tmp_path: Path) -> dict[str, object]:
 		'distillation_weight': 0.2,
 	}
 	config['identity'] = {
-		'model_tag': 'strat_hmm_multi_k6810_no_consistency_v1',
+		'model_tag': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
 		'scientific_identity': {
 			'experiment_role': 'multi_head_ordered_pretext',
+			'variant': 'nocons',
 			'head_spec': 'multi_resolution_ordered_prototypes_v1',
 			'head_ks': [6, 8, 10],
 			'target_manifest_sha256': file_sha256(manifest),

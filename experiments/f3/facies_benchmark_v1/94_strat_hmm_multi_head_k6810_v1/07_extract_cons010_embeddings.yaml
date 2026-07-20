@@ -1,0 +1,6 @@
+paths: {artifact_root: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'}
+manifests: {input: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json'}
+embeddings:
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1/best.pt
+  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1/overlap_x16
+embedding: {window_size: [128, 128, 128], overlap: [112, 64, 64], output_dtype: float16, batch_size: 1, prefetch_queue_depth: 0, amp: false, amp_dtype: auto, stage_timing: true, min_token_valid_fraction: 0.5, preprocessing_cache: {mode: memmap, chunk_size_x: 16, reuse: true, cleanup: false}}
