@@ -281,7 +281,7 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 				boundary_weight=values.boundary_weight,
 			)
 		else:
-			prototype_loss = tokens.new_zeros(())
+			prototype_loss = _graph_zero(logits)
 		if usage_weight > 0.0 and bool(valid_mask.any().item()):
 			entropy_floor_value = (
 				0.5 * math.log(k) if entropy_floor is None else float(entropy_floor)
@@ -292,7 +292,7 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 				entropy_floor=entropy_floor_value,
 			)
 		else:
-			usage_loss = tokens.new_zeros(())
+			usage_loss = _graph_zero(logits)
 		prototype_losses.append(prototype_loss)
 		usage_losses.append(usage_loss)
 		supervised_valid_fractions.append(
@@ -342,7 +342,9 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 			pair_loss = (pair_weight * error * pair_valid).sum() / pair_weight_sum
 			eligible_pair_count += 1
 		else:
-			pair_loss = tokens.new_zeros(())
+			pair_loss = _graph_zero(outputs.outputs[first_key].logits) + _graph_zero(
+				outputs.outputs[second_key].logits,
+			)
 		consistency_losses.append(pair_loss)
 		result[f'loss_consistency_{pair_name}'] = pair_loss
 		result[f'mean_consistency_weight_{pair_name}'] = _masked_mean(
@@ -359,7 +361,7 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 	consistency_loss = (
 		torch.stack(consistency_losses).sum() / eligible_pair_count
 		if eligible_pair_count > 0
-		else tokens.new_zeros(())
+		else torch.stack(consistency_losses).sum()
 	)
 	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
 	if distillation_weight > 0.0:
@@ -374,10 +376,10 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 				valid_mask=distillation_valid_mask,
 			)
 			if bool(distillation_valid_mask.any().item())
-			else tokens.new_zeros(())
+			else _graph_zero(tokens)
 		)
 	else:
-		distillation_loss = tokens.new_zeros(())
+		distillation_loss = _graph_zero(tokens)
 	result.update(
 		{
 			'loss': (
@@ -531,6 +533,11 @@ def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 	if not bool(mask.any().item()):
 		return values.new_zeros(())
 	return values[mask].mean()
+
+
+def _graph_zero(reference: torch.Tensor) -> torch.Tensor:
+	"""Return an exact zero that retains ``reference``'s autograd path."""
+	return reference.sum() * 0.0
 
 
 def _safe_fraction(mask: torch.Tensor, *, dtype: torch.dtype) -> torch.Tensor:

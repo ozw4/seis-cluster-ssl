@@ -332,9 +332,14 @@ def test_multi_head_checkpoint_rejects_wrong_per_head_tensor_shape(
 
 @pytest.mark.parametrize(
 	'field',
-	['initial_student_state_sha256', 'initial_head_state_sha256'],
+	[
+		'initial_student_state_sha256',
+		'initial_head_state_sha256',
+		'teacher_checkpoint_sha256',
+		'student_init_checkpoint_sha256',
+	],
 )
-def test_multi_head_checkpoint_requires_initial_state_hashes(
+def test_multi_head_checkpoint_requires_identity_hashes(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 	field: str,
@@ -470,6 +475,10 @@ def _valid_multi_head_checkpoint_payload(
 		checkpoint_kind='epoch',
 		batch_index=None,
 		control_identity={
+			'input_identities': {
+				'teacher_checkpoint': {'sha256': '2' * 64},
+				'student_init_checkpoint': {'sha256': '3' * 64},
+			},
 			'initial_state_sha256': {
 				'student': '0' * 64,
 				'head': '1' * 64,

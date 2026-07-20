@@ -184,6 +184,38 @@ def test_multi_head_confidence_is_stop_gradient_input() -> None:
 	assert all(confidence.grad is None for confidence in confidences.values())
 
 
+def test_multi_head_empty_supervision_keeps_loss_connected_to_autograd() -> None:
+	heads = _heads()
+	tokens = torch.randn(1, 4, 3, requires_grad=True)
+	batch = _batch()
+	for target in batch['strat_multi_targets'].values():  # type: ignore[union-attr]
+		target['valid_mask'].zero_()  # type: ignore[index]
+
+	losses = compute_strat_hmm_multi_head_losses(
+		heads=heads,
+		encoded={'tokens': tokens},
+		teacher_encoded=None,
+		batch=batch,
+		loss_config={
+			'prototype_weight': 1.0,
+			'usage_weight': 0.0,
+			'consistency_weight': 1.0,
+			'distillation_weight': 0.0,
+		},
+		pseudo_target_config={'min_confidence': 0.0},
+	)
+
+	assert losses['loss'].item() == 0.0
+	assert losses['loss'].requires_grad
+	losses['loss'].backward()
+	assert tokens.grad is not None
+	assert torch.isfinite(tokens.grad).all()
+	assert all(
+		parameter.grad is not None and torch.isfinite(parameter.grad).all()
+		for parameter in heads.parameters()
+	)
+
+
 def _heads() -> MultiResolutionOrderedPrototypeHeads:
 	return MultiResolutionOrderedPrototypeHeads(
 		feature_dim=3,

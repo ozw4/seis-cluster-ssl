@@ -529,14 +529,15 @@ def _multi_head_checkpoint_identity(  # noqa: PLR0913
 	}
 	if not isinstance(control_identity, Mapping):
 		raise TypeError('multi-head checkpoint requires control identity')
-	inputs = control_identity.get('input_identities')
-	if isinstance(inputs, Mapping):
-		result['teacher_checkpoint_sha256'] = _identity_sha256(
-			inputs.get('teacher_checkpoint')
-		)
-		result['student_init_checkpoint_sha256'] = _identity_sha256(
-			inputs.get('student_init_checkpoint')
-		)
+	inputs = _required_mapping(control_identity, 'input_identities')
+	result['teacher_checkpoint_sha256'] = _required_sha256(
+		_required_mapping(inputs, 'teacher_checkpoint').get('sha256'),
+		'input_identities.teacher_checkpoint.sha256',
+	)
+	result['student_init_checkpoint_sha256'] = _required_sha256(
+		_required_mapping(inputs, 'student_init_checkpoint').get('sha256'),
+		'input_identities.student_init_checkpoint.sha256',
+	)
 	initial_states = control_identity.get('initial_state_sha256')
 	if not isinstance(initial_states, Mapping):
 		raise TypeError('multi-head checkpoint requires initial state hashes')
@@ -579,6 +580,14 @@ def _validate_multi_head_identity(
 	_required_sha256(
 		identity.get('initial_head_state_sha256'),
 		'checkpoint initial_head_state_sha256',
+	)
+	_required_sha256(
+		identity.get('teacher_checkpoint_sha256'),
+		'checkpoint teacher_checkpoint_sha256',
+	)
+	_required_sha256(
+		identity.get('student_init_checkpoint_sha256'),
+		'checkpoint student_init_checkpoint_sha256',
 	)
 	target = identity.get('target_manifest')
 	if not isinstance(target, Mapping):
@@ -772,10 +781,6 @@ def _canonical_sha256(value: object) -> str:
 			allow_nan=False,
 		).encode('utf-8')
 	).hexdigest()
-
-
-def _identity_sha256(value: object) -> object:
-	return value.get('sha256') if isinstance(value, Mapping) else None
 
 
 def _optimizer_group_identity(
