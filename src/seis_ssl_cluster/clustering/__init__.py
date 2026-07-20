@@ -30,11 +30,6 @@ from seis_ssl_cluster.clustering.sampling import (
 	SampledTokens,
 	sample_valid_embedding_tokens,
 )
-from seis_ssl_cluster.clustering.summaries import (
-	ClusterSummaryArtifacts,
-	ClusterSummaryInput,
-	write_cluster_summaries,
-)
 
 _KMEANS_EXPORTS = {
 	'ClusteringRunResult',
@@ -53,6 +48,11 @@ _WRITER_EXPORTS = {
 	'write_labels_for_k',
 	'write_labels_for_models',
 	'write_model_artifacts',
+}
+_SUMMARY_EXPORTS = {
+	'ClusterSummaryArtifacts',
+	'ClusterSummaryInput',
+	'write_cluster_summaries',
 }
 
 __all__ = [
@@ -104,5 +104,8 @@ def __getattr__(name: str) -> object:
 	if name in _WRITER_EXPORTS:
 		writer = importlib.import_module('seis_ssl_cluster.clustering.writer')
 		return getattr(writer, name)
+	if name in _SUMMARY_EXPORTS:
+		summaries = importlib.import_module('seis_ssl_cluster.clustering.summaries')
+		return getattr(summaries, name)
 	msg = f'module {__name__!r} has no attribute {name!r}'
 	raise AttributeError(msg)

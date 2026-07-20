@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import importlib
+
 from seis_ssl_cluster.stratigraphy.boundary_weights import (
 	boundary_distance_tokens,
 	boundary_weight_tokens,
@@ -10,11 +12,6 @@ from seis_ssl_cluster.stratigraphy.export import (
 	ExportedPseudoTargetResult,
 	export_hmm_cluster_labels_as_pseudo_targets,
 	prepare_hmm_cluster_label_pseudo_target_exports,
-)
-from seis_ssl_cluster.stratigraphy.hmm_decode import (
-	LogitHMMPseudoTarget,
-	decode_ordered_logits_survey,
-	emission_costs_from_logits,
 )
 from seis_ssl_cluster.stratigraphy.losses import (
 	feature_distillation_loss,
@@ -30,8 +27,12 @@ from seis_ssl_cluster.stratigraphy.multi_head import (
 	validate_multi_head_target_manifest,
 )
 from seis_ssl_cluster.stratigraphy.prototypes import (
+	MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
+	MultiResolutionOrderedPrototypeHeads,
+	MultiResolutionOrderedPrototypeOutput,
 	OrderedPrototypeHead,
 	OrderedPrototypeOutput,
+	expected_normalized_order_coordinate,
 )
 from seis_ssl_cluster.stratigraphy.shuffle_targets import (
 	GLOBAL_VALID_TOKENS,
@@ -52,10 +53,19 @@ from seis_ssl_cluster.stratigraphy.targets import (
 	write_pseudo_target,
 )
 
+_HMM_DECODE_EXPORTS = {
+	'LogitHMMPseudoTarget',
+	'decode_ordered_logits_survey',
+	'emission_costs_from_logits',
+}
+
 __all__ = [
 	'GLOBAL_VALID_TOKENS',
+	'MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1',
 	'ExportedPseudoTargetResult',
 	'LogitHMMPseudoTarget',
+	'MultiResolutionOrderedPrototypeHeads',
+	'MultiResolutionOrderedPrototypeOutput',
 	'OrderedPrototypeHead',
 	'OrderedPrototypeOutput',
 	'ShuffledPseudoTargetResult',
@@ -69,6 +79,7 @@ __all__ = [
 	'decode_ordered_logits_survey',
 	'discover_pseudo_target_inputs',
 	'emission_costs_from_logits',
+	'expected_normalized_order_coordinate',
 	'export_hmm_cluster_labels_as_pseudo_targets',
 	'feature_distillation_loss',
 	'load_multi_head_target_manifest',
@@ -87,3 +98,12 @@ __all__ = [
 	'validate_pseudo_target_arrays',
 	'write_pseudo_target',
 ]
+
+
+def __getattr__(name: str) -> object:
+	"""Lazily import HMM decoding, which needs optional clustering dependencies."""
+	if name in _HMM_DECODE_EXPORTS:
+		hmm_decode = importlib.import_module('seis_ssl_cluster.stratigraphy.hmm_decode')
+		return getattr(hmm_decode, name)
+	msg = f'module {__name__!r} has no attribute {name!r}'
+	raise AttributeError(msg)

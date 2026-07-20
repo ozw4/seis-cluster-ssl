@@ -68,6 +68,10 @@ from seis_ssl_cluster.config.schema import (
 	SUPPORTED_RUNTIME_CHECK_MODES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
+from seis_ssl_cluster.stratigraphy.prototypes import (
+	MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
+	validate_multi_resolution_head_ks,
+)
 
 Config: TypeAlias = dict[str, object]
 _T = TypeVar('_T', bound=Mapping[str, object])
@@ -152,7 +156,7 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 	'zero_mask': frozenset(DEFAULT_ZERO_MASK_CONTRACT),
 }
 
-_STRAT_HMM_MULTI_HEAD_SPEC = 'multi_resolution_ordered_prototypes_v1'
+_STRAT_HMM_MULTI_HEAD_SPEC = MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1
 _STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY = 'normalized_order_smooth_l1_v1'
 
 # These fields are deliberately centralized so checkpoint identity construction can
@@ -714,19 +718,7 @@ def _validate_strat_hmm_pretext_loss(
 
 
 def _validate_head_ks(value: object, *, prefix: str) -> None:
-	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
-		raise TypeError(f'{prefix}.ks must be a sequence of integers')
-	if len(value) < 2:
-		raise ValueError(f'{prefix}.ks must contain at least two heads')
-	if any(isinstance(k, bool) or not isinstance(k, int) for k in value):
-		raise TypeError(f'{prefix}.ks must contain integers and not bools')
-	ks = tuple(value)
-	if any(k < 2 for k in ks):
-		raise ValueError(f'{prefix}.ks values must be at least 2')
-	if tuple(sorted(ks)) != ks:
-		raise ValueError(f'{prefix}.ks must be strictly increasing')
-	if len(set(ks)) != len(ks):
-		raise ValueError(f'{prefix}.ks must not contain duplicates')
+	validate_multi_resolution_head_ks(value, prefix=prefix)
 
 
 def _validate_strat_hmm_multi_head_manifest(
