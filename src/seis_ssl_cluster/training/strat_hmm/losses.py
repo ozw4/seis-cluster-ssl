@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from itertools import combinations
+from typing import NamedTuple
 
 import torch
 
 from seis_ssl_cluster.stratigraphy import (
+	MultiResolutionOrderedPrototypeHeads,
 	OrderedPrototypeHead,
+	expected_normalized_order_coordinate,
 	feature_distillation_loss,
 	structured_hmm_prototype_loss,
 	usage_entropy_floor_loss,
@@ -17,9 +21,6 @@ from seis_ssl_cluster.training.strat_hmm.runtime import (
 	_float_config,
 	_required_tensor,
 )
-
-if TYPE_CHECKING:
-	from collections.abc import Mapping
 
 
 def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
@@ -173,6 +174,361 @@ def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	}
 
 
+def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
+	*,
+	heads: MultiResolutionOrderedPrototypeHeads,
+	encoded: Mapping[str, object],
+	teacher_encoded: Mapping[str, object] | None,
+	batch: Mapping[str, object],
+	loss_config: Mapping[str, object],
+	pseudo_target_config: Mapping[str, object],
+) -> dict[str, torch.Tensor]:
+	"""Compute equally weighted ordered-prototype losses across resolutions."""
+	tokens = _encoded_tokens(encoded)
+	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
+	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
+	consistency_weight = _float_config(loss_config, 'consistency_weight', 0.0)
+	consistency_beta = _float_config(loss_config, 'consistency_beta', 0.1)
+	if consistency_weight < 0.0:
+		raise ValueError('consistency_weight must be nonnegative')
+	if consistency_beta <= 0.0:
+		raise ValueError('consistency_beta must be positive')
+
+	outputs = heads(tokens)
+	head_ks = heads.head_ks
+	head_keys = tuple(_head_key(k) for k in head_ks)
+	if outputs.head_ks != head_ks or tuple(outputs.outputs) != head_keys:
+		raise ValueError('multi-head model output does not match configured heads')
+	targets = _multi_head_targets(batch, head_keys)
+	min_confidence = _float_config(pseudo_target_config, 'min_confidence', 0.0)
+
+	reference = tokens
+	student_valid_mask = _multi_head_student_valid_mask(encoded, reference)
+	shared_pseudo_valid_mask: torch.Tensor | None = None
+	shared_pseudo_valid_shape: tuple[int, ...] | None = None
+	head_values: dict[str, _MultiHeadTargetValues] = {}
+	for k, head_key in zip(head_ks, head_keys, strict=True):
+		logits = outputs.outputs[head_key].logits
+		if logits.shape[-1] != k:
+			raise ValueError(
+				f'multi-head {head_key!r} logits last dimension must equal {k}',
+			)
+		values = _multi_head_target_values(
+			targets[head_key],
+			reference=logits,
+			head_key=head_key,
+		)
+		_validate_multi_head_labels(
+			values.labels,
+			valid_mask=values.valid_mask,
+			num_prototypes=k,
+			head_key=head_key,
+		)
+		if shared_pseudo_valid_mask is None:
+			shared_pseudo_valid_mask = values.valid_mask
+			shared_pseudo_valid_shape = tuple(values.valid_mask.shape)
+		elif tuple(values.valid_mask.shape) != shared_pseudo_valid_shape:
+			raise ValueError('all multi-head valid mask shapes must match')
+		elif not torch.equal(values.valid_mask, shared_pseudo_valid_mask):
+			raise ValueError('all multi-head valid masks must match')
+		head_values[head_key] = values
+
+	if shared_pseudo_valid_mask is None:  # pragma: no cover - model needs two heads
+		raise AssertionError('multi-head targets were unexpectedly empty')
+	distillation_valid_mask = shared_pseudo_valid_mask
+	if student_valid_mask is not None:
+		distillation_valid_mask = distillation_valid_mask & student_valid_mask
+	if teacher_encoded is not None:
+		teacher_valid_mask = _multi_head_student_valid_mask(
+			teacher_encoded,
+			reference,
+		)
+		if teacher_valid_mask is not None:
+			distillation_valid_mask = distillation_valid_mask & teacher_valid_mask
+
+	entropy_floor = loss_config.get('entropy_floor')
+	prototype_losses: list[torch.Tensor] = []
+	usage_losses: list[torch.Tensor] = []
+	supervised_valid_fractions: list[torch.Tensor] = []
+	result: dict[str, torch.Tensor] = {}
+	for k, head_key in zip(head_ks, head_keys, strict=True):
+		logits = outputs.outputs[head_key].logits
+		values = head_values[head_key]
+		valid_mask = values.valid_mask
+		if student_valid_mask is not None:
+			valid_mask = valid_mask & student_valid_mask
+		if min_confidence > 0.0:
+			valid_mask = valid_mask & values.confidence.ge(min_confidence)
+		probs = torch.nn.functional.softmax(logits, dim=-1)
+		if prototype_weight > 0.0 and bool(valid_mask.any().item()):
+			prototype_loss = structured_hmm_prototype_loss(
+				logits,
+				values.labels,
+				valid_mask=valid_mask,
+				confidence=values.confidence,
+				boundary_weight=values.boundary_weight,
+			)
+		else:
+			prototype_loss = tokens.new_zeros(())
+		if usage_weight > 0.0 and bool(valid_mask.any().item()):
+			entropy_floor_value = (
+				0.5 * math.log(k)
+				if entropy_floor is None
+				else float(entropy_floor)
+			)
+			usage_loss = usage_entropy_floor_loss(
+				probs,
+				valid_mask=valid_mask,
+				entropy_floor=entropy_floor_value,
+			)
+		else:
+			usage_loss = tokens.new_zeros(())
+		prototype_losses.append(prototype_loss)
+		usage_losses.append(usage_loss)
+		supervised_valid_fractions.append(
+			_safe_fraction(valid_mask, dtype=tokens.dtype),
+		)
+		result[f'loss_prototype_{head_key}'] = prototype_loss
+		result[f'loss_usage_{head_key}'] = usage_loss
+		result[f'target_usage_entropy_{head_key}'] = _target_usage_entropy(
+			values.labels,
+			valid_mask,
+			num_prototypes=k,
+		)
+		result[f'prototype_usage_entropy_{head_key}'] = _prototype_usage_entropy(
+			probs,
+			valid_mask,
+		)
+		result[f'mean_confidence_valid_{head_key}'] = _masked_mean(
+			values.confidence,
+			valid_mask,
+		)
+		head_values[head_key] = values._replace(valid_mask=valid_mask)
+
+	consistency_losses: list[torch.Tensor] = []
+	eligible_pair_count = 0
+	for first_k, second_k in combinations(sorted(head_ks), 2):
+		first_key = _head_key(first_k)
+		second_key = _head_key(second_k)
+		first = head_values[first_key]
+		second = head_values[second_key]
+		pair_valid = first.valid_mask & second.valid_mask
+		pair_weight = torch.sqrt(first.confidence * second.confidence)
+		pair_weight_sum = (pair_weight * pair_valid).sum()
+		pair_name = f'{first_key}_{second_key}'
+		if bool(pair_weight_sum.detach().gt(0.0).item()):
+			first_coordinate = expected_normalized_order_coordinate(
+				outputs.outputs[first_key].logits,
+			)
+			second_coordinate = expected_normalized_order_coordinate(
+				outputs.outputs[second_key].logits,
+			)
+			error = torch.nn.functional.smooth_l1_loss(
+				first_coordinate,
+				second_coordinate,
+				beta=consistency_beta,
+				reduction='none',
+			)
+			pair_loss = (pair_weight * error * pair_valid).sum() / pair_weight_sum
+			eligible_pair_count += 1
+		else:
+			pair_loss = tokens.new_zeros(())
+		consistency_losses.append(pair_loss)
+		result[f'loss_consistency_{pair_name}'] = pair_loss
+		result[f'mean_consistency_weight_{pair_name}'] = _masked_mean(
+			pair_weight,
+			pair_valid,
+		)
+		result[f'valid_consistency_token_fraction_{pair_name}'] = _safe_fraction(
+			pair_valid,
+			dtype=tokens.dtype,
+		)
+
+	prototype_loss = torch.stack(prototype_losses).mean()
+	usage_loss = torch.stack(usage_losses).mean()
+	consistency_loss = (
+		torch.stack(consistency_losses).sum() / eligible_pair_count
+		if eligible_pair_count > 0
+		else tokens.new_zeros(())
+	)
+	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
+	if distillation_weight > 0.0:
+		if teacher_encoded is None:
+			raise ValueError(
+				'teacher encoded tokens are required for feature distillation',
+			)
+		distillation_loss = (
+			feature_distillation_loss(
+				tokens,
+				_encoded_tokens(teacher_encoded),
+				valid_mask=distillation_valid_mask,
+			)
+			if bool(distillation_valid_mask.any().item())
+			else tokens.new_zeros(())
+		)
+	else:
+		distillation_loss = tokens.new_zeros(())
+	result.update(
+		{
+			'loss': (
+				prototype_weight * prototype_loss
+				+ usage_weight * usage_loss
+				+ consistency_weight * consistency_loss
+				+ distillation_weight * distillation_loss
+			),
+			'loss_prototype': prototype_loss,
+			'loss_usage': usage_loss,
+			'loss_consistency': consistency_loss,
+			'loss_distillation': distillation_loss,
+			'valid_supervised_token_fraction': torch.stack(
+				supervised_valid_fractions,
+			).mean(),
+			'valid_distillation_token_fraction': _safe_fraction(
+				distillation_valid_mask,
+				dtype=tokens.dtype,
+			),
+			'consistency_eligible_pair_count': tokens.new_tensor(
+				eligible_pair_count,
+			),
+		},
+	)
+	return result
+
+
+class _MultiHeadTargetValues(NamedTuple):
+	labels: torch.Tensor
+	confidence: torch.Tensor
+	boundary_weight: torch.Tensor
+	valid_mask: torch.Tensor
+
+
+def _head_key(k: int) -> str:
+	return f'k{k}'
+
+
+def _multi_head_targets(
+	batch: Mapping[str, object],
+	head_keys: tuple[str, ...],
+) -> Mapping[str, object]:
+	targets = batch.get('strat_multi_targets')
+	if not isinstance(targets, Mapping):
+		raise TypeError('strat_multi_targets must be a mapping')
+	if set(targets) != set(head_keys):
+		raise ValueError(
+			'strat_multi_targets keys must exactly match multi-head model keys; '
+			f'got {tuple(targets)!r}, expected {head_keys!r}',
+		)
+	return targets
+
+
+def _multi_head_target_values(
+	target: object,
+	*,
+	reference: torch.Tensor,
+	head_key: str,
+) -> _MultiHeadTargetValues:
+	if not isinstance(target, Mapping):
+		raise TypeError(f'strat_multi_targets[{head_key!r}] must be a mapping')
+	required_keys = {'labels', 'confidence', 'boundary_weight', 'valid_mask'}
+	if set(target) != required_keys:
+		raise ValueError(
+			f'strat_multi_targets[{head_key!r}] must contain exactly '
+			"'labels', 'confidence', 'boundary_weight', and 'valid_mask'",
+		)
+	raw_labels = _required_tensor(target, 'labels')
+	raw_confidence = _required_tensor(target, 'confidence')
+	raw_boundary_weight = _required_tensor(target, 'boundary_weight')
+	raw_valid_mask = _required_tensor(target, 'valid_mask')
+	if (
+		tuple(raw_labels.shape) != tuple(raw_confidence.shape)
+		or tuple(raw_confidence.shape) != tuple(raw_boundary_weight.shape)
+		or tuple(raw_confidence.shape) != tuple(raw_valid_mask.shape)
+	):
+		raise ValueError(
+			f'multi-head {head_key!r} labels, confidence, boundary weight, and '
+			'valid mask shapes must match',
+		)
+	labels = _flatten_token_tensor(
+		raw_labels,
+		reference,
+		f'strat_multi_targets[{head_key!r}].labels',
+	).long()
+	confidence = _flatten_token_tensor(
+		raw_confidence,
+		reference,
+		f'strat_multi_targets[{head_key!r}].confidence',
+	)
+	boundary_weight = _flatten_token_tensor(
+		raw_boundary_weight,
+		reference,
+		f'strat_multi_targets[{head_key!r}].boundary_weight',
+	)
+	valid_mask = _flatten_token_tensor(
+		raw_valid_mask,
+		reference,
+		f'strat_multi_targets[{head_key!r}].valid_mask',
+	).bool()
+	_validate_weight_tensor_pair(confidence, boundary_weight, reference)
+	if not bool(torch.isfinite(confidence).all().item()):
+		raise ValueError(f'multi-head {head_key!r} confidence must be finite')
+	if bool(confidence.lt(0.0).any().item()):
+		raise ValueError(f'multi-head {head_key!r} confidence must be nonnegative')
+	if not bool(torch.isfinite(boundary_weight).all().item()):
+		raise ValueError(f'multi-head {head_key!r} boundary weight must be finite')
+	if bool(boundary_weight.lt(0.0).any().item()):
+		raise ValueError(
+			f'multi-head {head_key!r} boundary weight must be nonnegative',
+		)
+	if not bool(torch.all(boundary_weight[valid_mask] == 1.0).item()):
+		raise ValueError(
+			'multi-head boundary weight must be one for every valid token',
+		)
+	return _MultiHeadTargetValues(
+		labels=labels,
+		confidence=confidence.to(dtype=reference.dtype).detach(),
+		boundary_weight=boundary_weight.to(dtype=reference.dtype),
+		valid_mask=valid_mask,
+	)
+
+
+def _multi_head_student_valid_mask(
+	encoded: Mapping[str, object],
+	reference: torch.Tensor,
+) -> torch.Tensor | None:
+	value = encoded.get('token_valid_mask')
+	return _encoded_token_valid_mask(value, reference) if value is not None else None
+
+
+def _validate_multi_head_labels(
+	labels: torch.Tensor,
+	*,
+	valid_mask: torch.Tensor,
+	num_prototypes: int,
+	head_key: str,
+) -> None:
+	"""Reject invalid pseudo-target labels before loss weights are considered."""
+	selected_labels = labels[valid_mask]
+	if bool(selected_labels.lt(0).any().item()) or bool(
+		selected_labels.ge(num_prototypes).any().item(),
+	):
+		raise ValueError(
+		f'multi-head {head_key!r} valid labels must be in prototype range '
+		f'[0, {num_prototypes})',
+	)
+
+
+def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+	if not bool(mask.any().item()):
+		return values.new_zeros(())
+	return values[mask].mean()
+
+
+def _safe_fraction(mask: torch.Tensor, *, dtype: torch.dtype) -> torch.Tensor:
+	if mask.numel() == 0:
+		return torch.zeros((), device=mask.device, dtype=dtype)
+	return mask.to(dtype=dtype).mean()
+
+
 def _encoded_tokens(encoded: Mapping[str, object]) -> torch.Tensor:
 	value = encoded.get('tokens')
 	if not isinstance(value, torch.Tensor):
@@ -273,5 +629,6 @@ _strat_head_losses = compute_strat_hmm_pretext_losses
 
 
 __all__ = [
+	'compute_strat_hmm_multi_head_losses',
 	'compute_strat_hmm_pretext_losses',
 ]
