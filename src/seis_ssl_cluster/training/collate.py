@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import torch
 
 if TYPE_CHECKING:
-	from collections.abc import Mapping, Sequence
+	from collections.abc import Sequence
 
 
 def mae_collate_fn(
@@ -51,6 +52,32 @@ def strat_pseudo_target_collate_fn(
 	}
 
 
+def strat_multi_head_target_collate_fn(
+	samples: Sequence[Mapping[str, object]],
+) -> dict[str, torch.Tensor | object]:
+	"""Collate ordered nested stratigraphic pseudo-target heads."""
+	if not samples:
+		msg = 'samples must contain at least one sample'
+		raise ValueError(msg)
+	head_keys, fields_by_head = _multi_head_contract(samples[0])
+	for sample in samples[1:]:
+		other_head_keys, _ = _multi_head_contract(sample)
+		if other_head_keys != head_keys:
+			raise ValueError('samples must have identical multi-head target order')
+	targets: dict[str, dict[str, torch.Tensor]] = {}
+	for head_key in head_keys:
+		targets[head_key] = {
+			field: _stack_multi_head_field(samples, head_key, field)
+			for field in fields_by_head[head_key]
+		}
+	return {
+		'x': _stack_arrays(samples, 'x'),
+		'local_valid_mask': _stack_arrays(samples, 'local_valid_mask'),
+		'strat_multi_targets': targets,
+		'coords': [sample.get('coords') for sample in samples],
+	}
+
+
 def move_batch_to_device(
 	batch: Mapping[str, object],
 	device: torch.device,
@@ -58,16 +85,42 @@ def move_batch_to_device(
 	non_blocking: bool = False,
 ) -> dict[str, object]:
 	"""Move tensor values in a batch to ``device`` while preserving metadata."""
-	return {
-		key: _move_tensor_to_device(
-			value,
-			device,
-			non_blocking=non_blocking,
+	return cast(
+		'dict[str, object]',
+		_move_batch_value(batch, device, non_blocking=non_blocking),
+	)
+
+
+def _move_batch_value(
+	value: object,
+	device: torch.device,
+	*,
+	non_blocking: bool,
+) -> object:
+	if isinstance(value, torch.Tensor):
+		return _move_tensor_to_device(value, device, non_blocking=non_blocking)
+	if isinstance(value, Mapping):
+		moved = {
+			key: _move_batch_value(item, device, non_blocking=non_blocking)
+			for key, item in value.items()
+		}
+		unchanged = all(moved[key] is item for key, item in value.items())
+		return value if unchanged else moved
+	if isinstance(value, list):
+		moved = [
+			_move_batch_value(item, device, non_blocking=non_blocking)
+			for item in value
+		]
+		unchanged = all(left is right for left, right in zip(moved, value, strict=True))
+		return value if unchanged else moved
+	if isinstance(value, tuple):
+		moved = tuple(
+			_move_batch_value(item, device, non_blocking=non_blocking)
+			for item in value
 		)
-		if isinstance(value, torch.Tensor)
-		else value
-		for key, value in batch.items()
-	}
+		unchanged = all(left is right for left, right in zip(moved, value, strict=True))
+		return value if unchanged else moved
+	return value
 
 
 def _move_tensor_to_device(
@@ -95,6 +148,60 @@ def _stack_arrays(
 				f'got {array.shape!r}, expected {first_shape!r}'
 			)
 			raise ValueError(msg)
+	return torch.stack([_to_tensor(array) for array in arrays], dim=0)
+
+
+def _multi_head_contract(
+	sample: Mapping[str, object],
+) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]]]:
+	targets = sample.get('strat_multi_targets')
+	if not isinstance(targets, Mapping):
+		raise TypeError('strat_multi_targets must be a mapping')
+	head_keys = tuple(targets)
+	if not head_keys:
+		raise ValueError('strat_multi_targets must contain at least one head')
+	fields_by_head: dict[str, tuple[str, ...]] = {}
+	for head_key in head_keys:
+		target = targets[head_key]
+		if not isinstance(head_key, str) or not isinstance(target, Mapping):
+			raise TypeError('strat_multi_targets must map string head keys to mappings')
+		fields = tuple(target)
+		if fields != ('labels', 'confidence', 'boundary_weight', 'valid_mask'):
+			raise ValueError(
+				f'strat_multi_targets[{head_key!r}] must contain ordered fields '
+				"('labels', 'confidence', 'boundary_weight', 'valid_mask')"
+			)
+		fields_by_head[head_key] = fields
+	return head_keys, fields_by_head
+
+
+def _stack_multi_head_field(
+	samples: Sequence[Mapping[str, object]],
+	head_key: str,
+	field: str,
+) -> torch.Tensor:
+	arrays: list[np.ndarray] = []
+	for sample in samples:
+		head_keys, _ = _multi_head_contract(sample)
+		if head_key not in head_keys:
+			raise ValueError(f'sample is missing multi-head target {head_key!r}')
+		targets = sample['strat_multi_targets']
+		if not isinstance(targets, Mapping):
+			raise TypeError('strat_multi_targets must be a mapping')
+		target = cast('Mapping[str, object]', targets[head_key])
+		arrays.append(_require_array(target, field))
+	first = arrays[0]
+	for array in arrays[1:]:
+		if array.shape != first.shape:
+			raise ValueError(
+				f'all {head_key!r} {field!r} arrays must share shape; got '
+				f'{array.shape!r}, expected {first.shape!r}'
+			)
+		if array.dtype != first.dtype:
+			raise TypeError(
+				f'all {head_key!r} {field!r} arrays must share dtype; got '
+				f'{array.dtype}, expected {first.dtype}'
+			)
 	return torch.stack([_to_tensor(array) for array in arrays], dim=0)
 
 
@@ -136,5 +243,6 @@ def _torch_dtype(array: np.ndarray) -> torch.dtype:
 __all__ = [
 	'mae_collate_fn',
 	'move_batch_to_device',
+	'strat_multi_head_target_collate_fn',
 	'strat_pseudo_target_collate_fn',
 ]
