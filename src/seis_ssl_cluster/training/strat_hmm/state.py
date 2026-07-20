@@ -11,7 +11,10 @@ if TYPE_CHECKING:
 	import torch
 
 	from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-	from seis_ssl_cluster.stratigraphy import OrderedPrototypeHead
+	from seis_ssl_cluster.stratigraphy import (
+		MultiResolutionOrderedPrototypeHeads,
+		OrderedPrototypeHead,
+	)
 
 
 @dataclass(frozen=True)
@@ -55,8 +58,23 @@ class StratHmmHeadOnlyComponents:
 	trainability_summary: TrainabilitySummary
 
 
+@dataclass(frozen=True)
+class StratHmmMultiHeadComponents:
+	"""Trainable components for multi-resolution strat HMM pretext training."""
+
+	student: AmplitudeMAE3D
+	teacher: AmplitudeMAE3D | None
+	heads: MultiResolutionOrderedPrototypeHeads
+	optimizer: torch.optim.Optimizer
+	mae_checkpoint_config: Mapping[str, object]
+	trainability_summary: TrainabilitySummary
+	head_spec: str
+	head_ks: tuple[int, ...]
+
+
 __all__ = [
 	'StratHmmHeadOnlyComponents',
+	'StratHmmMultiHeadComponents',
 	'StratHmmResumeState',
 	'StratHmmTrainingState',
 	'TrainabilitySummary',

@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, cast
 import torch
 
 from seis_ssl_cluster.embedding.extractor import build_model_from_config
-from seis_ssl_cluster.stratigraphy import OrderedPrototypeHead
+from seis_ssl_cluster.stratigraphy import (
+	MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
+	MultiResolutionOrderedPrototypeHeads,
+	OrderedPrototypeHead,
+)
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
 from seis_ssl_cluster.training.strat_hmm.runtime import (
 	_bool_config,
@@ -23,6 +27,7 @@ from seis_ssl_cluster.training.strat_hmm.runtime import (
 )
 from seis_ssl_cluster.training.strat_hmm.state import (
 	StratHmmHeadOnlyComponents,
+	StratHmmMultiHeadComponents,
 	TrainabilitySummary,
 )
 
@@ -49,50 +54,15 @@ def build_strat_hmm_head_only_components(
 	device: torch.device | str,
 ) -> StratHmmHeadOnlyComponents:
 	"""Build student MAE, optional teacher, ordered prototype head, and optimizer."""
-	resolved_device = torch.device(device)
-	student_config = _mapping(config, 'student')
 	loss_config = _mapping(config, 'loss')
-	unfreeze_top_blocks = _int_config(
-		student_config,
-		'unfreeze_top_blocks',
-		0,
+	student, teacher, teacher_config, trainability_summary = _build_student_teacher(
+		config,
+		device=device,
 	)
-	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
 	prototype_head_used = (
 		_float_config(loss_config, 'prototype_weight', 1.0) > 0.0
 		or _float_config(loss_config, 'usage_weight', 0.0) > 0.0
 	)
-	if unfreeze_top_blocks > 0 and distillation_weight <= 0.0:
-		msg = (
-			'loss.distillation_weight must be positive when '
-			'student.unfreeze_top_blocks is greater than 0'
-		)
-		raise ValueError(msg)
-	teacher_payload = load_checkpoint(
-		_path_config(_mapping(config, 'teacher'), 'checkpoint'),
-		map_location='cpu',
-	)
-	teacher_config = _checkpoint_config(teacher_payload)
-	_verify_model_geometry(teacher_config, _mapping(config, 'model'))
-	student = cast('AmplitudeMAE3D', build_model_from_config(teacher_config))
-	init_checkpoint = _student_init_checkpoint(config)
-	init_payload = load_checkpoint(init_checkpoint, map_location='cpu')
-	student.load_state_dict(_model_state_dict(init_payload))
-	trainability_summary = configure_student_trainability(
-		student,
-		unfreeze_top_blocks=unfreeze_top_blocks,
-	)
-	student.to(resolved_device)
-	student.eval()
-
-	teacher = None
-	if distillation_weight > 0.0:
-		teacher = cast('AmplitudeMAE3D', build_model_from_config(teacher_config))
-		teacher.load_state_dict(_model_state_dict(teacher_payload))
-		teacher.requires_grad_(requires_grad=False)
-		teacher.to(resolved_device)
-		teacher.eval()
-
 	head_config = _mapping(config, 'head')
 	head = OrderedPrototypeHead(
 		feature_dim=student.encoder_dim,
@@ -100,7 +70,7 @@ def build_strat_hmm_head_only_components(
 		projection_dim=_optional_int_config(head_config, 'projection_dim'),
 		temperature=_float_config(head_config, 'temperature', 0.1),
 		normalize=_bool_config(head_config, 'normalize', default=True),
-	).to(resolved_device)
+	).to(device)
 	if not prototype_head_used:
 		head.requires_grad_(requires_grad=False)
 	param_groups = _optimizer_param_groups(
@@ -129,6 +99,115 @@ def build_strat_hmm_head_only_components(
 		),
 		trainability_summary=trainability_summary,
 	)
+
+
+def build_strat_hmm_components(
+	config: Mapping[str, object],
+	*,
+	device: torch.device | str,
+) -> StratHmmHeadOnlyComponents | StratHmmMultiHeadComponents:
+	"""Build the configured single-head or multi-resolution training components."""
+	head_config = _mapping(config, 'head')
+	if 'spec' not in head_config:
+		return build_strat_hmm_head_only_components(config, device=device)
+	if head_config.get('spec') != MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1:
+		msg = f'unsupported strat HMM head.spec: {head_config.get("spec")!r}'
+		raise ValueError(msg)
+	return build_strat_hmm_multi_head_components(config, device=device)
+
+
+def build_strat_hmm_multi_head_components(
+	config: Mapping[str, object],
+	*,
+	device: torch.device | str,
+) -> StratHmmMultiHeadComponents:
+	"""Build shared MAE components and independent heads for every resolution."""
+	student, teacher, teacher_config, trainability_summary = _build_student_teacher(
+		config,
+		device=device,
+	)
+	head_config = _mapping(config, 'head')
+	heads = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=student.encoder_dim,
+		ks=cast('Sequence[int]', head_config['ks']),
+		projection_dim=_optional_int_config(head_config, 'projection_dim'),
+		temperature=_float_config(head_config, 'temperature', 0.1),
+		normalize=_bool_config(head_config, 'normalize', default=True),
+	).to(device)
+	train_config = _mapping(config, 'train')
+	param_groups = _optimizer_param_groups(
+		student=student,
+		head=heads,
+		train_config=train_config,
+	)
+	if not param_groups:
+		raise ValueError(
+			'multi-resolution ordered prototype heads have no trainable parameters'
+		)
+	optimizer = torch.optim.AdamW(
+		param_groups,
+		weight_decay=_float_config(train_config, 'weight_decay', 0.05),
+	)
+	return StratHmmMultiHeadComponents(
+		student=student,
+		teacher=teacher,
+		heads=heads,
+		optimizer=optimizer,
+		mae_checkpoint_config=_extraction_compatible_config(
+			teacher_config,
+			output_root=_path_config(_mapping(config, 'paths'), 'output_root'),
+			strat_data_config=_mapping(config, 'data'),
+			strat_zero_mask_config=_mapping(config, 'zero_mask'),
+		),
+		trainability_summary=trainability_summary,
+		head_spec=MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
+		head_ks=heads.head_ks,
+	)
+
+
+def _build_student_teacher(
+	config: Mapping[str, object],
+	*,
+	device: torch.device | str,
+) -> tuple[
+	AmplitudeMAE3D, AmplitudeMAE3D | None, Mapping[str, object], TrainabilitySummary
+]:
+	"""Build the shared MAE teacher/student pair for either head mode."""
+	resolved_device = torch.device(device)
+	student_config = _mapping(config, 'student')
+	distillation_weight = _float_config(
+		_mapping(config, 'loss'), 'distillation_weight', 0.0
+	)
+	unfreeze_top_blocks = _int_config(student_config, 'unfreeze_top_blocks', 0)
+	if unfreeze_top_blocks > 0 and distillation_weight <= 0.0:
+		raise ValueError(
+			'loss.distillation_weight must be positive when '
+			'student.unfreeze_top_blocks is greater than 0',
+		)
+	teacher_payload = load_checkpoint(
+		_path_config(_mapping(config, 'teacher'), 'checkpoint'), map_location='cpu'
+	)
+	teacher_config = _checkpoint_config(teacher_payload)
+	_verify_model_geometry(teacher_config, _mapping(config, 'model'))
+	student = cast('AmplitudeMAE3D', build_model_from_config(teacher_config))
+	student.load_state_dict(
+		_model_state_dict(
+			load_checkpoint(_student_init_checkpoint(config), map_location='cpu')
+		)
+	)
+	trainability_summary = configure_student_trainability(
+		student, unfreeze_top_blocks=unfreeze_top_blocks
+	)
+	student.to(resolved_device)
+	student.eval()
+	teacher = None
+	if distillation_weight > 0.0:
+		teacher = cast('AmplitudeMAE3D', build_model_from_config(teacher_config))
+		teacher.load_state_dict(_model_state_dict(teacher_payload))
+		teacher.requires_grad_(requires_grad=False)
+		teacher.to(resolved_device)
+		teacher.eval()
+	return student, teacher, teacher_config, trainability_summary
 
 
 def configure_student_trainability(
@@ -181,7 +260,7 @@ def configure_student_trainability(
 def _optimizer_param_groups(
 	*,
 	student: AmplitudeMAE3D,
-	head: OrderedPrototypeHead,
+	head: torch.nn.Module,
 	train_config: Mapping[str, object],
 ) -> list[dict[str, object]]:
 	head_params = [
@@ -215,14 +294,26 @@ def _optimizer_param_groups(
 		for parameter in module.parameters()
 		if parameter.requires_grad
 	}
-	_group_ids = {
-		id(parameter)
+	group_parameters = [
+		parameter
 		for group in param_groups
 		for parameter in cast('Sequence[torch.nn.Parameter]', group['params'])
-	}
+	]
+	_group_ids = {id(parameter) for parameter in group_parameters}
+	if len(_group_ids) != len(group_parameters):
+		raise ValueError('optimizer parameter groups contain duplicate parameters')
 	if _group_ids != _trainable_ids:
 		msg = 'optimizer parameter groups do not exactly match trainable parameters'
 		raise ValueError(msg)
+	encoder_ids = {id(parameter) for parameter in encoder_params}
+	if any(id(parameter) in encoder_ids for parameter in head_params):
+		raise ValueError('head and encoder optimizer parameters must not overlap')
+	if any(
+		parameter.requires_grad
+		for parameter in student.parameters()
+		if id(parameter) not in encoder_ids
+	):
+		raise ValueError('only encoder parameters may be trainable in the student')
 	return param_groups
 
 
@@ -305,7 +396,10 @@ def _extraction_compatible_config(
 
 __all__ = [
 	'StratHmmHeadOnlyComponents',
+	'StratHmmMultiHeadComponents',
 	'TrainabilitySummary',
+	'build_strat_hmm_components',
 	'build_strat_hmm_head_only_components',
+	'build_strat_hmm_multi_head_components',
 	'configure_student_trainability',
 ]

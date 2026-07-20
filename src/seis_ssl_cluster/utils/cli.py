@@ -53,7 +53,8 @@ def print_config_summary(  # noqa: C901
 	stage = cfg.get('stage')
 	rows = (
 		[]
-		if stage in {
+		if stage
+		in {
 			STAGE_EMBEDDING_EXTRACTION,
 			STAGE_CLUSTERING,
 			STAGE_CLUSTER_VISUALIZATION,
@@ -175,10 +176,12 @@ def _add_training_rows(
 	if 'huber_delta' in loss:
 		rows.append(('loss.huber_delta', loss.get('huber_delta')))
 	target_normalization = _mapping(loss.get('target_normalization'))
-	rows.append((
-		'loss.target_normalization.mode',
-		target_normalization.get('mode'),
-	))
+	rows.append(
+		(
+			'loss.target_normalization.mode',
+			target_normalization.get('mode'),
+		)
+	)
 	if target_normalization.get('mode') == 'patch_zscore':
 		rows.extend(
 			[
@@ -213,6 +216,31 @@ def _add_strat_hmm_pretext_rows(
 	head = _mapping(cfg.get('head'))
 	loss = _mapping(cfg.get('loss'))
 	train = _mapping(cfg.get('train'))
+	if 'spec' in head:
+		identity = _mapping(cfg.get('identity'))
+		scientific_identity = _mapping(identity.get('scientific_identity'))
+		rows.extend(
+			[
+				('pseudo_targets.manifest', pseudo_targets.get('manifest')),
+				('teacher.checkpoint', teacher.get('checkpoint')),
+				('student.init_checkpoint', student.get('init_checkpoint')),
+				('student.unfreeze_top_blocks', student.get('unfreeze_top_blocks')),
+				('head.spec', head.get('spec')),
+				('head.ks', head.get('ks')),
+				('head.count', len(head.get('ks', []))),
+				('head.prototypes_per_head', head.get('ks')),
+				('loss.consistency_weight', loss.get('consistency_weight')),
+				('loss.consistency_beta', loss.get('consistency_beta')),
+				(
+					'identity.consistency_policy',
+					scientific_identity.get('consistency_policy'),
+				),
+				('loss.prototype_usage_semantics', 'mean_across_heads'),
+				('train.head_lr', train.get('lr')),
+				('train.encoder_lr', train.get('encoder_lr')),
+			]
+		)
+		return
 	rows.extend(
 		[
 			('manifests.train', manifests.get('train')),

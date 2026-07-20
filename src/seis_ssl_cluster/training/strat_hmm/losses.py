@@ -39,13 +39,19 @@ def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	They are zero when that mask is empty.
 	"""
 	tokens = _encoded_tokens(encoded)
+	if not bool(torch.isfinite(tokens).all().item()):
+		raise FloatingPointError('non-finite student encoded tokens')
+	if teacher_encoded is not None and not bool(
+		torch.isfinite(_encoded_tokens(teacher_encoded)).all().item()
+	):
+		raise FloatingPointError('non-finite teacher encoded tokens')
 	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
 	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
 	logits = (
-		head(tokens).logits
-		if prototype_weight > 0.0 or usage_weight > 0.0
-		else None
+		head(tokens).logits if prototype_weight > 0.0 or usage_weight > 0.0 else None
 	)
+	if logits is not None and not bool(torch.isfinite(logits).all().item()):
+		raise FloatingPointError('non-finite ordered prototype logits')
 	reference = logits if logits is not None else tokens
 	labels = _flatten_token_tensor(
 		_required_tensor(batch, 'strat_labels'),
@@ -117,9 +123,7 @@ def compute_strat_hmm_pretext_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		)
 	else:
 		probs = (
-			torch.nn.functional.softmax(logits, dim=-1)
-			if logits is not None
-			else None
+			torch.nn.functional.softmax(logits, dim=-1) if logits is not None else None
 		)
 		usage_loss = tokens.new_zeros(())
 	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
@@ -185,6 +189,12 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 ) -> dict[str, torch.Tensor]:
 	"""Compute equally weighted ordered-prototype losses across resolutions."""
 	tokens = _encoded_tokens(encoded)
+	if not bool(torch.isfinite(tokens).all().item()):
+		raise FloatingPointError('non-finite student encoded tokens')
+	if teacher_encoded is not None and not bool(
+		torch.isfinite(_encoded_tokens(teacher_encoded)).all().item()
+	):
+		raise FloatingPointError('non-finite teacher encoded tokens')
 	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
 	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
 	consistency_weight = _float_config(loss_config, 'consistency_weight', 0.0)
@@ -209,6 +219,8 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 	head_values: dict[str, _MultiHeadTargetValues] = {}
 	for k, head_key in zip(head_ks, head_keys, strict=True):
 		logits = outputs.outputs[head_key].logits
+		if not bool(torch.isfinite(logits).all().item()):
+			raise FloatingPointError(f'non-finite multi-head logits for {head_key}')
 		if logits.shape[-1] != k:
 			raise ValueError(
 				f'multi-head {head_key!r} logits last dimension must equal {k}',
@@ -272,9 +284,7 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 			prototype_loss = tokens.new_zeros(())
 		if usage_weight > 0.0 and bool(valid_mask.any().item()):
 			entropy_floor_value = (
-				0.5 * math.log(k)
-				if entropy_floor is None
-				else float(entropy_floor)
+				0.5 * math.log(k) if entropy_floor is None else float(entropy_floor)
 			)
 			usage_loss = usage_entropy_floor_loss(
 				probs,
@@ -512,9 +522,9 @@ def _validate_multi_head_labels(
 		selected_labels.ge(num_prototypes).any().item(),
 	):
 		raise ValueError(
-		f'multi-head {head_key!r} valid labels must be in prototype range '
-		f'[0, {num_prototypes})',
-	)
+			f'multi-head {head_key!r} valid labels must be in prototype range '
+			f'[0, {num_prototypes})',
+		)
 
 
 def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -601,9 +611,7 @@ def _target_usage_entropy(
 	*,
 	num_prototypes: int,
 ) -> torch.Tensor:
-	selected = labels[
-		valid_mask & labels.ge(0) & labels.lt(num_prototypes)
-	]
+	selected = labels[valid_mask & labels.ge(0) & labels.lt(num_prototypes)]
 	if selected.numel() == 0:
 		return labels.new_tensor(0.0, dtype=torch.float32)
 	counts = torch.bincount(
