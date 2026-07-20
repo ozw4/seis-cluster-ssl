@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 
-from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
+from seis_ssl_cluster.stratigraphy.multi_head import (
+	load_multi_head_target_manifest,
+	validate_multi_head_target_reference,
+)
 from seis_ssl_cluster.stratigraphy.targets import (
 	StratPseudoTargetArrays,
 	StratPseudoTargetInput,
@@ -514,8 +517,11 @@ class MultiHeadStratPseudoTargetProvider:
 def load_strat_multi_head_target_manifest(
 	path: str | Path,
 ) -> StratMultiHeadTargetManifest:
-	"""Load #268's validated manifest into the dataset-facing input contract."""
-	payload = load_multi_head_target_manifest(path)
+	"""Load #268's references without materializing pseudo-target arrays."""
+	payload = load_multi_head_target_manifest(
+		path,
+		validate_array_semantics=False,
+	)
 	head_ks = tuple(cast('list[int]', payload['head_ks']))
 	common = cast('Mapping[str, object]', payload['common'])
 	heads = cast('Mapping[str, Mapping[str, object]]', payload['heads'])
@@ -576,18 +582,104 @@ def _coerce_multi_head_target_manifest(
 			f'{type(value).__name__}'
 		)
 		raise TypeError(msg)
-	if not value.head_ks or tuple(sorted(value.head_ks)) != value.head_ks:
-		raise ValueError('multi-head target head_ks must be non-empty and ascending')
+	_validate_multi_head_target_manifest_header(value)
 	for survey_id, inputs in value.by_survey.items():
-		if tuple(item.k for item in inputs) != value.head_ks:
-			raise ValueError(
-				f'multi-head target inputs for {survey_id!r} must match head_ks'
-			)
-		if any(item.survey_id != survey_id for item in inputs):
-			raise ValueError(
-				f'multi-head target input survey ids must match {survey_id!r}'
-			)
+		_validate_multi_head_target_survey(value, survey_id, inputs)
 	return value
+
+
+def _validate_multi_head_target_manifest_header(
+	value: StratMultiHeadTargetManifest,
+) -> None:
+	if (
+		len(value.head_ks) < 2
+		or any(isinstance(k, bool) or not isinstance(k, int) for k in value.head_ks)
+		or any(k < 2 for k in value.head_ks)
+		or tuple(sorted(value.head_ks)) != value.head_ks
+		or len(set(value.head_ks)) != len(value.head_ks)
+	):
+		raise ValueError(
+			'multi-head target head_ks must be unique ascending integers >= 2 '
+			'with at least two heads'
+		)
+	if not isinstance(value.by_survey, Mapping):
+		raise TypeError('multi-head target by_survey must be a mapping')
+	if not isinstance(value.common_valid_token_sha256, Mapping):
+		raise TypeError('multi-head target common valid-token hashes must be a mapping')
+	if not value.by_survey:
+		raise ValueError('multi-head target manifest must contain at least one survey')
+	if set(value.common_valid_token_sha256) != set(value.by_survey):
+		raise ValueError(
+			'multi-head target common valid-token hashes must match survey inputs'
+		)
+
+
+def _validate_multi_head_target_survey(
+	manifest: StratMultiHeadTargetManifest,
+	survey_id: object,
+	inputs: object,
+) -> None:
+	if not isinstance(survey_id, str) or not survey_id:
+		raise TypeError('multi-head target survey ids must be non-empty strings')
+	if not isinstance(inputs, tuple):
+		raise TypeError(f'multi-head target inputs for {survey_id!r} must be a tuple')
+	if not all(isinstance(item, StratMultiHeadTargetInput) for item in inputs):
+		invalid = next(
+			item
+			for item in inputs
+			if not isinstance(item, StratMultiHeadTargetInput)
+		)
+		raise TypeError(
+			'multi-head target inputs must contain StratMultiHeadTargetInput items; '
+			f'got {type(invalid).__name__}'
+		)
+	if tuple(item.k for item in inputs) != manifest.head_ks:
+		raise ValueError(
+			f'multi-head target inputs for {survey_id!r} must match head_ks'
+		)
+	common_valid_hash = manifest.common_valid_token_sha256[survey_id]
+	if not isinstance(common_valid_hash, str):
+		raise TypeError(
+			f'multi-head target valid-token hash for {survey_id!r} must be a string'
+		)
+	for item in inputs:
+		_validate_multi_head_target_input(item, survey_id, common_valid_hash)
+
+
+def _validate_multi_head_target_input(
+	item: StratMultiHeadTargetInput,
+	survey_id: str,
+	common_valid_hash: str,
+) -> None:
+	if item.survey_id != survey_id:
+		raise ValueError(
+			f'multi-head target input survey ids must match {survey_id!r}'
+		)
+	if not all(
+		isinstance(path, Path)
+		for path in (
+			item.labels_path,
+			item.confidence_path,
+			item.valid_tokens_path,
+			item.metadata_path,
+		)
+	):
+		raise TypeError('multi-head target artifact paths must be Path instances')
+	validate_multi_head_target_reference(
+		k=item.k,
+		survey_id=survey_id,
+		labels_path=item.labels_path,
+		confidence_path=item.confidence_path,
+		valid_tokens_path=item.valid_tokens_path,
+		metadata_path=item.metadata_path,
+		hashes=item.hashes,
+		validate_array_semantics=True,
+	)
+	if item.hashes['valid_tokens'] != common_valid_hash:
+		raise ValueError(
+			f'multi-head target valid-token hash for {survey_id!r} does not '
+			'match the common contract'
+		)
 
 
 def _token_slices(context: TargetProviderContext) -> tuple[slice, ...]:

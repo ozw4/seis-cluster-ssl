@@ -142,6 +142,8 @@ def test_cli_dry_run_only_missing_does_not_quarantine_invalid_manifest(
 	embeddings, heads = _artifacts(tmp_path)
 	manifest = tmp_path / 'manifest.json'
 	manifest.write_text('{not valid JSON', encoding='utf-8')
+	predictable_dry_run = manifest.with_name(f'.{manifest.name}.dry-run')
+	predictable_dry_run.write_text('preserve', encoding='utf-8')
 	migration = tmp_path / 'migration.json'
 	migration.write_text('{"status": "PASS_WITH_NUMERIC_DRIFT"}', encoding='utf-8')
 	control = tmp_path / 'control.json'
@@ -178,6 +180,7 @@ def test_cli_dry_run_only_missing_does_not_quarantine_invalid_manifest(
 	) == 0
 
 	assert manifest.read_text(encoding='utf-8') == '{not valid JSON'
+	assert predictable_dry_run.read_text(encoding='utf-8') == 'preserve'
 	assert not manifest.with_name(f'{manifest.name}.quarantine').exists()
 	assert 'would quarantine:' in capsys.readouterr().out
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -65,13 +66,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 			print(f'execution: reused complete manifest {args.manifest}')
 			return 0
 	if args.dry_run:
-		payload = build_multi_head_target_manifest(
-			manifest_path=args.manifest.with_name(f'.{args.manifest.name}.dry-run'),
-			source_embedding_dir=args.source_embedding_dir,
-			head_roots=heads,
-			replay_k6_root=args.replay_k6_root,
-		)
-		args.manifest.with_name(f'.{args.manifest.name}.dry-run').unlink()
+		with tempfile.TemporaryDirectory(
+			prefix=f'{args.manifest.name}.dry-run.',
+		) as temporary_directory:
+			payload = build_multi_head_target_manifest(
+				manifest_path=Path(temporary_directory) / args.manifest.name,
+				source_embedding_dir=args.source_embedding_dir,
+				head_roots=heads,
+				replay_k6_root=args.replay_k6_root,
+			)
 		print(f'execution: dry-run; validated heads {payload["head_ks"]}')
 		return 0
 	payload = build_multi_head_target_manifest(

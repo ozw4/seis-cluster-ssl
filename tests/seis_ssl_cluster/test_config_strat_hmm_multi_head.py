@@ -7,6 +7,7 @@ import pytest
 
 from seis_ssl_cluster.clustering.features import file_sha256
 from seis_ssl_cluster.config.pretraining import resolve_strat_hmm_pretext_config
+from seis_ssl_cluster.stratigraphy import multi_head
 from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
 from tests.seis_ssl_cluster.test_config_strat_hmm_pretext import _minimal_config
 from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import _artifacts
@@ -41,6 +42,22 @@ def test_multi_head_config_resolves_with_manifest_and_scientific_identity(
 	assert scientific['model'] == resolved['model']
 	assert scientific['data'] == resolved['data']
 	assert scientific['zero_mask'] == resolved['zero_mask']
+
+
+def test_multi_head_config_resolution_does_not_load_target_arrays(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _multi_head_config(tmp_path)
+
+	def fail_array_load(*_args: object, **_kwargs: object) -> object:
+		raise AssertionError('config resolution must not load pseudo-target arrays')
+
+	monkeypatch.setattr(multi_head.np, 'load', fail_array_load)
+
+	resolved = resolve_strat_hmm_pretext_config(config)
+
+	assert resolved['head']['ks'] == [6, 8, 10]
 
 
 @pytest.mark.parametrize(

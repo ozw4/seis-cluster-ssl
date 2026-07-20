@@ -94,20 +94,37 @@ def build_multi_head_target_manifest(
 	return payload
 
 
-def load_multi_head_target_manifest(path: str | Path) -> dict[str, object]:
-	"""Load and validate a multi-head manifest, including reference hashes."""
+def load_multi_head_target_manifest(
+	path: str | Path,
+	*,
+	validate_array_semantics: bool = True,
+) -> dict[str, object]:
+	"""Load a manifest with strict reference validation.
+
+	Set ``validate_array_semantics`` to false for configuration-only consumers.
+	That mode verifies the schema, metadata identities, and every referenced file
+	digest without materializing pseudo-target arrays.  Full target-array semantic
+	validation remains the default for artifact validation and publication.
+	"""
 	try:
 		payload = json.loads(Path(path).read_text(encoding='utf-8'))
 	except json.JSONDecodeError as exc:
 		raise ValueError(f'multi-head manifest must be valid JSON: {path}') from exc
 	if not isinstance(payload, dict):
 		raise TypeError('multi-head manifest must be a JSON object')
-	validate_multi_head_target_manifest(payload, verify_hashes=True)
+	validate_multi_head_target_manifest(
+		payload,
+		verify_hashes=True,
+		validate_array_semantics=validate_array_semantics,
+	)
 	return payload
 
 
 def validate_multi_head_target_manifest(  # noqa: C901, PLR0912
-	payload: Mapping[str, object], *, verify_hashes: bool = False
+	payload: Mapping[str, object],
+	*,
+	verify_hashes: bool = False,
+	validate_array_semantics: bool = True,
 ) -> None:
 	"""Strictly validate schema-v1 references and shared target semantics."""
 	_required_keys(
@@ -202,13 +219,19 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912
 				survey_id=str(survey_id),
 			)
 			if verify_hashes:
-				_validate_reference_hashes(entry, k=k, survey_id=survey_id)
+				_validate_reference_hashes(
+					entry,
+					k=k,
+					survey_id=survey_id,
+					validate_array_semantics=validate_array_semantics,
+				)
 	if verify_hashes:
 		_validate_manifest_embedding_alignment(
 			head_values,
 			survey_ids,
 			source_embedding,
 			ks,
+			validate_array_semantics=validate_array_semantics,
 		)
 	_validate_k6_replay_parity(payload['k6_replay_parity'], survey_ids)
 
@@ -597,8 +620,15 @@ def _validate_manifest_embedding_alignment(
 	survey_ids: list[object],
 	source_embedding: Mapping[str, object],
 	ks: Sequence[int],
+	*,
+	validate_array_semantics: bool,
 ) -> None:
-	"""Recheck target-to-embedding alignment when loading a manifest."""
+	"""Recheck target-to-embedding alignment when loading a manifest.
+
+	The reference-only path proves mask identity from the already verified file
+	digests.  It deliberately avoids reading target or embedding arrays; the
+	publication path performs the additional shape and bitwise checks.
+	"""
 	embeddings = _mapping(source_embedding['surveys'], 'source_embedding surveys')
 	if set(embeddings) != set(survey_ids):
 		raise ValueError('source embedding survey set does not match manifest common')
@@ -609,8 +639,19 @@ def _validate_manifest_embedding_alignment(
 		)
 		for survey_id in survey_ids:
 			entry = _mapping(surveys[str(survey_id)], 'target reference')
-			target = _load_reference_arrays(entry)
 			embedding = _mapping(embeddings[str(survey_id)], 'source embedding survey')
+			valid_reference = _mapping(
+				entry['valid_tokens'],
+				'target valid_tokens reference',
+			)
+			if valid_reference['sha256'] != embedding['valid_tokens_sha256']:
+				raise ValueError(
+					f'head k={k} {survey_id} valid-token mask does not match '
+					'source embedding'
+				)
+			if not validate_array_semantics:
+				continue
+			target = _load_reference_arrays(entry)
 			embedding_valid = np.load(Path(str(embedding['valid_tokens_path'])))
 			if target['labels'].shape != embedding_valid.shape:
 				raise ValueError(
@@ -700,32 +741,97 @@ def _file_reference(path: Path) -> dict[str, str]:
 
 
 def _validate_reference_hashes(
-	entry: Mapping[str, object], *, k: int, survey_id: str
+	entry: Mapping[str, object],
+	*,
+	k: int,
+	survey_id: str,
+	validate_array_semantics: bool,
 ) -> None:
-	for name in ('labels', 'confidence', 'valid_tokens', 'metadata'):
-		ref = _mapping(entry[name], f'{name} reference')
-		if file_sha256(Path(str(ref['path']))) != ref['sha256']:
+	refs = {
+		name: _mapping(entry[name], f'{name} reference')
+		for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
+	}
+	shape = entry['token_grid_shape']
+	if not isinstance(shape, list):
+		raise TypeError(f'head k={k} {survey_id} token_grid_shape must be a list')
+	validate_multi_head_target_reference(
+		k=k,
+		survey_id=survey_id,
+		labels_path=Path(str(refs['labels']['path'])),
+		confidence_path=Path(str(refs['confidence']['path'])),
+		valid_tokens_path=Path(str(refs['valid_tokens']['path'])),
+		metadata_path=Path(str(refs['metadata']['path'])),
+		hashes={name: refs[name]['sha256'] for name in refs},
+		expected_token_grid_shape=shape,
+		validate_array_semantics=validate_array_semantics,
+	)
+
+
+def validate_multi_head_target_reference(  # noqa: PLR0913
+	*,
+	k: int,
+	survey_id: str,
+	labels_path: str | Path,
+	confidence_path: str | Path,
+	valid_tokens_path: str | Path,
+	metadata_path: str | Path,
+	hashes: Mapping[str, object],
+	expected_token_grid_shape: Sequence[object] | None = None,
+	validate_array_semantics: bool = True,
+) -> None:
+	"""Validate one referenced schema-v1 target without duplicating its contract.
+
+	Reference-only validation verifies immutable file identities and metadata but
+	does not call :func:`numpy.load`.  Full validation retains the array-level
+	range, validity, occupancy, and ordering checks used at publication time.
+	"""
+	_required_keys(
+		hashes,
+		{'labels', 'confidence', 'valid_tokens', 'metadata'},
+		'multi-head target hashes',
+	)
+	paths = {
+		'labels': Path(labels_path),
+		'confidence': Path(confidence_path),
+		'valid_tokens': Path(valid_tokens_path),
+		'metadata': Path(metadata_path),
+	}
+	for name, path in paths.items():
+		digest = hashes[name]
+		if not isinstance(digest, str) or file_sha256(path) != digest:
 			raise ValueError(f'head k={k} {survey_id} {name} hash mismatch')
-	arrays = _load_reference_arrays(entry)
-	if arrays['labels'].shape != tuple(entry['token_grid_shape']):
+	_validate_referenced_target_metadata(
+		metadata_path=paths['metadata'],
+		labels_path=paths['labels'],
+		k=k,
+		survey_id=survey_id,
+	)
+	if not validate_array_semantics:
+		return
+	arrays = {
+		name: np.load(path, mmap_mode='r', allow_pickle=False)
+		for name, path in paths.items()
+		if name != 'metadata'
+	}
+	if expected_token_grid_shape is not None and arrays['labels'].shape != tuple(
+		expected_token_grid_shape
+	):
 		raise ValueError(f'head k={k} {survey_id} token grid mismatch')
 	_validate_referenced_target_semantics(
-		entry,
 		arrays,
 		k=k,
 		survey_id=survey_id,
 	)
 
 
-def _validate_referenced_target_semantics(
-	entry: Mapping[str, object],
-	arrays: Mapping[str, np.ndarray],
+def _validate_referenced_target_metadata(
 	*,
+	metadata_path: Path,
+	labels_path: Path,
 	k: int,
 	survey_id: str,
 ) -> None:
 	"""Recheck each referenced schema-v1 target's blocking semantics."""
-	metadata_path = Path(str(_mapping(entry['metadata'], 'metadata reference')['path']))
 	try:
 		metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
 	except json.JSONDecodeError as exc:
@@ -743,14 +849,22 @@ def _validate_referenced_target_semantics(
 		raise ValueError(
 			f'head k={k} {survey_id} must use matching schema-v1 pseudo-target metadata'
 		)
-	label_path = Path(str(_mapping(entry['labels'], 'labels reference')['path']))
-	boundary_weight_path = label_path.with_name(
+	boundary_weight_path = labels_path.with_name(
 		f'{survey_id}.hmm_boundary_weight_token.npy'
 	)
 	if boundary_weight_path.exists():
 		raise ValueError(
 			f'head k={k} {survey_id} must not contain a boundary-weight artifact'
 		)
+
+
+def _validate_referenced_target_semantics(
+	arrays: Mapping[str, np.ndarray],
+	*,
+	k: int,
+	survey_id: str,
+) -> None:
+	"""Recheck array-level blocking semantics after reference validation."""
 	validate_pseudo_target_arrays(
 		arrays['labels'],
 		arrays['confidence'],
@@ -890,4 +1004,5 @@ __all__ = [
 	'load_multi_head_target_manifest',
 	'multi_head_cross_head_diagnostics',
 	'validate_multi_head_target_manifest',
+	'validate_multi_head_target_reference',
 ]

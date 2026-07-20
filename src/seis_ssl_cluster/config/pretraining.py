@@ -728,7 +728,8 @@ def _validate_strat_hmm_multi_head_manifest(
 	"""Validate manifest references without loading pseudo-target arrays."""
 	multi_head = importlib.import_module('seis_ssl_cluster.stratigraphy.multi_head')
 	manifest = multi_head.load_multi_head_target_manifest(
-		str(pseudo_targets['manifest'])
+		str(pseudo_targets['manifest']),
+		validate_array_semantics=False,
 	)
 	if tuple(manifest['head_ks']) != tuple(head['ks']):
 		raise ValueError('manifest.head_ks must equal head.ks')

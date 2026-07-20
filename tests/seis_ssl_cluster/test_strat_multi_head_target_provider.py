@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +22,8 @@ from seis_ssl_cluster.data import (
 	TargetProviderContext,
 	target_providers,
 )
+from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
+from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import _artifacts
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
@@ -124,6 +129,51 @@ def test_provider_validates_generated_boundary_weight_contract(tmp_path: Path) -
 		provider.sample_is_acceptable(sample)
 
 
+@pytest.mark.parametrize('head_ks', [(6, 6, 10), (1, 8, 10)])
+def test_provider_rejects_invalid_public_manifest_head_ks(
+	tmp_path: Path,
+	head_ks: tuple[int, ...],
+) -> None:
+	provider, _ = _provider(tmp_path)
+
+	with pytest.raises(ValueError, match='head_ks'):
+		MultiHeadStratPseudoTargetProvider(
+			replace(provider.manifest, head_ks=head_ks),
+		)
+
+
+def test_provider_rejects_hash_tampered_public_manifest_input(tmp_path: Path) -> None:
+	provider, paths = _provider(tmp_path)
+	labels = paths['survey-a'][6]['labels']
+	np.save(labels, np.zeros((4, 5, 6), dtype=np.int32))
+
+	with pytest.raises(ValueError, match='labels hash mismatch'):
+		MultiHeadStratPseudoTargetProvider(provider.manifest)
+
+
+def test_provider_manifest_path_does_not_load_target_arrays(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	embeddings, heads = _artifacts(tmp_path)
+	manifest_path = tmp_path / 'multi_head_target_manifest.json'
+	build_multi_head_target_manifest(
+		manifest_path=manifest_path,
+		source_embedding_dir=embeddings,
+		head_roots=heads,
+		replay_k6_root=heads[6],
+	)
+
+	def fail_array_load(*_args: object, **_kwargs: object) -> object:
+		raise AssertionError('manifest-path provider construction must stay lazy')
+
+	monkeypatch.setattr(target_providers.np, 'load', fail_array_load)
+
+	provider = MultiHeadStratPseudoTargetProvider(manifest_path)
+
+	assert provider.manifest.head_ks == (6, 8, 10)
+
+
 def test_provider_loads_each_survey_heads_once_with_mmap(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -158,7 +208,11 @@ def _provider(
 		for k in (6, 8, 10):
 			root = tmp_path / survey_id / f'k{k}'
 			root.mkdir(parents=True)
-			labels = (np.arange(4 * 5 * 6).reshape(4, 5, 6) % k).astype(np.int32)
+			labels = np.repeat(
+				(np.arange(4 * 5).reshape(4, 5, 1) % k),
+				6,
+				axis=2,
+			).astype(np.int32)
 			valid_tokens = np.ones(labels.shape, dtype=np.bool_)
 			confidence = np.ones(labels.shape, dtype=np.float32)
 			for name, array in {
@@ -170,7 +224,17 @@ def _provider(
 				np.save(path, array)
 				paths[survey_id].setdefault(k, {})[name] = path
 			metadata_path = root / 'metadata.json'
-			metadata_path.write_text('{}', encoding='utf-8')
+			metadata_path.write_text(
+				json.dumps(
+					{
+						'artifact_type': 'strat_hmm_pseudo_target',
+						'schema_version': 1,
+						'k': k,
+						'survey_id': survey_id,
+					},
+				),
+				encoding='utf-8',
+			)
 			inputs.append(
 				StratMultiHeadTargetInput(
 					k=k,
@@ -179,14 +243,23 @@ def _provider(
 					confidence_path=paths[survey_id][k]['confidence'],
 					valid_tokens_path=paths[survey_id][k]['valid_tokens'],
 					metadata_path=metadata_path,
-					hashes={},
+					hashes={
+						name: sha256(path.read_bytes()).hexdigest()
+						for name, path in {
+							**paths[survey_id][k],
+							'metadata': metadata_path,
+						}.items()
+					},
 				),
 			)
 		by_survey[survey_id] = tuple(inputs)
 	manifest = StratMultiHeadTargetManifest(
 		head_ks=(6, 8, 10),
 		by_survey=by_survey,
-		common_valid_token_sha256={'survey-a': 'a', 'survey-b': 'b'},
+		common_valid_token_sha256={
+			survey_id: inputs[0].hashes['valid_tokens']
+			for survey_id, inputs in by_survey.items()
+		},
 	)
 	return MultiHeadStratPseudoTargetProvider(
 		manifest,
