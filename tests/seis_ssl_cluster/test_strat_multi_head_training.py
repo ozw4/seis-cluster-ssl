@@ -15,6 +15,7 @@ from seis_ssl_cluster.training.strat_hmm.state import (
 	StratHmmTrainingState,
 	TrainabilitySummary,
 )
+from seis_ssl_cluster.training.strat_hmm_checkpoint import StratRollingCheckpointResult
 
 
 class _Student(torch.nn.Module):
@@ -210,7 +211,7 @@ def test_multi_head_epoch_rejects_nonfinite_post_clip_gradient_norm(
 		)
 
 
-def test_multi_head_runner_never_calls_rolling_checkpoint_paths(
+def test_multi_head_runner_uses_rolling_checkpoint_paths(
 	monkeypatch,
 	tmp_path,
 ) -> None:
@@ -232,6 +233,11 @@ def test_multi_head_runner_never_calls_rolling_checkpoint_paths(
 		head_ks=(6, 8, 10),
 	)
 	checkpoint_calls: list[str] = []
+
+	class _Dataloader(list):
+		def __init__(self) -> None:
+			super().__init__([object()])
+			self.generator = torch.Generator().manual_seed(274)
 	monkeypatch.setattr(runner, 'read_manifest_json', lambda _path: [])
 	monkeypatch.setattr(
 		runner,
@@ -241,7 +247,7 @@ def test_multi_head_runner_never_calls_rolling_checkpoint_paths(
 	monkeypatch.setattr(
 		runner,
 		'build_strat_multi_head_target_dataloader',
-		lambda *_args, **_kwargs: [object()],
+		lambda *_args, **_kwargs: _Dataloader(),
 	)
 	monkeypatch.setattr(
 		runner,
@@ -266,7 +272,15 @@ def test_multi_head_runner_never_calls_rolling_checkpoint_paths(
 	monkeypatch.setattr(
 		runner,
 		'save_strat_hmm_rolling_checkpoint',
-		lambda *_args, **_kwargs: checkpoint_calls.append('save'),
+		lambda *_args, **_kwargs: (
+			checkpoint_calls.append('save')
+			or StratRollingCheckpointResult(
+				latest_path=tmp_path / 'latest.pt',
+				best_path=tmp_path / 'best.pt',
+				best_score=1.0,
+				best_updated=True,
+			)
+		),
 	)
 	monkeypatch.setattr(
 		runner,
@@ -276,8 +290,8 @@ def test_multi_head_runner_never_calls_rolling_checkpoint_paths(
 
 	result = runner.run_strat_hmm_pretext_training(_runner_config(tmp_path))
 
-	assert result == tmp_path
-	assert checkpoint_calls == []
+	assert result == tmp_path / 'latest.pt'
+	assert checkpoint_calls == ['save']
 
 
 def _batch() -> dict[str, object]:

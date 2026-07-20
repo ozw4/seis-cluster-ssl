@@ -69,6 +69,9 @@ from seis_ssl_cluster.embedding.writer import (
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
+from seis_ssl_cluster.training.strat_hmm_checkpoint import (
+	validate_stratigraphy_checkpoint_payload,
+)
 from seis_ssl_cluster.utils import StageTimer
 from seis_ssl_cluster.utils.cuda import cuda_device_supports_bfloat16
 
@@ -186,6 +189,7 @@ def run_embedding_extraction(
 		raise ValueError(msg)
 
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	validate_stratigraphy_checkpoint_payload(payload)
 	checkpoint_config = _checkpoint_config(payload)
 	if checkpoint_config_override is not None:
 		checkpoint_config = _checkpoint_config_override(checkpoint_config_override)
@@ -586,15 +590,15 @@ def _iter_prepared_batches(  # noqa: PLR0913
 	for window in windows:
 		with producer_timer.stage('read_preprocess'):
 			item = _read_window(
-			window,
-			manifest=manifest,
-			amplitude_path=amplitude_path,
-			stats=stats,
-			store=store,
-			settings=settings,
-			patch_size_xyz=patch_size_xyz,
-			prepared_survey=prepared_survey,
-		)
+				window,
+				manifest=manifest,
+				amplitude_path=amplitude_path,
+				stats=stats,
+				store=store,
+				settings=settings,
+				patch_size_xyz=patch_size_xyz,
+				prepared_survey=prepared_survey,
+			)
 		if not item[2].any():
 			continue
 		prepared.append(item)
@@ -753,11 +757,7 @@ def _resolve_autocast_dtype(
 		return torch.bfloat16
 	if settings.amp_dtype == 'float16':
 		return torch.float16
-	return (
-		torch.bfloat16
-		if cuda_device_supports_bfloat16(device)
-		else torch.float16
-	)
+	return torch.bfloat16 if cuda_device_supports_bfloat16(device) else torch.float16
 
 
 def _embedding_precision_metadata(
@@ -1130,6 +1130,52 @@ def _stratigraphy_pretext_metadata(
 		msg = 'checkpoint stratigraphy_config must be a mapping'
 		raise TypeError(msg)
 	head = _required_mapping(stratigraphy_config, 'head')
+	checkpoint_identity = payload.get('stratigraphy_checkpoint')
+	if checkpoint_identity is not None:
+		validate_stratigraphy_checkpoint_payload(payload)
+		if not isinstance(checkpoint_identity, Mapping):
+			raise TypeError('checkpoint stratigraphy_checkpoint must be a mapping')
+		student = _required_mapping(stratigraphy_config, 'student')
+		loss = _required_mapping(stratigraphy_config, 'loss')
+		return {
+			'method': 'strat_hmm_multi_head_pretext',
+			'base_objective': 'amp_mae3d',
+			'head_spec': checkpoint_identity['head_spec'],
+			'head_ks': checkpoint_identity['head_ks'],
+			'head_count': len(checkpoint_identity['head_ks']),
+			'target_manifest_path': _required_mapping(
+				checkpoint_identity['target_manifest'], 'checkpoint target_manifest'
+			)['path'],
+			'target_manifest_sha256': _required_mapping(
+				checkpoint_identity['target_manifest'], 'checkpoint target_manifest'
+			)['sha256'],
+			'per_head_target_sha256': checkpoint_identity['per_head_targets'],
+			'unfreeze_top_blocks': _nonnegative_int(
+				student.get('unfreeze_top_blocks'),
+				'stratigraphy_config.student.unfreeze_top_blocks',
+			),
+			'distillation_weight': _nonnegative_finite_number(
+				loss.get('distillation_weight'),
+				'stratigraphy_config.loss.distillation_weight',
+			),
+			'prototype_weight': _nonnegative_finite_number(
+				loss.get('prototype_weight'),
+				'stratigraphy_config.loss.prototype_weight',
+			),
+			'usage_weight': _nonnegative_finite_number(
+				loss.get('usage_weight'), 'stratigraphy_config.loss.usage_weight'
+			),
+			'consistency_policy': checkpoint_identity['consistency_policy'],
+			'consistency_weight': checkpoint_identity['consistency_weight'],
+			'consistency_beta': checkpoint_identity['consistency_beta'],
+			'model_tag': checkpoint_identity['model_tag'],
+			'scientific_identity_sha256': checkpoint_identity[
+				'scientific_identity_sha256'
+			],
+			'checkpoint_stratigraphy_state_sha256': checkpoint_identity[
+				'stratigraphy_state_sha256'
+			],
+		}
 	student = _required_mapping(stratigraphy_config, 'student')
 	loss = _required_mapping(stratigraphy_config, 'loss')
 	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
@@ -1268,8 +1314,7 @@ def _reject_checkpoint_owned_extraction_sections(
 	config: Mapping[str, object],
 ) -> None:
 	stale = sorted(
-		set(config)
-		& {'data', 'model', 'masking', 'loss', 'train', 'zero_mask'},
+		set(config) & {'data', 'model', 'masking', 'loss', 'train', 'zero_mask'},
 	)
 	if stale:
 		msg = (
@@ -1337,9 +1382,7 @@ def _preprocessing_cache_settings(
 			value.get('cleanup', False),
 			'embedding.preprocessing_cache.cleanup',
 		),
-		directory=(
-			None if directory_value is None else Path(directory_value)
-		),
+		directory=(None if directory_value is None else Path(directory_value)),
 	)
 	settings.validate()
 	return settings
@@ -1391,8 +1434,7 @@ def _validate_positive_xyz(value: object, name: str) -> XYZ:
 		or not isinstance(value, Sequence)
 		or len(value) != 3
 		or not all(
-			not isinstance(axis, bool) and isinstance(axis, Integral)
-			for axis in value
+			not isinstance(axis, bool) and isinstance(axis, Integral) for axis in value
 		)
 	):
 		msg = f'{name} must be a length-3 integer sequence; got {value!r}'
@@ -1410,8 +1452,7 @@ def _validate_nonnegative_xyz(value: object, name: str) -> XYZ:
 		or not isinstance(value, Sequence)
 		or len(value) != 3
 		or not all(
-			not isinstance(axis, bool) and isinstance(axis, Integral)
-			for axis in value
+			not isinstance(axis, bool) and isinstance(axis, Integral) for axis in value
 		)
 	):
 		msg = f'{name} must be a length-3 integer sequence; got {value!r}'

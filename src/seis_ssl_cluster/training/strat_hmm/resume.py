@@ -9,6 +9,9 @@ import torch
 from seis_ssl_cluster.training.checkpoint import restore_rng_state
 from seis_ssl_cluster.training.strat_hmm.runtime import _to_json_safe
 from seis_ssl_cluster.training.strat_hmm.state import StratHmmResumeState
+from seis_ssl_cluster.training.strat_hmm_checkpoint import (
+	validate_stratigraphy_checkpoint_payload,
+)
 
 
 def restore_strat_hmm_training_checkpoint(  # noqa: PLR0913
@@ -23,6 +26,13 @@ def restore_strat_hmm_training_checkpoint(  # noqa: PLR0913
 ) -> StratHmmResumeState:
 	"""Restore model, optimizer, AMP, RNG, and resume counters from a checkpoint."""
 	_validate_strat_resume_payload(payload, amp_enabled=amp_enabled)
+	_validate_stratigraphy_checkpoint_mode(
+		payload,
+		config,
+		optimizer=optimizer,
+		student=student,
+		head=head,
+	)
 	_validate_strat_resume_config_compatibility(payload, config)
 	try:
 		student.load_state_dict(payload['model_state_dict'])
@@ -117,7 +127,7 @@ def _validate_strat_resume_payload(
 	if bool(payload['amp_enabled']) != bool(amp_enabled):
 		msg = (
 			'resume checkpoint amp_enabled does not match current runtime: '
-			f"checkpoint={payload['amp_enabled']!r}, current={amp_enabled!r}"
+			f'checkpoint={payload["amp_enabled"]!r}, current={amp_enabled!r}'
 		)
 		raise ValueError(msg)
 	_validate_strat_resume_training_state(payload)
@@ -136,7 +146,7 @@ def _validate_strat_resume_training_state(payload: Mapping[str, object]) -> None
 	if training_state['stage'] != 'train_strat_hmm_pretext':
 		msg = (
 			'resume checkpoint stage must be train_strat_hmm_pretext; '
-			f"got {training_state['stage']!r}"
+			f'got {training_state["stage"]!r}'
 		)
 		raise ValueError(msg)
 	if training_state['checkpoint_kind'] not in {'step', 'epoch'}:
@@ -146,8 +156,7 @@ def _validate_strat_resume_training_state(payload: Mapping[str, object]) -> None
 	if training_state['checkpoint_kind'] == 'step':
 		if not isinstance(batch_index, int) or isinstance(batch_index, bool):
 			msg = (
-				'resume checkpoint batch_index must be an integer for '
-				'step checkpoints'
+				'resume checkpoint batch_index must be an integer for step checkpoints'
 			)
 			raise TypeError(msg)
 		if batch_index < 0:
@@ -191,6 +200,32 @@ def _validate_strat_resume_config_compatibility(
 	raise ValueError(msg)
 
 
+def _validate_stratigraphy_checkpoint_mode(
+	payload: Mapping[str, object],
+	config: Mapping[str, object],
+	*,
+	optimizer: torch.optim.Optimizer,
+	student: torch.nn.Module | None = None,
+	head: torch.nn.Module | None = None,
+) -> None:
+	head_config = config.get('head')
+	is_multi_head = isinstance(head_config, Mapping) and 'spec' in head_config
+	if is_multi_head:
+		if 'stratigraphy_checkpoint' not in payload:
+			raise ValueError(
+				'multi-head resume requires a versioned multi-head checkpoint'
+			)
+		validate_stratigraphy_checkpoint_payload(
+			payload,
+			expected_config=config,
+			expected_optimizer=optimizer,
+			expected_student=student,
+			expected_head=head,
+		)
+	elif 'stratigraphy_checkpoint' in payload:
+		raise ValueError('multi-head checkpoint cannot resume as a single-head run')
+
+
 def _strat_resume_compatibility_view(
 	config: Mapping[str, object],
 ) -> dict[str, object]:
@@ -223,6 +258,7 @@ def _strat_resume_compatibility_view(
 				'checkpoint_every_steps',
 				'allow_overwrite_output',
 				'device',
+				'num_workers',
 			}
 		}
 	else:

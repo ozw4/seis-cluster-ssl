@@ -177,9 +177,31 @@ def _strat_hmm_control_identity(
 	student = _mapping(config, 'student')
 	pseudo_targets = _mapping(config, 'pseudo_targets')
 	teacher_path = _path_config(teacher, 'checkpoint')
-	student_path = Path(
-		student.get('init_checkpoint') or str(teacher_path)
-	)
+	student_path = Path(student.get('init_checkpoint') or str(teacher_path))
+	if 'manifest' in pseudo_targets:
+		manifest_path = _path_config(pseudo_targets, 'manifest')
+		return {
+			'schema_version': 2,
+			'model_tag': model_tag,
+			'scientific_identity': _to_json_safe(
+				identity.get('scientific_identity', {}),
+			),
+			'runtime_identity': {
+				**_to_mapping(identity.get('runtime_identity', {}), 'runtime_identity'),
+				'git_commit': _git_commit(),
+				'git_status_short': _git_status_short(),
+				'git_diff_sha256': _git_diff_sha256(),
+				'finite_check_mode': _mapping(config, 'data').get(
+					'finite_check_mode', 'strict'
+				),
+			},
+			'resolved_training_config_sha256': _canonical_sha256(config),
+			'input_identities': {
+				'teacher_checkpoint': _file_identity(teacher_path),
+				'student_init_checkpoint': _file_identity(student_path),
+				'target_manifest': _file_identity(manifest_path),
+			},
+		}
 	pseudo_root = _path_config(pseudo_targets, 'input_dir')
 	pseudo_inputs = discover_pseudo_target_inputs(
 		pseudo_root,

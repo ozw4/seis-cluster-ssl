@@ -169,6 +169,11 @@ def _load_checkpoint_models(
 	hmm_k: int,
 	configured_patch_size: XYZ,
 ) -> tuple[torch.nn.Module, OrderedPrototypeHead]:
+	if 'stratigraphy_checkpoint' in payload:
+		raise ValueError(
+			'multi-head checkpoint requires a future explicit '
+			'head-selection/multi-output contract'
+		)
 	model = build_model_from_config(mae_config)
 	if tuple(model.patch_size_xyz) != configured_patch_size:
 		msg = (
@@ -947,11 +952,7 @@ def _xyz_from_mapping(
 	default: Sequence[int] | None = None,
 ) -> XYZ:
 	value = parent.get(key, default)
-	if (
-		not isinstance(value, Sequence)
-		or isinstance(value, str)
-		or len(value) != 3
-	):
+	if not isinstance(value, Sequence) or isinstance(value, str) or len(value) != 3:
 		msg = f'{prefix}.{key} must be a length-3 integer sequence'
 		raise TypeError(msg)
 	return (int(value[0]), int(value[1]), int(value[2]))

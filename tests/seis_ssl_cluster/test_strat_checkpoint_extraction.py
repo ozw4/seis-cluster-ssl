@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from hashlib import sha256
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 import torch
 
 from seis_ssl_cluster.data import (
@@ -17,14 +19,19 @@ from seis_ssl_cluster.data import (
 )
 from seis_ssl_cluster.embedding import run_embedding_extraction
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-from seis_ssl_cluster.stratigraphy.prototypes import OrderedPrototypeHead
-from seis_ssl_cluster.training import load_checkpoint
-from seis_ssl_cluster.training.strat_hmm_checkpoint import save_strat_hmm_checkpoint
+from seis_ssl_cluster.stratigraphy.prototypes import (
+	MultiResolutionOrderedPrototypeHeads,
+	OrderedPrototypeHead,
+)
+from seis_ssl_cluster.training import load_checkpoint, strat_hmm_checkpoint
+from seis_ssl_cluster.training.strat_hmm_checkpoint import (
+	inspect_stratigraphy_checkpoint,
+	save_strat_hmm_checkpoint,
+	validate_stratigraphy_checkpoint_payload,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
-
-	import pytest
 
 
 def test_strat_checkpoint_extracts_student_embeddings_and_metadata(
@@ -111,6 +118,401 @@ def test_strat_checkpoint_control_identity_is_carried_to_embedding_metadata(
 		'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
 	)
 	assert len(stratigraphy['control_identity_sha256']) == 64
+
+
+def test_embedding_extraction_rejects_multi_head_config_without_identity(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path, strat=True)
+	checkpoint = config['embeddings']['checkpoint']
+	assert isinstance(checkpoint, str)
+	payload = load_checkpoint(checkpoint, map_location='cpu')
+	stratigraphy_config = payload['stratigraphy_config']
+	assert isinstance(stratigraphy_config, dict)
+	stratigraphy_config['head'] = {
+		'spec': 'multi_resolution_ordered_prototypes_v1',
+		'ks': [6, 8, 10],
+	}
+	torch.save(payload, checkpoint)
+
+	with pytest.raises(
+		ValueError,
+		match='multi-head checkpoint is missing versioned identity',
+	):
+		run_embedding_extraction(config, device='cpu')
+
+
+def test_checkpoint_inspection_reports_resume_compatibility(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path, strat=True)
+	checkpoint = config['embeddings']['checkpoint']
+	assert isinstance(checkpoint, str)
+	payload = load_checkpoint(checkpoint, map_location='cpu')
+	stratigraphy_config = payload['stratigraphy_config']
+	assert isinstance(stratigraphy_config, dict)
+
+	inspection = inspect_stratigraphy_checkpoint(
+		payload,
+		expected_config=stratigraphy_config,
+	)
+	assert inspection['resume_compatibility'] == {
+		'checked': True,
+		'compatible': True,
+		'reason': None,
+	}
+
+	incompatible_config = deepcopy(stratigraphy_config)
+	incompatible_config['loss']['distillation_weight'] = 0.2
+	incompatible = inspect_stratigraphy_checkpoint(
+		payload,
+		expected_config=incompatible_config,
+	)
+	assert incompatible['resume_compatibility'] == {
+		'checked': True,
+		'compatible': False,
+		'reason': (
+			'resume checkpoint stratigraphy_config is incompatible with '
+			'current resolved config at loss.distillation_weight'
+		),
+	}
+
+
+def test_multi_head_checkpoint_rejects_per_head_provenance_mismatch(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	manifest_path = tmp_path / 'targets.json'
+	manifest_path.write_text('{}', encoding='utf-8')
+	expected_hashes = _per_head_target_hashes()
+	monkeypatch.setattr(
+		strat_hmm_checkpoint,
+		'load_multi_head_target_manifest',
+		lambda path, *, validate_array_semantics: (
+			_assert_manifest_load(
+				path,
+				manifest_path,
+				validate_array_semantics=validate_array_semantics,
+			)
+			or _multi_head_manifest(expected_hashes)
+		),
+	)
+	student = torch.nn.Linear(1, 1)
+	head = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=1,
+		ks=(6, 8, 10),
+		projection_dim=2,
+		temperature=0.1,
+		normalize=True,
+	)
+	optimizer = torch.optim.AdamW([*student.parameters(), *head.parameters()])
+	config = {
+		'paths': {'output_root': str(tmp_path / 'run')},
+		'pseudo_targets': {'manifest': str(manifest_path)},
+		'head': {'spec': 'multi_resolution_ordered_prototypes_v1', 'ks': [6, 8, 10]},
+		'identity': {
+			'scientific_identity': {
+				'target_manifest_sha256': _sha256(manifest_path),
+				'target_head_hashes': {'6': {}},
+			}
+		},
+	}
+
+	with pytest.raises(ValueError, match='per-head target hashes'):
+		save_strat_hmm_checkpoint(
+			tmp_path / 'checkpoint.pt',
+			student=student,
+			head=head,
+			optimizer=optimizer,
+			epoch=1,
+			mae_config={},
+			stratigraphy_config=config,
+			metrics={'loss': 1.0},
+			global_step=1,
+			checkpoint_kind='epoch',
+			batch_index=None,
+		)
+
+	assert not (tmp_path / 'checkpoint.pt').exists()
+
+
+def test_multi_head_checkpoint_rejects_unexpected_head_state_key(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	state = payload['stratigraphy_state_dict']
+	assert isinstance(state, dict)
+	state['heads.k6.unexpected'] = torch.ones(1)
+
+	with pytest.raises(ValueError, match='head state keys'):
+		validate_stratigraphy_checkpoint_payload(payload)
+
+
+def test_multi_head_checkpoint_rejects_state_compatible_wrong_module_type(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	config = payload['stratigraphy_config']
+	assert isinstance(config, dict)
+	student = torch.nn.Linear(1, 1)
+	head = torch.nn.Module()
+	head.heads = torch.nn.ModuleDict(
+		{
+			f'k{k}': OrderedPrototypeHead(
+				feature_dim=1,
+				num_prototypes=k,
+				projection_dim=2,
+			)
+			for k in (6, 8, 10)
+		}
+	)
+	optimizer = torch.optim.AdamW([*student.parameters(), *head.parameters()])
+
+	with pytest.raises(TypeError, match='head module type'):
+		save_strat_hmm_checkpoint(
+			tmp_path / 'wrong-module.pt',
+			student=student,
+			head=head,
+			optimizer=optimizer,
+			epoch=1,
+			mae_config={},
+			stratigraphy_config=config,
+			metrics={'loss': 1.0},
+			global_step=1,
+			checkpoint_kind='epoch',
+			batch_index=None,
+			control_identity={
+				'initial_state_sha256': {'student': '0' * 64, 'head': '1' * 64}
+			},
+		)
+
+	assert not (tmp_path / 'wrong-module.pt').exists()
+
+
+def test_multi_head_checkpoint_rejects_wrong_per_head_tensor_shape(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	config = payload['stratigraphy_config']
+	assert isinstance(config, dict)
+	student = torch.nn.Linear(1, 1)
+	head = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=1,
+		ks=(6, 8, 10),
+		projection_dim=2,
+		temperature=0.1,
+		normalize=True,
+	)
+	head.heads['k6'].prototypes = torch.nn.Parameter(torch.ones(5, 2))
+	optimizer = torch.optim.AdamW([*student.parameters(), *head.parameters()])
+
+	with pytest.raises(ValueError, match='prototype tensor shape'):
+		save_strat_hmm_checkpoint(
+			tmp_path / 'wrong-shape.pt',
+			student=student,
+			head=head,
+			optimizer=optimizer,
+			epoch=1,
+			mae_config={},
+			stratigraphy_config=config,
+			metrics={'loss': 1.0},
+			global_step=1,
+			checkpoint_kind='epoch',
+			batch_index=None,
+			control_identity={
+				'initial_state_sha256': {'student': '0' * 64, 'head': '1' * 64}
+			},
+		)
+
+	assert not (tmp_path / 'wrong-shape.pt').exists()
+
+
+@pytest.mark.parametrize(
+	'field',
+	['initial_student_state_sha256', 'initial_head_state_sha256'],
+)
+def test_multi_head_checkpoint_requires_initial_state_hashes(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	field: str,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	identity = payload['stratigraphy_checkpoint']
+	assert isinstance(identity, dict)
+	del identity[field]
+
+	with pytest.raises(ValueError, match=field):
+		validate_stratigraphy_checkpoint_payload(payload)
+
+
+def test_multi_head_checkpoint_rejects_incompatible_optimizer_groups(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	student = torch.nn.Linear(1, 1)
+	head = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=1,
+		ks=(6, 8, 10),
+		projection_dim=2,
+		temperature=0.1,
+		normalize=True,
+	)
+	optimizer = torch.optim.AdamW([*student.parameters(), *head.parameters()])
+
+	with pytest.raises(ValueError, match='optimizer group identity'):
+		validate_stratigraphy_checkpoint_payload(
+			payload,
+			expected_optimizer=optimizer,
+		)
+
+
+def test_multi_head_checkpoint_rejects_reordered_optimizer_parameters(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	student = torch.nn.Linear(1, 1)
+	head = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=1,
+		ks=(6, 8, 10),
+		projection_dim=2,
+		temperature=0.1,
+		normalize=True,
+	)
+	optimizer = torch.optim.AdamW(
+		[
+			{'params': [student.bias, student.weight], 'name': 'student'},
+			{'params': head.parameters(), 'name': 'head'},
+		]
+	)
+
+	with pytest.raises(ValueError, match='optimizer group identity'):
+		validate_stratigraphy_checkpoint_payload(
+			payload,
+			expected_optimizer=optimizer,
+			expected_student=student,
+			expected_head=head,
+		)
+
+
+def _assert_manifest_load(
+	path: Path, expected_path: Path, *, validate_array_semantics: bool
+) -> None:
+	assert path == expected_path
+	assert not validate_array_semantics
+
+
+def _valid_multi_head_checkpoint_payload(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+	manifest_path = tmp_path / 'targets.json'
+	manifest_path.write_text('{}', encoding='utf-8')
+	hashes = _per_head_target_hashes()
+	monkeypatch.setattr(
+		strat_hmm_checkpoint,
+		'load_multi_head_target_manifest',
+		lambda path, *, validate_array_semantics: (
+			_assert_manifest_load(
+				path,
+				manifest_path,
+				validate_array_semantics=validate_array_semantics,
+			)
+			or _multi_head_manifest(hashes)
+		),
+	)
+	student = torch.nn.Linear(1, 1)
+	head = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=1,
+		ks=(6, 8, 10),
+		projection_dim=2,
+		temperature=0.1,
+		normalize=True,
+	)
+	optimizer = torch.optim.AdamW(
+		[
+			{'params': student.parameters(), 'name': 'student'},
+			{'params': head.parameters(), 'name': 'head'},
+		]
+	)
+	checkpoint_path = tmp_path / 'multi-head.pt'
+	save_strat_hmm_checkpoint(
+		checkpoint_path,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+		epoch=1,
+		mae_config={},
+		stratigraphy_config={
+			'paths': {'output_root': str(tmp_path / 'run')},
+			'pseudo_targets': {'manifest': str(manifest_path)},
+			'head': {
+				'spec': 'multi_resolution_ordered_prototypes_v1',
+				'ks': [6, 8, 10],
+				'projection_dim': 2,
+			},
+			'identity': {
+				'scientific_identity': {
+					'target_manifest_sha256': _sha256(manifest_path),
+					'target_head_hashes': hashes,
+					'consistency_policy': 'normalized_order_smooth_l1_v1',
+					'consistency_weight': 0.1,
+					'consistency_beta': 0.1,
+				}
+			},
+		},
+		metrics={'loss': 1.0},
+		global_step=1,
+		checkpoint_kind='epoch',
+		batch_index=None,
+		control_identity={
+			'initial_state_sha256': {
+				'student': '0' * 64,
+				'head': '1' * 64,
+			}
+		},
+	)
+	return load_checkpoint(checkpoint_path, map_location='cpu')
+
+
+def _per_head_target_hashes() -> dict[str, dict[str, dict[str, str]]]:
+	return {
+		str(k): {
+			'survey': {
+				name: f'{k}-{name}'
+				for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
+			}
+		}
+		for k in (6, 8, 10)
+	}
+
+
+def _multi_head_manifest(
+	hashes: dict[str, dict[str, dict[str, str]]],
+) -> dict[str, object]:
+	return {
+		'head_ks': [6, 8, 10],
+		'heads': {
+			k: {
+				'surveys': {
+					survey_id: {
+						name: {'sha256': digest}
+						for name, digest in targets.items()
+					}
+					for survey_id, targets in surveys.items()
+				}
+			}
+			for k, surveys in hashes.items()
+		},
+	}
+
+
+def _sha256(path: Path) -> str:
+	return sha256(path.read_bytes()).hexdigest()
 
 
 def _write_fixture(tmp_path: Path, *, strat: bool) -> dict[str, object]:

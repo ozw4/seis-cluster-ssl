@@ -77,8 +77,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 ) -> Path:
 	"""Run strat HMM pretext training from ``config``.
 
-	Multi-head runs do not create or restore rolling checkpoints yet; their
-	return value is the run directory until multi-head checkpoint support lands.
+	Both single-head and multi-head runs use the same rolling checkpoint contract.
 	"""
 	train_config = _mapping(config, 'train')
 	paths_config = _mapping(config, 'paths')
@@ -86,8 +85,6 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 	model_config = _mapping(config, 'model')
 	pseudo_config = _mapping(config, 'pseudo_targets')
 	is_multi_head = 'spec' in _mapping(config, 'head')
-	if is_multi_head and resume is not None:
-		raise ValueError('multi-head strat HMM resume is not implemented')
 	device = _resolve_device(train_config)
 	seed = _int_config(train_config, 'seed', 42)
 	torch.manual_seed(seed)
@@ -186,12 +183,16 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 	)
 	scaler = torch.amp.GradScaler('cuda', enabled=amp_enabled) if amp_enabled else None
 	resume_state = StratHmmResumeState(start_epoch=1, global_step=0, skip_batches=0)
-	if resume is not None and not isinstance(components, StratHmmMultiHeadComponents):
+	if resume is not None:
 		payload = load_checkpoint(resume, map_location=device)
 		resume_state = restore_strat_hmm_training_checkpoint(
 			payload=payload,
 			student=components.student,
-			head=components.head,
+			head=(
+				components.heads
+				if isinstance(components, StratHmmMultiHeadComponents)
+				else components.head
+			),
 			optimizer=components.optimizer,
 			scaler=scaler,
 			amp_enabled=amp_enabled,
@@ -225,11 +226,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		set_epoch = getattr(dataset, 'set_epoch', None)
 		if callable(set_epoch):
 			set_epoch(epoch - 1)
-		epoch_start_dataloader_rng_state = (
-			None
-			if isinstance(components, StratHmmMultiHeadComponents)
-			else _dataloader_generator_state(dataloader)
-		)
+		epoch_start_dataloader_rng_state = _dataloader_generator_state(dataloader)
 		remaining_steps = None
 		if max_steps is not None:
 			remaining_steps = max_steps - state.global_step
@@ -240,6 +237,48 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		)
 
 		if isinstance(components, StratHmmMultiHeadComponents):
+
+			def save_multi_head_step_checkpoint(
+				step_state: StratHmmTrainingState,
+				epoch_start_rng_state: torch.Tensor = epoch_start_dataloader_rng_state,
+			) -> None:
+				nonlocal best_score, checkpoint_path
+				if (
+					checkpoint_every_steps is None
+					or step_state.global_step % checkpoint_every_steps != 0
+				):
+					return
+				result = save_strat_hmm_rolling_checkpoint(
+					output_root,
+					student=components.student,
+					head=components.heads,
+					optimizer=components.optimizer,
+					epoch=step_state.epoch,
+					mae_config=components.mae_checkpoint_config,
+					stratigraphy_config=config,
+					metrics={
+						**step_state.metrics,
+						**_trainability_metrics(components.trainability_summary),
+					},
+					global_step=step_state.global_step,
+					checkpoint_kind='step',
+					batch_index=step_state.last_batch_index,
+					amp_enabled=amp_enabled,
+					scaler=scaler,
+					rng_state=_rng_state_for_step_checkpoint(
+						dataloader=dataloader,
+						epoch_start_dataloader_rng_state=epoch_start_rng_state,
+						batch_index=step_state.last_batch_index,
+					),
+					trainability_summary=_trainability_summary_payload(
+						components.trainability_summary
+					),
+					control_identity=control_identity,
+					best_score=best_score,
+				)
+				best_score = result.best_score
+				checkpoint_path = result.latest_path
+
 			state = train_strat_hmm_multi_head_one_epoch(
 				student=components.student,
 				teacher=components.teacher,
@@ -256,7 +295,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				max_steps=remaining_steps,
 				grad_clip_norm=grad_clip_norm,
 				skip_batches=skip_batches,
-				step_callback=None,
+				step_callback=save_multi_head_step_checkpoint,
 			)
 		else:
 
@@ -319,11 +358,6 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				skip_batches=skip_batches,
 				step_callback=save_step_checkpoint,
 			)
-		if isinstance(components, StratHmmMultiHeadComponents):
-			if max_steps is not None and state.global_step >= max_steps:
-				break
-			continue
-
 		trainability_metrics = _trainability_metrics(components.trainability_summary)
 		checkpoint_kind: Literal['step', 'epoch'] = (
 			'epoch' if state.completed_epoch else 'step'
@@ -331,7 +365,11 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		result = save_strat_hmm_rolling_checkpoint(
 			output_root,
 			student=components.student,
-			head=components.head,
+			head=(
+				components.heads
+				if isinstance(components, StratHmmMultiHeadComponents)
+				else components.head
+			),
 			optimizer=components.optimizer,
 			epoch=epoch,
 			mae_config=components.mae_checkpoint_config,
@@ -366,8 +404,6 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		if max_steps is not None and state.global_step >= max_steps:
 			break
 
-	if isinstance(components, StratHmmMultiHeadComponents):
-		return output_root
 	if checkpoint_path is None:
 		msg = 'no strat HMM pretext training steps were run'
 		raise ValueError(msg)
@@ -398,6 +434,10 @@ def _with_initial_parameter_identities(
 		),
 		'prototype_head': _parameter_sha256(head.named_parameters()),
 	}
+	result['initial_state_sha256'] = {
+		'student': _state_dict_sha256(student.state_dict()),
+		'head': _state_dict_sha256(head.state_dict()),
+	}
 	return result
 
 
@@ -415,6 +455,18 @@ def _parameter_sha256(
 		digest.update(value.view(torch.uint8).numpy().tobytes())
 		result[name] = digest.hexdigest()
 	return result
+
+
+def _state_dict_sha256(state_dict: Mapping[str, torch.Tensor]) -> str:
+	"""Hash a complete initial module state, including frozen tensors."""
+	digest = hashlib.sha256()
+	for name in sorted(state_dict):
+		value = state_dict[name].detach().cpu().contiguous()
+		digest.update(name.encode('utf-8'))
+		digest.update(str(value.dtype).encode('utf-8'))
+		digest.update(str(tuple(value.shape)).encode('utf-8'))
+		digest.update(value.view(torch.uint8).numpy().tobytes())
+	return digest.hexdigest()
 
 
 __all__ = ['run_strat_hmm_pretext_training']

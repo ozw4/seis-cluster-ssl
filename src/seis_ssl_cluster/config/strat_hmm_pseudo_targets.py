@@ -261,6 +261,11 @@ def _inspect_checkpoint_num_prototypes(checkpoint_path: Path) -> int | None:
 		return None
 	if not isinstance(payload, Mapping):
 		return None
+	if 'stratigraphy_checkpoint' in payload:
+		raise ValueError(
+			'multi-head checkpoint requires a future explicit '
+			'head-selection/multi-output contract'
+		)
 
 	config_value = payload.get('stratigraphy_config')
 	if isinstance(config_value, Mapping):
