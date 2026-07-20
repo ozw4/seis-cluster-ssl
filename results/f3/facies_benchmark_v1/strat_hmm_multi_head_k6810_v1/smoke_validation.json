@@ -1,0 +1,28 @@
+{
+  "artifact_type": "f3_multi_head_smoke_validation",
+  "schema_version": 1,
+  "status": "NOT_RUN_PREREQUISITE_UNAVAILABLE",
+  "generated_date_utc": "2026-07-20",
+  "required_steps": 2,
+  "runs": {
+    "nocons": {
+      "config": "experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/02_train_nocons_smoke.yaml",
+      "dry_run_status": "FAIL",
+      "execution_status": "NOT_STARTED",
+      "error": "FileNotFoundError: pseudo_targets.manifest must exist and be a file"
+    },
+    "cons010": {
+      "config": "experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/03_train_cons010_smoke.yaml",
+      "dry_run_status": "FAIL",
+      "execution_status": "NOT_STARTED",
+      "error": "FileNotFoundError: pseudo_targets.manifest must exist and be a file"
+    }
+  },
+  "unavailable_validations": [
+    "step-2 aggregate, per-head, and per-pair finite losses",
+    "trainable head gradients and frozen teacher/student blocks",
+    "checkpoint identity",
+    "no-consistency/main pre-step parity and total-loss delta"
+  ],
+  "reason": "The target manifest is absent and was not substituted with an unvalidated bundle."
+}

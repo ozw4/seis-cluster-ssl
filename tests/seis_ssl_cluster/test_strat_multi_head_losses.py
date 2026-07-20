@@ -216,6 +216,43 @@ def test_multi_head_empty_supervision_keeps_loss_connected_to_autograd() -> None
 	)
 
 
+def test_consistency_uses_finite_geometric_mean_for_large_confidences() -> None:
+	max_float = torch.finfo(torch.float32).max
+	logits_k6 = torch.zeros((1, 2, 6), requires_grad=True)
+	logits_k8 = torch.zeros((1, 2, 8), requires_grad=True)
+	batch = {
+		'strat_multi_targets': {
+			key: {
+				'labels': torch.zeros((1, 2), dtype=torch.long),
+				'confidence': torch.full((1, 2), max_float),
+				'boundary_weight': torch.ones((1, 2)),
+				'valid_mask': torch.ones((1, 2), dtype=torch.bool),
+			}
+			for key in ('k6', 'k8')
+		},
+	}
+
+	losses = compute_strat_hmm_multi_head_losses(
+		heads=_StaticHeads({'k6': logits_k6, 'k8': logits_k8}),  # type: ignore[arg-type]
+		encoded={'tokens': torch.zeros((1, 2, 1))},
+		teacher_encoded=None,
+		batch=batch,
+		loss_config={
+			'prototype_weight': 0.0,
+			'usage_weight': 0.0,
+			'consistency_weight': 0.0,
+			'consistency_beta': 0.1,
+			'distillation_weight': 0.0,
+		},
+		pseudo_target_config={'min_confidence': 0.0},
+	)
+
+	assert torch.isfinite(torch.stack(tuple(losses.values()))).all()
+	assert losses['mean_consistency_weight_k6_k8'].item() == pytest.approx(
+		max_float,
+	)
+
+
 def _heads() -> MultiResolutionOrderedPrototypeHeads:
 	return MultiResolutionOrderedPrototypeHeads(
 		feature_dim=3,

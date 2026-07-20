@@ -18,6 +18,7 @@ from seis_ssl_cluster.data import (
 	write_normalization_stats,
 )
 from seis_ssl_cluster.embedding import run_embedding_extraction
+from seis_ssl_cluster.embedding.extractor import _stratigraphy_pretext_metadata
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.stratigraphy.prototypes import (
 	MultiResolutionOrderedPrototypeHeads,
@@ -616,6 +617,32 @@ def test_multi_head_resume_matches_continuous_two_plus_two_steps(
 	assert torch.equal(torch.get_rng_state(), expected_torch_rng_state)
 
 
+def test_multi_head_embedding_metadata_records_mean_head_weight_semantics(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _multi_head_resume_config(tmp_path, monkeypatch, variant='nocons')
+	student, head, optimizer = _new_multi_head_components()
+	payload = load_checkpoint(
+		_save_multi_head_resume_checkpoint(
+			tmp_path / 'metadata.pt',
+			config=config,
+			student=student,
+			head=head,
+			optimizer=optimizer,
+		),
+		map_location='cpu',
+	)
+
+	metadata = _stratigraphy_pretext_metadata(payload)
+
+	assert metadata is not None
+	assert metadata['prototype_weight'] == 1.0
+	assert metadata['prototype_weight_semantics'] == 'mean_across_heads'
+	assert metadata['usage_weight'] == 0.005
+	assert metadata['usage_weight_semantics'] == 'mean_across_heads'
+
+
 def _assert_manifest_load(
 	path: Path, expected_path: Path, *, validate_array_semantics: bool
 ) -> None:
@@ -654,7 +681,10 @@ def _multi_head_resume_config(
 		'paths': {'output_root': str(tmp_path / f'{variant}_run')},
 		'pseudo_targets': {'manifest': str(manifest_path)},
 		'teacher': {'checkpoint': str(teacher_checkpoint)},
-		'student': {'init_checkpoint': str(student_checkpoint)},
+		'student': {
+			'init_checkpoint': str(student_checkpoint),
+			'unfreeze_top_blocks': 1,
+		},
 		'head': {
 			'spec': 'multi_resolution_ordered_prototypes_v1',
 			'ks': [6, 8, 10],

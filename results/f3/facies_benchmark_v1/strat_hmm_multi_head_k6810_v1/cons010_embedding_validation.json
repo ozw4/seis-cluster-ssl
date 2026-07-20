@@ -1,0 +1,18 @@
+{
+  "artifact_type": "f3_multi_head_embedding_validation",
+  "schema_version": 1,
+  "status": "NOT_RUN_CHECKPOINT_UNAVAILABLE",
+  "generated_date_utc": "2026-07-20",
+  "model_tag": "strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1",
+  "config": "experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/07_extract_cons010_embeddings.yaml",
+  "dry_run_status": "PASS",
+  "execution_status": "FAIL",
+  "error": "FileNotFoundError: best.pt is absent at the configured consistency pretraining root",
+  "embedding_dir": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1/overlap_x16",
+  "checkpoint_sha256": null,
+  "embedding_shape": null,
+  "embedding_dtype": null,
+  "valid_token_count": null,
+  "nonfinite_valid_value_count": null,
+  "multi_head_metadata_complete": false
+}

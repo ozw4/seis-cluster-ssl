@@ -1137,18 +1137,18 @@ def _stratigraphy_pretext_metadata(
 			raise TypeError('checkpoint stratigraphy_checkpoint must be a mapping')
 		student = _required_mapping(stratigraphy_config, 'student')
 		loss = _required_mapping(stratigraphy_config, 'loss')
+		target_manifest = _required_mapping(
+			checkpoint_identity,
+			'target_manifest',
+		)
 		return {
 			'method': 'strat_hmm_multi_head_pretext',
 			'base_objective': 'amp_mae3d',
 			'head_spec': checkpoint_identity['head_spec'],
 			'head_ks': checkpoint_identity['head_ks'],
 			'head_count': len(checkpoint_identity['head_ks']),
-			'target_manifest_path': _required_mapping(
-				checkpoint_identity['target_manifest'], 'checkpoint target_manifest'
-			)['path'],
-			'target_manifest_sha256': _required_mapping(
-				checkpoint_identity['target_manifest'], 'checkpoint target_manifest'
-			)['sha256'],
+			'target_manifest_path': target_manifest['path'],
+			'target_manifest_sha256': target_manifest['sha256'],
 			'per_head_target_sha256': checkpoint_identity['per_head_targets'],
 			'unfreeze_top_blocks': _nonnegative_int(
 				student.get('unfreeze_top_blocks'),
@@ -1162,9 +1162,11 @@ def _stratigraphy_pretext_metadata(
 				loss.get('prototype_weight'),
 				'stratigraphy_config.loss.prototype_weight',
 			),
+			'prototype_weight_semantics': 'mean_across_heads',
 			'usage_weight': _nonnegative_finite_number(
 				loss.get('usage_weight'), 'stratigraphy_config.loss.usage_weight'
 			),
+			'usage_weight_semantics': 'mean_across_heads',
 			'consistency_policy': checkpoint_identity['consistency_policy'],
 			'consistency_weight': checkpoint_identity['consistency_weight'],
 			'consistency_beta': checkpoint_identity['consistency_beta'],

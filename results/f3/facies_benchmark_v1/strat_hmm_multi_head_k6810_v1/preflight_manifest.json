@@ -1,0 +1,46 @@
+{
+  "artifact_type": "f3_multi_head_preflight_manifest",
+  "schema_version": 1,
+  "status": "BLOCKED_INPUT_ARTIFACTS_UNAVAILABLE",
+  "generated_date_utc": "2026-07-20",
+  "experiment": "94_strat_hmm_multi_head_k6810_v1",
+  "artifact_root": "/workspace/artifacts/seis_ssl_cluster",
+  "migration_gate": {
+    "path": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/reports/performance_migration_decision.json",
+    "sha256": "f740cadf505913fd04414642fae61c5add5e6856aaf79f9627ffc25883a50b3d",
+    "status": "PASS_WITH_NUMERIC_DRIFT"
+  },
+  "current_k6_control_gate": {
+    "path": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_current_k6_control_v1/original_split/reports/current_k6_control_summary.json",
+    "sha256": "163e08dfc82b6761283ebfc4f971c043204fa7721c248a091a5252fb62f7062e",
+    "status": "CONTROL_READY_POSITIVE"
+  },
+  "target_manifest": {
+    "path": "/workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+    "status": "MISSING",
+    "sha256": null,
+    "per_head_hashes": null,
+    "common_valid_token_sha256": null,
+    "k6_historical_parity": "NOT_VALIDATED",
+    "empty_state_count": null,
+    "ordered_violation_count": null,
+    "boundary_weight": "NOT_VALIDATED"
+  },
+  "available_k6_source": {
+    "root": "/workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap",
+    "labels_sha256": "87a3ea23cb142d6e77acd3b63c6c4ca87250d82c99aabad152c9cd8e8c2c5e19",
+    "confidence_sha256": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+    "valid_tokens_sha256": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526",
+    "metadata_sha256": "2ec01e32372682c2abd308f5aa318e9d708bdab940aedae3f9a3606790d1e362"
+  },
+  "blocking_inputs": [
+    "K=8 and K=10 target roots are absent.",
+    "The K=6 replay root is absent.",
+    "The multi-head target manifest is absent.",
+    "The build dry-run reached K=6 validation and rejected its valid-token mask as different from the configured source embedding."
+  ],
+  "build_dry_run": {
+    "status": "FAIL",
+    "error": "ValueError: head k=6 f3_facies_benchmark valid-token mask does not match source embedding"
+  }
+}

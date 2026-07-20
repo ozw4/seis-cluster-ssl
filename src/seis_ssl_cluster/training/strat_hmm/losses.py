@@ -323,10 +323,11 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 		first = head_values[first_key]
 		second = head_values[second_key]
 		pair_valid = first.valid_mask & second.valid_mask
-		pair_weight = torch.sqrt(first.confidence * second.confidence)
-		pair_weight_sum = (pair_weight * pair_valid).sum()
+		# ``sqrt(a) * sqrt(b)`` is algebraically the requested geometric mean,
+		# while ``sqrt(a * b)`` can overflow for otherwise valid float inputs.
+		pair_weight = torch.sqrt(first.confidence) * torch.sqrt(second.confidence)
 		pair_name = f'{first_key}_{second_key}'
-		if bool(pair_weight_sum.detach().gt(0.0).item()):
+		if bool(pair_weight[pair_valid].detach().gt(0.0).any().item()):
 			first_coordinate = expected_normalized_order_coordinate(
 				outputs.outputs[first_key].logits,
 			)
@@ -339,7 +340,7 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 				beta=consistency_beta,
 				reduction='none',
 			)
-			pair_loss = (pair_weight * error * pair_valid).sum() / pair_weight_sum
+			pair_loss = _stable_weighted_mean(error, pair_weight, pair_valid)
 			eligible_pair_count += 1
 		else:
 			pair_loss = _graph_zero(outputs.outputs[first_key].logits) + _graph_zero(
@@ -532,7 +533,26 @@ def _validate_multi_head_labels(
 def _masked_mean(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 	if not bool(mask.any().item()):
 		return values.new_zeros(())
-	return values[mask].mean()
+	selected = values[mask]
+	scale = selected.abs().max()
+	if bool(scale.eq(0.0).item()):
+		return scale
+	return scale * (selected / scale).mean()
+
+
+def _stable_weighted_mean(
+	values: torch.Tensor,
+	weights: torch.Tensor,
+	mask: torch.Tensor,
+) -> torch.Tensor:
+	"""Return a finite weighted mean without summing unbounded weights."""
+	selected_values = values[mask]
+	selected_weights = weights[mask]
+	scale = selected_weights.max()
+	if bool(scale.le(0.0).item()):
+		return _graph_zero(values)
+	normalized_weights = selected_weights / scale
+	return (normalized_weights * selected_values).sum() / normalized_weights.sum()
 
 
 def _graph_zero(reference: torch.Tensor) -> torch.Tensor:

@@ -1,0 +1,14 @@
+{
+  "artifact_type": "f3_multi_head_checkpoint_validation",
+  "schema_version": 1,
+  "status": "NOT_RUN_PREREQUISITE_UNAVAILABLE",
+  "generated_date_utc": "2026-07-20",
+  "model_tag": "strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1",
+  "checkpoint": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/best.pt",
+  "reason": "No smoke or full run could start without the required multi-head target manifest.",
+  "latest_exists": false,
+  "best_exists": false,
+  "epoch": null,
+  "global_step": null,
+  "checkpoint_sha256": null
+}
