@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,7 @@ import torch
 from proc.seis_ssl_cluster.run_f3_lithology_split_sweep_probes import (
 	f3_lithology_split_sweep_probe_config_from_mapping,
 )
+from seis_ssl_cluster.clustering.features import file_sha256
 from seis_ssl_cluster.clustering.kmeans import clustering_settings_from_config
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	stratigraphic_hmm_settings_from_config,
@@ -108,6 +110,8 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_UPSAMPLE_MODE,
 )
 from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT, ArtifactPaths, ExperimentKey
+from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
+from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import _artifacts
 
 VOXEL_DECODER_SMOKE_SPEC = f'{VOXEL_DECODER_SPEC}_smoke'
 OLD_VOXEL_DECODER_SPEC = 'frozen_embedding_decoder_v1'
@@ -175,6 +179,7 @@ F3_STRAT_HMM_PRETRAINING_M2A_ROOT = (
 	F3_ROOT / '84_strat_hmm_pretraining_m2a_boundary'
 )
 F3_CURRENT_K6_CONTROL_ROOT = F3_ROOT / '93_strat_hmm_m1_current_k6_control'
+F3_STRAT_HMM_MULTI_HEAD_ROOT = F3_ROOT / '94_strat_hmm_multi_head_k6810_v1'
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
@@ -193,6 +198,9 @@ F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '04_train_boundary_full.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '01_train_current_k6_smoke.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '02_train_current_k6_full.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT
+		/ '02_train_multi_head_no_consistency.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '03_train_multi_head_consistency.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
@@ -508,6 +516,10 @@ def test_all_repository_configs_load_and_resolve_supported_stages(
 		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
 		'/test/artifacts/seis_ssl_cluster',
 	)
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256',
+		'0' * 64,
+	)
 	config = load_config(config_path)
 
 	assert isinstance(config, dict)
@@ -716,10 +728,90 @@ def test_active_f3_performance_migration_pseudo_target_configs_load(
 def test_active_f3_strat_hmm_pretext_configs_resolve(
 	config_path: Path,
 	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256',
+		'0' * 64,
+	)
 	resolve_strat_hmm_pretext_config(
 		_config_with_existing_strat_hmm_pretext_inputs(config_path, tmp_path),
 	)
+
+
+def test_active_f3_multi_head_pretext_config_contract(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256',
+		'0' * 64,
+	)
+	config_paths = [
+		F3_STRAT_HMM_MULTI_HEAD_ROOT
+		/ '02_train_multi_head_no_consistency.yaml',
+		F3_STRAT_HMM_MULTI_HEAD_ROOT / '03_train_multi_head_consistency.yaml',
+	]
+	for config_path, consistency_weight, model_tag in zip(
+		config_paths,
+		(0.0, 0.1),
+		(
+			'strat_hmm_multi_k6810_no_consistency_v1',
+			'strat_hmm_multi_k6810_main_v1',
+		),
+		strict=True,
+	):
+		raw = load_config(config_path)
+		assert raw['identity']['model_tag'] == model_tag
+		assert raw['identity']['scientific_identity'] == {
+			'experiment_role': 'multi_head_ordered_pretext',
+			'head_spec': 'multi_resolution_ordered_prototypes_v1',
+			'head_ks': [6, 8, 10],
+			'target_manifest_sha256': '0' * 64,
+			'consistency_policy': 'normalized_order_smooth_l1_v1',
+		}
+		assert raw['head'] == {
+			'spec': 'multi_resolution_ordered_prototypes_v1',
+			'ks': [6, 8, 10],
+			'projection_dim': 128,
+			'temperature': 0.1,
+			'normalize': True,
+		}
+		assert raw['loss'] == {
+			'prototype_weight': 1.0,
+			'usage_weight': 0.005,
+			'entropy_floor': None,
+			'consistency_weight': consistency_weight,
+			'consistency_beta': 0.1,
+			'distillation_weight': 0.2,
+		}
+
+	no_consistency, main = [
+		resolve_strat_hmm_pretext_config(
+			_config_with_existing_strat_hmm_pretext_inputs(config_path, tmp_path)
+		)
+		for config_path in config_paths
+	]
+	comparison = deepcopy(main)
+	comparison['loss']['consistency_weight'] = 0.0
+	comparison['identity']['scientific_identity']['consistency_weight'] = 0.0
+	comparison['identity']['model_tag'] = no_consistency['identity']['model_tag']
+	comparison['paths']['output_root'] = no_consistency['paths']['output_root']
+	comparison['pseudo_targets']['manifest'] = no_consistency['pseudo_targets'][
+		'manifest'
+	]
+	comparison['identity']['scientific_identity']['target_manifest_sha256'] = (
+		no_consistency['identity']['scientific_identity']['target_manifest_sha256']
+	)
+	assert comparison == no_consistency
 
 
 @pytest.mark.parametrize(
@@ -1430,7 +1522,7 @@ def _config_with_existing_strat_hmm_pretext_inputs(
 	config = load_config(config_path)
 	artifact_root = tmp_path / 'artifacts'
 	pseudo_target_dir = tmp_path / 'pseudo_targets'
-	pseudo_target_dir.mkdir()
+	pseudo_target_dir.mkdir(exist_ok=True)
 	checkpoint = tmp_path / 'mae_best.pt'
 	checkpoint.touch()
 
@@ -1438,7 +1530,23 @@ def _config_with_existing_strat_hmm_pretext_inputs(
 	config['paths']['output_root'] = str(
 		artifact_root / 'pretraining' / 'f3' / config_path.stem,
 	)
-	config['pseudo_targets']['input_dir'] = str(pseudo_target_dir)
+	if 'manifest' in config['pseudo_targets']:
+		fixture_root = tmp_path / config_path.stem
+		fixture_root.mkdir(exist_ok=True)
+		embeddings, heads = _artifacts(fixture_root)
+		manifest = fixture_root / 'multi_head_target_manifest.json'
+		build_multi_head_target_manifest(
+			manifest_path=manifest,
+			source_embedding_dir=embeddings,
+			head_roots={6: heads[6], 8: heads[8], 10: heads[10]},
+			replay_k6_root=heads[6],
+		)
+		config['pseudo_targets']['manifest'] = str(manifest)
+		config['identity']['scientific_identity']['target_manifest_sha256'] = (
+			file_sha256(manifest)
+		)
+	else:
+		config['pseudo_targets']['input_dir'] = str(pseudo_target_dir)
 	config['teacher']['checkpoint'] = str(checkpoint)
 	config['student']['init_checkpoint'] = str(checkpoint)
 	return config

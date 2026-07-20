@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
 import math
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
+from hashlib import sha256
 from numbers import Real
-from typing import TYPE_CHECKING, TypeAlias, TypeVar
-
-if TYPE_CHECKING:
-	from pathlib import Path
+from pathlib import Path
+from typing import TypeAlias, TypeVar
 
 from seis_ssl_cluster.config.artifact_paths import (
 	_validate_artifact_output_path,
@@ -106,17 +107,26 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 			'decoder_heads',
 		},
 	),
-	'pseudo_targets': frozenset({'input_dir', 'k', 'min_confidence'}),
+	'pseudo_targets': frozenset({'input_dir', 'k', 'manifest', 'min_confidence'}),
 	'teacher': frozenset({'checkpoint'}),
 	'student': frozenset({'init_checkpoint', 'unfreeze_top_blocks'}),
 	'head': frozenset(
-		{'num_prototypes', 'projection_dim', 'temperature', 'normalize'},
+		{
+			'num_prototypes',
+			'spec',
+			'ks',
+			'projection_dim',
+			'temperature',
+			'normalize',
+		},
 	),
 	'loss': frozenset(
 		{
 			'prototype_weight',
 			'usage_weight',
 			'entropy_floor',
+			'consistency_weight',
+			'consistency_beta',
 			'distillation_weight',
 		},
 	),
@@ -141,6 +151,55 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 	),
 	'zero_mask': frozenset(DEFAULT_ZERO_MASK_CONTRACT),
 }
+
+_STRAT_HMM_MULTI_HEAD_SPEC = 'multi_resolution_ordered_prototypes_v1'
+_STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY = 'normalized_order_smooth_l1_v1'
+
+# These fields are deliberately centralized so checkpoint identity construction can
+# distinguish scientific settings from machine-specific execution settings.
+MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS = frozenset(
+	{
+		'experiment_role',
+		'head_spec',
+		'head_ks',
+		'head_projection_dim',
+		'head_temperature',
+		'head_normalize',
+		'target_manifest_sha256',
+		'target_head_hashes',
+		'consistency_policy',
+		'prototype_weight',
+		'usage_weight',
+		'consistency_weight',
+		'consistency_beta',
+		'distillation_weight',
+		'teacher_checkpoint',
+		'student_init_checkpoint',
+		'student_unfreeze_top_blocks',
+		'model',
+		'data',
+		'zero_mask',
+		'train',
+	}
+)
+MULTI_HEAD_RUNTIME_IDENTITY_FIELDS = frozenset(
+	{'device', 'workers', 'stage_timing', 'cache_directory', 'resume_path'}
+)
+MULTI_HEAD_SCIENTIFIC_TRAIN_FIELDS = frozenset(
+	{
+		'batch_size',
+		'samples_per_epoch',
+		'epochs',
+		'shuffle',
+		'lr',
+		'encoder_lr',
+		'weight_decay',
+		'amp',
+		'seed',
+		'grad_clip_norm',
+		'max_steps',
+	}
+)
 
 
 def resolve_mae_training_config(config: _T) -> Config:
@@ -238,9 +297,9 @@ def resolve_strat_hmm_pretext_config(config: _T) -> Config:
 		prefix='paths',
 	)
 	_reject_fixed_contract_keys(resolved)
+	multi_head = _is_strat_hmm_multi_head_config(resolved)
 	_merge_strat_hmm_pretext_defaults(resolved)
 	_validate_strat_hmm_pretext_sections(resolved)
-	_validate_strat_hmm_pretext_identity(resolved)
 
 	manifests = _required_mapping(resolved, 'manifests')
 	data = _required_mapping(resolved, 'data')
@@ -261,18 +320,29 @@ def resolve_strat_hmm_pretext_config(config: _T) -> Config:
 	)
 	_validate_model(model)
 	_validate_divisible_crop_patch(local_crop_size, patch_size)
-	_validate_strat_hmm_pretext_pseudo_targets(pseudo_targets)
+	_validate_strat_hmm_pretext_pseudo_targets(pseudo_targets, multi_head=multi_head)
 	_validate_strat_hmm_pretext_teacher(teacher)
 	_validate_strat_hmm_pretext_student(
 		student,
 		encoder_depth=int(model['encoder_depth']),
 	)
-	_validate_strat_hmm_pretext_head(head)
+	_validate_strat_hmm_pretext_head(head, multi_head=multi_head)
 	_validate_strat_hmm_pretext_loss(
 		loss,
 		unfreeze_top_blocks=int(student['unfreeze_top_blocks']),
+		multi_head=multi_head,
 	)
-	_validate_strat_hmm_pretext_cross_section_values(pseudo_targets, head)
+	if multi_head:
+		manifest = _validate_strat_hmm_multi_head_manifest(pseudo_targets, head)
+		_validate_strat_hmm_pretext_identity(
+			resolved,
+			multi_head=True,
+			manifest_sha256=_file_sha256(str(pseudo_targets['manifest'])),
+			manifest=manifest,
+		)
+	else:
+		_validate_strat_hmm_pretext_cross_section_values(pseudo_targets, head)
+		_validate_strat_hmm_pretext_identity(resolved, multi_head=False)
 	_validate_strat_hmm_pretext_train(train)
 	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
 	_validate_artifact_output_path(
@@ -315,6 +385,11 @@ def _merge_strat_hmm_pretext_defaults(config: Config) -> None:
 	_merge_section_defaults(config, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
 
 
+def _is_strat_hmm_multi_head_config(config: Mapping[str, object]) -> bool:
+	head = config.get('head')
+	return isinstance(head, Mapping) and 'spec' in head
+
+
 def _validate_strat_hmm_pretext_sections(config: Mapping[str, object]) -> None:
 	for section, allowed in _STRAT_HMM_PRETEXT_SECTION_KEYS.items():
 		value = config.get(section)
@@ -323,10 +398,18 @@ def _validate_strat_hmm_pretext_sections(config: Mapping[str, object]) -> None:
 		_validate_allowed_keys(value, allowed, prefix=section)
 
 
-def _validate_strat_hmm_pretext_identity(config: Mapping[str, object]) -> None:
+def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912
+	config: Mapping[str, object],
+	*,
+	multi_head: bool,
+	manifest_sha256: str | None = None,
+	manifest: Mapping[str, object] | None = None,
+) -> None:
 	"""Validate optional provenance that is stored beside model weights."""
 	value = config.get('identity')
 	if value is None:
+		if multi_head:
+			raise ValueError('identity is required for multi-head strat HMM pretext')
 		return
 	if not isinstance(value, Mapping):
 		raise TypeError('identity must be a mapping')
@@ -342,6 +425,111 @@ def _validate_strat_hmm_pretext_identity(config: Mapping[str, object]) -> None:
 		child = value.get(key)
 		if child is not None and not isinstance(child, Mapping):
 			raise TypeError(f'identity.{key} must be a mapping when provided')
+	if not multi_head:
+		return
+	scientific = _required_child_mapping(
+		value,
+		'scientific_identity',
+		prefix='identity',
+	)
+	if manifest is None or manifest_sha256 is None:
+		raise AssertionError('multi-head identity validation requires a manifest')
+	if not isinstance(scientific, dict):
+		raise TypeError('identity.scientific_identity must be a mutable mapping')
+	_expected_or_record_multi_head_scientific_identity(
+		scientific,
+		config=config,
+		manifest=manifest,
+	)
+	_validate_allowed_keys(
+		scientific,
+		MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS,
+		prefix='identity.scientific_identity',
+	)
+	for key in (
+		'experiment_role',
+		'head_spec',
+		'head_ks',
+		'target_manifest_sha256',
+		'consistency_policy',
+	):
+		_validate_required_key(scientific, key, prefix='identity.scientific_identity')
+	if scientific['experiment_role'] != 'multi_head_ordered_pretext':
+		raise ValueError(
+			'identity.scientific_identity.experiment_role must be '
+			"'multi_head_ordered_pretext'"
+		)
+	if scientific['head_spec'] != _STRAT_HMM_MULTI_HEAD_SPEC:
+		raise ValueError(
+			'identity.scientific_identity.head_spec does not match head.spec'
+		)
+	_validate_head_ks(scientific['head_ks'], prefix='identity.scientific_identity')
+	if tuple(scientific['head_ks']) != tuple(manifest['head_ks']):
+		raise ValueError('identity.scientific_identity.head_ks does not match manifest')
+	if scientific['target_manifest_sha256'] != manifest_sha256:
+		raise ValueError(
+			'identity.scientific_identity.target_manifest_sha256 does not match '
+			'the manifest file'
+		)
+	if scientific['consistency_policy'] != _STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY:
+		raise ValueError(
+			'identity.scientific_identity.consistency_policy must be '
+			f'{_STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY!r}'
+		)
+	runtime = value.get('runtime_identity')
+	if runtime is not None:
+		_validate_allowed_keys(
+			runtime,
+			MULTI_HEAD_RUNTIME_IDENTITY_FIELDS,
+			prefix='identity.runtime_identity',
+		)
+
+
+def _expected_or_record_multi_head_scientific_identity(
+	scientific: dict[str, object],
+	*,
+	config: Mapping[str, object],
+	manifest: Mapping[str, object],
+) -> None:
+	"""Bind resolved scientific settings into a multi-head identity."""
+	head = _required_mapping(config, 'head')
+	loss = _required_mapping(config, 'loss')
+	teacher = _required_mapping(config, 'teacher')
+	student = _required_mapping(config, 'student')
+	model = _required_mapping(config, 'model')
+	data = _required_mapping(config, 'data')
+	zero_mask = _required_mapping(config, 'zero_mask')
+	train = _required_mapping(config, 'train')
+	expected = {
+		'head_projection_dim': head['projection_dim'],
+		'head_temperature': head['temperature'],
+		'head_normalize': head['normalize'],
+		'target_head_hashes': _multi_head_target_hashes(manifest),
+		'prototype_weight': loss['prototype_weight'],
+		'usage_weight': loss['usage_weight'],
+		'consistency_weight': loss['consistency_weight'],
+		'consistency_beta': loss['consistency_beta'],
+		'distillation_weight': loss['distillation_weight'],
+		'teacher_checkpoint': teacher['checkpoint'],
+		'student_init_checkpoint': student['init_checkpoint'],
+		'student_unfreeze_top_blocks': student['unfreeze_top_blocks'],
+		'model': {**FIXED_MODEL_CONTRACT, **model},
+		'data': {**FIXED_DATA_CONTRACT, **data},
+		'zero_mask': zero_mask,
+		'train': {
+			key: train[key]
+			for key in MULTI_HEAD_SCIENTIFIC_TRAIN_FIELDS
+		},
+	}
+	for key, expected_value in expected.items():
+		if key in scientific:
+			if scientific[key] != expected_value:
+				raise ValueError(
+					f'identity.scientific_identity.{key} does not match the '
+					'resolved scientific setting'
+				)
+		else:
+			scientific[key] = deepcopy(expected_value)
 
 
 def _validate_manifests(manifests: Mapping[str, object]) -> None:
@@ -382,7 +570,33 @@ def _validate_finite_check_mode(data: Mapping[str, object]) -> None:
 
 def _validate_strat_hmm_pretext_pseudo_targets(
 	pseudo_targets: Mapping[str, object],
+	*,
+	multi_head: bool,
 ) -> None:
+	if multi_head:
+		if 'input_dir' in pseudo_targets or 'k' in pseudo_targets:
+			raise ValueError(
+				'multi-head pseudo_targets must use manifest, not input_dir or k'
+			)
+		manifest = _validate_non_empty_path(
+			pseudo_targets,
+			'manifest',
+			prefix='pseudo_targets',
+		)
+		if not manifest.is_file():
+			raise FileNotFoundError(
+				f'pseudo_targets.manifest must exist and be a file: {manifest}'
+			)
+		_validate_optional_fraction(
+			pseudo_targets,
+			'min_confidence',
+			prefix='pseudo_targets',
+		)
+		return
+	if 'manifest' in pseudo_targets:
+		raise ValueError(
+			'single-head pseudo_targets must use input_dir and k, not manifest'
+		)
 	input_dir = _validate_non_empty_path(
 		pseudo_targets,
 		'input_dir',
@@ -436,8 +650,27 @@ def _validate_strat_hmm_pretext_student(
 		raise FileNotFoundError(msg)
 
 
-def _validate_strat_hmm_pretext_head(head: Mapping[str, object]) -> None:
-	_validate_positive_int(head, 'num_prototypes', prefix='head')
+def _validate_strat_hmm_pretext_head(
+	head: Mapping[str, object],
+	*,
+	multi_head: bool,
+) -> None:
+	if multi_head:
+		if 'num_prototypes' in head:
+			raise ValueError('multi-head head must use ks, not num_prototypes')
+		if head.get('spec') != _STRAT_HMM_MULTI_HEAD_SPEC:
+			raise ValueError(
+				f'head.spec must be {_STRAT_HMM_MULTI_HEAD_SPEC!r}; '
+				f"got {head.get('spec')!r}"
+			)
+		_validate_required_key(head, 'ks', prefix='head')
+		_validate_head_ks(head['ks'], prefix='head')
+		_validate_required_key(head, 'projection_dim', prefix='head')
+		_validate_positive_int(head, 'projection_dim', prefix='head')
+	else:
+		if 'ks' in head:
+			raise ValueError('single-head head must use num_prototypes, not ks')
+		_validate_positive_int(head, 'num_prototypes', prefix='head')
 	if head.get('projection_dim') is not None:
 		_validate_positive_int(head, 'projection_dim', prefix='head')
 	_validate_positive_finite_number(head, 'temperature', prefix='head')
@@ -448,12 +681,25 @@ def _validate_strat_hmm_pretext_loss(
 	loss: Mapping[str, object],
 	*,
 	unfreeze_top_blocks: int,
+	multi_head: bool,
 ) -> None:
-	for key in ('prototype_weight', 'usage_weight', 'distillation_weight'):
+	if not multi_head and (
+		'consistency_weight' in loss or 'consistency_beta' in loss
+	):
+		raise ValueError(
+			'single-head loss must not define multi-head consistency fields'
+		)
+	weight_keys = ['prototype_weight', 'usage_weight', 'distillation_weight']
+	if multi_head:
+		_validate_required_key(loss, 'consistency_weight', prefix='loss')
+		_validate_required_key(loss, 'consistency_beta', prefix='loss')
+		weight_keys.append('consistency_weight')
+		_validate_positive_finite_number(loss, 'consistency_beta', prefix='loss')
+	for key in weight_keys:
 		_validate_nonnegative_finite_number(loss, key, prefix='loss')
 	if not any(
 		float(loss[key]) > 0.0
-		for key in ('prototype_weight', 'usage_weight', 'distillation_weight')
+		for key in weight_keys
 	):
 		msg = 'at least one strat HMM pretext loss weight must be positive'
 		raise ValueError(msg)
@@ -465,6 +711,73 @@ def _validate_strat_hmm_pretext_loss(
 			'student.unfreeze_top_blocks is greater than 0'
 		)
 		raise ValueError(msg)
+
+
+def _validate_head_ks(value: object, *, prefix: str) -> None:
+	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+		raise TypeError(f'{prefix}.ks must be a sequence of integers')
+	if len(value) < 2:
+		raise ValueError(f'{prefix}.ks must contain at least two heads')
+	if any(isinstance(k, bool) or not isinstance(k, int) for k in value):
+		raise TypeError(f'{prefix}.ks must contain integers and not bools')
+	ks = tuple(value)
+	if any(k < 2 for k in ks):
+		raise ValueError(f'{prefix}.ks values must be at least 2')
+	if tuple(sorted(ks)) != ks:
+		raise ValueError(f'{prefix}.ks must be strictly increasing')
+	if len(set(ks)) != len(ks):
+		raise ValueError(f'{prefix}.ks must not contain duplicates')
+
+
+def _validate_strat_hmm_multi_head_manifest(
+	pseudo_targets: Mapping[str, object],
+	head: Mapping[str, object],
+) -> Mapping[str, object]:
+	"""Validate manifest references without loading pseudo-target arrays."""
+	multi_head = importlib.import_module('seis_ssl_cluster.stratigraphy.multi_head')
+	manifest = multi_head.load_multi_head_target_manifest(
+		str(pseudo_targets['manifest'])
+	)
+	if tuple(manifest['head_ks']) != tuple(head['ks']):
+		raise ValueError('manifest.head_ks must equal head.ks')
+	return manifest
+
+
+def _file_sha256(path: str) -> str:
+	"""Return a file digest without importing optional clustering dependencies."""
+	digest = sha256()
+	with Path(path).open('rb') as file_obj:
+		for block in iter(lambda: file_obj.read(1024 * 1024), b''):
+			digest.update(block)
+	return digest.hexdigest()
+
+
+def _multi_head_target_hashes(
+	manifest: Mapping[str, object],
+) -> dict[str, dict[str, dict[str, str]]]:
+	"""Extract per-head artifact hashes for the resolved scientific identity."""
+	heads = manifest['heads']
+	if not isinstance(heads, Mapping):
+		raise TypeError('validated multi-head manifest has mapping heads')
+	result: dict[str, dict[str, dict[str, str]]] = {}
+	for k in manifest['head_ks']:
+		head = heads[str(k)]
+		if not isinstance(head, Mapping):
+			raise TypeError(
+				'validated multi-head manifest has mapping head entries'
+			)
+		surveys = head['surveys']
+		if not isinstance(surveys, Mapping):
+			raise TypeError('validated multi-head manifest has mapping surveys')
+		result[str(k)] = {
+			str(survey_id): {
+				name: str(entry[name]['sha256'])
+				for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
+			}
+			for survey_id, entry in surveys.items()
+			if isinstance(entry, Mapping)
+		}
+	return result
 
 
 def _validate_strat_hmm_pretext_cross_section_values(

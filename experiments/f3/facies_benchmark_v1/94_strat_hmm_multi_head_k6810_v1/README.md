@@ -5,6 +5,21 @@ prepared feature cache is shared by the HMM backend; K is the only changed
 scientific variable. The immutable historical K=6 target remains the training
 reference. The replayed K=6 output is parity evidence only.
 
+The subsequent multi-head pretext configurations must use the explicit
+`multi_resolution_ordered_prototypes_v1` head spec, the generated manifest,
+and a scientific identity whose `target_manifest_sha256` matches that exact
+manifest file. The no-consistency and main runs differ only in
+`loss.consistency_weight` (0.0 and 0.1 respectively) and their model/output
+identity. Prototype and usage weights apply to the mean across heads, while
+the consistency weight applies to the mean over head pairs. K=6/8/10 denotes
+pretext ordered-state cardinality; downstream F3 lithology `class_count`
+remains 6.
+
+The resolved scientific identity binds the head projection/temperature/
+normalization, all loss weights, teacher/student initialization, and effective
+model, preprocessing, and scientific training settings. Device, workers,
+timing, cache location, and resume path remain runtime-only identity.
+
 Set `SEIS_SSL_CLUSTER_ARTIFACT_ROOT` to the absolute artifact-registry root for
 the current environment before running this stage. The replay config resolves
 that variable at load time.
@@ -43,3 +58,25 @@ python proc/seis_ssl_cluster/build_strat_hmm_multi_head_targets.py \
   --manifest "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json" \
   --only-missing --quarantine-invalid
 ```
+
+The paired pretext configs are `02_train_multi_head_no_consistency.yaml` and
+`03_train_multi_head_consistency.yaml`. Before either is resolved, bind its
+identity to the generated manifest's actual digest; the resolver rejects a
+stale or incorrect value.
+
+```bash
+export SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256="$(sha256sum \
+  "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json" \
+  | awk '{print $1}')"
+
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/02_train_multi_head_no_consistency.yaml --dry-run
+
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/03_train_multi_head_consistency.yaml --dry-run
+```
+
+The configs are intentionally paired: their only scientific setting difference
+is `loss.consistency_weight` (`0.0` versus `0.1`); their no-consistency and
+main model/output identities are distinct. Both keep the downstream lithology
+`class_count` at 6.

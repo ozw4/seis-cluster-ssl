@@ -258,6 +258,70 @@ When `visualization.mae_debug.enabled` is true, at least one of
 `output_dir` must be an absolute path under `paths.output_root`; `null` writes
 to `paths.output_root/visualizations/mae_debug`.
 
+### Strat-HMM Pretext Training
+
+The strat-HMM pretext resolver has two explicit, mutually exclusive target
+schemas. Existing single-head configurations continue to use
+`pseudo_targets.input_dir`, `pseudo_targets.k`, and `head.num_prototypes`; no
+multi-head defaults are inserted into their resolved configuration.
+
+Multi-head ordered-prototype pretext uses the following schema:
+
+```yaml
+pseudo_targets:
+  manifest: /absolute/path/multi_head_target_manifest.json
+  min_confidence: 0.0
+head:
+  spec: multi_resolution_ordered_prototypes_v1
+  ks: [6, 8, 10]
+  projection_dim: 128
+  temperature: 0.1
+  normalize: true
+loss:
+  prototype_weight: 1.0
+  usage_weight: 0.005
+  entropy_floor: null
+  consistency_weight: 0.1
+  consistency_beta: 0.1
+  distillation_weight: 0.2
+identity:
+  model_tag: strat_hmm_multi_k6810_main_v1
+  scientific_identity:
+    experiment_role: multi_head_ordered_pretext
+    head_spec: multi_resolution_ordered_prototypes_v1
+    head_ks: [6, 8, 10]
+    target_manifest_sha256: <sha256 of the manifest file>
+    consistency_policy: normalized_order_smooth_l1_v1
+  runtime_identity:
+    device: cuda
+    workers: 4
+```
+
+`head.ks` is an increasing sequence of at least two integer cardinalities, each
+at least two. The manifest must be complete, hash-valid, use the supported
+increasing-downward ordering, have matching K values and common valid-token
+identity, and contain no boundary-weight references. The resolver validates
+manifest metadata and file hashes; it does not load full pseudo-target arrays.
+
+The manifest hash is required in scientific identity and must match the actual
+manifest file. Resolved multi-head identity also records the manifest's
+per-head target hashes. It also records and binds `head_projection_dim`,
+`head_temperature`, `head_normalize`, all pretext loss weights and beta,
+teacher/student initialization, and the effective model/data, zero-mask
+preprocessing, and scientific training settings. Supplying any of those
+resolved fields with a different value fails validation. Runtime identity is
+limited to execution details such as device, workers, timing, cache location,
+and resume path.
+
+`prototype_weight` weights the mean head prototype loss, and `usage_weight`
+weights the mean head usage loss: neither is added once per head. Likewise,
+`consistency_weight` weights the mean across the three head pairs for the
+K=6/8/10 experiment. A distillation-only configuration is allowed as an
+explicit guardrail, but all loss weights may not be zero.
+
+K is the pretext ordered-state cardinality, not the downstream lithology class
+count. The F3 downstream `class_count` remains 6.
+
 ### Embedding Extraction
 
 Training-owned sections are loaded from the checkpoint, not repeated here.
