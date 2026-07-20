@@ -144,6 +144,35 @@ def test_embedding_extraction_rejects_multi_head_config_without_identity(
 		run_embedding_extraction(config, device='cpu')
 
 
+@pytest.mark.parametrize(
+	('field', 'value'),
+	[
+		('model_tag', 'tampered-model-tag'),
+		('output_root', '/tampered/output/root'),
+	],
+)
+def test_embedding_extraction_rejects_tampered_multi_head_provenance(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	field: str,
+	value: str,
+) -> None:
+	config = _write_fixture(tmp_path, strat=True)
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	identity = payload['stratigraphy_checkpoint']
+	assert isinstance(identity, dict)
+	identity[field] = value
+	checkpoint = config['embeddings']['checkpoint']
+	assert isinstance(checkpoint, str)
+	torch.save(payload, checkpoint)
+
+	with pytest.raises(
+		ValueError,
+		match=f'checkpoint {field} does not match stratigraphy config',
+	):
+		run_embedding_extraction(config, device='cpu')
+
+
 def test_checkpoint_inspection_reports_resume_compatibility(
 	tmp_path: Path,
 ) -> None:
@@ -207,11 +236,17 @@ def test_multi_head_checkpoint_rejects_per_head_provenance_mismatch(
 		temperature=0.1,
 		normalize=True,
 	)
-	optimizer = torch.optim.AdamW([*student.parameters(), *head.parameters()])
+	optimizer = torch.optim.AdamW(
+		[
+			{'params': head.parameters(), 'lr': 3.0e-4, 'name': 'head'},
+			{'params': student.parameters(), 'lr': 1.0e-5, 'name': 'encoder'},
+		]
+	)
 	config = {
 		'paths': {'output_root': str(tmp_path / 'run')},
 		'pseudo_targets': {'manifest': str(manifest_path)},
 		'head': {'spec': 'multi_resolution_ordered_prototypes_v1', 'ks': [6, 8, 10]},
+		'train': {'lr': 3.0e-4, 'encoder_lr': 1.0e-5},
 		'identity': {
 			'scientific_identity': {
 				'target_manifest_sha256': _sha256(manifest_path),
@@ -467,6 +502,46 @@ def test_multi_head_checkpoint_rejects_incompatible_optimizer_groups(
 			payload,
 			expected_optimizer=optimizer,
 		)
+
+
+@pytest.mark.parametrize('layout', ['single_group', 'k_split_groups'])
+def test_multi_head_checkpoint_save_rejects_noncanonical_optimizer_layout(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	layout: str,
+) -> None:
+	config = _multi_head_resume_config(tmp_path, monkeypatch, variant='nocons')
+	student, head, _ = _new_multi_head_components()
+	if layout == 'single_group':
+		optimizer = torch.optim.AdamW(
+			[*head.parameters(), *student.parameters()],
+			lr=1.0e-3,
+		)
+	else:
+		optimizer = torch.optim.AdamW(
+			[
+				{'params': head.heads['k6'].parameters(), 'name': 'head_k6'},
+				{'params': head.heads['k8'].parameters(), 'name': 'head_k8'},
+				{'params': head.heads['k10'].parameters(), 'name': 'head_k10'},
+				{'params': student.parameters(), 'name': 'encoder'},
+			],
+			lr=1.0e-3,
+		)
+	checkpoint_path = tmp_path / f'{layout}.pt'
+
+	with pytest.raises(
+		ValueError,
+		match='requires exactly head and encoder parameter groups',
+	):
+		_save_multi_head_resume_checkpoint(
+			checkpoint_path,
+			config=config,
+			student=student,
+			head=head,
+			optimizer=optimizer,
+		)
+
+	assert not checkpoint_path.exists()
 
 
 def test_multi_head_checkpoint_rejects_reordered_optimizer_parameters(
@@ -726,6 +801,7 @@ def _multi_head_resume_config(
 			'consistency_beta': 0.1,
 			'distillation_weight': 0.2,
 		},
+		'train': {'lr': 1.0e-3, 'encoder_lr': 1.0e-3},
 		'identity': {
 			'scientific_identity': {
 				'experiment_role': 'multi_head_ordered_pretext',
@@ -890,8 +966,8 @@ def _valid_multi_head_checkpoint_payload(
 	)
 	optimizer = torch.optim.AdamW(
 		[
-			{'params': student.parameters(), 'name': 'student'},
-			{'params': head.parameters(), 'name': 'head'},
+			{'params': head.parameters(), 'lr': 3.0e-4, 'name': 'head'},
+			{'params': student.parameters(), 'lr': 1.0e-5, 'name': 'encoder'},
 		]
 	)
 	checkpoint_path = tmp_path / 'multi-head.pt'
@@ -919,6 +995,7 @@ def _valid_multi_head_checkpoint_payload(
 			'consistency_beta': 0.1,
 			'distillation_weight': 0.2,
 		},
+		'train': {'lr': 3.0e-4, 'encoder_lr': 1.0e-5},
 		'identity': {
 			'scientific_identity': {
 				'target_manifest_sha256': _sha256(manifest_path),

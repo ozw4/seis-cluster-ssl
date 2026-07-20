@@ -118,6 +118,7 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 		stratigraphy_state_dict=stratigraphy_state_dict,
 		optimizer=optimizer,
 		stratigraphy_config=stratigraphy_config,
+		student=student,
 		head=head,
 	)
 	payload = {
@@ -298,12 +299,13 @@ def _is_multi_head_config(config: Mapping[str, object]) -> bool:
 	return isinstance(head, Mapping) and 'spec' in head
 
 
-def _validate_checkpoint_inputs(
+def _validate_checkpoint_inputs(  # noqa: PLR0913
 	*,
 	model_state_dict: Mapping[str, torch.Tensor],
 	stratigraphy_state_dict: Mapping[str, torch.Tensor],
 	optimizer: torch.optim.Optimizer,
 	stratigraphy_config: Mapping[str, object],
+	student: torch.nn.Module,
 	head: torch.nn.Module,
 ) -> None:
 	_validate_finite_state_dict(model_state_dict, label='model_state_dict')
@@ -319,10 +321,89 @@ def _validate_checkpoint_inputs(
 			head,
 			stratigraphy_state_dict,
 		)
+		_validate_multi_head_optimizer_layout(
+			optimizer=optimizer,
+			stratigraphy_config=stratigraphy_config,
+			student=student,
+			head=head,
+		)
 	_validate_finite_optimizer_state(optimizer.state_dict())
 	for group in optimizer.param_groups:
 		if not group.get('params'):
 			raise ValueError('optimizer parameter group must not be empty')
+
+
+def _validate_multi_head_optimizer_layout(  # noqa: C901
+	*,
+	optimizer: torch.optim.Optimizer,
+	stratigraphy_config: Mapping[str, object],
+	student: torch.nn.Module,
+	head: torch.nn.Module,
+) -> None:
+	"""Require the fixed multi-head encoder/head optimizer partition."""
+	groups = optimizer.param_groups
+	if len(groups) != 2 or [group.get('name') for group in groups] != [
+		'head',
+		'encoder',
+	]:
+		raise ValueError(
+			'multi-head optimizer requires exactly head and encoder parameter groups'
+		)
+	train = _required_mapping(stratigraphy_config, 'train')
+	expected_lrs = (
+		_required_positive_finite_number(train.get('lr'), 'train.lr'),
+		_required_positive_finite_number(train.get('encoder_lr'), 'train.encoder_lr'),
+	)
+	for group, expected_lr in zip(groups, expected_lrs, strict=True):
+		actual_lr = _required_positive_finite_number(
+			group.get('lr'), f'multi-head optimizer {group.get("name")!r} group lr'
+		)
+		if actual_lr != expected_lr:
+			raise ValueError(
+				'multi-head optimizer group learning rate does not match train config'
+			)
+
+	head_parameters = tuple(head.parameters())
+	student_parameters = tuple(student.parameters())
+	if not all(parameter.requires_grad for parameter in head_parameters):
+		raise ValueError('all multi-head head parameters must be trainable')
+	trainable_student_parameters = tuple(
+		parameter for parameter in student_parameters if parameter.requires_grad
+	)
+	if not trainable_student_parameters:
+		raise ValueError('multi-head optimizer requires trainable encoder parameters')
+
+	known_parameters = {
+		id(parameter): parameter
+		for parameter in (*head_parameters, *student_parameters)
+	}
+	group_parameters = tuple(
+		parameter for group in groups for parameter in group['params']
+	)
+	group_ids = tuple(id(parameter) for parameter in group_parameters)
+	if len(group_ids) != len(set(group_ids)):
+		raise ValueError('multi-head optimizer groups contain duplicate parameters')
+	if any(parameter_id not in known_parameters for parameter_id in group_ids):
+		raise ValueError(
+			'multi-head optimizer contains a parameter outside the student/head modules'
+		)
+	if any(
+		not known_parameters[parameter_id].requires_grad for parameter_id in group_ids
+	):
+		raise ValueError('multi-head optimizer contains frozen parameters')
+
+	head_ids = {id(parameter) for parameter in head_parameters}
+	encoder_ids = {id(parameter) for parameter in trainable_student_parameters}
+	if {id(parameter) for parameter in groups[0]['params']} != head_ids:
+		raise ValueError(
+			'multi-head optimizer head group must contain every head parameter '
+			'exactly once'
+		)
+	if {id(parameter) for parameter in groups[1]['params']} != encoder_ids:
+		raise ValueError(
+			'multi-head optimizer encoder group must contain every trainable encoder '
+			'parameter exactly once'
+		)
 
 
 def _validate_finite_optimizer_state(state: Mapping[str, object]) -> None:
@@ -615,10 +696,20 @@ def _validate_multi_head_identity(
 		},
 	)
 	head = _required_mapping(stratigraphy_config, 'head')
+	config_identity = _required_mapping(stratigraphy_config, 'identity')
+	paths = _required_mapping(stratigraphy_config, 'paths')
 	if list(_head_ks(head.get('ks'))) != identity.get('head_ks'):
 		raise ValueError('checkpoint head_ks does not match stratigraphy config')
 	if identity.get('head_spec') != head.get('spec'):
 		raise ValueError('checkpoint head_spec does not match stratigraphy config')
+	for key, expected in (
+		('model_tag', config_identity.get('model_tag')),
+		('output_root', paths.get('output_root')),
+	):
+		if identity.get(key) != expected:
+			raise ValueError(
+				f'checkpoint {key} does not match stratigraphy config'
+			)
 	if identity.get('stratigraphy_state_sha256') != _state_sha256(
 		stratigraphy_state_dict
 	):
@@ -825,6 +916,17 @@ def _required_sha256(value: object, label: str) -> str:
 	return value
 
 
+def _required_positive_finite_number(value: object, label: str) -> float:
+	if (
+		isinstance(value, bool)
+		or not isinstance(value, int | float)
+		or not math.isfinite(float(value))
+		or value <= 0.0
+	):
+		raise ValueError(f'{label} must be a positive finite number')
+	return float(value)
+
+
 def _file_sha256(path: Path) -> str:
 	digest = hashlib.sha256()
 	with path.open('rb') as file_obj:
@@ -874,7 +976,16 @@ def _optimizer_group_identity(
 			) from exc
 		if len(names) != len(set(names)):
 			raise ValueError('optimizer parameter group contains duplicate parameters')
-		result.append({'name': group.get('name'), 'parameter_names': names})
+		result.append(
+			{
+				'name': group.get('name'),
+				'parameter_names': names,
+				'lr': _required_positive_finite_number(
+					group.get('lr'),
+					f'optimizer {group.get("name")!r} group lr',
+				),
+			}
+		)
 	return result
 
 
@@ -914,6 +1025,7 @@ def _optimizer_state_group_identity_matches(
 			or not isinstance(parameters, list)
 			or not isinstance(names, list)
 			or not all(isinstance(name, str) for name in names)
+			or group.get('lr') != expected.get('lr')
 			or len(parameters) != len(names)
 			or parameters
 			!= list(range(next_parameter_id, next_parameter_id + len(parameters)))
@@ -932,6 +1044,7 @@ def _optimizer_group_counts_match(identity: object, summary: object) -> bool:
 		isinstance(recorded, Mapping)
 		and isinstance(expected, Mapping)
 		and recorded.get('name') == expected.get('name')
+		and recorded.get('lr') == expected.get('lr')
 		and len(recorded.get('parameter_names', []))
 		== len(expected.get('params', []))
 		for recorded, expected in zip(identity, summary, strict=True)
