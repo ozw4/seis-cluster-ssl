@@ -14,9 +14,9 @@ models from the available artifacts.
 The canonical model tags and intended output locations remain:
 
 - `strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1`:
-  `/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1`
+  `${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1`
 - `strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1`:
-  `/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1`
+  `${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1`
 
 Both best-checkpoint SHA-256 values, both initial-state SHA-256 values, and
 the multi-head target-manifest SHA-256 are unavailable. Do not use these model

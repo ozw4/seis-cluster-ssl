@@ -8,7 +8,7 @@
   "dry_run_status": "PASS",
   "execution_status": "FAIL",
   "error": "FileNotFoundError: best.pt is absent at the configured consistency pretraining root",
-  "embedding_dir": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1/overlap_x16",
+  "embedding_dir": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1/overlap_x16",
   "checkpoint_sha256": null,
   "embedding_shape": null,
   "embedding_dtype": null,

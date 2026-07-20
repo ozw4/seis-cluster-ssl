@@ -3,7 +3,7 @@
   "schema_version": 1,
   "status": "NOT_RUN_PREREQUISITE_UNAVAILABLE",
   "generated_date_utc": "2026-07-20",
-  "required_target_manifest": "/workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+  "required_target_manifest": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
   "reason": "The manifest was not published because target publication preflight failed; model components were not constructed from an unvalidated target bundle.",
   "student_initial_state_sha256": null,
   "multi_head_initial_state_sha256": null,

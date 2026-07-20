@@ -639,20 +639,9 @@ def _validate_multi_head_identity(
 		identity.get('student_init_checkpoint_sha256'),
 		'checkpoint student_init_checkpoint_sha256',
 	)
-	target = identity.get('target_manifest')
-	if not isinstance(target, Mapping):
-		raise TypeError('checkpoint target_manifest must be a mapping')
-	path = _required_string(target.get('path'), 'checkpoint target_manifest.path')
-	if target.get('sha256') != _file_sha256(Path(path)):
-		raise ValueError('checkpoint target manifest SHA-256 mismatch')
-	if identity.get('per_head_targets') != _manifest_per_head_target_hashes(
-		Path(path)
-	):
-		raise ValueError(
-			'checkpoint per-head target hashes do not match target manifest'
-		)
-	scientific = _required_mapping(
-		_required_mapping(stratigraphy_config, 'identity'), 'scientific_identity'
+	scientific = _validate_multi_head_target_manifest_identity(
+		identity=identity,
+		stratigraphy_config=stratigraphy_config,
 	)
 	if identity.get('scientific_identity_sha256') != _canonical_sha256(scientific):
 		raise ValueError('checkpoint scientific identity SHA-256 mismatch')
@@ -667,6 +656,40 @@ def _validate_multi_head_identity(
 			raise ValueError(
 				f'checkpoint {checkpoint_key} does not match scientific identity'
 			)
+
+
+def _validate_multi_head_target_manifest_identity(
+	*,
+	identity: Mapping[str, object],
+	stratigraphy_config: Mapping[str, object],
+) -> Mapping[str, object]:
+	"""Bind the checkpoint manifest to its scientific identity."""
+	target = identity.get('target_manifest')
+	if not isinstance(target, Mapping):
+		raise TypeError('checkpoint target_manifest must be a mapping')
+	path = _required_string(target.get('path'), 'checkpoint target_manifest.path')
+	manifest_sha256 = _required_sha256(
+		target.get('sha256'), 'checkpoint target_manifest.sha256'
+	)
+	if manifest_sha256 != _file_sha256(Path(path)):
+		raise ValueError('checkpoint target manifest SHA-256 mismatch')
+	if identity.get('per_head_targets') != _manifest_per_head_target_hashes(
+		Path(path)
+	):
+		raise ValueError(
+			'checkpoint per-head target hashes do not match target manifest'
+		)
+	scientific = _required_mapping(
+		_required_mapping(stratigraphy_config, 'identity'), 'scientific_identity'
+	)
+	if manifest_sha256 != _required_sha256(
+		scientific.get('target_manifest_sha256'),
+		'scientific identity target_manifest_sha256',
+	):
+		raise ValueError(
+			'checkpoint target manifest SHA-256 does not match scientific identity'
+		)
+	return scientific
 
 
 def _validate_expected_multi_head_identity(

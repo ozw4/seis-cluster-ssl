@@ -238,6 +238,33 @@ def test_multi_head_checkpoint_rejects_per_head_provenance_mismatch(
 	assert not (tmp_path / 'checkpoint.pt').exists()
 
 
+def test_multi_head_checkpoint_rejects_manifest_sha_substitution(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	hashes = _per_head_target_hashes()
+	replacement_manifest = tmp_path / 'replacement-targets.json'
+	replacement_manifest.write_text('{"replacement": true}', encoding='utf-8')
+	monkeypatch.setattr(
+		strat_hmm_checkpoint,
+		'load_multi_head_target_manifest',
+		lambda *_args, **_kwargs: _multi_head_manifest(hashes),
+	)
+
+	checkpoint_identity = payload['stratigraphy_checkpoint']
+	assert isinstance(checkpoint_identity, dict)
+	target_manifest = checkpoint_identity['target_manifest']
+	assert isinstance(target_manifest, dict)
+
+	replacement_sha256 = _sha256(replacement_manifest)
+	target_manifest['path'] = str(replacement_manifest)
+	target_manifest['sha256'] = replacement_sha256
+
+	with pytest.raises(ValueError, match='target manifest SHA-256 does not match'):
+		validate_stratigraphy_checkpoint_payload(payload)
+
+
 def test_multi_head_checkpoint_rejects_unexpected_head_state_key(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
