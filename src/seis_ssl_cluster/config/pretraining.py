@@ -469,6 +469,21 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912
 		raise ValueError(
 			'identity.scientific_identity.variant must be "nocons" or "cons010"'
 		)
+	expected_consistency_weight = {
+		'nocons': 0.0,
+		'cons010': 0.1,
+	}[scientific['variant']]
+	loss = _required_mapping(config, 'loss')
+	if loss['consistency_weight'] != expected_consistency_weight:
+		raise ValueError(
+			'loss.consistency_weight does not match '
+			'identity.scientific_identity.variant'
+		)
+	if scientific['consistency_weight'] != expected_consistency_weight:
+		raise ValueError(
+			'identity.scientific_identity.consistency_weight does not match '
+			'identity.scientific_identity.variant'
+		)
 	expected_tag = {
 		'nocons': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
 		'cons010': 'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',

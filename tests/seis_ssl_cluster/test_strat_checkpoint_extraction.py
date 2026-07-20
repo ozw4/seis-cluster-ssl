@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from hashlib import sha256
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,14 +24,15 @@ from seis_ssl_cluster.stratigraphy.prototypes import (
 	OrderedPrototypeHead,
 )
 from seis_ssl_cluster.training import load_checkpoint, strat_hmm_checkpoint
+from seis_ssl_cluster.training.checkpoint import capture_rng_state
+from seis_ssl_cluster.training.strat_hmm.resume import (
+	restore_strat_hmm_training_checkpoint,
+)
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	inspect_stratigraphy_checkpoint,
 	save_strat_hmm_checkpoint,
 	validate_stratigraphy_checkpoint_payload,
 )
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 
 def test_strat_checkpoint_extracts_student_embeddings_and_metadata(
@@ -331,6 +332,71 @@ def test_multi_head_checkpoint_rejects_wrong_per_head_tensor_shape(
 
 
 @pytest.mark.parametrize(
+	('mutate', 'match'),
+	[
+		(
+			lambda _config, head: setattr(head.heads['k6'], 'temperature', 0.2),
+			'module temperature',
+		),
+		(
+			lambda _config, head: setattr(head.heads['k8'], 'normalize', False),
+			'module normalize',
+		),
+		(
+			lambda config, _head: config['loss'].update(prototype_weight=0.5),
+			'loss.prototype_weight',
+		),
+	],
+)
+def test_multi_head_checkpoint_rejects_module_or_loss_identity_mismatch(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	mutate: object,
+	match: str,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	config = payload['stratigraphy_config']
+	assert isinstance(config, dict)
+	student = torch.nn.Linear(1, 1)
+	head = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=1,
+		ks=(6, 8, 10),
+		projection_dim=2,
+		temperature=0.1,
+		normalize=True,
+	)
+	mutate(config, head)  # type: ignore[operator]
+	optimizer = torch.optim.AdamW([*student.parameters(), *head.parameters()])
+
+	with pytest.raises(ValueError, match=match):
+		save_strat_hmm_checkpoint(
+			tmp_path / 'identity-mismatch.pt',
+			student=student,
+			head=head,
+			optimizer=optimizer,
+			epoch=1,
+			mae_config={},
+			stratigraphy_config=config,
+			metrics={'loss': 1.0},
+			global_step=1,
+			checkpoint_kind='epoch',
+			batch_index=None,
+			control_identity={
+				'input_identities': {
+					'teacher_checkpoint': {'sha256': '2' * 64},
+					'student_init_checkpoint': {'sha256': '3' * 64},
+				},
+				'initial_state_sha256': {
+					'student': '0' * 64,
+					'head': '1' * 64,
+				},
+			},
+		)
+
+	assert not (tmp_path / 'identity-mismatch.pt').exists()
+
+
+@pytest.mark.parametrize(
 	'field',
 	[
 		'initial_student_state_sha256',
@@ -404,11 +470,338 @@ def test_multi_head_checkpoint_rejects_reordered_optimizer_parameters(
 		)
 
 
+@pytest.mark.parametrize(
+	('checkpoint_variant', 'resume_variant'),
+	[
+		('nocons', 'cons010'),
+		('cons010', 'nocons'),
+	],
+)
+def test_multi_head_resume_rejects_no_consistency_main_mix(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	checkpoint_variant: str,
+	resume_variant: str,
+) -> None:
+	config = _multi_head_resume_config(
+		tmp_path,
+		monkeypatch,
+		variant=checkpoint_variant,
+	)
+	student, head, optimizer = _new_multi_head_components()
+	checkpoint_path = _save_multi_head_resume_checkpoint(
+		tmp_path / 'checkpoint.pt',
+		config=config,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+	)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	incompatible = deepcopy(config)
+	_set_multi_head_variant(incompatible, resume_variant)
+	resumed_student, resumed_head, resumed_optimizer = _new_multi_head_components()
+	student_before = {
+		key: value.detach().clone()
+		for key, value in resumed_student.state_dict().items()
+	}
+
+	with pytest.raises(ValueError, match='consistency_weight'):
+		restore_strat_hmm_training_checkpoint(
+			payload=payload,
+			student=resumed_student,
+			head=resumed_head,
+			optimizer=resumed_optimizer,
+			scaler=None,
+			amp_enabled=False,
+			config=incompatible,
+		)
+
+	assert all(
+		torch.equal(value, resumed_student.state_dict()[key])
+		for key, value in student_before.items()
+	)
+
+
+def test_multi_head_resume_matches_continuous_two_plus_two_steps(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _multi_head_resume_config(tmp_path, monkeypatch, variant='nocons')
+	torch.manual_seed(274)
+	continuous_student, continuous_head, continuous_optimizer = (
+		_new_multi_head_components()
+	)
+	initial_student = {
+		key: value.detach().clone()
+		for key, value in continuous_student.state_dict().items()
+	}
+	initial_head = {
+		key: value.detach().clone()
+		for key, value in continuous_head.state_dict().items()
+	}
+	resumable_student, resumable_head, resumable_optimizer = (
+		_new_multi_head_components()
+	)
+	resumable_student.load_state_dict(initial_student)
+	resumable_head.load_state_dict(initial_head)
+	batches = tuple(
+		torch.tensor([[float(index), float(index + 1)]]) for index in range(1, 5)
+	)
+	continuous_losses = [
+		_multi_head_optimizer_step(
+			continuous_student,
+			continuous_head,
+			continuous_optimizer,
+			batch,
+		)
+		for batch in batches
+	]
+	resumed_losses = [
+		_multi_head_optimizer_step(
+			resumable_student,
+			resumable_head,
+			resumable_optimizer,
+			batch,
+		)
+		for batch in batches[:2]
+	]
+	checkpoint_path = _save_multi_head_resume_checkpoint(
+		tmp_path / 'checkpoint.pt',
+		config=config,
+		student=resumable_student,
+		head=resumable_head,
+		optimizer=resumable_optimizer,
+	)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	rng_state = payload['rng_state']
+	assert isinstance(rng_state, dict)
+	expected_torch_rng_state = rng_state['torch']
+	assert isinstance(expected_torch_rng_state, torch.Tensor)
+	fresh_student, fresh_head, fresh_optimizer = _new_multi_head_components()
+	resume_state = restore_strat_hmm_training_checkpoint(
+		payload=payload,
+		student=fresh_student,
+		head=fresh_head,
+		optimizer=fresh_optimizer,
+		scaler=None,
+		amp_enabled=False,
+		config=config,
+	)
+	resume_counters = (
+		resume_state.start_epoch,
+		resume_state.global_step,
+		resume_state.skip_batches,
+	)
+	assert resume_counters == (
+		1,
+		2,
+		2,
+	)
+	resumed_losses.extend(
+		_multi_head_optimizer_step(
+			fresh_student,
+			fresh_head,
+			fresh_optimizer,
+			batch,
+		)
+		for batch in batches[2:]
+	)
+
+	assert resumed_losses == continuous_losses
+	_assert_nested_equal(continuous_student.state_dict(), fresh_student.state_dict())
+	_assert_nested_equal(continuous_head.state_dict(), fresh_head.state_dict())
+	_assert_nested_equal(
+		continuous_optimizer.state_dict(), fresh_optimizer.state_dict()
+	)
+	assert torch.equal(torch.get_rng_state(), expected_torch_rng_state)
+
+
 def _assert_manifest_load(
 	path: Path, expected_path: Path, *, validate_array_semantics: bool
 ) -> None:
 	assert path == expected_path
 	assert not validate_array_semantics
+
+
+def _multi_head_resume_config(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	*,
+	variant: str,
+) -> dict[str, object]:
+	manifest_path = tmp_path / 'targets.json'
+	manifest_path.write_text('{}', encoding='utf-8')
+	hashes = _per_head_target_hashes()
+	monkeypatch.setattr(
+		strat_hmm_checkpoint,
+		'load_multi_head_target_manifest',
+		lambda path, *, validate_array_semantics: (
+			_assert_manifest_load(
+				path,
+				manifest_path,
+				validate_array_semantics=validate_array_semantics,
+			)
+			or _multi_head_manifest(hashes)
+		),
+	)
+	teacher_checkpoint = tmp_path / 'teacher.pt'
+	student_checkpoint = tmp_path / 'student.pt'
+	teacher_checkpoint.write_bytes(b'teacher')
+	student_checkpoint.write_bytes(b'student')
+	consistency_weight = 0.0 if variant == 'nocons' else 0.1
+	config: dict[str, object] = {
+		'stage': 'train_strat_hmm_pretext',
+		'paths': {'output_root': str(tmp_path / f'{variant}_run')},
+		'pseudo_targets': {'manifest': str(manifest_path)},
+		'teacher': {'checkpoint': str(teacher_checkpoint)},
+		'student': {'init_checkpoint': str(student_checkpoint)},
+		'head': {
+			'spec': 'multi_resolution_ordered_prototypes_v1',
+			'ks': [6, 8, 10],
+			'projection_dim': 2,
+			'temperature': 0.1,
+			'normalize': True,
+		},
+		'loss': {
+			'prototype_weight': 1.0,
+			'usage_weight': 0.005,
+			'consistency_weight': consistency_weight,
+			'consistency_beta': 0.1,
+			'distillation_weight': 0.2,
+		},
+		'identity': {
+			'scientific_identity': {
+				'experiment_role': 'multi_head_ordered_pretext',
+				'variant': variant,
+				'head_spec': 'multi_resolution_ordered_prototypes_v1',
+				'head_ks': [6, 8, 10],
+				'target_manifest_sha256': _sha256(manifest_path),
+				'target_head_hashes': hashes,
+				'head_temperature': 0.1,
+				'head_normalize': True,
+				'consistency_policy': 'normalized_order_smooth_l1_v1',
+				'prototype_weight': 1.0,
+				'usage_weight': 0.005,
+				'consistency_weight': consistency_weight,
+				'consistency_beta': 0.1,
+				'distillation_weight': 0.2,
+			}
+		},
+	}
+	_set_multi_head_variant(config, variant)
+	return config
+
+
+def _set_multi_head_variant(config: dict[str, object], variant: str) -> None:
+	if variant not in {'nocons', 'cons010'}:
+		raise ValueError(f'unsupported fixture variant: {variant!r}')
+	identity = config['identity']
+	assert isinstance(identity, dict)
+	scientific = identity['scientific_identity']
+	assert isinstance(scientific, dict)
+	consistency_weight = 0.0 if variant == 'nocons' else 0.1
+	scientific['variant'] = variant
+	scientific['consistency_weight'] = consistency_weight
+	identity['model_tag'] = {
+		'nocons': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+		'cons010': 'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
+	}[variant]
+	loss = config['loss']
+	assert isinstance(loss, dict)
+	loss['consistency_weight'] = consistency_weight
+
+
+def _new_multi_head_components() -> tuple[
+	torch.nn.Linear,
+	MultiResolutionOrderedPrototypeHeads,
+	torch.optim.AdamW,
+]:
+	student = torch.nn.Linear(2, 3)
+	head = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=3,
+		ks=(6, 8, 10),
+		projection_dim=2,
+		temperature=0.1,
+		normalize=True,
+	)
+	optimizer = torch.optim.AdamW(
+		[
+			{'params': head.parameters(), 'name': 'head'},
+			{'params': student.parameters(), 'name': 'encoder'},
+		],
+		lr=1.0e-3,
+	)
+	return student, head, optimizer
+
+
+def _save_multi_head_resume_checkpoint(
+	path: Path,
+	*,
+	config: dict[str, object],
+	student: torch.nn.Module,
+	head: MultiResolutionOrderedPrototypeHeads,
+	optimizer: torch.optim.AdamW,
+) -> Path:
+	teacher_checkpoint = Path(config['teacher']['checkpoint'])
+	student_checkpoint = Path(config['student']['init_checkpoint'])
+	rng_state = capture_rng_state()
+	rng_state['dataloader_generator'] = torch.Generator().manual_seed(274).get_state()
+	return save_strat_hmm_checkpoint(
+		path,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+		epoch=1,
+		mae_config={},
+		stratigraphy_config=config,
+		metrics={'loss': 1.0},
+		global_step=2,
+		checkpoint_kind='step',
+		batch_index=1,
+		rng_state=rng_state,
+		control_identity={
+			'input_identities': {
+				'teacher_checkpoint': {'sha256': _sha256(teacher_checkpoint)},
+				'student_init_checkpoint': {'sha256': _sha256(student_checkpoint)},
+			},
+			'initial_state_sha256': {
+				'student': '0' * 64,
+				'head': '1' * 64,
+			},
+		},
+	)
+
+
+def _multi_head_optimizer_step(
+	student: torch.nn.Module,
+	head: MultiResolutionOrderedPrototypeHeads,
+	optimizer: torch.optim.Optimizer,
+	batch: torch.Tensor,
+) -> float:
+	optimizer.zero_grad(set_to_none=True)
+	outputs = head(student(batch)).outputs
+	loss = sum(output.logits.square().mean() for output in outputs.values())
+	loss.backward()
+	optimizer.step()
+	return float(loss.detach())
+
+
+def _assert_nested_equal(left: object, right: object) -> None:
+	if isinstance(left, torch.Tensor):
+		assert isinstance(right, torch.Tensor)
+		assert torch.equal(left, right)
+	elif isinstance(left, dict):
+		assert isinstance(right, dict)
+		assert left.keys() == right.keys()
+		for key, value in left.items():
+			_assert_nested_equal(value, right[key])
+	elif isinstance(left, list | tuple):
+		assert isinstance(right, type(left))
+		assert len(left) == len(right)
+		for left_value, right_value in zip(left, right, strict=True):
+			_assert_nested_equal(left_value, right_value)
+	else:
+		assert left == right
 
 
 def _valid_multi_head_checkpoint_payload(
@@ -455,20 +848,34 @@ def _valid_multi_head_checkpoint_payload(
 		stratigraphy_config={
 			'paths': {'output_root': str(tmp_path / 'run')},
 			'pseudo_targets': {'manifest': str(manifest_path)},
-			'head': {
-				'spec': 'multi_resolution_ordered_prototypes_v1',
-				'ks': [6, 8, 10],
-				'projection_dim': 2,
-			},
-			'identity': {
-				'scientific_identity': {
-					'target_manifest_sha256': _sha256(manifest_path),
-					'target_head_hashes': hashes,
-					'consistency_policy': 'normalized_order_smooth_l1_v1',
-					'consistency_weight': 0.1,
-					'consistency_beta': 0.1,
-				}
-			},
+		'head': {
+			'spec': 'multi_resolution_ordered_prototypes_v1',
+			'ks': [6, 8, 10],
+			'projection_dim': 2,
+			'temperature': 0.1,
+			'normalize': True,
+		},
+		'loss': {
+			'prototype_weight': 1.0,
+			'usage_weight': 0.005,
+			'consistency_weight': 0.1,
+			'consistency_beta': 0.1,
+			'distillation_weight': 0.2,
+		},
+		'identity': {
+			'scientific_identity': {
+				'target_manifest_sha256': _sha256(manifest_path),
+				'target_head_hashes': hashes,
+				'head_temperature': 0.1,
+				'head_normalize': True,
+				'prototype_weight': 1.0,
+				'usage_weight': 0.005,
+				'consistency_policy': 'normalized_order_smooth_l1_v1',
+				'consistency_weight': 0.1,
+				'consistency_beta': 0.1,
+				'distillation_weight': 0.2,
+			}
+		},
 		},
 		metrics={'loss': 1.0},
 		global_step=1,

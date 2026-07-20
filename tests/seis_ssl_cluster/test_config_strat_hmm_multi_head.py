@@ -70,6 +70,7 @@ def test_multi_head_config_resolution_does_not_load_target_arrays(
 		lambda config: config['pseudo_targets'].update(input_dir='/invalid', k=6),
 		lambda config: config['head'].update(num_prototypes=6),
 		lambda config: config['loss'].update(consistency_weight=-0.1),
+		lambda config: config['loss'].update(consistency_weight=0.1),
 		lambda config: config['loss'].update(consistency_beta=0.0),
 		lambda config: config['identity']['scientific_identity'].update(
 			target_manifest_sha256='0' * 64
@@ -121,6 +122,30 @@ def test_multi_head_identity_and_loss_policy_are_strict(tmp_path: Path) -> None:
 	)
 	resolved = resolve_strat_hmm_pretext_config(distillation_only)
 	assert resolved['loss']['distillation_weight'] == 0.2
+
+
+@pytest.mark.parametrize(
+	('variant', 'consistency_weight'),
+	[
+		('nocons', 0.1),
+		('cons010', 0.0),
+	],
+)
+def test_multi_head_variant_requires_its_exact_consistency_weight(
+	tmp_path: Path,
+	variant: str,
+	consistency_weight: float,
+) -> None:
+	config = _multi_head_config(tmp_path)
+	config['identity']['scientific_identity']['variant'] = variant
+	config['identity']['model_tag'] = {
+		'nocons': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+		'cons010': 'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
+	}[variant]
+	config['loss']['consistency_weight'] = consistency_weight
+
+	with pytest.raises(ValueError, match=r'consistency_weight.*variant'):
+		resolve_strat_hmm_pretext_config(config)
 
 
 def test_k6810_no_consistency_and_main_configs_have_a_pure_scientific_diff(

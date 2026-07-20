@@ -425,7 +425,57 @@ def _validate_multi_head_module_and_state(
 				'multi-head checkpoint per-head feature dimension does not match '
 				'module feature dimension'
 			)
+	_validate_multi_head_module_scientific_identity(config, module)
 	_validate_multi_head_state_shapes(head, state)
+
+
+def _validate_multi_head_module_scientific_identity(
+	config: Mapping[str, object],
+	module: MultiResolutionOrderedPrototypeHeads,
+) -> None:
+	"""Bind non-state-dict head settings and loss weights to provenance."""
+	identity = config.get('identity')
+	if not isinstance(identity, Mapping):
+		return
+	scientific = identity.get('scientific_identity')
+	if not isinstance(scientific, Mapping):
+		return
+	head = _required_mapping(config, 'head')
+	for scientific_key, config_key, module_key in (
+		('head_temperature', 'temperature', 'temperature'),
+		('head_normalize', 'normalize', 'normalize'),
+	):
+		if scientific_key not in scientific:
+			continue
+		expected = scientific[scientific_key]
+		if head.get(config_key) != expected:
+			raise ValueError(
+				f'multi-head checkpoint head.{config_key} does not match '
+				'scientific identity'
+			)
+		if any(
+			getattr(per_head, module_key) != expected
+			for per_head in module.heads.values()
+		):
+			raise ValueError(
+				f'multi-head checkpoint module {module_key} does not match '
+				'scientific identity'
+			)
+
+	for key in (
+		'prototype_weight',
+		'usage_weight',
+		'consistency_weight',
+		'consistency_beta',
+		'distillation_weight',
+	):
+		if key not in scientific:
+			continue
+		loss = _required_mapping(config, 'loss')
+		if loss.get(key) != scientific[key]:
+			raise ValueError(
+				f'multi-head checkpoint loss.{key} does not match scientific identity'
+			)
 
 
 def _validate_multi_head_state_shapes(
@@ -604,6 +654,8 @@ def _validate_multi_head_identity(
 	scientific = _required_mapping(
 		_required_mapping(stratigraphy_config, 'identity'), 'scientific_identity'
 	)
+	if identity.get('scientific_identity_sha256') != _canonical_sha256(scientific):
+		raise ValueError('checkpoint scientific identity SHA-256 mismatch')
 	for key in (
 		'target_head_hashes',
 		'consistency_policy',
