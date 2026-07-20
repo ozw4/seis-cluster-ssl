@@ -45,6 +45,7 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 	rng_state: Mapping[str, object] | None = None,
 	best_score: float | None = None,
 	trainability_summary: Mapping[str, object] | None = None,
+	control_identity: Mapping[str, object] | None = None,
 ) -> StratRollingCheckpointResult:
 	"""Write rolling ``latest.pt`` and update ``best.pt`` on lower loss."""
 	checkpoint_root = Path(checkpoint_dir)
@@ -64,6 +65,7 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 		batch_index=batch_index,
 		rng_state=rng_state,
 		trainability_summary=trainability_summary,
+		control_identity=control_identity,
 	)
 	score = _loss_score(metrics)
 	best_updated = _is_improved(score, best_score)
@@ -97,6 +99,7 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	scaler: torch.amp.GradScaler | None = None,
 	rng_state: Mapping[str, object] | None = None,
 	trainability_summary: Mapping[str, object] | None = None,
+	control_identity: Mapping[str, object] | None = None,
 ) -> Path:
 	"""Atomically save an extraction-compatible strat HMM checkpoint."""
 	checkpoint_path = Path(path)
@@ -126,6 +129,8 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 			'batch_index': batch_index,
 		},
 	}
+	if control_identity is not None:
+		payload['control_identity'] = _to_plain_value(control_identity)
 	return _atomic_torch_save(checkpoint_path, payload)
 
 

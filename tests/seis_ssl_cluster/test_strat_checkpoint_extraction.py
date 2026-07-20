@@ -91,6 +91,28 @@ def test_standard_mae_checkpoint_extracts_without_strat_metadata(
 	}
 
 
+def test_strat_checkpoint_control_identity_is_carried_to_embedding_metadata(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path, strat=True)
+	checkpoint = config['embeddings']['checkpoint']
+	assert isinstance(checkpoint, str)
+	payload = load_checkpoint(checkpoint, map_location='cpu')
+	payload['control_identity'] = {
+		'model_tag': 'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1',
+		'input_identities': {'fixture': True},
+	}
+	torch.save(payload, checkpoint)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	stratigraphy = metadata['stratigraphy_pretext']
+	assert stratigraphy['model_tag'] == (
+		'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
+	)
+	assert len(stratigraphy['control_identity_sha256']) == 64
+
+
 def _write_fixture(tmp_path: Path, *, strat: bool) -> dict[str, object]:
 	manifest_path, path_list = _write_manifest_fixture(tmp_path)
 	model = AmplitudeMAE3D(

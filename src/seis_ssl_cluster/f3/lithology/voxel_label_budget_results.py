@@ -200,6 +200,16 @@ class F3VoxelLabelBudgetResultsInspection:
 
 
 @dataclass(frozen=True)
+class F3VoxelLabelBudgetReferenceInspection:
+	"""Strictly validated original 45-job source suite for downstream controls."""
+
+	datasets: Mapping[tuple[str, int], _DatasetCondition]
+	jobs: tuple[_LoadedJob, ...]
+	dataset_manifest_identity: Mapping[str, str]
+	run_manifest_identity: Mapping[str, str]
+
+
+@dataclass(frozen=True)
 class F3VoxelLabelBudgetResultsResult:
 	"""All summary-owned outputs."""
 
@@ -249,6 +259,45 @@ def inspect_f3_lithology_voxel_label_budget_results(
 		},
 		decoder_architecture=dict(jobs[0].evaluation.decoder_architecture),
 	)
+
+
+def inspect_f3_lithology_voxel_label_budget_reference_run(
+	dataset_manifest: Path,
+	run_manifest: Path,
+) -> F3VoxelLabelBudgetReferenceInspection:
+	"""Validate and expose the immutable original 45-job source suite.
+
+	The function intentionally uses the same complete-artifact validators as the
+	published M3-V-LB summary. A later candidate-only control can therefore
+	compare against MAE and historical M1 without re-running either decoder.
+	"""
+	datasets, dataset_identity = _load_dataset_manifest(dataset_manifest)
+	jobs, run_identity = _load_run_manifest(run_manifest, datasets)
+	return F3VoxelLabelBudgetReferenceInspection(
+		datasets=datasets,
+		jobs=jobs,
+		dataset_manifest_identity=dataset_identity,
+		run_manifest_identity=run_identity,
+	)
+
+
+def load_f3_lithology_voxel_label_budget_evaluation_metrics(
+	*,
+	metrics_path: Path,
+	boundary_metrics_path: Path,
+	boundary_region_metrics_path: Path,
+	label: str,
+) -> Mapping[str, float]:
+	"""Load the canonical low-label metric vector from evaluation artifacts.
+
+	This is shared by an immutable historical suite and a candidate-only control
+	so both use the exact same boundary, monitored-class, and lower-is-better
+	metric interpretation.
+	"""
+	metrics = _read_json(metrics_path)
+	boundary = _read_json(boundary_metrics_path)
+	regions, _ = _boundary_regions(boundary_region_metrics_path, label=label)
+	return _evaluation_metric_values(metrics, boundary, regions, label=label)
 
 
 def summarize_f3_lithology_voxel_label_budget_results(
@@ -2693,8 +2742,11 @@ __all__ = [
 	'SUMMARY_JSON',
 	'SUMMARY_MARKDOWN',
 	'TABLE_NAMES',
+	'F3VoxelLabelBudgetReferenceInspection',
 	'F3VoxelLabelBudgetResultsInspection',
 	'F3VoxelLabelBudgetResultsResult',
+	'inspect_f3_lithology_voxel_label_budget_reference_run',
 	'inspect_f3_lithology_voxel_label_budget_results',
+	'load_f3_lithology_voxel_label_budget_evaluation_metrics',
 	'summarize_f3_lithology_voxel_label_budget_results',
 ]

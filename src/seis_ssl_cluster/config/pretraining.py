@@ -240,6 +240,7 @@ def resolve_strat_hmm_pretext_config(config: _T) -> Config:
 	_reject_fixed_contract_keys(resolved)
 	_merge_strat_hmm_pretext_defaults(resolved)
 	_validate_strat_hmm_pretext_sections(resolved)
+	_validate_strat_hmm_pretext_identity(resolved)
 
 	manifests = _required_mapping(resolved, 'manifests')
 	data = _required_mapping(resolved, 'data')
@@ -320,6 +321,27 @@ def _validate_strat_hmm_pretext_sections(config: Mapping[str, object]) -> None:
 		if not isinstance(value, Mapping):
 			continue
 		_validate_allowed_keys(value, allowed, prefix=section)
+
+
+def _validate_strat_hmm_pretext_identity(config: Mapping[str, object]) -> None:
+	"""Validate optional provenance that is stored beside model weights."""
+	value = config.get('identity')
+	if value is None:
+		return
+	if not isinstance(value, Mapping):
+		raise TypeError('identity must be a mapping')
+	_validate_allowed_keys(
+		value,
+		frozenset({'model_tag', 'scientific_identity', 'runtime_identity'}),
+		prefix='identity',
+	)
+	model_tag = value.get('model_tag')
+	if not isinstance(model_tag, str) or not model_tag:
+		raise TypeError('identity.model_tag must be a non-empty string')
+	for key in ('scientific_identity', 'runtime_identity'):
+		child = value.get(key)
+		if child is not None and not isinstance(child, Mapping):
+			raise TypeError(f'identity.{key} must be a mapping when provided')
 
 
 def _validate_manifests(manifests: Mapping[str, object]) -> None:

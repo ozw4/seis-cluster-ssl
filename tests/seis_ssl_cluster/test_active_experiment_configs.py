@@ -62,6 +62,9 @@ from seis_ssl_cluster.config.f3_lithology_voxel_inference import (
 from seis_ssl_cluster.config.f3_lithology_voxel_label_budget import (
 	f3_lithology_voxel_label_budget_dataset_config_from_mapping,
 )
+from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_control import (
+	f3_lithology_voxel_label_budget_control_config_from_mapping,
+)
 from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_results import (
 	f3_lithology_voxel_label_budget_results_config_from_mapping,
 )
@@ -171,6 +174,7 @@ F3_STRAT_HMM_M1_GUARDRAIL_ROOT = F3_ROOT / '83_strat_hmm_m1_guardrails'
 F3_STRAT_HMM_PRETRAINING_M2A_ROOT = (
 	F3_ROOT / '84_strat_hmm_pretraining_m2a_boundary'
 )
+F3_CURRENT_K6_CONTROL_ROOT = F3_ROOT / '93_strat_hmm_m1_current_k6_control'
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
@@ -187,6 +191,8 @@ F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 		/ '08_train_shuffled_hmm_full.yaml',
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '03_train_boundary_smoke.yaml',
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '04_train_boundary_full.yaml',
+		F3_CURRENT_K6_CONTROL_ROOT / '01_train_current_k6_smoke.yaml',
+		F3_CURRENT_K6_CONTROL_ROOT / '02_train_current_k6_full.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
@@ -198,6 +204,7 @@ F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
 		/ '09_extract_shuffled_hmm_embeddings.yaml',
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
 		/ '05_extract_student_embeddings.yaml',
+		F3_CURRENT_K6_CONTROL_ROOT / '03_extract_current_k6_embeddings.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
@@ -210,6 +217,7 @@ F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
 		/ '10_build_shuffled_hmm_token_dataset.yaml',
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
 		/ '06_build_lithology_token_dataset.yaml',
+		F3_CURRENT_K6_CONTROL_ROOT / '04_build_current_k6_token_dataset.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS = sorted(
@@ -220,6 +228,7 @@ F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS = sorted(
 		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
 		/ '11_train_shuffled_hmm_probe.yaml',
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '07_train_lithology_probe.yaml',
+		F3_CURRENT_K6_CONTROL_ROOT / '05_train_current_k6_token_probe.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_REPORT_CONFIGS = sorted(
@@ -231,6 +240,7 @@ F3_STRAT_HMM_STUDENT_LITHOLOGY_REPORT_CONFIGS = sorted(
 		/ '12_build_shuffled_hmm_report.yaml',
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
 		/ '08_build_lithology_report.yaml',
+		F3_CURRENT_K6_CONTROL_ROOT / '06_build_current_k6_token_report.yaml',
 	],
 )
 F3_STRAT_HMM_SHUFFLED_TARGET_CONFIGS = [
@@ -320,6 +330,10 @@ F3_VOXEL_LABEL_BUDGET_CONFIGS = [
 	F3_VOXEL_LABEL_BUDGET_ROOT / '01_build_voxel_label_budget_datasets.yaml',
 	F3_VOXEL_LABEL_BUDGET_ROOT / '02_run_voxel_label_budget_suite.yaml',
 	F3_VOXEL_LABEL_BUDGET_ROOT / '03_summarize_voxel_label_budget.yaml',
+]
+F3_VOXEL_LABEL_BUDGET_CURRENT_K6_CONTROL_CONFIGS = [
+	F3_CURRENT_K6_CONTROL_ROOT / '07_run_current_k6_voxel_label_budget.yaml',
+	F3_CURRENT_K6_CONTROL_ROOT / '08_summarize_current_k6_control.yaml',
 ]
 F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT = (
 	F3_ROOT / '92_performance_migration_validation'
@@ -454,6 +468,10 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	('f3 voxel evaluation', F3_VOXEL_EVALUATION_CONFIGS),
 	('f3 voxel report', F3_VOXEL_REPORT_CONFIGS),
 	('f3 voxel label budget', F3_VOXEL_LABEL_BUDGET_CONFIGS),
+	(
+		'f3 voxel label budget current K6 control',
+		F3_VOXEL_LABEL_BUDGET_CURRENT_K6_CONTROL_CONFIGS,
+	),
 	(
 		'f3 performance migration shared',
 		F3_PERFORMANCE_MIGRATION_SHARED_CONFIGS,
@@ -697,6 +715,21 @@ def test_active_f3_strat_hmm_pretext_configs_resolve(
 	resolve_strat_hmm_pretext_config(
 		_config_with_existing_strat_hmm_pretext_inputs(config_path, tmp_path),
 	)
+
+
+@pytest.mark.parametrize(
+	'config_path',
+	F3_VOXEL_LABEL_BUDGET_CURRENT_K6_CONTROL_CONFIGS,
+)
+def test_active_f3_current_k6_voxel_control_configs_resolve(
+	config_path: Path,
+) -> None:
+	config = f3_lithology_voxel_label_budget_control_config_from_mapping(
+		load_config(config_path)
+	)
+
+	assert config.job_count == 15
+	assert config.candidate.model_id == 'm1_current_k6'
 
 
 @pytest.mark.parametrize('config_path', F3_STRAT_HMM_SHUFFLED_TARGET_CONFIGS)

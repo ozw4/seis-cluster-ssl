@@ -113,6 +113,60 @@ def test_head_only_training_runs_cpu_writes_checkpoints_and_payloads(
 	assert {'prototypes', 'projection.weight', 'projection.bias'} <= head_keys
 
 
+def test_explicit_control_identity_is_persisted_with_initial_parameter_hashes(
+	tmp_path: Path,
+) -> None:
+	raw = _raw_config(
+		tmp_path,
+		max_steps=1,
+		encoder_depth=1,
+		unfreeze_top_blocks=1,
+		distillation_weight=0.2,
+	)
+	raw['identity'] = {
+		'model_tag': 'current-k6-control-fixture',
+		'scientific_identity': {'pretext': 'single-head-k6'},
+		'runtime_identity': {'finite_check_mode_reason': 'fixture'},
+	}
+	config = resolve_strat_hmm_pretext_config(raw)
+
+	checkpoint_path = run_strat_hmm_pretext_training(config)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	identity = payload['control_identity']
+	assert identity['model_tag'] == 'current-k6-control-fixture'
+	assert identity['scientific_identity'] == {'pretext': 'single-head-k6'}
+	assert identity['runtime_identity']['finite_check_mode'] == 'strict'
+	assert identity['input_identities']['teacher_checkpoint']['sha256']
+	assert identity['input_identities']['student_init_checkpoint']['sha256']
+	assert len(identity['input_identities']['pseudo_targets']) == 1
+	assert identity['initial_parameter_sha256']['student_trainable']
+	assert identity['initial_parameter_sha256']['prototype_head']
+	groups = payload['optimizer_state_dict']['param_groups']
+	assert [(group['name'], group['lr']) for group in groups] == [
+		('head', pytest.approx(1.0e-2)),
+		('encoder', pytest.approx(1.0e-3)),
+	]
+
+
+@pytest.mark.parametrize(
+	'identity',
+	[
+		{},
+		{'model_tag': ''},
+		{'model_tag': 'fixture', 'unexpected': True},
+		{'model_tag': 'fixture', 'scientific_identity': 'not-a-mapping'},
+	],
+)
+def test_control_identity_schema_rejects_invalid_values(
+	tmp_path: Path, identity: dict[str, object]
+) -> None:
+	raw = _raw_config(tmp_path)
+	raw['identity'] = identity
+
+	with pytest.raises((TypeError, ValueError)):
+		resolve_strat_hmm_pretext_config(raw)
+
+
 def test_training_runner_keeps_dataset_import_and_batch_schema(tmp_path: Path) -> None:
 	assert (
 		strat_hmm_runner.NopimsStratPseudoTargetDataset

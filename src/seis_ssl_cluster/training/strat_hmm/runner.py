@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING, Literal, cast
 
 import torch
@@ -42,6 +43,7 @@ from seis_ssl_cluster.training.strat_hmm.runtime import (
 	_rng_state_for_step_checkpoint,
 	_rng_state_with_dataloader,
 	_snapshot_run_inputs,
+	_strat_hmm_control_identity,
 	_trainability_summary_payload,
 	_write_run_metadata,
 	_xyz_config,
@@ -56,7 +58,7 @@ from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 )
 
 if TYPE_CHECKING:
-	from collections.abc import Mapping
+	from collections.abc import Iterable, Mapping
 	from pathlib import Path
 
 	from seis_ssl_cluster.data.window_preprocessing import FiniteCheckMode
@@ -80,21 +82,23 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 		torch.cuda.manual_seed_all(seed)
 
 	output_root = _path_config(paths_config, 'output_root')
+	control_identity = _strat_hmm_control_identity(config)
+	allow_overwrite = _bool_config(
+		train_config,
+		'allow_overwrite_output',
+		default=False,
+	)
 	prepare_run_directory(
 		output_root=output_root,
 		resume=resume,
-		allow_overwrite=_bool_config(
-			train_config,
-			'allow_overwrite_output',
-			default=False,
-		),
+		allow_overwrite=allow_overwrite or _preflight_only_output_root(output_root),
 	)
 	_snapshot_run_inputs(
 		output_root=output_root,
 		config=config,
+		control_identity=control_identity,
 		overwrite=(
-			_bool_config(train_config, 'allow_overwrite_output', default=False)
-			and resume is None
+			allow_overwrite and resume is None
 		),
 	)
 
@@ -134,9 +138,16 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 		device=device,
 	)
 	components = build_strat_hmm_head_only_components(config, device=device)
+	if control_identity is not None:
+		control_identity = _with_initial_parameter_identities(
+			control_identity,
+			student=components.student,
+			head=components.head,
+		)
 	_write_run_metadata(
 		output_root=output_root,
 		trainability_summary=components.trainability_summary,
+		control_identity=control_identity,
 		overwrite=True,
 	)
 	amp_enabled = (
@@ -232,6 +243,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 				trainability_summary=_trainability_summary_payload(
 					components.trainability_summary,
 				),
+				control_identity=control_identity,
 				best_score=best_score,
 			)
 			best_score = result.best_score
@@ -289,6 +301,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 			trainability_summary=_trainability_summary_payload(
 				components.trainability_summary,
 			),
+			control_identity=control_identity,
 			best_score=best_score,
 		)
 		best_score = result.best_score
@@ -300,6 +313,49 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0915
 		msg = 'no strat HMM pretext training steps were run'
 		raise ValueError(msg)
 	return checkpoint_path
+
+
+def _preflight_only_output_root(output_root: Path) -> bool:
+	"""Permit a validated control preflight without permitting stale outputs."""
+	if not output_root.is_dir():
+		return False
+	entries = tuple(output_root.iterdir())
+	return len(entries) == 1 and entries[0].name == 'preflight' and entries[0].is_dir()
+
+
+def _with_initial_parameter_identities(
+	control_identity: Mapping[str, object],
+	*,
+	student: torch.nn.Module,
+	head: torch.nn.Module,
+) -> dict[str, object]:
+	"""Record pre-optimization state hashes for control freeze validation."""
+	result = dict(control_identity)
+	result['initial_parameter_sha256'] = {
+		'student_trainable': _parameter_sha256(
+			(name, parameter)
+			for name, parameter in student.named_parameters()
+			if parameter.requires_grad
+		),
+		'prototype_head': _parameter_sha256(head.named_parameters()),
+	}
+	return result
+
+
+def _parameter_sha256(
+	parameters: Iterable[tuple[str, torch.Tensor]],
+) -> dict[str, str]:
+	"""Hash parameter names, shapes, dtypes, and raw tensor bytes."""
+	result: dict[str, str] = {}
+	for name, parameter in parameters:
+		value = parameter.detach().cpu().contiguous()
+		digest = hashlib.sha256()
+		digest.update(name.encode('utf-8'))
+		digest.update(str(value.dtype).encode('utf-8'))
+		digest.update(str(tuple(value.shape)).encode('utf-8'))
+		digest.update(value.view(torch.uint8).numpy().tobytes())
+		result[name] = digest.hexdigest()
+	return result
 
 
 __all__ = ['run_strat_hmm_pretext_training']

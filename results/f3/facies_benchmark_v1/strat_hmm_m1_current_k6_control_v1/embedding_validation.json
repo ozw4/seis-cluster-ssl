@@ -1,0 +1,39 @@
+{
+  "artifact_type": "f3_current_k6_embedding_validation",
+  "checkpoint": {
+    "path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/best.pt",
+    "sha256": "4624b494e4923ef777bd7d214256bf7ab1a5a4c08b939ea0dbfdee2774b008d9"
+  },
+  "embeddings": {
+    "dtype": "float16",
+    "path": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embeddings.npy",
+    "sha256": "0ea9f451bf48c90f5c8e979947d9e0a793473776e6cd0eca9ad5af87d0f74869",
+    "shape": [
+      76,
+      113,
+      32,
+      384
+    ]
+  },
+  "historical_diagnostic": {
+    "max_absolute_delta": 0.025390625,
+    "mean_absolute_delta": 0.0009045646902263138,
+    "mean_per_token_cosine_similarity": 0.9999989948744309,
+    "valid_token_mask_exact": true
+  },
+  "model_tag": "strat_hmm_pretext_m1_current_k6_topblock1_distill_v1",
+  "nonfinite_valid_embedding_count": 0,
+  "schema_version": 1,
+  "status": "PASS",
+  "valid_tokens": {
+    "dtype": "bool",
+    "path": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+    "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7",
+    "shape": [
+      76,
+      113,
+      32
+    ],
+    "valid_count": 237225
+  }
+}

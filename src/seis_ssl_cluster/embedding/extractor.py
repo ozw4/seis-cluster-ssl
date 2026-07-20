@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import queue
 import threading
 from collections.abc import Iterable, Iterator, Mapping, Sequence
@@ -1131,7 +1133,7 @@ def _stratigraphy_pretext_metadata(
 	student = _required_mapping(stratigraphy_config, 'student')
 	loss = _required_mapping(stratigraphy_config, 'loss')
 	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
-	return {
+	result = {
 		'method': 'strat_hmm_pretext',
 		'base_objective': 'amp_mae3d',
 		'head_num_prototypes': _positive_int(
@@ -1152,6 +1154,23 @@ def _stratigraphy_pretext_metadata(
 			'stratigraphy_config.pseudo_targets',
 		),
 	}
+	control_identity = payload.get('control_identity')
+	if control_identity is not None:
+		if not isinstance(control_identity, Mapping):
+			raise TypeError('checkpoint control_identity must be a mapping')
+		model_tag = control_identity.get('model_tag')
+		if not isinstance(model_tag, str) or not model_tag:
+			raise TypeError('checkpoint control_identity.model_tag must be non-empty')
+		result['model_tag'] = model_tag
+		result['control_identity_sha256'] = hashlib.sha256(
+			json.dumps(
+				control_identity,
+				sort_keys=True,
+				separators=(',', ':'),
+				allow_nan=False,
+			).encode('utf-8'),
+		).hexdigest()
+	return result
 
 
 def _validate_checkpoint_train(train: Mapping[str, object]) -> None:

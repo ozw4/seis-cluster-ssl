@@ -460,6 +460,56 @@ def run_f3_lithology_voxel_label_budget_suite(  # noqa: C901, PLR0912, PLR0913, 
 	return VoxelLabelBudgetSuiteResult(manifest_path, ordered, tuple(quarantines))
 
 
+def classify_voxel_label_budget_job(
+	config: F3VoxelLabelBudgetSuiteConfig,
+	job: VoxelLabelBudgetJob,
+	*,
+	estimated_bytes: int = 0,
+) -> VoxelLabelBudgetJobPlan:
+	"""Classify one decoder job using the shared resumability contract.
+
+	Specialized suites may supply a structurally compatible configuration with a
+	different model matrix.  The stage-level contract is intentionally model
+	agnostic: output identity, resume safety, and completed-artifact validation
+	are all derived from ``job`` and its resolved configuration.
+	"""
+	return _classify_job(config, job, estimated_bytes=estimated_bytes)
+
+
+def run_voxel_label_budget_job(
+	config: F3VoxelLabelBudgetSuiteConfig,
+	job: VoxelLabelBudgetJob,
+	*,
+	device: str,
+	resume: Path | None,
+) -> None:
+	"""Run shared decoder, best-checkpoint inference, evaluation, and report."""
+	_run_job(config, job, device=device, resume=resume)
+
+
+def completed_voxel_label_budget_job_row(
+	config: F3VoxelLabelBudgetSuiteConfig,
+	job: VoxelLabelBudgetJob,
+	*,
+	action: str,
+	quarantine_path: Path | None,
+	error: str | None,
+) -> dict[str, object]:
+	"""Revalidate one completed decoder job and return its manifest row."""
+	return _completed_job_row(
+		config,
+		job,
+		action=action,
+		quarantine_path=quarantine_path,
+		error=error,
+	)
+
+
+def quarantine_voxel_label_budget_output(path: Path, *, reason: str) -> Path:
+	"""Move an invalid output to a timestamped sibling without deleting it."""
+	return _quarantine(path, reason=reason)
+
+
 def _run_job(
 	config: F3VoxelLabelBudgetSuiteConfig,
 	job: VoxelLabelBudgetJob,
@@ -2121,8 +2171,12 @@ __all__ = [
 	'VoxelLabelBudgetJobPlan',
 	'VoxelLabelBudgetSuiteInspection',
 	'VoxelLabelBudgetSuiteResult',
+	'classify_voxel_label_budget_job',
+	'completed_voxel_label_budget_job_row',
 	'inspect_f3_lithology_voxel_label_budget_suite',
+	'quarantine_voxel_label_budget_output',
 	'run_f3_lithology_voxel_label_budget_smoke',
 	'run_f3_lithology_voxel_label_budget_suite',
+	'run_voxel_label_budget_job',
 	'sampling_sequence_sha256',
 ]

@@ -257,7 +257,7 @@ class F3VoxelDecoderDataset(Dataset[dict[str, Any]]):
 		return value
 
 
-def validate_encoder_pairing(  # noqa: C901, PLR0913
+def validate_encoder_pairing(  # noqa: C901, PLR0912, PLR0913
 	*,
 	candidate_metadata: Mapping[str, object],
 	reference_metadata: Mapping[str, object],
@@ -278,11 +278,14 @@ def validate_encoder_pairing(  # noqa: C901, PLR0913
 		if candidate_metadata.get(key) != reference_details.get(key):
 			raise ValueError(f'encoder pairing mismatch for {key}')
 	for key in ('preprocessing', 'zero_mask'):
-		if (
-			key not in candidate_metadata
-			or key not in reference_details
-			or candidate_metadata[key] != reference_details[key]
-		):
+		if key not in candidate_metadata or key not in reference_details:
+			raise ValueError(f'encoder pairing mismatch for {key}')
+		if key == 'preprocessing':
+			if not _preprocessing_pairing_matches(
+				candidate_metadata[key], reference_details[key]
+			):
+				raise ValueError(f'encoder pairing mismatch for {key}')
+		elif candidate_metadata[key] != reference_details[key]:
 			raise ValueError(f'encoder pairing mismatch for {key}')
 	candidate_dim = int(candidate_embedding_shape[3])
 	reference_dim = _metadata_embedding_dim(reference_details)
@@ -308,6 +311,39 @@ def validate_encoder_pairing(  # noqa: C901, PLR0913
 		)
 		if not np.array_equal(candidate, reference):
 			raise ValueError('candidate valid_tokens are not bitwise identical')
+
+
+def _preprocessing_pairing_matches(
+	candidate: object, reference: object
+) -> bool:
+	"""Compare input-transform identity while allowing finite-check migration.
+
+	``finite_check_mode`` determines validation timing only; it does not alter
+	the amplitude transform, valid-token geometry, or decoder inputs.  Legacy
+	embedding metadata pre-dates this field and therefore represents ``off``.
+	A current ``strict`` extraction may pair with that legacy representation,
+	but every actual preprocessing field remains exact and no other finite mode
+	may silently cross a representation boundary.
+	"""
+	if not isinstance(candidate, Mapping) or not isinstance(reference, Mapping):
+		return False
+	candidate_values = dict(candidate)
+	reference_values = dict(reference)
+	candidate_finite = candidate_values.pop('finite_check_mode', 'off')
+	reference_finite = reference_values.pop('finite_check_mode', 'off')
+	if candidate_values != reference_values:
+		return False
+	if (
+		not isinstance(candidate_finite, str)
+		or not isinstance(reference_finite, str)
+		or candidate_finite not in {'strict', 'output_only', 'off'}
+		or reference_finite not in {'strict', 'output_only', 'off'}
+	):
+		return False
+	return candidate_finite == reference_finite or {
+		candidate_finite,
+		reference_finite,
+	} <= {'strict', 'off'}
 
 
 def build_f3_voxel_decoder_dataloader(  # noqa: PLR0913

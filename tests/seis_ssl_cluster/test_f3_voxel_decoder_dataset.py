@@ -196,6 +196,54 @@ def test_dataset_rejects_valid_token_hash_mismatch(tmp_path) -> None:
 		)
 
 
+def test_dataset_accepts_current_strict_check_with_legacy_preprocessing(
+	tmp_path,
+) -> None:
+	"""A strict finite-value check does not change decoder input semantics."""
+	dataset = _dataset(tmp_path)
+	metadata = dict(dataset.embedding_metadata)
+	preprocessing = dict(metadata['preprocessing'])
+	preprocessing['finite_check_mode'] = 'strict'
+	metadata['preprocessing'] = preprocessing
+	dataset.embedding_metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+
+	reloaded = F3VoxelDecoderDataset(
+		dataset.embedding_path,
+		dataset.valid_tokens_path,
+		dataset.embedding_metadata_path,
+		dataset.label_volume_path,
+		dataset.supervision_split_grid_path,
+		dataset.manifest,
+		supervision_metadata_path=dataset.supervision_metadata_path,
+	)
+
+	assert len(reloaded) == len(dataset)
+
+
+def test_dataset_rejects_semantic_preprocessing_mismatch_despite_finite_check(
+	tmp_path,
+) -> None:
+	"""Finite-check compatibility must not hide an input-transform change."""
+	dataset = _dataset(tmp_path)
+	metadata = dict(dataset.embedding_metadata)
+	preprocessing = dict(metadata['preprocessing'])
+	preprocessing['finite_check_mode'] = 'strict'
+	preprocessing['normalized_clip_abs'] = 7.0
+	metadata['preprocessing'] = preprocessing
+	dataset.embedding_metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='encoder pairing mismatch for preprocessing'):
+		F3VoxelDecoderDataset(
+			dataset.embedding_path,
+			dataset.valid_tokens_path,
+			dataset.embedding_metadata_path,
+			dataset.label_volume_path,
+			dataset.supervision_split_grid_path,
+			dataset.manifest,
+			supervision_metadata_path=dataset.supervision_metadata_path,
+		)
+
+
 def test_dataset_rejects_missing_canonical_valid_token_hash(tmp_path) -> None:
 	dataset = _dataset(tmp_path)
 	dataset.supervision_metadata_path.write_text(

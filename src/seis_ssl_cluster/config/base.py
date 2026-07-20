@@ -56,6 +56,7 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 	STAGE_STRAT_HMM_PRETEXT_TRAINING: frozenset(
 		{
 			'paths',
+			'identity',
 			'manifests',
 			'data',
 			'zero_mask',

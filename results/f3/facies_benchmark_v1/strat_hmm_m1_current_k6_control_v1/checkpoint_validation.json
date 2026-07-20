@@ -1,0 +1,54 @@
+{
+  "artifact_type": "f3_current_k6_checkpoint_validation",
+  "best_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/best.pt",
+  "best_selection_criterion": "lowest finite metrics.loss",
+  "best_sha256": "4624b494e4923ef777bd7d214256bf7ab1a5a4c08b939ea0dbfdee2774b008d9",
+  "checks": {
+    "best": true,
+    "freeze_contract": {
+      "pass": true,
+      "prototype_head_parameter_changed": true,
+      "prototype_head_parameter_norm": 21.97949829894688,
+      "student_non_top_bitwise_init": true,
+      "student_top_parameter_changed": true,
+      "teacher_all_frozen": true,
+      "top_block_parameter_delta_norm": 12.43760361570097
+    },
+    "historical_comparison": {
+      "current_best_epoch": 25,
+      "current_best_loss": 0.26215481758117676,
+      "current_latest_distillation_loss": 0.004466615535420715,
+      "current_latest_loss": 0.3099220182048157,
+      "current_latest_prototype_loss": 0.3090286949882284,
+      "historical_best_epoch": 25,
+      "historical_best_loss": 0.262153297662735,
+      "historical_latest_distillation_loss": 0.004466637773248294,
+      "historical_latest_loss": 0.3099221125303302,
+      "historical_latest_prototype_loss": 0.30902878526831046
+    },
+    "latest": true,
+    "optimizer": {
+      "frozen_blocks_absent_from_optimizer": true,
+      "groups": {
+        "encoder": {
+          "lr": 1e-05,
+          "parameter_count": 12
+        },
+        "head": {
+          "lr": 0.0003,
+          "parameter_count": 3
+        }
+      },
+      "pass": true,
+      "teacher_absent_from_optimizer": true
+    },
+    "provenance": true,
+    "resolved_config_exists": true,
+    "run_metadata_exists": true
+  },
+  "latest_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/latest.pt",
+  "latest_sha256": "bf8b11b6d23a0bec85fc6acdb6c6b2139c9d93b3720871307784dd2328bc3118",
+  "model_tag": "strat_hmm_pretext_m1_current_k6_topblock1_distill_v1",
+  "schema_version": 1,
+  "status": "PASS"
+}

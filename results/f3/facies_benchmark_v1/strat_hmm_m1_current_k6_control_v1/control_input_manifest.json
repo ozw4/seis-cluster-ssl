@@ -1,0 +1,126 @@
+{
+  "artifact_type": "f3_current_k6_control_input_manifest",
+  "created_at_utc": "2026-07-19T12:24:30.017806+00:00",
+  "current_git": {
+    "dirty_status": [
+      "M src/seis_ssl_cluster/config/base.py",
+      " M src/seis_ssl_cluster/config/pretraining.py",
+      " M src/seis_ssl_cluster/embedding/extractor.py",
+      " M src/seis_ssl_cluster/f3/lithology/voxel_label_budget_results.py",
+      " M src/seis_ssl_cluster/f3/lithology/voxel_label_budget_runner.py",
+      " M src/seis_ssl_cluster/training/strat_hmm/runner.py",
+      " M src/seis_ssl_cluster/training/strat_hmm/runtime.py",
+      " M src/seis_ssl_cluster/training/strat_hmm_checkpoint.py",
+      "?? experiments/f3/facies_benchmark_v1/93_strat_hmm_m1_current_k6_control/",
+      "?? proc/seis_ssl_cluster/validate_f3_current_k6_control.py",
+      "?? src/seis_ssl_cluster/config/f3_lithology_voxel_label_budget_control.py",
+      "?? src/seis_ssl_cluster/f3/current_k6_control.py",
+      "?? tests/seis_ssl_cluster/test_config_f3_lithology_voxel_label_budget_control.py"
+    ],
+    "git_diff_sha256": "c6ac0433f4274a63e32e73cfd5f05e7121ed563df7215227272969ff46069361",
+    "head": "371ec7ae4156fdf551a11dd1a9d7ae31ec2ed3ec"
+  },
+  "finite_check_mode_exception": {
+    "classification": "runtime_check_path_only",
+    "current_explicit": "strict",
+    "historical_reconstructed": "off",
+    "source_volume_nonfinite_count": 0
+  },
+  "historical_scientific_parity": {
+    "allowed_runtime_difference": {
+      "data.finite_check_mode": {
+        "current": "strict",
+        "historical": "off"
+      }
+    },
+    "fields_compared": [
+      "data",
+      "head",
+      "loss",
+      "model",
+      "pseudo_targets",
+      "student",
+      "teacher",
+      "train",
+      "zero_mask"
+    ],
+    "mismatches": {},
+    "pass": true
+  },
+  "inputs": {
+    "f3_manifest": {
+      "path": "/workspace/artifacts/seis_ssl_cluster/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json",
+      "sha256": "c5dbc3a66a5c2eed0ec5df8745f8bf5a461b1e2e66156700091f1a751bdc0ef5"
+    },
+    "historical_m1": {
+      "best_checkpoint": {
+        "path": "artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/best.pt",
+        "sha256": "5f2af016f0a3aa95ed892b8e24a45baa0038ef0ed648f2a247326430b8a7177f"
+      },
+      "config": {
+        "path": "experiments/f3/facies_benchmark_v1/80_strat_hmm_pretraining_m1/03_train_single_head_topblock_distill_full.yaml",
+        "sha256": "c41dc532cb8c53e70f7832d979fbc8878a31b6afe6f90e26adc8a9675c7a9f08"
+      },
+      "latest_checkpoint": {
+        "path": "artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/latest.pt",
+        "sha256": "5eee5ed4c3db8c34e1142843ecce4b303fb10e1780f999b0494870377bca50f6"
+      }
+    },
+    "normalization_stats": {
+      "path": "/workspace/artifacts/seis_ssl_cluster/registry/normalization_stats/f3/facies_benchmark_v1/f3_seismic.normalization_stats.json",
+      "sha256": "bfbd9069726d06878da814a8b32dad2aa17dbac45184958c33ecbe8106dc59e7"
+    },
+    "pseudo_target": {
+      "boundary_weight_present": false,
+      "confidence": {
+        "path": "/workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap/k6/f3_facies_benchmark.hmm_confidence_token.npy",
+        "sha256": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2"
+      },
+      "k": 6,
+      "labels": {
+        "path": "/workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap/k6/f3_facies_benchmark.hmm_labels_token.npy",
+        "sha256": "87a3ea23cb142d6e77acd3b63c6c4ca87250d82c99aabad152c9cd8e8c2c5e19"
+      },
+      "metadata": {
+        "path": "/workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap/k6/f3_facies_benchmark.pseudo_target_metadata.json",
+        "sha256": "2ec01e32372682c2abd308f5aa318e9d708bdab940aedae3f9a3606790d1e362"
+      },
+      "schema_version": 1,
+      "valid_tokens": {
+        "path": "/workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap/k6/f3_facies_benchmark.valid_tokens.npy",
+        "sha256": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+      }
+    },
+    "pseudo_target_root": "/workspace/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_k6_pca64_resid_token_phase_edge8_expected3_iter10_bootstrap",
+    "resolved_training_config_sha256": "79b56d618ae269ff84678f6d7bc4eefffadd435cc45bed13de936666bd7a355b",
+    "student_init_checkpoint": {
+      "path": "/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt",
+      "sha256": "13f3f9feb879c29526638765011e9b2bc3d27974161c473a8e0606da98ed3365"
+    },
+    "teacher_checkpoint": {
+      "path": "/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt",
+      "sha256": "13f3f9feb879c29526638765011e9b2bc3d27974161c473a8e0606da98ed3365"
+    },
+    "training_config": {
+      "path": "experiments/f3/facies_benchmark_v1/93_strat_hmm_m1_current_k6_control/02_train_current_k6_full.yaml",
+      "sha256": "5c5b388e5e3bea6a1515b6c3a2369dc5f1450b51d90e1651c04a0403668eada0"
+    }
+  },
+  "migration": {
+    "decision": {
+      "decision_current_git_sha": "332478be21a021e46ee6c1d9423f14859b0cd819",
+      "path": "results/f3/facies_benchmark_v1/performance_migration_validation/performance_migration_decision.json",
+      "required_rerun_scope": "no historical rerun; add a future current-code K=6 control",
+      "sha256": "f740cadf505913fd04414642fae61c5add5e6856aaf79f9627ffc25883a50b3d",
+      "status": "PASS_WITH_NUMERIC_DRIFT"
+    },
+    "parity": {
+      "current_cache_off_vs_memmap_exact": true,
+      "hmm_labels_valid_exact": true,
+      "probe_exact": true,
+      "pseudo_target_exact": true
+    }
+  },
+  "model_tag": "strat_hmm_pretext_m1_current_k6_topblock1_distill_v1",
+  "schema_version": 1
+}

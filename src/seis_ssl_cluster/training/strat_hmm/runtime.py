@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import shutil
@@ -15,6 +16,7 @@ import torch
 
 import seis_ssl_cluster
 from seis_ssl_cluster.data import ZeroMaskConfig
+from seis_ssl_cluster.stratigraphy import discover_pseudo_target_inputs
 from seis_ssl_cluster.training.checkpoint import capture_rng_state, load_checkpoint
 
 if TYPE_CHECKING:
@@ -119,6 +121,7 @@ def _snapshot_run_inputs(
 	*,
 	output_root: Path,
 	config: Mapping[str, object],
+	control_identity: Mapping[str, object] | None = None,
 	overwrite: bool = False,
 ) -> None:
 	_write_json(
@@ -128,7 +131,7 @@ def _snapshot_run_inputs(
 	)
 	_write_json(
 		output_root / 'run_metadata.json',
-		_run_metadata_payload(),
+		_run_metadata_payload(control_identity=control_identity),
 		overwrite=overwrite,
 	)
 
@@ -137,21 +140,146 @@ def _write_run_metadata(
 	*,
 	output_root: Path,
 	trainability_summary: TrainabilitySummary,
+	control_identity: Mapping[str, object] | None = None,
 	overwrite: bool,
 ) -> None:
-	payload = _run_metadata_payload()
+	payload = _run_metadata_payload(control_identity=control_identity)
 	payload['trainability_summary'] = _trainability_summary_payload(
 		trainability_summary,
 	)
 	_write_json(output_root / 'run_metadata.json', payload, overwrite=overwrite)
 
 
-def _run_metadata_payload() -> dict[str, object]:
-	return {
+def _run_metadata_payload(
+	*, control_identity: Mapping[str, object] | None = None
+) -> dict[str, object]:
+	payload: dict[str, object] = {
 		'created_at_utc': datetime.now(timezone.utc).isoformat(),
 		'git_commit': _git_commit(),
 		'package_version': getattr(seis_ssl_cluster, '__version__', None),
 	}
+	if control_identity is not None:
+		payload['control_identity'] = _to_json_safe(control_identity)
+	return payload
+
+
+def _strat_hmm_control_identity(
+	config: Mapping[str, object],
+) -> dict[str, object] | None:
+	"""Build immutable provenance for an explicitly identified control run."""
+	identity = config.get('identity')
+	if identity is None:
+		return None
+	if not isinstance(identity, Mapping):
+		raise TypeError('identity must be a mapping')
+	model_tag = _non_empty_string(identity.get('model_tag'), 'identity.model_tag')
+	teacher = _mapping(config, 'teacher')
+	student = _mapping(config, 'student')
+	pseudo_targets = _mapping(config, 'pseudo_targets')
+	teacher_path = _path_config(teacher, 'checkpoint')
+	student_path = Path(
+		student.get('init_checkpoint') or str(teacher_path)
+	)
+	pseudo_root = _path_config(pseudo_targets, 'input_dir')
+	pseudo_inputs = discover_pseudo_target_inputs(
+		pseudo_root,
+		k=_int_config(pseudo_targets, 'k', 1),
+	)
+	if not pseudo_inputs:
+		raise ValueError('pseudo-target identity requires at least one survey input')
+	pseudo_identity: list[dict[str, object]] = []
+	for item in pseudo_inputs:
+		entry: dict[str, object] = {
+			'survey_id': item.survey_id,
+			'labels': _file_identity(item.labels_path),
+			'confidence': _file_identity(item.confidence_path),
+			'valid_tokens': _file_identity(item.valid_tokens_path),
+			'metadata': _file_identity(item.metadata_path),
+			'boundary_weight_present': item.boundary_weight_path is not None,
+		}
+		if item.boundary_weight_path is not None:
+			entry['boundary_weight'] = _file_identity(item.boundary_weight_path)
+		pseudo_identity.append(entry)
+	return {
+		'schema_version': 1,
+		'model_tag': model_tag,
+		'scientific_identity': _to_json_safe(
+			identity.get('scientific_identity', {}),
+		),
+		'runtime_identity': {
+			**_to_mapping(identity.get('runtime_identity', {}), 'runtime_identity'),
+			'git_commit': _git_commit(),
+			'git_status_short': _git_status_short(),
+			'git_diff_sha256': _git_diff_sha256(),
+			'finite_check_mode': _mapping(config, 'data').get(
+				'finite_check_mode', 'strict'
+			),
+		},
+		'resolved_training_config_sha256': _canonical_sha256(config),
+		'input_identities': {
+			'teacher_checkpoint': _file_identity(teacher_path),
+			'student_init_checkpoint': _file_identity(student_path),
+			'pseudo_targets': pseudo_identity,
+		},
+	}
+
+
+def _to_mapping(value: object, label: str) -> dict[str, object]:
+	if not isinstance(value, Mapping):
+		raise TypeError(f'identity.{label} must be a mapping')
+	return {str(key): _to_json_safe(child) for key, child in value.items()}
+
+
+def _file_identity(path: Path) -> dict[str, str]:
+	if not path.is_file():
+		raise FileNotFoundError(path)
+	return {'path': str(path), 'sha256': _file_sha256(path)}
+
+
+def _file_sha256(path: Path) -> str:
+	digest = hashlib.sha256()
+	with path.open('rb') as handle:
+		for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+			digest.update(chunk)
+	return digest.hexdigest()
+
+
+def _canonical_sha256(value: Mapping[str, object]) -> str:
+	payload = json.dumps(
+		_to_json_safe(value), sort_keys=True, separators=(',', ':'), allow_nan=False
+	).encode('utf-8')
+	return hashlib.sha256(payload).hexdigest()
+
+
+def _git_status_short() -> list[str]:
+	git = shutil.which('git')
+	if git is None:
+		return []
+	try:
+		output = subprocess.check_output(  # noqa: S603
+			[git, 'status', '--short'],
+			cwd=Path(__file__).resolve().parents[3],
+			text=True,
+			stderr=subprocess.DEVNULL,
+		)
+	except (OSError, subprocess.CalledProcessError):
+		return []
+	return output.splitlines()
+
+
+def _git_diff_sha256() -> str | None:
+	git = shutil.which('git')
+	if git is None:
+		return None
+	try:
+		output = subprocess.check_output(  # noqa: S603
+			[git, 'diff', '--binary', 'HEAD'],
+			cwd=Path(__file__).resolve().parents[3],
+			stderr=subprocess.DEVNULL,
+		)
+	except (OSError, subprocess.CalledProcessError):
+		return None
+	return hashlib.sha256(output).hexdigest()
 
 
 def _write_json(path: Path, payload: object, *, overwrite: bool = False) -> None:
@@ -343,6 +471,7 @@ __all__ = [
 	'_rng_state_for_step_checkpoint',
 	'_rng_state_with_dataloader',
 	'_snapshot_run_inputs',
+	'_strat_hmm_control_identity',
 	'_to_json_safe',
 	'_trainability_summary_payload',
 	'_write_run_metadata',
