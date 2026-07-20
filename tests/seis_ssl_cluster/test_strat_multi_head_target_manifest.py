@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 	from collections.abc import Callable
 
 
-def test_manifest_roundtrip_rejects_hash_tamper_and_bad_head_order(
+def test_manifest_roundtrip_rejects_hash_tamper(
 	tmp_path: Path,
 ) -> None:
 	embeddings, heads = _artifacts(tmp_path)
@@ -35,7 +35,7 @@ def test_manifest_roundtrip_rejects_hash_tamper_and_bad_head_order(
 		manifest_path=manifest,
 		source_embedding_dir=embeddings,
 		head_roots={'6': heads[6], '8': heads[8], '10': heads[10]},
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)
@@ -45,6 +45,49 @@ def test_manifest_roundtrip_rejects_hash_tamper_and_bad_head_order(
 	load_multi_head_target_manifest(manifest)
 	(heads[8] / 'k8' / 'survey.hmm_labels_token.npy').write_bytes(b'tampered')
 	with pytest.raises(ValueError, match='hash mismatch'):
+		load_multi_head_target_manifest(manifest)
+
+
+def test_manifest_rejects_replay_root_as_historical_k6_training_target(
+	tmp_path: Path,
+) -> None:
+	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
+
+	with pytest.raises(ValueError, match='immutable historical'):
+		build_multi_head_target_manifest(
+			manifest_path=tmp_path / 'manifest.json',
+			source_embedding_dir=embeddings,
+			head_roots=heads,
+			replay_k6_root=heads[6],
+			migration_decision=migration,
+			control_summary=control,
+		)
+
+
+@pytest.mark.parametrize(
+	'head_ks',
+	[[8, 6, 10], [6, 6, 10]],
+)
+def test_manifest_load_rejects_persisted_unsorted_or_duplicate_head_ks(
+	tmp_path: Path,
+	head_ks: list[int],
+) -> None:
+	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
+	manifest = tmp_path / 'manifest.json'
+	payload = build_multi_head_target_manifest(
+		manifest_path=manifest,
+		source_embedding_dir=embeddings,
+		head_roots=heads,
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
+		migration_decision=migration,
+		control_summary=control,
+	)
+	payload['head_ks'] = head_ks
+	manifest.write_text(json.dumps(payload), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='head_ks'):
 		load_multi_head_target_manifest(manifest)
 
 
@@ -70,20 +113,41 @@ def test_manifest_supports_dynamic_increasing_head_ks(tmp_path: Path) -> None:
 def test_k6_replay_parity_rejects_one_token_mismatch(tmp_path: Path) -> None:
 	embeddings, heads = _artifacts(tmp_path)
 	migration, control = _write_positive_preflight(tmp_path)
-	replay = tmp_path / 'replay'
 	labels = np.tile(np.minimum(np.arange(12), 5), (2, 2, 1)).astype(np.int32)
 	labels[0, 0, 0] = 1
-	write_pseudo_target(
-		replay,
-		k=6,
-		survey_id='survey',
-		labels=labels,
-		confidence=np.ones(labels.shape, dtype=np.float32),
-		valid_tokens=np.ones(labels.shape, dtype=np.bool_),
-		schema_version=1,
-		write_boundary_weight=False,
-	)
+	replay = _replay_k6_root(tmp_path, heads[6], labels=labels)
 	assert not compare_k6_replay(historical_root=heads[6], replay_root=replay)['exact']
+	with pytest.raises(ValueError, match='parity'):
+		build_multi_head_target_manifest(
+			manifest_path=tmp_path / 'manifest.json',
+			source_embedding_dir=embeddings,
+			head_roots=heads,
+			replay_k6_root=replay,
+			migration_decision=migration,
+			control_summary=control,
+		)
+
+
+def test_k6_replay_parity_compares_replayed_clustering_decoded_labels(
+	tmp_path: Path,
+) -> None:
+	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
+	replay = _replay_k6_root(tmp_path, heads[6])
+	initial = compare_k6_replay(
+		historical_root=heads[6],
+		replay_root=replay,
+	)
+	replayed_labels = Path(
+		initial['replay_decoded_labels']['survey']['path'],  # type: ignore[index]
+	)
+	labels = np.load(replayed_labels)
+	labels[0, 0, 0] = 1
+	np.save(replayed_labels, labels)
+
+	parity = compare_k6_replay(historical_root=heads[6], replay_root=replay)
+	assert not parity['exact']
+	assert parity['checks']['survey.decoded_labels'] is False  # type: ignore[index]
 	with pytest.raises(ValueError, match='parity'):
 		build_multi_head_target_manifest(
 			manifest_path=tmp_path / 'manifest.json',
@@ -109,7 +173,7 @@ def test_builder_requires_positive_migration_and_control_preflight(
 			manifest_path=manifest,
 			source_embedding_dir=embeddings,
 			head_roots=heads,
-			replay_k6_root=heads[6],
+			replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 			migration_decision=migration,
 			control_summary=control,
 		)
@@ -125,7 +189,7 @@ def test_builder_requires_positive_migration_and_control_preflight(
 			manifest_path=manifest,
 			source_embedding_dir=embeddings,
 			head_roots=heads,
-			replay_k6_root=heads[6],
+			replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 			migration_decision=migration,
 			control_summary=control,
 		)
@@ -141,7 +205,7 @@ def test_manifest_rejects_missing_k6_replay_parity(tmp_path: Path) -> None:
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)
@@ -191,7 +255,7 @@ def test_manifest_rejects_target_mask_misaligned_with_source_embedding(
 			manifest_path=tmp_path / 'manifest.json',
 			source_embedding_dir=embeddings,
 			head_roots=heads,
-			replay_k6_root=heads[6],
+			replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 			migration_decision=migration,
 			control_summary=control,
 		)
@@ -228,7 +292,7 @@ def test_cli_dry_run_only_missing_does_not_quarantine_invalid_manifest(
 			'--head-root',
 			f'10={heads[10]}',
 			'--replay-k6-root',
-			str(heads[6]),
+			str(_replay_k6_root(tmp_path, heads[6])),
 			'--manifest',
 			str(manifest),
 			'--migration-decision',
@@ -256,13 +320,14 @@ def test_cli_only_missing_rebuilds_for_stale_requested_inputs(
 	shutil.copytree(embeddings, alternate_embeddings)
 	alternate_k6 = tmp_path / 'alternate_k6'
 	shutil.copytree(heads[6], alternate_k6)
+	alternate_replay = _replay_k6_root(tmp_path, alternate_k6)
 	manifest = tmp_path / 'manifest.json'
 	migration, control = _write_positive_preflight(tmp_path)
 	build_multi_head_target_manifest(
 		manifest_path=manifest,
 		source_embedding_dir=embeddings,
 		head_roots=heads,
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)
@@ -288,7 +353,7 @@ def test_cli_only_missing_rebuilds_for_stale_requested_inputs(
 			'--head-root',
 			f'10={heads[10]}',
 			'--replay-k6-root',
-			str(alternate_k6),
+			str(alternate_replay),
 			'--manifest',
 			str(manifest),
 			'--migration-decision',
@@ -302,7 +367,7 @@ def test_cli_only_missing_rebuilds_for_stale_requested_inputs(
 	payload = load_multi_head_target_manifest(manifest)
 	assert payload['source_embedding']['input_dir'] == str(alternate_embeddings)  # type: ignore[index]
 	assert payload['heads']['6']['pseudo_target_root'] == str(alternate_k6)  # type: ignore[index]
-	assert payload['k6_replay_parity']['replay_root'] == str(alternate_k6)  # type: ignore[index]
+	assert payload['k6_replay_parity']['replay_root'] == str(alternate_replay)  # type: ignore[index]
 	assert 'reused complete manifest' not in capsys.readouterr().out
 
 
@@ -311,8 +376,7 @@ def test_cli_only_missing_refuses_stale_k6_replay_evidence(
 	capsys: pytest.CaptureFixture[str],
 ) -> None:
 	embeddings, heads = _artifacts(tmp_path)
-	replay = tmp_path / 'replay'
-	shutil.copytree(heads[6], replay)
+	replay = _replay_k6_root(tmp_path, heads[6])
 	manifest = tmp_path / 'manifest.json'
 	migration, control = _write_positive_preflight(tmp_path)
 	build_multi_head_target_manifest(
@@ -373,7 +437,7 @@ def test_manifest_rejects_falsified_common_target_contract(
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)
@@ -425,7 +489,7 @@ def test_manifest_load_revalidates_referenced_target_semantics(
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)
@@ -455,7 +519,7 @@ def test_manifest_rejects_unknown_nested_reference_fields(
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)
@@ -475,7 +539,7 @@ def test_manifest_rejects_unknown_head_diagnostics_fields(tmp_path: Path) -> Non
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)
@@ -492,7 +556,7 @@ def test_manifest_rejects_unknown_k6_replay_parity_fields(tmp_path: Path) -> Non
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)
@@ -506,6 +570,7 @@ def _artifacts(
 	tmp_path: Path,
 	*,
 	ks: tuple[int, ...] = (6, 8, 10),
+	source_root: Path | None = None,
 ) -> tuple[Path, dict[int, Path]]:
 	shape = (2, 2, 12)
 	embeddings = tmp_path / 'embeddings'
@@ -537,6 +602,15 @@ def _artifacts(
 		labels = np.tile(np.minimum(np.arange(12), k - 1), (2, 2, 1)).astype(
 			np.int32,
 		)
+		source_label_path = (
+			(source_root or tmp_path)
+			/ f'head{k}_clustering'
+			/ 'labels'
+			/ f'k{k}'
+			/ 'survey.cluster_labels_token.npy'
+		)
+		source_label_path.parent.mkdir(parents=True, exist_ok=True)
+		np.save(source_label_path, labels)
 		write_pseudo_target(
 			root,
 			k=k,
@@ -544,11 +618,55 @@ def _artifacts(
 			labels=labels,
 			confidence=np.ones(labels.shape, dtype=np.float32),
 			valid_tokens=np.ones(labels.shape, dtype=np.bool_),
+			metadata={
+				'source_clustering_output_dir': str(source_label_path.parents[2]),
+				'source_label_path': str(source_label_path),
+			},
 			schema_version=1,
 			write_boundary_weight=False,
 		)
 		heads[k] = root
 	return embeddings, heads
+
+
+def _replay_k6_root(
+	tmp_path: Path,
+	historical_root: Path,
+	*,
+	labels: np.ndarray | None = None,
+) -> Path:
+	index = 0
+	while (tmp_path / f'replay_k6_{index}').exists():
+		index += 1
+	replay_root = tmp_path / f'replay_k6_{index}'
+	historical_labels = np.load(
+		historical_root / 'k6' / 'survey.hmm_labels_token.npy',
+	)
+	replay_labels = historical_labels if labels is None else labels
+	source_label_path = (
+		tmp_path
+		/ f'replay_k6_clustering_{index}'
+		/ 'labels'
+		/ 'k6'
+		/ 'survey.cluster_labels_token.npy'
+	)
+	source_label_path.parent.mkdir(parents=True)
+	np.save(source_label_path, replay_labels)
+	write_pseudo_target(
+		replay_root,
+		k=6,
+		survey_id='survey',
+		labels=replay_labels,
+		confidence=np.ones(replay_labels.shape, dtype=np.float32),
+		valid_tokens=np.ones(replay_labels.shape, dtype=np.bool_),
+		metadata={
+			'source_clustering_output_dir': str(source_label_path.parents[2]),
+			'source_label_path': str(source_label_path),
+		},
+		schema_version=1,
+		write_boundary_weight=False,
+	)
+	return replay_root
 
 
 def _write_positive_preflight(root: Path) -> tuple[Path, Path]:

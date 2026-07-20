@@ -91,6 +91,11 @@ def build_multi_head_target_manifest(  # noqa: C901, PLR0913
 	if 6 in ks:
 		if replay_k6_root is None:
 			raise ValueError('K=6 manifests require replay_k6_root')
+		if _same_resolved_path(Path(roots[6]), Path(replay_k6_root)):
+			raise ValueError(
+			'K=6 replay root must differ from the immutable historical '
+			'training-target root'
+		)
 		payload['k6_replay_parity'] = compare_k6_replay(
 			historical_root=Path(roots[6]),
 			replay_root=replay_k6_root,
@@ -288,9 +293,12 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	if 6 in ks:
 		if 'k6_replay_parity' not in payload:
 			raise ValueError('manifest is missing K=6 replay parity evidence')
+		historical_head = _mapping(head_values['6'], 'head k=6')
 		_validate_k6_replay_parity(
 			payload['k6_replay_parity'],
 			survey_ids,
+			historical_root=Path(str(historical_head['pseudo_target_root'])),
+			historical_targets=_mapping(historical_head['surveys'], 'head k=6 surveys'),
 			verify_hashes=verify_hashes,
 		)
 	elif 'k6_replay_parity' in payload:
@@ -301,39 +309,72 @@ def compare_k6_replay(
 	*, historical_root: str | Path, replay_root: str | Path
 ) -> dict[str, object]:
 	"""Require exact K=6 decoded/pseudo-target semantics for replay evidence."""
+	if _same_resolved_path(Path(historical_root), Path(replay_root)):
+		raise ValueError(
+			'K=6 replay root must differ from the immutable historical '
+			'training-target root'
+		)
 	historical = _head_reference(Path(historical_root), k=6)
 	replay = _head_reference(Path(replay_root), k=6)
 	if set(historical['surveys']) != set(replay['surveys']):
 		raise ValueError('K=6 replay survey set mismatch')
+	historical_decoded = _decoded_label_references(historical)
+	replay_decoded = _decoded_label_references(replay)
 	checks: dict[str, bool] = {}
 	for survey_id in historical['surveys']:
 		left = _load_reference_arrays(
 			_mapping(historical['surveys'][survey_id], 'historical')
 		)
 		right = _load_reference_arrays(_mapping(replay['surveys'][survey_id], 'replay'))
+		left_decoded = np.load(
+			Path(str(historical_decoded[survey_id]['path'])), mmap_mode='r'
+		)
+		right_decoded = np.load(
+			Path(str(replay_decoded[survey_id]['path'])), mmap_mode='r'
+		)
+		if _same_resolved_path(
+			Path(str(historical_decoded[survey_id]['path'])),
+			Path(str(replay_decoded[survey_id]['path'])),
+		):
+			raise ValueError(
+				'K=6 replay decoded-label artifact must differ from the '
+				'immutable historical artifact'
+			)
 		for name in ('labels', 'confidence', 'valid_tokens'):
-			checks[f'{survey_id}.{name}'] = bool(
+			checks[f'{survey_id}.pseudo_target_{name}'] = bool(
 				np.array_equal(left[name], right[name])
 			)
-		checks[f'{survey_id}.state_occupancy'] = bool(
+		checks[f'{survey_id}.decoded_valid_token_mask'] = bool(
+			np.array_equal(left_decoded >= 0, right_decoded >= 0)
+		)
+		checks[f'{survey_id}.decoded_invalid_positions'] = bool(
+			np.array_equal(left_decoded < 0, right_decoded < 0)
+		)
+		checks[f'{survey_id}.decoded_labels'] = bool(
+			np.array_equal(left_decoded, right_decoded)
+		)
+		checks[f'{survey_id}.decoded_state_occupancy'] = bool(
 			np.array_equal(
-				np.bincount(left['labels'][left['valid_tokens']], minlength=6),
-				np.bincount(right['labels'][right['valid_tokens']], minlength=6),
+				np.bincount(left_decoded[left_decoded >= 0], minlength=6),
+				np.bincount(right_decoded[right_decoded >= 0], minlength=6),
 			)
 		)
-		checks[f'{survey_id}.transition_counts'] = bool(
+		checks[f'{survey_id}.decoded_transition_counts'] = bool(
 			np.array_equal(
-				_transition_counts(left['labels']), _transition_counts(right['labels'])
+				_transition_counts(left_decoded),
+				_transition_counts(right_decoded),
 			)
 		)
-		checks[f'{survey_id}.ordered_violations'] = bool(
-			_ordered_violation_count(left['labels'], k=6)
-			== _ordered_violation_count(right['labels'], k=6)
+		checks[f'{survey_id}.decoded_ordered_violations'] = bool(
+			_ordered_violation_count(left_decoded, k=6)
+			== _ordered_violation_count(right_decoded, k=6)
 		)
 	return {
 		'exact': all(checks.values()),
 		'checks': checks,
 		'replay_artifacts': _replay_artifact_references(replay),
+		'historical_decoded_labels': historical_decoded,
+		'replay_decoded_labels': replay_decoded,
 	}
 
 
@@ -530,21 +571,35 @@ def _validate_trace_quantiles(value: object, name: str) -> None:
 		raise ValueError(f'{name} must contain ordered non-negative quantiles')
 
 
-def _validate_k6_replay_parity(
+def _validate_k6_replay_parity(  # noqa: C901, PLR0912
 	value: object,
 	survey_ids: Sequence[object],
 	*,
+	historical_root: Path,
+	historical_targets: Mapping[str, object],
 	verify_hashes: bool,
 ) -> None:
 	"""Validate required exact K=6 replay evidence for complete manifests."""
 	parity = _mapping(value, 'k6_replay_parity')
 	_required_keys(
 		parity,
-		{'exact', 'checks', 'replay_root', 'replay_artifacts'},
+		{
+			'exact',
+			'checks',
+			'replay_root',
+			'replay_artifacts',
+			'historical_decoded_labels',
+			'replay_decoded_labels',
+		},
 		'k6_replay_parity',
 	)
 	if not isinstance(parity['replay_root'], str) or not parity['replay_root']:
 		raise TypeError('k6_replay_parity replay_root must be a non-empty string')
+	if _same_resolved_path(historical_root, Path(parity['replay_root'])):
+		raise ValueError(
+			'K=6 replay root must differ from the immutable historical '
+			'training-target root'
+		)
 	if not isinstance(parity['exact'], bool):
 		raise TypeError('k6_replay_parity exact must be a boolean')
 	checks = _mapping(parity['checks'], 'k6_replay_parity checks')
@@ -552,12 +607,15 @@ def _validate_k6_replay_parity(
 		f'{survey_id}.{metric}'
 		for survey_id in survey_ids
 		for metric in (
-			'labels',
-			'confidence',
-			'valid_tokens',
-			'state_occupancy',
-			'transition_counts',
-			'ordered_violations',
+			'pseudo_target_labels',
+			'pseudo_target_confidence',
+			'pseudo_target_valid_tokens',
+			'decoded_valid_token_mask',
+			'decoded_invalid_positions',
+			'decoded_labels',
+			'decoded_state_occupancy',
+			'decoded_transition_counts',
+			'decoded_ordered_violations',
 		)
 	}
 	_required_keys(checks, expected, 'k6_replay_parity checks')
@@ -589,6 +647,66 @@ def _validate_k6_replay_parity(
 					raise ValueError(
 						f'K=6 replay artifact {name} hash mismatch for {survey_id}'
 					)
+	_validate_decoded_label_references(
+		parity['historical_decoded_labels'],
+		survey_ids,
+		name='K=6 historical decoded labels',
+		verify_hashes=verify_hashes,
+	)
+	_validate_decoded_label_references(
+		parity['replay_decoded_labels'],
+		survey_ids,
+		name='K=6 replay decoded labels',
+		verify_hashes=verify_hashes,
+	)
+	historical_decoded = _mapping(
+		parity['historical_decoded_labels'],
+		'K=6 historical decoded labels',
+	)
+	replay_decoded = _mapping(
+		parity['replay_decoded_labels'],
+		'K=6 replay decoded labels',
+	)
+	for survey_id in survey_ids:
+		historical_target = _mapping(
+			historical_targets[str(survey_id)],
+			f'K=6 historical target {survey_id}',
+		)
+		artifacts = _mapping(
+			replay_artifacts[str(survey_id)],
+			f'K=6 replay artifacts {survey_id}',
+		)
+		expected_historical = _decoded_label_reference_from_target_metadata(
+			historical_target,
+			name=f'K=6 historical target {survey_id}',
+		)
+		expected_replay = _decoded_label_reference_from_target_metadata(
+			artifacts,
+			name=f'K=6 replay target {survey_id}',
+		)
+		if not _same_file_reference(
+			historical_decoded[str(survey_id)], expected_historical
+		):
+			raise ValueError(
+				f'K=6 historical decoded-label reference mismatch for {survey_id}'
+			)
+		if not _same_file_reference(replay_decoded[str(survey_id)], expected_replay):
+			raise ValueError(
+				f'K=6 replay decoded-label reference mismatch for {survey_id}'
+			)
+		historical_reference = _mapping(
+			historical_decoded[str(survey_id)],
+			'reference',
+		)
+		replay_reference = _mapping(replay_decoded[str(survey_id)], 'reference')
+		if _same_resolved_path(
+			Path(str(historical_reference['path'])),
+			Path(str(replay_reference['path'])),
+		):
+			raise ValueError(
+				'K=6 replay decoded-label artifact must differ from the '
+				'immutable historical artifact'
+			)
 
 
 def _head_reference(root: Path, *, k: int) -> dict[str, object]:
@@ -642,6 +760,70 @@ def _replay_artifact_references(
 			for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
 		}
 	return references
+
+
+def _decoded_label_references(
+	head: Mapping[str, object],
+) -> dict[str, dict[str, str]]:
+	"""Resolve each exported target's immutable clustering-label input."""
+	surveys = _mapping(head['surveys'], 'K=6 surveys')
+	return {
+		survey_id: _decoded_label_reference_from_target_metadata(
+			_mapping(value, f'K=6 target {survey_id}'),
+			name=f'K=6 target {survey_id}',
+		)
+		for survey_id, value in surveys.items()
+	}
+
+
+def _decoded_label_reference_from_target_metadata(
+	entry: Mapping[str, object],
+	*,
+	name: str,
+) -> dict[str, str]:
+	metadata = _mapping(entry['metadata'], f'{name} metadata reference')
+	metadata_path = Path(str(metadata['path']))
+	source = _mapping(_json_object(metadata_path).get('source'), f'{name} source')
+	label_path = source.get('source_label_path')
+	if not isinstance(label_path, str) or not label_path:
+		raise ValueError(f'{name} must record source_label_path')
+	path = Path(label_path)
+	if not path.is_file():
+		raise FileNotFoundError(f'{name} decoded-label artifact is missing: {path}')
+	return _file_reference(path)
+
+
+def _validate_decoded_label_references(
+	value: object,
+	survey_ids: Sequence[object],
+	*,
+	name: str,
+	verify_hashes: bool,
+) -> None:
+	references = _mapping(value, name)
+	if set(references) != {str(survey_id) for survey_id in survey_ids}:
+		raise ValueError(f'{name} survey set mismatch')
+	for survey_id in survey_ids:
+		reference = _mapping(references[str(survey_id)], f'{name} {survey_id}')
+		_required_keys(reference, {'path', 'sha256'}, f'{name} {survey_id}')
+		if (
+			verify_hashes
+			and file_sha256(Path(str(reference['path']))) != reference['sha256']
+		):
+			raise ValueError(f'{name} hash mismatch for {survey_id}')
+
+
+def _same_file_reference(
+	left: Mapping[str, object], right: Mapping[str, object]
+) -> bool:
+	return (
+		_same_resolved_path(Path(str(left['path'])), Path(str(right['path'])))
+		and left['sha256'] == right['sha256']
+	)
+
+
+def _same_resolved_path(left: Path, right: Path) -> bool:
+	return left.resolve() == right.resolve()
 
 
 def _common_contract(head: Mapping[str, object], *, k: int) -> dict[str, object]:

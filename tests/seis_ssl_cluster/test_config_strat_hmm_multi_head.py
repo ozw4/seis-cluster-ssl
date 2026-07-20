@@ -12,6 +12,7 @@ from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_man
 from tests.seis_ssl_cluster.test_config_strat_hmm_pretext import _minimal_config
 from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
 	_artifacts,
+	_replay_k6_root,
 	_write_positive_preflight,
 )
 
@@ -164,7 +165,7 @@ def _multi_head_config(tmp_path: Path) -> dict[str, object]:
 		manifest_path=manifest,
 		source_embedding_dir=embeddings,
 		head_roots={6: heads[6], 8: heads[8], 10: heads[10]},
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)

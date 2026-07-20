@@ -25,6 +25,7 @@ from seis_ssl_cluster.data import (
 from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
 from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
 	_artifacts,
+	_replay_k6_root,
 	_write_positive_preflight,
 )
 
@@ -165,7 +166,7 @@ def test_provider_manifest_path_does_not_load_target_arrays(
 		manifest_path=manifest_path,
 		source_embedding_dir=embeddings,
 		head_roots=heads,
-		replay_k6_root=heads[6],
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
 		migration_decision=migration,
 		control_summary=control,
 	)
