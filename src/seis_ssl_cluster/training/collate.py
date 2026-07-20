@@ -158,13 +158,21 @@ def _multi_head_contract(
 	if not isinstance(targets, Mapping):
 		raise TypeError('strat_multi_targets must be a mapping')
 	head_keys = tuple(targets)
-	if not head_keys:
-		raise ValueError('strat_multi_targets must contain at least one head')
+	head_ks = tuple(_multi_head_key_k(head_key) for head_key in head_keys)
+	if (
+		len(head_ks) < 2
+		or tuple(sorted(head_ks)) != head_ks
+		or len(set(head_ks)) != len(head_ks)
+	):
+		raise ValueError(
+			'strat_multi_targets head keys must be at least two canonical '
+			'ascending k{K} keys'
+		)
 	fields_by_head: dict[str, tuple[str, ...]] = {}
 	for head_key in head_keys:
 		target = targets[head_key]
-		if not isinstance(head_key, str) or not isinstance(target, Mapping):
-			raise TypeError('strat_multi_targets must map string head keys to mappings')
+		if not isinstance(target, Mapping):
+			raise TypeError('strat_multi_targets must map head keys to mappings')
 		fields = tuple(target)
 		if fields != ('labels', 'confidence', 'boundary_weight', 'valid_mask'):
 			raise ValueError(
@@ -173,6 +181,27 @@ def _multi_head_contract(
 			)
 		fields_by_head[head_key] = fields
 	return head_keys, fields_by_head
+
+
+def _multi_head_key_k(head_key: object) -> int:
+	"""Return the K encoded by one canonical multi-head target key."""
+	if not isinstance(head_key, str):
+		raise TypeError('strat_multi_targets head keys must be strings')
+	if not head_key.startswith('k'):
+		raise ValueError(
+			f'strat_multi_targets head key {head_key!r} must use canonical k{{K}}'
+		)
+	try:
+		k = int(head_key[1:])
+	except ValueError as exc:
+		raise ValueError(
+			f'strat_multi_targets head key {head_key!r} must use canonical k{{K}}'
+		) from exc
+	if k < 2 or head_key != f'k{k}':
+		raise ValueError(
+			f'strat_multi_targets head key {head_key!r} must use canonical k{{K}}'
+		)
+	return k
 
 
 def _stack_multi_head_field(

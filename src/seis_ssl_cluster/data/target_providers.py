@@ -673,7 +673,7 @@ def _validate_multi_head_target_input(
 		valid_tokens_path=item.valid_tokens_path,
 		metadata_path=item.metadata_path,
 		hashes=item.hashes,
-		validate_array_semantics=True,
+		validate_array_semantics=False,
 	)
 	if item.hashes['valid_tokens'] != common_valid_hash:
 		raise ValueError(

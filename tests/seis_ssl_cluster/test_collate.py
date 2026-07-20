@@ -92,7 +92,7 @@ def test_multi_head_collate_rejects_missing_head_and_dtype_mismatch() -> None:
 		strat_multi_head_target_collate_fn(
 			[_multi_head_sample((6, 8)), _multi_head_sample((6, 8, 10))]
 		)
-	second = _multi_head_sample((6,))
+	second = _multi_head_sample((6, 8))
 	second['strat_multi_targets']['k6']['confidence'] = np.ones(
 		(2, 3, 4),
 		dtype=np.float64,
@@ -101,7 +101,29 @@ def test_multi_head_collate_rejects_missing_head_and_dtype_mismatch() -> None:
 		TypeError,
 		match="all 'k6' 'confidence' arrays must share dtype",
 	):
-		strat_multi_head_target_collate_fn([_multi_head_sample((6,)), second])
+		strat_multi_head_target_collate_fn([_multi_head_sample((6, 8)), second])
+
+
+@pytest.mark.parametrize(
+	('head_ks', 'replacement'),
+	[
+		((6,), None),
+		((10, 6), None),
+		((6, 8), 'foo'),
+	],
+)
+def test_multi_head_collate_rejects_noncanonical_head_contract(
+	head_ks: tuple[int, ...],
+	replacement: str | None,
+) -> None:
+	sample = _multi_head_sample(head_ks)
+	if replacement is not None:
+		targets = sample['strat_multi_targets']
+		assert isinstance(targets, dict)
+		targets[replacement] = targets.pop('k8')
+
+	with pytest.raises(ValueError, match=r'canonical|ascending|at least two'):
+		strat_multi_head_target_collate_fn([sample])
 
 
 def test_mae_collate_fn_records_unequal_visible_counts_on_cpu() -> None:

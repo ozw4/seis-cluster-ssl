@@ -185,6 +185,7 @@ def test_provider_loads_each_survey_heads_once_with_mmap(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	provider, _ = _provider(tmp_path)
+	manifest = provider.manifest
 	original_load = target_providers.np.load
 	load_calls: list[Path] = []
 
@@ -194,6 +195,8 @@ def test_provider_loads_each_survey_heads_once_with_mmap(
 		return original_load(path, *args, **kwargs)
 
 	monkeypatch.setattr(target_providers.np, 'load', spy_load)
+	provider = MultiHeadStratPseudoTargetProvider(manifest)
+	assert load_calls == []
 	provider.add_targets({'coords': {}}, _context(tmp_path))
 	provider.add_targets({'coords': {}}, _context(tmp_path))
 	provider.add_targets({'coords': {}}, _context(tmp_path, survey_id='survey-b'))
