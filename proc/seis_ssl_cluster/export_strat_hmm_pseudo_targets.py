@@ -56,6 +56,18 @@ def build_parser() -> argparse.ArgumentParser:
 		default=1.0,
 		help='Positive exponential boundary-distance scale.',
 	)
+	parser.add_argument(
+		'--schema-version',
+		type=int,
+		default=2,
+		choices=(1, 2),
+		help='Pseudo-target schema version (K=8/10 bootstrap exports use 1).',
+	)
+	parser.add_argument(
+		'--no-boundary-weight',
+		action='store_true',
+		help='Omit the boundary-weight artifact; required for schema v1.',
+	)
 	add_overwrite_argument(parser)
 	add_dry_run_argument(
 		parser,
@@ -77,6 +89,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 			boundary_alpha=args.boundary_alpha,
 			boundary_tau=args.boundary_tau,
 			overwrite=args.overwrite,
+			schema_version=args.schema_version,
+			write_boundary_weight=not args.no_boundary_weight,
 		)
 		_print_summary(
 			results,
@@ -94,6 +108,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 		boundary_alpha=args.boundary_alpha,
 		boundary_tau=args.boundary_tau,
 		overwrite=args.overwrite,
+		schema_version=args.schema_version,
+		write_boundary_weight=not args.no_boundary_weight,
 	)
 	_print_summary(
 		results,

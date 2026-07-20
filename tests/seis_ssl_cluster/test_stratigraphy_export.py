@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from seis_ssl_cluster.stratigraphy import export as strat_export
 from seis_ssl_cluster.stratigraphy import (
 	export_hmm_cluster_labels_as_pseudo_targets,
 	load_pseudo_target_arrays,
@@ -198,6 +199,38 @@ def test_export_boundary_weight_blocks_overwrite(tmp_path: Path) -> None:
 			pseudo_target_root=tmp_path / 'pseudo',
 			k=3,
 		)
+
+
+def test_schema_v1_export_keeps_partial_staging_out_of_final_root(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	clustering_dir = _write_hmm_labels(tmp_path, 'survey_a', k=3)
+	label_dir = clustering_dir / 'labels' / 'k3'
+	np.save(
+		label_dir / 'survey_b.cluster_labels_token.npy',
+		np.array([[[0, 1, 2]]], dtype=np.int32),
+	)
+	original = strat_export.write_pseudo_target
+	calls = 0
+
+	def interrupted_write(*args: object, **kwargs: object) -> object:
+		nonlocal calls
+		calls += 1
+		if calls == 2:
+			raise RuntimeError('interrupt export')
+		return original(*args, **kwargs)
+
+	monkeypatch.setattr(strat_export, 'write_pseudo_target', interrupted_write)
+	with pytest.raises(RuntimeError, match='interrupt export'):
+		export_hmm_cluster_labels_as_pseudo_targets(
+			clustering_output_dir=clustering_dir,
+			pseudo_target_root=tmp_path / 'pseudo',
+			k=3,
+			schema_version=1,
+			write_boundary_weight=False,
+		)
+	assert not (tmp_path / 'pseudo' / 'k3').exists()
 
 
 def test_cli_dry_run_validates_and_does_not_create_files(tmp_path: Path) -> None:

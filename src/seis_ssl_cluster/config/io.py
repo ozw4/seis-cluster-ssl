@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import re
 from pathlib import Path
 
 import yaml
 
 from seis_ssl_cluster.config.schema import KNOWN_STAGES
 from seis_ssl_cluster.config.validate import validate_config
+
+_ENVIRONMENT_VARIABLE = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)\}')
 
 
 def load_config(path: str | Path) -> dict[str, object]:
@@ -22,7 +26,30 @@ def load_config(path: str | Path) -> dict[str, object]:
 		msg = f'config file must contain a mapping: {config_path}'
 		raise TypeError(msg)
 
-	return loaded
+	return _expand_environment_variables(loaded)
+
+
+def _expand_environment_variables(value: object) -> object:
+	"""Expand required ``${NAME}`` values in a loaded YAML structure."""
+	if isinstance(value, dict):
+		return {
+			key: _expand_environment_variables(child)
+			for key, child in value.items()
+		}
+	if isinstance(value, list):
+		return [_expand_environment_variables(child) for child in value]
+	if not isinstance(value, str):
+		return value
+
+	def replace(match: re.Match[str]) -> str:
+		name = match.group(1)
+		try:
+			return os.environ[name]
+		except KeyError as exc:
+			msg = f'config environment variable is required: {name}'
+			raise ValueError(msg) from exc
+
+	return _ENVIRONMENT_VARIABLE.sub(replace, value)
 
 
 def main() -> None:

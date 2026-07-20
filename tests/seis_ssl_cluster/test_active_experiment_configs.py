@@ -502,7 +502,12 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 @pytest.mark.parametrize('config_path', ALL_CONFIGS, ids=str)
 def test_all_repository_configs_load_and_resolve_supported_stages(
 	config_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
 	config = load_config(config_path)
 
 	assert isinstance(config, dict)

@@ -67,9 +67,7 @@ def pseudo_target_paths(
 		labels=output_dir / f'{survey_id}.hmm_labels_token.npy',
 		confidence=output_dir / f'{survey_id}.hmm_confidence_token.npy',
 		valid_tokens=output_dir / f'{survey_id}.valid_tokens.npy',
-		boundary_weight=(
-			output_dir / f'{survey_id}.hmm_boundary_weight_token.npy'
-		),
+		boundary_weight=(output_dir / f'{survey_id}.hmm_boundary_weight_token.npy'),
 		metadata=output_dir / f'{survey_id}.pseudo_target_metadata.json',
 	)
 
@@ -84,8 +82,16 @@ def write_pseudo_target(  # noqa: PLR0913
 	valid_tokens: np.ndarray,
 	boundary_weight: np.ndarray | None = None,
 	metadata: Mapping[str, object] | None = None,
+	schema_version: int = SCHEMA_VERSION,
+	write_boundary_weight: bool = True,
 ) -> StratPseudoTargetPaths:
 	"""Validate and write one survey's HMM pseudo-target artifact."""
+	if schema_version not in {1, SCHEMA_VERSION}:
+		raise ValueError(
+			f'unsupported pseudo-target schema_version: {schema_version!r}'
+		)
+	if schema_version == 1 and write_boundary_weight:
+		raise ValueError('schema v1 pseudo-targets must not write boundary weights')
 	boundary_weight_source = (
 		'explicit' if boundary_weight is not None else 'default_unity'
 	)
@@ -108,7 +114,8 @@ def write_pseudo_target(  # noqa: PLR0913
 	np.save(paths.labels, np.asarray(labels, dtype=np.int32))
 	np.save(paths.confidence, np.asarray(confidence, dtype=np.float32))
 	np.save(paths.valid_tokens, np.asarray(valid_tokens, dtype=np.bool_))
-	np.save(paths.boundary_weight, boundary_weight_array)
+	if write_boundary_weight:
+		np.save(paths.boundary_weight, boundary_weight_array)
 	_write_metadata(
 		paths.metadata,
 		_pseudo_target_metadata(
@@ -119,6 +126,8 @@ def write_pseudo_target(  # noqa: PLR0913
 			k=k,
 			survey_id=survey_id,
 			source_metadata=metadata,
+			schema_version=schema_version,
+			write_boundary_weight=write_boundary_weight,
 		),
 	)
 	return paths
@@ -291,6 +300,8 @@ def _pseudo_target_metadata(  # noqa: PLR0913
 	k: int,
 	survey_id: str,
 	source_metadata: Mapping[str, object] | None,
+	schema_version: int,
+	write_boundary_weight: bool,
 ) -> dict[str, object]:
 	valid_count = int(np.count_nonzero(valid_tokens))
 	counts = np.bincount(labels[valid_tokens].astype(np.int64), minlength=k)
@@ -303,8 +314,19 @@ def _pseudo_target_metadata(  # noqa: PLR0913
 		boundary_min = boundary_mean = boundary_max = 0.0
 	payload: dict[str, object] = {
 		'artifact_type': ARTIFACT_TYPE,
-		'boundary_weight_source': boundary_weight_source,
-		'boundary_weight_summary': {
+		'invalid_token_count': int(labels.size - valid_count),
+		'k': int(k),
+		'label_counts': {
+			str(label): int(count) for label, count in enumerate(counts[:k])
+		},
+		'schema_version': schema_version,
+		'survey_id': survey_id,
+		'token_grid_shape': [int(size) for size in labels.shape],
+		'valid_token_count': valid_count,
+	}
+	if write_boundary_weight:
+		payload['boundary_weight_source'] = boundary_weight_source
+		payload['boundary_weight_summary'] = {
 			'downweighted_valid_token_count': int(
 				np.count_nonzero(valid_boundary_weight < 1.0),
 			),
@@ -314,18 +336,7 @@ def _pseudo_target_metadata(  # noqa: PLR0913
 			'zero_weight_valid_token_count': int(
 				np.count_nonzero(valid_boundary_weight == 0.0),
 			),
-		},
-		'invalid_token_count': int(labels.size - valid_count),
-		'k': int(k),
-		'label_counts': {
-			str(label): int(count)
-			for label, count in enumerate(counts[:k])
-		},
-		'schema_version': SCHEMA_VERSION,
-		'survey_id': survey_id,
-		'token_grid_shape': [int(size) for size in labels.shape],
-		'valid_token_count': valid_count,
-	}
+		}
 	if source_metadata is not None:
 		payload['source'] = dict(source_metadata)
 	return payload

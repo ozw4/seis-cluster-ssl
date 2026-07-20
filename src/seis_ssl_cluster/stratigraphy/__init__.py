@@ -22,6 +22,13 @@ from seis_ssl_cluster.stratigraphy.losses import (
 	structured_hmm_prototype_loss,
 	usage_entropy_floor_loss,
 )
+from seis_ssl_cluster.stratigraphy.multi_head import (
+	build_multi_head_target_manifest,
+	compare_k6_replay,
+	load_multi_head_target_manifest,
+	multi_head_cross_head_diagnostics,
+	validate_multi_head_target_manifest,
+)
 from seis_ssl_cluster.stratigraphy.prototypes import (
 	OrderedPrototypeHead,
 	OrderedPrototypeOutput,
@@ -57,13 +64,17 @@ __all__ = [
 	'StratPseudoTargetPaths',
 	'boundary_distance_tokens',
 	'boundary_weight_tokens',
+	'build_multi_head_target_manifest',
+	'compare_k6_replay',
 	'decode_ordered_logits_survey',
 	'discover_pseudo_target_inputs',
 	'emission_costs_from_logits',
 	'export_hmm_cluster_labels_as_pseudo_targets',
 	'feature_distillation_loss',
+	'load_multi_head_target_manifest',
 	'load_pseudo_target_arrays',
 	'load_pseudo_target_metadata',
+	'multi_head_cross_head_diagnostics',
 	'ordered_soft_coordinate',
 	'plan_shuffled_hmm_pseudo_targets',
 	'prepare_hmm_cluster_label_pseudo_target_exports',
@@ -72,6 +83,7 @@ __all__ = [
 	'shuffle_strat_hmm_pseudo_targets',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
+	'validate_multi_head_target_manifest',
 	'validate_pseudo_target_arrays',
 	'write_pseudo_target',
 ]
