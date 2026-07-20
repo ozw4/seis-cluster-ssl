@@ -38,7 +38,7 @@ class ExportedPseudoTargetResult:
 	labels_path: Path
 	confidence_path: Path
 	valid_tokens_path: Path
-	boundary_weight_path: Path
+	boundary_weight_path: Path | None
 	metadata_path: Path
 	valid_token_count: int
 
@@ -106,7 +106,9 @@ def export_hmm_cluster_labels_as_pseudo_targets(  # noqa: PLR0913
 				labels_path=paths.labels,
 				confidence_path=paths.confidence,
 				valid_tokens_path=paths.valid_tokens,
-				boundary_weight_path=paths.boundary_weight,
+				boundary_weight_path=(
+					paths.boundary_weight if write_boundary_weight else None
+				),
 				metadata_path=paths.metadata,
 				valid_token_count=item.valid_token_count,
 			),
@@ -199,7 +201,7 @@ def _export_result(item: _PreparedPseudoTargetExport) -> ExportedPseudoTargetRes
 		labels_path=item.output_paths.labels,
 		confidence_path=item.output_paths.confidence,
 		valid_tokens_path=item.output_paths.valid_tokens,
-		boundary_weight_path=item.output_paths.boundary_weight,
+		boundary_weight_path=None,
 		metadata_path=item.output_paths.metadata,
 		valid_token_count=item.valid_token_count,
 	)
@@ -235,7 +237,9 @@ def prepare_hmm_cluster_label_pseudo_target_exports(  # noqa: PLR0913
 			labels_path=item.output_paths.labels,
 			confidence_path=item.output_paths.confidence,
 			valid_tokens_path=item.output_paths.valid_tokens,
-			boundary_weight_path=item.output_paths.boundary_weight,
+			boundary_weight_path=(
+				item.output_paths.boundary_weight if write_boundary_weight else None
+			),
 			metadata_path=item.output_paths.metadata,
 			valid_token_count=item.valid_token_count,
 		)

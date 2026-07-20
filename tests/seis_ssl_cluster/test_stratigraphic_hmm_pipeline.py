@@ -9,6 +9,7 @@ import pytest
 
 from seis_ssl_cluster.clustering import run_embedding_clustering, stratigraphic_hmm
 from seis_ssl_cluster.clustering.features import (
+	EmbeddingInput,
 	discover_embedding_inputs,
 	extract_token_features,
 )
@@ -411,6 +412,67 @@ def test_stratigraphic_hmm_closes_prepared_features_on_failure(
 
 	assert closed
 	assert list((output_dir / 'prepared_features').iterdir()) == []
+
+
+def test_stratigraphic_hmm_multi_k_prepares_each_feature_token_once(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""The shared prepared-feature pass must not repeat for each K value."""
+	input_dir = tmp_path / 'embeddings'
+	output_dir = tmp_path / 'clusters'
+	input_dir.mkdir()
+	_write_embedding_artifacts(
+		input_dir,
+		'survey_a',
+		embeddings=np.stack(
+			(
+				np.arange(12, dtype=np.float32),
+				np.arange(12, dtype=np.float32) ** 2,
+			),
+			axis=-1,
+		).reshape(1, 1, 12, 2),
+		valid=np.ones((1, 1, 12), dtype=np.bool_),
+	)
+	config = _hmm_config(input_dir, output_dir)
+	config['clustering']['k_values'] = [6, 8, 10]
+	config['clustering']['stratigraphic_hmm']['iterations'] = 1
+	config['clustering']['stratigraphic_hmm']['prepared_feature_cache'] = {
+		'chunk_size_tokens': 4,
+		'reuse': False,
+		'force_rebuild': False,
+		'cleanup': True,
+		'persist': False,
+	}
+	prepared_indices: list[np.ndarray] = []
+	original_prepare = stratigraphic_hmm.prepare_feature_batch_for_indices
+
+	def record_prepare(
+		embedding_input: EmbeddingInput,
+		flat_indices: np.ndarray,
+		**kwargs: object,
+	) -> np.ndarray:
+		prepared_indices.append(flat_indices.copy())
+		return original_prepare(
+			embedding_input,
+			flat_indices,
+			**kwargs,
+		)
+
+	monkeypatch.setattr(
+		stratigraphic_hmm,
+		'prepare_feature_batch_for_indices',
+		record_prepare,
+	)
+
+	result = run_embedding_clustering(config)
+
+	assert [item.k for item in result.results] == [6, 8, 10]
+	assert len(prepared_indices) == 3
+	np.testing.assert_array_equal(
+		np.concatenate(prepared_indices),
+		np.arange(12, dtype=np.int64),
+	)
 
 
 def test_stratigraphic_hmm_saved_labels_decode_from_saved_centers(

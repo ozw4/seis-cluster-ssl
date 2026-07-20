@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -11,6 +10,7 @@ from typing import TYPE_CHECKING
 from seis_ssl_cluster.stratigraphy import (
 	build_multi_head_target_manifest,
 	load_multi_head_target_manifest,
+	validate_multi_head_target_publication_preflight,
 )
 
 if TYPE_CHECKING:
@@ -37,7 +37,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
 	"""Publish only after all referenced arrays and hashes validate."""
 	args = build_parser().parse_args(argv)
-	_preflight(args.migration_decision, args.control_summary)
+	validate_multi_head_target_publication_preflight(
+		migration_decision=args.migration_decision,
+		control_summary=args.control_summary,
+	)
 	heads = _head_roots(args.head_root)
 	if args.only_missing and args.manifest.exists():
 		reused = False
@@ -74,6 +77,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 				source_embedding_dir=args.source_embedding_dir,
 				head_roots=heads,
 				replay_k6_root=args.replay_k6_root,
+				migration_decision=args.migration_decision,
+				control_summary=args.control_summary,
 			)
 		print(f'execution: dry-run; validated heads {payload["head_ks"]}')
 		return 0
@@ -82,6 +87,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 		source_embedding_dir=args.source_embedding_dir,
 		head_roots=heads,
 		replay_k6_root=args.replay_k6_root,
+		migration_decision=args.migration_decision,
+		control_summary=args.control_summary,
 	)
 	print(f'manifest: {args.manifest}')
 	print(f'head_ks: {payload["head_ks"]}')
@@ -137,34 +144,6 @@ def _object(value: object, name: str) -> dict[str, object]:
 
 def _same_path(recorded: object, requested: Path) -> bool:
 	return isinstance(recorded, str) and Path(recorded).resolve() == requested.resolve()
-
-
-def _preflight(migration_decision: Path, control_summary: Path) -> None:
-	"""Reject publication unless supplied migration/control gates are positive."""
-	status = _json_object(migration_decision).get('status')
-	if status != 'PASS_WITH_NUMERIC_DRIFT':
-		raise ValueError(
-			f'migration preflight requires PASS_WITH_NUMERIC_DRIFT; got {status!r}'
-		)
-	payload = _json_object(control_summary)
-	readiness = payload.get('readiness', payload)
-	if not isinstance(readiness, dict):
-		raise TypeError('control summary readiness must be an object')
-	status = readiness.get('status')
-	if status != 'CONTROL_READY_POSITIVE':
-		raise ValueError(
-			f'control preflight requires CONTROL_READY_POSITIVE; got {status!r}'
-		)
-
-
-def _json_object(path: Path) -> dict[str, object]:
-	try:
-		payload = json.loads(path.read_text(encoding='utf-8'))
-	except json.JSONDecodeError as exc:
-		raise ValueError(f'expected JSON object: {path}') from exc
-	if not isinstance(payload, dict):
-		raise TypeError(f'expected JSON object: {path}')
-	return payload
 
 
 if __name__ == '__main__':

@@ -10,7 +10,10 @@ from seis_ssl_cluster.config.pretraining import resolve_strat_hmm_pretext_config
 from seis_ssl_cluster.stratigraphy import multi_head
 from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
 from tests.seis_ssl_cluster.test_config_strat_hmm_pretext import _minimal_config
-from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import _artifacts
+from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
+	_artifacts,
+	_write_positive_preflight,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -156,11 +159,14 @@ def test_k6810_no_consistency_and_main_configs_have_a_pure_scientific_diff(
 def _multi_head_config(tmp_path: Path) -> dict[str, object]:
 	embeddings, heads = _artifacts(tmp_path)
 	manifest = tmp_path / 'multi_head_target_manifest.json'
+	migration, control = _write_positive_preflight(tmp_path)
 	build_multi_head_target_manifest(
 		manifest_path=manifest,
 		source_embedding_dir=embeddings,
 		head_roots={6: heads[6], 8: heads[8], 10: heads[10]},
 		replay_k6_root=heads[6],
+		migration_decision=migration,
+		control_summary=control,
 	)
 	config = deepcopy(_minimal_config(tmp_path))
 	config['pseudo_targets'] = {'manifest': str(manifest), 'min_confidence': 0.0}

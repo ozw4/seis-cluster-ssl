@@ -133,10 +133,15 @@ def _print_summary(
 	print(f'execution: {status}')
 	print(f'boundary_weighting: alpha={boundary_alpha} tau={boundary_tau}')
 	for item in result_list:
+		boundary_weight = (
+			str(item.boundary_weight_path)
+			if item.boundary_weight_path is not None
+			else 'absent'
+		)
 		print(
 			f'{item.survey_id}: valid_tokens={item.valid_token_count} '
 			f'labels={item.labels_path} '
-			f'boundary_weight={item.boundary_weight_path}',
+			f'boundary_weight={boundary_weight}',
 		)
 
 

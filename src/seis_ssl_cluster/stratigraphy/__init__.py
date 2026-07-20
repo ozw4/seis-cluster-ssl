@@ -25,6 +25,7 @@ from seis_ssl_cluster.stratigraphy.multi_head import (
 	load_multi_head_target_manifest,
 	multi_head_cross_head_diagnostics,
 	validate_multi_head_target_manifest,
+	validate_multi_head_target_publication_preflight,
 )
 from seis_ssl_cluster.stratigraphy.prototypes import (
 	MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
@@ -95,6 +96,7 @@ __all__ = [
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
 	'validate_multi_head_target_manifest',
+	'validate_multi_head_target_publication_preflight',
 	'validate_pseudo_target_arrays',
 	'write_pseudo_target',
 ]

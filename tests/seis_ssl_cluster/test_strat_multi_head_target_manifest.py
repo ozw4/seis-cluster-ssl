@@ -30,11 +30,14 @@ def test_manifest_roundtrip_rejects_hash_tamper_and_bad_head_order(
 ) -> None:
 	embeddings, heads = _artifacts(tmp_path)
 	manifest = tmp_path / 'manifest.json'
+	migration, control = _write_positive_preflight(tmp_path)
 	payload = build_multi_head_target_manifest(
 		manifest_path=manifest,
 		source_embedding_dir=embeddings,
 		head_roots={'6': heads[6], '8': heads[8], '10': heads[10]},
 		replay_k6_root=heads[6],
+		migration_decision=migration,
+		control_summary=control,
 	)
 
 	assert payload['head_ks'] == [6, 8, 10]
@@ -49,11 +52,14 @@ def test_manifest_roundtrip_rejects_hash_tamper_and_bad_head_order(
 			source_embedding_dir=embeddings,
 			head_roots={6: heads[6], 8: heads[8], 9: heads[10]},
 			replay_k6_root=heads[6],
+			migration_decision=migration,
+			control_summary=control,
 		)
 
 
 def test_k6_replay_parity_rejects_one_token_mismatch(tmp_path: Path) -> None:
 	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
 	replay = tmp_path / 'replay'
 	labels = np.tile(np.minimum(np.arange(12), 5), (2, 2, 1)).astype(np.int32)
 	labels[0, 0, 0] = 1
@@ -74,17 +80,60 @@ def test_k6_replay_parity_rejects_one_token_mismatch(tmp_path: Path) -> None:
 			source_embedding_dir=embeddings,
 			head_roots=heads,
 			replay_k6_root=replay,
+			migration_decision=migration,
+			control_summary=control,
 		)
+
+
+def test_builder_requires_positive_migration_and_control_preflight(
+	tmp_path: Path,
+) -> None:
+	"""Library callers cannot bypass the K=6 publication gates."""
+	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
+	migration.write_text('{"status": "BLOCKED"}', encoding='utf-8')
+	manifest = tmp_path / 'manifest.json'
+
+	with pytest.raises(ValueError, match='PASS_WITH_NUMERIC_DRIFT'):
+		build_multi_head_target_manifest(
+			manifest_path=manifest,
+			source_embedding_dir=embeddings,
+			head_roots=heads,
+			replay_k6_root=heads[6],
+			migration_decision=migration,
+			control_summary=control,
+		)
+
+	assert not manifest.exists()
+	migration.write_text(
+		'{"status": "PASS_WITH_NUMERIC_DRIFT"}',
+		encoding='utf-8',
+	)
+	control.write_text('{"readiness": {"status": "BLOCKED"}}', encoding='utf-8')
+	with pytest.raises(ValueError, match='CONTROL_READY_POSITIVE'):
+		build_multi_head_target_manifest(
+			manifest_path=manifest,
+			source_embedding_dir=embeddings,
+			head_roots=heads,
+			replay_k6_root=heads[6],
+			migration_decision=migration,
+			control_summary=control,
+		)
+
+	assert not manifest.exists()
 
 
 def test_manifest_rejects_missing_k6_replay_parity(tmp_path: Path) -> None:
 	"""A complete manifest must preserve exact K=6 replay evidence."""
 	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
 	payload = build_multi_head_target_manifest(
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
 		replay_k6_root=heads[6],
+		migration_decision=migration,
+		control_summary=control,
 	)
 	payload.pop('k6_replay_parity')
 
@@ -121,6 +170,7 @@ def test_manifest_rejects_target_mask_misaligned_with_source_embedding(
 	tmp_path: Path,
 ) -> None:
 	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
 	valid_path = embeddings / 'survey.valid_tokens.npy'
 	valid = np.load(valid_path)
 	valid[0, 0, 0] = False
@@ -132,6 +182,8 @@ def test_manifest_rejects_target_mask_misaligned_with_source_embedding(
 			source_embedding_dir=embeddings,
 			head_roots=heads,
 			replay_k6_root=heads[6],
+			migration_decision=migration,
+			control_summary=control,
 		)
 
 
@@ -195,11 +247,14 @@ def test_cli_only_missing_rebuilds_for_stale_requested_inputs(
 	alternate_k6 = tmp_path / 'alternate_k6'
 	shutil.copytree(heads[6], alternate_k6)
 	manifest = tmp_path / 'manifest.json'
+	migration, control = _write_positive_preflight(tmp_path)
 	build_multi_head_target_manifest(
 		manifest_path=manifest,
 		source_embedding_dir=embeddings,
 		head_roots=heads,
 		replay_k6_root=heads[6],
+		migration_decision=migration,
+		control_summary=control,
 	)
 	migration = tmp_path / 'migration.json'
 	migration.write_text('{"status": "PASS_WITH_NUMERIC_DRIFT"}', encoding='utf-8')
@@ -252,11 +307,14 @@ def test_manifest_rejects_falsified_common_target_contract(
 	tmp_path: Path, common_key: str, value: object, match: str
 ) -> None:
 	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
 	payload = build_multi_head_target_manifest(
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
 		replay_k6_root=heads[6],
+		migration_decision=migration,
+		control_summary=control,
 	)
 	payload['common'][common_key]['survey'] = value  # type: ignore[index]
 
@@ -301,11 +359,14 @@ def test_manifest_load_revalidates_referenced_target_semantics(
 	match: str,
 ) -> None:
 	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
 	payload = build_multi_head_target_manifest(
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
 		replay_k6_root=heads[6],
+		migration_decision=migration,
+		control_summary=control,
 	)
 	artifact = heads[8] / 'k8' / f'survey.hmm_{artifact_name}_token.npy'
 	array = np.load(artifact)
@@ -328,11 +389,14 @@ def test_manifest_rejects_unknown_nested_reference_fields(
 	tmp_path: Path, path: tuple[str, ...], value: object
 ) -> None:
 	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
 	payload = build_multi_head_target_manifest(
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
 		replay_k6_root=heads[6],
+		migration_decision=migration,
+		control_summary=control,
 	)
 	entry: object = payload
 	for key in path[:-1]:
@@ -345,11 +409,14 @@ def test_manifest_rejects_unknown_nested_reference_fields(
 
 def test_manifest_rejects_unknown_head_diagnostics_fields(tmp_path: Path) -> None:
 	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
 	payload = build_multi_head_target_manifest(
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
 		replay_k6_root=heads[6],
+		migration_decision=migration,
+		control_summary=control,
 	)
 	payload['heads']['8']['diagnostics']['per_survey']['survey']['unexpected'] = 1  # type: ignore[index]
 
@@ -359,11 +426,14 @@ def test_manifest_rejects_unknown_head_diagnostics_fields(tmp_path: Path) -> Non
 
 def test_manifest_rejects_unknown_k6_replay_parity_fields(tmp_path: Path) -> None:
 	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
 	payload = build_multi_head_target_manifest(
 		manifest_path=tmp_path / 'manifest.json',
 		source_embedding_dir=embeddings,
 		head_roots=heads,
 		replay_k6_root=heads[6],
+		migration_decision=migration,
+		control_summary=control,
 	)
 	payload['k6_replay_parity']['checks']['unexpected'] = True  # type: ignore[index]
 
@@ -414,3 +484,18 @@ def _artifacts(tmp_path: Path) -> tuple[Path, dict[int, Path]]:
 		)
 		heads[k] = root
 	return embeddings, heads
+
+
+def _write_positive_preflight(root: Path) -> tuple[Path, Path]:
+	"""Write the two required K=6 publication gates for a test artifact."""
+	migration = root / 'migration_decision.json'
+	control = root / 'control_summary.json'
+	migration.write_text(
+		'{"status": "PASS_WITH_NUMERIC_DRIFT"}',
+		encoding='utf-8',
+	)
+	control.write_text(
+		'{"readiness": {"status": "CONTROL_READY_POSITIVE"}}',
+		encoding='utf-8',
+	)
+	return migration, control

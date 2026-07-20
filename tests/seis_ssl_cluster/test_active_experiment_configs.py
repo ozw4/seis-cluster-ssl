@@ -111,7 +111,10 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 )
 from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT, ArtifactPaths, ExperimentKey
 from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
-from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import _artifacts
+from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
+	_artifacts,
+	_write_positive_preflight,
+)
 
 VOXEL_DECODER_SMOKE_SPEC = f'{VOXEL_DECODER_SPEC}_smoke'
 OLD_VOXEL_DECODER_SPEC = 'frozen_embedding_decoder_v1'
@@ -1534,12 +1537,15 @@ def _config_with_existing_strat_hmm_pretext_inputs(
 		fixture_root = tmp_path / config_path.stem
 		fixture_root.mkdir(exist_ok=True)
 		embeddings, heads = _artifacts(fixture_root)
+		migration, control = _write_positive_preflight(fixture_root)
 		manifest = fixture_root / 'multi_head_target_manifest.json'
 		build_multi_head_target_manifest(
 			manifest_path=manifest,
 			source_embedding_dir=embeddings,
 			head_roots={6: heads[6], 8: heads[8], 10: heads[10]},
 			replay_k6_root=heads[6],
+			migration_decision=migration,
+			control_summary=control,
 		)
 		config['pseudo_targets']['manifest'] = str(manifest)
 		config['identity']['scientific_identity']['target_manifest_sha256'] = (

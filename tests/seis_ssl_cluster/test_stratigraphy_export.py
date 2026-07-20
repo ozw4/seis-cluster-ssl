@@ -233,6 +233,33 @@ def test_schema_v1_export_keeps_partial_staging_out_of_final_root(
 	assert not (tmp_path / 'pseudo' / 'k3').exists()
 
 
+def test_schema_v1_export_and_dry_run_omit_boundary_weight_path(
+	tmp_path: Path,
+) -> None:
+	"""Schema-v1 result objects never advertise the absent boundary artifact."""
+	clustering_dir = _write_hmm_labels(tmp_path, 'survey_a', k=3)
+	results = export_hmm_cluster_labels_as_pseudo_targets(
+		clustering_output_dir=clustering_dir,
+		pseudo_target_root=tmp_path / 'pseudo',
+		k=3,
+		schema_version=1,
+		write_boundary_weight=False,
+	)
+	dry_run = strat_export.prepare_hmm_cluster_label_pseudo_target_exports(
+		clustering_output_dir=clustering_dir,
+		pseudo_target_root=tmp_path / 'dry_run_pseudo',
+		k=3,
+		schema_version=1,
+		write_boundary_weight=False,
+	)
+
+	assert results[0].boundary_weight_path is None
+	assert dry_run[0].boundary_weight_path is None
+	assert not (
+		tmp_path / 'pseudo' / 'k3' / 'survey_a.hmm_boundary_weight_token.npy'
+	).exists()
+
+
 def test_cli_dry_run_validates_and_does_not_create_files(tmp_path: Path) -> None:
 	clustering_dir = _write_hmm_labels(tmp_path, 'survey_a')
 	pseudo_root = tmp_path / 'pseudo'
