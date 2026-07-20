@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.stratigraphy import (
 	build_multi_head_target_manifest,
+	compare_k6_replay,
 	load_multi_head_target_manifest,
 	validate_multi_head_target_publication_preflight,
 )
@@ -20,12 +21,16 @@ if TYPE_CHECKING:
 def build_parser() -> argparse.ArgumentParser:
 	"""Build the standalone multi-head manifest CLI parser."""
 	parser = argparse.ArgumentParser(
-		description='Publish validated schema-v1 K=6/8/10 HMM target references.',
+		description='Publish validated schema-v1 multi-head HMM target references.',
 	)
 	parser.add_argument('--source-embedding-dir', type=Path, required=True)
 	parser.add_argument('--head-root', action='append', required=True, metavar='K=PATH')
 	parser.add_argument('--manifest', type=Path, required=True)
-	parser.add_argument('--replay-k6-root', type=Path, required=True)
+	parser.add_argument(
+		'--replay-k6-root',
+		type=Path,
+		help='Required when --head-root includes K=6.',
+	)
 	parser.add_argument('--migration-decision', type=Path, required=True)
 	parser.add_argument('--control-summary', type=Path, required=True)
 	parser.add_argument('--dry-run', action='store_true')
@@ -109,15 +114,16 @@ def _head_roots(values: list[str]) -> dict[int, Path]:
 	return result
 
 
-def _matches_requested_inputs(
+def _matches_requested_inputs(  # noqa: PLR0911
 	payload: dict[str, object],
 	*,
 	source_embedding_dir: Path,
 	head_roots: dict[int, Path],
-	replay_k6_root: Path,
+	replay_k6_root: Path | None,
 ) -> bool:
 	"""Return whether a valid manifest was built from these exact inputs."""
-	if set(head_roots) != {6, 8, 10}:
+	manifest_ks = payload.get('head_ks')
+	if not isinstance(manifest_ks, list) or manifest_ks != sorted(head_roots):
 		return False
 	source_embedding = _object(payload['source_embedding'], 'source_embedding')
 	if not _same_path(source_embedding['input_dir'], source_embedding_dir):
@@ -127,12 +133,23 @@ def _matches_requested_inputs(
 		head = _object(heads.get(str(k)), f'head k={k}')
 		if not _same_path(head['pseudo_target_root'], root):
 			return False
+	if 6 not in head_roots:
+		return replay_k6_root is None and 'k6_replay_parity' not in payload
+	if replay_k6_root is None:
+		return False
 	parity = payload.get('k6_replay_parity')
 	if parity is None:
 		return False
-	return _same_path(
+	if not _same_path(
 		_object(parity, 'k6_replay_parity')['replay_root'],
 		replay_k6_root,
+	):
+		return False
+	return bool(
+		compare_k6_replay(
+			historical_root=head_roots[6],
+			replay_root=replay_k6_root,
+		)['exact']
 	)
 
 

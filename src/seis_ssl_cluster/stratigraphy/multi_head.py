@@ -29,15 +29,14 @@ from seis_ssl_cluster.stratigraphy.targets import (
 
 ARTIFACT_TYPE = 'strat_hmm_multi_head_target_manifest'
 SCHEMA_VERSION = 1
-_HEAD_KS = (6, 8, 10)
 
 
-def build_multi_head_target_manifest(  # noqa: PLR0913
+def build_multi_head_target_manifest(  # noqa: C901, PLR0913
 	*,
 	manifest_path: str | Path,
 	source_embedding_dir: str | Path,
 	head_roots: Mapping[int | str, str | Path],
-	replay_k6_root: str | Path,
+	replay_k6_root: str | Path | None = None,
 	migration_decision: str | Path,
 	control_summary: str | Path,
 	ordering_orientation: str = 'increasing_downward',
@@ -89,13 +88,20 @@ def build_multi_head_target_manifest(  # noqa: PLR0913
 		'heads': head_payloads,
 		'cross_head_diagnostics': multi_head_cross_head_diagnostics(roots),
 	}
-	payload['k6_replay_parity'] = compare_k6_replay(
-		historical_root=Path(roots[6]),
-		replay_root=replay_k6_root,
-	)
-	payload['k6_replay_parity']['replay_root'] = str(replay_k6_root)
-	if not payload['k6_replay_parity']['exact']:
-		raise ValueError('K=6 replay parity is not exact; refusing complete manifest')
+	if 6 in ks:
+		if replay_k6_root is None:
+			raise ValueError('K=6 manifests require replay_k6_root')
+		payload['k6_replay_parity'] = compare_k6_replay(
+			historical_root=Path(roots[6]),
+			replay_root=replay_k6_root,
+		)
+		payload['k6_replay_parity']['replay_root'] = str(replay_k6_root)
+		if not payload['k6_replay_parity']['exact']:
+			raise ValueError(
+				'K=6 replay parity is not exact; refusing complete manifest'
+			)
+	elif replay_k6_root is not None:
+		raise ValueError('replay_k6_root requires a K=6 head')
 	validate_multi_head_target_manifest(payload, verify_hashes=True)
 	_write_json_atomic(Path(manifest_path), payload)
 	return payload
@@ -161,7 +167,7 @@ def load_multi_head_target_manifest(
 	return payload
 
 
-def validate_multi_head_target_manifest(  # noqa: C901, PLR0912
+def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	payload: Mapping[str, object],
 	*,
 	verify_hashes: bool = False,
@@ -179,9 +185,9 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912
 			'common',
 			'heads',
 			'cross_head_diagnostics',
-			'k6_replay_parity',
 		},
 		'manifest',
+		optional_keys={'k6_replay_parity'},
 	)
 	if payload['artifact_type'] != ARTIFACT_TYPE or payload['schema_version'] != 1:
 		raise ValueError('unsupported multi-head target manifest schema')
@@ -192,10 +198,15 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912
 	ks = tuple(payload['head_ks'])
 	if any(isinstance(k, bool) or not isinstance(k, int) for k in ks):
 		raise TypeError('manifest head_ks must contain integers')
-	if tuple(sorted(ks)) != ks or len(set(ks)) != len(ks) or any(k < 2 for k in ks):
-		raise ValueError('manifest head_ks must be unique, ascending integers >= 2')
-	if ks != _HEAD_KS:
-		raise ValueError(f'manifest head_ks must be {list(_HEAD_KS)!r}')
+	if (
+		len(ks) < 2
+		or tuple(sorted(ks)) != ks
+		or len(set(ks)) != len(ks)
+		or any(k < 2 for k in ks)
+	):
+		raise ValueError(
+			'manifest head_ks must contain at least two unique, ascending integers >= 2'
+		)
 	head_values = _mapping(payload['heads'], 'manifest heads')
 	if set(head_values) != {str(k) for k in ks}:
 		raise ValueError('manifest heads must contain exactly one entry per head K')
@@ -205,7 +216,7 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912
 		{'survey_ids', 'token_grid_shapes', 'valid_tokens_sha256'},
 		'manifest common',
 	)
-	_validate_cross_head_diagnostics(payload['cross_head_diagnostics'])
+	_validate_cross_head_diagnostics(payload['cross_head_diagnostics'], ks=ks)
 	source_embedding = _mapping(payload['source_embedding'], 'source_embedding')
 	_validate_embedding_identity(source_embedding, verify_hashes=verify_hashes)
 	survey_ids = common['survey_ids']
@@ -274,7 +285,16 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912
 			ks,
 			validate_array_semantics=validate_array_semantics,
 		)
-	_validate_k6_replay_parity(payload['k6_replay_parity'], survey_ids)
+	if 6 in ks:
+		if 'k6_replay_parity' not in payload:
+			raise ValueError('manifest is missing K=6 replay parity evidence')
+		_validate_k6_replay_parity(
+			payload['k6_replay_parity'],
+			survey_ids,
+			verify_hashes=verify_hashes,
+		)
+	elif 'k6_replay_parity' in payload:
+		raise ValueError('K=6 replay parity evidence requires a K=6 head')
 
 
 def compare_k6_replay(
@@ -310,7 +330,11 @@ def compare_k6_replay(
 			_ordered_violation_count(left['labels'], k=6)
 			== _ordered_violation_count(right['labels'], k=6)
 		)
-	return {'exact': all(checks.values()), 'checks': checks}
+	return {
+		'exact': all(checks.values()),
+		'checks': checks,
+		'replay_artifacts': _replay_artifact_references(replay),
+	}
 
 
 def multi_head_cross_head_diagnostics(
@@ -356,10 +380,14 @@ def multi_head_cross_head_diagnostics(
 	return result
 
 
-def _validate_cross_head_diagnostics(value: object) -> None:
+def _validate_cross_head_diagnostics(value: object, *, ks: Sequence[int]) -> None:
 	"""Validate the persisted pairwise normalized-coordinate sanity evidence."""
 	pairs = _mapping(value, 'cross_head_diagnostics')
-	expected_pairs = {'k6_k8', 'k6_k10', 'k8_k10'}
+	expected_pairs = {
+		f'k{left_k}_k{right_k}'
+		for index, left_k in enumerate(ks)
+		for right_k in ks[index + 1 :]
+	}
 	_required_keys(pairs, expected_pairs, 'cross_head_diagnostics')
 	for pair_name in sorted(expected_pairs):
 		metrics = _mapping(pairs[pair_name], f'cross-head diagnostics {pair_name}')
@@ -502,10 +530,19 @@ def _validate_trace_quantiles(value: object, name: str) -> None:
 		raise ValueError(f'{name} must contain ordered non-negative quantiles')
 
 
-def _validate_k6_replay_parity(value: object, survey_ids: Sequence[object]) -> None:
+def _validate_k6_replay_parity(
+	value: object,
+	survey_ids: Sequence[object],
+	*,
+	verify_hashes: bool,
+) -> None:
 	"""Validate required exact K=6 replay evidence for complete manifests."""
 	parity = _mapping(value, 'k6_replay_parity')
-	_required_keys(parity, {'exact', 'checks', 'replay_root'}, 'k6_replay_parity')
+	_required_keys(
+		parity,
+		{'exact', 'checks', 'replay_root', 'replay_artifacts'},
+		'k6_replay_parity',
+	)
 	if not isinstance(parity['replay_root'], str) or not parity['replay_root']:
 		raise TypeError('k6_replay_parity replay_root must be a non-empty string')
 	if not isinstance(parity['exact'], bool):
@@ -528,6 +565,30 @@ def _validate_k6_replay_parity(value: object, survey_ids: Sequence[object]) -> N
 		raise TypeError('k6_replay_parity checks must contain booleans')
 	if not parity['exact'] or not all(checks.values()):
 		raise ValueError('K=6 replay parity is not exact')
+	replay_artifacts = _mapping(
+		parity['replay_artifacts'],
+		'k6_replay_parity replay_artifacts',
+	)
+	if set(replay_artifacts) != {str(survey_id) for survey_id in survey_ids}:
+		raise ValueError('K=6 replay artifact survey set mismatch')
+	for survey_id in survey_ids:
+		artifacts = _mapping(
+			replay_artifacts[str(survey_id)],
+			f'K=6 replay artifacts {survey_id}',
+		)
+		_required_keys(
+			artifacts,
+			{'labels', 'confidence', 'valid_tokens', 'metadata'},
+			f'K=6 replay artifacts {survey_id}',
+		)
+		_validate_target_reference_schema(artifacts)
+		if verify_hashes:
+			for name in ('labels', 'confidence', 'valid_tokens', 'metadata'):
+				reference = _mapping(artifacts[name], f'K=6 replay {name}')
+				if file_sha256(Path(str(reference['path']))) != reference['sha256']:
+					raise ValueError(
+						f'K=6 replay artifact {name} hash mismatch for {survey_id}'
+					)
 
 
 def _head_reference(root: Path, *, k: int) -> dict[str, object]:
@@ -566,6 +627,21 @@ def _head_reference(root: Path, *, k: int) -> dict[str, object]:
 			'per_survey': {key: value['diagnostics'] for key, value in surveys.items()}
 		},
 	}
+
+
+def _replay_artifact_references(
+	head: Mapping[str, object],
+) -> dict[str, dict[str, dict[str, str]]]:
+	"""Extract replay artifact identities without embedding their arrays."""
+	surveys = _mapping(head['surveys'], 'K=6 replay surveys')
+	references: dict[str, dict[str, dict[str, str]]] = {}
+	for survey_id, value in surveys.items():
+		entry = _mapping(value, f'K=6 replay survey {survey_id}')
+		references[survey_id] = {
+			name: dict(_mapping(entry[name], f'K=6 replay {name}'))
+			for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
+		}
+	return references
 
 
 def _common_contract(head: Mapping[str, object], *, k: int) -> dict[str, object]:
@@ -957,9 +1033,10 @@ def _load_reference_arrays(entry: Mapping[str, object]) -> dict[str, np.ndarray]
 
 def _validate_head_ks(head_roots: Mapping[int | str, str | Path]) -> tuple[int, ...]:
 	values = _normalized_head_roots(head_roots)
-	if tuple(sorted(values)) != _HEAD_KS:
-		raise ValueError(f'head roots must contain exactly {_HEAD_KS!r}')
-	return _HEAD_KS
+	ks = tuple(sorted(values))
+	if len(ks) < 2 or any(k < 2 for k in ks):
+		raise ValueError('head roots must contain at least two K values >= 2')
+	return ks
 
 
 def _normalized_head_roots(

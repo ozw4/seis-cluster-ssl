@@ -46,15 +46,25 @@ def test_manifest_roundtrip_rejects_hash_tamper_and_bad_head_order(
 	(heads[8] / 'k8' / 'survey.hmm_labels_token.npy').write_bytes(b'tampered')
 	with pytest.raises(ValueError, match='hash mismatch'):
 		load_multi_head_target_manifest(manifest)
-	with pytest.raises(ValueError, match='exactly'):
-		build_multi_head_target_manifest(
-			manifest_path=tmp_path / 'bad.json',
-			source_embedding_dir=embeddings,
-			head_roots={6: heads[6], 8: heads[8], 9: heads[10]},
-			replay_k6_root=heads[6],
-			migration_decision=migration,
-			control_summary=control,
-		)
+
+
+def test_manifest_supports_dynamic_increasing_head_ks(tmp_path: Path) -> None:
+	"""The artifact contract is not coupled to the active K=6/8/10 experiment."""
+	embeddings, heads = _artifacts(tmp_path, ks=(4, 7))
+	migration, control = _write_positive_preflight(tmp_path)
+	manifest = tmp_path / 'manifest.json'
+	payload = build_multi_head_target_manifest(
+		manifest_path=manifest,
+		source_embedding_dir=embeddings,
+		head_roots=heads,
+		migration_decision=migration,
+		control_summary=control,
+	)
+
+	assert payload['head_ks'] == [4, 7]
+	assert set(payload['cross_head_diagnostics']) == {'k4_k7'}
+	assert 'k6_replay_parity' not in payload
+	load_multi_head_target_manifest(manifest)
 
 
 def test_k6_replay_parity_rejects_one_token_mismatch(tmp_path: Path) -> None:
@@ -137,7 +147,7 @@ def test_manifest_rejects_missing_k6_replay_parity(tmp_path: Path) -> None:
 	)
 	payload.pop('k6_replay_parity')
 
-	with pytest.raises(ValueError, match='missing fields'):
+	with pytest.raises(ValueError, match='replay parity evidence'):
 		validate_multi_head_target_manifest(payload)
 
 
@@ -296,6 +306,57 @@ def test_cli_only_missing_rebuilds_for_stale_requested_inputs(
 	assert 'reused complete manifest' not in capsys.readouterr().out
 
 
+def test_cli_only_missing_refuses_stale_k6_replay_evidence(
+	tmp_path: Path,
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	embeddings, heads = _artifacts(tmp_path)
+	replay = tmp_path / 'replay'
+	shutil.copytree(heads[6], replay)
+	manifest = tmp_path / 'manifest.json'
+	migration, control = _write_positive_preflight(tmp_path)
+	build_multi_head_target_manifest(
+		manifest_path=manifest,
+		source_embedding_dir=embeddings,
+		head_roots=heads,
+		replay_k6_root=replay,
+		migration_decision=migration,
+		control_summary=control,
+	)
+	labels_path = replay / 'k6' / 'survey.hmm_labels_token.npy'
+	labels = np.load(labels_path)
+	labels[0, 0, 0] = 1
+	np.save(labels_path, labels)
+	module = importlib.import_module(
+		'proc.seis_ssl_cluster.build_strat_hmm_multi_head_targets',
+	)
+
+	with pytest.raises(ValueError, match='existing manifest is invalid'):
+		module.main(
+			[
+				'--source-embedding-dir',
+				str(embeddings),
+				'--head-root',
+				f'6={heads[6]}',
+				'--head-root',
+				f'8={heads[8]}',
+				'--head-root',
+				f'10={heads[10]}',
+				'--replay-k6-root',
+				str(replay),
+				'--manifest',
+				str(manifest),
+				'--migration-decision',
+				str(migration),
+				'--control-summary',
+				str(control),
+				'--only-missing',
+			]
+		)
+
+	assert 'reused complete manifest' not in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
 	('common_key', 'value', 'match'),
 	[
@@ -441,10 +502,14 @@ def test_manifest_rejects_unknown_k6_replay_parity_fields(tmp_path: Path) -> Non
 		validate_multi_head_target_manifest(payload)
 
 
-def _artifacts(tmp_path: Path) -> tuple[Path, dict[int, Path]]:
+def _artifacts(
+	tmp_path: Path,
+	*,
+	ks: tuple[int, ...] = (6, 8, 10),
+) -> tuple[Path, dict[int, Path]]:
 	shape = (2, 2, 12)
 	embeddings = tmp_path / 'embeddings'
-	embeddings.mkdir()
+	embeddings.mkdir(parents=True)
 	np.save(embeddings / 'survey.embeddings.npy', np.zeros((*shape, 3), np.float32))
 	np.save(embeddings / 'survey.valid_tokens.npy', np.ones(shape, np.bool_))
 	(embeddings / 'survey.embedding_metadata.json').write_text(
@@ -467,7 +532,7 @@ def _artifacts(tmp_path: Path) -> tuple[Path, dict[int, Path]]:
 		),
 	)
 	heads: dict[int, Path] = {}
-	for k in (6, 8, 10):
+	for k in ks:
 		root = tmp_path / f'head{k}'
 		labels = np.tile(np.minimum(np.arange(12), k - 1), (2, 2, 1)).astype(
 			np.int32,
