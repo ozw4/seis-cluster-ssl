@@ -13,13 +13,16 @@ import json
 import math
 import shutil
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 
+from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_control import (
+	HISTORICAL_M1_MODEL_ID,
+)
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.lithology import voxel_label_budget_control as control
 from seis_ssl_cluster.f3.lithology import voxel_label_budget_results as results
@@ -494,32 +497,36 @@ def _current_k6_rows(
 	config: F3VoxelLabelBudgetMultiHeadConfig,
 	dataset_rows: Mapping[tuple[str, int], Mapping[str, object]],
 ) -> Mapping[tuple[str, int], Mapping[str, object]]:
-	payload = _read_json(config.current_k6_run_manifest)
-	if (
-		payload.get('artifact_type') != control.CONTROL_RUN_MANIFEST_TYPE
-		or payload.get('schema_version') != control.CONTROL_RUN_SCHEMA_VERSION
-	):
-		raise ValueError('current K6 reference manifest artifact type mismatch')
-	control._validate_identity_at(
-		payload.get('dataset_manifest'),
-		config.dataset_manifest,
-		label='current K6 dataset manifest',
+	"""Admit only current-K6 rows revalidated against their live artifacts."""
+	control_config = replace(
+		config.base,
+		references=replace(
+			config.base.references,
+			dataset_manifest=config.dataset_manifest,
+			historical_run_manifest=config.original_run_manifest,
+			mae_model_id=config.references.mae_model_id,
+			historical_m1_model_id=HISTORICAL_M1_MODEL_ID,
+		),
+		output_root=config.current_k6_run_manifest.parent,
+		validate_pairing_reference=True,
 	)
-	rows = payload.get('rows')
-	if not isinstance(rows, list):
-		raise TypeError('current K6 reference rows must be a list')
+	rows = control.load_f3_lithology_voxel_label_budget_control_rows(
+		control_config,
+		run_manifest_path=config.current_k6_run_manifest,
+	)
 	result: dict[tuple[str, int], Mapping[str, object]] = {}
 	for row in rows:
-		if (
-			not isinstance(row, Mapping)
-			or row.get('model_role') != config.references.current_k6_model_id
-		):
-			continue
+		if not isinstance(row, Mapping):
+			raise TypeError('current K6 reference row must be a mapping')
+		if row.get('model_role') != config.references.current_k6_model_id:
+			raise ValueError('current K6 reference model role mismatch')
+		if row.get('model_tag') != control_config.candidate.model_tag:
+			raise ValueError('current K6 reference model tag mismatch')
+		if row.get('status') != 'complete':
+			raise ValueError('current K6 reference row is not complete')
 		key = (str(row.get('budget_id')), int(row.get('subsample_seed', -1)))
-		if key in result or row.get('status') != 'complete':
-			raise ValueError(
-				'current K6 reference contains duplicate or incomplete row'
-			)
+		if key in result:
+			raise ValueError('current K6 reference contains duplicate job row')
 		result[key] = row
 	if set(result) != set(dataset_rows):
 		raise ValueError('current K6 reference matrix mismatch')

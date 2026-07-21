@@ -155,6 +155,53 @@ def test_config_allows_omitting_optional_historical_m1_reference() -> None:
 	assert config.references.historical_m1_model_id is None
 
 
+def test_current_k6_rows_use_live_control_row_validation(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	path = Path(
+		'experiments/f3/facies_benchmark_v1/'
+		'95_strat_hmm_multi_head_k6810_low_label_v1/'
+		'01_run_multi_head_voxel_label_budget.yaml'
+	)
+	raw = dict(load_config(path))
+	config = f3_lithology_voxel_label_budget_multi_head_config_from_mapping(raw)
+	manifest = config.current_k6_run_manifest
+	dataset_rows = {
+		(budget, seed): {}
+		for budget in config.budgets
+		for seed in config.subsample_seeds
+	}
+	validated_rows = tuple(
+		{
+			'budget_id': budget,
+			'subsample_seed': seed,
+			'model_role': config.references.current_k6_model_id,
+			'model_tag': config.base.candidate.model_tag,
+			'status': 'complete',
+		}
+		for budget in config.budgets
+		for seed in config.subsample_seeds
+	)
+	calls: list[tuple[object, object]] = []
+	monkeypatch.setattr(
+		multi_head.control,
+		'load_f3_lithology_voxel_label_budget_control_rows',
+		lambda actual_config, **kwargs: calls.append((actual_config, kwargs))
+		or validated_rows,
+	)
+
+	assert multi_head._current_k6_rows(config, dataset_rows) == {
+		(row['budget_id'], row['subsample_seed']): row for row in validated_rows
+	}
+	actual_config, kwargs = calls[0]
+	assert actual_config.output_root == manifest.parent
+	assert actual_config.references.historical_run_manifest == (
+		config.original_run_manifest
+	)
+	assert actual_config.validate_pairing_reference is True
+	assert kwargs == {'run_manifest_path': manifest}
+
+
 def test_only_missing_reuses_resumes_and_quarantines_selected_jobs(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

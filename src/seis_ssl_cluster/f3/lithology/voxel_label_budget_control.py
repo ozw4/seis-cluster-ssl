@@ -388,10 +388,15 @@ def load_f3_lithology_voxel_label_budget_control_rows(  # noqa: C901
 	config: F3VoxelLabelBudgetControlConfig,
 	*,
 	require_complete: bool = True,
+	run_manifest_path: Path | None = None,
 ) -> tuple[Mapping[str, object], ...]:
 	"""Revalidate all candidate jobs represented by the control manifest."""
 	inspection = inspect_f3_lithology_voxel_label_budget_control(config)
-	path = control_run_manifest_path(config)
+	path = (
+		control_run_manifest_path(config)
+		if run_manifest_path is None
+		else run_manifest_path
+	)
 	payload = _read_json(path)
 	_validate_control_manifest_header(
 		payload,
