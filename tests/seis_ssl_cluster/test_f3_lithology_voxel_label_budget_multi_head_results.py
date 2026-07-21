@@ -46,6 +46,7 @@ def test_results_load_current_k6_rows_from_configured_reference_manifest(
 		budgets=(),
 		subsample_seeds=(),
 	)
+	config.multi_head_target_manifest.write_text('{}', encoding='utf-8')
 	current_calls: list[object] = []
 	monkeypatch.setattr(
 		results.multi_head,
@@ -70,7 +71,17 @@ def test_results_load_current_k6_rows_from_configured_reference_manifest(
 	monkeypatch.setattr(results, '_paired_deltas', lambda *_args, **_kwargs: [])
 	monkeypatch.setattr(results, '_summary', lambda *_args, **_kwargs: [])
 	monkeypatch.setattr(results, '_monitored', lambda *_args, **_kwargs: [])
-	monkeypatch.setattr(results, '_pretraining_evidence', lambda *_args: ([], []))
+	monkeypatch.setattr(
+		results,
+		'load_multi_head_target_manifest',
+		lambda _path: {'head_ks': [6, 8, 10]},
+	)
+	monkeypatch.setattr(
+		results, '_pretraining_evidence', lambda *_args, **_kwargs: ([], [])
+	)
+	monkeypatch.setattr(
+		results, '_target_diagnostic_rows', lambda *_args, **_kwargs: []
+	)
 	monkeypatch.setattr(
 		results, '_validate_current_k6_mae_parity', lambda *_args, **_kwargs: {}
 	)
@@ -619,6 +630,172 @@ def test_mandatory_handoff_is_in_the_publish_set() -> None:
 	assert 'multi_head_experiment_handoff.md' in results.OUTPUT_NAMES
 	assert 'No confirmatory run is authorized.' in results._handoff(
 		{'overall_status': 'M4_MH_HOLD', 'selected_candidate': None}
+	)
+
+
+def test_target_diagnostics_preserve_head_cross_head_and_k6_evidence() -> None:
+	target_manifest = {
+		'head_ks': [6, 8, 10],
+		'heads': {
+			str(k): {
+				'diagnostics': {
+					'per_survey': {'f3': {'valid_token_count': 100 + k}}
+				}
+			}
+			for k in (6, 8, 10)
+		},
+		'cross_head_diagnostics': {
+			'k6_k8': {
+				'mae': 0.1,
+				'correlation': 0.9,
+				'rank_order_disagreement': 0.2,
+			},
+			'k6_k10': {
+				'mae': 0.2,
+				'correlation': 0.8,
+				'rank_order_disagreement': 0.3,
+			},
+			'k8_k10': {
+				'mae': 0.3,
+				'correlation': 0.7,
+				'rank_order_disagreement': 0.4,
+			},
+		},
+		'k6_replay_parity': {'exact': True, 'checks': {'f3.decoded_labels': True}},
+	}
+	candidate_binding = results._target_diagnostic_row(
+		record_type='candidate_binding',
+		model_role='mh_nocons',
+		model_tag='candidate',
+		target_manifest_sha256='a' * 64,
+		status='PASS',
+		diagnostics={'head_ks': [6, 8, 10]},
+	)
+
+	rows = results._target_diagnostic_rows(
+		target_manifest,
+		candidate_bindings=(candidate_binding,),
+		target_manifest_sha256='a' * 64,
+	)
+
+	assert all(tuple(row) == results.TARGET_DIAGNOSTIC_FIELDS for row in rows)
+	assert [row['record_type'] for row in rows] == [
+		'candidate_binding',
+		'per_head_diagnostic',
+		'per_head_diagnostic',
+		'per_head_diagnostic',
+		'cross_head_diagnostic',
+		'cross_head_diagnostic',
+		'cross_head_diagnostic',
+		'k6_replay_parity',
+	]
+	per_head = next(row for row in rows if row['head_k'] == 8)
+	assert json.loads(str(per_head['diagnostics_json'])) == {
+		'valid_token_count': 108
+	}
+	cross_head = next(row for row in rows if row['head_pair'] == 'k6_k8')
+	assert cross_head['mae'] == 0.1
+	assert json.loads(str(cross_head['diagnostics_json']))['correlation'] == 0.9
+	parity = rows[-1]
+	assert parity['exact'] is True
+	assert json.loads(str(parity['diagnostics_json']))['checks'] == {
+		'f3.decoded_labels': True
+	}
+
+
+def test_multi_head_publish_rejects_stale_and_missing_files(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = _publish_config(tmp_path)
+	inspection = _publishable_inspection()
+	monkeypatch.setattr(
+		results,
+		'inspect_f3_lithology_voxel_label_budget_multi_head_results',
+		lambda _config: inspection,
+	)
+	publish_dir = results._publish_dir(config)
+	publish_dir.mkdir(parents=True)
+	(publish_dir / 'stale_embeddings.npy').write_bytes(b'raw')
+
+	with pytest.raises(FileExistsError, match='unexpected file set'):
+		results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
+
+	(publish_dir / 'stale_embeddings.npy').unlink()
+	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
+	assert {
+		path.relative_to(publish_dir).as_posix()
+		for path in publish_dir.rglob('*')
+		if path.is_file()
+	} == results._publish_target_names()
+
+	(publish_dir / results.OUTPUT_NAMES[0]).unlink()
+	with pytest.raises(FileExistsError, match='missing'):
+		results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
+
+	assert publication.publish_manifest is not None
+
+
+def test_multi_head_publish_detects_manifest_and_target_hash_tampering(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = _publish_config(tmp_path)
+	monkeypatch.setattr(
+		results,
+		'inspect_f3_lithology_voxel_label_budget_multi_head_results',
+		lambda _config: _publishable_inspection(),
+	)
+	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
+	assert publication.publish_manifest is not None
+	manifest = publication.publish_manifest
+	publish_dir = results._publish_dir(config)
+	payload = json.loads(manifest.manifest_path.read_text(encoding='utf-8'))
+	payload['items'][0]['sha256'] = '0' * 64
+	manifest.manifest_path.write_text(json.dumps(payload), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='manifest SHA-256'):
+		results._validate_published_multi_head_tree(publish_dir, manifest)
+
+	results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
+	target = publish_dir / results.OUTPUT_NAMES[0]
+	target.write_bytes(b'x' * target.stat().st_size)
+	with pytest.raises(ValueError, match='target SHA-256'):
+		results._validate_published_multi_head_tree(publish_dir, manifest)
+
+
+def _publish_config(tmp_path: Path) -> SimpleNamespace:
+	return SimpleNamespace(
+		reports_dir=tmp_path / 'artifacts' / 'reports',
+		results_root=tmp_path / 'results',
+		candidates=(),
+		budgets=(),
+		subsample_seeds=(),
+	)
+
+
+def _publishable_inspection() -> results.F3VoxelLabelBudgetMultiHeadResultsInspection:
+	row = {'value': 'test'}
+	target_diagnostic = results._target_diagnostic_row(
+		record_type='candidate_binding',
+		model_role='mh_nocons',
+		model_tag='candidate',
+		target_manifest_sha256='a' * 64,
+		status='PASS',
+		diagnostics={'head_ks': [6, 8, 10]},
+	)
+	return results.F3VoxelLabelBudgetMultiHeadResultsInspection(
+		job_metrics=(row,),
+		paired_metrics=(row,),
+		paired_deltas=(row,),
+		summary_by_budget=(row,),
+		monitored_class_summary=(row,),
+		pretraining_summary=(row,),
+		target_diagnostics=(target_diagnostic,),
+		decisions={
+			'overall_status': 'M4_MH_HOLD',
+			'selected_candidate': None,
+			'effects': {},
+		},
+		source_identities={},
 	)
 
 

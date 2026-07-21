@@ -61,6 +61,22 @@ OUTPUT_NAMES = (
 	'multi_head_results_summary.md',
 	'multi_head_experiment_handoff.md',
 )
+PUBLISH_MANIFEST_NAME = 'publish_manifest.json'
+TARGET_DIAGNOSTIC_FIELDS = (
+	'record_type',
+	'model_role',
+	'model_tag',
+	'target_manifest_sha256',
+	'head_k',
+	'survey_id',
+	'head_pair',
+	'status',
+	'exact',
+	'mae',
+	'correlation',
+	'rank_order_disagreement',
+	'diagnostics_json',
+)
 
 
 @dataclass(frozen=True)
@@ -95,6 +111,7 @@ def inspect_f3_lithology_voxel_label_budget_multi_head_results(
 	config: object,
 ) -> F3VoxelLabelBudgetMultiHeadResultsInspection:
 	"""Validate every source and independently reaggregate all paired deltas."""
+	target_manifest = load_multi_head_target_manifest(config.multi_head_target_manifest)
 	rows = multi_head.load_f3_lithology_voxel_label_budget_multi_head_rows(config)
 	dataset_rows = multi_head._dataset_rows(config)
 	current_rows = tuple(
@@ -115,7 +132,14 @@ def inspect_f3_lithology_voxel_label_budget_multi_head_results(
 	deltas = tuple(_paired_deltas(config, members, comparisons=comparisons))
 	summary = tuple(_summary(config, deltas, comparisons=comparisons))
 	monitored = tuple(_monitored(config, summary, comparisons=comparisons))
-	pretraining, diagnostics = _pretraining_evidence(config)
+	pretraining, candidate_diagnostics = _pretraining_evidence(
+		config, target_manifest=target_manifest
+	)
+	diagnostics = _target_diagnostic_rows(
+		target_manifest,
+		candidate_bindings=candidate_diagnostics,
+		target_manifest_sha256=file_sha256(config.multi_head_target_manifest),
+	)
 	current_k6_mae_parity = _validate_current_k6_mae_parity(
 		config, paired_deltas=deltas, summary_by_budget=summary
 	)
@@ -296,12 +320,7 @@ def summarize_f3_lithology_voxel_label_budget_multi_head(
 	manifest = None
 	if publish:
 		items = [PublishItem(reports / name, Path(name)) for name in OUTPUT_NAMES]
-		manifest = publish_selected_results(
-			items=items,
-			output_dir=_publish_dir(config),
-			max_file_size_bytes=10 * 1024 * 1024,
-			overwrite=True,
-		)
+		manifest = _publish_multi_head_results(config, items=items)
 	return F3VoxelLabelBudgetMultiHeadResultsResult(
 		summary_json,
 		summary_md,
@@ -716,7 +735,10 @@ def _monitored(
 
 
 def _pretraining_evidence(
-	config: object, *, require_embeddings: bool = True
+	config: object,
+	*,
+	require_embeddings: bool = True,
+	target_manifest: Mapping[str, object] | None = None,
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
 	"""Validate paired pretraining, optionally requiring extracted embeddings."""
 	rows, diagnostics, payloads, checkpoints = [], [], {}, {}
@@ -724,7 +746,10 @@ def _pretraining_evidence(
 	# target is a valid K=6/8/10 multi-head artifact.  The loader verifies its
 	# schema, immutable references, and persisted diagnostics before the
 	# handoff identities below are trusted.
-	target_manifest = load_multi_head_target_manifest(config.multi_head_target_manifest)
+	if target_manifest is None:
+		target_manifest = load_multi_head_target_manifest(
+			config.multi_head_target_manifest
+		)
 	if target_manifest['head_ks'] != [6, 8, 10]:
 		raise ValueError('configured target manifest K identity mismatch')
 	expected_target_manifest_sha256 = file_sha256(config.multi_head_target_manifest)
@@ -766,13 +791,24 @@ def _pretraining_evidence(
 				)
 			)
 		diagnostics.append(
-			{
-				'model_role': candidate.model_id,
-				'target_manifest_sha256': strat.get('target_manifest_sha256'),
-				'head_ks': json.dumps(strat.get('head_ks')),
-				'head_spec': strat.get('head_spec'),
-				'status': 'PASS',
-			}
+			_target_diagnostic_row(
+				record_type='candidate_binding',
+				model_role=candidate.model_id,
+				model_tag=candidate.model_tag,
+				target_manifest_sha256=str(
+					strat.get('target_manifest_sha256')
+				),
+				status='PASS',
+				diagnostics={
+					'head_ks': strat.get('head_ks'),
+					'head_spec': strat.get('head_spec'),
+					'consistency_policy': strat.get('consistency_policy'),
+					'consistency_weight': strat.get('consistency_weight'),
+					'scientific_identity_sha256': strat.get(
+						'scientific_identity_sha256'
+					),
+				},
+			)
 		)
 		payloads[candidate.model_id] = payload
 		checkpoints[candidate.model_id] = checkpoint
@@ -791,6 +827,108 @@ def _pretraining_evidence(
 	for row in rows:
 		row['initial_state_parity'] = True
 	return rows, diagnostics
+
+
+def _target_diagnostic_rows(
+	target_manifest: Mapping[str, object],
+	*,
+	candidate_bindings: Sequence[Mapping[str, object]],
+	target_manifest_sha256: str,
+) -> list[dict[str, object]]:
+	"""Flatten the validated target-manifest audit evidence into CSV rows."""
+	rows = [dict(row) for row in candidate_bindings]
+	heads = _mapping(target_manifest.get('heads'), 'target manifest heads')
+	for value in target_manifest['head_ks']:
+		if isinstance(value, bool) or not isinstance(value, int):
+			raise TypeError('target manifest head_ks must contain integers')
+		head_k = value
+		head = _mapping(heads.get(str(head_k)), f'target manifest head k={head_k}')
+		diagnostics = _mapping(
+			head.get('diagnostics'), f'target manifest head k={head_k} diagnostics'
+		)
+		per_survey = _mapping(
+			diagnostics.get('per_survey'),
+			f'target manifest head k={head_k} per-survey diagnostics',
+		)
+		rows.extend(
+			_target_diagnostic_row(
+				record_type='per_head_diagnostic',
+				target_manifest_sha256=target_manifest_sha256,
+				head_k=head_k,
+				survey_id=survey_id,
+				status='PASS',
+				diagnostics=per_survey[survey_id],
+			)
+			for survey_id in sorted(per_survey)
+		)
+	cross_head = _mapping(
+		target_manifest.get('cross_head_diagnostics'),
+		'target manifest cross-head diagnostics',
+	)
+	for head_pair in sorted(cross_head):
+		metrics = _mapping(
+			cross_head[head_pair], f'target manifest cross-head {head_pair}'
+		)
+		rows.append(
+			_target_diagnostic_row(
+				record_type='cross_head_diagnostic',
+				target_manifest_sha256=target_manifest_sha256,
+				head_pair=head_pair,
+				status='PASS',
+				mae=metrics.get('mae'),
+				correlation=metrics.get('correlation'),
+				rank_order_disagreement=metrics.get('rank_order_disagreement'),
+				diagnostics=metrics,
+			)
+		)
+	if 'k6_replay_parity' in target_manifest:
+		parity = _mapping(
+			target_manifest['k6_replay_parity'], 'target manifest K=6 replay parity'
+		)
+		exact = parity.get('exact')
+		if not isinstance(exact, bool):
+			raise TypeError('target manifest K=6 replay parity exact must be boolean')
+		rows.append(
+			_target_diagnostic_row(
+				record_type='k6_replay_parity',
+				target_manifest_sha256=target_manifest_sha256,
+				status='PASS' if exact else 'FAIL',
+				exact=exact,
+				diagnostics=parity,
+			)
+		)
+	return rows
+
+
+def _target_diagnostic_row(
+	*,
+	record_type: str,
+	target_manifest_sha256: str,
+	status: str,
+	diagnostics: object,
+	**values: object,
+) -> dict[str, object]:
+	"""Build a fixed-schema CSV record for one target-manifest evidence item."""
+	row = {
+		'record_type': record_type,
+		'model_role': '',
+		'model_tag': '',
+		'target_manifest_sha256': target_manifest_sha256,
+		'head_k': '',
+		'survey_id': '',
+		'head_pair': '',
+		'status': status,
+		'exact': '',
+		'mae': '',
+		'correlation': '',
+		'rank_order_disagreement': '',
+		'diagnostics_json': _json_cell(diagnostics),
+	}
+	unknown = set(values) - set(row)
+	if unknown:
+		raise ValueError(f'unknown target diagnostic fields: {sorted(unknown)!r}')
+	row.update(values)
+	return row
 
 
 def _pretraining_checkpoint(
@@ -1285,6 +1423,113 @@ def _handoff(decisions: Mapping[str, object]) -> str:
 
 def _publish_dir(config: object) -> Path:
 	return config.results_root / 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
+
+
+def _publish_multi_head_results(
+	config: object, *, items: Sequence[PublishItem]
+) -> PublishManifest:
+	"""Publish only the declared review files after an exact-tree preflight."""
+	publish_dir = _publish_dir(config)
+	_validate_existing_multi_head_publish_tree(publish_dir)
+	manifest = publish_selected_results(
+		items=items,
+		output_dir=publish_dir,
+		max_file_size_bytes=10 * 1024 * 1024,
+		overwrite=True,
+	)
+	_validate_published_multi_head_tree(publish_dir, manifest)
+	return manifest
+
+
+def _publish_target_names() -> set[str]:
+	return {*OUTPUT_NAMES, PUBLISH_MANIFEST_NAME}
+
+
+def _validate_existing_multi_head_publish_tree(publish_dir: Path) -> None:
+	"""Reject stale outputs instead of publishing a manifest for a mixed tree."""
+	if not publish_dir.exists():
+		return
+	actual = _published_relative_names(publish_dir)
+	if not actual:
+		return
+	expected = _publish_target_names()
+	if actual != expected:
+		raise FileExistsError(
+			'multi-head publish root has an unexpected file set; '
+			f'missing={sorted(expected - actual)!r}, '
+			f'extra={sorted(actual - expected)!r}'
+		)
+
+
+def _validate_published_multi_head_tree(  # noqa: PLR0912
+	publish_dir: Path, manifest: PublishManifest
+) -> None:
+	"""Verify exact inventory and source/target digests after publication."""
+	expected = _publish_target_names()
+	actual = _published_relative_names(publish_dir)
+	if actual != expected:
+		raise ValueError(
+			'multi-head published file inventory mismatch; '
+			f'missing={sorted(expected - actual)!r}, '
+			f'extra={sorted(actual - expected)!r}'
+		)
+	if manifest.manifest_path != publish_dir.resolve() / PUBLISH_MANIFEST_NAME:
+		raise ValueError('multi-head publish manifest path mismatch')
+	payload = _read_json(manifest.manifest_path)
+	items = payload.get('items')
+	if not isinstance(items, list) or len(items) != len(OUTPUT_NAMES):
+		raise ValueError('multi-head publish manifest item count mismatch')
+	manifest_items: dict[str, Mapping[str, object]] = {}
+	for value in items:
+		item = _mapping(value, 'multi-head publish manifest item')
+		target = item.get('target')
+		if not isinstance(target, str) or target in manifest_items:
+			raise ValueError('multi-head publish manifest targets are invalid')
+		manifest_items[target] = item
+	if set(manifest_items) != set(OUTPUT_NAMES):
+		raise ValueError('multi-head publish manifest target set mismatch')
+	for item in manifest.items:
+		target = item.target.resolve()
+		if not target.is_file():
+			raise FileNotFoundError(
+				f'multi-head published target is missing: {target}'
+			)
+		if not item.source.is_file():
+			raise FileNotFoundError(
+				f'multi-head publish source is missing: {item.source}'
+			)
+		if item.size_bytes != target.stat().st_size:
+			raise ValueError(f'multi-head published target size mismatch: {target}')
+		if item.sha256 != file_sha256(item.source):
+			raise ValueError(
+				f'multi-head publish source SHA-256 mismatch: {item.source}'
+			)
+		if item.sha256 != file_sha256(target):
+			raise ValueError(f'multi-head published target SHA-256 mismatch: {target}')
+		relative_target = target.relative_to(publish_dir.resolve()).as_posix()
+		recorded = manifest_items.get(relative_target)
+		if recorded is None:
+			raise ValueError(f'multi-head publish manifest target is missing: {target}')
+		if (
+			recorded.get('source') != str(item.source)
+			or recorded.get('size_bytes') != item.size_bytes
+			or recorded.get('sha256') != item.sha256
+		):
+			raise ValueError(f'multi-head publish manifest SHA-256 mismatch: {target}')
+
+
+def _published_relative_names(publish_dir: Path) -> set[str]:
+	"""Return an exact flat file inventory and reject opaque tree entries."""
+	if not publish_dir.is_dir():
+		raise NotADirectoryError(
+			f'multi-head publish root is not a directory: {publish_dir}'
+		)
+	names = set()
+	for path in publish_dir.rglob('*'):
+		if path.is_symlink() or not path.is_file():
+			raise ValueError(f'multi-head publish root has a non-file entry: {path}')
+		names.add(path.relative_to(publish_dir).as_posix())
+	return names
 
 
 def _write_blocked(config: object, error: Exception) -> None:
