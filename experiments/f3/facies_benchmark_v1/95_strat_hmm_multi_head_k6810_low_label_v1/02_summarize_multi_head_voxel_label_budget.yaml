@@ -1,3 +1,2 @@
-# Reserved for the follow-up summary/publish issue.  The run manifest is the
-# only output owned by issue #276.
-run_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_job_manifest.json
+# M4-MH 010: aggregate, decide, and publish the paired matrix.
+run_config: /workspace/experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml

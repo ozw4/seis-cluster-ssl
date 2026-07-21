@@ -39,6 +39,12 @@ python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/06_extract_noc
 python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/06_extract_nocons_embeddings.yaml" --skip-existing
 python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/07_extract_cons010_embeddings.yaml" --dry-run
 python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/07_extract_cons010_embeddings.yaml" --skip-existing
+
+# Then run/reuse the 30 downstream jobs and aggregate them:
+python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml --dry-run
+python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml --only-missing
+python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/02_summarize_multi_head_voxel_label_budget.yaml --dry-run
+python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/02_summarize_multi_head_voxel_label_budget.yaml
 ```
 
 Smoke output roots are intentionally separate and must never be resumed by a

@@ -43,6 +43,7 @@ class F3VoxelLabelBudgetMultiHeadReferences:
 	"""Read-only paired source manifests."""
 
 	dataset_manifest: Path
+	multi_head_target_manifest: Path
 	original_run_manifest: Path
 	current_k6_run_manifest: Path
 	mae_model_id: str
@@ -71,6 +72,11 @@ class F3VoxelLabelBudgetMultiHeadConfig:
 	def original_run_manifest(self) -> Path:
 		"""Return the immutable MAE/historical-M1 run reference."""
 		return self.references.original_run_manifest
+
+	@property
+	def multi_head_target_manifest(self) -> Path:
+		"""Return the exact K=6/8/10 pseudo-target manifest expected upstream."""
+		return self.references.multi_head_target_manifest
 
 	@property
 	def current_k6_run_manifest(self) -> Path:
@@ -132,6 +138,7 @@ def f3_lithology_voxel_label_budget_multi_head_config_from_mapping(  # noqa: C90
 		frozenset(
 			{
 				'dataset_manifest',
+				'multi_head_target_manifest',
 				'original_run_manifest',
 				'current_k6_run_manifest',
 				'mae_model_id',
@@ -194,6 +201,9 @@ def f3_lithology_voxel_label_budget_multi_head_config_from_mapping(  # noqa: C90
 		dataset_manifest=_required_absolute_path(
 			references, 'dataset_manifest', prefix='references'
 		),
+		multi_head_target_manifest=_required_absolute_path(
+			references, 'multi_head_target_manifest', prefix='references'
+		),
 		original_run_manifest=_required_absolute_path(
 			references, 'original_run_manifest', prefix='references'
 		),
@@ -212,6 +222,7 @@ def f3_lithology_voxel_label_budget_multi_head_config_from_mapping(  # noqa: C90
 	)
 	for label, path in (
 		('references.dataset_manifest', refs.dataset_manifest),
+		('references.multi_head_target_manifest', refs.multi_head_target_manifest),
 		('references.original_run_manifest', refs.original_run_manifest),
 		('references.current_k6_run_manifest', refs.current_k6_run_manifest),
 	):
