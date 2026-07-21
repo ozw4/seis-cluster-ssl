@@ -377,13 +377,15 @@ def test_json_source_identity_records_schema_tag_and_scientific_identity(
 	assert identity['scientific_identity'] == {'condition': 'fixed'}
 
 
-def test_pretraining_checkpoint_requires_embedding_best_binding(
+def test_pretraining_checkpoint_requires_embedding_binding_and_configured_target(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	checkpoint = tmp_path / 'pretraining' / 'best.pt'
 	checkpoint.parent.mkdir(parents=True)
 	checkpoint.write_bytes(b'checkpoint')
 	(checkpoint.parent / 'latest.pt').write_bytes(b'latest')
+	target_manifest = tmp_path / 'multi_head_target_manifest.json'
+	target_manifest.write_text('{}', encoding='utf-8')
 	candidate = SimpleNamespace(
 		model_id='mh_nocons',
 		model_tag='strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
@@ -408,6 +410,10 @@ def test_pretraining_checkpoint_requires_embedding_best_binding(
 			'model_tag': candidate.model_tag,
 			'head_spec': 'multi_resolution_ordered_prototypes_v1',
 			'head_ks': [6, 8, 10],
+			'target_manifest': {
+				'path': str(target_manifest),
+				'sha256': file_sha256(target_manifest),
+			},
 			'consistency_weight': 0.0,
 		},
 		'stratigraphy_config': _checkpoint_evidence(
@@ -424,13 +430,100 @@ def test_pretraining_checkpoint_requires_embedding_best_binding(
 	}
 
 	assert results._pretraining_checkpoint(
-		SimpleNamespace(dataset={'name': 'f3'}), candidate, handoff
-		)['identity'] == payload['stratigraphy_checkpoint']
+		SimpleNamespace(
+			dataset={'name': 'f3'}, multi_head_target_manifest=target_manifest
+		),
+		candidate,
+		handoff,
+	)['identity'] == payload['stratigraphy_checkpoint']
+	payload['stratigraphy_checkpoint']['target_manifest']['sha256'] = '0' * 64
+	with pytest.raises(ValueError, match='target manifest does not match configured'):
+		results._pretraining_checkpoint(
+			SimpleNamespace(
+				dataset={'name': 'f3'}, multi_head_target_manifest=target_manifest
+			),
+			candidate,
+			handoff,
+		)
+	payload['stratigraphy_checkpoint']['target_manifest']['sha256'] = file_sha256(
+		target_manifest
+	)
 	metadata_path.write_text('{}', encoding='utf-8')
 	with pytest.raises(ValueError, match='embedding metadata does not bind'):
-		results._pretraining_checkpoint(
-			SimpleNamespace(dataset={'name': 'f3'}), candidate, handoff
+		results._validate_embedding_best_binding(
+			SimpleNamespace(dataset={'name': 'f3'}), candidate, checkpoint, handoff
 		)
+
+
+def test_pretraining_checkpoint_evidence_allows_pre_extraction_validation(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	target_manifest = tmp_path / 'multi_head_target_manifest.json'
+	target_manifest.write_text('{}', encoding='utf-8')
+	candidates = []
+	for role, tag, weight in (
+		(
+			'mh_nocons',
+			'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+			0.0,
+		),
+		(
+			'mh_cons010',
+			'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
+			0.1,
+		),
+	):
+		handoff = tmp_path / f'{role}.json'
+		handoff.write_text(
+			json.dumps(
+				{
+					'artifact_type': 'f3_multi_head_pretraining_handoff',
+					'status': 'PASS',
+					'stratigraphy_pretext': {
+						'head_ks': [6, 8, 10],
+						'head_spec': 'multi_resolution_ordered_prototypes_v1',
+						'target_manifest_sha256': file_sha256(target_manifest),
+						'consistency_policy': 'fixed',
+						'consistency_weight': weight,
+					},
+				}
+			),
+			encoding='utf-8',
+		)
+		candidates.append(
+			SimpleNamespace(
+				model_id=role,
+				model_tag=tag,
+				embeddings_dir=tmp_path / role / 'embeddings',
+				pretraining_handoff=handoff,
+			)
+	)
+	monkeypatch.setattr(
+		results,
+		'load_multi_head_target_manifest',
+		lambda _path: {'head_ks': [6, 8, 10]},
+	)
+	monkeypatch.setattr(
+		results,
+		'_pretraining_checkpoint',
+		lambda _config, candidate, _handoff: _checkpoint_evidence(
+			variant='nocons' if candidate.model_id == 'mh_nocons' else 'cons010',
+			consistency_weight=0.0 if candidate.model_id == 'mh_nocons' else 0.1,
+		),
+	)
+
+	rows, diagnostics = results._pretraining_evidence(
+		SimpleNamespace(
+			multi_head_target_manifest=target_manifest, candidates=candidates
+		),
+		require_embeddings=False,
+	)
+
+	assert rows == []
+	assert [row['model_role'] for row in diagnostics] == [
+		'mh_nocons',
+		'mh_cons010',
+	]
 
 
 def test_pretraining_summary_row_contains_required_training_diagnostics(

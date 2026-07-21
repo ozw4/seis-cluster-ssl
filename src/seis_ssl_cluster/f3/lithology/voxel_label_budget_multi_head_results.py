@@ -716,8 +716,9 @@ def _monitored(
 
 
 def _pretraining_evidence(
-	config: object,
+	config: object, *, require_embeddings: bool = True
 ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+	"""Validate paired pretraining, optionally requiring extracted embeddings."""
 	rows, diagnostics, payloads, checkpoints = [], [], {}, {}
 	# A matching digest in both handoffs is not evidence that the configured
 	# target is a valid K=6/8/10 multi-head artifact.  The loader verifies its
@@ -749,14 +750,21 @@ def _pretraining_evidence(
 		):
 			raise ValueError('pretraining head specification/K mismatch')
 		checkpoint = _pretraining_checkpoint(config, candidate, payload)
-		rows.append(
-			_pretraining_summary_row(
-				candidate=candidate,
-				handoff=payload,
-				stratigraphy=strat,
-				checkpoint=checkpoint,
+		if require_embeddings:
+			checkpoint = {
+				**checkpoint,
+				'embedding': _validate_embedding_best_binding(
+					config, candidate, checkpoint['path'], payload
+				),
+			}
+			rows.append(
+				_pretraining_summary_row(
+					candidate=candidate,
+					handoff=payload,
+					stratigraphy=strat,
+					checkpoint=checkpoint,
+				)
 			)
-		)
 		diagnostics.append(
 			{
 				'model_role': candidate.model_id,
@@ -838,14 +846,37 @@ def _pretraining_checkpoint(
 			raise ValueError(
 				f'pretraining best/latest scientific identity mismatch: {key}'
 			)
-	embedding = _validate_embedding_best_binding(config, candidate, checkpoint, handoff)
+	_configured_target_manifest_identity(config, identity)
 	return {
 		'identity': identity,
 		'config': training_config,
 		'best': best,
 		'latest': latest,
-		'embedding': embedding,
+		'path': checkpoint,
 	}
+
+
+def _configured_target_manifest_identity(
+	config: object, identity: Mapping[str, object]
+) -> None:
+	"""Require the selected best checkpoint to use this experiment's target."""
+	target = _mapping(
+		identity.get('target_manifest'), 'pretraining best.pt target manifest'
+	)
+	target_path = target.get('path')
+	target_sha256 = target.get('sha256')
+	if not isinstance(target_path, str) or not isinstance(target_sha256, str):
+		raise TypeError(
+			'pretraining best.pt target manifest path and SHA-256 must be strings'
+		)
+	configured_path = Path(config.multi_head_target_manifest).resolve()
+	if (
+		Path(target_path).resolve() != configured_path
+		or target_sha256 != file_sha256(configured_path)
+	):
+		raise ValueError(
+			'pretraining best.pt target manifest does not match configured target'
+		)
 
 
 def _validate_embedding_best_binding(

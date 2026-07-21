@@ -69,13 +69,17 @@ python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/05_train_
 python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$EXP/05_train_cons010_full.yaml"
 
 # Validate checkpoint, freeze, initialization, and paired scientific identity
-# before extracting either embedding.
-python -c "from seis_ssl_cluster.config import load_config; from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import f3_lithology_voxel_label_budget_multi_head_config_from_mapping as resolve; from seis_ssl_cluster.f3.lithology.voxel_label_budget_multi_head_results import _pretraining_evidence; _pretraining_evidence(resolve(load_config('experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml'))); print('pretraining validation: PASS')"
+# before extracting either embedding. Embedding evidence is intentionally
+# deferred until both extraction commands complete.
+python -c "from seis_ssl_cluster.config import load_config; from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import f3_lithology_voxel_label_budget_multi_head_config_from_mapping as resolve; from seis_ssl_cluster.f3.lithology.voxel_label_budget_multi_head_results import _pretraining_evidence; _pretraining_evidence(resolve(load_config('experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml')), require_embeddings=False); print('pretraining checkpoint validation: PASS')"
 
 python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/06_extract_nocons_embeddings.yaml" --dry-run
 python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/06_extract_nocons_embeddings.yaml" --skip-existing
 python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/07_extract_cons010_embeddings.yaml" --dry-run
 python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/07_extract_cons010_embeddings.yaml" --skip-existing
+
+# Require the extracted-array and metadata bindings before downstream planning.
+python -c "from seis_ssl_cluster.config import load_config; from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import f3_lithology_voxel_label_budget_multi_head_config_from_mapping as resolve; from seis_ssl_cluster.f3.lithology.voxel_label_budget_multi_head_results import _pretraining_evidence; _pretraining_evidence(resolve(load_config('experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml'))); print('pretraining and embedding validation: PASS')"
 
 # Then run/reuse the 30 downstream jobs and aggregate them:
 python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml --dry-run
