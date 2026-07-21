@@ -1664,13 +1664,18 @@ def _validate_paired_identity(
 	*,
 	reference: F3VoxelLabelBudgetReferenceInspection,
 	dataset_row: Mapping[str, object],
+	reference_roles: Sequence[str] = REFERENCE_MODEL_ROLES,
 ) -> None:
-	"""Reject a condition unless candidate and both historical jobs pair exactly."""
+	"""Reject a condition unless candidate and required references pair exactly."""
+	if not reference_roles or any(
+		role not in REFERENCE_MODEL_ROLES for role in reference_roles
+	):
+		raise ValueError('paired reference roles are invalid')
 	by_key = _reference_jobs_by_key(reference)
 	budget = str(row.get('budget_id'))
 	seed = int(row.get('subsample_seed', -1))
 	candidate = _candidate_pair_values(row)
-	for role in REFERENCE_MODEL_ROLES:
+	for role in reference_roles:
 		other = _reference_pair_values(by_key[(budget, seed, role)], dataset_row)
 		for name in PAIR_IDENTITY_KEYS:
 			if candidate[name] != other[name]:

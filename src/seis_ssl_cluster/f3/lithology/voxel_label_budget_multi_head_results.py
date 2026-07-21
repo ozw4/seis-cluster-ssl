@@ -20,7 +20,7 @@ from seis_ssl_cluster.f3.lithology import voxel_label_budget_control as control
 from seis_ssl_cluster.f3.lithology import voxel_label_budget_multi_head as multi_head
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 	METRIC_SPECS,
-	inspect_f3_lithology_voxel_label_budget_reference_run,
+	inspect_f3_lithology_voxel_label_budget_mae_reference_run,
 	load_f3_lithology_voxel_label_budget_evaluation_metrics,
 )
 from seis_ssl_cluster.results import (
@@ -96,11 +96,16 @@ def inspect_f3_lithology_voxel_label_budget_multi_head_results(
 ) -> F3VoxelLabelBudgetMultiHeadResultsInspection:
 	"""Validate every source and independently reaggregate all paired deltas."""
 	rows = multi_head.load_f3_lithology_voxel_label_budget_multi_head_rows(config)
-	current_rows = control.load_f3_lithology_voxel_label_budget_control_rows(
-		config.base
+	dataset_rows = multi_head._dataset_rows(config)
+	current_rows = tuple(
+		multi_head._current_k6_rows(config, dataset_rows).values()
 	)
-	reference = inspect_f3_lithology_voxel_label_budget_reference_run(
-		config.dataset_manifest, config.original_run_manifest
+	reference = inspect_f3_lithology_voxel_label_budget_mae_reference_run(
+		config.dataset_manifest,
+		config.original_run_manifest,
+		include_historical_m1=(
+			config.references.historical_m1_model_id is not None
+		),
 	)
 	members = _members(config, rows, current_rows, reference)
 	_validate_pairing(config, members)

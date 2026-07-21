@@ -14,6 +14,9 @@ from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.lithology import (
 	voxel_label_budget_multi_head_results as results,
 )
+from seis_ssl_cluster.f3.lithology import (
+	voxel_label_budget_results as voxel_results,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -27,6 +30,118 @@ def test_decisions_include_the_required_current_k6_mae_status() -> None:
 	assert decisions['effects']['current_k6_vs_mae']['comparison_id'] == (
 		'm1_current_k6_vs_mae'
 	)
+
+
+def test_results_load_current_k6_rows_from_configured_reference_manifest(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = SimpleNamespace(
+		dataset_manifest=tmp_path / 'dataset.json',
+		multi_head_target_manifest=tmp_path / 'target.json',
+		original_run_manifest=tmp_path / 'original.json',
+		current_k6_run_manifest=tmp_path / 'current' / 'control_job_manifest.json',
+		reports_dir=tmp_path / 'reports',
+		references=SimpleNamespace(historical_m1_model_id=None),
+		candidates=(),
+		budgets=(),
+		subsample_seeds=(),
+	)
+	current_calls: list[object] = []
+	monkeypatch.setattr(
+		results.multi_head,
+		'load_f3_lithology_voxel_label_budget_multi_head_rows',
+		lambda _config: (),
+	)
+	monkeypatch.setattr(results.multi_head, '_dataset_rows', lambda _config: {})
+	monkeypatch.setattr(
+		results.multi_head,
+		'_current_k6_rows',
+		lambda actual_config, _dataset_rows: current_calls.append(actual_config) or {},
+	)
+	monkeypatch.setattr(
+		results,
+		'inspect_f3_lithology_voxel_label_budget_mae_reference_run',
+		lambda *_args, **_kwargs: SimpleNamespace(jobs=()),
+	)
+	monkeypatch.setattr(results, '_members', lambda *_args: {})
+	monkeypatch.setattr(results, '_validate_pairing', lambda *_args: None)
+	monkeypatch.setattr(results, '_comparisons', lambda *_args: ())
+	monkeypatch.setattr(results, '_paired_metrics', lambda *_args: [])
+	monkeypatch.setattr(results, '_paired_deltas', lambda *_args, **_kwargs: [])
+	monkeypatch.setattr(results, '_summary', lambda *_args, **_kwargs: [])
+	monkeypatch.setattr(results, '_monitored', lambda *_args, **_kwargs: [])
+	monkeypatch.setattr(results, '_pretraining_evidence', lambda *_args: ([], []))
+	monkeypatch.setattr(
+		results, '_validate_current_k6_mae_parity', lambda *_args, **_kwargs: {}
+	)
+	monkeypatch.setattr(
+		results, 'decide_multi_head_comparisons', lambda *_args, **_kwargs: {}
+	)
+	monkeypatch.setattr(results, '_json_source_identity', lambda *_args, **_kwargs: {})
+	monkeypatch.setattr(
+		results.multi_head, 'multi_head_run_manifest_path', lambda _config: tmp_path
+	)
+	monkeypatch.setattr(
+		results.control,
+		'load_f3_lithology_voxel_label_budget_control_rows',
+		lambda *_args: pytest.fail('must not resolve control rows from config.base'),
+	)
+
+	results.inspect_f3_lithology_voxel_label_budget_multi_head_results(config)
+
+	assert current_calls == [config]
+
+
+def test_mae_reference_loader_omits_invalid_historical_m1(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	run_manifest = tmp_path / 'original.json'
+	run_manifest.write_text('{}', encoding='utf-8')
+	monkeypatch.setattr(
+		voxel_results,
+		'REQUIRED_BUDGETS',
+		('cap25',),
+	)
+	monkeypatch.setattr(voxel_results, 'REQUIRED_SEEDS', (0,))
+	monkeypatch.setattr(
+		voxel_results,
+		'_load_dataset_manifest',
+		lambda _path: ({}, {'path': 'dataset', 'sha256': 'a' * 64}),
+	)
+	monkeypatch.setattr(
+		voxel_results,
+		'_read_json',
+		lambda _path: {
+			'artifact_type': voxel_results.RUN_MANIFEST_ARTIFACT_TYPE,
+			'schema_version': voxel_results.SCHEMA_VERSION,
+			'preregistered_contract': {
+				'budgets': ['cap25'],
+				'subsample_seeds': [0],
+				'model_order': list(voxel_results.MODEL_ROLES),
+				'epochs': 50,
+				'sampling_mode': 'uniform_tiles_with_replacement',
+				'steps_per_epoch': 440,
+			},
+			'rows': [{'model_role': 'mae'}, {'model_role': 'm1'}],
+		},
+	)
+
+	def load_job(row: object, **_kwargs: object) -> object:
+		if row['model_role'] == 'm1':  # type: ignore[index]
+			raise ValueError('historical M1 metrics are unavailable')
+		return SimpleNamespace(
+			model_role='mae',
+			dataset=SimpleNamespace(budget_id='cap25', subsample_seed=0),
+			steps_per_epoch=440,
+		)
+
+	monkeypatch.setattr(voxel_results, '_load_job', load_job)
+
+	reference = voxel_results.inspect_f3_lithology_voxel_label_budget_mae_reference_run(
+		tmp_path / 'dataset.json', run_manifest, include_historical_m1=True
+	)
+
+	assert [job.model_role for job in reference.jobs] == ['mae']
 
 
 def test_members_reject_duplicate_source_rows(

@@ -106,16 +106,25 @@ def test_consistency_candidate_requires_explicit_consistency_weight(
 		)
 
 
-@pytest.mark.parametrize(
-	('missing', 'message'),
-	[
-		('original_run_manifest', 'original_run_manifest'),
-		('historical_m1_model_id', 'historical_m1_model_id'),
-	],
-)
-def test_config_requires_original_mae_historical_m1_reference(
-	missing: str, message: str
+def test_candidate_identity_requires_configured_target_manifest(
+	tmp_path: Path,
 ) -> None:
+	config, candidate, canonical_valid_tokens_sha256, paths = (
+		_candidate_identity_fixture(tmp_path)
+	)
+	metadata = json.loads(paths.metadata.read_text(encoding='utf-8'))
+	metadata['stratigraphy_pretext']['target_manifest_sha256'] = '0' * 64
+	paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='target manifest SHA-256 mismatch'):
+		multi_head._candidate_identity(
+			config,
+			candidate,
+			canonical_valid_tokens_sha256=canonical_valid_tokens_sha256,
+		)
+
+
+def test_config_requires_original_mae_reference() -> None:
 	path = Path(
 		'experiments/f3/facies_benchmark_v1/'
 		'95_strat_hmm_multi_head_k6810_low_label_v1/'
@@ -123,11 +132,27 @@ def test_config_requires_original_mae_historical_m1_reference(
 	)
 	raw = dict(load_config(path))
 	references = dict(raw['references'])
-	references.pop(missing)
+	references.pop('original_run_manifest')
 	raw['references'] = references
 
-	with pytest.raises(TypeError, match=message):
+	with pytest.raises(TypeError, match='original_run_manifest'):
 		f3_lithology_voxel_label_budget_multi_head_config_from_mapping(raw)
+
+
+def test_config_allows_omitting_optional_historical_m1_reference() -> None:
+	path = Path(
+		'experiments/f3/facies_benchmark_v1/'
+		'95_strat_hmm_multi_head_k6810_low_label_v1/'
+		'01_run_multi_head_voxel_label_budget.yaml'
+	)
+	raw = dict(load_config(path))
+	references = dict(raw['references'])
+	references.pop('historical_m1_model_id')
+	raw['references'] = references
+
+	config = f3_lithology_voxel_label_budget_multi_head_config_from_mapping(raw)
+
+	assert config.references.historical_m1_model_id is None
 
 
 def test_only_missing_reuses_resumes_and_quarantines_selected_jobs(
@@ -249,7 +274,14 @@ def test_candidate_pairing_also_requires_mae_historical_identity(
 
 	assert current_calls == [(row, current)]
 	assert historical_calls == [
-		(row, {'reference': historical, 'dataset_row': dataset_row})
+		(
+			row,
+			{
+				'reference': historical,
+				'dataset_row': dataset_row,
+				'reference_roles': ('mae',),
+			},
+		)
 	]
 
 
@@ -337,7 +369,10 @@ def _candidate_identity_fixture(
 		checkpoint=checkpoint,
 	)
 	paths.handoff.parent.mkdir(parents=True, exist_ok=True)
+	target_manifest = tmp_path / 'multi_head_target_manifest.json'
+	target_manifest.write_text('{}', encoding='utf-8')
 	stratigraphy = _stratigraphy(model_id)
+	stratigraphy['target_manifest_sha256'] = file_sha256(target_manifest)
 	metadata.write_text(
 		json.dumps(
 			{
@@ -348,11 +383,18 @@ def _candidate_identity_fixture(
 		),
 		encoding='utf-8',
 	)
+	handoff = _handoff_payload(paths, model_tag=candidate.model_tag)
+	handoff['stratigraphy_pretext']['target_manifest_sha256'] = file_sha256(
+		target_manifest
+	)
 	paths.handoff.write_text(
-		json.dumps(_handoff_payload(paths, model_tag=candidate.model_tag)),
+		json.dumps(handoff),
 		encoding='utf-8',
 	)
-	config = SimpleNamespace(dataset={'name': 'f3_facies_benchmark'})
+	config = SimpleNamespace(
+		dataset={'name': 'f3_facies_benchmark'},
+		multi_head_target_manifest=target_manifest,
+	)
 	return config, candidate, file_sha256(valid_tokens), paths
 
 

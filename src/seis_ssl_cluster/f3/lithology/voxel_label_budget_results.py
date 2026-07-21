@@ -281,6 +281,34 @@ def inspect_f3_lithology_voxel_label_budget_reference_run(
 	)
 
 
+def inspect_f3_lithology_voxel_label_budget_mae_reference_run(
+	dataset_manifest: Path,
+	run_manifest: Path,
+	*,
+	include_historical_m1: bool,
+) -> F3VoxelLabelBudgetReferenceInspection:
+	"""Validate MAE while admitting historical M1 only when wholly valid.
+
+	The original M3-V-LB manifest also contains historical M1 and M2-A rows.
+	The multi-head matrix needs MAE as a primary member, whereas M1 is strictly
+	report-only.  A missing or invalid M1 member must therefore not prevent the
+	new candidate matrix from running or aggregating against MAE/current K=6.
+	"""
+	datasets, dataset_identity = _load_dataset_manifest(dataset_manifest)
+	jobs, run_identity = _load_run_manifest_selected_roles(
+		run_manifest,
+		datasets,
+		required_roles=('mae',),
+		optional_roles=('m1',) if include_historical_m1 else (),
+	)
+	return F3VoxelLabelBudgetReferenceInspection(
+		datasets=datasets,
+		jobs=jobs,
+		dataset_manifest_identity=dataset_identity,
+		run_manifest_identity=run_identity,
+	)
+
+
 def load_f3_lithology_voxel_label_budget_evaluation_metrics(
 	*,
 	metrics_path: Path,
@@ -564,6 +592,88 @@ def _load_run_manifest(  # noqa: C901, PLR0912
 				tuple(jobs[(budget, seed, role)] for role in MODEL_ROLES)
 			)
 	return ordered, {'path': str(path), 'sha256': file_sha256(path)}
+
+
+def _load_run_manifest_selected_roles(  # noqa: C901
+	path: Path,
+	datasets: Mapping[tuple[str, int], _DatasetCondition],
+	*,
+	required_roles: tuple[str, ...],
+	optional_roles: tuple[str, ...],
+) -> tuple[tuple[_LoadedJob, ...], Mapping[str, str]]:
+	"""Load required original roles and omit an invalid optional role as a set."""
+	payload = _read_json(path)
+	if payload.get('artifact_type') != RUN_MANIFEST_ARTIFACT_TYPE:
+		raise ValueError('voxel label-budget run manifest artifact_type mismatch')
+	if payload.get('schema_version') != SCHEMA_VERSION:
+		raise ValueError('voxel label-budget run manifest schema_version mismatch')
+	contract = _mapping(
+		payload.get('preregistered_contract'), 'run manifest preregistered_contract'
+	)
+	if contract.get('budgets') != list(REQUIRED_BUDGETS):
+		raise ValueError('run manifest preregistered budget contract mismatch')
+	if contract.get('subsample_seeds') != list(REQUIRED_SEEDS):
+		raise ValueError('run manifest preregistered seed contract mismatch')
+	if contract.get('model_order') != list(MODEL_ROLES):
+		raise ValueError('run manifest preregistered model-order mismatch')
+	if contract.get('epochs') != 50:
+		raise ValueError('run manifest preregistered epoch contract mismatch')
+	if contract.get('sampling_mode') != 'uniform_tiles_with_replacement':
+		raise ValueError('run manifest preregistered sampling contract mismatch')
+	contract_steps = _positive_int(
+		contract.get('steps_per_epoch'),
+		'run manifest preregistered steps_per_epoch',
+	)
+	rows = _mapping_rows(payload.get('rows'), 'run manifest rows')
+	by_role: dict[str, list[tuple[int, Mapping[str, object]]]] = {
+		role: [] for role in (*required_roles, *optional_roles)
+	}
+	for index, row in enumerate(rows):
+		role = row.get('model_role')
+		if isinstance(role, str) and role in by_role:
+			by_role[role].append((index, row))
+
+	def load_role(role: str) -> tuple[_LoadedJob, ...]:
+		expected = {
+			(budget, seed)
+			for budget in REQUIRED_BUDGETS
+			for seed in REQUIRED_SEEDS
+		}
+		loaded: dict[tuple[str, int], _LoadedJob] = {}
+		for index, row in by_role[role]:
+			job = _load_job(row, index=index, datasets=datasets)
+			if job.steps_per_epoch != contract_steps:
+				raise ValueError(
+					'run row steps_per_epoch changed after preregistration'
+				)
+			key = (job.dataset.budget_id, job.dataset.subsample_seed)
+			if key in loaded:
+				raise ValueError(f'duplicate run manifest row: {(*key, role)!r}')
+			loaded[key] = job
+		if set(loaded) != expected:
+			raise ValueError(f'{role} run matrix is incomplete or duplicated')
+		return tuple(
+			loaded[(budget, seed)]
+			for budget in REQUIRED_BUDGETS
+			for seed in REQUIRED_SEEDS
+		)
+
+	loaded_required = tuple(
+		job for role in required_roles for job in load_role(role)
+	)
+	def optional_role(role: str) -> tuple[_LoadedJob, ...]:
+		try:
+			return load_role(role)
+		except (FileNotFoundError, TypeError, ValueError):
+			return ()
+
+	loaded_optional = tuple(
+		job for role in optional_roles for job in optional_role(role)
+	)
+	return loaded_required + loaded_optional, {
+		'path': str(path),
+		'sha256': file_sha256(path),
+	}
 
 
 def _load_job(  # noqa: C901, PLR0912, PLR0915
@@ -2745,6 +2855,7 @@ __all__ = [
 	'F3VoxelLabelBudgetReferenceInspection',
 	'F3VoxelLabelBudgetResultsInspection',
 	'F3VoxelLabelBudgetResultsResult',
+	'inspect_f3_lithology_voxel_label_budget_mae_reference_run',
 	'inspect_f3_lithology_voxel_label_budget_reference_run',
 	'inspect_f3_lithology_voxel_label_budget_results',
 	'load_f3_lithology_voxel_label_budget_evaluation_metrics',

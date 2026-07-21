@@ -25,7 +25,7 @@ from seis_ssl_cluster.f3.lithology import voxel_label_budget_control as control
 from seis_ssl_cluster.f3.lithology import voxel_label_budget_results as results
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 	F3VoxelLabelBudgetReferenceInspection,
-	inspect_f3_lithology_voxel_label_budget_reference_run,
+	inspect_f3_lithology_voxel_label_budget_mae_reference_run,
 )
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_runner import (
 	VoxelLabelBudgetJob,
@@ -104,13 +104,14 @@ def inspect_f3_lithology_voxel_label_budget_multi_head(
 ) -> F3VoxelLabelBudgetMultiHeadInspection:
 	"""Validate references and produce the canonical candidate/budget/seed plan."""
 	dataset_rows = _dataset_rows(config)
-	historical_reference = _historical_reference(config, dataset_rows)
+	historical_reference = _mae_reference(config, dataset_rows)
 	current_rows = _current_k6_rows(config, dataset_rows)
 	for key, row in current_rows.items():
 		control._validate_paired_identity(
 			row,
 			reference=historical_reference,
 			dataset_row=dataset_rows[key],
+			reference_roles=(config.references.mae_model_id,),
 		)
 	canonical_valid_tokens_sha256 = _canonical_valid_tokens_sha256(current_rows)
 	identities = {
@@ -344,8 +345,9 @@ def _candidate_identity(  # noqa: C901, PLR0912
 		raise ValueError('candidate multi-head specification mismatch')
 	if stratigraphy.get('head_ks') != [6, 8, 10]:
 		raise ValueError('candidate multi-head K identity mismatch')
-	if not isinstance(stratigraphy.get('target_manifest_sha256'), str):
-		raise TypeError('candidate target manifest identity is missing')
+	expected_target_manifest_sha256 = file_sha256(config.multi_head_target_manifest)
+	if stratigraphy.get('target_manifest_sha256') != expected_target_manifest_sha256:
+		raise ValueError('candidate target manifest SHA-256 mismatch')
 	consistency_weight = stratigraphy.get('consistency_weight')
 	if candidate.model_id == 'mh_nocons' and (
 		not isinstance(consistency_weight, float) or consistency_weight != 0.0
@@ -493,7 +495,10 @@ def _current_k6_rows(
 	dataset_rows: Mapping[tuple[str, int], Mapping[str, object]],
 ) -> Mapping[tuple[str, int], Mapping[str, object]]:
 	payload = _read_json(config.current_k6_run_manifest)
-	if payload.get('artifact_type') != control.CONTROL_RUN_MANIFEST_TYPE:
+	if (
+		payload.get('artifact_type') != control.CONTROL_RUN_MANIFEST_TYPE
+		or payload.get('schema_version') != control.CONTROL_RUN_SCHEMA_VERSION
+	):
 		raise ValueError('current K6 reference manifest artifact type mismatch')
 	control._validate_identity_at(
 		payload.get('dataset_manifest'),
@@ -521,15 +526,25 @@ def _current_k6_rows(
 	return result
 
 
-def _historical_reference(
+def _mae_reference(
 	config: F3VoxelLabelBudgetMultiHeadConfig,
 	dataset_rows: Mapping[tuple[str, int], Mapping[str, object]],
 ) -> F3VoxelLabelBudgetReferenceInspection:
-	"""Load and validate the immutable MAE/M1 paired reference matrix."""
-	reference = inspect_f3_lithology_voxel_label_budget_reference_run(
-		config.dataset_manifest, config.original_run_manifest
+	"""Load MAE and admit historical M1 only as an optional report source."""
+	reference = inspect_f3_lithology_voxel_label_budget_mae_reference_run(
+		config.dataset_manifest,
+		config.original_run_manifest,
+		include_historical_m1=(
+			config.references.historical_m1_model_id is not None
+		),
 	)
-	control._validate_reference_contract(config.base, reference, dataset_rows)
+	mae_rows = {
+		(job.dataset.budget_id, job.dataset.subsample_seed)
+		for job in reference.jobs
+		if job.model_role == config.references.mae_model_id
+	}
+	if mae_rows != set(dataset_rows):
+		raise ValueError('MAE reference matrix mismatch')
 	return reference
 
 
@@ -593,10 +608,13 @@ def _validate_candidate_pairing(
 	historical_reference: F3VoxelLabelBudgetReferenceInspection,
 	dataset_row: Mapping[str, object],
 ) -> None:
-	"""Require every candidate to share identities with K=6, MAE, and M1."""
+	"""Require every candidate to share identities with K=6 and MAE."""
 	_validate_current_pair(row, current_reference)
 	control._validate_paired_identity(
-		row, reference=historical_reference, dataset_row=dataset_row
+		row,
+		reference=historical_reference,
+		dataset_row=dataset_row,
+		reference_roles=('mae',),
 	)
 
 

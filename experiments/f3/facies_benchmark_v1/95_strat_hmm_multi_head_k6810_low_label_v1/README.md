@@ -16,14 +16,43 @@ multi-head scientific identity must match the extracted embedding metadata,
 whose SHA-256 must be recorded in the handoff. This rejects swapped or
 unrelated #275 pretraining provenance before a decoder job is planned.
 
+After the target, pretraining, checkpoint/freeze/initialization validation, and
+two embedding extractions in experiment 94 have passed, use this ordered
+downstream sequence:
+
 ```bash
-python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml --dry-run
-python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml --only-missing
-python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/02_summarize_multi_head_voxel_label_budget.yaml --dry-run
-python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/02_summarize_multi_head_voxel_label_budget.yaml
+export EXP=experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1
+
+# 30-job plan and pre-run identity gate.
+python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config "$EXP/01_run_multi_head_voxel_label_budget.yaml" --dry-run
+
+# Run or revalidate the complete 2 candidates × 3 budgets × 5 seeds matrix.
+python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config "$EXP/01_run_multi_head_voxel_label_budget.yaml" --only-missing
+
+# A completed rerun must show all 30 rows as REUSED without training.
+python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config "$EXP/01_run_multi_head_voxel_label_budget.yaml" --only-missing
+
+# Recompute paired metrics and scientific decisions, then write/publish reports.
+python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config "$EXP/02_summarize_multi_head_voxel_label_budget.yaml" --dry-run
+python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config "$EXP/02_summarize_multi_head_voxel_label_budget.yaml"
+
+# Validate the exact lightweight publish tree and 10 MiB ceiling.
+python proc/seis_ssl_cluster/validate_results_artifacts.py --root results --max-file-size-mb 10
 ```
 
 `--only-missing` reuses complete rows, resumes valid incomplete rows, and
 quarantines invalid partial outputs. If the source or identity contract is
 incomplete, the summary is blocked rather than substituting a report or raw
 artifact.
+
+To restart one failed job with its own validated `latest.pt`, select exactly
+that job and use `--resume`:
+
+```bash
+python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py \
+  --config "$EXP/01_run_multi_head_voxel_label_budget.yaml" \
+  --candidate mh_cons010 --budget cap50 --subsample-seed 3 --resume
+```
+
+Never use `--resume` for a partial or identity-invalid job: invoke
+`--only-missing` instead so it is timestamp-quarantined and restarted cleanly.

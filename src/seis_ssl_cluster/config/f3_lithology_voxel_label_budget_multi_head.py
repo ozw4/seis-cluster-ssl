@@ -48,7 +48,7 @@ class F3VoxelLabelBudgetMultiHeadReferences:
 	current_k6_run_manifest: Path
 	mae_model_id: str
 	current_k6_model_id: str
-	historical_m1_model_id: str
+	historical_m1_model_id: str | None
 
 
 @dataclass(frozen=True)
@@ -214,10 +214,14 @@ def f3_lithology_voxel_label_budget_multi_head_config_from_mapping(  # noqa: C90
 		current_k6_model_id=_required_str(
 			references, 'current_k6_model_id', prefix='references'
 		),
-		historical_m1_model_id=_required_str(
-			references,
-			'historical_m1_model_id',
-			prefix='references',
+		historical_m1_model_id=(
+			_required_str(
+				references,
+				'historical_m1_model_id',
+				prefix='references',
+			)
+			if 'historical_m1_model_id' in references
+			else None
 		),
 	)
 	for label, path in (
@@ -232,28 +236,25 @@ def f3_lithology_voxel_label_budget_multi_head_config_from_mapping(  # noqa: C90
 		CURRENT_K6_MODEL_ID,
 	):
 		raise ValueError('reference model IDs must be mae, m1_current_k6')
-	if refs.historical_m1_model_id != 'm1':
-		raise ValueError('historical_m1_model_id must be m1')
-	if any(
-		item.model_id
-		in {
-			refs.mae_model_id,
-			refs.current_k6_model_id,
-			refs.historical_m1_model_id,
-		}
-		for item in resolved_candidates
+	if (
+		refs.historical_m1_model_id is not None
+		and refs.historical_m1_model_id != 'm1'
 	):
+		raise ValueError('historical_m1_model_id must be m1')
+	reference_ids = {refs.mae_model_id, refs.current_k6_model_id}
+	if refs.historical_m1_model_id is not None:
+		reference_ids.add(refs.historical_m1_model_id)
+	if any(item.model_id in reference_ids for item in resolved_candidates):
 		raise ValueError('candidate IDs must not collide with reference IDs')
 
 	# The established resolver remains the single authority for the common fixed
-	# decoder contract and the immutable MAE/M1 pairing requirements.
+	# decoder contract. The multi-head runner validates MAE separately;
+	# historical M1 is an optional report-only source and must not gate candidate
+	# execution.
 	base_raw = dict(config)
 	base_raw.pop('candidates')
 	base_raw['references'] = {
 		'dataset_manifest': str(refs.dataset_manifest),
-		'historical_run_manifest': str(refs.original_run_manifest),
-		'mae_model_id': refs.mae_model_id,
-		'historical_m1_model_id': refs.historical_m1_model_id,
 	}
 	base_raw['candidate'] = {
 		'model_id': CURRENT_K6_MODEL_ID,
@@ -295,7 +296,7 @@ def f3_lithology_voxel_label_budget_multi_head_config_from_mapping(  # noqa: C90
 		'overwrite': False,
 	}
 	base = f3_lithology_voxel_label_budget_control_config_from_mapping(
-		base_raw,
+		base_raw, validate_pairing_reference=False
 	)
 	if base.base_seed != CANONICAL_BASE_SEED:
 		raise ValueError('seed policy must use base_seed 42000')
