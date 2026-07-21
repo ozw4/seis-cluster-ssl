@@ -20,9 +20,6 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_control import (
-	HISTORICAL_M1_MODEL_ID,
-)
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.lithology import voxel_label_budget_control as control
 from seis_ssl_cluster.f3.lithology import voxel_label_budget_results as results
@@ -505,10 +502,10 @@ def _current_k6_rows(
 			dataset_manifest=config.dataset_manifest,
 			historical_run_manifest=config.original_run_manifest,
 			mae_model_id=config.references.mae_model_id,
-			historical_m1_model_id=HISTORICAL_M1_MODEL_ID,
+			historical_m1_model_id=config.references.historical_m1_model_id,
 		),
 		output_root=config.current_k6_run_manifest.parent,
-		validate_pairing_reference=True,
+		validate_pairing_reference=False,
 	)
 	rows = control.load_f3_lithology_voxel_label_budget_control_rows(
 		control_config,

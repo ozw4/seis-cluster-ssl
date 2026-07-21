@@ -155,7 +155,7 @@ def test_config_allows_omitting_optional_historical_m1_reference() -> None:
 	assert config.references.historical_m1_model_id is None
 
 
-def test_current_k6_rows_use_live_control_row_validation(
+def test_current_k6_rows_allow_omitting_optional_historical_m1_reference(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	path = Path(
@@ -164,6 +164,9 @@ def test_current_k6_rows_use_live_control_row_validation(
 		'01_run_multi_head_voxel_label_budget.yaml'
 	)
 	raw = dict(load_config(path))
+	references = dict(raw['references'])
+	references.pop('historical_m1_model_id')
+	raw['references'] = references
 	config = f3_lithology_voxel_label_budget_multi_head_config_from_mapping(raw)
 	manifest = config.current_k6_run_manifest
 	dataset_rows = {
@@ -198,7 +201,8 @@ def test_current_k6_rows_use_live_control_row_validation(
 	assert actual_config.references.historical_run_manifest == (
 		config.original_run_manifest
 	)
-	assert actual_config.validate_pairing_reference is True
+	assert actual_config.references.historical_m1_model_id is None
+	assert actual_config.validate_pairing_reference is False
 	assert kwargs == {'run_manifest_path': manifest}
 
 

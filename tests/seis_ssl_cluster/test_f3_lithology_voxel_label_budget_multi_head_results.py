@@ -339,22 +339,38 @@ def test_current_k6_mae_parity_rejects_published_mismatch(
 		'losses': 0,
 		'ties': 0,
 	}
-	(tmp_path / 'current_k6_control_summary.json').write_text(
-		json.dumps(
-			{
-				'artifact_type': 'f3_current_k6_control_summary',
-				'schema_version': 1,
-				'paired_deltas': [delta],
-				'summary_by_budget': [summary],
-			}
-		),
-		encoding='utf-8',
-	)
+	def write_control_summary(
+		paired_deltas: list[object], summary_by_budget: list[object]
+	) -> None:
+		(tmp_path / 'current_k6_control_summary.json').write_text(
+			json.dumps(
+				{
+					'artifact_type': 'f3_current_k6_control_summary',
+					'schema_version': 1,
+					'paired_deltas': paired_deltas,
+					'summary_by_budget': summary_by_budget,
+				}
+			),
+			encoding='utf-8',
+		)
+
+	write_control_summary([delta], [summary])
 	config = SimpleNamespace(current_k6_run_manifest=manifest)
 
 	assert results._validate_current_k6_mae_parity(
 		config, paired_deltas=(delta,), summary_by_budget=(summary,)
 	)['status'] == 'PASS'
+	write_control_summary([delta, dict(delta)], [summary])
+	with pytest.raises(ValueError, match='duplicate rows'):
+		results._validate_current_k6_mae_parity(
+			config, paired_deltas=(delta,), summary_by_budget=(summary,)
+		)
+	write_control_summary([delta], [summary, dict(summary)])
+	with pytest.raises(ValueError, match='duplicate rows'):
+		results._validate_current_k6_mae_parity(
+			config, paired_deltas=(delta,), summary_by_budget=(summary,)
+		)
+	write_control_summary([delta], [summary])
 	delta['macro_f1'] = 0.26
 	with pytest.raises(ValueError, match='paired delta'):
 		results._validate_current_k6_mae_parity(

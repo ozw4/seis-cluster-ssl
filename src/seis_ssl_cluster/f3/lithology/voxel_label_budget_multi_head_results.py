@@ -632,11 +632,21 @@ def _validate_current_k6_mae_parity(
 	published_summary_index = {
 		(str(row['budget_id']), str(row['metric'])): row for row in published_summary
 	}
-	if len(published_delta_index) != len(recomputed_deltas):
+	_validate_unique_published_rows(
+		published_delta_index,
+		published_deltas,
+		label='published current-K6--MAE paired-delta parity',
+	)
+	_validate_unique_published_rows(
+		published_summary_index,
+		published_summary,
+		label='published current-K6--MAE summary parity',
+	)
+	if len(published_deltas) != len(recomputed_deltas):
 		raise ValueError(
 			'published current-K6--MAE paired-delta parity row count mismatch'
 		)
-	if len(published_summary_index) != len(recomputed_summary):
+	if len(published_summary) != len(recomputed_summary):
 		raise ValueError('published current-K6--MAE summary parity row count mismatch')
 	for row in recomputed_deltas:
 		published = published_delta_index.get(
@@ -688,6 +698,17 @@ def _validate_current_k6_mae_parity(
 		'paired_delta_row_count': len(recomputed_deltas),
 		'summary_row_count': len(recomputed_summary),
 	}
+
+
+def _validate_unique_published_rows(
+	index: Mapping[object, Mapping[str, object]],
+	rows: Sequence[Mapping[str, object]],
+	*,
+	label: str,
+) -> None:
+	"""Reject duplicate source rows before their keys are used for parity."""
+	if len(index) != len(rows):
+		raise ValueError(f'{label} contains duplicate rows')
 
 
 def _comparison_rows(

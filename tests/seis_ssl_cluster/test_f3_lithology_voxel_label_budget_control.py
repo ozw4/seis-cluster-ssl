@@ -632,6 +632,7 @@ def _config(tmp_path: Path) -> SimpleNamespace:
 		subsample_seeds=(0, 1, 2, 3, 4),
 		output_root=tmp_path,
 		decoder_seed=lambda seed: 42000 + seed,
+		validate_pairing_reference=True,
 	)
 
 

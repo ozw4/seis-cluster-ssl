@@ -26,6 +26,7 @@ from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 	METRIC_SPECS,
 	F3VoxelLabelBudgetReferenceInspection,
+	inspect_f3_lithology_voxel_label_budget_mae_reference_run,
 	inspect_f3_lithology_voxel_label_budget_reference_run,
 	load_f3_lithology_voxel_label_budget_evaluation_metrics,
 )
@@ -157,9 +158,16 @@ def inspect_f3_lithology_voxel_label_budget_control(
 	subsample_seed: int | None = None,
 ) -> F3VoxelLabelBudgetControlInspection:
 	"""Validate immutable references, current embedding provenance, and jobs."""
-	reference = inspect_f3_lithology_voxel_label_budget_reference_run(
-		config.dataset_manifest, config.historical_run_manifest
-	)
+	if config.validate_pairing_reference:
+		reference = inspect_f3_lithology_voxel_label_budget_reference_run(
+			config.dataset_manifest, config.historical_run_manifest
+		)
+	else:
+		reference = inspect_f3_lithology_voxel_label_budget_mae_reference_run(
+			config.dataset_manifest,
+			config.historical_run_manifest,
+			include_historical_m1=False,
+		)
 	dataset_rows = _dataset_rows(config, reference)
 	_validate_reference_contract(config, reference, dataset_rows)
 	candidate_embedding = _candidate_embedding_identity(config, reference)
@@ -460,6 +468,11 @@ def load_f3_lithology_voxel_label_budget_control_rows(  # noqa: C901
 			actual,
 			reference=inspection.reference,
 			dataset_row=inspection.dataset_rows[(job.budget_id, job.subsample_seed)],
+			reference_roles=(
+				REFERENCE_MODEL_ROLES
+				if config.validate_pairing_reference
+				else ('mae',)
+			),
 		)
 		validated.append(actual)
 	if require_complete and len(validated) != len(expected_keys):
@@ -1528,9 +1541,36 @@ def _validate_reference_contract(
 	reference: F3VoxelLabelBudgetReferenceInspection,
 	dataset_rows: Mapping[tuple[str, int], Mapping[str, object]],
 ) -> None:
-	"""Verify MAE/M1 reference pairing before candidate work may begin."""
+	"""Verify required reference pairing before candidate work may begin."""
+	_validate_mae_reference_contract(config, reference, dataset_rows)
+	if config.validate_pairing_reference:
+		_validate_mae_m1_reference_contract(config, reference, dataset_rows)
+
+
+def _validate_mae_reference_contract(
+	config: F3VoxelLabelBudgetControlConfig,
+	reference: F3VoxelLabelBudgetReferenceInspection,
+	dataset_rows: Mapping[tuple[str, int], Mapping[str, object]],
+) -> None:
+	"""Verify MAE is valid for every configured paired condition."""
 	if config.references.mae_model_id != 'mae':
 		raise ValueError('references.mae_model_id must be mae')
+	by_key = _reference_jobs_by_key(reference)
+	for budget in config.budgets:
+		for seed in config.subsample_seeds:
+			key = (budget, seed)
+			mae = by_key[(budget, seed, 'mae')]
+			values = _reference_pair_values(mae, dataset_rows[key])
+			if values['validation_voxel_count'] != REQUIRED_VALIDATION_VOXELS:
+				raise ValueError('historical validation voxel contract mismatch')
+
+
+def _validate_mae_m1_reference_contract(
+	config: F3VoxelLabelBudgetControlConfig,
+	reference: F3VoxelLabelBudgetReferenceInspection,
+	dataset_rows: Mapping[tuple[str, int], Mapping[str, object]],
+) -> None:
+	"""Verify the full historical MAE/M1 pairing for the control runner."""
 	if config.references.historical_m1_model_id != 'm1':
 		raise ValueError('references.historical_m1_model_id must be m1')
 	by_key = _reference_jobs_by_key(reference)
@@ -1538,8 +1578,8 @@ def _validate_reference_contract(
 		for seed in config.subsample_seeds:
 			key = (budget, seed)
 			mae = by_key[(budget, seed, 'mae')]
-			m1 = by_key[(budget, seed, 'm1')]
 			values = _reference_pair_values(mae, dataset_rows[key])
+			m1 = by_key[(budget, seed, 'm1')]
 			other = _reference_pair_values(m1, dataset_rows[key])
 			for name in PAIR_IDENTITY_KEYS:
 				if values[name] != other[name]:
@@ -1553,8 +1593,6 @@ def _validate_reference_contract(
 						f'historical MAE/M1 runtime identity mismatch for '
 						f'{budget}/seed{seed}: {name}'
 					)
-			if values['validation_voxel_count'] != REQUIRED_VALIDATION_VOXELS:
-				raise ValueError('historical validation voxel contract mismatch')
 
 
 def _candidate_embedding_identity(
@@ -1877,18 +1915,28 @@ def _validate_control_manifest_header(
 		raise ValueError('control run manifest artifact_type mismatch')
 	if payload.get('schema_version') != CONTROL_RUN_SCHEMA_VERSION:
 		raise ValueError('control run manifest schema_version mismatch')
-	if payload.get('control_contract') != _control_contract(config):
+	expected_contract = _control_contract(config)
+	if not config.validate_pairing_reference:
+		# The immutable K=6 manifest was produced under the original MAE/M1
+		# control contract. Multi-head validation reuses its candidate artifacts
+		# without making historical M1 a live prerequisite.
+		expected_contract['references'] = {
+			'mae_model_id': 'mae',
+			'historical_m1_model_id': 'm1',
+		}
+	if payload.get('control_contract') != expected_contract:
 		raise ValueError('control run manifest contract mismatch')
 	_validate_identity_at(
 		payload.get('dataset_manifest'),
 		config.dataset_manifest,
 		label='control dataset manifest',
 	)
-	_validate_identity_at(
-		payload.get('historical_run_manifest'),
-		config.historical_run_manifest,
-		label='control historical run manifest',
-	)
+	if config.validate_pairing_reference:
+		_validate_identity_at(
+			payload.get('historical_run_manifest'),
+			config.historical_run_manifest,
+			label='control historical run manifest',
+		)
 	if (
 		candidate_embedding_identity is not None
 		and payload.get('candidate_embedding_identity')
@@ -1953,14 +2001,20 @@ def _control_contract(config: F3VoxelLabelBudgetControlConfig) -> dict[str, obje
 def _estimated_candidate_job_bytes(
 	reference: F3VoxelLabelBudgetReferenceInspection,
 ) -> int:
-	m1_roots = [
+	roots = [
 		Path(str(job.row['latest_checkpoint']['path'])).parent.parent
 		for job in reference.jobs
 		if job.model_role == 'm1'
 	]
-	if not m1_roots:
-		raise ValueError('historical reference is missing M1 jobs')
-	sizes = [_tree_size(path) for path in m1_roots]
+	if not roots:
+		roots = [
+			Path(str(job.row['latest_checkpoint']['path'])).parent.parent
+			for job in reference.jobs
+			if job.model_role == 'mae'
+		]
+	if not roots:
+		raise ValueError('historical reference is missing MAE jobs')
+	sizes = [_tree_size(path) for path in roots]
 	return max(1, math.ceil((sum(sizes) / len(sizes)) * 1.2))
 
 
