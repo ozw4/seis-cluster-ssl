@@ -81,9 +81,9 @@ class F3VoxelLabelBudgetControlReferences:
 	"""Read-only dataset and historical result sources for paired comparisons."""
 
 	dataset_manifest: Path
-	historical_run_manifest: Path
-	mae_model_id: str
-	historical_m1_model_id: str
+	historical_run_manifest: Path | None
+	mae_model_id: str | None
+	historical_m1_model_id: str | None
 
 
 @dataclass(frozen=True)
@@ -199,6 +199,7 @@ class F3VoxelLabelBudgetControlConfig:
 	decision: F3VoxelLabelBudgetControlDecisionThresholds
 	overwrite: bool
 	publish: F3VoxelLabelBudgetControlPublishConfig
+	validate_pairing_reference: bool = True
 
 	def __post_init__(self) -> None:
 		"""Validate artifact ownership and the fixed scientific control contract."""
@@ -206,15 +207,19 @@ class F3VoxelLabelBudgetControlConfig:
 			raise ValueError(
 				'labels must define exactly the six canonical voxel decoder inputs'
 			)
-		for label, path in (
+		paths = [
 			('references.dataset_manifest', self.references.dataset_manifest),
-			(
-				'references.historical_run_manifest',
-				self.references.historical_run_manifest,
-			),
 			('candidate.embeddings_dir', self.candidate.embeddings_dir),
 			('outputs.output_root', self.output_root),
-		):
+		]
+		if self.references.historical_run_manifest is not None:
+			paths.append(
+				(
+					'references.historical_run_manifest',
+					self.references.historical_run_manifest,
+				)
+			)
+		for label, path in paths:
 			ensure_under_root(path, root=self.artifact_root, label=label)
 		for key, path in self.labels.items():
 			root = self.f3_root if key == 'source_label_segy' else self.artifact_root
@@ -229,6 +234,8 @@ class F3VoxelLabelBudgetControlConfig:
 	@property
 	def historical_run_manifest(self) -> Path:
 		"""Return the read-only MAE/historical-M1 run manifest."""
+		if self.references.historical_run_manifest is None:
+			raise ValueError('historical run manifest is not configured')
 		return self.references.historical_run_manifest
 
 	@property
@@ -242,12 +249,12 @@ class F3VoxelLabelBudgetControlConfig:
 		return {self.candidate.model_id: self.candidate}
 
 	@property
-	def mae_model_id(self) -> str:
+	def mae_model_id(self) -> str | None:
 		"""Return the historical MAE role used in paired comparisons."""
 		return self.references.mae_model_id
 
 	@property
-	def historical_m1_model_id(self) -> str:
+	def historical_m1_model_id(self) -> str | None:
 		"""Return the historical M1 role used in paired comparisons."""
 		return self.references.historical_m1_model_id
 
@@ -273,9 +280,17 @@ class F3VoxelLabelBudgetControlConfig:
 			'dataset': dict(self.dataset),
 			'references': {
 				'dataset_manifest': str(self.dataset_manifest),
-				'historical_run_manifest': str(self.historical_run_manifest),
-				'mae_model_id': self.mae_model_id,
-				'historical_m1_model_id': self.historical_m1_model_id,
+				**(
+					{
+						'historical_run_manifest': str(
+							self.historical_run_manifest
+						),
+						'mae_model_id': self.mae_model_id,
+						'historical_m1_model_id': self.historical_m1_model_id,
+					}
+					if self.validate_pairing_reference
+					else {}
+				),
 			},
 			'candidate': {
 				'model_id': self.candidate.model_id,
@@ -336,6 +351,8 @@ class F3VoxelLabelBudgetControlConfig:
 
 def f3_lithology_voxel_label_budget_control_config_from_mapping(
 	config: Mapping[str, object],
+	*,
+	validate_pairing_reference: bool = True,
 ) -> F3VoxelLabelBudgetControlConfig:
 	"""Validate and resolve the current-code K=6 control configuration."""
 	_validate_allowed_keys(
@@ -515,14 +532,30 @@ def f3_lithology_voxel_label_budget_control_config_from_mapping(
 			dataset_manifest=_required_absolute_path(
 				references, 'dataset_manifest', prefix='references'
 			),
-			historical_run_manifest=_required_absolute_path(
-				references, 'historical_run_manifest', prefix='references'
+			historical_run_manifest=(
+				_required_absolute_path(
+					references, 'historical_run_manifest', prefix='references'
+				)
+				if validate_pairing_reference
+				else _optional_absolute_path(
+					references, 'historical_run_manifest', prefix='references'
+				)
 			),
-			mae_model_id=_required_str(
-				references, 'mae_model_id', prefix='references'
+			mae_model_id=(
+				_required_str(references, 'mae_model_id', prefix='references')
+				if validate_pairing_reference
+				else _optional_str(references, 'mae_model_id', prefix='references')
 			),
-			historical_m1_model_id=_required_str(
-				references, 'historical_m1_model_id', prefix='references'
+			historical_m1_model_id=(
+				_required_str(
+					references, 'historical_m1_model_id', prefix='references'
+				)
+				if validate_pairing_reference
+				else _optional_str(
+					references,
+					'historical_m1_model_id',
+					prefix='references',
+				)
 			),
 		),
 		candidate=F3VoxelLabelBudgetControlCandidate(
@@ -604,6 +637,7 @@ def f3_lithology_voxel_label_budget_control_config_from_mapping(
 			max_file_size_bytes=_max_file_size_bytes(publish),
 			overwrite=_boolean(publish.get('overwrite'), 'publish.overwrite'),
 		),
+		validate_pairing_reference=validate_pairing_reference,
 	)
 
 
@@ -611,6 +645,22 @@ def _validate_section_keys(
 	value: Mapping[str, object], allowed: set[str], prefix: str
 ) -> None:
 	_validate_allowed_keys(value, frozenset(allowed), prefix=prefix)
+
+
+def _optional_absolute_path(
+	value: Mapping[str, object], key: str, *, prefix: str
+) -> Path | None:
+	if key not in value:
+		return None
+	return _required_absolute_path(value, key, prefix=prefix)
+
+
+def _optional_str(
+	value: Mapping[str, object], key: str, *, prefix: str
+) -> str | None:
+	if key not in value:
+		return None
+	return _required_str(value, key, prefix=prefix)
 
 
 def _decoder_spec(value: Mapping[str, object]) -> VoxelDecoderSpec:
@@ -864,12 +914,14 @@ def _validate_scientific_contract(  # noqa: C901, PLR0912
 ) -> None:
 	if dict(config.dataset) != EXPECTED_DATASET:
 		raise ValueError('dataset must be f3_facies_benchmark/facies_benchmark_v1')
-	if config.references.mae_model_id != MAE_MODEL_ID:
-		raise ValueError(f'references.mae_model_id must be {MAE_MODEL_ID!r}')
-	if config.references.historical_m1_model_id != HISTORICAL_M1_MODEL_ID:
-		raise ValueError(
-			f'references.historical_m1_model_id must be {HISTORICAL_M1_MODEL_ID!r}'
-		)
+	if config.validate_pairing_reference:
+		if config.references.mae_model_id != MAE_MODEL_ID:
+			raise ValueError(f'references.mae_model_id must be {MAE_MODEL_ID!r}')
+		if config.references.historical_m1_model_id != HISTORICAL_M1_MODEL_ID:
+			raise ValueError(
+				'references.historical_m1_model_id must be '
+				f'{HISTORICAL_M1_MODEL_ID!r}'
+			)
 	if config.candidate.model_id != CURRENT_K6_MODEL_ID:
 		raise ValueError(f'candidate.model_id must be {CURRENT_K6_MODEL_ID!r}')
 	if config.candidate.model_tag != CURRENT_K6_MODEL_TAG:

@@ -1,0 +1,3 @@
+# Reserved for the follow-up summary/publish issue.  The run manifest is the
+# only output owned by issue #276.
+run_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_job_manifest.json
