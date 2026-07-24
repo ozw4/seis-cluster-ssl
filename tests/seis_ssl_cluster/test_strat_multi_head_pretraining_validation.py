@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 import torch
 
@@ -26,9 +27,6 @@ from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
 	validate_f3_multi_head_pretraining,
 )
 from seis_ssl_cluster.training.strat_hmm_checkpoint import scientific_identity_sha256
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 
 def test_validation_config_rejects_unknown_keys_and_paths_outside_artifacts(
@@ -247,6 +245,187 @@ def test_only_missing_reuses_an_exact_live_handoff(tmp_path: Path) -> None:
 
 	assert not published
 	assert not list(tmp_path.glob('multi_head_handoff.json.quarantine.*'))
+
+
+def test_complete_phase_publishes_two_handoffs_from_synthetic_artifacts(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Exercise the public complete phase through both atomic handoff publishes."""
+	artifact_root = tmp_path / 'artifacts'
+	experiment_root = artifact_root / 'pretraining'
+	target_manifest = artifact_root / 'targets.json'
+	target_manifest.parent.mkdir(parents=True)
+	target_manifest.write_text('{}', encoding='utf-8')
+	config_paths = {
+		name: artifact_root / f'{name}.yaml'
+		for name in ('control', 'nocons', 'cons010')
+	}
+	for path in config_paths.values():
+		path.write_text('{}', encoding='utf-8')
+	config = F3MultiHeadPretrainingValidationConfig(
+		artifact_root=artifact_root,
+		experiment_root=experiment_root,
+		target_manifest=target_manifest,
+		control_full_config=config_paths['control'],
+		nocons_full_config=config_paths['nocons'],
+		cons010_full_config=config_paths['cons010'],
+	)
+	expected_targets = {
+		str(head_k): {
+			'f3': dict.fromkeys(
+				('labels', 'confidence', 'valid_tokens', 'metadata'),
+				f'{head_k:x}' * 64,
+			)
+		}
+		for head_k in (6, 8, 10)
+	}
+	control = {
+		'paths': {
+			'output_root': str(
+				experiment_root
+				/ 'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
+			)
+		},
+		'identity': {
+			'model_tag': 'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
+		},
+		'pseudo_targets': {'k': 6},
+		'head': {'num_prototypes': 6},
+	}
+	training: dict[Path, dict[str, object]] = {config_paths['control']: control}
+	for variant, model_tag, weight in (
+		(
+			'nocons',
+			'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+			0.0,
+		),
+		(
+			'cons010',
+			'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
+			0.1,
+		),
+	):
+		training[config_paths[variant]] = {
+			'paths': {'output_root': str(experiment_root / model_tag)},
+			'identity': {
+				'model_tag': model_tag,
+				'scientific_identity': {
+					'variant': variant,
+					'consistency_weight': weight,
+				},
+			},
+			'loss': {'consistency_weight': weight},
+			'pseudo_targets': {'manifest': str(target_manifest)},
+		}
+
+	monkeypatch.setattr(
+		pretraining_validation,
+		'load_multi_head_target_manifest',
+		lambda _path: {'head_ks': [6, 8, 10]},
+	)
+	monkeypatch.setattr(
+		pretraining_validation,
+		'_manifest_per_head_target_hashes',
+		lambda _target: expected_targets,
+	)
+	monkeypatch.setattr(
+		pretraining_validation,
+		'_training_config',
+		lambda path: training[path],
+	)
+	monkeypatch.setattr(
+		pretraining_validation,
+		'_canonical_k6_valid_tokens_sha256',
+		lambda *_args: 'a' * 64,
+	)
+
+	def checkpoint_evidence(
+		_validation_config: F3MultiHeadPretrainingValidationConfig,
+		candidate: dict[str, object],
+		*,
+		variant: str,
+		model_tag: str,
+		weight: float,
+		expected_per_head_targets: dict[str, object],
+	) -> dict[str, object]:
+		root = Path(candidate['paths']['output_root'])  # type: ignore[index]
+		root.mkdir(parents=True)
+		best, latest = root / 'best.pt', root / 'latest.pt'
+		torch.save({'synthetic': variant, 'kind': 'best'}, best)
+		torch.save({'synthetic': variant, 'kind': 'latest'}, latest)
+		scientific = candidate['identity']['scientific_identity']  # type: ignore[index]
+		return {
+			'root': root,
+			'best_path': best,
+			'latest_path': latest,
+			'best': {'epoch': 25, 'global_step': 25600},
+			'latest': {'epoch': 25, 'global_step': 25600},
+			'identity': {
+				'model_tag': model_tag,
+				'head_spec': 'multi_resolution_ordered_prototypes_v1',
+				'head_ks': [6, 8, 10],
+				'target_manifest': {
+					'path': str(target_manifest),
+					'sha256': pretraining_validation.file_sha256(target_manifest),
+				},
+				'per_head_targets': expected_per_head_targets,
+				'consistency_policy': 'normalized_order_smooth_l1_v1',
+				'consistency_weight': weight,
+				'consistency_beta': 0.1,
+				'scientific_identity_sha256': scientific_identity_sha256(scientific),
+				'initial_student_state_sha256': 'b' * 64,
+				'initial_head_state_sha256': 'c' * 64,
+				'teacher_checkpoint_sha256': 'd' * 64,
+				'student_init_checkpoint_sha256': 'e' * 64,
+				'optimizer_group_identity': [
+					{'name': 'head', 'parameter_names': ['head.fixture']},
+					{'name': 'encoder', 'parameter_names': ['student.fixture']},
+				],
+			},
+		}
+
+	def embedding_evidence(
+		_validation_config: F3MultiHeadPretrainingValidationConfig,
+		_checkpoint: dict[str, object],
+		model_tag: str,
+		*,
+		canonical_valid_tokens_sha256: str,
+	) -> dict[str, object]:
+		root = artifact_root / 'synthetic-embeddings' / model_tag
+		root.mkdir(parents=True)
+		embeddings, valid, metadata = (
+			root / 'embeddings.npy',
+			root / 'valid_tokens.npy',
+			root / 'embedding_metadata.json',
+		)
+		np.save(embeddings, np.zeros((1, 1, 1, 1), dtype=np.float16))
+		np.save(valid, np.ones((1, 1, 1), dtype=np.bool_))
+		metadata.write_text(
+			json.dumps({'synthetic': model_tag}), encoding='utf-8'
+		)
+		return {
+			'root': root,
+			'metadata_path': metadata,
+			'metadata_sha256': pretraining_validation.file_sha256(metadata),
+			'embeddings_sha256': pretraining_validation.file_sha256(embeddings),
+			'valid_tokens_sha256': canonical_valid_tokens_sha256,
+		}
+
+	monkeypatch.setattr(
+		pretraining_validation, '_checkpoint_evidence', checkpoint_evidence
+	)
+	monkeypatch.setattr(
+		pretraining_validation, '_embedding_evidence', embedding_evidence
+	)
+
+	result = validate_f3_multi_head_pretraining(config, phase='complete')
+
+	assert len(result.published_handoffs) == 2
+	for handoff in result.published_handoffs:
+		assert load_f3_multi_head_pretraining_handoff(handoff)['status'] == 'PASS'
+		assert (handoff.parent / 'checkpoint_validation.json').is_file()
+		assert (handoff.parent / 'embedding_validation.json').is_file()
 
 
 def test_checkpoint_per_head_targets_must_match_the_canonical_manifest() -> None:

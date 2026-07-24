@@ -77,6 +77,10 @@ def test_multi_head_export_is_schema_v1_resumable_and_quarantines_one_head(
 	)['schema_version'] == 1
 	handoff = json.loads(config.handoff_manifest.read_text(encoding='utf-8'))
 	assert handoff['completion_status'] == 'COMPLETE'
+	assert handoff['clustering']['config_path'] == str(config.clustering_config)
+	assert handoff['clustering']['config_sha256'] == multi_head_export.file_sha256(
+		config.clustering_config
+	)
 	assert set(handoff['common_target_valid_sha256']) == {'survey'}
 	assert set(handoff['source_embedding']['valid_tokens_sha256']) == {'survey'}
 
@@ -86,6 +90,15 @@ def test_multi_head_export_rejects_historical_k6_output_path(tmp_path: Path) -> 
 	config = _config(tmp_path, clustering)
 	config['pseudo_target_root'] = config['historical_k6_root']
 	with pytest.raises(ValueError, match='historical_k6_root'):
+		resolve_multi_head_pseudo_target_export_config(config)
+
+
+def test_multi_head_export_requires_the_clustering_config(tmp_path: Path) -> None:
+	clustering = _clustering_root(tmp_path)
+	config = _config(tmp_path, clustering)
+	config['clustering_config'] = str(tmp_path / 'missing-clustering-config.yaml')
+
+	with pytest.raises(FileNotFoundError, match='clustering_config is missing'):
 		resolve_multi_head_pseudo_target_export_config(config)
 
 
@@ -105,9 +118,42 @@ def test_multi_head_export_rejects_target_valid_outside_source_embedding(
 		export_multi_head_pseudo_targets(config, dry_run=True)
 
 
+def test_multi_head_export_rejects_missing_clustering_provenance(
+	tmp_path: Path,
+) -> None:
+	clustering = _clustering_root(tmp_path)
+	(
+		clustering / 'models' / 'k8' / 'clustering_metadata.json'
+	).unlink()
+	config = resolve_multi_head_pseudo_target_export_config(
+		_config(tmp_path, clustering),
+	)
+
+	with pytest.raises(FileNotFoundError, match=r'k=8 clustering metadata is missing'):
+		export_multi_head_pseudo_targets(config, dry_run=True)
+
+
+def test_multi_head_export_does_not_reuse_without_prepared_feature_identity(
+	tmp_path: Path,
+) -> None:
+	clustering = _clustering_root(tmp_path)
+	config = resolve_multi_head_pseudo_target_export_config(
+		_config(tmp_path, clustering),
+	)
+	export_multi_head_pseudo_targets(config)
+	metadata_path = clustering / 'models' / 'k8' / 'clustering_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['stratigraphic_hmm'].pop('prepared_feature_cache')
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='prepared-feature identity'):
+		export_multi_head_pseudo_targets(config, only_missing=True)
+
+
 def _config(tmp_path: Path, clustering: Path) -> dict[str, object]:
 	return {
 		'clustering_output_dir': str(clustering),
+		'clustering_config': str(clustering / 'resolved_clustering_config.yaml'),
 		'source_embedding_dir': str(tmp_path / 'embeddings'),
 		'pseudo_target_root': str(tmp_path / 'replay'),
 		'historical_k6_root': str(tmp_path / 'historical'),
@@ -121,6 +167,10 @@ def _config(tmp_path: Path, clustering: Path) -> dict[str, object]:
 
 def _clustering_root(tmp_path: Path) -> Path:
 	root = tmp_path / 'clustering'
+	(root / 'resolved_clustering_config.yaml').parent.mkdir(parents=True)
+	(root / 'resolved_clustering_config.yaml').write_text(
+		'clustering:\n  output_dir: fixture\n', encoding='utf-8'
+	)
 	embeddings = tmp_path / 'embeddings'
 	embeddings.mkdir()
 	shape = (1, 1, 3)
@@ -135,4 +185,21 @@ def _clustering_root(tmp_path: Path) -> Path:
 		label_dir.mkdir(parents=True)
 		labels = np.array([[[0, -1, min(k - 1, 2)]]], dtype=np.int32)
 		np.save(label_dir / 'survey.cluster_labels_token.npy', labels)
+		metadata_dir = root / 'models' / f'k{k}'
+		metadata_dir.mkdir(parents=True)
+		(metadata_dir / 'clustering_metadata.json').write_text(
+			json.dumps(
+				{
+					'k': k,
+					'method': 'stratigraphic_hmm_kmeans',
+					'stratigraphic_hmm': {
+						'prepared_feature_cache': {
+							'effective_mode': 'memory',
+							'fingerprint': 'fixture-prepared-features',
+						}
+					},
+				},
+			),
+			encoding='utf-8',
+		)
 	return root

@@ -334,6 +334,59 @@ def test_manifest_accepts_edge_excluded_target_mask_as_source_subset(
 		)
 
 
+def test_manifest_loader_supports_legacy_v1_exact_mask_contract(
+	tmp_path: Path,
+) -> None:
+	"""V1 remains loadable only for its original source-mask-equality contract."""
+	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
+	manifest = tmp_path / 'legacy-manifest.json'
+	payload = build_multi_head_target_manifest(
+		manifest_path=manifest,
+		source_embedding_dir=embeddings,
+		head_roots=heads,
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
+		migration_decision=migration,
+		control_summary=control,
+	)
+	payload['schema_version'] = 1
+	payload['common'].pop('source_target_alignment')  # type: ignore[index]
+	manifest.write_text(json.dumps(payload), encoding='utf-8')
+
+	assert load_multi_head_target_manifest(manifest)['schema_version'] == 1
+	assert load_multi_head_target_manifest(
+		manifest,
+		validate_array_semantics=False,
+	)['schema_version'] == 1
+
+
+def test_legacy_v1_manifest_rejects_edge_excluded_target_mask(
+	tmp_path: Path,
+) -> None:
+	shape = (2, 2, 12)
+	target_valid = np.ones(shape, dtype=np.bool_)
+	target_valid[0, :, :] = False
+	embeddings, heads = _artifacts(tmp_path, target_valid_tokens=target_valid)
+	migration, control = _write_positive_preflight(tmp_path)
+	manifest = tmp_path / 'legacy-manifest.json'
+	payload = build_multi_head_target_manifest(
+		manifest_path=manifest,
+		source_embedding_dir=embeddings,
+		head_roots=heads,
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
+		migration_decision=migration,
+		control_summary=control,
+	)
+	payload['schema_version'] = 1
+	payload['common'].pop('source_target_alignment')  # type: ignore[index]
+	manifest.write_text(json.dumps(payload), encoding='utf-8')
+
+	with pytest.raises(
+		ValueError, match=r'legacy v1.*does not match source embedding'
+	):
+		load_multi_head_target_manifest(manifest, validate_array_semantics=False)
+
+
 def test_manifest_rejects_cross_head_target_mask_mismatch(tmp_path: Path) -> None:
 	embeddings, heads = _artifacts(tmp_path)
 	migration, control = _write_positive_preflight(tmp_path)

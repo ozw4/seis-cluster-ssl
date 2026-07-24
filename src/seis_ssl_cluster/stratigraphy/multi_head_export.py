@@ -41,6 +41,7 @@ class MultiHeadPseudoTargetExportConfig:
 	"""Resolved immutable policy for a multi-head pseudo-target export."""
 
 	clustering_output_dir: Path
+	clustering_config: Path
 	source_embedding_dir: Path
 	pseudo_target_root: Path
 	ks: tuple[int, ...]
@@ -68,6 +69,7 @@ def resolve_multi_head_pseudo_target_export_config(  # noqa: C901
 	"""Validate the deliberately narrow schema-v1 multi-head export config."""
 	allowed = {
 		'clustering_output_dir',
+		'clustering_config',
 		'source_embedding_dir',
 		'pseudo_target_root',
 		'ks',
@@ -84,6 +86,11 @@ def resolve_multi_head_pseudo_target_export_config(  # noqa: C901
 			f'unknown multi-head pseudo-target config keys: {sorted(unknown)}',
 		)
 	clustering_output_dir = _path(config, 'clustering_output_dir')
+	clustering_config = _path(config, 'clustering_config')
+	if not clustering_config.is_file():
+		raise FileNotFoundError(
+			f'clustering_config is missing: {clustering_config}'
+		)
 	source_embedding_dir = _path(config, 'source_embedding_dir')
 	pseudo_target_root = _path(config, 'pseudo_target_root')
 	ks_value = config.get('ks')
@@ -127,6 +134,7 @@ def resolve_multi_head_pseudo_target_export_config(  # noqa: C901
 	)
 	return MultiHeadPseudoTargetExportConfig(
 		clustering_output_dir=clustering_output_dir,
+		clustering_config=clustering_config,
 		source_embedding_dir=source_embedding_dir,
 		pseudo_target_root=pseudo_target_root,
 		ks=ks,
@@ -145,6 +153,11 @@ def plan_multi_head_pseudo_target_exports(
 	only_missing: bool,
 ) -> list[MultiHeadPseudoTargetExportPlan]:
 	"""Validate all inputs and classify each head without writing arrays."""
+	# The handoff is a provenance record, not merely a list of output hashes.
+	# Validate its required clustering inputs before either reusing a handoff or
+	# creating new pseudo-target arrays.
+	_clustering_config_sha256(config.clustering_config)
+	_clustering_provenance(config.clustering_output_dir, ks=config.ks)
 	if config.historical_k6_root and _same_path(
 		config.historical_k6_root, config.pseudo_target_root
 	):
@@ -286,9 +299,9 @@ def _validate_complete_export(  # noqa: C901
 
 
 def _write_handoff(config: MultiHeadPseudoTargetExportConfig) -> None:
-	prepared_feature_identity = _prepared_feature_identity(
-		config.clustering_output_dir,
-		k=config.ks[0],
+	config_sha256 = _clustering_config_sha256(config.clustering_config)
+	metadata_hashes, prepared_feature_identity = _clustering_provenance(
+		config.clustering_output_dir, ks=config.ks
 	)
 	payload: dict[str, object] = {
 		'artifact_type': 'strat_hmm_multi_head_pseudo_target_export_handoff',
@@ -296,10 +309,9 @@ def _write_handoff(config: MultiHeadPseudoTargetExportConfig) -> None:
 		'completion_status': 'COMPLETE',
 		'clustering': {
 			'path': str(config.clustering_output_dir),
-			'config_and_metadata_sha256': _clustering_metadata_hashes(
-				config.clustering_output_dir,
-				ks=config.ks,
-			),
+			'config_path': str(config.clustering_config),
+			'config_sha256': config_sha256,
+			'metadata_sha256': metadata_hashes,
 			'labels': {
 				str(k): {
 					path.name: file_sha256(path)
@@ -359,7 +371,7 @@ def _item_hashes(item: StratPseudoTargetInput) -> dict[str, str]:
 	}
 
 
-def _recorded_head_hashes(
+def _recorded_head_hashes(  # noqa: C901
 	config: MultiHeadPseudoTargetExportConfig,
 	*,
 	k: int,
@@ -375,6 +387,30 @@ def _recorded_head_hashes(
 		or payload.get('completion_status') != 'COMPLETE'
 	):
 		raise ValueError('multi-head export handoff is incomplete')
+	metadata_hashes, prepared_feature_identity = _clustering_provenance(
+		config.clustering_output_dir, ks=config.ks
+	)
+	config_sha256 = _clustering_config_sha256(config.clustering_config)
+	clustering = payload.get('clustering')
+	if not isinstance(clustering, Mapping):
+		raise TypeError('multi-head export handoff is missing clustering provenance')
+	if (
+		not isinstance(clustering.get('path'), str)
+		or not _same_path(Path(clustering['path']), config.clustering_output_dir)
+	):
+		raise ValueError('multi-head export handoff clustering path mismatch')
+	if (
+		not isinstance(clustering.get('config_path'), str)
+		or not _same_path(Path(clustering['config_path']), config.clustering_config)
+		or clustering.get('config_sha256') != config_sha256
+	):
+		raise ValueError('multi-head export handoff clustering config mismatch')
+	if clustering.get('metadata_sha256') != metadata_hashes:
+		raise ValueError('multi-head export handoff clustering metadata mismatch')
+	if payload.get('prepared_feature_identity') != prepared_feature_identity:
+		raise ValueError(
+			'multi-head export handoff prepared-feature identity mismatch'
+		)
 	heads = payload.get('heads')
 	if not isinstance(heads, Mapping):
 		raise TypeError('multi-head export handoff is missing head hashes')
@@ -460,14 +496,44 @@ def _reject_historical_k6_identity(
 			)
 
 
-def _prepared_feature_identity(root: Path, *, k: int) -> object:
-	metadata_path = next(iter(_source_metadata_paths(root, k=k)), None)
-	if metadata_path is None:
-		return None
-	payload = json.loads(metadata_path.read_text(encoding='utf-8'))
-	if not isinstance(payload, dict):
-		return None
-	return payload.get('prepared_feature_cache')
+def _clustering_provenance(
+	root: Path,
+	*,
+	ks: Sequence[int],
+) -> tuple[dict[str, str], Mapping[str, object]]:
+	"""Return complete, cross-K clustering provenance for a publishable handoff."""
+	metadata_hashes = _clustering_metadata_hashes(root, ks=ks)
+	prepared_feature_identity: Mapping[str, object] | None = None
+	for k in ks:
+		current = _prepared_feature_identity(root, k=k)
+		if prepared_feature_identity is None:
+			prepared_feature_identity = current
+		elif current != prepared_feature_identity:
+			raise ValueError(
+				'clustering prepared-feature identity differs across K values'
+			)
+	if prepared_feature_identity is None:
+		raise AssertionError('at least one K is required for clustering provenance')
+	return metadata_hashes, prepared_feature_identity
+
+
+def _clustering_config_sha256(path: Path) -> str:
+	if not path.is_file():
+		raise FileNotFoundError(f'clustering config is missing: {path}')
+	return file_sha256(path)
+
+
+def _prepared_feature_identity(root: Path, *, k: int) -> Mapping[str, object]:
+	metadata = _clustering_metadata(root, k=k)
+	hmm = metadata.get('stratigraphic_hmm')
+	if not isinstance(hmm, Mapping):
+		raise TypeError(f'k={k} clustering metadata is missing stratigraphic_hmm')
+	prepared = hmm.get('prepared_feature_cache')
+	if not isinstance(prepared, Mapping) or not prepared:
+		raise ValueError(
+			f'k={k} clustering metadata is missing prepared-feature identity'
+		)
+	return prepared
 
 
 def _clustering_metadata_hashes(
@@ -475,18 +541,34 @@ def _clustering_metadata_hashes(
 	*,
 	ks: Sequence[int],
 ) -> dict[str, str]:
-	return {
-		str(k): file_sha256(path)
-		for k in ks
-		for path in [root / 'models' / f'k{k}' / 'clustering_metadata.json']
-		if path.is_file()
-	}
+	result: dict[str, str] = {}
+	for k in ks:
+		metadata_path = root / 'models' / f'k{k}' / 'clustering_metadata.json'
+		# Parse before hashing so a handoff cannot bind an opaque or wrong-K file.
+		_clustering_metadata(root, k=k)
+		result[str(k)] = file_sha256(metadata_path)
+	return result
 
 
-def _source_metadata_paths(root: Path, *, k: int) -> tuple[Path, ...]:
-	return tuple(
-		sorted((root / 'labels' / f'k{k}').glob('*.cluster_label_metadata.json')),
-	)
+def _clustering_metadata(root: Path, *, k: int) -> Mapping[str, object]:
+	metadata_path = root / 'models' / f'k{k}' / 'clustering_metadata.json'
+	if not metadata_path.is_file():
+		raise FileNotFoundError(
+			f'k={k} clustering metadata is missing: {metadata_path}'
+		)
+	try:
+		metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	except json.JSONDecodeError as exc:
+		raise ValueError(
+			f'k={k} clustering metadata must be valid JSON: {metadata_path}'
+		) from exc
+	if not isinstance(metadata, Mapping):
+		raise TypeError(f'k={k} clustering metadata must be a JSON object')
+	if metadata.get('k') != k:
+		raise ValueError(f'k={k} clustering metadata K mismatch')
+	if metadata.get('method') != 'stratigraphic_hmm_kmeans':
+		raise ValueError(f'k={k} clustering metadata method mismatch')
+	return metadata
 
 
 def _quarantine(path: Path) -> Path:

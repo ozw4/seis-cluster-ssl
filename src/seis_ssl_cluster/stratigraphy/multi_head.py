@@ -29,6 +29,7 @@ from seis_ssl_cluster.stratigraphy.targets import (
 
 ARTIFACT_TYPE = 'strat_hmm_multi_head_target_manifest'
 SCHEMA_VERSION = 2
+_LEGACY_SCHEMA_VERSION = 1
 
 
 def build_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0913
@@ -161,12 +162,14 @@ def load_multi_head_target_manifest(
 	*,
 	validate_array_semantics: bool = True,
 ) -> dict[str, object]:
-	"""Load a manifest with strict reference validation.
+	"""Load a v1 or v2 manifest with strict reference validation.
 
 	Set ``validate_array_semantics`` to false for configuration-only consumers.
 	That mode verifies the schema, metadata identities, and every referenced file
 	digest without materializing pseudo-target arrays.  Full target-array semantic
-	validation remains the default for artifact validation and publication.
+	validation remains the default for artifact validation and publication.  Legacy
+	v1 manifests remain loadable only under their original exact source-mask
+	contract; newly published manifests always use v2 subset evidence.
 	"""
 	try:
 		payload = json.loads(Path(path).read_text(encoding='utf-8'))
@@ -188,7 +191,7 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	verify_hashes: bool = False,
 	validate_array_semantics: bool = True,
 ) -> None:
-	"""Strictly validate schema-v2 references and shared target semantics."""
+	"""Strictly validate v1/v2 references and shared target semantics."""
 	_required_keys(
 		payload,
 		{
@@ -204,11 +207,12 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 		'manifest',
 		optional_keys={'k6_replay_parity'},
 	)
-	if (
-		payload['artifact_type'] != ARTIFACT_TYPE
-		or payload['schema_version'] != SCHEMA_VERSION
-	):
+	if payload['artifact_type'] != ARTIFACT_TYPE or payload['schema_version'] not in {
+		_LEGACY_SCHEMA_VERSION,
+		SCHEMA_VERSION,
+	}:
 		raise ValueError('unsupported multi-head target manifest schema')
+	legacy_v1 = payload['schema_version'] == _LEGACY_SCHEMA_VERSION
 	if payload['ordering_orientation'] != 'increasing_downward':
 		raise ValueError('manifest ordering_orientation must be increasing_downward')
 	if not isinstance(payload['head_ks'], list):
@@ -229,16 +233,14 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	if set(head_values) != {str(k) for k in ks}:
 		raise ValueError('manifest heads must contain exactly one entry per head K')
 	common = _mapping(payload['common'], 'manifest common')
-	_required_keys(
-		common,
-		{
-			'survey_ids',
-			'token_grid_shapes',
-			'valid_tokens_sha256',
-			'source_target_alignment',
-		},
-		'manifest common',
-	)
+	common_keys = {
+		'survey_ids',
+		'token_grid_shapes',
+		'valid_tokens_sha256',
+	}
+	if not legacy_v1:
+		common_keys.add('source_target_alignment')
+	_required_keys(common, common_keys, 'manifest common')
 	_validate_cross_head_diagnostics(payload['cross_head_diagnostics'], ks=ks)
 	source_embedding = _mapping(payload['source_embedding'], 'source_embedding')
 	_validate_embedding_identity(source_embedding, verify_hashes=verify_hashes)
@@ -255,18 +257,21 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	common_valid_tokens_sha256 = _mapping(
 		common['valid_tokens_sha256'], 'manifest common valid_tokens_sha256'
 	)
-	common_source_target_alignment = _mapping(
-		common['source_target_alignment'],
-		'manifest common source_target_alignment',
-	)
+	common_source_target_alignment: Mapping[str, object] | None = None
+	if not legacy_v1:
+		common_source_target_alignment = _mapping(
+			common['source_target_alignment'],
+			'manifest common source_target_alignment',
+		)
 	if set(common_token_grid_shapes) != set(survey_ids):
 		raise ValueError('manifest common token_grid_shapes survey set mismatch')
 	if set(common_valid_tokens_sha256) != set(survey_ids):
 		raise ValueError('manifest common valid_tokens_sha256 survey set mismatch')
-	_validate_source_target_alignment_contract(
-		common_source_target_alignment,
-		survey_ids,
-	)
+	if common_source_target_alignment is not None:
+		_validate_source_target_alignment_contract(
+			common_source_target_alignment,
+			survey_ids,
+		)
 	for k in ks:
 		head = _mapping(head_values[str(k)], f'head k={k}')
 		_required_keys(
@@ -309,14 +314,25 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 					validate_array_semantics=validate_array_semantics,
 				)
 	if verify_hashes:
-		_validate_manifest_embedding_alignment(
-			head_values,
-			survey_ids,
-			source_embedding,
-			ks,
-			common_source_target_alignment,
-			validate_array_semantics=validate_array_semantics,
-		)
+		if legacy_v1:
+			_validate_legacy_manifest_embedding_alignment(
+				head_values,
+				survey_ids,
+				source_embedding,
+				ks,
+				validate_array_semantics=validate_array_semantics,
+			)
+		else:
+			if common_source_target_alignment is None:
+				raise AssertionError('schema-v2 alignment evidence is required')
+			_validate_manifest_embedding_alignment(
+				head_values,
+				survey_ids,
+				source_embedding,
+				ks,
+				common_source_target_alignment,
+				validate_array_semantics=validate_array_semantics,
+			)
 	if 6 in ks:
 		if 'k6_replay_parity' not in payload:
 			raise ValueError('manifest is missing K=6 replay parity evidence')
@@ -1008,6 +1024,61 @@ def _validate_manifest_embedding_alignment(  # noqa: C901, PLR0913
 				f'{survey_id} persisted source-to-target alignment '
 				'does not match arrays'
 			)
+
+
+def _validate_legacy_manifest_embedding_alignment(
+	head_values: Mapping[str, object],
+	survey_ids: list[object],
+	source_embedding: Mapping[str, object],
+	ks: Sequence[int],
+	*,
+	validate_array_semantics: bool,
+) -> None:
+	"""Validate the original v1 exact source-to-target mask contract.
+
+	V1 does not carry subset evidence.  Its persisted source and target mask hashes
+	must therefore remain equal, and full validation repeats that bitwise check.
+	This compatibility path is intentionally read-only: new manifests are v2.
+	"""
+	embeddings = _mapping(source_embedding['surveys'], 'source_embedding surveys')
+	if set(embeddings) != set(survey_ids):
+		raise ValueError('source embedding survey set does not match manifest common')
+	for k in ks:
+		surveys = _mapping(
+			_mapping(head_values[str(k)], f'head k={k}')['surveys'],
+			f'head k={k} surveys',
+		)
+		for survey_id in survey_ids:
+			entry = _mapping(surveys[str(survey_id)], 'target reference')
+			embedding = _mapping(
+				embeddings[str(survey_id)], 'source embedding survey'
+			)
+			valid_reference = _mapping(
+				entry['valid_tokens'],
+				'target valid_tokens reference',
+			)
+			if valid_reference['sha256'] != embedding['valid_tokens_sha256']:
+				raise ValueError(
+					f'legacy v1 head k={k} {survey_id} valid-token mask does not '
+					'match source embedding'
+				)
+			if not validate_array_semantics:
+				continue
+			target = _load_reference_arrays(entry)
+			embedding_valid = np.load(
+				Path(str(embedding['valid_tokens_path'])),
+				mmap_mode='r',
+				allow_pickle=False,
+			)
+			if target['labels'].shape != embedding_valid.shape:
+				raise ValueError(
+					f'head k={k} {survey_id} token grid does not match source embedding'
+				)
+			if not np.array_equal(target['valid_tokens'], embedding_valid):
+				raise ValueError(
+					f'legacy v1 head k={k} {survey_id} valid-token mask does not '
+					'match source embedding'
+				)
 
 
 def _source_target_alignment_evidence(

@@ -16,9 +16,13 @@ consistency weight.
 `01_export_multi_head_pseudo_targets.yaml` is the canonical, strict K=6/8/10
 export input. It creates the replay K=6 target separately from the immutable
 historical K=6 training target and verifies that the common target-valid mask
-is a subset of the source embedding mask.
+is a subset of the source embedding mask. Its `clustering_config` path and
+hash are recorded with each complete export handoff alongside per-K clustering
+metadata and the prepared-feature identity.
 `01_build_multi_head_targets.yaml` supplies the manifest publication paths
-after replay parity has passed.
+after replay parity has passed. New manifests use schema v2 to record that
+subset evidence; legacy schema-v1 manifests remain loadable only when their
+source and target valid-token masks are exactly equal.
 
 Run the target and pretraining stages in this order. The build command both
 checks the K=6 replay parity and publishes the immutable K=6/8/10 manifest;
@@ -37,8 +41,9 @@ python proc/seis_ssl_cluster/export_strat_hmm_multi_head_pseudo_targets.py \
 python proc/seis_ssl_cluster/export_strat_hmm_multi_head_pseudo_targets.py \
   --config "$EXP/01_export_multi_head_pseudo_targets.yaml" --only-missing
 
-# Revalidate the complete schema-v1 bundle (including source hashes) without
-# writing arrays before the K=6 parity and manifest-publication stage.
+# Revalidate the complete schema-v1 pseudo-target bundle (including source
+# hashes) without writing arrays before the K=6 parity and manifest-publication
+# stage.
 python proc/seis_ssl_cluster/export_strat_hmm_multi_head_pseudo_targets.py \
   --config "$EXP/01_export_multi_head_pseudo_targets.yaml" --only-missing --dry-run
 

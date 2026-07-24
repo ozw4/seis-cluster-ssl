@@ -38,6 +38,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 		only_missing=args.only_missing,
 	)
 	print(f'source clustering root: {config.clustering_output_dir}')
+	print(
+		f'source clustering config: {config.clustering_config} '
+		f'sha256={file_sha256(config.clustering_config)}'
+	)
 	print(f'source embedding root: {config.source_embedding_dir}')
 	print(
 		'schema/boundary/confidence policy: '
