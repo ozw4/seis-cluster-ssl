@@ -203,6 +203,8 @@ def load_f3_multi_head_pretraining_handoff(  # noqa: C901, PLR0912
 		raise ValueError('handoff selected checkpoint kind mismatch')
 	if checkpoint['selection_history_event_count'] <= 0:
 		raise ValueError('handoff checkpoint selection history must not be empty')
+	if checkpoint['selection_history_schema_version'] != 1:
+		raise ValueError('handoff checkpoint selection history schema version mismatch')
 	if (
 		checkpoint['best_epoch'] != checkpoint['selected_epoch']
 		or checkpoint['best_global_step'] != checkpoint['selected_global_step']

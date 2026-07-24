@@ -150,6 +150,11 @@ def test_public_handoff_loader_requires_complete_pass_schema(tmp_path: Path) -> 
 		('best_epoch', 24, 'best identity does not match selected checkpoint'),
 		('best_global_step', 25500, 'best identity does not match selected checkpoint'),
 		('selection_history_event_count', 0, 'selection history must not be empty'),
+		(
+			'selection_history_schema_version',
+			2,
+			'selection history schema version mismatch',
+		),
 	):
 		payload = _handoff_payload()
 		payload['checkpoint'][field] = value
@@ -761,7 +766,7 @@ def test_best_selection_accepts_a_step_selected_before_the_final_epoch() -> None
 	step = {
 		'sequence': 0,
 		'epoch': 25,
-		'global_step': 25600,
+		'global_step': 25500,
 		'checkpoint_kind': 'step',
 		'batch_index': 499,
 		'loss': 0.262,
@@ -800,7 +805,7 @@ def test_best_selection_accepts_a_step_selected_before_the_final_epoch() -> None
 	}
 	best = {
 		'epoch': 25,
-		'global_step': 25600,
+		'global_step': 25500,
 		'metrics': {'loss': 0.262},
 		'training_state': {'checkpoint_kind': 'step', 'batch_index': 499},
 		'checkpoint_selection': best_selection,
@@ -814,6 +819,146 @@ def test_best_selection_accepts_a_step_selected_before_the_final_epoch() -> None
 	}
 
 	assert _validate_best_selection(best, latest, variant='nocons')['selected'] == step
+
+
+def test_checkpoint_phase_accepts_a_step_best_before_the_final_epoch(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	artifact_root = tmp_path / 'artifacts'
+	experiment_root = artifact_root / 'pretraining'
+	config = F3MultiHeadPretrainingValidationConfig(
+		artifact_root=artifact_root,
+		experiment_root=experiment_root,
+		target_manifest=artifact_root / 'targets.json',
+		control_full_config=artifact_root / 'control.yaml',
+		nocons_full_config=artifact_root / 'nocons.yaml',
+		cons010_full_config=artifact_root / 'cons010.yaml',
+	)
+	step = {
+		'sequence': 0,
+		'epoch': 25,
+		'global_step': 25500,
+		'checkpoint_kind': 'step',
+		'batch_index': 499,
+		'loss': 0.262,
+	}
+	epoch = {
+		'sequence': 1,
+		'epoch': 25,
+		'global_step': 25600,
+		'checkpoint_kind': 'epoch',
+		'batch_index': None,
+		'loss': 0.310,
+	}
+	selection = {
+		'schema_version': 1,
+		'criterion': 'metrics.loss',
+		'improvement_policy': 'strictly_lower_loss_v1',
+		'events': [
+			{
+				**step,
+				'previous_best_score': None,
+				'best_updated': True,
+				'best_score_after': 0.262,
+			},
+			{
+				**epoch,
+				'previous_best_score': 0.262,
+				'best_updated': False,
+				'best_score_after': 0.262,
+			},
+		],
+		'selected': step,
+	}
+	best_selection = {**selection, 'events': [selection['events'][0]]}
+	training: dict[Path, dict[str, object]] = {
+		config.control_full_config: {},
+	}
+	for variant, model_tag, _weight in pretraining_validation._CANDIDATES:  # noqa: SLF001
+		root = experiment_root / model_tag
+		root.mkdir(parents=True)
+		best = {
+			'epoch': 25,
+			'global_step': 25500,
+			'metrics': {'loss': 0.262},
+			'training_state': {'checkpoint_kind': 'step', 'batch_index': 499},
+			'checkpoint_selection': best_selection,
+			'stratigraphy_checkpoint': {},
+		}
+		latest = {
+			'epoch': 25,
+			'global_step': 25600,
+			'metrics': {'loss': 0.310},
+			'training_state': {'checkpoint_kind': 'epoch', 'batch_index': None},
+			'checkpoint_selection': selection,
+			'stratigraphy_checkpoint': {},
+		}
+		torch.save(best, root / 'best.pt')
+		torch.save(latest, root / 'latest.pt')
+		(root / 'multi_head_epoch_metrics.csv').write_text(
+			'epoch,global_step,loss\n'
+			+ ''.join(
+				f'{number},{number * 1024},0.310\n'
+				for number in range(1, 26)
+			),
+			encoding='utf-8',
+		)
+		training[getattr(config, f'{variant}_full_config')] = {
+			'paths': {'output_root': str(root)},
+		}
+	monkeypatch.setattr(
+		pretraining_validation,
+		'load_multi_head_target_manifest',
+		lambda _path: {'head_ks': [6, 8, 10]},
+	)
+	monkeypatch.setattr(
+		pretraining_validation, '_manifest_per_head_target_hashes', lambda _target: {}
+	)
+	monkeypatch.setattr(
+		pretraining_validation, '_training_config', lambda path: training[path]
+	)
+	monkeypatch.setattr(
+		pretraining_validation, '_validate_control_config', lambda *_: None
+	)
+	monkeypatch.setattr(
+		pretraining_validation,
+		'_validate_candidate_config_contract',
+		lambda *_args, **_kwargs: None,
+	)
+	monkeypatch.setattr(
+		pretraining_validation,
+		'validate_stratigraphy_checkpoint_payload',
+		lambda *_args, **_kwargs: None,
+	)
+	monkeypatch.setattr(
+		pretraining_validation, '_identity_contract', lambda *_: None
+	)
+	monkeypatch.setattr(
+		pretraining_validation, '_validate_initial_states', lambda *_: None
+	)
+	monkeypatch.setattr(
+		pretraining_validation, '_validate_freeze_contract', lambda *_: None
+	)
+	monkeypatch.setattr(
+		pretraining_validation, '_validate_pair_config_contract', lambda *_: None
+	)
+	monkeypatch.setattr(pretraining_validation, '_validate_pair', lambda *_: None)
+
+	result = validate_f3_multi_head_pretraining(config, phase='checkpoints')
+
+	for variant in ('nocons', 'cons010'):
+		evidence = result.candidates[variant]
+		assert evidence['status'] == 'PASS'
+		selection_evidence = evidence['checkpoint_selection']
+		assert isinstance(selection_evidence, dict)
+		assert selection_evidence['selected']['global_step'] == 25500
+		assert (
+			experiment_root
+			/ evidence['planned_action'].split(':', maxsplit=1)[0]
+			/ 'preflight'
+			/ 'checkpoint_validation.json'
+		).is_file()
 
 
 def test_freeze_contract_rejects_a_multi_head_run_with_only_one_updated_head(

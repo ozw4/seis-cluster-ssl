@@ -22,7 +22,7 @@ from seis_ssl_cluster.stratigraphy.prototypes import (
 	MultiResolutionOrderedPrototypeHeads,
 	OrderedPrototypeHead,
 )
-from seis_ssl_cluster.training.checkpoint import capture_rng_state
+from seis_ssl_cluster.training.checkpoint import capture_rng_state, load_checkpoint
 
 
 @dataclass(frozen=True)
@@ -39,6 +39,8 @@ class StratRollingCheckpointResult:
 _CHECKPOINT_SELECTION_SCHEMA_VERSION = 1
 _CHECKPOINT_SELECTION_CRITERION = 'metrics.loss'
 _CHECKPOINT_SELECTION_POLICY = 'strictly_lower_loss_v1'
+_CHECKPOINT_SELECTION_TRANSACTION_SCHEMA_VERSION = 1
+_CHECKPOINT_SELECTION_TRANSACTION_NAME = '.checkpoint_selection_transaction.json'
 
 
 def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
@@ -64,7 +66,10 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 ) -> StratRollingCheckpointResult:
 	"""Write rolling ``latest.pt`` and update ``best.pt`` on lower loss."""
 	checkpoint_root = Path(checkpoint_dir)
+	checkpoint_root.mkdir(parents=True, exist_ok=True)
 	is_multi_head = _is_multi_head_config(stratigraphy_config)
+	if is_multi_head:
+		recover_strat_hmm_rolling_checkpoint(checkpoint_root)
 	selection_best_score = (
 		float(selected_checkpoint_selection_event(checkpoint_selection)['loss'])
 		if checkpoint_selection is not None
@@ -84,6 +89,14 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 		if is_multi_head
 		else None
 	)
+	score = _loss_score(metrics)
+	best_updated = (
+		bool(selection['events'][-1]['best_updated'])
+		if selection is not None
+		else _is_improved(score, best_score)
+	)
+	if selection is not None and best_updated:
+		_write_checkpoint_selection_transaction(checkpoint_root, selection)
 	latest_path = save_strat_hmm_checkpoint(
 		checkpoint_root / 'latest.pt',
 		student=student,
@@ -103,12 +116,6 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 		control_identity=control_identity,
 		checkpoint_selection=selection,
 	)
-	score = _loss_score(metrics)
-	best_updated = (
-		bool(selection['events'][-1]['best_updated'])
-		if selection is not None
-		else _is_improved(score, best_score)
-	)
 	resolved_best_score = (
 		float(selection['selected']['loss']) if selection is not None else best_score
 	)
@@ -118,6 +125,8 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 		resolved_best_score = score
 	if selection is not None:
 		_write_checkpoint_selection_reports(checkpoint_root, selection)
+	if selection is not None and best_updated:
+		_checkpoint_selection_transaction_path(checkpoint_root).unlink()
 	return StratRollingCheckpointResult(
 		latest_path=latest_path,
 		best_path=best_path,
@@ -125,6 +134,47 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 		best_updated=best_updated,
 		checkpoint_selection=selection,
 	)
+
+
+def recover_strat_hmm_rolling_checkpoint(checkpoint_dir: str | Path) -> None:
+	"""Finish an interrupted multi-head ``latest.pt``/``best.pt`` update.
+
+	A transaction record is only left behind while an improved latest checkpoint
+	is waiting to be copied to ``best.pt``.  Recovery verifies that the latest
+	payload is that recorded candidate before repairing the derived best file.
+	"""
+	checkpoint_root = Path(checkpoint_dir)
+	transaction_path = _checkpoint_selection_transaction_path(checkpoint_root)
+	if not transaction_path.is_file():
+		return
+	transaction = _load_checkpoint_selection_transaction(transaction_path)
+	latest_path = checkpoint_root / 'latest.pt'
+	if not latest_path.is_file():
+		transaction_path.unlink()
+		return
+	latest = load_checkpoint(latest_path, map_location='cpu')
+	selection = _validated_checkpoint_selection(latest.get('checkpoint_selection'))
+	if checkpoint_selection_sha256(selection) != transaction['selection_sha256']:
+		transaction_path.unlink()
+		return
+	selected = selected_checkpoint_selection_event(selection)
+	if selected != transaction['selected']:
+		raise ValueError('checkpoint selection transaction selected event mismatch')
+	events = selection['events']
+	if not isinstance(events, list) or not isinstance(events[-1], Mapping):
+		raise TypeError('checkpoint selection transaction events are invalid')
+	last = events[-1]
+	if (
+		_selection_event_identity_from_event(last) != selected
+		or last.get('best_updated') is not True
+	):
+		raise ValueError('checkpoint selection transaction does not select latest')
+	_validate_checkpoint_selection_payload_binding(latest, selection)
+	best_path = checkpoint_root / 'best.pt'
+	if not _checkpoint_payload_matches_selected_event(best_path, selected):
+		_copy_checkpoint_atomic(latest_path, best_path)
+	_write_checkpoint_selection_reports(checkpoint_root, selection)
+	transaction_path.unlink()
 
 
 def save_strat_hmm_checkpoint(  # noqa: PLR0913
@@ -1406,6 +1456,74 @@ def _selection_event_identity_from_event(
 	return _selection_event_identity({key: value[key] for key in keys})
 
 
+def _checkpoint_selection_transaction_path(checkpoint_root: Path) -> Path:
+	return checkpoint_root / _CHECKPOINT_SELECTION_TRANSACTION_NAME
+
+
+def _write_checkpoint_selection_transaction(
+	checkpoint_root: Path, selection: Mapping[str, object]
+) -> None:
+	canonical = _validated_checkpoint_selection(selection)
+	events = canonical['events']
+	if not isinstance(events, list) or not isinstance(events[-1], Mapping):
+		raise TypeError('checkpoint selection transaction events are invalid')
+	selected = selected_checkpoint_selection_event(canonical)
+	last = events[-1]
+	if (
+		_selection_event_identity_from_event(last) != selected
+		or last.get('best_updated') is not True
+	):
+		raise ValueError('checkpoint selection transaction does not select latest')
+	_atomic_json(
+		_checkpoint_selection_transaction_path(checkpoint_root),
+		{
+			'schema_version': _CHECKPOINT_SELECTION_TRANSACTION_SCHEMA_VERSION,
+			'selection_sha256': checkpoint_selection_sha256(canonical),
+			'selected': selected,
+		},
+	)
+
+
+def _load_checkpoint_selection_transaction(path: Path) -> dict[str, object]:
+	try:
+		value = json.loads(path.read_text(encoding='utf-8'))
+	except (OSError, json.JSONDecodeError) as error:
+		raise ValueError('checkpoint selection transaction is unreadable') from error
+	if not isinstance(value, Mapping):
+		raise TypeError('checkpoint selection transaction must be a mapping')
+	if value.get('schema_version') != _CHECKPOINT_SELECTION_TRANSACTION_SCHEMA_VERSION:
+		raise ValueError('unsupported checkpoint selection transaction schema_version')
+	digest = value.get('selection_sha256')
+	if not isinstance(digest, str) or len(digest) != 64:
+		raise TypeError('checkpoint selection transaction digest is invalid')
+	if any(character not in '0123456789abcdef' for character in digest):
+		raise ValueError('checkpoint selection transaction digest is invalid')
+	return {
+		'selection_sha256': digest,
+		'selected': _selection_event_identity(value.get('selected')),
+	}
+
+
+def _checkpoint_payload_matches_selected_event(
+	path: Path, selected: Mapping[str, object]
+) -> bool:
+	if not path.is_file():
+		return False
+	try:
+		payload = load_checkpoint(path, map_location='cpu')
+		selection = _validated_checkpoint_selection(payload.get('checkpoint_selection'))
+		_validate_checkpoint_selection_payload_binding(payload, selection)
+		events = selection['events']
+		return (
+			isinstance(events, list)
+			and isinstance(events[-1], Mapping)
+			and selected_checkpoint_selection_event(selection) == selected
+			and _selection_event_identity_from_event(events[-1]) == selected
+		)
+	except (OSError, RuntimeError, TypeError, ValueError):
+		return False
+
+
 def _required_loss_score(metrics: Mapping[str, float]) -> float:
 	score = _loss_score(metrics)
 	if score is None:
@@ -1516,6 +1634,7 @@ def _to_plain_value(value: object) -> object:
 
 __all__ = [
 	'StratRollingCheckpointResult',
+	'recover_strat_hmm_rolling_checkpoint',
 	'save_strat_hmm_checkpoint',
 	'save_strat_hmm_rolling_checkpoint',
 ]

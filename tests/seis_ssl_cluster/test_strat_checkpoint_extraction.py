@@ -32,6 +32,7 @@ from seis_ssl_cluster.training.strat_hmm.resume import (
 )
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	inspect_stratigraphy_checkpoint,
+	recover_strat_hmm_rolling_checkpoint,
 	save_strat_hmm_checkpoint,
 	save_strat_hmm_rolling_checkpoint,
 	validate_stratigraphy_checkpoint_payload,
@@ -780,6 +781,100 @@ def test_multi_head_rolling_checkpoint_persists_resume_history_and_reports(
 	corrupt_event['epoch'] = 0
 	with pytest.raises(ValueError, match='event epochs must not regress'):
 		validate_stratigraphy_checkpoint_payload(corrupt_latest)
+
+
+def test_multi_head_rolling_checkpoint_recovers_interrupted_best_update(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _multi_head_resume_config(tmp_path, monkeypatch, variant='nocons')
+	student, head, optimizer = _new_multi_head_components()
+	teacher_checkpoint = Path(config['teacher']['checkpoint'])
+	student_checkpoint = Path(config['student']['init_checkpoint'])
+	control_identity = {
+		'input_identities': {
+			'teacher_checkpoint': {'sha256': _sha256(teacher_checkpoint)},
+			'student_init_checkpoint': {'sha256': _sha256(student_checkpoint)},
+		},
+		'initial_state_sha256': {'student': '0' * 64, 'head': '1' * 64},
+	}
+	first = save_strat_hmm_rolling_checkpoint(
+		tmp_path,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+		epoch=24,
+		mae_config={},
+		stratigraphy_config=config,
+		metrics={'loss': 0.5},
+		global_step=25000,
+		checkpoint_kind='epoch',
+		batch_index=None,
+		best_score=None,
+		checkpoint_selection=None,
+		control_identity=control_identity,
+	)
+	original_copy = strat_hmm_checkpoint._copy_checkpoint_atomic  # noqa: SLF001
+
+	def fail_best_copy(*_args: object, **_kwargs: object) -> None:
+		raise OSError('simulated best copy interruption')
+
+	monkeypatch.setattr(strat_hmm_checkpoint, '_copy_checkpoint_atomic', fail_best_copy)
+	with pytest.raises(OSError, match='simulated best copy interruption'):
+		save_strat_hmm_rolling_checkpoint(
+			tmp_path,
+			student=student,
+			head=head,
+			optimizer=optimizer,
+			epoch=25,
+			mae_config={},
+			stratigraphy_config=config,
+			metrics={'loss': 0.262},
+			global_step=25500,
+			checkpoint_kind='step',
+			batch_index=499,
+			best_score=first.best_score,
+			checkpoint_selection=first.checkpoint_selection,
+			control_identity=control_identity,
+		)
+	monkeypatch.setattr(
+		strat_hmm_checkpoint, '_copy_checkpoint_atomic', original_copy
+	)
+	assert (tmp_path / '.checkpoint_selection_transaction.json').is_file()
+
+	recover_strat_hmm_rolling_checkpoint(tmp_path)
+	latest = load_checkpoint(tmp_path / 'latest.pt', map_location='cpu')
+	best = load_checkpoint(tmp_path / 'best.pt', map_location='cpu')
+	assert latest['checkpoint_selection']['selected']['global_step'] == 25500
+	assert best['global_step'] == 25500
+	assert best['training_state']['checkpoint_kind'] == 'step'
+	assert not (tmp_path / '.checkpoint_selection_transaction.json').exists()
+
+	resumed_selection = latest['checkpoint_selection']
+	assert isinstance(resumed_selection, dict)
+	third = save_strat_hmm_rolling_checkpoint(
+		tmp_path,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+		epoch=25,
+		mae_config={},
+		stratigraphy_config=config,
+		metrics={'loss': 0.310},
+		global_step=25600,
+		checkpoint_kind='epoch',
+		batch_index=None,
+		best_score=0.262,
+		checkpoint_selection=resumed_selection,
+		control_identity=control_identity,
+	)
+	validate_stratigraphy_checkpoint_payload(
+		load_checkpoint(third.latest_path, map_location='cpu')
+	)
+	validate_stratigraphy_checkpoint_payload(
+		load_checkpoint(third.best_path, map_location='cpu')
+	)
+	assert load_checkpoint(third.best_path, map_location='cpu')['global_step'] == 25500
 
 
 def test_multi_head_resume_matches_continuous_two_plus_two_steps(

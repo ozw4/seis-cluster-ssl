@@ -6,6 +6,7 @@ import csv
 import hashlib
 import math
 from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 import torch
@@ -63,13 +64,13 @@ from seis_ssl_cluster.training.strat_hmm.state import (
 	StratHmmTrainingState,
 )
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
+	recover_strat_hmm_rolling_checkpoint,
 	save_strat_hmm_rolling_checkpoint,
 	selected_checkpoint_selection_event,
 )
 
 if TYPE_CHECKING:
 	from collections.abc import Iterable
-	from pathlib import Path
 
 	from seis_ssl_cluster.data.window_preprocessing import FiniteCheckMode
 
@@ -188,6 +189,8 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 	scaler = torch.amp.GradScaler('cuda', enabled=amp_enabled) if amp_enabled else None
 	resume_state = StratHmmResumeState(start_epoch=1, global_step=0, skip_batches=0)
 	if resume is not None:
+		if is_multi_head:
+			recover_strat_hmm_rolling_checkpoint(Path(resume).parent)
 		payload = load_checkpoint(resume, map_location=device)
 		resume_state = restore_strat_hmm_training_checkpoint(
 			payload=payload,
