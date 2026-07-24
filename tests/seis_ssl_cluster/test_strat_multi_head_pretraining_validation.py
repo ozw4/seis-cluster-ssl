@@ -129,9 +129,7 @@ def test_dry_run_reports_a_failure_and_plan_for_each_candidate(
 		evidence = result.candidates[variant]
 		assert evidence['status'] == 'FAIL'
 		assert variant in evidence['error']
-		assert evidence['planned_action'].startswith(
-			'strat_hmm_pretext_mh_k6810_'
-		)
+		assert evidence['planned_action'].startswith('strat_hmm_pretext_mh_k6810_')
 
 
 def test_public_handoff_loader_requires_complete_pass_schema(tmp_path: Path) -> None:
@@ -165,6 +163,13 @@ def _handoff_payload() -> dict[str, object]:
 			'best_epoch': 25,
 			'best_global_step': 25600,
 			'selection_metric': 'metrics.loss',
+			'selection_history_schema_version': 1,
+			'selection_history_event_count': 1,
+			'selected_checkpoint_kind': 'epoch',
+			'selected_epoch': 25,
+			'selected_global_step': 25600,
+			'selected_loss': 0.1,
+			'selection_history_sha256': '1' * 64,
 		},
 		'embedding': {
 			'root': '/artifact/overlap_x16',
@@ -328,8 +333,7 @@ def test_complete_phase_publishes_two_handoffs_from_synthetic_artifacts(
 	control = {
 		'paths': {
 			'output_root': str(
-				experiment_root
-				/ 'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
+				experiment_root / 'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
 			)
 		},
 		'identity': {
@@ -428,6 +432,17 @@ def test_complete_phase_publishes_two_handoffs_from_synthetic_artifacts(
 					{'name': 'encoder', 'parameter_names': ['student.fixture']},
 				],
 			},
+			'checkpoint_selection': {
+				'schema_version': 1,
+				'event_count': 1,
+				'selected': {
+					'checkpoint_kind': 'epoch',
+					'epoch': 25,
+					'global_step': 25600,
+					'loss': 1.0,
+				},
+				'sha256': '1' * 64,
+			},
 		}
 
 	def embedding_evidence(
@@ -446,9 +461,7 @@ def test_complete_phase_publishes_two_handoffs_from_synthetic_artifacts(
 		)
 		np.save(embeddings, np.zeros((1, 1, 1, 1), dtype=np.float16))
 		np.save(valid, np.ones((1, 1, 1), dtype=np.bool_))
-		metadata.write_text(
-			json.dumps({'synthetic': model_tag}), encoding='utf-8'
-		)
+		metadata.write_text(json.dumps({'synthetic': model_tag}), encoding='utf-8')
 		return {
 			'root': root,
 			'metadata_path': metadata,
@@ -529,9 +542,7 @@ def test_checkpoint_scientific_identity_must_match_the_resolved_training_config(
 	training['teacher'] = {'checkpoint': str(teacher)}
 	training['student'] = {'init_checkpoint': str(student)}
 	identity = {
-		'scientific_identity_sha256': scientific_identity_sha256(
-			scientific_identity
-		),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific_identity),
 		'teacher_checkpoint_sha256': pretraining_validation.file_sha256(teacher),
 		'student_init_checkpoint_sha256': pretraining_validation.file_sha256(student),
 	}
@@ -581,9 +592,7 @@ def test_checkpoint_scientific_identity_must_match_the_resolved_training_config(
 		_identity_contract(config, training, payload, model_tag, 0.0, {})
 
 	identity = {
-		'scientific_identity_sha256': scientific_identity_sha256(
-			scientific_identity
-		)
+		'scientific_identity_sha256': scientific_identity_sha256(scientific_identity)
 	}
 	configs = {
 		'nocons': {
@@ -602,7 +611,7 @@ def test_checkpoint_scientific_identity_must_match_the_resolved_training_config(
 					**scientific_identity,
 					'variant': 'cons010',
 					'consistency_weight': 0.1,
-				}
+				},
 			},
 			'loss': {'consistency_weight': 0.1},
 		},
@@ -640,10 +649,7 @@ def test_embedding_validation_rejects_metadata_without_checkpoint_binding(
 	best = tmp_path / 'best.pt'
 	best.write_bytes(b'best checkpoint')
 	root = (
-		artifact_root
-		/ 'embeddings/f3/facies_benchmark_v1'
-		/ model_tag
-		/ 'overlap_x16'
+		artifact_root / 'embeddings/f3/facies_benchmark_v1' / model_tag / 'overlap_x16'
 	)
 	files = pretraining_validation.output_paths(root, 'f3_facies_benchmark')
 	root.mkdir(parents=True)
@@ -676,9 +682,7 @@ def test_pair_config_contract_rejects_unbound_scientific_consistency_weight() ->
 			'paths': {'output_root': '/artifact/nocons'},
 			'identity': {
 				'model_tag': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
-				'scientific_identity': {
-					'variant': 'nocons', 'consistency_weight': 0.0
-				},
+				'scientific_identity': {'variant': 'nocons', 'consistency_weight': 0.0},
 			},
 			'loss': {'consistency_weight': 0.0},
 		},
@@ -687,7 +691,8 @@ def test_pair_config_contract_rejects_unbound_scientific_consistency_weight() ->
 			'identity': {
 				'model_tag': 'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
 				'scientific_identity': {
-					'variant': 'cons010', 'consistency_weight': 0.0
+					'variant': 'cons010',
+					'consistency_weight': 0.0,
 				},
 			},
 			'loss': {'consistency_weight': 0.1},
@@ -708,14 +713,10 @@ def test_initial_state_hashes_must_bind_the_actual_initial_states() -> None:
 		'initial_student_state_sha256': _state_sha256(student),
 		'initial_head_state_sha256': _state_sha256(head),
 	}
-	_validate_initial_state_hashes(
-		identity, student_state=student, head_state=head
-	)
+	_validate_initial_state_hashes(identity, student_state=student, head_state=head)
 	identity['initial_head_state_sha256'] = '0' * 64
 	with pytest.raises(ValueError, match='initial head state SHA-256 mismatch'):
-		_validate_initial_state_hashes(
-			identity, student_state=student, head_state=head
-		)
+		_validate_initial_state_hashes(identity, student_state=student, head_state=head)
 
 
 def test_initial_state_validation_reconstructs_and_binds_initial_states(
@@ -746,17 +747,63 @@ def test_initial_state_validation_reconstructs_and_binds_initial_states(
 		)
 
 
-def test_best_selection_requires_the_minimum_loss_epoch_and_step() -> None:
-	best = {'epoch': 2, 'global_step': 200, 'metrics': {'loss': 0.1}}
-	rows = [
-		{'epoch': 1, 'global_step': 100, 'loss': 0.1},
-		{'epoch': 2, 'global_step': 200, 'loss': 0.2},
-	]
+def test_best_selection_accepts_a_step_selected_before_the_final_epoch() -> None:
+	step = {
+		'sequence': 0,
+		'epoch': 25,
+		'global_step': 25500,
+		'checkpoint_kind': 'step',
+		'batch_index': 499,
+		'loss': 0.262,
+	}
+	epoch = {
+		'sequence': 1,
+		'epoch': 25,
+		'global_step': 25600,
+		'checkpoint_kind': 'epoch',
+		'batch_index': None,
+		'loss': 0.310,
+	}
+	selection = {
+		'schema_version': 1,
+		'criterion': 'metrics.loss',
+		'improvement_policy': 'strictly_lower_loss_v1',
+		'events': [
+			{
+				**step,
+				'previous_best_score': None,
+				'best_updated': True,
+				'best_score_after': 0.262,
+			},
+			{
+				**epoch,
+				'previous_best_score': 0.262,
+				'best_updated': False,
+				'best_score_after': 0.262,
+			},
+		],
+		'selected': step,
+	}
+	best_selection = {
+		**selection,
+		'events': [selection['events'][0]],
+	}
+	best = {
+		'epoch': 25,
+		'global_step': 25500,
+		'metrics': {'loss': 0.262},
+		'training_state': {'checkpoint_kind': 'step', 'batch_index': 499},
+		'checkpoint_selection': best_selection,
+	}
+	latest = {
+		'epoch': 25,
+		'global_step': 25600,
+		'metrics': {'loss': 0.310},
+		'training_state': {'checkpoint_kind': 'epoch', 'batch_index': None},
+		'checkpoint_selection': selection,
+	}
 
-	with pytest.raises(
-		ValueError, match=r'not selected by lowest finite metrics\.loss'
-	):
-		_validate_best_selection(best, rows, variant='nocons')
+	assert _validate_best_selection(best, latest, variant='nocons')['selected'] == step
 
 
 def test_freeze_contract_rejects_a_multi_head_run_with_only_one_updated_head(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
 import math
@@ -32,6 +33,12 @@ class StratRollingCheckpointResult:
 	best_path: Path
 	best_score: float | None
 	best_updated: bool
+	checkpoint_selection: Mapping[str, object] | None = None
+
+
+_CHECKPOINT_SELECTION_SCHEMA_VERSION = 1
+_CHECKPOINT_SELECTION_CRITERION = 'metrics.loss'
+_CHECKPOINT_SELECTION_POLICY = 'strictly_lower_loss_v1'
 
 
 def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
@@ -51,11 +58,32 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 	scaler: torch.amp.GradScaler | None = None,
 	rng_state: Mapping[str, object] | None = None,
 	best_score: float | None = None,
+	checkpoint_selection: Mapping[str, object] | None = None,
 	trainability_summary: Mapping[str, object] | None = None,
 	control_identity: Mapping[str, object] | None = None,
 ) -> StratRollingCheckpointResult:
 	"""Write rolling ``latest.pt`` and update ``best.pt`` on lower loss."""
 	checkpoint_root = Path(checkpoint_dir)
+	is_multi_head = _is_multi_head_config(stratigraphy_config)
+	selection_best_score = (
+		float(selected_checkpoint_selection_event(checkpoint_selection)['loss'])
+		if checkpoint_selection is not None
+		else None
+	)
+	if is_multi_head and best_score != selection_best_score:
+		raise ValueError('checkpoint selection best_score does not match history')
+	selection = (
+		_update_checkpoint_selection(
+			checkpoint_selection,
+			epoch=epoch,
+			global_step=global_step,
+			checkpoint_kind=checkpoint_kind,
+			batch_index=batch_index,
+			loss=_required_loss_score(metrics),
+		)
+		if is_multi_head
+		else None
+	)
 	latest_path = save_strat_hmm_checkpoint(
 		checkpoint_root / 'latest.pt',
 		student=student,
@@ -73,19 +101,29 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 		rng_state=rng_state,
 		trainability_summary=trainability_summary,
 		control_identity=control_identity,
+		checkpoint_selection=selection,
 	)
 	score = _loss_score(metrics)
-	best_updated = _is_improved(score, best_score)
-	resolved_best_score = best_score
+	best_updated = (
+		bool(selection['events'][-1]['best_updated'])
+		if selection is not None
+		else _is_improved(score, best_score)
+	)
+	resolved_best_score = (
+		float(selection['selected']['loss']) if selection is not None else best_score
+	)
 	best_path = checkpoint_root / 'best.pt'
 	if best_updated:
 		_copy_checkpoint_atomic(latest_path, best_path)
 		resolved_best_score = score
+	if selection is not None:
+		_write_checkpoint_selection_reports(checkpoint_root, selection)
 	return StratRollingCheckpointResult(
 		latest_path=latest_path,
 		best_path=best_path,
 		best_score=resolved_best_score,
 		best_updated=best_updated,
+		checkpoint_selection=selection,
 	)
 
 
@@ -107,6 +145,7 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	rng_state: Mapping[str, object] | None = None,
 	trainability_summary: Mapping[str, object] | None = None,
 	control_identity: Mapping[str, object] | None = None,
+	checkpoint_selection: Mapping[str, object] | None = None,
 ) -> Path:
 	"""Atomically save an extraction-compatible strat HMM checkpoint."""
 	checkpoint_path = Path(path)
@@ -149,6 +188,18 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	if control_identity is not None:
 		payload['control_identity'] = _to_plain_value(control_identity)
 	if _is_multi_head_config(stratigraphy_config):
+		if checkpoint_selection is None:
+			checkpoint_selection = _update_checkpoint_selection(
+				None,
+				epoch=epoch,
+				global_step=global_step,
+				checkpoint_kind=checkpoint_kind,
+				batch_index=batch_index,
+				loss=_required_loss_score(metrics),
+			)
+		payload['checkpoint_selection'] = _validated_checkpoint_selection(
+			checkpoint_selection
+		)
 		payload['stratigraphy_checkpoint'] = _multi_head_checkpoint_identity(
 			stratigraphy_config=stratigraphy_config,
 			stratigraphy_state_dict=stratigraphy_state_dict,
@@ -189,6 +240,7 @@ def validate_stratigraphy_checkpoint_payload(
 		stratigraphy_config=config,
 		stratigraphy_state_dict=state,
 	)
+	_validated_checkpoint_selection(payload.get('checkpoint_selection'))
 	if not _optimizer_state_group_identity_matches(
 		payload.get('optimizer_state_dict'),
 		identity.get('optimizer_group_identity'),
@@ -707,9 +759,7 @@ def _validate_multi_head_identity(
 		('output_root', paths.get('output_root')),
 	):
 		if identity.get(key) != expected:
-			raise ValueError(
-				f'checkpoint {key} does not match stratigraphy config'
-			)
+			raise ValueError(f'checkpoint {key} does not match stratigraphy config')
 	if identity.get('stratigraphy_state_sha256') != _state_sha256(
 		stratigraphy_state_dict
 	):
@@ -766,9 +816,7 @@ def _validate_multi_head_target_manifest_identity(
 	)
 	if manifest_sha256 != _file_sha256(Path(path)):
 		raise ValueError('checkpoint target manifest SHA-256 mismatch')
-	if identity.get('per_head_targets') != _manifest_per_head_target_hashes(
-		Path(path)
-	):
+	if identity.get('per_head_targets') != _manifest_per_head_target_hashes(Path(path)):
 		raise ValueError(
 			'checkpoint per-head target hashes do not match target manifest'
 		)
@@ -1011,9 +1059,7 @@ def _stratigraphy_parameter_names(
 	return result
 
 
-def _optimizer_state_group_identity_matches(
-	value: object, identity: object
-) -> bool:
+def _optimizer_state_group_identity_matches(value: object, identity: object) -> bool:
 	if not isinstance(value, Mapping):
 		return False
 	groups = value.get('param_groups')
@@ -1052,8 +1098,7 @@ def _optimizer_group_counts_match(identity: object, summary: object) -> bool:
 		and isinstance(expected, Mapping)
 		and recorded.get('name') == expected.get('name')
 		and recorded.get('lr') == expected.get('lr')
-		and len(recorded.get('parameter_names', []))
-		== len(expected.get('params', []))
+		and len(recorded.get('parameter_names', [])) == len(expected.get('params', []))
 		for recorded, expected in zip(identity, summary, strict=True)
 	)
 
@@ -1078,6 +1123,287 @@ def _state_summary(value: object) -> dict[str, object] | None:
 		'shapes': {key: list(tensor.shape) for key, tensor in state.items()},
 		'sha256': _state_sha256(state),
 	}
+
+
+def checkpoint_selection_sha256(selection: Mapping[str, object]) -> str:
+	"""Return the stable digest used to bind public selection evidence."""
+	canonical = _validated_checkpoint_selection(selection)
+	encoded = json.dumps(canonical, sort_keys=True, separators=(',', ':')).encode()
+	return hashlib.sha256(encoded).hexdigest()
+
+
+def selected_checkpoint_selection_event(
+	selection: Mapping[str, object],
+) -> Mapping[str, object]:
+	"""Return a validated copy of the selected rolling-checkpoint event."""
+	return _validated_checkpoint_selection(selection)['selected']
+
+
+def _update_checkpoint_selection(  # noqa: PLR0913
+	selection: Mapping[str, object] | None,
+	*,
+	epoch: int,
+	global_step: int,
+	checkpoint_kind: Literal['step', 'epoch'],
+	batch_index: int | None,
+	loss: float,
+) -> dict[str, object]:
+	if selection is None:
+		events: list[dict[str, object]] = []
+		best_score: float | None = None
+	else:
+		validated = _validated_checkpoint_selection(selection)
+		events = [dict(event) for event in validated['events']]
+		selected = validated['selected']
+		best_score = float(selected['loss'])
+	event = {
+		'sequence': len(events),
+		'epoch': int(epoch),
+		'global_step': int(global_step),
+		'checkpoint_kind': checkpoint_kind,
+		'batch_index': batch_index,
+		'loss': loss,
+		'previous_best_score': best_score,
+		'best_updated': _is_improved(loss, best_score),
+		'best_score_after': loss if _is_improved(loss, best_score) else best_score,
+	}
+	if any(
+		_selection_event_key(existing) == _selection_event_key(event)
+		for existing in events
+	):
+		raise ValueError('checkpoint selection history contains a duplicate event')
+	events.append(event)
+	selected = event if event['best_updated'] else selected
+	return _validated_checkpoint_selection(
+		{
+			'schema_version': _CHECKPOINT_SELECTION_SCHEMA_VERSION,
+			'criterion': _CHECKPOINT_SELECTION_CRITERION,
+			'improvement_policy': _CHECKPOINT_SELECTION_POLICY,
+			'events': events,
+			'selected': _selection_event_identity_from_event(selected),
+		}
+	)
+
+
+def _validated_checkpoint_selection(  # noqa: C901, PLR0912
+	value: object,
+) -> dict[str, object]:
+	if not isinstance(value, Mapping):
+		raise TypeError('multi-head checkpoint_selection must be a mapping')
+	if value.get('schema_version') != _CHECKPOINT_SELECTION_SCHEMA_VERSION:
+		raise ValueError('unsupported checkpoint selection schema_version')
+	if value.get('criterion') != _CHECKPOINT_SELECTION_CRITERION:
+		raise ValueError('checkpoint selection criterion must be metrics.loss')
+	if value.get('improvement_policy') != _CHECKPOINT_SELECTION_POLICY:
+		raise ValueError('unsupported checkpoint selection improvement policy')
+	raw_events = value.get('events')
+	if not isinstance(raw_events, list) or not raw_events:
+		raise ValueError('checkpoint selection events must be a non-empty list')
+	events: list[dict[str, object]] = []
+	best_score: float | None = None
+	previous_order: tuple[int, int, int, int] | None = None
+	keys: set[tuple[int, int, str, int | None]] = set()
+	selected: dict[str, object] | None = None
+	for sequence, raw_event in enumerate(raw_events):
+		if not isinstance(raw_event, Mapping):
+			raise TypeError('checkpoint selection event must be a mapping')
+		event = _validated_selection_event(raw_event, sequence)
+		key = _selection_event_key(event)
+		if key in keys:
+			raise ValueError('checkpoint selection history contains a duplicate event')
+		keys.add(key)
+		order = _selection_event_order(event)
+		if previous_order is not None and order <= previous_order:
+			raise ValueError('checkpoint selection events are not chronological')
+		previous_order = order
+		if event['previous_best_score'] != best_score:
+			raise ValueError('checkpoint selection previous_best_score is inconsistent')
+		updated = _is_improved(float(event['loss']), best_score)
+		if event['best_updated'] != updated:
+			raise ValueError('checkpoint selection best_updated is inconsistent')
+		best_score = float(event['loss']) if updated else best_score
+		if event['best_score_after'] != best_score:
+			raise ValueError('checkpoint selection best_score_after is inconsistent')
+		if updated:
+			selected = _selection_event_identity_from_event(event)
+		events.append(event)
+	if selected is None:
+		raise ValueError('checkpoint selection history has no selected event')
+	if _selection_event_identity(value.get('selected')) != selected:
+		raise ValueError('checkpoint selection selected event is inconsistent')
+	return {
+		'schema_version': _CHECKPOINT_SELECTION_SCHEMA_VERSION,
+		'criterion': _CHECKPOINT_SELECTION_CRITERION,
+		'improvement_policy': _CHECKPOINT_SELECTION_POLICY,
+		'events': events,
+		'selected': selected,
+	}
+
+
+def _validated_selection_event(
+	value: Mapping[str, object], sequence: int
+) -> dict[str, object]:
+	if value.get('sequence') != sequence:
+		raise ValueError('checkpoint selection event sequence is not contiguous')
+	epoch, global_step = value.get('epoch'), value.get('global_step')
+	if any(
+		isinstance(item, bool) or not isinstance(item, int)
+		for item in (epoch, global_step)
+	):
+		raise TypeError('checkpoint selection epoch/global_step must be integers')
+	if epoch < 0 or global_step < 0:
+		raise ValueError('checkpoint selection counters must be nonnegative')
+	kind = value.get('checkpoint_kind')
+	if kind not in {'step', 'epoch'}:
+		raise ValueError('checkpoint selection checkpoint_kind must be step or epoch')
+	batch_index = value.get('batch_index')
+	if kind == 'step' and (
+		isinstance(batch_index, bool)
+		or not isinstance(batch_index, int)
+		or batch_index < 0
+	):
+		raise TypeError('checkpoint selection step batch_index must be nonnegative')
+	if kind == 'epoch' and batch_index is not None:
+		raise ValueError('checkpoint selection epoch batch_index must be null')
+	loss = _finite_selection_number(value.get('loss'), 'loss')
+	previous = _nullable_selection_number(
+		value.get('previous_best_score'), 'previous_best_score'
+	)
+	after = _nullable_selection_number(
+		value.get('best_score_after'), 'best_score_after'
+	)
+	if not isinstance(value.get('best_updated'), bool):
+		raise TypeError('checkpoint selection best_updated must be a boolean')
+	return {
+		'sequence': sequence,
+		'epoch': epoch,
+		'global_step': global_step,
+		'checkpoint_kind': kind,
+		'batch_index': batch_index,
+		'loss': loss,
+		'previous_best_score': previous,
+		'best_updated': value['best_updated'],
+		'best_score_after': after,
+	}
+
+
+def _finite_selection_number(value: object, label: str) -> float:
+	if (
+		isinstance(value, bool)
+		or not isinstance(value, int | float)
+		or not math.isfinite(float(value))
+	):
+		raise ValueError(f'checkpoint selection {label} must be finite')
+	return float(value)
+
+
+def _nullable_selection_number(value: object, label: str) -> float | None:
+	return None if value is None else _finite_selection_number(value, label)
+
+
+def _selection_event_key(
+	event: Mapping[str, object],
+) -> tuple[int, int, str, int | None]:
+	return (
+		int(event['epoch']),
+		int(event['global_step']),
+		str(event['checkpoint_kind']),
+		event['batch_index'] if isinstance(event['batch_index'], int) else None,
+	)
+
+
+def _selection_event_order(event: Mapping[str, object]) -> tuple[int, int, int, int]:
+	return (
+		int(event['global_step']),
+		int(event['epoch']),
+		0 if event['checkpoint_kind'] == 'step' else 1,
+		int(event['batch_index']) if isinstance(event['batch_index'], int) else -1,
+	)
+
+
+def _selection_event_identity(value: object) -> dict[str, object]:
+	if not isinstance(value, Mapping):
+		raise TypeError('checkpoint selection selected event must be a mapping')
+	keys = (
+		'sequence',
+		'epoch',
+		'global_step',
+		'checkpoint_kind',
+		'batch_index',
+		'loss',
+	)
+	if set(value) != set(keys):
+		raise ValueError('checkpoint selection selected event identity is invalid')
+	return {key: value[key] for key in keys}
+
+
+def _selection_event_identity_from_event(
+	value: Mapping[str, object],
+) -> dict[str, object]:
+	keys = (
+		'sequence',
+		'epoch',
+		'global_step',
+		'checkpoint_kind',
+		'batch_index',
+		'loss',
+	)
+	return _selection_event_identity({key: value[key] for key in keys})
+
+
+def _required_loss_score(metrics: Mapping[str, float]) -> float:
+	score = _loss_score(metrics)
+	if score is None:
+		raise ValueError('checkpoint selection requires finite metrics.loss')
+	return score
+
+
+def _write_checkpoint_selection_reports(
+	checkpoint_root: Path, selection: Mapping[str, object]
+) -> None:
+	canonical = _validated_checkpoint_selection(selection)
+	_atomic_json(checkpoint_root / 'checkpoint_selection_summary.json', canonical)
+	fieldnames = [
+		'sequence',
+		'epoch',
+		'global_step',
+		'checkpoint_kind',
+		'batch_index',
+		'loss',
+		'previous_best_score',
+		'best_updated',
+		'best_score_after',
+	]
+	fd, name = tempfile.mkstemp(
+		prefix='.checkpoint_selection_history.', suffix='.tmp', dir=checkpoint_root
+	)
+	temporary = Path(name)
+	try:
+		with os.fdopen(fd, 'w', newline='', encoding='utf-8') as handle:
+			writer = csv.DictWriter(handle, fieldnames=fieldnames)
+			writer.writeheader()
+			writer.writerows(canonical['events'])
+			handle.flush()
+			os.fsync(handle.fileno())
+		temporary.replace(checkpoint_root / 'checkpoint_selection_history.csv')
+	finally:
+		if temporary.exists():
+			temporary.unlink()
+
+
+def _atomic_json(path: Path, value: Mapping[str, object]) -> None:
+	fd, name = tempfile.mkstemp(prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent)
+	temporary = Path(name)
+	try:
+		with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+			json.dump(value, handle, sort_keys=True, indent=2)
+			handle.write('\n')
+			handle.flush()
+			os.fsync(handle.fileno())
+		temporary.replace(path)
+	finally:
+		if temporary.exists():
+			temporary.unlink()
 
 
 def _loss_score(metrics: Mapping[str, float]) -> float | None:

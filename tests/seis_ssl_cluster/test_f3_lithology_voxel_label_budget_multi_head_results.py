@@ -218,9 +218,7 @@ def test_missing_historical_m1_omits_only_optional_comparisons(
 		lambda _job: {},
 	)
 
-	members = results._members(
-		config, rows, (), SimpleNamespace(jobs=(mae,))
-	)
+	members = results._members(config, rows, (), SimpleNamespace(jobs=(mae,)))
 
 	assert not results._has_historical_members(members)
 	assert results._comparisons(members) == results.REQUIRED_COMPARISONS
@@ -234,9 +232,7 @@ def test_non_pairing_historical_m1_is_omitted() -> None:
 		for role in ('mae', 'm1_current_k6', 'mh_nocons', 'mh_cons010')
 	}
 	historical = {
-		('cap25', 0, 'm1'): {
-			'row': {**pair_row, 'metric_schema_sha256': 'different'}
-		}
+		('cap25', 0, 'm1'): {'row': {**pair_row, 'metric_schema_sha256': 'different'}}
 	}
 
 	assert not results._historical_members_are_paired(config, members, historical)
@@ -339,6 +335,7 @@ def test_current_k6_mae_parity_rejects_published_mismatch(
 		'losses': 0,
 		'ties': 0,
 	}
+
 	def write_control_summary(
 		paired_deltas: list[object], summary_by_budget: list[object]
 	) -> None:
@@ -357,9 +354,12 @@ def test_current_k6_mae_parity_rejects_published_mismatch(
 	write_control_summary([delta], [summary])
 	config = SimpleNamespace(current_k6_run_manifest=manifest)
 
-	assert results._validate_current_k6_mae_parity(
-		config, paired_deltas=(delta,), summary_by_budget=(summary,)
-	)['status'] == 'PASS'
+	assert (
+		results._validate_current_k6_mae_parity(
+			config, paired_deltas=(delta,), summary_by_budget=(summary,)
+		)['status']
+		== 'PASS'
+	)
 	write_control_summary([delta, dict(delta)], [summary])
 	with pytest.raises(ValueError, match='duplicate rows'):
 		results._validate_current_k6_mae_parity(
@@ -456,13 +456,16 @@ def test_pretraining_checkpoint_requires_embedding_binding_and_configured_target
 		'embedding_metadata_sha256': file_sha256(metadata_path),
 	}
 
-	assert results._pretraining_checkpoint(
-		SimpleNamespace(
-			dataset={'name': 'f3'}, multi_head_target_manifest=target_manifest
-		),
-		candidate,
-		handoff,
-	)['identity'] == payload['stratigraphy_checkpoint']
+	assert (
+		results._pretraining_checkpoint(
+			SimpleNamespace(
+				dataset={'name': 'f3'}, multi_head_target_manifest=target_manifest
+			),
+			candidate,
+			handoff,
+		)['identity']
+		== payload['stratigraphy_checkpoint']
+	)
 	payload['stratigraphy_checkpoint']['target_manifest']['sha256'] = '0' * 64
 	with pytest.raises(ValueError, match='target manifest does not match configured'):
 		results._pretraining_checkpoint(
@@ -519,7 +522,7 @@ def test_pretraining_checkpoint_evidence_allows_pre_extraction_validation(
 				embeddings_dir=tmp_path / role / 'embeddings',
 				pretraining_handoff=handoff,
 			)
-	)
+		)
 	monkeypatch.setattr(
 		results,
 		'load_multi_head_target_manifest',
@@ -569,6 +572,13 @@ def _complete_handoff_payload(
 			'best_epoch': 25,
 			'best_global_step': 25600,
 			'selection_metric': 'metrics.loss',
+			'selection_history_schema_version': 1,
+			'selection_history_event_count': 1,
+			'selected_checkpoint_kind': 'epoch',
+			'selected_epoch': 25,
+			'selected_global_step': 25600,
+			'selected_loss': 0.1,
+			'selection_history_sha256': '1' * 64,
 		},
 		'embedding': {
 			'root': '/artifact/overlap_x16',
@@ -703,9 +713,7 @@ def test_target_diagnostics_preserve_head_cross_head_and_k6_evidence() -> None:
 		'head_ks': [6, 8, 10],
 		'heads': {
 			str(k): {
-				'diagnostics': {
-					'per_survey': {'f3': {'valid_token_count': 100 + k}}
-				}
+				'diagnostics': {'per_survey': {'f3': {'valid_token_count': 100 + k}}}
 			}
 			for k in (6, 8, 10)
 		},
@@ -755,9 +763,7 @@ def test_target_diagnostics_preserve_head_cross_head_and_k6_evidence() -> None:
 		'k6_replay_parity',
 	]
 	per_head = next(row for row in rows if row['head_k'] == 8)
-	assert json.loads(str(per_head['diagnostics_json'])) == {
-		'valid_token_count': 108
-	}
+	assert json.loads(str(per_head['diagnostics_json'])) == {'valid_token_count': 108}
 	cross_head = next(row for row in rows if row['head_pair'] == 'k6_k8')
 	assert cross_head['mae'] == 0.1
 	assert json.loads(str(cross_head['diagnostics_json']))['correlation'] == 0.9

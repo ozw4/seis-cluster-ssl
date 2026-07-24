@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import math
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Literal, cast
 
 import torch
@@ -63,10 +64,11 @@ from seis_ssl_cluster.training.strat_hmm.state import (
 )
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	save_strat_hmm_rolling_checkpoint,
+	selected_checkpoint_selection_event,
 )
 
 if TYPE_CHECKING:
-	from collections.abc import Iterable, Mapping
+	from collections.abc import Iterable
 	from pathlib import Path
 
 	from seis_ssl_cluster.data.window_preprocessing import FiniteCheckMode
@@ -224,6 +226,16 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 	)
 	checkpoint_path: Path | None = None
 	best_score = _load_existing_best_score(output_root) if resume is not None else None
+	checkpoint_selection: Mapping[str, object] | None = None
+	if resume is not None and is_multi_head:
+		checkpoint_selection = load_checkpoint(resume, map_location='cpu').get(
+			'checkpoint_selection'
+		)
+		if not isinstance(checkpoint_selection, Mapping):
+			raise TypeError('multi-head resume checkpoint is missing selection history')
+		best_score = float(
+			selected_checkpoint_selection_event(checkpoint_selection)['loss']
+		)
 	for epoch in range(resume_state.start_epoch, epochs + 1):
 		set_epoch = getattr(dataset, 'set_epoch', None)
 		if callable(set_epoch):
@@ -244,7 +256,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				step_state: StratHmmTrainingState,
 				epoch_start_rng_state: torch.Tensor = epoch_start_dataloader_rng_state,
 			) -> None:
-				nonlocal best_score, checkpoint_path
+				nonlocal best_score, checkpoint_path, checkpoint_selection
 				if (
 					checkpoint_every_steps is None
 					or step_state.global_step % checkpoint_every_steps != 0
@@ -277,8 +289,10 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 					),
 					control_identity=control_identity,
 					best_score=best_score,
+					checkpoint_selection=checkpoint_selection,
 				)
 				best_score = result.best_score
+				checkpoint_selection = result.checkpoint_selection
 				checkpoint_path = result.latest_path
 
 			state = train_strat_hmm_multi_head_one_epoch(
@@ -400,8 +414,10 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			),
 			control_identity=control_identity,
 			best_score=best_score,
+			checkpoint_selection=checkpoint_selection,
 		)
 		best_score = result.best_score
+		checkpoint_selection = result.checkpoint_selection
 		checkpoint_path = result.latest_path
 		if is_multi_head and state.completed_epoch:
 			_append_multi_head_epoch_metrics(

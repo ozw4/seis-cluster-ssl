@@ -46,9 +46,7 @@ def test_multi_head_job_matrix_is_canonical_thirty_row_pair(tmp_path: Path) -> N
 	jobs = multi_head._jobs(config, dataset_rows)
 
 	assert len(jobs) == 30
-	assert [
-		(job.model_role, job.budget_id, job.subsample_seed) for job in jobs
-	] == [
+	assert [(job.model_role, job.budget_id, job.subsample_seed) for job in jobs] == [
 		(candidate, budget, seed)
 		for candidate in ('mh_nocons', 'mh_cons010')
 		for budget in ('cap25', 'cap50', 'cap100')
@@ -223,13 +221,12 @@ def test_only_missing_reuses_resumes_and_quarantines_selected_jobs(
 		config.current_k6_run_manifest,
 	):
 		path.write_text('{}', encoding='utf-8')
-	jobs = tuple(
-		_job(config, seed) for seed in range(3)
-	)
+	jobs = tuple(_job(config, seed) for seed in range(3))
 	plans = tuple(
 		VoxelLabelBudgetJobPlan(job, state, None, 0)
 		for job, state in zip(
-			jobs, ('REUSE_COMPLETED', 'RESUME_LATEST', 'INVALID_OR_PARTIAL'),
+			jobs,
+			('REUSE_COMPLETED', 'RESUME_LATEST', 'INVALID_OR_PARTIAL'),
 			strict=True,
 		)
 	)
@@ -251,9 +248,7 @@ def test_only_missing_reuses_resumes_and_quarantines_selected_jobs(
 	monkeypatch.setattr(
 		multi_head,
 		'_dataset_rows',
-		lambda *_args: {
-			(job.budget_id, job.subsample_seed): {} for job in jobs
-		},
+		lambda *_args: {(job.budget_id, job.subsample_seed): {} for job in jobs},
 	)
 	monkeypatch.setattr(
 		multi_head,
@@ -405,9 +400,7 @@ def _candidate_identity_fixture(
 	embeddings = output.embeddings
 	valid_tokens = output.valid_tokens
 	metadata = output.metadata
-	checkpoint = (
-		tmp_path / candidate.model_tag / 'best.pt'
-	)
+	checkpoint = tmp_path / candidate.model_tag / 'best.pt'
 	checkpoint.parent.mkdir()
 	checkpoint.write_bytes(b'checkpoint')
 	np.save(embeddings, np.zeros((76, 113, 32, 384), dtype=np.float16))
@@ -465,6 +458,13 @@ def _handoff_payload(paths: object, *, model_tag: str) -> dict[str, object]:
 			'best_epoch': 25,
 			'best_global_step': 25600,
 			'selection_metric': 'metrics.loss',
+			'selection_history_schema_version': 1,
+			'selection_history_event_count': 1,
+			'selected_checkpoint_kind': 'epoch',
+			'selected_epoch': 25,
+			'selected_global_step': 25600,
+			'selected_loss': 0.1,
+			'selection_history_sha256': '1' * 64,
 		},
 		'embedding': {
 			'root': str(paths.embeddings.parent),  # type: ignore[attr-defined]

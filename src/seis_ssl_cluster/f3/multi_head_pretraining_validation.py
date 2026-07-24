@@ -29,7 +29,9 @@ from seis_ssl_cluster.training.strat_hmm.components import (
 	build_strat_hmm_components,
 )
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
+	checkpoint_selection_sha256,
 	scientific_identity_sha256,
+	selected_checkpoint_selection_event,
 	validate_stratigraphy_checkpoint_payload,
 )
 
@@ -175,7 +177,7 @@ def load_f3_multi_head_pretraining_handoff(  # noqa: C901, PLR0912
 		raise ValueError('handoff consistency beta mismatch')
 	_per_head_target_hashes(stratigraphy.get('per_head_target_sha256'))
 	checkpoint = _mapping(payload.get('checkpoint'), 'handoff checkpoint')
-	for key in ('path', 'latest_path', 'selection_metric'):
+	for key in ('path', 'latest_path', 'selection_metric', 'selected_checkpoint_kind'):
 		if not isinstance(checkpoint.get(key), str) or not checkpoint[key]:
 			raise TypeError(f'handoff checkpoint.{key} is missing')
 	for key in ('sha256', 'latest_sha256'):
@@ -183,11 +185,26 @@ def load_f3_multi_head_pretraining_handoff(  # noqa: C901, PLR0912
 			raise TypeError(f'handoff checkpoint.{key} is missing')
 	if checkpoint['selection_metric'] != 'metrics.loss':
 		raise ValueError('handoff checkpoint selection metric mismatch')
-	for key in ('best_epoch', 'best_global_step'):
-		if isinstance(checkpoint.get(key), bool) or not isinstance(
-			checkpoint.get(key), int
-		) or checkpoint[key] < 0:
+	for key in (
+		'best_epoch',
+		'best_global_step',
+		'selection_history_schema_version',
+		'selection_history_event_count',
+		'selected_epoch',
+		'selected_global_step',
+	):
+		if (
+			isinstance(checkpoint.get(key), bool)
+			or not isinstance(checkpoint.get(key), int)
+			or checkpoint[key] < 0
+		):
 			raise TypeError(f'handoff checkpoint.{key} must be an integer')
+	if checkpoint['selected_checkpoint_kind'] not in {'step', 'epoch'}:
+		raise ValueError('handoff selected checkpoint kind mismatch')
+	if not _finite_number(checkpoint.get('selected_loss')):
+		raise TypeError('handoff checkpoint.selected_loss must be finite')
+	if not _is_sha256(checkpoint.get('selection_history_sha256')):
+		raise TypeError('handoff checkpoint.selection_history_sha256 is missing')
 	embedding = _mapping(payload.get('embedding'), 'handoff embedding')
 	for key in ('root', 'metadata_path'):
 		if not isinstance(embedding.get(key), str) or not embedding[key]:
@@ -480,7 +497,7 @@ def _checkpoint_evidence(  # noqa: PLR0913
 		'global_step'
 	] != 25600:
 		raise ValueError(f'{variant} epoch metrics coverage is incomplete')
-	_validate_best_selection(best, rows, variant=variant)
+	selection = _validate_best_selection(best, latest, variant=variant)
 	_validate_freeze_contract(best, training)
 	identity = _mapping(best['stratigraphy_checkpoint'], 'stratigraphy_checkpoint')
 	return {
@@ -491,6 +508,7 @@ def _checkpoint_evidence(  # noqa: PLR0913
 		'latest': latest,
 		'identity': identity,
 		'epoch_rows': rows,
+		'checkpoint_selection': selection,
 	}
 
 
@@ -734,9 +752,7 @@ def _validate_optimizer_contract(
 	head_names = groups[0].get('parameter_names')
 	encoder_names = groups[1].get('parameter_names')
 	if not isinstance(head_names, list) or not isinstance(encoder_names, list):
-		raise TypeError(
-			'freeze contract optimizer parameters must appear exactly once'
-		)
+		raise TypeError('freeze contract optimizer parameters must appear exactly once')
 	parameter_names = [*head_names, *encoder_names]
 	if any(not isinstance(name, str) for name in parameter_names) or len(
 		parameter_names
@@ -876,6 +892,8 @@ def _handoff(
 		_mapping(evidence['embedding'], 'embedding'),
 	)
 	best, latest = Path(evidence['best_path']), Path(evidence['latest_path'])
+	selection = _mapping(evidence['checkpoint_selection'], 'checkpoint selection')
+	selected = _mapping(selection['selected'], 'selected checkpoint selection')
 	return {
 		'artifact_type': _HANDOFF_TYPE,
 		'schema_version': 1,
@@ -890,6 +908,13 @@ def _handoff(
 			'best_epoch': evidence['best']['epoch'],
 			'best_global_step': evidence['best']['global_step'],
 			'selection_metric': 'metrics.loss',
+			'selection_history_schema_version': selection['schema_version'],
+			'selection_history_event_count': selection['event_count'],
+			'selected_checkpoint_kind': selected['checkpoint_kind'],
+			'selected_epoch': selected['epoch'],
+			'selected_global_step': selected['global_step'],
+			'selected_loss': selected['loss'],
+			'selection_history_sha256': selection['sha256'],
 		},
 		'embedding': {
 			'root': str(embedding['root']),
@@ -982,35 +1007,68 @@ def _epoch_rows(path: Path) -> list[dict[str, float | int]]:
 
 def _validate_best_selection(
 	best: Mapping[str, object],
-	rows: list[Mapping[str, float | int]],
+	latest: Mapping[str, object],
 	*,
 	variant: str,
-) -> None:
-	"""Bind best.pt to the lowest-loss row recorded for the completed run."""
-	best_epoch, best_global_step = best.get('epoch'), best.get('global_step')
-	if (
-		isinstance(best_epoch, bool)
-		or not isinstance(best_epoch, int)
-		or isinstance(best_global_step, bool)
-		or not isinstance(best_global_step, int)
-	):
-		raise TypeError(f'{variant} best.pt epoch/global step must be integers')
-	best_loss = _mapping(best.get('metrics'), 'best metrics').get('loss')
-	if not _finite_number(best_loss):
-		raise ValueError(f'{variant} best.pt metrics.loss must be finite')
-	matching_rows = [
-		row
-		for row in rows
-		if row['epoch'] == best_epoch and row['global_step'] == best_global_step
-	]
-	if (
-		len(matching_rows) != 1
-		or best_loss != matching_rows[0]['loss']
-		or best_loss != min(row['loss'] for row in rows)
-	):
+) -> Mapping[str, object]:
+	"""Bind latest/best checkpoint identities to canonical rolling history."""
+	selection = latest.get('checkpoint_selection')
+	if not isinstance(selection, Mapping):
+		raise TypeError(f'{variant} latest.pt is missing checkpoint selection history')
+	selected = selected_checkpoint_selection_event(selection)
+	events = selection['events']
+	if not isinstance(events, list):  # Kept for static narrowing after validation.
+		raise TypeError('checkpoint selection events must be a list')
+	last = events[-1]
+	if not isinstance(last, Mapping):
+		raise TypeError('checkpoint selection final event must be a mapping')
+	_validate_checkpoint_event_identity(latest, last, label=f'{variant} latest.pt')
+	_validate_checkpoint_event_identity(best, selected, label=f'{variant} best.pt')
+	best_selection = best.get('checkpoint_selection')
+	if not isinstance(best_selection, Mapping):
+		raise TypeError(f'{variant} best.pt is missing checkpoint selection history')
+	if selected_checkpoint_selection_event(best_selection) != selected:
 		raise ValueError(
-			f'{variant} best.pt is not selected by lowest finite metrics.loss'
+			f'{variant} best.pt selected checkpoint history is inconsistent'
 		)
+	best_events = best_selection.get('events')
+	if not isinstance(best_events, list) or not isinstance(best_events[-1], Mapping):
+		raise TypeError(f'{variant} best.pt selection events are invalid')
+	if any(
+		best_events[-1].get(key) != selected[key]
+		for key in (
+			'sequence',
+			'epoch',
+			'global_step',
+			'checkpoint_kind',
+			'batch_index',
+			'loss',
+		)
+	):
+		raise ValueError(f'{variant} best.pt history does not end at selected event')
+	return {
+		'event_count': len(events),
+		'selected': dict(selected),
+		'sha256': checkpoint_selection_sha256(selection),
+		'schema_version': selection['schema_version'],
+	}
+
+
+def _validate_checkpoint_event_identity(
+	payload: Mapping[str, object], event: Mapping[str, object], *, label: str
+) -> None:
+	state = _mapping(payload.get('training_state'), f'{label} training_state')
+	metrics = _mapping(payload.get('metrics'), f'{label} metrics')
+	for key in ('epoch', 'global_step'):
+		if payload.get(key) != event[key]:
+			raise ValueError(f'{label} does not match checkpoint selection event')
+	if (
+		state.get('checkpoint_kind') != event['checkpoint_kind']
+		or state.get('batch_index') != event['batch_index']
+	):
+		raise ValueError(f'{label} does not match checkpoint selection event')
+	if metrics.get('loss') != event['loss']:
+		raise ValueError(f'{label} does not match checkpoint selection event')
 
 
 def _torch_mapping(path: Path) -> Mapping[str, object]:
@@ -1128,9 +1186,7 @@ def _per_head_target_hashes(value: object) -> None:
 	if set(per_head) != {'6', '8', '10'}:
 		raise ValueError('handoff per_head_target_sha256 K keys mismatch')
 	for head_k, surveys in per_head.items():
-		survey_hashes = _mapping(
-			surveys, f'handoff per_head_target_sha256.{head_k}'
-		)
+		survey_hashes = _mapping(surveys, f'handoff per_head_target_sha256.{head_k}')
 		if not survey_hashes:
 			raise ValueError(
 				f'handoff per_head_target_sha256.{head_k} must not be empty'
@@ -1144,8 +1200,7 @@ def _per_head_target_hashes(value: object) -> None:
 				_is_sha256(digest) for digest in digests.values()
 			):
 				raise ValueError(
-					'handoff per_head_target_sha256 contains an empty or invalid '
-					'digest'
+					'handoff per_head_target_sha256 contains an empty or invalid digest'
 				)
 
 

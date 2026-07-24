@@ -120,6 +120,16 @@ identity rejects cross-variant resumes. The four scientific differences between
 the full configs are `loss.consistency_weight`, `identity.model_tag`,
 `identity.scientific_identity.variant`, and `paths.output_root`.
 
+Each full-run checkpoint root also records the canonical, versioned rolling
+selection state in `latest.pt`, with derived
+`checkpoint_selection_history.csv` and `checkpoint_selection_summary.json`
+for inspection. Both 500-step and epoch-end saves are selection candidates;
+therefore checkpoint validation can correctly select a step `best.pt` even
+when the final `latest.pt` is an epoch checkpoint. Resume restores and
+continues this history without duplicate events. Keep the required order:
+full pretraining, checkpoint validation, embedding extraction, then complete
+validation.
+
 For a failed downstream decoder job, use the selected output's valid
 `latest.pt` only through the runner's explicit restart command in experiment
 95: `--candidate <id> --budget <id> --subsample-seed <n> --resume`. Invalid or
