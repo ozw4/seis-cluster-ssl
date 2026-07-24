@@ -458,7 +458,7 @@ def test_manifest_full_validation_rechecks_target_source_subset(
 	]['survey']['valid_tokens']['sha256']
 
 	with pytest.raises(ValueError, match='not a subset'):
-		validate_multi_head_target_manifest(payload, verify_hashes=True)
+		validate_multi_head_target_manifest(payload)
 
 
 def test_manifest_full_validation_rechecks_target_embedding_grid_shape(

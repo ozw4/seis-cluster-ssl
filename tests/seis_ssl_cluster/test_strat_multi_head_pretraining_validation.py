@@ -231,6 +231,33 @@ def test_complete_publish_quarantines_stale_handoff_without_only_missing(
 	assert quarantined[0].read_text(encoding='utf-8') == '{"status": "partial"}'
 
 
+def test_publish_preserves_canonical_handoff_when_atomic_write_fails(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	path = tmp_path / 'multi_head_handoff.json'
+	previous_handoff = _handoff_payload()
+	previous_handoff['checkpoint']['sha256'] = '0' * 64
+	previous = json.dumps(previous_handoff)
+	path.write_text(previous, encoding='utf-8')
+
+	def fail_atomic_write(*_args: object, **_kwargs: object) -> None:
+		raise OSError('simulated write failure')
+
+	monkeypatch.setattr(pretraining_validation, '_atomic_json', fail_atomic_write)
+	with pytest.raises(OSError, match='simulated write failure'):
+		_publish_handoff(
+			path,
+			_handoff_payload(),
+			only_missing=False,
+			_quarantine_invalid=False,
+		)
+
+	assert path.read_text(encoding='utf-8') == previous
+	quarantined = list(tmp_path.glob('multi_head_handoff.json.quarantine.*'))
+	assert len(quarantined) == 1
+	assert quarantined[0].read_text(encoding='utf-8') == previous
+
+
 def test_only_missing_reuses_an_exact_live_handoff(tmp_path: Path) -> None:
 	path = tmp_path / 'multi_head_handoff.json'
 	handoff = _handoff_payload()

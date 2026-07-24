@@ -1053,7 +1053,11 @@ def _quarantine(path: Path) -> Path:
 	target = path.with_name(
 		f'{path.name}.quarantine.{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}'
 	)
-	path.replace(target)
+	# Retain the canonical predecessor until its fully fsynced replacement is
+	# atomically installed.  The quarantine link keeps the stale evidence after
+	# replacement without a window in which a write failure removes the only
+	# canonical handoff.
+	os.link(path, target)
 	return target
 
 

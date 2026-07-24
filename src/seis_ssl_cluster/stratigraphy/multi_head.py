@@ -313,26 +313,25 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 					survey_id=survey_id,
 					validate_array_semantics=validate_array_semantics,
 				)
-	if verify_hashes:
-		if legacy_v1:
-			_validate_legacy_manifest_embedding_alignment(
-				head_values,
-				survey_ids,
-				source_embedding,
-				ks,
-				validate_array_semantics=validate_array_semantics,
-			)
-		else:
-			if common_source_target_alignment is None:
-				raise AssertionError('schema-v2 alignment evidence is required')
-			_validate_manifest_embedding_alignment(
-				head_values,
-				survey_ids,
-				source_embedding,
-				ks,
-				common_source_target_alignment,
-				validate_array_semantics=validate_array_semantics,
-			)
+	if legacy_v1:
+		_validate_legacy_manifest_embedding_alignment(
+			head_values,
+			survey_ids,
+			source_embedding,
+			ks,
+			validate_array_semantics=validate_array_semantics,
+		)
+	else:
+		if common_source_target_alignment is None:
+			raise AssertionError('schema-v2 alignment evidence is required')
+		_validate_manifest_embedding_alignment(
+			head_values,
+			survey_ids,
+			source_embedding,
+			ks,
+			common_source_target_alignment,
+			validate_array_semantics=validate_array_semantics,
+		)
 	if 6 in ks:
 		if 'k6_replay_parity' not in payload:
 			raise ValueError('manifest is missing K=6 replay parity evidence')
