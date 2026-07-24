@@ -154,6 +154,14 @@ def test_export_includes_source_metadata_provenance(tmp_path: Path) -> None:
 			/ 'k3'
 			/ 'survey_a.cluster_labels_token.npy',
 		),
+		'source_label_sha256': hashlib.sha256(
+			(
+				clustering_dir
+				/ 'labels'
+				/ 'k3'
+				/ 'survey_a.cluster_labels_token.npy'
+			).read_bytes(),
+		).hexdigest(),
 		'source_metadata_path': str(metadata_path),
 		'source_metadata_sha256': hashlib.sha256(
 			metadata_path.read_bytes(),

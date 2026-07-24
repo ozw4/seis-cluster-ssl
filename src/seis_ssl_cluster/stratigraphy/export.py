@@ -369,6 +369,7 @@ def _source_metadata(  # noqa: PLR0913
 		'export_confidence': confidence,
 		'source_clustering_output_dir': str(Path(clustering_output_dir)),
 		'source_label_path': str(label_path),
+		'source_label_sha256': _sha256_file(label_path),
 	}
 	if metadata_path.is_file():
 		source_metadata = _load_source_metadata(metadata_path)

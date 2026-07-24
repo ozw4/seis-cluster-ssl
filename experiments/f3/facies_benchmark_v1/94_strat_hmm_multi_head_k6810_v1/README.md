@@ -13,10 +13,12 @@ The current-code single-head control,
 baseline. This stage does not run voxel-decoder evaluation or tune the
 consistency weight.
 
-Set the manifest digest after the K=6/8/10 target bundle has passed the
-migration and current-control gates. `01_build_multi_head_targets.yaml` is a
-runner input for `build_strat_hmm_multi_head_targets.py`; use its paths as the
-corresponding command-line arguments.
+`01_export_multi_head_pseudo_targets.yaml` is the canonical, strict K=6/8/10
+export input. It creates the replay K=6 target separately from the immutable
+historical K=6 training target and verifies that the common target-valid mask
+is a subset of the source embedding mask.
+`01_build_multi_head_targets.yaml` supplies the manifest publication paths
+after replay parity has passed.
 
 Run the target and pretraining stages in this order. The build command both
 checks the K=6 replay parity and publishes the immutable K=6/8/10 manifest;
@@ -29,6 +31,16 @@ export EXP=experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1
 
 python proc/seis_ssl_cluster/cluster_embeddings.py --config "$EXP/01_replay_hmm_k6810.yaml" --dry-run
 python proc/seis_ssl_cluster/cluster_embeddings.py --config "$EXP/01_replay_hmm_k6810.yaml"
+
+python proc/seis_ssl_cluster/export_strat_hmm_multi_head_pseudo_targets.py \
+  --config "$EXP/01_export_multi_head_pseudo_targets.yaml" --dry-run
+python proc/seis_ssl_cluster/export_strat_hmm_multi_head_pseudo_targets.py \
+  --config "$EXP/01_export_multi_head_pseudo_targets.yaml" --only-missing
+
+# Revalidate the complete schema-v1 bundle (including source hashes) without
+# writing arrays before the K=6 parity and manifest-publication stage.
+python proc/seis_ssl_cluster/export_strat_hmm_multi_head_pseudo_targets.py \
+  --config "$EXP/01_export_multi_head_pseudo_targets.yaml" --only-missing --dry-run
 
 python proc/seis_ssl_cluster/build_strat_hmm_multi_head_targets.py \
   --source-embedding-dir "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16" \

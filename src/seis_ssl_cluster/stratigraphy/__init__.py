@@ -27,6 +27,14 @@ from seis_ssl_cluster.stratigraphy.multi_head import (
 	validate_multi_head_target_manifest,
 	validate_multi_head_target_publication_preflight,
 )
+from seis_ssl_cluster.stratigraphy.multi_head_export import (
+	CANONICAL_KS,
+	MultiHeadPseudoTargetExportConfig,
+	MultiHeadPseudoTargetExportPlan,
+	export_multi_head_pseudo_targets,
+	plan_multi_head_pseudo_target_exports,
+	resolve_multi_head_pseudo_target_export_config,
+)
 from seis_ssl_cluster.stratigraphy.prototypes import (
 	MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
 	MultiResolutionOrderedPrototypeHeads,
@@ -61,10 +69,13 @@ _HMM_DECODE_EXPORTS = {
 }
 
 __all__ = [
+	'CANONICAL_KS',
 	'GLOBAL_VALID_TOKENS',
 	'MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1',
 	'ExportedPseudoTargetResult',
 	'LogitHMMPseudoTarget',
+	'MultiHeadPseudoTargetExportConfig',
+	'MultiHeadPseudoTargetExportPlan',
 	'MultiResolutionOrderedPrototypeHeads',
 	'MultiResolutionOrderedPrototypeOutput',
 	'OrderedPrototypeHead',
@@ -82,15 +93,18 @@ __all__ = [
 	'emission_costs_from_logits',
 	'expected_normalized_order_coordinate',
 	'export_hmm_cluster_labels_as_pseudo_targets',
+	'export_multi_head_pseudo_targets',
 	'feature_distillation_loss',
 	'load_multi_head_target_manifest',
 	'load_pseudo_target_arrays',
 	'load_pseudo_target_metadata',
 	'multi_head_cross_head_diagnostics',
 	'ordered_soft_coordinate',
+	'plan_multi_head_pseudo_target_exports',
 	'plan_shuffled_hmm_pseudo_targets',
 	'prepare_hmm_cluster_label_pseudo_target_exports',
 	'pseudo_target_paths',
+	'resolve_multi_head_pseudo_target_export_config',
 	'shuffle_pseudo_target_arrays',
 	'shuffle_strat_hmm_pseudo_targets',
 	'structured_hmm_prototype_loss',

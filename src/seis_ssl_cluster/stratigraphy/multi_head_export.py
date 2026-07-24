@@ -1,0 +1,527 @@
+"""Strict, resumable export of the K=6/8/10 multi-head target bundle."""
+
+from __future__ import annotations
+
+import json
+import shutil
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal
+
+import numpy as np
+
+from seis_ssl_cluster.clustering.features import (
+	discover_embedding_inputs,
+	file_sha256,
+)
+from seis_ssl_cluster.stratigraphy.export import (
+	export_hmm_cluster_labels_as_pseudo_targets,
+	prepare_hmm_cluster_label_pseudo_target_exports,
+)
+from seis_ssl_cluster.stratigraphy.targets import (
+	StratPseudoTargetInput,
+	discover_pseudo_target_inputs,
+	load_pseudo_target_arrays,
+	load_pseudo_target_metadata,
+)
+
+if TYPE_CHECKING:
+	from collections.abc import Sequence
+
+
+CANONICAL_KS = (6, 8, 10)
+_LABEL_SUFFIX = '.cluster_labels_token.npy'
+_Action = Literal['NEW', 'REUSE', 'QUARANTINE', 'ERROR']
+
+
+@dataclass(frozen=True)
+class MultiHeadPseudoTargetExportConfig:
+	"""Resolved immutable policy for a multi-head pseudo-target export."""
+
+	clustering_output_dir: Path
+	source_embedding_dir: Path
+	pseudo_target_root: Path
+	ks: tuple[int, ...]
+	confidence: float
+	schema_version: int
+	write_boundary_weight: bool
+	overwrite: bool
+	historical_k6_root: Path | None
+	handoff_manifest: Path
+
+
+@dataclass(frozen=True)
+class MultiHeadPseudoTargetExportPlan:
+	"""Validated action for one K head."""
+
+	k: int
+	action: _Action
+	source_labels: tuple[Path, ...]
+	reason: str | None = None
+
+
+def resolve_multi_head_pseudo_target_export_config(  # noqa: C901
+	config: Mapping[str, object],
+) -> MultiHeadPseudoTargetExportConfig:
+	"""Validate the deliberately narrow schema-v1 multi-head export config."""
+	allowed = {
+		'clustering_output_dir',
+		'source_embedding_dir',
+		'pseudo_target_root',
+		'ks',
+		'confidence',
+		'schema_version',
+		'write_boundary_weight',
+		'outputs',
+		'historical_k6_root',
+		'handoff_manifest',
+	}
+	unknown = set(config) - allowed
+	if unknown:
+		raise ValueError(
+			f'unknown multi-head pseudo-target config keys: {sorted(unknown)}',
+		)
+	clustering_output_dir = _path(config, 'clustering_output_dir')
+	source_embedding_dir = _path(config, 'source_embedding_dir')
+	pseudo_target_root = _path(config, 'pseudo_target_root')
+	ks_value = config.get('ks')
+	if not isinstance(ks_value, list) or any(
+		isinstance(k, bool) or not isinstance(k, int) for k in ks_value
+	):
+		raise TypeError('ks must be a list of integers')
+	ks = tuple(ks_value)
+	if ks != CANONICAL_KS:
+		raise ValueError(f'ks must be exactly {list(CANONICAL_KS)} in canonical order')
+	confidence = config.get('confidence')
+	if isinstance(confidence, bool) or not isinstance(confidence, (int, float)):
+		raise TypeError('confidence must be a number')
+	confidence = float(confidence)
+	if confidence != 1.0:
+		raise ValueError('confidence must be the historical bootstrap constant 1.0')
+	if config.get('schema_version') != 1:
+		raise ValueError('schema_version must be explicitly set to 1')
+	if config.get('write_boundary_weight') is not False:
+		raise ValueError('write_boundary_weight must be explicitly set to false')
+	outputs = config.get('outputs')
+	if not isinstance(outputs, Mapping) or set(outputs) != {'overwrite'}:
+		raise ValueError('outputs must contain exactly overwrite')
+	if outputs['overwrite'] is not False:
+		raise ValueError('outputs.overwrite must be false for immutable exports')
+	historical_value = config.get('historical_k6_root')
+	historical_k6_root = (
+		Path(historical_value)
+		if isinstance(historical_value, str) and historical_value
+		else None
+	)
+	if historical_value is not None and historical_k6_root is None:
+		raise TypeError('historical_k6_root must be a non-empty path when provided')
+	if historical_k6_root and _same_path(historical_k6_root, pseudo_target_root):
+		raise ValueError('pseudo_target_root must differ from historical_k6_root')
+	handoff_value = config.get('handoff_manifest')
+	handoff_manifest = (
+		Path(handoff_value)
+		if isinstance(handoff_value, str) and handoff_value
+		else pseudo_target_root / 'multi_head_pseudo_target_export_handoff.json'
+	)
+	return MultiHeadPseudoTargetExportConfig(
+		clustering_output_dir=clustering_output_dir,
+		source_embedding_dir=source_embedding_dir,
+		pseudo_target_root=pseudo_target_root,
+		ks=ks,
+		confidence=confidence,
+		schema_version=1,
+		write_boundary_weight=False,
+		overwrite=False,
+		historical_k6_root=historical_k6_root,
+		handoff_manifest=handoff_manifest,
+	)
+
+
+def plan_multi_head_pseudo_target_exports(
+	config: MultiHeadPseudoTargetExportConfig,
+	*,
+	only_missing: bool,
+) -> list[MultiHeadPseudoTargetExportPlan]:
+	"""Validate all inputs and classify each head without writing arrays."""
+	if config.historical_k6_root and _same_path(
+		config.historical_k6_root, config.pseudo_target_root
+	):
+		raise ValueError('refusing to write K=6 replay into historical K=6 root')
+	plans: list[MultiHeadPseudoTargetExportPlan] = []
+	for k in config.ks:
+		source_labels = _source_label_paths(config.clustering_output_dir, k=k)
+		_validate_source_label_embedding_alignment(config, source_labels, k=k)
+		output_dir = config.pseudo_target_root / f'k{k}'
+		if not output_dir.exists():
+			plans.append(MultiHeadPseudoTargetExportPlan(k, 'NEW', source_labels))
+			continue
+		if k == 6:
+			_reject_historical_k6_identity(config, output_dir)
+		try:
+			_validate_complete_export(config, k=k, source_labels=source_labels)
+		except (OSError, TypeError, ValueError) as exc:
+			action: _Action = 'QUARANTINE' if only_missing else 'ERROR'
+			plans.append(
+				MultiHeadPseudoTargetExportPlan(
+					k, action, source_labels, str(exc)
+				),
+			)
+		else:
+			action = 'REUSE' if only_missing else 'ERROR'
+			reason = (
+				None if only_missing else 'complete output exists; use --only-missing'
+			)
+			plans.append(
+				MultiHeadPseudoTargetExportPlan(k, action, source_labels, reason),
+			)
+	return plans
+
+
+def export_multi_head_pseudo_targets(
+	config: MultiHeadPseudoTargetExportConfig,
+	*,
+	dry_run: bool = False,
+	only_missing: bool = False,
+) -> list[MultiHeadPseudoTargetExportPlan]:
+	"""Export the complete bundle, quarantining only invalid resumptions."""
+	plans = plan_multi_head_pseudo_target_exports(config, only_missing=only_missing)
+	if any(plan.action == 'ERROR' for plan in plans) and not dry_run:
+		raise FileExistsError(_plan_error(plans))
+	if dry_run:
+		return plans
+	for plan in plans:
+		if plan.action == 'REUSE':
+			continue
+		if plan.action == 'QUARANTINE':
+			_quarantine(config.pseudo_target_root / f'k{plan.k}')
+		export_hmm_cluster_labels_as_pseudo_targets(
+			clustering_output_dir=config.clustering_output_dir,
+			pseudo_target_root=config.pseudo_target_root,
+			k=plan.k,
+			confidence=config.confidence,
+			overwrite=False,
+			schema_version=config.schema_version,
+			write_boundary_weight=config.write_boundary_weight,
+		)
+		_validate_complete_export(
+			config,
+			k=plan.k,
+			source_labels=plan.source_labels,
+			verify_recorded_hashes=False,
+		)
+	_validate_common_target_masks(config)
+	_write_handoff(config)
+	return plans
+
+
+def _source_label_paths(root: Path, *, k: int) -> tuple[Path, ...]:
+	label_dir = root / 'labels' / f'k{k}'
+	paths = tuple(sorted(label_dir.glob(f'*{_LABEL_SUFFIX}')))
+	if not paths:
+		raise ValueError(f'no clustering labels found for k={k}: {label_dir}')
+	# Reuse the existing exporter preflight for source array semantics and policy.
+	prepare_hmm_cluster_label_pseudo_target_exports(
+		clustering_output_dir=root,
+		pseudo_target_root=root / '.multi-head-export-preflight',
+		k=k,
+		confidence=1.0,
+		schema_version=1,
+		write_boundary_weight=False,
+	)
+	return paths
+
+
+def _validate_complete_export(  # noqa: C901
+	config: MultiHeadPseudoTargetExportConfig,
+	*,
+	k: int,
+	source_labels: Sequence[Path],
+	verify_recorded_hashes: bool = True,
+) -> None:
+	output_dir = config.pseudo_target_root / f'k{k}'
+	if any(output_dir.glob('*.hmm_boundary_weight_token.npy')):
+		raise ValueError(f'k={k} contains forbidden boundary-weight artifacts')
+	inputs = discover_pseudo_target_inputs(config.pseudo_target_root, k=k)
+	expected = {
+		path.name.removesuffix(_LABEL_SUFFIX): file_sha256(path)
+		for path in source_labels
+	}
+	if {item.survey_id for item in inputs} != set(expected):
+		raise ValueError(f'k={k} source/output survey set mismatch')
+	recorded_hashes = (
+		_recorded_head_hashes(config, k=k) if verify_recorded_hashes else None
+	)
+	if verify_recorded_hashes and recorded_hashes is None:
+		raise ValueError(f'k={k} has no complete export handoff hashes')
+	for item in inputs:
+		metadata = load_pseudo_target_metadata(item)
+		if metadata.get('schema_version') != 1 or metadata.get('k') != k:
+			raise ValueError(f'k={k} has incompatible pseudo-target metadata')
+		source = metadata.get('source')
+		if not isinstance(source, Mapping):
+			raise TypeError(f'k={k} {item.survey_id} is missing source identity')
+		if source.get('export_confidence') != config.confidence:
+			raise ValueError(f'k={k} {item.survey_id} confidence policy mismatch')
+		label_path = source.get('source_label_path')
+		expected_label_path = (
+			config.clustering_output_dir
+			/ 'labels'
+			/ f'k{k}'
+			/ f'{item.survey_id}{_LABEL_SUFFIX}'
+		)
+		if not isinstance(label_path, str) or not _same_path(
+			Path(label_path), expected_label_path
+		):
+			raise ValueError(f'k={k} {item.survey_id} source label path mismatch')
+		if source.get('source_label_sha256') != expected[item.survey_id]:
+			raise ValueError(f'k={k} {item.survey_id} source label hash mismatch')
+		load_pseudo_target_arrays(item)
+		if (
+			recorded_hashes is not None
+			and recorded_hashes.get(item.survey_id) != _item_hashes(item)
+		):
+			raise ValueError(f'k={k} {item.survey_id} output hash mismatch')
+
+
+def _write_handoff(config: MultiHeadPseudoTargetExportConfig) -> None:
+	prepared_feature_identity = _prepared_feature_identity(
+		config.clustering_output_dir,
+		k=config.ks[0],
+	)
+	payload: dict[str, object] = {
+		'artifact_type': 'strat_hmm_multi_head_pseudo_target_export_handoff',
+		'schema_version': 1,
+		'completion_status': 'COMPLETE',
+		'clustering': {
+			'path': str(config.clustering_output_dir),
+			'config_and_metadata_sha256': _clustering_metadata_hashes(
+				config.clustering_output_dir,
+				ks=config.ks,
+			),
+			'labels': {
+				str(k): {
+					path.name: file_sha256(path)
+					for path in _source_label_paths(config.clustering_output_dir, k=k)
+				}
+				for k in config.ks
+			},
+		},
+		'prepared_feature_identity': prepared_feature_identity,
+		'source_embedding': {
+			'path': str(config.source_embedding_dir),
+			'valid_tokens_sha256': {
+				item.survey_id: file_sha256(item.valid_tokens_path)
+				for item in discover_embedding_inputs(config.source_embedding_dir)
+			},
+		},
+		'policy': {
+			'ks': list(config.ks),
+			'confidence': config.confidence,
+			'schema_version': config.schema_version,
+			'write_boundary_weight': config.write_boundary_weight,
+		},
+		'heads': {
+			str(k): _head_hashes(config.pseudo_target_root, k=k)
+			for k in config.ks
+		},
+		'common_target_valid_sha256': {
+			item.survey_id: file_sha256(item.valid_tokens_path)
+			for item in discover_pseudo_target_inputs(config.pseudo_target_root, k=6)
+		},
+	}
+	config.handoff_manifest.parent.mkdir(parents=True, exist_ok=True)
+	temporary = config.handoff_manifest.with_suffix(
+		config.handoff_manifest.suffix + '.tmp'
+	)
+	temporary.write_text(
+		json.dumps(payload, indent=2, sort_keys=True) + '\n',
+		encoding='utf-8',
+	)
+	temporary.replace(config.handoff_manifest)
+
+
+def _head_hashes(root: Path, *, k: int) -> dict[str, dict[str, str]]:
+	return {
+		item.survey_id: _item_hashes(item)
+		for item in discover_pseudo_target_inputs(root, k=k)
+	}
+
+
+def _item_hashes(item: StratPseudoTargetInput) -> dict[str, str]:
+	"""Return file hashes for a pseudo-target input without loading arrays."""
+	return {
+		'labels': file_sha256(item.labels_path),
+		'confidence': file_sha256(item.confidence_path),
+		'valid_tokens': file_sha256(item.valid_tokens_path),
+		'metadata': file_sha256(item.metadata_path),
+	}
+
+
+def _recorded_head_hashes(
+	config: MultiHeadPseudoTargetExportConfig,
+	*,
+	k: int,
+) -> Mapping[str, object] | None:
+	if not config.handoff_manifest.is_file():
+		return None
+	try:
+		payload = json.loads(config.handoff_manifest.read_text(encoding='utf-8'))
+	except json.JSONDecodeError as exc:
+		raise ValueError('multi-head export handoff must be valid JSON') from exc
+	if (
+		not isinstance(payload, Mapping)
+		or payload.get('completion_status') != 'COMPLETE'
+	):
+		raise ValueError('multi-head export handoff is incomplete')
+	heads = payload.get('heads')
+	if not isinstance(heads, Mapping):
+		raise TypeError('multi-head export handoff is missing head hashes')
+	head = heads.get(str(k))
+	if not isinstance(head, Mapping):
+		raise TypeError(f'multi-head export handoff is missing k={k} hashes')
+	return head
+
+
+def _validate_common_target_masks(config: MultiHeadPseudoTargetExportConfig) -> None:
+	reference = {
+		item.survey_id: file_sha256(item.valid_tokens_path)
+		for item in discover_pseudo_target_inputs(config.pseudo_target_root, k=6)
+	}
+	for k in config.ks[1:]:
+		current = {
+			item.survey_id: file_sha256(item.valid_tokens_path)
+			for item in discover_pseudo_target_inputs(config.pseudo_target_root, k=k)
+		}
+		if current != reference:
+			raise ValueError(f'k={k} valid-token mask differs from K=6')
+
+
+def _validate_source_label_embedding_alignment(
+	config: MultiHeadPseudoTargetExportConfig,
+	source_labels: Sequence[Path],
+	*,
+	k: int,
+) -> None:
+	"""Require each derived target mask to be a subset of its source embedding."""
+	embeddings = {
+		item.survey_id: item
+		for item in discover_embedding_inputs(config.source_embedding_dir)
+	}
+	labels_by_survey = {
+		path.name.removesuffix(_LABEL_SUFFIX): path for path in source_labels
+	}
+	if set(labels_by_survey) != set(embeddings):
+		raise ValueError(
+			f'k={k} clustering-label survey set does not match source embeddings',
+		)
+	for survey_id, label_path in labels_by_survey.items():
+		labels = np.load(label_path, mmap_mode='r', allow_pickle=False)
+		embedding_valid = np.load(
+			embeddings[survey_id].valid_tokens_path,
+			mmap_mode='r',
+			allow_pickle=False,
+		)
+		if labels.shape != embedding_valid.shape:
+			raise ValueError(
+				f'k={k} {survey_id} token grid does not match source embedding',
+			)
+		if np.any((labels >= 0) & ~embedding_valid):
+			raise ValueError(
+				f'k={k} {survey_id} valid-token mask is not a subset '
+				'of source embedding',
+			)
+
+
+def _reject_historical_k6_identity(
+	config: MultiHeadPseudoTargetExportConfig,
+	replay_dir: Path,
+) -> None:
+	"""Reject a replay target that aliases immutable historical K=6 files."""
+	if config.historical_k6_root is None:
+		return
+	historical_dir = config.historical_k6_root / 'k6'
+	if not historical_dir.is_dir():
+		return
+	for replay_path in replay_dir.iterdir():
+		historical_path = historical_dir / replay_path.name
+		if not historical_path.exists() or not replay_path.is_file():
+			continue
+		replay_stat = replay_path.stat()
+		historical_stat = historical_path.stat()
+		if (
+			replay_stat.st_dev == historical_stat.st_dev
+			and replay_stat.st_ino == historical_stat.st_ino
+		):
+			raise ValueError(
+				'K=6 replay artifact must not hardlink immutable historical target: '
+				f'{replay_path}',
+			)
+
+
+def _prepared_feature_identity(root: Path, *, k: int) -> object:
+	metadata_path = next(iter(_source_metadata_paths(root, k=k)), None)
+	if metadata_path is None:
+		return None
+	payload = json.loads(metadata_path.read_text(encoding='utf-8'))
+	if not isinstance(payload, dict):
+		return None
+	return payload.get('prepared_feature_cache')
+
+
+def _clustering_metadata_hashes(
+	root: Path,
+	*,
+	ks: Sequence[int],
+) -> dict[str, str]:
+	return {
+		str(k): file_sha256(path)
+		for k in ks
+		for path in [root / 'models' / f'k{k}' / 'clustering_metadata.json']
+		if path.is_file()
+	}
+
+
+def _source_metadata_paths(root: Path, *, k: int) -> tuple[Path, ...]:
+	return tuple(
+		sorted((root / 'labels' / f'k{k}').glob('*.cluster_label_metadata.json')),
+	)
+
+
+def _quarantine(path: Path) -> Path:
+	timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+	target = path.with_name(f'{path.name}.quarantine.{timestamp}')
+	if target.exists():
+		raise FileExistsError(f'quarantine path already exists: {target}')
+	shutil.move(str(path), str(target))
+	return target
+
+
+def _path(config: Mapping[str, object], name: str) -> Path:
+	value = config.get(name)
+	if not isinstance(value, str) or not value:
+		raise TypeError(f'{name} must be a non-empty path')
+	return Path(value)
+
+
+def _same_path(left: Path, right: Path) -> bool:
+	return left.resolve() == right.resolve()
+
+
+def _plan_error(plans: Sequence[MultiHeadPseudoTargetExportPlan]) -> str:
+	return '; '.join(
+		f'k={plan.k}: {plan.reason or "output collision"}'
+		for plan in plans
+		if plan.action == 'ERROR'
+	)
+
+
+__all__ = [
+	'CANONICAL_KS',
+	'MultiHeadPseudoTargetExportConfig',
+	'MultiHeadPseudoTargetExportPlan',
+	'export_multi_head_pseudo_targets',
+	'plan_multi_head_pseudo_target_exports',
+	'resolve_multi_head_pseudo_target_export_config',
+]
