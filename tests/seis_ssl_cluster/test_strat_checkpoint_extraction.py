@@ -688,6 +688,72 @@ def test_multi_head_checkpoint_rejects_corrupt_selection_history(
 		validate_stratigraphy_checkpoint_payload(payload)
 
 
+@pytest.mark.parametrize(
+	('first_kind', 'second_epoch', 'second_batch_index'),
+	[('step', 1, 1), ('epoch', 2, 0)],
+)
+def test_multi_head_checkpoint_rejects_invalid_repeated_global_steps(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	first_kind: str,
+	second_epoch: int,
+	second_batch_index: int,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	selection = payload['checkpoint_selection']
+	assert isinstance(selection, dict)
+	events = selection['events']
+	assert isinstance(events, list)
+	first = events[0]
+	assert isinstance(first, dict)
+	first['checkpoint_kind'] = first_kind
+	first['batch_index'] = 0 if first_kind == 'step' else None
+	second = {
+		'sequence': 1,
+		'epoch': second_epoch,
+		'global_step': 1,
+		'checkpoint_kind': 'step',
+		'batch_index': second_batch_index,
+		'loss': 0.5,
+		'previous_best_score': 1.0,
+		'best_updated': True,
+		'best_score_after': 0.5,
+	}
+	events.append(second)
+	selection['selected'] = {
+		key: second[key]
+		for key in (
+			'sequence',
+			'epoch',
+			'global_step',
+			'checkpoint_kind',
+			'batch_index',
+			'loss',
+		)
+	}
+
+	with pytest.raises(ValueError, match='repeated global_step'):
+		validate_stratigraphy_checkpoint_payload(payload)
+
+
+@pytest.mark.parametrize(('field', 'value'), [('sequence', False), ('epoch', True)])
+def test_multi_head_checkpoint_rejects_boolean_selected_event_identity(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	field: str,
+	value: object,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	selection = payload['checkpoint_selection']
+	assert isinstance(selection, dict)
+	selected = selection['selected']
+	assert isinstance(selected, dict)
+	selected[field] = value
+
+	with pytest.raises(TypeError, match='selected event sequence/epoch/global_step'):
+		validate_stratigraphy_checkpoint_payload(payload)
+
+
 def test_multi_head_rolling_checkpoint_persists_resume_history_and_reports(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,

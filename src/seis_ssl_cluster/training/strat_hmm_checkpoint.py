@@ -1252,8 +1252,7 @@ def _validated_checkpoint_selection(  # noqa: C901, PLR0912
 		raise ValueError('checkpoint selection events must be a non-empty list')
 	events: list[dict[str, object]] = []
 	best_score: float | None = None
-	previous_epoch: int | None = None
-	previous_order: tuple[int, int, int, int] | None = None
+	previous_event: Mapping[str, object] | None = None
 	keys: set[tuple[int, int, str, int | None]] = set()
 	selected: dict[str, object] | None = None
 	for sequence, raw_event in enumerate(raw_events):
@@ -1264,13 +1263,11 @@ def _validated_checkpoint_selection(  # noqa: C901, PLR0912
 		if key in keys:
 			raise ValueError('checkpoint selection history contains a duplicate event')
 		keys.add(key)
-		if previous_epoch is not None and event['epoch'] < previous_epoch:
-			raise ValueError('checkpoint selection event epochs must not regress')
-		previous_epoch = event['epoch']
-		order = _selection_event_order(event)
-		if previous_order is not None and order <= previous_order:
-			raise ValueError('checkpoint selection events are not chronological')
-		previous_order = order
+		if previous_event is not None:
+			if event['epoch'] < previous_event['epoch']:
+				raise ValueError('checkpoint selection event epochs must not regress')
+			_selection_event_order(previous_event, event)
+		previous_event = event
 		if event['previous_best_score'] != best_score:
 			raise ValueError('checkpoint selection previous_best_score is inconsistent')
 		updated = _is_improved(float(event['loss']), best_score)
@@ -1417,13 +1414,25 @@ def _selection_event_key(
 	)
 
 
-def _selection_event_order(event: Mapping[str, object]) -> tuple[int, int, int, int]:
-	return (
-		int(event['global_step']),
-		int(event['epoch']),
-		0 if event['checkpoint_kind'] == 'step' else 1,
-		int(event['batch_index']) if isinstance(event['batch_index'], int) else -1,
-	)
+def _selection_event_order(
+	previous: Mapping[str, object], event: Mapping[str, object]
+) -> None:
+	"""Require chronological checkpoints and the sole valid repeated-step pair."""
+	previous_step = int(previous['global_step'])
+	event_step = int(event['global_step'])
+	if event_step < previous_step:
+		raise ValueError('checkpoint selection events are not chronological')
+	if event_step > previous_step:
+		return
+	if (
+		event['epoch'] != previous['epoch']
+		or previous['checkpoint_kind'] != 'step'
+		or event['checkpoint_kind'] != 'epoch'
+	):
+		raise ValueError(
+			'checkpoint selection repeated global_step must be a '
+			'same-epoch step-to-epoch pair'
+		)
 
 
 def _selection_event_identity(value: object) -> dict[str, object]:
@@ -1439,7 +1448,52 @@ def _selection_event_identity(value: object) -> dict[str, object]:
 	)
 	if set(value) != set(keys):
 		raise ValueError('checkpoint selection selected event identity is invalid')
-	return {key: value[key] for key in keys}
+	sequence, epoch, global_step = (
+		value['sequence'],
+		value['epoch'],
+		value['global_step'],
+	)
+	if any(
+		isinstance(item, bool) or not isinstance(item, int)
+		for item in (sequence, epoch, global_step)
+	):
+		raise TypeError(
+			'checkpoint selection selected event sequence/epoch/global_step '
+			'must be integers'
+		)
+	if any(item < 0 for item in (sequence, epoch, global_step)):
+		raise ValueError(
+			'checkpoint selection selected event counters must be nonnegative'
+		)
+	kind = value['checkpoint_kind']
+	if kind not in {'step', 'epoch'}:
+		raise ValueError(
+			'checkpoint selection selected event checkpoint_kind must be step or epoch'
+		)
+	batch_index = value['batch_index']
+	if kind == 'step' and (
+		isinstance(batch_index, bool)
+		or not isinstance(batch_index, int)
+		or batch_index < 0
+	):
+		raise TypeError(
+			'checkpoint selection selected step batch_index must be a '
+			'nonnegative integer'
+		)
+	if kind == 'epoch' and batch_index is not None:
+		raise ValueError(
+			'checkpoint selection selected epoch batch_index must be null'
+		)
+	return {
+		'sequence': sequence,
+		'epoch': epoch,
+		'global_step': global_step,
+		'checkpoint_kind': kind,
+		'batch_index': batch_index,
+		'loss': _finite_selection_number(
+			value['loss'], 'selected event loss'
+		),
+	}
 
 
 def _selection_event_identity_from_event(
