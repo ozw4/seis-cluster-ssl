@@ -550,6 +550,35 @@ def _identity_contract(  # noqa: PLR0913
 		raise ValueError(
 			'checkpoint scientific identity does not match training config'
 		)
+	_validate_source_checkpoint_hashes(training, identity)
+
+
+def _validate_source_checkpoint_hashes(
+	training: Mapping[str, object], identity: Mapping[str, object]
+) -> None:
+	"""Bind checkpoint identity to the configured immutable source checkpoints."""
+	teacher = _mapping(training.get('teacher'), 'teacher')
+	student = _mapping(training.get('student'), 'student')
+	teacher_path = _checkpoint_path(teacher.get('checkpoint'), 'teacher.checkpoint')
+	student_path = _checkpoint_path(
+		student.get('init_checkpoint') or teacher.get('checkpoint'),
+		'student.init_checkpoint',
+	)
+	for key, path in (
+		('teacher_checkpoint_sha256', teacher_path),
+		('student_init_checkpoint_sha256', student_path),
+	):
+		if identity.get(key) != file_sha256(path):
+			raise ValueError(f'checkpoint {key} does not match configured source')
+
+
+def _checkpoint_path(value: object, label: str) -> Path:
+	if not isinstance(value, str) or not value:
+		raise TypeError(f'{label} must be a non-empty path string')
+	path = Path(value)
+	if not path.is_file():
+		raise FileNotFoundError(f'{label} is missing: {path}')
+	return path
 
 
 def _validate_initial_states(

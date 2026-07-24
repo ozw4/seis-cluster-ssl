@@ -523,10 +523,17 @@ def test_checkpoint_scientific_identity_must_match_the_resolved_training_config(
 		'paths': {'output_root': str(root)},
 		'identity': {'scientific_identity': scientific_identity},
 	}
+	teacher, student = tmp_path / 'teacher.pt', tmp_path / 'student-init.pt'
+	teacher.write_bytes(b'teacher checkpoint')
+	student.write_bytes(b'student checkpoint')
+	training['teacher'] = {'checkpoint': str(teacher)}
+	training['student'] = {'init_checkpoint': str(student)}
 	identity = {
 		'scientific_identity_sha256': scientific_identity_sha256(
 			scientific_identity
-		)
+		),
+		'teacher_checkpoint_sha256': pretraining_validation.file_sha256(teacher),
+		'student_init_checkpoint_sha256': pretraining_validation.file_sha256(student),
 	}
 	payload = {
 		'stratigraphy_checkpoint': {
@@ -546,6 +553,20 @@ def test_checkpoint_scientific_identity_must_match_the_resolved_training_config(
 		}
 	}
 	_identity_contract(config, training, payload, model_tag, 0.0, {})
+	teacher.write_bytes(b'replaced teacher checkpoint')
+	with pytest.raises(
+		ValueError,
+		match='teacher_checkpoint_sha256 does not match configured source',
+	):
+		_identity_contract(config, training, payload, model_tag, 0.0, {})
+	teacher.write_bytes(b'teacher checkpoint')
+	student.write_bytes(b'replaced student checkpoint')
+	with pytest.raises(
+		ValueError,
+		match='student_init_checkpoint_sha256 does not match configured source',
+	):
+		_identity_contract(config, training, payload, model_tag, 0.0, {})
+	student.write_bytes(b'student checkpoint')
 	scientific_identity['target_head_hashes'] = {'6': {}}
 	with pytest.raises(
 		ValueError,
@@ -601,6 +622,52 @@ def test_checkpoint_scientific_identity_must_match_the_resolved_training_config(
 		ValueError, match='paired pretraining scientific identity mismatch: nocons'
 	):
 		_validate_pair(left, right, configs)
+
+
+def test_embedding_validation_rejects_metadata_without_checkpoint_binding(
+	tmp_path: Path,
+) -> None:
+	artifact_root = tmp_path / 'artifacts'
+	model_tag = 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1'
+	config = F3MultiHeadPretrainingValidationConfig(
+		artifact_root=artifact_root,
+		experiment_root=artifact_root / 'pretraining',
+		target_manifest=artifact_root / 'targets.json',
+		control_full_config=tmp_path / 'control.yaml',
+		nocons_full_config=tmp_path / 'nocons.yaml',
+		cons010_full_config=tmp_path / 'cons010.yaml',
+	)
+	best = tmp_path / 'best.pt'
+	best.write_bytes(b'best checkpoint')
+	root = (
+		artifact_root
+		/ 'embeddings/f3/facies_benchmark_v1'
+		/ model_tag
+		/ 'overlap_x16'
+	)
+	files = pretraining_validation.output_paths(root, 'f3_facies_benchmark')
+	root.mkdir(parents=True)
+	files.embeddings.touch()
+	files.valid_tokens.touch()
+	files.metadata.write_text(
+		json.dumps(
+			{
+				'checkpoint_path': str(best),
+				'checkpoint_sha256': '0' * 64,
+			}
+		),
+		encoding='utf-8',
+	)
+
+	with pytest.raises(
+		ValueError, match=r'embedding metadata does not bind selected best\.pt'
+	):
+		pretraining_validation._embedding_evidence(  # noqa: SLF001
+			config,
+			{'best_path': best},
+			model_tag,
+			canonical_valid_tokens_sha256='a' * 64,
+		)
 
 
 def test_pair_config_contract_rejects_unbound_scientific_consistency_weight() -> None:
