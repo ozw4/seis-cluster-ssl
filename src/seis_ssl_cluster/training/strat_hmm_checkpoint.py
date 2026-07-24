@@ -1202,6 +1202,7 @@ def _validated_checkpoint_selection(  # noqa: C901, PLR0912
 		raise ValueError('checkpoint selection events must be a non-empty list')
 	events: list[dict[str, object]] = []
 	best_score: float | None = None
+	previous_epoch: int | None = None
 	previous_order: tuple[int, int, int, int] | None = None
 	keys: set[tuple[int, int, str, int | None]] = set()
 	selected: dict[str, object] | None = None
@@ -1213,6 +1214,9 @@ def _validated_checkpoint_selection(  # noqa: C901, PLR0912
 		if key in keys:
 			raise ValueError('checkpoint selection history contains a duplicate event')
 		keys.add(key)
+		if previous_epoch is not None and event['epoch'] < previous_epoch:
+			raise ValueError('checkpoint selection event epochs must not regress')
+		previous_epoch = event['epoch']
 		order = _selection_event_order(event)
 		if previous_order is not None and order <= previous_order:
 			raise ValueError('checkpoint selection events are not chronological')

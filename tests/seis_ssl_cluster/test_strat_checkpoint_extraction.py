@@ -769,6 +769,17 @@ def test_multi_head_rolling_checkpoint_persists_resume_history_and_reports(
 	assert json.loads(
 		(tmp_path / 'checkpoint_selection_summary.json').read_text(encoding='utf-8')
 	) == selection
+	corrupt_latest = deepcopy(latest)
+	corrupt_latest['epoch'] = 0
+	corrupt_selection = corrupt_latest['checkpoint_selection']
+	assert isinstance(corrupt_selection, dict)
+	corrupt_events = corrupt_selection['events']
+	assert isinstance(corrupt_events, list)
+	corrupt_event = corrupt_events[1]
+	assert isinstance(corrupt_event, dict)
+	corrupt_event['epoch'] = 0
+	with pytest.raises(ValueError, match='event epochs must not regress'):
+		validate_stratigraphy_checkpoint_payload(corrupt_latest)
 
 
 def test_multi_head_resume_matches_continuous_two_plus_two_steps(

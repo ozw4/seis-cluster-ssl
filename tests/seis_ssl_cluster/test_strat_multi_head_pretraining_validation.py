@@ -761,7 +761,7 @@ def test_best_selection_accepts_a_step_selected_before_the_final_epoch() -> None
 	step = {
 		'sequence': 0,
 		'epoch': 25,
-		'global_step': 25500,
+		'global_step': 25600,
 		'checkpoint_kind': 'step',
 		'batch_index': 499,
 		'loss': 0.262,
@@ -800,7 +800,7 @@ def test_best_selection_accepts_a_step_selected_before_the_final_epoch() -> None
 	}
 	best = {
 		'epoch': 25,
-		'global_step': 25500,
+		'global_step': 25600,
 		'metrics': {'loss': 0.262},
 		'training_state': {'checkpoint_kind': 'step', 'batch_index': 499},
 		'checkpoint_selection': best_selection,
