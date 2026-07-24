@@ -503,17 +503,12 @@ def test_pretraining_checkpoint_evidence_allows_pre_extraction_validation(
 		handoff = tmp_path / f'{role}.json'
 		handoff.write_text(
 			json.dumps(
-				{
-					'artifact_type': 'f3_multi_head_pretraining_handoff',
-					'status': 'PASS',
-					'stratigraphy_pretext': {
-						'head_ks': [6, 8, 10],
-						'head_spec': 'multi_resolution_ordered_prototypes_v1',
-						'target_manifest_sha256': file_sha256(target_manifest),
-						'consistency_policy': 'fixed',
-						'consistency_weight': weight,
-					},
-				}
+				_complete_handoff_payload(
+					model_tag=tag,
+					variant='nocons' if role == 'mh_nocons' else 'cons010',
+					consistency_weight=weight,
+					target_manifest_sha256=file_sha256(target_manifest),
+				)
 			),
 			encoding='utf-8',
 		)
@@ -551,6 +546,60 @@ def test_pretraining_checkpoint_evidence_allows_pre_extraction_validation(
 		'mh_nocons',
 		'mh_cons010',
 	]
+
+
+def _complete_handoff_payload(
+	*,
+	model_tag: str,
+	variant: str,
+	consistency_weight: float,
+	target_manifest_sha256: str,
+) -> dict[str, object]:
+	return {
+		'artifact_type': 'f3_multi_head_pretraining_handoff',
+		'schema_version': 1,
+		'status': 'PASS',
+		'model_tag': model_tag,
+		'variant': variant,
+		'checkpoint': {
+			'path': '/artifact/best.pt',
+			'sha256': 'a' * 64,
+			'latest_path': '/artifact/latest.pt',
+			'latest_sha256': 'b' * 64,
+			'best_epoch': 25,
+			'best_global_step': 25600,
+			'selection_metric': 'metrics.loss',
+		},
+		'embedding': {
+			'root': '/artifact/overlap_x16',
+			'metadata_path': '/artifact/metadata.json',
+			'metadata_sha256': 'c' * 64,
+			'embeddings_sha256': 'd' * 64,
+			'valid_tokens_sha256': 'e' * 64,
+		},
+		'embedding_metadata_sha256': 'c' * 64,
+		'stratigraphy_pretext': {
+			'head_spec': 'multi_resolution_ordered_prototypes_v1',
+			'head_ks': [6, 8, 10],
+			'target_manifest_path': '/artifact/multi_head_target_manifest.json',
+			'target_manifest_sha256': target_manifest_sha256,
+			'per_head_target_sha256': {
+				str(head_k): {
+					'f3': dict.fromkeys(
+						('labels', 'confidence', 'valid_tokens', 'metadata'),
+						f'{head_k:x}' * 64,
+					)
+				}
+				for head_k in (6, 8, 10)
+			},
+			'consistency_policy': 'normalized_order_smooth_l1_v1',
+			'consistency_weight': consistency_weight,
+			'consistency_beta': 0.1,
+			'scientific_identity_sha256': 'f' * 64,
+			'initial_student_state_sha256': '1' * 64,
+			'initial_head_state_sha256': '2' * 64,
+		},
+	}
 
 
 def test_pretraining_summary_row_contains_required_training_diagnostics(

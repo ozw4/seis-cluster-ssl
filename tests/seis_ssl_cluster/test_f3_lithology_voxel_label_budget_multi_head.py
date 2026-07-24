@@ -71,7 +71,7 @@ def test_candidate_identity_requires_bound_matching_handoff(tmp_path: Path) -> N
 	wrong = _handoff_payload(paths, model_tag=candidate.model_tag)
 	wrong['embedding_metadata_sha256'] = '0' * 64
 	paths.handoff.write_text(json.dumps(wrong), encoding='utf-8')
-	with pytest.raises(ValueError, match='handoff metadata SHA-256 mismatch'):
+	with pytest.raises(ValueError, match='handoff embedding metadata SHA-256 mismatch'):
 		multi_head._candidate_identity(
 			config,
 			candidate,
@@ -455,10 +455,23 @@ def _handoff_payload(paths: object, *, model_tag: str) -> dict[str, object]:
 		'schema_version': 1,
 		'status': 'PASS',
 		'model_tag': model_tag,
+		'variant': 'cons010' if 'cons010' in model_tag else 'nocons',
 		'embedding_metadata_sha256': file_sha256(paths.metadata),  # type: ignore[attr-defined]
 		'checkpoint': {
 			'path': str(paths.checkpoint),  # type: ignore[attr-defined]
 			'sha256': file_sha256(paths.checkpoint),  # type: ignore[attr-defined]
+			'latest_path': str(paths.checkpoint),  # type: ignore[attr-defined]
+			'latest_sha256': file_sha256(paths.checkpoint),  # type: ignore[attr-defined]
+			'best_epoch': 25,
+			'best_global_step': 25600,
+			'selection_metric': 'metrics.loss',
+		},
+		'embedding': {
+			'root': str(paths.embeddings.parent),  # type: ignore[attr-defined]
+			'metadata_path': str(paths.metadata),  # type: ignore[attr-defined]
+			'metadata_sha256': file_sha256(paths.metadata),  # type: ignore[attr-defined]
+			'embeddings_sha256': file_sha256(paths.embeddings),  # type: ignore[attr-defined]
+			'valid_tokens_sha256': file_sha256(paths.valid_tokens),  # type: ignore[attr-defined]
 		},
 		'stratigraphy_pretext': _stratigraphy(
 			'mh_cons010' if 'cons010' in model_tag else 'mh_nocons'
@@ -475,11 +488,23 @@ def _stratigraphy(model_id: str) -> dict[str, object]:
 		),
 		'head_spec': 'multi_resolution_ordered_prototypes_v1',
 		'head_ks': [6, 8, 10],
+		'target_manifest_path': '/artifact/multi_head_target_manifest.json',
 		'target_manifest_sha256': 'a' * 64,
+		'per_head_target_sha256': {
+			str(head_k): {
+				'f3': dict.fromkeys(
+					('labels', 'confidence', 'valid_tokens', 'metadata'),
+					f'{head_k:x}' * 64,
+				)
+			}
+			for head_k in (6, 8, 10)
+		},
 		'consistency_policy': 'normalized_order_smooth_l1_v1',
 		'consistency_weight': 0.1 if model_id == 'mh_cons010' else 0.0,
 		'consistency_beta': 0.1,
 		'scientific_identity_sha256': 'b' * 64,
+		'initial_student_state_sha256': 'c' * 64,
+		'initial_head_state_sha256': 'd' * 64,
 	}
 
 

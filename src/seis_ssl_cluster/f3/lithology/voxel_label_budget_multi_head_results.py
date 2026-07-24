@@ -23,6 +23,9 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 	inspect_f3_lithology_voxel_label_budget_mae_reference_run,
 	load_f3_lithology_voxel_label_budget_evaluation_metrics,
 )
+from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
+	load_f3_multi_head_pretraining_handoff,
+)
 from seis_ssl_cluster.results import (
 	PublishItem,
 	PublishManifest,
@@ -775,7 +778,9 @@ def _pretraining_evidence(
 		raise ValueError('configured target manifest K identity mismatch')
 	expected_target_manifest_sha256 = file_sha256(config.multi_head_target_manifest)
 	for candidate in config.candidates:
-		payload = _read_json(candidate.pretraining_handoff)
+		payload = load_f3_multi_head_pretraining_handoff(
+			candidate.pretraining_handoff
+		)
 		if (
 			payload.get('artifact_type') != 'f3_multi_head_pretraining_handoff'
 			or payload.get('status') != 'PASS'

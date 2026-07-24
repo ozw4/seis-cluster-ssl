@@ -651,7 +651,7 @@ def _multi_head_checkpoint_identity(  # noqa: PLR0913
 		'output_root': _required_mapping(stratigraphy_config, 'paths').get(
 			'output_root'
 		),
-		'scientific_identity_sha256': _canonical_sha256(scientific),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
 		'stratigraphy_state_sha256': _state_sha256(stratigraphy_state_dict),
 		'optimizer_group_identity': _optimizer_group_identity(
 			optimizer,
@@ -734,7 +734,9 @@ def _validate_multi_head_identity(
 		identity=identity,
 		stratigraphy_config=stratigraphy_config,
 	)
-	if identity.get('scientific_identity_sha256') != _canonical_sha256(scientific):
+	if identity.get('scientific_identity_sha256') != scientific_identity_sha256(
+		scientific
+	):
 		raise ValueError('checkpoint scientific identity SHA-256 mismatch')
 	for key in (
 		'target_head_hashes',
@@ -805,7 +807,7 @@ def _validate_expected_multi_head_identity(
 		'consistency_policy': scientific.get('consistency_policy'),
 		'consistency_weight': scientific.get('consistency_weight'),
 		'consistency_beta': scientific.get('consistency_beta'),
-		'scientific_identity_sha256': _canonical_sha256(scientific),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
 		'model_tag': config_identity.get('model_tag'),
 		'output_root': _required_mapping(config, 'paths').get('output_root'),
 		'teacher_checkpoint_sha256': _file_sha256(teacher_path),
@@ -958,6 +960,11 @@ def _canonical_sha256(value: object) -> str:
 			allow_nan=False,
 		).encode('utf-8')
 	).hexdigest()
+
+
+def scientific_identity_sha256(scientific_identity: Mapping[str, object]) -> str:
+	"""Return the canonical checksum recorded for a scientific identity."""
+	return _canonical_sha256(scientific_identity)
 
 
 def _optimizer_group_identity(

@@ -1,0 +1,550 @@
+from __future__ import annotations
+
+import json
+from types import SimpleNamespace
+from typing import TYPE_CHECKING
+
+import pytest
+import torch
+
+import seis_ssl_cluster.f3.multi_head_pretraining_validation as pretraining_validation
+from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
+	F3MultiHeadPretrainingValidationConfig,
+	_identity_contract,
+	_manifest_per_head_target_hashes,
+	_publish_handoff,
+	_state_sha256,
+	_tensor_sha256,
+	_validate_best_selection,
+	_validate_control_config,
+	_validate_freeze_contract,
+	_validate_initial_state_hashes,
+	_validate_pair,
+	_validate_pair_config_contract,
+	f3_multi_head_pretraining_validation_config_from_mapping,
+	load_f3_multi_head_pretraining_handoff,
+	validate_f3_multi_head_pretraining,
+)
+from seis_ssl_cluster.training.strat_hmm_checkpoint import scientific_identity_sha256
+
+if TYPE_CHECKING:
+	from pathlib import Path
+
+
+def test_validation_config_rejects_unknown_keys_and_paths_outside_artifacts(
+	tmp_path: Path,
+) -> None:
+	artifact_root = tmp_path / 'artifacts'
+	artifact_root.mkdir()
+	target = artifact_root / 'targets.json'
+	target.write_text('{}', encoding='utf-8')
+	configs = []
+	for name in ('control.yaml', 'nocons.yaml', 'cons010.yaml'):
+		path = tmp_path / name
+		path.write_text('{}', encoding='utf-8')
+		configs.append(path)
+	base = {
+		'artifact_root': str(artifact_root),
+		'experiment_root': str(artifact_root / 'pretraining'),
+		'target_manifest': str(target),
+		'control_full_config': str(configs[0]),
+		'nocons_full_config': str(configs[1]),
+		'cons010_full_config': str(configs[2]),
+	}
+	resolved = f3_multi_head_pretraining_validation_config_from_mapping(base)
+	assert resolved.target_manifest == target
+	with pytest.raises(ValueError, match='unknown validation config keys'):
+		f3_multi_head_pretraining_validation_config_from_mapping(
+			{**base, 'unknown': 'value'}
+		)
+
+
+def test_control_config_must_identify_the_canonical_current_k6_run(
+	tmp_path: Path,
+) -> None:
+	config = F3MultiHeadPretrainingValidationConfig(
+		artifact_root=tmp_path,
+		experiment_root=tmp_path / 'pretraining',
+		target_manifest=tmp_path / 'targets.json',
+		control_full_config=tmp_path / 'control.yaml',
+		nocons_full_config=tmp_path / 'nocons.yaml',
+		cons010_full_config=tmp_path / 'cons010.yaml',
+	)
+	control = {
+		'paths': {
+			'output_root': str(
+				config.experiment_root
+				/ 'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
+			)
+		},
+		'identity': {
+			'model_tag': 'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
+		},
+		'pseudo_targets': {'k': 6},
+		'head': {'num_prototypes': 6},
+	}
+	_validate_control_config(config, control)
+	control['identity']['model_tag'] = 'unrelated_control'
+	with pytest.raises(ValueError, match='control model tag mismatch'):
+		_validate_control_config(config, control)
+
+
+def test_dry_run_reports_a_failure_and_plan_for_each_candidate(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = F3MultiHeadPretrainingValidationConfig(
+		artifact_root=tmp_path,
+		experiment_root=tmp_path / 'pretraining',
+		target_manifest=tmp_path / 'targets.json',
+		control_full_config=tmp_path / 'control.yaml',
+		nocons_full_config=tmp_path / 'nocons.yaml',
+		cons010_full_config=tmp_path / 'cons010.yaml',
+	)
+	monkeypatch.setattr(
+		pretraining_validation,
+		'load_multi_head_target_manifest',
+		lambda _path: {'head_ks': [6, 8, 10]},
+	)
+	monkeypatch.setattr(
+		pretraining_validation, '_manifest_per_head_target_hashes', lambda _target: {}
+	)
+	monkeypatch.setattr(pretraining_validation, '_training_config', lambda _path: {})
+	monkeypatch.setattr(
+		pretraining_validation, '_validate_control_config', lambda *_: None
+	)
+	monkeypatch.setattr(
+		pretraining_validation,
+		'_validate_candidate_config_contract',
+		lambda *_args, **_kwargs: None,
+	)
+
+	def fail_candidate(*_args: object, variant: str, **_kwargs: object) -> None:
+		raise ValueError(f'{variant} checkpoint is unavailable')
+
+	monkeypatch.setattr(pretraining_validation, '_checkpoint_evidence', fail_candidate)
+
+	result = validate_f3_multi_head_pretraining(
+		config, phase='checkpoints', dry_run=True
+	)
+	assert result.published_handoffs == ()
+	for variant in ('nocons', 'cons010'):
+		evidence = result.candidates[variant]
+		assert evidence['status'] == 'FAIL'
+		assert variant in evidence['error']
+		assert evidence['planned_action'].startswith(
+			'strat_hmm_pretext_mh_k6810_'
+		)
+
+
+def test_public_handoff_loader_requires_complete_pass_schema(tmp_path: Path) -> None:
+	path = tmp_path / 'multi_head_handoff.json'
+	payload = _handoff_payload()
+	path.write_text(json.dumps(payload), encoding='utf-8')
+	assert load_f3_multi_head_pretraining_handoff(path)['status'] == 'PASS'
+	payload['embedding'] = {}
+	path.write_text(json.dumps(payload), encoding='utf-8')
+	with pytest.raises(TypeError, match=r'handoff embedding\.root is missing'):
+		load_f3_multi_head_pretraining_handoff(path)
+	payload = _handoff_payload()
+	payload['stratigraphy_pretext'].pop('consistency_beta')
+	path.write_text(json.dumps(payload), encoding='utf-8')
+	with pytest.raises(TypeError, match=r'consistency_beta is missing'):
+		load_f3_multi_head_pretraining_handoff(path)
+
+
+def _handoff_payload() -> dict[str, object]:
+	return {
+		'artifact_type': 'f3_multi_head_pretraining_handoff',
+		'schema_version': 1,
+		'status': 'PASS',
+		'model_tag': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+		'variant': 'nocons',
+		'checkpoint': {
+			'path': '/artifact/best.pt',
+			'sha256': 'a' * 64,
+			'latest_path': '/artifact/latest.pt',
+			'latest_sha256': 'b' * 64,
+			'best_epoch': 25,
+			'best_global_step': 25600,
+			'selection_metric': 'metrics.loss',
+		},
+		'embedding': {
+			'root': '/artifact/overlap_x16',
+			'metadata_path': '/artifact/metadata.json',
+			'metadata_sha256': 'c' * 64,
+			'embeddings_sha256': 'd' * 64,
+			'valid_tokens_sha256': 'e' * 64,
+		},
+		'embedding_metadata_sha256': 'c' * 64,
+		'stratigraphy_pretext': {
+			'head_spec': 'multi_resolution_ordered_prototypes_v1',
+			'head_ks': [6, 8, 10],
+			'target_manifest_path': '/artifact/targets.json',
+			'target_manifest_sha256': 'f' * 64,
+			'per_head_target_sha256': {
+				str(head_k): {
+					'f3': dict.fromkeys(
+						('labels', 'confidence', 'valid_tokens', 'metadata'),
+						f'{head_k:x}' * 64,
+					)
+				}
+				for head_k in (6, 8, 10)
+			},
+			'consistency_policy': 'normalized_order_smooth_l1_v1',
+			'consistency_weight': 0.0,
+			'consistency_beta': 0.1,
+			'scientific_identity_sha256': '2' * 64,
+			'initial_student_state_sha256': '3' * 64,
+			'initial_head_state_sha256': '4' * 64,
+		},
+	}
+
+
+def test_public_handoff_loader_rejects_empty_per_head_target_hashes(
+	tmp_path: Path,
+) -> None:
+	path = tmp_path / 'multi_head_handoff.json'
+	payload = _handoff_payload()
+	payload['stratigraphy_pretext']['per_head_target_sha256'] = {}
+	path.write_text(json.dumps(payload), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='per_head_target_sha256 K keys mismatch'):
+		load_f3_multi_head_pretraining_handoff(path)
+
+
+def test_complete_publish_quarantines_stale_handoff_without_only_missing(
+	tmp_path: Path,
+) -> None:
+	path = tmp_path / 'multi_head_handoff.json'
+	path.write_text('{"status": "partial"}', encoding='utf-8')
+	handoff = _handoff_payload()
+
+	published = _publish_handoff(
+		path,
+		handoff,
+		only_missing=False,
+		_quarantine_invalid=False,
+	)
+
+	assert published
+	assert load_f3_multi_head_pretraining_handoff(path) == handoff
+	quarantined = list(tmp_path.glob('multi_head_handoff.json.quarantine.*'))
+	assert len(quarantined) == 1
+	assert quarantined[0].read_text(encoding='utf-8') == '{"status": "partial"}'
+
+
+def test_only_missing_reuses_an_exact_live_handoff(tmp_path: Path) -> None:
+	path = tmp_path / 'multi_head_handoff.json'
+	handoff = _handoff_payload()
+	path.write_text(json.dumps(handoff), encoding='utf-8')
+
+	published = _publish_handoff(
+		path,
+		handoff,
+		only_missing=True,
+		_quarantine_invalid=False,
+	)
+
+	assert not published
+	assert not list(tmp_path.glob('multi_head_handoff.json.quarantine.*'))
+
+
+def test_checkpoint_per_head_targets_must_match_the_canonical_manifest() -> None:
+	manifest = {
+		'heads': {
+			str(head_k): {
+				'surveys': {
+					'f3': {
+						name: {'sha256': f'{head_k:x}' * 64}
+						for name in (
+							'labels',
+							'confidence',
+							'valid_tokens',
+							'metadata',
+						)
+					}
+				}
+			}
+			for head_k in (6, 8, 10)
+		}
+	}
+	expected = _manifest_per_head_target_hashes(manifest)
+	assert expected['6']['f3']['labels'] == '6' * 64
+	manifest['heads']['8']['surveys']['f3']['labels']['sha256'] = 'a' * 64
+	assert _manifest_per_head_target_hashes(manifest) != expected
+
+
+def test_checkpoint_scientific_identity_must_match_the_resolved_training_config(
+	tmp_path: Path,
+) -> None:
+	scientific_identity = {
+		'experiment_role': 'multi_head_ordered_pretext',
+		'variant': 'nocons',
+		'consistency_weight': 0.0,
+		'target_head_hashes': {},
+	}
+	target = tmp_path / 'targets.json'
+	target.write_text('{}', encoding='utf-8')
+	model_tag = 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1'
+	root = tmp_path / model_tag
+	config = F3MultiHeadPretrainingValidationConfig(
+		artifact_root=tmp_path,
+		experiment_root=tmp_path,
+		target_manifest=target,
+		control_full_config=tmp_path / 'control.yaml',
+		nocons_full_config=tmp_path / 'nocons.yaml',
+		cons010_full_config=tmp_path / 'cons010.yaml',
+	)
+	training = {
+		'paths': {'output_root': str(root)},
+		'identity': {'scientific_identity': scientific_identity},
+	}
+	identity = {
+		'scientific_identity_sha256': scientific_identity_sha256(
+			scientific_identity
+		)
+	}
+	payload = {
+		'stratigraphy_checkpoint': {
+			**identity,
+			'model_tag': model_tag,
+			'output_root': str(root),
+			'head_spec': 'multi_resolution_ordered_prototypes_v1',
+			'head_ks': [6, 8, 10],
+			'consistency_weight': 0.0,
+			'consistency_policy': 'normalized_order_smooth_l1_v1',
+			'consistency_beta': 0.1,
+			'target_manifest': {
+				'path': str(target),
+				'sha256': pretraining_validation.file_sha256(target),
+			},
+			'per_head_targets': {},
+		}
+	}
+	_identity_contract(config, training, payload, model_tag, 0.0, {})
+	scientific_identity['target_head_hashes'] = {'6': {}}
+	with pytest.raises(
+		ValueError,
+		match='scientific identity per-head target hashes do not match target manifest',
+	):
+		_identity_contract(config, training, payload, model_tag, 0.0, {})
+	scientific_identity['target_head_hashes'] = {}
+	payload['stratigraphy_checkpoint']['scientific_identity_sha256'] = '0' * 64
+	with pytest.raises(
+		ValueError, match='scientific identity does not match training config'
+	):
+		_identity_contract(config, training, payload, model_tag, 0.0, {})
+
+	identity = {
+		'scientific_identity_sha256': scientific_identity_sha256(
+			scientific_identity
+		)
+	}
+	configs = {
+		'nocons': {
+			'paths': {'output_root': '/artifact/nocons'},
+			'identity': {
+				'model_tag': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+				'scientific_identity': scientific_identity,
+			},
+			'loss': {'consistency_weight': 0.0},
+		},
+		'cons010': {
+			'paths': {'output_root': '/artifact/cons010'},
+			'identity': {
+				'model_tag': 'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
+				'scientific_identity': {
+					**scientific_identity,
+					'variant': 'cons010',
+					'consistency_weight': 0.1,
+				}
+			},
+			'loss': {'consistency_weight': 0.1},
+		},
+	}
+	_validate_pair_config_contract(configs)
+	left = {'identity': identity}
+	right = {
+		'identity': {
+			'scientific_identity_sha256': scientific_identity_sha256(
+				configs['cons010']['identity']['scientific_identity']
+			)
+		}
+	}
+	_validate_pair(left, right, configs)
+	identity['scientific_identity_sha256'] = '0' * 64
+	with pytest.raises(
+		ValueError, match='paired pretraining scientific identity mismatch: nocons'
+	):
+		_validate_pair(left, right, configs)
+
+
+def test_pair_config_contract_rejects_unbound_scientific_consistency_weight() -> None:
+	configs = {
+		'nocons': {
+			'paths': {'output_root': '/artifact/nocons'},
+			'identity': {
+				'model_tag': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+				'scientific_identity': {
+					'variant': 'nocons', 'consistency_weight': 0.0
+				},
+			},
+			'loss': {'consistency_weight': 0.0},
+		},
+		'cons010': {
+			'paths': {'output_root': '/artifact/cons010'},
+			'identity': {
+				'model_tag': 'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
+				'scientific_identity': {
+					'variant': 'cons010', 'consistency_weight': 0.0
+				},
+			},
+			'loss': {'consistency_weight': 0.1},
+		},
+	}
+
+	with pytest.raises(
+		ValueError,
+		match='scientific consistency weight must match loss consistency weight',
+	):
+		_validate_pair_config_contract(configs)
+
+
+def test_initial_state_hashes_must_bind_the_actual_initial_states() -> None:
+	student = {'encoder.layers.7.weight': torch.tensor([1.0])}
+	head = {'heads.k6.prototypes': torch.tensor([6.0])}
+	identity = {
+		'initial_student_state_sha256': _state_sha256(student),
+		'initial_head_state_sha256': _state_sha256(head),
+	}
+	_validate_initial_state_hashes(
+		identity, student_state=student, head_state=head
+	)
+	identity['initial_head_state_sha256'] = '0' * 64
+	with pytest.raises(ValueError, match='initial head state SHA-256 mismatch'):
+		_validate_initial_state_hashes(
+			identity, student_state=student, head_state=head
+		)
+
+
+def test_initial_state_validation_reconstructs_and_binds_initial_states(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	student = torch.nn.Linear(1, 1)
+	heads = torch.nn.Module()
+	heads.register_parameter('prototypes', torch.nn.Parameter(torch.tensor([6.0])))
+	identity = {
+		'initial_student_state_sha256': _state_sha256(student.state_dict()),
+		'initial_head_state_sha256': _state_sha256(heads.state_dict()),
+	}
+	monkeypatch.setattr(
+		pretraining_validation,
+		'build_strat_hmm_components',
+		lambda _training, *, device: SimpleNamespace(
+			student=student, heads=heads, device=device
+		),
+	)
+	payload = {'stratigraphy_checkpoint': identity}
+	pretraining_validation._validate_initial_states(  # noqa: SLF001
+		{'train': {'seed': 42}}, payload
+	)
+	identity['initial_student_state_sha256'] = '0' * 64
+	with pytest.raises(ValueError, match='initial student state SHA-256 mismatch'):
+		pretraining_validation._validate_initial_states(  # noqa: SLF001
+			{'train': {'seed': 42}}, payload
+		)
+
+
+def test_best_selection_requires_the_minimum_loss_epoch_and_step() -> None:
+	best = {'epoch': 2, 'global_step': 200, 'metrics': {'loss': 0.1}}
+	rows = [
+		{'epoch': 1, 'global_step': 100, 'loss': 0.1},
+		{'epoch': 2, 'global_step': 200, 'loss': 0.2},
+	]
+
+	with pytest.raises(
+		ValueError, match=r'not selected by lowest finite metrics\.loss'
+	):
+		_validate_best_selection(best, rows, variant='nocons')
+
+
+def test_freeze_contract_rejects_a_multi_head_run_with_only_one_updated_head(
+	tmp_path: Path,
+) -> None:
+	payload, training = _freeze_contract_inputs(tmp_path, changed_heads={6})
+
+	with pytest.raises(ValueError, match='K=8 head to update'):
+		_validate_freeze_contract(payload, training)
+
+
+@pytest.mark.parametrize('group_index', [0, 1])
+def test_freeze_contract_rejects_duplicate_optimizer_parameters(
+	tmp_path: Path, group_index: int
+) -> None:
+	payload, training = _freeze_contract_inputs(tmp_path, changed_heads={6, 8, 10})
+	groups = payload['stratigraphy_checkpoint']['optimizer_group_identity']
+	groups[group_index]['parameter_names'].append(
+		groups[group_index]['parameter_names'][0]
+	)
+
+	with pytest.raises(
+		ValueError, match='optimizer parameters must appear exactly once'
+	):
+		_validate_freeze_contract(payload, training)
+
+
+def test_freeze_contract_rejects_duplicate_optimizer_group(tmp_path: Path) -> None:
+	payload, training = _freeze_contract_inputs(tmp_path, changed_heads={6, 8, 10})
+	groups = payload['stratigraphy_checkpoint']['optimizer_group_identity']
+	groups.append(dict(groups[0]))
+
+	with pytest.raises(ValueError, match='optimizer groups are invalid'):
+		_validate_freeze_contract(payload, training)
+
+
+def _freeze_contract_inputs(
+	tmp_path: Path, *, changed_heads: set[int]
+) -> tuple[dict[str, object], dict[str, object]]:
+	initial_student = {
+		'encoder.layers.6.weight': torch.tensor([1.0]),
+		'encoder.layers.7.weight': torch.tensor([2.0]),
+	}
+	init_path = tmp_path / 'student-init.pt'
+	torch.save({'model_state_dict': initial_student}, init_path)
+	initial_head = {
+		f'heads.k{head_k}.prototypes': torch.tensor([float(head_k)])
+		for head_k in (6, 8, 10)
+	}
+	current_head = {
+		name: value + int(head_k in changed_heads)
+		for name, value in initial_head.items()
+		for head_k in (int(name.split('.')[1][1:]),)
+	}
+	initial_head_hashes = {
+		name: _tensor_sha256(name, value) for name, value in initial_head.items()
+	}
+	head_names = [f'head.{name}' for name in initial_head]
+	payload: dict[str, object] = {
+		'trainability_summary': {'trainable_names': ['encoder.layers.7.weight']},
+		'control_identity': {
+			'initial_parameter_sha256': {'prototype_head': initial_head_hashes},
+		},
+		'stratigraphy_checkpoint': {
+			'initial_head_state_sha256': _state_sha256(initial_head),
+			'optimizer_group_identity': [
+				{'name': 'head', 'parameter_names': head_names},
+				{
+					'name': 'encoder',
+					'parameter_names': ['student.encoder.layers.7.weight'],
+				},
+			],
+		},
+		'stratigraphy_state_dict': current_head,
+		'model_state_dict': {
+			'encoder.layers.6.weight': initial_student['encoder.layers.6.weight'],
+			'encoder.layers.7.weight': initial_student['encoder.layers.7.weight'] + 1,
+		},
+	}
+	return payload, {
+		'student': {'unfreeze_top_blocks': 1, 'init_checkpoint': str(init_path)}
+	}

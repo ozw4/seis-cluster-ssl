@@ -34,6 +34,9 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_runner import (
 	quarantine_voxel_label_budget_output,
 	run_voxel_label_budget_job,
 )
+from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
+	load_f3_multi_head_pretraining_handoff,
+)
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import (
@@ -389,7 +392,7 @@ def _validate_handoff_provenance(  # noqa: PLR0913
 	checkpoint, and multi-head scientific identity, so a merely existing (or
 	another candidate's) handoff cannot be used as provenance.
 	"""
-	handoff = _read_json(handoff_path)
+	handoff = load_f3_multi_head_pretraining_handoff(handoff_path)
 	if (
 		handoff.get('artifact_type') != 'f3_multi_head_pretraining_handoff'
 		or handoff.get('schema_version') != 1
