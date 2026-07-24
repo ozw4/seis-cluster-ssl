@@ -240,7 +240,8 @@ def validate_stratigraphy_checkpoint_payload(
 		stratigraphy_config=config,
 		stratigraphy_state_dict=state,
 	)
-	_validated_checkpoint_selection(payload.get('checkpoint_selection'))
+	selection = _validated_checkpoint_selection(payload.get('checkpoint_selection'))
+	_validate_checkpoint_selection_payload_binding(payload, selection)
 	if not _optimizer_state_group_identity_matches(
 		payload.get('optimizer_state_dict'),
 		identity.get('optimizer_group_identity'),
@@ -1238,6 +1239,56 @@ def _validated_checkpoint_selection(  # noqa: C901, PLR0912
 		'events': events,
 		'selected': selected,
 	}
+
+
+def _validate_checkpoint_selection_payload_binding(
+	payload: Mapping[str, object], selection: Mapping[str, object]
+) -> None:
+	"""Require a checkpoint to identify the final event in its history."""
+	events = selection['events']
+	if not isinstance(events, list) or not events:
+		raise ValueError('checkpoint selection events must be a non-empty list')
+	last = events[-1]
+	if not isinstance(last, Mapping):
+		raise TypeError('checkpoint selection final event must be a mapping')
+	training_state = payload.get('training_state')
+	metrics = payload.get('metrics')
+	if not isinstance(training_state, Mapping) or not isinstance(metrics, Mapping):
+		raise TypeError(
+			'checkpoint payload training_state and metrics must be mappings '
+			'for checkpoint selection'
+		)
+	epoch, global_step = payload.get('epoch'), payload.get('global_step')
+	if any(
+		isinstance(value, bool) or not isinstance(value, int)
+		for value in (epoch, global_step)
+	):
+		raise TypeError('checkpoint payload epoch/global_step must be integers')
+	checkpoint_kind = training_state.get('checkpoint_kind')
+	batch_index = training_state.get('batch_index')
+	if checkpoint_kind not in {'step', 'epoch'}:
+		raise ValueError('checkpoint payload checkpoint_kind must be step or epoch')
+	if checkpoint_kind == 'step' and (
+		isinstance(batch_index, bool)
+		or not isinstance(batch_index, int)
+		or batch_index < 0
+	):
+		raise TypeError(
+			'checkpoint payload step batch_index must be a nonnegative integer'
+		)
+	if checkpoint_kind == 'epoch' and batch_index is not None:
+		raise ValueError('checkpoint payload epoch batch_index must be null')
+	loss = _finite_selection_number(metrics.get('loss'), 'payload metrics.loss')
+	if (
+		epoch != last['epoch']
+		or global_step != last['global_step']
+		or checkpoint_kind != last['checkpoint_kind']
+		or batch_index != last['batch_index']
+		or loss != last['loss']
+	):
+		raise ValueError(
+			'checkpoint payload does not match final checkpoint selection event'
+		)
 
 
 def _validated_selection_event(

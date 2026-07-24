@@ -201,6 +201,15 @@ def load_f3_multi_head_pretraining_handoff(  # noqa: C901, PLR0912
 			raise TypeError(f'handoff checkpoint.{key} must be an integer')
 	if checkpoint['selected_checkpoint_kind'] not in {'step', 'epoch'}:
 		raise ValueError('handoff selected checkpoint kind mismatch')
+	if checkpoint['selection_history_event_count'] <= 0:
+		raise ValueError('handoff checkpoint selection history must not be empty')
+	if (
+		checkpoint['best_epoch'] != checkpoint['selected_epoch']
+		or checkpoint['best_global_step'] != checkpoint['selected_global_step']
+	):
+		raise ValueError(
+			'handoff checkpoint best identity does not match selected checkpoint'
+		)
 	if not _finite_number(checkpoint.get('selected_loss')):
 		raise TypeError('handoff checkpoint.selected_loss must be finite')
 	if not _is_sha256(checkpoint.get('selection_history_sha256')):

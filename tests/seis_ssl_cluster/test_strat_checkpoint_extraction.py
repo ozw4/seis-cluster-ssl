@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from copy import deepcopy
 from hashlib import sha256
@@ -32,6 +33,7 @@ from seis_ssl_cluster.training.strat_hmm.resume import (
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	inspect_stratigraphy_checkpoint,
 	save_strat_hmm_checkpoint,
+	save_strat_hmm_rolling_checkpoint,
 	validate_stratigraphy_checkpoint_payload,
 )
 
@@ -623,6 +625,150 @@ def test_multi_head_resume_rejects_no_consistency_main_mix(
 		torch.equal(value, resumed_student.state_dict()[key])
 		for key, value in student_before.items()
 	)
+
+
+def test_multi_head_resume_rejects_history_mismatched_payload_before_load(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _multi_head_resume_config(tmp_path, monkeypatch, variant='nocons')
+	student, head, optimizer = _new_multi_head_components()
+	payload = load_checkpoint(
+		_save_multi_head_resume_checkpoint(
+			tmp_path / 'checkpoint.pt',
+			config=config,
+			student=student,
+			head=head,
+			optimizer=optimizer,
+		),
+		map_location='cpu',
+	)
+	payload['global_step'] = 3
+	resumed_student, resumed_head, resumed_optimizer = _new_multi_head_components()
+	student_before = {
+		key: value.detach().clone()
+		for key, value in resumed_student.state_dict().items()
+	}
+
+	with pytest.raises(
+		ValueError,
+		match='checkpoint payload does not match final checkpoint selection event',
+	):
+		restore_strat_hmm_training_checkpoint(
+			payload=payload,
+			student=resumed_student,
+			head=resumed_head,
+			optimizer=resumed_optimizer,
+			scaler=None,
+			amp_enabled=False,
+			config=config,
+		)
+
+	assert all(
+		torch.equal(value, resumed_student.state_dict()[key])
+		for key, value in student_before.items()
+	)
+
+
+def test_multi_head_checkpoint_rejects_corrupt_selection_history(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	payload = _valid_multi_head_checkpoint_payload(tmp_path, monkeypatch)
+	selection = payload['checkpoint_selection']
+	assert isinstance(selection, dict)
+	events = selection['events']
+	assert isinstance(events, list)
+	event = events[0]
+	assert isinstance(event, dict)
+	event['best_score_after'] = 0.5
+
+	with pytest.raises(ValueError, match='best_score_after is inconsistent'):
+		validate_stratigraphy_checkpoint_payload(payload)
+
+
+def test_multi_head_rolling_checkpoint_persists_resume_history_and_reports(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _multi_head_resume_config(tmp_path, monkeypatch, variant='nocons')
+	student, head, optimizer = _new_multi_head_components()
+	teacher_checkpoint = Path(config['teacher']['checkpoint'])
+	student_checkpoint = Path(config['student']['init_checkpoint'])
+	control_identity = {
+		'input_identities': {
+			'teacher_checkpoint': {'sha256': _sha256(teacher_checkpoint)},
+			'student_init_checkpoint': {'sha256': _sha256(student_checkpoint)},
+		},
+		'initial_state_sha256': {'student': '0' * 64, 'head': '1' * 64},
+	}
+	first = save_strat_hmm_rolling_checkpoint(
+		tmp_path,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+		epoch=1,
+		mae_config={},
+		stratigraphy_config=config,
+		metrics={'loss': 0.25},
+		global_step=2,
+		checkpoint_kind='step',
+		batch_index=1,
+		best_score=None,
+		checkpoint_selection=None,
+		control_identity=control_identity,
+	)
+	resumed = load_checkpoint(first.latest_path, map_location='cpu')
+	resumed_selection = resumed['checkpoint_selection']
+	assert isinstance(resumed_selection, dict)
+	second = save_strat_hmm_rolling_checkpoint(
+		tmp_path,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+		epoch=1,
+		mae_config={},
+		stratigraphy_config=config,
+		metrics={'loss': 0.5},
+		global_step=3,
+		checkpoint_kind='epoch',
+		batch_index=None,
+		best_score=first.best_score,
+		checkpoint_selection=resumed_selection,
+		control_identity=control_identity,
+	)
+	latest = load_checkpoint(second.latest_path, map_location='cpu')
+	selection = latest['checkpoint_selection']
+	assert isinstance(selection, dict)
+	events = selection['events']
+	assert isinstance(events, list)
+	assert [event['sequence'] for event in events] == [0, 1]
+	assert [event['checkpoint_kind'] for event in events] == ['step', 'epoch']
+	assert len(
+		{
+			(
+				event['epoch'],
+				event['global_step'],
+				event['checkpoint_kind'],
+				event['batch_index'],
+			)
+			for event in events
+		}
+	) == 2
+	best = load_checkpoint(second.best_path, map_location='cpu')
+	best_selection = best['checkpoint_selection']
+	assert isinstance(best_selection, dict)
+	assert len(best_selection['events']) == 1
+	assert best['global_step'] == 2
+	assert selection['selected']['global_step'] == 2
+	with (tmp_path / 'checkpoint_selection_history.csv').open(
+		newline='', encoding='utf-8'
+	) as handle:
+		rows = list(csv.DictReader(handle))
+	assert [row['sequence'] for row in rows] == ['0', '1']
+	assert json.loads(
+		(tmp_path / 'checkpoint_selection_summary.json').read_text(encoding='utf-8')
+	) == selection
 
 
 def test_multi_head_resume_matches_continuous_two_plus_two_steps(

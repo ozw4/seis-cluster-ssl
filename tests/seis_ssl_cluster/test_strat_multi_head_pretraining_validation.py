@@ -146,6 +146,16 @@ def test_public_handoff_loader_requires_complete_pass_schema(tmp_path: Path) -> 
 	path.write_text(json.dumps(payload), encoding='utf-8')
 	with pytest.raises(TypeError, match=r'consistency_beta is missing'):
 		load_f3_multi_head_pretraining_handoff(path)
+	for field, value, message in (
+		('best_epoch', 24, 'best identity does not match selected checkpoint'),
+		('best_global_step', 25500, 'best identity does not match selected checkpoint'),
+		('selection_history_event_count', 0, 'selection history must not be empty'),
+	):
+		payload = _handoff_payload()
+		payload['checkpoint'][field] = value
+		path.write_text(json.dumps(payload), encoding='utf-8')
+		with pytest.raises(ValueError, match=message):
+			load_f3_multi_head_pretraining_handoff(path)
 
 
 def _handoff_payload() -> dict[str, object]:
