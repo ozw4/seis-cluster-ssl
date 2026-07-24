@@ -731,7 +731,7 @@ def test_multi_head_rolling_checkpoint_persists_resume_history_and_reports(
 		mae_config={},
 		stratigraphy_config=config,
 		metrics={'loss': 0.5},
-		global_step=3,
+		global_step=2,
 		checkpoint_kind='epoch',
 		batch_index=None,
 		best_score=first.best_score,
@@ -744,6 +744,7 @@ def test_multi_head_rolling_checkpoint_persists_resume_history_and_reports(
 	events = selection['events']
 	assert isinstance(events, list)
 	assert [event['sequence'] for event in events] == [0, 1]
+	assert [event['global_step'] for event in events] == [2, 2]
 	assert [event['checkpoint_kind'] for event in events] == ['step', 'epoch']
 	assert len(
 		{
@@ -814,13 +815,15 @@ def test_multi_head_rolling_checkpoint_recovers_interrupted_best_update(
 		checkpoint_selection=None,
 		control_identity=control_identity,
 	)
-	original_copy = strat_hmm_checkpoint._copy_checkpoint_atomic  # noqa: SLF001
+	original_reports = strat_hmm_checkpoint._write_checkpoint_selection_reports  # noqa: SLF001
 
-	def fail_best_copy(*_args: object, **_kwargs: object) -> None:
-		raise OSError('simulated best copy interruption')
+	def fail_reports(*_args: object, **_kwargs: object) -> None:
+		raise OSError('simulated report interruption')
 
-	monkeypatch.setattr(strat_hmm_checkpoint, '_copy_checkpoint_atomic', fail_best_copy)
-	with pytest.raises(OSError, match='simulated best copy interruption'):
+	monkeypatch.setattr(
+		strat_hmm_checkpoint, '_write_checkpoint_selection_reports', fail_reports
+	)
+	with pytest.raises(OSError, match='simulated report interruption'):
 		save_strat_hmm_rolling_checkpoint(
 			tmp_path,
 			student=student,
@@ -838,9 +841,13 @@ def test_multi_head_rolling_checkpoint_recovers_interrupted_best_update(
 			control_identity=control_identity,
 		)
 	monkeypatch.setattr(
-		strat_hmm_checkpoint, '_copy_checkpoint_atomic', original_copy
+		strat_hmm_checkpoint, '_write_checkpoint_selection_reports', original_reports
 	)
 	assert (tmp_path / '.checkpoint_selection_transaction.json').is_file()
+	assert (
+		load_checkpoint(tmp_path / 'best.pt', map_location='cpu')['global_step']
+		== 25500
+	)
 
 	recover_strat_hmm_rolling_checkpoint(tmp_path)
 	latest = load_checkpoint(tmp_path / 'latest.pt', map_location='cpu')
@@ -849,6 +856,13 @@ def test_multi_head_rolling_checkpoint_recovers_interrupted_best_update(
 	assert best['global_step'] == 25500
 	assert best['training_state']['checkpoint_kind'] == 'step'
 	assert not (tmp_path / '.checkpoint_selection_transaction.json').exists()
+	assert json.loads(
+		(tmp_path / 'checkpoint_selection_summary.json').read_text(encoding='utf-8')
+	) == latest['checkpoint_selection']
+	with (tmp_path / 'checkpoint_selection_history.csv').open(
+		newline='', encoding='utf-8'
+	) as handle:
+		assert [row['sequence'] for row in csv.DictReader(handle)] == ['0', '1']
 
 	resumed_selection = latest['checkpoint_selection']
 	assert isinstance(resumed_selection, dict)
