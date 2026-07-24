@@ -894,13 +894,12 @@ def _publish_handoff(
 	only_missing: bool,
 	_quarantine_invalid: bool,
 ) -> bool:
-	"""Publish a handoff, quarantining any non-live predecessor first.
+	"""Publish a handoff, quarantining an invalid predecessor on request.
 
-	A complete validation always makes stale, partial, hash-mismatched, and
-	wrong-variant handoffs auditable before replacing them.  ``--only-missing``
-	is the sole reuse mode: it retains an exact live handoff without rewriting it.
-	``quarantine_invalid`` remains accepted by the public CLI for its declared
-	option contract; invalid predecessors are quarantined in every publish mode.
+	``--only-missing`` is the sole reuse mode: it retains an exact live handoff
+	without rewriting it.  A stale, partial, hash-mismatched, or wrong-variant
+	predecessor requires ``--quarantine-invalid`` before it is preserved under a
+	timestamped quarantine name and replaced.
 	"""
 	if path.is_file():
 		try:
@@ -911,6 +910,11 @@ def _publish_handoff(
 			if only_missing:
 				return False
 		else:
+			if not _quarantine_invalid:
+				raise ValueError(
+					'existing handoff is stale or invalid; '
+					'pass --quarantine-invalid to replace it'
+				)
 			_quarantine(path)
 	_atomic_json(path, handoff)
 	return True

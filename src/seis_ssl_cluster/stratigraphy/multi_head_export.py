@@ -305,8 +305,12 @@ def _write_handoff(config: MultiHeadPseudoTargetExportConfig) -> None:
 	)
 	payload: dict[str, object] = {
 		'artifact_type': 'strat_hmm_multi_head_pseudo_target_export_handoff',
-		'schema_version': 1,
+		'schema_version': 2,
 		'completion_status': 'COMPLETE',
+		# This is the parent of the immutable, per-K roots recorded below.  Keep
+		# both levels explicit: consumers must be able to locate a complete head
+		# without inferring a directory layout from a hash-only record.
+		'pseudo_target_root': str(config.pseudo_target_root),
 		'clustering': {
 			'path': str(config.clustering_output_dir),
 			'config_path': str(config.clustering_config),
@@ -335,7 +339,10 @@ def _write_handoff(config: MultiHeadPseudoTargetExportConfig) -> None:
 			'write_boundary_weight': config.write_boundary_weight,
 		},
 		'heads': {
-			str(k): _head_hashes(config.pseudo_target_root, k=k)
+			str(k): {
+				'pseudo_target_root': str(config.pseudo_target_root / f'k{k}'),
+				'hashes': _head_hashes(config.pseudo_target_root, k=k),
+			}
 			for k in config.ks
 		},
 		'common_target_valid_sha256': {
@@ -371,7 +378,7 @@ def _item_hashes(item: StratPseudoTargetInput) -> dict[str, str]:
 	}
 
 
-def _recorded_head_hashes(  # noqa: C901
+def _recorded_head_hashes(  # noqa: C901, PLR0912
 	config: MultiHeadPseudoTargetExportConfig,
 	*,
 	k: int,
@@ -384,9 +391,17 @@ def _recorded_head_hashes(  # noqa: C901
 		raise ValueError('multi-head export handoff must be valid JSON') from exc
 	if (
 		not isinstance(payload, Mapping)
+		or payload.get('schema_version') != 2
 		or payload.get('completion_status') != 'COMPLETE'
 	):
-		raise ValueError('multi-head export handoff is incomplete')
+		raise ValueError('multi-head export handoff schema/status mismatch')
+	if (
+		not isinstance(payload.get('pseudo_target_root'), str)
+		or not _same_path(
+			Path(payload['pseudo_target_root']), config.pseudo_target_root
+		)
+	):
+		raise ValueError('multi-head export handoff pseudo-target root mismatch')
 	metadata_hashes, prepared_feature_identity = _clustering_provenance(
 		config.clustering_output_dir, ks=config.ks
 	)
@@ -417,7 +432,17 @@ def _recorded_head_hashes(  # noqa: C901
 	head = heads.get(str(k))
 	if not isinstance(head, Mapping):
 		raise TypeError(f'multi-head export handoff is missing k={k} hashes')
-	return head
+	if (
+		not isinstance(head.get('pseudo_target_root'), str)
+		or not _same_path(
+			Path(head['pseudo_target_root']), config.pseudo_target_root / f'k{k}'
+		)
+	):
+		raise ValueError(f'multi-head export handoff k={k} root mismatch')
+	hashes = head.get('hashes')
+	if not isinstance(hashes, Mapping):
+		raise TypeError(f'multi-head export handoff is missing k={k} hashes')
+	return hashes
 
 
 def _validate_common_target_masks(config: MultiHeadPseudoTargetExportConfig) -> None:

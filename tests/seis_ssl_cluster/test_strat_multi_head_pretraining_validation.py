@@ -210,7 +210,25 @@ def test_public_handoff_loader_rejects_empty_per_head_target_hashes(
 		load_f3_multi_head_pretraining_handoff(path)
 
 
-def test_complete_publish_quarantines_stale_handoff_without_only_missing(
+def test_complete_publish_requires_quarantine_flag_for_stale_handoff(
+	tmp_path: Path,
+) -> None:
+	path = tmp_path / 'multi_head_handoff.json'
+	path.write_text('{"status": "partial"}', encoding='utf-8')
+
+	with pytest.raises(ValueError, match='pass --quarantine-invalid'):
+		_publish_handoff(
+			path,
+			_handoff_payload(),
+			only_missing=False,
+			_quarantine_invalid=False,
+		)
+
+	assert path.read_text(encoding='utf-8') == '{"status": "partial"}'
+	assert not list(tmp_path.glob('multi_head_handoff.json.quarantine.*'))
+
+
+def test_complete_publish_quarantines_stale_handoff_when_requested(
 	tmp_path: Path,
 ) -> None:
 	path = tmp_path / 'multi_head_handoff.json'
@@ -221,7 +239,7 @@ def test_complete_publish_quarantines_stale_handoff_without_only_missing(
 		path,
 		handoff,
 		only_missing=False,
-		_quarantine_invalid=False,
+		_quarantine_invalid=True,
 	)
 
 	assert published
@@ -249,7 +267,7 @@ def test_publish_preserves_canonical_handoff_when_atomic_write_fails(
 			path,
 			_handoff_payload(),
 			only_missing=False,
-			_quarantine_invalid=False,
+			_quarantine_invalid=True,
 		)
 
 	assert path.read_text(encoding='utf-8') == previous

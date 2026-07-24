@@ -81,8 +81,31 @@ def test_multi_head_export_is_schema_v1_resumable_and_quarantines_one_head(
 	assert handoff['clustering']['config_sha256'] == multi_head_export.file_sha256(
 		config.clustering_config
 	)
+	assert handoff['pseudo_target_root'] == str(config.pseudo_target_root)
+	for k in (6, 8, 10):
+		head = handoff['heads'][str(k)]
+		assert head['pseudo_target_root'] == str(config.pseudo_target_root / f'k{k}')
+		assert set(head['hashes']) == {'survey'}
 	assert set(handoff['common_target_valid_sha256']) == {'survey'}
 	assert set(handoff['source_embedding']['valid_tokens_sha256']) == {'survey'}
+
+
+def test_multi_head_export_does_not_reuse_handoff_with_wrong_head_root(
+	tmp_path: Path,
+) -> None:
+	clustering = _clustering_root(tmp_path)
+	config = resolve_multi_head_pseudo_target_export_config(
+		_config(tmp_path, clustering),
+	)
+	export_multi_head_pseudo_targets(config)
+	handoff = json.loads(config.handoff_manifest.read_text(encoding='utf-8'))
+	handoff['heads']['8']['pseudo_target_root'] = str(tmp_path / 'wrong-k8')
+	config.handoff_manifest.write_text(json.dumps(handoff), encoding='utf-8')
+
+	plans = export_multi_head_pseudo_targets(config, only_missing=True)
+
+	assert [plan.action for plan in plans] == ['REUSE', 'QUARANTINE', 'REUSE']
+	assert list(config.pseudo_target_root.glob('k8.quarantine.*'))
 
 
 def test_multi_head_export_rejects_historical_k6_output_path(tmp_path: Path) -> None:

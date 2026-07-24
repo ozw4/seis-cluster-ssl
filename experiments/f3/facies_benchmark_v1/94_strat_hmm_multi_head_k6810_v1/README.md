@@ -18,7 +18,8 @@ export input. It creates the replay K=6 target separately from the immutable
 historical K=6 training target and verifies that the common target-valid mask
 is a subset of the source embedding mask. Its `clustering_config` path and
 hash are recorded with each complete export handoff alongside per-K clustering
-metadata and the prepared-feature identity.
+metadata, per-K pseudo-target roots and hash sets, and the prepared-feature
+identity.
 `01_build_multi_head_targets.yaml` supplies the manifest publication paths
 after replay parity has passed. New manifests use schema v2 to record that
 subset evidence; legacy schema-v1 manifests remain loadable only when their
@@ -99,6 +100,11 @@ python proc/seis_ssl_cluster/extract_embeddings.py --config "$EXP/07_extract_con
 # Require the extracted-array and metadata bindings before downstream planning.
 python proc/seis_ssl_cluster/validate_f3_multi_head_pretraining.py \
   --config "$EXP/08_validate_multi_head_runs.yaml" --phase complete
+
+# If a prior handoff is stale or partial, preserve it under a timestamped
+# quarantine name before publishing new PASS evidence.
+python proc/seis_ssl_cluster/validate_f3_multi_head_pretraining.py \
+  --config "$EXP/08_validate_multi_head_runs.yaml" --phase complete --quarantine-invalid
 
 # Then run/reuse the 30 downstream jobs and aggregate them:
 python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml --dry-run
