@@ -162,10 +162,17 @@ def plan_multi_head_pseudo_target_exports(
 		config.historical_k6_root, config.pseudo_target_root
 	):
 		raise ValueError('refusing to write K=6 replay into historical K=6 root')
+	source_labels_by_k = {
+		k: _source_label_paths(config.clustering_output_dir, k=k)
+		for k in config.ks
+	}
+	# The exported target-valid mask is derived solely from ``labels >= 0``.
+	# Validate that contract across all heads before classifying or publishing
+	# any individual output directory.
+	_validate_source_label_embedding_alignment(config, source_labels_by_k)
 	plans: list[MultiHeadPseudoTargetExportPlan] = []
 	for k in config.ks:
-		source_labels = _source_label_paths(config.clustering_output_dir, k=k)
-		_validate_source_label_embedding_alignment(config, source_labels, k=k)
+		source_labels = source_labels_by_k[k]
 		output_dir = config.pseudo_target_root / f'k{k}'
 		if not output_dir.exists():
 			plans.append(MultiHeadPseudoTargetExportPlan(k, 'NEW', source_labels))
@@ -261,6 +268,9 @@ def _validate_complete_export(  # noqa: C901
 		path.name.removesuffix(_LABEL_SUFFIX): file_sha256(path)
 		for path in source_labels
 	}
+	source_label_paths = {
+		path.name.removesuffix(_LABEL_SUFFIX): path for path in source_labels
+	}
 	if {item.survey_id for item in inputs} != set(expected):
 		raise ValueError(f'k={k} source/output survey set mismatch')
 	recorded_hashes = (
@@ -290,7 +300,14 @@ def _validate_complete_export(  # noqa: C901
 			raise ValueError(f'k={k} {item.survey_id} source label path mismatch')
 		if source.get('source_label_sha256') != expected[item.survey_id]:
 			raise ValueError(f'k={k} {item.survey_id} source label hash mismatch')
-		load_pseudo_target_arrays(item)
+		arrays = load_pseudo_target_arrays(item)
+		source_labels_array = np.load(
+			source_label_paths[item.survey_id],
+			mmap_mode='r',
+			allow_pickle=False,
+		)
+		if not np.array_equal(arrays.labels, source_labels_array):
+			raise ValueError(f'k={k} {item.survey_id} target labels mismatch')
 		if (
 			recorded_hashes is not None
 			and recorded_hashes.get(item.survey_id) != _item_hashes(item)
@@ -327,10 +344,9 @@ def _write_handoff(config: MultiHeadPseudoTargetExportConfig) -> None:
 		'prepared_feature_identity': prepared_feature_identity,
 		'source_embedding': {
 			'path': str(config.source_embedding_dir),
-			'valid_tokens_sha256': {
-				item.survey_id: file_sha256(item.valid_tokens_path)
-				for item in discover_embedding_inputs(config.source_embedding_dir)
-			},
+			'valid_tokens_sha256': _embedding_valid_token_hashes(
+				config.source_embedding_dir
+			),
 		},
 		'policy': {
 			'ks': list(config.ks),
@@ -426,6 +442,7 @@ def _recorded_head_hashes(  # noqa: C901, PLR0912
 		raise ValueError(
 			'multi-head export handoff prepared-feature identity mismatch'
 		)
+	_validate_recorded_source_embedding(config, payload)
 	heads = payload.get('heads')
 	if not isinstance(heads, Mapping):
 		raise TypeError('multi-head export handoff is missing head hashes')
@@ -445,6 +462,37 @@ def _recorded_head_hashes(  # noqa: C901, PLR0912
 	return hashes
 
 
+def _validate_recorded_source_embedding(
+	config: MultiHeadPseudoTargetExportConfig,
+	payload: Mapping[str, object],
+) -> None:
+	"""Bind reusable exports to the source embedding identity in the handoff."""
+	source_embedding = payload.get('source_embedding')
+	if not isinstance(source_embedding, Mapping):
+		raise TypeError('multi-head export handoff is missing source embedding')
+	path = source_embedding.get('path')
+	if not isinstance(path, str) or not _same_path(
+		Path(path), config.source_embedding_dir
+	):
+		raise ValueError('multi-head export handoff source embedding path mismatch')
+	recorded_hashes = source_embedding.get('valid_tokens_sha256')
+	if not isinstance(recorded_hashes, Mapping):
+		raise TypeError(
+			'multi-head export handoff is missing source embedding valid-mask hashes'
+		)
+	if recorded_hashes != _embedding_valid_token_hashes(config.source_embedding_dir):
+		raise ValueError(
+			'multi-head export handoff source embedding valid-mask hashes mismatch'
+		)
+
+
+def _embedding_valid_token_hashes(source_embedding_dir: Path) -> dict[str, str]:
+	return {
+		item.survey_id: file_sha256(item.valid_tokens_path)
+		for item in discover_embedding_inputs(source_embedding_dir)
+	}
+
+
 def _validate_common_target_masks(config: MultiHeadPseudoTargetExportConfig) -> None:
 	reference = {
 		item.survey_id: file_sha256(item.valid_tokens_path)
@@ -461,38 +509,48 @@ def _validate_common_target_masks(config: MultiHeadPseudoTargetExportConfig) -> 
 
 def _validate_source_label_embedding_alignment(
 	config: MultiHeadPseudoTargetExportConfig,
-	source_labels: Sequence[Path],
-	*,
-	k: int,
+	source_labels_by_k: Mapping[int, Sequence[Path]],
 ) -> None:
-	"""Require each derived target mask to be a subset of its source embedding."""
+	"""Require common target masks to be source-valid subsets before export."""
 	embeddings = {
 		item.survey_id: item
 		for item in discover_embedding_inputs(config.source_embedding_dir)
 	}
-	labels_by_survey = {
-		path.name.removesuffix(_LABEL_SUFFIX): path for path in source_labels
-	}
-	if set(labels_by_survey) != set(embeddings):
-		raise ValueError(
-			f'k={k} clustering-label survey set does not match source embeddings',
-		)
-	for survey_id, label_path in labels_by_survey.items():
-		labels = np.load(label_path, mmap_mode='r', allow_pickle=False)
-		embedding_valid = np.load(
-			embeddings[survey_id].valid_tokens_path,
-			mmap_mode='r',
-			allow_pickle=False,
-		)
-		if labels.shape != embedding_valid.shape:
+	reference_masks: dict[str, np.ndarray] | None = None
+	for k in config.ks:
+		labels_by_survey = {
+			path.name.removesuffix(_LABEL_SUFFIX): path
+			for path in source_labels_by_k[k]
+		}
+		if set(labels_by_survey) != set(embeddings):
 			raise ValueError(
-				f'k={k} {survey_id} token grid does not match source embedding',
+				f'k={k} clustering-label survey set does not match source embeddings',
 			)
-		if np.any((labels >= 0) & ~embedding_valid):
-			raise ValueError(
-				f'k={k} {survey_id} valid-token mask is not a subset '
-				'of source embedding',
+		current_masks: dict[str, np.ndarray] = {}
+		for survey_id, label_path in labels_by_survey.items():
+			labels = np.load(label_path, mmap_mode='r', allow_pickle=False)
+			embedding_valid = np.load(
+				embeddings[survey_id].valid_tokens_path,
+				mmap_mode='r',
+				allow_pickle=False,
 			)
+			if labels.shape != embedding_valid.shape:
+				raise ValueError(
+					f'k={k} {survey_id} token grid does not match source embedding',
+				)
+			target_valid = labels >= 0
+			if np.any(target_valid & ~embedding_valid):
+				raise ValueError(
+					f'k={k} {survey_id} valid-token mask is not a subset '
+					'of source embedding',
+				)
+			current_masks[survey_id] = target_valid
+		if reference_masks is None:
+			reference_masks = current_masks
+			continue
+		for survey_id, target_valid in current_masks.items():
+			if not np.array_equal(target_valid, reference_masks[survey_id]):
+				raise ValueError(f'k={k} valid-token mask differs from K=6')
 
 
 def _reject_historical_k6_identity(

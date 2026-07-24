@@ -141,6 +141,83 @@ def test_multi_head_export_rejects_target_valid_outside_source_embedding(
 		export_multi_head_pseudo_targets(config, dry_run=True)
 
 
+def test_multi_head_export_rejects_cross_head_mask_mismatch_before_writing(
+	tmp_path: Path,
+) -> None:
+	clustering = _clustering_root(tmp_path)
+	labels_path = (
+		clustering / 'labels' / 'k8' / 'survey.cluster_labels_token.npy'
+	)
+	labels = np.load(labels_path)
+	labels[0, 0, 0] = -1
+	np.save(labels_path, labels)
+	config = resolve_multi_head_pseudo_target_export_config(
+		_config(tmp_path, clustering),
+	)
+
+	with pytest.raises(ValueError, match='k=8 valid-token mask differs from K=6'):
+		export_multi_head_pseudo_targets(config, dry_run=True)
+	with pytest.raises(ValueError, match='k=8 valid-token mask differs from K=6'):
+		export_multi_head_pseudo_targets(config)
+
+	assert not config.pseudo_target_root.exists()
+
+
+def test_multi_head_export_does_not_reuse_changed_source_embedding_identity(
+	tmp_path: Path,
+) -> None:
+	clustering = _clustering_root(tmp_path)
+	config = resolve_multi_head_pseudo_target_export_config(
+		_config(tmp_path, clustering),
+	)
+	export_multi_head_pseudo_targets(config)
+
+	alternate_embeddings = tmp_path / 'alternate-embeddings'
+	alternate_embeddings.mkdir()
+	for name in (
+		'survey.embeddings.npy',
+		'survey.valid_tokens.npy',
+	):
+		np.save(
+			alternate_embeddings / name,
+			np.load(config.source_embedding_dir / name),
+		)
+	(alternate_embeddings / 'survey.embedding_metadata.json').write_text(
+		(config.source_embedding_dir / 'survey.embedding_metadata.json').read_text(
+			encoding='utf-8',
+		),
+		encoding='utf-8',
+	)
+	changed_path_config = _config(tmp_path, clustering)
+	changed_path_config['source_embedding_dir'] = str(alternate_embeddings)
+	changed_path = resolve_multi_head_pseudo_target_export_config(changed_path_config)
+
+	plans = export_multi_head_pseudo_targets(
+		changed_path,
+		dry_run=True,
+		only_missing=True,
+	)
+	assert [plan.action for plan in plans] == ['QUARANTINE', 'QUARANTINE', 'QUARANTINE']
+	assert all(
+		'source embedding path mismatch' in (plan.reason or '') for plan in plans
+	)
+
+	valid_path = config.source_embedding_dir / 'survey.valid_tokens.npy'
+	valid = np.load(valid_path)
+	valid[0, 0, 1] = False
+	np.save(valid_path, valid)
+	plans = export_multi_head_pseudo_targets(
+		config,
+		dry_run=True,
+		only_missing=True,
+	)
+	assert [plan.action for plan in plans] == ['QUARANTINE', 'QUARANTINE', 'QUARANTINE']
+	assert all(
+		'source embedding valid-mask hashes mismatch' in (plan.reason or '')
+		for plan in plans
+	)
+
+
 def test_multi_head_export_rejects_missing_clustering_provenance(
 	tmp_path: Path,
 ) -> None:
