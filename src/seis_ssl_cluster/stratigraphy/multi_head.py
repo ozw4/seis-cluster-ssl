@@ -28,10 +28,10 @@ from seis_ssl_cluster.stratigraphy.targets import (
 )
 
 ARTIFACT_TYPE = 'strat_hmm_multi_head_target_manifest'
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
-def build_multi_head_target_manifest(  # noqa: C901, PLR0913
+def build_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0913
 	*,
 	manifest_path: str | Path,
 	source_embedding_dir: str | Path,
@@ -62,19 +62,29 @@ def build_multi_head_target_manifest(  # noqa: C901, PLR0913
 	embedding_by_survey = {item.survey_id: item for item in embeddings}
 	head_payloads: dict[str, object] = {}
 	common: dict[str, object] | None = None
+	source_target_alignment: dict[str, object] | None = None
 	for k in ks:
 		head = _head_reference(Path(roots[k]), k=k)
 		if set(head['surveys']) != set(embedding_by_survey):
 			raise ValueError(f'head k={k} survey set does not match source embeddings')
-		_validate_head_embedding_alignment(head, embedding_by_survey, k=k)
+		current_alignment = _validate_head_embedding_alignment(
+			head,
+			embedding_by_survey,
+			k=k,
+		)
 		current_common = _common_contract(head, k=k)
 		if common is None:
 			common = current_common
 		elif common != current_common:
 			raise ValueError(f'head k={k} token grids or valid-token masks differ')
+		if source_target_alignment is None:
+			source_target_alignment = current_alignment
+		elif source_target_alignment != current_alignment:
+			raise ValueError(f'head k={k} source-to-target alignment differs')
 		head_payloads[str(k)] = head
-	if common is None:
+	if common is None or source_target_alignment is None:
 		raise AssertionError('at least one head is required')
+	common['source_target_alignment'] = source_target_alignment
 	payload: dict[str, object] = {
 		'artifact_type': ARTIFACT_TYPE,
 		'schema_version': SCHEMA_VERSION,
@@ -178,7 +188,7 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	verify_hashes: bool = False,
 	validate_array_semantics: bool = True,
 ) -> None:
-	"""Strictly validate schema-v1 references and shared target semantics."""
+	"""Strictly validate schema-v2 references and shared target semantics."""
 	_required_keys(
 		payload,
 		{
@@ -194,7 +204,10 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 		'manifest',
 		optional_keys={'k6_replay_parity'},
 	)
-	if payload['artifact_type'] != ARTIFACT_TYPE or payload['schema_version'] != 1:
+	if (
+		payload['artifact_type'] != ARTIFACT_TYPE
+		or payload['schema_version'] != SCHEMA_VERSION
+	):
 		raise ValueError('unsupported multi-head target manifest schema')
 	if payload['ordering_orientation'] != 'increasing_downward':
 		raise ValueError('manifest ordering_orientation must be increasing_downward')
@@ -218,7 +231,12 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	common = _mapping(payload['common'], 'manifest common')
 	_required_keys(
 		common,
-		{'survey_ids', 'token_grid_shapes', 'valid_tokens_sha256'},
+		{
+			'survey_ids',
+			'token_grid_shapes',
+			'valid_tokens_sha256',
+			'source_target_alignment',
+		},
 		'manifest common',
 	)
 	_validate_cross_head_diagnostics(payload['cross_head_diagnostics'], ks=ks)
@@ -237,10 +255,18 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	common_valid_tokens_sha256 = _mapping(
 		common['valid_tokens_sha256'], 'manifest common valid_tokens_sha256'
 	)
+	common_source_target_alignment = _mapping(
+		common['source_target_alignment'],
+		'manifest common source_target_alignment',
+	)
 	if set(common_token_grid_shapes) != set(survey_ids):
 		raise ValueError('manifest common token_grid_shapes survey set mismatch')
 	if set(common_valid_tokens_sha256) != set(survey_ids):
 		raise ValueError('manifest common valid_tokens_sha256 survey set mismatch')
+	_validate_source_target_alignment_contract(
+		common_source_target_alignment,
+		survey_ids,
+	)
 	for k in ks:
 		head = _mapping(head_values[str(k)], f'head k={k}')
 		_required_keys(
@@ -288,6 +314,7 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 			survey_ids,
 			source_embedding,
 			ks,
+			common_source_target_alignment,
 			validate_array_semantics=validate_array_semantics,
 		)
 	if 6 in ks:
@@ -866,22 +893,28 @@ def _validate_head_embedding_alignment(
 	embedding_by_survey: Mapping[str, Any],
 	*,
 	k: int,
-) -> None:
-	"""Require every target grid and mask to align exactly with its embedding."""
+) -> dict[str, object]:
+	"""Require every target grid and mask to be contained by its embedding."""
 	surveys = _mapping(head['surveys'], f'head k={k} surveys')
+	alignment: dict[str, object] = {}
 	for survey_id, embedding in embedding_by_survey.items():
 		entry = _mapping(surveys[survey_id], 'survey')
 		target = _load_reference_arrays(entry)
-		embedding_valid = np.load(embedding.valid_tokens_path)
+		embedding_valid = np.load(embedding.valid_tokens_path, allow_pickle=False)
 		if target['labels'].shape != embedding_valid.shape:
 			raise ValueError(
 				f'head k={k} {survey_id} token grid does not match source embedding'
 			)
-		if not np.array_equal(target['valid_tokens'], embedding_valid):
+		if np.any(target['valid_tokens'] & ~embedding_valid):
 			raise ValueError(
-				f'head k={k} {survey_id} valid-token mask does not match '
-				'source embedding'
+				f'head k={k} {survey_id} valid-token mask is not a subset '
+				'of source embedding'
 			)
+		alignment[survey_id] = _source_target_alignment_evidence(
+			embedding_valid,
+			target['valid_tokens'],
+		)
+	return alignment
 
 
 def _validate_embedding_identity(
@@ -914,53 +947,127 @@ def _validate_embedding_identity(
 				raise ValueError(f'source embedding {path_key} hash mismatch')
 
 
-def _validate_manifest_embedding_alignment(
+def _validate_manifest_embedding_alignment(  # noqa: C901, PLR0913
 	head_values: Mapping[str, object],
 	survey_ids: list[object],
 	source_embedding: Mapping[str, object],
 	ks: Sequence[int],
+	common_source_target_alignment: Mapping[str, object],
 	*,
 	validate_array_semantics: bool,
 ) -> None:
 	"""Recheck target-to-embedding alignment when loading a manifest.
 
-	The reference-only path proves mask identity from the already verified file
-	digests.  It deliberately avoids reading target or embedding arrays; the
-	publication path performs the additional shape and bitwise checks.
+	The reference-only path verifies the independently persisted source and target
+	identities plus their recorded subset contract without materializing arrays.
+	Full validation rechecks grid shape, subset semantics, and exact target-mask
+	parity across heads.
 	"""
 	embeddings = _mapping(source_embedding['surveys'], 'source_embedding surveys')
 	if set(embeddings) != set(survey_ids):
 		raise ValueError('source embedding survey set does not match manifest common')
-	for k in ks:
-		surveys = _mapping(
-			_mapping(head_values[str(k)], f'head k={k}')['surveys'],
-			f'head k={k} surveys',
+	for survey_id in survey_ids:
+		if not validate_array_semantics:
+			continue
+		embedding = _mapping(embeddings[str(survey_id)], 'source embedding survey')
+		embedding_valid = np.load(
+			Path(str(embedding['valid_tokens_path'])),
+			mmap_mode='r',
+			allow_pickle=False,
 		)
-		for survey_id in survey_ids:
-			entry = _mapping(surveys[str(survey_id)], 'target reference')
-			embedding = _mapping(embeddings[str(survey_id)], 'source embedding survey')
-			valid_reference = _mapping(
-				entry['valid_tokens'],
-				'target valid_tokens reference',
+		target_valid: np.ndarray | None = None
+		for k in ks:
+			surveys = _mapping(
+				_mapping(head_values[str(k)], f'head k={k}')['surveys'],
+				f'head k={k} surveys',
 			)
-			if valid_reference['sha256'] != embedding['valid_tokens_sha256']:
-				raise ValueError(
-					f'head k={k} {survey_id} valid-token mask does not match '
-					'source embedding'
-				)
-			if not validate_array_semantics:
-				continue
+			entry = _mapping(surveys[str(survey_id)], 'target reference')
 			target = _load_reference_arrays(entry)
-			embedding_valid = np.load(Path(str(embedding['valid_tokens_path'])))
 			if target['labels'].shape != embedding_valid.shape:
 				raise ValueError(
 					f'head k={k} {survey_id} token grid does not match source embedding'
 				)
-			if not np.array_equal(target['valid_tokens'], embedding_valid):
+			if np.any(target['valid_tokens'] & ~embedding_valid):
 				raise ValueError(
-					f'head k={k} {survey_id} valid-token mask does not match '
-					'source embedding'
+					f'head k={k} {survey_id} valid-token mask is not a subset '
+					'of source embedding'
 				)
+			if target_valid is None:
+				target_valid = target['valid_tokens']
+			elif not np.array_equal(target['valid_tokens'], target_valid):
+				raise ValueError(
+					f'head k={k} {survey_id} valid-token mask differs across heads'
+				)
+		if target_valid is None:
+			raise AssertionError('at least one head is required')
+		if _source_target_alignment_evidence(
+			embedding_valid,
+			target_valid,
+		) != common_source_target_alignment[str(survey_id)]:
+			raise ValueError(
+				f'{survey_id} persisted source-to-target alignment '
+				'does not match arrays'
+			)
+
+
+def _source_target_alignment_evidence(
+	source_valid: np.ndarray,
+	target_valid: np.ndarray,
+) -> dict[str, object]:
+	"""Return the persisted evidence for a target mask contained by its source."""
+	source_valid_count = int(np.count_nonzero(source_valid))
+	target_valid_count = int(np.count_nonzero(target_valid))
+	return {
+		'source_valid_count': source_valid_count,
+		'target_valid_count': target_valid_count,
+		'excluded_from_source_count': source_valid_count - target_valid_count,
+		'target_is_subset_of_source': True,
+	}
+
+
+def _validate_source_target_alignment_contract(
+	alignment: Mapping[str, object],
+	survey_ids: Sequence[object],
+) -> None:
+	"""Validate subset evidence used by the reference-only manifest path."""
+	if set(alignment) != {str(survey_id) for survey_id in survey_ids}:
+		raise ValueError('manifest source-to-target alignment survey set mismatch')
+	for survey_id in survey_ids:
+		entry = _mapping(
+			alignment[str(survey_id)],
+			f'manifest source-to-target alignment {survey_id}',
+		)
+		_required_keys(
+			entry,
+			{
+				'source_valid_count',
+				'target_valid_count',
+				'excluded_from_source_count',
+				'target_is_subset_of_source',
+			},
+			f'manifest source-to-target alignment {survey_id}',
+		)
+		source_count = _nonnegative_int(
+			entry['source_valid_count'],
+			f'manifest source-to-target alignment {survey_id} source count',
+		)
+		target_count = _nonnegative_int(
+			entry['target_valid_count'],
+			f'manifest source-to-target alignment {survey_id} target count',
+		)
+		excluded_count = _nonnegative_int(
+			entry['excluded_from_source_count'],
+			f'manifest source-to-target alignment {survey_id} excluded count',
+		)
+		if entry['target_is_subset_of_source'] is not True:
+			raise ValueError(
+				f'manifest source-to-target alignment {survey_id} must record a subset'
+			)
+		if target_count > source_count or excluded_count != source_count - target_count:
+			raise ValueError(
+				f'manifest source-to-target alignment {survey_id} '
+				'counts are inconsistent'
+			)
 
 
 def _head_diagnostics(

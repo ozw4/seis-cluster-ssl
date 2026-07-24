@@ -128,6 +128,37 @@ def test_k6_replay_parity_rejects_one_token_mismatch(tmp_path: Path) -> None:
 		)
 
 
+def test_k6_replay_parity_rejects_valid_mask_mismatch(tmp_path: Path) -> None:
+	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
+	replay = _replay_k6_root(tmp_path, heads[6])
+	valid_path = replay / 'k6' / 'survey.valid_tokens.npy'
+	labels_path = replay / 'k6' / 'survey.hmm_labels_token.npy'
+	confidence_path = replay / 'k6' / 'survey.hmm_confidence_token.npy'
+	valid = np.load(valid_path)
+	labels = np.load(labels_path)
+	confidence = np.load(confidence_path)
+	valid[0, 0, 0] = False
+	labels[0, 0, 0] = -1
+	confidence[0, 0, 0] = 0.0
+	np.save(valid_path, valid)
+	np.save(labels_path, labels)
+	np.save(confidence_path, confidence)
+
+	parity = compare_k6_replay(historical_root=heads[6], replay_root=replay)
+	assert not parity['exact']
+	assert parity['checks']['survey.pseudo_target_valid_tokens'] is False  # type: ignore[index]
+	with pytest.raises(ValueError, match='parity'):
+		build_multi_head_target_manifest(
+			manifest_path=tmp_path / 'manifest.json',
+			source_embedding_dir=embeddings,
+			head_roots=heads,
+			replay_k6_root=replay,
+			migration_decision=migration,
+			control_summary=control,
+		)
+
+
 def test_k6_replay_parity_compares_replayed_clustering_decoded_labels(
 	tmp_path: Path,
 ) -> None:
@@ -240,7 +271,7 @@ def test_replay_config_uses_a_required_artifact_root_environment_variable(
 		load_config(config_path)
 
 
-def test_manifest_rejects_target_mask_misaligned_with_source_embedding(
+def test_manifest_rejects_target_valid_outside_source_embedding(
 	tmp_path: Path,
 ) -> None:
 	embeddings, heads = _artifacts(tmp_path)
@@ -250,7 +281,7 @@ def test_manifest_rejects_target_mask_misaligned_with_source_embedding(
 	valid[0, 0, 0] = False
 	np.save(valid_path, valid)
 
-	with pytest.raises(ValueError, match='valid-token mask does not match'):
+	with pytest.raises(ValueError, match='valid-token mask is not a subset'):
 		build_multi_head_target_manifest(
 			manifest_path=tmp_path / 'manifest.json',
 			source_embedding_dir=embeddings,
@@ -259,6 +290,145 @@ def test_manifest_rejects_target_mask_misaligned_with_source_embedding(
 			migration_decision=migration,
 			control_summary=control,
 		)
+
+
+def test_manifest_accepts_edge_excluded_target_mask_as_source_subset(
+	tmp_path: Path,
+) -> None:
+	shape = (2, 2, 12)
+	target_valid = np.ones(shape, dtype=np.bool_)
+	target_valid[0, :, :] = False
+	embeddings, heads = _artifacts(tmp_path, target_valid_tokens=target_valid)
+	migration, control = _write_positive_preflight(tmp_path)
+	manifest = tmp_path / 'manifest.json'
+	payload = build_multi_head_target_manifest(
+		manifest_path=manifest,
+		source_embedding_dir=embeddings,
+		head_roots=heads,
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
+		migration_decision=migration,
+		control_summary=control,
+	)
+
+	alignment = payload['common']['source_target_alignment']['survey']  # type: ignore[index]
+	assert alignment == {
+		'source_valid_count': 48,
+		'target_valid_count': 24,
+		'excluded_from_source_count': 24,
+		'target_is_subset_of_source': True,
+	}
+	assert (
+		payload['source_embedding']['surveys']['survey']['valid_tokens_sha256']  # type: ignore[index]
+		!= payload['common']['valid_tokens_sha256']['survey']  # type: ignore[index]
+	)
+	load_multi_head_target_manifest(manifest, validate_array_semantics=False)
+	load_multi_head_target_manifest(manifest)
+	payload['common']['source_target_alignment']['survey'][  # type: ignore[index]
+		'target_is_subset_of_source'
+	] = False
+	with pytest.raises(ValueError, match='must record a subset'):
+		validate_multi_head_target_manifest(
+			payload,
+			verify_hashes=True,
+			validate_array_semantics=False,
+		)
+
+
+def test_manifest_rejects_cross_head_target_mask_mismatch(tmp_path: Path) -> None:
+	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
+	valid_path = heads[8] / 'k8' / 'survey.valid_tokens.npy'
+	labels_path = heads[8] / 'k8' / 'survey.hmm_labels_token.npy'
+	confidence_path = heads[8] / 'k8' / 'survey.hmm_confidence_token.npy'
+	valid = np.load(valid_path)
+	labels = np.load(labels_path)
+	confidence = np.load(confidence_path)
+	valid[0, 0, 0] = False
+	labels[0, 0, 0] = -1
+	confidence[0, 0, 0] = 0.0
+	np.save(valid_path, valid)
+	np.save(labels_path, labels)
+	np.save(confidence_path, confidence)
+
+	with pytest.raises(ValueError, match='valid-token masks differ'):
+		build_multi_head_target_manifest(
+			manifest_path=tmp_path / 'manifest.json',
+			source_embedding_dir=embeddings,
+			head_roots=heads,
+			replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
+			migration_decision=migration,
+			control_summary=control,
+		)
+
+
+def test_manifest_full_validation_rechecks_target_source_subset(
+	tmp_path: Path,
+) -> None:
+	shape = (2, 2, 12)
+	target_valid = np.ones(shape, dtype=np.bool_)
+	target_valid[0, :, :] = False
+	embeddings, heads = _artifacts(tmp_path, target_valid_tokens=target_valid)
+	source_valid_path = embeddings / 'survey.valid_tokens.npy'
+	source_valid = np.load(source_valid_path)
+	source_valid[0, 0, 0] = False
+	np.save(source_valid_path, source_valid)
+	migration, control = _write_positive_preflight(tmp_path)
+	payload = build_multi_head_target_manifest(
+		manifest_path=tmp_path / 'manifest.json',
+		source_embedding_dir=embeddings,
+		head_roots=heads,
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
+		migration_decision=migration,
+		control_summary=control,
+	)
+	for k in (6, 8, 10):
+		valid_path = heads[k] / f'k{k}' / 'survey.valid_tokens.npy'
+		labels_path = heads[k] / f'k{k}' / 'survey.hmm_labels_token.npy'
+		confidence_path = heads[k] / f'k{k}' / 'survey.hmm_confidence_token.npy'
+		valid = np.load(valid_path)
+		labels = np.load(labels_path)
+		confidence = np.load(confidence_path)
+		valid[0, 0, 0] = True
+		labels[0, 0, 0] = 0
+		confidence[0, 0, 0] = 1.0
+		for path, array, key in (
+			(valid_path, valid, 'valid_tokens'),
+			(labels_path, labels, 'labels'),
+			(confidence_path, confidence, 'confidence'),
+		):
+			np.save(path, array)
+			payload['heads'][str(k)]['surveys']['survey'][key]['sha256'] = sha256(  # type: ignore[index]
+				path.read_bytes(),
+			).hexdigest()
+	payload['common']['valid_tokens_sha256']['survey'] = payload['heads']['6'][  # type: ignore[index]
+		'surveys'
+	]['survey']['valid_tokens']['sha256']
+
+	with pytest.raises(ValueError, match='not a subset'):
+		validate_multi_head_target_manifest(payload, verify_hashes=True)
+
+
+def test_manifest_full_validation_rechecks_target_embedding_grid_shape(
+	tmp_path: Path,
+) -> None:
+	embeddings, heads = _artifacts(tmp_path)
+	migration, control = _write_positive_preflight(tmp_path)
+	payload = build_multi_head_target_manifest(
+		manifest_path=tmp_path / 'manifest.json',
+		source_embedding_dir=embeddings,
+		head_roots=heads,
+		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
+		migration_decision=migration,
+		control_summary=control,
+	)
+	valid_path = embeddings / 'survey.valid_tokens.npy'
+	np.save(valid_path, np.ones((2, 2, 11), dtype=np.bool_))
+	payload['source_embedding']['surveys']['survey']['valid_tokens_sha256'] = (  # type: ignore[index]
+		sha256(valid_path.read_bytes()).hexdigest()
+	)
+
+	with pytest.raises(ValueError, match='token grid does not match'):
+		validate_multi_head_target_manifest(payload, verify_hashes=True)
 
 
 def test_cli_dry_run_only_missing_does_not_quarantine_invalid_manifest(
@@ -571,8 +741,16 @@ def _artifacts(
 	*,
 	ks: tuple[int, ...] = (6, 8, 10),
 	source_root: Path | None = None,
+	target_valid_tokens: np.ndarray | None = None,
 ) -> tuple[Path, dict[int, Path]]:
 	shape = (2, 2, 12)
+	target_valid = (
+		np.ones(shape, dtype=np.bool_)
+		if target_valid_tokens is None
+		else np.asarray(target_valid_tokens, dtype=np.bool_)
+	)
+	if target_valid.shape != shape:
+		raise ValueError('target_valid_tokens shape mismatch')
 	embeddings = tmp_path / 'embeddings'
 	embeddings.mkdir(parents=True)
 	np.save(embeddings / 'survey.embeddings.npy', np.zeros((*shape, 3), np.float32))
@@ -602,6 +780,9 @@ def _artifacts(
 		labels = np.tile(np.minimum(np.arange(12), k - 1), (2, 2, 1)).astype(
 			np.int32,
 		)
+		labels[~target_valid] = -1
+		confidence = np.ones(labels.shape, dtype=np.float32)
+		confidence[~target_valid] = 0.0
 		source_label_path = (
 			(source_root or tmp_path)
 			/ f'head{k}_clustering'
@@ -616,8 +797,8 @@ def _artifacts(
 			k=k,
 			survey_id='survey',
 			labels=labels,
-			confidence=np.ones(labels.shape, dtype=np.float32),
-			valid_tokens=np.ones(labels.shape, dtype=np.bool_),
+			confidence=confidence,
+			valid_tokens=target_valid,
 			metadata={
 				'source_clustering_output_dir': str(source_label_path.parents[2]),
 				'source_label_path': str(source_label_path),
@@ -642,6 +823,10 @@ def _replay_k6_root(
 	historical_labels = np.load(
 		historical_root / 'k6' / 'survey.hmm_labels_token.npy',
 	)
+	historical_valid = np.load(historical_root / 'k6' / 'survey.valid_tokens.npy')
+	historical_confidence = np.load(
+		historical_root / 'k6' / 'survey.hmm_confidence_token.npy',
+	)
 	replay_labels = historical_labels if labels is None else labels
 	source_label_path = (
 		tmp_path
@@ -657,8 +842,8 @@ def _replay_k6_root(
 		k=6,
 		survey_id='survey',
 		labels=replay_labels,
-		confidence=np.ones(replay_labels.shape, dtype=np.float32),
-		valid_tokens=np.ones(replay_labels.shape, dtype=np.bool_),
+		confidence=historical_confidence,
+		valid_tokens=historical_valid,
 		metadata={
 			'source_clustering_output_dir': str(source_label_path.parents[2]),
 			'source_label_path': str(source_label_path),
