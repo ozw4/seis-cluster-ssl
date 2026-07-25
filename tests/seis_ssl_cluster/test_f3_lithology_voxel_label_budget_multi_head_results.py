@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -17,9 +17,6 @@ from seis_ssl_cluster.f3.lithology import (
 from seis_ssl_cluster.f3.lithology import (
 	voxel_label_budget_results as voxel_results,
 )
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 
 def test_decisions_include_the_required_current_k6_mae_status() -> None:
@@ -774,6 +771,85 @@ def test_target_diagnostics_preserve_head_cross_head_and_k6_evidence() -> None:
 	}
 
 
+def test_multi_head_publish_retains_tracked_historical_status_files_in_manifest(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = _publish_config(tmp_path)
+	monkeypatch.setattr(
+		results,
+		'inspect_f3_lithology_voxel_label_budget_multi_head_results',
+		lambda _config: _publishable_inspection(),
+	)
+	publish_dir = results._publish_dir(config)
+	initial_bytes = _seed_historical_multi_head_status_files(publish_dir)
+
+	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(
+		config
+	)
+	assert publication.publish_manifest is not None
+	manifest = publication.publish_manifest
+	assert {
+		path.relative_to(publish_dir).as_posix()
+		for path in publish_dir.rglob('*')
+		if path.is_file()
+	} == results._publish_target_names() | set(
+		results.HISTORICAL_STATUS_FILE_IDENTITIES
+	)
+	assert len(manifest.items) == len(results.OUTPUT_NAMES) + len(
+		results.HISTORICAL_STATUS_FILE_IDENTITIES
+	)
+	items_by_target = {
+		item.target.relative_to(publish_dir.resolve()).as_posix(): item
+		for item in manifest.items
+	}
+	payload = json.loads(manifest.manifest_path.read_text(encoding='utf-8'))
+	payload_items = {item['target']: item for item in payload['items']}
+	for name, (size_bytes, sha256) in (
+		results.HISTORICAL_STATUS_FILE_IDENTITIES.items()
+	):
+		path = (publish_dir / name).resolve()
+		assert path.read_bytes() == initial_bytes[name]
+		assert items_by_target[name].source == path
+		assert items_by_target[name].target == path
+		assert items_by_target[name].size_bytes == size_bytes
+		assert items_by_target[name].sha256 == sha256
+		assert payload_items[name]['source'] == str(path)
+		assert payload_items[name]['size_bytes'] == size_bytes
+		assert payload_items[name]['sha256'] == sha256
+
+
+def test_multi_head_publish_rejects_invalid_historical_status_files(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	monkeypatch.setattr(
+		results,
+		'inspect_f3_lithology_voxel_label_budget_multi_head_results',
+		lambda _config: _publishable_inspection(),
+	)
+
+	partial_config = _publish_config(tmp_path / 'partial')
+	partial_dir = results._publish_dir(partial_config)
+	_seed_historical_multi_head_status_files(partial_dir)
+	(partial_dir / next(iter(results.HISTORICAL_STATUS_FILE_IDENTITIES))).unlink()
+	with pytest.raises(FileExistsError, match='partial historical status set'):
+		results.summarize_f3_lithology_voxel_label_budget_multi_head(partial_config)
+
+	tampered_config = _publish_config(tmp_path / 'tampered')
+	tampered_dir = results._publish_dir(tampered_config)
+	_seed_historical_multi_head_status_files(tampered_dir)
+	tampered_path = tampered_dir / next(iter(results.HISTORICAL_STATUS_FILE_IDENTITIES))
+	tampered_path.write_bytes(b'tampered')
+	with pytest.raises(FileExistsError, match='tracked byte identity'):
+		results.summarize_f3_lithology_voxel_label_budget_multi_head(tampered_config)
+
+	unknown_config = _publish_config(tmp_path / 'unknown')
+	unknown_dir = results._publish_dir(unknown_config)
+	_seed_historical_multi_head_status_files(unknown_dir)
+	(unknown_dir / 'unexpected.md').write_text('unexpected', encoding='utf-8')
+	with pytest.raises(FileExistsError, match='unexpected file set'):
+		results.summarize_f3_lithology_voxel_label_budget_multi_head(unknown_config)
+
+
 def test_multi_head_publish_rejects_stale_and_missing_files(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -841,6 +917,21 @@ def _publish_config(tmp_path: Path) -> SimpleNamespace:
 		budgets=(),
 		subsample_seeds=(),
 	)
+
+
+def _seed_historical_multi_head_status_files(publish_dir: Path) -> dict[str, bytes]:
+	"""Copy immutable tracked status records into an isolated publish root."""
+	source_dir = (
+		Path(__file__).resolve().parents[2]
+		/ 'results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
+	)
+	publish_dir.mkdir(parents=True, exist_ok=True)
+	initial_bytes = {}
+	for name in results.HISTORICAL_STATUS_FILE_IDENTITIES:
+		content = (source_dir / name).read_bytes()
+		(publish_dir / name).write_bytes(content)
+		initial_bytes[name] = content
+	return initial_bytes
 
 
 def _publishable_inspection() -> results.F3VoxelLabelBudgetMultiHeadResultsInspection:

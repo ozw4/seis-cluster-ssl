@@ -137,6 +137,29 @@ def test_config_requires_original_mae_reference() -> None:
 		f3_lithology_voxel_label_budget_multi_head_config_from_mapping(raw)
 
 
+def test_active_config_binds_the_reports_current_k6_manifest() -> None:
+	path = Path(
+		'experiments/f3/facies_benchmark_v1/'
+		'95_strat_hmm_multi_head_k6810_low_label_v1/'
+		'01_run_multi_head_voxel_label_budget.yaml'
+	)
+	config = f3_lithology_voxel_label_budget_multi_head_config_from_mapping(
+		load_config(path)
+	)
+
+	assert config.current_k6_run_manifest == Path(
+		'/workspace/artifacts/seis_ssl_cluster/lithology/f3/'
+		'facies_benchmark_v1/voxel_label_budget_current_k6_control_v1/'
+		'original_split/reports/control_job_manifest.json'
+	)
+
+
+def test_existing_parent_supports_an_initially_uncreated_output_root(
+	tmp_path: Path,
+) -> None:
+	assert multi_head._existing_parent(tmp_path / 'new' / 'outputs') == tmp_path
+
+
 def test_config_allows_omitting_optional_historical_m1_reference() -> None:
 	path = Path(
 		'experiments/f3/facies_benchmark_v1/'
@@ -195,7 +218,7 @@ def test_current_k6_rows_allow_omitting_optional_historical_m1_reference(
 		(row['budget_id'], row['subsample_seed']): row for row in validated_rows
 	}
 	actual_config, kwargs = calls[0]
-	assert actual_config.output_root == manifest.parent
+	assert actual_config.output_root == manifest.parent.parent
 	assert actual_config.references.historical_run_manifest == (
 		config.original_run_manifest
 	)

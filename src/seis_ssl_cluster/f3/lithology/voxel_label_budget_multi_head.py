@@ -149,7 +149,7 @@ def inspect_f3_lithology_voxel_label_budget_multi_head(
 		)
 		for plan in plans
 	)
-	disk = shutil.disk_usage(config.output_root.parent)
+	disk = shutil.disk_usage(_existing_parent(config.output_root.parent))
 	return F3VoxelLabelBudgetMultiHeadInspection(
 		jobs=jobs,
 		plans=plans,
@@ -498,6 +498,10 @@ def _current_k6_rows(
 	dataset_rows: Mapping[tuple[str, int], Mapping[str, object]],
 ) -> Mapping[tuple[str, int], Mapping[str, object]]:
 	"""Admit only current-K6 rows revalidated against their live artifacts."""
+	manifest = config.current_k6_run_manifest
+	output_root = (
+		manifest.parent.parent if manifest.parent.name == 'reports' else manifest.parent
+	)
 	control_config = replace(
 		config.base,
 		references=replace(
@@ -507,12 +511,11 @@ def _current_k6_rows(
 			mae_model_id=config.references.mae_model_id,
 			historical_m1_model_id=config.references.historical_m1_model_id,
 		),
-		output_root=config.current_k6_run_manifest.parent,
+		output_root=output_root,
 		validate_pairing_reference=False,
 	)
 	rows = control.load_f3_lithology_voxel_label_budget_control_rows(
-		control_config,
-		run_manifest_path=config.current_k6_run_manifest,
+		control_config, run_manifest_path=manifest
 	)
 	result: dict[tuple[str, int], Mapping[str, object]] = {}
 	for row in rows:
@@ -587,6 +590,17 @@ def _estimated_candidate_job_bytes(
 		raise ValueError('current K6 reference has no jobs')
 	sizes = [control._tree_size(path) for path in roots]
 	return max(1, math.ceil((sum(sizes) / len(sizes)) * 1.2))
+
+
+def _existing_parent(path: Path) -> Path:
+	"""Return the nearest existing directory for an initial output allocation."""
+	candidate = path
+	while not candidate.exists():
+		parent = candidate.parent
+		if parent == candidate:
+			raise FileNotFoundError(path)
+		candidate = parent
+	return candidate
 
 
 def _validate_current_pair(

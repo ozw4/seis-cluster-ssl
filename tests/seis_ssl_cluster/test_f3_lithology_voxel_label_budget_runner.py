@@ -60,6 +60,31 @@ def test_replacement_sampling_sequence_is_seeded_and_stable() -> None:
 	assert len(first) == 64
 
 
+def test_identity_reuses_hash_for_an_unchanged_file(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	"""Repeated live-artifact checks avoid rehashing an unchanged file."""
+	path = tmp_path / 'artifact.bin'
+	path.write_bytes(b'identity-cache')
+	actual = runner_module.file_sha256
+	calls = 0
+
+	def counted_file_sha256(candidate: Path) -> str:
+		nonlocal calls
+		calls += 1
+		return actual(candidate)
+
+	runner_module._IDENTITY_CACHE.clear()  # noqa: SLF001
+	monkeypatch.setattr(runner_module, 'file_sha256', counted_file_sha256)
+
+	first = _identity(path)
+	second = _identity(path)
+
+	assert first == second
+	assert first is not second
+	assert calls == 1
+
+
 def test_completed_class_weights_are_recomputed_from_shared_train_mask() -> None:
 	manifest = SimpleNamespace(
 		split='train',

@@ -91,6 +91,12 @@ if TYPE_CHECKING:
 		F3LithologyVoxelReportInspection,
 	)
 
+
+_IDENTITY_CACHE: dict[
+	tuple[str, int, int, int, int, int], dict[str, object]
+] = {}
+
+
 RUN_MANIFEST_NAME = 'voxel_label_budget_run_manifest.json'
 RUN_MANIFEST_TYPE = 'f3_lithology_voxel_label_budget_run_manifest'
 RUN_SCHEMA_VERSION = 1
@@ -2082,11 +2088,24 @@ def _quarantine(path: Path, *, reason: str) -> Path:
 def _identity(path: Path) -> dict[str, object]:
 	if not path.is_file():
 		raise FileNotFoundError(path)
-	return {
+	stat = path.stat()
+	cache_key = (
+		str(path),
+		stat.st_dev,
+		stat.st_ino,
+		stat.st_size,
+		stat.st_mtime_ns,
+		stat.st_ctime_ns,
+	)
+	if cached := _IDENTITY_CACHE.get(cache_key):
+		return dict(cached)
+	identity = {
 		'path': str(path),
 		'sha256': file_sha256(path),
-		'byte_size': path.stat().st_size,
+		'byte_size': stat.st_size,
 	}
+	_IDENTITY_CACHE[cache_key] = identity
+	return dict(identity)
 
 
 def _validate_identity(value: object, *, label: str) -> Path:
