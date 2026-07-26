@@ -1,0 +1,78 @@
+{
+  "artifact_type": "f3_multi_head_decisions",
+  "effects": {
+    "consistency_increment": {
+      "comparison_id": "mh_cons010_vs_mh_nocons",
+      "negative_budgets": [],
+      "positive_budgets": [
+        "cap25"
+      ],
+      "status": "HOLD",
+      "systematic_major_degradation": []
+    },
+    "current_k6_vs_mae": {
+      "comparison_id": "m1_current_k6_vs_mae",
+      "negative_budgets": [],
+      "positive_budgets": [
+        "cap25",
+        "cap50",
+        "cap100"
+      ],
+      "status": "POSITIVE",
+      "systematic_major_degradation": []
+    },
+    "main_total_value": {
+      "comparison_id": "mh_cons010_vs_m1_current_k6",
+      "negative_budgets": [],
+      "positive_budgets": [
+        "cap25",
+        "cap50",
+        "cap100"
+      ],
+      "status": "POSITIVE",
+      "systematic_major_degradation": []
+    },
+    "main_vs_mae": {
+      "comparison_id": "mh_cons010_vs_mae",
+      "negative_budgets": [],
+      "positive_budgets": [
+        "cap25",
+        "cap50",
+        "cap100"
+      ],
+      "status": "POSITIVE",
+      "systematic_major_degradation": []
+    },
+    "multi_task_value": {
+      "comparison_id": "mh_nocons_vs_m1_current_k6",
+      "negative_budgets": [],
+      "positive_budgets": [
+        "cap25",
+        "cap50",
+        "cap100"
+      ],
+      "status": "POSITIVE",
+      "systematic_major_degradation": []
+    },
+    "nocons_vs_mae": {
+      "comparison_id": "mh_nocons_vs_mae",
+      "negative_budgets": [],
+      "positive_budgets": [
+        "cap25",
+        "cap50",
+        "cap100"
+      ],
+      "status": "POSITIVE",
+      "systematic_major_degradation": []
+    }
+  },
+  "gate": {
+    "major_degradation_budget_count": 2,
+    "major_degradation_delta": -0.05,
+    "minimum_positive_budgets": 2,
+    "minimum_primary_wins": 4
+  },
+  "overall_status": "M4_MH_GO_NOCONS",
+  "schema_version": 1,
+  "selected_candidate": "mh_nocons"
+}

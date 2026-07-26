@@ -235,6 +235,31 @@ def test_non_pairing_historical_m1_is_omitted() -> None:
 	assert not results._historical_members_are_paired(config, members, historical)
 
 
+def test_pairing_requires_identical_class_order_for_all_multi_head_roles() -> None:
+	config = SimpleNamespace(budgets=('cap25',), subsample_seeds=(0,))
+	pair_row = dict.fromkeys(results.control.PAIR_IDENTITY_KEYS, 'same')
+	pair_row['class_order'] = [0, 1, 2, 3, 4, 5]
+	members = {
+		('cap25', 0, role): {'row': dict(pair_row)}
+		for role in ('mae', 'm1_current_k6', 'mh_nocons', 'mh_cons010')
+	}
+
+	results._validate_pairing(config, members)
+
+	members[('cap25', 0, 'mh_cons010')]['row']['class_order'] = [
+		0,
+		1,
+		2,
+		3,
+		5,
+		4,
+	]
+	with pytest.raises(
+		ValueError, match='paired identity mismatch: cap25/seed0/class_order'
+	):
+		results._validate_pairing(config, members)
+
+
 def test_pretraining_pair_requires_initialization_parity() -> None:
 	left = _checkpoint_evidence(variant='nocons', consistency_weight=0.0)
 	right = _checkpoint_evidence(variant='cons010', consistency_weight=0.1)

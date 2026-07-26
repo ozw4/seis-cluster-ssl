@@ -58,6 +58,59 @@ def test_current_control_job_matrix_is_exactly_fifteen(tmp_path: Path) -> None:
 	assert {job.decoder_seed for job in jobs if job.subsample_seed == 4} == {42004}
 
 
+def test_reference_member_row_uses_dataset_class_order_as_a_list(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	dataset = SimpleNamespace(
+		budget_id='cap25',
+		per_class_cap=25,
+		subsample_seed=0,
+		root='/dataset',
+		grid=SimpleNamespace(sha256='grid'),
+		selected_token_identity_sha256='tokens',
+		unique_token_xyz_sha256='coordinates',
+		train_voxel_count=100,
+		validation_voxel_count=470136,
+		class_order=(0, 1, 2, 3, 4, 5),
+		validation_mask_sha256='validation',
+	)
+	job = SimpleNamespace(
+		dataset=dataset,
+		evaluation=SimpleNamespace(
+			decoder_architecture={'name': 'decoder'}, metric_schema_sha256='schema'
+		),
+		row={'prediction_metadata': {'path': '/prediction.json'}},
+		decoder_seed=42000,
+		model_role='mae',
+		model_tag='mae-tag',
+		canonical_valid_tokens_sha256='valid',
+		initial_model_state_sha256='initial',
+		class_weights=(1.0,) * 6,
+		sampling_mode='uniform_tiles_with_replacement',
+		steps_per_epoch=440,
+		sampling_sequence_sha256='sequence',
+		train_tile_manifest_sha256='train-manifest',
+		validation_tile_manifest_sha256='validation-manifest',
+		train_tile_identity_sha256='train-tiles',
+		validation_tile_identity_sha256='validation-tiles',
+	)
+	monkeypatch.setattr(
+		control_module,
+		'_prediction_coverage',
+		lambda _path: {
+			'duplicate_write_count': 0,
+			'missing_write_count': 0,
+			'exact_once': True,
+		},
+	)
+
+	row = control_module._reference_member_row(job)  # noqa: SLF001
+
+	assert row['class_order'] == [0, 1, 2, 3, 4, 5]
+	assert isinstance(row['class_order'], list)
+	assert dataset.class_order == (0, 1, 2, 3, 4, 5)
+
+
 def test_readiness_positive_requires_both_primary_metrics(tmp_path: Path) -> None:
 	config = _config(tmp_path)
 	rows = _summary_rows(config, current_vs_mae=0.02, current_vs_m1=0.0)

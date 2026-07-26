@@ -665,6 +665,7 @@ def _reference_member_row(job: object) -> Mapping[str, object]:
 		'unique_token_xyz_sha256': dataset.unique_token_xyz_sha256,
 		'train_voxel_count': dataset.train_voxel_count,
 		'validation_voxel_count': dataset.validation_voxel_count,
+		'class_order': list(dataset.class_order),
 		'validation_mask_sha256': dataset.validation_mask_sha256,
 		'canonical_valid_token_sha256': loaded.canonical_valid_tokens_sha256,
 		'initial_model_state_sha256': loaded.initial_model_state_sha256,

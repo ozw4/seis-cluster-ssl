@@ -1,0 +1,123 @@
+{
+  "created_at_utc": "2026-07-26T15:59:33.224560Z",
+  "items": [
+    {
+      "sha256": "f23a1416743a9f7def36966132161458df37797d8c2c7e9146ada090f2133e12",
+      "size_bytes": 120320,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_job_metrics.csv",
+      "target": "multi_head_job_metrics.csv"
+    },
+    {
+      "sha256": "fc71ecb7816d3fb018478a6882a868ea30324c15b52880b0c6bf4d9f50b57023",
+      "size_bytes": 31984,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_paired_metrics.csv",
+      "target": "multi_head_paired_metrics.csv"
+    },
+    {
+      "sha256": "9a5e4f7947770fe77543c4e30771a10ebe6ffc9b216991eeb94ac2713a82d825",
+      "size_bytes": 80738,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_paired_deltas.csv",
+      "target": "multi_head_paired_deltas.csv"
+    },
+    {
+      "sha256": "6f0de711081292bed3d837bf1bcf70c517ad8c3a6f8e67205bb4d7a07bdeefee",
+      "size_bytes": 121895,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_summary_by_budget.csv",
+      "target": "multi_head_summary_by_budget.csv"
+    },
+    {
+      "sha256": "4ebabe1f39ebba8f3cde4bc5637ab5820f866b22d4b680f517e750359dca0a53",
+      "size_bytes": 16843,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_monitored_class_summary.csv",
+      "target": "multi_head_monitored_class_summary.csv"
+    },
+    {
+      "sha256": "8d5f85038585ed10fc3644d8c969cf31d74672349ffcdeebc572f64474318c6f",
+      "size_bytes": 6456,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_pretraining_summary.csv",
+      "target": "multi_head_pretraining_summary.csv"
+    },
+    {
+      "sha256": "9a0429e82deec6e4e6f41e2ccdba8ef4292b1f13a0d6a40a2c732211ad6077e0",
+      "size_bytes": 7512,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_target_diagnostics.csv",
+      "target": "multi_head_target_diagnostics.csv"
+    },
+    {
+      "sha256": "c1461239894f7377f75ad39081be83554481c370c6bd19c33567ee4fbd4a58eb",
+      "size_bytes": 1898,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_decisions.json",
+      "target": "multi_head_decisions.json"
+    },
+    {
+      "sha256": "e98a1bda42d53231c942d5c02c2ebf2d456a106b20966d43491db33c9b356c69",
+      "size_bytes": 1353860,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_results_summary.json",
+      "target": "multi_head_results_summary.json"
+    },
+    {
+      "sha256": "ab55e8a603ae0747190034a827a8d0afd26b769168d7d673a3d0b7a090d8bd2d",
+      "size_bytes": 768,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_results_summary.md",
+      "target": "multi_head_results_summary.md"
+    },
+    {
+      "sha256": "e16115ab3aaf53a7fb0d1044ce951e31d70f17dcb86f2adaca80bfc59b4229e6",
+      "size_bytes": 270,
+      "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_experiment_handoff.md",
+      "target": "multi_head_experiment_handoff.md"
+    },
+    {
+      "sha256": "f5fb1bf8b34982060d4c4dc600a167005ea80e49b66c773ffba9b98fc4556969",
+      "size_bytes": 612,
+      "source": "/workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/cons010_checkpoint_validation.json",
+      "target": "cons010_checkpoint_validation.json"
+    },
+    {
+      "sha256": "1d8a346a769fe80459f4ce2f18ccacc9d422289bd85c940661959d9339cad1ba",
+      "size_bytes": 865,
+      "source": "/workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/cons010_embedding_validation.json",
+      "target": "cons010_embedding_validation.json"
+    },
+    {
+      "sha256": "cb85f919f270f571ae97bf5c733c93d05ef697ce123a429410239ab0d6705860",
+      "size_bytes": 728,
+      "source": "/workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/multi_head_initialization_parity.json",
+      "target": "multi_head_initialization_parity.json"
+    },
+    {
+      "sha256": "3987716484ee5f3ae4727b562b68d4e841545471c2979297bb52b6e1e7ad76bb",
+      "size_bytes": 2052,
+      "source": "/workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/multi_head_pretraining_handoff.md",
+      "target": "multi_head_pretraining_handoff.md"
+    },
+    {
+      "sha256": "2e49f88c08cf7ee85fccdb2270c3b2116596f414c86e6d077bd7220f04135399",
+      "size_bytes": 610,
+      "source": "/workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/nocons_checkpoint_validation.json",
+      "target": "nocons_checkpoint_validation.json"
+    },
+    {
+      "sha256": "2e8588533996f8deac4c07468a8689bcfbf5d4fe8355c9fb677756f6a132fe01",
+      "size_bytes": 865,
+      "source": "/workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/nocons_embedding_validation.json",
+      "target": "nocons_embedding_validation.json"
+    },
+    {
+      "sha256": "be5e33514a4b286e7e8147567880a008cf7ce6bb94b9dfff2306184bb7b387cf",
+      "size_bytes": 2398,
+      "source": "/workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/preflight_manifest.json",
+      "target": "preflight_manifest.json"
+    },
+    {
+      "sha256": "da61f218ec07ab7d67b59bd26e0f9be50d00292531128d6d751519c0ce3153bb",
+      "size_bytes": 1147,
+      "source": "/workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/smoke_validation.json",
+      "target": "smoke_validation.json"
+    }
+  ],
+  "output_dir": "/workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1",
+  "skipped_optional_items": [],
+  "source_artifact_root": "/workspace/artifacts/seis_ssl_cluster",
+  "warnings": []
+}
