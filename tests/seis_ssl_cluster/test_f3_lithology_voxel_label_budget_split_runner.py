@@ -9,6 +9,7 @@ import pytest
 import seis_ssl_cluster.f3.lithology.voxel_label_budget_split_runner as split_runner
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_split import (
+	_json_sha256,
 	_normalized_source_identities,
 )
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_split_runner import (
@@ -159,6 +160,56 @@ def test_split_labels_rejects_drift_in_every_committed_source_identity(
 		paths[key].write_bytes(b'drift')
 		with pytest.raises(ValueError, match='path/hash mismatch'):
 			_split_labels(row, metadata)
+
+
+def test_dataset_rows_rejects_self_consistent_stale_config_sources(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	current_paths = {
+		name: tmp_path / f'current-{name}'
+		for name in (
+			'class_info',
+			'source_label_segy',
+			'segy_geometry_json',
+			'seismic_volume',
+		)
+	}
+	stale_paths = {
+		name: tmp_path / f'stale-{name}' for name in current_paths
+	}
+	for paths in (current_paths, stale_paths):
+		for path in paths.values():
+			path.write_bytes(path.name.encode())
+	stale_sources = {name: _identity(path) for name, path in stale_paths.items()}
+	output_root = tmp_path / 'outputs'
+	(output_root / 'low_label_split_dataset_manifest.json').parent.mkdir()
+	(output_root / 'low_label_split_dataset_manifest.json').write_text(
+		json.dumps({
+			'rows': [
+				{
+					'split_id': f'split_{index:03d}',
+					'budget_id': budget_id,
+					'voxel_dataset_root': str(tmp_path / f'{index}-{budget_id}'),
+					'source_identities': stale_sources,
+					'source_identities_sha256': _json_sha256(stale_sources),
+				}
+				for index in range(6)
+				for budget_id in ('cap25', 'cap50')
+			],
+		}),
+		encoding='utf-8',
+	)
+	config = SimpleNamespace(
+		output_root=output_root,
+		**current_paths,
+		source_identities={
+			name: _identity(path) for name, path in current_paths.items()
+		},
+	)
+	monkeypatch.setattr(split_runner, '_complete', lambda *_: True)
+
+	with pytest.raises(ValueError, match='strict source identity mismatch'):
+		split_runner._dataset_rows(config)  # noqa: SLF001
 
 
 def test_completed_metric_row_uses_canonical_metric_loader(tmp_path: Path) -> None:

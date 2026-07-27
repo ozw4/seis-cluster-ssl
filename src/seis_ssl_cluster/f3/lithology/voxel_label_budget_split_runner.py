@@ -32,7 +32,11 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_runner import (
 	quarantine_voxel_label_budget_output,
 	run_voxel_label_budget_job,
 )
-from seis_ssl_cluster.f3.lithology.voxel_label_budget_split import _complete
+from seis_ssl_cluster.f3.lithology.voxel_label_budget_split import (
+	_complete,
+	_json_sha256,
+	_strict_source_identities,
+)
 from seis_ssl_cluster.f3.splits import read_f3_line_geometry
 from seis_ssl_cluster.training.voxel_decoder.runner import (
 	inspect_f3_lithology_voxel_decoder,
@@ -253,11 +257,23 @@ def _dataset_rows(config: F3VoxelLabelBudgetSplitConfig) -> Mapping[tuple[str, s
 	indexed = {(str(row.get('split_id')), str(row.get('budget_id'))): row for row in rows if isinstance(row, Mapping)}
 	if len(indexed) != 12:
 		raise ValueError('six-split dataset manifest must contain exactly twelve unique rows')
+	strict_sources = _strict_source_identities(
+		config, split_id='six-split dataset manifest'
+	)
+	strict_sources_sha256 = _json_sha256(strict_sources)
 	for (split_id, budget_id), row in indexed.items():
 		root = Path(str(row.get('voxel_dataset_root', '')))
 		if not _complete(root, row):
 			raise ValueError(
 				'six-split dataset source/provenance identity mismatch: '
+				f'{split_id}/{budget_id}'
+			)
+		if (
+			row.get('source_identities') != strict_sources
+			or row.get('source_identities_sha256') != strict_sources_sha256
+		):
+			raise ValueError(
+				'six-split dataset strict source identity mismatch: '
 				f'{split_id}/{budget_id}'
 			)
 	return indexed

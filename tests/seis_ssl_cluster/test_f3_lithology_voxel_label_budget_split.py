@@ -21,7 +21,10 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_split_runner import (
 	_run_manifest_root,
 	_write_run_manifest,
 )
-from seis_ssl_cluster.f3.lithology.voxel_split import TRAIN_VOXEL_SPLIT
+from seis_ssl_cluster.f3.lithology.voxel_split import (
+	TRAIN_VOXEL_SPLIT,
+	VALIDATION_VOXEL_SPLIT,
+)
 
 
 def test_selected_unique_tokens_require_canonical_train_voxels() -> None:
@@ -287,20 +290,62 @@ def test_only_missing_quarantines_legacy_dataset_then_reuses_rebuild(
 		name: {'path': str(path), 'sha256': file_sha256(path)}
 		for name, path in source_paths.items()
 	}
+	full_grid_path = tmp_path / 'full_split_grid.npy'
+	grid = np.asarray(
+		[[[TRAIN_VOXEL_SPLIT, VALIDATION_VOXEL_SPLIT]]],
+		dtype=np.uint8,
+	)
+	np.save(full_grid_path, grid, allow_pickle=False)
+	source_split_manifest = tmp_path / 'source_split_manifest.json'
+	source_split_manifest.write_text('{"source": true}\n', encoding='utf-8')
 	root = output_root / 'datasets' / 'split_000' / 'cap25' / 'voxel_supervision'
 	root.mkdir(parents=True)
 	(root / 'legacy.bin').write_bytes(b'legacy dataset bytes')
 	(root / METADATA_NAME).write_text('{}\n', encoding='utf-8')
 	(root / 'low_label_split_metadata.json').write_text('{}\n', encoding='utf-8')
+	selected = np.asarray([[0, 0, 0]], dtype=np.int64)
 	row = {
 		'split_id': 'split_000',
 		'budget_id': 'cap25',
+		'per_class_cap': 25,
+		'label_subset_seed': 0,
 		'voxel_dataset_root': str(root),
+		'selected_token_row_count': 1,
+		'unique_selected_token_xyz_count': 1,
+		'duplicate_selected_row_count': 0,
+		'selected_token_identity_sha256': 'selected-row-identity',
+		'unique_token_xyz_sha256': _array_sha(selected),
+		'train_voxel_count': 1,
+		'actual_train_voxel_count': 1,
+		'validation_voxel_count': 1,
+		'per_class_train_voxel_counts': {'0': 1},
+		'per_class_validation_voxel_counts': {'0': 1},
+		'train_mask_sha256': 'train-mask',
+		'validation_mask_sha256': 'validation-mask',
+		'grid_array_sha256': _array_sha(grid),
+		'supervision_split_grid': {
+			'path': str(root / GRID_NAME),
+			'sha256': file_sha256(full_grid_path),
+		},
+		'canonical_valid_tokens_sha256': 'valid-tokens',
+		'class_order': [0],
+		'patch_size_xyz': [8, 8, 8],
 		'source_identities': source_identities,
 		'source_identities_sha256': _json_sha256(source_identities),
+		'source_full_voxel_dataset': {
+			'split_grid': {
+				'path': str(full_grid_path),
+				'sha256': file_sha256(full_grid_path),
+			},
+			'slice_split_manifest': {
+				'path': str(source_split_manifest),
+				'sha256': file_sha256(source_split_manifest),
+			},
+		},
 	}
 	condition = split_datasets.LowLabelSplitCondition(
-		'split_000', 'cap25', root, row, np.empty((0, 3), dtype=np.int64), {}
+		'split_000', 'cap25', root, row, selected,
+		{'source_identities': source_identities},
 	)
 	config = SimpleNamespace(
 		output_root=output_root,
@@ -314,25 +359,6 @@ def test_only_missing_quarantines_legacy_dataset_then_reuses_rebuild(
 		lambda _: split_datasets.LowLabelSplitInspection((condition,)),
 	)
 	monkeypatch.setattr(split_datasets, '_parity_gate', lambda *_: None)
-	writes = []
-	complete = _complete
-
-	def write_condition(value) -> None:
-		writes.append(value.output_root)
-		value.output_root.mkdir(parents=True)
-		(value.output_root / METADATA_NAME).write_text(
-			json.dumps({'source_identities': value.row['source_identities']}),
-			encoding='utf-8',
-		)
-		(value.output_root / '.complete').write_text('yes\n', encoding='utf-8')
-
-	monkeypatch.setattr(split_datasets, '_write_condition', write_condition)
-	monkeypatch.setattr(
-		split_datasets,
-		'_complete',
-		lambda value, value_row: (value / '.complete').is_file()
-		or complete(value, value_row),
-	)
 
 	_, first_rows = split_datasets.build_f3_lithology_voxel_label_budget_split_datasets(
 		config, only_missing=True
@@ -344,9 +370,20 @@ def test_only_missing_quarantines_legacy_dataset_then_reuses_rebuild(
 	assert quarantine.is_absolute()
 	assert quarantine.name.startswith('voxel_supervision.quarantine-')
 	assert (quarantine / 'legacy.bin').read_bytes() == b'legacy dataset bytes'
-	assert json.loads((root / METADATA_NAME).read_text(encoding='utf-8'))[
-		'source_identities'
-	] == source_identities
+	metadata = json.loads((root / METADATA_NAME).read_text(encoding='utf-8'))
+	provenance = json.loads(
+		(root / 'low_label_split_metadata.json').read_text(encoding='utf-8')
+	)
+	assert metadata['source_identities'] == source_identities
+	assert (
+		metadata['voxel_label_budget_split']['identity']['source_identities_sha256']
+		== row['source_identities_sha256']
+	)
+	assert provenance['sources']['normalized_source_identities'] == source_identities
+	assert provenance['identity']['source_identities_sha256'] == row[
+		'source_identities_sha256'
+	]
+	assert _complete(root, row)
 
 	_, second_rows = (
 		split_datasets.build_f3_lithology_voxel_label_budget_split_datasets(
@@ -356,7 +393,6 @@ def test_only_missing_quarantines_legacy_dataset_then_reuses_rebuild(
 	assert second_rows[0]['action'] == 'REUSED'
 	assert second_rows[0]['quarantine_path'] is None
 	assert len(list(root.parent.glob('voxel_supervision.quarantine-*'))) == 1
-	assert writes == [root]
 
 
 def test_smoke_run_manifest_is_separate_from_scientific_manifest(tmp_path) -> None:
