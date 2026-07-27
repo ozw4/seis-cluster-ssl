@@ -240,6 +240,11 @@ def test_legacy_full_label_metadata_normalizes_strict_source_identities(
 	metadata['labels']['class_info'] = str(tmp_path / 'other.json')
 	with pytest.raises(ValueError, match='class_info path'):
 		_normalized_source_identities(config, metadata, split_id='split_001')
+	metadata['labels']['class_info'] = str(paths['class_info'])
+	metadata['source_identities'] = normalized
+	paths['class_info'].write_bytes(b'drift')
+	with pytest.raises(ValueError, match='source class_info hash'):
+		_normalized_source_identities(config, metadata, split_id='split_001')
 
 
 def test_only_missing_mixed_states_reuses_resumes_and_quarantines(

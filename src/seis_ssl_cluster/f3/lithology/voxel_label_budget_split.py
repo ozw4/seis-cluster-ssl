@@ -38,6 +38,7 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget import (
 	build_low_label_supervision_grid,
 	token_block,
 )
+from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import _json_sha256
 from seis_ssl_cluster.f3.lithology.voxel_split import (
 	TRAIN_VOXEL_SPLIT,
 	VALIDATION_VOXEL_SPLIT,
@@ -118,18 +119,32 @@ def build_f3_lithology_voxel_label_budget_split_datasets(
 	_parity_gate([condition.row for condition in inspection.conditions], config)
 	rows = []
 	for condition in inspection.conditions:
+		quarantine_path = None
+		quarantine_reason = None
 		if condition.output_root.exists():
 			if not only_missing:
 				raise FileExistsError(condition.output_root)
 			if _complete(condition.output_root, condition.row):
-				rows.append({**condition.row, 'action': 'REUSED'})
+				rows.append({
+					**condition.row,
+					'action': 'REUSED',
+					'quarantine_path': None,
+					'quarantine_reason': None,
+				})
 				continue
+			quarantine_reason = _quarantine_reason(condition.output_root)
 			quarantine = condition.output_root.with_name(
 				condition.output_root.name + f'.quarantine-{_timestamp()}'
 			)
 			condition.output_root.replace(quarantine)
+			quarantine_path = str(quarantine)
 		_write_condition(condition)
-		rows.append({**condition.row, 'action': 'NEW'})
+		rows.append({
+			**condition.row,
+			'action': 'NEW',
+			'quarantine_path': quarantine_path,
+			'quarantine_reason': quarantine_reason,
+		})
 	manifest = config.output_root / MANIFEST_NAME
 	_write_json(
 		manifest,
@@ -174,9 +189,10 @@ def _condition(
 	grid = build_low_label_supervision_grid(full_grid, unique, patch_size_xyz=(8, 8, 8))
 	del full_grid
 	metadata = dict(_read_json(Path(str(_mapping(voxel_row['metadata'])['path']))))
-	metadata['source_identities'] = _normalized_source_identities(
+	source_identities = _normalized_source_identities(
 		config, metadata, split_id=split_id
 	)
+	metadata['source_identities'] = source_identities
 	labels = np.load(
 		str(_mapping(metadata['label_volume'])['path']),
 		mmap_mode='r',
@@ -232,6 +248,8 @@ def _condition(
 		],
 		'class_order': classes,
 		'patch_size_xyz': [8, 8, 8],
+		'source_identities': source_identities,
+		'source_identities_sha256': _json_sha256(source_identities),
 		'source_full_voxel_dataset': voxel_row,
 	}
 	del grid
@@ -272,16 +290,20 @@ def _write_condition(condition: LowLabelSplitCondition) -> None:
 			'supervision_split_grid': str(root / GRID_NAME),
 			'metadata_json': str(root / METADATA_NAME),
 		}
+		metadata_identity = {
+			key: value
+			for key, value in condition.row.items()
+			if key not in {'source_full_voxel_dataset', 'source_identities_sha256'}
+		}
+		metadata_identity['source_identities_sha256'] = condition.row[
+			'source_identities_sha256'
+		]
 		metadata['voxel_label_budget_split'] = {
 			'split_id': condition.split_id,
 			'budget_id': condition.budget_id,
 			'dense_voxel_labels_preserved': True,
 			'validation_reuse': 'canonical_full_validation_bitwise',
-			'identity': {
-				key: value
-				for key, value in condition.row.items()
-				if key not in {'source_full_voxel_dataset'}
-			},
+			'identity': metadata_identity,
 		}
 		_write_json(staging / METADATA_NAME, metadata)
 		shutil.copyfile(
@@ -310,7 +332,10 @@ def _write_condition(condition: LowLabelSplitCondition) -> None:
 					for key, value in condition.row.items()
 					if key != 'source_full_voxel_dataset'
 				},
-				'sources': {'full_voxel_dataset': source},
+				'sources': {
+					'full_voxel_dataset': source,
+					'normalized_source_identities': condition.row['source_identities'],
+				},
 			},
 		)
 		staging.replace(root)
@@ -360,7 +385,13 @@ def _complete(root: Path, row: Mapping[str, object]) -> bool:
 		expected_identity = {
 			key: value
 			for key, value in row.items()
-			if key != 'source_full_voxel_dataset'
+			if key
+			not in {
+				'source_full_voxel_dataset',
+				'action',
+				'quarantine_path',
+				'quarantine_reason',
+			}
 		}
 		provenance = _read_json(provenance_path)
 		if (
@@ -368,11 +399,25 @@ def _complete(root: Path, row: Mapping[str, object]) -> bool:
 			!= 'f3_lithology_voxel_label_budget_split_dataset'
 			or provenance.get('identity') != expected_identity
 			or provenance.get('sources')
-			!= {'full_voxel_dataset': row['source_full_voxel_dataset']}
+			!= {
+				'full_voxel_dataset': row['source_full_voxel_dataset'],
+				'normalized_source_identities': row['source_identities'],
+			}
 		):
 			return False
 		metadata = _read_json(metadata_path)
-		if metadata.get('voxel_label_budget_split') != {
+		if not _source_identities_complete(
+			_mapping(metadata.get('source_identities')), row
+		):
+			return False
+		metadata_split = _mapping(metadata.get('voxel_label_budget_split'))
+		metadata_identity = _mapping(metadata_split.get('identity'))
+		if (
+			metadata_identity.get('source_identities_sha256')
+			!= row['source_identities_sha256']
+		):
+			return False
+		if metadata_split != {
 			'split_id': row['split_id'],
 			'budget_id': row['budget_id'],
 			'dense_voxel_labels_preserved': True,
@@ -405,6 +450,61 @@ def _complete(root: Path, row: Mapping[str, object]) -> bool:
 		return False
 	else:
 		return class_counts == expected_counts
+
+
+def _quarantine_reason(root: Path) -> str:
+	"""Return an audit reason for a dataset that failed completion validation."""
+	try:
+		metadata = _read_json(root / METADATA_NAME)
+		provenance = _read_json(root / 'low_label_split_metadata.json')
+		if (
+			not isinstance(metadata.get('source_identities'), Mapping)
+			or not isinstance(
+				_mapping(provenance.get('sources')).get(
+					'normalized_source_identities'
+				),
+				Mapping,
+			)
+		):
+			return 'legacy_missing_normalized_source_identity'
+	except (OSError, TypeError, ValueError, json.JSONDecodeError):
+		pass
+	return 'incomplete_or_mismatched_dataset'
+
+
+def _source_identities_complete(
+	sources: Mapping[str, object], row: Mapping[str, object]
+) -> bool:
+	"""Require the committed normalized source identities to be live and exact."""
+	expected = _mapping(row.get('source_identities'))
+	expected_sha256 = row.get('source_identities_sha256')
+	if sources != expected or not isinstance(expected_sha256, str):
+		return False
+	if _json_sha256(expected) != expected_sha256:
+		return False
+	for name in (
+		'class_info',
+		'source_label_segy',
+		'segy_geometry_json',
+		'seismic_volume',
+	):
+		identity = _mapping(expected.get(name))
+		path = identity.get('path')
+		sha256 = identity.get('sha256')
+		if (
+			not isinstance(path, str)
+			or not Path(path).is_absolute()
+			or not Path(path).is_file()
+			or not isinstance(sha256, str)
+			or file_sha256(Path(path)) != sha256
+		):
+			return False
+	return set(expected) == {
+		'class_info',
+		'source_label_segy',
+		'segy_geometry_json',
+		'seismic_volume',
+	}
 
 
 def _parity_gate(

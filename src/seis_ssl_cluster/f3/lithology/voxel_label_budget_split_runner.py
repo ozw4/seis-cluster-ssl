@@ -32,6 +32,7 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_runner import (
 	quarantine_voxel_label_budget_output,
 	run_voxel_label_budget_job,
 )
+from seis_ssl_cluster.f3.lithology.voxel_label_budget_split import _complete
 from seis_ssl_cluster.f3.splits import read_f3_line_geometry
 from seis_ssl_cluster.training.voxel_decoder.runner import (
 	inspect_f3_lithology_voxel_decoder,
@@ -252,6 +253,13 @@ def _dataset_rows(config: F3VoxelLabelBudgetSplitConfig) -> Mapping[tuple[str, s
 	indexed = {(str(row.get('split_id')), str(row.get('budget_id'))): row for row in rows if isinstance(row, Mapping)}
 	if len(indexed) != 12:
 		raise ValueError('six-split dataset manifest must contain exactly twelve unique rows')
+	for (split_id, budget_id), row in indexed.items():
+		root = Path(str(row.get('voxel_dataset_root', '')))
+		if not _complete(root, row):
+			raise ValueError(
+				'six-split dataset source/provenance identity mismatch: '
+				f'{split_id}/{budget_id}'
+			)
 	return indexed
 
 

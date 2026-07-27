@@ -12,6 +12,7 @@ from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_split import (
 	_array_sha,
 	_complete,
+	_json_sha256,
 	_require_selected_tokens_cover_train_voxels,
 )
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_split_runner import (
@@ -74,6 +75,21 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 	root.mkdir()
 	source_manifest = tmp_path / 'source_split_manifest.json'
 	source_manifest.write_text('{"source": true}\n', encoding='utf-8')
+	source_paths = {
+		name: tmp_path / f'{name}.source'
+		for name in (
+			'class_info',
+			'source_label_segy',
+			'segy_geometry_json',
+			'seismic_volume',
+		)
+	}
+	for path in source_paths.values():
+		path.write_bytes(path.name.encode())
+	source_identities = {
+		name: {'path': str(path), 'sha256': file_sha256(path)}
+		for name, path in source_paths.items()
+	}
 	grid = np.asarray([[[TRAIN_VOXEL_SPLIT]]], dtype=np.uint8)
 	selected = np.asarray([[0, 0, 0]], dtype=np.int64)
 	row = {
@@ -102,6 +118,8 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 		'canonical_valid_tokens_sha256': 'valid-tokens',
 		'class_order': [0],
 		'patch_size_xyz': [8, 8, 8],
+		'source_identities': source_identities,
+		'source_identities_sha256': _json_sha256(source_identities),
 		'source_full_voxel_dataset': {
 			'slice_split_manifest': {
 				'path': str(source_manifest),
@@ -118,6 +136,7 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 	(root / METADATA_NAME).write_text(
 		json.dumps(
 			{
+				'source_identities': source_identities,
 				'outputs': {
 					'supervision_split_grid': str(root / GRID_NAME),
 					'metadata_json': str(root / METADATA_NAME),
@@ -138,7 +157,10 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 			{
 				'artifact_type': 'f3_lithology_voxel_label_budget_split_dataset',
 				'identity': identity,
-				'sources': {'full_voxel_dataset': row['source_full_voxel_dataset']},
+				'sources': {
+					'full_voxel_dataset': row['source_full_voxel_dataset'],
+					'normalized_source_identities': source_identities,
+				},
 			}
 		),
 		encoding='utf-8',
@@ -169,7 +191,68 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 		assert not _complete(root, row)
 		(root / filename).write_bytes(content)
 
+	_assert_source_identity_completion_contract(
+		root, row, identity, source_identities, source_paths
+	)
+
+
+def _assert_source_identity_completion_contract(
+	root, row, identity, source_identities, source_paths
+) -> None:
 	(root / 'low_label_split_metadata.json').write_text('{}', encoding='utf-8')
+	assert not _complete(root, row)
+	(root / 'low_label_split_metadata.json').write_text(
+		json.dumps({
+			'artifact_type': 'f3_lithology_voxel_label_budget_split_dataset',
+			'identity': identity,
+			'sources': {
+				'full_voxel_dataset': row['source_full_voxel_dataset'],
+				'normalized_source_identities': source_identities,
+			},
+		}),
+		encoding='utf-8',
+	)
+	metadata = json.loads((root / METADATA_NAME).read_text(encoding='utf-8'))
+	del metadata['source_identities']
+	(root / METADATA_NAME).write_text(json.dumps(metadata), encoding='utf-8')
+	assert not _complete(root, row)
+	metadata['source_identities'] = source_identities
+	(root / METADATA_NAME).write_text(json.dumps(metadata), encoding='utf-8')
+	assert _complete(root, row)
+	assert (
+		metadata['voxel_label_budget_split']['identity']['source_identities_sha256']
+		== row['source_identities_sha256']
+	)
+	del metadata['voxel_label_budget_split']['identity']['source_identities_sha256']
+	(root / METADATA_NAME).write_text(json.dumps(metadata), encoding='utf-8')
+	assert not _complete(root, row)
+	metadata['voxel_label_budget_split']['identity']['source_identities_sha256'] = row[
+		'source_identities_sha256'
+	]
+	(root / METADATA_NAME).write_text(json.dumps(metadata), encoding='utf-8')
+	assert _complete(root, row)
+
+	provenance = json.loads(
+		(root / 'low_label_split_metadata.json').read_text(encoding='utf-8')
+	)
+	del provenance['sources']['normalized_source_identities']
+	(root / 'low_label_split_metadata.json').write_text(
+		json.dumps(provenance), encoding='utf-8'
+	)
+	assert not _complete(root, row)
+	provenance['sources']['normalized_source_identities'] = source_identities
+	(root / 'low_label_split_metadata.json').write_text(
+		json.dumps(provenance), encoding='utf-8'
+	)
+	assert _complete(root, row)
+
+	row['source_identities_sha256'] = '0' * 64
+	assert not _complete(root, row)
+	row['source_identities_sha256'] = _json_sha256(source_identities)
+	row['source_identities']['class_info']['path'] = str(root.parent / 'other.source')
+	assert not _complete(root, row)
+	row['source_identities']['class_info']['path'] = str(source_paths['class_info'])
+	source_paths['class_info'].write_bytes(b'drift')
 	assert not _complete(root, row)
 
 
