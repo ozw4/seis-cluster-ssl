@@ -221,6 +221,12 @@ def test_legacy_full_label_metadata_normalizes_strict_source_identities(
 	config = SimpleNamespace(
 		class_info=paths['class_info'], source_label_segy=paths['source_label_segy'],
 		segy_geometry_json=geometry, seismic_volume=paths['seismic_volume'],
+		source_identities={
+			'class_info': _identity(paths['class_info']),
+			'source_label_segy': _identity(paths['source_label_segy']),
+			'segy_geometry_json': _identity(geometry),
+			'seismic_volume': _identity(paths['seismic_volume']),
+		},
 	)
 	metadata = {
 		'labels': {
@@ -241,9 +247,8 @@ def test_legacy_full_label_metadata_normalizes_strict_source_identities(
 	with pytest.raises(ValueError, match='class_info path'):
 		_normalized_source_identities(config, metadata, split_id='split_001')
 	metadata['labels']['class_info'] = str(paths['class_info'])
-	metadata['source_identities'] = normalized
 	paths['class_info'].write_bytes(b'drift')
-	with pytest.raises(ValueError, match='source class_info hash'):
+	with pytest.raises(ValueError, match='strict source class_info hash'):
 		_normalized_source_identities(config, metadata, split_id='split_001')
 
 

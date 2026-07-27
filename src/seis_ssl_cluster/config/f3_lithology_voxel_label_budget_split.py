@@ -10,6 +10,7 @@ from pathlib import Path
 from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_absolute_path,
 	_required_mapping,
+	_required_str,
 	_validate_allowed_keys,
 )
 from seis_ssl_cluster.paths import ensure_under_root
@@ -45,6 +46,7 @@ class F3VoxelLabelBudgetSplitConfig:
 	class_info: Path
 	segy_geometry_json: Path
 	seismic_volume: Path
+	source_identities: Mapping[str, Mapping[str, str]]
 
 	@property
 	def models(self) -> tuple[str, ...]:
@@ -68,9 +70,16 @@ def f3_lithology_voxel_label_budget_split_config_from_mapping(
 		'split_inventory_manifest', 'split_dataset_manifest', 'voxel_dataset_manifest',
 		'original_dataset_manifest', 'multi_head_decisions', 'multi_head_handoff', 'embeddings',
 		'source_label_segy', 'class_info', 'segy_geometry_json', 'seismic_volume',
+		'source_identities',
 	}), prefix='inputs')
 	_validate_allowed_keys(matrix, frozenset({'split_ids', 'budgets', 'per_class_caps', 'label_subset_seed', 'decoder_seed', 'models'}), prefix='matrix')
 	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
+	source_paths = {
+		'source_label_segy': _required_absolute_path(inputs, 'source_label_segy', prefix='inputs'),
+		'class_info': _required_absolute_path(inputs, 'class_info', prefix='inputs'),
+		'segy_geometry_json': _required_absolute_path(inputs, 'segy_geometry_json', prefix='inputs'),
+		'seismic_volume': _required_absolute_path(inputs, 'seismic_volume', prefix='inputs'),
+	}
 	result = F3VoxelLabelBudgetSplitConfig(
 		artifact_root=artifact_root,
 		results_root=_required_absolute_path(paths, 'results_root', prefix='paths'),
@@ -86,10 +95,11 @@ def f3_lithology_voxel_label_budget_split_config_from_mapping(
 		budgets=_strings(matrix.get('budgets'), 'matrix.budgets'),
 		label_subset_seed=_integer(matrix.get('label_subset_seed'), 'matrix.label_subset_seed'),
 		decoder_seed=_integer(matrix.get('decoder_seed'), 'matrix.decoder_seed'),
-		source_label_segy=_required_absolute_path(inputs, 'source_label_segy', prefix='inputs'),
-		class_info=_required_absolute_path(inputs, 'class_info', prefix='inputs'),
-		segy_geometry_json=_required_absolute_path(inputs, 'segy_geometry_json', prefix='inputs'),
-		seismic_volume=_required_absolute_path(inputs, 'seismic_volume', prefix='inputs'),
+		source_label_segy=source_paths['source_label_segy'],
+		class_info=source_paths['class_info'],
+		segy_geometry_json=source_paths['segy_geometry_json'],
+		seismic_volume=source_paths['seismic_volume'],
+		source_identities=_source_identities(inputs, source_paths),
 	)
 	for label, path in ((name, getattr(result, name)) for name in (
 		'output_root', 'split_inventory_manifest', 'split_dataset_manifest', 'voxel_dataset_manifest',
@@ -114,6 +124,38 @@ def _embedding_paths(inputs: Mapping[str, object], artifact_root: Path) -> Mappi
 	for name, path in paths.items():
 		ensure_under_root(path, root=artifact_root, label=f'inputs.embeddings.{name}')
 	return paths
+
+
+def _source_identities(
+	inputs: Mapping[str, object], source_paths: Mapping[str, Path]
+) -> Mapping[str, Mapping[str, str]]:
+	"""Require immutable source hashes alongside the strict source paths."""
+	raw = _required_mapping(inputs, 'source_identities')
+	_validate_allowed_keys(raw, frozenset(source_paths), prefix='inputs.source_identities')
+	identities = {}
+	for name, expected_path in source_paths.items():
+		identity = _required_mapping(raw, name)
+		_validate_allowed_keys(
+			identity,
+			frozenset({'path', 'sha256'}),
+			prefix=f'inputs.source_identities.{name}',
+		)
+		path = _required_absolute_path(
+			identity, 'path', prefix=f'inputs.source_identities.{name}'
+		)
+		if path != expected_path:
+			raise ValueError(
+			f'inputs.source_identities.{name}.path must match inputs.{name}'
+		)
+		sha256 = _required_str(
+			identity, 'sha256', prefix=f'inputs.source_identities.{name}'
+		)
+		if len(sha256) != 64 or any(value not in '0123456789abcdef' for value in sha256):
+			raise ValueError(
+			f'inputs.source_identities.{name}.sha256 must be a lowercase SHA-256'
+		)
+		identities[name] = {'path': str(path), 'sha256': sha256}
+	return identities
 
 
 def _strings(value: object, label: str) -> tuple[str, ...]:

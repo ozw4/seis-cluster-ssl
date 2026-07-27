@@ -746,6 +746,7 @@ def _normalized_source_identities(
 	split_id: str,
 ) -> Mapping[str, Mapping[str, str]]:
 	"""Validate current or legacy full-label provenance and normalize it."""
+	strict_sources = _strict_source_identities(config, split_id=split_id)
 	labels = _mapping(metadata.get('labels'))
 	reference = _mapping(metadata.get('reference_embedding'))
 	reference_metadata = _mapping(reference.get('metadata'))
@@ -770,19 +771,38 @@ def _normalized_source_identities(
 	sources = metadata.get('source_identities')
 	if sources is not None:
 		current = _mapping(sources)
-		for name, (path, _) in {
-			**expected,
-			'segy_geometry_json': (config.segy_geometry_json, None),
-		}.items():
-			_validate_identity(
-				_mapping(current.get(name)), path, label=f'{split_id} source {name}'
+		if current != strict_sources:
+			raise ValueError(
+				f'{split_id} full-label source identities differ from strict config'
 			)
+	return strict_sources
+
+
+def _strict_source_identities(
+	config: F3VoxelLabelBudgetSplitConfig, *, split_id: str
+) -> Mapping[str, Mapping[str, str]]:
+	"""Validate the configured immutable source identity anchor before reuse."""
+	configured = _mapping(config.source_identities)
+	paths = {
+		'class_info': config.class_info,
+		'source_label_segy': config.source_label_segy,
+		'segy_geometry_json': config.segy_geometry_json,
+		'seismic_volume': config.seismic_volume,
+	}
+	if set(configured) != set(paths):
+		raise ValueError(f'{split_id} strict source identity keys are invalid')
+	for name, path in paths.items():
+		_validate_identity(
+			_mapping(configured.get(name)),
+			path,
+			label=f'{split_id} strict source {name}',
+		)
 	return {
-		name: {'path': str(path), 'sha256': file_sha256(path)}
-		for name, (path, _) in {
-			**expected,
-			'segy_geometry_json': (config.segy_geometry_json, None),
-		}.items()
+		name: {
+			'path': str(_mapping(configured[name])['path']),
+			'sha256': str(_mapping(configured[name])['sha256']),
+		}
+		for name in paths
 	}
 
 

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import csv
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.f3.lithology.voxel_label_budget_split as split_datasets
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_split import (
@@ -254,6 +256,107 @@ def _assert_source_identity_completion_contract(
 	row['source_identities']['class_info']['path'] = str(source_paths['class_info'])
 	source_paths['class_info'].write_bytes(b'drift')
 	assert not _complete(root, row)
+
+
+def test_only_missing_quarantines_legacy_dataset_then_reuses_rebuild(
+	tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	output_root = tmp_path / 'output'
+	manifest_sources = {
+		name: tmp_path / f'{name}.json'
+		for name in (
+			'split_inventory_manifest',
+			'split_dataset_manifest',
+			'voxel_dataset_manifest',
+		)
+	}
+	for path in manifest_sources.values():
+		path.write_text('{}\n', encoding='utf-8')
+	source_paths = {
+		name: tmp_path / f'{name}.source'
+		for name in (
+			'class_info',
+			'source_label_segy',
+			'segy_geometry_json',
+			'seismic_volume',
+		)
+	}
+	for path in source_paths.values():
+		path.write_bytes(path.name.encode())
+	source_identities = {
+		name: {'path': str(path), 'sha256': file_sha256(path)}
+		for name, path in source_paths.items()
+	}
+	root = output_root / 'datasets' / 'split_000' / 'cap25' / 'voxel_supervision'
+	root.mkdir(parents=True)
+	(root / 'legacy.bin').write_bytes(b'legacy dataset bytes')
+	(root / METADATA_NAME).write_text('{}\n', encoding='utf-8')
+	(root / 'low_label_split_metadata.json').write_text('{}\n', encoding='utf-8')
+	row = {
+		'split_id': 'split_000',
+		'budget_id': 'cap25',
+		'voxel_dataset_root': str(root),
+		'source_identities': source_identities,
+		'source_identities_sha256': _json_sha256(source_identities),
+	}
+	condition = split_datasets.LowLabelSplitCondition(
+		'split_000', 'cap25', root, row, np.empty((0, 3), dtype=np.int64), {}
+	)
+	config = SimpleNamespace(
+		output_root=output_root,
+		split_ids=('split_000',),
+		budgets=('cap25',),
+		**manifest_sources,
+	)
+	monkeypatch.setattr(
+		split_datasets,
+		'inspect_f3_lithology_voxel_label_budget_split_datasets',
+		lambda _: split_datasets.LowLabelSplitInspection((condition,)),
+	)
+	monkeypatch.setattr(split_datasets, '_parity_gate', lambda *_: None)
+	writes = []
+	complete = _complete
+
+	def write_condition(value) -> None:
+		writes.append(value.output_root)
+		value.output_root.mkdir(parents=True)
+		(value.output_root / METADATA_NAME).write_text(
+			json.dumps({'source_identities': value.row['source_identities']}),
+			encoding='utf-8',
+		)
+		(value.output_root / '.complete').write_text('yes\n', encoding='utf-8')
+
+	monkeypatch.setattr(split_datasets, '_write_condition', write_condition)
+	monkeypatch.setattr(
+		split_datasets,
+		'_complete',
+		lambda value, value_row: (value / '.complete').is_file()
+		or complete(value, value_row),
+	)
+
+	_, first_rows = split_datasets.build_f3_lithology_voxel_label_budget_split_datasets(
+		config, only_missing=True
+	)
+	first = first_rows[0]
+	quarantine = Path(str(first['quarantine_path']))
+	assert first['action'] == 'NEW'
+	assert first['quarantine_reason'] == 'legacy_missing_normalized_source_identity'
+	assert quarantine.is_absolute()
+	assert quarantine.name.startswith('voxel_supervision.quarantine-')
+	assert (quarantine / 'legacy.bin').read_bytes() == b'legacy dataset bytes'
+	assert json.loads((root / METADATA_NAME).read_text(encoding='utf-8'))[
+		'source_identities'
+	] == source_identities
+
+	_, second_rows = (
+		split_datasets.build_f3_lithology_voxel_label_budget_split_datasets(
+			config, only_missing=True
+		)
+	)
+	assert second_rows[0]['action'] == 'REUSED'
+	assert second_rows[0]['quarantine_path'] is None
+	assert len(list(root.parent.glob('voxel_supervision.quarantine-*'))) == 1
+	assert writes == [root]
 
 
 def test_smoke_run_manifest_is_separate_from_scientific_manifest(tmp_path) -> None:
