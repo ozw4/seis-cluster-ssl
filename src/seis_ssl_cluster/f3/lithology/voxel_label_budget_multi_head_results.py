@@ -8,7 +8,7 @@ import json
 import math
 import statistics
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -27,10 +27,8 @@ from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
 	load_f3_multi_head_pretraining_handoff,
 )
 from seis_ssl_cluster.results import (
-	PublishedItem,
 	PublishItem,
 	PublishManifest,
-	publish_manifest_to_dict,
 	publish_selected_results,
 )
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
@@ -67,40 +65,17 @@ OUTPUT_NAMES = (
 	'multi_head_experiment_handoff.md',
 )
 PUBLISH_MANIFEST_NAME = 'publish_manifest.json'
-# Immutable tracked records from the blocked preflight report, retained read-only.
-HISTORICAL_STATUS_FILE_IDENTITIES = {
-	'cons010_checkpoint_validation.json': (
-		612,
-		'f5fb1bf8b34982060d4c4dc600a167005ea80e49b66c773ffba9b98fc4556969',
-	),
-	'cons010_embedding_validation.json': (
-		865,
-		'1d8a346a769fe80459f4ce2f18ccacc9d422289bd85c940661959d9339cad1ba',
-	),
-	'multi_head_initialization_parity.json': (
-		728,
-		'cb85f919f270f571ae97bf5c733c93d05ef697ce123a429410239ab0d6705860',
-	),
-	'multi_head_pretraining_handoff.md': (
-		2052,
-		'3987716484ee5f3ae4727b562b68d4e841545471c2979297bb52b6e1e7ad76bb',
-	),
-	'nocons_checkpoint_validation.json': (
-		610,
-		'2e49f88c08cf7ee85fccdb2270c3b2116596f414c86e6d077bd7220f04135399',
-	),
-	'nocons_embedding_validation.json': (
-		865,
-		'2e8588533996f8deac4c07468a8689bcfbf5d4fe8355c9fb677756f6a132fe01',
-	),
-	'preflight_manifest.json': (
-		2398,
-		'be5e33514a4b286e7e8147567880a008cf7ce6bb94b9dfff2306184bb7b387cf',
-	),
-	'smoke_validation.json': (
-		1147,
-		'da61f218ec07ab7d67b59bd26e0f9be50d00292531128d6d751519c0ce3153bb',
-	),
+CANDIDATE_LABELS = {
+	'mh_nocons': 'no-consistency multi-head',
+	'mh_cons010': 'consistency-main multi-head',
+}
+UNSELECTED_CANDIDATES = {
+	'mh_nocons': 'mh_cons010',
+	'mh_cons010': 'mh_nocons',
+}
+UNSELECTED_CANDIDATE_HANDOFF_LABELS = {
+	'mh_nocons': 'no-consistency guardrail',
+	'mh_cons010': 'consistency-main candidate',
 }
 TARGET_DIAGNOSTIC_FIELDS = (
 	'record_type',
@@ -1470,15 +1445,23 @@ def _handoff(decisions: Mapping[str, object]) -> str:
 				'',
 			]
 		)
+	if not isinstance(selected, str) or selected not in CANDIDATE_LABELS:
+		raise ValueError(f'unknown selected candidate: {selected!r}')
+	unselected = UNSELECTED_CANDIDATES[selected]
 	return '\n'.join(
 		[
 			'# Six-split confirmatory handoff',
 			'',
+			f'Overall status: `{decisions["overall_status"]}`',
 			f'Selected candidate: `{selected}`',
 			'',
-			'Run MAE, current K6, and the selected multi-head candidate only; '
+			f'Run MAE, current K6, and the selected multi-head candidate `{selected}`; '
 			'cap25/cap50; split_000 through split_005; one paired decoder seed per '
-			'split. Do not carry the unselected no-consistency ablation forward.',
+			'split.',
+			'',
+			'Do not carry the unselected '
+			f'{UNSELECTED_CANDIDATE_HANDOFF_LABELS[unselected]} '
+			f'`{unselected}` forward.',
 			'',
 		]
 	)
@@ -1491,7 +1474,7 @@ def _publish_dir(config: object) -> Path:
 def _publish_multi_head_results(
 	config: object, *, items: Sequence[PublishItem]
 ) -> PublishManifest:
-	"""Publish review files and retain verified historical status records."""
+	"""Publish the current review files into the canonical results tree."""
 	publish_dir = _publish_dir(config)
 	_validate_existing_multi_head_publish_tree(publish_dir)
 	manifest = publish_selected_results(
@@ -1500,58 +1483,12 @@ def _publish_multi_head_results(
 		max_file_size_bytes=10 * 1024 * 1024,
 		overwrite=True,
 	)
-	actual = _published_relative_names(publish_dir)
-	retained = _verified_historical_status_items(publish_dir, actual=actual)
-	if retained:
-		manifest = replace(manifest, items=[*manifest.items, *retained])
-		_write_json(manifest.manifest_path, publish_manifest_to_dict(manifest))
 	_validate_published_multi_head_tree(publish_dir, manifest)
 	return manifest
 
 
 def _publish_target_names() -> set[str]:
 	return {*OUTPUT_NAMES, PUBLISH_MANIFEST_NAME}
-
-
-def _historical_status_names() -> set[str]:
-	return set(HISTORICAL_STATUS_FILE_IDENTITIES)
-
-
-def _verified_historical_status_items(
-	publish_dir: Path, *, actual: set[str]
-) -> tuple[PublishedItem, ...]:
-	"""Return immutable legacy records after exact byte-identity validation."""
-	historical_names = _historical_status_names()
-	present = actual & historical_names
-	if not present:
-		return ()
-	if present != historical_names:
-		raise FileExistsError(
-			'multi-head publish root has a partial historical status set; '
-			f'missing={sorted(historical_names - present)!r}'
-		)
-	records = []
-	for name, (expected_size, expected_sha256) in (
-		HISTORICAL_STATUS_FILE_IDENTITIES.items()
-	):
-		path = (publish_dir / name).resolve()
-		if (
-			path.stat().st_size != expected_size
-			or file_sha256(path) != expected_sha256
-		):
-			raise FileExistsError(
-				'multi-head historical status file does not match its tracked '
-				f'byte identity: {name}'
-			)
-		records.append(
-			PublishedItem(
-				source=path,
-				target=path,
-				size_bytes=expected_size,
-				sha256=expected_sha256,
-			)
-		)
-	return tuple(records)
 
 
 def _validate_existing_multi_head_publish_tree(publish_dir: Path) -> None:
@@ -1561,14 +1498,7 @@ def _validate_existing_multi_head_publish_tree(publish_dir: Path) -> None:
 	actual = _published_relative_names(publish_dir)
 	if not actual:
 		return
-	retained = _verified_historical_status_items(publish_dir, actual=actual)
-	historical_names = _historical_status_names()
-	if actual == historical_names:
-		return
-	expected = _publish_target_names() | {
-		item.target.relative_to(publish_dir.resolve()).as_posix()
-		for item in retained
-	}
+	expected = _publish_target_names()
 	if actual != expected:
 		raise FileExistsError(
 			'multi-head publish root has an unexpected file set; '
@@ -1582,12 +1512,7 @@ def _validate_published_multi_head_tree(  # noqa: PLR0912
 ) -> None:
 	"""Verify exact inventory and source/target digests after publication."""
 	actual = _published_relative_names(publish_dir)
-	retained = _verified_historical_status_items(publish_dir, actual=actual)
-	retained_targets = {
-		item.target.relative_to(publish_dir.resolve()).as_posix()
-		for item in retained
-	}
-	expected = _publish_target_names() | retained_targets
+	expected = _publish_target_names()
 	if actual != expected:
 		raise ValueError(
 			'multi-head published file inventory mismatch; '
@@ -1598,7 +1523,7 @@ def _validate_published_multi_head_tree(  # noqa: PLR0912
 		raise ValueError('multi-head publish manifest path mismatch')
 	payload = _read_json(manifest.manifest_path)
 	items = payload.get('items')
-	expected_manifest_targets = set(OUTPUT_NAMES) | retained_targets
+	expected_manifest_targets = set(OUTPUT_NAMES)
 	if not isinstance(items, list) or len(items) != len(expected_manifest_targets):
 		raise ValueError('multi-head publish manifest item count mismatch')
 	manifest_items: dict[str, Mapping[str, object]] = {}
@@ -1635,11 +1560,6 @@ def _validate_published_multi_head_tree(  # noqa: PLR0912
 		if item.sha256 != file_sha256(target):
 			raise ValueError(f'multi-head published target SHA-256 mismatch: {target}')
 		relative_target = target.relative_to(publish_dir.resolve()).as_posix()
-		if relative_target in retained_targets and item.source.resolve() != target:
-			raise ValueError(
-				'multi-head retained historical manifest source/target mismatch: '
-				f'{target}'
-			)
 		recorded = manifest_items.get(relative_target)
 		if recorded is None:
 			raise ValueError(f'multi-head publish manifest target is missing: {target}')

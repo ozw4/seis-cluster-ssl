@@ -18,6 +18,41 @@ from seis_ssl_cluster.f3.lithology import (
 	voxel_label_budget_results as voxel_results,
 )
 
+HISTORICAL_BLOCKED_FILE_IDENTITIES = {
+	'cons010_checkpoint_validation.json': (
+		612,
+		'f5fb1bf8b34982060d4c4dc600a167005ea80e49b66c773ffba9b98fc4556969',
+	),
+	'cons010_embedding_validation.json': (
+		865,
+		'1d8a346a769fe80459f4ce2f18ccacc9d422289bd85c940661959d9339cad1ba',
+	),
+	'multi_head_initialization_parity.json': (
+		728,
+		'cb85f919f270f571ae97bf5c733c93d05ef697ce123a429410239ab0d6705860',
+	),
+	'multi_head_pretraining_handoff.md': (
+		2052,
+		'3987716484ee5f3ae4727b562b68d4e841545471c2979297bb52b6e1e7ad76bb',
+	),
+	'nocons_checkpoint_validation.json': (
+		610,
+		'2e49f88c08cf7ee85fccdb2270c3b2116596f414c86e6d077bd7220f04135399',
+	),
+	'nocons_embedding_validation.json': (
+		865,
+		'2e8588533996f8deac4c07468a8689bcfbf5d4fe8355c9fb677756f6a132fe01',
+	),
+	'preflight_manifest.json': (
+		2398,
+		'be5e33514a4b286e7e8147567880a008cf7ce6bb94b9dfff2306184bb7b387cf',
+	),
+	'smoke_validation.json': (
+		1147,
+		'da61f218ec07ab7d67b59bd26e0f9be50d00292531128d6d751519c0ce3153bb',
+	),
+}
+
 
 def test_decisions_include_the_required_current_k6_mae_status() -> None:
 	decisions = results.decide_multi_head_comparisons(
@@ -723,11 +758,54 @@ def test_pretraining_summary_row_contains_required_training_diagnostics(
 	assert row['embedding_nonfinite_valid_embedding_count'] == 0
 
 
-def test_mandatory_handoff_is_in_the_publish_set() -> None:
+def test_handoff_for_selected_no_consistency_candidate() -> None:
 	assert 'multi_head_experiment_handoff.md' in results.OUTPUT_NAMES
-	assert 'No confirmatory run is authorized.' in results._handoff(
+	handoff = results._handoff(
+		{
+			'overall_status': 'M4_MH_GO_NOCONS',
+			'selected_candidate': 'mh_nocons',
+		}
+	)
+
+	assert 'Overall status: `M4_MH_GO_NOCONS`' in handoff
+	assert 'Selected candidate: `mh_nocons`' in handoff
+	assert 'selected multi-head candidate `mh_nocons`' in handoff
+	assert 'unselected consistency-main candidate `mh_cons010`' in handoff
+	assert 'unselected no-consistency' not in handoff
+
+
+def test_handoff_for_selected_consistency_main_candidate() -> None:
+	handoff = results._handoff(
+		{
+			'overall_status': 'M4_MH_GO_MAIN',
+			'selected_candidate': 'mh_cons010',
+		}
+	)
+
+	assert 'Overall status: `M4_MH_GO_MAIN`' in handoff
+	assert 'Selected candidate: `mh_cons010`' in handoff
+	assert 'selected multi-head candidate `mh_cons010`' in handoff
+	assert 'unselected no-consistency guardrail `mh_nocons`' in handoff
+	assert 'unselected consistency-main candidate `mh_cons010`' not in handoff
+
+
+def test_handoff_without_selected_candidate_preserves_hold_blocked_path() -> None:
+	handoff = results._handoff(
 		{'overall_status': 'M4_MH_HOLD', 'selected_candidate': None}
 	)
+
+	assert 'No confirmatory run is authorized.' in handoff
+	assert 'Do not carry the unselected' not in handoff
+
+
+def test_handoff_rejects_unknown_selected_candidate() -> None:
+	with pytest.raises(ValueError, match='unknown selected candidate'):
+		results._handoff(
+			{
+				'overall_status': 'M4_MH_GO_NOCONS',
+				'selected_candidate': 'mh_unknown',
+			}
+		)
 
 
 def test_target_diagnostics_preserve_head_cross_head_and_k6_evidence() -> None:
@@ -796,7 +874,7 @@ def test_target_diagnostics_preserve_head_cross_head_and_k6_evidence() -> None:
 	}
 
 
-def test_multi_head_publish_retains_tracked_historical_status_files_in_manifest(
+def test_multi_head_publish_accepts_empty_and_exact_current_tree(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	config = _publish_config(tmp_path)
@@ -806,105 +884,77 @@ def test_multi_head_publish_retains_tracked_historical_status_files_in_manifest(
 		lambda _config: _publishable_inspection(),
 	)
 	publish_dir = results._publish_dir(config)
-	initial_bytes = _seed_historical_multi_head_status_files(publish_dir)
+	publish_dir.mkdir(parents=True)
 
 	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(
 		config
 	)
 	assert publication.publish_manifest is not None
+	assert _published_names(publish_dir) == results._publish_target_names()
 	manifest = publication.publish_manifest
-	assert {
-		path.relative_to(publish_dir).as_posix()
-		for path in publish_dir.rglob('*')
-		if path.is_file()
-	} == results._publish_target_names() | set(
-		results.HISTORICAL_STATUS_FILE_IDENTITIES
-	)
-	assert len(manifest.items) == len(results.OUTPUT_NAMES) + len(
-		results.HISTORICAL_STATUS_FILE_IDENTITIES
-	)
-	items_by_target = {
-		item.target.relative_to(publish_dir.resolve()).as_posix(): item
-		for item in manifest.items
-	}
+	assert len(manifest.items) == len(results.OUTPUT_NAMES) == 11
 	payload = json.loads(manifest.manifest_path.read_text(encoding='utf-8'))
-	payload_items = {item['target']: item for item in payload['items']}
-	for name, (size_bytes, sha256) in (
-		results.HISTORICAL_STATUS_FILE_IDENTITIES.items()
-	):
-		path = (publish_dir / name).resolve()
-		assert path.read_bytes() == initial_bytes[name]
-		assert items_by_target[name].source == path
-		assert items_by_target[name].target == path
-		assert items_by_target[name].size_bytes == size_bytes
-		assert items_by_target[name].sha256 == sha256
-		assert payload_items[name]['source'] == str(path)
-		assert payload_items[name]['size_bytes'] == size_bytes
-		assert payload_items[name]['sha256'] == sha256
+	assert len(payload['items']) == len(results.OUTPUT_NAMES) == 11
+	manifest_targets = {item['target'] for item in payload['items']}
+	assert manifest_targets == set(results.OUTPUT_NAMES)
+	assert not (manifest_targets & set(HISTORICAL_BLOCKED_FILE_IDENTITIES))
+
+	republication = results.summarize_f3_lithology_voxel_label_budget_multi_head(
+		config
+	)
+	assert republication.publish_manifest is not None
+	assert _published_names(publish_dir) == results._publish_target_names()
 
 
-def test_multi_head_publish_rejects_invalid_historical_status_files(
-	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+	('names', 'expected_detail'),
+	[
+		(set(HISTORICAL_BLOCKED_FILE_IDENTITIES), 'extra='),
+		(
+			results._publish_target_names() | set(HISTORICAL_BLOCKED_FILE_IDENTITIES),
+			'extra=',
+		),
+		({next(iter(HISTORICAL_BLOCKED_FILE_IDENTITIES))}, 'missing='),
+		(results._publish_target_names() | {'unexpected.md'}, 'extra='),
+		(results._publish_target_names() - {results.OUTPUT_NAMES[0]}, 'missing='),
+	],
+	ids=(
+		'blocked-preflight-only',
+		'current-and-blocked-preflight',
+		'partial-blocked-preflight',
+		'extra-file',
+		'missing-current-file',
+	),
+)
+def test_multi_head_publish_rejects_noncanonical_existing_trees(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	names: set[str],
+	expected_detail: str,
 ) -> None:
+	config = _publish_config(tmp_path)
 	monkeypatch.setattr(
 		results,
 		'inspect_f3_lithology_voxel_label_budget_multi_head_results',
 		lambda _config: _publishable_inspection(),
 	)
+	_seed_publish_tree(results._publish_dir(config), names)
 
-	partial_config = _publish_config(tmp_path / 'partial')
-	partial_dir = results._publish_dir(partial_config)
-	_seed_historical_multi_head_status_files(partial_dir)
-	(partial_dir / next(iter(results.HISTORICAL_STATUS_FILE_IDENTITIES))).unlink()
-	with pytest.raises(FileExistsError, match='partial historical status set'):
-		results.summarize_f3_lithology_voxel_label_budget_multi_head(partial_config)
+	with pytest.raises(FileExistsError, match='unexpected file set') as error:
+		results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
 
-	tampered_config = _publish_config(tmp_path / 'tampered')
-	tampered_dir = results._publish_dir(tampered_config)
-	_seed_historical_multi_head_status_files(tampered_dir)
-	tampered_path = tampered_dir / next(iter(results.HISTORICAL_STATUS_FILE_IDENTITIES))
-	tampered_path.write_bytes(b'tampered')
-	with pytest.raises(FileExistsError, match='tracked byte identity'):
-		results.summarize_f3_lithology_voxel_label_budget_multi_head(tampered_config)
-
-	unknown_config = _publish_config(tmp_path / 'unknown')
-	unknown_dir = results._publish_dir(unknown_config)
-	_seed_historical_multi_head_status_files(unknown_dir)
-	(unknown_dir / 'unexpected.md').write_text('unexpected', encoding='utf-8')
-	with pytest.raises(FileExistsError, match='unexpected file set'):
-		results.summarize_f3_lithology_voxel_label_budget_multi_head(unknown_config)
+	assert expected_detail in str(error.value)
 
 
-def test_multi_head_publish_rejects_stale_and_missing_files(
-	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_multi_head_publish_rejects_raw_artifact_suffix(tmp_path: Path) -> None:
 	config = _publish_config(tmp_path)
-	inspection = _publishable_inspection()
-	monkeypatch.setattr(
-		results,
-		'inspect_f3_lithology_voxel_label_budget_multi_head_results',
-		lambda _config: inspection,
-	)
-	publish_dir = results._publish_dir(config)
-	publish_dir.mkdir(parents=True)
-	(publish_dir / 'stale_embeddings.npy').write_bytes(b'raw')
+	raw = tmp_path / 'raw_embeddings.npy'
+	raw.write_bytes(b'raw')
 
-	with pytest.raises(FileExistsError, match='unexpected file set'):
-		results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
-
-	(publish_dir / 'stale_embeddings.npy').unlink()
-	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
-	assert {
-		path.relative_to(publish_dir).as_posix()
-		for path in publish_dir.rglob('*')
-		if path.is_file()
-	} == results._publish_target_names()
-
-	(publish_dir / results.OUTPUT_NAMES[0]).unlink()
-	with pytest.raises(FileExistsError, match='missing'):
-		results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
-
-	assert publication.publish_manifest is not None
+	with pytest.raises(ValueError, match='forbidden suffix'):
+		results._publish_multi_head_results(
+			config, items=(results.PublishItem(raw, Path('raw_embeddings.npy')),)
+		)
 
 
 def test_multi_head_publish_detects_manifest_and_target_hash_tampering(
@@ -927,11 +977,57 @@ def test_multi_head_publish_detects_manifest_and_target_hash_tampering(
 	with pytest.raises(ValueError, match='manifest SHA-256'):
 		results._validate_published_multi_head_tree(publish_dir, manifest)
 
-	results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
+	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
+	assert publication.publish_manifest is not None
+	manifest = publication.publish_manifest
+	source = config.reports_dir / results.OUTPUT_NAMES[0]
+	source.write_bytes(b'x' * source.stat().st_size)
+	with pytest.raises(ValueError, match='source SHA-256'):
+		results._validate_published_multi_head_tree(publish_dir, manifest)
+
+	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
+	assert publication.publish_manifest is not None
+	manifest = publication.publish_manifest
 	target = publish_dir / results.OUTPUT_NAMES[0]
 	target.write_bytes(b'x' * target.stat().st_size)
 	with pytest.raises(ValueError, match='target SHA-256'):
 		results._validate_published_multi_head_tree(publish_dir, manifest)
+
+
+def test_historical_blocked_preflight_archive_is_noncanonical() -> None:
+	repository_root = Path(__file__).resolve().parents[2]
+	canonical_root = (
+		repository_root
+		/ 'results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
+	)
+	archive_root = (
+		repository_root
+		/ 'results/f3/facies_benchmark_v1/'
+		'strat_hmm_multi_head_k6810_v1_historical_preflight_20260720'
+	)
+
+	assert archive_root.is_dir()
+	assert _published_names(archive_root) == {
+		*HISTORICAL_BLOCKED_FILE_IDENTITIES,
+		'README.md',
+	}
+	for name, (size_bytes, sha256) in HISTORICAL_BLOCKED_FILE_IDENTITIES.items():
+		path = archive_root / name
+		assert path.stat().st_size == size_bytes
+		assert file_sha256(path) == sha256
+	readme = (archive_root / 'README.md').read_text(encoding='utf-8')
+	assert '# Historical M4-MH blocked preflight — 2026-07-20' in readme
+	assert 'This directory is non-canonical historical evidence.' in readme
+	assert (
+		'Do not use these records as current checkpoint, embedding, or '
+		'scientific-result status.'
+	) in readme
+	historical_names = set(HISTORICAL_BLOCKED_FILE_IDENTITIES)
+	assert not (_published_names(canonical_root) & historical_names)
+	manifest = json.loads(
+		(canonical_root / results.PUBLISH_MANIFEST_NAME).read_text(encoding='utf-8')
+	)
+	assert not {item['target'] for item in manifest['items']} & historical_names
 
 
 def _publish_config(tmp_path: Path) -> SimpleNamespace:
@@ -944,22 +1040,21 @@ def _publish_config(tmp_path: Path) -> SimpleNamespace:
 	)
 
 
-def _seed_historical_multi_head_status_files(publish_dir: Path) -> dict[str, bytes]:
-	"""Copy immutable tracked status records into an isolated publish root."""
-	source_dir = (
-		Path(__file__).resolve().parents[2]
-		/ 'results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
-	)
+def _published_names(root: Path) -> set[str]:
+	return {
+		path.relative_to(root).as_posix() for path in root.rglob('*') if path.is_file()
+	}
+
+
+def _seed_publish_tree(publish_dir: Path, names: set[str]) -> None:
 	publish_dir.mkdir(parents=True, exist_ok=True)
-	initial_bytes = {}
-	for name in results.HISTORICAL_STATUS_FILE_IDENTITIES:
-		content = (source_dir / name).read_bytes()
-		(publish_dir / name).write_bytes(content)
-		initial_bytes[name] = content
-	return initial_bytes
+	for name in names:
+		(publish_dir / name).write_text('stale', encoding='utf-8')
 
 
-def _publishable_inspection() -> results.F3VoxelLabelBudgetMultiHeadResultsInspection:
+def _publishable_inspection(
+	*, decisions: dict[str, object] | None = None
+) -> results.F3VoxelLabelBudgetMultiHeadResultsInspection:
 	row = {'value': 'test'}
 	target_diagnostic = results._target_diagnostic_row(
 		record_type='candidate_binding',
@@ -977,11 +1072,15 @@ def _publishable_inspection() -> results.F3VoxelLabelBudgetMultiHeadResultsInspe
 		monitored_class_summary=(row,),
 		pretraining_summary=(row,),
 		target_diagnostics=(target_diagnostic,),
-		decisions={
-			'overall_status': 'M4_MH_HOLD',
-			'selected_candidate': None,
-			'effects': {},
-		},
+		decisions=(
+			{
+				'overall_status': 'M4_MH_HOLD',
+				'selected_candidate': None,
+				'effects': {},
+			}
+			if decisions is None
+			else decisions
+		),
 		source_identities={},
 	)
 
