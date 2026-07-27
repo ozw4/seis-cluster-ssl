@@ -1,0 +1,627 @@
+"""Build the encoder-independent six-split low-label voxel datasets.
+
+The split inventory is strictly read-only.  Token labels are used only to draw
+the canonical MAE rows; the dense labels in each voxel dataset remain the
+supervision source.
+"""
+# ruff: noqa: D101, E501, PLR0911, PLR0913, E731, TRY004
+
+from __future__ import annotations
+
+import csv
+import hashlib
+import json
+import shutil
+import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+
+from seis_ssl_cluster.embedding.writer import file_sha256
+from seis_ssl_cluster.f3.lithology.robustness import (
+	assert_same_token_identity,
+	class_stratified_subset_indices,
+	load_token_dataset_npz,
+)
+from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
+from seis_ssl_cluster.f3.lithology.voxel_label_budget import (
+	build_low_label_supervision_grid,
+)
+from seis_ssl_cluster.f3.lithology.voxel_split import (
+	TRAIN_VOXEL_SPLIT,
+	VALIDATION_VOXEL_SPLIT,
+)
+
+if TYPE_CHECKING:
+	from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_split import (
+		F3VoxelLabelBudgetSplitConfig,
+	)
+
+MANIFEST_NAME = 'low_label_split_dataset_manifest.json'
+
+
+@dataclass(frozen=True)
+class LowLabelSplitCondition:
+	split_id: str
+	budget_id: str
+	output_root: Path
+	row: Mapping[str, object]
+	grid: np.ndarray
+	selected_xyz: np.ndarray
+	metadata: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class LowLabelSplitInspection:
+	conditions: tuple[LowLabelSplitCondition, ...]
+
+
+def inspect_f3_lithology_voxel_label_budget_split_datasets(
+	config: F3VoxelLabelBudgetSplitConfig,
+) -> LowLabelSplitInspection:
+	"""Validate immutable inputs and derive the complete 6 x 2 matrix."""
+	inventory = _manifest(config.split_inventory_manifest)
+	if [item.get('split_id') for item in inventory['rows']] != list(config.split_ids):
+		raise ValueError(
+			'split inventory must contain the canonical ordered six splits'
+		)
+	if inventory['rows'][0].get('random_seed') is not None:
+		raise ValueError('split_000 must be the original/base split')
+	token_manifest = _manifest(config.split_dataset_manifest)
+	voxel_manifest = _manifest(config.voxel_dataset_manifest)
+	_validate_full_voxel_sources(config, inventory, token_manifest, voxel_manifest)
+	tokens = _rows_by_split_model(token_manifest['rows'])
+	voxels = {str(row['split_id']): row for row in voxel_manifest['rows']}
+	conditions = []
+	for split_id in config.split_ids:
+		baseline = tokens[(split_id, 'baseline')]
+		historical = tokens[(split_id, 'candidate')]
+		train = load_token_dataset_npz(Path(str(baseline['train_tokens'])))
+		other = load_token_dataset_npz(Path(str(historical['train_tokens'])))
+		assert_same_token_identity(
+			train,
+			other,
+			reference_label='MAE train',
+			candidate_label='historical M1 train',
+		)
+		if split_id not in voxels:
+			raise ValueError(f'missing full-label voxel source for {split_id}')
+		for budget_id, cap in zip(config.budgets, (25, 50), strict=True):
+			selected = class_stratified_subset_indices(
+				train.labels, per_class_cap=cap, seed=0, require_all_classes=True
+			)
+			conditions.append(
+				_condition(
+					split_id, budget_id, cap, train, selected, voxels[split_id], config
+				)
+			)
+	return LowLabelSplitInspection(tuple(conditions))
+
+
+def build_f3_lithology_voxel_label_budget_split_datasets(
+	config: F3VoxelLabelBudgetSplitConfig, *, only_missing: bool = False
+) -> tuple[Path, tuple[Mapping[str, object], ...]]:
+	"""Build or validate the twelve datasets and atomically publish a manifest."""
+	inspection = inspect_f3_lithology_voxel_label_budget_split_datasets(config)
+	# The base split is a publication gate, not a post-write diagnostic.
+	_parity_gate([condition.row for condition in inspection.conditions], config)
+	rows = []
+	for condition in inspection.conditions:
+		if condition.output_root.exists():
+			if not only_missing:
+				raise FileExistsError(condition.output_root)
+			if _complete(condition.output_root, condition.row):
+				rows.append({**condition.row, 'action': 'REUSED'})
+				continue
+			quarantine = condition.output_root.with_name(
+				condition.output_root.name + f'.quarantine-{_timestamp()}'
+			)
+			condition.output_root.replace(quarantine)
+		_write_condition(condition)
+		rows.append({**condition.row, 'action': 'NEW'})
+	manifest = config.output_root / MANIFEST_NAME
+	_write_json(
+		manifest,
+		{
+			'artifact_type': 'f3_lithology_voxel_label_budget_split_dataset_manifest',
+			'schema_version': 1,
+			'contract': {
+				'split_ids': list(config.split_ids),
+				'budgets': list(config.budgets),
+				'label_subset_seed': 0,
+			},
+			'sources': {
+				name: _identity(path)
+				for name, path in {
+					'split_inventory_manifest': config.split_inventory_manifest,
+					'split_dataset_manifest': config.split_dataset_manifest,
+					'voxel_dataset_manifest': config.voxel_dataset_manifest,
+				}.items()
+			},
+			'rows': rows,
+		},
+	)
+	return manifest, tuple(rows)
+
+
+def _condition(
+	split_id: str,
+	budget_id: str,
+	cap: int,
+	train: object,
+	selected: np.ndarray,
+	voxel_row: Mapping[str, object],
+	config: F3VoxelLabelBudgetSplitConfig,
+) -> LowLabelSplitCondition:
+	coordinates = np.asarray(train.token_xyz)[selected].astype(np.int64, copy=False)
+	unique = np.unique(coordinates, axis=0)
+	grid_path = Path(str(_mapping(voxel_row['split_grid'])['path']))
+	full_grid = np.load(grid_path, mmap_mode='r', allow_pickle=False)
+	_require_selected_tokens_cover_train_voxels(unique, full_grid)
+	grid = build_low_label_supervision_grid(full_grid, unique, patch_size_xyz=(8, 8, 8))
+	metadata = _read_json(Path(str(_mapping(voxel_row['metadata'])['path'])))
+	labels = np.load(
+		str(_mapping(metadata['label_volume'])['path']),
+		mmap_mode='r',
+		allow_pickle=False,
+	)
+	classes = [int(item['class_id']) for item in metadata['classes']]
+	train_mask, validation_mask = (
+		grid == TRAIN_VOXEL_SPLIT,
+		grid == VALIDATION_VOXEL_SPLIT,
+	)
+	counts = lambda mask: {
+		str(value): int(np.count_nonzero(labels[mask] == value)) for value in classes
+	}
+	selected_identity = _array_sha(
+		np.column_stack(
+			(np.asarray(train.token_xyz)[selected], np.asarray(train.labels)[selected])
+		)
+	)
+	row = {
+		'split_id': split_id,
+		'budget_id': budget_id,
+		'per_class_cap': cap,
+		'label_subset_seed': 0,
+		'voxel_dataset_root': str(
+			config.output_root / 'datasets' / split_id / budget_id / 'voxel_supervision'
+		),
+		'selected_token_row_count': int(selected.size),
+		'unique_selected_token_xyz_count': int(unique.shape[0]),
+		'duplicate_selected_row_count': int(selected.size - unique.shape[0]),
+		'selected_token_identity_sha256': selected_identity,
+		'unique_token_xyz_sha256': _array_sha(unique),
+		'train_voxel_count': int(train_mask.sum()),
+		'actual_train_voxel_count': int(train_mask.sum()),
+		'validation_voxel_count': int(validation_mask.sum()),
+		'per_class_train_voxel_counts': counts(train_mask),
+		'per_class_validation_voxel_counts': counts(validation_mask),
+		'train_mask_sha256': _array_sha(train_mask),
+		'validation_mask_sha256': _array_sha(validation_mask),
+		'supervision_grid_sha256': _array_sha(grid),
+		'supervision_split_grid': {
+			'path': str(
+				config.output_root
+				/ 'datasets'
+				/ split_id
+				/ budget_id
+				/ 'voxel_supervision'
+				/ GRID_NAME
+			),
+			'sha256': _array_sha(grid),
+		},
+		'canonical_valid_tokens_sha256': _mapping(voxel_row['reference_valid_tokens'])[
+			'sha256'
+		],
+		'class_order': classes,
+		'patch_size_xyz': [8, 8, 8],
+		'source_full_voxel_dataset': voxel_row,
+	}
+	return LowLabelSplitCondition(
+		split_id,
+		budget_id,
+		Path(str(row['voxel_dataset_root'])),
+		row,
+		np.asarray(grid),
+		unique,
+		metadata,
+	)
+
+
+def _write_condition(condition: LowLabelSplitCondition) -> None:
+	root = condition.output_root
+	root.parent.mkdir(parents=True, exist_ok=True)
+	staging = Path(tempfile.mkdtemp(prefix='.low-label-', dir=root.parent))
+	try:
+		source = _mapping(condition.row['source_full_voxel_dataset'])
+		np.save(staging / GRID_NAME, condition.grid, allow_pickle=False)
+		np.save(
+			staging / 'selected_token_xyz.npy',
+			condition.selected_xyz,
+			allow_pickle=False,
+		)
+		metadata = dict(condition.metadata)
+		metadata['outputs'] = {
+			'supervision_split_grid': str(root / GRID_NAME),
+			'metadata_json': str(root / METADATA_NAME),
+		}
+		metadata['voxel_label_budget_split'] = {
+			'split_id': condition.split_id,
+			'budget_id': condition.budget_id,
+			'dense_voxel_labels_preserved': True,
+			'validation_reuse': 'canonical_full_validation_bitwise',
+			'identity': {
+				key: value
+				for key, value in condition.row.items()
+				if key not in {'source_full_voxel_dataset'}
+			},
+		}
+		_write_json(staging / METADATA_NAME, metadata)
+		shutil.copyfile(
+			str(_mapping(source['slice_split_manifest'])['path']),
+			staging / 'split_manifest.json',
+		)
+		with (staging / 'class_counts.csv').open(
+			'w', encoding='utf-8', newline=''
+		) as handle:
+			writer = csv.DictWriter(handle, fieldnames=('split', 'class_id', 'count'))
+			writer.writeheader()
+			for split, counts in (
+				('train', condition.row['per_class_train_voxel_counts']),
+				('validation', condition.row['per_class_validation_voxel_counts']),
+			):
+				for class_id, count in _mapping(counts).items():
+					writer.writerow(
+						{'split': split, 'class_id': class_id, 'count': count}
+					)
+		_write_json(
+			staging / 'low_label_split_metadata.json',
+			{
+				'artifact_type': 'f3_lithology_voxel_label_budget_split_dataset',
+				'identity': {
+					key: value
+					for key, value in condition.row.items()
+					if key != 'source_full_voxel_dataset'
+				},
+				'sources': {'full_voxel_dataset': source},
+			},
+		)
+		staging.replace(root)
+	except BaseException:
+		shutil.rmtree(staging, ignore_errors=True)
+		raise
+
+
+def _complete(root: Path, row: Mapping[str, object]) -> bool:
+	"""Return whether every published dataset artifact matches its identity."""
+	try:
+		grid_path = root / GRID_NAME
+		selected_path = root / 'selected_token_xyz.npy'
+		metadata_path = root / METADATA_NAME
+		provenance_path = root / 'low_label_split_metadata.json'
+		class_counts_path = root / 'class_counts.csv'
+		split_manifest_path = root / 'split_manifest.json'
+		if not all(
+			path.is_file()
+			for path in (
+				grid_path,
+				selected_path,
+				metadata_path,
+				provenance_path,
+				class_counts_path,
+				split_manifest_path,
+			)
+		):
+			return False
+		if (
+			_array_sha(np.load(grid_path, mmap_mode='r', allow_pickle=False))
+			!= row['supervision_grid_sha256']
+		):
+			return False
+		if (
+			_array_sha(np.load(selected_path, mmap_mode='r', allow_pickle=False))
+			!= row['unique_token_xyz_sha256']
+		):
+			return False
+		expected_identity = {
+			key: value
+			for key, value in row.items()
+			if key != 'source_full_voxel_dataset'
+		}
+		provenance = _read_json(provenance_path)
+		if (
+			provenance.get('artifact_type')
+			!= 'f3_lithology_voxel_label_budget_split_dataset'
+			or provenance.get('identity') != expected_identity
+			or provenance.get('sources')
+			!= {'full_voxel_dataset': row['source_full_voxel_dataset']}
+		):
+			return False
+		metadata = _read_json(metadata_path)
+		if metadata.get('voxel_label_budget_split') != {
+			'split_id': row['split_id'],
+			'budget_id': row['budget_id'],
+			'dense_voxel_labels_preserved': True,
+			'validation_reuse': 'canonical_full_validation_bitwise',
+			'identity': expected_identity,
+		}:
+			return False
+		if metadata.get('outputs') != {
+			'supervision_split_grid': str(grid_path),
+			'metadata_json': str(metadata_path),
+		}:
+			return False
+		source = _mapping(row['source_full_voxel_dataset'])
+		if (
+			file_sha256(split_manifest_path)
+			!= _mapping(source['slice_split_manifest'])['sha256']
+		):
+			return False
+		with class_counts_path.open(encoding='utf-8', newline='') as handle:
+			class_counts = list(csv.DictReader(handle))
+		expected_counts = [
+			{'split': split, 'class_id': str(class_id), 'count': str(count)}
+			for split, counts in (
+				('train', _mapping(row['per_class_train_voxel_counts'])),
+				('validation', _mapping(row['per_class_validation_voxel_counts'])),
+			)
+			for class_id, count in counts.items()
+		]
+	except (OSError, TypeError, ValueError, json.JSONDecodeError):
+		return False
+	else:
+		return class_counts == expected_counts
+
+
+def _parity_gate(
+	rows: list[Mapping[str, object]], config: F3VoxelLabelBudgetSplitConfig
+) -> None:
+	original = _manifest(config.original_dataset_manifest)
+	by_budget = {
+		str(row['budget_id']): row
+		for row in original['rows']
+		if row.get('subsample_seed') == 0
+	}
+	for row in rows:
+		if row['split_id'] != 'split_000':
+			continue
+		prior = by_budget.get(str(row['budget_id']))
+		if prior is None:
+			raise ValueError('original-split parity reference is missing')
+		comparisons = {
+			'selected_token_identity_sha256': row['selected_token_identity_sha256'],
+			'unique_token_xyz_sha256': row['unique_token_xyz_sha256'],
+			'train_mask_sha256': row['train_mask_sha256'],
+			'validation_mask_sha256': row['validation_mask_sha256'],
+			'train_voxel_count': row['train_voxel_count'],
+			'per_class_train_voxel_counts': row['per_class_train_voxel_counts'],
+		}
+		prior_grid = _mapping(prior.get('supervision_split_grid'))
+		for key, expected in comparisons.items():
+			if prior.get(key) != expected:
+				raise ValueError(f'split_000 parity mismatch: {key}')
+		if prior_grid.get('sha256') != row['supervision_grid_sha256']:
+			raise ValueError('split_000 parity mismatch: supervision_grid_sha256')
+
+
+def _manifest(path: Path) -> Mapping[str, object]:
+	payload = _read_json(path)
+	if not isinstance(payload.get('rows'), list):
+		raise ValueError(f'manifest lacks rows: {path}')
+	return payload
+
+
+def _rows_by_split_model(
+	rows: object,
+) -> Mapping[tuple[str, str], Mapping[str, object]]:
+	if not isinstance(rows, list):
+		raise TypeError('token manifest rows must be a list')
+	return {
+		(str(row['split_id']), str(row['model_role'])): _mapping(row) for row in rows
+	}
+
+
+def _validate_full_voxel_sources(
+	config: F3VoxelLabelBudgetSplitConfig,
+	inventory_manifest: Mapping[str, object],
+	token_manifest: Mapping[str, object],
+	voxel_manifest: Mapping[str, object],
+) -> None:
+	"""Require the read-only voxel suite to match the selected split sources."""
+	if (
+		voxel_manifest.get('artifact_type')
+		!= 'f3_lithology_voxel_split_dataset_manifest'
+	):
+		raise ValueError('unexpected full-label voxel dataset manifest type')
+	_validate_identity(
+		_mapping(voxel_manifest.get('source_split_inventory_manifest')),
+		config.split_inventory_manifest,
+		label='full-label voxel split inventory',
+	)
+	token_suite = _mapping(token_manifest.get('suite'))
+	if Path(str(token_suite.get('split_inventory_manifest'))).resolve(
+		strict=False
+	) != config.split_inventory_manifest.resolve(strict=False):
+		raise ValueError('token and configured split inventories differ')
+	canonical_valid = _mapping(voxel_manifest.get('canonical_reference_valid_tokens'))
+	_validate_identity(
+		canonical_valid,
+		config.embeddings['mae'] / Path(str(canonical_valid.get('path'))).name,
+		label='full-label voxel canonical valid tokens',
+	)
+	inventory_rows = {
+		str(row['split_id']): _mapping(row) for row in inventory_manifest['rows']
+	}
+	baseline_token_rows = _rows_by_split_model(token_manifest['rows'])
+	dense_label_identity: Mapping[str, object] | None = None
+	for raw_row in voxel_manifest['rows']:
+		row = _mapping(raw_row)
+		split_id = str(row.get('split_id'))
+		if split_id not in inventory_rows:
+			raise ValueError(f'full-label voxel source has unknown split: {split_id}')
+		dense_label = _validate_full_voxel_row(
+			row,
+			split_id=split_id,
+			inventory_row=inventory_rows[split_id],
+			baseline_token_row=baseline_token_rows[(split_id, 'baseline')],
+			canonical_valid=canonical_valid,
+		)
+		if dense_label_identity is None:
+			dense_label_identity = dense_label
+			_validate_identity(
+				dense_label,
+				Path(str(dense_label.get('path'))),
+				label='full-label dense label volume',
+			)
+		elif dense_label != dense_label_identity:
+			raise ValueError(
+				f'{split_id} dense label source differs from canonical source'
+			)
+
+
+def _validate_full_voxel_row(
+	row: Mapping[str, object],
+	*,
+	split_id: str,
+	inventory_row: Mapping[str, object],
+	baseline_token_row: Mapping[str, object],
+	canonical_valid: Mapping[str, object],
+) -> Mapping[str, object]:
+	grid_identity = _mapping(row.get('split_grid'))
+	metadata_identity = _mapping(row.get('metadata'))
+	_validate_identity(
+		grid_identity,
+		Path(str(grid_identity.get('path'))),
+		label=f'{split_id} full-label split grid',
+	)
+	_validate_identity(
+		metadata_identity,
+		Path(str(metadata_identity.get('path'))),
+		label=f'{split_id} full-label metadata',
+	)
+	slice_manifest = _mapping(row.get('slice_split_manifest'))
+	_validate_identity(
+		slice_manifest,
+		Path(str(slice_manifest.get('path'))),
+		label=f'{split_id} full-label slice split manifest',
+	)
+	if _mapping(row.get('reference_valid_tokens')) != canonical_valid:
+		raise ValueError(
+			f'{split_id} full-label valid-token identity differs from canonical reference'
+		)
+	metadata = _read_json(Path(str(metadata_identity.get('path'))))
+	_validate_identity(
+		_mapping(metadata.get('inventory')),
+		Path(str(inventory_row.get('png_label_inventory'))),
+		label=f'{split_id} full-label inventory',
+	)
+	if _mapping(metadata.get('reference_valid_tokens')) != canonical_valid:
+		raise ValueError(
+			f'{split_id} metadata valid-token identity differs from canonical reference'
+		)
+	if Path(
+		str(_mapping(metadata.get('outputs')).get('supervision_split_grid'))
+	).resolve(strict=False) != Path(str(grid_identity.get('path'))).resolve(
+		strict=False
+	):
+		raise ValueError(f'{split_id} metadata split-grid path differs from manifest')
+	dense_label = _mapping(metadata.get('label_volume'))
+	baseline_metadata = _read_json(Path(str(baseline_token_row.get('metadata_json'))))
+	if Path(str(_mapping(baseline_metadata.get('inputs')).get('label_volume'))).resolve(
+		strict=False
+	) != Path(str(dense_label.get('path'))).resolve(strict=False):
+		raise ValueError(
+			f'{split_id} dense label source differs from paired token dataset'
+		)
+	grid = np.load(str(grid_identity.get('path')), mmap_mode='r', allow_pickle=False)
+	labels = np.load(str(dense_label.get('path')), mmap_mode='r', allow_pickle=False)
+	if grid.shape != labels.shape or list(grid.shape) != _mapping(
+		metadata.get('geometry')
+	).get('shape_xyz'):
+		raise ValueError(
+			f'{split_id} full-label split-grid geometry differs from dense labels'
+		)
+	return dense_label
+
+
+def _expanded_token_mask(coordinates: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
+	mask = np.zeros(shape, dtype=bool)
+	for coordinate in coordinates:
+		start = coordinate * 8
+		stop = np.minimum(start + 8, shape)
+		if np.any(start < 0) or np.any(start >= shape):
+			raise ValueError(
+				f'selected token coordinate is outside the volume: {coordinate.tolist()}'
+			)
+		mask[
+			tuple(
+				slice(int(begin), int(end))
+				for begin, end in zip(start, stop, strict=True)
+			)
+		] = True
+	return mask
+
+
+def _require_selected_tokens_cover_train_voxels(
+	coordinates: np.ndarray,
+	full_grid: np.ndarray,
+) -> None:
+	if not np.any(
+		full_grid[_expanded_token_mask(coordinates, full_grid.shape)]
+		== TRAIN_VOXEL_SPLIT
+	):
+		raise ValueError('selected unique token set has no canonical train voxels')
+
+
+def _mapping(value: object) -> Mapping[str, object]:
+	if not isinstance(value, Mapping):
+		raise TypeError('expected mapping')
+	return value
+
+
+def _validate_identity(value: Mapping[str, object], path: Path, *, label: str) -> None:
+	recorded_path = value.get('path')
+	if not isinstance(recorded_path, str) or Path(recorded_path).resolve(
+		strict=False
+	) != path.resolve(strict=False):
+		raise ValueError(f'{label} path identity mismatch')
+	if value.get('sha256') != file_sha256(path):
+		raise ValueError(f'{label} hash identity mismatch')
+
+
+def _read_json(path: Path) -> Mapping[str, object]:
+	return _mapping(json.loads(path.read_text(encoding='utf-8')))
+
+
+def _write_json(path: Path, payload: Mapping[str, object]) -> None:
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_text(
+		json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+	)
+
+
+def _identity(path: Path) -> Mapping[str, str]:
+	return {'path': str(path), 'sha256': file_sha256(path)}
+
+
+def _array_sha(value: np.ndarray) -> str:
+	array = np.ascontiguousarray(value)
+	return hashlib.sha256(
+		array.dtype.str.encode() + str(array.shape).encode() + array.tobytes()
+	).hexdigest()
+
+
+def _timestamp() -> str:
+	return datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+
+
+__all__ = [
+	'LowLabelSplitCondition',
+	'LowLabelSplitInspection',
+	'build_f3_lithology_voxel_label_budget_split_datasets',
+	'inspect_f3_lithology_voxel_label_budget_split_datasets',
+]

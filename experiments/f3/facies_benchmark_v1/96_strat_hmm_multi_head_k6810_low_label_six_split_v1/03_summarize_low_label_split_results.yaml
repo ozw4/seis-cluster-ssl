@@ -1,0 +1,22 @@
+paths:
+  artifact_root: /workspace/artifacts/seis_ssl_cluster
+  results_root: /workspace/results
+  output_root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_six_split_v1
+inputs:
+  split_inventory_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/split_index_m1_v1/split_inventory_manifest.json
+  split_dataset_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/split_index_m1_v1/split_dataset_manifest.json
+  voxel_dataset_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1/voxel_split_dataset_manifest.json
+  original_dataset_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split/voxel_label_budget_dataset_manifest.json
+  multi_head_decisions: /workspace/results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/multi_head_decisions.json
+  multi_head_handoff: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/preflight/multi_head_handoff.json
+  embeddings:
+    mae: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16
+    m1_current_k6: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/overlap_x16
+    mh_nocons: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/overlap_x16
+matrix:
+  split_ids: [split_000, split_001, split_002, split_003, split_004, split_005]
+  budgets: [cap25, cap50]
+  per_class_caps: [25, 50]
+  label_subset_seed: 0
+  decoder_seed: 42000
+  models: [mae, m1_current_k6, mh_nocons]
