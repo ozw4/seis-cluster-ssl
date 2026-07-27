@@ -11,15 +11,15 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from seis_ssl_cluster.f3.lithology.token_dataset import (
-	F3LithologyTokenDataset,
-	load_f3_lithology_token_dataset,
-)
 from seis_ssl_cluster.f3.lithology.metrics import (
 	compute_lithology_metrics,
 	render_classification_report_markdown,
 	write_confusion_matrix_csv,
 	write_metrics_csv,
+)
+from seis_ssl_cluster.f3.lithology.token_dataset import (
+	F3LithologyTokenDataset,
+	load_f3_lithology_token_dataset,
 )
 
 if TYPE_CHECKING:

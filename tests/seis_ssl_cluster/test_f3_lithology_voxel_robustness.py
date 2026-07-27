@@ -955,6 +955,8 @@ def _synthetic_workflow_configs(  # noqa: PLR0915
 		labels[x, y, z] = 3 if (x // 2 + y // 2 + z // 2) % 2 == 0 else 5
 	label_volume = artifact_root / 'labels.npy'
 	np.save(label_volume, labels, allow_pickle=False)
+	seismic_volume = artifact_root / 'seismic.npy'
+	np.save(seismic_volume, labels.astype(np.float32), allow_pickle=False)
 	source_label_segy = f3_root / 'labels.sgy'
 	source_label_segy.write_bytes(b'synthetic label segy')
 	class_info = artifact_root / 'class_info.json'
@@ -1063,6 +1065,7 @@ def _synthetic_workflow_configs(  # noqa: PLR0915
 			'embedding_dim': 2,
 			'checkpoint_path': str(checkpoint),
 			'checkpoint_sha256': file_sha256(checkpoint),
+			'source_amplitude_path': str(seismic_volume),
 			'preprocessing': {'kind': 'synthetic'},
 			'zero_mask': {'enabled': True},
 		}

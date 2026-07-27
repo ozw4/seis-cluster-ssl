@@ -91,6 +91,11 @@ def inspect_f3_lithology_voxel_dataset(
 		metadata = json.load(file_obj)
 	if not isinstance(metadata, Mapping):
 		raise TypeError('reference embedding metadata must contain an object')
+	seismic_volume = Path(str(metadata.get('source_amplitude_path', '')))
+	if not seismic_volume.is_file():
+		raise FileNotFoundError(
+			f'missing reference embedding source amplitude: {seismic_volume}'
+		)
 	patch = _positive_triplet(metadata.get('patch_size'), 'patch_size')
 	token_shape = _positive_triplet(
 		metadata.get('token_grid_shape'), 'token_grid_shape'
@@ -217,6 +222,12 @@ def _write_artifact(
 		'reference_valid_tokens': _identity(config.reference_valid_tokens),
 		'label_volume': _identity(config.source_label_volume),
 		'inventory': _identity(config.png_label_inventory),
+		'class_info': _identity(config.class_info),
+		'source_label_segy': _identity(config.source_label_segy),
+		'segy_geometry_json': _identity(config.segy_geometry_json),
+		'seismic_volume': _identity(
+			Path(str(inspection.metadata['source_amplitude_path']))
+		),
 	}
 	metadata = {
 		'artifact_type': 'f3_lithology_voxel_supervision',
@@ -225,6 +236,15 @@ def _write_artifact(
 		'labels': {
 			'source_label_segy': str(config.source_label_segy),
 			'class_info': str(config.class_info),
+		},
+		'source_identities': {
+			name: identities[name]
+			for name in (
+				'class_info',
+				'source_label_segy',
+				'segy_geometry_json',
+				'seismic_volume',
+			)
 		},
 		'classes': [item.to_dict() for item in inspection.classes],
 		'geometry': inspection.geometry.to_dict(),

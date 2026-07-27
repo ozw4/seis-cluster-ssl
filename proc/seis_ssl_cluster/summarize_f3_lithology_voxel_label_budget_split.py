@@ -17,6 +17,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_split import (
 	f3_lithology_voxel_label_budget_split_config_from_mapping,
 )
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_split_results import (
+	aggregate_low_label_split_results,
 	publish_low_label_split_summary,
 	write_low_label_split_summary,
 )
@@ -44,7 +45,14 @@ def main() -> None:
 	with metrics.open(encoding='utf-8', newline='') as handle:
 		rows = list(csv.DictReader(handle))
 	if args.dry_run:
+		deltas, aggregates, decision = aggregate_low_label_split_results(rows)
+		if decision['status'] == 'M4_MH_SPLIT_BLOCKED':
+			raise ValueError(str(decision['blocked_reason']))
 		print(f'job_metric_row_count: {len(rows)}')
+		print(f'comparison_count: {len({row["comparison"] for row in deltas})}')
+		print(f'aggregate_row_count: {len(aggregates)}')
+		print(f'decision: {decision["status"]}')
+		print(f'systematic_major_degradation: {decision["systematic_major_degradation"]}')
 		return
 	paths = write_low_label_split_summary(rows, config.output_root)
 	publish_low_label_split_summary(config, paths)

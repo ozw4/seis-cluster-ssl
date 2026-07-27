@@ -8,5 +8,4 @@ published under:
 
 results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/
 
-Do not use these records as current checkpoint, embedding, or scientific-result
-status.
+Do not use these records as current checkpoint, embedding, or scientific-result status.

@@ -13,7 +13,6 @@ from seis_ssl_cluster.config.validate import (
 	resolve_cluster_visualization_config as validate_resolve_cluster_visualization_config,
 )
 
-
 CONFIG_DIR = Path('proc/configs/seis_ssl_cluster')
 
 

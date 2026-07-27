@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from seis_ssl_cluster.f3.lithology.metrics import compute_lithology_metrics
 from seis_ssl_cluster.f3.lithology.token_dataset import (
 	F3LithologyTokenDataset,
 	load_f3_lithology_token_dataset,
 )
 from seis_ssl_cluster.f3.lithology.tokens import read_f3_lithology_class_info
-from seis_ssl_cluster.f3.lithology.metrics import compute_lithology_metrics
 from seis_ssl_cluster.f3.splits import (
 	F3LineGeometry,
 	F3SliceSplitRecord,

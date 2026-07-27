@@ -12,6 +12,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from proc.seis_ssl_cluster.build_f3_lithology_baseline_token_dataset import (  # noqa: E402
 	build_parser as _build_parser,
+)
+from proc.seis_ssl_cluster.build_f3_lithology_baseline_token_dataset import (
 	main,
 )
 

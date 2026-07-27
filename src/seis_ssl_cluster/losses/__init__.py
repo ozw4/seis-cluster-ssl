@@ -13,11 +13,11 @@ from seis_ssl_cluster.losses.target_normalization import (
 )
 
 __all__ = [
+	'PatchTargetNormalizationResult',
+	'denormalize_predicted_patches',
 	'gradient_loss_xyz',
 	'mae_pretraining_loss',
 	'masked_patch_reconstruction_loss',
-	'reconstruction_target_patches_for_loss',
-	'PatchTargetNormalizationResult',
-	'denormalize_predicted_patches',
 	'normalize_target_patches',
+	'reconstruction_target_patches_for_loss',
 ]

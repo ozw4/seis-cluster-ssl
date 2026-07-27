@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 	from collections.abc import Mapping, Sequence
 
 	from numpy.typing import NDArray
+
 	from seis_ssl_cluster.f3.png_labels import (
 		F3PngLabelInspection,
 		PngLabelFileInspection,

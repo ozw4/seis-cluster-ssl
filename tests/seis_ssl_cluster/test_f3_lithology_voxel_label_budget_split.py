@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -13,13 +14,17 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_split import (
 	_complete,
 	_require_selected_tokens_cover_train_voxels,
 )
+from seis_ssl_cluster.f3.lithology.voxel_label_budget_split_runner import (
+	_run_manifest_root,
+	_write_run_manifest,
+)
 from seis_ssl_cluster.f3.lithology.voxel_split import TRAIN_VOXEL_SPLIT
 
 
 def test_selected_unique_tokens_require_canonical_train_voxels() -> None:
 	full_grid = np.zeros((16, 16, 16), dtype=np.uint8)
 	with pytest.raises(
-		ValueError, match='selected unique token set has no canonical train voxels'
+		ValueError, match='selected unique token has no canonical train voxel'
 	):
 		_require_selected_tokens_cover_train_voxels(
 			np.asarray([[0, 0, 0]], dtype=np.int64), full_grid
@@ -58,10 +63,10 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 		'per_class_validation_voxel_counts': {'0': 0},
 		'train_mask_sha256': 'train-mask',
 		'validation_mask_sha256': 'validation-mask',
-		'supervision_grid_sha256': _array_sha(grid),
+		'grid_array_sha256': _array_sha(grid),
 		'supervision_split_grid': {
 			'path': str(root / GRID_NAME),
-			'sha256': _array_sha(grid),
+			'sha256': '',
 		},
 		'canonical_valid_tokens_sha256': 'valid-tokens',
 		'class_order': [0],
@@ -74,6 +79,7 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 		},
 	}
 	np.save(root / GRID_NAME, grid, allow_pickle=False)
+	row['supervision_split_grid']['sha256'] = file_sha256(root / GRID_NAME)
 	np.save(root / 'selected_token_xyz.npy', selected, allow_pickle=False)
 	identity = {
 		key: value for key, value in row.items() if key != 'source_full_voxel_dataset'
@@ -134,3 +140,38 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 
 	(root / 'low_label_split_metadata.json').write_text('{}', encoding='utf-8')
 	assert not _complete(root, row)
+
+
+def test_smoke_run_manifest_is_separate_from_scientific_manifest(tmp_path) -> None:
+	config = SimpleNamespace(output_root=tmp_path)
+	scientific_root = _run_manifest_root(config, smoke_only=False)
+	smoke_root = _run_manifest_root(config, smoke_only=True)
+	_write_run_manifest(
+		scientific_root,
+		[{
+			'split_id': 'split_000',
+			'budget_id': 'cap25',
+			'model_role': 'mae',
+			'status': 'running',
+		}],
+	)
+	_write_run_manifest(
+		smoke_root,
+		[{
+			'split_id': 'split_000',
+			'budget_id': 'cap25',
+			'model_role': 'mae',
+			'status': 'smoke_running',
+		}],
+	)
+
+	scientific = json.loads(
+		(tmp_path / 'low_label_split_run_manifest.json').read_text(encoding='utf-8')
+	)
+	smoke = json.loads(
+		(tmp_path / 'smoke' / 'low_label_split_run_manifest.json').read_text(
+			encoding='utf-8'
+		)
+	)
+	assert scientific['rows'][0]['status'] == 'running'
+	assert smoke['rows'][0]['status'] == 'smoke_running'

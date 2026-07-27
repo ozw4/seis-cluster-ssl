@@ -29,6 +29,7 @@ def _fixture(tmp_path: Path) -> F3LithologyVoxelDatasetConfig:
 	labels = np.ones((4, 4, 4), dtype=np.int16)
 	labels[0, 0, 1] = 0
 	np.save(artifact_root / 'labels.npy', labels)
+	np.save(artifact_root / 'seismic.npy', labels.astype(np.float32))
 	np.save(artifact_root / 'valid.npy', np.ones((2, 2, 2), dtype=np.bool_))
 	_write_json(
 		artifact_root / 'embedding.json',
@@ -36,6 +37,7 @@ def _fixture(tmp_path: Path) -> F3LithologyVoxelDatasetConfig:
 			'patch_size': [2, 2, 2],
 			'token_grid_shape': [2, 2, 2],
 			'volume_shape_xyz': [4, 4, 4],
+			'source_amplitude_path': str(artifact_root / 'seismic.npy'),
 		},
 	)
 	_write_json(
@@ -119,6 +121,15 @@ def test_builds_complete_voxel_supervision_artifact(tmp_path: Path) -> None:
 	metadata = json.loads(result.metadata_json.read_text())
 	assert metadata['label_volume']['sha256'] == file_sha256(config.source_label_volume)
 	assert metadata['inventory']['sha256'] == file_sha256(config.png_label_inventory)
+	assert metadata['source_identities']['class_info']['sha256'] == file_sha256(
+		config.class_info
+	)
+	assert metadata['source_identities']['source_label_segy']['sha256'] == file_sha256(
+		config.source_label_segy
+	)
+	assert metadata['source_identities']['segy_geometry_json']['sha256'] == file_sha256(
+		config.segy_geometry_json
+	)
 	assert metadata['validation_precedence'] is True
 	rows = list(csv.DictReader(result.class_counts_csv.open()))
 	assert len(rows) == 9
@@ -147,6 +158,7 @@ def test_rejects_embedding_geometry_mismatch(tmp_path: Path) -> None:
 			'patch_size': [2, 2, 2],
 			'token_grid_shape': [2, 2, 2],
 			'volume_shape_xyz': [5, 4, 4],
+			'source_amplitude_path': str(config.artifact_root / 'seismic.npy'),
 		},
 	)
 	with pytest.raises(ValueError, match='volume_shape_xyz'):

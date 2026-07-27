@@ -4,16 +4,19 @@ The split inventory is strictly read-only.  Token labels are used only to draw
 the canonical MAE rows; the dense labels in each voxel dataset remain the
 supervision source.
 """
-# ruff: noqa: D101, E501, PLR0911, PLR0913, E731, TRY004
+# ruff: noqa: C901, D101, E501, PLR0911, PLR0913, TRY004
 
 from __future__ import annotations
 
 import csv
+import gc
 import hashlib
+import io
 import json
 import shutil
 import tempfile
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -26,9 +29,12 @@ from seis_ssl_cluster.f3.lithology.robustness import (
 	assert_same_token_identity,
 	class_stratified_subset_indices,
 	load_token_dataset_npz,
+	paired_token_identity_hash,
+	subset_token_dataset,
 )
 from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
 from seis_ssl_cluster.f3.lithology.voxel_label_budget import (
+	array_sha256,
 	build_low_label_supervision_grid,
 )
 from seis_ssl_cluster.f3.lithology.voxel_split import (
@@ -50,7 +56,6 @@ class LowLabelSplitCondition:
 	budget_id: str
 	output_root: Path
 	row: Mapping[str, object]
-	grid: np.ndarray
 	selected_xyz: np.ndarray
 	metadata: Mapping[str, object]
 
@@ -161,8 +166,11 @@ def _condition(
 	unique = np.unique(coordinates, axis=0)
 	grid_path = Path(str(_mapping(voxel_row['split_grid'])['path']))
 	full_grid = np.load(grid_path, mmap_mode='r', allow_pickle=False)
-	_require_selected_tokens_cover_train_voxels(unique, full_grid)
+	_require_selected_tokens_cover_train_voxels(
+		unique, full_grid, split_id=split_id, budget_id=budget_id
+	)
 	grid = build_low_label_supervision_grid(full_grid, unique, patch_size_xyz=(8, 8, 8))
+	del full_grid
 	metadata = _read_json(Path(str(_mapping(voxel_row['metadata'])['path'])))
 	labels = np.load(
 		str(_mapping(metadata['label_volume'])['path']),
@@ -170,18 +178,18 @@ def _condition(
 		allow_pickle=False,
 	)
 	classes = [int(item['class_id']) for item in metadata['classes']]
-	train_mask, validation_mask = (
-		grid == TRAIN_VOXEL_SPLIT,
-		grid == VALIDATION_VOXEL_SPLIT,
+	train_mask_sha256, train_voxel_count, per_class_train_voxel_counts = (
+		_split_mask_identity_and_counts(grid, labels, TRAIN_VOXEL_SPLIT, classes)
 	)
-	counts = lambda mask: {
-		str(value): int(np.count_nonzero(labels[mask] == value)) for value in classes
-	}
-	selected_identity = _array_sha(
-		np.column_stack(
-			(np.asarray(train.token_xyz)[selected], np.asarray(train.labels)[selected])
-		)
+	(
+		validation_mask_sha256,
+		validation_voxel_count,
+		per_class_validation_voxel_counts,
+	) = _split_mask_identity_and_counts(
+		grid, labels, VALIDATION_VOXEL_SPLIT, classes
 	)
+	selected_dataset = subset_token_dataset(train, selected)
+	selected_identity = paired_token_identity_hash(selected_dataset)
 	row = {
 		'split_id': split_id,
 		'budget_id': budget_id,
@@ -194,15 +202,15 @@ def _condition(
 		'unique_selected_token_xyz_count': int(unique.shape[0]),
 		'duplicate_selected_row_count': int(selected.size - unique.shape[0]),
 		'selected_token_identity_sha256': selected_identity,
-		'unique_token_xyz_sha256': _array_sha(unique),
-		'train_voxel_count': int(train_mask.sum()),
-		'actual_train_voxel_count': int(train_mask.sum()),
-		'validation_voxel_count': int(validation_mask.sum()),
-		'per_class_train_voxel_counts': counts(train_mask),
-		'per_class_validation_voxel_counts': counts(validation_mask),
-		'train_mask_sha256': _array_sha(train_mask),
-		'validation_mask_sha256': _array_sha(validation_mask),
-		'supervision_grid_sha256': _array_sha(grid),
+		'unique_token_xyz_sha256': array_sha256(unique),
+		'train_voxel_count': train_voxel_count,
+		'actual_train_voxel_count': train_voxel_count,
+		'validation_voxel_count': validation_voxel_count,
+		'per_class_train_voxel_counts': per_class_train_voxel_counts,
+		'per_class_validation_voxel_counts': per_class_validation_voxel_counts,
+		'train_mask_sha256': train_mask_sha256,
+		'validation_mask_sha256': validation_mask_sha256,
+		'grid_array_sha256': array_sha256(grid),
 		'supervision_split_grid': {
 			'path': str(
 				config.output_root
@@ -212,7 +220,7 @@ def _condition(
 				/ 'voxel_supervision'
 				/ GRID_NAME
 			),
-			'sha256': _array_sha(grid),
+			'sha256': _npy_sha256(grid),
 		},
 		'canonical_valid_tokens_sha256': _mapping(voxel_row['reference_valid_tokens'])[
 			'sha256'
@@ -221,12 +229,13 @@ def _condition(
 		'patch_size_xyz': [8, 8, 8],
 		'source_full_voxel_dataset': voxel_row,
 	}
+	del grid
+	gc.collect()
 	return LowLabelSplitCondition(
 		split_id,
 		budget_id,
 		Path(str(row['voxel_dataset_root'])),
 		row,
-		np.asarray(grid),
 		unique,
 		metadata,
 	)
@@ -238,7 +247,16 @@ def _write_condition(condition: LowLabelSplitCondition) -> None:
 	staging = Path(tempfile.mkdtemp(prefix='.low-label-', dir=root.parent))
 	try:
 		source = _mapping(condition.row['source_full_voxel_dataset'])
-		np.save(staging / GRID_NAME, condition.grid, allow_pickle=False)
+		source_grid = np.load(
+			str(_mapping(source['split_grid'])['path']),
+			mmap_mode='r',
+			allow_pickle=False,
+		)
+		grid = build_low_label_supervision_grid(
+			source_grid, condition.selected_xyz, patch_size_xyz=(8, 8, 8)
+		)
+		_assert_grid_identity(grid, condition.row)
+		np.save(staging / GRID_NAME, grid, allow_pickle=False)
 		np.save(
 			staging / 'selected_token_xyz.npy',
 			condition.selected_xyz,
@@ -296,6 +314,11 @@ def _write_condition(condition: LowLabelSplitCondition) -> None:
 		raise
 
 
+def _assert_grid_identity(grid: np.ndarray, row: Mapping[str, object]) -> None:
+	if array_sha256(grid) != row['grid_array_sha256']:
+		raise ValueError('derived grid identity changed before commit')
+
+
 def _complete(root: Path, row: Mapping[str, object]) -> bool:
 	"""Return whether every published dataset artifact matches its identity."""
 	try:
@@ -318,14 +341,16 @@ def _complete(root: Path, row: Mapping[str, object]) -> bool:
 		):
 			return False
 		if (
-			_array_sha(np.load(grid_path, mmap_mode='r', allow_pickle=False))
-			!= row['supervision_grid_sha256']
+			array_sha256(np.load(grid_path, mmap_mode='r', allow_pickle=False))
+			!= row['grid_array_sha256']
 		):
 			return False
 		if (
-			_array_sha(np.load(selected_path, mmap_mode='r', allow_pickle=False))
+			array_sha256(np.load(selected_path, mmap_mode='r', allow_pickle=False))
 			!= row['unique_token_xyz_sha256']
 		):
+			return False
+		if file_sha256(grid_path) != _mapping(row['supervision_split_grid'])['sha256']:
 			return False
 		expected_identity = {
 			key: value
@@ -397,15 +422,25 @@ def _parity_gate(
 			'unique_token_xyz_sha256': row['unique_token_xyz_sha256'],
 			'train_mask_sha256': row['train_mask_sha256'],
 			'validation_mask_sha256': row['validation_mask_sha256'],
-			'train_voxel_count': row['train_voxel_count'],
+			'actual_train_voxel_count': row['actual_train_voxel_count'],
+			'validation_voxel_count': row['validation_voxel_count'],
 			'per_class_train_voxel_counts': row['per_class_train_voxel_counts'],
+			'per_class_validation_voxel_counts': row['per_class_validation_voxel_counts'],
+			'class_order': row['class_order'],
 		}
-		prior_grid = _mapping(prior.get('supervision_split_grid'))
+		prior_identity = _original_identity(prior)
 		for key, expected in comparisons.items():
-			if prior.get(key) != expected:
+			if prior_identity.get(key, prior.get(key)) != expected:
 				raise ValueError(f'split_000 parity mismatch: {key}')
-		if prior_grid.get('sha256') != row['supervision_grid_sha256']:
-			raise ValueError('split_000 parity mismatch: supervision_grid_sha256')
+		prior_grid_array = prior_identity.get('grid_array_sha256')
+		if prior_grid_array is None:
+			prior_grid = np.load(
+				str(_mapping(prior['supervision_split_grid'])['path']),
+				mmap_mode='r', allow_pickle=False,
+			)
+			prior_grid_array = array_sha256(prior_grid)
+		if prior_grid_array != row['grid_array_sha256']:
+			raise ValueError('split_000 parity mismatch: grid_array_sha256')
 
 
 def _manifest(path: Path) -> Mapping[str, object]:
@@ -566,15 +601,53 @@ def _expanded_token_mask(coordinates: np.ndarray, shape: tuple[int, ...]) -> np.
 	return mask
 
 
+def _split_mask_identity_and_counts(
+	grid: np.ndarray,
+	labels: np.ndarray,
+	split_code: int,
+	classes: list[int],
+) -> tuple[str, int, Mapping[str, int]]:
+	"""Build one canonical boolean mask on disk to bound inspection memory."""
+	with tempfile.NamedTemporaryFile(suffix='.npy', delete=False) as handle:
+		mask_path = Path(handle.name)
+	try:
+		mask = np.lib.format.open_memmap(
+			mask_path, mode='w+', dtype=np.bool_, shape=grid.shape
+		)
+		counts = {str(value): 0 for value in classes}
+		count = 0
+		for start in range(0, grid.shape[0], 8):
+			stop = min(start + 8, grid.shape[0])
+			chunk_mask = np.asarray(grid[start:stop] == split_code, dtype=np.bool_)
+			mask[start:stop] = chunk_mask
+			count += int(np.count_nonzero(chunk_mask))
+			label_chunk = labels[start:stop]
+			for value in classes:
+				counts[str(value)] += int(
+					np.count_nonzero(label_chunk[chunk_mask] == value)
+				)
+		mask.flush()
+		return array_sha256(mask), count, counts
+	finally:
+		with suppress(UnboundLocalError):
+			del mask
+		mask_path.unlink(missing_ok=True)
+
+
 def _require_selected_tokens_cover_train_voxels(
 	coordinates: np.ndarray,
 	full_grid: np.ndarray,
+	*,
+	split_id: str = 'unknown',
+	budget_id: str = 'unknown',
 ) -> None:
-	if not np.any(
-		full_grid[_expanded_token_mask(coordinates, full_grid.shape)]
-		== TRAIN_VOXEL_SPLIT
-	):
-		raise ValueError('selected unique token set has no canonical train voxels')
+	for coordinate in coordinates:
+		block = _expanded_token_mask(np.asarray([coordinate]), full_grid.shape)
+		if not np.any(full_grid[block] == TRAIN_VOXEL_SPLIT):
+			raise ValueError(
+				'selected unique token has no canonical train voxel: '
+				f'{split_id}/{budget_id}/{coordinate.tolist()}'
+			)
 
 
 def _mapping(value: object) -> Mapping[str, object]:
@@ -609,10 +682,31 @@ def _identity(path: Path) -> Mapping[str, str]:
 
 
 def _array_sha(value: np.ndarray) -> str:
-	array = np.ascontiguousarray(value)
-	return hashlib.sha256(
-		array.dtype.str.encode() + str(array.shape).encode() + array.tobytes()
-	).hexdigest()
+	"""Compatibility alias for the canonical array identity helper."""
+	return array_sha256(value)
+
+
+def _npy_sha256(value: np.ndarray) -> str:
+	"""Return the SHA-256 of the exact .npy bytes written by ``np.save``."""
+	buffer = io.BytesIO()
+	np.save(buffer, value, allow_pickle=False)
+	return file_sha256_bytes(buffer.getvalue())
+
+
+def file_sha256_bytes(value: bytes) -> str:
+	"""Hash a small in-memory committed artifact."""
+	return hashlib.sha256(value).hexdigest()
+
+
+def _original_identity(row: Mapping[str, object]) -> Mapping[str, object]:
+	metadata_record = row.get('voxel_label_budget_metadata')
+	if not isinstance(metadata_record, Mapping):
+		return {}
+	metadata_path = Path(str(metadata_record.get('path', '')))
+	if not metadata_path.is_file() or metadata_record.get('sha256') != file_sha256(metadata_path):
+		raise ValueError('original-split parity metadata identity mismatch')
+	identity = _read_json(metadata_path).get('identity')
+	return _mapping(identity) if isinstance(identity, Mapping) else {}
 
 
 def _timestamp() -> str:

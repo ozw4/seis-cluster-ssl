@@ -44,8 +44,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
 	args = build_parser().parse_args()
-	if args.only_missing and args.resume:
-		raise ValueError('--only-missing and --resume are mutually exclusive')
 	path = parse_config_path(args)
 	config = resolve_config_for_cli(load_config_for_cli(path, loader=load_config), resolver=f3_lithology_voxel_label_budget_split_config_from_mapping, config_path=path)
 	jobs = inspect_f3_lithology_voxel_label_budget_split_suite(config)

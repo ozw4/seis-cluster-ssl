@@ -1,16 +1,5 @@
 """F3 facies benchmark inspection utilities."""
 
-from seis_ssl_cluster.f3.lithology.baselines import (
-	AMPLITUDE_STATISTICS,
-	BASELINE_FEATURE_KINDS,
-	F3BaselineFeatureConfig,
-	F3BaselineReferenceTokenDataset,
-	F3BaselineTokenDatasetOutputs,
-	F3LithologyBaselineTokenDatasetConfig,
-	F3LithologyBaselineTokenDatasetResult,
-	build_f3_lithology_baseline_token_dataset,
-	f3_lithology_baseline_token_dataset_config_from_mapping,
-)
 from seis_ssl_cluster.f3.consistency import (
 	CONSISTENCY_CSV_FIELDNAMES,
 	F3LabelConsistencyAlignment,
@@ -52,15 +41,23 @@ from seis_ssl_cluster.f3.labels import (
 	read_class_info,
 	rgb_to_hex,
 )
-from seis_ssl_cluster.f3.lithology.token_dataset import (
-	F3_LITHOLOGY_TOKEN_DATASET_KEYS,
-	F3LithologyTokenDataset,
-	F3LithologyTokenDatasetSummary,
-	load_f3_lithology_token_dataset,
-	load_f3_lithology_token_dataset_summary,
-	replace_token_features,
-	save_f3_lithology_token_dataset,
-	validate_f3_lithology_token_dataset,
+from seis_ssl_cluster.f3.lithology.baselines import (
+	AMPLITUDE_STATISTICS,
+	BASELINE_FEATURE_KINDS,
+	F3BaselineFeatureConfig,
+	F3BaselineReferenceTokenDataset,
+	F3BaselineTokenDatasetOutputs,
+	F3LithologyBaselineTokenDatasetConfig,
+	F3LithologyBaselineTokenDatasetResult,
+	build_f3_lithology_baseline_token_dataset,
+	f3_lithology_baseline_token_dataset_config_from_mapping,
+)
+from seis_ssl_cluster.f3.lithology.metrics import (
+	REQUIRED_LITHOLOGY_METRICS,
+	compute_lithology_metrics,
+	render_classification_report_markdown,
+	write_confusion_matrix_csv,
+	write_metrics_csv,
 )
 from seis_ssl_cluster.f3.lithology.prediction import (
 	VALIDATION_SLICE_METRIC_FIELDNAMES,
@@ -86,24 +83,15 @@ from seis_ssl_cluster.f3.lithology.probe import (
 	load_token_dataset,
 	train_and_evaluate_f3_lithology_probe,
 )
-from seis_ssl_cluster.f3.lithology_report import (
-	COMPARISON_ID_COLUMNS,
-	OVERALL_METRIC_COLUMNS,
-	F3LithologyComparisonFigureFontSizes,
-	F3LithologyComparisonFigureSizes,
-	F3LithologyComparisonFigureStyle,
-	F3LithologyComparisonPublishConfig,
-	F3LithologyComparisonReportConfig,
-	F3LithologyComparisonReportResult,
-	F3LithologyPublishConfig,
-	F3LithologyReportConfig,
-	F3LithologyReportResult,
-	build_f3_lithology_comparison_report,
-	build_f3_lithology_report,
-	default_f3_lithology_comparison_figure_style,
-	publish_f3_lithology_comparison_report,
-	publish_f3_lithology_report,
-	render_f3_lithology_report_markdown,
+from seis_ssl_cluster.f3.lithology.token_dataset import (
+	F3_LITHOLOGY_TOKEN_DATASET_KEYS,
+	F3LithologyTokenDataset,
+	F3LithologyTokenDatasetSummary,
+	load_f3_lithology_token_dataset,
+	load_f3_lithology_token_dataset_summary,
+	replace_token_features,
+	save_f3_lithology_token_dataset,
+	validate_f3_lithology_token_dataset,
 )
 from seis_ssl_cluster.f3.lithology.tokens import (
 	CLASS_COUNTS_FIELDNAMES,
@@ -144,12 +132,24 @@ from seis_ssl_cluster.f3.lithology.voxel_split import (
 	F3VoxelSupervisionSplitSummary,
 	build_f3_voxel_supervision_split,
 )
-from seis_ssl_cluster.f3.lithology.metrics import (
-	REQUIRED_LITHOLOGY_METRICS,
-	compute_lithology_metrics,
-	render_classification_report_markdown,
-	write_confusion_matrix_csv,
-	write_metrics_csv,
+from seis_ssl_cluster.f3.lithology_report import (
+	COMPARISON_ID_COLUMNS,
+	OVERALL_METRIC_COLUMNS,
+	F3LithologyComparisonFigureFontSizes,
+	F3LithologyComparisonFigureSizes,
+	F3LithologyComparisonFigureStyle,
+	F3LithologyComparisonPublishConfig,
+	F3LithologyComparisonReportConfig,
+	F3LithologyComparisonReportResult,
+	F3LithologyPublishConfig,
+	F3LithologyReportConfig,
+	F3LithologyReportResult,
+	build_f3_lithology_comparison_report,
+	build_f3_lithology_report,
+	default_f3_lithology_comparison_figure_style,
+	publish_f3_lithology_comparison_report,
+	publish_f3_lithology_report,
+	render_f3_lithology_report_markdown,
 )
 from seis_ssl_cluster.f3.png_labels import (
 	PNG_LABEL_CLASS_COUNT_FIELDNAMES,
