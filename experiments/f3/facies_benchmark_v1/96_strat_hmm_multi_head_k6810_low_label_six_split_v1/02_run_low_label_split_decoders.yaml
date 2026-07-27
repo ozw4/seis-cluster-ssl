@@ -13,6 +13,19 @@ inputs:
   class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
   segy_geometry_json: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
   seismic_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
+  source_identities:
+    class_info:
+      path: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+      sha256: 97ae41d06e57c5b2fed5a6005c7378a179e522fff27825327e9f857209ea9f01
+    source_label_segy:
+      path: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
+      sha256: 100667f54cf07a8283b8f14a96d90db5bf693c1fd09295e5f190a4cb8a34a139
+    segy_geometry_json:
+      path: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+      sha256: 02e7d0f1b2b652207ef9e2f3b019dee53aa5868c8b2835c1140f67ae5a3ad23d
+    seismic_volume:
+      path: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
+      sha256: 47108252f4bd670889da1ea6f36abe8acba41a6ad772db515b5902d4545bb276
   embeddings:
     mae: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16
     m1_current_k6: /workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/overlap_x16

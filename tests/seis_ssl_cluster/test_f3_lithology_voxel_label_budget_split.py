@@ -2,23 +2,29 @@ from __future__ import annotations
 
 import csv
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+import seis_ssl_cluster.f3.lithology.voxel_label_budget_split as split_datasets
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_split import (
 	_array_sha,
 	_complete,
+	_json_sha256,
 	_require_selected_tokens_cover_train_voxels,
 )
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_split_runner import (
 	_run_manifest_root,
 	_write_run_manifest,
 )
-from seis_ssl_cluster.f3.lithology.voxel_split import TRAIN_VOXEL_SPLIT
+from seis_ssl_cluster.f3.lithology.voxel_split import (
+	TRAIN_VOXEL_SPLIT,
+	VALIDATION_VOXEL_SPLIT,
+)
 
 
 def test_selected_unique_tokens_require_canonical_train_voxels() -> None:
@@ -74,6 +80,21 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 	root.mkdir()
 	source_manifest = tmp_path / 'source_split_manifest.json'
 	source_manifest.write_text('{"source": true}\n', encoding='utf-8')
+	source_paths = {
+		name: tmp_path / f'{name}.source'
+		for name in (
+			'class_info',
+			'source_label_segy',
+			'segy_geometry_json',
+			'seismic_volume',
+		)
+	}
+	for path in source_paths.values():
+		path.write_bytes(path.name.encode())
+	source_identities = {
+		name: {'path': str(path), 'sha256': file_sha256(path)}
+		for name, path in source_paths.items()
+	}
 	grid = np.asarray([[[TRAIN_VOXEL_SPLIT]]], dtype=np.uint8)
 	selected = np.asarray([[0, 0, 0]], dtype=np.int64)
 	row = {
@@ -102,6 +123,8 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 		'canonical_valid_tokens_sha256': 'valid-tokens',
 		'class_order': [0],
 		'patch_size_xyz': [8, 8, 8],
+		'source_identities': source_identities,
+		'source_identities_sha256': _json_sha256(source_identities),
 		'source_full_voxel_dataset': {
 			'slice_split_manifest': {
 				'path': str(source_manifest),
@@ -118,6 +141,7 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 	(root / METADATA_NAME).write_text(
 		json.dumps(
 			{
+				'source_identities': source_identities,
 				'outputs': {
 					'supervision_split_grid': str(root / GRID_NAME),
 					'metadata_json': str(root / METADATA_NAME),
@@ -138,7 +162,10 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 			{
 				'artifact_type': 'f3_lithology_voxel_label_budget_split_dataset',
 				'identity': identity,
-				'sources': {'full_voxel_dataset': row['source_full_voxel_dataset']},
+				'sources': {
+					'full_voxel_dataset': row['source_full_voxel_dataset'],
+					'normalized_source_identities': source_identities,
+				},
 			}
 		),
 		encoding='utf-8',
@@ -169,8 +196,203 @@ def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 		assert not _complete(root, row)
 		(root / filename).write_bytes(content)
 
+	_assert_source_identity_completion_contract(
+		root, row, identity, source_identities, source_paths
+	)
+
+
+def _assert_source_identity_completion_contract(
+	root, row, identity, source_identities, source_paths
+) -> None:
 	(root / 'low_label_split_metadata.json').write_text('{}', encoding='utf-8')
 	assert not _complete(root, row)
+	(root / 'low_label_split_metadata.json').write_text(
+		json.dumps({
+			'artifact_type': 'f3_lithology_voxel_label_budget_split_dataset',
+			'identity': identity,
+			'sources': {
+				'full_voxel_dataset': row['source_full_voxel_dataset'],
+				'normalized_source_identities': source_identities,
+			},
+		}),
+		encoding='utf-8',
+	)
+	metadata = json.loads((root / METADATA_NAME).read_text(encoding='utf-8'))
+	del metadata['source_identities']
+	(root / METADATA_NAME).write_text(json.dumps(metadata), encoding='utf-8')
+	assert not _complete(root, row)
+	metadata['source_identities'] = source_identities
+	(root / METADATA_NAME).write_text(json.dumps(metadata), encoding='utf-8')
+	assert _complete(root, row)
+	assert (
+		metadata['voxel_label_budget_split']['identity']['source_identities_sha256']
+		== row['source_identities_sha256']
+	)
+	del metadata['voxel_label_budget_split']['identity']['source_identities_sha256']
+	(root / METADATA_NAME).write_text(json.dumps(metadata), encoding='utf-8')
+	assert not _complete(root, row)
+	metadata['voxel_label_budget_split']['identity']['source_identities_sha256'] = row[
+		'source_identities_sha256'
+	]
+	(root / METADATA_NAME).write_text(json.dumps(metadata), encoding='utf-8')
+	assert _complete(root, row)
+
+	provenance = json.loads(
+		(root / 'low_label_split_metadata.json').read_text(encoding='utf-8')
+	)
+	del provenance['sources']['normalized_source_identities']
+	(root / 'low_label_split_metadata.json').write_text(
+		json.dumps(provenance), encoding='utf-8'
+	)
+	assert not _complete(root, row)
+	provenance['sources']['normalized_source_identities'] = source_identities
+	(root / 'low_label_split_metadata.json').write_text(
+		json.dumps(provenance), encoding='utf-8'
+	)
+	assert _complete(root, row)
+
+	row['source_identities_sha256'] = '0' * 64
+	assert not _complete(root, row)
+	row['source_identities_sha256'] = _json_sha256(source_identities)
+	row['source_identities']['class_info']['path'] = str(root.parent / 'other.source')
+	assert not _complete(root, row)
+	row['source_identities']['class_info']['path'] = str(source_paths['class_info'])
+	source_paths['class_info'].write_bytes(b'drift')
+	assert not _complete(root, row)
+
+
+def test_only_missing_quarantines_legacy_dataset_then_reuses_rebuild(
+	tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	output_root = tmp_path / 'output'
+	manifest_sources = {
+		name: tmp_path / f'{name}.json'
+		for name in (
+			'split_inventory_manifest',
+			'split_dataset_manifest',
+			'voxel_dataset_manifest',
+		)
+	}
+	for path in manifest_sources.values():
+		path.write_text('{}\n', encoding='utf-8')
+	source_paths = {
+		name: tmp_path / f'{name}.source'
+		for name in (
+			'class_info',
+			'source_label_segy',
+			'segy_geometry_json',
+			'seismic_volume',
+		)
+	}
+	for path in source_paths.values():
+		path.write_bytes(path.name.encode())
+	source_identities = {
+		name: {'path': str(path), 'sha256': file_sha256(path)}
+		for name, path in source_paths.items()
+	}
+	full_grid_path = tmp_path / 'full_split_grid.npy'
+	grid = np.asarray(
+		[[[TRAIN_VOXEL_SPLIT, VALIDATION_VOXEL_SPLIT]]],
+		dtype=np.uint8,
+	)
+	np.save(full_grid_path, grid, allow_pickle=False)
+	source_split_manifest = tmp_path / 'source_split_manifest.json'
+	source_split_manifest.write_text('{"source": true}\n', encoding='utf-8')
+	root = output_root / 'datasets' / 'split_000' / 'cap25' / 'voxel_supervision'
+	root.mkdir(parents=True)
+	(root / 'legacy.bin').write_bytes(b'legacy dataset bytes')
+	(root / METADATA_NAME).write_text('{}\n', encoding='utf-8')
+	(root / 'low_label_split_metadata.json').write_text('{}\n', encoding='utf-8')
+	selected = np.asarray([[0, 0, 0]], dtype=np.int64)
+	row = {
+		'split_id': 'split_000',
+		'budget_id': 'cap25',
+		'per_class_cap': 25,
+		'label_subset_seed': 0,
+		'voxel_dataset_root': str(root),
+		'selected_token_row_count': 1,
+		'unique_selected_token_xyz_count': 1,
+		'duplicate_selected_row_count': 0,
+		'selected_token_identity_sha256': 'selected-row-identity',
+		'unique_token_xyz_sha256': _array_sha(selected),
+		'train_voxel_count': 1,
+		'actual_train_voxel_count': 1,
+		'validation_voxel_count': 1,
+		'per_class_train_voxel_counts': {'0': 1},
+		'per_class_validation_voxel_counts': {'0': 1},
+		'train_mask_sha256': 'train-mask',
+		'validation_mask_sha256': 'validation-mask',
+		'grid_array_sha256': _array_sha(grid),
+		'supervision_split_grid': {
+			'path': str(root / GRID_NAME),
+			'sha256': file_sha256(full_grid_path),
+		},
+		'canonical_valid_tokens_sha256': 'valid-tokens',
+		'class_order': [0],
+		'patch_size_xyz': [8, 8, 8],
+		'source_identities': source_identities,
+		'source_identities_sha256': _json_sha256(source_identities),
+		'source_full_voxel_dataset': {
+			'split_grid': {
+				'path': str(full_grid_path),
+				'sha256': file_sha256(full_grid_path),
+			},
+			'slice_split_manifest': {
+				'path': str(source_split_manifest),
+				'sha256': file_sha256(source_split_manifest),
+			},
+		},
+	}
+	condition = split_datasets.LowLabelSplitCondition(
+		'split_000', 'cap25', root, row, selected,
+		{'source_identities': source_identities},
+	)
+	config = SimpleNamespace(
+		output_root=output_root,
+		split_ids=('split_000',),
+		budgets=('cap25',),
+		**manifest_sources,
+	)
+	monkeypatch.setattr(
+		split_datasets,
+		'inspect_f3_lithology_voxel_label_budget_split_datasets',
+		lambda _: split_datasets.LowLabelSplitInspection((condition,)),
+	)
+	monkeypatch.setattr(split_datasets, '_parity_gate', lambda *_: None)
+
+	_, first_rows = split_datasets.build_f3_lithology_voxel_label_budget_split_datasets(
+		config, only_missing=True
+	)
+	first = first_rows[0]
+	quarantine = Path(str(first['quarantine_path']))
+	assert first['action'] == 'NEW'
+	assert first['quarantine_reason'] == 'legacy_missing_normalized_source_identity'
+	assert quarantine.is_absolute()
+	assert quarantine.name.startswith('voxel_supervision.quarantine-')
+	assert (quarantine / 'legacy.bin').read_bytes() == b'legacy dataset bytes'
+	metadata = json.loads((root / METADATA_NAME).read_text(encoding='utf-8'))
+	provenance = json.loads(
+		(root / 'low_label_split_metadata.json').read_text(encoding='utf-8')
+	)
+	assert metadata['source_identities'] == source_identities
+	assert (
+		metadata['voxel_label_budget_split']['identity']['source_identities_sha256']
+		== row['source_identities_sha256']
+	)
+	assert provenance['sources']['normalized_source_identities'] == source_identities
+	assert provenance['identity']['source_identities_sha256'] == row[
+		'source_identities_sha256'
+	]
+	assert _complete(root, row)
+
+	_, second_rows = (
+		split_datasets.build_f3_lithology_voxel_label_budget_split_datasets(
+			config, only_missing=True
+		)
+	)
+	assert second_rows[0]['action'] == 'REUSED'
+	assert second_rows[0]['quarantine_path'] is None
+	assert len(list(root.parent.glob('voxel_supervision.quarantine-*'))) == 1
 
 
 def test_smoke_run_manifest_is_separate_from_scientific_manifest(tmp_path) -> None:
