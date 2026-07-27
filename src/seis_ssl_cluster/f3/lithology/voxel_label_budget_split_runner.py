@@ -7,7 +7,7 @@ import csv
 import json
 import tempfile
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,9 +20,13 @@ from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_split import MODEL_TAGS
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
+from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
+	load_f3_lithology_voxel_label_budget_evaluation_metrics,
+)
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_runner import (
 	VoxelLabelBudgetJob,
 	_decoder_config,
+	_validated_smoke_row,
 	classify_voxel_label_budget_job,
 	completed_voxel_label_budget_job_row,
 	quarantine_voxel_label_budget_output,
@@ -31,6 +35,7 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_runner import (
 from seis_ssl_cluster.f3.splits import read_f3_line_geometry
 from seis_ssl_cluster.training.voxel_decoder.runner import (
 	inspect_f3_lithology_voxel_decoder,
+	run_f3_lithology_voxel_decoder,
 )
 
 if TYPE_CHECKING:
@@ -170,8 +175,6 @@ def run_f3_lithology_voxel_label_budget_split_suite(  # noqa: C901, PLR0912, PLR
 		output_root = planned.output_root if not smoke_only else config.output_root / 'smoke' / planned.split_id / planned.budget_id / planned.model_role
 		stage = _SplitStageConfig(config, row, planned.model_role)
 		job = VoxelLabelBudgetJob(planned.budget_id, int(row['per_class_cap']), 0, config.decoder_seed, planned.model_role, stage.model_by_role[planned.model_role].model_tag, Path(str(row['voxel_dataset_root'])), output_root, row)
-		if smoke_only:
-			stage.train = replace(stage.train, epochs=1, steps_per_epoch=2)
 		plan = classify_voxel_label_budget_job(stage, job)
 		quarantine_path = None
 		if plan.state == 'REUSE_COMPLETED':
@@ -179,9 +182,15 @@ def run_f3_lithology_voxel_label_budget_split_suite(  # noqa: C901, PLR0912, PLR
 				raise FileExistsError(f'completed job requires --only-missing: {job.output_root}')
 			action, checkpoint = 'REUSED', None
 		elif plan.state == 'RESUME_LATEST':
-			if not (only_missing or resume):
+			if smoke_only:
+				quarantine_path = str(quarantine_voxel_label_budget_output(
+					job.output_root, reason='stale_smoke_checkpoint'
+				))
+				action, checkpoint = 'NEW', None
+			elif not (only_missing or resume):
 				raise FileExistsError(f'incomplete job requires --only-missing or --resume: {job.output_root}')
-			action, checkpoint = 'RESUMED', job.decoder_dir / 'latest.pt'
+			else:
+				action, checkpoint = 'RESUMED', job.decoder_dir / 'latest.pt'
 		else:
 			if plan.state == 'INVALID_OR_PARTIAL':
 				if not only_missing:
@@ -196,8 +205,19 @@ def run_f3_lithology_voxel_label_budget_split_suite(  # noqa: C901, PLR0912, PLR
 		_write_run_manifest(manifest_root, list(completed.values()))
 		try:
 			if action != 'REUSED':
-				run_voxel_label_budget_job(stage, job, device=device, resume=checkpoint)
-			result = completed_voxel_label_budget_job_row(stage, job, action=action, quarantine_path=quarantine_path, error=None)
+				if smoke_only:
+					run_f3_lithology_voxel_decoder(
+						_decoder_config(stage, job), device=device, max_steps=2
+					)
+				else:
+					run_voxel_label_budget_job(stage, job, device=device, resume=checkpoint)
+			result = (
+				_smoke_job_row(stage, job, action=action, quarantine_path=quarantine_path)
+				if smoke_only
+				else completed_voxel_label_budget_job_row(
+					stage, job, action=action, quarantine_path=quarantine_path, error=None
+				)
+			)
 			completed[_row_key(planned.split_id, planned.budget_id, planned.model_role)] = {'split_id': planned.split_id, **result}
 		except BaseException as error:
 			completed[_row_key(planned.split_id, planned.budget_id, planned.model_role)] = _progress_row(planned, 'failed', quarantine_path, f'{type(error).__name__}: {error}')
@@ -393,7 +413,11 @@ def _write_run_manifest(manifest_root: Path, rows: list[Mapping[str, object]]) -
 	ordered = sorted(rows, key=lambda row: _row_key(str(row.get('split_id')), str(row.get('budget_id')), str(row.get('model_role'))))
 	_atomic_write_text(path, json.dumps({'artifact_type': 'f3_lithology_voxel_label_budget_split_run_manifest', 'schema_version': 1, 'rows': ordered}, indent=2, sort_keys=True) + '\n')
 	_write_csv(manifest_root / 'low_label_split_job_status.csv', ordered)
-	complete = [row for row in ordered if row.get('status') == 'complete']
+	complete = [
+		row
+		for row in ordered
+		if row.get('status') == 'complete' and 'evaluation_metrics' in row
+	]
 	_write_csv(manifest_root / 'low_label_split_job_metrics.csv', [_metric_row(row) for row in complete])
 
 
@@ -401,30 +425,51 @@ def _metric_row(row: Mapping[str, object]) -> Mapping[str, object]:
 	metrics_path = Path(str(_mapping(row['evaluation_metrics']).get('path')))
 	boundary_path = Path(str(_mapping(row['evaluation_boundary_metrics']).get('path')))
 	regions_path = Path(str(_mapping(row['evaluation_boundary_region_metrics']).get('path')))
-	metrics = _json(metrics_path)
-	boundary = _json(boundary_path)
-	with regions_path.open(encoding='utf-8', newline='') as handle:
-		regions = {int(item['radius']): item for item in csv.DictReader(handle) if item.get('region') == 'boundary'}
-	result = {'split_id': row['split_id'], 'budget_id': row['budget_id'], 'model_role': row['model_role'], **{name: metrics[name] for name in ('macro_f1', 'mean_iou', 'balanced_accuracy', 'accuracy', 'weighted_f1')}}
-	for class_id in (3, 5):
-		result[f'class_{class_id}_f1'] = _metric_at(metrics, 'per_class_f1', class_id)
-		result[f'class_{class_id}_iou'] = _metric_at(metrics, 'per_class_iou', class_id)
-		result[f'class_{class_id}_boundary_recall_tolerance_2'] = boundary[f'vertical_boundary_class_{class_id}_recall_at_2']
-		result[f'class_{class_id}_boundary_recall_tolerance_4'] = boundary[f'vertical_boundary_class_{class_id}_recall_at_4']
-	for radius in (2, 4):
-		result[f'boundary_region_macro_f1_r{radius}'] = regions[radius]['macro_f1']
-		result[f'boundary_region_mean_iou_r{radius}'] = regions[radius]['mean_iou']
-	result['boundary_f1_t2'] = boundary['vertical_boundary_f1_at_2']
-	result['boundary_f1_t4'] = boundary['vertical_boundary_f1_at_4']
-	result['boundary_position_mae'] = boundary['vertical_boundary_position_mae_at_2']
-	return result
+	values = load_f3_lithology_voxel_label_budget_evaluation_metrics(
+		metrics_path=metrics_path,
+		boundary_metrics_path=boundary_path,
+		boundary_region_metrics_path=regions_path,
+		label=(
+			f"{row['split_id']}/{row['budget_id']}/{row['model_role']}"
+		),
+	)
+	return {
+		'split_id': row['split_id'],
+		'budget_id': row['budget_id'],
+		'model_role': row['model_role'],
+		**values,
+	}
 
 
-def _metric_at(metrics: Mapping[str, object], key: str, class_id: int) -> object:
-	values = metrics[key]
-	if not isinstance(values, list):
-		raise TypeError(f'evaluation metric {key} must be a list')
-	return values[class_id]
+def _smoke_job_row(
+	stage: _SplitStageConfig,
+	job: VoxelLabelBudgetJob,
+	*,
+	action: str,
+	quarantine_path: str | None,
+) -> Mapping[str, object]:
+	"""Validate a two-step decoder checkpoint without scientific evaluation."""
+	values = _validated_smoke_row(
+		stage, job, checkpoint=job.decoder_dir / 'latest.pt'
+	)
+	row = job.dataset_row
+	return {
+		**values,
+		'action': action,
+		'error': None,
+		'quarantine_path': quarantine_path,
+		'status': 'complete',
+		'voxel_supervision_grid_sha256': _mapping(
+			row['supervision_split_grid']
+		)['sha256'],
+		'selected_token_identity_sha256': row['selected_token_identity_sha256'],
+		'unique_token_xyz_sha256': row['unique_token_xyz_sha256'],
+		'train_voxel_count': row['train_voxel_count'],
+		'validation_voxel_count': row['validation_voxel_count'],
+		'validation_mask_sha256': row['validation_mask_sha256'],
+		'canonical_valid_token_sha256': row['canonical_valid_tokens_sha256'],
+		'metric_schema_sha256': 'smoke_not_evaluated',
+	}
 
 
 def _write_csv(path: Path, rows: list[Mapping[str, object]]) -> None:

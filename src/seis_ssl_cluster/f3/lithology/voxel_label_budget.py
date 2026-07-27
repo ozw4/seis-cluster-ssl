@@ -152,7 +152,7 @@ def build_low_label_supervision_grid(
 		raise ValueError('selected token coordinates must be non-negative')
 	result = np.zeros_like(grid)
 	for coordinate in coordinates:
-		block = _token_block(
+		block = token_block(
 			coordinate, patch_size_xyz=patch_size_xyz, volume_shape_xyz=grid.shape
 		)
 		full_block = np.asarray(grid[block])
@@ -1263,15 +1263,24 @@ def _token_coordinates(
 	return np.asarray(array, dtype=np.int64)
 
 
-def _token_block(
+def token_block(
 	coordinate: Sequence[int],
 	*,
 	patch_size_xyz: Sequence[int],
 	volume_shape_xyz: Sequence[int],
 ) -> tuple[slice, slice, slice]:
+	"""Return one validated, clipped token block in voxel coordinates."""
+	coordinate_values = _token_coordinates([coordinate])[0]
 	patch = _positive_triplet(patch_size_xyz, 'patch_size_xyz')
 	shape = _positive_triplet(volume_shape_xyz, 'volume_shape_xyz')
-	start = tuple(int(coordinate[axis]) * patch[axis] for axis in range(3))
+	if np.any(coordinate_values < 0):
+		raise ValueError('selected token coordinates must be non-negative')
+	start = tuple(int(coordinate_values[axis]) * patch[axis] for axis in range(3))
+	if any(start[axis] >= shape[axis] for axis in range(3)):
+		raise ValueError(
+			'selected token coordinate is outside the volume: '
+			f'{coordinate_values.tolist()}'
+		)
 	stop = tuple(min(start[axis] + patch[axis], shape[axis]) for axis in range(3))
 	return _slices(start, stop)
 
@@ -1423,6 +1432,7 @@ __all__ = [
 	'build_low_label_supervision_grid',
 	'expand_selected_token_blocks',
 	'inspect_f3_lithology_voxel_label_budget_datasets',
+	'token_block',
 	'validate_voxel_label_budget_condition',
 	'validate_voxel_label_budget_condition_artifact',
 ]

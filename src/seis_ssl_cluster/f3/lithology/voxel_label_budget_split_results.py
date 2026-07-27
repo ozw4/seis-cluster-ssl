@@ -22,17 +22,17 @@ BUDGETS = ('cap25', 'cap50')
 MODELS = ('mae', 'm1_current_k6', 'mh_nocons')
 PRIMARY = ('macro_f1', 'mean_iou')
 MONITORED = (
-	'class_3_f1', 'class_3_iou', 'class_3_boundary_recall_tolerance_2',
-	'class_3_boundary_recall_tolerance_4', 'class_5_f1', 'class_5_iou',
-	'class_5_boundary_recall_tolerance_2', 'class_5_boundary_recall_tolerance_4',
+	'class_3_f1', 'class_3_iou', 'class_3_boundary_recall_t2',
+	'class_3_boundary_recall_t4', 'class_5_f1', 'class_5_iou',
+	'class_5_boundary_recall_t2', 'class_5_boundary_recall_t4',
 )
 REQUIRED_METRICS = (*PRIMARY, *(
 	'balanced_accuracy', 'accuracy', 'weighted_f1',
 	'boundary_region_macro_f1_r2', 'boundary_region_mean_iou_r2',
 	'boundary_region_macro_f1_r4', 'boundary_region_mean_iou_r4',
-	'boundary_f1_t2', 'boundary_f1_t4', 'boundary_position_mae',
+	'boundary_f1_t2', 'boundary_f1_t4', 'vertical_boundary_position_mae',
 ), *MONITORED)
-LOWER_IS_BETTER = frozenset({'boundary_position_mae'})
+LOWER_IS_BETTER = frozenset({'vertical_boundary_position_mae'})
 COMPARISONS = (('mh_nocons', 'm1_current_k6'), ('mh_nocons', 'mae'), ('m1_current_k6', 'mae'))
 OUTPUT_NAMES = (
 	'low_label_split_paired_metrics.csv',

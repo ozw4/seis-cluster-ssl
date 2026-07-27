@@ -36,6 +36,37 @@ def test_selected_unique_tokens_require_canonical_train_voxels() -> None:
 	)
 
 
+def test_selected_token_coverage_uses_only_each_clipped_token_block(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	full_grid = np.zeros((9, 9, 9), dtype=np.uint8)
+	full_grid[8, 8, 8] = TRAIN_VOXEL_SPLIT
+
+	def fail_full_volume_mask(*args: object, **kwargs: object) -> object:
+		raise AssertionError(
+			f'coverage must not allocate a full-volume mask: {args!r}/{kwargs!r}'
+		)
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.f3.lithology.voxel_label_budget_split.np.zeros',
+		fail_full_volume_mask,
+	)
+	_require_selected_tokens_cover_train_voxels(
+		np.asarray([[1, 1, 1]], dtype=np.int64), full_grid,
+		split_id='split_005', budget_id='cap50',
+	)
+	with pytest.raises(ValueError, match=r'split_005/cap50/\[0, 0, 0\]'):
+		_require_selected_tokens_cover_train_voxels(
+			np.asarray([[1, 1, 1], [0, 0, 0]], dtype=np.int64),
+			full_grid,
+			split_id='split_005', budget_id='cap50',
+		)
+	with pytest.raises(ValueError, match='outside the volume'):
+		_require_selected_tokens_cover_train_voxels(
+			np.asarray([[2, 0, 0]], dtype=np.int64), full_grid
+		)
+
+
 def test_only_missing_reuses_only_a_complete_identity_matching_dataset(
 	tmp_path,
 ) -> None:

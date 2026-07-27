@@ -41,6 +41,10 @@ class F3VoxelLabelBudgetSplitConfig:
 	budgets: tuple[str, ...]
 	label_subset_seed: int
 	decoder_seed: int
+	source_label_segy: Path
+	class_info: Path
+	segy_geometry_json: Path
+	seismic_volume: Path
 
 	@property
 	def models(self) -> tuple[str, ...]:
@@ -63,6 +67,7 @@ def f3_lithology_voxel_label_budget_split_config_from_mapping(
 	_validate_allowed_keys(inputs, frozenset({
 		'split_inventory_manifest', 'split_dataset_manifest', 'voxel_dataset_manifest',
 		'original_dataset_manifest', 'multi_head_decisions', 'multi_head_handoff', 'embeddings',
+		'source_label_segy', 'class_info', 'segy_geometry_json', 'seismic_volume',
 	}), prefix='inputs')
 	_validate_allowed_keys(matrix, frozenset({'split_ids', 'budgets', 'per_class_caps', 'label_subset_seed', 'decoder_seed', 'models'}), prefix='matrix')
 	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
@@ -81,6 +86,10 @@ def f3_lithology_voxel_label_budget_split_config_from_mapping(
 		budgets=_strings(matrix.get('budgets'), 'matrix.budgets'),
 		label_subset_seed=_integer(matrix.get('label_subset_seed'), 'matrix.label_subset_seed'),
 		decoder_seed=_integer(matrix.get('decoder_seed'), 'matrix.decoder_seed'),
+		source_label_segy=_required_absolute_path(inputs, 'source_label_segy', prefix='inputs'),
+		class_info=_required_absolute_path(inputs, 'class_info', prefix='inputs'),
+		segy_geometry_json=_required_absolute_path(inputs, 'segy_geometry_json', prefix='inputs'),
+		seismic_volume=_required_absolute_path(inputs, 'seismic_volume', prefix='inputs'),
 	)
 	for label, path in ((name, getattr(result, name)) for name in (
 		'output_root', 'split_inventory_manifest', 'split_dataset_manifest', 'voxel_dataset_manifest',

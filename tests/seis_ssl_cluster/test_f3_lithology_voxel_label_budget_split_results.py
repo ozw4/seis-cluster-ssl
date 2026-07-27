@@ -53,6 +53,21 @@ def test_aggregate_reports_fixed_confirmatory_comparisons() -> None:
 	assert decision['status'] == 'M4_MH_SPLIT_CONFIRMED'
 
 
+def test_lower_is_better_metric_reverses_the_win_direction() -> None:
+	rows = _rows()
+	for row in rows:
+		row['vertical_boundary_position_mae'] = {
+			'mae': 0.6, 'm1_current_k6': 0.5, 'mh_nocons': 0.4,
+		}[str(row['model_role'])]
+	deltas, _, _ = aggregate_low_label_split_results(rows)
+	value = next(
+		item['delta'] for item in deltas
+		if item['comparison'] == 'mh_nocons_minus_m1_current_k6'
+		and item['metric'] == 'vertical_boundary_position_mae'
+	)
+	assert value == pytest.approx(0.1)
+
+
 def test_summary_publish_writes_and_validates_exact_lightweight_tree(
 	tmp_path: Path,
 ) -> None:

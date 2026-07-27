@@ -36,11 +36,13 @@ from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
 from seis_ssl_cluster.f3.lithology.voxel_label_budget import (
 	array_sha256,
 	build_low_label_supervision_grid,
+	token_block,
 )
 from seis_ssl_cluster.f3.lithology.voxel_split import (
 	TRAIN_VOXEL_SPLIT,
 	VALIDATION_VOXEL_SPLIT,
 )
+from seis_ssl_cluster.f3.splits import read_f3_line_geometry
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_split import (
@@ -171,7 +173,10 @@ def _condition(
 	)
 	grid = build_low_label_supervision_grid(full_grid, unique, patch_size_xyz=(8, 8, 8))
 	del full_grid
-	metadata = _read_json(Path(str(_mapping(voxel_row['metadata'])['path'])))
+	metadata = dict(_read_json(Path(str(_mapping(voxel_row['metadata'])['path']))))
+	metadata['source_identities'] = _normalized_source_identities(
+		config, metadata, split_id=split_id
+	)
 	labels = np.load(
 		str(_mapping(metadata['label_volume'])['path']),
 		mmap_mode='r',
@@ -583,24 +588,6 @@ def _validate_full_voxel_row(
 	return dense_label
 
 
-def _expanded_token_mask(coordinates: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
-	mask = np.zeros(shape, dtype=bool)
-	for coordinate in coordinates:
-		start = coordinate * 8
-		stop = np.minimum(start + 8, shape)
-		if np.any(start < 0) or np.any(start >= shape):
-			raise ValueError(
-				f'selected token coordinate is outside the volume: {coordinate.tolist()}'
-			)
-		mask[
-			tuple(
-				slice(int(begin), int(end))
-				for begin, end in zip(start, stop, strict=True)
-			)
-		] = True
-	return mask
-
-
 def _split_mask_identity_and_counts(
 	grid: np.ndarray,
 	labels: np.ndarray,
@@ -642,12 +629,61 @@ def _require_selected_tokens_cover_train_voxels(
 	budget_id: str = 'unknown',
 ) -> None:
 	for coordinate in coordinates:
-		block = _expanded_token_mask(np.asarray([coordinate]), full_grid.shape)
-		if not np.any(full_grid[block] == TRAIN_VOXEL_SPLIT):
+		block = token_block(
+			coordinate, patch_size_xyz=(8, 8, 8), volume_shape_xyz=full_grid.shape
+		)
+		if not np.any(np.asarray(full_grid[block]) == TRAIN_VOXEL_SPLIT):
 			raise ValueError(
 				'selected unique token has no canonical train voxel: '
 				f'{split_id}/{budget_id}/{coordinate.tolist()}'
 			)
+
+
+def _normalized_source_identities(
+	config: F3VoxelLabelBudgetSplitConfig,
+	metadata: Mapping[str, object],
+	*,
+	split_id: str,
+) -> Mapping[str, Mapping[str, str]]:
+	"""Validate current or legacy full-label provenance and normalize it."""
+	labels = _mapping(metadata.get('labels'))
+	reference = _mapping(metadata.get('reference_embedding'))
+	reference_metadata = _mapping(reference.get('metadata'))
+	expected = {
+		'class_info': (config.class_info, labels.get('class_info')),
+		'source_label_segy': (config.source_label_segy, labels.get('source_label_segy')),
+		'seismic_volume': (config.seismic_volume, reference_metadata.get('source_amplitude_path')),
+	}
+	for name, (path, recorded_path) in expected.items():
+		if not path.is_file():
+			raise FileNotFoundError(f'{split_id} missing strict {name}: {path}')
+		if Path(str(recorded_path)).resolve(strict=False) != path.resolve(strict=False):
+			raise ValueError(f'{split_id} legacy {name} path differs from strict config')
+	if not config.segy_geometry_json.is_file():
+		raise FileNotFoundError(
+			f'{split_id} missing strict segy_geometry_json: {config.segy_geometry_json}'
+		)
+	if dict(read_f3_line_geometry(config.segy_geometry_json).to_dict()) != dict(
+		_mapping(metadata.get('geometry'))
+	):
+		raise ValueError(f'{split_id} legacy SEGY geometry differs from strict config')
+	sources = metadata.get('source_identities')
+	if sources is not None:
+		current = _mapping(sources)
+		for name, (path, _) in {
+			**expected,
+			'segy_geometry_json': (config.segy_geometry_json, None),
+		}.items():
+			_validate_identity(
+				_mapping(current.get(name)), path, label=f'{split_id} source {name}'
+			)
+	return {
+		name: {'path': str(path), 'sha256': file_sha256(path)}
+		for name, (path, _) in {
+			**expected,
+			'segy_geometry_json': (config.segy_geometry_json, None),
+		}.items()
+	}
 
 
 def _mapping(value: object) -> Mapping[str, object]:
