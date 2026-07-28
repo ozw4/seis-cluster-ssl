@@ -1,0 +1,9 @@
+{
+  "aggregate_count": 120,
+  "decision": {
+    "status": "M4_MH_SPLIT_HOLD",
+    "systematic_major_degradation": false
+  },
+  "job_count": 36,
+  "status": "M4_MH_SPLIT_HOLD"
+}
