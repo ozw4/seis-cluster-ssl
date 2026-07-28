@@ -582,6 +582,174 @@ def test_soft_complete_requires_all_canonical_valid_token_identities(
 		_canonical_valid_token_identities(config)
 
 
+def test_soft_complete_phase_publishes_and_reuses_json_safe_handoff(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	artifact_root = tmp_path / 'artifacts'
+	full_root = artifact_root / 'pretraining' / (
+		'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1'
+	)
+	best_path = full_root / 'best.pt'
+	best_path.parent.mkdir(parents=True)
+	best_path.write_bytes(b'best checkpoint')
+	config = F3M5SoftPosteriorPretrainingValidationConfig(
+		artifact_root=artifact_root,
+		experiment_root=artifact_root / 'pretraining',
+		posterior_manifest=artifact_root / 'posterior_manifest.json',
+		hard_full_config=tmp_path / 'hard.yaml',
+		hard_handoff=artifact_root / 'hard_handoff.json',
+		soft_smoke_config=tmp_path / 'smoke.yaml',
+		soft_full_config=tmp_path / 'soft.yaml',
+	)
+	config.posterior_manifest.write_text('{}', encoding='utf-8')
+
+	embedding_root = (
+		artifact_root
+		/ 'embeddings/f3/facies_benchmark_v1'
+		/ 'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1'
+		/ 'overlap_x16'
+	)
+	files = soft_validation.output_paths(embedding_root, 'f3_facies_benchmark')
+	embedding_root.mkdir(parents=True)
+	files.embeddings.write_bytes(b'embeddings')
+	files.valid_tokens.write_bytes(b'valid tokens')
+	identity = {
+		'model_tag': 'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1',
+		'target_representation': 'ordered_path_state_posterior_v1',
+		'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+		'posterior_cost_temperature': 1.0,
+		'posterior_manifest_sha256': 'a' * 64,
+		'scientific_identity_sha256': 'b' * 64,
+		'posterior_manifest': {'sha256': 'a' * 64},
+	}
+	files.metadata.write_text(
+		json.dumps(
+			{
+				'checkpoint_path': str(best_path),
+				'checkpoint_sha256': soft_validation.file_sha256(best_path),
+				'stratigraphy_pretext': identity,
+			}
+		),
+		encoding='utf-8',
+	)
+	for model_tag in (
+		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1',
+		'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+	):
+		path = soft_validation.output_paths(
+			artifact_root
+			/ 'embeddings/f3/facies_benchmark_v1'
+			/ model_tag
+			/ 'overlap_x16',
+			'f3_facies_benchmark',
+		).valid_tokens
+		path.parent.mkdir(parents=True, exist_ok=True)
+		path.write_bytes(b'valid tokens')
+
+	class FakeEmbeddings:
+		shape = (76, 113, 32, 384)
+		dtype = np.dtype(np.float16)
+
+		def __getitem__(self, _index: object) -> np.ndarray:
+			return np.zeros(1, dtype=np.float16)
+
+	class FakeValidTokens:
+		shape = (76, 113, 32)
+		dtype = np.dtype(np.bool_)
+
+		def sum(self) -> int:
+			return 1
+
+	def fake_load(path: str | Path, *, mmap_mode: str) -> object:
+		assert mmap_mode == 'r'
+		if Path(path) == files.embeddings:
+			return FakeEmbeddings()
+		if Path(path) == files.valid_tokens:
+			return FakeValidTokens()
+		raise AssertionError(f'unexpected embedding load: {path}')
+
+	monkeypatch.setattr(soft_validation.np, 'load', fake_load)
+	target_evidence = {
+		'target_representation': 'ordered_path_state_posterior_v1',
+		'posterior_manifest_path': str(config.posterior_manifest),
+		'posterior_manifest_sha256': 'a' * 64,
+		'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+		'posterior_cost_temperature': 1.0,
+		'posterior_head_hashes': {
+			str(head_k): {
+				'f3': dict.fromkeys(
+					('posterior', 'valid_tokens', 'metadata'), 'a' * 64
+				)
+			}
+			for head_k in (6, 8, 10)
+		},
+		'posterior_source_hard_manifest': {},
+		'posterior_source_embedding': {},
+		'posterior_head_diagnostics': {},
+		'initial_student_state_sha256': 'a' * 64,
+		'initial_head_state_sha256': 'a' * 64,
+		'hard_baseline_config': 'hard.yaml',
+		'hard_baseline_handoff': 'hard_handoff.json',
+		'hard_baseline_trainability_summary': {},
+		'hard_baseline_optimizer_group_identity': [],
+	}
+	checkpoint = {
+		'root': full_root,
+		'best_path': best_path,
+		'best': {
+			'trainability_summary': {
+				'trainable_parameter_count': 1,
+				'frozen_parameter_count': 2,
+				'trainable_names': ['encoder.layers.7.weight'],
+			}
+		},
+		'identity': {
+			**identity,
+			'optimizer_group_identity': [
+				{'name': 'head', 'parameter_names': ['head.fixture']}
+			]
+		},
+		'selection': {
+			'sha256': 'a' * 64,
+			'selected': {
+				'epoch': 25,
+				'global_step': 25600,
+				'checkpoint_kind': 'epoch',
+				'loss': 1.0,
+			},
+		},
+	}
+	monkeypatch.setattr(
+		soft_validation, 'load_multi_head_state_posterior_manifest', lambda _: {}
+	)
+	monkeypatch.setattr(soft_validation, '_training_config', lambda _: {})
+	monkeypatch.setattr(
+		soft_validation, '_validate_target_contract', lambda *_: target_evidence
+	)
+	monkeypatch.setattr(
+		soft_validation, '_checkpoint_evidence', lambda *_args, **_kwargs: checkpoint
+	)
+
+	first = soft_validation.validate_f3_m5_soft_posterior_pretraining(
+		config, phase='complete'
+	)
+	handoff_path = full_root / 'preflight' / 'soft_posterior_handoff.json'
+	assert first.published_handoff == handoff_path
+	embedding = first.evidence['embedding']
+	assert isinstance(embedding, dict)
+	assert embedding['root'] == str(embedding_root)
+	assert embedding['metadata_path'] == str(files.metadata)
+	assert soft_validation.load_f3_m5_soft_posterior_pretraining_handoff(
+		handoff_path
+	)['status'] == 'PASS'
+
+	second = soft_validation.validate_f3_m5_soft_posterior_pretraining(
+		config, phase='complete', only_missing=True
+	)
+	assert second.published_handoff is None
+
+
 def _soft_handoff_fixture(tmp_path: Path) -> dict[str, object]:
 	best_path = tmp_path / 'best.pt'
 	best_path.write_bytes(b'best checkpoint')

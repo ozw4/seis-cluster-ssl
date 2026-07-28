@@ -621,7 +621,9 @@ def _embedding_evidence(
 	files = output_paths(root, 'f3_facies_benchmark')
 	if not all(path.is_file() for path in (files.embeddings, files.valid_tokens, files.metadata)):
 		raise FileNotFoundError('soft complete embedding artifacts are missing')
-	metadata = _mapping(json.loads(files.metadata.read_text(encoding='utf-8')), 'embedding metadata')
+	metadata = _mapping(
+		json.loads(files.metadata.read_text(encoding='utf-8')), 'embedding metadata'
+	)
 	best_path = Path(checkpoint['best_path'])
 	if Path(str(metadata.get('checkpoint_path', ''))).resolve() != best_path.resolve() or metadata.get('checkpoint_sha256') != file_sha256(best_path):
 		raise ValueError('embedding metadata does not bind selected best.pt')
@@ -655,8 +657,8 @@ def _embedding_evidence(
 			'soft embedding valid-token identity differs from a canonical baseline'
 		)
 	return {
-		'root': root,
-		'metadata_path': files.metadata,
+		'root': str(root),
+		'metadata_path': str(files.metadata),
 		'metadata_sha256': file_sha256(files.metadata),
 		'embeddings_sha256': file_sha256(files.embeddings),
 		'valid_tokens_sha256': valid_tokens_sha256,
