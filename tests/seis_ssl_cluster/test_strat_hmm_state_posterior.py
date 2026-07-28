@@ -116,7 +116,7 @@ def test_export_survey_rejects_embedding_valid_mask_mismatch(
 	output_root = tmp_path / 'out'
 	output_root.mkdir()
 
-	with pytest.raises(ValueError, match='source embedding valid mask differs'):
+	with pytest.raises(ValueError, match='source embedding valid mask does not cover'):
 		state_posterior._export_survey(
 			output_root,
 			embedding,
@@ -127,6 +127,48 @@ def test_export_survey_rejects_embedding_valid_mask_mismatch(
 				state_posterior._PosteriorStats(2),
 			),
 		)
+
+
+def test_export_survey_accepts_hard_target_subset_of_embedding_mask(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Edge-excluded hard targets may use a strict subset of source embeddings."""
+	labels_path, valid_path, embedding = _tiny_survey(tmp_path, labels=(0, -1))
+	embedding_valid_path = tmp_path / 'embedding.valid_tokens.npy'
+	np.save(embedding_valid_path, np.array([[[True, True]]], dtype=np.bool_))
+	embedding = EmbeddingInput(
+		survey_id=embedding.survey_id,
+		embeddings_path=embedding.embeddings_path,
+		valid_tokens_path=embedding_valid_path,
+		metadata_path=embedding.metadata_path,
+	)
+	monkeypatch.setattr(
+		state_posterior, '_source_label_path', lambda _source: labels_path
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'prepare_feature_batch_for_indices',
+		lambda *_args, **_kwargs: np.array([[0.0]], dtype=np.float32),
+	)
+	output_root = tmp_path / 'out'
+	output_root.mkdir()
+
+	entry, _ = state_posterior._export_survey(
+		output_root,
+		embedding,
+		{'valid_tokens': state_posterior._reference(valid_path)},
+		_tiny_model(),
+		statistics=(
+			state_posterior._PosteriorStats(2),
+			state_posterior._PosteriorStats(2),
+		),
+	)
+
+	assert np.array_equal(
+		np.load(entry['valid_tokens']['path'], allow_pickle=False),
+		np.array([[[True, False]]]),
+	)
 
 
 @pytest.mark.parametrize(
@@ -154,6 +196,44 @@ def test_hashed_provenance_rejects_input_drift(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='hash mismatch'):
 		state_posterior._hashed_path(reference, 'input')
+
+
+def test_source_label_path_accepts_legacy_metadata_with_hashed_label_reference(
+	tmp_path: Path,
+) -> None:
+	"""Legacy source labels remain hash-verified through their manifest entry."""
+	labels = tmp_path / 'labels.npy'
+	np.save(labels, np.array([[[0]]], dtype=np.int32))
+	metadata = tmp_path / 'metadata.json'
+	metadata.write_text(
+		json.dumps({'source': {'source_label_path': str(labels)}}),
+		encoding='utf-8',
+	)
+
+	assert state_posterior._source_label_path(
+		{
+			'metadata': state_posterior._reference(metadata),
+			'labels': state_posterior._reference(labels),
+		}
+	) == labels
+
+
+def test_source_label_path_rejects_metadata_without_cryptographic_binding(
+	tmp_path: Path,
+) -> None:
+	"""A source label cannot bypass digest verification."""
+	labels = tmp_path / 'labels.npy'
+	np.save(labels, np.array([[[0]]], dtype=np.int32))
+	metadata = tmp_path / 'metadata.json'
+	metadata.write_text(
+		json.dumps({'source': {'source_label_path': str(labels)}}),
+		encoding='utf-8',
+	)
+
+	with pytest.raises(TypeError, match='hard target labels'):
+		state_posterior._source_label_path(
+			{'metadata': state_posterior._reference(metadata)}
+		)
 
 
 def test_load_model_rejects_missing_emission_source(
@@ -320,19 +400,16 @@ def test_hard_source_anchor_rejects_replaced_frozen_config(
 		)
 
 
-def test_hard_source_anchor_rejects_historical_handoff_without_model_artifacts(
+def test_hard_source_anchor_reconstructs_historical_handoff_model_identities(
 	tmp_path: Path,
 ) -> None:
 	config, source, models = _anchored_hard_source(
 		tmp_path, include_model_artifacts=False
 	)
 
-	with pytest.raises(
-		ValueError, match='lacks frozen model identities'
-	):
-		state_posterior._validate_hard_source_model_anchor(
-			source, config=config, models=models
-		)
+	state_posterior._validate_hard_source_model_anchor(
+		source, config=config, models=models
+	)
 
 
 def test_dry_run_plans_without_creating_outputs(
@@ -766,7 +843,10 @@ def _tiny_survey(
 	labels_path = tmp_path / 'labels.npy'
 	valid_path = tmp_path / 'valid.npy'
 	np.save(labels_path, np.asarray(labels, dtype=np.int64).reshape(1, 1, 2))
-	np.save(valid_path, np.ones((1, 1, 2), dtype=np.bool_))
+	np.save(
+		valid_path,
+		np.asarray(labels, dtype=np.int64).reshape(1, 1, 2) >= 0,
+	)
 	return (
 		labels_path,
 		valid_path,

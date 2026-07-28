@@ -1,0 +1,11 @@
+{
+  "git_sha": "2fc9d846591235eb666943a1113134590cd66c60",
+  "status": "PASS",
+  "downstream_screening": "ready",
+  "fixed_conditions": "M5-U soft target representation only; K=6/8/10, consistency_weight=0, seed=42, 25 epochs, and all hard mh_nocons conditions retained.",
+  "posterior_manifest_sha256": "94c98cb2081db1dbd75d010278f1358cc17d9ebd943a715726e43f5a055af35f",
+  "full_run": {"epochs": 25, "global_step": 25600, "best_epoch": 22, "best_step": 22000, "best_kind": "step", "best_loss": 1.3672162294387817},
+  "embedding": {"shape": [76, 113, 32, 384], "dtype": "float16", "valid_count": 237225, "sha256": "f2df3d0476615cbad1ff0a834c22dfc9b782e6253c39f9be5a99c02eb29a85f8", "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"},
+  "handoff": {"status": "PASS", "sha256": "d085ddf61a7bcc3793bc9cf0a419710f794b018769618c0091152eeb5420605c"},
+  "reruns": {"pretraining": 1, "embedding": 1}
+}

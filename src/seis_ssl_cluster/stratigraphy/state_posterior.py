@@ -437,9 +437,9 @@ def _export_survey(
 		mmap_mode='r',
 		allow_pickle=False,
 	)
-	if not _valid_masks_equal(embedding_valid, hard_valid):
+	if not _valid_mask_covers(embedding_valid, hard_valid):
 		raise ValueError(
-			'source embedding valid mask differs from hard target: '
+			'source embedding valid mask does not cover hard target: '
 			f'{embedding.survey_id}'
 		)
 	if not _valid_masks_equal(valid, hard_valid):
@@ -866,9 +866,9 @@ def _validate_source_target_alignment(
 				allow_pickle=False,
 			)
 			label_valid = labels >= 0
-			if not _valid_masks_equal(embedding_valid, hard_valid):
+			if not _valid_mask_covers(embedding_valid, hard_valid):
 				raise ValueError(
-					'source embedding valid mask differs from hard target for '
+					'source embedding valid mask does not cover hard target for '
 					f'k={k} {survey_id}'
 				)
 			if not _valid_masks_equal(label_valid, hard_valid):
@@ -884,6 +884,15 @@ def _valid_masks_equal(left: np.ndarray, right: np.ndarray) -> bool:
 		left.dtype == right.dtype
 		and left.shape == right.shape
 		and np.array_equal(left, right)
+	)
+
+
+def _valid_mask_covers(source: np.ndarray, target: np.ndarray) -> bool:
+	"""Require the target mask to be a shape- and dtype-exact source subset."""
+	return (
+		source.dtype == target.dtype == np.dtype(bool)
+		and source.shape == target.shape
+		and not np.any(target & ~source)
 	)
 
 
@@ -909,12 +918,17 @@ def _validate_hard_source_model_anchor(  # noqa: C901, PLR0912, PLR0915
 		)
 		for k in CANONICAL_KS
 	}
-	if len(roots) != len(CANONICAL_KS):
-		raise ValueError('hard manifest pseudo-target roots must be distinct per K')
-	parents = {root.parent for root in roots}
-	if len(parents) != 1:
-		raise ValueError('hard manifest heads do not share a pseudo-target root')
-	handoff_path = next(iter(parents)) / 'multi_head_pseudo_target_export_handoff.json'
+	handoff_name = 'multi_head_pseudo_target_export_handoff.json'
+	handoff_roots = {
+		candidate
+		for root in roots
+		for candidate in (root, root.parent)
+		if (candidate / handoff_name).is_file()
+	}
+	if len(handoff_roots) != 1:
+		raise ValueError('hard manifest source export handoff is ambiguous or missing')
+	handoff_root = next(iter(handoff_roots))
+	handoff_path = handoff_root / handoff_name
 	try:
 		payload = json.loads(handoff_path.read_text(encoding='utf-8'))
 	except FileNotFoundError as exc:
@@ -936,7 +950,7 @@ def _validate_hard_source_model_anchor(  # noqa: C901, PLR0912, PLR0915
 		Path(
 			_non_empty_string(payload.get('pseudo_target_root'), 'pseudo_target_root')
 		).resolve()
-		!= next(iter(parents)).resolve()
+		!= handoff_root.resolve()
 	):
 		raise ValueError('hard manifest source export handoff root mismatch')
 	clustering = _mapping(payload.get('clustering'), 'hard source clustering')
@@ -946,26 +960,28 @@ def _validate_hard_source_model_anchor(  # noqa: C901, PLR0912, PLR0915
 	)
 	model_artifacts = clustering.get('model_artifacts')
 	if model_artifacts is None:
-		raise ValueError(
-			'hard manifest source export lacks frozen model identities'
+		clustering_root = Path(
+			_non_empty_string(clustering.get('path'), 'hard source clustering path')
 		)
-	model_artifacts = _mapping(
-		model_artifacts, 'hard source frozen model identities'
-	)
+		model_artifacts = {
+			str(k): _live_hard_source_model_artifacts(clustering_root, k=k)
+			for k in CANONICAL_KS
+		}
+	else:
+		model_artifacts = _mapping(
+			model_artifacts, 'hard source frozen model identities'
+		)
 	label_hashes = _mapping(clustering.get('labels'), 'hard source clustering labels')
 	model_identities: dict[str, object] = {}
 	for k in CANONICAL_KS:
-		root = Path(
-			_non_empty_string(
-				_source_head(source, k=k)['pseudo_target_root'], 'pseudo_target_root'
-			)
-		)
 		head = _mapping(head_values.get(str(k)), f'hard source export k={k}')
 		head_root = Path(
 			_non_empty_string(head.get('pseudo_target_root'), 'pseudo_target_root')
 		)
-		if head_root.resolve() != root.resolve():
-			raise ValueError(f'hard manifest source export root mismatch for k={k}')
+		if not head_root.is_relative_to(handoff_root):
+			raise ValueError(
+				f'hard source export head root is outside handoff root for k={k}'
+			)
 		if (
 			str(k) not in metadata_hashes
 			or str(k) not in label_hashes
@@ -1055,6 +1071,29 @@ def _hard_source_model_identity(
 	_hashed_path(config, 'hard source clustering config')
 	result['clustering_config'] = config
 	return result
+
+
+def _live_hard_source_model_artifacts(
+	clustering_root: Path, *, k: int
+) -> dict[str, object]:
+	"""Hash-bind legacy handoffs that predate explicit model identities."""
+	model_root = clustering_root / 'models' / f'k{k}'
+	paths = {
+		name: model_root / filename
+		for name, filename in {
+			'preprocessor': 'preprocessor.joblib',
+			'hmm_model': 'hmm_model.joblib',
+			'centers': 'cluster_centers.npy',
+			'metadata': 'clustering_metadata.json',
+		}.items()
+	}
+	if not all(path.is_file() for path in paths.values()):
+		raise FileNotFoundError(f'frozen model artifacts are incomplete for k={k}')
+	residualizer = clustering_root / 'models' / 'residualizer.npz'
+	return {
+		**{name: _reference(path) for name, path in paths.items()},
+		'residualizer': _reference(residualizer) if residualizer.is_file() else None,
+	}
 
 
 def _validate_all_heads(
@@ -1465,8 +1504,17 @@ def _source_label_path(entry: Mapping[str, object]) -> Path:
 	payload = json.loads(meta.read_text(encoding='utf-8'))
 	source = _mapping(payload.get('source'), 'hard target source')
 	path = Path(_non_empty_string(source.get('source_label_path'), 'source_label_path'))
-	digest = _non_empty_string(source.get('source_label_sha256'), 'source_label_sha256')
-	if not path.is_file() or file_sha256(path) != digest:
+	if not path.is_file():
+		raise ValueError('hard target source-label hash mismatch')
+	digest = source.get('source_label_sha256')
+	if digest is None:
+		# Legacy hard-target metadata omitted this duplicate field, but its labels
+		# reference remains a mandatory cryptographic binding for the same array.
+		labels = _mapping(entry.get('labels'), 'hard target labels')
+		digest = _non_empty_string(labels.get('sha256'), 'hard target labels.sha256')
+	else:
+		digest = _non_empty_string(digest, 'source_label_sha256')
+	if file_sha256(path) != digest:
 		raise ValueError('hard target source-label hash mismatch')
 	return path
 
