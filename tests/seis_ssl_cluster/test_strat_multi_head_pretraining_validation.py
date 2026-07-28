@@ -582,9 +582,7 @@ def test_soft_complete_requires_all_canonical_valid_token_identities(
 		_canonical_valid_token_identities(config)
 
 
-def test_soft_handoff_binds_trainability_and_canonical_valid_token_identities(
-	tmp_path: Path,
-) -> None:
+def _soft_handoff_fixture(tmp_path: Path) -> dict[str, object]:
 	best_path = tmp_path / 'best.pt'
 	best_path.write_bytes(b'best checkpoint')
 	digest = 'a' * 64
@@ -648,19 +646,56 @@ def test_soft_handoff_binds_trainability_and_canonical_valid_token_identities(
 			},
 		},
 	}
-	handoff = _soft_handoff(evidence)
+	return _soft_handoff(evidence)
+
+
+def test_soft_handoff_binds_trainability_and_canonical_valid_token_identities(
+	tmp_path: Path,
+) -> None:
+	handoff = _soft_handoff_fixture(tmp_path)
 	path = tmp_path / 'soft_handoff.json'
 	path.write_text(json.dumps(handoff), encoding='utf-8')
 
 	loaded = soft_validation.load_f3_m5_soft_posterior_pretraining_handoff(path)
 
-	assert loaded['checkpoint']['trainability_summary'] == trainability
-	expected_identities = evidence['embedding']['canonical_valid_token_identities']
+	assert loaded['checkpoint']['trainability_summary'] == handoff['checkpoint'][
+		'trainability_summary'
+	]
+	expected_identities = handoff['embedding']['canonical_valid_token_identities']
 	loaded_identities = loaded['embedding']['canonical_valid_token_identities']
 	assert loaded_identities == expected_identities
 	handoff['checkpoint'].pop('trainability_summary')
 	path.write_text(json.dumps(handoff), encoding='utf-8')
 	with pytest.raises(TypeError, match='trainability summary'):
+		soft_validation.load_f3_m5_soft_posterior_pretraining_handoff(path)
+
+
+@pytest.mark.parametrize(
+	('section', 'key'),
+	[
+		('targets', 'posterior_manifest_path'),
+		('targets', 'hard_baseline_config'),
+		('targets', 'hard_baseline_handoff'),
+		('checkpoint', 'path'),
+		('checkpoint', 'selected_epoch'),
+		('checkpoint', 'selected_global_step'),
+		('checkpoint', 'selected_checkpoint_kind'),
+		('checkpoint', 'selected_loss'),
+		('embedding', 'root'),
+		('embedding', 'metadata_path'),
+	],
+)
+def test_soft_handoff_requires_complete_audit_evidence(
+	tmp_path: Path, section: str, key: str
+) -> None:
+	handoff = _soft_handoff_fixture(tmp_path)
+	section_payload = handoff[section]
+	assert isinstance(section_payload, dict)
+	section_payload.pop(key)
+	path = tmp_path / 'soft_handoff.json'
+	path.write_text(json.dumps(handoff), encoding='utf-8')
+
+	with pytest.raises(TypeError, match=key):
 		soft_validation.load_f3_m5_soft_posterior_pretraining_handoff(path)
 
 

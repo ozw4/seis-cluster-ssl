@@ -137,6 +137,13 @@ def load_f3_m5_soft_posterior_pretraining_handoff(  # noqa: C901, PLR0912
 	if payload.get('model_tag') != _MODEL_TAG or payload.get('variant') != 'soft_nocons':
 		raise ValueError('M5-U handoff model identity mismatch')
 	targets = _mapping(payload.get('targets'), 'handoff targets')
+	for key in (
+		'posterior_manifest_path',
+		'hard_baseline_config',
+		'hard_baseline_handoff',
+	):
+		if not isinstance(targets.get(key), str) or not targets[key]:
+			raise TypeError(f'handoff targets.{key} is missing')
 	for key in ('posterior_manifest_sha256', 'initial_student_state_sha256', 'initial_head_state_sha256'):
 		if not _sha256(targets.get(key)):
 			raise TypeError(f'handoff targets.{key} is missing')
@@ -150,9 +157,28 @@ def load_f3_m5_soft_posterior_pretraining_handoff(  # noqa: C901, PLR0912
 	):
 		raise ValueError('M5-U handoff posterior semantics mismatch')
 	checkpoint = _mapping(payload.get('checkpoint'), 'handoff checkpoint')
+	for key in ('path', 'selected_checkpoint_kind'):
+		if not isinstance(checkpoint.get(key), str) or not checkpoint[key]:
+			raise TypeError(f'handoff checkpoint.{key} is missing')
 	for key in ('sha256', 'selection_history_sha256'):
 		if not _sha256(checkpoint.get(key)):
 			raise TypeError(f'handoff checkpoint.{key} is missing')
+	for key in ('selected_epoch', 'selected_global_step'):
+		if (
+			isinstance(checkpoint.get(key), bool)
+			or not isinstance(checkpoint.get(key), int)
+			or checkpoint[key] < 0
+		):
+			raise TypeError(f'handoff checkpoint.{key} must be a nonnegative integer')
+	if checkpoint['selected_checkpoint_kind'] not in {'step', 'epoch'}:
+		raise ValueError('M5-U handoff selected checkpoint kind mismatch')
+	selected_loss = checkpoint.get('selected_loss')
+	if (
+		isinstance(selected_loss, bool)
+		or not isinstance(selected_loss, int | float)
+		or not np.isfinite(selected_loss)
+	):
+		raise TypeError('handoff checkpoint.selected_loss must be finite')
 	trainability = _mapping(
 		checkpoint.get('trainability_summary'), 'handoff checkpoint trainability summary'
 	)
@@ -166,6 +192,9 @@ def load_f3_m5_soft_posterior_pretraining_handoff(  # noqa: C901, PLR0912
 	embedding = _mapping(payload.get('embedding'), 'handoff embedding')
 	for key in ('metadata_sha256', 'embeddings_sha256', 'valid_tokens_sha256'):
 		if not _sha256(embedding.get(key)):
+			raise TypeError(f'handoff embedding.{key} is missing')
+	for key in ('root', 'metadata_path'):
+		if not isinstance(embedding.get(key), str) or not embedding[key]:
 			raise TypeError(f'handoff embedding.{key} is missing')
 	if (
 		embedding.get('embeddings_shape') != [76, 113, 32, 384]
