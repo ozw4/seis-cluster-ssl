@@ -434,6 +434,7 @@ def compute_strat_hmm_multi_head_posterior_losses(  # noqa: C901, PLR0912, PLR09
 	consistency_weight = _float_config(loss_config, 'consistency_weight', 0.0)
 	if consistency_weight != 0.0:
 		raise ValueError('consistency_weight must be zero for soft posterior training')
+	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
 	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
 	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
 	outputs = heads(tokens)
@@ -528,7 +529,7 @@ def compute_strat_hmm_multi_head_posterior_losses(  # noqa: C901, PLR0912, PLR09
 		distillation_loss = _graph_zero(tokens)
 	result.update(
 		{
-			'loss': prototype_loss
+			'loss': prototype_weight * prototype_loss
 			+ usage_weight * usage_loss
 			+ distillation_weight * distillation_loss,
 			'loss_prototype': prototype_loss,

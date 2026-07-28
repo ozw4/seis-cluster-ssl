@@ -129,6 +129,9 @@ def test_soft_multi_head_config_resolves_with_posterior_identity(
 	assert resolved['identity']['scientific_identity']['posterior_head_hashes'] == (
 		posterior_hashes
 	)
+	config['loss']['prototype_weight'] = 0.0
+	with pytest.raises(ValueError, match=r'prototype_weight.*1\.0'):
+		resolve_strat_hmm_pretext_config(config)
 
 
 def test_soft_multi_head_config_requires_posterior_hashes(

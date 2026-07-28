@@ -139,6 +139,46 @@ def test_multi_head_cpu_two_step_smoke_is_finite(
 	assert torch.isfinite(torch.tensor(tuple(state.metrics.values()))).all()
 
 
+def test_multi_head_posterior_cpu_two_step_smoke_is_finite() -> None:
+	student = _Student()
+	heads = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=3,
+		ks=(6, 8, 10),
+		projection_dim=2,
+		temperature=0.1,
+		normalize=True,
+	)
+	optimizer = torch.optim.AdamW(
+		[*heads.parameters(), *student.parameters()],
+		lr=3.0e-4,
+	)
+
+	state = train_strat_hmm_multi_head_one_epoch(
+		student=student,
+		heads=heads,
+		dataloader=[_posterior_batch(), _posterior_batch()],
+		optimizer=optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		loss_config={
+			'prototype_weight': 1.0,
+			'usage_weight': 0.005,
+			'consistency_weight': 0.0,
+		},
+		pseudo_target_config={},
+		target_representation='ordered_path_state_posterior_v1',
+	)
+
+	assert student.calls == 2
+	assert state.global_step == 2
+	assert {
+		'loss_prototype_k6',
+		'target_entropy_k8',
+		'prototype_kl_k10',
+	} <= set(state.metrics)
+	assert torch.isfinite(torch.tensor(tuple(state.metrics.values()))).all()
+
+
 def test_multi_head_epoch_rejects_nonfinite_student_tokens() -> None:
 	student = _Student()
 	heads = MultiResolutionOrderedPrototypeHeads(
@@ -294,6 +334,101 @@ def test_multi_head_runner_uses_rolling_checkpoint_paths(
 	assert checkpoint_calls == ['save']
 
 
+def test_multi_head_runner_dispatches_posterior_dataset_and_loss(
+	monkeypatch,
+	tmp_path,
+) -> None:
+	heads = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=3,
+		ks=(6, 8, 10),
+		projection_dim=2,
+		temperature=0.1,
+		normalize=True,
+	)
+	components = StratHmmMultiHeadComponents(
+		student=torch.nn.Linear(1, 1),
+		teacher=None,
+		heads=heads,
+		optimizer=torch.optim.AdamW(heads.parameters()),
+		mae_checkpoint_config={},
+		trainability_summary=TrainabilitySummary(0, 0, ()),
+		head_spec='multi_resolution_ordered_prototypes_v1',
+		head_ks=(6, 8, 10),
+	)
+	dispatch: list[str] = []
+
+	class _Dataloader(list):
+		def __init__(self) -> None:
+			super().__init__([object()])
+			self.generator = torch.Generator().manual_seed(291)
+
+	def posterior_dataset(*_args, **kwargs):
+		assert 'min_confidence' not in kwargs
+		dispatch.append('dataset')
+		return []
+
+	def posterior_dataloader(*_args, **_kwargs):
+		dispatch.append('dataloader')
+		return _Dataloader()
+
+	monkeypatch.setattr(runner, 'read_manifest_json', lambda _path: [])
+	monkeypatch.setattr(
+		runner,
+		'NopimsStratMultiHeadPosteriorDataset',
+		posterior_dataset,
+	)
+	monkeypatch.setattr(
+		runner,
+		'build_strat_multi_head_posterior_dataloader',
+		posterior_dataloader,
+	)
+	monkeypatch.setattr(
+		runner,
+		'build_strat_hmm_components',
+		lambda *_args, **_kwargs: components,
+	)
+	monkeypatch.setattr(runner, '_strat_hmm_control_identity', lambda _config: None)
+	monkeypatch.setattr(runner, '_snapshot_run_inputs', lambda **_kwargs: None)
+	monkeypatch.setattr(runner, '_write_run_metadata', lambda **_kwargs: None)
+	monkeypatch.setattr(runner, 'prepare_run_directory', lambda **_kwargs: None)
+
+	def train_posterior_epoch(**kwargs):
+		assert kwargs['target_representation'] == 'ordered_path_state_posterior_v1'
+		dispatch.append('loss')
+		return StratHmmTrainingState(
+			epoch=1,
+			global_step=1,
+			metrics={'loss': 1.0},
+			last_batch_index=0,
+			completed_epoch=True,
+		)
+
+	monkeypatch.setattr(
+		runner,
+		'train_strat_hmm_multi_head_one_epoch',
+		train_posterior_epoch,
+	)
+	monkeypatch.setattr(
+		runner,
+		'save_strat_hmm_rolling_checkpoint',
+		lambda *_args, **_kwargs: StratRollingCheckpointResult(
+			latest_path=tmp_path / 'latest.pt',
+			best_path=tmp_path / 'best.pt',
+			best_score=1.0,
+			best_updated=True,
+		),
+	)
+	config = _runner_config(tmp_path)
+	config['pseudo_targets']['target_representation'] = (
+		'ordered_path_state_posterior_v1'
+	)
+
+	result = runner.run_strat_hmm_pretext_training(config)
+
+	assert result == tmp_path / 'latest.pt'
+	assert dispatch == ['dataset', 'dataloader', 'loss']
+
+
 def _batch() -> dict[str, object]:
 	return {
 		'x': torch.ones((1, 1, 2, 2, 2)),
@@ -303,6 +438,22 @@ def _batch() -> dict[str, object]:
 				'labels': torch.tensor([[0, 1, 2, 3]]),
 				'confidence': torch.ones((1, 4)),
 				'boundary_weight': torch.ones((1, 4)),
+				'valid_mask': torch.ones((1, 4), dtype=torch.bool),
+			}
+			for k in (6, 8, 10)
+		},
+	}
+
+
+def _posterior_batch() -> dict[str, object]:
+	return {
+		'x': torch.ones((1, 1, 2, 2, 2)),
+		'local_valid_mask': torch.ones((1, 2, 2, 2), dtype=torch.bool),
+		'strat_multi_posteriors': {
+			f'k{k}': {
+				'posterior': torch.nn.functional.one_hot(
+					torch.tensor([[0, 1, 2, 3]]), k
+				).float(),
 				'valid_mask': torch.ones((1, 4), dtype=torch.bool),
 			}
 			for k in (6, 8, 10)

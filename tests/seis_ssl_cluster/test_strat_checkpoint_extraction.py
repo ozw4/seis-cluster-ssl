@@ -628,6 +628,112 @@ def test_multi_head_resume_rejects_no_consistency_main_mix(
 	)
 
 
+def test_soft_multi_head_checkpoint_resumes_and_rejects_identity_mixes(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _soft_multi_head_resume_config(tmp_path, monkeypatch)
+	student, head, optimizer = _new_multi_head_components()
+	checkpoint_path = _save_multi_head_resume_checkpoint(
+		tmp_path / 'soft-checkpoint.pt',
+		config=config,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+	)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	checkpoint_identity = payload['stratigraphy_checkpoint']
+	assert isinstance(checkpoint_identity, dict)
+	assert checkpoint_identity['schema_version'] == 3
+
+	resumed_student, resumed_head, resumed_optimizer = _new_multi_head_components()
+	resume_state = restore_strat_hmm_training_checkpoint(
+		payload=payload,
+		student=resumed_student,
+		head=resumed_head,
+		optimizer=resumed_optimizer,
+		scaler=None,
+		amp_enabled=False,
+		config=config,
+	)
+	assert resume_state.global_step == 2
+
+	hard_config = deepcopy(config)
+	hard_config['pseudo_targets'].pop('target_representation')
+	hard_student, hard_head, hard_optimizer = _new_multi_head_components()
+	with pytest.raises(ValueError, match='target_representation'):
+		restore_strat_hmm_training_checkpoint(
+			payload=payload,
+			student=hard_student,
+			head=hard_head,
+			optimizer=hard_optimizer,
+			scaler=None,
+			amp_enabled=False,
+			config=hard_config,
+		)
+
+	different_manifest_config = deepcopy(config)
+	different_manifest_path = tmp_path / 'different-posteriors.json'
+	different_manifest_path.write_text('{"posterior": false}', encoding='utf-8')
+	different_pseudo_targets = different_manifest_config['pseudo_targets']
+	different_pseudo_targets['manifest'] = str(different_manifest_path)
+	different_scientific = different_manifest_config['identity'][
+		'scientific_identity'
+	]
+	different_scientific['posterior_manifest_sha256'] = _sha256(
+		different_manifest_path
+	)
+	different_scientific['posterior_head_hashes'] = {
+		str(k): {
+			'survey': {
+				name: f'different-{k}-{name}'
+				for name in ('posterior', 'valid_tokens', 'metadata')
+			}
+		}
+		for k in (6, 8, 10)
+	}
+	stale_student, stale_head, stale_optimizer = _new_multi_head_components()
+	with pytest.raises(ValueError, match='posterior_manifest_sha256'):
+		restore_strat_hmm_training_checkpoint(
+			payload=payload,
+			student=stale_student,
+			head=stale_head,
+			optimizer=stale_optimizer,
+			scaler=None,
+			amp_enabled=False,
+			config=different_manifest_config,
+		)
+
+
+def test_hard_multi_head_checkpoint_cannot_resume_as_soft(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	hard_config = _multi_head_resume_config(tmp_path, monkeypatch, variant='nocons')
+	student, head, optimizer = _new_multi_head_components()
+	checkpoint_path = _save_multi_head_resume_checkpoint(
+		tmp_path / 'hard-checkpoint.pt',
+		config=hard_config,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+	)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	soft_config = _soft_multi_head_resume_config(tmp_path, monkeypatch)
+	soft_student, soft_head, soft_optimizer = _new_multi_head_components()
+
+	with pytest.raises(ValueError, match='target_representation'):
+		restore_strat_hmm_training_checkpoint(
+			payload=payload,
+			student=soft_student,
+			head=soft_head,
+			optimizer=soft_optimizer,
+			scaler=None,
+			amp_enabled=False,
+			config=soft_config,
+		)
+
+
 def test_multi_head_resume_rejects_history_mismatched_payload_before_load(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -1157,6 +1263,63 @@ def _multi_head_resume_config(
 	return config
 
 
+def _soft_multi_head_resume_config(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+	config = _multi_head_resume_config(tmp_path, monkeypatch, variant='nocons')
+	posterior_manifest_path = tmp_path / 'posteriors.json'
+	posterior_manifest_path.write_text('{"posterior": true}', encoding='utf-8')
+	posterior_hashes = _per_head_posterior_hashes()
+	monkeypatch.setattr(
+		strat_hmm_checkpoint,
+		'load_multi_head_state_posterior_manifest',
+		lambda path: (
+			_assert_posterior_manifest_load(path, posterior_manifest_path)
+			or _posterior_manifest(posterior_hashes)
+		),
+	)
+	pseudo_targets = config['pseudo_targets']
+	assert isinstance(pseudo_targets, dict)
+	pseudo_targets.update(
+		{
+			'manifest': str(posterior_manifest_path),
+			'target_representation': 'ordered_path_state_posterior_v1',
+		}
+	)
+	identity = config['identity']
+	assert isinstance(identity, dict)
+	identity['model_tag'] = (
+		'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1'
+	)
+	scientific = identity['scientific_identity']
+	assert isinstance(scientific, dict)
+	scientific.clear()
+	scientific.update(
+		{
+			'experiment_role': 'multi_head_ordered_soft_posterior_pretext',
+			'variant': 'soft_nocons',
+			'target_representation': 'ordered_path_state_posterior_v1',
+			'posterior_manifest_sha256': _sha256(posterior_manifest_path),
+			'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+			'posterior_cost_temperature': 1.0,
+			'posterior_head_hashes': posterior_hashes,
+			'supervised_loss': 'soft_categorical_cross_entropy_v1',
+			'head_spec': 'multi_resolution_ordered_prototypes_v1',
+			'head_ks': [6, 8, 10],
+			'head_temperature': 0.1,
+			'head_normalize': True,
+			'consistency_policy': 'disabled_for_m5_u_v1',
+			'prototype_weight': 1.0,
+			'usage_weight': 0.005,
+			'consistency_weight': 0.0,
+			'consistency_beta': 0.1,
+			'distillation_weight': 0.2,
+		}
+	)
+	return config
+
+
 def _set_multi_head_variant(config: dict[str, object], variant: str) -> None:
 	if variant not in {'nocons', 'cons010'}:
 		raise ValueError(f'unsupported fixture variant: {variant!r}')
@@ -1373,6 +1536,18 @@ def _per_head_target_hashes() -> dict[str, dict[str, dict[str, str]]]:
 	}
 
 
+def _per_head_posterior_hashes() -> dict[str, dict[str, dict[str, str]]]:
+	return {
+		str(k): {
+			'survey': {
+				name: f'{k}-{name}'
+				for name in ('posterior', 'valid_tokens', 'metadata')
+			}
+		}
+		for k in (6, 8, 10)
+	}
+
+
 def _multi_head_manifest(
 	hashes: dict[str, dict[str, dict[str, str]]],
 ) -> dict[str, object]:
@@ -1391,6 +1566,32 @@ def _multi_head_manifest(
 			for k, surveys in hashes.items()
 		},
 	}
+
+
+def _posterior_manifest(
+	hashes: dict[str, dict[str, dict[str, str]]],
+) -> dict[str, object]:
+	return {
+		'head_ks': [6, 8, 10],
+		'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+		'cost_temperature': 1.0,
+		'heads': {
+			k: {
+				'surveys': {
+					survey_id: {
+						name: {'sha256': digest}
+						for name, digest in targets.items()
+					}
+					for survey_id, targets in surveys.items()
+				}
+			}
+			for k, surveys in hashes.items()
+		},
+	}
+
+
+def _assert_posterior_manifest_load(path: Path, expected_path: Path) -> None:
+	assert path == expected_path
 
 
 def _sha256(path: Path) -> str:
