@@ -99,6 +99,65 @@ def structured_hmm_prototype_loss(  # noqa: PLR0913
 	return (token_loss * selected_weights).sum() / total_weight
 
 
+def soft_categorical_cross_entropy(
+	logits: torch.Tensor,
+	target_posterior: torch.Tensor,
+	*,
+	valid_mask: torch.Tensor,
+) -> torch.Tensor:
+	"""Return mean categorical cross entropy against detached soft targets.
+
+	Invalid rows are intentionally required to be all zero.  An empty valid mask
+	returns a graph-connected zero so a fully masked training batch remains safe
+	to backpropagate.
+	"""
+	_validate_logits(logits)
+	prefix_shape = logits.shape[:-1]
+	if not isinstance(target_posterior, torch.Tensor):
+		raise TypeError(
+			'target_posterior must be a torch.Tensor; got '
+			f'{type(target_posterior)!r}',
+		)
+	if tuple(target_posterior.shape) != tuple(logits.shape):
+		raise ValueError(
+			'target_posterior shape must match logits; got '
+			f'{tuple(target_posterior.shape)!r}, expected {tuple(logits.shape)!r}',
+		)
+	if not torch.is_floating_point(target_posterior):
+		raise TypeError(
+			f'target_posterior must be floating point; got {target_posterior.dtype}',
+		)
+	_validate_valid_mask(valid_mask, prefix_shape, logits.device)
+	if target_posterior.device != logits.device:
+		raise ValueError(
+			'target_posterior must be on the logits device; got '
+			f'{target_posterior.device}, expected {logits.device}',
+		)
+	if not bool(torch.isfinite(target_posterior).all().item()):
+		raise ValueError('target_posterior must be finite')
+	if bool(target_posterior.lt(0.0).any().item()):
+		raise ValueError('target_posterior must be non-negative')
+	flat_target = target_posterior.detach().reshape(-1, logits.shape[-1])
+	flat_valid = valid_mask.reshape(-1)
+	if not bool(torch.all(flat_target[~flat_valid] == 0.0).item()):
+		raise ValueError('invalid target_posterior rows must be zero')
+	valid_row_sums = flat_target[flat_valid].sum(dim=-1)
+	if not bool(torch.all(torch.isclose(
+		valid_row_sums,
+		torch.ones((), device=logits.device, dtype=target_posterior.dtype),
+		rtol=0.0,
+		atol=2.0e-6,
+	)).item()):
+		raise ValueError('valid target_posterior rows must sum to one')
+	if not bool(flat_valid.any().item()):
+		return logits.sum() * 0.0
+	selected_target = flat_target[flat_valid].to(dtype=logits.dtype)
+	selected_logits = logits.reshape(-1, logits.shape[-1])[flat_valid]
+	return -(selected_target * torch.nn.functional.log_softmax(
+		selected_logits, dim=-1
+	)).sum(dim=-1).mean()
+
+
 def usage_entropy_floor_loss(
 	probs: torch.Tensor,
 	*,
@@ -371,6 +430,7 @@ def _validate_same_device(*tensors: torch.Tensor) -> None:
 __all__ = [
 	'feature_distillation_loss',
 	'ordered_soft_coordinate',
+	'soft_categorical_cross_entropy',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
 ]

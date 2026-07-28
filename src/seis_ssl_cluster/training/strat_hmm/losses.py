@@ -14,6 +14,7 @@ from seis_ssl_cluster.stratigraphy import (
 	OrderedPrototypeHead,
 	expected_normalized_order_coordinate,
 	feature_distillation_loss,
+	soft_categorical_cross_entropy,
 	structured_hmm_prototype_loss,
 	usage_entropy_floor_loss,
 )
@@ -408,10 +409,151 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 	return result
 
 
+def compute_strat_hmm_multi_head_posterior_losses(  # noqa: C901, PLR0912, PLR0915
+	*,
+	heads: MultiResolutionOrderedPrototypeHeads,
+	encoded: Mapping[str, object],
+	teacher_encoded: Mapping[str, object] | None,
+	batch: Mapping[str, object],
+	loss_config: Mapping[str, object],
+) -> dict[str, torch.Tensor]:
+	"""Compute M5-U's equal-head soft posterior objective.
+
+	This deliberately has no confidence, boundary, temperature, or consistency
+	path: the frozen posterior itself is the complete categorical target.
+	"""
+	tokens = _encoded_tokens(encoded)
+	if not bool(torch.isfinite(tokens).all().item()):
+		raise FloatingPointError('non-finite student encoded tokens')
+	if teacher_encoded is not None and not bool(
+		torch.isfinite(_encoded_tokens(teacher_encoded)).all().item()
+	):
+		raise FloatingPointError('non-finite teacher encoded tokens')
+	if heads.head_ks != (6, 8, 10):
+		raise ValueError('soft posterior training requires canonical heads (6, 8, 10)')
+	consistency_weight = _float_config(loss_config, 'consistency_weight', 0.0)
+	if consistency_weight != 0.0:
+		raise ValueError('consistency_weight must be zero for soft posterior training')
+	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
+	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
+	outputs = heads(tokens)
+	head_keys = tuple(_head_key(k) for k in heads.head_ks)
+	if outputs.head_ks != heads.head_ks or tuple(outputs.outputs) != head_keys:
+		raise ValueError('multi-head model output does not match configured heads')
+	targets = _multi_head_posteriors(batch, head_keys)
+	student_valid_mask = _multi_head_student_valid_mask(encoded, tokens)
+	shared_pseudo_valid: torch.Tensor | None = None
+	posterior_values: dict[str, _MultiHeadPosteriorValues] = {}
+	for k, head_key in zip(heads.head_ks, head_keys, strict=True):
+		logits = outputs.outputs[head_key].logits
+		if not bool(torch.isfinite(logits).all().item()):
+			raise FloatingPointError(f'non-finite multi-head logits for {head_key}')
+		if logits.shape[-1] != k:
+			raise ValueError(
+				f'multi-head {head_key!r} logits last dimension must equal {k}',
+			)
+		values = _multi_head_posterior_values(
+			targets[head_key], reference=logits, head_key=head_key
+		)
+		if shared_pseudo_valid is None:
+			shared_pseudo_valid = values.valid_mask
+		elif not torch.equal(shared_pseudo_valid, values.valid_mask):
+			raise ValueError('all multi-head posterior valid masks must match')
+		posterior_values[head_key] = values
+	if shared_pseudo_valid is None:  # pragma: no cover - canonical heads are nonempty
+		raise AssertionError('multi-head posterior targets were unexpectedly empty')
+	distillation_valid = shared_pseudo_valid
+	if student_valid_mask is not None:
+		distillation_valid = distillation_valid & student_valid_mask
+	if teacher_encoded is not None:
+		teacher_valid_mask = _multi_head_student_valid_mask(teacher_encoded, tokens)
+		if teacher_valid_mask is not None:
+			distillation_valid = distillation_valid & teacher_valid_mask
+
+	entropy_floor = loss_config.get('entropy_floor')
+	prototype_losses: list[torch.Tensor] = []
+	usage_losses: list[torch.Tensor] = []
+	result: dict[str, torch.Tensor] = {}
+	valid_supervised = shared_pseudo_valid
+	if student_valid_mask is not None:
+		valid_supervised = valid_supervised & student_valid_mask
+	for k, head_key in zip(heads.head_ks, head_keys, strict=True):
+		logits = outputs.outputs[head_key].logits
+		values = posterior_values[head_key]
+		effective_posterior = values.posterior.masked_fill(
+			~valid_supervised.unsqueeze(-1), 0.0
+		)
+		prototype_loss = soft_categorical_cross_entropy(
+			logits, effective_posterior, valid_mask=valid_supervised
+		)
+		probs = torch.nn.functional.softmax(logits, dim=-1)
+		if usage_weight > 0.0 and bool(valid_supervised.any().item()):
+			entropy_floor_value = (
+				0.5 * math.log(k) if entropy_floor is None else float(entropy_floor)
+			)
+			usage_loss = usage_entropy_floor_loss(
+				probs, valid_mask=valid_supervised, entropy_floor=entropy_floor_value
+			)
+		else:
+			usage_loss = _graph_zero(logits)
+		target_entropy = _posterior_target_entropy(
+			effective_posterior, valid_supervised
+		)
+		prototype_losses.append(prototype_loss)
+		usage_losses.append(usage_loss)
+		result[f'loss_prototype_{head_key}'] = prototype_loss
+		result[f'loss_usage_{head_key}'] = usage_loss
+		result[f'target_entropy_{head_key}'] = target_entropy
+		result[f'prototype_kl_{head_key}'] = prototype_loss - target_entropy
+		result[f'prototype_usage_entropy_{head_key}'] = _prototype_usage_entropy(
+			probs, valid_supervised
+		)
+	prototype_loss = torch.stack(prototype_losses).mean()
+	usage_loss = torch.stack(usage_losses).mean()
+	if distillation_weight > 0.0:
+		if teacher_encoded is None:
+			raise ValueError(
+				'teacher encoded tokens are required for feature distillation',
+			)
+		distillation_loss = (
+			feature_distillation_loss(
+				tokens,
+				_encoded_tokens(teacher_encoded),
+				valid_mask=distillation_valid,
+			)
+			if bool(distillation_valid.any().item())
+			else _graph_zero(tokens)
+		)
+	else:
+		distillation_loss = _graph_zero(tokens)
+	result.update(
+		{
+			'loss': prototype_loss
+			+ usage_weight * usage_loss
+			+ distillation_weight * distillation_loss,
+			'loss_prototype': prototype_loss,
+			'loss_usage': usage_loss,
+			'loss_distillation': distillation_loss,
+			'valid_supervised_token_fraction': _safe_fraction(
+				valid_supervised, dtype=tokens.dtype
+			),
+			'valid_distillation_token_fraction': _safe_fraction(
+				distillation_valid, dtype=tokens.dtype
+			),
+		},
+	)
+	return result
+
+
 class _MultiHeadTargetValues(NamedTuple):
 	labels: torch.Tensor
 	confidence: torch.Tensor
 	boundary_weight: torch.Tensor
+	valid_mask: torch.Tensor
+
+
+class _MultiHeadPosteriorValues(NamedTuple):
+	posterior: torch.Tensor
 	valid_mask: torch.Tensor
 
 
@@ -432,6 +574,21 @@ def _multi_head_targets(
 			f'got {tuple(targets)!r}, expected {head_keys!r}',
 		)
 	return targets
+
+
+def _multi_head_posteriors(
+	batch: Mapping[str, object],
+	head_keys: tuple[str, ...],
+) -> Mapping[str, object]:
+	posteriors = batch.get('strat_multi_posteriors')
+	if not isinstance(posteriors, Mapping):
+		raise TypeError('strat_multi_posteriors must be a mapping')
+	if tuple(posteriors) != head_keys:
+		raise ValueError(
+			'strat_multi_posteriors keys must match multi-head model order; '
+			f'got {tuple(posteriors)!r}, expected {head_keys!r}',
+		)
+	return posteriors
 
 
 def _multi_head_target_values(
@@ -493,14 +650,64 @@ def _multi_head_target_values(
 			f'multi-head {head_key!r} boundary weight must be nonnegative',
 		)
 	if not bool(torch.all(boundary_weight[valid_mask] == 1.0).item()):
-		raise ValueError(
-			'multi-head boundary weight must be one for every valid token',
-		)
+		raise ValueError('multi-head boundary weight must be one for every valid token')
 	return _MultiHeadTargetValues(
 		labels=labels,
 		confidence=confidence.to(dtype=reference.dtype).detach(),
 		boundary_weight=boundary_weight.to(dtype=reference.dtype),
 		valid_mask=valid_mask,
+	)
+
+
+def _multi_head_posterior_values(
+	target: object,
+	*,
+	reference: torch.Tensor,
+	head_key: str,
+) -> _MultiHeadPosteriorValues:
+	if not isinstance(target, Mapping):
+		raise TypeError(f'strat_multi_posteriors[{head_key!r}] must be a mapping')
+	if tuple(target) != ('posterior', 'valid_mask'):
+		raise ValueError(
+			f'strat_multi_posteriors[{head_key!r}] must contain ordered '
+			"'posterior' and 'valid_mask' fields",
+		)
+	posterior = _required_tensor(target, 'posterior')
+	valid_mask = _required_tensor(target, 'valid_mask')
+	if not torch.is_floating_point(posterior):
+		raise TypeError(
+			f'multi-head {head_key!r} posterior must be floating point',
+		)
+	if posterior.device != reference.device:
+		raise ValueError(
+			f'multi-head {head_key!r} posterior must be on logits device',
+		)
+	if (
+		posterior.shape[0] != reference.shape[0]
+		or posterior.shape[-1] != reference.shape[-1]
+	):
+		raise ValueError(
+			f'multi-head {head_key!r} posterior batch/K dimensions must match logits',
+		)
+	flattened = posterior.reshape(reference.shape[0], -1, posterior.shape[-1])
+	if tuple(flattened.shape) != tuple(reference.shape):
+		raise ValueError(
+			f'multi-head {head_key!r} posterior token count must match logits',
+		)
+	if valid_mask.dtype != torch.bool:
+		raise TypeError(
+			f'multi-head {head_key!r} valid_mask must have dtype torch.bool',
+		)
+	if valid_mask.device != reference.device:
+		raise ValueError(
+			f'multi-head {head_key!r} valid_mask must be on logits device',
+		)
+	flattened_valid = _flatten_token_tensor(
+		valid_mask, reference, f'strat_multi_posteriors[{head_key!r}].valid_mask'
+	).bool()
+	return _MultiHeadPosteriorValues(
+		posterior=flattened.to(dtype=reference.dtype).detach(),
+		valid_mask=flattened_valid,
 	)
 
 
@@ -660,10 +867,22 @@ def _prototype_usage_entropy(
 	return -(q_bar * (q_bar + 1.0e-8).log()).sum()
 
 
+def _posterior_target_entropy(
+	posterior: torch.Tensor,
+	valid_mask: torch.Tensor,
+) -> torch.Tensor:
+	"""Return the arithmetic mean entropy of detached valid posterior rows."""
+	if not bool(valid_mask.any().item()):
+		return posterior.sum() * 0.0
+	selected = posterior.detach()[valid_mask]
+	return -(selected * selected.clamp_min(1.0e-12).log()).sum(dim=-1).mean()
+
+
 _strat_head_losses = compute_strat_hmm_pretext_losses
 
 
 __all__ = [
 	'compute_strat_hmm_multi_head_losses',
+	'compute_strat_hmm_multi_head_posterior_losses',
 	'compute_strat_hmm_pretext_losses',
 ]

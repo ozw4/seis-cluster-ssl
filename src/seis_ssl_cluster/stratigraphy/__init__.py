@@ -16,6 +16,7 @@ from seis_ssl_cluster.stratigraphy.export import (
 from seis_ssl_cluster.stratigraphy.losses import (
 	feature_distillation_loss,
 	ordered_soft_coordinate,
+	soft_categorical_cross_entropy,
 	structured_hmm_prototype_loss,
 	usage_entropy_floor_loss,
 )
@@ -125,6 +126,7 @@ __all__ = [
 	'resolve_multi_head_state_posterior_export_config',
 	'shuffle_pseudo_target_arrays',
 	'shuffle_strat_hmm_pseudo_targets',
+	'soft_categorical_cross_entropy',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
 	'validate_multi_head_state_posterior_manifest',

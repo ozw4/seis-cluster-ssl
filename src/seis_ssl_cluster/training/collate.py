@@ -78,6 +78,31 @@ def strat_multi_head_target_collate_fn(
 	}
 
 
+def strat_multi_head_posterior_collate_fn(
+	samples: Sequence[Mapping[str, object]],
+) -> dict[str, torch.Tensor | object]:
+	"""Collate ordered nested soft posterior targets."""
+	if not samples:
+		raise ValueError('samples must contain at least one sample')
+	head_keys, fields_by_head = _multi_head_posterior_contract(samples[0])
+	for sample in samples[1:]:
+		other_head_keys, _ = _multi_head_posterior_contract(sample)
+		if other_head_keys != head_keys:
+			raise ValueError('samples must have identical multi-head posterior order')
+	posteriors: dict[str, dict[str, torch.Tensor]] = {}
+	for head_key in head_keys:
+		posteriors[head_key] = {
+			field: _stack_multi_head_posterior_field(samples, head_key, field)
+			for field in fields_by_head[head_key]
+		}
+	return {
+		'x': _stack_arrays(samples, 'x'),
+		'local_valid_mask': _stack_arrays(samples, 'local_valid_mask'),
+		'strat_multi_posteriors': posteriors,
+		'coords': [sample.get('coords') for sample in samples],
+	}
+
+
 def move_batch_to_device(
 	batch: Mapping[str, object],
 	device: torch.device,
@@ -183,6 +208,51 @@ def _multi_head_contract(
 	return head_keys, fields_by_head
 
 
+def _multi_head_posterior_contract(
+	sample: Mapping[str, object],
+) -> tuple[tuple[str, ...], dict[str, tuple[str, ...]]]:
+	posteriors = sample.get('strat_multi_posteriors')
+	if not isinstance(posteriors, Mapping):
+		raise TypeError('strat_multi_posteriors must be a mapping')
+	head_keys = tuple(posteriors)
+	head_ks = tuple(_multi_head_key_k(head_key) for head_key in head_keys)
+	if head_ks != (6, 8, 10):
+		raise ValueError(
+			'strat_multi_posteriors head keys must be canonical ascending '
+			'k6, k8, k10',
+		)
+	fields_by_head: dict[str, tuple[str, ...]] = {}
+	for head_key, k in zip(head_keys, head_ks, strict=True):
+		target = posteriors[head_key]
+		if not isinstance(target, Mapping):
+			raise TypeError('strat_multi_posteriors must map head keys to mappings')
+		fields = tuple(target)
+		if fields != ('posterior', 'valid_mask'):
+			raise ValueError(
+				f'strat_multi_posteriors[{head_key!r}] must contain ordered '
+				"fields ('posterior', 'valid_mask')",
+			)
+		posterior = _require_array(target, 'posterior')
+		valid_mask = _require_array(target, 'valid_mask')
+		if posterior.dtype != np.float32 or posterior.ndim != 4:
+			raise ValueError(
+				f'strat_multi_posteriors[{head_key!r}].posterior must be '
+				f'float32 [X,Y,Z,{k}]',
+			)
+		if posterior.shape[-1] != k:
+			raise ValueError(
+				f'strat_multi_posteriors[{head_key!r}] posterior last dimension '
+				f'must equal {k}',
+			)
+		if valid_mask.dtype != np.bool_ or valid_mask.shape != posterior.shape[:3]:
+			raise ValueError(
+				f'strat_multi_posteriors[{head_key!r}] valid_mask shape/dtype '
+				'mismatch',
+			)
+		fields_by_head[head_key] = fields
+	return head_keys, fields_by_head
+
+
 def _multi_head_key_k(head_key: object) -> int:
 	"""Return the K encoded by one canonical multi-head target key."""
 	if not isinstance(head_key, str):
@@ -234,6 +304,36 @@ def _stack_multi_head_field(
 	return torch.stack([_to_tensor(array) for array in arrays], dim=0)
 
 
+def _stack_multi_head_posterior_field(
+	samples: Sequence[Mapping[str, object]],
+	head_key: str,
+	field: str,
+) -> torch.Tensor:
+	arrays: list[np.ndarray] = []
+	for sample in samples:
+		head_keys, _ = _multi_head_posterior_contract(sample)
+		if head_key not in head_keys:
+			raise ValueError(f'sample is missing multi-head posterior {head_key!r}')
+		posteriors = sample['strat_multi_posteriors']
+		if not isinstance(posteriors, Mapping):  # pragma: no cover - validated above
+			raise TypeError('strat_multi_posteriors must be a mapping')
+		target = cast('Mapping[str, object]', posteriors[head_key])
+		arrays.append(_require_array(target, field))
+	first = arrays[0]
+	for array in arrays[1:]:
+		if array.shape != first.shape:
+			raise ValueError(
+				f'all {head_key!r} {field!r} posterior arrays must share shape; '
+				f'got {array.shape!r}, expected {first.shape!r}',
+			)
+		if array.dtype != first.dtype:
+			raise TypeError(
+				f'all {head_key!r} {field!r} posterior arrays must share dtype; '
+				f'got {array.dtype}, expected {first.dtype}',
+			)
+	return torch.stack([_to_tensor(array) for array in arrays], dim=0)
+
+
 def _require_array(sample: Mapping[str, object], key: str) -> np.ndarray:
 	try:
 		value = sample[key]
@@ -272,6 +372,7 @@ def _torch_dtype(array: np.ndarray) -> torch.dtype:
 __all__ = [
 	'mae_collate_fn',
 	'move_batch_to_device',
+	'strat_multi_head_posterior_collate_fn',
 	'strat_multi_head_target_collate_fn',
 	'strat_pseudo_target_collate_fn',
 ]

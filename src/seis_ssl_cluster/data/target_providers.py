@@ -10,9 +10,13 @@ from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 
+from seis_ssl_cluster.clustering.features import file_sha256
 from seis_ssl_cluster.stratigraphy.multi_head import (
 	load_multi_head_target_manifest,
 	validate_multi_head_target_reference,
+)
+from seis_ssl_cluster.stratigraphy.state_posterior import (
+	load_multi_head_state_posterior_manifest,
 )
 from seis_ssl_cluster.stratigraphy.targets import (
 	StratPseudoTargetArrays,
@@ -68,6 +72,34 @@ class StratMultiHeadTargetArrays:
 
 	labels: np.ndarray
 	confidence: np.ndarray
+	valid_tokens: np.ndarray
+
+
+@dataclass(frozen=True)
+class StratMultiHeadPosteriorInput:
+	"""One validated posterior reference from a multi-head export."""
+
+	k: int
+	survey_id: str
+	posterior_path: Path
+	valid_tokens_path: Path
+	metadata_path: Path
+	hashes: Mapping[str, str]
+
+
+@dataclass(frozen=True)
+class StratMultiHeadPosteriorManifest:
+	"""Ordered posterior references grouped by survey."""
+
+	head_ks: tuple[int, ...]
+	by_survey: Mapping[str, tuple[StratMultiHeadPosteriorInput, ...]]
+
+
+@dataclass(frozen=True)
+class StratMultiHeadPosteriorArrays:
+	"""Process-local memory maps for one survey and posterior head."""
+
+	posterior: np.ndarray
 	valid_tokens: np.ndarray
 
 
@@ -514,6 +546,160 @@ class MultiHeadStratPseudoTargetProvider:
 		return self._pseudo_target_arrays[survey_id]
 
 
+class MultiHeadStratPosteriorProvider:
+	"""Add token-aligned soft posterior targets without hard-target fields."""
+
+	def __init__(  # noqa: D107
+		self,
+		multi_head_posterior_manifest: StratMultiHeadPosteriorManifest | str | Path,
+	) -> None:
+		self.manifest = _coerce_multi_head_posterior_manifest(
+			multi_head_posterior_manifest,
+		)
+		self._posterior_arrays: dict[
+			str, dict[int, StratMultiHeadPosteriorArrays]
+		] = {}
+
+	def validate_manifests(
+		self,
+		manifests: Sequence[SurveyManifest],
+		*,
+		local_crop_size_xyz: tuple[int, int, int],
+		patch_size_xyz: tuple[int, int, int],
+		token_grid_shape_xyz: tuple[int, int, int],
+	) -> None:
+		"""Validate that every survey supports token-aligned posterior crops."""
+		missing_ids = sorted(
+			{manifest.survey_id for manifest in manifests}
+			- self.manifest.by_survey.keys(),
+		)
+		if missing_ids:
+			raise ValueError(
+				f'missing multi-head posterior inputs for surveys: {missing_ids!r}',
+			)
+		for manifest in manifests:
+			required_shape = tuple(
+				((shape_axis - crop_axis) // patch_axis) + token_axis
+				for shape_axis, crop_axis, patch_axis, token_axis in zip(
+					manifest.amplitude.shape_xyz,
+					local_crop_size_xyz,
+					patch_size_xyz,
+					token_grid_shape_xyz,
+					strict=True,
+				)
+			)
+			for k, arrays in self._posteriors_for_survey(manifest.survey_id).items():
+				if any(
+					axis < required_axis
+					for axis, required_axis in zip(
+						arrays.posterior.shape[:3], required_shape, strict=True
+					)
+				):
+					raise ValueError(
+						f'survey {manifest.survey_id!r} multi-head posterior k={k} '
+						f'grid is too small for token-aligned crops; got '
+						f'{arrays.posterior.shape[:3]!r}, need at least '
+						f'{required_shape!r}',
+					)
+
+	def add_targets(
+		self,
+		sample: MutableMapping[str, object],
+		context: TargetProviderContext,
+	) -> None:
+		"""Materialize only one common posterior crop from each memory map."""
+		arrays_by_k = self._posteriors_for_survey(context.manifest.survey_id)
+		token_valid = _require_bool_array(
+			{'token_valid_mask': context.token_valid_mask}, 'token_valid_mask'
+		)
+		if token_valid.shape != context.token_size_xyz:
+			raise ValueError(
+				'token_valid_mask shape must match token_size_xyz; got '
+				f'{token_valid.shape!r} and {context.token_size_xyz!r}',
+			)
+		token_slices = _token_slices(context)
+		common_valid: np.ndarray | None = None
+		crops: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+		for k in self.manifest.head_ks:
+			arrays = arrays_by_k[k]
+			posterior = np.asarray(
+				arrays.posterior[(*token_slices, slice(None))], dtype=np.float32
+			).copy()
+			valid_mask = np.asarray(
+				arrays.valid_tokens[token_slices], dtype=bool
+			).copy()
+			_validate_multi_head_posterior_crop(posterior, valid_mask, k=k)
+			if common_valid is None:
+				common_valid = valid_mask
+			elif not np.array_equal(common_valid, valid_mask):
+				raise ValueError(
+					'multi-head posterior valid_tokens must match across heads; '
+					f'k={self.manifest.head_ks[0]} and k={k} differ',
+				)
+			crops[k] = (posterior, valid_mask)
+		if common_valid is None:  # pragma: no cover - manifest validation rejects this
+			raise AssertionError('multi-head posterior manifest has no heads')
+		effective_valid = np.logical_and(common_valid, token_valid)
+		targets: dict[str, dict[str, np.ndarray]] = {}
+		for k in self.manifest.head_ks:
+			posterior, _ = crops[k]
+			posterior[~effective_valid] = 0.0
+			_validate_multi_head_posterior_crop(posterior, effective_valid, k=k)
+			targets[f'k{k}'] = {
+				'posterior': posterior,
+				'valid_mask': effective_valid.copy(),
+			}
+		sample['strat_multi_posteriors'] = targets
+		coords = sample['coords']
+		if not isinstance(coords, MutableMapping):
+			raise TypeError('sample coords must be a mutable mapping')
+		coords['token_start_xyz'] = cast('XYZ', context.token_start_xyz)
+		coords['token_size_xyz'] = cast('XYZ', context.token_size_xyz)
+
+	def sample_is_acceptable(self, sample: Mapping[str, object]) -> bool:
+		"""Require at least one common valid token for the posterior crop."""
+		targets = _require_multi_head_posteriors(sample)
+		common_valid: np.ndarray | None = None
+		for k in self.manifest.head_ks:
+			target = targets[f'k{k}']
+			posterior = _require_float32_array(target, 'posterior')
+			valid_mask = _require_bool_array(target, 'valid_mask')
+			_validate_multi_head_posterior_crop(posterior, valid_mask, k=k)
+			if common_valid is None:
+				common_valid = valid_mask
+			elif not np.array_equal(common_valid, valid_mask):
+				raise ValueError('multi-head posterior valid masks must match')
+		return bool(common_valid is not None and np.any(common_valid))
+
+	def rejection_message(
+		self,
+		*,
+		survey_id: str,
+		max_resample_attempts: int,
+		last_valid_fraction: float,
+	) -> str:
+		"""Describe an exhausted posterior crop resampling attempt."""
+		return (
+			f'survey {survey_id!r} did not produce a multi-head posterior crop '
+			f'with at least one common valid token after '
+			f'max_resample_attempts={max_resample_attempts}; last local valid '
+			f'fraction was {last_valid_fraction:.6f}.'
+		)
+
+	def _posteriors_for_survey(
+		self, survey_id: str
+	) -> dict[int, StratMultiHeadPosteriorArrays]:
+		if survey_id not in self._posterior_arrays:
+			self._posterior_arrays[survey_id] = {
+				item.k: StratMultiHeadPosteriorArrays(
+					posterior=np.load(item.posterior_path, mmap_mode='r'),
+					valid_tokens=np.load(item.valid_tokens_path, mmap_mode='r'),
+				)
+				for item in self.manifest.by_survey[survey_id]
+			}
+		return self._posterior_arrays[survey_id]
+
+
 def load_strat_multi_head_target_manifest(
 	path: str | Path,
 ) -> StratMultiHeadTargetManifest:
@@ -570,6 +756,42 @@ def load_strat_multi_head_target_manifest(
 	)
 
 
+def load_strat_multi_head_posterior_manifest(
+	path: str | Path,
+) -> StratMultiHeadPosteriorManifest:
+	"""Load the strict state-posterior manifest without retaining its payload."""
+	payload = load_multi_head_state_posterior_manifest(path)
+	head_ks = tuple(cast('list[int]', payload['head_ks']))
+	heads = cast('Mapping[str, Mapping[str, object]]', payload['heads'])
+	first_surveys = cast('Mapping[str, object]', heads[str(head_ks[0])]['surveys'])
+	by_survey: dict[str, tuple[StratMultiHeadPosteriorInput, ...]] = {}
+	for survey_id in first_surveys:
+		inputs: list[StratMultiHeadPosteriorInput] = []
+		for k in head_ks:
+			entry = cast('Mapping[str, object]', heads[str(k)]['surveys'][survey_id])
+			inputs.append(
+				StratMultiHeadPosteriorInput(
+					k=k,
+					survey_id=survey_id,
+					posterior_path=Path(
+						str(cast('Mapping[str, object]', entry['posterior'])['path'])
+					),
+					valid_tokens_path=Path(
+						str(cast('Mapping[str, object]', entry['valid_tokens'])['path'])
+					),
+					metadata_path=Path(
+						str(cast('Mapping[str, object]', entry['metadata'])['path'])
+					),
+					hashes={
+						name: str(cast('Mapping[str, object]', entry[name])['sha256'])
+						for name in ('posterior', 'valid_tokens', 'metadata')
+					},
+				),
+			)
+		by_survey[survey_id] = tuple(inputs)
+	return StratMultiHeadPosteriorManifest(head_ks=head_ks, by_survey=by_survey)
+
+
 def _coerce_multi_head_target_manifest(
 	value: StratMultiHeadTargetManifest | str | Path,
 ) -> StratMultiHeadTargetManifest:
@@ -586,6 +808,69 @@ def _coerce_multi_head_target_manifest(
 	for survey_id, inputs in value.by_survey.items():
 		_validate_multi_head_target_survey(value, survey_id, inputs)
 	return value
+
+
+def _coerce_multi_head_posterior_manifest(
+	value: StratMultiHeadPosteriorManifest | str | Path,
+) -> StratMultiHeadPosteriorManifest:
+	if isinstance(value, (str, Path)):
+		return load_strat_multi_head_posterior_manifest(value)
+	if not isinstance(value, StratMultiHeadPosteriorManifest):
+		raise TypeError(
+			'multi_head_posterior_manifest must be a '
+			'StratMultiHeadPosteriorManifest or path; got '
+			f'{type(value).__name__}',
+		)
+	if value.head_ks != (6, 8, 10):
+		raise ValueError('multi-head posterior head_ks must be canonical (6, 8, 10)')
+	if not isinstance(value.by_survey, Mapping) or not value.by_survey:
+		raise ValueError('multi-head posterior manifest must contain survey inputs')
+	for survey_id, inputs in value.by_survey.items():
+		if not isinstance(survey_id, str) or not survey_id:
+			raise TypeError('multi-head posterior survey ids must be non-empty strings')
+		if (
+			not isinstance(inputs, tuple)
+			or tuple(item.k for item in inputs) != value.head_ks
+		):
+			raise ValueError(
+				f'multi-head posterior inputs for {survey_id!r} must match head_ks',
+			)
+		for item in inputs:
+			_validate_multi_head_posterior_input(item, survey_id)
+	return value
+
+
+def _validate_multi_head_posterior_input(
+	item: object,
+	survey_id: str,
+) -> None:
+	if not isinstance(item, StratMultiHeadPosteriorInput):
+		raise TypeError(
+			'multi-head posterior inputs must contain '
+			'StratMultiHeadPosteriorInput items',
+		)
+	if item.survey_id != survey_id:
+		raise ValueError(
+			f'multi-head posterior input survey ids must match {survey_id!r}',
+		)
+	if set(item.hashes) != {'posterior', 'valid_tokens', 'metadata'}:
+		raise ValueError('multi-head posterior input hashes must be complete')
+	for name, path in (
+		('posterior', item.posterior_path),
+		('valid_tokens', item.valid_tokens_path),
+		('metadata', item.metadata_path),
+	):
+		if not isinstance(path, Path):
+			raise TypeError(
+				'multi-head posterior artifact paths must be Path instances',
+			)
+		if not path.is_file() or not isinstance(item.hashes[name], str):
+			raise ValueError(f'multi-head posterior {name} reference is invalid')
+		if file_sha256(path) != item.hashes[name]:
+			raise ValueError(f'multi-head posterior {name} hash mismatch')
+	posterior = np.load(item.posterior_path, mmap_mode='r', allow_pickle=False)
+	valid = np.load(item.valid_tokens_path, mmap_mode='r', allow_pickle=False)
+	_validate_multi_head_posterior_crop(posterior, valid, k=item.k)
 
 
 def _validate_multi_head_target_manifest_header(
@@ -714,6 +999,17 @@ def _require_multi_head_targets(
 	return cast('Mapping[str, Mapping[str, object]]', value)
 
 
+def _require_multi_head_posteriors(
+	sample: Mapping[str, object],
+) -> Mapping[str, Mapping[str, object]]:
+	value = sample.get('strat_multi_posteriors')
+	if not isinstance(value, Mapping):
+		raise TypeError('strat_multi_posteriors must be a mapping')
+	if not all(isinstance(target, Mapping) for target in value.values()):
+		raise TypeError('strat_multi_posteriors entries must be mappings')
+	return cast('Mapping[str, Mapping[str, object]]', value)
+
+
 def _require_int64_array(sample: Mapping[str, object], key: str) -> np.ndarray:
 	value = sample[key]
 	if not isinstance(value, np.ndarray):
@@ -777,6 +1073,39 @@ def _validate_multi_head_sample(
 	if np.any(boundary_weight[~valid_mask] != 0.0):
 		raise ValueError(
 			f'multi-head k={k} invalid boundary_weight must be 0.0'
+		)
+
+
+def _validate_multi_head_posterior_crop(
+	posterior: np.ndarray,
+	valid_mask: np.ndarray,
+	*,
+	k: int,
+) -> None:
+	"""Validate one cropped posterior with an explicit invalid-row contract."""
+	if posterior.dtype != np.float32 or posterior.ndim != 4:
+		raise ValueError(f'multi-head posterior k={k} must be float32 [X,Y,Z,{k}]')
+	if posterior.shape[-1] != k:
+		raise ValueError(
+			f'multi-head posterior k={k} last dimension must equal {k}',
+		)
+	if valid_mask.dtype != np.bool_ or valid_mask.shape != posterior.shape[:3]:
+		raise ValueError(
+			f'multi-head posterior k={k} valid mask shape/dtype mismatch',
+		)
+	if not np.all(np.isfinite(posterior)) or np.any(posterior < 0.0):
+		raise ValueError(
+			f'multi-head posterior k={k} must be finite and non-negative',
+		)
+	if not np.allclose(
+		posterior[valid_mask].sum(axis=-1), 1.0, rtol=0.0, atol=2.0e-6
+	):
+		raise ValueError(
+			f'multi-head posterior k={k} valid rows must sum to one',
+		)
+	if np.any(posterior[~valid_mask] != 0.0):
+		raise ValueError(
+			f'multi-head posterior k={k} invalid rows must be zero',
 		)
 
 
@@ -867,13 +1196,18 @@ def _validate_fraction(value: object, name: str) -> float:
 
 
 __all__ = [
+	'MultiHeadStratPosteriorProvider',
 	'MultiHeadStratPseudoTargetProvider',
 	'NoTargetProvider',
+	'StratMultiHeadPosteriorArrays',
+	'StratMultiHeadPosteriorInput',
+	'StratMultiHeadPosteriorManifest',
 	'StratMultiHeadTargetArrays',
 	'StratMultiHeadTargetInput',
 	'StratMultiHeadTargetManifest',
 	'StratPseudoTargetProvider',
 	'TargetProvider',
 	'TargetProviderContext',
+	'load_strat_multi_head_posterior_manifest',
 	'load_strat_multi_head_target_manifest',
 ]

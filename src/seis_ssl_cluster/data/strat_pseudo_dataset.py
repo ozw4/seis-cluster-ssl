@@ -6,7 +6,9 @@ from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.data.amplitude_crop_dataset import NopimsAmplitudeCropDataset
 from seis_ssl_cluster.data.target_providers import (
+	MultiHeadStratPosteriorProvider,
 	MultiHeadStratPseudoTargetProvider,
+	StratMultiHeadPosteriorManifest,
 	StratMultiHeadTargetManifest,
 	StratPseudoTargetProvider,
 )
@@ -137,4 +139,60 @@ class NopimsStratMultiHeadTargetDataset:
 		return self._dataset[index]
 
 
-__all__ = ['NopimsStratMultiHeadTargetDataset', 'NopimsStratPseudoTargetDataset']
+class NopimsStratMultiHeadPosteriorDataset:
+	"""Token-aligned crops with soft posteriors from a frozen HMM export."""
+
+	def __init__(  # noqa: D107, PLR0913
+		self,
+		manifests: Sequence[SurveyManifest],
+		multi_head_posterior_manifest: StratMultiHeadPosteriorManifest | str | Path,
+		local_crop_size_xyz: Sequence[int] = (128, 128, 128),
+		patch_size_xyz: Sequence[int] = (8, 8, 8),
+		seed: int = 42,
+		samples_per_epoch: int | None = None,
+		zero_mask: ZeroMaskConfig = DEFAULT_ZERO_MASK_CONFIG,
+		min_valid_fraction: float = 0.0,
+		max_resample_attempts: int = 16,
+		normalized_clip_abs: float | None = None,
+		amplitude_agc: AmplitudeAgcConfig | Mapping[str, object] | None = None,
+		finite_check_mode: FiniteCheckMode = 'strict',
+	) -> None:
+		provider = MultiHeadStratPosteriorProvider(multi_head_posterior_manifest)
+		self._dataset = NopimsAmplitudeCropDataset(
+			manifests,
+			local_crop_size_xyz=local_crop_size_xyz,
+			patch_size_xyz=patch_size_xyz,
+			seed=seed,
+			samples_per_epoch=samples_per_epoch,
+			zero_mask=zero_mask,
+			min_valid_fraction=min_valid_fraction,
+			max_resample_attempts=max_resample_attempts,
+			normalized_clip_abs=normalized_clip_abs,
+			amplitude_agc=amplitude_agc,
+			finite_check_mode=finite_check_mode,
+			target_provider=provider,
+		)
+
+	def __len__(self) -> int:
+		"""Return the configured epoch length."""
+		return len(self._dataset)
+
+	@property
+	def epoch(self) -> int:
+		"""Return the current shared sampling epoch."""
+		return self._dataset.epoch
+
+	def set_epoch(self, epoch: int) -> None:
+		"""Set the sampling epoch used for deterministic sample draws."""
+		self._dataset.set_epoch(epoch)
+
+	def __getitem__(self, index: int) -> dict[str, object]:
+		"""Return one multi-head soft-posterior supervision sample."""
+		return self._dataset[index]
+
+
+__all__ = [
+	'NopimsStratMultiHeadPosteriorDataset',
+	'NopimsStratMultiHeadTargetDataset',
+	'NopimsStratPseudoTargetDataset',
+]

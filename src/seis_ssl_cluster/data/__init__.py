@@ -60,6 +60,7 @@ from seis_ssl_cluster.data.schema import (
 	write_manifest_json,
 )
 from seis_ssl_cluster.data.strat_pseudo_dataset import (
+	NopimsStratMultiHeadPosteriorDataset,
 	NopimsStratMultiHeadTargetDataset,
 	NopimsStratPseudoTargetDataset,
 )
@@ -71,13 +72,18 @@ from seis_ssl_cluster.data.survey_preprocessing_cache import (
 	prepare_survey_preprocessing_cache,
 )
 from seis_ssl_cluster.data.target_providers import (
+	MultiHeadStratPosteriorProvider,
 	MultiHeadStratPseudoTargetProvider,
 	NoTargetProvider,
+	StratMultiHeadPosteriorArrays,
+	StratMultiHeadPosteriorInput,
+	StratMultiHeadPosteriorManifest,
 	StratMultiHeadTargetInput,
 	StratMultiHeadTargetManifest,
 	StratPseudoTargetProvider,
 	TargetProvider,
 	TargetProviderContext,
+	load_strat_multi_head_posterior_manifest,
 	load_strat_multi_head_target_manifest,
 )
 from seis_ssl_cluster.data.volume_store import (
@@ -124,10 +130,12 @@ __all__ = [
 	'FiniteCheckMode',
 	'ManifestBuildResult',
 	'ManifestBuildSummary',
+	'MultiHeadStratPosteriorProvider',
 	'MultiHeadStratPseudoTargetProvider',
 	'NoTargetProvider',
 	'NopimsAmplitudeCropDataset',
 	'NopimsAmplitudePretrainDataset',
+	'NopimsStratMultiHeadPosteriorDataset',
 	'NopimsStratMultiHeadTargetDataset',
 	'NopimsStratPseudoTargetDataset',
 	'NormalizationStatsQcItem',
@@ -137,6 +145,9 @@ __all__ = [
 	'NpyVolumeInfo',
 	'PreparedAmplitudeCrop',
 	'PreparedSurveyAmplitude',
+	'StratMultiHeadPosteriorArrays',
+	'StratMultiHeadPosteriorInput',
+	'StratMultiHeadPosteriorManifest',
 	'StratMultiHeadTargetInput',
 	'StratMultiHeadTargetManifest',
 	'StratPseudoTargetProvider',
@@ -165,6 +176,7 @@ __all__ = [
 	'inspect_npy_volume',
 	'load_normalization_stats',
 	'load_npy_path_list',
+	'load_strat_multi_head_posterior_manifest',
 	'load_strat_multi_head_target_manifest',
 	'make_survey_id_from_path',
 	'normalization_qc_report_to_dict',

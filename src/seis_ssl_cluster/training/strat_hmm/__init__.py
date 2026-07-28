@@ -12,6 +12,7 @@ from seis_ssl_cluster.training.strat_hmm.epoch import (
 )
 from seis_ssl_cluster.training.strat_hmm.losses import (
 	compute_strat_hmm_multi_head_losses,
+	compute_strat_hmm_multi_head_posterior_losses,
 	compute_strat_hmm_pretext_losses,
 )
 from seis_ssl_cluster.training.strat_hmm.resume import (
@@ -38,6 +39,7 @@ __all__ = [
 	'build_strat_hmm_head_only_components',
 	'build_strat_hmm_multi_head_components',
 	'compute_strat_hmm_multi_head_losses',
+	'compute_strat_hmm_multi_head_posterior_losses',
 	'compute_strat_hmm_pretext_losses',
 	'configure_student_trainability',
 	'restore_strat_hmm_training_checkpoint',
