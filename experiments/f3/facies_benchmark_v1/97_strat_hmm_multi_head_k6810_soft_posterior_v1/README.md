@@ -19,6 +19,20 @@ python proc/seis_ssl_cluster/export_strat_hmm_multi_head_state_posteriors.py \
 export SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_MANIFEST_SHA256="$(sha256sum \
   "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_state_posteriors/multi_head_state_posterior_handoff.json" \
   | awk '{print $1}')"
+eval "$(python - "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_state_posteriors/multi_head_state_posterior_handoff.json" <<'PY'
+import json
+import sys
+
+manifest = json.loads(open(sys.argv[1], encoding='utf-8').read())
+for k in (6, 8, 10):
+    survey = manifest['heads'][str(k)]['surveys']['f3_facies_benchmark']
+    for name in ('posterior', 'valid_tokens', 'metadata'):
+        print(
+            f"export SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K{k}_{name.upper()}_SHA256="
+            f"{survey[name]['sha256']}"
+        )
+PY
+)"
 export SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256="$(sha256sum \
   "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json" \
   | awk '{print $1}')"
@@ -33,11 +47,13 @@ The exporter validates K6/K8/K10, exact common valid masks, source hashes,
 Viterbi replay, and posterior structure before publishing its manifest. A
 second `--only-missing` pass must report `REUSE` for all heads.
 
-After the smoke, validate targets and checkpoints before full extraction:
+After the smoke, validate targets and the isolated two-step checkpoint before the full run:
 
 ```bash
 python proc/seis_ssl_cluster/validate_f3_m5_soft_posterior_pretraining.py \
   --config "$EXP/05_validate_soft_pretraining.yaml" --phase targets
+python proc/seis_ssl_cluster/validate_f3_m5_soft_posterior_pretraining.py \
+  --config "$EXP/05_validate_soft_pretraining.yaml" --phase smoke
 
 python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
   --config "$EXP/03_train_soft_full.yaml" --dry-run

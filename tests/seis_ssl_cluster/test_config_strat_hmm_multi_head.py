@@ -146,6 +146,7 @@ def test_soft_multi_head_config_requires_posterior_hashes(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	config = _multi_head_config(tmp_path)
+	manifest_sha256 = file_sha256(str(config['pseudo_targets']['manifest']))
 	monkeypatch.setattr(
 		state_posterior,
 		'load_multi_head_state_posterior_manifest',
@@ -163,8 +164,24 @@ def test_soft_multi_head_config_requires_posterior_hashes(
 		'multi_head_ordered_soft_posterior_pretext'
 	)
 	config['identity']['scientific_identity']['variant'] = 'soft_nocons'
+	config['identity']['model_tag'] = (
+		'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1'
+	)
+	scientific = config['identity']['scientific_identity']
+	scientific.update(
+		{
+			'target_representation': 'ordered_path_state_posterior_v1',
+			'posterior_manifest_sha256': manifest_sha256,
+			'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+			'posterior_cost_temperature': 1.0,
+			'supervised_loss': 'soft_categorical_cross_entropy_v1',
+			'consistency_policy': 'disabled_for_m5_u_v1',
+			'consistency_weight': 0.0,
+		}
+	)
+	del scientific['target_manifest_sha256']
 
-	with pytest.raises(ValueError, match='target_representation'):
+	with pytest.raises(ValueError, match='posterior_head_hashes'):
 		resolve_strat_hmm_pretext_config(config)
 
 

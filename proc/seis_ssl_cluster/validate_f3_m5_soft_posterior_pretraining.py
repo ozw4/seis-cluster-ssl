@@ -18,7 +18,9 @@ def build_parser() -> argparse.ArgumentParser:
 	)
 	parser.add_argument('--config', type=Path, required=True)
 	parser.add_argument(
-		'--phase', choices=('targets', 'checkpoints', 'complete'), required=True
+		'--phase',
+		choices=('targets', 'smoke', 'checkpoints', 'complete'),
+		required=True,
 	)
 	parser.add_argument('--dry-run', action='store_true')
 	parser.add_argument('--only-missing', action='store_true')

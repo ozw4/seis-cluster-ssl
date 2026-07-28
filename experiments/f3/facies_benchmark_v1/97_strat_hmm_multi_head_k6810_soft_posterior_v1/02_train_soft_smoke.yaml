@@ -12,6 +12,22 @@ identity:
     posterior_manifest_sha256: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_MANIFEST_SHA256}
     posterior_semantics: ordered_path_cost_gibbs_state_marginal_v1
     posterior_cost_temperature: 1.0
+    posterior_head_hashes:
+      '6':
+        f3_facies_benchmark:
+          posterior: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K6_POSTERIOR_SHA256}
+          valid_tokens: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K6_VALID_TOKENS_SHA256}
+          metadata: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K6_METADATA_SHA256}
+      '8':
+        f3_facies_benchmark:
+          posterior: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K8_POSTERIOR_SHA256}
+          valid_tokens: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K8_VALID_TOKENS_SHA256}
+          metadata: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K8_METADATA_SHA256}
+      '10':
+        f3_facies_benchmark:
+          posterior: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K10_POSTERIOR_SHA256}
+          valid_tokens: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K10_VALID_TOKENS_SHA256}
+          metadata: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K10_METADATA_SHA256}
     supervised_loss: soft_categorical_cross_entropy_v1
     consistency_policy: disabled_for_m5_u_v1
     consistency_weight: 0.0

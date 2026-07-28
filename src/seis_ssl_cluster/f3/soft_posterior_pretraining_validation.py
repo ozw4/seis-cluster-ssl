@@ -34,6 +34,7 @@ _CONFIG_KEYS = frozenset(
 		'posterior_manifest',
 		'hard_full_config',
 		'hard_handoff',
+		'soft_smoke_config',
 		'soft_full_config',
 	}
 )
@@ -53,6 +54,7 @@ class F3M5SoftPosteriorPretrainingValidationConfig:
 	posterior_manifest: Path
 	hard_full_config: Path
 	hard_handoff: Path
+	soft_smoke_config: Path
 	soft_full_config: Path
 
 
@@ -87,6 +89,7 @@ def f3_m5_soft_posterior_pretraining_validation_config_from_mapping(
 		posterior_manifest=required_path('posterior_manifest'),
 		hard_full_config=required_path('hard_full_config'),
 		hard_handoff=required_path('hard_handoff'),
+		soft_smoke_config=required_path('soft_smoke_config'),
 		soft_full_config=required_path('soft_full_config'),
 	)
 	for label, path in (
@@ -103,6 +106,7 @@ def f3_m5_soft_posterior_pretraining_validation_config_from_mapping(
 		('posterior_manifest', result.posterior_manifest),
 		('hard_full_config', result.hard_full_config),
 		('hard_handoff', result.hard_handoff),
+		('soft_smoke_config', result.soft_smoke_config),
 		('soft_full_config', result.soft_full_config),
 	):
 		if not path.is_file():
@@ -198,8 +202,8 @@ def validate_f3_m5_soft_posterior_pretraining(
 	quarantine_invalid: bool = False,
 ) -> F3M5SoftPosteriorPretrainingValidationResult:
 	"""Validate targets, full checkpoints, and extraction before PASS publication."""
-	if phase not in {'targets', 'checkpoints', 'complete'}:
-		raise ValueError('phase must be targets, checkpoints, or complete')
+	if phase not in {'targets', 'smoke', 'checkpoints', 'complete'}:
+		raise ValueError('phase must be targets, smoke, checkpoints, or complete')
 	try:
 		posterior = load_multi_head_state_posterior_manifest(config.posterior_manifest)
 		hard, soft = _training_config(config.hard_full_config), _training_config(
@@ -209,6 +213,25 @@ def validate_f3_m5_soft_posterior_pretraining(
 		if phase == 'targets':
 			return F3M5SoftPosteriorPretrainingValidationResult(
 				phase, {'status': 'PASS', **target_evidence}, None
+			)
+		if phase == 'smoke':
+			smoke = _training_config(config.soft_smoke_config)
+			smoke_evidence = _smoke_evidence(
+				config,
+				full=soft,
+				smoke=smoke,
+				hard_trainability_summary=_mapping(
+					target_evidence['hard_baseline_trainability_summary'],
+					'hard baseline trainability summary',
+				),
+				hard_optimizer_group_identity=target_evidence[
+					'hard_baseline_optimizer_group_identity'
+				],
+			)
+			return F3M5SoftPosteriorPretrainingValidationResult(
+				phase,
+				{'status': 'PASS', **target_evidence, 'smoke': smoke_evidence},
+				None,
 			)
 		checkpoint = _checkpoint_evidence(
 			soft,
@@ -253,7 +276,7 @@ def _training_config(path: Path) -> Mapping[str, object]:
 	return resolve_strat_hmm_pretext_config(load_config(path))
 
 
-def _validate_target_contract(
+def _validate_target_contract(  # noqa: C901
 	config: F3M5SoftPosteriorPretrainingValidationConfig,
 	posterior: Mapping[str, object],
 	hard: Mapping[str, object],
@@ -270,6 +293,20 @@ def _validate_target_contract(
 		raise ValueError('soft model tag mismatch')
 	if _mapping(hard['identity'], 'hard identity').get('model_tag') != _HARD_MODEL_TAG:
 		raise ValueError('hard baseline model tag mismatch')
+	hard_manifest = Path(
+		str(_mapping(hard['pseudo_targets'], 'hard pseudo targets')['manifest'])
+	).resolve()
+	posterior_source_hard_manifest = _mapping(
+		posterior['source_hard_manifest'], 'posterior source hard manifest'
+	)
+	if (
+		Path(str(posterior_source_hard_manifest.get('path', ''))).resolve()
+		!= hard_manifest
+		or posterior_source_hard_manifest.get('sha256') != file_sha256(hard_manifest)
+	):
+		raise ValueError(
+			'posterior source hard manifest does not match hard baseline target manifest'
+		)
 	for label, training, model_tag in (
 		('soft', soft, _MODEL_TAG),
 		('hard', hard, _HARD_MODEL_TAG),
@@ -298,7 +335,7 @@ def _validate_target_contract(
 		'posterior_semantics': posterior['posterior_semantics'],
 		'posterior_cost_temperature': posterior['cost_temperature'],
 		'posterior_head_hashes': posterior_head_hashes,
-		'posterior_source_hard_manifest': posterior['source_hard_manifest'],
+		'posterior_source_hard_manifest': posterior_source_hard_manifest,
 		'posterior_source_embedding': posterior['source_embedding'],
 		'posterior_head_diagnostics': {
 			str(k): _mapping(
@@ -412,16 +449,18 @@ def _hard_baseline_checkpoint_evidence(
 	}
 
 
-def _checkpoint_evidence(
+def _checkpoint_evidence(  # noqa: C901
 	training: Mapping[str, object],
 	*,
 	hard_trainability_summary: Mapping[str, object],
 	hard_optimizer_group_identity: object,
+	expected_global_step: int = 25600,
+	require_full_epoch_history: bool = True,
 ) -> dict[str, object]:
 	root = Path(str(_mapping(training['paths'], 'paths')['output_root']))
 	latest_path, best_path = root / 'latest.pt', root / 'best.pt'
 	if not latest_path.is_file() or not best_path.is_file():
-		raise FileNotFoundError('soft full run requires latest.pt and best.pt')
+		raise FileNotFoundError('soft run requires latest.pt and best.pt')
 	latest, best = _torch_mapping(latest_path), _torch_mapping(best_path)
 	for payload in (latest, best):
 		validate_stratigraphy_checkpoint_payload(payload, expected_config=training)
@@ -447,14 +486,102 @@ def _checkpoint_evidence(
 	identity = _mapping(best['stratigraphy_checkpoint'], 'soft checkpoint identity')
 	if (identity.get('initial_student_state_sha256'), identity.get('initial_head_state_sha256')) != (student_hash, head_hash):
 		raise ValueError('soft checkpoint initial state hash mismatch')
-	if latest.get('epoch') != 25 or latest.get('global_step') != 25600:
-		raise ValueError('soft full run must finish epoch 25/global step 25600')
-	rows = hard_validation._epoch_rows(root / 'multi_head_epoch_metrics.csv')
-	if [row['epoch'] for row in rows] != list(range(1, 26)) or rows[-1]['global_step'] != 25600:
-		raise ValueError('soft epoch metrics coverage is incomplete')
+	if require_full_epoch_history:
+		if latest.get('epoch') != 25 or latest.get('global_step') != expected_global_step:
+			raise ValueError('soft full run must finish epoch 25/global step 25600')
+		rows = hard_validation._epoch_rows(root / 'multi_head_epoch_metrics.csv')
+		if (
+			[row['epoch'] for row in rows] != list(range(1, 26))
+			or rows[-1]['global_step'] != expected_global_step
+		):
+			raise ValueError('soft epoch metrics coverage is incomplete')
+	elif latest.get('global_step') != expected_global_step:
+		raise ValueError(
+			f'soft smoke must finish at global step {expected_global_step}'
+		)
 	selection = hard_validation._validate_best_selection(best, latest, variant='soft_nocons')
 	hard_validation._validate_freeze_contract(best, training)
-	return {'root': root, 'best_path': best_path, 'latest_path': latest_path, 'best': best, 'identity': identity, 'selection': selection}
+	return {
+		'root': root,
+		'best_path': best_path,
+		'latest_path': latest_path,
+		'best': best,
+		'latest': latest,
+		'identity': identity,
+		'selection': selection,
+	}
+
+
+def _smoke_evidence(
+	config: F3M5SoftPosteriorPretrainingValidationConfig,
+	*,
+	full: Mapping[str, object],
+	smoke: Mapping[str, object],
+	hard_trainability_summary: Mapping[str, object],
+	hard_optimizer_group_identity: object,
+) -> dict[str, object]:
+	"""Validate the isolated CPU two-step M5-U smoke without full-run rules."""
+	_validate_smoke_config(config, full=full, smoke=smoke)
+	full_initial_hashes = _initial_hashes(full)
+	if _initial_hashes(smoke) != full_initial_hashes:
+		raise ValueError('soft smoke initial state hashes differ from soft full config')
+	evidence = _checkpoint_evidence(
+		smoke,
+		hard_trainability_summary=hard_trainability_summary,
+		hard_optimizer_group_identity=hard_optimizer_group_identity,
+		expected_global_step=2,
+		require_full_epoch_history=False,
+	)
+	latest = _mapping(evidence['latest'], 'soft smoke latest checkpoint')
+	state = _mapping(latest.get('training_state'), 'soft smoke training state')
+	if latest.get('epoch') != 1 or state.get('checkpoint_kind') != 'step':
+		raise ValueError('soft smoke must end with a two-step partial epoch checkpoint')
+	identity = _mapping(evidence['identity'], 'soft smoke checkpoint identity')
+	if (
+		identity.get('target_representation') != 'ordered_path_state_posterior_v1'
+		or identity.get('consistency_weight') != 0.0
+	):
+		raise ValueError('soft smoke target representation or consistency mismatch')
+	return evidence
+
+
+def _validate_smoke_config(
+	config: F3M5SoftPosteriorPretrainingValidationConfig,
+	*,
+	full: Mapping[str, object],
+	smoke: Mapping[str, object],
+) -> None:
+	"""Allow only the isolated CPU two-step execution delta from the full config."""
+	full_root = Path(
+		str(_mapping(full['paths'], 'soft full paths')['output_root'])
+	).resolve()
+	smoke_root = Path(
+		str(_mapping(smoke['paths'], 'soft smoke paths')['output_root'])
+	).resolve()
+	ensure_under_root(full_root, root=config.artifact_root, label='soft full output root')
+	ensure_under_root(smoke_root, root=config.artifact_root, label='soft smoke output root')
+	if smoke_root == full_root:
+		raise ValueError('soft smoke output root must differ from soft full output root')
+	if full_root.exists():
+		raise ValueError('soft full output root must remain unmodified during smoke')
+	smoke_train = _mapping(smoke['train'], 'soft smoke train')
+	if smoke_train.get('device') != 'cpu' or smoke_train.get('max_steps') != 2:
+		raise ValueError('soft smoke must use device=cpu and max_steps=2')
+	left, right = json.loads(json.dumps(full)), json.loads(json.dumps(smoke))
+	for value in (left, right):
+		_mapping(value['paths'], 'paths').pop('output_root', None)
+		runtime = _mapping(value['identity'], 'identity').get('runtime_identity')
+		if runtime is not None:
+			_mapping(runtime, 'runtime identity').pop('device', None)
+		train = _mapping(value['train'], 'train')
+		train.pop('device', None)
+		train.pop('max_steps', None)
+		_mapping(
+			_mapping(value['identity'], 'identity')['scientific_identity'],
+			'scientific identity',
+		)['train'].pop('max_steps', None)
+	if left != right:
+		raise ValueError('soft smoke config drift outside CPU two-step execution settings')
 
 
 def _embedding_evidence(

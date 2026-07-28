@@ -538,6 +538,12 @@ def test_all_repository_configs_load_and_resolve_supported_stages(
 		'SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_MANIFEST_SHA256',
 		'0' * 64,
 	)
+	for k in (6, 8, 10):
+		for name in ('POSTERIOR', 'VALID_TOKENS', 'METADATA'):
+			monkeypatch.setenv(
+				f'SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K{k}_{name}_SHA256',
+				'0' * 64,
+			)
 	config = load_config(config_path)
 
 	assert isinstance(config, dict)
@@ -767,6 +773,16 @@ def test_active_f3_strat_hmm_pretext_configs_resolve(
 		'SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_MANIFEST_SHA256',
 		'0' * 64,
 	)
+	for k in (6, 8, 10):
+		for name, offset in (
+			('POSTERIOR', 0),
+			('VALID_TOKENS', 10),
+			('METADATA', 20),
+		):
+			monkeypatch.setenv(
+				f'SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_K{k}_{name}_SHA256',
+				f'{k + offset:064x}',
+			)
 	monkeypatch.setattr(
 		state_posterior,
 		'load_multi_head_state_posterior_manifest',
@@ -1608,7 +1624,7 @@ def _active_posterior_manifest() -> dict[str, object]:
 		'heads': {
 			str(k): {
 				'surveys': {
-					'survey': {
+					'f3_facies_benchmark': {
 						'posterior': {'sha256': f'{k:064x}'},
 						'valid_tokens': {'sha256': f'{k + 10:064x}'},
 						'metadata': {'sha256': f'{k + 20:064x}'},

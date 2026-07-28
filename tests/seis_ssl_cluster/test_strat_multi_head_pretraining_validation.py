@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -67,6 +68,42 @@ def test_validation_config_rejects_unknown_keys_and_paths_outside_artifacts(
 		)
 
 
+def test_soft_validation_config_requires_a_smoke_config(tmp_path: Path) -> None:
+	artifact_root = tmp_path / 'artifacts'
+	artifact_root.mkdir()
+	posterior_manifest = artifact_root / 'posterior_manifest.json'
+	hard_handoff = artifact_root / 'hard_handoff.json'
+	for path in (posterior_manifest, hard_handoff):
+		path.write_text('{}', encoding='utf-8')
+	config_paths = {
+		name: tmp_path / f'{name}.yaml'
+		for name in ('hard', 'smoke', 'soft')
+	}
+	for path in config_paths.values():
+		path.write_text('{}', encoding='utf-8')
+	base = {
+		'artifact_root': str(artifact_root),
+		'experiment_root': str(artifact_root / 'pretraining'),
+		'posterior_manifest': str(posterior_manifest),
+		'hard_full_config': str(config_paths['hard']),
+		'hard_handoff': str(hard_handoff),
+		'soft_smoke_config': str(config_paths['smoke']),
+		'soft_full_config': str(config_paths['soft']),
+	}
+
+	resolved = (
+		soft_validation.f3_m5_soft_posterior_pretraining_validation_config_from_mapping(
+			base
+		)
+	)
+
+	assert resolved.soft_smoke_config == config_paths['smoke']
+	with pytest.raises(ValueError, match='soft_smoke_config'):
+		soft_validation.f3_m5_soft_posterior_pretraining_validation_config_from_mapping(
+			{key: value for key, value in base.items() if key != 'soft_smoke_config'}
+		)
+
+
 def test_soft_target_evidence_derives_per_head_hashes_from_manifest(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -75,6 +112,8 @@ def test_soft_target_evidence_derives_per_head_hashes_from_manifest(
 	posterior_manifest = artifact_root / 'posterior_manifest.json'
 	posterior_manifest.parent.mkdir(parents=True)
 	posterior_manifest.write_text('{}', encoding='utf-8')
+	hard_manifest = artifact_root / 'hard_target_manifest.json'
+	hard_manifest.write_text('{}', encoding='utf-8')
 	soft_model_tag = 'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1'
 	hard_model_tag = 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1'
 	config = F3M5SoftPosteriorPretrainingValidationConfig(
@@ -83,6 +122,7 @@ def test_soft_target_evidence_derives_per_head_hashes_from_manifest(
 		posterior_manifest=posterior_manifest,
 		hard_full_config=tmp_path / 'hard.yaml',
 		hard_handoff=artifact_root / 'hard_handoff.json',
+		soft_smoke_config=tmp_path / 'smoke.yaml',
 		soft_full_config=tmp_path / 'soft.yaml',
 	)
 	posterior_hashes = {
@@ -111,7 +151,10 @@ def test_soft_target_evidence_derives_per_head_hashes_from_manifest(
 			}
 			for key, surveys in posterior_hashes.items()
 		},
-		'source_hard_manifest': {'sha256': 'a' * 64},
+		'source_hard_manifest': {
+			'path': str(hard_manifest),
+			'sha256': soft_validation.file_sha256(hard_manifest),
+		},
 		'source_embedding': {'sha256': 'b' * 64},
 	}
 	soft = {
@@ -134,6 +177,7 @@ def test_soft_target_evidence_derives_per_head_hashes_from_manifest(
 			'output_root': str(experiment_root / hard_model_tag),
 		},
 		'identity': {'model_tag': hard_model_tag},
+		'pseudo_targets': {'manifest': str(hard_manifest)},
 	}
 	monkeypatch.setattr(
 		soft_validation, '_validate_allowed_config_delta', lambda *_: None
@@ -170,6 +214,16 @@ def test_soft_target_evidence_derives_per_head_hashes_from_manifest(
 	evidence = _validate_target_contract(config, posterior, hard, soft)
 
 	assert evidence['posterior_head_hashes'] == posterior_hashes
+	other_hard_manifest = artifact_root / 'other_hard_target_manifest.json'
+	other_hard_manifest.write_text('{}', encoding='utf-8')
+	posterior['source_hard_manifest'] = {
+		'path': str(other_hard_manifest),
+		'sha256': soft_validation.file_sha256(other_hard_manifest),
+	}
+	with pytest.raises(
+		ValueError, match='does not match hard baseline target manifest'
+	):
+		_validate_target_contract(config, posterior, hard, soft)
 
 
 def test_soft_config_delta_rejects_pseudo_target_drift() -> None:
@@ -318,6 +372,178 @@ def test_soft_checkpoint_evidence_requires_hard_trainability_and_optimizer_parit
 		)
 
 
+def test_soft_smoke_checkpoint_evidence_requires_two_finite_steps(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	root = tmp_path / 'soft_smoke'
+	root.mkdir()
+	for name in ('latest.pt', 'best.pt'):
+		(root / name).write_bytes(name.encode())
+	scientific = {'target_representation': 'ordered_path_state_posterior_v1'}
+	event = {
+		'sequence': 0,
+		'epoch': 1,
+		'global_step': 2,
+		'checkpoint_kind': 'step',
+		'batch_index': 1,
+		'loss': 1.0,
+	}
+	selection = {
+		'schema_version': 1,
+		'criterion': 'metrics.loss',
+		'improvement_policy': 'strictly_lower_loss_v1',
+		'events': [
+			{
+				**event,
+				'previous_best_score': None,
+				'best_updated': True,
+				'best_score_after': 1.0,
+			}
+		],
+		'selected': event,
+	}
+	optimizer_groups = [{'name': 'head', 'parameter_names': ['head.fixture']}]
+	payload = {
+		'epoch': 1,
+		'global_step': 2,
+		'metrics': {'loss': 1.0, 'loss_prototype': 0.8},
+		'training_state': {'checkpoint_kind': 'step', 'batch_index': 1},
+		'checkpoint_selection': selection,
+		'trainability_summary': {'trainable_names': ['encoder.layers.7.weight']},
+		'stratigraphy_checkpoint': {
+			'schema_version': 3,
+			'model_tag': 'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1',
+			'scientific_identity_sha256': scientific_identity_sha256(scientific),
+			'initial_student_state_sha256': 'a' * 64,
+			'initial_head_state_sha256': 'b' * 64,
+			'optimizer_group_identity': optimizer_groups,
+		},
+	}
+	training = {
+		'paths': {'output_root': str(root)},
+		'identity': {'scientific_identity': scientific},
+	}
+	monkeypatch.setattr(soft_validation, '_torch_mapping', lambda _: payload)
+	monkeypatch.setattr(
+		soft_validation,
+		'validate_stratigraphy_checkpoint_payload',
+		lambda *_args, **_kwargs: None,
+	)
+	monkeypatch.setattr(
+		soft_validation, '_initial_hashes', lambda _: ('a' * 64, 'b' * 64)
+	)
+	monkeypatch.setattr(
+		soft_validation.hard_validation, '_validate_freeze_contract', lambda *_: None
+	)
+
+	evidence = soft_validation._checkpoint_evidence(  # noqa: SLF001
+		training,
+		hard_trainability_summary=payload['trainability_summary'],
+		hard_optimizer_group_identity=optimizer_groups,
+		expected_global_step=2,
+		require_full_epoch_history=False,
+	)
+
+	assert evidence['latest']['global_step'] == 2
+	payload['global_step'] = 1
+	with pytest.raises(ValueError, match='finish at global step 2'):
+		soft_validation._checkpoint_evidence(  # noqa: SLF001
+			training,
+			hard_trainability_summary=payload['trainability_summary'],
+			hard_optimizer_group_identity=optimizer_groups,
+			expected_global_step=2,
+			require_full_epoch_history=False,
+		)
+
+
+def test_soft_smoke_evidence_requires_isolation_and_initial_parity(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	artifact_root = tmp_path / 'artifacts'
+	artifact_root.mkdir()
+	full_root = artifact_root / 'full'
+	smoke_root = artifact_root / 'smoke'
+	config = F3M5SoftPosteriorPretrainingValidationConfig(
+		artifact_root=artifact_root,
+		experiment_root=artifact_root / 'pretraining',
+		posterior_manifest=artifact_root / 'posterior.json',
+		hard_full_config=tmp_path / 'hard.yaml',
+		hard_handoff=artifact_root / 'hard_handoff.json',
+		soft_smoke_config=tmp_path / 'smoke.yaml',
+		soft_full_config=tmp_path / 'soft.yaml',
+	)
+	full = {
+		'paths': {'output_root': str(full_root)},
+		'identity': {
+			'runtime_identity': {'device': 'auto', 'workers': 4},
+			'scientific_identity': {'train': {'max_steps': None}},
+		},
+		'train': {'device': 'auto', 'max_steps': None},
+	}
+	smoke = deepcopy(full)
+	smoke['paths']['output_root'] = str(smoke_root)
+	smoke['identity']['runtime_identity']['device'] = 'cpu'
+	smoke['identity']['scientific_identity']['train']['max_steps'] = 2
+	smoke['train'].update(device='cpu', max_steps=2)
+	checkpoint_evidence = {
+		'latest': {
+			'epoch': 1,
+			'training_state': {'checkpoint_kind': 'step'},
+		},
+		'identity': {
+			'target_representation': 'ordered_path_state_posterior_v1',
+			'consistency_weight': 0.0,
+		},
+	}
+	monkeypatch.setattr(
+		soft_validation,
+		'_checkpoint_evidence',
+		lambda *_args, **_kwargs: checkpoint_evidence,
+	)
+	monkeypatch.setattr(
+		soft_validation, '_initial_hashes', lambda _: ('a' * 64, 'b' * 64)
+	)
+
+	evidence = soft_validation._smoke_evidence(  # noqa: SLF001
+		config,
+		full=full,
+		smoke=smoke,
+		hard_trainability_summary={},
+		hard_optimizer_group_identity=[],
+	)
+
+	assert evidence is checkpoint_evidence
+	monkeypatch.setattr(
+		soft_validation,
+		'_initial_hashes',
+		lambda training: ('a' * 64, 'b' * 64)
+		if training is full
+		else ('c' * 64, 'd' * 64),
+	)
+	with pytest.raises(ValueError, match='initial state hashes differ'):
+		soft_validation._smoke_evidence(  # noqa: SLF001
+			config,
+			full=full,
+			smoke=smoke,
+			hard_trainability_summary={},
+			hard_optimizer_group_identity=[],
+		)
+	monkeypatch.setattr(
+		soft_validation, '_initial_hashes', lambda _: ('a' * 64, 'b' * 64)
+	)
+	full_root.mkdir()
+	with pytest.raises(ValueError, match='must remain unmodified'):
+		soft_validation._smoke_evidence(  # noqa: SLF001
+			config,
+			full=full,
+			smoke=smoke,
+			hard_trainability_summary={},
+			hard_optimizer_group_identity=[],
+		)
+
+
 def test_soft_complete_requires_all_canonical_valid_token_identities(
 	tmp_path: Path,
 ) -> None:
@@ -328,6 +554,7 @@ def test_soft_complete_requires_all_canonical_valid_token_identities(
 		posterior_manifest=artifact_root / 'posterior.json',
 		hard_full_config=tmp_path / 'hard.yaml',
 		hard_handoff=artifact_root / 'hard_handoff.json',
+		soft_smoke_config=tmp_path / 'smoke.yaml',
 		soft_full_config=tmp_path / 'soft.yaml',
 	)
 	for model_tag in (
