@@ -1137,19 +1137,12 @@ def _stratigraphy_pretext_metadata(
 			raise TypeError('checkpoint stratigraphy_checkpoint must be a mapping')
 		student = _required_mapping(stratigraphy_config, 'student')
 		loss = _required_mapping(stratigraphy_config, 'loss')
-		target_manifest = _required_mapping(
-			checkpoint_identity,
-			'target_manifest',
-		)
-		return {
+		result = {
 			'method': 'strat_hmm_multi_head_pretext',
 			'base_objective': 'amp_mae3d',
 			'head_spec': checkpoint_identity['head_spec'],
 			'head_ks': checkpoint_identity['head_ks'],
 			'head_count': len(checkpoint_identity['head_ks']),
-			'target_manifest_path': target_manifest['path'],
-			'target_manifest_sha256': target_manifest['sha256'],
-			'per_head_target_sha256': checkpoint_identity['per_head_targets'],
 			'unfreeze_top_blocks': _nonnegative_int(
 				student.get('unfreeze_top_blocks'),
 				'stratigraphy_config.student.unfreeze_top_blocks',
@@ -1177,6 +1170,30 @@ def _stratigraphy_pretext_metadata(
 			'checkpoint_stratigraphy_state_sha256': checkpoint_identity[
 				'stratigraphy_state_sha256'
 			],
+		}
+		if checkpoint_identity.get('schema_version') == 3:
+			posterior = _required_mapping(
+				checkpoint_identity, 'posterior_manifest'
+			)
+			return {
+				**result,
+				'target_representation': checkpoint_identity['target_representation'],
+				'posterior_manifest_path': posterior['path'],
+				'posterior_manifest_sha256': posterior['sha256'],
+				'posterior_semantics': checkpoint_identity['posterior_semantics'],
+				'posterior_cost_temperature': checkpoint_identity[
+					'posterior_cost_temperature'
+				],
+				'per_head_posterior_sha256': checkpoint_identity[
+					'per_head_posteriors'
+				],
+			}
+		target_manifest = _required_mapping(checkpoint_identity, 'target_manifest')
+		return {
+			**result,
+			'target_manifest_path': target_manifest['path'],
+			'target_manifest_sha256': target_manifest['sha256'],
+			'per_head_target_sha256': checkpoint_identity['per_head_targets'],
 		}
 	student = _required_mapping(stratigraphy_config, 'student')
 	loss = _required_mapping(stratigraphy_config, 'loss')

@@ -9,6 +9,7 @@ import pytest
 import torch
 
 import seis_ssl_cluster.f3.multi_head_pretraining_validation as pretraining_validation
+import seis_ssl_cluster.f3.soft_posterior_pretraining_validation as soft_validation
 from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
 	F3MultiHeadPretrainingValidationConfig,
 	_identity_contract,
@@ -25,6 +26,15 @@ from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
 	f3_multi_head_pretraining_validation_config_from_mapping,
 	load_f3_multi_head_pretraining_handoff,
 	validate_f3_multi_head_pretraining,
+)
+from seis_ssl_cluster.f3.soft_posterior_pretraining_validation import (
+	F3M5SoftPosteriorPretrainingValidationConfig,
+	_canonical_valid_token_identities,
+	_validate_allowed_config_delta,
+	_validate_target_contract,
+)
+from seis_ssl_cluster.f3.soft_posterior_pretraining_validation import (
+	_handoff as _soft_handoff,
 )
 from seis_ssl_cluster.training.strat_hmm_checkpoint import scientific_identity_sha256
 
@@ -55,6 +65,238 @@ def test_validation_config_rejects_unknown_keys_and_paths_outside_artifacts(
 		f3_multi_head_pretraining_validation_config_from_mapping(
 			{**base, 'unknown': 'value'}
 		)
+
+
+def test_soft_target_evidence_derives_per_head_hashes_from_manifest(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	artifact_root = tmp_path / 'artifacts'
+	experiment_root = artifact_root / 'pretraining'
+	posterior_manifest = artifact_root / 'posterior_manifest.json'
+	posterior_manifest.parent.mkdir(parents=True)
+	posterior_manifest.write_text('{}', encoding='utf-8')
+	soft_model_tag = 'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1'
+	hard_model_tag = 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1'
+	config = F3M5SoftPosteriorPretrainingValidationConfig(
+		artifact_root=artifact_root,
+		experiment_root=experiment_root,
+		posterior_manifest=posterior_manifest,
+		hard_full_config=tmp_path / 'hard.yaml',
+		hard_handoff=artifact_root / 'hard_handoff.json',
+		soft_full_config=tmp_path / 'soft.yaml',
+	)
+	posterior_hashes = {
+		str(head_k): {
+			'f3': {
+				name: f'{head_k + index:064x}'
+				for index, name in enumerate(('posterior', 'valid_tokens', 'metadata'))
+			}
+		}
+		for head_k in (6, 8, 10)
+	}
+	posterior = {
+		'head_ks': [6, 8, 10],
+		'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+		'cost_temperature': 1.0,
+		'heads': {
+			key: {
+				'surveys': {
+					survey_id: {
+						name: {'sha256': digest}
+						for name, digest in artifacts.items()
+					}
+					for survey_id, artifacts in surveys.items()
+				},
+				'diagnostics': {},
+			}
+			for key, surveys in posterior_hashes.items()
+		},
+		'source_hard_manifest': {'sha256': 'a' * 64},
+		'source_embedding': {'sha256': 'b' * 64},
+	}
+	soft = {
+		'paths': {
+			'output_root': str(experiment_root / soft_model_tag),
+		},
+		'identity': {
+			'model_tag': soft_model_tag,
+			'scientific_identity': {
+				'target_representation': 'ordered_path_state_posterior_v1',
+				'posterior_manifest_sha256': soft_validation.file_sha256(
+					posterior_manifest
+				),
+			},
+		},
+		'pseudo_targets': {'manifest': str(posterior_manifest)},
+	}
+	hard = {
+		'paths': {
+			'output_root': str(experiment_root / hard_model_tag),
+		},
+		'identity': {'model_tag': hard_model_tag},
+	}
+	monkeypatch.setattr(
+		soft_validation, '_validate_allowed_config_delta', lambda *_: None
+	)
+	monkeypatch.setattr(
+		soft_validation.hard_validation,
+		'load_f3_multi_head_pretraining_handoff',
+		lambda _: {
+			'model_tag': hard_model_tag,
+			'stratigraphy_pretext': {
+				'initial_student_state_sha256': 'c' * 64,
+				'initial_head_state_sha256': 'd' * 64,
+			}
+		},
+	)
+	monkeypatch.setattr(
+		soft_validation, '_initial_hashes', lambda _: ('c' * 64, 'd' * 64)
+	)
+
+	evidence = _validate_target_contract(config, posterior, hard, soft)
+
+	assert evidence['posterior_head_hashes'] == posterior_hashes
+
+
+def test_soft_config_delta_rejects_pseudo_target_drift() -> None:
+	hard = {
+		'paths': {'output_root': 'hard'},
+		'identity': {'model_tag': 'hard', 'scientific_identity': {}},
+		'pseudo_targets': {'manifest': 'hard_manifest', 'min_confidence': 0.0},
+	}
+	soft = {
+		'paths': {'output_root': 'soft'},
+		'identity': {'model_tag': 'soft', 'scientific_identity': {}},
+		'pseudo_targets': {
+			'manifest': 'soft_manifest',
+			'min_confidence': 0.0,
+			'target_representation': 'ordered_path_state_posterior_v1',
+		},
+	}
+
+	_validate_allowed_config_delta(hard, soft)
+	soft['pseudo_targets']['min_confidence'] = 0.1
+	with pytest.raises(ValueError, match='scientific config drift'):
+		_validate_allowed_config_delta(hard, soft)
+
+
+def test_soft_complete_requires_all_canonical_valid_token_identities(
+	tmp_path: Path,
+) -> None:
+	artifact_root = tmp_path / 'artifacts'
+	config = F3M5SoftPosteriorPretrainingValidationConfig(
+		artifact_root=artifact_root,
+		experiment_root=artifact_root / 'pretraining',
+		posterior_manifest=artifact_root / 'posterior.json',
+		hard_full_config=tmp_path / 'hard.yaml',
+		hard_handoff=artifact_root / 'hard_handoff.json',
+		soft_full_config=tmp_path / 'soft.yaml',
+	)
+	for model_tag in (
+		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1',
+		'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
+	):
+		path = (
+			artifact_root
+			/ 'embeddings/f3/facies_benchmark_v1'
+			/ model_tag
+			/ 'overlap_x16/f3_facies_benchmark.valid_tokens.npy'
+		)
+		path.parent.mkdir(parents=True, exist_ok=True)
+		np.save(path, np.ones((1, 1, 1), dtype=np.bool_))
+
+	identities = _canonical_valid_token_identities(config)
+
+	assert set(identities) == {'mae', 'current_k6', 'mh_nocons'}
+	current_path = Path(identities['current_k6']['path'])
+	np.save(current_path, np.zeros((1, 1, 1), dtype=np.bool_))
+	with pytest.raises(
+		ValueError, match='canonical valid-token identities do not match'
+	):
+		_canonical_valid_token_identities(config)
+
+
+def test_soft_handoff_binds_trainability_and_canonical_valid_token_identities(
+	tmp_path: Path,
+) -> None:
+	best_path = tmp_path / 'best.pt'
+	best_path.write_bytes(b'best checkpoint')
+	digest = 'a' * 64
+	targets = {
+		'target_representation': 'ordered_path_state_posterior_v1',
+		'posterior_manifest_path': 'posterior.json',
+		'posterior_manifest_sha256': digest,
+		'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+		'posterior_cost_temperature': 1.0,
+		'posterior_head_hashes': {
+			str(head_k): {
+				'f3': dict.fromkeys(('posterior', 'valid_tokens', 'metadata'), digest)
+			}
+			for head_k in (6, 8, 10)
+		},
+		'posterior_source_hard_manifest': {},
+		'posterior_source_embedding': {},
+		'posterior_head_diagnostics': {},
+		'initial_student_state_sha256': digest,
+		'initial_head_state_sha256': digest,
+		'hard_baseline_config': 'hard.yaml',
+		'hard_baseline_handoff': 'hard_handoff.json',
+	}
+	trainability = {
+		'trainable_parameter_count': 1,
+		'frozen_parameter_count': 2,
+		'trainable_names': ['encoder.layers.7.weight'],
+	}
+	evidence = {
+		**targets,
+		'best_path': best_path,
+		'best': {'trainability_summary': trainability},
+		'selection': {
+			'sha256': digest,
+			'selected': {
+				'epoch': 25,
+				'global_step': 25600,
+				'checkpoint_kind': 'epoch',
+				'loss': 1.0,
+			},
+		},
+		'identity': {
+			'optimizer_group_identity': [
+				{'name': 'head', 'parameter_names': ['head.fixture']}
+			]
+		},
+		'embedding': {
+			'root': 'embeddings',
+			'metadata_path': 'metadata.json',
+			'metadata_sha256': digest,
+			'embeddings_sha256': digest,
+			'valid_tokens_sha256': digest,
+			'embeddings_shape': [76, 113, 32, 384],
+			'embeddings_dtype': 'float16',
+			'valid_tokens_shape': [76, 113, 32],
+			'valid_tokens_dtype': 'bool',
+			'finite_valid_count': 1,
+			'canonical_valid_token_identities': {
+				role: {'path': f'{role}.npy', 'sha256': digest}
+				for role in ('mae', 'current_k6', 'mh_nocons')
+			},
+		},
+	}
+	handoff = _soft_handoff(evidence)
+	path = tmp_path / 'soft_handoff.json'
+	path.write_text(json.dumps(handoff), encoding='utf-8')
+
+	loaded = soft_validation.load_f3_m5_soft_posterior_pretraining_handoff(path)
+
+	assert loaded['checkpoint']['trainability_summary'] == trainability
+	expected_identities = evidence['embedding']['canonical_valid_token_identities']
+	loaded_identities = loaded['embedding']['canonical_valid_token_identities']
+	assert loaded_identities == expected_identities
+	handoff['checkpoint'].pop('trainability_summary')
+	path.write_text(json.dumps(handoff), encoding='utf-8')
+	with pytest.raises(TypeError, match='trainability summary'):
+		soft_validation.load_f3_m5_soft_posterior_pretraining_handoff(path)
 
 
 def test_control_config_must_identify_the_canonical_current_k6_run(

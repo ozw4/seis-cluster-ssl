@@ -1,0 +1,28 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1_smoke_cpu_2step
+identity:
+  model_tag: strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1
+  scientific_identity:
+    experiment_role: multi_head_ordered_soft_posterior_pretext
+    variant: soft_nocons
+    head_spec: multi_resolution_ordered_prototypes_v1
+    head_ks: [6, 8, 10]
+    target_representation: ordered_path_state_posterior_v1
+    posterior_manifest_sha256: ${SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_MANIFEST_SHA256}
+    posterior_semantics: ordered_path_cost_gibbs_state_marginal_v1
+    posterior_cost_temperature: 1.0
+    supervised_loss: soft_categorical_cross_entropy_v1
+    consistency_policy: disabled_for_m5_u_v1
+    consistency_weight: 0.0
+  runtime_identity: {device: cpu, workers: 4}
+manifests: {train: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json', train_path_list: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/splits/f3/facies_benchmark_v1/train_npy_paths.txt'}
+data: {local_crop_size: [128, 128, 128], min_valid_fraction: 0.1, max_resample_attempts: 32, normalized_clip_abs: 8.0, finite_check_mode: strict, amplitude_agc: {enabled: true, mode: trace_rms_z, window_z: 65, eps: 0.001, clip_abs: 5.0}}
+zero_mask: {enabled: true, zero_atol: 0.0, z_sample_influence_radius: 16, xy_trace_influence_radius: 1}
+model: {patch_size: [8, 8, 8], encoder_dim: 384, encoder_depth: 8, encoder_heads: 6, decoder_dim: 256, decoder_depth: 4, decoder_heads: 4}
+pseudo_targets: {manifest: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_state_posteriors/multi_head_state_posterior_handoff.json', target_representation: ordered_path_state_posterior_v1, min_confidence: 0.0}
+teacher: {checkpoint: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt'}
+student: {init_checkpoint: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt', unfreeze_top_blocks: 1}
+head: {spec: multi_resolution_ordered_prototypes_v1, ks: [6, 8, 10], projection_dim: 128, temperature: 0.1, normalize: true}
+loss: {prototype_weight: 1.0, usage_weight: 0.005, entropy_floor: null, consistency_weight: 0.0, consistency_beta: 0.1, distillation_weight: 0.2}
+train: {batch_size: 4, samples_per_epoch: 4096, epochs: 25, num_workers: 4, shuffle: true, lr: 0.0003, encoder_lr: 0.00001, weight_decay: 0.05, amp: false, device: cpu, seed: 42, grad_clip_norm: 1.0, checkpoint_every_steps: 500, max_steps: 2, allow_overwrite_output: false}

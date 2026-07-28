@@ -469,7 +469,6 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912, PLR0915
 			'posterior_manifest_sha256',
 			'posterior_semantics',
 			'posterior_cost_temperature',
-			'posterior_head_hashes',
 			'supervised_loss',
 			'head_spec',
 			'head_ks',

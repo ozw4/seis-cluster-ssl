@@ -110,6 +110,7 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_UPSAMPLE_MODE,
 )
 from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT, ArtifactPaths, ExperimentKey
+from seis_ssl_cluster.stratigraphy import state_posterior
 from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
 from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
 	_artifacts,
@@ -184,6 +185,9 @@ F3_STRAT_HMM_PRETRAINING_M2A_ROOT = (
 )
 F3_CURRENT_K6_CONTROL_ROOT = F3_ROOT / '93_strat_hmm_m1_current_k6_control'
 F3_STRAT_HMM_MULTI_HEAD_ROOT = F3_ROOT / '94_strat_hmm_multi_head_k6810_v1'
+F3_STRAT_HMM_SOFT_POSTERIOR_ROOT = (
+	F3_ROOT / '97_strat_hmm_multi_head_k6810_soft_posterior_v1'
+)
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
@@ -206,6 +210,8 @@ F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '03_train_cons010_smoke.yaml',
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '04_train_nocons_full.yaml',
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '05_train_cons010_full.yaml',
+		F3_STRAT_HMM_SOFT_POSTERIOR_ROOT / '02_train_soft_smoke.yaml',
+		F3_STRAT_HMM_SOFT_POSTERIOR_ROOT / '03_train_soft_full.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
@@ -220,6 +226,7 @@ F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
 		F3_CURRENT_K6_CONTROL_ROOT / '03_extract_current_k6_embeddings.yaml',
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '06_extract_nocons_embeddings.yaml',
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '07_extract_cons010_embeddings.yaml',
+		F3_STRAT_HMM_SOFT_POSTERIOR_ROOT / '04_extract_soft_embeddings.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
@@ -527,6 +534,10 @@ def test_all_repository_configs_load_and_resolve_supported_stages(
 		'SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256',
 		'0' * 64,
 	)
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_MANIFEST_SHA256',
+		'0' * 64,
+	)
 	config = load_config(config_path)
 
 	assert isinstance(config, dict)
@@ -751,6 +762,15 @@ def test_active_f3_strat_hmm_pretext_configs_resolve(
 	monkeypatch.setenv(
 		'SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256',
 		'0' * 64,
+	)
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_MULTI_HEAD_POSTERIOR_MANIFEST_SHA256',
+		'0' * 64,
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_state_posterior_manifest',
+		lambda _path: _active_posterior_manifest(),
 	)
 	resolve_strat_hmm_pretext_config(
 		_config_with_existing_strat_hmm_pretext_inputs(config_path, tmp_path),
@@ -1563,14 +1583,41 @@ def _config_with_existing_strat_hmm_pretext_inputs(
 			control_summary=control,
 		)
 		config['pseudo_targets']['manifest'] = str(manifest)
-		config['identity']['scientific_identity']['target_manifest_sha256'] = (
-			file_sha256(manifest)
-		)
+		if config['pseudo_targets'].get('target_representation') == (
+			'ordered_path_state_posterior_v1'
+		):
+			config['identity']['scientific_identity'][
+				'posterior_manifest_sha256'
+			] = file_sha256(manifest)
+		else:
+			config['identity']['scientific_identity']['target_manifest_sha256'] = (
+				file_sha256(manifest)
+			)
 	else:
 		config['pseudo_targets']['input_dir'] = str(pseudo_target_dir)
 	config['teacher']['checkpoint'] = str(checkpoint)
 	config['student']['init_checkpoint'] = str(checkpoint)
 	return config
+
+
+def _active_posterior_manifest() -> dict[str, object]:
+	return {
+		'head_ks': [6, 8, 10],
+		'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+		'cost_temperature': 1.0,
+		'heads': {
+			str(k): {
+				'surveys': {
+					'survey': {
+						'posterior': {'sha256': f'{k:064x}'},
+						'valid_tokens': {'sha256': f'{k + 10:064x}'},
+						'metadata': {'sha256': f'{k + 20:064x}'},
+					}
+				}
+			}
+			for k in (6, 8, 10)
+		},
+	}
 
 
 def _config_with_existing_strat_hmm_refresh_inputs(
