@@ -68,14 +68,28 @@ _HMM_DECODE_EXPORTS = {
 	'emission_costs_from_logits',
 }
 
+_STATE_POSTERIOR_EXPORTS = {
+	'POSTERIOR_SEMANTICS',
+	'MultiHeadStatePosteriorExportConfig',
+	'MultiHeadStatePosteriorExportPlan',
+	'export_multi_head_state_posteriors',
+	'load_multi_head_state_posterior_manifest',
+	'plan_multi_head_state_posterior_exports',
+	'resolve_multi_head_state_posterior_export_config',
+	'validate_multi_head_state_posterior_manifest',
+}
+
 __all__ = [
 	'CANONICAL_KS',
 	'GLOBAL_VALID_TOKENS',
 	'MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1',
+	'POSTERIOR_SEMANTICS',
 	'ExportedPseudoTargetResult',
 	'LogitHMMPseudoTarget',
 	'MultiHeadPseudoTargetExportConfig',
 	'MultiHeadPseudoTargetExportPlan',
+	'MultiHeadStatePosteriorExportConfig',
+	'MultiHeadStatePosteriorExportPlan',
 	'MultiResolutionOrderedPrototypeHeads',
 	'MultiResolutionOrderedPrototypeOutput',
 	'OrderedPrototypeHead',
@@ -94,21 +108,26 @@ __all__ = [
 	'expected_normalized_order_coordinate',
 	'export_hmm_cluster_labels_as_pseudo_targets',
 	'export_multi_head_pseudo_targets',
+	'export_multi_head_state_posteriors',
 	'feature_distillation_loss',
+	'load_multi_head_state_posterior_manifest',
 	'load_multi_head_target_manifest',
 	'load_pseudo_target_arrays',
 	'load_pseudo_target_metadata',
 	'multi_head_cross_head_diagnostics',
 	'ordered_soft_coordinate',
 	'plan_multi_head_pseudo_target_exports',
+	'plan_multi_head_state_posterior_exports',
 	'plan_shuffled_hmm_pseudo_targets',
 	'prepare_hmm_cluster_label_pseudo_target_exports',
 	'pseudo_target_paths',
 	'resolve_multi_head_pseudo_target_export_config',
+	'resolve_multi_head_state_posterior_export_config',
 	'shuffle_pseudo_target_arrays',
 	'shuffle_strat_hmm_pseudo_targets',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
+	'validate_multi_head_state_posterior_manifest',
 	'validate_multi_head_target_manifest',
 	'validate_multi_head_target_publication_preflight',
 	'validate_pseudo_target_arrays',
@@ -121,5 +140,10 @@ def __getattr__(name: str) -> object:
 	if name in _HMM_DECODE_EXPORTS:
 		hmm_decode = importlib.import_module('seis_ssl_cluster.stratigraphy.hmm_decode')
 		return getattr(hmm_decode, name)
+	if name in _STATE_POSTERIOR_EXPORTS:
+		state_posterior = importlib.import_module(
+			'seis_ssl_cluster.stratigraphy.state_posterior'
+		)
+		return getattr(state_posterior, name)
 	msg = f'module {__name__!r} has no attribute {name!r}'
 	raise AttributeError(msg)

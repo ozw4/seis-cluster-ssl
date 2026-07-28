@@ -190,6 +190,11 @@ HELP_FLAG_CONTRACTS = {
 		'--dry-run',
 		'--only-missing',
 	),
+	'export_strat_hmm_multi_head_state_posteriors.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+	),
 	'visualize_clusters.py': (
 		'--config',
 		'--dry-run',
