@@ -58,6 +58,10 @@ def test_export_survey_writes_exact_posterior_in_full_token_grid(
 	).posterior.astype(np.float32)
 	np.testing.assert_allclose(posterior[0, 0], expected)
 	assert posterior.dtype == np.float32
+	assert entry['posterior']['shape'] == [1, 1, 2, 2]
+	assert entry['posterior']['dtype'] == 'float32'
+	assert entry['valid_tokens']['shape'] == [1, 1, 2]
+	assert entry['valid_tokens']['dtype'] == 'bool'
 	assert np.array_equal(np.load(entry['valid_tokens']['path']), [[[True, True]]])
 	assert diagnostics['posterior_argmax_viterbi_mismatch_rate'] == 0.0
 
@@ -80,6 +84,39 @@ def test_export_survey_rejects_viterbi_replay_mismatch(
 	output_root.mkdir()
 
 	with pytest.raises(ValueError, match='Viterbi replay'):
+		state_posterior._export_survey(
+			output_root,
+			embedding,
+			{'valid_tokens': state_posterior._reference(valid_path)},
+			_tiny_model(),
+			statistics=(
+				state_posterior._PosteriorStats(2),
+				state_posterior._PosteriorStats(2),
+			),
+		)
+
+
+def test_export_survey_rejects_embedding_valid_mask_mismatch(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Embedding masks must exactly match the hard target before replay."""
+	labels_path, valid_path, embedding = _tiny_survey(tmp_path)
+	embedding_valid_path = tmp_path / 'embedding.valid_tokens.npy'
+	np.save(embedding_valid_path, np.array([[[True, False]]], dtype=np.bool_))
+	embedding = EmbeddingInput(
+		survey_id=embedding.survey_id,
+		embeddings_path=embedding.embeddings_path,
+		valid_tokens_path=embedding_valid_path,
+		metadata_path=embedding.metadata_path,
+	)
+	monkeypatch.setattr(
+		state_posterior, '_source_label_path', lambda _source: labels_path
+	)
+	output_root = tmp_path / 'out'
+	output_root.mkdir()
+
+	with pytest.raises(ValueError, match='source embedding valid mask differs'):
 		state_posterior._export_survey(
 			output_root,
 			embedding,
@@ -117,6 +154,27 @@ def test_hashed_provenance_rejects_input_drift(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='hash mismatch'):
 		state_posterior._hashed_path(reference, 'input')
+
+
+def test_load_model_rejects_missing_emission_source(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Frozen posterior replay cannot infer the historical feature basis."""
+	config = _config(tmp_path)
+	model_dir = config.clustering_output_dir / 'models' / 'k6'
+	model_dir.mkdir(parents=True)
+	for filename in (
+		'preprocessor.joblib',
+		'hmm_model.joblib',
+		'clustering_metadata.json',
+	):
+		(model_dir / filename).write_bytes(b'frozen')
+	np.save(model_dir / 'cluster_centers.npy', np.zeros((6, 1), dtype=np.float32))
+	monkeypatch.setattr(state_posterior.joblib, 'load', lambda _path: {})
+
+	with pytest.raises(ValueError, match='must record a valid emission_source'):
+		state_posterior._load_model(config, k=6)
 
 
 @pytest.mark.parametrize(
@@ -295,6 +353,242 @@ def test_dry_run_plans_without_creating_outputs(
 	assert not config.posterior_root.exists()
 
 
+def test_all_k_export_reuses_complete_outputs_with_only_missing(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""A complete immutable bundle is reused byte-for-byte on resume."""
+	config, source, models, embedding = _export_fixture(tmp_path)
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_target_manifest',
+		lambda _path: source,
+	)
+	monkeypatch.setattr(state_posterior, '_validate_frozen_inputs', lambda *_args: None)
+	monkeypatch.setattr(
+		state_posterior,
+		'_load_model',
+		lambda _config, *, k: models[k],
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'discover_embedding_inputs',
+		lambda _root: [embedding],
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'prepare_feature_batch_for_indices',
+		lambda *_args, **_kwargs: np.array([[0.0], [1.0]], dtype=np.float32),
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'_manifest',
+		lambda _config: {'publication': 'complete'},
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_state_posterior_manifest',
+		lambda _path: {'publication': 'complete'},
+	)
+
+	first = state_posterior.export_multi_head_state_posteriors(config)
+	assert [plan.action for plan in first] == ['NEW', 'NEW', 'NEW']
+	before = {
+		path.relative_to(config.posterior_root): (
+			path.stat().st_mtime_ns,
+			path.read_bytes(),
+		)
+		for path in config.posterior_root.rglob('*')
+		if path.is_file()
+	}
+
+	second = state_posterior.export_multi_head_state_posteriors(
+		config,
+		only_missing=True,
+	)
+	assert [plan.action for plan in second] == ['REUSE', 'REUSE', 'REUSE']
+	after = {
+		path.relative_to(config.posterior_root): (
+			path.stat().st_mtime_ns,
+			path.read_bytes(),
+		)
+		for path in config.posterior_root.rglob('*')
+		if path.is_file()
+	}
+	assert after == before
+
+	(config.posterior_root / 'k6' / 'unreferenced.bin').write_bytes(b'unknown')
+	plans = state_posterior.plan_multi_head_state_posterior_exports(
+		config,
+		only_missing=True,
+	)
+	assert [plan.action for plan in plans] == ['QUARANTINE', 'REUSE', 'REUSE']
+	assert plans[0].reason is not None
+	assert 'files differ from metadata' in plans[0].reason
+
+
+def test_export_quarantines_stale_handoff_before_republishing(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""A stale owned handoff is preserved instead of atomically overwritten."""
+	config, source, models, embedding = _export_fixture(tmp_path)
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_target_manifest',
+		lambda _path: source,
+	)
+	monkeypatch.setattr(state_posterior, '_validate_frozen_inputs', lambda *_args: None)
+	monkeypatch.setattr(
+		state_posterior,
+		'_load_model',
+		lambda _config, *, k: models[k],
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'discover_embedding_inputs',
+		lambda _root: [embedding],
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'prepare_feature_batch_for_indices',
+		lambda *_args, **_kwargs: np.array([[0.0], [1.0]], dtype=np.float32),
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'_manifest',
+		lambda _config: {'publication': 'complete'},
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_state_posterior_manifest',
+		lambda _path: {'publication': 'complete'},
+	)
+
+	state_posterior.export_multi_head_state_posteriors(config)
+	config.handoff_manifest.write_bytes(b'stale handoff bytes')
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_state_posterior_manifest',
+		lambda _path: (_ for _ in ()).throw(ValueError('stale handoff')),
+	)
+
+	plans = state_posterior.export_multi_head_state_posteriors(
+		config,
+		only_missing=True,
+	)
+
+	assert [plan.action for plan in plans] == ['REUSE', 'REUSE', 'REUSE']
+	quarantines = list(config.posterior_root.glob('handoff.json.quarantine-*'))
+	assert len(quarantines) == 1
+	assert quarantines[0].read_bytes() == b'stale handoff bytes'
+	assert json.loads(config.handoff_manifest.read_text(encoding='utf-8')) == {
+		'publication': 'complete'
+	}
+
+
+def test_manifest_loader_rejects_cross_k_valid_mask_mismatch(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""A mask change in one completed head cannot pass manifest validation."""
+	config, source, models, embedding = _export_fixture(tmp_path)
+	monkeypatch.setattr(
+		state_posterior,
+		'_load_model',
+		lambda _config, *, k: models[k],
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'discover_embedding_inputs',
+		lambda _root: [embedding],
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'prepare_feature_batch_for_indices',
+		lambda *_args, **_kwargs: np.array([[0.0], [1.0]], dtype=np.float32),
+	)
+	for k in state_posterior.CANONICAL_KS:
+		state_posterior._export_head(config, source, k=k)
+
+	head_path = config.posterior_root / 'k8' / 'head_metadata.json'
+	head = json.loads(head_path.read_text(encoding='utf-8'))
+	valid_path = config.posterior_root / 'k8' / 'survey.valid_tokens.npy'
+	posterior_path = config.posterior_root / 'k8' / 'survey.state_posterior.npy'
+	valid = np.load(valid_path)
+	posterior = np.load(posterior_path)
+	valid[0, 0, 1] = False
+	posterior[0, 0, 1] = 0.0
+	np.save(valid_path, valid, allow_pickle=False)
+	np.save(posterior_path, posterior, allow_pickle=False)
+	head['surveys']['survey']['valid_tokens'] = state_posterior._array_reference(
+		valid_path,
+		shape=valid.shape,
+		dtype=valid.dtype,
+	)
+	head['surveys']['survey']['posterior'] = state_posterior._array_reference(
+		posterior_path,
+		shape=posterior.shape,
+		dtype=posterior.dtype,
+	)
+	head_path.write_text(json.dumps(head), encoding='utf-8')
+	config.source_hard_manifest.write_text('{}\n', encoding='utf-8')
+	source['source_embedding'] = {}
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_target_manifest',
+		lambda _path: source,
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'_validate_source_manifest',
+		lambda _source: None,
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'_validate_manifest_hard_source_anchor',
+		lambda _payload, _source: {
+			str(k): models[k]['identity'] for k in state_posterior.CANONICAL_KS
+		},
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'_validate_manifest_source_embedding_identity',
+		lambda _source_embedding: None,
+	)
+	posterior_manifest = tmp_path / 'posterior_manifest.json'
+	posterior_manifest.write_text(
+		json.dumps(
+			{
+				'artifact_type': state_posterior.ARTIFACT_TYPE,
+				'schema_version': state_posterior.SCHEMA_VERSION,
+				'posterior_semantics': state_posterior.POSTERIOR_SEMANTICS,
+				'head_ks': list(state_posterior.CANONICAL_KS),
+				'cost_temperature': 1.0,
+				'source_hard_manifest': state_posterior._reference(
+					config.source_hard_manifest
+				),
+				'source_hard_export_handoff': {},
+				'source_embedding': {},
+				'heads': {
+					str(k): json.loads(
+						(
+							config.posterior_root / f'k{k}' / 'head_metadata.json'
+						).read_text(
+							encoding='utf-8'
+						)
+					)
+					for k in state_posterior.CANONICAL_KS
+				},
+			}
+		),
+		encoding='utf-8',
+	)
+
+	with pytest.raises(ValueError, match='valid mask differs'):
+		state_posterior.load_multi_head_state_posterior_manifest(posterior_manifest)
+
+
 def test_plan_quarantines_invalid_owned_output_without_only_missing(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -318,6 +612,53 @@ def test_plan_quarantines_invalid_owned_output_without_only_missing(
 	)
 
 	assert [plan.action for plan in plans] == ['QUARANTINE', 'NEW', 'NEW']
+
+
+def test_plan_quarantines_malformed_head_metadata(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Missing owned head fields make the output partial, not fatal to planning."""
+	config = _config(tmp_path)
+	head_path = config.posterior_root / 'k6' / 'head_metadata.json'
+	head_path.parent.mkdir(parents=True)
+	head_path.write_text('{}\n', encoding='utf-8')
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_target_manifest',
+		lambda _path: {'head_ks': list(state_posterior.CANONICAL_KS)},
+	)
+	monkeypatch.setattr(state_posterior, '_validate_frozen_inputs', lambda *_args: None)
+
+	plans = state_posterior.plan_multi_head_state_posterior_exports(
+		config, only_missing=True
+	)
+
+	assert [plan.action for plan in plans] == ['QUARANTINE', 'NEW', 'NEW']
+	assert plans[0].reason is not None
+	assert 'manifest keys mismatch' in plans[0].reason
+
+
+def test_diagnostics_validation_requires_all_posterior_metrics(tmp_path: Path) -> None:
+	metrics = state_posterior._PosteriorStats(6).finish()
+	diagnostics_json = tmp_path / 'diagnostics.json'
+	diagnostics_csv = tmp_path / 'diagnostics.csv'
+	broken = dict(metrics)
+	broken.pop('expected_normalized_order')
+	payload = {
+		'per_survey': {'survey': broken},
+		'aggregate': {**metrics, 'survey_count': 1},
+	}
+	diagnostics_json.write_text(json.dumps(payload), encoding='utf-8')
+	diagnostics_csv.write_text('scope,survey_id,metric,value\n', encoding='utf-8')
+	diagnostics = {
+		**payload,
+		'json': state_posterior._reference(diagnostics_json),
+		'csv': state_posterior._reference(diagnostics_csv),
+	}
+
+	with pytest.raises(ValueError, match='manifest keys mismatch'):
+		state_posterior._validate_diagnostics(diagnostics, k=6)
 
 
 def test_quarantine_preserves_partial_owned_output(tmp_path: Path) -> None:
@@ -359,6 +700,50 @@ def test_export_head_cleans_temporary_directory_after_producer_failure(
 
 	assert not (config.posterior_root / 'k6').exists()
 	assert not list(config.posterior_root.glob('.k6.posterior.*'))
+
+
+def test_export_keeps_earlier_heads_staged_when_later_head_fails(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""A replay/export failure must not publish any newly generated head."""
+	config, source, models, embedding = _export_fixture(tmp_path)
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_target_manifest',
+		lambda _path: source,
+	)
+	monkeypatch.setattr(state_posterior, '_validate_frozen_inputs', lambda *_args: None)
+	monkeypatch.setattr(
+		state_posterior,
+		'_load_model',
+		lambda _config, *, k: models[k],
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'discover_embedding_inputs',
+		lambda _root: [embedding],
+	)
+	monkeypatch.setattr(
+		state_posterior,
+		'prepare_feature_batch_for_indices',
+		lambda *_args, **_kwargs: np.array([[0.0], [1.0]], dtype=np.float32),
+	)
+	real_export_head = state_posterior._export_head
+
+	def fail_k8(*args: object, **kwargs: object) -> None:
+		if kwargs['k'] == 8:
+			raise ValueError('Viterbi replay differs from frozen hard labels')
+		real_export_head(*args, **kwargs)
+
+	monkeypatch.setattr(state_posterior, '_export_head', fail_k8)
+
+	with pytest.raises(ValueError, match='Viterbi replay'):
+		state_posterior.export_multi_head_state_posteriors(config)
+
+	assert not any((config.posterior_root / f'k{k}').exists() for k in (6, 8, 10))
+	assert not config.handoff_manifest.exists()
+	assert not list(config.posterior_root.glob('.posterior.bundle.*'))
 
 
 def test_posterior_stats_uses_fixed_memory_histograms() -> None:
@@ -417,6 +802,78 @@ def _config(tmp_path: Path) -> state_posterior.MultiHeadStatePosteriorExportConf
 		clustering_config=None,
 		handoff_manifest=tmp_path / 'posterior' / 'handoff.json',
 	)
+
+
+def _export_fixture(
+	tmp_path: Path,
+) -> tuple[
+	state_posterior.MultiHeadStatePosteriorExportConfig,
+	dict[str, object],
+	dict[int, dict[str, object]],
+	EmbeddingInput,
+]:
+	"""Create the smallest frozen source that can drive every exporter stage."""
+	config = _config(tmp_path)
+	valid_path = tmp_path / 'hard_valid_tokens.npy'
+	np.save(valid_path, np.ones((1, 1, 2), dtype=np.bool_))
+	heads: dict[str, object] = {}
+	models: dict[int, dict[str, object]] = {}
+	for k in state_posterior.CANONICAL_KS:
+		labels_path = tmp_path / f'labels_k{k}.npy'
+		np.save(labels_path, np.array([[[0, 1]]], dtype=np.int32))
+		target_metadata = tmp_path / f'target_k{k}.metadata.json'
+		target_metadata.write_text(
+			json.dumps(
+				{
+					'source': {
+						'source_label_path': str(labels_path),
+						'source_label_sha256': file_sha256(labels_path),
+					}
+				}
+			),
+			encoding='utf-8',
+		)
+		heads[str(k)] = {
+			'surveys': {
+				'survey': {
+					'metadata': state_posterior._reference(target_metadata),
+					'valid_tokens': state_posterior._reference(valid_path),
+				}
+			}
+		}
+		model_dir = tmp_path / 'models' / f'k{k}'
+		model_dir.mkdir(parents=True)
+		identity = {}
+		for name, filename in {
+			'preprocessor': 'preprocessor.joblib',
+			'hmm_model': 'hmm_model.joblib',
+			'centers': 'cluster_centers.npy',
+			'metadata': 'clustering_metadata.json',
+		}.items():
+			path = model_dir / filename
+			path.write_bytes(name.encode())
+			identity[name] = state_posterior._reference(path)
+		centers = np.full((k, 1), 20.0, dtype=np.float32)
+		centers[0, 0] = 0.0
+		centers[1, 0] = 1.0
+		models[k] = {
+			'centers': centers,
+			'residualizer': None,
+			'preprocessor': object(),
+			'emission_source': 'embedding',
+			'hmm': {},
+			'transition_costs': np.zeros((k, k), dtype=np.float32),
+			'initial_costs': np.zeros(k, dtype=np.float32),
+			'terminal_costs': np.zeros(k, dtype=np.float32),
+			'identity': identity,
+		}
+	embedding = EmbeddingInput(
+		survey_id='survey',
+		embeddings_path=tmp_path / 'embeddings.npy',
+		valid_tokens_path=valid_path,
+		metadata_path=tmp_path / 'embedding_metadata.json',
+	)
+	return config, {'head_ks': [6, 8, 10], 'heads': heads}, models, embedding
 
 
 def _anchored_hard_source(

@@ -11,7 +11,7 @@ import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
 from contextlib import suppress
-from csv import DictWriter
+from csv import DictReader, DictWriter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -180,14 +180,35 @@ def export_multi_head_state_posteriors(
 			)
 		)
 	source = load_multi_head_target_manifest(config.source_hard_manifest)
+	if all(plan.action == 'REUSE' for plan in plans):
+		_validate_all_heads(config, source)
+		_publish_handoff_manifest(config)
+		return plans
 	for plan in plans:
-		if plan.action == 'REUSE':
-			continue
 		if plan.action == 'QUARANTINE':
 			_quarantine(config.posterior_root / f'k{plan.k}')
-		_export_head(config, source, k=plan.k)
+	config.posterior_root.mkdir(parents=True, exist_ok=True)
+	staging = Path(
+		tempfile.mkdtemp(prefix='.posterior.bundle.', dir=config.posterior_root)
+	)
+	try:
+		head_paths: dict[int, Path] = {}
+		for plan in plans:
+			if plan.action == 'REUSE':
+				head_paths[plan.k] = config.posterior_root / f'k{plan.k}'
+				continue
+			staged_head = staging / f'k{plan.k}'
+			_export_head(config, source, k=plan.k, final=staged_head)
+			head_paths[plan.k] = staged_head
+		_validate_all_heads(config, source, head_paths=head_paths, allow_staged=True)
+		_publish_staged_heads(config, staging, plans)
+	except BaseException:
+		shutil.rmtree(staging, ignore_errors=True)
+		raise
+	else:
+		shutil.rmtree(staging, ignore_errors=True)
 	_validate_all_heads(config, source)
-	_write_json_atomic(config.handoff_manifest, _manifest(config))
+	_publish_handoff_manifest(config)
 	return plans
 
 
@@ -330,11 +351,13 @@ def _export_head(
 	source: Mapping[str, object],
 	*,
 	k: int,
+	final: Path | None = None,
 ) -> None:
-	final = config.posterior_root / f'k{k}'
-	config.posterior_root.mkdir(parents=True, exist_ok=True)
+	if final is None:
+		final = config.posterior_root / f'k{k}'
+	final.parent.mkdir(parents=True, exist_ok=True)
 	temporary = Path(
-		tempfile.mkdtemp(prefix=f'.k{k}.posterior.', dir=config.posterior_root)
+		tempfile.mkdtemp(prefix=f'.k{k}.posterior.', dir=final.parent)
 	)
 	try:
 		model = _load_model(config, k=k)
@@ -409,7 +432,17 @@ def _export_survey(
 		mmap_mode='r',
 		allow_pickle=False,
 	)
-	if not np.array_equal(valid, hard_valid):
+	embedding_valid = np.load(
+		embedding.valid_tokens_path,
+		mmap_mode='r',
+		allow_pickle=False,
+	)
+	if not _valid_masks_equal(embedding_valid, hard_valid):
+		raise ValueError(
+			'source embedding valid mask differs from hard target: '
+			f'{embedding.survey_id}'
+		)
+	if not _valid_masks_equal(valid, hard_valid):
 		raise ValueError(
 			f'frozen hard-label valid mask differs from hard target: '
 			f'{embedding.survey_id}'
@@ -490,8 +523,16 @@ def _export_survey(
 	_write_json_atomic(metadata_path, metadata)
 	return (
 		{
-			'posterior': _reference(posterior_path),
-			'valid_tokens': _reference(valid_path),
+			'posterior': _array_reference(
+				posterior_path,
+				shape=(*labels.shape, k),
+				dtype=np.dtype(np.float32),
+			),
+			'valid_tokens': _array_reference(
+				valid_path,
+				shape=labels.shape,
+				dtype=np.dtype(np.bool_),
+			),
 			'metadata': _reference(metadata_path),
 			'source': _reference(source_label),
 		},
@@ -677,6 +718,11 @@ def _load_model(
 	hmm = joblib.load(paths['hmm_model'])
 	if not isinstance(hmm, Mapping):
 		raise TypeError(f'hmm_model must be a mapping for k={k}')
+	emission_source = hmm.get('emission_source')
+	if emission_source not in {'embedding', 'z_coordinate'}:
+		raise ValueError(
+			'frozen hmm_model must record a valid emission_source for k={k}'
+		)
 	centers = np.load(paths['centers'], mmap_mode='r', allow_pickle=False)
 	if centers.shape != (k, centers.shape[1]):
 		raise ValueError(f'center shape does not match k={k}')
@@ -699,7 +745,7 @@ def _load_model(
 		'hmm': hmm,
 		'centers': np.asarray(centers, dtype=np.float32),
 		'residualizer': residualizer,
-		'emission_source': hmm.get('emission_source', 'embedding'),
+		'emission_source': emission_source,
 		'transition_costs': np.asarray(hmm['transition_costs'], dtype=np.float32),
 		'initial_costs': np.asarray(hmm['initial_state_costs'], dtype=np.float32),
 		'terminal_costs': np.asarray(hmm['terminal_state_costs'], dtype=np.float32),
@@ -738,6 +784,7 @@ def _validate_frozen_inputs(
 		for item in discover_embedding_inputs(config.source_embedding_dir)
 	}
 	_validate_source_embedding_identity(source_embedding, inputs)
+	_validate_source_target_alignment(source, inputs)
 	models: dict[int, Mapping[str, object]] = {}
 	for k in CANONICAL_KS:
 		models[k] = _load_model(config, k=k)
@@ -790,6 +837,54 @@ def _validate_manifest_source_embedding_identity(
 		item.survey_id: item for item in discover_embedding_inputs(input_dir)
 	}
 	_validate_source_embedding_identity(source_embedding, inputs)
+
+
+def _validate_source_target_alignment(
+	source: Mapping[str, object],
+	inputs: Mapping[str, EmbeddingInput],
+) -> None:
+	"""Require each recorded embedding mask to match frozen target labels."""
+	for k in CANONICAL_KS:
+		for survey_id, raw in _source_head(source, k=k)['surveys'].items():
+			embedding = _required_embedding(inputs, survey_id)
+			hard_valid = np.load(
+				_hashed_path(
+					_mapping(raw, 'source survey')['valid_tokens'],
+					'hard target valid_tokens',
+				),
+				mmap_mode='r',
+				allow_pickle=False,
+			)
+			labels = np.load(
+				_source_label_path(_mapping(raw, 'source survey')),
+				mmap_mode='r',
+				allow_pickle=False,
+			)
+			embedding_valid = np.load(
+				embedding.valid_tokens_path,
+				mmap_mode='r',
+				allow_pickle=False,
+			)
+			label_valid = labels >= 0
+			if not _valid_masks_equal(embedding_valid, hard_valid):
+				raise ValueError(
+					'source embedding valid mask differs from hard target for '
+					f'k={k} {survey_id}'
+				)
+			if not _valid_masks_equal(label_valid, hard_valid):
+				raise ValueError(
+					'frozen hard-label valid mask differs from hard target for '
+					f'k={k} {survey_id}'
+				)
+
+
+def _valid_masks_equal(left: np.ndarray, right: np.ndarray) -> bool:
+	"""Compare valid masks without accepting a dtype or shape conversion."""
+	return (
+		left.dtype == right.dtype
+		and left.shape == right.shape
+		and np.array_equal(left, right)
+	)
 
 
 def _validate_hard_source_model_anchor(  # noqa: C901, PLR0912, PLR0915
@@ -963,12 +1058,26 @@ def _hard_source_model_identity(
 
 
 def _validate_all_heads(
-	config: MultiHeadStatePosteriorExportConfig, source: Mapping[str, object]
+	config: MultiHeadStatePosteriorExportConfig,
+	source: Mapping[str, object],
+	*,
+	head_paths: Mapping[int, Path] | None = None,
+	allow_staged: bool = False,
 ) -> None:
 	common_masks: dict[str, np.ndarray] = {}
 	for k in CANONICAL_KS:
-		path = config.posterior_root / f'k{k}'
-		_validate_complete_head(path, k=k, source=source, config=config)
+		path = (
+			config.posterior_root / f'k{k}'
+			if head_paths is None
+			else head_paths[k]
+		)
+		_validate_complete_head(
+			path,
+			k=k,
+			source=source,
+			config=config,
+			allow_staged=allow_staged,
+		)
 		head = _load_head_metadata(path)
 		for survey_id, raw in _mapping(head['surveys'], 'surveys').items():
 			valid = np.load(
@@ -988,14 +1097,38 @@ def _validate_all_heads(
 			common_masks.setdefault(survey_id, np.asarray(valid))
 
 
+def _publish_staged_heads(
+	config: MultiHeadStatePosteriorExportConfig,
+	staging: Path,
+	plans: Sequence[MultiHeadStatePosteriorExportPlan],
+) -> None:
+	"""Move a fully validated staged bundle into its immutable final paths."""
+	for plan in plans:
+		if plan.action == 'REUSE':
+			continue
+		staged = staging / f'k{plan.k}'
+		final = config.posterior_root / f'k{plan.k}'
+		if final.exists():
+			raise FileExistsError(f'posterior output appeared during export: {final}')
+		head = _load_head_metadata(staged)
+		_write_json_atomic(
+			staged / 'head_metadata.json',
+			_rebase_head_paths(head, old_root=staged, new_root=final),
+		)
+		staged.replace(final)
+
+
 def _validate_complete_head(
 	path: Path,
 	*,
 	k: int,
 	source: Mapping[str, object],
 	config: MultiHeadStatePosteriorExportConfig,
+	allow_staged: bool = False,
 ) -> None:
-	if not path.is_dir() or any(part.startswith('.') for part in path.parts):
+	if not path.is_dir() or (
+		not allow_staged and any(part.startswith('.') for part in path.parts)
+	):
 		raise ValueError(f'partial posterior output is not complete: {path}')
 	head_path = path / 'head_metadata.json'
 	if not head_path.is_file():
@@ -1015,25 +1148,33 @@ def _validate_complete_head(
 			_source_label_path(source_entry)
 		):
 			raise ValueError(f'hard label provenance drift for k={k} {survey_id}')
+	_validate_head_files(path, head)
 
 
 def _validate_head_mapping(head: Mapping[str, object], *, k: int) -> None:
+	_required_keys(head, {'model', 'surveys', 'diagnostics'})
 	_validate_model_identity(head['model'], k=k)
-	_validate_diagnostics(head['diagnostics'])
+	_validate_diagnostics(head['diagnostics'], k=k)
 	for raw in _mapping(head['surveys'], 'surveys').values():
 		entry = _mapping(raw, 'survey')
 		_required_keys(entry, {'posterior', 'valid_tokens', 'metadata', 'source'})
+		posterior_path = _hashed_path(entry['posterior'], 'posterior')
 		posterior = np.load(
-			_hashed_path(entry['posterior'], 'posterior'),
+			posterior_path,
 			mmap_mode='r',
 			allow_pickle=False,
 		)
+		valid_path = _hashed_path(entry['valid_tokens'], 'valid')
 		valid = np.load(
-			_hashed_path(entry['valid_tokens'], 'valid'),
+			valid_path,
 			mmap_mode='r',
 			allow_pickle=False,
 		)
 		_validate_posterior_array(posterior, valid, k=k)
+		_validate_array_reference(
+			entry['posterior'], posterior, name='posterior'
+		)
+		_validate_array_reference(entry['valid_tokens'], valid, name='valid')
 		metadata_path = _hashed_path(entry['metadata'], 'metadata')
 		source_reference = _mapping(entry['source'], 'source hard label')
 		_validate_source_reference(source_reference)
@@ -1059,11 +1200,11 @@ def _load_head_metadata(path: Path) -> Mapping[str, object]:
 	return head
 
 
-def _validate_diagnostics(value: object) -> None:
+def _validate_diagnostics(value: object, *, k: int) -> None:
 	diagnostics = _mapping(value, 'diagnostics')
 	_required_keys(diagnostics, {'per_survey', 'aggregate', 'json', 'csv'})
 	json_path = _hashed_path(diagnostics['json'], 'diagnostics JSON')
-	_hashed_path(diagnostics['csv'], 'diagnostics CSV')
+	csv_path = _hashed_path(diagnostics['csv'], 'diagnostics CSV')
 	try:
 		payload = json.loads(json_path.read_text(encoding='utf-8'))
 	except json.JSONDecodeError as exc:
@@ -1073,6 +1214,154 @@ def _validate_diagnostics(value: object) -> None:
 		'aggregate': diagnostics['aggregate'],
 	}:
 		raise ValueError('diagnostics JSON differs from head metadata')
+	per_survey = _mapping(diagnostics['per_survey'], 'per-survey diagnostics')
+	for survey_id, metrics in per_survey.items():
+		_validate_diagnostic_metrics(metrics, k=k, scope=f'survey {survey_id}')
+	aggregate = _mapping(diagnostics['aggregate'], 'aggregate diagnostics')
+	_required_keys(
+		aggregate,
+		{
+			'posterior_entropy_quantiles',
+			'top1_probability_quantiles',
+			'top1_minus_top2_margin_quantiles',
+			'viterbi_state_posterior_probability',
+			'expected_normalized_order',
+			'effective_posterior_state_usage',
+			'boundary_versus_interior_entropy',
+			'posterior_argmax_viterbi_mismatch_rate',
+			'per_trace_monotonicity',
+			'empty_trace_count',
+			'single_valid_token_trace_count',
+			'trace_length_summary',
+			'survey_count',
+		},
+	)
+	_validate_diagnostic_metrics(
+		{name: value for name, value in aggregate.items() if name != 'survey_count'},
+		k=k,
+		scope='aggregate',
+	)
+	if not _non_negative_integer(aggregate['survey_count']):
+		raise ValueError(
+			'aggregate diagnostics survey_count must be a non-negative integer'
+		)
+	_validate_diagnostics_csv(csv_path, diagnostics)
+
+
+def _validate_diagnostics_csv(path: Path, diagnostics: Mapping[str, object]) -> None:
+	try:
+		with path.open(encoding='utf-8', newline='') as stream:
+			reader = DictReader(stream)
+			if reader.fieldnames != ['scope', 'survey_id', 'metric', 'value']:
+				raise ValueError('diagnostics CSV columns are invalid')
+			rows: list[tuple[str, str, str, str]] = []
+			for row in reader:
+				if set(row) != {'scope', 'survey_id', 'metric', 'value'} or any(
+					not isinstance(item, str) for item in row.values()
+				):
+					raise ValueError('diagnostics CSV rows are invalid')
+				rows.append(
+					(row['scope'], row['survey_id'], row['metric'], row['value'])
+				)
+			actual = sorted(rows)
+	except (OSError, TypeError, UnicodeDecodeError) as exc:
+		raise ValueError('diagnostics CSV must be readable') from exc
+	expected = sorted(
+		(
+			row['scope'],
+			str(row['survey_id']),
+			str(row['metric']),
+			str(row['value']),
+		)
+		for row in _diagnostic_rows(diagnostics)
+	)
+	if actual != expected:
+		raise ValueError('diagnostics CSV differs from head metadata')
+
+
+def _validate_diagnostic_metrics(value: object, *, k: int, scope: str) -> None:
+	metrics = _mapping(value, f'{scope} diagnostics')
+	_required_keys(
+		metrics,
+		{
+			'posterior_entropy_quantiles',
+			'top1_probability_quantiles',
+			'top1_minus_top2_margin_quantiles',
+			'viterbi_state_posterior_probability',
+			'expected_normalized_order',
+			'effective_posterior_state_usage',
+			'boundary_versus_interior_entropy',
+			'posterior_argmax_viterbi_mismatch_rate',
+			'per_trace_monotonicity',
+			'empty_trace_count',
+			'single_valid_token_trace_count',
+			'trace_length_summary',
+		},
+	)
+	for name, upper in (
+		('posterior_entropy_quantiles', float(np.log(k))),
+		('top1_probability_quantiles', 1.0),
+		('top1_minus_top2_margin_quantiles', 1.0),
+		('viterbi_state_posterior_probability', 1.0),
+		('expected_normalized_order', 1.0),
+		('trace_length_summary', None),
+	):
+		_validate_quantiles(metrics[name], name=f'{scope} {name}', upper=upper)
+	boundary = _mapping(
+		metrics['boundary_versus_interior_entropy'],
+		f'{scope} boundary-versus-interior entropy',
+	)
+	_required_keys(boundary, {'boundary', 'interior'})
+	for name, quantiles in boundary.items():
+		_validate_quantiles(
+			quantiles,
+			name=f'{scope} boundary-versus-interior entropy {name}',
+			upper=float(np.log(k)),
+		)
+	if not _finite_number(metrics['effective_posterior_state_usage']) or not (
+		1.0 <= float(metrics['effective_posterior_state_usage']) <= float(k)
+	):
+		raise ValueError(f'{scope} effective posterior state usage is invalid')
+	if not _finite_number(metrics['posterior_argmax_viterbi_mismatch_rate']) or not (
+		0.0 <= float(metrics['posterior_argmax_viterbi_mismatch_rate']) <= 1.0
+	):
+		raise ValueError(f'{scope} posterior argmax/Viterbi mismatch rate is invalid')
+	monotonicity = _mapping(
+		metrics['per_trace_monotonicity'], f'{scope} per-trace monotonicity'
+	)
+	_required_keys(monotonicity, {'violation_count', 'max_decrease'})
+	if not _non_negative_integer(monotonicity['violation_count']):
+		raise ValueError(f'{scope} monotonicity violation count is invalid')
+	if not _finite_number(monotonicity['max_decrease']) or not (
+		0.0 <= float(monotonicity['max_decrease']) <= 1.0
+	):
+		raise ValueError(f'{scope} monotonicity max decrease is invalid')
+	for name in ('empty_trace_count', 'single_valid_token_trace_count'):
+		if not _non_negative_integer(metrics[name]):
+			raise ValueError(f'{scope} {name} must be a non-negative integer')
+
+
+def _validate_quantiles(value: object, *, name: str, upper: float | None) -> None:
+	quantiles = _mapping(value, name)
+	_required_keys(quantiles, {'p00', 'p05', 'p50', 'p95', 'p100'})
+	values = [quantiles[key] for key in ('p00', 'p05', 'p50', 'p95', 'p100')]
+	if (
+		any(not _finite_number(item) or float(item) < 0.0 for item in values)
+		or (upper is not None and any(float(item) > upper for item in values))
+	):
+		raise ValueError(f'{name} quantiles are invalid')
+
+
+def _finite_number(value: object) -> bool:
+	return isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(
+		value, (bool, np.bool_)
+	) and bool(np.isfinite(value))
+
+
+def _non_negative_integer(value: object) -> bool:
+	return isinstance(value, (int, np.integer)) and not isinstance(
+		value, (bool, np.bool_)
+	) and value >= 0
 
 
 def _validate_model_identity(value: object, *, k: int) -> None:
@@ -1112,6 +1401,52 @@ def _validate_posterior_array(
 		raise ValueError('invalid posterior rows must be zero')
 
 
+def _validate_array_reference(
+	reference: object, array: np.ndarray, *, name: str
+) -> None:
+	value = _mapping(reference, name)
+	_required_keys(value, {'path', 'sha256', 'shape', 'dtype'})
+	shape = value['shape']
+	if not isinstance(shape, list) or any(
+		not isinstance(dimension, int) or dimension < 0 for dimension in shape
+	):
+		raise TypeError(f'{name}.shape must be a list of non-negative integers')
+	if tuple(shape) != array.shape:
+		raise ValueError(f'{name} shape differs from manifest')
+	if value['dtype'] != array.dtype.name:
+		raise ValueError(f'{name} dtype differs from manifest')
+
+
+def _validate_head_files(path: Path, head: Mapping[str, object]) -> None:
+	"""Reject completed heads that contain any output not in their metadata."""
+	root = path.resolve()
+	expected = {root / 'head_metadata.json'}
+	diagnostics = _mapping(head['diagnostics'], 'diagnostics')
+	for name in ('json', 'csv'):
+		expected.add(_head_file_path(diagnostics[name], root, name))
+	for raw in _mapping(head['surveys'], 'surveys').values():
+		entry = _mapping(raw, 'survey')
+		for name in ('posterior', 'valid_tokens', 'metadata'):
+			expected.add(_head_file_path(entry[name], root, name))
+	actual = {
+		candidate.resolve() for candidate in path.rglob('*') if candidate.is_file()
+	}
+	if actual != expected:
+		unknown = sorted(str(candidate) for candidate in actual - expected)
+		missing = sorted(str(candidate) for candidate in expected - actual)
+		raise ValueError(
+			'posterior head files differ from metadata; '
+			f'unknown={unknown}, missing={missing}'
+		)
+
+
+def _head_file_path(reference: object, root: Path, name: str) -> Path:
+	path = _hashed_path(reference, name).resolve()
+	if not path.is_relative_to(root):
+		raise ValueError(f'{name} path is outside posterior head directory')
+	return path
+
+
 def _source_head(source: Mapping[str, object], *, k: int) -> Mapping[str, object]:
 	return _mapping(_mapping(source['heads'], 'heads')[str(k)], f'source k={k}')
 
@@ -1147,6 +1482,16 @@ def _validate_source_manifest(source: Mapping[str, object]) -> None:
 
 def _reference(path: Path) -> dict[str, str]:
 	return {'path': str(path), 'sha256': file_sha256(path)}
+
+
+def _array_reference(
+	path: Path, *, shape: tuple[int, ...], dtype: np.dtype[object]
+) -> dict[str, object]:
+	return {
+		**_reference(path),
+		'shape': list(shape),
+		'dtype': dtype.name,
+	}
 
 
 def _hashed_path(value: object, name: str) -> Path:
@@ -1264,6 +1609,22 @@ def _quarantine(path: Path) -> None:
 		f'{path.name}.quarantine-{datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")}'
 	)
 	shutil.move(str(path), str(destination))
+
+
+def _publish_handoff_manifest(config: MultiHeadStatePosteriorExportConfig) -> None:
+	"""Publish only a missing or quarantined handoff after all heads validate."""
+	path = config.handoff_manifest
+	payload = _manifest(config)
+	if path.exists():
+		try:
+			manifest = load_multi_head_state_posterior_manifest(path)
+		except (OSError, TypeError, ValueError):
+			_quarantine(path)
+		else:
+			if manifest == payload:
+				return
+			_quarantine(path)
+	_write_json_atomic(path, payload)
 
 
 def _write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
