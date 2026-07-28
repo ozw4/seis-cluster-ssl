@@ -110,6 +110,15 @@ class StratigraphicHMMSettings:
 	prepared_feature_cache: PreparedFeatureCacheSettings
 
 
+@dataclass(frozen=True)
+class HMMStatePosteriorResult:
+	"""Exact state-marginal posterior summary for one compacted HMM trace."""
+
+	posterior: np.ndarray
+	log_partition: float
+	expected_normalized_order: np.ndarray
+
+
 def stratigraphic_hmm_settings_from_config(
 	config: Mapping[str, object],
 ) -> StratigraphicHMMSettings:
@@ -712,6 +721,245 @@ def _emission_matrices(
 	):
 		raise ValueError('features and centers must contain only finite values')
 	return feature_matrix, center_matrix
+
+
+def forward_backward_state_posteriors(  # noqa: PLR0913
+	emission_costs: np.ndarray,
+	transition_costs: np.ndarray,
+	*,
+	initial_state_costs: np.ndarray | None = None,
+	terminal_state_costs: np.ndarray | None = None,
+	expected_boundary_count: int | None = None,
+	boundary_count_weight: float = 0.0,
+	cost_temperature: float = 1.0,
+) -> HMMStatePosteriorResult:
+	"""Return exact log-space state marginals for the ordered HMM cost model.
+
+	The optional expected-boundary prior uses the same capped forward-boundary
+	count as :func:`viterbi_decode_costs`.
+	"""
+	emissions = _as_float_matrix(emission_costs, 'emission_costs')
+	transitions = _as_float_matrix(transition_costs, 'transition_costs')
+	if emissions.shape[0] == 0 or emissions.shape[1] == 0:
+		raise ValueError('emission_costs must be non-empty in both dimensions')
+	_validate_cost_matrix(emissions, 'emission_costs')
+
+	_, k = emissions.shape
+	if transitions.shape != (k, k):
+		raise ValueError(
+			f'transition_costs must have shape ({k}, {k}); got {transitions.shape}'
+		)
+	_validate_cost_matrix(transitions, 'transition_costs')
+	initial_costs = _optional_posterior_state_costs(
+		initial_state_costs,
+		k,
+		'initial_state_costs',
+	)
+	terminal_costs = _optional_posterior_state_costs(
+		terminal_state_costs,
+		k,
+		'terminal_state_costs',
+	)
+	_validate_nonnegative_finite_cost(boundary_count_weight, 'boundary_count_weight')
+	_validate_cost_temperature(cost_temperature)
+	if expected_boundary_count is not None:
+		if isinstance(expected_boundary_count, bool) or not isinstance(
+			expected_boundary_count,
+			Integral,
+		):
+			raise TypeError('expected_boundary_count must be an integer')
+		if int(expected_boundary_count) < 0:
+			raise ValueError('expected_boundary_count must be non-negative')
+
+	log_emissions = -emissions / float(cost_temperature)
+	log_transitions = -transitions / float(cost_temperature)
+	log_initial = -initial_costs / float(cost_temperature)
+	log_terminal = -terminal_costs / float(cost_temperature)
+	if expected_boundary_count is not None and boundary_count_weight > 0.0:
+		posterior, log_partition = _state_posteriors_with_boundary_count(
+			log_emissions,
+			log_transitions,
+			log_initial=log_initial,
+			log_terminal=log_terminal,
+			expected_boundary_count=int(expected_boundary_count),
+			boundary_count_weight=float(boundary_count_weight),
+			cost_temperature=float(cost_temperature),
+		)
+	else:
+		posterior, log_partition = _state_posteriors_without_boundary_count(
+			log_emissions,
+			log_transitions,
+			log_initial=log_initial,
+			log_terminal=log_terminal,
+		)
+
+	expected_order = posterior @ _normalized_state_order(k)
+	_validate_state_posterior(posterior, expected_order)
+	return HMMStatePosteriorResult(
+		posterior=posterior,
+		log_partition=log_partition,
+		expected_normalized_order=expected_order,
+	)
+
+
+def _state_posteriors_without_boundary_count(
+	log_emissions: np.ndarray,
+	log_transitions: np.ndarray,
+	*,
+	log_initial: np.ndarray,
+	log_terminal: np.ndarray,
+) -> tuple[np.ndarray, float]:
+	"""Compute state marginals without the expected-boundary prior."""
+	t_count, k = log_emissions.shape
+	alpha = np.full((t_count, k), -np.inf, dtype=np.float64)
+	beta = np.full((t_count, k), -np.inf, dtype=np.float64)
+	alpha[0] = log_emissions[0] + log_initial
+	for t_index in range(1, t_count):
+		for next_state in range(k):
+			transition_sum = _logsumexp(
+				alpha[t_index - 1] + log_transitions[:, next_state],
+			)
+			alpha[t_index, next_state] = (
+				log_emissions[t_index, next_state] + transition_sum
+			)
+
+	beta[-1] = log_terminal
+	for t_index in range(t_count - 2, -1, -1):
+		for previous_state in range(k):
+			beta[t_index, previous_state] = _logsumexp(
+				log_transitions[previous_state]
+				+ log_emissions[t_index + 1]
+				+ beta[t_index + 1],
+			)
+	log_partition = _logsumexp(alpha[-1] + log_terminal)
+	return _posterior_from_log_messages(alpha, beta, log_partition), log_partition
+
+
+def _state_posteriors_with_boundary_count(  # noqa: PLR0913
+	log_emissions: np.ndarray,
+	log_transitions: np.ndarray,
+	*,
+	log_initial: np.ndarray,
+	log_terminal: np.ndarray,
+	expected_boundary_count: int,
+	boundary_count_weight: float,
+	cost_temperature: float,
+) -> tuple[np.ndarray, float]:
+	"""Compute state marginals on the capped ``(state, boundary_count)`` space."""
+	t_count, k = log_emissions.shape
+	max_boundaries = min(k - 1, t_count - 1)
+	target = min(expected_boundary_count, max_boundaries)
+	boundary_counts = np.arange(max_boundaries + 1, dtype=np.float64)
+	log_boundary_penalty = -boundary_count_weight * (
+		(boundary_counts - float(target)) ** 2
+	) / cost_temperature
+	alpha = np.full(
+		(t_count, k, max_boundaries + 1),
+		-np.inf,
+		dtype=np.float64,
+	)
+	beta = np.full_like(alpha, -np.inf)
+	alpha[0, :, 0] = log_emissions[0] + log_initial
+	for t_index in range(1, t_count):
+		for previous_state in range(k):
+			for next_state in range(k):
+				transition = log_transitions[previous_state, next_state]
+				if not np.isfinite(transition):
+					continue
+				increment = 1 if next_state > previous_state else 0
+				candidate = (
+					alpha[t_index - 1, previous_state, : max_boundaries + 1 - increment]
+					+ transition
+					+ log_emissions[t_index, next_state]
+				)
+				alpha[t_index, next_state, increment:] = np.logaddexp(
+					alpha[t_index, next_state, increment:],
+					candidate,
+				)
+
+	beta[-1] = log_terminal[:, np.newaxis] + log_boundary_penalty
+	for t_index in range(t_count - 2, -1, -1):
+		for previous_state in range(k):
+			for next_state in range(k):
+				transition = log_transitions[previous_state, next_state]
+				if not np.isfinite(transition):
+					continue
+				increment = 1 if next_state > previous_state else 0
+				candidate = (
+					transition
+					+ log_emissions[t_index + 1, next_state]
+					+ beta[t_index + 1, next_state, increment:]
+				)
+				beta[t_index, previous_state, : max_boundaries + 1 - increment] = (
+					np.logaddexp(
+						beta[t_index, previous_state, : max_boundaries + 1 - increment],
+						candidate,
+					)
+				)
+	log_partition = _logsumexp(alpha[-1] + beta[-1])
+	_require_finite_log_partition(log_partition)
+	log_marginals = _logsumexp(alpha + beta, axis=2) - log_partition
+	return _posterior_from_log_marginals(log_marginals, log_partition), log_partition
+
+
+def _posterior_from_log_messages(
+	alpha: np.ndarray,
+	beta: np.ndarray,
+	log_partition: float,
+) -> np.ndarray:
+	_require_finite_log_partition(log_partition)
+	return _posterior_from_log_marginals(alpha + beta - log_partition, log_partition)
+
+
+def _posterior_from_log_marginals(
+	log_marginals: np.ndarray,
+	log_partition: float,
+) -> np.ndarray:
+	_require_finite_log_partition(log_partition)
+	return np.exp(log_marginals)
+
+
+def _require_finite_log_partition(log_partition: float) -> None:
+	if not np.isfinite(log_partition):
+		raise ValueError(
+			'no finite path exists for emission_costs and transition_costs',
+		)
+
+
+def _logsumexp(values: np.ndarray, axis: int | None = None) -> np.ndarray | float:
+	"""Return a finite-safe float64 log-sum-exp without a SciPy dependency."""
+	maximum = np.max(values, axis=axis, keepdims=True)
+	with np.errstate(invalid='ignore', divide='ignore'):
+		shifted = np.where(np.isfinite(maximum), values - maximum, -np.inf)
+		summed = np.sum(np.exp(shifted), axis=axis, keepdims=True)
+		result = maximum + np.log(summed)
+	if axis is None:
+		return float(result.reshape(()))
+	return np.squeeze(result, axis=axis)
+
+
+def _normalized_state_order(k: int) -> np.ndarray:
+	if k == 1:
+		return np.zeros(1, dtype=np.float64)
+	return np.arange(k, dtype=np.float64) / float(k - 1)
+
+
+def _validate_state_posterior(
+	posterior: np.ndarray,
+	expected_normalized_order: np.ndarray,
+) -> None:
+	if (
+		not np.all(np.isfinite(posterior))
+		or np.any(posterior < 0.0)
+		or not np.allclose(np.sum(posterior, axis=1), 1.0, rtol=1.0e-10, atol=1.0e-12)
+	):
+		raise ValueError('state posterior must be finite, non-negative, and normalized')
+	if (
+		not np.all(np.isfinite(expected_normalized_order))
+		or np.any(expected_normalized_order < 0.0)
+		or np.any(expected_normalized_order > 1.0)
+	):
+		raise ValueError('expected_normalized_order must be finite and in [0, 1]')
 
 
 def viterbi_decode_costs(  # noqa: C901, PLR0913
@@ -1895,6 +2143,18 @@ def _validate_nonnegative_finite_cost(value: object, name: str) -> None:
 		raise ValueError(f'{name} must be a finite non-negative number')
 
 
+def _validate_cost_matrix(value: np.ndarray, name: str) -> None:
+	if np.isnan(value).any() or np.isneginf(value).any():
+		raise ValueError(f'{name} must not contain NaN or -inf values')
+
+
+def _validate_cost_temperature(value: object) -> None:
+	if isinstance(value, bool) or not isinstance(value, Real):
+		raise TypeError('cost_temperature must be a positive finite number')
+	if not np.isfinite(float(value)) or float(value) <= 0.0:
+		raise ValueError('cost_temperature must be a positive finite number')
+
+
 def _validate_positive_int(value: object, name: str) -> None:
 	if isinstance(value, bool) or not isinstance(value, Integral):
 		raise TypeError(f'{name} must be a positive integer')
@@ -1917,6 +2177,24 @@ def _optional_state_costs(
 	if value is None:
 		return np.zeros(k, dtype=np.float64)
 	return _validate_state_costs(np.asarray(value, dtype=np.float64), k, name)
+
+
+def _optional_posterior_state_costs(
+	value: np.ndarray | None,
+	k: int,
+	name: str,
+) -> np.ndarray:
+	if value is None:
+		return np.zeros(k, dtype=np.float64)
+	costs = np.asarray(value, dtype=np.float64)
+	if costs.ndim != 1:
+		raise ValueError(f'{name} must be 1D; got shape {costs.shape}')
+	if costs.shape != (k,):
+		raise ValueError(f'{name} must have shape ({k},); got {costs.shape}')
+	_validate_cost_matrix(costs, name)
+	if np.any(costs < 0.0):
+		raise ValueError(f'{name} must contain only non-negative values')
+	return costs
 
 
 def _validate_state_costs(value: np.ndarray, k: int, name: str) -> np.ndarray:
@@ -1962,6 +2240,7 @@ __all__ = [
 	'HMMAnchorPriorSettings',
 	'HMMExpectedBoundariesSettings',
 	'HMMPathPriorSettings',
+	'HMMStatePosteriorResult',
 	'HMMTransitionSettings',
 	'StratigraphicHMMSettings',
 	'build_initial_state_costs',
@@ -1970,6 +2249,7 @@ __all__ = [
 	'decode_prepared_survey_ordered_labels',
 	'decode_survey_ordered_labels',
 	'decode_trace_segments',
+	'forward_backward_state_posteriors',
 	'initialize_ordered_centers',
 	'normalized_z_features_for_indices',
 	'prepare_feature_batch_for_indices',

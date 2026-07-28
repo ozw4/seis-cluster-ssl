@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import itertools
 
 import numpy as np
 import pytest
@@ -17,6 +18,7 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	build_ordered_transition_costs,
 	build_terminal_state_costs,
 	decode_trace_segments,
+	forward_backward_state_posteriors,
 	squared_euclidean_emission_costs,
 	stratigraphic_hmm_settings_from_config,
 	viterbi_decode_costs,
@@ -529,6 +531,235 @@ def test_disabled_path_prior_builders_return_zero_vectors() -> None:
 	)
 
 
+@pytest.mark.parametrize(
+	(
+		'emissions',
+		'transitions',
+		'initial_costs',
+		'terminal_costs',
+		'expected_boundary_count',
+		'boundary_count_weight',
+	),
+	[
+		(
+			np.array([[0.0, 0.0]]),
+			np.zeros((2, 2)),
+			np.array([0.2, 0.0]),
+			np.array([0.0, 0.3]),
+			None,
+			0.0,
+		),
+		(
+			np.array([[0.0, 0.4], [0.2, 0.0], [0.3, 0.1]]),
+			np.array([[0.0, 0.2], [np.inf, 0.0]]),
+			np.array([0.1, 0.2]),
+			np.array([0.3, 0.0]),
+			None,
+			0.0,
+		),
+		(
+			np.array(
+				[
+					[0.0, 0.0, 1.0],
+					[0.1, 0.0, 0.1],
+					[0.2, 0.1, 0.0],
+					[0.3, 0.2, 0.0],
+				],
+			),
+			np.array(
+				[
+					[0.0, 0.2, np.inf],
+					[np.inf, 0.0, 0.2],
+					[np.inf, np.inf, 0.0],
+				],
+			),
+			np.array([0.0, 0.1, 0.2]),
+			np.array([0.2, 0.1, 0.0]),
+			2,
+			0.7,
+		),
+	],
+)
+def test_forward_backward_state_posteriors_matches_path_enumeration(  # noqa: PLR0913
+	emissions: np.ndarray,
+	transitions: np.ndarray,
+	initial_costs: np.ndarray,
+	terminal_costs: np.ndarray,
+	expected_boundary_count: int | None,
+	boundary_count_weight: float,
+) -> None:
+	result = forward_backward_state_posteriors(
+		emissions,
+		transitions,
+		initial_state_costs=initial_costs,
+		terminal_state_costs=terminal_costs,
+		expected_boundary_count=expected_boundary_count,
+		boundary_count_weight=boundary_count_weight,
+	)
+	reference_posterior, reference_log_partition = _enumerated_state_posterior(
+		emissions,
+		transitions,
+		initial_costs=initial_costs,
+		terminal_costs=terminal_costs,
+		expected_boundary_count=expected_boundary_count,
+		boundary_count_weight=boundary_count_weight,
+	)
+
+	np.testing.assert_allclose(result.posterior, reference_posterior)
+	assert result.log_partition == pytest.approx(reference_log_partition)
+	np.testing.assert_allclose(
+		result.expected_normalized_order,
+		reference_posterior @ np.linspace(0.0, 1.0, emissions.shape[1]),
+	)
+
+
+def test_forward_backward_state_posteriors_respects_unique_finite_path() -> None:
+	result = forward_backward_state_posteriors(
+		np.array([[0.0, np.inf], [0.0, np.inf], [0.0, np.inf]]),
+		np.array([[0.0, np.inf], [np.inf, 0.0]]),
+	)
+
+	np.testing.assert_array_equal(
+		result.posterior,
+		np.array([[1.0, 0.0], [1.0, 0.0], [1.0, 0.0]]),
+	)
+
+
+def test_forward_backward_state_posteriors_can_differ_from_viterbi_map() -> None:
+	emissions = np.zeros((2, 2))
+	transitions = np.array([[0.0, 0.0], [1.0, 0.0]])
+
+	viterbi = viterbi_decode_costs(emissions, transitions)
+	posterior_argmax = np.argmax(
+		forward_backward_state_posteriors(emissions, transitions).posterior,
+		axis=1,
+	)
+
+	np.testing.assert_array_equal(viterbi, np.array([0, 0], dtype=np.int32))
+	np.testing.assert_array_equal(posterior_argmax, np.array([0, 1]))
+
+
+def test_forward_backward_cost_fixture_has_the_existing_viterbi_map() -> None:
+	emissions = np.array(
+		[
+			[0.0, 3.0, 6.0],
+			[3.0, 0.0, 3.0],
+			[6.0, 3.0, 0.0],
+			[6.0, 3.0, 0.0],
+		],
+	)
+	transitions = build_ordered_transition_costs(
+		3,
+		HMMTransitionSettings(
+			same_cost=0.0,
+			advance_cost=0.1,
+			jump_cost=5.0,
+			reverse_cost=100.0,
+			forbid_reverse=True,
+			max_jump=1,
+		),
+	)
+
+	forward_backward_state_posteriors(
+		emissions,
+		transitions,
+		expected_boundary_count=2,
+		boundary_count_weight=1.0,
+	)
+	viterbi = viterbi_decode_costs(
+		emissions,
+		transitions,
+		expected_boundary_count=2,
+		boundary_count_weight=1.0,
+	)
+
+	np.testing.assert_array_equal(
+		viterbi,
+		_enumerated_minimum_cost_path(
+			emissions,
+			transitions,
+			expected_boundary_count=2,
+			boundary_count_weight=1.0,
+		),
+	)
+
+
+def test_forward_backward_state_posteriors_preserves_ordered_expectation() -> None:
+	result = forward_backward_state_posteriors(
+		np.zeros((4, 3)),
+		build_ordered_transition_costs(
+			3,
+			HMMTransitionSettings(
+				same_cost=0.0,
+				advance_cost=0.0,
+				jump_cost=0.0,
+				reverse_cost=1.0,
+				forbid_reverse=True,
+				max_jump=1,
+			),
+		),
+	)
+
+	assert np.all(np.diff(result.expected_normalized_order) >= -1.0e-12)
+
+
+@pytest.mark.parametrize(
+	('kwargs', 'message'),
+	[
+		({'cost_temperature': 0.0}, 'cost_temperature'),
+		({'cost_temperature': np.inf}, 'cost_temperature'),
+		({'expected_boundary_count': -1}, 'expected_boundary_count'),
+		({'boundary_count_weight': np.nan}, 'boundary_count_weight'),
+	],
+)
+def test_forward_backward_state_posteriors_rejects_invalid_parameters(
+	kwargs: dict[str, object],
+	message: str,
+) -> None:
+	with pytest.raises(ValueError, match=message):
+		forward_backward_state_posteriors(
+			np.zeros((2, 2)),
+			np.zeros((2, 2)),
+			**kwargs,
+		)
+
+
+def test_forward_backward_state_posteriors_rejects_invalid_costs_and_no_path() -> None:
+	with pytest.raises(ValueError, match='non-empty'):
+		forward_backward_state_posteriors(
+			np.empty((0, 2)),
+			np.zeros((2, 2)),
+		)
+	with pytest.raises(ValueError, match='shape'):
+		forward_backward_state_posteriors(
+			np.zeros((2, 2)),
+			np.zeros((3, 3)),
+		)
+	with pytest.raises(ValueError, match='NaN'):
+		forward_backward_state_posteriors(
+			np.array([[0.0, np.nan]]),
+			np.zeros((2, 2)),
+		)
+	with pytest.raises(ValueError, match='finite path'):
+		forward_backward_state_posteriors(
+			np.full((2, 2), np.inf),
+			np.zeros((2, 2)),
+		)
+
+
+def test_forward_backward_state_posteriors_uses_bounded_dynamic_programming() -> None:
+	source = inspect.getsource(forward_backward_state_posteriors)
+	boundary_source = inspect.getsource(
+		forward_backward_state_posteriors.__globals__[
+			'_state_posteriors_with_boundary_count'
+		],
+	)
+
+	assert 'itertools' not in source
+	assert 'itertools' not in boundary_source
+	assert 'k, k, max_boundaries' not in boundary_source
+
+
 def test_viterbi_decode_costs_rejects_invalid_path_prior_cost_shape() -> None:
 	with pytest.raises(ValueError, match='initial_state_costs'):
 		viterbi_decode_costs(
@@ -690,6 +921,85 @@ def test_decode_trace_segments_rejects_invalid_mask_shape() -> None:
 
 def _boundary_count(labels: np.ndarray) -> int:
 	return int(np.count_nonzero(np.diff(labels) > 0))
+
+
+def _enumerated_state_posterior(  # noqa: PLR0913
+	emissions: np.ndarray,
+	transitions: np.ndarray,
+	*,
+	initial_costs: np.ndarray,
+	terminal_costs: np.ndarray,
+	expected_boundary_count: int | None,
+	boundary_count_weight: float,
+) -> tuple[np.ndarray, float]:
+	t_count, k = emissions.shape
+	max_boundaries = min(k - 1, t_count - 1)
+	target = (
+		None
+		if expected_boundary_count is None
+		else min(expected_boundary_count, max_boundaries)
+	)
+	paths: list[tuple[int, ...]] = []
+	log_weights: list[float] = []
+	for path in itertools.product(range(k), repeat=t_count):
+		cost = float(emissions[np.arange(t_count), path].sum())
+		cost += float(initial_costs[path[0]] + terminal_costs[path[-1]])
+		for previous, next_state in itertools.pairwise(path):
+			transition = transitions[previous, next_state]
+			if not np.isfinite(transition):
+				break
+			cost += float(transition)
+		else:
+			boundaries = sum(
+				next_state > previous
+				for previous, next_state in itertools.pairwise(path)
+			)
+			if boundaries > max_boundaries:
+				continue
+			if target is not None and boundary_count_weight > 0.0:
+				cost += boundary_count_weight * (boundaries - target) ** 2
+			paths.append(path)
+			log_weights.append(-cost)
+	log_partition = float(np.logaddexp.reduce(log_weights))
+	posterior = np.zeros((t_count, k))
+	for path, log_weight in zip(paths, log_weights, strict=True):
+		posterior[np.arange(t_count), path] += np.exp(log_weight - log_partition)
+	return posterior, log_partition
+
+
+def _enumerated_minimum_cost_path(
+	emissions: np.ndarray,
+	transitions: np.ndarray,
+	*,
+	expected_boundary_count: int,
+	boundary_count_weight: float,
+) -> np.ndarray:
+	t_count, k = emissions.shape
+	max_boundaries = min(k - 1, t_count - 1)
+	target = min(expected_boundary_count, max_boundaries)
+	best_path: tuple[int, ...] | None = None
+	best_cost = np.inf
+	for path in itertools.product(range(k), repeat=t_count):
+		cost = float(emissions[np.arange(t_count), path].sum())
+		for previous, next_state in itertools.pairwise(path):
+			transition = transitions[previous, next_state]
+			if not np.isfinite(transition):
+				break
+			cost += float(transition)
+		else:
+			boundaries = sum(
+				next_state > previous
+				for previous, next_state in itertools.pairwise(path)
+			)
+			if boundaries > max_boundaries:
+				continue
+			cost += boundary_count_weight * (boundaries - target) ** 2
+			if cost < best_cost:
+				best_path = path
+				best_cost = cost
+	if best_path is None:
+		raise AssertionError('test fixture must have a finite path')
+	return np.asarray(best_path, dtype=np.int32)
 
 
 def _hmm_settings_config() -> dict[str, object]:
