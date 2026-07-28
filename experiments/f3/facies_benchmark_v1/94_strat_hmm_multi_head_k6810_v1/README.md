@@ -136,13 +136,17 @@ For a failed downstream decoder job, use the selected output's valid
 partial outputs instead require `--only-missing`, which quarantines them before
 starting a fresh job.
 
-## Execution status
+## Completed status
 
-The 2026-07-20 preflight is blocked before initialization: the required
-multi-head target manifest is absent, its K=8/K=10 and K=6 replay sources are
-unavailable, and the available historical K=6 target does not share the source
-embedding valid-token mask. No F3 smoke, full run, checkpoint, or embedding was
-created. The lightweight status records and handoff are in
-`results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/`; do not treat
-either configured model tag as a completed model until those records are
-replaced by PASS validation artifacts.
+- Target bundle: complete.
+- K6 replay parity: exact.
+- Pretraining: `mh_nocons` complete and `mh_cons010` complete.
+- Embeddings: 2/2 complete.
+- Original-split decision: `M4_MH_GO_NOCONS`.
+- Six-split formal result: `M4_MH_SPLIT_HOLD`.
+- Project decision: `ADOPT_MH_NOCONS_FOR_M5` (adopt `mh_nocons` for M5).
+- Next milestone: M5-U posterior-aware soft multi-resolution HMM pretraining.
+
+The 2026-07-20 blocked preflight is a historical archive only, retained under
+`results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1_historical_preflight_20260720/`.
+It is not the current execution status.

@@ -32,20 +32,20 @@
       "target": "low_label_split_decisions.json"
     },
     {
-      "sha256": "d2ff667ae280e443634931879ec46e6842499eb2c423beac803175726bd11b0a",
-      "size_bytes": 177,
+      "sha256": "cefa582cdf267a8105fbc4f0110bd53bd6ba592e1c51ccf6537cca47dbf46246",
+      "size_bytes": 22676,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_six_split_v1/low_label_split_results_summary.json",
       "target": "low_label_split_results_summary.json"
     },
     {
-      "sha256": "7db34a77bd43dd9184e27ba349cc76d40e71515e807c6f04d109a9c18928cb1c",
-      "size_bytes": 62,
+      "sha256": "ebe900cd4c92c2e61e99c5379eee0b1b4397ffcfc64318826b5ededed2975401",
+      "size_bytes": 3847,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_six_split_v1/low_label_split_results_summary.md",
       "target": "low_label_split_results_summary.md"
     },
     {
-      "sha256": "92829c1fb83c4ff66cf81871b12511937bbea3d2d8bd5cf9c39689f1229a1567",
-      "size_bytes": 61,
+      "sha256": "06e55f49bae2ed7b5650b437245bccbb56aa59f29b35f07c25eab64cecf288c7",
+      "size_bytes": 887,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_six_split_v1/low_label_split_handoff.md",
       "target": "low_label_split_handoff.md"
     }

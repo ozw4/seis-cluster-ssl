@@ -62,8 +62,8 @@
       "target": "multi_head_results_summary.md"
     },
     {
-      "sha256": "e16115ab3aaf53a7fb0d1044ce951e31d70f17dcb86f2adaca80bfc59b4229e6",
-      "size_bytes": 270,
+      "sha256": "d71baf77816e920f42fddd28313ca562d94785867078a25aef4d601c9ee01594",
+      "size_bytes": 328,
       "source": "/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_experiment_handoff.md",
       "target": "multi_head_experiment_handoff.md"
     }

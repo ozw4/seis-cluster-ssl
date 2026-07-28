@@ -798,6 +798,22 @@ def test_handoff_without_selected_candidate_preserves_hold_blocked_path() -> Non
 	assert 'Do not carry the unselected' not in handoff
 
 
+def test_published_original_handoff_matches_current_renderer() -> None:
+	repository_root = Path(__file__).resolve().parents[2]
+	publish_dir = (
+		repository_root
+		/ 'results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
+	)
+	decisions = json.loads(
+		(publish_dir / 'multi_head_decisions.json').read_text(encoding='utf-8')
+	)
+	published_handoff = (publish_dir / 'multi_head_experiment_handoff.md').read_text(
+		encoding='utf-8'
+	)
+
+	assert published_handoff == results._handoff(decisions)
+
+
 def test_handoff_rejects_unknown_selected_candidate() -> None:
 	with pytest.raises(ValueError, match='unknown selected candidate'):
 		results._handoff(

@@ -56,3 +56,20 @@ python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py \
 
 Never use `--resume` for a partial or identity-invalid job: invoke
 `--only-missing` instead so it is timestamp-quarantined and restarted cleanly.
+
+## Completed result
+
+- Original-split overall decision: `M4_MH_GO_NOCONS`.
+- Multi-task value: `POSITIVE`.
+- Consistency increment: `HOLD`.
+- Selected candidate: `mh_nocons`.
+
+`mh_cons010` is not the selected primary candidate.
+
+## Confirmatory follow-up
+
+- The six-split formal result is `M4_MH_SPLIT_HOLD`.
+- The original split overestimated the cap50 multi-head incremental effect.
+- The project decision is `ADOPT_MH_NOCONS_FOR_M5`: adopt `mh_nocons` as the
+  hard-target baseline for M5 without carrying the consistency model forward as
+  a primary candidate.
