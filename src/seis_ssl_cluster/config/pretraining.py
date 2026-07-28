@@ -958,6 +958,14 @@ def _validate_m5_u_scientific_identity(
 		raise ValueError(
 			'loss.prototype_weight must be 1.0 for soft posterior training'
 		)
+	if loss['usage_weight'] != 0.005:
+		raise ValueError(
+			'loss.usage_weight must be 0.005 for soft posterior training'
+		)
+	if loss['distillation_weight'] != 0.2:
+		raise ValueError(
+			'loss.distillation_weight must be 0.2 for soft posterior training'
+		)
 
 
 def _validate_strat_hmm_pretext_cross_section_values(

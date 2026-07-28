@@ -152,6 +152,20 @@ def test_soft_target_evidence_derives_per_head_hashes_from_manifest(
 	monkeypatch.setattr(
 		soft_validation, '_initial_hashes', lambda _: ('c' * 64, 'd' * 64)
 	)
+	monkeypatch.setattr(
+		soft_validation,
+		'_hard_baseline_checkpoint_evidence',
+		lambda *_: {
+			'hard_baseline_checkpoint': 'hard_best.pt',
+			'hard_baseline_checkpoint_sha256': 'e' * 64,
+			'hard_baseline_trainability_summary': {
+				'trainable_names': ['encoder.layers.7.weight']
+			},
+			'hard_baseline_optimizer_group_identity': [
+				{'name': 'head', 'parameter_names': ['head.fixture']}
+			],
+		},
+	)
 
 	evidence = _validate_target_contract(config, posterior, hard, soft)
 
@@ -178,6 +192,130 @@ def test_soft_config_delta_rejects_pseudo_target_drift() -> None:
 	soft['pseudo_targets']['min_confidence'] = 0.1
 	with pytest.raises(ValueError, match='scientific config drift'):
 		_validate_allowed_config_delta(hard, soft)
+
+
+def test_soft_validator_binds_hard_config_to_handoff_checkpoint(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	hard_checkpoint = tmp_path / 'hard_best.pt'
+	hard_checkpoint.write_bytes(b'canonical hard checkpoint')
+	hard = {'data': {'min_valid_fraction': 0.1}, 'train': {'seed': 42}}
+	identity = {
+		'head_spec': 'multi_resolution_ordered_prototypes_v1',
+		'head_ks': [6, 8, 10],
+		'consistency_policy': 'normalized_order_smooth_l1_v1',
+		'consistency_weight': 0.0,
+		'consistency_beta': 0.1,
+		'scientific_identity_sha256': 'a' * 64,
+		'initial_student_state_sha256': 'b' * 64,
+		'initial_head_state_sha256': 'c' * 64,
+		'target_manifest': {'sha256': 'd' * 64},
+		'per_head_targets': {},
+		'optimizer_group_identity': [
+			{'name': 'head', 'parameter_names': ['head.fixture']}
+		],
+	}
+	handoff = {
+		'checkpoint': {
+			'path': str(hard_checkpoint),
+			'sha256': soft_validation.file_sha256(hard_checkpoint),
+		},
+		'stratigraphy_pretext': {
+			**{
+				key: value
+				for key, value in identity.items()
+				if key not in {'target_manifest', 'per_head_targets'}
+			},
+			'target_manifest_sha256': 'd' * 64,
+			'per_head_target_sha256': {},
+		},
+	}
+	monkeypatch.setattr(
+		soft_validation,
+		'_torch_mapping',
+		lambda _: {
+			'stratigraphy_config': {
+				'data': {'min_valid_fraction': 0.2},
+				'train': {'seed': 42},
+			},
+			'stratigraphy_checkpoint': identity,
+			'trainability_summary': {'trainable_names': ['encoder.layers.7.weight']},
+		},
+	)
+	monkeypatch.setattr(
+		soft_validation,
+		'validate_stratigraphy_checkpoint_payload',
+		lambda *_args, **_kwargs: None,
+	)
+
+	with pytest.raises(ValueError, match='does not match canonical hard handoff'):
+		soft_validation._hard_baseline_checkpoint_evidence(  # noqa: SLF001
+			hard, handoff
+		)
+
+
+@pytest.mark.parametrize(
+	('hard_trainability', 'hard_optimizer_groups', 'match'),
+	[
+		(
+			{'trainable_names': ['encoder.layers.6.weight']},
+			[{'name': 'head', 'parameter_names': ['head.fixture']}],
+			'trainability differs',
+		),
+		(
+			{'trainable_names': ['encoder.layers.7.weight']},
+			[{'name': 'encoder', 'parameter_names': ['student.fixture']}],
+			'optimizer groups differ',
+		),
+	],
+)
+def test_soft_checkpoint_evidence_requires_hard_trainability_and_optimizer_parity(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	hard_trainability: dict[str, object],
+	hard_optimizer_groups: list[dict[str, object]],
+	match: str,
+) -> None:
+	root = tmp_path / 'soft'
+	root.mkdir()
+	for name in ('latest.pt', 'best.pt'):
+		(root / name).write_bytes(name.encode())
+	scientific = {'target_representation': 'ordered_path_state_posterior_v1'}
+	optimizer_groups = [{'name': 'head', 'parameter_names': ['head.fixture']}]
+	payload = {
+		'epoch': 25,
+		'global_step': 25600,
+		'trainability_summary': {'trainable_names': ['encoder.layers.7.weight']},
+		'stratigraphy_checkpoint': {
+			'schema_version': 3,
+			'model_tag': 'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1',
+			'scientific_identity_sha256': scientific_identity_sha256(scientific),
+			'initial_student_state_sha256': 'a' * 64,
+			'initial_head_state_sha256': 'b' * 64,
+			'optimizer_group_identity': optimizer_groups,
+		},
+	}
+	training = {
+		'paths': {'output_root': str(root)},
+		'identity': {'scientific_identity': scientific},
+	}
+	monkeypatch.setattr(soft_validation, '_torch_mapping', lambda _: payload)
+	monkeypatch.setattr(
+		soft_validation,
+		'validate_stratigraphy_checkpoint_payload',
+		lambda *_args, **_kwargs: None,
+	)
+	monkeypatch.setattr(
+		soft_validation.hard_validation, '_metrics_finite', lambda _: None
+	)
+
+	with pytest.raises(ValueError, match=match):
+		soft_validation._checkpoint_evidence(  # noqa: SLF001
+			training,
+			hard_trainability_summary=hard_trainability,
+			hard_optimizer_group_identity=hard_optimizer_groups,
+		)
 
 
 def test_soft_complete_requires_all_canonical_valid_token_identities(

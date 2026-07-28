@@ -205,13 +205,22 @@ def validate_f3_m5_soft_posterior_pretraining(
 		hard, soft = _training_config(config.hard_full_config), _training_config(
 			config.soft_full_config
 		)
-		_target_evidence = _validate_target_contract(config, posterior, hard, soft)
+		target_evidence = _validate_target_contract(config, posterior, hard, soft)
 		if phase == 'targets':
 			return F3M5SoftPosteriorPretrainingValidationResult(
-				phase, {'status': 'PASS', **_target_evidence}, None
+				phase, {'status': 'PASS', **target_evidence}, None
 			)
-		checkpoint = _checkpoint_evidence(soft)
-		evidence: dict[str, object] = {'status': 'PASS', **_target_evidence, **checkpoint}
+		checkpoint = _checkpoint_evidence(
+			soft,
+			hard_trainability_summary=_mapping(
+				target_evidence['hard_baseline_trainability_summary'],
+				'hard baseline trainability summary',
+			),
+			hard_optimizer_group_identity=target_evidence[
+				'hard_baseline_optimizer_group_identity'
+			],
+		)
+		evidence: dict[str, object] = {'status': 'PASS', **target_evidence, **checkpoint}
 		if phase == 'checkpoints':
 			if not dry_run:
 				hard_validation._atomic_json(
@@ -275,6 +284,7 @@ def _validate_target_contract(
 	hard_handoff = hard_validation.load_f3_multi_head_pretraining_handoff(config.hard_handoff)
 	if hard_handoff.get('model_tag') != _HARD_MODEL_TAG:
 		raise ValueError('hard baseline handoff model tag mismatch')
+	hard_checkpoint = _hard_baseline_checkpoint_evidence(hard, hard_handoff)
 	student_hash, head_hash = _initial_hashes(soft)
 	hard_targets = _mapping(hard_handoff['stratigraphy_pretext'], 'hard handoff targets')
 	if (hard_targets.get('initial_student_state_sha256'), hard_targets.get('initial_head_state_sha256')) != (student_hash, head_hash):
@@ -301,6 +311,7 @@ def _validate_target_contract(
 		'initial_head_state_sha256': head_hash,
 		'hard_baseline_config': str(config.hard_full_config),
 		'hard_baseline_handoff': str(config.hard_handoff),
+		**hard_checkpoint,
 	}
 
 
@@ -340,7 +351,73 @@ def _initial_hashes(training: Mapping[str, object]) -> tuple[str, str]:
 	)
 
 
-def _checkpoint_evidence(training: Mapping[str, object]) -> dict[str, object]:
+def _hard_baseline_checkpoint_evidence(
+	hard: Mapping[str, object], hard_handoff: Mapping[str, object]
+) -> dict[str, object]:
+	"""Bind the supplied hard config to the checkpoint named by its handoff."""
+	record = _mapping(hard_handoff.get('checkpoint'), 'hard handoff checkpoint')
+	path = Path(str(record.get('path', ''))).resolve()
+	if not path.is_file():
+		raise FileNotFoundError('hard baseline handoff checkpoint is missing')
+	if record.get('sha256') != file_sha256(path):
+		raise ValueError('hard baseline handoff checkpoint SHA-256 mismatch')
+	payload = _torch_mapping(path)
+	validate_stratigraphy_checkpoint_payload(payload, expected_config=hard)
+	checkpoint_config = _mapping(
+		payload.get('stratigraphy_config'), 'hard baseline checkpoint config'
+	)
+	if checkpoint_config != hard:
+		raise ValueError(
+			'hard baseline config does not match canonical hard handoff checkpoint'
+		)
+	identity = _mapping(
+		payload.get('stratigraphy_checkpoint'), 'hard baseline checkpoint identity'
+	)
+	handoff_identity = _mapping(
+		hard_handoff.get('stratigraphy_pretext'), 'hard handoff stratigraphy identity'
+	)
+	for key in (
+		'head_spec',
+		'head_ks',
+		'consistency_policy',
+		'consistency_weight',
+		'consistency_beta',
+		'scientific_identity_sha256',
+		'initial_student_state_sha256',
+		'initial_head_state_sha256',
+	):
+		if identity.get(key) != handoff_identity.get(key):
+			raise ValueError(
+				f'hard baseline handoff checkpoint identity mismatch: {key}'
+			)
+	if _mapping(identity.get('target_manifest'), 'hard checkpoint target manifest').get(
+		'sha256'
+	) != handoff_identity.get('target_manifest_sha256'):
+		raise ValueError('hard baseline handoff checkpoint target manifest mismatch')
+	if identity.get('per_head_targets') != handoff_identity.get(
+		'per_head_target_sha256'
+	):
+		raise ValueError('hard baseline handoff checkpoint target heads mismatch')
+	trainability = _mapping(
+		payload.get('trainability_summary'), 'hard baseline trainability summary'
+	)
+	optimizer_groups = identity.get('optimizer_group_identity')
+	if not isinstance(optimizer_groups, list) or not optimizer_groups:
+		raise TypeError('hard baseline optimizer group identity is missing')
+	return {
+		'hard_baseline_checkpoint': str(path),
+		'hard_baseline_checkpoint_sha256': record['sha256'],
+		'hard_baseline_trainability_summary': dict(trainability),
+		'hard_baseline_optimizer_group_identity': optimizer_groups,
+	}
+
+
+def _checkpoint_evidence(
+	training: Mapping[str, object],
+	*,
+	hard_trainability_summary: Mapping[str, object],
+	hard_optimizer_group_identity: object,
+) -> dict[str, object]:
 	root = Path(str(_mapping(training['paths'], 'paths')['output_root']))
 	latest_path, best_path = root / 'latest.pt', root / 'best.pt'
 	if not latest_path.is_file() or not best_path.is_file():
@@ -356,6 +433,16 @@ def _checkpoint_evidence(training: Mapping[str, object]) -> dict[str, object]:
 			_mapping(_mapping(training['identity'], 'identity')['scientific_identity'], 'scientific identity')
 		):
 			raise ValueError('soft checkpoint scientific identity mismatch')
+		if _mapping(
+			payload.get('trainability_summary'), 'soft checkpoint trainability summary'
+		) != hard_trainability_summary:
+			raise ValueError(
+				'soft checkpoint trainability differs from hard baseline'
+			)
+		if identity.get('optimizer_group_identity') != hard_optimizer_group_identity:
+			raise ValueError(
+				'soft checkpoint optimizer groups differ from hard baseline'
+			)
 	student_hash, head_hash = _initial_hashes(training)
 	identity = _mapping(best['stratigraphy_checkpoint'], 'soft checkpoint identity')
 	if (identity.get('initial_student_state_sha256'), identity.get('initial_head_state_sha256')) != (student_hash, head_hash):

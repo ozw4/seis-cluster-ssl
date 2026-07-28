@@ -107,6 +107,56 @@ def test_posterior_collate_rejects_bad_head_shape() -> None:
 		strat_multi_head_posterior_collate_fn([first, second])
 
 
+@pytest.mark.parametrize(
+	('mutate', 'error_type', 'match'),
+	[
+		(
+			lambda sample: sample.update(
+				strat_multi_posteriors={
+					key: sample['strat_multi_posteriors'][key]
+					for key in ('k8', 'k6', 'k10')
+				}
+			),
+			ValueError,
+			'canonical ascending',
+		),
+		(
+			lambda sample: sample['strat_multi_posteriors'].__setitem__(
+				'k6',
+				{
+					'valid_mask': sample['strat_multi_posteriors']['k6']['valid_mask'],
+					'posterior': sample['strat_multi_posteriors']['k6']['posterior'],
+				},
+			),
+			ValueError,
+			'ordered fields',
+		),
+		(
+			lambda sample: sample['strat_multi_posteriors']['k6'].__setitem__(
+				'posterior',
+				sample['strat_multi_posteriors']['k6']['posterior'].astype(
+					np.float64
+				),
+			),
+			ValueError,
+			'float32',
+		),
+	],
+)
+def test_posterior_collate_rejects_head_field_order_and_dtype_mismatches(
+	mutate: object,
+	error_type: type[Exception],
+	match: str,
+) -> None:
+	first = _sample()
+	second = _sample()
+	assert callable(mutate)
+	mutate(second)
+
+	with pytest.raises(error_type, match=match):
+		strat_multi_head_posterior_collate_fn([first, second])
+
+
 def test_posterior_losses_average_heads_without_consistency() -> None:
 	torch.manual_seed(289)
 	heads = MultiResolutionOrderedPrototypeHeads(
@@ -240,6 +290,7 @@ def test_posterior_provider_crops_memmaps_and_applies_token_mask(
 		(lambda paths: _make_k8_valid_mask_mismatch(paths), 'valid_tokens must match'),
 		(lambda paths: _make_k8_last_dimension_mismatch(paths), 'last dimension'),
 		(lambda paths: _make_k8_nonfinite(paths), 'finite and non-negative'),
+		(lambda paths: _make_k8_negative(paths), 'finite and non-negative'),
 		(lambda paths: _make_k8_nonunit(paths), 'valid rows must sum to one'),
 	],
 )
@@ -467,6 +518,14 @@ def _make_k8_last_dimension_mismatch(paths: dict[int, dict[str, Path]]) -> None:
 def _make_k8_nonfinite(paths: dict[int, dict[str, Path]]) -> None:
 	posterior = np.load(paths[8]['posterior'])
 	posterior[1, 1, 1] = np.nan
+	np.save(paths[8]['posterior'], posterior)
+
+
+def _make_k8_negative(paths: dict[int, dict[str, Path]]) -> None:
+	posterior = np.load(paths[8]['posterior'])
+	posterior[1, 1, 1] = 0.0
+	posterior[1, 1, 1, 0] = -1.0
+	posterior[1, 1, 1, 1] = 2.0
 	np.save(paths[8]['posterior'], posterior)
 
 
