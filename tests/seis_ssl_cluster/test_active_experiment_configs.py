@@ -530,6 +530,8 @@ def test_all_repository_configs_load_and_resolve_supported_stages(
 		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
 		'/test/artifacts/seis_ssl_cluster',
 	)
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_WORKSPACE', '/workspace')
+	monkeypatch.setenv('F3_ROOT', '/test/f3')
 	monkeypatch.setenv(
 		'SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256',
 		'0' * 64,

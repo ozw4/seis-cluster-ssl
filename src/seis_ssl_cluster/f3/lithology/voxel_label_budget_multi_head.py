@@ -37,6 +37,9 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_runner import (
 from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
 	load_f3_multi_head_pretraining_handoff,
 )
+from seis_ssl_cluster.f3.soft_posterior_pretraining_validation import (
+	load_f3_m5_soft_posterior_pretraining_handoff,
+)
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import (
@@ -95,7 +98,9 @@ class _CandidateStageConfig:
 
 def multi_head_run_manifest_path(config: F3VoxelLabelBudgetMultiHeadConfig) -> Path:
 	"""Return the candidate-owned, compact job manifest path."""
-	return config.reports_dir / RUN_MANIFEST_NAME
+	return config.reports_dir / str(
+		getattr(config, 'run_manifest_name', RUN_MANIFEST_NAME)
+	)
 
 
 def inspect_f3_lithology_voxel_label_budget_multi_head(
@@ -263,7 +268,9 @@ def load_f3_lithology_voxel_label_budget_multi_head_rows(
 	_validate_manifest(payload, config, inspection.candidate_identities)
 	rows = tuple(payload.get('rows', ()))
 	if len(rows) != config.job_count:
-		raise ValueError('multi-head manifest must own exactly 30 rows')
+		raise ValueError(
+			f'multi-head manifest must own exactly {config.job_count} rows'
+		)
 	by_job = {_job_key(job): job for job in inspection.jobs}
 	dataset_rows = _dataset_rows(config)
 	current_rows = _current_k6_rows(config, dataset_rows)
@@ -323,7 +330,7 @@ def _candidate_identity(  # noqa: C901, PLR0912
 		raise ValueError('candidate embeddings must be float16 [76,113,32,384]')
 	if valid.shape != (76, 113, 32) or valid.dtype != np.bool_ or int(valid.sum()) <= 0:
 		raise ValueError('candidate valid-token shape/dtype/count mismatch')
-	if not np.isfinite(embeddings[valid]).all():
+	if not _finite_valid_embeddings(embeddings, valid):
 		raise ValueError('candidate embeddings contain nonfinite valid values')
 	valid_sha = file_sha256(files.valid_tokens)
 	if valid_sha != canonical_valid_tokens_sha256:
@@ -348,6 +355,24 @@ def _candidate_identity(  # noqa: C901, PLR0912
 		raise ValueError('candidate multi-head specification mismatch')
 	if stratigraphy.get('head_ks') != [6, 8, 10]:
 		raise ValueError('candidate multi-head K identity mismatch')
+	if candidate.model_id == 'mh_soft_nocons':
+		_handoff_identity = _validate_soft_handoff_provenance(
+			candidate.pretraining_handoff,
+			candidate=candidate,
+			checkpoint=checkpoint,
+			checkpoint_sha256=str(metadata['checkpoint_sha256']),
+			embeddings_sha256=file_sha256(files.embeddings),
+			valid_tokens_sha256=valid_sha,
+			embedding_metadata_sha256=file_sha256(files.metadata),
+			stratigraphy=stratigraphy,
+		)
+		return {
+			'embeddings': _identity(files.embeddings),
+			'valid_tokens': _identity(files.valid_tokens),
+			'metadata': _identity(files.metadata),
+			'checkpoint': _identity(checkpoint),
+			'pretraining_handoff': _handoff_identity,
+		}
 	expected_target_manifest_sha256 = file_sha256(config.multi_head_target_manifest)
 	if stratigraphy.get('target_manifest_sha256') != expected_target_manifest_sha256:
 		raise ValueError('candidate target manifest SHA-256 mismatch')
@@ -434,6 +459,56 @@ def _validate_handoff_provenance(  # noqa: PLR0913
 	return _identity(handoff_path)
 
 
+def _validate_soft_handoff_provenance(  # noqa: PLR0913
+	handoff_path: Path,
+	*,
+	candidate: F3VoxelLabelBudgetMultiHeadCandidate,
+	checkpoint: Path,
+	checkpoint_sha256: str,
+	embeddings_sha256: str,
+	valid_tokens_sha256: str,
+	embedding_metadata_sha256: str,
+	stratigraphy: Mapping[str, object],
+) -> Mapping[str, object]:
+	"""Bind M5-U's PASS handoff to the exact soft extraction artifacts."""
+	handoff = load_f3_m5_soft_posterior_pretraining_handoff(handoff_path)
+	if handoff.get('model_tag') != candidate.model_tag:
+		raise ValueError('M5-U handoff model tag mismatch')
+	embedding = handoff['embedding']
+	checkpoint_evidence = handoff['checkpoint']
+	targets = handoff['targets']
+	if (
+		embedding.get('metadata_sha256') != embedding_metadata_sha256
+		or embedding.get('embeddings_sha256') != embeddings_sha256
+		or embedding.get('valid_tokens_sha256') != valid_tokens_sha256
+		or checkpoint_evidence.get('sha256') != checkpoint_sha256
+		or Path(str(checkpoint_evidence.get('path', ''))).resolve()
+		!= checkpoint.resolve()
+	):
+		raise ValueError('M5-U handoff extraction identity mismatch')
+	if (
+		stratigraphy.get('target_representation') != 'ordered_path_state_posterior_v1'
+		or targets.get('target_representation') != 'ordered_path_state_posterior_v1'
+		or stratigraphy.get('posterior_manifest_sha256')
+		!= targets.get('posterior_manifest_sha256')
+	):
+		raise ValueError('M5-U soft-posterior representation identity mismatch')
+	return _identity(handoff_path)
+
+
+def _finite_valid_embeddings(
+	embeddings: np.ndarray, valid: np.ndarray
+) -> bool:
+	"""Check valid embedding values without materializing the full volume."""
+	for inline_index in range(embeddings.shape[0]):
+		inline_valid = valid[inline_index]
+		if inline_valid.any() and not np.isfinite(
+			embeddings[inline_index][inline_valid]
+		).all():
+			return False
+	return True
+
+
 def _jobs(
 	config: F3VoxelLabelBudgetMultiHeadConfig,
 	dataset_rows: Mapping[tuple[str, int], Mapping[str, object]],
@@ -502,10 +577,11 @@ def _current_k6_rows(
 	output_root = (
 		manifest.parent.parent if manifest.parent.name == 'reports' else manifest.parent
 	)
+	control_base = config.base
 	control_config = replace(
-		config.base,
+		control_base,
 		references=replace(
-			config.base.references,
+			control_base.references,
 			dataset_manifest=config.dataset_manifest,
 			historical_run_manifest=config.original_run_manifest,
 			mae_model_id=config.references.mae_model_id,
@@ -665,7 +741,7 @@ def _write_manifest(
 ) -> None:
 	ordered = tuple(sorted(rows, key=_row_sort_key))
 	payload = {
-		'artifact_type': RUN_MANIFEST_TYPE,
+		'artifact_type': getattr(config, 'run_manifest_type', RUN_MANIFEST_TYPE),
 		'schema_version': RUN_SCHEMA_VERSION,
 		'dataset_manifest': _identity(config.dataset_manifest),
 		'original_run_manifest': _identity(config.original_run_manifest),
@@ -692,7 +768,8 @@ def _validate_manifest(
 	identities: Mapping[str, Mapping[str, object]],
 ) -> None:
 	if (
-		payload.get('artifact_type') != RUN_MANIFEST_TYPE
+		payload.get('artifact_type')
+		!= getattr(config, 'run_manifest_type', RUN_MANIFEST_TYPE)
 		or payload.get('schema_version') != RUN_SCHEMA_VERSION
 	):
 		raise ValueError('multi-head manifest type/schema mismatch')
@@ -789,7 +866,7 @@ def _row_key(row: Mapping[str, object]) -> tuple[str, int, str]:
 
 
 def _row_sort_key(row: Mapping[str, object]) -> tuple[int, int, int]:
-	role_order = {'mh_nocons': 0, 'mh_cons010': 1}
+	role_order = {'mh_soft_nocons': 0, 'mh_nocons': 0, 'mh_cons010': 1}
 	budget, seed, role = _row_key(row)
 	return (role_order.get(role, 99), int(budget.removeprefix('cap')), seed)
 

@@ -1,0 +1,36 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster
+  f3_root: ${F3_ROOT}
+  results_root: ${SEIS_SSL_CLUSTER_WORKSPACE}/results
+hard_multi_head_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml
+dataset: {name: f3_facies_benchmark, version: facies_benchmark_v1}
+references:
+  dataset_manifest: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split/voxel_label_budget_dataset_manifest.json
+  multi_head_target_manifest: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json
+  original_run_manifest: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split/voxel_label_budget_run_manifest.json
+  current_k6_run_manifest: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_current_k6_control_v1/original_split/reports/control_job_manifest.json
+  mae_model_id: mae
+  current_k6_model_id: m1_current_k6
+candidates:
+  - model_id: mh_soft_nocons
+    model_tag: strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1
+    embeddings_dir: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1/overlap_x16
+    pretraining_handoff: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1/preflight/soft_posterior_handoff.json
+budgets: [cap25, cap50, cap100]
+subsample_seeds: [0, 1, 2, 3, 4]
+seed_policy: {base_seed: 42000, add_subsample_seed: true}
+labels:
+  seismic_volume: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
+  source_label_volume: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  source_label_segy: ${F3_ROOT}/f3_labels.sgy
+  png_label_inventory: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/label_png_inventory.csv
+  segy_geometry_json: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+  class_info: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json
+decoder: {spec: frozen_embedding_decoder_nearest_voxel_ln_v1, embedding_dim: 384, class_count: 6, hidden_channels: [128, 64, 32], upsample_factors: [[2, 2, 2], [2, 2, 2], [2, 2, 2]], upsample_mode: nearest, normalization: voxelwise_layer_norm}
+tiles: {core_size_tokens: [8, 8, 8], context_halo_tokens: [1, 1, 1]}
+train: {epochs: 50, batch_size: 1, learning_rate: 0.001, weight_decay: 0.0001, class_weight: balanced, sampling_mode: uniform_tiles_with_replacement, steps_per_epoch: 440, num_workers: 0, amp: true, gradient_clip_norm: 1.0}
+inference: {write_probabilities: false}
+evaluation: {monitored_class_ids: [3, 5], boundary_tolerances: [2, 4], boundary_region_radii: [2, 4], chunk_size_x: 8}
+outputs:
+  output_root: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_soft_posterior_k6810_v1/original_split
+  overwrite: false

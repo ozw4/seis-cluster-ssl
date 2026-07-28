@@ -102,10 +102,28 @@ class F3VoxelLabelBudgetMultiHeadConfig:
 		return self.base.decoder_seed(subsample_seed)
 
 
-def f3_lithology_voxel_label_budget_multi_head_config_from_mapping(  # noqa: C901
+def f3_lithology_voxel_label_budget_multi_head_config_from_mapping(
 	config: Mapping[str, object],
 ) -> F3VoxelLabelBudgetMultiHeadConfig:
 	"""Resolve the generic candidate list without widening the control config."""
+	return _config_from_mapping(config, expected_candidates=EXPECTED_CANDIDATES)
+
+
+def config_from_mapping_for_candidates(
+	config: Mapping[str, object],
+	*,
+	expected_candidates: tuple[tuple[str, str], ...],
+) -> F3VoxelLabelBudgetMultiHeadConfig:
+	"""Resolve an isolated candidate matrix without altering the M4 contract."""
+	return _config_from_mapping(config, expected_candidates=expected_candidates)
+
+
+def _config_from_mapping(  # noqa: C901
+	config: Mapping[str, object],
+	*,
+	expected_candidates: tuple[tuple[str, str], ...],
+) -> F3VoxelLabelBudgetMultiHeadConfig:
+	"""Resolve a closed candidate tuple using the established decoder contract."""
 	_validate_allowed_keys(
 		config,
 		frozenset(
@@ -186,9 +204,9 @@ def f3_lithology_voxel_label_budget_multi_head_config_from_mapping(  # noqa: C90
 		resolved_candidates.append(item)
 	if (
 		tuple((item.model_id, item.model_tag) for item in resolved_candidates)
-		!= EXPECTED_CANDIDATES
+		!= expected_candidates
 	):
-		raise ValueError('candidates must be the canonical nocons then cons010 pair')
+		raise ValueError('candidates must be the configured canonical tuple')
 	if len({item.embeddings_dir for item in resolved_candidates}) != len(
 		resolved_candidates
 	):
@@ -308,5 +326,6 @@ __all__ = [
 	'F3VoxelLabelBudgetMultiHeadCandidate',
 	'F3VoxelLabelBudgetMultiHeadConfig',
 	'F3VoxelLabelBudgetMultiHeadReferences',
+	'config_from_mapping_for_candidates',
 	'f3_lithology_voxel_label_budget_multi_head_config_from_mapping',
 ]
