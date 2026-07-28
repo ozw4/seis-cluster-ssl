@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal, cast
 import torch
 
 from seis_ssl_cluster.data import (
+	NopimsStratMultiHeadPosteriorDataset,
 	NopimsStratMultiHeadTargetDataset,
 	NopimsStratPseudoTargetDataset,
 	read_manifest_json,
@@ -21,6 +22,7 @@ from seis_ssl_cluster.stratigraphy import (
 )
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
 from seis_ssl_cluster.training.dataloaders import (
+	build_strat_multi_head_posterior_dataloader,
 	build_strat_multi_head_target_dataloader,
 	build_strat_pseudo_target_dataloader,
 )
@@ -90,6 +92,9 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 	model_config = _mapping(config, 'model')
 	pseudo_config = _mapping(config, 'pseudo_targets')
 	is_multi_head = 'spec' in _mapping(config, 'head')
+	target_representation = pseudo_config.get(
+		'target_representation', 'hard_viterbi_labels_v1'
+	)
 	device = _resolve_device(train_config)
 	seed = _int_config(train_config, 'seed', 42)
 	torch.manual_seed(seed)
@@ -134,19 +139,39 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		'min_confidence': _float_config(pseudo_config, 'min_confidence', 0.0),
 	}
 	if is_multi_head:
-		dataset = NopimsStratMultiHeadTargetDataset(
-			manifests,
-			_path_config(pseudo_config, 'manifest'),
-			**dataset_kwargs,
-		)
-		dataloader = build_strat_multi_head_target_dataloader(
-			dataset,
-			batch_size=_int_config(train_config, 'batch_size', 1),
-			num_workers=_int_config(train_config, 'num_workers', 0),
-			shuffle=_bool_config(train_config, 'shuffle', default=True),
-			seed=seed,
-			device=device,
-		)
+		if target_representation == 'ordered_path_state_posterior_v1':
+			posterior_dataset_kwargs = {
+				key: value
+				for key, value in dataset_kwargs.items()
+				if key != 'min_confidence'
+			}
+			dataset = NopimsStratMultiHeadPosteriorDataset(
+				manifests,
+				_path_config(pseudo_config, 'manifest'),
+				**posterior_dataset_kwargs,
+			)
+			dataloader = build_strat_multi_head_posterior_dataloader(
+				dataset,
+				batch_size=_int_config(train_config, 'batch_size', 1),
+				num_workers=_int_config(train_config, 'num_workers', 0),
+				shuffle=_bool_config(train_config, 'shuffle', default=True),
+				seed=seed,
+				device=device,
+			)
+		else:
+			dataset = NopimsStratMultiHeadTargetDataset(
+				manifests,
+				_path_config(pseudo_config, 'manifest'),
+				**dataset_kwargs,
+			)
+			dataloader = build_strat_multi_head_target_dataloader(
+				dataset,
+				batch_size=_int_config(train_config, 'batch_size', 1),
+				num_workers=_int_config(train_config, 'num_workers', 0),
+				shuffle=_bool_config(train_config, 'shuffle', default=True),
+				seed=seed,
+				device=device,
+			)
 	else:
 		pseudo_inputs = discover_pseudo_target_inputs(
 			_path_config(pseudo_config, 'input_dir'),
@@ -308,6 +333,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				epoch=epoch,
 				loss_config=_mapping(config, 'loss'),
 				pseudo_target_config=pseudo_config,
+				target_representation=str(target_representation),
 				amp_enabled=amp_enabled,
 				scaler=scaler,
 				global_step=state.global_step,

@@ -7,7 +7,7 @@ import pytest
 
 from seis_ssl_cluster.clustering.features import file_sha256
 from seis_ssl_cluster.config.pretraining import resolve_strat_hmm_pretext_config
-from seis_ssl_cluster.stratigraphy import multi_head
+from seis_ssl_cluster.stratigraphy import multi_head, state_posterior
 from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
 from tests.seis_ssl_cluster.test_config_strat_hmm_pretext import _minimal_config
 from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
@@ -62,6 +62,100 @@ def test_multi_head_config_resolution_does_not_load_target_arrays(
 	resolved = resolve_strat_hmm_pretext_config(config)
 
 	assert resolved['head']['ks'] == [6, 8, 10]
+
+
+def test_soft_multi_head_config_resolves_with_posterior_identity(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _multi_head_config(tmp_path)
+	manifest_sha256 = file_sha256(str(config['pseudo_targets']['manifest']))
+	posterior_hashes = {
+		str(k): {
+			'survey': {
+				'posterior': f'{k:064x}',
+				'valid_tokens': f'{k + 10:064x}',
+				'metadata': f'{k + 20:064x}',
+			}
+		}
+		for k in (6, 8, 10)
+	}
+	posterior_manifest = {
+		'head_ks': [6, 8, 10],
+		'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+		'cost_temperature': 1.0,
+		'heads': {
+			str(k): {
+				'surveys': {
+					'survey': {
+						name: {'sha256': value}
+						for name, value in posterior_hashes[str(k)]['survey'].items()
+					}
+				}
+			}
+			for k in (6, 8, 10)
+		},
+	}
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_state_posterior_manifest',
+		lambda _path: posterior_manifest,
+	)
+	config['pseudo_targets']['target_representation'] = (
+		'ordered_path_state_posterior_v1'
+	)
+	config['identity']['model_tag'] = (
+		'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1'
+	)
+	scientific = config['identity']['scientific_identity']
+	scientific.update(
+		{
+			'experiment_role': 'multi_head_ordered_soft_posterior_pretext',
+			'variant': 'soft_nocons',
+			'target_representation': 'ordered_path_state_posterior_v1',
+			'posterior_manifest_sha256': manifest_sha256,
+			'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+			'posterior_cost_temperature': 1.0,
+			'posterior_head_hashes': posterior_hashes,
+			'supervised_loss': 'soft_categorical_cross_entropy_v1',
+			'consistency_policy': 'disabled_for_m5_u_v1',
+			'consistency_weight': 0.0,
+		}
+	)
+	del scientific['target_manifest_sha256']
+
+	resolved = resolve_strat_hmm_pretext_config(config)
+
+	assert resolved['identity']['scientific_identity']['posterior_head_hashes'] == (
+		posterior_hashes
+	)
+
+
+def test_soft_multi_head_config_requires_posterior_hashes(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _multi_head_config(tmp_path)
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_state_posterior_manifest',
+		lambda _path: {
+			'head_ks': [6, 8, 10],
+			'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+			'cost_temperature': 1.0,
+			'heads': {},
+		},
+	)
+	config['pseudo_targets']['target_representation'] = (
+		'ordered_path_state_posterior_v1'
+	)
+	config['identity']['scientific_identity']['experiment_role'] = (
+		'multi_head_ordered_soft_posterior_pretext'
+	)
+	config['identity']['scientific_identity']['variant'] = 'soft_nocons'
+
+	with pytest.raises(ValueError, match='target_representation'):
+		resolve_strat_hmm_pretext_config(config)
 
 
 @pytest.mark.parametrize(

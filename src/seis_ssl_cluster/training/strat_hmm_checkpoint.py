@@ -22,6 +22,9 @@ from seis_ssl_cluster.stratigraphy.prototypes import (
 	MultiResolutionOrderedPrototypeHeads,
 	OrderedPrototypeHead,
 )
+from seis_ssl_cluster.stratigraphy.state_posterior import (
+	load_multi_head_state_posterior_manifest,
+)
 from seis_ssl_cluster.training.checkpoint import capture_rng_state, load_checkpoint
 
 
@@ -261,7 +264,7 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	return _atomic_torch_save(checkpoint_path, payload)
 
 
-def validate_stratigraphy_checkpoint_payload(
+def validate_stratigraphy_checkpoint_payload(  # noqa: C901
 	payload: Mapping[str, object],
 	*,
 	expected_config: Mapping[str, object] | None = None,
@@ -278,13 +281,18 @@ def validate_stratigraphy_checkpoint_payload(
 		return
 	if not isinstance(identity, Mapping):
 		raise TypeError('checkpoint stratigraphy_checkpoint must be a mapping')
-	if identity.get('schema_version') != 2:
+	if identity.get('schema_version') not in {2, 3}:
 		raise ValueError('unsupported stratigraphy checkpoint schema_version')
 	if identity.get('head_spec') != 'multi_resolution_ordered_prototypes_v1':
 		raise ValueError('unsupported stratigraphy multi-head head_spec')
 	state = payload.get('stratigraphy_state_dict')
 	if not isinstance(config, Mapping) or not isinstance(state, Mapping):
 		raise TypeError('multi-head checkpoint requires config and head state mappings')
+	expected_schema_version = 3 if _is_soft_multi_head_config(config) else 2
+	if identity.get('schema_version') != expected_schema_version:
+		raise ValueError(
+			'multi-head checkpoint schema_version does not match target representation'
+		)
 	_validate_multi_head_identity(
 		identity=identity,
 		stratigraphy_config=config,
@@ -730,6 +738,15 @@ def _multi_head_checkpoint_identity(  # noqa: PLR0913
 	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
 	identity = _required_mapping(stratigraphy_config, 'identity')
 	scientific = _required_mapping(identity, 'scientific_identity')
+	if _is_soft_multi_head_config(stratigraphy_config):
+		return _soft_multi_head_checkpoint_identity(
+			stratigraphy_config=stratigraphy_config,
+			stratigraphy_state_dict=stratigraphy_state_dict,
+			control_identity=control_identity,
+			optimizer=optimizer,
+			student=student,
+			head=head,
+		)
 	manifest_path = _required_string(
 		pseudo_targets.get('manifest'), 'pseudo_targets.manifest'
 	)
@@ -784,12 +801,90 @@ def _multi_head_checkpoint_identity(  # noqa: PLR0913
 	return result
 
 
+def _soft_multi_head_checkpoint_identity(  # noqa: PLR0913
+	*,
+	stratigraphy_config: Mapping[str, object],
+	stratigraphy_state_dict: Mapping[str, torch.Tensor],
+	control_identity: Mapping[str, object] | None,
+	optimizer: torch.optim.Optimizer,
+	student: torch.nn.Module,
+	head: torch.nn.Module,
+) -> dict[str, object]:
+	"""Build schema-v3 identity for an immutable soft-posterior run."""
+	head_config = _required_mapping(stratigraphy_config, 'head')
+	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
+	identity = _required_mapping(stratigraphy_config, 'identity')
+	scientific = _required_mapping(identity, 'scientific_identity')
+	manifest_path = _required_string(
+		pseudo_targets.get('manifest'), 'pseudo_targets.manifest'
+	)
+	manifest_sha256 = _file_sha256(Path(manifest_path))
+	per_head_posteriors = _posterior_per_head_hashes(Path(manifest_path))
+	if scientific.get('posterior_manifest_sha256') != manifest_sha256:
+		raise ValueError(
+			'posterior manifest SHA-256 does not match scientific identity'
+		)
+	if scientific.get('posterior_head_hashes') != per_head_posteriors:
+		raise ValueError('scientific identity posterior hashes do not match manifest')
+	if not isinstance(control_identity, Mapping):
+		raise TypeError('multi-head checkpoint requires control identity')
+	inputs = _required_mapping(control_identity, 'input_identities')
+	initial_states = control_identity.get('initial_state_sha256')
+	if not isinstance(initial_states, Mapping):
+		raise TypeError('multi-head checkpoint requires initial state hashes')
+	return {
+		'schema_version': 3,
+		'head_spec': head_config['spec'],
+		'head_ks': list(_head_ks(head_config.get('ks'))),
+		'target_representation': scientific['target_representation'],
+		'posterior_semantics': scientific['posterior_semantics'],
+		'posterior_cost_temperature': scientific['posterior_cost_temperature'],
+		'posterior_manifest_sha256': manifest_sha256,
+		'posterior_manifest': {'path': manifest_path, 'sha256': manifest_sha256},
+		'per_head_posteriors': per_head_posteriors,
+		'consistency_policy': scientific['consistency_policy'],
+		'consistency_weight': scientific['consistency_weight'],
+		'consistency_beta': scientific['consistency_beta'],
+		'model_tag': identity.get('model_tag'),
+		'output_root': _required_mapping(stratigraphy_config, 'paths').get(
+			'output_root'
+		),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
+		'stratigraphy_state_sha256': _state_sha256(stratigraphy_state_dict),
+		'optimizer_group_identity': _optimizer_group_identity(
+			optimizer,
+			parameter_names=_stratigraphy_parameter_names(student, head),
+		),
+		'teacher_checkpoint_sha256': _required_sha256(
+			_required_mapping(inputs, 'teacher_checkpoint').get('sha256'),
+			'input_identities.teacher_checkpoint.sha256',
+		),
+		'student_init_checkpoint_sha256': _required_sha256(
+			_required_mapping(inputs, 'student_init_checkpoint').get('sha256'),
+			'input_identities.student_init_checkpoint.sha256',
+		),
+		'initial_student_state_sha256': _required_sha256(
+			initial_states.get('student'), 'initial_state_sha256.student'
+		),
+		'initial_head_state_sha256': _required_sha256(
+			initial_states.get('head'), 'initial_state_sha256.head'
+		),
+	}
+
+
 def _validate_multi_head_identity(
 	*,
 	identity: Mapping[str, object],
 	stratigraphy_config: Mapping[str, object],
 	stratigraphy_state_dict: Mapping[str, object],
 ) -> None:
+	if _is_soft_multi_head_config(stratigraphy_config):
+		_validate_soft_multi_head_identity(
+			identity=identity,
+			stratigraphy_config=stratigraphy_config,
+			stratigraphy_state_dict=stratigraphy_state_dict,
+		)
+		return
 	_validate_multi_head_config_and_state(
 		stratigraphy_config,
 		{
@@ -887,6 +982,9 @@ def _validate_multi_head_target_manifest_identity(
 def _validate_expected_multi_head_identity(
 	identity: Mapping[str, object], config: Mapping[str, object]
 ) -> None:
+	if _is_soft_multi_head_config(config):
+		_validate_expected_soft_multi_head_identity(identity, config)
+		return
 	head = _required_mapping(config, 'head')
 	config_identity = _required_mapping(config, 'identity')
 	scientific = _required_mapping(config_identity, 'scientific_identity')
@@ -992,6 +1090,148 @@ def _manifest_per_head_target_hashes(
 				for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
 			}
 	return result
+
+
+def _is_soft_multi_head_config(config: Mapping[str, object]) -> bool:
+	pseudo_targets = config.get('pseudo_targets')
+	return (
+		isinstance(pseudo_targets, Mapping)
+		and pseudo_targets.get('target_representation')
+		== 'ordered_path_state_posterior_v1'
+	)
+
+
+def _posterior_per_head_hashes(
+	manifest_path: Path,
+) -> dict[str, dict[str, dict[str, str]]]:
+	manifest = load_multi_head_state_posterior_manifest(manifest_path)
+	heads = _required_mapping(manifest, 'heads')
+	result: dict[str, dict[str, dict[str, str]]] = {}
+	for k in _head_ks(manifest.get('head_ks')):
+		head = _required_mapping(heads, str(k))
+		surveys = _required_mapping(head, 'surveys')
+		result[str(k)] = {}
+		for survey_id, entry in surveys.items():
+			if not isinstance(entry, Mapping):
+				raise TypeError(f'posterior manifest head {k} survey must be a mapping')
+			result[str(k)][str(survey_id)] = {
+				name: _required_string(
+					_required_mapping(entry, name).get('sha256'),
+					f'posterior manifest heads.{k}.surveys.{survey_id}.{name}.sha256',
+				)
+				for name in ('posterior', 'valid_tokens', 'metadata')
+			}
+	return result
+
+
+def _validate_soft_multi_head_identity(  # noqa: C901
+	*,
+	identity: Mapping[str, object],
+	stratigraphy_config: Mapping[str, object],
+	stratigraphy_state_dict: Mapping[str, object],
+) -> None:
+	"""Validate the schema-v3 soft identity without accepting hard artifacts."""
+	if identity.get('schema_version') != 3:
+		raise ValueError('soft posterior checkpoint requires schema_version 3')
+	_validate_multi_head_config_and_state(
+		stratigraphy_config,
+		{
+			str(key): value
+			for key, value in stratigraphy_state_dict.items()
+			if isinstance(value, torch.Tensor)
+		},
+	)
+	head = _required_mapping(stratigraphy_config, 'head')
+	config_identity = _required_mapping(stratigraphy_config, 'identity')
+	paths = _required_mapping(stratigraphy_config, 'paths')
+	scientific = _required_mapping(config_identity, 'scientific_identity')
+	if identity.get('head_spec') != head.get('spec') or identity.get('head_ks') != list(
+		_head_ks(head.get('ks'))
+	):
+		raise ValueError(
+			'soft checkpoint head identity does not match stratigraphy config'
+		)
+	if identity.get('model_tag') != config_identity.get('model_tag') or identity.get(
+		'output_root'
+	) != paths.get('output_root'):
+		raise ValueError(
+			'soft checkpoint model identity does not match stratigraphy config'
+		)
+	if identity.get('stratigraphy_state_sha256') != _state_sha256(
+		stratigraphy_state_dict
+	):
+		raise ValueError('checkpoint stratigraphy state SHA-256 mismatch')
+	posterior = identity.get('posterior_manifest')
+	if not isinstance(posterior, Mapping):
+		raise TypeError('soft checkpoint posterior_manifest must be a mapping')
+	path = Path(
+		_required_string(posterior.get('path'), 'checkpoint posterior_manifest.path')
+	)
+	sha256 = _required_sha256(
+		posterior.get('sha256'), 'checkpoint posterior_manifest.sha256'
+	)
+	if sha256 != _file_sha256(path):
+		raise ValueError('checkpoint posterior manifest SHA-256 mismatch')
+	if identity.get('per_head_posteriors') != _posterior_per_head_hashes(path):
+		raise ValueError('checkpoint posterior hashes do not match posterior manifest')
+	for key in (
+		'target_representation',
+		'posterior_semantics',
+		'posterior_cost_temperature',
+		'posterior_manifest_sha256',
+		'consistency_policy',
+		'consistency_weight',
+		'consistency_beta',
+	):
+		if identity.get(key) != scientific.get(key):
+			raise ValueError(f'checkpoint {key} does not match scientific identity')
+	if identity.get('per_head_posteriors') != scientific.get('posterior_head_hashes'):
+		raise ValueError('checkpoint posterior hashes do not match scientific identity')
+	if identity.get('scientific_identity_sha256') != scientific_identity_sha256(
+		scientific
+	):
+		raise ValueError('checkpoint scientific identity SHA-256 mismatch')
+	for key in (
+		'initial_student_state_sha256',
+		'initial_head_state_sha256',
+		'teacher_checkpoint_sha256',
+		'student_init_checkpoint_sha256',
+	):
+		_required_sha256(identity.get(key), f'checkpoint {key}')
+
+
+def _validate_expected_soft_multi_head_identity(
+	identity: Mapping[str, object], config: Mapping[str, object]
+) -> None:
+	scientific = _required_mapping(
+		_required_mapping(config, 'identity'), 'scientific_identity'
+	)
+	teacher = _required_mapping(config, 'teacher')
+	student = _required_mapping(config, 'student')
+	checks = {
+		'target_representation': scientific.get('target_representation'),
+		'posterior_semantics': scientific.get('posterior_semantics'),
+		'posterior_cost_temperature': scientific.get('posterior_cost_temperature'),
+		'posterior_manifest_sha256': scientific.get('posterior_manifest_sha256'),
+		'per_head_posteriors': scientific.get('posterior_head_hashes'),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
+		'model_tag': _required_mapping(config, 'identity').get('model_tag'),
+		'output_root': _required_mapping(config, 'paths').get('output_root'),
+		'teacher_checkpoint_sha256': _file_sha256(
+			Path(_required_string(teacher.get('checkpoint'), 'teacher.checkpoint'))
+		),
+		'student_init_checkpoint_sha256': _file_sha256(
+			Path(
+				student.get('init_checkpoint')
+				or _required_string(teacher.get('checkpoint'), 'teacher.checkpoint')
+			)
+		),
+	}
+	for key, expected in checks.items():
+		if identity.get(key) != expected:
+			raise ValueError(
+				f'checkpoint soft multi-head identity is incompatible at {key}'
+			)
 
 
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, object]:
@@ -1481,18 +1721,14 @@ def _selection_event_identity(value: object) -> dict[str, object]:
 			'nonnegative integer'
 		)
 	if kind == 'epoch' and batch_index is not None:
-		raise ValueError(
-			'checkpoint selection selected epoch batch_index must be null'
-		)
+		raise ValueError('checkpoint selection selected epoch batch_index must be null')
 	return {
 		'sequence': sequence,
 		'epoch': epoch,
 		'global_step': global_step,
 		'checkpoint_kind': kind,
 		'batch_index': batch_index,
-		'loss': _finite_selection_number(
-			value['loss'], 'selected event loss'
-		),
+		'loss': _finite_selection_number(value['loss'], 'selected event loss'),
 	}
 
 

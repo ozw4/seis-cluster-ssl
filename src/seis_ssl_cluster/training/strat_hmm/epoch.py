@@ -9,6 +9,7 @@ import torch
 from seis_ssl_cluster.training.collate import move_batch_to_device
 from seis_ssl_cluster.training.strat_hmm.losses import (
 	compute_strat_hmm_multi_head_losses,
+	compute_strat_hmm_multi_head_posterior_losses,
 	compute_strat_hmm_pretext_losses,
 )
 from seis_ssl_cluster.training.strat_hmm.runtime import (
@@ -189,6 +190,7 @@ def train_strat_hmm_multi_head_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR09
 	epoch: int,
 	loss_config: Mapping[str, object],
 	pseudo_target_config: Mapping[str, object],
+	target_representation: str = 'hard_viterbi_labels_v1',
 	amp_enabled: bool = False,
 	scaler: torch.amp.GradScaler | None = None,
 	global_step: int = 0,
@@ -231,14 +233,28 @@ def train_strat_hmm_multi_head_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR09
 					valid_mask=_required_tensor(batch, 'local_valid_mask'),
 				)
 		with torch.amp.autocast('cuda', enabled=amp_enabled):
-			losses = compute_strat_hmm_multi_head_losses(
-				heads=heads,
-				encoded=encoded,
-				teacher_encoded=teacher_encoded,
-				batch=batch,
-				loss_config=loss_config,
-				pseudo_target_config=pseudo_target_config,
-			)
+			if target_representation == 'ordered_path_state_posterior_v1':
+				losses = compute_strat_hmm_multi_head_posterior_losses(
+					heads=heads,
+					encoded=encoded,
+					teacher_encoded=teacher_encoded,
+					batch=batch,
+					loss_config=loss_config,
+				)
+			elif target_representation == 'hard_viterbi_labels_v1':
+				losses = compute_strat_hmm_multi_head_losses(
+					heads=heads,
+					encoded=encoded,
+					teacher_encoded=teacher_encoded,
+					batch=batch,
+					loss_config=loss_config,
+					pseudo_target_config=pseudo_target_config,
+				)
+			else:
+				raise ValueError(
+					'unsupported multi-head target representation: '
+					f'{target_representation!r}'
+				)
 			loss = losses['loss']
 		_ensure_finite_losses(
 			losses,

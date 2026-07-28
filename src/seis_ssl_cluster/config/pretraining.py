@@ -111,7 +111,9 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 			'decoder_heads',
 		},
 	),
-	'pseudo_targets': frozenset({'input_dir', 'k', 'manifest', 'min_confidence'}),
+	'pseudo_targets': frozenset(
+		{'input_dir', 'k', 'manifest', 'min_confidence', 'target_representation'}
+	),
 	'teacher': frozenset({'checkpoint'}),
 	'student': frozenset({'init_checkpoint', 'unfreeze_top_blocks'}),
 	'head': frozenset(
@@ -158,6 +160,9 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 
 _STRAT_HMM_MULTI_HEAD_SPEC = MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1
 _STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY = 'normalized_order_smooth_l1_v1'
+_STRAT_HMM_HARD_TARGET_REPRESENTATION = 'hard_viterbi_labels_v1'
+_STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION = 'ordered_path_state_posterior_v1'
+_STRAT_HMM_POSTERIOR_SEMANTICS = 'ordered_path_cost_gibbs_state_marginal_v1'
 
 # These fields are deliberately centralized so checkpoint identity construction can
 # distinguish scientific settings from machine-specific execution settings.
@@ -170,8 +175,14 @@ MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS = frozenset(
 		'head_projection_dim',
 		'head_temperature',
 		'head_normalize',
+		'target_representation',
 		'target_manifest_sha256',
 		'target_head_hashes',
+		'posterior_manifest_sha256',
+		'posterior_semantics',
+		'posterior_cost_temperature',
+		'posterior_head_hashes',
+		'supervised_loss',
 		'consistency_policy',
 		'prototype_weight',
 		'usage_weight',
@@ -338,12 +349,20 @@ def resolve_strat_hmm_pretext_config(config: _T) -> Config:
 		multi_head=multi_head,
 	)
 	if multi_head:
-		manifest = _validate_strat_hmm_multi_head_manifest(pseudo_targets, head)
+		target_representation = _strat_hmm_multi_head_target_representation(
+			pseudo_targets
+		)
+		manifest = _validate_strat_hmm_multi_head_manifest(
+			pseudo_targets,
+			head,
+			target_representation=target_representation,
+		)
 		_validate_strat_hmm_pretext_identity(
 			resolved,
 			multi_head=True,
 			manifest_sha256=_file_sha256(str(pseudo_targets['manifest'])),
 			manifest=manifest,
+			target_representation=target_representation,
 		)
 	else:
 		_validate_strat_hmm_pretext_cross_section_values(pseudo_targets, head)
@@ -403,12 +422,13 @@ def _validate_strat_hmm_pretext_sections(config: Mapping[str, object]) -> None:
 		_validate_allowed_keys(value, allowed, prefix=section)
 
 
-def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912
+def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912, PLR0915
 	config: Mapping[str, object],
 	*,
 	multi_head: bool,
 	manifest_sha256: str | None = None,
 	manifest: Mapping[str, object] | None = None,
+	target_representation: str | None = None,
 ) -> None:
 	"""Validate optional provenance that is stored beside model weights."""
 	value = config.get('identity')
@@ -441,16 +461,51 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912
 		raise AssertionError('multi-head identity validation requires a manifest')
 	if not isinstance(scientific, dict):
 		raise TypeError('identity.scientific_identity must be a mutable mapping')
+	if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION:
+		for key in (
+			'experiment_role',
+			'variant',
+			'target_representation',
+			'posterior_manifest_sha256',
+			'posterior_semantics',
+			'posterior_cost_temperature',
+			'posterior_head_hashes',
+			'supervised_loss',
+			'head_spec',
+			'head_ks',
+			'consistency_policy',
+			'consistency_weight',
+		):
+			_validate_required_key(
+				scientific, key, prefix='identity.scientific_identity'
+			)
 	_expected_or_record_multi_head_scientific_identity(
 		scientific,
 		config=config,
 		manifest=manifest,
+		target_representation=target_representation,
 	)
 	_validate_allowed_keys(
 		scientific,
 		MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS,
 		prefix='identity.scientific_identity',
 	)
+	if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION:
+		_validate_m5_u_scientific_identity(
+			scientific,
+			model_tag=model_tag,
+			manifest_sha256=manifest_sha256,
+			manifest=manifest,
+			loss=_required_mapping(config, 'loss'),
+		)
+		runtime = value.get('runtime_identity')
+		if runtime is not None:
+			_validate_allowed_keys(
+				runtime,
+				MULTI_HEAD_RUNTIME_IDENTITY_FIELDS,
+				prefix='identity.runtime_identity',
+			)
+		return
 	for key in (
 		'experiment_role',
 		'variant',
@@ -523,6 +578,7 @@ def _expected_or_record_multi_head_scientific_identity(
 	*,
 	config: Mapping[str, object],
 	manifest: Mapping[str, object],
+	target_representation: str | None,
 ) -> None:
 	"""Bind resolved scientific settings into a multi-head identity."""
 	head = _required_mapping(config, 'head')
@@ -537,7 +593,20 @@ def _expected_or_record_multi_head_scientific_identity(
 		'head_projection_dim': head['projection_dim'],
 		'head_temperature': head['temperature'],
 		'head_normalize': head['normalize'],
-		'target_head_hashes': _multi_head_target_hashes(manifest),
+		**(
+			{
+				'target_representation': target_representation,
+				'posterior_manifest_sha256': _file_sha256(
+					str(_required_mapping(config, 'pseudo_targets')['manifest'])
+				),
+				'posterior_semantics': manifest['posterior_semantics'],
+				'posterior_cost_temperature': manifest['cost_temperature'],
+				'posterior_head_hashes': _multi_head_posterior_hashes(manifest),
+				'supervised_loss': 'soft_categorical_cross_entropy_v1',
+			}
+			if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION
+			else {'target_head_hashes': _multi_head_target_hashes(manifest)}
+		),
 		'prototype_weight': loss['prototype_weight'],
 		'usage_weight': loss['usage_weight'],
 		'consistency_weight': loss['consistency_weight'],
@@ -549,10 +618,7 @@ def _expected_or_record_multi_head_scientific_identity(
 		'model': {**FIXED_MODEL_CONTRACT, **model},
 		'data': {**FIXED_DATA_CONTRACT, **data},
 		'zero_mask': zero_mask,
-		'train': {
-			key: train[key]
-			for key in MULTI_HEAD_SCIENTIFIC_TRAIN_FIELDS
-		},
+		'train': {key: train[key] for key in MULTI_HEAD_SCIENTIFIC_TRAIN_FIELDS},
 	}
 	for key, expected_value in expected.items():
 		if key in scientific:
@@ -625,6 +691,7 @@ def _validate_strat_hmm_pretext_pseudo_targets(
 			'min_confidence',
 			prefix='pseudo_targets',
 		)
+		_strat_hmm_multi_head_target_representation(pseudo_targets)
 		return
 	if 'manifest' in pseudo_targets:
 		raise ValueError(
@@ -694,7 +761,7 @@ def _validate_strat_hmm_pretext_head(
 		if head.get('spec') != _STRAT_HMM_MULTI_HEAD_SPEC:
 			raise ValueError(
 				f'head.spec must be {_STRAT_HMM_MULTI_HEAD_SPEC!r}; '
-				f"got {head.get('spec')!r}"
+				f'got {head.get("spec")!r}'
 			)
 		_validate_required_key(head, 'ks', prefix='head')
 		_validate_head_ks(head['ks'], prefix='head')
@@ -716,9 +783,7 @@ def _validate_strat_hmm_pretext_loss(
 	unfreeze_top_blocks: int,
 	multi_head: bool,
 ) -> None:
-	if not multi_head and (
-		'consistency_weight' in loss or 'consistency_beta' in loss
-	):
+	if not multi_head and ('consistency_weight' in loss or 'consistency_beta' in loss):
 		raise ValueError(
 			'single-head loss must not define multi-head consistency fields'
 		)
@@ -730,10 +795,7 @@ def _validate_strat_hmm_pretext_loss(
 		_validate_positive_finite_number(loss, 'consistency_beta', prefix='loss')
 	for key in weight_keys:
 		_validate_nonnegative_finite_number(loss, key, prefix='loss')
-	if not any(
-		float(loss[key]) > 0.0
-		for key in weight_keys
-	):
+	if not any(float(loss[key]) > 0.0 for key in weight_keys):
 		msg = 'at least one strat HMM pretext loss weight must be positive'
 		raise ValueError(msg)
 	if loss.get('entropy_floor') is not None:
@@ -750,16 +812,49 @@ def _validate_head_ks(value: object, *, prefix: str) -> None:
 	validate_multi_resolution_head_ks(value, prefix=prefix)
 
 
+def _strat_hmm_multi_head_target_representation(
+	pseudo_targets: Mapping[str, object],
+) -> str:
+	"""Return the explicit representation, retaining the legacy hard default."""
+	value = pseudo_targets.get('target_representation')
+	if value is None:
+		return _STRAT_HMM_HARD_TARGET_REPRESENTATION
+	if not isinstance(value, str):
+		raise TypeError('pseudo_targets.target_representation must be a string')
+	if value not in {
+		_STRAT_HMM_HARD_TARGET_REPRESENTATION,
+		_STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION,
+	}:
+		supported = [
+			_STRAT_HMM_HARD_TARGET_REPRESENTATION,
+			_STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION,
+		]
+		raise ValueError(
+			f'pseudo_targets.target_representation must be one of {supported!r}'
+		)
+	return str(value)
+
+
 def _validate_strat_hmm_multi_head_manifest(
 	pseudo_targets: Mapping[str, object],
 	head: Mapping[str, object],
+	*,
+	target_representation: str,
 ) -> Mapping[str, object]:
 	"""Validate manifest references without loading pseudo-target arrays."""
-	multi_head = importlib.import_module('seis_ssl_cluster.stratigraphy.multi_head')
-	manifest = multi_head.load_multi_head_target_manifest(
-		str(pseudo_targets['manifest']),
-		validate_array_semantics=False,
-	)
+	if target_representation == _STRAT_HMM_HARD_TARGET_REPRESENTATION:
+		multi_head = importlib.import_module('seis_ssl_cluster.stratigraphy.multi_head')
+		manifest = multi_head.load_multi_head_target_manifest(
+			str(pseudo_targets['manifest']),
+			validate_array_semantics=False,
+		)
+	else:
+		state_posterior = importlib.import_module(
+			'seis_ssl_cluster.stratigraphy.state_posterior'
+		)
+		manifest = state_posterior.load_multi_head_state_posterior_manifest(
+			str(pseudo_targets['manifest'])
+		)
 	if tuple(manifest['head_ks']) != tuple(head['ks']):
 		raise ValueError('manifest.head_ks must equal head.ks')
 	return manifest
@@ -785,9 +880,7 @@ def _multi_head_target_hashes(
 	for k in manifest['head_ks']:
 		head = heads[str(k)]
 		if not isinstance(head, Mapping):
-			raise TypeError(
-				'validated multi-head manifest has mapping head entries'
-			)
+			raise TypeError('validated multi-head manifest has mapping head entries')
 		surveys = head['surveys']
 		if not isinstance(surveys, Mapping):
 			raise TypeError('validated multi-head manifest has mapping surveys')
@@ -802,6 +895,68 @@ def _multi_head_target_hashes(
 	return result
 
 
+def _multi_head_posterior_hashes(
+	manifest: Mapping[str, object],
+) -> dict[str, dict[str, dict[str, str]]]:
+	"""Extract the posterior, valid-token, and metadata hashes by head/survey."""
+	heads = manifest['heads']
+	if not isinstance(heads, Mapping):
+		raise TypeError('validated posterior manifest has mapping heads')
+	result: dict[str, dict[str, dict[str, str]]] = {}
+	for k in manifest['head_ks']:
+		head = heads[str(k)]
+		if not isinstance(head, Mapping) or not isinstance(
+			head.get('surveys'), Mapping
+		):
+			raise TypeError('validated posterior manifest has mapping surveys')
+		result[str(k)] = {
+			str(survey_id): {
+				name: str(entry[name]['sha256'])
+				for name in ('posterior', 'valid_tokens', 'metadata')
+			}
+			for survey_id, entry in head['surveys'].items()
+			if isinstance(entry, Mapping)
+		}
+	return result
+
+
+def _validate_m5_u_scientific_identity(
+	scientific: Mapping[str, object],
+	*,
+	model_tag: object,
+	manifest_sha256: str,
+	manifest: Mapping[str, object],
+	loss: Mapping[str, object],
+) -> None:
+	"""Keep M5-U's soft-posterior identity separate from the M4 contract."""
+	expected = {
+		'experiment_role': 'multi_head_ordered_soft_posterior_pretext',
+		'variant': 'soft_nocons',
+		'target_representation': _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION,
+		'posterior_semantics': _STRAT_HMM_POSTERIOR_SEMANTICS,
+		'posterior_cost_temperature': 1.0,
+		'supervised_loss': 'soft_categorical_cross_entropy_v1',
+		'head_spec': _STRAT_HMM_MULTI_HEAD_SPEC,
+		'head_ks': [6, 8, 10],
+		'consistency_policy': 'disabled_for_m5_u_v1',
+		'consistency_weight': 0.0,
+		'posterior_manifest_sha256': manifest_sha256,
+		'posterior_head_hashes': _multi_head_posterior_hashes(manifest),
+	}
+	if model_tag != 'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1':
+		raise ValueError('identity.model_tag does not match M5-U soft_nocons')
+	for key, value in expected.items():
+		if scientific.get(key) != value:
+			raise ValueError(
+				f'identity.scientific_identity.{key} does not match M5-U '
+				'soft posterior contract'
+			)
+	if loss['consistency_weight'] != 0.0:
+		raise ValueError(
+			'loss.consistency_weight must be 0.0 for soft posterior training'
+		)
+
+
 def _validate_strat_hmm_pretext_cross_section_values(
 	pseudo_targets: Mapping[str, object],
 	head: Mapping[str, object],
@@ -809,7 +964,7 @@ def _validate_strat_hmm_pretext_cross_section_values(
 	if int(pseudo_targets['k']) != int(head['num_prototypes']):
 		msg = (
 			'pseudo_targets.k must equal head.num_prototypes; '
-			f"got {pseudo_targets['k']!r} and {head['num_prototypes']!r}"
+			f'got {pseudo_targets["k"]!r} and {head["num_prototypes"]!r}'
 		)
 		raise ValueError(msg)
 
@@ -1072,14 +1227,14 @@ def _validate_amplitude_agc(data: Mapping[str, object]) -> None:
 	if amplitude_agc.get('mode') != 'trace_rms_z':
 		msg = (
 			"data.amplitude_agc.mode must be 'trace_rms_z'; "
-			f"got {amplitude_agc.get('mode')!r}"
+			f'got {amplitude_agc.get("mode")!r}'
 		)
 		raise ValueError(msg)
 	_validate_positive_int(amplitude_agc, 'window_z', prefix='data.amplitude_agc')
 	if int(amplitude_agc['window_z']) % 2 == 0:
 		msg = (
 			'data.amplitude_agc.window_z must be odd; '
-			f"got {amplitude_agc['window_z']!r}"
+			f'got {amplitude_agc["window_z"]!r}'
 		)
 		raise ValueError(msg)
 	_validate_positive_finite_number(amplitude_agc, 'eps', prefix='data.amplitude_agc')
@@ -1208,8 +1363,7 @@ def _validate_divisible_crop_patch(
 	patch_size: Sequence[int],
 ) -> None:
 	if any(
-		crop % patch != 0
-		for crop, patch in zip(crop_size, patch_size, strict=True)
+		crop % patch != 0 for crop, patch in zip(crop_size, patch_size, strict=True)
 	):
 		msg = (
 			'data.local_crop_size dimensions must be divisible by '
