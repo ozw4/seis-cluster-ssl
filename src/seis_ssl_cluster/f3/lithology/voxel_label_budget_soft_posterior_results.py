@@ -151,7 +151,11 @@ def summarize_f3_lithology_voxel_label_budget_soft_posterior(
 	reports = config.reports_dir
 	reports.mkdir(parents=True, exist_ok=True)
 	job_metrics, deltas = reports / OUTPUT_NAMES[0], reports / OUTPUT_NAMES[1]
-	_write_csv(job_metrics, published_inspection['job_metrics'])
+	_write_csv(
+		job_metrics,
+		published_inspection['job_metrics'],
+		lineterminator='\n',
+	)
 	_write_csv(deltas, published_inspection['paired_deltas'])
 	payload = dict(published_inspection)
 	summary_json, summary_md, handoff = (reports / name for name in OUTPUT_NAMES[2:])
@@ -258,11 +262,20 @@ def _validate_pairing(
 					)
 
 
-def _write_csv(path: Path, rows: Sequence[Mapping[str, object]]) -> None:
+def _write_csv(
+	path: Path,
+	rows: Sequence[Mapping[str, object]],
+	*,
+	lineterminator: str = '\r\n',
+) -> None:
 	if not rows:
 		raise ValueError(f'no rows to write: {path.name}')
 	with path.open('w', newline='', encoding='utf-8') as handle:
-		writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+		writer = csv.DictWriter(
+			handle,
+			fieldnames=list(rows[0]),
+			lineterminator=lineterminator,
+		)
 		writer.writeheader()
 		writer.writerows(rows)
 
@@ -322,9 +335,12 @@ def _portable_path(
 			relative = path.relative_to(root)
 		except ValueError:
 			continue
+		relative_text = relative.as_posix()
 		if replacement:
-			return f'{replacement}/{relative.as_posix()}'
-		return relative.as_posix()
+			if relative_text == '.':
+				return replacement
+			return f'{replacement}/{relative_text}'
+		return relative_text
 	return value
 
 

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import csv
+import hashlib
+import json
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,10 +15,21 @@ from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_soft_posterior import (
 	f3_lithology_voxel_label_budget_soft_posterior_config_from_mapping,
 )
+from seis_ssl_cluster.f3.lithology import (
+	voxel_label_budget_soft_posterior_results as soft_posterior_results,
+)
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_soft_posterior_results import (
+	OUTPUT_NAMES,
 	_portable_value,
 	decide_soft_posterior_original_gate,
+	summarize_f3_lithology_voxel_label_budget_soft_posterior,
 )
+from seis_ssl_cluster.results import validate_results_artifacts
+
+RESULTS_RELATIVE_ROOT = Path(
+	'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_soft_posterior_v1'
+)
+REQUIRED_RESULT_FILES = (*OUTPUT_NAMES, 'publish_manifest.json')
 
 
 def test_soft_posterior_gate_go_hold_and_stop() -> None:
@@ -63,16 +78,242 @@ def test_soft_posterior_publish_paths_are_portable() -> None:
 	"""Publish provenance without embedding the local workspace path."""
 	payload = _portable_value(
 		{
+			'artifact_root': '/workspace/artifacts/seis_ssl_cluster',
 			'artifact': '/workspace/artifacts/seis_ssl_cluster/reports/summary.json',
+			'workspace_root': '/workspace',
 			'repository': '/workspace/experiments/f3/config.yaml',
+			'external': '/opt/other/summary.json',
 		},
 		artifact_root=Path('/workspace/artifacts/seis_ssl_cluster'),
 		workspace_root=Path('/workspace'),
 	)
 
 	assert payload == {
+		'artifact_root': '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}',
 		'artifact': '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/reports/summary.json',
+		'workspace_root': '.',
 		'repository': 'experiments/f3/config.yaml',
+		'external': '/opt/other/summary.json',
+	}
+
+
+def test_soft_posterior_summarizer_publishes_portable_paths(
+	monkeypatch: pytest.MonkeyPatch,
+	tmp_path: Path,
+) -> None:
+	"""Serialize portable source reports before publishing their live bytes."""
+	workspace_root = tmp_path / 'workspace'
+	artifact_root = workspace_root / 'artifacts' / 'seis_ssl_cluster'
+	reports_dir = artifact_root / 'reports'
+	results_root = workspace_root / 'results'
+	config = SimpleNamespace(
+		reports_dir=reports_dir,
+		base=SimpleNamespace(
+			artifact_root=artifact_root,
+			results_root=results_root,
+			publish=SimpleNamespace(results_root=results_root),
+		),
+	)
+	inspection = _portable_inspection(
+		artifact_root=artifact_root,
+		workspace_root=workspace_root,
+		external_path=tmp_path / 'external' / 'source.json',
+	)
+	monkeypatch.setattr(
+		soft_posterior_results,
+		'inspect_f3_lithology_voxel_label_budget_soft_posterior_results',
+		lambda _config: inspection,
+	)
+
+	result = summarize_f3_lithology_voxel_label_budget_soft_posterior(config)
+	published_dir = results_root / RESULTS_RELATIVE_ROOT
+	assert result['decisions'] == inspection['decisions']
+	assert {path.name for path in published_dir.iterdir()} == set(REQUIRED_RESULT_FILES)
+
+	texts = {}
+	for name in OUTPUT_NAMES:
+		source = reports_dir / name
+		published = published_dir / name
+		assert source.read_bytes() == published.read_bytes()
+		texts[name] = published.read_text(encoding='utf-8')
+	manifest_path = published_dir / 'publish_manifest.json'
+	texts['publish_manifest.json'] = manifest_path.read_text(encoding='utf-8')
+	assert all(str(artifact_root) not in text for text in texts.values())
+	assert all(str(workspace_root) not in text for text in texts.values())
+
+	summary = json.loads(texts['soft_posterior_results_summary.json'])
+	assert summary['source_identities'] == {
+		'artifact_child': '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/reports/source.json',
+		'artifact_root': '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}',
+		'external_path': str(tmp_path / 'external' / 'source.json'),
+		'workspace_child': 'experiments/f3/config.yaml',
+		'workspace_root': '.',
+	}
+	job_rows = list(
+		csv.DictReader(texts['soft_posterior_job_metrics.csv'].splitlines())
+	)
+	assert '\r\n' not in texts['soft_posterior_job_metrics.csv']
+	assert job_rows[0]['voxel_dataset_root'] == (
+		'${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/datasets/cap25'
+	)
+	assert job_rows[0]['source_config'] == 'experiments/f3/config.yaml'
+
+	manifest = json.loads(texts['publish_manifest.json'])
+	assert manifest['source_artifact_root'] == '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'
+	assert manifest['output_dir'] == f'results/{RESULTS_RELATIVE_ROOT.as_posix()}'
+	assert manifest['skipped_optional_items'] == []
+	assert [item['target'] for item in manifest['items']] == list(OUTPUT_NAMES)
+	for item in manifest['items']:
+		target = Path(item['target'])
+		assert not target.is_absolute()
+		assert '..' not in target.parts
+		assert target.name != 'publish_manifest.json'
+		assert item['source'] == (
+			'${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/reports/' + target.name
+		)
+		published = published_dir / target
+		assert published.is_file()
+		assert item['size_bytes'] == published.stat().st_size
+		assert item['sha256'] == hashlib.sha256(published.read_bytes()).hexdigest()
+
+	report = validate_results_artifacts(
+		published_dir,
+		required_files=tuple(Path(name) for name in REQUIRED_RESULT_FILES),
+		local_path_policy='error',
+		local_path_markers=(f'{workspace_root}/', f'{artifact_root}/'),
+	)
+	assert report.ok, report.errors
+
+
+def test_committed_soft_posterior_results_are_portable_and_valid() -> None:
+	"""Keep published M5-U results regenerated after serializer changes."""
+	repository_root = Path(__file__).resolve().parents[2]
+	results_dir = repository_root / 'results' / RESULTS_RELATIVE_ROOT
+	assert {path.name for path in results_dir.iterdir()} >= set(REQUIRED_RESULT_FILES)
+
+	report = validate_results_artifacts(
+		results_dir,
+		required_files=tuple(Path(name) for name in REQUIRED_RESULT_FILES),
+		local_path_policy='error',
+	)
+	assert report.ok, report.errors
+
+	texts = {
+		name: (results_dir / name).read_text(encoding='utf-8')
+		for name in REQUIRED_RESULT_FILES
+	}
+	for text in texts.values():
+		assert '/workspace/' not in text
+		assert '/home/dcuser/' not in text
+
+	summary = json.loads(texts['soft_posterior_results_summary.json'])
+	decisions = summary['decisions']
+	assert decisions['overall_status'] == 'M5_U_ORIGINAL_STOP'
+	assert decisions['hard_vs_soft'] == {
+		'positive_budgets': [],
+		'negative_budgets': ['cap25', 'cap50'],
+		'systematic_major_degradation': [],
+	}
+	assert decisions['six_split_follow_up'] == {
+		'ready': False,
+		'scientific_jobs_executed': 0,
+	}
+
+	job_rows = list(
+		csv.DictReader(texts['soft_posterior_job_metrics.csv'].splitlines())
+	)
+	assert '\r\n' not in texts['soft_posterior_job_metrics.csv']
+	assert len(job_rows) == 60
+	for role in ('mh_soft_nocons', 'mh_nocons', 'm1_current_k6', 'mae'):
+		assert sum(row['model_role'] == role for row in job_rows) == 15
+	paired_rows = list(
+		csv.DictReader(texts['soft_posterior_paired_deltas.csv'].splitlines())
+	)
+	assert len(paired_rows) == 45
+	assert {
+		row['comparison'] for row in paired_rows
+	} == {
+		'mh_soft_nocons - mh_nocons',
+		'mh_soft_nocons - m1_current_k6',
+		'mh_soft_nocons - mae',
+	}
+	for comparison in {row['comparison'] for row in paired_rows}:
+		assert sum(row['comparison'] == comparison for row in paired_rows) == 15
+
+	manifest = json.loads(texts['publish_manifest.json'])
+	assert manifest['source_artifact_root'] == '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'
+	assert manifest['output_dir'] == f'results/{RESULTS_RELATIVE_ROOT.as_posix()}'
+	assert manifest['skipped_optional_items'] == []
+	assert [item['target'] for item in manifest['items']] == list(OUTPUT_NAMES)
+	for item in manifest['items']:
+		target = Path(item['target'])
+		assert not target.is_absolute()
+		assert '..' not in target.parts
+		assert target.name != 'publish_manifest.json'
+		published = results_dir / target
+		assert published.is_file()
+		assert item['size_bytes'] == published.stat().st_size
+		assert item['sha256'] == hashlib.sha256(published.read_bytes()).hexdigest()
+
+
+def _portable_inspection(
+	*,
+	artifact_root: Path,
+	workspace_root: Path,
+	external_path: Path,
+) -> dict[str, object]:
+	artifact_child = artifact_root / 'reports' / 'source.json'
+	workspace_child = workspace_root / 'experiments' / 'f3' / 'config.yaml'
+	decisions = {
+		'overall_status': 'M5_U_ORIGINAL_STOP',
+		'hard_vs_soft': {
+			'positive_budgets': [],
+			'negative_budgets': ['cap25', 'cap50'],
+			'systematic_major_degradation': [],
+		},
+		'six_split_follow_up': {
+			'ready': False,
+			'scientific_jobs_executed': 0,
+		},
+	}
+	return {
+		'job_metrics': (
+			{
+				'budget_id': 'cap25',
+				'subsample_seed': 0,
+				'model_role': 'mh_soft_nocons',
+				'voxel_dataset_root': str(artifact_root / 'datasets' / 'cap25'),
+				'source_config': str(workspace_child),
+			},
+		),
+		'paired_deltas': (
+			{
+				'comparison_id': 'mh_soft_nocons_vs_mh_nocons',
+				'comparison': 'mh_soft_nocons - mh_nocons',
+				'artifact_path': str(artifact_child),
+				'workspace_path': str(workspace_child),
+			},
+		),
+		'summary_by_budget': (
+			{
+				'budget_id': 'cap25',
+				'paths': [
+					str(artifact_root),
+					str(artifact_child),
+					str(workspace_root),
+					str(workspace_child),
+					str(external_path),
+				],
+			},
+		),
+		'decisions': decisions,
+		'source_identities': {
+			'artifact_root': str(artifact_root),
+			'artifact_child': str(artifact_child),
+			'workspace_root': str(workspace_root),
+			'workspace_child': str(workspace_child),
+			'external_path': str(external_path),
+		},
 	}
 
 
