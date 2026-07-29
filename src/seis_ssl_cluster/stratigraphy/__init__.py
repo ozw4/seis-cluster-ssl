@@ -93,6 +93,16 @@ _STATE_POSTERIOR_EXPORTS = {
 	'validate_multi_head_state_posterior_manifest',
 }
 
+_LATERAL_TARGET_EXPORTS = {
+	'MultiHeadLateralTargetExportConfig',
+	'MultiHeadLateralTargetExportPlan',
+	'export_multi_head_lateral_targets',
+	'load_multi_head_lateral_target_manifest',
+	'plan_multi_head_lateral_target_exports',
+	'resolve_multi_head_lateral_target_export_config',
+	'validate_multi_head_lateral_target_manifest',
+}
+
 __all__ = [
 	'CANONICAL_KS',
 	'GLOBAL_VALID_TOKENS',
@@ -104,6 +114,8 @@ __all__ = [
 	'LateralMessageResult',
 	'LateralSmoothingResult',
 	'LogitHMMPseudoTarget',
+	'MultiHeadLateralTargetExportConfig',
+	'MultiHeadLateralTargetExportPlan',
 	'MultiHeadPseudoTargetExportConfig',
 	'MultiHeadPseudoTargetExportPlan',
 	'MultiHeadStatePosteriorExportConfig',
@@ -128,9 +140,11 @@ __all__ = [
 	'enumerate_xy_four_neighbors',
 	'expected_normalized_order_coordinate',
 	'export_hmm_cluster_labels_as_pseudo_targets',
+	'export_multi_head_lateral_targets',
 	'export_multi_head_pseudo_targets',
 	'export_multi_head_state_posteriors',
 	'feature_distillation_loss',
+	'load_multi_head_lateral_target_manifest',
 	'load_multi_head_state_posterior_manifest',
 	'load_multi_head_target_manifest',
 	'load_pseudo_target_arrays',
@@ -139,12 +153,14 @@ __all__ = [
 	'multi_head_cross_head_diagnostics',
 	'normalized_lateral_message',
 	'ordered_soft_coordinate',
+	'plan_multi_head_lateral_target_exports',
 	'plan_multi_head_pseudo_target_exports',
 	'plan_multi_head_state_posterior_exports',
 	'plan_shuffled_hmm_pseudo_targets',
 	'prepare_hmm_cluster_label_pseudo_target_exports',
 	'pseudo_target_paths',
 	'redecode_ordered_lateral_trace',
+	'resolve_multi_head_lateral_target_export_config',
 	'resolve_multi_head_pseudo_target_export_config',
 	'resolve_multi_head_state_posterior_export_config',
 	'shuffle_pseudo_target_arrays',
@@ -153,6 +169,7 @@ __all__ = [
 	'soft_categorical_cross_entropy',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
+	'validate_multi_head_lateral_target_manifest',
 	'validate_multi_head_state_posterior_manifest',
 	'validate_multi_head_target_manifest',
 	'validate_multi_head_target_publication_preflight',
@@ -171,5 +188,10 @@ def __getattr__(name: str) -> object:
 			'seis_ssl_cluster.stratigraphy.state_posterior'
 		)
 		return getattr(state_posterior, name)
+	if name in _LATERAL_TARGET_EXPORTS:
+		lateral_targets = importlib.import_module(
+			'seis_ssl_cluster.stratigraphy.lateral_targets'
+		)
+		return getattr(lateral_targets, name)
 	msg = f'module {__name__!r} has no attribute {name!r}'
 	raise AttributeError(msg)

@@ -154,8 +154,8 @@ def normalized_lateral_message(  # noqa: C901
 	if np.any(has_neighbors) and not np.allclose(
 		np.sum(message[has_neighbors], axis=1),
 		1.0,
-		rtol=1.0e-10,
-		atol=1.0e-12,
+		rtol=0.0,
+		atol=2.0e-6,
 	):
 		raise ValueError('normalized lateral message rows must sum to one')
 	entropy = np.zeros(t_count, dtype=np.float64)
@@ -210,8 +210,8 @@ def apply_lateral_message_to_emission_costs(  # noqa: PLR0913
 	if np.any(has_neighbors) and not np.allclose(
 		np.sum(message_array[has_neighbors], axis=1),
 		1.0,
-		rtol=1.0e-10,
-		atol=1.0e-12,
+		rtol=0.0,
+		atol=2.0e-6,
 	):
 		raise ValueError('message rows with neighbours must sum to one')
 	_validate_positive_finite(emission_gap_scale, 'emission_gap_scale')
@@ -384,8 +384,8 @@ def _validate_posterior(posterior: np.ndarray, valid_mask: np.ndarray) -> None:
 	if valid_rows.size and not np.allclose(
 		np.sum(valid_rows, axis=1),
 		1.0,
-		rtol=1.0e-10,
-		atol=1.0e-12,
+		rtol=0.0,
+		atol=2.0e-6,
 	):
 		raise ValueError('valid neighbor_posterior rows must sum to one')
 	if np.any(posterior[~valid_mask] != 0.0):

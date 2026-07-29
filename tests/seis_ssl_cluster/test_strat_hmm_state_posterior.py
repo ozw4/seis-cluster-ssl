@@ -96,6 +96,38 @@ def test_export_survey_rejects_viterbi_replay_mismatch(
 		)
 
 
+def test_export_survey_uses_shared_frozen_hmm_replay(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Posterior and lateral export share the one side-effect-free replay core."""
+	labels_path, valid_path, embedding = _tiny_survey(tmp_path)
+	monkeypatch.setattr(
+		state_posterior, '_source_label_path', lambda _source: labels_path
+	)
+	called = False
+
+	def replay(*_args, **_kwargs):
+		nonlocal called
+		called = True
+		return np.array([[0.0, 1.0], [1.0, 0.0]]), np.array([0, 1])
+
+	monkeypatch.setattr(state_posterior, 'replay_frozen_hmm_trace', replay)
+	output_root = tmp_path / 'out'
+	output_root.mkdir()
+	state_posterior._export_survey(
+		output_root,
+		embedding,
+		{'valid_tokens': state_posterior._reference(valid_path)},
+		_tiny_model(),
+		statistics=(
+			state_posterior._PosteriorStats(2),
+			state_posterior._PosteriorStats(2),
+		),
+	)
+	assert called
+
+
 def test_export_survey_rejects_embedding_valid_mask_mismatch(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,

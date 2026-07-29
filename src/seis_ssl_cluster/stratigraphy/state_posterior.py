@@ -26,19 +26,22 @@ from seis_ssl_cluster.clustering.features import (
 	embedding_input_metadata,
 	file_sha256,
 )
-from seis_ssl_cluster.clustering.residualization import read_residualizer_npz
 from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	forward_backward_state_posteriors,
 	prepare_feature_batch_for_indices,
 	squared_euclidean_emission_costs,
-	viterbi_decode_costs,
+)
+from seis_ssl_cluster.stratigraphy.frozen_hmm_replay import (
+	CANONICAL_KS,
+	expected_boundaries,
+	load_frozen_hmm_model,
+	replay_frozen_hmm_trace,
 )
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 
 ARTIFACT_TYPE = 'strat_hmm_multi_head_state_posterior_manifest'
 SCHEMA_VERSION = 1
 POSTERIOR_SEMANTICS = 'ordered_path_cost_gibbs_state_marginal_v1'
-CANONICAL_KS = (6, 8, 10)
 _POSTERIOR_SUFFIX = '.state_posterior.npy'
 _VALID_SUFFIX = '.valid_tokens.npy'
 _METADATA_SUFFIX = '.state_posterior_metadata.json'
@@ -336,14 +339,19 @@ def _validate_manifest_heads(
 def _validate_manifest_hard_source_anchor(
 	payload: Mapping[str, object], source: Mapping[str, object]
 ) -> Mapping[str, object]:
-	handoff_path, model_identities = _validate_hard_source_model_anchor(
-		source, config=None
-	)
+	handoff_path, model_identities = hard_source_model_identities(source)
 	if payload['source_hard_export_handoff'] != _reference(handoff_path):
 		raise ValueError(
 			'posterior hard-source export handoff identity differs from hard manifest'
 		)
 	return model_identities
+
+
+def hard_source_model_identities(
+	source: Mapping[str, object],
+) -> tuple[Path, Mapping[str, object]]:
+	"""Return the handoff and per-head frozen identities bound by hard targets."""
+	return _validate_hard_source_model_anchor(source, config=None)
 
 
 def _export_head(
@@ -469,24 +477,16 @@ def _export_survey(
 				flat = ((x_index * y_count + y_index) * z_count + z_indices).astype(
 					np.int64
 				)
-				features = prepare_feature_batch_for_indices(
+				costs, replay = replay_frozen_hmm_trace(
 					embedding,
 					flat,
-					residualizer=model['residualizer'],
-					preprocessor=model['preprocessor'],
-					emission_source=str(model['emission_source']),
+					model,
+					k=k,
+					prepare_features=prepare_feature_batch_for_indices,
+					emission_costs=squared_euclidean_emission_costs,
 				)
-				costs = squared_euclidean_emission_costs(features, centers)
-				expected, weight = _expected_boundaries(
+				expected, weight = expected_boundaries(
 					model['hmm'], k=k, length=z_indices.size
-				)
-				replay = viterbi_decode_costs(
-					costs,
-					model['transition_costs'],
-					initial_state_costs=model['initial_costs'],
-					terminal_state_costs=model['terminal_costs'],
-					expected_boundary_count=expected,
-					boundary_count_weight=weight,
 				)
 				if not np.array_equal(replay, labels[x_index, y_index, z_indices]):
 					raise ValueError(
@@ -703,71 +703,18 @@ class _LogLengthHistogram:
 def _load_model(
 	config: MultiHeadStatePosteriorExportConfig, *, k: int
 ) -> dict[str, object]:
-	model_dir = config.clustering_output_dir / 'models' / f'k{k}'
-	paths = {
-		name: model_dir / filename
-		for name, filename in {
-			'preprocessor': 'preprocessor.joblib',
-			'hmm_model': 'hmm_model.joblib',
-			'centers': 'cluster_centers.npy',
-			'metadata': 'clustering_metadata.json',
-		}.items()
-	}
-	if not all(path.is_file() for path in paths.values()):
-		raise FileNotFoundError(f'frozen model artifacts are incomplete for k={k}')
-	hmm = joblib.load(paths['hmm_model'])
-	if not isinstance(hmm, Mapping):
-		raise TypeError(f'hmm_model must be a mapping for k={k}')
-	emission_source = hmm.get('emission_source')
-	if emission_source not in {'embedding', 'z_coordinate'}:
-		raise ValueError(
-			'frozen hmm_model must record a valid emission_source for k={k}'
-		)
-	centers = np.load(paths['centers'], mmap_mode='r', allow_pickle=False)
-	if centers.shape != (k, centers.shape[1]):
-		raise ValueError(f'center shape does not match k={k}')
-	residualizer_path = config.clustering_output_dir / 'models' / 'residualizer.npz'
-	residualizer = (
-		read_residualizer_npz(residualizer_path)
-		if residualizer_path.is_file()
-		else None
+	return load_frozen_hmm_model(
+		clustering_output_dir=config.clustering_output_dir,
+		clustering_config=config.clustering_config,
+		k=k,
+		joblib_load=joblib.load,
 	)
-	frozen_identity: dict[str, object] = {
-		name: _reference(path) for name, path in paths.items()
-	}
-	if residualizer_path.is_file():
-		frozen_identity['residualizer'] = _reference(residualizer_path)
-	identity = dict(frozen_identity)
-	if config.clustering_config is not None:
-		identity['clustering_config'] = _reference(config.clustering_config)
-	return {
-		'preprocessor': joblib.load(paths['preprocessor']),
-		'hmm': hmm,
-		'centers': np.asarray(centers, dtype=np.float32),
-		'residualizer': residualizer,
-		'emission_source': emission_source,
-		'transition_costs': np.asarray(hmm['transition_costs'], dtype=np.float32),
-		'initial_costs': np.asarray(hmm['initial_state_costs'], dtype=np.float32),
-		'terminal_costs': np.asarray(hmm['terminal_state_costs'], dtype=np.float32),
-		'identity': identity,
-		'frozen_identity': frozen_identity,
-	}
 
 
 def _expected_boundaries(
 	hmm: Mapping[str, object], *, k: int, length: int
 ) -> tuple[int | None, float]:
-	prior = hmm.get('path_prior', {})
-	if not isinstance(prior, Mapping) or not prior.get('enabled', False):
-		return None, 0.0
-	value = prior.get('expected_boundaries', {})
-	if not isinstance(value, Mapping) or not value.get('enabled', False):
-		return None, 0.0
-	weight = float(value.get('weight', 0.0))
-	if weight == 0.0:
-		return None, 0.0
-	target = k - 1 if value.get('target') == 'auto_k_minus_1' else int(value['target'])
-	return min(target, length - 1), weight
+	return expected_boundaries(hmm, k=k, length=length)
 
 
 def _validate_frozen_inputs(
@@ -986,11 +933,11 @@ def _validate_hard_source_model_anchor(  # noqa: C901, PLR0912, PLR0915
 			str(k) not in metadata_hashes
 			or str(k) not in label_hashes
 		):
-			raise ValueError(f'hard manifest source export provenance is missing k={k}')
-		if str(k) not in model_artifacts:
 			raise ValueError(
 				f'hard manifest source export provenance is missing k={k}'
 			)
+		if str(k) not in model_artifacts:
+			raise ValueError(f'hard manifest source export provenance is missing k={k}')
 		identity = _hard_source_model_identity(
 			_mapping(model_artifacts[str(k)], f'hard source model k={k}'),
 			clustering=clustering,
@@ -1721,6 +1668,7 @@ __all__ = [
 	'MultiHeadStatePosteriorExportConfig',
 	'MultiHeadStatePosteriorExportPlan',
 	'export_multi_head_state_posteriors',
+	'hard_source_model_identities',
 	'load_multi_head_state_posterior_manifest',
 	'plan_multi_head_state_posterior_exports',
 	'resolve_multi_head_state_posterior_export_config',
