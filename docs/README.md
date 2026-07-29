@@ -8,6 +8,7 @@ This directory contains runbooks and configuration contracts for
 - [F3 M3-V voxel lithology benchmark](f3_voxel_lithology_benchmark.md): V0/V1 contracts, canonical `frozen_embedding_decoder_nearest_voxel_ln_v1` identity, exact original/six-split execution order, artifact migration checks, and release validation.
 - [F3 strat-HMM M2-A boundary weighting](f3_strat_hmm_m2a_boundary_weighting.md): ordered export-to-summary workflow, artifact paths, failure handling, and M1 housekeeping.
 - [F3 strat-HMM M2-A result decision](f3_strat_hmm_m2a_results.md): final Go/Stop/Hold evidence contract.
+- [F3 M5-LS lateral smoothing](f3_m5_lateral_smoothing_plan.md): fixed edge-aware lateral-message and ordered hard-reprojection contract after `M5_U_ORIGINAL_STOP`.
 
 ## Artifacts And Results
 
