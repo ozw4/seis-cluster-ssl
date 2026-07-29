@@ -34,8 +34,23 @@ def main(argv: Sequence[str] | None = None) -> int:
 	plans = export_multi_head_lateral_targets(
 		config, dry_run=args.dry_run, only_missing=args.only_missing
 	)
+	if args.dry_run:
+		affinity_scale = plans[0].affinity_scale
+		if affinity_scale is None:
+			raise RuntimeError('lateral dry-run did not resolve affinity scale')
+		print(f'resolved affinity scale: {affinity_scale:.17g}')
 	for plan in plans:
 		print(f'k={plan.k} planned action: {plan.action}')
+		if args.dry_run:
+			emission_gap_scale = plan.emission_gap_scale
+			if emission_gap_scale is None:
+				raise RuntimeError(
+					'lateral dry-run did not resolve emission-gap scale'
+				)
+			print(
+				f'k={plan.k} resolved emission-gap scale: '
+				f'{emission_gap_scale:.17g}'
+			)
 		if plan.reason:
 			print(f'k={plan.k} detail: {plan.reason}')
 	if args.dry_run:

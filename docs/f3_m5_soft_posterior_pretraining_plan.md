@@ -3,6 +3,11 @@
 Planning document only. No runnable M5 config or completed M5 scientific result
 is implied.
 
+This document records the original M5-U design. Original-split evaluation ended
+in `M5_U_ORIGINAL_STOP`, and no M5-U six-split follow-up was run. M5-LS is the
+separate successor method; its normative contract is
+`docs/f3_m5_lateral_smoothing_plan.md`.
+
 M4's formal six-split status remains `M4_MH_SPLIT_HOLD`. Separately, the
 project decision is `ADOPT_MH_NOCONS_FOR_M5`: use the selected hard-target
 model as the starting baseline for the next method-development milestone. This
@@ -104,10 +109,11 @@ candidate jobs.
 
 ## Later candidates
 
-Only after the soft-posterior change has been evaluated, consider these
-candidates in order:
+This old numbered list was a planning list, not a permanent execution-order
+requirement after `M5_U_ORIGINAL_STOP`:
 
-1. Boundary transition-probability auxiliary head.
+1. Boundary transition-probability auxiliary head (not adopted as an M5-LS
+   prerequisite).
 2. Edge-aware lateral posterior smoothing.
 3. One-step HMM/target refresh.
 

@@ -118,7 +118,7 @@ def write_pseudo_target(  # noqa: PLR0913
 		np.save(paths.boundary_weight, boundary_weight_array)
 	_write_metadata(
 		paths.metadata,
-		_pseudo_target_metadata(
+		build_pseudo_target_metadata(
 			labels=np.asarray(labels),
 			valid_tokens=np.asarray(valid_tokens),
 			boundary_weight=boundary_weight_array,
@@ -131,6 +131,37 @@ def write_pseudo_target(  # noqa: PLR0913
 		),
 	)
 	return paths
+
+
+def build_pseudo_target_metadata(  # noqa: PLR0913
+	*,
+	labels: np.ndarray,
+	valid_tokens: np.ndarray,
+	boundary_weight: np.ndarray,
+	boundary_weight_source: str,
+	k: int,
+	survey_id: str,
+	source_metadata: Mapping[str, object] | None,
+	schema_version: int,
+	write_boundary_weight: bool,
+) -> dict[str, object]:
+	"""Build the canonical metadata for one validated pseudo-target artifact.
+
+	This is deliberately shared by producers of schema-v1 hard targets.  It keeps
+	the provider-facing metadata contract in one place while allowing a producer
+	to add its immutable provenance under ``source``.
+	"""
+	return _pseudo_target_metadata(
+		labels=labels,
+		valid_tokens=valid_tokens,
+		boundary_weight=boundary_weight,
+		boundary_weight_source=boundary_weight_source,
+		k=k,
+		survey_id=survey_id,
+		source_metadata=source_metadata,
+		schema_version=schema_version,
+		write_boundary_weight=write_boundary_weight,
+	)
 
 
 def load_pseudo_target_arrays(

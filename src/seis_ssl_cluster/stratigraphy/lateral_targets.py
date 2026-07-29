@@ -12,8 +12,8 @@ import math
 import shutil
 import tempfile
 from collections.abc import Callable, Iterator, Mapping
-from csv import DictWriter
-from dataclasses import dataclass
+from csv import DictReader, DictWriter
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -33,6 +33,7 @@ from seis_ssl_cluster.stratigraphy.frozen_hmm_replay import (
 )
 from seis_ssl_cluster.stratigraphy.lateral_smoothing import (
 	LATERAL_SMOOTHING_SEMANTICS,
+	LateralSmoothingResult,
 	smooth_and_redecode_ordered_trace,
 )
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
@@ -41,6 +42,7 @@ from seis_ssl_cluster.stratigraphy.state_posterior import (
 	hard_source_model_identities,
 	validate_multi_head_state_posterior_manifest,
 )
+from seis_ssl_cluster.stratigraphy.targets import build_pseudo_target_metadata
 
 _BUNDLE_DIRNAME = 'bundle'
 
@@ -71,11 +73,37 @@ class MultiHeadLateralTargetExportConfig:
 
 @dataclass(frozen=True)
 class MultiHeadLateralTargetExportPlan:
-	"""One head action selected after source validation."""
+	"""One head action and its resolved fixed scales after source validation."""
 
 	k: int
 	action: _Action
 	reason: str | None = None
+	affinity_scale: float | None = None
+	emission_gap_scale: float | None = None
+
+
+@dataclass(frozen=True)
+class _LateralPreflight:
+	"""One immutable read-only source and scale decision for an export."""
+
+	source: Mapping[str, object]
+	posterior: Mapping[str, object]
+	inputs: Mapping[str, EmbeddingInput]
+	models: Mapping[int, Mapping[str, object]]
+	affinity_scale: float
+	affinity_stats: Mapping[str, object]
+	gap_scales: Mapping[int, float]
+	gap_stats: Mapping[int, Mapping[str, object]]
+	snapshot: str
+	plans: tuple[MultiHeadLateralTargetExportPlan, ...]
+
+
+class _OwnedOutputCorruptionError(ValueError):
+	"""An owned output is incomplete or fails its own semantic contract."""
+
+
+class _ImmutableIdentityMismatchError(ValueError):
+	"""A complete owned output belongs to a different scientific identity."""
 
 
 def resolve_multi_head_lateral_target_export_config(
@@ -148,29 +176,88 @@ def plan_multi_head_lateral_target_exports(
 	only_missing: bool,
 ) -> list[MultiHeadLateralTargetExportPlan]:
 	"""Completely validate sources and classify output paths without writing."""
+	return list(_preflight(config, only_missing=only_missing).plans)
+
+
+def _preflight(
+	config: MultiHeadLateralTargetExportConfig, *, only_missing: bool
+) -> _LateralPreflight:
+	"""Run every read-only check required before an owned path may change."""
 	source, posterior, inputs, models = _validate_sources(config)
 	_validate_frozen_source_replay(source, inputs, models)
+	affinity_scale, affinity_stats = _affinity_scale(source, posterior, inputs)
+	gap_scales, gap_stats = _emission_gap_scales(source, inputs, models)
 	bundle = _bundle_path(config)
 	if not bundle.exists():
-		return [MultiHeadLateralTargetExportPlan(k, 'NEW') for k in CANONICAL_KS]
-	try:
-		for k in CANONICAL_KS:
-			_validate_complete_head(
-				bundle / f'k{k}', k, source, posterior, models, config
-			)
-	except (OSError, TypeError, ValueError) as exc:
-		return [
-			MultiHeadLateralTargetExportPlan(k, 'QUARANTINE', str(exc))
-			for k in CANONICAL_KS
-		]
-	return [
-		MultiHeadLateralTargetExportPlan(
-			k,
-			'REUSE' if only_missing else 'ERROR',
-			None if only_missing else 'complete output exists; use --only-missing',
+		action = 'QUARANTINE' if config.handoff_manifest.exists() else 'NEW'
+		reason = (
+			'handoff exists without a complete bundle'
+			if action == 'QUARANTINE'
+			else None
 		)
-		for k in CANONICAL_KS
-	]
+		plans = tuple(
+			MultiHeadLateralTargetExportPlan(k, action, reason) for k in CANONICAL_KS
+		)
+	else:
+		try:
+			for k in CANONICAL_KS:
+				_validate_complete_head(
+					bundle / f'k{k}',
+					k,
+					source,
+					posterior,
+					models,
+					config,
+					inputs=inputs,
+					expected_scales={
+						'affinity': affinity_stats,
+						'emission_gap': gap_stats[k],
+					},
+				)
+			_validate_owned_handoff(config, source)
+		except _ImmutableIdentityMismatchError as exc:
+			plans = tuple(
+				MultiHeadLateralTargetExportPlan(k, 'ERROR', str(exc))
+				for k in CANONICAL_KS
+			)
+		except (OSError, TypeError, ValueError) as exc:
+			corruption = _OwnedOutputCorruptionError(str(exc))
+			plans = tuple(
+				MultiHeadLateralTargetExportPlan(k, 'QUARANTINE', str(corruption))
+				for k in CANONICAL_KS
+			)
+		else:
+			plans = tuple(
+				MultiHeadLateralTargetExportPlan(
+					k,
+					'REUSE' if only_missing else 'ERROR',
+					None
+					if only_missing
+					else 'complete output exists; use --only-missing',
+				)
+				for k in CANONICAL_KS
+			)
+	plans = tuple(
+		replace(
+			plan,
+			affinity_scale=affinity_scale,
+			emission_gap_scale=gap_scales[plan.k],
+		)
+		for plan in plans
+	)
+	snapshot = _source_snapshot(config, source, posterior, inputs, models)
+	return _LateralPreflight(
+		source,
+		posterior,
+		inputs,
+		models,
+		affinity_scale,
+		affinity_stats,
+		gap_scales,
+		gap_stats,
+		snapshot,
+		plans,
+	)
 
 
 def export_multi_head_lateral_targets(  # noqa: C901
@@ -180,85 +267,103 @@ def export_multi_head_lateral_targets(  # noqa: C901
 	only_missing: bool = False,
 ) -> list[MultiHeadLateralTargetExportPlan]:
 	"""Publish all heads atomically after a bounded preflight and export."""
-	plans = plan_multi_head_lateral_target_exports(config, only_missing=only_missing)
+	preflight = _preflight(config, only_missing=only_missing)
+	plans = list(preflight.plans)
 	if dry_run:
 		return plans
 	if any(plan.action == 'ERROR' for plan in plans):
 		raise FileExistsError(
 			'; '.join(f'k={p.k}: {p.reason}' for p in plans if p.action == 'ERROR')
 		)
-	source, posterior, inputs, models = _validate_sources(config)
 	if all(plan.action == 'REUSE' for plan in plans):
-		_publish_manifest(config, source)
 		return plans
-	# A handoff is the sole public completion marker.  Remove any owned marker
-	# before replacing its bundle so it can never reference a mixed generation.
-	if config.handoff_manifest.exists():
-		_quarantine(config.handoff_manifest)
-	if any(plan.action == 'QUARANTINE' for plan in plans):
-		_quarantine(_bundle_path(config))
 	config.output_root.mkdir(parents=True, exist_ok=True)
 	staging = Path(tempfile.mkdtemp(prefix='.lateral.bundle.', dir=config.output_root))
 	try:
-		affinity_scale, affinity_stats = _affinity_scale(source, posterior, inputs)
-		gap_scales, gap_stats = _emission_gap_scales(source, inputs, models)
 		for plan in plans:
 			if plan.action != 'REUSE':
 				_export_head(
 					staging / f'k{plan.k}',
 					plan.k,
-					source,
-					posterior,
-					inputs,
-					models[plan.k],
+					preflight.source,
+					preflight.posterior,
+					preflight.inputs,
+					preflight.models[plan.k],
 					config,
-					affinity_scale,
-					affinity_stats,
-					gap_scales[plan.k],
-					gap_stats[plan.k],
+					preflight.affinity_scale,
+					preflight.affinity_stats,
+					preflight.gap_scales[plan.k],
+					preflight.gap_stats[plan.k],
 				)
 		for plan in plans:
 			_validate_complete_head(
 				staging / f'k{plan.k}',
 				plan.k,
-				source,
-				posterior,
-				models,
+				preflight.source,
+				preflight.posterior,
+				preflight.models,
 				config,
 				allow_staging=True,
+				inputs=preflight.inputs,
+				expected_scales={
+					'affinity': preflight.affinity_stats,
+					'emission_gap': preflight.gap_stats[plan.k],
+				},
 			)
 			_rebase_head_metadata(
 				staging / f'k{plan.k}', old_root=staging, new_root=_bundle_path(config)
 			)
+		_validate_live_snapshot(config, preflight)
+		# Preserve a previous broken generation only after the replacement has
+		# passed complete staging validation and source revalidation.
+		if any(plan.action == 'QUARANTINE' for plan in plans):
+			if config.handoff_manifest.exists():
+				_quarantine(config.handoff_manifest)
+			_quarantine(_bundle_path(config))
 		staging.replace(_bundle_path(config))
 	except BaseException:
 		shutil.rmtree(staging, ignore_errors=True)
 		raise
 	else:
 		shutil.rmtree(staging, ignore_errors=True)
-	_validate_sources(config)
 	for k in CANONICAL_KS:
 		_validate_complete_head(
-			_bundle_path(config) / f'k{k}', k, source, posterior, models, config
+			_bundle_path(config) / f'k{k}',
+			k,
+			preflight.source,
+			preflight.posterior,
+			preflight.models,
+			config,
+			inputs=preflight.inputs,
+			expected_scales={
+				'affinity': preflight.affinity_stats,
+				'emission_gap': preflight.gap_stats[k],
+			},
 		)
-	_publish_manifest(config, source)
+	_publish_manifest(config, preflight.source)
 	return plans
 
 
-def load_multi_head_lateral_target_manifest(path: str | Path) -> dict[str, object]:
-	"""Load and fail-closed validate a published lateral-target manifest."""
+def load_multi_head_lateral_target_manifest(
+	path: str | Path, *, validate_array_semantics: bool = True
+) -> dict[str, object]:
+	"""Load a lateral manifest, optionally using reference-only validation."""
 	try:
 		payload = json.loads(Path(path).read_text(encoding='utf-8'))
 	except json.JSONDecodeError as exc:
 		raise ValueError(f'lateral target manifest must be valid JSON: {path}') from exc
 	if not isinstance(payload, dict):
 		raise TypeError('lateral target manifest must be an object')
-	validate_multi_head_lateral_target_manifest(payload)
+	validate_multi_head_lateral_target_manifest(
+		payload, validate_array_semantics=validate_array_semantics
+	)
 	return payload
 
 
 def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	payload: Mapping[str, object],
+	*,
+	validate_array_semantics: bool = True,
 ) -> None:
 	"""Validate strict source bindings, head arrays, and their hard semantics."""
 	_required(
@@ -368,9 +473,7 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 			_validate_array_reference(
 				entry['confidence'], confidence, name='confidence'
 			)
-			_validate_array_reference(
-				entry['valid_tokens'], valid, name='valid_tokens'
-			)
+			_validate_array_reference(entry['valid_tokens'], valid, name='valid_tokens')
 			if (
 				labels.dtype != np.int32
 				or labels.ndim != 3
@@ -380,7 +483,7 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 				or valid.shape != labels.shape
 			):
 				raise ValueError('lateral arrays have invalid shape or dtype')
-			if (
+			if validate_array_semantics and (
 				np.any(labels[valid] < 0)
 				or np.any(labels[valid] >= k)
 				or np.any(labels[~valid] != -1)
@@ -388,14 +491,15 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 				or np.any(confidence[~valid] != 0.0)
 			):
 				raise ValueError('lateral hard-label semantics are invalid')
-			_validate_target_valid_tokens(
-				valid,
-				hard_survey,
-				posterior_survey,
-				context=f'k={k} {survey_id}',
-			)
-			if np.any(np.bincount(labels[valid], minlength=k) == 0):
-				raise ValueError('lateral labels contain an empty state')
+			if validate_array_semantics:
+				_validate_target_valid_tokens(
+					valid,
+					hard_survey,
+					posterior_survey,
+					context=f'k={k} {survey_id}',
+				)
+				if np.any(np.bincount(labels[valid], minlength=k) == 0):
+					raise ValueError('lateral labels contain an empty state')
 			if entry['source_hard_labels'] != _reference(
 				_source_label_path(hard_survey)
 			):
@@ -414,14 +518,95 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 					'resolved_scales': resolved_scales,
 				},
 			)
-			for x in range(labels.shape[0]):
-				for y in range(labels.shape[1]):
-					trace = labels[x, y, valid[x, y]]
-					if np.any(np.diff(trace) < 0):
-						raise ValueError('lateral labels violate ordered paths')
-			if survey_id in common and not np.array_equal(common[survey_id], valid):
-				raise ValueError(f'valid mask differs across heads for {survey_id}')
-			common.setdefault(survey_id, np.asarray(valid))
+			if validate_array_semantics:
+				for x in range(labels.shape[0]):
+					for y in range(labels.shape[1]):
+						trace = labels[x, y, valid[x, y]]
+						if np.any(np.diff(trace) < 0):
+							raise ValueError('lateral labels violate ordered paths')
+				if survey_id in common and not np.array_equal(common[survey_id], valid):
+					raise ValueError(f'valid mask differs across heads for {survey_id}')
+				common.setdefault(survey_id, np.asarray(valid))
+		if validate_array_semantics:
+			_validate_diagnostics_from_arrays(
+				head['diagnostics'],
+				_mapping(head['surveys'], 'surveys'),
+				_mapping(_mapping(hard['heads'], 'hard heads')[str(k)], 'hard head')[
+					'surveys'
+				],
+				k=k,
+			)
+	if validate_array_semantics:
+		_validate_diagnostics_from_frozen_manifest_sources(
+			payload,
+			hard_path=hard_path,
+			posterior_path=posterior_path,
+		)
+
+
+def _validate_diagnostics_from_frozen_manifest_sources(
+	payload: Mapping[str, object],
+	*,
+	hard_path: Path,
+	posterior_path: Path,
+) -> None:
+	"""Replay complete diagnostics for a consumer-loaded lateral manifest."""
+	hard = load_multi_head_target_manifest(hard_path)
+	_, model_identities = hard_source_model_identities(hard)
+	model_identity = _mapping(model_identities[str(CANONICAL_KS[0])], 'model identity')
+	centers_path = _hashed(model_identity['centers'], 'model centers')
+	model_dir = centers_path.parent
+	if model_dir.name != f'k{CANONICAL_KS[0]}' or model_dir.parent.name != 'models':
+		raise ValueError('frozen model layout is invalid')
+	clustering_output_dir = model_dir.parent.parent
+	clustering_config = _hashed(
+		model_identity['clustering_config'], 'clustering config'
+	)
+	source_embedding_dir = Path(
+		_string(
+			_mapping(hard['source_embedding'], 'source_embedding').get('input_dir'),
+			'source_embedding.input_dir',
+		)
+	)
+	smoothing = _mapping(payload['smoothing'], 'smoothing')
+	config = MultiHeadLateralTargetExportConfig(
+		source_hard_manifest=hard_path,
+		source_posterior_manifest=posterior_path,
+		clustering_output_dir=clustering_output_dir,
+		clustering_config=clustering_config,
+		source_embedding_dir=source_embedding_dir,
+		output_root=hard_path.parent,
+		pairwise_strength_ratio=float(smoothing['pairwise_strength_ratio']),
+		handoff_manifest=hard_path,
+	)
+	source, posterior, inputs, models = _validate_sources(config)
+	_validate_frozen_source_replay(source, inputs, models)
+	_, affinity_stats = _affinity_scale(source, posterior, inputs)
+	_, gap_stats = _emission_gap_scales(source, inputs, models)
+	for k in CANONICAL_KS:
+		head = _mapping(_mapping(payload['heads'], 'heads')[str(k)], f'head k={k}')
+		diagnostics = head['diagnostics']
+		expected_scales = {
+			'affinity': affinity_stats,
+			'emission_gap': gap_stats[k],
+		}
+		if _mapping(diagnostics, 'diagnostics')['resolved_scales'] != expected_scales:
+			raise ValueError('resolved scales differ from frozen sources')
+		_validate_diagnostics_from_frozen_sources(
+			diagnostics,
+			_mapping(head['surveys'], 'surveys'),
+			_mapping(_mapping(source['heads'], 'heads')[str(k)], 'hard head')[
+				'surveys'
+			],
+			_mapping(_mapping(posterior['heads'], 'posterior heads')[str(k)], 'head')[
+				'surveys'
+			],
+			inputs,
+			models[k],
+			k=k,
+			config=config,
+			expected_scales=expected_scales,
+		)
 
 
 def _validate_sources(  # noqa: C901
@@ -515,9 +700,7 @@ def _validate_frozen_source_replay(
 				allow_pickle=False,
 			)
 			valid = np.load(
-				_hashed(
-					_mapping(raw, 'hard survey')['valid_tokens'], 'hard valid'
-				),
+				_hashed(_mapping(raw, 'hard survey')['valid_tokens'], 'hard valid'),
 				mmap_mode='r',
 				allow_pickle=False,
 			)
@@ -526,9 +709,9 @@ def _validate_frozen_source_replay(
 					z = np.flatnonzero(valid[x, y])
 					if not z.size:
 						continue
-					flat = (
-						(x * labels.shape[1] + y) * labels.shape[2] + z
-					).astype(np.int64)
+					flat = ((x * labels.shape[1] + y) * labels.shape[2] + z).astype(
+						np.int64
+					)
 					_, replay = replay_frozen_hmm_trace(
 						inputs[str(survey_id)], flat, models[k], k=k
 					)
@@ -924,6 +1107,10 @@ class _LateralDiagnostics:
 
 	def finish(self) -> dict[str, object]:
 		occupancy = self.occupancy / max(self.valid_tokens, 1)
+		positive = occupancy[occupancy > 0]
+		effective_k = float(
+			np.exp(-np.sum(positive * np.log(np.maximum(positive, 1e-30))))
+		)
 		return {
 			'valid_token_count': self.valid_tokens,
 			'invalid_token_count': self.invalid_tokens,
@@ -937,7 +1124,7 @@ class _LateralDiagnostics:
 			'state_occupancy': {
 				'counts': self.occupancy.tolist(),
 				'ratios': occupancy.tolist(),
-				'effective_k': int(np.count_nonzero(self.occupancy)),
+				'effective_k': effective_k,
 				'empty_state_count': int(np.count_nonzero(self.occupancy == 0)),
 			},
 			'ordered_path': {
@@ -1008,9 +1195,7 @@ def _export_head(  # noqa: PLR0913
 	root.mkdir(parents=True)
 	surveys: dict[str, object] = {}
 	diagnostics: dict[str, object] = {}
-	affinity_quartiles = _affinity_quartile_boundaries(
-		affinity_stats, affinity_scale
-	)
+	affinity_quartiles = _affinity_quartile_boundaries(affinity_stats, affinity_scale)
 	aggregate = _LateralDiagnostics(
 		k, config.pairwise_strength_ratio * gap_scale, affinity_quartiles
 	)
@@ -1061,7 +1246,7 @@ def _export_head(  # noqa: PLR0913
 	_write_json(root / 'head_metadata.json', head)
 
 
-def _export_survey(  # noqa: C901, PLR0913, PLR0915
+def _export_survey(  # noqa: PLR0913
 	root: Path,
 	survey_id: str,
 	source: Mapping[str, object],
@@ -1123,56 +1308,21 @@ def _export_survey(  # noqa: C901, PLR0913, PLR0915
 				z = np.flatnonzero(valid[x, y])
 				if not z.size:
 					continue
-				flat = (
-					(x * source_labels.shape[1] + y) * source_labels.shape[2] + z
-				).astype(np.int64)
-				costs, replay = replay_frozen_hmm_trace(embedding, flat, model, k=k)
-				expected, weight = expected_boundaries(model['hmm'], k=k, length=z.size)
-				if not np.array_equal(replay, source_labels[x, y, z]):
-					raise ValueError(
-						f'Viterbi replay differs from frozen hard labels: {survey_id}'
-					)
-				neighbor_features: list[np.ndarray] = []
-				neighbor_posteriors: list[np.ndarray] = []
-				neighbor_valid: list[np.ndarray] = []
-				for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
-					xx, yy = x + dx, y + dy
-					if (
-						0 <= xx < source_labels.shape[0]
-						and 0 <= yy < source_labels.shape[1]
-					):
-						neighbor_features.append(np.asarray(features[xx, yy, z]))
-						neighbor_posteriors.append(
-							np.asarray(posterior_array[xx, yy, z])
-						)
-						neighbor_valid.append(np.asarray(valid[xx, yy, z]))
-				if neighbor_features:
-					neighbor_embedding_array = np.asarray(neighbor_features)
-					neighbor_posterior_array = np.asarray(neighbor_posteriors)
-					neighbor_valid_array = np.asarray(neighbor_valid, dtype=bool)
-				else:
-					neighbor_embedding_array = np.empty(
-						(0, z.size, features.shape[-1]), dtype=features.dtype
-					)
-					neighbor_posterior_array = np.empty(
-						(0, z.size, k), dtype=np.float32
-					)
-					neighbor_valid_array = np.empty((0, z.size), dtype=bool)
-				result = smooth_and_redecode_ordered_trace(
-					np.asarray(features[x, y, z]),
-					neighbor_embedding_array,
-					neighbor_posterior_array,
-					np.ones(z.size, dtype=bool),
-					neighbor_valid_array,
-					costs,
-					model['transition_costs'],
+				replay, result = _smooth_trace(
+					survey_id=survey_id,
+					source_labels=source_labels,
+					valid=valid,
+					posterior=posterior_array,
+					features=features,
+					embedding=embedding,
+					model=model,
+					k=k,
+					config=config,
 					affinity_scale=affinity_scale,
-					emission_gap_scale=gap_scale,
-					pairwise_strength_ratio=config.pairwise_strength_ratio,
-					initial_state_costs=model['initial_costs'],
-					terminal_state_costs=model['terminal_costs'],
-					expected_boundary_count=expected,
-					boundary_count_weight=weight,
+					gap_scale=gap_scale,
+					x=x,
+					y=y,
+					z=z,
 				)
 				labels[x, y, z] = result.labels
 				confidence[x, y, z] = 1.0
@@ -1200,20 +1350,29 @@ def _export_survey(  # noqa: C901, PLR0913, PLR0915
 			affinity_scale,
 		)
 	np.save(paths['valid'], valid, allow_pickle=False)
-	metadata = {
-		'survey_id': survey_id,
-		'k': k,
-		'target_semantics': LATERAL_SMOOTHING_SEMANTICS,
-		'source_hard_labels': _reference(_source_label_path(source)),
-		'source_posterior': _mapping(posterior, 'posterior survey')['posterior'],
-		'source_embedding': dict(source_embedding),
-		'smoothing': {
-			**_smoothing_identity(config.pairwise_strength_ratio),
-			'affinity_scale': affinity_scale,
-			'emission_gap_scale': gap_scale,
-			'pairwise_strength_ratio': config.pairwise_strength_ratio,
+	metadata = build_pseudo_target_metadata(
+		labels=np.load(paths['labels'], mmap_mode='r', allow_pickle=False),
+		valid_tokens=valid,
+		boundary_weight=np.asarray(valid, dtype=np.float32),
+		boundary_weight_source='default_unity',
+		k=k,
+		survey_id=survey_id,
+		schema_version=1,
+		write_boundary_weight=False,
+		source_metadata={
+			'target_semantics': LATERAL_SMOOTHING_SEMANTICS,
+			'source_label_path': str(_source_label_path(source)),
+			'source_label_sha256': file_sha256(_source_label_path(source)),
+			'source_hard_labels': _reference(_source_label_path(source)),
+			'source_posterior': _mapping(posterior, 'posterior survey')['posterior'],
+			'source_embedding': dict(source_embedding),
+			'smoothing': {
+				**_smoothing_identity(config.pairwise_strength_ratio),
+				'affinity_scale': affinity_scale,
+				'emission_gap_scale': gap_scale,
+			},
 		},
-	}
+	)
 	meta = root / f'{survey_id}{_METADATA_SUFFIX}'
 	_write_json(meta, metadata)
 	return (
@@ -1235,7 +1394,69 @@ def _export_survey(  # noqa: C901, PLR0913, PLR0915
 	)
 
 
-def _validate_complete_head(  # noqa: PLR0913
+def _smooth_trace(  # noqa: PLR0913
+	*,
+	survey_id: str,
+	source_labels: np.ndarray,
+	valid: np.ndarray,
+	posterior: np.ndarray,
+	features: np.ndarray,
+	embedding: EmbeddingInput,
+	model: Mapping[str, object],
+	k: int,
+	config: MultiHeadLateralTargetExportConfig,
+	affinity_scale: float,
+	gap_scale: float,
+	x: int,
+	y: int,
+	z: np.ndarray,
+) -> tuple[np.ndarray, LateralSmoothingResult]:
+	"""Replay and smooth one valid trace using the fixed M5-LS definition."""
+	flat = ((x * source_labels.shape[1] + y) * source_labels.shape[2] + z).astype(
+		np.int64
+	)
+	costs, replay = replay_frozen_hmm_trace(embedding, flat, model, k=k)
+	expected, weight = expected_boundaries(model['hmm'], k=k, length=z.size)
+	if not np.array_equal(replay, source_labels[x, y, z]):
+		raise ValueError(f'Viterbi replay differs from frozen hard labels: {survey_id}')
+	neighbor_features: list[np.ndarray] = []
+	neighbor_posterior: list[np.ndarray] = []
+	neighbor_valid: list[np.ndarray] = []
+	for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+		xx, yy = x + dx, y + dy
+		if 0 <= xx < source_labels.shape[0] and 0 <= yy < source_labels.shape[1]:
+			neighbor_features.append(np.asarray(features[xx, yy, z]))
+			neighbor_posterior.append(np.asarray(posterior[xx, yy, z]))
+			neighbor_valid.append(np.asarray(valid[xx, yy, z]))
+	if neighbor_features:
+		neighbor_embedding_array = np.asarray(neighbor_features)
+		neighbor_posterior_array = np.asarray(neighbor_posterior)
+		neighbor_valid_array = np.asarray(neighbor_valid, dtype=bool)
+	else:
+		neighbor_embedding_array = np.empty(
+			(0, z.size, features.shape[-1]), dtype=features.dtype
+		)
+		neighbor_posterior_array = np.empty((0, z.size, k), dtype=np.float32)
+		neighbor_valid_array = np.empty((0, z.size), dtype=bool)
+	return replay, smooth_and_redecode_ordered_trace(
+		np.asarray(features[x, y, z]),
+		neighbor_embedding_array,
+		neighbor_posterior_array,
+		np.ones(z.size, dtype=bool),
+		neighbor_valid_array,
+		costs,
+		model['transition_costs'],
+		affinity_scale=affinity_scale,
+		emission_gap_scale=gap_scale,
+		pairwise_strength_ratio=config.pairwise_strength_ratio,
+		initial_state_costs=model['initial_costs'],
+		terminal_state_costs=model['terminal_costs'],
+		expected_boundary_count=expected,
+		boundary_count_weight=weight,
+	)
+
+
+def _validate_complete_head(  # noqa: C901, PLR0913
 	path: Path,
 	k: int,
 	source: Mapping[str, object],
@@ -1244,6 +1465,8 @@ def _validate_complete_head(  # noqa: PLR0913
 	config: MultiHeadLateralTargetExportConfig,
 	*,
 	allow_staging: bool = False,
+	inputs: Mapping[str, EmbeddingInput] | None = None,
+	expected_scales: Mapping[str, Mapping[str, object]] | None = None,
 ) -> None:
 	if not path.is_dir() or (
 		not allow_staging and any(part.startswith('.') for part in path.parts)
@@ -1259,16 +1482,22 @@ def _validate_complete_head(  # noqa: PLR0913
 	# full bundle.
 	_required(head, {'model', 'surveys', 'diagnostics'})
 	if head.get('model') != models[k]['identity']:
-		raise ValueError('frozen model identity drift')
+		raise _ImmutableIdentityMismatchError('frozen model identity drift')
 	surveys = _mapping(head.get('surveys'), 'surveys')
 	hard_surveys = _mapping(
 		_mapping(_mapping(source['heads'], 'heads')[str(k)], 'hard head')['surveys'],
 		'hard surveys',
 	)
 	if set(surveys) != set(hard_surveys):
-		raise ValueError('lateral survey set differs from source')
+		raise _ImmutableIdentityMismatchError(
+			'lateral survey set differs from source'
+		)
 	_validate_lateral_diagnostics(head.get('diagnostics'), survey_ids=set(surveys))
 	resolved_scales = _resolved_scales(head['diagnostics'])
+	if expected_scales is not None:
+		actual = _mapping(head['diagnostics'], 'diagnostics')['resolved_scales']
+		if actual != expected_scales:
+			raise _ImmutableIdentityMismatchError('resolved scales differ from source')
 	posterior_surveys = _mapping(
 		_mapping(_mapping(posterior['heads'], 'posterior heads')[str(k)], 'head')[
 			'surveys'
@@ -1305,14 +1534,10 @@ def _validate_complete_head(  # noqa: PLR0913
 		)
 		_validate_array_reference(entry['labels'], labels, name='labels')
 		_validate_array_reference(entry['confidence'], confidence, name='confidence')
-		_validate_array_reference(
-			entry['valid_tokens'], valid, name='valid_tokens'
-		)
+		_validate_array_reference(entry['valid_tokens'], valid, name='valid_tokens')
 		_validate_complete_head_arrays(labels, confidence, valid, k=k)
 		hard_survey = _mapping(hard_surveys[survey_id], 'hard survey')
-		posterior_survey = _mapping(
-			posterior_surveys[survey_id], 'posterior survey'
-		)
+		posterior_survey = _mapping(posterior_surveys[survey_id], 'posterior survey')
 		_validate_target_valid_tokens(
 			valid,
 			hard_survey,
@@ -1322,10 +1547,9 @@ def _validate_complete_head(  # noqa: PLR0913
 		if (
 			entry.get('source_hard_labels')
 			!= _reference(_source_label_path(hard_survey))
-			or entry.get('source_posterior')
-			!= posterior_survey['posterior']
+			or entry.get('source_posterior') != posterior_survey['posterior']
 		):
-			raise ValueError('lateral source provenance differs')
+			raise _ImmutableIdentityMismatchError('lateral source provenance differs')
 		_validate_survey_metadata(
 			entry,
 			k=k,
@@ -1337,6 +1561,21 @@ def _validate_complete_head(  # noqa: PLR0913
 				'smoothing': _smoothing_identity(config.pairwise_strength_ratio),
 				'resolved_scales': resolved_scales,
 			},
+		)
+	_validate_diagnostics_from_arrays(head['diagnostics'], surveys, hard_surveys, k=k)
+	if inputs is not None:
+		if expected_scales is None:
+			raise ValueError('semantic diagnostics validation requires resolved scales')
+		_validate_diagnostics_from_frozen_sources(
+			head['diagnostics'],
+			surveys,
+			hard_surveys,
+			posterior_surveys,
+			inputs,
+			models[k],
+			k=k,
+			config=config,
+			expected_scales=expected_scales,
 		)
 
 
@@ -1451,6 +1690,71 @@ def _bundle_path(config: MultiHeadLateralTargetExportConfig) -> Path:
 	return config.output_root / _BUNDLE_DIRNAME
 
 
+def _validate_owned_handoff(
+	config: MultiHeadLateralTargetExportConfig, source: Mapping[str, object]
+) -> None:
+	"""Require the public completion marker to name this exact bundle."""
+	if not config.handoff_manifest.is_file():
+		raise _OwnedOutputCorruptionError('lateral handoff is missing')
+	handoff = load_multi_head_lateral_target_manifest(config.handoff_manifest)
+	heads: dict[str, object] = {}
+	for k in CANONICAL_KS:
+		path = _bundle_path(config) / f'k{k}' / 'head_metadata.json'
+		payload = json.loads(path.read_text(encoding='utf-8'))
+		if not isinstance(payload, dict):
+			raise _OwnedOutputCorruptionError('lateral head metadata is invalid')
+		heads[str(k)] = payload
+	expected = _manifest_payload(config, source, heads)
+	if handoff == expected:
+		return
+	if handoff.get('heads') == heads:
+		raise _ImmutableIdentityMismatchError(
+			'lateral handoff identity differs from current config'
+		)
+	raise _OwnedOutputCorruptionError('lateral handoff differs from bundle')
+
+
+def _source_snapshot(
+	config: MultiHeadLateralTargetExportConfig,
+	source: Mapping[str, object],
+	posterior: Mapping[str, object],
+	inputs: Mapping[str, EmbeddingInput],
+	models: Mapping[int, Mapping[str, object]],
+) -> str:
+	"""Capture every immutable input identity used by this preflight."""
+	payload = {
+		'hard_manifest': _reference(config.source_hard_manifest),
+		'posterior_manifest': _reference(config.source_posterior_manifest),
+		'source_embedding': source['source_embedding'],
+		'posterior_embedding': posterior['source_embedding'],
+		'inputs': {
+			name: {
+				'embeddings': _reference(item.embeddings_path),
+				'valid_tokens': _reference(item.valid_tokens_path),
+				'metadata': _reference(item.metadata_path),
+			}
+			for name, item in sorted(inputs.items())
+		},
+		'models': {str(k): model['identity'] for k, model in sorted(models.items())},
+	}
+	return json.dumps(payload, sort_keys=True, separators=(',', ':'), allow_nan=False)
+
+
+def _validate_live_snapshot(
+	config: MultiHeadLateralTargetExportConfig, preflight: _LateralPreflight
+) -> None:
+	"""Fail before publication if a frozen input drifted while staging ran."""
+	source, posterior, inputs, models = _validate_sources(config)
+	_validate_frozen_source_replay(source, inputs, models)
+	if (
+		_source_snapshot(config, source, posterior, inputs, models)
+		!= preflight.snapshot
+	):
+		raise _ImmutableIdentityMismatchError(
+			'live source identity drift during staging'
+		)
+
+
 def _rebase_head_metadata(root: Path, *, old_root: Path, new_root: Path) -> None:
 	"""Rebase staged file references before one directory-level publication."""
 	path = root / 'head_metadata.json'
@@ -1542,7 +1846,7 @@ def _validate_survey_metadata(
 	survey_id: str,
 	identity: Mapping[str, object],
 ) -> None:
-	"""Require metadata to duplicate the complete source and scale identity."""
+	"""Require canonical schema-v1 metadata and exact lateral provenance."""
 	path = _hashed(entry['metadata'], 'metadata')
 	try:
 		metadata = json.loads(path.read_text(encoding='utf-8'))
@@ -1550,22 +1854,15 @@ def _validate_survey_metadata(
 		raise ValueError('lateral metadata must be valid JSON') from exc
 	if not isinstance(metadata, Mapping):
 		raise TypeError('lateral metadata must be an object')
-	_required(
-		metadata,
-		{
-			'survey_id',
-			'k',
-			'target_semantics',
-			'source_hard_labels',
-			'source_posterior',
-			'source_embedding',
-			'smoothing',
-		},
-	)
-	expected = {
-		'survey_id': survey_id,
-		'k': k,
+	source_hard = _mapping(entry['source_hard_labels'], 'source hard labels')
+	provenance = {
 		'target_semantics': LATERAL_SMOOTHING_SEMANTICS,
+		'source_label_path': _string(
+			source_hard.get('path'), 'source_hard_labels.path'
+		),
+		'source_label_sha256': _string(
+			source_hard.get('sha256'), 'source_hard_labels.sha256'
+		),
 		'source_hard_labels': entry['source_hard_labels'],
 		'source_posterior': entry['source_posterior'],
 		'source_embedding': dict(
@@ -1576,8 +1873,60 @@ def _validate_survey_metadata(
 			**_mapping(identity.get('resolved_scales'), 'resolved scales'),
 		},
 	}
-	if metadata != expected:
+	labels = np.load(
+		_hashed(entry['labels'], 'labels'), mmap_mode='r', allow_pickle=False
+	)
+	valid = np.load(
+		_hashed(entry['valid_tokens'], 'valid_tokens'),
+		mmap_mode='r',
+		allow_pickle=False,
+	)
+	expected = build_pseudo_target_metadata(
+		labels=labels,
+		valid_tokens=valid,
+		boundary_weight=np.asarray(valid, dtype=np.float32),
+		boundary_weight_source='default_unity',
+		k=k,
+		survey_id=survey_id,
+		schema_version=1,
+		write_boundary_weight=False,
+		source_metadata=provenance,
+	)
+	if set(metadata) != set(expected) or any(
+		metadata[name] != value for name, value in expected.items() if name != 'source'
+	):
 		raise ValueError('lateral metadata provenance differs from entry')
+	if not _matches_metadata_structure(metadata.get('source'), expected['source']):
+		raise ValueError('lateral metadata provenance structure is invalid')
+	if metadata['source'] != expected['source']:
+		raise _ImmutableIdentityMismatchError(
+			'lateral metadata provenance differs from entry'
+		)
+
+
+def _matches_metadata_structure(actual: object, expected: object) -> bool:
+	"""Return whether JSON metadata has the exact expected container shape."""
+	if isinstance(expected, Mapping):
+		return isinstance(actual, Mapping) and set(actual) == set(expected) and all(
+			_matches_metadata_structure(actual[key], value)
+			for key, value in expected.items()
+		)
+	if isinstance(expected, list):
+		return (
+			isinstance(actual, list)
+			and len(actual) == len(expected)
+			and all(
+				_matches_metadata_structure(item, value)
+				for item, value in zip(actual, expected, strict=True)
+			)
+		)
+	if isinstance(expected, bool):
+		return isinstance(actual, bool)
+	if isinstance(expected, int):
+		return isinstance(actual, int) and not isinstance(actual, bool)
+	if isinstance(expected, float):
+		return isinstance(actual, (int, float)) and not isinstance(actual, bool)
+	return isinstance(actual, type(expected))
 
 
 def _validate_lateral_diagnostics(value: object, *, survey_ids: set[str]) -> None:
@@ -1615,19 +1964,20 @@ def _validate_lateral_diagnostics(value: object, *, survey_ids: set[str]) -> Non
 	try:
 		payload = json.loads(json_path.read_text(encoding='utf-8'))
 		with csv_path.open(encoding='utf-8', newline='') as stream:
-			header = stream.readline().strip()
+			reader = DictReader(stream)
+			if reader.fieldnames != ['scope', 'survey_id', 'metric', 'value']:
+				raise ValueError('lateral diagnostics CSV header is invalid')
+			rows = list(reader)
 	except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
 		raise ValueError('lateral diagnostics are unreadable') from exc
-	if (
-		payload
-		!= {
-			'per_survey': diagnostics['per_survey'],
-			'aggregate': diagnostics['aggregate'],
-			'resolved_scales': diagnostics['resolved_scales'],
-		}
-		or header != 'scope,survey_id,metric,value'
-	):
+	expected_payload = {
+		'per_survey': diagnostics['per_survey'],
+		'aggregate': diagnostics['aggregate'],
+		'resolved_scales': diagnostics['resolved_scales'],
+	}
+	if payload != expected_payload or rows != _diagnostics_csv_rows(expected_payload):
 		raise ValueError('lateral diagnostics files differ from head metadata')
+	_validate_diagnostic_values(diagnostics)
 
 
 def _reference(path: Path) -> dict[str, str]:
@@ -1648,9 +1998,7 @@ def _validate_array_reference(
 	_required(item, {'path', 'sha256', 'shape', 'dtype'})
 	shape = item['shape']
 	if not isinstance(shape, list) or any(
-		isinstance(dimension, bool)
-		or not isinstance(dimension, int)
-		or dimension < 0
+		isinstance(dimension, bool) or not isinstance(dimension, int) or dimension < 0
 		for dimension in shape
 	):
 		raise TypeError(f'{name}.shape must be a list of non-negative integers')
@@ -1725,14 +2073,26 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
 
 def _write_diagnostics_csv(path: Path, diagnostics: Mapping[str, object]) -> None:
 	"""Write a compact, deterministic flattened companion to diagnostics JSON."""
+	rows = _diagnostics_csv_rows(diagnostics)
+	path.parent.mkdir(parents=True, exist_ok=True)
+	with path.open('w', encoding='utf-8', newline='') as stream:
+		writer = DictWriter(
+			stream, fieldnames=['scope', 'survey_id', 'metric', 'value']
+		)
+		writer.writeheader()
+		writer.writerows(rows)
+
+
+def _diagnostics_csv_rows(diagnostics: Mapping[str, object]) -> list[dict[str, str]]:
+	"""Return the exact ordered flattened CSV representation of diagnostics."""
 	rows: list[dict[str, str]] = []
 	for scope, survey_id, metrics in [
 		('aggregate', '', diagnostics['aggregate']),
 		*[
 			('survey', str(key), value)
-			for key, value in _mapping(
-				diagnostics['per_survey'], 'per_survey diagnostics'
-			).items()
+			for key, value in sorted(
+				_mapping(diagnostics['per_survey'], 'per_survey diagnostics').items()
+			)
 		],
 	]:
 		for metric, value in _flatten_metrics(_mapping(metrics, 'diagnostic metrics')):
@@ -1744,19 +2104,280 @@ def _write_diagnostics_csv(path: Path, diagnostics: Mapping[str, object]) -> Non
 					'value': json.dumps(value, sort_keys=True),
 				}
 			)
-	path.parent.mkdir(parents=True, exist_ok=True)
-	with path.open('w', encoding='utf-8', newline='') as stream:
-		writer = DictWriter(
-			stream, fieldnames=['scope', 'survey_id', 'metric', 'value']
+	return rows
+
+
+def _validate_diagnostic_values(diagnostics: Mapping[str, object]) -> None:
+	"""Reject non-finite or internally inconsistent persisted diagnostics."""
+	for scope, metrics in [
+		*[
+			(str(survey_id), _mapping(value, 'survey diagnostics'))
+			for survey_id, value in _mapping(
+				diagnostics['per_survey'], 'per-survey diagnostics'
+			).items()
+		],
+		('aggregate', _mapping(diagnostics['aggregate'], 'aggregate diagnostics')),
+	]:
+		valid = metrics.get('valid_token_count')
+		invalid = metrics.get('invalid_token_count')
+		changed = metrics.get('changed_token_count')
+		if (
+			any(
+				isinstance(value, bool) or not isinstance(value, int) or value < 0
+				for value in (valid, invalid, changed)
+			)
+			or changed > valid
+		):
+			raise ValueError(f'{scope} diagnostic counts are invalid')
+		if metrics.get('changed_fraction') != changed / max(valid, 1):
+			raise ValueError(f'{scope} changed fraction is invalid')
+		occupancy = _mapping(metrics.get('state_occupancy'), 'state occupancy')
+		counts = occupancy.get('counts')
+		ratios = occupancy.get('ratios')
+		if (
+			not isinstance(counts, list)
+			or not isinstance(ratios, list)
+			or len(counts) != len(ratios)
+			or any(
+				isinstance(item, bool) or not isinstance(item, int) or item < 0
+				for item in counts
+			)
+			or sum(counts) != valid
+			or any(
+				not isinstance(item, (int, float)) or not math.isfinite(item)
+				for item in ratios
+			)
+			or not np.allclose(
+				ratios,
+				np.asarray(counts, dtype=np.float64) / max(valid, 1),
+				rtol=0,
+				atol=0,
+			)
+		):
+			raise ValueError(f'{scope} state occupancy is invalid')
+		probability = np.asarray(ratios, dtype=np.float64)
+		expected_k = float(
+			np.exp(
+				-np.sum(
+					probability[probability > 0]
+					* np.log(np.maximum(probability[probability > 0], 1e-30))
+				)
+			)
 		)
-		writer.writeheader()
-		writer.writerows(rows)
+		if occupancy.get('effective_k') != expected_k or occupancy.get(
+			'empty_state_count'
+		) != int(np.count_nonzero(np.asarray(counts) == 0)):
+			raise ValueError(f'{scope} effective K is invalid')
+		_validate_finite_tree(metrics, context=f'{scope} diagnostics')
+	for name in ('affinity', 'emission_gap'):
+		stats = _mapping(
+			_mapping(diagnostics['resolved_scales'], 'resolved scales')[name],
+			f'{name} scale',
+		)
+		if (
+			not isinstance(stats.get('sample_count'), int)
+			or stats['sample_count'] <= 0
+			or not isinstance(stats.get('floor_applied'), bool)
+			or not isinstance(stats.get('resolved_scale'), (int, float))
+			or not math.isfinite(float(stats['resolved_scale']))
+			or float(stats['resolved_scale']) <= 0
+		):
+			raise ValueError(f'{name} scale diagnostics are invalid')
+
+
+def _validate_diagnostics_from_arrays(
+	diagnostics: object,
+	surveys: Mapping[str, object],
+	hard_surveys: Mapping[str, object],
+	*,
+	k: int,
+) -> None:
+	"""Recompute array-derived diagnostic invariants for publication and reuse."""
+	payload = _mapping(diagnostics, 'diagnostics')
+	per_survey = _mapping(payload['per_survey'], 'per-survey diagnostics')
+	aggregate_counts = {'valid': 0, 'invalid': 0, 'changed': 0}
+	aggregate_occupancy = np.zeros(k, dtype=np.int64)
+	for survey_id, raw in surveys.items():
+		entry = _mapping(raw, 'survey')
+		labels = np.load(
+			_hashed(entry['labels'], 'labels'), mmap_mode='r', allow_pickle=False
+		)
+		valid = np.load(
+			_hashed(entry['valid_tokens'], 'valid tokens'),
+			mmap_mode='r',
+			allow_pickle=False,
+		)
+		source = np.load(
+			_source_label_path(_mapping(hard_surveys[survey_id], 'hard survey')),
+			mmap_mode='r',
+			allow_pickle=False,
+		)
+		if source.shape != labels.shape:
+			raise ValueError('lateral source labels shape differs')
+		valid_count = int(np.count_nonzero(valid))
+		invalid_count = int(valid.size - valid_count)
+		changed_count = int(np.count_nonzero(labels[valid] != source[valid]))
+		counts = np.bincount(labels[valid], minlength=k).tolist()
+		metrics = _mapping(per_survey[survey_id], 'survey diagnostics')
+		if (
+			metrics.get('valid_token_count') != valid_count
+			or metrics.get('invalid_token_count') != invalid_count
+			or metrics.get('changed_token_count') != changed_count
+			or _mapping(metrics['state_occupancy'], 'state occupancy').get('counts')
+			!= counts
+		):
+			raise ValueError('persisted lateral diagnostics differ from target arrays')
+		aggregate_counts['valid'] += valid_count
+		aggregate_counts['invalid'] += invalid_count
+		aggregate_counts['changed'] += changed_count
+		aggregate_occupancy += np.asarray(counts, dtype=np.int64)
+	aggregate = _mapping(payload['aggregate'], 'aggregate diagnostics')
+	if (
+		aggregate.get('valid_token_count') != aggregate_counts['valid']
+		or aggregate.get('invalid_token_count') != aggregate_counts['invalid']
+		or aggregate.get('changed_token_count') != aggregate_counts['changed']
+		or _mapping(aggregate['state_occupancy'], 'aggregate state occupancy').get(
+			'counts'
+		)
+		!= aggregate_occupancy.tolist()
+		or aggregate.get('survey_count') != len(surveys)
+	):
+		raise ValueError('aggregate lateral diagnostics differ from target arrays')
+
+
+def _validate_diagnostics_from_frozen_sources(  # noqa: PLR0913
+	diagnostics: object,
+	surveys: Mapping[str, object],
+	hard_surveys: Mapping[str, object],
+	posterior_surveys: Mapping[str, object],
+	inputs: Mapping[str, EmbeddingInput],
+	model: Mapping[str, object],
+	*,
+	k: int,
+	config: MultiHeadLateralTargetExportConfig,
+	expected_scales: Mapping[str, Mapping[str, object]],
+) -> None:
+	"""Rebuild every persisted metric from frozen inputs and fixed smoothing."""
+	affinity_stats = _mapping(expected_scales['affinity'], 'expected affinity scale')
+	gap_stats = _mapping(expected_scales['emission_gap'], 'expected emission gap scale')
+	affinity_scale = float(affinity_stats['resolved_scale'])
+	gap_scale = float(gap_stats['resolved_scale'])
+	quartiles = _affinity_quartile_boundaries(affinity_stats, affinity_scale)
+	aggregate = _LateralDiagnostics(
+		k, config.pairwise_strength_ratio * gap_scale, quartiles
+	)
+	per_survey: dict[str, object] = {}
+	for survey_id, raw in surveys.items():
+		entry = _mapping(raw, 'survey')
+		source = np.load(
+			_source_label_path(_mapping(hard_surveys[survey_id], 'hard survey')),
+			mmap_mode='r',
+			allow_pickle=False,
+		)
+		valid = np.load(
+			_hashed(
+				_mapping(hard_surveys[survey_id], 'hard survey')['valid_tokens'],
+				'hard valid',
+			),
+			mmap_mode='r',
+			allow_pickle=False,
+		)
+		posterior_entry = _mapping(posterior_surveys[survey_id], 'posterior survey')
+		posterior = np.load(
+			_hashed(posterior_entry['posterior'], 'posterior'),
+			mmap_mode='r',
+			allow_pickle=False,
+		)
+		posterior_valid = np.load(
+			_hashed(posterior_entry['valid_tokens'], 'posterior valid'),
+			mmap_mode='r',
+			allow_pickle=False,
+		)
+		features = np.load(
+			inputs[str(survey_id)].embeddings_path, mmap_mode='r', allow_pickle=False
+		)
+		labels = np.load(
+			_hashed(entry['labels'], 'labels'), mmap_mode='r', allow_pickle=False
+		)
+		if (
+			not np.array_equal(valid, posterior_valid)
+			or source.shape != labels.shape
+			or source.shape != features.shape[:3]
+			or posterior.shape != (*source.shape, k)
+		):
+			raise ValueError('frozen sources do not agree for lateral diagnostics')
+		stats = _LateralDiagnostics(
+			k, config.pairwise_strength_ratio * gap_scale, quartiles
+		)
+		for x in range(source.shape[0]):
+			for y in range(source.shape[1]):
+				z = np.flatnonzero(valid[x, y])
+				if not z.size:
+					continue
+				replay, result = _smooth_trace(
+					survey_id=str(survey_id),
+					source_labels=source,
+					valid=valid,
+					posterior=posterior,
+					features=features,
+					embedding=inputs[str(survey_id)],
+					model=model,
+					k=k,
+					config=config,
+					affinity_scale=affinity_scale,
+					gap_scale=gap_scale,
+					x=x,
+					y=y,
+					z=z,
+				)
+				if not np.array_equal(labels[x, y, z], result.labels):
+					raise ValueError(
+					'lateral labels differ from the frozen smoothing replay result'
+				)
+				for item in (stats, aggregate):
+					item.add_trace(
+						replay,
+						result.labels,
+						result.diagnostics.distance,
+						result.diagnostics.affinity,
+						result.diagnostics.neighbor_count,
+						result.diagnostics.message_entropy,
+						result.changed_cost_magnitude,
+					)
+		for item in (stats, aggregate):
+			item.add_grid_counts(valid)
+			item.add_xy_edges(source, labels, valid, features, affinity_scale)
+		per_survey[str(survey_id)] = stats.finish()
+	expected = {
+		'per_survey': per_survey,
+		'aggregate': {**aggregate.finish(), 'survey_count': len(per_survey)},
+		'resolved_scales': {'affinity': affinity_stats, 'emission_gap': gap_stats},
+	}
+	persisted = _mapping(diagnostics, 'diagnostics')
+	actual = {
+		'per_survey': persisted['per_survey'],
+		'aggregate': persisted['aggregate'],
+		'resolved_scales': persisted['resolved_scales'],
+	}
+	if actual != expected:
+		raise ValueError('persisted lateral diagnostics differ from frozen sources')
+
+
+def _validate_finite_tree(value: object, *, context: str) -> None:
+	if isinstance(value, Mapping):
+		for item in value.values():
+			_validate_finite_tree(item, context=context)
+	elif isinstance(value, list):
+		for item in value:
+			_validate_finite_tree(item, context=context)
+	elif isinstance(value, float) and not math.isfinite(value):
+		raise ValueError(f'{context} contains a non-finite value')
 
 
 def _flatten_metrics(
 	value: Mapping[str, object], prefix: str = ''
 ) -> Iterator[tuple[str, object]]:
-	for name, item in value.items():
+	for name, item in sorted(value.items()):
 		key = f'{prefix}.{name}' if prefix else name
 		if isinstance(item, Mapping):
 			yield from _flatten_metrics(item, key)

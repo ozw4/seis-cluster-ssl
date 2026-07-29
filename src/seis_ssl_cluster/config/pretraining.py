@@ -162,7 +162,9 @@ _STRAT_HMM_MULTI_HEAD_SPEC = MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1
 _STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY = 'normalized_order_smooth_l1_v1'
 _STRAT_HMM_HARD_TARGET_REPRESENTATION = 'hard_viterbi_labels_v1'
 _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION = 'ordered_path_state_posterior_v1'
+_STRAT_HMM_LATERAL_TARGET_REPRESENTATION = 'lateral_mean_field_hard_labels_v1'
 _STRAT_HMM_POSTERIOR_SEMANTICS = 'ordered_path_cost_gibbs_state_marginal_v1'
+_STRAT_HMM_LATERAL_SEMANTICS = 'ordered_hmm_edge_aware_lateral_mean_field_hard_v1'
 
 # These fields are deliberately centralized so checkpoint identity construction can
 # distinguish scientific settings from machine-specific execution settings.
@@ -182,6 +184,12 @@ MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS = frozenset(
 		'posterior_semantics',
 		'posterior_cost_temperature',
 		'posterior_head_hashes',
+		'lateral_target_manifest_sha256',
+		'lateral_target_head_hashes',
+		'target_semantics',
+		'source_hard_manifest_sha256',
+		'source_posterior_manifest_sha256',
+		'lateral_smoothing',
 		'supervised_loss',
 		'consistency_policy',
 		'prototype_weight',
@@ -352,6 +360,13 @@ def resolve_strat_hmm_pretext_config(config: _T) -> Config:
 		target_representation = _strat_hmm_multi_head_target_representation(
 			pseudo_targets
 		)
+		if (
+			target_representation == _STRAT_HMM_LATERAL_TARGET_REPRESENTATION
+			and pseudo_targets['min_confidence'] != 0.0
+		):
+			raise ValueError(
+				'pseudo_targets.min_confidence must be 0.0 for lateral hard targets'
+			)
 		manifest = _validate_strat_hmm_multi_head_manifest(
 			pseudo_targets,
 			head,
@@ -506,6 +521,41 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912, PLR0915
 				prefix='identity.runtime_identity',
 			)
 		return
+	if target_representation == _STRAT_HMM_LATERAL_TARGET_REPRESENTATION:
+		for key in (
+			'experiment_role',
+			'variant',
+			'target_representation',
+			'target_semantics',
+			'lateral_target_manifest_sha256',
+			'lateral_target_head_hashes',
+			'source_hard_manifest_sha256',
+			'source_posterior_manifest_sha256',
+			'lateral_smoothing',
+			'supervised_loss',
+			'head_spec',
+			'head_ks',
+			'consistency_policy',
+			'consistency_weight',
+		):
+			_validate_required_key(
+				scientific, key, prefix='identity.scientific_identity'
+			)
+		_validate_m5_ls_scientific_identity(
+			scientific,
+			model_tag=model_tag,
+			manifest_sha256=manifest_sha256,
+			manifest=manifest,
+			loss=_required_mapping(config, 'loss'),
+		)
+		runtime = value.get('runtime_identity')
+		if runtime is not None:
+			_validate_allowed_keys(
+				runtime,
+				MULTI_HEAD_RUNTIME_IDENTITY_FIELDS,
+				prefix='identity.runtime_identity',
+			)
+		return
 	for key in (
 		'experiment_role',
 		'variant',
@@ -605,7 +655,11 @@ def _expected_or_record_multi_head_scientific_identity(
 				'supervised_loss': 'soft_categorical_cross_entropy_v1',
 			}
 			if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION
-			else {'target_head_hashes': _multi_head_target_hashes(manifest)}
+			else (
+				{}
+				if target_representation == _STRAT_HMM_LATERAL_TARGET_REPRESENTATION
+				else {'target_head_hashes': _multi_head_target_hashes(manifest)}
+			)
 		),
 		'prototype_weight': loss['prototype_weight'],
 		'usage_weight': loss['usage_weight'],
@@ -620,6 +674,26 @@ def _expected_or_record_multi_head_scientific_identity(
 		'zero_mask': zero_mask,
 		'train': {key: train[key] for key in MULTI_HEAD_SCIENTIFIC_TRAIN_FIELDS},
 	}
+	if target_representation == _STRAT_HMM_LATERAL_TARGET_REPRESENTATION:
+		pseudo_targets = _required_mapping(config, 'pseudo_targets')
+		expected.update(
+			{
+				'target_representation': target_representation,
+				'target_semantics': manifest['target_semantics'],
+				'lateral_target_manifest_sha256': _file_sha256(
+					str(pseudo_targets['manifest'])
+				),
+				'lateral_target_head_hashes': _multi_head_target_hashes(manifest),
+				'source_hard_manifest_sha256': _manifest_reference_sha256(
+					manifest, 'source_hard_manifest'
+				),
+				'source_posterior_manifest_sha256': _manifest_reference_sha256(
+					manifest, 'source_posterior_manifest'
+				),
+				'lateral_smoothing': _lateral_smoothing_identity(manifest),
+				'supervised_loss': 'structured_hmm_hard_categorical_v1',
+			}
+		)
 	for key, expected_value in expected.items():
 		if key in scientific:
 			if scientific[key] != expected_value:
@@ -824,10 +898,12 @@ def _strat_hmm_multi_head_target_representation(
 	if value not in {
 		_STRAT_HMM_HARD_TARGET_REPRESENTATION,
 		_STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION,
+		_STRAT_HMM_LATERAL_TARGET_REPRESENTATION,
 	}:
 		supported = [
 			_STRAT_HMM_HARD_TARGET_REPRESENTATION,
 			_STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION,
+			_STRAT_HMM_LATERAL_TARGET_REPRESENTATION,
 		]
 		raise ValueError(
 			f'pseudo_targets.target_representation must be one of {supported!r}'
@@ -848,12 +924,19 @@ def _validate_strat_hmm_multi_head_manifest(
 			str(pseudo_targets['manifest']),
 			validate_array_semantics=False,
 		)
-	else:
+	elif target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION:
 		state_posterior = importlib.import_module(
 			'seis_ssl_cluster.stratigraphy.state_posterior'
 		)
 		manifest = state_posterior.load_multi_head_state_posterior_manifest(
 			str(pseudo_targets['manifest'])
+		)
+	else:
+		lateral_targets = importlib.import_module(
+			'seis_ssl_cluster.stratigraphy.lateral_targets'
+		)
+		manifest = lateral_targets.load_multi_head_lateral_target_manifest(
+			str(pseudo_targets['manifest']), validate_array_semantics=False
 		)
 	if tuple(manifest['head_ks']) != tuple(head['ks']):
 		raise ValueError('manifest.head_ks must equal head.ks')
@@ -920,6 +1003,39 @@ def _multi_head_posterior_hashes(
 	return result
 
 
+def _manifest_reference_sha256(
+	manifest: Mapping[str, object], key: str
+) -> str:
+	reference = manifest.get(key)
+	if not isinstance(reference, Mapping):
+		raise TypeError(f'validated lateral manifest {key} must be a mapping')
+	value = reference.get('sha256')
+	if not isinstance(value, str):
+		raise TypeError(f'validated lateral manifest {key}.sha256 must be a string')
+	return value
+
+
+def _lateral_smoothing_identity(manifest: Mapping[str, object]) -> dict[str, object]:
+	smoothing = manifest.get('smoothing')
+	if not isinstance(smoothing, Mapping):
+		raise TypeError('validated lateral manifest smoothing must be a mapping')
+	heads = manifest.get('heads')
+	if not isinstance(heads, Mapping):
+		raise TypeError('validated lateral manifest heads must be a mapping')
+	resolved_scales: dict[str, object] = {}
+	for k in manifest['head_ks']:
+		head = heads.get(str(k))
+		if not isinstance(head, Mapping) or not isinstance(
+			head.get('diagnostics'), Mapping
+		):
+			raise TypeError('validated lateral manifest head diagnostics are invalid')
+		resolved = head['diagnostics'].get('resolved_scales')
+		if not isinstance(resolved, Mapping):
+			raise TypeError('validated lateral manifest resolved scales are invalid')
+		resolved_scales[str(k)] = deepcopy(resolved)
+	return {**deepcopy(dict(smoothing)), 'resolved_scales': resolved_scales}
+
+
 def _validate_m5_u_scientific_identity(
 	scientific: Mapping[str, object],
 	*,
@@ -967,6 +1083,53 @@ def _validate_m5_u_scientific_identity(
 		raise ValueError(
 			'loss.distillation_weight must be 0.2 for soft posterior training'
 		)
+
+
+def _validate_m5_ls_scientific_identity(
+	scientific: Mapping[str, object],
+	*,
+	model_tag: object,
+	manifest_sha256: str,
+	manifest: Mapping[str, object],
+	loss: Mapping[str, object],
+) -> None:
+	"""Keep the lateral hard-label experiment separate from M4 and M5-U."""
+	expected = {
+		'experiment_role': 'multi_head_ordered_lateral_hard_pretext',
+		'variant': 'latmf1_nocons',
+		'target_representation': _STRAT_HMM_LATERAL_TARGET_REPRESENTATION,
+		'target_semantics': _STRAT_HMM_LATERAL_SEMANTICS,
+		'lateral_target_manifest_sha256': manifest_sha256,
+		'lateral_target_head_hashes': _multi_head_target_hashes(manifest),
+		'source_hard_manifest_sha256': _manifest_reference_sha256(
+			manifest, 'source_hard_manifest'
+		),
+		'source_posterior_manifest_sha256': _manifest_reference_sha256(
+			manifest, 'source_posterior_manifest'
+		),
+		'lateral_smoothing': _lateral_smoothing_identity(manifest),
+		'supervised_loss': 'structured_hmm_hard_categorical_v1',
+		'head_spec': _STRAT_HMM_MULTI_HEAD_SPEC,
+		'head_ks': [6, 8, 10],
+		'consistency_policy': 'disabled_for_m5_ls_v1',
+		'consistency_weight': 0.0,
+	}
+	if model_tag != 'strat_hmm_pretext_mh_k6810_latmf1_nocons_topblock1_distill_v1':
+		raise ValueError('identity.model_tag does not match M5-LS latmf1_nocons')
+	for key, value in expected.items():
+		if scientific.get(key) != value:
+			raise ValueError(
+				f'identity.scientific_identity.{key} does not match M5-LS '
+				'lateral contract'
+			)
+	for key, value in (
+		('consistency_weight', 0.0),
+		('prototype_weight', 1.0),
+		('usage_weight', 0.005),
+		('distillation_weight', 0.2),
+	):
+		if loss[key] != value:
+			raise ValueError(f'loss.{key} must be {value} for lateral hard training')
 
 
 def _validate_strat_hmm_pretext_cross_section_values(
