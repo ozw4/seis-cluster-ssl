@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -20,7 +21,10 @@ from seis_ssl_cluster.stratigraphy.lateral_targets import (
 	export_multi_head_lateral_targets,
 	resolve_multi_head_lateral_target_export_config,
 )
-from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
+from seis_ssl_cluster.stratigraphy.multi_head import (
+	build_multi_head_target_manifest,
+	validate_multi_head_target_reference,
+)
 from seis_ssl_cluster.stratigraphy.state_posterior import (
 	MultiHeadStatePosteriorExportConfig,
 	export_multi_head_state_posteriors,
@@ -145,6 +149,11 @@ def test_lateral_export_publishes_one_complete_bundle_before_handoff(
 		lambda _config: ({}, {}, {}, {6: {}, 8: {}, 10: {}}),
 	)
 	monkeypatch.setattr(
+		lateral_targets, '_validate_frozen_source_replay', lambda *_: None
+	)
+	monkeypatch.setattr(lateral_targets, '_source_snapshot', lambda *_: '{}')
+	monkeypatch.setattr(lateral_targets, '_validate_live_snapshot', lambda *_: None)
+	monkeypatch.setattr(
 		lateral_targets,
 		'_affinity_scale',
 		lambda *_args: (
@@ -159,7 +168,7 @@ def test_lateral_export_publishes_one_complete_bundle_before_handoff(
 	)
 	staging_validation: list[bool] = []
 
-	def validate_complete_head(*_args, allow_staging: bool = False) -> None:
+	def validate_complete_head(*_args, allow_staging: bool = False, **_kwargs) -> None:
 		staging_validation.append(allow_staging)
 
 	monkeypatch.setattr(
@@ -464,8 +473,22 @@ def test_lateral_metadata_requires_exact_source_and_smoothing_identity(
 ) -> None:
 	"""Metadata cannot drift independently of its manifest entry and head scales."""
 	metadata_path = tmp_path / 'survey.metadata.json'
+	labels_path = tmp_path / 'labels.npy'
+	valid_path = tmp_path / 'valid.npy'
+	labels = np.array([[[0, 1]]], dtype=np.int32)
+	valid = np.ones(labels.shape, dtype=bool)
+	np.save(labels_path, labels, allow_pickle=False)
+	np.save(valid_path, valid, allow_pickle=False)
 	entry = {
 		'metadata': {},
+		'labels': {
+			'path': str(labels_path),
+			'sha256': lateral_targets.file_sha256(labels_path),
+		},
+		'valid_tokens': {
+			'path': str(valid_path),
+			'sha256': lateral_targets.file_sha256(valid_path),
+		},
 		'source_hard_labels': {'path': 'hard.npy', 'sha256': 'hard'},
 		'source_posterior': {'path': 'posterior.npy', 'sha256': 'posterior'},
 	}
@@ -474,15 +497,25 @@ def test_lateral_metadata_requires_exact_source_and_smoothing_identity(
 		'smoothing': lateral_targets._smoothing_identity(0.25),  # noqa: SLF001
 		'resolved_scales': {'affinity_scale': 0.5, 'emission_gap_scale': 1.5},
 	}
-	metadata = {
-		'survey_id': 'survey',
-		'k': 6,
-		'target_semantics': lateral_targets.LATERAL_SMOOTHING_SEMANTICS,
-		'source_hard_labels': entry['source_hard_labels'],
-		'source_posterior': entry['source_posterior'],
-		'source_embedding': identity['source_embedding'],
-		'smoothing': {**identity['smoothing'], **identity['resolved_scales']},
-	}
+	metadata = lateral_targets.build_pseudo_target_metadata(
+		labels=labels,
+		valid_tokens=valid,
+		boundary_weight=valid.astype(np.float32),
+		boundary_weight_source='default_unity',
+		k=6,
+		survey_id='survey',
+		schema_version=1,
+		write_boundary_weight=False,
+		source_metadata={
+			'target_semantics': lateral_targets.LATERAL_SMOOTHING_SEMANTICS,
+			'source_label_path': 'hard.npy',
+			'source_label_sha256': 'hard',
+			'source_hard_labels': entry['source_hard_labels'],
+			'source_posterior': entry['source_posterior'],
+			'source_embedding': identity['source_embedding'],
+			'smoothing': {**identity['smoothing'], **identity['resolved_scales']},
+		},
+	)
 
 	def validate(payload: dict[str, object]) -> None:
 		metadata_path.write_text(json.dumps(payload), encoding='utf-8')
@@ -496,8 +529,8 @@ def test_lateral_metadata_requires_exact_source_and_smoothing_identity(
 
 	validate(metadata)
 	for altered in (
-		{**metadata, 'source_hard_labels': {'path': 'other.npy', 'sha256': 'other'}},
-		{key: value for key, value in metadata.items() if key != 'smoothing'},
+		{**metadata, 'source': {'unexpected': 'provenance'}},
+		{key: value for key, value in metadata.items() if key != 'source'},
 	):
 		with pytest.raises(
 			ValueError, match=r'manifest keys mismatch|lateral metadata provenance'
@@ -535,6 +568,20 @@ def test_lateral_export_replays_real_frozen_sources_and_reuses_complete_bundle(
 		assert np.all(np.diff(labels[0, 0]) >= 0)
 		assert np.all(np.diff(labels[1, 0]) >= 0)
 		assert np.all(np.bincount(labels[valid], minlength=k) > 0)
+		validate_multi_head_target_reference(
+			k=k,
+			survey_id='survey',
+			labels_path=entry['labels']['path'],
+			confidence_path=entry['confidence']['path'],
+			valid_tokens_path=entry['valid_tokens']['path'],
+			metadata_path=entry['metadata']['path'],
+			hashes={
+				name: entry[name]['sha256']
+				for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
+			},
+			expected_token_grid_shape=list(labels.shape),
+			validate_array_semantics=True,
+		)
 	tracked = [
 		config.handoff_manifest,
 		*sorted((config.output_root / 'bundle').rglob('*')),
@@ -550,6 +597,34 @@ def test_lateral_export_replays_real_frozen_sources_and_reuses_complete_bundle(
 		path: (path.stat().st_mtime_ns, file_sha256(path)) for path in before
 	}
 	assert after == before
+
+
+def test_lateral_reuse_rejects_self_consistent_diagnostic_tampering(tmp_path) -> None:
+	"""Reuse rebuilds metrics from frozen inputs, not just diagnostics files."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	head_path = config.output_root / 'bundle' / 'k6' / 'head_metadata.json'
+	head = json.loads(head_path.read_text(encoding='utf-8'))
+	diagnostics = head['diagnostics']
+	diagnostics['aggregate']['ordered_path']['violation_count'] = 1
+	payload = {
+		'per_survey': diagnostics['per_survey'],
+		'aggregate': diagnostics['aggregate'],
+		'resolved_scales': diagnostics['resolved_scales'],
+	}
+	json_path = diagnostics['json']['path']
+	csv_path = diagnostics['csv']['path']
+	Path(json_path).write_text(
+		json.dumps(payload, sort_keys=True) + '\n', encoding='utf-8'
+	)
+	lateral_targets._write_diagnostics_csv(Path(csv_path), payload)  # noqa: SLF001
+	diagnostics['json']['sha256'] = file_sha256(json_path)
+	diagnostics['csv']['sha256'] = file_sha256(csv_path)
+	head_path.write_text(json.dumps(head, sort_keys=True) + '\n', encoding='utf-8')
+	plans = lateral_targets.plan_multi_head_lateral_target_exports(
+		config, only_missing=True
+	)
+	assert [plan.action for plan in plans] == ['QUARANTINE', 'QUARANTINE', 'QUARANTINE']
 
 
 def _real_lateral_export_fixture(  # noqa: PLR0915
