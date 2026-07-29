@@ -936,7 +936,7 @@ def _validate_strat_hmm_multi_head_manifest(
 			'seis_ssl_cluster.stratigraphy.lateral_targets'
 		)
 		manifest = lateral_targets.load_multi_head_lateral_target_manifest(
-			str(pseudo_targets['manifest']), validate_array_semantics=True
+			str(pseudo_targets['manifest']), validate_array_semantics=False
 		)
 	if tuple(manifest['head_ks']) != tuple(head['ks']):
 		raise ValueError('manifest.head_ks must equal head.ks')

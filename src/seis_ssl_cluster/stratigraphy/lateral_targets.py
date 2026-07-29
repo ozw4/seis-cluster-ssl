@@ -1892,10 +1892,41 @@ def _validate_survey_metadata(
 		write_boundary_weight=False,
 		source_metadata=provenance,
 	)
-	if metadata != expected:
+	if set(metadata) != set(expected) or any(
+		metadata[name] != value for name, value in expected.items() if name != 'source'
+	):
+		raise ValueError('lateral metadata provenance differs from entry')
+	if not _matches_metadata_structure(metadata.get('source'), expected['source']):
+		raise ValueError('lateral metadata provenance structure is invalid')
+	if metadata['source'] != expected['source']:
 		raise _ImmutableIdentityMismatchError(
 			'lateral metadata provenance differs from entry'
 		)
+
+
+def _matches_metadata_structure(actual: object, expected: object) -> bool:
+	"""Return whether JSON metadata has the exact expected container shape."""
+	if isinstance(expected, Mapping):
+		return isinstance(actual, Mapping) and set(actual) == set(expected) and all(
+			_matches_metadata_structure(actual[key], value)
+			for key, value in expected.items()
+		)
+	if isinstance(expected, list):
+		return (
+			isinstance(actual, list)
+			and len(actual) == len(expected)
+			and all(
+				_matches_metadata_structure(item, value)
+				for item, value in zip(actual, expected, strict=True)
+			)
+		)
+	if isinstance(expected, bool):
+		return isinstance(actual, bool)
+	if isinstance(expected, int):
+		return isinstance(actual, int) and not isinstance(actual, bool)
+	if isinstance(expected, float):
+		return isinstance(actual, (int, float)) and not isinstance(actual, bool)
+	return isinstance(actual, type(expected))
 
 
 def _validate_lateral_diagnostics(value: object, *, survey_ids: set[str]) -> None:

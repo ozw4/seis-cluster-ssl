@@ -781,7 +781,7 @@ def load_strat_multi_head_lateral_target_manifest_adapter(
 	"""
 	payload = load_multi_head_lateral_target_manifest(
 		path,
-		validate_array_semantics=True,
+		validate_array_semantics=False,
 	)
 	head_ks = tuple(cast('list[int]', payload['head_ks']))
 	heads = cast('Mapping[str, Mapping[str, object]]', payload['heads'])

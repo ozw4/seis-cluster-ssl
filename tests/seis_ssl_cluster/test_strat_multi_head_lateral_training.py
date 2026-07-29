@@ -29,15 +29,22 @@ def test_lateral_adapter_reuses_hard_provider_fields_without_array_load(
 ) -> None:
 	"""M5-LS keeps arrays lazy and emits the historical hard sample contract."""
 	payload, paths = _lateral_payload(tmp_path)
+	calls: list[object] = []
+
+	def load_manifest(*_args: object, **kwargs: object) -> dict[str, object]:
+		calls.append(kwargs.get('validate_array_semantics'))
+		return payload
+
 	monkeypatch.setattr(
 		target_providers,
 		'load_multi_head_lateral_target_manifest',
-		lambda *_args, **_kwargs: payload,
+		load_manifest,
 	)
 
 	adapted = load_strat_multi_head_lateral_target_manifest_adapter(
 		tmp_path / 'lateral.json'
 	)
+	assert calls == [False]
 	provider = MultiHeadStratPseudoTargetProvider(adapted.target_manifest)
 	assert provider._pseudo_target_arrays == {}  # noqa: SLF001
 
@@ -75,7 +82,7 @@ def test_lateral_adapter_reuses_hard_provider_fields_without_array_load(
 	[
 		('hard_viterbi_labels_v1', ('multi_head', False)),
 		('ordered_path_state_posterior_v1', ('state_posterior', None)),
-		('lateral_mean_field_hard_labels_v1', ('lateral_targets', True)),
+		('lateral_mean_field_hard_labels_v1', ('lateral_targets', False)),
 	],
 )
 def test_config_manifest_resolution_dispatches_each_representation_explicitly(

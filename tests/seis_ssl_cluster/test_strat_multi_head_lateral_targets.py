@@ -800,6 +800,40 @@ def test_lateral_reuse_rejects_self_consistent_diagnostic_tampering(tmp_path) ->
 	assert [plan.action for plan in plans] == ['QUARANTINE', 'QUARANTINE', 'QUARANTINE']
 
 
+def test_lateral_reuse_quarantines_structurally_malformed_metadata(tmp_path) -> None:
+	"""Malformed owned metadata is recoverable corruption, not an identity clash."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	head_path = config.output_root / 'bundle' / 'k6' / 'head_metadata.json'
+	head = json.loads(head_path.read_text(encoding='utf-8'))
+	entry = head['surveys']['survey']
+	metadata_path = Path(entry['metadata']['path'])
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	del metadata['source']
+	metadata_path.write_text(
+		json.dumps(metadata, sort_keys=True) + '\n', encoding='utf-8'
+	)
+	entry['metadata']['sha256'] = file_sha256(metadata_path)
+	head_path.write_text(json.dumps(head, sort_keys=True) + '\n', encoding='utf-8')
+	tracked = [
+		config.handoff_manifest,
+		*sorted((config.output_root / 'bundle').rglob('*')),
+	]
+	before = {
+		path: (path.read_bytes(), path.stat().st_mtime_ns)
+		for path in tracked
+		if path.is_file()
+	}
+	plans = lateral_targets.plan_multi_head_lateral_target_exports(
+		config, only_missing=True
+	)
+	assert [plan.action for plan in plans] == ['QUARANTINE', 'QUARANTINE', 'QUARANTINE']
+	after = {
+		path: (path.read_bytes(), path.stat().st_mtime_ns) for path in before
+	}
+	assert after == before
+
+
 def test_lateral_reuse_leaves_complete_bundle_for_other_source_identity_untouched(
 	tmp_path,
 ) -> None:
