@@ -627,6 +627,10 @@ def test_lateral_reuse_rejects_self_consistent_diagnostic_tampering(tmp_path) ->
 	config.handoff_manifest.write_text(
 		json.dumps(handoff, sort_keys=True) + '\n', encoding='utf-8'
 	)
+	with pytest.raises(ValueError, match='frozen sources'):
+		lateral_targets.load_multi_head_lateral_target_manifest(
+			config.handoff_manifest
+		)
 	plans = lateral_targets.plan_multi_head_lateral_target_exports(
 		config, only_missing=True
 	)

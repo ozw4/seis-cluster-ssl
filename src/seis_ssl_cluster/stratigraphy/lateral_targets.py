@@ -527,6 +527,77 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 				],
 				k=k,
 			)
+	if validate_array_semantics:
+		_validate_diagnostics_from_frozen_manifest_sources(
+			payload,
+			hard_path=hard_path,
+			posterior_path=posterior_path,
+		)
+
+
+def _validate_diagnostics_from_frozen_manifest_sources(
+	payload: Mapping[str, object],
+	*,
+	hard_path: Path,
+	posterior_path: Path,
+) -> None:
+	"""Replay complete diagnostics for a consumer-loaded lateral manifest."""
+	hard = load_multi_head_target_manifest(hard_path)
+	_, model_identities = hard_source_model_identities(hard)
+	model_identity = _mapping(model_identities[str(CANONICAL_KS[0])], 'model identity')
+	centers_path = _hashed(model_identity['centers'], 'model centers')
+	model_dir = centers_path.parent
+	if model_dir.name != f'k{CANONICAL_KS[0]}' or model_dir.parent.name != 'models':
+		raise ValueError('frozen model layout is invalid')
+	clustering_output_dir = model_dir.parent.parent
+	clustering_config = _hashed(
+		model_identity['clustering_config'], 'clustering config'
+	)
+	source_embedding_dir = Path(
+		_string(
+			_mapping(hard['source_embedding'], 'source_embedding').get('input_dir'),
+			'source_embedding.input_dir',
+		)
+	)
+	smoothing = _mapping(payload['smoothing'], 'smoothing')
+	config = MultiHeadLateralTargetExportConfig(
+		source_hard_manifest=hard_path,
+		source_posterior_manifest=posterior_path,
+		clustering_output_dir=clustering_output_dir,
+		clustering_config=clustering_config,
+		source_embedding_dir=source_embedding_dir,
+		output_root=hard_path.parent,
+		pairwise_strength_ratio=float(smoothing['pairwise_strength_ratio']),
+		handoff_manifest=hard_path,
+	)
+	source, posterior, inputs, models = _validate_sources(config)
+	_validate_frozen_source_replay(source, inputs, models)
+	_, affinity_stats = _affinity_scale(source, posterior, inputs)
+	_, gap_stats = _emission_gap_scales(source, inputs, models)
+	for k in CANONICAL_KS:
+		head = _mapping(_mapping(payload['heads'], 'heads')[str(k)], f'head k={k}')
+		diagnostics = head['diagnostics']
+		expected_scales = {
+			'affinity': affinity_stats,
+			'emission_gap': gap_stats[k],
+		}
+		if _mapping(diagnostics, 'diagnostics')['resolved_scales'] != expected_scales:
+			raise ValueError('resolved scales differ from frozen sources')
+		_validate_diagnostics_from_frozen_sources(
+			diagnostics,
+			_mapping(head['surveys'], 'surveys'),
+			_mapping(_mapping(source['heads'], 'heads')[str(k)], 'hard head')[
+				'surveys'
+			],
+			_mapping(_mapping(posterior['heads'], 'posterior heads')[str(k)], 'head')[
+				'surveys'
+			],
+			inputs,
+			models[k],
+			k=k,
+			config=config,
+			expected_scales=expected_scales,
+		)
 
 
 def _validate_sources(  # noqa: C901
