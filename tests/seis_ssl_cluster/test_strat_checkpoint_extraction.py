@@ -756,6 +756,95 @@ def test_lateral_multi_head_checkpoint_uses_schema_four_and_rejects_hard_resume(
 		)
 
 
+def test_lateral_multi_head_checkpoint_rejects_soft_and_stale_identities(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Schema four cannot cross-resume or reuse stale lateral provenance."""
+	lateral_config = _lateral_multi_head_resume_config(tmp_path, monkeypatch)
+	lateral_student, lateral_head, lateral_optimizer = _new_multi_head_components()
+	lateral_payload = load_checkpoint(
+		_save_multi_head_resume_checkpoint(
+			tmp_path / 'lateral-checkpoint.pt',
+			config=lateral_config,
+			student=lateral_student,
+			head=lateral_head,
+			optimizer=lateral_optimizer,
+		),
+		map_location='cpu',
+	)
+	soft_config = _soft_multi_head_resume_config(tmp_path, monkeypatch)
+	soft_student, soft_head, soft_optimizer = _new_multi_head_components()
+	soft_payload = load_checkpoint(
+		_save_multi_head_resume_checkpoint(
+			tmp_path / 'soft-checkpoint.pt',
+			config=soft_config,
+			student=soft_student,
+			head=soft_head,
+			optimizer=soft_optimizer,
+		),
+		map_location='cpu',
+	)
+	lateral_identity = lateral_config['identity']['scientific_identity']
+	assert isinstance(lateral_identity, dict)
+	lateral_hashes = lateral_identity['lateral_target_head_hashes']
+	assert isinstance(lateral_hashes, dict)
+	monkeypatch.setattr(
+		strat_hmm_checkpoint,
+		'load_multi_head_lateral_target_manifest',
+		lambda _path: _multi_head_manifest(lateral_hashes),
+	)
+
+	def reject(payload: object, config: object, message: str) -> None:
+		student, head, optimizer = _new_multi_head_components()
+		with pytest.raises(ValueError, match=message):
+			restore_strat_hmm_training_checkpoint(
+				payload=payload,
+				student=student,
+				head=head,
+				optimizer=optimizer,
+				scaler=None,
+				amp_enabled=False,
+				config=config,
+			)
+
+	reject(lateral_payload, soft_config, 'target_representation')
+	reject(soft_payload, lateral_config, 'target_representation')
+
+	stale_manifest_config = deepcopy(lateral_config)
+	stale_manifest = tmp_path / 'stale-lateral-targets.json'
+	stale_manifest.write_text('{"lateral": "stale"}', encoding='utf-8')
+	stale_pseudo_targets = stale_manifest_config['pseudo_targets']
+	assert isinstance(stale_pseudo_targets, dict)
+	stale_pseudo_targets['manifest'] = str(stale_manifest)
+	stale_identity = stale_manifest_config['identity']['scientific_identity']
+	assert isinstance(stale_identity, dict)
+	stale_identity['lateral_target_manifest_sha256'] = _sha256(stale_manifest)
+	reject(
+		lateral_payload,
+		stale_manifest_config,
+		'lateral_target_manifest_sha256',
+	)
+
+	stale_beta_config = deepcopy(lateral_config)
+	stale_beta = stale_beta_config['identity']['scientific_identity']
+	assert isinstance(stale_beta, dict)
+	stale_beta_smoothing = stale_beta['lateral_smoothing']
+	assert isinstance(stale_beta_smoothing, dict)
+	stale_beta_smoothing['pairwise_strength_ratio'] = 0.5
+	reject(lateral_payload, stale_beta_config, 'lateral_smoothing')
+
+	stale_scale_config = deepcopy(lateral_config)
+	stale_scale = stale_scale_config['identity']['scientific_identity']
+	assert isinstance(stale_scale, dict)
+	stale_scale_smoothing = stale_scale['lateral_smoothing']
+	assert isinstance(stale_scale_smoothing, dict)
+	stale_scales = stale_scale_smoothing['resolved_scales']
+	assert isinstance(stale_scales, dict)
+	stale_scales['6'] = 2.0
+	reject(lateral_payload, stale_scale_config, 'lateral_smoothing')
+
+
 def test_hard_multi_head_checkpoint_cannot_resume_as_soft(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,

@@ -11,6 +11,9 @@ import pytest
 from joblib import dump
 from sklearn.preprocessing import FunctionTransformer
 
+from proc.seis_ssl_cluster import (
+	export_strat_hmm_multi_head_lateral_targets as lateral_target_export_cli,
+)
 from proc.seis_ssl_cluster.export_strat_hmm_multi_head_lateral_targets import (
 	build_parser,
 )
@@ -62,6 +65,38 @@ def test_lateral_target_entrypoint_help_exposes_resume_controls() -> None:
 	help_text = build_parser().format_help()
 	assert '--dry-run' in help_text
 	assert '--only-missing' in help_text
+
+
+def test_lateral_target_entrypoint_dry_run_reports_resolved_scales(
+	tmp_path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+	"""The dry-run report exposes the same scales returned by the planner."""
+	config_path = tmp_path / 'lateral-targets.yaml'
+	plans = [
+		MultiHeadLateralTargetExportPlan(
+			k, 'NEW', affinity_scale=0.5, emission_gap_scale=float(k)
+		)
+		for k in (6, 8, 10)
+	]
+	monkeypatch.setattr(lateral_target_export_cli, 'load_config', lambda _path: {})
+	monkeypatch.setattr(
+		lateral_target_export_cli,
+		'resolve_multi_head_lateral_target_export_config',
+		lambda _config: object(),
+	)
+	monkeypatch.setattr(
+		lateral_target_export_cli,
+		'export_multi_head_lateral_targets',
+		lambda *_args, **_kwargs: plans,
+	)
+	assert (
+		lateral_target_export_cli.main(['--config', str(config_path), '--dry-run'])
+		== 0
+	)
+	report = capsys.readouterr().out
+	assert 'resolved affinity scale: 0.5' in report
+	for k in (6, 8, 10):
+		assert f'k={k} resolved emission-gap scale: {k}' in report
 
 
 def test_lateral_sources_require_hard_manifest_frozen_model_identity(
@@ -229,6 +264,103 @@ def test_dry_run_rejects_frozen_replay_mismatch_before_planning(
 		lateral_targets, '_validate_frozen_source_replay', reject_replay
 	)
 	with pytest.raises(ValueError, match='Viterbi replay differs'):
+		export_multi_head_lateral_targets(config, dry_run=True)
+	assert not config.output_root.exists()
+
+
+def test_dry_run_reports_preflight_scales_without_creating_output(tmp_path) -> None:
+	"""Both public planning paths expose the scales from their full preflight."""
+	config = _real_lateral_export_fixture(tmp_path)
+	planned = lateral_targets.plan_multi_head_lateral_target_exports(
+		config, only_missing=True
+	)
+	dry_run = export_multi_head_lateral_targets(
+		config, dry_run=True, only_missing=True
+	)
+	assert dry_run == planned
+	assert all(
+		plan.affinity_scale is not None and plan.affinity_scale > 0
+		for plan in dry_run
+	)
+	assert all(
+		plan.emission_gap_scale is not None and plan.emission_gap_scale > 0
+		for plan in dry_run
+	)
+	assert not config.output_root.exists()
+
+
+@pytest.mark.parametrize(
+	('invalid_scale', 'message'),
+	[
+		('zero_norm', 'zero or non-finite norm'),
+		('no_xy_edges', 'affinity scale requires at least one value'),
+		('non_finite_gap', 'emission gap is invalid'),
+		('negative_gap', 'emission gap is invalid'),
+	],
+)
+def test_dry_run_rejects_invalid_scale_inputs_before_output_mutation(
+	tmp_path,
+	monkeypatch: pytest.MonkeyPatch,
+	invalid_scale: str,
+	message: str,
+) -> None:
+	"""Every resolved-scale blocker fails in preflight with no owned output."""
+	config = _real_lateral_export_fixture(tmp_path)
+	source, posterior, inputs, models = lateral_targets._validate_sources(  # noqa: SLF001
+		config
+	)
+	if invalid_scale == 'zero_norm':
+		embeddings_path = config.source_embedding_dir / 'survey.embeddings.npy'
+		embeddings = np.load(embeddings_path)
+		embeddings[0, 0] = 0.0
+		np.save(embeddings_path, embeddings, allow_pickle=False)
+	elif invalid_scale == 'no_xy_edges':
+		valid_path = tmp_path / 'no_xy_edges.valid_tokens.npy'
+		np.save(valid_path, np.zeros((2, 1, 10), dtype=bool), allow_pickle=False)
+		valid_reference = {
+			'path': str(valid_path),
+			'sha256': file_sha256(valid_path),
+		}
+		source = json.loads(json.dumps(source))
+		posterior = json.loads(json.dumps(posterior))
+		for payload in (source, posterior):
+			payload['heads']['6']['surveys']['survey']['valid_tokens'] = valid_reference
+	elif invalid_scale == 'non_finite_gap':
+		monkeypatch.setattr(
+			lateral_targets,
+			'replay_frozen_hmm_trace',
+			lambda _embedding, indices, _model, *, k: (
+				np.full((indices.size, k), np.nan),
+				np.zeros(indices.size, dtype=np.int32),
+			),
+		)
+	else:
+		def negative_gap_partition(
+			values: np.ndarray, _index: int, *, axis: int
+		) -> np.ndarray:
+			del axis
+			return np.column_stack(
+				(
+					np.ones(values.shape[0]),
+					np.zeros(values.shape[0]),
+					values[:, 2:],
+				)
+			)
+
+		monkeypatch.setattr(
+			lateral_targets.np,
+			'partition',
+			negative_gap_partition,
+		)
+	monkeypatch.setattr(
+		lateral_targets,
+		'_validate_sources',
+		lambda _config: (source, posterior, inputs, models),
+	)
+	monkeypatch.setattr(
+		lateral_targets, '_validate_frozen_source_replay', lambda *_args: None
+	)
+	with pytest.raises(ValueError, match=message):
 		export_multi_head_lateral_targets(config, dry_run=True)
 	assert not config.output_root.exists()
 

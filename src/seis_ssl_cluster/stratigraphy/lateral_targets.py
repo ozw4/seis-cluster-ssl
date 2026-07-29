@@ -13,7 +13,7 @@ import shutil
 import tempfile
 from collections.abc import Callable, Iterator, Mapping
 from csv import DictReader, DictWriter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -73,11 +73,13 @@ class MultiHeadLateralTargetExportConfig:
 
 @dataclass(frozen=True)
 class MultiHeadLateralTargetExportPlan:
-	"""One head action selected after source validation."""
+	"""One head action and its resolved fixed scales after source validation."""
 
 	k: int
 	action: _Action
 	reason: str | None = None
+	affinity_scale: float | None = None
+	emission_gap_scale: float | None = None
 
 
 @dataclass(frozen=True)
@@ -235,6 +237,14 @@ def _preflight(
 				)
 				for k in CANONICAL_KS
 			)
+	plans = tuple(
+		replace(
+			plan,
+			affinity_scale=affinity_scale,
+			emission_gap_scale=gap_scales[plan.k],
+		)
+		for plan in plans
+	)
 	snapshot = _source_snapshot(config, source, posterior, inputs, models)
 	return _LateralPreflight(
 		source,
