@@ -1622,8 +1622,14 @@ def _validate_owned_handoff(
 		if not isinstance(payload, dict):
 			raise _OwnedOutputCorruptionError('lateral head metadata is invalid')
 		heads[str(k)] = payload
-	if handoff != _manifest_payload(config, source, heads):
-		raise _OwnedOutputCorruptionError('lateral handoff differs from bundle')
+	expected = _manifest_payload(config, source, heads)
+	if handoff == expected:
+		return
+	if handoff.get('heads') == heads:
+		raise _ImmutableIdentityMismatchError(
+			'lateral handoff identity differs from current config'
+		)
+	raise _OwnedOutputCorruptionError('lateral handoff differs from bundle')
 
 
 def _source_snapshot(

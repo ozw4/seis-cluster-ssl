@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -621,10 +622,56 @@ def test_lateral_reuse_rejects_self_consistent_diagnostic_tampering(tmp_path) ->
 	diagnostics['json']['sha256'] = file_sha256(json_path)
 	diagnostics['csv']['sha256'] = file_sha256(csv_path)
 	head_path.write_text(json.dumps(head, sort_keys=True) + '\n', encoding='utf-8')
+	handoff = json.loads(config.handoff_manifest.read_text(encoding='utf-8'))
+	handoff['heads']['6'] = head
+	config.handoff_manifest.write_text(
+		json.dumps(handoff, sort_keys=True) + '\n', encoding='utf-8'
+	)
 	plans = lateral_targets.plan_multi_head_lateral_target_exports(
 		config, only_missing=True
 	)
 	assert [plan.action for plan in plans] == ['QUARANTINE', 'QUARANTINE', 'QUARANTINE']
+
+
+def test_lateral_reuse_leaves_complete_bundle_for_other_source_identity_untouched(
+	tmp_path,
+) -> None:
+	"""A complete handoff from another source identity requires another root."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	hard_manifest = tmp_path / 'copied_hard_manifest.json'
+	hard_manifest.write_bytes(config.source_hard_manifest.read_bytes())
+	posterior_manifest = tmp_path / 'copied_posterior_manifest.json'
+	posterior = json.loads(config.source_posterior_manifest.read_text(encoding='utf-8'))
+	posterior['source_hard_manifest'] = {
+		'path': str(hard_manifest),
+		'sha256': file_sha256(hard_manifest),
+	}
+	posterior_manifest.write_text(
+		json.dumps(posterior, sort_keys=True) + '\n', encoding='utf-8'
+	)
+	mismatched = replace(
+		config,
+		source_hard_manifest=hard_manifest,
+		source_posterior_manifest=posterior_manifest,
+	)
+	tracked = [
+		mismatched.handoff_manifest,
+		*sorted((mismatched.output_root / 'bundle').rglob('*')),
+	]
+	before = {
+		path: (path.stat().st_mtime_ns, file_sha256(path))
+		for path in tracked
+		if path.is_file()
+	}
+	plans = lateral_targets.plan_multi_head_lateral_target_exports(
+		mismatched, only_missing=True
+	)
+	assert [plan.action for plan in plans] == ['ERROR', 'ERROR', 'ERROR']
+	after = {
+		path: (path.stat().st_mtime_ns, file_sha256(path)) for path in before
+	}
+	assert after == before
 
 
 def _real_lateral_export_fixture(  # noqa: PLR0915
