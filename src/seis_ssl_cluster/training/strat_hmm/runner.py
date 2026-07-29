@@ -15,6 +15,7 @@ from seis_ssl_cluster.data import (
 	NopimsStratMultiHeadPosteriorDataset,
 	NopimsStratMultiHeadTargetDataset,
 	NopimsStratPseudoTargetDataset,
+	load_strat_multi_head_lateral_target_manifest_adapter,
 	read_manifest_json,
 )
 from seis_ssl_cluster.stratigraphy import (
@@ -158,10 +159,18 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				seed=seed,
 				device=device,
 			)
-		else:
+		elif target_representation in {
+			'hard_viterbi_labels_v1',
+			'lateral_mean_field_hard_labels_v1',
+		}:
+			target_manifest: object = _path_config(pseudo_config, 'manifest')
+			if target_representation == 'lateral_mean_field_hard_labels_v1':
+				target_manifest = load_strat_multi_head_lateral_target_manifest_adapter(
+					target_manifest
+				).target_manifest
 			dataset = NopimsStratMultiHeadTargetDataset(
 				manifests,
-				_path_config(pseudo_config, 'manifest'),
+				target_manifest,
 				**dataset_kwargs,
 			)
 			dataloader = build_strat_multi_head_target_dataloader(
@@ -171,6 +180,11 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				shuffle=_bool_config(train_config, 'shuffle', default=True),
 				seed=seed,
 				device=device,
+			)
+		else:
+			raise ValueError(
+				'unsupported multi-head target representation: '
+				f'{target_representation!r}'
 			)
 	else:
 		pseudo_inputs = discover_pseudo_target_inputs(

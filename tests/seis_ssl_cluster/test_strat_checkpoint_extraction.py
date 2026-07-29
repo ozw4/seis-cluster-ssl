@@ -705,6 +705,57 @@ def test_soft_multi_head_checkpoint_resumes_and_rejects_identity_mixes(
 		)
 
 
+def test_lateral_multi_head_checkpoint_uses_schema_four_and_rejects_hard_resume(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _lateral_multi_head_resume_config(tmp_path, monkeypatch)
+	student, head, optimizer = _new_multi_head_components()
+	checkpoint_path = _save_multi_head_resume_checkpoint(
+		tmp_path / 'lateral-checkpoint.pt',
+		config=config,
+		student=student,
+		head=head,
+		optimizer=optimizer,
+	)
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	checkpoint_identity = payload['stratigraphy_checkpoint']
+	assert isinstance(checkpoint_identity, dict)
+	assert checkpoint_identity['schema_version'] == 4
+	assert (
+		checkpoint_identity['target_representation']
+		== 'lateral_mean_field_hard_labels_v1'
+	)
+
+	resumed_student, resumed_head, resumed_optimizer = _new_multi_head_components()
+	resume_state = restore_strat_hmm_training_checkpoint(
+		payload=payload,
+		student=resumed_student,
+		head=resumed_head,
+		optimizer=resumed_optimizer,
+		scaler=None,
+		amp_enabled=False,
+		config=config,
+	)
+	assert resume_state.global_step == 2
+
+	hard_config = deepcopy(config)
+	hard_pseudo_targets = hard_config['pseudo_targets']
+	assert isinstance(hard_pseudo_targets, dict)
+	hard_pseudo_targets.pop('target_representation')
+	hard_student, hard_head, hard_optimizer = _new_multi_head_components()
+	with pytest.raises(ValueError, match='target_representation'):
+		restore_strat_hmm_training_checkpoint(
+			payload=payload,
+			student=hard_student,
+			head=hard_head,
+			optimizer=hard_optimizer,
+			scaler=None,
+			amp_enabled=False,
+			config=hard_config,
+		)
+
+
 def test_hard_multi_head_checkpoint_cannot_resume_as_soft(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -1320,6 +1371,75 @@ def _soft_multi_head_resume_config(
 	return config
 
 
+def _lateral_multi_head_resume_config(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+	config = _multi_head_resume_config(tmp_path, monkeypatch, variant='nocons')
+	manifest_path = tmp_path / 'lateral-targets.json'
+	manifest_path.write_text('{"lateral": true}', encoding='utf-8')
+	hashes = _per_head_target_hashes()
+	monkeypatch.setattr(
+		strat_hmm_checkpoint,
+		'load_multi_head_lateral_target_manifest',
+		lambda path: (
+			_assert_lateral_manifest_load(path, manifest_path)
+			or _multi_head_manifest(hashes)
+		),
+	)
+	pseudo_targets = config['pseudo_targets']
+	assert isinstance(pseudo_targets, dict)
+	pseudo_targets.update(
+		{
+			'manifest': str(manifest_path),
+			'target_representation': 'lateral_mean_field_hard_labels_v1',
+		}
+	)
+	identity = config['identity']
+	assert isinstance(identity, dict)
+	identity['model_tag'] = (
+		'strat_hmm_pretext_mh_k6810_latmf1_nocons_topblock1_distill_v1'
+	)
+	scientific = identity['scientific_identity']
+	assert isinstance(scientific, dict)
+	scientific.clear()
+	scientific.update(
+		{
+			'experiment_role': 'multi_head_ordered_lateral_hard_pretext',
+			'variant': 'latmf1_nocons',
+			'target_representation': 'lateral_mean_field_hard_labels_v1',
+			'target_semantics': 'ordered_hmm_edge_aware_lateral_mean_field_hard_v1',
+			'lateral_target_manifest_sha256': _sha256(manifest_path),
+			'lateral_target_head_hashes': hashes,
+			'source_hard_manifest_sha256': 'a' * 64,
+			'source_posterior_manifest_sha256': 'b' * 64,
+			'lateral_smoothing': {
+				'neighborhood': 'axis_adjacent_v1',
+				'affinity': 'edge_aware_amplitude_v1',
+				'affinity_scale_policy': 'fixed_v1',
+				'resolved_affinity_scale': 1.0,
+				'emission_scale_policy': 'per_head_fixed_v1',
+				'resolved_scales': {'6': 1.0, '8': 1.0, '10': 1.0},
+				'pairwise_strength_ratio': 0.25,
+				'iterations': 3,
+				'projection': 'argmax_v1',
+			},
+			'supervised_loss': 'structured_hmm_hard_categorical_v1',
+			'head_spec': 'multi_resolution_ordered_prototypes_v1',
+			'head_ks': [6, 8, 10],
+			'head_temperature': 0.1,
+			'head_normalize': True,
+			'consistency_policy': 'disabled_for_m5_ls_v1',
+			'prototype_weight': 1.0,
+			'usage_weight': 0.005,
+			'consistency_weight': 0.0,
+			'consistency_beta': 0.1,
+			'distillation_weight': 0.2,
+		}
+	)
+	return config
+
+
 def _set_multi_head_variant(config: dict[str, object], variant: str) -> None:
 	if variant not in {'nocons', 'cons010'}:
 		raise ValueError(f'unsupported fixture variant: {variant!r}')
@@ -1591,6 +1711,10 @@ def _posterior_manifest(
 
 
 def _assert_posterior_manifest_load(path: Path, expected_path: Path) -> None:
+	assert path == expected_path
+
+
+def _assert_lateral_manifest_load(path: Path, expected_path: Path) -> None:
 	assert path == expected_path
 
 
