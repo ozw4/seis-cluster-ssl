@@ -600,6 +600,37 @@ def test_lateral_export_replays_real_frozen_sources_and_reuses_complete_bundle(
 	assert after == before
 
 
+def test_lateral_reference_only_validates_schema_v1_metadata_against_arrays(
+	tmp_path,
+) -> None:
+	"""Reference-only loading still binds schema-v1 metadata to array headers."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	manifest = json.loads(config.handoff_manifest.read_text(encoding='utf-8'))
+	entry = manifest['heads']['6']['surveys']['survey']
+	metadata_path = Path(entry['metadata']['path'])
+	original = json.loads(metadata_path.read_text(encoding='utf-8'))
+	for field, value in (
+		('token_grid_shape', [1, 1, 1]),
+		('valid_token_count', original['valid_token_count'] + 1),
+		('label_counts', {str(label): 0 for label in range(6)}),
+	):
+		altered = {**original, field: value}
+		metadata_path.write_text(
+			json.dumps(altered, sort_keys=True) + '\n', encoding='utf-8'
+		)
+		entry['metadata']['sha256'] = file_sha256(metadata_path)
+		config.handoff_manifest.write_text(
+			json.dumps(manifest, sort_keys=True) + '\n', encoding='utf-8'
+		)
+		with pytest.raises(
+			ValueError, match='lateral metadata provenance differs from entry'
+		):
+			lateral_targets.load_multi_head_lateral_target_manifest(
+				config.handoff_manifest, validate_array_semantics=False
+			)
+
+
 def test_lateral_reuse_rejects_self_consistent_diagnostic_tampering(tmp_path) -> None:
 	"""Reuse rebuilds metrics from frozen inputs, not just diagnostics files."""
 	config = _real_lateral_export_fixture(tmp_path)
@@ -674,6 +705,56 @@ def test_lateral_reuse_leaves_complete_bundle_for_other_source_identity_untouche
 	assert [plan.action for plan in plans] == ['ERROR', 'ERROR', 'ERROR']
 	after = {
 		path: (path.stat().st_mtime_ns, file_sha256(path)) for path in before
+	}
+	assert after == before
+
+
+def test_lateral_reuse_errors_for_a_different_current_survey_set(
+	tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	"""A complete bundle from another survey set is not quarantined as corrupt."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	source, posterior, inputs, models = lateral_targets._validate_sources(  # noqa: SLF001
+		config
+	)
+	current_source = json.loads(json.dumps(source))
+	current_posterior = json.loads(json.dumps(posterior))
+	for k in (6, 8, 10):
+		current_source['heads'][str(k)]['surveys'] = {'other_survey': {}}
+		current_posterior['heads'][str(k)]['surveys'] = {'other_survey': {}}
+	monkeypatch.setattr(
+		lateral_targets,
+		'_validate_sources',
+		lambda _config: (current_source, current_posterior, inputs, models),
+	)
+	monkeypatch.setattr(
+		lateral_targets, '_validate_frozen_source_replay', lambda *_args: None
+	)
+	monkeypatch.setattr(
+		lateral_targets, '_affinity_scale', lambda *_args: (1.0, {})
+	)
+	monkeypatch.setattr(
+		lateral_targets,
+		'_emission_gap_scales',
+		lambda *_args: ({6: 1.0, 8: 1.0, 10: 1.0}, {6: {}, 8: {}, 10: {}}),
+	)
+	monkeypatch.setattr(lateral_targets, '_source_snapshot', lambda *_args: '{}')
+	tracked = [
+		config.handoff_manifest,
+		*sorted((config.output_root / 'bundle').rglob('*')),
+	]
+	before = {
+		path: (path.read_bytes(), path.stat().st_mtime_ns)
+		for path in tracked
+		if path.is_file()
+	}
+	plans = lateral_targets.plan_multi_head_lateral_target_exports(
+		config, only_missing=True
+	)
+	assert [plan.action for plan in plans] == ['ERROR', 'ERROR', 'ERROR']
+	after = {
+		path: (path.read_bytes(), path.stat().st_mtime_ns) for path in before
 	}
 	assert after == before
 

@@ -507,7 +507,6 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 					'smoothing': payload['smoothing'],
 					'resolved_scales': resolved_scales,
 				},
-				validate_array_semantics=validate_array_semantics,
 			)
 			if validate_array_semantics:
 				for x in range(labels.shape[0]):
@@ -1480,7 +1479,9 @@ def _validate_complete_head(  # noqa: C901, PLR0913
 		'hard surveys',
 	)
 	if set(surveys) != set(hard_surveys):
-		raise ValueError('lateral survey set differs from source')
+		raise _ImmutableIdentityMismatchError(
+			'lateral survey set differs from source'
+		)
 	_validate_lateral_diagnostics(head.get('diagnostics'), survey_ids=set(surveys))
 	resolved_scales = _resolved_scales(head['diagnostics'])
 	if expected_scales is not None:
@@ -1834,7 +1835,6 @@ def _validate_survey_metadata(
 	k: int,
 	survey_id: str,
 	identity: Mapping[str, object],
-	validate_array_semantics: bool = True,
 ) -> None:
 	"""Require canonical schema-v1 metadata and exact lateral provenance."""
 	path = _hashed(entry['metadata'], 'metadata')
@@ -1863,32 +1863,6 @@ def _validate_survey_metadata(
 			**_mapping(identity.get('resolved_scales'), 'resolved scales'),
 		},
 	}
-	if not validate_array_semantics:
-		_required(
-			metadata,
-			{
-				'artifact_type',
-				'invalid_token_count',
-				'k',
-				'label_counts',
-				'schema_version',
-				'source',
-				'survey_id',
-				'token_grid_shape',
-				'valid_token_count',
-			},
-		)
-		if (
-			metadata.get('artifact_type') != 'strat_hmm_pseudo_target'
-			or metadata.get('schema_version') != 1
-			or metadata.get('k') != k
-			or metadata.get('survey_id') != survey_id
-			or metadata.get('source') != provenance
-		):
-			raise _ImmutableIdentityMismatchError(
-				'lateral metadata provenance differs from entry'
-			)
-		return
 	labels = np.load(
 		_hashed(entry['labels'], 'labels'), mmap_mode='r', allow_pickle=False
 	)
