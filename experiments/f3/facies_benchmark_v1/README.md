@@ -78,3 +78,4 @@ for the shared config contract and figure conventions.
 
 - [F3 token-level lithology probe](../../../docs/f3_token_level_lithology_probe.md)
 - [Stratigraphic HMM clustering](../../../docs/stratigraphic_hmm_clustering.md)
+- [XY-neighbour consensus hard-label smoothing](../../../docs/f3_xy_neighbor_consensus_hard_label_smoothing.md)

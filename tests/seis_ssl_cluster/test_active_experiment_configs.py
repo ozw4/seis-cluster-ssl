@@ -110,7 +110,11 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_UPSAMPLE_MODE,
 )
 from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT, ArtifactPaths, ExperimentKey
-from seis_ssl_cluster.stratigraphy import lateral_targets, state_posterior
+from seis_ssl_cluster.stratigraphy import (
+	lateral_targets,
+	state_posterior,
+	xy_neighbor_consensus_targets,
+)
 from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
 from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
 	_artifacts,
@@ -180,9 +184,7 @@ F3_STRATIGRAPHIC_CLUSTERING_CONFIGS = sorted(
 )
 F3_STRAT_HMM_PRETRAINING_M1_ROOT = F3_ROOT / '80_strat_hmm_pretraining_m1'
 F3_STRAT_HMM_M1_GUARDRAIL_ROOT = F3_ROOT / '83_strat_hmm_m1_guardrails'
-F3_STRAT_HMM_PRETRAINING_M2A_ROOT = (
-	F3_ROOT / '84_strat_hmm_pretraining_m2a_boundary'
-)
+F3_STRAT_HMM_PRETRAINING_M2A_ROOT = F3_ROOT / '84_strat_hmm_pretraining_m2a_boundary'
 F3_CURRENT_K6_CONTROL_ROOT = F3_ROOT / '93_strat_hmm_m1_current_k6_control'
 F3_STRAT_HMM_MULTI_HEAD_ROOT = F3_ROOT / '94_strat_hmm_multi_head_k6810_v1'
 F3_STRAT_HMM_SOFT_POSTERIOR_ROOT = (
@@ -191,20 +193,19 @@ F3_STRAT_HMM_SOFT_POSTERIOR_ROOT = (
 F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT = (
 	F3_ROOT / '99_strat_hmm_multi_head_k6810_lateral_smoothing_v1'
 )
+F3_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_ROOT = (
+	F3_ROOT / '100_strat_hmm_multi_head_k6810_xy_neighbor_consensus_v1'
+)
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
 		/ '02_train_single_head_topblock_distill_smoke.yaml',
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
 		/ '03_train_single_head_topblock_distill_full.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '01_train_distillation_only_smoke.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '02_train_distillation_only_full.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '07_train_shuffled_hmm_smoke.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '08_train_shuffled_hmm_full.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '01_train_distillation_only_smoke.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '02_train_distillation_only_full.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '07_train_shuffled_hmm_smoke.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '08_train_shuffled_hmm_full.yaml',
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '03_train_boundary_smoke.yaml',
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '04_train_boundary_full.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '01_train_current_k6_smoke.yaml',
@@ -217,44 +218,42 @@ F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 		F3_STRAT_HMM_SOFT_POSTERIOR_ROOT / '03_train_soft_full.yaml',
 		F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT / '05_train_lateral_smoke.yaml',
 		F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT / '06_train_lateral_full.yaml',
+		F3_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_ROOT
+		/ '02_train_xy_neighbor_consensus_smoke.yaml',
+		F3_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_ROOT
+		/ '03_train_xy_neighbor_consensus_full.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '04_extract_student_embeddings.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '03_extract_distillation_only_embeddings.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '09_extract_shuffled_hmm_embeddings.yaml',
-		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
-		/ '05_extract_student_embeddings.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '03_extract_distillation_only_embeddings.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '09_extract_shuffled_hmm_embeddings.yaml',
+		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '05_extract_student_embeddings.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '03_extract_current_k6_embeddings.yaml',
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '06_extract_nocons_embeddings.yaml',
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '07_extract_cons010_embeddings.yaml',
 		F3_STRAT_HMM_SOFT_POSTERIOR_ROOT / '04_extract_soft_embeddings.yaml',
 		F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT / '07_extract_lateral_embeddings.yaml',
+		F3_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_ROOT
+		/ '04_extract_xy_neighbor_consensus_embeddings.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
 	[
-		F3_STRAT_HMM_PRETRAINING_M1_ROOT
-		/ '05_build_lithology_token_dataset.yaml',
+		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '05_build_lithology_token_dataset.yaml',
 		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
 		/ '04_build_distillation_only_token_dataset.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '10_build_shuffled_hmm_token_dataset.yaml',
-		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
-		/ '06_build_lithology_token_dataset.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '10_build_shuffled_hmm_token_dataset.yaml',
+		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '06_build_lithology_token_dataset.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '04_build_current_k6_token_dataset.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '06_train_lithology_probe.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '05_train_distillation_only_probe.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '11_train_shuffled_hmm_probe.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '05_train_distillation_only_probe.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '11_train_shuffled_hmm_probe.yaml',
 		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '07_train_lithology_probe.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '05_train_current_k6_token_probe.yaml',
 	],
@@ -262,18 +261,14 @@ F3_STRAT_HMM_STUDENT_LITHOLOGY_PROBE_CONFIGS = sorted(
 F3_STRAT_HMM_STUDENT_LITHOLOGY_REPORT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '07_build_lithology_report.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '06_build_distillation_only_report.yaml',
-		F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-		/ '12_build_shuffled_hmm_report.yaml',
-		F3_STRAT_HMM_PRETRAINING_M2A_ROOT
-		/ '08_build_lithology_report.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '06_build_distillation_only_report.yaml',
+		F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '12_build_shuffled_hmm_report.yaml',
+		F3_STRAT_HMM_PRETRAINING_M2A_ROOT / '08_build_lithology_report.yaml',
 		F3_CURRENT_K6_CONTROL_ROOT / '06_build_current_k6_token_report.yaml',
 	],
 )
 F3_STRAT_HMM_SHUFFLED_TARGET_CONFIGS = [
-	F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-	/ '03_build_shuffled_hmm_pseudo_targets.yaml',
+	F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '03_build_shuffled_hmm_pseudo_targets.yaml',
 ]
 F3_STRAT_HMM_PSEUDO_TARGET_REFRESH_CONFIGS = sorted(
 	[
@@ -289,15 +284,13 @@ F3_STRAT_HMM_M1_LABEL_BUDGET_BUILD_CONFIGS = [
 	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '01_build_label_budget_datasets.yaml',
 	F3_STRAT_HMM_M1_GUARDRAIL_ROOT
 	/ '14_build_distillation_only_label_budget_datasets.yaml',
-	F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-	/ '16_build_shuffled_hmm_label_budget_datasets.yaml',
+	F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '16_build_shuffled_hmm_label_budget_datasets.yaml',
 ]
 F3_STRAT_HMM_M1_LABEL_BUDGET_PROBE_CONFIGS = [
 	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '02_run_label_budget_probes.yaml',
 	F3_STRAT_HMM_M1_GUARDRAIL_ROOT
 	/ '15_run_distillation_only_label_budget_probes.yaml',
-	F3_STRAT_HMM_M1_GUARDRAIL_ROOT
-	/ '17_run_shuffled_hmm_label_budget_probes.yaml',
+	F3_STRAT_HMM_M1_GUARDRAIL_ROOT / '17_run_shuffled_hmm_label_budget_probes.yaml',
 ]
 F3_STRAT_HMM_M1_SPLIT_INVENTORY_CONFIGS = [
 	F3_STRAT_HMM_M1_ROBUSTNESS_ROOT / '04_generate_split_inventories.yaml',
@@ -373,15 +366,13 @@ F3_PERFORMANCE_MIGRATION_SHARED_CONFIGS = [
 ]
 F3_PERFORMANCE_MIGRATION_EMBEDDING_CONFIGS = [
 	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT / '02_extract_m1_cache_off.yaml',
-	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT
-	/ '03_extract_m1_cache_memmap.yaml',
+	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT / '03_extract_m1_cache_memmap.yaml',
 ]
 F3_PERFORMANCE_MIGRATION_CLUSTERING_CONFIGS = [
 	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT / '04_replay_m1_k6_hmm.yaml',
 ]
 F3_PERFORMANCE_MIGRATION_PSEUDO_TARGET_CONFIGS = [
-	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT
-	/ '05_export_m1_k6_pseudo_targets.yaml',
+	F3_PERFORMANCE_MIGRATION_VALIDATION_ROOT / '05_export_m1_k6_pseudo_targets.yaml',
 ]
 F3_VOXEL_ROBUSTNESS_CONFIGS = [
 	F3_VOXEL_ROBUSTNESS_ROOT / f'{index:02d}_{name}.yaml'
@@ -807,6 +798,17 @@ def test_active_f3_strat_hmm_pretext_configs_resolve(
 			_active_lateral_manifest()
 			if not validate_array_semantics
 			else pytest.fail('config validation requested full lateral arrays')
+		),
+	)
+	monkeypatch.setattr(
+		xy_neighbor_consensus_targets,
+		'load_multi_head_xy_neighbor_consensus_target_manifest',
+		lambda _path, *, validate_array_semantics: (
+			_active_xy_neighbor_consensus_manifest()
+			if not validate_array_semantics
+			else pytest.fail(
+				'config validation requested full XY-neighbour consensus arrays'
+			)
 		),
 	)
 	resolve_strat_hmm_pretext_config(
@@ -1397,31 +1399,23 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 	)
 	smoke_configs = [
 		config
-		for path, config in zip(
-			F3_VOXEL_DECODER_CONFIGS, training_configs, strict=True
-		)
+		for path, config in zip(F3_VOXEL_DECODER_CONFIGS, training_configs, strict=True)
 		if path.name.endswith('_smoke.yaml')
 	]
 	assert all(
-		config['tiles']['context_halo_tokens'] == [1, 1, 1]
-		for config in smoke_configs
+		config['tiles']['context_halo_tokens'] == [1, 1, 1] for config in smoke_configs
 	)
 	full_configs = [
 		config
-		for path, config in zip(
-			F3_VOXEL_DECODER_CONFIGS, training_configs, strict=True
-		)
+		for path, config in zip(F3_VOXEL_DECODER_CONFIGS, training_configs, strict=True)
 		if path.name.endswith('_full.yaml')
 	]
 	assert tuple(config['model']['tag'] for config in full_configs) == model_tags
 	assert all(config['model']['freeze_encoder'] is True for config in full_configs)
 	assert all(config['embeddings']['spec'] == 'overlap_x16' for config in full_configs)
-	assert len(
-		{config['voxel_dataset']['input_dir'] for config in full_configs}
-	) == 1
+	assert len({config['voxel_dataset']['input_dir'] for config in full_configs}) == 1
 	assert (
-		Path(full_configs[0]['voxel_dataset']['input_dir'])
-		== voxel_dataset.output_dir
+		Path(full_configs[0]['voxel_dataset']['input_dir']) == voxel_dataset.output_dir
 	)
 	assert all(
 		config['decoder'] == full_configs[0]['decoder'] for config in full_configs
@@ -1446,12 +1440,10 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 		for config in inference_configs
 	)
 	assert all(
-		config.output_dir.name == VOXEL_DECODER_SPEC
-		for config in inference_configs
+		config.output_dir.name == VOXEL_DECODER_SPEC for config in inference_configs
 	)
 	assert all(
-		'mae_latest.pt' not in str(config.checkpoint)
-		for config in inference_configs
+		'mae_latest.pt' not in str(config.checkpoint) for config in inference_configs
 	)
 	assert len({config.output_dir for config in inference_configs}) == 3
 	assert model_tags[1] in str(inference_configs[1].output_dir)
@@ -1513,9 +1505,7 @@ def test_active_f3_voxel_robustness_stage_configs_resolve() -> None:
 	v1 = f3_lithology_voxel_decoder_split_suite_config_from_mapping(v1_raw)
 
 	assert build.split_inventory_manifest.name == 'split_inventory_manifest.json'
-	assert v0.voxel_dataset_manifest == Path(
-		v1_raw['suite']['voxel_dataset_manifest']
-	)
+	assert v0.voxel_dataset_manifest == Path(v1_raw['suite']['voxel_dataset_manifest'])
 	assert v0.output_root == Path(v1_raw['suite']['output_root']) == build.output_root
 	assert v0.split_dataset_manifest.name == 'split_dataset_manifest.json'
 	assert v0.probe_run_manifest.name == 'split_probe_run_manifest.json'
@@ -1527,9 +1517,10 @@ def test_active_f3_voxel_robustness_stage_configs_resolve() -> None:
 	assert v1.decoder.spec == VOXEL_DECODER_SPEC
 	assert v1.decoder.upsample_mode == VOXEL_DECODER_UPSAMPLE_MODE
 	assert v1.decoder.normalization == VOXEL_DECODER_NORMALIZATION
-	assert v1_raw['decoder'] == load_config(
-		F3_VOXEL_V1_ROOT / '02_train_mae_full.yaml'
-	)['decoder']
+	assert (
+		v1_raw['decoder']
+		== load_config(F3_VOXEL_V1_ROOT / '02_train_mae_full.yaml')['decoder']
+	)
 	assert OLD_VOXEL_DECODER_SPEC not in F3_VOXEL_ROBUSTNESS_CONFIGS[2].read_text(
 		encoding='utf-8'
 	)
@@ -1581,10 +1572,7 @@ def test_active_nopims_overlap_x16_paths_match_artifact_paths_contract() -> None
 	)
 
 	embedding = load_config(
-		NOPIMS_ROOT
-		/ '20_embedding'
-		/ model_tag
-		/ '01_ten_surveys_overlap_x16.yaml',
+		NOPIMS_ROOT / '20_embedding' / model_tag / '01_ten_surveys_overlap_x16.yaml',
 	)
 	clustering = load_config(
 		NOPIMS_ROOT
@@ -1603,10 +1591,9 @@ def test_active_nopims_overlap_x16_paths_match_artifact_paths_contract() -> None
 	assert Path(clustering['embeddings']['input_dir']) == paths.embeddings(key)
 	assert Path(clustering['clustering']['output_dir']) == paths.clustering(key)
 	assert Path(visualization['clustering']['input_dir']) == paths.clustering(key)
-	assert (
-		Path(visualization['visualization']['output_dir'])
-		== paths.cluster_visualization(key)
-	)
+	assert Path(
+		visualization['visualization']['output_dir']
+	) == paths.cluster_visualization(key)
 
 
 def _config_with_available_output(
@@ -1730,12 +1717,13 @@ def _config_with_existing_strat_hmm_pretext_inputs(
 		if config['pseudo_targets'].get('target_representation') == (
 			'ordered_path_state_posterior_v1'
 		):
-			config['identity']['scientific_identity'][
-				'posterior_manifest_sha256'
-			] = file_sha256(manifest)
-		elif config['pseudo_targets'].get('target_representation') != (
-			'lateral_mean_field_hard_labels_v1'
-		):
+			config['identity']['scientific_identity']['posterior_manifest_sha256'] = (
+				file_sha256(manifest)
+			)
+		elif config['pseudo_targets'].get('target_representation') not in {
+			'lateral_mean_field_hard_labels_v1',
+			'xy_neighbor_consensus_hard_labels_v1',
+		}:
 			config['identity']['scientific_identity']['target_manifest_sha256'] = (
 				file_sha256(manifest)
 			)
@@ -1800,6 +1788,40 @@ def _active_lateral_manifest() -> dict[str, object]:
 						'emission_gap': {'resolved_scale': 1.0},
 					}
 				},
+			}
+			for k in (6, 8, 10)
+		},
+	}
+
+
+def _active_xy_neighbor_consensus_manifest() -> dict[str, object]:
+	"""Return the reference-only XY identity used by active config tests."""
+	return {
+		'head_ks': [6, 8, 10],
+		'target_representation': 'xy_neighbor_consensus_hard_labels_v1',
+		'target_semantics': 'xy_neighbor_consensus_hard_label_smoothing_v1',
+		'source_hard_manifest': {'sha256': 'a' * 64},
+		'smoothing': {
+			'neighborhood': 'same_z_xy_four_neighbors',
+			'neighbor_order': ['x_minus', 'x_plus', 'y_minus', 'y_plus'],
+			'four_valid_neighbors_minimum_agreement': 3,
+			'three_valid_neighbors_minimum_agreement': 3,
+			'fewer_than_three_valid_neighbors': 'unchanged',
+			'tied_or_nonunique_consensus': 'unchanged',
+			'center_matching_consensus': 'unchanged',
+			'temporal_guard': 'internal_valid_token_source_label_bounds',
+			'application': 'single_pass_synchronous_source_labels',
+		},
+		'heads': {
+			str(k): {
+				'surveys': {
+					'f3_facies_benchmark': {
+						'labels': {'sha256': f'{k:064x}'},
+						'confidence': {'sha256': f'{k + 10:064x}'},
+						'valid_tokens': {'sha256': f'{k + 20:064x}'},
+						'metadata': {'sha256': f'{k + 30:064x}'},
+					}
+				}
 			}
 			for k in (6, 8, 10)
 		},

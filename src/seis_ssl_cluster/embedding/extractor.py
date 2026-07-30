@@ -1172,9 +1172,7 @@ def _stratigraphy_pretext_metadata(
 			],
 		}
 		if checkpoint_identity.get('schema_version') == 3:
-			posterior = _required_mapping(
-				checkpoint_identity, 'posterior_manifest'
-			)
+			posterior = _required_mapping(checkpoint_identity, 'posterior_manifest')
 			return {
 				**result,
 				'target_representation': checkpoint_identity['target_representation'],
@@ -1184,34 +1182,13 @@ def _stratigraphy_pretext_metadata(
 				'posterior_cost_temperature': checkpoint_identity[
 					'posterior_cost_temperature'
 				],
-				'per_head_posterior_sha256': checkpoint_identity[
-					'per_head_posteriors'
-				],
+				'per_head_posterior_sha256': checkpoint_identity['per_head_posteriors'],
 			}
-		if checkpoint_identity.get('schema_version') == 4:
-			lateral = _required_mapping(
+		if checkpoint_identity.get('schema_version') in {4, 5}:
+			return _hard_target_pretext_metadata(
+				result,
 				checkpoint_identity,
-				'lateral_target_manifest',
 			)
-			return {
-				**result,
-				'target_representation': checkpoint_identity[
-					'target_representation'
-				],
-				'target_semantics': checkpoint_identity['target_semantics'],
-				'lateral_target_manifest_path': lateral['path'],
-				'lateral_target_manifest_sha256': lateral['sha256'],
-				'per_head_lateral_target_sha256': checkpoint_identity[
-					'per_head_lateral_targets'
-				],
-				'source_hard_manifest_sha256': checkpoint_identity[
-					'source_hard_manifest_sha256'
-				],
-				'source_posterior_manifest_sha256': checkpoint_identity[
-					'source_posterior_manifest_sha256'
-				],
-				'lateral_smoothing': checkpoint_identity['lateral_smoothing'],
-			}
 		target_manifest = _required_mapping(checkpoint_identity, 'target_manifest')
 		return {
 			**result,
@@ -1260,6 +1237,55 @@ def _stratigraphy_pretext_metadata(
 			).encode('utf-8'),
 		).hexdigest()
 	return result
+
+
+def _hard_target_pretext_metadata(
+	base: Mapping[str, object],
+	checkpoint_identity: Mapping[str, object],
+) -> dict[str, object]:
+	"""Attach strict schema-v4/v5 hard-target provenance to extraction metadata."""
+	if checkpoint_identity.get('schema_version') == 4:
+		lateral = _required_mapping(
+			checkpoint_identity,
+			'lateral_target_manifest',
+		)
+		return {
+			**base,
+			'target_representation': checkpoint_identity['target_representation'],
+			'target_semantics': checkpoint_identity['target_semantics'],
+			'lateral_target_manifest_path': lateral['path'],
+			'lateral_target_manifest_sha256': lateral['sha256'],
+			'per_head_lateral_target_sha256': checkpoint_identity[
+				'per_head_lateral_targets'
+			],
+			'source_hard_manifest_sha256': checkpoint_identity[
+				'source_hard_manifest_sha256'
+			],
+			'source_posterior_manifest_sha256': checkpoint_identity[
+				'source_posterior_manifest_sha256'
+			],
+			'lateral_smoothing': checkpoint_identity['lateral_smoothing'],
+		}
+	xy_neighbor_consensus = _required_mapping(
+		checkpoint_identity,
+		'xy_neighbor_consensus_target_manifest',
+	)
+	return {
+		**base,
+		'target_representation': checkpoint_identity['target_representation'],
+		'target_semantics': checkpoint_identity['target_semantics'],
+		'xy_neighbor_consensus_target_manifest_path': xy_neighbor_consensus['path'],
+		'xy_neighbor_consensus_target_manifest_sha256': xy_neighbor_consensus['sha256'],
+		'per_head_xy_neighbor_consensus_target_sha256': checkpoint_identity[
+			'per_head_xy_neighbor_consensus_targets'
+		],
+		'source_hard_manifest_sha256': checkpoint_identity[
+			'source_hard_manifest_sha256'
+		],
+		'xy_neighbor_consensus_smoothing': checkpoint_identity[
+			'xy_neighbor_consensus_smoothing'
+		],
+	}
 
 
 def _validate_checkpoint_train(train: Mapping[str, object]) -> None:

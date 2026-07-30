@@ -47,6 +47,15 @@ def test_multi_head_config_resolves_with_manifest_and_scientific_identity(
 	assert scientific['data'] == resolved['data']
 	assert scientific['zero_mask'] == resolved['zero_mask']
 
+	mixed = deepcopy(config)
+	mixed['identity']['scientific_identity'][
+		'xy_neighbor_consensus_target_manifest_sha256'
+	] = 'a' * 64
+	with pytest.raises(
+		ValueError, match='xy_neighbor_consensus_target_manifest_sha256'
+	):
+		resolve_strat_hmm_pretext_config(mixed)
+
 
 def test_multi_head_config_resolution_does_not_load_target_arrays(
 	tmp_path: Path,
@@ -143,6 +152,15 @@ def test_soft_multi_head_config_resolves_with_posterior_identity(
 		invalid['identity']['scientific_identity'][key] = value
 		with pytest.raises(ValueError, match=match):
 			resolve_strat_hmm_pretext_config(invalid)
+
+	mixed = deepcopy(config)
+	mixed['identity']['scientific_identity'][
+		'xy_neighbor_consensus_target_manifest_sha256'
+	] = 'a' * 64
+	with pytest.raises(
+		ValueError, match='xy_neighbor_consensus_target_manifest_sha256'
+	):
+		resolve_strat_hmm_pretext_config(mixed)
 
 
 def test_soft_multi_head_config_requires_posterior_hashes(

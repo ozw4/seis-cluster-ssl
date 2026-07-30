@@ -26,6 +26,9 @@ from seis_ssl_cluster.stratigraphy.targets import (
 	StratPseudoTargetInput,
 	load_pseudo_target_arrays,
 )
+from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
+	load_multi_head_xy_neighbor_consensus_target_manifest,
+)
 
 if TYPE_CHECKING:
 	from collections.abc import Sequence
@@ -67,6 +70,7 @@ class StratMultiHeadTargetManifest:
 	head_ks: tuple[int, ...]
 	by_survey: Mapping[str, tuple[StratMultiHeadTargetInput, ...]]
 	common_valid_token_sha256: Mapping[str, str]
+	invalid_label_policy: str = 'minus_one'
 
 
 @dataclass(frozen=True)
@@ -77,6 +81,17 @@ class StratMultiHeadLateralTargetManifest:
 	target_semantics: str
 	source_hard_manifest: Mapping[str, str]
 	source_posterior_manifest: Mapping[str, str]
+	smoothing: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class StratMultiHeadXYNeighborConsensusTargetManifest:
+	"""Strict XY-consensus provenance plus its hard-target adapter."""
+
+	target_manifest: StratMultiHeadTargetManifest
+	target_representation: str
+	target_semantics: str
+	source_hard_manifest: Mapping[str, str]
 	smoothing: Mapping[str, object]
 
 
@@ -374,6 +389,9 @@ class MultiHeadStratPseudoTargetProvider:
 		self.manifest = _coerce_multi_head_target_manifest(
 			multi_head_target_manifest,
 		)
+		self._allow_source_invalid_labels = (
+			self.manifest.invalid_label_policy == 'preserve_source'
+		)
 		self._pseudo_target_arrays: dict[
 			str, dict[int, StratMultiHeadTargetArrays]
 		] = {}
@@ -454,6 +472,7 @@ class MultiHeadStratPseudoTargetProvider:
 				confidence,
 				current_valid,
 				k=k,
+				allow_source_invalid_labels=self._allow_source_invalid_labels,
 			)
 			if pseudo_valid is None:
 				pseudo_valid = current_valid
@@ -570,9 +589,7 @@ class MultiHeadStratPosteriorProvider:
 		self.manifest = _coerce_multi_head_posterior_manifest(
 			multi_head_posterior_manifest,
 		)
-		self._posterior_arrays: dict[
-			str, dict[int, StratMultiHeadPosteriorArrays]
-		] = {}
+		self._posterior_arrays: dict[str, dict[int, StratMultiHeadPosteriorArrays]] = {}
 
 	def validate_manifests(
 		self,
@@ -750,9 +767,7 @@ def load_strat_multi_head_target_manifest(
 						str(cast('Mapping[str, object]', entry['metadata'])['path'])
 					),
 					hashes={
-						name: str(
-							cast('Mapping[str, object]', entry[name])['sha256']
-						)
+						name: str(cast('Mapping[str, object]', entry[name])['sha256'])
 						for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
 					},
 				),
@@ -790,9 +805,7 @@ def load_strat_multi_head_lateral_target_manifest_adapter(
 	for survey_id in first_surveys:
 		inputs: list[StratMultiHeadTargetInput] = []
 		for k in head_ks:
-			entry = cast(
-				'Mapping[str, object]', heads[str(k)]['surveys'][survey_id]
-			)
+			entry = cast('Mapping[str, object]', heads[str(k)]['surveys'][survey_id])
 			inputs.append(
 				StratMultiHeadTargetInput(
 					k=k,
@@ -810,9 +823,7 @@ def load_strat_multi_head_lateral_target_manifest_adapter(
 						str(cast('Mapping[str, object]', entry['metadata'])['path'])
 					),
 					hashes={
-						name: str(
-							cast('Mapping[str, object]', entry[name])['sha256']
-						)
+						name: str(cast('Mapping[str, object]', entry[name])['sha256'])
 						for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
 					},
 				),
@@ -831,12 +842,77 @@ def load_strat_multi_head_lateral_target_manifest_adapter(
 	return StratMultiHeadLateralTargetManifest(
 		target_manifest=target_manifest,
 		target_semantics=str(payload['target_semantics']),
-		source_hard_manifest=cast(
-			'Mapping[str, str]', payload['source_hard_manifest']
-		),
+		source_hard_manifest=cast('Mapping[str, str]', payload['source_hard_manifest']),
 		source_posterior_manifest=cast(
 			'Mapping[str, str]', payload['source_posterior_manifest']
 		),
+		smoothing=cast('Mapping[str, object]', payload['smoothing']),
+	)
+
+
+def load_strat_multi_head_xy_neighbor_consensus_target_manifest_adapter(
+	path: str | Path,
+) -> StratMultiHeadXYNeighborConsensusTargetManifest:
+	"""Adapt a strict XY-consensus export to the hard-target provider.
+
+	The target loader validates the distinct source-hard-only provenance before
+	the existing lazy hard-label provider sees any array references.
+	"""
+	payload = load_multi_head_xy_neighbor_consensus_target_manifest(
+		path,
+		validate_array_semantics=False,
+	)
+	head_ks = tuple(cast('list[int]', payload['head_ks']))
+	heads = cast('Mapping[str, Mapping[str, object]]', payload['heads'])
+	by_survey: dict[str, tuple[StratMultiHeadTargetInput, ...]] = {}
+	first_surveys = cast('Mapping[str, object]', heads[str(head_ks[0])]['surveys'])
+	for survey_id in first_surveys:
+		inputs: list[StratMultiHeadTargetInput] = []
+		for k in head_ks:
+			entry = cast('Mapping[str, object]', heads[str(k)]['surveys'][survey_id])
+			inputs.append(
+				StratMultiHeadTargetInput(
+					k=k,
+					survey_id=str(survey_id),
+					labels_path=Path(
+						str(cast('Mapping[str, object]', entry['labels'])['path'])
+					),
+					confidence_path=Path(
+						str(cast('Mapping[str, object]', entry['confidence'])['path'])
+					),
+					valid_tokens_path=Path(
+						str(cast('Mapping[str, object]', entry['valid_tokens'])['path'])
+					),
+					metadata_path=Path(
+						str(cast('Mapping[str, object]', entry['metadata'])['path'])
+					),
+					hashes={
+						name: str(cast('Mapping[str, object]', entry[name])['sha256'])
+						for name in (
+							'labels',
+							'confidence',
+							'valid_tokens',
+							'metadata',
+						)
+					},
+				)
+			)
+		by_survey[str(survey_id)] = tuple(inputs)
+	target_manifest = StratMultiHeadTargetManifest(
+		head_ks=head_ks,
+		by_survey=by_survey,
+		common_valid_token_sha256={
+			survey_id: inputs[0].hashes['valid_tokens']
+			for survey_id, inputs in by_survey.items()
+		},
+		invalid_label_policy='preserve_source',
+	)
+	_coerce_multi_head_target_manifest(target_manifest)
+	return StratMultiHeadXYNeighborConsensusTargetManifest(
+		target_manifest=target_manifest,
+		target_representation=str(payload['target_representation']),
+		target_semantics=str(payload['target_semantics']),
+		source_hard_manifest=cast('Mapping[str, str]', payload['source_hard_manifest']),
 		smoothing=cast('Mapping[str, object]', payload['smoothing']),
 	)
 
@@ -979,6 +1055,11 @@ def _validate_multi_head_target_manifest_header(
 		raise TypeError('multi-head target by_survey must be a mapping')
 	if not isinstance(value.common_valid_token_sha256, Mapping):
 		raise TypeError('multi-head target common valid-token hashes must be a mapping')
+	if value.invalid_label_policy not in {'minus_one', 'preserve_source'}:
+		raise ValueError(
+			'multi-head target invalid_label_policy must be minus_one or '
+			'preserve_source'
+		)
 	if not value.by_survey:
 		raise ValueError('multi-head target manifest must contain at least one survey')
 	if set(value.common_valid_token_sha256) != set(value.by_survey):
@@ -998,9 +1079,7 @@ def _validate_multi_head_target_survey(
 		raise TypeError(f'multi-head target inputs for {survey_id!r} must be a tuple')
 	if not all(isinstance(item, StratMultiHeadTargetInput) for item in inputs):
 		invalid = next(
-			item
-			for item in inputs
-			if not isinstance(item, StratMultiHeadTargetInput)
+			item for item in inputs if not isinstance(item, StratMultiHeadTargetInput)
 		)
 		raise TypeError(
 			'multi-head target inputs must contain StratMultiHeadTargetInput items; '
@@ -1025,9 +1104,7 @@ def _validate_multi_head_target_input(
 	common_valid_hash: str,
 ) -> None:
 	if item.survey_id != survey_id:
-		raise ValueError(
-			f'multi-head target input survey ids must match {survey_id!r}'
-		)
+		raise ValueError(f'multi-head target input survey ids must match {survey_id!r}')
 	if not all(
 		isinstance(path, Path)
 		for path in (
@@ -1115,6 +1192,7 @@ def _validate_multi_head_crop(
 	valid_mask: np.ndarray,
 	*,
 	k: int,
+	allow_source_invalid_labels: bool = False,
 ) -> None:
 	if labels.shape != confidence.shape or labels.shape != valid_mask.shape:
 		msg = f'multi-head k={k} labels, confidence, and valid_tokens shapes must match'
@@ -1131,7 +1209,7 @@ def _validate_multi_head_crop(
 		raise ValueError(f'multi-head k={k} confidence must be finite and in [0, 1]')
 	if np.any((labels[valid_mask] < 0) | (labels[valid_mask] >= k)):
 		raise ValueError(f'multi-head k={k} valid labels must be in [0, {k - 1}]')
-	if np.any(labels[~valid_mask] != -1):
+	if not allow_source_invalid_labels and np.any(labels[~valid_mask] != -1):
 		raise ValueError(f'multi-head k={k} invalid labels must be -1')
 	if np.any(confidence[~valid_mask] != 0.0):
 		raise ValueError(f'multi-head k={k} invalid confidence must be 0.0')
@@ -1159,9 +1237,7 @@ def _validate_multi_head_sample(
 			f'multi-head k={k} boundary_weight must be finite and in [0, 1]'
 		)
 	if np.any(boundary_weight[~valid_mask] != 0.0):
-		raise ValueError(
-			f'multi-head k={k} invalid boundary_weight must be 0.0'
-		)
+		raise ValueError(f'multi-head k={k} invalid boundary_weight must be 0.0')
 
 
 def _validate_multi_head_posterior_crop(
@@ -1185,9 +1261,7 @@ def _validate_multi_head_posterior_crop(
 		raise ValueError(
 			f'multi-head posterior k={k} must be finite and non-negative',
 		)
-	if not np.allclose(
-		posterior[valid_mask].sum(axis=-1), 1.0, rtol=0.0, atol=2.0e-6
-	):
+	if not np.allclose(posterior[valid_mask].sum(axis=-1), 1.0, rtol=0.0, atol=2.0e-6):
 		raise ValueError(
 			f'multi-head posterior k={k} valid rows must sum to one',
 		)
@@ -1294,10 +1368,12 @@ __all__ = [
 	'StratMultiHeadTargetArrays',
 	'StratMultiHeadTargetInput',
 	'StratMultiHeadTargetManifest',
+	'StratMultiHeadXYNeighborConsensusTargetManifest',
 	'StratPseudoTargetProvider',
 	'TargetProvider',
 	'TargetProviderContext',
 	'load_strat_multi_head_lateral_target_manifest_adapter',
 	'load_strat_multi_head_posterior_manifest',
 	'load_strat_multi_head_target_manifest',
+	'load_strat_multi_head_xy_neighbor_consensus_target_manifest_adapter',
 ]

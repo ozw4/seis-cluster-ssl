@@ -28,6 +28,9 @@ from seis_ssl_cluster.stratigraphy.prototypes import (
 from seis_ssl_cluster.stratigraphy.state_posterior import (
 	load_multi_head_state_posterior_manifest,
 )
+from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
+	load_multi_head_xy_neighbor_consensus_target_manifest,
+)
 from seis_ssl_cluster.training.checkpoint import capture_rng_state, load_checkpoint
 
 
@@ -47,6 +50,74 @@ _CHECKPOINT_SELECTION_CRITERION = 'metrics.loss'
 _CHECKPOINT_SELECTION_POLICY = 'strictly_lower_loss_v1'
 _CHECKPOINT_SELECTION_TRANSACTION_SCHEMA_VERSION = 1
 _CHECKPOINT_SELECTION_TRANSACTION_NAME = '.checkpoint_selection_transaction.json'
+
+_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION = 'xy_neighbor_consensus_hard_labels_v1'
+_XY_NEIGHBOR_CONSENSUS_TARGET_SEMANTICS = (
+	'xy_neighbor_consensus_hard_label_smoothing_v1'
+)
+_XY_NEIGHBOR_CONSENSUS_CONSISTENCY_POLICY = 'disabled_for_xy_neighbor_consensus_v1'
+_XY_NEIGHBOR_CONSENSUS_EXPERIMENT_ROLE = (
+	'multi_head_ordered_xy_neighbor_consensus_hard_pretext'
+)
+
+_XY_NEIGHBOR_CONSENSUS_CHECKPOINT_IDENTITY_FIELDS = frozenset(
+	{
+		'schema_version',
+		'head_spec',
+		'head_ks',
+		'target_representation',
+		'target_semantics',
+		'xy_neighbor_consensus_target_manifest_sha256',
+		'xy_neighbor_consensus_target_manifest',
+		'per_head_xy_neighbor_consensus_targets',
+		'source_hard_manifest_sha256',
+		'xy_neighbor_consensus_smoothing',
+		'consistency_policy',
+		'consistency_weight',
+		'consistency_beta',
+		'model_tag',
+		'output_root',
+		'scientific_identity_sha256',
+		'stratigraphy_state_sha256',
+		'optimizer_group_identity',
+		'teacher_checkpoint_sha256',
+		'student_init_checkpoint_sha256',
+		'initial_student_state_sha256',
+		'initial_head_state_sha256',
+	}
+)
+
+_XY_NEIGHBOR_CONSENSUS_SCIENTIFIC_IDENTITY_FIELDS = frozenset(
+	{
+		'experiment_role',
+		'variant',
+		'head_spec',
+		'head_ks',
+		'head_projection_dim',
+		'head_temperature',
+		'head_normalize',
+		'target_representation',
+		'target_semantics',
+		'xy_neighbor_consensus_target_manifest_sha256',
+		'xy_neighbor_consensus_target_head_hashes',
+		'source_hard_manifest_sha256',
+		'xy_neighbor_consensus_smoothing',
+		'supervised_loss',
+		'consistency_policy',
+		'prototype_weight',
+		'usage_weight',
+		'consistency_weight',
+		'consistency_beta',
+		'distillation_weight',
+		'teacher_checkpoint',
+		'student_init_checkpoint',
+		'student_unfreeze_top_blocks',
+		'model',
+		'data',
+		'zero_mask',
+		'train',
+	}
+)
 
 
 def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
@@ -284,7 +355,7 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901
 		return
 	if not isinstance(identity, Mapping):
 		raise TypeError('checkpoint stratigraphy_checkpoint must be a mapping')
-	if identity.get('schema_version') not in {2, 3, 4}:
+	if identity.get('schema_version') not in {2, 3, 4, 5}:
 		raise ValueError('unsupported stratigraphy checkpoint schema_version')
 	if identity.get('head_spec') != 'multi_resolution_ordered_prototypes_v1':
 		raise ValueError('unsupported stratigraphy multi-head head_spec')
@@ -292,9 +363,15 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901
 	if not isinstance(config, Mapping) or not isinstance(state, Mapping):
 		raise TypeError('multi-head checkpoint requires config and head state mappings')
 	expected_schema_version = (
-		4
-		if _is_lateral_multi_head_config(config)
-		else 3 if _is_soft_multi_head_config(config) else 2
+		5
+		if _is_xy_neighbor_consensus_multi_head_config(config)
+		else (
+			4
+			if _is_lateral_multi_head_config(config)
+			else 3
+			if _is_soft_multi_head_config(config)
+			else 2
+		)
 	)
 	if identity.get('schema_version') != expected_schema_version:
 		raise ValueError(
@@ -763,6 +840,15 @@ def _multi_head_checkpoint_identity(  # noqa: PLR0913
 			student=student,
 			head=head,
 		)
+	if _is_xy_neighbor_consensus_multi_head_config(stratigraphy_config):
+		return _xy_neighbor_consensus_multi_head_checkpoint_identity(
+			stratigraphy_config=stratigraphy_config,
+			stratigraphy_state_dict=stratigraphy_state_dict,
+			control_identity=control_identity,
+			optimizer=optimizer,
+			student=student,
+			head=head,
+		)
 	manifest_path = _required_string(
 		pseudo_targets.get('manifest'), 'pseudo_targets.manifest'
 	)
@@ -961,6 +1047,99 @@ def _lateral_multi_head_checkpoint_identity(  # noqa: PLR0913
 	}
 
 
+def _xy_neighbor_consensus_multi_head_checkpoint_identity(  # noqa: PLR0913
+	*,
+	stratigraphy_config: Mapping[str, object],
+	stratigraphy_state_dict: Mapping[str, torch.Tensor],
+	control_identity: Mapping[str, object] | None,
+	optimizer: torch.optim.Optimizer,
+	student: torch.nn.Module,
+	head: torch.nn.Module,
+) -> dict[str, object]:
+	"""Build schema-v5 identity for source-hard XY consensus supervision."""
+	head_config = _required_mapping(stratigraphy_config, 'head')
+	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
+	identity = _required_mapping(stratigraphy_config, 'identity')
+	scientific = _required_mapping(identity, 'scientific_identity')
+	manifest_path = _required_string(
+		pseudo_targets.get('manifest'), 'pseudo_targets.manifest'
+	)
+	manifest_sha256 = _file_sha256(Path(manifest_path))
+	(
+		per_head_targets,
+		source_hard_manifest_sha256,
+		smoothing,
+	) = _xy_neighbor_consensus_target_provenance(Path(manifest_path))
+	if (
+		scientific.get('xy_neighbor_consensus_target_manifest_sha256')
+		!= manifest_sha256
+	):
+		raise ValueError(
+			'XY neighbor consensus manifest SHA-256 does not match scientific identity'
+		)
+	if scientific.get('xy_neighbor_consensus_target_head_hashes') != per_head_targets:
+		raise ValueError(
+			'XY neighbor consensus target hashes do not match scientific identity'
+		)
+	if scientific.get('source_hard_manifest_sha256') != source_hard_manifest_sha256:
+		raise ValueError(
+			'XY neighbor consensus source hard manifest does not match scientific '
+			'identity'
+		)
+	if _to_plain_value(scientific.get('xy_neighbor_consensus_smoothing')) != smoothing:
+		raise ValueError(
+			'XY neighbor consensus smoothing policy does not match scientific identity'
+		)
+	if not isinstance(control_identity, Mapping):
+		raise TypeError('multi-head checkpoint requires control identity')
+	inputs = _required_mapping(control_identity, 'input_identities')
+	initial_states = control_identity.get('initial_state_sha256')
+	if not isinstance(initial_states, Mapping):
+		raise TypeError('multi-head checkpoint requires initial state hashes')
+	return {
+		'schema_version': 5,
+		'head_spec': head_config['spec'],
+		'head_ks': list(_head_ks(head_config.get('ks'))),
+		'target_representation': scientific['target_representation'],
+		'target_semantics': scientific['target_semantics'],
+		'xy_neighbor_consensus_target_manifest_sha256': manifest_sha256,
+		'xy_neighbor_consensus_target_manifest': {
+			'path': manifest_path,
+			'sha256': manifest_sha256,
+		},
+		'per_head_xy_neighbor_consensus_targets': per_head_targets,
+		'source_hard_manifest_sha256': source_hard_manifest_sha256,
+		'xy_neighbor_consensus_smoothing': smoothing,
+		'consistency_policy': scientific['consistency_policy'],
+		'consistency_weight': scientific['consistency_weight'],
+		'consistency_beta': scientific['consistency_beta'],
+		'model_tag': identity.get('model_tag'),
+		'output_root': _required_mapping(stratigraphy_config, 'paths').get(
+			'output_root'
+		),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
+		'stratigraphy_state_sha256': _state_sha256(stratigraphy_state_dict),
+		'optimizer_group_identity': _optimizer_group_identity(
+			optimizer,
+			parameter_names=_stratigraphy_parameter_names(student, head),
+		),
+		'teacher_checkpoint_sha256': _required_sha256(
+			_required_mapping(inputs, 'teacher_checkpoint').get('sha256'),
+			'input_identities.teacher_checkpoint.sha256',
+		),
+		'student_init_checkpoint_sha256': _required_sha256(
+			_required_mapping(inputs, 'student_init_checkpoint').get('sha256'),
+			'input_identities.student_init_checkpoint.sha256',
+		),
+		'initial_student_state_sha256': _required_sha256(
+			initial_states.get('student'), 'initial_state_sha256.student'
+		),
+		'initial_head_state_sha256': _required_sha256(
+			initial_states.get('head'), 'initial_state_sha256.head'
+		),
+	}
+
+
 def _validate_multi_head_identity(  # noqa: C901
 	*,
 	identity: Mapping[str, object],
@@ -981,6 +1160,13 @@ def _validate_multi_head_identity(  # noqa: C901
 			stratigraphy_state_dict=stratigraphy_state_dict,
 		)
 		return
+	if _is_xy_neighbor_consensus_multi_head_config(stratigraphy_config):
+		_validate_xy_neighbor_consensus_multi_head_identity(
+			identity=identity,
+			stratigraphy_config=stratigraphy_config,
+			stratigraphy_state_dict=stratigraphy_state_dict,
+		)
+		return
 	_validate_multi_head_config_and_state(
 		stratigraphy_config,
 		{
@@ -992,6 +1178,8 @@ def _validate_multi_head_identity(  # noqa: C901
 	head = _required_mapping(stratigraphy_config, 'head')
 	config_identity = _required_mapping(stratigraphy_config, 'identity')
 	paths = _required_mapping(stratigraphy_config, 'paths')
+	scientific = _required_mapping(config_identity, 'scientific_identity')
+	_reject_xy_neighbor_consensus_fields_from_legacy_identity(identity, scientific)
 	if list(_head_ks(head.get('ks'))) != identity.get('head_ks'):
 		raise ValueError('checkpoint head_ks does not match stratigraphy config')
 	if identity.get('head_spec') != head.get('spec'):
@@ -1084,6 +1272,13 @@ def _validate_expected_multi_head_identity(
 	if _is_lateral_multi_head_config(config):
 		_validate_expected_lateral_multi_head_identity(identity, config)
 		return
+	if _is_xy_neighbor_consensus_multi_head_config(config):
+		_validate_expected_xy_neighbor_consensus_multi_head_identity(identity, config)
+		return
+	if identity.get('target_representation') not in {None, 'hard_viterbi_labels_v1'}:
+		raise ValueError(
+			'checkpoint multi-head identity is incompatible at target_representation'
+		)
 	head = _required_mapping(config, 'head')
 	config_identity = _required_mapping(config, 'identity')
 	scientific = _required_mapping(config_identity, 'scientific_identity')
@@ -1209,6 +1404,17 @@ def _is_lateral_multi_head_config(config: Mapping[str, object]) -> bool:
 	)
 
 
+def _is_xy_neighbor_consensus_multi_head_config(
+	config: Mapping[str, object],
+) -> bool:
+	pseudo_targets = config.get('pseudo_targets')
+	return (
+		isinstance(pseudo_targets, Mapping)
+		and pseudo_targets.get('target_representation')
+		== _XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION
+	)
+
+
 def _posterior_per_head_hashes(
 	manifest_path: Path,
 ) -> dict[str, dict[str, dict[str, str]]]:
@@ -1243,6 +1449,37 @@ def _lateral_per_head_target_hashes(
 		validate_array_semantics=False,
 	)
 	return _per_head_hard_target_hashes(manifest)
+
+
+def _xy_neighbor_consensus_per_head_target_hashes(
+	manifest_path: Path,
+) -> dict[str, dict[str, dict[str, str]]]:
+	return _xy_neighbor_consensus_target_provenance(manifest_path)[0]
+
+
+def _xy_neighbor_consensus_target_provenance(
+	manifest_path: Path,
+) -> tuple[
+	dict[str, dict[str, dict[str, str]]],
+	str,
+	Mapping[str, object],
+]:
+	"""Read the source-hard-only identity from a strict consensus manifest."""
+	manifest = load_multi_head_xy_neighbor_consensus_target_manifest(
+		manifest_path,
+		validate_array_semantics=False,
+	)
+	source_hard = _required_mapping(manifest, 'source_hard_manifest')
+	source_hard_manifest_sha256 = _required_sha256(
+		source_hard.get('sha256'),
+		'XY neighbor consensus source_hard_manifest.sha256',
+	)
+	smoothing = _required_mapping(manifest, 'smoothing')
+	return (
+		_per_head_hard_target_hashes(manifest),
+		source_hard_manifest_sha256,
+		_to_plain_value(smoothing),
+	)
 
 
 def _per_head_hard_target_hashes(
@@ -1289,6 +1526,7 @@ def _validate_soft_multi_head_identity(  # noqa: C901
 	config_identity = _required_mapping(stratigraphy_config, 'identity')
 	paths = _required_mapping(stratigraphy_config, 'paths')
 	scientific = _required_mapping(config_identity, 'scientific_identity')
+	_reject_xy_neighbor_consensus_fields_from_legacy_identity(identity, scientific)
 	if identity.get('head_spec') != head.get('spec') or identity.get('head_ks') != list(
 		_head_ks(head.get('ks'))
 	):
@@ -1399,6 +1637,7 @@ def _validate_lateral_multi_head_identity(  # noqa: C901
 	config_identity = _required_mapping(stratigraphy_config, 'identity')
 	paths = _required_mapping(stratigraphy_config, 'paths')
 	scientific = _required_mapping(config_identity, 'scientific_identity')
+	_reject_xy_neighbor_consensus_fields_from_legacy_identity(identity, scientific)
 	if identity.get('head_spec') != head.get('spec') or identity.get('head_ks') != list(
 		_head_ks(head.get('ks'))
 	):
@@ -1497,6 +1736,220 @@ def _validate_expected_lateral_multi_head_identity(
 			raise ValueError(
 				f'checkpoint lateral multi-head identity is incompatible at {key}'
 			)
+
+
+def _validate_xy_neighbor_consensus_multi_head_identity(  # noqa: C901, PLR0912
+	*,
+	identity: Mapping[str, object],
+	stratigraphy_config: Mapping[str, object],
+	stratigraphy_state_dict: Mapping[str, object],
+) -> None:
+	"""Validate schema-v5 XY-consensus identity before restoring state."""
+	if identity.get('schema_version') != 5:
+		raise ValueError('XY neighbor consensus checkpoint requires schema_version 5')
+	_validate_multi_head_config_and_state(
+		stratigraphy_config,
+		{
+			str(key): value
+			for key, value in stratigraphy_state_dict.items()
+			if isinstance(value, torch.Tensor)
+		},
+	)
+	head = _required_mapping(stratigraphy_config, 'head')
+	config_identity = _required_mapping(stratigraphy_config, 'identity')
+	paths = _required_mapping(stratigraphy_config, 'paths')
+	scientific = _required_mapping(config_identity, 'scientific_identity')
+	_reject_xy_neighbor_consensus_legacy_fields(identity, scientific)
+	if identity.get('head_spec') != head.get('spec') or identity.get('head_ks') != list(
+		_head_ks(head.get('ks'))
+	):
+		raise ValueError(
+			'XY neighbor consensus checkpoint head identity does not match config'
+		)
+	if identity.get('model_tag') != config_identity.get('model_tag') or identity.get(
+		'output_root'
+	) != paths.get('output_root'):
+		raise ValueError(
+			'XY neighbor consensus checkpoint model identity does not match config'
+		)
+	if identity.get('stratigraphy_state_sha256') != _state_sha256(
+		stratigraphy_state_dict
+	):
+		raise ValueError('checkpoint stratigraphy state SHA-256 mismatch')
+	target = identity.get('xy_neighbor_consensus_target_manifest')
+	if not isinstance(target, Mapping):
+		raise TypeError(
+			'XY neighbor consensus checkpoint target manifest must be a mapping'
+		)
+	path = Path(
+		_required_string(
+			target.get('path'),
+			'checkpoint xy_neighbor_consensus_target_manifest.path',
+		)
+	)
+	sha256 = _required_sha256(
+		target.get('sha256'),
+		'checkpoint xy_neighbor_consensus_target_manifest.sha256',
+	)
+	if sha256 != _file_sha256(path):
+		raise ValueError('checkpoint XY neighbor consensus manifest SHA-256 mismatch')
+	(
+		per_head_targets,
+		source_hard_manifest_sha256,
+		smoothing,
+	) = _xy_neighbor_consensus_target_provenance(path)
+	if identity.get('per_head_xy_neighbor_consensus_targets') != per_head_targets:
+		raise ValueError(
+			'checkpoint XY neighbor consensus target hashes do not match manifest'
+		)
+	for key, expected in (
+		('target_representation', scientific.get('target_representation')),
+		('target_semantics', scientific.get('target_semantics')),
+		(
+			'xy_neighbor_consensus_target_manifest_sha256',
+			scientific.get('xy_neighbor_consensus_target_manifest_sha256'),
+		),
+		('source_hard_manifest_sha256', scientific.get('source_hard_manifest_sha256')),
+		(
+			'xy_neighbor_consensus_smoothing',
+			_to_plain_value(scientific.get('xy_neighbor_consensus_smoothing')),
+		),
+		('consistency_policy', scientific.get('consistency_policy')),
+		('consistency_weight', scientific.get('consistency_weight')),
+		('consistency_beta', scientific.get('consistency_beta')),
+	):
+		if identity.get(key) != expected:
+			raise ValueError(f'checkpoint {key} does not match scientific identity')
+	if identity.get('xy_neighbor_consensus_target_manifest_sha256') != sha256:
+		raise ValueError(
+			'checkpoint XY neighbor consensus manifest hash does not match target '
+			'manifest'
+		)
+	if identity.get('per_head_xy_neighbor_consensus_targets') != scientific.get(
+		'xy_neighbor_consensus_target_head_hashes'
+	):
+		raise ValueError(
+			'checkpoint XY neighbor consensus hashes do not match scientific identity'
+		)
+	if identity.get('source_hard_manifest_sha256') != source_hard_manifest_sha256:
+		raise ValueError(
+			'checkpoint XY neighbor consensus source hard manifest does not match '
+			'target manifest'
+		)
+	if identity.get('xy_neighbor_consensus_smoothing') != smoothing:
+		raise ValueError(
+			'checkpoint XY neighbor consensus smoothing does not match target manifest'
+		)
+	if identity.get('scientific_identity_sha256') != scientific_identity_sha256(
+		scientific
+	):
+		raise ValueError('checkpoint scientific identity SHA-256 mismatch')
+	for key in (
+		'initial_student_state_sha256',
+		'initial_head_state_sha256',
+		'teacher_checkpoint_sha256',
+		'student_init_checkpoint_sha256',
+	):
+		_required_sha256(identity.get(key), f'checkpoint {key}')
+
+
+def _validate_expected_xy_neighbor_consensus_multi_head_identity(
+	identity: Mapping[str, object], config: Mapping[str, object]
+) -> None:
+	"""Reject cross-resume and stale source-hard consensus provenance."""
+	scientific = _required_mapping(
+		_required_mapping(config, 'identity'), 'scientific_identity'
+	)
+	teacher = _required_mapping(config, 'teacher')
+	student = _required_mapping(config, 'student')
+	checks = {
+		'target_representation': scientific.get('target_representation'),
+		'target_semantics': scientific.get('target_semantics'),
+		'xy_neighbor_consensus_target_manifest_sha256': scientific.get(
+			'xy_neighbor_consensus_target_manifest_sha256'
+		),
+		'per_head_xy_neighbor_consensus_targets': scientific.get(
+			'xy_neighbor_consensus_target_head_hashes'
+		),
+		'source_hard_manifest_sha256': scientific.get('source_hard_manifest_sha256'),
+		'xy_neighbor_consensus_smoothing': _to_plain_value(
+			scientific.get('xy_neighbor_consensus_smoothing')
+		),
+		'consistency_policy': scientific.get('consistency_policy'),
+		'consistency_weight': scientific.get('consistency_weight'),
+		'consistency_beta': scientific.get('consistency_beta'),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
+		'model_tag': _required_mapping(config, 'identity').get('model_tag'),
+		'output_root': _required_mapping(config, 'paths').get('output_root'),
+		'teacher_checkpoint_sha256': _file_sha256(
+			Path(_required_string(teacher.get('checkpoint'), 'teacher.checkpoint'))
+		),
+		'student_init_checkpoint_sha256': _file_sha256(
+			Path(
+				student.get('init_checkpoint')
+				or _required_string(teacher.get('checkpoint'), 'teacher.checkpoint')
+			)
+		),
+	}
+	for key, expected in checks.items():
+		if identity.get(key) != expected:
+			raise ValueError(
+				'checkpoint XY neighbor consensus multi-head identity is '
+				f'incompatible at {key}'
+			)
+
+
+def _reject_xy_neighbor_consensus_legacy_fields(
+	identity: Mapping[str, object], scientific: Mapping[str, object]
+) -> None:
+	"""Reject every non-v5 field, including posterior and M5-LS carry-over."""
+	unknown_identity = sorted(
+		set(identity) - _XY_NEIGHBOR_CONSENSUS_CHECKPOINT_IDENTITY_FIELDS
+	)
+	if unknown_identity:
+		raise ValueError(
+			'XY neighbor consensus checkpoint must not contain legacy or unknown '
+			f'identity fields: {unknown_identity!r}'
+		)
+	unknown_scientific = sorted(
+		set(scientific) - _XY_NEIGHBOR_CONSENSUS_SCIENTIFIC_IDENTITY_FIELDS
+	)
+	if unknown_scientific:
+		raise ValueError(
+			'XY neighbor consensus scientific identity must not contain legacy or '
+			f'unknown fields: {unknown_scientific!r}'
+		)
+
+
+def _reject_xy_neighbor_consensus_fields_from_legacy_identity(
+	identity: Mapping[str, object], scientific: Mapping[str, object]
+) -> None:
+	"""Keep schema-v2 through v4 identities disjoint from the XY successor."""
+	forbidden: list[str] = []
+	for prefix, values in (
+		('checkpoint', identity),
+		('scientific_identity', scientific),
+	):
+		forbidden.extend(
+			f'{prefix}.{key}'
+			for key in values
+			if isinstance(key, str) and key.startswith('xy_neighbor_consensus_')
+		)
+		forbidden.extend(
+			f'{prefix}.{key}'
+			for key, expected in (
+				('target_representation', _XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION),
+				('target_semantics', _XY_NEIGHBOR_CONSENSUS_TARGET_SEMANTICS),
+				('consistency_policy', _XY_NEIGHBOR_CONSENSUS_CONSISTENCY_POLICY),
+				('experiment_role', _XY_NEIGHBOR_CONSENSUS_EXPERIMENT_ROLE),
+			)
+			if values.get(key) == expected
+		)
+	if forbidden:
+		raise ValueError(
+			'legacy multi-head checkpoint identity must not contain XY neighbor '
+			f'consensus fields: {sorted(forbidden)!r}'
+		)
 
 
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, object]:

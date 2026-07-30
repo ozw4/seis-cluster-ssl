@@ -65,8 +65,7 @@ def test_strat_checkpoint_extracts_student_embeddings_and_metadata(
 	assert embeddings.shape == (2, 2, 2, 12)
 	assert loaded_keys
 	assert not any(
-		key == 'prototypes' or key.startswith('projection.')
-		for key in loaded_keys[0]
+		key == 'prototypes' or key.startswith('projection.') for key in loaded_keys[0]
 	)
 
 	checkpoint = load_checkpoint(config['embeddings']['checkpoint'], map_location='cpu')
@@ -678,12 +677,8 @@ def test_soft_multi_head_checkpoint_resumes_and_rejects_identity_mixes(
 	different_manifest_path.write_text('{"posterior": false}', encoding='utf-8')
 	different_pseudo_targets = different_manifest_config['pseudo_targets']
 	different_pseudo_targets['manifest'] = str(different_manifest_path)
-	different_scientific = different_manifest_config['identity'][
-		'scientific_identity'
-	]
-	different_scientific['posterior_manifest_sha256'] = _sha256(
-		different_manifest_path
-	)
+	different_scientific = different_manifest_config['identity']['scientific_identity']
+	different_scientific['posterior_manifest_sha256'] = _sha256(different_manifest_path)
 	different_scientific['posterior_head_hashes'] = {
 		str(k): {
 			'survey': {
@@ -747,16 +742,14 @@ def test_lateral_multi_head_checkpoint_uses_schema_four_and_rejects_hard_resume(
 	assert inspection['resume_compatibility']['compatible'] is True
 	metadata = _stratigraphy_pretext_metadata(payload)
 	assert metadata is not None
-	assert (
-		metadata['target_representation']
-		== 'lateral_mean_field_hard_labels_v1'
-	)
+	assert metadata['target_representation'] == 'lateral_mean_field_hard_labels_v1'
 	assert metadata['lateral_target_manifest_path'] == str(
 		config['pseudo_targets']['manifest']
 	)
-	assert metadata['per_head_lateral_target_sha256'] == checkpoint_identity[
-		'per_head_lateral_targets'
-	]
+	assert (
+		metadata['per_head_lateral_target_sha256']
+		== checkpoint_identity['per_head_lateral_targets']
+	)
 
 	resumed_student, resumed_head, resumed_optimizer = _new_multi_head_components()
 	resume_state = restore_strat_hmm_training_checkpoint(
@@ -877,6 +870,52 @@ def test_lateral_multi_head_checkpoint_rejects_soft_and_stale_identities(
 	assert isinstance(stale_scales, dict)
 	stale_scales['6'] = 2.0
 	reject(lateral_payload, stale_scale_config, 'lateral_smoothing')
+
+
+@pytest.mark.parametrize('representation', ['hard', 'soft', 'lateral'])
+def test_legacy_multi_head_checkpoint_rejects_xy_consensus_identity_fields(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	representation: str,
+) -> None:
+	"""Schemas v2 through v4 cannot carry successor-only provenance."""
+	config = {
+		'hard': lambda: _multi_head_resume_config(
+			tmp_path, monkeypatch, variant='nocons'
+		),
+		'soft': lambda: _soft_multi_head_resume_config(tmp_path, monkeypatch),
+		'lateral': lambda: _lateral_multi_head_resume_config(tmp_path, monkeypatch),
+	}[representation]()
+	student, head, optimizer = _new_multi_head_components()
+	payload = load_checkpoint(
+		_save_multi_head_resume_checkpoint(
+			tmp_path / f'{representation}-checkpoint.pt',
+			config=config,
+			student=student,
+			head=head,
+			optimizer=optimizer,
+		),
+		map_location='cpu',
+	)
+	stratigraphy_config = payload['stratigraphy_config']
+	assert isinstance(stratigraphy_config, dict)
+	config_identity = stratigraphy_config['identity']
+	assert isinstance(config_identity, dict)
+	scientific = config_identity['scientific_identity']
+	assert isinstance(scientific, dict)
+	scientific['xy_neighbor_consensus_target_manifest_sha256'] = 'c' * 64
+	checkpoint_identity = payload['stratigraphy_checkpoint']
+	assert isinstance(checkpoint_identity, dict)
+	checkpoint_identity['xy_neighbor_consensus_target_manifest_sha256'] = 'c' * 64
+	checkpoint_identity['scientific_identity_sha256'] = (
+		strat_hmm_checkpoint.scientific_identity_sha256(scientific)
+	)
+
+	with pytest.raises(
+		ValueError,
+		match='xy_neighbor_consensus_target_manifest_sha256',
+	):
+		validate_stratigraphy_checkpoint_payload(payload)
 
 
 def test_hard_multi_head_checkpoint_cannot_resume_as_soft(
@@ -1092,17 +1131,20 @@ def test_multi_head_rolling_checkpoint_persists_resume_history_and_reports(
 	assert [event['sequence'] for event in events] == [0, 1]
 	assert [event['global_step'] for event in events] == [2, 2]
 	assert [event['checkpoint_kind'] for event in events] == ['step', 'epoch']
-	assert len(
-		{
-			(
-				event['epoch'],
-				event['global_step'],
-				event['checkpoint_kind'],
-				event['batch_index'],
-			)
-			for event in events
-		}
-	) == 2
+	assert (
+		len(
+			{
+				(
+					event['epoch'],
+					event['global_step'],
+					event['checkpoint_kind'],
+					event['batch_index'],
+				)
+				for event in events
+			}
+		)
+		== 2
+	)
 	best = load_checkpoint(second.best_path, map_location='cpu')
 	best_selection = best['checkpoint_selection']
 	assert isinstance(best_selection, dict)
@@ -1114,9 +1156,12 @@ def test_multi_head_rolling_checkpoint_persists_resume_history_and_reports(
 	) as handle:
 		rows = list(csv.DictReader(handle))
 	assert [row['sequence'] for row in rows] == ['0', '1']
-	assert json.loads(
-		(tmp_path / 'checkpoint_selection_summary.json').read_text(encoding='utf-8')
-	) == selection
+	assert (
+		json.loads(
+			(tmp_path / 'checkpoint_selection_summary.json').read_text(encoding='utf-8')
+		)
+		== selection
+	)
 	corrupt_latest = deepcopy(latest)
 	corrupt_latest['epoch'] = 0
 	corrupt_selection = corrupt_latest['checkpoint_selection']
@@ -1202,9 +1247,12 @@ def test_multi_head_rolling_checkpoint_recovers_interrupted_best_update(
 	assert best['global_step'] == 25500
 	assert best['training_state']['checkpoint_kind'] == 'step'
 	assert not (tmp_path / '.checkpoint_selection_transaction.json').exists()
-	assert json.loads(
-		(tmp_path / 'checkpoint_selection_summary.json').read_text(encoding='utf-8')
-	) == latest['checkpoint_selection']
+	assert (
+		json.loads(
+			(tmp_path / 'checkpoint_selection_summary.json').read_text(encoding='utf-8')
+		)
+		== latest['checkpoint_selection']
+	)
 	with (tmp_path / 'checkpoint_selection_history.csv').open(
 		newline='', encoding='utf-8'
 	) as handle:
@@ -1727,35 +1775,35 @@ def _valid_multi_head_checkpoint_payload(
 		stratigraphy_config={
 			'paths': {'output_root': str(tmp_path / 'run')},
 			'pseudo_targets': {'manifest': str(manifest_path)},
-		'head': {
-			'spec': 'multi_resolution_ordered_prototypes_v1',
-			'ks': [6, 8, 10],
-			'projection_dim': 2,
-			'temperature': 0.1,
-			'normalize': True,
-		},
-		'loss': {
-			'prototype_weight': 1.0,
-			'usage_weight': 0.005,
-			'consistency_weight': 0.1,
-			'consistency_beta': 0.1,
-			'distillation_weight': 0.2,
-		},
-		'train': {'lr': 3.0e-4, 'encoder_lr': 1.0e-5},
-		'identity': {
-			'scientific_identity': {
-				'target_manifest_sha256': _sha256(manifest_path),
-				'target_head_hashes': hashes,
-				'head_temperature': 0.1,
-				'head_normalize': True,
+			'head': {
+				'spec': 'multi_resolution_ordered_prototypes_v1',
+				'ks': [6, 8, 10],
+				'projection_dim': 2,
+				'temperature': 0.1,
+				'normalize': True,
+			},
+			'loss': {
 				'prototype_weight': 1.0,
 				'usage_weight': 0.005,
-				'consistency_policy': 'normalized_order_smooth_l1_v1',
 				'consistency_weight': 0.1,
 				'consistency_beta': 0.1,
 				'distillation_weight': 0.2,
-			}
-		},
+			},
+			'train': {'lr': 3.0e-4, 'encoder_lr': 1.0e-5},
+			'identity': {
+				'scientific_identity': {
+					'target_manifest_sha256': _sha256(manifest_path),
+					'target_head_hashes': hashes,
+					'head_temperature': 0.1,
+					'head_normalize': True,
+					'prototype_weight': 1.0,
+					'usage_weight': 0.005,
+					'consistency_policy': 'normalized_order_smooth_l1_v1',
+					'consistency_weight': 0.1,
+					'consistency_beta': 0.1,
+					'distillation_weight': 0.2,
+				}
+			},
 		},
 		metrics={'loss': 1.0},
 		global_step=1,
@@ -1769,7 +1817,7 @@ def _valid_multi_head_checkpoint_payload(
 			'initial_state_sha256': {
 				'student': '0' * 64,
 				'head': '1' * 64,
-			}
+			},
 		},
 	)
 	return load_checkpoint(checkpoint_path, map_location='cpu')
@@ -1808,8 +1856,7 @@ def _multi_head_manifest(
 			k: {
 				'surveys': {
 					survey_id: {
-						name: {'sha256': digest}
-						for name, digest in targets.items()
+						name: {'sha256': digest} for name, digest in targets.items()
 					}
 					for survey_id, targets in surveys.items()
 				}
@@ -1830,8 +1877,7 @@ def _posterior_manifest(
 			k: {
 				'surveys': {
 					survey_id: {
-						name: {'sha256': digest}
-						for name, digest in targets.items()
+						name: {'sha256': digest} for name, digest in targets.items()
 					}
 					for survey_id, targets in surveys.items()
 				}

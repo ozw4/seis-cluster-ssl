@@ -163,8 +163,14 @@ _STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY = 'normalized_order_smooth_l1_v1'
 _STRAT_HMM_HARD_TARGET_REPRESENTATION = 'hard_viterbi_labels_v1'
 _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION = 'ordered_path_state_posterior_v1'
 _STRAT_HMM_LATERAL_TARGET_REPRESENTATION = 'lateral_mean_field_hard_labels_v1'
+_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION = (
+	'xy_neighbor_consensus_hard_labels_v1'
+)
 _STRAT_HMM_POSTERIOR_SEMANTICS = 'ordered_path_cost_gibbs_state_marginal_v1'
 _STRAT_HMM_LATERAL_SEMANTICS = 'ordered_hmm_edge_aware_lateral_mean_field_hard_v1'
+_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_SEMANTICS = (
+	'xy_neighbor_consensus_hard_label_smoothing_v1'
+)
 
 # These fields are deliberately centralized so checkpoint identity construction can
 # distinguish scientific settings from machine-specific execution settings.
@@ -190,6 +196,9 @@ MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS = frozenset(
 		'source_hard_manifest_sha256',
 		'source_posterior_manifest_sha256',
 		'lateral_smoothing',
+		'xy_neighbor_consensus_target_manifest_sha256',
+		'xy_neighbor_consensus_target_head_hashes',
+		'xy_neighbor_consensus_smoothing',
 		'supervised_loss',
 		'consistency_policy',
 		'prototype_weight',
@@ -206,6 +215,114 @@ MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS = frozenset(
 		'train',
 	}
 )
+
+_XY_NEIGHBOR_CONSENSUS_SCIENTIFIC_IDENTITY_FIELDS = frozenset(
+	{
+		'experiment_role',
+		'variant',
+		'head_spec',
+		'head_ks',
+		'head_projection_dim',
+		'head_temperature',
+		'head_normalize',
+		'target_representation',
+		'target_semantics',
+		'xy_neighbor_consensus_target_manifest_sha256',
+		'xy_neighbor_consensus_target_head_hashes',
+		'source_hard_manifest_sha256',
+		'xy_neighbor_consensus_smoothing',
+		'supervised_loss',
+		'consistency_policy',
+		'prototype_weight',
+		'usage_weight',
+		'consistency_weight',
+		'consistency_beta',
+		'distillation_weight',
+		'teacher_checkpoint',
+		'student_init_checkpoint',
+		'student_unfreeze_top_blocks',
+		'model',
+		'data',
+		'zero_mask',
+		'train',
+	}
+)
+
+_MULTI_HEAD_REPRESENTATION_SPECIFIC_IDENTITY_FIELDS = frozenset(
+	{
+		'target_representation',
+		'target_manifest_sha256',
+		'target_head_hashes',
+		'posterior_manifest_sha256',
+		'posterior_semantics',
+		'posterior_cost_temperature',
+		'posterior_head_hashes',
+		'lateral_target_manifest_sha256',
+		'lateral_target_head_hashes',
+		'target_semantics',
+		'source_hard_manifest_sha256',
+		'source_posterior_manifest_sha256',
+		'lateral_smoothing',
+		'xy_neighbor_consensus_target_manifest_sha256',
+		'xy_neighbor_consensus_target_head_hashes',
+		'xy_neighbor_consensus_smoothing',
+	}
+)
+_MULTI_HEAD_COMMON_SCIENTIFIC_IDENTITY_FIELDS = (
+	MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS
+	- _MULTI_HEAD_REPRESENTATION_SPECIFIC_IDENTITY_FIELDS
+)
+_MULTI_HEAD_HARD_SCIENTIFIC_IDENTITY_FIELDS = (
+	_MULTI_HEAD_COMMON_SCIENTIFIC_IDENTITY_FIELDS
+	| frozenset(
+		{
+			'target_representation',
+			'target_manifest_sha256',
+			'target_head_hashes',
+		}
+	)
+)
+_MULTI_HEAD_POSTERIOR_SCIENTIFIC_IDENTITY_FIELDS = (
+	_MULTI_HEAD_COMMON_SCIENTIFIC_IDENTITY_FIELDS
+	| frozenset(
+		{
+			'target_representation',
+			'posterior_manifest_sha256',
+			'posterior_semantics',
+			'posterior_cost_temperature',
+			'posterior_head_hashes',
+		}
+	)
+)
+_MULTI_HEAD_LATERAL_SCIENTIFIC_IDENTITY_FIELDS = (
+	_MULTI_HEAD_COMMON_SCIENTIFIC_IDENTITY_FIELDS
+	| frozenset(
+		{
+			'target_representation',
+			'target_semantics',
+			'lateral_target_manifest_sha256',
+			'lateral_target_head_hashes',
+			'source_hard_manifest_sha256',
+			'source_posterior_manifest_sha256',
+			'lateral_smoothing',
+		}
+	)
+)
+
+
+def _multi_head_scientific_identity_fields(
+	target_representation: str | None,
+) -> frozenset[str]:
+	"""Return the closed identity field set for one target representation."""
+	if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION:
+		return _MULTI_HEAD_POSTERIOR_SCIENTIFIC_IDENTITY_FIELDS
+	if target_representation == _STRAT_HMM_LATERAL_TARGET_REPRESENTATION:
+		return _MULTI_HEAD_LATERAL_SCIENTIFIC_IDENTITY_FIELDS
+	if target_representation == _STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION:
+		return _XY_NEIGHBOR_CONSENSUS_SCIENTIFIC_IDENTITY_FIELDS
+	return _MULTI_HEAD_HARD_SCIENTIFIC_IDENTITY_FIELDS
+
+
 MULTI_HEAD_RUNTIME_IDENTITY_FIELDS = frozenset(
 	{'device', 'workers', 'stage_timing', 'cache_directory', 'resume_path'}
 )
@@ -361,11 +478,15 @@ def resolve_strat_hmm_pretext_config(config: _T) -> Config:
 			pseudo_targets
 		)
 		if (
-			target_representation == _STRAT_HMM_LATERAL_TARGET_REPRESENTATION
+			target_representation
+			in {
+				_STRAT_HMM_LATERAL_TARGET_REPRESENTATION,
+				_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION,
+			}
 			and pseudo_targets['min_confidence'] != 0.0
 		):
 			raise ValueError(
-				'pseudo_targets.min_confidence must be 0.0 for lateral hard targets'
+				'pseudo_targets.min_confidence must be 0.0 for immutable hard targets'
 			)
 		manifest = _validate_strat_hmm_multi_head_manifest(
 			pseudo_targets,
@@ -502,7 +623,7 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912, PLR0915
 	)
 	_validate_allowed_keys(
 		scientific,
-		MULTI_HEAD_SCIENTIFIC_IDENTITY_FIELDS,
+		_multi_head_scientific_identity_fields(target_representation),
 		prefix='identity.scientific_identity',
 	)
 	if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION:
@@ -542,6 +663,45 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912, PLR0915
 				scientific, key, prefix='identity.scientific_identity'
 			)
 		_validate_m5_ls_scientific_identity(
+			scientific,
+			model_tag=model_tag,
+			manifest_sha256=manifest_sha256,
+			manifest=manifest,
+			loss=_required_mapping(config, 'loss'),
+		)
+		runtime = value.get('runtime_identity')
+		if runtime is not None:
+			_validate_allowed_keys(
+				runtime,
+				MULTI_HEAD_RUNTIME_IDENTITY_FIELDS,
+				prefix='identity.runtime_identity',
+			)
+		return
+	if target_representation == _STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION:
+		for key in (
+			'experiment_role',
+			'variant',
+			'target_representation',
+			'target_semantics',
+			'xy_neighbor_consensus_target_manifest_sha256',
+			'xy_neighbor_consensus_target_head_hashes',
+			'source_hard_manifest_sha256',
+			'xy_neighbor_consensus_smoothing',
+			'supervised_loss',
+			'head_spec',
+			'head_ks',
+			'consistency_policy',
+			'consistency_weight',
+		):
+			_validate_required_key(
+				scientific, key, prefix='identity.scientific_identity'
+			)
+		_validate_allowed_keys(
+			scientific,
+			_XY_NEIGHBOR_CONSENSUS_SCIENTIFIC_IDENTITY_FIELDS,
+			prefix='identity.scientific_identity',
+		)
+		_validate_xy_neighbor_consensus_scientific_identity(
 			scientific,
 			model_tag=model_tag,
 			manifest_sha256=manifest_sha256,
@@ -614,6 +774,14 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912, PLR0915
 			'identity.scientific_identity.consistency_policy must be '
 			f'{_STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY!r}'
 		)
+	if (
+		'target_representation' in scientific
+		and scientific['target_representation'] != _STRAT_HMM_HARD_TARGET_REPRESENTATION
+	):
+		raise ValueError(
+			'identity.scientific_identity.target_representation must be '
+			f'{_STRAT_HMM_HARD_TARGET_REPRESENTATION!r} when recorded'
+		)
 	runtime = value.get('runtime_identity')
 	if runtime is not None:
 		_validate_allowed_keys(
@@ -643,24 +811,6 @@ def _expected_or_record_multi_head_scientific_identity(
 		'head_projection_dim': head['projection_dim'],
 		'head_temperature': head['temperature'],
 		'head_normalize': head['normalize'],
-		**(
-			{
-				'target_representation': target_representation,
-				'posterior_manifest_sha256': _file_sha256(
-					str(_required_mapping(config, 'pseudo_targets')['manifest'])
-				),
-				'posterior_semantics': manifest['posterior_semantics'],
-				'posterior_cost_temperature': manifest['cost_temperature'],
-				'posterior_head_hashes': _multi_head_posterior_hashes(manifest),
-				'supervised_loss': 'soft_categorical_cross_entropy_v1',
-			}
-			if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION
-			else (
-				{}
-				if target_representation == _STRAT_HMM_LATERAL_TARGET_REPRESENTATION
-				else {'target_head_hashes': _multi_head_target_hashes(manifest)}
-			)
-		),
 		'prototype_weight': loss['prototype_weight'],
 		'usage_weight': loss['usage_weight'],
 		'consistency_weight': loss['consistency_weight'],
@@ -674,6 +824,24 @@ def _expected_or_record_multi_head_scientific_identity(
 		'zero_mask': zero_mask,
 		'train': {key: train[key] for key in MULTI_HEAD_SCIENTIFIC_TRAIN_FIELDS},
 	}
+	if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION:
+		expected.update(
+			{
+				'target_representation': target_representation,
+				'posterior_manifest_sha256': _file_sha256(
+					str(_required_mapping(config, 'pseudo_targets')['manifest'])
+				),
+				'posterior_semantics': manifest['posterior_semantics'],
+				'posterior_cost_temperature': manifest['cost_temperature'],
+				'posterior_head_hashes': _multi_head_posterior_hashes(manifest),
+				'supervised_loss': 'soft_categorical_cross_entropy_v1',
+			}
+		)
+	elif target_representation not in {
+		_STRAT_HMM_LATERAL_TARGET_REPRESENTATION,
+		_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION,
+	}:
+		expected['target_head_hashes'] = _multi_head_target_hashes(manifest)
 	if target_representation == _STRAT_HMM_LATERAL_TARGET_REPRESENTATION:
 		pseudo_targets = _required_mapping(config, 'pseudo_targets')
 		expected.update(
@@ -691,6 +859,27 @@ def _expected_or_record_multi_head_scientific_identity(
 					manifest, 'source_posterior_manifest'
 				),
 				'lateral_smoothing': _lateral_smoothing_identity(manifest),
+				'supervised_loss': 'structured_hmm_hard_categorical_v1',
+			}
+		)
+	if target_representation == _STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION:
+		pseudo_targets = _required_mapping(config, 'pseudo_targets')
+		expected.update(
+			{
+				'target_representation': target_representation,
+				'target_semantics': manifest['target_semantics'],
+				'xy_neighbor_consensus_target_manifest_sha256': _file_sha256(
+					str(pseudo_targets['manifest'])
+				),
+				'xy_neighbor_consensus_target_head_hashes': (
+					_multi_head_target_hashes(manifest)
+				),
+				'source_hard_manifest_sha256': _manifest_reference_sha256(
+					manifest, 'source_hard_manifest'
+				),
+				'xy_neighbor_consensus_smoothing': (
+					_xy_neighbor_consensus_smoothing_identity(manifest)
+				),
 				'supervised_loss': 'structured_hmm_hard_categorical_v1',
 			}
 		)
@@ -899,11 +1088,13 @@ def _strat_hmm_multi_head_target_representation(
 		_STRAT_HMM_HARD_TARGET_REPRESENTATION,
 		_STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION,
 		_STRAT_HMM_LATERAL_TARGET_REPRESENTATION,
+		_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION,
 	}:
 		supported = [
 			_STRAT_HMM_HARD_TARGET_REPRESENTATION,
 			_STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION,
 			_STRAT_HMM_LATERAL_TARGET_REPRESENTATION,
+			_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION,
 		]
 		raise ValueError(
 			f'pseudo_targets.target_representation must be one of {supported!r}'
@@ -932,11 +1123,20 @@ def _validate_strat_hmm_multi_head_manifest(
 			str(pseudo_targets['manifest']),
 			validate_array_semantics=False,
 		)
-	else:
+	elif target_representation == _STRAT_HMM_LATERAL_TARGET_REPRESENTATION:
 		lateral_targets = importlib.import_module(
 			'seis_ssl_cluster.stratigraphy.lateral_targets'
 		)
 		manifest = lateral_targets.load_multi_head_lateral_target_manifest(
+			str(pseudo_targets['manifest']), validate_array_semantics=False
+		)
+	else:
+		xy_neighbor_consensus_targets = importlib.import_module(
+			'seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets'
+		)
+		loader_name = 'load_multi_head_xy_neighbor_consensus_target_manifest'
+		load_manifest = getattr(xy_neighbor_consensus_targets, loader_name)
+		manifest = load_manifest(
 			str(pseudo_targets['manifest']), validate_array_semantics=False
 		)
 	if tuple(manifest['head_ks']) != tuple(head['ks']):
@@ -1004,15 +1204,13 @@ def _multi_head_posterior_hashes(
 	return result
 
 
-def _manifest_reference_sha256(
-	manifest: Mapping[str, object], key: str
-) -> str:
+def _manifest_reference_sha256(manifest: Mapping[str, object], key: str) -> str:
 	reference = manifest.get(key)
 	if not isinstance(reference, Mapping):
-		raise TypeError(f'validated lateral manifest {key} must be a mapping')
+		raise TypeError(f'validated target manifest {key} must be a mapping')
 	value = reference.get('sha256')
 	if not isinstance(value, str):
-		raise TypeError(f'validated lateral manifest {key}.sha256 must be a string')
+		raise TypeError(f'validated target manifest {key}.sha256 must be a string')
 	return value
 
 
@@ -1035,6 +1233,18 @@ def _lateral_smoothing_identity(manifest: Mapping[str, object]) -> dict[str, obj
 			raise TypeError('validated lateral manifest resolved scales are invalid')
 		resolved_scales[str(k)] = deepcopy(resolved)
 	return {**deepcopy(dict(smoothing)), 'resolved_scales': resolved_scales}
+
+
+def _xy_neighbor_consensus_smoothing_identity(
+	manifest: Mapping[str, object],
+) -> dict[str, object]:
+	"""Return the fixed XY consensus policy recorded by an immutable export."""
+	smoothing = manifest.get('smoothing')
+	if not isinstance(smoothing, Mapping):
+		raise TypeError(
+			'validated XY neighbor consensus manifest smoothing must be a mapping'
+		)
+	return deepcopy(dict(smoothing))
 
 
 def _validate_m5_u_scientific_identity(
@@ -1077,9 +1287,7 @@ def _validate_m5_u_scientific_identity(
 			'loss.prototype_weight must be 1.0 for soft posterior training'
 		)
 	if loss['usage_weight'] != 0.005:
-		raise ValueError(
-			'loss.usage_weight must be 0.005 for soft posterior training'
-		)
+		raise ValueError('loss.usage_weight must be 0.005 for soft posterior training')
 	if loss['distillation_weight'] != 0.2:
 		raise ValueError(
 			'loss.distillation_weight must be 0.2 for soft posterior training'
@@ -1131,6 +1339,58 @@ def _validate_m5_ls_scientific_identity(
 	):
 		if loss[key] != value:
 			raise ValueError(f'loss.{key} must be {value} for lateral hard training')
+
+
+def _validate_xy_neighbor_consensus_scientific_identity(
+	scientific: Mapping[str, object],
+	*,
+	model_tag: object,
+	manifest_sha256: str,
+	manifest: Mapping[str, object],
+	loss: Mapping[str, object],
+) -> None:
+	"""Keep XY consensus hard labels independent of M4, M5-U, and M5-LS."""
+	expected = {
+		'experiment_role': 'multi_head_ordered_xy_neighbor_consensus_hard_pretext',
+		'variant': 'xycons1_nocons',
+		'target_representation': (
+			_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION
+		),
+		'target_semantics': _STRAT_HMM_XY_NEIGHBOR_CONSENSUS_SEMANTICS,
+		'xy_neighbor_consensus_target_manifest_sha256': manifest_sha256,
+		'xy_neighbor_consensus_target_head_hashes': _multi_head_target_hashes(manifest),
+		'source_hard_manifest_sha256': _manifest_reference_sha256(
+			manifest, 'source_hard_manifest'
+		),
+		'xy_neighbor_consensus_smoothing': (
+			_xy_neighbor_consensus_smoothing_identity(manifest)
+		),
+		'supervised_loss': 'structured_hmm_hard_categorical_v1',
+		'head_spec': _STRAT_HMM_MULTI_HEAD_SPEC,
+		'head_ks': [6, 8, 10],
+		'consistency_policy': 'disabled_for_xy_neighbor_consensus_v1',
+		'consistency_weight': 0.0,
+	}
+	if model_tag != 'strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1':
+		raise ValueError(
+			'identity.model_tag does not match XY consensus xycons1_nocons'
+		)
+	for key, value in expected.items():
+		if scientific.get(key) != value:
+			raise ValueError(
+				f'identity.scientific_identity.{key} does not match XY neighbor '
+				'consensus hard-label contract'
+			)
+	for key, value in (
+		('consistency_weight', 0.0),
+		('prototype_weight', 1.0),
+		('usage_weight', 0.005),
+		('distillation_weight', 0.2),
+	):
+		if loss[key] != value:
+			raise ValueError(
+				f'loss.{key} must be {value} for XY consensus hard-label training'
+			)
 
 
 def _validate_strat_hmm_pretext_cross_section_values(

@@ -75,6 +75,13 @@ from seis_ssl_cluster.stratigraphy.targets import (
 	validate_pseudo_target_arrays,
 	write_pseudo_target,
 )
+from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus import (
+	XY_NEIGHBOR_CONSENSUS_HARD_LABEL_SMOOTHING_POLICY,
+	XY_NEIGHBOR_CONSENSUS_HARD_LABEL_SMOOTHING_SEMANTICS,
+	XYNeighborConsensusDiagnostics,
+	XYNeighborConsensusResult,
+	smooth_xy_neighbor_consensus_hard_labels,
+)
 
 _HMM_DECODE_EXPORTS = {
 	'LogitHMMPseudoTarget',
@@ -103,12 +110,24 @@ _LATERAL_TARGET_EXPORTS = {
 	'validate_multi_head_lateral_target_manifest',
 }
 
+_XY_NEIGHBOR_CONSENSUS_TARGET_EXPORTS = {
+	'MultiHeadXYNeighborConsensusTargetExportConfig',
+	'MultiHeadXYNeighborConsensusTargetExportPlan',
+	'export_multi_head_xy_neighbor_consensus_targets',
+	'load_multi_head_xy_neighbor_consensus_target_manifest',
+	'plan_multi_head_xy_neighbor_consensus_target_exports',
+	'resolve_multi_head_xy_neighbor_consensus_target_export_config',
+	'validate_multi_head_xy_neighbor_consensus_target_manifest',
+}
+
 __all__ = [
 	'CANONICAL_KS',
 	'GLOBAL_VALID_TOKENS',
 	'LATERAL_SMOOTHING_SEMANTICS',
 	'MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1',
 	'POSTERIOR_SEMANTICS',
+	'XY_NEIGHBOR_CONSENSUS_HARD_LABEL_SMOOTHING_POLICY',
+	'XY_NEIGHBOR_CONSENSUS_HARD_LABEL_SMOOTHING_SEMANTICS',
 	'ExportedPseudoTargetResult',
 	'LateralCostUpdateResult',
 	'LateralMessageResult',
@@ -120,6 +139,8 @@ __all__ = [
 	'MultiHeadPseudoTargetExportPlan',
 	'MultiHeadStatePosteriorExportConfig',
 	'MultiHeadStatePosteriorExportPlan',
+	'MultiHeadXYNeighborConsensusTargetExportConfig',
+	'MultiHeadXYNeighborConsensusTargetExportPlan',
 	'MultiResolutionOrderedPrototypeHeads',
 	'MultiResolutionOrderedPrototypeOutput',
 	'OrderedPrototypeHead',
@@ -128,6 +149,8 @@ __all__ = [
 	'StratPseudoTargetArrays',
 	'StratPseudoTargetInput',
 	'StratPseudoTargetPaths',
+	'XYNeighborConsensusDiagnostics',
+	'XYNeighborConsensusResult',
 	'apply_lateral_message_to_emission_costs',
 	'boundary_distance_tokens',
 	'boundary_weight_tokens',
@@ -143,10 +166,12 @@ __all__ = [
 	'export_multi_head_lateral_targets',
 	'export_multi_head_pseudo_targets',
 	'export_multi_head_state_posteriors',
+	'export_multi_head_xy_neighbor_consensus_targets',
 	'feature_distillation_loss',
 	'load_multi_head_lateral_target_manifest',
 	'load_multi_head_state_posterior_manifest',
 	'load_multi_head_target_manifest',
+	'load_multi_head_xy_neighbor_consensus_target_manifest',
 	'load_pseudo_target_arrays',
 	'load_pseudo_target_metadata',
 	'median_scale_with_floor',
@@ -156,6 +181,7 @@ __all__ = [
 	'plan_multi_head_lateral_target_exports',
 	'plan_multi_head_pseudo_target_exports',
 	'plan_multi_head_state_posterior_exports',
+	'plan_multi_head_xy_neighbor_consensus_target_exports',
 	'plan_shuffled_hmm_pseudo_targets',
 	'prepare_hmm_cluster_label_pseudo_target_exports',
 	'pseudo_target_paths',
@@ -163,9 +189,11 @@ __all__ = [
 	'resolve_multi_head_lateral_target_export_config',
 	'resolve_multi_head_pseudo_target_export_config',
 	'resolve_multi_head_state_posterior_export_config',
+	'resolve_multi_head_xy_neighbor_consensus_target_export_config',
 	'shuffle_pseudo_target_arrays',
 	'shuffle_strat_hmm_pseudo_targets',
 	'smooth_and_redecode_ordered_trace',
+	'smooth_xy_neighbor_consensus_hard_labels',
 	'soft_categorical_cross_entropy',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
@@ -173,6 +201,7 @@ __all__ = [
 	'validate_multi_head_state_posterior_manifest',
 	'validate_multi_head_target_manifest',
 	'validate_multi_head_target_publication_preflight',
+	'validate_multi_head_xy_neighbor_consensus_target_manifest',
 	'validate_pseudo_target_arrays',
 	'write_pseudo_target',
 ]
@@ -193,5 +222,10 @@ def __getattr__(name: str) -> object:
 			'seis_ssl_cluster.stratigraphy.lateral_targets'
 		)
 		return getattr(lateral_targets, name)
+	if name in _XY_NEIGHBOR_CONSENSUS_TARGET_EXPORTS:
+		consensus_targets = importlib.import_module(
+			'seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets'
+		)
+		return getattr(consensus_targets, name)
 	msg = f'module {__name__!r} has no attribute {name!r}'
 	raise AttributeError(msg)
