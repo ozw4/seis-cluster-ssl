@@ -22,6 +22,7 @@ from seis_ssl_cluster.config.pretraining import (
 )
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.xy_neighbor_consensus_pretraining_validation import (
+	_target_temporal_transition_counts,
 	_validate_embedding_stratigraphy_identity,
 	load_f3_xy_neighbor_consensus_pretraining_handoff,
 )
@@ -189,19 +190,34 @@ def render_f3_xy_neighbor_consensus_review_markdown(
 			'labels/metrics enter this target contract.'
 		),
 		'',
+		'## Temporal transition diagnostics',
+		'',
+		(
+			'Temporal transition-count increases are allowed. These counts are '
+			'observational diagnostics, not eligibility or stop gates.'
+		),
+		'',
 		'## Head diagnostics',
 		'',
-		'| K | Valid tokens | Changed tokens | Changed fraction |',
-		'| --- | ---: | ---: | ---: |',
+		(
+			'| K | Valid tokens | Changed tokens | Changed fraction | '
+			'Source transitions | Output transitions |'
+		),
+		'| --- | ---: | ---: | ---: | ---: | ---: |',
 	]
 	for row in evidence['head_diagnostics']:
 		item = _mapping(row, 'head diagnostic')
 		lines.append(
-			'| {k} | {valid} | {changed} | {fraction:.6f} |'.format(
+			(
+				'| {k} | {valid} | {changed} | {fraction:.6f} | '
+				'{source_transitions} | {output_transitions} |'
+			).format(
 				k=item['k'],
 				valid=item['valid_token_count'],
 				changed=item['changed_token_count'],
 				fraction=float(item['changed_fraction']),
+				source_transitions=item['source_temporal_transition_count'],
+				output_transitions=item['output_temporal_transition_count'],
 			)
 		)
 	return '\n'.join(lines) + '\n'
@@ -241,6 +257,12 @@ def _validate_lineage(
 	if targets.get('source_hard_manifest') != target.get('source_hard_manifest'):
 		raise ValueError(
 			'review source hard manifest does not match pretraining handoff'
+		)
+	if targets.get('temporal_transition_counts') != _target_temporal_transition_counts(
+		target
+	):
+		raise ValueError(
+			'review temporal transition counts do not match pretraining handoff'
 		)
 	_validate_handoff_artifact_lineage(config, target=target, handoff=handoff)
 
@@ -359,6 +381,11 @@ def _review_evidence(
 	target: Mapping[str, object],
 	handoff: Mapping[str, object],
 ) -> dict[str, object]:
+	targets = _mapping(handoff['targets'], 'pretraining handoff targets')
+	transition_counts_by_head = _mapping(
+		targets['temporal_transition_counts'],
+		'pretraining handoff temporal transition counts',
+	)
 	head_diagnostics: list[dict[str, object]] = []
 	for k in target['head_ks']:
 		head = _mapping(
@@ -368,6 +395,10 @@ def _review_evidence(
 		aggregate = _mapping(
 			diagnostics.get('aggregate'), 'target aggregate diagnostics'
 		)
+		transition_counts = _mapping(
+			transition_counts_by_head[str(k)],
+			f'pretraining handoff temporal transition counts k={k}',
+		)
 		head_diagnostics.append(
 			{
 				'k': k,
@@ -376,6 +407,14 @@ def _review_evidence(
 					aggregate, 'changed_token_count'
 				),
 				'changed_fraction': _diagnostic_fraction(aggregate, 'changed_fraction'),
+				'source_temporal_transition_count': _diagnostic_int(
+					transition_counts,
+					'source',
+				),
+				'output_temporal_transition_count': _diagnostic_int(
+					transition_counts,
+					'output',
+				),
 			}
 		)
 	return {

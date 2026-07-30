@@ -810,6 +810,10 @@ def _survey_diagnostics(
 		'invalid_token_count': int(valid.size - valid_count),
 		'changed_token_count': int(np.count_nonzero(changed)),
 		'changed_fraction': int(np.count_nonzero(changed)) / max(valid_count, 1),
+		'temporal_transition_counts': {
+			'source': _temporal_transition_count(source_labels, valid),
+			'output': _temporal_transition_count(labels, valid),
+		},
 		'source_state_occupancy_count': np.bincount(source_labels[valid], minlength=k)
 		.astype(int)
 		.tolist(),
@@ -857,6 +861,8 @@ def _aggregate_diagnostics(
 	changed_count = sum(int(item['changed_token_count']) for item in metrics)
 	source_counts = np.zeros(k, dtype=np.int64)
 	output_counts = np.zeros(k, dtype=np.int64)
+	source_transition_count = 0
+	output_transition_count = 0
 	neighbor_histogram = np.zeros(5, dtype=np.int64)
 	decision_counts = {
 		'consensus_token_count': 0,
@@ -872,6 +878,14 @@ def _aggregate_diagnostics(
 			item['source_state_occupancy_count'], dtype=np.int64
 		)
 		output_counts += np.asarray(item['state_occupancy_count'], dtype=np.int64)
+		transition_counts = _mapping(
+			item['temporal_transition_counts'],
+			'consensus temporal-transition diagnostics',
+		)
+		# These counts are observational diagnostics.  In particular, output may
+		# legitimately exceed source under the fixed consensus policy.
+		source_transition_count += int(transition_counts['source'])
+		output_transition_count += int(transition_counts['output'])
 		ordered = _mapping(item['ordered_path'], 'consensus ordered-path diagnostics')
 		violations += int(ordered['violation_count'])
 		maximum_reverse_decrease = max(
@@ -893,6 +907,10 @@ def _aggregate_diagnostics(
 		),
 		'changed_token_count': changed_count,
 		'changed_fraction': changed_count / max(valid_count, 1),
+		'temporal_transition_counts': {
+			'source': source_transition_count,
+			'output': output_transition_count,
+		},
 		'source_state_occupancy_count': source_counts.astype(int).tolist(),
 		'state_occupancy_count': output_counts.astype(int).tolist(),
 		'ordered_path': {
@@ -922,6 +940,21 @@ def _ordered_path_metrics(
 				int(max(0, -decrease.min(initial=0))),
 			)
 	return violations, maximum_reverse_decrease
+
+
+def _temporal_transition_count(labels: np.ndarray, valid: np.ndarray) -> int:
+	"""Count label changes over each trace's ordered valid-token sequence.
+
+	Invalid-token gaps are intentionally bridged because trace ordering and the
+	consensus guard use the same valid-token sequence.  This is a descriptive
+	diagnostic only: callers must not use it as an eligibility or stop gate.
+	"""
+	transitions = 0
+	for x in range(labels.shape[0]):
+		for y in range(labels.shape[1]):
+			trace = labels[x, y, valid[x, y]]
+			transitions += int(np.count_nonzero(trace[1:] != trace[:-1]))
+	return transitions
 
 
 def _validate_head_diagnostics(
@@ -975,6 +1008,7 @@ def _validate_diagnostic_structure(  # noqa: C901, PLR0912
 			'invalid_token_count',
 			'changed_token_count',
 			'changed_fraction',
+			'temporal_transition_counts',
 			'source_state_occupancy_count',
 			'state_occupancy_count',
 			'ordered_path',
@@ -1001,6 +1035,25 @@ def _validate_diagnostic_structure(  # noqa: C901, PLR0912
 			raise ValueError(
 				f'consensus diagnostics {name} changed fraction is invalid'
 			)
+		transition_counts = _mapping(
+			metrics['temporal_transition_counts'],
+			'consensus temporal-transition diagnostics',
+		)
+		_required(
+			transition_counts,
+			{'source', 'output'},
+			'consensus temporal-transition diagnostics',
+		)
+		for transition_name, transition_count in transition_counts.items():
+			if (
+				isinstance(transition_count, bool)
+				or not isinstance(transition_count, int)
+				or transition_count < 0
+			):
+				raise ValueError(
+					'consensus diagnostics '
+					f'{name} temporal transition count is invalid: {transition_name}'
+				)
 		for count_name in ('source_state_occupancy_count', 'state_occupancy_count'):
 			counts = metrics[count_name]
 			if (

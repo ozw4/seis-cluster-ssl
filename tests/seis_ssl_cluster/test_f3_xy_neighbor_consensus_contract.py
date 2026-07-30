@@ -129,6 +129,11 @@ def test_review_publishes_portable_source_only_diagnostics(
 	summary = json.loads(publication.summary_json.read_text(encoding='utf-8'))
 	assert summary['target_representation'] == 'xy_neighbor_consensus_hard_labels_v1'
 	assert summary['head_diagnostics'][0]['changed_token_count'] == 2
+	assert summary['head_diagnostics'][0]['source_temporal_transition_count'] == 6
+	assert summary['head_diagnostics'][0]['output_temporal_transition_count'] == 7
+	assert 'increases are allowed' in publication.summary_markdown.read_text(
+		encoding='utf-8'
+	)
 	assert summary['source_hard_manifest']['path'].startswith(
 		'${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/'
 	)
@@ -163,6 +168,12 @@ def test_review_publishes_portable_source_only_diagnostics(
 	handoff['targets']['xy_neighbor_consensus_smoothing'] = {'application': 'stale'}  # type: ignore[index]
 	paths['handoff'].write_text(json.dumps(handoff), encoding='utf-8')
 	with pytest.raises(ValueError, match='smoothing policy'):
+		results.publish_f3_xy_neighbor_consensus_review(config)
+
+	handoff = _handoff(paths)
+	handoff['targets']['temporal_transition_counts']['6']['output'] += 1  # type: ignore[index]
+	paths['handoff'].write_text(json.dumps(handoff), encoding='utf-8')
+	with pytest.raises(ValueError, match='temporal transition counts'):
 		results.publish_f3_xy_neighbor_consensus_review(config)
 
 
@@ -587,6 +598,7 @@ def _handoff(paths: dict[str, Path]) -> dict[str, object]:
 			'xy_neighbor_consensus_smoothing': {
 				'application': 'single_pass_synchronous_source_labels'
 			},
+			'temporal_transition_counts': _transition_counts(),
 			'initial_student_state_sha256': 'a' * 64,
 			'initial_head_state_sha256': 'b' * 64,
 		},
@@ -629,6 +641,10 @@ def _target_manifest(paths: dict[str, Path]) -> dict[str, object]:
 						'valid_token_count': 10 * k,
 						'changed_token_count': 2,
 						'changed_fraction': 2 / (10 * k),
+						'temporal_transition_counts': {
+							'source': k,
+							'output': k + 1,
+						},
 					}
 				},
 			}
@@ -647,3 +663,7 @@ def _head_hashes() -> dict[str, dict[str, dict[str, str]]]:
 		}
 		for k in (6, 8, 10)
 	}
+
+
+def _transition_counts() -> dict[str, dict[str, int]]:
+	return {str(k): {'source': k, 'output': k + 1} for k in (6, 8, 10)}

@@ -24,6 +24,7 @@ from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
 	TARGET_REPRESENTATION,
 	TARGET_SEMANTICS,
 	MultiHeadXYNeighborConsensusTargetExportConfig,
+	_temporal_transition_count,
 	export_multi_head_xy_neighbor_consensus_targets,
 	load_multi_head_xy_neighbor_consensus_target_manifest,
 	plan_multi_head_xy_neighbor_consensus_target_exports,
@@ -116,6 +117,50 @@ def test_export_plan_quarantines_mutated_bundle_head_metadata(tmp_path: Path) ->
 
 	assert [plan.action for plan in plans] == ['QUARANTINE', 'QUARANTINE', 'QUARANTINE']
 	assert all(plan.reason and 'head metadata differs' in plan.reason for plan in plans)
+
+
+def test_temporal_transition_diagnostics_bridge_valid_gaps_and_allow_increases(
+	tmp_path: Path,
+) -> None:
+	"""Source/output transitions are replayed diagnostics, never an export gate."""
+	labels = np.asarray([[[0, -17, 2, 2, 4]]], dtype=np.int32)
+	valid = np.asarray([[[True, False, True, True, True]]], dtype=bool)
+	assert _temporal_transition_count(labels, valid) == 2
+
+	hard_manifest = _hard_manifest(tmp_path)
+	payload = json.loads(hard_manifest.read_text(encoding='utf-8'))
+	for k in (6, 8, 10):
+		entry = payload['heads'][str(k)]['surveys']['survey']
+		labels_path = Path(entry['labels']['path'])
+		source_labels = np.load(labels_path)
+		# The four same-z neighbours vote 1 for this internal center.  Source
+		# [0, 0, 2, ...] becomes output [0, 1, 2, ...], increasing transitions
+		# while preserving the ordered valid trace.
+		source_labels[1, 1, 1] = 0
+		np.save(labels_path, source_labels, allow_pickle=False)
+		entry['labels']['sha256'] = file_sha256(labels_path)
+	hard_manifest.write_text(json.dumps(payload), encoding='utf-8')
+
+	config = MultiHeadXYNeighborConsensusTargetExportConfig(
+		source_hard_manifest=hard_manifest,
+		output_root=tmp_path / 'consensus',
+		handoff_manifest=tmp_path / 'consensus' / 'handoff.json',
+	)
+	export_multi_head_xy_neighbor_consensus_targets(config)
+	manifest = load_multi_head_xy_neighbor_consensus_target_manifest(
+		config.handoff_manifest
+	)
+
+	for k in (6, 8, 10):
+		diagnostics = manifest['heads'][str(k)]['diagnostics']  # type: ignore[index]
+		per_survey = diagnostics['per_survey']['survey']  # type: ignore[index]
+		aggregate = diagnostics['aggregate']  # type: ignore[index]
+		assert per_survey['temporal_transition_counts']['output'] > (  # type: ignore[index]
+			per_survey['temporal_transition_counts']['source']  # type: ignore[index]
+		)
+		assert aggregate['temporal_transition_counts'] == per_survey[  # type: ignore[index]
+			'temporal_transition_counts'
+		]
 
 
 def test_export_cli_exposes_immutable_resume_controls() -> None:

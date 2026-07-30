@@ -295,6 +295,7 @@ def load_f3_xy_neighbor_consensus_pretraining_handoff(  # noqa: C901, PLR0912
 		'xy_neighbor_consensus_target_head_hashes',
 		'source_hard_manifest',
 		'xy_neighbor_consensus_smoothing',
+		'temporal_transition_counts',
 		'initial_student_state_sha256',
 		'initial_head_state_sha256',
 	}:
@@ -303,6 +304,9 @@ def load_f3_xy_neighbor_consensus_pretraining_handoff(  # noqa: C901, PLR0912
 		_reference(targets.get(key), f'handoff targets.{key}')
 	if not isinstance(targets.get('xy_neighbor_consensus_smoothing'), Mapping):
 		raise TypeError('handoff consensus smoothing is missing')
+	_validate_handoff_temporal_transition_counts(
+		targets.get('temporal_transition_counts')
+	)
 	if not _sha256(targets.get('initial_student_state_sha256')) or not _sha256(
 		targets.get('initial_head_state_sha256')
 	):
@@ -433,6 +437,7 @@ def _target_evidence(  # noqa: C901, PLR0912
 		'xy_neighbor_consensus_smoothing'
 	) != _xy_neighbor_consensus_smoothing_identity(target):
 		raise ValueError('consensus smoothing policy identity mismatch')
+	temporal_transition_counts = _target_temporal_transition_counts(target)
 	for forbidden in ('source_posterior_manifest_sha256', 'lateral_smoothing'):
 		if forbidden in full_identity:
 			raise ValueError(f'consensus training must not carry {forbidden}')
@@ -449,7 +454,65 @@ def _target_evidence(  # noqa: C901, PLR0912
 		'xy_neighbor_consensus_smoothing': _xy_neighbor_consensus_smoothing_identity(
 			target
 		),
+		'temporal_transition_counts': temporal_transition_counts,
 	}
+
+
+def _target_temporal_transition_counts(
+	target: Mapping[str, object],
+) -> dict[str, dict[str, int]]:
+	"""Read per-head source/output transition diagnostics from a target manifest.
+
+	The counts are recorded for observation only.  In particular, this function
+	does not compare source and output values because an increase is permitted.
+	"""
+	if target.get('head_ks') != [6, 8, 10]:
+		raise ValueError('XY-neighbour consensus target K identity mismatch')
+	heads = _mapping(target.get('heads'), 'XY-neighbour consensus target heads')
+	counts: dict[str, dict[str, int]] = {}
+	for k in (6, 8, 10):
+		head = _mapping(heads.get(str(k)), f'XY-neighbour consensus target head k={k}')
+		diagnostics = _mapping(
+			head.get('diagnostics'),
+			f'XY-neighbour consensus target diagnostics k={k}',
+		)
+		aggregate = _mapping(
+			diagnostics.get('aggregate'),
+			f'XY-neighbour consensus aggregate diagnostics k={k}',
+		)
+		counts[str(k)] = _temporal_transition_count_pair(
+			aggregate.get('temporal_transition_counts'),
+			f'XY-neighbour consensus aggregate transition counts k={k}',
+		)
+	return counts
+
+
+def _validate_handoff_temporal_transition_counts(value: object) -> None:
+	"""Validate diagnostic-only source/output transition counts in a handoff."""
+	counts = _mapping(value, 'handoff temporal transition counts')
+	if set(counts) != {'6', '8', '10'}:
+		raise ValueError('handoff temporal transition counts must contain K=6/8/10')
+	for k in (6, 8, 10):
+		_temporal_transition_count_pair(
+			counts.get(str(k)),
+			f'handoff temporal transition counts k={k}',
+		)
+
+
+def _temporal_transition_count_pair(
+	value: object,
+	label: str,
+) -> dict[str, int]:
+	counts = _mapping(value, label)
+	if set(counts) != {'source', 'output'}:
+		raise ValueError(f'{label} must contain source and output')
+	result: dict[str, int] = {}
+	for name in ('source', 'output'):
+		count = counts[name]
+		if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+			raise TypeError(f'{label}.{name} must be a nonnegative integer')
+		result[name] = count
+	return result
 
 
 def _smoke_config_contract(
@@ -876,6 +939,7 @@ def _handoff(evidence: Mapping[str, object]) -> dict[str, object]:
 			'xy_neighbor_consensus_smoothing': evidence[
 				'xy_neighbor_consensus_smoothing'
 			],
+			'temporal_transition_counts': evidence['temporal_transition_counts'],
 			'initial_student_state_sha256': checkpoint['initial_student_state_sha256'],
 			'initial_head_state_sha256': checkpoint['initial_head_state_sha256'],
 		},
