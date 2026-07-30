@@ -110,7 +110,7 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_UPSAMPLE_MODE,
 )
 from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT, ArtifactPaths, ExperimentKey
-from seis_ssl_cluster.stratigraphy import state_posterior
+from seis_ssl_cluster.stratigraphy import lateral_targets, state_posterior
 from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
 from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
 	_artifacts,
@@ -188,6 +188,9 @@ F3_STRAT_HMM_MULTI_HEAD_ROOT = F3_ROOT / '94_strat_hmm_multi_head_k6810_v1'
 F3_STRAT_HMM_SOFT_POSTERIOR_ROOT = (
 	F3_ROOT / '97_strat_hmm_multi_head_k6810_soft_posterior_v1'
 )
+F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT = (
+	F3_ROOT / '99_strat_hmm_multi_head_k6810_lateral_smoothing_v1'
+)
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
@@ -212,6 +215,8 @@ F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '05_train_cons010_full.yaml',
 		F3_STRAT_HMM_SOFT_POSTERIOR_ROOT / '02_train_soft_smoke.yaml',
 		F3_STRAT_HMM_SOFT_POSTERIOR_ROOT / '03_train_soft_full.yaml',
+		F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT / '05_train_lateral_smoke.yaml',
+		F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT / '06_train_lateral_full.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
@@ -227,6 +232,7 @@ F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '06_extract_nocons_embeddings.yaml',
 		F3_STRAT_HMM_MULTI_HEAD_ROOT / '07_extract_cons010_embeddings.yaml',
 		F3_STRAT_HMM_SOFT_POSTERIOR_ROOT / '04_extract_soft_embeddings.yaml',
+		F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT / '07_extract_lateral_embeddings.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
@@ -794,6 +800,15 @@ def test_active_f3_strat_hmm_pretext_configs_resolve(
 			else pytest.fail('config validation requested full posterior arrays')
 		),
 	)
+	monkeypatch.setattr(
+		lateral_targets,
+		'load_multi_head_lateral_target_manifest',
+		lambda _path, *, validate_array_semantics: (
+			_active_lateral_manifest()
+			if not validate_array_semantics
+			else pytest.fail('config validation requested full lateral arrays')
+		),
+	)
 	resolve_strat_hmm_pretext_config(
 		_config_with_existing_strat_hmm_pretext_inputs(config_path, tmp_path),
 	)
@@ -869,6 +884,113 @@ def test_active_f3_multi_head_pretext_config_contract(
 		no_consistency['identity']['scientific_identity']['target_manifest_sha256']
 	)
 	assert comparison == no_consistency
+
+
+def test_active_f3_m5_ls_config_contract(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Keep M5-LS changes limited to its target representation identity."""
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256', '0' * 64)
+	root = F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT
+	candidates = [
+		load_config(root / '01_export_lateral_beta010.yaml'),
+		load_config(root / '02_export_lateral_beta025.yaml'),
+		load_config(root / '03_export_lateral_beta050.yaml'),
+	]
+	assert [
+		candidate['smoothing']['pairwise_strength_ratio'] for candidate in candidates
+	] == [0.10, 0.25, 0.50]
+	assert all(candidate['outputs'] == {'overwrite': False} for candidate in candidates)
+	assert [
+		Path(candidate['handoff_manifest']).parent.name for candidate in candidates
+	] == [
+		'strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_lateral_mean_field_beta010_v1',
+		'strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_lateral_mean_field_beta025_v1',
+		'strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_lateral_mean_field_beta050_v1',
+	]
+
+	for baseline_name, lateral_name in (
+		('02_train_nocons_smoke.yaml', '05_train_lateral_smoke.yaml'),
+		('04_train_nocons_full.yaml', '06_train_lateral_full.yaml'),
+	):
+		baseline = load_config(F3_STRAT_HMM_MULTI_HEAD_ROOT / baseline_name)
+		lateral = load_config(root / lateral_name)
+		assert lateral['identity']['model_tag'] == (
+			'strat_hmm_pretext_mh_k6810_latmf1_nocons_topblock1_distill_v1'
+		)
+		assert lateral['pseudo_targets']['target_representation'] == (
+			'lateral_mean_field_hard_labels_v1'
+		)
+		assert lateral['pseudo_targets']['min_confidence'] == 0.0
+		assert lateral['identity']['scientific_identity']['target_semantics'] == (
+			'ordered_hmm_edge_aware_lateral_mean_field_hard_v1'
+		)
+		assert lateral['loss']['consistency_weight'] == 0.0
+
+		baseline['paths']['output_root'] = lateral['paths']['output_root']
+		baseline['identity']['model_tag'] = lateral['identity']['model_tag']
+		baseline['pseudo_targets']['manifest'] = lateral['pseudo_targets']['manifest']
+		baseline['pseudo_targets']['target_representation'] = lateral['pseudo_targets'][
+			'target_representation'
+		]
+		baseline_scientific = baseline['identity']['scientific_identity']
+		lateral_scientific = lateral['identity']['scientific_identity']
+		assert isinstance(baseline_scientific, dict)
+		assert isinstance(lateral_scientific, dict)
+		for key in (
+			'experiment_role',
+			'variant',
+			'target_manifest_sha256',
+			'target_representation',
+			'target_semantics',
+			'supervised_loss',
+			'consistency_policy',
+			'consistency_weight',
+		):
+			baseline_scientific.pop(key, None)
+			lateral_scientific.pop(key, None)
+		assert baseline == lateral
+
+	calibration = load_config(root / '04_calibrate_lateral_targets.yaml')
+	assert set(calibration) == {
+		'artifact_root',
+		'source_hard_manifest',
+		'source_posterior_manifest',
+		'candidate_manifests',
+		'selected_manifest',
+		'calibration_handoff',
+		'calibration_report',
+		'hard_full_config',
+		'lateral_smoke_config',
+		'lateral_full_config',
+	}
+	assert list(calibration['candidate_manifests']) == ['beta010', 'beta025', 'beta050']
+	assert calibration['selected_manifest'].endswith(
+		'strat_hmm_multi_k6810_lateral_mean_field_selected_v1/'
+		'multi_head_lateral_target_handoff.json'
+	)
+	validator = load_config(root / '08_validate_lateral_pretraining.yaml')
+	assert set(validator) == {
+		'artifact_root',
+		'experiment_root',
+		'calibration_handoff',
+		'selected_manifest',
+		'hard_full_config',
+		'hard_handoff',
+		'lateral_smoke_config',
+		'lateral_full_config',
+	}
+	embedding = load_config(root / '07_extract_lateral_embeddings.yaml')
+	assert embedding['embeddings']['checkpoint'].endswith(
+		'strat_hmm_pretext_mh_k6810_latmf1_nocons_topblock1_distill_v1/best.pt'
+	)
+	assert embedding['embeddings']['output_dir'].endswith(
+		'strat_hmm_pretext_mh_k6810_latmf1_nocons_topblock1_distill_v1/overlap_x16'
+	)
 
 
 @pytest.mark.parametrize(
@@ -1611,7 +1733,9 @@ def _config_with_existing_strat_hmm_pretext_inputs(
 			config['identity']['scientific_identity'][
 				'posterior_manifest_sha256'
 			] = file_sha256(manifest)
-		else:
+		elif config['pseudo_targets'].get('target_representation') != (
+			'lateral_mean_field_hard_labels_v1'
+		):
 			config['identity']['scientific_identity']['target_manifest_sha256'] = (
 				file_sha256(manifest)
 			)
@@ -1636,6 +1760,46 @@ def _active_posterior_manifest() -> dict[str, object]:
 						'metadata': {'sha256': f'{k + 20:064x}'},
 					}
 				}
+			}
+			for k in (6, 8, 10)
+		},
+	}
+
+
+def _active_lateral_manifest() -> dict[str, object]:
+	"""Return the reference-only lateral identity used by active config tests."""
+	return {
+		'head_ks': [6, 8, 10],
+		'target_semantics': 'ordered_hmm_edge_aware_lateral_mean_field_hard_v1',
+		'source_hard_manifest': {'sha256': 'a' * 64},
+		'source_posterior_manifest': {'sha256': 'b' * 64},
+		'smoothing': {
+			'neighborhood': 'xy_4_connected_v1',
+			'affinity': 'source_embedding_cosine_rbf_v1',
+			'affinity_scale_policy': (
+				'global_valid_xy_edge_distance_median_floor_1e-6_v1'
+			),
+			'emission_scale_policy': 'per_head_valid_second_gap_median_floor_1e-6_v1',
+			'pairwise_strength_ratio': 0.10,
+			'iterations': 1,
+			'projection': 'original_ordered_viterbi_v1',
+		},
+		'heads': {
+			str(k): {
+				'surveys': {
+					'f3_facies_benchmark': {
+						'labels': {'sha256': f'{k:064x}'},
+						'confidence': {'sha256': f'{k + 10:064x}'},
+						'valid_tokens': {'sha256': f'{k + 20:064x}'},
+						'metadata': {'sha256': f'{k + 30:064x}'},
+					}
+				},
+				'diagnostics': {
+					'resolved_scales': {
+						'affinity': {'resolved_scale': 1.0},
+						'emission_gap': {'resolved_scale': 1.0},
+					}
+				},
 			}
 			for k in (6, 8, 10)
 		},

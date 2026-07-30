@@ -1,0 +1,1668 @@
+{
+  "artifact_type": "f3_m5_lateral_smoothing_review_artifacts",
+  "calibration_sources": {
+    "calibration_handoff": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_lateral_mean_field_selected_v1/lateral_target_calibration_handoff.json",
+      "sha256": "6fd1313f25779425fdd5e438d1e21bf1cb54ad0b47746550730bde5d055def89"
+    },
+    "calibration_report": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_lateral_mean_field_selected_v1/lateral_target_calibration_report.json",
+      "sha256": "66e3e8f4d4f4f2cdd6bf9d9619ecc675c363eb8f36255e59d7042bfe517a4c7e"
+    },
+    "calibration_report_artifact_type": "f3_m5_lateral_target_calibration_report"
+  },
+  "execution_scope": {
+    "downstream_screening": "NOT_EXECUTED",
+    "embedding_extraction": "NOT_EXECUTED",
+    "full_pretraining": "NOT_EXECUTED"
+  },
+  "schema_version": 1,
+  "smoke": {
+    "evidence": null,
+    "status": "NOT_READY_HOLD"
+  },
+  "target_calibration": {
+    "beta_zero_parity": {
+      "heads": {
+        "10": {
+          "labels_bitwise_identical": true,
+          "survey_count": 1,
+          "surveys": {
+            "f3_facies_benchmark": {
+              "labels_bitwise_identical": true,
+              "trace_count": 8588,
+              "valid_mask_exact": true,
+              "valid_token_count": 162960,
+              "valid_trace_count": 5820
+            }
+          },
+          "valid_masks_exact": true
+        },
+        "6": {
+          "labels_bitwise_identical": true,
+          "survey_count": 1,
+          "surveys": {
+            "f3_facies_benchmark": {
+              "labels_bitwise_identical": true,
+              "trace_count": 8588,
+              "valid_mask_exact": true,
+              "valid_token_count": 162960,
+              "valid_trace_count": 5820
+            }
+          },
+          "valid_masks_exact": true
+        },
+        "8": {
+          "labels_bitwise_identical": true,
+          "survey_count": 1,
+          "surveys": {
+            "f3_facies_benchmark": {
+              "labels_bitwise_identical": true,
+              "trace_count": 8588,
+              "valid_mask_exact": true,
+              "valid_token_count": 162960,
+              "valid_trace_count": 5820
+            }
+          },
+          "valid_masks_exact": true
+        }
+      },
+      "pairwise_strength_ratio": 0.0,
+      "status": "PASS",
+      "target_semantics": "ordered_hmm_edge_aware_lateral_mean_field_hard_v1"
+    },
+    "beta_zero_parity_status": "PASS",
+    "candidate_betas": [
+      0.1,
+      0.25,
+      0.5
+    ],
+    "candidates": {
+      "beta010": {
+        "beta": 0.1,
+        "eligibility": {
+          "checks": {
+            "10": {
+              "affinity_weighted_disagreement_reduced": false,
+              "boundary_change_not_less_than_interior": true,
+              "changed_tokens_positive": true,
+              "diagnostics_well_formed": true,
+              "highest_affinity_quartile_reduced": false,
+              "nonempty_state_occupancy": true,
+              "ordered_path": true,
+              "transition_count_not_increased": false
+            },
+            "6": {
+              "affinity_weighted_disagreement_reduced": true,
+              "boundary_change_not_less_than_interior": true,
+              "changed_tokens_positive": true,
+              "diagnostics_well_formed": true,
+              "highest_affinity_quartile_reduced": true,
+              "nonempty_state_occupancy": true,
+              "ordered_path": true,
+              "transition_count_not_increased": false
+            },
+            "8": {
+              "affinity_weighted_disagreement_reduced": true,
+              "boundary_change_not_less_than_interior": true,
+              "changed_tokens_positive": true,
+              "diagnostics_well_formed": true,
+              "highest_affinity_quartile_reduced": true,
+              "nonempty_state_occupancy": true,
+              "ordered_path": true,
+              "transition_count_not_increased": false
+            }
+          },
+          "eligible": false,
+          "reasons": [
+            "K=6: lateral transition count exceeds recomputed source transition count",
+            "K=8: lateral transition count exceeds recomputed source transition count",
+            "K=10: affinity-weighted XY disagreement is not reduced",
+            "K=10: highest-affinity XY disagreement is not reduced",
+            "K=10: lateral transition count exceeds recomputed source transition count"
+          ]
+        },
+        "head_hashes": {
+          "10": {
+            "f3_facies_benchmark": {
+              "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+              "labels": "dd89ca98411e580dcf567e09bdc800438662f62b666d3eadfffc0c5cd0fa8556",
+              "metadata": "250b41bfd4adfa1e9bf7e596caf94b862aa18388a97e72d1b2e07cac01944135",
+              "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+            }
+          },
+          "6": {
+            "f3_facies_benchmark": {
+              "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+              "labels": "1c2746643ae00d5515c2b3674f7290f00a96011f1605d36ee062183afcad2efd",
+              "metadata": "1d87102e828dceb853e47f021f245b35a6391c47a52c7ac1c54bbd3c1619f439",
+              "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+            }
+          },
+          "8": {
+            "f3_facies_benchmark": {
+              "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+              "labels": "3779f283b6ecc5adec03186544365e8ca2e251448cdb9cac006de2635766b614",
+              "metadata": "72ab706a64d6b1fb3d69cd8c971ad09ce44526087726c3085ecca8be194c1f22",
+              "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+            }
+          }
+        },
+        "heads": {
+          "10": {
+            "changed_fraction": 0.004774177712322043,
+            "changed_fraction_by_source_region": {
+              "boundary_adjacent": 0.00533532943668477,
+              "interior": 0.004422437631649879
+            },
+            "changed_token_count": 778,
+            "invalid_token_count": 111856,
+            "ordered_path": {
+              "max_reverse_decrease": 0,
+              "violation_count": 0
+            },
+            "resolved_scales": {
+              "affinity": {
+                "floor_applied": false,
+                "maximum": 1.2218075712138798,
+                "minimum": 0.03398195923946856,
+                "quantiles": {
+                  "p05": 0.25170109670493235,
+                  "p25": 0.43139900778248785,
+                  "p50": 0.5549197482148986,
+                  "p75": 0.6638440556167993,
+                  "p95": 0.8062640839911626
+                },
+                "resolved_scale": 0.5549197482148986,
+                "sample_count": 321524
+              },
+              "emission_gap": {
+                "floor_applied": false,
+                "maximum": 0.3886565566062927,
+                "minimum": 1.1920928955078125e-07,
+                "quantiles": {
+                  "p05": 0.0024471163749694826,
+                  "p25": 0.013416305184364319,
+                  "p50": 0.030748993158340454,
+                  "p75": 0.058635249733924866,
+                  "p95": 0.13198972493410094
+                },
+                "resolved_scale": 0.030748993158340454,
+                "sample_count": 162960
+              }
+            },
+            "source_transition_count": 37267,
+            "state_occupancy": {
+              "counts": [
+                557,
+                3442,
+                7137,
+                12684,
+                13376,
+                32119,
+                21858,
+                44756,
+                16331,
+                10700
+              ],
+              "effective_k": 7.356950941353279,
+              "empty_state_count": 0,
+              "ratios": [
+                0.0034180166912125675,
+                0.021121747668139422,
+                0.0437960235640648,
+                0.07783505154639175,
+                0.08208149239077074,
+                0.1970974472263132,
+                0.13413107511045655,
+                0.2746440844378989,
+                0.10021477663230241,
+                0.06566028473244968
+              ]
+            },
+            "trace_paths": {
+              "initial_state_counts": [
+                495,
+                1506,
+                2059,
+                1546,
+                161,
+                53,
+                0,
+                0,
+                0,
+                0
+              ],
+              "terminal_state_counts": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                269,
+                477,
+                76,
+                1205,
+                3793
+              ],
+              "transition_count": 37345,
+              "unique_state_count_quantiles": {
+                "p00": 3.0,
+                "p05": 5.001220703125,
+                "p100": 10.0,
+                "p50": 7.999267578125,
+                "p95": 9.000244140625
+              }
+            },
+            "valid_token_count": 162960,
+            "xy_edge_disagreement": {
+              "affinity_quartiles": [
+                {
+                  "affinity_range": [
+                    0.0,
+                    0.3023142026861624
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.051987133498935835,
+                  "source_unweighted_mean": 0.05196086969143018
+                },
+                {
+                  "affinity_range": [
+                    0.3023142026861624,
+                    0.36787944117144233
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.04876359670403248,
+                  "source_unweighted_mean": 0.048716598311653925
+                },
+                {
+                  "affinity_range": [
+                    0.36787944117144233,
+                    0.4595957772173178
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.04087754292404739,
+                  "source_unweighted_mean": 0.04058587643016887
+                },
+                {
+                  "affinity_range": [
+                    0.4595957772173178,
+                    1.0
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.03288643391403982,
+                  "source_unweighted_mean": 0.032734380291638644
+                }
+              ],
+              "affinity_weighted_normalized_order": {
+                "lateral": 0.04137362342408898,
+                "source": 0.04123050049960019
+              },
+              "edge_count": 321524,
+              "lateral_unweighted_mean": 0.043628676760263635,
+              "source_unweighted_mean": 0.04349943118122269
+            }
+          },
+          "6": {
+            "changed_fraction": 0.0059707903780068725,
+            "changed_fraction_by_source_region": {
+              "boundary_adjacent": 0.007034196364252723,
+              "interior": 0.0055372229228935225
+            },
+            "changed_token_count": 973,
+            "invalid_token_count": 111856,
+            "ordered_path": {
+              "max_reverse_decrease": 0,
+              "violation_count": 0
+            },
+            "resolved_scales": {
+              "affinity": {
+                "floor_applied": false,
+                "maximum": 1.2218075712138798,
+                "minimum": 0.03398195923946856,
+                "quantiles": {
+                  "p05": 0.25170109670493235,
+                  "p25": 0.43139900778248785,
+                  "p50": 0.5549197482148986,
+                  "p75": 0.6638440556167993,
+                  "p95": 0.8062640839911626
+                },
+                "resolved_scale": 0.5549197482148986,
+                "sample_count": 321524
+              },
+              "emission_gap": {
+                "floor_applied": false,
+                "maximum": 0.36450743675231934,
+                "minimum": 1.1920928955078125e-07,
+                "quantiles": {
+                  "p05": 0.0026832610368728643,
+                  "p25": 0.01444031298160553,
+                  "p50": 0.03241434693336487,
+                  "p75": 0.059024304151535034,
+                  "p95": 0.13264338076114646
+                },
+                "resolved_scale": 0.03241434693336487,
+                "sample_count": 162960
+              }
+            },
+            "source_transition_count": 26857,
+            "state_occupancy": {
+              "counts": [
+                9626,
+                11104,
+                12213,
+                61248,
+                32695,
+                36074
+              ],
+              "effective_k": 4.7980088035311255,
+              "empty_state_count": 0,
+              "ratios": [
+                0.05906971035837015,
+                0.0681394207167403,
+                0.07494477172312224,
+                0.37584683357879234,
+                0.20063205694648995,
+                0.22136720667648502
+              ]
+            },
+            "trace_paths": {
+              "initial_state_counts": [
+                4171,
+                1406,
+                215,
+                28,
+                0,
+                0
+              ],
+              "terminal_state_counts": [
+                0,
+                0,
+                0,
+                99,
+                65,
+                5656
+              ],
+              "transition_count": 26917,
+              "unique_state_count_quantiles": {
+                "p00": 3.0,
+                "p05": 3.999755859375,
+                "p100": 6.0,
+                "p50": 5.999267578125,
+                "p95": 5.999267578125
+              }
+            },
+            "valid_token_count": 162960,
+            "xy_edge_disagreement": {
+              "affinity_quartiles": [
+                {
+                  "affinity_range": [
+                    0.0,
+                    0.3023142026861624
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.05840932558688955,
+                  "source_unweighted_mean": 0.05899901718067417
+                },
+                {
+                  "affinity_range": [
+                    0.3023142026861624,
+                    0.36787944117144233
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.0626640624028034,
+                  "source_unweighted_mean": 0.06342543635933545
+                },
+                {
+                  "affinity_range": [
+                    0.36787944117144233,
+                    0.4595957772173178
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.057672833132205586,
+                  "source_unweighted_mean": 0.0583645388835647
+                },
+                {
+                  "affinity_range": [
+                    0.4595957772173178,
+                    1.0
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.04252746295766334,
+                  "source_unweighted_mean": 0.04299523519239537
+                }
+              ],
+              "affinity_weighted_normalized_order": {
+                "lateral": 0.05293334115646337,
+                "source": 0.05353400839273391
+              },
+              "edge_count": 321524,
+              "lateral_unweighted_mean": 0.05531842101989333,
+              "source_unweighted_mean": 0.055946056903995435
+            }
+          },
+          "8": {
+            "changed_fraction": 0.005111683848797251,
+            "changed_fraction_by_source_region": {
+              "boundary_adjacent": 0.005576266407693995,
+              "interior": 0.004812445771706451
+            },
+            "changed_token_count": 833,
+            "invalid_token_count": 111856,
+            "ordered_path": {
+              "max_reverse_decrease": 0,
+              "violation_count": 0
+            },
+            "resolved_scales": {
+              "affinity": {
+                "floor_applied": false,
+                "maximum": 1.2218075712138798,
+                "minimum": 0.03398195923946856,
+                "quantiles": {
+                  "p05": 0.25170109670493235,
+                  "p25": 0.43139900778248785,
+                  "p50": 0.5549197482148986,
+                  "p75": 0.6638440556167993,
+                  "p95": 0.8062640839911626
+                },
+                "resolved_scale": 0.5549197482148986,
+                "sample_count": 321524
+              },
+              "emission_gap": {
+                "floor_applied": false,
+                "maximum": 0.31719347834587097,
+                "minimum": 6.556510925292969e-07,
+                "quantiles": {
+                  "p05": 0.002222651243209839,
+                  "p25": 0.011798404157161713,
+                  "p50": 0.02705983817577362,
+                  "p75": 0.052277833223342896,
+                  "p95": 0.1237936064600944
+                },
+                "resolved_scale": 0.02705983817577362,
+                "sample_count": 162960
+              }
+            },
+            "source_transition_count": 36375,
+            "state_occupancy": {
+              "counts": [
+                11525,
+                15603,
+                46817,
+                21237,
+                19110,
+                23220,
+                15998,
+                9450
+              ],
+              "effective_k": 7.083884252600739,
+              "empty_state_count": 0,
+              "ratios": [
+                0.07072287677957781,
+                0.09574742268041238,
+                0.2872913598429062,
+                0.13032032400589103,
+                0.1172680412371134,
+                0.14248895434462444,
+                0.09817133038782523,
+                0.05798969072164949
+              ]
+            },
+            "trace_paths": {
+              "initial_state_counts": [
+                3958,
+                1743,
+                112,
+                3,
+                4,
+                0,
+                0,
+                0
+              ],
+              "terminal_state_counts": [
+                0,
+                0,
+                0,
+                1,
+                10,
+                829,
+                624,
+                4356
+              ],
+              "transition_count": 36432,
+              "unique_state_count_quantiles": {
+                "p00": 4.0,
+                "p05": 6.0009765625,
+                "p100": 8.0,
+                "p50": 7.0009765625,
+                "p95": 7.9990234375
+              }
+            },
+            "valid_token_count": 162960,
+            "xy_edge_disagreement": {
+              "affinity_quartiles": [
+                {
+                  "affinity_range": [
+                    0.0,
+                    0.3023142026861624
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.06665932069945565,
+                  "source_unweighted_mean": 0.06706808822980664
+                },
+                {
+                  "affinity_range": [
+                    0.3023142026861624,
+                    0.36787944117144233
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.07203905684890105,
+                  "source_unweighted_mean": 0.0721652416082703
+                },
+                {
+                  "affinity_range": [
+                    0.36787944117144233,
+                    0.4595957772173178
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.06938562240188355,
+                  "source_unweighted_mean": 0.06952780241244025
+                },
+                {
+                  "affinity_range": [
+                    0.4595957772173178,
+                    1.0
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.04356750973488839,
+                  "source_unweighted_mean": 0.04377011624993191
+                }
+              ],
+              "affinity_weighted_normalized_order": {
+                "lateral": 0.05952751105132262,
+                "source": 0.05972591867074378
+              },
+              "edge_count": 321524,
+              "lateral_unweighted_mean": 0.06291287742128103,
+              "source_unweighted_mean": 0.06313281212511133
+            }
+          }
+        },
+        "manifest": {
+          "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_lateral_mean_field_beta010_v1/multi_head_lateral_target_handoff.json",
+          "sha256": "f92b4cc428c1e8562a5762fa6bfe819be9edbd859895280a6bc886d78c5934f4"
+        },
+        "smoothing": {
+          "affinity": "source_embedding_cosine_rbf_v1",
+          "affinity_scale_policy": "global_valid_xy_edge_distance_median_floor_1e-6_v1",
+          "emission_scale_policy": "per_head_valid_second_gap_median_floor_1e-6_v1",
+          "iterations": 1,
+          "neighborhood": "xy_4_connected_v1",
+          "pairwise_strength_ratio": 0.1,
+          "projection": "original_ordered_viterbi_v1"
+        }
+      },
+      "beta025": {
+        "beta": 0.25,
+        "eligibility": {
+          "checks": {
+            "10": {
+              "affinity_weighted_disagreement_reduced": false,
+              "boundary_change_not_less_than_interior": true,
+              "changed_tokens_positive": true,
+              "diagnostics_well_formed": true,
+              "highest_affinity_quartile_reduced": false,
+              "nonempty_state_occupancy": true,
+              "ordered_path": true,
+              "transition_count_not_increased": false
+            },
+            "6": {
+              "affinity_weighted_disagreement_reduced": true,
+              "boundary_change_not_less_than_interior": true,
+              "changed_tokens_positive": true,
+              "diagnostics_well_formed": true,
+              "highest_affinity_quartile_reduced": true,
+              "nonempty_state_occupancy": true,
+              "ordered_path": true,
+              "transition_count_not_increased": false
+            },
+            "8": {
+              "affinity_weighted_disagreement_reduced": true,
+              "boundary_change_not_less_than_interior": true,
+              "changed_tokens_positive": true,
+              "diagnostics_well_formed": true,
+              "highest_affinity_quartile_reduced": true,
+              "nonempty_state_occupancy": true,
+              "ordered_path": true,
+              "transition_count_not_increased": false
+            }
+          },
+          "eligible": false,
+          "reasons": [
+            "K=6: lateral transition count exceeds recomputed source transition count",
+            "K=8: lateral transition count exceeds recomputed source transition count",
+            "K=10: affinity-weighted XY disagreement is not reduced",
+            "K=10: highest-affinity XY disagreement is not reduced",
+            "K=10: lateral transition count exceeds recomputed source transition count"
+          ]
+        },
+        "head_hashes": {
+          "10": {
+            "f3_facies_benchmark": {
+              "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+              "labels": "bd943ac8916b2bd84848826799a9864467a915b2b09d5db26de5145be53ca600",
+              "metadata": "e97c82ff5a8a92130d407bea65b518253c956c577653be4e8f588f70cfd1e033",
+              "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+            }
+          },
+          "6": {
+            "f3_facies_benchmark": {
+              "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+              "labels": "4a0fd5bd8a8dc59931315c8242cba47268563771a249b66099f96bcbcb00dd72",
+              "metadata": "6b11f9948444953bb1f8e35f4096413e3a82aa41a4c7df33775348631b8fdb67",
+              "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+            }
+          },
+          "8": {
+            "f3_facies_benchmark": {
+              "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+              "labels": "487dde6587d1fab0d352c724792d367f33962339b0d27639c913f1c956a466be",
+              "metadata": "5922b7b19b39459960f7150817946b069dd428429716bf0ab32f18fbf4fd7b9b",
+              "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+            }
+          }
+        },
+        "heads": {
+          "10": {
+            "changed_fraction": 0.01134020618556701,
+            "changed_fraction_by_source_region": {
+              "boundary_adjacent": 0.012725158865406361,
+              "interior": 0.010472092721446327
+            },
+            "changed_token_count": 1848,
+            "invalid_token_count": 111856,
+            "ordered_path": {
+              "max_reverse_decrease": 0,
+              "violation_count": 0
+            },
+            "resolved_scales": {
+              "affinity": {
+                "floor_applied": false,
+                "maximum": 1.2218075712138798,
+                "minimum": 0.03398195923946856,
+                "quantiles": {
+                  "p05": 0.25170109670493235,
+                  "p25": 0.43139900778248785,
+                  "p50": 0.5549197482148986,
+                  "p75": 0.6638440556167993,
+                  "p95": 0.8062640839911626
+                },
+                "resolved_scale": 0.5549197482148986,
+                "sample_count": 321524
+              },
+              "emission_gap": {
+                "floor_applied": false,
+                "maximum": 0.3886565566062927,
+                "minimum": 1.1920928955078125e-07,
+                "quantiles": {
+                  "p05": 0.0024471163749694826,
+                  "p25": 0.013416305184364319,
+                  "p50": 0.030748993158340454,
+                  "p75": 0.058635249733924866,
+                  "p95": 0.13198972493410094
+                },
+                "resolved_scale": 0.030748993158340454,
+                "sample_count": 162960
+              }
+            },
+            "source_transition_count": 37267,
+            "state_occupancy": {
+              "counts": [
+                561,
+                3470,
+                7221,
+                12703,
+                13443,
+                32143,
+                21775,
+                44542,
+                16338,
+                10764
+              ],
+              "effective_k": 7.374755904953331,
+              "empty_state_count": 0,
+              "ratios": [
+                0.003442562592047128,
+                0.021293568973981346,
+                0.04431148748159058,
+                0.07795164457535592,
+                0.08249263622974963,
+                0.19724472263132056,
+                0.13362174766813942,
+                0.27333087874324985,
+                0.10025773195876289,
+                0.06605301914580265
+              ]
+            },
+            "trace_paths": {
+              "initial_state_counts": [
+                499,
+                1516,
+                2068,
+                1533,
+                152,
+                52,
+                0,
+                0,
+                0,
+                0
+              ],
+              "terminal_state_counts": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                269,
+                465,
+                75,
+                1189,
+                3822
+              ],
+              "transition_count": 37451,
+              "unique_state_count_quantiles": {
+                "p00": 3.0,
+                "p05": 5.001220703125,
+                "p100": 10.0,
+                "p50": 7.999267578125,
+                "p95": 9.000244140625
+              }
+            },
+            "valid_token_count": 162960,
+            "xy_edge_disagreement": {
+              "affinity_quartiles": [
+                {
+                  "affinity_range": [
+                    0.0,
+                    0.3023142026861624
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.052235948517410515,
+                  "source_unweighted_mean": 0.05196086969143018
+                },
+                {
+                  "affinity_range": [
+                    0.3023142026861624,
+                    0.36787944117144233
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.04891288571511717,
+                  "source_unweighted_mean": 0.048716598311653925
+                },
+                {
+                  "affinity_range": [
+                    0.36787944117144233,
+                    0.4595957772173178
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.04118441478016603,
+                  "source_unweighted_mean": 0.04058587643016887
+                },
+                {
+                  "affinity_range": [
+                    0.4595957772173178,
+                    1.0
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.0329237561668111,
+                  "source_unweighted_mean": 0.032734380291638644
+                }
+              ],
+              "affinity_weighted_normalized_order": {
+                "lateral": 0.04153529680909555,
+                "source": 0.04123050049960019
+              },
+              "edge_count": 321524,
+              "lateral_unweighted_mean": 0.04381425129487594,
+              "source_unweighted_mean": 0.04349943118122269
+            }
+          },
+          "6": {
+            "changed_fraction": 0.014193667157584683,
+            "changed_fraction_by_source_region": {
+              "boundary_adjacent": 0.017055807449468198,
+              "interior": 0.013026727250738585
+            },
+            "changed_token_count": 2313,
+            "invalid_token_count": 111856,
+            "ordered_path": {
+              "max_reverse_decrease": 0,
+              "violation_count": 0
+            },
+            "resolved_scales": {
+              "affinity": {
+                "floor_applied": false,
+                "maximum": 1.2218075712138798,
+                "minimum": 0.03398195923946856,
+                "quantiles": {
+                  "p05": 0.25170109670493235,
+                  "p25": 0.43139900778248785,
+                  "p50": 0.5549197482148986,
+                  "p75": 0.6638440556167993,
+                  "p95": 0.8062640839911626
+                },
+                "resolved_scale": 0.5549197482148986,
+                "sample_count": 321524
+              },
+              "emission_gap": {
+                "floor_applied": false,
+                "maximum": 0.36450743675231934,
+                "minimum": 1.1920928955078125e-07,
+                "quantiles": {
+                  "p05": 0.0026832610368728643,
+                  "p25": 0.01444031298160553,
+                  "p50": 0.03241434693336487,
+                  "p75": 0.059024304151535034,
+                  "p95": 0.13264338076114646
+                },
+                "resolved_scale": 0.03241434693336487,
+                "sample_count": 162960
+              }
+            },
+            "source_transition_count": 26857,
+            "state_occupancy": {
+              "counts": [
+                9712,
+                11130,
+                12253,
+                61255,
+                32666,
+                35944
+              ],
+              "effective_k": 4.8033199492704854,
+              "empty_state_count": 0,
+              "ratios": [
+                0.05959744722631321,
+                0.06829896907216494,
+                0.07519023073146784,
+                0.3758897889052528,
+                0.20045409916543938,
+                0.2205694648993618
+              ]
+            },
+            "trace_paths": {
+              "initial_state_counts": [
+                4207,
+                1381,
+                206,
+                26,
+                0,
+                0
+              ],
+              "terminal_state_counts": [
+                0,
+                0,
+                0,
+                84,
+                62,
+                5674
+              ],
+              "transition_count": 26999,
+              "unique_state_count_quantiles": {
+                "p00": 3.0,
+                "p05": 3.999755859375,
+                "p100": 6.0,
+                "p50": 5.999267578125,
+                "p95": 5.999267578125
+              }
+            },
+            "valid_token_count": 162960,
+            "xy_edge_disagreement": {
+              "affinity_quartiles": [
+                {
+                  "affinity_range": [
+                    0.0,
+                    0.3023142026861624
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.05775743023848646,
+                  "source_unweighted_mean": 0.05899901718067417
+                },
+                {
+                  "affinity_range": [
+                    0.3023142026861624,
+                    0.36787944117144233
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.06156181187096125,
+                  "source_unweighted_mean": 0.06342543635933545
+                },
+                {
+                  "affinity_range": [
+                    0.36787944117144233,
+                    0.4595957772173178
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.05671738346126352,
+                  "source_unweighted_mean": 0.0583645388835647
+                },
+                {
+                  "affinity_range": [
+                    0.4595957772173178,
+                    1.0
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.04188552020999919,
+                  "source_unweighted_mean": 0.04299523519239537
+                }
+              ],
+              "affinity_weighted_normalized_order": {
+                "lateral": 0.0521218438572186,
+                "source": 0.05353400839273391
+              },
+              "edge_count": 321524,
+              "lateral_unweighted_mean": 0.054480536445180396,
+              "source_unweighted_mean": 0.055946056903995435
+            }
+          },
+          "8": {
+            "changed_fraction": 0.012966372115856653,
+            "changed_fraction_by_source_region": {
+              "boundary_adjacent": 0.014034648037342189,
+              "interior": 0.012278294558001574
+            },
+            "changed_token_count": 2113,
+            "invalid_token_count": 111856,
+            "ordered_path": {
+              "max_reverse_decrease": 0,
+              "violation_count": 0
+            },
+            "resolved_scales": {
+              "affinity": {
+                "floor_applied": false,
+                "maximum": 1.2218075712138798,
+                "minimum": 0.03398195923946856,
+                "quantiles": {
+                  "p05": 0.25170109670493235,
+                  "p25": 0.43139900778248785,
+                  "p50": 0.5549197482148986,
+                  "p75": 0.6638440556167993,
+                  "p95": 0.8062640839911626
+                },
+                "resolved_scale": 0.5549197482148986,
+                "sample_count": 321524
+              },
+              "emission_gap": {
+                "floor_applied": false,
+                "maximum": 0.31719347834587097,
+                "minimum": 6.556510925292969e-07,
+                "quantiles": {
+                  "p05": 0.002222651243209839,
+                  "p25": 0.011798404157161713,
+                  "p50": 0.02705983817577362,
+                  "p75": 0.052277833223342896,
+                  "p95": 0.1237936064600944
+                },
+                "resolved_scale": 0.02705983817577362,
+                "sample_count": 162960
+              }
+            },
+            "source_transition_count": 36375,
+            "state_occupancy": {
+              "counts": [
+                11546,
+                15619,
+                46562,
+                21178,
+                19156,
+                23099,
+                16221,
+                9579
+              ],
+              "effective_k": 7.101251344780619,
+              "empty_state_count": 0,
+              "ratios": [
+                0.07085174275895925,
+                0.09584560628375062,
+                0.285726558664703,
+                0.12995827196858126,
+                0.11755031909671085,
+                0.14174644084437898,
+                0.09953976435935198,
+                0.058781296023564064
+              ]
+            },
+            "trace_paths": {
+              "initial_state_counts": [
+                3969,
+                1736,
+                108,
+                3,
+                4,
+                0,
+                0,
+                0
+              ],
+              "terminal_state_counts": [
+                0,
+                0,
+                0,
+                0,
+                9,
+                803,
+                603,
+                4405
+              ],
+              "transition_count": 36527,
+              "unique_state_count_quantiles": {
+                "p00": 4.0,
+                "p05": 6.0009765625,
+                "p100": 8.0,
+                "p50": 7.9990234375,
+                "p95": 7.9990234375
+              }
+            },
+            "valid_token_count": 162960,
+            "xy_edge_disagreement": {
+              "affinity_quartiles": [
+                {
+                  "affinity_range": [
+                    0.0,
+                    0.3023142026861624
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.06593953439601159,
+                  "source_unweighted_mean": 0.06706808822980664
+                },
+                {
+                  "affinity_range": [
+                    0.3023142026861624,
+                    0.36787944117144233
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.07160007606630685,
+                  "source_unweighted_mean": 0.0721652416082703
+                },
+                {
+                  "affinity_range": [
+                    0.36787944117144233,
+                    0.4595957772173178
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.06900884537390792,
+                  "source_unweighted_mean": 0.06952780241244025
+                },
+                {
+                  "affinity_range": [
+                    0.4595957772173178,
+                    1.0
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.043062770697411566,
+                  "source_unweighted_mean": 0.04377011624993191
+                }
+              ],
+              "affinity_weighted_normalized_order": {
+                "lateral": 0.05902469308532948,
+                "source": 0.05972591867074378
+              },
+              "edge_count": 321524,
+              "lateral_unweighted_mean": 0.06240280663340825,
+              "source_unweighted_mean": 0.06313281212511133
+            }
+          }
+        },
+        "manifest": {
+          "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_lateral_mean_field_beta025_v1/multi_head_lateral_target_handoff.json",
+          "sha256": "721f86e424d8dc9d5527dba2d50c6d96475639165d4985b4cfd86bfe0ff11ae6"
+        },
+        "smoothing": {
+          "affinity": "source_embedding_cosine_rbf_v1",
+          "affinity_scale_policy": "global_valid_xy_edge_distance_median_floor_1e-6_v1",
+          "emission_scale_policy": "per_head_valid_second_gap_median_floor_1e-6_v1",
+          "iterations": 1,
+          "neighborhood": "xy_4_connected_v1",
+          "pairwise_strength_ratio": 0.25,
+          "projection": "original_ordered_viterbi_v1"
+        }
+      },
+      "beta050": {
+        "beta": 0.5,
+        "eligibility": {
+          "checks": {
+            "10": {
+              "affinity_weighted_disagreement_reduced": false,
+              "boundary_change_not_less_than_interior": true,
+              "changed_tokens_positive": true,
+              "diagnostics_well_formed": true,
+              "highest_affinity_quartile_reduced": false,
+              "nonempty_state_occupancy": true,
+              "ordered_path": true,
+              "transition_count_not_increased": false
+            },
+            "6": {
+              "affinity_weighted_disagreement_reduced": true,
+              "boundary_change_not_less_than_interior": true,
+              "changed_tokens_positive": true,
+              "diagnostics_well_formed": true,
+              "highest_affinity_quartile_reduced": true,
+              "nonempty_state_occupancy": true,
+              "ordered_path": true,
+              "transition_count_not_increased": false
+            },
+            "8": {
+              "affinity_weighted_disagreement_reduced": true,
+              "boundary_change_not_less_than_interior": true,
+              "changed_tokens_positive": true,
+              "diagnostics_well_formed": true,
+              "highest_affinity_quartile_reduced": true,
+              "nonempty_state_occupancy": true,
+              "ordered_path": true,
+              "transition_count_not_increased": false
+            }
+          },
+          "eligible": false,
+          "reasons": [
+            "K=6: lateral transition count exceeds recomputed source transition count",
+            "K=8: lateral transition count exceeds recomputed source transition count",
+            "K=10: affinity-weighted XY disagreement is not reduced",
+            "K=10: highest-affinity XY disagreement is not reduced",
+            "K=10: lateral transition count exceeds recomputed source transition count"
+          ]
+        },
+        "head_hashes": {
+          "10": {
+            "f3_facies_benchmark": {
+              "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+              "labels": "7c8182226774cff5bfa40a1037e1131c1f170c1b33d3c437ab9d45cf067ed977",
+              "metadata": "4355f8ba496dc2e8f68962c7962d2bbfa53756dd6a89e88cdf436d7b5945619f",
+              "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+            }
+          },
+          "6": {
+            "f3_facies_benchmark": {
+              "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+              "labels": "2f0a4d27fbda0f728d178f783d7aecf01b33e5e9ccc2703592396e24f829933d",
+              "metadata": "51112015301e83b66dc7792e2bfd1560e6ec3f6a938ec0398772348355f53483",
+              "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+            }
+          },
+          "8": {
+            "f3_facies_benchmark": {
+              "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+              "labels": "c36f60affd6221813808f037717ef91eb926bdeb35e398663640b816102fa2ad",
+              "metadata": "19281775b2dbabb8d0e7ce0dad15c6f6d6d9ca6f78d9145a33432c9203b420c0",
+              "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+            }
+          }
+        },
+        "heads": {
+          "10": {
+            "changed_fraction": 0.023649975454099165,
+            "changed_fraction_by_source_region": {
+              "boundary_adjacent": 0.02591218207010782,
+              "interior": 0.022231983308542393
+            },
+            "changed_token_count": 3854,
+            "invalid_token_count": 111856,
+            "ordered_path": {
+              "max_reverse_decrease": 0,
+              "violation_count": 0
+            },
+            "resolved_scales": {
+              "affinity": {
+                "floor_applied": false,
+                "maximum": 1.2218075712138798,
+                "minimum": 0.03398195923946856,
+                "quantiles": {
+                  "p05": 0.25170109670493235,
+                  "p25": 0.43139900778248785,
+                  "p50": 0.5549197482148986,
+                  "p75": 0.6638440556167993,
+                  "p95": 0.8062640839911626
+                },
+                "resolved_scale": 0.5549197482148986,
+                "sample_count": 321524
+              },
+              "emission_gap": {
+                "floor_applied": false,
+                "maximum": 0.3886565566062927,
+                "minimum": 1.1920928955078125e-07,
+                "quantiles": {
+                  "p05": 0.0024471163749694826,
+                  "p25": 0.013416305184364319,
+                  "p50": 0.030748993158340454,
+                  "p75": 0.058635249733924866,
+                  "p95": 0.13198972493410094
+                },
+                "resolved_scale": 0.030748993158340454,
+                "sample_count": 162960
+              }
+            },
+            "source_transition_count": 37267,
+            "state_occupancy": {
+              "counts": [
+                578,
+                3521,
+                7325,
+                12705,
+                13532,
+                32272,
+                21687,
+                44070,
+                16434,
+                10836
+              ],
+              "effective_k": 7.405384166101009,
+              "empty_state_count": 0,
+              "ratios": [
+                0.0035468826705940108,
+                0.021606529209621993,
+                0.04494968090328915,
+                0.0779639175257732,
+                0.0830387825233186,
+                0.19803632793323514,
+                0.13308173784977909,
+                0.2704344624447717,
+                0.10084683357879234,
+                0.06649484536082474
+              ]
+            },
+            "trace_paths": {
+              "initial_state_counts": [
+                512,
+                1529,
+                2065,
+                1508,
+                153,
+                53,
+                0,
+                0,
+                0,
+                0
+              ],
+              "terminal_state_counts": [
+                0,
+                0,
+                0,
+                0,
+                0,
+                258,
+                453,
+                72,
+                1169,
+                3868
+              ],
+              "transition_count": 37616,
+              "unique_state_count_quantiles": {
+                "p00": 3.0,
+                "p05": 5.001220703125,
+                "p100": 10.0,
+                "p50": 7.999267578125,
+                "p95": 9.000244140625
+              }
+            },
+            "valid_token_count": 162960,
+            "xy_edge_disagreement": {
+              "affinity_quartiles": [
+                {
+                  "affinity_range": [
+                    0.0,
+                    0.3023142026861624
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.05245988203403768,
+                  "source_unweighted_mean": 0.05196086969143018
+                },
+                {
+                  "affinity_range": [
+                    0.3023142026861624,
+                    0.36787944117144233
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.0494616610614193,
+                  "source_unweighted_mean": 0.048716598311653925
+                },
+                {
+                  "affinity_range": [
+                    0.36787944117144233,
+                    0.4595957772173178
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.041941918280855445,
+                  "source_unweighted_mean": 0.04058587643016887
+                },
+                {
+                  "affinity_range": [
+                    0.4595957772173178,
+                    1.0
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.033092397457110526,
+                  "source_unweighted_mean": 0.032734380291638644
+                }
+              ],
+              "affinity_weighted_normalized_order": {
+                "lateral": 0.041940161748659055,
+                "source": 0.04123050049960019
+              },
+              "edge_count": 321524,
+              "lateral_unweighted_mean": 0.04423896470835535,
+              "source_unweighted_mean": 0.04349943118122269
+            }
+          },
+          "6": {
+            "changed_fraction": 0.02803755522827688,
+            "changed_fraction_by_source_region": {
+              "boundary_adjacent": 0.034704860375439635,
+              "interior": 0.02531918937129628
+            },
+            "changed_token_count": 4569,
+            "invalid_token_count": 111856,
+            "ordered_path": {
+              "max_reverse_decrease": 0,
+              "violation_count": 0
+            },
+            "resolved_scales": {
+              "affinity": {
+                "floor_applied": false,
+                "maximum": 1.2218075712138798,
+                "minimum": 0.03398195923946856,
+                "quantiles": {
+                  "p05": 0.25170109670493235,
+                  "p25": 0.43139900778248785,
+                  "p50": 0.5549197482148986,
+                  "p75": 0.6638440556167993,
+                  "p95": 0.8062640839911626
+                },
+                "resolved_scale": 0.5549197482148986,
+                "sample_count": 321524
+              },
+              "emission_gap": {
+                "floor_applied": false,
+                "maximum": 0.36450743675231934,
+                "minimum": 1.1920928955078125e-07,
+                "quantiles": {
+                  "p05": 0.0026832610368728643,
+                  "p25": 0.01444031298160553,
+                  "p50": 0.03241434693336487,
+                  "p75": 0.059024304151535034,
+                  "p95": 0.13264338076114646
+                },
+                "resolved_scale": 0.03241434693336487,
+                "sample_count": 162960
+              }
+            },
+            "source_transition_count": 26857,
+            "state_occupancy": {
+              "counts": [
+                9865,
+                11190,
+                12367,
+                61324,
+                32477,
+                35737
+              ],
+              "effective_k": 4.813213583098,
+              "empty_state_count": 0,
+              "ratios": [
+                0.06053632793323515,
+                0.06866715758468336,
+                0.07588978890525282,
+                0.376313205694649,
+                0.1992943053510064,
+                0.2192992145311733
+              ]
+            },
+            "trace_paths": {
+              "initial_state_counts": [
+                4267,
+                1344,
+                185,
+                24,
+                0,
+                0
+              ],
+              "terminal_state_counts": [
+                0,
+                0,
+                0,
+                64,
+                48,
+                5708
+              ],
+              "transition_count": 27138,
+              "unique_state_count_quantiles": {
+                "p00": 3.0,
+                "p05": 5.000244140625,
+                "p100": 6.0,
+                "p50": 5.999267578125,
+                "p95": 5.999267578125
+              }
+            },
+            "valid_token_count": 162960,
+            "xy_edge_disagreement": {
+              "affinity_quartiles": [
+                {
+                  "affinity_range": [
+                    0.0,
+                    0.3023142026861624
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.05623468232542261,
+                  "source_unweighted_mean": 0.05899901718067417
+                },
+                {
+                  "affinity_range": [
+                    0.3023142026861624,
+                    0.36787944117144233
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.06008633881140735,
+                  "source_unweighted_mean": 0.06342543635933545
+                },
+                {
+                  "affinity_range": [
+                    0.36787944117144233,
+                    0.4595957772173178
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.054990607233050444,
+                  "source_unweighted_mean": 0.0583645388835647
+                },
+                {
+                  "affinity_range": [
+                    0.4595957772173178,
+                    1.0
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.04080815118000464,
+                  "source_unweighted_mean": 0.04299523519239537
+                }
+              ],
+              "affinity_weighted_normalized_order": {
+                "lateral": 0.050722102384463626,
+                "source": 0.05353400839273391
+              },
+              "edge_count": 321524,
+              "lateral_unweighted_mean": 0.05302994488747399,
+              "source_unweighted_mean": 0.055946056903995435
+            }
+          },
+          "8": {
+            "changed_fraction": 0.025165684830633285,
+            "changed_fraction_by_source_region": {
+              "boundary_adjacent": 0.027677704332571034,
+              "interior": 0.023547690631368672
+            },
+            "changed_token_count": 4101,
+            "invalid_token_count": 111856,
+            "ordered_path": {
+              "max_reverse_decrease": 0,
+              "violation_count": 0
+            },
+            "resolved_scales": {
+              "affinity": {
+                "floor_applied": false,
+                "maximum": 1.2218075712138798,
+                "minimum": 0.03398195923946856,
+                "quantiles": {
+                  "p05": 0.25170109670493235,
+                  "p25": 0.43139900778248785,
+                  "p50": 0.5549197482148986,
+                  "p75": 0.6638440556167993,
+                  "p95": 0.8062640839911626
+                },
+                "resolved_scale": 0.5549197482148986,
+                "sample_count": 321524
+              },
+              "emission_gap": {
+                "floor_applied": false,
+                "maximum": 0.31719347834587097,
+                "minimum": 6.556510925292969e-07,
+                "quantiles": {
+                  "p05": 0.002222651243209839,
+                  "p25": 0.011798404157161713,
+                  "p50": 0.02705983817577362,
+                  "p75": 0.052277833223342896,
+                  "p95": 0.1237936064600944
+                },
+                "resolved_scale": 0.02705983817577362,
+                "sample_count": 162960
+              }
+            },
+            "source_transition_count": 36375,
+            "state_occupancy": {
+              "counts": [
+                11576,
+                15652,
+                46221,
+                21068,
+                19184,
+                22935,
+                16560,
+                9764
+              ],
+              "effective_k": 7.1249795047424085,
+              "empty_state_count": 0,
+              "ratios": [
+                0.07103583701521846,
+                0.09604810996563574,
+                0.2836340206185567,
+                0.12928325969563084,
+                0.11772214040255277,
+                0.140740058910162,
+                0.101620029455081,
+                0.059916543937162496
+              ]
+            },
+            "trace_paths": {
+              "initial_state_counts": [
+                3984,
+                1724,
+                105,
+                3,
+                4,
+                0,
+                0,
+                0
+              ],
+              "terminal_state_counts": [
+                0,
+                0,
+                0,
+                0,
+                7,
+                763,
+                573,
+                4477
+              ],
+              "transition_count": 36661,
+              "unique_state_count_quantiles": {
+                "p00": 4.0,
+                "p05": 6.0009765625,
+                "p100": 8.0,
+                "p50": 7.9990234375,
+                "p95": 7.9990234375
+              }
+            },
+            "valid_token_count": 162960,
+            "xy_edge_disagreement": {
+              "affinity_quartiles": [
+                {
+                  "affinity_range": [
+                    0.0,
+                    0.3023142026861624
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.06537614610417988,
+                  "source_unweighted_mean": 0.06706808822980664
+                },
+                {
+                  "affinity_range": [
+                    0.3023142026861624,
+                    0.36787944117144233
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.0711824222852961,
+                  "source_unweighted_mean": 0.0721652416082703
+                },
+                {
+                  "affinity_range": [
+                    0.36787944117144233,
+                    0.4595957772173178
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.06819308756333785,
+                  "source_unweighted_mean": 0.06952780241244025
+                },
+                {
+                  "affinity_range": [
+                    0.4595957772173178,
+                    1.0
+                  ],
+                  "edge_count": 80381,
+                  "lateral_unweighted_mean": 0.04209239212536086,
+                  "source_unweighted_mean": 0.04377011624993191
+                }
+              ],
+              "affinity_weighted_normalized_order": {
+                "lateral": 0.05827196612690097,
+                "source": 0.05972591867074378
+              },
+              "edge_count": 321524,
+              "lateral_unweighted_mean": 0.06171101201954243,
+              "source_unweighted_mean": 0.06313281212511133
+            }
+          }
+        },
+        "manifest": {
+          "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_lateral_mean_field_beta050_v1/multi_head_lateral_target_handoff.json",
+          "sha256": "f0ad1868f1558f10bde32a305ce147dac732148d8e85f5be2be4cf0f50166537"
+        },
+        "smoothing": {
+          "affinity": "source_embedding_cosine_rbf_v1",
+          "affinity_scale_policy": "global_valid_xy_edge_distance_median_floor_1e-6_v1",
+          "emission_scale_policy": "per_head_valid_second_gap_median_floor_1e-6_v1",
+          "iterations": 1,
+          "neighborhood": "xy_4_connected_v1",
+          "pairwise_strength_ratio": 0.5,
+          "projection": "original_ordered_viterbi_v1"
+        }
+      }
+    },
+    "selected_beta": null,
+    "selected_candidate_manifest": null,
+    "selected_manifest": null,
+    "selection_policy": "target_only_smallest_eligible_beta_v1",
+    "source_hard_manifest": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+      "sha256": "c0b4edc17774d522bc0896db1366166628135d8369d2e063fd6183c66b01d15c"
+    },
+    "source_posterior_manifest": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1_state_posteriors/multi_head_state_posterior_handoff.json",
+      "sha256": "94c98cb2081db1dbd75d010278f1358cc17d9ebd943a715726e43f5a055af35f"
+    },
+    "status": "M5_LS_TARGET_HOLD"
+  }
+}
