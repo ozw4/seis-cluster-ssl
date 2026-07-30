@@ -1,0 +1,21 @@
+{
+  "created_at_utc": "2026-07-30T16:23:16.174631Z",
+  "items": [
+    {
+      "sha256": "37341051fa7247a52c29060a18ffbe99a858ebcd7409a290e22c2d435c9ac7b7",
+      "size_bytes": 2347,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_xy_neighbor_consensus_hard_labels_v1/multi_head_xy_neighbor_consensus_target_handoff.json",
+      "target": "xy_neighbor_consensus_summary.json"
+    },
+    {
+      "sha256": "1a3bdf88272ded56f6e3627d98ae8661549e67d66e2982e3303b6f29780e2c21",
+      "size_bytes": 1146,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_xy_neighbor_consensus_hard_labels_v1/multi_head_xy_neighbor_consensus_target_handoff.json",
+      "target": "xy_neighbor_consensus_summary.md"
+    }
+  ],
+  "output_dir": "results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_xy_neighbor_consensus_v1",
+  "skipped_optional_items": [],
+  "source_artifact_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}",
+  "warnings": []
+}
