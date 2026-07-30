@@ -183,9 +183,9 @@ def test_lateral_sources_require_hard_manifest_frozen_model_identity(
 		'validate_multi_head_state_posterior_manifest',
 		lambda _payload, *, validate_array_semantics: (
 			None
-			if not validate_array_semantics
+			if validate_array_semantics
 			else pytest.fail(
-				'lateral source validation requested full posterior arrays'
+				'lateral source validation requested reference-only posterior'
 			)
 		),
 	)
@@ -338,6 +338,37 @@ def test_dry_run_reports_preflight_scales_without_creating_output(tmp_path) -> N
 		for plan in dry_run
 	)
 	assert not config.output_root.exists()
+
+
+def test_dry_run_rejects_invalid_posterior_before_publication_mutation(
+	tmp_path,
+) -> None:
+	"""Full preflight rejects self-consistent NaN posterior source semantics."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	posterior_manifest = json.loads(
+		config.source_posterior_manifest.read_text(encoding='utf-8')
+	)
+	entry = posterior_manifest['heads']['6']['surveys']['survey']
+	posterior_path = Path(entry['posterior']['path'])
+	posterior = np.load(posterior_path)
+	posterior[0, 0, 0, 0] = np.nan
+	np.save(posterior_path, posterior, allow_pickle=False)
+	entry['posterior']['sha256'] = file_sha256(posterior_path)
+	config.source_posterior_manifest.write_text(
+		json.dumps(posterior_manifest, sort_keys=True) + '\n',
+		encoding='utf-8',
+	)
+	before = _public_file_snapshot(config)
+
+	with pytest.raises(ValueError, match='posterior must be finite and non-negative'):
+		export_multi_head_lateral_targets(
+			config,
+			dry_run=True,
+			only_missing=True,
+		)
+
+	assert _public_file_snapshot(config) == before
 
 
 @pytest.mark.parametrize(

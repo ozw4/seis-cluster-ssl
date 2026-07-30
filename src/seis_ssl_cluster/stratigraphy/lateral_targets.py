@@ -965,7 +965,7 @@ def _validate_sources(  # noqa: C901
 	_validate_source_valid_mask_reference_identities(hard, posterior)
 	validate_multi_head_state_posterior_manifest(
 		posterior,
-		validate_array_semantics=False,
+		validate_array_semantics=True,
 	)
 	if posterior['source_hard_manifest'] != _reference(config.source_hard_manifest):
 		raise ValueError('posterior is not anchored to selected hard manifest')
