@@ -1188,6 +1188,30 @@ def _stratigraphy_pretext_metadata(
 					'per_head_posteriors'
 				],
 			}
+		if checkpoint_identity.get('schema_version') == 4:
+			lateral = _required_mapping(
+				checkpoint_identity,
+				'lateral_target_manifest',
+			)
+			return {
+				**result,
+				'target_representation': checkpoint_identity[
+					'target_representation'
+				],
+				'target_semantics': checkpoint_identity['target_semantics'],
+				'lateral_target_manifest_path': lateral['path'],
+				'lateral_target_manifest_sha256': lateral['sha256'],
+				'per_head_lateral_target_sha256': checkpoint_identity[
+					'per_head_lateral_targets'
+				],
+				'source_hard_manifest_sha256': checkpoint_identity[
+					'source_hard_manifest_sha256'
+				],
+				'source_posterior_manifest_sha256': checkpoint_identity[
+					'source_posterior_manifest_sha256'
+				],
+				'lateral_smoothing': checkpoint_identity['lateral_smoothing'],
+			}
 		target_manifest = _required_mapping(checkpoint_identity, 'target_manifest')
 		return {
 			**result,

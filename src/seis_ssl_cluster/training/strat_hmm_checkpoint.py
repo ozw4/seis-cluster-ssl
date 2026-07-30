@@ -1235,7 +1235,10 @@ def _posterior_per_head_hashes(
 def _lateral_per_head_target_hashes(
 	manifest_path: Path,
 ) -> dict[str, dict[str, dict[str, str]]]:
-	manifest = load_multi_head_lateral_target_manifest(manifest_path)
+	manifest = load_multi_head_lateral_target_manifest(
+		manifest_path,
+		validate_array_semantics=False,
+	)
 	return _per_head_hard_target_hashes(manifest)
 
 

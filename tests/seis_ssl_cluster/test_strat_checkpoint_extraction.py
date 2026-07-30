@@ -21,6 +21,7 @@ from seis_ssl_cluster.data import (
 from seis_ssl_cluster.embedding import run_embedding_extraction
 from seis_ssl_cluster.embedding.extractor import _stratigraphy_pretext_metadata
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
+from seis_ssl_cluster.stratigraphy import lateral_targets
 from seis_ssl_cluster.stratigraphy.prototypes import (
 	MultiResolutionOrderedPrototypeHeads,
 	OrderedPrototypeHead,
@@ -709,6 +710,16 @@ def test_lateral_multi_head_checkpoint_uses_schema_four_and_rejects_hard_resume(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+	def reject_full_replay(*_args, **_kwargs):
+		raise AssertionError('schema-v4 checkpoint invoked full lateral replay')
+
+	for name in (
+		'_validate_frozen_source_replay',
+		'_affinity_scale',
+		'_emission_gap_scales',
+		'_validate_diagnostics_from_frozen_sources',
+	):
+		monkeypatch.setattr(lateral_targets, name, reject_full_replay)
 	config = _lateral_multi_head_resume_config(tmp_path, monkeypatch)
 	student, head, optimizer = _new_multi_head_components()
 	checkpoint_path = _save_multi_head_resume_checkpoint(
@@ -726,6 +737,26 @@ def test_lateral_multi_head_checkpoint_uses_schema_four_and_rejects_hard_resume(
 		checkpoint_identity['target_representation']
 		== 'lateral_mean_field_hard_labels_v1'
 	)
+	validate_stratigraphy_checkpoint_payload(payload, expected_config=config)
+	inspection = inspect_stratigraphy_checkpoint(
+		payload,
+		expected_config=config,
+		expected_optimizer=optimizer,
+	)
+	assert inspection['embedding_compatible'] is True
+	assert inspection['resume_compatibility']['compatible'] is True
+	metadata = _stratigraphy_pretext_metadata(payload)
+	assert metadata is not None
+	assert (
+		metadata['target_representation']
+		== 'lateral_mean_field_hard_labels_v1'
+	)
+	assert metadata['lateral_target_manifest_path'] == str(
+		config['pseudo_targets']['manifest']
+	)
+	assert metadata['per_head_lateral_target_sha256'] == checkpoint_identity[
+		'per_head_lateral_targets'
+	]
 
 	resumed_student, resumed_head, resumed_optimizer = _new_multi_head_components()
 	resume_state = restore_strat_hmm_training_checkpoint(
@@ -792,7 +823,10 @@ def test_lateral_multi_head_checkpoint_rejects_soft_and_stale_identities(
 	monkeypatch.setattr(
 		strat_hmm_checkpoint,
 		'load_multi_head_lateral_target_manifest',
-		lambda _path: _multi_head_manifest(lateral_hashes),
+		lambda _path, *, validate_array_semantics: (
+			_assert_false(validate_array_semantics)
+			or _multi_head_manifest(lateral_hashes)
+		),
 	)
 
 	def reject(payload: object, config: object, message: str) -> None:
@@ -1471,8 +1505,12 @@ def _lateral_multi_head_resume_config(
 	monkeypatch.setattr(
 		strat_hmm_checkpoint,
 		'load_multi_head_lateral_target_manifest',
-		lambda path: (
-			_assert_lateral_manifest_load(path, manifest_path)
+		lambda path, *, validate_array_semantics: (
+			_assert_lateral_manifest_load(
+				path,
+				manifest_path,
+				validate_array_semantics=validate_array_semantics,
+			)
 			or _multi_head_manifest(hashes)
 		),
 	)
@@ -1803,8 +1841,18 @@ def _assert_posterior_manifest_load(path: Path, expected_path: Path) -> None:
 	assert path == expected_path
 
 
-def _assert_lateral_manifest_load(path: Path, expected_path: Path) -> None:
+def _assert_lateral_manifest_load(
+	path: Path,
+	expected_path: Path,
+	*,
+	validate_array_semantics: bool,
+) -> None:
 	assert path == expected_path
+	assert not validate_array_semantics
+
+
+def _assert_false(value: object) -> None:
+	assert not value
 
 
 def _sha256(path: Path) -> str:

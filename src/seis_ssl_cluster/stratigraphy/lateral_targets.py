@@ -106,6 +106,19 @@ class _ImmutableIdentityMismatchError(ValueError):
 	"""A complete owned output belongs to a different scientific identity."""
 
 
+class _SourceIdentityMismatchError(ValueError):
+	"""The selected immutable source artifacts disagree with each other."""
+
+
+@dataclass(frozen=True)
+class _ValidMaskIdentity:
+	"""Hash and NPY descriptor sufficient for reference-only mask identity."""
+
+	sha256: str
+	shape: tuple[int, ...]
+	dtype: str
+
+
 def resolve_multi_head_lateral_target_export_config(
 	config: Mapping[str, object],
 ) -> MultiHeadLateralTargetExportConfig:
@@ -176,7 +189,10 @@ def plan_multi_head_lateral_target_exports(
 	only_missing: bool,
 ) -> list[MultiHeadLateralTargetExportPlan]:
 	"""Completely validate sources and classify output paths without writing."""
-	return list(_preflight(config, only_missing=only_missing).plans)
+	try:
+		return list(_preflight(config, only_missing=only_missing).plans)
+	except _SourceIdentityMismatchError as exc:
+		return _identity_error_plans(exc)
 
 
 def _preflight(
@@ -200,6 +216,7 @@ def _preflight(
 		)
 	else:
 		try:
+			_validate_bundle_valid_mask_identities(bundle, source, posterior)
 			for k in CANONICAL_KS:
 				_validate_complete_head(
 					bundle / f'k{k}',
@@ -215,7 +232,10 @@ def _preflight(
 					},
 				)
 			_validate_owned_handoff(config, source)
-		except _ImmutableIdentityMismatchError as exc:
+		except (
+			_ImmutableIdentityMismatchError,
+			_SourceIdentityMismatchError,
+		) as exc:
 			plans = tuple(
 				MultiHeadLateralTargetExportPlan(k, 'ERROR', str(exc))
 				for k in CANONICAL_KS
@@ -267,7 +287,15 @@ def export_multi_head_lateral_targets(  # noqa: C901
 	only_missing: bool = False,
 ) -> list[MultiHeadLateralTargetExportPlan]:
 	"""Publish all heads atomically after a bounded preflight and export."""
-	preflight = _preflight(config, only_missing=only_missing)
+	try:
+		preflight = _preflight(config, only_missing=only_missing)
+	except _SourceIdentityMismatchError as exc:
+		plans = _identity_error_plans(exc)
+		if dry_run:
+			return plans
+		raise FileExistsError(
+			'; '.join(f'k={plan.k}: {plan.reason}' for plan in plans)
+		) from exc
 	plans = list(preflight.plans)
 	if dry_run:
 		return plans
@@ -317,9 +345,8 @@ def export_multi_head_lateral_targets(  # noqa: C901
 		# Preserve a previous broken generation only after the replacement has
 		# passed complete staging validation and source revalidation.
 		if any(plan.action == 'QUARANTINE' for plan in plans):
-			if config.handoff_manifest.exists():
-				_quarantine(config.handoff_manifest)
-			_quarantine(_bundle_path(config))
+			_quarantine_if_exists(config.handoff_manifest)
+			_quarantine_if_exists(_bundle_path(config))
 		staging.replace(_bundle_path(config))
 	except BaseException:
 		shutil.rmtree(staging, ignore_errors=True)
@@ -342,6 +369,16 @@ def export_multi_head_lateral_targets(  # noqa: C901
 		)
 	_publish_manifest(config, preflight.source)
 	return plans
+
+
+def _identity_error_plans(
+	error: _SourceIdentityMismatchError,
+) -> list[MultiHeadLateralTargetExportPlan]:
+	"""Return the non-mutating planner classification for invalid sources."""
+	return [
+		MultiHeadLateralTargetExportPlan(k, 'ERROR', str(error))
+		for k in CANONICAL_KS
+	]
 
 
 def load_multi_head_lateral_target_manifest(
@@ -396,7 +433,10 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	posterior_path = _hashed(
 		payload['source_posterior_manifest'], 'source_posterior_manifest'
 	)
-	hard = load_multi_head_target_manifest(hard_path)
+	hard = load_multi_head_target_manifest(
+		hard_path,
+		validate_array_semantics=validate_array_semantics,
+	)
 	posterior = json.loads(posterior_path.read_text(encoding='utf-8'))
 	if not isinstance(posterior, Mapping):
 		raise TypeError('source posterior manifest must be an object')
@@ -411,7 +451,7 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	heads = _mapping(payload['heads'], 'heads')
 	if set(heads) != {str(k) for k in CANONICAL_KS}:
 		raise ValueError('lateral manifest heads must contain K=6/8/10')
-	common: dict[str, np.ndarray] = {}
+	_validate_valid_mask_reference_identities(payload, hard, posterior)
 	for k in CANONICAL_KS:
 		head = _mapping(heads[str(k)], f'head k={k}')
 		_required(head, {'model', 'surveys', 'diagnostics'})
@@ -491,15 +531,10 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 				or np.any(confidence[~valid] != 0.0)
 			):
 				raise ValueError('lateral hard-label semantics are invalid')
-			if validate_array_semantics:
-				_validate_target_valid_tokens(
-					valid,
-					hard_survey,
-					posterior_survey,
-					context=f'k={k} {survey_id}',
-				)
-				if np.any(np.bincount(labels[valid], minlength=k) == 0):
-					raise ValueError('lateral labels contain an empty state')
+			if validate_array_semantics and np.any(
+				np.bincount(labels[valid], minlength=k) == 0
+			):
+				raise ValueError('lateral labels contain an empty state')
 			if entry['source_hard_labels'] != _reference(
 				_source_label_path(hard_survey)
 			):
@@ -524,9 +559,6 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 						trace = labels[x, y, valid[x, y]]
 						if np.any(np.diff(trace) < 0):
 							raise ValueError('lateral labels violate ordered paths')
-				if survey_id in common and not np.array_equal(common[survey_id], valid):
-					raise ValueError(f'valid mask differs across heads for {survey_id}')
-				common.setdefault(survey_id, np.asarray(valid))
 		if validate_array_semantics:
 			_validate_diagnostics_from_arrays(
 				head['diagnostics'],
@@ -537,6 +569,7 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 				k=k,
 			)
 	if validate_array_semantics:
+		_validate_full_valid_mask_array_equality(payload, hard, posterior)
 		_validate_diagnostics_from_frozen_manifest_sources(
 			payload,
 			hard_path=hard_path,
@@ -607,6 +640,308 @@ def _validate_diagnostics_from_frozen_manifest_sources(
 			config=config,
 			expected_scales=expected_scales,
 		)
+
+
+def _validate_bundle_valid_mask_identities(
+	bundle: Path,
+	hard: Mapping[str, object],
+	posterior: Mapping[str, object],
+) -> None:
+	"""Classify bundle mask identity before validating individual head arrays."""
+	try:
+		heads = _load_bundle_heads(bundle)
+	except (OSError, TypeError, ValueError) as exc:
+		raise _OwnedOutputCorruptionError(
+			'lateral valid-mask references are unreadable'
+		) from exc
+	_validate_valid_mask_reference_identities({'heads': heads}, hard, posterior)
+
+
+def _load_bundle_heads(bundle: Path) -> dict[str, Mapping[str, object]]:
+	heads: dict[str, Mapping[str, object]] = {}
+	for k in CANONICAL_KS:
+		path = bundle / f'k{k}' / 'head_metadata.json'
+		head = json.loads(path.read_text(encoding='utf-8'))
+		if not isinstance(head, Mapping):
+			raise TypeError(f'lateral head metadata must be an object for k={k}')
+		heads[str(k)] = head
+	return heads
+
+
+def _validate_valid_mask_reference_identities(  # noqa: C901
+	payload: Mapping[str, object],
+	hard: Mapping[str, object],
+	posterior: Mapping[str, object],
+) -> None:
+	"""Bind all lateral masks to each other and to both immutable sources."""
+	heads = _mapping(payload['heads'], 'lateral heads')
+	lateral_by_survey: dict[str, _ValidMaskIdentity] = {}
+	common_surveys: set[str] | None = None
+	for k in CANONICAL_KS:
+		try:
+			surveys = _mapping(
+				_mapping(heads[str(k)], f'lateral head k={k}')['surveys'],
+				f'lateral surveys k={k}',
+			)
+		except (KeyError, TypeError, ValueError) as exc:
+			raise _OwnedOutputCorruptionError(
+				f'lateral valid-mask references are malformed for k={k}'
+			) from exc
+		survey_ids = {str(survey_id) for survey_id in surveys}
+		if common_surveys is None:
+			common_surveys = survey_ids
+		elif survey_ids != common_surveys:
+			raise _OwnedOutputCorruptionError(
+				'lateral valid-mask survey sets differ across heads'
+			)
+		for survey_id, raw in surveys.items():
+			try:
+				entry = _mapping(raw, f'lateral survey k={k} {survey_id}')
+				identity = _owned_valid_mask_identity(
+					entry['valid_tokens'],
+					context=f'k={k} {survey_id}',
+				)
+			except KeyError as exc:
+				raise _OwnedOutputCorruptionError(
+					f'lateral valid-mask reference is missing for k={k} {survey_id}'
+				) from exc
+			previous = lateral_by_survey.get(str(survey_id))
+			if previous is not None and identity != previous:
+				raise _OwnedOutputCorruptionError(
+					f'lateral valid-mask identity differs across heads for {survey_id}'
+				)
+			lateral_by_survey.setdefault(str(survey_id), identity)
+
+	source_by_survey = _validate_source_valid_mask_reference_identities(
+		hard,
+		posterior,
+	)
+	if set(lateral_by_survey) != set(source_by_survey):
+		raise _ImmutableIdentityMismatchError(
+			'lateral valid-mask survey set differs from current sources'
+		)
+	for survey_id, identity in lateral_by_survey.items():
+		if identity != source_by_survey[survey_id]:
+			raise _ImmutableIdentityMismatchError(
+				f'lateral valid-mask identity differs from current sources for '
+				f'{survey_id}'
+			)
+
+
+def _validate_source_valid_mask_reference_identities(
+	hard: Mapping[str, object],
+	posterior: Mapping[str, object],
+) -> dict[str, _ValidMaskIdentity]:
+	"""Require hard/posterior mask hashes and descriptors to be identical."""
+	hard_heads = _mapping(hard['heads'], 'hard heads')
+	posterior_heads = _mapping(posterior['heads'], 'posterior heads')
+	common: dict[str, _ValidMaskIdentity] = {}
+	common_surveys: set[str] | None = None
+	for k in CANONICAL_KS:
+		try:
+			hard_surveys = _mapping(
+				_mapping(hard_heads[str(k)], f'hard head k={k}')['surveys'],
+				f'hard surveys k={k}',
+			)
+			posterior_surveys = _mapping(
+				_mapping(
+					posterior_heads[str(k)],
+					f'posterior head k={k}',
+				)['surveys'],
+				f'posterior surveys k={k}',
+			)
+		except (KeyError, TypeError, ValueError) as exc:
+			raise _SourceIdentityMismatchError(
+				f'source valid-mask references are malformed for k={k}'
+			) from exc
+		hard_survey_ids = {str(survey_id) for survey_id in hard_surveys}
+		posterior_survey_ids = {str(survey_id) for survey_id in posterior_surveys}
+		if hard_survey_ids != posterior_survey_ids:
+			raise _SourceIdentityMismatchError(
+				f'hard and posterior valid-mask survey sets differ for k={k}'
+			)
+		if common_surveys is None:
+			common_surveys = hard_survey_ids
+		elif hard_survey_ids != common_surveys:
+			raise _SourceIdentityMismatchError(
+				'hard/posterior valid-mask survey sets differ across heads'
+			)
+		for survey_id in hard_surveys:
+			identity = _source_valid_mask_identity(
+				_mapping(hard_surveys[survey_id], 'hard survey'),
+				_mapping(posterior_surveys[survey_id], 'posterior survey'),
+				context=f'k={k} {survey_id}',
+			)
+			previous = common.get(str(survey_id))
+			if previous is not None and identity != previous:
+				raise _SourceIdentityMismatchError(
+					f'source valid-mask identity differs across heads for {survey_id}'
+				)
+			common.setdefault(str(survey_id), identity)
+	return common
+
+
+def _owned_valid_mask_identity(
+	reference: object,
+	*,
+	context: str,
+) -> _ValidMaskIdentity:
+	"""Validate one owned mask hash and NPY header without reading its values."""
+	try:
+		return _read_owned_valid_mask_identity(reference)
+	except (OSError, TypeError, ValueError) as exc:
+		raise _OwnedOutputCorruptionError(
+			f'lateral valid-mask reference is malformed for {context}'
+		) from exc
+
+
+def _read_owned_valid_mask_identity(reference: object) -> _ValidMaskIdentity:
+	path = _hashed(reference, 'lateral valid_tokens')
+	array = np.load(path, mmap_mode='r', allow_pickle=False)
+	_validate_array_reference(reference, array, name='lateral valid_tokens')
+	if array.dtype != np.bool_ or array.ndim != 3:
+		raise ValueError('lateral valid mask must be bool [X,Y,Z]')
+	item = _mapping(reference, 'lateral valid_tokens')
+	return _ValidMaskIdentity(
+		_string(item.get('sha256'), 'lateral valid_tokens.sha256'),
+		array.shape,
+		array.dtype.name,
+	)
+
+
+def _source_valid_mask_identity(
+	hard_survey: Mapping[str, object],
+	posterior_survey: Mapping[str, object],
+	*,
+	context: str,
+) -> _ValidMaskIdentity:
+	"""Validate and compare one hard/posterior reference-only mask identity."""
+	try:
+		hard_identity, posterior_identity = _read_source_valid_mask_identities(
+			hard_survey,
+			posterior_survey,
+		)
+	except (KeyError, OSError, TypeError, ValueError) as exc:
+		raise _SourceIdentityMismatchError(
+			f'source valid-mask reference is malformed for {context}'
+		) from exc
+	if hard_identity != posterior_identity:
+		raise _SourceIdentityMismatchError(
+			f'hard and posterior valid-mask identities differ for {context}'
+		)
+	return hard_identity
+
+
+def _read_source_valid_mask_identities(
+	hard_survey: Mapping[str, object],
+	posterior_survey: Mapping[str, object],
+) -> tuple[_ValidMaskIdentity, _ValidMaskIdentity]:
+	hard_reference = _mapping(hard_survey['valid_tokens'], 'hard valid_tokens')
+	hard_path = _hashed(hard_reference, 'hard valid_tokens')
+	hard_array = np.load(hard_path, mmap_mode='r', allow_pickle=False)
+	hard_shape = _shape_descriptor(
+		hard_survey.get('token_grid_shape'),
+		'hard token_grid_shape',
+	)
+	if (
+		hard_array.dtype != np.bool_
+		or hard_array.shape != hard_shape
+		or hard_array.ndim != 3
+	):
+		raise ValueError('hard valid-mask NPY descriptor differs from manifest')
+	hard_identity = _ValidMaskIdentity(
+		_string(hard_reference.get('sha256'), 'hard valid_tokens.sha256'),
+		hard_shape,
+		hard_array.dtype.name,
+	)
+
+	posterior_reference = _mapping(
+		posterior_survey['valid_tokens'],
+		'posterior valid_tokens',
+	)
+	posterior_path = _hashed(posterior_reference, 'posterior valid_tokens')
+	posterior_array = np.load(
+		posterior_path,
+		mmap_mode='r',
+		allow_pickle=False,
+	)
+	_validate_array_reference(
+		posterior_reference,
+		posterior_array,
+		name='posterior valid_tokens',
+	)
+	if posterior_array.dtype != np.bool_ or posterior_array.ndim != 3:
+		raise ValueError('posterior valid mask must be bool [X,Y,Z]')
+	posterior_identity = _ValidMaskIdentity(
+		_string(
+			posterior_reference.get('sha256'),
+			'posterior valid_tokens.sha256',
+		),
+		posterior_array.shape,
+		posterior_array.dtype.name,
+	)
+	return hard_identity, posterior_identity
+
+
+def _shape_descriptor(value: object, name: str) -> tuple[int, ...]:
+	if not isinstance(value, list) or any(
+		isinstance(dimension, bool)
+		or not isinstance(dimension, int)
+		or dimension < 0
+		for dimension in value
+	):
+		raise TypeError(f'{name} must be a list of non-negative integers')
+	return tuple(value)
+
+
+def _validate_full_valid_mask_array_equality(
+	payload: Mapping[str, object],
+	hard: Mapping[str, object],
+	posterior: Mapping[str, object],
+) -> None:
+	"""Retain value-level source and cross-head equality as full defense in depth."""
+	heads = _mapping(payload['heads'], 'lateral heads')
+	common: dict[str, np.ndarray] = {}
+	for k in CANONICAL_KS:
+		lateral_surveys = _mapping(
+			_mapping(heads[str(k)], f'lateral head k={k}')['surveys'],
+			f'lateral surveys k={k}',
+		)
+		hard_surveys = _mapping(
+			_mapping(
+				_mapping(hard['heads'], 'hard heads')[str(k)],
+				f'hard head k={k}',
+			)['surveys'],
+			f'hard surveys k={k}',
+		)
+		posterior_surveys = _mapping(
+			_mapping(
+				_mapping(posterior['heads'], 'posterior heads')[str(k)],
+				f'posterior head k={k}',
+			)['surveys'],
+			f'posterior surveys k={k}',
+		)
+		for survey_id, raw in lateral_surveys.items():
+			valid = np.load(
+				_hashed(
+					_mapping(raw, 'lateral survey')['valid_tokens'],
+					'lateral valid_tokens',
+				),
+				mmap_mode='r',
+				allow_pickle=False,
+			)
+			_validate_target_valid_tokens(
+				valid,
+				_mapping(hard_surveys[survey_id], 'hard survey'),
+				_mapping(posterior_surveys[survey_id], 'posterior survey'),
+				context=f'k={k} {survey_id}',
+			)
+			previous = common.get(str(survey_id))
+			if previous is not None and not np.array_equal(previous, valid):
+				raise _OwnedOutputCorruptionError(
+					f'lateral valid mask differs across heads for {survey_id}'
+				)
+			common.setdefault(str(survey_id), np.asarray(valid))
 
 
 def _validate_sources(  # noqa: C901
@@ -681,6 +1016,7 @@ def _validate_sources(  # noqa: C901
 				raise ValueError(
 					f'hard labels and valid mask differ for k={k} {survey_id}'
 				)
+	_validate_source_valid_mask_reference_identities(hard, posterior)
 	return hard, posterior, inputs, models
 
 
@@ -1631,12 +1967,20 @@ def _validate_target_valid_tokens(
 	if (
 		hard_valid.dtype != np.bool_
 		or posterior_valid.dtype != np.bool_
-		or valid.shape != hard_valid.shape
-		or valid.shape != posterior_valid.shape
+		or hard_valid.shape != posterior_valid.shape
+		or not np.array_equal(hard_valid, posterior_valid)
+	):
+		raise _SourceIdentityMismatchError(
+			f'hard and posterior valid masks differ for {context}'
+		)
+	if (
+		valid.shape != hard_valid.shape
 		or not np.array_equal(valid, hard_valid)
 		or not np.array_equal(valid, posterior_valid)
 	):
-		raise ValueError(f'lateral valid mask differs from source masks for {context}')
+		raise _ImmutableIdentityMismatchError(
+			f'lateral valid mask differs from source masks for {context}'
+		)
 
 
 def _publish_manifest(
@@ -2394,6 +2738,12 @@ def _quarantine(path: Path) -> None:
 			)
 		),
 	)
+
+
+def _quarantine_if_exists(path: Path) -> None:
+	"""Preserve an owned public path when present and skip orphan gaps."""
+	if path.exists():
+		_quarantine(path)
 
 
 __all__ = [

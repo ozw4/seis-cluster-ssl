@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
@@ -763,6 +764,195 @@ def test_lateral_reference_only_validates_schema_v1_metadata_against_arrays(
 			)
 
 
+def test_lateral_reference_only_skips_all_full_replay_helpers(
+	tmp_path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Runtime validation must never replay frozen HMM or smoothing semantics."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+
+	def reject(*_args, **_kwargs):
+		raise AssertionError('full lateral replay helper was called')
+
+	for name in (
+		'_validate_frozen_source_replay',
+		'_affinity_scale',
+		'_emission_gap_scales',
+		'_validate_diagnostics_from_frozen_sources',
+	):
+		monkeypatch.setattr(lateral_targets, name, reject)
+	lateral_targets.load_multi_head_lateral_target_manifest(
+		config.handoff_manifest,
+		validate_array_semantics=False,
+	)
+	with pytest.raises(AssertionError, match='full lateral replay helper'):
+		lateral_targets.load_multi_head_lateral_target_manifest(
+			config.handoff_manifest,
+			validate_array_semantics=True,
+		)
+
+
+def test_lateral_reference_only_rejects_all_heads_using_same_wrong_mask(
+	tmp_path,
+) -> None:
+	"""Cross-head agreement cannot replace the frozen source-mask identity."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	wrong_path = tmp_path / 'wrong.valid_tokens.npy'
+	wrong = np.ones((2, 1, 10), dtype=bool)
+	wrong[0, 0, 0] = False
+	np.save(wrong_path, wrong, allow_pickle=False)
+	wrong_reference = {
+		'path': str(wrong_path),
+		'sha256': file_sha256(wrong_path),
+		'shape': list(wrong.shape),
+		'dtype': wrong.dtype.name,
+	}
+	handoff = json.loads(config.handoff_manifest.read_text(encoding='utf-8'))
+	for k in (6, 8, 10):
+		handoff['heads'][str(k)]['surveys']['survey']['valid_tokens'] = (
+			wrong_reference
+		)
+	config.handoff_manifest.write_text(
+		json.dumps(handoff, sort_keys=True) + '\n',
+		encoding='utf-8',
+	)
+	with pytest.raises(
+		ValueError,
+		match='lateral valid-mask identity differs from current sources',
+	):
+		lateral_targets.load_multi_head_lateral_target_manifest(
+			config.handoff_manifest,
+			validate_array_semantics=False,
+		)
+
+
+def test_lateral_cross_head_mask_mismatch_is_quarantined_and_repaired(
+	tmp_path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Owned cross-head mask drift is recoverable corruption, not source drift."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	head_path = config.output_root / 'bundle' / 'k8' / 'head_metadata.json'
+	head = json.loads(head_path.read_text(encoding='utf-8'))
+	entry = head['surveys']['survey']
+	valid_path = Path(entry['valid_tokens']['path'])
+	valid = np.load(valid_path)
+	valid[0, 0, 0] = False
+	np.save(valid_path, valid, allow_pickle=False)
+	entry['valid_tokens']['sha256'] = file_sha256(valid_path)
+	head_path.write_text(json.dumps(head, sort_keys=True) + '\n', encoding='utf-8')
+
+	plans = lateral_targets.plan_multi_head_lateral_target_exports(
+		config,
+		only_missing=True,
+	)
+	assert [plan.action for plan in plans] == [
+		'QUARANTINE',
+		'QUARANTINE',
+		'QUARANTINE',
+	]
+	quarantined: list[Path] = []
+	strict_quarantine = lateral_targets._quarantine  # noqa: SLF001
+
+	def quarantine_existing(path: Path) -> None:
+		assert path.exists()
+		quarantined.append(path)
+		strict_quarantine(path)
+
+	monkeypatch.setattr(lateral_targets, '_quarantine', quarantine_existing)
+	repaired = export_multi_head_lateral_targets(config, only_missing=True)
+	assert [plan.action for plan in repaired] == [
+		'QUARANTINE',
+		'QUARANTINE',
+		'QUARANTINE',
+	]
+	assert quarantined == [config.handoff_manifest, config.output_root / 'bundle']
+	assert list(config.output_root.glob('bundle.quarantine-*'))
+	assert list(config.output_root.glob(f'{config.handoff_manifest.name}.quarantine-*'))
+	_assert_full_validation_and_reuse_idempotence(config)
+
+
+def test_lateral_source_mask_identity_mismatch_is_error_without_output_mutation(
+	tmp_path,
+) -> None:
+	"""A current hard/posterior mismatch is an input error and preserves output."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	posterior = json.loads(config.source_posterior_manifest.read_text(encoding='utf-8'))
+	for k in (6, 8, 10):
+		entry = posterior['heads'][str(k)]['surveys']['survey']
+		valid_path = Path(entry['valid_tokens']['path'])
+		valid = np.load(valid_path)
+		valid[0, 0, 0] = False
+		np.save(valid_path, valid, allow_pickle=False)
+		entry['valid_tokens']['sha256'] = file_sha256(valid_path)
+		posterior_path = Path(entry['posterior']['path'])
+		values = np.load(posterior_path)
+		values[0, 0, 0] = 0.0
+		np.save(posterior_path, values, allow_pickle=False)
+		entry['posterior']['sha256'] = file_sha256(posterior_path)
+	config.source_posterior_manifest.write_text(
+		json.dumps(posterior, sort_keys=True) + '\n',
+		encoding='utf-8',
+	)
+	before = _public_file_snapshot(config)
+	plans = lateral_targets.plan_multi_head_lateral_target_exports(
+		config,
+		only_missing=True,
+	)
+	assert [plan.action for plan in plans] == ['ERROR', 'ERROR', 'ERROR']
+	assert all(
+		'hard and posterior valid-mask identities differ' in plan.reason
+		for plan in plans
+	)
+	assert _public_file_snapshot(config) == before
+
+
+@pytest.mark.parametrize('missing', ['bundle', 'handoff'])
+def test_lateral_orphan_publication_repairs_only_existing_paths(
+	tmp_path,
+	monkeypatch: pytest.MonkeyPatch,
+	missing: str,
+) -> None:
+	"""Handoff-only and bundle-only generations repair bundle-first/handoff-last."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	bundle = config.output_root / 'bundle'
+	if missing == 'bundle':
+		shutil.rmtree(bundle)
+		expected_quarantine = config.handoff_manifest
+	else:
+		config.handoff_manifest.unlink()
+		expected_quarantine = bundle
+	quarantined: list[Path] = []
+	strict_quarantine = lateral_targets._quarantine  # noqa: SLF001
+
+	def quarantine_existing(path: Path) -> None:
+		assert path.exists()
+		quarantined.append(path)
+		strict_quarantine(path)
+
+	monkeypatch.setattr(lateral_targets, '_quarantine', quarantine_existing)
+	repaired = export_multi_head_lateral_targets(config, only_missing=True)
+	assert [plan.action for plan in repaired] == [
+		'QUARANTINE',
+		'QUARANTINE',
+		'QUARANTINE',
+	]
+	assert quarantined == [expected_quarantine]
+	assert bundle.is_dir()
+	assert config.handoff_manifest.is_file()
+	assert list(
+		expected_quarantine.parent.glob(
+			f'{expected_quarantine.name}.quarantine-*'
+		)
+	)
+	_assert_full_validation_and_reuse_idempotence(config)
+
+
 def test_lateral_reuse_rejects_self_consistent_diagnostic_tampering(tmp_path) -> None:
 	"""Reuse rebuilds metrics from frozen inputs, not just diagnostics files."""
 	config = _real_lateral_export_fixture(tmp_path)
@@ -923,6 +1113,30 @@ def test_lateral_reuse_errors_for_a_different_current_survey_set(
 		path: (path.read_bytes(), path.stat().st_mtime_ns) for path in before
 	}
 	assert after == before
+
+
+def _public_file_snapshot(
+	config: MultiHeadLateralTargetExportConfig,
+) -> dict[Path, tuple[bytes, int]]:
+	paths = [
+		config.handoff_manifest,
+		*sorted((config.output_root / 'bundle').rglob('*')),
+	]
+	return {
+		path: (path.read_bytes(), path.stat().st_mtime_ns)
+		for path in paths
+		if path.is_file()
+	}
+
+
+def _assert_full_validation_and_reuse_idempotence(
+	config: MultiHeadLateralTargetExportConfig,
+) -> None:
+	lateral_targets.load_multi_head_lateral_target_manifest(config.handoff_manifest)
+	before = _public_file_snapshot(config)
+	reused = export_multi_head_lateral_targets(config, only_missing=True)
+	assert [plan.action for plan in reused] == ['REUSE', 'REUSE', 'REUSE']
+	assert _public_file_snapshot(config) == before
 
 
 def _real_lateral_export_fixture(  # noqa: PLR0915
