@@ -215,8 +215,17 @@ def export_multi_head_state_posteriors(
 	return plans
 
 
-def load_multi_head_state_posterior_manifest(path: str | Path) -> dict[str, object]:
-	"""Load an immutable manifest and verify every referenced identity."""
+def load_multi_head_state_posterior_manifest(
+	path: str | Path,
+	*,
+	validate_array_semantics: bool = True,
+) -> dict[str, object]:
+	"""Load an immutable manifest and verify every referenced identity.
+
+	Set ``validate_array_semantics`` to false for configuration-only consumers.
+	That mode retains schema, provenance, digest, metadata, diagnostics, and NPY
+	header validation without scanning posterior or valid-mask array values.
+	"""
 	try:
 		payload = json.loads(Path(path).read_text(encoding='utf-8'))
 	except json.JSONDecodeError as exc:
@@ -225,12 +234,19 @@ def load_multi_head_state_posterior_manifest(path: str | Path) -> dict[str, obje
 		) from exc
 	if not isinstance(payload, dict):
 		raise TypeError('state posterior manifest must be a JSON object')
-	validate_multi_head_state_posterior_manifest(payload)
+	validate_multi_head_state_posterior_manifest(
+		payload,
+		validate_array_semantics=validate_array_semantics,
+	)
 	return payload
 
 
-def validate_multi_head_state_posterior_manifest(payload: Mapping[str, object]) -> None:
-	"""Strictly validate schema, provenance, arrays, and common valid masks."""
+def validate_multi_head_state_posterior_manifest(
+	payload: Mapping[str, object],
+	*,
+	validate_array_semantics: bool = True,
+) -> None:
+	"""Validate posterior references, optionally including full array semantics."""
 	_required_keys(
 		payload,
 		{
@@ -267,35 +283,51 @@ def validate_multi_head_state_posterior_manifest(payload: Mapping[str, object]) 
 					'path'
 				]
 			)
-		)
+		),
+		validate_array_semantics=validate_array_semantics,
 	)
 	_validate_source_manifest(source)
 	source_model_identities = _validate_manifest_hard_source_anchor(
-		payload, source
+		payload,
+		source,
+		validate_array_semantics=validate_array_semantics,
 	)
 	if payload['source_embedding'] != source['source_embedding']:
 		raise ValueError(
 			'posterior source embedding identity differs from hard manifest'
 		)
-	_validate_manifest_source_embedding_identity(
-		_mapping(payload['source_embedding'], 'source_embedding')
-	)
+	if validate_array_semantics:
+		_validate_manifest_source_embedding_identity(
+			_mapping(payload['source_embedding'], 'source_embedding')
+		)
 	heads = _mapping(payload['heads'], 'heads')
 	if set(heads) != {str(k) for k in CANONICAL_KS}:
 		raise ValueError('posterior manifest heads must contain K=6/8/10')
-	_validate_manifest_heads(heads, source, source_model_identities)
+	_validate_manifest_heads(
+		heads,
+		source,
+		source_model_identities,
+		validate_array_semantics=validate_array_semantics,
+	)
 
 
 def _validate_manifest_heads(
 	heads: Mapping[str, object],
 	source: Mapping[str, object],
 	source_model_identities: Mapping[str, object],
+	*,
+	validate_array_semantics: bool,
 ) -> None:
-	common: dict[str, np.ndarray] = {}
+	common_arrays: dict[str, np.ndarray] = {}
+	common_references: dict[str, tuple[str, tuple[int, ...], str]] = {}
 	for k in CANONICAL_KS:
 		head = _mapping(heads[str(k)], f'head k={k}')
 		_required_keys(head, {'model', 'surveys', 'diagnostics'})
-		_validate_head_mapping(head, k=k)
+		_validate_head_mapping(
+			head,
+			k=k,
+			validate_array_semantics=validate_array_semantics,
+		)
 		if _mapping(head['model'], f'posterior model k={k}') != _mapping(
 			source_model_identities[str(k)], f'hard source model k={k}'
 		):
@@ -310,36 +342,70 @@ def _validate_manifest_heads(
 		for survey_id, raw in surveys.items():
 			entry = _mapping(raw, f'k={k} survey {survey_id}')
 			_required_keys(entry, {'posterior', 'valid_tokens', 'metadata', 'source'})
-			posterior_path = _hashed_path(entry['posterior'], 'posterior')
-			valid_path = _hashed_path(entry['valid_tokens'], 'valid_tokens')
-			_hashed_path(entry['metadata'], 'metadata')
-			_validate_source_reference(entry['source'])
-			expected_source = _reference(
-				_source_label_path(
-					_mapping(
-						_source_head(source, k=k)['surveys'][survey_id],
-						'source survey',
-					)
-				)
+			source_survey = _mapping(
+				_source_head(source, k=k)['surveys'][survey_id],
+				'source survey',
+			)
+			expected_source = (
+				_reference(_source_label_path(source_survey))
+				if validate_array_semantics
+				else _source_label_reference(source_survey)
 			)
 			if entry['source'] != expected_source:
 				raise ValueError(
 					f'posterior k={k} {survey_id} hard-label provenance differs'
 				)
-			posterior = np.load(posterior_path, mmap_mode='r', allow_pickle=False)
-			valid = np.load(valid_path, mmap_mode='r', allow_pickle=False)
-			_validate_posterior_array(posterior, valid, k=k)
-			if survey_id in common and not np.array_equal(common[survey_id], valid):
+			valid_reference = _mapping(entry['valid_tokens'], 'valid_tokens')
+			valid_shape = valid_reference.get('shape')
+			if not isinstance(valid_shape, list):
+				raise TypeError('valid_tokens.shape must be a list')
+			identity = (
+				_non_empty_string(valid_reference.get('sha256'), 'valid_tokens.sha256'),
+				tuple(int(dimension) for dimension in valid_shape),
+				_non_empty_string(valid_reference.get('dtype'), 'valid_tokens.dtype'),
+			)
+			if (
+				survey_id in common_references
+				and common_references[survey_id] != identity
+			):
 				raise ValueError(
-					f'posterior k={k} valid mask differs from K=6 for {survey_id}'
+					f'posterior k={k} valid mask differs from K=6 in reference '
+					f'identity for {survey_id}'
 				)
-			common.setdefault(survey_id, np.asarray(valid))
+			common_references.setdefault(survey_id, identity)
+			if validate_array_semantics:
+				valid = np.load(
+					Path(
+						_non_empty_string(
+							valid_reference.get('path'),
+							'valid_tokens.path',
+						)
+					),
+					mmap_mode='r',
+					allow_pickle=False,
+				)
+				if survey_id in common_arrays and not np.array_equal(
+					common_arrays[survey_id],
+					valid,
+				):
+					raise ValueError(
+						f'posterior k={k} valid mask differs from K=6 for '
+						f'{survey_id}'
+					)
+				common_arrays.setdefault(survey_id, np.asarray(valid))
 
 
 def _validate_manifest_hard_source_anchor(
-	payload: Mapping[str, object], source: Mapping[str, object]
+	payload: Mapping[str, object],
+	source: Mapping[str, object],
+	*,
+	validate_array_semantics: bool,
 ) -> Mapping[str, object]:
-	handoff_path, model_identities = hard_source_model_identities(source)
+	handoff_path, model_identities = _validate_hard_source_model_anchor(
+		source,
+		config=None,
+		validate_array_semantics=validate_array_semantics,
+	)
 	if payload['source_hard_export_handoff'] != _reference(handoff_path):
 		raise ValueError(
 			'posterior hard-source export handoff identity differs from hard manifest'
@@ -848,6 +914,7 @@ def _validate_hard_source_model_anchor(  # noqa: C901, PLR0912, PLR0915
 	*,
 	config: MultiHeadStatePosteriorExportConfig | None,
 	models: Mapping[int, Mapping[str, object]] | None = None,
+	validate_array_semantics: bool = True,
 ) -> tuple[Path, Mapping[str, object]]:
 	"""Bind posterior inputs to the frozen export that produced hard targets.
 
@@ -948,14 +1015,15 @@ def _validate_hard_source_model_anchor(  # noqa: C901, PLR0912, PLR0915
 				f'hard manifest source model metadata differs for k={k}'
 			)
 		model_identities[str(k)] = identity
-		labels = _mapping(label_hashes[str(k)], f'hard source labels k={k}')
-		for survey_id, raw in _source_head(source, k=k)['surveys'].items():
-			label = _source_label_path(_mapping(raw, 'source survey'))
-			if labels.get(label.name) != file_sha256(label):
-				raise ValueError(
-					'hard manifest source export label identity mismatch for '
-					f'k={k} {survey_id}'
-				)
+		if validate_array_semantics:
+			labels = _mapping(label_hashes[str(k)], f'hard source labels k={k}')
+			for survey_id, raw in _source_head(source, k=k)['surveys'].items():
+				label = _source_label_path(_mapping(raw, 'source survey'))
+				if labels.get(label.name) != file_sha256(label):
+					raise ValueError(
+						'hard manifest source export label identity mismatch for '
+						f'k={k} {survey_id}'
+					)
 	if config is None:
 		return handoff_path, model_identities
 	clustering_path = Path(
@@ -1137,7 +1205,12 @@ def _validate_complete_head(
 	_validate_head_files(path, head)
 
 
-def _validate_head_mapping(head: Mapping[str, object], *, k: int) -> None:
+def _validate_head_mapping(
+	head: Mapping[str, object],
+	*,
+	k: int,
+	validate_array_semantics: bool = True,
+) -> None:
 	_required_keys(head, {'model', 'surveys', 'diagnostics'})
 	_validate_model_identity(head['model'], k=k)
 	_validate_diagnostics(head['diagnostics'], k=k)
@@ -1156,7 +1229,9 @@ def _validate_head_mapping(head: Mapping[str, object], *, k: int) -> None:
 			mmap_mode='r',
 			allow_pickle=False,
 		)
-		_validate_posterior_array(posterior, valid, k=k)
+		_validate_posterior_array_header(posterior, valid, k=k)
+		if validate_array_semantics:
+			_validate_posterior_array(posterior, valid, k=k)
 		_validate_array_reference(
 			entry['posterior'], posterior, name='posterior'
 		)
@@ -1375,16 +1450,25 @@ def _validate_model_identity(value: object, *, k: int) -> None:
 def _validate_posterior_array(
 	posterior: np.ndarray, valid: np.ndarray, *, k: int
 ) -> None:
-	if posterior.dtype != np.float32 or posterior.ndim != 4 or posterior.shape[-1] != k:
-		raise ValueError(f'posterior must be float32 [X,Y,Z,{k}]')
-	if valid.dtype != np.bool_ or valid.shape != posterior.shape[:3]:
-		raise ValueError('posterior valid mask shape/dtype mismatch')
+	_validate_posterior_array_header(posterior, valid, k=k)
 	if not np.all(np.isfinite(posterior)) or np.any(posterior < 0):
 		raise ValueError('posterior must be finite and non-negative')
 	if not np.allclose(posterior[valid].sum(axis=1), 1.0, rtol=0.0, atol=2e-6):
 		raise ValueError('valid posterior rows must sum to one')
 	if np.any(posterior[~valid] != 0):
 		raise ValueError('invalid posterior rows must be zero')
+
+
+def _validate_posterior_array_header(
+	posterior: np.ndarray,
+	valid: np.ndarray,
+	*,
+	k: int,
+) -> None:
+	if posterior.dtype != np.float32 or posterior.ndim != 4 or posterior.shape[-1] != k:
+		raise ValueError(f'posterior must be float32 [X,Y,Z,{k}]')
+	if valid.dtype != np.bool_ or valid.shape != posterior.shape[:3]:
+		raise ValueError('posterior valid mask shape/dtype mismatch')
 
 
 def _validate_array_reference(
@@ -1447,12 +1531,18 @@ def _required_embedding(
 
 
 def _source_label_path(entry: Mapping[str, object]) -> Path:
+	reference = _source_label_reference(entry)
+	return _hashed_path(reference, 'hard target source label')
+
+
+def _source_label_reference(entry: Mapping[str, object]) -> dict[str, str]:
+	"""Read the source-label identity recorded by hash-bound hard metadata."""
 	meta = _hashed_path(entry['metadata'], 'hard target metadata')
 	payload = json.loads(meta.read_text(encoding='utf-8'))
 	source = _mapping(payload.get('source'), 'hard target source')
 	path = Path(_non_empty_string(source.get('source_label_path'), 'source_label_path'))
 	if not path.is_file():
-		raise ValueError('hard target source-label hash mismatch')
+		raise ValueError('hard target source-label is missing')
 	digest = source.get('source_label_sha256')
 	if digest is None:
 		# Legacy hard-target metadata omitted this duplicate field, but its labels
@@ -1461,9 +1551,7 @@ def _source_label_path(entry: Mapping[str, object]) -> Path:
 		digest = _non_empty_string(labels.get('sha256'), 'hard target labels.sha256')
 	else:
 		digest = _non_empty_string(digest, 'source_label_sha256')
-	if file_sha256(path) != digest:
-		raise ValueError('hard target source-label hash mismatch')
-	return path
+	return {'path': str(path), 'sha256': digest}
 
 
 def _validate_source_reference(value: object) -> None:

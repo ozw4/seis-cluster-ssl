@@ -440,7 +440,11 @@ def validate_multi_head_lateral_target_manifest(  # noqa: C901, PLR0912, PLR0915
 	posterior = json.loads(posterior_path.read_text(encoding='utf-8'))
 	if not isinstance(posterior, Mapping):
 		raise TypeError('source posterior manifest must be an object')
-	validate_multi_head_state_posterior_manifest(posterior)
+	_validate_source_valid_mask_reference_identities(hard, posterior)
+	validate_multi_head_state_posterior_manifest(
+		posterior,
+		validate_array_semantics=validate_array_semantics,
+	)
 	if (
 		posterior['source_hard_manifest'] != _reference(hard_path)
 		or payload['source_embedding'] != hard['source_embedding']
@@ -958,7 +962,11 @@ def _validate_sources(  # noqa: C901
 	posterior = json.loads(config.source_posterior_manifest.read_text(encoding='utf-8'))
 	if not isinstance(posterior, Mapping):
 		raise TypeError('source posterior manifest must be an object')
-	validate_multi_head_state_posterior_manifest(posterior)
+	_validate_source_valid_mask_reference_identities(hard, posterior)
+	validate_multi_head_state_posterior_manifest(
+		posterior,
+		validate_array_semantics=False,
+	)
 	if posterior['source_hard_manifest'] != _reference(config.source_hard_manifest):
 		raise ValueError('posterior is not anchored to selected hard manifest')
 	if posterior['source_embedding'] != hard['source_embedding']:
@@ -1016,7 +1024,6 @@ def _validate_sources(  # noqa: C901
 				raise ValueError(
 					f'hard labels and valid mask differ for k={k} {survey_id}'
 				)
-	_validate_source_valid_mask_reference_identities(hard, posterior)
 	return hard, posterior, inputs, models
 
 

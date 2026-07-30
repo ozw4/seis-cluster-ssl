@@ -929,7 +929,8 @@ def _validate_strat_hmm_multi_head_manifest(
 			'seis_ssl_cluster.stratigraphy.state_posterior'
 		)
 		manifest = state_posterior.load_multi_head_state_posterior_manifest(
-			str(pseudo_targets['manifest'])
+			str(pseudo_targets['manifest']),
+			validate_array_semantics=False,
 		)
 	else:
 		lateral_targets = importlib.import_module(

@@ -1448,8 +1448,12 @@ def _soft_multi_head_resume_config(
 	monkeypatch.setattr(
 		strat_hmm_checkpoint,
 		'load_multi_head_state_posterior_manifest',
-		lambda path: (
-			_assert_posterior_manifest_load(path, posterior_manifest_path)
+		lambda path, *, validate_array_semantics: (
+			_assert_posterior_manifest_load(
+				path,
+				posterior_manifest_path,
+				validate_array_semantics=validate_array_semantics,
+			)
 			or _posterior_manifest(posterior_hashes)
 		),
 	)
@@ -1837,8 +1841,14 @@ def _posterior_manifest(
 	}
 
 
-def _assert_posterior_manifest_load(path: Path, expected_path: Path) -> None:
+def _assert_posterior_manifest_load(
+	path: Path,
+	expected_path: Path,
+	*,
+	validate_array_semantics: bool,
+) -> None:
 	assert path == expected_path
+	assert not validate_array_semantics
 
 
 def _assert_lateral_manifest_load(

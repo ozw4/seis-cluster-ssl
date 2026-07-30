@@ -845,7 +845,10 @@ def load_strat_multi_head_posterior_manifest(
 	path: str | Path,
 ) -> StratMultiHeadPosteriorManifest:
 	"""Load the strict state-posterior manifest without retaining its payload."""
-	payload = load_multi_head_state_posterior_manifest(path)
+	payload = load_multi_head_state_posterior_manifest(
+		path,
+		validate_array_semantics=False,
+	)
 	head_ks = tuple(cast('list[int]', payload['head_ks']))
 	heads = cast('Mapping[str, Mapping[str, object]]', payload['heads'])
 	first_surveys = cast('Mapping[str, object]', heads[str(head_ks[0])]['surveys'])

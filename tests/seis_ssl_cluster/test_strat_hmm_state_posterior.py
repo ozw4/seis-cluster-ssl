@@ -378,17 +378,21 @@ def test_manifest_validation_rehashes_live_source_embedding_inputs(
 		'heads': {str(k): {} for k in state_posterior.CANONICAL_KS},
 	}
 	monkeypatch.setattr(
-		state_posterior, 'load_multi_head_target_manifest', lambda _path: source
+		state_posterior,
+		'load_multi_head_target_manifest',
+		lambda _path, **_kwargs: source,
 	)
 	monkeypatch.setattr(
 		state_posterior, '_validate_source_manifest', lambda _source: None
 	)
 	monkeypatch.setattr(
 		state_posterior, '_validate_manifest_hard_source_anchor',
-		lambda _payload, _source: {},
+		lambda _payload, _source, *, validate_array_semantics: (
+			{} if validate_array_semantics else pytest.fail('expected full validation')
+		),
 	)
 	monkeypatch.setattr(
-		state_posterior, '_validate_manifest_heads', lambda *_args: None
+		state_posterior, '_validate_manifest_heads', lambda *_args, **_kwargs: None
 	)
 	np.save(embedding.embeddings_path, np.ones((1, 1, 1, 2), dtype=np.float32))
 	posterior_manifest = tmp_path / 'posterior_manifest.json'
@@ -471,7 +475,7 @@ def test_all_k_export_reuses_complete_outputs_with_only_missing(
 	monkeypatch.setattr(
 		state_posterior,
 		'load_multi_head_target_manifest',
-		lambda _path: source,
+		lambda _path, **_kwargs: source,
 	)
 	monkeypatch.setattr(state_posterior, '_validate_frozen_inputs', lambda *_args: None)
 	monkeypatch.setattr(
@@ -545,7 +549,7 @@ def test_export_quarantines_stale_handoff_before_republishing(
 	monkeypatch.setattr(
 		state_posterior,
 		'load_multi_head_target_manifest',
-		lambda _path: source,
+		lambda _path, **_kwargs: source,
 	)
 	monkeypatch.setattr(state_posterior, '_validate_frozen_inputs', lambda *_args: None)
 	monkeypatch.setattr(
@@ -646,7 +650,7 @@ def test_manifest_loader_rejects_cross_k_valid_mask_mismatch(
 	monkeypatch.setattr(
 		state_posterior,
 		'load_multi_head_target_manifest',
-		lambda _path: source,
+		lambda _path, **_kwargs: source,
 	)
 	monkeypatch.setattr(
 		state_posterior,
@@ -656,9 +660,14 @@ def test_manifest_loader_rejects_cross_k_valid_mask_mismatch(
 	monkeypatch.setattr(
 		state_posterior,
 		'_validate_manifest_hard_source_anchor',
-		lambda _payload, _source: {
-			str(k): models[k]['identity'] for k in state_posterior.CANONICAL_KS
-		},
+		lambda _payload, _source, *, validate_array_semantics: (
+			{
+				str(k): models[k]['identity']
+				for k in state_posterior.CANONICAL_KS
+			}
+			if validate_array_semantics
+			else pytest.fail('expected full validation')
+		),
 	)
 	monkeypatch.setattr(
 		state_posterior,

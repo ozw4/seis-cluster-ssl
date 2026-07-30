@@ -19,7 +19,7 @@ from proc.seis_ssl_cluster.export_strat_hmm_multi_head_lateral_targets import (
 	build_parser,
 )
 from seis_ssl_cluster.clustering.features import EmbeddingInput, file_sha256
-from seis_ssl_cluster.stratigraphy import lateral_targets
+from seis_ssl_cluster.stratigraphy import lateral_targets, state_posterior
 from seis_ssl_cluster.stratigraphy.lateral_targets import (
 	MultiHeadLateralTargetExportConfig,
 	MultiHeadLateralTargetExportPlan,
@@ -100,6 +100,45 @@ def test_lateral_target_entrypoint_dry_run_reports_resolved_scales(
 		assert f'k={k} resolved emission-gap scale: {k}' in report
 
 
+def test_lateral_target_entrypoint_dry_run_reports_source_error_without_scales(
+	tmp_path,
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	"""An unresolved ERROR plan reports its cause instead of requiring scales."""
+	config_path = tmp_path / 'lateral-targets.yaml'
+	reason = 'hard and posterior valid-mask identities differ for k=6 survey'
+	plans = [
+		MultiHeadLateralTargetExportPlan(k, 'ERROR', reason)
+		for k in (6, 8, 10)
+	]
+	monkeypatch.setattr(lateral_target_export_cli, 'load_config', lambda _path: {})
+	monkeypatch.setattr(
+		lateral_target_export_cli,
+		'resolve_multi_head_lateral_target_export_config',
+		lambda _config: object(),
+	)
+	monkeypatch.setattr(
+		lateral_target_export_cli,
+		'export_multi_head_lateral_targets',
+		lambda *_args, **_kwargs: plans,
+	)
+
+	assert (
+		lateral_target_export_cli.main(['--config', str(config_path), '--dry-run'])
+		== 0
+	)
+	report = capsys.readouterr().out
+	for k in (6, 8, 10):
+		action = f'k={k} planned action: ERROR'
+		detail = f'k={k} detail: {reason}'
+		assert action in report
+		assert detail in report
+		assert report.index(action) < report.index(detail)
+	assert 'resolved affinity scale' not in report
+	assert 'resolved emission-gap scale' not in report
+
+
 def test_lateral_sources_require_hard_manifest_frozen_model_identity(
 	tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -120,7 +159,10 @@ def test_lateral_sources_require_hard_manifest_frozen_model_identity(
 			'sha256': file_sha256(hard_path),
 		},
 		'source_embedding': source_embedding,
-		'heads': {str(k): {'model': {'model': 'selected'}} for k in (6, 8, 10)},
+		'heads': {
+			str(k): {'model': {'model': 'selected'}, 'surveys': {}}
+			for k in (6, 8, 10)
+		},
 	}
 	config = MultiHeadLateralTargetExportConfig(
 		hard_path,
@@ -137,7 +179,15 @@ def test_lateral_sources_require_hard_manifest_frozen_model_identity(
 	)
 	monkeypatch.setattr(lateral_targets.json, 'loads', lambda _: posterior)
 	monkeypatch.setattr(
-		lateral_targets, 'validate_multi_head_state_posterior_manifest', lambda _: None
+		lateral_targets,
+		'validate_multi_head_state_posterior_manifest',
+		lambda _payload, *, validate_array_semantics: (
+			None
+			if not validate_array_semantics
+			else pytest.fail(
+				'lateral source validation requested full posterior arrays'
+			)
+		),
 	)
 	monkeypatch.setattr(
 		lateral_targets, '_validate_source_embedding_identity', lambda *_: None
@@ -793,6 +843,47 @@ def test_lateral_reference_only_skips_all_full_replay_helpers(
 		)
 
 
+def test_lateral_reference_only_skips_nested_posterior_array_validation(
+	tmp_path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Checkpoint-style loading keeps nested posterior validation reference-only."""
+	config = _real_lateral_export_fixture(tmp_path)
+	export_multi_head_lateral_targets(config)
+	hard_load_modes: list[bool] = []
+	load_hard_manifest = state_posterior.load_multi_head_target_manifest
+
+	def load_hard(path, *, validate_array_semantics: bool):
+		hard_load_modes.append(validate_array_semantics)
+		return load_hard_manifest(
+			path,
+			validate_array_semantics=validate_array_semantics,
+		)
+
+	def reject(*_args, **_kwargs):
+		raise AssertionError('nested posterior full validation was called')
+
+	monkeypatch.setattr(
+		state_posterior,
+		'load_multi_head_target_manifest',
+		load_hard,
+	)
+	monkeypatch.setattr(state_posterior, '_validate_posterior_array', reject)
+	monkeypatch.setattr(
+		state_posterior,
+		'_validate_manifest_source_embedding_identity',
+		reject,
+	)
+	monkeypatch.setattr(state_posterior, 'discover_embedding_inputs', reject)
+
+	lateral_targets.load_multi_head_lateral_target_manifest(
+		config.handoff_manifest,
+		validate_array_semantics=False,
+	)
+
+	assert hard_load_modes == [False]
+
+
 def test_lateral_reference_only_rejects_all_heads_using_same_wrong_mask(
 	tmp_path,
 ) -> None:
@@ -909,6 +1000,38 @@ def test_lateral_source_mask_identity_mismatch_is_error_without_output_mutation(
 		for plan in plans
 	)
 	assert _public_file_snapshot(config) == before
+
+
+def test_lateral_cross_head_source_mask_mismatch_returns_typed_error_plans(
+	tmp_path,
+) -> None:
+	"""One posterior head with a different mask is classified as source ERROR."""
+	config = _real_lateral_export_fixture(tmp_path)
+	posterior = json.loads(config.source_posterior_manifest.read_text(encoding='utf-8'))
+	entry = posterior['heads']['8']['surveys']['survey']
+	valid_path = Path(entry['valid_tokens']['path'])
+	valid = np.load(valid_path)
+	valid[0, 0, 0] = False
+	np.save(valid_path, valid, allow_pickle=False)
+	entry['valid_tokens']['sha256'] = file_sha256(valid_path)
+	config.source_posterior_manifest.write_text(
+		json.dumps(posterior, sort_keys=True) + '\n',
+		encoding='utf-8',
+	)
+
+	plans = lateral_targets.plan_multi_head_lateral_target_exports(
+		config,
+		only_missing=True,
+	)
+
+	assert [plan.action for plan in plans] == ['ERROR', 'ERROR', 'ERROR']
+	assert all(
+		plan.reason is not None
+		and 'hard and posterior valid-mask identities differ for k=8 survey'
+		in plan.reason
+		for plan in plans
+	)
+	assert not config.output_root.exists()
 
 
 @pytest.mark.parametrize('missing', ['bundle', 'handoff'])

@@ -81,7 +81,7 @@ def test_lateral_adapter_reuses_hard_provider_fields_without_array_load(
 	('representation', 'expected_loader'),
 	[
 		('hard_viterbi_labels_v1', ('multi_head', False)),
-		('ordered_path_state_posterior_v1', ('state_posterior', None)),
+		('ordered_path_state_posterior_v1', ('state_posterior', False)),
 		('lateral_mean_field_hard_labels_v1', ('lateral_targets', False)),
 	],
 )

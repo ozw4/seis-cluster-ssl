@@ -1212,7 +1212,10 @@ def _is_lateral_multi_head_config(config: Mapping[str, object]) -> bool:
 def _posterior_per_head_hashes(
 	manifest_path: Path,
 ) -> dict[str, dict[str, dict[str, str]]]:
-	manifest = load_multi_head_state_posterior_manifest(manifest_path)
+	manifest = load_multi_head_state_posterior_manifest(
+		manifest_path,
+		validate_array_semantics=False,
+	)
 	heads = _required_mapping(manifest, 'heads')
 	result: dict[str, dict[str, dict[str, str]]] = {}
 	for k in _head_ks(manifest.get('head_ks')):

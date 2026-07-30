@@ -788,7 +788,11 @@ def test_active_f3_strat_hmm_pretext_configs_resolve(
 	monkeypatch.setattr(
 		state_posterior,
 		'load_multi_head_state_posterior_manifest',
-		lambda _path: _active_posterior_manifest(),
+		lambda _path, *, validate_array_semantics: (
+			_active_posterior_manifest()
+			if not validate_array_semantics
+			else pytest.fail('config validation requested full posterior arrays')
+		),
 	)
 	resolve_strat_hmm_pretext_config(
 		_config_with_existing_strat_hmm_pretext_inputs(config_path, tmp_path),

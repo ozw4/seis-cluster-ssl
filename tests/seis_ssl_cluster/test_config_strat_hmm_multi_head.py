@@ -99,7 +99,11 @@ def test_soft_multi_head_config_resolves_with_posterior_identity(
 	monkeypatch.setattr(
 		state_posterior,
 		'load_multi_head_state_posterior_manifest',
-		lambda _path: posterior_manifest,
+		lambda _path, *, validate_array_semantics: (
+			posterior_manifest
+			if not validate_array_semantics
+			else pytest.fail('config validation requested full posterior arrays')
+		),
 	)
 	config['pseudo_targets']['target_representation'] = (
 		'ordered_path_state_posterior_v1'
@@ -150,12 +154,16 @@ def test_soft_multi_head_config_requires_posterior_hashes(
 	monkeypatch.setattr(
 		state_posterior,
 		'load_multi_head_state_posterior_manifest',
-		lambda _path: {
-			'head_ks': [6, 8, 10],
-			'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
-			'cost_temperature': 1.0,
-			'heads': {},
-		},
+		lambda _path, *, validate_array_semantics: (
+			{
+				'head_ks': [6, 8, 10],
+				'posterior_semantics': 'ordered_path_cost_gibbs_state_marginal_v1',
+				'cost_temperature': 1.0,
+				'heads': {},
+			}
+			if not validate_array_semantics
+			else pytest.fail('config validation requested full posterior arrays')
+		),
 	)
 	config['pseudo_targets']['target_representation'] = (
 		'ordered_path_state_posterior_v1'
