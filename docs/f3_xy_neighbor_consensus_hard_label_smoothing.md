@@ -25,6 +25,11 @@ the source trace. Endpoints and one-sided-valid positions remain unchanged.
 This is a safety guard preserving the source trace's nondecreasing ordering;
 it is not Viterbi decoding or an iterative smoothing operation.
 
+Temporal transition-count increases are allowed in this experiment. Transition
+count is an observational diagnostic, not an eligibility or stop gate. The hard
+safety condition is preservation of valid-mask identity and nondecreasing
+ordered traces.
+
 ## Immutable artifact and training contract
 
 Each exported head writes `int32` labels, `float32` unity confidence, and the

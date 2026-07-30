@@ -5,6 +5,11 @@ publication from the frozen source hard manifest. It is a single synchronous
 XY four-neighbour consensus pass with an ordered-trace safety guard. Training
 uses only the existing hard-label multi-head data/collate/loss route.
 
+Temporal transition-count increases are allowed in this experiment. Transition
+count is an observational diagnostic, not an eligibility or stop gate. The hard
+safety condition is preservation of valid-mask identity and nondecreasing
+ordered traces.
+
 Target export and training do not read embeddings or state posteriors, compute
 affinities, update emissions, re-decode with Viterbi, sweep or calibrate beta,
 refresh targets, or use facies/lithology labels or downstream metrics. The
