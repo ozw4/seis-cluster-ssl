@@ -1,0 +1,394 @@
+{
+  "artifact_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}",
+  "artifact_type": "f3_xy_neighbor_consensus_original_screening_preflight",
+  "candidate": {
+    "best_checkpoint": {
+      "byte_size": 87247675,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1/best.pt",
+      "sha256": "86cf5050e181a6cf4b254a3a377ab3f496a81b7b025d765625fe3b31a6fbfb8c"
+    },
+    "embeddings": {
+      "embeddings": {
+        "byte_size": 211058816,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embeddings.npy",
+        "sha256": "9d34056a300cc440653ee7def2c0d066fdedf8787c52ed6cf3e6e915e923b998"
+      },
+      "metadata": {
+        "byte_size": 5803,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embedding_metadata.json",
+        "sha256": "2d732c843542af8aad0b4f04563c23fee30675caf38085282f28ea030dd40c8c"
+      },
+      "root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1/overlap_x16",
+      "valid_tokens": {
+        "byte_size": 274944,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+        "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      }
+    },
+    "model_id": "mh_xycons1_nocons",
+    "model_tag": "strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1",
+    "pretraining_handoff": {
+      "byte_size": 4599,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1/preflight/xy_neighbor_consensus_handoff.json",
+      "sha256": "6f7faeac191c79285a5fddd397a3da5ea65ca69db83e69cf42f18aa3afa32500"
+    }
+  },
+  "git": {
+    "dirty": false,
+    "git_sha": "9d940c9cfb2fb1d14dc9a5706f7ab2e86f3db936"
+  },
+  "hard_baseline_parity": {
+    "allowed_config_diff": {
+      "identity": [
+        "model_tag",
+        "scientific_identity.representation_specific_fields"
+      ],
+      "paths": [
+        "output_root"
+      ],
+      "pseudo_targets": [
+        "manifest",
+        "target_representation"
+      ]
+    },
+    "candidate": {
+      "config": {
+        "byte_size": 2745,
+        "path": "experiments/f3/facies_benchmark_v1/100_strat_hmm_multi_head_k6810_xy_neighbor_consensus_v1/03_train_xy_neighbor_consensus_full.yaml",
+        "sha256": "6d5e4a5ebd6b7afd9977a9c408a0e3067c8fde9ec7e228e6330af4e2d53e3e7a"
+      },
+      "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+      "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+      "optimizer_group_identity": [
+        {
+          "lr": 0.0003,
+          "name": "head",
+          "parameter_names": [
+            "head.heads.k6.prototypes",
+            "head.heads.k6.projection.weight",
+            "head.heads.k6.projection.bias",
+            "head.heads.k8.prototypes",
+            "head.heads.k8.projection.weight",
+            "head.heads.k8.projection.bias",
+            "head.heads.k10.prototypes",
+            "head.heads.k10.projection.weight",
+            "head.heads.k10.projection.bias"
+          ]
+        },
+        {
+          "lr": 1e-05,
+          "name": "encoder",
+          "parameter_names": [
+            "student.encoder.layers.7.norm1.weight",
+            "student.encoder.layers.7.norm1.bias",
+            "student.encoder.layers.7.attention.in_proj_weight",
+            "student.encoder.layers.7.attention.in_proj_bias",
+            "student.encoder.layers.7.attention.out_proj.weight",
+            "student.encoder.layers.7.attention.out_proj.bias",
+            "student.encoder.layers.7.norm2.weight",
+            "student.encoder.layers.7.norm2.bias",
+            "student.encoder.layers.7.mlp.0.weight",
+            "student.encoder.layers.7.mlp.0.bias",
+            "student.encoder.layers.7.mlp.3.weight",
+            "student.encoder.layers.7.mlp.3.bias"
+          ]
+        }
+      ],
+      "pretraining_handoff": {
+        "byte_size": 4599,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1/preflight/xy_neighbor_consensus_handoff.json",
+        "sha256": "6f7faeac191c79285a5fddd397a3da5ea65ca69db83e69cf42f18aa3afa32500"
+      },
+      "trainability_summary": {
+        "frozen_parameter_count": 16007680,
+        "trainable_names": [
+          "encoder.layers.7.norm1.weight",
+          "encoder.layers.7.norm1.bias",
+          "encoder.layers.7.attention.in_proj_weight",
+          "encoder.layers.7.attention.in_proj_bias",
+          "encoder.layers.7.attention.out_proj.weight",
+          "encoder.layers.7.attention.out_proj.bias",
+          "encoder.layers.7.norm2.weight",
+          "encoder.layers.7.norm2.bias",
+          "encoder.layers.7.mlp.0.weight",
+          "encoder.layers.7.mlp.0.bias",
+          "encoder.layers.7.mlp.3.weight",
+          "encoder.layers.7.mlp.3.bias"
+        ],
+        "trainable_parameter_count": 1774464
+      }
+    },
+    "hard": {
+      "config": {
+        "byte_size": 2483,
+        "path": "experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/04_train_nocons_full.yaml",
+        "sha256": "812b33961ca833d24e5dbc81f1c607b69e923a688b4b4a287d828ae1f0a014d5"
+      },
+      "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+      "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+      "optimizer_group_identity": [
+        {
+          "lr": 0.0003,
+          "name": "head",
+          "parameter_names": [
+            "head.heads.k6.prototypes",
+            "head.heads.k6.projection.weight",
+            "head.heads.k6.projection.bias",
+            "head.heads.k8.prototypes",
+            "head.heads.k8.projection.weight",
+            "head.heads.k8.projection.bias",
+            "head.heads.k10.prototypes",
+            "head.heads.k10.projection.weight",
+            "head.heads.k10.projection.bias"
+          ]
+        },
+        {
+          "lr": 1e-05,
+          "name": "encoder",
+          "parameter_names": [
+            "student.encoder.layers.7.norm1.weight",
+            "student.encoder.layers.7.norm1.bias",
+            "student.encoder.layers.7.attention.in_proj_weight",
+            "student.encoder.layers.7.attention.in_proj_bias",
+            "student.encoder.layers.7.attention.out_proj.weight",
+            "student.encoder.layers.7.attention.out_proj.bias",
+            "student.encoder.layers.7.norm2.weight",
+            "student.encoder.layers.7.norm2.bias",
+            "student.encoder.layers.7.mlp.0.weight",
+            "student.encoder.layers.7.mlp.0.bias",
+            "student.encoder.layers.7.mlp.3.weight",
+            "student.encoder.layers.7.mlp.3.bias"
+          ]
+        }
+      ],
+      "pretraining_handoff": {
+        "byte_size": 4081,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/preflight/multi_head_handoff.json",
+        "sha256": "489f99c1b21572d97b43e663f6cb165ea5cdcca656fcaa79a9faeacd91304140"
+      },
+      "trainability_summary": {
+        "frozen_parameter_count": 16007680,
+        "trainable_names": [
+          "encoder.layers.7.norm1.weight",
+          "encoder.layers.7.norm1.bias",
+          "encoder.layers.7.attention.in_proj_weight",
+          "encoder.layers.7.attention.in_proj_bias",
+          "encoder.layers.7.attention.out_proj.weight",
+          "encoder.layers.7.attention.out_proj.bias",
+          "encoder.layers.7.norm2.weight",
+          "encoder.layers.7.norm2.bias",
+          "encoder.layers.7.mlp.0.weight",
+          "encoder.layers.7.mlp.0.bias",
+          "encoder.layers.7.mlp.3.weight",
+          "encoder.layers.7.mlp.3.bias"
+        ],
+        "trainable_parameter_count": 1774464
+      }
+    },
+    "normalized_config_equal": true,
+    "status": "PASS"
+  },
+  "reviewed_identity_check": {
+    "expected": {
+      "best_checkpoint_sha256": "86cf5050e181a6cf4b254a3a377ab3f496a81b7b025d765625fe3b31a6fbfb8c",
+      "embedding_metadata_sha256": "2d732c843542af8aad0b4f04563c23fee30675caf38085282f28ea030dd40c8c",
+      "pretraining_handoff_sha256": "6f7faeac191c79285a5fddd397a3da5ea65ca69db83e69cf42f18aa3afa32500",
+      "target_manifest_sha256": "307c9a28796f7b1d90ef4f188676abc5a3604be402fe8ef4a18b515d06671a41"
+    },
+    "status": "PASS"
+  },
+  "schema_version": 1,
+  "source_hard_manifest": {
+    "byte_size": 22568,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+    "sha256": "c0b4edc17774d522bc0896db1366166628135d8369d2e063fd6183c66b01d15c"
+  },
+  "status": "PASS",
+  "workspace_root": ".",
+  "xy_spatial_smoothness": {
+    "per_k": {
+      "10": {
+        "changed_fraction": 0.027233676975945018,
+        "changed_token_count": 4438,
+        "combined": {
+          "absolute_disagreement_reduction": 0.03415297147335811,
+          "output_disagreement_count": 80337,
+          "output_disagreement_fraction": 0.24986315173983903,
+          "relative_disagreement_reduction": 0.12025011498280724,
+          "source_disagreement_count": 91318,
+          "source_disagreement_fraction": 0.28401612321319714,
+          "valid_edge_count": 321524
+        },
+        "empty_output_state_count": 0,
+        "ordered_path_violations": {
+          "output": 0,
+          "source": 0
+        },
+        "output_state_occupancy": [
+          548,
+          3418,
+          7077,
+          12605,
+          13260,
+          32497,
+          21219,
+          45499,
+          16234,
+          10603
+        ],
+        "output_temporal_transition_count": 36391,
+        "source_state_occupancy": [
+          549,
+          3420,
+          7106,
+          12669,
+          13322,
+          32082,
+          21913,
+          44985,
+          16276,
+          10638
+        ],
+        "source_temporal_transition_count": 37267,
+        "valid_token_count": 162960,
+        "x_edges": {
+          "absolute_disagreement_reduction": 0.03407303861611041,
+          "output_disagreement_count": 39340,
+          "output_disagreement_fraction": 0.24550061156735978,
+          "relative_disagreement_reduction": 0.12187499999999994,
+          "source_disagreement_count": 44800,
+          "source_disagreement_fraction": 0.2795736501834702,
+          "valid_edge_count": 160244
+        },
+        "y_edges": {
+          "absolute_disagreement_reduction": 0.03423239087301588,
+          "output_disagreement_count": 40997,
+          "output_disagreement_fraction": 0.25419766865079363,
+          "relative_disagreement_reduction": 0.11868524012210331,
+          "source_disagreement_count": 46518,
+          "source_disagreement_fraction": 0.2884300595238095,
+          "valid_edge_count": 161280
+        }
+      },
+      "6": {
+        "changed_fraction": 0.026485027000490918,
+        "changed_token_count": 4316,
+        "combined": {
+          "absolute_disagreement_reduction": 0.033642900685485366,
+          "output_disagreement_count": 64361,
+          "output_disagreement_fraction": 0.20017479255047835,
+          "relative_disagreement_reduction": 0.14388517917475854,
+          "source_disagreement_count": 75178,
+          "source_disagreement_fraction": 0.23381769323596371,
+          "valid_edge_count": 321524
+        },
+        "empty_output_state_count": 0,
+        "ordered_path_violations": {
+          "output": 0,
+          "source": 0
+        },
+        "output_state_occupancy": [
+          9599,
+          11059,
+          11747,
+          62162,
+          31720,
+          36673
+        ],
+        "output_temporal_transition_count": 26287,
+        "source_state_occupancy": [
+          9583,
+          11076,
+          12182,
+          61178,
+          32739,
+          36202
+        ],
+        "source_temporal_transition_count": 26857,
+        "valid_token_count": 162960,
+        "x_edges": {
+          "absolute_disagreement_reduction": 0.033929507501060885,
+          "output_disagreement_count": 31826,
+          "output_disagreement_fraction": 0.1986096203289983,
+          "relative_disagreement_reduction": 0.14590881034806644,
+          "source_disagreement_count": 37263,
+          "source_disagreement_fraction": 0.23253912783005917,
+          "valid_edge_count": 160244
+        },
+        "y_edges": {
+          "absolute_disagreement_reduction": 0.03335813492063491,
+          "output_disagreement_count": 32535,
+          "output_disagreement_fraction": 0.20172991071428573,
+          "relative_disagreement_reduction": 0.14189634709217985,
+          "source_disagreement_count": 37915,
+          "source_disagreement_fraction": 0.23508804563492064,
+          "valid_edge_count": 161280
+        }
+      },
+      "8": {
+        "changed_fraction": 0.027472999509081983,
+        "changed_token_count": 4477,
+        "combined": {
+          "absolute_disagreement_reduction": 0.03430848085990468,
+          "output_disagreement_count": 86385,
+          "output_disagreement_fraction": 0.26867356713651236,
+          "relative_disagreement_reduction": 0.11323601872382352,
+          "source_disagreement_count": 97416,
+          "source_disagreement_fraction": 0.30298204799641704,
+          "valid_edge_count": 321524
+        },
+        "empty_output_state_count": 0,
+        "ordered_path_violations": {
+          "output": 0,
+          "source": 0
+        },
+        "output_state_occupancy": [
+          11465,
+          15353,
+          48059,
+          20498,
+          18832,
+          23461,
+          15887,
+          9405
+        ],
+        "output_temporal_transition_count": 35540,
+        "source_state_occupancy": [
+          11513,
+          15587,
+          46989,
+          21251,
+          19061,
+          23308,
+          15865,
+          9386
+        ],
+        "source_temporal_transition_count": 36375,
+        "valid_token_count": 162960,
+        "x_edges": {
+          "absolute_disagreement_reduction": 0.035083996904720305,
+          "output_disagreement_count": 42188,
+          "output_disagreement_fraction": 0.2632735079004518,
+          "relative_disagreement_reduction": 0.11759046224639198,
+          "source_disagreement_count": 47810,
+          "source_disagreement_fraction": 0.2983575048051721,
+          "valid_edge_count": 160244
+        },
+        "y_edges": {
+          "absolute_disagreement_reduction": 0.033537946428571386,
+          "output_disagreement_count": 44197,
+          "output_disagreement_fraction": 0.2740389384920635,
+          "relative_disagreement_reduction": 0.10903922912550888,
+          "source_disagreement_count": 49606,
+          "source_disagreement_fraction": 0.3075768849206349,
+          "valid_edge_count": 161280
+        }
+      }
+    }
+  },
+  "xy_target_manifest": {
+    "byte_size": 12073,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_xy_neighbor_consensus_hard_labels_v1/multi_head_xy_neighbor_consensus_target_handoff.json",
+    "sha256": "307c9a28796f7b1d90ef4f188676abc5a3604be402fe8ef4a18b515d06671a41"
+  }
+}

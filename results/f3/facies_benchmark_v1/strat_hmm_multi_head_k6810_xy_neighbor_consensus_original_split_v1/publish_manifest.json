@@ -1,0 +1,57 @@
+{
+  "created_at_utc": "2026-07-31T12:37:53.850701Z",
+  "items": [
+    {
+      "sha256": "a95abd7733dcb004f4f562ede4b21447dcb0794e46a9961b581506240ca42339",
+      "size_bytes": 15686,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_consensus_k6810_v1/original_split/reports/xy_neighbor_consensus_screening_audit.json",
+      "target": "xy_neighbor_consensus_screening_audit.json"
+    },
+    {
+      "sha256": "d81f071bbf9441d8c2af813cdfef850b5b5133b8cbd4ae61301b87db5b9a22d9",
+      "size_bytes": 2780,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_consensus_k6810_v1/original_split/reports/xy_neighbor_consensus_spatial_audit.csv",
+      "target": "xy_neighbor_consensus_spatial_audit.csv"
+    },
+    {
+      "sha256": "d2064153d5ef8145c65400cfa9dc1bbef589dfd4f1d0a4acd2ece0650ffea760",
+      "size_bytes": 6605,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_consensus_k6810_v1/original_split/reports/xy_neighbor_consensus_hard_baseline_parity.json",
+      "target": "xy_neighbor_consensus_hard_baseline_parity.json"
+    },
+    {
+      "sha256": "bcd070bdcd6a46d989a79e2bde26114b196dbb624876dffed4487bd916437b45",
+      "size_bytes": 96581,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_consensus_k6810_v1/original_split/reports/xy_neighbor_consensus_original_job_metrics.csv",
+      "target": "xy_neighbor_consensus_original_job_metrics.csv"
+    },
+    {
+      "sha256": "bdfe0c28a589bb8db3bd4d7554a4a07ef92da0a5223816496d3b783eebb86abc",
+      "size_bytes": 29170,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_consensus_k6810_v1/original_split/reports/xy_neighbor_consensus_original_paired_deltas.csv",
+      "target": "xy_neighbor_consensus_original_paired_deltas.csv"
+    },
+    {
+      "sha256": "47b5058ddacf023a3de9bf8a5475cd7253e1166438b2e532cb17b3ce249d71fa",
+      "size_bytes": 405485,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_consensus_k6810_v1/original_split/reports/xy_neighbor_consensus_original_results_summary.json",
+      "target": "xy_neighbor_consensus_original_results_summary.json"
+    },
+    {
+      "sha256": "26f83aa34e702d0f9fb137a49e74417c0109cd84539922f709aebbde875283f0",
+      "size_bytes": 227,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_consensus_k6810_v1/original_split/reports/xy_neighbor_consensus_original_results_summary.md",
+      "target": "xy_neighbor_consensus_original_results_summary.md"
+    },
+    {
+      "sha256": "ebfa39f2acf80855cf812d65085c6f1060fabc5ece910332592aa2aaa9830c8c",
+      "size_bytes": 6850,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_consensus_k6810_v1/original_split/reports/xy_neighbor_consensus_original_handoff.json",
+      "target": "xy_neighbor_consensus_original_handoff.json"
+    }
+  ],
+  "output_dir": "results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_xy_neighbor_consensus_original_split_v1",
+  "skipped_optional_items": [],
+  "source_artifact_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}",
+  "warnings": []
+}
