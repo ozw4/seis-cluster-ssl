@@ -236,7 +236,11 @@ def summarize_f3_lithology_voxel_label_budget_xy_neighbor_consensus(
 		published['job_metrics'],
 		lineterminator='\n',
 	)
-	_write_csv(reports / REPORT_OUTPUT_NAMES[1], published['paired_deltas'])
+	_write_csv(
+		reports / REPORT_OUTPUT_NAMES[1],
+		published['paired_deltas'],
+		lineterminator='\n',
+	)
 	_write_json(reports / REPORT_OUTPUT_NAMES[2], published)
 	status = inspection['decisions']['overall_status']
 	ready = inspection['decisions']['six_split_follow_up']['ready']

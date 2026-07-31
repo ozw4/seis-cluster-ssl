@@ -164,6 +164,8 @@ def test_xy_consensus_summary_publishes_only_portable_lightweight_files(
 	assert {path.name for path in reports.iterdir()} == set(PUBLISHED_OUTPUT_NAMES)
 	for name in PUBLISHED_OUTPUT_NAMES:
 		assert (reports / name).read_bytes() == (published / name).read_bytes()
+	for name in REPORT_OUTPUT_NAMES[:2]:
+		assert b'\r\n' not in (published / name).read_bytes()
 	for path in published.iterdir():
 		if path.is_file():
 			text = path.read_text(encoding='utf-8')
