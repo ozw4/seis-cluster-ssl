@@ -20,6 +20,12 @@ PROC_SCRIPTS = tuple(
 )
 
 HELP_FLAG_CONTRACTS = {
+	'audit_f3_xy_neighbor_consensus_screening.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+		'--quarantine-invalid',
+	),
 	'build_strat_hmm_pseudo_targets.py': (
 		'--config',
 		'--dry-run',
@@ -80,6 +86,17 @@ HELP_FLAG_CONTRACTS = {
 		'--resume',
 		'--budget',
 		'--subsample-seed',
+	),
+	'run_f3_lithology_xy_neighbor_consensus_voxel_label_budget.py': (
+		'--config',
+		'--dry-run',
+		'--device',
+		'--only-missing',
+		'--resume',
+	),
+	'summarize_f3_lithology_voxel_label_budget_xy_neighbor_consensus.py': (
+		'--config',
+		'--dry-run',
 	),
 	'run_f3_lithology_split_sweep_probes.py': (
 		'--config',

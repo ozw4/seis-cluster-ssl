@@ -9,6 +9,7 @@ voxel label-budget runner.  It owns only the candidate matrix and its compact
 
 from __future__ import annotations
 
+import importlib
 import json
 import math
 import shutil
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+import torch
 
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.lithology import voxel_label_budget_control as control
@@ -40,6 +42,12 @@ from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
 from seis_ssl_cluster.f3.soft_posterior_pretraining_validation import (
 	load_f3_m5_soft_posterior_pretraining_handoff,
 )
+from seis_ssl_cluster.f3.xy_neighbor_consensus_pretraining_validation import (
+	load_f3_xy_neighbor_consensus_pretraining_handoff,
+)
+from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
+	load_multi_head_xy_neighbor_consensus_target_manifest,
+)
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import (
@@ -51,6 +59,8 @@ if TYPE_CHECKING:
 RUN_MANIFEST_NAME = 'multi_head_job_manifest.json'
 RUN_MANIFEST_TYPE = 'f3_lithology_voxel_label_budget_multi_head'
 RUN_SCHEMA_VERSION = 1
+XY_MODEL_ID = 'mh_xycons1_nocons'
+XY_MODEL_TAG = 'strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1'
 
 
 @dataclass(frozen=True)
@@ -111,6 +121,7 @@ def inspect_f3_lithology_voxel_label_budget_multi_head(
 	subsample_seed: int | None = None,
 ) -> F3VoxelLabelBudgetMultiHeadInspection:
 	"""Validate references and produce the canonical candidate/budget/seed plan."""
+	_validate_xy_neighbor_consensus_screening_audit(config)
 	dataset_rows = _dataset_rows(config)
 	historical_reference = _mae_reference(config, dataset_rows)
 	current_rows = _current_k6_rows(config, dataset_rows)
@@ -165,7 +176,7 @@ def inspect_f3_lithology_voxel_label_budget_multi_head(
 	)
 
 
-def run_f3_lithology_voxel_label_budget_multi_head(  # noqa: PLR0913
+def run_f3_lithology_voxel_label_budget_multi_head(  # noqa: C901, PLR0913
 	config: F3VoxelLabelBudgetMultiHeadConfig,
 	*,
 	only_missing: bool = False,
@@ -194,15 +205,16 @@ def run_f3_lithology_voxel_label_budget_multi_head(  # noqa: PLR0913
 	):
 		raise FileExistsError('non-new job requires --only-missing or --resume')
 	path = multi_head_run_manifest_path(config)
-	rows_by_key, quarantines = _prior_rows(
+	prior_rows_by_key, quarantines = _prior_rows(
 		path, config, inspection.candidate_identities
 	)
-	selected = {_job_key(job) for job in inspection.jobs}
-	rows_by_key = {key: row for key, row in rows_by_key.items() if key not in selected}
+	rows_by_key = dict(prior_rows_by_key)
 	dataset_rows = _dataset_rows(config)
 	current_rows = _current_k6_rows(config, dataset_rows)
 	for plan in inspection.plans:
 		job, state = plan.job, plan.state
+		key = _job_key(job)
+		prior_row = prior_rows_by_key.get(key)
 		quarantine: Path | None = None
 		if state == 'INVALID_OR_PARTIAL':
 			if not only_missing:
@@ -217,7 +229,7 @@ def run_f3_lithology_voxel_label_budget_multi_head(  # noqa: PLR0913
 		stage = _stage_config(config, job.model_role)
 		identity = inspection.candidate_identities[job.model_role]
 		if state == 'REUSE_COMPLETED':
-			row = control._completed_control_row(
+			actual_row = control._completed_control_row(
 				stage,
 				stage,
 				job,
@@ -225,6 +237,11 @@ def run_f3_lithology_voxel_label_budget_multi_head(  # noqa: PLR0913
 				action='REUSED',
 				quarantine_path=None,
 				error=None,
+			)
+			row = (
+				prior_row
+				if _same_completed_row_except_action(prior_row, actual_row)
+				else actual_row
 			)
 		else:
 			checkpoint = (
@@ -246,16 +263,24 @@ def run_f3_lithology_voxel_label_budget_multi_head(  # noqa: PLR0913
 			historical_reference=inspection.historical_reference,
 			dataset_row=dataset_rows[(job.budget_id, job.subsample_seed)],
 		)
-		rows_by_key[_job_key(job)] = row
+		rows_by_key[key] = row
+		if prior_row != row:
+			_write_manifest(
+				path,
+				config,
+				tuple(rows_by_key.values()),
+				quarantines,
+				inspection.candidate_identities,
+			)
+	ordered = tuple(sorted(rows_by_key.values(), key=_row_sort_key))
+	if not path.is_file():
 		_write_manifest(
 			path,
 			config,
-			tuple(rows_by_key.values()),
+			ordered,
 			quarantines,
 			inspection.candidate_identities,
 		)
-	ordered = tuple(sorted(rows_by_key.values(), key=_row_sort_key))
-	_write_manifest(path, config, ordered, quarantines, inspection.candidate_identities)
 	return F3VoxelLabelBudgetMultiHeadRunResult(path, ordered, tuple(quarantines))
 
 
@@ -355,6 +380,27 @@ def _candidate_identity(  # noqa: C901, PLR0912
 		raise ValueError('candidate multi-head specification mismatch')
 	if stratigraphy.get('head_ks') != [6, 8, 10]:
 		raise ValueError('candidate multi-head K identity mismatch')
+	if candidate.model_id == XY_MODEL_ID:
+		_handoff_identity = _validate_xy_neighbor_consensus_handoff_provenance(
+			candidate.pretraining_handoff,
+			config=config,
+			candidate=candidate,
+			checkpoint=checkpoint,
+			checkpoint_sha256=str(metadata['checkpoint_sha256']),
+			embeddings_sha256=file_sha256(files.embeddings),
+			valid_tokens_sha256=valid_sha,
+			embedding_metadata_sha256=file_sha256(files.metadata),
+			valid_token_count=int(valid.sum()),
+			metadata=metadata,
+			stratigraphy=stratigraphy,
+		)
+		return {
+			'embeddings': _identity(files.embeddings),
+			'valid_tokens': _identity(files.valid_tokens),
+			'metadata': _identity(files.metadata),
+			'checkpoint': _identity(checkpoint),
+			'pretraining_handoff': _handoff_identity,
+		}
 	if candidate.model_id == 'mh_soft_nocons':
 		_handoff_identity = _validate_soft_handoff_provenance(
 			candidate.pretraining_handoff,
@@ -494,6 +540,283 @@ def _validate_soft_handoff_provenance(  # noqa: PLR0913
 	):
 		raise ValueError('M5-U soft-posterior representation identity mismatch')
 	return _identity(handoff_path)
+
+
+def _validate_xy_neighbor_consensus_handoff_provenance(  # noqa: C901, PLR0913
+	handoff_path: Path,
+	*,
+	config: F3VoxelLabelBudgetMultiHeadConfig,
+	candidate: F3VoxelLabelBudgetMultiHeadCandidate,
+	checkpoint: Path,
+	checkpoint_sha256: str,
+	embeddings_sha256: str,
+	valid_tokens_sha256: str,
+	embedding_metadata_sha256: str,
+	valid_token_count: int,
+	metadata: Mapping[str, object],
+	stratigraphy: Mapping[str, object],
+) -> Mapping[str, object]:
+	"""Bind only the immutable schema-v5 XY-consensus lineage.
+
+	The strict handoff loader rejects M4, M5-U, and M5-LS handoffs before this
+	function accepts any candidate artifact.  The checks below then bind its
+	recorded references to the live checkpoint, embedding files, and immutable
+	consensus target publication.
+	"""
+	if candidate.model_id != XY_MODEL_ID or candidate.model_tag != XY_MODEL_TAG:
+		raise ValueError('XY-neighbour-consensus candidate identity mismatch')
+	handoff = load_f3_xy_neighbor_consensus_pretraining_handoff(handoff_path)
+	targets = _mapping_value(handoff.get('targets'), 'XY handoff targets')
+	handoff_checkpoint = _mapping_value(
+		handoff.get('checkpoint'), 'XY handoff checkpoint'
+	)
+	embedding = _mapping_value(handoff.get('embedding'), 'XY handoff embedding')
+	if (
+		Path(str(handoff_checkpoint.get('path', ''))).resolve()
+		!= checkpoint.resolve()
+		or handoff_checkpoint.get('sha256') != checkpoint_sha256
+	):
+		raise ValueError('XY-neighbour-consensus handoff checkpoint mismatch')
+	if (
+		Path(str(embedding.get('root', ''))).resolve()
+		!= candidate.embeddings_dir.resolve()
+		or Path(str(embedding.get('metadata_path', ''))).resolve()
+		!= _embedding_metadata_path(candidate.embeddings_dir, config.dataset['name'])
+		or embedding.get('metadata_sha256') != embedding_metadata_sha256
+		or embedding.get('embeddings_sha256') != embeddings_sha256
+		or embedding.get('valid_tokens_sha256') != valid_tokens_sha256
+		or embedding.get('valid_token_count') != valid_token_count
+	):
+		raise ValueError('XY-neighbour-consensus handoff extraction identity mismatch')
+	if (
+		targets.get('target_representation')
+		!= 'xy_neighbor_consensus_hard_labels_v1'
+		or targets.get('target_semantics')
+		!= 'xy_neighbor_consensus_hard_label_smoothing_v1'
+		or targets.get('consistency_policy')
+		!= 'disabled_for_xy_neighbor_consensus_v1'
+	):
+		raise ValueError('XY-neighbour-consensus handoff target identity mismatch')
+	target_reference = _reference_value(
+		targets.get('target_manifest'), 'XY handoff target manifest'
+	)
+	target_path = Path(str(target_reference['path'])).resolve()
+	if (
+		not target_path.is_file()
+		or target_reference['sha256'] != file_sha256(target_path)
+	):
+		raise ValueError('XY-neighbour-consensus target manifest identity mismatch')
+	target = load_multi_head_xy_neighbor_consensus_target_manifest(
+		target_path,
+		validate_array_semantics=False,
+	)
+	if target_reference['sha256'] != file_sha256(target_path):  # pragma: no cover
+		raise ValueError('XY-neighbour-consensus target manifest changed during read')
+	target_hashes = _xy_neighbor_consensus_target_head_hashes(target)
+	if targets.get('xy_neighbor_consensus_target_head_hashes') != target_hashes:
+		raise ValueError('XY-neighbour-consensus handoff target head hashes mismatch')
+	if (
+		stratigraphy.get('per_head_xy_neighbor_consensus_target_sha256')
+		!= target_hashes
+	):
+		raise ValueError('XY-neighbour-consensus embedding target head hashes mismatch')
+	target_smoothing = target.get('smoothing')
+	if (
+		not isinstance(target_smoothing, Mapping)
+		or targets.get('xy_neighbor_consensus_smoothing') != target_smoothing
+		or stratigraphy.get('xy_neighbor_consensus_smoothing') != target_smoothing
+	):
+		raise ValueError('XY-neighbour-consensus smoothing policy mismatch')
+	target_source = _reference_value(
+		target.get('source_hard_manifest'), 'XY target source hard manifest'
+	)
+	handoff_source = _reference_value(
+		targets.get('source_hard_manifest'), 'XY handoff source hard manifest'
+	)
+	if target_source != handoff_source:
+		raise ValueError('XY-neighbour-consensus handoff source hard manifest mismatch')
+	source_path = Path(str(target_source['path'])).resolve()
+	if (
+		source_path != config.multi_head_target_manifest.resolve()
+		or target_source['sha256'] != file_sha256(config.multi_head_target_manifest)
+		or stratigraphy.get('source_hard_manifest_sha256') != target_source['sha256']
+	):
+		raise ValueError('XY-neighbour-consensus source hard manifest mismatch')
+	_xy_neighbor_consensus_checkpoint_identity(
+		checkpoint,
+		candidate=candidate,
+		target_reference=target_reference,
+		target_hashes=target_hashes,
+		source_reference=target_source,
+		target_smoothing=target_smoothing,
+		targets=targets,
+		stratigraphy=stratigraphy,
+		metadata=metadata,
+	)
+	return _identity(handoff_path)
+
+
+def _embedding_metadata_path(embeddings_dir: Path, dataset_name: object) -> Path:
+	if not isinstance(dataset_name, str) or not dataset_name:
+		raise TypeError('candidate dataset name is invalid')
+	return output_paths(embeddings_dir, dataset_name).metadata.resolve()
+
+
+def _xy_neighbor_consensus_checkpoint_identity(  # noqa: C901, PLR0913
+	checkpoint: Path,
+	*,
+	candidate: F3VoxelLabelBudgetMultiHeadCandidate,
+	target_reference: Mapping[str, object],
+	target_hashes: Mapping[str, object],
+	source_reference: Mapping[str, object],
+	target_smoothing: Mapping[str, object],
+	targets: Mapping[str, object],
+	stratigraphy: Mapping[str, object],
+	metadata: Mapping[str, object],
+) -> Mapping[str, object]:
+	"""Check schema-v5 checkpoint identity without accepting legacy schemas."""
+	payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
+	if not isinstance(payload, Mapping):
+		raise TypeError('XY-neighbour-consensus checkpoint must be a mapping')
+	identity = _mapping_value(
+		payload.get('stratigraphy_checkpoint'),
+		'XY-neighbour-consensus checkpoint identity',
+	)
+	if identity.get('schema_version') != 5:
+		raise ValueError('XY-neighbour-consensus checkpoint schema must be 5')
+	for key, expected in (
+		('model_tag', candidate.model_tag),
+		('head_spec', 'multi_resolution_ordered_prototypes_v1'),
+		('head_ks', [6, 8, 10]),
+		('target_representation', 'xy_neighbor_consensus_hard_labels_v1'),
+		('target_semantics', 'xy_neighbor_consensus_hard_label_smoothing_v1'),
+		('xy_neighbor_consensus_target_manifest_sha256', target_reference['sha256']),
+		('per_head_xy_neighbor_consensus_targets', target_hashes),
+		('source_hard_manifest_sha256', source_reference['sha256']),
+		('xy_neighbor_consensus_smoothing', target_smoothing),
+		('consistency_policy', 'disabled_for_xy_neighbor_consensus_v1'),
+		('consistency_weight', 0.0),
+		('consistency_beta', 0.1),
+	):
+		if identity.get(key) != expected:
+			raise ValueError(
+				'XY-neighbour-consensus checkpoint identity mismatch: '
+				f'{key}'
+			)
+	checkpoint_target = _reference_value(
+		identity.get('xy_neighbor_consensus_target_manifest'),
+		'XY-neighbour-consensus checkpoint target manifest',
+	)
+	if checkpoint_target != target_reference:
+		raise ValueError('XY-neighbour-consensus checkpoint target manifest mismatch')
+	for key in ('initial_student_state_sha256', 'initial_head_state_sha256'):
+		if identity.get(key) != targets.get(key):
+			raise ValueError(
+				f'XY-neighbour-consensus checkpoint initial state mismatch: {key}'
+			)
+	for key, expected in (
+		('model_tag', candidate.model_tag),
+		('head_spec', 'multi_resolution_ordered_prototypes_v1'),
+		('head_ks', [6, 8, 10]),
+		('target_representation', 'xy_neighbor_consensus_hard_labels_v1'),
+		('target_semantics', 'xy_neighbor_consensus_hard_label_smoothing_v1'),
+		('xy_neighbor_consensus_target_manifest_sha256', target_reference['sha256']),
+		('per_head_xy_neighbor_consensus_target_sha256', target_hashes),
+		('source_hard_manifest_sha256', source_reference['sha256']),
+		('xy_neighbor_consensus_smoothing', target_smoothing),
+		('consistency_policy', 'disabled_for_xy_neighbor_consensus_v1'),
+		('consistency_weight', 0.0),
+		('consistency_beta', 0.1),
+		('scientific_identity_sha256', identity.get('scientific_identity_sha256')),
+		(
+			'checkpoint_stratigraphy_state_sha256',
+			identity.get('stratigraphy_state_sha256'),
+		),
+	):
+		if stratigraphy.get(key) != expected:
+			raise ValueError(
+				'XY-neighbour-consensus embedding identity mismatch: '
+				f'{key}'
+			)
+	if (
+		stratigraphy.get('xy_neighbor_consensus_target_manifest_path')
+		!= target_reference['path']
+	):
+		raise ValueError(
+			'XY-neighbour-consensus embedding target manifest path mismatch'
+		)
+	if any(
+		'posterior' in str(key) or 'lateral' in str(key)
+		for key in (*stratigraphy, *identity, *metadata)
+	):
+		raise ValueError(
+			'XY-neighbour-consensus provenance carries posterior/lateral fields'
+		)
+	return identity
+
+
+def _xy_neighbor_consensus_target_head_hashes(
+	target: Mapping[str, object],
+) -> dict[str, dict[str, dict[str, str]]]:
+	"""Extract the exact K=6/8/10 consensus target artifact hash matrix."""
+	heads = _mapping_value(target.get('heads'), 'XY target heads')
+	result: dict[str, dict[str, dict[str, str]]] = {}
+	for k in ('6', '8', '10'):
+		head = _mapping_value(heads.get(k), f'XY target head k={k}')
+		surveys = _mapping_value(head.get('surveys'), f'XY target surveys k={k}')
+		result[k] = {}
+		for survey_id, value in surveys.items():
+			entry = _mapping_value(value, f'XY target survey k={k}/{survey_id}')
+			result[k][str(survey_id)] = {}
+			for name in ('labels', 'confidence', 'valid_tokens', 'metadata'):
+				reference = _reference_value(entry.get(name), f'XY target {name}')
+				result[k][str(survey_id)][name] = str(reference['sha256'])
+	return result
+
+
+def _mapping_value(value: object, label: str) -> Mapping[str, object]:
+	if not isinstance(value, Mapping):
+		raise TypeError(f'{label} must be a mapping')
+	return value
+
+
+def _reference_value(value: object, label: str) -> Mapping[str, object]:
+	reference = _mapping_value(value, label)
+	if not {'path', 'sha256'} <= set(reference):
+		raise ValueError(f'{label} must contain path and SHA-256')
+	path, sha256 = reference.get('path'), reference.get('sha256')
+	if not isinstance(path, str) or not path:
+		raise TypeError(f'{label}.path is missing')
+	if not isinstance(sha256, str) or len(sha256) != 64:
+		raise TypeError(f'{label}.sha256 is invalid')
+	return reference
+
+
+def _validate_xy_neighbor_consensus_screening_audit(
+	config: F3VoxelLabelBudgetMultiHeadConfig,
+) -> None:
+	"""Revalidate the audit before planning any schema-v5 candidate job."""
+	if not any(item.model_id == XY_MODEL_ID for item in config.candidates):
+		return
+	audit_path = getattr(config, 'screening_audit', None)
+	if not isinstance(audit_path, Path):
+		raise TypeError('XY-neighbour-consensus candidate requires its closed config')
+	audit = importlib.import_module(
+		'seis_ssl_cluster.f3.lithology.xy_neighbor_consensus_screening_audit'
+	)
+	payload = audit.load_f3_xy_neighbor_consensus_screening_audit(
+		audit_path
+	)
+	candidate = next(
+		item for item in config.candidates if item.model_id == XY_MODEL_ID
+	)
+	audit.validate_f3_xy_neighbor_consensus_screening_audit_binding(
+		payload,
+		model_id=candidate.model_id,
+		model_tag=candidate.model_tag,
+		pretraining_handoff=candidate.pretraining_handoff,
+		embeddings_dir=candidate.embeddings_dir,
+	)
 
 
 def _finite_valid_embeddings(
@@ -836,6 +1159,18 @@ def _validate_owned_rows(
 		if key not in expected:
 			raise ValueError(f'multi-head manifest has non-matrix row: {key!r}')
 		seen.add(key)
+
+
+def _same_completed_row_except_action(
+	prior: Mapping[str, object] | None,
+	actual: Mapping[str, object],
+) -> bool:
+	"""Keep a valid completed row byte-stable during an all-reuse pass."""
+	if prior is None or not isinstance(prior.get('action'), str):
+		return False
+	return {
+		key: value for key, value in prior.items() if key != 'action'
+	} == {key: value for key, value in actual.items() if key != 'action'}
 
 
 def _identity(path: Path) -> Mapping[str, object]:
