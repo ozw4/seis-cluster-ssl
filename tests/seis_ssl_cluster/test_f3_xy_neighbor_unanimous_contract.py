@@ -156,6 +156,58 @@ def test_hard_label_metrics_require_zero_consistency_and_no_posterior() -> None:
 		validation._validate_hard_label_metrics(payload)  # noqa: SLF001
 
 
+def test_hard_config_parity_allows_representation_scientific_identity_only(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Required fixed hard-route settings remain comparable across identities."""
+	hard = {
+		'paths': {'output_root': str(tmp_path / 'hard')},
+		'identity': {
+			'model_tag': 'hard',
+			'scientific_identity': {
+				'experiment_role': 'hard',
+				'variant': 'nocons',
+				'head_spec': 'multi_resolution_ordered_prototypes_v1',
+				'head_ks': [6, 8, 10],
+				'target_manifest_sha256': 'a' * 64,
+				'consistency_policy': 'normalized_order_smooth_l1_v1',
+			},
+		},
+		'pseudo_targets': {'manifest': str(tmp_path / 'hard-target.json')},
+		'loss': {'prototype_weight': 1.0},
+	}
+	candidate = json.loads(json.dumps(hard))
+	candidate['paths']['output_root'] = str(tmp_path / 'candidate')
+	candidate['identity']['model_tag'] = 'candidate'
+	candidate['identity']['scientific_identity'].update(
+		{
+			'experiment_role': (
+				'multi_head_ordered_xy_neighbor_unanimous_hard_pretext'
+			),
+			'variant': 'xyunanim1_nocons',
+			'target_representation': 'xy_neighbor_unanimous_hard_labels_v1',
+			'target_semantics': 'xy_neighbor_unanimous_outlier_correction_v1',
+			'supervised_loss': 'structured_hmm_hard_categorical_v1',
+			'consistency_policy': 'disabled_for_xy_neighbor_unanimous_v1',
+			'consistency_weight': 0.0,
+		}
+	)
+	candidate['pseudo_targets'] = {
+		'manifest': str(tmp_path / 'candidate-target.json'),
+		'target_representation': 'xy_neighbor_unanimous_hard_labels_v1',
+	}
+	runtime = {
+		'initial_student_state_sha256': 'b' * 64,
+		'initial_head_state_sha256': 'c' * 64,
+		'trainability_summary': {},
+		'optimizer_group_identity': {},
+	}
+	monkeypatch.setattr(validation, '_runtime_contract', lambda _value: runtime)
+
+	assert validation._hard_config_parity(candidate, hard)['status'] == 'PASS'  # noqa: SLF001
+
+
 def test_hard_baseline_resolution_derives_only_its_frozen_manifest_digest(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,

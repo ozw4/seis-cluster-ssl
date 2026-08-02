@@ -479,6 +479,8 @@ def _hard_config_parity(
 			'source_hard_manifest_sha256',
 			'xy_neighbor_unanimous_smoothing',
 			'consistency_policy',
+			'supervised_loss',
+			'consistency_weight',
 		):
 			scientific.pop(key, None)
 		pseudo = _mapping(value['pseudo_targets'], 'pseudo targets')
