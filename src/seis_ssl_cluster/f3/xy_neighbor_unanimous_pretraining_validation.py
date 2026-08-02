@@ -713,11 +713,11 @@ def _scientific_checkpoint_contract(
 
 def _validate_hard_label_metrics(payload: Mapping[str, object]) -> None:
 	metrics = _mapping(payload.get('metrics'), 'checkpoint metrics')
-	if 'loss_consistency' not in metrics or any(
+	if 'loss_consistency_contribution' not in metrics or any(
 		'posterior' in str(key) for key in metrics
 	):
 		raise ValueError('unanimous checkpoint did not use only the hard-label route')
-	consistency = metrics['loss_consistency']
+	consistency = metrics['loss_consistency_contribution']
 	if (
 		isinstance(consistency, bool)
 		or not isinstance(consistency, int | float)

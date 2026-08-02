@@ -187,7 +187,10 @@ def test_unanimous_runner_and_epoch_use_existing_hard_route(
 		calls.append('hard')
 		encoded = kwargs['encoded']
 		assert isinstance(encoded, dict)
-		return {'loss': encoded['tokens'].sum()}
+		return {
+			'loss': encoded['tokens'].sum(),
+			'loss_consistency': encoded['tokens'].sum() * 0.25,
+		}
 
 	monkeypatch.setattr(epoch, 'compute_strat_hmm_multi_head_losses', hard_loss)
 	monkeypatch.setattr(
@@ -197,7 +200,7 @@ def test_unanimous_runner_and_epoch_use_existing_hard_route(
 	)
 	student = Student()
 	heads = torch.nn.Linear(1, 1)
-	epoch.train_strat_hmm_multi_head_one_epoch(
+	state = epoch.train_strat_hmm_multi_head_one_epoch(
 		student=student,
 		heads=heads,  # type: ignore[arg-type]
 		dataloader=[
@@ -214,6 +217,7 @@ def test_unanimous_runner_and_epoch_use_existing_hard_route(
 		target_representation=_REPRESENTATION,
 	)
 	assert calls == ['hard']
+	assert state.metrics['loss_consistency_contribution'] == 0.0
 
 
 def test_unanimous_target_adapter_uses_existing_hard_provider(

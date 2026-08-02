@@ -260,6 +260,23 @@ def train_strat_hmm_multi_head_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR09
 					'unsupported multi-head target representation: '
 					f'{target_representation!r}'
 				)
+			if target_representation == 'xy_neighbor_unanimous_hard_labels_v1':
+				# ``loss_consistency`` remains the diagnostic raw pair loss used by
+				# every hard multi-head route. Schema-6 additionally records its
+				# actual weighted contribution, which the fixed unanimous policy
+				# requires to be exactly zero.
+				consistency_weight = _float_config(
+					loss_config,
+					'consistency_weight',
+					0.0,
+				)
+				if consistency_weight != 0.0:
+					raise ValueError(
+						'unanimous hard-label training requires zero consistency weight'
+					)
+				losses['loss_consistency_contribution'] = (
+					losses['loss_consistency'] * consistency_weight
+				)
 			loss = losses['loss']
 		_ensure_finite_losses(
 			losses,

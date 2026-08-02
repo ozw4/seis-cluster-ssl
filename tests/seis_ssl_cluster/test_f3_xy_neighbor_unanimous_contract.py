@@ -143,14 +143,18 @@ def test_validator_phase_dispatches_without_publishing_partial_handoff(
 
 def test_hard_label_metrics_require_zero_consistency_and_no_posterior() -> None:
 	payload = {
-		'metrics': {'loss': 1.0, 'loss_consistency': 0.0},
+		'metrics': {
+			'loss': 1.0,
+			'loss_consistency': 0.081,
+			'loss_consistency_contribution': 0.0,
+		},
 		'stratigraphy_checkpoint': {'consistency_weight': 0.0},
 	}
 	validation._validate_hard_label_metrics(payload)  # noqa: SLF001
-	payload['metrics']['loss_consistency'] = 0.001  # type: ignore[index]
+	payload['metrics']['loss_consistency_contribution'] = 0.001  # type: ignore[index]
 	with pytest.raises(ValueError, match='consistency contribution'):
 		validation._validate_hard_label_metrics(payload)  # noqa: SLF001
-	payload['metrics']['loss_consistency'] = 0.0  # type: ignore[index]
+	payload['metrics']['loss_consistency_contribution'] = 0.0  # type: ignore[index]
 	payload['metrics']['posterior_loss'] = 1.0  # type: ignore[index]
 	with pytest.raises(ValueError, match='hard-label route'):
 		validation._validate_hard_label_metrics(payload)  # noqa: SLF001
