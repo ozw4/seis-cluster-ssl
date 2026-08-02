@@ -76,17 +76,22 @@ def f3_xy_neighbor_unanimous_target_audit_config_from_mapping(
 	if missing:
 		raise ValueError(f'missing unanimous target audit keys: {sorted(missing)!r}')
 
-	def path(name: str, *, must_exist: bool) -> Path:
+	def path(
+		name: str,
+		*,
+		must_exist: bool,
+		directory: bool = False,
+	) -> Path:
 		value = config[name]
 		if not isinstance(value, str) or not value:
 			raise TypeError(f'{name} must be a non-empty path string')
 		resolved = Path(value).resolve()
-		if must_exist and not resolved.is_file():
+		if must_exist and not (resolved.is_dir() if directory else resolved.is_file()):
 			raise FileNotFoundError(f'{name} is missing: {resolved}')
 		return resolved
 
 	result = F3XYNeighborUnanimousTargetAuditConfig(
-		artifact_root=path('artifact_root', must_exist=True),
+		artifact_root=path('artifact_root', must_exist=True, directory=True),
 		source_hard_manifest=path('source_hard_manifest', must_exist=True),
 		xy_neighbor_consensus_target_manifest=path(
 			'xy_neighbor_consensus_target_manifest', must_exist=True

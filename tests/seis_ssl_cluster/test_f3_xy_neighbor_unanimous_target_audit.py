@@ -12,6 +12,7 @@ import seis_ssl_cluster.f3.xy_neighbor_unanimous_target_audit as audit_module
 from seis_ssl_cluster.f3.xy_neighbor_unanimous_target_audit import (
 	F3XYNeighborUnanimousTargetAuditConfig,
 	audit_f3_xy_neighbor_unanimous_targets,
+	f3_xy_neighbor_unanimous_target_audit_config_from_mapping,
 	load_f3_xy_neighbor_unanimous_target_audit,
 	replay_f3_xy_neighbor_unanimous_target_audit,
 	validate_f3_xy_neighbor_unanimous_target_audit,
@@ -30,6 +31,29 @@ from tests.seis_ssl_cluster.test_strat_multi_head_xy_neighbor_consensus_targets 
 
 if TYPE_CHECKING:
 	from pathlib import Path
+
+
+def test_target_audit_mapping_accepts_existing_artifact_root_directory(
+	tmp_path: Path,
+) -> None:
+	"""The public YAML adapter must distinguish its root directory from files."""
+	for path in (
+		tmp_path / 'source.json',
+		tmp_path / 'consensus.json',
+		tmp_path / 'unanimous.json',
+	):
+		path.write_text('{}', encoding='utf-8')
+	config = f3_xy_neighbor_unanimous_target_audit_config_from_mapping(
+		{
+			'artifact_root': str(tmp_path),
+			'source_hard_manifest': str(tmp_path / 'source.json'),
+			'xy_neighbor_consensus_target_manifest': str(tmp_path / 'consensus.json'),
+			'xy_neighbor_unanimous_target_manifest': str(tmp_path / 'unanimous.json'),
+			'output_path': str(tmp_path / 'output.json'),
+		}
+	)
+
+	assert config.artifact_root == tmp_path.resolve()
 
 
 def test_target_audit_proves_subset_and_reuses_identical_evidence(
