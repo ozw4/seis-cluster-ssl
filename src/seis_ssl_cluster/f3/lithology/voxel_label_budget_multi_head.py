@@ -45,8 +45,17 @@ from seis_ssl_cluster.f3.soft_posterior_pretraining_validation import (
 from seis_ssl_cluster.f3.xy_neighbor_consensus_pretraining_validation import (
 	load_f3_xy_neighbor_consensus_pretraining_handoff,
 )
+from seis_ssl_cluster.f3.xy_neighbor_unanimous_pretraining_validation import (
+	load_f3_xy_neighbor_unanimous_pretraining_handoff,
+)
+from seis_ssl_cluster.f3.xy_neighbor_unanimous_target_audit import (
+	replay_f3_xy_neighbor_unanimous_target_audit,
+)
 from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
 	load_multi_head_xy_neighbor_consensus_target_manifest,
+)
+from seis_ssl_cluster.stratigraphy.xy_neighbor_unanimous_targets import (
+	load_multi_head_xy_neighbor_unanimous_target_manifest,
 )
 
 if TYPE_CHECKING:
@@ -61,6 +70,10 @@ RUN_MANIFEST_TYPE = 'f3_lithology_voxel_label_budget_multi_head'
 RUN_SCHEMA_VERSION = 1
 XY_MODEL_ID = 'mh_xycons1_nocons'
 XY_MODEL_TAG = 'strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1'
+XY_UNANIM_MODEL_ID = 'mh_xyunanim1_nocons'
+XY_UNANIM_MODEL_TAG = (
+	'strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1'
+)
 
 
 @dataclass(frozen=True)
@@ -401,6 +414,27 @@ def _candidate_identity(  # noqa: C901, PLR0912
 			'checkpoint': _identity(checkpoint),
 			'pretraining_handoff': _handoff_identity,
 		}
+	if candidate.model_id == XY_UNANIM_MODEL_ID:
+		_handoff_identity = _validate_xy_neighbor_unanimous_handoff_provenance(
+			candidate.pretraining_handoff,
+			config=config,
+			candidate=candidate,
+			checkpoint=checkpoint,
+			checkpoint_sha256=str(metadata['checkpoint_sha256']),
+			embeddings_sha256=file_sha256(files.embeddings),
+			valid_tokens_sha256=valid_sha,
+			embedding_metadata_sha256=file_sha256(files.metadata),
+			valid_token_count=int(valid.sum()),
+			metadata=metadata,
+			stratigraphy=stratigraphy,
+		)
+		return {
+			'embeddings': _identity(files.embeddings),
+			'valid_tokens': _identity(files.valid_tokens),
+			'metadata': _identity(files.metadata),
+			'checkpoint': _identity(checkpoint),
+			'pretraining_handoff': _handoff_identity,
+		}
 	if candidate.model_id == 'mh_soft_nocons':
 		_handoff_identity = _validate_soft_handoff_provenance(
 			candidate.pretraining_handoff,
@@ -656,6 +690,137 @@ def _validate_xy_neighbor_consensus_handoff_provenance(  # noqa: C901, PLR0913
 	return _identity(handoff_path)
 
 
+def _validate_xy_neighbor_unanimous_handoff_provenance(  # noqa: C901, PLR0912, PLR0913
+	handoff_path: Path,
+	*,
+	config: F3VoxelLabelBudgetMultiHeadConfig,
+	candidate: F3VoxelLabelBudgetMultiHeadCandidate,
+	checkpoint: Path,
+	checkpoint_sha256: str,
+	embeddings_sha256: str,
+	valid_tokens_sha256: str,
+	embedding_metadata_sha256: str,
+	valid_token_count: int,
+	metadata: Mapping[str, object],
+	stratigraphy: Mapping[str, object],
+) -> Mapping[str, object]:
+	"""Bind only the immutable schema-v6 unanimous hard-target lineage."""
+	if (
+		candidate.model_id != XY_UNANIM_MODEL_ID
+		or candidate.model_tag != XY_UNANIM_MODEL_TAG
+	):
+		raise ValueError('XY-neighbour-unanimous candidate identity mismatch')
+	handoff = load_f3_xy_neighbor_unanimous_pretraining_handoff(handoff_path)
+	targets = _mapping_value(handoff.get('targets'), 'unanimous handoff targets')
+	handoff_checkpoint = _mapping_value(
+		handoff.get('checkpoint'), 'unanimous handoff checkpoint'
+	)
+	embedding = _mapping_value(handoff.get('embedding'), 'unanimous handoff embedding')
+	if (
+		Path(str(handoff_checkpoint.get('path', ''))).resolve()
+		!= checkpoint.resolve()
+		or handoff_checkpoint.get('sha256') != checkpoint_sha256
+	):
+		raise ValueError('XY-neighbour-unanimous handoff checkpoint mismatch')
+	if (
+		Path(str(embedding.get('root', ''))).resolve()
+		!= candidate.embeddings_dir.resolve()
+		or Path(str(embedding.get('metadata_path', ''))).resolve()
+		!= _embedding_metadata_path(candidate.embeddings_dir, config.dataset['name'])
+		or embedding.get('metadata_sha256') != embedding_metadata_sha256
+		or embedding.get('embeddings_sha256') != embeddings_sha256
+		or embedding.get('valid_tokens_sha256') != valid_tokens_sha256
+		or embedding.get('valid_token_count') != valid_token_count
+	):
+		raise ValueError('XY-neighbour-unanimous handoff extraction identity mismatch')
+	if (
+		targets.get('target_representation')
+		!= 'xy_neighbor_unanimous_hard_labels_v1'
+		or targets.get('target_semantics')
+		!= 'xy_neighbor_unanimous_outlier_correction_v1'
+		or targets.get('consistency_policy')
+		!= 'disabled_for_xy_neighbor_unanimous_v1'
+	):
+		raise ValueError('XY-neighbour-unanimous handoff target identity mismatch')
+	target_reference = _reference_value(
+		targets.get('target_manifest'), 'unanimous handoff target manifest'
+	)
+	target_path = Path(str(target_reference['path'])).resolve()
+	if (
+		not target_path.is_file()
+		or target_reference['sha256'] != file_sha256(target_path)
+	):
+		raise ValueError('XY-neighbour-unanimous target manifest identity mismatch')
+	target_audit_reference = _reference_value(
+		targets.get('target_audit'), 'unanimous handoff target audit'
+	)
+	target_audit_path = Path(str(target_audit_reference['path'])).resolve()
+	if (
+		not target_audit_path.is_file()
+		or target_audit_reference['sha256'] != file_sha256(target_audit_path)
+	):
+		raise ValueError('XY-neighbour-unanimous target audit identity mismatch')
+	target_audit = replay_f3_xy_neighbor_unanimous_target_audit(
+		target_audit_path, artifact_root=config.artifact_root
+	)
+	if (
+		target_audit.get('status') != 'XYUNANIM_TARGET_GO'
+		or target_audit.get('xy_neighbor_unanimous_target_manifest')
+		!= target_reference
+	):
+		raise ValueError('XY-neighbour-unanimous target audit binding mismatch')
+	target = load_multi_head_xy_neighbor_unanimous_target_manifest(
+		target_path,
+		validate_array_semantics=False,
+	)
+	if target_reference['sha256'] != file_sha256(target_path):  # pragma: no cover
+		raise ValueError('XY-neighbour-unanimous target manifest changed during read')
+	target_hashes = _xy_neighbor_unanimous_target_head_hashes(target)
+	if targets.get('xy_neighbor_unanimous_target_head_hashes') != target_hashes:
+		raise ValueError('XY-neighbour-unanimous handoff target head hashes mismatch')
+	if (
+		stratigraphy.get('per_head_xy_neighbor_unanimous_target_sha256')
+		!= target_hashes
+	):
+		raise ValueError('XY-neighbour-unanimous embedding target head hashes mismatch')
+	target_smoothing = target.get('smoothing')
+	if (
+		not isinstance(target_smoothing, Mapping)
+		or targets.get('xy_neighbor_unanimous_smoothing') != target_smoothing
+		or stratigraphy.get('xy_neighbor_unanimous_smoothing') != target_smoothing
+	):
+		raise ValueError('XY-neighbour-unanimous smoothing policy mismatch')
+	target_source = _reference_value(
+		target.get('source_hard_manifest'), 'unanimous target source hard manifest'
+	)
+	handoff_source = _reference_value(
+		targets.get('source_hard_manifest'), 'unanimous handoff source hard manifest'
+	)
+	if target_source != handoff_source:
+		raise ValueError('XY-neighbour-unanimous handoff source hard manifest mismatch')
+	if target_audit.get('source_hard_manifest') != target_source:
+		raise ValueError('XY-neighbour-unanimous target audit source mismatch')
+	source_path = Path(str(target_source['path'])).resolve()
+	if (
+		source_path != config.multi_head_target_manifest.resolve()
+		or target_source['sha256'] != file_sha256(config.multi_head_target_manifest)
+		or stratigraphy.get('source_hard_manifest_sha256') != target_source['sha256']
+	):
+		raise ValueError('XY-neighbour-unanimous source hard manifest mismatch')
+	_xy_neighbor_unanimous_checkpoint_identity(
+		checkpoint,
+		candidate=candidate,
+		target_reference=target_reference,
+		target_hashes=target_hashes,
+		source_reference=target_source,
+		target_smoothing=target_smoothing,
+		targets=targets,
+		stratigraphy=stratigraphy,
+		metadata=metadata,
+	)
+	return _identity(handoff_path)
+
+
 def _embedding_metadata_path(embeddings_dir: Path, dataset_name: object) -> Path:
 	if not isinstance(dataset_name, str) or not dataset_name:
 		raise TypeError('candidate dataset name is invalid')
@@ -755,6 +920,104 @@ def _xy_neighbor_consensus_checkpoint_identity(  # noqa: C901, PLR0913
 	return identity
 
 
+def _xy_neighbor_unanimous_checkpoint_identity(  # noqa: C901, PLR0913
+	checkpoint: Path,
+	*,
+	candidate: F3VoxelLabelBudgetMultiHeadCandidate,
+	target_reference: Mapping[str, object],
+	target_hashes: Mapping[str, object],
+	source_reference: Mapping[str, object],
+	target_smoothing: Mapping[str, object],
+	targets: Mapping[str, object],
+	stratigraphy: Mapping[str, object],
+	metadata: Mapping[str, object],
+) -> Mapping[str, object]:
+	"""Check schema-v6 identity without accepting legacy target policies."""
+	payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
+	if not isinstance(payload, Mapping):
+		raise TypeError('XY-neighbour-unanimous checkpoint must be a mapping')
+	identity = _mapping_value(
+		payload.get('stratigraphy_checkpoint'),
+		'XY-neighbour-unanimous checkpoint identity',
+	)
+	if identity.get('schema_version') != 6:
+		raise ValueError('XY-neighbour-unanimous checkpoint schema must be 6')
+	for key, expected in (
+		('model_tag', candidate.model_tag),
+		('head_spec', 'multi_resolution_ordered_prototypes_v1'),
+		('head_ks', [6, 8, 10]),
+		('target_representation', 'xy_neighbor_unanimous_hard_labels_v1'),
+		('target_semantics', 'xy_neighbor_unanimous_outlier_correction_v1'),
+		('xy_neighbor_unanimous_target_manifest_sha256', target_reference['sha256']),
+		('per_head_xy_neighbor_unanimous_targets', target_hashes),
+		('source_hard_manifest_sha256', source_reference['sha256']),
+		('xy_neighbor_unanimous_smoothing', target_smoothing),
+		('consistency_policy', 'disabled_for_xy_neighbor_unanimous_v1'),
+		('consistency_weight', 0.0),
+		('consistency_beta', 0.1),
+	):
+		if identity.get(key) != expected:
+			raise ValueError(
+				'XY-neighbour-unanimous checkpoint identity mismatch: '
+				f'{key}'
+			)
+	checkpoint_target = _reference_value(
+		identity.get('xy_neighbor_unanimous_target_manifest'),
+		'XY-neighbour-unanimous checkpoint target manifest',
+	)
+	if checkpoint_target != target_reference:
+		raise ValueError('XY-neighbour-unanimous checkpoint target manifest mismatch')
+	for key in ('initial_student_state_sha256', 'initial_head_state_sha256'):
+		if identity.get(key) != targets.get(key):
+			raise ValueError(
+				f'XY-neighbour-unanimous checkpoint initial state mismatch: {key}'
+			)
+	for key, expected in (
+		('model_tag', candidate.model_tag),
+		('head_spec', 'multi_resolution_ordered_prototypes_v1'),
+		('head_ks', [6, 8, 10]),
+		('target_representation', 'xy_neighbor_unanimous_hard_labels_v1'),
+		('target_semantics', 'xy_neighbor_unanimous_outlier_correction_v1'),
+		(
+			'xy_neighbor_unanimous_target_manifest_sha256',
+			target_reference['sha256'],
+		),
+		('per_head_xy_neighbor_unanimous_target_sha256', target_hashes),
+		('source_hard_manifest_sha256', source_reference['sha256']),
+		('xy_neighbor_unanimous_smoothing', target_smoothing),
+		('consistency_policy', 'disabled_for_xy_neighbor_unanimous_v1'),
+		('consistency_weight', 0.0),
+		('consistency_beta', 0.1),
+		('scientific_identity_sha256', identity.get('scientific_identity_sha256')),
+		(
+			'checkpoint_stratigraphy_state_sha256',
+			identity.get('stratigraphy_state_sha256'),
+		),
+	):
+		if stratigraphy.get(key) != expected:
+			raise ValueError(
+				'XY-neighbour-unanimous embedding identity mismatch: '
+				f'{key}'
+			)
+	if (
+		stratigraphy.get('xy_neighbor_unanimous_target_manifest_path')
+		!= target_reference['path']
+	):
+		raise ValueError(
+			'XY-neighbour-unanimous embedding target manifest path mismatch'
+		)
+	if any(
+		'posterior' in str(key)
+		or 'lateral' in str(key)
+		or 'xy_neighbor_consensus' in str(key)
+		for key in (*stratigraphy, *identity, *metadata)
+	):
+		raise ValueError(
+			'XY-neighbour-unanimous provenance carries posterior/lateral fields'
+		)
+	return identity
+
+
 def _xy_neighbor_consensus_target_head_hashes(
 	target: Mapping[str, object],
 ) -> dict[str, dict[str, dict[str, str]]]:
@@ -770,6 +1033,27 @@ def _xy_neighbor_consensus_target_head_hashes(
 			result[k][str(survey_id)] = {}
 			for name in ('labels', 'confidence', 'valid_tokens', 'metadata'):
 				reference = _reference_value(entry.get(name), f'XY target {name}')
+				result[k][str(survey_id)][name] = str(reference['sha256'])
+	return result
+
+
+def _xy_neighbor_unanimous_target_head_hashes(
+	target: Mapping[str, object],
+) -> dict[str, dict[str, dict[str, str]]]:
+	"""Extract the exact K=6/8/10 unanimous target artifact hash matrix."""
+	heads = _mapping_value(target.get('heads'), 'unanimous target heads')
+	result: dict[str, dict[str, dict[str, str]]] = {}
+	for k in ('6', '8', '10'):
+		head = _mapping_value(heads.get(k), f'unanimous target head k={k}')
+		surveys = _mapping_value(head.get('surveys'), f'unanimous target surveys k={k}')
+		result[k] = {}
+		for survey_id, value in surveys.items():
+			entry = _mapping_value(value, f'unanimous target survey k={k}/{survey_id}')
+			result[k][str(survey_id)] = {}
+			for name in ('labels', 'confidence', 'valid_tokens', 'metadata'):
+				reference = _reference_value(
+					entry.get(name), f'unanimous target {name}'
+				)
 				result[k][str(survey_id)][name] = str(reference['sha256'])
 	return result
 
@@ -795,7 +1079,27 @@ def _reference_value(value: object, label: str) -> Mapping[str, object]:
 def _validate_xy_neighbor_consensus_screening_audit(
 	config: F3VoxelLabelBudgetMultiHeadConfig,
 ) -> None:
-	"""Revalidate the audit before planning any schema-v5 candidate job."""
+	"""Revalidate policy-specific audits before planning successor jobs."""
+	if any(item.model_id == XY_UNANIM_MODEL_ID for item in config.candidates):
+		audit_path = getattr(config, 'screening_audit', None)
+		if not isinstance(audit_path, Path):
+			raise TypeError(
+				'XY-neighbour-unanimous candidate requires its closed config'
+			)
+		audit = importlib.import_module(
+			'seis_ssl_cluster.f3.lithology.xy_neighbor_unanimous_screening_audit'
+		)
+		payload = audit.load_f3_xy_neighbor_unanimous_screening_audit(audit_path)
+		candidate = next(
+			item for item in config.candidates if item.model_id == XY_UNANIM_MODEL_ID
+		)
+		audit.validate_f3_xy_neighbor_unanimous_screening_audit_binding(
+			payload,
+			model_id=candidate.model_id,
+			model_tag=candidate.model_tag,
+			pretraining_handoff=candidate.pretraining_handoff,
+			embeddings_dir=candidate.embeddings_dir,
+		)
 	if not any(item.model_id == XY_MODEL_ID for item in config.candidates):
 		return
 	audit_path = getattr(config, 'screening_audit', None)

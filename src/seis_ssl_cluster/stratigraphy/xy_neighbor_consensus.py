@@ -33,6 +33,27 @@ XY_NEIGHBOR_CONSENSUS_HARD_LABEL_SMOOTHING_POLICY = MappingProxyType(
 """Fixed, JSON-compatible policy values for manifest and checkpoint identity."""
 
 
+XY_NEIGHBOR_UNANIMOUS_OUTLIER_CORRECTION_SEMANTICS = (
+	'xy_neighbor_unanimous_outlier_correction_v1'
+)
+"""Immutable semantic identifier for unanimous source-label correction."""
+
+XY_NEIGHBOR_UNANIMOUS_OUTLIER_CORRECTION_POLICY = MappingProxyType(
+	{
+		'neighborhood': 'same_z_xy_four_neighbors',
+		'neighbor_order': ('x_minus', 'x_plus', 'y_minus', 'y_plus'),
+		'four_valid_neighbors_minimum_agreement': 4,
+		'three_valid_neighbors_minimum_agreement': 3,
+		'fewer_than_three_valid_neighbors': 'unchanged',
+		'tied_or_nonunique_consensus': 'unchanged',
+		'center_matching_consensus': 'unchanged',
+		'temporal_guard': 'internal_valid_token_source_label_bounds',
+		'application': 'single_pass_synchronous_source_labels',
+	}
+)
+"""Fixed, JSON-compatible unanimous correction policy values."""
+
+
 @dataclass(frozen=True)
 class XYNeighborConsensusDiagnostics:
 	"""Per-token decisions made by the fixed XY consensus policy.
@@ -78,6 +99,42 @@ def smooth_xy_neighbor_consensus_hard_labels(
 	sequence and is bounded by the labels of the preceding and following valid
 	tokens.  Physical ``z`` gaps do not reset that sequence.
 	"""
+	return _smooth_xy_neighbor_hard_labels(
+		source_labels,
+		valid_mask,
+		four_valid_neighbors_minimum_agreement=3,
+	)
+
+
+def smooth_xy_neighbor_unanimous_hard_labels(
+	source_labels: np.ndarray,
+	valid_mask: np.ndarray,
+) -> XYNeighborConsensusResult:
+	"""Apply the fixed conservative unanimous XY correction once.
+
+	Four valid neighbours must all agree on one label.  Three valid neighbours
+	still require all three labels to agree; fewer valid neighbours never make a
+	proposal.  The ordered-trace guard and synchronous source-label semantics are
+	exactly the same as :func:`smooth_xy_neighbor_consensus_hard_labels`.
+	"""
+	return _smooth_xy_neighbor_hard_labels(
+		source_labels,
+		valid_mask,
+		four_valid_neighbors_minimum_agreement=4,
+	)
+
+
+def _smooth_xy_neighbor_hard_labels(
+	source_labels: np.ndarray,
+	valid_mask: np.ndarray,
+	*,
+	four_valid_neighbors_minimum_agreement: int,
+) -> XYNeighborConsensusResult:
+	"""Apply one source-only XY policy with a fixed four-neighbour threshold."""
+	if four_valid_neighbors_minimum_agreement not in {3, 4}:
+		raise ValueError(
+			'four_valid_neighbors_minimum_agreement must be either 3 or 4'
+		)
 	labels = _as_integer_grid(source_labels, 'source_labels')
 	valid = _as_bool_grid(valid_mask, 'valid_mask')
 	if labels.shape != valid.shape:
@@ -112,6 +169,7 @@ def smooth_xy_neighbor_consensus_hard_labels(
 			plane_neighbor_count,
 			center_valid,
 			center_labels,
+			four_valid_neighbors_minimum_agreement,
 		)
 		proposal_labels[x] = plane_proposals
 		consensus_mask[x] = plane_consensus
@@ -171,12 +229,13 @@ def _xy_neighbor_planes(
 	return neighbor_labels, neighbor_valid
 
 
-def _consensus_proposals(
+def _consensus_proposals(  # noqa: PLR0913
 	neighbor_labels: np.ndarray,
 	neighbor_valid: np.ndarray,
 	neighbor_count: np.ndarray,
 	center_valid: np.ndarray,
 	center_labels: np.ndarray,
+	four_valid_neighbors_minimum_agreement: int,
 ) -> tuple[np.ndarray, np.ndarray]:
 	"""Compute threshold-qualified consensus labels from frozen neighbour values."""
 	proposals = center_labels.copy()
@@ -187,9 +246,15 @@ def _consensus_proposals(
 		is_better = count > best_count
 		proposals[is_better] = neighbor_labels[index, is_better]
 		best_count = np.maximum(best_count, count)
-	# A count of three among four neighbours can have only one winning label.
-	# With three valid neighbours, the same threshold requires all three to agree.
-	consensus = center_valid & (neighbor_count >= 3) & (best_count >= 3)
+	# The three-neighbour rule is always unanimous.  The policy only varies for
+	# four valid neighbours: 3/4 for the legacy consensus route and 4/4 for the
+	# conservative unanimous route.
+	required_agreement = np.where(
+		neighbor_count == 4,
+		four_valid_neighbors_minimum_agreement,
+		np.where(neighbor_count == 3, 3, 5),
+	)
+	consensus = center_valid & (best_count >= required_agreement)
 	return proposals, consensus
 
 

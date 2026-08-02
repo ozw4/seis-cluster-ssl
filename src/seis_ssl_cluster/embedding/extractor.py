@@ -1184,7 +1184,7 @@ def _stratigraphy_pretext_metadata(
 				],
 				'per_head_posterior_sha256': checkpoint_identity['per_head_posteriors'],
 			}
-		if checkpoint_identity.get('schema_version') in {4, 5}:
+		if checkpoint_identity.get('schema_version') in {4, 5, 6}:
 			return _hard_target_pretext_metadata(
 				result,
 				checkpoint_identity,
@@ -1243,7 +1243,7 @@ def _hard_target_pretext_metadata(
 	base: Mapping[str, object],
 	checkpoint_identity: Mapping[str, object],
 ) -> dict[str, object]:
-	"""Attach strict schema-v4/v5 hard-target provenance to extraction metadata."""
+	"""Attach strict schema-v4/v5/v6 hard-target provenance to metadata."""
 	if checkpoint_identity.get('schema_version') == 4:
 		lateral = _required_mapping(
 			checkpoint_identity,
@@ -1266,24 +1266,47 @@ def _hard_target_pretext_metadata(
 			],
 			'lateral_smoothing': checkpoint_identity['lateral_smoothing'],
 		}
-	xy_neighbor_consensus = _required_mapping(
+	if checkpoint_identity.get('schema_version') == 5:
+		xy_neighbor_consensus = _required_mapping(
+			checkpoint_identity,
+			'xy_neighbor_consensus_target_manifest',
+		)
+		return {
+			**base,
+			'target_representation': checkpoint_identity['target_representation'],
+			'target_semantics': checkpoint_identity['target_semantics'],
+			'xy_neighbor_consensus_target_manifest_path': xy_neighbor_consensus['path'],
+			'xy_neighbor_consensus_target_manifest_sha256': xy_neighbor_consensus[
+				'sha256'
+			],
+			'per_head_xy_neighbor_consensus_target_sha256': checkpoint_identity[
+				'per_head_xy_neighbor_consensus_targets'
+			],
+			'source_hard_manifest_sha256': checkpoint_identity[
+				'source_hard_manifest_sha256'
+			],
+			'xy_neighbor_consensus_smoothing': checkpoint_identity[
+				'xy_neighbor_consensus_smoothing'
+			],
+		}
+	xy_neighbor_unanimous = _required_mapping(
 		checkpoint_identity,
-		'xy_neighbor_consensus_target_manifest',
+		'xy_neighbor_unanimous_target_manifest',
 	)
 	return {
 		**base,
 		'target_representation': checkpoint_identity['target_representation'],
 		'target_semantics': checkpoint_identity['target_semantics'],
-		'xy_neighbor_consensus_target_manifest_path': xy_neighbor_consensus['path'],
-		'xy_neighbor_consensus_target_manifest_sha256': xy_neighbor_consensus['sha256'],
-		'per_head_xy_neighbor_consensus_target_sha256': checkpoint_identity[
-			'per_head_xy_neighbor_consensus_targets'
+		'xy_neighbor_unanimous_target_manifest_path': xy_neighbor_unanimous['path'],
+		'xy_neighbor_unanimous_target_manifest_sha256': xy_neighbor_unanimous['sha256'],
+		'per_head_xy_neighbor_unanimous_target_sha256': checkpoint_identity[
+			'per_head_xy_neighbor_unanimous_targets'
 		],
 		'source_hard_manifest_sha256': checkpoint_identity[
 			'source_hard_manifest_sha256'
 		],
-		'xy_neighbor_consensus_smoothing': checkpoint_identity[
-			'xy_neighbor_consensus_smoothing'
+		'xy_neighbor_unanimous_smoothing': checkpoint_identity[
+			'xy_neighbor_unanimous_smoothing'
 		],
 	}
 

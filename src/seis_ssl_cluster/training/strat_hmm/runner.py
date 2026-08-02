@@ -17,6 +17,7 @@ from seis_ssl_cluster.data import (
 	NopimsStratPseudoTargetDataset,
 	load_strat_multi_head_lateral_target_manifest_adapter,
 	load_strat_multi_head_xy_neighbor_consensus_target_manifest_adapter,
+	load_strat_multi_head_xy_neighbor_unanimous_target_manifest_adapter,
 	read_manifest_json,
 )
 from seis_ssl_cluster.stratigraphy import (
@@ -164,6 +165,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			'hard_viterbi_labels_v1',
 			'lateral_mean_field_hard_labels_v1',
 			'xy_neighbor_consensus_hard_labels_v1',
+			'xy_neighbor_unanimous_hard_labels_v1',
 		}:
 			target_manifest: object = _path_config(pseudo_config, 'manifest')
 			if target_representation == 'lateral_mean_field_hard_labels_v1':
@@ -173,6 +175,12 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			elif target_representation == 'xy_neighbor_consensus_hard_labels_v1':
 				target_manifest = (
 					load_strat_multi_head_xy_neighbor_consensus_target_manifest_adapter(
+						target_manifest
+					).target_manifest
+				)
+			elif target_representation == 'xy_neighbor_unanimous_hard_labels_v1':
+				target_manifest = (
+					load_strat_multi_head_xy_neighbor_unanimous_target_manifest_adapter(
 						target_manifest
 					).target_manifest
 				)

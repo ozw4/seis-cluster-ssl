@@ -20,6 +20,12 @@ PROC_SCRIPTS = tuple(
 )
 
 HELP_FLAG_CONTRACTS = {
+	'audit_f3_xy_neighbor_unanimous_targets.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+		'--quarantine-invalid',
+	),
 	'audit_f3_xy_neighbor_consensus_screening.py': (
 		'--config',
 		'--dry-run',
@@ -211,6 +217,22 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 		'--only-missing',
+	),
+	'export_strat_hmm_multi_head_xy_neighbor_unanimous_targets.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+	),
+	'publish_f3_xy_neighbor_unanimous_results.py': (
+		'--config',
+		'--dry-run',
+	),
+	'validate_f3_xy_neighbor_unanimous_pretraining.py': (
+		'--config',
+		'--phase',
+		'--dry-run',
+		'--only-missing',
+		'--quarantine-invalid',
 	),
 	'visualize_clusters.py': (
 		'--config',

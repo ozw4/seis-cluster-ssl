@@ -114,6 +114,7 @@ from seis_ssl_cluster.stratigraphy import (
 	lateral_targets,
 	state_posterior,
 	xy_neighbor_consensus_targets,
+	xy_neighbor_unanimous_targets,
 )
 from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
 from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
@@ -196,6 +197,9 @@ F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT = (
 F3_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_ROOT = (
 	F3_ROOT / '100_strat_hmm_multi_head_k6810_xy_neighbor_consensus_v1'
 )
+F3_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_ROOT = (
+	F3_ROOT / '102_strat_hmm_multi_head_k6810_xy_neighbor_unanimous_v1'
+)
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
@@ -222,6 +226,10 @@ F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 		/ '02_train_xy_neighbor_consensus_smoke.yaml',
 		F3_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_ROOT
 		/ '03_train_xy_neighbor_consensus_full.yaml',
+		F3_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_ROOT
+		/ '03_train_xy_neighbor_unanimous_smoke.yaml',
+		F3_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_ROOT
+		/ '04_train_xy_neighbor_unanimous_full.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
@@ -237,6 +245,8 @@ F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
 		F3_STRAT_HMM_LATERAL_SMOOTHING_ROOT / '07_extract_lateral_embeddings.yaml',
 		F3_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_ROOT
 		/ '04_extract_xy_neighbor_consensus_embeddings.yaml',
+		F3_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_ROOT
+		/ '05_extract_xy_neighbor_unanimous_embeddings.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
@@ -808,6 +818,17 @@ def test_active_f3_strat_hmm_pretext_configs_resolve(
 			if not validate_array_semantics
 			else pytest.fail(
 				'config validation requested full XY-neighbour consensus arrays'
+			)
+		),
+	)
+	monkeypatch.setattr(
+		xy_neighbor_unanimous_targets,
+		'load_multi_head_xy_neighbor_unanimous_target_manifest',
+		lambda _path, *, validate_array_semantics: (
+			_active_xy_neighbor_unanimous_manifest()
+			if not validate_array_semantics
+			else pytest.fail(
+				'config validation requested full XY-neighbour unanimous arrays'
 			)
 		),
 	)
@@ -1723,6 +1744,7 @@ def _config_with_existing_strat_hmm_pretext_inputs(
 		elif config['pseudo_targets'].get('target_representation') not in {
 			'lateral_mean_field_hard_labels_v1',
 			'xy_neighbor_consensus_hard_labels_v1',
+			'xy_neighbor_unanimous_hard_labels_v1',
 		}:
 			config['identity']['scientific_identity']['target_manifest_sha256'] = (
 				file_sha256(manifest)
@@ -1826,6 +1848,15 @@ def _active_xy_neighbor_consensus_manifest() -> dict[str, object]:
 			for k in (6, 8, 10)
 		},
 	}
+
+
+def _active_xy_neighbor_unanimous_manifest() -> dict[str, object]:
+	"""Return the reference-only unanimous identity used by active configs."""
+	manifest = _active_xy_neighbor_consensus_manifest()
+	manifest['target_representation'] = 'xy_neighbor_unanimous_hard_labels_v1'
+	manifest['target_semantics'] = 'xy_neighbor_unanimous_outlier_correction_v1'
+	manifest['smoothing']['four_valid_neighbors_minimum_agreement'] = 4
+	return manifest
 
 
 def _config_with_existing_strat_hmm_refresh_inputs(

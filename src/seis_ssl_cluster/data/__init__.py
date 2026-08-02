@@ -82,6 +82,7 @@ from seis_ssl_cluster.data.target_providers import (
 	StratMultiHeadTargetInput,
 	StratMultiHeadTargetManifest,
 	StratMultiHeadXYNeighborConsensusTargetManifest,
+	StratMultiHeadXYNeighborUnanimousTargetManifest,
 	StratPseudoTargetProvider,
 	TargetProvider,
 	TargetProviderContext,
@@ -89,6 +90,7 @@ from seis_ssl_cluster.data.target_providers import (
 	load_strat_multi_head_posterior_manifest,
 	load_strat_multi_head_target_manifest,
 	load_strat_multi_head_xy_neighbor_consensus_target_manifest_adapter,
+	load_strat_multi_head_xy_neighbor_unanimous_target_manifest_adapter,
 )
 from seis_ssl_cluster.data.volume_store import (
 	NpyMemmapVolumeStore,
@@ -156,6 +158,7 @@ __all__ = [
 	'StratMultiHeadTargetInput',
 	'StratMultiHeadTargetManifest',
 	'StratMultiHeadXYNeighborConsensusTargetManifest',
+	'StratMultiHeadXYNeighborUnanimousTargetManifest',
 	'StratPseudoTargetProvider',
 	'SurveyManifest',
 	'SurveyNormalizationStats',
@@ -186,6 +189,7 @@ __all__ = [
 	'load_strat_multi_head_posterior_manifest',
 	'load_strat_multi_head_target_manifest',
 	'load_strat_multi_head_xy_neighbor_consensus_target_manifest_adapter',
+	'load_strat_multi_head_xy_neighbor_unanimous_target_manifest_adapter',
 	'make_survey_id_from_path',
 	'normalization_qc_report_to_dict',
 	'normalize_amplitude',

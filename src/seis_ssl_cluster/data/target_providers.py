@@ -29,6 +29,9 @@ from seis_ssl_cluster.stratigraphy.targets import (
 from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
 	load_multi_head_xy_neighbor_consensus_target_manifest,
 )
+from seis_ssl_cluster.stratigraphy.xy_neighbor_unanimous_targets import (
+	load_multi_head_xy_neighbor_unanimous_target_manifest,
+)
 
 if TYPE_CHECKING:
 	from collections.abc import Sequence
@@ -87,6 +90,17 @@ class StratMultiHeadLateralTargetManifest:
 @dataclass(frozen=True)
 class StratMultiHeadXYNeighborConsensusTargetManifest:
 	"""Strict XY-consensus provenance plus its hard-target adapter."""
+
+	target_manifest: StratMultiHeadTargetManifest
+	target_representation: str
+	target_semantics: str
+	source_hard_manifest: Mapping[str, str]
+	smoothing: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class StratMultiHeadXYNeighborUnanimousTargetManifest:
+	"""Strict XY-unanimous provenance plus its hard-target adapter."""
 
 	target_manifest: StratMultiHeadTargetManifest
 	target_representation: str
@@ -917,6 +931,73 @@ def load_strat_multi_head_xy_neighbor_consensus_target_manifest_adapter(
 	)
 
 
+def load_strat_multi_head_xy_neighbor_unanimous_target_manifest_adapter(
+	path: str | Path,
+) -> StratMultiHeadXYNeighborUnanimousTargetManifest:
+	"""Adapt a strict XY-unanimous export to the existing hard provider.
+
+	The target loader validates the distinct source-hard-only provenance before
+	the existing lazy hard-label provider sees any array references.
+	"""
+	payload = load_multi_head_xy_neighbor_unanimous_target_manifest(
+		path,
+		validate_array_semantics=False,
+	)
+	head_ks = tuple(cast('list[int]', payload['head_ks']))
+	heads = cast('Mapping[str, Mapping[str, object]]', payload['heads'])
+	by_survey: dict[str, tuple[StratMultiHeadTargetInput, ...]] = {}
+	first_surveys = cast('Mapping[str, object]', heads[str(head_ks[0])]['surveys'])
+	for survey_id in first_surveys:
+		inputs: list[StratMultiHeadTargetInput] = []
+		for k in head_ks:
+			entry = cast('Mapping[str, object]', heads[str(k)]['surveys'][survey_id])
+			inputs.append(
+				StratMultiHeadTargetInput(
+					k=k,
+					survey_id=str(survey_id),
+					labels_path=Path(
+						str(cast('Mapping[str, object]', entry['labels'])['path'])
+					),
+					confidence_path=Path(
+						str(cast('Mapping[str, object]', entry['confidence'])['path'])
+					),
+					valid_tokens_path=Path(
+						str(cast('Mapping[str, object]', entry['valid_tokens'])['path'])
+					),
+					metadata_path=Path(
+						str(cast('Mapping[str, object]', entry['metadata'])['path'])
+					),
+					hashes={
+						name: str(cast('Mapping[str, object]', entry[name])['sha256'])
+						for name in (
+							'labels',
+							'confidence',
+							'valid_tokens',
+							'metadata',
+						)
+					},
+				)
+			)
+		by_survey[str(survey_id)] = tuple(inputs)
+	target_manifest = StratMultiHeadTargetManifest(
+		head_ks=head_ks,
+		by_survey=by_survey,
+		common_valid_token_sha256={
+			survey_id: inputs[0].hashes['valid_tokens']
+			for survey_id, inputs in by_survey.items()
+		},
+		invalid_label_policy='preserve_source',
+	)
+	_coerce_multi_head_target_manifest(target_manifest)
+	return StratMultiHeadXYNeighborUnanimousTargetManifest(
+		target_manifest=target_manifest,
+		target_representation=str(payload['target_representation']),
+		target_semantics=str(payload['target_semantics']),
+		source_hard_manifest=cast('Mapping[str, str]', payload['source_hard_manifest']),
+		smoothing=cast('Mapping[str, object]', payload['smoothing']),
+	)
+
+
 def load_strat_multi_head_posterior_manifest(
 	path: str | Path,
 ) -> StratMultiHeadPosteriorManifest:
@@ -1369,6 +1450,7 @@ __all__ = [
 	'StratMultiHeadTargetInput',
 	'StratMultiHeadTargetManifest',
 	'StratMultiHeadXYNeighborConsensusTargetManifest',
+	'StratMultiHeadXYNeighborUnanimousTargetManifest',
 	'StratPseudoTargetProvider',
 	'TargetProvider',
 	'TargetProviderContext',
@@ -1376,4 +1458,5 @@ __all__ = [
 	'load_strat_multi_head_posterior_manifest',
 	'load_strat_multi_head_target_manifest',
 	'load_strat_multi_head_xy_neighbor_consensus_target_manifest_adapter',
+	'load_strat_multi_head_xy_neighbor_unanimous_target_manifest_adapter',
 ]
