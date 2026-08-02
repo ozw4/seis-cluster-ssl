@@ -1,0 +1,420 @@
+{
+  "artifact_type": "f3_xy_neighbor_unanimous_target_audit",
+  "go_conditions": {
+    "10": {
+      "arrays_and_diagnostics_finite_and_consistent": true,
+      "changed_token_count_positive": true,
+      "empty_output_state_count_zero": true,
+      "ordered_path_violation_count_zero": true,
+      "unanimous_changed_mask_subset_of_3_of_4": true,
+      "unanimous_combined_xy_disagreement_lt_source": true,
+      "unanimous_output_equals_3_of_4_at_unanimous_changes": true,
+      "valid_masks_exact": true
+    },
+    "6": {
+      "arrays_and_diagnostics_finite_and_consistent": true,
+      "changed_token_count_positive": true,
+      "empty_output_state_count_zero": true,
+      "ordered_path_violation_count_zero": true,
+      "unanimous_changed_mask_subset_of_3_of_4": true,
+      "unanimous_combined_xy_disagreement_lt_source": true,
+      "unanimous_output_equals_3_of_4_at_unanimous_changes": true,
+      "valid_masks_exact": true
+    },
+    "8": {
+      "arrays_and_diagnostics_finite_and_consistent": true,
+      "changed_token_count_positive": true,
+      "empty_output_state_count_zero": true,
+      "ordered_path_violation_count_zero": true,
+      "unanimous_changed_mask_subset_of_3_of_4": true,
+      "unanimous_combined_xy_disagreement_lt_source": true,
+      "unanimous_output_equals_3_of_4_at_unanimous_changes": true,
+      "valid_masks_exact": true
+    }
+  },
+  "per_k": {
+    "10": {
+      "arrays_and_diagnostics_finite_and_consistent": true,
+      "consensus_changed_fraction": 0.027233676975945018,
+      "consensus_changed_token_count": 4438,
+      "source": {
+        "changed_fraction": 0.0,
+        "changed_token_count": 0,
+        "empty_output_state_count": 0,
+        "invalid_token_count": 111856,
+        "ordered_path_violation_count": 0,
+        "spatial": {
+          "combined": {
+            "disagreement_count": 91318,
+            "disagreement_fraction": 0.28401612321319714,
+            "valid_edge_count": 321524
+          },
+          "x_edges": {
+            "disagreement_count": 44800,
+            "disagreement_fraction": 0.2795736501834702,
+            "valid_edge_count": 160244
+          },
+          "y_edges": {
+            "disagreement_count": 46518,
+            "disagreement_fraction": 0.2884300595238095,
+            "valid_edge_count": 161280
+          }
+        },
+        "state_occupancy_count": [
+          549,
+          3420,
+          7106,
+          12669,
+          13322,
+          32082,
+          21913,
+          44985,
+          16276,
+          10638
+        ],
+        "temporal_transition_count": 37267,
+        "valid_token_count": 162960
+      },
+      "subset_evidence": {
+        "changed_mask_subset": true,
+        "label_parity": true,
+        "retained_change_fraction": 0.24470482199188823,
+        "unanimous_changed_count_over_consensus_changed_count": 0.24470482199188823,
+        "xy_neighbor_consensus_only_changed_token_count": 3352
+      },
+      "unanimous": {
+        "changed_fraction": 0.00666421207658321,
+        "changed_token_count": 1086,
+        "empty_output_state_count": 0,
+        "invalid_token_count": 111856,
+        "ordered_path_violation_count": 0,
+        "spatial": {
+          "combined": {
+            "disagreement_count": 87113,
+            "disagreement_fraction": 0.27093778380463046,
+            "valid_edge_count": 321524
+          },
+          "x_edges": {
+            "disagreement_count": 42719,
+            "disagreement_fraction": 0.2665872045131175,
+            "valid_edge_count": 160244
+          },
+          "y_edges": {
+            "disagreement_count": 44394,
+            "disagreement_fraction": 0.2752604166666667,
+            "valid_edge_count": 161280
+          }
+        },
+        "state_occupancy_count": [
+          549,
+          3419,
+          7105,
+          12642,
+          13326,
+          32184,
+          21610,
+          45242,
+          16240,
+          10643
+        ],
+        "temporal_transition_count": 37022,
+        "valid_token_count": 162960
+      },
+      "unanimous_changed_fraction": 0.00666421207658321,
+      "unanimous_changed_token_count": 1086,
+      "valid_masks_exact": true,
+      "xy_neighbor_consensus": {
+        "changed_fraction": 0.027233676975945018,
+        "changed_token_count": 4438,
+        "empty_output_state_count": 0,
+        "invalid_token_count": 111856,
+        "ordered_path_violation_count": 0,
+        "spatial": {
+          "combined": {
+            "disagreement_count": 80337,
+            "disagreement_fraction": 0.24986315173983903,
+            "valid_edge_count": 321524
+          },
+          "x_edges": {
+            "disagreement_count": 39340,
+            "disagreement_fraction": 0.24550061156735978,
+            "valid_edge_count": 160244
+          },
+          "y_edges": {
+            "disagreement_count": 40997,
+            "disagreement_fraction": 0.25419766865079363,
+            "valid_edge_count": 161280
+          }
+        },
+        "state_occupancy_count": [
+          548,
+          3418,
+          7077,
+          12605,
+          13260,
+          32497,
+          21219,
+          45499,
+          16234,
+          10603
+        ],
+        "temporal_transition_count": 36391,
+        "valid_token_count": 162960
+      }
+    },
+    "6": {
+      "arrays_and_diagnostics_finite_and_consistent": true,
+      "consensus_changed_fraction": 0.026485027000490918,
+      "consensus_changed_token_count": 4316,
+      "source": {
+        "changed_fraction": 0.0,
+        "changed_token_count": 0,
+        "empty_output_state_count": 0,
+        "invalid_token_count": 111856,
+        "ordered_path_violation_count": 0,
+        "spatial": {
+          "combined": {
+            "disagreement_count": 75178,
+            "disagreement_fraction": 0.23381769323596371,
+            "valid_edge_count": 321524
+          },
+          "x_edges": {
+            "disagreement_count": 37263,
+            "disagreement_fraction": 0.23253912783005917,
+            "valid_edge_count": 160244
+          },
+          "y_edges": {
+            "disagreement_count": 37915,
+            "disagreement_fraction": 0.23508804563492064,
+            "valid_edge_count": 161280
+          }
+        },
+        "state_occupancy_count": [
+          9583,
+          11076,
+          12182,
+          61178,
+          32739,
+          36202
+        ],
+        "temporal_transition_count": 26857,
+        "valid_token_count": 162960
+      },
+      "subset_evidence": {
+        "changed_mask_subset": true,
+        "label_parity": true,
+        "retained_change_fraction": 0.25023169601482853,
+        "unanimous_changed_count_over_consensus_changed_count": 0.25023169601482853,
+        "xy_neighbor_consensus_only_changed_token_count": 3236
+      },
+      "unanimous": {
+        "changed_fraction": 0.0066273932253313695,
+        "changed_token_count": 1080,
+        "empty_output_state_count": 0,
+        "invalid_token_count": 111856,
+        "ordered_path_violation_count": 0,
+        "spatial": {
+          "combined": {
+            "disagreement_count": 70983,
+            "disagreement_fraction": 0.22077045570470633,
+            "valid_edge_count": 321524
+          },
+          "x_edges": {
+            "disagreement_count": 35172,
+            "disagreement_fraction": 0.2194902773270762,
+            "valid_edge_count": 160244
+          },
+          "y_edges": {
+            "disagreement_count": 35811,
+            "disagreement_fraction": 0.2220424107142857,
+            "valid_edge_count": 161280
+          }
+        },
+        "state_occupancy_count": [
+          9581,
+          11067,
+          12038,
+          61537,
+          32383,
+          36354
+        ],
+        "temporal_transition_count": 26708,
+        "valid_token_count": 162960
+      },
+      "unanimous_changed_fraction": 0.0066273932253313695,
+      "unanimous_changed_token_count": 1080,
+      "valid_masks_exact": true,
+      "xy_neighbor_consensus": {
+        "changed_fraction": 0.026485027000490918,
+        "changed_token_count": 4316,
+        "empty_output_state_count": 0,
+        "invalid_token_count": 111856,
+        "ordered_path_violation_count": 0,
+        "spatial": {
+          "combined": {
+            "disagreement_count": 64361,
+            "disagreement_fraction": 0.20017479255047835,
+            "valid_edge_count": 321524
+          },
+          "x_edges": {
+            "disagreement_count": 31826,
+            "disagreement_fraction": 0.1986096203289983,
+            "valid_edge_count": 160244
+          },
+          "y_edges": {
+            "disagreement_count": 32535,
+            "disagreement_fraction": 0.20172991071428573,
+            "valid_edge_count": 161280
+          }
+        },
+        "state_occupancy_count": [
+          9599,
+          11059,
+          11747,
+          62162,
+          31720,
+          36673
+        ],
+        "temporal_transition_count": 26287,
+        "valid_token_count": 162960
+      }
+    },
+    "8": {
+      "arrays_and_diagnostics_finite_and_consistent": true,
+      "consensus_changed_fraction": 0.027472999509081983,
+      "consensus_changed_token_count": 4477,
+      "source": {
+        "changed_fraction": 0.0,
+        "changed_token_count": 0,
+        "empty_output_state_count": 0,
+        "invalid_token_count": 111856,
+        "ordered_path_violation_count": 0,
+        "spatial": {
+          "combined": {
+            "disagreement_count": 97416,
+            "disagreement_fraction": 0.30298204799641704,
+            "valid_edge_count": 321524
+          },
+          "x_edges": {
+            "disagreement_count": 47810,
+            "disagreement_fraction": 0.2983575048051721,
+            "valid_edge_count": 160244
+          },
+          "y_edges": {
+            "disagreement_count": 49606,
+            "disagreement_fraction": 0.3075768849206349,
+            "valid_edge_count": 161280
+          }
+        },
+        "state_occupancy_count": [
+          11513,
+          15587,
+          46989,
+          21251,
+          19061,
+          23308,
+          15865,
+          9386
+        ],
+        "temporal_transition_count": 36375,
+        "valid_token_count": 162960
+      },
+      "subset_evidence": {
+        "changed_mask_subset": true,
+        "label_parity": true,
+        "retained_change_fraction": 0.23028813937904846,
+        "unanimous_changed_count_over_consensus_changed_count": 0.23028813937904846,
+        "xy_neighbor_consensus_only_changed_token_count": 3446
+      },
+      "unanimous": {
+        "changed_fraction": 0.006326705940108002,
+        "changed_token_count": 1031,
+        "empty_output_state_count": 0,
+        "invalid_token_count": 111856,
+        "ordered_path_violation_count": 0,
+        "spatial": {
+          "combined": {
+            "disagreement_count": 93412,
+            "disagreement_fraction": 0.29052885632176756,
+            "valid_edge_count": 321524
+          },
+          "x_edges": {
+            "disagreement_count": 45820,
+            "disagreement_fraction": 0.28593894311175455,
+            "valid_edge_count": 160244
+          },
+          "y_edges": {
+            "disagreement_count": 47592,
+            "disagreement_fraction": 0.2950892857142857,
+            "valid_edge_count": 161280
+          }
+        },
+        "state_occupancy_count": [
+          11516,
+          15453,
+          47359,
+          21031,
+          18988,
+          23384,
+          15850,
+          9379
+        ],
+        "temporal_transition_count": 36171,
+        "valid_token_count": 162960
+      },
+      "unanimous_changed_fraction": 0.006326705940108002,
+      "unanimous_changed_token_count": 1031,
+      "valid_masks_exact": true,
+      "xy_neighbor_consensus": {
+        "changed_fraction": 0.027472999509081983,
+        "changed_token_count": 4477,
+        "empty_output_state_count": 0,
+        "invalid_token_count": 111856,
+        "ordered_path_violation_count": 0,
+        "spatial": {
+          "combined": {
+            "disagreement_count": 86385,
+            "disagreement_fraction": 0.26867356713651236,
+            "valid_edge_count": 321524
+          },
+          "x_edges": {
+            "disagreement_count": 42188,
+            "disagreement_fraction": 0.2632735079004518,
+            "valid_edge_count": 160244
+          },
+          "y_edges": {
+            "disagreement_count": 44197,
+            "disagreement_fraction": 0.2740389384920635,
+            "valid_edge_count": 161280
+          }
+        },
+        "state_occupancy_count": [
+          11465,
+          15353,
+          48059,
+          20498,
+          18832,
+          23461,
+          15887,
+          9405
+        ],
+        "temporal_transition_count": 35540,
+        "valid_token_count": 162960
+      }
+    }
+  },
+  "schema_version": 1,
+  "source_hard_manifest": {
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+    "sha256": "c0b4edc17774d522bc0896db1366166628135d8369d2e063fd6183c66b01d15c"
+  },
+  "status": "XYUNANIM_TARGET_GO",
+  "xy_neighbor_consensus_target_manifest": {
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_xy_neighbor_consensus_hard_labels_v1/multi_head_xy_neighbor_consensus_target_handoff.json",
+    "sha256": "307c9a28796f7b1d90ef4f188676abc5a3604be402fe8ef4a18b515d06671a41"
+  },
+  "xy_neighbor_unanimous_target_manifest": {
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_xy_neighbor_unanimous_hard_labels_v1/multi_head_xy_neighbor_unanimous_target_handoff.json",
+    "sha256": "f09cc73c67e686785d6b04dfb4b92aea4a339a234d71226cd317e1380323d1a4"
+  }
+}

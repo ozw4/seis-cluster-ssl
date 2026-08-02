@@ -1,0 +1,418 @@
+{
+  "artifact_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}",
+  "artifact_type": "f3_xy_neighbor_unanimous_original_screening_preflight",
+  "candidate": {
+    "best_checkpoint": {
+      "byte_size": 87247611,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1/best.pt",
+      "sha256": "22c9ccacf8ce184118e175b5dadf21beb2a65dcce4f35b19815c04ed0dbc1ecc"
+    },
+    "embeddings": {
+      "embeddings": {
+        "byte_size": 211058816,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embeddings.npy",
+        "sha256": "a4f60b77823c2191ad7175645ac6604314cd1d4b34e473594cc8615b9db5cde3"
+      },
+      "metadata": {
+        "byte_size": 5805,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embedding_metadata.json",
+        "sha256": "68822898a55599aa131ef8daf040c83d0d91d3c37a872bcd9a34c61b35274588"
+      },
+      "root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1/overlap_x16",
+      "valid_tokens": {
+        "byte_size": 274944,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+        "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      }
+    },
+    "model_id": "mh_xyunanim1_nocons",
+    "model_tag": "strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1",
+    "pretraining_handoff": {
+      "byte_size": 4910,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1/preflight/xy_neighbor_unanimous_handoff.json",
+      "sha256": "892bc9dd3f19250730f0f3c6474923caa81211a0bd48cc38abc84bafb7f70ce1"
+    }
+  },
+  "git": {
+    "dirty": false,
+    "git_sha": "6915a2fba3217810f4f57218180163018708559f"
+  },
+  "hard_baseline_parity": {
+    "allowed_config_diff": {
+      "identity": [
+        "model_tag",
+        "scientific_identity.representation_specific_fields"
+      ],
+      "paths": [
+        "output_root"
+      ],
+      "pseudo_targets": [
+        "manifest",
+        "target_representation"
+      ]
+    },
+    "candidate": {
+      "config": {
+        "byte_size": 2752,
+        "path": "experiments/f3/facies_benchmark_v1/102_strat_hmm_multi_head_k6810_xy_neighbor_unanimous_v1/04_train_xy_neighbor_unanimous_full.yaml",
+        "sha256": "c2a1fde2b593e031fe8187a5a8debe61ed2effac00ec188f8087faa64327a4e3"
+      },
+      "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+      "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+      "optimizer_group_identity": [
+        {
+          "lr": 0.0003,
+          "name": "head",
+          "parameter_names": [
+            "head.heads.k6.prototypes",
+            "head.heads.k6.projection.weight",
+            "head.heads.k6.projection.bias",
+            "head.heads.k8.prototypes",
+            "head.heads.k8.projection.weight",
+            "head.heads.k8.projection.bias",
+            "head.heads.k10.prototypes",
+            "head.heads.k10.projection.weight",
+            "head.heads.k10.projection.bias"
+          ]
+        },
+        {
+          "lr": 1e-05,
+          "name": "encoder",
+          "parameter_names": [
+            "student.encoder.layers.7.norm1.weight",
+            "student.encoder.layers.7.norm1.bias",
+            "student.encoder.layers.7.attention.in_proj_weight",
+            "student.encoder.layers.7.attention.in_proj_bias",
+            "student.encoder.layers.7.attention.out_proj.weight",
+            "student.encoder.layers.7.attention.out_proj.bias",
+            "student.encoder.layers.7.norm2.weight",
+            "student.encoder.layers.7.norm2.bias",
+            "student.encoder.layers.7.mlp.0.weight",
+            "student.encoder.layers.7.mlp.0.bias",
+            "student.encoder.layers.7.mlp.3.weight",
+            "student.encoder.layers.7.mlp.3.bias"
+          ]
+        }
+      ],
+      "pretraining_handoff": {
+        "byte_size": 4910,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1/preflight/xy_neighbor_unanimous_handoff.json",
+        "sha256": "892bc9dd3f19250730f0f3c6474923caa81211a0bd48cc38abc84bafb7f70ce1"
+      },
+      "trainability_summary": {
+        "frozen_parameter_count": 16007680,
+        "trainable_names": [
+          "encoder.layers.7.norm1.weight",
+          "encoder.layers.7.norm1.bias",
+          "encoder.layers.7.attention.in_proj_weight",
+          "encoder.layers.7.attention.in_proj_bias",
+          "encoder.layers.7.attention.out_proj.weight",
+          "encoder.layers.7.attention.out_proj.bias",
+          "encoder.layers.7.norm2.weight",
+          "encoder.layers.7.norm2.bias",
+          "encoder.layers.7.mlp.0.weight",
+          "encoder.layers.7.mlp.0.bias",
+          "encoder.layers.7.mlp.3.weight",
+          "encoder.layers.7.mlp.3.bias"
+        ],
+        "trainable_parameter_count": 1774464
+      }
+    },
+    "hard": {
+      "config": {
+        "byte_size": 2483,
+        "path": "experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/04_train_nocons_full.yaml",
+        "sha256": "812b33961ca833d24e5dbc81f1c607b69e923a688b4b4a287d828ae1f0a014d5"
+      },
+      "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+      "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+      "optimizer_group_identity": [
+        {
+          "lr": 0.0003,
+          "name": "head",
+          "parameter_names": [
+            "head.heads.k6.prototypes",
+            "head.heads.k6.projection.weight",
+            "head.heads.k6.projection.bias",
+            "head.heads.k8.prototypes",
+            "head.heads.k8.projection.weight",
+            "head.heads.k8.projection.bias",
+            "head.heads.k10.prototypes",
+            "head.heads.k10.projection.weight",
+            "head.heads.k10.projection.bias"
+          ]
+        },
+        {
+          "lr": 1e-05,
+          "name": "encoder",
+          "parameter_names": [
+            "student.encoder.layers.7.norm1.weight",
+            "student.encoder.layers.7.norm1.bias",
+            "student.encoder.layers.7.attention.in_proj_weight",
+            "student.encoder.layers.7.attention.in_proj_bias",
+            "student.encoder.layers.7.attention.out_proj.weight",
+            "student.encoder.layers.7.attention.out_proj.bias",
+            "student.encoder.layers.7.norm2.weight",
+            "student.encoder.layers.7.norm2.bias",
+            "student.encoder.layers.7.mlp.0.weight",
+            "student.encoder.layers.7.mlp.0.bias",
+            "student.encoder.layers.7.mlp.3.weight",
+            "student.encoder.layers.7.mlp.3.bias"
+          ]
+        }
+      ],
+      "pretraining_handoff": {
+        "byte_size": 4081,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/preflight/multi_head_handoff.json",
+        "sha256": "489f99c1b21572d97b43e663f6cb165ea5cdcca656fcaa79a9faeacd91304140"
+      },
+      "trainability_summary": {
+        "frozen_parameter_count": 16007680,
+        "trainable_names": [
+          "encoder.layers.7.norm1.weight",
+          "encoder.layers.7.norm1.bias",
+          "encoder.layers.7.attention.in_proj_weight",
+          "encoder.layers.7.attention.in_proj_bias",
+          "encoder.layers.7.attention.out_proj.weight",
+          "encoder.layers.7.attention.out_proj.bias",
+          "encoder.layers.7.norm2.weight",
+          "encoder.layers.7.norm2.bias",
+          "encoder.layers.7.mlp.0.weight",
+          "encoder.layers.7.mlp.0.bias",
+          "encoder.layers.7.mlp.3.weight",
+          "encoder.layers.7.mlp.3.bias"
+        ],
+        "trainable_parameter_count": 1774464
+      }
+    },
+    "normalized_config_equal": true,
+    "status": "PASS"
+  },
+  "reference_run_manifests": {
+    "current_k6": {
+      "byte_size": 306506,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_current_k6_control_v1/original_split/reports/control_job_manifest.json",
+      "sha256": "532515efe948faccf36fc73e273974bac8d6e1faca40f1ef89d33fc414d2cf80"
+    },
+    "hard_multi_head": {
+      "byte_size": 594914,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_job_manifest.json",
+      "sha256": "a6d3344bb5d684bc0a80a67390fd3414aaa046f0a188bcfc3e83ab740b8d3f32"
+    },
+    "mae": {
+      "byte_size": 687894,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split/voxel_label_budget_run_manifest.json",
+      "sha256": "3ba59737b8db0ac872f26b024907f236974326849899a2300c8f5d6478cb7077"
+    },
+    "xy_neighbor_consensus": {
+      "byte_size": 304646,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_consensus_k6810_v1/original_split/reports/xy_neighbor_consensus_job_manifest.json",
+      "sha256": "d4ca0701082404ac9118fb9ef8bfc0cf9a20484e5fdb13ec03c465d389def772"
+    }
+  },
+  "schema_version": 1,
+  "source_hard_manifest": {
+    "byte_size": 22568,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+    "sha256": "c0b4edc17774d522bc0896db1366166628135d8369d2e063fd6183c66b01d15c"
+  },
+  "status": "PASS",
+  "target_audit": {
+    "byte_size": 13717,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_xy_neighbor_unanimous_hard_labels_v1/xy_neighbor_unanimous_target_audit.json",
+    "sha256": "69c96e708e37d99877d09c143584403163560993741aadbcbcc8786acaaa4df4",
+    "status": "XYUNANIM_TARGET_GO"
+  },
+  "workspace_root": ".",
+  "xy_neighbor_consensus_target_manifest": {
+    "byte_size": 12073,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_xy_neighbor_consensus_hard_labels_v1/multi_head_xy_neighbor_consensus_target_handoff.json",
+    "sha256": "307c9a28796f7b1d90ef4f188676abc5a3604be402fe8ef4a18b515d06671a41"
+  },
+  "xy_neighbor_unanimous_spatial_smoothness": {
+    "per_k": {
+      "10": {
+        "changed_fraction": 0.00666421207658321,
+        "changed_token_count": 1086,
+        "combined": {
+          "absolute_disagreement_reduction": 0.013078339408566675,
+          "output_disagreement_count": 87113,
+          "output_disagreement_fraction": 0.27093778380463046,
+          "relative_disagreement_reduction": 0.0460478766508245,
+          "source_disagreement_count": 91318,
+          "source_disagreement_fraction": 0.28401612321319714,
+          "valid_edge_count": 321524
+        },
+        "empty_output_state_count": 0,
+        "ordered_path_violations": {
+          "output": 0,
+          "source": 0
+        },
+        "output_state_occupancy": [
+          549,
+          3419,
+          7105,
+          12642,
+          13326,
+          32184,
+          21610,
+          45242,
+          16240,
+          10643
+        ],
+        "output_temporal_transition_count": 37022,
+        "source_state_occupancy": [
+          549,
+          3420,
+          7106,
+          12669,
+          13322,
+          32082,
+          21913,
+          44985,
+          16276,
+          10638
+        ],
+        "source_temporal_transition_count": 37267,
+        "valid_token_count": 162960,
+        "x_edges": {
+          "absolute_disagreement_reduction": 0.012986445670352675,
+          "output_disagreement_count": 42719,
+          "output_disagreement_fraction": 0.2665872045131175,
+          "relative_disagreement_reduction": 0.046450892857142725,
+          "source_disagreement_count": 44800,
+          "source_disagreement_fraction": 0.2795736501834702,
+          "valid_edge_count": 160244
+        },
+        "y_edges": {
+          "absolute_disagreement_reduction": 0.013169642857142838,
+          "output_disagreement_count": 44394,
+          "output_disagreement_fraction": 0.2752604166666667,
+          "relative_disagreement_reduction": 0.04565974461498768,
+          "source_disagreement_count": 46518,
+          "source_disagreement_fraction": 0.2884300595238095,
+          "valid_edge_count": 161280
+        }
+      },
+      "6": {
+        "changed_fraction": 0.0066273932253313695,
+        "changed_token_count": 1080,
+        "combined": {
+          "absolute_disagreement_reduction": 0.013047237531257388,
+          "output_disagreement_count": 70983,
+          "output_disagreement_fraction": 0.22077045570470633,
+          "relative_disagreement_reduction": 0.055800899199233825,
+          "source_disagreement_count": 75178,
+          "source_disagreement_fraction": 0.23381769323596371,
+          "valid_edge_count": 321524
+        },
+        "empty_output_state_count": 0,
+        "ordered_path_violations": {
+          "output": 0,
+          "source": 0
+        },
+        "output_state_occupancy": [
+          9581,
+          11067,
+          12038,
+          61537,
+          32383,
+          36354
+        ],
+        "output_temporal_transition_count": 26708,
+        "source_state_occupancy": [
+          9583,
+          11076,
+          12182,
+          61178,
+          32739,
+          36202
+        ],
+        "source_temporal_transition_count": 26857,
+        "valid_token_count": 162960,
+        "x_edges": {
+          "absolute_disagreement_reduction": 0.013048850502982962,
+          "output_disagreement_count": 35172,
+          "output_disagreement_fraction": 0.2194902773270762,
+          "relative_disagreement_reduction": 0.05611464455357866,
+          "source_disagreement_count": 37263,
+          "source_disagreement_fraction": 0.23253912783005917,
+          "valid_edge_count": 160244
+        },
+        "y_edges": {
+          "absolute_disagreement_reduction": 0.01304563492063493,
+          "output_disagreement_count": 35811,
+          "output_disagreement_fraction": 0.2220424107142857,
+          "relative_disagreement_reduction": 0.055492549123038415,
+          "source_disagreement_count": 37915,
+          "source_disagreement_fraction": 0.23508804563492064,
+          "valid_edge_count": 161280
+        }
+      },
+      "8": {
+        "changed_fraction": 0.006326705940108002,
+        "changed_token_count": 1031,
+        "combined": {
+          "absolute_disagreement_reduction": 0.012453191674649478,
+          "output_disagreement_count": 93412,
+          "output_disagreement_fraction": 0.29052885632176756,
+          "relative_disagreement_reduction": 0.04110207768744353,
+          "source_disagreement_count": 97416,
+          "source_disagreement_fraction": 0.30298204799641704,
+          "valid_edge_count": 321524
+        },
+        "empty_output_state_count": 0,
+        "ordered_path_violations": {
+          "output": 0,
+          "source": 0
+        },
+        "output_state_occupancy": [
+          11516,
+          15453,
+          47359,
+          21031,
+          18988,
+          23384,
+          15850,
+          9379
+        ],
+        "output_temporal_transition_count": 36171,
+        "source_state_occupancy": [
+          11513,
+          15587,
+          46989,
+          21251,
+          19061,
+          23308,
+          15865,
+          9386
+        ],
+        "source_temporal_transition_count": 36375,
+        "valid_token_count": 162960,
+        "x_edges": {
+          "absolute_disagreement_reduction": 0.01241856169341754,
+          "output_disagreement_count": 45820,
+          "output_disagreement_fraction": 0.28593894311175455,
+          "relative_disagreement_reduction": 0.04162309140347209,
+          "source_disagreement_count": 47810,
+          "source_disagreement_fraction": 0.2983575048051721,
+          "valid_edge_count": 160244
+        },
+        "y_edges": {
+          "absolute_disagreement_reduction": 0.012487599206349176,
+          "output_disagreement_count": 47592,
+          "output_disagreement_fraction": 0.2950892857142857,
+          "relative_disagreement_reduction": 0.0405999274281336,
+          "source_disagreement_count": 49606,
+          "source_disagreement_fraction": 0.3075768849206349,
+          "valid_edge_count": 161280
+        }
+      }
+    }
+  },
+  "xy_neighbor_unanimous_target_manifest": {
+    "byte_size": 12245,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_xy_neighbor_unanimous_hard_labels_v1/multi_head_xy_neighbor_unanimous_target_handoff.json",
+    "sha256": "f09cc73c67e686785d6b04dfb4b92aea4a339a234d71226cd317e1380323d1a4"
+  }
+}

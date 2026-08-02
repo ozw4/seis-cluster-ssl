@@ -1,0 +1,160 @@
+{
+  "artifact_type": "f3_xy_neighbor_unanimous_hard_baseline_parity",
+  "evidence": {
+    "allowed_config_diff": {
+      "identity": [
+        "model_tag",
+        "scientific_identity.representation_specific_fields"
+      ],
+      "paths": [
+        "output_root"
+      ],
+      "pseudo_targets": [
+        "manifest",
+        "target_representation"
+      ]
+    },
+    "candidate": {
+      "config": {
+        "byte_size": 2752,
+        "path": "experiments/f3/facies_benchmark_v1/102_strat_hmm_multi_head_k6810_xy_neighbor_unanimous_v1/04_train_xy_neighbor_unanimous_full.yaml",
+        "sha256": "c2a1fde2b593e031fe8187a5a8debe61ed2effac00ec188f8087faa64327a4e3"
+      },
+      "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+      "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+      "optimizer_group_identity": [
+        {
+          "lr": 0.0003,
+          "name": "head",
+          "parameter_names": [
+            "head.heads.k6.prototypes",
+            "head.heads.k6.projection.weight",
+            "head.heads.k6.projection.bias",
+            "head.heads.k8.prototypes",
+            "head.heads.k8.projection.weight",
+            "head.heads.k8.projection.bias",
+            "head.heads.k10.prototypes",
+            "head.heads.k10.projection.weight",
+            "head.heads.k10.projection.bias"
+          ]
+        },
+        {
+          "lr": 1e-05,
+          "name": "encoder",
+          "parameter_names": [
+            "student.encoder.layers.7.norm1.weight",
+            "student.encoder.layers.7.norm1.bias",
+            "student.encoder.layers.7.attention.in_proj_weight",
+            "student.encoder.layers.7.attention.in_proj_bias",
+            "student.encoder.layers.7.attention.out_proj.weight",
+            "student.encoder.layers.7.attention.out_proj.bias",
+            "student.encoder.layers.7.norm2.weight",
+            "student.encoder.layers.7.norm2.bias",
+            "student.encoder.layers.7.mlp.0.weight",
+            "student.encoder.layers.7.mlp.0.bias",
+            "student.encoder.layers.7.mlp.3.weight",
+            "student.encoder.layers.7.mlp.3.bias"
+          ]
+        }
+      ],
+      "pretraining_handoff": {
+        "byte_size": 4910,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1/preflight/xy_neighbor_unanimous_handoff.json",
+        "sha256": "892bc9dd3f19250730f0f3c6474923caa81211a0bd48cc38abc84bafb7f70ce1"
+      },
+      "trainability_summary": {
+        "frozen_parameter_count": 16007680,
+        "trainable_names": [
+          "encoder.layers.7.norm1.weight",
+          "encoder.layers.7.norm1.bias",
+          "encoder.layers.7.attention.in_proj_weight",
+          "encoder.layers.7.attention.in_proj_bias",
+          "encoder.layers.7.attention.out_proj.weight",
+          "encoder.layers.7.attention.out_proj.bias",
+          "encoder.layers.7.norm2.weight",
+          "encoder.layers.7.norm2.bias",
+          "encoder.layers.7.mlp.0.weight",
+          "encoder.layers.7.mlp.0.bias",
+          "encoder.layers.7.mlp.3.weight",
+          "encoder.layers.7.mlp.3.bias"
+        ],
+        "trainable_parameter_count": 1774464
+      }
+    },
+    "hard": {
+      "config": {
+        "byte_size": 2483,
+        "path": "experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/04_train_nocons_full.yaml",
+        "sha256": "812b33961ca833d24e5dbc81f1c607b69e923a688b4b4a287d828ae1f0a014d5"
+      },
+      "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+      "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+      "optimizer_group_identity": [
+        {
+          "lr": 0.0003,
+          "name": "head",
+          "parameter_names": [
+            "head.heads.k6.prototypes",
+            "head.heads.k6.projection.weight",
+            "head.heads.k6.projection.bias",
+            "head.heads.k8.prototypes",
+            "head.heads.k8.projection.weight",
+            "head.heads.k8.projection.bias",
+            "head.heads.k10.prototypes",
+            "head.heads.k10.projection.weight",
+            "head.heads.k10.projection.bias"
+          ]
+        },
+        {
+          "lr": 1e-05,
+          "name": "encoder",
+          "parameter_names": [
+            "student.encoder.layers.7.norm1.weight",
+            "student.encoder.layers.7.norm1.bias",
+            "student.encoder.layers.7.attention.in_proj_weight",
+            "student.encoder.layers.7.attention.in_proj_bias",
+            "student.encoder.layers.7.attention.out_proj.weight",
+            "student.encoder.layers.7.attention.out_proj.bias",
+            "student.encoder.layers.7.norm2.weight",
+            "student.encoder.layers.7.norm2.bias",
+            "student.encoder.layers.7.mlp.0.weight",
+            "student.encoder.layers.7.mlp.0.bias",
+            "student.encoder.layers.7.mlp.3.weight",
+            "student.encoder.layers.7.mlp.3.bias"
+          ]
+        }
+      ],
+      "pretraining_handoff": {
+        "byte_size": 4081,
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/preflight/multi_head_handoff.json",
+        "sha256": "489f99c1b21572d97b43e663f6cb165ea5cdcca656fcaa79a9faeacd91304140"
+      },
+      "trainability_summary": {
+        "frozen_parameter_count": 16007680,
+        "trainable_names": [
+          "encoder.layers.7.norm1.weight",
+          "encoder.layers.7.norm1.bias",
+          "encoder.layers.7.attention.in_proj_weight",
+          "encoder.layers.7.attention.in_proj_bias",
+          "encoder.layers.7.attention.out_proj.weight",
+          "encoder.layers.7.attention.out_proj.bias",
+          "encoder.layers.7.norm2.weight",
+          "encoder.layers.7.norm2.bias",
+          "encoder.layers.7.mlp.0.weight",
+          "encoder.layers.7.mlp.0.bias",
+          "encoder.layers.7.mlp.3.weight",
+          "encoder.layers.7.mlp.3.bias"
+        ],
+        "trainable_parameter_count": 1774464
+      }
+    },
+    "normalized_config_equal": true,
+    "status": "PASS"
+  },
+  "schema_version": 1,
+  "screening_audit": {
+    "byte_size": 17357,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_xy_neighbor_unanimous_k6810_v1/original_split/preflight/xy_neighbor_unanimous_screening_audit.json",
+    "sha256": "b3b9f7de02756a542b9593bc5dcd381e06246d25d3cba065c78c08fe7e3a9872"
+  }
+}
