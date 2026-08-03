@@ -147,6 +147,22 @@ def test_center_trace_resume_state_is_not_generic_latest_state(
 	assert plan.state == 'RESUME_SAME_IDENTITY'
 
 
+def test_center_trace_runner_revalidates_cached_screening_audit(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = SimpleNamespace(screening_audit_payload={'cached': True})
+	seen: list[object] = []
+	monkeypatch.setattr(
+		runner.center_config,
+		'validate_f3_center_trace_masked_screening_audit',
+		seen.append,
+	)
+
+	runner._validate_screening_audit(config)
+
+	assert seen == [config]
+
+
 def _audit_config(tmp_path: Path) -> audit.F3CenterTraceMaskedScreeningAuditConfig:
 	artifact_root = tmp_path / 'artifacts'
 	workspace_root = tmp_path / 'workspace'

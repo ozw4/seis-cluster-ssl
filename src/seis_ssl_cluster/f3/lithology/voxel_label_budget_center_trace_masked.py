@@ -348,8 +348,6 @@ def _classify_center_job(
 
 
 def _validate_screening_audit(config: object) -> None:
-	if getattr(config, 'screening_audit_payload', None) is not None:
-		return
 	center_config.validate_f3_center_trace_masked_screening_audit(config)
 
 
