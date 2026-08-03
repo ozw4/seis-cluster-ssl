@@ -17,6 +17,7 @@ from seis_ssl_cluster.config import (
 	resolve_strat_hmm_pretext_config,
 )
 from seis_ssl_cluster.training.strat_hmm import (
+	inspect_strat_hmm_pretext_plan,
 	run_strat_hmm_pretext_training,
 )
 from seis_ssl_cluster.utils.cli import print_config_summary
@@ -76,6 +77,10 @@ def main() -> None:
 		raise FileNotFoundError(f'resume checkpoint does not exist: {args.resume}')
 	if args.dry_run:
 		print_config_summary(config)
+		if isinstance(config.get('spatial_context'), dict):
+			plan = inspect_strat_hmm_pretext_plan(config)
+			for key, value in plan.items():
+				print(f'{key}: {value}')
 		if args.resume is not None:
 			print(f'resume: {args.resume}')
 		print('execution: dry-run; training skipped')

@@ -156,6 +156,20 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 		},
 	),
 	'zero_mask': frozenset(DEFAULT_ZERO_MASK_CONTRACT),
+	'spatial_context': frozenset(
+		{
+			'objective',
+			'mask_semantics',
+			'column_fraction',
+			'selection_policy',
+			'replacement',
+			'replacement_initialization',
+			'rng_policy',
+			'masked_prototype_weight',
+			'visible_prototype_weight',
+			'distillation_scope',
+		}
+	),
 }
 
 _STRAT_HMM_MULTI_HEAD_SPEC = MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1
@@ -176,6 +190,76 @@ _STRAT_HMM_XY_NEIGHBOR_CONSENSUS_SEMANTICS = (
 )
 _STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_SEMANTICS = (
 	'xy_neighbor_unanimous_outlier_correction_v1'
+)
+
+CENTER_TRACE_MODEL_TAG = (
+	'strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1'
+)
+CENTER_TRACE_EXPERIMENT_ROLE = 'multi_head_center_trace_masked_hard_pretext'
+CENTER_TRACE_VARIANT = 'ctmask010_nocons'
+CENTER_TRACE_OBJECTIVE = 'center_trace_masked_hmm_path_reconstruction_v1'
+CENTER_TRACE_MASK_SEMANTICS = 'xy_token_column_full_z_v1'
+CENTER_TRACE_SELECTION_POLICY = (
+	'supervised_valid_xy_columns_round_half_up_leave_one_v1'
+)
+CENTER_TRACE_REPLACEMENT = 'learned_encoder_mask_token_v1'
+CENTER_TRACE_REPLACEMENT_INITIALIZATION = (
+	'normal_std_0p02_train_seed_salted_v1'
+)
+CENTER_TRACE_RNG_POLICY = 'stateless_step_seed_v1'
+CENTER_TRACE_DISTILLATION_SCOPE = 'visible_only_v1'
+CENTER_TRACE_SUPERVISED_LOSS = 'structured_hmm_center_trace_masked_hard_v1'
+CENTER_TRACE_CONSISTENCY_POLICY = 'disabled_for_center_trace_masked_v1'
+CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT = {
+	'objective': CENTER_TRACE_OBJECTIVE,
+	'mask_semantics': CENTER_TRACE_MASK_SEMANTICS,
+	'column_fraction': 0.10,
+	'selection_policy': CENTER_TRACE_SELECTION_POLICY,
+	'replacement': CENTER_TRACE_REPLACEMENT,
+	'replacement_initialization': CENTER_TRACE_REPLACEMENT_INITIALIZATION,
+	'rng_policy': CENTER_TRACE_RNG_POLICY,
+	'masked_prototype_weight': 0.50,
+	'visible_prototype_weight': 0.50,
+	'distillation_scope': CENTER_TRACE_DISTILLATION_SCOPE,
+}
+
+_CENTER_TRACE_SCIENTIFIC_IDENTITY_FIELDS = frozenset(
+	{
+		'experiment_role',
+		'variant',
+		'head_spec',
+		'head_ks',
+		'head_projection_dim',
+		'head_temperature',
+		'head_normalize',
+		'target_representation',
+		'target_manifest_sha256',
+		'target_head_hashes',
+		'objective_semantics',
+		'mask_semantics',
+		'column_fraction',
+		'selection_policy',
+		'replacement',
+		'replacement_initialization',
+		'rng_policy',
+		'masked_prototype_weight',
+		'visible_prototype_weight',
+		'distillation_scope',
+		'supervised_loss',
+		'consistency_policy',
+		'prototype_weight',
+		'usage_weight',
+		'consistency_weight',
+		'consistency_beta',
+		'distillation_weight',
+		'teacher_checkpoint',
+		'student_init_checkpoint',
+		'student_unfreeze_top_blocks',
+		'model',
+		'data',
+		'zero_mask',
+		'train',
+	}
 )
 
 # These fields are deliberately centralized so checkpoint identity construction can
@@ -470,7 +554,9 @@ def resolve_mae_training_config(config: _T) -> Config:
 	return resolved
 
 
-def resolve_strat_hmm_pretext_config(config: _T) -> Config:
+def resolve_strat_hmm_pretext_config(  # noqa: PLR0915
+	config: _T,
+) -> Config:
 	"""Validate and resolve raw config for strat HMM pretext training."""
 	resolved, paths = _resolve_base(
 		config,
@@ -508,6 +594,14 @@ def resolve_strat_hmm_pretext_config(config: _T) -> Config:
 	_validate_model(model)
 	_validate_divisible_crop_patch(local_crop_size, patch_size)
 	_validate_strat_hmm_pretext_pseudo_targets(pseudo_targets, multi_head=multi_head)
+	if _is_center_trace_masked_config(resolved):
+		if not multi_head:
+			raise ValueError(
+				'spatial_context is only supported for multi-head strat HMM pretext'
+			)
+		_validate_center_trace_spatial_context(
+			_required_mapping(resolved, 'spatial_context')
+		)
 	_validate_strat_hmm_pretext_teacher(teacher)
 	_validate_strat_hmm_pretext_student(
 		student,
@@ -523,6 +617,13 @@ def resolve_strat_hmm_pretext_config(config: _T) -> Config:
 		target_representation = _strat_hmm_multi_head_target_representation(
 			pseudo_targets
 		)
+		if _is_center_trace_masked_config(resolved) and target_representation != (
+			_STRAT_HMM_HARD_TARGET_REPRESENTATION
+		):
+			raise ValueError(
+				'spatial_context requires pseudo_targets.target_representation to be '
+				f'{_STRAT_HMM_HARD_TARGET_REPRESENTATION!r}'
+			)
 		if (
 			target_representation
 			in {
@@ -551,6 +652,8 @@ def resolve_strat_hmm_pretext_config(config: _T) -> Config:
 		_validate_strat_hmm_pretext_cross_section_values(pseudo_targets, head)
 		_validate_strat_hmm_pretext_identity(resolved, multi_head=False)
 	_validate_strat_hmm_pretext_train(train)
+	if _is_center_trace_masked_config(resolved) and int(train['seed']) < 0:
+		raise ValueError('train.seed must be nonnegative for center-trace masking')
 	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
 	_validate_artifact_output_path(
 		output_root,
@@ -597,15 +700,44 @@ def _is_strat_hmm_multi_head_config(config: Mapping[str, object]) -> bool:
 	return isinstance(head, Mapping) and 'spec' in head
 
 
+def _is_center_trace_masked_config(config: Mapping[str, object]) -> bool:
+	"""Return whether the explicit center-trace route is configured."""
+	return isinstance(config.get('spatial_context'), Mapping)
+
+
+def _validate_center_trace_spatial_context(
+	spatial_context: Mapping[str, object],
+) -> None:
+	"""Validate the single closed center-trace masking contract."""
+	_validate_allowed_keys(
+		spatial_context,
+		_STRAT_HMM_PRETEXT_SECTION_KEYS['spatial_context'],
+		prefix='spatial_context',
+	)
+	missing = sorted(
+		set(_STRAT_HMM_PRETEXT_SECTION_KEYS['spatial_context']) - set(spatial_context)
+	)
+	if missing:
+		raise ValueError(f'spatial_context is missing required key(s): {missing!r}')
+	for key, expected in CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT.items():
+		actual = spatial_context.get(key)
+		if actual != expected:
+			raise ValueError(
+				f'spatial_context.{key} must be {expected!r}; got {actual!r}'
+			)
+
+
 def _validate_strat_hmm_pretext_sections(config: Mapping[str, object]) -> None:
 	for section, allowed in _STRAT_HMM_PRETEXT_SECTION_KEYS.items():
 		value = config.get(section)
 		if not isinstance(value, Mapping):
+			if section == 'spatial_context' and section in config:
+				raise TypeError('spatial_context must be a mapping')
 			continue
 		_validate_allowed_keys(value, allowed, prefix=section)
 
 
-def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912, PLR0915
+def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0911, PLR0912, PLR0915
 	config: Mapping[str, object],
 	*,
 	multi_head: bool,
@@ -644,6 +776,57 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0912, PLR0915
 		raise AssertionError('multi-head identity validation requires a manifest')
 	if not isinstance(scientific, dict):
 		raise TypeError('identity.scientific_identity must be a mutable mapping')
+	if _is_center_trace_masked_config(config):
+		for key in (
+			'experiment_role',
+			'variant',
+			'head_spec',
+			'head_ks',
+			'target_representation',
+			'target_manifest_sha256',
+			'target_head_hashes',
+			'objective_semantics',
+			'mask_semantics',
+			'column_fraction',
+			'selection_policy',
+			'replacement',
+			'replacement_initialization',
+			'rng_policy',
+			'masked_prototype_weight',
+			'visible_prototype_weight',
+			'distillation_scope',
+			'supervised_loss',
+			'consistency_policy',
+		):
+			_validate_required_key(
+				scientific, key, prefix='identity.scientific_identity'
+			)
+		_expected_or_record_multi_head_scientific_identity(
+			scientific,
+			config=config,
+			manifest=manifest,
+			target_representation=target_representation,
+		)
+		_validate_allowed_keys(
+			scientific,
+			_CENTER_TRACE_SCIENTIFIC_IDENTITY_FIELDS,
+			prefix='identity.scientific_identity',
+		)
+		_validate_center_trace_scientific_identity(
+			scientific,
+			model_tag=model_tag,
+			manifest_sha256=manifest_sha256,
+			manifest=manifest,
+			loss=_required_mapping(config, 'loss'),
+		)
+		runtime = value.get('runtime_identity')
+		if runtime is not None:
+			_validate_allowed_keys(
+				runtime,
+				MULTI_HEAD_RUNTIME_IDENTITY_FIELDS,
+				prefix='identity.runtime_identity',
+			)
+		return
 	if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION:
 		for key in (
 			'experiment_role',
@@ -910,6 +1093,36 @@ def _expected_or_record_multi_head_scientific_identity(
 		'zero_mask': zero_mask,
 		'train': {key: train[key] for key in MULTI_HEAD_SCIENTIFIC_TRAIN_FIELDS},
 	}
+	if _is_center_trace_masked_config(config):
+		spatial_context = _required_mapping(config, 'spatial_context')
+		expected.update(
+			{
+				'head_spec': head['spec'],
+				'head_ks': list(head['ks']),
+				'target_representation': _STRAT_HMM_HARD_TARGET_REPRESENTATION,
+				'target_manifest_sha256': _file_sha256(
+					str(_required_mapping(config, 'pseudo_targets')['manifest'])
+				),
+				'objective_semantics': spatial_context['objective'],
+				'mask_semantics': spatial_context['mask_semantics'],
+				'column_fraction': spatial_context['column_fraction'],
+				'selection_policy': spatial_context['selection_policy'],
+				'replacement': spatial_context['replacement'],
+				'replacement_initialization': spatial_context[
+					'replacement_initialization'
+				],
+				'rng_policy': spatial_context['rng_policy'],
+				'masked_prototype_weight': spatial_context[
+					'masked_prototype_weight'
+				],
+				'visible_prototype_weight': spatial_context[
+					'visible_prototype_weight'
+				],
+				'distillation_scope': spatial_context['distillation_scope'],
+				'supervised_loss': CENTER_TRACE_SUPERVISED_LOSS,
+			}
+		)
+		expected['target_head_hashes'] = _multi_head_target_hashes(manifest)
 	if target_representation == _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION:
 		expected.update(
 			{
@@ -1430,6 +1643,70 @@ def _validate_m5_u_scientific_identity(
 	if loss['distillation_weight'] != 0.2:
 		raise ValueError(
 			'loss.distillation_weight must be 0.2 for soft posterior training'
+		)
+
+
+def _validate_center_trace_scientific_identity(
+	scientific: Mapping[str, object],
+	*,
+	model_tag: object,
+	manifest_sha256: str,
+	manifest: Mapping[str, object],
+	loss: Mapping[str, object],
+) -> None:
+	"""Validate the fixed schema-7 center-trace scientific identity."""
+	expected = {
+		'experiment_role': CENTER_TRACE_EXPERIMENT_ROLE,
+		'variant': CENTER_TRACE_VARIANT,
+		'head_spec': _STRAT_HMM_MULTI_HEAD_SPEC,
+		'head_ks': [6, 8, 10],
+		'target_representation': _STRAT_HMM_HARD_TARGET_REPRESENTATION,
+		'target_manifest_sha256': manifest_sha256,
+		'target_head_hashes': _multi_head_target_hashes(manifest),
+		'objective_semantics': CENTER_TRACE_OBJECTIVE,
+		'mask_semantics': CENTER_TRACE_MASK_SEMANTICS,
+		'column_fraction': 0.10,
+		'selection_policy': CENTER_TRACE_SELECTION_POLICY,
+		'replacement': CENTER_TRACE_REPLACEMENT,
+		'replacement_initialization': CENTER_TRACE_REPLACEMENT_INITIALIZATION,
+		'rng_policy': CENTER_TRACE_RNG_POLICY,
+		'masked_prototype_weight': 0.50,
+		'visible_prototype_weight': 0.50,
+		'distillation_scope': CENTER_TRACE_DISTILLATION_SCOPE,
+		'supervised_loss': CENTER_TRACE_SUPERVISED_LOSS,
+		'consistency_policy': CENTER_TRACE_CONSISTENCY_POLICY,
+		'consistency_weight': 0.0,
+	}
+	if model_tag != CENTER_TRACE_MODEL_TAG:
+		raise ValueError(
+			'identity.model_tag does not match the fixed center-trace masked contract'
+		)
+	for key, value in expected.items():
+		if scientific.get(key) != value:
+			raise ValueError(
+				f'identity.scientific_identity.{key} does not match the fixed '
+				'center-trace masked contract'
+			)
+	if scientific.get('head_ks') != [6, 8, 10]:
+		raise ValueError('center-trace scientific identity requires head K=[6, 8, 10]')
+	for key, value in (
+		('prototype_weight', 1.0),
+		('usage_weight', 0.005),
+		('consistency_weight', 0.0),
+		('distillation_weight', 0.2),
+	):
+		if loss.get(key) != value:
+			raise ValueError(
+				f'loss.{key} must be {value} for center-trace masked training'
+			)
+	if loss.get('consistency_beta') != 0.1:
+		raise ValueError(
+			'loss.consistency_beta must be 0.1 for center-trace masked training'
+		)
+	if scientific.get('student_unfreeze_top_blocks') != 1:
+		raise ValueError(
+			'identity.scientific_identity.student_unfreeze_top_blocks must be 1 '
+			'for center-trace masked training'
 		)
 
 
@@ -2070,4 +2347,21 @@ def _validate_mae_debug_columns(mae_debug: Mapping[str, object]) -> None:
 		raise ValueError(msg)
 
 
-__all__ = ['resolve_mae_training_config', 'resolve_strat_hmm_pretext_config']
+__all__ = [
+	'CENTER_TRACE_CONSISTENCY_POLICY',
+	'CENTER_TRACE_DISTILLATION_SCOPE',
+	'CENTER_TRACE_EXPERIMENT_ROLE',
+	'CENTER_TRACE_MASK_SEMANTICS',
+	'CENTER_TRACE_MODEL_TAG',
+	'CENTER_TRACE_OBJECTIVE',
+	'CENTER_TRACE_REPLACEMENT',
+	'CENTER_TRACE_REPLACEMENT_INITIALIZATION',
+	'CENTER_TRACE_RNG_POLICY',
+	'CENTER_TRACE_SELECTION_POLICY',
+	'CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT',
+	'CENTER_TRACE_SUPERVISED_LOSS',
+	'CENTER_TRACE_VARIANT',
+	'_is_center_trace_masked_config',
+	'resolve_mae_training_config',
+	'resolve_strat_hmm_pretext_config',
+]

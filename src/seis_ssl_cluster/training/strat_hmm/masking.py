@@ -14,6 +14,7 @@ _SPLITMIX_INCREMENT = 0x9E3779B97F4A7C15
 _SPLITMIX_MULTIPLIER_1 = 0xBF58476D1CE4E5B9
 _SPLITMIX_MULTIPLIER_2 = 0x94D049BB133111EB
 _COLUMN_SALT = 0xD1B54A32D192ED03
+_REPLACEMENT_TOKEN_SALT = 0xA0761D6478BD642F
 
 CommonHardTargetValidMaskInput: TypeAlias = (
 	torch.Tensor | Mapping[int, torch.Tensor] | Sequence[torch.Tensor]
@@ -195,6 +196,12 @@ def validate_common_hard_target_valid_masks(
 	return first
 
 
+def center_trace_replacement_token_seed(training_seed: int) -> int:
+	"""Return the fixed local-generator seed for a training seed."""
+	_validate_identity_int(training_seed, 'training_seed')
+	return _splitmix64(training_seed ^ _REPLACEMENT_TOKEN_SALT) & ((1 << 63) - 1)
+
+
 def _resolve_common_hard_target_valid_mask(
 	value: CommonHardTargetValidMaskInput,
 ) -> torch.Tensor:
@@ -360,6 +367,7 @@ __all__ = [
 	'COMMON_HARD_TARGET_HEAD_KS',
 	'CommonHardTargetValidMaskInput',
 	'XYTokenColumnMaskPlan',
+	'center_trace_replacement_token_seed',
 	'plan_xy_token_column_mask',
 	'validate_common_hard_target_valid_masks',
 ]

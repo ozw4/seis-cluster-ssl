@@ -35,6 +35,7 @@ from seis_ssl_cluster.training.strat_hmm.components import (
 	build_strat_hmm_components,
 )
 from seis_ssl_cluster.training.strat_hmm.epoch import (
+	train_strat_hmm_center_trace_masked_one_epoch,
 	train_strat_hmm_head_only_one_epoch,
 	train_strat_hmm_multi_head_one_epoch,
 )
@@ -64,6 +65,7 @@ from seis_ssl_cluster.training.strat_hmm.runtime import (
 	_zero_mask_from_config,
 )
 from seis_ssl_cluster.training.strat_hmm.state import (
+	StratHmmCenterTraceMaskedComponents,
 	StratHmmMultiHeadComponents,
 	StratHmmResumeState,
 	StratHmmTrainingState,
@@ -219,9 +221,10 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			device=device,
 		)
 	components = build_strat_hmm_components(config, device=device)
+	is_center_trace = isinstance(components, StratHmmCenterTraceMaskedComponents)
 	identity_head = (
 		components.heads
-		if isinstance(components, StratHmmMultiHeadComponents)
+		if is_multi_head
 		else components.head
 	)
 	if control_identity is not None:
@@ -229,6 +232,9 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			control_identity,
 			student=components.student,
 			head=identity_head,
+			replacement_token=(
+				components.replacement_token if is_center_trace else None
+			),
 		)
 	_write_run_metadata(
 		output_root=output_root,
@@ -252,8 +258,11 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			student=components.student,
 			head=(
 				components.heads
-				if isinstance(components, StratHmmMultiHeadComponents)
+				if is_multi_head
 				else components.head
+			),
+			spatial_context=(
+				components.replacement_token if is_center_trace else None
 			),
 			optimizer=components.optimizer,
 			scaler=scaler,
@@ -308,7 +317,76 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			resume_state.skip_batches if epoch == resume_state.start_epoch else 0
 		)
 
-		if isinstance(components, StratHmmMultiHeadComponents):
+		if is_center_trace:
+
+			def save_center_trace_step_checkpoint(
+				step_state: StratHmmTrainingState,
+				epoch_start_rng_state: torch.Tensor = epoch_start_dataloader_rng_state,
+			) -> None:
+				nonlocal best_score, checkpoint_path, checkpoint_selection
+				if (
+					checkpoint_every_steps is None
+					or step_state.global_step % checkpoint_every_steps != 0
+				):
+					return
+				result = save_strat_hmm_rolling_checkpoint(
+					output_root,
+					student=components.student,
+					head=components.heads,
+					spatial_context=components.replacement_token,
+					optimizer=components.optimizer,
+					epoch=step_state.epoch,
+					mae_config=components.mae_checkpoint_config,
+					stratigraphy_config=config,
+					metrics={
+						**step_state.metrics,
+						**_trainability_metrics(components.trainability_summary),
+					},
+					global_step=step_state.global_step,
+					checkpoint_kind='step',
+					batch_index=step_state.last_batch_index,
+					amp_enabled=amp_enabled,
+					scaler=scaler,
+					rng_state=_rng_state_for_step_checkpoint(
+						dataloader=dataloader,
+						epoch_start_dataloader_rng_state=epoch_start_rng_state,
+						batch_index=step_state.last_batch_index,
+					),
+					trainability_summary=_trainability_summary_payload(
+						components.trainability_summary
+					),
+					control_identity=control_identity,
+					best_score=best_score,
+					checkpoint_selection=checkpoint_selection,
+				)
+				best_score = result.best_score
+				checkpoint_selection = result.checkpoint_selection
+				checkpoint_path = result.latest_path
+
+			state = train_strat_hmm_center_trace_masked_one_epoch(
+				student=components.student,
+				teacher=components.teacher,
+				heads=components.heads,
+				replacement_token=components.replacement_token,
+				dataloader=dataloader,
+				optimizer=components.optimizer,
+				device=device,
+				epoch=epoch,
+				loss_config=_mapping(config, 'loss'),
+				pseudo_target_config=pseudo_config,
+				training_seed=seed,
+				column_fraction=float(
+					_mapping(config, 'spatial_context')['column_fraction']
+				),
+				amp_enabled=amp_enabled,
+				scaler=scaler,
+				global_step=state.global_step,
+				max_steps=remaining_steps,
+				grad_clip_norm=grad_clip_norm,
+				skip_batches=skip_batches,
+				step_callback=save_center_trace_step_checkpoint,
+			)
+		elif isinstance(components, StratHmmMultiHeadComponents):
 
 			def save_multi_head_step_checkpoint(
 				step_state: StratHmmTrainingState,
@@ -442,8 +520,11 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			student=components.student,
 			head=(
 				components.heads
-				if isinstance(components, StratHmmMultiHeadComponents)
+				if is_multi_head
 				else components.head
+			),
+			spatial_context=(
+				components.replacement_token if is_center_trace else None
 			),
 			optimizer=components.optimizer,
 			epoch=epoch,
@@ -494,6 +575,70 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 	return checkpoint_path
 
 
+def inspect_strat_hmm_pretext_plan(
+	config: Mapping[str, object],
+) -> dict[str, object]:
+	"""Validate the closed center-trace action plan without mutating state."""
+	if not isinstance(config.get('spatial_context'), Mapping):
+		raise TypeError('center-trace dry-run requires spatial_context')
+	train_config = _mapping(config, 'train')
+	data_config = _mapping(config, 'data')
+	model_config = _mapping(config, 'model')
+	pseudo_config = _mapping(config, 'pseudo_targets')
+	device = _resolve_device(train_config)
+	seed = _int_config(train_config, 'seed', 42)
+	manifests = read_manifest_json(_path_config(_mapping(config, 'manifests'), 'train'))
+	dataset = NopimsStratMultiHeadTargetDataset(
+		manifests,
+		_path_config(pseudo_config, 'manifest'),
+		local_crop_size_xyz=_xyz_config(data_config, 'local_crop_size'),
+		patch_size_xyz=_xyz_config(model_config, 'patch_size'),
+		seed=seed,
+		samples_per_epoch=_int_config(train_config, 'samples_per_epoch', 1),
+		zero_mask=_zero_mask_from_config(config),
+		min_valid_fraction=_float_config(data_config, 'min_valid_fraction', 0.0),
+		max_resample_attempts=_int_config(data_config, 'max_resample_attempts', 16),
+		normalized_clip_abs=_optional_float_config(
+			data_config, 'normalized_clip_abs'
+		),
+		amplitude_agc=data_config.get('amplitude_agc'),
+		finite_check_mode=cast(
+			'FiniteCheckMode', data_config.get('finite_check_mode', 'strict')
+		),
+		min_confidence=_float_config(pseudo_config, 'min_confidence', 0.0),
+	)
+	dataloader = build_strat_multi_head_target_dataloader(
+		dataset,
+		batch_size=_int_config(train_config, 'batch_size', 1),
+		num_workers=_int_config(train_config, 'num_workers', 0),
+		shuffle=_bool_config(train_config, 'shuffle', default=True),
+		seed=seed,
+		device=device,
+	)
+	# Component construction checks the route and optimizer partition.  Isolate
+	# its random initialization so inspection has no observable RNG effect.
+	with torch.random.fork_rng(
+		devices=[device] if device.type == 'cuda' and torch.cuda.is_available() else []
+	):
+		components = build_strat_hmm_components(config, device=device)
+	if not isinstance(components, StratHmmCenterTraceMaskedComponents):
+		raise TypeError('center-trace dry-run did not dispatch center components')
+	control_identity = _strat_hmm_control_identity(config)
+	return {
+		'route': 'center_trace_masked_hard_multi_head',
+		'target_representation': 'hard_viterbi_labels_v1',
+		'dataset': type(dataset).__name__,
+		'dataloader': type(dataloader).__name__,
+		'components': type(components).__name__,
+		'epoch': 'train_strat_hmm_center_trace_masked_one_epoch',
+		'checkpoint_schema': 7,
+		'model_tag': _mapping(config, 'identity').get('model_tag'),
+		'control_identity_validated': control_identity is not None,
+		'samples_per_epoch': len(dataset),
+		'outputs_written': False,
+	}
+
+
 def _append_multi_head_epoch_metrics(
 	*,
 	output_root: Path,
@@ -540,6 +685,7 @@ def _with_initial_parameter_identities(
 	*,
 	student: torch.nn.Module,
 	head: torch.nn.Module,
+	replacement_token: torch.nn.Module | None = None,
 ) -> dict[str, object]:
 	"""Record pre-optimization state hashes for control freeze validation."""
 	result = dict(control_identity)
@@ -555,6 +701,10 @@ def _with_initial_parameter_identities(
 		'student': _state_dict_sha256(student.state_dict()),
 		'head': _state_dict_sha256(head.state_dict()),
 	}
+	if replacement_token is not None:
+		result['initial_state_sha256']['spatial_context'] = _state_dict_sha256(
+			replacement_token.state_dict()
+		)
 	return result
 
 
@@ -586,4 +736,4 @@ def _state_dict_sha256(state_dict: Mapping[str, torch.Tensor]) -> str:
 	return digest.hexdigest()
 
 
-__all__ = ['run_strat_hmm_pretext_training']
+__all__ = ['inspect_strat_hmm_pretext_plan', 'run_strat_hmm_pretext_training']

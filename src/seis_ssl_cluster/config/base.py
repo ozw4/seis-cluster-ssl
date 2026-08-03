@@ -67,6 +67,7 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 			'head',
 			'loss',
 			'train',
+			'spatial_context',
 		},
 	),
 	STAGE_STRAT_HMM_PSEUDO_TARGETS: frozenset(

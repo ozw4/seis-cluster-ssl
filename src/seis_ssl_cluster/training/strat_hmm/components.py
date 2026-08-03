@@ -17,6 +17,9 @@ from seis_ssl_cluster.stratigraphy import (
 	OrderedPrototypeHead,
 )
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
+from seis_ssl_cluster.training.strat_hmm.masking import (
+	center_trace_replacement_token_seed,
+)
 from seis_ssl_cluster.training.strat_hmm.runtime import (
 	_bool_config,
 	_float_config,
@@ -109,6 +112,8 @@ def build_strat_hmm_components(
 	device: torch.device | str,
 ) -> StratHmmHeadOnlyComponents | StratHmmMultiHeadComponents:
 	"""Build the configured single-head or multi-resolution training components."""
+	if isinstance(config.get('spatial_context'), Mapping):
+		return build_strat_hmm_center_trace_masked_components(config, device=device)
 	head_config = _mapping(config, 'head')
 	if 'spec' not in head_config:
 		return build_strat_hmm_head_only_components(config, device=device)
@@ -198,11 +203,7 @@ def build_strat_hmm_center_trace_masked_components(
 	train_config = _mapping(config, 'train')
 	training_seed = _int_config(train_config, 'seed', 42)
 	if replacement_token_seed is None:
-		replacement_token_seed = _int_config(
-			train_config,
-			'replacement_token_seed',
-			training_seed,
-		)
+		replacement_token_seed = center_trace_replacement_token_seed(training_seed)
 	replacement_token = LearnedEncoderReplacementToken(
 		student.encoder_dim,
 		seed=replacement_token_seed,

@@ -21,6 +21,7 @@ from seis_ssl_cluster.training.strat_hmm.losses import (
 from seis_ssl_cluster.training.strat_hmm.masking import (
 	COMMON_HARD_TARGET_HEAD_KS,
 	XYTokenColumnMaskPlan,
+	center_trace_replacement_token_seed,
 	plan_xy_token_column_mask,
 	validate_common_hard_target_valid_masks,
 )
@@ -28,6 +29,7 @@ from seis_ssl_cluster.training.strat_hmm.resume import (
 	restore_strat_hmm_training_checkpoint,
 )
 from seis_ssl_cluster.training.strat_hmm.runner import (
+	inspect_strat_hmm_pretext_plan,
 	run_strat_hmm_pretext_training,
 )
 from seis_ssl_cluster.training.strat_hmm.state import (
@@ -52,11 +54,13 @@ __all__ = [
 	'build_strat_hmm_components',
 	'build_strat_hmm_head_only_components',
 	'build_strat_hmm_multi_head_components',
+	'center_trace_replacement_token_seed',
 	'compute_strat_hmm_center_trace_masked_losses',
 	'compute_strat_hmm_multi_head_losses',
 	'compute_strat_hmm_multi_head_posterior_losses',
 	'compute_strat_hmm_pretext_losses',
 	'configure_student_trainability',
+	'inspect_strat_hmm_pretext_plan',
 	'plan_xy_token_column_mask',
 	'restore_strat_hmm_training_checkpoint',
 	'run_strat_hmm_pretext_training',

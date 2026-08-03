@@ -23,22 +23,38 @@ def restore_strat_hmm_training_checkpoint(  # noqa: PLR0913
 	scaler: torch.amp.GradScaler | None,
 	amp_enabled: bool,
 	config: Mapping[str, object],
+	spatial_context: torch.nn.Module | None = None,
 ) -> StratHmmResumeState:
 	"""Restore model, optimizer, AMP, RNG, and resume counters from a checkpoint."""
 	_validate_strat_resume_payload(payload, amp_enabled=amp_enabled)
+	checkpoint_identity = payload.get('stratigraphy_checkpoint')
+	if (
+		isinstance(checkpoint_identity, Mapping)
+		and checkpoint_identity.get('schema_version') == 7
+		and spatial_context is None
+	):
+		raise ValueError(
+			'schema-7 resume requires the spatial_context replacement-token module'
+		)
 	_validate_stratigraphy_checkpoint_mode(
 		payload,
 		config,
 		optimizer=optimizer,
 		student=student,
 		head=head,
+		spatial_context=spatial_context,
 	)
 	_validate_strat_resume_config_compatibility(payload, config)
 	try:
 		student.load_state_dict(payload['model_state_dict'])
 		head.load_state_dict(payload['stratigraphy_state_dict'])
+		if spatial_context is not None:
+			spatial_context.load_state_dict(payload['spatial_context_state_dict'])
 	except RuntimeError as exc:
-		msg = f'incompatible model/head geometry for resume checkpoint: {exc}'
+		msg = (
+			'incompatible model/head/spatial context geometry for resume checkpoint: '
+			f'{exc}'
+		)
 		raise ValueError(msg) from exc
 	optimizer.load_state_dict(payload['optimizer_state_dict'])
 	if amp_enabled:
@@ -200,13 +216,14 @@ def _validate_strat_resume_config_compatibility(
 	raise ValueError(msg)
 
 
-def _validate_stratigraphy_checkpoint_mode(
+def _validate_stratigraphy_checkpoint_mode(  # noqa: PLR0913
 	payload: Mapping[str, object],
 	config: Mapping[str, object],
 	*,
 	optimizer: torch.optim.Optimizer,
 	student: torch.nn.Module | None = None,
 	head: torch.nn.Module | None = None,
+	spatial_context: torch.nn.Module | None = None,
 ) -> None:
 	head_config = config.get('head')
 	is_multi_head = isinstance(head_config, Mapping) and 'spec' in head_config
@@ -221,9 +238,12 @@ def _validate_stratigraphy_checkpoint_mode(
 			expected_optimizer=optimizer,
 			expected_student=student,
 			expected_head=head,
+			expected_spatial_context=spatial_context,
 		)
 	elif 'stratigraphy_checkpoint' in payload:
 		raise ValueError('multi-head checkpoint cannot resume as a single-head run')
+	elif spatial_context is not None:
+		raise ValueError('spatial_context requires a versioned multi-head checkpoint')
 
 
 def _strat_resume_compatibility_view(
@@ -246,6 +266,8 @@ def _strat_resume_compatibility_view(
 			view[section] = _to_json_safe(_data_resume_compatibility_view(value))
 		else:
 			view[section] = _to_json_safe(value)
+	if 'spatial_context' in config:
+		view['spatial_context'] = _to_json_safe(config['spatial_context'])
 	train = config.get('train')
 	if isinstance(train, Mapping):
 		view['train'] = {

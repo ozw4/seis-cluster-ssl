@@ -17,6 +17,15 @@ from typing import Literal
 import torch
 
 import seis_ssl_cluster
+from seis_ssl_cluster.config.pretraining import (
+	CENTER_TRACE_CONSISTENCY_POLICY,
+	CENTER_TRACE_EXPERIMENT_ROLE,
+	CENTER_TRACE_MODEL_TAG,
+	CENTER_TRACE_REPLACEMENT_INITIALIZATION,
+	CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT,
+	CENTER_TRACE_SUPERVISED_LOSS,
+	CENTER_TRACE_VARIANT,
+)
 from seis_ssl_cluster.stratigraphy.lateral_targets import (
 	load_multi_head_lateral_target_manifest,
 )
@@ -67,6 +76,50 @@ _XY_NEIGHBOR_UNANIMOUS_TARGET_SEMANTICS = 'xy_neighbor_unanimous_outlier_correct
 _XY_NEIGHBOR_UNANIMOUS_CONSISTENCY_POLICY = 'disabled_for_xy_neighbor_unanimous_v1'
 _XY_NEIGHBOR_UNANIMOUS_EXPERIMENT_ROLE = (
 	'multi_head_ordered_xy_neighbor_unanimous_hard_pretext'
+)
+
+_CENTER_TRACE_TARGET_REPRESENTATION = 'hard_viterbi_labels_v1'
+_CENTER_TRACE_HEAD_SPEC = 'multi_resolution_ordered_prototypes_v1'
+_CENTER_TRACE_HEAD_KS = (6, 8, 10)
+_CENTER_TRACE_CHECKPOINT_IDENTITY_FIELDS = frozenset(
+	{
+		'schema_version',
+		'head_spec',
+		'head_ks',
+		'target_representation',
+		'target_manifest_sha256',
+		'target_manifest',
+		'per_head_targets',
+		'objective_semantics',
+		'mask_semantics',
+		'column_fraction',
+		'selection_policy',
+		'replacement',
+		'replacement_initialization',
+		'rng_policy',
+		'masked_prototype_weight',
+		'visible_prototype_weight',
+		'distillation_scope',
+		'supervised_loss',
+		'consistency_policy',
+		'prototype_weight',
+		'usage_weight',
+		'consistency_weight',
+		'consistency_beta',
+		'distillation_weight',
+		'model_tag',
+		'output_root',
+		'scientific_identity_sha256',
+		'student_state_sha256',
+		'stratigraphy_state_sha256',
+		'spatial_context_state_sha256',
+		'initial_spatial_context_state_sha256',
+		'optimizer_group_identity',
+		'teacher_checkpoint_sha256',
+		'student_init_checkpoint_sha256',
+		'initial_student_state_sha256',
+		'initial_head_state_sha256',
+	}
 )
 
 _XY_NEIGHBOR_CONSENSUS_CHECKPOINT_IDENTITY_FIELDS = frozenset(
@@ -193,6 +246,7 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 	*,
 	student: torch.nn.Module,
 	head: torch.nn.Module,
+	spatial_context: torch.nn.Module | None = None,
 	optimizer: torch.optim.Optimizer,
 	epoch: int,
 	mae_config: Mapping[str, object],
@@ -246,6 +300,7 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 		checkpoint_root / 'latest.pt',
 		student=student,
 		head=head,
+		spatial_context=spatial_context,
 		optimizer=optimizer,
 		epoch=epoch,
 		mae_config=mae_config,
@@ -327,6 +382,7 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	*,
 	student: torch.nn.Module,
 	head: torch.nn.Module,
+	spatial_context: torch.nn.Module | None = None,
 	optimizer: torch.optim.Optimizer,
 	epoch: int,
 	mae_config: Mapping[str, object],
@@ -347,6 +403,9 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 	model_state_dict = _state_dict_cpu(student)
 	stratigraphy_state_dict = _state_dict_cpu(head)
+	spatial_context_state_dict = (
+		None if spatial_context is None else _state_dict_cpu(spatial_context)
+	)
 	_validate_checkpoint_inputs(
 		model_state_dict=model_state_dict,
 		stratigraphy_state_dict=stratigraphy_state_dict,
@@ -354,6 +413,8 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 		stratigraphy_config=stratigraphy_config,
 		student=student,
 		head=head,
+		spatial_context=spatial_context,
+		spatial_context_state_dict=spatial_context_state_dict,
 	)
 	payload = {
 		'model_state_dict': model_state_dict,
@@ -382,6 +443,18 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	}
 	if control_identity is not None:
 		payload['control_identity'] = _to_plain_value(control_identity)
+	if spatial_context_state_dict is not None:
+		payload['spatial_context_state_dict'] = spatial_context_state_dict
+		payload['spatial_context_state_sha256'] = _state_sha256(
+			spatial_context_state_dict
+		)
+		initial_states = _required_mapping(
+			control_identity or {}, 'initial_state_sha256'
+		)
+		payload['initial_spatial_context_state_sha256'] = _required_sha256(
+			initial_states.get('spatial_context'),
+			'initial_state_sha256.spatial_context',
+		)
 	if _is_multi_head_config(stratigraphy_config):
 		if checkpoint_selection is None:
 			checkpoint_selection = _update_checkpoint_selection(
@@ -402,17 +475,20 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 			optimizer=optimizer,
 			student=student,
 			head=head,
+			spatial_context=spatial_context,
+			spatial_context_state_dict=spatial_context_state_dict,
 		)
 	return _atomic_torch_save(checkpoint_path, payload)
 
 
-def validate_stratigraphy_checkpoint_payload(  # noqa: C901
+def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	payload: Mapping[str, object],
 	*,
 	expected_config: Mapping[str, object] | None = None,
 	expected_optimizer: torch.optim.Optimizer | None = None,
 	expected_student: torch.nn.Module | None = None,
 	expected_head: torch.nn.Module | None = None,
+	expected_spatial_context: torch.nn.Module | None = None,
 ) -> None:
 	"""Validate the versioned multi-head identity before loading any state."""
 	identity = payload.get('stratigraphy_checkpoint')
@@ -423,7 +499,7 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901
 		return
 	if not isinstance(identity, Mapping):
 		raise TypeError('checkpoint stratigraphy_checkpoint must be a mapping')
-	if identity.get('schema_version') not in {2, 3, 4, 5, 6}:
+	if identity.get('schema_version') not in {2, 3, 4, 5, 6, 7}:
 		raise ValueError('unsupported stratigraphy checkpoint schema_version')
 	if identity.get('head_spec') != 'multi_resolution_ordered_prototypes_v1':
 		raise ValueError('unsupported stratigraphy multi-head head_spec')
@@ -431,7 +507,9 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901
 	if not isinstance(config, Mapping) or not isinstance(state, Mapping):
 		raise TypeError('multi-head checkpoint requires config and head state mappings')
 	expected_schema_version = (
-		6
+		7
+		if _is_center_trace_config(config)
+		else 6
 		if _is_xy_neighbor_unanimous_multi_head_config(config)
 		else 5
 		if _is_xy_neighbor_consensus_multi_head_config(config)
@@ -443,6 +521,43 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901
 			else 2
 		)
 	)
+	aux_payload_keys = {
+		'spatial_context_state_dict',
+		'spatial_context_state_sha256',
+		'initial_spatial_context_state_sha256',
+	}
+	unsupported_aux_payload_keys = sorted(
+		{
+			str(key)
+			for key in payload
+			if str(key).startswith('spatial_context')
+			and str(key) not in aux_payload_keys
+		}
+	)
+	if unsupported_aux_payload_keys:
+		raise ValueError(
+			'checkpoint has unsupported spatial_context field(s): '
+			f'{unsupported_aux_payload_keys!r}'
+		)
+	if expected_schema_version != 7:
+		aux_fields = sorted(set(payload) & aux_payload_keys)
+		if aux_fields:
+			raise ValueError(
+				'spatial_context fields are only valid for schema-7 checkpoints: '
+				f'{aux_fields!r}'
+			)
+		identity_aux_fields = sorted(
+			{
+				str(key)
+				for key in identity
+				if str(key).startswith('spatial_context')
+			}
+		)
+		if identity_aux_fields:
+			raise ValueError(
+				'schema-2-to-6 checkpoint identity must not contain spatial_context '
+				f'field(s): {identity_aux_fields!r}'
+			)
 	if identity.get('schema_version') != expected_schema_version:
 		raise ValueError(
 			'multi-head checkpoint schema_version does not match target representation'
@@ -452,6 +567,102 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901
 		stratigraphy_config=config,
 		stratigraphy_state_dict=state,
 	)
+	if expected_schema_version == 7:
+		model_state = payload.get('model_state_dict')
+		if not isinstance(model_state, Mapping):
+			raise TypeError('schema-7 model_state_dict must be a mapping')
+		if any(not isinstance(value, torch.Tensor) for value in model_state.values()):
+			raise TypeError('schema-7 model_state_dict values must be tensors')
+		student_state_sha256 = _required_sha256(
+			identity.get('student_state_sha256'),
+			'checkpoint student_state_sha256',
+		)
+		if student_state_sha256 != _state_sha256(model_state):
+			raise ValueError('checkpoint student state SHA-256 mismatch')
+		spatial_state = payload.get('spatial_context_state_dict')
+		if not isinstance(spatial_state, Mapping):
+			raise ValueError(
+				'schema-7 checkpoint is missing spatial_context_state_dict'
+			)
+		_validate_finite_state_dict(
+			{
+				str(key): value
+				for key, value in spatial_state.items()
+				if isinstance(value, torch.Tensor)
+			},
+			label='spatial_context_state_dict',
+		)
+		if any(not isinstance(value, torch.Tensor) for value in spatial_state.values()):
+			raise TypeError('spatial_context_state_dict values must be tensors')
+		if set(spatial_state) != {'replacement_token'}:
+			raise ValueError(
+				'schema-7 spatial_context_state_dict must contain only '
+				'replacement_token'
+			)
+		replacement_state = spatial_state['replacement_token']
+		model_config = _required_mapping(config, 'model')
+		model_state = payload.get('model_state_dict')
+		if not isinstance(model_state, Mapping):
+			raise TypeError('schema-7 model_state_dict must be a mapping')
+		model_dtypes = {
+			value.dtype
+			for value in model_state.values()
+			if isinstance(value, torch.Tensor) and value.is_floating_point()
+		}
+		if not model_dtypes or replacement_state.dtype not in model_dtypes:
+			raise TypeError(
+				'schema-7 replacement_token dtype does not match model state dtype'
+			)
+		if (
+			not replacement_state.is_floating_point()
+			or replacement_state.ndim != 1
+			or replacement_state.shape[0] != model_config.get('encoder_dim')
+		):
+			raise ValueError(
+				'schema-7 replacement_token shape or dtype does not match model encoder'
+			)
+		spatial_sha256 = _required_sha256(
+			payload.get('spatial_context_state_sha256'),
+			'checkpoint spatial_context_state_sha256',
+		)
+		if spatial_sha256 != _state_sha256(spatial_state):
+			raise ValueError('checkpoint spatial_context state SHA-256 mismatch')
+		initial_spatial_sha256 = _required_sha256(
+			payload.get('initial_spatial_context_state_sha256'),
+			'checkpoint initial_spatial_context_state_sha256',
+		)
+		identity_spatial_sha256 = _required_sha256(
+			identity.get('spatial_context_state_sha256'),
+			'checkpoint identity spatial_context_state_sha256',
+		)
+		if identity_spatial_sha256 != spatial_sha256:
+			raise ValueError(
+				'checkpoint spatial_context state hash does not match identity'
+			)
+		if initial_spatial_sha256 != identity.get(
+			'initial_spatial_context_state_sha256'
+		):
+			raise ValueError(
+				'checkpoint initial spatial_context state hash does not match identity'
+			)
+		if expected_spatial_context is not None:
+			expected_state = expected_spatial_context.state_dict()
+			if set(expected_state) != set(spatial_state):
+				raise ValueError(
+					'schema-7 spatial_context state keys do not match current module'
+				)
+			for key, expected_value in expected_state.items():
+				actual_value = spatial_state[key]
+				if (
+					actual_value.shape != expected_value.shape
+					or actual_value.dtype != expected_value.dtype
+				):
+					raise ValueError(
+						'schema-7 spatial_context state geometry or dtype does not '
+						'match current module'
+					)
+	elif expected_spatial_context is not None:
+		raise ValueError('spatial_context is only valid for schema-7 checkpoints')
 	if expected_schema_version == 6:
 		_validate_xy_neighbor_unanimous_control_identity(
 			identity=identity,
@@ -467,7 +678,13 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901
 			'checkpoint optimizer state groups do not match optimizer group identity'
 		)
 	if expected_config is not None:
-		_validate_expected_multi_head_identity(identity, expected_config)
+		_validate_expected_multi_head_identity(
+			identity,
+			expected_config,
+			expected_student=expected_student,
+			expected_head=expected_head,
+			expected_spatial_context=expected_spatial_context,
+		)
 	if expected_optimizer is not None:
 		_validate_expected_optimizer_group_identity(
 			identity=identity,
@@ -475,6 +692,7 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901
 			expected_optimizer=expected_optimizer,
 			expected_student=expected_student,
 			expected_head=expected_head,
+			expected_spatial_context=expected_spatial_context,
 		)
 
 
@@ -486,7 +704,7 @@ def inspect_stratigraphy_checkpoint(
 ) -> dict[str, object]:
 	"""Return a machine-readable checkpoint identity and state summary."""
 	validate_stratigraphy_checkpoint_payload(payload)
-	return {
+	result: dict[str, object] = {
 		'stratigraphy_checkpoint': _to_plain_value(
 			payload.get('stratigraphy_checkpoint', {'schema_version': 1}),
 		),
@@ -503,6 +721,30 @@ def inspect_stratigraphy_checkpoint(
 			expected_optimizer=expected_optimizer,
 		),
 	}
+	identity = payload.get('stratigraphy_checkpoint')
+	if isinstance(identity, Mapping) and identity.get('schema_version') == 7:
+		result.update(
+			{
+				'representation': identity['target_representation'],
+				'objective': identity['objective_semantics'],
+				'mask_policy': {
+					'objective': identity['objective_semantics'],
+					'mask_semantics': identity['mask_semantics'],
+					'column_fraction': identity['column_fraction'],
+					'selection_policy': identity['selection_policy'],
+					'replacement': identity['replacement'],
+					'replacement_initialization': identity[
+						'replacement_initialization'
+					],
+					'rng_policy': identity['rng_policy'],
+				},
+				'auxiliary_state_sha256': identity['spatial_context_state_sha256'],
+				'initial_auxiliary_state_sha256': identity[
+					'initial_spatial_context_state_sha256'
+				],
+			}
+		)
+	return result
 
 
 def _resume_compatibility_result(
@@ -569,6 +811,133 @@ def _is_multi_head_config(config: Mapping[str, object]) -> bool:
 	return isinstance(head, Mapping) and 'spec' in head
 
 
+def _is_center_trace_config(config: Mapping[str, object]) -> bool:
+	return isinstance(config.get('spatial_context'), Mapping)
+
+
+def _validate_center_trace_optimizer_layout(  # noqa: C901
+	*,
+	optimizer: torch.optim.Optimizer,
+	stratigraphy_config: Mapping[str, object],
+	student: torch.nn.Module,
+	head: torch.nn.Module,
+	spatial_context: torch.nn.Module | None,
+) -> None:
+	if spatial_context is None:
+		raise ValueError('center-trace optimizer validation requires spatial_context')
+	groups = optimizer.param_groups
+	if [group.get('name') for group in groups] != [
+		'head',
+		'encoder',
+		'spatial_context',
+	]:
+		raise ValueError(
+			'center-trace optimizer requires exactly head, encoder, and '
+			'spatial_context parameter groups'
+		)
+	train = _required_mapping(stratigraphy_config, 'train')
+	expected_lrs = (
+		_required_positive_finite_number(train.get('lr'), 'train.lr'),
+		_required_positive_finite_number(train.get('encoder_lr'), 'train.encoder_lr'),
+		_required_positive_finite_number(train.get('lr'), 'train.lr'),
+	)
+	for group, expected_lr in zip(groups, expected_lrs, strict=True):
+		actual_lr = _required_positive_finite_number(
+			group.get('lr'), f'optimizer {group.get("name")!r} group lr'
+		)
+		if actual_lr != expected_lr:
+			raise ValueError(
+				'center-trace optimizer group learning rate does not match train config'
+			)
+	modules = (student, head, spatial_context)
+	known_parameters = {
+		id(parameter): parameter
+		for module in modules
+		for parameter in module.parameters()
+	}
+	if len(known_parameters) != sum(
+		1 for module in modules for _parameter in module.parameters()
+	):
+		raise ValueError('center-trace modules must not share parameters')
+	trainable_parameters = tuple(
+		parameter for module in modules for parameter in module.parameters()
+		if parameter.requires_grad
+	)
+	group_parameters = tuple(
+		parameter for group in groups for parameter in group['params']
+	)
+	group_ids = tuple(id(parameter) for parameter in group_parameters)
+	if len(group_ids) != len(set(group_ids)):
+		raise ValueError('center-trace optimizer groups contain duplicate parameters')
+	if set(group_ids) != {id(parameter) for parameter in trainable_parameters}:
+		raise ValueError(
+			'center-trace optimizer groups must exactly match trainable parameters'
+		)
+	for parameter_id in group_ids:
+		if parameter_id not in known_parameters:
+			raise ValueError(
+				'center-trace optimizer contains a parameter outside the '
+				'student/head/spatial_context modules'
+			)
+	if {id(parameter) for parameter in groups[0]['params']} != {
+		id(parameter) for parameter in head.parameters() if parameter.requires_grad
+	}:
+		raise ValueError('center-trace optimizer head group identity mismatch')
+	if {id(parameter) for parameter in groups[1]['params']} != {
+		id(parameter)
+		for parameter in student.parameters()
+		if parameter.requires_grad
+	}:
+		raise ValueError('center-trace optimizer encoder group identity mismatch')
+	if {id(parameter) for parameter in groups[2]['params']} != {
+		id(parameter)
+		for parameter in spatial_context.parameters()
+		if parameter.requires_grad
+	}:
+		raise ValueError(
+			'center-trace optimizer spatial_context group identity mismatch'
+		)
+
+
+def _validate_center_trace_spatial_context_state(
+	config: Mapping[str, object],
+	spatial_context: torch.nn.Module,
+	state: Mapping[str, torch.Tensor],
+) -> None:
+	"""Validate the independent schema-7 replacement-token state."""
+	expected_state = spatial_context.state_dict()
+	if set(state) != set(expected_state):
+		raise ValueError(
+			'center-trace spatial_context state keys do not match replacement token'
+		)
+	for key, expected in expected_state.items():
+		actual = state[key]
+		if not isinstance(actual, torch.Tensor):
+			raise TypeError(f'spatial_context_state_dict.{key} must be a tensor')
+		if actual.shape != expected.shape:
+			raise ValueError(
+				f'spatial_context state shape mismatch for {key}: '
+				f'{tuple(actual.shape)!r} != {tuple(expected.shape)!r}'
+			)
+		if actual.dtype != expected.dtype:
+			raise TypeError(
+				f'spatial_context state dtype mismatch for {key}: '
+				f'{actual.dtype} != {expected.dtype}'
+			)
+	_validate_finite_state_dict(state, label='spatial_context_state_dict')
+	identity = _required_mapping(config, 'identity')
+	scientific = _required_mapping(identity, 'scientific_identity')
+	if not all(
+		isinstance(value, torch.Tensor) and value.is_floating_point()
+		for value in state.values()
+	):
+		raise TypeError('center-trace spatial_context state must be floating tensors')
+	if scientific.get('replacement_initialization') != (
+		CENTER_TRACE_REPLACEMENT_INITIALIZATION
+	):
+		raise ValueError('center-trace replacement initialization policy mismatch')
+
+
 def _validate_checkpoint_inputs(  # noqa: PLR0913
 	*,
 	model_state_dict: Mapping[str, torch.Tensor],
@@ -577,6 +946,8 @@ def _validate_checkpoint_inputs(  # noqa: PLR0913
 	stratigraphy_config: Mapping[str, object],
 	student: torch.nn.Module,
 	head: torch.nn.Module,
+	spatial_context: torch.nn.Module | None,
+	spatial_context_state_dict: Mapping[str, torch.Tensor] | None,
 ) -> None:
 	_validate_finite_state_dict(model_state_dict, label='model_state_dict')
 	_validate_finite_state_dict(
@@ -596,6 +967,26 @@ def _validate_checkpoint_inputs(  # noqa: PLR0913
 			stratigraphy_config=stratigraphy_config,
 			student=student,
 			head=head,
+			spatial_context=spatial_context,
+		)
+		if _is_center_trace_config(stratigraphy_config):
+			if spatial_context is None or spatial_context_state_dict is None:
+				raise ValueError(
+					'schema-7 center-trace checkpoint requires spatial_context state'
+				)
+			_validate_center_trace_spatial_context_state(
+				stratigraphy_config,
+				spatial_context,
+				spatial_context_state_dict,
+			)
+		elif spatial_context is not None or spatial_context_state_dict is not None:
+			raise ValueError(
+				'spatial_context state is only valid for schema-7 center-trace '
+				'checkpoints'
+			)
+	elif spatial_context is not None or spatial_context_state_dict is not None:
+		raise ValueError(
+			'spatial_context state requires a multi-head center-trace checkpoint'
 		)
 	_validate_finite_optimizer_state(optimizer.state_dict())
 	for group in optimizer.param_groups:
@@ -609,8 +1000,18 @@ def _validate_multi_head_optimizer_layout(  # noqa: C901
 	stratigraphy_config: Mapping[str, object],
 	student: torch.nn.Module,
 	head: torch.nn.Module,
+	spatial_context: torch.nn.Module | None,
 ) -> None:
 	"""Require the fixed multi-head encoder/head optimizer partition."""
+	if _is_center_trace_config(stratigraphy_config):
+		_validate_center_trace_optimizer_layout(
+			optimizer=optimizer,
+			stratigraphy_config=stratigraphy_config,
+			student=student,
+			head=head,
+			spatial_context=spatial_context,
+		)
+		return
 	groups = optimizer.param_groups
 	if len(groups) != 2 or [group.get('name') for group in groups] != [
 		'head',
@@ -892,11 +1293,24 @@ def _multi_head_checkpoint_identity(  # noqa: PLR0913
 	optimizer: torch.optim.Optimizer,
 	student: torch.nn.Module,
 	head: torch.nn.Module,
+	spatial_context: torch.nn.Module | None = None,
+	spatial_context_state_dict: Mapping[str, torch.Tensor] | None = None,
 ) -> dict[str, object]:
 	head_config = _required_mapping(stratigraphy_config, 'head')
 	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
 	identity = _required_mapping(stratigraphy_config, 'identity')
 	scientific = _required_mapping(identity, 'scientific_identity')
+	if _is_center_trace_config(stratigraphy_config):
+		return _center_trace_checkpoint_identity(
+			stratigraphy_config=stratigraphy_config,
+			stratigraphy_state_dict=stratigraphy_state_dict,
+			spatial_context=spatial_context,
+			spatial_context_state_dict=spatial_context_state_dict,
+			control_identity=control_identity,
+			optimizer=optimizer,
+			student=student,
+			head=head,
+		)
 	if _is_soft_multi_head_config(stratigraphy_config):
 		return _soft_multi_head_checkpoint_identity(
 			stratigraphy_config=stratigraphy_config,
@@ -985,6 +1399,109 @@ def _multi_head_checkpoint_identity(  # noqa: PLR0913
 		initial_states.get('head'), 'initial_state_sha256.head'
 	)
 	return result
+
+
+def _center_trace_checkpoint_identity(  # noqa: PLR0913
+	*,
+	stratigraphy_config: Mapping[str, object],
+	stratigraphy_state_dict: Mapping[str, torch.Tensor],
+	spatial_context: torch.nn.Module | None,
+	spatial_context_state_dict: Mapping[str, torch.Tensor] | None,
+	control_identity: Mapping[str, object] | None,
+	optimizer: torch.optim.Optimizer,
+	student: torch.nn.Module,
+	head: torch.nn.Module,
+) -> dict[str, object]:
+	"""Build the closed schema-7 center-trace checkpoint identity."""
+	if spatial_context is None or spatial_context_state_dict is None:
+		raise ValueError('schema-7 checkpoint requires spatial_context state')
+	if not isinstance(control_identity, Mapping):
+		raise TypeError('schema-7 checkpoint requires control identity')
+	head_config = _required_mapping(stratigraphy_config, 'head')
+	if head_config.get('spec') != _CENTER_TRACE_HEAD_SPEC or tuple(
+		head_config.get('ks', ())
+	) != _CENTER_TRACE_HEAD_KS:
+		raise ValueError('schema-7 checkpoint requires head K=(6, 8, 10)')
+	spatial = _required_mapping(stratigraphy_config, 'spatial_context')
+	for key, expected in CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT.items():
+		if spatial.get(key) != expected:
+			raise ValueError(f'schema-7 spatial_context.{key} contract mismatch')
+	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
+	manifest_path = _required_string(
+		pseudo_targets.get('manifest'), 'pseudo_targets.manifest'
+	)
+	manifest_sha256 = _file_sha256(Path(manifest_path))
+	per_head_targets = _manifest_per_head_target_hashes(Path(manifest_path))
+	identity = _required_mapping(stratigraphy_config, 'identity')
+	scientific = _required_mapping(identity, 'scientific_identity')
+	if scientific.get('target_manifest_sha256') != manifest_sha256:
+		raise ValueError('schema-7 target manifest SHA-256 mismatch')
+	if scientific.get('target_head_hashes') != per_head_targets:
+		raise ValueError('schema-7 per-head target hashes do not match manifest')
+	inputs = _required_mapping(control_identity, 'input_identities')
+	initial_states = _required_mapping(control_identity, 'initial_state_sha256')
+	spatial_state_sha256 = _state_sha256(spatial_context_state_dict)
+	return {
+		'schema_version': 7,
+		'head_spec': _CENTER_TRACE_HEAD_SPEC,
+		'head_ks': list(_CENTER_TRACE_HEAD_KS),
+		'target_representation': _CENTER_TRACE_TARGET_REPRESENTATION,
+		'target_manifest_sha256': manifest_sha256,
+		'target_manifest': {
+			'path': manifest_path,
+			'sha256': manifest_sha256,
+		},
+		'per_head_targets': per_head_targets,
+		'objective_semantics': scientific['objective_semantics'],
+		'mask_semantics': scientific['mask_semantics'],
+		'column_fraction': scientific['column_fraction'],
+		'selection_policy': scientific['selection_policy'],
+		'replacement': scientific['replacement'],
+		'replacement_initialization': scientific['replacement_initialization'],
+		'rng_policy': scientific['rng_policy'],
+		'masked_prototype_weight': scientific['masked_prototype_weight'],
+		'visible_prototype_weight': scientific['visible_prototype_weight'],
+		'distillation_scope': scientific['distillation_scope'],
+		'supervised_loss': scientific['supervised_loss'],
+		'consistency_policy': scientific['consistency_policy'],
+		'prototype_weight': scientific['prototype_weight'],
+		'usage_weight': scientific['usage_weight'],
+		'consistency_weight': scientific['consistency_weight'],
+		'consistency_beta': scientific['consistency_beta'],
+		'distillation_weight': scientific['distillation_weight'],
+		'model_tag': identity.get('model_tag'),
+		'output_root': _required_mapping(stratigraphy_config, 'paths').get(
+			'output_root'
+		),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
+		'student_state_sha256': _state_sha256(_state_dict_cpu(student)),
+		'stratigraphy_state_sha256': _state_sha256(stratigraphy_state_dict),
+		'spatial_context_state_sha256': spatial_state_sha256,
+		'initial_spatial_context_state_sha256': _required_sha256(
+			initial_states.get('spatial_context'),
+			'initial_state_sha256.spatial_context',
+		),
+		'optimizer_group_identity': _optimizer_group_identity(
+			optimizer,
+			parameter_names=_stratigraphy_parameter_names(
+				student, head, spatial_context=spatial_context
+			),
+		),
+		'teacher_checkpoint_sha256': _required_sha256(
+			_required_mapping(inputs, 'teacher_checkpoint').get('sha256'),
+			'input_identities.teacher_checkpoint.sha256',
+		),
+		'student_init_checkpoint_sha256': _required_sha256(
+			_required_mapping(inputs, 'student_init_checkpoint').get('sha256'),
+			'input_identities.student_init_checkpoint.sha256',
+		),
+		'initial_student_state_sha256': _required_sha256(
+			initial_states.get('student'), 'initial_state_sha256.student'
+		),
+		'initial_head_state_sha256': _required_sha256(
+			initial_states.get('head'), 'initial_state_sha256.head'
+		),
+	}
 
 
 def _soft_multi_head_checkpoint_identity(  # noqa: PLR0913
@@ -1317,12 +1834,19 @@ def _xy_neighbor_unanimous_multi_head_checkpoint_identity(  # noqa: PLR0913
 	}
 
 
-def _validate_multi_head_identity(  # noqa: C901
+def _validate_multi_head_identity(  # noqa: C901, PLR0912
 	*,
 	identity: Mapping[str, object],
 	stratigraphy_config: Mapping[str, object],
 	stratigraphy_state_dict: Mapping[str, object],
 ) -> None:
+	if _is_center_trace_config(stratigraphy_config):
+		_validate_center_trace_identity(
+			identity=identity,
+			stratigraphy_config=stratigraphy_config,
+			stratigraphy_state_dict=stratigraphy_state_dict,
+		)
+		return
 	if _is_soft_multi_head_config(stratigraphy_config):
 		_validate_soft_multi_head_identity(
 			identity=identity,
@@ -1415,6 +1939,160 @@ def _validate_multi_head_identity(  # noqa: C901
 			)
 
 
+def _validate_center_trace_identity(  # noqa: C901, PLR0912
+	*,
+	identity: Mapping[str, object],
+	stratigraphy_config: Mapping[str, object],
+	stratigraphy_state_dict: Mapping[str, object],
+) -> None:
+	"""Validate schema-7 identity without accepting another target route."""
+	if identity.get('schema_version') != 7:
+		raise ValueError('center-trace masked checkpoint requires schema_version 7')
+	unknown = sorted(set(identity) - _CENTER_TRACE_CHECKPOINT_IDENTITY_FIELDS)
+	if unknown:
+		raise ValueError(
+			f'schema-7 checkpoint identity has unsupported field(s): {unknown!r}'
+		)
+	_validate_multi_head_config_and_state(
+		stratigraphy_config,
+		{
+			str(key): value
+			for key, value in stratigraphy_state_dict.items()
+			if isinstance(value, torch.Tensor)
+		},
+	)
+	head = _required_mapping(stratigraphy_config, 'head')
+	config_identity = _required_mapping(stratigraphy_config, 'identity')
+	scientific = _required_mapping(config_identity, 'scientific_identity')
+	paths = _required_mapping(stratigraphy_config, 'paths')
+	if identity.get('head_spec') != _CENTER_TRACE_HEAD_SPEC:
+		raise ValueError('schema-7 checkpoint head_spec is not center-trace multi-head')
+	if identity.get('head_ks') != list(_CENTER_TRACE_HEAD_KS):
+		raise ValueError('schema-7 checkpoint head_ks must be [6, 8, 10]')
+	if head.get('spec') != _CENTER_TRACE_HEAD_SPEC or list(head.get('ks', ())) != list(
+		_CENTER_TRACE_HEAD_KS
+	):
+		raise ValueError('schema-7 checkpoint head config is not [6, 8, 10]')
+	for key, expected in (
+		('model_tag', config_identity.get('model_tag')),
+		('output_root', paths.get('output_root')),
+	):
+		if identity.get(key) != expected:
+			raise ValueError(f'checkpoint {key} does not match stratigraphy config')
+	if identity.get('stratigraphy_state_sha256') != _state_sha256(
+		{
+			str(key): value
+			for key, value in stratigraphy_state_dict.items()
+			if isinstance(value, torch.Tensor)
+		}
+	):
+		raise ValueError('checkpoint stratigraphy state SHA-256 mismatch')
+	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
+	target = identity.get('target_manifest')
+	if not isinstance(target, Mapping):
+		raise TypeError('schema-7 checkpoint target_manifest must be a mapping')
+	target_path = Path(
+		_required_string(target.get('path'), 'checkpoint target_manifest.path')
+	)
+	target_sha256 = _required_sha256(
+		target.get('sha256'), 'checkpoint target_manifest.sha256'
+	)
+	if target_sha256 != _file_sha256(target_path):
+		raise ValueError('checkpoint target manifest SHA-256 mismatch')
+	if identity.get('target_manifest_sha256') != target_sha256:
+		raise ValueError('checkpoint target manifest hash fields disagree')
+	if identity.get('per_head_targets') != _manifest_per_head_target_hashes(
+		target_path
+	):
+		raise ValueError(
+			'checkpoint per-head target hashes do not match target manifest'
+		)
+	if _required_string(
+		pseudo_targets.get('manifest'), 'pseudo_targets.manifest'
+	) != str(target_path):
+		raise ValueError('schema-7 target manifest path does not match config')
+	for key in _CENTER_TRACE_CHECKPOINT_IDENTITY_FIELDS:
+		if key in {
+			'schema_version',
+			'head_spec',
+			'head_ks',
+			'target_manifest_sha256',
+			'target_manifest',
+			'per_head_targets',
+			'optimizer_group_identity',
+			'teacher_checkpoint_sha256',
+			'student_init_checkpoint_sha256',
+			'initial_student_state_sha256',
+			'initial_head_state_sha256',
+			'spatial_context_state_sha256',
+			'initial_spatial_context_state_sha256',
+			'stratigraphy_state_sha256',
+			'model_tag',
+			'output_root',
+			'scientific_identity_sha256',
+			'student_state_sha256',
+		}:
+			continue
+		if identity.get(key) != scientific.get(key):
+			raise ValueError(
+				f'checkpoint {key} does not match center-trace scientific identity'
+			)
+	if identity.get('scientific_identity_sha256') != scientific_identity_sha256(
+		scientific
+	):
+		raise ValueError('checkpoint scientific identity SHA-256 mismatch')
+	for key in (
+		'student_state_sha256',
+		'initial_student_state_sha256',
+		'initial_head_state_sha256',
+		'initial_spatial_context_state_sha256',
+		'teacher_checkpoint_sha256',
+		'student_init_checkpoint_sha256',
+		'spatial_context_state_sha256',
+	):
+		_required_sha256(identity.get(key), f'checkpoint {key}')
+	_validate_center_trace_config_identity_values(
+		stratigraphy_config, scientific
+	)
+
+
+def _validate_center_trace_config_identity_values(  # noqa: C901
+	config: Mapping[str, object], scientific: Mapping[str, object]
+) -> None:
+	spatial = _required_mapping(config, 'spatial_context')
+	for key, expected in CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT.items():
+		if spatial.get(key) != expected or scientific.get(
+			'objective_semantics' if key == 'objective' else key
+		) != expected:
+			raise ValueError(f'schema-7 center-trace {key} identity mismatch')
+	if scientific.get('experiment_role') != CENTER_TRACE_EXPERIMENT_ROLE:
+		raise ValueError('schema-7 center-trace experiment role mismatch')
+	if scientific.get('variant') != CENTER_TRACE_VARIANT:
+		raise ValueError('schema-7 center-trace variant mismatch')
+	if scientific.get('target_representation') != _CENTER_TRACE_TARGET_REPRESENTATION:
+		raise ValueError('schema-7 center-trace target representation mismatch')
+	if scientific.get('supervised_loss') != CENTER_TRACE_SUPERVISED_LOSS:
+		raise ValueError('schema-7 center-trace supervised loss mismatch')
+	if scientific.get('consistency_policy') != CENTER_TRACE_CONSISTENCY_POLICY:
+		raise ValueError('schema-7 center-trace consistency policy mismatch')
+	if scientific.get('student_unfreeze_top_blocks') != 1:
+		raise ValueError('schema-7 center-trace unfreeze depth must be 1')
+	if scientific.get('head_ks') != list(_CENTER_TRACE_HEAD_KS):
+		raise ValueError('schema-7 center-trace head K identity mismatch')
+	if _required_mapping(config, 'identity').get('model_tag') != CENTER_TRACE_MODEL_TAG:
+		raise ValueError('schema-7 center-trace model tag mismatch')
+	loss = _required_mapping(config, 'loss')
+	for key, expected in (
+		('prototype_weight', 1.0),
+		('usage_weight', 0.005),
+		('consistency_weight', 0.0),
+		('consistency_beta', 0.1),
+		('distillation_weight', 0.2),
+	):
+		if loss.get(key) != expected or scientific.get(key) != expected:
+			raise ValueError(f'schema-7 center-trace {key} identity mismatch')
+
+
 def _validate_multi_head_target_manifest_identity(
 	*,
 	identity: Mapping[str, object],
@@ -1448,8 +2126,22 @@ def _validate_multi_head_target_manifest_identity(
 
 
 def _validate_expected_multi_head_identity(
-	identity: Mapping[str, object], config: Mapping[str, object]
+	identity: Mapping[str, object],
+	config: Mapping[str, object],
+	*,
+	expected_student: torch.nn.Module | None = None,
+	expected_head: torch.nn.Module | None = None,
+	expected_spatial_context: torch.nn.Module | None = None,
 ) -> None:
+	if _is_center_trace_config(config):
+		_validate_expected_center_trace_identity(
+			identity,
+			config,
+			expected_student=expected_student,
+			expected_head=expected_head,
+			expected_spatial_context=expected_spatial_context,
+		)
+		return
 	if _is_soft_multi_head_config(config):
 		_validate_expected_soft_multi_head_identity(identity, config)
 		return
@@ -1496,13 +2188,96 @@ def _validate_expected_multi_head_identity(
 			raise ValueError(f'checkpoint multi-head identity is incompatible at {key}')
 
 
-def _validate_expected_optimizer_group_identity(
+def _validate_expected_center_trace_identity(
+	identity: Mapping[str, object],
+	config: Mapping[str, object],
+	*,
+	expected_student: torch.nn.Module | None,
+	expected_head: torch.nn.Module | None,
+	expected_spatial_context: torch.nn.Module | None,
+) -> None:
+	"""Compare schema-7 identity against the current resolved center config."""
+	scientific = _required_mapping(
+		_required_mapping(config, 'identity'), 'scientific_identity'
+	)
+	teacher = _required_mapping(config, 'teacher')
+	student = _required_mapping(config, 'student')
+	pseudo_targets = _required_mapping(config, 'pseudo_targets')
+	checks = {
+		'schema_version': 7,
+		'head_spec': _CENTER_TRACE_HEAD_SPEC,
+		'head_ks': list(_CENTER_TRACE_HEAD_KS),
+		'target_representation': _CENTER_TRACE_TARGET_REPRESENTATION,
+		'target_manifest_sha256': scientific.get('target_manifest_sha256'),
+		'per_head_targets': scientific.get('target_head_hashes'),
+		'objective_semantics': scientific.get('objective_semantics'),
+		'mask_semantics': scientific.get('mask_semantics'),
+		'column_fraction': scientific.get('column_fraction'),
+		'selection_policy': scientific.get('selection_policy'),
+		'replacement': scientific.get('replacement'),
+		'replacement_initialization': scientific.get('replacement_initialization'),
+		'rng_policy': scientific.get('rng_policy'),
+		'masked_prototype_weight': scientific.get('masked_prototype_weight'),
+		'visible_prototype_weight': scientific.get('visible_prototype_weight'),
+		'distillation_scope': scientific.get('distillation_scope'),
+		'supervised_loss': scientific.get('supervised_loss'),
+		'consistency_policy': scientific.get('consistency_policy'),
+		'prototype_weight': scientific.get('prototype_weight'),
+		'usage_weight': scientific.get('usage_weight'),
+		'consistency_weight': scientific.get('consistency_weight'),
+		'consistency_beta': scientific.get('consistency_beta'),
+		'distillation_weight': scientific.get('distillation_weight'),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
+		'model_tag': _required_mapping(config, 'identity').get('model_tag'),
+		'output_root': _required_mapping(config, 'paths').get('output_root'),
+		'teacher_checkpoint_sha256': _file_sha256(
+			Path(_required_string(teacher.get('checkpoint'), 'teacher.checkpoint'))
+		),
+		'student_init_checkpoint_sha256': _file_sha256(
+			Path(
+				student.get('init_checkpoint')
+				or _required_string(teacher.get('checkpoint'), 'teacher.checkpoint')
+			)
+		),
+	}
+	manifest_path = Path(
+		_required_string(pseudo_targets.get('manifest'), 'pseudo_targets.manifest')
+	)
+	if checks['target_manifest_sha256'] != _file_sha256(manifest_path):
+		raise ValueError('schema-7 expected target manifest hash does not match file')
+	for key, expected in checks.items():
+		if identity.get(key) != expected:
+			raise ValueError(
+				f'schema-7 checkpoint identity is incompatible at {key}'
+			)
+	if expected_student is not None and identity.get(
+		'initial_student_state_sha256'
+	) != _state_sha256(
+			expected_student.state_dict()
+		):
+			raise ValueError('schema-7 initial student state hash is incompatible')
+	if expected_head is not None and identity.get(
+		'initial_head_state_sha256'
+	) != _state_sha256(
+			expected_head.state_dict()
+		):
+			raise ValueError('schema-7 initial head state hash is incompatible')
+	if expected_spatial_context is not None:
+		initial_spatial_hash = _state_sha256(expected_spatial_context.state_dict())
+		if identity.get('initial_spatial_context_state_sha256') != initial_spatial_hash:
+			raise ValueError(
+				'schema-7 initial spatial_context state hash is incompatible'
+			)
+
+
+def _validate_expected_optimizer_group_identity(  # noqa: PLR0913
 	*,
 	identity: Mapping[str, object],
 	optimizer_state_dict: object,
 	expected_optimizer: torch.optim.Optimizer,
 	expected_student: torch.nn.Module | None,
 	expected_head: torch.nn.Module | None,
+	expected_spatial_context: torch.nn.Module | None = None,
 ) -> None:
 	if expected_student is None or expected_head is None:
 		expected = _optimizer_group_summary(expected_optimizer.state_dict())
@@ -1510,7 +2285,9 @@ def _validate_expected_optimizer_group_identity(
 		expected = _optimizer_group_identity(
 			expected_optimizer,
 			parameter_names=_stratigraphy_parameter_names(
-				expected_student, expected_head
+				expected_student,
+				expected_head,
+				spatial_context=expected_spatial_context,
 			),
 		)
 	checkpoint_identity = identity.get('optimizer_group_identity')
@@ -2583,10 +3360,19 @@ def _optimizer_group_identity(
 
 
 def _stratigraphy_parameter_names(
-	student: torch.nn.Module, head: torch.nn.Module
+	student: torch.nn.Module,
+	head: torch.nn.Module,
+	*,
+	spatial_context: torch.nn.Module | None = None,
 ) -> dict[int, str]:
 	result: dict[int, str] = {}
-	for prefix, module in (('student', student), ('head', head)):
+	modules: tuple[tuple[str, torch.nn.Module], ...] = (
+		('student', student),
+		('head', head),
+	)
+	if spatial_context is not None:
+		modules += (('spatial_context', spatial_context),)
+	for prefix, module in modules:
 		for name, parameter in module.named_parameters():
 			parameter_id = id(parameter)
 			if parameter_id in result:

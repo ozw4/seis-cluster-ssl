@@ -1120,7 +1120,7 @@ def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 	return objective
 
 
-def _stratigraphy_pretext_metadata(
+def _stratigraphy_pretext_metadata(  # noqa: C901
 	payload: Mapping[str, object],
 ) -> dict[str, object] | None:
 	if 'stratigraphy_config' not in payload:
@@ -1167,9 +1167,9 @@ def _stratigraphy_pretext_metadata(
 			'scientific_identity_sha256': checkpoint_identity[
 				'scientific_identity_sha256'
 			],
-			'checkpoint_stratigraphy_state_sha256': checkpoint_identity[
-				'stratigraphy_state_sha256'
-			],
+		'checkpoint_stratigraphy_state_sha256': checkpoint_identity[
+			'stratigraphy_state_sha256'
+		],
 		}
 		if checkpoint_identity.get('schema_version') == 3:
 			posterior = _required_mapping(checkpoint_identity, 'posterior_manifest')
@@ -1183,6 +1183,60 @@ def _stratigraphy_pretext_metadata(
 					'posterior_cost_temperature'
 				],
 				'per_head_posterior_sha256': checkpoint_identity['per_head_posteriors'],
+			}
+		if checkpoint_identity.get('schema_version') == 7:
+			target_manifest = _required_mapping(checkpoint_identity, 'target_manifest')
+			optimizer_groups = checkpoint_identity['optimizer_group_identity']
+			if not isinstance(optimizer_groups, list):
+				raise TypeError(
+					'checkpoint optimizer_group_identity must be a list for schema 7'
+				)
+			spatial_context_group = next(
+				(
+					group
+					for group in optimizer_groups
+					if isinstance(group, Mapping)
+					and group.get('name') == 'spatial_context'
+				),
+				None,
+			)
+			if not isinstance(spatial_context_group, Mapping):
+				raise ValueError(
+					'schema-7 checkpoint is missing spatial_context optimizer group'
+				)
+			return {
+				**result,
+				'target_representation': checkpoint_identity['target_representation'],
+				'objective_semantics': checkpoint_identity['objective_semantics'],
+				'mask_semantics': checkpoint_identity['mask_semantics'],
+				'column_fraction': checkpoint_identity['column_fraction'],
+				'selection_policy': checkpoint_identity['selection_policy'],
+				'replacement': checkpoint_identity['replacement'],
+				'replacement_initialization': checkpoint_identity[
+					'replacement_initialization'
+				],
+				'rng_policy': checkpoint_identity['rng_policy'],
+				'masked_prototype_weight': checkpoint_identity[
+					'masked_prototype_weight'
+				],
+				'visible_prototype_weight': checkpoint_identity[
+					'visible_prototype_weight'
+				],
+				'distillation_scope': checkpoint_identity['distillation_scope'],
+				'supervised_loss': checkpoint_identity['supervised_loss'],
+				'target_manifest_path': target_manifest['path'],
+				'target_manifest_sha256': target_manifest['sha256'],
+				'per_head_target_sha256': checkpoint_identity['per_head_targets'],
+				'checkpoint_spatial_context_state_sha256': checkpoint_identity[
+					'spatial_context_state_sha256'
+				],
+				'checkpoint_student_state_sha256': checkpoint_identity[
+					'student_state_sha256'
+				],
+				'initial_spatial_context_state_sha256': checkpoint_identity[
+					'initial_spatial_context_state_sha256'
+				],
+				'spatial_context_optimizer_group': spatial_context_group,
 			}
 		if checkpoint_identity.get('schema_version') in {4, 5, 6}:
 			return _hard_target_pretext_metadata(
