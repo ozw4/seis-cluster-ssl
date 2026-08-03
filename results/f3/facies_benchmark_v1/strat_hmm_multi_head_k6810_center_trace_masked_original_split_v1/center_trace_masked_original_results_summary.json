@@ -36,7 +36,7 @@
     },
     "overall_status": "CTMASK_ORIGINAL_GO",
     "schema_version": 1,
-    "scientific_jobs_executed": 0,
+	    "scientific_jobs_executed": 15,
     "six_split_follow_up": {
       "ready": true,
       "scientific_jobs_executed": 0,

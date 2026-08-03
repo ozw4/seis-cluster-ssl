@@ -106,7 +106,7 @@
     },
     "overall_status": "CTMASK_ORIGINAL_GO",
     "schema_version": 1,
-    "scientific_jobs_executed": 0,
+    "scientific_jobs_executed": 15,
     "six_split_follow_up": {
       "ready": true,
       "scientific_jobs_executed": 0,
@@ -184,7 +184,7 @@
     }
   },
   "schema_version": 1,
-  "scientific_jobs_executed": 0,
+  "scientific_jobs_executed": 15,
   "screening_audit": {
     "byte_size": 22543,
     "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_center_trace_masked_k6810_v1/original_split/preflight/center_trace_masked_screening_audit.json",

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
@@ -57,6 +58,18 @@ _ARTIFACT_ROOT_PLACEHOLDER = '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'
 _CANDIDATE_ROLE = center_config.CENTER_TRACE_MASKED_MODEL_ID
 _CANDIDATE_TAG = center_config.CENTER_TRACE_MASKED_MODEL_TAG
 _SCIENTIFIC_JOB_COUNT = 15
+_GATE_METRICS = (
+	'macro_f1',
+	'mean_iou',
+	'class_3_f1',
+	'class_3_iou',
+	'class_3_boundary_recall_t2',
+	'class_3_boundary_recall_t4',
+	'class_5_f1',
+	'class_5_iou',
+	'class_5_boundary_recall_t2',
+	'class_5_boundary_recall_t4',
+)
 _PUBLISHED_ROOT = Path(
 	'f3/facies_benchmark_v1/'
 	'strat_hmm_multi_head_k6810_center_trace_masked_original_split_v1'
@@ -149,11 +162,9 @@ def decide_center_trace_masked_original_gate(
 ) -> dict[str, object]:
 	"""Apply the fixed center-trace masked original-split GO/HOLD/STOP gate."""
 	comparison_id = control._comparison_id(_CANDIDATE_ROLE, 'mh_nocons')
-	index = {
-		(str(row['budget_id']), str(row['metric'])): row
-		for row in summary
-		if row['comparison_id'] == comparison_id
-	}
+	index = _validate_gate_summary(
+		summary, budgets=budgets, comparison_id=comparison_id
+	)
 	positive, negative = [], []
 	for budget in budgets:
 		primary = [
@@ -226,6 +237,64 @@ def decide_center_trace_masked_original_gate(
 		'scientific_jobs_executed': _SCIENTIFIC_JOB_COUNT,
 		'six_split_jobs_executed': 0,
 	}
+
+
+def _validate_gate_summary(
+	summary: Sequence[Mapping[str, object]],
+	*,
+	budgets: Sequence[str],
+	comparison_id: str,
+) -> dict[tuple[str, str], Mapping[str, object]]:
+	"""Validate summary rows before indexing the fixed gate inputs."""
+	seen: set[tuple[str, str, str]] = set()
+	index: dict[tuple[str, str], Mapping[str, object]] = {}
+	for row in summary:
+		if not isinstance(row, Mapping):
+			raise TypeError('center-trace masked gate summary rows must be mappings')
+		try:
+			key = (
+				str(row['budget_id']),
+				str(row['comparison_id']),
+				str(row['metric']),
+			)
+		except KeyError as error:
+			raise ValueError(
+				'center-trace masked gate summary row is missing its identity'
+			) from error
+		if key in seen:
+			raise ValueError(
+				f'center-trace masked gate summary contains duplicate row: {key!r}'
+			)
+		seen.add(key)
+		try:
+			mean_delta = float(row['mean_delta'])
+			wins = float(row['wins'])
+		except (KeyError, TypeError, ValueError) as error:
+			raise ValueError(
+				f'center-trace masked gate summary has invalid metric row: {key!r}'
+			) from error
+		if not math.isfinite(mean_delta) or not math.isfinite(wins):
+			raise ValueError(
+				f'center-trace masked gate summary has non-finite metric row: {key!r}'
+			)
+		if wins != int(wins) or not 0 <= wins <= 5:
+			raise ValueError(
+				f'center-trace masked gate summary has invalid win count: {key!r}'
+			)
+		if key[1] == comparison_id:
+			index[(key[0], key[2])] = row
+
+	expected = {
+		(str(budget), metric) for budget in budgets for metric in _GATE_METRICS
+	}
+	if set(index) != expected:
+		missing = sorted(expected - set(index))
+		extra = sorted(set(index) - expected)
+		raise ValueError(
+			'center-trace masked gate summary matrix is incomplete or duplicated: '
+			f'missing={missing!r}, extra={extra!r}'
+		)
+	return index
 
 
 def summarize_f3_lithology_voxel_label_budget_center_trace_masked(

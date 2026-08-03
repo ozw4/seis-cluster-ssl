@@ -52,6 +52,23 @@ def test_center_trace_masked_gate_requires_four_of_five_wins() -> None:
 	assert decision['six_split_follow_up']['scientific_jobs_executed'] == 0
 
 
+def test_center_trace_masked_gate_rejects_duplicate_metric_rows() -> None:
+	budgets = ('cap25', 'cap50', 'cap100')
+	rows = _rows(budgets)
+	with pytest.raises(ValueError, match='duplicate'):
+		results.decide_center_trace_masked_original_gate(
+			[ *rows, dict(rows[0]) ], budgets=budgets
+		)
+
+
+def test_center_trace_masked_gate_rejects_nonfinite_metric_rows() -> None:
+	budgets = ('cap25', 'cap50', 'cap100')
+	rows = _rows(budgets)
+	rows[0]['mean_delta'] = float('nan')
+	with pytest.raises(ValueError, match='non-finite'):
+		results.decide_center_trace_masked_original_gate(rows, budgets=budgets)
+
+
 def test_center_trace_masked_handoff_reports_candidate_jobs() -> None:
 	budgets = ('cap25', 'cap50', 'cap100')
 	decision = results.decide_center_trace_masked_original_gate(
@@ -69,7 +86,7 @@ def test_center_trace_masked_handoff_reports_candidate_jobs() -> None:
 			'paired_matrix_identity',
 		)
 	}
-	handoff = results._handoff_payload(  # noqa: SLF001
+	handoff = results._handoff_payload(
 		{'source_identities': identities, 'decisions': decision}, execution={}
 	)
 	assert handoff['scientific_jobs_executed'] == 15
