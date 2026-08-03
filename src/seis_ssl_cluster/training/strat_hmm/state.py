@@ -10,7 +10,10 @@ if TYPE_CHECKING:
 
 	import torch
 
-	from seis_ssl_cluster.models.mae import AmplitudeMAE3D
+	from seis_ssl_cluster.models.mae import (
+		AmplitudeMAE3D,
+		LearnedEncoderReplacementToken,
+	)
 	from seis_ssl_cluster.stratigraphy import (
 		MultiResolutionOrderedPrototypeHeads,
 		OrderedPrototypeHead,
@@ -72,7 +75,23 @@ class StratHmmMultiHeadComponents:
 	head_ks: tuple[int, ...]
 
 
+@dataclass(frozen=True)
+class StratHmmCenterTraceMaskedComponents:
+	"""Trainable components for center-trace masked HMM pretraining."""
+
+	student: AmplitudeMAE3D
+	teacher: AmplitudeMAE3D | None
+	heads: MultiResolutionOrderedPrototypeHeads
+	replacement_token: LearnedEncoderReplacementToken
+	optimizer: torch.optim.Optimizer
+	mae_checkpoint_config: Mapping[str, object]
+	trainability_summary: TrainabilitySummary
+	head_spec: str
+	head_ks: tuple[int, ...]
+
+
 __all__ = [
+	'StratHmmCenterTraceMaskedComponents',
 	'StratHmmHeadOnlyComponents',
 	'StratHmmMultiHeadComponents',
 	'StratHmmResumeState',

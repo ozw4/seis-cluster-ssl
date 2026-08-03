@@ -18,6 +18,7 @@ from seis_ssl_cluster.stratigraphy import (
 	structured_hmm_prototype_loss,
 	usage_entropy_floor_loss,
 )
+from seis_ssl_cluster.training.strat_hmm.masking import COMMON_HARD_TARGET_HEAD_KS
 from seis_ssl_cluster.training.strat_hmm.runtime import (
 	_float_config,
 	_required_tensor,
@@ -409,6 +410,357 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 	return result
 
 
+def compute_strat_hmm_center_trace_masked_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
+	*,
+	heads: MultiResolutionOrderedPrototypeHeads,
+	encoded: Mapping[str, object],
+	teacher_encoded: Mapping[str, object] | None,
+	batch: Mapping[str, object],
+	replacement_mask: torch.Tensor,
+	loss_config: Mapping[str, object],
+	pseudo_target_config: Mapping[str, object],
+) -> dict[str, torch.Tensor]:
+	"""Compute the masked/visible hard objective for center-trace pretraining."""
+	tokens = _encoded_tokens(encoded)
+	if not bool(torch.isfinite(tokens).all().item()):
+		raise FloatingPointError('non-finite student encoded tokens')
+	if teacher_encoded is not None and not bool(
+		torch.isfinite(_encoded_tokens(teacher_encoded)).all().item()
+	):
+		raise FloatingPointError('non-finite teacher encoded tokens')
+	if heads.head_ks != COMMON_HARD_TARGET_HEAD_KS:
+		raise ValueError(
+			'center-trace masked training requires heads K=(6, 8, 10); '
+			f'got {heads.head_ks!r}'
+		)
+	consistency_weight = _float_config(loss_config, 'consistency_weight', 0.0)
+	if consistency_weight != 0.0:
+		raise ValueError(
+			'center-trace masked training requires consistency_weight to be zero'
+		)
+	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
+	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
+	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
+
+	outputs = heads(tokens)
+	head_keys = tuple(_head_key(k) for k in heads.head_ks)
+	if outputs.head_ks != heads.head_ks or tuple(outputs.outputs) != head_keys:
+		raise ValueError('multi-head model output does not match configured heads')
+	for head_key, output in outputs.outputs.items():
+		if not bool(torch.isfinite(output.logits).all().item()):
+			raise FloatingPointError(f'non-finite multi-head logits for {head_key}')
+
+	flat_replacement_mask = _center_trace_replacement_mask(
+		replacement_mask,
+		reference=tokens,
+		encoded=encoded,
+	)
+	targets = _multi_head_targets(batch, head_keys)
+	min_confidence = _float_config(pseudo_target_config, 'min_confidence', 0.0)
+	student_valid_mask = _multi_head_student_valid_mask(encoded, tokens)
+	shared_pseudo_valid_mask: torch.Tensor | None = None
+	values_by_head: dict[str, _MultiHeadTargetValues] = {}
+	for k, head_key in zip(heads.head_ks, head_keys, strict=True):
+		logits = outputs.outputs[head_key].logits
+		values = _multi_head_target_values(
+			targets[head_key],
+			reference=logits,
+			head_key=head_key,
+			require_unity_boundary_weight=False,
+		)
+		_validate_multi_head_labels(
+			values.labels,
+			valid_mask=values.valid_mask,
+			num_prototypes=k,
+			head_key=head_key,
+		)
+		if shared_pseudo_valid_mask is None:
+			shared_pseudo_valid_mask = values.valid_mask
+		elif tuple(values.valid_mask.shape) != tuple(shared_pseudo_valid_mask.shape):
+			raise ValueError('all multi-head valid mask shapes must match')
+		elif not torch.equal(values.valid_mask, shared_pseudo_valid_mask):
+			raise ValueError('all multi-head valid masks must match')
+		values_by_head[head_key] = values
+	if shared_pseudo_valid_mask is None:  # pragma: no cover - canonical heads nonempty
+		raise AssertionError('multi-head targets were unexpectedly empty')
+
+	base_supervised_valid = shared_pseudo_valid_mask
+	if student_valid_mask is not None:
+		base_supervised_valid = base_supervised_valid & student_valid_mask
+	supervised_valid_by_head: dict[str, torch.Tensor] = {}
+	for head_key in head_keys:
+		supervised_valid = base_supervised_valid
+		if min_confidence > 0.0:
+			supervised_valid = supervised_valid & values_by_head[
+				head_key
+			].confidence.ge(min_confidence)
+		supervised_valid_by_head[head_key] = supervised_valid
+	base_visible_valid = base_supervised_valid & ~flat_replacement_mask
+	eligible_column_count, selected_column_count = _center_trace_xy_column_metrics(
+		replacement_mask,
+		common_valid=shared_pseudo_valid_mask,
+		student_valid=student_valid_mask,
+		encoded=encoded,
+		reference=tokens,
+	)
+
+	prototype_losses_masked: list[torch.Tensor] = []
+	prototype_losses_visible: list[torch.Tensor] = []
+	usage_losses: list[torch.Tensor] = []
+	masked_fractions: list[torch.Tensor] = []
+	visible_fractions: list[torch.Tensor] = []
+	result: dict[str, torch.Tensor] = {}
+	entropy_floor = loss_config.get('entropy_floor')
+	for k, head_key in zip(heads.head_ks, head_keys, strict=True):
+		logits = outputs.outputs[head_key].logits
+		values = values_by_head[head_key]
+		supervised_valid = supervised_valid_by_head[head_key]
+		masked_valid = supervised_valid & flat_replacement_mask
+		visible_valid = supervised_valid & ~flat_replacement_mask
+		effective_weight = values.confidence * values.boundary_weight
+		if not bool(torch.isfinite(effective_weight).all().item()):
+			raise FloatingPointError(
+				f'non-finite effective target weights for {head_key}'
+			)
+		masked_loss = _center_trace_branch_prototype_loss(
+			logits,
+			values,
+			valid_mask=masked_valid,
+			head_key=head_key,
+			branch_name='masked',
+		)
+		visible_loss = _center_trace_branch_prototype_loss(
+			logits,
+			values,
+			valid_mask=visible_valid,
+			head_key=head_key,
+			branch_name='visible',
+		)
+		probs = torch.nn.functional.softmax(logits, dim=-1)
+		if usage_weight > 0.0:
+			entropy_floor_value = (
+				0.5 * math.log(k) if entropy_floor is None else float(entropy_floor)
+			)
+			usage_loss = usage_entropy_floor_loss(
+				probs,
+				valid_mask=supervised_valid,
+				entropy_floor=entropy_floor_value,
+			)
+		else:
+			usage_loss = _graph_zero(logits)
+		prototype_losses_masked.append(masked_loss)
+		prototype_losses_visible.append(visible_loss)
+		usage_losses.append(usage_loss)
+		masked_fractions.append(_safe_fraction(masked_valid, dtype=tokens.dtype))
+		visible_fractions.append(_safe_fraction(visible_valid, dtype=tokens.dtype))
+		result[f'loss_prototype_masked_{head_key}'] = masked_loss
+		result[f'loss_prototype_visible_{head_key}'] = visible_loss
+		result[f'loss_usage_{head_key}'] = usage_loss
+		result[f'target_usage_entropy_{head_key}'] = _target_usage_entropy(
+			values.labels,
+			supervised_valid,
+			num_prototypes=k,
+		)
+		result[f'prototype_usage_entropy_{head_key}'] = _prototype_usage_entropy(
+			probs,
+			supervised_valid,
+		)
+		result[f'masked_top1_accuracy_{head_key}'] = _center_trace_top1_accuracy(
+			logits,
+			values.labels,
+			masked_valid,
+		)
+
+	prototype_masked = torch.stack(prototype_losses_masked).mean()
+	prototype_visible = torch.stack(prototype_losses_visible).mean()
+	prototype_loss = 0.5 * prototype_masked + 0.5 * prototype_visible
+	usage_loss = torch.stack(usage_losses).mean()
+
+	# Distillation uses one shared token mask; require every head to keep the
+	# visible token after its configured confidence filtering.
+	distillation_valid = base_visible_valid
+	for head_key in head_keys:
+		distillation_valid = distillation_valid & supervised_valid_by_head[head_key]
+	if teacher_encoded is not None:
+		teacher_valid_mask = _multi_head_student_valid_mask(
+			teacher_encoded,
+			tokens,
+		)
+		if teacher_valid_mask is not None:
+			distillation_valid = distillation_valid & teacher_valid_mask
+	if distillation_weight > 0.0:
+		if teacher_encoded is None:
+			raise ValueError(
+				'teacher encoded tokens are required for feature distillation'
+			)
+		if bool(distillation_valid.any().item()):
+			distillation_loss = feature_distillation_loss(
+				tokens,
+				_encoded_tokens(teacher_encoded),
+				valid_mask=distillation_valid,
+			)
+		else:
+			distillation_loss = _graph_zero(tokens)
+	else:
+		distillation_loss = _graph_zero(tokens)
+
+	consistency_contribution = _graph_zero(
+		torch.stack([output.logits.sum() for output in outputs.outputs.values()])
+	)
+	result.update(
+		{
+			'loss': prototype_weight * prototype_loss
+			+ usage_weight * usage_loss
+			+ distillation_weight * distillation_loss,
+			'loss_prototype': prototype_loss,
+			'loss_prototype_masked': prototype_masked,
+			'loss_prototype_visible': prototype_visible,
+			'loss_usage': usage_loss,
+			'loss_distillation': distillation_loss,
+			'masked_supervised_token_fraction': torch.stack(masked_fractions).mean(),
+			'visible_supervised_token_fraction': torch.stack(visible_fractions).mean(),
+			'valid_distillation_token_fraction': _safe_fraction(
+				distillation_valid,
+				dtype=tokens.dtype,
+			),
+			'eligible_xy_column_count': eligible_column_count,
+			'selected_xy_column_count': selected_column_count,
+			'loss_consistency_contribution': consistency_contribution,
+		}
+	)
+	if not all(torch.isfinite(value).all().item() for value in result.values()):
+		raise FloatingPointError('non-finite center-trace masked loss or metric')
+	return result
+
+
+def _center_trace_branch_prototype_loss(
+	logits: torch.Tensor,
+	values: _MultiHeadTargetValues,
+	*,
+	valid_mask: torch.Tensor,
+	head_key: str,
+	branch_name: str,
+) -> torch.Tensor:
+	effective_weight = values.confidence * values.boundary_weight
+	branch_weights = effective_weight[valid_mask]
+	if not bool(branch_weights.gt(0.0).any().item()):
+		raise ValueError(
+			f'center-trace {branch_name} branch for {head_key} has no positive '
+			'effective target weight'
+		)
+	return structured_hmm_prototype_loss(
+		logits,
+		values.labels,
+		valid_mask=valid_mask,
+		confidence=values.confidence,
+		boundary_weight=values.boundary_weight,
+	)
+
+
+def _center_trace_top1_accuracy(
+	logits: torch.Tensor,
+	labels: torch.Tensor,
+	valid_mask: torch.Tensor,
+) -> torch.Tensor:
+	if not bool(valid_mask.any().item()):
+		return _graph_zero(logits)
+	predicted = logits.argmax(dim=-1)
+	return (predicted[valid_mask] == labels[valid_mask]).to(dtype=logits.dtype).mean()
+
+
+def _center_trace_replacement_mask(
+	replacement_mask: torch.Tensor,
+	*,
+	reference: torch.Tensor,
+	encoded: Mapping[str, object],
+) -> torch.Tensor:
+	if not isinstance(replacement_mask, torch.Tensor):
+		raise TypeError('replacement_mask must be a tensor')
+	if replacement_mask.dtype != torch.bool:
+		raise TypeError(
+			f'replacement_mask must have dtype torch.bool; got {replacement_mask.dtype}'
+		)
+	if replacement_mask.device != reference.device:
+		raise ValueError(
+			'replacement_mask must be on the encoded-token device; '
+			f'got {replacement_mask.device}, expected {reference.device}'
+		)
+	if replacement_mask.ndim != 4:
+		raise ValueError(
+			'replacement_mask must have shape [B, TX, TY, TZ]; '
+			f'got shape={tuple(replacement_mask.shape)!r}'
+		)
+	if replacement_mask.shape[0] != reference.shape[0]:
+		raise ValueError('replacement_mask batch dimension must match encoded tokens')
+	token_grid_shape = encoded.get('token_grid_shape')
+	if token_grid_shape is not None and tuple(replacement_mask.shape[1:]) != tuple(
+		token_grid_shape
+	):
+		raise ValueError(
+			'replacement_mask grid shape must match encoded token_grid_shape; '
+			f'got {tuple(replacement_mask.shape[1:])!r}, expected {token_grid_shape!r}'
+		)
+	flattened = replacement_mask.reshape(reference.shape[0], -1)
+	if tuple(flattened.shape) != tuple(reference.shape[:-1]):
+		raise ValueError(
+			'replacement_mask flattened token count must match encoded tokens; '
+			f'got {tuple(flattened.shape)!r}, expected {tuple(reference.shape[:-1])!r}'
+		)
+	return flattened
+
+
+def _center_trace_xy_column_metrics(
+	replacement_mask: torch.Tensor,
+	*,
+	common_valid: torch.Tensor,
+	student_valid: torch.Tensor | None,
+	encoded: Mapping[str, object],
+	reference: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+	encoded_grid_shape = encoded.get('token_grid_shape')
+	if replacement_mask.ndim == 4:
+		grid_shape = tuple(int(size) for size in replacement_mask.shape[1:])
+	elif isinstance(encoded_grid_shape, tuple) and len(encoded_grid_shape) == 3:
+		grid_shape = encoded_grid_shape
+	else:
+		grid_shape = None
+	if grid_shape is not None:
+		token_count = math.prod(grid_shape)
+		if token_count == reference.shape[1]:
+			common_grid = common_valid.reshape(reference.shape[0], *grid_shape)
+			student_grid = (
+				student_valid.reshape(reference.shape[0], *grid_shape)
+				if student_valid is not None
+				else torch.ones_like(common_grid)
+			)
+			replacement_grid = (
+				replacement_mask
+				if replacement_mask.ndim == 4
+				else replacement_mask.reshape(reference.shape[0], *grid_shape)
+			)
+			eligible = (common_grid & student_grid).any(dim=3).sum(dim=(1, 2))
+			selected = replacement_grid.any(dim=3).sum(dim=(1, 2))
+			return eligible.to(dtype=reference.dtype).mean(), selected.to(
+				dtype=reference.dtype
+			).mean()
+	if student_valid is None:
+		student_valid = torch.ones_like(common_valid)
+	return (
+		(common_valid & student_valid).sum(dim=1).to(dtype=reference.dtype).mean(),
+		_flatten_center_trace_mask(replacement_mask, reference)
+		.sum(dim=1)
+		.to(dtype=reference.dtype)
+		.mean(),
+	)
+
+
+def _flatten_center_trace_mask(
+	replacement_mask: torch.Tensor,
+	reference: torch.Tensor,
+) -> torch.Tensor:
+	return replacement_mask.reshape(reference.shape[0], -1)
+
+
 def compute_strat_hmm_multi_head_posterior_losses(  # noqa: C901, PLR0912, PLR0915
 	*,
 	heads: MultiResolutionOrderedPrototypeHeads,
@@ -597,6 +949,7 @@ def _multi_head_target_values(
 	*,
 	reference: torch.Tensor,
 	head_key: str,
+	require_unity_boundary_weight: bool = True,
 ) -> _MultiHeadTargetValues:
 	if not isinstance(target, Mapping):
 		raise TypeError(f'strat_multi_targets[{head_key!r}] must be a mapping')
@@ -650,7 +1003,9 @@ def _multi_head_target_values(
 		raise ValueError(
 			f'multi-head {head_key!r} boundary weight must be nonnegative',
 		)
-	if not bool(torch.all(boundary_weight[valid_mask] == 1.0).item()):
+	if require_unity_boundary_weight and not bool(
+		torch.all(boundary_weight[valid_mask] == 1.0).item()
+	):
 		raise ValueError('multi-head boundary weight must be one for every valid token')
 	return _MultiHeadTargetValues(
 		labels=labels,
@@ -883,6 +1238,7 @@ _strat_head_losses = compute_strat_hmm_pretext_losses
 
 
 __all__ = [
+	'compute_strat_hmm_center_trace_masked_losses',
 	'compute_strat_hmm_multi_head_losses',
 	'compute_strat_hmm_multi_head_posterior_losses',
 	'compute_strat_hmm_pretext_losses',

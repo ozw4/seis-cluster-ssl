@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, cast
 import torch
 
 from seis_ssl_cluster.embedding.extractor import build_model_from_config
+from seis_ssl_cluster.models.mae import LearnedEncoderReplacementToken
 from seis_ssl_cluster.stratigraphy import (
 	MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
 	MultiResolutionOrderedPrototypeHeads,
@@ -26,6 +27,7 @@ from seis_ssl_cluster.training.strat_hmm.runtime import (
 	_path_config,
 )
 from seis_ssl_cluster.training.strat_hmm.state import (
+	StratHmmCenterTraceMaskedComponents,
 	StratHmmHeadOnlyComponents,
 	StratHmmMultiHeadComponents,
 	TrainabilitySummary,
@@ -152,6 +154,76 @@ def build_strat_hmm_multi_head_components(
 		student=student,
 		teacher=teacher,
 		heads=heads,
+		optimizer=optimizer,
+		mae_checkpoint_config=_extraction_compatible_config(
+			teacher_config,
+			output_root=_path_config(_mapping(config, 'paths'), 'output_root'),
+			strat_data_config=_mapping(config, 'data'),
+			strat_zero_mask_config=_mapping(config, 'zero_mask'),
+		),
+		trainability_summary=trainability_summary,
+		head_spec=MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
+		head_ks=heads.head_ks,
+	)
+
+
+def build_strat_hmm_center_trace_masked_components(
+	config: Mapping[str, object],
+	*,
+	device: torch.device | str,
+	replacement_token_seed: int | None = None,
+) -> StratHmmCenterTraceMaskedComponents:
+	"""Build the isolated center-trace masked multi-head training components."""
+	student, teacher, teacher_config, trainability_summary = _build_student_teacher(
+		config,
+		device=device,
+	)
+	head_config = _mapping(config, 'head')
+	if head_config.get('spec') != MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1:
+		msg = f'unsupported strat HMM head.spec: {head_config.get("spec")!r}'
+		raise ValueError(msg)
+	heads = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=student.encoder_dim,
+		ks=cast('Sequence[int]', head_config['ks']),
+		projection_dim=_optional_int_config(head_config, 'projection_dim'),
+		temperature=_float_config(head_config, 'temperature', 0.1),
+		normalize=_bool_config(head_config, 'normalize', default=True),
+	).to(device)
+	if heads.head_ks != (6, 8, 10):
+		raise ValueError(
+			'center-trace masked training requires heads K=(6, 8, 10); '
+			f'got {heads.head_ks!r}'
+		)
+
+	train_config = _mapping(config, 'train')
+	training_seed = _int_config(train_config, 'seed', 42)
+	if replacement_token_seed is None:
+		replacement_token_seed = _int_config(
+			train_config,
+			'replacement_token_seed',
+			training_seed,
+		)
+	replacement_token = LearnedEncoderReplacementToken(
+		student.encoder_dim,
+		seed=replacement_token_seed,
+		device=device,
+		dtype=_module_dtype(student),
+	)
+	param_groups = _center_trace_optimizer_param_groups(
+		student=student,
+		head=heads,
+		replacement_token=replacement_token,
+		train_config=train_config,
+	)
+	optimizer = torch.optim.AdamW(
+		param_groups,
+		weight_decay=_float_config(train_config, 'weight_decay', 0.05),
+	)
+	return StratHmmCenterTraceMaskedComponents(
+		student=student,
+		teacher=teacher,
+		heads=heads,
+		replacement_token=replacement_token,
 		optimizer=optimizer,
 		mae_checkpoint_config=_extraction_compatible_config(
 			teacher_config,
@@ -317,6 +389,86 @@ def _optimizer_param_groups(
 	return param_groups
 
 
+def _center_trace_optimizer_param_groups(
+	*,
+	student: AmplitudeMAE3D,
+	head: torch.nn.Module,
+	replacement_token: LearnedEncoderReplacementToken,
+	train_config: Mapping[str, object],
+) -> list[dict[str, object]]:
+	"""Return the fixed head/encoder/spatial-context optimizer partition."""
+	head_params = [
+		parameter for parameter in head.parameters() if parameter.requires_grad
+	]
+	encoder_params = [
+		parameter
+		for parameter in student.encoder.parameters()
+		if parameter.requires_grad
+	]
+	spatial_context_params = [
+		parameter
+		for parameter in replacement_token.parameters()
+		if parameter.requires_grad
+	]
+	if not head_params:
+		raise ValueError('center-trace masked heads have no trainable parameters')
+	if not encoder_params:
+		raise ValueError(
+			'center-trace masked student has no trainable encoder parameters'
+		)
+	if not spatial_context_params:
+		raise ValueError(
+			'center-trace masked replacement token has no trainable parameters'
+		)
+	param_groups: list[dict[str, object]] = [
+		{
+			'params': head_params,
+			'lr': _float_config(train_config, 'lr', 3.0e-4),
+			'name': 'head',
+		},
+		{
+			'params': encoder_params,
+			'lr': _float_config(train_config, 'encoder_lr', 3.0e-5),
+			'name': 'encoder',
+		},
+		{
+			'params': spatial_context_params,
+			'lr': _float_config(train_config, 'lr', 3.0e-4),
+			'name': 'spatial_context',
+		},
+	]
+	trainable_ids = {
+		id(parameter)
+		for module in (student, head, replacement_token)
+		for parameter in module.parameters()
+		if parameter.requires_grad
+	}
+	group_parameters = [
+		parameter
+		for group in param_groups
+		for parameter in cast('Sequence[torch.nn.Parameter]', group['params'])
+	]
+	group_ids = {id(parameter) for parameter in group_parameters}
+	if len(group_ids) != len(group_parameters):
+		raise ValueError('center-trace optimizer parameter groups contain duplicates')
+	if group_ids != trainable_ids:
+		raise ValueError(
+			'center-trace optimizer parameter groups do not exactly match trainable '
+			'parameters'
+		)
+	return param_groups
+
+
+def _module_dtype(module: torch.nn.Module) -> torch.dtype:
+	try:
+		parameter = next(module.parameters())
+	except StopIteration as exc:
+		raise ValueError('student must contain at least one parameter') from exc
+	if not parameter.dtype.is_floating_point:
+		raise TypeError('student parameters must have a floating dtype')
+	return parameter.dtype
+
+
 def _trainability_metrics(summary: TrainabilitySummary) -> dict[str, float]:
 	return {
 		'trainable_parameter_count': float(summary.trainable_parameter_count),
@@ -395,9 +547,11 @@ def _extraction_compatible_config(
 
 
 __all__ = [
+	'StratHmmCenterTraceMaskedComponents',
 	'StratHmmHeadOnlyComponents',
 	'StratHmmMultiHeadComponents',
 	'TrainabilitySummary',
+	'build_strat_hmm_center_trace_masked_components',
 	'build_strat_hmm_components',
 	'build_strat_hmm_head_only_components',
 	'build_strat_hmm_multi_head_components',
