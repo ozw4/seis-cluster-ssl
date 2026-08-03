@@ -91,6 +91,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_robustness import (
 from seis_ssl_cluster.config.performance_migration_validation import (
 	performance_migration_validation_config_from_mapping,
 )
+from seis_ssl_cluster.config.pretraining import _multi_head_target_hashes
 from seis_ssl_cluster.config.schema import (
 	STAGE_F3_INSPECT_FILES,
 	STAGE_F3_INSPECTION_REPORT,
@@ -200,6 +201,9 @@ F3_STRAT_HMM_XY_NEIGHBOR_CONSENSUS_ROOT = (
 F3_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_ROOT = (
 	F3_ROOT / '102_strat_hmm_multi_head_k6810_xy_neighbor_unanimous_v1'
 )
+F3_STRAT_HMM_CENTER_TRACE_MASKED_ROOT = (
+	F3_ROOT / '104_strat_hmm_multi_head_k6810_center_trace_masked_v1'
+)
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
@@ -230,6 +234,10 @@ F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 		/ '03_train_xy_neighbor_unanimous_smoke.yaml',
 		F3_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_ROOT
 		/ '04_train_xy_neighbor_unanimous_full.yaml',
+		F3_STRAT_HMM_CENTER_TRACE_MASKED_ROOT
+		/ '01_train_center_trace_masked_smoke.yaml',
+		F3_STRAT_HMM_CENTER_TRACE_MASKED_ROOT
+		/ '02_train_center_trace_masked_full.yaml',
 	],
 )
 F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
@@ -247,8 +255,14 @@ F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS = sorted(
 		/ '04_extract_xy_neighbor_consensus_embeddings.yaml',
 		F3_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_ROOT
 		/ '05_extract_xy_neighbor_unanimous_embeddings.yaml',
+		F3_STRAT_HMM_CENTER_TRACE_MASKED_ROOT
+		/ '03_extract_center_trace_masked_embeddings.yaml',
 	],
 )
+F3_STRAT_HMM_CENTER_TRACE_MASKED_VALIDATION_CONFIGS = [
+	F3_STRAT_HMM_CENTER_TRACE_MASKED_ROOT
+	/ '04_validate_center_trace_masked_pretraining.yaml',
+]
 F3_STRAT_HMM_STUDENT_LITHOLOGY_TOKEN_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT / '05_build_lithology_token_dataset.yaml',
@@ -461,6 +475,10 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	('f3 embedding', F3_EMBEDDING_CONFIGS),
 	('f3 stratigraphic clustering', F3_STRATIGRAPHIC_CLUSTERING_CONFIGS),
 	('f3 strat hmm pretext', F3_STRAT_HMM_PRETEXT_CONFIGS),
+	(
+		'f3 strat hmm center-trace masked validation',
+		F3_STRAT_HMM_CENTER_TRACE_MASKED_VALIDATION_CONFIGS,
+	),
 	('f3 strat hmm shuffled targets', F3_STRAT_HMM_SHUFFLED_TARGET_CONFIGS),
 	(
 		'f3 strat hmm student embedding',
@@ -907,6 +925,28 @@ def test_active_f3_multi_head_pretext_config_contract(
 		no_consistency['identity']['scientific_identity']['target_manifest_sha256']
 	)
 	assert comparison == no_consistency
+
+
+@pytest.mark.parametrize(
+	'config_path', F3_STRAT_HMM_CENTER_TRACE_MASKED_VALIDATION_CONFIGS
+)
+def test_active_f3_center_trace_masked_validation_configs_load(
+	config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT', '/test/artifacts/seis_ssl_cluster'
+	)
+	config = load_config(config_path)
+	assert set(config) == {
+		'artifact_root',
+		'experiment_root',
+		'target_manifest',
+		'hard_full_config',
+		'hard_handoff',
+		'center_trace_masked_smoke_config',
+		'center_trace_masked_full_config',
+		'center_trace_masked_embedding_config',
+	}
 
 
 def test_active_f3_m5_ls_config_contract(
@@ -1735,6 +1775,12 @@ def _config_with_existing_strat_hmm_pretext_inputs(
 			control_summary=control,
 		)
 		config['pseudo_targets']['manifest'] = str(manifest)
+		if 'target_head_hashes' in config['identity']['scientific_identity']:
+			config['identity']['scientific_identity']['target_head_hashes'] = (
+				_multi_head_target_hashes(
+					json.loads(manifest.read_text(encoding='utf-8'))
+				)
+			)
 		if config['pseudo_targets'].get('target_representation') == (
 			'ordered_path_state_posterior_v1'
 		):

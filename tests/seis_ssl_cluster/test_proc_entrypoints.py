@@ -234,6 +234,13 @@ HELP_FLAG_CONTRACTS = {
 		'--only-missing',
 		'--quarantine-invalid',
 	),
+	'validate_f3_center_trace_masked_pretraining.py': (
+		'--config',
+		'--phase',
+		'--dry-run',
+		'--only-missing',
+		'--quarantine-invalid',
+	),
 	'visualize_clusters.py': (
 		'--config',
 		'--dry-run',

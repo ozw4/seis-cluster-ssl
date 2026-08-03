@@ -65,13 +65,19 @@ def main() -> None:
 	_apply_cli_overrides(
 		raw_config,
 		device=args.device,
-		max_steps=args.max_steps,
+		max_steps=None,
 		output_root=args.output_root,
 	)
 	config = resolve_config_for_cli(
 		raw_config,
 		resolver=resolve_strat_hmm_pretext_config,
 		config_path=config_path,
+	)
+	_apply_cli_overrides(
+		config,
+		device=None,
+		max_steps=args.max_steps,
+		output_root=None,
 	)
 	if args.resume is not None and not args.resume.is_file():
 		raise FileNotFoundError(f'resume checkpoint does not exist: {args.resume}')
