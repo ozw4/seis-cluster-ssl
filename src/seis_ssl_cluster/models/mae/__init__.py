@@ -13,12 +13,14 @@ from seis_ssl_cluster.models.mae.positional_encoding import (
 	restore_decoder_sequence,
 	select_visible_tokens,
 )
+from seis_ssl_cluster.models.mae.replacement import LearnedEncoderReplacementToken
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.models.mae.model import AmplitudeMAE3D
 
 __all__ = [
 	'AmplitudeMAE3D',
+	'LearnedEncoderReplacementToken',
 	'build_3d_sincos_position_embedding',
 	'compute_num_patches',
 	'patchify_3d',

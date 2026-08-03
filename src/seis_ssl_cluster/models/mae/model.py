@@ -160,9 +160,32 @@ class AmplitudeMAE3D(nn.Module):
 		x: torch.Tensor,
 		*,
 		valid_mask: torch.Tensor | None = None,
+		replacement_mask: torch.Tensor | None = None,
+		replacement_token: torch.Tensor | None = None,
 	) -> dict[str, torch.Tensor | tuple[int, int, int] | None]:
-		"""Encode all spatial tokens without MAE masking."""
+		"""Encode all spatial tokens, optionally replacing selected inputs."""
+		if (replacement_mask is None) != (replacement_token is None):
+			raise ValueError(
+				'replacement_mask and replacement_token must be provided together'
+			)
 		_target_patches, tokens, token_grid_shape = self._project_patches(x)
+		if replacement_mask is not None and replacement_token is not None:
+			_validate_replacement_mask(
+				replacement_mask,
+				tokens.shape[0],
+				token_grid_shape,
+				tokens.device,
+			)
+			_validate_replacement_token(
+				replacement_token,
+				encoder_dim=self.encoder_dim,
+				reference=tokens,
+			)
+			tokens = torch.where(
+				replacement_mask.reshape(tokens.shape[0], -1).unsqueeze(-1),
+				replacement_token.reshape(1, 1, self.encoder_dim),
+				tokens,
+			)
 		pos = self._position_embedding(
 			token_grid_shape,
 			self.encoder_dim,
@@ -180,11 +203,14 @@ class AmplitudeMAE3D(nn.Module):
 			key_padding_mask = ~token_valid_mask
 
 		encoded = self.encoder(tokens + pos.unsqueeze(0), key_padding_mask)
-		return {
+		output: dict[str, torch.Tensor | tuple[int, int, int] | None] = {
 			'tokens': encoded,
 			'token_grid_shape': token_grid_shape,
 			'token_valid_mask': token_valid_mask,
 		}
+		if replacement_mask is not None:
+			output['replacement_mask'] = replacement_mask
+		return output
 
 	def _project_patches(
 		self,
@@ -338,6 +364,74 @@ def _validate_bool_mask(
 			f'got mask_device={mask.device}, x_device={device}'
 		)
 		raise ValueError(msg)
+
+
+def _validate_replacement_mask(
+	replacement_mask: torch.Tensor,
+	batch_size: int,
+	token_grid_shape: tuple[int, int, int],
+	device: torch.device,
+) -> None:
+	if not isinstance(replacement_mask, torch.Tensor):
+		raise TypeError(
+			'replacement_mask must be a tensor; '
+			f'got {type(replacement_mask).__name__}'
+		)
+	if replacement_mask.ndim != 4 or tuple(replacement_mask.shape) != (
+		batch_size,
+		*token_grid_shape,
+	):
+		raise ValueError(
+			'replacement_mask must have shape [B, TX, TY, TZ]; '
+			f'got shape={tuple(replacement_mask.shape)!r}, '
+			f'expected={(batch_size, *token_grid_shape)!r}'
+		)
+	if replacement_mask.dtype != torch.bool:
+		raise TypeError(
+			f'replacement_mask must have dtype torch.bool; got {replacement_mask.dtype}'
+		)
+	if replacement_mask.device != device:
+		raise ValueError(
+			'replacement_mask must be on the same device as x; '
+			f'got mask_device={replacement_mask.device}, x_device={device}'
+		)
+
+
+def _validate_replacement_token(
+	replacement_token: torch.Tensor,
+	*,
+	encoder_dim: int,
+	reference: torch.Tensor,
+) -> None:
+	if not isinstance(replacement_token, torch.Tensor):
+		raise TypeError(
+			'replacement_token must be a tensor; '
+			f'got {type(replacement_token).__name__}'
+		)
+	if tuple(replacement_token.shape) != (encoder_dim,):
+		raise ValueError(
+			'replacement_token must have shape [encoder_dim]; '
+			f'got shape={tuple(replacement_token.shape)!r}, expected={(encoder_dim,)!r}'
+		)
+	if not replacement_token.dtype.is_floating_point:
+		raise TypeError(
+			'replacement_token must have a floating dtype; '
+			f'got {replacement_token.dtype}'
+		)
+	if replacement_token.device != reference.device:
+		raise ValueError(
+			'replacement_token must be on the same device as encoder tokens; '
+			f'got token_device={replacement_token.device}, '
+			f'encoder_device={reference.device}'
+		)
+	if replacement_token.dtype != reference.dtype:
+		raise TypeError(
+			'replacement_token dtype must match encoder tokens; '
+			f'got token_dtype={replacement_token.dtype}, '
+			f'encoder_dtype={reference.dtype}'
+		)
+	if not bool(torch.isfinite(replacement_token).all().item()):
+		raise ValueError('replacement_token must contain only finite values')
 
 
 def _validate_input_volume(x: torch.Tensor, in_channels: int) -> None:
