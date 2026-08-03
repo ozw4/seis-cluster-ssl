@@ -221,7 +221,7 @@ def run_embedding_extraction(
 		accumulator=timer.accumulator,
 	)
 	try:
-		return [
+		results = [
 			extract_survey_embeddings(
 				manifest,
 				model=model,
@@ -237,9 +237,31 @@ def run_embedding_extraction(
 			)
 			for manifest in manifests
 		]
+		_write_embedding_execution_summary(settings.output_dir, results)
+		return results
 	finally:
 		if settings.stage_timing:
 			timer.write_json(settings.output_dir / 'stage_timings.json')
+
+
+def _write_embedding_execution_summary(
+	output_dir: Path, results: list[SurveyEmbeddingResult]
+) -> None:
+	"""Persist the fresh/reuse disposition for the completed extraction call."""
+	payload = {
+		'artifact_type': 'embedding_extraction_execution',
+		'schema_version': 1,
+		'fresh': sum(not result.skipped for result in results),
+		'reuse': sum(result.skipped for result in results),
+		'survey_count': len(results),
+	}
+	path = output_dir / 'embedding_extraction_execution.json'
+	tmp_path = path.with_name(f'.{path.name}.tmp')
+	tmp_path.write_text(
+		json.dumps(payload, indent=2, sort_keys=True, allow_nan=False) + '\n',
+		encoding='utf-8',
+	)
+	tmp_path.replace(path)
 
 
 def extraction_settings_from_config(

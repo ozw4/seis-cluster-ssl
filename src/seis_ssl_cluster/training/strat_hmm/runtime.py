@@ -122,6 +122,7 @@ def _snapshot_run_inputs(
 	output_root: Path,
 	config: Mapping[str, object],
 	control_identity: Mapping[str, object] | None = None,
+	execution_counts: Mapping[str, object] | None = None,
 	overwrite: bool = False,
 ) -> None:
 	_write_json(
@@ -131,7 +132,10 @@ def _snapshot_run_inputs(
 	)
 	_write_json(
 		output_root / 'run_metadata.json',
-		_run_metadata_payload(control_identity=control_identity),
+		_run_metadata_payload(
+			control_identity=control_identity,
+			execution_counts=execution_counts,
+		),
 		overwrite=overwrite,
 	)
 
@@ -141,9 +145,13 @@ def _write_run_metadata(
 	output_root: Path,
 	trainability_summary: TrainabilitySummary,
 	control_identity: Mapping[str, object] | None = None,
+	execution_counts: Mapping[str, object] | None = None,
 	overwrite: bool,
 ) -> None:
-	payload = _run_metadata_payload(control_identity=control_identity)
+	payload = _run_metadata_payload(
+		control_identity=control_identity,
+		execution_counts=execution_counts,
+	)
 	payload['trainability_summary'] = _trainability_summary_payload(
 		trainability_summary,
 	)
@@ -151,7 +159,9 @@ def _write_run_metadata(
 
 
 def _run_metadata_payload(
-	*, control_identity: Mapping[str, object] | None = None
+	*,
+	control_identity: Mapping[str, object] | None = None,
+	execution_counts: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
 	payload: dict[str, object] = {
 		'created_at_utc': datetime.now(timezone.utc).isoformat(),
@@ -160,6 +170,8 @@ def _run_metadata_payload(
 	}
 	if control_identity is not None:
 		payload['control_identity'] = _to_json_safe(control_identity)
+	if execution_counts is not None:
+		payload['execution_counts'] = _to_json_safe(execution_counts)
 	return payload
 
 

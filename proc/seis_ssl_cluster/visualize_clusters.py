@@ -502,7 +502,7 @@ def run_cluster_visualization(  # noqa: C901, PLR0912, PLR0915
 				output_dir=output_dir / f'k{k}',
 				include_amplitude_norm=include_amplitude,
 				selected_survey_ids=(
-					requested_survey_ids if requested_survey_ids else None
+					requested_survey_ids or None
 				),
 			)
 			summary_count += 1

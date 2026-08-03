@@ -241,6 +241,13 @@ HELP_FLAG_CONTRACTS = {
 		'--only-missing',
 		'--quarantine-invalid',
 	),
+	'publish_f3_center_trace_masked_pretraining_results.py': (
+		'--artifact-root',
+		'--workspace-root',
+		'--pretraining-handoff',
+		'--output-dir',
+		'--dry-run',
+	),
 	'visualize_clusters.py': (
 		'--config',
 		'--dry-run',

@@ -118,10 +118,15 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		resume=resume,
 		allow_overwrite=allow_overwrite or _preflight_only_output_root(output_root),
 	)
+	execution_counts = {
+		'fresh': int(resume is None),
+		'resume': int(resume is not None),
+	}
 	_snapshot_run_inputs(
 		output_root=output_root,
 		config=config,
 		control_identity=control_identity,
+		execution_counts=execution_counts,
 		overwrite=(allow_overwrite and resume is None),
 	)
 
@@ -240,6 +245,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		output_root=output_root,
 		trainability_summary=components.trainability_summary,
 		control_identity=control_identity,
+		execution_counts=execution_counts,
 		overwrite=True,
 	)
 	amp_enabled = (

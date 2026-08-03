@@ -1,0 +1,520 @@
+{
+  "artifact_type": "f3_center_trace_masked_pretraining_review",
+  "baseline_candidate_fixed_field_parity": {
+    "allowed_differences": [
+      "paths.output_root",
+      "identity.model_tag",
+      "identity.scientific_identity center-trace fields",
+      "spatial_context"
+    ],
+    "candidate_runtime": {
+      "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+      "initial_spatial_context_state_sha256": "6edf1303c88e534ee6ed93a67cd5d4be9bc167e91e06f8d4224a7ee51276740a",
+      "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+      "optimizer_group_identity": [
+        {
+          "lr": 0.0003,
+          "name": "head",
+          "parameter_names": [
+            "head.heads.k6.prototypes",
+            "head.heads.k6.projection.weight",
+            "head.heads.k6.projection.bias",
+            "head.heads.k8.prototypes",
+            "head.heads.k8.projection.weight",
+            "head.heads.k8.projection.bias",
+            "head.heads.k10.prototypes",
+            "head.heads.k10.projection.weight",
+            "head.heads.k10.projection.bias"
+          ]
+        },
+        {
+          "lr": 1e-05,
+          "name": "encoder",
+          "parameter_names": [
+            "student.encoder.layers.7.norm1.weight",
+            "student.encoder.layers.7.norm1.bias",
+            "student.encoder.layers.7.attention.in_proj_weight",
+            "student.encoder.layers.7.attention.in_proj_bias",
+            "student.encoder.layers.7.attention.out_proj.weight",
+            "student.encoder.layers.7.attention.out_proj.bias",
+            "student.encoder.layers.7.norm2.weight",
+            "student.encoder.layers.7.norm2.bias",
+            "student.encoder.layers.7.mlp.0.weight",
+            "student.encoder.layers.7.mlp.0.bias",
+            "student.encoder.layers.7.mlp.3.weight",
+            "student.encoder.layers.7.mlp.3.bias"
+          ]
+        },
+        {
+          "lr": 0.0003,
+          "name": "spatial_context",
+          "parameter_names": [
+            "spatial_context.replacement_token"
+          ]
+        }
+      ],
+      "trainability_summary": {
+        "frozen_parameter_count": 16007680,
+        "trainable_names": [
+          "encoder.layers.7.norm1.weight",
+          "encoder.layers.7.norm1.bias",
+          "encoder.layers.7.attention.in_proj_weight",
+          "encoder.layers.7.attention.in_proj_bias",
+          "encoder.layers.7.attention.out_proj.weight",
+          "encoder.layers.7.attention.out_proj.bias",
+          "encoder.layers.7.norm2.weight",
+          "encoder.layers.7.norm2.bias",
+          "encoder.layers.7.mlp.0.weight",
+          "encoder.layers.7.mlp.0.bias",
+          "encoder.layers.7.mlp.3.weight",
+          "encoder.layers.7.mlp.3.bias"
+        ],
+        "trainable_parameter_count": 1774464
+      }
+    },
+    "hard_runtime": {
+      "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+      "initial_spatial_context_state_sha256": null,
+      "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+      "optimizer_group_identity": [
+        {
+          "lr": 0.0003,
+          "name": "head",
+          "parameter_names": [
+            "head.heads.k6.prototypes",
+            "head.heads.k6.projection.weight",
+            "head.heads.k6.projection.bias",
+            "head.heads.k8.prototypes",
+            "head.heads.k8.projection.weight",
+            "head.heads.k8.projection.bias",
+            "head.heads.k10.prototypes",
+            "head.heads.k10.projection.weight",
+            "head.heads.k10.projection.bias"
+          ]
+        },
+        {
+          "lr": 1e-05,
+          "name": "encoder",
+          "parameter_names": [
+            "student.encoder.layers.7.norm1.weight",
+            "student.encoder.layers.7.norm1.bias",
+            "student.encoder.layers.7.attention.in_proj_weight",
+            "student.encoder.layers.7.attention.in_proj_bias",
+            "student.encoder.layers.7.attention.out_proj.weight",
+            "student.encoder.layers.7.attention.out_proj.bias",
+            "student.encoder.layers.7.norm2.weight",
+            "student.encoder.layers.7.norm2.bias",
+            "student.encoder.layers.7.mlp.0.weight",
+            "student.encoder.layers.7.mlp.0.bias",
+            "student.encoder.layers.7.mlp.3.weight",
+            "student.encoder.layers.7.mlp.3.bias"
+          ]
+        }
+      ],
+      "trainability_summary": {
+        "frozen_parameter_count": 16007680,
+        "trainable_names": [
+          "encoder.layers.7.norm1.weight",
+          "encoder.layers.7.norm1.bias",
+          "encoder.layers.7.attention.in_proj_weight",
+          "encoder.layers.7.attention.in_proj_bias",
+          "encoder.layers.7.attention.out_proj.weight",
+          "encoder.layers.7.attention.out_proj.bias",
+          "encoder.layers.7.norm2.weight",
+          "encoder.layers.7.norm2.bias",
+          "encoder.layers.7.mlp.0.weight",
+          "encoder.layers.7.mlp.0.bias",
+          "encoder.layers.7.mlp.3.weight",
+          "encoder.layers.7.mlp.3.bias"
+        ],
+        "trainable_parameter_count": 1774464
+      }
+    },
+    "status": "PASS"
+  },
+  "canonical_valid_mask_parity": {
+    "current_k6": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+      "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+    },
+    "mae": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+      "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+    },
+    "mh_nocons": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+      "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+    }
+  },
+  "checkpoint_selection_source": {
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/checkpoint_selection_summary.json",
+    "sha256": "a9138da8658d3f852cb42e4032ef94d2aeabcf19549f859d7d6c17686083e051"
+  },
+  "downstream_screening": {
+    "executed": false,
+    "original_split_gate": "NOT_EXECUTED",
+    "ready": true,
+    "six_split": "NOT_EXECUTED"
+  },
+  "embedding": {
+    "embeddings_dtype": "float16",
+    "embeddings_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embeddings.npy",
+    "embeddings_sha256": "a5259eb20412f25dcfdb60fcbda10c30bcd726ad6dd4bd705e71ae6b0b61d2c2",
+    "embeddings_shape": [
+      76,
+      113,
+      32,
+      384
+    ],
+    "finite_valid_count": 237225,
+    "metadata_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embedding_metadata.json",
+    "metadata_sha256": "361aa90d74c09ebb63474f525e39710ad6bf0e7e849339fcb117f7044ed67b7b",
+    "root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16",
+    "valid_tokens_dtype": "bool",
+    "valid_tokens_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+    "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7",
+    "valid_tokens_shape": [
+      76,
+      113,
+      32
+    ]
+  },
+  "execution": {
+    "after": {
+      "git_commit": "9e5371de9944026b7e1e4a1e0f78490508773cec",
+      "git_diff_sha256": "5df2a0204336c8c87712d73289a27e9c63db2011374244cb7f8746c12a3f38ba",
+      "git_status_short": [
+        "M src/seis_ssl_cluster/embedding/extractor.py",
+        " M src/seis_ssl_cluster/f3/center_trace_masked_pretraining_validation.py",
+        " M src/seis_ssl_cluster/training/strat_hmm/runner.py",
+        " M src/seis_ssl_cluster/training/strat_hmm/runtime.py",
+        " M tests/seis_ssl_cluster/test_f3_center_trace_masked_pretraining_validation.py",
+        " M tests/seis_ssl_cluster/test_proc_entrypoints.py",
+        "?? proc/seis_ssl_cluster/publish_f3_center_trace_masked_pretraining_results.py",
+        "?? results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_center_trace_masked_v1/",
+        "?? src/seis_ssl_cluster/f3/center_trace_masked_pretraining_results.py",
+        "?? tests/seis_ssl_cluster/test_f3_center_trace_masked_pretraining_results.py"
+      ]
+    },
+    "before": {
+      "git_commit": "9e5371de9944026b7e1e4a1e0f78490508773cec",
+      "git_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_status_short": []
+    },
+    "dirty_status": [
+      "M src/seis_ssl_cluster/embedding/extractor.py",
+      " M src/seis_ssl_cluster/f3/center_trace_masked_pretraining_validation.py",
+      " M src/seis_ssl_cluster/training/strat_hmm/runner.py",
+      " M src/seis_ssl_cluster/training/strat_hmm/runtime.py",
+      " M tests/seis_ssl_cluster/test_f3_center_trace_masked_pretraining_validation.py",
+      " M tests/seis_ssl_cluster/test_proc_entrypoints.py",
+      "?? proc/seis_ssl_cluster/publish_f3_center_trace_masked_pretraining_results.py",
+      "?? results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_center_trace_masked_v1/",
+      "?? src/seis_ssl_cluster/f3/center_trace_masked_pretraining_results.py",
+      "?? tests/seis_ssl_cluster/test_f3_center_trace_masked_pretraining_results.py"
+    ],
+    "git_sha": "9e5371de9944026b7e1e4a1e0f78490508773cec"
+  },
+  "execution_counts": {
+    "embedding": {
+      "fresh": 1,
+      "reuse": 0
+    },
+    "training": {
+      "fresh": 1,
+      "resume": 0
+    }
+  },
+  "execution_counts_source": {
+    "embedding": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/embedding_extraction_execution.json",
+      "sha256": "3132b6ec13e635d3011961bae462690f8b648f1a911827a440162bfdccd9c42d"
+    },
+    "training": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/run_metadata.json",
+      "sha256": "6455c0bc5b564a33711375cb6004683c8a381aa789724a97b535532473af2c8d"
+    }
+  },
+  "full_run": {
+    "epoch_count": 25,
+    "expected_epochs": 25,
+    "expected_global_step": 25600,
+    "final_epoch": 25,
+    "final_global_step": 25600
+  },
+  "hard_target_identity": {
+    "boundary_weight_semantics": "valid_token_indicator_v1",
+    "per_head_target_hashes": {
+      "10": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "13fbd90858a3862c92d27fecaee74f356b9c2c5dab4613d5732f759cb889707c",
+          "metadata": "93bc962e290679749095e4b72bed9ea42fe030259c4426c3ad0226ab3c2a15fa",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      },
+      "6": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "87a3ea23cb142d6e77acd3b63c6c4ca87250d82c99aabad152c9cd8e8c2c5e19",
+          "metadata": "2ec01e32372682c2abd308f5aa318e9d708bdab940aedae3f9a3606790d1e362",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      },
+      "8": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "28c48c6dc19db55553b555f4494cfcfebb0cdce13557a1471ed0635ac1f3087d",
+          "metadata": "c8c004e871e0588abe801c1ab6ba5a6df8e5d62e8ae88aa550d0cb85d9b90c33",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      }
+    },
+    "target_manifest": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+      "sha256": "c0b4edc17774d522bc0896db1366166628135d8369d2e063fd6183c66b01d15c"
+    },
+    "target_representation": "hard_viterbi_labels_v1"
+  },
+  "objective_mask_loss_identity": {
+    "column_fraction": 0.1,
+    "consistency_policy": "disabled_for_center_trace_masked_v1",
+    "distillation_scope": "visible_only_v1",
+    "experiment_role": "multi_head_center_trace_masked_hard_pretext",
+    "mask_semantics": "xy_token_column_full_z_v1",
+    "masked_prototype_weight": 0.5,
+    "objective_semantics": "center_trace_masked_hmm_path_reconstruction_v1",
+    "replacement": "learned_encoder_mask_token_v1",
+    "replacement_initialization": "normal_std_0p02_train_seed_salted_v1",
+    "rng_policy": "stateless_step_seed_v1",
+    "selection_policy": "supervised_valid_xy_columns_round_half_up_leave_one_v1",
+    "supervised_loss": "structured_hmm_center_trace_masked_hard_v1",
+    "variant": "ctmask010_nocons",
+    "visible_prototype_weight": 0.5
+  },
+  "optimizer_trainability": {
+    "optimizer_group_identity": [
+      {
+        "lr": 0.0003,
+        "name": "head",
+        "parameter_names": [
+          "head.heads.k6.prototypes",
+          "head.heads.k6.projection.weight",
+          "head.heads.k6.projection.bias",
+          "head.heads.k8.prototypes",
+          "head.heads.k8.projection.weight",
+          "head.heads.k8.projection.bias",
+          "head.heads.k10.prototypes",
+          "head.heads.k10.projection.weight",
+          "head.heads.k10.projection.bias"
+        ]
+      },
+      {
+        "lr": 1e-05,
+        "name": "encoder",
+        "parameter_names": [
+          "student.encoder.layers.7.norm1.weight",
+          "student.encoder.layers.7.norm1.bias",
+          "student.encoder.layers.7.attention.in_proj_weight",
+          "student.encoder.layers.7.attention.in_proj_bias",
+          "student.encoder.layers.7.attention.out_proj.weight",
+          "student.encoder.layers.7.attention.out_proj.bias",
+          "student.encoder.layers.7.norm2.weight",
+          "student.encoder.layers.7.norm2.bias",
+          "student.encoder.layers.7.mlp.0.weight",
+          "student.encoder.layers.7.mlp.0.bias",
+          "student.encoder.layers.7.mlp.3.weight",
+          "student.encoder.layers.7.mlp.3.bias"
+        ]
+      },
+      {
+        "lr": 0.0003,
+        "name": "spatial_context",
+        "parameter_names": [
+          "spatial_context.replacement_token"
+        ]
+      }
+    ],
+    "trainability_summary": {
+      "frozen_parameter_count": 16007680,
+      "trainable_names": [
+        "encoder.layers.7.norm1.weight",
+        "encoder.layers.7.norm1.bias",
+        "encoder.layers.7.attention.in_proj_weight",
+        "encoder.layers.7.attention.in_proj_bias",
+        "encoder.layers.7.attention.out_proj.weight",
+        "encoder.layers.7.attention.out_proj.bias",
+        "encoder.layers.7.norm2.weight",
+        "encoder.layers.7.norm2.bias",
+        "encoder.layers.7.mlp.0.weight",
+        "encoder.layers.7.mlp.0.bias",
+        "encoder.layers.7.mlp.3.weight",
+        "encoder.layers.7.mlp.3.bias"
+      ],
+      "trainable_parameter_count": 1774464
+    },
+    "trainability_summary_sha256": "fe4426eff000c9cd824d004d7349b1da8f6c9c395556cb71bf4d3e95e9d1f978"
+  },
+  "pass_handoff": {
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/preflight/center_trace_masked_handoff.json",
+    "sha256": "27a31a98483ef3ce6d5f59d80c94602ab82dc562d4b345b1555f5fd655ccbbe6",
+    "status": "PASS"
+  },
+  "replacement_token": {
+    "current_sha256": "e9ceb86c6f915134b7263ebafa75344ab93e84995dea312f8689bf62d24116e4",
+    "identity": "learned_encoder_mask_token_v1",
+    "initial_sha256": "6edf1303c88e534ee6ed93a67cd5d4be9bc167e91e06f8d4224a7ee51276740a"
+  },
+  "schema_version": 1,
+  "scientific_superiority_conclusion": "NOT_CONCLUDED",
+  "selected_checkpoint": {
+    "epoch": 19,
+    "global_step": 19000,
+    "kind": "step",
+    "latest_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/latest.pt",
+    "latest_sha256": "74275b3c7783712b667e37dcf9e18de3e92a719293a4b3c798576dbda9a61bdc",
+    "loss": 0.4731243848800659,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/best.pt",
+    "selection_event": {
+      "batch_index": 567,
+      "checkpoint_kind": "step",
+      "epoch": 19,
+      "global_step": 19000,
+      "loss": 0.4731243848800659,
+      "sequence": 55
+    },
+    "selection_history_sha256": "c85705b0b3ce4e502ae10a43ae8051222a1827e9de27bec8e7fdd2c0e1806de0",
+    "sha256": "3562467846253aad44dce9520e784debe992dec733e627fcbe0e88f18a817285"
+  },
+  "status": "PASS",
+  "training_diagnostics_source": {
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/multi_head_epoch_metrics.csv",
+    "sha256": "3979e9c6b684e5cd9ec2ee9fb5c51816ba8b9a3361331f90d67c588205b707b2"
+  },
+  "training_metrics": {
+    "consistency_contribution_exact_zero": true,
+    "ranges": {
+      "eligible_xy_column_count": {
+        "max": 230.138671875,
+        "min": 228.05908203125
+      },
+      "loss": {
+        "max": 0.8187180302920751,
+        "min": 0.5587667691870593
+      },
+      "loss_consistency_contribution": {
+        "max": 0.0,
+        "min": 0.0
+      },
+      "loss_distillation": {
+        "max": 0.009352963641049428,
+        "min": 0.002329684276446642
+      },
+      "loss_prototype": {
+        "max": 0.8182520946138538,
+        "min": 0.5568961766839493
+      },
+      "loss_prototype_masked": {
+        "max": 0.8890424889395945,
+        "min": 0.6391359099652618
+      },
+      "loss_prototype_masked_k10": {
+        "max": 0.9080370710871648,
+        "min": 0.633461440942483
+      },
+      "loss_prototype_masked_k6": {
+        "max": 0.7409317135461606,
+        "min": 0.5362527313118335
+      },
+      "loss_prototype_masked_k8": {
+        "max": 1.018158616439905,
+        "min": 0.7458745757467113
+      },
+      "loss_prototype_visible": {
+        "max": 0.7474616980762221,
+        "min": 0.4746564404340461
+      },
+      "loss_prototype_visible_k10": {
+        "max": 0.8039207561814692,
+        "min": 0.46939860822749324
+      },
+      "loss_prototype_visible_k6": {
+        "max": 0.6021547059644945,
+        "min": 0.3882192099117674
+      },
+      "loss_prototype_visible_k8": {
+        "max": 0.8363095678505488,
+        "min": 0.564802615204826
+      },
+      "loss_usage": {
+        "max": 4.493687596252016e-06,
+        "min": 0.0
+      },
+      "loss_usage_k10": {
+        "max": 1.3481062788756049e-05,
+        "min": 0.0
+      },
+      "loss_usage_k6": {
+        "max": 4.818324455868606e-06,
+        "min": 0.0
+      },
+      "loss_usage_k8": {
+        "max": 0.0,
+        "min": 0.0
+      },
+      "masked_supervised_token_fraction": {
+        "max": 0.08777111768722534,
+        "min": 0.08688986301422119
+      },
+      "masked_top1_accuracy_k10": {
+        "max": 0.7502487567253411,
+        "min": 0.660825307117193
+      },
+      "masked_top1_accuracy_k6": {
+        "max": 0.7847550297155976,
+        "min": 0.7103830170526635
+      },
+      "masked_top1_accuracy_k8": {
+        "max": 0.7010542430798523,
+        "min": 0.6152713996052626
+      },
+      "prototype_usage_entropy_k10": {
+        "max": 1.702764529385604,
+        "min": 1.6200631849933416
+      },
+      "prototype_usage_entropy_k6": {
+        "max": 1.316531054500956,
+        "min": 1.2672402546741068
+      },
+      "prototype_usage_entropy_k8": {
+        "max": 1.706986561883241,
+        "min": 1.6440610904246569
+      },
+      "selected_xy_column_count": {
+        "max": 23.263671875,
+        "min": 23.047119140625
+      },
+      "target_usage_entropy_k10": {
+        "max": 1.6304627492791042,
+        "min": 1.6093179017771035
+      },
+      "target_usage_entropy_k6": {
+        "max": 1.2816735059022903,
+        "min": 1.2651628575986251
+      },
+      "target_usage_entropy_k8": {
+        "max": 1.651950724539347,
+        "min": 1.6392401040066034
+      },
+      "valid_distillation_token_fraction": {
+        "max": 0.7806355357170105,
+        "min": 0.7729109525680542
+      },
+      "visible_supervised_token_fraction": {
+        "max": 0.7806355357170105,
+        "min": 0.7729109525680542
+      }
+    },
+    "rows": 25
+  }
+}

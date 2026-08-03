@@ -1,5 +1,5 @@
 """Strict schema-7 validation and handoff publication for experiment 104."""
-# ruff: noqa: CPY001, E501, C901, PLR0912, PLR0913, PLR0915, S603, S607, SLF001
+# ruff: noqa: E501, C901, PLR0912, PLR0913, PLR0915, S603, S607, SLF001
 
 from __future__ import annotations
 
@@ -222,6 +222,7 @@ def load_f3_center_trace_masked_pretraining_handoff(
 		'variant',
 		'targets',
 		'checkpoint',
+		'training_diagnostics',
 		'embedding',
 		'execution',
 	}:
@@ -368,6 +369,16 @@ def load_f3_center_trace_masked_pretraining_handoff(
 		trainability
 	):
 		raise ValueError('center-trace handoff trainability hash mismatch')
+	diagnostics = _mapping(
+		payload['training_diagnostics'], 'center-trace handoff training diagnostics'
+	)
+	if set(diagnostics) != {'path', 'sha256'}:
+		raise ValueError('center-trace handoff training diagnostics keys mismatch')
+	_require_sha256(
+		diagnostics.get('sha256'), 'handoff training diagnostics.sha256'
+	)
+	if not isinstance(diagnostics.get('path'), str) or not diagnostics['path']:
+		raise TypeError('handoff training diagnostics.path is missing')
 	embedding = _mapping(payload['embedding'], 'center-trace handoff embedding')
 	if set(embedding) != {
 		'root',
@@ -1320,11 +1331,12 @@ def _checkpoint_evidence(
 			f'center-trace checkpoint must end at global step {expected_global_step}'
 		)
 	if require_full_epoch_history:
+		diagnostics_path = root / 'multi_head_epoch_metrics.csv'
 		if latest.get('epoch') != 25 or _checkpoint_kind(latest) != 'epoch':
 			raise ValueError('center-trace full run must end at epoch 25')
 		if best is None:
 			raise AssertionError('center-trace full validation requires best.pt')
-		rows = hard_validation._epoch_rows(root / 'multi_head_epoch_metrics.csv')
+		rows = hard_validation._epoch_rows(diagnostics_path)
 		if [row['epoch'] for row in rows] != list(range(1, 26)) or rows[-1][
 			'global_step'
 		] != expected_global_step:
@@ -1355,6 +1367,12 @@ def _checkpoint_evidence(
 		'latest': latest,
 		'best': best,
 		'epoch_rows': rows,
+		'training_diagnostics_path': (
+			str(diagnostics_path) if require_full_epoch_history else None
+		),
+		'training_diagnostics_sha256': (
+			file_sha256(diagnostics_path) if require_full_epoch_history else None
+		),
 		'selection': selection,
 	}
 
@@ -1475,7 +1493,7 @@ def _embedding_evidence(
 	manifest_config = _mapping(
 		extraction['manifests'], 'center-trace embedding manifests'
 	)
-	if Path(str(manifest_config['input'])).resolve() != _manifest_path(training):
+	if Path(str(manifest_config['input'])).resolve() != _train_manifest_path(training):
 		raise ValueError(
 			'center-trace embedding extraction config does not bind training manifest'
 		)
@@ -1713,6 +1731,10 @@ def _handoff(evidence: Mapping[str, object]) -> dict[str, object]:
 			'trainability_summary_sha256': scientific_identity_sha256(trainability),
 			'schema_version': identity['schema_version'],
 			'scientific_identity_sha256': identity['scientific_identity_sha256'],
+		},
+		'training_diagnostics': {
+			'path': evidence['training_diagnostics_path'],
+			'sha256': evidence['training_diagnostics_sha256'],
 		},
 		'embedding': dict(embedding),
 		'execution': dict(evidence['execution']),
@@ -2189,6 +2211,12 @@ def _scientific(training: Mapping[str, object], label: str) -> Mapping[str, obje
 def _manifest_path(training: Mapping[str, object]) -> Path:
 	return Path(
 		str(_mapping(training['pseudo_targets'], 'pseudo_targets')['manifest'])
+	).resolve()
+
+
+def _train_manifest_path(training: Mapping[str, object]) -> Path:
+	return Path(
+		str(_mapping(training['manifests'], 'manifests')['train'])
 	).resolve()
 
 

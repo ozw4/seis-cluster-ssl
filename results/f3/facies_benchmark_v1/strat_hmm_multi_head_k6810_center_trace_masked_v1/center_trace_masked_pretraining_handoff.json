@@ -1,0 +1,388 @@
+{
+  "artifact_type": "f3_center_trace_masked_pretraining_handoff",
+  "checkpoint": {
+    "latest_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/latest.pt",
+    "latest_sha256": "74275b3c7783712b667e37dcf9e18de3e92a719293a4b3c798576dbda9a61bdc",
+    "optimizer_group_identity": [
+      {
+        "lr": 0.0003,
+        "name": "head",
+        "parameter_names": [
+          "head.heads.k6.prototypes",
+          "head.heads.k6.projection.weight",
+          "head.heads.k6.projection.bias",
+          "head.heads.k8.prototypes",
+          "head.heads.k8.projection.weight",
+          "head.heads.k8.projection.bias",
+          "head.heads.k10.prototypes",
+          "head.heads.k10.projection.weight",
+          "head.heads.k10.projection.bias"
+        ]
+      },
+      {
+        "lr": 1e-05,
+        "name": "encoder",
+        "parameter_names": [
+          "student.encoder.layers.7.norm1.weight",
+          "student.encoder.layers.7.norm1.bias",
+          "student.encoder.layers.7.attention.in_proj_weight",
+          "student.encoder.layers.7.attention.in_proj_bias",
+          "student.encoder.layers.7.attention.out_proj.weight",
+          "student.encoder.layers.7.attention.out_proj.bias",
+          "student.encoder.layers.7.norm2.weight",
+          "student.encoder.layers.7.norm2.bias",
+          "student.encoder.layers.7.mlp.0.weight",
+          "student.encoder.layers.7.mlp.0.bias",
+          "student.encoder.layers.7.mlp.3.weight",
+          "student.encoder.layers.7.mlp.3.bias"
+        ]
+      },
+      {
+        "lr": 0.0003,
+        "name": "spatial_context",
+        "parameter_names": [
+          "spatial_context.replacement_token"
+        ]
+      }
+    ],
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/best.pt",
+    "schema_version": 7,
+    "scientific_identity_sha256": "56922ebdfc6e306c680ec91d2b8e0352f7a9b8fbaa391a3e606c2f13e0ba1706",
+    "selected_checkpoint_kind": "step",
+    "selected_epoch": 19,
+    "selected_global_step": 19000,
+    "selected_loss": 0.4731243848800659,
+    "selection_history_event_count": 76,
+    "selection_history_schema_version": 1,
+    "selection_history_sha256": "c85705b0b3ce4e502ae10a43ae8051222a1827e9de27bec8e7fdd2c0e1806de0",
+    "sha256": "3562467846253aad44dce9520e784debe992dec733e627fcbe0e88f18a817285",
+    "trainability_summary": {
+      "frozen_parameter_count": 16007680,
+      "trainable_names": [
+        "encoder.layers.7.norm1.weight",
+        "encoder.layers.7.norm1.bias",
+        "encoder.layers.7.attention.in_proj_weight",
+        "encoder.layers.7.attention.in_proj_bias",
+        "encoder.layers.7.attention.out_proj.weight",
+        "encoder.layers.7.attention.out_proj.bias",
+        "encoder.layers.7.norm2.weight",
+        "encoder.layers.7.norm2.bias",
+        "encoder.layers.7.mlp.0.weight",
+        "encoder.layers.7.mlp.0.bias",
+        "encoder.layers.7.mlp.3.weight",
+        "encoder.layers.7.mlp.3.bias"
+      ],
+      "trainable_parameter_count": 1774464
+    },
+    "trainability_summary_sha256": "fe4426eff000c9cd824d004d7349b1da8f6c9c395556cb71bf4d3e95e9d1f978"
+  },
+  "embedding": {
+    "canonical_valid_token_identities": {
+      "current_k6": {
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+        "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      "mae": {
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+        "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      "mh_nocons": {
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+        "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      }
+    },
+    "embeddings_dtype": "float16",
+    "embeddings_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embeddings.npy",
+    "embeddings_sha256": "a5259eb20412f25dcfdb60fcbda10c30bcd726ad6dd4bd705e71ae6b0b61d2c2",
+    "embeddings_shape": [
+      76,
+      113,
+      32,
+      384
+    ],
+    "finite_valid_count": 237225,
+    "metadata_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embedding_metadata.json",
+    "metadata_sha256": "361aa90d74c09ebb63474f525e39710ad6bf0e7e849339fcb117f7044ed67b7b",
+    "root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16",
+    "valid_tokens_dtype": "bool",
+    "valid_tokens_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+    "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7",
+    "valid_tokens_shape": [
+      76,
+      113,
+      32
+    ]
+  },
+  "execution": {
+    "after": {
+      "git_commit": "9e5371de9944026b7e1e4a1e0f78490508773cec",
+      "git_diff_sha256": "5df2a0204336c8c87712d73289a27e9c63db2011374244cb7f8746c12a3f38ba",
+      "git_status_short": [
+        "M src/seis_ssl_cluster/embedding/extractor.py",
+        " M src/seis_ssl_cluster/f3/center_trace_masked_pretraining_validation.py",
+        " M src/seis_ssl_cluster/training/strat_hmm/runner.py",
+        " M src/seis_ssl_cluster/training/strat_hmm/runtime.py",
+        " M tests/seis_ssl_cluster/test_f3_center_trace_masked_pretraining_validation.py",
+        " M tests/seis_ssl_cluster/test_proc_entrypoints.py",
+        "?? proc/seis_ssl_cluster/publish_f3_center_trace_masked_pretraining_results.py",
+        "?? results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_center_trace_masked_v1/",
+        "?? src/seis_ssl_cluster/f3/center_trace_masked_pretraining_results.py",
+        "?? tests/seis_ssl_cluster/test_f3_center_trace_masked_pretraining_results.py"
+      ]
+    },
+    "before": {
+      "git_commit": "9e5371de9944026b7e1e4a1e0f78490508773cec",
+      "git_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "git_status_short": []
+    }
+  },
+  "model_tag": "strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1",
+  "schema_version": 1,
+  "status": "PASS",
+  "targets": {
+    "allowed_differences": [
+      "paths.output_root",
+      "identity.model_tag",
+      "identity.scientific_identity center-trace fields",
+      "spatial_context"
+    ],
+    "column_fraction": 0.1,
+    "consistency_policy": "disabled_for_center_trace_masked_v1",
+    "distillation_scope": "visible_only_v1",
+    "experiment_role": "multi_head_center_trace_masked_hard_pretext",
+    "hard_baseline_config": {
+      "path": "experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/04_train_nocons_full.yaml",
+      "sha256": "812b33961ca833d24e5dbc81f1c607b69e923a688b4b4a287d828ae1f0a014d5"
+    },
+    "hard_baseline_config_parity": {
+      "allowed_differences": [
+        "paths.output_root",
+        "identity.model_tag",
+        "identity.scientific_identity center-trace fields",
+        "spatial_context"
+      ],
+      "candidate_runtime": {
+        "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+        "initial_spatial_context_state_sha256": "6edf1303c88e534ee6ed93a67cd5d4be9bc167e91e06f8d4224a7ee51276740a",
+        "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+        "optimizer_group_identity": [
+          {
+            "lr": 0.0003,
+            "name": "head",
+            "parameter_names": [
+              "head.heads.k6.prototypes",
+              "head.heads.k6.projection.weight",
+              "head.heads.k6.projection.bias",
+              "head.heads.k8.prototypes",
+              "head.heads.k8.projection.weight",
+              "head.heads.k8.projection.bias",
+              "head.heads.k10.prototypes",
+              "head.heads.k10.projection.weight",
+              "head.heads.k10.projection.bias"
+            ]
+          },
+          {
+            "lr": 1e-05,
+            "name": "encoder",
+            "parameter_names": [
+              "student.encoder.layers.7.norm1.weight",
+              "student.encoder.layers.7.norm1.bias",
+              "student.encoder.layers.7.attention.in_proj_weight",
+              "student.encoder.layers.7.attention.in_proj_bias",
+              "student.encoder.layers.7.attention.out_proj.weight",
+              "student.encoder.layers.7.attention.out_proj.bias",
+              "student.encoder.layers.7.norm2.weight",
+              "student.encoder.layers.7.norm2.bias",
+              "student.encoder.layers.7.mlp.0.weight",
+              "student.encoder.layers.7.mlp.0.bias",
+              "student.encoder.layers.7.mlp.3.weight",
+              "student.encoder.layers.7.mlp.3.bias"
+            ]
+          },
+          {
+            "lr": 0.0003,
+            "name": "spatial_context",
+            "parameter_names": [
+              "spatial_context.replacement_token"
+            ]
+          }
+        ],
+        "trainability_summary": {
+          "frozen_parameter_count": 16007680,
+          "trainable_names": [
+            "encoder.layers.7.norm1.weight",
+            "encoder.layers.7.norm1.bias",
+            "encoder.layers.7.attention.in_proj_weight",
+            "encoder.layers.7.attention.in_proj_bias",
+            "encoder.layers.7.attention.out_proj.weight",
+            "encoder.layers.7.attention.out_proj.bias",
+            "encoder.layers.7.norm2.weight",
+            "encoder.layers.7.norm2.bias",
+            "encoder.layers.7.mlp.0.weight",
+            "encoder.layers.7.mlp.0.bias",
+            "encoder.layers.7.mlp.3.weight",
+            "encoder.layers.7.mlp.3.bias"
+          ],
+          "trainable_parameter_count": 1774464
+        }
+      },
+      "hard_runtime": {
+        "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+        "initial_spatial_context_state_sha256": null,
+        "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+        "optimizer_group_identity": [
+          {
+            "lr": 0.0003,
+            "name": "head",
+            "parameter_names": [
+              "head.heads.k6.prototypes",
+              "head.heads.k6.projection.weight",
+              "head.heads.k6.projection.bias",
+              "head.heads.k8.prototypes",
+              "head.heads.k8.projection.weight",
+              "head.heads.k8.projection.bias",
+              "head.heads.k10.prototypes",
+              "head.heads.k10.projection.weight",
+              "head.heads.k10.projection.bias"
+            ]
+          },
+          {
+            "lr": 1e-05,
+            "name": "encoder",
+            "parameter_names": [
+              "student.encoder.layers.7.norm1.weight",
+              "student.encoder.layers.7.norm1.bias",
+              "student.encoder.layers.7.attention.in_proj_weight",
+              "student.encoder.layers.7.attention.in_proj_bias",
+              "student.encoder.layers.7.attention.out_proj.weight",
+              "student.encoder.layers.7.attention.out_proj.bias",
+              "student.encoder.layers.7.norm2.weight",
+              "student.encoder.layers.7.norm2.bias",
+              "student.encoder.layers.7.mlp.0.weight",
+              "student.encoder.layers.7.mlp.0.bias",
+              "student.encoder.layers.7.mlp.3.weight",
+              "student.encoder.layers.7.mlp.3.bias"
+            ]
+          }
+        ],
+        "trainability_summary": {
+          "frozen_parameter_count": 16007680,
+          "trainable_names": [
+            "encoder.layers.7.norm1.weight",
+            "encoder.layers.7.norm1.bias",
+            "encoder.layers.7.attention.in_proj_weight",
+            "encoder.layers.7.attention.in_proj_bias",
+            "encoder.layers.7.attention.out_proj.weight",
+            "encoder.layers.7.attention.out_proj.bias",
+            "encoder.layers.7.norm2.weight",
+            "encoder.layers.7.norm2.bias",
+            "encoder.layers.7.mlp.0.weight",
+            "encoder.layers.7.mlp.0.bias",
+            "encoder.layers.7.mlp.3.weight",
+            "encoder.layers.7.mlp.3.bias"
+          ],
+          "trainable_parameter_count": 1774464
+        }
+      },
+      "status": "PASS"
+    },
+    "hard_baseline_handoff": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/preflight/multi_head_handoff.json",
+      "sha256": "489f99c1b21572d97b43e663f6cb165ea5cdcca656fcaa79a9faeacd91304140"
+    },
+    "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+    "initial_spatial_context_state_sha256": "6edf1303c88e534ee6ed93a67cd5d4be9bc167e91e06f8d4224a7ee51276740a",
+    "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+    "mask_semantics": "xy_token_column_full_z_v1",
+    "masked_prototype_weight": 0.5,
+    "model_tag": "strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1",
+    "objective_semantics": "center_trace_masked_hmm_path_reconstruction_v1",
+    "per_head_target_hashes": {
+      "10": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "13fbd90858a3862c92d27fecaee74f356b9c2c5dab4613d5732f759cb889707c",
+          "metadata": "93bc962e290679749095e4b72bed9ea42fe030259c4426c3ad0226ab3c2a15fa",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      },
+      "6": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "87a3ea23cb142d6e77acd3b63c6c4ca87250d82c99aabad152c9cd8e8c2c5e19",
+          "metadata": "2ec01e32372682c2abd308f5aa318e9d708bdab940aedae3f9a3606790d1e362",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      },
+      "8": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "28c48c6dc19db55553b555f4494cfcfebb0cdce13557a1471ed0635ac1f3087d",
+          "metadata": "c8c004e871e0588abe801c1ab6ba5a6df8e5d62e8ae88aa550d0cb85d9b90c33",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      }
+    },
+    "real_data_inputs": {
+      "student_init_checkpoint": {
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt",
+        "sha256": "13f3f9feb879c29526638765011e9b2bc3d27974161c473a8e0606da98ed3365"
+      },
+      "survey_count": 1,
+      "surveys": [
+        {
+          "amplitude": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy",
+            "sha256": "47108252f4bd670889da1ea6f36abe8acba41a6ad772db515b5902d4545bb276"
+          },
+          "dtype": "float32",
+          "grid_order": [
+            "x",
+            "y",
+            "z"
+          ],
+          "normalization_stats": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/normalization_stats/f3/facies_benchmark_v1/f3_seismic.normalization_stats.json",
+            "sha256": "bfbd9069726d06878da814a8b32dad2aa17dbac45184958c33ecbe8106dc59e7"
+          },
+          "shape_xyz": [
+            601,
+            901,
+            255
+          ],
+          "survey_id": "f3_facies_benchmark"
+        }
+      ],
+      "teacher_checkpoint": {
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt",
+        "sha256": "13f3f9feb879c29526638765011e9b2bc3d27974161c473a8e0606da98ed3365"
+      },
+      "train_manifest": {
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json",
+        "sha256": "c5dbc3a66a5c2eed0ec5df8745f8bf5a461b1e2e66156700091f1a751bdc0ef5"
+      },
+      "train_path_list": {
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/splits/f3/facies_benchmark_v1/train_npy_paths.txt",
+        "sha256": "b52fd5e0c57edb2d2158be12b94046b554b5e6e13ba17008321bcdbe0ae2acb1"
+      }
+    },
+    "replacement": "learned_encoder_mask_token_v1",
+    "replacement_initialization": "normal_std_0p02_train_seed_salted_v1",
+    "rng_policy": "stateless_step_seed_v1",
+    "scientific_identity_sha256": "56922ebdfc6e306c680ec91d2b8e0352f7a9b8fbaa391a3e606c2f13e0ba1706",
+    "selection_policy": "supervised_valid_xy_columns_round_half_up_leave_one_v1",
+    "supervised_loss": "structured_hmm_center_trace_masked_hard_v1",
+    "target_manifest": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+      "sha256": "c0b4edc17774d522bc0896db1366166628135d8369d2e063fd6183c66b01d15c"
+    },
+    "target_representation": "hard_viterbi_labels_v1",
+    "variant": "ctmask010_nocons",
+    "visible_prototype_weight": 0.5
+  },
+  "training_diagnostics": {
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/multi_head_epoch_metrics.csv",
+    "sha256": "3979e9c6b684e5cd9ec2ee9fb5c51816ba8b9a3361331f90d67c588205b707b2"
+  },
+  "variant": "ctmask010_nocons"
+}

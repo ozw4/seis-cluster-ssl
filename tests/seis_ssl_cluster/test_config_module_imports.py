@@ -130,7 +130,7 @@ def test_f3_lithology_internal_modules_export_stage_resolvers(
 
 
 def test_validate_module_imports_in_fresh_python_process() -> None:
-	result = subprocess.run(  # noqa: S603
+	result = subprocess.run(
 		[
 			sys.executable,
 			'-c',

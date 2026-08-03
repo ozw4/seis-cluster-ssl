@@ -1,5 +1,4 @@
 """Focused contracts for the strict experiment-104 validator."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 
@@ -144,6 +143,35 @@ def test_embedding_evidence_loads_extraction_config_and_uses_its_output_root(
 		)
 
 	assert loaded == [config.center_trace_masked_embedding_config]
+
+
+def test_embedding_evidence_binds_training_manifest_not_target_manifest(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config, extraction, selected, _manifest = _embedding_extraction_fixture(tmp_path)
+	monkeypatch.setattr(validation, 'load_config', lambda _path: extraction)
+	monkeypatch.setattr(
+		validation,
+		'resolve_embedding_extraction_config',
+		lambda raw: raw,
+	)
+	files = validation.output_paths(
+		Path(str(extraction['embeddings']['output_dir'])),  # type: ignore[index]
+		'f3_facies_benchmark',
+	)
+	for path in (files.embeddings, files.valid_tokens, files.metadata):
+		path.parent.mkdir(parents=True, exist_ok=True)
+		path.write_bytes(b'placeholder')
+
+	other_manifest = tmp_path / 'other-manifest.json'
+	other_manifest.write_text('{}\n', encoding='utf-8')
+	training = {'manifests': {'train': str(other_manifest)}}
+	with pytest.raises(ValueError, match='does not bind training manifest'):
+		validation._embedding_evidence(  # noqa: SLF001
+			config,
+			{'selected_path': str(selected)},
+			training,
+		)
 
 
 def test_embedding_evidence_rejects_extraction_checkpoint_drift(
@@ -767,6 +795,8 @@ def test_handoff_carries_computed_baseline_parity_and_real_input_evidence() -> N
 		'selected_sha256': 'f' * 64,
 		'latest_path': 'latest.pt',
 		'latest_sha256': '0' * 64,
+		'training_diagnostics_path': 'metrics.csv',
+		'training_diagnostics_sha256': '1' * 64,
 		'target_manifest': {'path': 'target', 'sha256': '1' * 64},
 		'per_head_target_hashes': {},
 		'hard_baseline_config': {'path': 'hard.yaml', 'sha256': '2' * 64},
@@ -780,6 +810,10 @@ def test_handoff_carries_computed_baseline_parity_and_real_input_evidence() -> N
 
 	assert handoff['targets']['hard_baseline_config_parity'] is parity  # type: ignore[index]
 	assert handoff['targets']['real_data_inputs'] is real_inputs  # type: ignore[index]
+	assert handoff['training_diagnostics'] == {  # type: ignore[index]
+		'path': 'metrics.csv',
+		'sha256': '1' * 64,
+	}
 
 
 def test_git_identity_fails_closed_when_commit_or_diff_is_missing(
