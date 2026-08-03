@@ -47,5 +47,9 @@ services:
       - type: bind
         source: /home/aiuser4/Desktop/.config/gh/
         target: /home/dcuser/.config/gh/
+      - type: bind
+        source: /nvme01/aidata/public_data/
+        target: /home/dcuser/public_data/
+        read_only: true
     stdin_open: true
     tty: true
