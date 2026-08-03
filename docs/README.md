@@ -9,6 +9,7 @@ This directory contains runbooks and configuration contracts for
 - [F3 strat-HMM M2-A boundary weighting](f3_strat_hmm_m2a_boundary_weighting.md): ordered export-to-summary workflow, artifact paths, failure handling, and M1 housekeeping.
 - [F3 strat-HMM M2-A result decision](f3_strat_hmm_m2a_results.md): final Go/Stop/Hold evidence contract.
 - [F3 M5-LS lateral smoothing](f3_m5_lateral_smoothing_plan.md): fixed edge-aware lateral-message and ordered hard-reprojection algorithm plus staged artifact, training, and evaluation contract after `M5_U_ORIGINAL_STOP`.
+- [F3 center-trace masked HMM path reconstruction](f3_center_trace_masked_pretraining_plan.md): fixed center-trace mask, hard-target loss, trainability, checkpoint identity, and original-split evaluation contract.
 - [F3 XY-neighbour consensus hard-label smoothing](f3_xy_neighbor_consensus_hard_label_smoothing.md): single synchronous source-label consensus correction with an ordered-trace guard and no posterior, affinity, re-decoding, or beta calibration.
 
 ## Artifacts And Results
