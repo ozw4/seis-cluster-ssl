@@ -1,4 +1,5 @@
 """Full-volume amplitude MAE encoder embedding extraction."""
+# ruff: noqa: CPY001
 
 from __future__ import annotations
 
@@ -74,6 +75,8 @@ from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 )
 from seis_ssl_cluster.utils import StageTimer
 from seis_ssl_cluster.utils.cuda import cuda_device_supports_bfloat16
+
+UNMASKED_ENCODER_INPUT_MODE = 'unmasked_encoder_tokens_v1'
 
 XYZ = tuple[int, int, int]
 _CHECKPOINT_ALLOWED_TOP_LEVEL = frozenset(
@@ -251,6 +254,7 @@ def _write_embedding_execution_summary(
 	payload = {
 		'artifact_type': 'embedding_extraction_execution',
 		'schema_version': 1,
+		'encoder_input_mode': UNMASKED_ENCODER_INPUT_MODE,
 		'fresh': sum(not result.skipped for result in results),
 		'reuse': sum(result.skipped for result in results),
 		'survey_count': len(results),
@@ -1749,6 +1753,7 @@ def _validate_overlap_less_than_window(
 
 
 __all__ = [
+	'UNMASKED_ENCODER_INPUT_MODE',
 	'EmbeddingExtractionSettings',
 	'SurveyEmbeddingResult',
 	'build_embedding_metadata',

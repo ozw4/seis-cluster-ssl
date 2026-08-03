@@ -1,3 +1,5 @@
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
 import argparse
@@ -27,6 +29,12 @@ HELP_FLAG_CONTRACTS = {
 		'--quarantine-invalid',
 	),
 	'audit_f3_xy_neighbor_consensus_screening.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+		'--quarantine-invalid',
+	),
+	'audit_f3_center_trace_masked_screening.py': (
 		'--config',
 		'--dry-run',
 		'--only-missing',
@@ -100,7 +108,18 @@ HELP_FLAG_CONTRACTS = {
 		'--only-missing',
 		'--resume',
 	),
+	'run_f3_lithology_center_trace_masked_voxel_label_budget.py': (
+		'--config',
+		'--dry-run',
+		'--device',
+		'--only-missing',
+		'--resume',
+	),
 	'summarize_f3_lithology_voxel_label_budget_xy_neighbor_consensus.py': (
+		'--config',
+		'--dry-run',
+	),
+	'summarize_f3_lithology_voxel_label_budget_center_trace_masked.py': (
 		'--config',
 		'--dry-run',
 	),

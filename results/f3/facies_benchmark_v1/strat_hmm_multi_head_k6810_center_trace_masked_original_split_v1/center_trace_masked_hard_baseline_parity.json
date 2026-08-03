@@ -1,0 +1,185 @@
+{
+  "artifact_type": "f3_center_trace_masked_hard_baseline_parity",
+  "evidence": {
+    "config": {
+      "byte_size": 2483,
+      "path": "experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/04_train_nocons_full.yaml",
+      "sha256": "812b33961ca833d24e5dbc81f1c607b69e923a688b4b4a287d828ae1f0a014d5"
+    },
+    "config_parity": {
+      "allowed_differences": [
+        "paths.output_root",
+        "identity.model_tag",
+        "identity.scientific_identity center-trace fields",
+        "spatial_context"
+      ],
+      "candidate_runtime": {
+        "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+        "initial_spatial_context_state_sha256": "6edf1303c88e534ee6ed93a67cd5d4be9bc167e91e06f8d4224a7ee51276740a",
+        "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+        "optimizer_group_identity": [
+          {
+            "lr": 0.0003,
+            "name": "head",
+            "parameter_names": [
+              "head.heads.k6.prototypes",
+              "head.heads.k6.projection.weight",
+              "head.heads.k6.projection.bias",
+              "head.heads.k8.prototypes",
+              "head.heads.k8.projection.weight",
+              "head.heads.k8.projection.bias",
+              "head.heads.k10.prototypes",
+              "head.heads.k10.projection.weight",
+              "head.heads.k10.projection.bias"
+            ]
+          },
+          {
+            "lr": 1e-05,
+            "name": "encoder",
+            "parameter_names": [
+              "student.encoder.layers.7.norm1.weight",
+              "student.encoder.layers.7.norm1.bias",
+              "student.encoder.layers.7.attention.in_proj_weight",
+              "student.encoder.layers.7.attention.in_proj_bias",
+              "student.encoder.layers.7.attention.out_proj.weight",
+              "student.encoder.layers.7.attention.out_proj.bias",
+              "student.encoder.layers.7.norm2.weight",
+              "student.encoder.layers.7.norm2.bias",
+              "student.encoder.layers.7.mlp.0.weight",
+              "student.encoder.layers.7.mlp.0.bias",
+              "student.encoder.layers.7.mlp.3.weight",
+              "student.encoder.layers.7.mlp.3.bias"
+            ]
+          },
+          {
+            "lr": 0.0003,
+            "name": "spatial_context",
+            "parameter_names": [
+              "spatial_context.replacement_token"
+            ]
+          }
+        ],
+        "trainability_summary": {
+          "frozen_parameter_count": 16007680,
+          "trainable_names": [
+            "encoder.layers.7.norm1.weight",
+            "encoder.layers.7.norm1.bias",
+            "encoder.layers.7.attention.in_proj_weight",
+            "encoder.layers.7.attention.in_proj_bias",
+            "encoder.layers.7.attention.out_proj.weight",
+            "encoder.layers.7.attention.out_proj.bias",
+            "encoder.layers.7.norm2.weight",
+            "encoder.layers.7.norm2.bias",
+            "encoder.layers.7.mlp.0.weight",
+            "encoder.layers.7.mlp.0.bias",
+            "encoder.layers.7.mlp.3.weight",
+            "encoder.layers.7.mlp.3.bias"
+          ],
+          "trainable_parameter_count": 1774464
+        }
+      },
+      "hard_runtime": {
+        "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+        "initial_spatial_context_state_sha256": null,
+        "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+        "optimizer_group_identity": [
+          {
+            "lr": 0.0003,
+            "name": "head",
+            "parameter_names": [
+              "head.heads.k6.prototypes",
+              "head.heads.k6.projection.weight",
+              "head.heads.k6.projection.bias",
+              "head.heads.k8.prototypes",
+              "head.heads.k8.projection.weight",
+              "head.heads.k8.projection.bias",
+              "head.heads.k10.prototypes",
+              "head.heads.k10.projection.weight",
+              "head.heads.k10.projection.bias"
+            ]
+          },
+          {
+            "lr": 1e-05,
+            "name": "encoder",
+            "parameter_names": [
+              "student.encoder.layers.7.norm1.weight",
+              "student.encoder.layers.7.norm1.bias",
+              "student.encoder.layers.7.attention.in_proj_weight",
+              "student.encoder.layers.7.attention.in_proj_bias",
+              "student.encoder.layers.7.attention.out_proj.weight",
+              "student.encoder.layers.7.attention.out_proj.bias",
+              "student.encoder.layers.7.norm2.weight",
+              "student.encoder.layers.7.norm2.bias",
+              "student.encoder.layers.7.mlp.0.weight",
+              "student.encoder.layers.7.mlp.0.bias",
+              "student.encoder.layers.7.mlp.3.weight",
+              "student.encoder.layers.7.mlp.3.bias"
+            ]
+          }
+        ],
+        "trainability_summary": {
+          "frozen_parameter_count": 16007680,
+          "trainable_names": [
+            "encoder.layers.7.norm1.weight",
+            "encoder.layers.7.norm1.bias",
+            "encoder.layers.7.attention.in_proj_weight",
+            "encoder.layers.7.attention.in_proj_bias",
+            "encoder.layers.7.attention.out_proj.weight",
+            "encoder.layers.7.attention.out_proj.bias",
+            "encoder.layers.7.norm2.weight",
+            "encoder.layers.7.norm2.bias",
+            "encoder.layers.7.mlp.0.weight",
+            "encoder.layers.7.mlp.0.bias",
+            "encoder.layers.7.mlp.3.weight",
+            "encoder.layers.7.mlp.3.bias"
+          ],
+          "trainable_parameter_count": 1774464
+        }
+      },
+      "status": "PASS"
+    },
+    "handoff": {
+      "byte_size": 4081,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/preflight/multi_head_handoff.json",
+      "sha256": "489f99c1b21572d97b43e663f6cb165ea5cdcca656fcaa79a9faeacd91304140"
+    },
+    "per_head_target_hashes": {
+      "10": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "13fbd90858a3862c92d27fecaee74f356b9c2c5dab4613d5732f759cb889707c",
+          "metadata": "93bc962e290679749095e4b72bed9ea42fe030259c4426c3ad0226ab3c2a15fa",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      },
+      "6": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "87a3ea23cb142d6e77acd3b63c6c4ca87250d82c99aabad152c9cd8e8c2c5e19",
+          "metadata": "2ec01e32372682c2abd308f5aa318e9d708bdab940aedae3f9a3606790d1e362",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      },
+      "8": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "28c48c6dc19db55553b555f4494cfcfebb0cdce13557a1471ed0635ac1f3087d",
+          "metadata": "c8c004e871e0588abe801c1ab6ba5a6df8e5d62e8ae88aa550d0cb85d9b90c33",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      }
+    },
+    "status": "PASS",
+    "target_manifest": {
+      "byte_size": 22568,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+      "sha256": "c0b4edc17774d522bc0896db1366166628135d8369d2e063fd6183c66b01d15c"
+    }
+  },
+  "schema_version": 1,
+  "screening_audit": {
+    "byte_size": 22543,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_center_trace_masked_k6810_v1/original_split/preflight/center_trace_masked_screening_audit.json",
+    "sha256": "5930398b2b1e2d13598bfe7e0d0b89962c7cd39e95111fb504dc9458330114cd"
+  }
+}

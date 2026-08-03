@@ -1,0 +1,200 @@
+{
+  "artifact_type": "f3_center_trace_masked_original_screening_handoff",
+  "candidate_job_live_validation": {
+    "expected_count": 15,
+    "status": "PASS",
+    "validated_count": 15
+  },
+  "candidate_provenance": {
+    "best_checkpoint": {
+      "byte_size": 87254323,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/best.pt",
+      "sha256": "3562467846253aad44dce9520e784debe992dec733e627fcbe0e88f18a817285"
+    },
+    "embedding_metadata": {
+      "byte_size": 6059,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embedding_metadata.json",
+      "sha256": "361aa90d74c09ebb63474f525e39710ad6bf0e7e849339fcb117f7044ed67b7b"
+    },
+    "embeddings": {
+      "byte_size": 211058816,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embeddings.npy",
+      "sha256": "a5259eb20412f25dcfdb60fcbda10c30bcd726ad6dd4bd705e71ae6b0b61d2c2"
+    },
+    "model_id": "mh_ctmask010_nocons",
+    "model_tag": "strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1",
+    "pretraining_handoff": {
+      "byte_size": 18355,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/preflight/center_trace_masked_handoff.json",
+      "sha256": "27a31a98483ef3ce6d5f59d80c94602ab82dc562d4b345b1555f5fd655ccbbe6"
+    },
+    "valid_tokens": {
+      "byte_size": 274944,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+      "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+    }
+  },
+  "candidate_run_manifest": {
+    "byte_size": 305318,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_center_trace_masked_k6810_v1/original_split/reports/center_trace_masked_job_manifest.json",
+    "sha256": "197f8e2b75e73c0aa83b160c269066ed476c08d98e49092e208c8725243e544e"
+  },
+  "execution": {
+    "dirty": true,
+    "git_sha": "d895307c9a5c363c6fbd7a85c6dea58c5680f58a"
+  },
+  "formal_status": "CTMASK_ORIGINAL_GO",
+  "gate_definition": {
+    "major_degradation_budget_count": 2,
+    "major_degradation_classes": [
+      3,
+      5
+    ],
+    "major_degradation_delta": -0.05,
+    "major_degradation_metrics": [
+      "f1",
+      "iou",
+      "boundary_recall_t2",
+      "boundary_recall_t4"
+    ],
+    "maximum_negative_primary_wins": 1,
+    "minimum_negative_budgets": 2,
+    "minimum_positive_budgets": 2,
+    "minimum_primary_wins": 4,
+    "negative_mean_delta": "< 0",
+    "positive_mean_delta": "> 0",
+    "primary_comparison_id": "mh_ctmask010_nocons_vs_mh_nocons",
+    "primary_metrics": [
+      "macro_f1",
+      "mean_iou"
+    ]
+  },
+  "gate_result": {
+    "artifact_type": "f3_center_trace_masked_original_gate",
+    "gate": {
+      "major_degradation_budget_count": 2,
+      "major_degradation_classes": [
+        3,
+        5
+      ],
+      "major_degradation_delta": -0.05,
+      "major_degradation_metrics": [
+        "f1",
+        "iou",
+        "boundary_recall_t2",
+        "boundary_recall_t4"
+      ],
+      "maximum_negative_primary_wins": 1,
+      "minimum_negative_budgets": 2,
+      "minimum_positive_budgets": 2,
+      "minimum_primary_wins": 4,
+      "negative_mean_delta": "< 0",
+      "positive_mean_delta": "> 0",
+      "primary_comparison_id": "mh_ctmask010_nocons_vs_mh_nocons",
+      "primary_metrics": [
+        "macro_f1",
+        "mean_iou"
+      ]
+    },
+    "hard_vs_center_trace_masked": {
+      "negative_budgets": [],
+      "positive_budgets": [
+        "cap50",
+        "cap100"
+      ],
+      "systematic_major_degradation": []
+    },
+    "overall_status": "CTMASK_ORIGINAL_GO",
+    "schema_version": 1,
+    "scientific_jobs_executed": 0,
+    "six_split_follow_up": {
+      "ready": true,
+      "scientific_jobs_executed": 0,
+      "six_split_jobs_executed": 0
+    },
+    "six_split_jobs_executed": 0
+  },
+  "hard_decoder_config": {
+    "byte_size": 3606,
+    "path": "experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml",
+    "sha256": "faae2618fd3231b6507283fbd73f33e793c816d9d06241c5e0ce2f2e9b6e537e"
+  },
+  "paired_matrix_identity": {
+    "budgets": [
+      "cap25",
+      "cap50",
+      "cap100"
+    ],
+    "pair_identity_keys": [
+      "voxel_supervision_grid_sha256",
+      "selected_token_identity_sha256",
+      "unique_token_xyz_sha256",
+      "train_voxel_count",
+      "validation_voxel_count",
+      "class_order",
+      "validation_mask_sha256",
+      "canonical_valid_token_sha256",
+      "initial_model_state_sha256",
+      "class_weights",
+      "decoder_architecture",
+      "decoder_seed",
+      "sampling_mode",
+      "steps_per_epoch",
+      "sampling_sequence_sha256",
+      "train_tile_manifest_sha256",
+      "validation_tile_manifest_sha256",
+      "train_tile_identity_sha256",
+      "validation_tile_identity_sha256",
+      "metric_schema_sha256",
+      "uncovered_validation_voxel_count",
+      "prediction_duplicate_write_count",
+      "prediction_missing_write_count",
+      "prediction_exact_once"
+    ],
+    "roles": [
+      "mae",
+      "m1_current_k6",
+      "mh_nocons",
+      "mh_ctmask010_nocons"
+    ],
+    "row_count": 60,
+    "subsample_seeds": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ]
+  },
+  "reference_run_manifests": {
+    "current_k6": {
+      "byte_size": 306506,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_current_k6_control_v1/original_split/reports/control_job_manifest.json",
+      "sha256": "532515efe948faccf36fc73e273974bac8d6e1faca40f1ef89d33fc414d2cf80"
+    },
+    "hard_multi_head": {
+      "byte_size": 594914,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_job_manifest.json",
+      "sha256": "a6d3344bb5d684bc0a80a67390fd3414aaa046f0a188bcfc3e83ab740b8d3f32"
+    },
+    "mae": {
+      "byte_size": 687894,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split/voxel_label_budget_run_manifest.json",
+      "sha256": "3ba59737b8db0ac872f26b024907f236974326849899a2300c8f5d6478cb7077"
+    }
+  },
+  "schema_version": 1,
+  "scientific_jobs_executed": 0,
+  "screening_audit": {
+    "byte_size": 22543,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_center_trace_masked_k6810_v1/original_split/preflight/center_trace_masked_screening_audit.json",
+    "sha256": "5930398b2b1e2d13598bfe7e0d0b89962c7cd39e95111fb504dc9458330114cd"
+  },
+  "six_split_follow_up": {
+    "ready": true,
+    "scientific_jobs_executed": 0,
+    "six_split_jobs_executed": 0
+  },
+  "six_split_jobs_executed": 0,
+  "status": "PASS"
+}
