@@ -48,7 +48,33 @@ def test_center_trace_masked_gate_requires_four_of_five_wins() -> None:
 	assert decision['overall_status'] == 'CTMASK_ORIGINAL_HOLD'
 	assert decision['six_split_follow_up']['ready'] is False
 	assert decision['six_split_jobs_executed'] == 0
-	assert decision['scientific_jobs_executed'] == 0
+	assert decision['scientific_jobs_executed'] == 15
+	assert decision['six_split_follow_up']['scientific_jobs_executed'] == 0
+
+
+def test_center_trace_masked_handoff_reports_candidate_jobs() -> None:
+	budgets = ('cap25', 'cap50', 'cap100')
+	decision = results.decide_center_trace_masked_original_gate(
+		_rows(budgets), budgets=budgets
+	)
+	identities = {
+		key: {}
+		for key in (
+			'screening_audit',
+			'candidate_run_manifest',
+			'candidate_job_live_validation',
+			'candidate_provenance',
+			'hard_decoder_config',
+			'reference_run_manifests',
+			'paired_matrix_identity',
+		)
+	}
+	handoff = results._handoff_payload(  # noqa: SLF001
+		{'source_identities': identities, 'decisions': decision}, execution={}
+	)
+	assert handoff['scientific_jobs_executed'] == 15
+	assert handoff['six_split_jobs_executed'] == 0
+	assert handoff['six_split_follow_up']['scientific_jobs_executed'] == 0
 
 
 def test_center_trace_masked_gate_uses_inclusive_degradation_threshold() -> None:

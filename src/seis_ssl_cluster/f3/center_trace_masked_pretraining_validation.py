@@ -1753,8 +1753,9 @@ def _publish_handoff(
 			existing = load_f3_center_trace_masked_pretraining_handoff(path)
 		except (OSError, TypeError, ValueError, json.JSONDecodeError):
 			existing = None
-		if existing == handoff and only_missing:
-			return False
+		if existing == handoff:
+			# An exact PASS handoff is reusable even without --only-missing.
+			return not only_missing
 		if existing != handoff and not quarantine_invalid:
 			raise ValueError(
 				'existing center-trace handoff is stale or invalid; '
@@ -2008,7 +2009,7 @@ def _update_execution_evidence(
 	updated = dict(record)
 	updated['phase'] = phase
 	updated['execution'] = execution
-	if not dry_run:
+	if not dry_run and updated != record:
 		_atomic_json(_execution_evidence_path(config), updated)
 	return _mapping(updated['execution'], 'execution evidence')
 

@@ -56,6 +56,7 @@ PUBLISHED_OUTPUT_NAMES = AUDIT_OUTPUT_NAMES + REPORT_OUTPUT_NAMES
 _ARTIFACT_ROOT_PLACEHOLDER = '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'
 _CANDIDATE_ROLE = center_config.CENTER_TRACE_MASKED_MODEL_ID
 _CANDIDATE_TAG = center_config.CENTER_TRACE_MASKED_MODEL_TAG
+_SCIENTIFIC_JOB_COUNT = 15
 _PUBLISHED_ROOT = Path(
 	'f3/facies_benchmark_v1/'
 	'strat_hmm_multi_head_k6810_center_trace_masked_original_split_v1'
@@ -222,7 +223,7 @@ def decide_center_trace_masked_original_gate(
 			'scientific_jobs_executed': 0,
 			'six_split_jobs_executed': 0,
 		},
-		'scientific_jobs_executed': 0,
+		'scientific_jobs_executed': _SCIENTIFIC_JOB_COUNT,
 		'six_split_jobs_executed': 0,
 	}
 
@@ -442,7 +443,7 @@ def _handoff_payload(
 		'execution': dict(execution),
 		'six_split_follow_up': decisions['six_split_follow_up'],
 		'six_split_jobs_executed': 0,
-		'scientific_jobs_executed': 0,
+		'scientific_jobs_executed': decisions['scientific_jobs_executed'],
 	}
 
 

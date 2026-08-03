@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -726,6 +727,62 @@ def test_execution_evidence_records_bound_before_and_after_states(
 	record = validation._load_execution_evidence(config)  # noqa: SLF001
 	assert record['phase'] == 'smoke'
 	assert record['execution'] == execution
+
+
+def test_repeated_complete_reuses_handoff_and_execution_evidence(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = SimpleNamespace(experiment_root=tmp_path)
+	state = {
+		'git_commit': 'a' * 40,
+		'git_status_short': [],
+		'git_diff_sha256': 'b' * 64,
+	}
+	monkeypatch.setattr(validation, '_execution_identity', lambda: state)
+	monkeypatch.setattr(validation, '_execution_binding', lambda _config: {})
+	validation._start_execution_evidence(config, dry_run=False)  # noqa: SLF001
+	validation._update_execution_evidence(  # noqa: SLF001
+		config, phase='smoke', dry_run=False
+	)
+	validation._update_execution_evidence(  # noqa: SLF001
+		config, phase='complete', dry_run=False
+	)
+
+	sidecar = validation._execution_evidence_path(config)  # noqa: SLF001
+	sidecar_bytes = sidecar.read_bytes()
+	sidecar_mtime = sidecar.stat().st_mtime_ns
+	os.utime(sidecar, ns=(1_700_000_000_000_000_000,) * 2)
+	sidecar_mtime = sidecar.stat().st_mtime_ns
+	validation._update_execution_evidence(  # noqa: SLF001
+		config, phase='complete', dry_run=False
+	)
+	assert sidecar.read_bytes() == sidecar_bytes
+	assert sidecar.stat().st_mtime_ns == sidecar_mtime
+
+	handoff_path = tmp_path / 'handoff.json'
+	handoff = {'status': 'PASS'}
+	monkeypatch.setattr(
+		validation,
+		'load_f3_center_trace_masked_pretraining_handoff',
+		validation._json,  # noqa: SLF001
+	)
+	assert validation._publish_handoff(  # noqa: SLF001
+		handoff_path,
+		handoff,
+		only_missing=False,
+		quarantine_invalid=False,
+	)
+	handoff_bytes = handoff_path.read_bytes()
+	os.utime(handoff_path, ns=(1_700_000_000_000_000_000,) * 2)
+	handoff_mtime = handoff_path.stat().st_mtime_ns
+	assert validation._publish_handoff(  # noqa: SLF001
+		handoff_path,
+		handoff,
+		only_missing=False,
+		quarantine_invalid=False,
+	)
+	assert handoff_path.read_bytes() == handoff_bytes
+	assert handoff_path.stat().st_mtime_ns == handoff_mtime
 
 
 def _smoke_metrics() -> dict[str, object]:
