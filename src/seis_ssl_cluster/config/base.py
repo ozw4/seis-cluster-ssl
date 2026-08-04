@@ -1,5 +1,7 @@
 """Stage-aware base validation helpers for config resolvers."""
 
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -68,6 +70,7 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 			'loss',
 			'train',
 			'spatial_context',
+			'pseudo_target_refresh',
 		},
 	),
 	STAGE_STRAT_HMM_PSEUDO_TARGETS: frozenset(

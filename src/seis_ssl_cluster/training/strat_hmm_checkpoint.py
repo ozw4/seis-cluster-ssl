@@ -1,5 +1,7 @@
 """Checkpoint helpers for stratigraphic HMM pretext training."""
 
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
 import csv
@@ -25,11 +27,29 @@ from seis_ssl_cluster.config.pretraining import (
 	CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT,
 	CENTER_TRACE_SUPERVISED_LOSS,
 	CENTER_TRACE_VARIANT,
+	PERIODIC_REFRESH_CENTER_UPDATE_SEMANTICS,
+	PERIODIC_REFRESH_CHECKPOINT_SELECTION_POLICY,
+	PERIODIC_REFRESH_EMBEDDING_SEMANTICS,
+	PERIODIC_REFRESH_EXPERIMENT_ROLE,
+	PERIODIC_REFRESH_MODEL_ROLE,
+	PERIODIC_REFRESH_MODEL_TAG,
+	PERIODIC_REFRESH_PREPROCESSING_POLICY,
+	PERIODIC_REFRESH_SCHEDULE,
+	PERIODIC_REFRESH_SCHEDULE_SEMANTICS,
+	PERIODIC_REFRESH_SEMANTICS,
+	PERIODIC_REFRESH_TARGET_ACTIVATION_POLICY,
+	PERIODIC_REFRESH_TARGET_REPRESENTATION,
+	PERIODIC_REFRESH_VARIANT,
+	_is_periodic_refresh_config,
+	_validate_periodic_refresh_config,
 )
 from seis_ssl_cluster.stratigraphy.lateral_targets import (
 	load_multi_head_lateral_target_manifest,
 )
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
+from seis_ssl_cluster.stratigraphy.periodic_refresh import (
+	load_periodic_refresh_generation,
+)
 from seis_ssl_cluster.stratigraphy.prototypes import (
 	MultiResolutionOrderedPrototypeHeads,
 	OrderedPrototypeHead,
@@ -55,6 +75,7 @@ class StratRollingCheckpointResult:
 	best_score: float | None
 	best_updated: bool
 	checkpoint_selection: Mapping[str, object] | None = None
+	selected_path: Path | None = None
 
 
 _CHECKPOINT_SELECTION_SCHEMA_VERSION = 1
@@ -121,6 +142,97 @@ _CENTER_TRACE_CHECKPOINT_IDENTITY_FIELDS = frozenset(
 		'initial_head_state_sha256',
 	}
 )
+
+_PERIODIC_REFRESH_CHECKPOINT_IDENTITY_FIELDS = (
+	(
+		_CENTER_TRACE_CHECKPOINT_IDENTITY_FIELDS
+		- frozenset({'target_manifest_sha256', 'target_manifest', 'per_head_targets'})
+	)
+	| frozenset(
+		{
+			'model_role',
+			'initial_hard_target_manifest_sha256',
+			'initial_hard_target_manifest',
+			'initial_per_head_targets',
+			'initial_hmm_artifacts',
+			'target_refresh_semantics',
+			'refresh_schedule_semantics',
+			'refresh_after_epochs',
+			'hmm_iterations_per_refresh',
+			'embedding_source',
+			'embedding_mode',
+			'refresh_embedding_semantics',
+			'center_initialization',
+			'center_update',
+			'center_update_semantics',
+			'preprocessing_policy',
+			'target_activation_policy',
+			'empty_state_policy',
+			'checkpoint_selection_policy',
+			'fixed_preprocessor_sha256',
+			'fixed_residualizer_sha256',
+			'fixed_clustering_config_sha256',
+			'source_embedding_metadata_sha256',
+			'source_valid_token_hashes',
+			'feature_dimension',
+			'generation_root',
+			'target_refresh_state_sha256',
+		}
+	)
+)
+
+_PERIODIC_REFRESH_STATE_SCHEMA_VERSION = 1
+_PERIODIC_REFRESH_STATE_KEYS = frozenset(
+	{
+		'schema_version',
+		'active_generation_index',
+		'active_generation_id',
+		'active_generation_manifest_path',
+		'active_generation_manifest_sha256',
+		'active_generation_content_sha256',
+		'active_target_manifest_path',
+		'active_target_manifest_sha256',
+		'periodic_refresh_chain_path',
+		'periodic_refresh_chain_sha256',
+		'last_completed_refresh_epoch',
+		'next_scheduled_refresh_epoch',
+		'refresh_phase',
+		'source_student_state_sha256',
+		'fixed_preprocessing_hmm_identity_sha256',
+		'generations',
+	}
+)
+_PERIODIC_REFRESH_GENERATION_KEYS = frozenset(
+	{
+		'generation_index',
+		'generation_id',
+		'manifest_path',
+		'manifest_sha256',
+		'generation_content_sha256',
+	}
+)
+_PERIODIC_REFRESH_CHAIN_KEYS = frozenset(
+	{
+		'schema_version',
+		'semantics',
+		'refresh_after_epochs',
+		'fixed_preprocessing_hmm_identity_sha256',
+		'generations',
+	}
+)
+_PERIODIC_REFRESH_CHAIN_GENERATION_KEYS = frozenset(
+	{
+		'generation_index',
+		'generation_id',
+		'refresh_after_epoch',
+		'previous_generation_manifest_sha256',
+		'source_student_state_sha256',
+		'manifest_path',
+		'manifest_sha256',
+		'generation_content_sha256',
+	}
+)
+_PERIODIC_REFRESH_CHAIN_SEMANTICS = 'periodic_student_hmm_refresh_chain_v1'
 
 _XY_NEIGHBOR_CONSENSUS_CHECKPOINT_IDENTITY_FIELDS = frozenset(
 	{
@@ -253,7 +365,7 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 	stratigraphy_config: Mapping[str, object],
 	metrics: Mapping[str, float],
 	global_step: int,
-	checkpoint_kind: Literal['step', 'epoch'],
+	checkpoint_kind: Literal['step', 'epoch', 'refresh'],
 	batch_index: int | None,
 	amp_enabled: bool = False,
 	scaler: torch.amp.GradScaler | None = None,
@@ -262,10 +374,34 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 	checkpoint_selection: Mapping[str, object] | None = None,
 	trainability_summary: Mapping[str, object] | None = None,
 	control_identity: Mapping[str, object] | None = None,
+	target_refresh_state: Mapping[str, object] | None = None,
 ) -> StratRollingCheckpointResult:
 	"""Write rolling ``latest.pt`` and update ``best.pt`` on lower loss."""
 	checkpoint_root = Path(checkpoint_dir)
 	checkpoint_root.mkdir(parents=True, exist_ok=True)
+	if _is_periodic_refresh_config(stratigraphy_config):
+		return _save_periodic_refresh_rolling_checkpoint(
+			checkpoint_root,
+			student=student,
+			head=head,
+			spatial_context=spatial_context,
+			optimizer=optimizer,
+			epoch=epoch,
+			mae_config=mae_config,
+			stratigraphy_config=stratigraphy_config,
+			metrics=metrics,
+			global_step=global_step,
+			checkpoint_kind=checkpoint_kind,
+			batch_index=batch_index,
+			amp_enabled=amp_enabled,
+			scaler=scaler,
+			rng_state=rng_state,
+			best_score=best_score,
+			checkpoint_selection=checkpoint_selection,
+			trainability_summary=trainability_summary,
+			control_identity=control_identity,
+			target_refresh_state=target_refresh_state,
+		)
 	is_multi_head = _is_multi_head_config(stratigraphy_config)
 	if is_multi_head:
 		recover_strat_hmm_rolling_checkpoint(checkpoint_root)
@@ -336,6 +472,85 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 	)
 
 
+def _save_periodic_refresh_rolling_checkpoint(  # noqa: PLR0913
+	checkpoint_root: Path,
+	*,
+	student: torch.nn.Module,
+	head: torch.nn.Module,
+	spatial_context: torch.nn.Module | None,
+	optimizer: torch.optim.Optimizer,
+	epoch: int,
+	mae_config: Mapping[str, object],
+	stratigraphy_config: Mapping[str, object],
+	metrics: Mapping[str, float],
+	global_step: int,
+	checkpoint_kind: Literal['step', 'epoch', 'refresh'],
+	batch_index: int | None,
+	amp_enabled: bool,
+	scaler: torch.amp.GradScaler | None,
+	rng_state: Mapping[str, object] | None,
+	best_score: float | None,
+	checkpoint_selection: Mapping[str, object] | None,
+	trainability_summary: Mapping[str, object] | None,
+	control_identity: Mapping[str, object] | None,
+	target_refresh_state: Mapping[str, object] | None,
+) -> StratRollingCheckpointResult:
+	"""Write periodic rolling state without loss-based model selection."""
+	if best_score is not None:
+		raise ValueError('periodic refresh checkpoints do not accept best_score')
+	if target_refresh_state is None:
+		raise ValueError('periodic refresh rolling checkpoint requires refresh state')
+	refresh_state = _validated_target_refresh_state(
+		target_refresh_state, expected_config=stratigraphy_config
+	)
+	selection = _periodic_checkpoint_selection_for_payload(
+		selection=checkpoint_selection,
+		epoch=epoch,
+		global_step=global_step,
+		checkpoint_kind=checkpoint_kind,
+		batch_index=batch_index,
+		target_refresh_state=refresh_state,
+		train_epochs=_periodic_train_epochs(stratigraphy_config),
+	)
+	latest_path = save_strat_hmm_checkpoint(
+		checkpoint_root / 'latest.pt',
+		student=student,
+		head=head,
+		spatial_context=spatial_context,
+		optimizer=optimizer,
+		epoch=epoch,
+		mae_config=mae_config,
+		stratigraphy_config=stratigraphy_config,
+		metrics=metrics,
+		global_step=global_step,
+		amp_enabled=amp_enabled,
+		scaler=scaler,
+		checkpoint_kind=checkpoint_kind,
+		batch_index=batch_index,
+		rng_state=rng_state,
+		trainability_summary=trainability_summary,
+		control_identity=control_identity,
+		checkpoint_selection=selection,
+		target_refresh_state=refresh_state,
+	)
+	selected_path: Path | None = None
+	if selection['selected'] is not None:
+		selected_path = checkpoint_root / 'selected.pt'
+		_copy_checkpoint_atomic(latest_path, selected_path)
+	_atomic_json(
+		checkpoint_root / 'checkpoint_selection_summary.json',
+		selection,
+	)
+	return StratRollingCheckpointResult(
+		latest_path=latest_path,
+		best_path=checkpoint_root / 'best.pt',
+		best_score=None,
+		best_updated=False,
+		checkpoint_selection=selection,
+		selected_path=selected_path,
+	)
+
+
 def recover_strat_hmm_rolling_checkpoint(checkpoint_dir: str | Path) -> None:
 	"""Finish an interrupted multi-head ``latest.pt``/``best.pt`` update.
 
@@ -389,7 +604,7 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	stratigraphy_config: Mapping[str, object],
 	metrics: Mapping[str, float],
 	global_step: int,
-	checkpoint_kind: Literal['step', 'epoch'],
+	checkpoint_kind: Literal['step', 'epoch', 'refresh'],
 	batch_index: int | None,
 	amp_enabled: bool = False,
 	scaler: torch.amp.GradScaler | None = None,
@@ -397,6 +612,7 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	trainability_summary: Mapping[str, object] | None = None,
 	control_identity: Mapping[str, object] | None = None,
 	checkpoint_selection: Mapping[str, object] | None = None,
+	target_refresh_state: Mapping[str, object] | None = None,
 ) -> Path:
 	"""Atomically save an extraction-compatible strat HMM checkpoint."""
 	checkpoint_path = Path(path)
@@ -443,6 +659,17 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	}
 	if control_identity is not None:
 		payload['control_identity'] = _to_plain_value(control_identity)
+	if _is_periodic_refresh_config(stratigraphy_config):
+		if target_refresh_state is None:
+			raise ValueError('schema-8 checkpoint requires target_refresh_state')
+		payload['target_refresh_state'] = _validated_target_refresh_state(
+			target_refresh_state,
+			expected_config=stratigraphy_config,
+		)
+	elif target_refresh_state is not None:
+		raise ValueError(
+			'target_refresh_state is only valid for periodic-refresh checkpoints'
+		)
 	if spatial_context_state_dict is not None:
 		payload['spatial_context_state_dict'] = spatial_context_state_dict
 		payload['spatial_context_state_sha256'] = _state_sha256(
@@ -455,7 +682,36 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 			initial_states.get('spatial_context'),
 			'initial_state_sha256.spatial_context',
 		)
-	if _is_multi_head_config(stratigraphy_config):
+	if _is_periodic_refresh_config(stratigraphy_config):
+		if checkpoint_selection is None:
+			checkpoint_selection = _periodic_checkpoint_selection_for_payload(
+				epoch=epoch,
+				global_step=global_step,
+				checkpoint_kind=checkpoint_kind,
+				batch_index=batch_index,
+				target_refresh_state=payload['target_refresh_state'],
+				train_epochs=_periodic_train_epochs(stratigraphy_config),
+			)
+		payload['checkpoint_selection'] = _validated_periodic_checkpoint_selection(
+			checkpoint_selection,
+			train_epochs=_periodic_train_epochs(stratigraphy_config),
+		)
+		payload['stratigraphy_checkpoint'] = _periodic_refresh_checkpoint_identity(
+			stratigraphy_config=stratigraphy_config,
+			stratigraphy_state_dict=stratigraphy_state_dict,
+			spatial_context=spatial_context,
+			spatial_context_state_dict=spatial_context_state_dict,
+			control_identity=control_identity,
+			optimizer=optimizer,
+			student=student,
+			head=head,
+			target_refresh_state=payload['target_refresh_state'],
+		)
+		_validate_periodic_training_state(payload)
+		_validate_periodic_checkpoint_selection_payload_binding(
+			payload, payload['checkpoint_selection']
+		)
+	elif _is_multi_head_config(stratigraphy_config):
 		if checkpoint_selection is None:
 			checkpoint_selection = _update_checkpoint_selection(
 				None,
@@ -499,7 +755,7 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 		return
 	if not isinstance(identity, Mapping):
 		raise TypeError('checkpoint stratigraphy_checkpoint must be a mapping')
-	if identity.get('schema_version') not in {2, 3, 4, 5, 6, 7}:
+	if identity.get('schema_version') not in {2, 3, 4, 5, 6, 7, 8}:
 		raise ValueError('unsupported stratigraphy checkpoint schema_version')
 	if identity.get('head_spec') != 'multi_resolution_ordered_prototypes_v1':
 		raise ValueError('unsupported stratigraphy multi-head head_spec')
@@ -507,7 +763,9 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 	if not isinstance(config, Mapping) or not isinstance(state, Mapping):
 		raise TypeError('multi-head checkpoint requires config and head state mappings')
 	expected_schema_version = (
-		7
+		8
+		if _is_periodic_refresh_config(config)
+		else 7
 		if _is_center_trace_config(config)
 		else 6
 		if _is_xy_neighbor_unanimous_multi_head_config(config)
@@ -539,11 +797,12 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 			'checkpoint has unsupported spatial_context field(s): '
 			f'{unsupported_aux_payload_keys!r}'
 		)
-	if expected_schema_version != 7:
+	if expected_schema_version not in {7, 8}:
 		aux_fields = sorted(set(payload) & aux_payload_keys)
 		if aux_fields:
 			raise ValueError(
-				'spatial_context fields are only valid for schema-7 checkpoints: '
+				'spatial_context fields are only valid for schema-7/schema-8 '
+				'checkpoints: '
 				f'{aux_fields!r}'
 			)
 		identity_aux_fields = sorted(
@@ -567,12 +826,41 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 		stratigraphy_config=config,
 		stratigraphy_state_dict=state,
 	)
-	if expected_schema_version == 7:
+	if expected_schema_version == 8:
+		target_refresh_state = payload.get('target_refresh_state')
+		if not isinstance(target_refresh_state, Mapping):
+			raise ValueError('schema-8 checkpoint is missing target_refresh_state')
+		validated_refresh_state = _validated_target_refresh_state(
+			target_refresh_state,
+			expected_config=config,
+		)
+		if identity.get('target_refresh_state_sha256') != _canonical_sha256(
+			validated_refresh_state
+		):
+			raise ValueError(
+				'schema-8 target_refresh_state hash does not match identity'
+			)
+		_validate_periodic_training_state(payload)
+		selection = _validated_periodic_checkpoint_selection(
+			payload.get('checkpoint_selection'),
+			train_epochs=_periodic_train_epochs(config),
+		)
+		_validate_periodic_checkpoint_selection_payload_binding(payload, selection)
+	elif 'target_refresh_state' in payload:
+		raise ValueError(
+			'target_refresh_state is only valid for schema-8 checkpoints'
+		)
+	if expected_schema_version in {7, 8}:
 		model_state = payload.get('model_state_dict')
 		if not isinstance(model_state, Mapping):
-			raise TypeError('schema-7 model_state_dict must be a mapping')
+			raise TypeError(
+				f'schema-{expected_schema_version} model_state_dict must be a mapping'
+			)
 		if any(not isinstance(value, torch.Tensor) for value in model_state.values()):
-			raise TypeError('schema-7 model_state_dict values must be tensors')
+			raise TypeError(
+				f'schema-{expected_schema_version} model_state_dict values must '
+				'be tensors'
+			)
 		student_state_sha256 = _required_sha256(
 			identity.get('student_state_sha256'),
 			'checkpoint student_state_sha256',
@@ -582,7 +870,8 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 		spatial_state = payload.get('spatial_context_state_dict')
 		if not isinstance(spatial_state, Mapping):
 			raise ValueError(
-				'schema-7 checkpoint is missing spatial_context_state_dict'
+				f'schema-{expected_schema_version} checkpoint is missing '
+				'spatial_context_state_dict'
 			)
 		_validate_finite_state_dict(
 			{
@@ -596,14 +885,16 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 			raise TypeError('spatial_context_state_dict values must be tensors')
 		if set(spatial_state) != {'replacement_token'}:
 			raise ValueError(
-				'schema-7 spatial_context_state_dict must contain only '
-				'replacement_token'
+				f'schema-{expected_schema_version} spatial_context_state_dict must '
+				'contain only replacement_token'
 			)
 		replacement_state = spatial_state['replacement_token']
 		model_config = _required_mapping(config, 'model')
 		model_state = payload.get('model_state_dict')
 		if not isinstance(model_state, Mapping):
-			raise TypeError('schema-7 model_state_dict must be a mapping')
+			raise TypeError(
+				f'schema-{expected_schema_version} model_state_dict must be a mapping'
+			)
 		model_dtypes = {
 			value.dtype
 			for value in model_state.values()
@@ -611,7 +902,8 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 		}
 		if not model_dtypes or replacement_state.dtype not in model_dtypes:
 			raise TypeError(
-				'schema-7 replacement_token dtype does not match model state dtype'
+				f'schema-{expected_schema_version} replacement_token dtype does not '
+				'match model state dtype'
 			)
 		if (
 			not replacement_state.is_floating_point()
@@ -619,7 +911,8 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 			or replacement_state.shape[0] != model_config.get('encoder_dim')
 		):
 			raise ValueError(
-				'schema-7 replacement_token shape or dtype does not match model encoder'
+				f'schema-{expected_schema_version} replacement_token shape or dtype '
+				'does not match model encoder'
 			)
 		spatial_sha256 = _required_sha256(
 			payload.get('spatial_context_state_sha256'),
@@ -649,7 +942,8 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 			expected_state = expected_spatial_context.state_dict()
 			if set(expected_state) != set(spatial_state):
 				raise ValueError(
-					'schema-7 spatial_context state keys do not match current module'
+					f'schema-{expected_schema_version} spatial_context state keys do '
+					'not match current module'
 				)
 			for key, expected_value in expected_state.items():
 				actual_value = spatial_state[key]
@@ -658,18 +952,21 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 					or actual_value.dtype != expected_value.dtype
 				):
 					raise ValueError(
-						'schema-7 spatial_context state geometry or dtype does not '
-						'match current module'
-					)
+					f'schema-{expected_schema_version} spatial_context state '
+					'geometry or dtype does not match current module'
+				)
 	elif expected_spatial_context is not None:
-		raise ValueError('spatial_context is only valid for schema-7 checkpoints')
+		raise ValueError(
+			'spatial_context is only valid for schema-7/schema-8 checkpoints'
+		)
 	if expected_schema_version == 6:
 		_validate_xy_neighbor_unanimous_control_identity(
 			identity=identity,
 			control_identity=payload.get('control_identity'),
 		)
-	selection = _validated_checkpoint_selection(payload.get('checkpoint_selection'))
-	_validate_checkpoint_selection_payload_binding(payload, selection)
+	if expected_schema_version != 8:
+		selection = _validated_checkpoint_selection(payload.get('checkpoint_selection'))
+		_validate_checkpoint_selection_payload_binding(payload, selection)
 	if not _optimizer_state_group_identity_matches(
 		payload.get('optimizer_state_dict'),
 		identity.get('optimizer_group_identity'),
@@ -722,7 +1019,20 @@ def inspect_stratigraphy_checkpoint(
 		),
 	}
 	identity = payload.get('stratigraphy_checkpoint')
-	if isinstance(identity, Mapping) and identity.get('schema_version') == 7:
+	if isinstance(identity, Mapping) and identity.get('schema_version') == 8:
+		target_refresh_state = payload.get('target_refresh_state')
+		if not isinstance(target_refresh_state, Mapping):
+			raise TypeError('schema-8 target_refresh_state must be a mapping')
+		result.update(
+			{
+				'best_selection_metric': None,
+				'representation': identity['target_representation'],
+				'objective': identity['objective_semantics'],
+				'selection_policy': identity['checkpoint_selection_policy'],
+				'active_generation_id': target_refresh_state['active_generation_id'],
+			}
+		)
+	elif isinstance(identity, Mapping) and identity.get('schema_version') == 7:
 		result.update(
 			{
 				'representation': identity['target_representation'],
@@ -1504,6 +1814,762 @@ def _center_trace_checkpoint_identity(  # noqa: PLR0913
 	}
 
 
+def _periodic_refresh_checkpoint_identity(  # noqa: PLR0913
+	*,
+	stratigraphy_config: Mapping[str, object],
+	stratigraphy_state_dict: Mapping[str, torch.Tensor],
+	spatial_context: torch.nn.Module | None,
+	spatial_context_state_dict: Mapping[str, torch.Tensor] | None,
+	control_identity: Mapping[str, object] | None,
+	optimizer: torch.optim.Optimizer,
+	student: torch.nn.Module,
+	head: torch.nn.Module,
+	target_refresh_state: Mapping[str, object],
+) -> dict[str, object]:
+	"""Build the independent schema-8 periodic-refresh checkpoint identity."""
+	if spatial_context is None or spatial_context_state_dict is None:
+		raise ValueError('schema-8 checkpoint requires spatial_context state')
+	if not isinstance(control_identity, Mapping):
+		raise TypeError('schema-8 checkpoint requires control identity')
+	head_config = _required_mapping(stratigraphy_config, 'head')
+	if head_config.get('spec') != 'multi_resolution_ordered_prototypes_v1' or tuple(
+		head_config.get('ks', ())
+	) != (6, 8, 10):
+		raise ValueError('schema-8 checkpoint requires head K=(6, 8, 10)')
+	spatial = _required_mapping(stratigraphy_config, 'spatial_context')
+	for key, expected in CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT.items():
+		if spatial.get(key) != expected:
+			raise ValueError(f'schema-8 spatial_context.{key} contract mismatch')
+	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
+	initial_manifest_path = Path(
+		_required_string(pseudo_targets.get('manifest'), 'pseudo_targets.manifest')
+	)
+	initial_manifest_sha256 = _file_sha256(initial_manifest_path)
+	per_head_targets = _manifest_per_head_target_hashes(initial_manifest_path)
+	identity = _required_mapping(stratigraphy_config, 'identity')
+	scientific = _required_mapping(identity, 'scientific_identity')
+	if scientific.get('target_manifest_sha256') != initial_manifest_sha256:
+		raise ValueError('schema-8 initial target manifest SHA-256 mismatch')
+	if scientific.get('target_head_hashes') != per_head_targets:
+		raise ValueError(
+			'schema-8 initial per-head target hashes do not match manifest'
+		)
+	inputs = _required_mapping(control_identity, 'input_identities')
+	initial_states = _required_mapping(control_identity, 'initial_state_sha256')
+	return {
+		'schema_version': 8,
+		'head_spec': 'multi_resolution_ordered_prototypes_v1',
+		'head_ks': [6, 8, 10],
+		'target_representation': PERIODIC_REFRESH_TARGET_REPRESENTATION,
+		'initial_hard_target_manifest_sha256': initial_manifest_sha256,
+		'initial_hard_target_manifest': {
+			'path': str(initial_manifest_path),
+			'sha256': initial_manifest_sha256,
+		},
+		'initial_per_head_targets': per_head_targets,
+		'objective_semantics': scientific['objective_semantics'],
+		'mask_semantics': scientific['mask_semantics'],
+		'column_fraction': scientific['column_fraction'],
+		'selection_policy': scientific['selection_policy'],
+		'replacement': scientific['replacement'],
+		'replacement_initialization': scientific['replacement_initialization'],
+		'rng_policy': scientific['rng_policy'],
+		'masked_prototype_weight': scientific['masked_prototype_weight'],
+		'visible_prototype_weight': scientific['visible_prototype_weight'],
+		'distillation_scope': scientific['distillation_scope'],
+		'supervised_loss': scientific['supervised_loss'],
+		'consistency_policy': scientific['consistency_policy'],
+		'prototype_weight': scientific['prototype_weight'],
+		'usage_weight': scientific['usage_weight'],
+		'consistency_weight': scientific['consistency_weight'],
+		'consistency_beta': scientific['consistency_beta'],
+		'distillation_weight': scientific['distillation_weight'],
+		'model_role': scientific['model_role'],
+		'target_refresh_semantics': scientific['target_refresh_semantics'],
+		'refresh_schedule_semantics': scientific['refresh_schedule_semantics'],
+		'refresh_after_epochs': scientific['refresh_after_epochs'],
+		'hmm_iterations_per_refresh': scientific['hmm_iterations_per_refresh'],
+		'embedding_source': scientific['embedding_source'],
+		'embedding_mode': scientific['embedding_mode'],
+		'refresh_embedding_semantics': scientific['refresh_embedding_semantics'],
+		'center_initialization': scientific['center_initialization'],
+		'center_update': scientific['center_update'],
+		'center_update_semantics': scientific['center_update_semantics'],
+		'preprocessing_policy': scientific['preprocessing_policy'],
+		'target_activation_policy': scientific['target_activation_policy'],
+		'empty_state_policy': scientific['empty_state_policy'],
+		'checkpoint_selection_policy': scientific['checkpoint_selection_policy'],
+		'initial_hmm_artifacts': scientific['initial_hmm_artifacts'],
+		'fixed_preprocessor_sha256': scientific['fixed_preprocessor_sha256'],
+		'fixed_residualizer_sha256': scientific['fixed_residualizer_sha256'],
+		'fixed_clustering_config_sha256': scientific[
+			'fixed_clustering_config_sha256'
+		],
+		'source_embedding_metadata_sha256': scientific[
+			'source_embedding_metadata_sha256'
+		],
+		'source_valid_token_hashes': scientific['source_valid_token_hashes'],
+		'feature_dimension': scientific['feature_dimension'],
+		'generation_root': scientific['generation_root'],
+		'target_refresh_state_sha256': _canonical_sha256(target_refresh_state),
+		'model_tag': identity.get('model_tag'),
+		'output_root': _required_mapping(stratigraphy_config, 'paths').get(
+			'output_root'
+		),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
+		'student_state_sha256': _state_sha256(_state_dict_cpu(student)),
+		'stratigraphy_state_sha256': _state_sha256(stratigraphy_state_dict),
+		'spatial_context_state_sha256': _state_sha256(spatial_context_state_dict),
+		'initial_spatial_context_state_sha256': _required_sha256(
+			initial_states.get('spatial_context'),
+			'initial_state_sha256.spatial_context',
+		),
+		'optimizer_group_identity': _optimizer_group_identity(
+			optimizer,
+			parameter_names=_stratigraphy_parameter_names(
+				student, head, spatial_context=spatial_context
+			),
+		),
+		'teacher_checkpoint_sha256': _required_sha256(
+			_required_mapping(inputs, 'teacher_checkpoint').get('sha256'),
+			'input_identities.teacher_checkpoint.sha256',
+		),
+		'student_init_checkpoint_sha256': _required_sha256(
+			_required_mapping(inputs, 'student_init_checkpoint').get('sha256'),
+			'input_identities.student_init_checkpoint.sha256',
+		),
+		'initial_student_state_sha256': _required_sha256(
+			initial_states.get('student'), 'initial_state_sha256.student'
+		),
+		'initial_head_state_sha256': _required_sha256(
+			initial_states.get('head'), 'initial_state_sha256.head'
+		),
+	}
+
+
+def _periodic_train_epochs(config: Mapping[str, object]) -> int:
+	train = _required_mapping(config, 'train')
+	epochs = train.get('epochs')
+	if isinstance(epochs, bool) or not isinstance(epochs, int) or epochs != 25:
+		raise ValueError('periodic refresh requires train.epochs == 25')
+	return epochs
+
+
+def _periodic_fixed_preprocessing_identity_sha256(
+	scientific: Mapping[str, object],
+) -> str:
+	keys = (
+		'initial_hmm_artifacts',
+		'fixed_preprocessor_sha256',
+		'fixed_residualizer_sha256',
+		'fixed_clustering_config_sha256',
+		'source_embedding_metadata_sha256',
+		'source_valid_token_hashes',
+		'feature_dimension',
+	)
+	return _canonical_sha256({key: scientific.get(key) for key in keys})
+
+
+def _validated_target_refresh_state(  # noqa: C901, PLR0912, PLR0915
+	value: object,
+	*,
+	expected_config: Mapping[str, object] | None = None,
+) -> dict[str, object]:
+	"""Validate the complete, externally published periodic refresh state."""
+	if not isinstance(value, Mapping):
+		raise TypeError('target_refresh_state must be a mapping')
+	unknown = sorted(set(value) - _PERIODIC_REFRESH_STATE_KEYS)
+	missing = sorted(_PERIODIC_REFRESH_STATE_KEYS - set(value))
+	if unknown:
+		raise ValueError(
+			f'target_refresh_state has unsupported field(s): {unknown!r}'
+		)
+	if missing:
+		raise ValueError(f'target_refresh_state is missing field(s): {missing!r}')
+	if value.get('schema_version') != _PERIODIC_REFRESH_STATE_SCHEMA_VERSION:
+		raise ValueError('unsupported target_refresh_state schema_version')
+
+	active_index = _nonnegative_int_value(
+		value.get('active_generation_index'), 'active_generation_index'
+	)
+	active_id = _required_string(
+		value.get('active_generation_id'), 'active_generation_id'
+	)
+	active_manifest_path = _absolute_state_path(
+		value.get('active_generation_manifest_path'),
+		'active_generation_manifest_path',
+	)
+	active_manifest_sha256 = _required_sha256(
+		value.get('active_generation_manifest_sha256'),
+		'active_generation_manifest_sha256',
+	)
+	active_content_sha256 = _required_sha256(
+		value.get('active_generation_content_sha256'),
+		'active_generation_content_sha256',
+	)
+	active_target_path = _absolute_state_path(
+		value.get('active_target_manifest_path'), 'active_target_manifest_path'
+	)
+	active_target_sha256 = _required_sha256(
+		value.get('active_target_manifest_sha256'),
+		'active_target_manifest_sha256',
+	)
+	chain_path = _absolute_state_path(
+		value.get('periodic_refresh_chain_path'), 'periodic_refresh_chain_path'
+	)
+	chain_sha256 = _required_sha256(
+		value.get('periodic_refresh_chain_sha256'),
+		'periodic_refresh_chain_sha256',
+	)
+	last_refresh = _nonnegative_int_value(
+		value.get('last_completed_refresh_epoch'),
+		'last_completed_refresh_epoch',
+	)
+	next_refresh = value.get('next_scheduled_refresh_epoch')
+	if next_refresh is not None:
+		next_refresh = _positive_int_value(
+			next_refresh, 'next_scheduled_refresh_epoch'
+		)
+	phase = value.get('refresh_phase')
+	if phase not in {'training', 'refresh_required', 'refresh_complete'}:
+		raise ValueError(
+			'target_refresh_state.refresh_phase must be training, refresh_required, '
+			'or refresh_complete'
+		)
+	source_hash = value.get('source_student_state_sha256')
+	if source_hash is not None:
+		source_hash = _required_sha256(
+			source_hash, 'source_student_state_sha256'
+		)
+	fixed_identity_hash = _required_sha256(
+		value.get('fixed_preprocessing_hmm_identity_sha256'),
+		'fixed_preprocessing_hmm_identity_sha256',
+	)
+
+	raw_generations = value.get('generations')
+	if not isinstance(raw_generations, list) or not raw_generations:
+		raise ValueError('target_refresh_state.generations must be a non-empty list')
+	if len(raw_generations) != active_index + 1:
+		raise ValueError(
+		'target_refresh_state.generations must end at active_generation_index'
+	)
+	generations: list[dict[str, object]] = []
+	loaded_payloads: list[Mapping[str, object]] = []
+	for expected_index, raw_generation in enumerate(raw_generations):
+		if not isinstance(raw_generation, Mapping):
+			raise TypeError('target_refresh_state generation must be a mapping')
+		if set(raw_generation) != _PERIODIC_REFRESH_GENERATION_KEYS:
+			raise ValueError(
+				'target_refresh_state generation fields are not closed'
+			)
+		generation_index = _nonnegative_int_value(
+				raw_generation.get('generation_index'),
+				'generation.generation_index',
+			)
+		if generation_index != expected_index:
+			raise ValueError(
+				'target_refresh_state generation indices must be contiguous from zero'
+			)
+		generation_id = _required_string(
+				raw_generation.get('generation_id'), 'generation.generation_id'
+		)
+		manifest_path = _absolute_state_path(
+				raw_generation.get('manifest_path'), 'generation.manifest_path'
+			)
+		manifest_sha256 = _required_sha256(
+				raw_generation.get('manifest_sha256'), 'generation.manifest_sha256'
+			)
+		content_sha256 = _required_sha256(
+				raw_generation.get('generation_content_sha256'),
+			'generation.generation_content_sha256',
+		)
+		if not manifest_path.is_file():
+			raise FileNotFoundError(
+				f'target_refresh_state generation manifest is missing: {manifest_path}'
+			)
+		if _file_sha256(manifest_path) != manifest_sha256:
+			raise ValueError(
+				'target_refresh_state generation manifest hash mismatch: '
+				f'{manifest_path}'
+			)
+		try:
+			generation_payload = load_periodic_refresh_generation(manifest_path)
+		except (OSError, RuntimeError, TypeError, ValueError, KeyError) as exc:
+			raise ValueError(
+				f'target_refresh_state generation is incomplete or corrupt: '
+				f'{manifest_path}: {exc}'
+			) from exc
+		if generation_payload.get('generation_index') != generation_index:
+			raise ValueError(
+				'target_refresh_state generation index does not match manifest'
+			)
+		if generation_payload.get('generation_id') != generation_id:
+			raise ValueError(
+				'target_refresh_state generation id does not match manifest'
+			)
+		if generation_payload.get('generation_content_sha256') != content_sha256:
+			raise ValueError(
+				'target_refresh_state generation content hash does not match manifest'
+			)
+		generations.append(
+			{
+				'generation_index': generation_index,
+				'generation_id': generation_id,
+				'manifest_path': str(manifest_path),
+				'manifest_sha256': manifest_sha256,
+				'generation_content_sha256': content_sha256,
+			}
+		)
+		loaded_payloads.append(generation_payload)
+
+	last_generation = generations[-1]
+	if active_index != last_generation['generation_index']:
+		raise ValueError('active generation index does not match generation list')
+	if active_id != last_generation['generation_id']:
+		raise ValueError('active generation id does not match generation list')
+	if active_manifest_path != Path(str(last_generation['manifest_path'])):
+		raise ValueError(
+			'active generation manifest path does not match generation list'
+		)
+	if active_manifest_sha256 != last_generation['manifest_sha256']:
+		raise ValueError(
+			'active generation manifest hash does not match generation list'
+		)
+	if active_content_sha256 != last_generation['generation_content_sha256']:
+		raise ValueError(
+		'active generation content hash does not match generation list'
+	)
+
+	active_payload = loaded_payloads[-1]
+	canonical_target = active_payload.get('canonical_multi_head_target_manifest')
+	if not isinstance(canonical_target, Mapping):
+		raise TypeError(
+			'active generation canonical_multi_head_target_manifest must be a mapping'
+		)
+	canonical_target_path = _absolute_state_path(
+		canonical_target.get('path'),
+		'active generation canonical target path',
+	)
+	canonical_target_sha256 = _required_sha256(
+		canonical_target.get('sha256'),
+		'active generation canonical target hash',
+	)
+	if active_target_path != canonical_target_path:
+		raise ValueError('active target manifest path does not match active generation')
+	if active_target_sha256 != canonical_target_sha256:
+		raise ValueError('active target manifest hash does not match active generation')
+	if not active_target_path.is_file():
+		raise FileNotFoundError(
+		f'active target manifest is missing: {active_target_path}'
+	)
+	if _file_sha256(active_target_path) != active_target_sha256:
+		raise ValueError('active target manifest SHA-256 mismatch')
+	try:
+		target_payload = load_multi_head_target_manifest(active_target_path)
+	except (OSError, RuntimeError, TypeError, ValueError, KeyError) as exc:
+		raise ValueError(
+			f'active target manifest is incomplete or corrupt: {active_target_path}'
+		) from exc
+	if tuple(target_payload.get('head_ks', ())) != (6, 8, 10):
+		raise ValueError('active target manifest head_ks must be [6, 8, 10]')
+
+	_refresh_root = _periodic_refresh_root_from_config(expected_config)
+	if _refresh_root is not None:
+		_expected_periodic_state_paths(
+			refresh_root=_refresh_root,
+			active_manifest_path=active_manifest_path,
+			active_target_path=active_target_path,
+			chain_path=chain_path,
+			generations=generations,
+		)
+		pointer_path = _refresh_root / 'active_target_generation.json'
+		if not pointer_path.is_file():
+			raise FileNotFoundError(
+				f'active target generation pointer is missing: {pointer_path}'
+			)
+		pointer = _load_json_mapping(pointer_path, 'active target generation pointer')
+		if set(pointer) != {'manifest_path', 'manifest_sha256'}:
+			raise ValueError('active target generation pointer fields are not closed')
+		if pointer.get('manifest_path') != str(active_manifest_path) or pointer.get(
+			'manifest_sha256'
+		) != active_manifest_sha256:
+			raise ValueError(
+				'active target generation pointer does not match checkpoint state'
+			)
+
+	_validate_periodic_refresh_chain(
+		chain_path,
+		chain_sha256=chain_sha256,
+		generations=generations,
+		loaded_payloads=loaded_payloads,
+		expected_config=expected_config,
+	)
+
+	if expected_config is not None:
+		_validate_periodic_refresh_state_against_config(
+			state={
+				'active_generation_index': active_index,
+				'active_generation_id': active_id,
+				'active_target_manifest_path': str(active_target_path),
+				'active_target_manifest_sha256': active_target_sha256,
+				'last_completed_refresh_epoch': last_refresh,
+				'next_scheduled_refresh_epoch': next_refresh,
+				'refresh_phase': phase,
+				'source_student_state_sha256': source_hash,
+				'fixed_preprocessing_hmm_identity_sha256': fixed_identity_hash,
+			},
+			loaded_payloads=loaded_payloads,
+			expected_config=expected_config,
+		)
+
+	return {
+		'schema_version': _PERIODIC_REFRESH_STATE_SCHEMA_VERSION,
+		'active_generation_index': active_index,
+		'active_generation_id': active_id,
+		'active_generation_manifest_path': str(active_manifest_path),
+		'active_generation_manifest_sha256': active_manifest_sha256,
+		'active_generation_content_sha256': active_content_sha256,
+		'active_target_manifest_path': str(active_target_path),
+		'active_target_manifest_sha256': active_target_sha256,
+		'periodic_refresh_chain_path': str(chain_path),
+		'periodic_refresh_chain_sha256': chain_sha256,
+		'last_completed_refresh_epoch': last_refresh,
+		'next_scheduled_refresh_epoch': next_refresh,
+		'refresh_phase': phase,
+		'source_student_state_sha256': source_hash,
+		'fixed_preprocessing_hmm_identity_sha256': fixed_identity_hash,
+		'generations': generations,
+	}
+
+
+def _periodic_refresh_root_from_config(
+	config: Mapping[str, object] | None,
+) -> Path | None:
+	if config is None:
+		return None
+	identity = _required_mapping(config, 'identity')
+	scientific = _required_mapping(identity, 'scientific_identity')
+	return Path(_required_string(scientific.get('generation_root'), 'generation_root'))
+
+
+def _expected_periodic_state_paths(
+	*,
+	refresh_root: Path,
+	active_manifest_path: Path,
+	active_target_path: Path,
+	chain_path: Path,
+	generations: list[dict[str, object]],
+) -> None:
+	refresh_root = refresh_root.resolve()
+	for label, path, expected in (
+		('active generation manifest', active_manifest_path, None),
+		(
+			'periodic refresh chain',
+			chain_path,
+			refresh_root / 'periodic_refresh_chain.json',
+		),
+	):
+		try:
+			path.resolve().relative_to(refresh_root)
+		except ValueError as exc:
+			raise ValueError(f'{label} must be under generation_root') from exc
+		if expected is not None and path.resolve() != expected.resolve():
+			raise ValueError(f'{label} path does not match generation_root layout')
+	if int(generations[-1]['generation_index']) > 0:
+		try:
+			active_target_path.resolve().relative_to(refresh_root)
+		except ValueError as exc:
+			raise ValueError(
+				'active target manifest must be under generation_root'
+			) from exc
+	for generation in generations:
+		path = Path(str(generation['manifest_path']))
+		try:
+			path.resolve().relative_to(refresh_root / 'generations')
+		except ValueError as exc:
+			raise ValueError(
+				'generation manifest must be under generation_root/generations'
+			) from exc
+
+
+def _validate_periodic_refresh_chain(  # noqa: C901, PLR0912
+	path: Path,
+	*,
+	chain_sha256: str,
+	generations: list[dict[str, object]],
+	loaded_payloads: list[Mapping[str, object]],
+	expected_config: Mapping[str, object] | None,
+) -> None:
+	if not path.is_file():
+		raise FileNotFoundError(f'periodic refresh chain is missing: {path}')
+	if _file_sha256(path) != chain_sha256:
+		raise ValueError('periodic refresh chain SHA-256 mismatch')
+	chain = _load_json_mapping(path, 'periodic refresh chain')
+	if set(chain) != _PERIODIC_REFRESH_CHAIN_KEYS:
+		raise ValueError('periodic refresh chain fields are not closed')
+	if chain.get('schema_version') != 1:
+		raise ValueError('periodic refresh chain schema_version is invalid')
+	if chain.get('semantics') != _PERIODIC_REFRESH_CHAIN_SEMANTICS:
+		raise ValueError('periodic refresh chain semantics are invalid')
+	if tuple(chain.get('refresh_after_epochs', ())) != PERIODIC_REFRESH_SCHEDULE:
+		raise ValueError('periodic refresh chain schedule mismatch')
+	chain_fixed_hash = _required_sha256(
+		chain.get('fixed_preprocessing_hmm_identity_sha256'),
+		'periodic refresh chain fixed preprocessing identity hash',
+	)
+	chain_generations = chain.get('generations')
+	if not isinstance(chain_generations, list):
+		raise TypeError('periodic refresh chain generations must be a list')
+	if len(chain_generations) != len(generations) or len(
+		loaded_payloads
+	) != len(generations):
+		raise ValueError('periodic refresh chain generations do not match state')
+	expected_generations: list[dict[str, object]] = []
+	for sequence, (generation, payload) in enumerate(
+		zip(generations, loaded_payloads, strict=True)
+	):
+		previous = payload.get('previous_generation_manifest')
+		if previous is None:
+			previous_hash = None
+		elif isinstance(previous, Mapping):
+			previous_hash = _required_sha256(
+				previous.get('sha256'),
+				'periodic refresh previous generation manifest hash',
+			)
+		else:
+			raise TypeError(
+				'periodic refresh previous generation manifest must be a '
+				'mapping or null'
+			)
+		expected_previous_hash = (
+			None
+			if sequence == 0
+			else generations[sequence - 1]['manifest_sha256']
+		)
+		if previous_hash != expected_previous_hash:
+			raise ValueError(
+				'periodic refresh generation chain is disconnected from the prior '
+				'generation manifest'
+			)
+		source_hash = payload.get('source_student_state_sha256')
+		if source_hash is not None:
+			source_hash = _required_sha256(
+				source_hash,
+				'periodic refresh chain source student state hash',
+			)
+		expected_generations.append(
+			{
+				'generation_index': generation['generation_index'],
+				'generation_id': generation['generation_id'],
+				'refresh_after_epoch': payload.get('refresh_after_epoch'),
+				'previous_generation_manifest_sha256': previous_hash,
+				'source_student_state_sha256': source_hash,
+				'manifest_path': generation['manifest_path'],
+				'manifest_sha256': generation['manifest_sha256'],
+				'generation_content_sha256': generation[
+					'generation_content_sha256'
+				],
+			}
+		)
+	for sequence, raw_generation in enumerate(chain_generations):
+		if not isinstance(raw_generation, Mapping):
+			raise TypeError('periodic refresh chain generation must be a mapping')
+		if set(raw_generation) != _PERIODIC_REFRESH_CHAIN_GENERATION_KEYS:
+			raise ValueError(
+				'periodic refresh chain generation fields are not closed'
+			)
+		if dict(raw_generation) != expected_generations[sequence]:
+			raise ValueError(
+				'periodic refresh chain generation lineage does not match manifests'
+			)
+	if expected_config is not None:
+		scientific = _required_mapping(
+			_required_mapping(expected_config, 'identity'), 'scientific_identity'
+		)
+		expected_hash = _periodic_fixed_preprocessing_identity_sha256(scientific)
+		if chain_fixed_hash != expected_hash:
+			raise ValueError(
+				'periodic refresh chain fixed preprocessing identity drift'
+			)
+
+
+def _validate_periodic_refresh_state_against_config(  # noqa: C901, PLR0912, PLR0915
+	*,
+	state: Mapping[str, object],
+	loaded_payloads: list[Mapping[str, object]],
+	expected_config: Mapping[str, object],
+) -> None:
+	scientific = _required_mapping(
+		_required_mapping(expected_config, 'identity'), 'scientific_identity'
+	)
+	schedule = tuple(PERIODIC_REFRESH_SCHEDULE)
+	active_index = int(state['active_generation_index'])
+	last_refresh = int(state['last_completed_refresh_epoch'])
+	next_refresh = state['next_scheduled_refresh_epoch']
+	phase = state['refresh_phase']
+	expected_target_sha256 = _required_sha256(
+		scientific.get('initial_hard_target_manifest_sha256'),
+		'identity.scientific_identity.initial_hard_target_manifest_sha256',
+	)
+	initial_target_path = Path(
+		_required_string(
+			_required_mapping(expected_config, 'pseudo_targets').get('manifest'),
+			'pseudo_targets.manifest',
+		)
+	)
+	if active_index == 0 and Path(
+		str(state['active_target_manifest_path'])
+	) != initial_target_path:
+		raise ValueError('initial active target manifest path does not match config')
+	if active_index == 0 and state['source_student_state_sha256'] is not None:
+		raise ValueError('initial active generation cannot bind a student state hash')
+	if active_index > 0 and state['source_student_state_sha256'] is None:
+		raise ValueError('refreshed active generation requires a student state hash')
+	expected_fixed_hash = _periodic_fixed_preprocessing_identity_sha256(scientific)
+	if state['fixed_preprocessing_hmm_identity_sha256'] != expected_fixed_hash:
+		raise ValueError('target refresh fixed preprocessing/HMM identity mismatch')
+	if last_refresh not in ({0} | set(schedule)):
+		raise ValueError('last_completed_refresh_epoch is not on the exact schedule')
+	if next_refresh is not None and next_refresh not in schedule:
+		raise ValueError('next_scheduled_refresh_epoch is not on the exact schedule')
+	expected_index = 0 if last_refresh == 0 else schedule.index(last_refresh) + 1
+	if phase == 'refresh_required':
+		if next_refresh is None or next_refresh <= last_refresh:
+			raise ValueError(
+				'refresh_required state does not identify the next refresh'
+			)
+		expected_index = schedule.index(next_refresh)
+	elif phase == 'refresh_complete' and last_refresh == 0:
+		raise ValueError('refresh_complete state must identify a completed refresh')
+	if active_index != expected_index:
+		raise ValueError('active generation index does not match refresh phase')
+	expected_next = next(
+		(epoch for epoch in schedule if epoch > last_refresh), None
+	)
+	if next_refresh != expected_next:
+		raise ValueError(
+			'next scheduled refresh does not follow completed refresh epoch'
+		)
+	if phase == 'refresh_required' and next_refresh != expected_next:
+		raise ValueError('refresh_required state schedule mismatch')
+	for index, payload in enumerate(loaded_payloads):
+		expected_id = (
+			'refresh_0000_initial'
+			if index == 0
+			else f'refresh_{index:04d}_epoch{schedule[index - 1]:03d}'
+		)
+		expected_epoch = 0 if index == 0 else schedule[index - 1]
+		if payload.get('generation_id') != expected_id or payload.get(
+			'refresh_after_epoch'
+		) != expected_epoch:
+			raise ValueError(
+				f'generation {index} does not match the exact periodic schedule'
+			)
+		initial_target = payload.get('initial_hard_target_manifest')
+		if not isinstance(initial_target, Mapping):
+			raise TypeError('generation initial target reference must be a mapping')
+		if (
+			initial_target.get('path') != str(initial_target_path)
+			or initial_target.get('sha256') != expected_target_sha256
+		):
+			raise ValueError(
+				f'generation {index} initial target manifest lineage mismatch'
+			)
+		fixed_identity = payload.get('fixed_preprocessing_hmm_identity')
+		if not isinstance(fixed_identity, Mapping):
+			raise TypeError(
+				f'generation {index} fixed preprocessing identity must be a mapping'
+			)
+		artifacts = fixed_identity.get('artifacts')
+		if not isinstance(artifacts, Mapping):
+			raise TypeError(f'generation {index} fixed HMM artifacts must be a mapping')
+		configured_artifacts = _required_mapping(
+			scientific, 'initial_hmm_artifacts'
+		)
+		configured_common = _required_mapping(configured_artifacts, 'common')
+		configured_heads = _required_mapping(configured_artifacts, 'heads')
+		for k in ('6', '8', '10'):
+			artifact = artifacts.get(k)
+			if not isinstance(artifact, Mapping):
+				raise TypeError(f'generation {index} initial HMM k={k} is invalid')
+			configured_head = _required_mapping(configured_heads, k)
+			for artifact_key, configured_key in (
+				('centers', 'centers'),
+				('metadata', 'model_metadata'),
+			):
+				artifact_ref = _required_mapping(
+					artifact, artifact_key
+				)
+				configured_ref = _required_mapping(
+					configured_head, configured_key
+				)
+				if (
+					artifact_ref.get('path') != configured_ref.get('path')
+					or artifact_ref.get('sha256') != configured_ref.get('sha256')
+				):
+					raise ValueError(
+						f'generation {index} initial HMM {k} {artifact_key} drift'
+					)
+			for artifact_key, configured_key in (
+				('preprocessor', 'preprocessor'),
+				('residualizer', 'residualizer'),
+			):
+				artifact_value = artifact.get(artifact_key)
+				configured_value = configured_common.get(configured_key)
+				if artifact_value is None or configured_value is None:
+					if artifact_value is not configured_value:
+						raise ValueError(
+							f'generation {index} initial HMM {k} {artifact_key} drift'
+						)
+					continue
+				if not isinstance(artifact_value, Mapping) or not isinstance(
+					configured_value, Mapping
+				):
+					raise TypeError(
+						f'generation {index} initial HMM {k} {artifact_key} is invalid'
+					)
+				if (
+					artifact_value.get('path') != configured_value.get('path')
+					or artifact_value.get('sha256') != configured_value.get('sha256')
+				):
+					raise ValueError(
+						f'generation {index} initial HMM {k} {artifact_key} drift'
+					)
+	if active_index > 0:
+		active_source = loaded_payloads[-1].get('source_student_state_sha256')
+		if active_source != state['source_student_state_sha256']:
+			raise ValueError('active generation source student state hash mismatch')
+
+
+def _load_json_mapping(path: Path, label: str) -> dict[str, object]:
+	try:
+		value = json.loads(path.read_text(encoding='utf-8'))
+	except (OSError, json.JSONDecodeError) as exc:
+		raise ValueError(f'{label} must be valid JSON: {path}') from exc
+	if not isinstance(value, dict):
+		raise TypeError(f'{label} must be a JSON object')
+	return value
+
+
+def _absolute_state_path(value: object, label: str) -> Path:
+	path = Path(_required_string(value, label))
+	if not path.is_absolute():
+		raise ValueError(f'{label} must be an absolute path')
+	return path
+
+
+def _nonnegative_int_value(value: object, label: str) -> int:
+	if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+		raise ValueError(f'{label} must be a nonnegative integer')
+	return value
+
+
+def _positive_int_value(value: object, label: str) -> int:
+	if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+		raise ValueError(f'{label} must be a positive integer')
+	return value
+
+
 def _soft_multi_head_checkpoint_identity(  # noqa: PLR0913
 	*,
 	stratigraphy_config: Mapping[str, object],
@@ -1840,6 +2906,13 @@ def _validate_multi_head_identity(  # noqa: C901, PLR0912
 	stratigraphy_config: Mapping[str, object],
 	stratigraphy_state_dict: Mapping[str, object],
 ) -> None:
+	if _is_periodic_refresh_config(stratigraphy_config):
+		_validate_periodic_refresh_identity(
+			identity=identity,
+			stratigraphy_config=stratigraphy_config,
+			stratigraphy_state_dict=stratigraphy_state_dict,
+		)
+		return
 	if _is_center_trace_config(stratigraphy_config):
 		_validate_center_trace_identity(
 			identity=identity,
@@ -1937,6 +3010,207 @@ def _validate_multi_head_identity(  # noqa: C901, PLR0912
 			raise ValueError(
 				f'checkpoint {checkpoint_key} does not match scientific identity'
 			)
+
+
+def _validate_periodic_refresh_identity(  # noqa: C901, PLR0912
+	*,
+	identity: Mapping[str, object],
+	stratigraphy_config: Mapping[str, object],
+	stratigraphy_state_dict: Mapping[str, object],
+) -> None:
+	"""Validate the closed schema-8 periodic-refresh identity."""
+	if identity.get('schema_version') != 8:
+		raise ValueError('periodic refresh checkpoint requires schema_version 8')
+	unknown = sorted(set(identity) - _PERIODIC_REFRESH_CHECKPOINT_IDENTITY_FIELDS)
+	if unknown:
+		raise ValueError(
+		f'schema-8 checkpoint identity has unsupported field(s): {unknown!r}'
+	)
+	_validate_multi_head_config_and_state(
+		stratigraphy_config,
+		{
+			str(key): value
+			for key, value in stratigraphy_state_dict.items()
+			if isinstance(value, torch.Tensor)
+		},
+	)
+	head = _required_mapping(stratigraphy_config, 'head')
+	config_identity = _required_mapping(stratigraphy_config, 'identity')
+	scientific = _required_mapping(config_identity, 'scientific_identity')
+	paths = _required_mapping(stratigraphy_config, 'paths')
+	if identity.get('head_spec') != 'multi_resolution_ordered_prototypes_v1':
+		raise ValueError('schema-8 checkpoint head_spec is invalid')
+	if identity.get('head_ks') != [6, 8, 10]:
+		raise ValueError('schema-8 checkpoint head_ks must be [6, 8, 10]')
+	if head.get('spec') != identity.get('head_spec') or list(
+		head.get('ks', ())
+	) != [6, 8, 10]:
+		raise ValueError('schema-8 checkpoint head config is not [6, 8, 10]')
+	for key, expected in (
+		('model_tag', config_identity.get('model_tag')),
+		('output_root', paths.get('output_root')),
+	):
+		if identity.get(key) != expected:
+			raise ValueError(f'schema-8 checkpoint {key} does not match config')
+	if identity.get('target_representation') != PERIODIC_REFRESH_TARGET_REPRESENTATION:
+		raise ValueError(
+			'schema-8 checkpoint target representation is not hard Viterbi'
+		)
+	manifest = identity.get('initial_hard_target_manifest')
+	if not isinstance(manifest, Mapping):
+		raise TypeError('schema-8 initial_hard_target_manifest must be a mapping')
+	manifest_path = _absolute_state_path(
+		manifest.get('path'), 'schema-8 initial target manifest path'
+	)
+	manifest_sha256 = _required_sha256(
+		manifest.get('sha256'), 'schema-8 initial target manifest hash'
+	)
+	if not manifest_path.is_file() or _file_sha256(manifest_path) != manifest_sha256:
+		raise ValueError('schema-8 initial target manifest is missing or hash-drifted')
+	if identity.get('initial_hard_target_manifest_sha256') != manifest_sha256:
+		raise ValueError('schema-8 initial target manifest hash fields disagree')
+	if identity.get('initial_per_head_targets') != _manifest_per_head_target_hashes(
+		manifest_path
+	):
+		raise ValueError(
+			'schema-8 initial per-head target hashes do not match manifest'
+		)
+	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
+	if manifest_path != Path(
+		_required_string(pseudo_targets.get('manifest'), 'pseudo_targets.manifest')
+	):
+		raise ValueError('schema-8 initial target manifest path does not match config')
+	for key in _PERIODIC_REFRESH_CHECKPOINT_IDENTITY_FIELDS:
+		if key in {
+			'schema_version',
+			'head_spec',
+			'head_ks',
+			'initial_hard_target_manifest_sha256',
+			'initial_hard_target_manifest',
+			'initial_per_head_targets',
+			'optimizer_group_identity',
+			'teacher_checkpoint_sha256',
+			'student_init_checkpoint_sha256',
+			'initial_student_state_sha256',
+			'initial_head_state_sha256',
+			'spatial_context_state_sha256',
+			'initial_spatial_context_state_sha256',
+			'stratigraphy_state_sha256',
+			'student_state_sha256',
+			'target_refresh_state_sha256',
+			'model_tag',
+			'output_root',
+			'scientific_identity_sha256',
+		}:
+			continue
+		if identity.get(key) != scientific.get(key):
+			raise ValueError(
+				f'schema-8 checkpoint {key} does not match scientific identity'
+			)
+	if identity.get('scientific_identity_sha256') != scientific_identity_sha256(
+		scientific
+	):
+		raise ValueError('schema-8 checkpoint scientific identity SHA-256 mismatch')
+	_validate_periodic_refresh_config_identity_values(
+		stratigraphy_config, scientific
+	)
+	for key in (
+		'student_state_sha256',
+		'stratigraphy_state_sha256',
+		'spatial_context_state_sha256',
+		'initial_spatial_context_state_sha256',
+		'initial_student_state_sha256',
+		'initial_head_state_sha256',
+		'target_refresh_state_sha256',
+		'teacher_checkpoint_sha256',
+		'student_init_checkpoint_sha256',
+	):
+		_required_sha256(identity.get(key), f'schema-8 checkpoint {key}')
+
+
+def _validate_periodic_refresh_config_identity_values(  # noqa: C901, PLR0912
+	config: Mapping[str, object], scientific: Mapping[str, object]
+) -> None:
+	identity = _required_mapping(config, 'identity')
+	paths = _required_mapping(config, 'paths')
+	periodic = _validate_periodic_refresh_config(
+		_required_mapping(config, 'pseudo_target_refresh'),
+		output_root=Path(
+			_required_string(paths.get('output_root'), 'paths.output_root')
+		),
+		train=_required_mapping(config, 'train'),
+		pseudo_targets=_required_mapping(config, 'pseudo_targets'),
+		head=_required_mapping(config, 'head'),
+		multi_head=True,
+	)
+	if periodic is None:
+		raise ValueError('schema-8 periodic refresh config cannot be disabled')
+	if identity.get('model_tag') != PERIODIC_REFRESH_MODEL_TAG:
+		raise ValueError('periodic refresh model tag mismatch')
+	checks = {
+		'experiment_role': PERIODIC_REFRESH_EXPERIMENT_ROLE,
+		'variant': PERIODIC_REFRESH_VARIANT,
+		'model_role': PERIODIC_REFRESH_MODEL_ROLE,
+		'head_spec': 'multi_resolution_ordered_prototypes_v1',
+		'head_ks': [6, 8, 10],
+		'target_representation': PERIODIC_REFRESH_TARGET_REPRESENTATION,
+		'target_refresh_semantics': PERIODIC_REFRESH_SEMANTICS,
+		'refresh_schedule_semantics': PERIODIC_REFRESH_SCHEDULE_SEMANTICS,
+		'refresh_after_epochs': list(PERIODIC_REFRESH_SCHEDULE),
+		'hmm_iterations_per_refresh': 2,
+		'embedding_source': 'current_student',
+		'embedding_mode': 'unmasked_eval_full_survey',
+		'refresh_embedding_semantics': PERIODIC_REFRESH_EMBEDDING_SEMANTICS,
+		'center_initialization': 'previous_generation',
+		'center_update': 'full_mean',
+		'center_update_semantics': PERIODIC_REFRESH_CENTER_UPDATE_SEMANTICS,
+		'preprocessing_policy': PERIODIC_REFRESH_PREPROCESSING_POLICY,
+		'target_activation_policy': PERIODIC_REFRESH_TARGET_ACTIVATION_POLICY,
+		'empty_state_policy': 'error',
+		'checkpoint_selection_policy': PERIODIC_REFRESH_CHECKPOINT_SELECTION_POLICY,
+		'initial_hard_target_manifest_sha256': periodic[
+			'initial_hard_target_manifest'
+		]['sha256'],
+	}
+	for key, expected in checks.items():
+		if scientific.get(key) != expected:
+			raise ValueError(f'periodic refresh scientific identity mismatch: {key}')
+	for key in (
+		'generation_root',
+		'initial_hmm_artifacts',
+		'fixed_preprocessor_sha256',
+		'fixed_residualizer_sha256',
+		'fixed_clustering_config_sha256',
+		'source_embedding_metadata_sha256',
+		'source_valid_token_hashes',
+		'feature_dimension',
+	):
+		if scientific.get(key) != periodic.get(key):
+			raise ValueError(f'periodic refresh scientific identity mismatch: {key}')
+	if scientific.get('output_root') not in {None, paths.get('output_root')}:
+		# output_root is a checkpoint identity field, not scientific; retain a
+		# defensive check for hand-authored scientific identities.
+		raise ValueError('periodic refresh scientific output root mismatch')
+	if _required_mapping(config, 'train').get('epochs') != 25:
+		raise ValueError('periodic refresh requires train.epochs == 25')
+	if _required_mapping(config, 'student').get('unfreeze_top_blocks') != 1:
+		raise ValueError('periodic refresh requires one unfrozen student block')
+	spatial = _required_mapping(config, 'spatial_context')
+	for key, expected in CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT.items():
+		if spatial.get(key) != expected or scientific.get(
+			'objective_semantics' if key == 'objective' else key
+		) != expected:
+			raise ValueError(f'periodic refresh spatial identity mismatch: {key}')
+	loss = _required_mapping(config, 'loss')
+	for key, expected in (
+		('prototype_weight', 1.0),
+		('usage_weight', 0.005),
+		('consistency_weight', 0.0),
+		('consistency_beta', 0.1),
+		('distillation_weight', 0.2),
+	):
+		if loss.get(key) != expected or scientific.get(key) != expected:
+			raise ValueError(f'periodic refresh loss identity mismatch: {key}')
 
 
 def _validate_center_trace_identity(  # noqa: C901, PLR0912
@@ -2133,6 +3407,15 @@ def _validate_expected_multi_head_identity(
 	expected_head: torch.nn.Module | None = None,
 	expected_spatial_context: torch.nn.Module | None = None,
 ) -> None:
+	if _is_periodic_refresh_config(config):
+		_validate_expected_periodic_refresh_identity(
+			identity,
+			config,
+			expected_student=expected_student,
+			expected_head=expected_head,
+			expected_spatial_context=expected_spatial_context,
+		)
+		return
 	if _is_center_trace_config(config):
 		_validate_expected_center_trace_identity(
 			identity,
@@ -2186,6 +3469,101 @@ def _validate_expected_multi_head_identity(
 	for key, expected in checks.items():
 		if identity.get(key) != expected:
 			raise ValueError(f'checkpoint multi-head identity is incompatible at {key}')
+
+
+def _validate_expected_periodic_refresh_identity(  # noqa: C901
+	identity: Mapping[str, object],
+	config: Mapping[str, object],
+	*,
+	expected_student: torch.nn.Module | None,
+	expected_head: torch.nn.Module | None,
+	expected_spatial_context: torch.nn.Module | None,
+) -> None:
+	"""Compare schema-8 identity against the current periodic config."""
+	scientific = _required_mapping(
+		_required_mapping(config, 'identity'), 'scientific_identity'
+	)
+	teacher = _required_mapping(config, 'teacher')
+	student = _required_mapping(config, 'student')
+	pseudo_targets = _required_mapping(config, 'pseudo_targets')
+	manifest_path = Path(
+		_required_string(pseudo_targets.get('manifest'), 'pseudo_targets.manifest')
+	)
+	checks = {
+		'schema_version': 8,
+		'head_spec': 'multi_resolution_ordered_prototypes_v1',
+		'head_ks': [6, 8, 10],
+		'target_representation': PERIODIC_REFRESH_TARGET_REPRESENTATION,
+		'initial_hard_target_manifest_sha256': scientific.get(
+			'initial_hard_target_manifest_sha256'
+		),
+		'initial_per_head_targets': scientific.get('target_head_hashes'),
+		'scientific_identity_sha256': scientific_identity_sha256(scientific),
+		'model_tag': _required_mapping(config, 'identity').get('model_tag'),
+		'output_root': _required_mapping(config, 'paths').get('output_root'),
+		'teacher_checkpoint_sha256': _file_sha256(
+			Path(_required_string(teacher.get('checkpoint'), 'teacher.checkpoint'))
+		),
+		'student_init_checkpoint_sha256': _file_sha256(
+			Path(
+				student.get('init_checkpoint')
+				or _required_string(teacher.get('checkpoint'), 'teacher.checkpoint')
+			)
+		),
+	}
+	if checks['initial_hard_target_manifest_sha256'] != _file_sha256(manifest_path):
+		raise ValueError('schema-8 expected target manifest hash does not match file')
+	for key, expected in checks.items():
+		if identity.get(key) != expected:
+			raise ValueError(f'schema-8 checkpoint identity is incompatible at {key}')
+	expected_initial_manifest = {
+		'path': str(manifest_path),
+		'sha256': checks['initial_hard_target_manifest_sha256'],
+	}
+	if identity.get('initial_hard_target_manifest') != expected_initial_manifest:
+		raise ValueError(
+		'schema-8 checkpoint identity is incompatible at '
+		'initial_hard_target_manifest'
+	)
+	for key in _PERIODIC_REFRESH_CHECKPOINT_IDENTITY_FIELDS:
+		if key in {
+			'schema_version',
+			'head_spec',
+			'head_ks',
+			'initial_hard_target_manifest_sha256',
+			'initial_hard_target_manifest',
+			'initial_per_head_targets',
+			'optimizer_group_identity',
+			'student_state_sha256',
+			'stratigraphy_state_sha256',
+			'spatial_context_state_sha256',
+			'initial_spatial_context_state_sha256',
+			'initial_student_state_sha256',
+			'initial_head_state_sha256',
+			'teacher_checkpoint_sha256',
+			'student_init_checkpoint_sha256',
+			'target_refresh_state_sha256',
+			'model_tag',
+			'output_root',
+			'scientific_identity_sha256',
+		}:
+			continue
+		if identity.get(key) != scientific.get(key):
+			raise ValueError(
+				f'schema-8 checkpoint identity is incompatible at {key}'
+			)
+	if expected_student is not None and identity.get(
+		'initial_student_state_sha256'
+	) != _state_sha256(expected_student.state_dict()):
+		raise ValueError('schema-8 initial student state hash is incompatible')
+	if expected_head is not None and identity.get(
+		'initial_head_state_sha256'
+	) != _state_sha256(expected_head.state_dict()):
+		raise ValueError('schema-8 initial head state hash is incompatible')
+	if expected_spatial_context is not None and identity.get(
+		'initial_spatial_context_state_sha256'
+	) != _state_sha256(expected_spatial_context.state_dict()):
+		raise ValueError('schema-8 initial spatial context state hash is incompatible')
 
 
 def _validate_expected_center_trace_identity(
@@ -3447,6 +4825,376 @@ def _state_summary(value: object) -> dict[str, object] | None:
 		'shapes': {key: list(tensor.shape) for key, tensor in state.items()},
 		'sha256': _state_sha256(state),
 	}
+
+
+_PERIODIC_SELECTION_SCHEMA_VERSION = 1
+_PERIODIC_SELECTION_KEYS = frozenset(
+	{'schema_version', 'policy', 'events', 'selected'}
+)
+_PERIODIC_SELECTION_EVENT_KEYS = frozenset(
+	{
+		'sequence',
+		'epoch',
+		'global_step',
+		'checkpoint_kind',
+		'batch_index',
+		'refresh_phase',
+		'selected',
+	}
+)
+
+
+def _periodic_checkpoint_selection_for_payload(  # noqa: PLR0913
+	*,
+	selection: Mapping[str, object] | None = None,
+	epoch: int,
+	global_step: int,
+	checkpoint_kind: Literal['step', 'epoch', 'refresh'],
+	batch_index: int | None,
+	target_refresh_state: Mapping[str, object],
+	train_epochs: int,
+) -> dict[str, object]:
+	if selection is None:
+		events: list[Mapping[str, object]] = []
+	else:
+		validated = _validated_periodic_checkpoint_selection(
+			selection, train_epochs=train_epochs
+		)
+		events = validated['events']
+	if not isinstance(events, list):
+		raise TypeError('periodic checkpoint selection events must be a list')
+	state = _validated_target_refresh_state(target_refresh_state)
+	event = {
+		'sequence': len(events),
+		'epoch': epoch,
+		'global_step': global_step,
+		'checkpoint_kind': checkpoint_kind,
+		'batch_index': batch_index,
+		'refresh_phase': state['refresh_phase'],
+		'selected': False,
+	}
+	if _periodic_event_is_final(event, state, train_epochs):
+		event['selected'] = True
+	if any(
+		_periodic_event_identity(existing) == _periodic_event_identity(event)
+		for existing in events
+	):
+		raise ValueError(
+			'periodic checkpoint selection history contains a duplicate event'
+		)
+	combined = [dict(existing) for existing in events]
+	combined.append(event)
+	selected = _periodic_event_identity(event) if event['selected'] else None
+	return _validated_periodic_checkpoint_selection(
+		{
+			'schema_version': _PERIODIC_SELECTION_SCHEMA_VERSION,
+			'policy': PERIODIC_REFRESH_CHECKPOINT_SELECTION_POLICY,
+			'events': combined,
+			'selected': selected,
+		},
+		train_epochs=train_epochs,
+	)
+
+
+def _validated_periodic_checkpoint_selection(  # noqa: C901, PLR0912
+	value: object,
+	*,
+	train_epochs: int,
+) -> dict[str, object]:
+	if not isinstance(value, Mapping):
+		raise TypeError('periodic checkpoint_selection must be a mapping')
+	if set(value) != _PERIODIC_SELECTION_KEYS:
+		raise ValueError('periodic checkpoint_selection fields are not closed')
+	if value.get('schema_version') != _PERIODIC_SELECTION_SCHEMA_VERSION:
+		raise ValueError('unsupported periodic checkpoint selection schema_version')
+	if value.get('policy') != PERIODIC_REFRESH_CHECKPOINT_SELECTION_POLICY:
+		raise ValueError('periodic checkpoint selection policy is invalid')
+	if (
+		isinstance(train_epochs, bool)
+		or not isinstance(train_epochs, int)
+		or train_epochs != 25
+	):
+		raise ValueError('periodic checkpoint selection requires train_epochs == 25')
+	raw_events = value.get('events')
+	if not isinstance(raw_events, list) or not raw_events:
+		raise ValueError('periodic checkpoint selection events must be non-empty')
+	events: list[dict[str, object]] = []
+	previous: Mapping[str, object] | None = None
+	selected_event: dict[str, object] | None = None
+	for sequence, raw_event in enumerate(raw_events):
+		event = _validated_periodic_selection_event(raw_event, sequence)
+		if previous is not None:
+			_periodic_selection_event_order(previous, event)
+		if event['selected']:
+			if selected_event is not None:
+				raise ValueError(
+					'periodic checkpoint selection has multiple selected events'
+				)
+			if event['checkpoint_kind'] != 'epoch' or event['epoch'] != train_epochs:
+				raise ValueError('only completed epoch 25 may be selected periodically')
+			if event['refresh_phase'] != 'training':
+				raise ValueError(
+					'refresh-required state cannot be selected periodically'
+				)
+			selected_event = _periodic_event_identity(event)
+		previous = event
+		events.append(event)
+	selected = value.get('selected')
+	if selected_event is None:
+		if selected is not None:
+			raise ValueError('periodic checkpoint selection selected must be null')
+	else:
+		if _periodic_event_identity(selected) != selected_event:
+			raise ValueError(
+				'periodic checkpoint selection selected event is inconsistent'
+			)
+		if not events[-1]['selected']:
+			raise ValueError('periodic selected event must be the latest event')
+	return {
+		'schema_version': _PERIODIC_SELECTION_SCHEMA_VERSION,
+		'policy': PERIODIC_REFRESH_CHECKPOINT_SELECTION_POLICY,
+		'events': events,
+		'selected': selected_event,
+	}
+
+
+def _validated_periodic_selection_event(
+	value: object, sequence: int
+) -> dict[str, object]:
+	if not isinstance(value, Mapping):
+		raise TypeError('periodic checkpoint selection event must be a mapping')
+	if set(value) != _PERIODIC_SELECTION_EVENT_KEYS:
+		raise ValueError('periodic checkpoint selection event fields are not closed')
+	if value.get('sequence') != sequence:
+		raise ValueError('periodic checkpoint selection sequence is not contiguous')
+	epoch = _nonnegative_int_value(value.get('epoch'), 'periodic selection epoch')
+	global_step = _nonnegative_int_value(
+		value.get('global_step'), 'periodic selection global_step'
+	)
+	kind = value.get('checkpoint_kind')
+	if kind not in {'step', 'epoch', 'refresh'}:
+		raise ValueError('periodic checkpoint selection kind is invalid')
+	batch_index = value.get('batch_index')
+	if kind == 'step':
+		batch_index = _nonnegative_int_value(
+			batch_index, 'periodic step batch_index'
+		)
+	elif batch_index is not None:
+		raise ValueError(
+			'periodic epoch and refresh selection batch_index must be null'
+		)
+	phase = value.get('refresh_phase')
+	if phase not in {'training', 'refresh_required', 'refresh_complete'}:
+		raise ValueError('periodic selection refresh_phase is invalid')
+	if kind == 'refresh' and phase != 'refresh_complete':
+		raise ValueError('periodic refresh checkpoint must have refresh_complete phase')
+	if not isinstance(value.get('selected'), bool):
+		raise TypeError('periodic selection selected must be a boolean')
+	return {
+		'sequence': sequence,
+		'epoch': epoch,
+		'global_step': global_step,
+		'checkpoint_kind': kind,
+		'batch_index': batch_index,
+		'refresh_phase': phase,
+		'selected': value['selected'],
+	}
+
+
+def _periodic_event_identity(value: Mapping[str, object]) -> dict[str, object]:
+	return {
+		'sequence': value['sequence'],
+		'epoch': value['epoch'],
+		'global_step': value['global_step'],
+		'checkpoint_kind': value['checkpoint_kind'],
+		'batch_index': value['batch_index'],
+		'refresh_phase': value['refresh_phase'],
+	}
+
+
+def _periodic_selection_event_order(
+	previous: Mapping[str, object], event: Mapping[str, object]
+) -> None:
+	if (
+		event['epoch'] < previous['epoch']
+		or event['global_step'] < previous['global_step']
+	):
+		raise ValueError('periodic checkpoint selection events are not chronological')
+	if event['global_step'] != previous['global_step']:
+		return
+	if event['epoch'] != previous['epoch']:
+		raise ValueError('periodic selection repeated global_step changed epoch')
+	ranks = {'step': 0, 'epoch': 1, 'refresh': 2}
+	if ranks[str(event['checkpoint_kind'])] <= ranks[str(previous['checkpoint_kind'])]:
+		raise ValueError('periodic selection boundary event order is invalid')
+
+
+def _periodic_event_is_final(
+	event: Mapping[str, object],
+	state: Mapping[str, object],
+	train_epochs: int,
+) -> bool:
+	return (
+		event['checkpoint_kind'] == 'epoch'
+		and event['epoch'] == train_epochs
+		and state.get('refresh_phase') == 'training'
+		and state.get('next_scheduled_refresh_epoch') is None
+	)
+
+
+def _validate_periodic_training_state(payload: Mapping[str, object]) -> None:
+	training_state = payload.get('training_state')
+	if not isinstance(training_state, Mapping):
+		raise TypeError('schema-8 training_state must be a mapping')
+	if set(training_state) != {
+		'schema_version',
+		'stage',
+		'checkpoint_kind',
+		'batch_index',
+	}:
+		raise ValueError('schema-8 training_state fields are not closed')
+	if training_state.get('schema_version') != 1:
+		raise ValueError('schema-8 training_state schema_version is invalid')
+	if training_state.get('stage') != 'train_strat_hmm_pretext':
+		raise ValueError('schema-8 training_state stage is invalid')
+	kind = training_state.get('checkpoint_kind')
+	if kind not in {'step', 'epoch', 'refresh'}:
+		raise ValueError('schema-8 checkpoint kind is invalid')
+	batch_index = training_state.get('batch_index')
+	if kind == 'step':
+		_nonnegative_int_value(batch_index, 'schema-8 step batch_index')
+	elif batch_index is not None:
+		raise ValueError('schema-8 epoch/refresh batch_index must be null')
+	state = _validated_target_refresh_state(payload.get('target_refresh_state'))
+	epoch = _nonnegative_int_value(payload.get('epoch'), 'schema-8 epoch')
+	_validate_periodic_checkpoint_phase(
+		epoch=epoch,
+		checkpoint_kind=kind,
+		state=state,
+	)
+	if kind == 'refresh' and state['refresh_phase'] != 'refresh_complete':
+		raise ValueError(
+			'schema-8 refresh checkpoint requires refresh_complete state'
+		)
+
+
+def _validate_periodic_checkpoint_phase(  # noqa: C901
+	*,
+	epoch: int,
+	checkpoint_kind: object,
+	state: Mapping[str, object],
+) -> None:
+	"""Bind refresh phase to the completed/partial training epoch boundary."""
+	phase = state['refresh_phase']
+	next_refresh = state['next_scheduled_refresh_epoch']
+	last_refresh = state['last_completed_refresh_epoch']
+	if checkpoint_kind == 'step':
+		if phase != 'training':
+			raise ValueError(
+				'schema-8 step checkpoint must remain in training phase '
+				'before a boundary'
+			)
+		if next_refresh is not None and epoch > next_refresh:
+			raise ValueError(
+				'schema-8 step checkpoint epoch skips a scheduled refresh boundary'
+			)
+		return
+	if checkpoint_kind == 'refresh':
+		if phase != 'refresh_complete':
+			raise ValueError(
+				'schema-8 refresh checkpoint must have refresh_complete phase'
+			)
+		if epoch not in PERIODIC_REFRESH_SCHEDULE or last_refresh != epoch:
+			raise ValueError(
+				'schema-8 refresh checkpoint epoch must be the completed scheduled '
+				'refresh epoch'
+			)
+		return
+	if checkpoint_kind != 'epoch':
+		raise ValueError('schema-8 checkpoint kind is invalid')
+	if phase == 'refresh_required':
+		if epoch not in PERIODIC_REFRESH_SCHEDULE or next_refresh != epoch:
+			raise ValueError(
+				'schema-8 refresh_required epoch must identify the next '
+				'scheduled refresh'
+			)
+		return
+	if phase == 'refresh_complete':
+		raise ValueError(
+			'schema-8 refresh_complete state requires a refresh checkpoint'
+		)
+	if phase != 'training':
+		raise ValueError('schema-8 checkpoint refresh phase is invalid')
+	if next_refresh is not None and epoch >= next_refresh:
+		raise ValueError(
+			'schema-8 epoch checkpoint cannot remain training at a scheduled '
+			'refresh or after it'
+		)
+
+
+def _validate_periodic_checkpoint_selection_payload_binding(  # noqa: C901, PLR0912
+	payload: Mapping[str, object], selection: Mapping[str, object]
+) -> None:
+	events = selection['events']
+	if not isinstance(events, list) or not events:
+		raise ValueError('periodic checkpoint selection events must be non-empty')
+	last = events[-1]
+	if not isinstance(last, Mapping):
+		raise TypeError('periodic checkpoint selection final event must be a mapping')
+	training_state = payload.get('training_state')
+	if not isinstance(training_state, Mapping):
+		raise TypeError('periodic checkpoint training_state must be a mapping')
+	epoch = _nonnegative_int_value(payload.get('epoch'), 'payload epoch')
+	global_step = _nonnegative_int_value(
+		payload.get('global_step'), 'payload global_step'
+	)
+	kind = training_state.get('checkpoint_kind')
+	if kind not in {'step', 'epoch', 'refresh'}:
+		raise ValueError('periodic checkpoint kind must be step, epoch, or refresh')
+	batch_index = training_state.get('batch_index')
+	if kind == 'step':
+		batch_index = _nonnegative_int_value(batch_index, 'payload batch_index')
+	elif batch_index is not None:
+		raise ValueError('periodic epoch and refresh batch_index must be null')
+	state = _validated_target_refresh_state(payload.get('target_refresh_state'))
+	if (
+		epoch != last['epoch']
+		or global_step != last['global_step']
+		or kind != last['checkpoint_kind']
+		or batch_index != last['batch_index']
+		or state['refresh_phase'] != last['refresh_phase']
+	):
+		raise ValueError(
+			'periodic checkpoint payload does not match final selection event'
+		)
+	if kind == 'refresh':
+		if len(events) < 2 or not isinstance(events[-2], Mapping):
+			raise ValueError('schema-8 refresh checkpoint must follow an epoch event')
+		previous = events[-2]
+		if (
+			previous.get('checkpoint_kind') != 'epoch'
+			or previous.get('epoch') != epoch
+			or previous.get('global_step') != global_step
+			or previous.get('refresh_phase') != 'refresh_required'
+		):
+			raise ValueError(
+				'schema-8 refresh checkpoint must follow a scheduled refresh boundary '
+				'without advancing global_step or epoch'
+			)
+		if state['last_completed_refresh_epoch'] != epoch:
+			raise ValueError(
+			'schema-8 refresh checkpoint must complete the checkpoint epoch'
+			)
+	selected = selection.get('selected')
+	eligible = _periodic_event_is_final(
+		last,
+		state,
+		train_epochs=25,
+	)
+	if eligible and selected != _periodic_event_identity(last):
+		raise ValueError('completed epoch 25 must be the periodic selected event')
+	if selected is not None and not eligible:
+		raise ValueError('periodic selected event is not a completed final epoch')
 
 
 def checkpoint_selection_sha256(selection: Mapping[str, object]) -> str:

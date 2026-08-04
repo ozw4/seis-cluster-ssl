@@ -1,4 +1,5 @@
 """Full-volume amplitude MAE encoder embedding extraction."""
+
 # ruff: noqa: CPY001
 
 from __future__ import annotations
@@ -1871,7 +1872,7 @@ def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 	return objective
 
 
-def _stratigraphy_pretext_metadata(  # noqa: C901
+def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 	payload: Mapping[str, object],
 ) -> dict[str, object] | None:
 	if 'stratigraphy_config' not in payload:
@@ -1934,6 +1935,91 @@ def _stratigraphy_pretext_metadata(  # noqa: C901
 					'posterior_cost_temperature'
 				],
 				'per_head_posterior_sha256': checkpoint_identity['per_head_posteriors'],
+			}
+		if checkpoint_identity.get('schema_version') == 8:
+			target_refresh_state = payload.get('target_refresh_state')
+			if not isinstance(target_refresh_state, Mapping):
+				raise TypeError('schema-8 target_refresh_state must be a mapping')
+			return {
+				**result,
+				'model_role': checkpoint_identity['model_role'],
+				'target_representation': checkpoint_identity[
+					'target_representation'
+				],
+				'target_refresh_semantics': checkpoint_identity[
+					'target_refresh_semantics'
+				],
+				'refresh_schedule_semantics': checkpoint_identity[
+					'refresh_schedule_semantics'
+				],
+				'refresh_after_epochs': checkpoint_identity['refresh_after_epochs'],
+				'hmm_iterations_per_refresh': checkpoint_identity[
+					'hmm_iterations_per_refresh'
+				],
+				'embedding_source': checkpoint_identity['embedding_source'],
+				'embedding_mode': checkpoint_identity['embedding_mode'],
+				'refresh_embedding_semantics': checkpoint_identity[
+					'refresh_embedding_semantics'
+				],
+				'center_initialization': checkpoint_identity[
+					'center_initialization'
+				],
+				'center_update': checkpoint_identity['center_update'],
+				'center_update_semantics': checkpoint_identity[
+					'center_update_semantics'
+				],
+				'preprocessing_policy': checkpoint_identity['preprocessing_policy'],
+				'target_activation_policy': checkpoint_identity[
+					'target_activation_policy'
+				],
+				'empty_state_policy': checkpoint_identity['empty_state_policy'],
+				'checkpoint_selection_policy': checkpoint_identity[
+					'checkpoint_selection_policy'
+				],
+				'generation_root': checkpoint_identity['generation_root'],
+				'initial_hard_target_manifest_sha256': checkpoint_identity[
+					'initial_hard_target_manifest_sha256'
+				],
+				'active_generation_id': target_refresh_state[
+					'active_generation_id'
+				],
+				'active_generation_manifest_path': target_refresh_state[
+					'active_generation_manifest_path'
+				],
+				'active_generation_manifest_sha256': target_refresh_state[
+					'active_generation_manifest_sha256'
+				],
+				'active_generation_content_sha256': target_refresh_state[
+					'active_generation_content_sha256'
+				],
+				'active_target_manifest_path': target_refresh_state[
+					'active_target_manifest_path'
+				],
+				'active_target_manifest_sha256': target_refresh_state[
+					'active_target_manifest_sha256'
+				],
+				'periodic_refresh_chain_path': target_refresh_state[
+					'periodic_refresh_chain_path'
+				],
+				'periodic_refresh_chain_sha256': target_refresh_state[
+					'periodic_refresh_chain_sha256'
+				],
+				'last_completed_refresh_epoch': target_refresh_state[
+					'last_completed_refresh_epoch'
+				],
+				'next_scheduled_refresh_epoch': target_refresh_state[
+					'next_scheduled_refresh_epoch'
+				],
+				'refresh_phase': target_refresh_state['refresh_phase'],
+				'source_student_state_sha256': target_refresh_state[
+					'source_student_state_sha256'
+				],
+				'fixed_preprocessing_hmm_identity_sha256': target_refresh_state[
+					'fixed_preprocessing_hmm_identity_sha256'
+				],
+				'target_refresh_state_sha256': checkpoint_identity[
+					'target_refresh_state_sha256'
+				],
 			}
 		if checkpoint_identity.get('schema_version') == 7:
 			target_manifest = _required_mapping(checkpoint_identity, 'target_manifest')

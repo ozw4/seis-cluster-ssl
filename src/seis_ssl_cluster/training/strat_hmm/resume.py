@@ -1,11 +1,14 @@
 """Checkpoint resume helpers for stratigraphic HMM pretext training."""
 
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
 from collections.abc import Mapping
 
 import torch
 
+from seis_ssl_cluster.config.pretraining import _is_periodic_refresh_config
 from seis_ssl_cluster.training.checkpoint import restore_rng_state
 from seis_ssl_cluster.training.strat_hmm.runtime import _to_json_safe
 from seis_ssl_cluster.training.strat_hmm.state import StratHmmResumeState
@@ -14,7 +17,7 @@ from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 )
 
 
-def restore_strat_hmm_training_checkpoint(  # noqa: PLR0913
+def restore_strat_hmm_training_checkpoint(  # noqa: C901, PLR0913
 	*,
 	payload: Mapping[str, object],
 	student: torch.nn.Module,
@@ -30,12 +33,15 @@ def restore_strat_hmm_training_checkpoint(  # noqa: PLR0913
 	checkpoint_identity = payload.get('stratigraphy_checkpoint')
 	if (
 		isinstance(checkpoint_identity, Mapping)
-		and checkpoint_identity.get('schema_version') == 7
+		and checkpoint_identity.get('schema_version') in {7, 8}
 		and spatial_context is None
 	):
-		raise ValueError(
+		message = (
 			'schema-7 resume requires the spatial_context replacement-token module'
+			if checkpoint_identity.get('schema_version') == 7
+			else 'schema-8 resume requires the spatial_context replacement-token module'
 		)
+		raise ValueError(message)
 	_validate_stratigraphy_checkpoint_mode(
 		payload,
 		config,
@@ -77,20 +83,41 @@ def restore_strat_hmm_training_checkpoint(  # noqa: PLR0913
 		raise TypeError(msg)
 	checkpoint_kind = training_state['checkpoint_kind']
 	batch_index = training_state['batch_index']
+	refresh_state = payload.get('target_refresh_state')
+	refresh_phase = None
+	refresh_required = False
+	if isinstance(refresh_state, Mapping):
+		refresh_phase = refresh_state.get('refresh_phase')
+		refresh_required = refresh_phase == 'refresh_required'
 	if checkpoint_kind == 'step':
 		return StratHmmResumeState(
 			start_epoch=int(payload['epoch']),
 			global_step=int(payload['global_step']),
 			skip_batches=int(batch_index) + 1,
+			refresh_phase=refresh_phase,
+			refresh_required=refresh_required,
+			target_refresh_state=refresh_state,
+		)
+	if checkpoint_kind == 'refresh':
+		return StratHmmResumeState(
+			start_epoch=int(payload['epoch']) + 1,
+			global_step=int(payload['global_step']),
+			skip_batches=0,
+			refresh_phase=refresh_phase,
+			refresh_required=refresh_required,
+			target_refresh_state=refresh_state,
 		)
 	return StratHmmResumeState(
 		start_epoch=int(payload['epoch']) + 1,
 		global_step=int(payload['global_step']),
 		skip_batches=0,
+		refresh_phase=refresh_phase,
+		refresh_required=refresh_required,
+		target_refresh_state=refresh_state,
 	)
 
 
-def _validate_strat_resume_payload(
+def _validate_strat_resume_payload(  # noqa: C901
 	payload: Mapping[str, object],
 	*,
 	amp_enabled: bool,
@@ -147,10 +174,19 @@ def _validate_strat_resume_payload(
 		)
 		raise ValueError(msg)
 	_validate_strat_resume_training_state(payload)
+	checkpoint_identity = payload.get('stratigraphy_checkpoint')
+	if (
+		isinstance(checkpoint_identity, Mapping)
+		and checkpoint_identity.get('schema_version') == 8
+		and not isinstance(payload.get('target_refresh_state'), Mapping)
+	):
+		raise ValueError('schema-8 resume checkpoint requires target_refresh_state')
 	_validate_resume_rng_state(payload)
 
 
-def _validate_strat_resume_training_state(payload: Mapping[str, object]) -> None:
+def _validate_strat_resume_training_state(  # noqa: C901
+	payload: Mapping[str, object],
+) -> None:
 	training_state = payload['training_state']
 	if not isinstance(training_state, Mapping):
 		msg = 'resume checkpoint training_state must be a mapping'
@@ -165,8 +201,10 @@ def _validate_strat_resume_training_state(payload: Mapping[str, object]) -> None
 			f'got {training_state["stage"]!r}'
 		)
 		raise ValueError(msg)
-	if training_state['checkpoint_kind'] not in {'step', 'epoch'}:
-		msg = 'resume checkpoint checkpoint_kind must be "step" or "epoch"'
+	if training_state['checkpoint_kind'] not in {'step', 'epoch', 'refresh'}:
+		msg = (
+			'resume checkpoint checkpoint_kind must be "step", "epoch", or "refresh"'
+		)
 		raise ValueError(msg)
 	batch_index = training_state['batch_index']
 	if training_state['checkpoint_kind'] == 'step':
@@ -181,6 +219,14 @@ def _validate_strat_resume_training_state(payload: Mapping[str, object]) -> None
 	elif batch_index is not None:
 		msg = 'resume checkpoint batch_index must be null for epoch checkpoints'
 		raise ValueError(msg)
+	if training_state['checkpoint_kind'] == 'refresh':
+		refresh_state = payload.get('target_refresh_state')
+		if not isinstance(refresh_state, Mapping):
+			raise ValueError('refresh resume checkpoint requires target_refresh_state')
+		if refresh_state.get('refresh_phase') != 'refresh_complete':
+			raise ValueError(
+				'refresh resume checkpoint requires refresh_complete refresh state'
+			)
 
 
 def _validate_resume_rng_state(payload: Mapping[str, object]) -> None:
@@ -268,6 +314,10 @@ def _strat_resume_compatibility_view(
 			view[section] = _to_json_safe(value)
 	if 'spatial_context' in config:
 		view['spatial_context'] = _to_json_safe(config['spatial_context'])
+	if _is_periodic_refresh_config(config):
+		view['pseudo_target_refresh'] = _to_json_safe(
+			config['pseudo_target_refresh']
+		)
 	train = config.get('train')
 	if isinstance(train, Mapping):
 		view['train'] = {
