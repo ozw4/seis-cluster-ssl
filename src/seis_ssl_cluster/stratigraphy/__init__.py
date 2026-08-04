@@ -1,4 +1,5 @@
 """Stratigraphic pretraining artifact contracts."""
+# ruff: noqa: CPY001
 
 from __future__ import annotations
 
@@ -133,17 +134,46 @@ _XY_NEIGHBOR_UNANIMOUS_TARGET_EXPORTS = {
 	'validate_multi_head_xy_neighbor_unanimous_target_manifest',
 }
 
+_PERIODIC_REFRESH_EXPORTS = {
+	'PERIODIC_REFRESH_ARTIFACT_TYPE': 'ARTIFACT_TYPE',
+	'INITIAL_GENERATION_ID': 'INITIAL_GENERATION_ID',
+	'HardTargetPolicy': 'HardTargetPolicy',
+	'HashedArtifactReference': 'HashedArtifactReference',
+	'InitialHMMArtifact': 'InitialHMMArtifact',
+	'InitialPeriodicRefreshConfig': 'InitialPeriodicRefreshConfig',
+	'PeriodicRefreshConfig': 'PeriodicRefreshConfig',
+	'PeriodicRefreshGenerationResult': 'PeriodicRefreshGenerationResult',
+	'PreviousCenterArtifact': 'PreviousCenterArtifact',
+	'build_initial_periodic_refresh_generation': (
+		'build_initial_periodic_refresh_generation'
+	),
+	'build_periodic_refresh_generation': 'build_periodic_refresh_generation',
+	'load_periodic_refresh_generation': 'load_periodic_refresh_generation',
+	'produce_initial_periodic_refresh_generation': (
+		'produce_initial_periodic_refresh_generation'
+	),
+	'produce_periodic_refresh_generation': 'produce_periodic_refresh_generation',
+	'quarantine_periodic_refresh_generation': 'quarantine_periodic_refresh_generation',
+	'validate_periodic_refresh_generation': 'validate_periodic_refresh_generation',
+}
+
 __all__ = [
 	'CANONICAL_KS',
 	'GLOBAL_VALID_TOKENS',
+	'INITIAL_GENERATION_ID',
 	'LATERAL_SMOOTHING_SEMANTICS',
 	'MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1',
+	'PERIODIC_REFRESH_ARTIFACT_TYPE',
 	'POSTERIOR_SEMANTICS',
 	'XY_NEIGHBOR_CONSENSUS_HARD_LABEL_SMOOTHING_POLICY',
 	'XY_NEIGHBOR_CONSENSUS_HARD_LABEL_SMOOTHING_SEMANTICS',
 	'XY_NEIGHBOR_UNANIMOUS_OUTLIER_CORRECTION_POLICY',
 	'XY_NEIGHBOR_UNANIMOUS_OUTLIER_CORRECTION_SEMANTICS',
 	'ExportedPseudoTargetResult',
+	'HardTargetPolicy',
+	'HashedArtifactReference',
+	'InitialHMMArtifact',
+	'InitialPeriodicRefreshConfig',
 	'LateralCostUpdateResult',
 	'LateralMessageResult',
 	'LateralSmoothingResult',
@@ -162,6 +192,9 @@ __all__ = [
 	'MultiResolutionOrderedPrototypeOutput',
 	'OrderedPrototypeHead',
 	'OrderedPrototypeOutput',
+	'PeriodicRefreshConfig',
+	'PeriodicRefreshGenerationResult',
+	'PreviousCenterArtifact',
 	'ShuffledPseudoTargetResult',
 	'StratPseudoTargetArrays',
 	'StratPseudoTargetInput',
@@ -171,7 +204,9 @@ __all__ = [
 	'apply_lateral_message_to_emission_costs',
 	'boundary_distance_tokens',
 	'boundary_weight_tokens',
+	'build_initial_periodic_refresh_generation',
 	'build_multi_head_target_manifest',
+	'build_periodic_refresh_generation',
 	'compare_k6_replay',
 	'cosine_rbf_affinities',
 	'decode_ordered_logits_survey',
@@ -191,6 +226,7 @@ __all__ = [
 	'load_multi_head_target_manifest',
 	'load_multi_head_xy_neighbor_consensus_target_manifest',
 	'load_multi_head_xy_neighbor_unanimous_target_manifest',
+	'load_periodic_refresh_generation',
 	'load_pseudo_target_arrays',
 	'load_pseudo_target_metadata',
 	'median_scale_with_floor',
@@ -204,7 +240,10 @@ __all__ = [
 	'plan_multi_head_xy_neighbor_unanimous_target_exports',
 	'plan_shuffled_hmm_pseudo_targets',
 	'prepare_hmm_cluster_label_pseudo_target_exports',
+	'produce_initial_periodic_refresh_generation',
+	'produce_periodic_refresh_generation',
 	'pseudo_target_paths',
+	'quarantine_periodic_refresh_generation',
 	'redecode_ordered_lateral_trace',
 	'resolve_multi_head_lateral_target_export_config',
 	'resolve_multi_head_pseudo_target_export_config',
@@ -225,6 +264,7 @@ __all__ = [
 	'validate_multi_head_target_publication_preflight',
 	'validate_multi_head_xy_neighbor_consensus_target_manifest',
 	'validate_multi_head_xy_neighbor_unanimous_target_manifest',
+	'validate_periodic_refresh_generation',
 	'validate_pseudo_target_arrays',
 	'write_pseudo_target',
 ]
@@ -255,5 +295,10 @@ def __getattr__(name: str) -> object:
 			'seis_ssl_cluster.stratigraphy.xy_neighbor_unanimous_targets'
 		)
 		return getattr(unanimous_targets, name)
+	if name in _PERIODIC_REFRESH_EXPORTS:
+		periodic_refresh = importlib.import_module(
+			'seis_ssl_cluster.stratigraphy.periodic_refresh'
+		)
+		return getattr(periodic_refresh, _PERIODIC_REFRESH_EXPORTS[name])
 	msg = f'module {__name__!r} has no attribute {name!r}'
 	raise AttributeError(msg)

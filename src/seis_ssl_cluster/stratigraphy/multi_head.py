@@ -1,4 +1,5 @@
 """Strict manifest contract for ordered multi-head HMM pseudo-targets."""
+# ruff: noqa: CPY001
 
 from __future__ import annotations
 
@@ -294,11 +295,8 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 					'diagnostics',
 				},
 				'target reference',
+				optional_keys={'boundary_weight'},
 			)
-			if 'boundary_weight' in entry:
-				raise ValueError(
-					'multi-head schema-v1 target references forbid boundary weights'
-				)
 			_validate_target_reference_schema(entry)
 			_validate_common_target_contract(
 				common_token_grid_shapes,
@@ -385,6 +383,12 @@ def compare_k6_replay(
 		for name in ('labels', 'confidence', 'valid_tokens'):
 			checks[f'{survey_id}.pseudo_target_{name}'] = bool(
 				np.array_equal(left[name], right[name])
+			)
+		if ('boundary_weight' in left) != ('boundary_weight' in right):
+			raise ValueError('K=6 replay boundary-weight policy differs')
+		if 'boundary_weight' in left:
+			checks[f'{survey_id}.pseudo_target_boundary_weight'] = bool(
+				np.array_equal(left['boundary_weight'], right['boundary_weight'])
 			)
 		checks[f'{survey_id}.decoded_valid_token_mask'] = bool(
 			np.array_equal(left_decoded >= 0, right_decoded >= 0)
@@ -613,7 +617,7 @@ def _validate_trace_quantiles(value: object, name: str) -> None:
 		raise ValueError(f'{name} must contain ordered non-negative quantiles')
 
 
-def _validate_k6_replay_parity(  # noqa: C901, PLR0912
+def _validate_k6_replay_parity(  # noqa: C901, PLR0912, PLR0915
 	value: object,
 	survey_ids: Sequence[object],
 	*,
@@ -645,6 +649,16 @@ def _validate_k6_replay_parity(  # noqa: C901, PLR0912
 	if not isinstance(parity['exact'], bool):
 		raise TypeError('k6_replay_parity exact must be a boolean')
 	checks = _mapping(parity['checks'], 'k6_replay_parity checks')
+	historical_boundary = {
+		'boundary_weight' in _mapping(
+			historical_targets[str(survey_id)],
+			f'K=6 historical target {survey_id}',
+		)
+		for survey_id in survey_ids
+	}
+	if len(historical_boundary) != 1:
+		raise ValueError('K=6 historical boundary-weight policy is inconsistent')
+	has_boundary = historical_boundary.pop()
 	expected = {
 		f'{survey_id}.{metric}'
 		for survey_id in survey_ids
@@ -660,6 +674,10 @@ def _validate_k6_replay_parity(  # noqa: C901, PLR0912
 			'decoded_ordered_violations',
 		)
 	}
+	if has_boundary:
+		expected.update(
+		f'{survey_id}.pseudo_target_boundary_weight' for survey_id in survey_ids
+	)
 	_required_keys(checks, expected, 'k6_replay_parity checks')
 	if not all(isinstance(result, bool) for result in checks.values()):
 		raise TypeError('k6_replay_parity checks must contain booleans')
@@ -680,7 +698,16 @@ def _validate_k6_replay_parity(  # noqa: C901, PLR0912
 			artifacts,
 			{'labels', 'confidence', 'valid_tokens', 'metadata'},
 			f'K=6 replay artifacts {survey_id}',
+			optional_keys={'boundary_weight'},
 		)
+		if has_boundary and 'boundary_weight' not in artifacts:
+			raise ValueError(
+				f'K=6 replay boundary-weight artifact is missing for {survey_id}'
+			)
+		if not has_boundary and 'boundary_weight' in artifacts:
+			raise ValueError(
+				f'K=6 replay has an unexpected boundary-weight artifact for {survey_id}'
+			)
 		_validate_target_reference_schema(artifacts)
 		if verify_hashes:
 			for name in ('labels', 'confidence', 'valid_tokens', 'metadata'):
@@ -755,10 +782,15 @@ def _head_reference(root: Path, *, k: int) -> dict[str, object]:
 	surveys: dict[str, object] = {}
 	for item in discover_pseudo_target_inputs(root, k=k):
 		metadata = load_pseudo_target_metadata(item)
-		if metadata.get('schema_version') != 1:
-			raise ValueError(f'head k={k} must use schema-v1 pseudo-targets')
-		if item.boundary_weight_path is not None:
-			raise ValueError(f'head k={k} must not contain a boundary-weight artifact')
+		if metadata.get('schema_version') not in {1, 2}:
+			raise ValueError(f'head k={k} has unsupported pseudo-target schema')
+		if (
+			metadata.get('schema_version') == 1
+			and item.boundary_weight_path is not None
+		):
+			raise ValueError(
+				f'head k={k} schema-v1 target has a boundary-weight artifact'
+			)
 		arrays = load_pseudo_target_arrays(item)
 		if int(np.count_nonzero(arrays.valid_tokens)) == 0:
 			raise ValueError(f'head k={k} has no valid tokens for {item.survey_id}')
@@ -772,7 +804,7 @@ def _head_reference(root: Path, *, k: int) -> dict[str, object]:
 			raise ValueError(
 				f'head k={k} has ordered path violations for {item.survey_id}'
 			)
-		surveys[item.survey_id] = {
+		entry: dict[str, object] = {
 			'labels': _file_reference(item.labels_path),
 			'confidence': _file_reference(item.confidence_path),
 			'valid_tokens': _file_reference(item.valid_tokens_path),
@@ -780,6 +812,9 @@ def _head_reference(root: Path, *, k: int) -> dict[str, object]:
 			'token_grid_shape': list(arrays.labels.shape),
 			'diagnostics': diagnostics,
 		}
+		if item.boundary_weight_path is not None:
+			entry['boundary_weight'] = _file_reference(item.boundary_weight_path)
+		surveys[item.survey_id] = entry
 	return {
 		'pseudo_target_root': str(root),
 		'surveys': surveys,
@@ -799,7 +834,14 @@ def _replay_artifact_references(
 		entry = _mapping(value, f'K=6 replay survey {survey_id}')
 		references[survey_id] = {
 			name: dict(_mapping(entry[name], f'K=6 replay {name}'))
-			for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
+			for name in (
+				'labels',
+				'confidence',
+				'valid_tokens',
+				'boundary_weight',
+				'metadata',
+			)
+			if name in entry
 		}
 	return references
 
@@ -1227,6 +1269,10 @@ def _validate_reference_hashes(
 		name: _mapping(entry[name], f'{name} reference')
 		for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
 	}
+	if 'boundary_weight' in entry:
+		refs['boundary_weight'] = _mapping(
+			entry['boundary_weight'], 'boundary_weight reference'
+		)
 	shape = entry['token_grid_shape']
 	if not isinstance(shape, list):
 		raise TypeError(f'head k={k} {survey_id} token_grid_shape must be a list')
@@ -1238,6 +1284,11 @@ def _validate_reference_hashes(
 		valid_tokens_path=Path(str(refs['valid_tokens']['path'])),
 		metadata_path=Path(str(refs['metadata']['path'])),
 		hashes={name: refs[name]['sha256'] for name in refs},
+		boundary_weight_path=(
+			None
+			if 'boundary_weight' not in refs
+			else Path(str(refs['boundary_weight']['path']))
+		),
 		expected_token_grid_shape=shape,
 		validate_array_semantics=validate_array_semantics,
 	)
@@ -1252,6 +1303,7 @@ def validate_multi_head_target_reference(  # noqa: PLR0913
 	valid_tokens_path: str | Path,
 	metadata_path: str | Path,
 	hashes: Mapping[str, object],
+	boundary_weight_path: str | Path | None = None,
 	expected_token_grid_shape: Sequence[object] | None = None,
 	validate_array_semantics: bool = True,
 ) -> None:
@@ -1261,24 +1313,25 @@ def validate_multi_head_target_reference(  # noqa: PLR0913
 	does not call :func:`numpy.load`.  Full validation retains the array-level
 	range, validity, occupancy, and ordering checks used at publication time.
 	"""
-	_required_keys(
-		hashes,
-		{'labels', 'confidence', 'valid_tokens', 'metadata'},
-		'multi-head target hashes',
-	)
+	required_hashes = {'labels', 'confidence', 'valid_tokens', 'metadata'}
+	if boundary_weight_path is not None:
+		required_hashes.add('boundary_weight')
+	_required_keys(hashes, required_hashes, 'multi-head target hashes')
 	paths = {
 		'labels': Path(labels_path),
 		'confidence': Path(confidence_path),
 		'valid_tokens': Path(valid_tokens_path),
 		'metadata': Path(metadata_path),
 	}
+	if boundary_weight_path is not None:
+		paths['boundary_weight'] = Path(boundary_weight_path)
 	for name, path in paths.items():
 		digest = hashes[name]
 		if not isinstance(digest, str) or file_sha256(path) != digest:
 			raise ValueError(f'head k={k} {survey_id} {name} hash mismatch')
 	_validate_referenced_target_metadata(
 		metadata_path=paths['metadata'],
-		labels_path=paths['labels'],
+		boundary_weight_path=paths.get('boundary_weight'),
 		k=k,
 		survey_id=survey_id,
 	)
@@ -1303,11 +1356,11 @@ def validate_multi_head_target_reference(  # noqa: PLR0913
 def _validate_referenced_target_metadata(
 	*,
 	metadata_path: Path,
-	labels_path: Path,
+	boundary_weight_path: Path | None,
 	k: int,
 	survey_id: str,
 ) -> None:
-	"""Recheck each referenced schema-v1 target's blocking semantics."""
+	"""Recheck each referenced target's blocking semantics."""
 	try:
 		metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
 	except json.JSONDecodeError as exc:
@@ -1318,19 +1371,21 @@ def _validate_referenced_target_metadata(
 		raise TypeError(f'head k={k} {survey_id} metadata must be an object')
 	if (
 		metadata.get('artifact_type') != PSEUDO_TARGET_ARTIFACT_TYPE
-		or metadata.get('schema_version') != 1
+		or metadata.get('schema_version') not in {1, 2}
 		or metadata.get('k') != k
 		or metadata.get('survey_id') != survey_id
 	):
 		raise ValueError(
-			f'head k={k} {survey_id} must use matching schema-v1 pseudo-target metadata'
+			f'head k={k} {survey_id} must use matching pseudo-target metadata'
 		)
-	boundary_weight_path = labels_path.with_name(
-		f'{survey_id}.hmm_boundary_weight_token.npy'
-	)
-	if boundary_weight_path.exists():
+	if metadata.get('schema_version') == 1 and boundary_weight_path is not None:
 		raise ValueError(
-			f'head k={k} {survey_id} must not contain a boundary-weight artifact'
+			f'head k={k} {survey_id} schema-v1 target has a boundary-weight artifact'
+		)
+	if metadata.get('schema_version') == 2 and boundary_weight_path is None:
+		raise ValueError(
+			f'head k={k} {survey_id} schema-v2 target is missing a '
+			'boundary-weight artifact'
 		)
 
 
@@ -1345,6 +1400,7 @@ def _validate_referenced_target_semantics(
 		arrays['labels'],
 		arrays['confidence'],
 		arrays['valid_tokens'],
+		boundary_weight=arrays.get('boundary_weight'),
 		k=k,
 		survey_id=survey_id,
 	)
@@ -1361,6 +1417,12 @@ def _validate_target_reference_schema(entry: Mapping[str, object]) -> None:
 			_mapping(entry[name], f'{name} reference'),
 			{'path', 'sha256'},
 			f'{name} reference',
+		)
+	if 'boundary_weight' in entry:
+		_required_keys(
+			_mapping(entry['boundary_weight'], 'boundary_weight reference'),
+			{'path', 'sha256'},
+			'boundary_weight reference',
 		)
 
 
@@ -1384,10 +1446,15 @@ def _validate_common_target_contract(
 
 
 def _load_reference_arrays(entry: Mapping[str, object]) -> dict[str, np.ndarray]:
-	return {
+	arrays = {
 		name: np.load(Path(str(_mapping(entry[name], name)['path'])))
 		for name in ('labels', 'confidence', 'valid_tokens')
 	}
+	if 'boundary_weight' in entry:
+		arrays['boundary_weight'] = np.load(
+			Path(str(_mapping(entry['boundary_weight'], 'boundary_weight')['path']))
+		)
+	return arrays
 
 
 def _validate_head_ks(head_roots: Mapping[int | str, str | Path]) -> tuple[int, ...]:

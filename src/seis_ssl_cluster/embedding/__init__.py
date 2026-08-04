@@ -1,10 +1,14 @@
 """Embedding components for seismic SSL clustering."""
+# ruff: noqa: CPY001
 
 from seis_ssl_cluster.embedding.extractor import (
+	CURRENT_STUDENT_UNMASKED_EMBEDDING_SEMANTICS,
+	REFRESH_EXTRACTION_DESCRIPTOR_NAME,
 	EmbeddingExtractionSettings,
 	SurveyEmbeddingResult,
 	build_embedding_metadata,
 	build_model_from_config,
+	extract_embeddings_from_loaded_model,
 	extract_survey_embeddings,
 	extraction_settings_from_config,
 	reduce_valid_mask_to_tokens,
@@ -31,6 +35,8 @@ from seis_ssl_cluster.embedding.writer import (
 )
 
 __all__ = [
+	'CURRENT_STUDENT_UNMASKED_EMBEDDING_SEMANTICS',
+	'REFRESH_EXTRACTION_DESCRIPTOR_NAME',
 	'EmbeddingExtractionSettings',
 	'EmbeddingMerger',
 	'EmbeddingOutputPaths',
@@ -42,6 +48,7 @@ __all__ = [
 	'commit_staged_outputs',
 	'compute_stride_xyz',
 	'create_merge_memmaps',
+	'extract_embeddings_from_loaded_model',
 	'extract_survey_embeddings',
 	'extraction_settings_from_config',
 	'file_sha256',

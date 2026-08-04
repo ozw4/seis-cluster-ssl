@@ -38,6 +38,7 @@ from seis_ssl_cluster.data.window_preprocessing import (
 )
 from seis_ssl_cluster.embedding import (
 	EmbeddingMerger,
+	extract_embeddings_from_loaded_model,
 	iter_sliding_windows,
 	run_embedding_extraction,
 	token_grid_shape_xyz,
@@ -102,6 +103,177 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['min_token_valid_fraction'] == 0.5
 	assert metadata['preprocessing']['amplitude_agc'] == {'enabled': False}
 	assert metadata['amplitude_agc'] == {'enabled': False}
+
+
+def test_loaded_model_extraction_matches_checkpoint_and_publishes_descriptor(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _write_fixture(tmp_path)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	checkpoint_config = payload['config']
+	assert isinstance(checkpoint_config, dict)
+	student = extractor_module.build_model_from_config(checkpoint_config)
+	student.load_state_dict(payload['model_state_dict'])
+	standard = run_embedding_extraction(config, device='cpu')[0]
+	refresh_root = tmp_path / 'refresh_generation'
+	state_hash = extractor_module.file_sha256(checkpoint_path)
+	student.train()
+	student.encoder.layers[0].eval()
+	training_before = {
+		name: module.training for name, module in student.named_modules()
+	}
+	state_before = {
+		name: value.detach().clone()
+		for name, value in student.state_dict().items()
+	}
+	cpu_rng_before = torch.random.get_rng_state()
+
+	def fail_checkpoint_load(*_args: object, **_kwargs: object) -> None:
+		raise AssertionError('loaded-model refresh must not load a checkpoint')
+
+	monkeypatch.setattr(extractor_module, 'load_checkpoint', fail_checkpoint_load)
+
+	refresh = extract_embeddings_from_loaded_model(
+		student,
+		config,
+		refresh_root,
+		state_hash,
+		checkpoint_config=checkpoint_config,
+		device='cpu',
+	)
+
+	np.testing.assert_array_equal(
+		np.load(refresh[0].embeddings_path),
+		np.load(standard.embeddings_path),
+	)
+	np.testing.assert_array_equal(
+		np.load(refresh[0].valid_tokens_path),
+		np.load(standard.valid_tokens_path),
+	)
+	assert json.loads(refresh[0].metadata_path.read_text()) == json.loads(
+		standard.metadata_path.read_text(),
+	)
+	descriptor = json.loads(
+		(refresh_root / 'refresh_extraction_descriptor.json').read_text(),
+	)
+	assert descriptor['source_student_state_sha256'] == state_hash
+	assert (
+		descriptor['embedding_semantics']
+		== 'current_student_unmasked_eval_full_survey_v1'
+	)
+	assert descriptor['completion_status'] == 'COMPLETE'
+	assert {
+		name: module.training for name, module in student.named_modules()
+	} == training_before
+	assert all(
+		torch.equal(value, student.state_dict()[name])
+		for name, value in state_before.items()
+	)
+	assert torch.equal(torch.random.get_rng_state(), cpu_rng_before)
+
+
+def test_loaded_model_extraction_restores_mode_state_and_rng_on_failure(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = _write_fixture(tmp_path)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	checkpoint_config = payload['config']
+	assert isinstance(checkpoint_config, dict)
+	student = extractor_module.build_model_from_config(checkpoint_config)
+	student.load_state_dict(payload['model_state_dict'])
+	student.train()
+	student.encoder.layers[0].eval()
+	training_before = {
+		name: module.training for name, module in student.named_modules()
+	}
+	state_before = {
+		name: value.detach().clone()
+		for name, value in student.state_dict().items()
+	}
+	cpu_rng_before = torch.random.get_rng_state()
+
+	def fail(*_args: object, **_kwargs: object) -> None:
+		raise RuntimeError('injected loaded extraction failure')
+
+	monkeypatch.setattr(extractor_module, '_process_prepared_batch', fail)
+	with pytest.raises(RuntimeError, match='injected loaded extraction failure'):
+		extract_embeddings_from_loaded_model(
+			student,
+			config,
+			tmp_path / 'refresh_generation',
+			'a' * 64,
+			checkpoint_config=checkpoint_config,
+			device='cpu',
+		)
+
+	assert not (tmp_path / 'refresh_generation').exists()
+	assert {
+		name: module.training for name, module in student.named_modules()
+	} == training_before
+	assert all(
+		torch.equal(value, student.state_dict()[name])
+		for name, value in state_before.items()
+	)
+	assert torch.equal(torch.random.get_rng_state(), cpu_rng_before)
+
+
+def test_loaded_model_refresh_reuse_rejects_foreign_and_partial_outputs(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	checkpoint_config = payload['config']
+	assert isinstance(checkpoint_config, dict)
+	student = extractor_module.build_model_from_config(checkpoint_config)
+	student.load_state_dict(payload['model_state_dict'])
+	refresh_root = tmp_path / 'refresh_generation'
+	extract_embeddings_from_loaded_model(
+		student,
+		config,
+		refresh_root,
+		'a' * 64,
+		checkpoint_config=checkpoint_config,
+		device='cpu',
+	)
+
+	reused = extract_embeddings_from_loaded_model(
+		student,
+		config,
+		refresh_root,
+		'a' * 64,
+		checkpoint_config=checkpoint_config,
+		reuse=True,
+		device='cpu',
+	)
+	assert reused[0].skipped is True
+
+	with pytest.raises(ValueError, match='complete validation'):
+		extract_embeddings_from_loaded_model(
+			student,
+			config,
+			refresh_root,
+			'b' * 64,
+			checkpoint_config=checkpoint_config,
+			reuse=True,
+			device='cpu',
+		)
+
+	(refresh_root / 'refresh_extraction_descriptor.json').unlink()
+	with pytest.raises(ValueError, match='incomplete or does not match'):
+		extract_embeddings_from_loaded_model(
+			student,
+			config,
+			refresh_root,
+			'a' * 64,
+			checkpoint_config=checkpoint_config,
+			reuse=True,
+			device='cpu',
+		)
 
 
 @pytest.mark.parametrize('mode', ['memory', 'memmap'])

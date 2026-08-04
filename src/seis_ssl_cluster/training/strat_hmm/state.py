@@ -1,5 +1,7 @@
 """State containers for stratigraphic HMM pretext training."""
 
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -38,6 +40,9 @@ class StratHmmResumeState:
 	start_epoch: int
 	global_step: int
 	skip_batches: int
+	refresh_phase: str | None = None
+	refresh_required: bool = False
+	target_refresh_state: Mapping[str, object] | None = None
 
 
 @dataclass(frozen=True)

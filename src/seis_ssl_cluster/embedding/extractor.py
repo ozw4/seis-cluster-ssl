@@ -1,4 +1,5 @@
 """Full-volume amplitude MAE encoder embedding extraction."""
+
 # ruff: noqa: CPY001
 
 from __future__ import annotations
@@ -6,10 +7,12 @@ from __future__ import annotations
 import hashlib
 import json
 import queue
+import shutil
 import threading
+import uuid
 from collections.abc import Iterable, Iterator, Mapping, Sequence
-from contextlib import suppress
-from dataclasses import dataclass
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass, replace
 from functools import partial
 from numbers import Integral, Real
 from pathlib import Path
@@ -67,6 +70,7 @@ from seis_ssl_cluster.embedding.writer import (
 	file_sha256,
 	output_paths,
 	prepare_outputs,
+	write_metadata,
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
@@ -77,6 +81,10 @@ from seis_ssl_cluster.utils import StageTimer
 from seis_ssl_cluster.utils.cuda import cuda_device_supports_bfloat16
 
 UNMASKED_ENCODER_INPUT_MODE = 'unmasked_encoder_tokens_v1'
+CURRENT_STUDENT_UNMASKED_EMBEDDING_SEMANTICS = (
+	'current_student_unmasked_eval_full_survey_v1'
+)
+REFRESH_EXTRACTION_DESCRIPTOR_NAME = 'refresh_extraction_descriptor.json'
 
 XYZ = tuple[int, int, int]
 _CHECKPOINT_ALLOWED_TOP_LEVEL = frozenset(
@@ -247,6 +255,724 @@ def run_embedding_extraction(
 			timer.write_json(settings.output_dir / 'stage_timings.json')
 
 
+def extract_embeddings_from_loaded_model(  # noqa: C901, PLR0913, PLR0915
+	student: AmplitudeMAE3D,
+	config: Mapping[str, object],
+	output_dir: str | Path,
+	source_student_state_sha256: str,
+	*,
+	checkpoint_config: Mapping[str, object] | None = None,
+	reuse: bool = False,
+	overwrite: bool = False,
+	device: str | torch.device | None = None,
+) -> list[SurveyEmbeddingResult]:
+	"""Extract a generation-scoped embedding from a live MAE student.
+
+	The resolved MAE configuration is supplied as ``checkpoint_config`` so this
+	boundary never has to read a checkpoint.  ``config`` remains the standard
+	extraction configuration and provides the manifest and extraction geometry.
+
+	The student is used only through its normal unmasked ``encode_tokens`` path.
+	Its module training flags and PyTorch CPU/CUDA RNG states are restored on
+	both success and failure.
+	"""
+	if not isinstance(student, AmplitudeMAE3D):
+		msg = 'student must be an AmplitudeMAE3D instance'
+		raise TypeError(msg)
+	_validate_bool_argument(reuse, 'reuse')
+	_validate_bool_argument(overwrite, 'overwrite')
+	if reuse and overwrite:
+		msg = 'reuse and overwrite cannot both be true'
+		raise ValueError(msg)
+	student_state_sha256 = _validate_sha256(
+		source_student_state_sha256,
+		'source_student_state_sha256',
+	)
+	standard_config, resolved_checkpoint_config = _loaded_model_config_pair(
+		config,
+		checkpoint_config=checkpoint_config,
+	)
+	settings = extraction_settings_from_config(
+		standard_config,
+		checkpoint_config=resolved_checkpoint_config,
+	)
+	manifests = read_manifest_json(_manifest_path(standard_config))
+	if not manifests:
+		msg = 'loaded-model embedding extraction manifest is empty'
+		raise ValueError(msg)
+	_validate_loaded_model_config(student, resolved_checkpoint_config)
+	resolved_device = _loaded_model_device(student, device, standard_config)
+	output_root = Path(output_dir)
+	identity = _refresh_identity(
+		standard_config=standard_config,
+		resolved_checkpoint_config=resolved_checkpoint_config,
+		manifests=manifests,
+		student_state_sha256=student_state_sha256,
+		model=student,
+	)
+	existing = _inspect_existing_refresh_output(
+		output_root,
+		identity=identity,
+		manifests=manifests,
+		model=student,
+		settings=settings,
+		overwrite=overwrite,
+	)
+	if existing is not None:
+		if reuse:
+			return existing
+		if overwrite:
+			existing = None
+	if existing is not None:
+		msg = (
+			'complete refresh output already exists; set reuse=True or '
+			'overwrite=True: '
+			f'{output_root}'
+		)
+		raise FileExistsError(msg)
+	if output_root.exists() and not _is_empty_directory(output_root) and not overwrite:
+		msg = (
+			'existing refresh output is incomplete or does not match the '
+			'requested identity: '
+			f'{output_root}'
+		)
+		raise ValueError(msg)
+	output_root.parent.mkdir(parents=True, exist_ok=True)
+	staging = output_root.with_name(
+		f'.{output_root.name}.staging-{uuid.uuid4().hex}'
+	)
+	staging.mkdir()
+	try:
+		staged_cache = replace(
+			settings.preprocessing_cache,
+			directory=staging / '.preprocessing_cache',
+		)
+		staged_settings = replace(
+			settings,
+			output_dir=staging,
+			preprocessing_cache=staged_cache,
+		)
+		timer = StageTimer(
+			enabled=staged_settings.stage_timing,
+			synchronize=(
+				partial(torch.cuda.synchronize, resolved_device)
+				if resolved_device.type == 'cuda'
+				else None
+			),
+		)
+		producer_timer = StageTimer(
+			enabled=staged_settings.stage_timing,
+			accumulator=timer.accumulator,
+		)
+		store = NpyMemmapVolumeStore()
+		with _preserve_student_runtime_state(student):
+			student.eval()
+			results = [
+				extract_survey_embeddings(
+					manifest,
+					model=student,
+					store=store,
+					settings=staged_settings,
+					checkpoint_config=resolved_checkpoint_config,
+					checkpoint_payload=None,
+					checkpoint_sha256=student_state_sha256,
+					device=resolved_device,
+					skip_existing=False,
+					timer=timer,
+					producer_timer=producer_timer,
+				)
+				for manifest in manifests
+			]
+			_write_embedding_execution_summary(staging, results)
+		if staged_settings.stage_timing:
+			timer.write_json(staging / 'stage_timings.json')
+		if _refresh_identity(
+			standard_config=standard_config,
+			resolved_checkpoint_config=resolved_checkpoint_config,
+			manifests=manifests,
+			student_state_sha256=student_state_sha256,
+			model=student,
+		) != identity:
+			msg = 'refresh source identity changed during extraction'
+			raise ValueError(msg)
+		descriptor = _build_refresh_descriptor(
+			staging,
+			identity=identity,
+			manifests=manifests,
+			results=results,
+			model=student,
+			settings=staged_settings,
+		)
+		write_metadata(staging / REFRESH_EXTRACTION_DESCRIPTOR_NAME, descriptor)
+		_validate_refresh_descriptor(
+			staging,
+			descriptor=descriptor,
+			identity=identity,
+			manifests=manifests,
+			model=student,
+			settings=staged_settings,
+		)
+		_publish_refresh_staging(staging, output_root, overwrite=overwrite)
+		return [
+			_rebase_survey_result(result, output_root, skipped=False)
+			for result in results
+		]
+	finally:
+		if staging.exists():
+			shutil.rmtree(staging, ignore_errors=True)
+
+
+def _loaded_model_config_pair(
+	config: Mapping[str, object],
+	*,
+	checkpoint_config: Mapping[str, object] | None,
+) -> tuple[Mapping[str, object], Mapping[str, object]]:
+	if not isinstance(config, Mapping):
+		msg = 'config must be a mapping'
+		raise TypeError(msg)
+	if checkpoint_config is None:
+		msg = (
+			'loaded-model extraction requires an explicit resolved checkpoint_config; '
+			'no checkpoint file is read at this boundary'
+		)
+		raise ValueError(msg)
+	if not isinstance(checkpoint_config, Mapping):
+		msg = 'checkpoint_config must be a mapping'
+		raise TypeError(msg)
+	return config, checkpoint_config
+
+
+def _validate_bool_argument(value: object, name: str) -> None:
+	if not isinstance(value, bool):
+		msg = f'{name} must be a boolean'
+		raise TypeError(msg)
+
+
+def _validate_sha256(value: object, name: str) -> str:
+	if not isinstance(value, str) or len(value) != 64:
+		msg = f'{name} must be a lowercase SHA-256 digest'
+		raise TypeError(msg)
+	if any(character not in '0123456789abcdef' for character in value):
+		msg = f'{name} must be a lowercase SHA-256 digest'
+		raise ValueError(msg)
+	return value
+
+
+def _validate_loaded_model_config(
+	model: AmplitudeMAE3D,
+	checkpoint_config: Mapping[str, object],
+) -> None:
+	model_geometry = _model_geometry(checkpoint_config, model)
+	configured_model = _required_mapping(checkpoint_config, 'model')
+	for key in (
+		'name',
+		'in_channels',
+		'out_channels',
+		'encoder_dim',
+		'encoder_depth',
+		'encoder_heads',
+		'decoder_dim',
+		'decoder_depth',
+		'decoder_heads',
+	):
+		configured = configured_model.get(key)
+		actual = model_geometry[key]
+		if configured != actual:
+			msg = (
+				f'loaded student model geometry differs from checkpoint_config.model.'
+				f'{key}: configured={configured!r}, actual={actual!r}'
+			)
+			raise ValueError(msg)
+	if list(configured_model['patch_size']) != model_geometry['patch_size']:
+		msg = (
+			'loaded student model geometry differs from '
+			'checkpoint_config.model.patch_size'
+		)
+		raise ValueError(msg)
+
+
+def _loaded_model_device(
+	model: AmplitudeMAE3D,
+	requested: str | torch.device | None,
+	config: Mapping[str, object],
+) -> torch.device:
+	devices = {tensor.device for tensor in (*model.parameters(), *model.buffers())}
+	if len(devices) != 1:
+		msg = (
+			'loaded student tensors must share one device; got '
+			f'{sorted(map(str, devices))}'
+		)
+		raise ValueError(msg)
+	actual = next(iter(devices))
+	if requested is None:
+		return actual
+	resolved = _resolve_device(requested, config)
+	if resolved.type != actual.type or (
+		resolved.index is not None and resolved.index != actual.index
+	):
+		msg = (
+			'loaded student device does not match extraction device: '
+			f'model={actual}, requested={resolved}'
+		)
+		raise ValueError(msg)
+	return actual
+
+
+@contextmanager
+def _preserve_student_runtime_state(model: AmplitudeMAE3D) -> Iterator[None]:
+	training_flags = tuple((module, module.training) for module in model.modules())
+	cpu_rng_state = torch.random.get_rng_state()
+	cuda_rng_states = (
+		torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+	)
+	try:
+		yield
+	finally:
+		try:
+			torch.random.set_rng_state(cpu_rng_state)
+			if cuda_rng_states is not None:
+				torch.cuda.set_rng_state_all(cuda_rng_states)
+		finally:
+			for module, training in training_flags:
+				module.training = training
+
+
+def _refresh_identity(
+	*,
+	standard_config: Mapping[str, object],
+	resolved_checkpoint_config: Mapping[str, object],
+	manifests: Sequence[SurveyManifest],
+	student_state_sha256: str,
+	model: AmplitudeMAE3D,
+) -> dict[str, object]:
+	manifest_path = _manifest_path(standard_config).resolve()
+	path_list = _source_path_list_identity(
+		standard_config,
+		resolved_checkpoint_config,
+		manifests,
+	)
+	normalized_config = {
+		'standard_embedding_config': _jsonable(standard_config),
+		'resolved_checkpoint_config': _jsonable(resolved_checkpoint_config),
+	}
+	normalized_config_sha256 = _canonical_json_sha256(normalized_config)
+	normalization: dict[str, object] = {}
+	for manifest in manifests:
+		stats_path = resolve_manifest_path(
+			manifest,
+			manifest.amplitude.normalization_stats_path,
+		).resolve()
+		normalization[manifest.survey_id] = {
+			'path': str(stats_path),
+			'sha256': file_sha256(stats_path),
+		}
+	return {
+		'source_student_state_sha256': student_state_sha256,
+		'embedding_semantics': CURRENT_STUDENT_UNMASKED_EMBEDDING_SEMANTICS,
+		'extraction_config': {
+			'identity_type': 'normalized_json_v1',
+			'sha256': normalized_config_sha256,
+			'normalized': normalized_config,
+		},
+		'source_manifest': {
+			'path': str(manifest_path),
+			'sha256': file_sha256(manifest_path),
+		},
+		'source_path_list': path_list,
+		'source_normalization': normalization,
+		'survey_ids': [manifest.survey_id for manifest in manifests],
+		'model_geometry': _model_geometry(resolved_checkpoint_config, model),
+	}
+
+
+def _source_path_list_identity(
+	standard_config: Mapping[str, object],
+	resolved_checkpoint_config: Mapping[str, object],
+	manifests: Sequence[SurveyManifest],
+) -> dict[str, object]:
+	for config in (standard_config, resolved_checkpoint_config):
+		manifests_config = _optional_mapping(config, 'manifests')
+		for key in ('path_list', 'train_path_list', 'input_path_list'):
+			value = manifests_config.get(key)
+			if value is None:
+				continue
+			if not isinstance(value, str) or not value:
+				msg = f'manifests.{key} must be a non-empty path'
+				raise TypeError(msg)
+			path = Path(value).resolve()
+			return {'path': str(path), 'sha256': file_sha256(path)}
+	entries = [
+		str(resolve_manifest_path(manifest, manifest.amplitude.path).resolve())
+		for manifest in manifests
+	]
+	canonical = ''.join(f'{entry}\n' for entry in entries).encode('utf-8')
+	return {
+		'path': None,
+		'sha256': hashlib.sha256(canonical).hexdigest(),
+		'identity_type': 'manifest_amplitude_paths_v1',
+		'entry_count': len(entries),
+	}
+
+
+def _jsonable(value: object) -> object:
+	if isinstance(value, Mapping):
+		return {str(key): _jsonable(item) for key, item in value.items()}
+	if isinstance(value, Path):
+		return str(value)
+	if isinstance(value, np.generic):
+		return _jsonable(value.item())
+	if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+		return [_jsonable(item) for item in value]
+	if value is None or isinstance(value, (str, int, float, bool)):
+		return value
+	msg = f'cannot normalize extraction config value of type {type(value)!r}'
+	raise TypeError(msg)
+
+
+def _canonical_json_sha256(value: object) -> str:
+	return hashlib.sha256(
+		json.dumps(
+			value,
+			allow_nan=False,
+			sort_keys=True,
+			separators=(',', ':'),
+		).encode('utf-8'),
+	).hexdigest()
+
+
+def _build_refresh_descriptor(  # noqa: PLR0913
+	root: Path,
+	*,
+	identity: Mapping[str, object],
+	manifests: Sequence[SurveyManifest],
+	results: Sequence[SurveyEmbeddingResult],
+	model: AmplitudeMAE3D,
+	settings: EmbeddingExtractionSettings,
+) -> dict[str, object]:
+	if len(results) != len(manifests):
+		msg = 'refresh extraction result count does not match manifest count'
+		raise ValueError(msg)
+	manifest_by_id = {manifest.survey_id: manifest for manifest in manifests}
+	outputs: dict[str, object] = {}
+	for result in results:
+		manifest = manifest_by_id.get(result.survey_id)
+		if manifest is None or result.skipped:
+			msg = 'refresh extraction produced an invalid survey result'
+			raise ValueError(msg)
+		outputs[result.survey_id] = _refresh_output_entry(
+			root,
+			result=result,
+			manifest=manifest,
+			model=model,
+			settings=settings,
+		)
+	return {
+		'artifact_type': 'embedding_refresh_extraction',
+		'schema_version': 1,
+		'status': 'COMPLETE',
+		'completion_status': 'COMPLETE',
+		**dict(identity),
+		'outputs': outputs,
+	}
+
+
+def _refresh_output_entry(
+	root: Path,
+	*,
+	result: SurveyEmbeddingResult,
+	manifest: SurveyManifest,
+	model: AmplitudeMAE3D,
+	settings: EmbeddingExtractionSettings,
+) -> dict[str, object]:
+	paths = output_paths(root, result.survey_id)
+	expected_grid = token_grid_shape_xyz(
+		manifest.amplitude.shape_xyz,
+		model.patch_size_xyz,
+	)
+	embeddings = _refresh_array_descriptor(
+		root,
+		paths.embeddings,
+		expected_shape=(*expected_grid, model.encoder_dim),
+		expected_dtype=settings.output_dtype,
+		label=f'{result.survey_id}.embeddings',
+	)
+	valid_tokens = _refresh_array_descriptor(
+		root,
+		paths.valid_tokens,
+		expected_shape=expected_grid,
+		expected_dtype=np.dtype(bool),
+		label=f'{result.survey_id}.valid_tokens',
+	)
+	metadata = _refresh_metadata_descriptor(
+		root,
+		paths.metadata,
+		survey_id=result.survey_id,
+	)
+	return {
+		'embeddings': embeddings,
+		'valid_tokens': valid_tokens,
+		'metadata': metadata,
+	}
+
+
+def _refresh_array_descriptor(
+	root: Path,
+	path: Path,
+	*,
+	expected_shape: tuple[int, ...],
+	expected_dtype: np.dtype,
+	label: str,
+) -> dict[str, object]:
+	if not path.is_file():
+		msg = f'missing refresh output array: {path}'
+		raise FileNotFoundError(msg)
+	array = np.load(path, mmap_mode='r', allow_pickle=False)
+	try:
+		if tuple(array.shape) != expected_shape:
+			msg = (
+				f'{label} shape mismatch: expected {expected_shape!r}, '
+				f'got {tuple(array.shape)!r}'
+			)
+			raise ValueError(msg)
+		if np.dtype(array.dtype) != expected_dtype:
+			msg = (
+				f'{label} dtype mismatch: expected {expected_dtype!s}, '
+				f'got {array.dtype!s}'
+			)
+			raise ValueError(msg)
+		return {
+			'path': _relative_output_path(root, path),
+			'sha256': file_sha256(path),
+			'shape': list(array.shape),
+			'dtype': str(array.dtype),
+		}
+	finally:
+		del array
+
+
+def _refresh_metadata_descriptor(
+	root: Path,
+	path: Path,
+	*,
+	survey_id: str,
+) -> dict[str, object]:
+	if not path.is_file():
+		msg = f'missing refresh embedding metadata: {path}'
+		raise FileNotFoundError(msg)
+	try:
+		metadata = json.loads(path.read_text(encoding='utf-8'))
+	except (OSError, json.JSONDecodeError) as exc:
+		msg = f'invalid refresh embedding metadata: {path}'
+		raise ValueError(msg) from exc
+	if not isinstance(metadata, Mapping) or metadata.get('survey_id') != survey_id:
+		msg = f'refresh embedding metadata survey mismatch: {path}'
+		raise ValueError(msg)
+	return {
+		'path': _relative_output_path(root, path),
+		'sha256': file_sha256(path),
+	}
+
+
+def _relative_output_path(root: Path, path: Path) -> str:
+	try:
+		return path.resolve().relative_to(root.resolve()).as_posix()
+	except ValueError as exc:
+		msg = f'refresh output path is outside generation root: {path}'
+		raise ValueError(msg) from exc
+
+
+def _validate_refresh_descriptor(  # noqa: C901, PLR0912, PLR0913
+	root: Path,
+	*,
+	descriptor: Mapping[str, object],
+	identity: Mapping[str, object],
+	manifests: Sequence[SurveyManifest],
+	model: AmplitudeMAE3D,
+	settings: EmbeddingExtractionSettings,
+) -> None:
+	if descriptor.get('artifact_type') != 'embedding_refresh_extraction':
+		msg = 'refresh descriptor artifact_type is invalid'
+		raise ValueError(msg)
+	if descriptor.get('schema_version') != 1:
+		msg = 'refresh descriptor schema_version is invalid'
+		raise ValueError(msg)
+	if descriptor.get('status') != 'COMPLETE' or descriptor.get(
+		'completion_status'
+	) != 'COMPLETE':
+		msg = 'refresh descriptor is not complete'
+		raise ValueError(msg)
+	for key, expected in identity.items():
+		if descriptor.get(key) != expected:
+			msg = f'refresh descriptor identity mismatch: {key}'
+			raise ValueError(msg)
+	outputs = descriptor.get('outputs')
+	if not isinstance(outputs, Mapping):
+		msg = 'refresh descriptor outputs must be a mapping'
+		raise TypeError(msg)
+	manifest_by_id = {manifest.survey_id: manifest for manifest in manifests}
+	if set(outputs) != set(manifest_by_id):
+		msg = 'refresh descriptor survey output set mismatch'
+		raise ValueError(msg)
+	for survey_id, manifest in manifest_by_id.items():
+		entry = outputs.get(survey_id)
+		if not isinstance(entry, Mapping):
+			msg = f'refresh descriptor output entry is invalid: {survey_id}'
+			raise TypeError(msg)
+		paths = output_paths(root, survey_id)
+		expected_paths = {
+			'embeddings': paths.embeddings,
+			'valid_tokens': paths.valid_tokens,
+			'metadata': paths.metadata,
+		}
+		for name, expected_path in expected_paths.items():
+			item = entry.get(name)
+			if not isinstance(item, Mapping):
+				msg = f'refresh descriptor {survey_id}.{name} is invalid'
+				raise TypeError(msg)
+			if item.get('path') != _relative_output_path(root, expected_path):
+				msg = f'refresh descriptor path mismatch: {survey_id}.{name}'
+				raise ValueError(msg)
+		expected_entry = _refresh_output_entry(
+			root,
+			result=SurveyEmbeddingResult(
+				survey_id=survey_id,
+				embeddings_path=paths.embeddings,
+				valid_tokens_path=paths.valid_tokens,
+				metadata_path=paths.metadata,
+				skipped=False,
+			),
+			manifest=manifest,
+			model=model,
+			settings=settings,
+		)
+		if dict(entry) != expected_entry:
+			msg = f'refresh descriptor output hash or layout mismatch: {survey_id}'
+			raise ValueError(msg)
+
+
+def _inspect_existing_refresh_output(  # noqa: PLR0913
+	output_root: Path,
+	*,
+	identity: Mapping[str, object],
+	manifests: Sequence[SurveyManifest],
+	model: AmplitudeMAE3D,
+	settings: EmbeddingExtractionSettings,
+	overwrite: bool,
+) -> list[SurveyEmbeddingResult] | None:
+	if not output_root.exists():
+		return None
+	if output_root.is_dir() and not any(output_root.iterdir()):
+		return None
+	descriptor_path = output_root / REFRESH_EXTRACTION_DESCRIPTOR_NAME
+	if not descriptor_path.is_file():
+		return None
+	try:
+		descriptor = json.loads(descriptor_path.read_text(encoding='utf-8'))
+		if not isinstance(descriptor, Mapping):
+			msg = 'refresh descriptor must be a JSON object'
+			raise TypeError(msg)  # noqa: TRY301
+		_validate_refresh_descriptor(
+			output_root,
+			descriptor=descriptor,
+			identity=identity,
+			manifests=manifests,
+			model=model,
+			settings=settings,
+		)
+	except (
+		OSError,
+		json.JSONDecodeError,
+		TypeError,
+		ValueError,
+		FileNotFoundError,
+	) as exc:
+		if overwrite:
+			return None
+		msg = f'existing refresh output failed complete validation: {output_root}'
+		raise ValueError(msg) from exc
+	return [
+		_rebase_survey_result(
+			SurveyEmbeddingResult(
+				survey_id=manifest.survey_id,
+				embeddings_path=output_paths(
+					output_root,
+					manifest.survey_id,
+				).embeddings,
+				valid_tokens_path=output_paths(
+					output_root,
+					manifest.survey_id,
+				).valid_tokens,
+				metadata_path=output_paths(
+					output_root,
+					manifest.survey_id,
+				).metadata,
+				skipped=True,
+			),
+			output_root,
+			skipped=True,
+		)
+		for manifest in manifests
+	]
+
+
+def _rebase_survey_result(
+	result: SurveyEmbeddingResult,
+	output_root: Path,
+	*,
+	skipped: bool,
+) -> SurveyEmbeddingResult:
+	paths = output_paths(output_root, result.survey_id)
+	return replace(
+		result,
+		embeddings_path=paths.embeddings,
+		valid_tokens_path=paths.valid_tokens,
+		metadata_path=paths.metadata,
+		skipped=skipped,
+	)
+
+
+def _publish_refresh_staging(
+	staging: Path,
+	output_root: Path,
+	*,
+	overwrite: bool,
+) -> None:
+	if not staging.is_dir():
+		msg = f'refresh staging directory is missing: {staging}'
+		raise FileNotFoundError(msg)
+	if not output_root.exists():
+		staging.replace(output_root)
+		return
+	if not overwrite:
+		msg = f'refresh output already exists: {output_root}'
+		raise FileExistsError(msg)
+	backup = output_root.with_name(
+		f'.{output_root.name}.backup-{uuid.uuid4().hex}'
+	)
+	output_root.replace(backup)
+	try:
+		staging.replace(output_root)
+	except BaseException:
+		if output_root.exists():
+			_remove_path(output_root)
+		if backup.exists():
+			backup.replace(output_root)
+		raise
+	with suppress(OSError):
+		_remove_path(backup)
+
+
+def _remove_path(path: Path) -> None:
+	if path.is_dir() and not path.is_symlink():
+		shutil.rmtree(path)
+	else:
+		path.unlink()
+
+
+def _is_empty_directory(path: Path) -> bool:
+	return path.is_dir() and not any(path.iterdir())
+
+
 def _write_embedding_execution_summary(
 	output_dir: Path, results: list[SurveyEmbeddingResult]
 ) -> None:
@@ -397,7 +1123,7 @@ def extract_survey_embeddings(  # noqa: PLR0913
 	store: NpyMemmapVolumeStore,
 	settings: EmbeddingExtractionSettings,
 	checkpoint_config: Mapping[str, object],
-	checkpoint_payload: Mapping[str, object],
+	checkpoint_payload: Mapping[str, object] | None,
 	checkpoint_sha256: str,
 	device: torch.device,
 	skip_existing: bool,
@@ -1146,7 +1872,7 @@ def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 	return objective
 
 
-def _stratigraphy_pretext_metadata(  # noqa: C901
+def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 	payload: Mapping[str, object],
 ) -> dict[str, object] | None:
 	if 'stratigraphy_config' not in payload:
@@ -1209,6 +1935,91 @@ def _stratigraphy_pretext_metadata(  # noqa: C901
 					'posterior_cost_temperature'
 				],
 				'per_head_posterior_sha256': checkpoint_identity['per_head_posteriors'],
+			}
+		if checkpoint_identity.get('schema_version') == 8:
+			target_refresh_state = payload.get('target_refresh_state')
+			if not isinstance(target_refresh_state, Mapping):
+				raise TypeError('schema-8 target_refresh_state must be a mapping')
+			return {
+				**result,
+				'model_role': checkpoint_identity['model_role'],
+				'target_representation': checkpoint_identity[
+					'target_representation'
+				],
+				'target_refresh_semantics': checkpoint_identity[
+					'target_refresh_semantics'
+				],
+				'refresh_schedule_semantics': checkpoint_identity[
+					'refresh_schedule_semantics'
+				],
+				'refresh_after_epochs': checkpoint_identity['refresh_after_epochs'],
+				'hmm_iterations_per_refresh': checkpoint_identity[
+					'hmm_iterations_per_refresh'
+				],
+				'embedding_source': checkpoint_identity['embedding_source'],
+				'embedding_mode': checkpoint_identity['embedding_mode'],
+				'refresh_embedding_semantics': checkpoint_identity[
+					'refresh_embedding_semantics'
+				],
+				'center_initialization': checkpoint_identity[
+					'center_initialization'
+				],
+				'center_update': checkpoint_identity['center_update'],
+				'center_update_semantics': checkpoint_identity[
+					'center_update_semantics'
+				],
+				'preprocessing_policy': checkpoint_identity['preprocessing_policy'],
+				'target_activation_policy': checkpoint_identity[
+					'target_activation_policy'
+				],
+				'empty_state_policy': checkpoint_identity['empty_state_policy'],
+				'checkpoint_selection_policy': checkpoint_identity[
+					'checkpoint_selection_policy'
+				],
+				'generation_root': checkpoint_identity['generation_root'],
+				'initial_hard_target_manifest_sha256': checkpoint_identity[
+					'initial_hard_target_manifest_sha256'
+				],
+				'active_generation_id': target_refresh_state[
+					'active_generation_id'
+				],
+				'active_generation_manifest_path': target_refresh_state[
+					'active_generation_manifest_path'
+				],
+				'active_generation_manifest_sha256': target_refresh_state[
+					'active_generation_manifest_sha256'
+				],
+				'active_generation_content_sha256': target_refresh_state[
+					'active_generation_content_sha256'
+				],
+				'active_target_manifest_path': target_refresh_state[
+					'active_target_manifest_path'
+				],
+				'active_target_manifest_sha256': target_refresh_state[
+					'active_target_manifest_sha256'
+				],
+				'periodic_refresh_chain_path': target_refresh_state[
+					'periodic_refresh_chain_path'
+				],
+				'periodic_refresh_chain_sha256': target_refresh_state[
+					'periodic_refresh_chain_sha256'
+				],
+				'last_completed_refresh_epoch': target_refresh_state[
+					'last_completed_refresh_epoch'
+				],
+				'next_scheduled_refresh_epoch': target_refresh_state[
+					'next_scheduled_refresh_epoch'
+				],
+				'refresh_phase': target_refresh_state['refresh_phase'],
+				'source_student_state_sha256': target_refresh_state[
+					'source_student_state_sha256'
+				],
+				'fixed_preprocessing_hmm_identity_sha256': target_refresh_state[
+					'fixed_preprocessing_hmm_identity_sha256'
+				],
+				'target_refresh_state_sha256': checkpoint_identity[
+					'target_refresh_state_sha256'
+				],
 			}
 		if checkpoint_identity.get('schema_version') == 7:
 			target_manifest = _required_mapping(checkpoint_identity, 'target_manifest')
