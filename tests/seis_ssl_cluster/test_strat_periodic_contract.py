@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 from copy import deepcopy
 from pathlib import Path
+from types import SimpleNamespace
 
 import joblib
 import numpy as np
 import pytest
+import torch
 import yaml
 
+import seis_ssl_cluster.training.strat_hmm.runner as runner_module
 import seis_ssl_cluster.training.strat_hmm_checkpoint as checkpoint_module
 from seis_ssl_cluster.clustering.features import file_sha256
 from seis_ssl_cluster.clustering.kmeans import PCASettings, fit_preprocessor
@@ -23,7 +26,13 @@ from seis_ssl_cluster.config.pretraining import (
 	_multi_head_target_hashes,
 	resolve_strat_hmm_pretext_config,
 )
+from seis_ssl_cluster.embedding import REFRESH_EXTRACTION_DESCRIPTOR_NAME
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
+from seis_ssl_cluster.stratigraphy.periodic_refresh import (
+	HardTargetPolicy,
+	HashedArtifactReference,
+)
+from seis_ssl_cluster.training.checkpoint import capture_rng_state
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	_validated_periodic_checkpoint_selection,
 	inspect_stratigraphy_checkpoint,
@@ -502,3 +511,260 @@ def test_schema8_refresh_chain_requires_prior_manifest_link(tmp_path: Path) -> N
 			loaded_payloads=loaded_payloads,
 			expected_config=None,
 		)
+
+
+def test_periodic_runner_uses_exact_refresh_schedule() -> None:
+	assert [
+		epoch
+		for epoch in range(1, 26)
+		if runner_module._periodic_scheduled_epoch(epoch)  # noqa: SLF001
+	] == [2, 5, 8, 11, 14, 17, 20]
+	assert not runner_module._periodic_scheduled_epoch(25)  # noqa: SLF001
+
+
+def test_periodic_recovered_epoch_metrics_ignore_checkpoint_metadata() -> None:
+	assert runner_module._periodic_epoch_metrics_from_checkpoint(  # noqa: SLF001
+		{
+			'metrics': {
+				'loss': 0.25,
+				'eligible_xy_column_count': 4.0,
+				'trainable_parameter_count': 2.0,
+				'frozen_parameter_count': 3.0,
+				'amp_enabled': 0.0,
+			}
+		}
+	) == {
+		'loss': 0.25,
+		'eligible_xy_column_count': 4.0,
+		}
+
+
+def test_periodic_runner_validates_complete_generation_before_producer(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	output_root = tmp_path / 'refresh_0001_epoch002'
+	output_root.mkdir()
+	manifest_path = output_root / 'refresh_generation.json'
+	manifest_path.write_text('{}', encoding='utf-8')
+	load_calls: list[tuple[Path, object]] = []
+
+	monkeypatch.setattr(
+		runner_module,
+		'_periodic_request_identity',
+		lambda _config: {'request': 'expected'},
+	)
+
+	def record_load(path: Path, **kwargs: object) -> dict[str, object]:
+		load_calls.append((path, kwargs['expected_identity']))
+		return {}
+
+	monkeypatch.setattr(
+		runner_module, 'load_periodic_refresh_generation', record_load
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'produce_periodic_refresh_generation',
+		lambda _config: pytest.fail('complete generation must be reused'),
+	)
+
+	result = runner_module._load_or_produce_periodic_refresh_generation(  # noqa: SLF001
+		SimpleNamespace(output_generation_dir=output_root)
+	)
+
+	assert result == manifest_path.resolve()
+	assert load_calls == [(manifest_path, {'request': 'expected'})]
+
+
+def test_periodic_runner_pointer_rollback_rejects_foreign_state(
+	tmp_path: Path,
+) -> None:
+	pointer_path = tmp_path / 'active_target_generation.json'
+	old_pointer = {
+		'manifest_path': str(tmp_path / 'old.json'),
+		'manifest_sha256': '0' * 64,
+	}
+	new_pointer = {
+		'manifest_path': str(tmp_path / 'new.json'),
+		'manifest_sha256': '1' * 64,
+	}
+	pointer_path.write_text(
+		json.dumps(
+			{
+				'manifest_path': str(tmp_path / 'foreign.json'),
+				'manifest_sha256': '2' * 64,
+			}
+		),
+		encoding='utf-8',
+	)
+
+	with pytest.raises(RuntimeError, match='foreign active target pointer'):
+		runner_module._rollback_periodic_refresh_pointer(  # noqa: SLF001
+			pointer_path=pointer_path,
+			old_pointer=old_pointer,
+			new_pointer=new_pointer,
+		)
+
+
+def test_periodic_runner_rolls_back_pointer_on_post_activation_failure(  # noqa: PLR0915
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	refresh_root = tmp_path / 'refresh'
+	pointer_path = refresh_root / 'active_target_generation.json'
+	pointer_path.parent.mkdir(parents=True)
+	old_manifest = tmp_path / 'old' / 'refresh_generation.json'
+	old_manifest.parent.mkdir()
+	old_manifest.write_text('old', encoding='utf-8')
+	new_manifest = refresh_root / 'generations' / 'refresh_0001_epoch002' / (
+		'refresh_generation.json'
+	)
+	new_manifest.parent.mkdir(parents=True)
+	new_manifest.write_text('new', encoding='utf-8')
+	old_target = tmp_path / 'initial-target.json'
+	old_target.write_text('target', encoding='utf-8')
+	old_pointer = {
+		'manifest_path': str(old_manifest.resolve()),
+		'manifest_sha256': '0' * 64,
+	}
+	new_pointer = {
+		'manifest_path': str(new_manifest.resolve()),
+		'manifest_sha256': file_sha256(new_manifest),
+	}
+	runner_module._json_write_atomic(pointer_path, old_pointer)  # noqa: SLF001
+
+	student = torch.nn.Linear(1, 1)
+	teacher = torch.nn.Linear(1, 1)
+	heads = torch.nn.Linear(1, 1)
+	replacement = torch.nn.Linear(1, 1)
+	optimizer = torch.optim.AdamW(student.parameters(), lr=1.0e-3)
+	components = SimpleNamespace(
+		student=student,
+		teacher=teacher,
+		heads=heads,
+		replacement_token=replacement,
+		optimizer=optimizer,
+		mae_checkpoint_config={},
+		trainability_summary=SimpleNamespace(
+			trainable_parameter_count=2,
+			frozen_parameter_count=0,
+			trainable_names=('weight', 'bias'),
+		),
+	)
+	student.eval()
+	teacher.train()
+	heads.eval()
+	replacement.train()
+	flags_before = tuple(
+		module.training
+		for module in (student, teacher, heads, replacement)
+	)
+	rng_before = capture_rng_state()
+	events: list[str] = []
+	metadata = tmp_path / 'source-metadata.json'
+	clustering = tmp_path / 'clustering.yaml'
+	for path in (metadata, clustering):
+		path.write_text('{}', encoding='utf-8')
+	artifact = lambda path: HashedArtifactReference(  # noqa: E731
+		path=path,
+		sha256=file_sha256(path),
+	)
+	initial_target = artifact(old_target)
+
+	monkeypatch.setattr(
+		runner_module,
+		'_periodic_initial_artifacts',
+		lambda _config: ((), artifact(clustering), artifact(metadata), initial_target),
+	)
+	monkeypatch.setattr(runner_module, '_periodic_previous_centers', lambda _path: ())
+	monkeypatch.setattr(
+		runner_module,
+		'_periodic_target_policy',
+		lambda _path: HardTargetPolicy(),
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'_periodic_embedding_extraction_config',
+		lambda **_kwargs: {},
+	)
+
+	def extract(_student, _config, output_dir, *_args, **_kwargs):
+		Path(output_dir).mkdir(parents=True, exist_ok=True)
+		(Path(output_dir) / REFRESH_EXTRACTION_DESCRIPTOR_NAME).write_text(
+			'{}', encoding='utf-8'
+		)
+
+	monkeypatch.setattr(
+		runner_module, 'extract_embeddings_from_loaded_model', extract
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'_load_or_produce_periodic_refresh_generation',
+		lambda _config: new_manifest,
+	)
+
+	def activate(**_kwargs):
+		runner_module._json_write_atomic(pointer_path, new_pointer)  # noqa: SLF001
+		return {
+			'active_generation_id': 'refresh_0001_epoch002',
+			'active_generation_manifest_path': str(new_manifest),
+			'active_generation_manifest_sha256': new_pointer['manifest_sha256'],
+			'active_generation_content_sha256': '3' * 64,
+			'active_target_manifest_path': str(old_target),
+			'active_target_manifest_sha256': file_sha256(old_target),
+		}
+
+	monkeypatch.setattr(runner_module, '_activate_periodic_generation', activate)
+	monkeypatch.setattr(
+		runner_module,
+		'_build_strat_hmm_dataset_and_dataloader',
+		lambda **_kwargs: (
+			[],
+			torch.utils.data.DataLoader(
+				[0], generator=torch.Generator().manual_seed(17)
+			),
+		),
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'load_periodic_refresh_generation',
+		lambda _path, **_kwargs: {},
+	)
+
+	def append_event(_output_root, payload):
+		events.append(str(payload['status']))
+		if payload['status'] == 'complete':
+			raise OSError('event log failure')
+
+	monkeypatch.setattr(runner_module, '_append_target_refresh_event', append_event)
+	old_loader = torch.utils.data.DataLoader(
+		[0], generator=torch.Generator().manual_seed(23)
+	)
+
+	with pytest.raises(OSError, match='event log failure'):
+		runner_module._perform_periodic_refresh(  # noqa: SLF001
+			config={'pseudo_target_refresh': {'generation_root': str(refresh_root)}},
+			output_root=tmp_path / 'output',
+			manifests=[],
+			dataset_kwargs={'seed': 23},
+			components=components,
+			device=torch.device('cpu'),
+			dataloader=old_loader,
+			state={
+				'active_generation_index': 0,
+				'active_generation_id': 'refresh_0000_initial',
+				'active_generation_manifest_path': str(old_manifest),
+				'active_generation_manifest_sha256': '0' * 64,
+			},
+			refresh_epoch=2,
+			global_step=4,
+		)
+
+	assert runner_module._periodic_pointer(pointer_path) == old_pointer  # noqa: SLF001
+	assert events == ['start', 'complete', 'failure']
+	assert tuple(
+		module.training for module in (student, teacher, heads, replacement)
+	) == flags_before
+	assert runner_module._rng_state_hash(capture_rng_state()) == (  # noqa: SLF001
+		runner_module._rng_state_hash(rng_before)  # noqa: SLF001
+	)

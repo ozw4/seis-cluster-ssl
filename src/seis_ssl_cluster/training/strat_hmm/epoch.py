@@ -525,13 +525,19 @@ def train_strat_hmm_center_trace_masked_one_epoch(  # noqa: C901, PLR0912, PLR09
 		global_step += 1
 		last_batch_index = batch_index
 		if step_callback is not None:
+			completed_epoch = batch_index >= len(dataloader) - 1
 			step_callback(
 				StratHmmTrainingState(
 					epoch=epoch,
 					global_step=global_step,
 					metrics=step_metrics,
 					last_batch_index=batch_index,
-					completed_epoch=batch_index >= len(dataloader) - 1,
+					completed_epoch=completed_epoch,
+					epoch_metrics=(
+						{key: total / batches for key, total in totals.items()}
+						if completed_epoch
+						else None
+					),
 				)
 			)
 	if batches == 0:

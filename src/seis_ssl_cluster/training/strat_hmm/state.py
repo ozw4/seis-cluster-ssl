@@ -31,6 +31,7 @@ class StratHmmTrainingState:
 	metrics: dict[str, float]
 	last_batch_index: int
 	completed_epoch: bool
+	epoch_metrics: dict[str, float] | None = None
 
 
 @dataclass(frozen=True)

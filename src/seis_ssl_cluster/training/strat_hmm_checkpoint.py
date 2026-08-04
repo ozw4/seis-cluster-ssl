@@ -840,6 +840,11 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 		validated_refresh_state = _validated_target_refresh_state(
 			target_refresh_state,
 			expected_config=config,
+			recovery_source_student_state_sha256=(
+				identity.get('student_state_sha256')
+				if isinstance(identity.get('student_state_sha256'), str)
+				else None
+			),
 		)
 		if identity.get('target_refresh_state_sha256') != _canonical_sha256(
 			validated_refresh_state
@@ -1983,6 +1988,7 @@ def _validated_target_refresh_state(  # noqa: C901, PLR0912, PLR0915
 	value: object,
 	*,
 	expected_config: Mapping[str, object] | None = None,
+	recovery_source_student_state_sha256: str | None = None,
 ) -> dict[str, object]:
 	"""Validate the complete, externally published periodic refresh state."""
 	if not isinstance(value, Mapping):
@@ -2183,6 +2189,9 @@ def _validated_target_refresh_state(  # noqa: C901, PLR0912, PLR0915
 		raise ValueError('active target manifest head_ks must be [6, 8, 10]')
 
 	_refresh_root = _periodic_refresh_root_from_config(expected_config)
+	chain_generations = generations
+	chain_payloads = loaded_payloads
+	validated_chain_sha256 = chain_sha256
 	if _refresh_root is not None:
 		_expected_periodic_state_paths(
 			refresh_root=_refresh_root,
@@ -2199,18 +2208,41 @@ def _validated_target_refresh_state(  # noqa: C901, PLR0912, PLR0915
 		pointer = _load_json_mapping(pointer_path, 'active target generation pointer')
 		if set(pointer) != {'manifest_path', 'manifest_sha256'}:
 			raise ValueError('active target generation pointer fields are not closed')
-		if pointer.get('manifest_path') != str(active_manifest_path) or pointer.get(
-			'manifest_sha256'
-		) != active_manifest_sha256:
+		actual_chain_sha256 = _file_sha256(chain_path)
+		if actual_chain_sha256 != chain_sha256:
+			(
+				extra_generation,
+				extra_payload,
+				pointer_acceptance,
+			) = _recover_periodic_refresh_extension(
+				chain_path=chain_path,
+				pointer_path=pointer_path,
+				refresh_root=_refresh_root,
+				generations=generations,
+				loaded_payloads=loaded_payloads,
+				expected_config=expected_config,
+				expected_source_student_state_sha256=(
+					recovery_source_student_state_sha256
+				),
+			)
+			chain_generations = [*generations, extra_generation]
+			chain_payloads = [*loaded_payloads, extra_payload]
+			validated_chain_sha256 = actual_chain_sha256
+		else:
+			pointer_acceptance = {
+				'manifest_path': str(active_manifest_path),
+				'manifest_sha256': active_manifest_sha256,
+			}
+		if dict(pointer) != pointer_acceptance:
 			raise ValueError(
 				'active target generation pointer does not match checkpoint state'
 			)
 
 	_validate_periodic_refresh_chain(
 		chain_path,
-		chain_sha256=chain_sha256,
-		generations=generations,
-		loaded_payloads=loaded_payloads,
+		chain_sha256=validated_chain_sha256,
+		generations=chain_generations,
+		loaded_payloads=chain_payloads,
 		expected_config=expected_config,
 	)
 
@@ -2249,6 +2281,161 @@ def _validated_target_refresh_state(  # noqa: C901, PLR0912, PLR0915
 		'fixed_preprocessing_hmm_identity_sha256': fixed_identity_hash,
 		'generations': generations,
 	}
+
+
+def _recover_periodic_refresh_extension(  # noqa: C901, PLR0912, PLR0913, PLR0915
+	*,
+	chain_path: Path,
+	pointer_path: Path,
+	refresh_root: Path,
+	generations: list[dict[str, object]],
+	loaded_payloads: list[Mapping[str, object]],
+	expected_config: Mapping[str, object],
+	expected_source_student_state_sha256: str | None,
+) -> tuple[dict[str, object], Mapping[str, object], dict[str, str]]:
+	"""Accept only the one generation published before its refresh checkpoint."""
+	chain = _load_json_mapping(chain_path, 'periodic refresh chain')
+	if set(chain) != _PERIODIC_REFRESH_CHAIN_KEYS:
+		raise ValueError('periodic refresh chain fields are not closed')
+	if chain.get('schema_version') != 1 or chain.get(
+		'semantics'
+	) != _PERIODIC_REFRESH_CHAIN_SEMANTICS:
+		raise ValueError('periodic refresh chain identity is invalid')
+	if tuple(chain.get('refresh_after_epochs', ())) != PERIODIC_REFRESH_SCHEDULE:
+		raise ValueError('periodic refresh chain schedule mismatch')
+	scientific = _required_mapping(
+		_required_mapping(expected_config, 'identity'), 'scientific_identity'
+	)
+	if chain.get('fixed_preprocessing_hmm_identity_sha256') != (
+		_periodic_fixed_preprocessing_identity_sha256(scientific)
+	):
+		raise ValueError('periodic refresh chain fixed preprocessing identity drift')
+	chain_generations = chain.get('generations')
+	if not isinstance(chain_generations, list) or len(chain_generations) != len(
+		generations
+	) + 1:
+		raise ValueError('periodic refresh chain has no single recoverable extension')
+	for sequence, (generation, payload) in enumerate(
+		zip(generations, loaded_payloads, strict=True)
+	):
+		raw = chain_generations[sequence]
+		if not isinstance(raw, Mapping):
+			raise TypeError('periodic refresh chain generation must be a mapping')
+		if set(raw) != _PERIODIC_REFRESH_CHAIN_GENERATION_KEYS:
+			raise ValueError('periodic refresh chain generation fields are not closed')
+		previous = payload.get('previous_generation_manifest')
+		previous_hash = (
+			None
+			if previous is None
+			else _required_sha256(
+				_required_mapping(previous, 'previous generation manifest').get(
+					'sha256'
+				),
+				'previous generation manifest sha256',
+			)
+		)
+		expected = {
+			'generation_index': generation['generation_index'],
+			'generation_id': generation['generation_id'],
+			'refresh_after_epoch': payload['refresh_after_epoch'],
+			'previous_generation_manifest_sha256': previous_hash,
+			'source_student_state_sha256': payload.get(
+				'source_student_state_sha256'
+			),
+			'manifest_path': generation['manifest_path'],
+			'manifest_sha256': generation['manifest_sha256'],
+			'generation_content_sha256': generation['generation_content_sha256'],
+		}
+		if dict(raw) != expected:
+			raise ValueError('periodic refresh chain prefix does not match state')
+	extra_raw = chain_generations[-1]
+	if not isinstance(extra_raw, Mapping) or set(extra_raw) != (
+		_PERIODIC_REFRESH_CHAIN_GENERATION_KEYS
+	):
+		raise ValueError('periodic refresh chain extension fields are invalid')
+	extra_index = len(generations)
+	if extra_index > len(PERIODIC_REFRESH_SCHEDULE):
+		raise ValueError('periodic refresh chain extension is beyond the schedule')
+	extra_path = _absolute_state_path(
+		extra_raw.get('manifest_path'), 'periodic refresh extension manifest path'
+	)
+	expected_id = (
+		f'refresh_{extra_index:04d}_epoch'
+		f'{PERIODIC_REFRESH_SCHEDULE[extra_index - 1]:03d}'
+	)
+	if extra_raw.get('generation_index') != extra_index or extra_raw.get(
+		'generation_id'
+	) != expected_id or extra_raw.get('refresh_after_epoch') != (
+		PERIODIC_REFRESH_SCHEDULE[extra_index - 1]
+	):
+		raise ValueError('periodic refresh chain extension schedule mismatch')
+	try:
+		extra_path.resolve().relative_to((refresh_root / 'generations').resolve())
+	except ValueError as exc:
+		raise ValueError(
+			'periodic refresh chain extension is outside generation_root'
+		) from exc
+	if not extra_path.is_file():
+		raise FileNotFoundError(extra_path)
+	extra_hash = _required_sha256(
+		extra_raw.get('manifest_sha256'), 'periodic extension manifest hash'
+	)
+	if _file_sha256(extra_path) != extra_hash:
+		raise ValueError('periodic refresh extension manifest hash mismatch')
+	try:
+		extra_payload = load_periodic_refresh_generation(extra_path)
+	except (OSError, RuntimeError, TypeError, ValueError, KeyError) as exc:
+		raise ValueError('periodic refresh extension is incomplete or corrupt') from exc
+	if extra_payload.get('generation_index') != extra_index or extra_payload.get(
+		'generation_id'
+	) != expected_id:
+		raise ValueError('periodic refresh extension manifest identity mismatch')
+	if extra_payload.get('refresh_after_epoch') != extra_raw['refresh_after_epoch']:
+		raise ValueError('periodic refresh extension epoch mismatch')
+	if extra_payload.get('generation_content_sha256') != extra_raw[
+		'generation_content_sha256'
+	]:
+		raise ValueError('periodic refresh extension content hash mismatch')
+	previous = _required_mapping(
+		extra_payload.get('previous_generation_manifest'),
+		'periodic refresh extension previous manifest',
+	)
+	if previous.get('sha256') != generations[-1]['manifest_sha256'] or Path(
+		str(previous.get('path'))
+	).resolve() != Path(str(generations[-1]['manifest_path'])).resolve():
+		raise ValueError('periodic refresh extension previous manifest mismatch')
+	extra_source = _required_sha256(
+		extra_payload.get('source_student_state_sha256'),
+		'periodic refresh extension source student state hash',
+	)
+	if (
+		expected_source_student_state_sha256 is not None
+		and extra_source != expected_source_student_state_sha256
+	):
+		raise ValueError('periodic refresh extension source student state mismatch')
+	new_record = dict(extra_raw)
+	new_record['manifest_path'] = str(extra_path)
+	new_record['manifest_sha256'] = extra_hash
+	pointer = _load_json_mapping(pointer_path, 'active target generation pointer')
+	if set(pointer) != {'manifest_path', 'manifest_sha256'}:
+		raise ValueError('active target generation pointer fields are not closed')
+	accepted = (
+		{
+			'manifest_path': str(Path(str(generations[-1]['manifest_path'])).resolve()),
+			'manifest_sha256': generations[-1]['manifest_sha256'],
+		},
+		{
+			'manifest_path': str(extra_path),
+			'manifest_sha256': extra_hash,
+		},
+	)
+	pointer_value = {
+		'manifest_path': pointer.get('manifest_path'),
+		'manifest_sha256': pointer.get('manifest_sha256'),
+	}
+	if pointer_value not in accepted:
+		raise ValueError('active target pointer is foreign or out of chain order')
+	return new_record, extra_payload, pointer_value
 
 
 def _periodic_refresh_root_from_config(
@@ -2413,6 +2600,10 @@ def _validate_periodic_refresh_state_against_config(  # noqa: C901, PLR0912, PLR
 	)
 	schedule = tuple(PERIODIC_REFRESH_SCHEDULE)
 	active_index = int(state['active_generation_index'])
+	if active_index < 0 or active_index > len(schedule):
+		raise ValueError(
+			'active_generation_index exceeds the periodic refresh schedule'
+		)
 	last_refresh = int(state['last_completed_refresh_epoch'])
 	next_refresh = state['next_scheduled_refresh_epoch']
 	phase = state['refresh_phase']
@@ -5090,7 +5281,13 @@ def _validate_periodic_training_state(
 		_nonnegative_int_value(batch_index, 'schema-8 step batch_index')
 	elif batch_index is not None:
 		raise ValueError('schema-8 epoch/refresh batch_index must be null')
-	state = _validated_target_refresh_state(payload.get('target_refresh_state'))
+	checkpoint_config = payload.get('stratigraphy_config')
+	state = _validated_target_refresh_state(
+		payload.get('target_refresh_state'),
+		expected_config=(
+			checkpoint_config if isinstance(checkpoint_config, Mapping) else None
+		),
+	)
 	epoch = _nonnegative_int_value(payload.get('epoch'), 'schema-8 epoch')
 	if epoch > train_epochs:
 		raise ValueError('schema-8 checkpoint epoch exceeds train.epochs')
@@ -5183,7 +5380,13 @@ def _validate_periodic_checkpoint_selection_payload_binding(  # noqa: C901, PLR0
 		batch_index = _nonnegative_int_value(batch_index, 'payload batch_index')
 	elif batch_index is not None:
 		raise ValueError('periodic epoch and refresh batch_index must be null')
-	state = _validated_target_refresh_state(payload.get('target_refresh_state'))
+	checkpoint_config = payload.get('stratigraphy_config')
+	state = _validated_target_refresh_state(
+		payload.get('target_refresh_state'),
+		expected_config=(
+			checkpoint_config if isinstance(checkpoint_config, Mapping) else None
+		),
+	)
 	if (
 		epoch != last['epoch']
 		or global_step != last['global_step']

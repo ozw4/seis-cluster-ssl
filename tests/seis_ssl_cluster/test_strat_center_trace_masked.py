@@ -326,6 +326,50 @@ def test_center_trace_cpu_one_step_masks_student_and_trains_replacement_token() 
 	)
 
 
+def test_center_trace_final_step_callback_preserves_epoch_metrics() -> None:
+	student = _RuntimeStudent()
+	heads = MultiResolutionOrderedPrototypeHeads(
+		feature_dim=4,
+		ks=(6, 8, 10),
+		projection_dim=3,
+		temperature=0.5,
+		normalize=True,
+	)
+	replacement_token = LearnedEncoderReplacementToken(4, seed=5)
+	optimizer = torch.optim.AdamW(
+		[
+			{'params': heads.parameters(), 'lr': 3.0e-4},
+			{'params': student.parameters(), 'lr': 1.0e-5},
+			{'params': replacement_token.parameters(), 'lr': 3.0e-4},
+		]
+	)
+	callback_states = []
+	state = train_strat_hmm_center_trace_masked_one_epoch(
+		student=student,
+		heads=heads,
+		replacement_token=replacement_token,
+		dataloader=[_runtime_batch(), _runtime_batch()],
+		optimizer=optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		training_seed=273,
+		column_fraction=0.10,
+		loss_config={
+			'prototype_weight': 1.0,
+			'usage_weight': 0.005,
+			'distillation_weight': 0.0,
+			'consistency_weight': 0.0,
+		},
+		pseudo_target_config={},
+		step_callback=callback_states.append,
+	)
+
+	assert len(callback_states) == 2
+	assert callback_states[0].epoch_metrics is None
+	assert callback_states[-1].completed_epoch
+	assert callback_states[-1].epoch_metrics == pytest.approx(state.metrics)
+
+
 class _StaticHeads(torch.nn.Module):
 	def __init__(self, logits: list[torch.Tensor]) -> None:
 		super().__init__()
