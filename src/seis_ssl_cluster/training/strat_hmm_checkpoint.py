@@ -707,7 +707,9 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 			head=head,
 			target_refresh_state=payload['target_refresh_state'],
 		)
-		_validate_periodic_training_state(payload)
+		_validate_periodic_training_state(
+			payload, train_epochs=_periodic_train_epochs(stratigraphy_config)
+		)
 		_validate_periodic_checkpoint_selection_payload_binding(
 			payload, payload['checkpoint_selection']
 		)
@@ -840,7 +842,9 @@ def validate_stratigraphy_checkpoint_payload(  # noqa: C901, PLR0912, PLR0913, P
 			raise ValueError(
 				'schema-8 target_refresh_state hash does not match identity'
 			)
-		_validate_periodic_training_state(payload)
+		_validate_periodic_training_state(
+			payload, train_epochs=_periodic_train_epochs(config)
+		)
 		selection = _validated_periodic_checkpoint_selection(
 			payload.get('checkpoint_selection'),
 			train_epochs=_periodic_train_epochs(config),
@@ -2534,6 +2538,19 @@ def _validate_periodic_refresh_state_against_config(  # noqa: C901, PLR0912, PLR
 				):
 					raise ValueError(
 						f'generation {index} initial HMM {k} {artifact_key} drift'
+					)
+			for artifact_key in ('clustering_config', 'source_embedding_metadata'):
+				artifact_ref = _required_mapping(
+					fixed_identity.get(artifact_key),
+					f'generation {index} fixed {artifact_key}',
+				)
+				configured_ref = _required_mapping(
+					configured_common.get(artifact_key),
+					f'initial_hmm_artifacts.common.{artifact_key}',
+				)
+				if dict(artifact_ref) != dict(configured_ref):
+					raise ValueError(
+						f'generation {index} fixed {artifact_key} drift'
 					)
 	if active_index > 0:
 		active_source = loaded_payloads[-1].get('source_student_state_sha256')
@@ -5042,7 +5059,9 @@ def _periodic_event_is_final(
 	)
 
 
-def _validate_periodic_training_state(payload: Mapping[str, object]) -> None:
+def _validate_periodic_training_state(
+	payload: Mapping[str, object], *, train_epochs: int
+) -> None:
 	training_state = payload.get('training_state')
 	if not isinstance(training_state, Mapping):
 		raise TypeError('schema-8 training_state must be a mapping')
@@ -5067,6 +5086,8 @@ def _validate_periodic_training_state(payload: Mapping[str, object]) -> None:
 		raise ValueError('schema-8 epoch/refresh batch_index must be null')
 	state = _validated_target_refresh_state(payload.get('target_refresh_state'))
 	epoch = _nonnegative_int_value(payload.get('epoch'), 'schema-8 epoch')
+	if epoch > train_epochs:
+		raise ValueError('schema-8 checkpoint epoch exceeds train.epochs')
 	_validate_periodic_checkpoint_phase(
 		epoch=epoch,
 		checkpoint_kind=kind,

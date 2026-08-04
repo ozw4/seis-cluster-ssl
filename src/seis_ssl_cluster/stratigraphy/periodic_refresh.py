@@ -37,6 +37,10 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm_refresh import (
 	WarmStartOrderedHMMRefreshResult,
 	run_warm_start_ordered_hmm_refresh,
 )
+from seis_ssl_cluster.config.pretraining import (
+	PERIODIC_REFRESH_EMBEDDING_SEMANTICS,
+	PERIODIC_REFRESH_SCHEDULE,
+)
 from seis_ssl_cluster.stratigraphy.export import (
 	export_hmm_cluster_labels_as_pseudo_targets,
 )
@@ -135,6 +139,8 @@ class PeriodicRefreshConfig:
 	current_embedding_descriptor: HashedArtifactReference
 	initial_hard_target_manifest: HashedArtifactReference
 	initial_hmm_artifacts: tuple[InitialHMMArtifact, ...]
+	clustering_config: HashedArtifactReference
+	source_embedding_metadata: HashedArtifactReference
 	previous_centers: tuple[PreviousCenterArtifact, ...]
 	output_generation_dir: Path
 	target_policy: HardTargetPolicy
@@ -148,6 +154,8 @@ class InitialPeriodicRefreshConfig:
 
 	initial_hard_target_manifest: HashedArtifactReference
 	initial_hmm_artifacts: tuple[InitialHMMArtifact, ...]
+	clustering_config: HashedArtifactReference
+	source_embedding_metadata: HashedArtifactReference
 	output_generation_dir: Path
 	target_policy: HardTargetPolicy
 
@@ -459,6 +467,10 @@ def validate_periodic_refresh_generation(
 		raise ValueError('periodic refresh generation is not COMPLETE')
 	index = _positive_int(payload['generation_index'], 'generation_index')
 	epoch = _positive_int(payload['refresh_after_epoch'], 'refresh_after_epoch')
+	if index > len(PERIODIC_REFRESH_SCHEDULE) or epoch != PERIODIC_REFRESH_SCHEDULE[index - 1]:
+		raise ValueError(
+			'periodic refresh generation does not match the exact refresh schedule'
+		)
 	expected_id = f'refresh_{index:04d}_epoch{epoch:03d}'
 	if payload['generation_id'] != expected_id:
 		raise ValueError(
@@ -715,6 +727,14 @@ def _initial_request_identity_from_payload(
 		'generation_index': 0,
 		'generation_id': INITIAL_GENERATION_ID,
 		'initial_hard_target_manifest': payload['initial_hard_target_manifest'],
+		'clustering_config': _mapping(
+			payload['fixed_preprocessing_hmm_identity'],
+			'fixed preprocessing identity',
+		)['clustering_config'],
+		'source_embedding_metadata': _mapping(
+			payload['fixed_preprocessing_hmm_identity'],
+			'fixed preprocessing identity',
+		)['source_embedding_metadata'],
 		'initial_hmm_artifacts': _mapping(
 			_mapping(
 				payload['fixed_preprocessing_hmm_identity'],
@@ -834,6 +854,15 @@ def _validate_config(config: PeriodicRefreshConfig) -> None:
 		raise ValueError('generation_index must be a positive integer for refresh')
 	if config.refresh_after_epoch <= 0 or isinstance(config.refresh_after_epoch, bool):
 		raise ValueError('refresh_after_epoch must be a positive integer')
+	if (
+		config.generation_index > len(PERIODIC_REFRESH_SCHEDULE)
+		or config.refresh_after_epoch != PERIODIC_REFRESH_SCHEDULE[
+			config.generation_index - 1
+		]
+	):
+		raise ValueError(
+			'periodic refresh generation must use the exact refresh schedule'
+		)
 	if config.iterations != 2 or isinstance(config.iterations, bool):
 		raise ValueError('periodic refresh requires exactly two HMM iterations')
 	if (
@@ -856,6 +885,10 @@ def _validate_config(config: PeriodicRefreshConfig) -> None:
 	)
 	_validate_reference(
 		config.initial_hard_target_manifest, 'initial_hard_target_manifest'
+	)
+	_validate_reference(config.clustering_config, 'clustering_config')
+	_validate_reference(
+		config.source_embedding_metadata, 'source_embedding_metadata'
 	)
 	for artifact in config.initial_hmm_artifacts:
 		for name in ('centers', 'hmm_model', 'preprocessor', 'metadata'):
@@ -883,6 +916,8 @@ def _validate_config(config: PeriodicRefreshConfig) -> None:
 		config.previous_generation_manifest,
 		config.current_embedding_descriptor,
 		config.initial_hard_target_manifest,
+		config.clustering_config,
+		config.source_embedding_metadata,
 	):
 		if reference.path.resolve() == output:
 			raise ValueError('output_generation_dir must differ from input artifacts')
@@ -901,6 +936,10 @@ def _request_identity(config: PeriodicRefreshConfig) -> dict[str, object]:
 		),
 		'initial_hard_target_manifest': _reference_payload(
 			config.initial_hard_target_manifest
+		),
+		'clustering_config': _reference_payload(config.clustering_config),
+		'source_embedding_metadata': _reference_payload(
+			config.source_embedding_metadata
 		),
 		'initial_hmm_artifacts': {
 			str(item.k): _initial_hmm_artifact_payload(item)
@@ -926,6 +965,14 @@ def _request_identity_from_payload(
 		'previous_generation_manifest': payload['previous_generation_manifest'],
 		'current_embedding_descriptor': payload['current_embedding_descriptor'],
 		'initial_hard_target_manifest': payload['initial_hard_target_manifest'],
+		'clustering_config': _mapping(
+			payload['fixed_preprocessing_hmm_identity'],
+			'fixed preprocessing identity',
+		)['clustering_config'],
+		'source_embedding_metadata': _mapping(
+			payload['fixed_preprocessing_hmm_identity'],
+			'fixed preprocessing identity',
+		)['source_embedding_metadata'],
 		'initial_hmm_artifacts': _mapping(
 			_mapping(
 				payload['fixed_preprocessing_hmm_identity'],
@@ -949,6 +996,10 @@ def _initial_request_identity(
 		'initial_hard_target_manifest': _reference_payload(
 			config.initial_hard_target_manifest
 		),
+		'clustering_config': _reference_payload(config.clustering_config),
+		'source_embedding_metadata': _reference_payload(
+			config.source_embedding_metadata
+		),
 		'initial_hmm_artifacts': {
 			str(item.k): _initial_hmm_artifact_payload(item)
 			for item in config.initial_hmm_artifacts
@@ -962,6 +1013,10 @@ def _validate_initial_config(config: InitialPeriodicRefreshConfig) -> None:
 		raise TypeError('config must be an InitialPeriodicRefreshConfig')
 	_validate_reference(
 		config.initial_hard_target_manifest, 'initial_hard_target_manifest'
+	)
+	_validate_reference(config.clustering_config, 'clustering_config')
+	_validate_reference(
+		config.source_embedding_metadata, 'source_embedding_metadata'
 	)
 	if tuple(item.k for item in config.initial_hmm_artifacts) != CANONICAL_KS:
 		raise ValueError('initial_hmm_artifacts must be ordered K=6,8,10')
@@ -982,8 +1037,13 @@ def _validate_initial_config(config: InitialPeriodicRefreshConfig) -> None:
 		raise ValueError(
 		f'output_generation_dir must be named {INITIAL_GENERATION_ID!r}'
 	)
-	if config.initial_hard_target_manifest.path.resolve() == output:
-		raise ValueError('output_generation_dir must differ from input artifacts')
+	for reference in (
+		config.initial_hard_target_manifest,
+		config.clustering_config,
+		config.source_embedding_metadata,
+	):
+		if reference.path.resolve() == output:
+			raise ValueError('output_generation_dir must differ from input artifacts')
 
 
 def _build_initial_generation_manifest(
@@ -1047,7 +1107,11 @@ def _build_initial_generation_manifest(
 		'initial_hard_target_manifest': _reference_payload(
 			config.initial_hard_target_manifest
 		),
-		'fixed_preprocessing_hmm_identity': _fixed_identity_payload(models),
+		'fixed_preprocessing_hmm_identity': _fixed_identity_payload(
+			models,
+			clustering_config=config.clustering_config,
+			source_embedding_metadata=config.source_embedding_metadata,
+		),
 		'initial_hard_target_policy': asdict(config.target_policy),
 		'previous_centers': None,
 		'embeddings': None,
@@ -1067,8 +1131,13 @@ def _build_initial_generation_manifest(
 
 def _fixed_identity_payload(
 	models: Sequence[_LoadedFixedHMM],
+	*,
+	clustering_config: HashedArtifactReference,
+	source_embedding_metadata: HashedArtifactReference,
 ) -> dict[str, object]:
 	return {
+		'clustering_config': _reference_payload(clustering_config),
+		'source_embedding_metadata': _reference_payload(source_embedding_metadata),
 		'artifacts': {
 			str(model.k): _initial_hmm_artifact_payload(model.artifact)
 			for model in models
@@ -1328,8 +1397,10 @@ def _load_fixed_hmm(artifact: InitialHMMArtifact) -> _LoadedFixedHMM:
 	model = joblib.load(artifact.hmm_model.path)
 	if not isinstance(model, Mapping):
 		raise TypeError(f'initial hmm_model must be a mapping for k={artifact.k}')
-	if model.get('emission_source') not in {'embedding', 'z_coordinate'}:
-		raise ValueError(f'initial emission_source is invalid for k={artifact.k}')
+	if model.get('emission_source') != 'embedding':
+		raise ValueError(
+		f'initial emission_source must be embedding for k={artifact.k}'
+	)
 	model_centers = np.asarray(model.get('centers'), dtype=np.float32)
 	if model_centers.shape != centers.shape or not np.array_equal(
 		model_centers, centers
@@ -1370,8 +1441,6 @@ def _load_fixed_hmm(artifact: InitialHMMArtifact) -> _LoadedFixedHMM:
 	edge_margin = _edge_margin(strat.get('edge_margin_tokens'), artifact.k)
 	if strat.get('emission_source') != emission_source:
 		raise ValueError(f'initial emission source drift for k={artifact.k}')
-	if emission_source == 'z_coordinate' and centers.shape[1] != 1:
-		raise ValueError(f'z-coordinate HMM centers must be one-dimensional for k={artifact.k}')
 	if strat.get('z_axis') != 2:
 		raise ValueError(f'initial z_axis must be 2 for k={artifact.k}')
 	if not isinstance(strat.get('z_direction'), str):
@@ -1488,6 +1557,8 @@ def _prepare_generation_embeddings(
 		or descriptor.get('completion_status') != 'COMPLETE'
 	):
 		raise ValueError('current embedding descriptor is not COMPLETE')
+	if descriptor.get('embedding_semantics') != PERIODIC_REFRESH_EMBEDDING_SEMANTICS:
+		raise ValueError('current embedding descriptor embedding semantics are invalid')
 	if descriptor.get('source_student_state_sha256') != source_student_state_sha256:
 		raise ValueError('current embedding descriptor student-state hash mismatch')
 	outputs = _mapping(
@@ -1619,7 +1690,11 @@ def _validate_previous_lineage(
 			config.initial_hard_target_manifest
 		),
 		initial_hard_target_policy=asdict(config.target_policy),
-		fixed_identity=_fixed_identity_payload(models),
+		fixed_identity=_fixed_identity_payload(
+			models,
+			clustering_config=config.clustering_config,
+			source_embedding_metadata=config.source_embedding_metadata,
+		),
 	)
 
 
@@ -2139,7 +2214,11 @@ def _build_generation_manifest(
 		'initial_hard_target_manifest': _reference_payload(
 			config.initial_hard_target_manifest
 		),
-		'fixed_preprocessing_hmm_identity': _fixed_identity_payload(models),
+		'fixed_preprocessing_hmm_identity': _fixed_identity_payload(
+			models,
+			clustering_config=config.clustering_config,
+			source_embedding_metadata=config.source_embedding_metadata,
+		),
 		'initial_hard_target_policy': asdict(config.target_policy),
 		'previous_centers': {
 			str(item.k): _reference_payload(item.centers)
@@ -2229,6 +2308,10 @@ def _validate_persisted_embeddings(
 		or descriptor.get('completion_status') != 'COMPLETE'
 	):
 		raise ValueError('generation embedding descriptor is not COMPLETE')
+	if descriptor.get('embedding_semantics') != PERIODIC_REFRESH_EMBEDDING_SEMANTICS:
+		raise ValueError(
+			'generation embedding descriptor embedding semantics are invalid'
+		)
 	if descriptor.get('source_student_state_sha256') != expected_student_state_sha256:
 		raise ValueError('generation embedding descriptor student-state drift')
 	descriptor_outputs = _mapping(
@@ -2663,6 +2746,8 @@ def _validate_persisted_fixed_identity(
 	models: Sequence[_LoadedFixedHMM],
 ) -> None:
 	identity = _mapping(value, 'fixed preprocessing identity')
+	for name in ('clustering_config', 'source_embedding_metadata'):
+		_validate_reference_payload(identity[name], f'fixed {name}')
 	if _jsonable(identity.get('normalized')) != _jsonable(
 		models[0].normalized_identity
 	):

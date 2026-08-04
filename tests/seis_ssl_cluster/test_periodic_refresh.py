@@ -46,11 +46,11 @@ def test_periodic_refresh_publishes_valid_generation_and_reuses_unchanged_output
 	manifest_mtime = result.manifest_path.stat().st_mtime_ns
 
 	assert result.reused is False
-	assert result.generation_dir.name == 'refresh_0001_epoch003'
+	assert result.generation_dir.name == 'refresh_0001_epoch002'
 	payload = load_periodic_refresh_generation(result.manifest_path)
 	assert payload['status'] == 'COMPLETE'
 	assert payload['generation_index'] == 1
-	assert payload['refresh_after_epoch'] == 3
+	assert payload['refresh_after_epoch'] == 2
 	assert payload['initial_hard_target_policy'] == {
 		'confidence_mode': 'constant',
 		'confidence': 1.0,
@@ -153,12 +153,60 @@ def test_periodic_refresh_requires_immediate_previous_generation(
 	stale_config = replace(
 		config,
 		generation_index=2,
-		refresh_after_epoch=4,
-		output_generation_dir=tmp_path / 'generations' / 'refresh_0002_epoch004',
+		refresh_after_epoch=5,
+		output_generation_dir=tmp_path / 'generations' / 'refresh_0002_epoch005',
 	)
 	with pytest.raises(ValueError, match='exactly one less'):
 		produce_periodic_refresh_generation(stale_config)
 	assert not stale_config.output_generation_dir.exists()
+
+
+def test_periodic_refresh_rejects_unscheduled_epoch(tmp_path: Path) -> None:
+	config = _write_fixture(tmp_path)
+	unscheduled_config = replace(
+		config,
+		refresh_after_epoch=3,
+		output_generation_dir=tmp_path / 'generations' / 'refresh_0001_epoch003',
+	)
+	with pytest.raises(ValueError, match='exact refresh schedule'):
+		produce_periodic_refresh_generation(unscheduled_config)
+
+
+def test_periodic_refresh_requires_current_student_embedding_semantics(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	descriptor_path = config.current_embedding_descriptor.path
+	descriptor = json.loads(descriptor_path.read_text(encoding='utf-8'))
+	descriptor['embedding_semantics'] = 'masked_student_embedding_v1'
+	descriptor_path.write_text(
+		json.dumps(descriptor, sort_keys=True) + '\n', encoding='utf-8'
+	)
+	invalid_config = replace(
+		config,
+		current_embedding_descriptor=_reference(descriptor_path),
+	)
+	with pytest.raises(ValueError, match='embedding semantics'):
+		produce_periodic_refresh_generation(invalid_config)
+
+
+def test_periodic_refresh_requires_embedding_hmm_emission_source(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	artifact = config.initial_hmm_artifacts[0]
+	model = joblib.load(artifact.hmm_model.path)
+	model['emission_source'] = 'z_coordinate'
+	joblib.dump(model, artifact.hmm_model.path)
+	invalid_artifact = replace(artifact, hmm_model=_reference(artifact.hmm_model.path))
+	invalid_config = replace(
+		config,
+		initial_hmm_artifacts=(invalid_artifact, *config.initial_hmm_artifacts[1:]),
+	)
+	with pytest.raises(ValueError, match='emission_source must be embedding'):
+		periodic_refresh._load_fixed_hmm(  # noqa: SLF001
+			invalid_config.initial_hmm_artifacts[0]
+		)
 
 
 def test_periodic_refresh_persists_arbitrary_descriptor_name(tmp_path: Path) -> None:
@@ -318,6 +366,9 @@ def _write_fixture(
 		edge_margin=edge_margin,
 		target_policy=target_policy,
 	)
+	clustering_config = tmp_path / 'initial_clustering.yaml'
+	clustering_config.write_text('clustering: {}\n', encoding='utf-8')
+	source_embedding_metadata = embedding_root / 'survey.embedding_metadata.json'
 	artifacts, previous_centers = _write_hmm_artifacts(
 		tmp_path, embeddings=embeddings, edge_margin=edge_margin
 	)
@@ -325,20 +376,24 @@ def _write_fixture(
 		InitialPeriodicRefreshConfig(
 			initial_hard_target_manifest=_reference(initial_manifest),
 			initial_hmm_artifacts=artifacts,
+			clustering_config=_reference(clustering_config),
+			source_embedding_metadata=_reference(source_embedding_metadata),
 			output_generation_dir=tmp_path / 'generations' / 'refresh_0000_initial',
 			target_policy=target_policy,
 		)
 	)
 	return PeriodicRefreshConfig(
 		generation_index=1,
-		refresh_after_epoch=3,
+		refresh_after_epoch=2,
 		source_student_state_sha256=state_hash,
 		previous_generation_manifest=_reference(initial_result.manifest_path),
 		current_embedding_descriptor=_reference(descriptor),
 		initial_hard_target_manifest=_reference(initial_manifest),
 		initial_hmm_artifacts=artifacts,
+		clustering_config=_reference(clustering_config),
+		source_embedding_metadata=_reference(source_embedding_metadata),
 		previous_centers=previous_centers,
-		output_generation_dir=tmp_path / 'generations' / 'refresh_0001_epoch003',
+		output_generation_dir=tmp_path / 'generations' / 'refresh_0001_epoch002',
 		target_policy=target_policy,
 		prediction_batch_size=4,
 	)
@@ -358,6 +413,7 @@ def _write_embedding_descriptor(
 		'schema_version': 1,
 		'status': 'COMPLETE',
 		'completion_status': 'COMPLETE',
+		'embedding_semantics': 'current_student_unmasked_eval_full_survey_v1',
 		'source_student_state_sha256': state_hash,
 		'outputs': {
 			'survey': {
