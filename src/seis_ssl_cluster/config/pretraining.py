@@ -281,7 +281,7 @@ PERIODIC_REFRESH_INITIAL_ARTIFACT_COMMON_KEYS = frozenset(
 	}
 )
 PERIODIC_REFRESH_INITIAL_ARTIFACT_HEAD_KEYS = frozenset(
-	{'model_metadata', 'centers'}
+	{'model_metadata', 'hmm_model', 'centers'}
 )
 PERIODIC_REFRESH_CONFIG_KEYS = frozenset(
 	{
@@ -665,7 +665,7 @@ def resolve_mae_training_config(config: _T) -> Config:
 	return resolved
 
 
-def resolve_strat_hmm_pretext_config(  # noqa: PLR0915
+def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0915
 	config: _T,
 ) -> Config:
 	"""Validate and resolve raw config for strat HMM pretext training."""
@@ -707,6 +707,12 @@ def resolve_strat_hmm_pretext_config(  # noqa: PLR0915
 	_validate_divisible_crop_patch(local_crop_size, patch_size)
 	_validate_strat_hmm_pretext_pseudo_targets(pseudo_targets, multi_head=multi_head)
 	if 'pseudo_target_refresh' in resolved:
+		if _is_periodic_refresh_config(resolved) and not isinstance(
+			resolved.get('identity'), Mapping
+		):
+			raise ValueError(
+				'periodic refresh requires the top-level scientific identity section'
+			)
 		periodic_refresh_identity = _validate_periodic_refresh_config(
 			_required_mapping(resolved, 'pseudo_target_refresh'),
 			output_root=output_root,
@@ -888,7 +894,8 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		raised = sorted(set(refresh) - {'enabled'})
 		if raised:
 			raise ValueError(
-				'pseudo_target_refresh policy fields are not allowed when disabled: '
+				'pseudo_target_refresh policy fields are not allowed '
+				'when disabled: '
 				f'{raised!r}'
 			)
 		return None
@@ -1096,6 +1103,11 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			'model_metadata',
 			prefix=f'pseudo_target_refresh.initial_hmm_artifacts.heads.{key}',
 		)
+		hmm_model_path = _validate_absolute_path(
+			head_entry,
+			'hmm_model',
+			prefix=f'pseudo_target_refresh.initial_hmm_artifacts.heads.{key}',
+		)
 		centers_path = _validate_absolute_path(
 			head_entry,
 			'centers',
@@ -1103,6 +1115,7 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		)
 		for label, path in (
 			('model_metadata', metadata_path),
+			('hmm_model', hmm_model_path),
 			('centers', centers_path),
 		):
 			if not path.is_file():
@@ -1146,6 +1159,7 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		metadata_identities.append(metadata_identity)
 		initial_heads[key] = {
 			'model_metadata': _artifact_reference(metadata_path),
+			'hmm_model': _artifact_reference(hmm_model_path),
 			'centers': _artifact_reference(centers_path),
 		}
 	if len(feature_dimensions) != 1:

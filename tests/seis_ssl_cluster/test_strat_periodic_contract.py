@@ -128,8 +128,17 @@ def _periodic_config(tmp_path: Path) -> dict[str, object]:
 		)
 		centers = head_root / 'centers.npy'
 		np.save(centers, np.zeros((k, 3), dtype=np.float32), allow_pickle=False)
+		hmm_model = head_root / 'hmm_model.joblib'
+		joblib.dump(
+			{
+				'emission_source': 'embedding',
+				'centers': np.zeros((k, 3), dtype=np.float32),
+			},
+			hmm_model,
+		)
 		initial_heads[str(k)] = {
 			'model_metadata': str(model_metadata),
+			'hmm_model': str(hmm_model),
 			'centers': str(centers),
 		}
 
@@ -231,6 +240,23 @@ def test_periodic_config_resolves_with_full_scientific_identity(
 	assert scientific['target_activation_policy'] == (  # type: ignore[index]
 		'atomic_next_epoch_activation_v1'
 	)
+
+
+def test_periodic_config_requires_scientific_identity(tmp_path: Path) -> None:
+	config = _periodic_config(tmp_path)
+	del config['identity']
+
+	with pytest.raises(ValueError, match='top-level scientific identity'):
+		resolve_strat_hmm_pretext_config(config)
+
+
+def test_periodic_config_requires_initial_hmm_model_artifacts(tmp_path: Path) -> None:
+	config = _periodic_config(tmp_path)
+	head = config['pseudo_target_refresh']['initial_hmm_artifacts']['heads']['6']  # type: ignore[index]
+	del head['hmm_model']
+
+	with pytest.raises(ValueError, match='hmm_model is required'):
+		resolve_strat_hmm_pretext_config(config)
 
 
 def test_periodic_initial_artifacts_bind_centers_to_feature_dimension(

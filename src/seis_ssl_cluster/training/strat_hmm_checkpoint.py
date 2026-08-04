@@ -71,7 +71,7 @@ class StratRollingCheckpointResult:
 	"""Result of a rolling strat HMM checkpoint write."""
 
 	latest_path: Path
-	best_path: Path
+	best_path: Path | None
 	best_score: float | None
 	best_updated: bool
 	checkpoint_selection: Mapping[str, object] | None = None
@@ -498,6 +498,11 @@ def _save_periodic_refresh_rolling_checkpoint(  # noqa: PLR0913
 	"""Write periodic rolling state without loss-based model selection."""
 	if best_score is not None:
 		raise ValueError('periodic refresh checkpoints do not accept best_score')
+	best_path = checkpoint_root / 'best.pt'
+	if best_path.exists() or best_path.is_symlink():
+		raise ValueError(
+			'periodic refresh checkpoint root must not contain best.pt'
+		)
 	if target_refresh_state is None:
 		raise ValueError('periodic refresh rolling checkpoint requires refresh state')
 	refresh_state = _validated_target_refresh_state(
@@ -543,7 +548,7 @@ def _save_periodic_refresh_rolling_checkpoint(  # noqa: PLR0913
 	)
 	return StratRollingCheckpointResult(
 		latest_path=latest_path,
-		best_path=checkpoint_root / 'best.pt',
+		best_path=None,
 		best_score=None,
 		best_updated=False,
 		checkpoint_selection=selection,
@@ -2499,6 +2504,7 @@ def _validate_periodic_refresh_state_against_config(  # noqa: C901, PLR0912, PLR
 			configured_head = _required_mapping(configured_heads, k)
 			for artifact_key, configured_key in (
 				('centers', 'centers'),
+				('hmm_model', 'hmm_model'),
 				('metadata', 'model_metadata'),
 			):
 				artifact_ref = _required_mapping(

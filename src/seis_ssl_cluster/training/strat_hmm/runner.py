@@ -1,5 +1,7 @@
 """Runner for stratigraphic HMM pretext training."""
 
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
 import csv
@@ -11,6 +13,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 import torch
 
+from seis_ssl_cluster.config.pretraining import _is_periodic_refresh_config
 from seis_ssl_cluster.data import (
 	NopimsStratMultiHeadPosteriorDataset,
 	NopimsStratMultiHeadTargetDataset,
@@ -298,7 +301,11 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		completed_epoch=True,
 	)
 	checkpoint_path: Path | None = None
-	best_score = _load_existing_best_score(output_root) if resume is not None else None
+	best_score = (
+		_load_existing_best_score(output_root)
+		if resume is not None and not _is_periodic_refresh_config(config)
+		else None
+	)
 	checkpoint_selection: Mapping[str, object] | None = None
 	if resume is not None and is_multi_head:
 		checkpoint_selection = load_checkpoint(resume, map_location='cpu').get(
