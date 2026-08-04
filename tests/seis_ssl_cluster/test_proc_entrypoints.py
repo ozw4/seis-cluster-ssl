@@ -260,6 +260,13 @@ HELP_FLAG_CONTRACTS = {
 		'--only-missing',
 		'--quarantine-invalid',
 	),
+	'validate_f3_center_trace_masked_periodic_refresh.py': (
+		'--config',
+		'--phase',
+		'--dry-run',
+		'--only-missing',
+		'--quarantine-invalid',
+	),
 	'publish_f3_center_trace_masked_pretraining_results.py': (
 		'--artifact-root',
 		'--workspace-root',

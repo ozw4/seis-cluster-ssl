@@ -26,19 +26,31 @@ from seis_ssl_cluster.config.pretraining import (
 	_multi_head_target_hashes,
 	resolve_strat_hmm_pretext_config,
 )
+from seis_ssl_cluster.data import (
+	GRID_ORDER_XYZ,
+	AmplitudeVolumeRecord,
+	SurveyManifest,
+	SurveyNormalizationStats,
+	write_manifest_json,
+	write_normalization_stats,
+)
 from seis_ssl_cluster.embedding import REFRESH_EXTRACTION_DESCRIPTOR_NAME
+from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 from seis_ssl_cluster.stratigraphy.periodic_refresh import (
 	HardTargetPolicy,
 	HashedArtifactReference,
 )
-from seis_ssl_cluster.training.checkpoint import capture_rng_state
+from seis_ssl_cluster.training.checkpoint import capture_rng_state, load_checkpoint
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	_validated_periodic_checkpoint_selection,
 	inspect_stratigraphy_checkpoint,
 )
 from tests.seis_ssl_cluster.test_config_strat_hmm_multi_head import (
 	_multi_head_config,
+)
+from tests.seis_ssl_cluster.test_random_mae_checkpoint import (
+	_reference_checkpoint_config,
 )
 
 
@@ -520,6 +532,314 @@ def test_periodic_runner_uses_exact_refresh_schedule() -> None:
 		if runner_module._periodic_scheduled_epoch(epoch)  # noqa: SLF001
 	] == [2, 5, 8, 11, 14, 17, 20]
 	assert not runner_module._periodic_scheduled_epoch(25)  # noqa: SLF001
+
+
+def test_periodic_runner_executes_real_refresh_with_synthetic_artifacts(  # noqa: PLR0915
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	"""Exercise one real refresh through the runner and reload the next epoch."""
+	config = _periodic_config(tmp_path)
+	initial_target = Path(config['pseudo_targets']['manifest'])  # type: ignore[index]
+	amplitude_path = tmp_path / 'amplitude.npy'
+	np.save(
+		amplitude_path,
+		np.arange(48, dtype=np.float32).reshape(2, 2, 12),
+		allow_pickle=False,
+	)
+	stats_path = tmp_path / 'normalization_stats.json'
+	write_normalization_stats(
+		SurveyNormalizationStats(
+			survey_id='survey',
+			source_path=amplitude_path,
+			grid_order=GRID_ORDER_XYZ,
+			clip_low_percentile=0.0,
+			clip_high_percentile=100.0,
+			clip_low=-100.0,
+			clip_high=100.0,
+			median=0.0,
+			iqr=1.0,
+		),
+		stats_path,
+	)
+	train_manifest = tmp_path / 'train_manifest.json'
+	write_manifest_json(
+		[
+			SurveyManifest(
+				survey_id='survey',
+				root=tmp_path,
+				amplitude=AmplitudeVolumeRecord(
+					survey_id='survey',
+					path=amplitude_path,
+					shape_xyz=(2, 2, 12),
+					dtype='float32',
+					grid_order=GRID_ORDER_XYZ,
+					normalization_stats_path=stats_path,
+				),
+			),
+		],
+		train_manifest,
+	)
+	config['manifests']['train'] = str(train_manifest)  # type: ignore[index]
+	config['manifests']['train_path_list'] = str(tmp_path / 'train_paths.txt')  # type: ignore[index]
+	Path(config['manifests']['train_path_list']).write_text(  # type: ignore[index]
+		f'{amplitude_path}\n', encoding='utf-8'
+	)
+	config['data'].update(  # type: ignore[index]
+		{
+			'local_crop_size': [2, 2, 12],
+			'min_valid_fraction': 0.0,
+			'max_resample_attempts': 4,
+			'normalized_clip_abs': 100.0,
+			'amplitude_agc': {'enabled': False},
+			'finite_check_mode': 'strict',
+		}
+	)
+	config['model'].update(  # type: ignore[index]
+		{
+			'patch_size': [1, 1, 1],
+			'encoder_dim': 3,
+			'encoder_depth': 1,
+			'encoder_heads': 1,
+			'decoder_dim': 3,
+			'decoder_depth': 1,
+			'decoder_heads': 1,
+		}
+	)
+	config['train'].update(  # type: ignore[index]
+		{
+			'batch_size': 1,
+			'samples_per_epoch': 1,
+			'epochs': 25,
+			'max_steps': 3,
+			'num_workers': 0,
+			'shuffle': False,
+			'device': 'cpu',
+			'seed': 7,
+			'lr': 1.0e-4,
+			'encoder_lr': 1.0e-4,
+			'weight_decay': 0.0,
+			'amp': False,
+			'grad_clip_norm': 1.0,
+		}
+	)
+	transition = {
+		'same_cost': 0.0,
+		'advance_cost': 0.0,
+		'jump_cost': 0.0,
+		'reverse_cost': 0.0,
+		'forbid_reverse': False,
+		'max_jump': None,
+	}
+	path_prior = {
+		'enabled': False,
+		'initial_state': {'mode': 'none', 'weight': 0.0},
+		'terminal_state': {'mode': 'none', 'weight': 0.0},
+		'expected_boundaries': {
+			'enabled': False,
+			'target': 'auto_k_minus_1',
+			'weight': 0.0,
+		},
+	}
+	initial_heads = config['pseudo_target_refresh']['initial_hmm_artifacts'][  # type: ignore[index]
+		'heads'
+	]
+	for raw_k, raw_head in initial_heads.items():  # type: ignore[union-attr]
+		k = int(raw_k)
+		head = raw_head  # type: ignore[assignment]
+		hmm_path = Path(head['hmm_model'])  # type: ignore[index]
+		joblib.dump(
+			{
+				'emission_source': 'embedding',
+				'centers': np.zeros((k, 3), dtype=np.float32),
+				'transition_settings': transition,
+				'edge_margin_tokens': [0, 0, 0],
+				'path_prior': path_prior,
+				'transition_costs': np.zeros((k, k), dtype=np.float32),
+				'initial_state_costs': np.zeros(k, dtype=np.float32),
+				'terminal_state_costs': np.zeros(k, dtype=np.float32),
+			},
+			hmm_path,
+		)
+		metadata_path = Path(head['model_metadata'])  # type: ignore[index]
+		metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+		stratigraphic_hmm = metadata['stratigraphic_hmm']
+		stratigraphic_hmm.update(
+			{
+				'transition': transition,
+				'transition_costs': [[0.0] * k for _ in range(k)],
+				'path_prior': {
+					**path_prior,
+					'initial_state_costs': [0.0] * k,
+					'terminal_state_costs': [0.0] * k,
+				},
+			}
+		)
+		stratigraphic_hmm['prepared_feature_cache'].update(
+			{
+				'chunk_size_tokens': 4,
+				'reuse': False,
+				'force_rebuild': False,
+				'cleanup': False,
+				'persist': True,
+				'directory': str(tmp_path / 'external_prepared_cache'),
+			}
+		)
+		metadata_path.write_text(
+			json.dumps(metadata, sort_keys=True) + '\n', encoding='utf-8'
+		)
+
+	checkpoint_config = _reference_checkpoint_config(tmp_path)
+	checkpoint_config['paths']['output_root'] = str(tmp_path / 'teacher_run')  # type: ignore[index]
+	checkpoint_config['manifests']['train'] = str(train_manifest)  # type: ignore[index]
+	checkpoint_config['manifests']['train_path_list'] = str(  # type: ignore[index]
+		tmp_path / 'train_paths.txt'
+	)
+	checkpoint_config['data'].update(  # type: ignore[index]
+		{
+			'local_crop_size': [2, 2, 12],
+			'min_valid_fraction': 0.0,
+			'normalized_clip_abs': 100.0,
+			'amplitude_agc': {'enabled': False},
+		}
+	)
+	checkpoint_config['model'].update(  # type: ignore[index]
+		{
+			'patch_size': [1, 1, 1],
+			'encoder_dim': 3,
+			'encoder_depth': 1,
+			'encoder_heads': 1,
+			'decoder_dim': 3,
+			'decoder_depth': 1,
+			'decoder_heads': 1,
+		}
+	)
+	teacher = AmplitudeMAE3D(
+		in_channels=1,
+		out_channels=1,
+		patch_size_xyz=(1, 1, 1),
+		encoder_dim=3,
+		encoder_depth=1,
+		encoder_heads=1,
+		decoder_dim=3,
+		decoder_depth=1,
+		decoder_heads=1,
+	)
+	with torch.inference_mode():
+		feature_rows = []
+		for value in range(48):
+			window = torch.tensor([[[[[float(value)]]]]])
+			encoded = teacher.encode_tokens(
+				window, valid_mask=torch.ones((1, 1, 1, 1), dtype=torch.bool)
+			)
+			feature_rows.append(encoded['tokens'].reshape(-1, 3)[0].numpy())
+	feature_rows_array = np.asarray(feature_rows, dtype=np.float32)
+	for raw_k, raw_head in initial_heads.items():  # type: ignore[union-attr]
+		k = int(raw_k)
+		head = raw_head  # type: ignore[assignment]
+		centers = feature_rows_array[np.linspace(0, 47, k, dtype=int)]
+		centers_path = Path(head['centers'])  # type: ignore[index]
+		np.save(centers_path, centers, allow_pickle=False)
+		hmm_path = Path(head['hmm_model'])  # type: ignore[index]
+		hmm_model = joblib.load(hmm_path)
+		hmm_model['centers'] = centers
+		joblib.dump(hmm_model, hmm_path)
+	teacher_path = tmp_path / 'teacher.pt'
+	torch.save(
+		{'model_state_dict': teacher.state_dict(), 'config': checkpoint_config},
+		teacher_path,
+	)
+	config['teacher'] = {'checkpoint': str(teacher_path)}
+	config['student'] = {'unfreeze_top_blocks': 1}
+	resolved_config = resolve_strat_hmm_pretext_config(config)
+
+	build_calls: list[Path | None] = []
+	original_build = runner_module._build_strat_hmm_dataset_and_dataloader  # noqa: SLF001
+
+	def record_build(**kwargs: object) -> tuple[object, torch.utils.data.DataLoader]:
+		target_override = kwargs.get('target_manifest_override')
+		build_calls.append(
+			None if target_override is None else Path(str(target_override))
+		)
+		return original_build(**kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(
+		runner_module, '_build_strat_hmm_dataset_and_dataloader', record_build
+	)
+	extraction_calls: list[Path] = []
+	original_extract = runner_module.extract_embeddings_from_loaded_model
+
+	def record_extract(*args: object, **kwargs: object) -> object:
+		extraction_calls.append(Path(str(args[2])))
+		return original_extract(*args, **kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(
+		runner_module, 'extract_embeddings_from_loaded_model', record_extract
+	)
+	latest_path = runner_module.run_strat_hmm_pretext_training(resolved_config)
+	assert latest_path == (
+		Path(str(resolved_config['paths']['output_root'])) / 'latest.pt'  # type: ignore[index]
+	)
+	checkpoint_path = latest_path
+	assert checkpoint_path.name == 'latest.pt'
+	payload_checkpoint = load_checkpoint(checkpoint_path, map_location='cpu')
+	inspection = inspect_stratigraphy_checkpoint(payload_checkpoint)
+	assert inspection['stratigraphy_checkpoint']['schema_version'] == 8  # type: ignore[index]
+	assert payload_checkpoint['epoch'] == 3
+	assert payload_checkpoint['global_step'] == 3
+	assert payload_checkpoint['target_refresh_state']['active_generation_id'] == (  # type: ignore[index]
+		'refresh_0001_epoch002'
+	)
+	assert not checkpoint_path.with_name('selected.pt').exists()
+	assert build_calls == [
+		Path(str(initial_target)).resolve(),
+		(
+			Path(str(resolved_config['pseudo_target_refresh']['generation_root']))  # type: ignore[index]
+			/ 'generations'
+			/ 'refresh_0001_epoch002'
+			/ 'pseudo_targets'
+			/ 'multi_head_target_manifest.json'
+		).resolve(),
+	]
+	assert len(extraction_calls) == 1
+	manifest_path = Path(
+		str(payload_checkpoint['target_refresh_state']['active_generation_manifest_path'])  # type: ignore[index]
+	)
+	payload = runner_module.load_periodic_refresh_generation(manifest_path)
+	assert payload['status'] == 'COMPLETE'
+	assert payload['iterations'] == 2
+	diagnostics = json.loads(
+		Path(str(payload['refresh_diagnostics']['path'])).read_text(  # type: ignore[index]
+			encoding='utf-8'
+		)
+	)
+	assert len(diagnostics['per_k']['6']['iterations']) == 2
+	assert Path(str(payload['embeddings']['descriptor']['path'])).is_file()  # type: ignore[index]
+	refresh_root = Path(
+		str(resolved_config['pseudo_target_refresh']['generation_root'])  # type: ignore[index]
+	)
+	chain = json.loads(
+		(refresh_root / 'periodic_refresh_chain.json').read_text(
+			encoding='utf-8'
+		)
+	)
+	assert [item['generation_id'] for item in chain['generations']] == [  # type: ignore[index]
+		'refresh_0000_initial',
+		'refresh_0001_epoch002',
+	]
+	events = [
+		json.loads(line)
+		for line in (
+			Path(str(resolved_config['paths']['output_root']))  # type: ignore[index]
+			/ 'target_refresh_events.jsonl'
+		)
+		.read_text(encoding='utf-8')
+		.splitlines()
+	]
+	assert any(
+		item['event_type'] == 'refresh' and item['status'] == 'complete'
+		for item in events
+	)
 
 
 def test_periodic_recovered_epoch_metrics_ignore_checkpoint_metadata() -> None:

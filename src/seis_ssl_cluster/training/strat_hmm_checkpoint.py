@@ -2737,14 +2737,14 @@ def _validate_periodic_refresh_state_against_config(  # noqa: C901, PLR0912, PLR
 						f'generation {index} initial HMM {k} {artifact_key} drift'
 					)
 			for artifact_key in ('clustering_config', 'source_embedding_metadata'):
-				artifact_ref = _required_mapping(
-					fixed_identity.get(artifact_key),
-					f'generation {index} fixed {artifact_key}',
-				)
-				configured_ref = _required_mapping(
-					configured_common.get(artifact_key),
-					f'initial_hmm_artifacts.common.{artifact_key}',
-				)
+				artifact_ref = fixed_identity.get(artifact_key)
+				configured_ref = configured_common.get(artifact_key)
+				if not isinstance(artifact_ref, Mapping) or not isinstance(
+					configured_ref, Mapping
+				):
+					raise TypeError(
+						f'generation {index} fixed {artifact_key} is invalid'
+					)
 				if dict(artifact_ref) != dict(configured_ref):
 					raise ValueError(
 						f'generation {index} fixed {artifact_key} drift'

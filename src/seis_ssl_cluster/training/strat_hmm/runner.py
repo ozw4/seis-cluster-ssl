@@ -401,9 +401,21 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				'active_generation_manifest_sha256': checkpoint_state[
 					'active_generation_manifest_sha256'
 				],
+				'active_generation_content_sha256': checkpoint_state[
+					'active_generation_content_sha256'
+				],
 				'active_target_manifest_sha256': checkpoint_state[
 					'active_target_manifest_sha256'
 				],
+				'source_student_state_sha256': checkpoint_state[
+					'source_student_state_sha256'
+				],
+				'student_state_sha256': _state_dict_sha256(
+					components.student.state_dict()
+				),
+				'optimizer_state_sha256': _optimizer_state_sha256(
+					components.optimizer
+				),
 				'refresh_phase': checkpoint_state['refresh_phase'],
 				'recovered_from_completed_step': True,
 			},
@@ -464,9 +476,21 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 					'active_generation_manifest_sha256': periodic_state[
 						'active_generation_manifest_sha256'
 					],
+					'active_generation_content_sha256': periodic_state[
+						'active_generation_content_sha256'
+					],
 					'active_target_manifest_sha256': periodic_state[
 						'active_target_manifest_sha256'
 					],
+					'source_student_state_sha256': periodic_state[
+						'source_student_state_sha256'
+					],
+					'student_state_sha256': _state_dict_sha256(
+						components.student.state_dict()
+					),
+					'optimizer_state_sha256': _optimizer_state_sha256(
+						components.optimizer
+					),
 					'refresh_phase': periodic_state['refresh_phase'],
 				},
 			)
@@ -567,6 +591,12 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 						'source_student_state_sha256': periodic_state[  # noqa: B023
 							'source_student_state_sha256'
 						],
+						'student_state_sha256': _state_dict_sha256(
+							components.student.state_dict()
+						),
+						'optimizer_state_sha256': _optimizer_state_sha256(
+							components.optimizer
+						),
 					},
 				)
 
@@ -653,6 +683,12 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 						'source_student_state_sha256': checkpoint_state[
 							'source_student_state_sha256'
 						],
+						'student_state_sha256': _state_dict_sha256(
+							components.student.state_dict()
+						),
+						'optimizer_state_sha256': _optimizer_state_sha256(
+							components.optimizer
+						),
 						'refresh_phase': checkpoint_state['refresh_phase'],
 					},
 				)
@@ -702,9 +738,21 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 							'active_generation_manifest_sha256': periodic_state[
 								'active_generation_manifest_sha256'
 							],
+							'active_generation_content_sha256': periodic_state[
+								'active_generation_content_sha256'
+							],
 							'active_target_manifest_sha256': periodic_state[
 								'active_target_manifest_sha256'
 							],
+							'source_student_state_sha256': periodic_state[
+								'source_student_state_sha256'
+							],
+							'student_state_sha256': _state_dict_sha256(
+								components.student.state_dict()
+							),
+							'optimizer_state_sha256': _optimizer_state_sha256(
+								components.optimizer
+							),
 							'refresh_phase': periodic_state['refresh_phase'],
 						},
 					)
@@ -1113,6 +1161,12 @@ def _periodic_refresh_mapping(
 	return value
 
 
+def _periodic_nested_mapping(value: object, name: str) -> Mapping[str, object]:
+	if not isinstance(value, Mapping):
+		raise TypeError(f'{name} must be a mapping')
+	return value
+
+
 def _periodic_initial_artifacts(
 	config: Mapping[str, object],
 ) -> tuple[
@@ -1165,25 +1219,39 @@ def _periodic_target_policy(
 	manifest_path: Path,
 ) -> HardTargetPolicy:
 	payload = load_multi_head_target_manifest(manifest_path)
-	heads = _mapping(payload['heads'], 'target manifest heads')
+	heads = _periodic_nested_mapping(
+		payload.get('heads'), 'target manifest heads'
+	)
 	confidence_values: list[float] = []
 	boundary_modes: set[bool] = set()
 	for k in CANONICAL_KS:
-		surveys = _mapping(
-			_mapping(heads[str(k)], f'target manifest k={k}')['surveys'],
-			f'target manifest k={k} surveys',
+		head = _periodic_nested_mapping(
+			heads.get(str(k)), f'target manifest k={k}'
+		)
+		surveys = _periodic_nested_mapping(
+			head.get('surveys'), f'target manifest k={k} surveys'
 		)
 		for survey_id, raw_entry in surveys.items():
-			entry = _mapping(raw_entry, f'target manifest k={k} {survey_id}')
+			entry = _periodic_nested_mapping(
+				raw_entry, f'target manifest k={k} {survey_id}'
+			)
 			refs = {
-				name: _mapping(entry[name], f'{k} {survey_id} {name}')
+				name: _periodic_nested_mapping(
+					entry.get(name), f'{k} {survey_id} {name}'
+				)
 				for name in ('labels', 'confidence', 'valid_tokens', 'metadata')
 			}
 			boundary = entry.get('boundary_weight')
 			boundary_ref = (
 				None
 				if boundary is None
-				else Path(str(_mapping(boundary, 'boundary_weight')['path']))
+				else Path(
+					str(
+						_periodic_nested_mapping(
+							boundary, 'boundary_weight'
+						)['path']
+					)
+				)
 			)
 			item = StratPseudoTargetInput(
 				survey_id=str(survey_id),
@@ -1277,7 +1345,11 @@ def _periodic_generation_record(manifest_path: Path) -> dict[str, object]:
 	previous_hash = (
 		None
 		if previous is None
-		else str(_mapping(previous, 'previous_generation_manifest')['sha256'])
+		else str(
+			_periodic_nested_mapping(
+				previous, 'previous_generation_manifest'
+			)['sha256']
+		)
 	)
 	source_hash = payload.get('source_student_state_sha256')
 	return {
@@ -1318,8 +1390,33 @@ def _periodic_chain_from_state(
 	for item in raw:
 		if not isinstance(item, Mapping):
 			raise TypeError('periodic refresh state generation must be a mapping')
-		result.append(dict(item))
+		manifest_path = Path(str(item.get('manifest_path'))).resolve()
+		record = _periodic_generation_record(manifest_path)
+		for key in (
+			'generation_index',
+			'generation_id',
+			'manifest_path',
+			'manifest_sha256',
+			'generation_content_sha256',
+		):
+			if item.get(key) != record[key]:
+				raise ValueError(
+					f'periodic refresh state generation {key} does not match manifest'
+				)
+		result.append(record)
 	return result
+
+
+def _periodic_state_generation_record(
+	record: Mapping[str, object],
+) -> dict[str, object]:
+	return {
+		'generation_index': record['generation_index'],
+		'generation_id': record['generation_id'],
+		'manifest_path': record['manifest_path'],
+		'manifest_sha256': record['manifest_sha256'],
+		'generation_content_sha256': record['generation_content_sha256'],
+	}
 
 
 def _periodic_fixed_identity_hash(config: Mapping[str, object]) -> str:
@@ -1413,8 +1510,8 @@ def _periodic_state_for_generation(  # noqa: PLR0913
 ) -> dict[str, object]:
 	active = generations[-1]
 	active_payload = load_periodic_refresh_generation(active_manifest)
-	target = _mapping(
-		active_payload['canonical_multi_head_target_manifest'],
+	target = _periodic_nested_mapping(
+		active_payload.get('canonical_multi_head_target_manifest'),
 		'active canonical target reference',
 	)
 	next_epoch = next(
@@ -1446,7 +1543,9 @@ def _periodic_state_for_generation(  # noqa: PLR0913
 		'fixed_preprocessing_hmm_identity_sha256': _periodic_fixed_identity_hash(
 			config
 		),
-		'generations': generations,
+		'generations': [
+			_periodic_state_generation_record(record) for record in generations
+		],
 	}
 
 
@@ -1498,10 +1597,9 @@ def _initialize_periodic_refresh_state(
 	else:
 		_json_write_atomic(chain_path, expected_chain)
 	pointer_path = refresh_root / 'active_target_generation.json'
-	initial_target = _mapping(
-		load_periodic_refresh_generation(initial_manifest)[
-			'canonical_multi_head_target_manifest'
-		],
+	initial_payload = load_periodic_refresh_generation(initial_manifest)
+	initial_target = _periodic_nested_mapping(
+		initial_payload.get('canonical_multi_head_target_manifest'),
 		'initial canonical target reference',
 	)
 	expected_pointer = {
@@ -1709,11 +1807,17 @@ def _periodic_previous_centers(
 	manifest_path: Path,
 ) -> tuple[PreviousCenterArtifact, ...]:
 	payload = load_periodic_refresh_generation(manifest_path)
-	centers = _mapping(payload['centers'], 'previous generation centers')
+	centers = _periodic_nested_mapping(
+		payload.get('centers'), 'previous generation centers'
+	)
 	result: list[PreviousCenterArtifact] = []
 	for k in CANONICAL_KS:
-		entry = _mapping(centers[str(k)], f'previous generation k={k} centers')
-		after = _mapping(entry['after'], f'previous generation k={k} after centers')
+		entry = _periodic_nested_mapping(
+			centers.get(str(k)), f'previous generation k={k} centers'
+		)
+		after = _periodic_nested_mapping(
+			entry.get('after'), f'previous generation k={k} after centers'
+		)
 		result.append(
 			PreviousCenterArtifact(
 				k=k,
@@ -1911,6 +2015,10 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				'generation_id': generation_id,
 				'refresh_epoch': refresh_epoch,
 				'source_student_state_sha256': student_hash,
+				'student_state_sha256': student_hash,
+				'optimizer_state_sha256': _optimizer_state_sha256(
+					components.optimizer
+				),
 				'active_generation_id_before': state['active_generation_id'],
 				'global_step_before': global_step,
 				'rng_before_sha256': _rng_state_hash(rng_before),
@@ -2010,6 +2118,12 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				'generation_id': new_state['active_generation_id'],
 				'refresh_epoch': refresh_epoch,
 				'source_student_state_sha256': student_hash,
+				'student_state_sha256': _state_dict_sha256(
+					components.student.state_dict()
+				),
+				'optimizer_state_sha256': _optimizer_state_sha256(
+					components.optimizer
+				),
 				'output_generation_manifest_path': new_state[
 					'active_generation_manifest_path'
 				],
@@ -2063,6 +2177,12 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					'generation_id': generation_id,
 					'refresh_epoch': refresh_epoch,
 					'source_student_state_sha256': student_hash,
+					'student_state_sha256': _state_dict_sha256(
+						components.student.state_dict()
+					),
+					'optimizer_state_sha256': _optimizer_state_sha256(
+						components.optimizer
+					),
 					'active_generation_id_after': (
 						generation_id
 						if pointer_before != old_pointer
@@ -2363,7 +2483,7 @@ def _parameter_sha256(
 		digest.update(name.encode('utf-8'))
 		digest.update(str(value.dtype).encode('utf-8'))
 		digest.update(str(tuple(value.shape)).encode('utf-8'))
-		digest.update(value.view(torch.uint8).numpy().tobytes())
+		digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
 		result[name] = digest.hexdigest()
 	return result
 
@@ -2376,8 +2496,38 @@ def _state_dict_sha256(state_dict: Mapping[str, torch.Tensor]) -> str:
 		digest.update(name.encode('utf-8'))
 		digest.update(str(value.dtype).encode('utf-8'))
 		digest.update(str(tuple(value.shape)).encode('utf-8'))
-		digest.update(value.view(torch.uint8).numpy().tobytes())
+		digest.update(value.reshape(-1).view(torch.uint8).numpy().tobytes())
 	return digest.hexdigest()
+
+
+def _optimizer_state_sha256(optimizer: torch.optim.Optimizer) -> str:
+	"""Hash optimizer state deterministically for refresh-continuity events."""
+	digest = hashlib.sha256()
+	_update_optimizer_hash(digest, optimizer.state_dict())
+	return digest.hexdigest()
+
+
+def _update_optimizer_hash(digest: hashlib._Hash, value: object) -> None:
+	if isinstance(value, torch.Tensor):
+		tensor = value.detach().cpu().contiguous()
+		digest.update(b'tensor')
+		digest.update(str(tensor.dtype).encode('utf-8'))
+		digest.update(str(tuple(tensor.shape)).encode('utf-8'))
+		digest.update(tensor.reshape(-1).view(torch.uint8).numpy().tobytes())
+		return
+	if isinstance(value, Mapping):
+		digest.update(b'mapping')
+		for key in sorted(value, key=lambda item: (type(item).__name__, repr(item))):
+			_update_optimizer_hash(digest, key)
+			_update_optimizer_hash(digest, value[key])
+		return
+	if isinstance(value, list | tuple):
+		digest.update(b'list' if isinstance(value, list) else b'tuple')
+		for child in value:
+			_update_optimizer_hash(digest, child)
+		return
+	digest.update(type(value).__name__.encode('utf-8'))
+	digest.update(repr(value).encode('utf-8'))
 
 
 __all__ = ['inspect_strat_hmm_pretext_plan', 'run_strat_hmm_pretext_training']

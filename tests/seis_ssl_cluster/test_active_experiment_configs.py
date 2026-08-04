@@ -102,6 +102,9 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_F3_TOKENIZATION_PREVIEW,
 )
 from seis_ssl_cluster.embedding.extractor import extraction_settings_from_config
+from seis_ssl_cluster.f3.center_trace_masked_periodic_refresh_validation import (
+	load_f3_center_trace_masked_periodic_refresh_validation_config,
+)
 from seis_ssl_cluster.f3.lithology.guardrails import (
 	f3_shuffled_hmm_target_config_from_mapping,
 )
@@ -204,6 +207,22 @@ F3_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_ROOT = (
 F3_STRAT_HMM_CENTER_TRACE_MASKED_ROOT = (
 	F3_ROOT / '104_strat_hmm_multi_head_k6810_center_trace_masked_v1'
 )
+F3_STRAT_HMM_PERIODIC_REFRESH_ROOT = (
+	F3_ROOT
+	/ '107_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_v1'
+)
+F3_STRAT_HMM_PERIODIC_REFRESH_PRETEXT_CONFIGS = [
+	F3_STRAT_HMM_PERIODIC_REFRESH_ROOT / '01_train_periodic_refresh_smoke.yaml',
+	F3_STRAT_HMM_PERIODIC_REFRESH_ROOT / '02_train_periodic_refresh_full.yaml',
+]
+F3_STRAT_HMM_PERIODIC_REFRESH_EMBEDDING_CONFIGS = [
+	F3_STRAT_HMM_PERIODIC_REFRESH_ROOT
+	/ '03_extract_periodic_refresh_embeddings.yaml',
+]
+F3_STRAT_HMM_PERIODIC_REFRESH_VALIDATION_CONFIGS = [
+	F3_STRAT_HMM_PERIODIC_REFRESH_ROOT
+	/ '04_validate_periodic_refresh_pretraining.yaml',
+]
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
@@ -479,6 +498,14 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 		'f3 strat hmm center-trace masked validation',
 		F3_STRAT_HMM_CENTER_TRACE_MASKED_VALIDATION_CONFIGS,
 	),
+	(
+		'f3 strat hmm periodic refresh pretext',
+		F3_STRAT_HMM_PERIODIC_REFRESH_PRETEXT_CONFIGS,
+	),
+	(
+		'f3 strat hmm periodic refresh validation',
+		F3_STRAT_HMM_PERIODIC_REFRESH_VALIDATION_CONFIGS,
+	),
 	('f3 strat hmm shuffled targets', F3_STRAT_HMM_SHUFFLED_TARGET_CONFIGS),
 	(
 		'f3 strat hmm student embedding',
@@ -696,6 +723,7 @@ def test_active_f3_prepare_configs_resolve(config_path: Path) -> None:
 		*F3_EMBEDDING_CONFIGS,
 		*F3_RANDOM_ENCODER_EMBEDDING_CONFIGS,
 		*F3_STRAT_HMM_STUDENT_EMBEDDING_CONFIGS,
+		*F3_STRAT_HMM_PERIODIC_REFRESH_EMBEDDING_CONFIGS,
 	],
 )
 def test_active_f3_embedding_configs_resolve(
@@ -947,6 +975,34 @@ def test_active_f3_center_trace_masked_validation_configs_load(
 		'center_trace_masked_full_config',
 		'center_trace_masked_embedding_config',
 	}
+
+
+def test_active_f3_periodic_refresh_configs_resolve(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	artifact_root = Path('/workspace/artifacts/seis_ssl_cluster')
+	target = artifact_root / (
+		'pseudo_targets/f3/facies_benchmark_v1/'
+		'strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/'
+		'multi_head_target_manifest.json'
+	)
+	if not target.is_file():
+		pytest.skip('real F3 periodic-refresh artifacts are not available')
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_WORKSPACE', '/workspace')
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str(artifact_root))
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256',
+		file_sha256(target),
+	)
+	for path in F3_STRAT_HMM_PERIODIC_REFRESH_PRETEXT_CONFIGS:
+		resolved = resolve_strat_hmm_pretext_config(load_config(path))
+		assert resolved['identity']['model_tag'].endswith('distill_v1')
+	for path in F3_STRAT_HMM_PERIODIC_REFRESH_EMBEDDING_CONFIGS:
+		resolved = resolve_embedding_extraction_config(load_config(path))
+		assert Path(resolved['embeddings']['checkpoint']).name == 'selected.pt'
+	for path in F3_STRAT_HMM_PERIODIC_REFRESH_VALIDATION_CONFIGS:
+		resolved = load_f3_center_trace_masked_periodic_refresh_validation_config(path)
+		assert resolved.target_manifest == target.resolve()
 
 
 def test_active_f3_m5_ls_config_contract(

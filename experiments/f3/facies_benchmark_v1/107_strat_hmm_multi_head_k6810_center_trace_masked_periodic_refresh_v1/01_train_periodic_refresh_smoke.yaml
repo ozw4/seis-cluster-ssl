@@ -1,0 +1,89 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1_smoke_cpu_2step
+identity:
+  model_tag: strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1
+  scientific_identity:
+    experiment_role: multi_head_center_trace_masked_periodic_hmm_refresh_hard_pretext
+    variant: ctmask010_refresh3ep_hmm2_nocons
+    model_role: mh_ctmask010_refresh3ep_hmm2_nocons
+    head_spec: multi_resolution_ordered_prototypes_v1
+    head_ks: [6, 8, 10]
+    target_representation: hard_viterbi_labels_v1
+    target_manifest_sha256: ${SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256}
+    target_head_hashes:
+      '6': {f3_facies_benchmark: {labels: 87a3ea23cb142d6e77acd3b63c6c4ca87250d82c99aabad152c9cd8e8c2c5e19, confidence: ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2, valid_tokens: b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526, metadata: 2ec01e32372682c2abd308f5aa318e9d708bdab940aedae3f9a3606790d1e362}}
+      '8': {f3_facies_benchmark: {labels: 28c48c6dc19db55553b555f4494cfcfebb0cdce13557a1471ed0635ac1f3087d, confidence: ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2, valid_tokens: b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526, metadata: c8c004e871e0588abe801c1ab6ba5a6df8e5d62e8ae88aa550d0cb85d9b90c33}}
+      '10': {f3_facies_benchmark: {labels: 13fbd90858a3862c92d27fecaee74f356b9c2c5dab4613d5732f759cb889707c, confidence: ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2, metadata: 93bc962e290679749095e4b72bed9ea42fe030259c4426c3ad0226ab3c2a15fa, valid_tokens: b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526}}
+    objective_semantics: center_trace_masked_hmm_path_reconstruction_v1
+    mask_semantics: xy_token_column_full_z_v1
+    column_fraction: 0.10
+    selection_policy: supervised_valid_xy_columns_round_half_up_leave_one_v1
+    replacement: learned_encoder_mask_token_v1
+    replacement_initialization: normal_std_0p02_train_seed_salted_v1
+    rng_policy: stateless_step_seed_v1
+    masked_prototype_weight: 0.50
+    visible_prototype_weight: 0.50
+    distillation_scope: visible_only_v1
+    supervised_loss: structured_hmm_center_trace_masked_hard_v1
+    consistency_policy: disabled_for_center_trace_masked_v1
+    target_refresh_semantics: periodic_student_hmm_center_refresh_v1
+    refresh_schedule_semantics: after_epochs_2_5_8_11_14_17_20_v1
+    refresh_after_epochs: [2, 5, 8, 11, 14, 17, 20]
+    hmm_iterations_per_refresh: 2
+    embedding_source: current_student
+    embedding_mode: unmasked_eval_full_survey
+    refresh_embedding_semantics: current_student_unmasked_eval_full_survey_v1
+    center_initialization: previous_generation
+    center_update: full_mean
+    center_update_semantics: warm_start_full_mean_two_iterations_final_decode_v1
+    preprocessing_policy: freeze_initial_residualizer_pca_v1
+    target_activation_policy: atomic_next_epoch_activation_v1
+    empty_state_policy: error
+    checkpoint_selection_policy: final_completed_epoch_v1
+    generation_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1_smoke_cpu_2step/target_refresh
+  runtime_identity: {device: cpu, workers: 4}
+manifests: {train: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json', train_path_list: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/splits/f3/facies_benchmark_v1/train_npy_paths.txt'}
+data: {local_crop_size: [128, 128, 128], min_valid_fraction: 0.1, max_resample_attempts: 32, normalized_clip_abs: 8.0, finite_check_mode: strict, amplitude_agc: {enabled: true, mode: trace_rms_z, window_z: 65, eps: 0.001, clip_abs: 5.0}}
+zero_mask: {enabled: true, zero_atol: 0.0, z_sample_influence_radius: 16, xy_trace_influence_radius: 1}
+model: {patch_size: [8, 8, 8], encoder_dim: 384, encoder_depth: 8, encoder_heads: 6, decoder_dim: 256, decoder_depth: 4, decoder_heads: 4}
+pseudo_targets: {manifest: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json', target_representation: hard_viterbi_labels_v1, min_confidence: 0.0}
+teacher: {checkpoint: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt'}
+student: {init_checkpoint: '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/nopims/pretrain_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/mae_latest.pt', unfreeze_top_blocks: 1}
+head: {spec: multi_resolution_ordered_prototypes_v1, ks: [6, 8, 10], projection_dim: 128, temperature: 0.1, normalize: true}
+loss: {prototype_weight: 1.0, usage_weight: 0.005, entropy_floor: null, consistency_weight: 0.0, consistency_beta: 0.1, distillation_weight: 0.2}
+spatial_context: {objective: center_trace_masked_hmm_path_reconstruction_v1, mask_semantics: xy_token_column_full_z_v1, column_fraction: 0.10, selection_policy: supervised_valid_xy_columns_round_half_up_leave_one_v1, replacement: learned_encoder_mask_token_v1, replacement_initialization: normal_std_0p02_train_seed_salted_v1, rng_policy: stateless_step_seed_v1, masked_prototype_weight: 0.50, visible_prototype_weight: 0.50, distillation_scope: visible_only_v1}
+train: {batch_size: 4, samples_per_epoch: 4096, epochs: 25, num_workers: 4, shuffle: true, lr: 0.0003, encoder_lr: 0.00001, weight_decay: 0.05, amp: false, device: cpu, seed: 42, grad_clip_norm: 1.0, checkpoint_every_steps: 500, max_steps: null, allow_overwrite_output: false}
+pseudo_target_refresh:
+  enabled: true
+  semantics: periodic_student_hmm_center_refresh_v1
+  generation_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1_smoke_cpu_2step/target_refresh
+  refresh_after_epochs: [2, 5, 8, 11, 14, 17, 20]
+  hmm_iterations_per_refresh: 2
+  embedding_source: current_student
+  embedding_mode: unmasked_eval_full_survey
+  center_initialization: previous_generation
+  center_update: full_mean
+  preprocessing_policy: freeze_initial
+  target_replacement: atomic_next_epoch
+  empty_cluster_policy: error
+  checkpoint_selection: final_completed_epoch
+  initial_hmm_artifacts:
+    common:
+      clustering_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/01_replay_hmm_k6810.yaml
+      preprocessor: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k6/preprocessor.joblib
+      residualizer: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/residualizer.npz
+      source_embedding_metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/f3_facies_benchmark.embedding_metadata.json
+    heads:
+      '6':
+        model_metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k6/clustering_metadata.json
+        hmm_model: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k6/hmm_model.joblib
+        centers: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k6/cluster_centers.npy
+      '8':
+        model_metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k8/clustering_metadata.json
+        hmm_model: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k8/hmm_model.joblib
+        centers: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k8/cluster_centers.npy
+      '10':
+        model_metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k10/clustering_metadata.json
+        hmm_model: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k10/hmm_model.joblib
+        centers: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k10/cluster_centers.npy

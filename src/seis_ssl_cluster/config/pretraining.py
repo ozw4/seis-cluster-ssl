@@ -1575,6 +1575,25 @@ def _periodic_nonnegative_int_triplet(
 	return (int(value[0]), int(value[1]), int(value[2]))
 
 
+def _periodic_edge_margin_mask_for_shape(
+	shape: tuple[int, int, int], edge_margin_tokens: tuple[int, int, int]
+) -> np.ndarray:
+	for size, margin in zip(shape, edge_margin_tokens, strict=True):
+		if margin * 2 > size:
+			raise ValueError('periodic edge margins do not fit token shape')
+	mask = np.ones(shape, dtype=np.bool_)
+	for axis, margin in enumerate(edge_margin_tokens):
+		if margin == 0:
+			continue
+		leading = [slice(None)] * 3
+		trailing = [slice(None)] * 3
+		leading[axis] = slice(0, margin)
+		trailing[axis] = slice(shape[axis] - margin, None)
+		mask[tuple(leading)] = False
+		mask[tuple(trailing)] = False
+	return mask
+
+
 def _validate_periodic_initial_artifact_identity(  # noqa: C901, PLR0912, PLR0915
 	*,
 	common_refs: Mapping[str, object],
@@ -1669,6 +1688,25 @@ def _validate_periodic_initial_artifact_identity(  # noqa: C901, PLR0912, PLR091
 			raise ValueError(
 				'pseudo_target_refresh source embedding compatibility identity mismatch'
 			)
+	target_heads = target_manifest.get('heads')
+	if not isinstance(target_heads, Mapping):
+		raise TypeError(
+			'pseudo_target_refresh target manifest heads must be a mapping'
+		)
+	common_head = target_heads.get('6')
+	if not isinstance(common_head, Mapping):
+		raise TypeError(
+			'pseudo_target_refresh target manifest must contain a K=6 head'
+		)
+	common_head_surveys = common_head.get('surveys')
+	if not isinstance(common_head_surveys, Mapping):
+		raise TypeError(
+			'pseudo_target_refresh target manifest K=6 surveys must be a mapping'
+		)
+	edge_margin = _periodic_nonnegative_int_triplet(
+		metadata_identity['ordering']['edge_margin_tokens'],
+		'periodic edge margin tokens',
+	)
 	for entry in input_identity:
 		survey_id = entry['survey_id']
 		target_entry = source_surveys.get(survey_id)
@@ -1701,10 +1739,57 @@ def _validate_periodic_initial_artifact_identity(  # noqa: C901, PLR0912, PLR091
 					f'for {survey_id}'
 				)
 		target_valid_hash = target_entry.get('valid_tokens_sha256')
-		if target_valid_hash != common_valid_hashes.get(survey_id):
+		if target_valid_hash != _file_sha256(str(target_entry['valid_tokens_path'])):
 			raise ValueError(
-				f'pseudo_target_refresh source valid-mask identity mismatch for '
+				f'pseudo_target_refresh source embedding valid-mask hash mismatch '
 				f'{survey_id}'
+			)
+		common_entry = common_head_surveys.get(survey_id)
+		if not isinstance(common_entry, Mapping):
+			raise TypeError(
+				f'pseudo_target_refresh target manifest is missing K=6 survey '
+				f'{survey_id}'
+			)
+		common_valid_reference = common_entry.get('valid_tokens')
+		if not isinstance(common_valid_reference, Mapping):
+			raise TypeError(
+				f'pseudo_target_refresh K=6 valid-token reference is invalid for '
+				f'{survey_id}'
+			)
+		common_valid_path = common_valid_reference.get('path')
+		if not isinstance(common_valid_path, str) or not common_valid_path:
+			raise ValueError(
+				f'pseudo_target_refresh K=6 valid-token path is missing for '
+				f'{survey_id}'
+			)
+		if _file_sha256(common_valid_path) != common_valid_hashes[survey_id]:
+			raise ValueError(
+				f'pseudo_target_refresh common valid-token hash mismatch for '
+				f'{survey_id}'
+			)
+		source_valid_tokens = np.asarray(
+			np.load(entry['valid_tokens_path'], mmap_mode='r', allow_pickle=False),
+			dtype=np.bool_,
+		)
+		common_valid_tokens = np.asarray(
+			np.load(common_valid_path, mmap_mode='r', allow_pickle=False),
+			dtype=np.bool_,
+		)
+		if source_valid_tokens.shape != common_valid_tokens.shape:
+			raise ValueError(
+				f'pseudo_target_refresh source/common valid-mask shape mismatch '
+				f'for {survey_id}'
+			)
+		effective_valid_tokens = np.logical_and(
+			source_valid_tokens,
+			_periodic_edge_margin_mask_for_shape(
+				source_valid_tokens.shape, edge_margin
+			),
+		)
+		if not np.array_equal(effective_valid_tokens, common_valid_tokens):
+			raise ValueError(
+				f'pseudo_target_refresh source valid-mask/edge-margin identity '
+				f'mismatch for {survey_id}'
 			)
 		embeddings = np.load(
 			entry['embeddings_path'], mmap_mode='r', allow_pickle=False
@@ -1901,7 +1986,16 @@ def _validate_periodic_preprocessing_artifacts(  # noqa: C901, PLR0912, PLR0915
 	)
 	if residualizer_ref is None:
 		return
-	residualizer_path = Path(str(_required_mapping(residualizer_ref, 'path')))
+	if not isinstance(residualizer_ref, Mapping):
+		raise TypeError(
+			'pseudo_target_refresh residualizer reference must be a mapping'
+		)
+	residualizer_path_value = residualizer_ref.get('path')
+	if not isinstance(residualizer_path_value, str) or not residualizer_path_value:
+		raise ValueError(
+			'pseudo_target_refresh residualizer reference path is missing'
+		)
+	residualizer_path = Path(residualizer_path_value)
 	try:
 		residualizer = read_residualizer_npz(residualizer_path)
 	except (OSError, KeyError, TypeError, ValueError) as exc:
