@@ -1,5 +1,7 @@
 """Thin entrypoint for strat HMM pretext training."""
 
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -52,6 +54,14 @@ def build_parser() -> argparse.ArgumentParser:
 		'--resume',
 		help_text='Resume strat HMM pretext training from a checkpoint.',
 	)
+	parser.add_argument(
+		'--quarantine-invalid',
+		action='store_true',
+		help=(
+			'Quarantine an explicitly owned partial or foreign periodic-refresh '
+			'generation before retrying; default is fail-closed.'
+		),
+	)
 	return parser
 
 
@@ -92,7 +102,11 @@ def main() -> None:
 		print('execution: dry-run; training skipped')
 		return
 
-	checkpoint_path = run_strat_hmm_pretext_training(config, resume=args.resume)
+	checkpoint_path = run_strat_hmm_pretext_training(
+		config,
+		resume=args.resume,
+		quarantine_invalid=args.quarantine_invalid,
+	)
 	print(f'checkpoint: {checkpoint_path}')
 
 

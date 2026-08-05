@@ -949,6 +949,94 @@ def test_periodic_runner_refresh_boundary_resume_matches_uninterrupted(  # noqa:
 			resumed_generation['centers'][raw_k]['after']['sha256']  # type: ignore[index]
 		)
 
+	# A step checkpoint in the middle of an epoch must resume at the same
+	# batch position before the next scheduled refresh boundary.
+	mid_config = deepcopy(resolved_config)
+	mid_output_root = tmp_path / 'mid_epoch'
+	mid_generation_root = mid_output_root / 'target_refresh'
+	mid_config['paths']['output_root'] = str(mid_output_root)  # type: ignore[index]
+	mid_config['pseudo_target_refresh']['generation_root'] = str(  # type: ignore[index]
+		mid_generation_root
+	)
+	mid_config['identity']['scientific_identity']['generation_root'] = str(  # type: ignore[index]
+		mid_generation_root
+	)
+	mid_config['train']['samples_per_epoch'] = 2  # type: ignore[index]
+	mid_config['train']['max_steps'] = 1  # type: ignore[index]
+	mid_step_path = runner_module.run_strat_hmm_pretext_training(mid_config)
+	mid_step_payload = load_checkpoint(mid_step_path, map_location='cpu')
+	assert mid_step_payload['epoch'] == 1
+	assert mid_step_payload['global_step'] == 1
+	assert mid_step_payload['training_state']['checkpoint_kind'] == 'step'  # type: ignore[index]
+	assert mid_step_payload['training_state']['batch_index'] == 0  # type: ignore[index]
+	assert mid_step_payload['target_refresh_state']['active_generation_index'] == 0  # type: ignore[index]
+
+	mid_config['train']['max_steps'] = 4  # type: ignore[index]
+	mid_resumed_path = runner_module.run_strat_hmm_pretext_training(
+		mid_config, resume=mid_step_path
+	)
+	mid_resumed_payload = load_checkpoint(mid_resumed_path, map_location='cpu')
+	assert mid_resumed_payload['epoch'] == 2
+	assert mid_resumed_payload['global_step'] == 4
+	assert mid_resumed_payload['training_state']['checkpoint_kind'] == 'refresh'  # type: ignore[index]
+	assert mid_resumed_payload['target_refresh_state']['active_generation_index'] == 1  # type: ignore[index]
+
+	# If activation completes but the refresh checkpoint write fails, resume must
+	# validate the advanced pointer/chain and recover the missing checkpoint.
+	activation_crash_config = deepcopy(resolved_config)
+	activation_crash_output = tmp_path / 'activation_crash'
+	activation_crash_generation = activation_crash_output / 'target_refresh'
+	activation_crash_config['paths']['output_root'] = str(  # type: ignore[index]
+		activation_crash_output
+	)
+	activation_crash_config['pseudo_target_refresh']['generation_root'] = str(  # type: ignore[index]
+		activation_crash_generation
+	)
+	activation_crash_config['identity']['scientific_identity']['generation_root'] = str(  # type: ignore[index]
+		activation_crash_generation
+	)
+	activation_crash_config['train']['max_steps'] = 2  # type: ignore[index]
+	original_save_periodic_checkpoint = runner_module._save_periodic_checkpoint  # noqa: SLF001
+
+	def fail_refresh_checkpoint(**kwargs: object) -> object:
+		if kwargs.get('checkpoint_kind') == 'refresh':
+			raise RuntimeError('simulated refresh checkpoint crash')
+		return original_save_periodic_checkpoint(**kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(
+		runner_module, '_save_periodic_checkpoint', fail_refresh_checkpoint
+	)
+	with pytest.raises(RuntimeError, match='simulated refresh checkpoint crash'):
+		runner_module.run_strat_hmm_pretext_training(activation_crash_config)
+	crash_latest = activation_crash_output / 'latest.pt'
+	crash_payload = load_checkpoint(crash_latest, map_location='cpu')
+	assert crash_payload['training_state']['checkpoint_kind'] == 'epoch'  # type: ignore[index]
+	assert crash_payload['target_refresh_state']['refresh_phase'] == (  # type: ignore[index]
+		'refresh_required'
+	)
+	assert crash_payload['target_refresh_state']['active_generation_index'] == 0  # type: ignore[index]
+	assert (
+		activation_crash_generation
+		/ 'generations'
+		/ 'refresh_0001_epoch002'
+		/ 'refresh_generation.json'
+	).is_file()
+
+	monkeypatch.setattr(
+		runner_module,
+		'_save_periodic_checkpoint',
+		original_save_periodic_checkpoint,
+	)
+	activation_crash_config['train']['max_steps'] = 3  # type: ignore[index]
+	crash_resumed = runner_module.run_strat_hmm_pretext_training(
+		activation_crash_config, resume=crash_latest
+	)
+	crash_resumed_payload = load_checkpoint(crash_resumed, map_location='cpu')
+	assert crash_resumed_payload['epoch'] == 3
+	assert crash_resumed_payload['global_step'] == 3
+	assert crash_resumed_payload['training_state']['checkpoint_kind'] == 'epoch'  # type: ignore[index]
+	assert crash_resumed_payload['target_refresh_state']['active_generation_index'] == 1  # type: ignore[index]
+
 
 def test_periodic_recovered_epoch_metrics_ignore_checkpoint_metadata() -> None:
 	assert runner_module._periodic_epoch_metrics_from_checkpoint(  # noqa: SLF001
@@ -1002,6 +1090,56 @@ def test_periodic_runner_validates_complete_generation_before_producer(
 
 	assert result == manifest_path.resolve()
 	assert load_calls == [(manifest_path, {'request': 'expected'})]
+
+
+def test_periodic_runner_explicitly_quarantines_invalid_generation(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	output_root = tmp_path / 'refresh_0001_epoch002'
+	output_root.mkdir()
+	manifest_path = output_root / 'refresh_generation.json'
+	manifest_path.write_text('{partial', encoding='utf-8')
+	load_count = 0
+
+	monkeypatch.setattr(
+		runner_module,
+		'_periodic_request_identity',
+		lambda _config: {'request': 'expected'},
+	)
+
+	def record_load(_path: Path, **_kwargs: object) -> dict[str, object]:
+		nonlocal load_count
+		load_count += 1
+		if load_count == 1:
+			raise ValueError('partial generation')
+		return {}
+
+	monkeypatch.setattr(
+		runner_module, 'load_periodic_refresh_generation', record_load
+	)
+
+	def produce(_config: object) -> SimpleNamespace:
+		output_root.mkdir(parents=True, exist_ok=True)
+		manifest_path.write_text('{complete}', encoding='utf-8')
+		return SimpleNamespace(manifest_path=manifest_path)
+
+	monkeypatch.setattr(
+		runner_module, 'produce_periodic_refresh_generation', produce
+	)
+
+	result = runner_module._load_or_produce_periodic_refresh_generation(  # noqa: SLF001
+		SimpleNamespace(output_generation_dir=output_root),
+		quarantine_invalid=True,
+	)
+
+	assert result == manifest_path.resolve()
+	assert load_count == 2
+	quarantined = list(tmp_path.glob(f'{output_root.name}.quarantine.*'))
+	assert len(quarantined) == 1
+	assert (
+		quarantined[0] / 'refresh_generation.json'
+	).read_text(encoding='utf-8') == '{partial'
 
 
 def test_periodic_runner_pointer_rollback_rejects_foreign_state(

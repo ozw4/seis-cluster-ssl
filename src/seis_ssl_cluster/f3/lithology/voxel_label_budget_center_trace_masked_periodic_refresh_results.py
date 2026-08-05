@@ -338,7 +338,11 @@ def summarize_f3_lithology_voxel_label_budget_center_trace_masked_periodic_refre
 		'This is paired original-split facies-label evidence only.\n',
 		encoding='utf-8',
 	)
-	handoff = _handoff_payload(inspection, execution=execution)
+	handoff = _handoff_payload(
+		inspection,
+		execution=execution,
+		reports_dir=reports,
+	)
 	_write_json(
 		reports / REPORT_OUTPUT_NAMES[4], _portable_payload(handoff, config=config)
 	)
@@ -513,12 +517,35 @@ def _candidate_provenance(
 
 
 def _handoff_payload(
-	inspection: Mapping[str, object], *, execution: Mapping[str, object]
+	inspection: Mapping[str, object],
+	*,
+	execution: Mapping[str, object],
+	reports_dir: Path,
 ) -> dict[str, object]:
 	identities = inspection['source_identities']
 	decisions = inspection['decisions']
 	if not isinstance(identities, Mapping) or not isinstance(decisions, Mapping):
 		raise TypeError('periodic-refresh summary evidence is incomplete')
+	job_metrics = inspection.get('job_metrics')
+	if not isinstance(job_metrics, Sequence) or isinstance(job_metrics, str):
+		raise TypeError('periodic-refresh job metrics evidence is invalid')
+	if len(job_metrics) != 75:
+		raise ValueError('periodic-refresh paired matrix must contain exactly 75 rows')
+	if not all(isinstance(row, Mapping) for row in job_metrics):
+		raise TypeError('periodic-refresh paired matrix rows must be mappings')
+	job_metrics_path = reports_dir / REPORT_OUTPUT_NAMES[0]
+	paired_deltas_path = reports_dir / REPORT_OUTPUT_NAMES[1]
+	summary_json_path = reports_dir / REPORT_OUTPUT_NAMES[2]
+	summary_markdown_path = reports_dir / REPORT_OUTPUT_NAMES[3]
+	for path in (
+		job_metrics_path,
+		paired_deltas_path,
+		summary_json_path,
+		summary_markdown_path,
+	):
+		if not path.is_file():
+			raise FileNotFoundError(path)
+	job_metric_columns = list(job_metrics[0]) if job_metrics else []
 	return {
 		'artifact_type': 'f3_center_trace_masked_periodic_refresh_original_screening_handoff',
 		'schema_version': 1,
@@ -535,6 +562,18 @@ def _handoff_payload(
 		'hard_decoder_config': identities['hard_decoder_config'],
 		'reference_run_manifests': identities['reference_run_manifests'],
 		'paired_matrix_identity': identities['paired_matrix_identity'],
+		'reports': {
+			'paired_matrix': {
+				**_identity(job_metrics_path),
+				'row_count': len(job_metrics),
+				'columns': job_metric_columns,
+			},
+			'gate_reports': {
+				'paired_deltas': _identity(paired_deltas_path),
+				'summary_json': _identity(summary_json_path),
+				'summary_markdown': _identity(summary_markdown_path),
+			},
+		},
 		'gate_definition': decisions['gate'],
 		'gate_result': decisions,
 		'execution': dict(execution),

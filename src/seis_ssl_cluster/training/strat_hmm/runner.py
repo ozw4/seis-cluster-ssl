@@ -54,6 +54,7 @@ from seis_ssl_cluster.stratigraphy.periodic_refresh import (
 	load_periodic_refresh_generation,
 	produce_initial_periodic_refresh_generation,
 	produce_periodic_refresh_generation,
+	quarantine_periodic_refresh_generation,
 )
 from seis_ssl_cluster.stratigraphy.periodic_refresh import (
 	_initial_request_identity as _periodic_initial_request_identity,
@@ -133,10 +134,14 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 	config: Mapping[str, object],
 	*,
 	resume: str | Path | None = None,
+	quarantine_invalid: bool = False,
 ) -> Path:
 	"""Run strat HMM pretext training from ``config``.
 
 	Both single-head and multi-head runs use the same rolling checkpoint contract.
+	For periodic refresh runs, ``quarantine_invalid`` explicitly moves an owned
+	partial or foreign generation aside before retrying it; the default remains
+	fail-closed.
 	"""
 	train_config = _mapping(config, 'train')
 	paths_config = _mapping(config, 'paths')
@@ -203,6 +208,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			periodic_state = _initialize_periodic_refresh_state(
 				config=config,
 				output_root=output_root,
+				quarantine_invalid=quarantine_invalid,
 			)
 		else:
 			periodic_resume_payload = load_checkpoint(resume, map_location=device)
@@ -285,10 +291,10 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		)
 		if is_periodic_refresh and resume_checkpoint_kind == 'step':
 			epoch_metrics_state = _mapping(
-				payload.get('epoch_metrics_state'), 'epoch metrics state'
+				payload, 'epoch_metrics_state'
 			)
 			raw_totals = _mapping(
-				epoch_metrics_state.get('totals'), 'epoch metric totals'
+				epoch_metrics_state, 'totals'
 			)
 			resume_epoch_metric_totals = {
 				str(key): float(value) for key, value in raw_totals.items()
@@ -473,6 +479,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				state=periodic_state,
 				refresh_epoch=refresh_epoch,
 				global_step=resume_state.global_step,
+				quarantine_invalid=quarantine_invalid,
 			)
 			refresh_result = _save_periodic_checkpoint(
 				output_root=output_root,
@@ -755,6 +762,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 						state=periodic_state,
 						refresh_epoch=epoch,
 						global_step=state.global_step,
+						quarantine_invalid=quarantine_invalid,
 					)
 					result = _save_periodic_checkpoint(
 						output_root=output_root,
@@ -814,6 +822,13 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				checkpoint_state = _periodic_state_with_phase(
 					periodic_state, phase='training'
 				)
+				if (
+					state.epoch_metric_totals is None
+					or state.epoch_batch_count <= 0
+				):
+					raise ValueError(
+						'periodic step checkpoint is missing epoch metric totals'
+					)
 				result = _save_periodic_checkpoint(
 					output_root=output_root,
 					components=components,
@@ -830,6 +845,11 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 					control_identity=control_identity,
 					checkpoint_selection=checkpoint_selection,
 					target_refresh_state=checkpoint_state,
+					epoch_metrics_state={
+						'schema_version': 1,
+						'batch_count': state.epoch_batch_count,
+						'totals': state.epoch_metric_totals,
+					},
 				)
 				checkpoint_path = result.latest_path
 				checkpoint_selection = result.checkpoint_selection
@@ -1771,10 +1791,11 @@ def _periodic_state_with_phase(
 	return updated
 
 
-def _initialize_periodic_refresh_state(
+def _initialize_periodic_refresh_state(  # noqa: C901, PLR0912, PLR0915
 	*,
 	config: Mapping[str, object],
 	output_root: Path,
+	quarantine_invalid: bool = False,
 ) -> dict[str, object]:
 	initial_config, refresh_root = _periodic_initial_config(config)
 	initial_manifest = (
@@ -1785,11 +1806,21 @@ def _initialize_periodic_refresh_state(
 		initial_config.output_generation_dir.is_symlink()
 	):
 		# Validate a complete generation before asking the producer to do any
-		# work.  A partial or foreign directory must remain fail-closed.
-		load_periodic_refresh_generation(
-			initial_manifest,
-			expected_identity=expected_identity,
-		)
+		# work.  A partial or foreign directory remains fail-closed unless the
+		# caller explicitly requested its recoverable quarantine.
+		try:
+			load_periodic_refresh_generation(
+				initial_manifest,
+				expected_identity=expected_identity,
+			)
+		except (OSError, TypeError, ValueError, KeyError):
+			if not quarantine_invalid:
+				raise
+			quarantine_periodic_refresh_generation(
+				initial_config.output_generation_dir
+			)
+			result = produce_initial_periodic_refresh_generation(initial_config)
+			initial_manifest = result.manifest_path.resolve()
 	else:
 		result = produce_initial_periodic_refresh_generation(initial_config)
 		initial_manifest = result.manifest_path.resolve()
@@ -1804,8 +1835,24 @@ def _initialize_periodic_refresh_state(
 		fixed_identity_hash=fixed_hash, generations=[initial_record]
 	)
 	if chain_path.is_file():
-		if _read_periodic_chain(chain_path) != expected_chain:
+		try:
+			chain_matches = _read_periodic_chain(chain_path) == expected_chain
+		except (OSError, TypeError, ValueError, KeyError):
+			if not quarantine_invalid:
+				raise
+			quarantine_periodic_refresh_generation(chain_path)
+			chain_matches = False
+		if not chain_matches:
+			if chain_path.exists() and not quarantine_invalid:
+				raise ValueError('existing periodic refresh chain is foreign or stale')
+			if chain_path.exists():
+				quarantine_periodic_refresh_generation(chain_path)
+			_json_write_atomic(chain_path, expected_chain)
+	elif chain_path.exists() or chain_path.is_symlink():
+		if not quarantine_invalid:
 			raise ValueError('existing periodic refresh chain is foreign or stale')
+		quarantine_periodic_refresh_generation(chain_path)
+		_json_write_atomic(chain_path, expected_chain)
 	else:
 		_json_write_atomic(chain_path, expected_chain)
 	pointer_path = refresh_root / 'active_target_generation.json'
@@ -1819,8 +1866,24 @@ def _initialize_periodic_refresh_state(
 		'manifest_sha256': initial_record['manifest_sha256'],
 	}
 	if pointer_path.is_file():
-		if _periodic_pointer(pointer_path) != expected_pointer:
+		try:
+			pointer_matches = _periodic_pointer(pointer_path) == expected_pointer
+		except (OSError, TypeError, ValueError, KeyError):
+			if not quarantine_invalid:
+				raise
+			quarantine_periodic_refresh_generation(pointer_path)
+			pointer_matches = False
+		if not pointer_matches:
+			if pointer_path.exists() and not quarantine_invalid:
+				raise ValueError('existing active target pointer is foreign or stale')
+			if pointer_path.exists():
+				quarantine_periodic_refresh_generation(pointer_path)
+			_json_write_atomic(pointer_path, expected_pointer)
+	elif pointer_path.exists() or pointer_path.is_symlink():
+		if not quarantine_invalid:
 			raise ValueError('existing active target pointer is foreign or stale')
+		quarantine_periodic_refresh_generation(pointer_path)
+		_json_write_atomic(pointer_path, expected_pointer)
 	else:
 		_json_write_atomic(pointer_path, expected_pointer)
 	state = _periodic_state_for_generation(
@@ -2145,17 +2208,25 @@ def _activate_periodic_generation(  # noqa: C901, PLR0912, PLR0913
 
 def _load_or_produce_periodic_refresh_generation(
 	config: PeriodicRefreshConfig,
+	*,
+	quarantine_invalid: bool = False,
 ) -> Path:
-	"""Validate and reuse a complete generation before producing anything."""
+	"""Validate/reuse a generation, with explicit recovery for owned invalid output."""
 	expected_identity = _periodic_request_identity(config)
 	output_root = Path(config.output_generation_dir)
 	manifest_path = output_root / 'refresh_generation.json'
 	if output_root.exists() or output_root.is_symlink():
-		load_periodic_refresh_generation(
-			manifest_path,
-			expected_identity=expected_identity,
-		)
-		return manifest_path.resolve()
+		try:
+			load_periodic_refresh_generation(
+				manifest_path,
+				expected_identity=expected_identity,
+			)
+		except (OSError, TypeError, ValueError, KeyError):
+			if not quarantine_invalid:
+				raise
+			quarantine_periodic_refresh_generation(output_root)
+		else:
+			return manifest_path.resolve()
 	result = produce_periodic_refresh_generation(config)
 	manifest_path = result.manifest_path.resolve()
 	load_periodic_refresh_generation(
@@ -2177,6 +2248,7 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	state: Mapping[str, object],
 	refresh_epoch: int,
 	global_step: int,
+	quarantine_invalid: bool = False,
 ) -> tuple[object, torch.utils.data.DataLoader, dict[str, object]]:
 	refresh = _periodic_refresh_mapping(config)
 	refresh_root = _path_config(refresh, 'generation_root').resolve()
@@ -2270,9 +2342,15 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			target_policy=_periodic_target_policy(initial_target.path),
 			iterations=2,
 		)
-		activation_manifest = _load_or_produce_periodic_refresh_generation(
-			generation_config
-		)
+		if quarantine_invalid:
+			activation_manifest = _load_or_produce_periodic_refresh_generation(
+				generation_config,
+				quarantine_invalid=True,
+			)
+		else:
+			activation_manifest = _load_or_produce_periodic_refresh_generation(
+				generation_config
+			)
 		new_pointer = {
 			'manifest_path': str(activation_manifest),
 			'manifest_sha256': file_sha256(activation_manifest),

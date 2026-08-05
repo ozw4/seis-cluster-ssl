@@ -2341,7 +2341,7 @@ def _recover_periodic_refresh_extension(  # noqa: C901, PLR0912, PLR0913, PLR091
 			None
 			if previous is None
 			else _required_sha256(
-				_required_mapping(previous, 'previous generation manifest').get(
+				_required_mapping(payload, 'previous_generation_manifest').get(
 					'sha256'
 				),
 				'previous generation manifest sha256',
@@ -2410,8 +2410,8 @@ def _recover_periodic_refresh_extension(  # noqa: C901, PLR0912, PLR0913, PLR091
 	]:
 		raise ValueError('periodic refresh extension content hash mismatch')
 	previous = _required_mapping(
-		extra_payload.get('previous_generation_manifest'),
-		'periodic refresh extension previous manifest',
+		extra_payload,
+		'previous_generation_manifest',
 	)
 	if previous.get('sha256') != generations[-1]['manifest_sha256'] or Path(
 		str(previous.get('path'))

@@ -519,8 +519,9 @@ def validate_f3_center_trace_masked_periodic_refresh(
 			inputs=inputs,
 			checkpoint=checkpoints['checkpoint'],
 		)
-		if not dry_run:
-			_validate_smoke_phase_evidence(config, inputs=inputs)
+		# Complete validation must always bind the final handoff to the live
+		# smoke evidence, including when the caller is only inspecting a plan.
+		_validate_smoke_phase_evidence(config, inputs=inputs)
 		evidence['execution'] = _update_execution_evidence(
 			config, phase=phase, dry_run=dry_run
 		)

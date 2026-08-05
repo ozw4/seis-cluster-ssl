@@ -134,6 +134,50 @@ def test_execution_marker_never_quarantines_completed_phase(
 	assert list(tmp_path.glob(f'{path.name}.quarantine.*')) == []
 
 
+def test_complete_dry_run_validates_smoke_phase_evidence(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = SimpleNamespace(periodic_refresh_smoke_config=tmp_path / 'smoke.yaml')
+	calls: list[tuple[object, object]] = []
+	monkeypatch.setattr(validation, '_training_config', lambda _path: {})
+	monkeypatch.setattr(
+		validation,
+		'_inputs_evidence',
+		lambda _config: {'target_manifest': {'path': 'target', 'sha256': 'a' * 64}},
+	)
+	monkeypatch.setattr(
+		validation,
+		'_checkpoint_evidence',
+		lambda *_args, **_kwargs: {'checkpoint': {'root': str(tmp_path)}},
+	)
+	monkeypatch.setattr(
+		validation,
+		'_embedding_evidence',
+		lambda *_args, **_kwargs: {'embeddings': 'validated'},
+	)
+	monkeypatch.setattr(
+		validation,
+		'_validate_smoke_phase_evidence',
+		lambda _config, *, inputs: calls.append((_config, inputs)),
+	)
+	monkeypatch.setattr(
+		validation,
+		'_update_execution_evidence',
+		lambda *_args, **_kwargs: {'before': {}, 'after': {}},
+	)
+	monkeypatch.setattr(validation, '_handoff', lambda _evidence: {})
+
+	result = validation.validate_f3_center_trace_masked_periodic_refresh(
+		config,
+		phase='complete',
+		dry_run=True,
+	)
+
+	assert result.evidence['status'] == 'PASS'
+	assert calls[0][0] is config
+	assert calls[0][1]['target_manifest'] == result.evidence['target_manifest']
+
+
 def test_handoff_initial_target_manifest_is_a_loadable_reference(
 	tmp_path: Path,
 ) -> None:

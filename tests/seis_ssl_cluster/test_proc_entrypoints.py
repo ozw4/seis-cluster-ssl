@@ -227,6 +227,7 @@ HELP_FLAG_CONTRACTS = {
 		'--max-steps',
 		'--output-root',
 		'--resume',
+		'--quarantine-invalid',
 	),
 	'validate_artifact_paths.py': (
 		'--root',

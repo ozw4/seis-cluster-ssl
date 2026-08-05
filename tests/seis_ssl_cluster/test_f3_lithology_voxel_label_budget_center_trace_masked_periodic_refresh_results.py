@@ -141,6 +141,51 @@ def test_periodic_refresh_expected_matrix_has_exact_five_roles() -> None:
 	results._expected_matrix(config, members)
 
 
+def test_periodic_refresh_handoff_binds_matrix_and_gate_report_bytes(
+	tmp_path: Path,
+) -> None:
+	reports = tmp_path / 'reports'
+	reports.mkdir()
+	for name in results.REPORT_OUTPUT_NAMES[:4]:
+		(reports / name).write_text(name, encoding='utf-8')
+	inspection = {
+		'job_metrics': tuple({'model_role': 'role'} for _ in range(75)),
+		'source_identities': {
+			'periodic_refresh_handoff': {'sha256': 'a' * 64},
+			'candidate_provenance': {'model_id': 'candidate'},
+			'screening_audit': {'sha256': 'b' * 64},
+			'candidate_run_manifest': {'sha256': 'c' * 64},
+			'candidate_job_live_validation': {'status': 'PASS'},
+			'fixed_center_trace_run_manifest': {'sha256': 'd' * 64},
+			'hard_decoder_config': {'sha256': 'e' * 64},
+			'reference_run_manifests': {},
+			'paired_matrix_identity': {'row_count': 75},
+		},
+		'decisions': {
+			'gate': {'primary': 'fixed'},
+			'overall_status': 'CTMASK_REFRESH_ORIGINAL_HOLD',
+			'six_split_follow_up': {'ready': False},
+			'scientific_jobs_executed': 15,
+		},
+	}
+
+	handoff = results._handoff_payload(
+		inspection,
+		execution={'git_sha': 'f' * 40},
+		reports_dir=reports,
+	)
+	report_evidence = handoff['reports']
+	assert report_evidence['paired_matrix']['row_count'] == 75  # type: ignore[index]
+	assert report_evidence['paired_matrix']['sha256'] == (  # type: ignore[index]
+		results.file_sha256(reports / results.REPORT_OUTPUT_NAMES[0])
+	)
+	assert set(report_evidence['gate_reports']) == {  # type: ignore[index]
+		'paired_deltas',
+		'summary_json',
+		'summary_markdown',
+	}
+
+
 def _rows(
 	budgets: tuple[str, ...],
 	*,
