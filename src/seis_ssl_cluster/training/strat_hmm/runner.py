@@ -1,5 +1,7 @@
 """Runner for stratigraphic HMM pretext training."""
 
+# ruff: noqa: CPY001
+
 
 from __future__ import annotations
 
@@ -302,6 +304,13 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			if not isinstance(resume_state.target_refresh_state, Mapping):
 				raise ValueError(
 					'periodic refresh resume state is missing target_refresh_state'
+				)
+			if resume_checkpoint_kind in {'epoch', 'refresh'}:
+				_recover_periodic_checkpoint_event(
+					output_root=output_root,
+					payload=payload,
+					state=resume_state.target_refresh_state,
+					components=components,
 				)
 			periodic_state = dict(resume_state.target_refresh_state)
 			if resume_checkpoint_kind == 'refresh':
@@ -1368,16 +1377,19 @@ def _json_write_atomic(path: Path, payload: Mapping[str, object]) -> None:
 			temporary.unlink()
 
 
-def _append_target_refresh_event(
+def _append_target_refresh_event(  # noqa: C901
 	output_root: Path,
 	payload: Mapping[str, object],
 ) -> None:
 	path = output_root / 'target_refresh_events.jsonl'
 	path.parent.mkdir(parents=True, exist_ok=True)
+	existing_events = (
+		_read_target_refresh_events(path) if path.is_file() else []
+	)
 	if payload.get('event_type') == 'refresh' and payload.get('status') in {
 		'start',
 		'complete',
-	} and path.is_file():
+	}:
 		identity_fields = (
 			'event_type',
 			'status',
@@ -1395,30 +1407,148 @@ def _append_target_refresh_event(
 				'active_target_manifest_path',
 				'active_target_manifest_sha256',
 			)
-		for line in path.read_text(encoding='utf-8').splitlines():
-			if not line.strip():
-				continue
-			existing = json.loads(line)
-			if not isinstance(existing, Mapping):
-				raise TypeError('periodic refresh event must be a mapping')
+		for existing in existing_events:
 			if all(
 				existing.get(key) == payload.get(key)
 				for key in ('event_type', 'status', 'refresh_epoch')
-			):
-				if not all(
+			) and not all(
 					existing.get(key) == payload.get(key)
-					for key in identity_fields
-				):
+				for key in identity_fields
+			):
 					raise ValueError(
 						'conflicting periodic refresh lifecycle event already exists'
 					)
 			if all(existing.get(key) == payload.get(key) for key in identity_fields):
 				return
+	checkpoint_identity = (
+		'event_type',
+		'status',
+		'checkpoint_kind',
+		'epoch',
+		'global_step_after',
+	)
+	if (
+		payload.get('event_type') == 'checkpoint'
+		and payload.get('status') == 'complete'
+	):
+		for existing in existing_events:
+			if all(
+				existing.get(key) == payload.get(key) for key in checkpoint_identity
+			):
+				if dict(existing) != dict(payload):
+					raise ValueError(
+						'conflicting periodic checkpoint event already exists'
+					)
+				return
+	needs_separator = False
+	if path.is_file():
+		existing_bytes = path.read_bytes()
+		needs_separator = bool(existing_bytes) and not existing_bytes.endswith(b'\n')
 	with path.open('a', encoding='utf-8') as handle:
+		if needs_separator:
+			handle.write('\n')
 		handle.write(json.dumps(dict(payload), sort_keys=True, allow_nan=False))
 		handle.write('\n')
 		handle.flush()
 		os.fsync(handle.fileno())
+
+
+def _read_target_refresh_events(path: Path) -> list[Mapping[str, object]]:
+	"""Read events and quarantine a malformed trailing append fragment."""
+	raw = path.read_bytes()
+	chunks = raw.splitlines(keepends=True)
+	last_content_index = next(
+		(
+			index
+			for index in range(len(chunks) - 1, -1, -1)
+			if chunks[index].strip()
+		),
+		None,
+	)
+	events: list[Mapping[str, object]] = []
+	offset = 0
+	for index, chunk in enumerate(chunks):
+		start = offset
+		offset += len(chunk)
+		if not chunk.strip():
+			continue
+		try:
+			value = json.loads(chunk.decode('utf-8'))
+		except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+			if index != last_content_index:
+				raise ValueError(
+					f'periodic refresh event is invalid JSON at line {index + 1}'
+				) from exc
+			_quarantine_target_refresh_event_fragment(path, raw[start:])
+			break
+		if not isinstance(value, Mapping):
+			raise TypeError('periodic refresh event must be a mapping')
+		events.append(value)
+	return events
+
+
+def _quarantine_target_refresh_event_fragment(path: Path, fragment: bytes) -> None:
+	fd, _ = tempfile.mkstemp(
+		prefix=f'{path.name}.quarantine.', dir=path.parent
+	)
+	with os.fdopen(fd, 'wb') as handle:
+		handle.write(fragment)
+		handle.flush()
+		os.fsync(handle.fileno())
+	with path.open('r+b') as handle:
+		handle.truncate(path.stat().st_size - len(fragment))
+		handle.flush()
+		os.fsync(handle.fileno())
+
+
+def _recover_periodic_checkpoint_event(
+	*,
+	output_root: Path,
+	payload: Mapping[str, object],
+	state: Mapping[str, object],
+	components: StratHmmCenterTraceMaskedComponents,
+) -> None:
+	"""Reconcile checkpoint evidence before resuming a periodic refresh."""
+	training_state = _mapping(payload, 'training_state')
+	kind = training_state.get('checkpoint_kind')
+	if kind not in {'epoch', 'refresh'}:
+		return
+	epoch = payload.get('epoch')
+	global_step = payload.get('global_step')
+	if (
+		isinstance(epoch, bool)
+		or not isinstance(epoch, int)
+		or isinstance(global_step, bool)
+		or not isinstance(global_step, int)
+	):
+		raise TypeError('periodic checkpoint event counters must be integers')
+	_append_target_refresh_event(
+		output_root,
+		{
+			'event_type': 'checkpoint',
+			'status': 'complete',
+			'checkpoint_kind': kind,
+			'epoch': epoch,
+			'global_step_before': global_step,
+			'global_step_after': global_step,
+			'active_generation_id': state['active_generation_id'],
+			'active_generation_manifest_sha256': state[
+				'active_generation_manifest_sha256'
+			],
+			'active_generation_content_sha256': state[
+				'active_generation_content_sha256'
+			],
+			'active_target_manifest_sha256': state['active_target_manifest_sha256'],
+			'source_student_state_sha256': state['source_student_state_sha256'],
+			'student_state_sha256': _state_dict_sha256(
+				components.student.state_dict()
+			),
+			'optimizer_state_sha256': _optimizer_state_sha256(
+				components.optimizer
+			),
+			'refresh_phase': state['refresh_phase'],
+		},
+	)
 
 
 def _periodic_generation_record(manifest_path: Path) -> dict[str, object]:

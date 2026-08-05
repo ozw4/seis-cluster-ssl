@@ -1088,3 +1088,85 @@ def test_periodic_runner_rolls_back_pointer_on_post_activation_failure(  # noqa:
 	assert runner_module._rng_state_hash(capture_rng_state()) == (  # noqa: SLF001
 		runner_module._rng_state_hash(rng_before)  # noqa: SLF001
 	)
+
+
+def test_periodic_event_append_quarantines_partial_trailing_record(
+	tmp_path: Path,
+) -> None:
+	output_root = tmp_path / 'output'
+	output_root.mkdir()
+	event_path = output_root / 'target_refresh_events.jsonl'
+	first = {'event_type': 'generation', 'status': 'complete'}
+	partial = b'{"event_type":"refresh","status":"start"'
+	event_path.write_bytes(
+		json.dumps(first, sort_keys=True).encode() + b'\n' + partial
+	)
+	second = {'event_type': 'generation', 'status': 'recovered'}
+
+	runner_module._append_target_refresh_event(output_root, second)  # noqa: SLF001
+
+	assert [
+		json.loads(line)
+		for line in event_path.read_text(encoding='utf-8').splitlines()
+	] == [first, second]
+	quarantined = list(output_root.glob('target_refresh_events.jsonl.quarantine.*'))
+	assert len(quarantined) == 1
+	assert quarantined[0].read_bytes() == partial
+
+
+def test_periodic_event_append_separates_unterminated_valid_record(
+	tmp_path: Path,
+) -> None:
+	output_root = tmp_path / 'output'
+	output_root.mkdir()
+	event_path = output_root / 'target_refresh_events.jsonl'
+	first = {'event_type': 'generation', 'status': 'complete'}
+	event_path.write_text(json.dumps(first), encoding='utf-8')
+	second = {'event_type': 'generation', 'status': 'next'}
+
+	runner_module._append_target_refresh_event(output_root, second)  # noqa: SLF001
+
+	assert [
+		json.loads(line)
+		for line in event_path.read_text(encoding='utf-8').splitlines()
+	] == [first, second]
+
+
+def test_periodic_resume_reconstructs_checkpoint_event_idempotently(
+	tmp_path: Path,
+) -> None:
+	student = torch.nn.Linear(1, 1)
+	optimizer = torch.optim.AdamW(student.parameters(), lr=1.0e-3)
+	components = SimpleNamespace(student=student, optimizer=optimizer)
+	state = {
+		'active_generation_id': 'refresh_0001_epoch002',
+		'active_generation_manifest_sha256': '1' * 64,
+		'active_generation_content_sha256': '2' * 64,
+		'active_target_manifest_sha256': '3' * 64,
+		'source_student_state_sha256': '4' * 64,
+		'refresh_phase': 'refresh_required',
+	}
+	payload = {
+		'training_state': {'checkpoint_kind': 'epoch'},
+		'epoch': 5,
+		'global_step': 10,
+	}
+
+	for _ in range(2):
+		runner_module._recover_periodic_checkpoint_event(  # noqa: SLF001
+			output_root=tmp_path / 'output',
+			payload=payload,
+			state=state,
+			components=components,
+		)
+
+	events = [
+		json.loads(line)
+		for line in (
+			tmp_path / 'output' / 'target_refresh_events.jsonl'
+		).read_text(encoding='utf-8').splitlines()
+	]
+	assert len(events) == 1
+	assert events[0]['checkpoint_kind'] == 'epoch'
+	assert events[0]['epoch'] == 5
+	assert events[0]['refresh_phase'] == 'refresh_required'

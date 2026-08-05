@@ -932,7 +932,9 @@ def _compare_full_and_smoke(
 		_mapping(identity['scientific_identity'], 'scientific_identity').pop(
 			'generation_root', None
 		)
-		_mapping(identity, 'identity').get('runtime_identity', {}).pop('device', None)
+		runtime_identity = identity.get('runtime_identity')
+		if runtime_identity is not None:
+			_mapping(runtime_identity, 'runtime identity').pop('device', None)
 		_mapping(value['train'], 'train').pop('device', None)
 		_mapping(value['train'], 'train').pop('max_steps', None)
 		_mapping(value['pseudo_target_refresh'], 'refresh').pop(
