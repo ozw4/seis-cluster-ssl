@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -57,6 +58,80 @@ def test_checkpoint_report_reuses_exact_and_quarantines_stale(
 	quarantined = list(report.parent.glob(f'{report.name}.quarantine.*'))
 	assert len(quarantined) == 1
 	assert quarantined[0].read_text(encoding='utf-8') == '{"status": "STALE"}'
+
+
+def test_execution_marker_rejects_corrupt_and_quarantines_before_recovery(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = SimpleNamespace(experiment_root=tmp_path)
+	path = validation._execution_evidence_path(config)  # noqa: SLF001
+	path.write_text('{not-json', encoding='utf-8')
+	monkeypatch.setattr(
+		validation,
+		'_execution_binding',
+		lambda _config: {'binding': 'current'},
+	)
+	monkeypatch.setattr(
+		validation,
+		'_execution_identity',
+		lambda: {'git_commit': 'a' * 40, 'git_status_short': []},
+	)
+
+	with pytest.raises(ValueError, match='quarantine-invalid'):
+		validation._start_execution_evidence(  # noqa: SLF001
+			config, dry_run=False, quarantine_invalid=False
+		)
+
+	validation._start_execution_evidence(  # noqa: SLF001
+		config, dry_run=False, quarantine_invalid=True
+	)
+	quarantined = list(tmp_path.glob(f'{path.name}.quarantine.*'))
+	assert len(quarantined) == 1
+	assert quarantined[0].read_text(encoding='utf-8') == '{not-json'
+	assert json.loads(path.read_text(encoding='utf-8'))['phase'] == 'inputs'
+
+
+@pytest.mark.parametrize('phase', ['smoke', 'complete'])
+@pytest.mark.parametrize('marker_binding', ['current', 'foreign'])
+def test_execution_marker_never_quarantines_completed_phase(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	phase: str,
+	marker_binding: str,
+) -> None:
+	config = SimpleNamespace(experiment_root=tmp_path)
+	path = validation._execution_evidence_path(config)  # noqa: SLF001
+	state = {
+		'git_commit': 'a' * 40,
+		'git_status_short': [],
+		'git_diff_sha256': 'b' * 64,
+	}
+	monkeypatch.setattr(
+		validation,
+		'_execution_binding',
+		lambda _config: {'binding': 'current'},
+	)
+	path.write_text(
+		json.dumps(
+			{
+				'artifact_type': validation._EXECUTION_ARTIFACT_TYPE,  # noqa: SLF001
+				'schema_version': 1,
+				'phase': phase,
+				'binding': {'binding': marker_binding},
+				'execution': {'before': state, 'after': state},
+			}
+		),
+		encoding='utf-8',
+	)
+	original = path.read_bytes()
+
+	with pytest.raises(ValueError, match=f'existing periodic {phase}'):
+		validation._start_execution_evidence(  # noqa: SLF001
+			config, dry_run=False, quarantine_invalid=True
+		)
+
+	assert path.read_bytes() == original
+	assert list(tmp_path.glob(f'{path.name}.quarantine.*')) == []
 
 
 def test_handoff_initial_target_manifest_is_a_loadable_reference(

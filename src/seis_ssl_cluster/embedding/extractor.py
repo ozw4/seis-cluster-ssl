@@ -1315,6 +1315,11 @@ def build_embedding_metadata(  # noqa: PLR0913
 		stratigraphy_pretext = _stratigraphy_pretext_metadata(checkpoint_payload)
 		if stratigraphy_pretext is not None:
 			metadata['stratigraphy_pretext'] = stratigraphy_pretext
+			embedding_semantics = stratigraphy_pretext.get(
+				'refresh_embedding_semantics'
+			)
+			if embedding_semantics is not None:
+				metadata['embedding_semantics'] = embedding_semantics
 	return metadata
 
 
@@ -1979,6 +1984,9 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 				'generation_root': checkpoint_identity['generation_root'],
 				'initial_hard_target_manifest_sha256': checkpoint_identity[
 					'initial_hard_target_manifest_sha256'
+				],
+				'target_manifest_sha256': target_refresh_state[
+					'active_target_manifest_sha256'
 				],
 				'active_generation_id': target_refresh_state[
 					'active_generation_id'

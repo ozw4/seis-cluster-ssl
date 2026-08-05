@@ -441,7 +441,11 @@ def validate_f3_center_trace_masked_periodic_refresh(
 	try:
 		inputs = _inputs_evidence(config)
 		if phase == 'inputs':
-			execution = _start_execution_evidence(config, dry_run=dry_run)
+			execution = _start_execution_evidence(
+				config,
+				dry_run=dry_run,
+				quarantine_invalid=quarantine_invalid,
+			)
 			evidence = {'status': 'PASS', **inputs, 'execution': execution}
 			if not dry_run:
 				evidence['phase_evidence_path'] = str(
@@ -2177,16 +2181,52 @@ def _start_execution_evidence(
 	config: F3CenterTraceMaskedPeriodicRefreshValidationConfig,
 	*,
 	dry_run: bool,
+	quarantine_invalid: bool,
 ) -> Mapping[str, object]:
 	path = _execution_evidence_path(config)
-	if path.is_file():
-		existing = _mapping(_json(path), 'periodic execution evidence')
-		if existing.get('binding') == _execution_binding(config) and existing.get(
-			'phase'
-		) == 'inputs':
-			return _mapping(existing['execution'], 'periodic execution state')
-		if existing.get('phase') in {'smoke', 'complete'}:
-			raise ValueError('periodic inputs evidence cannot follow executed phases')
+	if path.exists() or path.is_symlink():
+		existing_execution: Mapping[str, object] | None = None
+		completed_phase: str | None = None
+		try:
+			existing = _mapping(_json(path), 'periodic execution evidence')
+			valid_identity = (
+				existing.get('artifact_type') == _EXECUTION_ARTIFACT_TYPE
+				and existing.get('schema_version') == 1
+			)
+			if valid_identity:
+				phase = existing.get('phase')
+				candidate_execution = _mapping(
+					existing.get('execution'), 'periodic execution state'
+				)
+				_validate_execution_record(
+					candidate_execution,
+					phase=phase,
+					label='periodic execution evidence',
+				)
+				if phase in {'smoke', 'complete'}:
+					completed_phase = phase
+				elif (
+					phase == 'inputs'
+					and existing.get('binding') == _execution_binding(config)
+				):
+					existing_execution = candidate_execution
+		except _VALIDATION_ERRORS:
+			existing_execution = None
+			completed_phase = None
+		if completed_phase is not None:
+			raise ValueError(
+				f'existing periodic {completed_phase} execution evidence is complete; '
+				'refusing to restart it'
+			)
+		if existing_execution is not None:
+			return existing_execution
+		if not quarantine_invalid:
+			raise ValueError(
+				'existing periodic execution evidence is stale or invalid; pass '
+				'--quarantine-invalid to start a new execution'
+			)
+		if not dry_run:
+			_quarantine_file(path)
 	before = _execution_identity()
 	record = {
 		'artifact_type': _EXECUTION_ARTIFACT_TYPE,
@@ -2198,6 +2238,25 @@ def _start_execution_evidence(
 	if not dry_run:
 		_atomic_json(path, record)
 	return _mapping(record['execution'], 'periodic execution state')
+
+
+def _validate_execution_record(
+	execution: Mapping[str, object], *, phase: object, label: str
+) -> None:
+	"""Validate an execution marker before deciding whether it is reusable."""
+	if phase not in {'inputs', 'smoke', 'complete'}:
+		raise ValueError(f'{label} phase is invalid')
+	if set(execution) != {'before', 'after'}:
+		raise ValueError(f'{label} state fields are invalid')
+	_validate_execution_state(execution['before'], f'{label}.before')
+	after = execution['after']
+	if phase == 'inputs':
+		if after is not None:
+			raise ValueError(f'{label} inputs state is already complete')
+		return
+	if after is None:
+		raise ValueError(f'{label} {phase} state is incomplete')
+	_validate_execution_state(after, f'{label}.after')
 
 
 def _update_execution_evidence(

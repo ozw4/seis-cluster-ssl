@@ -1,0 +1,239 @@
+{
+  "artifact_type": "f3_center_trace_masked_periodic_refresh_pretraining_handoff",
+  "checkpoint": {
+    "epoch": 25,
+    "global_step": 25600,
+    "initial_head_state_sha256": "768ffee63faf5008c59efec903d58b166dac99b4d8cb38532d60fc2977c27947",
+    "initial_spatial_context_state_sha256": "6edf1303c88e534ee6ed93a67cd5d4be9bc167e91e06f8d4224a7ee51276740a",
+    "initial_student_state_sha256": "f98180d0833fd5ea272e23b29ce03d100c725d4cbd97b7ee7c7e39b97354c70f",
+    "latest_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/latest.pt",
+    "latest_sha256": "46c084c82c5c4cdb70375b432bd54aab7f2c68477b8027d01e1773bdfffea663",
+    "optimizer_group_identity": [
+      {
+        "lr": 0.0003,
+        "name": "head",
+        "parameter_names": [
+          "head.heads.k6.prototypes",
+          "head.heads.k6.projection.weight",
+          "head.heads.k6.projection.bias",
+          "head.heads.k8.prototypes",
+          "head.heads.k8.projection.weight",
+          "head.heads.k8.projection.bias",
+          "head.heads.k10.prototypes",
+          "head.heads.k10.projection.weight",
+          "head.heads.k10.projection.bias"
+        ]
+      },
+      {
+        "lr": 1e-05,
+        "name": "encoder",
+        "parameter_names": [
+          "student.encoder.layers.7.norm1.weight",
+          "student.encoder.layers.7.norm1.bias",
+          "student.encoder.layers.7.attention.in_proj_weight",
+          "student.encoder.layers.7.attention.in_proj_bias",
+          "student.encoder.layers.7.attention.out_proj.weight",
+          "student.encoder.layers.7.attention.out_proj.bias",
+          "student.encoder.layers.7.norm2.weight",
+          "student.encoder.layers.7.norm2.bias",
+          "student.encoder.layers.7.mlp.0.weight",
+          "student.encoder.layers.7.mlp.0.bias",
+          "student.encoder.layers.7.mlp.3.weight",
+          "student.encoder.layers.7.mlp.3.bias"
+        ]
+      },
+      {
+        "lr": 0.0003,
+        "name": "spatial_context",
+        "parameter_names": [
+          "spatial_context.replacement_token"
+        ]
+      }
+    ],
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/selected.pt",
+    "schema_version": 8,
+    "scientific_identity_sha256": "83d1d21930c772e60708e11a48c0191d2b62a5f479292995a2cef01cd861de92",
+    "sha256": "46c084c82c5c4cdb70375b432bd54aab7f2c68477b8027d01e1773bdfffea663",
+    "target_refresh_state_sha256": "fcd047b819c9b79dc706368fb89d76cc50354b244029df62a945dcf9badb1f7a"
+  },
+  "embedding": {
+    "embeddings_dtype": "float16",
+    "embeddings_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embeddings.npy",
+    "embeddings_sha256": "5ee0052cbc1268f5bfe3dd9a83d30ab0e6e8a4f36af999478abc27a999fb3f95",
+    "embeddings_shape": [
+      76,
+      113,
+      32,
+      384
+    ],
+    "finite_valid_count": 237225,
+    "metadata_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.embedding_metadata.json",
+    "metadata_sha256": "264365d2a70dea0b530f98ddd7f25bda4568ead092cdac424540688cbd0e105e",
+    "root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/overlap_x16",
+    "valid_tokens_dtype": "bool",
+    "valid_tokens_path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/overlap_x16/f3_facies_benchmark.valid_tokens.npy",
+    "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7",
+    "valid_tokens_shape": [
+      76,
+      113,
+      32
+    ]
+  },
+  "execution": {
+    "after": {
+      "git_commit": "3ee1e5485408f3d179675afddc6136897135aec8",
+      "git_diff_sha256": "57ffe513670288d3047a331214b4e1ed3516ff80cee4963211c542458505657d",
+      "git_status_short": [
+        "M src/seis_ssl_cluster/embedding/extractor.py",
+        " M src/seis_ssl_cluster/f3/center_trace_masked_periodic_refresh_validation.py",
+        " M tests/seis_ssl_cluster/test_proc_entrypoints.py",
+        "?? experiments/f3/facies_benchmark_v1/107_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_v1/05_review_periodic_refresh_results.yaml",
+        "?? proc/seis_ssl_cluster/publish_f3_center_trace_masked_periodic_refresh_results.py",
+        "?? src/seis_ssl_cluster/f3/center_trace_masked_periodic_refresh_results.py",
+        "?? tests/seis_ssl_cluster/test_f3_center_trace_masked_periodic_refresh_results.py"
+      ]
+    },
+    "before": {
+      "git_commit": "3ee1e5485408f3d179675afddc6136897135aec8",
+      "git_diff_sha256": "100a7ae7f7add1a49675b6af855ef63e38e3db8346cbd90e62fb3bb0ca22a9f8",
+      "git_status_short": [
+        "M src/seis_ssl_cluster/f3/center_trace_masked_periodic_refresh_validation.py",
+        " M tests/seis_ssl_cluster/test_proc_entrypoints.py",
+        "?? experiments/f3/facies_benchmark_v1/107_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_v1/05_review_periodic_refresh_results.yaml",
+        "?? proc/seis_ssl_cluster/publish_f3_center_trace_masked_periodic_refresh_results.py",
+        "?? src/seis_ssl_cluster/f3/center_trace_masked_periodic_refresh_results.py"
+      ]
+    }
+  },
+  "fixed_preprocessing": {
+    "feature_dimension": 64,
+    "fixed_clustering_config_sha256": "8335a80cb08649c305db5977cffb04f1f6b9834d33d6f90a8ead6d8c51d22e5c",
+    "fixed_preprocessor_sha256": "404df7be5d7dab0ca826384cf7698aa7a53cd8f5e1ffa6ad4e0bcfe311daa322",
+    "fixed_residualizer_sha256": "97f7486102bedf9a988bf8eaaa99822faf8aafa35b5d0ee52fc882ecc15753aa",
+    "initial_hmm_artifacts": {
+      "common": {
+        "clustering_config": {
+          "path": "experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/01_replay_hmm_k6810.yaml",
+          "sha256": "8335a80cb08649c305db5977cffb04f1f6b9834d33d6f90a8ead6d8c51d22e5c"
+        },
+        "preprocessor": {
+          "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k6/preprocessor.joblib",
+          "sha256": "404df7be5d7dab0ca826384cf7698aa7a53cd8f5e1ffa6ad4e0bcfe311daa322"
+        },
+        "residualizer": {
+          "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/residualizer.npz",
+          "sha256": "97f7486102bedf9a988bf8eaaa99822faf8aafa35b5d0ee52fc882ecc15753aa"
+        },
+        "source_embedding_metadata": {
+          "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/f3_facies_benchmark.embedding_metadata.json",
+          "sha256": "8dda68ec9c756e156332dd34fff069cb89335daaa3de520ad17b490311f74d4b"
+        }
+      },
+      "heads": {
+        "10": {
+          "centers": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k10/cluster_centers.npy",
+            "sha256": "e87936094d7f5cd4b32c2ba7e0cf3d65211af9d1c34be6cf3636ca3bea737fb1"
+          },
+          "hmm_model": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k10/hmm_model.joblib",
+            "sha256": "384d5a23042e6c91e95ae146950150e1bea7219388719d2731c754fdb05dcc1b"
+          },
+          "model_metadata": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k10/clustering_metadata.json",
+            "sha256": "3372a07589e38feed8df5a9a088fa0dd30298e77a27bc69b4f2d027abc918ac4"
+          }
+        },
+        "6": {
+          "centers": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k6/cluster_centers.npy",
+            "sha256": "6a58b124e6d784d72d1f6bba058f135299436556b86d844a1bdedf78c964cce8"
+          },
+          "hmm_model": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k6/hmm_model.joblib",
+            "sha256": "680eca23f1434cc4e85ebdbcc13a25779eb5f411b6924174abb6c7564d36e3c6"
+          },
+          "model_metadata": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k6/clustering_metadata.json",
+            "sha256": "d9d334586d46a46c41c89923ae62026f1241fb593d4652fe6da3e2613c5f411e"
+          }
+        },
+        "8": {
+          "centers": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k8/cluster_centers.npy",
+            "sha256": "0d5c970f4ec00db5f4127cc33a80e571459e07d3e8a0e348bf855767254090c6"
+          },
+          "hmm_model": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k8/hmm_model.joblib",
+            "sha256": "a0c77f433f0e116f8fc7806fdacead72c29e174947a036f4c2286eac650c33cf"
+          },
+          "model_metadata": {
+            "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/models/k8/clustering_metadata.json",
+            "sha256": "9138619c8461ad237b774125f4ba414ea5a06a49b7bf1cbef50afe725dce0cf1"
+          }
+        }
+      }
+    },
+    "source_embedding_metadata_sha256": "8dda68ec9c756e156332dd34fff069cb89335daaa3de520ad17b490311f74d4b",
+    "source_valid_token_hashes": {
+      "f3_facies_benchmark": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+    }
+  },
+  "model_tag": "strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1",
+  "primary_checkpoint_role": "completed_final_selected",
+  "schema_version": 1,
+  "status": "PASS",
+  "targets": {
+    "final_generation": {
+      "content_sha256": "6d71d46e618c86925fd8d90badc8f90b5f8a25d04688c32440db6a6857ba0ef6",
+      "generation_id": "refresh_0007_epoch020",
+      "generation_index": 7,
+      "manifest": {
+        "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/target_refresh/generations/refresh_0007_epoch020/refresh_generation.json",
+        "sha256": "7bfe852037e44de31e8f9adee5237bff1482295c745f44efbe0711b34857d48a"
+      }
+    },
+    "final_target_manifest": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/target_refresh/generations/refresh_0007_epoch020/pseudo_targets/multi_head_target_manifest.json",
+      "sha256": "456c1d75963a1f3239f8aac905257afac3221f6843aa3b1f5d424fcb900410c1"
+    },
+    "initial_hard_target_manifest": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_pca64_resid_token_phase_edge8_expected3_iter10_v1/multi_head_target_manifest.json",
+      "sha256": "c0b4edc17774d522bc0896db1366166628135d8369d2e063fd6183c66b01d15c"
+    },
+    "initial_per_head_target_hashes": {
+      "10": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "13fbd90858a3862c92d27fecaee74f356b9c2c5dab4613d5732f759cb889707c",
+          "metadata": "93bc962e290679749095e4b72bed9ea42fe030259c4426c3ad0226ab3c2a15fa",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      },
+      "6": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "87a3ea23cb142d6e77acd3b63c6c4ca87250d82c99aabad152c9cd8e8c2c5e19",
+          "metadata": "2ec01e32372682c2abd308f5aa318e9d708bdab940aedae3f9a3606790d1e362",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      },
+      "8": {
+        "f3_facies_benchmark": {
+          "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+          "labels": "28c48c6dc19db55553b555f4494cfcfebb0cdce13557a1471ed0635ac1f3087d",
+          "metadata": "c8c004e871e0588abe801c1ab6ba5a6df8e5d62e8ae88aa550d0cb85d9b90c33",
+          "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+        }
+      }
+    },
+    "periodic_refresh_chain": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/target_refresh/periodic_refresh_chain.json",
+      "sha256": "dc10c59926623b0258804772bf1034000d2e5dcd24098e3ac3f7594bcb7d3b3a"
+    },
+    "valid_token_hashes": {
+      "f3_facies_benchmark": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526"
+    }
+  },
+  "variant": "ctmask010_refresh3ep_hmm2_nocons"
+}

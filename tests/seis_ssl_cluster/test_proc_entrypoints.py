@@ -274,6 +274,11 @@ HELP_FLAG_CONTRACTS = {
 		'--output-dir',
 		'--dry-run',
 	),
+	'publish_f3_center_trace_masked_periodic_refresh_results.py': (
+		'--config',
+		'--dry-run',
+		'--quarantine-invalid',
+	),
 	'visualize_clusters.py': (
 		'--config',
 		'--dry-run',

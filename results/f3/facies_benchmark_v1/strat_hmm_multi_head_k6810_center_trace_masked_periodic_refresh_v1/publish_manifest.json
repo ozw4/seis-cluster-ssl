@@ -1,0 +1,45 @@
+{
+  "created_at_utc": "2026-08-05T01:29:50.258698Z",
+  "items": [
+    {
+      "sha256": "30bd9e46c410192e1500985f426ce65b240ebfd669108c8326181b48496103c4",
+      "size_bytes": 143910,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/preflight/periodic_refresh_handoff.json",
+      "target": "periodic_refresh_pretraining_summary.json"
+    },
+    {
+      "sha256": "b14192a988cbcd524e425dc1a3747fe8f98f7d1b2aa308e492c5ce459f79979f",
+      "size_bytes": 3009,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/preflight/periodic_refresh_handoff.json",
+      "target": "periodic_refresh_pretraining_summary.md"
+    },
+    {
+      "sha256": "1a4b84c485a76c243510ed22ce859dd40ec864548dee61e34273c0b47f9c26be",
+      "size_bytes": 45592,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/preflight/periodic_refresh_handoff.json",
+      "target": "periodic_refresh_events.csv"
+    },
+    {
+      "sha256": "0f3604e89cc0f09a14b24bc7bef9904185d9559cacbc2100479a23820d271e20",
+      "size_bytes": 72624,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/preflight/periodic_refresh_handoff.json",
+      "target": "periodic_refresh_generation_summary.csv"
+    },
+    {
+      "sha256": "20b4dde8256ff47496dd5fc374ab610db4e4352b5595c56904b70f92776be637",
+      "size_bytes": 3055,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/preflight/periodic_refresh_handoff.json",
+      "target": "periodic_refresh_checkpoint_summary.json"
+    },
+    {
+      "sha256": "63b51fdc8e5b64300b44036f854d3fa2b337d50297afcc3e5c71d15c19b2bf89",
+      "size_bytes": 13838,
+      "source": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/preflight/periodic_refresh_handoff.json",
+      "target": "periodic_refresh_pretraining_handoff.json"
+    }
+  ],
+  "output_dir": "results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_v1",
+  "skipped_optional_items": [],
+  "source_artifact_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}",
+  "warnings": []
+}

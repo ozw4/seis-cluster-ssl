@@ -1,0 +1,81 @@
+{
+  "artifact_type": "f3_center_trace_masked_periodic_refresh_checkpoint_summary",
+  "checkpoint": {
+    "epoch": 25,
+    "global_step": 25600,
+    "latest": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/latest.pt",
+      "sha256": "46c084c82c5c4cdb70375b432bd54aab7f2c68477b8027d01e1773bdfffea663"
+    },
+    "schema_version": 8,
+    "selected": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/selected.pt",
+      "sha256": "46c084c82c5c4cdb70375b432bd54aab7f2c68477b8027d01e1773bdfffea663"
+    },
+    "selected_event": {
+      "batch_index": null,
+      "checkpoint_kind": "epoch",
+      "epoch": 25,
+      "global_step": 25600,
+      "refresh_phase": "training",
+      "sequence": 82
+    },
+    "selection_history_sha256": "66ccf92a9cd9a8a1638a3a9a6026ab5743b757cfcbb2859b6be416dcc4134ffa",
+    "selection_policy": "final_completed_epoch_v1"
+  },
+  "optimizer_global_step_continuity": {
+    "actual_step": 25600,
+    "expected_step": 25600,
+    "groups": [
+      {
+        "lr": 0.0003,
+        "name": "head",
+        "parameter_names": [
+          "head.heads.k6.prototypes",
+          "head.heads.k6.projection.weight",
+          "head.heads.k6.projection.bias",
+          "head.heads.k8.prototypes",
+          "head.heads.k8.projection.weight",
+          "head.heads.k8.projection.bias",
+          "head.heads.k10.prototypes",
+          "head.heads.k10.projection.weight",
+          "head.heads.k10.projection.bias"
+        ]
+      },
+      {
+        "lr": 1e-05,
+        "name": "encoder",
+        "parameter_names": [
+          "student.encoder.layers.7.norm1.weight",
+          "student.encoder.layers.7.norm1.bias",
+          "student.encoder.layers.7.attention.in_proj_weight",
+          "student.encoder.layers.7.attention.in_proj_bias",
+          "student.encoder.layers.7.attention.out_proj.weight",
+          "student.encoder.layers.7.attention.out_proj.bias",
+          "student.encoder.layers.7.norm2.weight",
+          "student.encoder.layers.7.norm2.bias",
+          "student.encoder.layers.7.mlp.0.weight",
+          "student.encoder.layers.7.mlp.0.bias",
+          "student.encoder.layers.7.mlp.3.weight",
+          "student.encoder.layers.7.mlp.3.bias"
+        ]
+      },
+      {
+        "lr": 0.0003,
+        "name": "spatial_context",
+        "parameter_names": [
+          "spatial_context.replacement_token"
+        ]
+      }
+    ],
+    "refresh_global_step_unchanged": true,
+    "status": "PASS"
+  },
+  "refresh_chain": {
+    "generation_count": 8,
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/target_refresh/periodic_refresh_chain.json",
+    "sha256": "dc10c59926623b0258804772bf1034000d2e5dcd24098e3ac3f7594bcb7d3b3a"
+  },
+  "schema_version": 1,
+  "status": "PASS"
+}
