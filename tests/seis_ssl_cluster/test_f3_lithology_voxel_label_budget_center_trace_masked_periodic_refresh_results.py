@@ -162,20 +162,22 @@ def _rows(
 		'class_5_boundary_recall_t4',
 	)
 	for budget in budgets:
-		for metric in metrics:
-			value = 0.0
-			metric_wins = 0
-			if budget in positive_budgets and metric in {'macro_f1', 'mean_iou'}:
-				value, metric_wins = 0.1, wins
-			if budget in negative_budgets and metric in {'macro_f1', 'mean_iou'}:
-				value, metric_wins = -0.1, 1
-			rows.append(
-				{
-					'budget_id': budget,
-					'comparison_id': 'mh_ctmask010_refresh3ep_hmm2_nocons_vs_mh_ctmask010_nocons',
-					'metric': metric,
-					'mean_delta': value,
-					'wins': metric_wins,
-				}
-			)
+		for candidate, baseline in results.COMPARISONS:
+			comparison_id = results.control._comparison_id(candidate, baseline)
+			for metric in metrics:
+				value = 0.0
+				metric_wins = 0
+				if budget in positive_budgets and metric in {'macro_f1', 'mean_iou'}:
+					value, metric_wins = 0.1, wins
+				if budget in negative_budgets and metric in {'macro_f1', 'mean_iou'}:
+					value, metric_wins = -0.1, 1
+				rows.append(
+					{
+						'budget_id': budget,
+						'comparison_id': comparison_id,
+						'metric': metric,
+						'mean_delta': value,
+						'wins': metric_wins,
+					}
+				)
 	return rows

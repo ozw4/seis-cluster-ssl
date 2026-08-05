@@ -375,6 +375,7 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 	trainability_summary: Mapping[str, object] | None = None,
 	control_identity: Mapping[str, object] | None = None,
 	target_refresh_state: Mapping[str, object] | None = None,
+	epoch_metrics_state: Mapping[str, object] | None = None,
 ) -> StratRollingCheckpointResult:
 	"""Write rolling ``latest.pt`` and update ``best.pt`` on lower loss."""
 	checkpoint_root = Path(checkpoint_dir)
@@ -401,6 +402,7 @@ def save_strat_hmm_rolling_checkpoint(  # noqa: PLR0913
 			trainability_summary=trainability_summary,
 			control_identity=control_identity,
 			target_refresh_state=target_refresh_state,
+			epoch_metrics_state=epoch_metrics_state,
 		)
 	is_multi_head = _is_multi_head_config(stratigraphy_config)
 	if is_multi_head:
@@ -494,6 +496,7 @@ def _save_periodic_refresh_rolling_checkpoint(  # noqa: PLR0913
 	trainability_summary: Mapping[str, object] | None,
 	control_identity: Mapping[str, object] | None,
 	target_refresh_state: Mapping[str, object] | None,
+	epoch_metrics_state: Mapping[str, object] | None,
 ) -> StratRollingCheckpointResult:
 	"""Write periodic rolling state without loss-based model selection."""
 	if best_score is not None:
@@ -505,6 +508,8 @@ def _save_periodic_refresh_rolling_checkpoint(  # noqa: PLR0913
 		)
 	if target_refresh_state is None:
 		raise ValueError('periodic refresh rolling checkpoint requires refresh state')
+	if checkpoint_kind == 'step' and epoch_metrics_state is None:
+		raise ValueError('periodic step checkpoint requires epoch metrics state')
 	refresh_state = _validated_target_refresh_state(
 		target_refresh_state, expected_config=stratigraphy_config
 	)
@@ -537,6 +542,7 @@ def _save_periodic_refresh_rolling_checkpoint(  # noqa: PLR0913
 		control_identity=control_identity,
 		checkpoint_selection=selection,
 		target_refresh_state=refresh_state,
+		epoch_metrics_state=epoch_metrics_state,
 	)
 	selected_path: Path | None = None
 	if selection['selected'] is not None:
@@ -597,7 +603,7 @@ def recover_strat_hmm_rolling_checkpoint(checkpoint_dir: str | Path) -> None:
 	transaction_path.unlink()
 
 
-def save_strat_hmm_checkpoint(  # noqa: PLR0913
+def save_strat_hmm_checkpoint(  # noqa: C901, PLR0913
 	path: str | Path,
 	*,
 	student: torch.nn.Module,
@@ -618,6 +624,7 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 	control_identity: Mapping[str, object] | None = None,
 	checkpoint_selection: Mapping[str, object] | None = None,
 	target_refresh_state: Mapping[str, object] | None = None,
+	epoch_metrics_state: Mapping[str, object] | None = None,
 ) -> Path:
 	"""Atomically save an extraction-compatible strat HMM checkpoint."""
 	checkpoint_path = Path(path)
@@ -662,6 +669,12 @@ def save_strat_hmm_checkpoint(  # noqa: PLR0913
 			'batch_index': batch_index,
 		},
 	}
+	if epoch_metrics_state is not None:
+		payload['epoch_metrics_state'] = _validated_epoch_metrics_state(
+			epoch_metrics_state
+		)
+	elif _is_periodic_refresh_config(stratigraphy_config) and checkpoint_kind == 'step':
+		raise ValueError('schema-8 step checkpoint requires epoch metrics state')
 	if control_identity is not None:
 		payload['control_identity'] = _to_plain_value(control_identity)
 	if _is_periodic_refresh_config(stratigraphy_config):
@@ -5256,7 +5269,7 @@ def _periodic_event_is_final(
 	)
 
 
-def _validate_periodic_training_state(
+def _validate_periodic_training_state(  # noqa: C901
 	payload: Mapping[str, object], *, train_epochs: int
 ) -> None:
 	training_state = payload.get('training_state')
@@ -5279,6 +5292,13 @@ def _validate_periodic_training_state(
 	batch_index = training_state.get('batch_index')
 	if kind == 'step':
 		_nonnegative_int_value(batch_index, 'schema-8 step batch_index')
+		epoch_metrics_state = _validated_epoch_metrics_state(
+			payload.get('epoch_metrics_state')
+		)
+		if epoch_metrics_state['batch_count'] != int(batch_index) + 1:
+			raise ValueError(
+				'schema-8 epoch metrics state batch count does not match batch_index'
+			)
 	elif batch_index is not None:
 		raise ValueError('schema-8 epoch/refresh batch_index must be null')
 	checkpoint_config = payload.get('stratigraphy_config')
@@ -5300,6 +5320,37 @@ def _validate_periodic_training_state(
 		raise ValueError(
 			'schema-8 refresh checkpoint requires refresh_complete state'
 		)
+
+
+def _validated_epoch_metrics_state(value: object) -> dict[str, object]:
+	"""Validate the exact running metric accumulator stored in step checkpoints."""
+	if not isinstance(value, Mapping):
+		raise TypeError('schema-8 epoch metrics state must be a mapping')
+	if set(value) != {'schema_version', 'batch_count', 'totals'}:
+		raise ValueError('schema-8 epoch metrics state fields are not closed')
+	if value.get('schema_version') != 1:
+		raise ValueError('schema-8 epoch metrics state schema_version is invalid')
+	batch_count = _nonnegative_int_value(
+		value.get('batch_count'), 'schema-8 epoch metrics batch_count'
+	)
+	if batch_count == 0:
+		raise ValueError('schema-8 epoch metrics batch_count must be positive')
+	totals = value.get('totals')
+	if not isinstance(totals, Mapping) or not totals:
+		raise ValueError('schema-8 epoch metrics totals must be non-empty')
+	validated_totals: dict[str, float] = {}
+	for key, raw_value in totals.items():
+		if isinstance(raw_value, bool) or not isinstance(raw_value, (int, float)):
+			raise TypeError('schema-8 epoch metric totals must be numeric')
+		metric = float(raw_value)
+		if not math.isfinite(metric):
+			raise ValueError('schema-8 epoch metric totals must be finite')
+		validated_totals[str(key)] = metric
+	return {
+		'schema_version': 1,
+		'batch_count': batch_count,
+		'totals': validated_totals,
+	}
 
 
 def _validate_periodic_checkpoint_phase(  # noqa: C901

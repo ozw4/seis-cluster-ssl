@@ -387,6 +387,8 @@ def train_strat_hmm_center_trace_masked_one_epoch(  # noqa: C901, PLR0912, PLR09
 	grad_clip_norm: float | None = None,
 	skip_batches: int = 0,
 	step_callback: Callable[[StratHmmTrainingState], None] | None = None,
+	initial_epoch_metric_totals: Mapping[str, float] | None = None,
+	initial_epoch_batch_count: int = 0,
 ) -> StratHmmTrainingState:
 	"""Train the center-trace masked hard multi-head objective for one epoch."""
 	if heads.head_ks != COMMON_HARD_TARGET_HEAD_KS:
@@ -398,8 +400,19 @@ def train_strat_hmm_center_trace_masked_one_epoch(  # noqa: C901, PLR0912, PLR09
 	_set_student_training_mode(student)
 	heads.train()
 	replacement_token.train()
-	totals: dict[str, float] = {}
-	batches = 0
+	if initial_epoch_batch_count < 0:
+		raise ValueError('initial epoch batch count must be nonnegative')
+	if initial_epoch_batch_count and initial_epoch_metric_totals is None:
+		raise ValueError('initial epoch metric totals are required for resumed batches')
+	if initial_epoch_metric_totals is not None and not initial_epoch_batch_count:
+		raise ValueError('initial epoch metric totals require resumed batches')
+	totals = {
+		str(key): float(value)
+		for key, value in (initial_epoch_metric_totals or {}).items()
+	}
+	if not all(torch.isfinite(torch.tensor(value)) for value in totals.values()):
+		raise ValueError('initial epoch metric totals must be finite')
+	batches = initial_epoch_batch_count
 	last_batch_index = -1
 	for batch_index, raw_batch in enumerate(dataloader):
 		if batch_index < skip_batches:
@@ -538,6 +551,8 @@ def train_strat_hmm_center_trace_masked_one_epoch(  # noqa: C901, PLR0912, PLR09
 						if completed_epoch
 						else None
 					),
+					epoch_metric_totals=dict(totals),
+					epoch_batch_count=batches,
 				)
 			)
 	if batches == 0:
@@ -548,6 +563,8 @@ def train_strat_hmm_center_trace_masked_one_epoch(  # noqa: C901, PLR0912, PLR09
 		metrics={key: total / batches for key, total in totals.items()},
 		last_batch_index=last_batch_index,
 		completed_epoch=last_batch_index >= len(dataloader) - 1,
+		epoch_metric_totals=dict(totals),
+		epoch_batch_count=batches,
 	)
 
 

@@ -294,13 +294,24 @@ def _validate_gate_summary(
 			raise ValueError(f'periodic-refresh gate win count is invalid: {key!r}')
 		if key[1] == comparison_id:
 			index[(key[0], key[2])] = row
-	expected = {(str(budget), metric) for budget in budgets for metric in _GATE_METRICS}
-	if set(index) != expected:
+	expected = {
+		(str(budget), control._comparison_id(candidate, baseline), metric)
+		for budget in budgets
+		for candidate, baseline in COMPARISONS
+		for metric in _GATE_METRICS
+	}
+	if seen != expected:
 		raise ValueError(
-			'periodic-refresh gate summary matrix is incomplete or duplicated: '
-			f'missing={sorted(expected - set(index))!r}, '
-			f'extra={sorted(set(index) - expected)!r}'
+			'periodic-refresh gate summary comparison matrix is incomplete or '
+			'duplicated: '
+			f'missing={sorted(expected - seen)!r}, '
+			f'extra={sorted(seen - expected)!r}'
 		)
+	primary_expected = {
+		(str(budget), metric) for budget in budgets for metric in _GATE_METRICS
+	}
+	if set(index) != primary_expected:
+		raise ValueError('periodic-refresh primary gate summary matrix is incomplete')
 	return index
 
 

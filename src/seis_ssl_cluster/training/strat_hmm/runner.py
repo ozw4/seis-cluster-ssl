@@ -252,6 +252,9 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 	)
 	scaler = torch.amp.GradScaler('cuda', enabled=amp_enabled) if amp_enabled else None
 	resume_state = StratHmmResumeState(start_epoch=1, global_step=0, skip_batches=0)
+	resume_checkpoint_kind: object | None = None
+	resume_epoch_metric_totals: dict[str, float] | None = None
+	resume_epoch_batch_count = 0
 	recovered_completed_epoch = False
 	if resume is not None:
 		if is_multi_head and not is_periodic_refresh:
@@ -278,6 +281,23 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 			amp_enabled=amp_enabled,
 			config=config,
 		)
+		if is_periodic_refresh and resume_checkpoint_kind == 'step':
+			epoch_metrics_state = _mapping(
+				payload.get('epoch_metrics_state'), 'epoch metrics state'
+			)
+			raw_totals = _mapping(
+				epoch_metrics_state.get('totals'), 'epoch metric totals'
+			)
+			resume_epoch_metric_totals = {
+				str(key): float(value) for key, value in raw_totals.items()
+			}
+			resume_epoch_batch_count = _int_config(
+				epoch_metrics_state, 'batch_count', 0
+			)
+			if resume_epoch_batch_count != resume_state.skip_batches:
+				raise ValueError(
+					'periodic epoch metrics state does not match resumed batch position'
+				)
 		if is_periodic_refresh:
 			if not isinstance(resume_state.target_refresh_state, Mapping):
 				raise ValueError(
@@ -532,6 +552,13 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 					or step_state.global_step % checkpoint_every_steps != 0
 				):
 					return
+				if (
+					step_state.epoch_metric_totals is None
+					or step_state.epoch_batch_count <= 0
+				):
+					raise ValueError(
+						'periodic step checkpoint is missing epoch metric totals'
+					)
 				checkpoint_metrics = step_state.metrics
 				if step_state.completed_epoch:
 					if step_state.epoch_metrics is None:
@@ -564,6 +591,11 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 					control_identity=control_identity,
 					checkpoint_selection=checkpoint_selection,
 					target_refresh_state=periodic_state,  # noqa: B023
+					epoch_metrics_state={
+						'schema_version': 1,
+						'batch_count': step_state.epoch_batch_count,
+						'totals': step_state.epoch_metric_totals,
+					},
 				)
 				checkpoint_path = result.latest_path
 				checkpoint_selection = result.checkpoint_selection
@@ -626,6 +658,16 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				grad_clip_norm=grad_clip_norm,
 				skip_batches=skip_batches,
 				step_callback=save_periodic_step_checkpoint,
+				initial_epoch_metric_totals=(
+					resume_epoch_metric_totals
+					if epoch == resume_state.start_epoch
+					else None
+				),
+				initial_epoch_batch_count=(
+					resume_epoch_batch_count
+					if epoch == resume_state.start_epoch
+					else 0
+				),
 			)
 			trainability_metrics = _trainability_metrics(
 				components.trainability_summary
@@ -1332,6 +1374,46 @@ def _append_target_refresh_event(
 ) -> None:
 	path = output_root / 'target_refresh_events.jsonl'
 	path.parent.mkdir(parents=True, exist_ok=True)
+	if payload.get('event_type') == 'refresh' and payload.get('status') in {
+		'start',
+		'complete',
+	} and path.is_file():
+		identity_fields = (
+			'event_type',
+			'status',
+			'refresh_epoch',
+			'generation_index',
+			'generation_id',
+			'source_student_state_sha256',
+			'student_state_sha256',
+			'optimizer_state_sha256',
+		)
+		if payload.get('status') == 'complete':
+			identity_fields += (
+				'output_generation_manifest_path',
+				'output_generation_manifest_sha256',
+				'active_target_manifest_path',
+				'active_target_manifest_sha256',
+			)
+		for line in path.read_text(encoding='utf-8').splitlines():
+			if not line.strip():
+				continue
+			existing = json.loads(line)
+			if not isinstance(existing, Mapping):
+				raise TypeError('periodic refresh event must be a mapping')
+			if all(
+				existing.get(key) == payload.get(key)
+				for key in ('event_type', 'status', 'refresh_epoch')
+			):
+				if not all(
+					existing.get(key) == payload.get(key)
+					for key in identity_fields
+				):
+					raise ValueError(
+						'conflicting periodic refresh lifecycle event already exists'
+					)
+			if all(existing.get(key) == payload.get(key) for key in identity_fields):
+				return
 	with path.open('a', encoding='utf-8') as handle:
 		handle.write(json.dumps(dict(payload), sort_keys=True, allow_nan=False))
 		handle.write('\n')
@@ -2228,6 +2310,7 @@ def _save_periodic_checkpoint(  # noqa: PLR0913
 	control_identity: Mapping[str, object] | None,
 	checkpoint_selection: Mapping[str, object] | None,
 	target_refresh_state: Mapping[str, object],
+	epoch_metrics_state: Mapping[str, object] | None = None,
 	epoch_start_dataloader_rng_state: torch.Tensor | None = None,
 ) -> object:
 	if checkpoint_kind == 'step':
@@ -2263,6 +2346,7 @@ def _save_periodic_checkpoint(  # noqa: PLR0913
 		best_score=None,
 		checkpoint_selection=checkpoint_selection,
 		target_refresh_state=target_refresh_state,
+		epoch_metrics_state=epoch_metrics_state,
 	)
 
 

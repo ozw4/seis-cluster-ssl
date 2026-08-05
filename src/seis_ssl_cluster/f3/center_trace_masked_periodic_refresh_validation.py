@@ -11,7 +11,7 @@ import os
 import pickle
 import subprocess
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -1790,6 +1790,7 @@ def _events_evidence(
 		for line in path.read_text(encoding='utf-8').splitlines()
 		if line.strip()
 	]
+	events = _deduplicate_refresh_lifecycle_events(events)
 	if not events:
 		raise ValueError('periodic refresh events are empty')
 	generations = {
@@ -1942,6 +1943,36 @@ def _events_evidence(
 		raise ValueError('periodic refresh events are missing the final epoch checkpoint')
 	if state.get('active_generation_id') != _GENERATION_IDS[-1]:
 		raise ValueError('periodic event state is not final')
+
+
+def _deduplicate_refresh_lifecycle_events(
+	events: Sequence[Mapping[str, object]],
+) -> list[Mapping[str, object]]:
+	"""Ignore exact lifecycle replays while rejecting conflicting retries."""
+	seen: dict[tuple[object, ...], Mapping[str, object]] = {}
+	result: list[Mapping[str, object]] = []
+	for event in events:
+		if event.get('event_type') != 'refresh' or event.get('status') not in {
+			'start',
+			'complete',
+		}:
+			result.append(event)
+			continue
+		key = (
+			event.get('event_type'),
+			event.get('status'),
+			event.get('refresh_epoch'),
+			event.get('generation_index'),
+			event.get('generation_id'),
+		)
+		previous = seen.get(key)
+		if previous is None:
+			seen[key] = event
+			result.append(event)
+			continue
+		if dict(previous) != dict(event):
+			raise ValueError('conflicting duplicate periodic refresh lifecycle event')
+	return result
 
 
 def _embedding_evidence(
