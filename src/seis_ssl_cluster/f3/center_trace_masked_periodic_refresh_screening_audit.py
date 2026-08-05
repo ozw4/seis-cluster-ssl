@@ -727,7 +727,7 @@ def _decoder_contract_evidence(
 		raise ValueError('decoder target head identity mismatch')
 	for key, expected in (
 		('embedding_dim', 384),
-		('hidden_channels', [128, 64, 32]),
+		('hidden_channels', (128, 64, 32)),
 		('upsample_mode', 'nearest'),
 		('normalization', 'voxelwise_layer_norm'),
 	):
