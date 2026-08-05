@@ -40,6 +40,12 @@ HELP_FLAG_CONTRACTS = {
 		'--only-missing',
 		'--quarantine-invalid',
 	),
+	'audit_f3_center_trace_masked_periodic_refresh_screening.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+		'--quarantine-invalid',
+	),
 	'build_strat_hmm_pseudo_targets.py': (
 		'--config',
 		'--dry-run',
@@ -115,11 +121,23 @@ HELP_FLAG_CONTRACTS = {
 		'--only-missing',
 		'--resume',
 	),
+	'run_f3_lithology_center_trace_masked_periodic_refresh_voxel_label_budget.py': (
+		'--config',
+		'--dry-run',
+		'--device',
+		'--only-missing',
+		'--resume',
+	),
 	'summarize_f3_lithology_voxel_label_budget_xy_neighbor_consensus.py': (
 		'--config',
 		'--dry-run',
 	),
 	'summarize_f3_lithology_voxel_label_budget_center_trace_masked.py': (
+		'--config',
+		'--dry-run',
+	),
+	'summarize_f3_lithology_voxel_label_budget_center_trace_masked_'
+	'periodic_refresh.py': (
 		'--config',
 		'--dry-run',
 	),

@@ -1,3 +1,5 @@
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
 import json
@@ -223,6 +225,13 @@ F3_STRAT_HMM_PERIODIC_REFRESH_VALIDATION_CONFIGS = [
 	F3_STRAT_HMM_PERIODIC_REFRESH_ROOT
 	/ '04_validate_periodic_refresh_pretraining.yaml',
 ]
+F3_PERIODIC_REFRESH_ORIGINAL_SPLIT_ROOT = (
+	F3_ROOT
+	/ '108_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_low_label_v1'
+)
+F3_PERIODIC_REFRESH_ORIGINAL_SPLIT_CONFIGS = sorted(
+	F3_PERIODIC_REFRESH_ORIGINAL_SPLIT_ROOT.glob('*.yaml')
+)
 F3_STRAT_HMM_PRETEXT_CONFIGS = sorted(
 	[
 		F3_STRAT_HMM_PRETRAINING_M1_ROOT
@@ -505,6 +514,10 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	(
 		'f3 strat hmm periodic refresh validation',
 		F3_STRAT_HMM_PERIODIC_REFRESH_VALIDATION_CONFIGS,
+	),
+	(
+		'f3 periodic refresh original split low label',
+		F3_PERIODIC_REFRESH_ORIGINAL_SPLIT_CONFIGS,
 	),
 	('f3 strat hmm shuffled targets', F3_STRAT_HMM_SHUFFLED_TARGET_CONFIGS),
 	(
@@ -1003,6 +1016,46 @@ def test_active_f3_periodic_refresh_configs_resolve(
 	for path in F3_STRAT_HMM_PERIODIC_REFRESH_VALIDATION_CONFIGS:
 		resolved = load_f3_center_trace_masked_periodic_refresh_validation_config(path)
 		assert resolved.target_manifest == target.resolve()
+
+
+def test_active_f3_periodic_refresh_original_split_configs_have_closed_roles(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_WORKSPACE', '/workspace')
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT', '/test/artifacts/seis_ssl_cluster'
+	)
+	monkeypatch.setenv('F3_ROOT', '/test/f3')
+	root = F3_PERIODIC_REFRESH_ORIGINAL_SPLIT_ROOT
+	audit = load_config(root / '00_audit_periodic_refresh_screening.yaml')
+	assert set(audit) == {
+		'artifact_root',
+		'workspace_root',
+		'source_hard_manifest',
+		'hard_full_config',
+		'hard_pretraining_handoff',
+		'center_trace_masked_config',
+		'periodic_refresh_validation_config',
+		'periodic_refresh_full_config',
+		'periodic_refresh_handoff',
+		'periodic_refresh_embeddings_dir',
+		'output_path',
+	}
+	run = load_config(root / '01_run_periodic_refresh_voxel_label_budget.yaml')
+	assert run['multi_head']['budgets'] == ['cap25', 'cap50', 'cap100']
+	assert run['multi_head']['subsample_seeds'] == [0, 1, 2, 3, 4]
+	assert run['multi_head']['seed_policy'] == {
+		'base_seed': 42000,
+		'add_subsample_seed': True,
+	}
+	assert len(run['multi_head']['candidates']) == 1
+	assert run['multi_head']['candidates'][0]['model_id'] == (
+		'mh_ctmask010_refresh3ep_hmm2_nocons'
+	)
+	summary = load_config(
+		root / '02_summarize_periodic_refresh_voxel_label_budget.yaml'
+	)
+	assert set(summary) == {'run_config'}
 
 
 def test_active_f3_m5_ls_config_contract(
