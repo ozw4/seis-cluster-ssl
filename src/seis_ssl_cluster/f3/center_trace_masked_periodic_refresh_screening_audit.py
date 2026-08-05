@@ -19,7 +19,11 @@ from seis_ssl_cluster.config import (
 	resolve_embedding_extraction_config,
 	resolve_strat_hmm_pretext_config,
 )
+from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_center_trace_masked import (
+	_validate_hard_decoder_contract,
+)
 from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import (
+	config_from_mapping_for_candidates,
 	f3_lithology_voxel_label_budget_multi_head_config_from_mapping,
 )
 from seis_ssl_cluster.embedding.extractor import UNMASKED_ENCODER_INPUT_MODE
@@ -68,6 +72,7 @@ _CONFIG_KEYS = frozenset(
 		'source_hard_manifest',
 		'hard_full_config',
 		'hard_pretraining_handoff',
+		'candidate_decoder_config',
 		'center_trace_masked_config',
 		'periodic_refresh_validation_config',
 		'periodic_refresh_full_config',
@@ -106,6 +111,7 @@ class F3CenterTraceMaskedPeriodicRefreshScreeningAuditConfig:
 	source_hard_manifest: Path
 	hard_full_config: Path
 	hard_pretraining_handoff: Path
+	candidate_decoder_config: Path
 	center_trace_masked_config: Path
 	periodic_refresh_validation_config: Path
 	periodic_refresh_full_config: Path
@@ -157,6 +163,7 @@ def f3_center_trace_masked_periodic_refresh_screening_audit_config_from_mapping(
 		source_hard_manifest=path('source_hard_manifest', must_exist=True),
 		hard_full_config=path('hard_full_config', must_exist=True),
 		hard_pretraining_handoff=path('hard_pretraining_handoff', must_exist=True),
+		candidate_decoder_config=path('candidate_decoder_config', must_exist=True),
 		center_trace_masked_config=path('center_trace_masked_config', must_exist=True),
 		periodic_refresh_validation_config=path(
 			'periodic_refresh_validation_config', must_exist=True
@@ -186,12 +193,21 @@ def f3_center_trace_masked_periodic_refresh_screening_audit_config_from_mapping(
 			result.periodic_refresh_validation_config,
 		),
 		('periodic_refresh_full_config', result.periodic_refresh_full_config),
+		('candidate_decoder_config', result.candidate_decoder_config),
 	):
 		ensure_under_root(value, root=result.workspace_root, label=label)
 	if result.periodic_refresh_handoff.name != 'periodic_refresh_handoff.json':
 		raise ValueError('periodic refresh handoff name is not canonical')
 	if result.output_path.name != 'periodic_refresh_screening_audit.json':
 		raise ValueError('periodic refresh audit output name is not canonical')
+	expected_decoder_config = (
+		result.workspace_root
+		/ 'experiments/f3/facies_benchmark_v1/'
+		/ '108_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_low_label_v1'
+		/ '01_run_periodic_refresh_voxel_label_budget.yaml'
+	)
+	if result.candidate_decoder_config != expected_decoder_config:
+		raise ValueError('periodic candidate decoder config path is not canonical')
 	expected_handoff = (
 		result.artifact_root
 		/ 'pretraining/f3/facies_benchmark_v1'
@@ -675,14 +691,30 @@ def _decoder_contract_evidence(
 	hard: Mapping[str, object],
 	periodic: Mapping[str, object],
 ) -> Mapping[str, object]:
-	decoder_config = f3_lithology_voxel_label_budget_multi_head_config_from_mapping(
-		load_config(
-			config.workspace_root
-			/ 'experiments/f3/facies_benchmark_v1/'
-			/ '95_strat_hmm_multi_head_k6810_low_label_v1'
-			/ '01_run_multi_head_voxel_label_budget.yaml'
-		)
+	candidate_raw = load_config(config.candidate_decoder_config)
+	candidate_mapping = _mapping(
+		candidate_raw.get('multi_head'), 'periodic candidate decoder config'
 	)
+	decoder_config = config_from_mapping_for_candidates(
+		candidate_mapping,
+		expected_candidates=((MODEL_ID, MODEL_TAG),),
+	)
+	hard_decoder_path = _required_live_path(
+		candidate_raw.get('hard_multi_head_config'),
+		'periodic candidate hard decoder config',
+	)
+	expected_hard_decoder_path = (
+		config.workspace_root
+		/ 'experiments/f3/facies_benchmark_v1/'
+		/ '95_strat_hmm_multi_head_k6810_low_label_v1'
+		/ '01_run_multi_head_voxel_label_budget.yaml'
+	)
+	if hard_decoder_path != expected_hard_decoder_path:
+		raise ValueError('periodic candidate hard decoder config path is not canonical')
+	hard_decoder_config = f3_lithology_voxel_label_budget_multi_head_config_from_mapping(
+		load_config(hard_decoder_path)
+	)
+	_validate_hard_decoder_contract(decoder_config, hard_decoder_config)
 	periodic_target = _mapping(periodic.get('pseudo_targets'), 'periodic targets')
 	if (
 		Path(str(periodic_target.get('manifest'))).resolve()
@@ -702,6 +734,7 @@ def _decoder_contract_evidence(
 		if getattr(decoder_config.decoder, key) != expected:
 			raise ValueError(f'decoder contract mismatch: {key}')
 	return {
+		'candidate_decoder_config': _identity(config.candidate_decoder_config),
 		'spec': decoder_config.decoder.spec,
 		'embedding_dim': decoder_config.decoder.embedding_dim,
 		'hidden_channels': list(decoder_config.decoder.hidden_channels),
@@ -711,7 +744,7 @@ def _decoder_contract_evidence(
 		'steps_per_epoch': decoder_config.train.steps_per_epoch,
 		'class_weight': decoder_config.train.class_weight,
 		'sampling_mode': decoder_config.train.sampling_mode,
-		'paired_to_hard_config': _identity(config.hard_full_config),
+		'paired_to_hard_config': _identity(hard_decoder_path),
 		'periodic_scientific_identity': _mapping(
 			_mapping(periodic.get('identity'), 'periodic identity').get(
 				'scientific_identity'
@@ -881,6 +914,7 @@ def _source_identity_drift(
 			for key in (
 				'periodic_refresh_full_config',
 				'pretraining_handoff',
+				'candidate_decoder_config',
 				'paired_to_hard_config',
 			):
 				if key in left and left.get(key) != right.get(key):
@@ -932,6 +966,9 @@ def _revalidate_persisted_audit(payload: Mapping[str, object]) -> None:
 	hard = _mapping(payload.get('hard_baseline'), 'persisted hard baseline')
 	for key in ('config', 'handoff', 'target_manifest'):
 		_identity_matches_live(hard.get(key), label=f'hard baseline {key}')
+	decoder = _mapping(payload.get('decoder_contract'), 'persisted decoder contract')
+	for key in ('candidate_decoder_config', 'paired_to_hard_config'):
+		_identity_matches_live(decoder.get(key), label=f'decoder contract {key}')
 
 
 def _clean_git_identity(workspace_root: Path) -> Mapping[str, object]:

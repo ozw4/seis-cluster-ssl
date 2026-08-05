@@ -5,7 +5,7 @@ revalidates every live checkpoint, generation, event, and embedding reference
 before writing review files.  It never copies binary or array artifacts into
 ``results/``.
 """
-# ruff: noqa: CPY001, E501, PERF401, PLR0911, TRY300
+# ruff: noqa: C901, CPY001, E501, PERF401, PLR0911, PLR0912, TRY300
 
 from __future__ import annotations
 
@@ -606,7 +606,7 @@ def _publish_review(
 		handoff=handoff,
 		live=live,
 	)
-	if _existing_publication_matches(config.output_dir, items=items):
+	if _existing_publication_matches(config, items=items):
 		return _load_existing_publish_manifest(config.output_dir)
 	if config.output_dir.exists() or config.output_dir.is_symlink():
 		if not quarantine_invalid:
@@ -714,18 +714,33 @@ def _validate_existing_output_dir(
 
 
 def _existing_publication_matches(
-	output_dir: Path,
+	config: F3CenterTraceMaskedPeriodicRefreshReviewConfig,
 	*,
 	items: Sequence[PublishItem],
 ) -> bool:
+	output_dir = config.output_dir
 	manifest_path = output_dir / 'publish_manifest.json'
 	if not manifest_path.is_file():
 		return False
 	try:
 		payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+		if not isinstance(payload, Mapping):
+			return False
+		if payload.get('source_artifact_root') != _ARTIFACT_ROOT_PLACEHOLDER:
+			return False
+		if payload.get('output_dir') != _portable_path(
+			str(output_dir.resolve()), config=config
+		):
+			return False
+		if payload.get('skipped_optional_items') != [] or payload.get('warnings') != []:
+			return False
+		if not isinstance(payload.get('created_at_utc'), str) or not payload[
+			'created_at_utc'
+		]:
+			return False
 		records = payload.get('items')
 		expected = {
-			Path(item.relative_target).as_posix(): _content_bytes(item) for item in items
+			Path(item.relative_target).as_posix(): item for item in items
 		}
 		if not isinstance(records, list) or len(records) != len(expected):
 			return False
@@ -734,11 +749,16 @@ def _existing_publication_matches(
 		}
 		if set(by_target) != set(expected):
 			return False
-		for target, content in expected.items():
+		for target, item in expected.items():
+			content = _content_bytes(item)
 			path = output_dir / target
 			if not path.is_file() or path.read_bytes() != content:
 				return False
 			record = _mapping(by_target[target], 'publish item')
+			if record.get('source') != _portable_path(
+				str(item.source), config=config
+			):
+				return False
 			if record.get('size_bytes') != len(content) or record.get(
 				'sha256'
 			) != file_sha256(path):

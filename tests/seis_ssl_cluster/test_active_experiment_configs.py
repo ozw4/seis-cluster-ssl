@@ -1034,6 +1034,7 @@ def test_active_f3_periodic_refresh_original_split_configs_have_closed_roles(
 		'source_hard_manifest',
 		'hard_full_config',
 		'hard_pretraining_handoff',
+		'candidate_decoder_config',
 		'center_trace_masked_config',
 		'periodic_refresh_validation_config',
 		'periodic_refresh_full_config',

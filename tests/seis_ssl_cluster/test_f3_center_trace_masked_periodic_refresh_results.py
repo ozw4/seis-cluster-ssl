@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -164,6 +165,40 @@ def test_publication_reuses_exact_content_without_rewriting(tmp_path: Path) -> N
 		*results.OUTPUT_NAMES,
 		'publish_manifest.json',
 	}
+
+
+@pytest.mark.parametrize(
+	('field', 'value'),
+	[
+		('source_artifact_root', '/foreign/artifacts'),
+		('output_dir', 'foreign-results'),
+	],
+)
+def test_publication_does_not_reuse_foreign_manifest_identity(
+	tmp_path: Path, field: str, value: str
+) -> None:
+	config = _config(tmp_path)
+	evidence, live, handoff = _publication_inputs()
+	results._publish_review(
+		config,
+		evidence=evidence,
+		handoff=handoff,
+		live=live,
+		quarantine_invalid=False,
+	)
+	manifest_path = config.output_dir / 'publish_manifest.json'
+	payload = json.loads(manifest_path.read_text(encoding='utf-8'))
+	payload[field] = value
+	manifest_path.write_text(json.dumps(payload) + '\n', encoding='utf-8')
+
+	with pytest.raises(ValueError, match='stale or partial'):
+		results._publish_review(
+			config,
+			evidence=evidence,
+			handoff=handoff,
+			live=live,
+			quarantine_invalid=False,
+		)
 
 
 def test_publication_rejects_raw_output_and_explicitly_quarantines_it(
