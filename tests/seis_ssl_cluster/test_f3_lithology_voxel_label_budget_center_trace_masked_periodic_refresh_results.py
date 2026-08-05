@@ -15,6 +15,10 @@ from seis_ssl_cluster.f3.lithology import (
 	voxel_label_budget_center_trace_masked_periodic_refresh_results as results,
 )
 from seis_ssl_cluster.f3.lithology import voxel_label_budget_multi_head as shared
+from seis_ssl_cluster.f3.lithology import (
+	voxel_label_budget_multi_head_results as shared_results,
+)
+from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import METRIC_SPECS
 
 
 def test_periodic_refresh_job_matrix_and_seed_identity() -> None:
@@ -75,6 +79,47 @@ def test_periodic_refresh_gate_boundaries_and_six_split_zero() -> None:
 	)
 	assert stop['overall_status'] == 'CTMASK_REFRESH_ORIGINAL_STOP'
 	assert stop['six_split_follow_up']['ready'] is False
+
+
+def test_periodic_refresh_gate_accepts_full_shared_summary() -> None:
+	budgets = ('cap25', 'cap50', 'cap100')
+	config = SimpleNamespace(budgets=budgets)
+	primary_comparison_id = results.control._comparison_id(
+		results._CANDIDATE_ROLE, results._FIXED_CENTER_ROLE
+	)
+	deltas = []
+	for budget in budgets:
+		for seed in range(5):
+			for candidate, baseline in results.COMPARISONS:
+				comparison_id = results.control._comparison_id(candidate, baseline)
+				row: dict[str, object] = {
+					'budget_id': budget,
+					'comparison_id': comparison_id,
+					'subsample_seed': seed,
+				}
+				for metric in METRIC_SPECS:
+					row[metric.name] = (
+						0.1
+						if (
+							comparison_id == primary_comparison_id
+							and budget in {'cap25', 'cap50'}
+							and metric.name in {'macro_f1', 'mean_iou'}
+						)
+						else 0.0
+					)
+				deltas.append(row)
+
+	summary = shared_results._summary(
+		config, deltas, comparisons=results.COMPARISONS
+	)
+
+	assert len(summary) == len(budgets) * len(results.COMPARISONS) * len(
+		METRIC_SPECS
+	)
+	decision = results.decide_center_trace_masked_periodic_refresh_original_gate(
+		summary, budgets=budgets
+	)
+	assert decision['overall_status'] == 'CTMASK_REFRESH_ORIGINAL_GO'
 
 
 def test_periodic_refresh_gate_uses_strict_primary_boundaries_and_inclusive_guardrail() -> (
@@ -194,18 +239,7 @@ def _rows(
 	wins: int = 4,
 ) -> list[dict[str, object]]:
 	rows = []
-	metrics = (
-		'macro_f1',
-		'mean_iou',
-		'class_3_f1',
-		'class_3_iou',
-		'class_3_boundary_recall_t2',
-		'class_3_boundary_recall_t4',
-		'class_5_f1',
-		'class_5_iou',
-		'class_5_boundary_recall_t2',
-		'class_5_boundary_recall_t4',
-	)
+	metrics = tuple(metric.name for metric in METRIC_SPECS)
 	for budget in budgets:
 		for candidate, baseline in results.COMPARISONS:
 			comparison_id = results.control._comparison_id(candidate, baseline)

@@ -30,6 +30,7 @@ from seis_ssl_cluster.f3.lithology import (
 	voxel_label_budget_multi_head_results as shared_results,
 )
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
+	METRIC_SPECS,
 	load_f3_lithology_voxel_label_budget_evaluation_metrics,
 )
 from seis_ssl_cluster.results import (
@@ -72,6 +73,7 @@ _GATE_METRICS = (
 	'class_5_boundary_recall_t2',
 	'class_5_boundary_recall_t4',
 )
+_ALL_SUMMARY_METRICS = tuple(spec.name for spec in METRIC_SPECS)
 _PUBLISHED_ROOT = Path(
 	'f3/facies_benchmark_v1/'
 	'strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_original_split_v1'
@@ -292,13 +294,13 @@ def _validate_gate_summary(
 			raise ValueError(f'periodic-refresh gate row is non-finite: {key!r}')
 		if wins != int(wins) or not 0 <= wins <= 5:
 			raise ValueError(f'periodic-refresh gate win count is invalid: {key!r}')
-		if key[1] == comparison_id:
+		if key[1] == comparison_id and key[2] in _GATE_METRICS:
 			index[(key[0], key[2])] = row
 	expected = {
 		(str(budget), control._comparison_id(candidate, baseline), metric)
 		for budget in budgets
 		for candidate, baseline in COMPARISONS
-		for metric in _GATE_METRICS
+		for metric in _ALL_SUMMARY_METRICS
 	}
 	if seen != expected:
 		raise ValueError(
