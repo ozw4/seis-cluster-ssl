@@ -534,11 +534,11 @@ def test_periodic_runner_uses_exact_refresh_schedule() -> None:
 	assert not runner_module._periodic_scheduled_epoch(25)  # noqa: SLF001
 
 
-def test_periodic_runner_executes_real_refresh_with_synthetic_artifacts(  # noqa: PLR0915
+def test_periodic_runner_refresh_boundary_resume_matches_uninterrupted(  # noqa: C901, PLR0915
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	"""Exercise one real refresh through the runner and reload the next epoch."""
+	"""Compare a refresh-boundary resume with uninterrupted training."""
 	config = _periodic_config(tmp_path)
 	initial_target = Path(config['pseudo_targets']['manifest'])  # type: ignore[index]
 	amplitude_path = tmp_path / 'amplitude.npy'
@@ -840,6 +840,114 @@ def test_periodic_runner_executes_real_refresh_with_synthetic_artifacts(  # noqa
 		item['event_type'] == 'refresh' and item['status'] == 'complete'
 		for item in events
 	)
+
+	# Resume from the completed epoch-2 refresh checkpoint and compare it with
+	# the uninterrupted epoch-3 run.  Both executions use the production
+	# extraction, generation activation, and dataloader rebuild paths above.
+	resumed_config = deepcopy(resolved_config)
+	resumed_output_root = tmp_path / 'resumed'
+	resumed_generation_root = resumed_output_root / 'target_refresh'
+	resumed_config['paths']['output_root'] = str(resumed_output_root)  # type: ignore[index]
+	resumed_config['pseudo_target_refresh']['generation_root'] = str(  # type: ignore[index]
+		resumed_generation_root
+	)
+	resumed_config['identity']['scientific_identity']['generation_root'] = str(  # type: ignore[index]
+		resumed_generation_root
+	)
+	resumed_config['train']['max_steps'] = 2  # type: ignore[index]
+	partial_path = runner_module.run_strat_hmm_pretext_training(resumed_config)
+	partial_payload = load_checkpoint(partial_path, map_location='cpu')
+	assert partial_payload['epoch'] == 2
+	assert partial_payload['training_state']['checkpoint_kind'] == 'refresh'  # type: ignore[index]
+	assert partial_payload['target_refresh_state']['refresh_phase'] == (  # type: ignore[index]
+		'refresh_complete'
+	)
+
+	resumed_config['train']['max_steps'] = 3  # type: ignore[index]
+	resumed_path = runner_module.run_strat_hmm_pretext_training(
+		resumed_config, resume=partial_path
+	)
+	resumed_payload = load_checkpoint(resumed_path, map_location='cpu')
+
+	def assert_checkpoint_values_match(left: object, right: object) -> None:
+		if isinstance(left, torch.Tensor):
+			assert isinstance(right, torch.Tensor)
+			assert torch.equal(left, right)
+		elif isinstance(left, dict):
+			assert isinstance(right, dict)
+			assert left.keys() == right.keys()
+			for key in left:
+				assert_checkpoint_values_match(left[key], right[key])
+		elif isinstance(left, list):
+			assert isinstance(right, list)
+			assert len(left) == len(right)
+			for left_item, right_item in zip(left, right, strict=True):
+				assert_checkpoint_values_match(left_item, right_item)
+		elif isinstance(left, tuple):
+			assert isinstance(right, tuple)
+			assert len(left) == len(right)
+			for left_item, right_item in zip(left, right, strict=True):
+				assert_checkpoint_values_match(left_item, right_item)
+		elif isinstance(left, np.ndarray):
+			assert isinstance(right, np.ndarray)
+			assert np.array_equal(left, right)
+		else:
+			assert left == right
+
+	for key in (
+		'model_state_dict',
+		'stratigraphy_state_dict',
+		'spatial_context_state_dict',
+		'optimizer_state_dict',
+		'scaler_state_dict',
+		'rng_state',
+		'metrics',
+		'checkpoint_selection',
+	):
+		assert_checkpoint_values_match(payload_checkpoint[key], resumed_payload[key])
+	assert resumed_payload['epoch'] == payload_checkpoint['epoch'] == 3
+	assert resumed_payload['global_step'] == payload_checkpoint['global_step'] == 3
+	for key in (
+		'active_generation_id',
+		'active_generation_index',
+		'last_completed_refresh_epoch',
+		'refresh_phase',
+	):
+		assert resumed_payload['target_refresh_state'][key] == (  # type: ignore[index]
+			payload_checkpoint['target_refresh_state'][key]  # type: ignore[index]
+		)
+
+	full_generation = runner_module.load_periodic_refresh_generation(
+		Path(
+			str(payload_checkpoint['target_refresh_state']['active_generation_manifest_path'])  # type: ignore[index]
+		)
+	)
+	resumed_generation = runner_module.load_periodic_refresh_generation(
+		Path(
+			str(resumed_payload['target_refresh_state']['active_generation_manifest_path'])  # type: ignore[index]
+		)
+	)
+	assert full_generation['generation_id'] == resumed_generation['generation_id']
+	assert full_generation['source_student_state_sha256'] == (
+		resumed_generation['source_student_state_sha256']
+	)
+
+	full_target = load_multi_head_target_manifest(
+		full_generation['canonical_multi_head_target_manifest']['path']  # type: ignore[index]
+	)
+	resumed_target = load_multi_head_target_manifest(
+		resumed_generation['canonical_multi_head_target_manifest']['path']  # type: ignore[index]
+	)
+	for raw_k in ('6', '8', '10'):
+		full_head = full_target['heads'][raw_k]['surveys']['survey']  # type: ignore[index]
+		resumed_head = resumed_target['heads'][raw_k]['surveys']['survey']  # type: ignore[index]
+		for artifact_name in ('labels', 'confidence', 'valid_tokens'):
+			assert full_head[artifact_name]['sha256'] == (  # type: ignore[index]
+				resumed_head[artifact_name]['sha256']  # type: ignore[index]
+			)
+		assert full_generation['centers'][raw_k]['after']['sha256'] == (  # type: ignore[index]
+			resumed_generation['centers'][raw_k]['after']['sha256']  # type: ignore[index]
+		)
 
 
 def test_periodic_recovered_epoch_metrics_ignore_checkpoint_metadata() -> None:

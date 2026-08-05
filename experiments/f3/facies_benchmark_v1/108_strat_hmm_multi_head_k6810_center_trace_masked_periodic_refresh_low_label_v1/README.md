@@ -32,8 +32,6 @@ python proc/seis_ssl_cluster/run_f3_lithology_center_trace_masked_periodic_refre
 python proc/seis_ssl_cluster/run_f3_lithology_center_trace_masked_periodic_refresh_voxel_label_budget.py \
   --config "$EXP/01_run_periodic_refresh_voxel_label_budget.yaml" --only-missing
 python proc/seis_ssl_cluster/run_f3_lithology_center_trace_masked_periodic_refresh_voxel_label_budget.py \
-  --config "$EXP/01_run_periodic_refresh_voxel_label_budget.yaml" --resume
-python proc/seis_ssl_cluster/run_f3_lithology_center_trace_masked_periodic_refresh_voxel_label_budget.py \
   --config "$EXP/01_run_periodic_refresh_voxel_label_budget.yaml" --only-missing
 
 python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_center_trace_masked_periodic_refresh.py \
@@ -42,11 +40,20 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_center_tr
   --config "$EXP/02_summarize_periodic_refresh_voxel_label_budget.yaml"
 ```
 
-`--resume` is valid only when every selected owned job has a valid latest
-checkpoint with the same identity. `--only-missing` reuses complete jobs and
-quarantines partial or invalid owned outputs only when the runner explicitly
-classifies them for recovery. Historical manifests and results are never
-written by this route.
+If the first `--only-missing` command reports owned jobs that are resumable,
+run the following command before the final `--only-missing` pass:
+
+```bash
+python proc/seis_ssl_cluster/run_f3_lithology_center_trace_masked_periodic_refresh_voxel_label_budget.py \
+  --config "$EXP/01_run_periodic_refresh_voxel_label_budget.yaml" --resume
+```
+
+If the first `--only-missing` command completes every selected job, omit
+`--resume`; the final `--only-missing` pass is sufficient. `--resume` is valid
+only when every selected owned job has a valid latest checkpoint with the same
+identity. `--only-missing` reuses complete jobs and quarantines partial or
+invalid owned outputs only when the runner explicitly classifies them for
+recovery. Historical manifests and results are never written by this route.
 
 The summary publishes the 75-row matrix, the periodic-refresh-versus-fixed
 center-trace primary comparison, the three diagnostics, and the formal

@@ -62,6 +62,11 @@ python proc/seis_ssl_cluster/extract_embeddings.py \
   --config "$EXP/03_extract_periodic_refresh_embeddings.yaml"
 python proc/seis_ssl_cluster/validate_f3_center_trace_masked_periodic_refresh.py \
   --config "$EXP/04_validate_periodic_refresh_pretraining.yaml" --phase complete
+
+python proc/seis_ssl_cluster/publish_f3_center_trace_masked_periodic_refresh_results.py \
+  --config "$EXP/05_review_periodic_refresh_results.yaml" --dry-run
+python proc/seis_ssl_cluster/publish_f3_center_trace_masked_periodic_refresh_results.py \
+  --config "$EXP/05_review_periodic_refresh_results.yaml"
 ```
 
 The final embedding must be unmasked and bound to the completed selected
@@ -69,6 +74,9 @@ checkpoint, final target generation, fixed preprocessing, and valid-token
 mask. A PASS handoff is published only by `complete`; `inputs`, `smoke`, and
 `checkpoints` never publish it. Exact PASS handoffs are reused without a
 content or mtime change. A stale handoff requires `--quarantine-invalid`.
+The publication dry-run and write command are run only after `complete` has
+published and validated the PASS handoff; they publish the allowlisted,
+lightweight review tree and do not copy raw checkpoints or embeddings.
 
 This issue intentionally executes only the live `inputs` phase, smoke dry-run,
 isolated CPU two-step smoke, and smoke validation. Full 25-epoch pretraining,
