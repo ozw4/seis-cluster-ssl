@@ -8,6 +8,9 @@ import numpy as np
 import pytest
 import yaml
 
+from seis_ssl_cluster.config.f3_lithology import (
+	f3_lithology_report_config_from_mapping,
+)
 from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonReportConfig,
 	F3LithologyPublishConfig,
@@ -490,6 +493,78 @@ def test_build_f3_lithology_report_proc_dry_run(tmp_path: Path) -> None:
 	assert 'execution: dry-run; F3 lithology report skipped' in result.stdout
 
 
+@pytest.mark.parametrize(
+	('output_section', 'output_key', 'collision_section', 'collision_key'),
+	[
+		('reports', 'output_json', 'probe', 'metrics_json'),
+		(
+			'reports',
+			'output_markdown',
+			'reports',
+			'token_dataset_metadata_json',
+		),
+		('comparison', 'output_csv', 'comparison', 'output_markdown'),
+		('reports', 'output_json', 'comparison', 'output_csv'),
+	],
+)
+def test_f3_lithology_report_config_rejects_file_path_collisions(
+	tmp_path: Path,
+	output_section: str,
+	output_key: str,
+	collision_section: str,
+	collision_key: str,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='model_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	raw = _report_config_mapping(tmp_path, run)
+	raw[output_section][output_key] = raw[collision_section][collision_key]
+
+	with pytest.raises(
+		ValueError,
+		match=rf'{output_section}\.{output_key}.*differ',
+	):
+		f3_lithology_report_config_from_mapping(raw)
+
+
+def test_f3_lithology_report_config_preserves_disjoint_explicit_paths(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='model_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	raw = _report_config_mapping(tmp_path, run)
+
+	resolved = f3_lithology_report_config_from_mapping(raw)
+
+	assert resolved.metrics_json == Path(raw['probe']['metrics_json'])
+	assert resolved.probe_config_json == Path(
+		raw['probe']['probe_config_resolved_json']
+	)
+	assert resolved.token_dataset_metadata_json == Path(
+		raw['reports']['token_dataset_metadata_json']
+	)
+	assert resolved.prediction_metadata_json == Path(
+		raw['predictions']['metadata_json']
+	)
+	assert resolved.visualization_metadata_json == Path(
+		raw['visualizations']['metadata_json']
+	)
+	assert resolved.output_markdown == Path(raw['reports']['output_markdown'])
+	assert resolved.output_json == Path(raw['reports']['output_json'])
+	assert resolved.comparison.search_root == Path(raw['comparison']['search_root'])
+	assert resolved.comparison.output_csv == Path(raw['comparison']['output_csv'])
+	assert resolved.comparison.output_markdown == Path(
+		raw['comparison']['output_markdown']
+	)
+
+
 def test_build_f3_lithology_report_proc_default_config_dry_run() -> None:
 	result = run_python_proc(
 		Path('proc/seis_ssl_cluster/build_f3_lithology_report.py'),
@@ -580,6 +655,52 @@ def _report_config(run: dict[str, object]) -> F3LithologyReportConfig:
 		lithology={'root': str(run['lithology_root'])},
 		probe={'spec': run['probe_spec'], 'metrics_json': str(run['metrics_json'])},
 	)
+
+
+def _report_config_mapping(
+	tmp_path: Path,
+	run: dict[str, object],
+) -> dict[str, object]:
+	report_dir = Path(run['report_dir'])
+	comparison_dir = report_dir / 'comparison'
+	return {
+		'paths': {
+			'f3_root': str(tmp_path / 'F3'),
+			'artifact_root': str(run['artifact_root']),
+		},
+		'dataset': {
+			'name': 'f3_facies_benchmark',
+			'version': 'facies_benchmark_v1',
+		},
+		'model': {'tag': run['model_tag']},
+		'labels': {'set': 'png_slices_segy_labels_v1'},
+		'lithology': {'root': str(run['lithology_root'])},
+		'probe': {
+			'spec': run['probe_spec'],
+			'metrics_json': str(run['metrics_json']),
+			'probe_config_resolved_json': str(run['probe_config_json']),
+		},
+		'predictions': {'metadata_json': str(run['prediction_metadata_json'])},
+		'visualizations': {
+			'metadata_json': str(run['visualization_metadata_json']),
+		},
+		'reports': {
+			'output_dir': str(report_dir),
+			'output_markdown': str(report_dir / 'report.md'),
+			'output_json': str(report_dir / 'report.json'),
+			'token_dataset_metadata_json': str(
+				Path(run['lithology_root'])
+				/ 'token_dataset'
+				/ 'token_dataset_metadata.json'
+			),
+		},
+		'comparison': {
+			'search_root': str(run['lithology_root']),
+			'output_dir': str(comparison_dir),
+			'output_csv': str(comparison_dir / 'comparison.csv'),
+			'output_markdown': str(comparison_dir / 'comparison.md'),
+		},
+	}
 
 
 def _write_probe_run(  # noqa: PLR0913

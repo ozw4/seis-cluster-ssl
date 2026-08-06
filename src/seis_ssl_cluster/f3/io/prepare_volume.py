@@ -11,6 +11,7 @@ from typing import cast
 
 import numpy as np
 
+from seis_ssl_cluster.config.common import _validate_distinct_paths
 from seis_ssl_cluster.config.schema import (
 	F3_FACIES_DATASET_NAME,
 	F3_FACIES_DATASET_VERSION,
@@ -131,6 +132,7 @@ def prepare_f3_facies_volume(
 	overwrite: bool = False,
 ) -> F3PrepareVolumeResult:
 	"""Convert F3 SEGY inputs into NPY registry artifacts."""
+	_validate_prepare_file_paths(inputs=config.inputs, outputs=config.outputs)
 	_validate_source_files(config.inputs)
 	_validate_writable_outputs(config.outputs, overwrite=overwrite)
 
@@ -215,8 +217,9 @@ def f3_prepare_volume_config_from_mapping(
 	inputs = _parse_inputs(_required_mapping(config, 'inputs'), paths=paths)
 	outputs = _parse_outputs(
 		_required_mapping(config, 'outputs'),
-		paths=paths,
 	)
+	_validate_prepare_file_paths(inputs=inputs, outputs=outputs)
+	_validate_prepare_output_locations(outputs=outputs, paths=paths)
 	normalization = _parse_normalization(_required_mapping(config, 'normalization'))
 	return F3PrepareVolumeConfig(
 		paths=paths,
@@ -479,8 +482,6 @@ def _parse_inputs(
 
 def _parse_outputs(
 	outputs: Mapping[str, object],
-	*,
-	paths: F3PrepareRootPaths,
 ) -> F3PrepareOutputPaths:
 	_validate_allowed_keys(
 		outputs,
@@ -508,7 +509,7 @@ def _parse_outputs(
 		),
 		prefix='outputs',
 	)
-	parsed = F3PrepareOutputPaths(
+	return F3PrepareOutputPaths(
 		volume_dir=_required_absolute_path(outputs, 'volume_dir', prefix='outputs'),
 		manifest_path=_required_absolute_path(
 			outputs,
@@ -527,12 +528,49 @@ def _parse_outputs(
 			prefix='outputs',
 		),
 	)
+
+
+def _validate_prepare_file_paths(
+	*,
+	inputs: F3PrepareInputPaths,
+	outputs: F3PrepareOutputPaths,
+) -> None:
+	source_files = (
+		(inputs.seismic_segy, 'inputs.seismic_segy'),
+		(inputs.label_segy, 'inputs.label_segy'),
+		(inputs.class_info, 'inputs.class_info'),
+		(inputs.inspection_report, 'inputs.inspection_report'),
+	)
+	output_files = (
+		(outputs.seismic_npy, 'outputs.seismic_npy'),
+		(outputs.label_npy, 'outputs.label_npy'),
+		(outputs.metadata_path, 'outputs.metadata_path'),
+		(outputs.manifest_path, 'outputs.manifest_path'),
+		(outputs.split_path, 'outputs.split_path'),
+		(
+			outputs.normalization_stats_path,
+			'outputs.normalization_stats_path',
+		),
+	)
+	for output, output_label in output_files:
+		for source, source_label in source_files:
+			_validate_distinct_paths(output, output_label, source, source_label)
+	for index, (left, left_label) in enumerate(output_files):
+		for right, right_label in output_files[index + 1 :]:
+			_validate_distinct_paths(left, left_label, right, right_label)
+
+
+def _validate_prepare_output_locations(
+	*,
+	outputs: F3PrepareOutputPaths,
+	paths: F3PrepareRootPaths,
+) -> None:
 	for label, path in (
-		('outputs.volume_dir', parsed.volume_dir),
-		('outputs.manifest_path', parsed.manifest_path),
-		('outputs.split_path', parsed.split_path),
-		('outputs.normalization_stats_path', parsed.normalization_stats_path),
-		('outputs.metadata_path', parsed.metadata_path),
+		('outputs.volume_dir', outputs.volume_dir),
+		('outputs.manifest_path', outputs.manifest_path),
+		('outputs.split_path', outputs.split_path),
+		('outputs.normalization_stats_path', outputs.normalization_stats_path),
+		('outputs.metadata_path', outputs.metadata_path),
 	):
 		_validate_artifact_output_path(
 			path,
@@ -540,7 +578,6 @@ def _parse_outputs(
 			artifact_root=paths.artifact_root,
 			raw_root=paths.f3_root,
 		)
-	return parsed
 
 
 def _parse_dataset(dataset: Mapping[str, object]) -> F3PrepareDatasetConfig:

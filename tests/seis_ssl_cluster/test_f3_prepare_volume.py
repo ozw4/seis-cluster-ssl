@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -125,6 +126,66 @@ def test_f3_prepare_and_embedding_configs_preserve_explicit_paths() -> None:
 		'/probes/linear_balanced_v1/scaler.joblib',
 	)
 	assert 'probe.pt' not in json.dumps(predict_raw)
+
+
+@pytest.mark.parametrize(
+	('output_label', 'collision_label'),
+	[
+		('outputs.seismic_npy', 'inputs.seismic_segy'),
+		('outputs.metadata_path', 'inputs.inspection_report'),
+		('outputs.manifest_path', 'outputs.split_path'),
+		('outputs.normalization_stats_path', 'outputs.metadata_path'),
+	],
+)
+def test_f3_prepare_config_rejects_file_path_collisions(
+	tmp_path: Path,
+	output_label: str,
+	collision_label: str,
+) -> None:
+	f3_root = tmp_path / 'F3'
+	artifact_root = tmp_path / 'artifacts' / 'seis_ssl_cluster'
+	config_path, _outputs = _write_prepare_config(
+		tmp_path,
+		f3_root=f3_root,
+		artifact_root=artifact_root,
+	)
+	raw = load_config(config_path)
+	if output_label == 'outputs.seismic_npy':
+		raw['outputs']['volume_dir'] = str(f3_root)
+		raw['inputs']['seismic_segy'] = str(f3_root / 'f3_seismic.npy')
+	else:
+		output_section, output_key = output_label.split('.')
+		collision_section, collision_key = collision_label.split('.')
+		raw[output_section][output_key] = raw[collision_section][collision_key]
+
+	with pytest.raises(
+		ValueError,
+		match=rf'({output_label}|{collision_label}).*differ',
+	):
+		f3_prepare_volume_config_from_mapping(raw)
+
+
+def test_prepare_f3_volume_rechecks_collisions_when_overwrite_is_enabled(
+	tmp_path: Path,
+) -> None:
+	f3_root = tmp_path / 'F3'
+	artifact_root = tmp_path / 'artifacts' / 'seis_ssl_cluster'
+	config_path, _outputs = _write_prepare_config(
+		tmp_path,
+		f3_root=f3_root,
+		artifact_root=artifact_root,
+	)
+	config = f3_prepare_volume_config_from_mapping(load_config(config_path))
+	config = replace(
+		config,
+		outputs=replace(
+			config.outputs,
+			metadata_path=config.inputs.inspection_report,
+		),
+	)
+
+	with pytest.raises(ValueError, match=r'outputs\.metadata_path.*differ'):
+		prepare_f3_facies_volume(config, overwrite=True)
 
 
 def test_prepare_f3_facies_volume_missing_segy_has_clear_error(

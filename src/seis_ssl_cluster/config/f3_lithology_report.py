@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from seis_ssl_cluster.config.common import _validate_distinct_paths
 from seis_ssl_cluster.config.f3_lithology_common import (
 	_optional_absolute_path,
 	_optional_mapping,
@@ -85,6 +86,16 @@ def f3_lithology_report_config_from_mapping(
 		prefix='reports',
 	)
 	comparison = _embedded_comparison_config(_optional_mapping(config, 'comparison'))
+	_validate_report_file_paths(
+		metrics_json=metrics_json,
+		probe_config_json=probe_config_json,
+		token_dataset_metadata_json=token_dataset_metadata_json,
+		prediction_metadata_json=prediction_metadata_json,
+		visualization_metadata_json=visualization_metadata_json,
+		output_markdown=output_markdown,
+		output_json=output_json,
+		comparison=comparison,
+	)
 	for label, path in _report_output_paths(
 		output_dir=output_dir,
 		output_markdown=output_markdown,
@@ -113,6 +124,39 @@ def f3_lithology_report_config_from_mapping(
 		probe=probe,
 		comparison=comparison,
 	)
+
+
+def _validate_report_file_paths(  # noqa: PLR0913
+	*,
+	metrics_json: Path,
+	probe_config_json: Path | None,
+	token_dataset_metadata_json: Path | None,
+	prediction_metadata_json: Path | None,
+	visualization_metadata_json: Path | None,
+	output_markdown: Path,
+	output_json: Path,
+	comparison: F3LithologyComparisonReportConfig,
+) -> None:
+	source_files = (
+		(metrics_json, 'probe.metrics_json'),
+		(probe_config_json, 'probe.probe_config_resolved_json'),
+		(token_dataset_metadata_json, 'reports.token_dataset_metadata_json'),
+		(prediction_metadata_json, 'predictions.metadata_json'),
+		(visualization_metadata_json, 'visualizations.metadata_json'),
+	)
+	output_files = (
+		(output_markdown, 'reports.output_markdown'),
+		(output_json, 'reports.output_json'),
+		(comparison.output_csv, 'comparison.output_csv'),
+		(comparison.output_markdown, 'comparison.output_markdown'),
+	)
+	for output, output_label in output_files:
+		for source, source_label in source_files:
+			if source is not None:
+				_validate_distinct_paths(output, output_label, source, source_label)
+	for index, (left, left_label) in enumerate(output_files):
+		for right, right_label in output_files[index + 1 :]:
+			_validate_distinct_paths(left, left_label, right, right_label)
 
 
 def _report_output_paths(
