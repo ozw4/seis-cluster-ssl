@@ -24,7 +24,9 @@ keys, and symlinks.
 
 ## Runbook
 
-Run the canonical path-contract stages from the repository root:
+Run the configured stages from the repository root. Each YAML's explicit input
+and output paths are the source of truth; the directory examples below are not
+enforced by a repository validator:
 
 ```bash
 python proc/seis_ssl_cluster/build_nopims_manifests.py \

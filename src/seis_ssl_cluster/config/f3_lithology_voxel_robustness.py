@@ -28,9 +28,9 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_UPSAMPLE_MODE,
 	validate_voxel_decoder_implementation,
 )
-from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import DEFAULT_MAX_FILE_SIZE_BYTES
 
+DEFAULT_RESULTS_ROOT = Path('results')
 BASELINE_MODEL_TAG = 'strat_hmm_pretext_m1_k6_topblock1_distill'
 CANDIDATE_MODEL_TAG = 'strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill'
 MODEL_ROLES = ('baseline', 'candidate')
@@ -68,7 +68,6 @@ class F3VoxelSplitDatasetSuiteConfig:
 		"""Keep generated split supervision under the artifact root."""
 		_validate_suite_output_root(
 			self.output_root,
-			artifact_root=self.artifact_root,
 			f3_root=self.f3_root,
 			label='suite.output_root',
 		)
@@ -99,7 +98,6 @@ class F3VoxelV0SplitSuiteConfig:
 		"""Keep generated V0 artifacts under the artifact root."""
 		_validate_suite_output_root(
 			self.output_root,
-			artifact_root=self.artifact_root,
 			f3_root=self.f3_root,
 			label='suite.output_root',
 		)
@@ -130,7 +128,6 @@ class F3VoxelDecoderSplitSuiteConfig:
 		"""Keep generated decoder artifacts under the artifact root."""
 		_validate_suite_output_root(
 			self.output_root,
-			artifact_root=self.artifact_root,
 			f3_root=self.f3_root,
 			label='suite.output_root',
 		)
@@ -147,16 +144,10 @@ class F3VoxelSplitRobustnessPublishConfig:
 	overwrite: bool = True
 
 	def __post_init__(self) -> None:
-		"""Require final publication to remain under the results root."""
+		"""Validate publication settings."""
 		if self.enabled and self.output_dir is None:
 			raise ValueError(
 				'publish.output_dir is required when publishing is enabled'
-			)
-		if self.output_dir is not None:
-			ensure_under_root(
-				self.output_dir,
-				root=self.results_root,
-				label='publish.output_dir',
 			)
 
 
@@ -183,7 +174,6 @@ class F3VoxelSplitRobustnessSummaryConfig:
 		if self.artifact_root is not None and self.f3_root is not None:
 			_validate_suite_output_root(
 				self.suite_root,
-				artifact_root=self.artifact_root,
 				f3_root=self.f3_root,
 				label='suite.root',
 			)
@@ -616,14 +606,12 @@ def _path(parent: Mapping[str, object], key: str) -> Path:
 def _validate_suite_output_root(
 	path: Path,
 	*,
-	artifact_root: Path,
 	f3_root: Path,
 	label: str,
 ) -> None:
 	output = Path(path)
 	if not output.is_absolute():
 		raise ValueError(f'{label} must be an absolute path; got {output}')
-	ensure_under_root(output, root=artifact_root, label=label)
 	resolved = output.resolve(strict=False)
 	resolved_f3 = Path(f3_root).resolve(strict=False)
 	try:

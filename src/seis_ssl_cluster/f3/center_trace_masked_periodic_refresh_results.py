@@ -24,7 +24,6 @@ from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.f3 import (
 	center_trace_masked_periodic_refresh_validation as validation,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.results import (
 	PublishedItem,
 	PublishItem,
@@ -193,21 +192,10 @@ def f3_center_trace_masked_periodic_refresh_review_config_from_mapping(
 		raise FileNotFoundError(
 			f'validation_config is missing: {result.validation_config}'
 		)
-	ensure_under_root(
-		result.validation_config,
-		root=result.workspace_root,
-		label='validation_config',
-	)
-	ensure_under_root(
-		result.pretraining_handoff,
-		root=result.artifact_root,
-		label='pretraining_handoff',
-	)
 	if not result.pretraining_handoff.is_file():
 		raise FileNotFoundError(
 			f'pretraining_handoff is missing: {result.pretraining_handoff}'
 		)
-	ensure_under_root(result.output_dir, root=result.workspace_root, label='output_dir')
 	return result
 
 

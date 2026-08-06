@@ -14,9 +14,9 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_validate_allowed_keys,
 )
-from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import DEFAULT_MAX_FILE_SIZE_BYTES
 
+DEFAULT_RESULTS_ROOT = Path('results')
 EXPECTED_BUDGET_COUNT = 3
 EXPECTED_SEED_COUNT = 5
 
@@ -88,16 +88,10 @@ class F3VoxelLabelBudgetResultsPublishConfig:
 	overwrite: bool = True
 
 	def __post_init__(self) -> None:
-		"""Keep publication below the configured results root."""
+		"""Validate publication settings."""
 		if self.enabled and self.output_dir is None:
 			raise ValueError(
 				'publish.output_dir is required when publishing is enabled'
-			)
-		if self.output_dir is not None:
-			ensure_under_root(
-				self.output_dir,
-				root=self.results_root,
-				label='publish.output_dir',
 			)
 		if self.max_file_size_bytes <= 0:
 			raise ValueError('publish.max_file_size_bytes must be positive')
@@ -119,17 +113,7 @@ class F3VoxelLabelBudgetResultsConfig:
 	)
 
 	def __post_init__(self) -> None:
-		"""Keep every scientific artifact input below the artifact root."""
-		for label, path in (
-			('suite.root', self.suite_root),
-			('suite.dataset_manifest', self.dataset_manifest),
-			('suite.run_manifest', self.run_manifest),
-			*(
-				(f'full_label_reference.{role}', path)
-				for role, path in self.full_label_evaluations.items()
-			),
-		):
-			ensure_under_root(path, root=self.artifact_root, label=label)
+		"""Validate required comparison roles."""
 		if set(self.full_label_evaluations) != {'mae', 'm1', 'm2a'}:
 			raise ValueError(
 				'full_label_reference must define exactly mae, m1, and m2a'

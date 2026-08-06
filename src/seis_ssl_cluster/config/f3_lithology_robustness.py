@@ -49,10 +49,10 @@ from seis_ssl_cluster.f3.lithology.tokens import (
 	F3LithologyTokenPolicy,
 	read_f3_lithology_class_info,
 )
-from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT
 
-F3_LITHOLOGY_ROBUSTNESS_ROOT = (
-	DEFAULT_ARTIFACT_ROOT / 'lithology/f3/facies_benchmark_v1/robustness'
+F3_LITHOLOGY_ROBUSTNESS_ROOT = Path(
+	'/workspace/artifacts/seis_ssl_cluster/lithology/f3/'
+	'facies_benchmark_v1/robustness'
 )
 F3_LABEL_BUDGET_M1_SUITE_NAME = 'label_budget_m1_v1'
 F3_SPLIT_INDEX_M1_SUITE_NAME = 'split_index_m1_v1'

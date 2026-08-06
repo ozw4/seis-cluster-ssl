@@ -11,7 +11,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_absolute_path,
 	_required_mapping,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.f3.lithology.voxel_results import (
 	REQUIRED_MODELS,
@@ -51,7 +51,7 @@ def f3_lithology_voxel_results_config_from_mapping(
 		frozenset({'enabled', 'output_dir', 'max_file_size_mb', 'overwrite'}),
 		prefix='publish',
 	)
-	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
+	_required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
 	results_root = Path(_required_string(paths, 'results_root', prefix='paths'))
 	resolved_runs = []
@@ -67,18 +67,16 @@ def f3_lithology_voxel_results_config_from_mapping(
 			input_dir = _required_absolute_path(
 				versions, version.lower(), prefix=f'runs.{model_key}'
 			)
-			_validate_artifact_path_not_f3(
+			_validate_output_not_under_f3_root(
 				input_dir,
 				f'runs.{model_key}.{version.lower()}',
-				artifact_root=artifact_root,
 				f3_root=f3_root,
 			)
 			resolved_runs.append(F3LithologyVoxelResultsRun(model, version, input_dir))
 	output_dir = _required_absolute_path(outputs, 'output_dir', prefix='outputs')
-	_validate_artifact_path_not_f3(
+	_validate_output_not_under_f3_root(
 		output_dir,
 		'outputs.output_dir',
-		artifact_root=artifact_root,
 		f3_root=f3_root,
 	)
 	overwrite = _bool(outputs.get('overwrite', False), 'outputs.overwrite')

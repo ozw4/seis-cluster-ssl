@@ -229,13 +229,6 @@ HELP_FLAG_CONTRACTS = {
 		'--resume',
 		'--quarantine-invalid',
 	),
-	'validate_artifact_paths.py': (
-		'--root',
-		'--scan',
-		'--fail-on-runs',
-		'--allow-pattern',
-		'--allow-test-fixtures',
-	),
 	'validate_results_artifacts.py': (
 		'--root',
 		'--max-file-size-mb',

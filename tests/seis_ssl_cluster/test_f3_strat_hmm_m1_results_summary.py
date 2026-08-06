@@ -247,56 +247,57 @@ def test_publish_refuses_oversized_file(
 		)
 
 
-def test_relative_publish_path_must_stay_under_results(tmp_path: Path) -> None:
+def test_relative_publish_path_is_preserved(tmp_path: Path) -> None:
 	config = _write_inputs(tmp_path)
 
-	with pytest.raises(ValueError, match='under root'):
-		f3_strat_hmm_m1_results_config_from_mapping(
-			{
-				'inputs': {
-					'baseline_comparison_csv': str(config.baseline_comparison_csv),
-					'label_budget_suite_root': str(config.label_budget_suite_root),
-					'split_index_suite_root': str(config.split_index_suite_root),
-				},
-				'models': {
-					'baseline': config.baseline_model,
-					'candidate': config.candidate_model,
-				},
-				'outputs': {'output_dir': str(config.output_dir)},
-				'publish': {
-					'enabled': True,
-					'output_dir': 'artifacts/not-results',
-				},
-			}
-		)
+	resolved = f3_strat_hmm_m1_results_config_from_mapping(
+		{
+			'inputs': {
+				'baseline_comparison_csv': str(config.baseline_comparison_csv),
+				'label_budget_suite_root': str(config.label_budget_suite_root),
+				'split_index_suite_root': str(config.split_index_suite_root),
+			},
+			'models': {
+				'baseline': config.baseline_model,
+				'candidate': config.candidate_model,
+			},
+			'outputs': {'output_dir': str(config.output_dir)},
+			'publish': {
+				'enabled': True,
+				'output_dir': 'artifacts/not-results',
+			},
+		}
+	)
+	assert resolved.publish.output_dir == Path('artifacts/not-results')
 
 
-def test_absolute_publish_path_must_stay_under_repo_results(
+def test_absolute_publish_path_is_preserved(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	monkeypatch.chdir(tmp_path)
 	config = _write_inputs(tmp_path)
 
-	with pytest.raises(ValueError, match='under root'):
-		f3_strat_hmm_m1_results_config_from_mapping(
-			{
-				'inputs': {
-					'baseline_comparison_csv': str(config.baseline_comparison_csv),
-					'label_budget_suite_root': str(config.label_budget_suite_root),
-					'split_index_suite_root': str(config.split_index_suite_root),
-				},
-				'models': {
-					'baseline': config.baseline_model,
-					'candidate': config.candidate_model,
-				},
-				'outputs': {'output_dir': str(config.output_dir)},
-				'publish': {
-					'enabled': True,
-					'output_dir': str(tmp_path / 'outside-results' / 'm1'),
-				},
-			}
-		)
+	explicit_output = tmp_path / 'outside-results' / 'm1'
+	resolved = f3_strat_hmm_m1_results_config_from_mapping(
+		{
+			'inputs': {
+				'baseline_comparison_csv': str(config.baseline_comparison_csv),
+				'label_budget_suite_root': str(config.label_budget_suite_root),
+				'split_index_suite_root': str(config.split_index_suite_root),
+			},
+			'models': {
+				'baseline': config.baseline_model,
+				'candidate': config.candidate_model,
+			},
+			'outputs': {'output_dir': str(config.output_dir)},
+			'publish': {
+				'enabled': True,
+				'output_dir': str(explicit_output),
+			},
+		}
+	)
+	assert resolved.publish.output_dir == explicit_output
 
 
 def test_missing_required_input_file_raises_clear_error(tmp_path: Path) -> None:

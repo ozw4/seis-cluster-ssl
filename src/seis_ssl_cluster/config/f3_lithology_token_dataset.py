@@ -13,7 +13,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_required_nonnegative_int,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.f3.lithology.tokens import (
 	F3LithologyTokenDatasetConfig,
@@ -49,7 +49,7 @@ def f3_lithology_token_dataset_config_from_mapping(
 		prefix='config',
 	)
 	paths = _required_mapping(config, 'paths')
-	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
+	_required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
 	dataset = _required_mapping(config, 'dataset')
 	model = _required_mapping(config, 'model')
@@ -59,10 +59,9 @@ def f3_lithology_token_dataset_config_from_mapping(
 	token_dataset = _required_mapping(config, 'token_dataset')
 	outputs = _token_dataset_outputs_from_mapping(token_dataset)
 	for label, path in _token_dataset_output_paths(outputs):
-		_validate_artifact_path_not_f3(
+		_validate_output_not_under_f3_root(
 			path,
 			label,
-			artifact_root=artifact_root,
 			f3_root=f3_root,
 		)
 	inputs = F3LithologyTokenDatasetInputs(

@@ -35,7 +35,6 @@ class PerformanceMigrationValidationConfig:
 
 	def __post_init__(self) -> None:
 		"""Keep all mutable scientific outputs inside the dedicated artifact root."""
-		_require_under(self.migration_root, self.artifact_root, 'paths.migration_root')
 
 
 _TOP_LEVEL_KEYS = frozenset(
@@ -131,33 +130,28 @@ def performance_migration_validation_config_from_mapping(
 		inputs,
 		'checkpoints',
 		_CHECKPOINT_KEYS,
-		artifact_root=artifact_root,
 	)
 	historical_embeddings = _path_mapping(
 		inputs,
 		'historical_embeddings',
 		_EMBEDDING_KEYS,
-		artifact_root=artifact_root,
 	)
 	m1_probe = _path_mapping(
 		inputs,
 		'm1_probe',
 		_M1_PROBE_KEYS,
-		artifact_root=artifact_root,
 	)
 	hmm = _path_mapping(
 		inputs,
 		'hmm',
 		_HMM_KEYS,
-		artifact_root=artifact_root,
 	)
 	pseudo_targets = _path_mapping(
 		inputs,
 		'pseudo_targets',
 		_PSEUDO_TARGET_KEYS,
-		artifact_root=artifact_root,
 	)
-	f3 = _path_mapping(inputs, 'f3', _F3_KEYS, artifact_root=artifact_root)
+	f3 = _path_mapping(inputs, 'f3', _F3_KEYS)
 
 	finite_mode = compatibility.get('m1_historical_finite_check_mode')
 	if finite_mode != 'off':
@@ -207,18 +201,13 @@ def _path_mapping(
 	parent: Mapping[str, object],
 	key: str,
 	allowed: frozenset[str],
-	*,
-	artifact_root: Path,
 ) -> dict[str, Path]:
 	value = _required_mapping(parent, key)
 	_validate_allowed_keys(value, allowed, prefix=f'inputs.{key}')
-	result = {
+	return {
 		item: _required_absolute_path(value, item, prefix=f'inputs.{key}')
 		for item in sorted(allowed)
 	}
-	for item, path in result.items():
-		_require_under(path, artifact_root, f'inputs.{key}.{item}')
-	return result
 
 
 def _benchmark_mapping(value: Mapping[str, object]) -> dict[str, int]:
@@ -237,11 +226,6 @@ def _sha(value: str, label: str) -> str:
 	return value
 
 
-def _require_under(path: Path, root: Path, label: str) -> None:
-	try:
-		path.resolve(strict=False).relative_to(root.resolve(strict=False))
-	except ValueError as error:
-		raise ValueError(f'{label} must be under paths.artifact_root') from error
 
 
 __all__ = [

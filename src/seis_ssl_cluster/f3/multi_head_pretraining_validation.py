@@ -23,7 +23,6 @@ import torch
 
 from seis_ssl_cluster.config import load_config, resolve_strat_hmm_pretext_config
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 from seis_ssl_cluster.training.strat_hmm.components import (
 	build_strat_hmm_components,
@@ -104,12 +103,6 @@ def f3_multi_head_pretraining_validation_config_from_mapping(
 		or not result.experiment_root.is_absolute()
 	):
 		raise ValueError('artifact_root and experiment_root must be absolute')
-	ensure_under_root(
-		result.experiment_root, root=result.artifact_root, label='experiment_root'
-	)
-	ensure_under_root(
-		result.target_manifest, root=result.artifact_root, label='target_manifest'
-	)
 	for key, value in (
 		('control_full_config', result.control_full_config),
 		('nocons_full_config', result.nocons_full_config),
@@ -402,7 +395,6 @@ def _validate_control_config(
 	output = Path(str(paths.get('output_root', ''))).resolve()
 	if output != (config.experiment_root / model_tag).resolve():
 		raise ValueError('control output root mismatch')
-	ensure_under_root(output, root=config.artifact_root, label='control.output_root')
 	if _mapping(control['pseudo_targets'], 'control pseudo_targets').get('k') != 6:
 		raise ValueError('control pseudo-target K mismatch')
 	if _mapping(control['head'], 'control head').get('num_prototypes') != 6:
@@ -424,7 +416,6 @@ def _validate_candidate_config_contract(
 	output = Path(str(paths.get('output_root', ''))).resolve()
 	if output != (config.experiment_root / model_tag).resolve():
 		raise ValueError(f'{variant} output root mismatch')
-	ensure_under_root(output, root=config.artifact_root, label=f'{variant}.output_root')
 	if _mapping(candidate['loss'], 'loss').get('consistency_weight') != weight:
 		raise ValueError(f'{variant} consistency weight mismatch')
 	if (

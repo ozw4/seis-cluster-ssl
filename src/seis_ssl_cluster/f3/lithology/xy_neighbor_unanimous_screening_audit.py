@@ -35,7 +35,6 @@ from seis_ssl_cluster.f3.xy_neighbor_unanimous_pretraining_validation import (
 from seis_ssl_cluster.f3.xy_neighbor_unanimous_target_audit import (
 	replay_f3_xy_neighbor_unanimous_target_audit,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
 	load_multi_head_xy_neighbor_consensus_target_manifest,
@@ -202,29 +201,6 @@ def f3_xy_neighbor_unanimous_screening_audit_config_from_mapping(  # noqa: C901
 		('hard_reference_run_manifest', result.hard_reference_run_manifest),
 		('current_k6_run_manifest', result.current_k6_run_manifest),
 		('mae_reference_run_manifest', result.mae_reference_run_manifest),
-		('output_path', result.output_path),
-	):
-		ensure_under_root(value, root=result.artifact_root, label=label)
-	for label, value in (
-		('source_hard_manifest', result.source_hard_manifest),
-		(
-			'xy_neighbor_consensus_target_manifest',
-			result.xy_neighbor_consensus_target_manifest,
-		),
-		(
-			'xy_neighbor_unanimous_target_manifest',
-			result.xy_neighbor_unanimous_target_manifest,
-		),
-		('target_audit', result.target_audit),
-		('hard_pretraining_handoff', result.hard_pretraining_handoff),
-		('candidate_pretraining_handoff', result.candidate_pretraining_handoff),
-		(
-			'xy_neighbor_consensus_run_manifest',
-			result.xy_neighbor_consensus_run_manifest,
-		),
-		('hard_reference_run_manifest', result.hard_reference_run_manifest),
-		('current_k6_run_manifest', result.current_k6_run_manifest),
-		('mae_reference_run_manifest', result.mae_reference_run_manifest),
 	):
 		if not value.is_file():
 			raise FileNotFoundError(f'{label} is missing: {value}')
@@ -234,16 +210,10 @@ def f3_xy_neighbor_unanimous_screening_audit_config_from_mapping(  # noqa: C901
 	):
 		if not value.is_file():
 			raise FileNotFoundError(f'{label} is missing: {value}')
-		ensure_under_root(value, root=result.workspace_root, label=label)
 	if not result.candidate_embeddings_dir.is_dir():
 		raise FileNotFoundError(
 			f'candidate_embeddings_dir is missing: {result.candidate_embeddings_dir}'
 		)
-	ensure_under_root(
-		result.candidate_embeddings_dir,
-		root=result.artifact_root,
-		label='candidate_embeddings_dir',
-	)
 	return result
 
 

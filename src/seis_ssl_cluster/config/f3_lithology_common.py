@@ -295,14 +295,12 @@ def _validate_frozen_encoder(model: Mapping[str, object], *, stage: str) -> None
 		raise ValueError(msg)
 
 
-def _validate_artifact_path_not_f3(
+def _validate_output_not_under_f3_root(
 	path: Path,
 	label: str,
 	*,
-	artifact_root: Path,
 	f3_root: Path,
 ) -> None:
-	del artifact_root
 	if _is_relative_to(path, f3_root):
 		msg = f'{label} must not be under paths.f3_root; got {path}'
 		raise ValueError(msg)

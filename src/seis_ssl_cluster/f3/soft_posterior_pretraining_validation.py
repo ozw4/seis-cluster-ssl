@@ -15,7 +15,6 @@ from seis_ssl_cluster.config import load_config, resolve_strat_hmm_pretext_confi
 from seis_ssl_cluster.config.pretraining import _multi_head_posterior_hashes
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3 import multi_head_pretraining_validation as hard_validation
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.state_posterior import (
 	load_multi_head_state_posterior_manifest,
 )
@@ -92,16 +91,8 @@ def f3_m5_soft_posterior_pretraining_validation_config_from_mapping(
 		soft_smoke_config=required_path('soft_smoke_config'),
 		soft_full_config=required_path('soft_full_config'),
 	)
-	for label, path in (
-		('posterior_manifest', result.posterior_manifest),
-		('hard_handoff', result.hard_handoff),
-	):
-		ensure_under_root(path, root=result.artifact_root, label=label)
 	if not result.experiment_root.is_absolute() or not result.artifact_root.is_absolute():
 		raise ValueError('artifact_root and experiment_root must be absolute')
-	ensure_under_root(
-		result.experiment_root, root=result.artifact_root, label='experiment_root'
-	)
 	for label, path in (
 		('posterior_manifest', result.posterior_manifest),
 		('hard_full_config', result.hard_full_config),
@@ -246,7 +237,6 @@ def validate_f3_m5_soft_posterior_pretraining(
 		if phase == 'smoke':
 			smoke = _training_config(config.soft_smoke_config)
 			smoke_evidence = _smoke_evidence(
-				config,
 				full=soft,
 				smoke=smoke,
 				hard_trainability_summary=_mapping(
@@ -345,7 +335,6 @@ def _validate_target_contract(  # noqa: C901
 		).resolve()
 		if output != (config.experiment_root / model_tag).resolve():
 			raise ValueError(f'{label} output root mismatch')
-		ensure_under_root(output, root=config.artifact_root, label=f'{label}.output_root')
 	_validate_allowed_config_delta(hard, soft)
 	hard_handoff = hard_validation.load_f3_multi_head_pretraining_handoff(config.hard_handoff)
 	if hard_handoff.get('model_tag') != _HARD_MODEL_TAG:
@@ -542,7 +531,6 @@ def _checkpoint_evidence(  # noqa: C901
 
 
 def _smoke_evidence(
-	config: F3M5SoftPosteriorPretrainingValidationConfig,
 	*,
 	full: Mapping[str, object],
 	smoke: Mapping[str, object],
@@ -550,7 +538,7 @@ def _smoke_evidence(
 	hard_optimizer_group_identity: object,
 ) -> dict[str, object]:
 	"""Validate the isolated CPU two-step M5-U smoke without full-run rules."""
-	_validate_smoke_config(config, full=full, smoke=smoke)
+	_validate_smoke_config(full=full, smoke=smoke)
 	full_initial_hashes = _initial_hashes(full)
 	if _initial_hashes(smoke) != full_initial_hashes:
 		raise ValueError('soft smoke initial state hashes differ from soft full config')
@@ -575,7 +563,6 @@ def _smoke_evidence(
 
 
 def _validate_smoke_config(
-	config: F3M5SoftPosteriorPretrainingValidationConfig,
 	*,
 	full: Mapping[str, object],
 	smoke: Mapping[str, object],
@@ -587,8 +574,6 @@ def _validate_smoke_config(
 	smoke_root = Path(
 		str(_mapping(smoke['paths'], 'soft smoke paths')['output_root'])
 	).resolve()
-	ensure_under_root(full_root, root=config.artifact_root, label='soft full output root')
-	ensure_under_root(smoke_root, root=config.artifact_root, label='soft smoke output root')
 	if smoke_root == full_root:
 		raise ValueError('soft smoke output root must differ from soft full output root')
 	if full_root.exists():

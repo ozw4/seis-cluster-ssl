@@ -15,8 +15,8 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_required_str,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_NORMALIZATION,
@@ -229,9 +229,7 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 		('voxel_dataset.input_dir', voxel_dir),
 		('outputs.output_dir', output_dir),
 	):
-		_validate_artifact_path_not_f3(
-			path, label, artifact_root=artifact_root, f3_root=f3_root
-		)
+		_validate_output_not_under_f3_root(path, label, f3_root=f3_root)
 	_validate_no_output_overlap(
 		output_dir,
 		sources=(embeddings_dir, voxel_dir),

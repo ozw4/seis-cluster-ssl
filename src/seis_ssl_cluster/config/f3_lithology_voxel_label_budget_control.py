@@ -32,7 +32,6 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_UPSAMPLE_MODE,
 	validate_voxel_decoder_implementation,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -98,11 +97,6 @@ class F3VoxelLabelBudgetControlPublishConfig:
 
 	def __post_init__(self) -> None:
 		"""Keep publishable files below the repository results root."""
-		ensure_under_root(
-			self.output_dir,
-			root=self.results_root,
-			label='publish.output_dir',
-		)
 		if self.max_file_size_bytes <= 0:
 			raise ValueError('publish.max_file_size_bytes must be positive')
 
@@ -207,23 +201,6 @@ class F3VoxelLabelBudgetControlConfig:
 			raise ValueError(
 				'labels must define exactly the six canonical voxel decoder inputs'
 			)
-		paths = [
-			('references.dataset_manifest', self.references.dataset_manifest),
-			('candidate.embeddings_dir', self.candidate.embeddings_dir),
-			('outputs.output_root', self.output_root),
-		]
-		if self.references.historical_run_manifest is not None:
-			paths.append(
-				(
-					'references.historical_run_manifest',
-					self.references.historical_run_manifest,
-				)
-			)
-		for label, path in paths:
-			ensure_under_root(path, root=self.artifact_root, label=label)
-		for key, path in self.labels.items():
-			root = self.f3_root if key == 'source_label_segy' else self.artifact_root
-			ensure_under_root(path, root=root, label=f'labels.{key}')
 		_validate_scientific_contract(self)
 
 	@property

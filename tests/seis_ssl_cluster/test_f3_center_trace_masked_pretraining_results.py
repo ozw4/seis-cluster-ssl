@@ -122,7 +122,7 @@ def test_publication_rejects_unallowlisted_owned_output(tmp_path: Path) -> None:
 		)
 
 
-def test_live_references_reject_missing_stale_and_external_files(
+def test_live_references_reject_missing_and_stale_but_allow_explicit_files(
 	tmp_path: Path,
 ) -> None:
 	config, _portable, _live = _publication_fixture(tmp_path)
@@ -131,22 +131,20 @@ def test_live_references_reject_missing_stale_and_external_files(
 
 	with pytest.raises(FileNotFoundError, match='missing'):
 		results._validate_live_reference(
-			config,
 			{'path': str(config.artifact_root / 'missing.json'), 'sha256': 'a' * 64},
 			label='missing evidence',
 		)
 	with pytest.raises(ValueError, match='SHA-256'):
 		results._validate_live_reference(
-			config,
 			{'path': str(source), 'sha256': 'a' * 64},
 			label='stale evidence',
 		)
-	with pytest.raises(ValueError, match='outside'):
-		results._validate_live_reference(
-			config,
-			{'path': str(tmp_path / 'foreign.json'), 'sha256': 'a' * 64},
-			label='foreign evidence',
-		)
+	foreign = tmp_path / 'foreign.json'
+	foreign.write_text('{}\n', encoding='utf-8')
+	assert results._validate_live_reference(
+		{'path': str(foreign), 'sha256': results.file_sha256(foreign)},
+		label='explicit evidence',
+	) == foreign.resolve()
 
 
 def test_portable_review_paths_preserve_hashes_without_local_roots(
@@ -194,12 +192,6 @@ def test_inspect_live_evidence_binds_diagnostics_to_handoff_hash_and_root(
 	workspace_root.mkdir()
 	handoff_path = artifact_root / 'handoff.json'
 	handoff_path.write_text('{}\n', encoding='utf-8')
-	config = results.F3CenterTraceMaskedPretrainingReviewConfig(
-		artifact_root=artifact_root,
-		workspace_root=workspace_root,
-		pretraining_handoff=handoff_path,
-		output_dir=workspace_root / 'review',
-	)
 	checkpoint_root = artifact_root / 'pretraining'
 	checkpoint_root.mkdir()
 	selected_path = checkpoint_root / 'best.pt'
@@ -269,14 +261,14 @@ def test_inspect_live_evidence_binds_diagnostics_to_handoff_hash_and_root(
 		lambda *_args, **_kwargs: {'root': embedding_root, 'survey_count': 1},
 	)
 
-	live = results._inspect_live_evidence(config, handoff=handoff)
+	live = results._inspect_live_evidence(handoff=handoff)
 	assert live['diagnostics_reference'] == handoff['training_diagnostics']
 	assert live['training_execution'] == {'fresh': 1, 'resume': 0}
 	assert live['embedding_execution'] == {'fresh': 1, 'reuse': 0}
 
 	diagnostics_path.write_bytes(b'tampered')
 	with pytest.raises(ValueError, match='does not match live bytes'):
-		results._inspect_live_evidence(config, handoff=handoff)
+		results._inspect_live_evidence(handoff=handoff)
 
 	foreign = artifact_root / 'foreign.csv'
 	foreign.write_bytes(b'foreign')
@@ -288,4 +280,4 @@ def test_inspect_live_evidence_binds_diagnostics_to_handoff_hash_and_root(
 		},
 	}
 	with pytest.raises(ValueError, match='does not bind selected checkpoint'):
-		results._inspect_live_evidence(config, handoff=foreign_handoff)
+		results._inspect_live_evidence(handoff=foreign_handoff)

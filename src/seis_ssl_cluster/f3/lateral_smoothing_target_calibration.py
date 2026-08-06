@@ -25,7 +25,6 @@ from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.pretraining import _multi_head_target_hashes
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3 import multi_head_pretraining_validation as hard_validation
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy import lateral_targets
 from seis_ssl_cluster.stratigraphy.lateral_smoothing import (
 	LATERAL_SMOOTHING_SEMANTICS,
@@ -202,18 +201,6 @@ def _config_candidates(
 
 
 def _validate_calibration_paths(config: F3M5LateralTargetCalibrationConfig) -> None:
-	for label, path in (
-		('source_hard_manifest', config.source_hard_manifest),
-		('source_posterior_manifest', config.source_posterior_manifest),
-		*(
-			(f'candidate_manifests.{candidate.name}', candidate.manifest)
-			for candidate in config.candidates
-		),
-		('selected_manifest', config.selected_manifest),
-		('calibration_handoff', config.calibration_handoff),
-		('calibration_report', config.calibration_report),
-	):
-		ensure_under_root(path, root=config.artifact_root, label=label)
 	output_paths = (
 		config.selected_manifest,
 		config.calibration_handoff,

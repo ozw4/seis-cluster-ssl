@@ -66,7 +66,10 @@ from seis_ssl_cluster.f3.lithology.voxel_evaluation import (
 	inspect_f3_lithology_voxel_evaluation,
 )
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
-	f3_voxel_prediction_artifact_paths,
+	CONFIDENCE_NAME,
+	METADATA_NAME,
+	PREDICTIONS_NAME,
+	VALID_MASK_NAME,
 	validate_f3_voxel_prediction_artifact,
 )
 from seis_ssl_cluster.f3.lithology.voxel_projection import (
@@ -757,7 +760,7 @@ def _run_v1_job(  # noqa: PLR0913
 		embeddings_input_dir=model.embeddings_dir,
 		checkpoint=best_checkpoint,
 		tiles=config.tiles,
-		output_paths=f3_voxel_prediction_artifact_paths(prediction_dir),
+		output_dir=prediction_dir,
 		write_probabilities=config.write_probabilities,
 		overwrite=config.overwrite,
 	)
@@ -869,12 +872,12 @@ def _run_or_validate_evaluation(
 	}
 	if metadata.get('policy') != expected_policy:
 		raise ValueError('existing voxel evaluation policy identity mismatch')
-	prediction = inspection.prediction_artifact.paths
+	prediction_dir = inspection.prediction_artifact.output_dir
 	expected_inputs = {
-		'prediction_metadata': prediction.metadata,
-		'voxel_predictions': prediction.predictions,
-		'voxel_confidence': prediction.confidence,
-		'voxel_valid_mask': prediction.valid_mask,
+		'prediction_metadata': prediction_dir / METADATA_NAME,
+		'voxel_predictions': prediction_dir / PREDICTIONS_NAME,
+		'voxel_confidence': prediction_dir / CONFIDENCE_NAME,
+		'voxel_valid_mask': prediction_dir / VALID_MASK_NAME,
 		'voxel_dataset_metadata': config.voxel_dataset_input_dir / VOXEL_METADATA_NAME,
 		'voxel_split_grid': config.voxel_dataset_input_dir / GRID_NAME,
 		'label_volume': config.source_label_volume,
@@ -1744,14 +1747,13 @@ def _complete_token_prediction(root: Path) -> bool:
 
 
 def _complete_prediction(root: Path) -> bool:
-	paths = f3_voxel_prediction_artifact_paths(root)
 	return all(
 		path.is_file()
 		for path in (
-			paths.predictions,
-			paths.confidence,
-			paths.valid_mask,
-			paths.metadata,
+			root / PREDICTIONS_NAME,
+			root / CONFIDENCE_NAME,
+			root / VALID_MASK_NAME,
+			root / METADATA_NAME,
 		)
 	)
 

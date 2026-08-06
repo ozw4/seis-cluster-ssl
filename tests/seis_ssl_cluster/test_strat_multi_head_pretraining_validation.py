@@ -465,15 +465,6 @@ def test_soft_smoke_evidence_requires_isolation_and_initial_parity(
 	artifact_root.mkdir()
 	full_root = artifact_root / 'full'
 	smoke_root = artifact_root / 'smoke'
-	config = F3M5SoftPosteriorPretrainingValidationConfig(
-		artifact_root=artifact_root,
-		experiment_root=artifact_root / 'pretraining',
-		posterior_manifest=artifact_root / 'posterior.json',
-		hard_full_config=tmp_path / 'hard.yaml',
-		hard_handoff=artifact_root / 'hard_handoff.json',
-		soft_smoke_config=tmp_path / 'smoke.yaml',
-		soft_full_config=tmp_path / 'soft.yaml',
-	)
 	full = {
 		'paths': {'output_root': str(full_root)},
 		'identity': {
@@ -507,7 +498,6 @@ def test_soft_smoke_evidence_requires_isolation_and_initial_parity(
 	)
 
 	evidence = soft_validation._smoke_evidence(  # noqa: SLF001
-		config,
 		full=full,
 		smoke=smoke,
 		hard_trainability_summary={},
@@ -524,7 +514,6 @@ def test_soft_smoke_evidence_requires_isolation_and_initial_parity(
 	)
 	with pytest.raises(ValueError, match='initial state hashes differ'):
 		soft_validation._smoke_evidence(  # noqa: SLF001
-			config,
 			full=full,
 			smoke=smoke,
 			hard_trainability_summary={},
@@ -536,7 +525,6 @@ def test_soft_smoke_evidence_requires_isolation_and_initial_parity(
 	full_root.mkdir()
 	with pytest.raises(ValueError, match='must remain unmodified'):
 		soft_validation._smoke_evidence(  # noqa: SLF001
-			config,
 			full=full,
 			smoke=smoke,
 			hard_trainability_summary={},

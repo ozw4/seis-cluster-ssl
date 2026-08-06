@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config.f3_lithology_common import (
 	_hidden_dims,
@@ -21,8 +20,8 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_str,
 	_string_item,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.f3 import (
 	DEFAULT_EVALUATION_METRICS,
@@ -32,9 +31,6 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyProbeSettings,
 )
 from seis_ssl_cluster.f3.lithology.tokens import read_f3_lithology_class_info
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 
 def f3_lithology_probe_config_from_mapping(
@@ -61,7 +57,7 @@ def f3_lithology_probe_config_from_mapping(
 		prefix='config',
 	)
 	paths = _required_mapping(config, 'paths')
-	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
+	_required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
 	dataset = _required_mapping(config, 'dataset')
 	model = _required_mapping(config, 'model')
@@ -86,16 +82,29 @@ def f3_lithology_probe_config_from_mapping(
 		'metadata_json',
 		prefix='token_dataset',
 	)
-	for label, path in _probe_artifact_paths(
-		token_dataset_dir=token_dataset_dir,
-		class_info_path=class_info_path,
-		token_dataset_metadata_json=token_dataset_metadata_json,
-		outputs=outputs,
+	for label, path in (
+		('token_dataset.input_dir', token_dataset_dir),
+		('labels.class_info', class_info_path),
+		('probe.output_dir', outputs.output_dir),
+		('probe.probe_joblib', outputs.probe_joblib),
+		('probe.scaler_joblib', outputs.scaler_joblib),
+		('probe.probe_config_resolved_json', outputs.config_json),
+		('probe.metrics_json', outputs.metrics_json),
+		('probe.metrics_csv', outputs.metrics_csv),
+		('probe.confusion_matrix_csv', outputs.confusion_matrix_csv),
+		('probe.classification_report_md', outputs.classification_report_md),
+		('probe.confusion_matrix_png', outputs.confusion_matrix_png),
+		('probe.per_class_f1_png', outputs.per_class_f1_png),
 	):
-		_validate_artifact_path_not_f3(
+		_validate_output_not_under_f3_root(
 			path,
 			label,
-			artifact_root=artifact_root,
+			f3_root=f3_root,
+		)
+	if token_dataset_metadata_json is not None:
+		_validate_output_not_under_f3_root(
+			token_dataset_metadata_json,
+			'token_dataset.metadata_json',
 			f3_root=f3_root,
 		)
 	return F3LithologyProbeConfig(
@@ -211,32 +220,6 @@ def _probe_figure_dpi(evaluation: Mapping[str, object]) -> int:
 		msg = f'evaluation.figure must be a mapping; got {figure!r}'
 		raise TypeError(msg)
 	return _optional_positive_int(figure.get('dpi', 300), 'evaluation.figure.dpi')
-
-
-def _probe_artifact_paths(
-	*,
-	token_dataset_dir: Path,
-	class_info_path: Path,
-	token_dataset_metadata_json: Path | None,
-	outputs: F3LithologyProbeOutputs,
-) -> tuple[tuple[str, Path], ...]:
-	paths: list[tuple[str, Path]] = [
-		('token_dataset.input_dir', token_dataset_dir),
-		('labels.class_info', class_info_path),
-		('probe.output_dir', outputs.output_dir),
-		('probe.probe_joblib', outputs.probe_joblib),
-		('probe.scaler_joblib', outputs.scaler_joblib),
-		('probe.probe_config_resolved_json', outputs.config_json),
-		('probe.metrics_json', outputs.metrics_json),
-		('probe.metrics_csv', outputs.metrics_csv),
-		('probe.confusion_matrix_csv', outputs.confusion_matrix_csv),
-		('probe.classification_report_md', outputs.classification_report_md),
-		('probe.confusion_matrix_png', outputs.confusion_matrix_png),
-		('probe.per_class_f1_png', outputs.per_class_f1_png),
-	]
-	if token_dataset_metadata_json is not None:
-		paths.append(('token_dataset.metadata_json', token_dataset_metadata_json))
-	return tuple(paths)
 
 
 __all__ = ['f3_lithology_probe_config_from_mapping']

@@ -30,7 +30,6 @@ from seis_ssl_cluster.data.volume_store import inspect_npy_volume
 from seis_ssl_cluster.data.window_preprocessing import resolve_manifest_path
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3 import multi_head_pretraining_validation as hard_validation
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 from seis_ssl_cluster.training.strat_hmm.components import (
 	build_strat_hmm_components,
@@ -189,14 +188,6 @@ def f3_center_trace_masked_pretraining_validation_config_from_mapping(
 		raise FileNotFoundError(
 			'artifact_root and experiment_root must be existing directories'
 		)
-	ensure_under_root(
-		result.experiment_root, root=result.artifact_root, label='experiment_root'
-	)
-	for label, value in (
-		('target_manifest', result.target_manifest),
-		('hard_handoff', result.hard_handoff),
-	):
-		ensure_under_root(value, root=result.artifact_root, label=label)
 	return result
 
 
@@ -601,7 +592,6 @@ def _target_evidence(
 		).resolve()
 		if root != (config.experiment_root / model_tag).resolve():
 			raise ValueError(f'{label} output root mismatch')
-		ensure_under_root(root, root=config.artifact_root, label=f'{label}.output_root')
 	_validate_center_config(full, config.target_manifest, target_hashes)
 	hard_identity = _scientific(hard, 'hard')
 	if hard_identity.get('target_manifest_sha256') != file_sha256(
@@ -1190,9 +1180,9 @@ def _smoke_evidence(
 	dry_run: bool = False,
 ) -> dict[str, object]:
 	smoke_root = _training_output_root(
-		smoke, config, label='smoke output root'
+		smoke, label='smoke output root'
 	)
-	full_root = _training_output_root(full, config, label='full output root')
+	full_root = _training_output_root(full, label='full output root')
 	try:
 		_smoke_config_contract(config, full=full, smoke=smoke)
 		full_runtime = _runtime_contract(full, center=True)
@@ -1269,8 +1259,8 @@ def _smoke_config_contract(
 		or _model_tag(smoke, 'smoke') != _MODEL_TAG
 	):
 		raise ValueError('center-trace smoke target or model identity mismatch')
-	full_root = _training_output_root(full, config, label='full output root')
-	smoke_root = _training_output_root(smoke, config, label='smoke output root')
+	full_root = _training_output_root(full, label='full output root')
+	smoke_root = _training_output_root(smoke, label='smoke output root')
 	if full_root == smoke_root:
 		raise ValueError('center-trace smoke output root must differ from full root')
 	if full_root.exists():
@@ -1298,13 +1288,12 @@ def _smoke_config_contract(
 
 def _training_output_root(
 	training: Mapping[str, object],
-	config: F3CenterTraceMaskedPretrainingValidationConfig,
 	*,
 	label: str,
 ) -> Path:
-	root = Path(str(_mapping(training['paths'], f'{label} paths')['output_root'])).resolve()
-	ensure_under_root(root, root=config.artifact_root, label=label)
-	return root
+	return Path(
+		str(_mapping(training['paths'], f'{label} paths')['output_root'])
+	).resolve()
 
 
 def _checkpoint_evidence(
@@ -1899,8 +1888,8 @@ def _validate_smoke_phase_evidence(
 				f'center-trace smoke evidence is stale for target/config field: {key}'
 			)
 	smoke_evidence = _mapping(evidence['smoke'], 'center-trace smoke evidence body')
-	full_root = _training_output_root(full, config, label='full output root')
-	smoke_root = _training_output_root(smoke, config, label='smoke output root')
+	full_root = _training_output_root(full, label='full output root')
+	smoke_root = _training_output_root(smoke, label='smoke output root')
 	if full_root == smoke_root:
 		raise ValueError('center-trace smoke output root must differ from full root')
 	latest_path = smoke_root / 'latest.pt'

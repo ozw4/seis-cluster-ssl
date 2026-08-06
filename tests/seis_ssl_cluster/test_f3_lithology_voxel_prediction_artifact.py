@@ -8,11 +8,12 @@ import pytest
 
 from seis_ssl_cluster.f3.lithology import voxel_prediction_artifact as artifact_module
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	METADATA_NAME,
+	PREDICTIONS_NAME,
 	F3VoxelPredictionArrays,
 	commit_f3_voxel_prediction_artifact,
-	create_f3_voxel_prediction_staging_paths,
+	create_f3_voxel_prediction_staging_dir,
 	discover_f3_voxel_probability_path,
-	f3_voxel_prediction_artifact_paths,
 	open_f3_voxel_prediction_memmaps,
 	read_f3_voxel_prediction_metadata,
 	validate_f3_voxel_prediction_arrays,
@@ -62,9 +63,8 @@ def _metadata(
 def _write_artifact(
 	output_dir: Path, *, include_probabilities: bool = False, first_class: int = 2
 ) -> None:
-	paths = f3_voxel_prediction_artifact_paths(output_dir)
 	arrays = open_f3_voxel_prediction_memmaps(
-		paths,
+		output_dir,
 		volume_shape_xyz=SHAPE,
 		class_count=len(CLASS_IDS),
 		include_probabilities=include_probabilities,
@@ -92,7 +92,7 @@ def _write_artifact(
 		chunk_voxels=3,
 	)
 	write_f3_voxel_prediction_metadata(
-		paths.metadata,
+		output_dir / METADATA_NAME,
 		_metadata(summary, include_probabilities=include_probabilities),
 	)
 
@@ -193,10 +193,9 @@ def test_probability_sum_and_confidence_are_validated() -> None:
 def test_class_order_mismatch_is_rejected(tmp_path: Path) -> None:
 	output_dir = tmp_path / 'predictions'
 	_write_artifact(output_dir)
-	paths = f3_voxel_prediction_artifact_paths(output_dir)
-	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata = dict(read_f3_voxel_prediction_metadata(output_dir / METADATA_NAME))
 	metadata['class_probability_order'] = [5, 2]
-	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+	write_f3_voxel_prediction_metadata(output_dir / METADATA_NAME, metadata)
 
 	with pytest.raises(ValueError, match='classes order must match'):
 		validate_f3_voxel_prediction_artifact(output_dir)
@@ -205,10 +204,9 @@ def test_class_order_mismatch_is_rejected(tmp_path: Path) -> None:
 def test_learned_decoder_metadata_requires_architecture(tmp_path: Path) -> None:
 	output_dir = tmp_path / 'predictions'
 	_write_artifact(output_dir)
-	paths = f3_voxel_prediction_artifact_paths(output_dir)
-	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata = dict(read_f3_voxel_prediction_metadata(output_dir / METADATA_NAME))
 	metadata['prediction_kind'] = 'frozen_embedding_decoder'
-	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+	write_f3_voxel_prediction_metadata(output_dir / METADATA_NAME, metadata)
 
 	with pytest.raises(ValueError, match='decoder_architecture'):
 		validate_f3_voxel_prediction_artifact(output_dir)
@@ -219,8 +217,7 @@ def test_learned_decoder_metadata_rejects_old_architecture_spec(
 ) -> None:
 	output_dir = tmp_path / 'predictions'
 	_write_artifact(output_dir)
-	paths = f3_voxel_prediction_artifact_paths(output_dir)
-	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata = dict(read_f3_voxel_prediction_metadata(output_dir / METADATA_NAME))
 	metadata['prediction_kind'] = 'frozen_embedding_decoder'
 	metadata['decoder_architecture'] = {
 		'spec': 'frozen_embedding_decoder_v1',
@@ -231,7 +228,7 @@ def test_learned_decoder_metadata_rejects_old_architecture_spec(
 		'upsample_mode': VOXEL_DECODER_UPSAMPLE_MODE,
 		'normalization': VOXEL_DECODER_NORMALIZATION,
 	}
-	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+	write_f3_voxel_prediction_metadata(output_dir / METADATA_NAME, metadata)
 
 	with pytest.raises(ValueError, match=r'decoder_architecture\.spec'):
 		validate_f3_voxel_prediction_artifact(output_dir)
@@ -272,10 +269,9 @@ def test_metadata_outputs_are_required_and_bound_to_artifact_paths(
 ) -> None:
 	output_dir = tmp_path / 'predictions'
 	_write_artifact(output_dir)
-	paths = f3_voxel_prediction_artifact_paths(output_dir)
-	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata = dict(read_f3_voxel_prediction_metadata(output_dir / METADATA_NAME))
 	metadata['outputs'] = outputs
-	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+	write_f3_voxel_prediction_metadata(output_dir / METADATA_NAME, metadata)
 
 	with pytest.raises(error, match=match):
 		validate_f3_voxel_prediction_artifact(output_dir)
@@ -284,12 +280,11 @@ def test_metadata_outputs_are_required_and_bound_to_artifact_paths(
 def test_metadata_declared_probability_file_must_exist(tmp_path: Path) -> None:
 	output_dir = tmp_path / 'predictions'
 	_write_artifact(output_dir)
-	paths = f3_voxel_prediction_artifact_paths(output_dir)
-	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata = dict(read_f3_voxel_prediction_metadata(output_dir / METADATA_NAME))
 	outputs = dict(metadata['outputs'])  # type: ignore[arg-type]
 	outputs['probabilities'] = 'f3_voxel_probabilities.npy'
 	metadata['outputs'] = outputs
-	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+	write_f3_voxel_prediction_metadata(output_dir / METADATA_NAME, metadata)
 
 	with pytest.raises(FileNotFoundError, match='metadata declares'):
 		validate_f3_voxel_prediction_artifact(output_dir)
@@ -299,27 +294,27 @@ def test_metadata_declared_probability_file_must_exist(tmp_path: Path) -> None:
 def test_partial_artifact_is_rejected(
 	tmp_path: Path, metadata_only
 ) -> None:
-	paths = f3_voxel_prediction_artifact_paths(tmp_path / 'partial')
-	paths.output_dir.mkdir()
+	output_dir = tmp_path / 'partial'
+	output_dir.mkdir()
 	if metadata_only:
-		write_f3_voxel_prediction_metadata(paths.metadata, _metadata({}))
+		write_f3_voxel_prediction_metadata(output_dir / METADATA_NAME, _metadata({}))
 	else:
-		np.save(paths.predictions, np.full(SHAPE, -1, dtype=np.int16))
+		np.save(output_dir / PREDICTIONS_NAME, np.full(SHAPE, -1, dtype=np.int16))
 
 	with pytest.raises(FileNotFoundError, match='incomplete'):
-		validate_f3_voxel_prediction_artifact(paths)
+		validate_f3_voxel_prediction_artifact(output_dir)
 
 
 def test_staged_commit_and_overwrite_safety(tmp_path: Path) -> None:
 	target = tmp_path / 'run'
-	staging = create_f3_voxel_prediction_staging_paths(target)
-	_write_artifact(staging.output_dir)
+	staging = create_f3_voxel_prediction_staging_dir(target)
+	_write_artifact(staging)
 	committed = commit_f3_voxel_prediction_artifact(staging, target)
-	assert committed.output_dir == target
-	assert not staging.output_dir.exists()
+	assert committed == target
+	assert not staging.exists()
 
-	replacement = create_f3_voxel_prediction_staging_paths(target, overwrite=True)
-	_write_artifact(replacement.output_dir, first_class=5)
+	replacement = create_f3_voxel_prediction_staging_dir(target, overwrite=True)
+	_write_artifact(replacement, first_class=5)
 	with pytest.raises(FileExistsError, match='refusing to overwrite'):
 		commit_f3_voxel_prediction_artifact(replacement, target)
 	assert validate_f3_voxel_prediction_artifact(target).metadata['summary'] == {
@@ -340,11 +335,11 @@ def test_overwrite_falls_back_when_atomic_exchange_is_unsupported(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	target = tmp_path / 'run'
-	staging = create_f3_voxel_prediction_staging_paths(target)
-	_write_artifact(staging.output_dir)
+	staging = create_f3_voxel_prediction_staging_dir(target)
+	_write_artifact(staging)
 	commit_f3_voxel_prediction_artifact(staging, target)
-	replacement = create_f3_voxel_prediction_staging_paths(target, overwrite=True)
-	_write_artifact(replacement.output_dir, first_class=5)
+	replacement = create_f3_voxel_prediction_staging_dir(target, overwrite=True)
+	_write_artifact(replacement, first_class=5)
 
 	def unsupported_exchange(_source: Path, _target: Path) -> None:
 		raise NotImplementedError('RENAME_EXCHANGE is unsupported')
@@ -354,7 +349,7 @@ def test_overwrite_falls_back_when_atomic_exchange_is_unsupported(
 	)
 	commit_f3_voxel_prediction_artifact(replacement, target, overwrite=True)
 
-	assert not replacement.output_dir.exists()
+	assert not replacement.exists()
 	assert not list(tmp_path.glob('.run.backup-*'))
 	assert validate_f3_voxel_prediction_artifact(target).metadata['summary'] == {
 		'valid_voxel_count': 4,
@@ -367,12 +362,12 @@ def test_portable_overwrite_rolls_back_failed_promotion(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	target = tmp_path / 'run'
-	staging = create_f3_voxel_prediction_staging_paths(target)
-	_write_artifact(staging.output_dir, include_probabilities=True)
+	staging = create_f3_voxel_prediction_staging_dir(target)
+	_write_artifact(staging, include_probabilities=True)
 	commit_f3_voxel_prediction_artifact(staging, target)
-	replacement = create_f3_voxel_prediction_staging_paths(target, overwrite=True)
+	replacement = create_f3_voxel_prediction_staging_dir(target, overwrite=True)
 	_write_artifact(
-		replacement.output_dir, include_probabilities=True, first_class=5
+		replacement, include_probabilities=True, first_class=5
 	)
 
 	def unsupported_exchange(_source: Path, _target: Path) -> None:
@@ -401,7 +396,7 @@ def test_portable_overwrite_rolls_back_failed_promotion(
 	assert np.all(artifact.arrays.predictions[0] == 2)
 	assert artifact.arrays.probabilities is not None
 	assert np.all(artifact.arrays.probabilities[0, :, :, 0] == np.float16(0.75))
-	assert replacement.output_dir.is_dir()
+	assert replacement.is_dir()
 	assert not list(tmp_path.glob('.run.backup-*'))
 
 
@@ -409,11 +404,11 @@ def test_atomic_exchange_overwrite_removes_old_target(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	target = tmp_path / 'run'
-	staging = create_f3_voxel_prediction_staging_paths(target)
-	_write_artifact(staging.output_dir)
+	staging = create_f3_voxel_prediction_staging_dir(target)
+	_write_artifact(staging)
 	commit_f3_voxel_prediction_artifact(staging, target)
-	replacement = create_f3_voxel_prediction_staging_paths(target, overwrite=True)
-	_write_artifact(replacement.output_dir, first_class=5)
+	replacement = create_f3_voxel_prediction_staging_dir(target, overwrite=True)
+	_write_artifact(replacement, first_class=5)
 	exchanged = False
 
 	def exchange(source: Path, destination: Path) -> None:
@@ -428,7 +423,7 @@ def test_atomic_exchange_overwrite_removes_old_target(
 	commit_f3_voxel_prediction_artifact(replacement, target, overwrite=True)
 
 	assert exchanged
-	assert not replacement.output_dir.exists()
+	assert not replacement.exists()
 	assert validate_f3_voxel_prediction_artifact(target).metadata['summary'] == {
 		'valid_voxel_count': 4,
 		'invalid_voxel_count': 4,
@@ -440,8 +435,8 @@ def test_non_overwrite_commit_does_not_replace_racing_target(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	target = tmp_path / 'run'
-	staging = create_f3_voxel_prediction_staging_paths(target)
-	_write_artifact(staging.output_dir)
+	staging = create_f3_voxel_prediction_staging_dir(target)
+	_write_artifact(staging)
 	original_exists = Path.exists
 	target_checks = 0
 
@@ -460,7 +455,7 @@ def test_non_overwrite_commit_does_not_replace_racing_target(
 		commit_f3_voxel_prediction_artifact(staging, target)
 
 	assert target_checks == 2
-	assert staging.output_dir.is_dir()
+	assert staging.is_dir()
 	assert (target / 'marker').read_text(encoding='utf-8') == 'existing'
 
 
@@ -490,12 +485,11 @@ def test_metadata_reader_rejects_non_standard_json_constants(
 def test_extra_summary_fields_are_rejected(tmp_path: Path) -> None:
 	output_dir = tmp_path / 'predictions'
 	_write_artifact(output_dir)
-	paths = f3_voxel_prediction_artifact_paths(output_dir)
-	metadata = dict(read_f3_voxel_prediction_metadata(paths.metadata))
+	metadata = dict(read_f3_voxel_prediction_metadata(output_dir / METADATA_NAME))
 	summary = dict(metadata['summary'])  # type: ignore[arg-type]
 	summary['extra'] = 'unexpected'
 	metadata['summary'] = summary
-	write_f3_voxel_prediction_metadata(paths.metadata, metadata)
+	write_f3_voxel_prediction_metadata(output_dir / METADATA_NAME, metadata)
 
 	with pytest.raises(ValueError, match='summary does not match'):
 		validate_f3_voxel_prediction_artifact(output_dir)

@@ -29,10 +29,11 @@ def test_review_config_is_closed_and_requires_results_output(tmp_path: Path) -> 
 			{**config, 'facies_labels': '/not/allowed.npy'}
 		)
 
-	with pytest.raises(ValueError, match='output_dir must be under root'):
-		results.f3_m5_lateral_smoothing_review_config_from_mapping(
-			{**config, 'output_dir': str(paths['workspace_root'] / 'outside')}
-		)
+	explicit_output = paths['workspace_root'] / 'outside'
+	resolved = results.f3_m5_lateral_smoothing_review_config_from_mapping(
+		{**config, 'output_dir': str(explicit_output)}
+	)
+	assert resolved.output_dir == explicit_output
 
 
 def test_review_publisher_writes_portable_target_only_artifacts(

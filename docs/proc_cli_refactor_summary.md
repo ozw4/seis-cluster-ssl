@@ -43,7 +43,6 @@ directly:
 - `preview_f3_tokenization.py`
 - `train_amp_mae.py`
 - `train_f3_lithology_probe.py`
-- `validate_artifact_paths.py`
 - `validate_results_artifacts.py`
 - `visualize_clusters.py`
 - `visualize_f3_lithology_predictions.py`
@@ -63,11 +62,11 @@ The entrypoint contract test added in
 - primary workflow help output still contains `--config` and `--dry-run`;
 - major existing options remain present, including `--device`,
   `--skip-existing`, `--overwrite`, `--max-steps`, `--output-root`, `--resume`,
-  comparison-report overrides, and validator options;
+  comparison-report overrides, and results-validator options;
 - proc `main()` functions stay small enough to act as entrypoints rather than
   stage implementations.
 
-Validator commands intentionally remain non-YAML CLIs and do not gain
+The results validator intentionally remains a non-YAML CLI and does not gain
 `--config`.
 
 ## Verification
@@ -77,7 +76,7 @@ Executed:
 ```bash
 python -m compileall -q src proc tests
 pytest -q tests/seis_ssl_cluster/test_cli_helpers.py tests/seis_ssl_cluster/test_proc_entrypoints.py
-pytest -q tests/seis_ssl_cluster/test_config.py tests/seis_ssl_cluster/test_active_experiment_configs.py tests/seis_ssl_cluster/test_results_publish.py tests/seis_ssl_cluster/test_results_validation.py tests/seis_ssl_cluster/test_artifact_path_validation_cli.py
+pytest -q tests/seis_ssl_cluster/test_config.py tests/seis_ssl_cluster/test_active_experiment_configs.py tests/seis_ssl_cluster/test_results_publish.py tests/seis_ssl_cluster/test_results_validation.py
 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTORCH_NUM_THREADS=1 pytest -q tests/seis_ssl_cluster/test_f3_lithology_probe.py tests/seis_ssl_cluster/test_f3_lithology_baseline_comparison.py tests/seis_ssl_cluster/test_embedding_extractor.py tests/seis_ssl_cluster/test_training_smoke.py
 python proc/seis_ssl_cluster/train_amp_mae.py --help
 python proc/seis_ssl_cluster/extract_embeddings.py --help

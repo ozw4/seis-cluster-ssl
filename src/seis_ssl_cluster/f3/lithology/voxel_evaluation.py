@@ -28,6 +28,18 @@ from seis_ssl_cluster.f3.lithology.voxel_boundary_metrics import (
 from seis_ssl_cluster.f3.lithology.voxel_dataset import GRID_NAME, METADATA_NAME
 from seis_ssl_cluster.f3.lithology.voxel_metrics import update_confusion_matrix
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	CONFIDENCE_NAME as PREDICTION_CONFIDENCE_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	METADATA_NAME as PREDICTION_METADATA_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	PREDICTIONS_NAME as VOXEL_PREDICTIONS_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	VALID_MASK_NAME as PREDICTION_VALID_MASK_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	F3VoxelPredictionArtifact,
 	validate_f3_voxel_prediction_artifact,
 )
@@ -1062,16 +1074,16 @@ def _evaluation_metadata(
 		},
 		'inputs': {
 			'prediction_metadata': _identity(
-				inspection.prediction_artifact.paths.metadata
+				inspection.prediction_artifact.output_dir / PREDICTION_METADATA_NAME
 			),
 			'voxel_predictions': _identity(
-				inspection.prediction_artifact.paths.predictions
+				inspection.prediction_artifact.output_dir / VOXEL_PREDICTIONS_NAME
 			),
 			'voxel_confidence': _identity(
-				inspection.prediction_artifact.paths.confidence
+				inspection.prediction_artifact.output_dir / PREDICTION_CONFIDENCE_NAME
 			),
 			'voxel_valid_mask': _identity(
-				inspection.prediction_artifact.paths.valid_mask
+				inspection.prediction_artifact.output_dir / PREDICTION_VALID_MASK_NAME
 			),
 			'voxel_dataset_metadata': _identity(
 				config.voxel_dataset_input_dir / METADATA_NAME

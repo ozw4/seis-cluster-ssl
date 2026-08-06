@@ -33,7 +33,7 @@ def test_voxel_inference_config_resolves_strict_settings(tmp_path) -> None:
 	assert config.tiles.core_size_tokens == (2, 3, 4)
 	assert config.tiles.context_halo_tokens == (1, 0, 2)
 	assert config.write_probabilities is True
-	assert config.output_paths.predictions.name == 'f3_voxel_predictions.npy'
+	assert config.output_dir == tmp_path / 'artifacts' / 'predictions'
 
 
 def test_voxel_inference_config_rejects_unknown_keys(tmp_path) -> None:

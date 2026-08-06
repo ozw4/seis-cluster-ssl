@@ -17,7 +17,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_absolute_path,
 	_required_mapping,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonReportConfig,
@@ -114,10 +114,9 @@ def f3_lithology_report_config_from_mapping(
 		output_json=output_json,
 		comparison=comparison,
 	):
-		_validate_artifact_path_not_f3(
+		_validate_output_not_under_f3_root(
 			path,
 			label,
-			artifact_root=artifact_root,
 			f3_root=f3_root,
 		)
 	return F3LithologyReportConfig(

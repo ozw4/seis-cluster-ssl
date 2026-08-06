@@ -74,7 +74,6 @@ class F3VoxelLabelBudgetSuiteConfig:
 
 	def __post_init__(self) -> None:
 		"""Validate that suite outputs stay below the artifact root."""
-		_require_under_root(self.output_root, self.artifact_root, 'suite.output_root')
 		_validate_scientific_contract(self)
 
 	@property
@@ -238,13 +237,8 @@ def f3_lithology_voxel_label_budget_suite_config_from_mapping(
 	dataset_manifest = _required_absolute_path(
 		suite, 'dataset_manifest', prefix='suite'
 	)
-	for label, path in (
-		('suite.output_root', output_root),
-		('suite.dataset_manifest', dataset_manifest),
-	):
-		_require_under_root(path, artifact_root, label)
 	resolved_models = tuple(
-		_model(role, models, artifact_root=artifact_root)
+		_model(role, models)
 		for role in ('mae', 'm1', 'm2a')
 	)
 	base_seed = _integer(
@@ -263,10 +257,6 @@ def f3_lithology_voxel_label_budget_suite_config_from_mapping(
 		)
 		for role in ('mae', 'm1', 'm2a')
 	}
-	for role, path in full_runs.items():
-		_require_under_root(
-			path, artifact_root, f'full_label_reference.{role}_decoder_run'
-		)
 	resolved_labels = {
 		key: _required_absolute_path(labels, key, prefix='labels')
 		for key in (
@@ -361,9 +351,7 @@ def f3_lithology_voxel_label_budget_suite_config_from_mapping(
 	)
 
 
-def _model(
-	role: str, models: Mapping[str, object], *, artifact_root: Path
-) -> VoxelLabelBudgetSuiteModel:
+def _model(role: str, models: Mapping[str, object]) -> VoxelLabelBudgetSuiteModel:
 	value = models.get(role)
 	if not isinstance(value, Mapping):
 		raise TypeError(f'models.{role} must be a mapping')
@@ -373,7 +361,6 @@ def _model(
 	embeddings = _required_absolute_path(
 		value, 'embeddings_dir', prefix=f'models.{role}'
 	)
-	_require_under_root(embeddings, artifact_root, f'models.{role}.embeddings_dir')
 	return VoxelLabelBudgetSuiteModel(
 		role=role,
 		model_tag=_required_str(value, 'model_tag', prefix=f'models.{role}'),
@@ -553,11 +540,6 @@ def _boolean(value: object, label: str) -> bool:
 	return value
 
 
-def _require_under_root(path: Path, root: Path, label: str) -> None:
-	try:
-		path.resolve(strict=False).relative_to(root.resolve(strict=False))
-	except ValueError as error:
-		raise ValueError(f'{label} must be under paths.artifact_root') from error
 
 
 def _validate_scientific_contract(  # noqa: C901

@@ -125,21 +125,6 @@ def _validate_disjoint_directories(
 		raise ValueError(msg)
 
 
-def _validate_path_under_root(
-	path: Path,
-	label: str,
-	*,
-	root: Path,
-	root_label: str,
-) -> None:
-	if not path.is_absolute():
-		msg = f'{label} must be an absolute path; got {path}'
-		raise ValueError(msg)
-	if not _is_relative_to(path, root):
-		msg = f'{label} must be under {root_label} ({root}); got {path}'
-		raise ValueError(msg)
-
-
 def _is_relative_to(path: Path, root: Path) -> bool:
 	try:
 		path.resolve(strict=False).relative_to(root.resolve(strict=False))

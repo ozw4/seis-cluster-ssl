@@ -11,7 +11,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_nonnegative_int,
 	_required_str,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
+	_validate_output_not_under_f3_root,
 )
 
 if TYPE_CHECKING:
@@ -117,10 +117,9 @@ def f3_lithology_voxel_dataset_config_from_mapping(
 		),
 	}
 	output_dir = _required_absolute_path(voxel, 'output_dir', prefix='voxel_dataset')
-	_validate_artifact_path_not_f3(
+	_validate_output_not_under_f3_root(
 		output_dir,
 		'voxel_dataset.output_dir',
-		artifact_root=artifact_root,
 		f3_root=f3_root,
 	)
 	overwrite = outputs.get('overwrite')

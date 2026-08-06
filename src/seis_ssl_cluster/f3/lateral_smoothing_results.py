@@ -20,7 +20,6 @@ from pathlib import Path
 from seis_ssl_cluster.f3.lateral_smoothing_target_calibration import (
 	load_f3_m5_lateral_target_calibration_handoff,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.results import (
 	PublishItem,
 	PublishManifest,
@@ -152,7 +151,7 @@ def f3_m5_lateral_smoothing_review_config_from_mapping(
 
 	artifact_root = _directory_path(config, 'artifact_root')
 	workspace_root = _directory_path(config, 'workspace_root')
-	result = F3M5LateralSmoothingReviewConfig(
+	return F3M5LateralSmoothingReviewConfig(
 		artifact_root=artifact_root,
 		workspace_root=workspace_root,
 		calibration_handoff=_file_path(config, 'calibration_handoff'),
@@ -160,8 +159,6 @@ def f3_m5_lateral_smoothing_review_config_from_mapping(
 		output_dir=_output_path(config, 'output_dir'),
 		smoke_evidence=_optional_file_path(config, 'smoke_evidence'),
 	)
-	_validate_config_paths(result)
-	return result
 
 
 def publish_f3_m5_lateral_smoothing_review(
@@ -395,25 +392,6 @@ def _output_path(config: Mapping[str, object], key: str) -> Path:
 	if not isinstance(value, str) or not value:
 		raise TypeError(f'{key} must be a non-empty path string')
 	return Path(value).resolve()
-
-
-def _validate_config_paths(config: F3M5LateralSmoothingReviewConfig) -> None:
-	for label, path in (
-		('calibration_handoff', config.calibration_handoff),
-		('calibration_report', config.calibration_report),
-	):
-		ensure_under_root(path, root=config.artifact_root, label=label)
-	if config.smoke_evidence is not None:
-		ensure_under_root(
-			config.smoke_evidence,
-			root=config.artifact_root,
-			label='smoke_evidence',
-		)
-	ensure_under_root(
-		config.output_dir,
-		root=config.workspace_root / 'results',
-		label='output_dir',
-	)
 
 
 def _load_json_mapping(path: Path, label: str) -> Mapping[str, object]:

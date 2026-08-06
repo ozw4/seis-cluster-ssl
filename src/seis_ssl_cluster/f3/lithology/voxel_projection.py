@@ -21,11 +21,11 @@ from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	ARTIFACT_TYPE,
 	INVALID_CONFIDENCE_VALUE,
 	INVALID_PREDICTION_CLASS_ID,
+	METADATA_NAME,
 	SCHEMA_VERSION,
 	F3VoxelPredictionArrays,
-	F3VoxelPredictionArtifactPaths,
 	commit_f3_voxel_prediction_artifact,
-	create_f3_voxel_prediction_staging_paths,
+	create_f3_voxel_prediction_staging_dir,
 	open_f3_voxel_prediction_memmaps,
 	validate_f3_voxel_prediction_arrays,
 	write_f3_voxel_prediction_metadata,
@@ -44,7 +44,7 @@ SOURCE_METADATA_NAME = 'prediction_metadata.json'
 class F3VoxelProjectionResult:
 	"""Committed nearest-projection artifact paths and voxel counts."""
 
-	paths: F3VoxelPredictionArtifactPaths
+	output_dir: Path
 	volume_shape_xyz: tuple[int, int, int]
 	valid_voxel_count: int
 	invalid_voxel_count: int
@@ -141,7 +141,7 @@ def project_f3_lithology_tokens_to_voxels(
 			'output_dir must not be inside token_prediction_dir, to preserve the '
 			'source token artifact'
 		)
-	staging = create_f3_voxel_prediction_staging_paths(
+	staging = create_f3_voxel_prediction_staging_dir(
 		output_root, overwrite=overwrite
 	)
 	try:
@@ -175,15 +175,15 @@ def project_f3_lithology_tokens_to_voxels(
 			write_probabilities=write_probabilities,
 			summary=summary,
 		)
-		write_f3_voxel_prediction_metadata(staging.metadata, metadata)
-		paths = commit_f3_voxel_prediction_artifact(
+		write_f3_voxel_prediction_metadata(staging / METADATA_NAME, metadata)
+		committed_output_dir = commit_f3_voxel_prediction_artifact(
 			staging, output_root, overwrite=overwrite
 		)
 	except BaseException:
-		shutil.rmtree(staging.output_dir, ignore_errors=True)
+		shutil.rmtree(staging, ignore_errors=True)
 		raise
 	return F3VoxelProjectionResult(
-		paths=paths,
+		output_dir=committed_output_dir,
 		volume_shape_xyz=source.volume_shape_xyz,
 		valid_voxel_count=cast('int', summary['valid_voxel_count']),
 		invalid_voxel_count=cast('int', summary['invalid_voxel_count']),

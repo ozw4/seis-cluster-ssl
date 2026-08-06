@@ -1116,7 +1116,9 @@ def _relative_file_path(root: Path, value: Path | str, *, label: str) -> str:
 	try:
 		relative = resolved.relative_to(root.resolve()).as_posix()
 	except ValueError as error:
-		raise ValueError(f'{label} must be under artifact root: {value}') from error
+		raise ValueError(
+			f'{label} must be inside the completion manifest root: {value}'
+		) from error
 	if relative in {'', '.'} or relative.startswith('../'):
 		raise ValueError(f'{label} must be a relative file path: {value}')
 	return relative

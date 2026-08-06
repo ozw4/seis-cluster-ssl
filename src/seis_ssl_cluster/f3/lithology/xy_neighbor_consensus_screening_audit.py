@@ -28,7 +28,6 @@ from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
 from seis_ssl_cluster.f3.xy_neighbor_consensus_pretraining_validation import (
 	load_f3_xy_neighbor_consensus_pretraining_handoff,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
 	load_multi_head_xy_neighbor_consensus_target_manifest,
@@ -119,7 +118,7 @@ class F3XYNeighborConsensusScreeningAuditResult:
 	quarantine_path: Path | None
 
 
-def f3_xy_neighbor_consensus_screening_audit_config_from_mapping(  # noqa: C901
+def f3_xy_neighbor_consensus_screening_audit_config_from_mapping(
 	config: Mapping[str, object],
 ) -> F3XYNeighborConsensusScreeningAuditConfig:
 	"""Resolve the closed audit schema without accepting extension fields."""
@@ -168,24 +167,6 @@ def f3_xy_neighbor_consensus_screening_audit_config_from_mapping(  # noqa: C901
 	):
 		if not value.is_file():
 			raise FileNotFoundError(f'{label} is missing: {value}')
-	ensure_under_root(
-		result.source_hard_manifest,
-		root=result.artifact_root,
-		label='source_hard_manifest',
-	)
-	for label, value in (
-		('xy_target_manifest', result.xy_target_manifest),
-		('hard_pretraining_handoff', result.hard_pretraining_handoff),
-		('candidate_pretraining_handoff', result.candidate_pretraining_handoff),
-		('candidate_embeddings_dir', result.candidate_embeddings_dir),
-		('output_path', result.output_path),
-	):
-		ensure_under_root(value, root=result.artifact_root, label=label)
-	for label, value in (
-		('hard_full_config', result.hard_full_config),
-		('candidate_full_config', result.candidate_full_config),
-	):
-		ensure_under_root(value, root=result.workspace_root, label=label)
 	return result
 
 

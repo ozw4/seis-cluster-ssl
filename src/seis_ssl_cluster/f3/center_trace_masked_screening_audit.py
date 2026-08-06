@@ -34,7 +34,6 @@ from seis_ssl_cluster.f3.lithology import (
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 	inspect_f3_lithology_voxel_label_budget_mae_reference_run,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	validate_stratigraphy_checkpoint_payload,
@@ -146,19 +145,6 @@ def f3_center_trace_masked_screening_audit_config_from_mapping(
 	)
 	if not result.artifact_root.is_dir() or not result.workspace_root.is_dir():
 		raise FileNotFoundError('artifact_root and workspace_root must be directories')
-	for label, value in (
-		('source_hard_manifest', result.source_hard_manifest),
-		('hard_pretraining_handoff', result.hard_pretraining_handoff),
-		('candidate_pretraining_handoff', result.candidate_pretraining_handoff),
-		('candidate_embeddings_dir', result.candidate_embeddings_dir),
-		('output_path', result.output_path),
-	):
-		ensure_under_root(value, root=result.artifact_root, label=label)
-	for label, value in (
-		('hard_full_config', result.hard_full_config),
-		('candidate_full_config', result.candidate_full_config),
-	):
-		ensure_under_root(value, root=result.workspace_root, label=label)
 	return result
 
 
@@ -854,20 +840,6 @@ def _config_from_persisted_payload(
 	)
 	embedding_root = _required_directory(
 		embeddings.get('root'), 'candidate_embeddings_dir'
-	)
-	ensure_under_root(source, root=artifact_root, label='source_hard_manifest')
-	ensure_under_root(
-		hard_handoff, root=artifact_root, label='hard_pretraining_handoff'
-	)
-	ensure_under_root(
-		candidate_handoff, root=artifact_root, label='candidate_pretraining_handoff'
-	)
-	ensure_under_root(
-		embedding_root, root=artifact_root, label='candidate_embeddings_dir'
-	)
-	ensure_under_root(hard_config, root=workspace_root, label='hard_full_config')
-	ensure_under_root(
-		candidate_config, root=workspace_root, label='candidate_full_config'
 	)
 	return F3CenterTraceMaskedScreeningAuditConfig(
 		artifact_root=artifact_root,

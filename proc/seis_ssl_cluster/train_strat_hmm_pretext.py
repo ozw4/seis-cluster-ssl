@@ -45,8 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
 		parser,
 		'--output-root',
 		help_text=(
-			'Override paths.output_root for checkpoints and run snapshots; '
-			'must be absolute and under paths.artifact_root.'
+			'Override the explicit paths.output_root used for checkpoints and '
+			'run snapshots; must be absolute.'
 		),
 	)
 	add_path_argument(

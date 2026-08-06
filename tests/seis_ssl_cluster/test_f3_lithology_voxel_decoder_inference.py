@@ -223,7 +223,7 @@ def test_cpu_chunked_inference_crops_volume_and_masks_invalid_tokens(
 	model_architecture = _load_decoder(plan, device=torch.device('cpu')).architecture
 
 	result = predict_f3_lithology_voxels(config, device='cpu')
-	artifact = validate_f3_voxel_prediction_artifact(result.paths)
+	artifact = validate_f3_voxel_prediction_artifact(result.output_dir)
 
 	assert result.tile_count == 2
 	assert artifact.arrays.predictions.shape == (5, 1, 1)

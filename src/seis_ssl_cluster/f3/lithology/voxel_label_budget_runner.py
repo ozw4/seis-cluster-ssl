@@ -51,7 +51,6 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget import (
 	SCHEMA_VERSION as DATASET_SCHEMA_VERSION,
 )
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
-	f3_voxel_prediction_artifact_paths,
 	validate_f3_voxel_prediction_artifact,
 )
 from seis_ssl_cluster.f3.lithology.voxel_report import (
@@ -601,7 +600,7 @@ def _inference_config(
 		embeddings_input_dir=model.embeddings_dir,
 		checkpoint=checkpoint,
 		tiles=config.tiles,
-		output_paths=f3_voxel_prediction_artifact_paths(job.prediction_dir),
+		output_dir=job.prediction_dir,
 		write_probabilities=False,
 		overwrite=config.overwrite,
 	)

@@ -9,7 +9,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
 	PublishItem,
@@ -17,6 +16,7 @@ from seis_ssl_cluster.results import (
 	publish_selected_results,
 )
 
+DEFAULT_RESULTS_ROOT = Path('results')
 F3_STRAT_HMM_M1_GUARDRAIL_SUITE_NAME = 'strat_hmm_m1_guardrails_v1'
 F3_STRAT_HMM_M1_BASELINE_MODEL_TAG = (
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
@@ -426,11 +426,6 @@ def publish_f3_strat_hmm_m1_guardrails(
 	"""Publish only lightweight guardrail summary formats into ``results/``."""
 	if not publish_config.enabled:
 		return None
-	ensure_under_root(
-		publish_config.output_dir,
-		root=DEFAULT_RESULTS_ROOT,
-		label='publish.output_dir',
-	)
 	_validate_guardrail_publish_payload(summary_json)
 	return publish_selected_results(
 		items=(
@@ -513,11 +508,6 @@ def _publish_config(value: object) -> F3GuardrailPublishConfig:
 	if not isinstance(output_raw, str | Path) or not str(output_raw):
 		raise TypeError('publish.output_dir must be a non-empty path string')
 	output_dir = Path(output_raw)
-	ensure_under_root(
-		output_dir,
-		root=DEFAULT_RESULTS_ROOT,
-		label='publish.output_dir',
-	)
 	max_size = value.get('max_file_size_mb', 10)
 	if (
 		isinstance(max_size, bool)

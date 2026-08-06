@@ -15,8 +15,8 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_absolute_path,
 	_required_mapping,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.f3.lithology.visualization import (
 	F3LithologyVisualizationConfig,
@@ -55,7 +55,7 @@ def f3_lithology_visualization_config_from_mapping(
 		prefix='config',
 	)
 	paths = _required_mapping(config, 'paths')
-	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
+	_required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
 	dataset = _required_mapping(config, 'dataset')
 	model = _required_mapping(config, 'model')
@@ -128,10 +128,9 @@ def f3_lithology_visualization_config_from_mapping(
 	)
 	for label, path in _visualization_paths(inputs, outputs, labels):
 		if label.startswith('visualizations.'):
-			_validate_artifact_path_not_f3(
+			_validate_output_not_under_f3_root(
 				path,
 				label,
-				artifact_root=artifact_root,
 				f3_root=f3_root,
 			)
 	return F3LithologyVisualizationConfig(

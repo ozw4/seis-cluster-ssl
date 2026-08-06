@@ -116,7 +116,7 @@ as selected reports, metrics, comparison tables, and representative figures.
 These files should be reproducible summaries, not raw data, checkpoints,
 embeddings, clustering models, full visualization dumps, or path lists.
 
-Use these path-contract variables in runbook commands:
+The following variables are convenient examples for runbook commands:
 
 ```bash
 ROOT=/workspace/artifacts/seis_ssl_cluster
@@ -130,7 +130,8 @@ VIZ_SPEC=voxel_cmp_xy750_xz150
 SMOKE_MODEL_TAG=amp_mae_v1
 ```
 
-Recommended layout:
+Recommended layout (an organizational example only; no validator enforces this
+hierarchy):
 
 ```text
 $ROOT/
@@ -162,10 +163,11 @@ Artifact roles:
 | `clustering/` | KMeans models, clustering labels, and clustering metadata |
 | `visualizations/` | PNGs, visualization reports, summaries, and optional voxel labels |
 
-The configuration validator requires generated manifest and normalization-stat paths to be absolute, under `paths.artifact_root`, and outside `paths.nopims_root`.
+Each config's explicit input and output fields are the source of truth. Runtime
+validation requires output paths to be absolute and keeps generated outputs out
+of configured raw-data roots, but it does not enforce the recommended hierarchy.
 Publishing a report to the repository should copy only the selected lightweight
-outputs into `results/`; normal experiment output paths remain under
-`$ROOT/`.
+outputs into `results/`. Keep large local artifacts outside the repository.
 
 ## Quick start
 

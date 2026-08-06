@@ -23,7 +23,6 @@ from seis_ssl_cluster.f3.lithology.voxel_split import VALIDATION_VOXEL_SPLIT
 from seis_ssl_cluster.models.voxel_decoder.spec import (
 	validate_voxel_decoder_architecture_mapping,
 )
-from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
 	PublishItem,
@@ -31,6 +30,7 @@ from seis_ssl_cluster.results import (
 	publish_selected_results,
 )
 
+DEFAULT_RESULTS_ROOT = Path('results')
 REQUIRED_MODELS = ('MAE', 'M1', 'M2-A')
 REQUIRED_VERSIONS = ('V0', 'V1')
 EXPECTED_MODEL_TAGS = {
@@ -93,12 +93,6 @@ class F3LithologyVoxelResultsPublishConfig:
 		if self.enabled and self.output_dir is None:
 			raise ValueError(
 				'publish.output_dir is required when publishing is enabled'
-			)
-		if self.output_dir is not None:
-			ensure_under_root(
-				self.output_dir,
-				root=self.results_root,
-				label='publish.output_dir',
 			)
 
 

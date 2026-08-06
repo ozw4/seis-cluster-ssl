@@ -260,7 +260,6 @@ def test_target_contract_requires_initial_trainability_and_optimizer_parity(
 def test_smoke_config_isolated_cpu_two_step_and_exactly_paired(tmp_path: Path) -> None:
 	artifact_root = tmp_path / 'artifacts'
 	artifact_root.mkdir()
-	config = _validator_config(artifact_root)
 	_, full = _paired_training_configs(artifact_root=artifact_root)
 	smoke = deepcopy(full)
 	smoke['paths']['output_root'] = str(artifact_root / 'lateral_smoke')
@@ -268,14 +267,14 @@ def test_smoke_config_isolated_cpu_two_step_and_exactly_paired(tmp_path: Path) -
 	smoke['train'].update(device='cpu', max_steps=2)
 	smoke['identity']['scientific_identity']['train']['max_steps'] = 2
 
-	validation._validate_smoke_config(config, full=full, smoke=smoke)  # noqa: SLF001
+	validation._validate_smoke_config(full=full, smoke=smoke)  # noqa: SLF001
 	altered = deepcopy(smoke)
 	altered['train']['seed'] = 99
 	with pytest.raises(ValueError, match='config drift'):
-		validation._validate_smoke_config(config, full=full, smoke=altered)  # noqa: SLF001
+		validation._validate_smoke_config(full=full, smoke=altered)  # noqa: SLF001
 	Path(full['paths']['output_root']).mkdir()
 	with pytest.raises(ValueError, match='must remain unmodified'):
-		validation._validate_smoke_config(config, full=full, smoke=smoke)  # noqa: SLF001
+		validation._validate_smoke_config(full=full, smoke=smoke)  # noqa: SLF001
 
 
 def test_checkpoint_payload_requires_schema_v4_hard_loss_and_zero_consistency(
@@ -343,7 +342,6 @@ def test_smoke_evidence_requires_two_steps_and_never_publishes_final_handoff(
 ) -> None:
 	artifact_root = tmp_path / 'artifacts'
 	artifact_root.mkdir()
-	config = _validator_config(artifact_root)
 	_, full = _paired_training_configs(artifact_root=artifact_root)
 	smoke = deepcopy(full)
 	smoke['paths']['output_root'] = str(artifact_root / 'lateral_smoke')
@@ -377,7 +375,6 @@ def test_smoke_evidence_requires_two_steps_and_never_publishes_final_handoff(
 	)
 
 	evidence = validation._smoke_evidence(  # noqa: SLF001
-		config,
 		full=full,
 		smoke=smoke,
 		target_evidence={

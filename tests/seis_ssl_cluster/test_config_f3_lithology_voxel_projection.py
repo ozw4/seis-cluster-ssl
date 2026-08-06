@@ -102,7 +102,7 @@ def test_projection_config_resolves_geometry_and_defaults(tmp_path: Path) -> Non
 	assert resolved.source.token_grid_shape_xyz == (2, 1, 1)
 	assert resolved.source.patch_size_xyz == (2, 2, 2)
 	assert resolved.source.volume_shape_xyz == (3, 2, 2)
-	assert resolved.output_paths.predictions.name == 'f3_voxel_predictions.npy'
+	assert resolved.output_dir == tmp_path / 'artifacts' / 'voxel_predictions'
 
 
 def test_projection_config_accepts_inventory_class_info_payload(

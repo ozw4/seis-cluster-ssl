@@ -420,7 +420,7 @@ def _fake_prediction_artifact(
 	root = Path(paths_or_dir)
 	metadata_path = root / 'prediction_metadata.json'
 	return SimpleNamespace(
-		paths=SimpleNamespace(metadata=metadata_path),
+		output_dir=root,
 		metadata=json.loads(metadata_path.read_text(encoding='utf-8')),
 		arrays=SimpleNamespace(probabilities=None, valid_mask=None),
 	)

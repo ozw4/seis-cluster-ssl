@@ -47,9 +47,10 @@ and cannot collide with full scientific outputs.
 
 The old `frozen_embedding_decoder_v1` checkpoint/artifact name is not eligible
 for resume or evaluation because it does not identify upsampling and
-normalization. Do not copy or rename old artifacts into the canonical path.
-Regenerate from the smoke stage under the new spec and use checkpoint schema 5
-or later.
+normalization. Do not reuse an old artifact merely by pointing a current config
+at it. Regenerate from the smoke stage under the new spec and use checkpoint
+schema 5 or later; the paths shown here are recommended examples, not a
+validator-enforced hierarchy.
 
 Training writes `latest.pt` for exact continuation and `best.pt` for inference.
 Resume an interrupted full run with:

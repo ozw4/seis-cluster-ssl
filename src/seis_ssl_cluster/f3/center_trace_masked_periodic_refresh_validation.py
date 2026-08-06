@@ -38,7 +38,6 @@ from seis_ssl_cluster.f3 import (
 from seis_ssl_cluster.f3 import (
 	multi_head_pretraining_validation as hard_validation,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 from seis_ssl_cluster.stratigraphy.periodic_refresh import (
 	INITIAL_GENERATION_ID,
@@ -211,17 +210,6 @@ def f3_center_trace_masked_periodic_refresh_validation_config_from_mapping(
 		raise FileNotFoundError(
 			'artifact_root and experiment_root must be existing directories'
 		)
-	ensure_under_root(
-		result.experiment_root,
-		root=result.artifact_root,
-		label='experiment_root',
-	)
-	for label, value in (
-		('target_manifest', result.target_manifest),
-		('hard_handoff', result.hard_handoff),
-		('center_trace_masked_handoff', result.center_trace_masked_handoff),
-	):
-		ensure_under_root(value, root=result.artifact_root, label=label)
 	return result
 
 
@@ -844,15 +832,9 @@ def _config_contract(
 	if full_root == _training_output_root(center, config, 'center baseline output root'):
 		raise ValueError('periodic full root collides with fixed center-trace root')
 	generation_root = Path(str(refresh['generation_root'])).resolve()
-	ensure_under_root(generation_root, root=full_root, label='periodic generation_root')
 	smoke_generation_root = Path(
 		str(_mapping(smoke['pseudo_target_refresh'], 'smoke refresh')['generation_root'])
 	).resolve()
-	ensure_under_root(
-		smoke_generation_root,
-		root=smoke_root,
-		label='periodic smoke generation_root',
-	)
 	if generation_root == smoke_generation_root:
 		raise ValueError('periodic generation roots must be distinct')
 	extraction_paths = _mapping(extraction['embeddings'], 'periodic extraction')
@@ -860,7 +842,6 @@ def _config_contract(
 	if Path(str(extraction_paths['checkpoint'])).resolve() != selected:
 		raise ValueError('periodic extraction must use full selected.pt')
 	extraction_root = Path(str(extraction_paths['output_dir'])).resolve()
-	ensure_under_root(extraction_root, root=config.artifact_root, label='final embedding root')
 	if extraction_root in (full_root, smoke_root):
 		raise ValueError('periodic final embedding root collides with training root')
 	if Path(str(_mapping(extraction['manifests'], 'extraction manifests')['input'])).resolve() != (
@@ -875,12 +856,8 @@ def _config_contract(
 		_CENTER_HANDOFF_ALLOWED_DIFFERENCES
 	):
 		raise ValueError('baseline allowed-difference set changed')
-	_validate_initial_artifacts(
-		full, target, config.target_manifest, config.artifact_root
-	)
-	_validate_initial_artifacts(
-		smoke, target, config.target_manifest, config.artifact_root
-	)
+	_validate_initial_artifacts(full, target, config.target_manifest)
+	_validate_initial_artifacts(smoke, target, config.target_manifest)
 	for label, training in (('full', full), ('smoke', smoke)):
 		for section, key in (('teacher', 'checkpoint'), ('student', 'init_checkpoint')):
 			path = Path(str(_mapping(training[section], section)[key])).resolve()
@@ -951,7 +928,6 @@ def _validate_initial_artifacts(
 	training: Mapping[str, object],
 	target: Mapping[str, object],
 	target_manifest_path: Path,
-	artifact_root: Path,
 ) -> None:
 	scientific = _scientific(training)
 	artifacts = _mapping(
@@ -976,7 +952,6 @@ def _validate_initial_artifacts(
 		artifacts,
 		target=target,
 		target_manifest_path=target_manifest_path,
-		artifact_root=artifact_root,
 	)
 	if scientific['fixed_preprocessor_sha256'] != _reference_hash(common['preprocessor']):
 		raise ValueError('fixed preprocessor hash drift')
@@ -1039,7 +1014,6 @@ def _validate_canonical_initial_artifacts(
 	*,
 	target: Mapping[str, object],
 	target_manifest_path: Path,
-	artifact_root: Path,
 ) -> None:
 	"""Bind periodic initial artifacts to the completed historical export."""
 	export_path = target_manifest_path.parent / (
@@ -1072,11 +1046,6 @@ def _validate_canonical_initial_artifacts(
 	if not clustering_root.is_dir():
 		raise FileNotFoundError(
 		f'initial clustering export root is missing: {clustering_root}'
-	)
-	ensure_under_root(
-		clustering_root,
-		root=artifact_root,
-		label='initial clustering export root',
 	)
 	common = _mapping(artifacts['common'], 'initial HMM common artifacts')
 	expected_common = {
@@ -2567,7 +2536,6 @@ def _training_output_root(
 	label: str,
 ) -> Path:
 	root = Path(str(_mapping(training['paths'], label)['output_root'])).resolve()
-	ensure_under_root(root, root=config.artifact_root, label=label)
 	if root == config.artifact_root:
 		raise ValueError(f'{label} must not be the artifact root')
 	return root

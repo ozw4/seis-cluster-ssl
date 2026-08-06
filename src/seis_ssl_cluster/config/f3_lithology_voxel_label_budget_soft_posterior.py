@@ -13,7 +13,6 @@ from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import (
 	config_from_mapping_for_candidates,
 	f3_lithology_voxel_label_budget_multi_head_config_from_mapping,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 
 SOFT_MODEL_ID = 'mh_soft_nocons'
 SOFT_MODEL_TAG = 'strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1'
@@ -89,11 +88,6 @@ def f3_lithology_voxel_label_budget_soft_posterior_config_from_mapping(
 		raise ValueError('M5-U soft-posterior screen must contain exactly 15 jobs')
 	if base.candidates[0].model_id != SOFT_MODEL_ID:
 		raise ValueError('M5-U candidate identity mismatch')
-	ensure_under_root(
-		base.output_root,
-		root=base.artifact_root,
-		label='outputs.output_root',
-	)
 	return F3VoxelLabelBudgetSoftPosteriorConfig(
 		multi_head=base, hard_multi_head_config=hard_multi_head_config
 	)

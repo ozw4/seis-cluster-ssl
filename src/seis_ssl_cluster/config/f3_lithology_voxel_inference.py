@@ -10,16 +10,12 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_required_str,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
 	VoxelDecoderTileSettings,
 	_triplet,
-)
-from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
-	F3VoxelPredictionArtifactPaths,
-	f3_voxel_prediction_artifact_paths,
 )
 
 if TYPE_CHECKING:
@@ -39,14 +35,9 @@ class F3LithologyVoxelInferenceConfig:
 	embeddings_input_dir: Path
 	checkpoint: Path
 	tiles: VoxelDecoderTileSettings
-	output_paths: F3VoxelPredictionArtifactPaths
+	output_dir: Path
 	write_probabilities: bool
 	overwrite: bool
-
-	@property
-	def output_dir(self) -> Path:
-		"""Return the final prediction artifact directory."""
-		return self.output_paths.output_dir
 
 
 def f3_lithology_voxel_inference_config_from_mapping(
@@ -110,10 +101,9 @@ def f3_lithology_voxel_inference_config_from_mapping(
 	)
 	checkpoint = _required_absolute_path(decoder, 'checkpoint', prefix='decoder')
 	output_dir = _required_absolute_path(outputs, 'output_dir', prefix='outputs')
-	_validate_artifact_path_not_f3(
+	_validate_output_not_under_f3_root(
 		output_dir,
 		'outputs.output_dir',
-		artifact_root=artifact_root,
 		f3_root=f3_root,
 	)
 	_validate_no_output_overlap(
@@ -144,7 +134,7 @@ def f3_lithology_voxel_inference_config_from_mapping(
 				positive=False,
 			),
 		),
-		output_paths=f3_voxel_prediction_artifact_paths(output_dir),
+		output_dir=output_dir,
 		write_probabilities=_optional_bool(
 			inference, 'write_probabilities', default=False
 		),

@@ -30,7 +30,6 @@ from seis_ssl_cluster.f3.xy_neighbor_unanimous_target_audit import (
 	load_f3_xy_neighbor_unanimous_target_audit,
 	replay_f3_xy_neighbor_unanimous_target_audit,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.xy_neighbor_unanimous_targets import (
 	load_multi_head_xy_neighbor_unanimous_target_manifest,
 )
@@ -145,14 +144,6 @@ def f3_xy_neighbor_unanimous_pretraining_validation_config_from_mapping(
 	)
 	if not result.artifact_root.is_dir() or not result.experiment_root.is_dir():
 		raise FileNotFoundError('artifact_root and experiment_root must be directories')
-	ensure_under_root(
-		result.experiment_root, root=result.artifact_root, label='experiment_root'
-	)
-	for name, value in (
-		('target_manifest', result.target_manifest),
-		('target_audit', result.target_audit),
-	):
-		ensure_under_root(value, root=result.artifact_root, label=name)
 	return result
 
 

@@ -17,7 +17,6 @@ from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import (
 	config_from_mapping_for_candidates,
 	f3_lithology_voxel_label_budget_multi_head_config_from_mapping,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 
 PERIODIC_REFRESH_MODEL_ID = 'mh_ctmask010_refresh3ep_hmm2_nocons'
 PERIODIC_REFRESH_MODEL_TAG = (
@@ -121,11 +120,6 @@ def f3_lithology_voxel_label_budget_center_trace_masked_periodic_refresh_config_
 	)
 	if center_trace_masked_run_manifest != expected_center_manifest:
 		raise ValueError('center-trace reference manifest path is not canonical')
-	ensure_under_root(
-		center_trace_masked_run_manifest,
-		root=multi_head.artifact_root,
-		label='center_trace_masked_run_manifest',
-	)
 	periodic_refresh_handoff = _required_existing_path(
 		config['periodic_refresh_handoff'], 'periodic_refresh_handoff'
 	)
@@ -133,11 +127,6 @@ def f3_lithology_voxel_label_budget_center_trace_masked_periodic_refresh_config_
 		raise ValueError('periodic_refresh_handoff name is not canonical')
 	if periodic_refresh_handoff != multi_head.candidates[0].pretraining_handoff:
 		raise ValueError('periodic-refresh handoff is not the candidate handoff')
-	ensure_under_root(
-		periodic_refresh_handoff,
-		root=multi_head.artifact_root,
-		label='periodic_refresh_handoff',
-	)
 	screening_audit = _required_existing_path(
 		config['screening_audit'], 'screening_audit'
 	)
@@ -145,17 +134,7 @@ def f3_lithology_voxel_label_budget_center_trace_masked_periodic_refresh_config_
 		raise ValueError(
 			'screening_audit must use the canonical periodic-refresh preflight path'
 		)
-	ensure_under_root(
-		screening_audit,
-		root=multi_head.artifact_root,
-		label='screening_audit',
-	)
 	audit_payload = _validate_screening_audit_binding(screening_audit, multi_head)
-	ensure_under_root(
-		multi_head.output_root,
-		root=multi_head.artifact_root,
-		label='outputs.output_root',
-	)
 	return F3VoxelLabelBudgetCenterTraceMaskedPeriodicRefreshConfig(
 		multi_head=multi_head,
 		hard_multi_head_config=hard_multi_head_config,

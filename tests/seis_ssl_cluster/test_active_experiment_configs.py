@@ -1639,13 +1639,17 @@ def test_active_f3_voxel_paired_experiment_contract() -> None:
 
 
 def test_active_f3_voxel_final_summary_publish_order_contract() -> None:
+	original_raw = load_config(
+		F3_VOXEL_RESULTS_ROOT / '01_summarize_original_split.yaml'
+	)
 	original = f3_lithology_voxel_results_config_from_mapping(
-		load_config(F3_VOXEL_RESULTS_ROOT / '01_summarize_original_split.yaml')
+		original_raw
+	)
+	robustness_raw = load_config(
+		F3_VOXEL_ROBUSTNESS_ROOT / '04_summarize_voxel_split_robustness.yaml'
 	)
 	robustness = f3_lithology_voxel_split_summary_config_from_mapping(
-		load_config(
-			F3_VOXEL_ROBUSTNESS_ROOT / '04_summarize_voxel_split_robustness.yaml'
-		)
+		robustness_raw
 	)
 
 	assert original.publish.enabled is False
@@ -1654,9 +1658,8 @@ def test_active_f3_voxel_final_summary_publish_order_contract() -> None:
 	assert robustness.publish.output_dir == original.publish.output_dir
 	assert robustness.artifact_root is not None
 	assert robustness.f3_root is not None
-	robustness.suite_root.relative_to(robustness.artifact_root)
-	with pytest.raises(ValueError, match='is not in the subpath'):
-		robustness.suite_root.relative_to(robustness.f3_root)
+	assert robustness.suite_root == Path(robustness_raw['suite']['root'])
+	assert original.output_dir == Path(original_raw['outputs']['output_dir'])
 	assert all(
 		run.input_dir.name == VOXEL_DECODER_SPEC
 		for run in original.runs
@@ -1665,11 +1668,13 @@ def test_active_f3_voxel_final_summary_publish_order_contract() -> None:
 
 
 def test_active_f3_voxel_robustness_stage_configs_resolve() -> None:
+	build_raw = load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[0])
 	build = f3_lithology_voxel_split_dataset_config_from_mapping(
-		load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[0])
+		build_raw
 	)
+	v0_raw = load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[1])
 	v0 = f3_lithology_voxel_v0_split_suite_config_from_mapping(
-		load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[1])
+		v0_raw
 	)
 	v1_raw = load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[2])
 	v1 = f3_lithology_voxel_decoder_split_suite_config_from_mapping(v1_raw)
@@ -1694,18 +1699,18 @@ def test_active_f3_voxel_robustness_stage_configs_resolve() -> None:
 	assert OLD_VOXEL_DECODER_SPEC not in F3_VOXEL_ROBUSTNESS_CONFIGS[2].read_text(
 		encoding='utf-8'
 	)
-	for config in (build, v0, v1):
-		config.output_root.relative_to(config.artifact_root)
-		with pytest.raises(ValueError, match='is not in the subpath'):
-			config.output_root.relative_to(config.f3_root)
+	assert build.output_root == Path(build_raw['suite']['output_root'])
+	assert v0.output_root == Path(v0_raw['suite']['output_root'])
+	assert v1.output_root == Path(v1_raw['suite']['output_root'])
 
 
-def test_f3_voxel_robustness_output_root_must_stay_under_artifacts() -> None:
+def test_f3_voxel_robustness_preserves_explicit_output_root() -> None:
 	raw = load_config(F3_VOXEL_ROBUSTNESS_CONFIGS[0])
 	raw['suite']['output_root'] = '/outside-artifacts'
 
-	with pytest.raises(ValueError, match=r'suite\.output_root must be under root'):
-		f3_lithology_voxel_split_dataset_config_from_mapping(raw)
+	resolved = f3_lithology_voxel_split_dataset_config_from_mapping(raw)
+
+	assert resolved.output_root == Path('/outside-artifacts')
 
 
 def test_f3_voxel_robustness_output_root_must_stay_outside_raw_f3() -> None:

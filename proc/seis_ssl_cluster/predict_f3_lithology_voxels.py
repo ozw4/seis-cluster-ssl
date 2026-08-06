@@ -21,6 +21,13 @@ from seis_ssl_cluster.f3.lithology.voxel_decoder_inference import (
 	inspect_f3_lithology_voxel_inference,
 	predict_f3_lithology_voxels,
 )
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	CONFIDENCE_NAME,
+	METADATA_NAME,
+	PREDICTIONS_NAME,
+	PROBABILITIES_NAME,
+	VALID_MASK_NAME,
+)
 
 STAGE = 'predict_f3_lithology_voxels'
 
@@ -111,21 +118,21 @@ def _print_plan(
 	)
 	print(f'inference.write_probabilities: {probabilities}')
 	print(f'outputs.output_dir: {config.output_dir}')
-	print(f'outputs.predictions: {config.output_paths.predictions}')
-	print(f'outputs.confidence: {config.output_paths.confidence}')
-	print(f'outputs.valid_mask: {config.output_paths.valid_mask}')
+	print(f'outputs.predictions: {config.output_dir / PREDICTIONS_NAME}')
+	print(f'outputs.confidence: {config.output_dir / CONFIDENCE_NAME}')
+	print(f'outputs.valid_mask: {config.output_dir / VALID_MASK_NAME}')
 	if probabilities:
-		print(f'outputs.probabilities: {config.output_paths.probabilities}')
-	print(f'outputs.metadata: {config.output_paths.metadata}')
+		print(f'outputs.probabilities: {config.output_dir / PROBABILITIES_NAME}')
+	print(f'outputs.metadata: {config.output_dir / METADATA_NAME}')
 
 
 def _print_result(result: VoxelDecoderInferenceResult) -> None:
-	print(f'output.predictions: {result.paths.predictions}')
-	print(f'output.confidence: {result.paths.confidence}')
-	print(f'output.valid_mask: {result.paths.valid_mask}')
+	print(f'output.predictions: {result.output_dir / PREDICTIONS_NAME}')
+	print(f'output.confidence: {result.output_dir / CONFIDENCE_NAME}')
+	print(f'output.valid_mask: {result.output_dir / VALID_MASK_NAME}')
 	if result.probabilities_written:
-		print(f'output.probabilities: {result.paths.probabilities}')
-	print(f'output.metadata: {result.paths.metadata}')
+		print(f'output.probabilities: {result.output_dir / PROBABILITIES_NAME}')
+	print(f'output.metadata: {result.output_dir / METADATA_NAME}')
 	print(f'core_tile_count: {result.tile_count}')
 	print(f'valid_voxel_count: {result.valid_voxel_count}')
 	print(f'invalid_voxel_count: {result.invalid_voxel_count}')

@@ -14,8 +14,8 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_required_nonnegative_int,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.f3 import (
 	F3LithologyPredictionConfig,
@@ -53,7 +53,7 @@ def f3_lithology_prediction_config_from_mapping(
 		prefix='config',
 	)
 	paths = _required_mapping(config, 'paths')
-	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
+	_required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
 	dataset = _required_mapping(config, 'dataset')
 	model = _required_mapping(config, 'model')
@@ -125,10 +125,9 @@ def f3_lithology_prediction_config_from_mapping(
 	outputs = _prediction_outputs_from_mapping(predictions)
 	for label, path in _prediction_paths(inputs, outputs):
 		if label.startswith('predictions.'):
-			_validate_artifact_path_not_f3(
+			_validate_output_not_under_f3_root(
 				path,
 				label,
-				artifact_root=artifact_root,
 				f3_root=f3_root,
 			)
 	return F3LithologyPredictionConfig(

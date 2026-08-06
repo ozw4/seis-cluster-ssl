@@ -18,7 +18,6 @@ from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.center_trace_masked_pretraining_validation import (
 	load_f3_center_trace_masked_pretraining_handoff,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.results import (
 	PublishedItem,
 	PublishItem,
@@ -140,16 +139,10 @@ def f3_center_trace_masked_pretraining_review_config_from_mapping(
 		raise FileNotFoundError(
 			'artifact_root and workspace_root must be existing directories'
 		)
-	ensure_under_root(
-		result.pretraining_handoff,
-		root=result.artifact_root,
-		label='pretraining_handoff',
-	)
 	if not result.pretraining_handoff.is_file():
 		raise FileNotFoundError(
 			f'pretraining_handoff is missing: {result.pretraining_handoff}'
 		)
-	ensure_under_root(result.output_dir, root=result.workspace_root, label='output_dir')
 	return result
 
 
@@ -162,7 +155,7 @@ def publish_f3_center_trace_masked_pretraining_review(
 	handoff = load_f3_center_trace_masked_pretraining_handoff(
 		config.pretraining_handoff
 	)
-	live = _inspect_live_evidence(config, handoff=handoff)
+	live = _inspect_live_evidence(handoff=handoff)
 	portable = _mapping(
 		_portable_value(
 			_review_evidence(config, handoff=handoff, live=live), config=config
@@ -189,19 +182,18 @@ def publish_f3_center_trace_masked_pretraining_review(
 
 
 def _inspect_live_evidence(
-	config: F3CenterTraceMaskedPretrainingReviewConfig,
 	*,
 	handoff: Mapping[str, object],
 ) -> dict[str, object]:
 	"""Revalidate every live file named by the complete handoff."""
 	targets = _mapping(handoff['targets'], 'handoff targets')
-	_validate_source_references(config, targets)
+	_validate_source_references(targets)
 	checkpoint = _mapping(handoff['checkpoint'], 'handoff checkpoint')
 	selected_path = _artifact_file(
-		checkpoint['path'], root=config.artifact_root, label='selected checkpoint'
+		checkpoint['path'], label='selected checkpoint'
 	)
 	latest_path = _artifact_file(
-		checkpoint['latest_path'], root=config.artifact_root, label='latest checkpoint'
+		checkpoint['latest_path'], label='latest checkpoint'
 	)
 	if file_sha256(selected_path) != checkpoint['sha256']:
 		raise ValueError('selected checkpoint SHA-256 does not match handoff')
@@ -228,7 +220,6 @@ def _inspect_live_evidence(
 		handoff['training_diagnostics'], 'handoff training diagnostics'
 	)
 	diagnostics_path = _validate_live_reference(
-		config,
 		diagnostics_reference,
 		label='handoff training diagnostics',
 	)
@@ -251,7 +242,7 @@ def _inspect_live_evidence(
 	if diagnostics[-1]['global_step'] != latest['global_step']:
 		raise ValueError('center-trace diagnostics do not bind latest checkpoint')
 	embedding = _embedding_evidence(
-		config, handoff=handoff, selected=selected_path, selected_payload=selected
+		handoff=handoff, selected=selected_path, selected_payload=selected
 	)
 	training_execution_path = checkpoint_root / 'run_metadata.json'
 	training_execution_payload = _json_mapping(
@@ -303,12 +294,11 @@ def _inspect_live_evidence(
 
 
 def _validate_source_references(
-	config: F3CenterTraceMaskedPretrainingReviewConfig,
 	targets: Mapping[str, object],
 ) -> None:
 	"""Fail closed when a handoff input has drifted since validation."""
 	for key in ('target_manifest', 'hard_baseline_config', 'hard_baseline_handoff'):
-		_validate_live_reference(config, targets[key], label=f'handoff {key}')
+		_validate_live_reference(targets[key], label=f'handoff {key}')
 	inputs = _mapping(targets['real_data_inputs'], 'handoff real-data inputs')
 	for key in (
 		'train_manifest',
@@ -316,12 +306,11 @@ def _validate_source_references(
 		'teacher_checkpoint',
 		'student_init_checkpoint',
 	):
-		_validate_live_reference(config, inputs[key], label=f'handoff inputs.{key}')
+		_validate_live_reference(inputs[key], label=f'handoff inputs.{key}')
 	for index, survey_value in enumerate(inputs['surveys']):
 		survey = _mapping(survey_value, f'handoff input survey {index}')
 		for key in ('amplitude', 'normalization_stats'):
 			_validate_live_reference(
-				config,
 				survey[key],
 				label=f'handoff input survey {index}.{key}',
 			)
@@ -388,7 +377,6 @@ def _validate_checkpoint_lineage(
 
 
 def _embedding_evidence(
-	config: F3CenterTraceMaskedPretrainingReviewConfig,
 	*,
 	handoff: Mapping[str, object],
 	selected: Path,
@@ -397,7 +385,7 @@ def _embedding_evidence(
 	"""Verify the selected checkpoint's complete unmasked embedding output."""
 	embedding = _mapping(handoff['embedding'], 'handoff embedding')
 	root = _artifact_file(
-		embedding['root'], root=config.artifact_root, label='handoff embedding root'
+		embedding['root'], label='handoff embedding root'
 	)
 	if not root.is_dir():
 		raise FileNotFoundError(f'handoff embedding root is missing: {root}')
@@ -482,7 +470,7 @@ def _embedding_evidence(
 	for role, value in canonical.items():
 		item = _mapping(value, f'canonical valid-token identity {role}')
 		path = _artifact_file(
-			item['path'], root=config.artifact_root, label=f'canonical {role} mask'
+			item['path'], label=f'canonical {role} mask'
 		)
 		if file_sha256(path) != item['sha256']:
 			raise ValueError(f'canonical {role} valid-token hash is stale')
@@ -950,14 +938,13 @@ def _metric_range(rows: object, field: str) -> dict[str, float]:
 
 
 def _validate_live_reference(
-	config: F3CenterTraceMaskedPretrainingReviewConfig,
 	value: object,
 	*,
 	label: str,
 ) -> Path:
 	if not isinstance(value, Mapping):
 		raise TypeError(f'{label} must contain path and sha256')
-	path = _artifact_or_workspace_file(config, value.get('path'), label=label)
+	path = _artifact_or_workspace_file(value.get('path'), label=label)
 	digest = value.get('sha256')
 	if file_sha256(path) != digest:
 		raise ValueError(f'{label} SHA-256 does not match live bytes')
@@ -965,7 +952,6 @@ def _validate_live_reference(
 
 
 def _artifact_or_workspace_file(
-	config: F3CenterTraceMaskedPretrainingReviewConfig,
 	value: object,
 	*,
 	label: str,
@@ -973,22 +959,15 @@ def _artifact_or_workspace_file(
 	if not isinstance(value, str) or not value:
 		raise TypeError(f'{label} path is missing')
 	path = Path(value).resolve()
-	for root in (config.artifact_root, config.workspace_root):
-		try:
-			ensure_under_root(path, root=root, label=label)
-		except ValueError:
-			continue
-		if not path.is_file():
-			raise FileNotFoundError(f'{label} is missing: {path}')
-		return path
-	raise ValueError(f'{label} is outside the artifact/workspace roots: {path}')
+	if not path.is_file():
+		raise FileNotFoundError(f'{label} is missing: {path}')
+	return path
 
 
-def _artifact_file(value: object, *, root: Path, label: str) -> Path:
+def _artifact_file(value: object, *, label: str) -> Path:
 	if not isinstance(value, str) or not value:
 		raise TypeError(f'{label} path is missing')
 	path = Path(value).resolve()
-	ensure_under_root(path, root=root, label=label)
 	if not path.exists():
 		raise FileNotFoundError(f'{label} is missing: {path}')
 	return path

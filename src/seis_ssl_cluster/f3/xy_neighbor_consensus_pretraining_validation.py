@@ -25,7 +25,6 @@ from seis_ssl_cluster.config.pretraining import (
 )
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3 import multi_head_pretraining_validation as hard_validation
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
 	load_multi_head_xy_neighbor_consensus_target_manifest,
 )
@@ -136,12 +135,6 @@ def f3_xy_neighbor_consensus_pretraining_validation_config_from_mapping(
 		or not result.experiment_root.is_absolute()
 	):
 		raise ValueError('artifact_root and experiment_root must be absolute')
-	ensure_under_root(
-		result.experiment_root, root=result.artifact_root, label='experiment_root'
-	)
-	ensure_under_root(
-		result.target_manifest, root=result.artifact_root, label='target_manifest'
-	)
 	for name, value in (
 		('target_manifest', result.target_manifest),
 		(
@@ -397,11 +390,6 @@ def _target_evidence(  # noqa: C901, PLR0912
 		!= (config.experiment_root / _MODEL_TAG).resolve()
 	):
 		raise ValueError('full training output root mismatch')
-	ensure_under_root(
-		config.experiment_root / _MODEL_TAG,
-		root=config.artifact_root,
-		label='full output root',
-	)
 	if full_identity.get('target_representation') != _TARGET_REPRESENTATION:
 		raise ValueError('full training target representation mismatch')
 	if full_identity.get('target_semantics') != _TARGET_SEMANTICS:
@@ -541,7 +529,6 @@ def _smoke_config_contract(
 		== Path(str(_mapping(full['paths'], 'full paths')['output_root'])).resolve()
 	):
 		raise ValueError('smoke and full output roots must differ')
-	ensure_under_root(output, root=config.artifact_root, label='smoke output root')
 	if _mapping(smoke['train'], 'smoke train').get('max_steps') != 2:
 		raise ValueError('smoke max_steps must be exactly 2')
 	_validate_smoke_full_config_equivalence(full, smoke)

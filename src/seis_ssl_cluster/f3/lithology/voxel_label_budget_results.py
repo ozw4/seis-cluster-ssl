@@ -28,6 +28,9 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget import (
 	validate_voxel_label_budget_condition_artifact,
 )
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	METADATA_NAME as PREDICTION_METADATA_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	validate_f3_voxel_prediction_artifact,
 )
 from seis_ssl_cluster.models.voxel_decoder.spec import (
@@ -1256,7 +1259,9 @@ def _validate_prediction_metadata(  # noqa: C901, PLR0912, PLR0913
 	artifact = validate_f3_voxel_prediction_artifact(
 		identity.path.parent, mmap_mode='r'
 	)
-	if artifact.paths.metadata.resolve(strict=False) != identity.path.resolve(
+	if (artifact.output_dir / PREDICTION_METADATA_NAME).resolve(
+		strict=False
+	) != identity.path.resolve(
 		strict=False
 	):
 		raise ValueError(f'{label} prediction metadata path mismatch')

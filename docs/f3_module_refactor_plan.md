@@ -93,16 +93,16 @@ that expectation.
 | `tests/seis_ssl_cluster/test_f3_file_inventory.py` | File inventory, class-info parsing, proc output writing. | `seis_ssl_cluster.f3`. | Inspection inventory facade. |
 | `tests/seis_ssl_cluster/test_f3_inspection_report.py` | Inspection report JSON/Markdown, readiness, publishing, proc dry run. | `seis_ssl_cluster.f3`. | Inspection report facade. |
 | `tests/seis_ssl_cluster/test_f3_label_consistency.py` | PNG/SEGY alignment, mismatch handling, class `0` behavior, consistency output. | `seis_ssl_cluster.f3`. | Inspection consistency facade. |
-| `tests/seis_ssl_cluster/test_f3_lithology_baseline_comparison.py` | Comparison report tables, figures, publishing, default path contracts. | `seis_ssl_cluster.f3`, `seis_ssl_cluster.f3.lithology_report`, `seis_ssl_cluster.paths`. | Lithology report/comparison facade plus old wrapper. |
+| `tests/seis_ssl_cluster/test_f3_lithology_baseline_comparison.py` | Comparison report tables, figures, publishing, and explicit paths. | `seis_ssl_cluster.f3`, `seis_ssl_cluster.f3.lithology_report`. | Lithology report/comparison facade plus old wrapper. |
 | `tests/seis_ssl_cluster/test_f3_lithology_baseline_contract.py` | Baseline output layout and metadata contract. | None from package. | No change expected. |
-| `tests/seis_ssl_cluster/test_f3_lithology_baseline_features.py` | Baseline feature builders and config validation. | `seis_ssl_cluster.f3`, `seis_ssl_cluster.paths`. | Lithology baselines facade. |
+| `tests/seis_ssl_cluster/test_f3_lithology_baseline_features.py` | Baseline feature builders and config validation. | `seis_ssl_cluster.f3`. | Lithology baselines facade. |
 | `tests/seis_ssl_cluster/test_f3_lithology_prediction.py` | Prediction grids, metadata, metrics, class loading validation. | `seis_ssl_cluster.f3`. | Lithology prediction facade. |
 | `tests/seis_ssl_cluster/test_f3_lithology_probe.py` | Probe training, MLP class weighting, metrics, invalid configs. | `seis_ssl_cluster.f3`. | Lithology probe facade. |
-| `tests/seis_ssl_cluster/test_f3_lithology_report.py` | Lithology report Markdown/JSON, publishing, comparison aggregation, proc dry run. | `seis_ssl_cluster.f3`, `seis_ssl_cluster.paths`. | Lithology report facade. |
-| `tests/seis_ssl_cluster/test_f3_lithology_token_dataset.py` | Token dataset schema, split behavior, class `0`, reference dataset reuse. | `seis_ssl_cluster.f3`, `seis_ssl_cluster.paths`. | Lithology token dataset facade. |
+| `tests/seis_ssl_cluster/test_f3_lithology_report.py` | Lithology report Markdown/JSON, publishing, comparison aggregation, proc dry run. | `seis_ssl_cluster.f3`. | Lithology report facade. |
+| `tests/seis_ssl_cluster/test_f3_lithology_token_dataset.py` | Token dataset schema, split behavior, class `0`, reference dataset reuse. | `seis_ssl_cluster.f3`. | Lithology token dataset facade. |
 | `tests/seis_ssl_cluster/test_f3_lithology_visualization.py` | Prediction visualization outputs and class loading validation. | `seis_ssl_cluster.f3`. | Lithology visualization facade. |
 | `tests/seis_ssl_cluster/test_f3_png_labels.py` | RGB-to-class mapping, PNG filename parsing, PNG summary outputs. | `seis_ssl_cluster.f3`. | Inspection PNG label facade. |
-| `tests/seis_ssl_cluster/test_f3_prepare_volume.py` | Prepare-volume proc, path contracts, missing SEGY errors. | `seis_ssl_cluster.config`, `seis_ssl_cluster.data`, `seis_ssl_cluster.f3`. | IO prepare-volume facade. |
+| `tests/seis_ssl_cluster/test_f3_prepare_volume.py` | Prepare-volume proc, explicit path handling, missing SEGY errors. | `seis_ssl_cluster.config`, `seis_ssl_cluster.data`, `seis_ssl_cluster.f3`. | IO prepare-volume facade. |
 | `tests/seis_ssl_cluster/test_f3_quicklook_visualization.py` | Quicklook slices, label alignment, legends, proc dry run. | `seis_ssl_cluster.f3`. | Inspection visualization facade. |
 | `tests/seis_ssl_cluster/test_f3_segy_inspection.py` | SEGY stats, axis assumptions, missing files, proc outputs. | `seis_ssl_cluster.f3`. | IO SEGY facade. |
 | `tests/seis_ssl_cluster/test_f3_tokenization_preview.py` | Tokenization preview, class `0`, output summaries, proc dry run. | `seis_ssl_cluster.f3`. | Inspection preview facade plus shared lithology token helpers. |

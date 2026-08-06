@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from seis_ssl_cluster.f3.lithology import m1_results as m1
-from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
 	PublishItem,
@@ -20,6 +19,7 @@ from seis_ssl_cluster.results import (
 	publish_selected_results,
 )
 
+DEFAULT_RESULTS_ROOT = Path('results')
 REQUIRED_LOW_BUDGETS = ('cap25', 'cap50', 'cap100')
 REQUIRED_BUDGETS = (*REQUIRED_LOW_BUDGETS, 'full')
 REQUIRED_SUBSAMPLE_SEEDS = (0, 1, 2, 3, 4)
@@ -490,9 +490,6 @@ def publish_f3_strat_hmm_m2_results(
 		return None
 	if publish_config.output_dir is None:
 		raise ValueError('publish output_dir is required when publishing is enabled')
-	ensure_under_root(
-		publish_config.output_dir, root=DEFAULT_RESULTS_ROOT, label='publish.output_dir'
-	)
 	_validate_m2_publish_contract(result)
 	markdown_without_figures = None
 	if not publish_config.include_figures:
@@ -587,8 +584,6 @@ def _publish_config(raw: Mapping[str, object]) -> F3StratHMMM2PublishConfig:
 	output = m1._optional_publish_path(raw, 'output_dir')
 	if enabled and output is None:
 		raise ValueError('publish.output_dir must be set when publish.enabled is true')
-	if output is not None:
-		ensure_under_root(output, root=DEFAULT_RESULTS_ROOT, label='publish.output_dir')
 	return F3StratHMMM2PublishConfig(
 		enabled, output, include, m1._max_file_size_bytes(raw)
 	)

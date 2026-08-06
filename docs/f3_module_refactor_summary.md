@@ -169,11 +169,6 @@ PYTHONPATH=src pytest -q \
   tests/seis_ssl_cluster/test_results_publish.py \
   tests/seis_ssl_cluster/test_results_validation.py
 
-PYTHONPATH=src python proc/seis_ssl_cluster/validate_artifact_paths.py \
-  --root /workspace/artifacts/seis_ssl_cluster \
-  --scan experiments proc docs README.md results \
-  --fail-on-runs
-
 PYTHONPATH=src python proc/seis_ssl_cluster/validate_results_artifacts.py \
   --root results \
   --max-file-size-mb 10

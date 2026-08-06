@@ -24,7 +24,6 @@ from seis_ssl_cluster.config.pretraining import (
 )
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3 import multi_head_pretraining_validation as hard_validation
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.lateral_targets import (
 	load_multi_head_lateral_target_manifest,
 )
@@ -120,15 +119,6 @@ def f3_m5_lateral_smoothing_pretraining_validation_config_from_mapping(
 	)
 	if not result.artifact_root.is_absolute() or not result.experiment_root.is_absolute():
 		raise ValueError('artifact_root and experiment_root must be absolute')
-	ensure_under_root(
-		result.experiment_root, root=result.artifact_root, label='experiment_root'
-	)
-	for label, path in (
-		('calibration_handoff', result.calibration_handoff),
-		('selected_manifest', result.selected_manifest),
-		('hard_handoff', result.hard_handoff),
-	):
-		ensure_under_root(path, root=result.artifact_root, label=label)
 	for label, path in (
 		('calibration_handoff', result.calibration_handoff),
 		('selected_manifest', result.selected_manifest),
@@ -307,7 +297,7 @@ def validate_f3_m5_lateral_smoothing_pretraining(
 		if phase == 'smoke':
 			smoke = _training_config(config.lateral_smoke_config)
 			smoke_evidence = _smoke_evidence(
-				config, full=lateral, smoke=smoke, target_evidence=target_evidence
+				full=lateral, smoke=smoke, target_evidence=target_evidence
 			)
 			return F3M5LateralSmoothingPretrainingValidationResult(
 				phase,
@@ -419,7 +409,6 @@ def _validate_target_contract(  # noqa: C901, PLR0912, PLR0915
 		output = _output_root(training, label)
 		if output != (config.experiment_root / model_tag).resolve():
 			raise ValueError(f'{label} output root mismatch')
-		ensure_under_root(output, root=config.artifact_root, label=f'{label}.output_root')
 	if Path(str(_mapping(lateral['pseudo_targets'], 'lateral pseudo targets')['manifest'])).resolve() != config.selected_manifest:
 		raise ValueError('lateral selected manifest path mismatch')
 	if lateral_identity.get('lateral_target_manifest_sha256') != file_sha256(
@@ -977,14 +966,13 @@ def _validate_hard_loss_metrics(payload: Mapping[str, object]) -> None:
 
 
 def _smoke_evidence(
-	config: F3M5LateralSmoothingPretrainingValidationConfig,
 	*,
 	full: Mapping[str, object],
 	smoke: Mapping[str, object],
 	target_evidence: Mapping[str, object],
 ) -> dict[str, object]:
 	"""Validate the isolated CPU two-step M5-LS smoke contract."""
-	_validate_smoke_config(config, full=full, smoke=smoke)
+	_validate_smoke_config(full=full, smoke=smoke)
 	hard_initial_hashes = (
 		str(target_evidence['initial_student_state_sha256']),
 		str(target_evidence['initial_head_state_sha256']),
@@ -1027,7 +1015,6 @@ def _smoke_evidence(
 
 
 def _validate_smoke_config(
-	config: F3M5LateralSmoothingPretrainingValidationConfig,
 	*,
 	full: Mapping[str, object],
 	smoke: Mapping[str, object],
@@ -1035,12 +1022,6 @@ def _validate_smoke_config(
 	"""Allow only the isolated CPU two-step execution delta from full config."""
 	full_root, smoke_root = _output_root(full, 'lateral full'), _output_root(
 		smoke, 'lateral smoke'
-	)
-	ensure_under_root(
-		full_root, root=config.artifact_root, label='lateral full output root'
-	)
-	ensure_under_root(
-		smoke_root, root=config.artifact_root, label='lateral smoke output root'
 	)
 	if smoke_root == full_root:
 		raise ValueError('lateral smoke output root must differ from lateral full root')

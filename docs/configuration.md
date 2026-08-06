@@ -41,7 +41,7 @@ Default YAML files must keep these top-level sections only:
 
 No user YAML contains a top-level `stage`; the proc entrypoint selects the stage.
 
-## Path Contract
+## Path Configuration
 
 Every stage names its upstream inputs and downstream outputs explicitly. The
 resolver validates those paths but does not derive paths from dataset names,
@@ -59,10 +59,11 @@ The `paths` mapping is stage-specific and accepts only these keys:
 | Clustering | `artifact_root` |
 | Visualization | `artifact_root` |
 
-Generated outputs must be non-empty absolute paths under the resolved
-`paths.artifact_root`. The normalized path is checked, so `..` traversal cannot
-escape the artifact root. Registry stages that also have `paths.nopims_root`
-reject generated outputs under the raw NOPIMS root.
+Generated outputs must be non-empty absolute paths. Registry stages that also
+have `paths.nopims_root` reject generated outputs under the raw NOPIMS root to
+protect source data. Output paths are otherwise used exactly as configured;
+they do not have to follow a repository-defined hierarchy or sit below
+`paths.artifact_root`.
 
 Generated output fields are:
 
@@ -80,7 +81,8 @@ rewritten by the resolver and may point outside `artifact_root` when the stage
 intentionally supports that, such as raw NOPIMS path lists or an existing
 checkpoint path.
 
-Recommended artifact roles under `paths.artifact_root` are:
+Recommended artifact roles under a local output root are shown below. This is
+an organizational example and is not enforced by a validator:
 
 | Directory | Contents |
 |---|---|
@@ -89,7 +91,9 @@ Recommended artifact roles under `paths.artifact_root` are:
 | `clustering/` | KMeans models, clustering labels, and clustering metadata |
 | `visualizations/` | PNGs, visualization reports, summaries, and optional voxel labels |
 
-The standard pretraining checkpoint path is `pretraining/nopims/pretrain_v1/<MODEL_TAG>/full_100ep`; `runs/` is not used for active configs.
+An example pretraining checkpoint path is
+`pretraining/nopims/pretrain_v1/<MODEL_TAG>/full_100ep`; active configs may use
+any explicit path that satisfies runtime input and overwrite protections.
 
 ## Fixed And Checkpoint-Owned Settings
 

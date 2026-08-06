@@ -15,6 +15,13 @@ from seis_ssl_cluster.config.f3_lithology_voxel_projection import (
 	F3LithologyVoxelProjectionConfig,
 	f3_lithology_voxel_projection_config_from_mapping,
 )
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	CONFIDENCE_NAME,
+	METADATA_NAME,
+	PREDICTIONS_NAME,
+	PROBABILITIES_NAME,
+	VALID_MASK_NAME,
+)
 from seis_ssl_cluster.f3.lithology.voxel_projection import (
 	F3VoxelProjectionResult,
 	project_f3_lithology_tokens_to_voxels,
@@ -78,25 +85,23 @@ def _print_summary(config: F3LithologyVoxelProjectionConfig) -> None:
 
 
 def _print_output_paths(config: F3LithologyVoxelProjectionConfig) -> None:
-	paths = config.output_paths
-	print(f'voxel_projection.output_dir: {paths.output_dir}')
-	print(f'outputs.predictions: {paths.predictions}')
-	print(f'outputs.confidence: {paths.confidence}')
-	print(f'outputs.valid_mask: {paths.valid_mask}')
+	print(f'voxel_projection.output_dir: {config.output_dir}')
+	print(f'outputs.predictions: {config.output_dir / PREDICTIONS_NAME}')
+	print(f'outputs.confidence: {config.output_dir / CONFIDENCE_NAME}')
+	print(f'outputs.valid_mask: {config.output_dir / VALID_MASK_NAME}')
 	if config.write_probabilities:
-		print(f'outputs.probabilities: {paths.probabilities}')
-	print(f'outputs.metadata: {paths.metadata}')
+		print(f'outputs.probabilities: {config.output_dir / PROBABILITIES_NAME}')
+	print(f'outputs.metadata: {config.output_dir / METADATA_NAME}')
 
 
 def _print_result(result: F3VoxelProjectionResult) -> None:
 	# Kept separate so main remains a thin procedure entrypoint.
-	paths = result.paths
-	print(f'output.predictions: {paths.predictions}')
-	print(f'output.confidence: {paths.confidence}')
-	print(f'output.valid_mask: {paths.valid_mask}')
+	print(f'output.predictions: {result.output_dir / PREDICTIONS_NAME}')
+	print(f'output.confidence: {result.output_dir / CONFIDENCE_NAME}')
+	print(f'output.valid_mask: {result.output_dir / VALID_MASK_NAME}')
 	if result.probabilities_written:
-		print(f'output.probabilities: {paths.probabilities}')
-	print(f'output.metadata: {paths.metadata}')
+		print(f'output.probabilities: {result.output_dir / PROBABILITIES_NAME}')
+	print(f'output.metadata: {result.output_dir / METADATA_NAME}')
 	print(f'valid_voxel_count: {result.valid_voxel_count}')
 	print(f'invalid_voxel_count: {result.invalid_voxel_count}')
 	print('execution: complete')

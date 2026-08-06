@@ -25,7 +25,6 @@ from seis_ssl_cluster.f3.xy_neighbor_unanimous_target_audit import (
 	load_f3_xy_neighbor_unanimous_target_audit,
 	replay_f3_xy_neighbor_unanimous_target_audit,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.results import (
 	PublishItem,
 	PublishManifest,
@@ -109,10 +108,8 @@ def f3_xy_neighbor_unanimous_review_config_from_mapping(
 		('target_audit', result.target_audit),
 		('pretraining_handoff', result.pretraining_handoff),
 	):
-		ensure_under_root(value, root=result.artifact_root, label=name)
 		if not value.is_file():
 			raise FileNotFoundError(f'{name} is missing: {value}')
-	ensure_under_root(result.output_dir, root=result.workspace_root, label='output_dir')
 	return result
 
 
@@ -251,7 +248,6 @@ def _validate_lineage(  # noqa: C901, PLR0912, PLR0915
 	checkpoint_evidence = _mapping(handoff['checkpoint'], 'handoff checkpoint')
 	checkpoint = _artifact_file(
 		checkpoint_evidence['path'],
-		root=config.artifact_root,
 		label='handoff checkpoint',
 	)
 	if file_sha256(checkpoint) != checkpoint_evidence['sha256']:
@@ -299,7 +295,6 @@ def _validate_lineage(  # noqa: C901, PLR0912, PLR0915
 		raise ValueError('review selected checkpoint evidence mismatch')
 	embedding = _mapping(handoff['embedding'], 'handoff embedding')
 	root = Path(str(embedding['root'])).resolve()
-	ensure_under_root(root, root=config.artifact_root, label='embedding root')
 	files = output_paths(root, 'f3_facies_benchmark')
 	if Path(str(embedding['metadata_path'])).resolve() != files.metadata:
 		raise ValueError('review embedding metadata path mismatch')
@@ -368,11 +363,10 @@ def _review_evidence(
 	}
 
 
-def _artifact_file(value: object, *, root: Path, label: str) -> Path:
+def _artifact_file(value: object, *, label: str) -> Path:
 	if not isinstance(value, str) or not value:
 		raise TypeError(f'{label} path must be a non-empty string')
 	path = Path(value).resolve()
-	ensure_under_root(path, root=root, label=label)
 	if not path.is_file():
 		raise FileNotFoundError(f'{label} is missing: {path}')
 	return path

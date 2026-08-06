@@ -53,7 +53,6 @@ from seis_ssl_cluster.f3.splits import (
 from seis_ssl_cluster.models.voxel_decoder.spec import (
 	validate_voxel_decoder_architecture_mapping,
 )
-from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
 	PublishItem,
@@ -61,6 +60,7 @@ from seis_ssl_cluster.results import (
 	publish_selected_results,
 )
 
+DEFAULT_RESULTS_ROOT = Path('results')
 if TYPE_CHECKING:
 	from seis_ssl_cluster.f3.labels import F3ClassInfo
 
@@ -99,12 +99,6 @@ class F3LithologyVoxelPublishConfig:
 			raise TypeError('publish enabled and overwrite must be boolean')
 		if self.max_file_size_bytes <= 0:
 			raise ValueError('publish max_file_size_bytes must be positive')
-		if self.output_dir is not None:
-			ensure_under_root(
-				self.output_dir,
-				root=self.results_root,
-				label='publish.output_dir',
-			)
 
 
 @dataclass(frozen=True)

@@ -40,18 +40,6 @@ _RENAME_EXCHANGE = 2
 
 
 @dataclass(frozen=True)
-class F3VoxelPredictionArtifactPaths:
-	"""Deterministic paths belonging to one voxel-prediction run."""
-
-	output_dir: Path
-	predictions: Path
-	confidence: Path
-	valid_mask: Path
-	probabilities: Path
-	metadata: Path
-
-
-@dataclass(frozen=True)
 class F3VoxelPredictionArrays:
 	"""Writable or loaded arrays in a voxel-prediction artifact."""
 
@@ -65,59 +53,47 @@ class F3VoxelPredictionArrays:
 class F3VoxelPredictionArtifact:
 	"""A completely validated voxel-prediction artifact."""
 
-	paths: F3VoxelPredictionArtifactPaths
+	output_dir: Path
 	metadata: Mapping[str, object]
 	arrays: F3VoxelPredictionArrays
 
 
-def f3_voxel_prediction_artifact_paths(
-	output_dir: str | Path,
-) -> F3VoxelPredictionArtifactPaths:
-	"""Return the fixed artifact paths below ``output_dir``."""
-	root = Path(output_dir)
-	return F3VoxelPredictionArtifactPaths(
-		output_dir=root,
-		predictions=root / PREDICTIONS_NAME,
-		confidence=root / CONFIDENCE_NAME,
-		valid_mask=root / VALID_MASK_NAME,
-		probabilities=root / PROBABILITIES_NAME,
-		metadata=root / METADATA_NAME,
-	)
-
-
 def discover_f3_voxel_probability_path(
-	paths_or_dir: F3VoxelPredictionArtifactPaths | str | Path,
+	output_dir: str | Path,
 ) -> Path | None:
 	"""Return the optional probability path when it exists."""
-	paths = _coerce_paths(paths_or_dir)
-	return paths.probabilities if paths.probabilities.is_file() else None
+	path = Path(output_dir) / PROBABILITIES_NAME
+	return path if path.is_file() else None
 
 
-def create_f3_voxel_prediction_staging_paths(
+def create_f3_voxel_prediction_staging_dir(
 	output_dir: str | Path,
 	*,
 	overwrite: bool = False,
-) -> F3VoxelPredictionArtifactPaths:
+) -> Path:
 	"""Create a same-filesystem staging directory for an artifact run."""
 	target = Path(output_dir)
 	if target.exists() and not overwrite:
 		raise FileExistsError(f'refusing to overwrite existing output: {target}')
 	target.parent.mkdir(parents=True, exist_ok=True)
-	staging = Path(
+	return Path(
 		tempfile.mkdtemp(prefix=f'.{target.name}.staging-', dir=target.parent)
 	)
-	return f3_voxel_prediction_artifact_paths(staging)
 
 
 def open_f3_voxel_prediction_memmaps(
-	paths_or_dir: F3VoxelPredictionArtifactPaths | str | Path,
+	output_dir: str | Path,
 	*,
 	volume_shape_xyz: Sequence[int],
 	class_count: int,
 	include_probabilities: bool = False,
 ) -> F3VoxelPredictionArrays:
 	"""Create initialized ``.npy`` memmaps for a producer to fill in chunks."""
-	paths = _coerce_paths(paths_or_dir)
+	root = Path(output_dir)
+	predictions_path = root / PREDICTIONS_NAME
+	confidence_path = root / CONFIDENCE_NAME
+	valid_mask_path = root / VALID_MASK_NAME
+	probabilities_path = root / PROBABILITIES_NAME
 	shape = _positive_triplet(volume_shape_xyz, 'volume_shape_xyz')
 	if (
 		not isinstance(class_count, int)
@@ -125,26 +101,26 @@ def open_f3_voxel_prediction_memmaps(
 		or class_count <= 0
 	):
 		raise ValueError(f'class_count must be a positive integer; got {class_count!r}')
-	paths.output_dir.mkdir(parents=True, exist_ok=True)
-	for path in (paths.predictions, paths.confidence, paths.valid_mask):
+	root.mkdir(parents=True, exist_ok=True)
+	for path in (predictions_path, confidence_path, valid_mask_path):
 		if path.exists():
 			raise FileExistsError(f'refusing to overwrite existing output: {path}')
-	if paths.probabilities.exists():
+	if probabilities_path.exists():
 		raise FileExistsError(
-			f'refusing to overwrite existing output: {paths.probabilities}'
+			f'refusing to overwrite existing output: {probabilities_path}'
 		)
 	predictions = np.lib.format.open_memmap(
-		paths.predictions, mode='w+', dtype=np.int16, shape=shape
+		predictions_path, mode='w+', dtype=np.int16, shape=shape
 	)
 	confidence = np.lib.format.open_memmap(
-		paths.confidence, mode='w+', dtype=np.float16, shape=shape
+		confidence_path, mode='w+', dtype=np.float16, shape=shape
 	)
 	valid_mask = np.lib.format.open_memmap(
-		paths.valid_mask, mode='w+', dtype=np.bool_, shape=shape
+		valid_mask_path, mode='w+', dtype=np.bool_, shape=shape
 	)
 	probabilities = (
 		np.lib.format.open_memmap(
-			paths.probabilities,
+			probabilities_path,
 			mode='w+',
 			dtype=np.float16,
 			shape=(*shape, class_count),
@@ -288,46 +264,51 @@ def validate_f3_voxel_prediction_arrays(  # noqa: C901, PLR0912
 
 
 def validate_f3_voxel_prediction_artifact(
-	paths_or_dir: F3VoxelPredictionArtifactPaths | str | Path,
+	output_dir: str | Path,
 	*,
 	mmap_mode: str | None = 'r',
 ) -> F3VoxelPredictionArtifact:
 	"""Load and validate one complete artifact, rejecting partial output."""
-	paths = _coerce_paths(paths_or_dir)
+	root = Path(output_dir)
 	return _validate_f3_voxel_prediction_artifact(
-		paths,
-		metadata_paths=paths,
+		root,
+		metadata_output_dir=root,
 		mmap_mode=mmap_mode,
 	)
 
 
 def _validate_f3_voxel_prediction_artifact(
-	paths: F3VoxelPredictionArtifactPaths,
+	output_dir: Path,
 	*,
-	metadata_paths: F3VoxelPredictionArtifactPaths,
+	metadata_output_dir: Path,
 	mmap_mode: str | None,
 ) -> F3VoxelPredictionArtifact:
-	required = (paths.predictions, paths.confidence, paths.valid_mask, paths.metadata)
+	predictions_path = output_dir / PREDICTIONS_NAME
+	confidence_path = output_dir / CONFIDENCE_NAME
+	valid_mask_path = output_dir / VALID_MASK_NAME
+	probabilities_path = output_dir / PROBABILITIES_NAME
+	metadata_path = output_dir / METADATA_NAME
+	required = (predictions_path, confidence_path, valid_mask_path, metadata_path)
 	missing = [path.name for path in required if not path.is_file()]
 	if missing:
 		raise FileNotFoundError(
 			f'incomplete voxel prediction artifact; missing: {", ".join(missing)}'
 		)
-	metadata = read_f3_voxel_prediction_metadata(paths.metadata)
+	metadata = read_f3_voxel_prediction_metadata(metadata_path)
 	shape, class_ids = _validate_metadata(metadata)
 	_validate_metadata_output_binding(
 		metadata,
-		paths=metadata_paths,
-		probabilities_present=paths.probabilities.is_file(),
+		output_dir=metadata_output_dir,
+		probabilities_present=probabilities_path.is_file(),
 	)
 	arrays = F3VoxelPredictionArrays(
-		predictions=np.load(paths.predictions, mmap_mode=mmap_mode, allow_pickle=False),
-		confidence=np.load(paths.confidence, mmap_mode=mmap_mode, allow_pickle=False),
-		valid_mask=np.load(paths.valid_mask, mmap_mode=mmap_mode, allow_pickle=False),
+		predictions=np.load(predictions_path, mmap_mode=mmap_mode, allow_pickle=False),
+		confidence=np.load(confidence_path, mmap_mode=mmap_mode, allow_pickle=False),
+		valid_mask=np.load(valid_mask_path, mmap_mode=mmap_mode, allow_pickle=False),
 		probabilities=(
 			None
-			if discover_f3_voxel_probability_path(paths) is None
-			else np.load(paths.probabilities, mmap_mode=mmap_mode, allow_pickle=False)
+			if discover_f3_voxel_probability_path(output_dir) is None
+			else np.load(probabilities_path, mmap_mode=mmap_mode, allow_pickle=False)
 		),
 	)
 	summary = validate_f3_voxel_prediction_arrays(
@@ -341,44 +322,48 @@ def _validate_f3_voxel_prediction_artifact(
 			'artifact summary does not match voxel prediction arrays; '
 			f'metadata={metadata_summary!r}, arrays={summary!r}'
 		)
-	return F3VoxelPredictionArtifact(paths=paths, metadata=metadata, arrays=arrays)
+	return F3VoxelPredictionArtifact(
+		output_dir=output_dir,
+		metadata=metadata,
+		arrays=arrays,
+	)
 
 
 def commit_f3_voxel_prediction_artifact(
-	staging_paths_or_dir: F3VoxelPredictionArtifactPaths | str | Path,
+	staging_dir: str | Path,
 	output_dir: str | Path,
 	*,
 	overwrite: bool = False,
-) -> F3VoxelPredictionArtifactPaths:
+) -> Path:
 	"""Validate and transactionally publish a same-filesystem staging directory.
 
 	An atomic directory exchange is used for overwrite when the platform and
 	filesystem support it. Otherwise, the previous artifact is kept at a unique
 	backup path until promotion of the validated staging directory succeeds.
 	"""
-	staging = _coerce_paths(staging_paths_or_dir)
+	staging = Path(staging_dir)
 	target = Path(output_dir)
-	if staging.output_dir.resolve() == target.resolve():
+	if staging.resolve() == target.resolve():
 		raise ValueError('staging and output directories must be different')
-	if staging.output_dir.parent.resolve() != target.parent.resolve():
+	if staging.parent.resolve() != target.parent.resolve():
 		raise ValueError('staging and output directories must have the same parent')
 	_validate_f3_voxel_prediction_artifact(
 		staging,
-		metadata_paths=f3_voxel_prediction_artifact_paths(target),
+		metadata_output_dir=target,
 		mmap_mode='r',
 	)
 	if target.exists() and not overwrite:
 		raise FileExistsError(f'refusing to overwrite existing output: {target}')
 	if not target.exists():
-		_rename_directory_no_replace(staging.output_dir, target)
-		return f3_voxel_prediction_artifact_paths(target)
+		_rename_directory_no_replace(staging, target)
+		return target
 	try:
-		_exchange_directories(staging.output_dir, target)
+		_exchange_directories(staging, target)
 	except NotImplementedError:
-		_replace_directory_portably(staging.output_dir, target)
+		_replace_directory_portably(staging, target)
 	else:
-		shutil.rmtree(staging.output_dir)
-	return f3_voxel_prediction_artifact_paths(target)
+		shutil.rmtree(staging)
+	return target
 
 
 def _replace_directory_portably(source: Path, target: Path) -> None:
@@ -487,14 +472,6 @@ def _rename_directories(
 			os.strerror(error_number),
 			f'{source} <-> {target}',
 		)
-
-
-def _coerce_paths(
-	value: F3VoxelPredictionArtifactPaths | str | Path,
-) -> F3VoxelPredictionArtifactPaths:
-	if isinstance(value, F3VoxelPredictionArtifactPaths):
-		return value
-	return f3_voxel_prediction_artifact_paths(value)
 
 
 def _reject_json_constant(value: str) -> None:
@@ -648,21 +625,21 @@ def _validate_metadata(  # noqa: C901, PLR0912
 def _validate_metadata_output_binding(
 	metadata: Mapping[str, object],
 	*,
-	paths: F3VoxelPredictionArtifactPaths,
+	output_dir: Path,
 	probabilities_present: bool,
 ) -> None:
 	outputs = cast('Mapping[str, object]', metadata['outputs'])
 	expected = {
-		'predictions': paths.predictions,
-		'confidence': paths.confidence,
-		'valid_mask': paths.valid_mask,
+		'predictions': output_dir / PREDICTIONS_NAME,
+		'confidence': output_dir / CONFIDENCE_NAME,
+		'valid_mask': output_dir / VALID_MASK_NAME,
 	}
 	for key, expected_path in expected.items():
 		_validate_metadata_output_path(
 			outputs,
 			key=key,
 			expected_path=expected_path,
-			output_dir=paths.output_dir,
+			output_dir=output_dir,
 		)
 	probabilities_declared = 'probabilities' in outputs
 	if probabilities_declared and not probabilities_present:
@@ -679,8 +656,8 @@ def _validate_metadata_output_binding(
 		_validate_metadata_output_path(
 			outputs,
 			key='probabilities',
-			expected_path=paths.probabilities,
-			output_dir=paths.output_dir,
+			expected_path=output_dir / PROBABILITIES_NAME,
+			output_dir=output_dir,
 		)
 
 
@@ -728,11 +705,9 @@ __all__ = [
 	'VALID_MASK_NAME',
 	'F3VoxelPredictionArrays',
 	'F3VoxelPredictionArtifact',
-	'F3VoxelPredictionArtifactPaths',
 	'commit_f3_voxel_prediction_artifact',
-	'create_f3_voxel_prediction_staging_paths',
+	'create_f3_voxel_prediction_staging_dir',
 	'discover_f3_voxel_probability_path',
-	'f3_voxel_prediction_artifact_paths',
 	'open_f3_voxel_prediction_memmaps',
 	'read_f3_voxel_prediction_metadata',
 	'validate_f3_voxel_prediction_arrays',

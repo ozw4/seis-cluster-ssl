@@ -222,13 +222,13 @@ def test_voxel_publish_default_dir_uses_versioned_prediction_spec(
 	)
 
 
-def test_voxel_publish_output_must_be_under_results_root(tmp_path: Path) -> None:
-	with pytest.raises(ValueError, match=r'publish\.output_dir must be under root'):
-		F3LithologyVoxelPublishConfig(
-			enabled=True,
-			results_root=tmp_path / 'results',
-			output_dir=tmp_path / 'outside-results',
-		)
+def test_voxel_publish_preserves_explicit_output_dir(tmp_path: Path) -> None:
+	config = F3LithologyVoxelPublishConfig(
+		enabled=True,
+		results_root=tmp_path / 'results',
+		output_dir=tmp_path / 'outside-results',
+	)
+	assert config.output_dir == tmp_path / 'outside-results'
 
 
 def test_selected_slices_must_have_validation_metrics(tmp_path: Path) -> None:

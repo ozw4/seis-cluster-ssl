@@ -249,6 +249,9 @@ M1, and M2-A source tags and checkpoint semantics.
 
 Let `$ROOT=/workspace/artifacts/seis_ssl_cluster` and
 `$MODEL_ROOT=$ROOT/lithology/f3/facies_benchmark_v1/<MODEL_TAG>/overlap_x16/png_slices_segy_labels_v1`.
+The paths below are recommended examples from the checked-in configs, not a
+hierarchy enforced by a repository validator. Each config's explicit paths are
+the source of truth.
 
 ```text
 $MODEL_ROOT/predictions/linear_balanced_v1/                 token predictions

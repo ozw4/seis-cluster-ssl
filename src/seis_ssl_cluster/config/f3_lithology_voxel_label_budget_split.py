@@ -13,7 +13,6 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_str,
 	_validate_allowed_keys,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 
 SPLIT_IDS = tuple(f'split_{index:03d}' for index in range(6))
 BUDGETS = ('cap25', 'cap50')
@@ -90,7 +89,7 @@ def f3_lithology_voxel_label_budget_split_config_from_mapping(
 		original_dataset_manifest=_required_absolute_path(inputs, 'original_dataset_manifest', prefix='inputs'),
 		multi_head_decisions=_required_absolute_path(inputs, 'multi_head_decisions', prefix='inputs'),
 		multi_head_handoff=_required_absolute_path(inputs, 'multi_head_handoff', prefix='inputs'),
-		embeddings=_embedding_paths(inputs, artifact_root),
+		embeddings=_embedding_paths(inputs),
 		split_ids=_strings(matrix.get('split_ids'), 'matrix.split_ids'),
 		budgets=_strings(matrix.get('budgets'), 'matrix.budgets'),
 		label_subset_seed=_integer(matrix.get('label_subset_seed'), 'matrix.label_subset_seed'),
@@ -101,11 +100,6 @@ def f3_lithology_voxel_label_budget_split_config_from_mapping(
 		seismic_volume=source_paths['seismic_volume'],
 		source_identities=_source_identities(inputs, source_paths),
 	)
-	for label, path in ((name, getattr(result, name)) for name in (
-		'output_root', 'split_inventory_manifest', 'split_dataset_manifest', 'voxel_dataset_manifest',
-		'original_dataset_manifest', 'multi_head_handoff', *(),
-	)):
-		ensure_under_root(path, root=artifact_root, label=label)
 	if result.split_ids != SPLIT_IDS or len(set(result.split_ids)) != len(SPLIT_IDS):
 		raise ValueError('matrix.split_ids must be the canonical six unique split IDs')
 	if result.budgets != BUDGETS or matrix.get('per_class_caps') != [25, 50]:
@@ -117,13 +111,13 @@ def f3_lithology_voxel_label_budget_split_config_from_mapping(
 	return result
 
 
-def _embedding_paths(inputs: Mapping[str, object], artifact_root: Path) -> Mapping[str, Path]:
+def _embedding_paths(inputs: Mapping[str, object]) -> Mapping[str, Path]:
 	raw = _required_mapping(inputs, 'embeddings')
 	_validate_allowed_keys(raw, frozenset(MODEL_TAGS), prefix='inputs.embeddings')
-	paths = {name: _required_absolute_path(raw, name, prefix='inputs.embeddings') for name in MODEL_TAGS}
-	for name, path in paths.items():
-		ensure_under_root(path, root=artifact_root, label=f'inputs.embeddings.{name}')
-	return paths
+	return {
+		name: _required_absolute_path(raw, name, prefix='inputs.embeddings')
+		for name in MODEL_TAGS
+	}
 
 
 def _source_identities(

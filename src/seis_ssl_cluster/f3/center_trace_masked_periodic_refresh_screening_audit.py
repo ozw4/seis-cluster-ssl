@@ -44,7 +44,6 @@ from seis_ssl_cluster.f3.lithology import (
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 	inspect_f3_lithology_voxel_label_budget_mae_reference_run,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 
 ARTIFACT_TYPE = 'f3_center_trace_masked_periodic_refresh_original_screening_preflight'
@@ -177,25 +176,6 @@ def f3_center_trace_masked_periodic_refresh_screening_audit_config_from_mapping(
 		),
 		output_path=path('output_path', must_exist=False),
 	)
-	for label, value in (
-		('source_hard_manifest', result.source_hard_manifest),
-		('hard_pretraining_handoff', result.hard_pretraining_handoff),
-		('periodic_refresh_handoff', result.periodic_refresh_handoff),
-		('periodic_refresh_embeddings_dir', result.periodic_refresh_embeddings_dir),
-		('output_path', result.output_path),
-	):
-		ensure_under_root(value, root=result.artifact_root, label=label)
-	for label, value in (
-		('hard_full_config', result.hard_full_config),
-		('center_trace_masked_config', result.center_trace_masked_config),
-		(
-			'periodic_refresh_validation_config',
-			result.periodic_refresh_validation_config,
-		),
-		('periodic_refresh_full_config', result.periodic_refresh_full_config),
-		('candidate_decoder_config', result.candidate_decoder_config),
-	):
-		ensure_under_root(value, root=result.workspace_root, label=label)
 	if result.periodic_refresh_handoff.name != 'periodic_refresh_handoff.json':
 		raise ValueError('periodic refresh handoff name is not canonical')
 	if result.output_path.name != 'periodic_refresh_screening_audit.json':

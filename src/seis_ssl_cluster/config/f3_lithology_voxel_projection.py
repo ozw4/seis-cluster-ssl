@@ -12,14 +12,10 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_required_str,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.f3.lithology.tokens import read_f3_lithology_class_info
-from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
-	F3VoxelPredictionArtifactPaths,
-	f3_voxel_prediction_artifact_paths,
-)
 from seis_ssl_cluster.f3.lithology.voxel_projection import (
 	F3VoxelProjectionSourceInfo,
 	inspect_f3_lithology_token_projection_source,
@@ -38,15 +34,10 @@ class F3LithologyVoxelProjectionConfig:
 	model: Mapping[str, object]
 	class_info: Path
 	source: F3VoxelProjectionSourceInfo
-	output_paths: F3VoxelPredictionArtifactPaths
+	output_dir: Path
 	mode: str
 	write_probabilities: bool
 	overwrite: bool
-
-	@property
-	def output_dir(self) -> Path:
-		"""Return the projection artifact directory."""
-		return self.output_paths.output_dir
 
 
 def f3_lithology_voxel_projection_config_from_mapping(
@@ -121,10 +112,9 @@ def f3_lithology_voxel_projection_config_from_mapping(
 	output_dir = _required_absolute_path(
 		projection, 'output_dir', prefix='voxel_projection'
 	)
-	_validate_artifact_path_not_f3(
+	_validate_output_not_under_f3_root(
 		output_dir,
 		'voxel_projection.output_dir',
-		artifact_root=artifact_root,
 		f3_root=f3_root,
 	)
 	_validate_output_collision(
@@ -155,7 +145,7 @@ def f3_lithology_voxel_projection_config_from_mapping(
 		model=dict(model),
 		class_info=class_info,
 		source=source,
-		output_paths=f3_voxel_prediction_artifact_paths(output_dir),
+		output_dir=output_dir,
 		mode=mode,
 		write_probabilities=write_probabilities,
 		overwrite=overwrite,

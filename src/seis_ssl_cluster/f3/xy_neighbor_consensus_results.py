@@ -26,7 +26,6 @@ from seis_ssl_cluster.f3.xy_neighbor_consensus_pretraining_validation import (
 	_validate_embedding_stratigraphy_identity,
 	load_f3_xy_neighbor_consensus_pretraining_handoff,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.results import (
 	PublishItem,
 	PublishManifest,
@@ -113,10 +112,8 @@ def f3_xy_neighbor_consensus_review_config_from_mapping(
 		('target_manifest', result.target_manifest),
 		('pretraining_handoff', result.pretraining_handoff),
 	):
-		ensure_under_root(value, root=result.artifact_root, label=key)
 		if not value.is_file():
 			raise FileNotFoundError(f'{key} is missing: {value}')
-	ensure_under_root(result.output_dir, root=result.workspace_root, label='output_dir')
 	return result
 
 
@@ -278,7 +275,6 @@ def _validate_handoff_artifact_lineage(  # noqa: C901, PLR0912
 	checkpoint = _mapping(handoff.get('checkpoint'), 'pretraining checkpoint')
 	checkpoint_path = _artifact_file(
 		checkpoint.get('path'),
-		root=config.artifact_root,
 		label='handoff checkpoint',
 	)
 	if file_sha256(checkpoint_path) != checkpoint.get('sha256'):
@@ -339,11 +335,6 @@ def _validate_handoff_artifact_lineage(  # noqa: C901, PLR0912
 
 	embedding = _mapping(handoff.get('embedding'), 'pretraining embedding')
 	embedding_root = Path(str(embedding.get('root', ''))).resolve()
-	ensure_under_root(
-		embedding_root,
-		root=config.artifact_root,
-		label='handoff embedding root',
-	)
 	files = output_paths(embedding_root, 'f3_facies_benchmark')
 	if Path(str(embedding.get('metadata_path', ''))).resolve() != files.metadata:
 		raise ValueError('handoff embedding metadata path does not match output root')
@@ -365,11 +356,10 @@ def _validate_handoff_artifact_lineage(  # noqa: C901, PLR0912
 	_validate_embedding_stratigraphy_identity(metadata, identity)
 
 
-def _artifact_file(value: object, *, root: Path, label: str) -> Path:
+def _artifact_file(value: object, *, label: str) -> Path:
 	if not isinstance(value, str) or not value:
 		raise TypeError(f'{label} path must be a non-empty string')
 	path = Path(value).resolve()
-	ensure_under_root(path, root=root, label=label)
 	if not path.is_file():
 		raise FileNotFoundError(f'{label} is missing: {path}')
 	return path

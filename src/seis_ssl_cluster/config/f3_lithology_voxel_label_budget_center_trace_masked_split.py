@@ -1,5 +1,5 @@
 """Strict configuration for the center-trace masked six-split preflight."""
-# ruff: noqa: CPY001, C901, E501, PLR0912
+# ruff: noqa: CPY001, C901, E501
 
 from __future__ import annotations
 
@@ -14,7 +14,6 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_validate_allowed_keys,
 )
 from seis_ssl_cluster.config.io import load_config
-from seis_ssl_cluster.paths import ensure_under_root
 
 SPLIT_IDS = tuple(f'split_{index:03d}' for index in range(6))
 BUDGETS = ('cap25', 'cap50', 'cap100')
@@ -186,7 +185,6 @@ def f3_lithology_voxel_label_budget_center_trace_masked_split_config_from_mappin
 		raise ValueError(
 			'paths.output_root must be the candidate-owned six-split output root'
 		)
-	ensure_under_root(output_root, root=artifact_root, label='paths.output_root')
 
 	candidate = _model_identity(matrix, 'candidate')
 	baseline = _model_identity(matrix, 'baseline')
@@ -217,13 +215,6 @@ def f3_lithology_voxel_label_budget_center_trace_masked_split_config_from_mappin
 		for name in _INPUT_KEYS
 		if name != 'source_identities'
 	}
-	for name, path in resolved_inputs.items():
-		if name in {'original_split_handoff', 'source_label_segy'}:
-			continue
-		if name in {'seismic_volume', 'class_info', 'segy_geometry_json'}:
-			ensure_under_root(path, root=artifact_root, label=f'inputs.{name}')
-			continue
-		ensure_under_root(path, root=artifact_root, label=f'inputs.{name}')
 	for name in ('candidate_embeddings_dir', 'hard_baseline_embeddings_dir'):
 		if not resolved_inputs[name].is_absolute():
 			raise ValueError(f'inputs.{name} must be absolute')

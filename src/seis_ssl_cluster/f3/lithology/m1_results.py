@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
 
-from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT, ensure_under_root
 from seis_ssl_cluster.results import (
 	DEFAULT_MAX_FILE_SIZE_BYTES,
 	PublishItem,
@@ -19,6 +18,7 @@ from seis_ssl_cluster.results import (
 	publish_selected_results,
 )
 
+DEFAULT_RESULTS_ROOT = Path('results')
 CORE_METRICS = (
 	'accuracy',
 	'balanced_accuracy',
@@ -226,7 +226,6 @@ def publish_f3_strat_hmm_m1_results(
 	if publish_config.output_dir is None:
 		msg = 'publish output_dir is required when publishing is enabled'
 		raise ValueError(msg)
-	_validate_publish_output_dir(publish_config.output_dir)
 	return publish_selected_results(
 		items=_publish_items_for_f3_strat_hmm_m1_results(
 			result,
@@ -267,14 +266,6 @@ def _publish_items_for_f3_strat_hmm_m1_results(
 	return tuple(items)
 
 
-def _validate_publish_output_dir(output_dir: Path) -> None:
-	ensure_under_root(
-		output_dir,
-		root=DEFAULT_RESULTS_ROOT,
-		label='publish.output_dir',
-	)
-
-
 def _publish_config_from_mapping(
 	publish: Mapping[str, object],
 ) -> F3StratHMMM1PublishConfig:
@@ -289,8 +280,6 @@ def _publish_config_from_mapping(
 	if enabled and output_dir is None:
 		msg = 'publish.output_dir must be set when publish.enabled is true'
 		raise ValueError(msg)
-	if output_dir is not None:
-		_validate_publish_output_dir(output_dir)
 	return F3StratHMMM1PublishConfig(
 		enabled=enabled,
 		output_dir=output_dir,

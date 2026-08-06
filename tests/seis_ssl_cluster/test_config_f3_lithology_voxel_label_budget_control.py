@@ -87,22 +87,22 @@ def test_rejects_scientific_contract_drift(
 		f3_lithology_voxel_label_budget_control_config_from_mapping(raw)
 
 
-def test_rejects_artifact_and_publish_paths_outside_their_roots(
+def test_preserves_explicit_artifact_and_publish_paths(
 	tmp_path: Path,
 ) -> None:
 	raw = _mapping(tmp_path)
 	candidate = raw['candidate']
 	assert isinstance(candidate, dict)
 	candidate['embeddings_dir'] = str(tmp_path / 'outside-artifacts')
-	with pytest.raises(ValueError, match=r'candidate\.embeddings_dir'):
-		f3_lithology_voxel_label_budget_control_config_from_mapping(raw)
+	resolved = f3_lithology_voxel_label_budget_control_config_from_mapping(raw)
+	assert resolved.candidate.embeddings_dir == tmp_path / 'outside-artifacts'
 
 	raw = _mapping(tmp_path)
 	publish = raw['publish']
 	assert isinstance(publish, dict)
 	publish['output_dir'] = str(tmp_path / 'outside-results')
-	with pytest.raises(ValueError, match=r'publish\.output_dir'):
-		f3_lithology_voxel_label_budget_control_config_from_mapping(raw)
+	resolved = f3_lithology_voxel_label_budget_control_config_from_mapping(raw)
+	assert resolved.publish.output_dir == tmp_path / 'outside-results'
 
 
 def test_decoder_seed_rejects_unconfigured_subsample_seed(tmp_path: Path) -> None:

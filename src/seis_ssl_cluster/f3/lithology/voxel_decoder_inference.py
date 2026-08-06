@@ -18,11 +18,11 @@ from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	ARTIFACT_TYPE,
 	INVALID_CONFIDENCE_VALUE,
 	INVALID_PREDICTION_CLASS_ID,
+	METADATA_NAME,
 	SCHEMA_VERSION,
 	F3VoxelPredictionArrays,
-	F3VoxelPredictionArtifactPaths,
 	commit_f3_voxel_prediction_artifact,
-	create_f3_voxel_prediction_staging_paths,
+	create_f3_voxel_prediction_staging_dir,
 	open_f3_voxel_prediction_memmaps,
 	validate_f3_voxel_prediction_arrays,
 	write_f3_voxel_prediction_metadata,
@@ -73,7 +73,7 @@ class VoxelDecoderInferencePlan:
 class VoxelDecoderInferenceResult:
 	"""Committed output paths and inference coverage counts."""
 
-	paths: F3VoxelPredictionArtifactPaths
+	output_dir: Path
 	volume_shape_xyz: tuple[int, int, int]
 	valid_voxel_count: int
 	invalid_voxel_count: int
@@ -232,7 +232,7 @@ def predict_f3_lithology_voxels(
 	run_device = _resolve_device(device)
 	embeddings, valid_tokens = _load_source_arrays(plan)
 	model = _load_decoder(plan, device=run_device)
-	staging = create_f3_voxel_prediction_staging_paths(
+	staging = create_f3_voxel_prediction_staging_dir(
 		config.output_dir, overwrite=overwrite_enabled
 	)
 	try:
@@ -266,15 +266,15 @@ def predict_f3_lithology_voxels(
 			summary=summary,
 			coverage=coverage,
 		)
-		write_f3_voxel_prediction_metadata(staging.metadata, metadata)
-		paths = commit_f3_voxel_prediction_artifact(
+		write_f3_voxel_prediction_metadata(staging / METADATA_NAME, metadata)
+		committed_output_dir = commit_f3_voxel_prediction_artifact(
 			staging, config.output_dir, overwrite=overwrite_enabled
 		)
 	except BaseException:
-		shutil.rmtree(staging.output_dir, ignore_errors=True)
+		shutil.rmtree(staging, ignore_errors=True)
 		raise
 	return VoxelDecoderInferenceResult(
-		paths=paths,
+		output_dir=committed_output_dir,
 		volume_shape_xyz=plan.volume_shape_xyz,
 		valid_voxel_count=cast('int', summary['valid_voxel_count']),
 		invalid_voxel_count=cast('int', summary['invalid_voxel_count']),

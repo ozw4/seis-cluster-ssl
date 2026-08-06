@@ -34,11 +34,14 @@ If train and validation slices retain the same `token_xyz`, validation keeps
 precedence and matching train rows are removed before `train_tokens.npz` is
 written. The token dataset metadata records the removed row count.
 
-The canonical config directory is:
+The recommended config directory is:
 
 ```text
 $EXP/50_lithology/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/
 ```
+
+This organization is an example for maintainers and is not enforced by a path
+validator. The explicit input and output values in each YAML are authoritative.
 
 Each YAML is standalone and avoids inheritance, anchors, merge keys, and
 symlinks. Raw YAML does not contain a top-level `stage`; the selected proc

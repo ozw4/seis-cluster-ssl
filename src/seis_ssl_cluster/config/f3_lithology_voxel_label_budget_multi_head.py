@@ -20,7 +20,6 @@ from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_control import (
 	F3VoxelLabelBudgetControlConfig,
 	f3_lithology_voxel_label_budget_control_config_from_mapping,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 
 EXPECTED_CANDIDATES = (
 	('mh_nocons', 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1'),
@@ -191,16 +190,6 @@ def _config_from_mapping(  # noqa: C901
 				candidate, 'pretraining_handoff', prefix=f'candidates[{index}]'
 			),
 		)
-		ensure_under_root(
-			item.embeddings_dir,
-			root=artifact_root,
-			label=f'candidates[{index}].embeddings_dir',
-		)
-		ensure_under_root(
-			item.pretraining_handoff,
-			root=artifact_root,
-			label=f'candidates[{index}].pretraining_handoff',
-		)
 		resolved_candidates.append(item)
 	if (
 		tuple((item.model_id, item.model_tag) for item in resolved_candidates)
@@ -242,13 +231,6 @@ def _config_from_mapping(  # noqa: C901
 			else None
 		),
 	)
-	for label, path in (
-		('references.dataset_manifest', refs.dataset_manifest),
-		('references.multi_head_target_manifest', refs.multi_head_target_manifest),
-		('references.original_run_manifest', refs.original_run_manifest),
-		('references.current_k6_run_manifest', refs.current_k6_run_manifest),
-	):
-		ensure_under_root(path, root=artifact_root, label=label)
 	if (refs.mae_model_id, refs.current_k6_model_id) != (
 		'mae',
 		CURRENT_K6_MODEL_ID,

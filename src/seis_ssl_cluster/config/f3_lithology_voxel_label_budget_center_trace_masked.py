@@ -14,7 +14,6 @@ from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_multi_head import (
 	config_from_mapping_for_candidates,
 	f3_lithology_voxel_label_budget_multi_head_config_from_mapping,
 )
-from seis_ssl_cluster.paths import ensure_under_root
 
 CENTER_TRACE_MASKED_MODEL_ID = 'mh_ctmask010_nocons'
 CENTER_TRACE_MASKED_MODEL_TAG = (
@@ -104,17 +103,7 @@ def f3_lithology_voxel_label_budget_center_trace_masked_config_from_mapping(
 		raise ValueError(
 			'screening_audit must use the canonical center-trace preflight path'
 		)
-	ensure_under_root(
-		screening_audit,
-		root=multi_head.artifact_root,
-		label='screening_audit',
-	)
 	audit_payload = _validate_screening_audit_binding(screening_audit, multi_head)
-	ensure_under_root(
-		multi_head.output_root,
-		root=multi_head.artifact_root,
-		label='outputs.output_root',
-	)
 	return F3VoxelLabelBudgetCenterTraceMaskedConfig(
 		multi_head=multi_head,
 		hard_multi_head_config=hard_multi_head_config,

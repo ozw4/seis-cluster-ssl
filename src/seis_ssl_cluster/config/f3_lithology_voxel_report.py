@@ -10,7 +10,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_required_str,
 	_validate_allowed_keys,
-	_validate_artifact_path_not_f3,
+	_validate_output_not_under_f3_root,
 )
 from seis_ssl_cluster.f3.lithology.voxel_report import (
 	F3LithologyVoxelPublishConfig,
@@ -19,8 +19,9 @@ from seis_ssl_cluster.f3.lithology.voxel_report import (
 from seis_ssl_cluster.f3.lithology.voxel_visualization import (
 	F3LithologyVoxelFigureConfig,
 )
-from seis_ssl_cluster.paths import DEFAULT_RESULTS_ROOT
 from seis_ssl_cluster.results import DEFAULT_MAX_FILE_SIZE_BYTES
+
+DEFAULT_RESULTS_ROOT = Path('results')
 
 
 def f3_lithology_voxel_report_config_from_mapping(
@@ -109,7 +110,7 @@ def f3_lithology_voxel_report_config_from_mapping(
 		prefix='publish',
 	)
 
-	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
+	_required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
 	resolved = {
 		'labels.seismic_volume': _required_absolute_path(
@@ -138,10 +139,9 @@ def f3_lithology_voxel_report_config_from_mapping(
 		),
 	}
 	output_dir = _required_absolute_path(outputs, 'output_dir', prefix='outputs')
-	_validate_artifact_path_not_f3(
+	_validate_output_not_under_f3_root(
 		output_dir,
 		'outputs.output_dir',
-		artifact_root=artifact_root,
 		f3_root=f3_root,
 	)
 	for label, source in resolved.items():

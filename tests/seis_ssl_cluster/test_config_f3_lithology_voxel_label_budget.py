@@ -84,7 +84,7 @@ def test_rejects_invalid_label_budget_fields(
 		f3_lithology_voxel_label_budget_dataset_config_from_mapping(raw)
 
 
-def test_rejects_duplicate_models_and_paths_outside_artifact_root(
+def test_rejects_duplicate_models_and_preserves_explicit_output_root(
 	tmp_path: Path,
 ) -> None:
 	raw = _mapping(tmp_path)
@@ -98,8 +98,8 @@ def test_rejects_duplicate_models_and_paths_outside_artifact_root(
 	suite = raw['suite']
 	assert isinstance(suite, dict)
 	suite['output_root'] = str(tmp_path / 'outside')
-	with pytest.raises(ValueError, match=r'under paths\.artifact_root'):
-		f3_lithology_voxel_label_budget_dataset_config_from_mapping(raw)
+	resolved = f3_lithology_voxel_label_budget_dataset_config_from_mapping(raw)
+	assert resolved.output_root == tmp_path / 'outside'
 
 
 def _mapping(tmp_path: Path) -> dict[str, object]:

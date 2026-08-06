@@ -34,13 +34,6 @@ class F3VoxelLabelBudgetDatasetConfig:
 	require_all_classes: bool
 	overwrite: bool
 
-	def __post_init__(self) -> None:
-		"""Validate output placement for direct dataclass construction."""
-		_require_under_artifact_root(
-			self.output_root, self.artifact_root, 'suite.output_root'
-		)
-
-
 def f3_lithology_voxel_label_budget_dataset_config_from_mapping(
 	config: Mapping[str, object],
 ) -> F3VoxelLabelBudgetDatasetConfig:
@@ -88,11 +81,6 @@ def f3_lithology_voxel_label_budget_dataset_config_from_mapping(
 			'm1_m2a_label_budget_manifest',
 		)
 	}
-	for label, path in (
-		('suite.output_root', output_root),
-		*((f'inputs.{key}', value) for key, value in resolved_inputs.items()),
-	):
-		_require_under_artifact_root(path, artifact_root, label)
 	model_tags = {
 		role: _required_str(models, role, prefix='models')
 		for role in ('mae', 'm1', 'm2a')
@@ -184,11 +172,6 @@ def _positive_triplet(value: object, label: str) -> tuple[int, int, int]:
 	return (int(items[0]), int(items[1]), int(items[2]))
 
 
-def _require_under_artifact_root(path: Path, root: Path, label: str) -> None:
-	try:
-		path.resolve(strict=False).relative_to(root.resolve(strict=False))
-	except ValueError as error:
-		raise ValueError(f'{label} must be under paths.artifact_root') from error
 
 
 __all__ = [

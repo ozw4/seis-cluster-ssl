@@ -39,7 +39,7 @@ def test_projects_exact_repeat_crop_invalid_tokens_and_provenance(
 		write_probabilities=write_probabilities,
 		token_axis_chunk_size=1,
 	)
-	artifact = validate_f3_voxel_prediction_artifact(result.paths, mmap_mode='r')
+	artifact = validate_f3_voxel_prediction_artifact(result.output_dir, mmap_mode='r')
 	expected_valid = project_token_grid_nearest(
 		np.load(source / 'f3_valid_token_grid.npy'),
 		patch_size_xyz=PATCH_SIZE,
@@ -71,7 +71,7 @@ def test_projects_exact_repeat_crop_invalid_tokens_and_provenance(
 	assert np.all(np.isnan(artifact.arrays.confidence[~expected_valid]))
 	assert (artifact.arrays.probabilities is not None) is write_probabilities
 	assert (
-		discover_f3_voxel_probability_path(result.paths) is not None
+		discover_f3_voxel_probability_path(result.output_dir) is not None
 	) is write_probabilities
 	if artifact.arrays.probabilities is not None:
 		expected_probabilities = project_token_grid_nearest(
@@ -114,8 +114,8 @@ def test_chunked_projection_matches_larger_axis_chunk(tmp_path: Path) -> None:
 		write_probabilities=True,
 		token_axis_chunk_size=TOKEN_SHAPE[0],
 	)
-	first_artifact = validate_f3_voxel_prediction_artifact(first.paths)
-	second_artifact = validate_f3_voxel_prediction_artifact(second.paths)
+	first_artifact = validate_f3_voxel_prediction_artifact(first.output_dir)
+	second_artifact = validate_f3_voxel_prediction_artifact(second.output_dir)
 	for first_array, second_array in (
 		(first_artifact.arrays.predictions, second_artifact.arrays.predictions),
 		(first_artifact.arrays.confidence, second_artifact.arrays.confidence),

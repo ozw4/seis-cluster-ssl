@@ -20,7 +20,6 @@ import numpy as np
 
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.embedding.writer import file_sha256
-from seis_ssl_cluster.paths import ensure_under_root
 from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
 	load_multi_head_xy_neighbor_consensus_target_manifest,
 )
@@ -105,19 +104,6 @@ def f3_xy_neighbor_unanimous_target_audit_config_from_mapping(
 		raise NotADirectoryError(
 			f'artifact_root is not a directory: {result.artifact_root}'
 		)
-	for name, value in (
-		('source_hard_manifest', result.source_hard_manifest),
-		(
-			'xy_neighbor_consensus_target_manifest',
-			result.xy_neighbor_consensus_target_manifest,
-		),
-		(
-			'xy_neighbor_unanimous_target_manifest',
-			result.xy_neighbor_unanimous_target_manifest,
-		),
-		('output_path', result.output_path),
-	):
-		ensure_under_root(value, root=result.artifact_root, label=name)
 	return result
 
 
@@ -263,9 +249,7 @@ def replay_f3_xy_neighbor_unanimous_target_audit(
 
 	def referenced(name: str) -> Path:
 		entry = _mapping(payload[name], f'unanimous target audit {name}')
-		value = Path(_string(entry['path'], f'unanimous target audit {name}.path'))
-		ensure_under_root(value, root=root, label=f'unanimous target audit {name}')
-		return value
+		return Path(_string(entry['path'], f'unanimous target audit {name}.path'))
 
 	return validate_f3_xy_neighbor_unanimous_target_audit(
 		F3XYNeighborUnanimousTargetAuditConfig(

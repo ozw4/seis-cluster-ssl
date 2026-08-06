@@ -214,12 +214,12 @@ def f3_prepare_volume_config_from_mapping(
 	)
 	paths = _parse_paths(_required_mapping(config, 'paths'))
 	dataset = _parse_dataset(_required_mapping(config, 'dataset'))
-	inputs = _parse_inputs(_required_mapping(config, 'inputs'), paths=paths)
+	inputs = _parse_inputs(_required_mapping(config, 'inputs'))
 	outputs = _parse_outputs(
 		_required_mapping(config, 'outputs'),
 	)
 	_validate_prepare_file_paths(inputs=inputs, outputs=outputs)
-	_validate_prepare_output_locations(outputs=outputs, paths=paths)
+	_validate_prepare_output_locations(outputs=outputs, raw_root=paths.f3_root)
 	normalization = _parse_normalization(_required_mapping(config, 'normalization'))
 	return F3PrepareVolumeConfig(
 		paths=paths,
@@ -432,11 +432,7 @@ def _parse_paths(paths: Mapping[str, object]) -> F3PrepareRootPaths:
 	)
 
 
-def _parse_inputs(
-	inputs: Mapping[str, object],
-	*,
-	paths: F3PrepareRootPaths,
-) -> F3PrepareInputPaths:
+def _parse_inputs(inputs: Mapping[str, object]) -> F3PrepareInputPaths:
 	_validate_allowed_keys(
 		inputs,
 		frozenset({'seismic_segy', 'label_segy', 'class_info', 'inspection_report'}),
@@ -454,23 +450,6 @@ def _parse_inputs(
 		inputs,
 		'inspection_report',
 		prefix='inputs',
-	)
-	for label, path in (
-		('inputs.seismic_segy', seismic_segy),
-		('inputs.label_segy', label_segy),
-		('inputs.class_info', class_info),
-	):
-		_validate_path_under_root(
-			path,
-			label,
-			root=paths.f3_root,
-			root_label='paths.f3_root',
-		)
-	_validate_path_under_root(
-		inspection_report,
-		'inputs.inspection_report',
-		root=paths.artifact_root,
-		root_label='paths.artifact_root',
 	)
 	return F3PrepareInputPaths(
 		seismic_segy=seismic_segy,
@@ -563,7 +542,7 @@ def _validate_prepare_file_paths(
 def _validate_prepare_output_locations(
 	*,
 	outputs: F3PrepareOutputPaths,
-	paths: F3PrepareRootPaths,
+	raw_root: Path,
 ) -> None:
 	for label, path in (
 		('outputs.volume_dir', outputs.volume_dir),
@@ -572,11 +551,10 @@ def _validate_prepare_output_locations(
 		('outputs.normalization_stats_path', outputs.normalization_stats_path),
 		('outputs.metadata_path', outputs.metadata_path),
 	):
-		_validate_artifact_output_path(
+		_validate_output_not_in_raw_root(
 			path,
 			label,
-			artifact_root=paths.artifact_root,
-			raw_root=paths.f3_root,
+			raw_root=raw_root,
 		)
 
 
@@ -676,17 +654,15 @@ def _validate_writable_outputs(
 			raise FileExistsError(msg)
 
 
-def _validate_artifact_output_path(
+def _validate_output_not_in_raw_root(
 	path: Path,
 	label: str,
 	*,
-	artifact_root: Path,
 	raw_root: Path,
 ) -> None:
 	if _is_relative_to(path, raw_root):
 		msg = f'{label} must not be under paths.f3_root; got {path}'
 		raise ValueError(msg)
-	del artifact_root
 
 
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, object]:
@@ -815,16 +791,6 @@ def _is_real(value: object) -> bool:
 	return isinstance(value, Real) and not isinstance(value, bool)
 
 
-def _validate_path_under_root(
-	path: Path,
-	label: str,
-	*,
-	root: Path,
-	root_label: str,
-) -> None:
-	if not _is_relative_to(path, root):
-		msg = f'{label} must be under {root_label} ({root}); got {path}'
-		raise ValueError(msg)
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:
