@@ -351,14 +351,16 @@ def test_clustering_output_dir_accepts_canonical_nopims_path() -> None:
 	)
 
 
-def test_clustering_output_dir_enforces_canonical_nopims_shape() -> None:
+def test_clustering_output_dir_preserves_explicit_path() -> None:
 	cfg = _minimal_clustering_config()
-	cfg['clustering']['output_dir'] = (
+	explicit_output = (
 		'/artifacts/clustering/nopims/pretrain_v1/model_a/ten_surveys/overlap_x16'
 	)
+	cfg['clustering']['output_dir'] = explicit_output
 
-	with pytest.raises(ValueError, match=r'<CLUSTER_SPEC>'):
-		resolve_clustering_config(cfg)
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['output_dir'] == explicit_output
 
 
 def test_active_default_nopims_clustering_yaml_resolves() -> None:

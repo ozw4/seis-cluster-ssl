@@ -76,26 +76,23 @@ def _validate_path(
 	return Path(value)
 
 
-def _validate_optional_output_path_under_root(
-	parent: Mapping[str, object],
-	key: str,
+def _validate_output_path(
+	path: Path,
+	label: str,
 	*,
-	prefix: str,
-	root: Path,
-	root_label: str,
+	input_root: Path | None = None,
+	input_root_label: str = 'input root',
 ) -> None:
-	value = parent.get(key)
-	if value is None:
-		return
-	if not isinstance(value, str) or not value:
-		msg = f'{prefix}.{key} must be a non-empty string or null; got {value!r}'
-		raise TypeError(msg)
-	_validate_path_under_root(
-		Path(value),
-		f'{prefix}.{key}',
-		root=root,
-		root_label=root_label,
-	)
+	"""Validate an explicit output path without imposing an artifact layout."""
+	if not path.is_absolute():
+		msg = f'{label} must be an absolute path; got {path}'
+		raise ValueError(msg)
+	if input_root is not None and _is_relative_to(path, input_root):
+		msg = (
+			f'{label} must not be under {input_root_label} '
+			f'({input_root}); got {path}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_path_under_root(

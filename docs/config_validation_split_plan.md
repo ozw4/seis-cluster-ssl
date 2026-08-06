@@ -2,9 +2,11 @@
 
 This is an inventory and target module map for splitting
 `src/seis_ssl_cluster/config/validate.py`. It is not an implementation plan for
-changing validation behavior. The existing YAML contracts, `ArtifactPaths`
-path layout, checkpoint/resume compatibility, F3 workflows, `artifacts/`, and
-`results/` policies remain unchanged.
+changing validation behavior. It is retained as a historical plan. The current
+active resolver contract uses explicit YAML/CLI paths; the old `ArtifactPaths`
+path layout is no longer revalidated by active stages. Checkpoint/resume
+compatibility, F3 workflows, `artifacts/`, and `results/` policies remain
+unchanged.
 
 ## Current Public API
 
@@ -113,7 +115,7 @@ Path validation helpers:
 - `_validate_absolute_path`
 - `_validate_non_empty_path`
 - `_validate_path`
-- `_validate_optional_output_path_under_root`
+- `_validate_output_path`
 - `_validate_path_under_root`
 - `_is_relative_to`
 
@@ -225,16 +227,17 @@ To avoid circular imports:
 - `base.py` contains stage-aware top-level routing helpers and may import
   `config.schema` plus primitive helpers from `common.py`. It must not import
   stage modules.
-- `artifact_paths.py` contains path and `ArtifactPaths` contract validation. It
-  may import `seis_ssl_cluster.paths` and common primitive helpers, but it must
-  not import stage modules.
-- Stage modules may import `common.py`, `base.py`, `artifact_paths.py`,
-  `config.schema`, and `seis_ssl_cluster.paths`.
+- `artifact_paths.py` contains the legacy path contract used by scanner/follow-up
+  work. It may import `seis_ssl_cluster.paths` and common primitive helpers, but
+  it must not import stage modules.
+- Active stage modules may import `common.py`, `base.py`, and `config.schema`,
+  but do not import the legacy artifact path contract or the `ArtifactPaths`,
+  `ResultsPaths`, and `ExperimentKey` builders.
 - Stage modules must not import `validate.py`.
 - `validate.py` imports public symbols from stage modules and re-exports them
   for compatibility.
 
-## Non-Goals For The Split
+## Non-Goals For The Historical Split
 
 - Do not change resolver behavior, YAML schemas, or default values.
 - Do not reintroduce `runs/` as a valid standard path.

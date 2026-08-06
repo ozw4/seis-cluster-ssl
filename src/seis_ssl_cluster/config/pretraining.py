@@ -18,10 +18,6 @@ import numpy as np
 import yaml
 
 from seis_ssl_cluster.clustering.residualization import read_residualizer_npz
-from seis_ssl_cluster.config.artifact_paths import (
-	_validate_artifact_output_path,
-	_validate_nopims_pretraining_path,
-)
 from seis_ssl_cluster.config.base import _resolve_base
 from seis_ssl_cluster.config.common import (
 	_is_int,
@@ -39,10 +35,9 @@ from seis_ssl_cluster.config.common import (
 	_validate_nonnegative_number,
 	_validate_optional_fraction,
 	_validate_optional_nonnegative_int,
-	_validate_optional_output_path_under_root,
 	_validate_optional_positive_int,
+	_validate_output_path,
 	_validate_path,
-	_validate_path_under_root,
 	_validate_positive_finite_number,
 	_validate_positive_int,
 	_validate_positive_int_triplet,
@@ -637,16 +632,11 @@ def resolve_mae_training_config(config: _T) -> Config:
 	)
 	_validate_model(model)
 	_validate_divisible_crop_patch(local_crop_size, patch_size)
-	_validate_artifact_output_path(
+	_validate_output_path(
 		output_root,
 		'paths.output_root',
-		artifact_root=paths.artifact_root,
-		nopims_root=paths.nopims_root,
-	)
-	_validate_nopims_pretraining_path(
-		output_root,
-		'paths.output_root',
-		artifact_root=paths.artifact_root,
+		input_root=paths.nopims_root,
+		input_root_label='paths.nopims_root',
 	)
 	_validate_masking(masking)
 	_validate_loss(loss)
@@ -655,7 +645,6 @@ def resolve_mae_training_config(config: _T) -> Config:
 	if 'visualization' in resolved:
 		_validate_mae_training_visualization(
 			_required_mapping(resolved, 'visualization'),
-			output_root=output_root,
 		)
 
 	_merge_section_defaults(resolved, 'data', FIXED_DATA_CONTRACT)
@@ -715,7 +704,6 @@ def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0915
 			)
 		periodic_refresh_identity = _validate_periodic_refresh_config(
 			_required_mapping(resolved, 'pseudo_target_refresh'),
-			output_root=output_root,
 			train=train,
 			pseudo_targets=pseudo_targets,
 			head=head,
@@ -796,16 +784,11 @@ def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0915
 	if _is_center_trace_masked_config(resolved) and int(train['seed']) < 0:
 		raise ValueError('train.seed must be nonnegative for center-trace masking')
 	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
-	_validate_artifact_output_path(
+	_validate_output_path(
 		output_root,
 		'paths.output_root',
-		artifact_root=paths.artifact_root,
-		nopims_root=paths.nopims_root,
-	)
-	_validate_nopims_pretraining_path(
-		output_root,
-		'paths.output_root',
-		artifact_root=paths.artifact_root,
+		input_root=paths.nopims_root,
+		input_root_label='paths.nopims_root',
 	)
 
 	_merge_section_defaults(resolved, 'data', FIXED_DATA_CONTRACT)
@@ -874,10 +857,9 @@ def _validate_center_trace_spatial_context(
 			)
 
 
-def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0915
 	refresh: Mapping[str, object],
 	*,
-	output_root: Path,
 	train: Mapping[str, object],
 	pseudo_targets: Mapping[str, object],
 	head: Mapping[str, object],
@@ -997,16 +979,6 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		'generation_root',
 		prefix='pseudo_target_refresh',
 	)
-	_validate_path_under_root(
-		generation_root,
-		'pseudo_target_refresh.generation_root',
-		root=output_root,
-		root_label='paths.output_root',
-	)
-	if generation_root.resolve() == output_root.resolve():
-		raise ValueError(
-			'pseudo_target_refresh.generation_root must be a child of paths.output_root'
-		)
 
 	artifacts = _required_child_mapping(
 		refresh,
@@ -3734,8 +3706,6 @@ def _validate_amplitude_agc(data: Mapping[str, object]) -> None:
 
 def _validate_mae_training_visualization(
 	visualization: Mapping[str, object],
-	*,
-	output_root: Path,
 ) -> None:
 	_validate_allowed_keys(
 		visualization,
@@ -3754,26 +3724,29 @@ def _validate_mae_training_visualization(
 		MAE_DEBUG_VISUALIZATION_KEYS,
 		prefix='visualization.mae_debug',
 	)
-	_validate_mae_debug_general_fields(mae_debug, output_root=output_root)
+	_validate_mae_debug_general_fields(mae_debug)
 	_validate_mae_debug_triggers(mae_debug)
 	_validate_mae_debug_rendering_fields(mae_debug)
 
 
 def _validate_mae_debug_general_fields(
 	mae_debug: Mapping[str, object],
-	*,
-	output_root: Path,
 ) -> None:
 	if 'enabled' in mae_debug:
 		_validate_bool(mae_debug, 'enabled', prefix='visualization.mae_debug')
 	if 'output_dir' in mae_debug:
-		_validate_optional_output_path_under_root(
-			mae_debug,
-			'output_dir',
-			prefix='visualization.mae_debug',
-			root=output_root,
-			root_label='paths.output_root',
-		)
+		value = mae_debug.get('output_dir')
+		if value is not None:
+			if not isinstance(value, str) or not value:
+				msg = (
+					'visualization.mae_debug.output_dir must be a non-empty '
+					f'string or null; got {value!r}'
+				)
+				raise TypeError(msg)
+			_validate_output_path(
+				Path(value),
+				'visualization.mae_debug.output_dir',
+			)
 
 
 def _validate_mae_debug_triggers(mae_debug: Mapping[str, object]) -> None:

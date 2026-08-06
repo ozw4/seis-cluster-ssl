@@ -21,7 +21,6 @@ from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training import load_checkpoint
 from seis_ssl_cluster.training.random_checkpoint import (
 	create_random_mae_checkpoint,
-	create_random_mae_checkpoint_from_config,
 	random_mae_checkpoint_config_from_mapping,
 )
 
@@ -142,7 +141,7 @@ def test_create_random_mae_checkpoint_seed_determinism(tmp_path: Path) -> None:
 	assert _any_state_tensor_differs(first_state, third_state)
 
 
-def test_create_random_mae_checkpoint_config_mapping_and_runs_rejection(
+def test_create_random_mae_checkpoint_config_mapping_preserves_explicit_path(
 	tmp_path: Path,
 ) -> None:
 	reference_checkpoint = _write_reference_checkpoint(tmp_path)
@@ -171,8 +170,11 @@ def test_create_random_mae_checkpoint_config_mapping_and_runs_rejection(
 	config['random_checkpoint']['output_checkpoint'] = str(
 		tmp_path / 'artifacts' / 'runs' / 'random.pt',
 	)
-	with pytest.raises(ValueError, match='runs/'):
-		create_random_mae_checkpoint_from_config(config)
+	settings = random_mae_checkpoint_config_from_mapping(config)
+
+	assert settings.output_checkpoint == (
+		tmp_path / 'artifacts' / 'runs' / 'random.pt'
+	)
 
 
 def test_random_mae_checkpoint_is_readable_by_embedding_extractor(

@@ -89,7 +89,9 @@ def create_random_mae_checkpoint(
 	if not reference_path.is_file():
 		msg = f'reference checkpoint does not exist: {reference_path}'
 		raise FileNotFoundError(msg)
-	_validate_no_runs_segment(output_path, 'random checkpoint output')
+	if output_path.resolve(strict=False) == reference_path.resolve(strict=False):
+		msg = f'random checkpoint output must differ from reference: {output_path}'
+		raise ValueError(msg)
 	resolved_seed = _nonnegative_int(seed, 'seed')
 	resolved_reference_model_tag = _non_empty_string(
 		reference_model_tag,
@@ -137,7 +139,7 @@ def random_mae_checkpoint_config_from_mapping(
 ) -> RandomMaeCheckpointConfig:
 	"""Resolve random-checkpoint settings from an experiment config mapping."""
 	paths = _mapping(config, 'paths')
-	artifact_root = _absolute_path(paths, 'artifact_root', 'paths')
+	_absolute_path(paths, 'artifact_root', 'paths')
 	reference = _first_mapping(config, ('reference_model', 'reference'))
 	random_checkpoint = _first_mapping(
 		config,
@@ -158,8 +160,6 @@ def random_mae_checkpoint_config_from_mapping(
 		'output_checkpoint',
 		'random_checkpoint',
 	)
-	_validate_under_root(output_checkpoint, artifact_root, 'output_checkpoint')
-	_validate_no_runs_segment(output_checkpoint, 'output_checkpoint')
 	return RandomMaeCheckpointConfig(
 		reference_checkpoint=reference_checkpoint,
 		reference_model_tag=reference_model_tag,
@@ -271,20 +271,6 @@ def _absolute_path(
 		msg = f'{prefix}.{key} must be absolute: {path}'
 		raise ValueError(msg)
 	return path
-
-
-def _validate_under_root(path: Path, root: Path, name: str) -> None:
-	try:
-		path.resolve().relative_to(root.resolve())
-	except ValueError as exc:
-		msg = f'{name} must be under paths.artifact_root: {path}'
-		raise ValueError(msg) from exc
-
-
-def _validate_no_runs_segment(path: Path, name: str) -> None:
-	if 'runs' in path.parts:
-		msg = f'{name} must not use a runs/ artifact path: {path}'
-		raise ValueError(msg)
 
 
 def _non_empty_string(value: object, name: str) -> str:

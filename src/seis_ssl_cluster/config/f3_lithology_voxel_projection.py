@@ -12,7 +12,6 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_required_str,
 	_validate_allowed_keys,
-	_validate_artifact_or_f3_source_path,
 	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
 )
@@ -111,21 +110,6 @@ def f3_lithology_voxel_projection_config_from_mapping(
 			token_predictions, 'metadata_json', prefix='token_predictions'
 		),
 	}
-	for label, path in (
-		('labels.class_info', class_info),
-		('token_predictions.input_dir', input_dir),
-		*(
-			(f'token_predictions.{key}', value)
-			for key, value in configured_sources.items()
-		),
-	):
-		_validate_artifact_or_f3_source_path(
-			path,
-			label,
-			artifact_root=artifact_root,
-			f3_root=f3_root,
-		)
-
 	source = inspect_f3_lithology_token_projection_source(input_dir)
 	_validate_source_binding(
 		source,

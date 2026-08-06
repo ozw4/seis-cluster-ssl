@@ -76,15 +76,17 @@ def test_cluster_visualization_output_dir_accepts_canonical_nopims_path() -> Non
 	)
 
 
-def test_cluster_visualization_output_dir_enforces_canonical_nopims_shape() -> None:
+def test_cluster_visualization_output_dir_preserves_explicit_path() -> None:
 	cfg = _minimal_visualization_config()
-	cfg['visualization']['output_dir'] = (
+	explicit_output = (
 		'/artifacts/visualizations/clusters/nopims/pretrain_v1/'
 		'model_a/ten_surveys/overlap_x16/k4_6_8_pca16'
 	)
+	cfg['visualization']['output_dir'] = explicit_output
 
-	with pytest.raises(ValueError, match=r'<VIZ_SPEC>'):
-		resolve_cluster_visualization_config(cfg)
+	resolved = resolve_cluster_visualization_config(cfg)
+
+	assert resolved['visualization']['output_dir'] == explicit_output
 
 
 def test_active_default_nopims_cluster_visualization_yaml_resolves() -> None:

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config.f3_lithology_common import (
 	_optional_absolute_path,
 	_optional_mapping,
-	_optional_str,
 	_required_absolute_path,
 	_required_mapping,
 	_validate_allowed_keys,
@@ -17,11 +17,9 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonReportConfig,
 	F3LithologyReportConfig,
 )
-from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping
-	from pathlib import Path
 
 
 def f3_lithology_report_config_from_mapping(
@@ -86,17 +84,8 @@ def f3_lithology_report_config_from_mapping(
 		'token_dataset_metadata_json',
 		prefix='reports',
 	)
-	comparison = _embedded_comparison_config(
-		_optional_mapping(config, 'comparison'),
-		artifact_root=artifact_root,
-		dataset=dataset,
-	)
-	for label, path in _report_paths(
-		metrics_json=metrics_json,
-		probe_config_json=probe_config_json,
-		token_dataset_metadata_json=token_dataset_metadata_json,
-		prediction_metadata_json=prediction_metadata_json,
-		visualization_metadata_json=visualization_metadata_json,
+	comparison = _embedded_comparison_config(_optional_mapping(config, 'comparison'))
+	for label, path in _report_output_paths(
 		output_dir=output_dir,
 		output_markdown=output_markdown,
 		output_json=output_json,
@@ -126,22 +115,29 @@ def f3_lithology_report_config_from_mapping(
 	)
 
 
+def _report_output_paths(
+	*,
+	output_dir: Path,
+	output_markdown: Path,
+	output_json: Path,
+	comparison: F3LithologyComparisonReportConfig,
+) -> tuple[tuple[str, Path], ...]:
+	return (
+		('reports.output_dir', output_dir),
+		('reports.output_markdown', output_markdown),
+		('reports.output_json', output_json),
+		('comparison.output_csv', comparison.output_csv),
+		('comparison.output_markdown', comparison.output_markdown),
+	)
+
+
 def _embedded_comparison_config(
 	comparison: Mapping[str, object],
-	*,
-	artifact_root: Path,
-	dataset: Mapping[str, object],
 ) -> F3LithologyComparisonReportConfig:
-	version = _optional_str(
-		dataset,
-		'version',
-		default='facies_benchmark_v1',
-		prefix='dataset',
+	default_search_root = Path(
+		'/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1'
 	)
-	default_key = ExperimentKey(dataset='f3', version=version)
-	default_paths = ArtifactPaths(artifact_root)
-	default_search_root = default_paths.lithology_dataset(default_key)
-	default_output_dir = default_paths.baseline_comparison_report(default_key)
+	default_output_dir = default_search_root / 'reports' / 'baseline_comparison'
 	search_root = _optional_absolute_path(
 		comparison,
 		'search_root',
@@ -169,37 +165,6 @@ def _embedded_comparison_config(
 			default=output_dir / 'comparison_report.md',
 		),
 	)
-
-
-def _report_paths(  # noqa: PLR0913
-	*,
-	metrics_json: Path,
-	probe_config_json: Path | None,
-	token_dataset_metadata_json: Path | None,
-	prediction_metadata_json: Path | None,
-	visualization_metadata_json: Path | None,
-	output_dir: Path,
-	output_markdown: Path,
-	output_json: Path,
-	comparison: F3LithologyComparisonReportConfig,
-) -> tuple[tuple[str, Path], ...]:
-	paths = [
-		('probe.metrics_json', metrics_json),
-		('reports.output_dir', output_dir),
-		('reports.output_markdown', output_markdown),
-		('reports.output_json', output_json),
-		('comparison.search_root', comparison.search_root),
-		('comparison.output_csv', comparison.output_csv),
-		('comparison.output_markdown', comparison.output_markdown),
-	]
-	optional_paths = (
-		('probe.probe_config_resolved_json', probe_config_json),
-		('reports.token_dataset_metadata_json', token_dataset_metadata_json),
-		('predictions.metadata_json', prediction_metadata_json),
-		('visualizations.metadata_json', visualization_metadata_json),
-	)
-	paths.extend((label, path) for label, path in optional_paths if path is not None)
-	return tuple(paths)
 
 
 __all__ = ['f3_lithology_report_config_from_mapping']

@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, TypeAlias, TypeVar
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
 
-from seis_ssl_cluster.config.artifact_paths import _validate_artifact_output_path
 from seis_ssl_cluster.config.base import _resolve_base
 from seis_ssl_cluster.config.clustering import (
 	_validate_stratigraphic_hmm_edge_margin_tokens,
@@ -24,6 +23,7 @@ from seis_ssl_cluster.config.common import (
 	_validate_fraction,
 	_validate_non_empty_path,
 	_validate_nonnegative_int_triplet,
+	_validate_output_path,
 	_validate_path,
 	_validate_positive_finite_number,
 	_validate_positive_int,
@@ -125,7 +125,7 @@ def resolve_strat_hmm_pseudo_target_config(config: _T) -> Config:
 	_validate_device(inference)
 
 	_validate_hmm(hmm, checkpoint_path=checkpoint_path)
-	_validate_outputs(outputs, artifact_root=paths.artifact_root)
+	_validate_outputs(outputs, input_root=paths.nopims_root)
 	return resolved
 
 
@@ -289,17 +289,19 @@ def _inspect_checkpoint_num_prototypes(checkpoint_path: Path) -> int | None:
 	return None
 
 
-def _validate_outputs(outputs: Mapping[str, object], *, artifact_root: Path) -> None:
+def _validate_outputs(
+	outputs: Mapping[str, object], *, input_root: Path | None
+) -> None:
 	pseudo_target_root = _validate_path(
 		outputs,
 		'pseudo_target_root',
 		prefix='outputs',
 	)
-	_validate_artifact_output_path(
+	_validate_output_path(
 		pseudo_target_root,
 		'outputs.pseudo_target_root',
-		artifact_root=artifact_root,
-		nopims_root=None,
+		input_root=input_root,
+		input_root_label='paths.nopims_root',
 	)
 	_validate_bool(outputs, 'overwrite', prefix='outputs')
 	_validate_bool(outputs, 'skip_existing', prefix='outputs')

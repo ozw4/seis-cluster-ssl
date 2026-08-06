@@ -1,5 +1,11 @@
 # Config Validation Split Summary
 
+> この文書は config validation 分割時点の履歴・module inventory である。現在の
+> active resolver と実行経路では、YAML/CLI の明示 path を source of truth とし、
+> `ArtifactPaths` / `ResultsPaths` / `ExperimentKey` による stage 固有の path
+> 再構築・完全一致検証は行わない。`paths.py` と `config/artifact_paths.py` は
+> scanner/後続削除Issue向けにまだ保持している。
+
 ## 分割前の問題
 
 `src/seis_ssl_cluster/config/validate.py` に、NOPIMS の manifest /
@@ -8,9 +14,9 @@ inspection、results publish まわりの validation entrypoint が集中して�
 そのため、stage 固有の validation 変更でも大きな単一 module を読む必要があり、
 import cycle のリスクや public import 互換性の確認範囲が分かりにくかった。
 
-今回の確認対象は責務分割後の回帰確認であり、YAML contract、
-`ArtifactPaths` の path layout、checkpoint/resume 互換性、F3 downstream
-workflow、`artifacts/` と `results/` の運用方針は変更していない。
+分割時点の確認対象は責務分割後の回帰確認だった。現在の active resolver では
+YAML contract、checkpoint/resume 互換性、F3 downstream workflow、`artifacts/`
+と `results/` の運用方針を維持しつつ、明示 path を再構築しない。
 
 ## 新しいmodule構成
 
@@ -82,8 +88,8 @@ entrypoint も `validate.py` から import 可能であることを確認した�
   `_validate_required_keys`, `_validate_required_key`, `_required_mapping`,
   `_required_child_mapping`, `_iter_mapping_keys`, `_merge_section_defaults`
 - Path helpers: `_validate_absolute_path`, `_validate_non_empty_path`,
-  `_validate_path`, `_validate_optional_output_path_under_root`,
-  `_validate_path_under_root`, `_is_relative_to`
+  `_validate_path`, `_validate_output_path`, `_validate_path_under_root`,
+  `_is_relative_to`
 - String / bool / number helpers: `_validate_non_empty_str`,
   `_validate_bool`, `_validate_positive_int`, `_validate_nonnegative_int`,
   `_validate_optional_positive_int`, `_validate_optional_nonnegative_int`,
@@ -97,7 +103,8 @@ entrypoint も `validate.py` から import 可能であることを確認した�
 - Stage base helpers: `_resolve_base`, `_ResolvedPaths`, `_reject_stage_key`,
   `_validate_top_level_sections`, `_reject_legacy_attribute_config`,
   `_validate_paths`
-- Artifact path helpers: `_validate_artifact_output_path`,
+- Legacy artifact path helpers retained for scanner/follow-up removal:
+  `_validate_artifact_output_path`,
   `_validate_nopims_checkpoint_path`, `_validate_nopims_pretraining_path`,
   `_validate_nopims_embedding_path`, `_validate_nopims_clustering_path`,
   `_validate_nopims_cluster_visualization_path`, `_artifact_relative_path`,
@@ -106,14 +113,15 @@ entrypoint も `validate.py` から import 可能であることを確認した�
 
 ## path contractとの関係
 
-標準 artifact root は `/workspace/artifacts/seis_ssl_cluster` のままである。
-MAE checkpoint は `pretraining/`、embedding は `embeddings/`、clustering は
-`clustering/`、cluster visualization は `visualizations/clusters/`、F3
-lithology は `lithology/` 配下を使う。`runs` は標準 path として復活させていない。
+active config の path は YAML/CLI の明示値をそのまま使用する。既存の active YAML
+が指定する標準 artifact root と出力場所は変更していない。`runs` を含む明示 path
+も stage hierarchy の理由だけでは拒否しない。
 
 `results/` は lightweight review artifact 用であり、checkpoint、embedding、
 model artifact、raw data、large binary は publish 対象外のまま。今回の変更では
-`ArtifactPaths`、path validation、results validation の contract は変更していない。
+`ArtifactPaths` と `ResultsPaths` の builder は後続削除Issue向けに残しているが、
+active resolver/report の path contract ではない。results publish/validator 自体は
+残し、source/output の衝突と既存の overwrite 方針だけを責務側で扱う。
 
 ## 後方互換性
 

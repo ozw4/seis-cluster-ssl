@@ -5,6 +5,10 @@ from typing import Any
 
 import yaml
 
+from seis_ssl_cluster.config.f3_baselines import (
+	f3_lithology_comparison_report_config_from_mapping,
+)
+
 BASELINE_ROOT = (
 	Path('experiments')
 	/ 'f3'
@@ -14,14 +18,9 @@ BASELINE_ROOT = (
 RANDOM_ENCODER_TAG = (
 	'random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1'
 )
-REFERENCE_CHECKPOINT = (
-	'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/'
-	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/'
-	'mae_latest.pt'
-)
 
 
-def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
+def test_f3_lithology_baseline_configs_are_present_and_have_metadata() -> None:
 	expected_files = (
 		Path('README.md'),
 		Path('05_build_baseline_comparison_report.yaml'),
@@ -44,8 +43,6 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 	for relative in expected_files:
 		path = BASELINE_ROOT / relative
 		assert path.is_file(), relative
-		raw = path.read_text(encoding='utf-8')
-		assert '/runs/' not in raw
 
 	for yaml_path in sorted(BASELINE_ROOT.glob('**/*.yaml')):
 		payload = yaml.safe_load(yaml_path.read_text(encoding='utf-8'))
@@ -59,10 +56,10 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 
 		if yaml_path.name == '05_build_baseline_comparison_report.yaml':
 			comparison = payload['comparison']
-			assert comparison['search_root'].endswith(
-				'/lithology/f3/facies_benchmark_v1',
-			)
-			assert '/reports/baseline_comparison/' in comparison['output_csv']
+			resolved = f3_lithology_comparison_report_config_from_mapping(payload)
+			assert str(resolved.search_root) == comparison['search_root']
+			assert str(resolved.output_csv) == comparison['output_csv']
+			assert str(resolved.output_markdown) == comparison['output_markdown']
 			assert comparison['figure_dpi'] == 300
 			assert payload['publish'] == {
 				'enabled': True,
@@ -95,13 +92,11 @@ def test_f3_lithology_baseline_contract_layout_and_metadata() -> None:
 
 		if yaml_path.name.endswith('build_report.yaml'):
 			comparison = payload['comparison']
-			assert comparison['search_root'].endswith(
-				'/lithology/f3/facies_benchmark_v1',
-			)
-			assert '/reports/baseline_comparison/' in comparison['output_csv']
+			assert comparison['search_root']
+			assert comparison['output_csv']
 
 		if yaml_path.name == '01_create_random_checkpoint.yaml':
-			assert payload['reference_model']['checkpoint'] == REFERENCE_CHECKPOINT
+			assert payload['reference_model']['checkpoint']
 
 	readme = (BASELINE_ROOT / 'README.md').read_text(encoding='utf-8')
 	assert 'FEATURE_SOURCE_KIND' in readme

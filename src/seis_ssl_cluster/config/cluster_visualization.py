@@ -5,11 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TypeAlias, TypeVar
 
-from seis_ssl_cluster.config.artifact_paths import (
-	_validate_artifact_output_path,
-	_validate_nopims_cluster_visualization_path,
-	_validate_nopims_clustering_path,
-)
 from seis_ssl_cluster.config.base import _resolve_base
 from seis_ssl_cluster.config.common import (
 	_required_child_mapping,
@@ -20,6 +15,7 @@ from seis_ssl_cluster.config.common import (
 	_validate_non_empty_str,
 	_validate_nonnegative_finite_number,
 	_validate_nonnegative_int_list,
+	_validate_output_path,
 	_validate_path,
 	_validate_positive_int,
 	_validate_required_keys,
@@ -81,32 +77,22 @@ def resolve_cluster_visualization_config(config: _T) -> Config:
 		prefix='visualization',
 	)
 	input_dir = _validate_path(clustering, 'input_dir', prefix='clustering')
-	_validate_artifact_output_path(
+	_validate_output_path(
 		input_dir,
 		'clustering.input_dir',
-		artifact_root=paths.artifact_root,
-		nopims_root=paths.nopims_root,
-	)
-	_validate_nopims_clustering_path(
-		input_dir,
-		'clustering.input_dir',
-		artifact_root=paths.artifact_root,
+		input_root=paths.nopims_root,
+		input_root_label='paths.nopims_root',
 	)
 	output_dir = _validate_path(
 		visualization,
 		'output_dir',
 		prefix='visualization',
 	)
-	_validate_artifact_output_path(
+	_validate_output_path(
 		output_dir,
 		'visualization.output_dir',
-		artifact_root=paths.artifact_root,
-		nopims_root=paths.nopims_root,
-	)
-	_validate_nopims_cluster_visualization_path(
-		output_dir,
-		'visualization.output_dir',
-		artifact_root=paths.artifact_root,
+		input_root=paths.nopims_root,
+		input_root_label='paths.nopims_root',
 	)
 	_validate_survey_id_list(visualization)
 	_validate_visualization_modes(visualization)

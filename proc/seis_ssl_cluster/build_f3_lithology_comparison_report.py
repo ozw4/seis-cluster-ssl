@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
 	from argparse import Namespace
 	from collections.abc import Mapping
-	from pathlib import Path
 
 from seis_ssl_cluster.cli import (
 	add_append_path_argument,
@@ -27,15 +27,12 @@ from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonReportConfig,
 	build_f3_lithology_comparison_report,
 )
-from seis_ssl_cluster.paths import (
-	ArtifactPaths,
-	ExperimentKey,
-)
 
 STAGE = 'build_f3_lithology_comparison_report'
-DEFAULT_KEY = ExperimentKey(dataset='f3', version='facies_benchmark_v1')
-DEFAULT_SEARCH_ROOT = ArtifactPaths().lithology_dataset(DEFAULT_KEY)
-DEFAULT_OUTPUT_DIR = ArtifactPaths().baseline_comparison_report(DEFAULT_KEY)
+DEFAULT_SEARCH_ROOT = Path(
+	'/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1'
+)
+DEFAULT_OUTPUT_DIR = DEFAULT_SEARCH_ROOT / 'reports' / 'baseline_comparison'
 
 
 def build_parser() -> argparse.ArgumentParser:

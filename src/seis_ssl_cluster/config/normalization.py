@@ -5,15 +5,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TypeAlias, TypeVar
 
-from seis_ssl_cluster.config.artifact_path_validation import (
-	_validate_artifact_output_path,
-)
 from seis_ssl_cluster.config.base import _resolve_base
 from seis_ssl_cluster.config.common import (
 	_is_int,
 	_is_number,
 	_required_mapping,
 	_validate_non_empty_path,
+	_validate_output_path,
 	_validate_path,
 	_validate_positive_int,
 	_validate_positive_number,
@@ -61,11 +59,11 @@ def resolve_normalization_qc_config(config: _T) -> Config:
 		(qc, 'excluded_surveys', 'qc'),
 	):
 		label = f'{prefix}.{key}'
-		_validate_artifact_output_path(
+		_validate_output_path(
 			_validate_path(parent, key, prefix=prefix),
 			label,
-			artifact_root=paths.artifact_root,
-			nopims_root=paths.nopims_root,
+			input_root=paths.nopims_root,
+			input_root_label='paths.nopims_root',
 		)
 	for key in ('min_iqr', 'max_normalized_abs'):
 		_validate_required_key(qc, key, prefix='qc')

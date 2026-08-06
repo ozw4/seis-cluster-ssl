@@ -93,11 +93,10 @@ def test_prepare_f3_facies_volume_proc_writes_registry_artifacts(
 	assert stats.grid_order == GRID_ORDER_XYZ
 	assert stats.clip_low == pytest.approx(1.0)
 	assert stats.clip_high == pytest.approx(23.0)
-	assert '/runs/' not in result.stdout
 	assert 'f3_prepare.shape_xyz: (2, 3, 4)' in result.stdout
 
 
-def test_f3_prepare_and_embedding_configs_follow_path_contracts() -> None:
+def test_f3_prepare_and_embedding_configs_preserve_explicit_paths() -> None:
 	prepare_raw = load_config(PREPARE_CONFIG)
 	prepare_config = f3_prepare_volume_config_from_mapping(prepare_raw)
 	embedding_raw = load_config(EMBEDDING_CONFIG)
@@ -105,29 +104,20 @@ def test_f3_prepare_and_embedding_configs_follow_path_contracts() -> None:
 	predict_raw = load_config(PREDICT_CONFIG)
 
 	assert prepare_config.outputs.volume_dir == Path(
-		'/workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/'
-		'facies_benchmark_v1',
+		prepare_raw['outputs']['volume_dir']
 	)
 	assert prepare_config.outputs.manifest_path == Path(
-		'/workspace/artifacts/seis_ssl_cluster/registry/manifests/f3/'
-		'facies_benchmark_v1/f3_amplitude_manifest.json',
+		prepare_raw['outputs']['manifest_path']
 	)
 	assert prepare_config.outputs.normalization_stats_path == Path(
-		'/workspace/artifacts/seis_ssl_cluster/registry/normalization_stats/f3/'
-		'facies_benchmark_v1/f3_seismic.normalization_stats.json',
+		prepare_raw['outputs']['normalization_stats_path']
 	)
 	assert embedding_config['embeddings']['checkpoint'] == (
-		'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/'
-		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/'
-		'mae_latest.pt'
+		embedding_raw['embeddings']['checkpoint']
 	)
 	assert embedding_config['embeddings']['output_dir'] == (
-		'/workspace/artifacts/seis_ssl_cluster/embeddings/f3/'
-		'facies_benchmark_v1/'
-		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16'
+		embedding_raw['embeddings']['output_dir']
 	)
-	assert '/runs/' not in json.dumps(prepare_raw)
-	assert '/runs/' not in json.dumps(embedding_raw)
 	assert predict_raw['probe']['probe_joblib'].endswith(
 		'/probes/linear_balanced_v1/probe.joblib',
 	)
@@ -135,7 +125,6 @@ def test_f3_prepare_and_embedding_configs_follow_path_contracts() -> None:
 		'/probes/linear_balanced_v1/scaler.joblib',
 	)
 	assert 'probe.pt' not in json.dumps(predict_raw)
-	assert '/runs/' not in json.dumps(predict_raw)
 
 
 def test_prepare_f3_facies_volume_missing_segy_has_clear_error(

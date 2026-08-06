@@ -25,24 +25,15 @@ def test_f3_volume_prepare_config_resolves_from_stage_module() -> None:
 	config = f3_prepare_volume_config_from_mapping(raw)
 
 	assert config.dataset.version == F3_FACIES_DATASET_VERSION
-	assert 'runs' not in config.outputs.volume_dir.parts
+	assert config.outputs.volume_dir == Path(raw['outputs']['volume_dir'])
 
 
-def test_f3_volume_prepare_outputs_match_artifact_paths_contract() -> None:
+def test_f3_volume_prepare_outputs_preserve_explicit_paths() -> None:
 	raw = load_config(F3_PREPARE_CONFIG)
 	config = f3_prepare_volume_config_from_mapping(raw)
-	artifact_root = config.paths.artifact_root
-	version = F3_FACIES_DATASET_VERSION
 
-	assert config.outputs.volume_dir == (
-		artifact_root / 'registry' / 'volumes' / 'f3' / version
-	)
-	assert config.outputs.manifest_path.parent == (
-		artifact_root / 'registry' / 'manifests' / 'f3' / version
-	)
-	assert config.outputs.split_path.parent == (
-		artifact_root / 'registry' / 'splits' / 'f3' / version
-	)
+	for key, value in raw['outputs'].items():
+		assert getattr(config.outputs, key) == Path(value)
 
 
 def test_f3_lithology_config_entrypoints_reexport_from_validate_module() -> None:

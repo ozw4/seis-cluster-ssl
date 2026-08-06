@@ -28,7 +28,6 @@ from seis_ssl_cluster.f3 import (
 	resolve_f3_slice_array_index,
 	tokenize_f3_lithology_slice,
 )
-from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey
 from tests.helpers import run_python_proc
 
 
@@ -449,27 +448,20 @@ def test_pretrained_token_dataset_config_accepts_top_level_feature_source(
 	assert parsed.feature_source == _feature_source()
 
 
-def test_pretrained_token_dataset_output_matches_artifact_paths(
+def test_pretrained_token_dataset_output_preserves_explicit_path(
 	tmp_path: Path,
 ) -> None:
 	config = _write_dataset_fixture(tmp_path)
 	payload = _config_mapping(config)
-	artifact_root = Path(payload['paths']['artifact_root'])
-	expected = ArtifactPaths(artifact_root).lithology_token_dataset(
-		ExperimentKey(
-			dataset='f3',
-			version='facies_benchmark_v1',
-			model_tag='model',
-			embed_spec='embed',
-			label_set='labels',
-		),
-	)
+	explicit_output = tmp_path / 'custom' / 'token_dataset'
+	payload['token_dataset']['output_dir'] = str(explicit_output)
 
 	parsed = f3_lithology_token_dataset_config_from_mapping(payload)
 
-	assert parsed.outputs.output_dir == expected
-	assert parsed.outputs.metadata_json == expected / 'token_dataset_metadata.json'
-	assert 'runs' not in parsed.outputs.output_dir.parts
+	assert parsed.outputs.output_dir == explicit_output
+	assert parsed.outputs.metadata_json == Path(
+		payload['token_dataset']['metadata_json']
+	)
 
 
 def test_pretrained_token_dataset_config_respects_explicit_output_paths(

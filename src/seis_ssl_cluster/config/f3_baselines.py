@@ -17,13 +17,15 @@ from seis_ssl_cluster.f3 import (
 from seis_ssl_cluster.f3.lithology.baselines import (
 	f3_lithology_baseline_token_dataset_config_from_mapping,
 )
-from seis_ssl_cluster.paths import (
-	DEFAULT_ARTIFACT_ROOT,
-	ArtifactPaths,
-	ExperimentKey,
-)
 from seis_ssl_cluster.training.random_checkpoint import (
 	random_mae_checkpoint_config_from_mapping,
+)
+
+_DEFAULT_COMPARISON_SEARCH_ROOT = Path(
+	'/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1'
+)
+_DEFAULT_COMPARISON_OUTPUT_DIR = (
+	_DEFAULT_COMPARISON_SEARCH_ROOT / 'reports' / 'baseline_comparison'
 )
 
 
@@ -36,36 +38,18 @@ def f3_lithology_comparison_report_config_from_mapping(
 		frozenset({'paths', 'dataset', 'comparison', 'publish'}),
 		prefix='config',
 	)
-	paths = _optional_mapping(config, 'paths')
-	dataset = _optional_mapping(config, 'dataset')
 	comparison = _required_mapping(config, 'comparison')
-	artifact_root = _optional_absolute_path(
-		paths,
-		'artifact_root',
-		prefix='paths',
-		default=DEFAULT_ARTIFACT_ROOT,
-	)
-	version = _optional_str(
-		dataset,
-		'version',
-		prefix='dataset',
-		default='facies_benchmark_v1',
-	)
-	default_key = ExperimentKey(dataset='f3', version=version)
-	default_paths = ArtifactPaths(artifact_root)
-	default_search_root = default_paths.lithology_dataset(default_key)
-	default_output_dir = default_paths.baseline_comparison_report(default_key)
 	search_root = _optional_absolute_path(
 		comparison,
 		'search_root',
 		prefix='comparison',
-		default=default_search_root,
+		default=_DEFAULT_COMPARISON_SEARCH_ROOT,
 	)
 	output_dir = _optional_absolute_path(
 		comparison,
 		'output_dir',
 		prefix='comparison',
-		default=default_output_dir,
+		default=_DEFAULT_COMPARISON_OUTPUT_DIR,
 	)
 	figure_style = _comparison_figure_style_from_mapping(comparison)
 	return F3LithologyComparisonReportConfig(
@@ -284,22 +268,6 @@ def _absolute_path(value: object, *, label: str) -> Path:
 		msg = f'{label} must be an absolute path: {path}'
 		raise ValueError(msg)
 	return path
-
-
-def _optional_str(
-	mapping: Mapping[str, object],
-	key: str,
-	*,
-	prefix: str,
-	default: str,
-) -> str:
-	value = mapping.get(key)
-	if value is None:
-		return default
-	if not isinstance(value, str) or not value:
-		msg = f'{prefix}.{key} must be a non-empty string; got {value!r}'
-		raise TypeError(msg)
-	return value
 
 
 def _optional_int(

@@ -11,8 +11,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from seis_ssl_cluster.paths import reject_runs_path
-
 if TYPE_CHECKING:
 	from collections.abc import Sequence
 
@@ -103,7 +101,6 @@ def publish_selected_results(
 ) -> PublishManifest:
 	"""Copy selected lightweight files into ``output_dir`` and write a manifest."""
 	_validate_max_file_size_bytes(max_file_size_bytes)
-	reject_runs_path(Path(output_dir), label='publish output_dir')
 	allowed = _normalize_suffixes(allowed_suffixes, name='allowed_suffixes')
 	forbidden_overlap = allowed & FORBIDDEN_SUFFIXES
 	if forbidden_overlap:
@@ -280,6 +277,9 @@ def _plan_copy_for_item(
 	)
 	if not _source_exists_for_publish(source=source, required=item.required):
 		return None
+	if source.resolve(strict=False) == target.resolve(strict=False):
+		msg = f'publish target must differ from source: {source}'
+		raise ValueError(msg)
 	content_bytes = _publish_content_bytes(source=source, item=item)
 	return _PublishCopy(
 		source=source,

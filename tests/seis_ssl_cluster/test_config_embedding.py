@@ -23,35 +23,41 @@ def test_embedding_config_rejects_checkpoint_owned_sections() -> None:
 		resolve_embedding_extraction_config(cfg)
 
 
-def test_embedding_config_rejects_runs_checkpoint_path() -> None:
+def test_embedding_config_preserves_runs_checkpoint_path() -> None:
 	cfg = _minimal_embedding_config()
-	cfg['embeddings']['checkpoint'] = (
+	explicit_checkpoint = (
 		'/artifacts/runs/nopims/pretrain_v1/amp_mae_v1/full_100ep/'
 		'mae_latest.pt'
 	)
+	cfg['embeddings']['checkpoint'] = explicit_checkpoint
 
-	with pytest.raises(ValueError, match='runs/ paths'):
-		resolve_embedding_extraction_config(cfg)
+	resolved = resolve_embedding_extraction_config(cfg)
+
+	assert resolved['embeddings']['checkpoint'] == explicit_checkpoint
 
 
-def test_embedding_config_enforces_checkpoint_pretraining_path_contract() -> None:
+def test_embedding_config_accepts_explicit_checkpoint_path() -> None:
 	cfg = _minimal_embedding_config()
-	cfg['embeddings']['checkpoint'] = (
+	explicit_checkpoint = (
 		'/artifacts/pretraining/nopims/pretrain_v1/amp_mae_v1/mae_latest.pt'
 	)
+	cfg['embeddings']['checkpoint'] = explicit_checkpoint
 
-	with pytest.raises(ValueError, match=r'pretraining/nopims/pretrain_v1'):
-		resolve_embedding_extraction_config(cfg)
+	resolved = resolve_embedding_extraction_config(cfg)
+
+	assert resolved['embeddings']['checkpoint'] == explicit_checkpoint
 
 
-def test_embedding_config_enforces_output_artifact_path_contract() -> None:
+def test_embedding_config_accepts_explicit_output_path() -> None:
 	cfg = _minimal_embedding_config()
-	cfg['embeddings']['output_dir'] = (
+	explicit_output = (
 		'/artifacts/embeddings/nopims/pretrain_v1/amp_mae_v1/full'
 	)
+	cfg['embeddings']['output_dir'] = explicit_output
 
-	with pytest.raises(ValueError, match=r'embeddings/nopims/pretrain_v1'):
-		resolve_embedding_extraction_config(cfg)
+	resolved = resolve_embedding_extraction_config(cfg)
+
+	assert resolved['embeddings']['output_dir'] == explicit_output
 
 
 def test_embedding_config_validates_window_overlap() -> None:

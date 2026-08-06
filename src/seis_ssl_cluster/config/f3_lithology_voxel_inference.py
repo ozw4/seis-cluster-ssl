@@ -10,7 +10,6 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_required_str,
 	_validate_allowed_keys,
-	_validate_artifact_or_f3_source_path,
 	_validate_artifact_path_not_f3,
 	_validate_frozen_encoder,
 )
@@ -111,17 +110,6 @@ def f3_lithology_voxel_inference_config_from_mapping(
 	)
 	checkpoint = _required_absolute_path(decoder, 'checkpoint', prefix='decoder')
 	output_dir = _required_absolute_path(outputs, 'output_dir', prefix='outputs')
-	for label, path in (
-		('labels.class_info', class_info),
-		('embeddings.input_dir', embeddings_input_dir),
-		('decoder.checkpoint', checkpoint),
-	):
-		_validate_artifact_or_f3_source_path(
-			path,
-			label,
-			artifact_root=artifact_root,
-			f3_root=f3_root,
-		)
 	_validate_artifact_path_not_f3(
 		output_dir,
 		'outputs.output_dir',

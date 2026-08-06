@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import TYPE_CHECKING, Literal, cast
+from typing import Literal, cast
 
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
@@ -23,9 +23,6 @@ from seis_ssl_cluster.config.schema import (
 	SUPPORTED_RUNTIME_CHECK_MODES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 
 def _complete_mae_training_config(config: Mapping[str, object]) -> dict[str, object]:
@@ -539,29 +536,6 @@ def _reject_unknown_runtime_keys(
 			f'allowed keys are {sorted(allowed)!r}'
 		)
 		raise ValueError(msg)
-
-
-def _validate_runtime_output_path_under_root(
-	path: Path,
-	label: str,
-	*,
-	root: Path,
-	root_label: str,
-) -> None:
-	if not path.is_absolute():
-		msg = f'{label} must be an absolute path; got {path}'
-		raise ValueError(msg)
-	if not _runtime_path_is_relative_to(path, root):
-		msg = f'{label} must be under {root_label} ({root}); got {path}'
-		raise ValueError(msg)
-
-
-def _runtime_path_is_relative_to(path: Path, root: Path) -> bool:
-	try:
-		path.resolve(strict=False).relative_to(root.resolve(strict=False))
-	except ValueError:
-		return False
-	return True
 
 
 def _xyz_config(parent: Mapping[str, object], key: str) -> tuple[int, int, int]:

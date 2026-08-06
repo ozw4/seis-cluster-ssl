@@ -216,7 +216,6 @@ def f3_prepare_volume_config_from_mapping(
 	outputs = _parse_outputs(
 		_required_mapping(config, 'outputs'),
 		paths=paths,
-		dataset=dataset,
 	)
 	normalization = _parse_normalization(_required_mapping(config, 'normalization'))
 	return F3PrepareVolumeConfig(
@@ -482,7 +481,6 @@ def _parse_outputs(
 	outputs: Mapping[str, object],
 	*,
 	paths: F3PrepareRootPaths,
-	dataset: F3PrepareDatasetConfig,
 ) -> F3PrepareOutputPaths:
 	_validate_allowed_keys(
 		outputs,
@@ -542,12 +540,6 @@ def _parse_outputs(
 			artifact_root=paths.artifact_root,
 			raw_root=paths.f3_root,
 		)
-		_reject_runs_path(path, label)
-	_validate_fixed_output_paths(
-		parsed,
-		expected=default_f3_prepare_outputs(paths.artifact_root),
-		dataset=dataset,
-	)
 	return parsed
 
 
@@ -647,31 +639,6 @@ def _validate_writable_outputs(
 			raise FileExistsError(msg)
 
 
-def _validate_fixed_output_paths(
-	outputs: F3PrepareOutputPaths,
-	*,
-	expected: F3PrepareOutputPaths,
-	dataset: F3PrepareDatasetConfig,
-) -> None:
-	for label, actual, expected_path in (
-		('outputs.volume_dir', outputs.volume_dir, expected.volume_dir),
-		('outputs.manifest_path', outputs.manifest_path, expected.manifest_path),
-		('outputs.split_path', outputs.split_path, expected.split_path),
-		(
-			'outputs.normalization_stats_path',
-			outputs.normalization_stats_path,
-			expected.normalization_stats_path,
-		),
-		('outputs.metadata_path', outputs.metadata_path, expected.metadata_path),
-	):
-		if actual.resolve(strict=False) != expected_path.resolve(strict=False):
-			msg = (
-				f'{label} must follow the F3 {dataset.version} registry convention; '
-				f'expected {expected_path}, got {actual}'
-			)
-			raise ValueError(msg)
-
-
 def _validate_artifact_output_path(
 	path: Path,
 	label: str,
@@ -682,18 +649,7 @@ def _validate_artifact_output_path(
 	if _is_relative_to(path, raw_root):
 		msg = f'{label} must not be under paths.f3_root; got {path}'
 		raise ValueError(msg)
-	if not _is_relative_to(path, artifact_root):
-		msg = (
-			f'{label} must be under paths.artifact_root '
-			f'({artifact_root}); got {path}'
-		)
-		raise ValueError(msg)
-
-
-def _reject_runs_path(path: Path, label: str) -> None:
-	if 'runs' in path.parts:
-		msg = f'{label} must not use runs/ paths; got {path}'
-		raise ValueError(msg)
+	del artifact_root
 
 
 def _required_mapping(parent: Mapping[str, object], key: str) -> Mapping[str, object]:

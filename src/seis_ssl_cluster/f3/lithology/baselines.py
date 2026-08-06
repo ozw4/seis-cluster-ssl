@@ -1341,18 +1341,10 @@ def _validate_artifact_output_path(
 	artifact_root: Path | None,
 	f3_root: Path | None,
 ) -> None:
-	if 'runs' in path.parts:
-		msg = f'{label} must not use runs/ paths; got {path}'
-		raise ValueError(msg)
 	if f3_root is not None and _is_relative_to(path, f3_root):
 		msg = f'{label} must not be under paths.f3_root; got {path}'
 		raise ValueError(msg)
-	if artifact_root is not None and not _is_relative_to(path, artifact_root):
-		msg = (
-			f'{label} must be under paths.artifact_root '
-			f'({artifact_root}); got {path}'
-		)
-		raise ValueError(msg)
+	del artifact_root
 
 
 def _is_relative_to(path: Path, root: Path) -> bool:

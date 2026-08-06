@@ -338,7 +338,7 @@ def test_prepare_nopims_normalization_stats_dry_run_reports_counts(
 	assert 'normalization_stats.compute: skipped' in result.stdout
 
 
-def test_prepare_nopims_normalization_stats_rejects_stats_outside_artifact_root(
+def test_prepare_nopims_normalization_stats_accepts_explicit_external_output(
 	tmp_path: Path,
 ) -> None:
 	manifest_path, config_path, _, source_paths = _write_prepare_inputs(tmp_path)
@@ -357,10 +357,11 @@ def test_prepare_nopims_normalization_stats_rejects_stats_outside_artifact_root(
 		Path('proc/seis_ssl_cluster/prepare_nopims_normalization_stats.py'),
 		'--config',
 		config_path,
+		'--dry-run',
 	)
 
-	assert result.returncode != 0
-	assert 'paths.artifact_root' in result.stderr
+	assert result.returncode == 0, result.stderr
+	assert 'normalization_stats.missing_files: 1' in result.stdout
 
 
 def _write_prepare_inputs(

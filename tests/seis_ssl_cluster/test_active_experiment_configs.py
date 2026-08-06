@@ -115,7 +115,6 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_SPEC,
 	VOXEL_DECODER_UPSAMPLE_MODE,
 )
-from seis_ssl_cluster.paths import DEFAULT_ARTIFACT_ROOT, ArtifactPaths, ExperimentKey
 from seis_ssl_cluster.stratigraphy import (
 	lateral_targets,
 	state_posterior,
@@ -1729,18 +1728,8 @@ def test_active_f3_baseline_comparison_configs_resolve(
 	f3_lithology_comparison_publish_config_from_mapping(raw.get('publish'))
 
 
-def test_active_nopims_overlap_x16_paths_match_artifact_paths_contract() -> None:
+def test_active_nopims_overlap_x16_paths_are_explicit() -> None:
 	model_tag = 'amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1'
-	paths = ArtifactPaths(DEFAULT_ARTIFACT_ROOT)
-	key = ExperimentKey(
-		dataset='nopims',
-		version='pretrain_v1',
-		model_tag=model_tag,
-		subset='ten_surveys',
-		embed_spec='overlap_x16',
-		cluster_spec='k6_8_whiten',
-		viz_spec='voxel_cmp_xy750_xz150',
-	)
 
 	embedding = load_config(
 		NOPIMS_ROOT / '20_embedding' / model_tag / '01_ten_surveys_overlap_x16.yaml',
@@ -1758,13 +1747,25 @@ def test_active_nopims_overlap_x16_paths_match_artifact_paths_contract() -> None
 		/ '01_ten_surveys_overlap_x16_whiten.yaml',
 	)
 
-	assert Path(embedding['embeddings']['output_dir']) == paths.embeddings(key)
-	assert Path(clustering['embeddings']['input_dir']) == paths.embeddings(key)
-	assert Path(clustering['clustering']['output_dir']) == paths.clustering(key)
-	assert Path(visualization['clustering']['input_dir']) == paths.clustering(key)
-	assert Path(
+	resolved_embedding = resolve_embedding_extraction_config(embedding)
+	resolved_clustering = resolve_clustering_config(clustering)
+	resolved_visualization = resolve_cluster_visualization_config(visualization)
+
+	assert resolved_embedding['embeddings']['output_dir'] == (
+		embedding['embeddings']['output_dir']
+	)
+	assert resolved_clustering['embeddings']['input_dir'] == (
+		clustering['embeddings']['input_dir']
+	)
+	assert resolved_clustering['clustering']['output_dir'] == (
+		clustering['clustering']['output_dir']
+	)
+	assert resolved_visualization['clustering']['input_dir'] == (
+		visualization['clustering']['input_dir']
+	)
+	assert resolved_visualization['visualization']['output_dir'] == (
 		visualization['visualization']['output_dir']
-	) == paths.cluster_visualization(key)
+	)
 
 
 def _config_with_available_output(

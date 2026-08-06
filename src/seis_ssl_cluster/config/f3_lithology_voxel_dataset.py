@@ -11,7 +11,6 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_nonnegative_int,
 	_required_str,
 	_validate_allowed_keys,
-	_validate_artifact_or_f3_source_path,
 	_validate_artifact_path_not_f3,
 )
 
@@ -117,10 +116,6 @@ def f3_lithology_voxel_dataset_config_from_mapping(
 			reference, 'valid_tokens', prefix='reference_embedding'
 		),
 	}
-	for label, path in resolved_paths.items():
-		_validate_artifact_or_f3_source_path(
-			path, label, artifact_root=artifact_root, f3_root=f3_root
-		)
 	output_dir = _required_absolute_path(voxel, 'output_dir', prefix='voxel_dataset')
 	_validate_artifact_path_not_f3(
 		output_dir,

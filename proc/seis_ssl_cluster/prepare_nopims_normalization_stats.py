@@ -54,7 +54,6 @@ def main() -> None:
 	args = parser.parse_args()
 	config = resolve_normalization_stats_config(load_config(args.config))
 	paths = _required_mapping(config, 'paths')
-	artifact_root = Path(_required_str(paths, 'artifact_root'))
 	nopims_root = Path(_required_str(paths, 'nopims_root'))
 	manifest_path = _manifest_path(config)
 	normalization_cfg = _required_mapping(config, 'normalization')
@@ -85,7 +84,6 @@ def main() -> None:
 	targets = [
 		_normalization_target(
 			manifest,
-			artifact_root=artifact_root,
 			nopims_root=nopims_root,
 		)
 		for manifest in manifests
@@ -156,7 +154,6 @@ def _manifest_path(config: Mapping[str, object]) -> Path:
 def _normalization_target(
 	manifest: SurveyManifest,
 	*,
-	artifact_root: Path,
 	nopims_root: Path,
 ) -> NormalizationTarget:
 	amplitude = manifest.amplitude
@@ -181,13 +178,6 @@ def _normalization_target(
 		msg = (
 			'amplitude.normalization_stats_path must not be under '
 			f'paths.nopims_root for {manifest.survey_id!r}; got {output_path}'
-		)
-		raise ValueError(msg)
-	if not _is_relative_to(output_path, artifact_root):
-		msg = (
-			'amplitude.normalization_stats_path must be under '
-			f'paths.artifact_root ({artifact_root}) for {manifest.survey_id!r}; '
-			f'got {output_path}'
 		)
 		raise ValueError(msg)
 	return NormalizationTarget(

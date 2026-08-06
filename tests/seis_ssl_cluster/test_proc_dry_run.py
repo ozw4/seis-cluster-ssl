@@ -316,11 +316,9 @@ def test_train_amp_mae_dry_run_prints_enabled_mae_debug_summary(
 	'output_root',
 	[
 		'relative/run',
-		'/' + 'tmp/untracked-run',
-		'/workspace/artifacts/seis_ssl_cluster/../outside',
 	],
 )
-def test_train_amp_mae_cli_output_root_override_must_stay_under_artifact_root(
+def test_train_amp_mae_cli_output_root_override_must_be_absolute(
 	output_root: str,
 ) -> None:
 	result = run_python_proc(
@@ -333,6 +331,19 @@ def test_train_amp_mae_cli_output_root_override_must_stay_under_artifact_root(
 	assert result.returncode != 0
 	assert 'paths.output_root' in result.stderr
 	assert 'stage:' not in result.stdout
+
+
+def test_train_amp_mae_cli_accepts_explicit_output_root_outside_artifacts() -> None:
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_mae.py'),
+		'--dry-run',
+		'--output-root',
+		'/external/untracked-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'paths.output_root: /external/untracked-run' in result.stdout
+	assert 'execution: dry-run; training skipped' in result.stdout
 
 
 def test_train_amp_mae_cli_overrides_are_validated_after_apply() -> None:

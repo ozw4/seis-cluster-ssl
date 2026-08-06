@@ -5,11 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TypeAlias, TypeVar
 
-from seis_ssl_cluster.config.artifact_paths import (
-	_validate_artifact_output_path,
-	_validate_nopims_checkpoint_path,
-	_validate_nopims_embedding_path,
-)
 from seis_ssl_cluster.config.base import _resolve_base
 from seis_ssl_cluster.config.common import (
 	_required_mapping,
@@ -18,6 +13,7 @@ from seis_ssl_cluster.config.common import (
 	_validate_non_empty_path,
 	_validate_nonnegative_int,
 	_validate_nonnegative_int_triplet,
+	_validate_output_path,
 	_validate_path,
 	_validate_positive_int,
 	_validate_positive_int_triplet,
@@ -43,27 +39,17 @@ def resolve_embedding_extraction_config(config: _T) -> Config:
 	manifests = _required_mapping(resolved, 'manifests')
 	embeddings = _required_mapping(resolved, 'embeddings')
 	_validate_non_empty_path(manifests, 'input', prefix='manifests')
-	checkpoint = _validate_non_empty_path(
+	_validate_non_empty_path(
 		embeddings,
 		'checkpoint',
 		prefix='embeddings',
 	)
-	_validate_nopims_checkpoint_path(
-		checkpoint,
-		'embeddings.checkpoint',
-		artifact_root=paths.artifact_root,
-	)
 	output_dir = _validate_path(embeddings, 'output_dir', prefix='embeddings')
-	_validate_artifact_output_path(
+	_validate_output_path(
 		output_dir,
 		'embeddings.output_dir',
-		artifact_root=paths.artifact_root,
-		nopims_root=paths.nopims_root,
-	)
-	_validate_nopims_embedding_path(
-		output_dir,
-		'embeddings.output_dir',
-		artifact_root=paths.artifact_root,
+		input_root=paths.nopims_root,
+		input_root_label='paths.nopims_root',
 	)
 
 	embedding = _required_mapping(resolved, 'embedding')

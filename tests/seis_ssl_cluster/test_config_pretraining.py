@@ -86,22 +86,26 @@ def test_pretraining_config_validates_target_normalization() -> None:
 	assert resolved['loss']['target_normalization']['mode'] == 'patch_zscore'
 
 
-def test_pretraining_config_rejects_runs_output_root() -> None:
+def test_pretraining_config_preserves_runs_output_root() -> None:
 	cfg = _minimal_training_config()
-	cfg['paths']['output_root'] = '/artifacts/runs/train_amp_mae'
+	explicit_output = '/artifacts/runs/train_amp_mae'
+	cfg['paths']['output_root'] = explicit_output
 
-	with pytest.raises(ValueError, match='runs/ paths'):
-		resolve_mae_training_config(cfg)
+	resolved = resolve_mae_training_config(cfg)
+
+	assert resolved['paths']['output_root'] == explicit_output
 
 
-def test_pretraining_config_enforces_pretraining_artifact_path_contract() -> None:
+def test_pretraining_config_accepts_explicit_pretraining_output_path() -> None:
 	cfg = _minimal_training_config()
-	cfg['paths']['output_root'] = (
+	explicit_output = (
 		'/artifacts/pretraining/nopims/pretrain_v1/amp_mae_v1'
 	)
+	cfg['paths']['output_root'] = explicit_output
 
-	with pytest.raises(ValueError, match=r'pretraining/nopims/pretrain_v1'):
-		resolve_mae_training_config(cfg)
+	resolved = resolve_mae_training_config(cfg)
+
+	assert resolved['paths']['output_root'] == explicit_output
 
 
 def _minimal_training_config() -> dict[str, object]:

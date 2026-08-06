@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
+from seis_ssl_cluster.config.common import _validate_output_path
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
 	MAE_DEBUG_VISUALIZATION_COLUMNS,
@@ -22,7 +23,6 @@ from seis_ssl_cluster.training.mae_config_completion import (
 	_reject_unknown_runtime_keys,
 	_str_config_with_default,
 	_string_tuple_config,
-	_validate_runtime_output_path_under_root,
 )
 from seis_ssl_cluster.visualization.mae_debug import (
 	MaeDebugVisualizationConfig,
@@ -68,11 +68,9 @@ def _mae_debug_visualization_config(
 		output_dir = output_root / 'visualizations' / 'mae_debug'
 	elif isinstance(output_dir_value, str) and output_dir_value:
 		output_dir = Path(output_dir_value)
-		_validate_runtime_output_path_under_root(
+		_validate_output_path(
 			output_dir,
 			'visualization.mae_debug.output_dir',
-			root=output_root,
-			root_label='paths.output_root',
 		)
 	else:
 		msg = (

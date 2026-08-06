@@ -302,36 +302,9 @@ def _validate_artifact_path_not_f3(
 	artifact_root: Path,
 	f3_root: Path,
 ) -> None:
-	if 'runs' in path.parts:
-		msg = f'{label} must not use runs/ paths; got {path}'
-		raise ValueError(msg)
+	del artifact_root
 	if _is_relative_to(path, f3_root):
 		msg = f'{label} must not be under paths.f3_root; got {path}'
-		raise ValueError(msg)
-	if not _is_relative_to(path, artifact_root):
-		msg = f'{label} must be under paths.artifact_root ({artifact_root}); got {path}'
-		raise ValueError(msg)
-
-
-def _validate_artifact_or_f3_source_path(
-	path: Path | None,
-	label: str,
-	*,
-	artifact_root: Path,
-	f3_root: Path,
-) -> None:
-	if path is None:
-		return
-	if 'runs' in path.parts:
-		msg = f'{label} must not use runs/ paths; got {path}'
-		raise ValueError(msg)
-	if label == 'labels.source_label_segy':
-		if not _is_relative_to(path, f3_root):
-			msg = f'{label} must be under paths.f3_root ({f3_root}); got {path}'
-			raise ValueError(msg)
-		return
-	if not _is_relative_to(path, artifact_root):
-		msg = f'{label} must be under paths.artifact_root ({artifact_root}); got {path}'
 		raise ValueError(msg)
 
 

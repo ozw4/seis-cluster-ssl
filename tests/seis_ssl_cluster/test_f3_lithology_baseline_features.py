@@ -18,7 +18,6 @@ from seis_ssl_cluster.f3 import (
 	load_f3_lithology_token_dataset,
 	load_token_dataset,
 )
-from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey
 from tests.helpers import run_python_proc
 
 
@@ -332,19 +331,12 @@ def test_xyz_coordinates_baseline_errors_for_zero_volume_range(
 		build_f3_lithology_baseline_token_dataset(config)
 
 
-def test_baseline_token_dataset_output_matches_artifact_paths(
+def test_baseline_token_dataset_output_preserves_explicit_path(
 	tmp_path: Path,
 ) -> None:
 	reference = _write_reference_token_dataset(tmp_path)
 	artifact_root = tmp_path / 'artifacts'
-	expected = ArtifactPaths(artifact_root).baseline_token_dataset(
-		ExperimentKey(
-			dataset='f3',
-			version='facies_benchmark_v1',
-			baseline_tag='z_only_v1',
-			label_set='png_slices_segy_labels_v1',
-		),
-	)
+	explicit_output = artifact_root / 'custom' / 'baseline_tokens'
 
 	config = f3_lithology_baseline_token_dataset_config_from_mapping(
 		{
@@ -356,14 +348,15 @@ def test_baseline_token_dataset_output_matches_artifact_paths(
 			'model': {'tag': 'z_only_v1', 'freeze_encoder': True},
 			'labels': {'set': 'png_slices_segy_labels_v1'},
 			'source_token_dataset': {'directory': str(reference.root)},
-			'baseline': {'kind': 'z_only', 'output_dir': str(expected)},
+			'baseline': {'kind': 'z_only', 'output_dir': str(explicit_output)},
 			'features': {'kind': 'z_only'},
 		},
 	)
 
-	assert config.outputs.output_dir == expected
-	assert config.outputs.metadata_json == expected / 'token_dataset_metadata.json'
-	assert 'runs' not in config.outputs.output_dir.parts
+	assert config.outputs.output_dir == explicit_output
+	assert config.outputs.metadata_json == (
+		explicit_output / 'token_dataset_metadata.json'
+	)
 
 
 def test_baseline_features_proc_dry_run_accepts_issue_style_config(

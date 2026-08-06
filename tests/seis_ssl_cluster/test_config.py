@@ -32,7 +32,6 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_F3_SEGY_GEOMETRY,
 	STAGE_F3_TOKENIZATION_PREVIEW,
 )
-from seis_ssl_cluster.paths import ArtifactPaths, ExperimentKey
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
@@ -263,7 +262,6 @@ def test_f3_inspection_configs_resolve_common_contract(
 		'artifact_root': DEFAULT_ARTIFACT_ROOT,
 	}
 	assert raw['outputs'] == {'inspection_dir': DEFAULT_F3_FACIES_INSPECTION_DIR}
-	assert '/runs/' not in raw['outputs']['inspection_dir']
 	assert raw['dataset'] == {
 		'name': F3_FACIES_DATASET_NAME,
 		'version': F3_FACIES_DATASET_VERSION,
@@ -282,14 +280,19 @@ def test_f3_inspection_configs_resolve_common_contract(
 	assert resolved['stage'] == stage
 
 
-def test_f3_inspection_config_rejects_runs_output() -> None:
+def test_f3_inspection_config_preserves_runs_component() -> None:
 	cfg = load_config(F3_INSPECTION_CONFIG_DIR / '01_inspect_files.yaml')
-	cfg['outputs']['inspection_dir'] = (
+	explicit_output = (
 		'/workspace/artifacts/seis_ssl_cluster/runs/f3/facies_benchmark_v1'
 	)
+	cfg['outputs']['inspection_dir'] = explicit_output
 
-	with pytest.raises(ValueError, match=r'outputs\.inspection_dir.*runs/ paths'):
-		resolve_f3_facies_inspection_config(cfg, stage=STAGE_F3_INSPECT_FILES)
+	resolved = resolve_f3_facies_inspection_config(
+		cfg,
+		stage=STAGE_F3_INSPECT_FILES,
+	)
+
+	assert resolved['outputs']['inspection_dir'] == explicit_output
 
 
 @pytest.mark.parametrize(
@@ -332,21 +335,20 @@ def test_f3_inspection_config_rejects_runs_output() -> None:
 		),
 	],
 )
-def test_f3_inspection_config_rejects_stage_paths_outside_inspection_dir(
+def test_f3_inspection_config_preserves_explicit_stage_paths(
 	config_path: Path,
 	stage: str,
 	inspection_key: str,
 ) -> None:
 	cfg = load_config(config_path)
-	cfg['inspection'][inspection_key] = (
+	explicit_path = (
 		'/workspace/artifacts/seis_ssl_cluster/runs/f3/facies_benchmark_v1/out'
 	)
+	cfg['inspection'][inspection_key] = explicit_path
 
-	with pytest.raises(
-		ValueError,
-		match=rf'inspection\.{inspection_key}.*outputs\.inspection_dir',
-	):
-		resolve_f3_facies_inspection_config(cfg, stage=stage)
+	resolved = resolve_f3_facies_inspection_config(cfg, stage=stage)
+
+	assert resolved['inspection'][inspection_key] == explicit_path
 
 
 def test_f3_inspection_config_rejects_stage_output_under_raw_root() -> None:
@@ -357,7 +359,7 @@ def test_f3_inspection_config_rejects_stage_output_under_raw_root() -> None:
 
 	with pytest.raises(
 		ValueError,
-		match=r'inspection\.output_json.*outputs\.inspection_dir',
+		match=r'inspection\.output_json.*paths\.f3_root',
 	):
 		resolve_f3_facies_inspection_config(cfg, stage=STAGE_F3_INSPECT_FILES)
 
@@ -479,28 +481,6 @@ def test_default_cluster_visualization_config_is_minimal_raw_user_config() -> No
 		'summaries': {'enabled': True, 'include_amplitude_norm': False},
 	}
 	assert not REDUNDANT_DATA_STAGE_SECTIONS & set(raw)
-
-
-def test_default_nopims_paths_match_artifact_paths_contract() -> None:
-	paths = ArtifactPaths(Path(DEFAULT_ARTIFACT_ROOT))
-	key = ExperimentKey(
-		dataset='nopims',
-		version='pretrain_v1',
-		model_tag='amp_mae_v1',
-		subset='full',
-		embed_spec='overlap_x64',
-		cluster_spec='k6_8_10_12_pca64_nowhiten_s1m',
-		viz_spec='token_xy750_xz150',
-		run_spec='full_100ep',
-	)
-
-	assert Path(DEFAULT_EMBEDDING_DIR) == paths.embeddings(key)
-	assert Path(DEFAULT_CLUSTERING_DIR) == paths.clustering(key)
-	assert Path(DEFAULT_CLUSTER_VISUALIZATION_DIR) == paths.cluster_visualization(key)
-	assert (
-		Path(DEFAULT_EMBEDDING_CHECKPOINT_PATH).parent
-		== paths.pretraining(key)
-	)
 
 
 def test_default_clustering_input_matches_extraction_output() -> None:
@@ -1204,15 +1184,14 @@ def test_cluster_visualization_explicit_paths_are_preserved() -> None:
 	)
 
 
-def test_embedding_extraction_output_dir_must_be_under_artifact_root() -> None:
+def test_embedding_extraction_output_dir_may_be_outside_artifact_root() -> None:
 	cfg = _minimal_embedding_config()
-	cfg['embeddings']['output_dir'] = '/external/embeddings'
+	explicit_output = '/external/embeddings'
+	cfg['embeddings']['output_dir'] = explicit_output
 
-	with pytest.raises(
-		ValueError,
-		match=r'embeddings\.output_dir.*paths\.artifact_root',
-	):
-		resolve_embedding_extraction_config(cfg)
+	resolved = resolve_embedding_extraction_config(cfg)
+
+	assert resolved['embeddings']['output_dir'] == explicit_output
 
 
 def test_training_output_root_must_be_absolute() -> None:
@@ -1223,15 +1202,14 @@ def test_training_output_root_must_be_absolute() -> None:
 		resolve_mae_training_config(cfg)
 
 
-def test_training_output_root_must_be_under_artifact_root() -> None:
+def test_training_output_root_may_be_outside_artifact_root() -> None:
 	cfg = _minimal_training_config()
-	cfg['paths']['output_root'] = '/external/artifacts/train_amp_mae'
+	explicit_output = '/external/artifacts/train_amp_mae'
+	cfg['paths']['output_root'] = explicit_output
 
-	with pytest.raises(
-		ValueError,
-		match=r'paths\.output_root.*paths\.artifact_root',
-	):
-		resolve_mae_training_config(cfg)
+	resolved = resolve_mae_training_config(cfg)
+
+	assert resolved['paths']['output_root'] == explicit_output
 
 
 @pytest.mark.parametrize(
@@ -1263,21 +1241,23 @@ def test_training_output_root_must_be_under_artifact_root() -> None:
 		),
 	],
 )
-def test_artifact_output_paths_reject_runs_component(
+def test_explicit_output_paths_allow_runs_component(
 	resolver: Callable[[dict[str, object]], dict[str, object]],
 	raw_config: Callable[[], dict[str, object]],
 	section: str,
 	key: str,
 ) -> None:
 	cfg = raw_config()
-	cfg[section][key] = f'/artifacts/runs/{section}/{key}'
+	explicit_path = f'/artifacts/runs/{section}/{key}'
+	cfg[section][key] = explicit_path
 
-	with pytest.raises(ValueError, match='runs/ paths'):
-		resolver(cfg)
+	resolved = resolver(cfg)
+
+	assert resolved[section][key] == explicit_path
 
 
 @pytest.mark.parametrize(
-	('resolver', 'raw_config', 'section', 'key', 'path', 'message'),
+	('resolver', 'raw_config', 'section', 'key', 'path'),
 	[
 		(
 			resolve_mae_training_config,
@@ -1285,7 +1265,6 @@ def test_artifact_output_paths_reject_runs_component(
 			'paths',
 			'output_root',
 			'/artifacts/pretraining/nopims/pretrain_v1/amp_mae_v1',
-			r'pretraining/nopims/pretrain_v1',
 		),
 		(
 			resolve_embedding_extraction_config,
@@ -1293,7 +1272,6 @@ def test_artifact_output_paths_reject_runs_component(
 			'embeddings',
 			'output_dir',
 			'/artifacts/embeddings/nopims/pretrain_v1/amp_mae_v1/full',
-			r'embeddings/nopims/pretrain_v1',
 		),
 		(
 			resolve_clustering_config,
@@ -1301,7 +1279,6 @@ def test_artifact_output_paths_reject_runs_component(
 			'clustering',
 			'output_dir',
 			'/artifacts/clustering/nopims/pretrain_v1/amp_mae_v1/full/overlap_x64',
-			r'clustering/nopims/pretrain_v1',
 		),
 		(
 			resolve_cluster_visualization_config,
@@ -1309,44 +1286,47 @@ def test_artifact_output_paths_reject_runs_component(
 			'visualization',
 			'output_dir',
 			'/artifacts/visualizations/clusters/nopims/pretrain_v1/amp_mae_v1/full/overlap_x64/k6_8',
-			r'visualizations/clusters/nopims/pretrain_v1',
 		),
 	],
 )
-def test_nopims_artifact_paths_must_match_artifact_paths_contract(
+def test_explicit_nopims_paths_are_not_revalidated(
 	resolver: Callable[[dict[str, object]], dict[str, object]],
 	raw_config: Callable[[], dict[str, object]],
 	section: str,
 	key: str,
 	path: str,
-	message: str,
 ) -> None:
 	cfg = raw_config()
 	cfg[section][key] = path
 
-	with pytest.raises(ValueError, match=message):
-		resolver(cfg)
+	resolved = resolver(cfg)
+
+	assert resolved[section][key] == path
 
 
-def test_embedding_checkpoint_rejects_runs_path() -> None:
+def test_embedding_checkpoint_preserves_runs_path() -> None:
 	cfg = _minimal_embedding_config()
-	cfg['embeddings']['checkpoint'] = (
+	explicit_checkpoint = (
 		'/artifacts/runs/nopims/pretrain_v1/amp_mae_v1/full_100ep/'
 		'mae_latest.pt'
 	)
+	cfg['embeddings']['checkpoint'] = explicit_checkpoint
 
-	with pytest.raises(ValueError, match='runs/ paths'):
-		resolve_embedding_extraction_config(cfg)
+	resolved = resolve_embedding_extraction_config(cfg)
+
+	assert resolved['embeddings']['checkpoint'] == explicit_checkpoint
 
 
-def test_embedding_checkpoint_parent_uses_nopims_pretraining_contract() -> None:
+def test_embedding_checkpoint_parent_is_explicit() -> None:
 	cfg = _minimal_embedding_config()
-	cfg['embeddings']['checkpoint'] = (
+	explicit_checkpoint = (
 		'/artifacts/pretraining/nopims/pretrain_v1/amp_mae_v1/mae_latest.pt'
 	)
+	cfg['embeddings']['checkpoint'] = explicit_checkpoint
 
-	with pytest.raises(ValueError, match=r'pretraining/nopims/pretrain_v1'):
-		resolve_embedding_extraction_config(cfg)
+	resolved = resolve_embedding_extraction_config(cfg)
+
+	assert resolved['embeddings']['checkpoint'] == explicit_checkpoint
 
 
 @pytest.mark.parametrize(
@@ -1378,39 +1358,39 @@ def test_embedding_checkpoint_parent_uses_nopims_pretraining_contract() -> None:
 		),
 	],
 )
-def test_artifact_output_paths_reject_traversal_after_resolution(
+def test_explicit_output_paths_are_not_relocated_after_resolution(
 	resolver: Callable[[dict[str, object]], dict[str, object]],
 	raw_config: Callable[[], dict[str, object]],
 	section: str,
 	key: str,
 ) -> None:
 	cfg = raw_config()
-	cfg[section][key] = '/artifacts/../outside'
+	explicit_path = '/artifacts/../outside'
+	cfg[section][key] = explicit_path
 
-	with pytest.raises(ValueError, match=rf'{section}\.{key}.*paths\.artifact_root'):
-		resolver(cfg)
+	resolved = resolver(cfg)
+
+	assert resolved[section][key] == explicit_path
 
 
-def test_clustering_output_dir_must_be_under_artifact_root() -> None:
+def test_clustering_output_dir_may_be_outside_artifact_root() -> None:
 	cfg = _minimal_clustering_config()
-	cfg['clustering']['output_dir'] = '/external/clustering'
+	explicit_output = '/external/clustering'
+	cfg['clustering']['output_dir'] = explicit_output
 
-	with pytest.raises(
-		ValueError,
-		match=r'clustering\.output_dir.*paths\.artifact_root',
-	):
-		resolve_clustering_config(cfg)
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['clustering']['output_dir'] == explicit_output
 
 
-def test_visualization_output_dir_must_be_under_artifact_root() -> None:
+def test_visualization_output_dir_may_be_outside_artifact_root() -> None:
 	cfg = _minimal_visualization_config()
-	cfg['visualization']['output_dir'] = '/external/visualizations'
+	explicit_output = '/external/visualizations'
+	cfg['visualization']['output_dir'] = explicit_output
 
-	with pytest.raises(
-		ValueError,
-		match=r'visualization\.output_dir.*paths\.artifact_root',
-	):
-		resolve_cluster_visualization_config(cfg)
+	resolved = resolve_cluster_visualization_config(cfg)
+
+	assert resolved['visualization']['output_dir'] == explicit_output
 
 
 def test_embedding_extraction_overlap_must_be_less_than_window() -> None:
@@ -1563,21 +1543,20 @@ def test_mae_debug_visualization_rejects_unknown_nested_key() -> None:
 		resolve_mae_training_config(cfg)
 
 
-def test_mae_debug_explicit_output_dir_must_stay_under_output_root() -> None:
+def test_mae_debug_explicit_output_dir_is_preserved() -> None:
 	cfg = _minimal_training_config()
+	explicit_output = '/external/debug'
 	cfg['visualization'] = {
 		'mae_debug': {
 			'enabled': True,
 			'every_steps': 1,
-			'output_dir': '/external/debug',
+			'output_dir': explicit_output,
 		},
 	}
 
-	with pytest.raises(
-		ValueError,
-		match=r'visualization\.mae_debug\.output_dir.*paths\.output_root',
-	):
-		resolve_mae_training_config(cfg)
+	resolved = resolve_mae_training_config(cfg)
+
+	assert resolved['visualization']['mae_debug']['output_dir'] == explicit_output
 
 
 def test_nondivisible_crop_patch_geometry_is_rejected() -> None:
@@ -1625,15 +1604,14 @@ def test_build_manifest_config_requires_output_name() -> None:
 		resolve_manifest_build_config(cfg)
 
 
-def test_filter_qc_output_outside_artifact_root_is_rejected() -> None:
+def test_filter_qc_output_outside_artifact_root_is_preserved() -> None:
 	cfg = _minimal_normalization_qc_config()
-	cfg['qc']['output_json'] = '/external/qc/normalization_stats_qc.json'
+	explicit_output = '/external/qc/normalization_stats_qc.json'
+	cfg['qc']['output_json'] = explicit_output
 
-	with pytest.raises(
-		ValueError,
-		match=r'qc\.output_json.*paths\.artifact_root',
-	):
-		resolve_normalization_qc_config(cfg)
+	resolved = resolve_normalization_qc_config(cfg)
+
+	assert resolved['qc']['output_json'] == explicit_output
 
 
 def _paths() -> dict[str, object]:

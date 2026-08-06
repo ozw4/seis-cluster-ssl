@@ -145,14 +145,29 @@ def test_publish_selected_results_rejects_target_outside_output_dir(
 		)
 
 
-def test_publish_selected_results_rejects_runs_output_dir(tmp_path: Path) -> None:
-	report = _write_file(tmp_path / 'artifacts' / 'summary.md', b'ok')
+def test_publish_selected_results_rejects_source_target_collision(
+	tmp_path: Path,
+) -> None:
+	report = _write_file(tmp_path / 'results' / 'summary.md', b'ok')
 
-	with pytest.raises(ValueError, match='runs/ paths'):
+	with pytest.raises(ValueError, match='target must differ from source'):
 		publish_selected_results(
 			items=(PublishItem(report, Path('summary.md')),),
-			output_dir=tmp_path / 'runs' / 'results',
+			output_dir=report.parent,
 		)
+
+
+def test_publish_selected_results_allows_runs_output_dir(tmp_path: Path) -> None:
+	report = _write_file(tmp_path / 'artifacts' / 'summary.md', b'ok')
+	output_dir = tmp_path / 'runs' / 'results'
+
+	manifest = publish_selected_results(
+		items=(PublishItem(report, Path('summary.md')),),
+		output_dir=output_dir,
+	)
+
+	assert (output_dir / 'summary.md').read_bytes() == b'ok'
+	assert manifest.manifest_path == output_dir.resolve() / 'publish_manifest.json'
 
 
 def test_publish_selected_results_rejects_existing_target_when_overwrite_disabled(

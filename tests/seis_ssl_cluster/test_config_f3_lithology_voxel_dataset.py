@@ -59,10 +59,13 @@ def test_voxel_dataset_config_rejects_unknown_keys(
 		f3_lithology_voxel_dataset_config_from_mapping(config)
 
 
-def test_voxel_dataset_config_rejects_runs_output(tmp_path: Path) -> None:
+def test_voxel_dataset_config_preserves_runs_output(tmp_path: Path) -> None:
 	config = _config(tmp_path)
-	config['voxel_dataset']['output_dir'] = str(  # type: ignore[index]
+	explicit_output = str(  # type: ignore[index]
 		tmp_path / 'artifacts' / 'runs' / 'voxel'
 	)
-	with pytest.raises(ValueError, match='runs'):
-		f3_lithology_voxel_dataset_config_from_mapping(config)
+	config['voxel_dataset']['output_dir'] = explicit_output
+
+	resolved = f3_lithology_voxel_dataset_config_from_mapping(config)
+
+	assert str(resolved.output_dir) == explicit_output

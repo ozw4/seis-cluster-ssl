@@ -50,7 +50,6 @@ def test_f3_baseline_token_dataset_configs_resolve_from_stage_module(
 	assert config.features.kind == kind
 	assert config.feature_source is not None
 	assert config.feature_source['kind'] == kind
-	assert 'runs' not in config.outputs.output_dir.parts
 
 
 def test_random_encoder_config_resolves_from_stage_module() -> None:
@@ -60,7 +59,6 @@ def test_random_encoder_config_resolves_from_stage_module() -> None:
 
 	assert config.seed == 42
 	assert config.output_checkpoint.name == 'mae_random_seed42.pt'
-	assert 'runs' not in config.output_checkpoint.parts
 
 
 def test_f3_baseline_config_entrypoints_reexport_from_validate_module() -> None:

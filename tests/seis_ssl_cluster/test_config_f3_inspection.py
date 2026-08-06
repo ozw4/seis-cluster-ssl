@@ -59,17 +59,21 @@ def test_f3_inspection_stage_module_resolves_active_configs(
 
 	assert raw == original
 	assert resolved['stage'] == stage
-	assert '/runs/' not in raw['outputs']['inspection_dir']
 
 
-def test_f3_inspection_stage_module_rejects_runs_output() -> None:
+def test_f3_inspection_stage_module_preserves_runs_output() -> None:
 	raw = load_config(F3_INSPECTION_CONFIG_DIR / '01_inspect_files.yaml')
-	raw['outputs']['inspection_dir'] = (
+	explicit_output = (
 		'/workspace/artifacts/seis_ssl_cluster/runs/f3/facies_benchmark_v1'
 	)
+	raw['outputs']['inspection_dir'] = explicit_output
 
-	with pytest.raises(ValueError, match=r'outputs\.inspection_dir.*runs/ paths'):
-		resolve_f3_facies_inspection_config(raw, stage=STAGE_F3_INSPECT_FILES)
+	resolved = resolve_f3_facies_inspection_config(
+		raw,
+		stage=STAGE_F3_INSPECT_FILES,
+	)
+
+	assert resolved['outputs']['inspection_dir'] == explicit_output
 
 
 def test_ignore_border_samples_z_runtime_validation_remains_active() -> None:

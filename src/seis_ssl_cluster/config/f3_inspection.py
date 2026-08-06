@@ -7,9 +7,6 @@ from copy import deepcopy
 from pathlib import Path
 from typing import TypeAlias, TypeVar
 
-from seis_ssl_cluster.config.artifact_path_validation import (
-	_validate_artifact_output_path,
-)
 from seis_ssl_cluster.config.base import (
 	_reject_legacy_attribute_config,
 	_reject_stage_key,
@@ -20,15 +17,14 @@ from seis_ssl_cluster.config.common import (
 	_validate_allowed_keys,
 	_validate_bool,
 	_validate_mapping,
+	_validate_output_path,
 	_validate_path,
-	_validate_path_under_root,
 	_validate_positive_finite_number,
 	_validate_required_keys,
 )
 from seis_ssl_cluster.config.schema import (
 	F3_FACIES_DATASET_NAME,
 	F3_FACIES_DATASET_VERSION,
-	F3_FACIES_INSPECTION_ARTIFACT_SUBDIR,
 	F3_FACIES_INSPECTION_STAGES,
 )
 
@@ -75,7 +71,7 @@ def resolve_f3_facies_inspection_config(config: _T, *, stage: str) -> Config:
 	paths = _validate_f3_facies_inspection_paths(
 		_required_mapping(resolved, 'paths'),
 	)
-	inspection_dir = _validate_f3_facies_inspection_outputs(
+	_validate_f3_facies_inspection_outputs(
 		_required_mapping(resolved, 'outputs'),
 		paths=paths,
 	)
@@ -90,7 +86,7 @@ def resolve_f3_facies_inspection_config(config: _T, *, stage: str) -> Config:
 		raise ValueError(msg)
 	_validate_f3_facies_inspection_artifact_paths(
 		inspection,
-		inspection_dir=inspection_dir,
+		input_root=paths.f3_root,
 	)
 	return resolved
 
@@ -143,7 +139,7 @@ def _validate_f3_facies_inspection_outputs(
 	outputs: Mapping[str, object],
 	*,
 	paths: _ResolvedPaths,
-) -> Path:
+) -> None:
 	_validate_allowed_keys(
 		outputs,
 		_F3_FACIES_INSPECTION_OUTPUT_KEYS,
@@ -155,30 +151,18 @@ def _validate_f3_facies_inspection_outputs(
 		prefix='outputs',
 	)
 	inspection_dir = _validate_path(outputs, 'inspection_dir', prefix='outputs')
-	_validate_artifact_output_path(
+	_validate_output_path(
 		inspection_dir,
 		'outputs.inspection_dir',
-		artifact_root=paths.artifact_root,
-		nopims_root=paths.f3_root,
-		raw_root_label='paths.f3_root',
+		input_root=paths.f3_root,
+		input_root_label='paths.f3_root',
 	)
-	expected_relative = Path(F3_FACIES_INSPECTION_ARTIFACT_SUBDIR)
-	actual_relative = inspection_dir.resolve(strict=False).relative_to(
-		paths.artifact_root.resolve(strict=False),
-	)
-	if actual_relative != expected_relative:
-		msg = (
-			'outputs.inspection_dir must be paths.artifact_root / '
-			f'{F3_FACIES_INSPECTION_ARTIFACT_SUBDIR!r}; got {inspection_dir}'
-		)
-		raise ValueError(msg)
-	return inspection_dir
 
 
 def _validate_f3_facies_inspection_artifact_paths(
 	inspection: Mapping[str, object],
 	*,
-	inspection_dir: Path,
+	input_root: Path,
 	prefix: str = 'inspection',
 ) -> None:
 	for key, value in inspection.items():
@@ -186,7 +170,7 @@ def _validate_f3_facies_inspection_artifact_paths(
 		if isinstance(value, Mapping):
 			_validate_f3_facies_inspection_artifact_paths(
 				value,
-				inspection_dir=inspection_dir,
+				input_root=input_root,
 				prefix=label,
 			)
 			continue
@@ -195,11 +179,11 @@ def _validate_f3_facies_inspection_artifact_paths(
 		if not isinstance(value, str) or not value:
 			msg = f'{label} must be a non-empty string; got {value!r}'
 			raise TypeError(msg)
-		_validate_path_under_root(
+		_validate_output_path(
 			Path(value),
 			label,
-			root=inspection_dir,
-			root_label='outputs.inspection_dir',
+			input_root=input_root,
+			input_root_label='paths.f3_root',
 		)
 
 

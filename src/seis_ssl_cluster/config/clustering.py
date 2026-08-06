@@ -5,11 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TypeAlias, TypeVar
 
-from seis_ssl_cluster.config.artifact_paths import (
-	_validate_artifact_output_path,
-	_validate_nopims_clustering_path,
-	_validate_nopims_embedding_path,
-)
 from seis_ssl_cluster.config.base import _resolve_base
 from seis_ssl_cluster.config.common import (
 	_is_int,
@@ -19,6 +14,7 @@ from seis_ssl_cluster.config.common import (
 	_validate_bool,
 	_validate_nonnegative_finite_number,
 	_validate_optional_positive_int,
+	_validate_output_path,
 	_validate_path,
 	_validate_positive_int,
 	_validate_required_key,
@@ -168,28 +164,18 @@ def resolve_clustering_config(config: _T) -> Config:
 		prefix='clustering',
 	)
 	input_dir = _validate_path(embeddings, 'input_dir', prefix='embeddings')
-	_validate_artifact_output_path(
+	_validate_output_path(
 		input_dir,
 		'embeddings.input_dir',
-		artifact_root=paths.artifact_root,
-		nopims_root=paths.nopims_root,
-	)
-	_validate_nopims_embedding_path(
-		input_dir,
-		'embeddings.input_dir',
-		artifact_root=paths.artifact_root,
+		input_root=paths.nopims_root,
+		input_root_label='paths.nopims_root',
 	)
 	output_dir = _validate_path(clustering, 'output_dir', prefix='clustering')
-	_validate_artifact_output_path(
+	_validate_output_path(
 		output_dir,
 		'clustering.output_dir',
-		artifact_root=paths.artifact_root,
-		nopims_root=paths.nopims_root,
-	)
-	_validate_nopims_clustering_path(
-		output_dir,
-		'clustering.output_dir',
-		artifact_root=paths.artifact_root,
+		input_root=paths.nopims_root,
+		input_root_label='paths.nopims_root',
 	)
 	_validate_clustering_normalization(clustering)
 	residualization = _required_child_mapping(
