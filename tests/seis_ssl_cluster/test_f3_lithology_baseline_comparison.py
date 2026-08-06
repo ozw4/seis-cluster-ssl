@@ -411,6 +411,100 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 	assert table_entry['sha256'] == hashlib.sha256(table_bytes).hexdigest()
 
 
+@pytest.mark.parametrize(
+	('collision', 'match'),
+	[
+		(
+			'outputs',
+			r'comparison\.output_csv must differ from comparison\.output_markdown',
+		),
+		(
+			'csv_metrics',
+			r'comparison\.output_csv must differ from comparison\.metrics_json',
+		),
+		(
+			'markdown_metrics',
+			r'comparison\.output_markdown must differ from comparison\.metrics_json',
+		),
+	],
+)
+def test_f3_lithology_baseline_comparison_rejects_output_path_collisions_before_writes(
+	tmp_path: Path,
+	collision: str,
+	match: str,
+) -> None:
+	search_root = _search_root(tmp_path)
+	metrics_path = _write_probe_metrics(
+		search_root,
+		feature_kind='z_only',
+		baseline_tag='z_only_v1',
+		embed_spec='z_only_degree1',
+		macro_f1=0.60,
+		mean_iou=0.43,
+		per_class_f1={'5': 0.36},
+	)
+	metrics_bytes = metrics_path.read_bytes()
+	output_dir = _comparison_output_dir(tmp_path)
+	output_csv = output_dir / 'comparison_table.csv'
+	output_markdown = output_dir / 'comparison_report.md'
+	if collision == 'outputs':
+		output_markdown = output_csv
+	elif collision == 'csv_metrics':
+		output_csv = metrics_path
+	else:
+		output_markdown = metrics_path
+
+	with pytest.raises(ValueError, match=match):
+		build_f3_lithology_comparison_report(
+			F3LithologyComparisonReportConfig(
+				search_root=search_root,
+				output_csv=output_csv,
+				output_markdown=output_markdown,
+				metrics_paths=(metrics_path,),
+			),
+		)
+
+	assert metrics_path.read_bytes() == metrics_bytes
+	if output_csv != metrics_path:
+		assert not output_csv.exists()
+	if output_markdown != metrics_path:
+		assert not output_markdown.exists()
+	assert not (output_markdown.parent / 'figures').exists()
+
+
+def test_f3_lithology_baseline_comparison_accepts_disjoint_explicit_paths(
+	tmp_path: Path,
+) -> None:
+	search_root = _search_root(tmp_path)
+	metrics_path = _write_probe_metrics(
+		search_root,
+		feature_kind='z_only',
+		baseline_tag='z_only_v1',
+		embed_spec='z_only_degree1',
+		macro_f1=0.60,
+		mean_iou=0.43,
+		per_class_f1={'5': 0.36},
+	)
+	metrics_bytes = metrics_path.read_bytes()
+	output_dir = _comparison_output_dir(tmp_path)
+	config = f3_lithology_comparison_report_config_from_mapping(
+		{
+			'comparison': {
+				'metrics_json': [str(metrics_path)],
+				'output_csv': str(output_dir / 'comparison_table.csv'),
+				'output_markdown': str(output_dir / 'comparison_report.md'),
+			},
+		},
+	)
+
+	result = build_f3_lithology_comparison_report(config)
+
+	assert len(result.rows) == 1
+	assert result.comparison_csv.is_file()
+	assert result.comparison_markdown.is_file()
+	assert metrics_path.read_bytes() == metrics_bytes
+
+
 def test_f3_lithology_baseline_comparison_publish_warns_for_missing_optional_figure(
 	tmp_path: Path,
 ) -> None:

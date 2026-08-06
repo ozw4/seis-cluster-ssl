@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from seis_ssl_cluster.config.common import _validate_distinct_paths
 from seis_ssl_cluster.f3.lithology.report._common import (
 	_BASELINE_FEATURE_KINDS,
 	_COMPARISON_FEATURE_KIND_ORDER,
@@ -90,9 +91,29 @@ def build_f3_lithology_comparison_report(
 	publish_config: F3LithologyComparisonPublishConfig | None = None,
 ) -> F3LithologyComparisonReportResult:
 	"""Aggregate probe metrics into comparison CSV and Markdown reports."""
+	metrics_paths = _comparison_metrics_paths(config)
+	_validate_distinct_paths(
+		config.output_csv,
+		'comparison.output_csv',
+		config.output_markdown,
+		'comparison.output_markdown',
+	)
+	for metrics_path in metrics_paths:
+		_validate_distinct_paths(
+			config.output_csv,
+			'comparison.output_csv',
+			metrics_path,
+			'comparison.metrics_json',
+		)
+		_validate_distinct_paths(
+			config.output_markdown,
+			'comparison.output_markdown',
+			metrics_path,
+			'comparison.metrics_json',
+		)
 	warnings: list[str] = []
 	rows: list[dict[str, object]] = []
-	for metrics_path in _comparison_metrics_paths(config):
+	for metrics_path in metrics_paths:
 		metrics = _read_json_component(
 			'comparison_metrics',
 			metrics_path,
