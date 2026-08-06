@@ -1798,6 +1798,11 @@ def _initialize_periodic_refresh_state(  # noqa: C901, PLR0912, PLR0915
 	quarantine_invalid: bool = False,
 ) -> dict[str, object]:
 	initial_config, refresh_root = _periodic_initial_config(config)
+	_validate_periodic_refresh_runtime_ownership(
+		initial_config=initial_config,
+		refresh_root=refresh_root,
+		output_root=output_root,
+	)
 	initial_manifest = (
 		initial_config.output_generation_dir / 'refresh_generation.json'
 	).resolve()
@@ -1916,6 +1921,56 @@ def _initialize_periodic_refresh_state(  # noqa: C901, PLR0912, PLR0915
 		},
 	)
 	return state
+
+
+def _validate_periodic_refresh_runtime_ownership(
+	*,
+	initial_config: InitialPeriodicRefreshConfig,
+	refresh_root: Path,
+	output_root: Path,
+) -> None:
+	resolved_refresh_root = refresh_root.resolve(strict=False)
+	resolved_output_root = output_root.resolve(strict=False)
+	try:
+		relative = resolved_refresh_root.relative_to(resolved_output_root)
+	except ValueError as exc:
+		raise ValueError(
+			'pseudo_target_refresh.generation_root must be a strict child of '
+			'paths.output_root'
+		) from exc
+	if relative == Path():
+		raise ValueError(
+			'pseudo_target_refresh.generation_root must be a strict child of '
+			'paths.output_root'
+		)
+
+	source_artifacts = [
+		initial_config.initial_hard_target_manifest,
+		initial_config.clustering_config,
+		initial_config.source_embedding_metadata,
+	]
+	for artifact in initial_config.initial_hmm_artifacts:
+		source_artifacts.extend(
+			(
+				artifact.centers,
+				artifact.hmm_model,
+				artifact.preprocessor,
+				artifact.metadata,
+			)
+		)
+		if artifact.residualizer is not None:
+			source_artifacts.append(artifact.residualizer)
+	for source_artifact in source_artifacts:
+		try:
+			source_artifact.path.resolve(strict=False).relative_to(
+				resolved_refresh_root
+			)
+		except ValueError:
+			continue
+		raise ValueError(
+			'pseudo_target_refresh initial source artifacts must be outside '
+			'generation_root'
+		)
 
 
 def _periodic_embedding_extraction_config(

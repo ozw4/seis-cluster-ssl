@@ -704,6 +704,7 @@ def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0915
 			)
 		periodic_refresh_identity = _validate_periodic_refresh_config(
 			_required_mapping(resolved, 'pseudo_target_refresh'),
+			output_root=output_root,
 			train=train,
 			pseudo_targets=pseudo_targets,
 			head=head,
@@ -857,9 +858,10 @@ def _validate_center_trace_spatial_context(
 			)
 
 
-def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0915
+def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	refresh: Mapping[str, object],
 	*,
+	output_root: Path,
 	train: Mapping[str, object],
 	pseudo_targets: Mapping[str, object],
 	head: Mapping[str, object],
@@ -979,6 +981,7 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0915
 		'generation_root',
 		prefix='pseudo_target_refresh',
 	)
+	_validate_periodic_generation_root_ownership(generation_root, output_root)
 
 	artifacts = _required_child_mapping(
 		refresh,
@@ -1257,13 +1260,35 @@ def _validate_initial_artifact_not_in_generation_root(
 	label: str,
 ) -> None:
 	try:
-		path.resolve().relative_to(generation_root.resolve())
+		path.resolve(strict=False).relative_to(
+			generation_root.resolve(strict=False)
+		)
 	except ValueError:
 		return
 	raise ValueError(
 		f'pseudo_target_refresh initial artifact {label} must be outside '
 		'generation_root'
 	)
+
+
+def _validate_periodic_generation_root_ownership(
+	generation_root: Path,
+	output_root: Path,
+) -> None:
+	resolved_generation_root = generation_root.resolve(strict=False)
+	resolved_output_root = output_root.resolve(strict=False)
+	try:
+		relative = resolved_generation_root.relative_to(resolved_output_root)
+	except ValueError as exc:
+		raise ValueError(
+			'pseudo_target_refresh.generation_root must be a strict child of '
+			'paths.output_root'
+		) from exc
+	if relative == Path():
+		raise ValueError(
+			'pseudo_target_refresh.generation_root must be a strict child of '
+			'paths.output_root'
+		)
 
 
 def _artifact_reference(path: Path) -> dict[str, str]:

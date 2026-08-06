@@ -263,6 +263,81 @@ def test_periodic_config_resolves_with_full_scientific_identity(
 	)
 
 
+@pytest.mark.parametrize('relative_root', ['custom-targets', 'runs/refresh-data'])
+def test_periodic_config_allows_any_strict_child_generation_root(
+	tmp_path: Path,
+	relative_root: str,
+) -> None:
+	config = _periodic_config(tmp_path)
+	output_root = Path(config['paths']['output_root'])  # type: ignore[index]
+	generation_root = output_root / relative_root
+	config['pseudo_target_refresh']['generation_root'] = str(generation_root)  # type: ignore[index]
+
+	resolved = resolve_strat_hmm_pretext_config(config)
+
+	assert resolved['pseudo_target_refresh']['generation_root'] == str(  # type: ignore[index]
+		generation_root
+	)
+	assert resolved['identity']['scientific_identity']['refresh_after_epochs'] == [  # type: ignore[index]
+		2,
+		5,
+		8,
+		11,
+		14,
+		17,
+		20,
+	]
+
+
+@pytest.mark.parametrize('location', ['equal', 'outside'])
+def test_periodic_config_rejects_unowned_generation_root(
+	tmp_path: Path,
+	location: str,
+) -> None:
+	config = _periodic_config(tmp_path)
+	output_root = Path(config['paths']['output_root'])  # type: ignore[index]
+	config['pseudo_target_refresh']['generation_root'] = str(  # type: ignore[index]
+		output_root if location == 'equal' else tmp_path / 'foreign-refresh'
+	)
+
+	with pytest.raises(ValueError, match=r'strict child of paths\.output_root'):
+		resolve_strat_hmm_pretext_config(config)
+
+
+@pytest.mark.parametrize(
+	'source_field',
+	['pseudo_targets.manifest', 'heads.6.centers', 'common.source_embedding_metadata'],
+)
+def test_periodic_config_rejects_source_artifact_in_generation_root(
+	tmp_path: Path,
+	source_field: str,
+) -> None:
+	config = _periodic_config(tmp_path)
+	generation_root = Path(
+		config['pseudo_target_refresh']['generation_root']  # type: ignore[index]
+	)
+	generation_root.mkdir(parents=True)
+	if source_field == 'pseudo_targets.manifest':
+		parent = config['pseudo_targets']  # type: ignore[assignment]
+		key = 'manifest'
+	elif source_field == 'heads.6.centers':
+		parent = config['pseudo_target_refresh']['initial_hmm_artifacts']['heads'][  # type: ignore[index]
+			'6'
+		]
+		key = 'centers'
+	else:
+		parent = config['pseudo_target_refresh']['initial_hmm_artifacts']['common']  # type: ignore[index]
+		key = 'source_embedding_metadata'
+	source_path = Path(parent[key])
+	nested_source_path = generation_root / 'source' / source_path.name
+	nested_source_path.parent.mkdir()
+	nested_source_path.write_bytes(source_path.read_bytes())
+	parent[key] = str(nested_source_path)
+
+	with pytest.raises(ValueError, match='must be outside generation_root'):
+		resolve_strat_hmm_pretext_config(config)
+
+
 def test_periodic_config_requires_scientific_identity(tmp_path: Path) -> None:
 	config = _periodic_config(tmp_path)
 	del config['identity']
@@ -1140,6 +1215,88 @@ def test_periodic_runner_explicitly_quarantines_invalid_generation(
 	assert (
 		quarantined[0] / 'refresh_generation.json'
 	).read_text(encoding='utf-8') == '{partial'
+
+
+@pytest.mark.parametrize('location', ['equal', 'outside'])
+def test_periodic_runtime_rejects_unowned_root_before_side_effects(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	location: str,
+) -> None:
+	output_root = tmp_path / 'output'
+	refresh_root = (
+		output_root if location == 'equal' else tmp_path / 'foreign-refresh'
+	)
+	outside_reference = SimpleNamespace(path=tmp_path / 'source-artifact')
+	initial_config = SimpleNamespace(
+		initial_hard_target_manifest=outside_reference,
+		clustering_config=outside_reference,
+		source_embedding_metadata=outside_reference,
+		initial_hmm_artifacts=(),
+		output_generation_dir=refresh_root / 'generations' / 'refresh_0000_initial',
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'_periodic_initial_config',
+		lambda _config: (initial_config, refresh_root),
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'produce_initial_periodic_refresh_generation',
+		lambda _config: pytest.fail('generation production must not start'),
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'quarantine_periodic_refresh_generation',
+		lambda _path: pytest.fail('quarantine must not start'),
+	)
+
+	with pytest.raises(ValueError, match=r'strict child of paths\.output_root'):
+		runner_module._initialize_periodic_refresh_state(  # noqa: SLF001
+			config={},
+			output_root=output_root,
+			quarantine_invalid=True,
+		)
+
+
+def test_periodic_runtime_rejects_nested_source_before_side_effects(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	output_root = tmp_path / 'output'
+	refresh_root = output_root / 'runs' / 'refresh-data'
+	outside_reference = SimpleNamespace(path=tmp_path / 'source-artifact')
+	initial_config = SimpleNamespace(
+		initial_hard_target_manifest=SimpleNamespace(
+			path=refresh_root / 'source-manifest.json'
+		),
+		clustering_config=outside_reference,
+		source_embedding_metadata=outside_reference,
+		initial_hmm_artifacts=(),
+		output_generation_dir=refresh_root / 'generations' / 'refresh_0000_initial',
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'_periodic_initial_config',
+		lambda _config: (initial_config, refresh_root),
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'produce_initial_periodic_refresh_generation',
+		lambda _config: pytest.fail('generation production must not start'),
+	)
+	monkeypatch.setattr(
+		runner_module,
+		'quarantine_periodic_refresh_generation',
+		lambda _path: pytest.fail('quarantine must not start'),
+	)
+
+	with pytest.raises(ValueError, match='source artifacts must be outside'):
+		runner_module._initialize_periodic_refresh_state(  # noqa: SLF001
+			config={},
+			output_root=output_root,
+			quarantine_invalid=True,
+		)
 
 
 def test_periodic_runner_pointer_rollback_rejects_foreign_state(
