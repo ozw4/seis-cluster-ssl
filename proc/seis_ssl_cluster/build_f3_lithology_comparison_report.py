@@ -175,9 +175,12 @@ def _config_from_args(
 	else:
 		resolver_input = {}
 	comparison = dict(resolver_input.get('comparison', {}))
+	if args.output_dir is not None:
+		comparison['output_dir'] = str(args.output_dir)
+		comparison.pop('output_csv', None)
+		comparison.pop('output_markdown', None)
 	for key, value in (
 		('search_root', args.search_root),
-		('output_dir', args.output_dir),
 		('output_csv', args.output_csv),
 		('output_markdown', args.output_markdown),
 		('figure_dpi', args.figure_dpi),

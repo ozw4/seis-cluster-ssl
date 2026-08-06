@@ -668,11 +668,12 @@ def test_f3_lithology_comparison_cli_requires_explicit_paths(
 	)
 
 
-def test_build_f3_lithology_comparison_report_proc_dry_run_with_config(
+def test_build_f3_lithology_comparison_report_proc_output_dir_override(
 	tmp_path: Path,
 ) -> None:
 	search_root = _search_root(tmp_path)
-	output_dir = tmp_path / 'out' / 'baseline_comparison'
+	old_output_dir = tmp_path / 'out' / 'old_baseline_comparison'
+	new_output_dir = tmp_path / 'out' / 'new_baseline_comparison'
 	config_path = tmp_path / 'comparison.yaml'
 	config_path.write_text(
 		f"""
@@ -683,9 +684,9 @@ dataset:
   version: facies_benchmark_v1
 comparison:
   search_root: {search_root}
-  output_dir: {output_dir}
-  output_csv: {output_dir / 'comparison_table.csv'}
-  output_markdown: {output_dir / 'comparison_report.md'}
+  output_dir: {old_output_dir}
+  output_csv: {old_output_dir / 'comparison_table.csv'}
+  output_markdown: {old_output_dir / 'comparison_report.md'}
   figure_dpi: 300
 publish:
   enabled: true
@@ -700,6 +701,8 @@ publish:
 		Path('proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py'),
 		'--config',
 		config_path,
+		'--output-dir',
+		new_output_dir,
 		'--dry-run',
 	)
 
@@ -707,9 +710,14 @@ publish:
 	assert 'stage: build_f3_lithology_comparison_report' in result.stdout
 	assert f'comparison.search_root: {search_root}' in result.stdout
 	assert (
-		f'comparison.output_csv: {output_dir / "comparison_table.csv"}'
+		f'comparison.output_csv: {new_output_dir / "comparison_table.csv"}'
 		in result.stdout
 	)
+	assert (
+		f'comparison.output_markdown: {new_output_dir / "comparison_report.md"}'
+		in result.stdout
+	)
+	assert str(old_output_dir) not in result.stdout
 	assert 'comparison.figure_dpi: 300' in result.stdout
 	assert 'publish.enabled: True' in result.stdout
 	assert f"publish.output_dir: {tmp_path / 'results' / 'baseline_comparison'}" in (
