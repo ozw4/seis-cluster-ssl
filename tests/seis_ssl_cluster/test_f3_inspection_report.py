@@ -154,11 +154,10 @@ def test_f3_inspection_report_publish_enabled_writes_lightweight_results(
 		),
 	)
 
-	assert result.publish_manifest is not None
+	assert result.published_files
 	expected_files = {
 		Path('report.md'),
 		Path('report.json'),
-		Path('publish_manifest.json'),
 		Path('figures/seismic_xz_y_mid.png'),
 		Path('figures/train_inline_0250_overlay.png'),
 		Path('figures/train_inline_0250_tokenization.png'),
@@ -170,6 +169,10 @@ def test_f3_inspection_report_publish_enabled_writes_lightweight_results(
 		if path.is_file()
 	}
 	assert published_files == expected_files
+	assert {
+		path.relative_to(output_dir) for path in result.published_files
+	} == expected_files
+	assert not (output_dir / 'publish_manifest.json').exists()
 	assert (
 		output_dir / 'figures' / 'label_consistency_example.png'
 	).read_bytes() == consistency_figure.read_bytes()
@@ -177,15 +180,6 @@ def test_f3_inspection_report_publish_enabled_writes_lightweight_results(
 
 	_assert_published_markdown_is_lightweight(output_dir, tmp_path)
 	_assert_published_json_is_lightweight(output_dir, tmp_path)
-
-	manifest = json.loads(
-		(output_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
-	)
-	manifest_targets = {Path(item['target']) for item in manifest['items']}
-	assert manifest_targets == expected_files - {Path('publish_manifest.json')}
-	assert manifest['warnings'] == []
-	assert manifest['skipped_optional_items'] == []
-
 
 def test_f3_inspection_report_publish_disabled_writes_no_results(
 	tmp_path: Path,
@@ -203,7 +197,7 @@ def test_f3_inspection_report_publish_disabled_writes_no_results(
 		),
 	)
 
-	assert result.publish_manifest is None
+	assert result.published_files == ()
 	assert not output_dir.exists()
 
 
@@ -224,7 +218,11 @@ def test_f3_inspection_report_publish_include_figures_false_omits_links(
 		),
 	)
 
-	assert result.publish_manifest is not None
+	assert {path.relative_to(output_dir) for path in result.published_files} == {
+		Path('report.md'),
+		Path('report.json'),
+	}
+	assert not (output_dir / 'publish_manifest.json').exists()
 	assert (output_dir / 'report.md').is_file()
 	assert (output_dir / 'report.json').is_file()
 	assert not (output_dir / 'figures').exists()
@@ -252,16 +250,14 @@ def test_f3_inspection_report_publish_missing_optional_figure_warns(
 		),
 	)
 
-	assert result.publish_manifest is not None
-	manifest = result.publish_manifest
+	assert {path.relative_to(output_dir) for path in result.published_files} == {
+		Path('report.md'),
+		Path('report.json'),
+	}
 	assert (output_dir / 'report.md').is_file()
 	assert (output_dir / 'report.json').is_file()
 	assert not (output_dir / 'figures').exists()
-	assert len(manifest.skipped_optional_items) == 4
-	assert any(
-		'optional publish source does not exist' in warning
-		for warning in manifest.warnings
-	)
+	assert not (output_dir / 'publish_manifest.json').exists()
 
 
 def test_f3_inspection_report_publish_requires_report_files(tmp_path: Path) -> None:

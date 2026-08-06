@@ -410,17 +410,17 @@ def test_m2a_publish_wrapper_enforces_exact_allowlist_and_size_guard(
 		max_file_size_bytes=10 * 1024 * 1024,
 	)
 
-	manifest = publish_f3_strat_hmm_m2_results(result, publish_config)
-	assert manifest is not None
+	published_files = publish_f3_strat_hmm_m2_results(result, publish_config)
 	assert {
-		item.target.relative_to(publish_config.output_dir).as_posix()
-		for item in manifest.items
+		path.relative_to(publish_config.output_dir).as_posix()
+		for path in published_files
 	} == {
 		'm2a_results_summary.md',
 		'm2a_results_summary.json',
 		*(f'tables/{name}' for name in m2_results.M2_RESULTS_TABLE_NAMES),
 		*(f'figures/{name}' for name in m2_results.M2_RESULTS_FIGURE_NAMES),
 	}
+	assert not (publish_config.output_dir / 'publish_manifest.json').exists()
 
 	wrong_tables = replace(
 		result,

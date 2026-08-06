@@ -53,12 +53,8 @@ from seis_ssl_cluster.f3.splits import (
 from seis_ssl_cluster.models.voxel_decoder.spec import (
 	validate_voxel_decoder_architecture_mapping,
 )
-from seis_ssl_cluster.results import (
-	DEFAULT_MAX_FILE_SIZE_BYTES,
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
+
+DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 DEFAULT_RESULTS_ROOT = Path('results')
 if TYPE_CHECKING:
@@ -133,7 +129,7 @@ class F3LithologyVoxelReportResult:
 	report_json: Path
 	figure_paths: tuple[Path, ...]
 	payload: Mapping[str, object]
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -230,13 +226,13 @@ def build_f3_lithology_voxel_report(
 		figure_paths,
 		staged_result.payload,
 	)
-	manifest = publish_f3_lithology_voxel_report(result, config=config)
+	published_files = publish_f3_lithology_voxel_report(result, config=config)
 	return F3LithologyVoxelReportResult(
 		result.report_markdown,
 		result.report_json,
 		result.figure_paths,
 		result.payload,
-		manifest,
+		published_files,
 	)
 
 
@@ -541,11 +537,11 @@ def publish_f3_lithology_voxel_report(
 	result: F3LithologyVoxelReportResult,
 	*,
 	config: F3LithologyVoxelReportConfig,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	"""Publish report, numeric evaluation artifacts, and PNG figures."""
 	policy = config.publish
 	if not policy.enabled:
-		return None
+		return ()
 	evaluation = _read_json_object(
 		config.evaluation_input_dir / EVALUATION_METADATA_JSON
 	)
@@ -565,25 +561,49 @@ def publish_f3_lithology_voxel_report(
 		model_tag=str(prediction.get('model_tag') or 'unknown_model'),
 		prediction_spec=prediction_spec,
 	)
-	items = [
-		PublishItem(result.report_markdown, Path(REPORT_MARKDOWN)),
-		PublishItem(result.report_json, Path(REPORT_JSON)),
+	sources = [
+		(result.report_markdown, Path(REPORT_MARKDOWN)),
+		(result.report_json, Path(REPORT_JSON)),
+		*(
+			(config.evaluation_input_dir / name, Path(name))
+			for name in VOXEL_EVALUATION_PUBLISH_FILES
+		),
 	]
-	items.extend(
-		PublishItem(config.evaluation_input_dir / name, Path(name))
-		for name in VOXEL_EVALUATION_PUBLISH_FILES
+	for path in result.figure_paths:
+		try:
+			relative = path.relative_to(config.output_dir)
+		except ValueError as exc:
+			raise ValueError(f'report figure is outside output_dir: {path}') from exc
+		if relative.suffix.lower() != '.png' or relative.parts[0] != FIGURES_DIR:
+			raise ValueError(f'unexpected report figure publish path: {relative}')
+		sources.append((path, relative))
+	return tuple(
+		_copy_published_file(
+			source,
+			output_dir / relative_target,
+			max_file_size_bytes=policy.max_file_size_bytes,
+			overwrite=policy.overwrite,
+		)
+		for source, relative_target in sources
 	)
-	items.extend(
-		PublishItem(path, path.relative_to(config.output_dir))
-		for path in result.figure_paths
-	)
-	return publish_selected_results(
-		items=items,
-		output_dir=output_dir,
-		allowed_suffixes=VOXEL_REPORT_PUBLISH_SUFFIXES,
-		max_file_size_bytes=policy.max_file_size_bytes,
-		overwrite=policy.overwrite,
-	)
+
+
+def _copy_published_file(
+	source: Path,
+	target: Path,
+	*,
+	max_file_size_bytes: int,
+	overwrite: bool,
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if source.stat().st_size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	if target.exists() and not overwrite:
+		raise FileExistsError(f'publish target already exists: {target}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(source, target)
+	return target
 
 
 def default_f3_lithology_voxel_publish_dir(

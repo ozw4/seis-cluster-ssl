@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Build F3 lithology pretrained-vs-baseline comparison reports."""
 
 from __future__ import annotations
@@ -125,12 +124,11 @@ def main() -> None:
 	print(f'f3_lithology_comparison_report.markdown: {result.comparison_markdown}')
 	for path in result.figure_paths:
 		print(f'f3_lithology_comparison_report.figure: {path}')
-	if result.publish_manifest is not None:
+	if result.published_files:
 		print(
 			'published F3 lithology comparison report: '
-			f'{result.publish_manifest.output_dir}',
+			f'{result.published_files[0].parent}',
 		)
-		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
 
 
 def _print_summary(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
 import zlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, replace
@@ -23,12 +24,8 @@ from seis_ssl_cluster.f3.lithology.voxel_split import VALIDATION_VOXEL_SPLIT
 from seis_ssl_cluster.models.voxel_decoder.spec import (
 	validate_voxel_decoder_architecture_mapping,
 )
-from seis_ssl_cluster.results import (
-	DEFAULT_MAX_FILE_SIZE_BYTES,
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
+
+DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 DEFAULT_RESULTS_ROOT = Path('results')
 REQUIRED_MODELS = ('MAE', 'M1', 'M2-A')
@@ -118,7 +115,7 @@ class F3LithologyVoxelResultsResult:
 	figure_paths: tuple[Path, ...]
 	decoder_value: str
 	m2a_vs_m1_voxel: str
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -213,8 +210,8 @@ def summarize_f3_lithology_voxel_results(
 		decoder_value=decoder_status,
 		m2a_vs_m1_voxel=m2a_status,
 	)
-	manifest = _publish(result, config.publish)
-	return replace(result, publish_manifest=manifest)
+	published_files = _publish(result, config.publish)
+	return replace(result, published_files=published_files)
 
 
 def _validate_summary_output_availability(
@@ -932,27 +929,57 @@ def _render_markdown(payload: Mapping[str, object]) -> str:
 def _publish(
 	result: F3LithologyVoxelResultsResult,
 	config: F3LithologyVoxelResultsPublishConfig,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	if not config.enabled:
-		return None
+		return ()
 	if config.output_dir is None:  # guarded by the frozen config contract
 		raise ValueError('publish.output_dir is required')
-	items = [
-		PublishItem(result.summary_markdown, Path(SUMMARY_MARKDOWN)),
-		PublishItem(result.summary_json, Path(SUMMARY_JSON)),
-		*(PublishItem(path, Path('tables') / path.name) for path in result.table_paths),
-		*(
-			PublishItem(path, Path('figures') / path.name)
-			for path in result.figure_paths
-		),
+	_validate_named_publish_paths(result.table_paths, TABLE_NAMES, label='table')
+	_validate_named_publish_paths(result.figure_paths, FIGURE_NAMES, label='figure')
+	sources = [
+		(result.summary_markdown, Path(SUMMARY_MARKDOWN)),
+		(result.summary_json, Path(SUMMARY_JSON)),
+		*((path, Path('tables') / path.name) for path in result.table_paths),
+		*((path, Path('figures') / path.name) for path in result.figure_paths),
 	]
-	return publish_selected_results(
-		items=items,
-		output_dir=config.output_dir,
-		allowed_suffixes=PUBLISH_SUFFIXES,
-		max_file_size_bytes=config.max_file_size_bytes,
-		overwrite=config.overwrite,
+	return tuple(
+		_copy_published_file(
+			source,
+			config.output_dir / relative_target,
+			max_file_size_bytes=config.max_file_size_bytes,
+			overwrite=config.overwrite,
+		)
+		for source, relative_target in sources
 	)
+
+
+def _validate_named_publish_paths(
+	paths: Sequence[Path], expected_names: Sequence[str], *, label: str
+) -> None:
+	names = [path.name for path in paths]
+	if len(names) != len(set(names)) or set(names) != set(expected_names):
+		raise ValueError(
+			f'voxel results publish {label} files must be exactly '
+			f'{sorted(expected_names)!r}; got {sorted(names)!r}'
+		)
+
+
+def _copy_published_file(
+	source: Path,
+	target: Path,
+	*,
+	max_file_size_bytes: int,
+	overwrite: bool,
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if source.stat().st_size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	if target.exists() and not overwrite:
+		raise FileExistsError(f'publish target already exists: {target}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(source, target)
+	return target
 
 
 def _read_json(path: Path) -> Mapping[str, object]:

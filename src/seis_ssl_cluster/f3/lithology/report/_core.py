@@ -41,8 +41,6 @@ if TYPE_CHECKING:
 	from collections.abc import Mapping
 	from pathlib import Path
 
-	from seis_ssl_cluster.results import PublishManifest
-
 
 @dataclass(frozen=True)
 class F3LithologyReportConfig:
@@ -73,7 +71,7 @@ class F3LithologyReportResult:
 	payload: dict[str, object]
 	comparison_csv: Path | None = None
 	comparison_markdown: Path | None = None
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 def build_f3_lithology_report(
@@ -90,7 +88,7 @@ def build_f3_lithology_report(
 		payload['comparison'] = _comparison_payload(comparison_result)
 	_write_json(config.output_json, payload)
 	_write_text(config.output_markdown, render_f3_lithology_report_markdown(payload))
-	publish_manifest = publish_f3_lithology_report(
+	published_files = publish_f3_lithology_report(
 		config,
 		publish_config,
 		payload=payload,
@@ -107,7 +105,7 @@ def build_f3_lithology_report(
 			if comparison_result is None
 			else comparison_result.comparison_markdown
 		),
-		publish_manifest=publish_manifest,
+		published_files=published_files,
 	)
 
 def _report_payload(config: F3LithologyReportConfig) -> dict[str, object]:

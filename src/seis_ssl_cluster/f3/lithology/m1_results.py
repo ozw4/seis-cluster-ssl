@@ -5,18 +5,14 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
 
-from seis_ssl_cluster.results import (
-	DEFAULT_MAX_FILE_SIZE_BYTES,
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
+DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 DEFAULT_RESULTS_ROOT = Path('results')
 CORE_METRICS = (
@@ -81,7 +77,7 @@ class F3StratHMMM1ResultsResult:
 	table_paths: tuple[Path, ...]
 	figure_paths: tuple[Path, ...]
 	warnings: tuple[str, ...]
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 def f3_strat_hmm_m1_results_config_from_mapping(
@@ -205,65 +201,121 @@ def consolidate_f3_strat_hmm_m1_results(
 		figure_paths=figure_paths,
 		warnings=tuple(warnings),
 	)
-	publish_manifest = publish_f3_strat_hmm_m1_results(result, config.publish)
+	published_files = publish_f3_strat_hmm_m1_results(result, config.publish)
 	return F3StratHMMM1ResultsResult(
 		summary_json=json_path,
 		summary_markdown=markdown_path,
 		table_paths=table_paths,
 		figure_paths=figure_paths,
 		warnings=tuple(warnings),
-		publish_manifest=publish_manifest,
+		published_files=published_files,
 	)
 
 
 def publish_f3_strat_hmm_m1_results(
 	result: F3StratHMMM1ResultsResult,
 	publish_config: F3StratHMMM1PublishConfig | None,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	"""Publish lightweight M1 summary artifacts into ``results/``."""
 	if publish_config is None or not publish_config.enabled:
-		return None
+		return ()
 	if publish_config.output_dir is None:
 		msg = 'publish output_dir is required when publishing is enabled'
 		raise ValueError(msg)
-	return publish_selected_results(
-		items=_publish_items_for_f3_strat_hmm_m1_results(
-			result,
-			include_figures=publish_config.include_figures,
-		),
-		output_dir=publish_config.output_dir,
-		max_file_size_bytes=publish_config.max_file_size_bytes,
+	_validate_publish_names(
+		result.table_paths,
+		(SINGLE_SPLIT_TABLE, LABEL_BUDGET_TABLE, SPLIT_INDEX_TABLE),
+		label='table',
 	)
-
-
-def _publish_items_for_f3_strat_hmm_m1_results(
-	result: F3StratHMMM1ResultsResult,
-	*,
-	include_figures: bool,
-) -> tuple[PublishItem, ...]:
-	markdown_content = (
-		None
-		if include_figures
+	if publish_config.include_figures:
+		_validate_publish_names(
+			result.figure_paths,
+			(SINGLE_RUN_FIGURE, LABEL_BUDGET_FIGURE, SPLIT_INDEX_FIGURE),
+			label='figure',
+		)
+	output_dir = publish_config.output_dir
+	files: list[Path] = []
+	markdown_text = (
+		result.summary_markdown.read_text(encoding='utf-8')
+		if publish_config.include_figures
 		else _publish_markdown_without_figure_links(result.summary_json)
 	)
-	items = [
-		PublishItem(
+	files.append(
+		_write_published_text(
 			result.summary_markdown,
-			Path('m1_results_summary.md'),
-			content_text=markdown_content,
-		),
-		PublishItem(result.summary_json, Path('m1_results_summary.json')),
-		*(
-			PublishItem(table_path, Path('tables') / table_path.name)
-			for table_path in result.table_paths
-		),
-	]
-	if include_figures:
-		items.extend(
-			PublishItem(figure_path, Path('figures') / figure_path.name)
-			for figure_path in result.figure_paths
+			output_dir / 'm1_results_summary.md',
+			markdown_text,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
 		)
-	return tuple(items)
+	)
+	files.append(
+		_copy_published_file(
+			result.summary_json,
+			output_dir / 'm1_results_summary.json',
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		)
+	)
+	for name in (SINGLE_SPLIT_TABLE, LABEL_BUDGET_TABLE, SPLIT_INDEX_TABLE):
+		source = next((path for path in result.table_paths if path.name == name), None)
+		if source is None:
+			raise FileNotFoundError(f'required publish source is missing: {name}')
+		files.append(
+			_copy_published_file(
+				source,
+				output_dir / 'tables' / name,
+				max_file_size_bytes=publish_config.max_file_size_bytes,
+			)
+		)
+	if publish_config.include_figures:
+		for name in (SINGLE_RUN_FIGURE, LABEL_BUDGET_FIGURE, SPLIT_INDEX_FIGURE):
+			source = next(
+				(path for path in result.figure_paths if path.name == name), None
+			)
+			if source is None:
+				raise FileNotFoundError(f'required publish source is missing: {name}')
+			files.append(
+				_copy_published_file(
+					source,
+					output_dir / 'figures' / name,
+					max_file_size_bytes=publish_config.max_file_size_bytes,
+				)
+			)
+	return tuple(files)
+
+
+def _validate_publish_names(
+	paths: Sequence[Path], expected_names: Sequence[str], *, label: str
+) -> None:
+	names = [path.name for path in paths]
+	if len(names) != len(set(names)) or set(names) != set(expected_names):
+		raise ValueError(
+			f'M1 publish {label} files must be exactly '
+			f'{sorted(expected_names)!r}; got {sorted(names)!r}'
+		)
+
+
+def _copy_published_file(
+	source: Path, target: Path, *, max_file_size_bytes: int
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if source.stat().st_size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(source, target)
+	return target
+
+
+def _write_published_text(
+	source: Path, target: Path, text: str, *, max_file_size_bytes: int
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if len(text.encode('utf-8')) > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	target.write_text(text, encoding='utf-8')
+	return target
 
 
 def _publish_config_from_mapping(

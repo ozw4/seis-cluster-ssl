@@ -56,7 +56,6 @@ if TYPE_CHECKING:
 	from seis_ssl_cluster.f3.lithology.token_dataset import (
 		F3LithologyTokenDatasetSummary,
 	)
-	from seis_ssl_cluster.results import PublishManifest
 
 
 @dataclass(frozen=True)
@@ -82,7 +81,7 @@ class F3LithologyComparisonReportResult:
 	figure_paths: tuple[Path, ...]
 	rows: tuple[dict[str, object], ...]
 	warnings: tuple[str, ...]
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 def build_f3_lithology_comparison_report(
@@ -167,7 +166,7 @@ def build_f3_lithology_comparison_report(
 		config.output_markdown,
 		_render_comparison_markdown(rows, fieldnames, figure_paths, warnings),
 	)
-	publish_manifest = publish_f3_lithology_comparison_report(
+	published_files = publish_f3_lithology_comparison_report(
 		config,
 		publish_config,
 	)
@@ -177,7 +176,7 @@ def build_f3_lithology_comparison_report(
 		figure_paths=tuple(figure_paths.values()),
 		rows=tuple(rows),
 		warnings=tuple(warnings),
-		publish_manifest=publish_manifest,
+		published_files=published_files,
 	)
 
 def _comparison_payload(

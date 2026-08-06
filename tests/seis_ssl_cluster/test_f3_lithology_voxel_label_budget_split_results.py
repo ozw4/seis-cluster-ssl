@@ -111,18 +111,17 @@ def test_summary_publish_writes_and_validates_exact_lightweight_tree(
 ) -> None:
 	paths = write_low_label_split_summary(_rows(), tmp_path / 'artifacts')
 	config = SimpleNamespace(results_root=tmp_path / 'results')
-	manifest = publish_low_label_split_summary(config, paths)
+	published_files = publish_low_label_split_summary(config, paths)
 	publish_dir = (
 		config.results_root
 		/ 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_six_split_v1'
 	)
 	assert {path.name for path in publish_dir.iterdir()} == {
 		*OUTPUT_NAMES,
-		'publish_manifest.json',
 	}
-	payload = json.loads(manifest.manifest_path.read_text(encoding='utf-8'))
-	assert {item['target'] for item in payload['items']} == set(OUTPUT_NAMES)
-	_validate_published_tree(publish_dir, manifest)
+	assert {path.name for path in published_files} == set(OUTPUT_NAMES)
+	assert not (publish_dir / 'publish_manifest.json').exists()
+	_validate_published_tree(publish_dir, published_files)
 
 
 def test_summary_separates_formal_hold_from_project_adoption_and_uses_aggregates(
@@ -225,16 +224,11 @@ def test_summary_publish_rejects_noncanonical_existing_tree(tmp_path: Path) -> N
 		publish_low_label_split_summary(config, paths)
 
 
-def test_summary_publish_detects_source_or_target_hash_tampering(
+def test_summary_publish_rejects_missing_required_source(
 	tmp_path: Path,
 ) -> None:
 	paths = write_low_label_split_summary(_rows(), tmp_path / 'artifacts')
 	config = SimpleNamespace(results_root=tmp_path / 'results')
-	manifest = publish_low_label_split_summary(config, paths)
-	publish_dir = (
-		config.results_root
-		/ 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_six_split_v1'
-	)
-	paths['paired_metrics'].write_text('tampered\n', encoding='utf-8')
-	with pytest.raises(ValueError, match='SHA-256'):
-		_validate_published_tree(publish_dir, manifest)
+	paths['paired_metrics'].unlink()
+	with pytest.raises(FileNotFoundError, match='required six-split publish source'):
+		publish_low_label_split_summary(config, paths)

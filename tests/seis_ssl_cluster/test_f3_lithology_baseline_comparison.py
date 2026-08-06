@@ -1,8 +1,7 @@
-# ruff: noqa: CPY001, SLF001
+# ruff: noqa: SLF001
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 from pathlib import Path
 
@@ -337,33 +336,26 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 	assert 'pretrained encoderがrandom encoderを上回るか' in markdown
 	assert 'class 5: F1差分 +0.1300' in markdown
 	assert 'F3 faciesが深度だけで説明できる程度' in markdown
-	assert result.publish_manifest is not None
+	assert result.published_files
 	assert published_files == {
 		Path('comparison_report.md'),
 		Path('comparison_table.csv'),
 		Path('comparison_table.json'),
-		Path('publish_manifest.json'),
 		Path('figures/macro_f1_comparison.png'),
 		Path('figures/mean_iou_comparison.png'),
 		Path('figures/per_class_f1_comparison.png'),
 	}
+	assert {
+		path.relative_to(publish_dir) for path in result.published_files
+	} == published_files
+	assert not (publish_dir / 'publish_manifest.json').exists()
 	assert not any(
 		path.suffix in {'.pt', '.npy', '.npz', '.joblib', '.pkl'}
 		for path in published_files
 	)
 	published_table = publish_dir / 'comparison_table.csv'
-	manifest_payload = json.loads(
-		(publish_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
-	)
-	table_entry = next(
-		item
-		for item in manifest_payload['items']
-		if Path(item['target']).name == 'comparison_table.csv'
-	)
 	table_bytes = published_table.read_bytes()
 	assert table_bytes == result.comparison_csv.read_bytes()
-	assert table_entry['size_bytes'] == len(table_bytes)
-	assert table_entry['sha256'] == hashlib.sha256(table_bytes).hexdigest()
 
 
 @pytest.mark.parametrize(
@@ -473,7 +465,7 @@ def test_f3_lithology_baseline_comparison_publish_warns_for_missing_optional_fig
 		encoding='utf-8',
 	)
 
-	manifest = publish_f3_lithology_comparison_report(
+	published_files = publish_f3_lithology_comparison_report(
 		F3LithologyComparisonReportConfig(
 			search_root=tmp_path / 'artifacts',
 			output_csv=output_dir / 'comparison_table.csv',
@@ -486,15 +478,14 @@ def test_f3_lithology_baseline_comparison_publish_warns_for_missing_optional_fig
 		),
 	)
 
-	assert manifest is not None
+	assert {path.relative_to(publish_dir) for path in published_files} == {
+		Path('comparison_report.md'),
+		Path('comparison_table.csv'),
+	}
 	assert (publish_dir / 'comparison_report.md').is_file()
 	assert (publish_dir / 'comparison_table.csv').is_file()
-	assert any(
-		'optional publish source does not exist' in warning
-		and 'macro_f1_comparison.png' in warning
-		for warning in manifest.warnings
-	)
 	assert not (publish_dir / 'figures/macro_f1_comparison.png').exists()
+	assert not (publish_dir / 'publish_manifest.json').exists()
 
 
 def test_f3_lithology_baseline_comparison_uses_pretrained_token_metadata(

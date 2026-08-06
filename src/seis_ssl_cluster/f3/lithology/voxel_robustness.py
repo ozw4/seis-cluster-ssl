@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
 import statistics
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -94,11 +95,6 @@ from seis_ssl_cluster.f3.splits import read_f3_line_geometry
 from seis_ssl_cluster.models.voxel_decoder.spec import (
 	validate_voxel_decoder_architecture_mapping,
 )
-from seis_ssl_cluster.results import (
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
 from seis_ssl_cluster.training.voxel_decoder.runner import (
 	inspect_f3_lithology_voxel_decoder,
 	run_f3_lithology_voxel_decoder,
@@ -178,7 +174,7 @@ class VoxelSplitRobustnessSummaryResult:
 	aggregates_csv: Path
 	status: str
 	summary_markdown: Path | None = None
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -491,7 +487,7 @@ def summarize_f3_lithology_voxel_split_robustness(
 		status,
 		summary_markdown,
 	)
-	return replace(result, publish_manifest=_publish_robustness_summary(result, config))
+	return replace(result, published_files=_publish_robustness_summary(result, config))
 
 
 def inspect_f3_lithology_voxel_split_robustness(
@@ -573,60 +569,74 @@ def inspect_f3_lithology_voxel_split_robustness(
 def _publish_robustness_summary(
 	result: VoxelSplitRobustnessSummaryResult,
 	config: F3VoxelSplitRobustnessSummaryConfig,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	policy = config.publish
 	if not policy.enabled:
-		return None
+		return ()
 	if policy.output_dir is None or config.original_summary_dir is None:
 		raise ValueError(
 			'final publish requires publish.output_dir and inputs.original_summary_dir'
 		)
 	original = config.original_summary_dir
 	validate_f3_lithology_voxel_results_bundle(original)
-	items = [
-		PublishItem(
+	sources = [
+		(
 			original / ORIGINAL_SUMMARY_MARKDOWN,
 			Path(ORIGINAL_SUMMARY_MARKDOWN),
 		),
-		PublishItem(original / ORIGINAL_SUMMARY_JSON, Path(ORIGINAL_SUMMARY_JSON)),
+		(original / ORIGINAL_SUMMARY_JSON, Path(ORIGINAL_SUMMARY_JSON)),
 		*(
-			PublishItem(original / 'tables' / name, Path('tables') / name)
+			(original / 'tables' / name, Path('tables') / name)
 			for name in ORIGINAL_TABLE_NAMES
 		),
 		*(
-			PublishItem(original / 'figures' / name, Path('figures') / name)
+			(original / 'figures' / name, Path('figures') / name)
 			for name in ORIGINAL_FIGURE_NAMES
 		),
-		PublishItem(
-			result.summary_json,
-			Path('robustness') / result.summary_json.name,
-		),
-		*(
-			(
-				PublishItem(
-					result.summary_markdown,
-					Path('robustness') / result.summary_markdown.name,
-				),
-			)
-			if result.summary_markdown is not None
-			else ()
-		),
-		PublishItem(
+		(result.summary_json, Path('robustness') / result.summary_json.name),
+		(
 			result.paired_rows_csv,
 			Path('robustness') / 'tables' / result.paired_rows_csv.name,
 		),
-		PublishItem(
+		(
 			result.aggregates_csv,
 			Path('robustness') / 'tables' / result.aggregates_csv.name,
 		),
 	]
-	return publish_selected_results(
-		items=items,
-		output_dir=policy.output_dir,
-		allowed_suffixes=PUBLISH_SUFFIXES,
-		max_file_size_bytes=policy.max_file_size_bytes,
-		overwrite=policy.overwrite,
+	if result.summary_markdown is not None:
+		sources.append(
+			(
+				result.summary_markdown,
+				Path('robustness') / result.summary_markdown.name,
+			)
+		)
+	return tuple(
+		_copy_published_file(
+			source,
+			policy.output_dir / relative_target,
+			max_file_size_bytes=policy.max_file_size_bytes,
+			overwrite=policy.overwrite,
+		)
+		for source, relative_target in sources
 	)
+
+
+def _copy_published_file(
+	source: Path,
+	target: Path,
+	*,
+	max_file_size_bytes: int,
+	overwrite: bool,
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if source.stat().st_size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	if target.exists() and not overwrite:
+		raise FileExistsError(f'publish target already exists: {target}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(source, target)
+	return target
 
 
 def _run_v0_job(  # noqa: PLR0913

@@ -90,10 +90,9 @@ def main() -> None:
 	result = summarize_f3_lithology_voxel_label_budget_results(config)
 	print(f'voxel_label_budget.summary_json: {result.summary_json}')
 	print(f'voxel_label_budget.summary_markdown: {result.summary_markdown}')
-	print(f'voxel_label_budget.publish_manifest: {result.local_publish_manifest}')
 	print(f'voxel_label_budget.scientific_decisions: {result.decisions}')
-	if result.publish_manifest is not None:
-		print(f'published manifest: {result.publish_manifest.manifest_path}')
+	if result.published_files:
+		print(f'voxel_label_budget.published_file_count: {len(result.published_files)}')
 
 
 if __name__ == '__main__':

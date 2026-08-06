@@ -13,10 +13,11 @@ import json
 import math
 import os
 import re
+import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -25,12 +26,6 @@ from uuid import uuid4
 import numpy as np
 
 from seis_ssl_cluster.embedding.writer import file_sha256
-from seis_ssl_cluster.results import (
-	PublishedItem,
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
 
 if TYPE_CHECKING:
 	from collections.abc import Iterator
@@ -846,63 +841,64 @@ def cosine_similarity_summary_to_dict(
 	}
 
 
-def publish_lightweight_migration_results(
+def publish_lightweight_migration_results(  # noqa: PLR0913
 	*,
-	items: Sequence[PublishItem],
+	summary_report: Path,
+	metrics_json: Path,
 	output_dir: Path,
 	source_artifact_root: Path,
 	max_file_size_bytes: int = 10 * 1024 * 1024,
 	allow_reuse: bool = False,
-) -> PublishManifest:
-	"""Atomically publish only lightweight migration reports and validate them.
-
-	Raw checkpoints, arrays, feature caches, and clustering products are rejected
-	by suffix before any copy.  A fresh directory is staged and renamed only after
-	the manifest has been enriched with source and published hashes and fully
-	validated.  Existing result directories are never overwritten.
-	"""
+) -> tuple[Path, ...]:
+	"""Atomically publish the migration summary and metrics files."""
 	final = Path(output_dir)
 	source_root = Path(source_artifact_root)
-	_validate_publish_sources(items, source_root, max_file_size_bytes)
+	sources = (
+		(Path(summary_report), Path('summary.md')),
+		(Path(metrics_json), Path('tables/metrics.json')),
+	)
+	_validate_publish_sources(sources, source_root, max_file_size_bytes)
 	if final.exists():
 		if not allow_reuse:
 			raise FileExistsError(f'publish output already exists: {final}')
-		validate_migration_publish_manifest(
-			final / 'publish_manifest.json',
-			source_artifact_root=source_root,
-			max_file_size_bytes=max_file_size_bytes,
-		)
-		return _publish_manifest_from_payload(final / 'publish_manifest.json')
+		_validate_existing_migration_results(final, sources)
+		return tuple(final / target for _, target in sources)
 	with staged_artifact_directory(final) as staging:
 		try:
-			manifest = publish_selected_results(
-				items=items,
-				output_dir=staging,
-				allowed_suffixes=MIGRATION_ALLOWED_PUBLISH_SUFFIXES,
-				max_file_size_bytes=max_file_size_bytes,
-				overwrite=False,
-			)
-			_manifest_enrich_source_identities(manifest.manifest_path)
-			validate_migration_publish_manifest(
-				manifest.manifest_path,
-				source_artifact_root=source_root,
-				max_file_size_bytes=max_file_size_bytes,
-			)
+			for source, relative_target in sources:
+				target = staging / relative_target
+				target.parent.mkdir(parents=True, exist_ok=True)
+				shutil.copy2(source, target)
+			_validate_existing_migration_results(staging, sources)
 			committed = commit_staged_artifact_directory(staging, final)
 		except BaseException:
 			if staging.exists():
 				quarantine_artifact(staging, reason='publish_failure')
 			raise
-	final_manifest = committed / 'publish_manifest.json'
-	payload = _read_json_mapping(final_manifest)
-	payload['output_dir'] = str(final)
-	write_json_atomic(final_manifest, payload)
-	validate_migration_publish_manifest(
-		final_manifest,
-		source_artifact_root=source_root,
-		max_file_size_bytes=max_file_size_bytes,
-	)
-	return replace(manifest, output_dir=final, manifest_path=final_manifest)
+	return tuple(committed / target for _, target in sources)
+
+
+def _validate_existing_migration_results(
+	output_dir: Path, sources: Sequence[tuple[Path, Path]]
+) -> None:
+	expected = {target.as_posix() for _, target in sources}
+	actual = {
+		path.relative_to(output_dir).as_posix()
+		for path in output_dir.rglob('*')
+		if path.is_file()
+	}
+	if actual != expected:
+		raise ValueError(
+			'migration result files do not exactly match the producer contract: '
+			f'missing={sorted(expected - actual)!r}, '
+			f'extra={sorted(actual - expected)!r}'
+		)
+	for source, relative_target in sources:
+		target = output_dir / relative_target
+		if file_sha256(source) != file_sha256(target):
+			raise ValueError(
+				f'migration published content differs from source: {target}'
+			)
 
 
 def validate_migration_publish_manifest(  # noqa: C901
@@ -1388,7 +1384,7 @@ def _empty_cosine_summary() -> CosineSimilaritySummary:
 
 
 def _validate_publish_sources(
-	items: Sequence[PublishItem],
+	items: Sequence[tuple[Path, Path]],
 	source_root: Path,
 	max_file_size_bytes: int,
 ) -> None:
@@ -1398,10 +1394,7 @@ def _validate_publish_sources(
 		raise ValueError('max_file_size_bytes must be positive')
 	if not items:
 		raise ValueError('at least one lightweight publish item is required')
-	for item in items:
-		if item.content_text is not None or item.text_replacements:
-			raise ValueError('migration publish accepts immutable source files only')
-		source = Path(item.source)
+	for source, relative_target in items:
 		if source.is_symlink() or not source.is_file():
 			raise FileNotFoundError(f'publish source must be a regular file: {source}')
 		try:
@@ -1412,8 +1405,8 @@ def _validate_publish_sources(
 			) from error
 		_validate_lightweight_path(source, label=f'publish source {source}')
 		_validate_lightweight_path(
-			Path(item.relative_target),
-			label=f'publish target {item.relative_target}',
+			relative_target,
+			label=f'publish target {relative_target}',
 		)
 		if source.stat().st_size > max_file_size_bytes:
 			raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
@@ -1427,27 +1420,6 @@ def _validate_lightweight_path(path: Path, *, label: str) -> None:
 		raise ValueError(
 			f'{label} suffix is not allowed for lightweight publication: {suffix}'
 		)
-
-
-def _manifest_enrich_source_identities(manifest_path: Path) -> None:
-	payload = _read_json_mapping(manifest_path)
-	items = payload.get('items')
-	if not isinstance(items, list):
-		raise TypeError('publish manifest items must be a list')
-	for index, item in enumerate(items):
-		if not isinstance(item, dict):
-			raise TypeError(f'publish manifest item {index} must be an object')
-		source_value = item.get('source')
-		if not isinstance(source_value, str):
-			raise TypeError(f'publish manifest item {index}.source is invalid')
-		source = Path(source_value)
-		if not source.is_file():
-			raise FileNotFoundError(f'publish source disappeared: {source}')
-		item['source_sha256'] = file_sha256(source)
-		item['source_size_bytes'] = source.stat().st_size
-		item['published_sha256'] = item.get('sha256')
-		item['published_size_bytes'] = item.get('size_bytes')
-	write_json_atomic(manifest_path, payload)
 
 
 def _manifest_target(root: Path, item: Mapping[str, object], index: int) -> Path:
@@ -1517,57 +1489,6 @@ def _validate_source_hashes(
 		raise ValueError(f'publish manifest item {index}.source_sha256 mismatch')
 	if source_sha != file_sha256(target):
 		raise ValueError(f'publish source and target SHA-256 differ: {target}')
-
-
-def _publish_manifest_from_payload(manifest_path: Path) -> PublishManifest:
-	payload = _read_json_mapping(manifest_path)
-	items_value = payload.get('items')
-	if not isinstance(items_value, list):
-		raise TypeError('publish manifest items must be a list')
-
-	published: list[PublishedItem] = []
-	for index, item in enumerate(items_value):
-		if not isinstance(item, Mapping):
-			raise TypeError(f'publish manifest item {index} must be an object')
-		source = item.get('source')
-		target = item.get('target')
-		size = item.get('size_bytes')
-		sha256 = item.get('sha256')
-		if (
-			not isinstance(source, str)
-			or not isinstance(target, str)
-			or isinstance(size, bool)
-			or not isinstance(size, int)
-			or not _is_sha256(sha256)
-		):
-			raise TypeError(f'publish manifest item {index} is invalid')
-		published.append(
-			PublishedItem(
-				source=Path(source),
-				target=manifest_path.parent / target,
-				size_bytes=size,
-				sha256=sha256,
-			)
-		)
-	created_at = payload.get('created_at_utc')
-	if not isinstance(created_at, str):
-		raise TypeError('publish manifest created_at_utc is invalid')
-	output = payload.get('output_dir')
-	if not isinstance(output, str):
-		raise TypeError('publish manifest output_dir is invalid')
-	return PublishManifest(
-		created_at_utc=created_at,
-		source_artifact_root=(
-			None
-			if payload.get('source_artifact_root') is None
-			else Path(str(payload['source_artifact_root']))
-		),
-		output_dir=Path(output),
-		items=published,
-		skipped_optional_items=[],
-		warnings=[],
-		manifest_path=manifest_path,
-	)
 
 
 __all__ = [

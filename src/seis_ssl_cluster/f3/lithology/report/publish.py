@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,12 +23,8 @@ from seis_ssl_cluster.f3.lithology.report.metrics_loader import (
 	_read_optional_json,
 	_read_required_json_object,
 )
-from seis_ssl_cluster.results import (
-	DEFAULT_MAX_FILE_SIZE_BYTES,
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
+
+DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping, Sequence
@@ -71,52 +68,44 @@ def publish_f3_lithology_report(
 	publish_config: F3LithologyPublishConfig | None,
 	*,
 	payload: Mapping[str, object] | None = None,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	"""Publish lightweight F3 lithology probe report artifacts into ``results/``."""
 	if publish_config is None or not publish_config.enabled:
-		return None
+		return ()
 	if publish_config.output_dir is None:
 		msg = 'publish output_dir is required when publishing is enabled'
 		raise ValueError(msg)
 	_validate_max_prediction_figures(publish_config.max_prediction_figures)
 	if payload is None:
 		payload = _read_required_json_object(config.output_json, 'publish report')
-	return publish_selected_results(
-		items=_publish_items_for_f3_lithology_report(
-			config,
-			publish_config=publish_config,
-			payload=payload,
-		),
-		output_dir=publish_config.output_dir,
-		max_file_size_bytes=publish_config.max_file_size_bytes,
+	return _write_published_f3_lithology_report(
+		config,
+		publish_config=publish_config,
+		payload=payload,
 	)
 
 def publish_f3_lithology_comparison_report(
 	config: F3LithologyComparisonReportConfig,
 	publish_config: F3LithologyComparisonPublishConfig | None,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	"""Publish lightweight F3 lithology comparison artifacts into ``results/``."""
 	if publish_config is None or not publish_config.enabled:
-		return None
+		return ()
 	if publish_config.output_dir is None:
 		msg = 'publish output_dir is required when publishing is enabled'
 		raise ValueError(msg)
-	return publish_selected_results(
-		items=_publish_items_for_f3_lithology_comparison_report(
-			config,
-			publish_config=publish_config,
-		),
-		output_dir=publish_config.output_dir,
-		max_file_size_bytes=publish_config.max_file_size_bytes,
+	return _copy_f3_lithology_comparison_files(
+		config,
+		publish_config=publish_config,
 	)
 
-def _publish_items_for_f3_lithology_report(
+def _write_published_f3_lithology_report(
 	config: F3LithologyReportConfig,
 	*,
 	publish_config: F3LithologyPublishConfig,
 	payload: Mapping[str, object],
-) -> tuple[PublishItem, ...]:
-	figure_items, text_replacements = _publish_figure_items_and_replacements(
+) -> tuple[Path, ...]:
+	figure_sources, text_replacements = _publish_figure_sources_and_replacements(
 		config,
 		publish_config=publish_config,
 		payload=payload,
@@ -125,69 +114,94 @@ def _publish_items_for_f3_lithology_report(
 		payload,
 		text_replacements=text_replacements,
 	)
-	return (
-		PublishItem(
+	if publish_config.output_dir is None:
+		raise ValueError('publish output_dir is required when publishing is enabled')
+	output_dir = publish_config.output_dir
+	files = [
+		_write_published_text(
 			config.output_markdown,
-			_PUBLISH_REPORT_TARGET,
-			content_text=render_f3_lithology_report_markdown(published_payload),
+			output_dir / _PUBLISH_REPORT_TARGET,
+			render_f3_lithology_report_markdown(published_payload),
+			max_file_size_bytes=publish_config.max_file_size_bytes,
 		),
-		PublishItem(
+		_write_published_text(
 			config.output_json,
-			_PUBLISH_JSON_TARGET,
-			content_text=(
-				json.dumps(published_payload, indent=2, sort_keys=True) + '\n'
-			),
+			output_dir / _PUBLISH_JSON_TARGET,
+			json.dumps(published_payload, indent=2, sort_keys=True) + '\n',
+			max_file_size_bytes=publish_config.max_file_size_bytes,
 		),
-		PublishItem(config.metrics_json, _PUBLISH_METRICS_TARGET),
-		PublishItem(
-			config.metrics_json.with_name('metrics.csv'),
-			_PUBLISH_METRICS_CSV_TARGET,
-		),
-		PublishItem(
+	]
+	for source, relative_target in (
+		(config.metrics_json, _PUBLISH_METRICS_TARGET),
+		(config.metrics_json.with_name('metrics.csv'), _PUBLISH_METRICS_CSV_TARGET),
+		(
 			config.metrics_json.with_name('classification_report.md'),
 			_PUBLISH_CLASSIFICATION_REPORT_TARGET,
 		),
-		PublishItem(
+		(
 			config.metrics_json.with_name('confusion_matrix.csv'),
 			_PUBLISH_CONFUSION_MATRIX_CSV_TARGET,
 		),
-		*figure_items,
-	)
+	):
+		files.append(
+			_copy_published_file(
+				source,
+				output_dir / relative_target,
+				max_file_size_bytes=publish_config.max_file_size_bytes,
+			)
+		)
+	for source, relative_target in figure_sources:
+		if source.is_file():
+			files.append(
+				_copy_published_file(
+					source,
+					output_dir / relative_target,
+					max_file_size_bytes=publish_config.max_file_size_bytes,
+				)
+			)
+	return tuple(files)
 
-def _publish_items_for_f3_lithology_comparison_report(
+def _copy_f3_lithology_comparison_files(
 	config: F3LithologyComparisonReportConfig,
 	*,
 	publish_config: F3LithologyComparisonPublishConfig,
-) -> tuple[PublishItem, ...]:
-	items = [
-		PublishItem(config.output_markdown, Path('comparison_report.md')),
-		PublishItem(config.output_csv, Path('comparison_table.csv')),
+) -> tuple[Path, ...]:
+	if publish_config.output_dir is None:
+		raise ValueError('publish output_dir is required when publishing is enabled')
+	output_dir = publish_config.output_dir
+	sources = [
+		(config.output_markdown, Path('comparison_report.md')),
+		(config.output_csv, Path('comparison_table.csv')),
 	]
 	optional_json = config.output_csv.with_suffix('.json')
 	if optional_json.is_file():
-		items.append(PublishItem(optional_json, Path('comparison_table.json')))
+		sources.append((optional_json, Path('comparison_table.json')))
 	if publish_config.include_figures:
-		items.extend(
-			PublishItem(
-				source,
-				_PUBLISH_FIGURE_DIR / source.name,
-				required=False,
-			)
+		sources.extend(
+			(source, _PUBLISH_FIGURE_DIR / source.name)
 			for source in _comparison_figure_paths(config.output_markdown).values()
+			if source.is_file()
 		)
-	return tuple(items)
+	return tuple(
+		_copy_published_file(
+			source,
+			output_dir / relative_target,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		)
+		for source, relative_target in sources
+	)
 
-def _publish_figure_items_and_replacements(
+def _publish_figure_sources_and_replacements(
 	config: F3LithologyReportConfig,
 	*,
 	publish_config: F3LithologyPublishConfig,
 	payload: Mapping[str, object],
-) -> tuple[tuple[PublishItem, ...], tuple[tuple[str, str], ...]]:
+) -> tuple[tuple[tuple[Path, Path], ...], tuple[tuple[str, str], ...]]:
 	if not publish_config.include_figures:
 		return (), ()
 
 	report_dir = config.output_markdown.parent
-	items: list[PublishItem] = []
+	items: list[tuple[Path, Path]] = []
 	replacements: list[tuple[str, str]] = []
 	planned_targets: set[Path] = set()
 	figures_by_type = {
@@ -200,7 +214,7 @@ def _publish_figure_items_and_replacements(
 		if source is None:
 			source = config.metrics_json.parent / relative
 		target = _PUBLISH_FIGURE_DIR / relative.name
-		_append_publish_figure_item(
+		_append_publish_figure_source(
 			items=items,
 			replacements=replacements,
 			planned_targets=planned_targets,
@@ -213,7 +227,7 @@ def _publish_figure_items_and_replacements(
 		config,
 		max_prediction_figures=publish_config.max_prediction_figures,
 	):
-		_append_publish_figure_item(
+		_append_publish_figure_source(
 			items=items,
 			replacements=replacements,
 			planned_targets=planned_targets,
@@ -224,9 +238,9 @@ def _publish_figure_items_and_replacements(
 
 	return tuple(items), tuple(replacements)
 
-def _append_publish_figure_item(  # noqa: PLR0913
+def _append_publish_figure_source(  # noqa: PLR0913
 	*,
-	items: list[PublishItem],
+	items: list[tuple[Path, Path]],
 	replacements: list[tuple[str, str]],
 	planned_targets: set[Path],
 	source: Path,
@@ -235,7 +249,7 @@ def _append_publish_figure_item(  # noqa: PLR0913
 ) -> None:
 	if target in planned_targets:
 		return
-	items.append(PublishItem(source, target, required=False))
+	items.append((source, target))
 	if source.is_file():
 		replacements.append(
 			(
@@ -244,6 +258,28 @@ def _append_publish_figure_item(  # noqa: PLR0913
 			),
 		)
 	planned_targets.add(target)
+
+def _copy_published_file(
+	source: Path, target: Path, *, max_file_size_bytes: int
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if source.stat().st_size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(source, target)
+	return target
+
+def _write_published_text(
+	source: Path, target: Path, text: str, *, max_file_size_bytes: int
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if len(text.encode('utf-8')) > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	target.write_text(text, encoding='utf-8')
+	return target
 
 def _publish_prediction_figure_sources(
 	config: F3LithologyReportConfig,
@@ -324,16 +360,16 @@ def _validate_max_prediction_figures(value: int) -> None:
 __all__ = [
 	'F3LithologyComparisonPublishConfig',
 	'F3LithologyPublishConfig',
-	'_append_publish_figure_item',
+	'_append_publish_figure_source',
+	'_copy_f3_lithology_comparison_files',
 	'_is_validation_prediction_figure',
-	'_publish_figure_items_and_replacements',
 	'_publish_figure_payload',
-	'_publish_items_for_f3_lithology_comparison_report',
-	'_publish_items_for_f3_lithology_report',
+	'_publish_figure_sources_and_replacements',
 	'_publish_prediction_figure_sources',
 	'_publish_report_payload',
 	'_source_path_from_figure',
 	'_validate_max_prediction_figures',
+	'_write_published_f3_lithology_report',
 	'publish_f3_lithology_comparison_report',
 	'publish_f3_lithology_report',
 ]

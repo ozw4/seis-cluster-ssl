@@ -58,12 +58,11 @@ def main() -> None:
 	for figure_path in result.figure_paths:
 		print(f'f3_strat_hmm_m1_results.figure: {figure_path}')
 	print(f'f3_strat_hmm_m1_results.warning_count: {len(result.warnings)}')
-	if result.publish_manifest is not None:
+	if result.published_files:
 		print(
 			'published F3 strat-HMM M1 results: '
-			f'{result.publish_manifest.output_dir}',
+			f'{result.published_files[0].parent}',
 		)
-		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
 
 
 def _config_from_mapping(

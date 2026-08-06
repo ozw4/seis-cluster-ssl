@@ -5,16 +5,12 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from seis_ssl_cluster.results import (
-	DEFAULT_MAX_FILE_SIZE_BYTES,
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
+DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 DEFAULT_RESULTS_ROOT = Path('results')
 F3_STRAT_HMM_M1_GUARDRAIL_SUITE_NAME = 'strat_hmm_m1_guardrails_v1'
@@ -136,7 +132,7 @@ class F3GuardrailSummaryResult:
 	summary_markdown: Path
 	pending_roles: tuple[str, ...]
 	warnings: tuple[str, ...]
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 def f3_shuffled_hmm_target_config_from_mapping(
@@ -400,7 +396,7 @@ def summarize_f3_strat_hmm_m1_guardrails(
 	_write_comparison_csv(table_path, rows)
 	json_path.write_text(json.dumps(payload, indent=2) + '\n', encoding='utf-8')
 	markdown_path.write_text(_render_markdown(payload), encoding='utf-8')
-	publish_manifest = publish_f3_strat_hmm_m1_guardrails(
+	published_files = publish_f3_strat_hmm_m1_guardrails(
 		comparison_table=table_path,
 		summary_json=json_path,
 		summary_markdown=markdown_path,
@@ -412,7 +408,7 @@ def summarize_f3_strat_hmm_m1_guardrails(
 		markdown_path,
 		tuple(pending),
 		tuple(warnings),
-		publish_manifest,
+		published_files,
 	)
 
 
@@ -422,21 +418,24 @@ def publish_f3_strat_hmm_m1_guardrails(
 	summary_json: Path,
 	summary_markdown: Path,
 	publish_config: F3GuardrailPublishConfig,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	"""Publish only lightweight guardrail summary formats into ``results/``."""
 	if not publish_config.enabled:
-		return None
+		return ()
 	_validate_guardrail_publish_payload(summary_json)
-	return publish_selected_results(
-		items=(
-			PublishItem(summary_markdown, Path(summary_markdown.name)),
-			PublishItem(summary_json, Path(summary_json.name)),
-			PublishItem(comparison_table, Path(comparison_table.name)),
-		),
-		output_dir=publish_config.output_dir,
-		allowed_suffixes=F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_SUFFIXES,
-		max_file_size_bytes=publish_config.max_file_size_bytes,
-	)
+	files = []
+	for source in (summary_markdown, summary_json, comparison_table):
+		if not source.is_file():
+			raise FileNotFoundError(
+				f'required guardrail publish source does not exist: {source}'
+			)
+		if source.stat().st_size > publish_config.max_file_size_bytes:
+			raise ValueError(f'guardrail publish source exceeds size limit: {source}')
+		target = publish_config.output_dir / source.name
+		target.parent.mkdir(parents=True, exist_ok=True)
+		shutil.copy2(source, target)
+		files.append(target)
+	return tuple(files)
 
 
 def _validate_guardrail_publish_readiness(

@@ -58,9 +58,8 @@ def main() -> None:
 	print(f'f3_lithology_voxel_report.markdown: {result.report_markdown}')
 	print(f'f3_lithology_voxel_report.json: {result.report_json}')
 	print(f'f3_lithology_voxel_report.figure_count: {len(result.figure_paths)}')
-	if result.publish_manifest is not None:
-		print(f'published F3 voxel report: {result.publish_manifest.output_dir}')
-		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
+	if result.published_files:
+		print(f'published F3 voxel report: {result.published_files[0].parent}')
 
 
 def _print_summary(config: F3LithologyVoxelReportConfig) -> None:

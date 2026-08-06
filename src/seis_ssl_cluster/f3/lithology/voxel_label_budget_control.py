@@ -38,15 +38,12 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_runner import (
 	quarantine_voxel_label_budget_output,
 	run_voxel_label_budget_job,
 )
-from seis_ssl_cluster.results import (
-	FORBIDDEN_SUFFIXES,
-	PublishItem,
-	PublishManifest,
-	publish_manifest_to_dict,
-	publish_selected_results,
-)
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	load_voxel_decoder_checkpoint,
+)
+
+FORBIDDEN_SUFFIXES = frozenset(
+	{'.pt', '.pth', '.npy', '.npz', '.joblib', '.pkl', '.sgy', '.segy'}
 )
 
 if TYPE_CHECKING:
@@ -146,9 +143,8 @@ class F3VoxelLabelBudgetControlResultsResult:
 	summary_markdown: Path
 	handoff_markdown: Path
 	table_paths: tuple[Path, ...]
-	local_publish_manifest: Path
 	readiness: Mapping[str, object]
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 def inspect_f3_lithology_voxel_label_budget_control(
@@ -555,15 +551,13 @@ def summarize_f3_lithology_voxel_label_budget_control(
 			summary_markdown=summary_markdown,
 			handoff_markdown=handoff_markdown,
 			table_paths=table_paths,
-			local_publish_manifest=config.reports_dir / CONTROL_PUBLISH_MANIFEST,
 			readiness=inspection.readiness,
 		)
 	except Exception as error:
 		_write_blocked_control_contract(config, stage='summary_write', error=error)
 		raise
 	try:
-		publish_manifest = _publish_control_results(config)
-		_write_local_publish_manifest(result, config, publish_manifest)
+		published_files = _publish_control_results(config)
 	except Exception as error:
 		_write_blocked_control_contract(config, stage='summary_publish', error=error)
 		raise
@@ -572,9 +566,8 @@ def summarize_f3_lithology_voxel_label_budget_control(
 		summary_markdown=result.summary_markdown,
 		handoff_markdown=result.handoff_markdown,
 		table_paths=result.table_paths,
-		local_publish_manifest=result.local_publish_manifest,
 		readiness=result.readiness,
-		publish_manifest=publish_manifest,
+		published_files=published_files,
 	)
 
 
@@ -1324,74 +1317,36 @@ def _validate_existing_publish_tree(
 			raise ValueError(f'raw artifact was published: {path}')
 		if path.stat().st_size > config.publish.max_file_size_bytes:
 			raise ValueError(f'published file exceeds size limit: {path}')
-	if actual != expected:
+	actual_without_historical_manifest = actual - {CONTROL_PUBLISH_MANIFEST}
+	if actual_without_historical_manifest != expected:
 		raise FileExistsError(
 			'current K6 publish root has an unexpected file set; '
-			f'missing={sorted(expected - actual)!r}, '
-			f'extra={sorted(actual - expected)!r}'
+			f'missing={sorted(expected - actual_without_historical_manifest)!r}, '
+			f'extra={sorted(actual_without_historical_manifest - expected)!r}'
 		)
 
 
 def _publish_control_results(
 	config: F3VoxelLabelBudgetControlConfig,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	if not config.publish.enabled:
-		return None
-	items = [
-		_publish_report_item(config, name)
-		for name in sorted(_publish_target_names() - {CONTROL_PUBLISH_MANIFEST})
-	]
-	manifest = publish_selected_results(
-		items=items,
-		output_dir=config.publish.output_dir,
-		max_file_size_bytes=config.publish.max_file_size_bytes,
-		overwrite=config.publish.overwrite,
-	)
-	_validate_published_control_tree(config, manifest)
-	return manifest
-
-
-def _write_local_publish_manifest(
-	result: F3VoxelLabelBudgetControlResultsResult,
-	config: F3VoxelLabelBudgetControlConfig,
-	manifest: PublishManifest | None,
-) -> None:
-	payload: dict[str, object] = {
-		'artifact_type': 'f3_current_k6_control_publish_manifest',
-		'schema_version': 1,
-		'publish_enabled': config.publish.enabled,
-		'publish_output_dir': str(config.publish.output_dir),
-		'published_manifest': (
-			None if manifest is None else publish_manifest_to_dict(manifest)
-		),
-	}
-	_write_json(result.local_publish_manifest, payload)
-
-
-def _validate_published_control_tree(
-	config: F3VoxelLabelBudgetControlConfig, manifest: PublishManifest
-) -> None:
-	expected = _publish_target_names()
-	actual = {
-		path.relative_to(config.publish.output_dir).as_posix()
-		for path in config.publish.output_dir.rglob('*')
-		if path.is_file()
-	}
-	if actual != expected:
-		raise ValueError(
-			'published current K6 control file inventory mismatch; '
-			f'missing={sorted(expected - actual)!r}, '
-			f'extra={sorted(actual - expected)!r}'
-		)
-	if manifest.manifest_path.name != CONTROL_PUBLISH_MANIFEST:
-		raise AssertionError('unexpected current K6 publish manifest name')
-	for path in config.publish.output_dir.rglob('*'):
-		if not path.is_file():
-			continue
-		if path.suffix.lower() in FORBIDDEN_SUFFIXES:
-			raise ValueError(f'raw artifact was published: {path}')
-		if path.stat().st_size > config.publish.max_file_size_bytes:
-			raise ValueError(f'published file exceeds size limit: {path}')
+		return ()
+	files = []
+	for name in sorted(_publish_target_names()):
+		source = config.reports_dir / name
+		if not source.is_file():
+			raise FileNotFoundError(
+				f'required control publish source is missing: {source}'
+			)
+		if source.stat().st_size > config.publish.max_file_size_bytes:
+			raise ValueError(f'control publish source exceeds size limit: {source}')
+		target = config.publish.output_dir / name
+		if target.exists() and not config.publish.overwrite:
+			raise FileExistsError(f'publish target already exists: {target}')
+		target.parent.mkdir(parents=True, exist_ok=True)
+		shutil.copy2(source, target)
+		files.append(target)
+	return tuple(files)
 
 
 def _publish_target_names() -> set[str]:
@@ -1410,14 +1365,7 @@ def _publish_target_names() -> set[str]:
 		CONTROL_SUMMARY_JSON,
 		CONTROL_SUMMARY_MARKDOWN,
 		CONTROL_HANDOFF_MARKDOWN,
-		CONTROL_PUBLISH_MANIFEST,
 	}
-
-
-def _publish_report_item(
-	config: F3VoxelLabelBudgetControlConfig, name: str
-) -> PublishItem:
-	return PublishItem(config.reports_dir / name, Path(name))
 
 
 def _identity_path(value: object, label: str) -> Path:

@@ -63,8 +63,8 @@ def main() -> None:
 	print(f'guardrails.summary_markdown: {result.summary_markdown}')
 	print(f'guardrails.pending_roles: {list(result.pending_roles)}')
 	print(f'guardrails.warnings: {list(result.warnings)}')
-	if result.publish_manifest is not None:
-		print(f'guardrails.publish_manifest: {result.publish_manifest.manifest_path}')
+	if result.published_files:
+		print(f'guardrails.published_file_count: {len(result.published_files)}')
 
 
 if __name__ == '__main__':

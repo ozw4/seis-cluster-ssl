@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 from __future__ import annotations
 
 import csv
@@ -276,7 +275,7 @@ def test_f3_lithology_report_publish_writes_lightweight_results(
 		),
 	)
 
-	assert result.publish_manifest is not None
+	assert result.published_files
 	published_files = {
 		path.relative_to(output_dir)
 		for path in output_dir.rglob('*')
@@ -289,13 +288,16 @@ def test_f3_lithology_report_publish_writes_lightweight_results(
 		Path('metrics.csv'),
 		Path('classification_report.md'),
 		Path('confusion_matrix.csv'),
-		Path('publish_manifest.json'),
 		Path('figures/confusion_matrix.png'),
 		Path('figures/per_class_f1.png'),
 		Path('figures/validation_inline_0150_prediction.png'),
 		Path('figures/validation_crossline_0350_prediction.png'),
 		Path('figures/validation_crossline_0750_prediction.png'),
 	}
+	assert {
+		path.relative_to(output_dir) for path in result.published_files
+	} == published_files
+	assert not (output_dir / 'publish_manifest.json').exists()
 	assert not any(
 		path.suffix in {'.joblib', '.npy', '.npz'}
 		for path in published_files
@@ -340,14 +342,11 @@ def test_f3_lithology_report_publish_warns_for_missing_optional_prediction_figur
 		),
 	)
 
-	assert result.publish_manifest is not None
-	assert any(
-		'optional publish source does not exist' in warning
-		and 'validation_crossline_0350_prediction.png' in warning
-		for warning in result.publish_manifest.warnings
-	)
+	assert result.published_files
 	missing_prediction = output_dir / 'figures/validation_crossline_0350_prediction.png'
 	assert not missing_prediction.exists()
+	assert missing_prediction not in result.published_files
+	assert not (output_dir / 'publish_manifest.json').exists()
 	markdown = (output_dir / 'report.md').read_text(encoding='utf-8')
 	assert 'validation_crossline_0350_prediction.png' not in _figures_section(markdown)
 

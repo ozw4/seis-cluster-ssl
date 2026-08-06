@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+
+if TYPE_CHECKING:
+	from pathlib import Path
 
 from seis_ssl_cluster.migration.performance_results import (
 	COMPLETION_MANIFEST_NAME,
@@ -18,10 +20,8 @@ from seis_ssl_cluster.migration.performance_results import (
 	reuse_or_quarantine_artifact,
 	staged_artifact_directory,
 	validate_completion_manifest,
-	validate_migration_publish_manifest,
 	write_completion_manifest,
 )
-from seis_ssl_cluster.results import PublishItem
 
 CURRENT_SHA = 'a' * 40
 HISTORICAL_SHA = 'b' * 40
@@ -193,7 +193,7 @@ def test_quarantine_uses_timestamped_preserving_rename(tmp_path: Path) -> None:
 	assert (quarantined / 'evidence.txt').read_text(encoding='utf-8') == 'preserve'
 
 
-def test_lightweight_publish_enforces_raw_exclusion_and_manifest_integrity(
+def test_lightweight_publish_writes_exact_files_without_manifest(
 	tmp_path: Path,
 ) -> None:
 	source_root = tmp_path / 'artifacts'
@@ -201,40 +201,37 @@ def test_lightweight_publish_enforces_raw_exclusion_and_manifest_integrity(
 	metrics = _write(source_root / 'reports' / 'metrics.json', '{"f1": 1.0}\n')
 	output = tmp_path / 'results' / 'migration'
 
-	manifest = publish_lightweight_migration_results(
-		items=(
-			PublishItem(report, Path('summary.md')),
-			PublishItem(metrics, Path('tables/metrics.json')),
-		),
+	raw = _write(source_root / 'raw.npy', 'not actually an array')
+	published_files = publish_lightweight_migration_results(
+		summary_report=report,
+		metrics_json=metrics,
 		output_dir=output,
 		source_artifact_root=source_root,
 	)
 
-	assert manifest.manifest_path == output / 'publish_manifest.json'
-	listed = validate_migration_publish_manifest(
-		manifest.manifest_path,
-		source_artifact_root=source_root,
-	)
-	assert {item.relative_to(output).as_posix() for item in listed} == {
+	assert {item.relative_to(output).as_posix() for item in published_files} == {
 		'summary.md',
 		'tables/metrics.json',
 	}
-	payload = json.loads(manifest.manifest_path.read_text(encoding='utf-8'))
-	assert (
-		payload['items'][0]['source_sha256'] == payload['items'][0]['published_sha256']
-	)
+	assert (output / 'summary.md').read_bytes() == report.read_bytes()
+	assert (output / 'tables/metrics.json').read_bytes() == metrics.read_bytes()
+	assert not (output / raw.name).exists()
+	assert not (output / 'publish_manifest.json').exists()
 	(output / 'unlisted.md').write_text('not allowed', encoding='utf-8')
 	with pytest.raises(ValueError, match='do not exactly match'):
-		validate_migration_publish_manifest(
-			manifest.manifest_path,
+		publish_lightweight_migration_results(
+			summary_report=report,
+			metrics_json=metrics,
+			output_dir=output,
 			source_artifact_root=source_root,
+			allow_reuse=True,
 		)
 
-	raw = _write(source_root / 'raw.npy', 'not actually an array')
-	with pytest.raises(ValueError, match='forbidden raw-artifact suffix'):
+	with pytest.raises(FileNotFoundError, match='regular file'):
 		publish_lightweight_migration_results(
-			items=(PublishItem(raw, Path('raw.npy')),),
-			output_dir=tmp_path / 'results' / 'raw',
+			summary_report=source_root / 'missing.md',
+			metrics_json=metrics,
+			output_dir=tmp_path / 'results' / 'missing',
 			source_artifact_root=source_root,
 		)
 

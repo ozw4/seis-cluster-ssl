@@ -6,16 +6,15 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
 import statistics
 from collections.abc import Mapping, Sequence
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.embedding.writer import file_sha256
-from seis_ssl_cluster.results import (
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
+
+if TYPE_CHECKING:
+	from pathlib import Path
 
 SPLITS = tuple(f'split_{index:03d}' for index in range(6))
 BUDGETS = ('cap25', 'cap50')
@@ -800,21 +799,28 @@ def _render_formal_handoff_note(formal: Mapping[str, object]) -> list[str]:
 
 def publish_low_label_split_summary(
 	config: object, paths: Mapping[str, Path]
-) -> PublishManifest:
+) -> tuple[Path, ...]:
 	"""Copy the exact lightweight six-split summary into the results tree."""
 	sources = {path.name: path for path in paths.values()}
 	if set(sources) != set(OUTPUT_NAMES):
 		raise ValueError('six-split summary publish sources are incomplete or unexpected')
 	publish_dir = _publish_dir(config)
 	_validate_existing_publish_tree(publish_dir)
-	manifest = publish_selected_results(
-		items=[PublishItem(sources[name], Path(name)) for name in OUTPUT_NAMES],
-		output_dir=publish_dir,
-		max_file_size_bytes=10 * 1024 * 1024,
-		overwrite=True,
-	)
-	_validate_published_tree(publish_dir, manifest)
-	return manifest
+	published = []
+	for name in OUTPUT_NAMES:
+		source = sources[name]
+		if not source.is_file():
+			raise FileNotFoundError(f'required six-split publish source is missing: {source}')
+		if source.stat().st_size > 10 * 1024 * 1024:
+			raise ValueError(f'six-split publish source exceeds size limit: {source}')
+		target = publish_dir / name
+		target.parent.mkdir(parents=True, exist_ok=True)
+		shutil.copy2(source, target)
+		if file_sha256(source) != file_sha256(target):
+			raise ValueError(f'six-split published content differs from source: {target}')
+		published.append(target)
+	_validate_published_tree(publish_dir, tuple(published))
+	return tuple(published)
 
 
 def _publish_dir(config: object) -> Path:
@@ -822,13 +828,13 @@ def _publish_dir(config: object) -> Path:
 
 
 def _publish_target_names() -> set[str]:
-	return {*OUTPUT_NAMES, PUBLISH_MANIFEST_NAME}
+	return set(OUTPUT_NAMES)
 
 
 def _validate_existing_publish_tree(publish_dir: Path) -> None:
 	if not publish_dir.exists():
 		return
-	actual = _published_relative_names(publish_dir)
+	actual = _published_relative_names(publish_dir) - {PUBLISH_MANIFEST_NAME}
 	if actual and actual != _publish_target_names():
 		expected = _publish_target_names()
 		raise FileExistsError(
@@ -837,43 +843,22 @@ def _validate_existing_publish_tree(publish_dir: Path) -> None:
 	)
 
 
-def _validate_published_tree(  # noqa: C901
-	publish_dir: Path, manifest: PublishManifest
+def _validate_published_tree(
+	publish_dir: Path, published_files: Sequence[Path]
 ) -> None:
 	expected = _publish_target_names()
-	actual = _published_relative_names(publish_dir)
+	actual = _published_relative_names(publish_dir) - {PUBLISH_MANIFEST_NAME}
 	if actual != expected:
 		raise ValueError(
 		'six-split published file inventory mismatch; '
 		f'missing={sorted(expected - actual)!r}, extra={sorted(actual - expected)!r}'
 	)
-	if manifest.manifest_path != publish_dir.resolve() / PUBLISH_MANIFEST_NAME:
-		raise ValueError('six-split publish manifest path mismatch')
-	payload = _mapping(json.loads(manifest.manifest_path.read_text(encoding='utf-8')))
-	recorded = payload.get('items')
-	if not isinstance(recorded, list) or len(recorded) != len(OUTPUT_NAMES):
-		raise ValueError('six-split publish manifest item count mismatch')
-	recorded_by_target: dict[str, Mapping[str, object]] = {}
-	for value in recorded:
-		item = _mapping(value)
-		target = item.get('target')
-		if not isinstance(target, str) or target in recorded_by_target:
-			raise ValueError('six-split publish manifest targets are invalid')
-		recorded_by_target[target] = item
-	if set(recorded_by_target) != set(OUTPUT_NAMES):
-		raise ValueError('six-split publish manifest target set mismatch')
-	for item in manifest.items:
-		target = item.target.resolve()
-		if not target.is_file() or not item.source.is_file():
-			raise FileNotFoundError(f'six-split publish source or target is missing: {target}')
-		if item.size_bytes != target.stat().st_size:
-			raise ValueError(f'six-split published target size mismatch: {target}')
-		if item.sha256 != file_sha256(item.source) or item.sha256 != file_sha256(target):
-			raise ValueError(f'six-split publish source/target SHA-256 mismatch: {target}')
-		target_name = target.relative_to(publish_dir.resolve()).as_posix()
-		record = recorded_by_target.get(target_name)
-		if record is None or record.get('source') != str(item.source) or record.get('size_bytes') != item.size_bytes or record.get('sha256') != item.sha256:
-			raise ValueError(f'six-split publish manifest SHA-256 mismatch: {target}')
+	listed = {
+		path.resolve().relative_to(publish_dir.resolve()).as_posix()
+		for path in published_files
+	}
+	if listed != expected:
+		raise ValueError('six-split returned published file set mismatch')
 
 
 def _published_relative_names(publish_dir: Path) -> set[str]:

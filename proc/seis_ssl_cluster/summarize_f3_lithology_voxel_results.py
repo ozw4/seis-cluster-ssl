@@ -77,8 +77,8 @@ def main() -> None:
 	print(f'f3_lithology_voxel_results.summary_markdown: {result.summary_markdown}')
 	print(f'f3_lithology_voxel_results.decoder_value: {result.decoder_value}')
 	print(f'f3_lithology_voxel_results.m2a_vs_m1_voxel: {result.m2a_vs_m1_voxel}')
-	if result.publish_manifest is not None:
-		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
+	if result.published_files:
+		print(f'published F3 voxel results: {result.published_files[0].parent}')
 
 
 if __name__ == '__main__':

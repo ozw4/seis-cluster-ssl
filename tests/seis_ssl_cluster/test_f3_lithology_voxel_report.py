@@ -150,10 +150,10 @@ def test_voxel_publish_excludes_raw_volume_and_enforces_size_guard(
 	payload = _payload(kind='token_projection_nearest')
 	result = F3LithologyVoxelReportResult(markdown, json_path, (figure,), payload)
 	config = _publish_config(tmp_path, report_dir=report_dir)
-	manifest = publish_f3_lithology_voxel_report(result, config=config)
+	published_files = publish_f3_lithology_voxel_report(result, config=config)
 
-	assert manifest is not None
-	targets = [item.target.name for item in manifest.items]
+	assert published_files
+	targets = [path.name for path in published_files]
 	assert targets == [
 		'report.md',
 		'report.json',
@@ -161,6 +161,7 @@ def test_voxel_publish_excludes_raw_volume_and_enforces_size_guard(
 		'confusion_matrix.png',
 	]
 	assert 'raw.npy' not in targets
+	assert not (config.publish.output_dir / 'publish_manifest.json').exists()
 	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
 		publish_f3_lithology_voxel_report(
 			result,
@@ -208,10 +209,9 @@ def test_voxel_publish_default_dir_uses_versioned_prediction_spec(
 		publish=replace(config.publish, output_dir=None),
 	)
 
-	manifest = publish_f3_lithology_voxel_report(result, config=config)
+	published_files = publish_f3_lithology_voxel_report(result, config=config)
 
-	assert manifest is not None
-	assert manifest.output_dir == (
+	expected_output_dir = (
 		tmp_path
 		/ 'results'
 		/ 'f3'
@@ -220,6 +220,9 @@ def test_voxel_publish_default_dir_uses_versioned_prediction_spec(
 		/ 'model'
 		/ prediction_spec
 	)
+	assert published_files
+	assert all(path.is_relative_to(expected_output_dir) for path in published_files)
+	assert not (expected_output_dir / 'publish_manifest.json').exists()
 
 
 def test_voxel_publish_preserves_explicit_output_dir(tmp_path: Path) -> None:

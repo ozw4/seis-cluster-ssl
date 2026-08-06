@@ -137,7 +137,7 @@ def test_readiness_with_drift_overrides_positive_label(tmp_path: Path) -> None:
 def test_publish_target_inventory_is_lightweight_only() -> None:
 	targets = _publish_target_names()
 
-	assert CONTROL_PUBLISH_MANIFEST in targets
+	assert CONTROL_PUBLISH_MANIFEST not in targets
 	assert not {
 		name
 		for name in targets

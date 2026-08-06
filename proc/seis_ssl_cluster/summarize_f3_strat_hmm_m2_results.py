@@ -80,8 +80,11 @@ def main() -> None:
 	print(f'f3_strat_hmm_m2_results.summary_json: {result.summary_json}')
 	print(f'f3_strat_hmm_m2_results.summary_markdown: {result.summary_markdown}')
 	print(f'f3_strat_hmm_m2_results.decision: {result.decision}')
-	if result.publish_manifest is not None:
-		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
+	if result.published_files:
+		print(
+			'published F3 strat-HMM M2-A results: '
+			f'{result.published_files[0].parent}'
+		)
 
 
 if __name__ == '__main__':

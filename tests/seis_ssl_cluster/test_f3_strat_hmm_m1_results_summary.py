@@ -5,7 +5,6 @@ import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -94,7 +93,7 @@ def test_successful_summary_creation(tmp_path: Path) -> None:
 		in markdown
 	)
 	assert '![Split/index deltas](figures/split_index_deltas.png)' in markdown
-	assert result.publish_manifest is None
+	assert result.published_files == ()
 
 
 def test_publish_copies_expected_small_files(
@@ -120,7 +119,7 @@ def test_publish_copies_expected_small_files(
 		for path in publish_dir.rglob('*')
 		if path.is_file()
 	}
-	assert result.publish_manifest is not None
+	assert result.published_files
 	assert published_files == {
 		Path('m1_results_summary.md'),
 		Path('m1_results_summary.json'),
@@ -130,21 +129,16 @@ def test_publish_copies_expected_small_files(
 		Path('figures/label_budget_delta_curves.png'),
 		Path('figures/split_index_deltas.png'),
 		Path('figures/single_run_metric_comparison.png'),
-		Path('publish_manifest.json'),
 	}
+	assert {
+		path.resolve().relative_to(publish_dir) for path in result.published_files
+	} == published_files
+	assert not (publish_dir / 'publish_manifest.json').exists()
 	assert (publish_dir / 'm1_results_summary.md').read_text(
 		encoding='utf-8'
 	) == result.summary_markdown.read_text(
 		encoding='utf-8',
 	)
-	manifest_payload = json.loads(
-		(publish_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
-	)
-	assert sorted(item['target'] for item in manifest_payload['items']) == sorted(
-		str(path) for path in published_files if path.name != 'publish_manifest.json'
-	)
-
-
 def test_publish_include_figures_false_omits_markdown_figure_links(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -163,7 +157,8 @@ def test_publish_include_figures_false_omits_markdown_figure_links(
 
 	result = consolidate_f3_strat_hmm_m1_results(config)
 
-	assert result.publish_manifest is not None
+	assert result.published_files
+	assert not (publish_dir / 'publish_manifest.json').exists()
 	assert not (publish_dir / 'figures').exists()
 	generated_markdown = result.summary_markdown.read_text(encoding='utf-8')
 	published_markdown = (publish_dir / 'm1_results_summary.md').read_text(
@@ -190,8 +185,24 @@ def test_publish_disabled_does_nothing(
 
 	result = consolidate_f3_strat_hmm_m1_results(config)
 
-	assert result.publish_manifest is None
+	assert result.published_files == ()
 	assert not publish_dir.exists()
+
+
+def test_publish_leaves_historical_manifest_untouched(tmp_path: Path) -> None:
+	result = _write_publishable_result(tmp_path)
+	publish_dir = tmp_path / 'results'
+	publish_dir.mkdir()
+	manifest = publish_dir / 'publish_manifest.json'
+	manifest.write_text('historical\n', encoding='utf-8')
+
+	published_files = publish_f3_strat_hmm_m1_results(
+		result,
+		F3StratHMMM1PublishConfig(enabled=True, output_dir=publish_dir),
+	)
+
+	assert manifest.read_text(encoding='utf-8') == 'historical\n'
+	assert manifest not in published_files
 
 
 def test_publish_refuses_prohibited_suffix(
@@ -210,12 +221,13 @@ def test_publish_refuses_prohibited_suffix(
 		warnings=(),
 	)
 
-	with pytest.raises(ValueError, match='forbidden suffix'):
+	with pytest.raises(ValueError, match='table files must be exactly'):
 		publish_f3_strat_hmm_m1_results(
 			result,
 			F3StratHMMM1PublishConfig(
 				enabled=True,
 				output_dir=Path('results'),
+				include_figures=False,
 			),
 		)
 
@@ -226,13 +238,13 @@ def test_publish_refuses_oversized_file(
 ) -> None:
 	monkeypatch.chdir(tmp_path)
 	result = _write_publishable_result(tmp_path)
-	large_table = tmp_path / 'artifacts' / 'large.csv'
-	large_table.write_bytes(b'12345')
+	large_table = tmp_path / 'artifacts' / 'tables' / 'label_budget_summary.csv'
+	large_table.write_bytes(b'1' * 100)
 	result = F3StratHMMM1ResultsResult(
 		summary_json=result.summary_json,
 		summary_markdown=result.summary_markdown,
-		table_paths=(large_table,),
-		figure_paths=(),
+		table_paths=(result.table_paths[0], large_table, result.table_paths[2]),
+		figure_paths=result.figure_paths,
 		warnings=(),
 	)
 
@@ -242,7 +254,7 @@ def test_publish_refuses_oversized_file(
 			F3StratHMMM1PublishConfig(
 				enabled=True,
 				output_dir=Path('results'),
-				max_file_size_bytes=4,
+				max_file_size_bytes=50,
 			),
 		)
 
@@ -608,23 +620,12 @@ def test_cli_runs_end_to_end_and_publishes_synthetic_fixtures(
 	assert (publish_dir / 'm1_results_summary.md').is_file()
 	assert (publish_dir / 'tables' / 'label_budget_summary.csv').is_file()
 	assert (publish_dir / 'figures' / 'label_budget_delta_curves.png').is_file()
-	manifest = json.loads(
-		(publish_dir / 'publish_manifest.json').read_text(encoding='utf-8'),
-	)
-	created_at = _parse_created_at_utc(manifest['created_at_utc'])
-	assert created_at.tzinfo == timezone.utc
-	assert manifest['created_at_utc'] != '1970-01-01T00:00:00Z'
+	assert not (publish_dir / 'publish_manifest.json').exists()
 
 
 def _summary_payload(config: F3StratHMMM1ResultsConfig) -> dict[str, object]:
 	result = consolidate_f3_strat_hmm_m1_results(config)
 	return json.loads(result.summary_json.read_text(encoding='utf-8'))
-
-
-def _parse_created_at_utc(value: object) -> datetime:
-	assert isinstance(value, str)
-	return datetime.fromisoformat(value.replace('Z', '+00:00'))
-
 
 def _write_inputs(
 	tmp_path: Path,
@@ -656,17 +657,36 @@ def _write_publishable_result(tmp_path: Path) -> F3StratHMMM1ResultsResult:
 	root = tmp_path / 'artifacts'
 	summary_json = root / 'm1_results_summary.json'
 	summary_markdown = root / 'm1_results_summary.md'
-	table = root / 'tables' / 'single_split_comparison.csv'
+	tables = tuple(
+		root / 'tables' / name
+		for name in (
+			'single_split_comparison.csv',
+			'label_budget_summary.csv',
+			'split_index_deltas.csv',
+		)
+	)
 	summary_json.parent.mkdir(parents=True, exist_ok=True)
-	table.parent.mkdir(parents=True, exist_ok=True)
+	tables[0].parent.mkdir(parents=True, exist_ok=True)
 	summary_json.write_text('{"schema_version": 1}\n', encoding='utf-8')
 	summary_markdown.write_text('# summary\n', encoding='utf-8')
-	table.write_text('role,macro_f1\nbaseline,0.5\n', encoding='utf-8')
+	for table in tables:
+		table.write_text('role,macro_f1\nbaseline,0.5\n', encoding='utf-8')
+	figures = tuple(
+		root / 'figures' / name
+		for name in (
+			'single_run_metric_comparison.png',
+			'label_budget_delta_curves.png',
+			'split_index_deltas.png',
+		)
+	)
+	figures[0].parent.mkdir(parents=True, exist_ok=True)
+	for figure in figures:
+		figure.write_bytes(b'png')
 	return F3StratHMMM1ResultsResult(
 		summary_json=summary_json,
 		summary_markdown=summary_markdown,
-		table_paths=(table,),
-		figure_paths=(),
+		table_paths=tables,
+		figure_paths=figures,
 		warnings=(),
 	)
 

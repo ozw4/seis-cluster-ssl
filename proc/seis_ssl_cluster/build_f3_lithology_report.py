@@ -81,9 +81,8 @@ def main() -> None:
 			'f3_lithology_report.comparison_markdown: '
 			f'{result.comparison_markdown}',
 		)
-	if result.publish_manifest is not None:
-		print(f'published F3 lithology report: {result.publish_manifest.output_dir}')
-		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
+	if result.published_files:
+		print(f'published F3 lithology report: {result.published_files[0].parent}')
 
 
 def _print_summary(

@@ -312,10 +312,9 @@ def test_publish_uses_exact_lightweight_allowlist(tmp_path: Path) -> None:
 	)
 	result = summarize_f3_lithology_voxel_results(config)
 
-	assert result.publish_manifest is not None
 	targets = {
-		item.target.relative_to(publish_dir).as_posix()
-		for item in result.publish_manifest.items
+		path.relative_to(publish_dir).as_posix()
+		for path in result.published_files
 	}
 	assert targets == {
 		SUMMARY_JSON,
@@ -324,6 +323,7 @@ def test_publish_uses_exact_lightweight_allowlist(tmp_path: Path) -> None:
 		*(f'figures/{name}' for name in FIGURE_NAMES),
 	}
 	assert not any(target.endswith(('.pt', '.npy', '.npz')) for target in targets)
+	assert not (publish_dir / 'publish_manifest.json').exists()
 
 
 @pytest.mark.parametrize(

@@ -52,9 +52,8 @@ def main() -> None:
 	result = summarize_f3_lithology_voxel_split_robustness(config)
 	print(f'voxel_split_robustness.summary: {result.summary_json}')
 	print(f'voxel_split_robustness.status: {result.status}')
-	if result.publish_manifest is not None:
-		print(f'voxel_split_robustness.published: {result.publish_manifest.output_dir}')
-		print(f'publish_manifest: {result.publish_manifest.manifest_path}')
+	if result.published_files:
+		print(f'voxel_split_robustness.published: {result.published_files[0].parent}')
 
 
 if __name__ == '__main__':

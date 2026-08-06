@@ -4,17 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
-from seis_ssl_cluster.results import (
-	DEFAULT_MAX_FILE_SIZE_BYTES,
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
+DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 READINESS_PROCEED = 'proceed'
 READINESS_CAUTION = 'caution'
@@ -103,7 +99,7 @@ class F3InspectionReportResult:
 	report_markdown: Path
 	report_json: Path
 	payload: dict[str, object]
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 def build_f3_inspection_report(
@@ -121,7 +117,7 @@ def build_f3_inspection_report(
 	)
 	_write_json(config.output_json, payload)
 	_write_text(config.output_markdown, render_f3_inspection_report_markdown(payload))
-	publish_manifest = publish_f3_inspection_report(
+	published_files = publish_f3_inspection_report(
 		config,
 		publish_config,
 		payload=payload,
@@ -130,7 +126,7 @@ def build_f3_inspection_report(
 		report_markdown=config.output_markdown,
 		report_json=config.output_json,
 		payload=payload,
-		publish_manifest=publish_manifest,
+		published_files=published_files,
 	)
 
 
@@ -139,24 +135,22 @@ def publish_f3_inspection_report(
 	publish_config: F3InspectionPublishConfig | None,
 	*,
 	payload: Mapping[str, object] | None = None,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	"""Publish lightweight F3 inspection report artifacts into ``results/``."""
 	if publish_config is None or not publish_config.enabled:
-		return None
+		return ()
 	if publish_config.output_dir is None:
 		msg = 'publish output_dir is required when publishing is enabled'
 		raise ValueError(msg)
 	report_payload = payload
 	if report_payload is None:
 		report_payload = _read_publish_report_payload(config.output_json)
-	return publish_selected_results(
-		items=_publish_items_for_f3_inspection_report(
-			config,
-			include_figures=publish_config.include_figures,
-			payload=report_payload,
-		),
+	return _write_published_f3_inspection_report(
+		config,
 		output_dir=publish_config.output_dir,
+		include_figures=publish_config.include_figures,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
+		payload=report_payload,
 	)
 
 
@@ -508,13 +502,15 @@ def _figure_summary(
 	return figures, warnings
 
 
-def _publish_items_for_f3_inspection_report(
+def _write_published_f3_inspection_report(
 	config: F3InspectionReportConfig,
 	*,
+	output_dir: Path,
 	include_figures: bool,
+	max_file_size_bytes: int,
 	payload: Mapping[str, object],
-) -> tuple[PublishItem, ...]:
-	figure_items, text_replacements = _publish_figure_items_and_replacements(
+) -> tuple[Path, ...]:
+	figure_sources, text_replacements = _publish_figure_sources_and_replacements(
 		config,
 		include_figures=include_figures,
 	)
@@ -522,21 +518,53 @@ def _publish_items_for_f3_inspection_report(
 		payload,
 		text_replacements=text_replacements,
 	)
-	return (
-		PublishItem(
+	files = [
+		_write_published_text(
 			config.output_markdown,
-			_PUBLISH_REPORT_TARGET,
-			content_text=render_f3_inspection_report_markdown(published_payload),
+			output_dir / _PUBLISH_REPORT_TARGET,
+			render_f3_inspection_report_markdown(published_payload),
+			max_file_size_bytes=max_file_size_bytes,
 		),
-		PublishItem(
+		_write_published_text(
 			config.output_json,
-			_PUBLISH_JSON_TARGET,
-			content_text=(
-				json.dumps(published_payload, indent=2, sort_keys=True) + '\n'
-			),
+			output_dir / _PUBLISH_JSON_TARGET,
+			json.dumps(published_payload, indent=2, sort_keys=True) + '\n',
+			max_file_size_bytes=max_file_size_bytes,
 		),
-		*figure_items,
-	)
+	]
+	for source, relative_target in figure_sources:
+		if not source.is_file():
+			continue
+		files.append(
+			_copy_published_file(
+				source,
+				output_dir / relative_target,
+				max_file_size_bytes=max_file_size_bytes,
+			)
+		)
+	return tuple(files)
+
+
+def _copy_published_file(
+	source: Path, target: Path, *, max_file_size_bytes: int
+) -> Path:
+	if source.stat().st_size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(source, target)
+	return target
+
+
+def _write_published_text(
+	source: Path, target: Path, text: str, *, max_file_size_bytes: int
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if len(text.encode('utf-8')) > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	target.write_text(text, encoding='utf-8')
+	return target
 
 
 def _read_publish_report_payload(path: Path) -> Mapping[str, object]:
@@ -607,19 +635,19 @@ def _publish_figure_payload(
 	return figure
 
 
-def _publish_figure_items_and_replacements(
+def _publish_figure_sources_and_replacements(
 	config: F3InspectionReportConfig,
 	*,
 	include_figures: bool,
-) -> tuple[tuple[PublishItem, ...], tuple[tuple[str, str], ...]]:
+) -> tuple[tuple[tuple[Path, Path], ...], tuple[tuple[str, str], ...]]:
 	if not include_figures:
 		return (), ()
 
-	items: list[PublishItem] = []
+	items: list[tuple[Path, Path]] = []
 	replacements: list[tuple[str, str]] = []
 	for relative_source, relative_target in _PUBLISH_FIGURE_TARGETS:
 		source = config.inspection_dir / relative_source
-		items.append(PublishItem(source, relative_target, required=False))
+		items.append((source, relative_target))
 		replacements.append(
 			(
 				_relative_path_for_markdown(source, config.output_markdown.parent),
@@ -642,13 +670,7 @@ def _publish_figure_items_and_replacements(
 				_PUBLISH_CONSISTENCY_FIGURE_TARGET.as_posix(),
 			),
 		)
-	items.append(
-		PublishItem(
-			consistency_source,
-			_PUBLISH_CONSISTENCY_FIGURE_TARGET,
-			required=False,
-		),
-	)
+	items.append((consistency_source, _PUBLISH_CONSISTENCY_FIGURE_TARGET))
 	return tuple(items), tuple(replacements)
 
 

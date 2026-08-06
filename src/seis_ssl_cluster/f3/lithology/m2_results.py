@@ -6,18 +6,15 @@ from __future__ import annotations
 
 import json
 import math
+import shutil
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from seis_ssl_cluster.f3.lithology import m1_results as m1
-from seis_ssl_cluster.results import (
-	DEFAULT_MAX_FILE_SIZE_BYTES,
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
-)
+
+DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 DEFAULT_RESULTS_ROOT = Path('results')
 REQUIRED_LOW_BUDGETS = ('cap25', 'cap50', 'cap100')
@@ -84,7 +81,7 @@ class F3StratHMMM2ResultsResult:
 	table_paths: tuple[Path, ...]
 	figure_paths: tuple[Path, ...]
 	decision: str
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -298,9 +295,14 @@ def consolidate_f3_strat_hmm_m2_results(
 	result = F3StratHMMM2ResultsResult(
 		json_path, markdown_path, tables, figures, str(decision['guidance'])
 	)
-	manifest = publish_f3_strat_hmm_m2_results(result, config.publish)
+	published_files = publish_f3_strat_hmm_m2_results(result, config.publish)
 	return F3StratHMMM2ResultsResult(
-		json_path, markdown_path, tables, figures, str(decision['guidance']), manifest
+		json_path,
+		markdown_path,
+		tables,
+		figures,
+		str(decision['guidance']),
+		published_files,
 	)
 
 
@@ -484,16 +486,16 @@ def _with_split_aggregate(split_index: Mapping[str, object]) -> dict[str, object
 
 def publish_f3_strat_hmm_m2_results(
 	result: F3StratHMMM2ResultsResult, publish_config: F3StratHMMM2PublishConfig | None
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	"""Publish only the declared lightweight M2-A summary allowlist."""
 	if publish_config is None or not publish_config.enabled:
-		return None
+		return ()
 	if publish_config.output_dir is None:
 		raise ValueError('publish output_dir is required when publishing is enabled')
 	_validate_m2_publish_contract(result)
-	markdown_without_figures = None
+	markdown_text = result.summary_markdown.read_text(encoding='utf-8')
 	if not publish_config.include_figures:
-		markdown_without_figures = (
+		markdown_text = (
 			'\n'.join(
 				line
 				for line in result.summary_markdown.read_text(
@@ -503,28 +505,66 @@ def publish_f3_strat_hmm_m2_results(
 			)
 			+ '\n'
 		)
-	items = [
-		PublishItem(
+	output_dir = publish_config.output_dir
+	files = [
+		_write_published_text(
 			result.summary_markdown,
-			Path('m2a_results_summary.md'),
-			content_text=markdown_without_figures,
+			output_dir / 'm2a_results_summary.md',
+			markdown_text,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
 		),
-		PublishItem(result.summary_json, Path('m2a_results_summary.json')),
+		_copy_published_file(
+			result.summary_json,
+			output_dir / 'm2a_results_summary.json',
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		),
 	]
-	items.extend(
-		PublishItem(path, Path('tables') / path.name) for path in result.table_paths
+	files.extend(
+
+			_copy_published_file(
+				path,
+				output_dir / 'tables' / path.name,
+				max_file_size_bytes=publish_config.max_file_size_bytes,
+			)
+			for path in result.table_paths
+
 	)
 	if publish_config.include_figures:
-		items.extend(
-			PublishItem(path, Path('figures') / path.name)
-			for path in result.figure_paths
+		files.extend(
+
+				_copy_published_file(
+					path,
+					output_dir / 'figures' / path.name,
+					max_file_size_bytes=publish_config.max_file_size_bytes,
+				)
+				for path in result.figure_paths
+
 		)
-	return publish_selected_results(
-		items=tuple(items),
-		output_dir=publish_config.output_dir,
-		allowed_suffixes=M2_RESULTS_PUBLISH_SUFFIXES,
-		max_file_size_bytes=publish_config.max_file_size_bytes,
-	)
+	return tuple(files)
+
+
+def _copy_published_file(
+	source: Path, target: Path, *, max_file_size_bytes: int
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if source.stat().st_size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(source, target)
+	return target
+
+
+def _write_published_text(
+	source: Path, target: Path, text: str, *, max_file_size_bytes: int
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if len(text.encode('utf-8')) > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	target.write_text(text, encoding='utf-8')
+	return target
 
 
 def _validate_m2_publish_contract(result: F3StratHMMM2ResultsResult) -> None:

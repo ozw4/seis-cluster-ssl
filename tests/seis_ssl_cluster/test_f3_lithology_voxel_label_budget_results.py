@@ -75,49 +75,26 @@ def test_complete_summary_pairing_decisions_and_lightweight_publish(
 	assert {path.name for path in result.figure_paths} == set(FIGURE_NAMES)
 	assert result.summary_markdown.name == SUMMARY_MARKDOWN
 	assert result.summary_json.name == SUMMARY_JSON
-	assert result.publish_manifest is not None
+	assert result.published_files
 	publish_root = config.publish.output_dir
 	assert publish_root is not None
-	publish_payload = json.loads(
-		(publish_root / 'publish_manifest.json').read_text(encoding='utf-8')
-	)
 	published = {
 		path.relative_to(publish_root).as_posix()
 		for path in publish_root.rglob('*')
 		if path.is_file()
 	}
-	assert len(publish_payload['items']) == 13
-	assert len(publish_payload['inventory']) == 14
-	assert {
-		item['target'] for item in publish_payload['inventory']
-	} == published
-	self_item = next(
-		item
-		for item in publish_payload['inventory']
-		if item['target'] == 'publish_manifest.json'
-	)
-	assert self_item == {
-		'target': 'publish_manifest.json',
-		'source': None,
-		'source_sha256': None,
-		'published_sha256': None,
-		'byte_size': None,
-		'self_manifest': True,
-		'hash_policy': 'omitted_due_to_self_reference',
-	}
-	assert all(
-		item['source_sha256'] == item['published_sha256'] == item['sha256']
-		and item['byte_size'] == item['size_bytes']
-		for item in publish_payload['items']
-	)
 	assert published == {
 		SUMMARY_JSON,
 		SUMMARY_MARKDOWN,
 		'README.md',
-		'publish_manifest.json',
 		*(f'tables/{name}' for name in TABLE_NAMES),
 		*(f'figures/{name}' for name in FIGURE_NAMES),
 	}
+	assert {
+		path.relative_to(publish_root).as_posix()
+		for path in result.published_files
+	} == published
+	assert not (publish_root / 'publish_manifest.json').exists()
 	assert not any(
 		Path(name).suffix in {'.pt', '.npy', '.npz', '.joblib'} for name in published
 	)

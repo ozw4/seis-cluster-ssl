@@ -282,7 +282,7 @@ def test_guardrail_summary_publishes_only_lightweight_summary_files(
 		f3_guardrail_summary_config_from_mapping(raw),
 	)
 
-	assert result.publish_manifest is not None
+	assert result.published_files
 	assert {
 		path.relative_to(publish_dir)
 		for path in publish_dir.iterdir()
@@ -291,8 +291,15 @@ def test_guardrail_summary_publishes_only_lightweight_summary_files(
 		Path('guardrail_comparison_report.md'),
 		Path('guardrail_comparison_summary.json'),
 		Path('guardrail_comparison_table.csv'),
-		Path('publish_manifest.json'),
 	}
+	assert {
+		path.relative_to(publish_dir) for path in result.published_files
+	} == {
+		Path('guardrail_comparison_report.md'),
+		Path('guardrail_comparison_summary.json'),
+		Path('guardrail_comparison_table.csv'),
+	}
+	assert not (publish_dir / 'publish_manifest.json').exists()
 
 
 def test_guardrail_publish_requires_strict_complete_summary(

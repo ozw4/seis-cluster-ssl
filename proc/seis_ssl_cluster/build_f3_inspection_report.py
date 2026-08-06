@@ -87,9 +87,8 @@ def main() -> None:
 	print(f'f3_inspection_report.warning_count: {warning_count}')
 	print(f'wrote F3 inspection report Markdown: {result.report_markdown}')
 	print(f'wrote F3 inspection report JSON: {result.report_json}')
-	if result.publish_manifest is not None:
-		print(f'published F3 inspection report: {result.publish_manifest.output_dir}')
-		print(f'wrote publish manifest: {result.publish_manifest.manifest_path}')
+	if result.published_files:
+		print(f'published F3 inspection report: {result.published_files[0].parent}')
 
 
 def _report_config(

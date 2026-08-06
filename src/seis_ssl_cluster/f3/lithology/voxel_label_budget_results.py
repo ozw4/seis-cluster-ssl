@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import math
+import shutil
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -35,12 +36,6 @@ from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 )
 from seis_ssl_cluster.models.voxel_decoder.spec import (
 	validate_voxel_decoder_architecture_mapping,
-)
-from seis_ssl_cluster.results import (
-	PublishItem,
-	PublishManifest,
-	publish_manifest_to_dict,
-	publish_selected_results,
 )
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	load_voxel_decoder_checkpoint,
@@ -221,9 +216,8 @@ class F3VoxelLabelBudgetResultsResult:
 	readme: Path
 	table_paths: tuple[Path, ...]
 	figure_paths: tuple[Path, ...]
-	local_publish_manifest: Path
 	decisions: Mapping[str, object]
-	publish_manifest: PublishManifest | None = None
+	published_files: tuple[Path, ...] = ()
 
 
 def inspect_f3_lithology_voxel_label_budget_results(
@@ -357,12 +351,10 @@ def summarize_f3_lithology_voxel_label_budget_results(
 		readme=readme,
 		table_paths=table_paths,
 		figure_paths=figure_paths,
-		local_publish_manifest=reports / LOCAL_PUBLISH_MANIFEST,
 		decisions=inspection.decisions,
 	)
-	publish_manifest = _publish(result, config)
-	_write_local_publish_manifest(result, config, publish_manifest)
-	return replace(result, publish_manifest=publish_manifest)
+	published_files = _publish(result, config)
+	return replace(result, published_files=published_files)
 
 
 def _load_dataset_manifest(  # noqa: C901, PLR0912
@@ -2463,43 +2455,61 @@ def _render_readme() -> str:
 def _publish(
 	result: F3VoxelLabelBudgetResultsResult,
 	config: F3VoxelLabelBudgetResultsConfig,
-) -> PublishManifest | None:
+) -> tuple[Path, ...]:
 	policy = config.publish
 	if not policy.enabled:
-		return None
+		return ()
 	if policy.output_dir is None:
 		raise ValueError('publish.output_dir is required')
-	items = _publish_items(result)
-	expected = {
-		item.relative_target.as_posix() for item in items
-	} | {LOCAL_PUBLISH_MANIFEST}
-	_validate_existing_publish_tree(policy.output_dir, expected=expected)
-	manifest = publish_selected_results(
-		items=items,
-		output_dir=policy.output_dir,
-		allowed_suffixes=PUBLISH_SUFFIXES,
-		max_file_size_bytes=policy.max_file_size_bytes,
-		overwrite=policy.overwrite,
-	)
-	payload = _publish_manifest_payload(manifest)
-	_write_json(manifest.manifest_path, payload)
-	_validate_published_tree(policy.output_dir, expected=expected, manifest=manifest)
-	return manifest
-
-
-def _publish_items(
-	result: F3VoxelLabelBudgetResultsResult,
-) -> list[PublishItem]:
-	return [
-		PublishItem(result.summary_markdown, Path(SUMMARY_MARKDOWN)),
-		PublishItem(result.summary_json, Path(SUMMARY_JSON)),
-		PublishItem(result.readme, Path(README_NAME)),
-		*(PublishItem(path, Path('tables') / path.name) for path in result.table_paths),
-		*(
-			PublishItem(path, Path('figures') / path.name)
-			for path in result.figure_paths
-		),
+	_validate_named_publish_paths(result.table_paths, TABLE_NAMES, label='table')
+	_validate_named_publish_paths(result.figure_paths, FIGURE_NAMES, label='figure')
+	sources = [
+		(result.summary_markdown, Path(SUMMARY_MARKDOWN)),
+		(result.summary_json, Path(SUMMARY_JSON)),
+		(result.readme, Path(README_NAME)),
+		*((path, Path('tables') / path.name) for path in result.table_paths),
+		*((path, Path('figures') / path.name) for path in result.figure_paths),
 	]
+	expected = {target.as_posix() for _, target in sources}
+	_validate_existing_publish_tree(policy.output_dir, expected=expected)
+	return tuple(
+		_copy_published_file(
+			source,
+			policy.output_dir / relative_target,
+			max_file_size_bytes=policy.max_file_size_bytes,
+			overwrite=policy.overwrite,
+		)
+		for source, relative_target in sources
+	)
+
+
+def _validate_named_publish_paths(
+	paths: Sequence[Path], expected_names: Sequence[str], *, label: str
+) -> None:
+	names = [path.name for path in paths]
+	if len(names) != len(set(names)) or set(names) != set(expected_names):
+		raise ValueError(
+			f'voxel label-budget publish {label} files must be exactly '
+			f'{sorted(expected_names)!r}; got {sorted(names)!r}'
+		)
+
+
+def _copy_published_file(
+	source: Path,
+	target: Path,
+	*,
+	max_file_size_bytes: int,
+	overwrite: bool,
+) -> Path:
+	if not source.is_file():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if source.stat().st_size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+	if target.exists() and not overwrite:
+		raise FileExistsError(f'publish target already exists: {target}')
+	target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(source, target)
+	return target
 
 
 def _validate_existing_publish_tree(output_dir: Path, *, expected: set[str]) -> None:
@@ -2512,146 +2522,9 @@ def _validate_existing_publish_tree(output_dir: Path, *, expected: set[str]) -> 
 		for path in output_dir.rglob('*')
 		if path.is_file()
 	}
-	extra = sorted(existing - expected)
+	extra = sorted(existing - expected - {LOCAL_PUBLISH_MANIFEST})
 	if extra:
 		raise ValueError(f'publish output contains unlisted files: {extra!r}')
-
-
-def _validate_published_tree(
-	output_dir: Path,
-	*,
-	expected: set[str],
-	manifest: PublishManifest,
-) -> None:
-	actual = {
-		path.relative_to(output_dir).as_posix()
-		for path in output_dir.rglob('*')
-		if path.is_file()
-	}
-	if actual != expected:
-		raise ValueError(
-			'published file inventory mismatch: '
-			f'missing={sorted(expected - actual)}, extra={sorted(actual - expected)}'
-		)
-	manifest_targets = {
-		item.target.resolve(strict=False).relative_to(
-			output_dir.resolve(strict=False)
-		).as_posix()
-		for item in manifest.items
-	}
-	if manifest_targets != expected - {LOCAL_PUBLISH_MANIFEST}:
-		raise ValueError('publish manifest target inventory mismatch')
-	payload = _read_json(output_dir / LOCAL_PUBLISH_MANIFEST)
-	inventory = _mapping_rows(payload.get('inventory'), 'publish inventory')
-	inventory_targets = {
-		_non_empty_string(item.get('target'), 'publish inventory target')
-		for item in inventory
-	}
-	if inventory_targets != actual or len(inventory) != len(actual):
-		raise ValueError('publish manifest does not enumerate the exact file tree')
-	self_entries = [
-		item for item in inventory if item.get('target') == LOCAL_PUBLISH_MANIFEST
-	]
-	if self_entries != [
-		{
-			'target': LOCAL_PUBLISH_MANIFEST,
-			'source': None,
-			'source_sha256': None,
-			'published_sha256': None,
-			'byte_size': None,
-			'self_manifest': True,
-			'hash_policy': 'omitted_due_to_self_reference',
-		}
-	]:
-		raise ValueError('publish manifest self-inventory marker mismatch')
-	for relative in actual:
-		if Path(relative).suffix.lower() in FORBIDDEN_PUBLISH_SUFFIXES:
-			raise ValueError(f'raw artifact escaped into publish output: {relative}')
-
-
-def _write_local_publish_manifest(
-	result: F3VoxelLabelBudgetResultsResult,
-	config: F3VoxelLabelBudgetResultsConfig,
-	manifest: PublishManifest | None,
-) -> None:
-	if manifest is not None:
-		payload = _publish_manifest_payload(manifest)
-		payload['published'] = True
-	else:
-		items = _publish_items(result)
-		payload = {
-			'artifact_type': 'f3_lithology_voxel_label_budget_publish_plan',
-			'schema_version': 1,
-			'published': False,
-			'output_dir': (
-				None
-				if config.publish.output_dir is None
-				else str(config.publish.output_dir)
-			),
-			'items': [
-				{
-					'source': str(item.source),
-					'target': item.relative_target.as_posix(),
-					'size_bytes': item.source.stat().st_size,
-					'sha256': file_sha256(item.source),
-				}
-				for item in items
-			],
-			'warnings': ['publication disabled by configuration'],
-		}
-	_write_json(result.local_publish_manifest, payload)
-
-
-def _publish_manifest_payload(manifest: PublishManifest) -> dict[str, object]:
-	"""Record both source and copied hashes for every lightweight output."""
-	payload = publish_manifest_to_dict(manifest)
-	payload['artifact_type'] = 'f3_lithology_voxel_label_budget_publish_manifest'
-	payload['schema_version'] = SCHEMA_VERSION
-	items = cast('list[dict[str, object]]', payload['items'])
-	for record, published in zip(items, manifest.items, strict=True):
-		source_sha256 = file_sha256(published.source)
-		published_sha256 = file_sha256(published.target)
-		if source_sha256 != published.sha256:
-			raise ValueError('publish source SHA-256 changed after copy')
-		if published_sha256 != source_sha256:
-			raise ValueError('published output SHA-256 differs from its source')
-		if published.target.stat().st_size != published.size_bytes:
-			raise ValueError('published output byte size changed after copy')
-		record.update(
-			{
-				'source_sha256': source_sha256,
-				'published_sha256': published_sha256,
-				'byte_size': published.size_bytes,
-			}
-		)
-	payload['inventory'] = [
-		*[
-			{
-				'target': record['target'],
-				'source': record['source'],
-				'source_sha256': record['source_sha256'],
-				'published_sha256': record['published_sha256'],
-				'byte_size': record['byte_size'],
-				'self_manifest': False,
-			}
-			for record in items
-		],
-		{
-			'target': LOCAL_PUBLISH_MANIFEST,
-			'source': None,
-			'source_sha256': None,
-			'published_sha256': None,
-			'byte_size': None,
-			'self_manifest': True,
-			'hash_policy': 'omitted_due_to_self_reference',
-		},
-	]
-	payload['inventory_contract'] = {
-		'all_published_files_enumerated': True,
-		'manifest_self_hash_omitted': True,
-		'self_hash_reason': 'a cryptographic hash cannot include its own value',
-	}
-	return payload
 
 
 def _validate_output_availability(config: F3VoxelLabelBudgetResultsConfig) -> None:
@@ -2661,7 +2534,6 @@ def _validate_output_availability(config: F3VoxelLabelBudgetResultsConfig) -> No
 		SUMMARY_JSON,
 		SUMMARY_MARKDOWN,
 		README_NAME,
-		LOCAL_PUBLISH_MANIFEST,
 		'tables',
 		'figures',
 	}

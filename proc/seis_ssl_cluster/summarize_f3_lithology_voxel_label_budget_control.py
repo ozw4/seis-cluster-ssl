@@ -65,8 +65,8 @@ def main() -> None:
 	print(f'current_k6_control.summary_markdown: {result.summary_markdown}')
 	print(f'current_k6_control.handoff: {result.handoff_markdown}')
 	print(f"current_k6_control.status: {result.readiness['status']}")
-	if result.publish_manifest is not None:
-		print(f'published manifest: {result.publish_manifest.manifest_path}')
+	if result.published_files:
+		print(f'current_k6_control.published_file_count: {len(result.published_files)}')
 
 
 if __name__ == '__main__':
