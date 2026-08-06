@@ -7,8 +7,7 @@ from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config.common import _validate_distinct_paths
 from seis_ssl_cluster.config.f3_baselines import (
-	_configured_dataset_version,
-	_f3_comparison_default_paths,
+	_explicit_comparison_paths,
 	_validate_f3_dataset_name,
 )
 from seis_ssl_cluster.config.f3_lithology_common import (
@@ -53,10 +52,8 @@ def f3_lithology_report_config_from_mapping(
 		prefix='config',
 	)
 	paths = _required_mapping(config, 'paths')
-	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
 	dataset = _required_mapping(config, 'dataset')
-	dataset_version = _configured_dataset_version(dataset)
 	_validate_f3_dataset_name(dataset)
 	model = _required_mapping(config, 'model')
 	labels = _required_mapping(config, 'labels')
@@ -95,8 +92,6 @@ def f3_lithology_report_config_from_mapping(
 	)
 	comparison = _embedded_comparison_config(
 		_optional_mapping(config, 'comparison'),
-		artifact_root=artifact_root,
-		dataset_version=dataset_version,
 	)
 	_validate_report_file_paths(
 		metrics_json=metrics_json,
@@ -188,40 +183,14 @@ def _report_output_paths(
 
 def _embedded_comparison_config(
 	comparison: Mapping[str, object],
-	*,
-	artifact_root: Path,
-	dataset_version: str,
 ) -> F3LithologyComparisonReportConfig:
-	default_search_root, default_output_dir = _f3_comparison_default_paths(
-		artifact_root=artifact_root,
-		dataset_version=dataset_version,
-	)
-	search_root = _optional_absolute_path(
+	search_root, output_csv, output_markdown = _explicit_comparison_paths(
 		comparison,
-		'search_root',
-		prefix='comparison',
-		default=default_search_root,
-	)
-	output_dir = _optional_absolute_path(
-		comparison,
-		'output_dir',
-		prefix='comparison',
-		default=default_output_dir,
 	)
 	return F3LithologyComparisonReportConfig(
 		search_root=search_root,
-		output_csv=_optional_absolute_path(
-			comparison,
-			'output_csv',
-			prefix='comparison',
-			default=output_dir / 'comparison_table.csv',
-		),
-		output_markdown=_optional_absolute_path(
-			comparison,
-			'output_markdown',
-			prefix='comparison',
-			default=output_dir / 'comparison_report.md',
-		),
+		output_csv=output_csv,
+		output_markdown=output_markdown,
 	)
 
 

@@ -1,3 +1,4 @@
+# ruff: noqa: CPY001
 from __future__ import annotations
 
 import csv
@@ -530,7 +531,7 @@ def test_f3_lithology_report_config_rejects_file_path_collisions(
 		f3_lithology_report_config_from_mapping(raw)
 
 
-def test_f3_lithology_report_config_preserves_disjoint_explicit_paths(
+def test_f3_lithology_report_config_preserves_explicit_comparison_paths(
 	tmp_path: Path,
 ) -> None:
 	run = _write_probe_run(
@@ -540,6 +541,8 @@ def test_f3_lithology_report_config_preserves_disjoint_explicit_paths(
 		probe_spec='linear_balanced_v1',
 	)
 	raw = _report_config_mapping(tmp_path, run)
+	raw['paths']['artifact_root'] = str(tmp_path / 'unrelated-artifact-root')
+	raw['dataset']['version'] = 'unrelated_version'
 
 	resolved = f3_lithology_report_config_from_mapping(raw)
 
@@ -562,30 +565,6 @@ def test_f3_lithology_report_config_preserves_disjoint_explicit_paths(
 	assert resolved.comparison.output_csv == Path(raw['comparison']['output_csv'])
 	assert resolved.comparison.output_markdown == Path(
 		raw['comparison']['output_markdown']
-	)
-
-
-def test_f3_lithology_report_embedded_comparison_uses_root_and_version(
-	tmp_path: Path,
-) -> None:
-	run = _write_probe_run(
-		tmp_path,
-		model_tag='model_v1',
-		embed_spec='overlap_x16',
-		probe_spec='linear_balanced_v1',
-	)
-	raw = _report_config_mapping(tmp_path, run)
-	raw['dataset']['version'] = 'custom_version'
-	raw['comparison'] = {}
-
-	resolved = f3_lithology_report_config_from_mapping(raw)
-
-	base = Path(raw['paths']['artifact_root']) / 'lithology' / 'f3' / 'custom_version'
-	output_dir = base / 'reports' / 'baseline_comparison'
-	assert resolved.comparison.search_root == base
-	assert resolved.comparison.output_csv == output_dir / 'comparison_table.csv'
-	assert resolved.comparison.output_markdown == (
-		output_dir / 'comparison_report.md'
 	)
 
 

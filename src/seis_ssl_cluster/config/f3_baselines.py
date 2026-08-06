@@ -7,11 +7,8 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from seis_ssl_cluster.config.schema import (
-	DEFAULT_ARTIFACT_ROOT,
-	F3_FACIES_DATASET_NAME,
-	F3_FACIES_DATASET_VERSION,
-)
+from seis_ssl_cluster.config.common import _validate_distinct_paths
+from seis_ssl_cluster.config.schema import F3_FACIES_DATASET_NAME
 from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonFigureFontSizes,
 	F3LithologyComparisonFigureSizes,
@@ -41,70 +38,80 @@ def f3_lithology_comparison_report_config_from_mapping(
 	_validate_allowed_keys(paths, frozenset({'artifact_root'}), prefix='paths')
 	dataset = _optional_mapping(config, 'dataset')
 	_validate_allowed_keys(dataset, frozenset({'name', 'version'}), prefix='dataset')
-	artifact_root = _configured_artifact_root(paths)
-	dataset_version = _configured_dataset_version(dataset)
 	_validate_f3_dataset_name(dataset)
-	default_search_root, default_output_dir = _f3_comparison_default_paths(
-		artifact_root=artifact_root,
-		dataset_version=dataset_version,
-	)
 	comparison = _required_mapping(config, 'comparison')
-	search_root = _optional_absolute_path(
+	search_root, output_csv, output_markdown = _explicit_comparison_paths(
 		comparison,
-		'search_root',
-		prefix='comparison',
-		default=default_search_root,
 	)
-	output_dir = _optional_absolute_path(
-		comparison,
-		'output_dir',
-		prefix='comparison',
-		default=default_output_dir,
+	metrics_paths = _metrics_paths_from_mapping(comparison)
+	_validate_distinct_paths(
+		output_csv,
+		'comparison.output_csv',
+		output_markdown,
+		'comparison.output_markdown',
 	)
+	for metrics_path in metrics_paths:
+		_validate_distinct_paths(
+			output_csv,
+			'comparison.output_csv',
+			metrics_path,
+			'comparison.metrics_json',
+		)
+		_validate_distinct_paths(
+			output_markdown,
+			'comparison.output_markdown',
+			metrics_path,
+			'comparison.metrics_json',
+		)
 	figure_style = _comparison_figure_style_from_mapping(comparison)
 	return F3LithologyComparisonReportConfig(
 		search_root=search_root,
-		output_csv=_optional_absolute_path(
-			comparison,
-			'output_csv',
-			prefix='comparison',
-			default=output_dir / 'comparison_table.csv',
-		),
-		output_markdown=_optional_absolute_path(
-			comparison,
-			'output_markdown',
-			prefix='comparison',
-			default=output_dir / 'comparison_report.md',
-		),
-		metrics_paths=_metrics_paths_from_mapping(comparison),
+		output_csv=output_csv,
+		output_markdown=output_markdown,
+		metrics_paths=metrics_paths,
 		figure_dpi=_comparison_figure_dpi_from_mapping(comparison),
 		figure_style=figure_style,
 	)
 
 
-def _f3_comparison_default_paths(
-	*,
-	artifact_root: Path,
-	dataset_version: str,
-) -> tuple[Path, Path]:
-	base = artifact_root / 'lithology' / 'f3' / dataset_version
-	return base, base / 'reports' / 'baseline_comparison'
-
-
-def _configured_artifact_root(paths: Mapping[str, object]) -> Path:
-	if 'artifact_root' not in paths:
-		return Path(DEFAULT_ARTIFACT_ROOT)
-	return _absolute_path(paths['artifact_root'], label='paths.artifact_root')
-
-
-def _configured_dataset_version(dataset: Mapping[str, object]) -> str:
-	if 'version' not in dataset:
-		return F3_FACIES_DATASET_VERSION
-	value = dataset['version']
-	if not isinstance(value, str) or not value:
-		msg = f'dataset.version must be a non-empty string; got {value!r}'
-		raise TypeError(msg)
-	return value
+def _explicit_comparison_paths(
+	comparison: Mapping[str, object],
+) -> tuple[Path, Path, Path]:
+	search_root = _required_absolute_path(
+		comparison,
+		'search_root',
+		prefix='comparison',
+	)
+	output_dir = _optional_explicit_absolute_path(
+		comparison,
+		'output_dir',
+		prefix='comparison',
+	)
+	output_csv = _optional_explicit_absolute_path(
+		comparison,
+		'output_csv',
+		prefix='comparison',
+	)
+	output_markdown = _optional_explicit_absolute_path(
+		comparison,
+		'output_markdown',
+		prefix='comparison',
+	)
+	if output_dir is None and (output_csv is None or output_markdown is None):
+		msg = (
+			'comparison.output_dir or both comparison.output_csv and '
+			'comparison.output_markdown must be set'
+		)
+		raise ValueError(msg)
+	if output_dir is not None:
+		if output_csv is None:
+			output_csv = output_dir / 'comparison_table.csv'
+		if output_markdown is None:
+			output_markdown = output_dir / 'comparison_report.md'
+	if output_csv is None or output_markdown is None:
+		msg = 'comparison output paths could not be resolved'
+		raise ValueError(msg)
+	return search_root, output_csv, output_markdown
 
 
 def _validate_f3_dataset_name(dataset: Mapping[str, object]) -> None:
@@ -290,16 +297,27 @@ def _validate_allowed_keys(
 		raise ValueError(msg)
 
 
-def _optional_absolute_path(
+def _required_absolute_path(
 	mapping: Mapping[str, object],
 	key: str,
 	*,
 	prefix: str,
-	default: Path,
 ) -> Path:
+	if key not in mapping or mapping[key] is None:
+		msg = f'{prefix}.{key} is required'
+		raise ValueError(msg)
+	return _absolute_path(mapping[key], label=f'{prefix}.{key}')
+
+
+def _optional_explicit_absolute_path(
+	mapping: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> Path | None:
 	value = mapping.get(key)
 	if value is None:
-		return default
+		return None
 	return _absolute_path(value, label=f'{prefix}.{key}')
 
 

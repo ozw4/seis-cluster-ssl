@@ -83,13 +83,30 @@ def main() -> None:
 	"""Build an F3 lithology comparison report or print a dry-run summary."""
 	parser = build_parser()
 	args = parser.parse_args()
+	if args.config is None:
+		if args.search_root is None:
+			parser.error('--search-root is required when --config is not provided')
+		if args.output_dir is None and (
+			args.output_csv is None or args.output_markdown is None
+		):
+			parser.error(
+				'--output-dir or both --output-csv and --output-markdown are '
+				'required when --config is not provided',
+			)
 
 	raw_config = (
 		load_config_for_cli(args.config, loader=load_config)
 		if args.config is not None
 		else None
 	)
-	config = _config_from_args(args, raw_config=raw_config, config_path=args.config)
+	try:
+		config = _config_from_args(
+			args,
+			raw_config=raw_config,
+			config_path=args.config,
+		)
+	except (TypeError, ValueError) as exc:
+		parser.error(str(exc))
 	publish_config = f3_lithology_comparison_publish_config_from_mapping(
 		None if raw_config is None else raw_config.get('publish'),
 	)
@@ -154,52 +171,28 @@ def _config_from_args(
 		if config_path is None:
 			msg = 'config_path is required when args.config is set'
 			raise ValueError(msg)
-		config = resolve_config_for_cli(
-			raw_config,
-			resolver=f3_lithology_comparison_report_config_from_mapping,
-			config_path=config_path,
-		)
+		resolver_input = dict(raw_config)
 	else:
-		config = f3_lithology_comparison_report_config_from_mapping(
-			{'comparison': {}},
-		)
-	return _config_with_overrides(
-		config,
-		search_root=args.search_root,
-		output_dir=args.output_dir,
-		output_csv=args.output_csv,
-		output_markdown=args.output_markdown,
-		metrics_paths=tuple(args.metrics_json),
-		figure_dpi=args.figure_dpi,
-	)
-
-
-def _config_with_overrides(  # noqa: PLR0913
-	config: F3LithologyComparisonReportConfig,
-	*,
-	search_root: Path | None,
-	output_dir: Path | None,
-	output_csv: Path | None,
-	output_markdown: Path | None,
-	metrics_paths: tuple[Path, ...],
-	figure_dpi: int | None,
-) -> F3LithologyComparisonReportConfig:
-	resolved_output_dir = output_dir or config.output_markdown.parent
-	return F3LithologyComparisonReportConfig(
-		search_root=search_root or config.search_root,
-		output_csv=output_csv or (
-			resolved_output_dir / 'comparison_table.csv'
-			if output_dir is not None
-			else config.output_csv
-		),
-		output_markdown=output_markdown or (
-			resolved_output_dir / 'comparison_report.md'
-			if output_dir is not None
-			else config.output_markdown
-		),
-		metrics_paths=metrics_paths or config.metrics_paths,
-		figure_dpi=figure_dpi or config.figure_dpi,
-		figure_style=config.figure_style,
+		resolver_input = {}
+	comparison = dict(resolver_input.get('comparison', {}))
+	for key, value in (
+		('search_root', args.search_root),
+		('output_dir', args.output_dir),
+		('output_csv', args.output_csv),
+		('output_markdown', args.output_markdown),
+		('figure_dpi', args.figure_dpi),
+	):
+		if value is not None:
+			comparison[key] = value if key == 'figure_dpi' else str(value)
+	if args.metrics_json:
+		comparison['metrics_json'] = [str(path) for path in args.metrics_json]
+	resolver_input['comparison'] = comparison
+	if config_path is None:
+		return f3_lithology_comparison_report_config_from_mapping(resolver_input)
+	return resolve_config_for_cli(
+		resolver_input,
+		resolver=f3_lithology_comparison_report_config_from_mapping,
+		config_path=config_path,
 	)
 
 

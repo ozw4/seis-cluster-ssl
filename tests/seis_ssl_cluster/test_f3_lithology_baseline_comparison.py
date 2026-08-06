@@ -1,3 +1,4 @@
+# ruff: noqa: CPY001, SLF001
 from __future__ import annotations
 
 import csv
@@ -209,68 +210,22 @@ def test_f3_lithology_comparison_uses_explicit_paths(
 	assert config.output_markdown == output_markdown
 
 
-def test_f3_lithology_comparison_defaults_use_configured_root_and_version() -> None:
-	config = f3_lithology_comparison_report_config_from_mapping(
-		{
-			'paths': {'artifact_root': '/custom/artifacts'},
-			'dataset': {
-				'name': 'f3_facies_benchmark',
-				'version': 'custom_version',
+def test_f3_lithology_comparison_requires_explicit_paths() -> None:
+	with pytest.raises(ValueError, match=r'comparison\.search_root is required'):
+		f3_lithology_comparison_report_config_from_mapping({'comparison': {}})
+
+	with pytest.raises(
+		ValueError,
+		match=r'comparison\.output_dir or both comparison\.output_csv',
+	):
+		f3_lithology_comparison_report_config_from_mapping(
+			{
+				'comparison': {
+					'search_root': '/explicit/search',
+					'output_csv': '/explicit/table.csv',
+				},
 			},
-			'comparison': {},
-		},
-	)
-
-	base = Path('/custom/artifacts/lithology/f3/custom_version')
-	output_dir = base / 'reports' / 'baseline_comparison'
-	assert config.search_root == base
-	assert config.output_csv == output_dir / 'comparison_table.csv'
-	assert config.output_markdown == output_dir / 'comparison_report.md'
-
-
-def test_f3_lithology_comparison_output_dir_overrides_configured_default() -> None:
-	output_dir = Path('/custom/comparison')
-	config = f3_lithology_comparison_report_config_from_mapping(
-		{
-			'paths': {'artifact_root': '/custom/artifacts'},
-			'dataset': {'version': 'custom_version'},
-			'comparison': {'output_dir': str(output_dir)},
-		},
-	)
-
-	assert config.output_csv == output_dir / 'comparison_table.csv'
-	assert config.output_markdown == output_dir / 'comparison_report.md'
-
-
-@pytest.mark.parametrize(
-	('override', 'error', 'match'),
-	[
-		(
-			{'paths': {'artifact_root': 'relative/artifacts'}},
-			ValueError,
-			r'paths\.artifact_root must be an absolute path',
-		),
-		(
-			{'dataset': {'version': ''}},
-			TypeError,
-			r'dataset\.version must be a non-empty string',
-		),
-		(
-			{'dataset': {'name': 'another_dataset'}},
-			ValueError,
-			r'dataset\.name must be .f3_facies_benchmark.',
-		),
-	],
-)
-def test_f3_lithology_comparison_rejects_invalid_default_path_fields(
-	override: dict[str, object],
-	error: type[Exception],
-	match: str,
-) -> None:
-	raw = {'comparison': {}, **override}
-
-	with pytest.raises(error, match=match):
-		f3_lithology_comparison_report_config_from_mapping(raw)
+		)
 
 
 def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
@@ -490,6 +445,7 @@ def test_f3_lithology_baseline_comparison_accepts_disjoint_explicit_paths(
 	config = f3_lithology_comparison_report_config_from_mapping(
 		{
 			'comparison': {
+				'search_root': str(search_root),
 				'metrics_json': [str(metrics_path)],
 				'output_csv': str(output_dir / 'comparison_table.csv'),
 				'output_markdown': str(output_dir / 'comparison_report.md'),
@@ -669,7 +625,9 @@ def test_f3_lithology_baseline_comparison_warns_for_missing_metrics(
 	)
 
 
-def test_build_f3_lithology_comparison_report_proc_dry_run(tmp_path: Path) -> None:
+def test_f3_lithology_comparison_cli_requires_explicit_paths(
+	tmp_path: Path,
+) -> None:
 	output_dir = tmp_path / 'out' / 'baseline_comparison'
 
 	result = run_python_proc(
@@ -688,6 +646,26 @@ def test_build_f3_lithology_comparison_report_proc_dry_run(tmp_path: Path) -> No
 		in result.stdout
 	)
 	assert 'execution: dry-run; F3 lithology comparison report skipped' in result.stdout
+
+	missing_search_root = run_python_proc(
+		Path('proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py'),
+		'--output-dir',
+		output_dir,
+		'--dry-run',
+	)
+	assert missing_search_root.returncode == 2
+	assert '--search-root is required' in missing_search_root.stderr
+
+	missing_outputs = run_python_proc(
+		Path('proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py'),
+		'--search-root',
+		_search_root(tmp_path),
+		'--dry-run',
+	)
+	assert missing_outputs.returncode == 2
+	assert '--output-dir or both --output-csv and --output-markdown' in (
+		missing_outputs.stderr
+	)
 
 
 def test_build_f3_lithology_comparison_report_proc_dry_run_with_config(
