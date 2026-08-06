@@ -90,8 +90,11 @@ def f3_lithology_report_config_from_mapping(
 		'token_dataset_metadata_json',
 		prefix='reports',
 	)
-	comparison = _embedded_comparison_config(
-		_optional_mapping(config, 'comparison'),
+	comparison_mapping = _optional_mapping(config, 'comparison')
+	comparison = (
+		_embedded_comparison_config(comparison_mapping)
+		if comparison_mapping
+		else None
 	)
 	_validate_report_file_paths(
 		metrics_json=metrics_json,
@@ -141,7 +144,7 @@ def _validate_report_file_paths(  # noqa: PLR0913
 	visualization_metadata_json: Path | None,
 	output_markdown: Path,
 	output_json: Path,
-	comparison: F3LithologyComparisonReportConfig,
+	comparison: F3LithologyComparisonReportConfig | None,
 ) -> None:
 	source_files = (
 		(metrics_json, 'probe.metrics_json'),
@@ -153,9 +156,12 @@ def _validate_report_file_paths(  # noqa: PLR0913
 	output_files = (
 		(output_markdown, 'reports.output_markdown'),
 		(output_json, 'reports.output_json'),
-		(comparison.output_csv, 'comparison.output_csv'),
-		(comparison.output_markdown, 'comparison.output_markdown'),
 	)
+	if comparison is not None:
+		output_files += (
+			(comparison.output_csv, 'comparison.output_csv'),
+			(comparison.output_markdown, 'comparison.output_markdown'),
+		)
 	for output, output_label in output_files:
 		for source, source_label in source_files:
 			if source is not None:
@@ -170,15 +176,19 @@ def _report_output_paths(
 	output_dir: Path,
 	output_markdown: Path,
 	output_json: Path,
-	comparison: F3LithologyComparisonReportConfig,
+	comparison: F3LithologyComparisonReportConfig | None,
 ) -> tuple[tuple[str, Path], ...]:
-	return (
+	output_paths = (
 		('reports.output_dir', output_dir),
 		('reports.output_markdown', output_markdown),
 		('reports.output_json', output_json),
-		('comparison.output_csv', comparison.output_csv),
-		('comparison.output_markdown', comparison.output_markdown),
 	)
+	if comparison is not None:
+		output_paths += (
+			('comparison.output_csv', comparison.output_csv),
+			('comparison.output_markdown', comparison.output_markdown),
+		)
+	return output_paths
 
 
 def _embedded_comparison_config(

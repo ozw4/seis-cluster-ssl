@@ -476,6 +476,7 @@ def test_build_f3_lithology_report_proc_dry_run(tmp_path: Path) -> None:
 			'output_markdown': str(run['report_dir'] / 'report.md'),
 			'output_json': str(run['report_dir'] / 'report.json'),
 		},
+		'comparison': {},
 	}
 	config_path = tmp_path / 'build_lithology_report.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
@@ -490,7 +491,7 @@ def test_build_f3_lithology_report_proc_dry_run(tmp_path: Path) -> None:
 	assert result.returncode == 0, result.stderr
 	assert 'stage: build_f3_lithology_report' in result.stdout
 	assert 'reports.output_markdown:' in result.stdout
-	assert 'comparison.output_csv:' in result.stdout
+	assert 'comparison.output_csv:' not in result.stdout
 	assert 'execution: dry-run; F3 lithology report skipped' in result.stdout
 
 
@@ -561,6 +562,7 @@ def test_f3_lithology_report_config_preserves_explicit_comparison_paths(
 	)
 	assert resolved.output_markdown == Path(raw['reports']['output_markdown'])
 	assert resolved.output_json == Path(raw['reports']['output_json'])
+	assert resolved.comparison is not None
 	assert resolved.comparison.search_root == Path(raw['comparison']['search_root'])
 	assert resolved.comparison.output_csv == Path(raw['comparison']['output_csv'])
 	assert resolved.comparison.output_markdown == Path(
@@ -577,7 +579,7 @@ def test_build_f3_lithology_report_proc_default_config_dry_run() -> None:
 	assert result.returncode == 0, result.stderr
 	assert 'stage: build_f3_lithology_report' in result.stdout
 	assert 'reports.output_markdown:' in result.stdout
-	assert 'comparison.output_csv:' in result.stdout
+	assert 'comparison.output_csv:' not in result.stdout
 	assert 'prediction_metadata.json' in result.stdout
 	assert 'execution: dry-run; F3 lithology report skipped' in result.stdout
 
