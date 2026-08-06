@@ -230,35 +230,6 @@ def f3_prepare_volume_config_from_mapping(
 	)
 
 
-def default_f3_prepare_outputs(artifact_root: str | Path) -> F3PrepareOutputPaths:
-	"""Return the fixed registry output paths for the F3 facies benchmark."""
-	root = Path(artifact_root)
-	version = F3_FACIES_DATASET_VERSION
-	volume_dir = root / 'registry' / 'volumes' / 'f3' / version
-	return F3PrepareOutputPaths(
-		volume_dir=volume_dir,
-		manifest_path=root
-		/ 'registry'
-		/ 'manifests'
-		/ 'f3'
-		/ version
-		/ F3_MANIFEST_NAME,
-		split_path=root
-		/ 'registry'
-		/ 'splits'
-		/ 'f3'
-		/ version
-		/ F3_SPLIT_NAME,
-		normalization_stats_path=root
-		/ 'registry'
-		/ 'normalization_stats'
-		/ 'f3'
-		/ version
-		/ F3_NORMALIZATION_STATS_NAME,
-		metadata_path=volume_dir / F3_METADATA_NAME,
-	)
-
-
 def _load_seismic_cube(path: Path) -> np.ndarray:
 	inspection = read_f3_segy_file(path, role='seismic')
 	array = np.asarray(inspection.cube)
@@ -816,7 +787,6 @@ __all__ = [
 	'F3PrepareRootPaths',
 	'F3PrepareVolumeConfig',
 	'F3PrepareVolumeResult',
-	'default_f3_prepare_outputs',
 	'f3_prepare_volume_config_from_mapping',
 	'prepare_f3_facies_volume',
 ]

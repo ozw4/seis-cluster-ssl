@@ -187,7 +187,6 @@ from seis_ssl_cluster.f3.prepare_volume import (
 	F3PrepareRootPaths,
 	F3PrepareVolumeConfig,
 	F3PrepareVolumeResult,
-	default_f3_prepare_outputs,
 	f3_prepare_volume_config_from_mapping,
 	prepare_f3_facies_volume,
 )
@@ -399,7 +398,6 @@ __all__ = [
 	'class_info_inventory_to_dict',
 	'compute_lithology_metrics',
 	'count_class_pixels',
-	'default_f3_prepare_outputs',
 	'extract_label_split',
 	'extract_teacher_label_slice',
 	'f3_line_geometry_from_mapping',

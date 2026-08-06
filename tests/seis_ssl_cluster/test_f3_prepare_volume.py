@@ -17,7 +17,7 @@ from seis_ssl_cluster.data import (
 )
 from seis_ssl_cluster.f3 import (
 	F3_SURVEY_ID,
-	default_f3_prepare_outputs,
+	F3PrepareOutputPaths,
 	f3_prepare_volume_config_from_mapping,
 	prepare_f3_facies_volume,
 )
@@ -37,7 +37,7 @@ PREDICT_CONFIG = Path(
 )
 
 
-def test_prepare_f3_facies_volume_proc_writes_registry_artifacts(
+def test_prepare_f3_facies_volume_proc_writes_configured_outputs(
 	tmp_path: Path,
 ) -> None:
 	segyio = pytest.importorskip('segyio')
@@ -86,7 +86,12 @@ def test_prepare_f3_facies_volume_proc_writes_registry_artifacts(
 	assert manifest.amplitude.normalization_stats_path == (
 		outputs.normalization_stats_path
 	)
-	assert _is_relative_to(outputs.normalization_stats_path, artifact_root)
+	assert outputs.normalization_stats_path == (
+		tmp_path
+		/ 'configured-outputs'
+		/ 'stats'
+		/ 'custom-normalization.json'
+	)
 
 	assert outputs.split_path.read_text(encoding='utf-8') == f'{outputs.seismic_npy}\n'
 	assert stats.survey_id == F3_SURVEY_ID
@@ -240,8 +245,17 @@ def _write_prepare_config(
 	*,
 	f3_root: Path,
 	artifact_root: Path,
-) -> tuple[Path, object]:
-	outputs = default_f3_prepare_outputs(artifact_root)
+) -> tuple[Path, F3PrepareOutputPaths]:
+	output_root = tmp_path / 'configured-outputs'
+	outputs = F3PrepareOutputPaths(
+		volume_dir=output_root / 'volume',
+		manifest_path=output_root / 'manifest' / 'custom-manifest.json',
+		split_path=output_root / 'split' / 'custom-inputs.txt',
+		normalization_stats_path=(
+			output_root / 'stats' / 'custom-normalization.json'
+		),
+		metadata_path=output_root / 'metadata' / 'custom-metadata.json',
+	)
 	inspection_report = (
 		artifact_root / 'inspection' / 'f3' / 'facies_benchmark_v1' / 'report.json'
 	)
@@ -283,11 +297,3 @@ def _write_prepare_config(
 	config_path = tmp_path / 'prepare_f3_volume.yaml'
 	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
 	return config_path, outputs
-
-
-def _is_relative_to(path: Path, root: Path) -> bool:
-	try:
-		path.resolve(strict=False).relative_to(root.resolve(strict=False))
-	except ValueError:
-		return False
-	return True
