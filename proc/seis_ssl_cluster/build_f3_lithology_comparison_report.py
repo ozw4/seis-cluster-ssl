@@ -1,14 +1,15 @@
+# ruff: noqa: CPY001
 """Build F3 lithology pretrained-vs-baseline comparison reports."""
 
 from __future__ import annotations
 
-import argparse
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+	import argparse
 	from argparse import Namespace
 	from collections.abc import Mapping
+	from pathlib import Path
 
 from seis_ssl_cluster.cli import (
 	add_append_path_argument,
@@ -29,10 +30,6 @@ from seis_ssl_cluster.f3 import (
 )
 
 STAGE = 'build_f3_lithology_comparison_report'
-DEFAULT_SEARCH_ROOT = Path(
-	'/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1'
-)
-DEFAULT_OUTPUT_DIR = DEFAULT_SEARCH_ROOT / 'reports' / 'baseline_comparison'
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -163,18 +160,9 @@ def _config_from_args(
 			config_path=config_path,
 		)
 	else:
-		output_dir = args.output_dir or DEFAULT_OUTPUT_DIR
-		config = F3LithologyComparisonReportConfig(
-			search_root=args.search_root or DEFAULT_SEARCH_ROOT,
-			output_csv=args.output_csv or output_dir / 'comparison_table.csv',
-			output_markdown=(
-				args.output_markdown or output_dir / 'comparison_report.md'
-			),
-			metrics_paths=tuple(args.metrics_json),
-			figure_dpi=args.figure_dpi or 300,
+		config = f3_lithology_comparison_report_config_from_mapping(
+			{'comparison': {}},
 		)
-	if args.config is None:
-		return config
 	return _config_with_overrides(
 		config,
 		search_root=args.search_root,

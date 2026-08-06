@@ -1,11 +1,16 @@
+# ruff: noqa: CPY001
 """F3 lithology report config validation."""
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config.common import _validate_distinct_paths
+from seis_ssl_cluster.config.f3_baselines import (
+	_configured_dataset_version,
+	_f3_comparison_default_paths,
+	_validate_f3_dataset_name,
+)
 from seis_ssl_cluster.config.f3_lithology_common import (
 	_optional_absolute_path,
 	_optional_mapping,
@@ -21,6 +26,7 @@ from seis_ssl_cluster.f3 import (
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping
+	from pathlib import Path
 
 
 def f3_lithology_report_config_from_mapping(
@@ -50,6 +56,8 @@ def f3_lithology_report_config_from_mapping(
 	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
 	dataset = _required_mapping(config, 'dataset')
+	dataset_version = _configured_dataset_version(dataset)
+	_validate_f3_dataset_name(dataset)
 	model = _required_mapping(config, 'model')
 	labels = _required_mapping(config, 'labels')
 	lithology = _required_mapping(config, 'lithology')
@@ -85,7 +93,11 @@ def f3_lithology_report_config_from_mapping(
 		'token_dataset_metadata_json',
 		prefix='reports',
 	)
-	comparison = _embedded_comparison_config(_optional_mapping(config, 'comparison'))
+	comparison = _embedded_comparison_config(
+		_optional_mapping(config, 'comparison'),
+		artifact_root=artifact_root,
+		dataset_version=dataset_version,
+	)
 	_validate_report_file_paths(
 		metrics_json=metrics_json,
 		probe_config_json=probe_config_json,
@@ -177,11 +189,14 @@ def _report_output_paths(
 
 def _embedded_comparison_config(
 	comparison: Mapping[str, object],
+	*,
+	artifact_root: Path,
+	dataset_version: str,
 ) -> F3LithologyComparisonReportConfig:
-	default_search_root = Path(
-		'/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1'
+	default_search_root, default_output_dir = _f3_comparison_default_paths(
+		artifact_root=artifact_root,
+		dataset_version=dataset_version,
 	)
-	default_output_dir = default_search_root / 'reports' / 'baseline_comparison'
 	search_root = _optional_absolute_path(
 		comparison,
 		'search_root',

@@ -565,6 +565,30 @@ def test_f3_lithology_report_config_preserves_disjoint_explicit_paths(
 	)
 
 
+def test_f3_lithology_report_embedded_comparison_uses_root_and_version(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='model_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	raw = _report_config_mapping(tmp_path, run)
+	raw['dataset']['version'] = 'custom_version'
+	raw['comparison'] = {}
+
+	resolved = f3_lithology_report_config_from_mapping(raw)
+
+	base = Path(raw['paths']['artifact_root']) / 'lithology' / 'f3' / 'custom_version'
+	output_dir = base / 'reports' / 'baseline_comparison'
+	assert resolved.comparison.search_root == base
+	assert resolved.comparison.output_csv == output_dir / 'comparison_table.csv'
+	assert resolved.comparison.output_markdown == (
+		output_dir / 'comparison_report.md'
+	)
+
+
 def test_build_f3_lithology_report_proc_default_config_dry_run() -> None:
 	result = run_python_proc(
 		Path('proc/seis_ssl_cluster/build_f3_lithology_report.py'),

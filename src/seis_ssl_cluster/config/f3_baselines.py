@@ -1,3 +1,4 @@
+# ruff: noqa: CPY001
 """F3 lithology baseline config validation entrypoints."""
 
 from __future__ import annotations
@@ -6,6 +7,11 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from seis_ssl_cluster.config.schema import (
+	DEFAULT_ARTIFACT_ROOT,
+	F3_FACIES_DATASET_NAME,
+	F3_FACIES_DATASET_VERSION,
+)
 from seis_ssl_cluster.f3 import (
 	F3LithologyComparisonFigureFontSizes,
 	F3LithologyComparisonFigureSizes,
@@ -21,13 +27,6 @@ from seis_ssl_cluster.training.random_checkpoint import (
 	random_mae_checkpoint_config_from_mapping,
 )
 
-_DEFAULT_COMPARISON_SEARCH_ROOT = Path(
-	'/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1'
-)
-_DEFAULT_COMPARISON_OUTPUT_DIR = (
-	_DEFAULT_COMPARISON_SEARCH_ROOT / 'reports' / 'baseline_comparison'
-)
-
 
 def f3_lithology_comparison_report_config_from_mapping(
 	config: Mapping[str, object],
@@ -38,18 +37,29 @@ def f3_lithology_comparison_report_config_from_mapping(
 		frozenset({'paths', 'dataset', 'comparison', 'publish'}),
 		prefix='config',
 	)
+	paths = _optional_mapping(config, 'paths')
+	_validate_allowed_keys(paths, frozenset({'artifact_root'}), prefix='paths')
+	dataset = _optional_mapping(config, 'dataset')
+	_validate_allowed_keys(dataset, frozenset({'name', 'version'}), prefix='dataset')
+	artifact_root = _configured_artifact_root(paths)
+	dataset_version = _configured_dataset_version(dataset)
+	_validate_f3_dataset_name(dataset)
+	default_search_root, default_output_dir = _f3_comparison_default_paths(
+		artifact_root=artifact_root,
+		dataset_version=dataset_version,
+	)
 	comparison = _required_mapping(config, 'comparison')
 	search_root = _optional_absolute_path(
 		comparison,
 		'search_root',
 		prefix='comparison',
-		default=_DEFAULT_COMPARISON_SEARCH_ROOT,
+		default=default_search_root,
 	)
 	output_dir = _optional_absolute_path(
 		comparison,
 		'output_dir',
 		prefix='comparison',
-		default=_DEFAULT_COMPARISON_OUTPUT_DIR,
+		default=default_output_dir,
 	)
 	figure_style = _comparison_figure_style_from_mapping(comparison)
 	return F3LithologyComparisonReportConfig(
@@ -70,6 +80,40 @@ def f3_lithology_comparison_report_config_from_mapping(
 		figure_dpi=_comparison_figure_dpi_from_mapping(comparison),
 		figure_style=figure_style,
 	)
+
+
+def _f3_comparison_default_paths(
+	*,
+	artifact_root: Path,
+	dataset_version: str,
+) -> tuple[Path, Path]:
+	base = artifact_root / 'lithology' / 'f3' / dataset_version
+	return base, base / 'reports' / 'baseline_comparison'
+
+
+def _configured_artifact_root(paths: Mapping[str, object]) -> Path:
+	if 'artifact_root' not in paths:
+		return Path(DEFAULT_ARTIFACT_ROOT)
+	return _absolute_path(paths['artifact_root'], label='paths.artifact_root')
+
+
+def _configured_dataset_version(dataset: Mapping[str, object]) -> str:
+	if 'version' not in dataset:
+		return F3_FACIES_DATASET_VERSION
+	value = dataset['version']
+	if not isinstance(value, str) or not value:
+		msg = f'dataset.version must be a non-empty string; got {value!r}'
+		raise TypeError(msg)
+	return value
+
+
+def _validate_f3_dataset_name(dataset: Mapping[str, object]) -> None:
+	if 'name' not in dataset:
+		return
+	value = dataset['name']
+	if value != F3_FACIES_DATASET_NAME:
+		msg = f'dataset.name must be {F3_FACIES_DATASET_NAME!r}; got {value!r}'
+		raise ValueError(msg)
 
 
 def f3_lithology_comparison_publish_config_from_mapping(
