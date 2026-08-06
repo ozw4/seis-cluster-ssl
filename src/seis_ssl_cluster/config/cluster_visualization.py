@@ -11,6 +11,7 @@ from seis_ssl_cluster.config.common import (
 	_required_mapping,
 	_validate_allowed_keys,
 	_validate_bool,
+	_validate_disjoint_directories,
 	_validate_fraction,
 	_validate_non_empty_str,
 	_validate_nonnegative_finite_number,
@@ -93,6 +94,12 @@ def resolve_cluster_visualization_config(config: _T) -> Config:
 		'visualization.output_dir',
 		input_root=paths.nopims_root,
 		input_root_label='paths.nopims_root',
+	)
+	_validate_disjoint_directories(
+		input_dir,
+		'clustering.input_dir',
+		output_dir,
+		'visualization.output_dir',
 	)
 	_validate_survey_id_list(visualization)
 	_validate_visualization_modes(visualization)

@@ -10,6 +10,7 @@ from seis_ssl_cluster.config.common import (
 	_is_int,
 	_is_number,
 	_required_mapping,
+	_validate_distinct_paths,
 	_validate_non_empty_path,
 	_validate_output_path,
 	_validate_path,
@@ -50,8 +51,17 @@ def resolve_normalization_qc_config(config: _T) -> Config:
 	manifests = _required_mapping(resolved, 'manifests')
 	splits = _required_mapping(resolved, 'splits')
 	qc = _required_mapping(resolved, 'qc')
-	_validate_non_empty_path(manifests, 'input', prefix='manifests')
-	_validate_non_empty_path(splits, 'input', prefix='splits')
+	source_files = (
+		(
+			_validate_non_empty_path(manifests, 'input', prefix='manifests'),
+			'manifests.input',
+		),
+		(
+			_validate_non_empty_path(splits, 'input', prefix='splits'),
+			'splits.input',
+		),
+	)
+	output_files = []
 	for parent, key, prefix in (
 		(manifests, 'output', 'manifests'),
 		(splits, 'output', 'splits'),
@@ -59,8 +69,22 @@ def resolve_normalization_qc_config(config: _T) -> Config:
 		(qc, 'excluded_surveys', 'qc'),
 	):
 		label = f'{prefix}.{key}'
+		path = _validate_path(parent, key, prefix=prefix)
+		output_files.append((path, label))
+	for output, output_label in output_files:
+		for source, source_label in source_files:
+			_validate_distinct_paths(
+				output,
+				output_label,
+				source,
+				source_label,
+			)
+	for index, (left, left_label) in enumerate(output_files):
+		for right, right_label in output_files[index + 1 :]:
+			_validate_distinct_paths(left, left_label, right, right_label)
+	for path, label in output_files:
 		_validate_output_path(
-			_validate_path(parent, key, prefix=prefix),
+			path,
 			label,
 			input_root=paths.nopims_root,
 			input_root_label='paths.nopims_root',

@@ -363,6 +363,38 @@ def test_clustering_output_dir_preserves_explicit_path() -> None:
 	assert resolved['clustering']['output_dir'] == explicit_output
 
 
+@pytest.mark.parametrize(
+	'relationship',
+	['equal', 'output_inside_input', 'input_inside_output'],
+)
+def test_clustering_rejects_overlapping_input_and_output_directories(
+	relationship: str,
+) -> None:
+	cfg = _minimal_clustering_config()
+	if relationship == 'equal':
+		cfg['clustering']['output_dir'] = cfg['embeddings']['input_dir']
+	elif relationship == 'output_inside_input':
+		cfg['clustering']['output_dir'] = f"{cfg['embeddings']['input_dir']}/clusters"
+	else:
+		cfg['embeddings']['input_dir'] = f"{cfg['clustering']['output_dir']}/embeddings"
+
+	with pytest.raises(ValueError, match='must be disjoint directories'):
+		resolve_clustering_config(cfg)
+
+
+def test_clustering_preserves_disjoint_explicit_paths_with_runs() -> None:
+	cfg = _minimal_clustering_config()
+	input_dir = '/external/runs/embeddings/../embeddings/model_a'
+	output_dir = '/external/runs/clustering/model_a'
+	cfg['embeddings']['input_dir'] = input_dir
+	cfg['clustering']['output_dir'] = output_dir
+
+	resolved = resolve_clustering_config(cfg)
+
+	assert resolved['embeddings']['input_dir'] == input_dir
+	assert resolved['clustering']['output_dir'] == output_dir
+
+
 def test_active_default_nopims_clustering_yaml_resolves() -> None:
 	resolve_clustering_config(load_config(CONFIG_DIR / 'cluster_embeddings.yaml'))
 

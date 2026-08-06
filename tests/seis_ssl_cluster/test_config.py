@@ -1614,6 +1614,39 @@ def test_filter_qc_output_outside_artifact_root_is_preserved() -> None:
 	assert resolved['qc']['output_json'] == explicit_output
 
 
+@pytest.mark.parametrize(
+	('output_section', 'output_key', 'collision_section', 'collision_key'),
+	[
+		('manifests', 'output', 'manifests', 'input'),
+		('splits', 'output', 'splits', 'input'),
+		('qc', 'output_json', 'manifests', 'input'),
+		('qc', 'output_json', 'qc', 'excluded_surveys'),
+		('manifests', 'output', 'splits', 'output'),
+	],
+)
+def test_normalization_qc_rejects_file_path_collisions(
+	output_section: str,
+	output_key: str,
+	collision_section: str,
+	collision_key: str,
+) -> None:
+	cfg = _minimal_normalization_qc_config()
+	cfg[output_section][output_key] = cfg[collision_section][collision_key]
+
+	with pytest.raises(ValueError, match=rf'{output_section}\.{output_key}.*differ'):
+		resolve_normalization_qc_config(cfg)
+
+
+def test_normalization_qc_preserves_disjoint_explicit_paths_with_runs() -> None:
+	cfg = _minimal_normalization_qc_config()
+	explicit_output = '/external/runs/qc/../qc/report.json'
+	cfg['qc']['output_json'] = explicit_output
+
+	resolved = resolve_normalization_qc_config(cfg)
+
+	assert resolved['qc']['output_json'] == explicit_output
+
+
 def _paths() -> dict[str, object]:
 	return {
 		'nopims_root': '/data/NOPIMS',

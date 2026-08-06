@@ -12,6 +12,7 @@ from seis_ssl_cluster.config.common import (
 	_required_mapping,
 	_validate_allowed_keys,
 	_validate_bool,
+	_validate_disjoint_directories,
 	_validate_nonnegative_finite_number,
 	_validate_optional_positive_int,
 	_validate_output_path,
@@ -176,6 +177,12 @@ def resolve_clustering_config(config: _T) -> Config:
 		'clustering.output_dir',
 		input_root=paths.nopims_root,
 		input_root_label='paths.nopims_root',
+	)
+	_validate_disjoint_directories(
+		input_dir,
+		'embeddings.input_dir',
+		output_dir,
+		'clustering.output_dir',
 	)
 	_validate_clustering_normalization(clustering)
 	residualization = _required_child_mapping(

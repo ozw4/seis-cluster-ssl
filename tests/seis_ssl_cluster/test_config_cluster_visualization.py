@@ -89,6 +89,42 @@ def test_cluster_visualization_output_dir_preserves_explicit_path() -> None:
 	assert resolved['visualization']['output_dir'] == explicit_output
 
 
+@pytest.mark.parametrize(
+	'relationship',
+	['equal', 'output_inside_input', 'input_inside_output'],
+)
+def test_cluster_visualization_rejects_overlapping_input_and_output_directories(
+	relationship: str,
+) -> None:
+	cfg = _minimal_visualization_config()
+	if relationship == 'equal':
+		cfg['visualization']['output_dir'] = cfg['clustering']['input_dir']
+	elif relationship == 'output_inside_input':
+		cfg['visualization']['output_dir'] = (
+			f"{cfg['clustering']['input_dir']}/plots"
+		)
+	else:
+		cfg['clustering']['input_dir'] = (
+			f"{cfg['visualization']['output_dir']}/clusters"
+		)
+
+	with pytest.raises(ValueError, match='must be disjoint directories'):
+		resolve_cluster_visualization_config(cfg)
+
+
+def test_cluster_visualization_preserves_disjoint_explicit_paths_with_runs() -> None:
+	cfg = _minimal_visualization_config()
+	input_dir = '/external/runs/clustering/../clustering/model_a'
+	output_dir = '/external/runs/visualizations/model_a'
+	cfg['clustering']['input_dir'] = input_dir
+	cfg['visualization']['output_dir'] = output_dir
+
+	resolved = resolve_cluster_visualization_config(cfg)
+
+	assert resolved['clustering']['input_dir'] == input_dir
+	assert resolved['visualization']['output_dir'] == output_dir
+
+
 def test_active_default_nopims_cluster_visualization_yaml_resolves() -> None:
 	resolve_cluster_visualization_config(
 		load_config(CONFIG_DIR / 'visualize_clusters.yaml'),

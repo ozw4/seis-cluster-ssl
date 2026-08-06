@@ -95,6 +95,36 @@ def _validate_output_path(
 		raise ValueError(msg)
 
 
+def _validate_distinct_paths(
+	left: Path,
+	left_label: str,
+	right: Path,
+	right_label: str,
+) -> None:
+	"""Reject paths that resolve to the same location."""
+	if left.resolve(strict=False) == right.resolve(strict=False):
+		msg = f'{left_label} must differ from {right_label}'
+		raise ValueError(msg)
+
+
+def _validate_disjoint_directories(
+	left: Path,
+	left_label: str,
+	right: Path,
+	right_label: str,
+) -> None:
+	"""Reject equal or nested directory paths."""
+	resolved_left = left.resolve(strict=False)
+	resolved_right = right.resolve(strict=False)
+	if (
+		resolved_left == resolved_right
+		or _is_relative_to(resolved_left, resolved_right)
+		or _is_relative_to(resolved_right, resolved_left)
+	):
+		msg = f'{left_label} and {right_label} must be disjoint directories'
+		raise ValueError(msg)
+
+
 def _validate_path_under_root(
 	path: Path,
 	label: str,
