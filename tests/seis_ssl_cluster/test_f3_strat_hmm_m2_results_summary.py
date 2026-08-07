@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
@@ -17,9 +17,6 @@ from seis_ssl_cluster.f3.lithology.m2_results import (
 	f3_strat_hmm_m2_results_config_from_mapping,
 	publish_f3_strat_hmm_m2_results,
 )
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 
 def test_m2a_go_writes_complete_lightweight_report(tmp_path: Path) -> None:
@@ -435,6 +432,134 @@ def test_m2a_publish_wrapper_enforces_exact_allowlist_and_size_guard(
 		publish_f3_strat_hmm_m2_results(
 			result, replace(publish_config, max_file_size_bytes=1)
 		)
+
+
+def test_m2a_publish_include_figures_false_keeps_lightweight_contract(
+	tmp_path: Path,
+) -> None:
+	pytest.importorskip('matplotlib').use('Agg', force=True)
+	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
+	output_dir = tmp_path / 'results'
+
+	published = publish_f3_strat_hmm_m2_results(
+		result,
+		F3StratHMMM2PublishConfig(
+			enabled=True,
+			output_dir=output_dir,
+			include_figures=False,
+		),
+	)
+
+	assert {path.relative_to(output_dir) for path in published} == {
+		Path('m2a_results_summary.md'),
+		Path('m2a_results_summary.json'),
+		*(Path('tables') / name for name in m2_results.M2_RESULTS_TABLE_NAMES),
+	}
+	assert not (output_dir / 'figures').exists()
+	assert not (output_dir / 'publish_manifest.json').exists()
+	assert '(figures/' not in (output_dir / 'm2a_results_summary.md').read_text(
+		encoding='utf-8'
+	)
+
+
+def test_m2a_publish_rejects_missing_required_source_before_writing(
+	tmp_path: Path,
+) -> None:
+	pytest.importorskip('matplotlib').use('Agg', force=True)
+	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
+	result.table_paths[-1].unlink()
+	output_dir = tmp_path / 'results'
+
+	with pytest.raises(FileNotFoundError, match='regular file'):
+		publish_f3_strat_hmm_m2_results(
+			result,
+			F3StratHMMM2PublishConfig(enabled=True, output_dir=output_dir),
+		)
+
+	assert not output_dir.exists()
+
+
+def test_m2a_publish_rejects_source_symlink_before_writing(tmp_path: Path) -> None:
+	pytest.importorskip('matplotlib').use('Agg', force=True)
+	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
+	symlink = tmp_path / 'linked' / result.table_paths[-1].name
+	symlink.parent.mkdir()
+	symlink.symlink_to(result.table_paths[-1])
+	result = replace(result, table_paths=(*result.table_paths[:-1], symlink))
+	output_dir = tmp_path / 'results'
+
+	with pytest.raises(FileNotFoundError, match='regular file'):
+		publish_f3_strat_hmm_m2_results(
+			result,
+			F3StratHMMM2PublishConfig(enabled=True, output_dir=output_dir),
+		)
+
+	assert not output_dir.exists()
+
+
+@pytest.mark.parametrize('target_kind', ['symlink', 'directory'])
+def test_m2a_publish_rejects_unsafe_target_before_writing(
+	tmp_path: Path,
+	target_kind: str,
+) -> None:
+	pytest.importorskip('matplotlib').use('Agg', force=True)
+	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
+	output_dir = tmp_path / 'results'
+	unsafe_target = output_dir / 'tables' / m2_results.MONITORED_CLASS_TABLE
+	unsafe_target.parent.mkdir(parents=True)
+	if target_kind == 'symlink':
+		outside = tmp_path / 'outside.csv'
+		outside.write_text('outside\n', encoding='utf-8')
+		unsafe_target.symlink_to(outside)
+	else:
+		unsafe_target.mkdir()
+
+	exception = ValueError if target_kind == 'symlink' else IsADirectoryError
+	with pytest.raises(exception):
+		publish_f3_strat_hmm_m2_results(
+			result,
+			F3StratHMMM2PublishConfig(enabled=True, output_dir=output_dir),
+		)
+
+	assert not (output_dir / 'm2a_results_summary.md').exists()
+	assert not (output_dir / 'm2a_results_summary.json').exists()
+
+
+def test_m2a_publish_rejects_source_target_collision_without_writing(
+	tmp_path: Path,
+) -> None:
+	pytest.importorskip('matplotlib').use('Agg', force=True)
+	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
+	before = result.summary_markdown.read_bytes()
+
+	with pytest.raises(ValueError, match='publish target must differ from source'):
+		publish_f3_strat_hmm_m2_results(
+			result,
+			F3StratHMMM2PublishConfig(
+				enabled=True,
+				output_dir=result.summary_markdown.parent,
+			),
+		)
+
+	assert result.summary_markdown.read_bytes() == before
+
+
+def test_m2a_publish_rejects_size_before_writing(tmp_path: Path) -> None:
+	pytest.importorskip('matplotlib').use('Agg', force=True)
+	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
+	output_dir = tmp_path / 'results'
+
+	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
+		publish_f3_strat_hmm_m2_results(
+			result,
+			F3StratHMMM2PublishConfig(
+				enabled=True,
+				output_dir=output_dir,
+				max_file_size_bytes=1,
+			),
+		)
+
+	assert not output_dir.exists()
 
 
 def _fixture(tmp_path: Path) -> F3StratHMMM2ResultsConfig:

@@ -54,13 +54,6 @@ class F3StratHMMM1PublishConfig:
 
 
 @dataclass(frozen=True)
-class _LocalPublishEntry:
-	source: Path
-	target: Path
-	content_bytes: bytes | None = None
-
-
-@dataclass(frozen=True)
 class F3StratHMMM1ResultsConfig:
 	"""Resolved inputs and outputs for M1 result consolidation."""
 
@@ -219,7 +212,7 @@ def consolidate_f3_strat_hmm_m1_results(
 	)
 
 
-def publish_f3_strat_hmm_m1_results(
+def publish_f3_strat_hmm_m1_results(  # noqa: PLR0915
 	result: F3StratHMMM1ResultsResult,
 	publish_config: F3StratHMMM1PublishConfig | None,
 ) -> tuple[Path, ...]:
@@ -246,37 +239,110 @@ def publish_f3_strat_hmm_m1_results(
 		if publish_config.include_figures
 		else _publish_markdown_without_figure_links(result.summary_json)
 	)
-	entries = [
-		_LocalPublishEntry(
-			result.summary_markdown,
-			output_dir / 'm1_results_summary.md',
-			markdown_text.encode('utf-8'),
-		),
-		_LocalPublishEntry(
-			result.summary_json,
-			output_dir / 'm1_results_summary.json',
-		),
-	]
-	for name in (SINGLE_SPLIT_TABLE, LABEL_BUDGET_TABLE, SPLIT_INDEX_TABLE):
-		source = next((path for path in result.table_paths if path.name == name), None)
-		if source is None:
-			raise FileNotFoundError(f'required publish source is missing: {name}')
-		entries.append(_LocalPublishEntry(source, output_dir / 'tables' / name))
-	if publish_config.include_figures:
-		for name in (SINGLE_RUN_FIGURE, LABEL_BUDGET_FIGURE, SPLIT_INDEX_FIGURE):
-			source = next(
-				(path for path in result.figure_paths if path.name == name), None
-			)
-			if source is None:
-				raise FileNotFoundError(f'required publish source is missing: {name}')
-			entries.append(
-				_LocalPublishEntry(source, output_dir / 'figures' / name)
-			)
-	plan = _preflight_local_publish_entries(
-		entries,
+	single_split_table = next(
+		path for path in result.table_paths if path.name == SINGLE_SPLIT_TABLE
+	)
+	label_budget_table = next(
+		path for path in result.table_paths if path.name == LABEL_BUDGET_TABLE
+	)
+	split_index_table = next(
+		path for path in result.table_paths if path.name == SPLIT_INDEX_TABLE
+	)
+	markdown_target = output_dir / 'm1_results_summary.md'
+	json_target = output_dir / 'm1_results_summary.json'
+	single_split_target = output_dir / 'tables' / SINGLE_SPLIT_TABLE
+	label_budget_target = output_dir / 'tables' / LABEL_BUDGET_TABLE
+	split_index_target = output_dir / 'tables' / SPLIT_INDEX_TABLE
+	_validate_published_file(
+		result.summary_markdown,
+		markdown_target,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+		content_size_bytes=len(markdown_text.encode('utf-8')),
+	)
+	_validate_published_file(
+		result.summary_json,
+		json_target,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
-	return _write_local_publish_entries(plan)
+	_validate_published_file(
+		single_split_table,
+		single_split_target,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	_validate_published_file(
+		label_budget_table,
+		label_budget_target,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	_validate_published_file(
+		split_index_table,
+		split_index_target,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	single_run_figure: Path | None = None
+	label_budget_figure: Path | None = None
+	split_index_figure: Path | None = None
+	if publish_config.include_figures:
+		single_run_figure = next(
+			path for path in result.figure_paths if path.name == SINGLE_RUN_FIGURE
+		)
+		label_budget_figure = next(
+			path for path in result.figure_paths if path.name == LABEL_BUDGET_FIGURE
+		)
+		split_index_figure = next(
+			path for path in result.figure_paths if path.name == SPLIT_INDEX_FIGURE
+		)
+		_validate_published_file(
+			single_run_figure,
+			output_dir / 'figures' / SINGLE_RUN_FIGURE,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		)
+		_validate_published_file(
+			label_budget_figure,
+			output_dir / 'figures' / LABEL_BUDGET_FIGURE,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		)
+		_validate_published_file(
+			split_index_figure,
+			output_dir / 'figures' / SPLIT_INDEX_FIGURE,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		)
+
+	markdown_target.parent.mkdir(parents=True, exist_ok=True)
+	markdown_target.write_text(markdown_text, encoding='utf-8')
+	shutil.copy2(result.summary_json, json_target)
+	single_split_target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(single_split_table, single_split_target)
+	shutil.copy2(label_budget_table, label_budget_target)
+	shutil.copy2(split_index_table, split_index_target)
+	published_files = [
+		markdown_target,
+		json_target,
+		single_split_target,
+		label_budget_target,
+		split_index_target,
+	]
+	if (
+		single_run_figure is not None
+		and label_budget_figure is not None
+		and split_index_figure is not None
+	):
+		figures_dir = output_dir / 'figures'
+		figures_dir.mkdir(parents=True, exist_ok=True)
+		single_run_target = figures_dir / SINGLE_RUN_FIGURE
+		label_budget_figure_target = figures_dir / LABEL_BUDGET_FIGURE
+		split_index_figure_target = figures_dir / SPLIT_INDEX_FIGURE
+		shutil.copy2(single_run_figure, single_run_target)
+		shutil.copy2(label_budget_figure, label_budget_figure_target)
+		shutil.copy2(split_index_figure, split_index_figure_target)
+		published_files.extend(
+			(
+				single_run_target,
+				label_budget_figure_target,
+				split_index_figure_target,
+			)
+		)
+	return tuple(published_files)
 
 
 def _validate_publish_names(
@@ -290,53 +356,32 @@ def _validate_publish_names(
 		)
 
 
-def _preflight_local_publish_entries(
-	entries: Sequence[_LocalPublishEntry], *, max_file_size_bytes: int
-) -> tuple[_LocalPublishEntry, ...]:
+def _validate_published_file(
+	source: Path,
+	target: Path,
+	*,
+	max_file_size_bytes: int,
+	content_size_bytes: int | None = None,
+) -> None:
 	if (
 		isinstance(max_file_size_bytes, bool)
 		or not isinstance(max_file_size_bytes, int)
 		or max_file_size_bytes <= 0
 	):
 		raise ValueError('max_file_size_bytes must be a positive integer')
-	targets: set[Path] = set()
-	for entry in entries:
-		if entry.source.is_symlink() or not entry.source.is_file():
-			raise FileNotFoundError(
-				f'required publish source must be a regular file: {entry.source}'
-			)
-		target = entry.target.resolve(strict=False)
-		if entry.source.resolve(strict=False) == target:
-			raise ValueError(f'publish target must differ from source: {entry.target}')
-		if target in targets:
-			raise ValueError(f'duplicate publish target: {entry.target}')
-		targets.add(target)
-		if entry.target.is_symlink():
-			raise ValueError(f'publish target must not be a symlink: {entry.target}')
-		if entry.target.exists() and not entry.target.is_file():
-			raise IsADirectoryError(f'publish target is not a file: {entry.target}')
-		size = (
-			len(entry.content_bytes)
-			if entry.content_bytes is not None
-			else entry.source.stat().st_size
+	if source.is_symlink() or not source.is_file():
+		raise FileNotFoundError(
+			f'required publish source must be a regular file: {source}'
 		)
-		if size > max_file_size_bytes:
-			raise ValueError(
-				f'publish source exceeds max_file_size_bytes: {entry.source}'
-			)
-	return tuple(entries)
-
-
-def _write_local_publish_entries(
-	entries: Sequence[_LocalPublishEntry],
-) -> tuple[Path, ...]:
-	for entry in entries:
-		entry.target.parent.mkdir(parents=True, exist_ok=True)
-		if entry.content_bytes is None:
-			shutil.copy2(entry.source, entry.target)
-		else:
-			entry.target.write_bytes(entry.content_bytes)
-	return tuple(entry.target for entry in entries)
+	if source.resolve(strict=False) == target.resolve(strict=False):
+		raise ValueError(f'publish target must differ from source: {target}')
+	if target.is_symlink():
+		raise ValueError(f'publish target must not be a symlink: {target}')
+	if target.exists() and not target.is_file():
+		raise IsADirectoryError(f'publish target is not a file: {target}')
+	size = source.stat().st_size if content_size_bytes is None else content_size_bytes
+	if size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
 
 
 def _publish_config_from_mapping(

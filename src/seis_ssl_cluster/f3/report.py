@@ -172,8 +172,10 @@ def render_f3_inspection_report_markdown(
 	lines = [
 		'# F3 facies benchmark inspection report',
 		'',
-		'このreportはF3 facies benchmark inspectionの出力を統合し、'
-		'少量教師の岩相判別MVPへ進むための判断材料をまとめる。',
+		(
+			'このreportはF3 facies benchmark inspectionの出力を統合し、'
+			'少量教師の岩相判別MVPへ進むための判断材料をまとめる。'
+		),
 		'',
 		'## 1. Dataset files',
 		'',
@@ -518,102 +520,73 @@ def _write_published_f3_inspection_report(
 		payload,
 		text_replacements=text_replacements,
 	)
-	entries = [
-		_LocalPublishEntry(
-			config.output_markdown,
-			output_dir / _PUBLISH_REPORT_TARGET,
-			render_f3_inspection_report_markdown(published_payload).encode('utf-8'),
-		),
-		_LocalPublishEntry(
-			config.output_json,
-			output_dir / _PUBLISH_JSON_TARGET,
-			(json.dumps(published_payload, indent=2, sort_keys=True) + '\n').encode(
-				'utf-8'
-			),
-		),
-	]
-	entries.extend(
-		_LocalPublishEntry(
-			source,
-			output_dir / relative_target,
-			required=False,
-		)
-		for source, relative_target in figure_sources
-	)
-	plan = _preflight_local_publish_entries(
-		entries,
+	report_text = render_f3_inspection_report_markdown(published_payload)
+	json_text = json.dumps(published_payload, indent=2, sort_keys=True) + '\n'
+	report_target = output_dir / _PUBLISH_REPORT_TARGET
+	json_target = output_dir / _PUBLISH_JSON_TARGET
+	_validate_published_file(
+		config.output_markdown,
+		report_target,
 		max_file_size_bytes=max_file_size_bytes,
+		content_size_bytes=len(report_text.encode('utf-8')),
 	)
-	return _write_local_publish_entries(plan)
+	_validate_published_file(
+		config.output_json,
+		json_target,
+		max_file_size_bytes=max_file_size_bytes,
+		content_size_bytes=len(json_text.encode('utf-8')),
+	)
+	existing_figures: list[tuple[Path, Path]] = []
+	for source, relative_target in figure_sources:
+		target = output_dir / relative_target
+		if source.is_symlink() or source.exists():
+			_validate_published_file(
+				source,
+				target,
+				max_file_size_bytes=max_file_size_bytes,
+			)
+			existing_figures.append((source, target))
+
+	report_target.parent.mkdir(parents=True, exist_ok=True)
+	report_target.write_text(report_text, encoding='utf-8')
+	json_target.write_text(json_text, encoding='utf-8')
+	published_files = [report_target, json_target]
+	for source, target in existing_figures:
+		target.parent.mkdir(parents=True, exist_ok=True)
+		shutil.copy2(source, target)
+		published_files.append(target)
+	return tuple(published_files)
 
 
-@dataclass(frozen=True)
-class _LocalPublishEntry:
-	source: Path
-	target: Path
-	content_bytes: bytes | None = None
-	required: bool = True
-
-
-def _preflight_local_publish_entries(  # noqa: C901
-	entries: Sequence[_LocalPublishEntry], *, max_file_size_bytes: int
-) -> tuple[_LocalPublishEntry, ...]:
+def _validate_published_file(
+	source: Path,
+	target: Path,
+	*,
+	max_file_size_bytes: int,
+	content_size_bytes: int | None = None,
+) -> None:
 	if (
 		isinstance(max_file_size_bytes, bool)
 		or not isinstance(max_file_size_bytes, int)
 		or max_file_size_bytes <= 0
 	):
 		raise ValueError('max_file_size_bytes must be a positive integer')
-	plan: list[_LocalPublishEntry] = []
-	targets: set[Path] = set()
-	for entry in entries:
-		if entry.source.is_symlink():
-			raise FileNotFoundError(
-				f'publish source must be a regular file: {entry.source}'
-			)
-		if not entry.source.exists():
-			if not entry.required:
-				continue
-			raise FileNotFoundError(
-				f'required publish source does not exist: {entry.source}'
-			)
-		if not entry.source.is_file():
-			raise FileNotFoundError(
-				f'publish source must be a regular file: {entry.source}'
-			)
-		target = entry.target.resolve(strict=False)
-		if entry.source.resolve(strict=False) == target:
-			raise ValueError(f'publish target must differ from source: {entry.target}')
-		if target in targets:
-			raise ValueError(f'duplicate publish target: {entry.target}')
-		targets.add(target)
-		if entry.target.is_symlink():
-			raise ValueError(f'publish target must not be a symlink: {entry.target}')
-		if entry.target.exists() and not entry.target.is_file():
-			raise IsADirectoryError(f'publish target is not a file: {entry.target}')
-		size = (
-			len(entry.content_bytes)
-			if entry.content_bytes is not None
-			else entry.source.stat().st_size
-		)
-		if size > max_file_size_bytes:
-			raise ValueError(
-				f'publish source exceeds max_file_size_bytes: {entry.source}'
-			)
-		plan.append(entry)
-	return tuple(plan)
-
-
-def _write_local_publish_entries(
-	entries: Sequence[_LocalPublishEntry],
-) -> tuple[Path, ...]:
-	for entry in entries:
-		entry.target.parent.mkdir(parents=True, exist_ok=True)
-		if entry.content_bytes is None:
-			shutil.copy2(entry.source, entry.target)
-		else:
-			entry.target.write_bytes(entry.content_bytes)
-	return tuple(entry.target for entry in entries)
+	if source.is_symlink():
+		raise FileNotFoundError(f'publish source must be a regular file: {source}')
+	if not source.exists():
+		raise FileNotFoundError(f'required publish source does not exist: {source}')
+	if not source.is_file():
+		raise FileNotFoundError(f'publish source must be a regular file: {source}')
+	resolved_target = target.resolve(strict=False)
+	if source.resolve(strict=False) == resolved_target:
+		raise ValueError(f'publish target must differ from source: {target}')
+	if target.is_symlink():
+		raise ValueError(f'publish target must not be a symlink: {target}')
+	if target.exists() and not target.is_file():
+		raise IsADirectoryError(f'publish target is not a file: {target}')
+	size = source.stat().st_size if content_size_bytes is None else content_size_bytes
+	if size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
 
 
 def _read_publish_report_payload(path: Path) -> Mapping[str, object]:
@@ -760,8 +733,10 @@ def _tokenization_summary(
 		'ambiguous_token_ratio': _fraction_or_none(ambiguous_tokens, total_tokens),
 		'empty_token_count': overall.get('empty_token_count'),
 		'warnings': [
-			'patch単位の代表classは粗い教師ラベルであり、境界付近では'
-			'facies混合を含む可能性がある。',
+			(
+				'patch単位の代表classは粗い教師ラベルであり、境界付近では'
+				'facies混合を含む可能性がある。'
+			),
 		],
 	}
 
@@ -960,8 +935,10 @@ def _render_dataset_files(dataset_files: Mapping[str, object]) -> list[str]:
 		f'- label SEGY: {label_count}',
 		f'- class_info: {class_info_count}',
 		f'- train PNG labels: {_display(dataset_files.get("train_png_count"))}件',
-		'- validation PNG labels: '
-		f'{_display(dataset_files.get("validation_png_count"))}件',
+		(
+			'- validation PNG labels: '
+			f'{_display(dataset_files.get("validation_png_count"))}件'
+		),
 	]
 
 
@@ -1058,18 +1035,30 @@ def _render_consistency(consistency: Mapping[str, object]) -> list[str]:
 	lines = [
 		f'- status: {status}',
 		f'- PNG labels: {_display(consistency.get("png_label_file_count"))}',
-		'- max mismatch threshold: '
-		f'{_display(consistency.get("max_mismatch_rate"))}',
-		'- max observed mismatch rate: '
-		f'{_display(consistency.get("max_observed_mismatch_rate"))}',
-		'- max observed effective mismatch rate: '
-		f'{_display(consistency.get("max_observed_effective_mismatch_rate"))}',
-		'- ignored z-border samples: '
-		f'{_display(consistency.get("ignore_border_samples_z"))}',
-		'- total mismatch pixels: '
-		f'{_display(consistency.get("total_mismatch_pixel_count"))}',
-		'- border-only mismatch slices: '
-		f'{_display(consistency.get("border_only_mismatch_count"))}',
+		(
+			'- max mismatch threshold: '
+			f'{_display(consistency.get("max_mismatch_rate"))}'
+		),
+		(
+			'- max observed mismatch rate: '
+			f'{_display(consistency.get("max_observed_mismatch_rate"))}'
+		),
+		(
+			'- max observed effective mismatch rate: '
+			f'{_display(consistency.get("max_observed_effective_mismatch_rate"))}'
+		),
+		(
+			'- ignored z-border samples: '
+			f'{_display(consistency.get("ignore_border_samples_z"))}'
+		),
+		(
+			'- total mismatch pixels: '
+			f'{_display(consistency.get("total_mismatch_pixel_count"))}'
+		),
+		(
+			'- border-only mismatch slices: '
+			f'{_display(consistency.get("border_only_mismatch_count"))}'
+		),
 		(
 			'- note: raw mismatchはz-border sampleを含み、'
 			'readiness判定はeffective mismatch rateを使う。'
@@ -1095,11 +1084,15 @@ def _render_figures(figures: Sequence[Mapping[str, object]]) -> list[str]:
 def _render_tokenization(tokenization: Mapping[str, object]) -> list[str]:
 	lines = [
 		f'- patch size: {_display(tokenization.get("patch_size_xyz"))}',
-		'- retained token ratio: '
-		f'{_display(tokenization.get("retained_token_ratio"))}',
-		'- ambiguous/dropped token ratio: '
-		f'{_display(tokenization.get("ambiguous_token_ratio"))} / '
-		f'{_display(tokenization.get("dropped_token_ratio"))}',
+		(
+			'- retained token ratio: '
+			f'{_display(tokenization.get("retained_token_ratio"))}'
+		),
+		(
+			'- ambiguous/dropped token ratio: '
+			f'{_display(tokenization.get("ambiguous_token_ratio"))} / '
+			f'{_display(tokenization.get("dropped_token_ratio"))}'
+		),
 		(
 			'- total / retained / dropped tokens: '
 			f'{_display(tokenization.get("total_tokens"))} / '

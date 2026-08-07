@@ -261,6 +261,72 @@ def test_publish_refuses_oversized_file(
 	assert not (tmp_path / 'results').exists()
 
 
+def test_publish_rejects_missing_required_source_before_writing(
+	tmp_path: Path,
+) -> None:
+	result = _write_publishable_result(tmp_path)
+	result.table_paths[-1].unlink()
+	output_dir = tmp_path / 'results'
+
+	with pytest.raises(FileNotFoundError, match='regular file'):
+		publish_f3_strat_hmm_m1_results(
+			result,
+			F3StratHMMM1PublishConfig(enabled=True, output_dir=output_dir),
+		)
+
+	assert not output_dir.exists()
+
+
+def test_publish_rejects_source_symlink_before_writing(tmp_path: Path) -> None:
+	result = _write_publishable_result(tmp_path)
+	symlink = tmp_path / 'linked' / result.table_paths[-1].name
+	symlink.parent.mkdir()
+	symlink.symlink_to(result.table_paths[-1])
+	result = F3StratHMMM1ResultsResult(
+		summary_json=result.summary_json,
+		summary_markdown=result.summary_markdown,
+		table_paths=(*result.table_paths[:-1], symlink),
+		figure_paths=result.figure_paths,
+		warnings=result.warnings,
+	)
+	output_dir = tmp_path / 'results'
+
+	with pytest.raises(FileNotFoundError, match='regular file'):
+		publish_f3_strat_hmm_m1_results(
+			result,
+			F3StratHMMM1PublishConfig(enabled=True, output_dir=output_dir),
+		)
+
+	assert not output_dir.exists()
+
+
+@pytest.mark.parametrize('target_kind', ['symlink', 'directory'])
+def test_publish_rejects_unsafe_target_before_writing(
+	tmp_path: Path,
+	target_kind: str,
+) -> None:
+	result = _write_publishable_result(tmp_path)
+	output_dir = tmp_path / 'results'
+	unsafe_target = output_dir / 'tables' / 'split_index_deltas.csv'
+	unsafe_target.parent.mkdir(parents=True)
+	if target_kind == 'symlink':
+		outside = tmp_path / 'outside.csv'
+		outside.write_text('outside\n', encoding='utf-8')
+		unsafe_target.symlink_to(outside)
+	else:
+		unsafe_target.mkdir()
+
+	exception = ValueError if target_kind == 'symlink' else IsADirectoryError
+	with pytest.raises(exception):
+		publish_f3_strat_hmm_m1_results(
+			result,
+			F3StratHMMM1PublishConfig(enabled=True, output_dir=output_dir),
+		)
+
+	assert not (output_dir / 'm1_results_summary.md').exists()
+	assert not (output_dir / 'm1_results_summary.json').exists()
+
+
 def test_publish_rejects_source_target_collision_without_changing_sources(
 	tmp_path: Path,
 ) -> None:

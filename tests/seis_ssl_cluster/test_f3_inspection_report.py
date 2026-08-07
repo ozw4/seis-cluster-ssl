@@ -262,15 +262,121 @@ def test_f3_inspection_report_publish_missing_optional_figure_warns(
 
 def test_f3_inspection_report_publish_requires_report_files(tmp_path: Path) -> None:
 	config = _report_config(tmp_path)
+	output_dir = tmp_path / 'results'
 
 	with pytest.raises(FileNotFoundError, match='required publish source'):
 		publish_f3_inspection_report(
 			config,
 			F3InspectionPublishConfig(
 				enabled=True,
-				output_dir=tmp_path / 'results',
+				output_dir=output_dir,
 			),
 		)
+	assert not output_dir.exists()
+
+
+def test_f3_inspection_publish_validates_all_required_sources_before_writing(
+	tmp_path: Path,
+) -> None:
+	config = _report_config(tmp_path)
+	_write_file(config.output_markdown, b'artifact report\n')
+	output_dir = tmp_path / 'results'
+
+	with pytest.raises(FileNotFoundError, match='required publish source'):
+		publish_f3_inspection_report(
+			config,
+			F3InspectionPublishConfig(enabled=True, output_dir=output_dir),
+			payload={},
+		)
+
+	assert not output_dir.exists()
+
+
+def test_f3_inspection_publish_rejects_optional_figure_symlink_before_writing(
+	tmp_path: Path,
+) -> None:
+	config = _report_config(tmp_path)
+	_write_file(config.output_markdown, b'artifact report\n')
+	_write_json(config.output_json, {})
+	figure = config.inspection_dir / config.figure_paths[0]
+	figure.parent.mkdir(parents=True, exist_ok=True)
+	figure.symlink_to(_write_file(tmp_path / 'outside.png', b'png'))
+	output_dir = tmp_path / 'results'
+
+	with pytest.raises(FileNotFoundError, match='regular file'):
+		publish_f3_inspection_report(
+			config,
+			F3InspectionPublishConfig(enabled=True, output_dir=output_dir),
+			payload={},
+		)
+
+	assert not output_dir.exists()
+
+
+def test_f3_inspection_publish_rejects_size_before_writing(tmp_path: Path) -> None:
+	config = _report_config(tmp_path)
+	_write_file(config.output_markdown, b'artifact report\n')
+	_write_json(config.output_json, {})
+	output_dir = tmp_path / 'results'
+
+	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
+		publish_f3_inspection_report(
+			config,
+			F3InspectionPublishConfig(
+				enabled=True,
+				output_dir=output_dir,
+				max_file_size_bytes=1,
+			),
+			payload={},
+		)
+
+	assert not output_dir.exists()
+
+
+@pytest.mark.parametrize('target_kind', ['symlink', 'directory'])
+def test_f3_inspection_publish_rejects_unsafe_target_before_writing(
+	tmp_path: Path,
+	target_kind: str,
+) -> None:
+	config = _report_config(tmp_path)
+	_write_file(config.output_markdown, b'artifact report\n')
+	_write_json(config.output_json, {})
+	output_dir = tmp_path / 'results'
+	unsafe_target = output_dir / 'report.json'
+	unsafe_target.parent.mkdir(parents=True)
+	if target_kind == 'symlink':
+		unsafe_target.symlink_to(_write_file(tmp_path / 'outside.json', b'{}\n'))
+	else:
+		unsafe_target.mkdir()
+
+	exception = ValueError if target_kind == 'symlink' else IsADirectoryError
+	with pytest.raises(exception):
+		publish_f3_inspection_report(
+			config,
+			F3InspectionPublishConfig(enabled=True, output_dir=output_dir),
+			payload={},
+		)
+
+	assert not (output_dir / 'report.md').exists()
+
+
+def test_f3_inspection_publish_rejects_source_target_collision(tmp_path: Path) -> None:
+	config = _report_config(tmp_path)
+	_write_file(config.output_markdown, b'artifact report\n')
+	_write_json(config.output_json, {})
+	before = config.output_markdown.read_bytes()
+
+	with pytest.raises(ValueError, match='publish target must differ from source'):
+		publish_f3_inspection_report(
+			config,
+			F3InspectionPublishConfig(
+				enabled=True,
+				output_dir=config.output_markdown.parent,
+			),
+			payload={},
+		)
+
+	assert config.output_markdown.read_bytes() == before
 
 
 def test_build_f3_inspection_report_proc_dry_run(tmp_path: Path) -> None:
