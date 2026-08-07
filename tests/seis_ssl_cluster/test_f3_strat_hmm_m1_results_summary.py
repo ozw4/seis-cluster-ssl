@@ -258,6 +258,34 @@ def test_publish_refuses_oversized_file(
 			),
 		)
 
+	assert not (tmp_path / 'results').exists()
+
+
+def test_publish_rejects_source_target_collision_without_changing_sources(
+	tmp_path: Path,
+) -> None:
+	result = _write_publishable_result(tmp_path)
+	source_bytes = {
+		path: path.read_bytes()
+		for path in (
+			result.summary_markdown,
+			result.summary_json,
+			*result.table_paths,
+			*result.figure_paths,
+		)
+	}
+
+	with pytest.raises(ValueError, match='publish target must differ from source'):
+		publish_f3_strat_hmm_m1_results(
+			result,
+			F3StratHMMM1PublishConfig(
+				enabled=True,
+				output_dir=result.summary_json.parent,
+			),
+		)
+
+	assert {path: path.read_bytes() for path in source_bytes} == source_bytes
+
 
 def test_relative_publish_path_is_preserved(tmp_path: Path) -> None:
 	config = _write_inputs(tmp_path)

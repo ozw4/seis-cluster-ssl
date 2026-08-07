@@ -518,53 +518,102 @@ def _write_published_f3_inspection_report(
 		payload,
 		text_replacements=text_replacements,
 	)
-	files = [
-		_write_published_text(
+	entries = [
+		_LocalPublishEntry(
 			config.output_markdown,
 			output_dir / _PUBLISH_REPORT_TARGET,
-			render_f3_inspection_report_markdown(published_payload),
-			max_file_size_bytes=max_file_size_bytes,
+			render_f3_inspection_report_markdown(published_payload).encode('utf-8'),
 		),
-		_write_published_text(
+		_LocalPublishEntry(
 			config.output_json,
 			output_dir / _PUBLISH_JSON_TARGET,
-			json.dumps(published_payload, indent=2, sort_keys=True) + '\n',
-			max_file_size_bytes=max_file_size_bytes,
+			(json.dumps(published_payload, indent=2, sort_keys=True) + '\n').encode(
+				'utf-8'
+			),
 		),
 	]
-	for source, relative_target in figure_sources:
-		if not source.is_file():
-			continue
-		files.append(
-			_copy_published_file(
-				source,
-				output_dir / relative_target,
-				max_file_size_bytes=max_file_size_bytes,
-			)
+	entries.extend(
+		_LocalPublishEntry(
+			source,
+			output_dir / relative_target,
+			required=False,
 		)
-	return tuple(files)
+		for source, relative_target in figure_sources
+	)
+	plan = _preflight_local_publish_entries(
+		entries,
+		max_file_size_bytes=max_file_size_bytes,
+	)
+	return _write_local_publish_entries(plan)
 
 
-def _copy_published_file(
-	source: Path, target: Path, *, max_file_size_bytes: int
-) -> Path:
-	if source.stat().st_size > max_file_size_bytes:
-		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
-	target.parent.mkdir(parents=True, exist_ok=True)
-	shutil.copy2(source, target)
-	return target
+@dataclass(frozen=True)
+class _LocalPublishEntry:
+	source: Path
+	target: Path
+	content_bytes: bytes | None = None
+	required: bool = True
 
 
-def _write_published_text(
-	source: Path, target: Path, text: str, *, max_file_size_bytes: int
-) -> Path:
-	if not source.is_file():
-		raise FileNotFoundError(f'required publish source does not exist: {source}')
-	if len(text.encode('utf-8')) > max_file_size_bytes:
-		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
-	target.parent.mkdir(parents=True, exist_ok=True)
-	target.write_text(text, encoding='utf-8')
-	return target
+def _preflight_local_publish_entries(  # noqa: C901
+	entries: Sequence[_LocalPublishEntry], *, max_file_size_bytes: int
+) -> tuple[_LocalPublishEntry, ...]:
+	if (
+		isinstance(max_file_size_bytes, bool)
+		or not isinstance(max_file_size_bytes, int)
+		or max_file_size_bytes <= 0
+	):
+		raise ValueError('max_file_size_bytes must be a positive integer')
+	plan: list[_LocalPublishEntry] = []
+	targets: set[Path] = set()
+	for entry in entries:
+		if entry.source.is_symlink():
+			raise FileNotFoundError(
+				f'publish source must be a regular file: {entry.source}'
+			)
+		if not entry.source.exists():
+			if not entry.required:
+				continue
+			raise FileNotFoundError(
+				f'required publish source does not exist: {entry.source}'
+			)
+		if not entry.source.is_file():
+			raise FileNotFoundError(
+				f'publish source must be a regular file: {entry.source}'
+			)
+		target = entry.target.resolve(strict=False)
+		if entry.source.resolve(strict=False) == target:
+			raise ValueError(f'publish target must differ from source: {entry.target}')
+		if target in targets:
+			raise ValueError(f'duplicate publish target: {entry.target}')
+		targets.add(target)
+		if entry.target.is_symlink():
+			raise ValueError(f'publish target must not be a symlink: {entry.target}')
+		if entry.target.exists() and not entry.target.is_file():
+			raise IsADirectoryError(f'publish target is not a file: {entry.target}')
+		size = (
+			len(entry.content_bytes)
+			if entry.content_bytes is not None
+			else entry.source.stat().st_size
+		)
+		if size > max_file_size_bytes:
+			raise ValueError(
+				f'publish source exceeds max_file_size_bytes: {entry.source}'
+			)
+		plan.append(entry)
+	return tuple(plan)
+
+
+def _write_local_publish_entries(
+	entries: Sequence[_LocalPublishEntry],
+) -> tuple[Path, ...]:
+	for entry in entries:
+		entry.target.parent.mkdir(parents=True, exist_ok=True)
+		if entry.content_bytes is None:
+			shutil.copy2(entry.source, entry.target)
+		else:
+			entry.target.write_bytes(entry.content_bytes)
+	return tuple(entry.target for entry in entries)
 
 
 def _read_publish_report_payload(path: Path) -> Mapping[str, object]:
@@ -648,12 +697,15 @@ def _publish_figure_sources_and_replacements(
 	for relative_source, relative_target in _PUBLISH_FIGURE_TARGETS:
 		source = config.inspection_dir / relative_source
 		items.append((source, relative_target))
-		replacements.append(
-			(
-				_relative_path_for_markdown(source, config.output_markdown.parent),
-				relative_target.as_posix(),
-			),
-		)
+		if source.is_file():
+			replacements.append(
+				(
+					_relative_path_for_markdown(
+						source, config.output_markdown.parent
+					),
+					relative_target.as_posix(),
+				),
+			)
 
 	consistency_source = _select_publish_consistency_figure(config.inspection_dir)
 	if consistency_source is None:

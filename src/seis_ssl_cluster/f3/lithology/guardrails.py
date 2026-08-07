@@ -423,19 +423,47 @@ def publish_f3_strat_hmm_m1_guardrails(
 	if not publish_config.enabled:
 		return ()
 	_validate_guardrail_publish_payload(summary_json)
-	files = []
-	for source in (summary_markdown, summary_json, comparison_table):
-		if not source.is_file():
-			raise FileNotFoundError(
-				f'required guardrail publish source does not exist: {source}'
-			)
-		if source.stat().st_size > publish_config.max_file_size_bytes:
-			raise ValueError(f'guardrail publish source exceeds size limit: {source}')
-		target = publish_config.output_dir / source.name
+	entries = tuple(
+		(source, publish_config.output_dir / source.name)
+		for source in (summary_markdown, summary_json, comparison_table)
+	)
+	_preflight_guardrail_publish_entries(
+		entries,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	for source, target in entries:
 		target.parent.mkdir(parents=True, exist_ok=True)
 		shutil.copy2(source, target)
-		files.append(target)
-	return tuple(files)
+	return tuple(target for _, target in entries)
+
+
+def _preflight_guardrail_publish_entries(
+	entries: Sequence[tuple[Path, Path]], *, max_file_size_bytes: int
+) -> None:
+	if (
+		isinstance(max_file_size_bytes, bool)
+		or not isinstance(max_file_size_bytes, int)
+		or max_file_size_bytes <= 0
+	):
+		raise ValueError('max_file_size_bytes must be a positive integer')
+	targets: set[Path] = set()
+	for source, target_path in entries:
+		if source.is_symlink() or not source.is_file():
+			raise FileNotFoundError(
+				f'required guardrail publish source must be a regular file: {source}'
+			)
+		target = target_path.resolve(strict=False)
+		if source.resolve(strict=False) == target:
+			raise ValueError(f'publish target must differ from source: {target_path}')
+		if target in targets:
+			raise ValueError(f'duplicate publish target: {target_path}')
+		targets.add(target)
+		if target_path.is_symlink():
+			raise ValueError(f'publish target must not be a symlink: {target_path}')
+		if target_path.exists() and not target_path.is_file():
+			raise IsADirectoryError(f'publish target is not a file: {target_path}')
+		if source.stat().st_size > max_file_size_bytes:
+			raise ValueError(f'guardrail publish source exceeds size limit: {source}')
 
 
 def _validate_guardrail_publish_readiness(

@@ -62,6 +62,13 @@ class F3LithologyPublishConfig:
 	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
 	max_prediction_figures: int = 3
 
+@dataclass(frozen=True)
+class _LocalPublishEntry:
+	source: Path
+	target: Path
+	content_bytes: bytes | None = None
+	required: bool = True
+
 
 def publish_f3_lithology_report(
 	config: F3LithologyReportConfig,
@@ -117,18 +124,18 @@ def _write_published_f3_lithology_report(
 	if publish_config.output_dir is None:
 		raise ValueError('publish output_dir is required when publishing is enabled')
 	output_dir = publish_config.output_dir
-	files = [
-		_write_published_text(
+	entries = [
+		_LocalPublishEntry(
 			config.output_markdown,
 			output_dir / _PUBLISH_REPORT_TARGET,
-			render_f3_lithology_report_markdown(published_payload),
-			max_file_size_bytes=publish_config.max_file_size_bytes,
+			render_f3_lithology_report_markdown(published_payload).encode('utf-8'),
 		),
-		_write_published_text(
+		_LocalPublishEntry(
 			config.output_json,
 			output_dir / _PUBLISH_JSON_TARGET,
-			json.dumps(published_payload, indent=2, sort_keys=True) + '\n',
-			max_file_size_bytes=publish_config.max_file_size_bytes,
+			(json.dumps(published_payload, indent=2, sort_keys=True) + '\n').encode(
+				'utf-8'
+			),
 		),
 	]
 	for source, relative_target in (
@@ -143,23 +150,20 @@ def _write_published_f3_lithology_report(
 			_PUBLISH_CONFUSION_MATRIX_CSV_TARGET,
 		),
 	):
-		files.append(
-			_copy_published_file(
+		entries.append(_LocalPublishEntry(source, output_dir / relative_target))
+	for source, relative_target in figure_sources:
+		entries.append(
+			_LocalPublishEntry(
 				source,
 				output_dir / relative_target,
-				max_file_size_bytes=publish_config.max_file_size_bytes,
+				required=False,
 			)
 		)
-	for source, relative_target in figure_sources:
-		if source.is_file():
-			files.append(
-				_copy_published_file(
-					source,
-					output_dir / relative_target,
-					max_file_size_bytes=publish_config.max_file_size_bytes,
-				)
-			)
-	return tuple(files)
+	plan = _preflight_local_publish_entries(
+		entries,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	return _write_local_publish_entries(plan)
 
 def _copy_f3_lithology_comparison_files(
 	config: F3LithologyComparisonReportConfig,
@@ -169,27 +173,34 @@ def _copy_f3_lithology_comparison_files(
 	if publish_config.output_dir is None:
 		raise ValueError('publish output_dir is required when publishing is enabled')
 	output_dir = publish_config.output_dir
-	sources = [
-		(config.output_markdown, Path('comparison_report.md')),
-		(config.output_csv, Path('comparison_table.csv')),
+	entries = [
+		_LocalPublishEntry(
+			config.output_markdown, output_dir / 'comparison_report.md'
+		),
+		_LocalPublishEntry(config.output_csv, output_dir / 'comparison_table.csv'),
 	]
 	optional_json = config.output_csv.with_suffix('.json')
-	if optional_json.is_file():
-		sources.append((optional_json, Path('comparison_table.json')))
-	if publish_config.include_figures:
-		sources.extend(
-			(source, _PUBLISH_FIGURE_DIR / source.name)
-			for source in _comparison_figure_paths(config.output_markdown).values()
-			if source.is_file()
+	entries.append(
+		_LocalPublishEntry(
+			optional_json,
+			output_dir / 'comparison_table.json',
+			required=False,
 		)
-	return tuple(
-		_copy_published_file(
-			source,
-			output_dir / relative_target,
-			max_file_size_bytes=publish_config.max_file_size_bytes,
-		)
-		for source, relative_target in sources
 	)
+	if publish_config.include_figures:
+		entries.extend(
+			_LocalPublishEntry(
+				source,
+				output_dir / _PUBLISH_FIGURE_DIR / source.name,
+				required=False,
+			)
+			for source in _comparison_figure_paths(config.output_markdown).values()
+		)
+	plan = _preflight_local_publish_entries(
+		entries,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	return _write_local_publish_entries(plan)
 
 def _publish_figure_sources_and_replacements(
 	config: F3LithologyReportConfig,
@@ -259,27 +270,64 @@ def _append_publish_figure_source(  # noqa: PLR0913
 		)
 	planned_targets.add(target)
 
-def _copy_published_file(
-	source: Path, target: Path, *, max_file_size_bytes: int
-) -> Path:
-	if not source.is_file():
-		raise FileNotFoundError(f'required publish source does not exist: {source}')
-	if source.stat().st_size > max_file_size_bytes:
-		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
-	target.parent.mkdir(parents=True, exist_ok=True)
-	shutil.copy2(source, target)
-	return target
+def _preflight_local_publish_entries(  # noqa: C901
+	entries: Sequence[_LocalPublishEntry], *, max_file_size_bytes: int
+) -> tuple[_LocalPublishEntry, ...]:
+	if (
+		isinstance(max_file_size_bytes, bool)
+		or not isinstance(max_file_size_bytes, int)
+		or max_file_size_bytes <= 0
+	):
+		raise ValueError('max_file_size_bytes must be a positive integer')
+	plan: list[_LocalPublishEntry] = []
+	targets: set[Path] = set()
+	for entry in entries:
+		if entry.source.is_symlink():
+			raise FileNotFoundError(
+				f'publish source must be a regular file: {entry.source}'
+			)
+		if not entry.source.exists():
+			if not entry.required:
+				continue
+			raise FileNotFoundError(
+				f'required publish source does not exist: {entry.source}'
+			)
+		if not entry.source.is_file():
+			raise FileNotFoundError(
+				f'publish source must be a regular file: {entry.source}'
+			)
+		target = entry.target.resolve(strict=False)
+		if entry.source.resolve(strict=False) == target:
+			raise ValueError(f'publish target must differ from source: {entry.target}')
+		if target in targets:
+			raise ValueError(f'duplicate publish target: {entry.target}')
+		targets.add(target)
+		if entry.target.is_symlink():
+			raise ValueError(f'publish target must not be a symlink: {entry.target}')
+		if entry.target.exists() and not entry.target.is_file():
+			raise IsADirectoryError(f'publish target is not a file: {entry.target}')
+		size = (
+			len(entry.content_bytes)
+			if entry.content_bytes is not None
+			else entry.source.stat().st_size
+		)
+		if size > max_file_size_bytes:
+			raise ValueError(
+				f'publish source exceeds max_file_size_bytes: {entry.source}'
+			)
+		plan.append(entry)
+	return tuple(plan)
 
-def _write_published_text(
-	source: Path, target: Path, text: str, *, max_file_size_bytes: int
-) -> Path:
-	if not source.is_file():
-		raise FileNotFoundError(f'required publish source does not exist: {source}')
-	if len(text.encode('utf-8')) > max_file_size_bytes:
-		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
-	target.parent.mkdir(parents=True, exist_ok=True)
-	target.write_text(text, encoding='utf-8')
-	return target
+def _write_local_publish_entries(
+	entries: Sequence[_LocalPublishEntry],
+) -> tuple[Path, ...]:
+	for entry in entries:
+		entry.target.parent.mkdir(parents=True, exist_ok=True)
+		if entry.content_bytes is None:
+			shutil.copy2(entry.source, entry.target)
+		else:
+			entry.target.write_bytes(entry.content_bytes)
+	return tuple(entry.target for entry in entries)
 
 def _publish_prediction_figure_sources(
 	config: F3LithologyReportConfig,

@@ -4,6 +4,7 @@ import csv
 import hashlib
 import json
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -98,6 +99,33 @@ def test_complete_summary_pairing_decisions_and_lightweight_publish(
 	assert not any(
 		Path(name).suffix in {'.pt', '.npy', '.npz', '.joblib'} for name in published
 	)
+
+
+def test_publish_overwrite_false_preflights_late_target_conflict(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = _fixture(tmp_path)
+	_patch_synthetic_completion_validators(monkeypatch)
+	result = summarize_f3_lithology_voxel_label_budget_results(config)
+	publish_root = tmp_path / 'results' / 'f3' / 'low_label'
+	late_target = publish_root / 'tables' / TABLE_NAMES[-1]
+	late_target.parent.mkdir(parents=True)
+	late_target.write_bytes(b'historical table\n')
+	publish_config = F3VoxelLabelBudgetResultsPublishConfig(
+		enabled=True,
+		results_root=tmp_path / 'results',
+		output_dir=publish_root,
+		overwrite=False,
+	)
+
+	with pytest.raises(FileExistsError, match='publish target already exists'):
+		results_module._publish(  # noqa: SLF001
+			result,
+			replace(config, publish=publish_config),
+		)
+
+	assert not (publish_root / SUMMARY_MARKDOWN).exists()
+	assert late_target.read_bytes() == b'historical table\n'
 
 
 def test_rejects_incomplete_45_job_manifest(

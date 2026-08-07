@@ -362,14 +362,22 @@ def test_f3_lithology_report_publish_requires_metrics(
 		write_metrics=False,
 	)
 
+	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
 	with pytest.raises(FileNotFoundError, match='required publish source'):
 		build_f3_lithology_report(
 			_report_config(run),
 			publish_config=F3LithologyPublishConfig(
 				enabled=True,
-				output_dir=tmp_path / 'results' / 'f3' / 'lithology_probe',
+				output_dir=output_dir,
 			),
 		)
+
+	assert not output_dir.exists() or not any(output_dir.rglob('*'))
+	local_payload = json.loads(
+		(Path(run['report_dir']) / 'report.json').read_text(encoding='utf-8')
+	)
+	assert 'inputs' in local_payload
+	assert 'outputs' in local_payload
 
 
 def test_f3_lithology_comparison_table_aggregates_multiple_runs(

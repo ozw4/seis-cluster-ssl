@@ -54,6 +54,13 @@ class F3StratHMMM1PublishConfig:
 
 
 @dataclass(frozen=True)
+class _LocalPublishEntry:
+	source: Path
+	target: Path
+	content_bytes: bytes | None = None
+
+
+@dataclass(frozen=True)
 class F3StratHMMM1ResultsConfig:
 	"""Resolved inputs and outputs for M1 result consolidation."""
 
@@ -234,38 +241,27 @@ def publish_f3_strat_hmm_m1_results(
 			label='figure',
 		)
 	output_dir = publish_config.output_dir
-	files: list[Path] = []
 	markdown_text = (
 		result.summary_markdown.read_text(encoding='utf-8')
 		if publish_config.include_figures
 		else _publish_markdown_without_figure_links(result.summary_json)
 	)
-	files.append(
-		_write_published_text(
+	entries = [
+		_LocalPublishEntry(
 			result.summary_markdown,
 			output_dir / 'm1_results_summary.md',
-			markdown_text,
-			max_file_size_bytes=publish_config.max_file_size_bytes,
-		)
-	)
-	files.append(
-		_copy_published_file(
+			markdown_text.encode('utf-8'),
+		),
+		_LocalPublishEntry(
 			result.summary_json,
 			output_dir / 'm1_results_summary.json',
-			max_file_size_bytes=publish_config.max_file_size_bytes,
-		)
-	)
+		),
+	]
 	for name in (SINGLE_SPLIT_TABLE, LABEL_BUDGET_TABLE, SPLIT_INDEX_TABLE):
 		source = next((path for path in result.table_paths if path.name == name), None)
 		if source is None:
 			raise FileNotFoundError(f'required publish source is missing: {name}')
-		files.append(
-			_copy_published_file(
-				source,
-				output_dir / 'tables' / name,
-				max_file_size_bytes=publish_config.max_file_size_bytes,
-			)
-		)
+		entries.append(_LocalPublishEntry(source, output_dir / 'tables' / name))
 	if publish_config.include_figures:
 		for name in (SINGLE_RUN_FIGURE, LABEL_BUDGET_FIGURE, SPLIT_INDEX_FIGURE):
 			source = next(
@@ -273,14 +269,14 @@ def publish_f3_strat_hmm_m1_results(
 			)
 			if source is None:
 				raise FileNotFoundError(f'required publish source is missing: {name}')
-			files.append(
-				_copy_published_file(
-					source,
-					output_dir / 'figures' / name,
-					max_file_size_bytes=publish_config.max_file_size_bytes,
-				)
+			entries.append(
+				_LocalPublishEntry(source, output_dir / 'figures' / name)
 			)
-	return tuple(files)
+	plan = _preflight_local_publish_entries(
+		entries,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	return _write_local_publish_entries(plan)
 
 
 def _validate_publish_names(
@@ -294,28 +290,53 @@ def _validate_publish_names(
 		)
 
 
-def _copy_published_file(
-	source: Path, target: Path, *, max_file_size_bytes: int
-) -> Path:
-	if not source.is_file():
-		raise FileNotFoundError(f'required publish source does not exist: {source}')
-	if source.stat().st_size > max_file_size_bytes:
-		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
-	target.parent.mkdir(parents=True, exist_ok=True)
-	shutil.copy2(source, target)
-	return target
+def _preflight_local_publish_entries(
+	entries: Sequence[_LocalPublishEntry], *, max_file_size_bytes: int
+) -> tuple[_LocalPublishEntry, ...]:
+	if (
+		isinstance(max_file_size_bytes, bool)
+		or not isinstance(max_file_size_bytes, int)
+		or max_file_size_bytes <= 0
+	):
+		raise ValueError('max_file_size_bytes must be a positive integer')
+	targets: set[Path] = set()
+	for entry in entries:
+		if entry.source.is_symlink() or not entry.source.is_file():
+			raise FileNotFoundError(
+				f'required publish source must be a regular file: {entry.source}'
+			)
+		target = entry.target.resolve(strict=False)
+		if entry.source.resolve(strict=False) == target:
+			raise ValueError(f'publish target must differ from source: {entry.target}')
+		if target in targets:
+			raise ValueError(f'duplicate publish target: {entry.target}')
+		targets.add(target)
+		if entry.target.is_symlink():
+			raise ValueError(f'publish target must not be a symlink: {entry.target}')
+		if entry.target.exists() and not entry.target.is_file():
+			raise IsADirectoryError(f'publish target is not a file: {entry.target}')
+		size = (
+			len(entry.content_bytes)
+			if entry.content_bytes is not None
+			else entry.source.stat().st_size
+		)
+		if size > max_file_size_bytes:
+			raise ValueError(
+				f'publish source exceeds max_file_size_bytes: {entry.source}'
+			)
+	return tuple(entries)
 
 
-def _write_published_text(
-	source: Path, target: Path, text: str, *, max_file_size_bytes: int
-) -> Path:
-	if not source.is_file():
-		raise FileNotFoundError(f'required publish source does not exist: {source}')
-	if len(text.encode('utf-8')) > max_file_size_bytes:
-		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
-	target.parent.mkdir(parents=True, exist_ok=True)
-	target.write_text(text, encoding='utf-8')
-	return target
+def _write_local_publish_entries(
+	entries: Sequence[_LocalPublishEntry],
+) -> tuple[Path, ...]:
+	for entry in entries:
+		entry.target.parent.mkdir(parents=True, exist_ok=True)
+		if entry.content_bytes is None:
+			shutil.copy2(entry.source, entry.target)
+		else:
+			entry.target.write_bytes(entry.content_bytes)
+	return tuple(entry.target for entry in entries)
 
 
 def _publish_config_from_mapping(

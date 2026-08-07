@@ -2472,15 +2472,19 @@ def _publish(
 	]
 	expected = {target.as_posix() for _, target in sources}
 	_validate_existing_publish_tree(policy.output_dir, expected=expected)
-	return tuple(
-		_copy_published_file(
-			source,
-			policy.output_dir / relative_target,
-			max_file_size_bytes=policy.max_file_size_bytes,
-			overwrite=policy.overwrite,
-		)
+	entries = tuple(
+		(source, policy.output_dir / relative_target)
 		for source, relative_target in sources
 	)
+	_preflight_label_budget_publish_entries(
+		entries,
+		max_file_size_bytes=policy.max_file_size_bytes,
+		overwrite=policy.overwrite,
+	)
+	for source, target in entries:
+		target.parent.mkdir(parents=True, exist_ok=True)
+		shutil.copy2(source, target)
+	return tuple(target for _, target in entries)
 
 
 def _validate_named_publish_paths(
@@ -2494,22 +2498,38 @@ def _validate_named_publish_paths(
 		)
 
 
-def _copy_published_file(
-	source: Path,
-	target: Path,
+def _preflight_label_budget_publish_entries(
+	entries: Sequence[tuple[Path, Path]],
 	*,
 	max_file_size_bytes: int,
 	overwrite: bool,
-) -> Path:
-	if not source.is_file():
-		raise FileNotFoundError(f'required publish source does not exist: {source}')
-	if source.stat().st_size > max_file_size_bytes:
-		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
-	if target.exists() and not overwrite:
-		raise FileExistsError(f'publish target already exists: {target}')
-	target.parent.mkdir(parents=True, exist_ok=True)
-	shutil.copy2(source, target)
-	return target
+) -> None:
+	if (
+		isinstance(max_file_size_bytes, bool)
+		or not isinstance(max_file_size_bytes, int)
+		or max_file_size_bytes <= 0
+	):
+		raise ValueError('max_file_size_bytes must be a positive integer')
+	targets: set[Path] = set()
+	for source, target_path in entries:
+		if source.is_symlink() or not source.is_file():
+			raise FileNotFoundError(
+				f'required publish source must be a regular file: {source}'
+			)
+		target = target_path.resolve(strict=False)
+		if source.resolve(strict=False) == target:
+			raise ValueError(f'publish target must differ from source: {target_path}')
+		if target in targets:
+			raise ValueError(f'duplicate publish target: {target_path}')
+		targets.add(target)
+		if target_path.is_symlink():
+			raise ValueError(f'publish target must not be a symlink: {target_path}')
+		if target_path.exists() and not target_path.is_file():
+			raise IsADirectoryError(f'publish target is not a file: {target_path}')
+		if target_path.exists() and not overwrite:
+			raise FileExistsError(f'publish target already exists: {target_path}')
+		if source.stat().st_size > max_file_size_bytes:
+			raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
 
 
 def _validate_existing_publish_tree(output_dir: Path, *, expected: set[str]) -> None:

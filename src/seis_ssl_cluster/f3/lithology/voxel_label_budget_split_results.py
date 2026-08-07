@@ -806,21 +806,45 @@ def publish_low_label_split_summary(
 		raise ValueError('six-split summary publish sources are incomplete or unexpected')
 	publish_dir = _publish_dir(config)
 	_validate_existing_publish_tree(publish_dir)
-	published = []
-	for name in OUTPUT_NAMES:
-		source = sources[name]
-		if not source.is_file():
-			raise FileNotFoundError(f'required six-split publish source is missing: {source}')
-		if source.stat().st_size > 10 * 1024 * 1024:
-			raise ValueError(f'six-split publish source exceeds size limit: {source}')
-		target = publish_dir / name
+	entries = tuple((sources[name], publish_dir / name) for name in OUTPUT_NAMES)
+	_preflight_six_split_publish_entries(entries, max_file_size_bytes=10 * 1024 * 1024)
+	for source, target in entries:
 		target.parent.mkdir(parents=True, exist_ok=True)
 		shutil.copy2(source, target)
 		if file_sha256(source) != file_sha256(target):
 			raise ValueError(f'six-split published content differs from source: {target}')
-		published.append(target)
-	_validate_published_tree(publish_dir, tuple(published))
-	return tuple(published)
+	published = tuple(target for _, target in entries)
+	_validate_published_tree(publish_dir, published)
+	return published
+
+
+def _preflight_six_split_publish_entries(
+	entries: Sequence[tuple[Path, Path]], *, max_file_size_bytes: int
+) -> None:
+	if (
+		isinstance(max_file_size_bytes, bool)
+		or not isinstance(max_file_size_bytes, int)
+		or max_file_size_bytes <= 0
+	):
+		raise ValueError('max_file_size_bytes must be a positive integer')
+	targets: set[Path] = set()
+	for source, target_path in entries:
+		if source.is_symlink() or not source.is_file():
+			raise FileNotFoundError(
+				f'required six-split publish source must be a regular file: {source}'
+			)
+		target = target_path.resolve(strict=False)
+		if source.resolve(strict=False) == target:
+			raise ValueError(f'publish target must differ from source: {target_path}')
+		if target in targets:
+			raise ValueError(f'duplicate publish target: {target_path}')
+		targets.add(target)
+		if target_path.is_symlink():
+			raise ValueError(f'publish target must not be a symlink: {target_path}')
+		if target_path.exists() and not target_path.is_file():
+			raise IsADirectoryError(f'publish target is not a file: {target_path}')
+		if source.stat().st_size > max_file_size_bytes:
+			raise ValueError(f'six-split publish source exceeds size limit: {source}')
 
 
 def _publish_dir(config: object) -> Path:
