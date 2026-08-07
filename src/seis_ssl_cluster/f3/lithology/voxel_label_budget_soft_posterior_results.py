@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -19,11 +20,6 @@ from seis_ssl_cluster.f3.lithology import (
 )
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 	load_f3_lithology_voxel_label_budget_evaluation_metrics,
-)
-from seis_ssl_cluster.results import (
-	PublishItem,
-	publish_manifest_to_dict,
-	publish_selected_results,
 )
 
 COMPARISONS = (
@@ -175,22 +171,22 @@ def summarize_f3_lithology_voxel_label_budget_soft_posterior(
 		'Six-split scientific jobs executed: `0`.\n',
 		encoding='utf-8',
 	)
-	manifest = None
+	published_files: tuple[Path, ...] = ()
 	if publish:
 		output = (
 			config.base.publish.results_root
 			/ 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_soft_posterior_v1'
 		)
-		manifest = publish_selected_results(
-			items=[PublishItem(reports / name, Path(name)) for name in OUTPUT_NAMES],
-			output_dir=output,
-			max_file_size_bytes=10 * 1024 * 1024,
-		)
-		_write_portable_publish_manifest(manifest, config=config)
+		output.mkdir(parents=True, exist_ok=True)
+		published_files = tuple(output / name for name in OUTPUT_NAMES)
+		for source, destination in zip(
+			(reports / name for name in OUTPUT_NAMES), published_files, strict=True
+		):
+			shutil.copyfile(source, destination)
 	return {
 		'summary_json': summary_json,
 		'decisions': inspection['decisions'],
-		'publish_manifest': manifest,
+		'published_files': published_files,
 	}
 
 
@@ -342,11 +338,3 @@ def _portable_path(
 			return f'{replacement}/{relative_text}'
 		return relative_text
 	return value
-
-
-def _write_portable_publish_manifest(manifest: object, *, config: object) -> None:
-	"""Keep provenance while omitting machine-specific manifest locations."""
-	payload = _portable_payload(publish_manifest_to_dict(manifest), config=config)
-	manifest.manifest_path.write_text(
-		json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
-	)

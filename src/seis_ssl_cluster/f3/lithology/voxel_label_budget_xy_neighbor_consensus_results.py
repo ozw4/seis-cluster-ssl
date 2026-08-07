@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import csv
 import json
+import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -27,11 +28,6 @@ from seis_ssl_cluster.f3.lithology import (
 )
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 	load_f3_lithology_voxel_label_budget_evaluation_metrics,
-)
-from seis_ssl_cluster.results import (
-	PublishItem,
-	publish_manifest_to_dict,
-	publish_selected_results,
 )
 
 COMPARISONS = (
@@ -256,21 +252,21 @@ def summarize_f3_lithology_voxel_label_budget_xy_neighbor_consensus(
 	_write_json(
 		reports / REPORT_OUTPUT_NAMES[4], _portable_payload(handoff, config=config)
 	)
-	manifest = None
+	published_files: tuple[Path, ...] = ()
 	if publish:
-		manifest = publish_selected_results(
-			items=[
-				PublishItem(reports / name, Path(name))
-				for name in PUBLISHED_OUTPUT_NAMES
-			],
-			output_dir=config.base.publish.results_root / _PUBLISHED_ROOT,
-			max_file_size_bytes=10 * 1024 * 1024,
-		)
-		_write_portable_publish_manifest(manifest, config=config)
+		output = config.base.publish.results_root / _PUBLISHED_ROOT
+		output.mkdir(parents=True, exist_ok=True)
+		published_files = tuple(output / name for name in PUBLISHED_OUTPUT_NAMES)
+		for source, destination in zip(
+			(reports / name for name in PUBLISHED_OUTPUT_NAMES),
+			published_files,
+			strict=True,
+		):
+			shutil.copyfile(source, destination)
 	return {
 		'summary_json': reports / REPORT_OUTPUT_NAMES[2],
 		'decisions': inspection['decisions'],
-		'publish_manifest': manifest,
+		'published_files': published_files,
 	}
 
 
@@ -642,15 +638,6 @@ def _portable_path(value: str, *, artifact_root: Path, workspace_root: Path) -> 
 			)
 		return '.' if relative_text == '.' else relative_text
 	return value
-
-
-def _write_portable_publish_manifest(manifest: object, *, config: object) -> None:
-	payload = _portable_payload(publish_manifest_to_dict(manifest), config=config)
-	if not isinstance(payload, Mapping):
-		raise TypeError('portable publish manifest must be a mapping')
-	manifest.manifest_path.write_text(
-		json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
-	)
 
 
 __all__ = [

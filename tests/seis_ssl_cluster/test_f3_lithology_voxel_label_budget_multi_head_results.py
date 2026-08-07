@@ -905,20 +905,19 @@ def test_multi_head_publish_accepts_empty_and_exact_current_tree(
 	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(
 		config
 	)
-	assert publication.publish_manifest is not None
+	assert publication.published_files == tuple(
+		publish_dir / name for name in results.OUTPUT_NAMES
+	)
 	assert _published_names(publish_dir) == results._publish_target_names()
-	manifest = publication.publish_manifest
-	assert len(manifest.items) == len(results.OUTPUT_NAMES) == 11
-	payload = json.loads(manifest.manifest_path.read_text(encoding='utf-8'))
-	assert len(payload['items']) == len(results.OUTPUT_NAMES) == 11
-	manifest_targets = {item['target'] for item in payload['items']}
-	assert manifest_targets == set(results.OUTPUT_NAMES)
-	assert not (manifest_targets & set(HISTORICAL_BLOCKED_FILE_IDENTITIES))
+	assert not (publish_dir / 'publish_manifest.json').exists()
+	assert not any(
+		path.suffix in {'.npy', '.npz', '.pt'} for path in publish_dir.iterdir()
+	)
 
 	republication = results.summarize_f3_lithology_voxel_label_budget_multi_head(
 		config
 	)
-	assert republication.publish_manifest is not None
+	assert republication.published_files == publication.published_files
 	assert _published_names(publish_dir) == results._publish_target_names()
 
 
@@ -962,18 +961,15 @@ def test_multi_head_publish_rejects_noncanonical_existing_trees(
 	assert expected_detail in str(error.value)
 
 
-def test_multi_head_publish_rejects_raw_artifact_suffix(tmp_path: Path) -> None:
+def test_multi_head_publish_rejects_missing_required_report(tmp_path: Path) -> None:
 	config = _publish_config(tmp_path)
-	raw = tmp_path / 'raw_embeddings.npy'
-	raw.write_bytes(b'raw')
+	config.reports_dir.mkdir(parents=True)
 
-	with pytest.raises(ValueError, match='forbidden suffix'):
-		results._publish_multi_head_results(
-			config, items=(results.PublishItem(raw, Path('raw_embeddings.npy')),)
-		)
+	with pytest.raises(FileNotFoundError, match='report is missing'):
+		results._publish_multi_head_results(config, reports=config.reports_dir)
 
 
-def test_multi_head_publish_detects_manifest_and_target_hash_tampering(
+def test_multi_head_publish_rejects_extra_heavy_output(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	config = _publish_config(tmp_path)
@@ -982,32 +978,12 @@ def test_multi_head_publish_detects_manifest_and_target_hash_tampering(
 		'inspect_f3_lithology_voxel_label_budget_multi_head_results',
 		lambda _config: _publishable_inspection(),
 	)
-	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
-	assert publication.publish_manifest is not None
-	manifest = publication.publish_manifest
+	results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
 	publish_dir = results._publish_dir(config)
-	payload = json.loads(manifest.manifest_path.read_text(encoding='utf-8'))
-	payload['items'][0]['sha256'] = '0' * 64
-	manifest.manifest_path.write_text(json.dumps(payload), encoding='utf-8')
+	(publish_dir / 'raw_embeddings.npy').write_bytes(b'raw')
 
-	with pytest.raises(ValueError, match='manifest SHA-256'):
-		results._validate_published_multi_head_tree(publish_dir, manifest)
-
-	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
-	assert publication.publish_manifest is not None
-	manifest = publication.publish_manifest
-	source = config.reports_dir / results.OUTPUT_NAMES[0]
-	source.write_bytes(b'x' * source.stat().st_size)
-	with pytest.raises(ValueError, match='source SHA-256'):
-		results._validate_published_multi_head_tree(publish_dir, manifest)
-
-	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
-	assert publication.publish_manifest is not None
-	manifest = publication.publish_manifest
-	target = publish_dir / results.OUTPUT_NAMES[0]
-	target.write_bytes(b'x' * target.stat().st_size)
-	with pytest.raises(ValueError, match='target SHA-256'):
-		results._validate_published_multi_head_tree(publish_dir, manifest)
+	with pytest.raises(ValueError, match='inventory mismatch'):
+		results._validate_published_multi_head_tree(publish_dir)
 
 
 def test_historical_blocked_preflight_archive_is_noncanonical() -> None:
@@ -1040,10 +1016,7 @@ def test_historical_blocked_preflight_archive_is_noncanonical() -> None:
 	) in readme
 	historical_names = set(HISTORICAL_BLOCKED_FILE_IDENTITIES)
 	assert not (_published_names(canonical_root) & historical_names)
-	manifest = json.loads(
-		(canonical_root / results.PUBLISH_MANIFEST_NAME).read_text(encoding='utf-8')
-	)
-	assert not {item['target'] for item in manifest['items']} & historical_names
+	assert set(results.OUTPUT_NAMES) <= _published_names(canonical_root)
 
 
 def _publish_config(tmp_path: Path) -> SimpleNamespace:

@@ -157,10 +157,8 @@ def test_xy_consensus_summary_publishes_only_portable_lightweight_files(
 	result = summarize_f3_lithology_voxel_label_budget_xy_neighbor_consensus(config)
 	published = results_root / _RESULTS_ROOT
 	assert result['decisions'] == inspection['decisions']
-	assert {path.name for path in published.iterdir()} == {
-		*PUBLISHED_OUTPUT_NAMES,
-		'publish_manifest.json',
-	}
+	assert {path.name for path in published.iterdir()} == set(PUBLISHED_OUTPUT_NAMES)
+	assert not (published / 'publish_manifest.json').exists()
 	assert {path.name for path in reports.iterdir()} == set(PUBLISHED_OUTPUT_NAMES)
 	for name in PUBLISHED_OUTPUT_NAMES:
 		assert (reports / name).read_bytes() == (published / name).read_bytes()
@@ -189,9 +187,7 @@ def test_xy_consensus_summary_publishes_only_portable_lightweight_files(
 
 	report = validate_results_artifacts(
 		published,
-		required_files=tuple(
-			Path(name) for name in (*PUBLISHED_OUTPUT_NAMES, 'publish_manifest.json')
-		),
+		required_files=tuple(Path(name) for name in PUBLISHED_OUTPUT_NAMES),
 		local_path_policy='error',
 		local_path_markers=(f'{workspace}/', f'{artifact_root}/'),
 	)

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -29,7 +28,7 @@ from seis_ssl_cluster.results import validate_results_artifacts
 RESULTS_RELATIVE_ROOT = Path(
 	'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_soft_posterior_v1'
 )
-REQUIRED_RESULT_FILES = (*OUTPUT_NAMES, 'publish_manifest.json')
+REQUIRED_RESULT_FILES = OUTPUT_NAMES
 
 
 def test_soft_posterior_gate_go_hold_and_stop() -> None:
@@ -136,8 +135,7 @@ def test_soft_posterior_summarizer_publishes_portable_paths(
 		published = published_dir / name
 		assert source.read_bytes() == published.read_bytes()
 		texts[name] = published.read_text(encoding='utf-8')
-	manifest_path = published_dir / 'publish_manifest.json'
-	texts['publish_manifest.json'] = manifest_path.read_text(encoding='utf-8')
+	assert not (published_dir / 'publish_manifest.json').exists()
 	assert all(str(artifact_root) not in text for text in texts.values())
 	assert all(str(workspace_root) not in text for text in texts.values())
 
@@ -157,24 +155,6 @@ def test_soft_posterior_summarizer_publishes_portable_paths(
 		'${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/datasets/cap25'
 	)
 	assert job_rows[0]['source_config'] == 'experiments/f3/config.yaml'
-
-	manifest = json.loads(texts['publish_manifest.json'])
-	assert manifest['source_artifact_root'] == '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'
-	assert manifest['output_dir'] == f'results/{RESULTS_RELATIVE_ROOT.as_posix()}'
-	assert manifest['skipped_optional_items'] == []
-	assert [item['target'] for item in manifest['items']] == list(OUTPUT_NAMES)
-	for item in manifest['items']:
-		target = Path(item['target'])
-		assert not target.is_absolute()
-		assert '..' not in target.parts
-		assert target.name != 'publish_manifest.json'
-		assert item['source'] == (
-			'${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/reports/' + target.name
-		)
-		published = published_dir / target
-		assert published.is_file()
-		assert item['size_bytes'] == published.stat().st_size
-		assert item['sha256'] == hashlib.sha256(published.read_bytes()).hexdigest()
 
 	report = validate_results_artifacts(
 		published_dir,
@@ -239,22 +219,6 @@ def test_committed_soft_posterior_results_are_portable_and_valid() -> None:
 	}
 	for comparison in {row['comparison'] for row in paired_rows}:
 		assert sum(row['comparison'] == comparison for row in paired_rows) == 15
-
-	manifest = json.loads(texts['publish_manifest.json'])
-	assert manifest['source_artifact_root'] == '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'
-	assert manifest['output_dir'] == f'results/{RESULTS_RELATIVE_ROOT.as_posix()}'
-	assert manifest['skipped_optional_items'] == []
-	assert [item['target'] for item in manifest['items']] == list(OUTPUT_NAMES)
-	for item in manifest['items']:
-		target = Path(item['target'])
-		assert not target.is_absolute()
-		assert '..' not in target.parts
-		assert target.name != 'publish_manifest.json'
-		published = results_dir / target
-		assert published.is_file()
-		assert item['size_bytes'] == published.stat().st_size
-		assert item['sha256'] == hashlib.sha256(published.read_bytes()).hexdigest()
-
 
 def _portable_inspection(
 	*,

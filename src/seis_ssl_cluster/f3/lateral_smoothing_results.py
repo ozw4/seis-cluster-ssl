@@ -14,17 +14,11 @@ import io
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from seis_ssl_cluster.f3.lateral_smoothing_target_calibration import (
 	load_f3_m5_lateral_target_calibration_handoff,
-)
-from seis_ssl_cluster.results import (
-	PublishItem,
-	PublishManifest,
-	publish_manifest_to_dict,
-	publish_selected_results,
 )
 
 _ARTIFACT_ROOT_PLACEHOLDER = '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'
@@ -133,7 +127,6 @@ class F3M5LateralSmoothingReviewResult:
 	summary_markdown: Path
 	calibration_handoff: Path
 	smoke_summary: Path | None
-	publish_manifest: PublishManifest | None
 
 
 def f3_m5_lateral_smoothing_review_config_from_mapping(
@@ -199,13 +192,13 @@ def publish_f3_m5_lateral_smoothing_review(
 	_validate_existing_smoke_output(config, smoke=resolved_smoke)
 	if dry_run:
 		return result
-	manifest = _publish_evidence(
+	_publish_evidence(
 		config,
 		evidence=evidence,
 		handoff=handoff,
 		smoke=resolved_smoke,
 	)
-	return replace(result, publish_manifest=manifest)
+	return result
 
 
 def compact_f3_m5_lateral_smoke_evidence(
@@ -504,7 +497,6 @@ def _result_from_evidence(
 			if smoke['evidence'] is None
 			else output / LATERAL_SMOKE_SUMMARY_JSON
 		),
-		publish_manifest=None,
 	)
 
 
@@ -525,7 +517,7 @@ def _publish_evidence(
 	evidence: Mapping[str, object],
 	handoff: Mapping[str, object],
 	smoke: Mapping[str, object] | None,
-) -> PublishManifest:
+) -> None:
 	portable = _portable_value(
 		evidence,
 		artifact_root=config.artifact_root,
@@ -540,50 +532,31 @@ def _publish_evidence(
 		_mapping(portable, 'portable review evidence').get('target_calibration'),
 		'portable target calibration',
 	)
-	items = [
-		PublishItem(
-			config.calibration_report,
-			Path(LATERAL_TARGET_CANDIDATES_CSV),
-			content_text=_candidate_csv_text(portable_calibration),
-		),
-		PublishItem(
-			config.calibration_report,
-			Path(LATERAL_TARGET_CALIBRATION_SUMMARY_JSON),
-			content_text=_json_text(portable),
-		),
-		PublishItem(
-			config.calibration_report,
-			Path(LATERAL_TARGET_CALIBRATION_SUMMARY_MARKDOWN),
-			content_text=render_f3_m5_lateral_smoothing_review_markdown(portable),
-		),
-		PublishItem(
-			config.calibration_handoff,
-			Path(LATERAL_TARGET_CALIBRATION_HANDOFF_JSON),
-			content_text=_json_text(portable_handoff),
-		),
-	]
+	config.output_dir.mkdir(parents=True, exist_ok=True)
+	(config.output_dir / LATERAL_TARGET_CANDIDATES_CSV).write_text(
+		_candidate_csv_text(portable_calibration), encoding='utf-8'
+	)
+	(config.output_dir / LATERAL_TARGET_CALIBRATION_SUMMARY_JSON).write_text(
+		_json_text(portable), encoding='utf-8'
+	)
+	(config.output_dir / LATERAL_TARGET_CALIBRATION_SUMMARY_MARKDOWN).write_text(
+		render_f3_m5_lateral_smoothing_review_markdown(portable),
+		encoding='utf-8',
+	)
+	(config.output_dir / LATERAL_TARGET_CALIBRATION_HANDOFF_JSON).write_text(
+		_json_text(portable_handoff), encoding='utf-8'
+	)
 	if smoke is not None:
-		smoke_source = (
-			config.calibration_handoff
-			if config.smoke_evidence is None
-			else config.smoke_evidence
-		)
-		items.append(
-			PublishItem(
-				smoke_source,
-				Path(LATERAL_SMOKE_SUMMARY_JSON),
-				content_text=_json_text(
-					_portable_value(
-						smoke,
-						artifact_root=config.artifact_root,
-						workspace_root=config.workspace_root,
-					)
-				),
+		(config.output_dir / LATERAL_SMOKE_SUMMARY_JSON).write_text(
+			_json_text(
+				_portable_value(
+					smoke,
+					artifact_root=config.artifact_root,
+					workspace_root=config.workspace_root,
+				)
 			),
+			encoding='utf-8',
 		)
-	manifest = publish_selected_results(items=items, output_dir=config.output_dir)
-	_write_portable_publish_manifest(manifest, config=config)
-	return manifest
 
 
 def _candidate_csv_text(calibration: Mapping[str, object]) -> str:
@@ -945,20 +918,6 @@ def _replace_embedded_roots(
 		f'{artifact_root}/', f'{_ARTIFACT_ROOT_PLACEHOLDER}/'
 	)
 	return result.replace(f'{workspace_root}/', '')
-
-
-def _write_portable_publish_manifest(
-	manifest: PublishManifest, *, config: F3M5LateralSmoothingReviewConfig
-) -> None:
-	payload = _portable_value(
-		publish_manifest_to_dict(manifest),
-		artifact_root=config.artifact_root,
-		workspace_root=config.workspace_root,
-	)
-	if not isinstance(payload, dict):
-		raise TypeError('portable publish manifest must be a mapping')
-	payload['source_artifact_root'] = _ARTIFACT_ROOT_PLACEHOLDER
-	manifest.manifest_path.write_text(_json_text(payload), encoding='utf-8')
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:

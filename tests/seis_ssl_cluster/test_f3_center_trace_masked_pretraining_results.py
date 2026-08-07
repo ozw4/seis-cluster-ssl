@@ -91,25 +91,23 @@ def _publication_fixture(tmp_path: Path) -> tuple[object, dict[str, object], dic
 	return config, portable, live
 
 
-def test_publication_reuses_exact_content_without_rewriting(tmp_path: Path) -> None:
+def test_publication_rewrites_exact_lightweight_file_set(tmp_path: Path) -> None:
 	config, portable, live = _publication_fixture(tmp_path)
 	first = results._publish_review(
 		config, portable=portable, live=live, handoff={}
 	)
-	paths = [config.output_dir / name for name in (*results.OUTPUT_NAMES, 'publish_manifest.json')]
-	first_state = {path: (path.stat().st_mtime_ns, path.read_bytes()) for path in paths}
+	paths = [config.output_dir / name for name in results.OUTPUT_NAMES]
+	first_state = {path: path.read_bytes() for path in paths}
 
 	second = results._publish_review(
 		config, portable=portable, live=live, handoff={}
 	)
-	second_state = {path: (path.stat().st_mtime_ns, path.read_bytes()) for path in paths}
-	assert first is not None
-	assert second is not None
+	second_state = {path: path.read_bytes() for path in paths}
+	assert first is None
+	assert second is None
 	assert first_state == second_state
-	assert {path.name for path in config.output_dir.iterdir()} == {
-		*results.OUTPUT_NAMES,
-		'publish_manifest.json',
-	}
+	assert {path.name for path in config.output_dir.iterdir()} == set(results.OUTPUT_NAMES)
+	assert not (config.output_dir / 'publish_manifest.json').exists()
 
 
 def test_publication_rejects_unallowlisted_owned_output(tmp_path: Path) -> None:

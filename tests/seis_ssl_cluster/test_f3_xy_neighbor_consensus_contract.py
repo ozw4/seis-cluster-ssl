@@ -120,12 +120,11 @@ def test_review_publishes_portable_source_only_diagnostics(
 
 	assert calls == [False]
 	assert runtime_checks == [(target, handoff)]
-	assert publication.publish_manifest is not None
 	assert {path.name for path in paths['output_dir'].iterdir()} == {
 		results.SUMMARY_JSON,
 		results.SUMMARY_MARKDOWN,
-		'publish_manifest.json',
 	}
+	assert not (paths['output_dir'] / 'publish_manifest.json').exists()
 	summary = json.loads(publication.summary_json.read_text(encoding='utf-8'))
 	assert summary['target_representation'] == 'xy_neighbor_consensus_hard_labels_v1'
 	assert summary['head_diagnostics'][0]['changed_token_count'] == 2
@@ -147,7 +146,6 @@ def test_review_publishes_portable_source_only_diagnostics(
 		required_files=(
 			Path(results.SUMMARY_JSON),
 			Path(results.SUMMARY_MARKDOWN),
-			Path('publish_manifest.json'),
 		),
 		local_path_policy='error',
 		local_path_markers=(

@@ -6,6 +6,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import shutil
 import statistics
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -25,11 +26,6 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 )
 from seis_ssl_cluster.f3.multi_head_pretraining_validation import (
 	load_f3_multi_head_pretraining_handoff,
-)
-from seis_ssl_cluster.results import (
-	PublishItem,
-	PublishManifest,
-	publish_selected_results,
 )
 from seis_ssl_cluster.stratigraphy.multi_head import load_multi_head_target_manifest
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
@@ -64,7 +60,6 @@ OUTPUT_NAMES = (
 	'multi_head_results_summary.md',
 	'multi_head_experiment_handoff.md',
 )
-PUBLISH_MANIFEST_NAME = 'publish_manifest.json'
 CANDIDATE_LABELS = {
 	'mh_nocons': 'no-consistency multi-head',
 	'mh_cons010': 'consistency-main multi-head',
@@ -118,7 +113,7 @@ class F3VoxelLabelBudgetMultiHeadResultsResult:
 	decision_json: Path
 	table_paths: tuple[Path, ...]
 	handoff_markdown: Path
-	publish_manifest: PublishManifest | None
+	published_files: tuple[Path, ...]
 	decisions: Mapping[str, object]
 
 
@@ -332,17 +327,16 @@ def summarize_f3_lithology_voxel_label_budget_multi_head(
 	summary_md.write_text(_markdown(payload), encoding='utf-8')
 	handoff = reports / 'multi_head_experiment_handoff.md'
 	handoff.write_text(_handoff(inspection.decisions), encoding='utf-8')
-	manifest = None
+	published_files: tuple[Path, ...] = ()
 	if publish:
-		items = [PublishItem(reports / name, Path(name)) for name in OUTPUT_NAMES]
-		manifest = _publish_multi_head_results(config, items=items)
+		published_files = _publish_multi_head_results(config, reports=reports)
 	return F3VoxelLabelBudgetMultiHeadResultsResult(
 		summary_json,
 		summary_md,
 		decision,
 		tuple(reports / name for name, _ in tables),
 		handoff,
-		manifest,
+		published_files,
 		inspection.decisions,
 	)
 
@@ -1472,23 +1466,25 @@ def _publish_dir(config: object) -> Path:
 
 
 def _publish_multi_head_results(
-	config: object, *, items: Sequence[PublishItem]
-) -> PublishManifest:
+	config: object, *, reports: Path
+) -> tuple[Path, ...]:
 	"""Publish the current review files into the canonical results tree."""
 	publish_dir = _publish_dir(config)
 	_validate_existing_multi_head_publish_tree(publish_dir)
-	manifest = publish_selected_results(
-		items=items,
-		output_dir=publish_dir,
-		max_file_size_bytes=10 * 1024 * 1024,
-		overwrite=True,
-	)
-	_validate_published_multi_head_tree(publish_dir, manifest)
-	return manifest
+	publish_dir.mkdir(parents=True, exist_ok=True)
+	published_files = tuple(publish_dir / name for name in OUTPUT_NAMES)
+	for source, destination in zip(
+		(reports / name for name in OUTPUT_NAMES), published_files, strict=True
+	):
+		if not source.is_file():
+			raise FileNotFoundError(f'multi-head report is missing: {source}')
+		shutil.copyfile(source, destination)
+	_validate_published_multi_head_tree(publish_dir)
+	return published_files
 
 
 def _publish_target_names() -> set[str]:
-	return {*OUTPUT_NAMES, PUBLISH_MANIFEST_NAME}
+	return set(OUTPUT_NAMES)
 
 
 def _validate_existing_multi_head_publish_tree(publish_dir: Path) -> None:
@@ -1507,10 +1503,8 @@ def _validate_existing_multi_head_publish_tree(publish_dir: Path) -> None:
 		)
 
 
-def _validate_published_multi_head_tree(  # noqa: PLR0912
-	publish_dir: Path, manifest: PublishManifest
-) -> None:
-	"""Verify exact inventory and source/target digests after publication."""
+def _validate_published_multi_head_tree(publish_dir: Path) -> None:
+	"""Verify the exact explicit file set after publication."""
 	actual = _published_relative_names(publish_dir)
 	expected = _publish_target_names()
 	if actual != expected:
@@ -1519,56 +1513,6 @@ def _validate_published_multi_head_tree(  # noqa: PLR0912
 			f'missing={sorted(expected - actual)!r}, '
 			f'extra={sorted(actual - expected)!r}'
 		)
-	if manifest.manifest_path != publish_dir.resolve() / PUBLISH_MANIFEST_NAME:
-		raise ValueError('multi-head publish manifest path mismatch')
-	payload = _read_json(manifest.manifest_path)
-	items = payload.get('items')
-	expected_manifest_targets = set(OUTPUT_NAMES)
-	if not isinstance(items, list) or len(items) != len(expected_manifest_targets):
-		raise ValueError('multi-head publish manifest item count mismatch')
-	manifest_items: dict[str, Mapping[str, object]] = {}
-	for value in items:
-		item = _mapping(value, 'multi-head publish manifest item')
-		target = item.get('target')
-		if not isinstance(target, str) or target in manifest_items:
-			raise ValueError('multi-head publish manifest targets are invalid')
-		manifest_items[target] = item
-	if set(manifest_items) != expected_manifest_targets:
-		raise ValueError('multi-head publish manifest target set mismatch')
-	manifest_targets = {
-		item.target.resolve().relative_to(publish_dir.resolve()).as_posix()
-		for item in manifest.items
-	}
-	if manifest_targets != expected_manifest_targets:
-		raise ValueError('multi-head published manifest records mismatch')
-	for item in manifest.items:
-		target = item.target.resolve()
-		if not target.is_file():
-			raise FileNotFoundError(
-				f'multi-head published target is missing: {target}'
-			)
-		if not item.source.is_file():
-			raise FileNotFoundError(
-				f'multi-head publish source is missing: {item.source}'
-			)
-		if item.size_bytes != target.stat().st_size:
-			raise ValueError(f'multi-head published target size mismatch: {target}')
-		if item.sha256 != file_sha256(item.source):
-			raise ValueError(
-				f'multi-head publish source SHA-256 mismatch: {item.source}'
-			)
-		if item.sha256 != file_sha256(target):
-			raise ValueError(f'multi-head published target SHA-256 mismatch: {target}')
-		relative_target = target.relative_to(publish_dir.resolve()).as_posix()
-		recorded = manifest_items.get(relative_target)
-		if recorded is None:
-			raise ValueError(f'multi-head publish manifest target is missing: {target}')
-		if (
-			recorded.get('source') != str(item.source)
-			or recorded.get('size_bytes') != item.size_bytes
-			or recorded.get('sha256') != item.sha256
-		):
-			raise ValueError(f'multi-head publish manifest SHA-256 mismatch: {target}')
 
 
 def _published_relative_names(publish_dir: Path) -> set[str]:

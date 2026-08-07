@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -32,10 +33,6 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import (
 )
 from seis_ssl_cluster.f3.xy_neighbor_unanimous_target_audit import (
 	replay_f3_xy_neighbor_unanimous_target_audit,
-)
-from seis_ssl_cluster.results import (
-	PublishItem,
-	publish_selected_results,
 )
 
 COMPARISONS = (
@@ -286,21 +283,21 @@ def summarize_f3_lithology_voxel_label_budget_xy_neighbor_unanimous(
 	_write_json(
 		reports / REPORT_OUTPUT_NAMES[4], _portable_payload(handoff, config=config)
 	)
-	manifest = None
+	published_files: tuple[Path, ...] = ()
 	if publish:
-		manifest = publish_selected_results(
-			items=[
-				PublishItem(reports / name, Path(name))
-				for name in PUBLISHED_OUTPUT_NAMES
-			],
-			output_dir=config.base.publish.results_root / _PUBLISHED_ROOT,
-			max_file_size_bytes=10 * 1024 * 1024,
-		)
-		_write_portable_publish_manifest(manifest, config=config)
+		output = config.base.publish.results_root / _PUBLISHED_ROOT
+		output.mkdir(parents=True, exist_ok=True)
+		published_files = tuple(output / name for name in PUBLISHED_OUTPUT_NAMES)
+		for source, destination in zip(
+			(reports / name for name in PUBLISHED_OUTPUT_NAMES),
+			published_files,
+			strict=True,
+		):
+			shutil.copyfile(source, destination)
 	return {
 		'summary_json': reports / REPORT_OUTPUT_NAMES[2],
 		'decisions': inspection['decisions'],
-		'publish_manifest': manifest,
+		'published_files': published_files,
 	}
 
 
@@ -715,9 +712,6 @@ def _read_json(path: Path) -> Mapping[str, object]:
 _write_csv = consensus_results._write_csv
 _write_json = consensus_results._write_json
 _portable_payload = consensus_results._portable_payload
-_write_portable_publish_manifest = consensus_results._write_portable_publish_manifest
-
-
 __all__ = [
 	'AUDIT_OUTPUT_NAMES',
 	'COMPARISONS',

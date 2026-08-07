@@ -21,6 +21,52 @@ from seis_ssl_cluster.f3.lithology import (
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_results import METRIC_SPECS
 
 
+def test_periodic_refresh_publishes_only_explicit_lightweight_files(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	reports = tmp_path / 'artifacts/reports'
+	results_root = tmp_path / 'results'
+	config = SimpleNamespace(
+		reports_dir=reports,
+		base=SimpleNamespace(
+			artifact_root=tmp_path / 'artifacts',
+			results_root=results_root,
+			publish=SimpleNamespace(results_root=results_root),
+		),
+	)
+	decisions = {
+		'overall_status': 'M5_PERIODIC_ORIGINAL_HOLD',
+		'six_split_follow_up': {'ready': False},
+	}
+	inspection = {
+		'job_metrics': ({'metric': 1},),
+		'paired_deltas': ({'delta': 0.0},),
+		'decisions': decisions,
+		'screening_audit': {},
+	}
+	monkeypatch.setattr(
+		results,
+		'inspect_f3_lithology_voxel_label_budget_center_trace_masked_periodic_refresh_results',
+		lambda _config: inspection,
+	)
+	monkeypatch.setattr(results, '_execution_git_state', lambda _config: {})
+	monkeypatch.setattr(results, '_handoff_payload', lambda *_args, **_kwargs: {})
+
+	result = results.summarize_f3_lithology_voxel_label_budget_center_trace_masked_periodic_refresh(
+		config
+	)
+	published = results_root / results._PUBLISHED_ROOT
+
+	assert result['decisions'] == decisions
+	assert {path.name for path in published.iterdir()} == set(
+		results.PUBLISHED_OUTPUT_NAMES
+	)
+	assert not (published / 'publish_manifest.json').exists()
+	assert not any(
+		path.suffix in {'.npy', '.npz', '.pt'} for path in published.iterdir()
+	)
+
+
 def test_periodic_refresh_job_matrix_and_seed_identity() -> None:
 	config = SimpleNamespace(
 		candidates=(

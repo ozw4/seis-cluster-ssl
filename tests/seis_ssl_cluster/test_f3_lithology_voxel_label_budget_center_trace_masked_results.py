@@ -12,6 +12,60 @@ from seis_ssl_cluster.f3.lithology import (
 )
 
 
+def test_center_trace_masked_publishes_only_explicit_lightweight_files(
+	tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	reports = tmp_path / 'artifacts/reports'
+	results_root = tmp_path / 'results'
+	config = SimpleNamespace(
+		reports_dir=reports,
+		base=SimpleNamespace(
+			artifact_root=tmp_path / 'artifacts',
+			results_root=results_root,
+			publish=SimpleNamespace(results_root=results_root),
+		),
+	)
+	decisions = {
+		'overall_status': 'M5_CT_ORIGINAL_HOLD',
+		'six_split_follow_up': {'ready': False},
+	}
+	inspection = {
+		'job_metrics': ({'metric': 1},),
+		'paired_deltas': ({'delta': 0.0},),
+		'decisions': decisions,
+		'screening_audit': {},
+	}
+	monkeypatch.setattr(
+		results,
+		'inspect_f3_lithology_voxel_label_budget_center_trace_masked_results',
+		lambda _config: inspection,
+	)
+	monkeypatch.setattr(results, '_execution_git_state', lambda _config: {})
+	monkeypatch.setattr(results, '_handoff_payload', lambda *_args, **_kwargs: {})
+	monkeypatch.setattr(
+		results,
+		'_write_audit_evidence',
+		lambda output, **_kwargs: [
+			(output / name).write_text('{}\n', encoding='utf-8')
+			for name in results.AUDIT_OUTPUT_NAMES
+		],
+	)
+
+	result = results.summarize_f3_lithology_voxel_label_budget_center_trace_masked(
+		config
+	)
+	published = results_root / results._PUBLISHED_ROOT
+
+	assert result['decisions'] == decisions
+	assert {path.name for path in published.iterdir()} == set(
+		results.PUBLISHED_OUTPUT_NAMES
+	)
+	assert not (published / 'publish_manifest.json').exists()
+	assert not any(
+		path.suffix in {'.npy', '.npz', '.pt'} for path in published.iterdir()
+	)
+
+
 def test_center_trace_masked_gate_boundaries() -> None:
 	budgets = ('cap25', 'cap50', 'cap100')
 	assert (

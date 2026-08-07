@@ -29,8 +29,6 @@ def main() -> int:
 	)
 	for path in (result.summary_json, result.summary_markdown):
 		print(f'output: {path}')
-	if result.publish_manifest is not None:
-		print(f'publish_manifest: {result.publish_manifest.manifest_path}')
 	if args.dry_run:
 		print('execution: dry-run; review artifacts were not written')
 	return 0

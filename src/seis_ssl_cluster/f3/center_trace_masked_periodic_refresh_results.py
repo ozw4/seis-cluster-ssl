@@ -15,7 +15,7 @@ import json
 import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,14 +23,6 @@ from seis_ssl_cluster.clustering.features import file_sha256
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.f3 import (
 	center_trace_masked_periodic_refresh_validation as validation,
-)
-from seis_ssl_cluster.results import (
-	PublishedItem,
-	PublishItem,
-	PublishManifest,
-	SkippedOptionalItem,
-	publish_manifest_to_dict,
-	publish_selected_results,
 )
 from seis_ssl_cluster.stratigraphy.periodic_refresh import (
 	load_periodic_refresh_generation,
@@ -132,7 +124,7 @@ class F3CenterTraceMaskedPeriodicRefreshReviewConfig:
 
 @dataclass(frozen=True)
 class F3CenterTraceMaskedPeriodicRefreshReviewResult:
-	"""Review output paths and the optional publication manifest."""
+	"""Review output paths."""
 
 	output_dir: Path
 	summary_json: Path
@@ -141,7 +133,6 @@ class F3CenterTraceMaskedPeriodicRefreshReviewResult:
 	generation_summary: Path
 	checkpoint_summary: Path
 	pretraining_handoff: Path
-	publish_manifest: PublishManifest | None
 
 
 _CONFIG_KEYS = frozenset(
@@ -228,18 +219,17 @@ def publish_f3_center_trace_masked_periodic_refresh_review(
 		generation_summary=config.output_dir / GENERATION_SUMMARY_CSV,
 		checkpoint_summary=config.output_dir / CHECKPOINT_SUMMARY_JSON,
 		pretraining_handoff=config.output_dir / PRETRAINING_HANDOFF_JSON,
-		publish_manifest=None,
 	)
 	if dry_run:
 		return result
-	manifest = _publish_review(
+	_publish_review(
 		config,
 		evidence=evidence,
 		handoff=handoff,
 		live=live,
 		quarantine_invalid=quarantine_invalid,
 	)
-	return replace(result, publish_manifest=manifest)
+	return result
 
 
 def _inspect_live_evidence(
@@ -578,7 +568,7 @@ def _publish_review(
 	handoff: Mapping[str, object],
 	live: Mapping[str, object],
 	quarantine_invalid: bool,
-) -> PublishManifest:
+) -> None:
 	"""Publish exactly the allowlisted review tree with exact reuse."""
 	try:
 		_validate_existing_output_dir(config)
@@ -588,14 +578,14 @@ def _publish_review(
 		):
 			raise
 		_quarantine_tree(config.output_dir)
-	items = _publication_items(
+	contents = _publication_contents(
 		config,
 		evidence=evidence,
 		handoff=handoff,
 		live=live,
 	)
-	if _existing_publication_matches(config, items=items):
-		return _load_existing_publish_manifest(config.output_dir)
+	if _existing_publication_matches(config, contents=contents):
+		return
 	if config.output_dir.exists() or config.output_dir.is_symlink():
 		if not quarantine_invalid:
 			raise ValueError(
@@ -611,68 +601,48 @@ def _publish_review(
 		)
 	)
 	try:
-		staged_manifest = publish_selected_results(
-			items=items,
-			output_dir=staging,
-			allowed_suffixes={'.json', '.md', '.csv'},
-			overwrite=False,
-		)
-		manifest = _relocate_publish_manifest(
-			staged_manifest,
-			staging=staging,
-			output_dir=config.output_dir,
-		)
-		_write_portable_publish_manifest(
-			manifest,
-			config=config,
-			destination_dir=staging,
-		)
+		for name, content in contents:
+			(staging / name).write_text(content, encoding='utf-8')
 		staging.replace(config.output_dir)
 	except Exception:
 		if staging.exists():
 			shutil.rmtree(staging, ignore_errors=True)
 		raise
-	return _load_existing_publish_manifest(config.output_dir)
+	return
 
 
-def _publication_items(
+def _publication_contents(
 	config: F3CenterTraceMaskedPeriodicRefreshReviewConfig,
 	*,
 	evidence: Mapping[str, object],
 	handoff: Mapping[str, object],
 	live: Mapping[str, object],
-) -> tuple[PublishItem, ...]:
-	source = config.pretraining_handoff
+) -> tuple[tuple[str, str], ...]:
 	return (
-		PublishItem(source, Path(SUMMARY_JSON), content_text=_json_text(evidence)),
-		PublishItem(
-			source,
-			Path(SUMMARY_MARKDOWN),
-			content_text=render_f3_center_trace_masked_periodic_refresh_review_markdown(
+		(SUMMARY_JSON, _json_text(evidence)),
+		(
+			SUMMARY_MARKDOWN,
+			render_f3_center_trace_masked_periodic_refresh_review_markdown(
 				evidence
 			),
 		),
-		PublishItem(
-			source,
-			Path(REFRESH_EVENTS_CSV),
-			content_text=_events_csv_text(live['events'], config=config),
+		(
+			REFRESH_EVENTS_CSV,
+			_events_csv_text(live['events'], config=config),
 		),
-		PublishItem(
-			source,
-			Path(GENERATION_SUMMARY_CSV),
-			content_text=_generation_csv_text(
+		(
+			GENERATION_SUMMARY_CSV,
+			_generation_csv_text(
 				live['generation_details'], config=config
 			),
 		),
-		PublishItem(
-			source,
-			Path(CHECKPOINT_SUMMARY_JSON),
-			content_text=_json_text(evidence['checkpoint_summary']),
+		(
+			CHECKPOINT_SUMMARY_JSON,
+			_json_text(evidence['checkpoint_summary']),
 		),
-		PublishItem(
-			source,
-			Path(PRETRAINING_HANDOFF_JSON),
-			content_text=_json_text(_portable_value(handoff, config=config)),
+		(
+			PRETRAINING_HANDOFF_JSON,
+			_json_text(_portable_value(handoff, config=config)),
 		),
 	)
 
@@ -689,7 +659,7 @@ def _validate_existing_output_dir(
 		)
 	if not config.output_dir.is_dir():
 		raise ValueError(f'periodic refresh output_dir is not a directory: {config.output_dir}')
-	allowed = set(OUTPUT_NAMES) | {'publish_manifest.json'}
+	allowed = set(OUTPUT_NAMES)
 	for path in config.output_dir.rglob('*'):
 		if path.is_symlink():
 			raise ValueError(f'periodic refresh output must not contain symlinks: {path}')
@@ -704,130 +674,19 @@ def _validate_existing_output_dir(
 def _existing_publication_matches(
 	config: F3CenterTraceMaskedPeriodicRefreshReviewConfig,
 	*,
-	items: Sequence[PublishItem],
+	contents: Sequence[tuple[str, str]],
 ) -> bool:
 	output_dir = config.output_dir
-	manifest_path = output_dir / 'publish_manifest.json'
-	if not manifest_path.is_file():
+	if not output_dir.is_dir():
 		return False
 	try:
-		payload = json.loads(manifest_path.read_text(encoding='utf-8'))
-		if not isinstance(payload, Mapping):
-			return False
-		if payload.get('source_artifact_root') != _ARTIFACT_ROOT_PLACEHOLDER:
-			return False
-		if payload.get('output_dir') != _portable_path(
-			str(output_dir.resolve()), config=config
-		):
-			return False
-		if payload.get('skipped_optional_items') != [] or payload.get('warnings') != []:
-			return False
-		if not isinstance(payload.get('created_at_utc'), str) or not payload[
-			'created_at_utc'
-		]:
-			return False
-		records = payload.get('items')
-		expected = {
-			Path(item.relative_target).as_posix(): item for item in items
-		}
-		if not isinstance(records, list) or len(records) != len(expected):
-			return False
-		by_target = {
-			_mapping(record, 'publish item').get('target'): record for record in records
-		}
-		if set(by_target) != set(expected):
-			return False
-		for target, item in expected.items():
-			content = _content_bytes(item)
-			path = output_dir / target
-			if not path.is_file() or path.read_bytes() != content:
-				return False
-			record = _mapping(by_target[target], 'publish item')
-			if record.get('source') != _portable_path(
-				str(item.source), config=config
-			):
-				return False
-			if record.get('size_bytes') != len(content) or record.get(
-				'sha256'
-			) != file_sha256(path):
-				return False
-		return True
-	except (OSError, TypeError, ValueError, json.JSONDecodeError):
+		return all(
+			(output_dir / name).is_file()
+			and (output_dir / name).read_text(encoding='utf-8') == content
+			for name, content in contents
+		)
+	except OSError:
 		return False
-
-
-def _load_existing_publish_manifest(output_dir: Path) -> PublishManifest:
-	payload = _mapping(
-		json.loads((output_dir / 'publish_manifest.json').read_text(encoding='utf-8')),
-		'publish manifest',
-	)
-	items = [
-		PublishedItem(
-			source=Path(str(_mapping(item, 'publish item')['source'])),
-			target=output_dir / str(_mapping(item, 'publish item')['target']),
-			size_bytes=int(_mapping(item, 'publish item')['size_bytes']),
-			sha256=str(_mapping(item, 'publish item')['sha256']),
-		)
-		for item in _mapping_sequence(payload['items'], 'publish manifest items')
-	]
-	skipped = [
-		SkippedOptionalItem(
-			source=Path(str(_mapping(item, 'skipped item')['source'])),
-			target=output_dir / str(_mapping(item, 'skipped item')['target']),
-			reason=str(_mapping(item, 'skipped item')['reason']),
-		)
-		for item in _mapping_sequence(
-			payload.get('skipped_optional_items', []),
-			'publish skipped items',
-		)
-	]
-	source_root = payload.get('source_artifact_root')
-	return PublishManifest(
-		created_at_utc=str(payload['created_at_utc']),
-		source_artifact_root=None if source_root is None else Path(str(source_root)),
-		output_dir=Path(str(payload['output_dir'])),
-		items=items,
-		skipped_optional_items=skipped,
-		warnings=[str(value) for value in payload.get('warnings', [])],
-		manifest_path=output_dir / 'publish_manifest.json',
-	)
-
-
-def _relocate_publish_manifest(
-	manifest: PublishManifest,
-	*,
-	staging: Path,
-	output_dir: Path,
-) -> PublishManifest:
-	"""Bind a staged manifest to the directory that will be atomically promoted."""
-	return replace(
-		manifest,
-		output_dir=output_dir,
-		items=[
-			replace(
-				item,
-				target=output_dir / item.target.relative_to(staging),
-			)
-			for item in manifest.items
-		],
-		manifest_path=output_dir / 'publish_manifest.json',
-	)
-
-
-def _write_portable_publish_manifest(
-	manifest: PublishManifest,
-	*,
-	config: F3CenterTraceMaskedPeriodicRefreshReviewConfig,
-	destination_dir: Path | None = None,
-) -> None:
-	payload = _portable_value(publish_manifest_to_dict(manifest), config=config)
-	if not isinstance(payload, dict):
-		raise TypeError('portable publish manifest must be a mapping')
-	payload['source_artifact_root'] = _ARTIFACT_ROOT_PLACEHOLDER
-	destination = config.output_dir if destination_dir is None else destination_dir
-	(destination / 'publish_manifest.json').write_text(
-		_json_text(payload), encoding='utf-8'
-	)
 
 
 def _load_events(path: Path) -> list[Mapping[str, object]]:
@@ -1054,17 +913,6 @@ def _portable_path(
 
 def _json_text(value: object) -> str:
 	return json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + '\n'
-
-
-def _content_bytes(item: PublishItem) -> bytes:
-	if item.content_text is not None:
-		return item.content_text.encode('utf-8')
-	if item.text_replacements:
-		text = item.source.read_text(encoding='utf-8')
-		for old, new in item.text_replacements:
-			text = text.replace(old, new)
-		return text.encode('utf-8')
-	return item.source.read_bytes()
 
 
 def _quarantine_tree(path: Path) -> Path:

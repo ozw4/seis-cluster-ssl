@@ -319,25 +319,18 @@ def test_review_publishes_portable_evidence_and_manifest(
 	)
 	monkeypatch.setattr(results, '_validate_lineage', lambda *_args, **_kwargs: None)
 
-	publication = results.publish_f3_xy_neighbor_unanimous_review(config)
+	results.publish_f3_xy_neighbor_unanimous_review(config)
 
-	assert publication.publish_manifest is not None
 	assert {path.name for path in config.output_dir.iterdir()} == {
 		results.SUMMARY_JSON,
 		results.SUMMARY_MARKDOWN,
-		'publish_manifest.json',
 	}
+	assert not (config.output_dir / 'publish_manifest.json').exists()
 	for path in config.output_dir.iterdir():
 		if path.suffix in {'.json', '.md'}:
 			text = path.read_text(encoding='utf-8')
 			assert str(artifact_root) not in text
 			assert str(workspace) not in text
-	manifest = json.loads(
-		(config.output_dir / 'publish_manifest.json').read_text(encoding='utf-8')
-	)
-	assert manifest['source_artifact_root'] == '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'
-
-
 def _validation_config(
 	tmp_path: Path,
 ) -> validation.F3XYNeighborUnanimousPretrainingValidationConfig:

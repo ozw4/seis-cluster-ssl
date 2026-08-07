@@ -30,8 +30,6 @@ def main() -> int:
 	)
 	print(f'summary JSON: {result.summary_json}')
 	print(f'summary Markdown: {result.summary_markdown}')
-	if result.publish_manifest is not None:
-		print(f'publish manifest: {result.output_dir / "publish_manifest.json"}')
 	return 0
 
 

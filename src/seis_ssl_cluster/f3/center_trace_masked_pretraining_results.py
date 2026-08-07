@@ -8,7 +8,7 @@ import io
 import json
 import math
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -17,14 +17,6 @@ import torch
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.center_trace_masked_pretraining_validation import (
 	load_f3_center_trace_masked_pretraining_handoff,
-)
-from seis_ssl_cluster.results import (
-	PublishedItem,
-	PublishItem,
-	PublishManifest,
-	SkippedOptionalItem,
-	publish_manifest_to_dict,
-	publish_selected_results,
 )
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	checkpoint_selection_sha256,
@@ -95,7 +87,7 @@ class F3CenterTraceMaskedPretrainingReviewConfig:
 
 @dataclass(frozen=True)
 class F3CenterTraceMaskedPretrainingReviewResult:
-	"""Review output paths and the optional publication manifest."""
+	"""Review output paths."""
 
 	output_dir: Path
 	summary_json: Path
@@ -103,7 +95,6 @@ class F3CenterTraceMaskedPretrainingReviewResult:
 	training_diagnostics: Path
 	checkpoint_selection_summary: Path
 	pretraining_handoff: Path
-	publish_manifest: PublishManifest | None
 
 
 _CONFIG_KEYS = frozenset(
@@ -171,14 +162,11 @@ def publish_f3_center_trace_masked_pretraining_review(
 			config.output_dir / CHECKPOINT_SELECTION_SUMMARY_JSON
 		),
 		pretraining_handoff=config.output_dir / PRETRAINING_HANDOFF_JSON,
-		publish_manifest=None,
 	)
 	if dry_run:
 		return result
-	manifest = _publish_review(
-		config, portable=portable, live=live, handoff=handoff
-	)
-	return replace(result, publish_manifest=manifest)
+	_publish_review(config, portable=portable, live=live, handoff=handoff)
+	return result
 
 
 def _inspect_live_evidence(
@@ -721,48 +709,27 @@ def _publish_review(
 	portable: Mapping[str, object],
 	live: Mapping[str, object],
 	handoff: Mapping[str, object],
-) -> PublishManifest:
-	"""Publish the fixed allowlisted review tree and preserve exact reuse."""
+) -> None:
+	"""Write the fixed lightweight review tree."""
 	_validate_existing_output_dir(config)
 	selection = _mapping(live['selection'], 'live selection')
-	items = (
-		PublishItem(
-			config.pretraining_handoff,
-			Path(SUMMARY_JSON),
-			content_text=_json_text(portable),
-		),
-		PublishItem(
-			config.pretraining_handoff,
-			Path(SUMMARY_MARKDOWN),
-			content_text=render_f3_center_trace_masked_pretraining_review_markdown(
-				portable
-			),
-		),
-		PublishItem(
-			Path(str(live['diagnostics_path'])),
-			Path(TRAINING_DIAGNOSTICS_CSV),
-			content_text=_diagnostics_csv_text(live['diagnostics']),
-		),
-		PublishItem(
-			live['selection_path'],
-			Path(CHECKPOINT_SELECTION_SUMMARY_JSON),
-			content_text=_json_text(selection),
-		),
-		PublishItem(
-			config.pretraining_handoff,
-			Path(PRETRAINING_HANDOFF_JSON),
-			content_text=_json_text(_portable_value(handoff, config=config)),
-		),
+	config.output_dir.mkdir(parents=True, exist_ok=True)
+	(config.output_dir / SUMMARY_JSON).write_text(
+		_json_text(portable), encoding='utf-8'
 	)
-	if _existing_publication_matches(config.output_dir, items=items):
-		return _load_existing_publish_manifest(config.output_dir)
-	manifest = publish_selected_results(
-		items=items,
-		output_dir=config.output_dir,
-		allowed_suffixes={'.json', '.md', '.csv'},
+	(config.output_dir / SUMMARY_MARKDOWN).write_text(
+		render_f3_center_trace_masked_pretraining_review_markdown(portable),
+		encoding='utf-8',
 	)
-	_write_portable_publish_manifest(manifest, config=config)
-	return manifest
+	(config.output_dir / TRAINING_DIAGNOSTICS_CSV).write_text(
+		_diagnostics_csv_text(live['diagnostics']), encoding='utf-8'
+	)
+	(config.output_dir / CHECKPOINT_SELECTION_SUMMARY_JSON).write_text(
+		_json_text(selection), encoding='utf-8'
+	)
+	(config.output_dir / PRETRAINING_HANDOFF_JSON).write_text(
+		_json_text(_portable_value(handoff, config=config)), encoding='utf-8'
+	)
 
 
 def _validate_existing_output_dir(
@@ -773,7 +740,7 @@ def _validate_existing_output_dir(
 		return
 	if not config.output_dir.is_dir():
 		raise ValueError(f'center-trace output_dir is not a directory: {config.output_dir}')
-	allowed = set(OUTPUT_NAMES) | {'publish_manifest.json'}
+	allowed = set(OUTPUT_NAMES)
 	for path in config.output_dir.rglob('*'):
 		if path.is_symlink():
 			raise ValueError(f'center-trace output must not contain symlinks: {path}')
@@ -781,84 +748,6 @@ def _validate_existing_output_dir(
 			continue
 		if path.relative_to(config.output_dir).as_posix() not in allowed:
 			raise ValueError(f'center-trace output contains unallowlisted file: {path}')
-
-
-def _existing_publication_matches(
-	output_dir: Path,
-	*,
-	items: tuple[PublishItem, ...],
-) -> bool:
-	manifest_path = output_dir / 'publish_manifest.json'
-	if not manifest_path.is_file():
-		return False
-	try:
-		payload = json.loads(manifest_path.read_text(encoding='utf-8'))
-		records = payload.get('items')
-		expected = {
-			item.relative_target.as_posix(): _content_bytes(item) for item in items
-		}
-		if not isinstance(records, list) or len(records) != len(expected):
-			return False
-		by_target = {record.get('target'): record for record in records}
-		if set(by_target) != set(expected):
-			return False
-		for target, content in expected.items():
-			path = output_dir / target
-			if not path.is_file() or path.read_bytes() != content:
-				return False
-			record = by_target[target]
-			if record.get('size_bytes') != len(content) or record.get('sha256') != file_sha256(
-				path
-			):
-				return False
-		return True
-	except (OSError, TypeError, ValueError, json.JSONDecodeError):
-		return False
-
-
-def _load_existing_publish_manifest(output_dir: Path) -> PublishManifest:
-	payload = _json_mapping(output_dir / 'publish_manifest.json', 'publish manifest')
-	items = [
-		PublishedItem(
-			source=Path(str(_mapping(item, 'publish item')['source'])),
-			target=output_dir / str(_mapping(item, 'publish item')['target']),
-			size_bytes=int(_mapping(item, 'publish item')['size_bytes']),
-			sha256=str(_mapping(item, 'publish item')['sha256']),
-		)
-		for item in payload['items']
-	]
-	skipped = [
-		SkippedOptionalItem(
-			source=Path(str(_mapping(item, 'skipped item')['source'])),
-			target=output_dir / str(_mapping(item, 'skipped item')['target']),
-			reason=str(_mapping(item, 'skipped item')['reason']),
-		)
-		for item in payload.get('skipped_optional_items', [])
-	]
-	source_root = payload.get('source_artifact_root')
-	return PublishManifest(
-		created_at_utc=str(payload['created_at_utc']),
-		source_artifact_root=None if source_root is None else Path(str(source_root)),
-		output_dir=Path(str(payload['output_dir'])),
-		items=items,
-		skipped_optional_items=skipped,
-		warnings=[str(value) for value in payload.get('warnings', [])],
-		manifest_path=output_dir / 'publish_manifest.json',
-	)
-
-
-def _write_portable_publish_manifest(
-	manifest: PublishManifest,
-	*,
-	config: F3CenterTraceMaskedPretrainingReviewConfig,
-) -> None:
-	payload = _portable_value(publish_manifest_to_dict(manifest), config=config)
-	if not isinstance(payload, dict):
-		raise TypeError('portable publish manifest must be a mapping')
-	payload['source_artifact_root'] = _ARTIFACT_ROOT_PLACEHOLDER
-	(config.output_dir / 'publish_manifest.json').write_text(
-		_json_text(payload), encoding='utf-8'
-	)
 
 
 def _read_diagnostics(path: Path) -> list[dict[str, float | int]]:
@@ -983,12 +872,6 @@ def _json_mapping(path: Path, label: str) -> Mapping[str, object]:
 		return _mapping(json.loads(path.read_text(encoding='utf-8')), label)
 	except (OSError, json.JSONDecodeError) as error:
 		raise ValueError(f'{label} is not valid JSON: {path}') from error
-
-
-def _content_bytes(item: PublishItem) -> bytes:
-	if item.content_text is not None:
-		return item.content_text.encode('utf-8')
-	return Path(item.source).read_bytes()
 
 
 def _json_text(value: object) -> str:

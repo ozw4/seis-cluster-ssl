@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -24,12 +24,6 @@ from seis_ssl_cluster.f3.xy_neighbor_unanimous_pretraining_validation import (
 from seis_ssl_cluster.f3.xy_neighbor_unanimous_target_audit import (
 	load_f3_xy_neighbor_unanimous_target_audit,
 	replay_f3_xy_neighbor_unanimous_target_audit,
-)
-from seis_ssl_cluster.results import (
-	PublishItem,
-	PublishManifest,
-	publish_manifest_to_dict,
-	publish_selected_results,
 )
 from seis_ssl_cluster.stratigraphy.xy_neighbor_unanimous_targets import (
 	load_multi_head_xy_neighbor_unanimous_target_manifest,
@@ -67,12 +61,11 @@ class F3XYNeighborUnanimousReviewConfig:
 
 @dataclass(frozen=True)
 class F3XYNeighborUnanimousReviewResult:
-	"""Review output paths and optional lightweight publish manifest."""
+	"""Review output paths."""
 
 	output_dir: Path
 	summary_json: Path
 	summary_markdown: Path
-	publish_manifest: PublishManifest | None
 
 
 def f3_xy_neighbor_unanimous_review_config_from_mapping(
@@ -144,28 +137,18 @@ def publish_f3_xy_neighbor_unanimous_review(
 		output_dir=config.output_dir,
 		summary_json=config.output_dir / SUMMARY_JSON,
 		summary_markdown=config.output_dir / SUMMARY_MARKDOWN,
-		publish_manifest=None,
 	)
 	if dry_run:
 		return result
 	portable = _portable(evidence, config=config)
-	manifest = publish_selected_results(
-		items=(
-			PublishItem(
-				source=config.target_manifest,
-				relative_target=Path(SUMMARY_JSON),
-				content_text=json.dumps(portable, indent=2, sort_keys=True) + '\n',
-			),
-			PublishItem(
-				source=config.target_manifest,
-				relative_target=Path(SUMMARY_MARKDOWN),
-				content_text=render_f3_xy_neighbor_unanimous_review_markdown(portable),
-			),
-		),
-		output_dir=config.output_dir,
+	config.output_dir.mkdir(parents=True, exist_ok=True)
+	result.summary_json.write_text(
+		json.dumps(portable, indent=2, sort_keys=True) + '\n', encoding='utf-8'
 	)
-	_write_portable_publish_manifest(manifest, config=config)
-	return replace(result, publish_manifest=manifest)
+	result.summary_markdown.write_text(
+		render_f3_xy_neighbor_unanimous_review_markdown(portable), encoding='utf-8'
+	)
+	return result
 
 
 def render_f3_xy_neighbor_unanimous_review_markdown(
@@ -400,22 +383,6 @@ def _portable(  # noqa: PLR0911
 			return value[len(workspace_root) + 1 :]
 		return value.replace(f'{artifact_root}/', f'{_ARTIFACT_ROOT_PLACEHOLDER}/')
 	return value
-
-
-def _write_portable_publish_manifest(
-	manifest: PublishManifest,
-	*,
-	config: F3XYNeighborUnanimousReviewConfig,
-) -> None:
-	"""Replace machine-specific paths in the publisher's lightweight manifest."""
-	payload = _portable(publish_manifest_to_dict(manifest), config=config)
-	if not isinstance(payload, dict):
-		raise TypeError('portable publish manifest must be a mapping')
-	payload['source_artifact_root'] = _ARTIFACT_ROOT_PLACEHOLDER
-	manifest.manifest_path.write_text(
-		json.dumps(payload, indent=2, sort_keys=True) + '\n',
-		encoding='utf-8',
-	)
 
 
 def _mapping(value: object, label: str) -> Mapping[str, object]:

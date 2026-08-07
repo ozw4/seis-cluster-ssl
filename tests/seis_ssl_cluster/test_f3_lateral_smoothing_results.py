@@ -57,11 +57,10 @@ def test_review_publisher_writes_portable_target_only_artifacts(
 	assert publication.selected_beta == 0.10
 	assert publication.smoke_status == 'READY_NOT_RUN'
 	assert publication.smoke_summary is None
-	assert publication.publish_manifest is not None
-	assert {path.name for path in paths['output_dir'].iterdir()} == {
-		*results.OUTPUT_NAMES,
-		'publish_manifest.json',
-	}
+	assert {path.name for path in paths['output_dir'].iterdir()} == set(
+		results.OUTPUT_NAMES
+	)
+	assert not (paths['output_dir'] / 'publish_manifest.json').exists()
 
 	candidate_rows = list(
 		csv.DictReader(publication.candidate_csv.read_text(encoding='utf-8').splitlines())
@@ -103,9 +102,7 @@ def test_review_publisher_writes_portable_target_only_artifacts(
 	assert all(str(paths['workspace_root']) not in text for text in texts)
 	report = validate_results_artifacts(
 		paths['output_dir'],
-		required_files=tuple(
-			Path(name) for name in (*results.OUTPUT_NAMES, 'publish_manifest.json')
-		),
+		required_files=tuple(Path(name) for name in results.OUTPUT_NAMES),
 		local_path_policy='error',
 		local_path_markers=(
 			f'{paths["artifact_root"]}/',
@@ -163,13 +160,11 @@ def test_review_publisher_compacts_strict_smoke_evidence(
 			'smoke_root_isolated_from_full_root': 'PASS',
 		},
 	}
-	manifest = json.loads(
-		(paths['output_dir'] / 'publish_manifest.json').read_text(encoding='utf-8')
-	)
-	assert [item['target'] for item in manifest['items']] == [
+	assert {path.name for path in paths['output_dir'].iterdir()} == {
 		*results.OUTPUT_NAMES,
 		results.LATERAL_SMOKE_SUMMARY_JSON,
-	]
+	}
+	assert not (paths['output_dir'] / 'publish_manifest.json').exists()
 
 
 def test_review_rejects_report_drift_and_smoke_for_hold(
@@ -234,7 +229,6 @@ def test_review_cli_passes_explicit_smoke_evidence_path(
 			summary_markdown=paths['output_dir'] / 'summary.md',
 			calibration_handoff=paths['output_dir'] / 'handoff.json',
 			smoke_summary=paths['output_dir'] / 'smoke.json',
-			publish_manifest=None,
 		),
 	)
 	monkeypatch.setattr(

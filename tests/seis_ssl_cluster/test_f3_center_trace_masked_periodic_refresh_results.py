@@ -3,8 +3,7 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
+from pathlib import Path  # noqa: TC003
 
 import pytest
 
@@ -132,7 +131,7 @@ def test_review_config_is_closed_and_requires_owned_paths(tmp_path: Path) -> Non
 		)
 
 
-def test_publication_reuses_exact_content_without_rewriting(tmp_path: Path) -> None:
+def test_publication_reuses_exact_lightweight_content(tmp_path: Path) -> None:
 	config = _config(tmp_path)
 	evidence, live, handoff = _publication_inputs()
 	first = results._publish_review(
@@ -142,10 +141,7 @@ def test_publication_reuses_exact_content_without_rewriting(tmp_path: Path) -> N
 		live=live,
 		quarantine_invalid=False,
 	)
-	paths = [
-		config.output_dir / name
-		for name in (*results.OUTPUT_NAMES, 'publish_manifest.json')
-	]
+	paths = [config.output_dir / name for name in results.OUTPUT_NAMES]
 	first_state = {
 		path: (path.stat().st_mtime_ns, path.read_bytes()) for path in paths
 	}
@@ -159,46 +155,13 @@ def test_publication_reuses_exact_content_without_rewriting(tmp_path: Path) -> N
 	second_state = {
 		path: (path.stat().st_mtime_ns, path.read_bytes()) for path in paths
 	}
-	assert first.manifest_path == second.manifest_path
+	assert first is None
+	assert second is None
 	assert first_state == second_state
-	assert {path.name for path in config.output_dir.iterdir()} == {
-		*results.OUTPUT_NAMES,
-		'publish_manifest.json',
-	}
-
-
-@pytest.mark.parametrize(
-	('field', 'value'),
-	[
-		('source_artifact_root', '/foreign/artifacts'),
-		('output_dir', 'foreign-results'),
-	],
-)
-def test_publication_does_not_reuse_foreign_manifest_identity(
-	tmp_path: Path, field: str, value: str
-) -> None:
-	config = _config(tmp_path)
-	evidence, live, handoff = _publication_inputs()
-	results._publish_review(
-		config,
-		evidence=evidence,
-		handoff=handoff,
-		live=live,
-		quarantine_invalid=False,
+	assert {path.name for path in config.output_dir.iterdir()} == set(
+		results.OUTPUT_NAMES
 	)
-	manifest_path = config.output_dir / 'publish_manifest.json'
-	payload = json.loads(manifest_path.read_text(encoding='utf-8'))
-	payload[field] = value
-	manifest_path.write_text(json.dumps(payload) + '\n', encoding='utf-8')
-
-	with pytest.raises(ValueError, match='stale or partial'):
-		results._publish_review(
-			config,
-			evidence=evidence,
-			handoff=handoff,
-			live=live,
-			quarantine_invalid=False,
-		)
+	assert not (config.output_dir / 'publish_manifest.json').exists()
 
 
 def test_publication_rejects_raw_output_and_explicitly_quarantines_it(
@@ -235,16 +198,15 @@ def test_publication_failure_does_not_leave_canonical_partial_tree(
 	config = _config(tmp_path)
 	evidence, live, handoff = _publication_inputs()
 
-	def fail_after_partial_stage(**kwargs: object) -> object:
-		staging = kwargs['output_dir']
-		assert isinstance(staging, Path)
-		(staging / 'partial.json').write_text('partial\n', encoding='utf-8')
-		raise RuntimeError('simulated publication failure')
-
 	monkeypatch.setattr(
-		results, 'publish_selected_results', fail_after_partial_stage
+		results,
+		'_publication_contents',
+		lambda *_args, **_kwargs: (
+			(results.SUMMARY_JSON, 'partial\n'),
+			('missing/summary.md', 'failure\n'),
+		),
 	)
-	with pytest.raises(RuntimeError, match='simulated publication failure'):
+	with pytest.raises(FileNotFoundError):
 		results._publish_review(
 			config,
 			evidence=evidence,

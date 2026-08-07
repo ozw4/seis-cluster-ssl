@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 import torch
@@ -25,12 +25,6 @@ from seis_ssl_cluster.f3.xy_neighbor_consensus_pretraining_validation import (
 	_target_temporal_transition_counts,
 	_validate_embedding_stratigraphy_identity,
 	load_f3_xy_neighbor_consensus_pretraining_handoff,
-)
-from seis_ssl_cluster.results import (
-	PublishItem,
-	PublishManifest,
-	publish_manifest_to_dict,
-	publish_selected_results,
 )
 from seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets import (
 	load_multi_head_xy_neighbor_consensus_target_manifest,
@@ -66,12 +60,11 @@ class F3XYNeighborConsensusReviewConfig:
 
 @dataclass(frozen=True)
 class F3XYNeighborConsensusReviewResult:
-	"""Portable review output paths and optional publication manifest."""
+	"""Portable review output paths."""
 
 	output_dir: Path
 	summary_json: Path
 	summary_markdown: Path
-	publish_manifest: PublishManifest | None
 
 
 def f3_xy_neighbor_consensus_review_config_from_mapping(
@@ -142,27 +135,17 @@ def publish_f3_xy_neighbor_consensus_review(
 		output_dir=config.output_dir,
 		summary_json=config.output_dir / SUMMARY_JSON,
 		summary_markdown=config.output_dir / SUMMARY_MARKDOWN,
-		publish_manifest=None,
 	)
 	if dry_run:
 		return result
-	manifest = publish_selected_results(
-		items=(
-			PublishItem(
-				source=config.target_manifest,
-				relative_target=Path(SUMMARY_JSON),
-				content_text=json.dumps(evidence, indent=2, sort_keys=True) + '\n',
-			),
-			PublishItem(
-				source=config.target_manifest,
-				relative_target=Path(SUMMARY_MARKDOWN),
-				content_text=render_f3_xy_neighbor_consensus_review_markdown(evidence),
-			),
-		),
-		output_dir=config.output_dir,
+	config.output_dir.mkdir(parents=True, exist_ok=True)
+	result.summary_json.write_text(
+		json.dumps(evidence, indent=2, sort_keys=True) + '\n', encoding='utf-8'
 	)
-	_write_portable_publish_manifest(manifest, config=config)
-	return replace(result, publish_manifest=manifest)
+	result.summary_markdown.write_text(
+		render_f3_xy_neighbor_consensus_review_markdown(evidence), encoding='utf-8'
+	)
+	return result
 
 
 def render_f3_xy_neighbor_consensus_review_markdown(
@@ -511,25 +494,6 @@ def _portable_path(
 		return value[len(workspace) + 1 :]
 	return value.replace(f'{artifact}/', f'{_ARTIFACT_ROOT_PLACEHOLDER}/').replace(
 		f'{workspace}/', ''
-	)
-
-
-def _write_portable_publish_manifest(
-	manifest: PublishManifest,
-	*,
-	config: F3XYNeighborConsensusReviewConfig,
-) -> None:
-	payload = _portable_value(
-		publish_manifest_to_dict(manifest),
-		artifact_root=config.artifact_root,
-		workspace_root=config.workspace_root,
-	)
-	if not isinstance(payload, dict):
-		raise TypeError('portable publish manifest must be a mapping')
-	payload['source_artifact_root'] = _ARTIFACT_ROOT_PLACEHOLDER
-	manifest.manifest_path.write_text(
-		json.dumps(payload, indent=2, sort_keys=True) + '\n',
-		encoding='utf-8',
 	)
 
 
