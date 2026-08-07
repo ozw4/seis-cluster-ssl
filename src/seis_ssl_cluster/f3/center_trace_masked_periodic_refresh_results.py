@@ -5,7 +5,7 @@ revalidates every live checkpoint, generation, event, and embedding reference
 before writing review files.  It never copies binary or array artifacts into
 ``results/``.
 """
-# ruff: noqa: C901, CPY001, E501, PERF401, PLR0911, PLR0912, TRY300
+# ruff: noqa: CPY001, E501, PERF401
 
 from __future__ import annotations
 
@@ -56,6 +56,7 @@ OUTPUT_NAMES = (
 	CHECKPOINT_SUMMARY_JSON,
 	PRETRAINING_HANDOFF_JSON,
 )
+_LEGACY_PUBLISH_MANIFEST = 'publish_manifest.json'
 
 _EVENT_FIELDS = (
 	'event_index',
@@ -650,7 +651,7 @@ def _publication_contents(
 def _validate_existing_output_dir(
 	config: F3CenterTraceMaskedPeriodicRefreshReviewConfig,
 ) -> None:
-	"""Reject foreign or raw files instead of replacing them in place."""
+	"""Reject foreign entries while tolerating one legacy manifest file."""
 	if not config.output_dir.exists():
 		return
 	if config.output_dir.is_symlink():
@@ -663,9 +664,10 @@ def _validate_existing_output_dir(
 	for path in config.output_dir.rglob('*'):
 		if path.is_symlink():
 			raise ValueError(f'periodic refresh output must not contain symlinks: {path}')
-		if path.is_dir():
+		relative = path.relative_to(config.output_dir).as_posix()
+		if relative == _LEGACY_PUBLISH_MANIFEST and path.is_file():
 			continue
-		if path.relative_to(config.output_dir).as_posix() not in allowed:
+		if not path.is_file() or relative not in allowed:
 			raise ValueError(
 				f'periodic refresh output contains unallowlisted file: {path}'
 			)

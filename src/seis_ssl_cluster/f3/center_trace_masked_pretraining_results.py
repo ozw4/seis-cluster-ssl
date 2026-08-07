@@ -1,5 +1,5 @@
 """Publish lightweight review evidence for the experiment-104 handoff."""
-# ruff: noqa: C901, E501, ISC004, PLR0911, PLR0912, TRY300
+# ruff: noqa: C901, E501, ISC004, PLR0912
 
 from __future__ import annotations
 
@@ -47,6 +47,7 @@ OUTPUT_NAMES = (
 	CHECKPOINT_SELECTION_SUMMARY_JSON,
 	PRETRAINING_HANDOFF_JSON,
 )
+_LEGACY_PUBLISH_MANIFEST = 'publish_manifest.json'
 _DIAGNOSTIC_FIELDS = (
 	'loss',
 	'loss_prototype',
@@ -735,18 +736,23 @@ def _publish_review(
 def _validate_existing_output_dir(
 	config: F3CenterTraceMaskedPretrainingReviewConfig,
 ) -> None:
-	"""Reject foreign or heavy files instead of deleting them in place."""
+	"""Reject foreign entries while tolerating one legacy manifest file."""
 	if not config.output_dir.exists():
 		return
+	if config.output_dir.is_symlink():
+		raise ValueError(
+			f'center-trace output_dir must not be a symlink: {config.output_dir}'
+		)
 	if not config.output_dir.is_dir():
 		raise ValueError(f'center-trace output_dir is not a directory: {config.output_dir}')
 	allowed = set(OUTPUT_NAMES)
 	for path in config.output_dir.rglob('*'):
 		if path.is_symlink():
 			raise ValueError(f'center-trace output must not contain symlinks: {path}')
-		if path.is_dir():
+		relative = path.relative_to(config.output_dir).as_posix()
+		if relative == _LEGACY_PUBLISH_MANIFEST and path.is_file():
 			continue
-		if path.relative_to(config.output_dir).as_posix() not in allowed:
+		if not path.is_file() or relative not in allowed:
 			raise ValueError(f'center-trace output contains unallowlisted file: {path}')
 
 
