@@ -380,6 +380,142 @@ def test_f3_lithology_report_publish_requires_metrics(
 	assert 'outputs' in local_payload
 
 
+def test_f3_lithology_report_publish_can_exclude_figures(tmp_path: Path) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+		prediction_figures=(('validation', 'inline', 150, True),),
+	)
+	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+
+	result = build_f3_lithology_report(
+		_report_config(run),
+		publish_config=F3LithologyPublishConfig(
+			enabled=True,
+			output_dir=output_dir,
+			include_figures=False,
+		),
+	)
+
+	assert {path.relative_to(output_dir) for path in result.published_files} == {
+		Path('report.md'),
+		Path('report.json'),
+		Path('metrics.json'),
+		Path('metrics.csv'),
+		Path('classification_report.md'),
+		Path('confusion_matrix.csv'),
+	}
+	assert not (output_dir / 'figures').exists()
+	assert json.loads((output_dir / 'report.json').read_text())['figures'] == []
+	assert not (output_dir / 'publish_manifest.json').exists()
+
+
+def test_f3_lithology_report_publish_enforces_size_limit(tmp_path: Path) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+
+	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
+		build_f3_lithology_report(
+			_report_config(run),
+			publish_config=F3LithologyPublishConfig(
+				enabled=True,
+				output_dir=output_dir,
+				max_file_size_bytes=1,
+			),
+		)
+
+	assert not output_dir.exists()
+
+
+def test_f3_lithology_report_publish_rejects_source_symlink(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	metrics_json = Path(run['metrics_json'])
+	real_metrics_json = metrics_json.with_name('metrics-real.json')
+	metrics_json.rename(real_metrics_json)
+	metrics_json.symlink_to(real_metrics_json.name)
+	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+
+	with pytest.raises(FileNotFoundError, match='regular file'):
+		build_f3_lithology_report(
+			_report_config(run),
+			publish_config=F3LithologyPublishConfig(
+				enabled=True,
+				output_dir=output_dir,
+			),
+		)
+
+	assert not output_dir.exists()
+
+
+def test_f3_lithology_report_publish_rejects_source_as_target(
+	tmp_path: Path,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+
+	with pytest.raises(ValueError, match='publish target must differ from source'):
+		build_f3_lithology_report(
+			_report_config(run),
+			publish_config=F3LithologyPublishConfig(
+				enabled=True,
+				output_dir=Path(run['report_dir']),
+			),
+		)
+
+
+@pytest.mark.parametrize('target_kind', ['symlink', 'directory'])
+def test_f3_lithology_report_publish_rejects_unsafe_target(
+	tmp_path: Path,
+	target_kind: str,
+) -> None:
+	run = _write_probe_run(
+		tmp_path,
+		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
+		embed_spec='overlap_x16',
+		probe_spec='linear_balanced_v1',
+	)
+	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+	output_dir.mkdir(parents=True)
+	report_target = output_dir / 'report.md'
+	if target_kind == 'symlink':
+		symlink_target = tmp_path / 'existing-report.md'
+		symlink_target.write_text('unchanged\n', encoding='utf-8')
+		report_target.symlink_to(symlink_target)
+		expected_error = ValueError
+		expected_message = 'must not be a symlink'
+	else:
+		report_target.mkdir()
+		expected_error = IsADirectoryError
+		expected_message = 'is not a file'
+
+	with pytest.raises(expected_error, match=expected_message):
+		build_f3_lithology_report(
+			_report_config(run),
+			publish_config=F3LithologyPublishConfig(
+				enabled=True,
+				output_dir=output_dir,
+			),
+		)
+
+
 def test_f3_lithology_comparison_table_aggregates_multiple_runs(
 	tmp_path: Path,
 ) -> None:

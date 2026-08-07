@@ -488,6 +488,43 @@ def test_f3_lithology_baseline_comparison_publish_warns_for_missing_optional_fig
 	assert not (publish_dir / 'publish_manifest.json').exists()
 
 
+def test_f3_lithology_baseline_comparison_publish_can_exclude_figures(
+	tmp_path: Path,
+) -> None:
+	output_dir = tmp_path / 'artifacts' / 'comparison'
+	publish_dir = tmp_path / 'results' / 'comparison'
+	figures_dir = output_dir / 'figures'
+	figures_dir.mkdir(parents=True)
+	(output_dir / 'comparison_report.md').write_text('# report\n', encoding='utf-8')
+	(output_dir / 'comparison_table.csv').write_text(
+		'feature_kind,macro_f1\npretrained_encoder,0.7\n',
+		encoding='utf-8',
+	)
+	(output_dir / 'comparison_table.json').write_text('{"rows": []}\n')
+	(figures_dir / 'macro_f1_comparison.png').write_bytes(b'figure')
+
+	published_files = publish_f3_lithology_comparison_report(
+		F3LithologyComparisonReportConfig(
+			search_root=tmp_path / 'artifacts',
+			output_csv=output_dir / 'comparison_table.csv',
+			output_markdown=output_dir / 'comparison_report.md',
+		),
+		F3LithologyComparisonPublishConfig(
+			enabled=True,
+			output_dir=publish_dir,
+			include_figures=False,
+		),
+	)
+
+	assert {path.relative_to(publish_dir) for path in published_files} == {
+		Path('comparison_report.md'),
+		Path('comparison_table.csv'),
+		Path('comparison_table.json'),
+	}
+	assert not (publish_dir / 'figures').exists()
+	assert not (publish_dir / 'publish_manifest.json').exists()
+
+
 def test_f3_lithology_baseline_comparison_uses_pretrained_token_metadata(
 	tmp_path: Path,
 ) -> None:

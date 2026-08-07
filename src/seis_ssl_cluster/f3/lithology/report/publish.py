@@ -62,13 +62,6 @@ class F3LithologyPublishConfig:
 	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
 	max_prediction_figures: int = 3
 
-@dataclass(frozen=True)
-class _LocalPublishEntry:
-	source: Path
-	target: Path
-	content_bytes: bytes | None = None
-	required: bool = True
-
 
 def publish_f3_lithology_report(
 	config: F3LithologyReportConfig,
@@ -124,46 +117,98 @@ def _write_published_f3_lithology_report(
 	if publish_config.output_dir is None:
 		raise ValueError('publish output_dir is required when publishing is enabled')
 	output_dir = publish_config.output_dir
-	entries = [
-		_LocalPublishEntry(
-			config.output_markdown,
-			output_dir / _PUBLISH_REPORT_TARGET,
-			render_f3_lithology_report_markdown(published_payload).encode('utf-8'),
-		),
-		_LocalPublishEntry(
-			config.output_json,
-			output_dir / _PUBLISH_JSON_TARGET,
-			(json.dumps(published_payload, indent=2, sort_keys=True) + '\n').encode(
-				'utf-8'
-			),
-		),
-	]
-	for source, relative_target in (
-		(config.metrics_json, _PUBLISH_METRICS_TARGET),
-		(config.metrics_json.with_name('metrics.csv'), _PUBLISH_METRICS_CSV_TARGET),
-		(
-			config.metrics_json.with_name('classification_report.md'),
-			_PUBLISH_CLASSIFICATION_REPORT_TARGET,
-		),
-		(
-			config.metrics_json.with_name('confusion_matrix.csv'),
-			_PUBLISH_CONFUSION_MATRIX_CSV_TARGET,
-		),
-	):
-		entries.append(_LocalPublishEntry(source, output_dir / relative_target))
-	for source, relative_target in figure_sources:
-		entries.append(
-			_LocalPublishEntry(
-				source,
-				output_dir / relative_target,
-				required=False,
-			)
-		)
-	plan = _preflight_local_publish_entries(
-		entries,
+	report_text = render_f3_lithology_report_markdown(published_payload)
+	report_json = json.dumps(published_payload, indent=2, sort_keys=True) + '\n'
+	metrics_csv = config.metrics_json.with_name('metrics.csv')
+	classification_report = config.metrics_json.with_name(
+		'classification_report.md'
+	)
+	confusion_matrix_csv = config.metrics_json.with_name('confusion_matrix.csv')
+
+	_validate_published_file(
+		config.output_markdown,
+		output_dir / _PUBLISH_REPORT_TARGET,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+		content_size_bytes=len(report_text.encode('utf-8')),
+	)
+	_validate_published_file(
+		config.output_json,
+		output_dir / _PUBLISH_JSON_TARGET,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+		content_size_bytes=len(report_json.encode('utf-8')),
+	)
+	_validate_published_file(
+		config.metrics_json,
+		output_dir / _PUBLISH_METRICS_TARGET,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
-	return _write_local_publish_entries(plan)
+	_validate_published_file(
+		metrics_csv,
+		output_dir / _PUBLISH_METRICS_CSV_TARGET,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	_validate_published_file(
+		classification_report,
+		output_dir / _PUBLISH_CLASSIFICATION_REPORT_TARGET,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	_validate_published_file(
+		confusion_matrix_csv,
+		output_dir / _PUBLISH_CONFUSION_MATRIX_CSV_TARGET,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	for source, relative_target in figure_sources:
+		if source.exists() or source.is_symlink():
+			_validate_published_file(
+				source,
+				output_dir / relative_target,
+				max_file_size_bytes=publish_config.max_file_size_bytes,
+			)
+
+	published_files = [
+		_write_published_text(
+			config.output_markdown,
+			output_dir / _PUBLISH_REPORT_TARGET,
+			report_text,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		),
+		_write_published_text(
+			config.output_json,
+			output_dir / _PUBLISH_JSON_TARGET,
+			report_json,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		),
+		_copy_published_file(
+			config.metrics_json,
+			output_dir / _PUBLISH_METRICS_TARGET,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		),
+		_copy_published_file(
+			metrics_csv,
+			output_dir / _PUBLISH_METRICS_CSV_TARGET,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		),
+		_copy_published_file(
+			classification_report,
+			output_dir / _PUBLISH_CLASSIFICATION_REPORT_TARGET,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		),
+		_copy_published_file(
+			confusion_matrix_csv,
+			output_dir / _PUBLISH_CONFUSION_MATRIX_CSV_TARGET,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		),
+	]
+	for source, relative_target in figure_sources:
+		if source.exists() or source.is_symlink():
+			published_files.append(
+				_copy_published_file(
+					source,
+					output_dir / relative_target,
+					max_file_size_bytes=publish_config.max_file_size_bytes,
+				)
+			)
+	return tuple(published_files)
 
 def _copy_f3_lithology_comparison_files(
 	config: F3LithologyComparisonReportConfig,
@@ -173,34 +218,69 @@ def _copy_f3_lithology_comparison_files(
 	if publish_config.output_dir is None:
 		raise ValueError('publish output_dir is required when publishing is enabled')
 	output_dir = publish_config.output_dir
-	entries = [
-		_LocalPublishEntry(
-			config.output_markdown, output_dir / 'comparison_report.md'
-		),
-		_LocalPublishEntry(config.output_csv, output_dir / 'comparison_table.csv'),
-	]
+	comparison_report = output_dir / 'comparison_report.md'
+	comparison_table = output_dir / 'comparison_table.csv'
 	optional_json = config.output_csv.with_suffix('.json')
-	entries.append(
-		_LocalPublishEntry(
-			optional_json,
-			output_dir / 'comparison_table.json',
-			required=False,
-		)
-	)
-	if publish_config.include_figures:
-		entries.extend(
-			_LocalPublishEntry(
-				source,
-				output_dir / _PUBLISH_FIGURE_DIR / source.name,
-				required=False,
-			)
-			for source in _comparison_figure_paths(config.output_markdown).values()
-		)
-	plan = _preflight_local_publish_entries(
-		entries,
+	comparison_table_json = output_dir / 'comparison_table.json'
+	_validate_published_file(
+		config.output_markdown,
+		comparison_report,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
-	return _write_local_publish_entries(plan)
+	_validate_published_file(
+		config.output_csv,
+		comparison_table,
+		max_file_size_bytes=publish_config.max_file_size_bytes,
+	)
+	if optional_json.exists() or optional_json.is_symlink():
+		_validate_published_file(
+			optional_json,
+			comparison_table_json,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		)
+	figure_sources = ()
+	if publish_config.include_figures:
+		figure_sources = tuple(
+			_comparison_figure_paths(config.output_markdown).values()
+		)
+		for source in figure_sources:
+			if source.exists() or source.is_symlink():
+				_validate_published_file(
+					source,
+					output_dir / _PUBLISH_FIGURE_DIR / source.name,
+					max_file_size_bytes=publish_config.max_file_size_bytes,
+				)
+
+	published_files = [
+		_copy_published_file(
+			config.output_markdown,
+			comparison_report,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		),
+		_copy_published_file(
+			config.output_csv,
+			comparison_table,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		),
+	]
+	if optional_json.exists() or optional_json.is_symlink():
+		published_files.append(
+			_copy_published_file(
+				optional_json,
+				comparison_table_json,
+				max_file_size_bytes=publish_config.max_file_size_bytes,
+			)
+		)
+	published_files.extend(
+		_copy_published_file(
+			source,
+			output_dir / _PUBLISH_FIGURE_DIR / source.name,
+			max_file_size_bytes=publish_config.max_file_size_bytes,
+		)
+		for source in figure_sources
+		if source.exists() or source.is_symlink()
+	)
+	return tuple(published_files)
 
 def _publish_figure_sources_and_replacements(
 	config: F3LithologyReportConfig,
@@ -270,64 +350,70 @@ def _append_publish_figure_source(  # noqa: PLR0913
 		)
 	planned_targets.add(target)
 
-def _preflight_local_publish_entries(  # noqa: C901
-	entries: Sequence[_LocalPublishEntry], *, max_file_size_bytes: int
-) -> tuple[_LocalPublishEntry, ...]:
+def _validate_published_file(
+	source: Path,
+	target: Path,
+	*,
+	max_file_size_bytes: int,
+	content_size_bytes: int | None = None,
+) -> None:
 	if (
 		isinstance(max_file_size_bytes, bool)
 		or not isinstance(max_file_size_bytes, int)
 		or max_file_size_bytes <= 0
 	):
 		raise ValueError('max_file_size_bytes must be a positive integer')
-	plan: list[_LocalPublishEntry] = []
-	targets: set[Path] = set()
-	for entry in entries:
-		if entry.source.is_symlink():
-			raise FileNotFoundError(
-				f'publish source must be a regular file: {entry.source}'
-			)
-		if not entry.source.exists():
-			if not entry.required:
-				continue
-			raise FileNotFoundError(
-				f'required publish source does not exist: {entry.source}'
-			)
-		if not entry.source.is_file():
-			raise FileNotFoundError(
-				f'publish source must be a regular file: {entry.source}'
-			)
-		target = entry.target.resolve(strict=False)
-		if entry.source.resolve(strict=False) == target:
-			raise ValueError(f'publish target must differ from source: {entry.target}')
-		if target in targets:
-			raise ValueError(f'duplicate publish target: {entry.target}')
-		targets.add(target)
-		if entry.target.is_symlink():
-			raise ValueError(f'publish target must not be a symlink: {entry.target}')
-		if entry.target.exists() and not entry.target.is_file():
-			raise IsADirectoryError(f'publish target is not a file: {entry.target}')
-		size = (
-			len(entry.content_bytes)
-			if entry.content_bytes is not None
-			else entry.source.stat().st_size
+	if source.is_symlink():
+		raise FileNotFoundError(f'publish source must be a regular file: {source}')
+	if not source.exists():
+		raise FileNotFoundError(
+			f'required publish source does not exist: {source}'
 		)
-		if size > max_file_size_bytes:
-			raise ValueError(
-				f'publish source exceeds max_file_size_bytes: {entry.source}'
-			)
-		plan.append(entry)
-	return tuple(plan)
+	if not source.is_file():
+		raise FileNotFoundError(f'publish source must be a regular file: {source}')
+	if source.resolve(strict=False) == target.resolve(strict=False):
+		raise ValueError(f'publish target must differ from source: {target}')
+	if target.is_symlink():
+		raise ValueError(f'publish target must not be a symlink: {target}')
+	if target.exists() and not target.is_file():
+		raise IsADirectoryError(f'publish target is not a file: {target}')
+	size = source.stat().st_size if content_size_bytes is None else content_size_bytes
+	if size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
 
-def _write_local_publish_entries(
-	entries: Sequence[_LocalPublishEntry],
-) -> tuple[Path, ...]:
-	for entry in entries:
-		entry.target.parent.mkdir(parents=True, exist_ok=True)
-		if entry.content_bytes is None:
-			shutil.copy2(entry.source, entry.target)
-		else:
-			entry.target.write_bytes(entry.content_bytes)
-	return tuple(entry.target for entry in entries)
+
+def _copy_published_file(
+	source: Path,
+	target: Path,
+	*,
+	max_file_size_bytes: int,
+) -> Path:
+	_validate_published_file(
+		source,
+		target,
+		max_file_size_bytes=max_file_size_bytes,
+	)
+	target.parent.mkdir(parents=True, exist_ok=True)
+	shutil.copy2(source, target)
+	return target
+
+
+def _write_published_text(
+	source: Path,
+	target: Path,
+	text: str,
+	*,
+	max_file_size_bytes: int,
+) -> Path:
+	_validate_published_file(
+		source,
+		target,
+		max_file_size_bytes=max_file_size_bytes,
+		content_size_bytes=len(text.encode('utf-8')),
+	)
+	target.parent.mkdir(parents=True, exist_ok=True)
+	target.write_text(text, encoding='utf-8')
+	return target
 
 def _publish_prediction_figure_sources(
 	config: F3LithologyReportConfig,
