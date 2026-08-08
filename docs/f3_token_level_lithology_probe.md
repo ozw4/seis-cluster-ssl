@@ -248,15 +248,8 @@ $ROOT/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/
 
 A lightweight shared copy, when needed, belongs under
 `results/f3/facies_benchmark_v1/baseline_comparison/`. The checked-in
-comparison config publishes this copy through its `publish` block.
-
-Validate shared results after publishing:
-
-```bash
-python proc/seis_ssl_cluster/validate_results_artifacts.py \
-  --root results \
-  --max-file-size-mb 10
-```
+comparison config publishes this copy through its `publish` block. Review the
+producer-owned file set and `git diff` before committing it.
 
 Read `macro_f1` as the primary class-balanced score, `mean_iou` as the
 secondary segmentation-style score, and per-class F1 columns to check whether
