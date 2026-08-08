@@ -39,7 +39,6 @@ STAGE_MODULES = {
 	'manifest',
 	'normalization',
 	'pretraining',
-	'results',
 	'strat_hmm_pseudo_targets',
 }
 DIRECT_STAGE_IMPORTS = (
@@ -62,7 +61,6 @@ DIRECT_STAGE_IMPORTS = (
 	('normalization', 'resolve_normalization_stats_config'),
 	('pretraining', 'resolve_mae_training_config'),
 	('pretraining', 'resolve_strat_hmm_pretext_config'),
-	('results', 'validate_results_artifacts'),
 	('strat_hmm_pseudo_targets', 'resolve_strat_hmm_pseudo_target_config'),
 )
 PROC_IMPORTS = (
