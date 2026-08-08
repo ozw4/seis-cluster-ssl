@@ -14,7 +14,6 @@ from proc.seis_ssl_cluster import (
 	summarize_f3_lithology_voxel_label_budget_control as summarize_control_cli,
 )
 from seis_ssl_cluster.f3.lithology.voxel_label_budget_control import (
-	CONTROL_PUBLISH_MANIFEST,
 	CURRENT_MODEL_ROLE,
 	FORBIDDEN_SUFFIXES,
 	PAIR_IDENTITY_KEYS,
@@ -137,7 +136,6 @@ def test_readiness_with_drift_overrides_positive_label(tmp_path: Path) -> None:
 def test_publish_target_inventory_is_lightweight_only() -> None:
 	targets = _publish_target_names()
 
-	assert CONTROL_PUBLISH_MANIFEST not in targets
 	assert not {
 		name
 		for name in targets

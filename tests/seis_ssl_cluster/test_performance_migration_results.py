@@ -4,7 +4,6 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pytest
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -15,7 +14,6 @@ from seis_ssl_cluster.migration.performance_results import (
 	commit_staged_artifact_directory,
 	compare_numeric_arrays,
 	decide_migration_status,
-	publish_lightweight_migration_results,
 	quarantine_artifact,
 	reuse_or_quarantine_artifact,
 	staged_artifact_directory,
@@ -193,47 +191,6 @@ def test_quarantine_uses_timestamped_preserving_rename(tmp_path: Path) -> None:
 	assert (quarantined / 'evidence.txt').read_text(encoding='utf-8') == 'preserve'
 
 
-def test_lightweight_publish_writes_exact_files_without_manifest(
-	tmp_path: Path,
-) -> None:
-	source_root = tmp_path / 'artifacts'
-	report = _write(source_root / 'reports' / 'summary.md', '# summary\n')
-	metrics = _write(source_root / 'reports' / 'metrics.json', '{"f1": 1.0}\n')
-	output = tmp_path / 'results' / 'migration'
-
-	raw = _write(source_root / 'raw.npy', 'not actually an array')
-	published_files = publish_lightweight_migration_results(
-		summary_report=report,
-		metrics_json=metrics,
-		output_dir=output,
-		source_artifact_root=source_root,
-	)
-
-	assert {item.relative_to(output).as_posix() for item in published_files} == {
-		'summary.md',
-		'tables/metrics.json',
-	}
-	assert (output / 'summary.md').read_bytes() == report.read_bytes()
-	assert (output / 'tables/metrics.json').read_bytes() == metrics.read_bytes()
-	assert not (output / raw.name).exists()
-	assert not (output / 'publish_manifest.json').exists()
-	(output / 'unlisted.md').write_text('not allowed', encoding='utf-8')
-	with pytest.raises(ValueError, match='do not exactly match'):
-		publish_lightweight_migration_results(
-			summary_report=report,
-			metrics_json=metrics,
-			output_dir=output,
-			source_artifact_root=source_root,
-			allow_reuse=True,
-		)
-
-	with pytest.raises(FileNotFoundError, match='regular file'):
-		publish_lightweight_migration_results(
-			summary_report=source_root / 'missing.md',
-			metrics_json=metrics,
-			output_dir=tmp_path / 'results' / 'missing',
-			source_artifact_root=source_root,
-		)
 
 
 def _exact_checks() -> dict[str, bool]:

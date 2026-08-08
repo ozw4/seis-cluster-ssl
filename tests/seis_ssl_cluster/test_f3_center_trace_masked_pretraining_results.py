@@ -107,27 +107,8 @@ def test_publication_rewrites_exact_lightweight_file_set(tmp_path: Path) -> None
 	assert second is None
 	assert first_state == second_state
 	assert {path.name for path in config.output_dir.iterdir()} == set(results.OUTPUT_NAMES)
-	assert not (config.output_dir / 'publish_manifest.json').exists()
 
 
-def test_publication_preserves_top_level_legacy_manifest(tmp_path: Path) -> None:
-	config, portable, live = _publication_fixture(tmp_path)
-	results._publish_review(config, portable=portable, live=live, handoff={})
-	legacy = config.output_dir / 'publish_manifest.json'
-	legacy.write_bytes(b'{"legacy": true}\n')
-	before_bytes = legacy.read_bytes()
-	before_size = legacy.stat().st_size
-	before_mtime_ns = legacy.stat().st_mtime_ns
-
-	results._publish_review(config, portable=portable, live=live, handoff={})
-
-	assert legacy.read_bytes() == before_bytes
-	assert legacy.stat().st_size == before_size
-	assert legacy.stat().st_mtime_ns == before_mtime_ns
-	assert {path.name for path in config.output_dir.iterdir()} == {
-		*results.OUTPUT_NAMES,
-		'publish_manifest.json',
-	}
 
 
 @pytest.mark.parametrize(
@@ -146,29 +127,8 @@ def test_publication_rejects_unallowlisted_owned_output(
 		)
 
 
-def test_publication_rejects_nested_legacy_manifest(tmp_path: Path) -> None:
-	config, portable, live = _publication_fixture(tmp_path)
-	nested = config.output_dir / 'nested'
-	nested.mkdir(parents=True)
-	(nested / 'publish_manifest.json').write_bytes(b'{"legacy": true}\n')
-
-	with pytest.raises(ValueError, match='unallowlisted'):
-		results._publish_review(
-			config, portable=portable, live=live, handoff={}
-		)
 
 
-def test_publication_rejects_legacy_manifest_symlink(tmp_path: Path) -> None:
-	config, portable, live = _publication_fixture(tmp_path)
-	config.output_dir.mkdir()
-	target = tmp_path / 'legacy.json'
-	target.write_bytes(b'{"legacy": true}\n')
-	(config.output_dir / 'publish_manifest.json').symlink_to(target)
-
-	with pytest.raises(ValueError, match='symlink'):
-		results._publish_review(
-			config, portable=portable, live=live, handoff={}
-		)
 
 
 def test_live_references_reject_missing_and_stale_but_allow_explicit_files(

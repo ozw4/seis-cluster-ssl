@@ -323,7 +323,6 @@ def test_publish_uses_exact_lightweight_allowlist(tmp_path: Path) -> None:
 		*(f'figures/{name}' for name in FIGURE_NAMES),
 	}
 	assert not any(target.endswith(('.pt', '.npy', '.npz')) for target in targets)
-	assert not (publish_dir / 'publish_manifest.json').exists()
 
 
 @pytest.mark.parametrize(

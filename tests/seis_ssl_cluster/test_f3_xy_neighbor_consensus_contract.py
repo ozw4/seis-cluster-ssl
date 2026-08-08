@@ -124,7 +124,6 @@ def test_review_publishes_portable_source_only_diagnostics(
 		results.SUMMARY_JSON,
 		results.SUMMARY_MARKDOWN,
 	}
-	assert not (paths['output_dir'] / 'publish_manifest.json').exists()
 	summary = json.loads(publication.summary_json.read_text(encoding='utf-8'))
 	assert summary['target_representation'] == 'xy_neighbor_consensus_hard_labels_v1'
 	assert summary['head_diagnostics'][0]['changed_token_count'] == 2

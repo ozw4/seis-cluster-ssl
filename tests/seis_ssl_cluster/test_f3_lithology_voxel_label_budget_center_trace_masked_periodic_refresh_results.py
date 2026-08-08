@@ -61,7 +61,6 @@ def test_periodic_refresh_publishes_only_explicit_lightweight_files(
 	assert {path.name for path in published.iterdir()} == set(
 		results.PUBLISHED_OUTPUT_NAMES
 	)
-	assert not (published / 'publish_manifest.json').exists()
 	assert not any(
 		path.suffix in {'.npy', '.npz', '.pt'} for path in published.iterdir()
 	)

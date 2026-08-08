@@ -66,7 +66,6 @@ CONTROL_MONITORED_CLASS_SUMMARY_CSV = 'control_monitored_class_summary.csv'
 CONTROL_SUMMARY_JSON = 'current_k6_control_summary.json'
 CONTROL_SUMMARY_MARKDOWN = 'current_k6_control_summary.md'
 CONTROL_HANDOFF_MARKDOWN = 'current_k6_control_handoff.md'
-CONTROL_PUBLISH_MANIFEST = 'publish_manifest.json'
 BLOCKED_CONTROL_CONTRACT = 'BLOCKED_CONTROL_CONTRACT'
 CURRENT_MODEL_ROLE = 'm1_current_k6'
 REFERENCE_MODEL_ROLES = ('mae', 'm1')
@@ -137,7 +136,7 @@ class F3VoxelLabelBudgetControlResultsInspection:
 
 @dataclass(frozen=True)
 class F3VoxelLabelBudgetControlResultsResult:
-	"""Summary files and optional lightweight publication manifest."""
+	"""Summary files and optional lightweight publication outputs."""
 
 	summary_json: Path
 	summary_markdown: Path
@@ -1317,12 +1316,11 @@ def _validate_existing_publish_tree(
 			raise ValueError(f'raw artifact was published: {path}')
 		if path.stat().st_size > config.publish.max_file_size_bytes:
 			raise ValueError(f'published file exceeds size limit: {path}')
-	actual_without_historical_manifest = actual - {CONTROL_PUBLISH_MANIFEST}
-	if actual_without_historical_manifest != expected:
+	if actual != expected:
 		raise FileExistsError(
 			'current K6 publish root has an unexpected file set; '
-			f'missing={sorted(expected - actual_without_historical_manifest)!r}, '
-			f'extra={sorted(actual_without_historical_manifest - expected)!r}'
+			f'missing={sorted(expected - actual)!r}, '
+			f'extra={sorted(actual - expected)!r}'
 		)
 
 

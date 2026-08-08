@@ -447,7 +447,6 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 	assert f'robustness/{published.summary_json.name}' in targets
 	assert ORIGINAL_SUMMARY_JSON in targets
 	assert not any(target.endswith(('.npy', '.pt', '.joblib')) for target in targets)
-	assert not (publish_dir / 'publish_manifest.json').exists()
 
 	first_evaluation = Path(v1_rows[0]['evaluation_dir']) / 'evaluation_metadata.json'
 	evaluation_payload = json.loads(first_evaluation.read_text(encoding='utf-8'))

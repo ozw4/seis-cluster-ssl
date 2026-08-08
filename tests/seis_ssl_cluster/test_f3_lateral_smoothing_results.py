@@ -60,7 +60,6 @@ def test_review_publisher_writes_portable_target_only_artifacts(
 	assert {path.name for path in paths['output_dir'].iterdir()} == set(
 		results.OUTPUT_NAMES
 	)
-	assert not (paths['output_dir'] / 'publish_manifest.json').exists()
 
 	candidate_rows = list(
 		csv.DictReader(publication.candidate_csv.read_text(encoding='utf-8').splitlines())
@@ -164,7 +163,6 @@ def test_review_publisher_compacts_strict_smoke_evidence(
 		*results.OUTPUT_NAMES,
 		results.LATERAL_SMOKE_SUMMARY_JSON,
 	}
-	assert not (paths['output_dir'] / 'publish_manifest.json').exists()
 
 
 def test_review_rejects_report_drift_and_smoke_for_hold(

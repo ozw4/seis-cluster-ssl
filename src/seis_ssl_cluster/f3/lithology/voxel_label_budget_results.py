@@ -70,7 +70,6 @@ BOUNDARY_TOLERANCES = (2, 4)
 SUMMARY_JSON = 'voxel_label_budget_summary.json'
 SUMMARY_MARKDOWN = 'voxel_label_budget_summary.md'
 README_NAME = 'README.md'
-LOCAL_PUBLISH_MANIFEST = 'publish_manifest.json'
 TABLE_NAMES = (
 	'job_metrics.csv',
 	'paired_metrics.csv',
@@ -2542,7 +2541,7 @@ def _validate_existing_publish_tree(output_dir: Path, *, expected: set[str]) -> 
 		for path in output_dir.rglob('*')
 		if path.is_file()
 	}
-	extra = sorted(existing - expected - {LOCAL_PUBLISH_MANIFEST})
+	extra = sorted(existing - expected)
 	if extra:
 		raise ValueError(f'publish output contains unlisted files: {extra!r}')
 

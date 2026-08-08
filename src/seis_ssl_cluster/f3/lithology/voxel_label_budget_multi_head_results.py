@@ -60,7 +60,6 @@ OUTPUT_NAMES = (
 	'multi_head_results_summary.md',
 	'multi_head_experiment_handoff.md',
 )
-_LEGACY_PUBLISH_MANIFEST = 'publish_manifest.json'
 CANDIDATE_LABELS = {
 	'mh_nocons': 'no-consistency multi-head',
 	'mh_cons010': 'consistency-main multi-head',
@@ -1517,7 +1516,7 @@ def _validate_published_multi_head_tree(publish_dir: Path) -> None:
 
 
 def _published_relative_names(publish_dir: Path) -> set[str]:
-	"""Return current outputs, ignoring only a regular top-level legacy manifest."""
+	"""Return the exact current lightweight output inventory."""
 	if not publish_dir.is_dir():
 		raise NotADirectoryError(
 			f'multi-head publish root is not a directory: {publish_dir}'
@@ -1527,8 +1526,6 @@ def _published_relative_names(publish_dir: Path) -> set[str]:
 		if path.is_symlink() or not path.is_file():
 			raise ValueError(f'multi-head publish root has a non-file entry: {path}')
 		relative = path.relative_to(publish_dir).as_posix()
-		if relative == _LEGACY_PUBLISH_MANIFEST:
-			continue
 		names.add(relative)
 	return names
 

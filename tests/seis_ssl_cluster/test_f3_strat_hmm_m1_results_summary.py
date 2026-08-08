@@ -133,7 +133,6 @@ def test_publish_copies_expected_small_files(
 	assert {
 		path.resolve().relative_to(publish_dir) for path in result.published_files
 	} == published_files
-	assert not (publish_dir / 'publish_manifest.json').exists()
 	assert (publish_dir / 'm1_results_summary.md').read_text(
 		encoding='utf-8'
 	) == result.summary_markdown.read_text(
@@ -158,7 +157,6 @@ def test_publish_include_figures_false_omits_markdown_figure_links(
 	result = consolidate_f3_strat_hmm_m1_results(config)
 
 	assert result.published_files
-	assert not (publish_dir / 'publish_manifest.json').exists()
 	assert not (publish_dir / 'figures').exists()
 	generated_markdown = result.summary_markdown.read_text(encoding='utf-8')
 	published_markdown = (publish_dir / 'm1_results_summary.md').read_text(
@@ -189,20 +187,6 @@ def test_publish_disabled_does_nothing(
 	assert not publish_dir.exists()
 
 
-def test_publish_leaves_historical_manifest_untouched(tmp_path: Path) -> None:
-	result = _write_publishable_result(tmp_path)
-	publish_dir = tmp_path / 'results'
-	publish_dir.mkdir()
-	manifest = publish_dir / 'publish_manifest.json'
-	manifest.write_text('historical\n', encoding='utf-8')
-
-	published_files = publish_f3_strat_hmm_m1_results(
-		result,
-		F3StratHMMM1PublishConfig(enabled=True, output_dir=publish_dir),
-	)
-
-	assert manifest.read_text(encoding='utf-8') == 'historical\n'
-	assert manifest not in published_files
 
 
 def test_publish_refuses_prohibited_suffix(
@@ -714,7 +698,6 @@ def test_cli_runs_end_to_end_and_publishes_synthetic_fixtures(
 	assert (publish_dir / 'm1_results_summary.md').is_file()
 	assert (publish_dir / 'tables' / 'label_budget_summary.csv').is_file()
 	assert (publish_dir / 'figures' / 'label_budget_delta_curves.png').is_file()
-	assert not (publish_dir / 'publish_manifest.json').exists()
 
 
 def _summary_payload(config: F3StratHMMM1ResultsConfig) -> dict[str, object]:

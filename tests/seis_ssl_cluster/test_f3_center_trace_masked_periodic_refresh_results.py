@@ -161,47 +161,8 @@ def test_publication_reuses_exact_lightweight_content(tmp_path: Path) -> None:
 	assert {path.name for path in config.output_dir.iterdir()} == set(
 		results.OUTPUT_NAMES
 	)
-	assert not (config.output_dir / 'publish_manifest.json').exists()
 
 
-def test_publication_reuses_tree_with_unchanged_legacy_manifest(
-	tmp_path: Path,
-) -> None:
-	config = _config(tmp_path)
-	evidence, live, handoff = _publication_inputs()
-	results._publish_review(
-		config,
-		evidence=evidence,
-		handoff=handoff,
-		live=live,
-		quarantine_invalid=False,
-	)
-	legacy = config.output_dir / 'publish_manifest.json'
-	legacy.write_bytes(b'{"legacy": true}\n')
-	before_bytes = legacy.read_bytes()
-	before_size = legacy.stat().st_size
-	before_mtime_ns = legacy.stat().st_mtime_ns
-	before_outputs = {
-		path: (path.read_bytes(), path.stat().st_mtime_ns)
-		for path in (config.output_dir / name for name in results.OUTPUT_NAMES)
-	}
-
-	results._publish_review(
-		config,
-		evidence=evidence,
-		handoff=handoff,
-		live=live,
-		quarantine_invalid=False,
-	)
-
-	assert legacy.read_bytes() == before_bytes
-	assert legacy.stat().st_size == before_size
-	assert legacy.stat().st_mtime_ns == before_mtime_ns
-	assert {
-		path: (path.read_bytes(), path.stat().st_mtime_ns)
-		for path in (config.output_dir / name for name in results.OUTPUT_NAMES)
-	} == before_outputs
-	assert list(config.output_dir.parent.glob('results.quarantine.*')) == []
 
 
 def test_publication_rejects_raw_output_and_explicitly_quarantines_it(

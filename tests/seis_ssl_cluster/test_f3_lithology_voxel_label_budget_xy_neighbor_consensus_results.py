@@ -158,7 +158,6 @@ def test_xy_consensus_summary_publishes_only_portable_lightweight_files(
 	published = results_root / _RESULTS_ROOT
 	assert result['decisions'] == inspection['decisions']
 	assert {path.name for path in published.iterdir()} == set(PUBLISHED_OUTPUT_NAMES)
-	assert not (published / 'publish_manifest.json').exists()
 	assert {path.name for path in reports.iterdir()} == set(PUBLISHED_OUTPUT_NAMES)
 	for name in PUBLISHED_OUTPUT_NAMES:
 		assert (reports / name).read_bytes() == (published / name).read_bytes()
