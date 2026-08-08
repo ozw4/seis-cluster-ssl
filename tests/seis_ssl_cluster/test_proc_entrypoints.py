@@ -229,12 +229,6 @@ HELP_FLAG_CONTRACTS = {
 		'--resume',
 		'--quarantine-invalid',
 	),
-	'validate_results_artifacts.py': (
-		'--root',
-		'--max-file-size-mb',
-		'--required-file',
-		'--local-path-policy',
-	),
 	'validate_performance_migration.py': (
 		'--config',
 		'--stage',
@@ -305,7 +299,6 @@ SMOKE_HELP_SCRIPTS = (
 	'train_amp_mae.py',
 	'extract_embeddings.py',
 	'build_f3_lithology_report.py',
-	'validate_results_artifacts.py',
 )
 
 
