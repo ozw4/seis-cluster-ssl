@@ -47,7 +47,6 @@ OUTPUT_NAMES = (
 	CHECKPOINT_SELECTION_SUMMARY_JSON,
 	PRETRAINING_HANDOFF_JSON,
 )
-_LEGACY_PUBLISH_MANIFEST = 'publish_manifest.json'
 _DIAGNOSTIC_FIELDS = (
 	'loss',
 	'loss_prototype',
@@ -736,7 +735,7 @@ def _publish_review(
 def _validate_existing_output_dir(
 	config: F3CenterTraceMaskedPretrainingReviewConfig,
 ) -> None:
-	"""Reject foreign entries while tolerating one legacy manifest file."""
+	"""Reject foreign entries outside the fixed lightweight output set."""
 	if not config.output_dir.exists():
 		return
 	if config.output_dir.is_symlink():
@@ -750,8 +749,6 @@ def _validate_existing_output_dir(
 		if path.is_symlink():
 			raise ValueError(f'center-trace output must not contain symlinks: {path}')
 		relative = path.relative_to(config.output_dir).as_posix()
-		if relative == _LEGACY_PUBLISH_MANIFEST and path.is_file():
-			continue
 		if not path.is_file() or relative not in allowed:
 			raise ValueError(f'center-trace output contains unallowlisted file: {path}')
 

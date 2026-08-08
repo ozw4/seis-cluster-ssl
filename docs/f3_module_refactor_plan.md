@@ -200,7 +200,7 @@ figure generation, Markdown rendering, comparison aggregation, and publishing.
   expose the same public names.
 - Existing proc paths under `proc/seis_ssl_cluster/` remain the CLI contract.
   Module moves may update internal imports only.
-- Existing YAML keys, artifact paths, result paths, publish manifests, figure
+- Existing YAML keys, artifact paths, result paths, figure
   names, and report filenames remain unchanged.
 - Do not restore `runs/` as a standard path. `artifacts/` remains the generated
   local-output area, and `results/` remains the lightweight review-output area.

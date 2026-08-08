@@ -909,7 +909,6 @@ def test_multi_head_publish_accepts_empty_and_exact_current_tree(
 		publish_dir / name for name in results.OUTPUT_NAMES
 	)
 	assert _published_names(publish_dir) == results._publish_target_names()
-	assert not (publish_dir / 'publish_manifest.json').exists()
 	assert not any(
 		path.suffix in {'.npy', '.npz', '.pt'} for path in publish_dir.iterdir()
 	)
@@ -921,38 +920,6 @@ def test_multi_head_publish_accepts_empty_and_exact_current_tree(
 	assert _published_names(publish_dir) == results._publish_target_names()
 
 
-def test_multi_head_republish_preserves_top_level_legacy_manifest(
-	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-	config = _publish_config(tmp_path)
-	monkeypatch.setattr(
-		results,
-		'inspect_f3_lithology_voxel_label_budget_multi_head_results',
-		lambda _config: _publishable_inspection(),
-	)
-	results.summarize_f3_lithology_voxel_label_budget_multi_head(config)
-	publish_dir = results._publish_dir(config)
-	legacy = publish_dir / 'publish_manifest.json'
-	legacy.write_bytes(b'{"legacy": true}\n')
-	before_bytes = legacy.read_bytes()
-	before_size = legacy.stat().st_size
-	before_mtime_ns = legacy.stat().st_mtime_ns
-
-	publication = results.summarize_f3_lithology_voxel_label_budget_multi_head(
-		config
-	)
-
-	assert publication.published_files == tuple(
-		publish_dir / name for name in results.OUTPUT_NAMES
-	)
-	assert legacy.read_bytes() == before_bytes
-	assert legacy.stat().st_size == before_size
-	assert legacy.stat().st_mtime_ns == before_mtime_ns
-	assert _published_names(publish_dir) == {
-		*results._publish_target_names(),
-		'publish_manifest.json',
-	}
-	results._validate_published_multi_head_tree(publish_dir)
 
 
 @pytest.mark.parametrize(
@@ -1018,30 +985,6 @@ def test_multi_head_publish_rejects_extra_heavy_output(
 
 	with pytest.raises(ValueError, match='inventory mismatch'):
 		results._validate_published_multi_head_tree(publish_dir)
-
-
-@pytest.mark.parametrize(
-	'entry_kind',
-	['nested-manifest', 'manifest-directory', 'manifest-symlink'],
-)
-def test_multi_head_publish_rejects_nonregular_legacy_manifest_entries(
-	tmp_path: Path, entry_kind: str
-) -> None:
-	publish_dir = results._publish_dir(_publish_config(tmp_path))
-	publish_dir.mkdir(parents=True)
-	if entry_kind == 'nested-manifest':
-		nested = publish_dir / 'nested'
-		nested.mkdir()
-		(nested / 'publish_manifest.json').write_bytes(b'{"legacy": true}\n')
-	elif entry_kind == 'manifest-directory':
-		(publish_dir / 'publish_manifest.json').mkdir()
-	else:
-		target = tmp_path / 'legacy.json'
-		target.write_bytes(b'{"legacy": true}\n')
-		(publish_dir / 'publish_manifest.json').symlink_to(target)
-
-	with pytest.raises(ValueError, match='non-file entry'):
-		results._validate_existing_multi_head_publish_tree(publish_dir)
 
 
 def test_historical_blocked_preflight_archive_is_noncanonical() -> None:

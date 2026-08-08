@@ -11,8 +11,6 @@ import statistics
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from seis_ssl_cluster.embedding.writer import file_sha256
-
 if TYPE_CHECKING:
 	from pathlib import Path
 
@@ -52,7 +50,6 @@ OUTPUT_NAMES = (
 	'low_label_split_results_summary.md',
 	'low_label_split_handoff.md',
 )
-PUBLISH_MANIFEST_NAME = 'publish_manifest.json'
 
 
 def aggregate_low_label_split_results(rows: Sequence[Mapping[str, object]]) -> tuple[list[dict[str, object]], list[dict[str, object]], dict[str, object]]:
@@ -811,8 +808,6 @@ def publish_low_label_split_summary(
 	for source, target in entries:
 		target.parent.mkdir(parents=True, exist_ok=True)
 		shutil.copy2(source, target)
-		if file_sha256(source) != file_sha256(target):
-			raise ValueError(f'six-split published content differs from source: {target}')
 	published = tuple(target for _, target in entries)
 	_validate_published_tree(publish_dir, published)
 	return published
@@ -858,7 +853,7 @@ def _publish_target_names() -> set[str]:
 def _validate_existing_publish_tree(publish_dir: Path) -> None:
 	if not publish_dir.exists():
 		return
-	actual = _published_relative_names(publish_dir) - {PUBLISH_MANIFEST_NAME}
+	actual = _published_relative_names(publish_dir)
 	if actual and actual != _publish_target_names():
 		expected = _publish_target_names()
 		raise FileExistsError(
@@ -871,7 +866,7 @@ def _validate_published_tree(
 	publish_dir: Path, published_files: Sequence[Path]
 ) -> None:
 	expected = _publish_target_names()
-	actual = _published_relative_names(publish_dir) - {PUBLISH_MANIFEST_NAME}
+	actual = _published_relative_names(publish_dir)
 	if actual != expected:
 		raise ValueError(
 		'six-split published file inventory mismatch; '
@@ -965,7 +960,6 @@ def _write_csv(path: Path, rows: Sequence[Mapping[str, object]], fieldnames: Seq
 
 __all__ = [
 	'OUTPUT_NAMES',
-	'PUBLISH_MANIFEST_NAME',
 	'aggregate_low_label_split_results',
 	'publish_low_label_split_summary',
 	'write_low_label_split_summary',

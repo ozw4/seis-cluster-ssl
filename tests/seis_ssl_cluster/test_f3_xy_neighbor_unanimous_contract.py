@@ -267,7 +267,7 @@ def test_embedding_identity_binds_all_hard_route_weights() -> None:
 		)
 
 
-def test_review_publishes_portable_evidence_and_manifest(
+def test_review_publishes_portable_evidence(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -325,12 +325,13 @@ def test_review_publishes_portable_evidence_and_manifest(
 		results.SUMMARY_JSON,
 		results.SUMMARY_MARKDOWN,
 	}
-	assert not (config.output_dir / 'publish_manifest.json').exists()
 	for path in config.output_dir.iterdir():
 		if path.suffix in {'.json', '.md'}:
 			text = path.read_text(encoding='utf-8')
 			assert str(artifact_root) not in text
 			assert str(workspace) not in text
+
+
 def _validation_config(
 	tmp_path: Path,
 ) -> validation.F3XYNeighborUnanimousPretrainingValidationConfig:

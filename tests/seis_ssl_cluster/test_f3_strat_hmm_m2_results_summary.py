@@ -417,7 +417,6 @@ def test_m2a_publish_wrapper_enforces_exact_allowlist_and_size_guard(
 		*(f'tables/{name}' for name in m2_results.M2_RESULTS_TABLE_NAMES),
 		*(f'figures/{name}' for name in m2_results.M2_RESULTS_FIGURE_NAMES),
 	}
-	assert not (publish_config.output_dir / 'publish_manifest.json').exists()
 
 	wrong_tables = replace(
 		result,
@@ -456,7 +455,6 @@ def test_m2a_publish_include_figures_false_keeps_lightweight_contract(
 		*(Path('tables') / name for name in m2_results.M2_RESULTS_TABLE_NAMES),
 	}
 	assert not (output_dir / 'figures').exists()
-	assert not (output_dir / 'publish_manifest.json').exists()
 	assert '(figures/' not in (output_dir / 'm2a_results_summary.md').read_text(
 		encoding='utf-8'
 	)

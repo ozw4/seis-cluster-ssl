@@ -1,4 +1,4 @@
-# ruff: noqa: C901, E501, PERF401, PLR0911, PLR0912, PLR0915, PTH105, S603, S607, TC001, TRY300, TRY301
+# ruff: noqa: C901, E501, PERF401, PLR0911, PLR0912, PLR0915, PTH105, S603, S607, TC001, TRY301
 """Real-data compatibility validation for post-performance-change migrations.
 
 The helpers in this module deliberately treat historical science artifacts as
@@ -1501,10 +1501,6 @@ def summarize_performance_migration(
 	if only_missing and _is_complete_file(summary_path):
 		return _load_json(summary_path)
 	reports.mkdir(parents=True, exist_ok=True)
-	# This invocation rewrites report sources. Preserve any previous lightweight
-	# publish before its source-hash contract can become stale.
-	if config.publish_root.exists():
-		_quarantine_publish_output(config, config.publish_root)
 	stage_paths = {
 		'preflight': config.migration_root / 'preflight' / 'input_inventory.json',
 		'checkpoint_smoke': config.migration_root
@@ -1588,9 +1584,7 @@ def summarize_performance_migration(
 		_render_handoff_markdown(summary, manifest),
 	)
 	if publish and decision['complete']:
-		publish_manifest = _publish_migration_reports(config, reports)
-		_write_json_atomic(reports / 'publish_manifest.json', publish_manifest)
-		return {**summary, 'publish_manifest': publish_manifest}
+		_publish_migration_reports(config, reports)
 	return summary
 
 
@@ -1712,89 +1706,25 @@ def _decision_payload(
 def _publish_migration_reports(
 	config: PerformanceMigrationValidationConfig,
 	reports: Path,
-) -> dict[str, object]:
-	"""Atomically publish a whitelisted small report set and verify all hashes."""
-	selected = [
+) -> tuple[Path, ...]:
+	"""Copy the fixed lightweight migration report set."""
+	selected = (
 		reports / 'performance_migration_summary.md',
 		reports / 'performance_migration_summary.json',
 		reports / 'performance_migration_manifest.json',
 		reports / 'performance_migration_decision.json',
 		reports / 'performance_migration_handoff.md',
-		config.migration_root / 'preflight' / 'input_inventory.md',
-		config.migration_root / 'embedding_parity' / 'embedding_parity.md',
-		config.migration_root / 'embedding_parity' / 'embedding_parity.json',
-		config.migration_root / 'probe_parity' / 'probe_parity.md',
-		config.migration_root / 'probe_parity' / 'probe_parity.json',
-		config.migration_root / 'clustering' / 'hmm_parity.md',
-		config.migration_root / 'clustering' / 'hmm_parity.json',
-		config.migration_root / 'pseudo_targets' / 'pseudo_target_parity.md',
-		config.migration_root / 'pseudo_targets' / 'pseudo_target_parity.json',
-		config.migration_root / 'benchmark' / 'current.md',
-		config.migration_root / 'benchmark' / 'current.json',
-	]
-	if any(not path.is_file() for path in selected):
-		missing = [str(path) for path in selected if not path.is_file()]
-		raise FileNotFoundError(f'cannot publish incomplete migration reports: {missing!r}')
+	)
+	missing = [str(path) for path in selected if not path.is_file()]
+	if missing:
+		raise FileNotFoundError(
+			f'cannot publish incomplete migration reports: {missing!r}'
+		)
 	root = config.publish_root
-	if root.exists():
-		manifest_path = root / 'publish_manifest.json'
-		try:
-			manifest = _load_json(manifest_path) if manifest_path.is_file() else {}
-			if _validate_publish_manifest(root, manifest):
-				return manifest
-		except (OSError, TypeError, ValueError):
-			pass
-		_quarantine_publish_output(config, root)
-	staging = root.parent / f'.{root.name}.staging-{uuid4().hex}'
-	try:
-		staging.mkdir(parents=True, exist_ok=False)
-		items: list[dict[str, object]] = []
-		standard_items: list[dict[str, object]] = []
-		for source in selected:
-			if source.suffix not in {'.md', '.json', '.csv', '.png'}:
-				raise ValueError(f'publish raw artifact exclusion rejected: {source}')
-			destination = staging / source.name
-			shutil.copy2(source, destination)
-			items.append(
-				{
-					'source_artifact_path': str(source),
-					'source_sha256': _sha256_path(source),
-					'relative_path': destination.name,
-					'published_sha256': _sha256_path(destination),
-					'byte_size': destination.stat().st_size,
-				},
-			)
-			standard_items.append(
-				{
-					'source': str(source),
-					'target': destination.name,
-					'size_bytes': destination.stat().st_size,
-					'sha256': _sha256_path(destination),
-				},
-			)
-		manifest = {
-			'artifact_type': ARTIFACT_TYPE,
-			'schema_version': SCHEMA_VERSION,
-			'current_git_sha': config.current_git_sha,
-			'historical_baseline_sha': config.historical_baseline_sha,
-			'created_at_utc': _utc_now(),
-			'source_artifact_root': str(config.migration_root),
-			'output_dir': str(root),
-			'items': standard_items,
-			'skipped_optional_items': [],
-			'warnings': [],
-			'files': items,
-		}
-		_write_json_atomic(staging / 'publish_manifest.json', manifest)
-		if not _validate_publish_manifest(staging, manifest):
-			raise RuntimeError('staged publish manifest validation failed')
-		root.parent.mkdir(parents=True, exist_ok=True)
-		os.replace(staging, root)
-		return manifest
-	except BaseException:
-		if staging.exists():
-			_quarantine_path(staging, reason='publish_stage_failure')
-		raise
+	root.mkdir(parents=True, exist_ok=True)
+	for source in selected:
+		shutil.copy2(source, root / source.name)
+	return tuple(root / source.name for source in selected)
 
 
 def _inventory_input_records(
@@ -2894,64 +2824,10 @@ def _quarantine_path(path: Path, *, reason: str) -> Path:
 	return destination
 
 
-def _quarantine_publish_output(
-	config: PerformanceMigrationValidationConfig,
-	path: Path,
-) -> Path:
-	"""Preserve an invalid results publish outside the lightweight publish tree."""
-	if not path.exists():
-		raise FileNotFoundError(path)
-	root = config.migration_root / 'quarantine'
-	root.mkdir(parents=True, exist_ok=True)
-	timestamp = datetime.now(tz=timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-	destination = root / f'{path.name}.{timestamp}.invalid_publish.{uuid4().hex[:8]}'
-	os.replace(path, destination)
-	return destination
-
-
 def _quarantine_paths(root: Path) -> list[str]:
 	return sorted(str(path) for path in root.rglob('quarantine/*') if path.exists())
 
 
-def _validate_publish_manifest(root: Path, manifest: Mapping[str, object]) -> bool:
-	files = manifest.get('files')
-	items = manifest.get('items')
-	if not isinstance(files, list) or not isinstance(items, list):
-		return False
-	if len(files) != len(items):
-		return False
-	expected: set[str] = {'publish_manifest.json'}
-	for file_item, standard_item in zip(files, items, strict=True):
-		if not isinstance(file_item, Mapping) or not isinstance(standard_item, Mapping):
-			return False
-		relative = file_item.get('relative_path')
-		if not isinstance(relative, str) or Path(relative).is_absolute():
-			return False
-		path = root / relative
-		if not path.is_file():
-			return False
-		if path.suffix not in {'.md', '.json', '.csv', '.png'}:
-			return False
-		if file_item.get('published_sha256') != _sha256_path(path):
-			return False
-		if file_item.get('byte_size') != path.stat().st_size:
-			return False
-		source = file_item.get('source_artifact_path')
-		if not isinstance(source, str) or not Path(source).is_file():
-			return False
-		if file_item.get('source_sha256') != _sha256_path(Path(source)):
-			return False
-		if standard_item.get('source') != source:
-			return False
-		if standard_item.get('target') != relative:
-			return False
-		if standard_item.get('size_bytes') != path.stat().st_size:
-			return False
-		if standard_item.get('sha256') != _sha256_path(path):
-			return False
-		expected.add(relative)
-	actual = {str(path.relative_to(root)) for path in root.rglob('*') if path.is_file()}
-	return actual == expected
 
 
 def _render_inventory_markdown(payload: Mapping[str, object]) -> str:

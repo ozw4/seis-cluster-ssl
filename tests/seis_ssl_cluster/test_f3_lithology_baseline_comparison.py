@@ -348,7 +348,6 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 	assert {
 		path.relative_to(publish_dir) for path in result.published_files
 	} == published_files
-	assert not (publish_dir / 'publish_manifest.json').exists()
 	assert not any(
 		path.suffix in {'.pt', '.npy', '.npz', '.joblib', '.pkl'}
 		for path in published_files
@@ -485,7 +484,6 @@ def test_f3_lithology_baseline_comparison_publish_warns_for_missing_optional_fig
 	assert (publish_dir / 'comparison_report.md').is_file()
 	assert (publish_dir / 'comparison_table.csv').is_file()
 	assert not (publish_dir / 'figures/macro_f1_comparison.png').exists()
-	assert not (publish_dir / 'publish_manifest.json').exists()
 
 
 def test_f3_lithology_baseline_comparison_publish_can_exclude_figures(
@@ -522,7 +520,6 @@ def test_f3_lithology_baseline_comparison_publish_can_exclude_figures(
 		Path('comparison_table.json'),
 	}
 	assert not (publish_dir / 'figures').exists()
-	assert not (publish_dir / 'publish_manifest.json').exists()
 
 
 def test_f3_lithology_baseline_comparison_uses_pretrained_token_metadata(

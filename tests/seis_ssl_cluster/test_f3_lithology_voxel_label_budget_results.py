@@ -95,7 +95,6 @@ def test_complete_summary_pairing_decisions_and_lightweight_publish(
 		path.relative_to(publish_root).as_posix()
 		for path in result.published_files
 	} == published
-	assert not (publish_root / 'publish_manifest.json').exists()
 	assert not any(
 		Path(name).suffix in {'.pt', '.npy', '.npz', '.joblib'} for name in published
 	)
