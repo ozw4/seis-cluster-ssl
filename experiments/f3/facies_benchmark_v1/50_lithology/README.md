@@ -185,14 +185,11 @@ python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
 
 Then regenerate the comparison report. The comparison config publishes selected
 lightweight outputs to `results/f3/facies_benchmark_v1/baseline_comparison/`.
+Review the explicit published file set and `git diff` before committing it.
 
 ```bash
 python proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py \
   --config $EXP/50_lithology_baselines/05_build_baseline_comparison_report.yaml
-
-python proc/seis_ssl_cluster/validate_results_artifacts.py \
-  --root results \
-  --max-file-size-mb 10
 ```
 
 Comparison outputs:
