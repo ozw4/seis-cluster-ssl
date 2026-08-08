@@ -64,5 +64,5 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget.py \
 ```
 
 Only a complete 15-dataset / 45-job summary may publish the Markdown, JSON,
-CSV, and PNG review products plus their publish manifest to
+CSV, and PNG review products to
 `results/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1/`.

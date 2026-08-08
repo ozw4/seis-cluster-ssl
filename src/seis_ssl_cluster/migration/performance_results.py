@@ -3,7 +3,7 @@
 The helpers in this module intentionally know nothing about a particular model,
 embedding writer, or clustering implementation.  They make it possible for the
 stage runners to keep historical artifacts read-only while applying one strict
-definition of completion, parity, publication, and migration status.
+definition of completion, parity, and migration status.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ import json
 import math
 import os
 import re
-import shutil
 import tempfile
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
@@ -44,27 +43,6 @@ MIGRATION_STATUSES = frozenset(
 		'REBUILD_M1_REQUIRED',
 		'BLOCKED_NUMERIC_CONTRACT',
 	},
-)
-MIGRATION_ALLOWED_PUBLISH_SUFFIXES = frozenset({'.md', '.json', '.csv', '.png'})
-RAW_ARTIFACT_SUFFIXES = frozenset(
-	{
-		'.pt',
-		'.pth',
-		'.ckpt',
-		'.npy',
-		'.npz',
-		'.joblib',
-		'.pkl',
-		'.pickle',
-		'.mmap',
-		'.memmap',
-		'.h5',
-		'.hdf5',
-		'.zarr',
-		'.sgy',
-		'.segy',
-		'.parquet',
-	}
 )
 _MISSING = object()
 _STATUS_ORDER = (
@@ -841,129 +819,6 @@ def cosine_similarity_summary_to_dict(
 	}
 
 
-def publish_lightweight_migration_results(  # noqa: PLR0913
-	*,
-	summary_report: Path,
-	metrics_json: Path,
-	output_dir: Path,
-	source_artifact_root: Path,
-	max_file_size_bytes: int = 10 * 1024 * 1024,
-	allow_reuse: bool = False,
-) -> tuple[Path, ...]:
-	"""Atomically publish the migration summary and metrics files."""
-	final = Path(output_dir)
-	source_root = Path(source_artifact_root)
-	sources = (
-		(Path(summary_report), Path('summary.md')),
-		(Path(metrics_json), Path('tables/metrics.json')),
-	)
-	_validate_publish_sources(sources, source_root, max_file_size_bytes)
-	if final.exists():
-		if not allow_reuse:
-			raise FileExistsError(f'publish output already exists: {final}')
-		_validate_existing_migration_results(final, sources)
-		return tuple(final / target for _, target in sources)
-	with staged_artifact_directory(final) as staging:
-		try:
-			for source, relative_target in sources:
-				target = staging / relative_target
-				target.parent.mkdir(parents=True, exist_ok=True)
-				shutil.copy2(source, target)
-			_validate_existing_migration_results(staging, sources)
-			committed = commit_staged_artifact_directory(staging, final)
-		except BaseException:
-			if staging.exists():
-				quarantine_artifact(staging, reason='publish_failure')
-			raise
-	return tuple(committed / target for _, target in sources)
-
-
-def _validate_existing_migration_results(
-	output_dir: Path, sources: Sequence[tuple[Path, Path]]
-) -> None:
-	expected = {target.as_posix() for _, target in sources}
-	actual = {
-		path.relative_to(output_dir).as_posix()
-		for path in output_dir.rglob('*')
-		if path.is_file()
-	}
-	if actual != expected:
-		raise ValueError(
-			'migration result files do not exactly match the producer contract: '
-			f'missing={sorted(expected - actual)!r}, '
-			f'extra={sorted(actual - expected)!r}'
-		)
-	for source, relative_target in sources:
-		target = output_dir / relative_target
-		if file_sha256(source) != file_sha256(target):
-			raise ValueError(
-				f'migration published content differs from source: {target}'
-			)
-
-
-def validate_migration_publish_manifest(  # noqa: C901
-	manifest_path: Path,
-	*,
-	source_artifact_root: Path,
-	max_file_size_bytes: int = 10 * 1024 * 1024,
-) -> tuple[Path, ...]:
-	"""Validate hashes, size, source identity, and no-unlisted-file publication."""
-	manifest = Path(manifest_path)
-	if not manifest.is_file():
-		raise FileNotFoundError(f'publish manifest is missing: {manifest}')
-	if manifest.name != 'publish_manifest.json':
-		raise ValueError(
-			'migration publish manifest must be named publish_manifest.json'
-		)
-	if max_file_size_bytes <= 0:
-		raise ValueError('max_file_size_bytes must be positive')
-	root = manifest.parent.resolve()
-	source_root = Path(source_artifact_root).resolve()
-	payload = _read_json_mapping(manifest)
-	items = payload.get('items')
-	if not isinstance(items, list):
-		raise TypeError('publish manifest items must be a list')
-	listed_paths: set[Path] = set()
-	for index, item in enumerate(items):
-		if not isinstance(item, Mapping):
-			raise TypeError(f'publish manifest item {index} must be an object')
-		target = _manifest_target(root, item, index)
-		if target in listed_paths:
-			raise ValueError(f'publish manifest lists duplicate target: {target}')
-		listed_paths.add(target)
-		_validate_lightweight_path(target, label=f'publish target {target}')
-		if target.is_symlink() or not target.is_file():
-			raise ValueError(f'publish target must be a regular file: {target}')
-		if target.stat().st_size > max_file_size_bytes:
-			raise ValueError(f'publish target exceeds max_file_size_bytes: {target}')
-		_validate_manifest_hashes(item, target, index)
-		source = _manifest_source(source_root, item, index)
-		_validate_lightweight_path(source, label=f'publish source {source}')
-		if source.is_symlink() or not source.is_file():
-			raise ValueError(f'publish source must be a regular file: {source}')
-		if source.stat().st_size > max_file_size_bytes:
-			raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
-		_validate_source_hashes(item, source, target, index)
-	actual_paths = {
-		item.resolve()
-		for item in root.rglob('*')
-		if item.is_file() and not item.is_symlink()
-	}
-	expected_paths = listed_paths | {manifest.resolve()}
-	if actual_paths != expected_paths:
-		extra = sorted(
-			str(item.relative_to(root)) for item in actual_paths - expected_paths
-		)
-		missing = sorted(
-			str(item.relative_to(root)) for item in expected_paths - actual_paths
-		)
-		raise ValueError(
-			'publish directory files do not exactly match the manifest: '
-			f'extra={extra}, missing={missing}'
-		)
-	return tuple(sorted(listed_paths))
-
-
 def _decision(status: str, reasons: Sequence[str]) -> MigrationDecision:
 	policies = {
 		'PASS_REUSE_EXISTING': (
@@ -1383,121 +1238,11 @@ def _empty_cosine_summary() -> CosineSimilaritySummary:
 	)
 
 
-def _validate_publish_sources(
-	items: Sequence[tuple[Path, Path]],
-	source_root: Path,
-	max_file_size_bytes: int,
-) -> None:
-	if not source_root.is_dir():
-		raise FileNotFoundError(f'source_artifact_root is missing: {source_root}')
-	if max_file_size_bytes <= 0:
-		raise ValueError('max_file_size_bytes must be positive')
-	if not items:
-		raise ValueError('at least one lightweight publish item is required')
-	for source, relative_target in items:
-		if source.is_symlink() or not source.is_file():
-			raise FileNotFoundError(f'publish source must be a regular file: {source}')
-		try:
-			source.resolve().relative_to(source_root.resolve())
-		except ValueError as error:
-			raise ValueError(
-				f'publish source must be under source_artifact_root: {source}'
-			) from error
-		_validate_lightweight_path(source, label=f'publish source {source}')
-		_validate_lightweight_path(
-			relative_target,
-			label=f'publish target {relative_target}',
-		)
-		if source.stat().st_size > max_file_size_bytes:
-			raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
-
-
-def _validate_lightweight_path(path: Path, *, label: str) -> None:
-	suffix = path.suffix.lower()
-	if suffix in RAW_ARTIFACT_SUFFIXES:
-		raise ValueError(f'{label} has forbidden raw-artifact suffix: {suffix}')
-	if suffix not in MIGRATION_ALLOWED_PUBLISH_SUFFIXES:
-		raise ValueError(
-			f'{label} suffix is not allowed for lightweight publication: {suffix}'
-		)
-
-
-def _manifest_target(root: Path, item: Mapping[str, object], index: int) -> Path:
-	target_value = item.get('target')
-	if not isinstance(target_value, str) or not target_value:
-		raise ValueError(f'publish manifest item {index}.target is invalid')
-	target = Path(target_value)
-	if target.is_absolute():
-		raise ValueError(f'publish manifest item {index}.target must be relative')
-	resolved = (root / target).resolve(strict=False)
-	try:
-		resolved.relative_to(root)
-	except ValueError as error:
-		raise ValueError(
-			f'publish manifest item {index}.target escapes output root'
-		) from error
-	return resolved
-
-
-def _manifest_source(root: Path, item: Mapping[str, object], index: int) -> Path:
-	source_value = item.get('source')
-	if not isinstance(source_value, str) or not source_value:
-		raise ValueError(f'publish manifest item {index}.source is invalid')
-	source = Path(source_value).resolve(strict=False)
-	try:
-		source.relative_to(root)
-	except ValueError as error:
-		raise ValueError(
-			f'publish manifest item {index}.source escapes source root'
-		) from error
-	return source
-
-
-def _validate_manifest_hashes(
-	item: Mapping[str, object],
-	target: Path,
-	index: int,
-) -> None:
-	for key, actual in (
-		('size_bytes', target.stat().st_size),
-		('published_size_bytes', target.stat().st_size),
-	):
-		value = item.get(key)
-		if isinstance(value, bool) or not isinstance(value, int) or value != actual:
-			raise ValueError(f'publish manifest item {index}.{key} mismatch')
-	for key in ('sha256', 'published_sha256'):
-		value = item.get(key)
-		if not _is_sha256(value) or value != file_sha256(target):
-			raise ValueError(f'publish manifest item {index}.{key} mismatch')
-
-
-def _validate_source_hashes(
-	item: Mapping[str, object],
-	source: Path,
-	target: Path,
-	index: int,
-) -> None:
-	source_size = item.get('source_size_bytes')
-	if (
-		isinstance(source_size, bool)
-		or not isinstance(source_size, int)
-		or source_size != source.stat().st_size
-	):
-		raise ValueError(f'publish manifest item {index}.source_size_bytes mismatch')
-	source_sha = item.get('source_sha256')
-	if not _is_sha256(source_sha) or source_sha != file_sha256(source):
-		raise ValueError(f'publish manifest item {index}.source_sha256 mismatch')
-	if source_sha != file_sha256(target):
-		raise ValueError(f'publish source and target SHA-256 differ: {target}')
-
-
 __all__ = [
 	'COMPLETION_ARTIFACT_TYPE',
 	'COMPLETION_MANIFEST_NAME',
 	'COMPLETION_SCHEMA_VERSION',
-	'MIGRATION_ALLOWED_PUBLISH_SUFFIXES',
 	'MIGRATION_STATUSES',
-	'RAW_ARTIFACT_SUFFIXES',
 	'ArtifactReuse',
 	'CosineSimilaritySummary',
 	'MetadataDiff',
@@ -1513,13 +1258,11 @@ __all__ = [
 	'metadata_diff_to_dict',
 	'migration_decision_to_dict',
 	'numeric_array_comparison_to_dict',
-	'publish_lightweight_migration_results',
 	'quarantine_artifact',
 	'reuse_or_quarantine_artifact',
 	'staged_artifact_directory',
 	'summarize_rowwise_cosine_similarity',
 	'validate_completion_manifest',
-	'validate_migration_publish_manifest',
 	'write_completion_manifest',
 	'write_json_atomic',
 	'write_text_atomic',

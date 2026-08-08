@@ -297,7 +297,6 @@ def test_f3_lithology_report_publish_writes_lightweight_results(
 	assert {
 		path.relative_to(output_dir) for path in result.published_files
 	} == published_files
-	assert not (output_dir / 'publish_manifest.json').exists()
 	assert not any(
 		path.suffix in {'.joblib', '.npy', '.npz'}
 		for path in published_files
@@ -346,7 +345,6 @@ def test_f3_lithology_report_publish_warns_for_missing_optional_prediction_figur
 	missing_prediction = output_dir / 'figures/validation_crossline_0350_prediction.png'
 	assert not missing_prediction.exists()
 	assert missing_prediction not in result.published_files
-	assert not (output_dir / 'publish_manifest.json').exists()
 	markdown = (output_dir / 'report.md').read_text(encoding='utf-8')
 	assert 'validation_crossline_0350_prediction.png' not in _figures_section(markdown)
 
@@ -409,7 +407,6 @@ def test_f3_lithology_report_publish_can_exclude_figures(tmp_path: Path) -> None
 	}
 	assert not (output_dir / 'figures').exists()
 	assert json.loads((output_dir / 'report.json').read_text())['figures'] == []
-	assert not (output_dir / 'publish_manifest.json').exists()
 
 
 def test_f3_lithology_report_publish_enforces_size_limit(tmp_path: Path) -> None:

@@ -120,7 +120,6 @@ def test_summary_publish_writes_and_validates_exact_lightweight_tree(
 		*OUTPUT_NAMES,
 	}
 	assert {path.name for path in published_files} == set(OUTPUT_NAMES)
-	assert not (publish_dir / 'publish_manifest.json').exists()
 	_validate_published_tree(publish_dir, published_files)
 
 

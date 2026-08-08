@@ -135,7 +135,6 @@ def test_soft_posterior_summarizer_publishes_portable_paths(
 		published = published_dir / name
 		assert source.read_bytes() == published.read_bytes()
 		texts[name] = published.read_text(encoding='utf-8')
-	assert not (published_dir / 'publish_manifest.json').exists()
 	assert all(str(artifact_root) not in text for text in texts.values())
 	assert all(str(workspace_root) not in text for text in texts.values())
 

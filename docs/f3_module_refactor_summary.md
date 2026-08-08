@@ -117,7 +117,7 @@ unlabeled by the schema helpers.
 - `markdown.py`: single-run and comparison Markdown rendering.
 - `figures.py`: comparison figure styles and rendering.
 - `comparison.py`: baseline comparison aggregation and output writing.
-- `publish.py`: results publish manifests for single-run and comparison
+- `publish.py`: lightweight results copy logic for single-run and comparison
   reports.
 
 `seis_ssl_cluster.f3.lithology_report` remains the compatibility import and
@@ -177,8 +177,7 @@ PYTHONPATH=src python proc/seis_ssl_cluster/validate_results_artifacts.py \
 `tests/seis_ssl_cluster/test_proc_dry_run.py` is intentionally excluded.
 
 The validation CLIs reported `error_count: 0`. They also reported existing
-warnings for legacy documentation mentions, legacy embedding path shape, local
-artifact paths recorded in publish manifests, and local absolute path markers in
+warnings for legacy documentation mentions, legacy embedding path shape, legacy results metadata, and local absolute path markers in
 results files; those warnings do not change the error-zero validation result.
 
 ## Future Work

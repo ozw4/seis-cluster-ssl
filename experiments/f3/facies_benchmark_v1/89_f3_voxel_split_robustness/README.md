@@ -38,7 +38,7 @@ smoke jobs and checkpoint schema 5 or later.
 The summary reports raw split rows, paired deltas, win rates, and a provisional
 `positive`, `negative`, or `hold` status. Its statistical unit is the split;
 it does not compute voxel-level p-values or confidence intervals. Its final
-publish manifest includes both this six-split evidence and the original-split
+published result set includes both this six-split evidence and the original-split
 summary; no result is published before this step.
 
 Do not redraw the six splits. A valid pair has the same canonical valid-token

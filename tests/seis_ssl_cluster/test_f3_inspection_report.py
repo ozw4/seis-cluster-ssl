@@ -172,7 +172,6 @@ def test_f3_inspection_report_publish_enabled_writes_lightweight_results(
 	assert {
 		path.relative_to(output_dir) for path in result.published_files
 	} == expected_files
-	assert not (output_dir / 'publish_manifest.json').exists()
 	assert (
 		output_dir / 'figures' / 'label_consistency_example.png'
 	).read_bytes() == consistency_figure.read_bytes()
@@ -222,7 +221,6 @@ def test_f3_inspection_report_publish_include_figures_false_omits_links(
 		Path('report.md'),
 		Path('report.json'),
 	}
-	assert not (output_dir / 'publish_manifest.json').exists()
 	assert (output_dir / 'report.md').is_file()
 	assert (output_dir / 'report.json').is_file()
 	assert not (output_dir / 'figures').exists()
@@ -257,7 +255,6 @@ def test_f3_inspection_report_publish_missing_optional_figure_warns(
 	assert (output_dir / 'report.md').is_file()
 	assert (output_dir / 'report.json').is_file()
 	assert not (output_dir / 'figures').exists()
-	assert not (output_dir / 'publish_manifest.json').exists()
 
 
 def test_f3_inspection_report_publish_requires_report_files(tmp_path: Path) -> None:
