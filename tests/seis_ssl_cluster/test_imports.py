@@ -16,7 +16,6 @@ NEW_PACKAGE_MODULES = (
 	'seis_ssl_cluster.training',
 	'seis_ssl_cluster.embedding',
 	'seis_ssl_cluster.clustering',
-	'seis_ssl_cluster.results',
 	'seis_ssl_cluster.visualization',
 	'seis_ssl_cluster.utils',
 )
