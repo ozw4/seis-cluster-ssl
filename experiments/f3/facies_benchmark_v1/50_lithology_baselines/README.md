@@ -160,7 +160,7 @@ comparison in this order:
 7. Rebuild the comparison report.
 8. Publish lightweight comparison outputs to `results/` through the comparison
    config's `publish` block.
-9. Validate `results/`.
+9. Review the explicit published file set and `git diff` before committing it.
 
 ### Pretrained Encoder
 
@@ -335,7 +335,7 @@ Output:
 $ROOT/lithology/f3/facies_benchmark_v1/$RANDOM_ENCODER_TAG/$EMBED_SPEC/$LABEL_SET/probes/$PROBE_SPEC
 ```
 
-### Comparison, Publish, And Validation
+### Comparison And Publish
 
 1. Build the pretrained-vs-baseline comparison report.
 
@@ -347,14 +347,7 @@ python proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py \
 The same command publishes lightweight comparison outputs to
 `results/f3/facies_benchmark_v1/baseline_comparison/` because
 `05_build_baseline_comparison_report.yaml` has `publish.enabled: true`.
-
-2. Validate shared results.
-
-```bash
-python proc/seis_ssl_cluster/validate_results_artifacts.py \
-  --root results \
-  --max-file-size-mb 10
-```
+Review that producer-owned file set and `git diff` before committing it.
 
 The checked-in `03_build_report.yaml` and `05_build_report.yaml` files can still
 be used for per-run reports, but they are not required before the comparison
