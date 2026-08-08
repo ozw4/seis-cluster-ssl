@@ -35,10 +35,10 @@ python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py -
 # Recompute paired metrics and scientific decisions, then write/publish reports.
 python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config "$EXP/02_summarize_multi_head_voxel_label_budget.yaml" --dry-run
 python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config "$EXP/02_summarize_multi_head_voxel_label_budget.yaml"
-
-# Validate the exact lightweight publish tree and 10 MiB ceiling.
-python proc/seis_ssl_cluster/validate_results_artifacts.py --root results --max-file-size-mb 10
 ```
+
+Review the explicit lightweight result file set and `git diff` before committing
+published outputs.
 
 `--only-missing` reuses complete rows, resumes valid incomplete rows, and
 quarantines invalid partial outputs. If the source or identity contract is
