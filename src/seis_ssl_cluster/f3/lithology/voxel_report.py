@@ -54,7 +54,7 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	validate_voxel_decoder_architecture_mapping,
 )
 
-DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+_DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 DEFAULT_RESULTS_ROOT = Path('results')
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ class F3LithologyVoxelPublishConfig:
 	enabled: bool = False
 	output_dir: Path | None = None
 	results_root: Path = DEFAULT_RESULTS_ROOT
-	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 	overwrite: bool = True
 
 	def __post_init__(self) -> None:
