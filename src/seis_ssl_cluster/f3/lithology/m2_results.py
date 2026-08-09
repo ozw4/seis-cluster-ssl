@@ -14,7 +14,7 @@ from pathlib import Path
 
 from seis_ssl_cluster.f3.lithology import m1_results as m1
 
-DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+_DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 DEFAULT_RESULTS_ROOT = Path('results')
 REQUIRED_LOW_BUDGETS = ('cap25', 'cap50', 'cap100')
@@ -50,7 +50,7 @@ class F3StratHMMM2PublishConfig:
 	enabled: bool = False
 	output_dir: Path | None = None
 	include_figures: bool = True
-	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 
 
 @dataclass(frozen=True)
