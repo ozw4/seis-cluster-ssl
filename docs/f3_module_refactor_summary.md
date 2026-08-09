@@ -141,8 +141,8 @@ module imports.
 
 ## Historical Issue #92 Validation
 
-Issue #92 regression pass completed successfully with these commands at that
-time:
+The following regression commands were executed for issue #92 in that
+historical repository state:
 
 ```bash
 python -m compileall -q src proc tests
