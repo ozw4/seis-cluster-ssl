@@ -25,10 +25,10 @@ Shared CLI helpers live in `src/seis_ssl_cluster/cli.py`:
 `src/seis_ssl_cluster/utils/cli.py` remains in use for existing config-summary
 printing and older `parse_config_args` call sites.
 
-## Migrated Script Coverage
+## Historical Migrated Script Coverage
 
-The following proc entrypoints use the shared `seis_ssl_cluster.cli` helpers
-directly:
+The following proc entrypoints used the shared `seis_ssl_cluster.cli` helpers
+in the issue #82 repository state:
 
 - `build_f3_inspection_report.py`
 - `build_f3_lithology_baseline_token_dataset.py`
@@ -52,30 +52,29 @@ directly:
 - `visualize_f3_lithology_predictions.py`
 - `visualize_f3_quicklook.py`
 
-`build_f3_lithology_baseline_features.py` remains a thin compatibility wrapper
-that delegates to `build_f3_lithology_baseline_token_dataset.main`.
+`build_f3_lithology_baseline_features.py` was a thin compatibility wrapper
+that delegated to `build_f3_lithology_baseline_token_dataset.main`.
 
-## Maintained CLI Compatibility
+## Historical CLI Compatibility
 
-The entrypoint contract test added in
-`tests/seis_ssl_cluster/test_proc_entrypoints.py` verifies:
+The entrypoint contract test added in issue #82 verified:
 
-- proc modules import without running `main`;
-- existing `build_parser()` functions construct `argparse.ArgumentParser`
+- proc modules imported without running `main`;
+- existing `build_parser()` functions constructed `argparse.ArgumentParser`
   instances;
-- primary workflow help output still contains `--config` and `--dry-run`;
-- major existing options remain present, including `--device`,
-  `--skip-existing`, `--overwrite`, `--max-steps`, `--output-root`, `--resume`,
-  comparison-report overrides, and results-validator options;
-- proc `main()` functions stay small enough to act as entrypoints rather than
+- primary workflow help output contained `--config` and `--dry-run`;
+- major options then present included `--device`, `--skip-existing`,
+  `--overwrite`, `--max-steps`, `--output-root`, `--resume`, comparison-report
+  overrides, and the then-existing results-validator options;
+- proc `main()` functions stayed small enough to act as entrypoints rather than
   stage implementations.
 
-The results validator intentionally remains a non-YAML CLI and does not gain
+At that time the results validator was a non-YAML CLI and did not use
 `--config`.
 
-## Verification
+## Historical Verification
 
-Executed:
+The following commands were executed for issue #82 at that time:
 
 ```bash
 python -m compileall -q src proc tests
@@ -88,12 +87,12 @@ python proc/seis_ssl_cluster/build_f3_lithology_report.py --help
 python proc/seis_ssl_cluster/validate_results_artifacts.py --help
 ```
 
-All commands completed successfully. `tests/seis_ssl_cluster/test_proc_dry_run.py`
-was not executed.
+Those commands completed successfully in that historical repository state.
+`tests/seis_ssl_cluster/test_proc_dry_run.py` was not executed.
 
-## Open Items
+## Open Items At That Time
 
-No compatibility gaps are known for this issue. Stage-specific summaries,
-validation command exit-code handling, and implementation logic remain owned by
-their existing modules or proc scripts where they differ from the standard YAML
-workflow.
+No compatibility gaps were known for issue #82. Stage-specific summaries,
+validation command exit-code handling, and implementation logic remained owned
+by their existing modules or proc scripts where they differed from the standard
+YAML workflow.
