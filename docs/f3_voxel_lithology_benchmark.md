@@ -232,18 +232,17 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_split_robustness.py --
 ```
 
 The final lightweight result tree contains both original-split products and the
-six-split summary/tables. Validate that repository-managed publication:
+six-split summary/tables. Review the producer-owned file set and run these
+repository checks before committing it:
 
 ```bash
-python proc/seis_ssl_cluster/validate_results_artifacts.py --root results --max-file-size-mb 10
 find results -type f \( -name '*.npy' -o -name '*.pt' -o -name '*.joblib' \) -print
 rg -n '(^|[/:])runs/' experiments/f3/facies_benchmark_v1/{87_f3_voxel_benchmark_v0,88_f3_voxel_decoder_v1,89_f3_voxel_split_robustness,90_f3_voxel_results}
 ```
 
-The validator checks the repository-managed lightweight result tree. The two
-discovery commands must print nothing. Active
-config regression tests additionally resolve every path and assert the MAE,
-M1, and M2-A source tags and checkpoint semantics.
+Both discovery commands must print nothing. Active config regression tests
+additionally resolve every path and assert the MAE, M1, and M2-A source tags
+and checkpoint semantics.
 
 ## Artifact paths and resuming
 
