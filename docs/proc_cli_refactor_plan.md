@@ -1,11 +1,16 @@
 # Proc CLI Refactor Plan
 
-This plan inventories the current `proc/seis_ssl_cluster/*.py` entrypoints and
-defines the narrow refactor path for shared CLI handling. It is intentionally a
-planning document only: no proc script migration, console script addition, YAML
-rewrite, or behavior change is included in this issue.
+> Historical planning snapshot: this document records the proc inventory used by
+> the earlier CLI-refactor work. Issue #329 later removed the repository-wide
+> results validator named below. Its inventory entry and planning references are
+> retained only as historical context and are not current instructions.
 
-Normative constraints:
+This plan inventories the `proc/seis_ssl_cluster/*.py` entrypoints as they
+existed for that refactor and defines the narrow path that was considered for
+shared CLI handling. It is a planning document only: no proc script migration,
+console script addition, YAML rewrite, or behavior change is included here.
+
+Normative constraints for that historical refactor were:
 
 - Keep existing command names, required arguments, major options, YAML workflow,
   artifact paths, results publishing behavior, and downstream F3 workflows.
@@ -16,10 +21,10 @@ Normative constraints:
 - Leave existing proc scripts in place.
 
 `proc/seis_ssl_cluster/publish_results.py` is mentioned in the issue example but
-is not present in the current repository, so it is not included in the active
+was not present in that repository state, so it was not included in the active
 inventory.
 
-## Current Inventory
+## Historical Inventory
 
 Common column meanings:
 
@@ -60,17 +65,17 @@ Common column meanings:
 
 ## Shared Patterns
 
-Existing shared helpers live in `src/seis_ssl_cluster/utils/cli.py`:
+Existing shared helpers at that time lived in `src/seis_ssl_cluster/utils/cli.py`:
 
 - `parse_config_args(description, default_config)` handles `--config` and
   `--dry-run`.
 - `print_config_summary(cfg, device_override=None)` prints stage-aware summaries
   for NOPIMS manifest, normalization, training, embedding, clustering, and
   cluster visualization configs.
-- `run_pending_entrypoint(...)` is available but not part of the active proc
+- `run_pending_entrypoint(...)` was available but was not part of the active proc
   entrypoint inventory.
 
-Observed repeated patterns that are candidates for future extraction:
+Observed repeated patterns that were candidates for future extraction:
 
 - Construction of `ArgumentParser` with `--config` and `--dry-run`.
 - `load_config(args.config)` followed by one resolver or typed
@@ -105,7 +110,7 @@ Observed non-shared behavior that should remain script-owned:
 
 ## Commonization Targets
 
-Safe to commonize in a later implementation issue:
+Safe to commonize in a later implementation issue at that time:
 
 - A `--config`/`--dry-run` parser builder that preserves each script's current
   default vs required config behavior.
@@ -125,7 +130,7 @@ Safe to commonize in a later implementation issue:
 - A central developer note for matplotlib warning avoidance in visualization
   entrypoints.
 
-Not safe to commonize in this refactor track:
+Not safe to commonize in that refactor track:
 
 - Training loops, checkpoint/resume behavior, optimizer control, or MAE debug
   visualization internals.
@@ -140,6 +145,8 @@ Not safe to commonize in this refactor track:
 - CLI command names, existing script locations, or console-script packaging.
 
 ## Migration Order
+
+The historical plan was:
 
 1. Add tests around the existing CLI contracts before moving code. Focus on
    parser defaults, required/optional `--config`, dry-run exit behavior, and
@@ -164,6 +171,8 @@ Not safe to commonize in this refactor track:
 
 ## Compatibility Policy
 
+The historical compatibility policy was:
+
 - Existing command names and file paths under `proc/seis_ssl_cluster/` stay
   valid.
 - Existing `--config` workflows stay valid, including scripts with default
@@ -182,20 +191,18 @@ Not safe to commonize in this refactor track:
 
 ## Test Policy
 
-Minimum checks for this planning issue:
+Minimum checks for that planning issue were:
 
 ```bash
 python -m compileall -q src proc tests
 pytest -q tests/seis_ssl_cluster/test_config.py
 ```
 
-Do not run:
+It also explicitly excluded:
 
 ```bash
 pytest tests/seis_ssl_cluster/test_proc_dry_run.py
 ```
 
-For later implementation issues, add focused tests around parser compatibility
-and config loading wrappers before each migration step. Prefer narrow tests that
-assert preserved CLI defaults, required flags, dry-run summaries, and validation
-exit codes without executing heavy stage logic.
+Later implementation issues were expected to add focused tests around parser
+compatibility and config loading wrappers before each migration step.
