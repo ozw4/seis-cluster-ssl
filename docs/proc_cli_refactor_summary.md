@@ -1,5 +1,9 @@
 # Proc CLI Refactor Summary
 
+> Historical record: this document describes the repository state for issue #82.
+> The repository-wide results validator named below was removed by issue #329;
+> commands and inventory entries in this document are not current instructions.
+
 This summarizes the proc entrypoint commonization and regression checks for
 issue #82. The proc scripts remain in `proc/seis_ssl_cluster/`; no
 `console_scripts` packaging, command rename, YAML rewrite, or path-policy change
