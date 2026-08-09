@@ -357,6 +357,65 @@ def test_f3_inspection_publish_rejects_unsafe_target_before_writing(
 	assert not (output_dir / 'report.md').exists()
 
 
+@pytest.mark.parametrize('output_kind', ['symlink', 'file'])
+def test_f3_inspection_publish_rejects_unsafe_output_dir_before_writing(
+	tmp_path: Path,
+	output_kind: str,
+) -> None:
+	config = _report_config(tmp_path)
+	_write_file(config.output_markdown, b'artifact report\n')
+	_write_json(config.output_json, {})
+	outside = tmp_path / 'outside'
+	outside.mkdir()
+	output_dir = tmp_path / 'results'
+	if output_kind == 'symlink':
+		output_dir.symlink_to(outside, target_is_directory=True)
+	else:
+		output_dir.write_text('not a directory\n', encoding='utf-8')
+
+	exception = ValueError if output_kind == 'symlink' else NotADirectoryError
+	with pytest.raises(exception):
+		publish_f3_inspection_report(
+			config,
+			F3InspectionPublishConfig(enabled=True, output_dir=output_dir),
+			payload={},
+		)
+
+	assert not any(outside.iterdir())
+
+
+@pytest.mark.parametrize('parent_kind', ['symlink', 'file'])
+def test_f3_inspection_publish_rejects_unsafe_figure_parent_before_writing(
+	tmp_path: Path,
+	parent_kind: str,
+) -> None:
+	config = _report_config(tmp_path)
+	_write_file(config.output_markdown, b'artifact report\n')
+	_write_json(config.output_json, {})
+	_write_file(config.inspection_dir / config.figure_paths[0], b'png')
+	output_dir = tmp_path / 'results'
+	output_dir.mkdir()
+	figures_dir = output_dir / 'figures'
+	outside = tmp_path / 'outside'
+	outside.mkdir()
+	if parent_kind == 'symlink':
+		figures_dir.symlink_to(outside, target_is_directory=True)
+	else:
+		figures_dir.write_text('not a directory\n', encoding='utf-8')
+
+	exception = ValueError if parent_kind == 'symlink' else NotADirectoryError
+	with pytest.raises(exception):
+		publish_f3_inspection_report(
+			config,
+			F3InspectionPublishConfig(enabled=True, output_dir=output_dir),
+			payload={},
+		)
+
+	assert not (output_dir / 'report.md').exists()
+	assert not (output_dir / 'report.json').exists()
+	assert not any(outside.iterdir())
+
+
 def test_f3_inspection_publish_rejects_source_target_collision(tmp_path: Path) -> None:
 	config = _report_config(tmp_path)
 	_write_file(config.output_markdown, b'artifact report\n')

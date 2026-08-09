@@ -256,27 +256,32 @@ def publish_f3_strat_hmm_m1_results(  # noqa: PLR0915
 	_validate_published_file(
 		result.summary_markdown,
 		markdown_target,
+		output_dir=output_dir,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 		content_size_bytes=len(markdown_text.encode('utf-8')),
 	)
 	_validate_published_file(
 		result.summary_json,
 		json_target,
+		output_dir=output_dir,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
 	_validate_published_file(
 		single_split_table,
 		single_split_target,
+		output_dir=output_dir,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
 	_validate_published_file(
 		label_budget_table,
 		label_budget_target,
+		output_dir=output_dir,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
 	_validate_published_file(
 		split_index_table,
 		split_index_target,
+		output_dir=output_dir,
 		max_file_size_bytes=publish_config.max_file_size_bytes,
 	)
 	single_run_figure: Path | None = None
@@ -295,16 +300,19 @@ def publish_f3_strat_hmm_m1_results(  # noqa: PLR0915
 		_validate_published_file(
 			single_run_figure,
 			output_dir / 'figures' / SINGLE_RUN_FIGURE,
+			output_dir=output_dir,
 			max_file_size_bytes=publish_config.max_file_size_bytes,
 		)
 		_validate_published_file(
 			label_budget_figure,
 			output_dir / 'figures' / LABEL_BUDGET_FIGURE,
+			output_dir=output_dir,
 			max_file_size_bytes=publish_config.max_file_size_bytes,
 		)
 		_validate_published_file(
 			split_index_figure,
 			output_dir / 'figures' / SPLIT_INDEX_FIGURE,
+			output_dir=output_dir,
 			max_file_size_bytes=publish_config.max_file_size_bytes,
 		)
 
@@ -360,6 +368,7 @@ def _validate_published_file(
 	source: Path,
 	target: Path,
 	*,
+	output_dir: Path,
 	max_file_size_bytes: int,
 	content_size_bytes: int | None = None,
 ) -> None:
@@ -373,15 +382,53 @@ def _validate_published_file(
 		raise FileNotFoundError(
 			f'required publish source must be a regular file: {source}'
 		)
+	_validate_publish_target(output_dir, target)
 	if source.resolve(strict=False) == target.resolve(strict=False):
 		raise ValueError(f'publish target must differ from source: {target}')
+	size = source.stat().st_size if content_size_bytes is None else content_size_bytes
+	if size > max_file_size_bytes:
+		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
+
+
+def _validate_publish_target(output_dir: Path, target: Path) -> None:  # noqa: C901
+	if output_dir.is_symlink():
+		raise ValueError(f'publish output_dir must not be a symlink: {output_dir}')
+	if output_dir.exists() and not output_dir.is_dir():
+		raise NotADirectoryError(f'publish output_dir is not a directory: {output_dir}')
+
+	lexical_output_dir = output_dir.absolute()
+	lexical_target = target.absolute()
+	try:
+		relative_target = lexical_target.relative_to(lexical_output_dir)
+	except ValueError as exc:
+		raise ValueError(
+			f'publish target must be within output_dir: {target}'
+		) from exc
+	if not relative_target.parts or '..' in relative_target.parts:
+		raise ValueError(f'publish target must be within output_dir: {target}')
+
+	resolved_output_dir = output_dir.resolve(strict=False)
+	resolved_target = target.resolve(strict=False)
+	try:
+		resolved_target.relative_to(resolved_output_dir)
+	except ValueError as exc:
+		raise ValueError(
+			f'publish target resolves outside output_dir: {target}'
+		) from exc
+
+	parent = output_dir
+	for part in relative_target.parent.parts:
+		parent /= part
+		if parent.is_symlink():
+			raise ValueError(f'publish target parent must not be a symlink: {parent}')
+		if parent.exists() and not parent.is_dir():
+			raise NotADirectoryError(
+				f'publish target parent is not a directory: {parent}'
+			)
 	if target.is_symlink():
 		raise ValueError(f'publish target must not be a symlink: {target}')
 	if target.exists() and not target.is_file():
 		raise IsADirectoryError(f'publish target is not a file: {target}')
-	size = source.stat().st_size if content_size_bytes is None else content_size_bytes
-	if size > max_file_size_bytes:
-		raise ValueError(f'publish source exceeds max_file_size_bytes: {source}')
 
 
 def _publish_config_from_mapping(

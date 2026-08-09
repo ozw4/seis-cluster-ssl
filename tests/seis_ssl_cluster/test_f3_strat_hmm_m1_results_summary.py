@@ -311,6 +311,58 @@ def test_publish_rejects_unsafe_target_before_writing(
 	assert not (output_dir / 'm1_results_summary.json').exists()
 
 
+@pytest.mark.parametrize('output_kind', ['symlink', 'file'])
+def test_publish_rejects_unsafe_output_dir_before_writing(
+	tmp_path: Path,
+	output_kind: str,
+) -> None:
+	result = _write_publishable_result(tmp_path)
+	outside = tmp_path / 'outside'
+	outside.mkdir()
+	output_dir = tmp_path / 'results'
+	if output_kind == 'symlink':
+		output_dir.symlink_to(outside, target_is_directory=True)
+	else:
+		output_dir.write_text('not a directory\n', encoding='utf-8')
+
+	exception = ValueError if output_kind == 'symlink' else NotADirectoryError
+	with pytest.raises(exception):
+		publish_f3_strat_hmm_m1_results(
+			result,
+			F3StratHMMM1PublishConfig(enabled=True, output_dir=output_dir),
+		)
+
+	assert not any(outside.iterdir())
+
+
+@pytest.mark.parametrize('parent_kind', ['symlink', 'file'])
+def test_publish_rejects_unsafe_table_parent_before_writing(
+	tmp_path: Path,
+	parent_kind: str,
+) -> None:
+	result = _write_publishable_result(tmp_path)
+	output_dir = tmp_path / 'results'
+	output_dir.mkdir()
+	tables_dir = output_dir / 'tables'
+	outside = tmp_path / 'outside'
+	outside.mkdir()
+	if parent_kind == 'symlink':
+		tables_dir.symlink_to(outside, target_is_directory=True)
+	else:
+		tables_dir.write_text('not a directory\n', encoding='utf-8')
+
+	exception = ValueError if parent_kind == 'symlink' else NotADirectoryError
+	with pytest.raises(exception):
+		publish_f3_strat_hmm_m1_results(
+			result,
+			F3StratHMMM1PublishConfig(enabled=True, output_dir=output_dir),
+		)
+
+	assert not (output_dir / 'm1_results_summary.md').exists()
+	assert not (output_dir / 'm1_results_summary.json').exists()
+	assert not any(outside.iterdir())
+
+
 def test_publish_rejects_source_target_collision_without_changing_sources(
 	tmp_path: Path,
 ) -> None:
