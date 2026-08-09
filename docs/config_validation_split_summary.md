@@ -19,8 +19,7 @@ PYTHONPATH=src pytest -q \
   tests/seis_ssl_cluster/test_active_experiment_configs.py \
   tests/seis_ssl_cluster/test_config.py \
   tests/seis_ssl_cluster/test_proc_entrypoints.py
-
-PYTHONPATH=src python proc/seis_ssl_cluster/validate_results_artifacts.py \
-  --root results \
-  --max-file-size-mb 10
 ```
+
+For `results/`, each producer owns its explicit lightweight file set. Verify
+that set in focused tests and inspect `git diff` during review.
