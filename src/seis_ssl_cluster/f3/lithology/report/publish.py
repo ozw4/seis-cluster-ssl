@@ -24,7 +24,7 @@ from seis_ssl_cluster.f3.lithology.report.metrics_loader import (
 	_read_required_json_object,
 )
 
-DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+_DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping, Sequence
@@ -49,7 +49,7 @@ class F3LithologyComparisonPublishConfig:
 	enabled: bool = False
 	output_dir: Path | None = None
 	include_figures: bool = True
-	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 
 
 @dataclass(frozen=True)
@@ -59,7 +59,7 @@ class F3LithologyPublishConfig:
 	enabled: bool = False
 	output_dir: Path | None = None
 	include_figures: bool = True
-	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 	max_prediction_figures: int = 3
 
 

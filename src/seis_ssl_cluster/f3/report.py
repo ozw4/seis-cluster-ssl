@@ -10,7 +10,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+_DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 READINESS_PROCEED = 'proceed'
 READINESS_CAUTION = 'caution'
@@ -89,7 +89,7 @@ class F3InspectionPublishConfig:
 	enabled: bool = False
 	output_dir: Path | None = None
 	include_figures: bool = True
-	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 
 
 @dataclass(frozen=True)

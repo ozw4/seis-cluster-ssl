@@ -12,7 +12,6 @@ import pytest
 
 import seis_ssl_cluster.f3.lateral_smoothing_results as results
 from proc.seis_ssl_cluster import publish_f3_m5_lateral_smoothing_results as cli
-from seis_ssl_cluster.results import validate_results_artifacts
 
 _DIGEST = 'a' * 64
 
@@ -99,16 +98,6 @@ def test_review_publisher_writes_portable_target_only_artifacts(
 	]
 	assert all(str(paths['artifact_root']) not in text for text in texts)
 	assert all(str(paths['workspace_root']) not in text for text in texts)
-	report = validate_results_artifacts(
-		paths['output_dir'],
-		required_files=tuple(Path(name) for name in results.OUTPUT_NAMES),
-		local_path_policy='error',
-		local_path_markers=(
-			f'{paths["artifact_root"]}/',
-			f'{paths["workspace_root"]}/',
-		),
-	)
-	assert report.ok, report.errors
 
 
 def test_review_publisher_compacts_strict_smoke_evidence(

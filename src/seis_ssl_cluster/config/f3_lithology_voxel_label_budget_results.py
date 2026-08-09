@@ -14,9 +14,9 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_required_mapping,
 	_validate_allowed_keys,
 )
-from seis_ssl_cluster.results import DEFAULT_MAX_FILE_SIZE_BYTES
 
 DEFAULT_RESULTS_ROOT = Path('results')
+_DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 EXPECTED_BUDGET_COUNT = 3
 EXPECTED_SEED_COUNT = 5
 
@@ -84,7 +84,7 @@ class F3VoxelLabelBudgetResultsPublishConfig:
 	enabled: bool = False
 	results_root: Path = DEFAULT_RESULTS_ROOT
 	output_dir: Path | None = None
-	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 	overwrite: bool = True
 
 	def __post_init__(self) -> None:

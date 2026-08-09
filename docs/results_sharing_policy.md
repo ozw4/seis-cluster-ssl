@@ -3,58 +3,25 @@
 Use `artifacts/` for complete local outputs and `results/` for lightweight
 GitHub review artifacts.
 
-```bash
-ROOT=/workspace/artifacts/seis_ssl_cluster
-```
-
-## Normal Runs
+## Normal runs
 
 Experiment, training, embedding, clustering, and visualization commands should
-continue to write full outputs under `$ROOT/`.
-That tree is local generated output and is not tracked by Git.
+continue to write large generated outputs under the configured artifact root.
+Do not move those outputs into `results/`.
 
 ## Sharing
 
-When a report builder supports publishing, use its publish configuration to copy
-only selected lightweight outputs into `results/`. Keep normal experiment output
-paths unchanged.
+Commit only the small file set owned explicitly by each producer: Markdown,
+JSON, CSV, and representative figures needed for review.
 
-Files suitable for `results/` are selected Markdown reports, metrics files,
-comparison tables, and representative figures. Do not commit checkpoints,
-embeddings, clustering models, `.npy`, `.npz`, `.pt`, `.joblib`, `.pkl`, raw
-SEGY files, path lists, normalization statistics, full visualization dumps, or
-an `artifacts/` directory nested under `results/`.
+Do not commit checkpoints, embeddings, raw `.npy`/`.npz` arrays, prediction
+volumes, clustering models, or raw SEGY data under `results/`.
 
-## Validation
-
-Run the lightweight validator before review:
-
-```bash
-python proc/seis_ssl_cluster/validate_results_artifacts.py \
-  --root results \
-  --max-file-size-mb 10
-```
-
-Use required-file checks for known review deliverables:
-
-```bash
-python proc/seis_ssl_cluster/validate_results_artifacts.py \
-  --root results \
-  --max-file-size-mb 10 \
-  --required-file f3/facies_benchmark_v1/inspection/report.md \
-  --required-file f3/facies_benchmark_v1/baseline_comparison/comparison_report.md
-```
-
-```bash
-python proc/seis_ssl_cluster/validate_results_artifacts.py \
-  --root results \
-  --max-file-size-mb 10 \
-  --local-path-policy error
-```
+Each producer's focused tests should fix the expected review file set and check
+that heavy artifacts are not emitted there.
 
 ## Review
 
-In GitHub review, inspect `results/` instead of `artifacts/`. For F3, start with
-`results/f3/facies_benchmark_v1/inspection/report.md` and, after baseline
-comparison has been published,
-`results/f3/facies_benchmark_v1/baseline_comparison/comparison_report.md`.
+Use `git diff` and normal code review as the final check for changes under
+`results/`. For F3, start with the experiment-specific summary/report files and
+representative figures committed by the producer.

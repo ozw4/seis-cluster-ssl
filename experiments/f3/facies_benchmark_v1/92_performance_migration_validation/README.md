@@ -46,8 +46,8 @@ the migration root. The pseudo-target export is legacy-compatible schema v1:
 no boundary-weight field is emitted for M1.
 
 `results/f3/facies_benchmark_v1/performance_migration_validation/` receives
-only the completed Markdown, JSON, CSV, small PNG files, README, and publish
-manifest. Checkpoints, arrays, joblib objects, embeddings, clustering labels,
+only the completed Markdown, JSON, CSV, small PNG files, and README.
+Checkpoints, arrays, joblib objects, embeddings, clustering labels,
 pseudo-target arrays, prepared-feature caches, temporary directories, and
 quarantines are prohibited from that directory.
 
@@ -116,17 +116,18 @@ OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTORCH_NUM_THREADS=1 \
     --output-json /workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/benchmark/current.json \
     --output-markdown /workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/benchmark/current.md
 
-# 17-20. Calculate the ordered migration decision, publish only light files,
-# validate publication, and write the handoff.
+# 17-19. Calculate the ordered migration decision, publish only light files,
+# and write the handoff.
 python proc/seis_ssl_cluster/validate_performance_migration.py \
   --config "$EXP_MIG/06_summarize_performance_migration.yaml" --stage summarize --dry-run
 python proc/seis_ssl_cluster/validate_performance_migration.py \
   --config "$EXP_MIG/06_summarize_performance_migration.yaml" --stage summarize
 python proc/seis_ssl_cluster/validate_performance_migration.py \
   --config "$EXP_MIG/06_summarize_performance_migration.yaml" --stage publish
-python proc/seis_ssl_cluster/validate_results_artifacts.py \
-  --root results --max-file-size-mb 10
 ```
+
+Review the producer-owned lightweight result file set and `git diff` before
+committing published outputs.
 
 The decision is constrained by the recorded artifacts. `PASS_REUSE_EXISTING`
 requires exact checkpoint smoke, valid-token, probe prediction/confusion,

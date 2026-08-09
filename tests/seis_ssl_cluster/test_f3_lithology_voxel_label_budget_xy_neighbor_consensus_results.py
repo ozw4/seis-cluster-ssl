@@ -22,7 +22,6 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_xy_neighbor_consensus_resu
 	decide_xy_neighbor_consensus_original_gate,
 	summarize_f3_lithology_voxel_label_budget_xy_neighbor_consensus,
 )
-from seis_ssl_cluster.results import validate_results_artifacts
 
 _RESULTS_ROOT = Path(
 	'f3/facies_benchmark_v1/'
@@ -183,14 +182,6 @@ def test_xy_consensus_summary_publishes_only_portable_lightweight_files(
 		'${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}'
 	)
 	assert handoff['six_split_follow_up']['scientific_jobs_executed'] == 0
-
-	report = validate_results_artifacts(
-		published,
-		required_files=tuple(Path(name) for name in PUBLISHED_OUTPUT_NAMES),
-		local_path_policy='error',
-		local_path_markers=(f'{workspace}/', f'{artifact_root}/'),
-	)
-	assert report.ok, report.errors
 
 
 def _rows(

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
 
-DEFAULT_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
+_DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 DEFAULT_RESULTS_ROOT = Path('results')
 CORE_METRICS = (
@@ -50,7 +50,7 @@ class F3StratHMMM1PublishConfig:
 	enabled: bool = False
 	output_dir: Path | None = None
 	include_figures: bool = True
-	max_file_size_bytes: int = DEFAULT_MAX_FILE_SIZE_BYTES
+	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 
 
 @dataclass(frozen=True)

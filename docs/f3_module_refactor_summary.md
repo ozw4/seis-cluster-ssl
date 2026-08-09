@@ -2,8 +2,13 @@
 
 This is the current post-refactor module contract for F3 inspection,
 lithology probe, and baseline comparison code. The refactor preserves existing
-CLI commands, YAML keys, artifact paths, results publishing, label-source
-policy, class `0` handling, report metrics, and figure outputs.
+CLI commands, YAML keys, artifact paths, producer-owned results publishing,
+label-source policy, class `0` handling, report metrics, and figure outputs.
+
+> The Issue #92 validation transcript near the end is a historical record.
+> Issue #329 later removed the repository-wide results validator and its
+> dedicated publish/validation tests; those historical commands are not current
+> instructions.
 
 ## Final Module Structure
 
@@ -117,26 +122,27 @@ unlabeled by the schema helpers.
 - `markdown.py`: single-run and comparison Markdown rendering.
 - `figures.py`: comparison figure styles and rendering.
 - `comparison.py`: baseline comparison aggregation and output writing.
-- `publish.py`: lightweight results copy logic for single-run and comparison
-  reports.
+- `publish.py`: producer-owned lightweight results copy logic for single-run and
+  comparison reports.
 
 `seis_ssl_cluster.f3.lithology_report` remains the compatibility import and
 re-exports the package facade.
 
 ## Runbooks
 
-The F3 runbooks keep the same CLI commands and config paths:
+The F3 runbooks keep the same scientific CLI commands and config paths:
 
 - `experiments/f3/facies_benchmark_v1/README.md`
 - `experiments/f3/facies_benchmark_v1/50_lithology/README.md`
 - `experiments/f3/facies_benchmark_v1/50_lithology_baselines/README.md`
 
 They describe proc entrypoints and artifact layouts rather than direct library
-module imports, so no CLI command changes are required.
+module imports.
 
-## Tests And Validation
+## Historical Issue #92 Validation
 
-Issue #92 regression pass completed successfully with these commands:
+The following regression commands were executed for issue #92 in that
+historical repository state:
 
 ```bash
 python -m compileall -q src proc tests
@@ -174,11 +180,13 @@ PYTHONPATH=src python proc/seis_ssl_cluster/validate_results_artifacts.py \
   --max-file-size-mb 10
 ```
 
-`tests/seis_ssl_cluster/test_proc_dry_run.py` is intentionally excluded.
+`tests/seis_ssl_cluster/test_proc_dry_run.py` was intentionally excluded from
+that historical pass.
 
-The validation CLIs reported `error_count: 0`. They also reported existing
-warnings for legacy documentation mentions, legacy embedding path shape, legacy results metadata, and local absolute path markers in
-results files; those warnings do not change the error-zero validation result.
+The historical validation CLIs reported `error_count: 0`. They also reported
+warnings for legacy documentation mentions, legacy embedding path shape,
+legacy results metadata, and local absolute path markers in results files; those
+warnings did not change that historical error-zero result.
 
 ## Future Work
 

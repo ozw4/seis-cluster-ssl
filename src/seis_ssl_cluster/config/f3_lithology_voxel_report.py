@@ -19,9 +19,9 @@ from seis_ssl_cluster.f3.lithology.voxel_report import (
 from seis_ssl_cluster.f3.lithology.voxel_visualization import (
 	F3LithologyVoxelFigureConfig,
 )
-from seis_ssl_cluster.results import DEFAULT_MAX_FILE_SIZE_BYTES
 
 DEFAULT_RESULTS_ROOT = Path('results')
+_DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 
 def f3_lithology_voxel_report_config_from_mapping(
@@ -234,7 +234,7 @@ def _publish_config(
 	):
 		raise TypeError('paths.results_root must be a non-empty path string')
 	max_mb = publish.get(
-		'max_file_size_mb', DEFAULT_MAX_FILE_SIZE_BYTES / (1024 * 1024)
+		'max_file_size_mb', _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES / (1024 * 1024)
 	)
 	if not isinstance(max_mb, int | float) or isinstance(max_mb, bool) or max_mb <= 0:
 		raise ValueError('publish.max_file_size_mb must be positive')

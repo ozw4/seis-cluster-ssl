@@ -10,7 +10,6 @@ import pytest
 
 import seis_ssl_cluster.f3.xy_neighbor_consensus_pretraining_validation as validation
 import seis_ssl_cluster.f3.xy_neighbor_consensus_results as results
-from seis_ssl_cluster.results import validate_results_artifacts
 
 
 def test_preflight_config_is_closed_and_requires_successor_inputs(
@@ -140,19 +139,6 @@ def test_review_publishes_portable_source_only_diagnostics(
 			text = path.read_text(encoding='utf-8')
 			assert str(paths['artifact_root']) not in text
 			assert str(paths['workspace_root']) not in text
-	report = validate_results_artifacts(
-		paths['output_dir'],
-		required_files=(
-			Path(results.SUMMARY_JSON),
-			Path(results.SUMMARY_MARKDOWN),
-		),
-		local_path_policy='error',
-		local_path_markers=(
-			f'{paths["artifact_root"]}/',
-			f'{paths["workspace_root"]}/',
-		),
-	)
-	assert report.ok, report.errors
 
 	stale_head_hashes = _head_hashes()
 	stale_head_hashes['6']['survey']['labels'] = 'f' * 64

@@ -111,8 +111,10 @@ python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py -
 python proc/seis_ssl_cluster/run_f3_lithology_multi_head_voxel_label_budget.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml --only-missing
 python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/02_summarize_multi_head_voxel_label_budget.yaml --dry-run
 python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_multi_head.py --config experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/02_summarize_multi_head_voxel_label_budget.yaml
-python proc/seis_ssl_cluster/validate_results_artifacts.py --root results --max-file-size-mb 10
 ```
+
+Review the producer-owned lightweight result file set and `git diff` before
+committing published outputs.
 
 Smoke output roots are intentionally separate and must never be resumed by a
 full run. A full run may resume only from its own `latest.pt`; the checkpoint

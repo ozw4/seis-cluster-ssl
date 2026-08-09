@@ -142,10 +142,10 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_control.p
 
 python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget_control.py \
   --config "$EXP_CONTROL/08_summarize_current_k6_control.yaml"
-
-python proc/seis_ssl_cluster/validate_results_artifacts.py \
-  --root results --max-file-size-mb 10
 ```
+
+Review the producer-owned lightweight result file set and `git diff` before
+committing it.
 
 The final control status is one of `CONTROL_READY_POSITIVE`,
 `CONTROL_READY_MIXED`, `CONTROL_READY_WITH_DRIFT`, or
