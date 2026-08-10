@@ -206,7 +206,7 @@ Create a plain-text file containing one `.npy` path per line.
 ```text
 # Absolute paths are accepted.
 /home/dcuser/data/NOPIMS/ENO0047389_0_00050_00400.npy
-/home/dcuser/data/NOPIMS/ENO0047389_0_00750.npy
+/home/dcuser/data/NOPIMS/ENO0047389_0_00050_00750.npy
 
 # Relative paths are resolved against paths.nopims_root.
 ENO0047392_0_00100_00100.npy
@@ -357,6 +357,7 @@ python proc/seis_ssl_cluster/train_amp_mae.py \
 ```
 
 ### 8. Extract full-volume embeddings
+
 Set the trained checkpoint, clean manifest, `embeddings.output_dir`, window size, and overlap in the embedding YAML.
 
 ```bash
