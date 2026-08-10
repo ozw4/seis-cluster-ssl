@@ -25,6 +25,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	LAYOUT_IDS,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout_roster import (
+	EXPECTED_MODEL_IDS,
 	F3SectionLayoutModel,
 	F3SectionLayoutModelRoster,
 	f3_lithology_voxel_section_layout_model_roster_from_mapping,
@@ -43,7 +44,8 @@ from seis_ssl_cluster.f3.lithology.voxel_section_layout_runner import (
 )
 
 RESULTS_ARTIFACT_TYPE = 'f3_lithology_voxel_section_layout_results_summary'
-HANDOFF_ARTIFACT_TYPE = 'f3_lithology_voxel_section_layout_results_handoff'
+HANDOFF_ARTIFACT_TYPE = 'f3_voxel_section_layout_handoff'
+MODEL_REVIEW_ARTIFACT_TYPE = 'f3_voxel_section_layout_model_review'
 RESULTS_SCHEMA_VERSION = 1
 FORMAL_STATUSES = ('SECTION_LAYOUT_GO', 'SECTION_LAYOUT_HOLD', 'SECTION_LAYOUT_STOP')
 PRIMARY_METRICS = ('macro_f1', 'mean_iou')
@@ -59,6 +61,12 @@ FINAL_OUTPUT_NAMES = (
 	'section_layout_results_summary.json',
 	'section_layout_results_summary.md',
 	'section_layout_handoff.json',
+)
+MODEL_OUTPUT_NAMES = (
+	'section_layout_model_job_metrics.csv',
+	'section_layout_model_paired_deltas.csv',
+	'section_layout_model_review.json',
+	'section_layout_model_review.md',
 )
 PAIR_IDENTITY_FIELDS = (
 	'layout_id',
@@ -274,10 +282,16 @@ def summarize_f3_lithology_voxel_section_layout_results(
 		if model_id is None
 		else config.model_results_dir(model_id)
 	)
-	_write_results(output_dir, inspection=inspection, config=config)
-	files = tuple(output_dir / name for name in FINAL_OUTPUT_NAMES)
-	if {path.name for path in files} != set(FINAL_OUTPUT_NAMES):
-		raise AssertionError('internal final output inventory mismatch')
+	output_names = MODEL_OUTPUT_NAMES if model_id is not None else FINAL_OUTPUT_NAMES
+	_write_results(
+		output_dir,
+		inspection=inspection,
+		config=config,
+		output_names=output_names,
+	)
+	files = tuple(output_dir / name for name in output_names)
+	if {path.name for path in files} != set(output_names):
+		raise AssertionError('internal summary output inventory mismatch')
 	return F3SectionLayoutResultsResult(output_dir, files, inspection)
 
 
@@ -770,32 +784,19 @@ def _write_results(
 	*,
 	inspection: F3SectionLayoutResultsInspection,
 	config: F3SectionLayoutResultsConfig,
+	output_names: tuple[str, ...],
 ) -> None:
 	if output_dir.exists():
 		raise FileExistsError(output_dir)
+	if inspection.mode not in {'model', 'final'}:
+		raise ValueError(f'unsupported results mode: {inspection.mode!r}')
 	output_dir.mkdir(parents=True)
 	try:
-		_write_csv(output_dir / FINAL_OUTPUT_NAMES[0], inspection.job_metrics)
-		_write_csv(output_dir / FINAL_OUTPUT_NAMES[1], inspection.paired_deltas)
-		_write_csv(output_dir / FINAL_OUTPUT_NAMES[2], inspection.summary_by_size)
-		_write_json(
-			output_dir / FINAL_OUTPUT_NAMES[3],
-			{
-				'artifact_type': 'f3_lithology_voxel_section_layout_model_decisions',
-				'schema_version': RESULTS_SCHEMA_VERSION,
-				'model_decisions': inspection.model_decisions,
-			},
-		)
-		summary = _summary_payload(inspection)
-		_write_json(output_dir / FINAL_OUTPUT_NAMES[4], summary)
-		(output_dir / FINAL_OUTPUT_NAMES[5]).write_text(
-			_render_markdown(summary), encoding='utf-8'
-		)
-		_write_json(
-			output_dir / FINAL_OUTPUT_NAMES[6],
-			_handoff_payload(inspection, config=config),
-		)
-		_validate_output_inventory(output_dir)
+		if inspection.mode == 'model':
+			_write_model_review(output_dir, inspection=inspection)
+		else:
+			_write_final_results(output_dir, inspection=inspection, config=config)
+		_validate_output_inventory(output_dir, expected=output_names)
 	except BaseException:
 		for path in output_dir.iterdir():
 			if path.is_file():
@@ -804,10 +805,79 @@ def _write_results(
 		raise
 
 
-def _validate_output_inventory(output_dir: Path) -> None:
+def _write_model_review(
+	output_dir: Path, *, inspection: F3SectionLayoutResultsInspection
+) -> None:
+	if inspection.requested_model_id is None:
+		raise ValueError('model review requires one requested model ID')
+	_write_csv(output_dir / MODEL_OUTPUT_NAMES[0], inspection.job_metrics)
+	_write_csv(output_dir / MODEL_OUTPUT_NAMES[1], inspection.paired_deltas)
+	review = _model_review_payload(inspection)
+	_write_json(output_dir / MODEL_OUTPUT_NAMES[2], review)
+	(output_dir / MODEL_OUTPUT_NAMES[3]).write_text(
+		_render_markdown(review), encoding='utf-8'
+	)
+
+
+def _write_final_results(
+	output_dir: Path,
+	*,
+	inspection: F3SectionLayoutResultsInspection,
+	config: F3SectionLayoutResultsConfig,
+) -> None:
+	if inspection.requested_model_id is not None:
+		raise ValueError('final results cannot have a requested model ID')
+	if inspection.loaded_model_ids != EXPECTED_MODEL_IDS:
+		raise ValueError('final results require the exact full model roster')
+	expected_job_count = len(EXPECTED_MODEL_IDS) * len(LAYOUT_IDS) * len(DATA_SIZES)
+	if len(inspection.job_metrics) != expected_job_count:
+		raise ValueError('final results require all 210 completed jobs')
+	_write_csv(output_dir / FINAL_OUTPUT_NAMES[0], inspection.job_metrics)
+	_write_csv(output_dir / FINAL_OUTPUT_NAMES[1], inspection.paired_deltas)
+	_write_csv(output_dir / FINAL_OUTPUT_NAMES[2], inspection.summary_by_size)
+	_write_json(
+		output_dir / FINAL_OUTPUT_NAMES[3],
+		{
+			'artifact_type': 'f3_lithology_voxel_section_layout_model_decisions',
+			'schema_version': RESULTS_SCHEMA_VERSION,
+			'model_decisions': inspection.model_decisions,
+		},
+	)
+	summary = _summary_payload(inspection)
+	_write_json(output_dir / FINAL_OUTPUT_NAMES[4], summary)
+	(output_dir / FINAL_OUTPUT_NAMES[5]).write_text(
+		_render_markdown(summary), encoding='utf-8'
+	)
+	_write_json(
+		output_dir / FINAL_OUTPUT_NAMES[6],
+		_handoff_payload(inspection, config=config),
+	)
+
+
+def _validate_output_inventory(
+	output_dir: Path, *, expected: Sequence[str]
+) -> None:
 	actual = {path.name for path in output_dir.iterdir() if path.is_file()}
-	if actual != set(FINAL_OUTPUT_NAMES):
+	if actual != set(expected):
 		raise AssertionError('summary wrote a non-canonical output inventory')
+
+
+def _model_review_payload(
+	inspection: F3SectionLayoutResultsInspection,
+) -> Mapping[str, object]:
+	payload = dict(_summary_payload(inspection))
+	payload.update(
+		{
+			'artifact_type': MODEL_REVIEW_ARTIFACT_TYPE,
+			'status': 'COMPLETE',
+			'scope': 'single_model',
+			'benchmark_complete': False,
+			'reviewed_model_id': inspection.requested_model_id,
+			'loaded_model_ids': list(inspection.loaded_model_ids),
+			'summary_by_size': list(inspection.summary_by_size),
+		}
+	)
+	return payload
 
 
 def _summary_payload(
@@ -848,6 +918,8 @@ def _handoff_payload(
 		'artifact_type': HANDOFF_ARTIFACT_TYPE,
 		'schema_version': RESULTS_SCHEMA_VERSION,
 		'status': 'PASS',
+		'scope': 'full_roster',
+		'benchmark_complete': True,
 		'dataset_contract_identity': inspection.source_identities['dataset_contract'],
 		'model_roster_identity': inspection.source_identities['model_roster'],
 		'completed_model_count': len(inspection.loaded_model_ids),
@@ -918,8 +990,13 @@ def _write_json(path: Path, payload: Mapping[str, object]) -> None:
 
 def _render_markdown(payload: Mapping[str, object]) -> str:
 	decisions = cast('Mapping[str, Mapping[str, object]]', payload['model_decisions'])
+	title = (
+		'# F3 section-layout model review'
+		if payload.get('scope') == 'single_model'
+		else '# F3 section-layout benchmark summary'
+	)
 	lines = [
-		'# F3 section-layout benchmark summary',
+		title,
 		'',
 		'Layouts are the paired statistical units. No p-values, confidence intervals,',
 		'or voxel-independence claims are produced.',
@@ -988,6 +1065,7 @@ def _job_key(job: _LoadedJob) -> tuple[str, str]:
 __all__ = [
 	'FINAL_OUTPUT_NAMES',
 	'FORMAL_STATUSES',
+	'MODEL_OUTPUT_NAMES',
 	'F3SectionLayoutResultsConfig',
 	'F3SectionLayoutResultsInspection',
 	'F3SectionLayoutResultsResult',

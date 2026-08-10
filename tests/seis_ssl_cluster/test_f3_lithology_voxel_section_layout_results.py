@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -15,6 +16,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	LAYOUT_IDS,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout_roster import (
+	EXPECTED_MODEL_IDS,
 	EXPECTED_MODEL_ROSTER,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
@@ -252,18 +254,62 @@ def test_model_mode_no_publish_writes_only_lightweight_artifact_set(
 		config, model_id='m1_distill_only', no_publish=True
 	)
 	assert result.output_dir.is_relative_to(config.artifact_root)
-	assert {path.name for path in result.files} == set(results.FINAL_OUTPUT_NAMES)
+	assert {path.name for path in result.files} == set(results.MODEL_OUTPUT_NAMES)
 	assert {path.suffix for path in result.files} <= {'.csv', '.json', '.md'}
 	assert not config.final_results_dir.exists()
 	assert not any('publish' in path.name for path in result.files)
-	handoff = json.loads(
-		(result.output_dir / results.FINAL_OUTPUT_NAMES[-1]).read_text()
+	assert not (result.output_dir / 'section_layout_handoff.json').exists()
+	review = json.loads(
+		(result.output_dir / 'section_layout_model_review.json').read_text()
 	)
-	assert handoff['project_adoption'] == 'PENDING_REVIEW'
-	assert handoff['completed_model_count'] == 1
-	assert handoff['completed_job_count'] == 1
-	assert handoff['pair_identity_validation']['status'] == 'PASS'
-	assert handoff['execution_git_state']['dirty'] is False
+	assert review['artifact_type'] == 'f3_voxel_section_layout_model_review'
+	assert review['status'] == 'COMPLETE'
+	assert review['scope'] == 'single_model'
+	assert review['benchmark_complete'] is False
+	assert review['reviewed_model_id'] == 'm1_distill_only'
+	assert review['project_adoption'] == 'PENDING_REVIEW'
+	assert review['completed_model_count'] == 1
+	assert review['completed_job_count'] == 1
+	assert review['pair_identity_validation']['status'] == 'PASS'
+
+
+def test_final_handoff_is_explicitly_full_roster(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = results.f3_lithology_voxel_section_layout_results_config_from_mapping(
+		_config_mapping(tmp_path)
+	)
+	inspection = replace(
+		_minimal_inspection(),
+		mode='final',
+		requested_model_id=None,
+		loaded_model_ids=EXPECTED_MODEL_IDS,
+		job_metrics=tuple(
+			{'model_id': model_id}
+			for model_id in EXPECTED_MODEL_IDS
+			for _layout_id in LAYOUT_IDS
+			for _data_size in DATA_SIZES
+		),
+	)
+	monkeypatch.setattr(
+		results,
+		'inspect_f3_lithology_voxel_section_layout_results',
+		lambda *_args, **_kwargs: inspection,
+	)
+	monkeypatch.setattr(
+		results,
+		'_git_state',
+		lambda _root: {'commit': 'a' * 40, 'dirty': False},
+	)
+	result = results.summarize_f3_lithology_voxel_section_layout_results(config)
+	assert {path.name for path in result.files} == set(results.FINAL_OUTPUT_NAMES)
+	handoff = json.loads(
+		(result.output_dir / 'section_layout_handoff.json').read_text()
+	)
+	assert handoff['artifact_type'] == results.HANDOFF_ARTIFACT_TYPE
+	assert handoff['status'] == 'PASS'
+	assert handoff['scope'] == 'full_roster'
+	assert handoff['benchmark_complete'] is True
 
 
 def test_final_mode_requires_every_roster_manifest(

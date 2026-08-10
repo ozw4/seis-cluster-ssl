@@ -189,6 +189,12 @@ class 3/5 metric degrading by at least 0.05 at two or more sizes, produces
 roster models receive metrics and a formal status but remain selection
 ineligible. Project adoption remains `PENDING_REVIEW`.
 
+One-model mode writes an artifact-owned model review with `scope` set to
+`single_model` and `benchmark_complete` set to false. It does not write
+`section_layout_handoff.json`. Only final mode, after requiring the full roster,
+writes the PASS handoff with `scope` set to `full_roster` and
+`benchmark_complete` set to true.
+
 ## Historical evidence
 
 The earlier `cap25/cap50/cap100` by subsample seed `0..4` experiments and the
