@@ -121,9 +121,41 @@ def test_partial_footprints_stay_on_active_planes_and_deduplicate_intersection()
 	)
 	assert len(footprints) == 1
 	assert footprints[0].voxel_count == 8 * 8 + 8 * 8 - 8
+	owned = footprints[0].per_line_flat_voxel_indices
+	assert len(owned[('inline', 100)]) == 8 * 8
+	assert len(owned[('crossline', 200)]) == 8 * 8 - 8
+	assert set(owned[('inline', 100)]).isdisjoint(owned[('crossline', 200)])
+	assert set(owned[('inline', 100)]) | set(owned[('crossline', 200)]) == set(
+		footprints[0].flat_voxel_indices
+	)
 	for flat in footprints[0].flat_voxel_indices:
 		x, y, _ = np.unravel_index(flat, shape)
 		assert x == 0 or y == 0
+
+
+def test_coverage_uses_owned_teacher_voxels_not_geometric_token_intersection() -> (
+	None
+):
+	shape = (8, 8, 8)
+	grid = np.zeros(shape, dtype=np.uint8)
+	grid[0, 0, :] = 1
+	labels = np.indices(shape).sum(axis=0).astype(np.int16) % 6
+	lines = (
+		SectionLine('inline', 100, 0, is_validation_line=False),
+		SectionLine('crossline', 200, 0, is_validation_line=False),
+	)
+	footprint = candidate_token_footprints(grid, labels, lines)[0]
+	assert footprint.line_voxel_count(('inline', 100)) == 8
+	assert footprint.line_voxel_count(('crossline', 200)) == 0
+	candidates = inspect_section_candidates(grid, labels, lines)
+	with pytest.raises(ValueError, match=r'crossline.*contributes no teacher voxels'):
+		preview_nested_selection(
+			LayoutLines('layout_000', (100,), (200,)),
+			{'small': 8, 'medium': 8, 'large': 8},
+			grid,
+			labels,
+			candidates,
+		)
 
 
 def test_preview_is_nested_and_satisfies_all_finalize_gates() -> None:

@@ -129,12 +129,18 @@ class TokenFootprint:
 
 	token_xyz: tuple[int, int, int]
 	flat_voxel_indices: tuple[int, ...]
-	line_keys: tuple[tuple[str, int], ...]
+	per_line_flat_voxel_indices: Mapping[
+		tuple[str, int], tuple[int, ...]
+	]
 
 	@property
 	def voxel_count(self) -> int:
 		"""Return the exact partial-plane teacher voxel count."""
 		return len(self.flat_voxel_indices)
+
+	def line_voxel_count(self, line_key: tuple[str, int]) -> int:
+		"""Return teacher voxels owned by one line under ordered attribution."""
+		return len(self.per_line_flat_voxel_indices.get(line_key, ()))
 
 
 @dataclass(frozen=True)
@@ -449,17 +455,16 @@ def candidate_token_footprints(
 		local = np.argwhere(block_mask)
 		start = tuple(part.start or 0 for part in block)
 		global_xyz = local + np.asarray(start, dtype=np.int64)
-		flat = tuple(
-			sorted(
-				int(value) for value in np.ravel_multi_index(global_xyz.T, grid.shape)
-			)
+		flat_array = np.ravel_multi_index(global_xyz.T, grid.shape)
+		order = np.argsort(flat_array)
+		global_xyz = global_xyz[order]
+		flat = tuple(int(value) for value in flat_array[order])
+		per_line = _ordered_line_voxel_ownership(
+			global_xyz,
+			flat_voxel_indices=flat,
+			lines=lines,
 		)
-		line_keys = tuple(
-			line.key
-			for line in lines
-			if _token_intersects_line(coordinate, line, patch)
-		)
-		result.append(TokenFootprint(coordinate, flat, line_keys))
+		result.append(TokenFootprint(coordinate, flat, per_line))
 	return tuple(result)
 
 
@@ -517,12 +522,22 @@ def preview_nested_selection(  # noqa: PLR0913
 			raise AssertionError('nested active lines lost a previously selected token')
 		ordered = stable_token_order(footprints, layout_id=layout.layout_id)
 		# Coverage pass is deterministic and precedes target filling.
-		covered = {key for xyz in selected_tokens for key in by_xyz[xyz].line_keys}
+		covered = {
+			key
+			for xyz in selected_tokens
+			for key in by_xyz[xyz].per_line_flat_voxel_indices
+		}
 		for line in active:
 			if line.key in covered:
 				continue
 			candidate = next(
-				(item for item in ordered if line.key in item.line_keys), None
+				(
+					item
+					for item in ordered
+					if item.token_xyz not in selected_tokens
+					and item.line_voxel_count(line.key) > 0
+				),
+				None,
 			)
 			if candidate is None:
 				raise ValueError(
@@ -530,7 +545,7 @@ def preview_nested_selection(  # noqa: PLR0913
 					f'{line.key!r} contributes no teacher voxels'
 				)
 			selected_tokens.add(candidate.token_xyz)
-			covered.update(candidate.line_keys)
+			covered.update(candidate.per_line_flat_voxel_indices)
 		selected_tokens = _fill_to_nearest_target(
 			selected_tokens, ordered, by_xyz=by_xyz, target=targets[data_size]
 		)
@@ -546,7 +561,7 @@ def preview_nested_selection(  # noqa: PLR0913
 		actual = len(selected_voxels)
 		error = actual - targets[data_size]
 		class_counts = _selected_class_counts(labels, selected_voxels)
-		line_counts = _per_line_contributions(grid.shape, selected_voxels, active)
+		line_counts = _per_line_contributions(selected_footprints, active)
 		preview = SelectionPreview(
 			layout_id=layout.layout_id,
 			data_size=data_size,
@@ -945,20 +960,56 @@ def _selected_class_counts(
 	}
 
 
-def _per_line_contributions(
-	shape: tuple[int, ...], selected: set[int], lines: Sequence[SectionLine]
-) -> dict[str, int]:
-	result = {f'{line.slice_type}:{line.slice_index}': 0 for line in lines}
-	for flat in sorted(selected):
-		x, y, _ = np.unravel_index(flat, shape)
-		# Ordered attribution makes inline/crossline intersections count once.
+def _ordered_line_voxel_ownership(
+	voxel_xyz: NDArray[np.integer],
+	*,
+	flat_voxel_indices: Sequence[int],
+	lines: Sequence[SectionLine],
+) -> Mapping[tuple[str, int], tuple[int, ...]]:
+	"""Assign each teacher voxel once using the active line order."""
+	if len(voxel_xyz) != len(flat_voxel_indices):
+		raise AssertionError('voxel coordinates and flat indices differ in length')
+	owned: dict[tuple[str, int], list[int]] = {}
+	for xyz, flat in zip(voxel_xyz, flat_voxel_indices, strict=True):
+		x, y = int(xyz[0]), int(xyz[1])
 		line = next(
-			item
-			for item in lines
-			if (item.slice_type == 'inline' and x == item.array_index)
-			or (item.slice_type == 'crossline' and y == item.array_index)
+			(
+				item
+				for item in lines
+				if (item.slice_type == 'inline' and x == item.array_index)
+				or (item.slice_type == 'crossline' and y == item.array_index)
+			),
+			None,
 		)
-		result[f'{line.slice_type}:{line.slice_index}'] += 1
+		if line is None:
+			raise AssertionError('teacher voxel lies outside every active line')
+		owned.setdefault(line.key, []).append(int(flat))
+	return {key: tuple(values) for key, values in owned.items()}
+
+
+def _per_line_contributions(
+	selected: Sequence[TokenFootprint], lines: Sequence[SectionLine]
+) -> dict[str, int]:
+	"""Count the exact footprint ownership used by the coverage pass."""
+	expected = {line.key for line in lines}
+	result = {f'{line.slice_type}:{line.slice_index}': 0 for line in lines}
+	selected_flat: set[int] = set()
+	owned_flat: set[int] = set()
+	for footprint in selected:
+		flat = set(footprint.flat_voxel_indices)
+		if selected_flat & flat:
+			raise AssertionError('selected token footprints overlap')
+		selected_flat.update(flat)
+		for line_key, indices in footprint.per_line_flat_voxel_indices.items():
+			if line_key not in expected:
+				raise AssertionError('footprint ownership escaped active lines')
+			owned = set(indices)
+			if not owned <= flat or owned_flat & owned:
+				raise AssertionError('footprint line ownership is not disjoint')
+			owned_flat.update(owned)
+			result[f'{line_key[0]}:{line_key[1]}'] += len(indices)
+	if owned_flat != selected_flat:
+		raise AssertionError('footprint ownership does not cover teacher voxels')
 	return result
 
 
@@ -1024,14 +1075,6 @@ def _token_block(
 	start = tuple(coordinate[axis] * patch[axis] for axis in range(3))
 	stop = tuple(min(start[axis] + patch[axis], shape[axis]) for axis in range(3))
 	return tuple(slice(start[axis], stop[axis]) for axis in range(3))  # type: ignore[return-value]
-
-
-def _token_intersects_line(
-	coordinate: tuple[int, int, int], line: SectionLine, patch: tuple[int, int, int]
-) -> bool:
-	axis = 0 if line.slice_type == 'inline' else 1
-	start = coordinate[axis] * patch[axis]
-	return start <= line.array_index < start + patch[axis]
 
 
 def _validation_identity(grid: NDArray[np.integer], path: Path) -> dict[str, object]:
