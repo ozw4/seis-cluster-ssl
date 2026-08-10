@@ -171,6 +171,24 @@ Dry-run performs validation and planning with zero writes or stage execution.
 The explicit one-condition smoke mode stops at two optimizer steps and uses a
 disjoint non-scientific root and manifest.
 
+## Paired-layout result gate
+
+The generic summarizer treats `layout_id` as the paired statistical unit. It
+requires the exact five-layout by three-size complete matrix for every loaded
+model and rejects any mismatch in supervision, decoder initialization,
+sampling, tile, or metric-schema identity before computing a delta. For every
+comparison and size it reports the mean, median, sample standard deviation,
+wins, ties, losses, and all five per-layout deltas. It does not calculate
+p-values or confidence intervals and does not assert voxel independence.
+
+Formal parent status uses both Macro F1 and Mean IoU. `medium` and `large` must
+both satisfy strict positive evidence for `SECTION_LAYOUT_GO`; `small` is
+diagnostic only. Strict negative evidence at both sizes, or the same monitored
+class 3/5 metric degrading by at least 0.05 at two or more sizes, produces
+`SECTION_LAYOUT_STOP`; every other case is `SECTION_LAYOUT_HOLD`. Diagnostic
+roster models receive metrics and a formal status but remain selection
+ineligible. Project adoption remains `PENDING_REVIEW`.
+
 ## Historical evidence
 
 The earlier `cap25/cap50/cap100` by subsample seed `0..4` experiments and the

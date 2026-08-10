@@ -72,4 +72,12 @@ incomplete `latest.pt` is resumed only with `--resume`. Partial model-owned
 outputs require explicit `--only-missing --quarantine-invalid`; foreign model,
 dataset, embedding, or decoder identities remain errors and are not blessed by
 quarantine. This stage does not extract missing embeddings and does not produce
-a cross-model result summary.
+a cross-model result summary. The separate generic results stage reads these
+manifests without adding model-specific aggregators.
+
+`05_summarize_section_layout_benchmark.yaml` has two modes. One-model review
+uses `--model-id <id> --no-publish` and writes below that model's artifact run
+directory. Final mode uses no model flag, requires all 14 complete manifests,
+and writes only the seven contract-named lightweight CSV, JSON, and Markdown
+files. It creates no publish manifest and does not select a global winner or
+project adoption automatically.

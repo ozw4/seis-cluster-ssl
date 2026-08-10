@@ -22,6 +22,11 @@ PROC_SCRIPTS = tuple(
 )
 
 HELP_FLAG_CONTRACTS = {
+	'summarize_f3_lithology_voxel_section_layout.py': (
+		'--config',
+		'--model-id',
+		'--no-publish',
+	),
 	'run_f3_lithology_voxel_section_layout_suite.py': (
 		'--config',
 		'--model-id',
