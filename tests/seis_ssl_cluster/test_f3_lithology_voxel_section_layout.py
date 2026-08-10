@@ -6,6 +6,7 @@ import csv
 import hashlib
 import json
 import sys
+import weakref
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -53,6 +54,7 @@ def test_inspection_derives_exact_common_condition_matrix(tmp_path: Path) -> Non
 		for size in ('small', 'medium', 'large')
 	]
 	for condition in inspection.conditions:
+		assert not hasattr(condition, 'grid')
 		expected = {'small': 1, 'medium': 2, 'large': 4}[condition.data_size]
 		assert len(condition.active_inlines) == expected
 		assert len(condition.active_crosslines) == expected
@@ -68,9 +70,14 @@ def test_inspection_derives_exact_common_condition_matrix(tmp_path: Path) -> Non
 
 
 def test_live_grids_use_only_partial_active_plane_footprints(tmp_path: Path) -> None:
-	inspection = inspect_f3_lithology_voxel_section_layout_datasets(_fixture(tmp_path))
-	for condition in inspection.conditions:
-		train = condition.grid == 1
+	config = _fixture(tmp_path)
+	inspection = inspect_f3_lithology_voxel_section_layout_datasets(config)
+	result = build_f3_lithology_voxel_section_layout_datasets(config)
+	for condition, root in zip(
+		inspection.conditions, result.condition_roots, strict=True
+	):
+		grid = np.load(root / GRID_NAME, mmap_mode='r', allow_pickle=False)
+		train = grid == 1
 		active = np.zeros(train.shape, dtype=np.bool_)
 		for line in condition.active_inlines:
 			active[line - 100, :, :] = True
@@ -79,7 +86,7 @@ def test_live_grids_use_only_partial_active_plane_footprints(tmp_path: Path) -> 
 		assert not np.any(train & ~active)
 		assert np.any(active & (inspection.canonical_grid == 1) & ~train)
 		assert np.any((inspection.canonical_grid == 1) & ~train)
-		assert np.array_equal(condition.grid == 2, inspection.canonical_grid == 2)
+		assert np.array_equal(grid == 2, inspection.canonical_grid == 2)
 
 
 def test_build_writes_exact_files_and_preserves_dense_labels(tmp_path: Path) -> None:
@@ -115,20 +122,57 @@ def test_train_masks_and_selected_tokens_are_nested_and_deterministic(
 	first = inspect_f3_lithology_voxel_section_layout_datasets(config)
 	second = inspect_f3_lithology_voxel_section_layout_datasets(config)
 	for left, right in zip(first.conditions, second.conditions, strict=True):
-		assert np.array_equal(left.grid, right.grid)
 		assert np.array_equal(left.selected_token_xyz, right.selected_token_xyz)
+		assert left.train_mask_sha256 == right.train_mask_sha256
+		assert left.grid_array_sha256 == right.grid_array_sha256
 	by_key = {(item.layout_id, item.data_size): item for item in first.conditions}
 	for layout_id in (f'layout_{index:03d}' for index in range(5)):
-		small = by_key[(layout_id, 'small')].grid == 1
-		medium = by_key[(layout_id, 'medium')].grid == 1
-		large = by_key[(layout_id, 'large')].grid == 1
-		assert not np.any(small & ~medium)
-		assert not np.any(medium & ~large)
+		small = {
+			tuple(row) for row in by_key[(layout_id, 'small')].selected_token_xyz
+		}
+		medium = {
+			tuple(row) for row in by_key[(layout_id, 'medium')].selected_token_xyz
+		}
+		large = {
+			tuple(row) for row in by_key[(layout_id, 'large')].selected_token_xyz
+		}
+		assert small < medium
+		assert medium < large
 	build = build_f3_lithology_voxel_section_layout_datasets(config)
 	manifest_before = build.manifest_json.read_bytes()
 	reused = build_f3_lithology_voxel_section_layout_datasets(config, only_missing=True)
 	assert {row['action'] for row in reused.rows} == {'REUSED'}
 	assert reused.manifest_json.read_bytes() == manifest_before
+
+
+def test_inspection_is_compact_and_build_releases_each_materialized_grid(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = _fixture(tmp_path)
+	original = builder_module._materialize_condition_grid  # noqa: SLF001
+	monkeypatch.setattr(
+		builder_module,
+		'_materialize_condition_grid',
+		lambda *_args, **_kwargs: pytest.fail('inspection materialized a grid'),
+	)
+	inspection = inspect_f3_lithology_voxel_section_layout_datasets(config)
+	assert len(inspection.conditions) == 15
+	assert all(not hasattr(condition, 'grid') for condition in inspection.conditions)
+
+	references: list[weakref.ReferenceType[np.ndarray]] = []
+
+	def track_materialization(*args: object, **kwargs: object) -> np.ndarray:
+		assert all(reference() is None for reference in references)
+		grid = original(*args, **kwargs)  # type: ignore[arg-type]
+		references.append(weakref.ref(grid))
+		return grid
+
+	monkeypatch.setattr(
+		builder_module, '_materialize_condition_grid', track_materialization
+	)
+	result = build_f3_lithology_voxel_section_layout_datasets(config)
+	assert len(result.rows) == 15
+	assert len(references) == 15
 
 
 def test_source_shape_dtype_hash_class_and_validation_drift_fail_closed(

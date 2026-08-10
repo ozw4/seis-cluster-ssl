@@ -66,6 +66,7 @@ SUMMARY_NAME = 'summary.md'
 ARTIFACT_TYPE = 'f3_lithology_voxel_section_layout_dataset'
 MANIFEST_ARTIFACT_TYPE = 'f3_lithology_voxel_section_layout_dataset_manifest'
 SCHEMA_VERSION = 1
+_STREAM_CHUNK_VOXELS = 1_048_576
 REQUIRED_CONDITION_FILES = (
 	GRID_NAME,
 	TOKEN_NAME,
@@ -78,7 +79,7 @@ REQUIRED_CONDITION_FILES = (
 
 
 @dataclass(frozen=True)
-class _Condition:
+class _ConditionPlan:
 	layout_id: str
 	data_size: str
 	output_dir: Path
@@ -97,7 +98,6 @@ class _Condition:
 	validation_mask_sha256: str
 	grid_array_sha256: str
 	parent_size: str | None
-	grid: NDArray[np.integer]
 
 
 @dataclass(frozen=True)
@@ -111,7 +111,8 @@ class _Inspection:
 	geometry: F3LineGeometry
 	class_ids: tuple[int, ...]
 	class_names: tuple[str, ...]
-	conditions: tuple[_Condition, ...]
+	conditions: tuple[_ConditionPlan, ...]
+	line_array_indices: Mapping[tuple[str, int], int]
 	source_identities: Mapping[str, Mapping[str, str]]
 	validation_mask_sha256: str
 	validation_voxel_count: int
@@ -211,8 +212,8 @@ def inspect_f3_lithology_voxel_section_layout_datasets(  # noqa: C901, PLR0912, 
 		config=config,
 		canonical_grid=canonical_files['canonical_split_grid'],
 	)
-	validation_hash, validation_count = _plain_mask_identity(
-		grid == VALIDATION_VOXEL_SPLIT
+	validation_hash, validation_count = _split_mask_identity(
+		grid, VALIDATION_VOXEL_SPLIT
 	)
 	_validate_contract_validation_identity(
 		contract_payload,
@@ -243,7 +244,13 @@ def inspect_f3_lithology_voxel_section_layout_datasets(  # noqa: C901, PLR0912, 
 		size: contract.layouts[0].size_by_name[size].target_train_voxel_count
 		for size in DATA_SIZES
 	}
-	conditions: list[_Condition] = []
+	validation_class_counts = _split_class_counts(
+		labels,
+		grid,
+		split_code=VALIDATION_VOXEL_SPLIT,
+		class_ids=class_ids,
+	)
+	conditions: list[_ConditionPlan] = []
 	for layout in contract.layouts:
 		layout_lines = LayoutLines(
 			layout.layout_id,
@@ -262,20 +269,21 @@ def inspect_f3_lithology_voxel_section_layout_datasets(  # noqa: C901, PLR0912, 
 		for preview in previews:
 			_validate_preview_matches_contract(contract_payload, preview=preview)
 			conditions.append(
-				_condition_from_preview(
+				_condition_plan_from_preview(
 					preview,
 					layout=layout_lines,
 					canonical_grid=grid,
 					labels=labels,
 					valid_tokens=cast('NDArray[np.bool_]', valid_tokens),
-					patch=patch,
 					class_ids=class_ids,
 					line_array_indices=line_array_indices,
 					output_root=config.output_root,
 					allowed_relative_error=contract.allowed_relative_error,
+					validation_mask_sha256=validation_hash,
+					validation_class_counts=validation_class_counts,
 				)
 			)
-	_validate_condition_matrix(conditions, canonical_grid=grid)
+	_validate_condition_plan_matrix(conditions)
 	source_identities = {
 		'section_layout_contract': _identity(config.section_layout_contract),
 		'canonical_voxel_dataset_metadata': _identity(
@@ -303,6 +311,7 @@ def inspect_f3_lithology_voxel_section_layout_datasets(  # noqa: C901, PLR0912, 
 		class_ids=class_ids,
 		class_names=class_names,
 		conditions=tuple(conditions),
+		line_array_indices=line_array_indices,
 		source_identities=source_identities,
 		validation_mask_sha256=validation_hash,
 		validation_voxel_count=validation_count,
@@ -328,7 +337,7 @@ def validate_f3_lithology_voxel_section_layout_condition(  # noqa: C901
 	root: str | Path,
 	*,
 	inspection: _Inspection | None = None,
-	condition: _Condition | None = None,
+	condition: _ConditionPlan | None = None,
 ) -> Mapping[str, object]:
 	"""Reload and validate one exact seven-file condition artifact."""
 	condition_root = Path(root)
@@ -370,14 +379,18 @@ def validate_f3_lithology_voxel_section_layout_condition(  # noqa: C901
 	if not np.issubdtype(grid.dtype, np.integer) or grid.dtype == np.dtype(np.bool_):
 		raise TypeError('condition grid must use an integer dtype')
 	_validate_split_codes(cast('NDArray[np.integer]', grid))
+	train_mask_sha256, actual_train_voxel_count = _split_mask_identity(
+		cast('NDArray[np.integer]', grid), TRAIN_VOXEL_SPLIT
+	)
+	validation_mask_sha256, validation_voxel_count = _split_mask_identity(
+		cast('NDArray[np.integer]', grid), VALIDATION_VOXEL_SPLIT
+	)
 	checks = {
 		'grid_array_sha256': _array_sha256(grid),
-		'train_mask_sha256': _plain_mask_identity(grid == TRAIN_VOXEL_SPLIT)[0],
-		'validation_mask_sha256': _plain_mask_identity(grid == VALIDATION_VOXEL_SPLIT)[
-			0
-		],
-		'actual_train_voxel_count': int(np.count_nonzero(grid == TRAIN_VOXEL_SPLIT)),
-		'validation_voxel_count': int(np.count_nonzero(grid == VALIDATION_VOXEL_SPLIT)),
+		'train_mask_sha256': train_mask_sha256,
+		'validation_mask_sha256': validation_mask_sha256,
+		'actual_train_voxel_count': actual_train_voxel_count,
+		'validation_voxel_count': validation_voxel_count,
 		'selected_token_count': int(tokens.shape[0]),
 		'selected_token_identity_sha256': _array_sha256(tokens),
 	}
@@ -493,61 +506,39 @@ def validate_f3_lithology_voxel_section_layout_manifest(  # noqa: C901, PLR0912
 	return cast('Mapping[str, object]', payload)
 
 
-def _condition_from_preview(  # noqa: C901, PLR0913
+def _condition_plan_from_preview(  # noqa: PLR0913
 	preview: SelectionPreview,
 	*,
 	layout: LayoutLines,
 	canonical_grid: NDArray[np.integer],
 	labels: NDArray[np.integer],
 	valid_tokens: NDArray[np.bool_],
-	patch: tuple[int, int, int],
 	class_ids: tuple[int, ...],
 	line_array_indices: Mapping[tuple[str, int], int],
 	output_root: Path,
 	allowed_relative_error: float,
-) -> _Condition:
+	validation_mask_sha256: str,
+	validation_class_counts: Mapping[str, int],
+) -> _ConditionPlan:
 	tokens = np.asarray(preview.selected_token_xyz, dtype=np.int64)
 	_validate_token_array(tokens)
 	if np.any(tokens >= np.asarray(valid_tokens.shape, dtype=np.int64)):
 		raise ValueError('selected token coordinate lies outside token grid')
 	if np.any(~valid_tokens[tuple(tokens.T)]):
 		raise ValueError('selected token coordinate is invalid in reference mask')
-	active = _active_plane_mask(
-		canonical_grid.shape,
-		preview.inline_lines,
-		preview.crossline_lines,
-		geometry_lines=line_array_indices,
+	selected_flat = _validate_preview_flat_voxel_indices(
+		preview,
+		tokens=tokens,
+		canonical_grid=canonical_grid,
+		labels=labels,
+		valid_token_shape=cast('tuple[int, int, int]', valid_tokens.shape),
+		class_ids=class_ids,
+		line_array_indices=line_array_indices,
 	)
-	selected_voxels = np.zeros(canonical_grid.shape, dtype=np.bool_)
-	if preview.selected_flat_voxel_indices:
-		selected_voxels.reshape(-1)[
-			np.asarray(preview.selected_flat_voxel_indices, dtype=np.int64)
-		] = True
-	# Reconstruct token blocks, then constrain them to the exact active planes.
-	block_mask = _selected_token_block_mask(
-		tokens, patch=patch, shape=canonical_grid.shape
-	)
-	if np.any(selected_voxels & ~block_mask):
-		raise ValueError('preview teacher voxel lies outside selected token blocks')
-	known = np.isin(labels, np.asarray(class_ids, dtype=labels.dtype))
-	expected_candidates = (
-		block_mask & active & (canonical_grid == TRAIN_VOXEL_SPLIT) & known
-	)
-	if not np.array_equal(selected_voxels, expected_candidates):
-		raise ValueError(
-			'preview teacher voxels differ from selected-token active-plane footprints'
-		)
-	grid = np.full(
-		canonical_grid.shape,
-		UNSUPERVISED_VOXEL_SPLIT,
-		dtype=canonical_grid.dtype,
-	)
-	grid[selected_voxels] = TRAIN_VOXEL_SPLIT
-	grid[canonical_grid == VALIDATION_VOXEL_SPLIT] = VALIDATION_VOXEL_SPLIT
-	actual = int(np.count_nonzero(grid == TRAIN_VOXEL_SPLIT))
+	actual = int(selected_flat.size)
 	if actual != preview.actual_train_voxel_count:
-		raise ValueError('live train voxel count differs from selection preview')
-	if actual == int(np.count_nonzero(canonical_grid == TRAIN_VOXEL_SPLIT)):
+		raise ValueError('teacher voxel count differs from selection preview')
+	if actual == _count_split_code(canonical_grid, TRAIN_VOXEL_SPLIT):
 		raise ValueError('section-layout condition must not select full train grid')
 	relative = (
 		abs(actual - preview.target_train_voxel_count)
@@ -555,19 +546,21 @@ def _condition_from_preview(  # noqa: C901, PLR0913
 	)
 	if relative > allowed_relative_error + 1e-15:
 		raise ValueError('live train voxel count exceeds contract tolerance')
-	train_counts = _class_counts(labels, grid == TRAIN_VOXEL_SPLIT, class_ids)
-	validation_counts = _class_counts(labels, grid == VALIDATION_VOXEL_SPLIT, class_ids)
+	train_counts = dict(preview.per_class_voxel_counts)
 	if any(train_counts[str(class_id)] <= 0 for class_id in class_ids):
-		raise ValueError('live train grid is missing a required class')
-	if train_counts != dict(preview.per_class_voxel_counts):
-		raise ValueError('live train class counts differ from selection preview')
+		raise ValueError('selection preview is missing a required class')
+	if sum(train_counts.values()) != actual:
+		raise ValueError('selection preview class counts do not sum to actual count')
 	if sum(preview.per_line_contributions.values()) != actual:
 		raise ValueError('per-line contributions double-count intersections')
 	if any(value <= 0 for value in preview.per_line_contributions.values()):
 		raise ValueError('an active line contributes zero teacher voxels')
 	data_index = DATA_SIZES.index(preview.data_size)
 	parent_size = None if data_index == 0 else DATA_SIZES[data_index - 1]
-	return _Condition(
+	train_hash, grid_hash = _planned_grid_identities(
+		canonical_grid, selected_train_flat_indices=selected_flat
+	)
+	return _ConditionPlan(
 		layout_id=preview.layout_id,
 		data_size=preview.data_size,
 		output_dir=(
@@ -587,38 +580,41 @@ def _condition_from_preview(  # noqa: C901, PLR0913
 		selected_token_xyz=tokens,
 		per_line_contributions=dict(preview.per_line_contributions),
 		per_class_train_voxel_counts=train_counts,
-		per_class_validation_voxel_counts=validation_counts,
-		train_mask_sha256=_plain_mask_identity(grid == TRAIN_VOXEL_SPLIT)[0],
-		validation_mask_sha256=_plain_mask_identity(grid == VALIDATION_VOXEL_SPLIT)[0],
-		grid_array_sha256=_array_sha256(grid),
+		per_class_validation_voxel_counts=dict(validation_class_counts),
+		train_mask_sha256=train_hash,
+		validation_mask_sha256=validation_mask_sha256,
+		grid_array_sha256=grid_hash,
 		parent_size=parent_size,
-		grid=grid,
 	)
 
 
-def _validate_condition_matrix(
-	conditions: Sequence[_Condition], *, canonical_grid: NDArray[np.integer]
+def _validate_condition_plan_matrix(
+	conditions: Sequence[_ConditionPlan],
 ) -> None:
 	expected = tuple((layout, size) for layout in LAYOUT_IDS for size in DATA_SIZES)
 	actual = tuple((item.layout_id, item.data_size) for item in conditions)
 	if actual != expected:
 		raise ValueError('conditions must be the exact ordered 5 by 3 matrix')
-	validation = canonical_grid == VALIDATION_VOXEL_SPLIT
-	for condition in conditions:
-		if not np.array_equal(condition.grid == VALIDATION_VOXEL_SPLIT, validation):
-			raise ValueError('validation mask changed across conditions')
-		if np.any(
-			(condition.grid == TRAIN_VOXEL_SPLIT)
-			& (condition.grid == VALIDATION_VOXEL_SPLIT)
-		):
-			raise ValueError('train and validation overlap')
 	by_key = {(item.layout_id, item.data_size): item for item in conditions}
 	for layout_id in LAYOUT_IDS:
-		masks = [
-			by_key[(layout_id, size)].grid == TRAIN_VOXEL_SPLIT for size in DATA_SIZES
-		]
-		if np.any(masks[0] & ~masks[1]) or np.any(masks[1] & ~masks[2]):
-			raise ValueError(f'{layout_id} live train masks are not nested')
+		small, medium, large = (by_key[(layout_id, size)] for size in DATA_SIZES)
+		if (
+			medium.active_inlines[: len(small.active_inlines)]
+			!= small.active_inlines
+			or large.active_inlines[: len(medium.active_inlines)]
+			!= medium.active_inlines
+			or medium.active_crosslines[: len(small.active_crosslines)]
+			!= small.active_crosslines
+			or large.active_crosslines[: len(medium.active_crosslines)]
+			!= medium.active_crosslines
+		):
+			raise ValueError(f'{layout_id} active line prefixes are not nested')
+		if not _sorted_token_rows_are_subset(
+			small.selected_token_xyz, medium.selected_token_xyz
+		) or not _sorted_token_rows_are_subset(
+			medium.selected_token_xyz, large.selected_token_xyz
+		):
+			raise ValueError(f'{layout_id} selected token plans are not nested')
 
 
 def _build_new_suite(inspection: _Inspection) -> _BuildResult:
@@ -631,12 +627,17 @@ def _build_new_suite(inspection: _Inspection) -> _BuildResult:
 		rows = []
 		for condition in inspection.conditions:
 			stage_root = _stage_condition_root(staging, root, condition.output_dir)
-			_write_condition_files(
-				stage_root,
-				recorded_root=condition.output_dir,
-				condition=condition,
-				inspection=inspection,
-			)
+			grid = _materialize_condition_grid(condition, inspection=inspection)
+			try:
+				_write_condition_files(
+					stage_root,
+					recorded_root=condition.output_dir,
+					condition=condition,
+					grid=grid,
+					inspection=inspection,
+				)
+			finally:
+				del grid
 			rows.append(
 				validate_f3_lithology_voxel_section_layout_condition(
 					stage_root, inspection=inspection, condition=condition
@@ -665,7 +666,7 @@ def _build_only_missing(  # noqa: C901, PLR0912, PLR0915
 	root = inspection.config.output_root
 	manifest_path = root / DATASET_MANIFEST_NAME
 	statuses: list[
-		tuple[_Condition, Mapping[str, object] | None, BaseException | None]
+		tuple[_ConditionPlan, Mapping[str, object] | None, BaseException | None]
 	] = []
 	for condition in inspection.conditions:
 		if not condition.output_dir.exists():
@@ -712,12 +713,17 @@ def _build_only_missing(  # noqa: C901, PLR0912, PLR0915
 			)
 		)
 		try:
-			_write_condition_files(
-				staging,
-				recorded_root=condition.output_dir,
-				condition=condition,
-				inspection=inspection,
-			)
+			grid = _materialize_condition_grid(condition, inspection=inspection)
+			try:
+				_write_condition_files(
+					staging,
+					recorded_root=condition.output_dir,
+					condition=condition,
+					grid=grid,
+					inspection=inspection,
+				)
+			finally:
+				del grid
 			built_row = validate_f3_lithology_voxel_section_layout_condition(
 				staging, inspection=inspection, condition=condition
 			)
@@ -759,13 +765,14 @@ def _write_condition_files(
 	root: Path,
 	*,
 	recorded_root: Path,
-	condition: _Condition,
+	condition: _ConditionPlan,
+	grid: NDArray[np.integer],
 	inspection: _Inspection,
 ) -> None:
 	if root.exists() and any(root.iterdir()):
 		raise FileExistsError(f'non-empty staging condition root: {root}')
 	root.mkdir(parents=True, exist_ok=True)
-	np.save(root / GRID_NAME, condition.grid, allow_pickle=False)
+	np.save(root / GRID_NAME, grid, allow_pickle=False)
 	np.save(root / TOKEN_NAME, condition.selected_token_xyz, allow_pickle=False)
 	shutil.copyfile(
 		Path(inspection.source_identities['canonical_split_manifest']['path']),
@@ -827,10 +834,9 @@ def _validate_committed_condition(  # noqa: PLR0913
 	grid: NDArray[np.integer],
 	tokens: NDArray[np.integer],
 	inspection: _Inspection,
-	condition: _Condition,
+	condition: _ConditionPlan,
 ) -> None:
-	if not np.array_equal(grid, condition.grid):
-		raise ValueError('committed condition grid content mismatch')
+	_validate_materialized_grid(grid, condition=condition, inspection=inspection)
 	if not np.array_equal(tokens, condition.selected_token_xyz):
 		raise ValueError('committed selected token coordinates mismatch')
 	if metadata.get('identity') != _condition_identity(
@@ -858,7 +864,7 @@ def _validate_committed_condition(  # noqa: PLR0913
 
 
 def _condition_identity(
-	condition: _Condition, *, inspection: _Inspection
+	condition: _ConditionPlan, *, inspection: _Inspection
 ) -> dict[str, object]:
 	return {
 		'layout_id': condition.layout_id,
@@ -885,7 +891,7 @@ def _condition_identity(
 
 
 def _voxel_metadata(
-	condition: _Condition, *, inspection: _Inspection, recorded_root: Path
+	condition: _ConditionPlan, *, inspection: _Inspection, recorded_root: Path
 ) -> dict[str, object]:
 	payload = json.loads(json.dumps(inspection.canonical_metadata))
 	payload['outputs'] = {
@@ -963,7 +969,7 @@ def _validate_existing_manifest(
 	*,
 	inspection: _Inspection,
 	statuses: Sequence[
-		tuple[_Condition, Mapping[str, object] | None, BaseException | None]
+		tuple[_ConditionPlan, Mapping[str, object] | None, BaseException | None]
 	],
 ) -> None:
 	if any(row is None or error is not None for _condition, row, error in statuses):
@@ -1260,46 +1266,243 @@ def _validate_reference_validity(
 		raise ValueError('canonical supervision intersects an invalid reference token')
 
 
-def _selected_token_block_mask(
-	tokens: NDArray[np.integer],
+def _validate_preview_flat_voxel_indices(  # noqa: C901, PLR0913
+	preview: SelectionPreview,
 	*,
-	patch: tuple[int, int, int],
-	shape: tuple[int, ...],
-) -> NDArray[np.bool_]:
-	mask = np.zeros(shape, dtype=np.bool_)
-	for coordinate in tokens:
-		start = tuple(int(coordinate[axis]) * patch[axis] for axis in range(3))
-		stop = tuple(min(start[axis] + patch[axis], shape[axis]) for axis in range(3))
-		mask[tuple(slice(start[axis], stop[axis]) for axis in range(3))] = True
-	return mask
+	tokens: NDArray[np.int64],
+	canonical_grid: NDArray[np.integer],
+	labels: NDArray[np.integer],
+	valid_token_shape: tuple[int, int, int],
+	class_ids: tuple[int, ...],
+	line_array_indices: Mapping[tuple[str, int], int],
+) -> NDArray[np.int64]:
+	flat = np.asarray(preview.selected_flat_voxel_indices, dtype=np.int64)
+	if flat.ndim != 1 or flat.size == 0:
+		raise ValueError('selection preview must contain flat teacher voxel indices')
+	flat = np.sort(flat)
+	if flat[0] < 0 or flat[-1] >= canonical_grid.size:
+		raise ValueError('selection preview teacher voxel lies outside volume')
+	if np.any(flat[1:] == flat[:-1]):
+		raise ValueError('selection preview double-counts a teacher voxel')
+	inline_indices = np.asarray(
+		[line_array_indices[('inline', value)] for value in preview.inline_lines],
+		dtype=np.int64,
+	)
+	crossline_indices = np.asarray(
+		[
+			line_array_indices[('crossline', value)]
+			for value in preview.crossline_lines
+		],
+		dtype=np.int64,
+	)
+	token_linear = np.ravel_multi_index(tokens.T, valid_token_shape)
+	known = np.asarray(class_ids, dtype=labels.dtype)
+	class_counts = {str(class_id): 0 for class_id in class_ids}
+	grid_flat = canonical_grid.reshape(-1)
+	label_flat = labels.reshape(-1)
+	for start in range(0, flat.size, _STREAM_CHUNK_VOXELS):
+		selected = flat[start : start + _STREAM_CHUNK_VOXELS]
+		xyz = np.unravel_index(selected, canonical_grid.shape)
+		active = np.isin(xyz[0], inline_indices) | np.isin(
+			xyz[1], crossline_indices
+		)
+		if not np.all(active):
+			raise ValueError(
+				'selection preview teacher voxel lies outside active lines'
+			)
+		voxel_tokens = tuple(
+			xyz[axis] // PATCH_SIZE[axis] for axis in range(3)
+		)
+		selected_token_linear = np.ravel_multi_index(
+			voxel_tokens, valid_token_shape
+		)
+		positions = np.searchsorted(token_linear, selected_token_linear)
+		if np.any(positions >= token_linear.size) or np.any(
+			token_linear[np.minimum(positions, token_linear.size - 1)]
+			!= selected_token_linear
+		):
+			raise ValueError(
+				'selection preview teacher voxel lies outside selected token blocks'
+			)
+		if np.any(grid_flat[selected] != TRAIN_VOXEL_SPLIT):
+			raise ValueError('selection preview teacher voxel is not canonical train')
+		selected_labels = label_flat[selected]
+		if np.any(~np.isin(selected_labels, known)):
+			raise ValueError('selection preview teacher voxel has an unknown class')
+		for class_id in class_ids:
+			class_counts[str(class_id)] += int(
+				np.count_nonzero(selected_labels == class_id)
+			)
+	if class_counts != dict(preview.per_class_voxel_counts):
+		raise ValueError('selection preview teacher class counts are inconsistent')
+	return flat
 
 
-def _active_plane_mask(
-	shape: tuple[int, ...],
-	inlines: Sequence[int],
-	crosslines: Sequence[int],
+def _planned_grid_identities(
+	canonical_grid: NDArray[np.integer],
 	*,
-	geometry_lines: Mapping[tuple[str, int], int],
-) -> NDArray[np.bool_]:
-	mask = np.zeros(shape, dtype=np.bool_)
-	for value in inlines:
-		mask[geometry_lines[('inline', value)], :, :] = True
-	for value in crosslines:
-		mask[:, geometry_lines[('crossline', value)], :] = True
-	return mask
+	selected_train_flat_indices: NDArray[np.int64],
+) -> tuple[str, str]:
+	train_hasher = hashlib.sha256()
+	grid_hasher = hashlib.sha256()
+	grid_hasher.update(canonical_grid.dtype.str.encode('ascii'))
+	grid_hasher.update(
+		json.dumps(list(canonical_grid.shape), separators=(',', ':')).encode('ascii')
+	)
+	canonical_flat = canonical_grid.reshape(-1)
+	for start in range(0, canonical_grid.size, _STREAM_CHUNK_VOXELS):
+		stop = min(start + _STREAM_CHUNK_VOXELS, canonical_grid.size)
+		train = np.zeros(stop - start, dtype=np.bool_)
+		left = int(np.searchsorted(selected_train_flat_indices, start))
+		right = int(np.searchsorted(selected_train_flat_indices, stop))
+		train[selected_train_flat_indices[left:right] - start] = True
+		validation = canonical_flat[start:stop] == VALIDATION_VOXEL_SPLIT
+		if np.any(train & validation):
+			raise ValueError('planned train and validation voxels overlap')
+		grid = np.full(
+			stop - start,
+			UNSUPERVISED_VOXEL_SPLIT,
+			dtype=canonical_grid.dtype,
+		)
+		grid[train] = TRAIN_VOXEL_SPLIT
+		grid[validation] = VALIDATION_VOXEL_SPLIT
+		train_hasher.update(train.view(np.uint8))
+		grid_hasher.update(grid.view(np.uint8))
+	return train_hasher.hexdigest(), grid_hasher.hexdigest()
 
 
-def _class_counts(
-	labels: NDArray[np.integer], mask: NDArray[np.bool_], class_ids: Sequence[int]
-) -> dict[str, int]:
-	return {
-		str(class_id): int(np.count_nonzero(mask & (labels == class_id)))
-		for class_id in class_ids
+def _materialize_condition_grid(
+	condition: _ConditionPlan, *, inspection: _Inspection
+) -> NDArray[np.integer]:
+	grid = np.full(
+		inspection.canonical_grid.shape,
+		UNSUPERVISED_VOXEL_SPLIT,
+		dtype=inspection.canonical_grid.dtype,
+	)
+	grid_flat = grid.reshape(-1)
+	canonical_flat = inspection.canonical_grid.reshape(-1)
+	for start in range(0, grid.size, _STREAM_CHUNK_VOXELS):
+		stop = min(start + _STREAM_CHUNK_VOXELS, grid.size)
+		validation = canonical_flat[start:stop] == VALIDATION_VOXEL_SPLIT
+		grid_flat[start:stop][validation] = VALIDATION_VOXEL_SPLIT
+	inline_indices = {
+		inspection.line_array_indices[('inline', value)]
+		for value in condition.active_inlines
 	}
+	crossline_indices = {
+		inspection.line_array_indices[('crossline', value)]
+		for value in condition.active_crosslines
+	}
+	known = np.asarray(inspection.class_ids, dtype=inspection.label_volume.dtype)
+	for coordinate in condition.selected_token_xyz:
+		start = tuple(
+			int(coordinate[axis]) * PATCH_SIZE[axis] for axis in range(3)
+		)
+		stop = tuple(
+			min(start[axis] + PATCH_SIZE[axis], grid.shape[axis])
+			for axis in range(3)
+		)
+		slices = tuple(slice(start[axis], stop[axis]) for axis in range(3))
+		x = np.arange(start[0], stop[0], dtype=np.int64)
+		y = np.arange(start[1], stop[1], dtype=np.int64)
+		active = np.isin(x, tuple(inline_indices))[:, None, None] | np.isin(
+			y, tuple(crossline_indices)
+		)[None, :, None]
+		canonical = inspection.canonical_grid[slices]
+		labels = inspection.label_volume[slices]
+		teacher = (
+			active
+			& (canonical == TRAIN_VOXEL_SPLIT)
+			& np.isin(labels, known)
+		)
+		grid[slices][teacher] = TRAIN_VOXEL_SPLIT
+	_validate_materialized_grid(grid, condition=condition, inspection=inspection)
+	return cast('NDArray[np.integer]', grid)
+
+
+def _validate_materialized_grid(
+	grid: NDArray[np.integer],
+	*,
+	condition: _ConditionPlan,
+	inspection: _Inspection,
+) -> None:
+	if grid.shape != inspection.canonical_grid.shape:
+		raise ValueError('materialized condition grid shape mismatch')
+	if grid.dtype != inspection.canonical_grid.dtype:
+		raise TypeError('materialized condition grid dtype mismatch')
+	_validate_split_codes(grid)
+	train_hash, actual = _split_mask_identity(grid, TRAIN_VOXEL_SPLIT)
+	validation_hash, validation_count = _split_mask_identity(
+		grid, VALIDATION_VOXEL_SPLIT
+	)
+	checks = {
+		'train mask identity': (train_hash, condition.train_mask_sha256),
+		'validation mask identity': (
+			validation_hash,
+			condition.validation_mask_sha256,
+		),
+		'grid array identity': (_array_sha256(grid), condition.grid_array_sha256),
+	}
+	for label, (actual_value, expected_value) in checks.items():
+		if actual_value != expected_value:
+			raise ValueError(f'materialized condition {label} mismatch')
+	if actual != condition.actual_train_voxel_count:
+		raise ValueError('materialized condition train voxel count mismatch')
+	if validation_count != inspection.validation_voxel_count:
+		raise ValueError('materialized condition validation voxel count mismatch')
+	train_counts = _split_class_counts(
+		inspection.label_volume,
+		grid,
+		split_code=TRAIN_VOXEL_SPLIT,
+		class_ids=inspection.class_ids,
+	)
+	if train_counts != dict(condition.per_class_train_voxel_counts):
+		raise ValueError('materialized condition train class counts mismatch')
+
+
+def _split_class_counts(
+	labels: NDArray[np.integer],
+	grid: NDArray[np.integer],
+	*,
+	split_code: int,
+	class_ids: Sequence[int],
+) -> dict[str, int]:
+	counts = {str(class_id): 0 for class_id in class_ids}
+	label_flat = labels.reshape(-1)
+	grid_flat = grid.reshape(-1)
+	for start in range(0, grid.size, _STREAM_CHUNK_VOXELS):
+		stop = min(start + _STREAM_CHUNK_VOXELS, grid.size)
+		selected_labels = label_flat[start:stop][
+			grid_flat[start:stop] == split_code
+		]
+		for class_id in class_ids:
+			counts[str(class_id)] += int(
+				np.count_nonzero(selected_labels == class_id)
+			)
+	return counts
+
+
+def _sorted_token_rows_are_subset(
+	smaller: NDArray[np.int64], larger: NDArray[np.int64]
+) -> bool:
+	shape = tuple(
+		int(value) + 1
+		for value in np.maximum(smaller.max(axis=0), larger.max(axis=0))
+	)
+	smaller_linear = np.ravel_multi_index(smaller.T, shape)
+	larger_linear = np.ravel_multi_index(larger.T, shape)
+	positions = np.searchsorted(larger_linear, smaller_linear)
+	return bool(
+		np.all(positions < larger_linear.size)
+		and np.all(
+			larger_linear[np.minimum(positions, larger_linear.size - 1)]
+			== smaller_linear
+		)
+	)
 
 
 def _write_class_counts(
-	path: Path, *, condition: _Condition, inspection: _Inspection
+	path: Path, *, condition: _ConditionPlan, inspection: _Inspection
 ) -> None:
 	rows = _class_count_rows(condition=condition, inspection=inspection)
 	with path.open('w', encoding='utf-8', newline='') as handle:
@@ -1312,7 +1515,7 @@ def _write_class_counts(
 
 
 def _class_count_rows(
-	*, condition: _Condition, inspection: _Inspection
+	*, condition: _ConditionPlan, inspection: _Inspection
 ) -> list[dict[str, object]]:
 	rows: list[dict[str, object]] = []
 	for split, counts in (
@@ -1337,7 +1540,7 @@ def _class_count_rows(
 
 
 def _validate_condition_class_counts(
-	path: Path, *, condition: _Condition, inspection: _Inspection
+	path: Path, *, condition: _ConditionPlan, inspection: _Inspection
 ) -> None:
 	expected = _class_count_rows(condition=condition, inspection=inspection)
 	with path.open(newline='', encoding='utf-8') as handle:
@@ -1367,7 +1570,7 @@ def _validate_class_counts_csv(path: Path) -> None:
 			raise ValueError('condition class-count CSV is empty')
 
 
-def _render_summary(condition: _Condition) -> str:
+def _render_summary(condition: _ConditionPlan) -> str:
 	return '\n'.join(
 		[
 			'# F3 section-layout voxel supervision',
@@ -1466,12 +1669,22 @@ def _validate_token_array(array: NDArray[np.generic]) -> None:
 		)
 
 
-def _plain_mask_identity(mask: NDArray[np.bool_]) -> tuple[str, int]:
-	value = np.ascontiguousarray(mask, dtype=np.bool_)
-	return (
-		hashlib.sha256(value.tobytes()).hexdigest(),
-		int(np.count_nonzero(value)),
-	)
+def _split_mask_identity(
+	grid: NDArray[np.integer], split_code: int
+) -> tuple[str, int]:
+	hasher = hashlib.sha256()
+	count = 0
+	flat = grid.reshape(-1)
+	for start in range(0, grid.size, _STREAM_CHUNK_VOXELS):
+		stop = min(start + _STREAM_CHUNK_VOXELS, grid.size)
+		mask = np.ascontiguousarray(flat[start:stop] == split_code)
+		hasher.update(mask.view(np.uint8))
+		count += int(np.count_nonzero(mask))
+	return hasher.hexdigest(), count
+
+
+def _count_split_code(grid: NDArray[np.integer], split_code: int) -> int:
+	return _split_mask_identity(grid, split_code)[1]
 
 
 def _array_sha256(array: NDArray[np.generic]) -> str:
