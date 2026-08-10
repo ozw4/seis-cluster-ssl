@@ -29,10 +29,28 @@ contract only after every class, monitored-class, line-contribution, nesting,
 validation-identity, and target-error gate passes. Neither mode reads model
 metrics, checkpoints, or embeddings.
 
+After the user has finalized the canonical contract, validate the common
+15-condition dataset plan before writing anything:
+
+```bash
+PYTHONPATH=src python proc/seis_ssl_cluster/build_f3_lithology_voxel_section_layout_datasets.py \
+  --config experiments/f3/facies_benchmark_v1/109_f3_voxel_section_layout_v1/03_build_section_layout_datasets.yaml \
+  --dry-run
+```
+
+The builder replays the contract selection against the canonical arrays, then
+writes one model-independent voxel dataset for each layout/size condition. It
+never copies a token label over a block: only the selected token block's
+intersection with active train planes becomes teacher supervision. Canonical
+validation is retained bitwise. Existing output is refused by default;
+`--only-missing` reuses only complete validated conditions, and adding
+`--quarantine-invalid` explicitly moves invalid conditions aside before a
+rebuild.
+
 The statistical unit is `layout_id`, the validation mask is shared across all
 jobs, and every decoder uses seed 42000. Models with `selection_role:
 diagnostic` produce metrics but are ineligible for formal adoption.
 
-This directory contains no runner config. The calibration command is not a
-scientific model job; creating benchmark datasets, training decoders, running
-inference, or producing a summary remains outside this issue.
+This directory contains no model runner config. Calibration and common-dataset
+construction are not scientific model jobs; training decoders, running
+inference, and producing a result summary remain outside this issue.

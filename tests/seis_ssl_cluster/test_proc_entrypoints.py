@@ -22,6 +22,12 @@ PROC_SCRIPTS = tuple(
 )
 
 HELP_FLAG_CONTRACTS = {
+	'build_f3_lithology_voxel_section_layout_datasets.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+		'--quarantine-invalid',
+	),
 	'prepare_f3_lithology_voxel_section_layout_contract.py': (
 		'--config',
 		'--mode',

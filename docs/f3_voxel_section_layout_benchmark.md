@@ -74,6 +74,32 @@ not read the old cap manifests. Unknown fields, Boolean values supplied where
 integers are required, duplicate teacher lines, validation-line overlap, and
 non-nested selections fail closed.
 
+## Common voxel datasets
+
+`build_f3_lithology_voxel_section_layout_datasets.py` replays the canonical
+selection against the source grid instead of trusting preview counts. It writes
+the exact 15 rows in layout-ID order and `small`, `medium`, `large` order under
+`datasets/layout=<id>/size=<size>/voxel_supervision/`. Each condition contains
+only the split grid, selected token coordinates, two metadata files, class
+counts, the canonical split manifest, and a short summary.
+
+For each selected token, train supervision is the intersection of its clipped
+8³ block, the active inline/crossline plane union, canonical train, and known
+dense labels. The builder never supervises the remainder of a token block or a
+whole selected section. It rechecks live-mask nesting, all six classes,
+nonzero classes 3 and 5, positive contributions from every active line,
+count-error tolerance, and bitwise-identical validation across all 15
+conditions. Source shape, dtype, geometry, hashes, class order, reference-valid
+tokens, and validation identity are fail-closed inputs.
+
+The default build stages and reloads the complete suite before replacing the
+final directory. Existing output is refused. `--only-missing` reuses only exact
+complete conditions; stale or partial output is rejected unless
+`--quarantine-invalid` explicitly moves it to a timestamped sibling. Dry-run
+performs source validation and prints the 15-condition plan without writes or
+quarantines. These datasets are model-independent and shared by all 14 roster
+members.
+
 ## Fixed decoder
 
 All roster members use the same `frozen_embedding_decoder_nearest_voxel_ln_v1`

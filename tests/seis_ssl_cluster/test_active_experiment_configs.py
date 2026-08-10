@@ -90,6 +90,9 @@ from seis_ssl_cluster.config.f3_lithology_voxel_robustness import (
 	f3_lithology_voxel_split_summary_config_from_mapping,
 	f3_lithology_voxel_v0_split_suite_config_from_mapping,
 )
+from seis_ssl_cluster.config.f3_lithology_voxel_section_layout_dataset import (
+	f3_lithology_voxel_section_layout_dataset_config_from_mapping,
+)
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout_roster import (
 	EXPECTED_MODEL_IDS,
 	f3_lithology_voxel_section_layout_model_roster_from_mapping,
@@ -183,6 +186,9 @@ F3_SECTION_LAYOUT_MODEL_ROSTER_CONFIG = (
 )
 F3_SECTION_LAYOUT_CALIBRATION_CONFIG = (
 	F3_ROOT / '109_f3_voxel_section_layout_v1/01_prepare_section_layout_contract.yaml'
+)
+F3_SECTION_LAYOUT_DATASET_CONFIG = (
+	F3_ROOT / '109_f3_voxel_section_layout_v1/03_build_section_layout_datasets.yaml'
 )
 F3_INSPECTION_STAGES = {
 	'01_inspect_files.yaml': STAGE_F3_INSPECT_FILES,
@@ -1580,6 +1586,24 @@ def test_active_f3_section_layout_calibration_config_resolves(
 	assert config.selection_semantics == SELECTION_SEMANTICS
 	assert config.patch_size_xyz == (8, 8, 8)
 	assert config.allowed_relative_error == 0.05
+
+
+def test_active_f3_section_layout_dataset_config_resolves(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	config = f3_lithology_voxel_section_layout_dataset_config_from_mapping(
+		load_config(F3_SECTION_LAYOUT_DATASET_CONFIG)
+	)
+
+	assert config.section_layout_contract.name == (
+		'f3_voxel_section_layout_contract.json'
+	)
+	assert config.canonical_voxel_dataset.name == 'png_slices_segy_labels_v1'
+	assert config.output_root.name == 'datasets_v1'
 
 
 def test_active_f3_voxel_paired_experiment_contract() -> None:
