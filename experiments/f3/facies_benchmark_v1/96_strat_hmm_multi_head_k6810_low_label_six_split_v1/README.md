@@ -44,8 +44,3 @@ of `mh_nocons` across all splits.
 
 This adoption is a project development decision; it does not reinterpret the
 formal `M4_MH_SPLIT_HOLD` result as `CONFIRMED`.
-
-## Next stage
-
-Proceed to [M5-U — Posterior-aware soft multi-resolution HMM
-pretraining](../../../../docs/f3_m5_soft_posterior_pretraining_plan.md).
