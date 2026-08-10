@@ -16,33 +16,58 @@ an inventory path.
 
 ## Calibration handoff
 
-Concrete line numbers and target voxel counts are intentionally not fixed in
-this repository change. A later calibration tool will select the lines and set
-one positive integer target for each data size. The same size target must be
-used by all five layouts. Those targets are calculated from the median
-`actual_train_voxel_count` of the corresponding historical cap datasets.
+Concrete line numbers and target voxel counts are not checked into the example
+layout file. The user runs
+`prepare_f3_lithology_voxel_section_layout_contract.py` in `inspect` mode,
+reviews the candidate report, supplies five ordered 4+4 layouts, then runs
+`finalize`. The same size target is used by all five layouts. Targets are the
+integer medians of the five canonical `actual_train_voxel_count` values for
+`cap25`, `cap50`, and `cap100`; the exact 15-row budget/seed matrix is required.
 
 The resulting handoff has schema version
 `f3_voxel_section_layout_contract_v1`. Its closed top-level fields are:
 
 ```yaml
 schema_version: f3_voxel_section_layout_contract_v1
+artifact_type: f3_lithology_voxel_section_layout_contract
 statistical_unit: layout_id
 nesting_semantics: strict_small_medium_large
 validation_mask_semantics: shared_across_all_layouts_sizes_and_models
-stable_selection_semantics: stable_sha256_voxel_rank_v1
+selection_semantics: stable_hash_partial_section_token_footprints_v1
+stable_selection_semantics: stable_hash_partial_section_token_footprints_v1
 patch_size: [8, 8, 8]
+patch_size_xyz: [8, 8, 8]
 allowed_relative_error: 0.05
+target_train_voxel_counts: {small: 0, medium: 0, large: 0} # generated integers
+active_prefix_counts:
+  small: {inline: 1, crossline: 1}
+  medium: {inline: 2, crossline: 2}
+  large: {inline: 4, crossline: 4}
 decoder_seed: 42000
 layouts: []  # exactly layout_000..layout_004; populated by calibration
 decoder: {}  # exact fixed mapping shown below
+validation_identity: {}             # generated count/hash/source identity
+source_file_identities: {}          # generated path/SHA-256 mappings
+legacy_budget_source_identity: {}   # generated path/SHA-256 mapping
 ```
 
-`stable_sha256_voxel_rank_v1` means that eligible labeled voxels are ordered by
-a SHA-256 rank of their canonical integer voxel coordinate and selected without
-replacement. Implementations must not use process hash state, directory order,
-or model identity in this ordering. The allowed relative error must be in
-`(0, 0.1]`; it is an acceptance tolerance and not a tuning parameter.
+`stable_hash_partial_section_token_footprints_v1` uses an intersecting 8³ token
+coordinate as the candidate unit. Only voxels in the intersection of that
+block, the active line-plane union, the canonical train mask, and valid
+annotations become teachers. Inline/crossline intersections are counted once
+and validation voxels are excluded. Token order is SHA-256 of layout ID, token
+coordinate, and semantics version. A coverage pass selects at least one
+candidate for every active line before target filling. Small tokens are kept in
+medium, and medium tokens are kept in large; the closer of the prefixes just
+before and after the target is used. Python `hash()`, global RNG, and subsample
+seed do not participate. The allowed relative error is in `(0, 0.1]`.
+
+`inspect` writes only candidate CSV/JSON statistics. `finalize` writes only the
+canonical contract, and only if all three sizes in all layouts contain six
+classes, classes 3 and 5 are nonzero, all active lines contribute, relative
+count error is within tolerance, selections are nested, no validation line is
+active, and the validation mask identity is unchanged. `--dry-run` performs
+the same reads and validation but writes nothing.
 
 After calibration, builders and runners consume this handoff directly. They do
 not read the old cap manifests. Unknown fields, Boolean values supplied where

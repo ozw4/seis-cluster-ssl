@@ -114,6 +114,10 @@ from seis_ssl_cluster.f3.center_trace_masked_periodic_refresh_validation import 
 from seis_ssl_cluster.f3.lithology.guardrails import (
 	f3_shuffled_hmm_target_config_from_mapping,
 )
+from seis_ssl_cluster.f3.lithology.voxel_section_layout_calibration import (
+	SELECTION_SEMANTICS,
+	f3_section_layout_calibration_config_from_mapping,
+)
 from seis_ssl_cluster.models.voxel_decoder.spec import (
 	VOXEL_DECODER_NORMALIZATION,
 	VOXEL_DECODER_SPEC,
@@ -176,6 +180,9 @@ NOPIMS_VISUALIZATION_CONFIGS = sorted(
 F3_ROOT = Path('experiments/f3/facies_benchmark_v1')
 F3_SECTION_LAYOUT_MODEL_ROSTER_CONFIG = (
 	F3_ROOT / '109_f3_voxel_section_layout_v1/00_model_roster.yaml'
+)
+F3_SECTION_LAYOUT_CALIBRATION_CONFIG = (
+	F3_ROOT / '109_f3_voxel_section_layout_v1/01_prepare_section_layout_contract.yaml'
 )
 F3_INSPECTION_STAGES = {
 	'01_inspect_files.yaml': STAGE_F3_INSPECT_FILES,
@@ -1556,6 +1563,23 @@ def test_active_f3_section_layout_model_roster_resolves(
 		for model in roster.models
 		if model.selection_role == 'diagnostic'
 	)
+
+
+def test_active_f3_section_layout_calibration_config_resolves(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_WORKSPACE', '/workspace')
+	config = f3_section_layout_calibration_config_from_mapping(
+		load_config(F3_SECTION_LAYOUT_CALIBRATION_CONFIG)
+	)
+
+	assert config.selection_semantics == SELECTION_SEMANTICS
+	assert config.patch_size_xyz == (8, 8, 8)
+	assert config.allowed_relative_error == 0.05
 
 
 def test_active_f3_voxel_paired_experiment_contract() -> None:

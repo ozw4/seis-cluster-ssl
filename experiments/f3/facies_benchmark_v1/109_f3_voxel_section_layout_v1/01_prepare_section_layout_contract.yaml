@@ -1,0 +1,15 @@
+inputs:
+  legacy_budget_manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split/voxel_label_budget_dataset_manifest.json
+  canonical_split_grid: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_supervision/png_slices_segy_labels_v1/supervision_split_grid.npy
+  label_volume: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v1/f3_facies_labels.npy
+  line_inventory: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v1/inventory/label_png_inventory.csv
+  segy_geometry_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v1/segy/segy_geometry.json
+  layout_lines: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v1/109_f3_voxel_section_layout_v1/02_layout_lines.yaml
+selection:
+  semantics: stable_hash_partial_section_token_footprints_v1
+  patch_size_xyz: [8, 8, 8]
+  allowed_relative_error: 0.05
+outputs:
+  candidate_statistics_csv: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_section_layout_v1/calibration/section_candidates.csv
+  candidate_statistics_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_section_layout_v1/calibration/section_candidates.json
+  canonical_contract: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_section_layout_v1/f3_voxel_section_layout_contract.json

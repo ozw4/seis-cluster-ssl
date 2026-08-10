@@ -24,7 +24,8 @@ LINE_COUNTS = {
 STATISTICAL_UNIT = 'layout_id'
 NESTING_SEMANTICS = 'strict_small_medium_large'
 VALIDATION_MASK_SEMANTICS = 'shared_across_all_layouts_sizes_and_models'
-STABLE_SELECTION_SEMANTICS = 'stable_sha256_voxel_rank_v1'
+STABLE_SELECTION_SEMANTICS = 'stable_hash_partial_section_token_footprints_v1'
+CONTRACT_ARTIFACT_TYPE = 'f3_lithology_voxel_section_layout_contract'
 PATCH_SIZE = (8, 8, 8)
 DECODER_SEED = 42000
 
@@ -111,20 +112,30 @@ def f3_lithology_voxel_section_layout_contract_from_mapping(
 		config,
 		frozenset(
 			{
+				'artifact_type',
 				'schema_version',
+				'selection_semantics',
 				'statistical_unit',
 				'nesting_semantics',
 				'validation_mask_semantics',
 				'stable_selection_semantics',
 				'patch_size',
+				'patch_size_xyz',
 				'allowed_relative_error',
+				'target_train_voxel_counts',
+				'active_prefix_counts',
 				'decoder_seed',
 				'layouts',
 				'decoder',
+				'validation_identity',
+				'source_file_identities',
+				'legacy_budget_source_identity',
 			}
 		),
 		prefix='config',
 	)
+	if 'artifact_type' in config:
+		_exact_string(config, 'artifact_type', CONTRACT_ARTIFACT_TYPE)
 	_exact_string(config, 'schema_version', CONTRACT_SCHEMA_VERSION)
 	statistical_unit = _exact_string(
 		config, 'statistical_unit', STATISTICAL_UNIT
@@ -138,15 +149,22 @@ def f3_lithology_voxel_section_layout_contract_from_mapping(
 		'stable_selection_semantics',
 		STABLE_SELECTION_SEMANTICS,
 	)
+	if 'selection_semantics' in config:
+		_exact_string(config, 'selection_semantics', STABLE_SELECTION_SEMANTICS)
 	patch_size = _integer_tuple(config.get('patch_size'), 'patch_size')
 	if patch_size != PATCH_SIZE:
 		raise ValueError(f'patch_size must be exactly {list(PATCH_SIZE)!r}')
+	if 'patch_size_xyz' in config:
+		patch_size_xyz = _integer_tuple(config.get('patch_size_xyz'), 'patch_size_xyz')
+		if patch_size_xyz != PATCH_SIZE:
+			raise ValueError(f'patch_size_xyz must be exactly {list(PATCH_SIZE)!r}')
 	allowed_relative_error = _relative_error(config.get('allowed_relative_error'))
 	decoder_seed = _integer(config.get('decoder_seed'), 'decoder_seed')
 	if decoder_seed != DECODER_SEED:
 		raise ValueError(f'decoder_seed must be exactly {DECODER_SEED}')
 	layouts = _resolve_layouts(config.get('layouts'))
 	_validate_target_counts(layouts)
+	_validate_generated_summary(config, layouts)
 	_validate_validation_disjoint(layouts, line_inventory=line_inventory)
 	decoder = _resolve_fixed_decoder(config.get('decoder'))
 	return F3SectionLayoutContract(
@@ -195,7 +213,9 @@ def _resolve_layout(value: object, *, index: int) -> F3SectionLayoutSpec:
 		raise TypeError(f'layouts[{index}] must be a mapping; got {value!r}')
 	prefix = f'layouts[{index}]'
 	_validate_allowed_keys(
-		value, frozenset({'layout_id', 'sizes'}), prefix=prefix
+		value,
+		frozenset({'layout_id', 'ordered_inlines', 'ordered_crosslines', 'sizes'}),
+		prefix=prefix,
 	)
 	layout_id = _required_str(value, 'layout_id', prefix=prefix)
 	raw_sizes = value.get('sizes')
@@ -211,6 +231,20 @@ def _resolve_layout(value: object, *, index: int) -> F3SectionLayoutSpec:
 		for data_size in DATA_SIZES
 	)
 	_validate_nesting(layout_id, sizes)
+	if 'ordered_inlines' in value:
+		ordered = _line_numbers(
+			value.get('ordered_inlines'), f'{prefix}.ordered_inlines'
+		)
+		if ordered != sizes[-1].inline_lines:
+			raise ValueError(f'{prefix}.ordered_inlines must match large inline_lines')
+	if 'ordered_crosslines' in value:
+		ordered = _line_numbers(
+			value.get('ordered_crosslines'), f'{prefix}.ordered_crosslines'
+		)
+		if ordered != sizes[-1].crossline_lines:
+			raise ValueError(
+				f'{prefix}.ordered_crosslines must match large crossline_lines'
+			)
 	return F3SectionLayoutSpec(layout_id=layout_id, sizes=sizes)
 
 
@@ -223,7 +257,17 @@ def _resolve_size(
 	_validate_allowed_keys(
 		value,
 		frozenset(
-			{'inline_lines', 'crossline_lines', 'target_train_voxel_count'}
+			{
+				'inline_lines',
+				'crossline_lines',
+				'target_train_voxel_count',
+				'preview_actual_train_voxel_count',
+				'preview_count_error',
+				'preview_relative_count_error',
+				'selected_token_xyz',
+				'per_line_contributions',
+				'per_class_voxel_counts',
+			}
 		),
 		prefix=label,
 	)
@@ -250,6 +294,43 @@ def _resolve_size(
 		crossline_lines=crosslines,
 		target_train_voxel_count=target,
 	)
+
+
+def _validate_generated_summary(
+	config: Mapping[str, object], layouts: tuple[F3SectionLayoutSpec, ...]
+) -> None:
+	if 'target_train_voxel_counts' in config:
+		targets = config.get('target_train_voxel_counts')
+		if not isinstance(targets, Mapping) or set(targets) != set(DATA_SIZES):
+			raise ValueError('target_train_voxel_counts must define exactly all sizes')
+		for size in DATA_SIZES:
+			expected = layouts[0].size_by_name[size].target_train_voxel_count
+			if (
+				_positive_integer(targets[size], f'target_train_voxel_counts.{size}')
+				!= expected
+			):
+				raise ValueError(
+					f'target_train_voxel_counts.{size} does not match layouts'
+				)
+	if 'active_prefix_counts' in config:
+		prefixes = config.get('active_prefix_counts')
+		if not isinstance(prefixes, Mapping) or set(prefixes) != set(DATA_SIZES):
+			raise ValueError('active_prefix_counts must define exactly all sizes')
+		for size in DATA_SIZES:
+			value = prefixes[size]
+			if not isinstance(value, Mapping) or set(value) != {'inline', 'crossline'}:
+				raise ValueError(
+					f'active_prefix_counts.{size} must define inline and crossline'
+				)
+			expected = LINE_COUNTS[size]
+			actual = (
+				_integer(value['inline'], f'active_prefix_counts.{size}.inline'),
+				_integer(value['crossline'], f'active_prefix_counts.{size}.crossline'),
+			)
+			if actual != expected:
+				raise ValueError(
+					f'active_prefix_counts.{size} must be exactly {expected!r}'
+				)
 
 
 def _validate_nesting(
@@ -453,6 +534,7 @@ def _relative_error(value: object) -> float:
 
 
 __all__ = [
+	'CONTRACT_ARTIFACT_TYPE',
 	'CONTRACT_SCHEMA_VERSION',
 	'DATA_SIZES',
 	'DECODER_SEED',

@@ -1,0 +1,19 @@
+# Copy to 02_layout_lines.yaml and replace every example line number with a
+# train candidate chosen from the inspect-mode report. Order fixes the nested
+# small (prefix 1), medium (prefix 2), and large (prefix 4) active lines.
+layouts:
+  - layout_id: layout_000
+    ordered_inlines: [100, 101, 102, 103]
+    ordered_crosslines: [200, 201, 202, 203]
+  - layout_id: layout_001
+    ordered_inlines: [104, 105, 106, 107]
+    ordered_crosslines: [204, 205, 206, 207]
+  - layout_id: layout_002
+    ordered_inlines: [108, 109, 110, 111]
+    ordered_crosslines: [208, 209, 210, 211]
+  - layout_id: layout_003
+    ordered_inlines: [112, 113, 114, 115]
+    ordered_crosslines: [212, 213, 214, 215]
+  - layout_id: layout_004
+    ordered_inlines: [116, 117, 118, 119]
+    ordered_crosslines: [216, 217, 218, 219]

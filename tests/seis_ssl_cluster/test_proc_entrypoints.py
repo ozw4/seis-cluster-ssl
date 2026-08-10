@@ -22,6 +22,11 @@ PROC_SCRIPTS = tuple(
 )
 
 HELP_FLAG_CONTRACTS = {
+	'prepare_f3_lithology_voxel_section_layout_contract.py': (
+		'--config',
+		'--mode',
+		'--dry-run',
+	),
 	'audit_f3_xy_neighbor_unanimous_targets.py': (
 		'--config',
 		'--dry-run',
