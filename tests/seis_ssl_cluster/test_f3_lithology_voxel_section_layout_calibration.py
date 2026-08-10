@@ -11,22 +11,26 @@ import numpy as np
 import pytest
 
 from seis_ssl_cluster.f3.lithology.voxel_section_layout_calibration import (
-	CLASS_IDS,
-	SELECTION_SEMANTICS,
 	F3SectionLayoutCalibrationConfig,
-	LayoutLines,
-	SectionLine,
-	SelectionPreview,
 	build_section_layout_contract,
-	candidate_token_footprints,
 	f3_section_layout_calibration_config_from_mapping,
 	inspect_section_candidates,
 	load_legacy_budget_counts,
 	median_target_counts,
-	preview_nested_selection,
 	run_section_layout_calibration,
-	stable_token_order,
 	validate_layout_lines,
+)
+from seis_ssl_cluster.f3.lithology.voxel_section_layout_selection import (
+	CLASS_IDS,
+	SELECTION_SEMANTICS,
+	LayoutLines,
+	SectionLine,
+	SelectionPreview,
+	candidate_token_footprints,
+	per_line_contributions,
+	preview_nested_selection,
+	replay_selected_teacher_mask,
+	stable_token_order,
 )
 
 if TYPE_CHECKING:
@@ -128,6 +132,17 @@ def test_partial_footprints_stay_on_active_planes_and_deduplicate_intersection()
 	assert set(owned[('inline', 100)]) | set(owned[('crossline', 200)]) == set(
 		footprints[0].flat_voxel_indices
 	)
+	assert per_line_contributions(footprints, lines) == {
+		'inline:100': 8 * 8,
+		'crossline:200': (8 * 8) - 8,
+	}
+	replayed = replay_selected_teacher_mask(
+		grid, labels, lines, [footprints[0].token_xyz]
+	)
+	coordinates = np.indices(shape)
+	assert np.array_equal(
+		replayed, (coordinates[0] == 0) | (coordinates[1] == 0)
+	)
 	for flat in footprints[0].flat_voxel_indices:
 		x, y, _ = np.unravel_index(flat, shape)
 		assert x == 0 or y == 0
@@ -147,14 +162,13 @@ def test_coverage_uses_owned_teacher_voxels_not_geometric_token_intersection() -
 	footprint = candidate_token_footprints(grid, labels, lines)[0]
 	assert footprint.line_voxel_count(('inline', 100)) == 8
 	assert footprint.line_voxel_count(('crossline', 200)) == 0
-	candidates = inspect_section_candidates(grid, labels, lines)
 	with pytest.raises(ValueError, match=r'crossline.*contributes no teacher voxels'):
 		preview_nested_selection(
 			LayoutLines('layout_000', (100,), (200,)),
 			{'small': 8, 'medium': 8, 'large': 8},
 			grid,
 			labels,
-			candidates,
+			lines,
 		)
 
 
@@ -169,7 +183,7 @@ def test_preview_is_nested_and_satisfies_all_finalize_gates() -> None:
 		{'small': 120, 'medium': 332, 'large': 712},
 		grid,
 		labels,
-		candidates,
+		lines,
 		patch_size_xyz=(8, 8, 8),
 		allowed_relative_error=0.1,
 	)

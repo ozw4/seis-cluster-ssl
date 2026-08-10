@@ -33,10 +33,11 @@ from seis_ssl_cluster.f3.lithology.voxel_section_layout import (
 	validate_f3_lithology_voxel_section_layout_manifest,
 )
 from seis_ssl_cluster.f3.lithology.voxel_section_layout_calibration import (
+	build_section_layout_contract,
+)
+from seis_ssl_cluster.f3.lithology.voxel_section_layout_selection import (
 	LayoutLines,
 	SectionLine,
-	build_section_layout_contract,
-	inspect_section_candidates,
 	preview_nested_selection,
 )
 
@@ -362,7 +363,6 @@ def _fixture(tmp_path: Path) -> F3SectionLayoutDatasetConfig:
 	}
 	_write_json(canonical_root / 'voxel_dataset_metadata.json', metadata)
 	lines = _section_lines()
-	candidates = inspect_section_candidates(grid, labels, lines)
 	layouts = _layouts()
 	targets = {'small': 120, 'medium': 332, 'large': 712}
 	previews = tuple(
@@ -373,7 +373,7 @@ def _fixture(tmp_path: Path) -> F3SectionLayoutDatasetConfig:
 			targets,
 			grid,
 			labels,
-			candidates,
+			lines,
 			allowed_relative_error=0.1,
 		)
 	)

@@ -37,6 +37,17 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 )
 from seis_ssl_cluster.config.io import load_config
 from seis_ssl_cluster.embedding.writer import file_sha256
+from seis_ssl_cluster.f3.lithology.voxel_section_layout_selection import (
+	CLASS_IDS,
+	SELECTION_SEMANTICS,
+	LayoutLines,
+	SectionLine,
+	SelectionPreview,
+	TokenFootprint,
+	candidate_token_footprints,
+	preview_nested_selection,
+	stable_token_order,
+)
 from seis_ssl_cluster.f3.lithology.voxel_split import (
 	TRAIN_VOXEL_SPLIT,
 	VALIDATION_VOXEL_SPLIT,
@@ -47,8 +58,6 @@ if TYPE_CHECKING:
 
 ARTIFACT_TYPE = CONTRACT_ARTIFACT_TYPE
 CANDIDATE_ARTIFACT_TYPE = 'f3_lithology_voxel_section_candidates'
-SELECTION_SEMANTICS = 'stable_hash_partial_section_token_footprints_v1'
-CLASS_IDS = tuple(range(6))
 LEGACY_BUDGETS = ('cap25', 'cap50', 'cap100')
 LEGACY_SEEDS = (0, 1, 2, 3, 4)
 BUDGET_TO_SIZE = {'cap25': 'small', 'cap50': 'medium', 'cap100': 'large'}
@@ -65,21 +74,6 @@ class LegacyBudgetCount:
 	budget_id: str
 	subsample_seed: int
 	actual_train_voxel_count: int
-
-
-@dataclass(frozen=True)
-class SectionLine:
-	"""One physical F3 line and its zero-based volume axis index."""
-
-	slice_type: str
-	slice_index: int
-	array_index: int
-	is_validation_line: bool
-
-	@property
-	def key(self) -> tuple[str, int]:
-		"""Return the stable physical line identity."""
-		return (self.slice_type, self.slice_index)
 
 
 @dataclass(frozen=True)
@@ -112,54 +106,6 @@ class SectionCandidate:
 			),
 			'is_validation_line': self.line.is_validation_line,
 		}
-
-
-@dataclass(frozen=True)
-class LayoutLines:
-	"""The user-selected ordered four-inline/four-crossline layout."""
-
-	layout_id: str
-	ordered_inlines: tuple[int, ...]
-	ordered_crosslines: tuple[int, ...]
-
-
-@dataclass(frozen=True)
-class TokenFootprint:
-	"""Teacher voxels in one token block intersected with active line planes."""
-
-	token_xyz: tuple[int, int, int]
-	flat_voxel_indices: tuple[int, ...]
-	per_line_flat_voxel_indices: Mapping[
-		tuple[str, int], tuple[int, ...]
-	]
-
-	@property
-	def voxel_count(self) -> int:
-		"""Return the exact partial-plane teacher voxel count."""
-		return len(self.flat_voxel_indices)
-
-	def line_voxel_count(self, line_key: tuple[str, int]) -> int:
-		"""Return teacher voxels owned by one line under ordered attribution."""
-		return len(self.per_line_flat_voxel_indices.get(line_key, ()))
-
-
-@dataclass(frozen=True)
-class SelectionPreview:
-	"""One nested size selection and its finalize-gate evidence."""
-
-	layout_id: str
-	data_size: str
-	inline_lines: tuple[int, ...]
-	crossline_lines: tuple[int, ...]
-	target_train_voxel_count: int
-	actual_train_voxel_count: int
-	count_error: int
-	relative_count_error: float
-	selected_token_xyz: tuple[tuple[int, int, int], ...]
-	selected_flat_voxel_indices: tuple[int, ...]
-	per_line_contributions: Mapping[str, int]
-	per_class_voxel_counts: Mapping[str, int]
-
 
 @dataclass(frozen=True)
 class F3SectionLayoutCalibrationConfig:
@@ -422,165 +368,6 @@ def validate_layout_lines(  # noqa: C901
 	return tuple(by_id[layout_id] for layout_id in LAYOUT_IDS)
 
 
-def candidate_token_footprints(
-	canonical_split_grid: NDArray[np.integer],
-	label_volume: NDArray[np.integer],
-	active_lines: Sequence[SectionLine | Mapping[str, object]],
-	*,
-	patch_size_xyz: Sequence[int] = PATCH_SIZE,
-	class_ids: Sequence[int] = CLASS_IDS,
-) -> tuple[TokenFootprint, ...]:
-	"""Return disjoint token units containing only active-plane train voxels."""
-	grid, labels = _volume_pair(canonical_split_grid, label_volume)
-	patch = _positive_triplet(patch_size_xyz, 'patch_size_xyz')
-	classes = _class_ids(class_ids)
-	lines = tuple(_coerce_section_line(item, grid.shape) for item in active_lines)
-	if not lines:
-		raise ValueError('active_lines must not be empty')
-	active_mask = np.zeros(grid.shape, dtype=np.bool_)
-	for line in lines:
-		if line.is_validation_line:
-			raise ValueError(f'active line {line.key!r} is a validation line')
-		active_mask |= _line_plane(line, grid.shape)
-	teacher = (
-		active_mask
-		& (grid == TRAIN_VOXEL_SPLIT)
-		& np.isin(labels, np.asarray(classes, dtype=labels.dtype))
-	)
-	coordinates = _token_coordinates_for_mask(teacher, patch)
-	result: list[TokenFootprint] = []
-	for coordinate in coordinates:
-		block = _token_block(coordinate, patch, grid.shape)
-		block_mask = teacher[block]
-		local = np.argwhere(block_mask)
-		start = tuple(part.start or 0 for part in block)
-		global_xyz = local + np.asarray(start, dtype=np.int64)
-		flat_array = np.ravel_multi_index(global_xyz.T, grid.shape)
-		order = np.argsort(flat_array)
-		global_xyz = global_xyz[order]
-		flat = tuple(int(value) for value in flat_array[order])
-		per_line = _ordered_line_voxel_ownership(
-			global_xyz,
-			flat_voxel_indices=flat,
-			lines=lines,
-		)
-		result.append(TokenFootprint(coordinate, flat, per_line))
-	return tuple(result)
-
-
-def stable_token_order(
-	footprints: Sequence[TokenFootprint],
-	*,
-	layout_id: str,
-	semantics_version: str = SELECTION_SEMANTICS,
-) -> tuple[TokenFootprint, ...]:
-	"""Order token coordinates by an explicit SHA-256 identity, never RNG/hash()."""
-	if layout_id not in LAYOUT_IDS:
-		raise ValueError(f'unsupported layout_id {layout_id!r}')
-	if semantics_version != SELECTION_SEMANTICS:
-		raise ValueError(f'unsupported selection semantics {semantics_version!r}')
-
-	def key(item: TokenFootprint) -> tuple[str, tuple[int, int, int]]:
-		x, y, z = item.token_xyz
-		identity = f'{layout_id}|{x},{y},{z}|{semantics_version}'.encode()
-		return (hashlib.sha256(identity).hexdigest(), item.token_xyz)
-
-	return tuple(sorted(footprints, key=key))
-
-
-def preview_nested_selection(  # noqa: PLR0913
-	layout: LayoutLines,
-	target_train_voxel_counts: Mapping[str, int],
-	canonical_split_grid: NDArray[np.integer],
-	label_volume: NDArray[np.integer],
-	candidates: Sequence[SectionCandidate | Mapping[str, object]],
-	*,
-	patch_size_xyz: Sequence[int] = PATCH_SIZE,
-	allowed_relative_error: float = 0.05,
-) -> tuple[SelectionPreview, ...]:
-	"""Build coverage-first nested small/medium/large selection previews."""
-	grid, labels = _volume_pair(canonical_split_grid, label_volume)
-	patch = _positive_triplet(patch_size_xyz, 'patch_size_xyz')
-	tolerance = _relative_error(allowed_relative_error)
-	targets = _target_counts(target_train_voxel_counts)
-	line_map = _candidate_line_map(candidates)
-	selected_tokens: set[tuple[int, int, int]] = set()
-	previews: list[SelectionPreview] = []
-	previous_voxels: set[int] = set()
-	for data_size in DATA_SIZES:
-		inline_count, crossline_count = LINE_COUNTS[data_size]
-		inline_lines = layout.ordered_inlines[:inline_count]
-		crossline_lines = layout.ordered_crosslines[:crossline_count]
-		active = tuple(line_map[('inline', value)] for value in inline_lines) + tuple(
-			line_map[('crossline', value)] for value in crossline_lines
-		)
-		footprints = candidate_token_footprints(
-			grid, labels, active, patch_size_xyz=patch
-		)
-		by_xyz = {item.token_xyz: item for item in footprints}
-		if not selected_tokens <= set(by_xyz):
-			raise AssertionError('nested active lines lost a previously selected token')
-		ordered = stable_token_order(footprints, layout_id=layout.layout_id)
-		# Coverage pass is deterministic and precedes target filling.
-		covered = {
-			key
-			for xyz in selected_tokens
-			for key in by_xyz[xyz].per_line_flat_voxel_indices
-		}
-		for line in active:
-			if line.key in covered:
-				continue
-			candidate = next(
-				(
-					item
-					for item in ordered
-					if item.token_xyz not in selected_tokens
-					and item.line_voxel_count(line.key) > 0
-				),
-				None,
-			)
-			if candidate is None:
-				raise ValueError(
-					f'{layout.layout_id}/{data_size} active line '
-					f'{line.key!r} contributes no teacher voxels'
-				)
-			selected_tokens.add(candidate.token_xyz)
-			covered.update(candidate.per_line_flat_voxel_indices)
-		selected_tokens = _fill_to_nearest_target(
-			selected_tokens, ordered, by_xyz=by_xyz, target=targets[data_size]
-		)
-		selected_footprints = tuple(by_xyz[xyz] for xyz in sorted(selected_tokens))
-		selected_voxels = {
-			flat for item in selected_footprints for flat in item.flat_voxel_indices
-		}
-		if not previous_voxels <= selected_voxels:
-			raise AssertionError(
-				'nested selection lost previously selected teacher voxels'
-			)
-		previous_voxels = selected_voxels
-		actual = len(selected_voxels)
-		error = actual - targets[data_size]
-		class_counts = _selected_class_counts(labels, selected_voxels)
-		line_counts = _per_line_contributions(selected_footprints, active)
-		preview = SelectionPreview(
-			layout_id=layout.layout_id,
-			data_size=data_size,
-			inline_lines=inline_lines,
-			crossline_lines=crossline_lines,
-			target_train_voxel_count=targets[data_size],
-			actual_train_voxel_count=actual,
-			count_error=error,
-			relative_count_error=abs(error) / targets[data_size],
-			selected_token_xyz=tuple(sorted(selected_tokens)),
-			selected_flat_voxel_indices=tuple(sorted(selected_voxels)),
-			per_line_contributions=line_counts,
-			per_class_voxel_counts=class_counts,
-		)
-		_validate_preview_gate(preview, allowed_relative_error=tolerance)
-		previews.append(preview)
-	return tuple(previews)
-
-
 def build_section_layout_contract(  # noqa: PLR0913
 	layouts: Sequence[LayoutLines],
 	target_train_voxel_counts: Mapping[str, int],
@@ -710,7 +497,7 @@ def run_section_layout_calibration(
 			targets,
 			grid,
 			labels,
-			candidates,
+			tuple(item.line for item in candidates),
 			patch_size_xyz=config.patch_size_xyz,
 			allowed_relative_error=config.allowed_relative_error,
 		)
@@ -922,97 +709,6 @@ def _candidate_line_map(
 	return result
 
 
-def _fill_to_nearest_target(
-	selected: set[tuple[int, int, int]],
-	ordered: Sequence[TokenFootprint],
-	*,
-	by_xyz: Mapping[tuple[int, int, int], TokenFootprint],
-	target: int,
-) -> set[tuple[int, int, int]]:
-	result = set(selected)
-	count = sum(by_xyz[xyz].voxel_count for xyz in result)
-	if count >= target:
-		return result
-	for item in ordered:
-		if item.token_xyz in result:
-			continue
-		before_error = abs(target - count)
-		after = count + item.voxel_count
-		after_error = abs(target - after)
-		if after >= target:
-			if after_error < before_error:
-				result.add(item.token_xyz)
-			return result
-		result.add(item.token_xyz)
-		count = after
-	return result
-
-
-def _selected_class_counts(
-	labels: NDArray[np.integer], selected: set[int]
-) -> dict[str, int]:
-	flat = labels.reshape(-1)
-	indices = np.asarray(sorted(selected), dtype=np.int64)
-	values = flat[indices] if indices.size else np.empty((0,), dtype=labels.dtype)
-	return {
-		str(class_id): int(np.count_nonzero(values == class_id))
-		for class_id in CLASS_IDS
-	}
-
-
-def _ordered_line_voxel_ownership(
-	voxel_xyz: NDArray[np.integer],
-	*,
-	flat_voxel_indices: Sequence[int],
-	lines: Sequence[SectionLine],
-) -> Mapping[tuple[str, int], tuple[int, ...]]:
-	"""Assign each teacher voxel once using the active line order."""
-	if len(voxel_xyz) != len(flat_voxel_indices):
-		raise AssertionError('voxel coordinates and flat indices differ in length')
-	owned: dict[tuple[str, int], list[int]] = {}
-	for xyz, flat in zip(voxel_xyz, flat_voxel_indices, strict=True):
-		x, y = int(xyz[0]), int(xyz[1])
-		line = next(
-			(
-				item
-				for item in lines
-				if (item.slice_type == 'inline' and x == item.array_index)
-				or (item.slice_type == 'crossline' and y == item.array_index)
-			),
-			None,
-		)
-		if line is None:
-			raise AssertionError('teacher voxel lies outside every active line')
-		owned.setdefault(line.key, []).append(int(flat))
-	return {key: tuple(values) for key, values in owned.items()}
-
-
-def _per_line_contributions(
-	selected: Sequence[TokenFootprint], lines: Sequence[SectionLine]
-) -> dict[str, int]:
-	"""Count the exact footprint ownership used by the coverage pass."""
-	expected = {line.key for line in lines}
-	result = {f'{line.slice_type}:{line.slice_index}': 0 for line in lines}
-	selected_flat: set[int] = set()
-	owned_flat: set[int] = set()
-	for footprint in selected:
-		flat = set(footprint.flat_voxel_indices)
-		if selected_flat & flat:
-			raise AssertionError('selected token footprints overlap')
-		selected_flat.update(flat)
-		for line_key, indices in footprint.per_line_flat_voxel_indices.items():
-			if line_key not in expected:
-				raise AssertionError('footprint ownership escaped active lines')
-			owned = set(indices)
-			if not owned <= flat or owned_flat & owned:
-				raise AssertionError('footprint line ownership is not disjoint')
-			owned_flat.update(owned)
-			result[f'{line_key[0]}:{line_key[1]}'] += len(indices)
-	if owned_flat != selected_flat:
-		raise AssertionError('footprint ownership does not cover teacher voxels')
-	return result
-
-
 def _validate_preview_gate(
 	preview: SelectionPreview, *, allowed_relative_error: float
 ) -> None:
@@ -1065,16 +761,6 @@ def _token_coordinates_for_mask(
 		return ()
 	tokens = np.unique(voxel_xyz // np.asarray(patch, dtype=np.int64), axis=0)
 	return tuple(tuple(int(value) for value in row) for row in tokens)
-
-
-def _token_block(
-	coordinate: tuple[int, int, int],
-	patch: tuple[int, int, int],
-	shape: tuple[int, ...],
-) -> tuple[slice, slice, slice]:
-	start = tuple(coordinate[axis] * patch[axis] for axis in range(3))
-	stop = tuple(min(start[axis] + patch[axis], shape[axis]) for axis in range(3))
-	return tuple(slice(start[axis], stop[axis]) for axis in range(3))  # type: ignore[return-value]
 
 
 def _validation_identity(grid: NDArray[np.integer], path: Path) -> dict[str, object]:

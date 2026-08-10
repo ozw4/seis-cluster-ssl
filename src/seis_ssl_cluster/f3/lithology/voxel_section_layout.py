@@ -27,14 +27,14 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.tokens import read_f3_lithology_class_info
-from seis_ssl_cluster.f3.lithology.voxel_section_layout_calibration import (
+from seis_ssl_cluster.f3.lithology.voxel_section_layout_selection import (
 	CLASS_IDS,
 	SELECTION_SEMANTICS,
 	LayoutLines,
 	SectionLine,
 	SelectionPreview,
-	inspect_section_candidates,
 	preview_nested_selection,
+	replay_selected_teacher_mask,
 )
 from seis_ssl_cluster.f3.lithology.voxel_split import (
 	TRAIN_VOXEL_SPLIT,
@@ -237,9 +237,6 @@ def inspect_f3_lithology_voxel_section_layout_datasets(  # noqa: C901, PLR0912, 
 		for record in records
 	)
 	line_array_indices = {line.key: line.array_index for line in lines}
-	candidates = inspect_section_candidates(
-		grid, labels, lines, patch_size_xyz=patch, class_ids=class_ids
-	)
 	targets = {
 		size: contract.layouts[0].size_by_name[size].target_train_voxel_count
 		for size in DATA_SIZES
@@ -262,7 +259,7 @@ def inspect_f3_lithology_voxel_section_layout_datasets(  # noqa: C901, PLR0912, 
 			targets,
 			grid,
 			labels,
-			candidates,
+			lines,
 			patch_size_xyz=patch,
 			allowed_relative_error=contract.allowed_relative_error,
 		)
@@ -1385,37 +1382,32 @@ def _materialize_condition_grid(
 		stop = min(start + _STREAM_CHUNK_VOXELS, grid.size)
 		validation = canonical_flat[start:stop] == VALIDATION_VOXEL_SPLIT
 		grid_flat[start:stop][validation] = VALIDATION_VOXEL_SPLIT
-	inline_indices = {
-		inspection.line_array_indices[('inline', value)]
+	active_lines = tuple(
+		SectionLine(
+			slice_type='inline',
+			slice_index=value,
+			array_index=inspection.line_array_indices[('inline', value)],
+			is_validation_line=False,
+		)
 		for value in condition.active_inlines
-	}
-	crossline_indices = {
-		inspection.line_array_indices[('crossline', value)]
+	) + tuple(
+		SectionLine(
+			slice_type='crossline',
+			slice_index=value,
+			array_index=inspection.line_array_indices[('crossline', value)],
+			is_validation_line=False,
+		)
 		for value in condition.active_crosslines
-	}
-	known = np.asarray(inspection.class_ids, dtype=inspection.label_volume.dtype)
-	for coordinate in condition.selected_token_xyz:
-		start = tuple(
-			int(coordinate[axis]) * PATCH_SIZE[axis] for axis in range(3)
-		)
-		stop = tuple(
-			min(start[axis] + PATCH_SIZE[axis], grid.shape[axis])
-			for axis in range(3)
-		)
-		slices = tuple(slice(start[axis], stop[axis]) for axis in range(3))
-		x = np.arange(start[0], stop[0], dtype=np.int64)
-		y = np.arange(start[1], stop[1], dtype=np.int64)
-		active = np.isin(x, tuple(inline_indices))[:, None, None] | np.isin(
-			y, tuple(crossline_indices)
-		)[None, :, None]
-		canonical = inspection.canonical_grid[slices]
-		labels = inspection.label_volume[slices]
-		teacher = (
-			active
-			& (canonical == TRAIN_VOXEL_SPLIT)
-			& np.isin(labels, known)
-		)
-		grid[slices][teacher] = TRAIN_VOXEL_SPLIT
+	)
+	teacher = replay_selected_teacher_mask(
+		inspection.canonical_grid,
+		inspection.label_volume,
+		active_lines,
+		condition.selected_token_xyz,
+		patch_size_xyz=PATCH_SIZE,
+		class_ids=inspection.class_ids,
+	)
+	grid[teacher] = TRAIN_VOXEL_SPLIT
 	_validate_materialized_grid(grid, condition=condition, inspection=inspection)
 	return cast('NDArray[np.integer]', grid)
 
