@@ -51,6 +51,25 @@ The statistical unit is `layout_id`, the validation mask is shared across all
 jobs, and every decoder uses seed 42000. Models with `selection_role:
 diagnostic` produce metrics but are ineligible for formal adoption.
 
-This directory contains no model runner config. Calibration and common-dataset
-construction are not scientific model jobs; training decoders, running
-inference, and producing a result summary remain outside this issue.
+After the 15 common datasets exist, preflight one exact roster model without
+writing or running a scientific job:
+
+```bash
+PYTHONPATH=src python proc/seis_ssl_cluster/run_f3_lithology_voxel_section_layout_suite.py \
+  --config experiments/f3/facies_benchmark_v1/109_f3_voxel_section_layout_v1/04_run_section_layout_benchmark.yaml \
+  --model-id mae --dry-run
+```
+
+Omitting `--model-id` is an error; the runner never expands implicitly to all
+14 models. Optional `--layout-id` and `--data-size` filters select explicit
+conditions. Scientific outputs live below `benchmark_v1/runs/model=<model_id>`.
+The two-step `--smoke-only` mode requires both condition filters and writes to
+the separately configured smoke root, never to the scientific root or
+scientific manifest.
+
+Completed outputs are reused only with `--only-missing`. A same-identity
+incomplete `latest.pt` is resumed only with `--resume`. Partial model-owned
+outputs require explicit `--only-missing --quarantine-invalid`; foreign model,
+dataset, embedding, or decoder identities remain errors and are not blessed by
+quarantine. This stage does not extract missing embeddings and does not produce
+a cross-model result summary.

@@ -143,6 +143,34 @@ adoption. `m1_distill_only` and `m1_shuffled_hmm` have the explicit
 `diagnostic` role: their metrics are aggregated, but they are never selection
 eligible.
 
+## Generic decoder runner
+
+`run_f3_lithology_voxel_section_layout_suite.py` accepts exactly one
+`--model-id` from the closed 14-model roster. It validates the selected
+embedding array, valid-token mask, embedding metadata, checkpoint evidence,
+and the complete 15-row common-dataset manifest before classifying any job.
+Missing or drifted embeddings are errors; extraction is never invoked.
+
+Each scientific model has exactly 15 canonical output locations under
+`benchmark_v1/runs/model=<model_id>/layout=<layout_id>/size=<data_size>`. Every
+job constructs the same frozen nearest-voxel decoder: seed 42000, 50 epochs,
+440 replacement-sampling steps per epoch, batch size 1, balanced class weights,
+best-checkpoint inference, no probability volume, and the common evaluation
+schema.
+
+The per-model `section_layout_run_manifest.json` is atomically replaced after
+each job. Completed rows retain dataset/mask/token identities, embedding
+evidence, initial decoder state, class weights, sampling sequence, tile
+identities, exact-once inference checks, best checkpoint identity, metric
+schema identity, and canonical metric paths. A later failure retains earlier
+complete rows. Only a matching latest checkpoint can resume; foreign identity
+drift is an error. Model-owned partial outputs are moved only when explicit
+quarantine is requested.
+
+Dry-run performs validation and planning with zero writes or stage execution.
+The explicit one-condition smoke mode stops at two optimizer steps and uses a
+disjoint non-scientific root and manifest.
+
 ## Historical evidence
 
 The earlier `cap25/cap50/cap100` by subsample seed `0..4` experiments and the
