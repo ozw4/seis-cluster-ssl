@@ -19,7 +19,7 @@ unlabeled amplitude .npy volumes
   -> token- and optional voxel-scale cluster visualization
 ```
 
-The MVP does **not** use fixed seismic attributes, well labels, facies labels, a context branch, or supervised fine-tuning. Arbitrary attributes may be added later as optional clustering features without changing the amplitude-only pretraining model.
+The MVP does **not** use fixed seismic attributes, well labels, facies labels, a context branch, or supervised fine-tuning. Optional non-amplitude clustering features are outside the amplitude-only pretraining contract.
 
 ## Main features
 
@@ -206,7 +206,7 @@ Create a plain-text file containing one `.npy` path per line.
 ```text
 # Absolute paths are accepted.
 /home/dcuser/data/NOPIMS/ENO0047389_0_00050_00400.npy
-/home/dcuser/data/NOPIMS/ENO0047389_0_00050_00750.npy
+/home/dcuser/data/NOPIMS/ENO0047389_0_00750.npy
 
 # Relative paths are resolved against paths.nopims_root.
 ENO0047392_0_00100_00100.npy
@@ -357,7 +357,6 @@ python proc/seis_ssl_cluster/train_amp_mae.py \
 ```
 
 ### 8. Extract full-volume embeddings
-
 Set the trained checkpoint, clean manifest, `embeddings.output_dir`, window size, and overlap in the embedding YAML.
 
 ```bash
@@ -497,7 +496,7 @@ masked amplitude reconstruction loss
 
 Set `loss.reconstruction` in the training YAML to `huber`, `mse`, or `l1`. Huber requires `loss.huber_delta`; MSE and L1 must omit it. Both reconstruction and gradient terms exclude invalid voxels using `local_valid_mask`.
 
-`loss.target_normalization.mode` is required. Use `mode: none` for the historical behavior. Use `mode: patch_zscore` with positive finite `eps` and `min_std` to z-score only the patchified loss target. The encoder input `x` and dataset `target` remain survey-wise normalized amplitudes; only `target_for_loss` is transformed as `(target_patch - valid_voxel_mean) / max(sqrt(valid_voxel_population_var + eps), min_std)`. Patch statistics use `local_valid_mask == true`; invalid voxels are excluded and zeroed in the normalized target. In v1, `patch_zscore` requires `loss.gradient_weight: 0.0` because the existing gradient loss operates in survey-normalized amplitude space. Debug MAE predictions are oracle-denormalized with target patch statistics before comparison and the JSON metadata records that oracle target statistics were used.
+`loss.target_normalization.mode` is required. Use `mode: none` to keep the reconstruction-loss target in survey-wise normalized amplitude space without patch-wise target normalization. Use `mode: patch_zscore` with positive finite `eps` and `min_std` to z-score only the patchified loss target. The encoder input `x` and dataset `target` remain survey-wise normalized amplitudes; only `target_for_loss` is transformed as `(target_patch - valid_voxel_mean) / max(sqrt(valid_voxel_population_var + eps), min_std)`. Patch statistics use `local_valid_mask == true`; invalid voxels are excluded and zeroed in the normalized target. In v1, `patch_zscore` requires `loss.gradient_weight: 0.0` because the existing gradient loss operates in survey-normalized amplitude space. Debug MAE predictions are oracle-denormalized with target patch statistics before comparison and the JSON metadata records that oracle target statistics were used.
 
 Invalid regions include source padding and configured raw-amplitude zero-sample or zero-trace influence regions.
 
@@ -560,12 +559,12 @@ python tools/check_seis_ssl_cluster_isolation.py
 - Cluster IDs are categorical and have no intrinsic geological meaning.
 - Voxel maps are nearest-neighbor reconstructions of token labels.
 - No supervised facies classification is included in the MVP.
-- Arbitrary seismic attributes are not yet fused into clustering features.
-- Multi-GPU distributed pretraining is not part of the initial MVP.
+- Arbitrary seismic attributes are not included in the current clustering inputs.
+- Multi-GPU distributed pretraining is not part of the MVP.
 
-## Roadmap
+## Out-of-scope extensions
 
-Planned extensions include:
+The following capabilities are outside the current MVP contract:
 
 - Optional arbitrary-attribute features at clustering time
 - Embedding-only vs. attribute-only vs. combined-feature ablations

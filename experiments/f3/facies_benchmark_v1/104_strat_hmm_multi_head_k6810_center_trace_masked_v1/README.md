@@ -1,7 +1,7 @@
 # F3 center-trace masked schema-7 pretraining
 
-Experiment 104 is the hard-label center-trace masked successor to the frozen
-`mh_nocons` baseline. It keeps the K=6/8/10 target manifest, MAE
+Experiment 104 defines the hard-label center-trace masked treatment relative to
+the frozen `mh_nocons` baseline. It keeps the K=6/8/10 target manifest, MAE
 initialization, model geometry, optimizer settings, top-block freeze, and
 distillation settings unchanged. Its fixed scientific identity is
 `ctmask010_nocons`: 10% of eligible valid XY columns are selected with the
@@ -20,24 +20,25 @@ export SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256="$(sha256sum \
   | awk '{print $1}')"
 ```
 
-For issue #305, run only the `inputs` and CPU two-step `smoke` phases below.
-Full pretraining, embedding extraction, checkpoint validation, and complete
-handoff publication are intentionally deferred; this issue must not create or
-modify the full checkpoint or embedding roots.
+## Validation evidence
 
 The `inputs` phase atomically records the pre-execution Git commit, dirty
 status, and binary diff digest in
 `$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/f3/facies_benchmark_v1/.f3_center_trace_masked_pretraining_execution.json`.
-The `smoke` phase records the corresponding after-state. Later phases reject a
-missing or stale sidecar instead of reusing execution evidence from another
-config or target.
+The `smoke` phase records the corresponding after-state. Subsequent phases
+reject a missing or stale sidecar instead of reusing execution evidence from
+another config or target.
 
 Successful phases also publish read-only validation reports beside that
 sidecar: `.f3_center_trace_masked_pretraining_inputs.json` fingerprints the
-real amplitude manifest, volume, normalization, teacher, and student inputs;
+amplitude manifest, volume, normalization, teacher, and student inputs;
 `.f3_center_trace_masked_pretraining_smoke.json` binds the real-data CPU
 two-step schema-7 checkpoint, metrics, and input evidence. Neither report is a
 PASS handoff.
+
+## Execution order
+
+Validate the inputs, run the isolated CPU two-step smoke, and validate it:
 
 ```bash
 python proc/seis_ssl_cluster/validate_f3_center_trace_masked_pretraining.py \
@@ -51,22 +52,41 @@ python proc/seis_ssl_cluster/validate_f3_center_trace_masked_pretraining.py \
   --config "$EXP/04_validate_center_trace_masked_pretraining.yaml" --phase smoke
 ```
 
-The smoke YAML intentionally keeps `train.max_steps: null` in both the
-scientific identity and runtime config. The required `--max-steps 2` CLI
-override is applied after resolution and therefore does not create a new
-scientific identity.
+The smoke YAML keeps `train.max_steps: null` in both the scientific identity
+and runtime config. The required `--max-steps 2` CLI override is applied after
+resolution and therefore does not create a different scientific identity.
 
-The full and extraction YAML files, plus the `checkpoints` and `complete`
-validator phases, are retained for a later authorized continuation. Do not run
-those phases in issue #305.
+After the smoke validation passes, run full pretraining, checkpoint validation,
+embedding extraction, and complete validation in this order:
 
-Resume and quarantine procedure:
+```bash
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config "$EXP/02_train_center_trace_masked_full.yaml" --dry-run
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config "$EXP/02_train_center_trace_masked_full.yaml"
+python proc/seis_ssl_cluster/validate_f3_center_trace_masked_pretraining.py \
+  --config "$EXP/04_validate_center_trace_masked_pretraining.yaml" --phase checkpoints
 
-- The smoke output root is isolated from the full output root and cannot resume
-  from it. If the isolated smoke root is foreign or partial, validate it with
-  `--quarantine-invalid` before rerunning the two-step smoke. The validator
-  moves that root to a timestamped `.quarantine.*` sibling and never changes
-  the full root:
+python proc/seis_ssl_cluster/extract_embeddings.py \
+  --config "$EXP/03_extract_center_trace_masked_embeddings.yaml" --dry-run
+python proc/seis_ssl_cluster/extract_embeddings.py \
+  --config "$EXP/03_extract_center_trace_masked_embeddings.yaml" --skip-existing
+python proc/seis_ssl_cluster/validate_f3_center_trace_masked_pretraining.py \
+  --config "$EXP/04_validate_center_trace_masked_pretraining.yaml" --phase complete
+```
+
+The `complete` phase publishes the PASS handoff at
+`preflight/center_trace_masked_handoff.json` under the full center-trace
+checkpoint root. The handoff binds the selected schema-7 checkpoint, complete
+embedding metadata, immutable target identity, and validation evidence.
+
+## Resume and quarantine
+
+The smoke output root is isolated from the full output root and cannot be a
+resume source for full training. If the isolated smoke root is foreign or
+partial, validate it with `--quarantine-invalid` before rerunning the two-step
+smoke. The validator moves that root to a timestamped `.quarantine.*` sibling
+and never changes the full root:
 
 ```bash
 python proc/seis_ssl_cluster/validate_f3_center_trace_masked_pretraining.py \
@@ -74,14 +94,9 @@ python proc/seis_ssl_cluster/validate_f3_center_trace_masked_pretraining.py \
   --phase smoke --quarantine-invalid
 ```
 
-- A later authorized full run may resume only from its own `latest.pt`; it must
-  never resume from the isolated smoke root. A stale, partial, or invalid
-  handoff must be preserved with `--quarantine-invalid` before a later
-  `complete` phase publishes a replacement. Those full-run and extraction
-  commands are intentionally omitted here because they are not executed in
-  issue #305.
+An incomplete full run may resume only from its own `latest.pt`; it must never
+resume from the isolated smoke root. A stale, partial, or invalid handoff must
+be preserved with `--quarantine-invalid` before the `complete` phase publishes
+a replacement.
 
-The future handoff path is
-`preflight/center_trace_masked_handoff.json` under the full center-trace
-checkpoint root. It is not published by issue #305. No downstream decoder or
-six-split result is part of this experiment root.
+No downstream decoder or six-split result is part of this experiment root.
