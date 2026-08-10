@@ -49,9 +49,23 @@ from seis_ssl_cluster.f3.lithology.voxel_label_budget_runner import (
 	sampling_sequence_sha256,
 )
 from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	CONFIDENCE_NAME as PREDICTION_CONFIDENCE_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	METADATA_NAME as PREDICTION_METADATA_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	PREDICTIONS_NAME as VOXEL_PREDICTIONS_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
+	VALID_MASK_NAME as PREDICTION_VALID_MASK_NAME,
+)
+from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 	validate_f3_voxel_prediction_artifact,
 )
 from seis_ssl_cluster.f3.lithology.voxel_section_layout import (
+	GRID_NAME,
+	VOXEL_METADATA_NAME,
 	validate_f3_lithology_voxel_section_layout_condition,
 	validate_f3_lithology_voxel_section_layout_manifest,
 )
@@ -75,7 +89,14 @@ if TYPE_CHECKING:
 RUN_MANIFEST_NAME = 'section_layout_run_manifest.json'
 RUN_MANIFEST_TYPE = 'f3_lithology_voxel_section_layout_run_manifest'
 RUN_SCHEMA_VERSION = 1
-JOB_STATES = ('NEW', 'RESUME_LATEST', 'REUSE_COMPLETED', 'INVALID_OR_PARTIAL')
+JOB_STATES = (
+	'NEW',
+	'RESUME_LATEST',
+	'DECODER_COMPLETE',
+	'PREDICTION_COMPLETE',
+	'REUSE_COMPLETED',
+	'INVALID_OR_PARTIAL',
+)
 EXPECTED_EMBEDDING_SHAPE = (76, 113, 32, 384)
 EXPECTED_VALID_TOKEN_SHAPE = EXPECTED_EMBEDDING_SHAPE[:3]
 
@@ -120,6 +141,41 @@ class F3SectionLayoutJobPlan:
 	job: F3SectionLayoutJob
 	state: str
 	reason: str | None = None
+	decoder_stage: F3SectionLayoutStageStatus | None = None
+	prediction_stage: F3SectionLayoutStageStatus | None = None
+	evaluation_stage: F3SectionLayoutStageStatus | None = None
+	invalid_paths: tuple[Path, ...] = ()
+	recovery_state: str | None = None
+
+
+@dataclass(frozen=True)
+class F3SectionLayoutStageStatus:
+	"""Validation result for one independently recoverable job stage."""
+
+	stage: str
+	state: str
+	reason: str | None = None
+	foreign_identity: bool = False
+
+
+@dataclass(frozen=True)
+class _DecoderStageEvidence:
+	initial_decoder_state_sha256: object
+	class_weights: tuple[float, ...]
+	sampling_sequence_sha256: str
+	tile_identities: Mapping[str, object]
+	best_checkpoint_inference: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class _PredictionStageEvidence:
+	exact_once: Mapping[str, object]
+
+
+@dataclass(frozen=True)
+class _EvaluationStageEvidence:
+	metric_schema_sha256: str
+	canonical_metrics_paths: Mapping[str, Mapping[str, object]]
 
 
 @dataclass(frozen=True)
@@ -206,7 +262,7 @@ def inspect_f3_lithology_voxel_section_layout_suite(
 	)
 
 
-def run_f3_lithology_voxel_section_layout_suite(  # noqa: C901, PLR0912, PLR0913
+def run_f3_lithology_voxel_section_layout_suite(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	config: F3SectionLayoutBenchmarkConfig,
 	*,
 	model_id: str,
@@ -266,13 +322,17 @@ def run_f3_lithology_voxel_section_layout_suite(  # noqa: C901, PLR0912, PLR0913
 					'invalid/partial output requires --only-missing '
 					f'--quarantine-invalid: {job.output_root}: {plan.reason}'
 				)
-			quarantine = quarantine_voxel_label_budget_output(
-				job.output_root, reason=plan.reason or 'invalid_or_partial'
-			)
-			quarantines.append(quarantine)
-			state = 'NEW'
+			paths = plan.invalid_paths or (job.output_root,)
+			for path in paths:
+				if path.exists():
+					quarantine = quarantine_voxel_label_budget_output(
+						path, reason=plan.reason or 'invalid_or_partial'
+					)
+					quarantines.append(quarantine)
+			state = plan.recovery_state or 'NEW'
 		try:
 			if state == 'REUSE_COMPLETED':
+				_write_generated_configs(config, job)
 				row = _completed_row(config, job, action='REUSED')
 				_validate_common_completed_row(row, prior=tuple(rows_by_key.values()))
 			else:
@@ -285,13 +345,18 @@ def run_f3_lithology_voxel_section_layout_suite(  # noqa: C901, PLR0912, PLR0913
 					device=device,
 					resume=latest,
 					max_steps=2 if smoke_only else None,
+					start_state=state,
 				)
 				if smoke_only:
 					row = _smoke_row(config, job)
 				else:
-					row = _completed_row(
-						config, job, action='RESUMED' if latest else 'NEW'
-					)
+					action = {
+						'NEW': 'NEW',
+						'RESUME_LATEST': 'RESUMED',
+						'DECODER_COMPLETE': 'INFERENCE_RECOVERED',
+						'PREDICTION_COMPLETE': 'EVALUATION_RECOVERED',
+					}[state]
+					row = _completed_row(config, job, action=action)
 					_validate_common_completed_row(
 						row, prior=tuple(rows_by_key.values())
 					)
@@ -470,56 +535,318 @@ def _validate_dataset_valid_tokens(
 		raise ValueError('embedding valid-token identity differs from dataset contract')
 
 
-def _classify_job(  # noqa: PLR0911
+def _classify_job(  # noqa: C901, PLR0911, PLR0912
 	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
 ) -> F3SectionLayoutJobPlan:
 	if not job.output_root.exists():
 		return F3SectionLayoutJobPlan(job, 'NEW')
 	if not job.output_root.is_dir():
 		return F3SectionLayoutJobPlan(
-			job, 'INVALID_OR_PARTIAL', 'job output is not a directory'
+			job,
+			'INVALID_OR_PARTIAL',
+			'job output is not a directory',
+			invalid_paths=(job.output_root,),
+			recovery_state='NEW',
+		)
+	decoder = _inspect_decoder_stage(config, job)
+	if decoder.state == 'MISSING':
+		return F3SectionLayoutJobPlan(
+			job,
+			'INVALID_OR_PARTIAL',
+			decoder.reason or 'missing decoder stage',
+			decoder_stage=decoder,
+			invalid_paths=(job.output_root,),
+			recovery_state='NEW',
+		)
+	if decoder.state == 'INVALID':
+		reason = decoder.reason or 'invalid decoder stage'
+		if decoder.foreign_identity:
+			reason = f'FOREIGN_IDENTITY: {reason}'
+		return F3SectionLayoutJobPlan(
+			job,
+			'INVALID_OR_PARTIAL',
+			reason,
+			decoder_stage=decoder,
+			invalid_paths=(job.output_root,),
+			recovery_state='NEW',
+		)
+	if decoder.state == 'INCOMPLETE':
+		downstream = tuple(
+			path
+			for path in (job.prediction_dir, job.evaluation_dir)
+			if path.exists()
+		)
+		if downstream:
+			return F3SectionLayoutJobPlan(
+				job,
+				'INVALID_OR_PARTIAL',
+				'incomplete decoder has downstream outputs',
+				decoder_stage=decoder,
+				invalid_paths=downstream,
+				recovery_state='RESUME_LATEST',
+			)
+		return F3SectionLayoutJobPlan(
+			job, 'RESUME_LATEST', decoder_stage=decoder
+		)
+	config_status = _inspect_generated_configs(config, job)
+	if config_status is not None and config_status.foreign_identity:
+		return _generated_config_failure_plan(
+			job,
+			config_status,
+			decoder=decoder,
+			prediction=None,
+			recovery_state='DECODER_COMPLETE',
+		)
+	prediction = _inspect_prediction_stage(config, job)
+	if prediction.state == 'INVALID':
+		reason = prediction.reason or 'invalid prediction stage'
+		if prediction.foreign_identity:
+			reason = f'FOREIGN_IDENTITY: {reason}'
+		paths = (job.prediction_dir,)
+		if job.evaluation_dir.exists():
+			paths = (*paths, job.evaluation_dir)
+		if config_status is not None:
+			paths = (*paths, job.generated_configs_dir)
+		return F3SectionLayoutJobPlan(
+			job,
+			'INVALID_OR_PARTIAL',
+			reason,
+			decoder_stage=decoder,
+			prediction_stage=prediction,
+			invalid_paths=paths,
+			recovery_state='DECODER_COMPLETE',
+		)
+	if prediction.state == 'MISSING':
+		if job.evaluation_dir.exists():
+			return F3SectionLayoutJobPlan(
+				job,
+				'INVALID_OR_PARTIAL',
+				'missing prediction has downstream evaluation output',
+				decoder_stage=decoder,
+				prediction_stage=prediction,
+				invalid_paths=(job.evaluation_dir,),
+				recovery_state='DECODER_COMPLETE',
+			)
+		if config_status is not None:
+			return _generated_config_failure_plan(
+				job,
+				config_status,
+				decoder=decoder,
+				prediction=prediction,
+				recovery_state='DECODER_COMPLETE',
+			)
+		return F3SectionLayoutJobPlan(
+			job,
+			'DECODER_COMPLETE',
+			decoder_stage=decoder,
+			prediction_stage=prediction,
+		)
+	evaluation = _inspect_evaluation_stage(config, job)
+	if evaluation.state == 'INVALID':
+		reason = evaluation.reason or 'invalid evaluation stage'
+		if evaluation.foreign_identity:
+			reason = f'FOREIGN_IDENTITY: {reason}'
+		paths = (job.evaluation_dir,)
+		if config_status is not None:
+			paths = (*paths, job.generated_configs_dir)
+		return F3SectionLayoutJobPlan(
+			job,
+			'INVALID_OR_PARTIAL',
+			reason,
+			decoder_stage=decoder,
+			prediction_stage=prediction,
+			evaluation_stage=evaluation,
+			invalid_paths=paths,
+			recovery_state='PREDICTION_COMPLETE',
+		)
+	recovery_state = (
+		'PREDICTION_COMPLETE'
+		if evaluation.state == 'MISSING'
+		else 'REUSE_COMPLETED'
+	)
+	if config_status is not None:
+		return _generated_config_failure_plan(
+			job,
+			config_status,
+			decoder=decoder,
+			prediction=prediction,
+			evaluation=evaluation,
+			recovery_state=recovery_state,
+		)
+	return F3SectionLayoutJobPlan(
+		job,
+		recovery_state,
+		decoder_stage=decoder,
+		prediction_stage=prediction,
+		evaluation_stage=evaluation,
+	)
+
+
+def _inspect_decoder_stage(  # noqa: PLR0911
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> F3SectionLayoutStageStatus:
+	"""Validate decoder artifacts without inspecting downstream outputs."""
+	if not job.decoder_dir.exists():
+		return F3SectionLayoutStageStatus('decoder', 'MISSING', 'missing decoder stage')
+	if not job.decoder_dir.is_dir():
+		return F3SectionLayoutStageStatus(
+			'decoder', 'INVALID', 'decoder output is not a directory'
 		)
 	latest_path = job.decoder_dir / 'latest.pt'
 	if not latest_path.is_file():
-		return F3SectionLayoutJobPlan(
-			job, 'INVALID_OR_PARTIAL', 'missing decoder/latest.pt'
+		return F3SectionLayoutStageStatus(
+			'decoder', 'INVALID', 'missing decoder/latest.pt'
 		)
 	try:
 		latest = load_voxel_decoder_checkpoint(latest_path)
 	except Exception as error:  # noqa: BLE001
-		return F3SectionLayoutJobPlan(
-			job, 'INVALID_OR_PARTIAL', f'invalid latest.pt: {error}'
+		return F3SectionLayoutStageStatus(
+			'decoder', 'INVALID', f'invalid latest.pt: {error}'
 		)
-	expected = _decoder_config(config, job).to_dict()
-	if latest.get('resolved_config') != expected:
-		return F3SectionLayoutJobPlan(
-			job,
-			'INVALID_OR_PARTIAL',
-			'FOREIGN_IDENTITY: decoder resolved config mismatch',
+	if latest.get('resolved_config') != _decoder_config(config, job).to_dict():
+		return F3SectionLayoutStageStatus(
+			'decoder',
+			'INVALID',
+			'decoder resolved config mismatch',
+			foreign_identity=True,
 		)
 	if latest.get('checkpoint_kind') != 'completed':
-		if job.prediction_dir.exists() or job.evaluation_dir.exists():
-			return F3SectionLayoutJobPlan(
-				job, 'INVALID_OR_PARTIAL', 'incomplete decoder has downstream outputs'
-			)
 		try:
 			validate_f3_lithology_voxel_decoder_resume(
 				_decoder_config(config, job), latest_path
 			)
 		except Exception as error:  # noqa: BLE001
-			return F3SectionLayoutJobPlan(
-				job,
-				'INVALID_OR_PARTIAL',
-				f'FOREIGN_IDENTITY: invalid resume identity: {error}',
+			return F3SectionLayoutStageStatus(
+				'decoder',
+				'INVALID',
+				f'invalid resume identity: {error}',
+				foreign_identity=True,
 			)
-		return F3SectionLayoutJobPlan(job, 'RESUME_LATEST')
+		return F3SectionLayoutStageStatus('decoder', 'INCOMPLETE')
 	try:
-		_completed_row(config, job, action='REUSED')
+		_decoder_stage_evidence(config, job)
 	except Exception as error:  # noqa: BLE001
-		return F3SectionLayoutJobPlan(
-			job, 'INVALID_OR_PARTIAL', f'completed artifact validation failed: {error}'
+		return F3SectionLayoutStageStatus(
+			'decoder', 'INVALID', f'completed decoder validation failed: {error}'
 		)
-	return F3SectionLayoutJobPlan(job, 'REUSE_COMPLETED')
+	return F3SectionLayoutStageStatus('decoder', 'COMPLETE')
+
+
+def _inspect_prediction_stage(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> F3SectionLayoutStageStatus:
+	"""Validate prediction artifacts independently of evaluation outputs."""
+	if not job.prediction_dir.exists():
+		return F3SectionLayoutStageStatus(
+			'prediction', 'MISSING', 'missing prediction stage'
+		)
+	if not job.prediction_dir.is_dir():
+		return F3SectionLayoutStageStatus(
+			'prediction', 'INVALID', 'prediction output is not a directory'
+		)
+	try:
+		_prediction_stage_evidence(config, job)
+	except Exception as error:  # noqa: BLE001
+		return F3SectionLayoutStageStatus(
+			'prediction',
+			'INVALID',
+			f'prediction validation failed: {error}',
+			foreign_identity=_is_identity_failure(error),
+		)
+	return F3SectionLayoutStageStatus('prediction', 'COMPLETE')
+
+
+def _inspect_evaluation_stage(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> F3SectionLayoutStageStatus:
+	"""Validate evaluation artifacts independently of decoder training."""
+	if not job.evaluation_dir.exists():
+		return F3SectionLayoutStageStatus(
+			'evaluation', 'MISSING', 'missing evaluation stage'
+		)
+	if not job.evaluation_dir.is_dir():
+		return F3SectionLayoutStageStatus(
+			'evaluation', 'INVALID', 'evaluation output is not a directory'
+		)
+	try:
+		_evaluation_stage_evidence(config, job)
+	except Exception as error:  # noqa: BLE001
+		return F3SectionLayoutStageStatus(
+			'evaluation',
+			'INVALID',
+			f'evaluation validation failed: {error}',
+			foreign_identity=_is_identity_failure(error),
+		)
+	return F3SectionLayoutStageStatus('evaluation', 'COMPLETE')
+
+
+def _is_identity_failure(error: Exception) -> bool:
+	message = str(error).lower()
+	return 'identity mismatch' in message or 'identity differs' in message
+
+
+def _generated_config_failure_plan(  # noqa: PLR0913
+	job: F3SectionLayoutJob,
+	status: F3SectionLayoutStageStatus,
+	*,
+	decoder: F3SectionLayoutStageStatus,
+	prediction: F3SectionLayoutStageStatus | None,
+	recovery_state: str,
+	evaluation: F3SectionLayoutStageStatus | None = None,
+) -> F3SectionLayoutJobPlan:
+	reason = status.reason or 'invalid generated configs'
+	if status.foreign_identity:
+		reason = f'FOREIGN_IDENTITY: {reason}'
+	return F3SectionLayoutJobPlan(
+		job,
+		'INVALID_OR_PARTIAL',
+		reason,
+		decoder_stage=decoder,
+		prediction_stage=prediction,
+		evaluation_stage=evaluation,
+		invalid_paths=(job.generated_configs_dir,),
+		recovery_state=recovery_state,
+	)
+
+
+def _inspect_generated_configs(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> F3SectionLayoutStageStatus | None:
+	"""Accept missing snapshots but reject corrupt or foreign existing snapshots."""
+	if not job.generated_configs_dir.exists():
+		return None
+	if not job.generated_configs_dir.is_dir():
+		return F3SectionLayoutStageStatus(
+			'generated_configs',
+			'INVALID',
+			'generated configs output is not a directory',
+		)
+	for name, expected in _generated_config_mappings(config, job).items():
+		path = job.generated_configs_dir / name
+		if not path.exists():
+			continue
+		if not path.is_file():
+			return F3SectionLayoutStageStatus(
+				'generated_configs',
+				'INVALID',
+				f'generated config is not a file: {name}',
+			)
+		try:
+			actual = _read_json(path)
+		except Exception as error:  # noqa: BLE001
+			return F3SectionLayoutStageStatus(
+				'generated_configs',
+				'INVALID',
+				f'invalid generated config {name}: {error}',
+			)
+		if actual != expected:
+			return F3SectionLayoutStageStatus(
+				'generated_configs',
+				'INVALID',
+				f'generated config content mismatch: {name}',
+				foreign_identity=True,
+			)
+	return None
 
 
 def _decoder_config(
@@ -584,33 +911,39 @@ def _evaluation_config(
 	)
 
 
-def _run_job(
+def _run_job(  # noqa: PLR0913
 	config: F3SectionLayoutBenchmarkConfig,
 	job: F3SectionLayoutJob,
 	*,
 	device: str,
 	resume: Path | None,
 	max_steps: int | None,
+	start_state: str,
 ) -> None:
-	job.generated_configs_dir.mkdir(parents=True, exist_ok=True)
 	decoder = _decoder_config(config, job)
 	_write_json(job.generated_configs_dir / 'decoder_config.json', decoder.to_dict())
-	result = run_f3_lithology_voxel_decoder(
-		decoder, device=device, resume=resume, max_steps=max_steps
-	)
-	if max_steps is not None:
-		if result.completed or result.global_step != max_steps:
-			raise RuntimeError('smoke must stop at exactly two optimizer steps')
-		return
-	if not result.completed:
-		raise RuntimeError('decoder did not complete')
-	best = result.best_checkpoint
+	if start_state in {'NEW', 'RESUME_LATEST'}:
+		result = run_f3_lithology_voxel_decoder(
+			decoder, device=device, resume=resume, max_steps=max_steps
+		)
+		if max_steps is not None:
+			if result.completed or result.global_step != max_steps:
+				raise RuntimeError('smoke must stop at exactly two optimizer steps')
+			return
+		if not result.completed:
+			raise RuntimeError('decoder did not complete')
+		best = result.best_checkpoint
+	else:
+		if max_steps is not None:
+			raise ValueError('smoke cannot reuse a completed scientific stage')
+		best = job.decoder_dir / 'best.pt'
 	inference = _inference_config(config, job, checkpoint=best)
 	_write_json(
 		job.generated_configs_dir / 'inference_config.json',
 		_inference_mapping(inference),
 	)
-	predict_f3_lithology_voxels(inference, device=device)
+	if start_state in {'NEW', 'RESUME_LATEST', 'DECODER_COMPLETE'}:
+		predict_f3_lithology_voxels(inference, device=device)
 	evaluation = _evaluation_config(config, job)
 	_write_json(
 		job.generated_configs_dir / 'evaluation_config.json',
@@ -619,9 +952,37 @@ def _run_job(
 	evaluate_f3_lithology_voxels(evaluation)
 
 
-def _completed_row(  # noqa: C901, PLR0912
-	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob, *, action: str
-) -> dict[str, object]:
+def _generated_config_mappings(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> Mapping[str, Mapping[str, object]]:
+	best_path = job.decoder_dir / 'best.pt'
+	return {
+		'decoder_config.json': _decoder_config(config, job).to_dict(),
+		'inference_config.json': _inference_mapping(
+			_inference_config(config, job, checkpoint=best_path)
+		),
+		'evaluation_config.json': _evaluation_mapping(_evaluation_config(config, job)),
+	}
+
+
+def _write_generated_configs(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> None:
+	for name, mapping in _generated_config_mappings(config, job).items():
+		_write_json(job.generated_configs_dir / name, mapping)
+
+
+def _validate_generated_configs(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> None:
+	for name, expected in _generated_config_mappings(config, job).items():
+		if _read_json(job.generated_configs_dir / name) != expected:
+			raise ValueError(f'generated config content mismatch: {name}')
+
+
+def _decoder_stage_evidence(  # noqa: C901
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> _DecoderStageEvidence:
 	latest_path = job.decoder_dir / 'latest.pt'
 	best_path = job.decoder_dir / 'best.pt'
 	for path in (
@@ -645,16 +1006,6 @@ def _completed_row(  # noqa: C901, PLR0912
 		raise ValueError('latest checkpoint does not bind best.pt')
 	if _read_json(job.decoder_dir / 'resolved_config.json') != resolved:
 		raise ValueError('persisted decoder resolved config mismatch')
-	generated_expected = {
-		'decoder_config.json': resolved,
-		'inference_config.json': _inference_mapping(
-			_inference_config(config, job, checkpoint=best_path)
-		),
-		'evaluation_config.json': _evaluation_mapping(_evaluation_config(config, job)),
-	}
-	for name, expected in generated_expected.items():
-		if _read_json(job.generated_configs_dir / name) != expected:
-			raise ValueError(f'generated config content mismatch: {name}')
 	if latest.get('global_step') != 50 * 440:
 		raise ValueError('completed checkpoint global step mismatch')
 	run_metadata = _read_json(job.decoder_dir / 'run_metadata.json')
@@ -685,6 +1036,30 @@ def _completed_row(  # noqa: C901, PLR0912
 		float(value) for value in cast('Sequence[object]', latest.get('class_weights'))
 	] != weights:
 		raise ValueError('checkpoint class weights mismatch')
+	return _DecoderStageEvidence(
+		initial_decoder_state_sha256=run_metadata['initial_model_state_sha256'],
+		class_weights=tuple(weights),
+		sampling_sequence_sha256=sampling_sequence_sha256(
+			tile_count=len(train_tiles.tiles),
+			batch_size=1,
+			steps_per_epoch=440,
+			train_seed=DECODER_SEED,
+			epochs=50,
+		),
+		tile_identities={
+			'train_file': _identity(train_path),
+			'train': train_tiles.identity_sha256,
+			'validation_file': _identity(validation_path),
+			'validation': validation_tiles.identity_sha256,
+		},
+		best_checkpoint_inference={'kind': 'best', **_identity(best_path)},
+	)
+
+
+def _prediction_stage_evidence(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> _PredictionStageEvidence:
+	best_path = job.decoder_dir / 'best.pt'
 	prediction = validate_f3_voxel_prediction_artifact(
 		job.prediction_dir, mmap_mode='r'
 	)
@@ -700,6 +1075,14 @@ def _completed_row(  # noqa: C901, PLR0912
 			raise ValueError(f'prediction exact-once check failed: {key}')
 	if prediction.metadata.get('write_probabilities') is not False:
 		raise ValueError('probabilities must be disabled')
+	source_identity = _mapping(
+		prediction.metadata.get('source_identity'), 'prediction source identity'
+	)
+	_validate_bound_file_identity(
+		source_identity.get('decoder_checkpoint'),
+		best_path,
+		label='prediction decoder checkpoint',
+	)
 	plan = inspect_f3_lithology_voxel_inference(
 		_inference_config(config, job, checkpoint=best_path), verify_array_hashes=True
 	)
@@ -714,13 +1097,99 @@ def _completed_row(  # noqa: C901, PLR0912
 	)
 	if evaluation.validation_voxel_count != manifest_validation:
 		raise ValueError('evaluation validation voxel count mismatch')
+	return _PredictionStageEvidence(exact_once=exact_once)
+
+
+def _evaluation_stage_evidence(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> _EvaluationStageEvidence:
 	metrics_paths = {
 		'metrics': job.evaluation_dir / METRICS_JSON,
 		'boundary_metrics': job.evaluation_dir / BOUNDARY_METRICS_JSON,
 		'boundary_region_metrics': job.evaluation_dir / BOUNDARY_REGION_METRICS_CSV,
 		'evaluation_metadata': job.evaluation_dir / EVALUATION_METADATA_JSON,
 	}
+	_validate_evaluation_metadata(config, job, metrics_paths['evaluation_metadata'])
 	metric_schema = _metric_schema(metrics_paths)
+	return _EvaluationStageEvidence(
+		metric_schema_sha256=metric_schema,
+		canonical_metrics_paths={
+			key: _identity(path) for key, path in metrics_paths.items()
+		},
+	)
+
+
+def _validate_evaluation_metadata(
+	config: F3SectionLayoutBenchmarkConfig,
+	job: F3SectionLayoutJob,
+	path: Path,
+) -> None:
+	metadata = _read_json(path)
+	if (
+		metadata.get('artifact_type') != 'f3_lithology_voxel_evaluation'
+		or metadata.get('schema_version') != 2
+		or metadata.get('dataset') != dict(config.dataset)
+		or metadata.get('model_tag') != job.model.model_tag
+	):
+		raise ValueError('evaluation metadata identity mismatch')
+	policy = _mapping(metadata.get('policy'), 'evaluation metadata policy')
+	expected_policy = {
+		'monitored_class_ids': list(
+			cast('Sequence[int]', config.evaluation['monitored_class_ids'])
+		),
+		'boundary_tolerances': list(
+			cast('Sequence[int]', config.evaluation['boundary_tolerances'])
+		),
+		'boundary_region_radii': list(
+			cast('Sequence[int]', config.evaluation['boundary_region_radii'])
+		),
+		'primary_trace_boundary_tolerance': max(
+			cast('Sequence[int]', config.evaluation['boundary_tolerances'])
+		),
+		'chunk_size_x': config.evaluation['chunk_size_x'],
+	}
+	if policy != expected_policy:
+		raise ValueError('evaluation policy identity mismatch')
+	inputs = _mapping(metadata.get('inputs'), 'evaluation metadata inputs')
+	expected_inputs = {
+		'prediction_metadata': job.prediction_dir / PREDICTION_METADATA_NAME,
+		'voxel_predictions': job.prediction_dir / VOXEL_PREDICTIONS_NAME,
+		'voxel_confidence': job.prediction_dir / PREDICTION_CONFIDENCE_NAME,
+		'voxel_valid_mask': job.prediction_dir / PREDICTION_VALID_MASK_NAME,
+		'voxel_dataset_metadata': job.dataset_root / VOXEL_METADATA_NAME,
+		'voxel_split_grid': job.dataset_root / GRID_NAME,
+		'label_volume': config.labels['source_label_volume'],
+		'png_label_inventory': config.labels['png_label_inventory'],
+		'source_label_segy': config.labels['source_label_segy'],
+		'segy_geometry_json': config.labels['segy_geometry_json'],
+		'class_info': config.labels['class_info'],
+	}
+	if set(inputs) != set(expected_inputs):
+		raise ValueError('evaluation input identity inventory mismatch')
+	for label, expected in expected_inputs.items():
+		_validate_bound_file_identity(inputs.get(label), expected, label=label)
+
+
+def _validate_bound_file_identity(
+	value: object, expected: Path, *, label: str
+) -> None:
+	identity = _mapping(value, label)
+	path = identity.get('path')
+	if (
+		not isinstance(path, str)
+		or Path(path).resolve(strict=False) != expected.resolve(strict=False)
+		or identity.get('sha256') != file_sha256(expected)
+	):
+		raise ValueError(f'{label} identity mismatch')
+
+
+def _completed_row(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob, *, action: str
+) -> dict[str, object]:
+	decoder = _decoder_stage_evidence(config, job)
+	prediction = _prediction_stage_evidence(config, job)
+	evaluation = _evaluation_stage_evidence(config, job)
+	_validate_generated_configs(config, job)
 	selected_output = _mapping(job.dataset_row['outputs'], 'dataset outputs')[
 		'selected_token_xyz.npy'
 	]
@@ -754,26 +1223,16 @@ def _completed_row(  # noqa: C901, PLR0912
 			key: dict(value) for key, value in job.embedding_identity.items()
 		},
 		'decoder_seed': DECODER_SEED,
-		'initial_decoder_state_sha256': run_metadata['initial_model_state_sha256'],
-		'class_weights': weights,
-		'sampling_sequence_sha256': sampling_sequence_sha256(
-			tile_count=len(train_tiles.tiles),
-			batch_size=1,
-			steps_per_epoch=440,
-			train_seed=DECODER_SEED,
-			epochs=50,
-		),
-		'tile_identities': {
-			'train_file': _identity(train_path),
-			'train': train_tiles.identity_sha256,
-			'validation_file': _identity(validation_path),
-			'validation': validation_tiles.identity_sha256,
-		},
-		'metric_schema_sha256': metric_schema,
-		'best_checkpoint_inference': {'kind': 'best', **_identity(best_path)},
-		'prediction_exact_once_checks': exact_once,
+		'initial_decoder_state_sha256': decoder.initial_decoder_state_sha256,
+		'class_weights': list(decoder.class_weights),
+		'sampling_sequence_sha256': decoder.sampling_sequence_sha256,
+		'tile_identities': dict(decoder.tile_identities),
+		'metric_schema_sha256': evaluation.metric_schema_sha256,
+		'best_checkpoint_inference': dict(decoder.best_checkpoint_inference),
+		'prediction_exact_once_checks': dict(prediction.exact_once),
 		'canonical_metrics_paths': {
-			key: _identity(path) for key, path in metrics_paths.items()
+			key: dict(value)
+			for key, value in evaluation.canonical_metrics_paths.items()
 		},
 		'error': None,
 	}
@@ -932,6 +1391,11 @@ def _validate_execution_policy(
 			continue
 		if plan.reason and plan.reason.startswith('FOREIGN_IDENTITY:'):
 			raise ValueError(plan.reason)
+		if plan.recovery_state == 'RESUME_LATEST' and not resume:
+			raise FileExistsError(
+				'quarantined downstream output requires --resume for its '
+				'incomplete decoder'
+			)
 		if not quarantine_invalid:
 			raise FileExistsError(
 				'invalid/partial output requires --only-missing '

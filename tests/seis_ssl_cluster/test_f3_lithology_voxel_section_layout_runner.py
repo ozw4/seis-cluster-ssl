@@ -27,6 +27,7 @@ from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.voxel_section_layout_runner import (
 	F3SectionLayoutJob,
 	F3SectionLayoutJobPlan,
+	F3SectionLayoutStageStatus,
 	F3SectionLayoutSuiteInspection,
 	_classify_job,
 	load_f3_lithology_voxel_section_layout_rows,
@@ -166,8 +167,108 @@ def test_job_states_new_resume_reuse_invalid_and_foreign(
 		'load_voxel_decoder_checkpoint',
 		lambda _path: {'resolved_config': resolved, 'checkpoint_kind': 'completed'},
 	)
-	monkeypatch.setattr(runner, '_completed_row', lambda *_args, **_kwargs: {})
+	monkeypatch.setattr(
+		runner,
+		'_decoder_stage_evidence',
+		lambda *_args: object(),
+	)
+	monkeypatch.setattr(
+		runner,
+		'_inspect_prediction_stage',
+		lambda *_args: F3SectionLayoutStageStatus('prediction', 'COMPLETE'),
+	)
+	monkeypatch.setattr(
+		runner,
+		'_inspect_evaluation_stage',
+		lambda *_args: F3SectionLayoutStageStatus('evaluation', 'COMPLETE'),
+	)
 	assert _classify_job(config, job).state == 'REUSE_COMPLETED'
+
+
+def test_job_classification_reports_deepest_complete_stage(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = _config(tmp_path)
+	job = _job(tmp_path)
+	job.output_root.mkdir(parents=True)
+	complete_decoder = F3SectionLayoutStageStatus('decoder', 'COMPLETE')
+	monkeypatch.setattr(
+		runner, '_inspect_decoder_stage', lambda *_args: complete_decoder
+	)
+	monkeypatch.setattr(runner, '_inspect_generated_configs', lambda *_args: None)
+	monkeypatch.setattr(
+		runner,
+		'_inspect_prediction_stage',
+		lambda *_args: F3SectionLayoutStageStatus('prediction', 'MISSING'),
+	)
+	plan = _classify_job(config, job)
+	assert plan.state == 'DECODER_COMPLETE'
+	assert plan.decoder_stage == complete_decoder
+
+	monkeypatch.setattr(
+		runner,
+		'_inspect_prediction_stage',
+		lambda *_args: F3SectionLayoutStageStatus('prediction', 'COMPLETE'),
+	)
+	monkeypatch.setattr(
+		runner,
+		'_inspect_evaluation_stage',
+		lambda *_args: F3SectionLayoutStageStatus('evaluation', 'MISSING'),
+	)
+	assert _classify_job(config, job).state == 'PREDICTION_COMPLETE'
+	monkeypatch.setattr(
+		runner,
+		'_inspect_evaluation_stage',
+		lambda *_args: F3SectionLayoutStageStatus('evaluation', 'COMPLETE'),
+	)
+	assert _classify_job(config, job).state == 'REUSE_COMPLETED'
+
+
+@pytest.mark.parametrize(
+	('start_state', 'expected_calls'),
+	[
+		('DECODER_COMPLETE', ['inference', 'evaluation']),
+		('PREDICTION_COMPLETE', ['evaluation']),
+	],
+)
+def test_run_job_reuses_completed_upstream_stages(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	start_state: str,
+	expected_calls: list[str],
+) -> None:
+	config = _config(tmp_path)
+	job = _job(tmp_path)
+	job.decoder_dir.mkdir(parents=True)
+	(job.decoder_dir / 'best.pt').write_bytes(b'valid completed decoder')
+	calls: list[str] = []
+	monkeypatch.setattr(
+		runner,
+		'run_f3_lithology_voxel_decoder',
+		lambda *_args, **_kwargs: pytest.fail('completed decoder was retrained'),
+	)
+	monkeypatch.setattr(
+		runner,
+		'predict_f3_lithology_voxels',
+		lambda *_args, **_kwargs: calls.append('inference'),
+	)
+	monkeypatch.setattr(
+		runner,
+		'evaluate_f3_lithology_voxels',
+		lambda *_args, **_kwargs: calls.append('evaluation'),
+	)
+	runner._run_job(  # noqa: SLF001
+		config,
+		job,
+		device='cpu',
+		resume=None,
+		max_steps=None,
+		start_state=start_state,
+	)
+	assert calls == expected_calls
+	assert (job.generated_configs_dir / 'decoder_config.json').is_file()
+	assert (job.generated_configs_dir / 'inference_config.json').is_file()
+	assert (job.generated_configs_dir / 'evaluation_config.json').is_file()
 
 
 def test_failure_manifest_is_atomic_and_retains_completed_rows(
@@ -292,6 +393,72 @@ def test_explicit_quarantine_and_smoke_two_steps_use_disjoint_roots(
 	assert not config.benchmark_root.exists()
 	assert len(result.quarantines) == 1
 	assert (result.quarantines[0] / 'partial.txt').is_file()
+
+
+def test_evaluation_recovery_quarantines_only_evaluation_stage(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = _config(tmp_path)
+	job = _job(
+		tmp_path,
+		output_root=(
+			config.benchmark_root
+			/ 'runs/model=mae/layout=layout_000/size=small'
+		),
+	)
+	job.decoder_dir.mkdir(parents=True)
+	job.prediction_dir.mkdir()
+	job.evaluation_dir.mkdir()
+	(job.decoder_dir / 'best.pt').write_bytes(b'completed decoder')
+	(job.prediction_dir / 'predictions.npy').write_bytes(b'valid prediction')
+	(job.evaluation_dir / 'metrics.json').write_text('{broken', encoding='utf-8')
+	base = _inspection((job,))
+	inspection = F3SectionLayoutSuiteInspection(
+		model=base.model,
+		jobs=base.jobs,
+		plans=(
+			F3SectionLayoutJobPlan(
+				job,
+				'INVALID_OR_PARTIAL',
+				'evaluation validation failed',
+				invalid_paths=(job.evaluation_dir,),
+				recovery_state='PREDICTION_COMPLETE',
+			),
+		),
+		dataset_manifest_identity=base.dataset_manifest_identity,
+		embedding_identity=base.embedding_identity,
+	)
+	monkeypatch.setattr(
+		runner,
+		'inspect_f3_lithology_voxel_section_layout_suite',
+		lambda *_args, **_kwargs: inspection,
+	)
+	starts: list[str] = []
+
+	def execute(*_args: object, **kwargs: object) -> None:
+		starts.append(cast('str', kwargs['start_state']))
+		assert (job.decoder_dir / 'best.pt').is_file()
+		assert (job.prediction_dir / 'predictions.npy').is_file()
+		assert not job.evaluation_dir.exists()
+
+	monkeypatch.setattr(runner, '_run_job', execute)
+	monkeypatch.setattr(
+		runner,
+		'_completed_row',
+		lambda *_args, **_kwargs: _complete_row(job),
+	)
+	result = run_f3_lithology_voxel_section_layout_suite(
+		config,
+		model_id='mae',
+		only_missing=True,
+		quarantine_invalid=True,
+	)
+	assert starts == ['PREDICTION_COMPLETE']
+	assert (job.decoder_dir / 'best.pt').is_file()
+	assert (job.prediction_dir / 'predictions.npy').is_file()
+	assert len(result.quarantines) == 1
+	assert result.quarantines[0].parent == job.output_root
+	assert (result.quarantines[0] / 'metrics.json').is_file()
 
 
 def test_config_is_closed_and_rejects_fixed_decoder_drift(tmp_path: Path) -> None:
