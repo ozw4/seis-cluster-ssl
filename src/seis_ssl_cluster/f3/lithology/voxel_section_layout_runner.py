@@ -6,7 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -112,6 +112,9 @@ class F3SectionLayoutJob:
 	output_root: Path
 	dataset_row: Mapping[str, object]
 	embedding_identity: Mapping[str, Mapping[str, object]]
+	dataset_source_identities: Mapping[str, Mapping[str, object]] = field(
+		default_factory=dict
+	)
 
 	@property
 	def decoder_dir(self) -> Path:
@@ -225,6 +228,17 @@ def inspect_f3_lithology_voxel_section_layout_suite(
 	)
 	rows = _dataset_rows(manifest)
 	_validate_dataset_valid_tokens(manifest, embedding_identity)
+	dataset_source_identities = {
+		str(key): dict(_mapping(value, f'dataset source identity {key}'))
+		for key, value in _mapping(
+			manifest.get('source_identities'), 'dataset source identities'
+		).items()
+	}
+	_validate_bound_file_identity(
+		dataset_source_identities.get('label_volume'),
+		Path(cast('str', config.labels['source_label_volume'])),
+		label='dataset label volume',
+	)
 	root = config.smoke_root if smoke_only else config.benchmark_root
 	all_jobs = tuple(
 		F3SectionLayoutJob(
@@ -241,6 +255,7 @@ def inspect_f3_lithology_voxel_section_layout_suite(
 			),
 			dataset_row=row,
 			embedding_identity=embedding_identity,
+			dataset_source_identities=dataset_source_identities,
 		)
 		for row in rows
 	)
@@ -727,7 +742,10 @@ def _inspect_decoder_stage(  # noqa: PLR0911
 		_decoder_stage_evidence(config, job)
 	except Exception as error:  # noqa: BLE001
 		return F3SectionLayoutStageStatus(
-			'decoder', 'INVALID', f'completed decoder validation failed: {error}'
+			'decoder',
+			'INVALID',
+			f'completed decoder validation failed: {error}',
+			foreign_identity=_is_identity_failure(error),
 		)
 	return F3SectionLayoutStageStatus('decoder', 'COMPLETE')
 
@@ -980,7 +998,7 @@ def _validate_generated_configs(
 			raise ValueError(f'generated config content mismatch: {name}')
 
 
-def _decoder_stage_evidence(  # noqa: C901
+def _decoder_stage_evidence(  # noqa: C901, PLR0912
 	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
 ) -> _DecoderStageEvidence:
 	latest_path = job.decoder_dir / 'latest.pt'
@@ -1006,6 +1024,10 @@ def _decoder_stage_evidence(  # noqa: C901
 		raise ValueError('latest checkpoint does not bind best.pt')
 	if _read_json(job.decoder_dir / 'resolved_config.json') != resolved:
 		raise ValueError('persisted decoder resolved config mismatch')
+	expected_artifacts = _expected_decoder_artifact_identities(config, job)
+	for payload in (latest, best):
+		if payload.get('artifact_identities') != expected_artifacts:
+			raise ValueError('completed decoder source artifact identity mismatch')
 	if latest.get('global_step') != 50 * 440:
 		raise ValueError('completed checkpoint global step mismatch')
 	run_metadata = _read_json(job.decoder_dir / 'run_metadata.json')
@@ -1020,6 +1042,19 @@ def _decoder_stage_evidence(  # noqa: C901
 	validation_path = job.decoder_dir / 'validation_tile_manifest.json'
 	train_tiles = read_voxel_tile_manifest(train_path)
 	validation_tiles = read_voxel_tile_manifest(validation_path)
+	expected_tile_hashes = {
+		'train': train_tiles.identity_sha256,
+		'validation': validation_tiles.identity_sha256,
+	}
+	for payload in (latest, best):
+		if payload.get('tile_manifest_hashes') != expected_tile_hashes:
+			raise ValueError('completed decoder tile manifest identity mismatch')
+	for key, expected in (
+		('train_tile_manifest_sha256', train_tiles.identity_sha256),
+		('validation_tile_manifest_sha256', validation_tiles.identity_sha256),
+	):
+		if run_metadata.get(key) != expected:
+			raise ValueError(f'run metadata identity mismatch: {key}')
 	counts = tuple(
 		sum(
 			tile.per_class_supervised_counts[str(class_id)]
@@ -1054,6 +1089,54 @@ def _decoder_stage_evidence(  # noqa: C901
 		},
 		best_checkpoint_inference={'kind': 'best', **_identity(best_path)},
 	)
+
+
+def _expected_decoder_artifact_identities(
+	config: F3SectionLayoutBenchmarkConfig, job: F3SectionLayoutJob
+) -> dict[str, object]:
+	outputs = _mapping(job.dataset_row.get('outputs'), 'dataset outputs')
+	grid = _mapping(outputs.get(GRID_NAME), 'dataset grid identity')
+	metadata = _mapping(
+		outputs.get(VOXEL_METADATA_NAME), 'dataset metadata identity'
+	)
+	label = _mapping(
+		job.dataset_source_identities.get('label_volume'),
+		'dataset label volume identity',
+	)
+	label_path = Path(cast('str', config.labels['source_label_volume']))
+	if Path(str(label.get('path'))).resolve(strict=False) != label_path.resolve(
+		strict=False
+	):
+		raise ValueError('dataset label volume identity mismatch')
+	return {
+		'name': 'f3_voxel_decoder_sources',
+		'embeddings': dict(
+			_mapping(job.embedding_identity.get('embeddings'), 'embeddings identity')
+		),
+		'embedding_metadata': dict(
+			_mapping(
+				job.embedding_identity.get('embedding_metadata'),
+				'embedding metadata identity',
+			)
+		),
+		'valid_tokens': dict(
+			_mapping(
+				job.embedding_identity.get('valid_tokens'), 'valid tokens identity'
+			)
+		),
+		'voxel_dataset_metadata': {
+			'path': str(job.dataset_root / VOXEL_METADATA_NAME),
+			'sha256': metadata.get('sha256'),
+		},
+		'voxel_split_grid': {
+			'path': str(job.dataset_root / GRID_NAME),
+			'sha256': grid.get('sha256'),
+		},
+		'label_volume': {
+			'path': str(label_path),
+			'sha256': label.get('sha256'),
+		},
+	}
 
 
 def _prediction_stage_evidence(

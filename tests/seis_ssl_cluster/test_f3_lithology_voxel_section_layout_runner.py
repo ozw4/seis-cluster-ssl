@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -222,6 +223,83 @@ def test_job_classification_reports_deepest_complete_stage(
 		lambda *_args: F3SectionLayoutStageStatus('evaluation', 'COMPLETE'),
 	)
 	assert _classify_job(config, job).state == 'REUSE_COMPLETED'
+
+
+def test_completed_decoder_rejects_current_source_identity_drift_before_run(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	config = _config(tmp_path)
+	base = _job(tmp_path)
+	row = deepcopy(base.dataset_row)
+	outputs = cast('dict[str, object]', row['outputs'])
+	outputs['voxel_dataset_metadata.json'] = {
+		'path': str(base.dataset_root / 'voxel_dataset_metadata.json'),
+		'sha256': '1' * 64,
+	}
+	outputs['supervision_split_grid.npy'] = {
+		'path': str(base.dataset_root / 'supervision_split_grid.npy'),
+		'sha256': '2' * 64,
+	}
+	embedding_identities = {
+		'embeddings': {'path': '/embeddings.npy', 'sha256': '3' * 64},
+		'embedding_metadata': {'path': '/metadata.json', 'sha256': '4' * 64},
+		'valid_tokens': {'path': '/valid_tokens.npy', 'sha256': '5' * 64},
+	}
+	label_path = Path(cast('str', config.labels['source_label_volume']))
+	job = replace(
+		base,
+		dataset_row=row,
+		embedding_identity=embedding_identities,
+		dataset_source_identities={
+			'label_volume': {'path': str(label_path), 'sha256': '6' * 64}
+		},
+	)
+	job.decoder_dir.mkdir(parents=True)
+	best_path = job.decoder_dir / 'best.pt'
+	best_path.write_bytes(b'best decoder')
+	(job.decoder_dir / 'latest.pt').write_bytes(b'latest decoder')
+	(job.decoder_dir / 'history.csv').write_text('epoch\n', encoding='utf-8')
+	resolved = runner._decoder_config(config, job).to_dict()  # noqa: SLF001
+	(job.decoder_dir / 'resolved_config.json').write_text(
+		json.dumps(resolved), encoding='utf-8'
+	)
+	persisted_artifacts = runner._expected_decoder_artifact_identities(  # noqa: SLF001
+		config, job
+	)
+	persisted_artifacts['voxel_split_grid'] = {
+		'path': str(job.dataset_root / 'supervision_split_grid.npy'),
+		'sha256': '0' * 64,
+	}
+	payload = {
+		'checkpoint_kind': 'completed',
+		'resolved_config': resolved,
+		'best_checkpoint_sha256': file_sha256(best_path),
+		'global_step': 50 * 440,
+		'artifact_identities': persisted_artifacts,
+		'tile_manifest_hashes': {'train': '7' * 64, 'validation': '8' * 64},
+	}
+	monkeypatch.setattr(runner, 'load_voxel_decoder_checkpoint', lambda _path: payload)
+	monkeypatch.setattr(
+		runner,
+		'_run_job',
+		lambda *_args, **_kwargs: pytest.fail('foreign decoder must not run'),
+	)
+
+	plan = _classify_job(config, job)
+
+	assert plan.state == 'INVALID_OR_PARTIAL'
+	assert (plan.reason or '').startswith('FOREIGN_IDENTITY:')
+	assert plan.decoder_stage is not None
+	assert plan.decoder_stage.foreign_identity is True
+	inspection = _inspection((job,))
+	inspection = replace(inspection, plans=(plan,))
+	monkeypatch.setattr(
+		runner,
+		'inspect_f3_lithology_voxel_section_layout_suite',
+		lambda *_args, **_kwargs: inspection,
+	)
+	with pytest.raises(ValueError, match='FOREIGN_IDENTITY'):
+		run_f3_lithology_voxel_section_layout_suite(config, model_id='mae')
 
 
 @pytest.mark.parametrize(
@@ -566,6 +644,11 @@ def _inspection_fixture(
 		'path': str(embedding_root / f'{name}.valid_tokens.npy'),
 		'sha256': file_sha256(embedding_root / f'{name}.valid_tokens.npy'),
 	}
+	np.save(config.labels['source_label_volume'], np.zeros((1,), dtype=np.uint8))
+	label_identity = {
+		'path': str(config.labels['source_label_volume']),
+		'sha256': file_sha256(config.labels['source_label_volume']),
+	}
 	rows = [
 		_dataset_row(tmp_path, layout, size)
 		for layout in range(5)
@@ -573,7 +656,10 @@ def _inspection_fixture(
 	]
 	manifest: dict[str, object] = {
 		'condition_count': 15,
-		'source_identities': {'reference_valid_tokens': valid_identity},
+		'source_identities': {
+			'reference_valid_tokens': valid_identity,
+			'label_volume': label_identity,
+		},
 		'rows': rows,
 	}
 	_write_json(config.dataset_manifest, manifest)
