@@ -90,6 +90,10 @@ from seis_ssl_cluster.config.f3_lithology_voxel_robustness import (
 	f3_lithology_voxel_split_summary_config_from_mapping,
 	f3_lithology_voxel_v0_split_suite_config_from_mapping,
 )
+from seis_ssl_cluster.config.f3_lithology_voxel_section_layout_roster import (
+	EXPECTED_MODEL_IDS,
+	f3_lithology_voxel_section_layout_model_roster_from_mapping,
+)
 from seis_ssl_cluster.config.performance_migration_validation import (
 	performance_migration_validation_config_from_mapping,
 )
@@ -170,6 +174,9 @@ NOPIMS_VISUALIZATION_CONFIGS = sorted(
 	(NOPIMS_ROOT / '40_visualization').rglob('*.yaml'),
 )
 F3_ROOT = Path('experiments/f3/facies_benchmark_v1')
+F3_SECTION_LAYOUT_MODEL_ROSTER_CONFIG = (
+	F3_ROOT / '109_f3_voxel_section_layout_v1/00_model_roster.yaml'
+)
 F3_INSPECTION_STAGES = {
 	'01_inspect_files.yaml': STAGE_F3_INSPECT_FILES,
 	'02_inspect_segy_geometry.yaml': STAGE_F3_SEGY_GEOMETRY,
@@ -1527,6 +1534,27 @@ def test_active_f3_voxel_label_budget_summary_config_resolves() -> None:
 	assert config.publish.enabled is True
 	assert config.publish.output_dir == Path(
 		'results/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1'
+	)
+
+
+def test_active_f3_section_layout_model_roster_resolves(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	roster = f3_lithology_voxel_section_layout_model_roster_from_mapping(
+		load_config(F3_SECTION_LAYOUT_MODEL_ROSTER_CONFIG)
+	)
+
+	assert tuple(roster.model_by_id) == EXPECTED_MODEL_IDS
+	assert len({model.model_tag for model in roster.models}) == 14
+	assert len({model.embedding_root for model in roster.models}) == 14
+	assert all(
+		not model.selection_eligible
+		for model in roster.models
+		if model.selection_role == 'diagnostic'
 	)
 
 

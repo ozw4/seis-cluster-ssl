@@ -1,0 +1,73 @@
+schema_version: f3_voxel_section_layout_model_roster_v1
+artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+models:
+  - model_id: mae
+    model_tag: amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16
+    parent_model_id: null
+    selection_role: baseline
+  - model_id: m1_k6
+    model_tag: strat_hmm_pretext_m1_k6_topblock1_distill
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16
+    parent_model_id: mae
+    selection_role: candidate
+  - model_id: m1_distill_only
+    model_tag: strat_hmm_m1_guardrail_distill_only
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_m1_guardrail_distill_only/overlap_x16
+    parent_model_id: mae
+    selection_role: diagnostic
+  - model_id: m1_shuffled_hmm
+    model_tag: strat_hmm_m1_guardrail_shuffled_hmm_seed42
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_m1_guardrail_shuffled_hmm_seed42/overlap_x16
+    parent_model_id: m1_k6
+    selection_role: diagnostic
+  - model_id: m2a_boundary
+    model_tag: strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16
+    parent_model_id: m1_k6
+    selection_role: candidate
+  - model_id: m1_current_k6
+    model_tag: strat_hmm_pretext_m1_current_k6_topblock1_distill_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_m1_current_k6_topblock1_distill_v1/overlap_x16
+    parent_model_id: m1_k6
+    selection_role: candidate
+  - model_id: mh_nocons
+    model_tag: strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/overlap_x16
+    parent_model_id: m1_current_k6
+    selection_role: candidate
+  - model_id: mh_cons010
+    model_tag: strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1/overlap_x16
+    parent_model_id: mh_nocons
+    selection_role: candidate
+  - model_id: mh_soft_posterior
+    model_tag: strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_soft_nocons_topblock1_distill_v1/overlap_x16
+    parent_model_id: mh_nocons
+    selection_role: candidate
+  - model_id: mh_lateral_smoothing
+    model_tag: strat_hmm_pretext_mh_k6810_latmf1_nocons_topblock1_distill_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_latmf1_nocons_topblock1_distill_v1/overlap_x16
+    parent_model_id: mh_nocons
+    selection_role: candidate
+  - model_id: mh_xy_consensus
+    model_tag: strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xycons1_nocons_topblock1_distill_v1/overlap_x16
+    parent_model_id: mh_nocons
+    selection_role: candidate
+  - model_id: mh_xy_unanimous
+    model_tag: strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_xyunanim1_nocons_topblock1_distill_v1/overlap_x16
+    parent_model_id: mh_nocons
+    selection_role: candidate
+  - model_id: mh_ctmask010_nocons
+    model_tag: strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1/overlap_x16
+    parent_model_id: mh_nocons
+    selection_role: candidate
+  - model_id: mh_ctmask010_refresh3ep_hmm2_nocons
+    model_tag: strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1
+    embedding_root: embeddings/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1/overlap_x16
+    parent_model_id: mh_ctmask010_nocons
+    selection_role: candidate
