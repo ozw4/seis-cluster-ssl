@@ -1,0 +1,52 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  parihaka_root: ${PARIHAKA_DATA_ROOT}
+inputs:
+  amplitude_npz: ${PARIHAKA_DATA_ROOT}/parihaka_data_train.npz
+outputs:
+  data_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1
+  amplitude_npy: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude.npy
+  manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude_manifest.json
+  path_list: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_npy_paths.txt
+  normalization_stats: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude.normalization_stats.json
+  metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_prepare_metadata.json
+dataset:
+  name: parihaka
+  version: facies_benchmark_v1
+  survey_id: parihaka
+source:
+  direct_distributor: Mendeley Data
+  dataset_title: Parihaka + Netherlands F3 (raw volumes + labels) for seismic facies segmentation
+  contributor: jiang zishuo
+  version: 1
+  doi: 10.17632/gnvyh3msrj.1
+  upstream: AIcrowd Seismic Facies Identification Challenge
+  displayed_license: CC BY 4.0
+  archive_name: parihaka_Data.zip
+  upstream_member: data_train.npz
+  local_filename: parihaka_data_train.npz
+  local_modification: filename only
+  aicrowd_byte_identity: unverified
+  redistribution_transformation: unverified
+  acquisition_date: null
+  acquisition_by: null
+  array_key: data
+  member_name: data.npy
+  shape_zxy: [1006, 782, 590]
+  dtype: float32
+  fortran_order: true
+  element_count: 464148280
+  finite_count: 464148280
+  nonfinite_count: 0
+  min: -5195.5234375
+  max: 5151.71875
+  mean: 0.6766075433795379
+  population_std: 390.30892519280377
+conversion:
+  transpose_axes: [1, 2, 0]
+  chunk_size_z: 8
+normalization:
+  clipping_percentiles: [0.5, 99.5]
+  epsilon: 1.0e-6
+  max_samples: 1000000
+  seed: 42

@@ -231,6 +231,11 @@ HELP_FLAG_CONTRACTS = {
 		'--dry-run',
 		'--overwrite',
 	),
+	'prepare_parihaka_volume.py': (
+		'--config',
+		'--dry-run',
+		'--overwrite',
+	),
 	'prepare_nopims_normalization_stats.py': (
 		'--config',
 		'--dry-run',
