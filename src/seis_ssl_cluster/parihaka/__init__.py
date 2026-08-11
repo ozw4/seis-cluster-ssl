@@ -1,6 +1,15 @@
 # ruff: noqa: CPY001
 """Parihaka amplitude-volume preparation."""
 
+from seis_ssl_cluster.parihaka.mae_validation import (
+	FULL_DIR_NAME,
+	MODEL_TAG,
+	SMOKE_DIR_NAME,
+	ParihakaMaeValidationResult,
+	validate_parihaka_mae,
+	validate_parihaka_mae_inputs_from_configs,
+	write_parihaka_mae_validation_report,
+)
 from seis_ssl_cluster.parihaka.prepare_volume import (
 	PARIHAKA_AMPLITUDE_NPY_NAME,
 	PARIHAKA_MANIFEST_NAME,
@@ -23,12 +32,16 @@ from seis_ssl_cluster.parihaka.prepare_volume import (
 )
 
 __all__ = [
+	'FULL_DIR_NAME',
+	'MODEL_TAG',
 	'PARIHAKA_AMPLITUDE_NPY_NAME',
 	'PARIHAKA_MANIFEST_NAME',
 	'PARIHAKA_METADATA_NAME',
 	'PARIHAKA_NORMALIZATION_STATS_NAME',
 	'PARIHAKA_PATH_LIST_NAME',
+	'SMOKE_DIR_NAME',
 	'ArrayStatistics',
+	'ParihakaMaeValidationResult',
 	'ParihakaPrepareConversionConfig',
 	'ParihakaPrepareDatasetConfig',
 	'ParihakaPrepareInputPaths',
@@ -41,4 +54,7 @@ __all__ = [
 	'inspect_parihaka_preparation',
 	'parihaka_prepare_volume_config_from_mapping',
 	'prepare_parihaka_volume',
+	'validate_parihaka_mae',
+	'validate_parihaka_mae_inputs_from_configs',
+	'write_parihaka_mae_validation_report',
 ]

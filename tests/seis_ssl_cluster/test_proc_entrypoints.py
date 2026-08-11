@@ -236,6 +236,13 @@ HELP_FLAG_CONTRACTS = {
 		'--dry-run',
 		'--overwrite',
 	),
+	'validate_parihaka_mae.py': (
+		'--prepare-config',
+		'--smoke-config',
+		'--full-config',
+		'--check',
+		'--json-output',
+	),
 	'prepare_nopims_normalization_stats.py': (
 		'--config',
 		'--dry-run',
