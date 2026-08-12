@@ -12,6 +12,7 @@ import seis_ssl_cluster.training.mae as mae_training
 from seis_ssl_cluster import __version__
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
+	AmplitudePretrainDataset,
 	AmplitudeVolumeRecord,
 	SurveyManifest,
 	SurveyNormalizationStats,
@@ -47,6 +48,11 @@ class _TinyAmpModel(torch.nn.Module):
 			'target_patches': patchify_3d(x, (2, 2, 2)).detach(),
 			'spatial_mask': batch['spatial_mask'],
 		}
+
+
+def test_mae_training_engine_uses_survey_neutral_dataset_name() -> None:
+	assert mae_training.AmplitudePretrainDataset is AmplitudePretrainDataset
+	assert not hasattr(mae_training, 'NopimsAmplitudePretrainDataset')
 
 
 class _FiniteLossNanGradient(torch.autograd.Function):
@@ -153,8 +159,10 @@ def test_run_rejects_missing_train_path_list(tmp_path: Path) -> None:
 	cfg = _tiny_config(tmp_path)
 	del cfg['manifests']['train_path_list']
 
-	with pytest.raises(ValueError, match=r'manifests\.train_path_list'):
+	with pytest.raises(ValueError, match=r'manifests\.train_path_list') as error:
 		run_mae_pretraining(cfg)
+	assert 'NOPIMS' not in str(error.value)
+	assert 'builder' not in str(error.value).lower()
 
 
 def test_run_requires_explicit_output_root(tmp_path: Path) -> None:
@@ -170,8 +178,28 @@ def test_run_rejects_missing_configured_train_path_list(tmp_path: Path) -> None:
 	missing = tmp_path / 'missing_train_paths.txt'
 	cfg['manifests']['train_path_list'] = str(missing)
 
-	with pytest.raises(FileNotFoundError, match=r'manifests\.train_path_list'):
+	with pytest.raises(
+		FileNotFoundError,
+		match=r'manifests\.train_path_list',
+	) as error:
 		run_mae_pretraining(cfg)
+	assert str(missing) in str(error.value)
+	assert 'NOPIMS' not in str(error.value)
+	assert 'builder' not in str(error.value).lower()
+
+
+def test_run_rejects_missing_manifest_without_dataset_specific_hint(
+	tmp_path: Path,
+) -> None:
+	cfg = _tiny_config(tmp_path)
+	missing = tmp_path / 'missing_manifest.json'
+	cfg['manifests']['train'] = str(missing)
+
+	with pytest.raises(FileNotFoundError, match=r'manifests\.train') as error:
+		run_mae_pretraining(cfg)
+	assert str(missing) in str(error.value)
+	assert 'NOPIMS' not in str(error.value)
+	assert 'builder' not in str(error.value).lower()
 
 
 def test_fresh_run_rejects_existing_snapshot_files(tmp_path: Path) -> None:

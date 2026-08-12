@@ -600,11 +600,11 @@ def _validate_training_configs(
 		)
 	_validate_disjoint_run_roots(expected_smoke, expected_full)
 	differences = _differing_paths(smoke, full)
-	if differences != _SMOKE_FULL_ALLOWED_DIFFERENCES:
+	unexpected = differences - _SMOKE_FULL_ALLOWED_DIFFERENCES
+	if unexpected:
 		msg = (
-			'smoke/full config differences must equal the closed allowlist; '
-			f'expected={sorted(_SMOKE_FULL_ALLOWED_DIFFERENCES)!r}, '
-			f'got={sorted(differences)!r}'
+			'smoke/full config differences are outside the closed allowlist; '
+			f'unexpected={sorted(unexpected)!r}'
 		)
 		raise ValueError(msg)
 	_validate_full_contract(full)

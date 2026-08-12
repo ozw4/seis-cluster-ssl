@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Literal, cast
 import torch
 
 import seis_ssl_cluster
-from seis_ssl_cluster.data import NopimsAmplitudePretrainDataset, read_manifest_json
+from seis_ssl_cluster.data import AmplitudePretrainDataset, read_manifest_json
 from seis_ssl_cluster.losses import mae_pretraining_loss
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.mae.patching import unpatchify_3d
@@ -58,13 +58,6 @@ from seis_ssl_cluster.utils.cuda import cuda_device_supports_bfloat16
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.visualization.mae_debug import MaeDebugVisualizationConfig
-
-_MANIFEST_BUILD_HINT = (
-	'Build NOPIMS manifests with '
-	'`python proc/seis_ssl_cluster/build_nopims_manifests.py --config '
-	'proc/configs/seis_ssl_cluster/build_nopims_manifests.yaml`.'
-)
-
 
 @dataclass(frozen=True)
 class MaeTrainingState:
@@ -370,7 +363,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 	)
 
 	samples_per_epoch = _optional_int_config(train_config, 'samples_per_epoch')
-	dataset = NopimsAmplitudePretrainDataset.from_config(
+	dataset = AmplitudePretrainDataset.from_config(
 		manifests,
 		config,
 		samples_per_epoch=samples_per_epoch,
@@ -722,9 +715,7 @@ def _configured_path_list(config: Mapping[str, object]) -> Path:
 		raise ValueError(msg)
 	path = Path(path_value)
 	if not path.is_file():
-		msg = _manifest_path_error(
-			f'manifests.train_path_list does not exist: {path}',
-		)
+		msg = f'manifests.train_path_list does not exist: {path}'
 		raise FileNotFoundError(msg)
 	return path
 
@@ -747,26 +738,20 @@ def _git_commit() -> str | None:
 def _manifest_train_path(config: Mapping[str, object]) -> Path:
 	manifests = config.get('manifests')
 	if not isinstance(manifests, Mapping):
-		msg = _manifest_path_error('manifests.train is required')
+		msg = 'manifests.train is required'
 		raise TypeError(msg)
 	if 'train' not in manifests:
-		msg = _manifest_path_error('manifests.train is required')
+		msg = 'manifests.train is required'
 		raise ValueError(msg)
 	path_value = manifests.get('train')
 	if not isinstance(path_value, str) or not path_value:
-		msg = _manifest_path_error(
-			f'manifests.train must be a non-empty string; got {path_value!r}',
-		)
+		msg = f'manifests.train must be a non-empty string; got {path_value!r}'
 		raise ValueError(msg)
 	path = Path(path_value)
 	if not path.is_file():
-		msg = _manifest_path_error(f'manifests.train does not exist: {path}')
+		msg = f'manifests.train does not exist: {path}'
 		raise FileNotFoundError(msg)
 	return path
-
-
-def _manifest_path_error(reason: str) -> str:
-	return f'{reason}. {_MANIFEST_BUILD_HINT}'
 
 
 def _resolve_output_root(paths_config: Mapping[str, object]) -> Path:

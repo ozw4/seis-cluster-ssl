@@ -11,6 +11,7 @@ import seis_ssl_cluster.data.window_preprocessing as preprocessing_module
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeAgcConfig,
+	AmplitudePretrainDataset,
 	AmplitudeVolumeRecord,
 	CropRequest,
 	NopimsAmplitudePretrainDataset,
@@ -87,6 +88,29 @@ def _manifest(
 			normalization_stats_path=stats_path,
 		),
 	)
+
+
+def test_generic_and_legacy_dataset_names_have_identical_behavior(
+	tmp_path: Path,
+) -> None:
+	assert NopimsAmplitudePretrainDataset is AmplitudePretrainDataset
+	manifest = _manifest(
+		tmp_path,
+		'survey',
+		np.arange(8 * 8 * 8, dtype=np.float32).reshape(8, 8, 8),
+	)
+	kwargs = {
+		'local_crop_size_xyz': (4, 4, 4),
+		'patch_size_xyz': (2, 2, 2),
+		'seed': 7,
+		'zero_mask': ZeroMaskConfig(enabled=False),
+	}
+	generic_sample = AmplitudePretrainDataset([manifest], **kwargs)[0]
+	legacy_sample = NopimsAmplitudePretrainDataset([manifest], **kwargs)[0]
+
+	assert generic_sample.keys() == legacy_sample.keys()
+	for key in generic_sample:
+		np.testing.assert_array_equal(generic_sample[key], legacy_sample[key])
 
 
 def test_amplitude_dataset_returns_one_channel_sample_contract(tmp_path: Path) -> None:

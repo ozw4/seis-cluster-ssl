@@ -46,10 +46,10 @@ if TYPE_CHECKING:
 XYZ = tuple[int, int, int]
 
 
-class NopimsAmplitudePretrainDataset:
-	"""Return deterministic random amplitude-only crops from NOPIMS manifests."""
+class AmplitudePretrainDataset:
+	"""Return deterministic random amplitude-only crops from survey manifests."""
 
-	def __init__(  # noqa: D107, PLR0913
+	def __init__(  # noqa: D107, PLR0913, PLR0917
 		self,
 		manifests: Sequence[SurveyManifest],
 		local_crop_size_xyz: Sequence[int] = (128, 128, 128),
@@ -145,7 +145,7 @@ class NopimsAmplitudePretrainDataset:
 		config: Mapping[str, object],
 		*,
 		samples_per_epoch: int | None = None,
-	) -> NopimsAmplitudePretrainDataset:
+	) -> AmplitudePretrainDataset:
 		"""Build an amplitude-only dataset from validated config sections."""
 		data = _require_config_mapping(config, 'data')
 		model = _require_config_mapping(config, 'model')
@@ -324,9 +324,6 @@ class NopimsAmplitudePretrainDataset:
 		return self._normalization_stats[path]
 
 
-AmplitudePretrainDataset = NopimsAmplitudePretrainDataset
-
-
 def _zero_mask_from_config(config: Mapping[str, object]) -> ZeroMaskConfig:
 	value = config.get('zero_mask')
 	if value is None:
@@ -447,6 +444,9 @@ def _validate_optional_positive_float(
 		msg = f'{name} must be a finite positive number; got {value!r}'
 		raise ValueError(msg)
 	return result
+
+
+NopimsAmplitudePretrainDataset = AmplitudePretrainDataset
 
 
 __all__ = [

@@ -246,7 +246,43 @@ def test_inputs_reject_full_scientific_and_non_allowlisted_smoke_drift(
 
 	prepare, smoke, full = _inputs_fixture(tmp_path / 'second', monkeypatch)
 	smoke['data']['min_valid_fraction'] = 0.2
-	with pytest.raises(ValueError, match='allowlist'):
+	with pytest.raises(ValueError, match=r'data\.min_valid_fraction'):
+		validate_parihaka_mae_inputs_from_configs(
+			prepare=prepare,
+			smoke_raw=smoke,
+			full_raw=full,
+		)
+
+
+def test_inputs_allow_allowlisted_field_to_match_full(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	prepare, smoke, full = _inputs_fixture(tmp_path, monkeypatch)
+	smoke['train']['batch_size'] = full['train']['batch_size']
+
+	result = validate_parihaka_mae_inputs_from_configs(
+		prepare=prepare,
+		smoke_raw=smoke,
+		full_raw=full,
+	)
+
+	assert result.smoke['train']['batch_size'] == result.full['train']['batch_size']
+
+
+@pytest.mark.parametrize(
+	'key',
+	['device', 'amp', 'epochs', 'samples_per_epoch', 'max_steps'],
+)
+def test_inputs_require_mandatory_smoke_full_train_differences(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	key: str,
+) -> None:
+	prepare, smoke, full = _inputs_fixture(tmp_path, monkeypatch)
+	smoke['train'][key] = full['train'].get(key)
+
+	with pytest.raises(ValueError, match=key):
 		validate_parihaka_mae_inputs_from_configs(
 			prepare=prepare,
 			smoke_raw=smoke,
