@@ -58,7 +58,7 @@ def test_results_write_exact_portable_three_file_allowlist(
 		'git_commit': 'b' * 40,
 		'git_dirty': None,
 	}
-	assert summary['summary_generation'] == {'git_commit': 'a' * 40}
+	assert 'summary_generation' not in summary
 	assert 'execution' not in summary
 	assert summary['scientific_scope']['kind'].startswith('survey-specific')
 	assert summary['training_completion'] == {'epoch': 100, 'global_step': 250_000}
@@ -178,7 +178,6 @@ def _results_fixture(
 		'resolve_mae_training_config',
 		lambda config: config,
 	)
-	monkeypatch.setattr(results_module, '_git_sha', lambda: 'a' * 40)
 	run_metadata_path = validation.full_output_root / 'run_metadata.json'
 	run_metadata = json.loads(run_metadata_path.read_text())
 	run_metadata.update(

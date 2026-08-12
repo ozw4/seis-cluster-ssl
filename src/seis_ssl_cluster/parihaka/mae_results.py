@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import json
-import shutil
-import subprocess
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
@@ -256,9 +254,6 @@ def _build_evidence(
 			'git_commit': git_commit,
 			'git_dirty': None,
 		},
-		'summary_generation': {
-			'git_commit': _git_sha(),
-		},
 		'training_completion': {
 			'epoch': validation.checkpoint_epoch,
 			'global_step': validation.checkpoint_global_step,
@@ -279,7 +274,6 @@ def _render_markdown(evidence: Mapping[str, object]) -> str:
 	completion = _mapping(evidence, 'training_completion')
 	checkpoints = _mapping(evidence, 'checkpoints')
 	training_invocation = _mapping(evidence, 'training_invocation')
-	summary_generation = _mapping(evidence, 'summary_generation')
 	latest = _mapping(checkpoints, 'latest')
 	best = _mapping(checkpoints, 'best')
 	return (
@@ -289,7 +283,6 @@ def _render_markdown(evidence: Mapping[str, object]) -> str:
 		f"- Model tag: `{dataset['model_tag']}`\n"
 		f"- Training invocation: `{training_invocation['created_at_utc']}`, "
 		f"git `{training_invocation['git_commit']}`\n"
-		f"- Summary generation git: `{summary_generation['git_commit']}`\n"
 		'- Input boundary: amplitude only; labels were not used or opened.\n'
 		'- Scope: survey-specific transductive self-supervised pretraining.\n'
 		f"- Completion: epoch {completion['epoch']}, "
@@ -374,21 +367,6 @@ def _required_string(
 	if not isinstance(value, str) or not value:
 		raise TypeError(f'{label}.{key} must be a non-empty string')
 	return value
-
-
-def _git_sha() -> str | None:
-	git = shutil.which('git')
-	if git is None:
-		return None
-	try:
-		return subprocess.check_output(  # noqa: S603
-			[git, 'rev-parse', 'HEAD'],
-			cwd=Path(__file__).resolve().parents[3],
-			text=True,
-			stderr=subprocess.DEVNULL,
-		).strip()
-	except (OSError, subprocess.CalledProcessError):
-		return None
 
 
 def file_sha256(path: Path) -> str:

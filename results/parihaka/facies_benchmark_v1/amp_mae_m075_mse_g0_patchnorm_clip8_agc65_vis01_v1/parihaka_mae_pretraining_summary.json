@@ -277,9 +277,6 @@
     "sha256": "c5c22ac694e4dc3467dadf5e94cce9ac59c06cc4a43b2ef75ff05f5a057f28c2",
     "size_bytes": 1715555445
   },
-  "summary_generation": {
-    "git_commit": "6d8553c0138aaaf8466cee1f715c50367912e8a8"
-  },
   "training_completion": {
     "epoch": 100,
     "global_step": 250000
