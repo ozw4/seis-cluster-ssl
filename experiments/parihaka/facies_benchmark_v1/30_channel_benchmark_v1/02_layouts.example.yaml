@@ -1,0 +1,28 @@
+axis_mapping:
+  inline: x
+  crossline: y
+
+validation:
+  inline: [REPLACE_WITH_X_INDEX]
+  crossline: [REPLACE_WITH_Y_INDEX]
+
+test:
+  inline: [REPLACE_WITH_X_INDEX]
+  crossline: [REPLACE_WITH_Y_INDEX]
+
+layouts:
+  layout_000:
+    inline: [X0, X1, X2, X3]
+    crossline: [Y0, Y1, Y2, Y3]
+  layout_001:
+    inline: [X0, X1, X2, X3]
+    crossline: [Y0, Y1, Y2, Y3]
+  layout_002:
+    inline: [X0, X1, X2, X3]
+    crossline: [Y0, Y1, Y2, Y3]
+  layout_003:
+    inline: [X0, X1, X2, X3]
+    crossline: [Y0, Y1, Y2, Y3]
+  layout_004:
+    inline: [X0, X1, X2, X3]
+    crossline: [Y0, Y1, Y2, Y3]

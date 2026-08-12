@@ -1,0 +1,65 @@
+# Parihaka Channel benchmark v1
+
+This experiment compares one pretrained Parihaka amplitude MAE with the same
+architecture initialized randomly. The encoder embeddings are fixed; each job
+trains only the same binary `VoxelDecoder3D`, with seed 42000 and all selected
+section voxels used once per epoch.
+
+The repository does not choose section indices. First prepare and inspect the
+labels, review `parihaka_channel_section_counts.csv`, copy
+`02_layouts.example.yaml` outside its example name, and replace every placeholder
+with explicit integer X/Y indices. The same validation and test lines are shared
+by all 30 jobs. A training line may not reuse a held-out line number in the same
+orientation.
+
+```bash
+EXP=experiments/parihaka/facies_benchmark_v1/30_channel_benchmark_v1
+
+PYTHONPATH=src python proc/seis_ssl_cluster/prepare_parihaka_channel_labels.py \
+  --config "$EXP/01_prepare_channel_labels.yaml" --dry-run
+PYTHONPATH=src python proc/seis_ssl_cluster/prepare_parihaka_channel_labels.py \
+  --config "$EXP/01_prepare_channel_labels.yaml"
+PYTHONPATH=src python proc/seis_ssl_cluster/inspect_parihaka_channel_sections.py \
+  --config "$EXP/01_prepare_channel_labels.yaml"
+```
+
+Create the random checkpoint with the existing generic entrypoint, then run the
+two extraction configs. They are identical except for checkpoint, model-tag path,
+and output directory.
+
+```bash
+PYTHONPATH=src python proc/seis_ssl_cluster/create_random_mae_checkpoint.py \
+  --config "$EXP/03_create_random_checkpoint.yaml"
+PYTHONPATH=src python proc/seis_ssl_cluster/extract_embeddings.py \
+  --config "$EXP/04_extract_pretrained_embeddings.yaml"
+PYTHONPATH=src python proc/seis_ssl_cluster/extract_embeddings.py \
+  --config "$EXP/05_extract_random_embeddings.yaml"
+```
+
+Run one read-only preflight, then the simple 30-job loop. Set `LAYOUT_CONFIG` to
+the reviewed, concrete YAML rather than the example file.
+
+```bash
+LAYOUT_CONFIG=/absolute/path/to/parihaka_channel_layouts.yaml
+PYTHONPATH=src python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
+  --config "$EXP/06_channel_benchmark.yaml" --model pretrained \
+  --layout layout_000 --size small --layout-config "$LAYOUT_CONFIG" --dry-run
+
+for model in pretrained random; do
+  for layout in layout_000 layout_001 layout_002 layout_003 layout_004; do
+    for size in small medium large; do
+      PYTHONPATH=src python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
+        --config "$EXP/06_channel_benchmark.yaml" --model "$model" \
+        --layout "$layout" --size "$size" --layout-config "$LAYOUT_CONFIG"
+    done
+  done
+done
+
+PYTHONPATH=src python proc/seis_ssl_cluster/summarize_parihaka_channel_benchmark.py \
+  --config "$EXP/06_channel_benchmark.yaml"
+```
+
+An interrupted job resumes only from its own `latest.pt` using `--resume PATH`.
+`best.pt` is selected by validation Channel IoU. Test is evaluated once after
+training from `best.pt`; no probability volume is written. The summary requires
+all 30 `metrics.json` files and reports paired test Channel-IoU deltas only.

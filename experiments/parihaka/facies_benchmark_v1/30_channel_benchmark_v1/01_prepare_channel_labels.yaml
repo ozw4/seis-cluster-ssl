@@ -1,0 +1,9 @@
+inputs:
+  labels_npz: ${PARIHAKA_DATA_ROOT}/parihaka_labels_train.npz
+  array_key: labels
+outputs:
+  labels_npy: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_labels.npy
+  metadata_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_labels_metadata.json
+  section_counts_csv: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_channel_section_counts.csv
+conversion:
+  chunk_size_z: 8
