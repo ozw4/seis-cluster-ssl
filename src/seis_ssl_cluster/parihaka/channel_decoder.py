@@ -45,6 +45,24 @@ BEST_NAME = 'best.pt'
 HISTORY_NAME = 'history.csv'
 METRICS_NAME = 'metrics.json'
 
+_PAIRED_EMBEDDING_METADATA_KEYS = (
+	'survey_id',
+	'source_amplitude_path',
+	'volume_shape_xyz',
+	'model_geometry',
+	'patch_size',
+	'token_grid_shape',
+	'window_size',
+	'overlap',
+	'output_dtype',
+	'min_token_valid_fraction',
+	'normalization_stats_path',
+	'preprocessing',
+	'zero_mask',
+	'precision',
+	'pretraining_objective',
+)
+
 
 @dataclass(frozen=True)
 class DecoderArchitecture:
@@ -163,10 +181,10 @@ def channel_decoder_config_from_mapping(
 	)
 
 
-def inspect_embedding_pair(  # noqa: C901, PLR0912
+def inspect_embedding_pair(  # noqa: C901
 	config: ChannelDecoderConfig,
 ) -> EmbeddingGeometry:
-	"""Require identical pretrained/random geometry and valid-token masks."""
+	"""Require scientifically paired pretrained/random embedding inputs."""
 	pretrained = output_paths(config.pretrained_embeddings, config.survey_id)
 	random_paths = output_paths(config.random_embeddings, config.survey_id)
 	for paths in (pretrained, random_paths):
@@ -179,20 +197,18 @@ def inspect_embedding_pair(  # noqa: C901, PLR0912
 	random_array = np.load(random_paths.embeddings, mmap_mode='r', allow_pickle=False)
 	if pretrained_array.shape != random_array.shape:
 		raise ValueError('pretrained/random embedding shape mismatch')
-	if pretrained_array.ndim != 4 or not np.issubdtype(
-		pretrained_array.dtype, np.floating
+	if (
+		pretrained_array.ndim != 4
+		or not np.issubdtype(pretrained_array.dtype, np.floating)
+		or not np.issubdtype(random_array.dtype, np.floating)
 	):
 		raise TypeError('embeddings must be floating [TX,TY,TZ,D] arrays')
-	for key, label in (
-		('patch_size', 'patch size'),
-		('token_grid_shape', 'token-grid shape'),
-		('volume_shape_xyz', 'volume shape'),
-	):
-		if pretrained_meta.get(key) != random_meta.get(key):
-			raise ValueError(f'pretrained/random {label} mismatch')
-	for key in ('preprocessing', 'zero_mask'):
-		if pretrained_meta.get(key) != random_meta.get(key):
-			raise ValueError(f'pretrained/random embedding {key} mismatch')
+	_validate_embedding_pair_metadata(
+		pretrained_meta,
+		random_meta,
+		pretrained_dtype=pretrained_array.dtype,
+		random_dtype=random_array.dtype,
+	)
 	patch = _triplet(pretrained_meta.get('patch_size'), 'embedding patch_size')
 	token_grid = _triplet(
 		pretrained_meta.get('token_grid_shape'), 'embedding token_grid_shape'
@@ -236,6 +252,57 @@ def inspect_embedding_pair(  # noqa: C901, PLR0912
 		embedding_shape=tuple(int(item) for item in pretrained_array.shape),
 		embedding_dim=dimension,
 	)
+
+
+def _validate_embedding_pair_metadata(  # noqa: C901
+	pretrained_meta: Mapping[str, object],
+	random_meta: Mapping[str, object],
+	*,
+	pretrained_dtype: np.dtype[Any],
+	random_dtype: np.dtype[Any],
+) -> None:
+	for key in _PAIRED_EMBEDDING_METADATA_KEYS:
+		if key not in pretrained_meta:
+			raise ValueError(f'pretrained embedding metadata missing {key}')
+		if key not in random_meta:
+			raise ValueError(f'random embedding metadata missing {key}')
+	pretrained_metadata_dtype = _metadata_dtype(pretrained_meta, 'pretrained')
+	random_metadata_dtype = _metadata_dtype(random_meta, 'random')
+	if pretrained_dtype != pretrained_metadata_dtype:
+		raise TypeError(
+			'pretrained embedding array dtype does not match metadata output_dtype'
+		)
+	if random_dtype != random_metadata_dtype:
+		raise TypeError(
+			'random embedding array dtype does not match metadata output_dtype'
+		)
+	if pretrained_dtype != random_dtype:
+		raise TypeError('pretrained/random embedding array dtype mismatch')
+	for key in _PAIRED_EMBEDDING_METADATA_KEYS:
+		if pretrained_meta[key] != random_meta[key]:
+			raise ValueError(
+				f'pretrained/random embedding metadata {key} mismatch'
+			)
+	pretrained_sha = pretrained_meta.get('checkpoint_sha256')
+	random_sha = random_meta.get('checkpoint_sha256')
+	if not isinstance(pretrained_sha, str) or not pretrained_sha:
+		raise ValueError('pretrained embedding metadata missing checkpoint_sha256')
+	if not isinstance(random_sha, str) or not random_sha:
+		raise ValueError('random embedding metadata missing checkpoint_sha256')
+	if pretrained_sha == random_sha:
+		raise ValueError('pretrained/random checkpoint_sha256 must differ')
+
+
+def _metadata_dtype(metadata: Mapping[str, object], model: str) -> np.dtype[Any]:
+	value = metadata.get('output_dtype')
+	if not isinstance(value, str) or not value:
+		raise TypeError(f'{model} embedding metadata output_dtype must be a string')
+	try:
+		return np.dtype(value)
+	except TypeError as exc:
+		raise TypeError(
+			f'{model} embedding metadata output_dtype is invalid: {value!r}'
+		) from exc
 
 
 def inspect_channel_decoder_job(

@@ -57,19 +57,35 @@ def _config(tmp_path: Path) -> ChannelDecoderConfig:
 
 def _write_pair(config: ChannelDecoderConfig) -> None:
 	metadata = {
+		'survey_id': config.survey_id,
+		'source_amplitude_path': '/data/parihaka_amplitude.npy',
 		'patch_size': [8, 8, 8],
 		'token_grid_shape': [2, 2, 2],
 		'volume_shape_xyz': [16, 16, 16],
 		'embedding_dim': 384,
+		'model_geometry': {'embed_dim': 384, 'depth': 12, 'num_heads': 6},
+		'window_size': [16, 16, 16],
+		'overlap': [8, 8, 8],
+		'output_dtype': 'float16',
+		'min_token_valid_fraction': 0.5,
+		'normalization_stats_path': '/data/parihaka_stats.json',
 		'preprocessing': {'mode': 'same'},
 		'zero_mask': {'enabled': True},
+		'precision': {'device_type': 'cpu', 'autocast': False},
+		'pretraining_objective': {'name': 'masked_autoencoding'},
 	}
-	for root in (config.pretrained_embeddings, config.random_embeddings):
+	for root, checkpoint_sha256 in (
+		(config.pretrained_embeddings, 'a' * 64),
+		(config.random_embeddings, 'b' * 64),
+	):
 		paths = output_paths(root, config.survey_id)
 		root.mkdir(parents=True)
 		np.save(paths.embeddings, np.zeros((2, 2, 2, 384), dtype=np.float16))
 		np.save(paths.valid_tokens, np.ones((2, 2, 2), dtype=np.bool_))
-		paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+		paths.metadata.write_text(
+			json.dumps({**metadata, 'checkpoint_sha256': checkpoint_sha256}),
+			encoding='utf-8',
+		)
 
 
 def test_embedding_geometry_mismatch_is_rejected(tmp_path: Path) -> None:
@@ -89,6 +105,98 @@ def test_valid_token_mask_mismatch_is_rejected(tmp_path: Path) -> None:
 	mask[0, 0, 0] = False
 	np.save(random_paths.valid_tokens, mask)
 	with pytest.raises(ValueError, match='valid-token mask mismatch'):
+		inspect_embedding_pair(config)
+
+
+@pytest.mark.parametrize(
+	('key', 'different_value'),
+	[
+		('survey_id', 'another-survey'),
+		('source_amplitude_path', '/data/another.npy'),
+		('volume_shape_xyz', [24, 16, 16]),
+		('model_geometry', {'embed_dim': 384, 'depth': 24, 'num_heads': 6}),
+		('patch_size', [4, 8, 8]),
+		('token_grid_shape', [3, 2, 2]),
+		('window_size', [8, 16, 16]),
+		('overlap', [4, 8, 8]),
+		('min_token_valid_fraction', 0.75),
+		('normalization_stats_path', '/data/another_stats.json'),
+		('preprocessing', {'mode': 'different'}),
+		('zero_mask', {'enabled': False}),
+		('precision', {'device_type': 'cuda', 'autocast': True}),
+		('pretraining_objective', {'name': 'different'}),
+	],
+)
+def test_embedding_pair_metadata_mismatch_is_rejected(
+	tmp_path: Path,
+	key: str,
+	different_value: object,
+) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	random_paths = output_paths(config.random_embeddings, config.survey_id)
+	metadata = json.loads(random_paths.metadata.read_text(encoding='utf-8'))
+	metadata[key] = different_value
+	random_paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+	with pytest.raises(ValueError, match=rf'metadata {key} mismatch'):
+		inspect_embedding_pair(config)
+
+
+@pytest.mark.parametrize('model', ['pretrained', 'random'])
+def test_embedding_array_dtype_must_match_metadata(
+	tmp_path: Path,
+	model: str,
+) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	root = (
+		config.pretrained_embeddings
+		if model == 'pretrained'
+		else config.random_embeddings
+	)
+	paths = output_paths(root, config.survey_id)
+	np.save(paths.embeddings, np.zeros((2, 2, 2, 384), dtype=np.float32))
+	with pytest.raises(TypeError, match=rf'{model} embedding array dtype'):
+		inspect_embedding_pair(config)
+
+
+def test_embedding_arrays_must_have_same_actual_dtype(tmp_path: Path) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	random_paths = output_paths(config.random_embeddings, config.survey_id)
+	np.save(
+		random_paths.embeddings,
+		np.zeros((2, 2, 2, 384), dtype=np.float32),
+	)
+	for root, output_dtype in (
+		(config.pretrained_embeddings, 'float16'),
+		(config.random_embeddings, 'float32'),
+	):
+		paths = output_paths(root, config.survey_id)
+		metadata = json.loads(paths.metadata.read_text(encoding='utf-8'))
+		metadata['output_dtype'] = output_dtype
+		paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+	with pytest.raises(TypeError, match='embedding array dtype mismatch'):
+		inspect_embedding_pair(config)
+
+
+def test_random_embedding_array_must_be_floating(tmp_path: Path) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	random_paths = output_paths(config.random_embeddings, config.survey_id)
+	np.save(random_paths.embeddings, np.zeros((2, 2, 2, 384), dtype=np.int16))
+	with pytest.raises(TypeError, match='embeddings must be floating'):
+		inspect_embedding_pair(config)
+
+
+def test_embedding_pair_must_use_distinct_checkpoint_sha256(tmp_path: Path) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	random_paths = output_paths(config.random_embeddings, config.survey_id)
+	metadata = json.loads(random_paths.metadata.read_text(encoding='utf-8'))
+	metadata['checkpoint_sha256'] = 'a' * 64
+	random_paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+	with pytest.raises(ValueError, match='checkpoint_sha256 must differ'):
 		inspect_embedding_pair(config)
 
 
@@ -120,19 +228,35 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 		tiles=DecoderTiles((1, 1, 1), (1, 1, 1)),
 	)
 	metadata = {
+		'survey_id': config.survey_id,
+		'source_amplitude_path': '/data/parihaka_amplitude.npy',
 		'patch_size': [8, 8, 8],
 		'token_grid_shape': [1, 1, 1],
 		'volume_shape_xyz': [8, 8, 8],
 		'embedding_dim': 384,
+		'model_geometry': {'embed_dim': 384, 'depth': 12, 'num_heads': 6},
+		'window_size': [8, 8, 8],
+		'overlap': [0, 0, 0],
+		'output_dtype': 'float16',
+		'min_token_valid_fraction': 0.5,
+		'normalization_stats_path': '/data/parihaka_stats.json',
 		'preprocessing': {'mode': 'same'},
 		'zero_mask': {'enabled': True},
+		'precision': {'device_type': 'cpu', 'autocast': False},
+		'pretraining_objective': {'name': 'masked_autoencoding'},
 	}
-	for root in (config.pretrained_embeddings, config.random_embeddings):
+	for root, checkpoint_sha256 in (
+		(config.pretrained_embeddings, 'a' * 64),
+		(config.random_embeddings, 'b' * 64),
+	):
 		paths = output_paths(root, config.survey_id)
 		root.mkdir(parents=True)
 		np.save(paths.embeddings, np.zeros((1, 1, 1, 384), dtype=np.float16))
 		np.save(paths.valid_tokens, np.ones((1, 1, 1), dtype=np.bool_))
-		paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+		paths.metadata.write_text(
+			json.dumps({**metadata, 'checkpoint_sha256': checkpoint_sha256}),
+			encoding='utf-8',
+		)
 	labels = np.ones((8, 8, 8), dtype=np.int8)
 	labels[:, :, ::2] = 5
 	np.save(config.labels, labels)
