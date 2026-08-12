@@ -131,6 +131,31 @@ def test_training_and_held_out_same_orientation_overlap_is_rejected(
 		data.load_channel_layouts(path, (30, 30, 8))
 
 
+@pytest.mark.parametrize(
+	('data_size', 'inline', 'crossline'),
+	[
+		('small', [1, 10, 15, 20], [1, 10, 15, 20]),
+		('medium', [6, 1, 15, 20], [6, 1, 15, 20]),
+		('large', [16, 11, 6, 1], [16, 11, 6, 1]),
+	],
+)
+def test_training_section_sets_must_be_unique_for_every_size(
+	tmp_path: Path,
+	data_size: str,
+	inline: list[int],
+	crossline: list[int],
+) -> None:
+	path = _write_layout(tmp_path)
+	payload = yaml.safe_load(path.read_text(encoding='utf-8'))
+	payload['layouts']['layout_004'] = {
+		'inline': inline,
+		'crossline': crossline,
+	}
+	path.write_text(yaml.safe_dump(payload), encoding='utf-8')
+	with pytest.raises(ValueError, match=rf'{data_size} training section sets'):
+		data.load_channel_layouts(path, (30, 30, 8))
+
+
 def test_prepare_cli_dry_run_writes_nothing(
 	tmp_path: Path,
 	small_geometry: tuple[int, int, int],

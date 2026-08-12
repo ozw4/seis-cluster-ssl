@@ -12,17 +12,17 @@ test:
 
 layouts:
   layout_000:
-    inline: [X0, X1, X2, X3]
-    crossline: [Y0, Y1, Y2, Y3]
+    inline: [X00, X01, X02, X03]
+    crossline: [Y00, Y01, Y02, Y03]
   layout_001:
-    inline: [X0, X1, X2, X3]
-    crossline: [Y0, Y1, Y2, Y3]
+    inline: [X10, X11, X12, X13]
+    crossline: [Y10, Y11, Y12, Y13]
   layout_002:
-    inline: [X0, X1, X2, X3]
-    crossline: [Y0, Y1, Y2, Y3]
+    inline: [X20, X21, X22, X23]
+    crossline: [Y20, Y21, Y22, Y23]
   layout_003:
-    inline: [X0, X1, X2, X3]
-    crossline: [Y0, Y1, Y2, Y3]
+    inline: [X30, X31, X32, X33]
+    crossline: [Y30, Y31, Y32, Y33]
   layout_004:
-    inline: [X0, X1, X2, X3]
-    crossline: [Y0, Y1, Y2, Y3]
+    inline: [X40, X41, X42, X43]
+    crossline: [Y40, Y41, Y42, Y43]

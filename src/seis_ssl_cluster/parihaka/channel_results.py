@@ -252,6 +252,7 @@ def _validate_supervision_parity(
 	_validate_common_held_out(rows, runs_root)
 	_validate_pairs(rows, runs_root)
 	_validate_nested_training(rows)
+	_validate_unique_layout_training(rows)
 
 
 def _validate_common_held_out(
@@ -329,6 +330,39 @@ def _validate_nested_training(
 							f'{model}/{layout_id} {key} is not nested in '
 							'small/medium/large prefix order'
 						)
+
+
+def _validate_unique_layout_training(
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]],
+) -> None:
+	for model in MODELS:
+		for data_size in DATA_SIZE_PREFIX:
+			seen: dict[tuple[frozenset[int], frozenset[int]], str] = {}
+			for layout_id in LAYOUT_IDS:
+				supervision = _supervision(rows[(model, layout_id, data_size)])
+				identity = (
+					frozenset(
+						_indices(
+							supervision.get('train_inline'),
+							f'{model}/{layout_id}/{data_size} '
+							'supervision.train_inline',
+						)
+					),
+					frozenset(
+						_indices(
+							supervision.get('train_crossline'),
+							f'{model}/{layout_id}/{data_size} '
+							'supervision.train_crossline',
+						)
+					),
+				)
+				if duplicate := seen.get(identity):
+					raise ValueError(
+						f'{model}/{data_size} training section sets must be unique '
+						f'across layouts; {duplicate} and {layout_id} select the '
+						'same sections'
+					)
+				seen[identity] = layout_id
 
 
 def _supervision(payload: Mapping[str, object]) -> Mapping[str, object]:

@@ -10,7 +10,8 @@ labels, review `parihaka_channel_section_counts.csv`, copy
 `02_layouts.example.yaml` outside its example name, and replace every placeholder
 with explicit integer X/Y indices. The same validation and test lines are shared
 by all 30 jobs. A training line may not reuse a held-out line number in the same
-orientation.
+orientation. For each of small, medium, and large, all five layouts must select
+different training-section sets; line order does not make a set distinct.
 
 ```bash
 EXP=experiments/parihaka/facies_benchmark_v1/30_channel_benchmark_v1

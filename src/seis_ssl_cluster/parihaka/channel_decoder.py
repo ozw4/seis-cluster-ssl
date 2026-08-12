@@ -353,8 +353,11 @@ def inspect_channel_decoder_job(
 		)
 		split_counts[split] = dataset.class_counts
 		tile_counts[split] = len(dataset)
-	if any(count == 0 for count in split_counts['train']):
-		raise ValueError('training sections must contain both Channel classes')
+	for split in ('train', 'validation', 'test'):
+		if any(count == 0 for count in split_counts[split]):
+			raise ValueError(
+				f'{split} sections must contain both Channel and non-Channel voxels'
+			)
 	if any(tile_counts[split] == 0 for split in ('train', 'validation', 'test')):
 		raise ValueError('train, validation, and test must each contain valid voxels')
 	weights = balanced_class_weights_from_counts(split_counts['train'])

@@ -250,6 +250,7 @@ def load_channel_layouts(
 	_validate_disjoint_held_out(validation, test)
 	for layout_id, lines in layouts.items():
 		_validate_training_disjoint(lines, validation, test, layout_id)
+	_validate_unique_training_selections(layouts)
 	return ChannelLayouts(validation=validation, test=test, layouts=layouts)
 
 
@@ -382,6 +383,25 @@ def _validate_training_disjoint(
 			raise ValueError(
 				f'{layout_id} training and held-out {orientation} lines overlap'
 			)
+
+
+def _validate_unique_training_selections(
+	layouts: Mapping[str, SectionLines],
+) -> None:
+	for data_size, prefix in DATA_SIZE_PREFIX.items():
+		seen: dict[tuple[frozenset[int], frozenset[int]], str] = {}
+		for layout_id in LAYOUT_IDS:
+			lines = layouts[layout_id]
+			identity = (
+				frozenset(lines.inline[:prefix]),
+				frozenset(lines.crossline[:prefix]),
+			)
+			if duplicate := seen.get(identity):
+				raise ValueError(
+					f'{data_size} training section sets must be unique across layouts; '
+					f'{duplicate} and {layout_id} select the same sections'
+				)
+			seen[identity] = layout_id
 
 
 def _mapping(value: Mapping[str, object], key: str) -> Mapping[str, object]:

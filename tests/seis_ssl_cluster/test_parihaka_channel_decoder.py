@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from seis_ssl_cluster.embedding.writer import output_paths
+from seis_ssl_cluster.parihaka.channel_data import SectionLines, split_mask_for_crop
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	ChannelDecoderConfig,
 	DecoderArchitecture,
@@ -86,6 +87,28 @@ def _write_pair(config: ChannelDecoderConfig) -> None:
 			json.dumps({**metadata, 'checkpoint_sha256': checkpoint_sha256}),
 			encoding='utf-8',
 		)
+
+
+def _write_layout(tmp_path: Path) -> Path:
+	layout_path = tmp_path / 'layouts.yaml'
+	layout_path.write_text(
+		yaml.safe_dump(
+			{
+				'axis_mapping': {'inline': 'x', 'crossline': 'y'},
+				'validation': {'inline': [12], 'crossline': [12]},
+				'test': {'inline': [13], 'crossline': [13]},
+				'layouts': {
+					f'layout_{index:03d}': {
+						'inline': [index, index + 1, index + 2, index + 3],
+						'crossline': [index, index + 1, index + 2, index + 3],
+					}
+					for index in range(5)
+				},
+			}
+		),
+		encoding='utf-8',
+	)
+	return layout_path
 
 
 def test_embedding_geometry_mismatch_is_rejected(tmp_path: Path) -> None:
@@ -200,6 +223,50 @@ def test_embedding_pair_must_use_distinct_checkpoint_sha256(tmp_path: Path) -> N
 		inspect_embedding_pair(config)
 
 
+@pytest.mark.parametrize(
+	('split', 'missing_class'),
+	[
+		('train', 'Channel'),
+		('train', 'non-Channel'),
+		('validation', 'Channel'),
+		('validation', 'non-Channel'),
+		('test', 'Channel'),
+		('test', 'non-Channel'),
+	],
+)
+def test_every_split_must_contain_both_channel_classes(
+	tmp_path: Path,
+	split: str,
+	missing_class: str,
+) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	layout_path = _write_layout(tmp_path)
+	labels = np.ones((16, 16, 16), dtype=np.int8)
+	labels[:, :, ::2] = 5
+	mask = split_mask_for_crop(
+		shape=labels.shape,
+		start_xyz=(0, 0, 0),
+		train=SectionLines((0,), (0,)),
+		validation=SectionLines((12,), (12,)),
+		test=SectionLines((13,), (13,)),
+		split=split,
+	)
+	labels[mask] = 1 if missing_class == 'Channel' else 5
+	np.save(config.labels, labels)
+	with pytest.raises(
+		ValueError,
+		match=rf'{split} sections must contain both Channel and non-Channel voxels',
+	):
+		inspect_channel_decoder_job(
+			config,
+			model='pretrained',
+			layout_id='layout_000',
+			data_size='small',
+			layout_config=layout_path,
+		)
+
+
 def test_decoder_initialization_and_tile_order_are_paired(tmp_path: Path) -> None:
 	config = _config(tmp_path)
 	first = decoder_initial_state_sha256(config.decoder, (8, 8, 8), 42000)
@@ -260,6 +327,7 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 	labels = np.ones((8, 8, 8), dtype=np.int8)
 	labels[:, :, ::2] = 5
 	np.save(config.labels, labels)
+	training_lines = (0, 1, 2, 3, 6, 7)
 	layout_path = tmp_path / 'layouts.yaml'
 	layout_path.write_text(
 		yaml.safe_dump(
@@ -269,8 +337,14 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 				'test': {'inline': [5], 'crossline': [5]},
 				'layouts': {
 					f'layout_{index:03d}': {
-						'inline': [0, 1, 2, 3],
-						'crossline': [0, 1, 2, 3],
+						'inline': [
+							training_lines[(index + offset) % len(training_lines)]
+							for offset in range(4)
+						],
+						'crossline': [
+							training_lines[(index + offset) % len(training_lines)]
+							for offset in range(4)
+						],
 					}
 					for index in range(5)
 				},

@@ -171,6 +171,40 @@ def test_summary_rejects_non_nested_training_sections(tmp_path: Path) -> None:
 		inspect_channel_benchmark_results(config)
 
 
+@pytest.mark.parametrize(
+	('data_size', 'inline', 'crossline'),
+	[
+		('small', [10, 51, 52, 53], [20, 61, 62, 63]),
+		('medium', [11, 10, 52, 53], [21, 20, 62, 63]),
+		('large', [13, 12, 11, 10], [23, 22, 21, 20]),
+	],
+)
+def test_summary_rejects_duplicate_training_sets_for_every_size(
+	tmp_path: Path,
+	data_size: str,
+	inline: list[int],
+	crossline: list[int],
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+	for model in ('pretrained', 'random'):
+		for size, prefix in DATA_SIZE_PREFIX.items():
+			_mutate_metrics(
+				config,
+				model,
+				'layout_004',
+				size,
+				lambda payload, prefix=prefix: payload['supervision'].update(
+					{
+						'train_inline': inline[:prefix],
+						'train_crossline': crossline[:prefix],
+					}
+				),
+			)
+	with pytest.raises(ValueError, match=rf'{data_size} training section sets'):
+		inspect_channel_benchmark_results(config)
+
+
 def test_summary_rejects_paired_class_weight_mismatch(tmp_path: Path) -> None:
 	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
 	_write_complete_results(config)
