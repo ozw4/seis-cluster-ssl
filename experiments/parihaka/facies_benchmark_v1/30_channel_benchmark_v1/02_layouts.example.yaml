@@ -1,7 +1,3 @@
-axis_mapping:
-  inline: x
-  crossline: y
-
 validation:
   inline: [REPLACE_WITH_X_INDEX]
   crossline: [REPLACE_WITH_Y_INDEX]

@@ -86,6 +86,18 @@ def test_size_prefixes_are_nested(tmp_path: Path) -> None:
 	assert set(small.inline) < set(medium.inline) < set(large.inline)
 
 
+def test_axis_mapping_is_fixed_and_not_a_layout_setting(tmp_path: Path) -> None:
+	path = _write_layout(tmp_path)
+	data.load_channel_layouts(path, (30, 30, 8))
+	payload = yaml.safe_load(path.read_text(encoding='utf-8'))
+	payload['axis_mapping'] = {'inline': 'x', 'crossline': 'y'}
+	path.write_text(yaml.safe_dump(payload), encoding='utf-8')
+	with pytest.raises(
+		ValueError, match='inline is fixed to X and crossline is fixed to Y'
+	):
+		data.load_channel_layouts(path, (30, 30, 8))
+
+
 def test_inline_crossline_intersection_is_counted_once() -> None:
 	mask = data.split_mask_for_crop(
 		shape=(3, 4, 2),
@@ -187,7 +199,6 @@ def test_prepare_cli_dry_run_writes_nothing(
 
 def _write_layout(tmp_path: Path) -> Path:
 	payload = {
-		'axis_mapping': {'inline': 'x', 'crossline': 'y'},
 		'validation': {'inline': [28], 'crossline': [28]},
 		'test': {'inline': [29], 'crossline': [29]},
 		'layouts': {

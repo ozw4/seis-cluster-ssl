@@ -94,7 +94,6 @@ def _write_layout(tmp_path: Path) -> Path:
 	layout_path.write_text(
 		yaml.safe_dump(
 			{
-				'axis_mapping': {'inline': 'x', 'crossline': 'y'},
 				'validation': {'inline': [12], 'crossline': [12]},
 				'test': {'inline': [13], 'crossline': [13]},
 				'layouts': {
@@ -332,7 +331,6 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 	layout_path.write_text(
 		yaml.safe_dump(
 			{
-				'axis_mapping': {'inline': 'x', 'crossline': 'y'},
 				'validation': {'inline': [4], 'crossline': [4]},
 				'test': {'inline': [5], 'crossline': [5]},
 				'layouts': {

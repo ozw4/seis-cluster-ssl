@@ -8,10 +8,12 @@ section voxels used once per epoch.
 The repository does not choose section indices. First prepare and inspect the
 labels, review `parihaka_channel_section_counts.csv`, copy
 `02_layouts.example.yaml` outside its example name, and replace every placeholder
-with explicit integer X/Y indices. The same validation and test lines are shared
-by all 30 jobs. A training line may not reuse a held-out line number in the same
-orientation. For each of small, medium, and large, all five layouts must select
-different training-section sets; line order does not make a set distinct.
+with explicit integer X/Y indices. Inline is fixed to the prepared volume's X axis
+and crossline is fixed to its Y axis; this is a benchmark contract, not a layout
+setting. The same validation and test lines are shared by all 30 jobs. A training
+line may not reuse a held-out line number in the same orientation. For each of
+small, medium, and large, all five layouts must select different training-section
+sets; line order does not make a set distinct.
 
 ```bash
 EXP=experiments/parihaka/facies_benchmark_v1/30_channel_benchmark_v1

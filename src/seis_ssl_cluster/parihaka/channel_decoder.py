@@ -27,6 +27,7 @@ from seis_ssl_cluster.models.voxel_decoder import (
 	validate_voxel_decoder_architecture,
 )
 from seis_ssl_cluster.parihaka.channel_data import (
+	CHANNEL_AXIS_MAPPING,
 	CHANNEL_CLASS_ID,
 	ChannelLayouts,
 	SectionLines,
@@ -872,7 +873,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 		'layout_id': plan.layout_id,
 		'data_size': plan.data_size,
 		'supervision': {
-			'axis_mapping': {'inline': 'x', 'crossline': 'y'},
+			'axis_mapping': dict(CHANNEL_AXIS_MAPPING),
 			'train_inline': list(plan.train_lines.inline),
 			'train_crossline': list(plan.train_lines.crossline),
 			'validation_inline': list(plan.layouts.validation.inline),

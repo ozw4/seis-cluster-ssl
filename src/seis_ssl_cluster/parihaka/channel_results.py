@@ -11,7 +11,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from seis_ssl_cluster.parihaka.channel_data import DATA_SIZE_PREFIX, LAYOUT_IDS
+from seis_ssl_cluster.parihaka.channel_data import (
+	CHANNEL_AXIS_MAPPING,
+	DATA_SIZE_PREFIX,
+	LAYOUT_IDS,
+)
 
 MODELS = ('pretrained', 'random')
 OUTPUT_NAMES = ('comparison.csv', 'summary.json', 'summary.md')
@@ -218,10 +222,10 @@ def _validate_supervision(payload: Mapping[str, object], path: Path) -> None:
 		raise ValueError(
 			f'{path} supervision must contain exactly {sorted(expected_keys)!r}'
 		)
-	if supervision.get('axis_mapping') != {'inline': 'x', 'crossline': 'y'}:
+	if supervision.get('axis_mapping') != CHANNEL_AXIS_MAPPING:
 		raise ValueError(
 			f"{path} supervision.axis_mapping must be "
-			"{'inline': 'x', 'crossline': 'y'}"
+			f'{CHANNEL_AXIS_MAPPING!r}'
 		)
 	for key in (
 		'train_inline',

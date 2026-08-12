@@ -19,6 +19,7 @@ PREPARED_SHAPE_XYZ = (782, 590, 1006)
 LABEL_DTYPE = np.dtype(np.int8)
 CLASS_IDS = (1, 2, 3, 4, 5, 6)
 CHANNEL_CLASS_ID = 5
+CHANNEL_AXIS_MAPPING = {'inline': 'x', 'crossline': 'y'}
 LAYOUT_IDS = tuple(f'layout_{index:03d}' for index in range(5))
 DATA_SIZE_PREFIX = {'small': 1, 'medium': 2, 'large': 4}
 
@@ -231,10 +232,11 @@ def load_channel_layouts(
 ) -> ChannelLayouts:
 	"""Load and validate five explicit, ordered section layouts."""
 	raw = load_config(path)
-	mapping = _mapping(raw, 'axis_mapping')
-	if mapping != {'inline': 'x', 'crossline': 'y'}:
+	expected_keys = {'validation', 'test', 'layouts'}
+	if set(raw) != expected_keys:
 		raise ValueError(
-			"axis_mapping must explicitly be {'inline': 'x', 'crossline': 'y'}"
+			f'layout config must contain exactly {sorted(expected_keys)!r}; '
+			'inline is fixed to X and crossline is fixed to Y'
 		)
 	validation = _section_lines(_mapping(raw, 'validation'), 'validation', volume_shape)
 	test = _section_lines(_mapping(raw, 'test'), 'test', volume_shape)
@@ -422,6 +424,7 @@ def _path(value: Mapping[str, object], key: str, prefix: str) -> Path:
 
 
 __all__ = [
+	'CHANNEL_AXIS_MAPPING',
 	'CHANNEL_CLASS_ID',
 	'CLASS_IDS',
 	'DATA_SIZE_PREFIX',
