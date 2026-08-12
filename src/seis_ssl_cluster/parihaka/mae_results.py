@@ -32,7 +32,6 @@ PARIHAKA_MAE_RESULT_FILES = (
 )
 _MAX_RESULT_BYTES = 10 * 1024 * 1024
 _HASH_CHUNK_BYTES = 8 * 1024 * 1024
-_EXECUTION_CLASSIFICATIONS = frozenset({'fresh', 'resumed', 'reused'})
 
 
 @dataclass(frozen=True)
@@ -49,16 +48,9 @@ def summarize_parihaka_mae(
 	prepare_config_path: str | Path,
 	full_config_path: str | Path,
 	output_dir: str | Path,
-	execution_classification: str = 'reused',
 	overwrite: bool = False,
 ) -> ParihakaMaeResults:
 	"""Validate live evidence and write exactly three portable review files."""
-	if execution_classification not in _EXECUTION_CLASSIFICATIONS:
-		msg = (
-			'execution_classification must be fresh, resumed, or reused; '
-			f'got {execution_classification!r}'
-		)
-		raise ValueError(msg)
 	prepare_path = Path(prepare_config_path)
 	full_path = Path(full_config_path)
 	smoke_path = full_path.parent / '01_smoke_2step.yaml'
@@ -72,7 +64,6 @@ def summarize_parihaka_mae(
 		prepare_config_path=prepare_path,
 		full_config_path=full_path,
 		validation=validation,
-		execution_classification=execution_classification,
 	)
 	checkpoint_summary = cast(
 		'Mapping[str, object]', evidence['checkpoints']
@@ -113,7 +104,6 @@ def _build_evidence(
 	prepare_config_path: Path,
 	full_config_path: Path,
 	validation: ParihakaMaeValidationResult,
-	execution_classification: str,
 ) -> dict[str, object]:
 	prepare = parihaka_prepare_volume_config_from_mapping(
 		load_config(prepare_config_path)
@@ -127,6 +117,9 @@ def _build_evidence(
 	latest_path = _required_path(validation.latest_checkpoint, 'latest checkpoint')
 	best_path = _required_path(validation.best_checkpoint, 'best checkpoint')
 	latest_metrics = dict(validation.latest_metrics)
+	run_metadata = _read_json(validation.full_output_root / 'run_metadata.json')
+	created_at_utc = _required_string(run_metadata, 'created_at_utc', 'run metadata')
+	git_commit = _required_optional_string(run_metadata, 'git_commit', 'run metadata')
 	best_metric_key = validation.best_metric_key
 	best_metric_value = validation.best_metric_value
 	if best_metric_key is None or best_metric_value is None:
@@ -180,7 +173,7 @@ def _build_evidence(
 	}
 	return {
 		'artifact_type': 'parihaka_mae_pretraining_review',
-		'schema_version': 1,
+		'schema_version': 2,
 		'dataset': {
 			'name': 'parihaka',
 			'version': 'facies_benchmark_v1',
@@ -258,10 +251,13 @@ def _build_evidence(
 			'resolved': validation.resolved_precision,
 			'scaler_present': validation.scaler_present,
 		},
-		'execution': {
-			'git_sha': _git_sha(),
-			'git_dirty': _git_dirty(),
-			'classification': execution_classification,
+		'training_invocation': {
+			'created_at_utc': created_at_utc,
+			'git_commit': git_commit,
+			'git_dirty': None,
+		},
+		'summary_generation': {
+			'git_commit': _git_sha(),
 		},
 		'training_completion': {
 			'epoch': validation.checkpoint_epoch,
@@ -282,6 +278,8 @@ def _render_markdown(evidence: Mapping[str, object]) -> str:
 	precision = _mapping(evidence, 'precision')
 	completion = _mapping(evidence, 'training_completion')
 	checkpoints = _mapping(evidence, 'checkpoints')
+	training_invocation = _mapping(evidence, 'training_invocation')
+	summary_generation = _mapping(evidence, 'summary_generation')
 	latest = _mapping(checkpoints, 'latest')
 	best = _mapping(checkpoints, 'best')
 	return (
@@ -289,6 +287,9 @@ def _render_markdown(evidence: Mapping[str, object]) -> str:
 		f"- Dataset: `{dataset['name']}/{dataset['version']}` "
 		f"(`{dataset['survey_id']}`)\n"
 		f"- Model tag: `{dataset['model_tag']}`\n"
+		f"- Training invocation: `{training_invocation['created_at_utc']}`, "
+		f"git `{training_invocation['git_commit']}`\n"
+		f"- Summary generation git: `{summary_generation['git_commit']}`\n"
 		'- Input boundary: amplitude only; labels were not used or opened.\n'
 		'- Scope: survey-specific transductive self-supervised pretraining.\n'
 		f"- Completion: epoch {completion['epoch']}, "
@@ -355,6 +356,26 @@ def _required_path(value: Path | None, label: str) -> Path:
 	return value
 
 
+def _required_optional_string(
+	payload: Mapping[str, object], key: str, label: str
+) -> str | None:
+	if key not in payload:
+		raise ValueError(f'{label}.{key} is required')
+	value = payload[key]
+	if value is not None and not isinstance(value, str):
+		raise TypeError(f'{label}.{key} must be a string or null')
+	return cast('str | None', value)
+
+
+def _required_string(
+	payload: Mapping[str, object], key: str, label: str
+) -> str:
+	value = payload.get(key)
+	if not isinstance(value, str) or not value:
+		raise TypeError(f'{label}.{key} must be a non-empty string')
+	return value
+
+
 def _git_sha() -> str | None:
 	git = shutil.which('git')
 	if git is None:
@@ -368,22 +389,6 @@ def _git_sha() -> str | None:
 		).strip()
 	except (OSError, subprocess.CalledProcessError):
 		return None
-
-
-def _git_dirty() -> bool | None:
-	git = shutil.which('git')
-	if git is None:
-		return None
-	try:
-		status = subprocess.check_output(  # noqa: S603
-			[git, 'status', '--porcelain=v1'],
-			cwd=Path(__file__).resolve().parents[3],
-			text=True,
-			stderr=subprocess.DEVNULL,
-		)
-	except (OSError, subprocess.CalledProcessError):
-		return None
-	return bool(status)
 
 
 def file_sha256(path: Path) -> str:

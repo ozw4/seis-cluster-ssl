@@ -2,6 +2,8 @@
 
 - Dataset: `parihaka/facies_benchmark_v1` (`parihaka`)
 - Model tag: `amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1`
+- Training invocation: `2026-08-12T00:10:06.491600+00:00`, git `fe9e7e6484ab54726012dd9ea5ca757deeda555f`
+- Summary generation git: `6d8553c0138aaaf8466cee1f715c50367912e8a8`
 - Input boundary: amplitude only; labels were not used or opened.
 - Scope: survey-specific transductive self-supervised pretraining.
 - Completion: epoch 100, global step 250000

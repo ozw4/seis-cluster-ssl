@@ -90,11 +90,6 @@
     "embedding_jobs_executed": 0,
     "status": "checkpoint ready, evaluation not run"
   },
-  "execution": {
-    "classification": "fresh",
-    "git_dirty": true,
-    "git_sha": "fe9e7e6484ab54726012dd9ea5ca757deeda555f"
-  },
   "full_config": {
     "data": {
       "amplitude_agc": {
@@ -261,7 +256,7 @@
     "upstream_member": "data_train.npz",
     "version": 1
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "scientific_scope": {
     "claim": "Unlabeled representation learning from the Parihaka amplitude volume.",
     "kind": "survey-specific transductive self-supervised pretraining",
@@ -282,8 +277,16 @@
     "sha256": "c5c22ac694e4dc3467dadf5e94cce9ac59c06cc4a43b2ef75ff05f5a057f28c2",
     "size_bytes": 1715555445
   },
+  "summary_generation": {
+    "git_commit": "6d8553c0138aaaf8466cee1f715c50367912e8a8"
+  },
   "training_completion": {
     "epoch": 100,
     "global_step": 250000
+  },
+  "training_invocation": {
+    "created_at_utc": "2026-08-12T00:10:06.491600+00:00",
+    "git_commit": "fe9e7e6484ab54726012dd9ea5ca757deeda555f",
+    "git_dirty": null
   }
 }

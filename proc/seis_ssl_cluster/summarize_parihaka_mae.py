@@ -17,11 +17,6 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument('--prepare-config', type=Path, required=True)
 	parser.add_argument('--full-config', type=Path, required=True)
 	parser.add_argument('--output-dir', type=Path, required=True)
-	parser.add_argument(
-		'--execution-classification',
-		choices=('fresh', 'resumed', 'reused'),
-		default='reused',
-	)
 	parser.add_argument('--overwrite', action='store_true')
 	return parser
 
@@ -33,7 +28,6 @@ def main() -> None:
 		prepare_config_path=args.prepare_config,
 		full_config_path=args.full_config,
 		output_dir=args.output_dir,
-		execution_classification=args.execution_classification,
 		overwrite=args.overwrite,
 	)
 	print(f'output_dir: {result.output_dir}')

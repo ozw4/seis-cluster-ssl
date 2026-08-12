@@ -247,7 +247,6 @@ HELP_FLAG_CONTRACTS = {
 		'--prepare-config',
 		'--full-config',
 		'--output-dir',
-		'--execution-classification',
 		'--overwrite',
 	),
 	'prepare_nopims_normalization_stats.py': (

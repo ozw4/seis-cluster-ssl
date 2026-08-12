@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -51,6 +52,14 @@ def test_results_write_exact_portable_three_file_allowlist(
 	assert '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}' in serialized
 	assert '${PARIHAKA_DATA_ROOT}' in serialized
 	assert summary['input_boundary']['labels_used'] is False
+	assert summary['schema_version'] == 2
+	assert summary['training_invocation'] == {
+		'created_at_utc': '2025-01-02T03:04:05+00:00',
+		'git_commit': 'b' * 40,
+		'git_dirty': None,
+	}
+	assert summary['summary_generation'] == {'git_commit': 'a' * 40}
+	assert 'execution' not in summary
 	assert summary['scientific_scope']['kind'].startswith('survey-specific')
 	assert summary['training_completion'] == {'epoch': 100, 'global_step': 250_000}
 	assert checkpoint['latest']['sha256']
@@ -92,6 +101,15 @@ def test_results_use_validation_evidence_without_loading_checkpoints(
 	)
 
 	summarize_parihaka_mae(**kwargs)
+
+
+def test_results_api_has_no_execution_classification() -> None:
+	assert 'execution_classification' not in inspect.signature(
+		summarize_parihaka_mae
+	).parameters
+	assert 'execution-classification' not in (
+		Path('proc/seis_ssl_cluster/summarize_parihaka_mae.py').read_text()
+	)
 
 
 def test_results_reject_conflict_without_touching_other_targets(
@@ -161,14 +179,21 @@ def _results_fixture(
 		lambda config: config,
 	)
 	monkeypatch.setattr(results_module, '_git_sha', lambda: 'a' * 40)
-	monkeypatch.setattr(results_module, '_git_dirty', lambda: True)
+	run_metadata_path = validation.full_output_root / 'run_metadata.json'
+	run_metadata = json.loads(run_metadata_path.read_text())
+	run_metadata.update(
+		{
+			'created_at_utc': '2025-01-02T03:04:05+00:00',
+			'git_commit': 'b' * 40,
+		}
+	)
+	run_metadata_path.write_text(json.dumps(run_metadata), encoding='utf-8')
 	output_dir = tmp_path / 'results'
 	return (
 		{
 			'prepare_config_path': prepare_path,
 			'full_config_path': full_path,
 			'output_dir': output_dir,
-			'execution_classification': 'fresh',
 		},
 		output_dir,
 	)
