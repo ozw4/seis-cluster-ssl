@@ -1,3 +1,4 @@
+# ruff: noqa: CPY001
 """MAE-specific checkpoint and resume helpers."""
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import torch
 import seis_ssl_cluster
 from seis_ssl_cluster.training.checkpoint import (
 	capture_rng_state,
+	load_checkpoint,
 	restore_rng_state,
 	save_checkpoint,
 )
@@ -84,6 +86,28 @@ class RollingCheckpointResult:
 	best_metric_key: str | None
 
 
+@dataclass(frozen=True)
+class MaeCheckpointInspection:
+	"""Validated, immutable evidence from one MAE checkpoint load."""
+
+	schema_version: int
+	stage: str
+	checkpoint_kind: str
+	batch_index: int | None
+	epoch: int
+	global_step: int
+	resolved_precision: str
+	amp_enabled: bool
+	scaler_present: bool
+	metrics: tuple[tuple[str, float], ...]
+	best_metric_key: str | None
+	best_metric_value: float | None
+
+	def metrics_dict(self) -> dict[str, float]:
+		"""Return a mutable serialization copy of the validated metrics."""
+		return dict(self.metrics)
+
+
 _BEST_METRIC_KEYS = (
 	'val_loss',
 	'validation_loss',
@@ -95,6 +119,65 @@ _BEST_METRIC_KEYS = (
 _RESOLVED_PRECISIONS = frozenset({'float32', 'bfloat16', 'float16'})
 _TRAINING_STATE_SCHEMA_VERSION = 2
 _SUPPORTED_TRAINING_STATE_SCHEMA_VERSIONS = (1, 2)
+
+
+def inspect_mae_checkpoint(  # noqa: PLR0913
+	path: str | Path,
+	*,
+	resolved_config: Mapping[str, object],
+	model: torch.nn.Module,
+	resolved_precision: str,
+	amp_enabled: bool,
+	scaler_present: bool,
+) -> MaeCheckpointInspection:
+	"""Load and fully inspect one MAE checkpoint against explicit run evidence."""
+	checkpoint_path = Path(path)
+	payload = cast(
+		'Mapping[str, object]',
+		load_checkpoint(checkpoint_path, map_location='cpu'),
+	)
+	_validate_resume_payload(
+		payload,
+		amp_enabled=amp_enabled,
+		scaler_required=scaler_present,
+		resolved_precision=resolved_precision,
+	)
+	if payload['config'] != resolved_config:
+		raise ValueError(
+			'MAE checkpoint config does not match the resolved config: '
+			f'{checkpoint_path}'
+		)
+	try:
+		model.load_state_dict(payload['model_state_dict'], strict=True)
+	except RuntimeError as exc:
+		msg = f'MAE checkpoint model geometry/state mismatch: {checkpoint_path}: {exc}'
+		raise ValueError(msg) from exc
+	_require_finite_checkpoint_tree(
+		model.state_dict(), 'MAE checkpoint loaded model state'
+	)
+	_require_finite_checkpoint_tree(
+		payload['optimizer_state_dict'], 'MAE checkpoint optimizer_state_dict'
+	)
+	_require_finite_checkpoint_tree(
+		payload['scaler_state_dict'], 'MAE checkpoint scaler_state_dict'
+	)
+	metrics = _finite_checkpoint_metrics(payload['metrics'])
+	best_metric_key, best_metric_value = _best_metric_from_metrics(dict(metrics))
+	training_state = cast('Mapping[str, object]', payload['training_state'])
+	return MaeCheckpointInspection(
+		schema_version=cast('int', training_state['schema_version']),
+		stage=cast('str', training_state['stage']),
+		checkpoint_kind=cast('str', training_state['checkpoint_kind']),
+		batch_index=cast('int | None', training_state['batch_index']),
+		epoch=cast('int', payload['epoch']),
+		global_step=cast('int', payload['global_step']),
+		resolved_precision=_checkpoint_resolved_precision(payload),
+		amp_enabled=cast('bool', payload['amp_enabled']),
+		scaler_present=isinstance(payload['scaler_state_dict'], Mapping),
+		metrics=metrics,
+		best_metric_key=best_metric_key,
+		best_metric_value=best_metric_value,
+	)
 
 
 def _save_mae_rolling_checkpoint(  # noqa: PLR0913
@@ -195,6 +278,47 @@ def _best_metric_from_metrics(
 			if math.isfinite(score):
 				return key, score
 	return None, None
+
+
+def _finite_checkpoint_metrics(
+	value: object,
+) -> tuple[tuple[str, float], ...]:
+	if not isinstance(value, Mapping):
+		raise TypeError('MAE checkpoint metrics must be a mapping')
+	metrics: list[tuple[str, float]] = []
+	for key, metric in value.items():
+		if not isinstance(key, str):
+			raise TypeError('MAE checkpoint metric keys must be strings')
+		if isinstance(metric, bool) or not isinstance(metric, int | float):
+			raise TypeError(f'MAE checkpoint metric {key} must be numeric')
+		floating = float(metric)
+		if not math.isfinite(floating):
+			raise ValueError(f'MAE checkpoint metric {key} must be finite')
+		metrics.append((key, floating))
+	if not metrics:
+		raise ValueError('MAE checkpoint metrics must not be empty')
+	return tuple(metrics)
+
+
+def _require_finite_checkpoint_tree(value: object, label: str) -> None:
+	if isinstance(value, torch.Tensor):
+		if (torch.is_floating_point(value) or torch.is_complex(value)) and not bool(
+			torch.isfinite(value).all(),
+		):
+			raise ValueError(f'{label} contains a nonfinite tensor')
+		return
+	if isinstance(value, Mapping):
+		for key, child in value.items():
+			_require_finite_checkpoint_tree(child, f'{label}.{key}')
+		return
+	if isinstance(value, (list, tuple)):
+		for index, child in enumerate(value):
+			_require_finite_checkpoint_tree(child, f'{label}[{index}]')
+		return
+	if isinstance(
+		value, float | complex | np.floating | np.complexfloating
+	) and not np.isfinite(value):
+		raise ValueError(f'{label} contains a nonfinite scalar')
 
 
 def _is_improved_best_metric(
@@ -472,6 +596,10 @@ def _validate_resume_training_state(payload: Mapping[str, object]) -> None:
 			msg = f'resume checkpoint training_state is missing {key}'
 			raise ValueError(msg)
 	schema_version = training_state['schema_version']
+	if not isinstance(schema_version, int) or isinstance(schema_version, bool):
+		raise TypeError(
+			'resume checkpoint training_state.schema_version must be an integer'
+		)
 	if schema_version not in _SUPPORTED_TRAINING_STATE_SCHEMA_VERSIONS:
 		msg = (
 			'resume checkpoint training_state.schema_version must be one of '
@@ -757,6 +885,7 @@ def _summarize_float_tensor(
 
 
 __all__ = [
+	'MaeCheckpointInspection',
 	'ResumeState',
 	'RollingCheckpointResult',
 	'_best_metric_from_metrics',
@@ -786,4 +915,5 @@ __all__ = [
 	'_validate_resume_rng_state',
 	'_validate_resume_training_batch_index',
 	'_validate_resume_training_state',
+	'inspect_mae_checkpoint',
 ]

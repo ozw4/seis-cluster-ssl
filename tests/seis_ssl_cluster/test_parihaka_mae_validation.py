@@ -13,6 +13,7 @@ import pytest
 import torch
 
 import seis_ssl_cluster.parihaka.mae_validation as validation_module
+import seis_ssl_cluster.training.mae_checkpoint as mae_checkpoint_module
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.parihaka import (
 	ParihakaMaeValidationResult,
@@ -51,6 +52,27 @@ def test_valid_synthetic_parihaka_inputs_pass(
 	assert result.prepared_sha256
 	assert result.smoke['train']['device'] == 'cpu'
 	assert result.full['train']['device'] == 'cuda'
+
+
+def test_runtime_validation_does_not_read_nopims_config(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	prepare, smoke, full = _inputs_fixture(tmp_path, monkeypatch)
+
+	def reject_external_config(_path: str | Path) -> dict[str, object]:
+		raise AssertionError('runtime validation read an external experiment config')
+
+	monkeypatch.setattr(validation_module, 'load_config', reject_external_config)
+	result = validate_parihaka_mae_inputs_from_configs(
+		prepare=prepare,
+		smoke_raw=smoke,
+		full_raw=full,
+	)
+
+	assert result.full['train']['epochs'] == 100
+	module_source = Path(validation_module.__file__).read_text(encoding='utf-8')
+	assert 'experiments/nopims' not in module_source
 
 
 @pytest.mark.parametrize(
@@ -382,6 +404,11 @@ def test_valid_schema2_completed_full_passes(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	inputs, base = _full_fixture(tmp_path, monkeypatch)
+	monkeypatch.setattr(
+		torch.cuda,
+		'is_available',
+		lambda: pytest.fail('post-hoc full validation queried CUDA availability'),
+	)
 
 	result = validation_module._validate_full(inputs, base=base)  # noqa: SLF001
 
@@ -396,6 +423,38 @@ def test_valid_schema2_completed_full_passes(
 	assert result.best_metric_value == 1.0
 
 
+def test_full_loads_latest_and_best_once_each(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch)
+	loads: list[Path] = []
+	original = mae_checkpoint_module.load_checkpoint
+
+	def counted_load(path: str | Path, **kwargs: object) -> object:
+		loads.append(Path(path))
+		return original(path, **kwargs)
+
+	monkeypatch.setattr(mae_checkpoint_module, 'load_checkpoint', counted_load)
+	validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+	root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+	assert loads.count(root / 'latest.pt') == 1
+	assert loads.count(root / 'best.pt') == 1
+
+
+def test_valid_float16_completed_full_requires_scaler(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch, resolved='float16')
+
+	result = validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+	assert result.resolved_precision == 'float16'
+	assert result.scaler_present is True
+
+
 @pytest.mark.parametrize(
 	('field', 'value', 'match'),
 	[
@@ -405,6 +464,7 @@ def test_valid_schema2_completed_full_passes(
 		(('epoch',), 99, 'epoch'),
 		(('global_step',), 249_999, 'global_step'),
 		(('amp_enabled',), False, 'amp_enabled'),
+		(('training_state', 'resolved_precision'), 'float16', 'precision'),
 		(('config', 'train', 'seed'), 7, 'config'),
 	]
 )
@@ -442,16 +502,74 @@ def test_full_rejects_nonfinite_checkpoint_state(
 		state = next(iter(payload['optimizer_state_dict']['state'].values()))
 		state['exp_avg'].reshape(-1)[0] = float('inf')
 	else:
-		payload['training_state']['resolved_precision'] = 'float16'
-		payload['scaler_state_dict'] = {'scale': torch.tensor(float('inf'))}
-		monkeypatch.setattr(
-			validation_module,
-			'_resolve_full_precision_contract',
-			lambda _config: _precision_contract('float16'),
+		inputs, base = _full_fixture(
+			tmp_path / 'float16', monkeypatch, resolved='float16'
 		)
+		root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+		latest = root / 'latest.pt'
+		payload = load_checkpoint(latest, map_location='cpu')
+		payload['scaler_state_dict']['scale'] = torch.tensor(float('inf'))
 	torch.save(payload, latest)
 
 	with pytest.raises(ValueError, match=r'finite|nonfinite'):
+		validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+
+def test_full_rejects_model_geometry_mismatch(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch)
+	root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+	latest = root / 'latest.pt'
+	payload = load_checkpoint(latest, map_location='cpu')
+	payload['model_state_dict'].pop(next(iter(payload['model_state_dict'])))
+	torch.save(payload, latest)
+
+	with pytest.raises(ValueError, match=r'geometry|state mismatch'):
+		validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+
+def test_full_rejects_float16_checkpoint_without_scaler(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch, resolved='float16')
+	root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+	latest = root / 'latest.pt'
+	payload = load_checkpoint(latest, map_location='cpu')
+	payload['scaler_state_dict'] = None
+	torch.save(payload, latest)
+
+	with pytest.raises(ValueError, match='scaler_state_dict'):
+		validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+	('target', 'value', 'match'),
+	[
+		('amp_requested', False, 'requested AMP'),
+		('amp_dtype_requested', 'float16', 'requested AMP dtype'),
+		('resolved_dtype', 'float16', 'scaler contract'),
+		('amp_enabled', False, 'enabled CUDA AMP'),
+		('grad_scaler_enabled', True, 'scaler contract'),
+	],
+)
+def test_full_rejects_precision_contract_mismatch(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	target: str,
+	value: object,
+	match: str,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch)
+	root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+	metadata_path = root / 'run_metadata.json'
+	metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+	metadata['precision'][target] = value
+	metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
+
+	with pytest.raises((TypeError, ValueError), match=match):
 		validation_module._validate_full(inputs, base=base)  # noqa: SLF001
 
 
@@ -479,7 +597,7 @@ def test_full_rejects_snapshot_drift(
 	)
 	path.write_text('{}\n', encoding='utf-8')
 
-	with pytest.raises(ValueError, match=match):
+	with pytest.raises((TypeError, ValueError), match=match):
 		validation_module._validate_full(inputs, base=base)  # noqa: SLF001
 
 
@@ -650,6 +768,8 @@ def _smoke_fixture(
 def _full_fixture(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
+	*,
+	resolved: str = 'bfloat16',
 ) -> tuple[object, dict[str, object]]:
 	prepare, smoke_raw, full_raw = _inputs_fixture(tmp_path, monkeypatch)
 	inputs = validate_parihaka_mae_inputs_from_configs(
@@ -666,6 +786,7 @@ def _full_fixture(
 	optimizer.step()
 	rng_state = capture_rng_state()
 	rng_state['dataloader_generator'] = torch.Generator().get_state()
+	scaler = torch.amp.GradScaler('cpu') if resolved == 'float16' else None
 	for name, epoch, step, metric in (
 		('latest.pt', 100, 250_000, 2.0),
 		('best.pt', 40, 100_000, 1.0),
@@ -679,7 +800,7 @@ def _full_fixture(
 			metrics={'loss': metric, 'amp_enabled': 1.0},
 			global_step=step,
 			amp_enabled=True,
-			scaler=None,
+			scaler=scaler,
 			checkpoint_kind='epoch',
 			batch_index=None,
 			rng_state=rng_state,
@@ -696,7 +817,7 @@ def _full_fixture(
 		json.dumps(
 			{
 				'runtime_check_mode': 'once',
-				'precision': _precision_contract('bfloat16'),
+				'precision': _precision_contract(resolved),
 			},
 		),
 		encoding='utf-8',
@@ -705,11 +826,6 @@ def _full_fixture(
 		validation_module,
 		'_build_mae_model',
 		lambda _config: torch.nn.Linear(2, 2),
-	)
-	monkeypatch.setattr(
-		validation_module,
-		'_resolve_full_precision_contract',
-		lambda _config: _precision_contract('bfloat16'),
 	)
 	base = {
 		'check': 'full',

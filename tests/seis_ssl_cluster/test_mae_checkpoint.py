@@ -1,20 +1,73 @@
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from typing import TYPE_CHECKING
 
 import pytest
 import torch
 
 from seis_ssl_cluster.training import load_checkpoint
+from seis_ssl_cluster.training.checkpoint import capture_rng_state
 from seis_ssl_cluster.training.mae_checkpoint import (
 	_best_metric_from_metrics,
 	_is_improved_best_metric,
 	_restore_mae_checkpoint,
 	_save_mae_rolling_checkpoint,
+	inspect_mae_checkpoint,
 )
 
 if TYPE_CHECKING:
 	from pathlib import Path
+
+
+def test_inspect_mae_checkpoint_returns_immutable_validated_evidence(
+	tmp_path: Path,
+) -> None:
+	model = torch.nn.Linear(2, 1)
+	optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
+	config = {'stage': 'train_amp_mae', 'model': {'width': 2}}
+	rng_state = capture_rng_state()
+	rng_state['dataloader_generator'] = torch.Generator().get_state()
+	result = _save_mae_rolling_checkpoint(
+		tmp_path,
+		model=model,
+		optimizer=optimizer,
+		epoch=3,
+		config=config,
+		metrics={'loss': 0.25, 'gradient_norm': 1.5},
+		global_step=12,
+		amp_enabled=False,
+		scaler=None,
+		checkpoint_kind='epoch',
+		batch_index=None,
+		rng_state=rng_state,
+	)
+
+	inspection = inspect_mae_checkpoint(
+		result.latest_path,
+		resolved_config=config,
+		model=torch.nn.Linear(2, 1),
+		resolved_precision='float32',
+		amp_enabled=False,
+		scaler_present=False,
+	)
+
+	assert inspection.schema_version == 2
+	assert inspection.stage == 'train_amp_mae'
+	assert inspection.checkpoint_kind == 'epoch'
+	assert inspection.batch_index is None
+	assert inspection.epoch == 3
+	assert inspection.global_step == 12
+	assert inspection.resolved_precision == 'float32'
+	assert inspection.amp_enabled is False
+	assert inspection.scaler_present is False
+	assert inspection.metrics_dict() == {'loss': 0.25, 'gradient_norm': 1.5}
+	assert inspection.best_metric_key == 'loss'
+	assert inspection.best_metric_value == 0.25
+	with pytest.raises(FrozenInstanceError):
+		inspection.epoch = 4  # type: ignore[misc]
 
 
 def test_rolling_checkpoint_saves_latest_and_best_only(tmp_path: Path) -> None:

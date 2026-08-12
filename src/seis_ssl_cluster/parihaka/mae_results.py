@@ -21,8 +21,6 @@ from seis_ssl_cluster.parihaka.mae_validation import (
 from seis_ssl_cluster.parihaka.prepare_volume import (
 	parihaka_prepare_volume_config_from_mapping,
 )
-from seis_ssl_cluster.training.checkpoint import load_checkpoint
-from seis_ssl_cluster.training.mae_checkpoint import _best_metric_from_metrics
 
 SUMMARY_JSON_NAME = 'parihaka_mae_pretraining_summary.json'
 SUMMARY_MARKDOWN_NAME = 'parihaka_mae_pretraining_summary.md'
@@ -128,15 +126,9 @@ def _build_evidence(
 	amplitude = _mapping(outputs, 'amplitude_npy')
 	latest_path = _required_path(validation.latest_checkpoint, 'latest checkpoint')
 	best_path = _required_path(validation.best_checkpoint, 'best checkpoint')
-	latest = cast(
-		'Mapping[str, object]', load_checkpoint(latest_path, map_location='cpu')
-	)
-	best = cast('Mapping[str, object]', load_checkpoint(best_path, map_location='cpu'))
-	latest_metrics = dict(_mapping(latest, 'metrics'))
-	best_metrics = _mapping(best, 'metrics')
-	best_metric_key, best_metric_value = _best_metric_from_metrics(
-		cast('Mapping[str, float]', best_metrics)
-	)
+	latest_metrics = dict(validation.latest_metrics)
+	best_metric_key = validation.best_metric_key
+	best_metric_value = validation.best_metric_value
 	if best_metric_key is None or best_metric_value is None:
 		raise ValueError('validated best checkpoint has no best metric')
 	artifact_root = prepare.paths.artifact_root

@@ -9,6 +9,7 @@ import pytest
 
 import seis_ssl_cluster.parihaka.mae_results as results_module
 import seis_ssl_cluster.parihaka.mae_validation as validation_module
+import seis_ssl_cluster.training.mae_checkpoint as mae_checkpoint_module
 from seis_ssl_cluster.parihaka.mae_results import (
 	PARIHAKA_MAE_RESULT_FILES,
 	summarize_parihaka_mae,
@@ -75,6 +76,22 @@ def test_results_second_identical_run_preserves_bytes_and_mtime(
 	assert {
 		path: (path.read_bytes(), path.stat().st_mtime_ns) for path in second.paths
 	} == before
+
+
+def test_results_use_validation_evidence_without_loading_checkpoints(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	kwargs, _output_dir = _results_fixture(tmp_path, monkeypatch)
+	monkeypatch.setattr(
+		mae_checkpoint_module,
+		'load_checkpoint',
+		lambda *_args, **_kwargs: pytest.fail(
+			'results producer loaded a checkpoint after validation'
+		),
+	)
+
+	summarize_parihaka_mae(**kwargs)
 
 
 def test_results_reject_conflict_without_touching_other_targets(

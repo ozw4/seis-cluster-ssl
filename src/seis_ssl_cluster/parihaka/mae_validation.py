@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import cast
 
 import numpy as np
-import torch
 
 from seis_ssl_cluster.config import load_config, resolve_mae_training_config
 from seis_ssl_cluster.data.normalization import (
@@ -28,11 +27,9 @@ from seis_ssl_cluster.parihaka.prepare_volume import (
 	inspect_parihaka_preparation,
 	parihaka_prepare_volume_config_from_mapping,
 )
-from seis_ssl_cluster.training.checkpoint import load_checkpoint
-from seis_ssl_cluster.training.mae import _resolve_amp_precision, _resolve_device
 from seis_ssl_cluster.training.mae_checkpoint import (
-	_best_metric_from_metrics,
-	_validate_resume_payload,
+	MaeCheckpointInspection,
+	inspect_mae_checkpoint,
 )
 
 MODEL_TAG = 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
@@ -55,15 +52,102 @@ _SMOKE_FULL_ALLOWED_DIFFERENCES = frozenset(
 		'visualization.mae_debug.enabled',
 	},
 )
-_STABLE_NOPIMS_FULL = (
-	Path(__file__).resolve().parents[3]
-	/ 'experiments'
-	/ 'nopims'
-	/ 'pretrain_v1'
-	/ '10_pretrain'
-	/ MODEL_TAG
-	/ '03_full_100ep.yaml'
-)
+_PARIHAKA_FULL_CONTRACT: Mapping[str, object] = {
+	'data': {
+		'amplitude_agc': {
+			'clip_abs': 5.0,
+			'enabled': True,
+			'eps': 1.0e-3,
+			'mode': 'trace_rms_z',
+			'window_z': 65,
+		},
+		'finite_check_mode': 'strict',
+		'grid_order': ['x', 'y', 'z'],
+		'input_channels': 1,
+		'local_crop_size': [128, 128, 128],
+		'max_resample_attempts': 16,
+		'min_valid_fraction': 0.1,
+		'normalized_clip_abs': 8.0,
+		'target_channels': 1,
+		'use_context': False,
+		'volume_format': 'npy_memmap',
+	},
+	'zero_mask': {
+		'enabled': True,
+		'xy_trace_influence_radius': 1,
+		'z_sample_influence_radius': 16,
+		'zero_atol': 0.0,
+	},
+	'model': {
+		'decoder_depth': 4,
+		'decoder_dim': 256,
+		'decoder_heads': 4,
+		'encoder_depth': 8,
+		'encoder_dim': 384,
+		'encoder_heads': 6,
+		'in_channels': 1,
+		'name': 'amp_mae3d',
+		'out_channels': 1,
+		'patch_size': [8, 8, 8],
+	},
+	'masking': {
+		'block_size_tokens': [1, 1, 1],
+		'spatial_mask_mode': 'block',
+		'spatial_mask_ratio': 0.75,
+	},
+	'loss': {
+		'gradient_weight': 0.0,
+		'reconstruction': 'mse',
+		'target_normalization': {
+			'eps': 1.0e-6,
+			'min_std': 0.05,
+			'mode': 'patch_zscore',
+		},
+		'valid_mask_mode': 'voxel',
+		'visible_reconstruction_weight': 0.1,
+	},
+	'train': {
+		'amp': True,
+		'amp_dtype': 'auto',
+		'batch_size': 4,
+		'device': 'cuda',
+		'epochs': 100,
+		'grad_clip_norm': 1.0,
+		'lr': 1.0e-4,
+		'num_workers': 8,
+		'persistent_workers': True,
+		'prefetch_factor': 2,
+		'runtime_check_mode': 'once',
+		'samples_per_epoch': 10_000,
+		'seed': 42,
+		'shuffle': True,
+		'stage_timing': False,
+		'weight_decay': 0.05,
+	},
+	'visualization': {
+		'mae_debug': {
+			'clip_percentiles': [1.0, 99.0],
+			'columns': [
+				'input',
+				'masked_input',
+				'target',
+				'prediction',
+				'abs_error',
+				'valid_mask',
+			],
+			'dpi': 160,
+			'enabled': True,
+			'every_epochs': None,
+			'every_steps': 1_000,
+			'invalid_color': 'lightgray',
+			'max_samples': 1,
+			'panel_height': 2.4,
+			'panel_width': 2.6,
+			'xy_slice_index': None,
+			'xz_slice_y_index': None,
+		},
+	},
+}
 
 
 @dataclass(frozen=True)
@@ -96,6 +180,8 @@ class ParihakaMaeValidationResult:
 	best_metric_key: str | None = None
 	best_metric_value: float | None = None
 	scaler_present: bool | None = None
+	latest_metrics: tuple[tuple[str, float], ...] = ()
+	best_metrics: tuple[tuple[str, float], ...] = ()
 
 	def to_dict(self) -> dict[str, object]:
 		"""Return the intentionally small report payload."""
@@ -523,21 +609,16 @@ def _validate_training_configs(
 		raise ValueError(msg)
 	_validate_full_contract(full)
 	_validate_smoke_contract(smoke)
-	_validate_nopims_scientific_parity(full)
 	_reject_initial_checkpoint(full)
 
 
 def _validate_full_contract(full: Mapping[str, object]) -> None:
-	train = _mapping(full, 'train', 'full config')
-	for key, expected in (
-		('amp', True),
-		('amp_dtype', 'auto'),
-		('device', 'cuda'),
-		('seed', 42),
-		('epochs', 100),
-		('samples_per_epoch', 10_000),
-	):
-		_expected_equal(train.get(key), expected, f'full train.{key}')
+	for section, expected in _PARIHAKA_FULL_CONTRACT.items():
+		_expected_equal(
+			full.get(section),
+			expected,
+			f'full {section} Parihaka contract',
+		)
 
 
 def _validate_smoke_contract(smoke: Mapping[str, object]) -> None:
@@ -552,18 +633,6 @@ def _validate_smoke_contract(smoke: Mapping[str, object]) -> None:
 		('max_steps', 2),
 	):
 		_expected_equal(train.get(key), expected, f'smoke train.{key}')
-
-
-def _validate_nopims_scientific_parity(full: Mapping[str, object]) -> None:
-	stable = resolve_mae_training_config(load_config(_STABLE_NOPIMS_FULL))
-	for section in ('data', 'zero_mask', 'model', 'masking', 'loss', 'visualization'):
-		_expected_equal(
-			full.get(section), stable.get(section), f'full {section} stable parity'
-		)
-	full_train = dict(_mapping(full, 'train', 'full config'))
-	stable_train = dict(_mapping(stable, 'train', 'stable NOPIMS config'))
-	stable_train['amp'] = True
-	_expected_equal(full_train, stable_train, 'full train stable parity')
 
 
 def _reject_initial_checkpoint(config: Mapping[str, object]) -> None:
@@ -607,6 +676,8 @@ def _validate_smoke(
 		expected_epoch=1,
 		expected_global_step=2,
 		expected_precision='float32',
+		expected_amp_enabled=False,
+		expected_scaler_enabled=False,
 	)
 	best = _validate_checkpoint(
 		best_path,
@@ -615,6 +686,8 @@ def _validate_smoke(
 		expected_epoch=1,
 		expected_global_step=2,
 		expected_precision='float32',
+		expected_amp_enabled=False,
+		expected_scaler_enabled=False,
 	)
 	_validate_run_snapshots(
 		inputs,
@@ -629,15 +702,11 @@ def _validate_smoke(
 		},
 		label='smoke',
 	)
-	best_metrics = _mapping(best, 'metrics', 'best checkpoint')
-	metric_key, best_metric = _best_metric_from_metrics(
-		cast('Mapping[str, float]', best_metrics)
-	)
+	metric_key = best.best_metric_key
+	best_metric = best.best_metric_value
 	if metric_key is None or best_metric is None or not math.isfinite(best_metric):
 		raise ValueError('best checkpoint must contain a finite existing best metric')
-	metric_values = _finite_metric_values(latest, 'latest') + _finite_metric_values(
-		best, 'best'
-	)
+	metric_values = [value for _, value in latest.metrics + best.metrics]
 	return ParihakaMaeValidationResult(
 		**base,
 		latest_checkpoint=latest_path,
@@ -655,6 +724,8 @@ def _validate_smoke(
 		best_metric_key=metric_key,
 		best_metric_value=best_metric,
 		scaler_present=False,
+		latest_metrics=latest.metrics,
+		best_metrics=best.metrics,
 	)
 
 
@@ -668,8 +739,10 @@ def _validate_full(
 		cast('Mapping[str, object]', inputs.smoke['paths'])['output_root']
 	)
 	_validate_disjoint_run_roots(smoke_root, full_root)
-	precision = _resolve_full_precision_contract(inputs.full)
+	precision = _load_full_precision_contract(full_root, inputs.full)
 	resolved_precision = cast('str', precision['resolved_dtype'])
+	amp_enabled = cast('bool', precision['amp_enabled'])
+	scaler_enabled = cast('bool', precision['grad_scaler_enabled'])
 	latest_path = full_root / 'latest.pt'
 	best_path = full_root / 'best.pt'
 	latest = _validate_checkpoint(
@@ -679,25 +752,29 @@ def _validate_full(
 		expected_epoch=100,
 		expected_global_step=250_000,
 		expected_precision=resolved_precision,
+		expected_amp_enabled=amp_enabled,
+		expected_scaler_enabled=scaler_enabled,
 	)
-	if not best_path.is_file():
-		raise FileNotFoundError(f'best full checkpoint does not exist: {best_path}')
-	best_probe = cast(
-		'Mapping[str, object]', load_checkpoint(best_path, map_location='cpu')
+	best = _validate_checkpoint(
+		best_path,
+		inputs.full,
+		label='best full',
+		expected_epoch=None,
+		expected_global_step=None,
+		expected_precision=resolved_precision,
+		expected_amp_enabled=amp_enabled,
+		expected_scaler_enabled=scaler_enabled,
 	)
-	best_epoch = _required_int(best_probe.get('epoch'), 'best full checkpoint epoch')
+	best_epoch = best.epoch
 	if not 1 <= best_epoch <= 100:
 		msg = f'best full checkpoint epoch must be in [1, 100]; got {best_epoch}'
 		raise ValueError(msg)
 	steps_per_epoch = _full_steps_per_epoch(inputs.full)
 	best_global_step = best_epoch * steps_per_epoch
-	best = _validate_checkpoint(
-		best_path,
-		inputs.full,
-		label='best full',
-		expected_epoch=best_epoch,
-		expected_global_step=best_global_step,
-		expected_precision=resolved_precision,
+	_expected_equal(
+		best.global_step,
+		best_global_step,
+		'best full checkpoint global_step',
 	)
 	_validate_run_snapshots(
 		inputs,
@@ -706,30 +783,21 @@ def _validate_full(
 		expected_precision=precision,
 		label='full',
 	)
-	best_metrics = _mapping(best, 'metrics', 'best full checkpoint')
-	best_metric_key, best_metric = _best_metric_from_metrics(
-		cast('Mapping[str, float]', best_metrics)
-	)
+	best_metric_key = best.best_metric_key
+	best_metric = best.best_metric_value
 	if best_metric_key is None or best_metric is None or not math.isfinite(best_metric):
 		raise ValueError('best full checkpoint must contain a finite best metric')
-	latest_metrics = _mapping(latest, 'metrics', 'latest full checkpoint')
-	latest_metric = latest_metrics.get(best_metric_key)
-	if (
-		isinstance(latest_metric, bool)
-		or not isinstance(latest_metric, int | float)
-		or not math.isfinite(float(latest_metric))
-	):
+	latest_metric = dict(latest.metrics).get(best_metric_key)
+	if latest_metric is None:
 		msg = f'latest full checkpoint metric {best_metric_key} must be finite'
 		raise ValueError(msg)
-	if best_metric > float(latest_metric):
+	if best_metric > latest_metric:
 		msg = (
 			'best full checkpoint metric must be no greater than latest: '
 			f'{best_metric_key} best={best_metric}, latest={latest_metric}'
 		)
 		raise ValueError(msg)
-	metric_values = _finite_metric_values(
-		latest, 'latest full'
-	) + _finite_metric_values(best, 'best full')
+	metric_values = [value for _, value in latest.metrics + best.metrics]
 	return ParihakaMaeValidationResult(
 		**base,
 		latest_checkpoint=latest_path,
@@ -747,22 +815,66 @@ def _validate_full(
 		best_metric_key=best_metric_key,
 		best_metric_value=best_metric,
 		scaler_present=bool(precision['grad_scaler_enabled']),
+		latest_metrics=latest.metrics,
+		best_metrics=best.metrics,
 	)
 
 
-def _resolve_full_precision_contract(
+def _load_full_precision_contract(
+	full_root: Path,
 	full: Mapping[str, object],
 ) -> dict[str, object]:
-	train = _mapping(full, 'train', 'full config')
-	device = _resolve_device(train)
-	precision = _resolve_amp_precision(train, device=device)
-	return {
-		'amp_requested': precision.amp_requested,
-		'amp_dtype_requested': precision.requested_dtype,
-		'resolved_dtype': precision.resolved_dtype,
-		'amp_enabled': precision.amp_enabled,
-		'grad_scaler_enabled': precision.scaler_enabled,
+	run_metadata = _read_json_mapping(
+		full_root / 'run_metadata.json', 'full run metadata'
+	)
+	precision = _mapping(run_metadata, 'precision', 'full run metadata')
+	expected_keys = {
+		'amp_requested',
+		'amp_dtype_requested',
+		'resolved_dtype',
+		'amp_enabled',
+		'grad_scaler_enabled',
 	}
+	_expected_equal(set(precision), expected_keys, 'full run metadata precision fields')
+	for key in ('amp_requested', 'amp_enabled', 'grad_scaler_enabled'):
+		if not isinstance(precision.get(key), bool):
+			raise TypeError(f'full run metadata precision.{key} must be a boolean')
+	requested_dtype = precision.get('amp_dtype_requested')
+	if requested_dtype not in {'auto', 'bfloat16', 'float16'}:
+		msg = (
+			'full run metadata precision.amp_dtype_requested must be auto, '
+			'bfloat16, or float16'
+		)
+		raise ValueError(msg)
+	resolved_dtype = precision.get('resolved_dtype')
+	if resolved_dtype not in {'float32', 'bfloat16', 'float16'}:
+		msg = (
+			'full run metadata precision.resolved_dtype must be float32, '
+			'bfloat16, or float16'
+		)
+		raise ValueError(msg)
+	train = _mapping(full, 'train', 'full config')
+	_expected_equal(
+		precision.get('amp_requested'), train.get('amp'), 'full requested AMP'
+	)
+	_expected_equal(
+		precision.get('amp_dtype_requested'),
+		train.get('amp_dtype'),
+		'full requested AMP dtype',
+	)
+	amp_enabled = cast('bool', precision['amp_enabled'])
+	scaler_enabled = cast('bool', precision['grad_scaler_enabled'])
+	amp_requested = cast('bool', precision['amp_requested'])
+	if not amp_requested or not amp_enabled or resolved_dtype == 'float32':
+		raise ValueError(
+			'full run metadata must describe enabled CUDA AMP with a reduced dtype'
+		)
+	_expected_equal(
+		scaler_enabled,
+		resolved_dtype == 'float16',
+		'full run metadata precision scaler contract',
+	)
+	return dict(precision)
 
 
 def _full_steps_per_epoch(full: Mapping[str, object]) -> int:
@@ -781,59 +893,51 @@ def _validate_checkpoint(  # noqa: PLR0913
 	resolved_config: Mapping[str, object],
 	*,
 	label: str,
-	expected_epoch: int,
-	expected_global_step: int,
+	expected_epoch: int | None,
+	expected_global_step: int | None,
 	expected_precision: str,
-) -> Mapping[str, object]:
+	expected_amp_enabled: bool,
+	expected_scaler_enabled: bool,
+) -> MaeCheckpointInspection:
 	if not path.is_file():
 		raise FileNotFoundError(f'{label} checkpoint does not exist: {path}')
-	payload = cast('Mapping[str, object]', load_checkpoint(path, map_location='cpu'))
-	expected_amp = expected_precision != 'float32'
-	expected_scaler = expected_precision == 'float16'
-	_validate_resume_payload(
-		payload,
-		amp_enabled=expected_amp,
-		scaler_required=expected_scaler,
+	inspection = inspect_mae_checkpoint(
+		path,
+		resolved_config=resolved_config,
+		model=_build_mae_model(
+			_mapping(resolved_config, 'model', f'{label} config')
+		),
 		resolved_precision=expected_precision,
+		amp_enabled=expected_amp_enabled,
+		scaler_present=expected_scaler_enabled,
 	)
-	training_state = _mapping(payload, 'training_state', f'{label} checkpoint')
 	for actual, expected, field in (
-		(training_state.get('schema_version'), 2, 'training_state.schema_version'),
-		(training_state.get('stage'), 'train_amp_mae', 'training_state.stage'),
+		(inspection.schema_version, 2, 'training_state.schema_version'),
+		(inspection.stage, 'train_amp_mae', 'training_state.stage'),
 		(
-			training_state.get('checkpoint_kind'),
+			inspection.checkpoint_kind,
 			'epoch',
 			'training_state.checkpoint_kind',
 		),
-		(training_state.get('batch_index'), None, 'training_state.batch_index'),
+		(inspection.batch_index, None, 'training_state.batch_index'),
 		(
-			training_state.get('resolved_precision'),
+			inspection.resolved_precision,
 			expected_precision,
 			'training_state.resolved_precision',
 		),
-		(payload.get('epoch'), expected_epoch, 'epoch'),
-		(payload.get('global_step'), expected_global_step, 'global_step'),
-		(payload.get('amp_enabled'), expected_amp, 'amp_enabled'),
+		(inspection.amp_enabled, expected_amp_enabled, 'amp_enabled'),
+		(inspection.scaler_present, expected_scaler_enabled, 'scaler_state_dict'),
 	):
 		_expected_equal(actual, expected, f'{label} checkpoint {field}')
-	_expected_equal(
-		payload.get('config'), resolved_config, f'{label} checkpoint config'
-	)
-	model = _build_mae_model(_mapping(resolved_config, 'model', f'{label} config'))
-	state = _mapping(payload, 'model_state_dict', f'{label} checkpoint')
-	try:
-		model.load_state_dict(state, strict=True)
-	except RuntimeError as exc:
-		msg = f'{label} checkpoint model geometry/state mismatch: {path}: {exc}'
-		raise ValueError(msg) from exc
-	_require_finite_tree(state, f'{label} checkpoint model_state_dict')
-	_require_finite_tree(
-		_mapping(payload, 'optimizer_state_dict', f'{label} checkpoint'),
-		f'{label} checkpoint optimizer_state_dict',
-	)
-	_require_finite_tree(payload.get('scaler_state_dict'), f'{label} scaler_state_dict')
-	_finite_metric_values(payload, label)
-	return payload
+	if expected_epoch is not None:
+		_expected_equal(inspection.epoch, expected_epoch, f'{label} checkpoint epoch')
+	if expected_global_step is not None:
+		_expected_equal(
+			inspection.global_step,
+			expected_global_step,
+			f'{label} checkpoint global_step',
+		)
+	return inspection
 
 
 def _validate_run_snapshots(
@@ -899,37 +1003,6 @@ def _build_mae_model(model: Mapping[str, object]) -> AmplitudeMAE3D:
 		decoder_heads=int(model['decoder_heads']),
 		runtime_check_mode='once',
 	)
-
-
-def _finite_metric_values(payload: Mapping[str, object], label: str) -> list[float]:
-	metrics = _mapping(payload, 'metrics', f'{label} checkpoint')
-	values: list[float] = []
-	for key, value in metrics.items():
-		if isinstance(value, bool) or not isinstance(value, int | float):
-			raise TypeError(f'{label} checkpoint metric {key} must be numeric')
-		floating = float(value)
-		if not math.isfinite(floating):
-			raise ValueError(f'{label} checkpoint metric {key} must be finite')
-		values.append(floating)
-	if not values:
-		raise ValueError(f'{label} checkpoint metrics must not be empty')
-	return values
-
-
-def _require_finite_tree(value: object, label: str) -> None:
-	if isinstance(value, torch.Tensor):
-		if (torch.is_floating_point(value) or torch.is_complex(value)) and not bool(
-			torch.isfinite(value).all(),
-		):
-			raise ValueError(f'{label} contains a nonfinite tensor')
-		return
-	if isinstance(value, Mapping):
-		for key, child in value.items():
-			_require_finite_tree(child, f'{label}.{key}')
-		return
-	if isinstance(value, Sequence) and not isinstance(value, str | bytes):
-		for index, child in enumerate(value):
-			_require_finite_tree(child, f'{label}[{index}]')
 
 
 def _stream_npy_statistics(array: np.ndarray) -> ArrayStatistics:

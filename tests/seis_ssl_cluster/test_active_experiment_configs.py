@@ -186,6 +186,16 @@ NOPIMS_CLUSTERING_CONFIGS = sorted((NOPIMS_ROOT / '30_clustering').rglob('*.yaml
 NOPIMS_VISUALIZATION_CONFIGS = sorted(
 	(NOPIMS_ROOT / '40_visualization').rglob('*.yaml'),
 )
+PARIHAKA_FULL_MAE_CONFIG = Path(
+	'experiments/parihaka/facies_benchmark_v1/20_pretrain/'
+	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/02_full_100ep.yaml',
+)
+STABLE_NOPIMS_FULL_MAE_CONFIG = (
+	NOPIMS_ROOT
+	/ '10_pretrain'
+	/ 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
+	/ '03_full_100ep.yaml'
+)
 F3_ROOT = Path('experiments/f3/facies_benchmark_v1')
 F3_SECTION_LAYOUT_MODEL_ROSTER_CONFIG = (
 	F3_ROOT / '109_f3_voxel_section_layout_v1/00_model_roster.yaml'
@@ -730,6 +740,24 @@ def test_active_config_groups_are_not_empty(
 @pytest.mark.parametrize('config_path', NOPIMS_PRETRAINING_CONFIGS)
 def test_active_nopims_pretraining_configs_resolve(config_path: Path) -> None:
 	resolve_mae_training_config(load_config(config_path))
+
+
+def test_parihaka_full_mae_matches_stable_nopims_scientific_contract(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	parihaka = resolve_mae_training_config(load_config(PARIHAKA_FULL_MAE_CONFIG))
+	nopims = resolve_mae_training_config(load_config(STABLE_NOPIMS_FULL_MAE_CONFIG))
+
+	for section in ('data', 'zero_mask', 'model', 'masking', 'loss', 'visualization'):
+		assert parihaka[section] == nopims[section]
+	parihaka_train = dict(parihaka['train'])
+	nopims_train = dict(nopims['train'])
+	nopims_train['amp'] = True
+	assert parihaka_train == nopims_train
 
 
 @pytest.mark.parametrize('config_path', NOPIMS_EMBEDDING_CONFIGS)
