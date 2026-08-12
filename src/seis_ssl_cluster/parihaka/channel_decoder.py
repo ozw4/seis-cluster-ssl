@@ -885,6 +885,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 		'model': plan.model,
 		'layout_id': plan.layout_id,
 		'data_size': plan.data_size,
+		'benchmark_identity': identity,
 		'supervision': {
 			'axis_mapping': dict(CHANNEL_AXIS_MAPPING),
 			'train_inline': list(plan.train_lines.inline),
@@ -1058,10 +1059,15 @@ def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
 			'checkpoint_path': selected_metadata['checkpoint_path'],
 			'checkpoint_sha256': selected_metadata['checkpoint_sha256'],
 			'common_metadata': {
-				key: plan.geometry.pretrained_metadata[key]
+				key: selected_metadata[key]
 				for key in _PAIRED_EMBEDDING_METADATA_KEYS
 			},
 		},
+		'decoder_initial_state_sha256': decoder_initial_state_sha256(
+			plan.config.decoder,
+			plan.geometry.patch_size_xyz,
+			plan.config.train.seed,
+		),
 		'label_path': str(plan.config.labels),
 		'train_lines': {
 			'inline': list(plan.train_lines.inline),
@@ -1078,6 +1084,7 @@ def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
 		'geometry': {
 			'embedding_shape': list(plan.geometry.embedding_shape),
 			'volume_shape_xyz': list(plan.geometry.volume_shape_xyz),
+			'token_grid_shape_xyz': list(plan.geometry.token_grid_shape_xyz),
 			'patch_size_xyz': list(plan.geometry.patch_size_xyz),
 		},
 		'class_weights': list(plan.class_weights),

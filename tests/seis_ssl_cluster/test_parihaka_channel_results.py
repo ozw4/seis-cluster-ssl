@@ -35,6 +35,85 @@ def _supervision(layout_index: int, data_size: str) -> dict[str, object]:
 	}
 
 
+def _benchmark_identity(
+	model: str, layout_index: int, layout_id: str, data_size: str
+) -> dict[str, object]:
+	supervision = _supervision(layout_index, data_size)
+	return {
+		'model': model,
+		'layout_id': layout_id,
+		'data_size': data_size,
+		'embedding': {
+			'checkpoint_path': f'/checkpoints/{model}.pt',
+			'checkpoint_sha256': ('a' if model == 'pretrained' else 'b') * 64,
+			'common_metadata': {
+				'survey_id': 'parihaka_full',
+				'source_amplitude_path': '/data/parihaka.npy',
+				'volume_shape_xyz': [100, 200, 300],
+				'model_geometry': {'embedding_dim': 384, 'depth': 12},
+				'patch_size': [8, 8, 8],
+				'token_grid_shape': [13, 25, 38],
+				'window_size': [16, 16, 16],
+				'overlap': [8, 8, 8],
+				'output_dtype': 'float16',
+				'min_token_valid_fraction': 0.5,
+				'normalization_stats_path': '/data/stats.json',
+				'preprocessing': {'normalization': 'zscore'},
+				'zero_mask': {'enabled': True},
+				'precision': {'autocast': True},
+				'pretraining_objective': {'name': 'mae'},
+			},
+		},
+		'decoder_initial_state_sha256': 'c' * 64,
+		'label_path': '/data/parihaka_labels.npy',
+		'train_lines': {
+			'inline': supervision['train_inline'],
+			'crossline': supervision['train_crossline'],
+		},
+		'validation': {
+			'inline': supervision['validation_inline'],
+			'crossline': supervision['validation_crossline'],
+		},
+		'test': {
+			'inline': supervision['test_inline'],
+			'crossline': supervision['test_crossline'],
+		},
+		'geometry': {
+			'embedding_shape': [13, 25, 38, 384],
+			'volume_shape_xyz': [100, 200, 300],
+			'token_grid_shape_xyz': [13, 25, 38],
+			'patch_size_xyz': [8, 8, 8],
+		},
+		'class_weights': [0.55, 5.5],
+		'decoder': {
+			'spec': 'frozen_embedding_decoder_v1',
+			'embedding_dim': 384,
+			'class_count': 2,
+			'hidden_channels': [128, 64, 32],
+			'upsample_factors': [[2, 2, 2], [2, 2, 2], [2, 2, 2]],
+			'upsample_mode': 'trilinear',
+			'normalization': 'group_norm',
+		},
+		'training': {
+			'epochs': 50,
+			'batch_size': 1,
+			'learning_rate': 0.001,
+			'weight_decay': 0.0001,
+			'class_weight': 'balanced_train_voxels',
+			'sampling_mode': 'all_tiles_once_per_epoch',
+			'seed': 42000,
+			'amp': True,
+			'gradient_clip_norm': 1.0,
+		},
+		'tiles': {
+			'core_size_tokens': [8, 8, 8],
+			'context_halo_tokens': [1, 1, 1],
+		},
+		'split_class_counts': supervision['split_class_counts'],
+		'tile_counts': {'train': 10, 'validation': 4, 'test': 4},
+	}
+
+
 def _write_complete_results(config: ChannelSummaryConfig) -> None:
 	for model in ('pretrained', 'random'):
 		for layout_index, layout_id in enumerate(LAYOUT_IDS):
@@ -50,6 +129,9 @@ def _write_complete_results(config: ChannelSummaryConfig) -> None:
 							'model': model,
 							'layout_id': layout_id,
 							'data_size': size,
+							'benchmark_identity': _benchmark_identity(
+								model, layout_index, layout_id, size
+							),
 							'supervision': _supervision(layout_index, size),
 							'class_weights': [0.55, 5.5],
 							'test': {'channel_iou': value},
@@ -84,6 +166,17 @@ def _mutate_metrics(
 	path.write_text(json.dumps(payload), encoding='utf-8')
 
 
+def _set_nested(
+	payload: dict[str, object], keys: tuple[str, ...], value: object
+) -> None:
+	target = payload
+	for key in keys[:-1]:
+		child = target[key]
+		assert isinstance(child, dict)
+		target = child
+	target[keys[-1]] = value
+
+
 def test_summary_fails_when_any_of_30_jobs_is_missing(tmp_path: Path) -> None:
 	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
 	with pytest.raises(FileNotFoundError, match='all 30 jobs'):
@@ -107,6 +200,117 @@ def test_complete_summary_writes_only_three_outputs(tmp_path: Path) -> None:
 	payload = json.loads((config.output_dir / 'summary.json').read_text())
 	assert payload['job_count'] == 30
 	assert payload['by_size']['small']['paired_mean'] == pytest.approx(0.1)
+
+
+def test_summary_requires_benchmark_identity(tmp_path: Path) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+	_mutate_metrics(
+		config,
+		'pretrained',
+		'layout_000',
+		'small',
+		lambda payload: payload.pop('benchmark_identity'),
+	)
+	with pytest.raises(TypeError, match='benchmark_identity must be a mapping'):
+		inspect_channel_benchmark_results(config)
+
+
+@pytest.mark.parametrize(
+	('keys', 'value', 'message'),
+	[
+		(('label_path',), '/data/different_labels.npy', 'label_path'),
+		(
+			('embedding', 'common_metadata', 'source_amplitude_path'),
+			'/data/different_amplitude.npy',
+			'embedding common metadata',
+		),
+		(('geometry', 'token_grid_shape_xyz'), [99, 25, 38], 'geometry'),
+		(('decoder', 'hidden_channels'), [64, 32], 'decoder'),
+		(('training', 'epochs'), 51, 'training'),
+		(('tiles', 'core_size_tokens'), [4, 4, 4], 'tiles'),
+		(('decoder_initial_state_sha256',), 'd' * 64, 'decoder_initial_state'),
+	],
+)
+def test_summary_rejects_global_benchmark_identity_drift(
+	tmp_path: Path,
+	keys: tuple[str, ...],
+	value: object,
+	message: str,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+	for model in ('pretrained', 'random'):
+		_mutate_metrics(
+			config,
+			model,
+			'layout_001',
+			'medium',
+			lambda payload, keys=keys, value=value: _set_nested(
+				payload['benchmark_identity'], keys, value
+			),
+		)
+	with pytest.raises(ValueError, match=message):
+		inspect_channel_benchmark_results(config)
+
+
+@pytest.mark.parametrize(
+	('field', 'value'),
+	[
+		('checkpoint_path', '/checkpoints/other_pretrained.pt'),
+		('checkpoint_sha256', 'd' * 64),
+	],
+)
+def test_summary_rejects_checkpoint_drift_within_model_jobs(
+	tmp_path: Path, field: str, value: str
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+	_mutate_metrics(
+		config,
+		'pretrained',
+		'layout_004',
+		'large',
+		lambda payload: payload['benchmark_identity']['embedding'].__setitem__(
+			field, value
+		),
+	)
+	with pytest.raises(ValueError, match='checkpoint does not match its other 15 jobs'):
+		inspect_channel_benchmark_results(config)
+
+
+def test_summary_rejects_same_checkpoint_sha_for_both_models(tmp_path: Path) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+	for layout_id in LAYOUT_IDS:
+		for size in DATA_SIZE_PREFIX:
+			_mutate_metrics(
+				config,
+				'random',
+				layout_id,
+				size,
+				lambda payload: payload['benchmark_identity'][
+					'embedding'
+				].__setitem__('checkpoint_sha256', 'a' * 64),
+			)
+	with pytest.raises(ValueError, match='checkpoint SHA-256 must differ'):
+		inspect_channel_benchmark_results(config)
+
+
+def test_summary_rejects_paired_tile_count_mismatch(tmp_path: Path) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+	_mutate_metrics(
+		config,
+		'random',
+		'layout_002',
+		'medium',
+		lambda payload: payload['benchmark_identity']['tile_counts'].__setitem__(
+			'train', 11
+		),
+	)
+	with pytest.raises(ValueError, match='mismatch outside model-specific checkpoint'):
+		inspect_channel_benchmark_results(config)
 
 
 def test_summary_requires_complete_supervision(tmp_path: Path) -> None:

@@ -462,6 +462,10 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 	}
 	assert identity['label_path'] == str(config.labels)
 	assert identity['decoder']['spec'] == config.decoder.spec
+	assert identity['decoder_initial_state_sha256'] == decoder_initial_state_sha256(
+		config.decoder, plan.geometry.patch_size_xyz, config.train.seed
+	)
+	assert identity['geometry']['token_grid_shape_xyz'] == [1, 1, 1]
 	assert identity['tiles'] == {
 		'core_size_tokens': [1, 1, 1],
 		'context_halo_tokens': [1, 1, 1],
@@ -496,6 +500,7 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 	assert metrics_path is not None and metrics_path.is_file()
 	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
 	assert metrics['best_epoch'] == 0
+	assert metrics['benchmark_identity'] == identity
 	assert metrics['supervision'] == {
 		'axis_mapping': {'inline': 'x', 'crossline': 'y'},
 		'train_inline': [0],

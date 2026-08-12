@@ -69,3 +69,9 @@ and tile counts to match the interrupted run exactly.
 `best.pt` is selected by validation Channel IoU. Test is evaluated once after
 training from `best.pt`; no probability volume is written. The summary requires
 all 30 `metrics.json` files and reports paired test Channel-IoU deltas only.
+Each metrics file carries the same benchmark identity used for resume, including
+the seeded decoder-initial-state SHA-256. Before aggregation, the summary requires
+common label, embedding metadata, geometry, decoder, training, and tile identity
+across all jobs; one checkpoint path/SHA-256 within each model; distinct
+pretrained/random checkpoint SHA-256 values; and matching non-checkpoint identity,
+supervision, class weights, split counts, and tile counts within every pair.

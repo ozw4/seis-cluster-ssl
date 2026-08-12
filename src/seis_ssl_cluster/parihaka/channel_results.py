@@ -20,6 +20,50 @@ from seis_ssl_cluster.parihaka.channel_data import (
 MODELS = ('pretrained', 'random')
 OUTPUT_NAMES = ('comparison.csv', 'summary.json', 'summary.md')
 
+_BENCHMARK_IDENTITY_KEYS = {
+	'model',
+	'layout_id',
+	'data_size',
+	'embedding',
+	'decoder_initial_state_sha256',
+	'label_path',
+	'train_lines',
+	'validation',
+	'test',
+	'geometry',
+	'class_weights',
+	'decoder',
+	'training',
+	'tiles',
+	'split_class_counts',
+	'tile_counts',
+}
+_EMBEDDING_COMMON_METADATA_KEYS = {
+	'survey_id',
+	'source_amplitude_path',
+	'volume_shape_xyz',
+	'model_geometry',
+	'patch_size',
+	'token_grid_shape',
+	'window_size',
+	'overlap',
+	'output_dtype',
+	'min_token_valid_fraction',
+	'normalization_stats_path',
+	'preprocessing',
+	'zero_mask',
+	'precision',
+	'pretraining_objective',
+}
+_GLOBAL_IDENTITY_KEYS = (
+	'label_path',
+	'geometry',
+	'decoder',
+	'decoder_initial_state_sha256',
+	'training',
+	'tiles',
+)
+
 
 @dataclass(frozen=True)
 class ChannelSummaryConfig:
@@ -59,6 +103,9 @@ def inspect_channel_benchmark_results(
 				_metric(payload, 'test', 'channel_iou', path)
 				_validate_supervision(payload, path)
 				_class_weights(payload, path)
+				_validate_benchmark_identity(
+					payload, model, layout_id, data_size, path
+				)
 				rows[(model, layout_id, data_size)] = payload
 	if missing:
 		raise FileNotFoundError(
@@ -257,6 +304,235 @@ def _validate_supervision_parity(
 	_validate_pairs(rows, runs_root)
 	_validate_nested_training(rows)
 	_validate_unique_layout_training(rows)
+	for key, payload in rows.items():
+		path = _metrics_path(runs_root, *key)
+		_validate_identity_redundancy(
+			payload, _benchmark_identity(payload, path), path
+		)
+	_validate_benchmark_identity_parity(rows, runs_root)
+
+
+def _validate_benchmark_identity(
+	payload: Mapping[str, object],
+	model: str,
+	layout_id: str,
+	data_size: str,
+	path: Path,
+) -> None:
+	identity = _benchmark_identity(payload, path)
+	if set(identity) != _BENCHMARK_IDENTITY_KEYS:
+		raise ValueError(
+			f'{path} benchmark_identity must contain exactly '
+			f'{sorted(_BENCHMARK_IDENTITY_KEYS)!r}'
+		)
+	for key, expected in (
+		('model', model),
+		('layout_id', layout_id),
+		('data_size', data_size),
+	):
+		if identity.get(key) != expected:
+			raise ValueError(
+				f'{path} benchmark_identity.{key} must equal {expected!r}'
+			)
+	embedding = _identity_mapping(identity, 'embedding', path)
+	if set(embedding) != {'checkpoint_path', 'checkpoint_sha256', 'common_metadata'}:
+		raise ValueError(f'{path} benchmark_identity.embedding has invalid fields')
+	checkpoint_path = embedding.get('checkpoint_path')
+	if not isinstance(checkpoint_path, str) or not checkpoint_path:
+		raise TypeError(
+			f'{path} benchmark_identity.embedding.checkpoint_path must be non-empty'
+		)
+	_validate_sha256(
+		embedding.get('checkpoint_sha256'),
+		f'{path} benchmark_identity.embedding.checkpoint_sha256',
+	)
+	common_metadata = _identity_mapping(
+		embedding, 'common_metadata', path, prefix='benchmark_identity.embedding'
+	)
+	if set(common_metadata) != _EMBEDDING_COMMON_METADATA_KEYS:
+		raise ValueError(
+			f'{path} benchmark_identity.embedding.common_metadata has invalid fields'
+		)
+	_validate_sha256(
+		identity.get('decoder_initial_state_sha256'),
+		f'{path} benchmark_identity.decoder_initial_state_sha256',
+	)
+	label_path = identity.get('label_path')
+	if not isinstance(label_path, str) or not label_path:
+		raise TypeError(f'{path} benchmark_identity.label_path must be non-empty')
+	for key, expected_keys in (
+		('train_lines', {'inline', 'crossline'}),
+		('validation', {'inline', 'crossline'}),
+		('test', {'inline', 'crossline'}),
+		(
+			'geometry',
+			{
+				'embedding_shape',
+				'volume_shape_xyz',
+				'token_grid_shape_xyz',
+				'patch_size_xyz',
+			},
+		),
+		(
+			'decoder',
+			{
+				'spec',
+				'embedding_dim',
+				'class_count',
+				'hidden_channels',
+				'upsample_factors',
+				'upsample_mode',
+				'normalization',
+			},
+		),
+		(
+			'training',
+			{
+				'epochs',
+				'batch_size',
+				'learning_rate',
+				'weight_decay',
+				'class_weight',
+				'sampling_mode',
+				'seed',
+				'amp',
+				'gradient_clip_norm',
+			},
+		),
+		('tiles', {'core_size_tokens', 'context_halo_tokens'}),
+		('split_class_counts', {'train', 'validation', 'test'}),
+		('tile_counts', {'train', 'validation', 'test'}),
+	):
+		value = _identity_mapping(identity, key, path)
+		if set(value) != expected_keys:
+				raise ValueError(
+					f'{path} benchmark_identity.{key} must contain exactly '
+					f'{sorted(expected_keys)!r}'
+				)
+
+
+def _validate_identity_redundancy(
+	payload: Mapping[str, object], identity: Mapping[str, object], path: Path
+) -> None:
+	supervision = _supervision(payload)
+	for identity_key, prefix in (
+		('train_lines', 'train'),
+		('validation', 'validation'),
+		('test', 'test'),
+	):
+		lines = _identity_mapping(identity, identity_key, path)
+		for orientation in ('inline', 'crossline'):
+			if lines.get(orientation) != supervision.get(f'{prefix}_{orientation}'):
+				raise ValueError(
+					f'{path} benchmark_identity.{identity_key}.{orientation} '
+					'does not match supervision'
+				)
+	if _class_weights(identity, path) != _class_weights(payload, path):
+		raise ValueError(
+			f'{path} benchmark_identity.class_weights does not match metrics'
+		)
+	identity_counts = _identity_mapping(identity, 'split_class_counts', path)
+	if identity_counts != supervision.get('split_class_counts'):
+		raise ValueError(
+			f'{path} benchmark_identity.split_class_counts does not match supervision'
+		)
+	tile_counts = _identity_mapping(identity, 'tile_counts', path)
+	if any(
+		not isinstance(tile_counts.get(split), int)
+		or isinstance(tile_counts.get(split), bool)
+		or int(tile_counts[split]) <= 0
+		for split in ('train', 'validation', 'test')
+	):
+		raise TypeError(
+			f'{path} benchmark_identity.tile_counts must contain positive integers'
+		)
+
+
+def _validate_benchmark_identity_parity(
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]], runs_root: Path
+) -> None:
+	first_key = (MODELS[0], LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
+	common = _benchmark_identity(rows[first_key], _metrics_path(runs_root, *first_key))
+	common_metadata = _embedding_identity(common)['common_metadata']
+	for key, payload in rows.items():
+		path = _metrics_path(runs_root, *key)
+		identity = _benchmark_identity(payload, path)
+		for field in _GLOBAL_IDENTITY_KEYS:
+			if identity[field] != common[field]:
+				raise ValueError(
+					f'{path} benchmark_identity.{field} does not match all 30 jobs'
+				)
+		if _embedding_identity(identity)['common_metadata'] != common_metadata:
+			raise ValueError(
+				f'{path} embedding common metadata does not match all 30 jobs'
+			)
+	model_checkpoints: dict[str, tuple[object, object]] = {}
+	for model in MODELS:
+		first_model_key = (model, LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
+		first_embedding = _embedding_identity(
+			_benchmark_identity(
+				rows[first_model_key], _metrics_path(runs_root, *first_model_key)
+			)
+		)
+		checkpoint = (
+			first_embedding['checkpoint_path'],
+			first_embedding['checkpoint_sha256'],
+		)
+		model_checkpoints[model] = checkpoint
+		for layout_id in LAYOUT_IDS:
+			for data_size in DATA_SIZE_PREFIX:
+				key = (model, layout_id, data_size)
+				embedding = _embedding_identity(
+					_benchmark_identity(rows[key], _metrics_path(runs_root, *key))
+				)
+				if (
+					embedding['checkpoint_path'],
+					embedding['checkpoint_sha256'],
+				) != checkpoint:
+					raise ValueError(
+						f'{_metrics_path(runs_root, *key)} {model} embedding '
+						'checkpoint does not match its other 15 jobs'
+					)
+	if model_checkpoints['pretrained'][1] == model_checkpoints['random'][1]:
+		raise ValueError('pretrained and random checkpoint SHA-256 must differ')
+
+
+def _benchmark_identity(
+	payload: Mapping[str, object], path: Path
+) -> Mapping[str, object]:
+	identity = payload.get('benchmark_identity')
+	if not isinstance(identity, Mapping):
+		raise TypeError(f'{path} benchmark_identity must be a mapping')
+	return identity
+
+
+def _embedding_identity(identity: Mapping[str, object]) -> Mapping[str, object]:
+	value = identity.get('embedding')
+	if not isinstance(value, Mapping):
+		raise TypeError('benchmark_identity.embedding must be a mapping')
+	return value
+
+
+def _identity_mapping(
+	value: Mapping[str, object],
+	key: str,
+	path: Path,
+	*,
+	prefix: str = 'benchmark_identity',
+) -> Mapping[str, object]:
+	child = value.get(key)
+	if not isinstance(child, Mapping):
+		raise TypeError(f'{path} {prefix}.{key} must be a mapping')
+	return child
+
+
+def _validate_sha256(value: object, label: str) -> None:
+	if (
+		not isinstance(value, str)
+		or len(value) != 64
+		or any(character not in '0123456789abcdefABCDEF' for character in value)
+	):
+		raise TypeError(f'{label} must be a SHA-256 hex digest')
 
 
 def _validate_common_held_out(
@@ -280,22 +556,50 @@ def _validate_pairs(
 		for data_size in DATA_SIZE_PREFIX:
 			pretrained = rows[('pretrained', layout_id, data_size)]
 			random = rows[('random', layout_id, data_size)]
+			pretrained_path = _metrics_path(
+				runs_root, 'pretrained', layout_id, data_size
+			)
+			random_path = _metrics_path(runs_root, 'random', layout_id, data_size)
 			if _supervision(pretrained) != _supervision(random):
 				raise ValueError(
 					f'{layout_id}/{data_size} pretrained/random supervision mismatch'
 				)
 			pretrained_weights = _class_weights(
 				pretrained,
-				_metrics_path(runs_root, 'pretrained', layout_id, data_size),
+				pretrained_path,
 			)
 			random_weights = _class_weights(
 				random,
-				_metrics_path(runs_root, 'random', layout_id, data_size),
+				random_path,
 			)
 			if pretrained_weights != random_weights:
 				raise ValueError(
 					f'{layout_id}/{data_size} pretrained/random class_weights mismatch'
 				)
+			if _paired_benchmark_identity(
+				_benchmark_identity(pretrained, pretrained_path)
+			) != _paired_benchmark_identity(
+				_benchmark_identity(random, random_path)
+			):
+				raise ValueError(
+					f'{layout_id}/{data_size} pretrained/random benchmark identity '
+					'mismatch outside model-specific checkpoint'
+				)
+
+
+def _paired_benchmark_identity(
+	identity: Mapping[str, object],
+) -> dict[str, object]:
+	return {
+		**{
+			key: value
+			for key, value in identity.items()
+			if key not in {'model', 'embedding'}
+		},
+		'embedding': {
+			'common_metadata': _embedding_identity(identity)['common_metadata']
+		},
+	}
 
 
 def _validate_nested_training(
