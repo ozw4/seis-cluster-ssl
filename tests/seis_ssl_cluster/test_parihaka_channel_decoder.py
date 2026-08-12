@@ -168,6 +168,19 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 	assert metrics_path is not None and metrics_path.is_file()
 	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
 	assert metrics['best_epoch'] == 0
+	assert metrics['supervision'] == {
+		'axis_mapping': {'inline': 'x', 'crossline': 'y'},
+		'train_inline': [0],
+		'train_crossline': [0],
+		'validation_inline': [4],
+		'validation_crossline': [4],
+		'test_inline': [5],
+		'test_crossline': [5],
+		'split_class_counts': {
+			split: list(plan.split_counts[split])
+			for split in ('train', 'validation', 'test')
+		},
+	}
 	assert set(metrics['test']) == {
 		'channel_iou',
 		'channel_f1',

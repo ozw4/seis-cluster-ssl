@@ -801,6 +801,19 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 		'model': plan.model,
 		'layout_id': plan.layout_id,
 		'data_size': plan.data_size,
+		'supervision': {
+			'axis_mapping': {'inline': 'x', 'crossline': 'y'},
+			'train_inline': list(plan.train_lines.inline),
+			'train_crossline': list(plan.train_lines.crossline),
+			'validation_inline': list(plan.layouts.validation.inline),
+			'validation_crossline': list(plan.layouts.validation.crossline),
+			'test_inline': list(plan.layouts.test.inline),
+			'test_crossline': list(plan.layouts.test.crossline),
+			'split_class_counts': {
+				split: list(plan.split_counts[split])
+				for split in ('train', 'validation', 'test')
+			},
+		},
 		'selected_inline_indices': list(plan.train_lines.inline),
 		'selected_crossline_indices': list(plan.train_lines.crossline),
 		'train_channel_voxels': plan.split_counts['train'][1],

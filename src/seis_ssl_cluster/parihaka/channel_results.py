@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import csv
 import json
+import math
 import statistics
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -52,6 +53,8 @@ def inspect_channel_benchmark_results(
 				payload = _read_json(path)
 				_validate_identity(payload, model, layout_id, data_size, path)
 				_metric(payload, 'test', 'channel_iou', path)
+				_validate_supervision(payload, path)
+				_class_weights(payload, path)
 				rows[(model, layout_id, data_size)] = payload
 	if missing:
 		raise FileNotFoundError(
@@ -60,6 +63,7 @@ def inspect_channel_benchmark_results(
 		)
 	if len(rows) != 30:
 		raise ValueError(f'expected 30 unique benchmark conditions; got {len(rows)}')
+	_validate_supervision_parity(rows, config.runs_root)
 	return rows
 
 
@@ -194,6 +198,200 @@ def _metric(payload: Mapping[str, object], split: str, key: str, path: Path) -> 
 	if not isinstance(metric, int | float) or isinstance(metric, bool):
 		raise TypeError(f'{path} {split}.{key} must be numeric')
 	return float(metric)
+
+
+def _validate_supervision(payload: Mapping[str, object], path: Path) -> None:
+	supervision = payload.get('supervision')
+	if not isinstance(supervision, Mapping):
+		raise TypeError(f'{path} supervision must be a mapping')
+	expected_keys = {
+		'axis_mapping',
+		'train_inline',
+		'train_crossline',
+		'validation_inline',
+		'validation_crossline',
+		'test_inline',
+		'test_crossline',
+		'split_class_counts',
+	}
+	if set(supervision) != expected_keys:
+		raise ValueError(
+			f'{path} supervision must contain exactly {sorted(expected_keys)!r}'
+		)
+	if supervision.get('axis_mapping') != {'inline': 'x', 'crossline': 'y'}:
+		raise ValueError(
+			f"{path} supervision.axis_mapping must be "
+			"{'inline': 'x', 'crossline': 'y'}"
+		)
+	for key in (
+		'train_inline',
+		'train_crossline',
+		'validation_inline',
+		'validation_crossline',
+		'test_inline',
+		'test_crossline',
+	):
+		_indices(supervision.get(key), f'{path} supervision.{key}')
+	counts = supervision.get('split_class_counts')
+	if not isinstance(counts, Mapping):
+		raise TypeError(f'{path} supervision.split_class_counts must be a mapping')
+	if set(counts) != {'train', 'validation', 'test'}:
+		raise ValueError(
+			f'{path} supervision.split_class_counts must contain exactly '
+			"'train', 'validation', and 'test'"
+		)
+	for split in ('train', 'validation', 'test'):
+		_class_counts(
+			counts.get(split), f'{path} supervision.split_class_counts.{split}'
+		)
+
+
+def _validate_supervision_parity(
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]], runs_root: Path
+) -> None:
+	_validate_common_held_out(rows, runs_root)
+	_validate_pairs(rows, runs_root)
+	_validate_nested_training(rows)
+
+
+def _validate_common_held_out(
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]], runs_root: Path
+) -> None:
+	first_key = (MODELS[0], LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
+	common_supervision = _supervision(rows[first_key])
+	common_held_out = _held_out_identity(common_supervision)
+	for key, payload in rows.items():
+		if _held_out_identity(_supervision(payload)) != common_held_out:
+			raise ValueError(
+				f'{_metrics_path(runs_root, *key)} validation/test supervision '
+				'does not match all 30 jobs'
+			)
+
+
+def _validate_pairs(
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]], runs_root: Path
+) -> None:
+	for layout_id in LAYOUT_IDS:
+		for data_size in DATA_SIZE_PREFIX:
+			pretrained = rows[('pretrained', layout_id, data_size)]
+			random = rows[('random', layout_id, data_size)]
+			if _supervision(pretrained) != _supervision(random):
+				raise ValueError(
+					f'{layout_id}/{data_size} pretrained/random supervision mismatch'
+				)
+			pretrained_weights = _class_weights(
+				pretrained,
+				_metrics_path(runs_root, 'pretrained', layout_id, data_size),
+			)
+			random_weights = _class_weights(
+				random,
+				_metrics_path(runs_root, 'random', layout_id, data_size),
+			)
+			if pretrained_weights != random_weights:
+				raise ValueError(
+					f'{layout_id}/{data_size} pretrained/random class_weights mismatch'
+				)
+
+
+def _validate_nested_training(
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]],
+) -> None:
+	for model in MODELS:
+		for layout_id in LAYOUT_IDS:
+			by_size = {
+				data_size: _supervision(rows[(model, layout_id, data_size)])
+				for data_size in DATA_SIZE_PREFIX
+			}
+			for orientation in ('inline', 'crossline'):
+				key = f'train_{orientation}'
+				large: tuple[int, ...] | None = None
+				for data_size, prefix in DATA_SIZE_PREFIX.items():
+					current = _indices(
+						by_size[data_size].get(key),
+						f'{model}/{layout_id}/{data_size} supervision.{key}',
+					)
+					if len(current) != prefix:
+						raise ValueError(
+							f'{model}/{layout_id}/{data_size} {key} must contain '
+							f'exactly {prefix} indices'
+						)
+					if data_size == 'large':
+						large = current
+				if large is None:
+					raise RuntimeError('large Channel supervision is unavailable')
+				for data_size, prefix in DATA_SIZE_PREFIX.items():
+					current = _indices(
+						by_size[data_size].get(key),
+						f'{model}/{layout_id}/{data_size} supervision.{key}',
+					)
+					if current != large[:prefix]:
+						raise ValueError(
+							f'{model}/{layout_id} {key} is not nested in '
+							'small/medium/large prefix order'
+						)
+
+
+def _supervision(payload: Mapping[str, object]) -> Mapping[str, object]:
+	value = payload.get('supervision')
+	if not isinstance(value, Mapping):
+		raise TypeError('supervision must be a mapping')
+	return value
+
+
+def _held_out_identity(supervision: Mapping[str, object]) -> tuple[object, ...]:
+	counts = supervision.get('split_class_counts')
+	if not isinstance(counts, Mapping):
+		raise TypeError('supervision.split_class_counts must be a mapping')
+	return (
+		supervision.get('axis_mapping'),
+		supervision.get('validation_inline'),
+		supervision.get('validation_crossline'),
+		supervision.get('test_inline'),
+		supervision.get('test_crossline'),
+		counts.get('validation'),
+		counts.get('test'),
+	)
+
+
+def _indices(value: object, label: str) -> tuple[int, ...]:
+	if not isinstance(value, list) or not value:
+		raise TypeError(f'{label} must be a non-empty list')
+	if any(not isinstance(item, int) or isinstance(item, bool) for item in value):
+		raise TypeError(f'{label} must contain integers')
+	items = tuple(value)
+	if len(set(items)) != len(items):
+		raise ValueError(f'{label} must not contain duplicates')
+	return items
+
+
+def _class_counts(value: object, label: str) -> tuple[int, int]:
+	if (
+		not isinstance(value, list)
+		or len(value) != 2
+		or any(
+			not isinstance(item, int) or isinstance(item, bool) or item < 0
+			for item in value
+		)
+	):
+		raise TypeError(f'{label} must contain two non-negative integers')
+	return value[0], value[1]
+
+
+def _class_weights(payload: Mapping[str, object], path: Path) -> tuple[float, float]:
+	value = payload.get('class_weights')
+	if (
+		not isinstance(value, Sequence)
+		or isinstance(value, str | bytes)
+		or len(value) != 2
+		or any(
+			not isinstance(item, int | float)
+			or isinstance(item, bool)
+			or not math.isfinite(float(item))
+			for item in value
+		)
+	):
+		raise TypeError(f'{path} class_weights must contain two finite numbers')
+	return float(value[0]), float(value[1])
 
 
 def _read_json(path: Path) -> Mapping[str, object]:
