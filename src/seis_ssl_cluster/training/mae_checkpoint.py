@@ -472,6 +472,7 @@ def _validate_resume_payload(
 	_validate_resume_precision(payload, resolved_precision=resolved_precision)
 	_validate_resume_amp_state(
 		payload,
+		amp_enabled=amp_enabled,
 		scaler_required=resolved_scaler_required,
 	)
 	stage = _checkpoint_stage(payload)
@@ -515,11 +516,18 @@ def _validate_resume_counters(payload: Mapping[str, object]) -> None:
 def _validate_resume_amp_state(
 	payload: Mapping[str, object],
 	*,
+	amp_enabled: bool,
 	scaler_required: bool,
 ) -> None:
 	if not isinstance(payload['amp_enabled'], bool):
 		msg = 'resume checkpoint amp_enabled must be a bool'
 		raise TypeError(msg)
+	if payload['amp_enabled'] is not amp_enabled:
+		msg = (
+			'resume checkpoint amp_enabled does not match the current runtime: '
+			f'checkpoint={payload["amp_enabled"]!r}, current={amp_enabled!r}'
+		)
+		raise ValueError(msg)
 	if scaler_required and not isinstance(payload['scaler_state_dict'], Mapping):
 		msg = 'resume checkpoint is missing scaler_state_dict for AMP resume'
 		raise ValueError(msg)

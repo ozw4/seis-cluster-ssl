@@ -70,6 +70,42 @@ def test_inspect_mae_checkpoint_returns_immutable_validated_evidence(
 		inspection.epoch = 4  # type: ignore[misc]
 
 
+def test_inspect_mae_checkpoint_rejects_amp_enabled_mismatch(
+	tmp_path: Path,
+) -> None:
+	model = torch.nn.Linear(1, 1)
+	config = {'stage': 'train_amp_mae', 'train': {'amp_dtype': 'bfloat16'}}
+	rng_state = capture_rng_state()
+	rng_state['dataloader_generator'] = torch.Generator().get_state()
+	result = _save_mae_rolling_checkpoint(
+		tmp_path,
+		model=model,
+		optimizer=torch.optim.SGD(model.parameters(), lr=0.1),
+		epoch=1,
+		config=config,
+		metrics={'loss': 1.0},
+		global_step=1,
+		amp_enabled=True,
+		scaler=None,
+		checkpoint_kind='epoch',
+		batch_index=None,
+		rng_state=rng_state,
+	)
+
+	with pytest.raises(
+		ValueError,
+		match='amp_enabled does not match the current runtime',
+	):
+		inspect_mae_checkpoint(
+			result.latest_path,
+			resolved_config=config,
+			model=torch.nn.Linear(1, 1),
+			resolved_precision='bfloat16',
+			amp_enabled=False,
+			scaler_present=False,
+		)
+
+
 def test_rolling_checkpoint_saves_latest_and_best_only(tmp_path: Path) -> None:
 	model = torch.nn.Linear(1, 1)
 	optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
