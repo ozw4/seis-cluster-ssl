@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 import yaml
 
 from seis_ssl_cluster.embedding.writer import output_paths
@@ -17,6 +18,7 @@ from seis_ssl_cluster.parihaka.channel_decoder import (
 	DecoderArchitecture,
 	DecoderTiles,
 	DecoderTrain,
+	channel_decoder_config_from_mapping,
 	channel_metrics,
 	decoder_initial_state_sha256,
 	deterministic_tile_order,
@@ -75,18 +77,63 @@ def _write_pair(config: ChannelDecoderConfig) -> None:
 		'precision': {'device_type': 'cpu', 'autocast': False},
 		'pretraining_objective': {'name': 'masked_autoencoding'},
 	}
-	for root, checkpoint_sha256 in (
-		(config.pretrained_embeddings, 'a' * 64),
-		(config.random_embeddings, 'b' * 64),
+	for root, checkpoint_path, checkpoint_sha256 in (
+		(config.pretrained_embeddings, '/checkpoints/pretrained.pt', 'a' * 64),
+		(config.random_embeddings, '/checkpoints/random.pt', 'b' * 64),
 	):
 		paths = output_paths(root, config.survey_id)
 		root.mkdir(parents=True)
 		np.save(paths.embeddings, np.zeros((2, 2, 2, 384), dtype=np.float16))
 		np.save(paths.valid_tokens, np.ones((2, 2, 2), dtype=np.bool_))
 		paths.metadata.write_text(
-			json.dumps({**metadata, 'checkpoint_sha256': checkpoint_sha256}),
+			json.dumps(
+				{
+					**metadata,
+					'checkpoint_path': checkpoint_path,
+					'checkpoint_sha256': checkpoint_sha256,
+				}
+			),
 			encoding='utf-8',
 		)
+
+
+def _config_mapping(tmp_path: Path) -> dict[str, object]:
+	config = _config(tmp_path)
+	return {
+		'dataset': {'survey_id': config.survey_id},
+		'inputs': {'labels_npy': str(config.labels)},
+		'embeddings': {
+			'pretrained_dir': str(config.pretrained_embeddings),
+			'random_dir': str(config.random_embeddings),
+		},
+		'outputs': {'runs_root': str(config.runs_root)},
+		'decoder': {
+			'spec': config.decoder.spec,
+			'embedding_dim': config.decoder.embedding_dim,
+			'class_count': config.decoder.class_count,
+			'hidden_channels': list(config.decoder.hidden_channels),
+			'upsample_factors': [
+				list(item) for item in config.decoder.upsample_factors
+			],
+			'upsample_mode': config.decoder.upsample_mode,
+			'normalization': config.decoder.normalization,
+		},
+		'train': {
+			'epochs': config.train.epochs,
+			'batch_size': config.train.batch_size,
+			'learning_rate': config.train.learning_rate,
+			'weight_decay': config.train.weight_decay,
+			'class_weight': config.train.class_weight,
+			'sampling_mode': config.train.sampling_mode,
+			'seed': config.train.seed,
+			'amp': config.train.amp,
+			'gradient_clip_norm': config.train.gradient_clip_norm,
+		},
+		'tiles': {
+			'core_size_tokens': [8, 8, 8],
+			'context_halo_tokens': [1, 1, 1],
+		},
+	}
 
 
 def _write_layout(tmp_path: Path) -> Path:
@@ -223,6 +270,27 @@ def test_embedding_pair_must_use_distinct_checkpoint_sha256(tmp_path: Path) -> N
 
 
 @pytest.mark.parametrize(
+	('key', 'value'),
+	[
+		('core_size_tokens', [4, 8, 8]),
+		('context_halo_tokens', [0, 1, 1]),
+	],
+)
+def test_channel_benchmark_tile_settings_are_fixed(
+	tmp_path: Path,
+	key: str,
+	value: list[int],
+) -> None:
+	raw = _config_mapping(tmp_path)
+	configured = channel_decoder_config_from_mapping(raw)
+	assert configured.tiles == DecoderTiles((8, 8, 8), (1, 1, 1))
+	assert isinstance(raw['tiles'], dict)
+	raw['tiles'][key] = value
+	with pytest.raises(ValueError, match='tile settings differ'):
+		channel_decoder_config_from_mapping(raw)
+
+
+@pytest.mark.parametrize(
 	('split', 'missing_class'),
 	[
 		('train', 'Channel'),
@@ -311,16 +379,22 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 		'precision': {'device_type': 'cpu', 'autocast': False},
 		'pretraining_objective': {'name': 'masked_autoencoding'},
 	}
-	for root, checkpoint_sha256 in (
-		(config.pretrained_embeddings, 'a' * 64),
-		(config.random_embeddings, 'b' * 64),
+	for root, checkpoint_path, checkpoint_sha256 in (
+		(config.pretrained_embeddings, '/checkpoints/pretrained.pt', 'a' * 64),
+		(config.random_embeddings, '/checkpoints/random.pt', 'b' * 64),
 	):
 		paths = output_paths(root, config.survey_id)
 		root.mkdir(parents=True)
 		np.save(paths.embeddings, np.zeros((1, 1, 1, 384), dtype=np.float16))
 		np.save(paths.valid_tokens, np.ones((1, 1, 1), dtype=np.bool_))
 		paths.metadata.write_text(
-			json.dumps({**metadata, 'checkpoint_sha256': checkpoint_sha256}),
+			json.dumps(
+				{
+					**metadata,
+					'checkpoint_path': checkpoint_path,
+					'checkpoint_sha256': checkpoint_sha256,
+				}
+			),
 			encoding='utf-8',
 		)
 	labels = np.ones((8, 8, 8), dtype=np.int8)
@@ -360,6 +434,64 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 	assert run_channel_decoder_job(plan, device='cpu', max_steps=1) is None
 	latest = plan.output_dir / 'latest.pt'
 	assert latest.is_file()
+	payload = torch.load(latest, map_location='cpu', weights_only=False)
+	identity = payload['run_identity']
+	assert identity['embedding'] == {
+		'checkpoint_path': '/checkpoints/pretrained.pt',
+		'checkpoint_sha256': 'a' * 64,
+		'common_metadata': {
+			key: metadata[key]
+			for key in (
+				'survey_id',
+				'source_amplitude_path',
+				'volume_shape_xyz',
+				'model_geometry',
+				'patch_size',
+				'token_grid_shape',
+				'window_size',
+				'overlap',
+				'output_dtype',
+				'min_token_valid_fraction',
+				'normalization_stats_path',
+				'preprocessing',
+				'zero_mask',
+				'precision',
+				'pretraining_objective',
+			)
+		},
+	}
+	assert identity['label_path'] == str(config.labels)
+	assert identity['decoder']['spec'] == config.decoder.spec
+	assert identity['tiles'] == {
+		'core_size_tokens': [1, 1, 1],
+		'context_halo_tokens': [1, 1, 1],
+	}
+	assert identity['split_class_counts'] == {
+		split: list(plan.split_counts[split])
+		for split in ('train', 'validation', 'test')
+	}
+	assert identity['tile_counts'] == dict(plan.tile_counts)
+	pretrained_metadata_path = plan.geometry.pretrained.metadata
+	changed_metadata = json.loads(
+		pretrained_metadata_path.read_text(encoding='utf-8')
+	)
+	changed_metadata['checkpoint_sha256'] = 'c' * 64
+	pretrained_metadata_path.write_text(
+		json.dumps(changed_metadata), encoding='utf-8'
+	)
+	changed_plan = inspect_channel_decoder_job(
+		config,
+		model='pretrained',
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=layout_path,
+	)
+	with pytest.raises(ValueError, match='resume checkpoint does not match'):
+		run_channel_decoder_job(changed_plan, device='cpu', resume=latest)
+	changed_metadata['checkpoint_sha256'] = 'a' * 64
+	pretrained_metadata_path.write_text(
+		json.dumps(changed_metadata), encoding='utf-8'
+	)
 	metrics_path = run_channel_decoder_job(plan, device='cpu', resume=latest)
 	assert metrics_path is not None and metrics_path.is_file()
 	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))

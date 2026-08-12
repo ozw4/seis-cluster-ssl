@@ -63,6 +63,9 @@ PYTHONPATH=src python proc/seis_ssl_cluster/summarize_parihaka_channel_benchmark
 ```
 
 An interrupted job resumes only from its own `latest.pt` using `--resume PATH`.
+Resume also requires the embedding/checkpoint metadata, label path, decoder and
+training settings, fixed 8x8x8-core/1x1x1-halo tile settings, split class counts,
+and tile counts to match the interrupted run exactly.
 `best.pt` is selected by validation Channel IoU. Test is evaluated once after
 training from `best.pt`; no probability volume is written. The summary requires
 all 30 `metrics.json` files and reports paired test Channel-IoU deltas only.

@@ -46,6 +46,9 @@ BEST_NAME = 'best.pt'
 HISTORY_NAME = 'history.csv'
 METRICS_NAME = 'metrics.json'
 
+CHANNEL_CORE_SIZE_TOKENS = (8, 8, 8)
+CHANNEL_CONTEXT_HALO_TOKENS = (1, 1, 1)
+
 _PAIRED_EMBEDDING_METADATA_KEYS = (
 	'survey_id',
 	'source_amplitude_path',
@@ -126,6 +129,8 @@ class EmbeddingGeometry:
 	patch_size_xyz: tuple[int, int, int]
 	embedding_shape: tuple[int, int, int, int]
 	embedding_dim: int
+	pretrained_metadata: Mapping[str, object]
+	random_metadata: Mapping[str, object]
 
 
 @dataclass(frozen=True)
@@ -252,10 +257,12 @@ def inspect_embedding_pair(  # noqa: C901
 		patch_size_xyz=patch,
 		embedding_shape=tuple(int(item) for item in pretrained_array.shape),
 		embedding_dim=dimension,
+		pretrained_metadata=dict(pretrained_meta),
+		random_metadata=dict(random_meta),
 	)
 
 
-def _validate_embedding_pair_metadata(  # noqa: C901
+def _validate_embedding_pair_metadata(  # noqa: C901, PLR0912
 	pretrained_meta: Mapping[str, object],
 	random_meta: Mapping[str, object],
 	*,
@@ -286,6 +293,12 @@ def _validate_embedding_pair_metadata(  # noqa: C901
 			)
 	pretrained_sha = pretrained_meta.get('checkpoint_sha256')
 	random_sha = random_meta.get('checkpoint_sha256')
+	pretrained_checkpoint = pretrained_meta.get('checkpoint_path')
+	random_checkpoint = random_meta.get('checkpoint_path')
+	if not isinstance(pretrained_checkpoint, str) or not pretrained_checkpoint:
+		raise ValueError('pretrained embedding metadata missing checkpoint_path')
+	if not isinstance(random_checkpoint, str) or not random_checkpoint:
+		raise ValueError('random embedding metadata missing checkpoint_path')
 	if not isinstance(pretrained_sha, str) or not pretrained_sha:
 		raise ValueError('pretrained embedding metadata missing checkpoint_sha256')
 	if not isinstance(random_sha, str) or not random_sha:
@@ -1032,10 +1045,24 @@ def _save_checkpoint(
 
 
 def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
+	selected_metadata = (
+		plan.geometry.pretrained_metadata
+		if plan.model == 'pretrained'
+		else plan.geometry.random_metadata
+	)
 	return {
 		'model': plan.model,
 		'layout_id': plan.layout_id,
 		'data_size': plan.data_size,
+		'embedding': {
+			'checkpoint_path': selected_metadata['checkpoint_path'],
+			'checkpoint_sha256': selected_metadata['checkpoint_sha256'],
+			'common_metadata': {
+				key: plan.geometry.pretrained_metadata[key]
+				for key in _PAIRED_EMBEDDING_METADATA_KEYS
+			},
+		},
+		'label_path': str(plan.config.labels),
 		'train_lines': {
 			'inline': list(plan.train_lines.inline),
 			'crossline': list(plan.train_lines.crossline),
@@ -1054,7 +1081,40 @@ def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
 			'patch_size_xyz': list(plan.geometry.patch_size_xyz),
 		},
 		'class_weights': list(plan.class_weights),
-		'decoder_seed': plan.config.train.seed,
+		'decoder': {
+			'spec': plan.config.decoder.spec,
+			'embedding_dim': plan.config.decoder.embedding_dim,
+			'class_count': plan.config.decoder.class_count,
+			'hidden_channels': list(plan.config.decoder.hidden_channels),
+			'upsample_factors': [
+				list(factors) for factors in plan.config.decoder.upsample_factors
+			],
+			'upsample_mode': plan.config.decoder.upsample_mode,
+			'normalization': plan.config.decoder.normalization,
+		},
+		'training': {
+			'epochs': plan.config.train.epochs,
+			'batch_size': plan.config.train.batch_size,
+			'learning_rate': plan.config.train.learning_rate,
+			'weight_decay': plan.config.train.weight_decay,
+			'class_weight': plan.config.train.class_weight,
+			'sampling_mode': plan.config.train.sampling_mode,
+			'seed': plan.config.train.seed,
+			'amp': plan.config.train.amp,
+			'gradient_clip_norm': plan.config.train.gradient_clip_norm,
+		},
+		'tiles': {
+			'core_size_tokens': list(plan.config.tiles.core_size_tokens),
+			'context_halo_tokens': list(plan.config.tiles.context_halo_tokens),
+		},
+		'split_class_counts': {
+			split: list(plan.split_counts[split])
+			for split in ('train', 'validation', 'test')
+		},
+		'tile_counts': {
+			split: plan.tile_counts[split]
+			for split in ('train', 'validation', 'test')
+		},
 	}
 
 
@@ -1152,7 +1212,7 @@ def _train(value: Mapping[str, object]) -> DecoderTrain:
 
 
 def _tiles(value: Mapping[str, object]) -> DecoderTiles:
-	return DecoderTiles(
+	settings = DecoderTiles(
 		core_size_tokens=_triplet(
 			value.get('core_size_tokens'), 'tiles.core_size_tokens'
 		),
@@ -1162,6 +1222,13 @@ def _tiles(value: Mapping[str, object]) -> DecoderTiles:
 			allow_zero=True,
 		),
 	)
+	expected = DecoderTiles(
+		core_size_tokens=CHANNEL_CORE_SIZE_TOKENS,
+		context_halo_tokens=CHANNEL_CONTEXT_HALO_TOKENS,
+	)
+	if settings != expected:
+		raise ValueError('tile settings differ from the fixed Channel benchmark')
+	return settings
 
 
 def _resolve_device(value: str) -> torch.device:
@@ -1300,6 +1367,8 @@ def _ratio(numerator: int, denominator: int) -> float:
 
 
 __all__ = [
+	'CHANNEL_CONTEXT_HALO_TOKENS',
+	'CHANNEL_CORE_SIZE_TOKENS',
 	'ChannelDecoderConfig',
 	'ChannelDecoderPlan',
 	'ChannelTileDataset',
