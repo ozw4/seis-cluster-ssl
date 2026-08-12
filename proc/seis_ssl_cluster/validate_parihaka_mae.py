@@ -1,5 +1,5 @@
 # ruff: noqa: CPY001
-"""Thin CLI for validating Parihaka MAE inputs and smoke artifacts."""
+"""Thin CLI for validating Parihaka MAE inputs and training artifacts."""
 
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from seis_ssl_cluster.parihaka import (
 def build_parser() -> argparse.ArgumentParser:
 	"""Build the closed Parihaka MAE validation parser."""
 	parser = argparse.ArgumentParser(
-		description='Validate Parihaka amplitude inputs or the CPU 2-step smoke.',
+		description='Validate Parihaka inputs, CPU smoke, or completed full run.',
 	)
 	parser.add_argument('--prepare-config', type=Path, required=True)
 	parser.add_argument('--smoke-config', type=Path, required=True)
 	parser.add_argument('--full-config', type=Path, required=True)
-	parser.add_argument('--check', choices=('inputs', 'smoke'), required=True)
+	parser.add_argument('--check', choices=('inputs', 'smoke', 'full'), required=True)
 	parser.add_argument(
 		'--json-output',
 		type=Path,

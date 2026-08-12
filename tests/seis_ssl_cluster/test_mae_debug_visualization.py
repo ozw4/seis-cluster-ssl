@@ -1,3 +1,5 @@
+# ruff: noqa: CPY001
+
 from __future__ import annotations
 
 import json
@@ -10,6 +12,7 @@ import torch
 import seis_ssl_cluster.training.mae as mae_training
 from seis_ssl_cluster.models.mae.patching import patchify_3d
 from seis_ssl_cluster.training.mae import run_mae_pretraining
+from seis_ssl_cluster.visualization.common import as_numpy
 from seis_ssl_cluster.visualization.mae_debug import (
 	MaeDebugVisualizationConfig,
 	save_mae_debug_visualization_pngs,
@@ -30,6 +33,15 @@ def test_unpatchify_mae_predictions_produces_expected_dense_values() -> None:
 	assert dense.shape == (1, 1, 4, 2, 2)
 	assert dense[0, 0, 0, 0, 0] == 0
 	assert dense[0, 0, 2, 0, 0] == 8
+
+
+def test_visualization_converts_bfloat16_tensor_to_numpy_float32() -> None:
+	tensor = torch.tensor([1.5, -2.25], dtype=torch.bfloat16)
+
+	array = as_numpy(tensor, 'prediction')
+
+	assert array.dtype.name == 'float32'
+	assert array.tolist() == [1.5, -2.25]
 
 
 def test_save_mae_debug_visualization_pngs_writes_xy_and_xz(

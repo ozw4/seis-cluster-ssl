@@ -1,0 +1,289 @@
+{
+  "artifact_type": "parihaka_mae_pretraining_review",
+  "checkpoints": {
+    "best": {
+      "epoch": 89,
+      "global_step": 222500,
+      "metric_key": "loss",
+      "metric_value": 0.18413860874176027,
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/best.pt",
+      "role": "strictly-lower training-loss diagnostic",
+      "schema_version": 2,
+      "sha256": "bc591a62232d07927d90a6fd8d1f28ccc1ab939bfc109f0f8b43366caec961f8",
+      "size_bytes": 213591105
+    },
+    "dataset": {
+      "model_tag": "amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1",
+      "name": "parihaka",
+      "survey_id": "parihaka",
+      "version": "facies_benchmark_v1"
+    },
+    "finite_metric_range": [
+      0.0,
+      6291456.0
+    ],
+    "latest": {
+      "epoch": 100,
+      "global_step": 250000,
+      "metrics": {
+        "amp_enabled": 1.0,
+        "grad_norm": 0.24786649069786074,
+        "loss": 0.18578970537781717,
+        "loss_gradient": 0.0,
+        "loss_reconstruction": 0.18578970537781717,
+        "loss_reconstruction_masked": 0.18455156159102917,
+        "loss_reconstruction_visible": 0.01238143818769604,
+        "target_patch_low_std_fraction": 0.0,
+        "target_patch_std_max": 2.1914326224327088,
+        "target_patch_std_mean": 0.8960851378679275,
+        "target_patch_std_min": 0.15259096623659135,
+        "valid_reconstruction_voxels": 6291456.0,
+        "valid_visible_reconstruction_voxels": 2097152.0,
+        "visible_reconstruction_weight": 0.10000000149011612
+      },
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/latest.pt",
+      "schema_version": 2,
+      "sha256": "37f8308ff3ecad8b048ec75ae70fa587dbfa874c11a35e5698e1c4b06479c5b9",
+      "size_bytes": 213591105
+    },
+    "precision": {
+      "amp_dtype_requested": "auto",
+      "amp_requested": true,
+      "resolved": "bfloat16",
+      "scaler_present": false
+    },
+    "prepared_amplitude": {
+      "dtype": "float32",
+      "order": "C",
+      "sha256": "040618b06ac3fae46de4c1cbda1b25b47c77c9f905c68a3a215b4dca0ec5827a",
+      "shape_xyz": [
+        782,
+        590,
+        1006
+      ]
+    },
+    "primary_role": "completed latest"
+  },
+  "dataset": {
+    "model_tag": "amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1",
+    "name": "parihaka",
+    "survey_id": "parihaka",
+    "version": "facies_benchmark_v1"
+  },
+  "direct_inputs": {
+    "manifest": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude_manifest.json",
+      "sha256": "b3bad52c644aaa2998b5483d33aced96af1149d6503d867934357f6967f0aa7e"
+    },
+    "normalization_stats": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude.normalization_stats.json",
+      "sha256": "a24001d6cdd91f0fe1165f87b2db3987341c736c1944234b5dc20607dfe39469"
+    },
+    "path_list": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_npy_paths.txt",
+      "sha256": "d75042630f6abf4f1b168d6b6500c798b7de49dab8be4d00bf356148d8969e0d"
+    }
+  },
+  "downstream": {
+    "clustering_jobs_executed": 0,
+    "downstream_jobs_executed": 0,
+    "embedding_jobs_executed": 0,
+    "status": "checkpoint ready, evaluation not run"
+  },
+  "execution": {
+    "classification": "fresh",
+    "git_dirty": true,
+    "git_sha": "fe9e7e6484ab54726012dd9ea5ca757deeda555f"
+  },
+  "full_config": {
+    "data": {
+      "amplitude_agc": {
+        "clip_abs": 5.0,
+        "enabled": true,
+        "eps": 0.001,
+        "mode": "trace_rms_z",
+        "window_z": 65
+      },
+      "finite_check_mode": "strict",
+      "grid_order": [
+        "x",
+        "y",
+        "z"
+      ],
+      "input_channels": 1,
+      "local_crop_size": [
+        128,
+        128,
+        128
+      ],
+      "max_resample_attempts": 16,
+      "min_valid_fraction": 0.1,
+      "normalized_clip_abs": 8.0,
+      "target_channels": 1,
+      "use_context": false,
+      "volume_format": "npy_memmap"
+    },
+    "initialization": "random from seed 42",
+    "loss": {
+      "gradient_weight": 0.0,
+      "reconstruction": "mse",
+      "target_normalization": {
+        "eps": 1e-06,
+        "min_std": 0.05,
+        "mode": "patch_zscore"
+      },
+      "valid_mask_mode": "voxel",
+      "visible_reconstruction_weight": 0.1
+    },
+    "masking": {
+      "block_size_tokens": [
+        1,
+        1,
+        1
+      ],
+      "spatial_mask_mode": "block",
+      "spatial_mask_ratio": 0.75
+    },
+    "model": {
+      "decoder_depth": 4,
+      "decoder_dim": 256,
+      "decoder_heads": 4,
+      "encoder_depth": 8,
+      "encoder_dim": 384,
+      "encoder_heads": 6,
+      "in_channels": 1,
+      "name": "amp_mae3d",
+      "out_channels": 1,
+      "patch_size": [
+        8,
+        8,
+        8
+      ]
+    },
+    "optimizer": "AdamW",
+    "train": {
+      "amp": true,
+      "amp_dtype": "auto",
+      "batch_size": 4,
+      "device": "cuda",
+      "epochs": 100,
+      "grad_clip_norm": 1.0,
+      "lr": 0.0001,
+      "num_workers": 8,
+      "persistent_workers": true,
+      "prefetch_factor": 2,
+      "runtime_check_mode": "once",
+      "samples_per_epoch": 10000,
+      "seed": 42,
+      "shuffle": true,
+      "stage_timing": false,
+      "weight_decay": 0.05
+    },
+    "visualization": {
+      "mae_debug": {
+        "clip_percentiles": [
+          1.0,
+          99.0
+        ],
+        "columns": [
+          "input",
+          "masked_input",
+          "target",
+          "prediction",
+          "abs_error",
+          "valid_mask"
+        ],
+        "dpi": 160,
+        "enabled": true,
+        "every_epochs": null,
+        "every_steps": 1000,
+        "invalid_color": "lightgray",
+        "max_samples": 1,
+        "panel_height": 2.4,
+        "panel_width": 2.6,
+        "xy_slice_index": null,
+        "xz_slice_y_index": null
+      }
+    },
+    "zero_mask": {
+      "enabled": true,
+      "xy_trace_influence_radius": 1,
+      "z_sample_influence_radius": 16,
+      "zero_atol": 0.0
+    }
+  },
+  "input_boundary": {
+    "label_files_opened": 0,
+    "labels_used": false,
+    "modality": "amplitude only"
+  },
+  "precision": {
+    "amp_dtype_requested": "auto",
+    "amp_requested": true,
+    "resolved": "bfloat16",
+    "scaler_present": false
+  },
+  "prepared_amplitude": {
+    "dtype": "float32",
+    "order": "C",
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude.npy",
+    "sha256": "040618b06ac3fae46de4c1cbda1b25b47c77c9f905c68a3a215b4dca0ec5827a",
+    "shape_xyz": [
+      782,
+      590,
+      1006
+    ],
+    "size_bytes": 1856593248,
+    "statistics": {
+      "element_count": 464148280,
+      "finite_count": 464148280,
+      "max": 5151.71875,
+      "mean": 0.6766075433795384,
+      "min": -5195.5234375,
+      "nonfinite_count": 0,
+      "population_std": 390.3089251928039
+    }
+  },
+  "provenance": {
+    "acquisition_by": null,
+    "acquisition_date": null,
+    "aicrowd_byte_identity": "unverified",
+    "archive_name": "parihaka_Data.zip",
+    "contributor": "jiang zishuo",
+    "dataset_title": "Parihaka + Netherlands F3 (raw volumes + labels) for seismic facies segmentation",
+    "direct_distributor": "Mendeley Data",
+    "displayed_license": "CC BY 4.0",
+    "doi": "10.17632/gnvyh3msrj.1",
+    "local_filename": "parihaka_data_train.npz",
+    "local_modification": "filename only",
+    "redistribution_transformation": "unverified",
+    "upstream": "AIcrowd Seismic Facies Identification Challenge",
+    "upstream_member": "data_train.npz",
+    "version": 1
+  },
+  "schema_version": 1,
+  "scientific_scope": {
+    "claim": "Unlabeled representation learning from the Parihaka amplitude volume.",
+    "kind": "survey-specific transductive self-supervised pretraining",
+    "not_established": [
+      "label leakage",
+      "transfer to unseen surveys",
+      "inductive holdout performance",
+      "downstream accuracy improvement",
+      "geological or channel interpretation performance"
+    ]
+  },
+  "source": {
+    "identity_qualification": {
+      "aicrowd_byte_identity": "unverified",
+      "redistribution_transformation": "unverified"
+    },
+    "path": "${PARIHAKA_DATA_ROOT}/parihaka_data_train.npz",
+    "sha256": "c5c22ac694e4dc3467dadf5e94cce9ac59c06cc4a43b2ef75ff05f5a057f28c2",
+    "size_bytes": 1715555445
+  },
+  "training_completion": {
+    "epoch": 100,
+    "global_step": 250000
+  }
+}

@@ -377,6 +377,143 @@ def test_smoke_rejects_snapshot_drift(
 		validation_module._validate_smoke(inputs, base=base)  # noqa: SLF001
 
 
+def test_valid_schema2_completed_full_passes(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch)
+
+	result = validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+	assert result.status == 'pass'
+	assert result.checkpoint_schema_version == 2
+	assert result.checkpoint_epoch == 100
+	assert result.checkpoint_global_step == 250_000
+	assert result.resolved_precision == 'bfloat16'
+	assert result.scaler_present is False
+	assert result.best_checkpoint_epoch == 40
+	assert result.best_checkpoint_global_step == 100_000
+	assert result.best_metric_value == 1.0
+
+
+@pytest.mark.parametrize(
+	('field', 'value', 'match'),
+	[
+		(('training_state', 'stage'), 'foreign', 'stage'),
+		(('training_state', 'schema_version'), 1, 'schema_version'),
+		(('training_state', 'checkpoint_kind'), 'step', 'checkpoint_kind|batch_index'),
+		(('epoch',), 99, 'epoch'),
+		(('global_step',), 249_999, 'global_step'),
+		(('amp_enabled',), False, 'amp_enabled'),
+		(('config', 'train', 'seed'), 7, 'config'),
+	]
+)
+def test_full_rejects_checkpoint_contract_drift(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	field: tuple[str, ...],
+	value: object,
+	match: str,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch)
+	root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+	_mutate_checkpoint(root / 'latest.pt', field, value)
+
+	with pytest.raises((TypeError, ValueError), match=match):
+		validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+
+@pytest.mark.parametrize('target', ['metric', 'model', 'optimizer', 'scaler'])
+def test_full_rejects_nonfinite_checkpoint_state(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	target: str,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch)
+	root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+	latest = root / 'latest.pt'
+	payload = load_checkpoint(latest, map_location='cpu')
+	if target == 'metric':
+		payload['metrics']['loss'] = float('nan')
+	elif target == 'model':
+		first = next(iter(payload['model_state_dict'].values()))
+		first.reshape(-1)[0] = float('nan')
+	elif target == 'optimizer':
+		state = next(iter(payload['optimizer_state_dict']['state'].values()))
+		state['exp_avg'].reshape(-1)[0] = float('inf')
+	else:
+		payload['training_state']['resolved_precision'] = 'float16'
+		payload['scaler_state_dict'] = {'scale': torch.tensor(float('inf'))}
+		monkeypatch.setattr(
+			validation_module,
+			'_resolve_full_precision_contract',
+			lambda _config: _precision_contract('float16'),
+		)
+	torch.save(payload, latest)
+
+	with pytest.raises(ValueError, match=r'finite|nonfinite'):
+		validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+	('target', 'match'),
+	[
+		('resolved_config.json', 'snapshot'),
+		('manifest.json', 'snapshot'),
+		('path_list', 'snapshot'),
+		('run_metadata.json', 'metadata'),
+	]
+)
+def test_full_rejects_snapshot_drift(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	target: str,
+	match: str,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch)
+	root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+	path = (
+		root / 'inputs' / inputs.prepare.outputs.path_list.name
+		if target == 'path_list'
+		else root / target
+	)
+	path.write_text('{}\n', encoding='utf-8')
+
+	with pytest.raises(ValueError, match=match):
+		validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+
+@pytest.mark.parametrize(
+	('target', 'value', 'match'),
+	[
+		('best_metric', 3.0, 'no greater'),
+		('best_epoch', 101, r'\[1, 100\]'),
+		('best_step', 100_001, 'global_step'),
+		('best_config', 13, 'config'),
+	]
+)
+def test_full_rejects_invalid_or_foreign_best(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	target: str,
+	value: object,
+	match: str,
+) -> None:
+	inputs, base = _full_fixture(tmp_path, monkeypatch)
+	root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+	best = root / 'best.pt'
+	fields = {
+		'best_metric': ('metrics', 'loss'),
+		'best_epoch': ('epoch',),
+		'best_step': ('global_step',),
+		'best_config': ('config', 'train', 'seed'),
+	}
+	_mutate_checkpoint(best, fields[target], value)
+
+	with pytest.raises(ValueError, match=match):
+		validation_module._validate_full(inputs, base=base)  # noqa: SLF001
+
+
 def test_inputs_do_not_require_checkpoint_and_json_is_only_explicit(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -508,6 +645,98 @@ def _smoke_fixture(
 		),
 	}
 	return inputs, base
+
+
+def _full_fixture(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> tuple[object, dict[str, object]]:
+	prepare, smoke_raw, full_raw = _inputs_fixture(tmp_path, monkeypatch)
+	inputs = validate_parihaka_mae_inputs_from_configs(
+		prepare=prepare,
+		smoke_raw=smoke_raw,
+		full_raw=full_raw,
+	)
+	full_root = Path(cast('Mapping[str, object]', inputs.full['paths'])['output_root'])
+	full_root.mkdir(parents=True)
+	model = torch.nn.Linear(2, 2)
+	optimizer = torch.optim.AdamW(model.parameters(), lr=1.0e-4)
+	loss = model(torch.ones(1, 2)).sum()
+	loss.backward()
+	optimizer.step()
+	rng_state = capture_rng_state()
+	rng_state['dataloader_generator'] = torch.Generator().get_state()
+	for name, epoch, step, metric in (
+		('latest.pt', 100, 250_000, 2.0),
+		('best.pt', 40, 100_000, 1.0),
+	):
+		_save_mae_checkpoint(
+			full_root / name,
+			model=model,
+			optimizer=optimizer,
+			epoch=epoch,
+			config=inputs.full,
+			metrics={'loss': metric, 'amp_enabled': 1.0},
+			global_step=step,
+			amp_enabled=True,
+			scaler=None,
+			checkpoint_kind='epoch',
+			batch_index=None,
+			rng_state=rng_state,
+		)
+	(full_root / 'resolved_config.json').write_text(
+		json.dumps(inputs.full, indent=2, sort_keys=True, allow_nan=False) + '\n',
+		encoding='utf-8',
+	)
+	shutil.copy2(prepare.outputs.manifest, full_root / 'manifest.json')
+	inputs_dir = full_root / 'inputs'
+	inputs_dir.mkdir()
+	shutil.copy2(prepare.outputs.path_list, inputs_dir / prepare.outputs.path_list.name)
+	(full_root / 'run_metadata.json').write_text(
+		json.dumps(
+			{
+				'runtime_check_mode': 'once',
+				'precision': _precision_contract('bfloat16'),
+			},
+		),
+		encoding='utf-8',
+	)
+	monkeypatch.setattr(
+		validation_module,
+		'_build_mae_model',
+		lambda _config: torch.nn.Linear(2, 2),
+	)
+	monkeypatch.setattr(
+		validation_module,
+		'_resolve_full_precision_contract',
+		lambda _config: _precision_contract('bfloat16'),
+	)
+	base = {
+		'check': 'full',
+		'status': 'pass',
+		'prepare_config': tmp_path / 'prepare.yaml',
+		'smoke_config': SMOKE_CONFIG,
+		'full_config': FULL_CONFIG,
+		'source_npz': prepare.inputs.amplitude_npz,
+		'source_sha256': inputs.source_sha256,
+		'prepared_npy': prepare.outputs.amplitude_npy,
+		'prepared_sha256': inputs.prepared_sha256,
+		'smoke_output_root': Path(
+			cast('Mapping[str, object]', inputs.smoke['paths'])['output_root']
+		),
+		'full_output_root': full_root,
+	}
+	return inputs, base
+
+
+def _precision_contract(resolved: str) -> dict[str, object]:
+	return {
+		'amp_requested': True,
+		'amp_dtype_requested': 'auto',
+		'resolved_dtype': resolved,
+		'amp_enabled': True,
+		'grad_scaler_enabled': resolved == 'float16',
+	}
 
 
 def _mutate_checkpoint(path: Path, field: tuple[str, ...], value: object) -> None:

@@ -1,3 +1,4 @@
+# ruff: noqa: CPY001
 """Shared array helpers for training-time visualization."""
 
 from __future__ import annotations
@@ -26,7 +27,10 @@ def as_numpy(value: ArrayLike, name: str) -> np.ndarray:
 	if isinstance(value, np.ndarray):
 		return value
 	if isinstance(value, torch.Tensor):
-		return value.detach().cpu().numpy()
+		detached = value.detach().cpu()
+		if detached.dtype == torch.bfloat16:
+			detached = detached.float()
+		return detached.numpy()
 	msg = f'{name} must be a torch.Tensor or np.ndarray; got {type(value).__name__}'
 	raise TypeError(msg)
 

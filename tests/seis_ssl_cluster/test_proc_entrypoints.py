@@ -243,6 +243,13 @@ HELP_FLAG_CONTRACTS = {
 		'--check',
 		'--json-output',
 	),
+	'summarize_parihaka_mae.py': (
+		'--prepare-config',
+		'--full-config',
+		'--output-dir',
+		'--execution-classification',
+		'--overwrite',
+	),
 	'prepare_nopims_normalization_stats.py': (
 		'--config',
 		'--dry-run',
