@@ -1,4 +1,4 @@
-"""Inspect one Parihaka Channel end-to-end condition without training."""
+"""Run one Parihaka Channel end-to-end condition."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from seis_ssl_cluster.parihaka.channel_end_to_end import (
 	ChannelEndToEndPlan,
 	channel_end_to_end_config_from_mapping,
 	inspect_channel_end_to_end_job,
+	run_channel_end_to_end_job,
 )
 
 DEFAULT_CONFIG = (
@@ -23,9 +24,9 @@ DEFAULT_CONFIG = (
 
 
 def build_parser() -> argparse.ArgumentParser:
-	"""Build the read-only one-job parser."""
+	"""Build the one-job train/resume parser."""
 	parser = argparse.ArgumentParser(
-		description='Inspect one Parihaka Channel end-to-end job.'
+		description='Run one Parihaka Channel end-to-end job.'
 	)
 	parser.add_argument('--config', type=Path, default=DEFAULT_CONFIG)
 	parser.add_argument(
@@ -42,6 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument('--layout-config', required=True, type=Path)
 	parser.add_argument('--device', default='auto', choices=('auto', 'cpu', 'cuda'))
 	parser.add_argument('--dry-run', action='store_true')
+	parser.add_argument('--max-steps', type=int)
+	parser.add_argument('--resume', type=Path)
 	return parser
 
 
@@ -95,7 +98,7 @@ def _print_dry_run(plan: ChannelEndToEndPlan) -> None:
 
 
 def main() -> None:
-	"""Run preflight, print dry-run, and reject not-yet-implemented training."""
+	"""Run preflight, then inspect or execute exactly one job."""
 	args = build_parser().parse_args()
 	raw = load_config_for_cli(args.config, loader=load_config)
 	config = channel_end_to_end_config_from_mapping(raw)
@@ -110,9 +113,16 @@ def main() -> None:
 	if args.dry_run:
 		_print_dry_run(plan)
 		return
-	raise NotImplementedError(
-		'Parihaka Channel end-to-end training is not implemented; use --dry-run'
+	metrics = run_channel_end_to_end_job(
+		plan,
+		max_steps=args.max_steps,
+		resume=args.resume,
 	)
+	if metrics is None:
+		latest = plan.output_dir / 'latest.pt'
+		print(f'interrupted_checkpoint: {latest}')
+	else:
+		print(f'metrics: {metrics}')
 
 
 if __name__ == '__main__':

@@ -32,6 +32,10 @@ from seis_ssl_cluster.parihaka.channel_decoder import (
 	EmbeddingGeometry,
 )
 from seis_ssl_cluster.parihaka.channel_end_to_end import (
+	BEST_NAME,
+	HISTORY_NAME,
+	LATEST_NAME,
+	METRICS_NAME,
 	ChannelAmplitudeTileDataset,
 	ChannelEndToEndConfig,
 	ChannelEndToEndModel,
@@ -40,6 +44,8 @@ from seis_ssl_cluster.parihaka.channel_end_to_end import (
 	channel_end_to_end_optimizer_groups,
 	inspect_channel_end_to_end_job,
 	resolve_channel_reference_artifact,
+	run_channel_end_to_end_job,
+	train_channel_end_to_end_step,
 )
 
 
@@ -461,6 +467,7 @@ def test_preflight_geometry_identity_and_condition_parity(tmp_path: Path) -> Non
 		random.decoder_initial_state_sha256
 	)
 	assert pretrained.tile_ids == random.tile_ids
+	assert pretrained.class_weights == random.class_weights
 	assert pretrained.output_dir != random.output_dir
 	assert 'encoder_init=pretrained' in str(pretrained.output_dir)
 	assert 'encoder_init=random' in str(random.output_dir)
@@ -609,6 +616,7 @@ def test_optimizer_groups_exclude_unused_mae_decoder() -> None:
 		weight_decay=0.0001,
 	)
 	assert [group['name'] for group in groups] == ['encoder', 'decoder']
+	assert [group['lr'] for group in groups] == [0.0001, 0.001]
 	parameter_ids = {
 		id(parameter)
 		for group in groups
@@ -661,3 +669,266 @@ def test_config_mapping_and_cli_dry_run_are_read_only(
 	output = capsys.readouterr().out
 	assert 'encoder_init: pretrained' in output
 	assert 'execution: dry-run; no files written' in output
+
+
+class _TinyChannelDataset(torch.utils.data.Dataset[dict[str, object]]):
+	def __init__(self, count: int) -> None:
+		self.count = count
+
+	def __len__(self) -> int:
+		return self.count
+
+	def __getitem__(self, index: int) -> dict[str, object]:
+		labels = (torch.arange(64).reshape(4, 4, 4) % 2).to(torch.int64)
+		return {
+			'amplitude': torch.linspace(-1.0, 1.0, 64).reshape(1, 4, 4, 4)
+			+ index * 0.01,
+			'token_valid_mask': torch.ones(2, 2, 2, dtype=torch.bool),
+			'labels': labels,
+			'supervision_mask': torch.ones(4, 4, 4, dtype=torch.bool),
+			'core_mask': torch.ones(4, 4, 4, dtype=torch.bool),
+			'tile_id': index,
+		}
+
+
+def _tiny_model(encoder_init: str = 'pretrained') -> ChannelEndToEndModel:
+	with torch.random.fork_rng(devices=[]):
+		torch.manual_seed(11 if encoder_init == 'pretrained' else 12)
+		mae = AmplitudeMAE3D(
+			patch_size_xyz=(2, 2, 2),
+			encoder_dim=12,
+			encoder_depth=1,
+			encoder_heads=3,
+			decoder_dim=12,
+			decoder_depth=1,
+			decoder_heads=3,
+			runtime_check_mode='strict',
+		)
+	with torch.random.fork_rng(devices=[]):
+		torch.manual_seed(42000)
+		decoder = VoxelDecoder3D(
+			embedding_dim=12,
+			class_count=2,
+			hidden_channels=(8,),
+			upsample_factors=((2, 2, 2),),
+			patch_size_xyz=(2, 2, 2),
+		)
+	return ChannelEndToEndModel(mae, decoder).float()
+
+
+def _tiny_training_plan(
+	tmp_path: Path, *, encoder_init: str = 'pretrained', name: str = 'run'
+) -> Any:
+	fixture_root = tmp_path / f'fixture-{name}'
+	fixture_root.mkdir()
+	fixture = _PreflightFixture(fixture_root)
+	plan = fixture.plan(encoder_init)
+	train = replace(plan.config.train, epochs=2)
+	config = replace(plan.config, train=train)
+	identity = json.loads(json.dumps(plan.benchmark_identity))
+	identity['training']['epochs'] = 2
+	return replace(
+		plan,
+		config=config,
+		output_dir=tmp_path / name,
+		benchmark_identity=identity,
+	)
+
+
+def _patch_tiny_training(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setattr(
+		end_to_end,
+		'build_channel_end_to_end_model',
+		lambda plan: _tiny_model(plan.encoder_init),
+	)
+	monkeypatch.setattr(
+		end_to_end,
+		'_channel_end_to_end_datasets',
+		lambda _plan: {
+			'train': _TinyChannelDataset(3),
+			'validation': _TinyChannelDataset(1),
+			'test': _TinyChannelDataset(1),
+		},
+	)
+
+
+@pytest.mark.parametrize('encoder_init', ['pretrained', 'random'])
+def test_joint_step_updates_encoder_and_decoder_only(
+	encoder_init: str,
+) -> None:
+	model = _tiny_model(encoder_init)
+	groups = channel_end_to_end_optimizer_groups(
+		model,
+		encoder_learning_rate=0.0001,
+		decoder_learning_rate=0.001,
+		weight_decay=0.0001,
+	)
+	optimizer = torch.optim.AdamW(groups)
+	encoder_before = [
+		parameter.detach().clone() for parameter in model.encoder_parameters()
+	]
+	decoder_before = [
+		parameter.detach().clone() for parameter in model.decoder_parameters()
+	]
+	unused_before = {
+		name: value.detach().clone()
+		for name, value in model.mae.state_dict().items()
+		if not name.startswith(('patch_projection.', 'encoder.'))
+	}
+	metrics = train_channel_end_to_end_step(
+		model,
+		_TinyChannelDataset(1),
+		0,
+		optimizer,
+		None,
+		torch.ones(2),
+		torch.device('cpu'),
+		amp_enabled=False,
+		grad_clip_norm=1.0,
+	)
+	assert np.isfinite(metrics['loss'])
+	assert any(
+		not torch.equal(before, after)
+		for before, after in zip(
+			encoder_before, model.encoder_parameters(), strict=True
+		)
+	)
+	assert any(
+		not torch.equal(before, after)
+		for before, after in zip(
+			decoder_before, model.decoder_parameters(), strict=True
+		)
+	)
+	assert all(
+		parameter.grad is not None and torch.isfinite(parameter.grad).all()
+		for parameter in model.encoder_parameters()
+	)
+	assert all(
+		parameter.grad is not None and torch.isfinite(parameter.grad).all()
+		for parameter in model.decoder_parameters()
+	)
+	assert model.mae.mask_token.grad is None
+	assert all(parameter.grad is None for parameter in model.mae.decoder.parameters())
+	assert all(
+		torch.equal(unused_before[name], value)
+		for name, value in model.mae.state_dict().items()
+		if name in unused_before
+	)
+
+
+def test_interrupted_resume_matches_uninterrupted_job(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	_patch_tiny_training(monkeypatch)
+	uninterrupted = _tiny_training_plan(tmp_path, name='uninterrupted')
+	resumed = replace(uninterrupted, output_dir=tmp_path / 'resumed')
+	assert run_channel_end_to_end_job(uninterrupted) is not None
+	assert run_channel_end_to_end_job(resumed, max_steps=2) is None
+	latest_path = resumed.output_dir / LATEST_NAME
+	interrupted_payload = torch.load(latest_path, weights_only=False)
+	assert interrupted_payload['global_step'] == 2
+	assert interrupted_payload['next_position'] == 2
+	assert {
+		'schema_version',
+		'completed',
+		'run_identity',
+		'encoder_state_dict',
+		'decoder_state_dict',
+		'optimizer_state_dict',
+		'scaler_state_dict',
+		'train_loss_sum',
+		'train_confusion',
+		'train_voxels',
+		'python_rng_state',
+		'numpy_rng_state',
+		'torch_cpu_rng_state',
+		'torch_cuda_rng_state',
+	} <= interrupted_payload.keys()
+	assert run_channel_end_to_end_job(resumed, resume=latest_path) is not None
+	full = torch.load(uninterrupted.output_dir / LATEST_NAME, weights_only=False)
+	actual = torch.load(latest_path, weights_only=False)
+	assert full['history'] == actual['history']
+	for state_name in ('encoder_state_dict', 'decoder_state_dict'):
+		assert full[state_name].keys() == actual[state_name].keys()
+		assert all(
+			torch.equal(full[state_name][key], actual[state_name][key])
+			for key in full[state_name]
+		)
+	assert {path.name for path in resumed.output_dir.iterdir()} == {
+		LATEST_NAME,
+		BEST_NAME,
+		HISTORY_NAME,
+		METRICS_NAME,
+	}
+	with pytest.raises(ValueError, match='completed'):
+		run_channel_end_to_end_job(resumed, resume=latest_path)
+
+
+def test_resume_rejects_identity_drift_and_new_run_rejects_output(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	_patch_tiny_training(monkeypatch)
+	plan = _tiny_training_plan(tmp_path, name='drift')
+	assert run_channel_end_to_end_job(plan, max_steps=1) is None
+	latest = plan.output_dir / LATEST_NAME
+	drifted_identity = dict(plan.benchmark_identity)
+	drifted_identity['encoder_init'] = 'random'
+	drifted = replace(plan, benchmark_identity=drifted_identity)
+	with pytest.raises(ValueError, match='does not match'):
+		run_channel_end_to_end_job(drifted, resume=latest)
+	precision_identity = json.loads(json.dumps(plan.benchmark_identity))
+	precision_identity['runtime']['amp_enabled'] = True
+	precision_drifted = replace(plan, benchmark_identity=precision_identity)
+	with pytest.raises(ValueError, match='does not match'):
+		run_channel_end_to_end_job(precision_drifted, resume=latest)
+	with pytest.raises(FileExistsError, match='non-empty'):
+		run_channel_end_to_end_job(plan)
+
+
+def test_strict_best_selection_and_test_reload_best_state(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	_patch_tiny_training(monkeypatch)
+	plan = _tiny_training_plan(tmp_path, name='best')
+	observed_states: list[dict[str, torch.Tensor]] = []
+
+	def evaluate(
+		model: ChannelEndToEndModel,
+		_dataset: object,
+		_weights: object,
+		_device: object,
+		*,
+		amp_enabled: bool,
+	) -> dict[str, object]:
+		assert not amp_enabled
+		observed_states.append(
+			{
+				key: value.detach().clone()
+				for key, value in model.voxel_decoder.state_dict().items()
+			}
+		)
+		return {
+			'channel_iou': 0.5,
+			'channel_f1': 2.0 / 3.0,
+			'channel_precision': 0.5,
+			'channel_recall': 1.0,
+			'balanced_accuracy': 0.5,
+			'confusion_matrix': [[0, 32], [0, 32]],
+			'loss': 1.0,
+			'supervised_voxel_count': 64,
+		}
+
+	monkeypatch.setattr(end_to_end, '_evaluate_channel_end_to_end', evaluate)
+	metrics_path = run_channel_end_to_end_job(plan)
+	assert metrics_path == plan.output_dir / METRICS_NAME
+	assert len(observed_states) == 3
+	assert all(
+		torch.equal(observed_states[0][key], observed_states[2][key])
+		for key in observed_states[0]
+	)
+	payload = json.loads(metrics_path.read_text(encoding='utf-8'))
+	assert payload['best_epoch'] == 0
+	assert payload['test']['confusion_matrix'] == [[0, 32], [0, 32]]
+	assert payload['condition_name'] == 'finetune_pretrained'

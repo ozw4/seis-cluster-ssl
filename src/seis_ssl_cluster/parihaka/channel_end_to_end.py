@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import csv
 import hashlib
 import json
+import os
+import random
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 
 from seis_ssl_cluster.data.normalization import (
 	AmplitudeAgcConfig,
@@ -37,6 +40,7 @@ from seis_ssl_cluster.parihaka.channel_checkpoints import (
 	inspect_channel_model_sources,
 )
 from seis_ssl_cluster.parihaka.channel_data import (
+	CHANNEL_AXIS_MAPPING,
 	ChannelLayouts,
 	SectionLines,
 	inspect_prepared_label_identity,
@@ -46,7 +50,9 @@ from seis_ssl_cluster.parihaka.channel_data import (
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	DecoderArchitecture,
 	DecoderTiles,
+	channel_metrics,
 	decoder_initial_state_sha256,
+	deterministic_tile_order,
 )
 from seis_ssl_cluster.parihaka.channel_tiles import (
 	CHANNEL_CONTEXT_HALO_TOKENS,
@@ -61,6 +67,7 @@ from seis_ssl_cluster.training.random_checkpoint import (
 )
 from seis_ssl_cluster.training.voxel_decoder.losses import (
 	balanced_class_weights_from_counts,
+	masked_weighted_voxel_cross_entropy,
 )
 
 if TYPE_CHECKING:
@@ -68,6 +75,12 @@ if TYPE_CHECKING:
 
 
 _ENCODER_PARAMETER_PREFIXES = ('patch_projection.', 'encoder.')
+_CHECKPOINT_SCHEMA_VERSION = 1
+
+LATEST_NAME = 'latest.pt'
+BEST_NAME = 'best.pt'
+HISTORY_NAME = 'history.csv'
+METRICS_NAME = 'metrics.json'
 
 
 @dataclass(frozen=True)
@@ -101,7 +114,7 @@ class MaeModelGeometry:
 
 @dataclass(frozen=True)
 class ChannelEndToEndTrain:
-	"""Fixed optimization settings for the future end-to-end training issue."""
+	"""Fixed optimization settings for Channel end-to-end training."""
 
 	epochs: int
 	batch_size: int
@@ -145,7 +158,7 @@ class ChannelEndToEndRuntime:
 
 @dataclass(frozen=True)
 class ChannelEndToEndPlan:
-	"""Read-only, fully validated plan for exactly one future training job."""
+	"""Fully validated plan for exactly one end-to-end training job."""
 
 	config: ChannelEndToEndConfig
 	encoder_init: str
@@ -700,14 +713,18 @@ def channel_end_to_end_optimizer_groups(
 	decoder_learning_rate: float,
 	weight_decay: float,
 ) -> list[ParamGroup]:
-	"""Return exactly the two disjoint future AdamW parameter groups."""
+	"""Return exactly the two disjoint AdamW parameter groups."""
 	encoder = list(model.encoder_parameters())
 	decoder = list(model.decoder_parameters())
 	if not encoder or not decoder:
 		raise ValueError('encoder and decoder parameter groups must be non-empty')
-	if {id(parameter) for parameter in encoder} & {
-		id(parameter) for parameter in decoder
-	}:
+	encoder_ids = [id(parameter) for parameter in encoder]
+	decoder_ids = [id(parameter) for parameter in decoder]
+	if len(set(encoder_ids)) != len(encoder_ids) or len(set(decoder_ids)) != len(
+		decoder_ids
+	):
+		raise ValueError('optimizer parameter groups must not contain duplicates')
+	if set(encoder_ids) & set(decoder_ids):
 		raise ValueError('encoder and decoder parameter groups must be disjoint')
 	return [
 		{
@@ -723,6 +740,673 @@ def channel_end_to_end_optimizer_groups(
 			'weight_decay': weight_decay,
 		},
 	]
+
+
+def run_channel_end_to_end_job(  # noqa: C901, PLR0912, PLR0915
+	plan: ChannelEndToEndPlan,
+	*,
+	max_steps: int | None = None,
+	resume: str | Path | None = None,
+) -> Path | None:
+	"""Jointly train one encoder/decoder job, then evaluate its best state once."""
+	if max_steps is not None and (
+		not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps <= 0
+	):
+		raise ValueError('max_steps must be a positive integer')
+	resume_path = None if resume is None else Path(resume)
+	_validate_run_output(plan.output_dir, resume_path)
+	_configure_determinism()
+	_seed_everything(plan.config.train.seed)
+	run_device = torch.device(plan.runtime.device_type)
+	datasets = _channel_end_to_end_datasets(plan)
+	model = build_channel_end_to_end_model(plan).to(run_device, dtype=torch.float32)
+	groups = channel_end_to_end_optimizer_groups(
+		model,
+		encoder_learning_rate=plan.config.train.encoder_learning_rate,
+		decoder_learning_rate=plan.config.train.decoder_learning_rate,
+		weight_decay=plan.config.train.weight_decay,
+	)
+	optimizer = torch.optim.AdamW(groups)
+	scaler = (
+		torch.amp.GradScaler('cuda', enabled=True)
+		if plan.runtime.grad_scaler_enabled
+		else None
+	)
+	weights = torch.tensor(plan.class_weights, dtype=torch.float32, device=run_device)
+	history: list[dict[str, object]] = []
+	best_epoch: int | None = None
+	best_iou = -1.0
+	global_step = 0
+	start_epoch = 0
+	start_position = 0
+	train_confusion = np.zeros((2, 2), dtype=np.int64)
+	train_loss_sum = 0.0
+	train_voxels = 0
+	identity = dict(plan.benchmark_identity)
+	if resume_path is not None:
+		payload = _load_run_checkpoint(resume_path, run_device)
+		_validate_resume_payload(payload, identity)
+		_load_trainable_encoder_state(model, payload.get('encoder_state_dict'))
+		decoder_state = payload.get('decoder_state_dict')
+		if not isinstance(decoder_state, Mapping):
+			raise TypeError('resume decoder_state_dict must be a mapping')
+		model.voxel_decoder.load_state_dict(decoder_state, strict=True)
+		optimizer_state = payload.get('optimizer_state_dict')
+		if not isinstance(optimizer_state, Mapping):
+			raise TypeError('resume optimizer_state_dict must be a mapping')
+		optimizer.load_state_dict(optimizer_state)
+		_restore_scaler_state(scaler, payload.get('scaler_state_dict'))
+		history = [dict(row) for row in _history_rows(payload.get('history'))]
+		best_epoch_value = payload.get('best_epoch')
+		best_epoch = None if best_epoch_value is None else int(best_epoch_value)
+		best_iou = float(payload.get('best_iou', -1.0))
+		global_step = int(payload.get('global_step', 0))
+		start_epoch = int(payload.get('epoch', 0))
+		start_position = int(payload.get('next_position', 0))
+		train_confusion = np.asarray(
+			payload.get('train_confusion'), dtype=np.int64
+		)
+		if train_confusion.shape != (2, 2):
+			raise ValueError('resume train_confusion must be 2x2')
+		train_loss_sum = float(payload.get('train_loss_sum', 0.0))
+		train_voxels = int(payload.get('train_voxels', 0))
+		_restore_rng_state(payload)
+	plan.output_dir.mkdir(parents=True, exist_ok=True)
+	for epoch in range(start_epoch, plan.config.train.epochs):
+		order = deterministic_tile_order(
+			len(datasets['train']), plan.config.train.seed, epoch
+		)
+		if start_position < 0 or start_position > len(order):
+			raise ValueError('resume next_position is outside the epoch tile order')
+		for position in range(start_position, len(order)):
+			if max_steps is not None and global_step >= max_steps:
+				_save_end_to_end_latest(
+					plan,
+					model,
+					optimizer,
+					scaler,
+					identity,
+					history,
+					best_epoch,
+					best_iou,
+					global_step,
+					epoch,
+					position,
+					train_confusion,
+					train_loss_sum,
+					train_voxels,
+					completed=False,
+				)
+				_write_end_to_end_history(plan.output_dir / HISTORY_NAME, history)
+				return None
+			batch_metrics = train_channel_end_to_end_step(
+				model,
+				datasets['train'],
+				order[position],
+				optimizer,
+				scaler,
+				weights,
+				run_device,
+				amp_enabled=plan.runtime.amp_enabled,
+				grad_clip_norm=plan.config.train.gradient_clip_norm,
+			)
+			count = int(batch_metrics['supervised_voxel_count'])
+			train_confusion += np.asarray(
+				batch_metrics['confusion_matrix'], dtype=np.int64
+			)
+			train_loss_sum += float(batch_metrics['loss']) * count
+			train_voxels += count
+			global_step += 1
+			if (
+				max_steps is not None
+				and global_step >= max_steps
+				and position + 1 < len(order)
+			):
+				_save_end_to_end_latest(
+					plan,
+					model,
+					optimizer,
+					scaler,
+					identity,
+					history,
+					best_epoch,
+					best_iou,
+					global_step,
+					epoch,
+					position + 1,
+					train_confusion,
+					train_loss_sum,
+					train_voxels,
+					completed=False,
+				)
+				_write_end_to_end_history(plan.output_dir / HISTORY_NAME, history)
+				return None
+		validation_metrics = _evaluate_channel_end_to_end(
+			model,
+			datasets['validation'],
+			weights,
+			run_device,
+			amp_enabled=plan.runtime.amp_enabled,
+		)
+		train_metrics = channel_metrics(train_confusion)
+		row: dict[str, object] = {
+			'epoch': epoch,
+			'global_step': global_step,
+			'train_loss': train_loss_sum / train_voxels,
+			'train_channel_iou': train_metrics['channel_iou'],
+			'validation_loss': validation_metrics['loss'],
+			'validation_channel_iou': validation_metrics['channel_iou'],
+			'validation_channel_f1': validation_metrics['channel_f1'],
+		}
+		history.append(row)
+		validation_iou = float(validation_metrics['channel_iou'])
+		if validation_iou > best_iou:
+			best_iou = validation_iou
+			best_epoch = epoch
+			_save_end_to_end_checkpoint(
+				plan.output_dir / BEST_NAME,
+				model=model,
+				payload={
+					'schema_version': _CHECKPOINT_SCHEMA_VERSION,
+					'completed': False,
+					'run_identity': identity,
+					'epoch': epoch,
+					'validation': validation_metrics,
+				},
+			)
+		_save_end_to_end_latest(
+			plan,
+			model,
+			optimizer,
+			scaler,
+			identity,
+			history,
+			best_epoch,
+			best_iou,
+			global_step,
+			epoch + 1,
+			0,
+			np.zeros((2, 2), dtype=np.int64),
+			0.0,
+			0,
+			completed=False,
+		)
+		_write_end_to_end_history(plan.output_dir / HISTORY_NAME, history)
+		start_position = 0
+		train_confusion = np.zeros((2, 2), dtype=np.int64)
+		train_loss_sum = 0.0
+		train_voxels = 0
+		if max_steps is not None and global_step >= max_steps:
+			return None
+	if best_epoch is None:
+		raise RuntimeError('training completed without a best checkpoint')
+	best = _load_run_checkpoint(plan.output_dir / BEST_NAME, run_device)
+	if best.get('run_identity') != identity:
+		raise ValueError('best checkpoint does not match this Channel job')
+	_load_trainable_encoder_state(model, best.get('encoder_state_dict'))
+	best_decoder_state = best.get('decoder_state_dict')
+	if not isinstance(best_decoder_state, Mapping):
+		raise TypeError('best decoder_state_dict must be a mapping')
+	model.voxel_decoder.load_state_dict(best_decoder_state, strict=True)
+	validation_metrics = dict(_metrics_mapping(best.get('validation'), 'validation'))
+	test_metrics = _evaluate_channel_end_to_end(
+		model,
+		datasets['test'],
+		weights,
+		run_device,
+		amp_enabled=plan.runtime.amp_enabled,
+	)
+	metrics_path = plan.output_dir / METRICS_NAME
+	metrics_payload = _end_to_end_metrics_payload(
+		plan,
+		identity,
+		best_epoch,
+		validation_metrics,
+		test_metrics,
+	)
+	_write_json_atomic(metrics_path, metrics_payload)
+	_save_end_to_end_latest(
+		plan,
+		model,
+		optimizer,
+		scaler,
+		identity,
+		history,
+		best_epoch,
+		best_iou,
+		global_step,
+		plan.config.train.epochs,
+		0,
+		np.zeros((2, 2), dtype=np.int64),
+		0.0,
+		0,
+		completed=True,
+	)
+	return metrics_path
+
+
+def _channel_end_to_end_datasets(
+	plan: ChannelEndToEndPlan,
+) -> dict[str, ChannelAmplitudeTileDataset]:
+	return {
+		split: ChannelAmplitudeTileDataset(
+			reference=plan.reference,
+			labels_path=plan.config.labels,
+			lines=plan.train_lines,
+			validation=plan.layouts.validation,
+			test=plan.layouts.test,
+			split=split,
+			core_size_tokens=plan.config.tiles.core_size_tokens,
+			context_halo_tokens=plan.config.tiles.context_halo_tokens,
+			survey_id=plan.config.survey_id,
+		)
+		for split in ('train', 'validation', 'test')
+	}
+
+
+def train_channel_end_to_end_step(  # noqa: PLR0913, PLR0917
+	model: ChannelEndToEndModel,
+	dataset: Dataset[dict[str, Any]],
+	index: int,
+	optimizer: torch.optim.Optimizer,
+	scaler: torch.amp.GradScaler | None,
+	weights: torch.Tensor,
+	device: torch.device,
+	*,
+	amp_enabled: bool,
+	grad_clip_norm: float,
+) -> dict[str, object]:
+	"""Update the trainable MAE encoder and voxel decoder for one tile."""
+	model.train()
+	loader = DataLoader(Subset(dataset, [index]), batch_size=1, shuffle=False)
+	batch = _end_to_end_batch(next(iter(loader)), device)
+	mask = batch['supervision_mask'] & batch['core_mask']
+	optimizer.zero_grad(set_to_none=True)
+	with torch.autocast(device_type=device.type, enabled=amp_enabled):
+		logits = model(batch['amplitude'], batch['token_valid_mask'])
+		loss, summary = masked_weighted_voxel_cross_entropy(
+			logits, batch['labels'], mask, weights
+		)
+	if not torch.isfinite(loss):
+		raise FloatingPointError('non-finite Channel end-to-end loss')
+	if scaler is None:
+		loss.backward()
+	else:
+		scaler.scale(loss).backward()
+		scaler.unscale_(optimizer)
+	parameters = [
+		parameter
+		for group in optimizer.param_groups
+		for parameter in group['params']
+	]
+	grad_norm = torch.nn.utils.clip_grad_norm_(parameters, grad_clip_norm)
+	if scaler is None and not torch.isfinite(grad_norm):
+		raise FloatingPointError('non-finite Channel end-to-end gradient norm')
+	if scaler is None:
+		optimizer.step()
+	else:
+		scaler.step(optimizer)
+		scaler.update()
+	metrics = _batch_channel_metrics(logits, batch['labels'], mask)
+	metrics['loss'] = float(loss.detach().cpu())
+	metrics['supervised_voxel_count'] = int(summary['supervised_voxel_count'])
+	return metrics
+
+
+def _evaluate_channel_end_to_end(
+	model: ChannelEndToEndModel,
+	dataset: Dataset[dict[str, Any]],
+	weights: torch.Tensor,
+	device: torch.device,
+	*,
+	amp_enabled: bool,
+) -> dict[str, object]:
+	model.eval()
+	confusion = np.zeros((2, 2), dtype=np.int64)
+	loss_sum = 0.0
+	voxel_count = 0
+	loader = DataLoader(dataset, batch_size=1, shuffle=False)
+	with torch.no_grad():
+		for raw_batch in loader:
+			batch = _end_to_end_batch(raw_batch, device)
+			mask = batch['supervision_mask'] & batch['core_mask']
+			with torch.autocast(device_type=device.type, enabled=amp_enabled):
+				logits = model(batch['amplitude'], batch['token_valid_mask'])
+				loss, summary = masked_weighted_voxel_cross_entropy(
+					logits, batch['labels'], mask, weights
+				)
+			if not torch.isfinite(loss):
+				raise FloatingPointError(
+					'non-finite Channel end-to-end evaluation loss'
+				)
+			confusion += np.asarray(
+				_batch_channel_metrics(logits, batch['labels'], mask)[
+					'confusion_matrix'
+				],
+				dtype=np.int64,
+			)
+			count = int(summary['supervised_voxel_count'])
+			loss_sum += float(loss.detach().cpu()) * count
+			voxel_count += count
+	if voxel_count <= 0:
+		raise ValueError('evaluation requires supervised voxels')
+	metrics: dict[str, object] = dict(channel_metrics(confusion))
+	metrics['loss'] = loss_sum / voxel_count
+	metrics['supervised_voxel_count'] = voxel_count
+	return metrics
+
+
+def _end_to_end_batch(
+	raw_batch: object, device: torch.device
+) -> dict[str, torch.Tensor]:
+	if not isinstance(raw_batch, Mapping):
+		raise TypeError('Channel end-to-end batch must be a mapping')
+	batch: dict[str, torch.Tensor] = {}
+	for key in (
+		'amplitude',
+		'token_valid_mask',
+		'labels',
+		'supervision_mask',
+		'core_mask',
+	):
+		value = raw_batch.get(key)
+		if not isinstance(value, torch.Tensor):
+			raise TypeError(f'Channel end-to-end batch {key!r} must be a tensor')
+		batch[key] = value.to(device=device, non_blocking=True)
+	return batch
+
+
+def _batch_channel_metrics(
+	logits: torch.Tensor, labels: torch.Tensor, mask: torch.Tensor
+) -> dict[str, float | list[list[int]]]:
+	predicted = logits.detach().argmax(dim=1)
+	encoded = labels[mask].to(dtype=torch.int64) * 2 + predicted[mask]
+	confusion = torch.bincount(encoded, minlength=4).reshape(2, 2).cpu().numpy()
+	return channel_metrics(confusion)
+
+
+def _save_end_to_end_latest(  # noqa: PLR0913, PLR0917
+	plan: ChannelEndToEndPlan,
+	model: ChannelEndToEndModel,
+	optimizer: torch.optim.Optimizer,
+	scaler: torch.amp.GradScaler | None,
+	identity: Mapping[str, object],
+	history: Sequence[Mapping[str, object]],
+	best_epoch: int | None,
+	best_iou: float,
+	global_step: int,
+	epoch: int,
+	next_position: int,
+	train_confusion: np.ndarray,
+	train_loss_sum: float,
+	train_voxels: int,
+	*,
+	completed: bool,
+) -> None:
+	rng_state = _rng_state()
+	_save_end_to_end_checkpoint(
+		plan.output_dir / LATEST_NAME,
+		model=model,
+		payload={
+			'schema_version': _CHECKPOINT_SCHEMA_VERSION,
+			'completed': completed,
+			'run_identity': dict(identity),
+			'optimizer_state_dict': optimizer.state_dict(),
+			'scaler_state_dict': None if scaler is None else scaler.state_dict(),
+			'epoch': epoch,
+			'next_position': next_position,
+			'global_step': global_step,
+			'history': [dict(row) for row in history],
+			'best_epoch': best_epoch,
+			'best_iou': best_iou,
+			'train_loss_sum': train_loss_sum,
+			'train_confusion': train_confusion.tolist(),
+			'train_voxels': train_voxels,
+			**rng_state,
+		},
+	)
+
+
+def _save_end_to_end_checkpoint(
+	path: Path,
+	*,
+	model: ChannelEndToEndModel,
+	payload: Mapping[str, object],
+) -> None:
+	full = {
+		**payload,
+		'encoder_state_dict': _trainable_encoder_state(model),
+		'decoder_state_dict': {
+			key: value.detach().cpu()
+			for key, value in model.voxel_decoder.state_dict().items()
+		},
+	}
+	temporary = path.with_name(f'.{path.name}.tmp')
+	torch.save(full, temporary)
+	temporary.replace(path)
+
+
+def _trainable_encoder_state(
+	model: ChannelEndToEndModel,
+) -> dict[str, torch.Tensor]:
+	return {
+		key: value.detach().cpu()
+		for key, value in model.mae.state_dict().items()
+		if key.startswith(_ENCODER_PARAMETER_PREFIXES)
+	}
+
+
+def _load_trainable_encoder_state(
+	model: ChannelEndToEndModel, raw_state: object
+) -> None:
+	if not isinstance(raw_state, Mapping):
+		raise TypeError('encoder_state_dict must be a mapping')
+	expected = set(_trainable_encoder_state(model))
+	if set(raw_state) != expected:
+		raise ValueError('encoder_state_dict does not match trainable MAE encoder')
+	full_state = model.mae.state_dict()
+	full_state.update(cast('Mapping[str, torch.Tensor]', raw_state))
+	model.mae.load_state_dict(full_state, strict=True)
+
+
+def _load_run_checkpoint(
+	path: Path, device: torch.device
+) -> Mapping[str, object]:
+	payload = torch.load(path, map_location=device, weights_only=False)
+	if not isinstance(payload, Mapping):
+		raise TypeError(f'checkpoint must contain a mapping: {path}')
+	return payload
+
+
+def _validate_resume_payload(
+	payload: Mapping[str, object], identity: Mapping[str, object]
+) -> None:
+	if payload.get('schema_version') != _CHECKPOINT_SCHEMA_VERSION:
+		raise ValueError('resume checkpoint schema version is unsupported')
+	if payload.get('run_identity') != identity:
+		raise ValueError('resume checkpoint does not match this Channel end-to-end job')
+	if payload.get('completed') is True:
+		raise ValueError('completed Channel end-to-end job cannot be resumed')
+
+
+def _restore_scaler_state(
+	scaler: torch.amp.GradScaler | None, raw_state: object
+) -> None:
+	if scaler is None:
+		if raw_state is not None:
+			raise ValueError('resume GradScaler state does not match runtime precision')
+		return
+	if not isinstance(raw_state, Mapping):
+		raise TypeError('resume checkpoint is missing GradScaler state')
+	scaler.load_state_dict(dict(raw_state))
+
+
+def _rng_state() -> dict[str, object]:
+	return {
+		'python_rng_state': random.getstate(),
+		'numpy_rng_state': np.random.get_state(),  # noqa: NPY002
+		'torch_cpu_rng_state': torch.get_rng_state(),
+		'torch_cuda_rng_state': (
+			torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+		),
+	}
+
+
+def _restore_rng_state(payload: Mapping[str, object]) -> None:
+	try:
+		random.setstate(cast('tuple[Any, ...]', payload['python_rng_state']))
+		np.random.set_state(cast('tuple[Any, ...]', payload['numpy_rng_state']))  # noqa: NPY002
+		torch.set_rng_state(
+			cast('torch.Tensor', payload['torch_cpu_rng_state']).cpu()
+		)
+	except KeyError as exc:
+		raise ValueError(
+			f'resume checkpoint is missing RNG state: {exc.args[0]}'
+		) from exc
+	cuda_state = payload.get('torch_cuda_rng_state')
+	if torch.cuda.is_available():
+		if not isinstance(cuda_state, list) or not all(
+			isinstance(value, torch.Tensor) for value in cuda_state
+		):
+			raise ValueError('resume checkpoint is missing Torch CUDA RNG state')
+		torch.cuda.set_rng_state_all([value.cpu() for value in cuda_state])
+	elif cuda_state is not None:
+		raise ValueError('resume Torch CUDA RNG state does not match runtime')
+
+
+def _history_rows(value: object) -> Sequence[Mapping[str, object]]:
+	if not isinstance(value, list) or not all(
+		isinstance(row, Mapping) for row in value
+	):
+		raise TypeError('resume history must be a list of mappings')
+	return cast('Sequence[Mapping[str, object]]', value)
+
+
+def _metrics_mapping(value: object, label: str) -> Mapping[str, object]:
+	if not isinstance(value, Mapping):
+		raise TypeError(f'{label} metrics must be a mapping')
+	return value
+
+
+def _end_to_end_metrics_payload(
+	plan: ChannelEndToEndPlan,
+	identity: Mapping[str, object],
+	best_epoch: int,
+	validation: Mapping[str, object],
+	test: Mapping[str, object],
+) -> dict[str, object]:
+	return {
+		'encoder_init': plan.encoder_init,
+		'condition_name': (
+			'finetune_pretrained'
+			if plan.encoder_init == 'pretrained'
+			else 'train_from_scratch'
+		),
+		'layout_id': plan.layout_id,
+		'data_size': plan.data_size,
+		'selected_inline_indices': list(plan.train_lines.inline),
+		'selected_crossline_indices': list(plan.train_lines.crossline),
+		'supervision': {
+			'axis_mapping': dict(CHANNEL_AXIS_MAPPING),
+			'train_inline': list(plan.train_lines.inline),
+			'train_crossline': list(plan.train_lines.crossline),
+			'validation_inline': list(plan.layouts.validation.inline),
+			'validation_crossline': list(plan.layouts.validation.crossline),
+			'test_inline': list(plan.layouts.test.inline),
+			'test_crossline': list(plan.layouts.test.crossline),
+			'split_class_counts': {
+				split: list(plan.split_counts[split])
+				for split in ('train', 'validation', 'test')
+			},
+			'tile_counts': {
+				split: plan.tile_counts[split]
+				for split in ('train', 'validation', 'test')
+			},
+		},
+		'class_weights': list(plan.class_weights),
+		'best_epoch': best_epoch,
+		'benchmark_identity': dict(identity),
+		'validation': _public_end_to_end_metrics(validation),
+		'test': _public_end_to_end_metrics(test),
+	}
+
+
+def _public_end_to_end_metrics(
+	metrics: Mapping[str, object],
+) -> dict[str, object]:
+	return {
+		key: metrics[key]
+		for key in (
+			'channel_iou',
+			'channel_f1',
+			'channel_precision',
+			'channel_recall',
+			'balanced_accuracy',
+			'confusion_matrix',
+		)
+	}
+
+
+def _write_end_to_end_history(
+	path: Path, history: Sequence[Mapping[str, object]]
+) -> None:
+	fields = (
+		tuple(history[0])
+		if history
+		else (
+			'epoch',
+			'global_step',
+			'train_loss',
+			'train_channel_iou',
+			'validation_loss',
+			'validation_channel_iou',
+			'validation_channel_f1',
+		)
+	)
+	temporary = path.with_name(f'.{path.name}.tmp')
+	with temporary.open('w', encoding='utf-8', newline='') as file_obj:
+		writer = csv.DictWriter(file_obj, fieldnames=fields)
+		writer.writeheader()
+		writer.writerows(history)
+	temporary.replace(path)
+
+
+def _write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
+	temporary = path.with_name(f'.{path.name}.tmp')
+	temporary.write_text(
+		json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+	)
+	temporary.replace(path)
+
+
+def _validate_run_output(output_dir: Path, resume: Path | None) -> None:
+	if resume is None:
+		if output_dir.exists() and any(output_dir.iterdir()):
+			raise FileExistsError(
+				f'Channel end-to-end job output is non-empty: {output_dir}'
+			)
+		return
+	if not resume.is_file() or resume.name != LATEST_NAME:
+		raise FileNotFoundError(f'resume must identify an existing {LATEST_NAME}')
+	if resume.parent.resolve() != output_dir.resolve():
+		raise ValueError('resume checkpoint must be in this job output directory')
+	if (output_dir / METRICS_NAME).exists():
+		raise ValueError('completed Channel end-to-end job cannot be resumed')
+
+
+def _configure_determinism() -> None:
+	os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
+	torch.use_deterministic_algorithms(mode=True)
+	torch.backends.cudnn.benchmark = False
+	torch.backends.cudnn.deterministic = True
+
+
+def _seed_everything(seed: int) -> None:
+	random.seed(seed)
+	np.random.seed(seed)  # noqa: NPY002
+	torch.manual_seed(seed)
+	if torch.cuda.is_available():
+		torch.cuda.manual_seed_all(seed)
 
 
 def encoder_initial_state_sha256(path: str | Path) -> str:
@@ -1283,6 +1967,10 @@ def _is_int_triplet(value: object) -> bool:
 
 
 __all__ = [
+	'BEST_NAME',
+	'HISTORY_NAME',
+	'LATEST_NAME',
+	'METRICS_NAME',
 	'ChannelAmplitudeTileDataset',
 	'ChannelEndToEndConfig',
 	'ChannelEndToEndModel',
@@ -1298,4 +1986,6 @@ __all__ = [
 	'inspect_channel_end_to_end_job',
 	'resolve_channel_end_to_end_runtime',
 	'resolve_channel_reference_artifact',
+	'run_channel_end_to_end_job',
+	'train_channel_end_to_end_step',
 ]

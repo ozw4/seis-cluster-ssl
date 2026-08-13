@@ -227,6 +227,8 @@ HELP_FLAG_CONTRACTS = {
 		'--layout-config',
 		'--device',
 		'--dry-run',
+		'--max-steps',
+		'--resume',
 	),
 	'extract_embeddings.py': (
 		'--config',
