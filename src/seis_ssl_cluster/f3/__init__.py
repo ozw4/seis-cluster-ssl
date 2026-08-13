@@ -41,17 +41,6 @@ from seis_ssl_cluster.f3.labels import (
 	read_class_info,
 	rgb_to_hex,
 )
-from seis_ssl_cluster.f3.lithology.baselines import (
-	AMPLITUDE_STATISTICS,
-	BASELINE_FEATURE_KINDS,
-	F3BaselineFeatureConfig,
-	F3BaselineReferenceTokenDataset,
-	F3BaselineTokenDatasetOutputs,
-	F3LithologyBaselineTokenDatasetConfig,
-	F3LithologyBaselineTokenDatasetResult,
-	build_f3_lithology_baseline_token_dataset,
-	f3_lithology_baseline_token_dataset_config_from_mapping,
-)
 from seis_ssl_cluster.f3.lithology.metrics import (
 	REQUIRED_LITHOLOGY_METRICS,
 	compute_lithology_metrics,
@@ -101,7 +90,6 @@ from seis_ssl_cluster.f3.lithology.tokens import (
 	F3LithologyTokenDatasetOutputs,
 	F3LithologyTokenDatasetResult,
 	F3LithologyTokenPolicy,
-	F3ReferenceTokenDataset,
 	F3SliceTokenization,
 	F3TokenArrays,
 	build_f3_lithology_token_dataset,
@@ -135,9 +123,6 @@ from seis_ssl_cluster.f3.lithology.voxel_split import (
 from seis_ssl_cluster.f3.lithology_report import (
 	COMPARISON_ID_COLUMNS,
 	OVERALL_METRIC_COLUMNS,
-	F3LithologyComparisonFigureFontSizes,
-	F3LithologyComparisonFigureSizes,
-	F3LithologyComparisonFigureStyle,
 	F3LithologyComparisonPublishConfig,
 	F3LithologyComparisonReportConfig,
 	F3LithologyComparisonReportResult,
@@ -146,7 +131,6 @@ from seis_ssl_cluster.f3.lithology_report import (
 	F3LithologyReportResult,
 	build_f3_lithology_comparison_report,
 	build_f3_lithology_report,
-	default_f3_lithology_comparison_figure_style,
 	publish_f3_lithology_comparison_report,
 	publish_f3_lithology_report,
 	render_f3_lithology_report_markdown,

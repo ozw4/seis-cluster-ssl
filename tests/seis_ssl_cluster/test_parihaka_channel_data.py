@@ -240,3 +240,26 @@ def _write_layout(tmp_path: Path) -> Path:
 	path = tmp_path / 'layouts.yaml'
 	path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding='utf-8')
 	return path
+
+
+def test_inspection_config_reuses_preparation_outputs(tmp_path: Path) -> None:
+	labels = tmp_path / 'parihaka_labels.npy'
+	section_counts = tmp_path / 'parihaka_channel_section_counts.csv'
+
+	config = data.channel_inspection_config_from_mapping(
+		{
+			'inputs': {
+				'labels_npz': str(tmp_path / 'parihaka_labels_train.npz'),
+				'array_key': 'labels',
+			},
+			'outputs': {
+				'labels_npy': str(labels),
+				'metadata_json': str(tmp_path / 'parihaka_labels_metadata.json'),
+				'section_counts_csv': str(section_counts),
+			},
+			'conversion': {'chunk_size_z': 8},
+		}
+	)
+
+	assert config.labels == labels
+	assert config.output_csv == section_counts

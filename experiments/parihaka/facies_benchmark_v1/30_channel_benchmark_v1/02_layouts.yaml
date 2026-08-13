@@ -1,0 +1,28 @@
+validation:
+  inline: [350]
+  crossline: [200]
+
+test:
+  inline: [650]
+  crossline: [340]
+
+layouts:
+  layout_000:
+    inline: [50, 250, 490, 690]
+    crossline: [20, 120, 260, 380]
+
+  layout_001:
+    inline: [290, 520, 700, 90]
+    crossline: [140, 270, 390, 40]
+
+  layout_002:
+    inline: [550, 710, 130, 400]
+    crossline: [280, 400, 60, 160]
+
+  layout_003:
+    inline: [720, 170, 430, 580]
+    crossline: [405, 80, 240, 290]
+
+  layout_004:
+    inline: [210, 460, 610, 730]
+    crossline: [100, 250, 300, 410]

@@ -90,10 +90,9 @@ def channel_inspection_config_from_mapping(
 	config: Mapping[str, object],
 ) -> ChannelInspectionConfig:
 	"""Resolve the section-inspection config."""
-	inputs = _mapping(config, 'inputs')
 	outputs = _mapping(config, 'outputs')
 	return ChannelInspectionConfig(
-		labels=_path(inputs, 'labels_npy', 'inputs'),
+		labels=_path(outputs, 'labels_npy', 'outputs'),
 		output_csv=_path(outputs, 'section_counts_csv', 'outputs'),
 	)
 
@@ -239,8 +238,10 @@ def _validate_prepared_label_identity(
 			f'{sorted(expected_keys)!r}'
 		)
 	sha256 = identity.get('labels_sha256')
-	if not isinstance(sha256, str) or len(sha256) != 64 or any(
-		character not in '0123456789abcdef' for character in sha256
+	if (
+		not isinstance(sha256, str)
+		or len(sha256) != 64
+		or any(character not in '0123456789abcdef' for character in sha256)
 	):
 		raise ValueError('prepared label metadata labels_sha256 is invalid')
 	if _file_sha256(labels_path) != sha256:
