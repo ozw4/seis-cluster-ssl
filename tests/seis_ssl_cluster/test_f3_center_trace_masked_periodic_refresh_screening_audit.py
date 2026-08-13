@@ -1,5 +1,5 @@
 """Regression coverage for periodic-refresh screening contracts."""
-# ruff: noqa: CPY001, SLF001, TC003
+# ruff: noqa: SLF001, TC003
 
 from __future__ import annotations
 

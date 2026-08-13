@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Parihaka amplitude-volume preparation."""
 
 from seis_ssl_cluster.parihaka.mae_results import (

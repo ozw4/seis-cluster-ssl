@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Thin CLI for validating Parihaka MAE inputs and training artifacts."""
 
 from __future__ import annotations

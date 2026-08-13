@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """MAE-specific checkpoint and resume helpers."""
 
 from __future__ import annotations

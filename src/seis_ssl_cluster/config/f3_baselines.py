@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """F3 lithology baseline config validation entrypoints."""
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """Synthetic contracts for the periodic-refresh original-split gate."""
-# ruff: noqa: CPY001, E501, S108, SLF001
+# ruff: noqa: E501, S108, SLF001
 
 from __future__ import annotations
 

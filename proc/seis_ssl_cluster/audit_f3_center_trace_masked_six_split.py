@@ -1,5 +1,4 @@
 """Create the read-only center-trace masked six-split preflight."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

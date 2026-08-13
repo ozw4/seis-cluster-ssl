@@ -1,5 +1,5 @@
 """Focused contracts for center-trace screening audit and recovery."""
-# ruff: noqa: CPY001, I001, SLF001, TC002, TC003
+# ruff: noqa: I001, SLF001, TC002, TC003
 
 from __future__ import annotations
 

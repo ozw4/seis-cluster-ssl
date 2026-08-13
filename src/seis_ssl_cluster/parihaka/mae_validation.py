@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Fail-closed validation for Parihaka MAE inputs and training artifacts."""
 
 from __future__ import annotations

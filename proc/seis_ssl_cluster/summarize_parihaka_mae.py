@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Thin CLI for completed Parihaka MAE review results."""
 
 from __future__ import annotations

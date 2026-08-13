@@ -1,6 +1,5 @@
 """Strict validation and handoff publication for experiment 107."""
 # ruff: noqa: E501, C901, PLR0912, PLR0913, PLR0915, S603, S607
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

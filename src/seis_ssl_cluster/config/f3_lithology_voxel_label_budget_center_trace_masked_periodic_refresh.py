@@ -1,5 +1,5 @@
 """Closed configuration for the periodic-refresh original-split screen."""
-# ruff: noqa: C901, CPY001, E501
+# ruff: noqa: C901, E501
 
 from __future__ import annotations
 

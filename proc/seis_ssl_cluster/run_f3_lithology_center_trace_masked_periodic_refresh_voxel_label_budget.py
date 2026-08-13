@@ -1,5 +1,5 @@
 """Run the closed periodic-refresh original-split decoder screen."""
-# ruff: noqa: CPY001, E501
+# ruff: noqa: E501
 
 from __future__ import annotations
 

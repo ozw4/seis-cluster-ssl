@@ -1,5 +1,4 @@
 """Create the read-only periodic-refresh original-split screening preflight."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

@@ -1,5 +1,4 @@
 """Validate and publish the experiment-107 periodic refresh handoff."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

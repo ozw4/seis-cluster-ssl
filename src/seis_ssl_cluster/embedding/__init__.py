@@ -1,5 +1,4 @@
 """Embedding components for seismic SSL clustering."""
-# ruff: noqa: CPY001
 
 from seis_ssl_cluster.embedding.extractor import (
 	CURRENT_STUDENT_UNMASKED_EMBEDDING_SEMANTICS,

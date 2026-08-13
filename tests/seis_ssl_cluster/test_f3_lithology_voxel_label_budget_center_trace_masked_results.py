@@ -1,5 +1,5 @@
 """Fixed gate and paired-matrix coverage for center-trace screening."""
-# ruff: noqa: CPY001, PLR0913, SLF001
+# ruff: noqa: PLR0913, SLF001
 
 from __future__ import annotations
 

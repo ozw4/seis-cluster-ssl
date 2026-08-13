@@ -1,5 +1,5 @@
 """Immutable preflight audit for the center-trace masked original-split screen."""
-# ruff: noqa: C901, PLR0912, SLF001, CPY001, S603
+# ruff: noqa: C901, PLR0912, SLF001, S603
 
 from __future__ import annotations
 

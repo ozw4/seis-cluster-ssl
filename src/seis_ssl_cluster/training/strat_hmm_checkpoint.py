@@ -1,6 +1,5 @@
 """Checkpoint helpers for stratigraphic HMM pretext training."""
 
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

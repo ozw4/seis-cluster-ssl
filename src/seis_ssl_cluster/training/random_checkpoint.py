@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Random MAE checkpoint creation for encoder baseline comparisons."""
 
 from __future__ import annotations

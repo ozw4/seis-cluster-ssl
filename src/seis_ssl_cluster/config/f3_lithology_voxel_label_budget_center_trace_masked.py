@@ -1,5 +1,4 @@
 """Closed configuration for center-trace masked original-split screening."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

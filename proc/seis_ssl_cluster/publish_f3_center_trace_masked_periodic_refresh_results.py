@@ -1,5 +1,4 @@
 """Publish lightweight review artifacts for experiment 107."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

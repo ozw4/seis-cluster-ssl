@@ -1,5 +1,4 @@
 """Run the closed F3 center-trace masked original-split screen."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

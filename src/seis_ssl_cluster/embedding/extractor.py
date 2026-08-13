@@ -1,6 +1,5 @@
 """Full-volume amplitude MAE encoder embedding extraction."""
 
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

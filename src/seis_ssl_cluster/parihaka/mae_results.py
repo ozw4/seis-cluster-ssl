@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Portable, lightweight review results for completed Parihaka MAE training."""
 
 from __future__ import annotations

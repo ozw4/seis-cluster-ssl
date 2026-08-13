@@ -1,5 +1,5 @@
 """Candidate-only runner for the periodic-refresh original-split matrix."""
-# ruff: noqa: C901, CPY001, E501, PLR0912, PLR0913, SLF001
+# ruff: noqa: C901, E501, PLR0912, PLR0913, SLF001
 
 from __future__ import annotations
 

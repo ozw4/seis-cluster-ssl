@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """One-job frozen-embedding decoder for Parihaka Channel estimation."""
 
 from __future__ import annotations

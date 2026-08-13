@@ -1,5 +1,5 @@
 """Immutable preflight audit for the periodic-refresh original-split screen."""
-# ruff: noqa: C901, CPY001, E501, PLR0912, SLF001, S603
+# ruff: noqa: C901, E501, PLR0912, SLF001, S603
 
 from __future__ import annotations
 

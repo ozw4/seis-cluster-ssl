@@ -32,8 +32,8 @@ ignore = [
     'D205',
     'D415',
     'RUF002',
-    'RUF003'
-
+    'RUF003',
+    'CPY001',
 ]
 # COM812, COM819, D206, D300, E111, E114, E117,
 # ISC001, ISC002, Q000, Q001, Q002, Q003, W191: conflict formatter
@@ -56,3 +56,6 @@ quote-style = "single"
 	"D",
 	"S101",
 ]
+
+[lint.pydocstyle]
+convention = "google"

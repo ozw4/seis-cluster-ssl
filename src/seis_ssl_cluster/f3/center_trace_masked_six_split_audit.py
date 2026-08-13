@@ -1,5 +1,5 @@
 """Read-only start audit for the center-trace masked six-split study."""
-# ruff: noqa: C901, CPY001, E501, PLR0912, PLR0913, S603
+# ruff: noqa: C901, E501, PLR0912, PLR0913, S603
 
 from __future__ import annotations
 

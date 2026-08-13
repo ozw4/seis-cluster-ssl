@@ -1,5 +1,4 @@
 """Artifact-independent warm-start refresh for ordered HMM centers."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

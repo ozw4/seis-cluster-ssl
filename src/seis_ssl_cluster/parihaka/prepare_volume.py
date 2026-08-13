@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Prepare the Parihaka amplitude NPZ as a bounded-memory XYZ NPY."""
 
 from __future__ import annotations

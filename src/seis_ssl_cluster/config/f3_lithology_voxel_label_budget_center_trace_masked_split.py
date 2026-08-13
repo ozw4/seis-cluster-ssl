@@ -1,5 +1,5 @@
 """Strict configuration for the center-trace masked six-split preflight."""
-# ruff: noqa: CPY001, C901, E501
+# ruff: noqa: C901, E501
 
 from __future__ import annotations
 

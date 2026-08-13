@@ -1,5 +1,4 @@
 """Closed model roster for the F3 section-layout voxel benchmark."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

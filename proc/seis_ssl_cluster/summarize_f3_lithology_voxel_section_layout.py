@@ -1,5 +1,4 @@
 """Summarize generic F3 section-layout benchmark manifests."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

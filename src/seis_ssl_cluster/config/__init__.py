@@ -1,5 +1,4 @@
 """Configuration components for seismic SSL clustering."""
-# ruff: noqa: CPY001
 
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	f3_lithology_voxel_section_layout_contract_from_mapping,

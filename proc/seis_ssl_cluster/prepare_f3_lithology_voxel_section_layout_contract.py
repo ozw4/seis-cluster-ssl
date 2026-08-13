@@ -1,5 +1,4 @@
 """Inspect F3 section candidates or finalize a canonical layout contract."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

@@ -1,5 +1,4 @@
 """Closed section-layout contract for the F3 voxel benchmark."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

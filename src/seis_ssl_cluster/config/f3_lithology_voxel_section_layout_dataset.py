@@ -1,5 +1,4 @@
 """Strict configuration for F3 section-layout voxel supervision datasets."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Run one Parihaka Channel decoder condition."""
 
 from __future__ import annotations

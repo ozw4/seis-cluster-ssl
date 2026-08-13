@@ -1,5 +1,4 @@
 """Generic paired-layout results for the F3 section-layout benchmark."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

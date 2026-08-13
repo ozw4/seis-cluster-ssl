@@ -1,5 +1,4 @@
 """Strict manifest contract for ordered multi-head HMM pseudo-targets."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

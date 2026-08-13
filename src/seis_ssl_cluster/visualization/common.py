@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Shared array helpers for training-time visualization."""
 
 from __future__ import annotations

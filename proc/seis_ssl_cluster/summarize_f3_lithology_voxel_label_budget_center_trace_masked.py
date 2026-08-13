@@ -1,5 +1,4 @@
 """Summarize the center-trace masked original-split screening result."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

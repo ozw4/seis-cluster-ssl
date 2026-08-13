@@ -1,6 +1,5 @@
 """Validation and resolution for MAE pretraining configs."""
 
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

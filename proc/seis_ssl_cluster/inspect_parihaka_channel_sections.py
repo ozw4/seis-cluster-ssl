@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Write per-section Parihaka Channel label statistics."""
 
 from __future__ import annotations

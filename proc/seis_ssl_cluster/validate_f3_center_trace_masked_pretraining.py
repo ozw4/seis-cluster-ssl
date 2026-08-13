@@ -1,5 +1,4 @@
 """Validate and publish the experiment-104 center-trace masked handoff."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

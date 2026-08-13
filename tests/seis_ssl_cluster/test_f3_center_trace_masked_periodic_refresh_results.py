@@ -1,5 +1,5 @@
 """Focused contracts for experiment-107 lightweight publication."""
-# ruff: noqa: CPY001, SLF001
+# ruff: noqa: SLF001
 
 from __future__ import annotations
 

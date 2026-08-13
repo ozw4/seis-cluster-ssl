@@ -1,4 +1,4 @@
-# ruff: noqa: CPY001, TC002
+# ruff: noqa: TC002
 
 from __future__ import annotations
 

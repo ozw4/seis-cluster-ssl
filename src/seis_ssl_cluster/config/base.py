@@ -1,6 +1,5 @@
 """Stage-aware base validation helpers for config resolvers."""
 
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

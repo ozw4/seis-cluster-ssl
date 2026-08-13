@@ -1,5 +1,5 @@
 """Isolated runner for the center-trace masked original-split screen."""
-# ruff: noqa: C901, PLR0912, PLR0913, PLR0915, SLF001, CPY001
+# ruff: noqa: C901, PLR0912, PLR0913, PLR0915, SLF001
 
 from __future__ import annotations
 

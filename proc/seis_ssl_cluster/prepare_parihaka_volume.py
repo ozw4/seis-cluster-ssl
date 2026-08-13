@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Thin entrypoint for preparing the Parihaka amplitude volume."""
 
 from __future__ import annotations

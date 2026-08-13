@@ -1,5 +1,5 @@
 """Summarize the periodic-refresh original-split screening result."""
-# ruff: noqa: CPY001, E501
+# ruff: noqa: E501
 
 from __future__ import annotations
 

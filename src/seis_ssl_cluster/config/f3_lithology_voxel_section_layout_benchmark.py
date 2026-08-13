@@ -1,5 +1,4 @@
 """Closed configuration for the F3 section-layout decoder benchmark."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

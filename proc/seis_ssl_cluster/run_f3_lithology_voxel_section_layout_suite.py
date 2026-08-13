@@ -1,5 +1,4 @@
 """Run one roster model through the F3 section-layout benchmark."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

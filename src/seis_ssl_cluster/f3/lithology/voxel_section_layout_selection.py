@@ -1,5 +1,4 @@
 """Pure selection kernel for F3 section-layout voxel supervision."""
-# ruff: noqa: CPY001
 
 from __future__ import annotations
 

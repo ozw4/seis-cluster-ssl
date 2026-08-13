@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Prepare Parihaka Channel labels in XYZ order."""
 
 from __future__ import annotations

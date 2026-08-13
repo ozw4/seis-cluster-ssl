@@ -5,7 +5,7 @@ revalidates every live checkpoint, generation, event, and embedding reference
 before writing review files.  It never copies binary or array artifacts into
 ``results/``.
 """
-# ruff: noqa: CPY001, E501, PERF401
+# ruff: noqa: E501, PERF401
 
 from __future__ import annotations
 

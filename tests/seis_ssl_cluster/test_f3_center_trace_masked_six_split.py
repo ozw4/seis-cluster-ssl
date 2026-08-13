@@ -1,5 +1,5 @@
 """Contracts for the center-trace masked six-split start audit."""
-# ruff: noqa: CPY001, SLF001, TC003
+# ruff: noqa: SLF001, TC003
 
 from __future__ import annotations
 

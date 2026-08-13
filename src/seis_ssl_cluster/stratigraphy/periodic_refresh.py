@@ -2,7 +2,7 @@
 
 # The producer/validator deliberately keeps the closed artifact contract in one
 # module.  A few validation routines are necessarily branch-heavy.
-# ruff: noqa: ARG001, CPY001, C901, E501, PLR0911, PLR0912, PLR0913, PLR0915, PLR0917, TRY004
+# ruff: noqa: ARG001, C901, E501, PLR0911, PLR0912, PLR0913, PLR0915, PLR0917, TRY004
 
 from __future__ import annotations
 

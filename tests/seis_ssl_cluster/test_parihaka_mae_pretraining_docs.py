@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 
 from pathlib import Path
 

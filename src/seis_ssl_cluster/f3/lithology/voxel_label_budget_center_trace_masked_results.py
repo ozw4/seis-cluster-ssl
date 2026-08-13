@@ -1,5 +1,5 @@
 """Aggregate the center-trace masked original-split screening result."""
-# ruff: noqa: SLF001, CPY001, S603
+# ruff: noqa: SLF001, S603
 
 from __future__ import annotations
 

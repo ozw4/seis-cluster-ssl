@@ -1,4 +1,3 @@
-# ruff: noqa: CPY001
 """Summarize the complete paired Parihaka Channel benchmark."""
 
 from __future__ import annotations
