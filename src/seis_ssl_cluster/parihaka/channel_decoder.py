@@ -31,13 +31,19 @@ from seis_ssl_cluster.models.voxel_decoder import (
 )
 from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_AXIS_MAPPING,
-	CHANNEL_CLASS_ID,
 	ChannelLayouts,
 	SectionLines,
 	inspect_prepared_label_identity,
 	load_channel_layouts,
 	selected_training_lines,
-	split_mask_for_crop,
+)
+from seis_ssl_cluster.parihaka.channel_tiles import (
+	CHANNEL_CONTEXT_HALO_TOKENS,
+	CHANNEL_CORE_SIZE_TOKENS,
+	ChannelTileRecord,
+	ChannelTileSettings,
+	build_channel_tile_targets,
+	enumerate_channel_tile_records,
 )
 from seis_ssl_cluster.training.random_checkpoint import (
 	load_checkpoint_metadata_without_weights,
@@ -53,8 +59,6 @@ BEST_NAME = 'best.pt'
 HISTORY_NAME = 'history.csv'
 METRICS_NAME = 'metrics.json'
 
-CHANNEL_CORE_SIZE_TOKENS = (8, 8, 8)
-CHANNEL_CONTEXT_HALO_TOKENS = (1, 1, 1)
 CHANNEL_PRETRAINED_MODEL_TAG = (
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
 )
@@ -153,14 +157,6 @@ class EmbeddingGeometry:
 	random_metadata: Mapping[str, object]
 	pretrained_model_source: Mapping[str, object]
 	random_model_source: Mapping[str, object]
-
-
-@dataclass(frozen=True)
-class _Tile:
-	index: int
-	core_start_token: tuple[int, int, int]
-	core_stop_token: tuple[int, int, int]
-	supervised_voxels: int
 
 
 @dataclass(frozen=True)
@@ -568,6 +564,13 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 		self.test = test
 		self.split = split
 		self.tile_settings = tiles
+		self.shared_tile_settings = ChannelTileSettings(
+			volume_shape_xyz=geometry.volume_shape_xyz,
+			token_grid_shape_xyz=geometry.token_grid_shape_xyz,
+			patch_size_xyz=geometry.patch_size_xyz,
+			core_size_tokens=tiles.core_size_tokens,
+			context_halo_tokens=tiles.context_halo_tokens,
+		)
 		self._embeddings: np.ndarray | None = None
 		self._valid_tokens: np.ndarray | None = None
 		self._labels: np.ndarray | None = None
@@ -585,100 +588,40 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 		embeddings = _array(self._embeddings)
 		valid_tokens = _array(self._valid_tokens)
 		labels = _array(self._labels)
-		patch = self.geometry.patch_size_xyz
-		core = self.tile_settings.core_size_tokens
-		halo = self.tile_settings.context_halo_tokens
-		input_tokens = tuple(core[axis] + 2 * halo[axis] for axis in range(3))
-		input_voxels = tuple(input_tokens[axis] * patch[axis] for axis in range(3))
-		input_start = tuple(
-			record.core_start_token[axis] - halo[axis] for axis in range(3)
-		)
-		source_start = tuple(max(0, value) for value in input_start)
-		source_stop = tuple(
-			min(
-				record.core_stop_token[axis] + halo[axis],
-				self.geometry.token_grid_shape_xyz[axis],
-			)
-			for axis in range(3)
-		)
-		destination_start = tuple(
-			source_start[axis] - input_start[axis] for axis in range(3)
-		)
-		destination_stop = tuple(
-			destination_start[axis] + source_stop[axis] - source_start[axis]
-			for axis in range(3)
-		)
-		token_source = _slices(source_start, source_stop)
-		token_destination = _slices(destination_start, destination_stop)
-		embedding_crop = np.zeros(
-			(*input_tokens, self.geometry.embedding_dim), dtype=np.float32
-		)
-		embedding_crop[token_destination] = np.asarray(
-			embeddings[token_source], dtype=np.float32
-		)
-		token_mask = np.zeros(input_tokens, dtype=np.bool_)
-		token_mask[token_destination] = valid_tokens[token_source]
-		voxel_global_start = tuple(
-			value * patch[axis] for axis, value in enumerate(input_start)
-		)
-		voxel_source_start = tuple(max(0, value) for value in voxel_global_start)
-		voxel_source_stop = tuple(
-			min(
-				(record.core_stop_token[axis] + halo[axis]) * patch[axis],
-				self.geometry.volume_shape_xyz[axis],
-			)
-			for axis in range(3)
-		)
-		voxel_destination_start = tuple(
-			voxel_source_start[axis] - voxel_global_start[axis] for axis in range(3)
-		)
-		voxel_destination_stop = tuple(
-			voxel_destination_start[axis]
-			+ voxel_source_stop[axis]
-			- voxel_source_start[axis]
-			for axis in range(3)
-		)
-		voxel_source = _slices(voxel_source_start, voxel_source_stop)
-		voxel_destination = _slices(voxel_destination_start, voxel_destination_stop)
-		label_crop = np.full(input_voxels, -1, dtype=np.int64)
-		label_crop[voxel_destination] = (
-			np.asarray(labels[voxel_source]) == CHANNEL_CLASS_ID
-		).astype(np.int64)
-		valid_voxels = token_mask
-		for axis, repeats in enumerate(patch):
-			valid_voxels = np.repeat(valid_voxels, repeats, axis=axis)
-		section_mask = np.zeros(input_voxels, dtype=np.bool_)
-		section_mask[voxel_destination] = split_mask_for_crop(
-			shape=tuple(
-				voxel_source_stop[axis] - voxel_source_start[axis] for axis in range(3)
-			),
-			start_xyz=voxel_source_start,
+		targets = build_channel_tile_targets(
+			record=record,
+			valid_tokens=valid_tokens,
+			labels=labels,
+			settings=self.shared_tile_settings,
 			train=self.lines,
 			validation=self.validation,
 			test=self.test,
 			split=self.split,
 		)
-		core_mask = np.zeros(input_voxels, dtype=np.bool_)
-		core_start = tuple(halo[axis] * patch[axis] for axis in range(3))
-		core_stop = tuple(
-			core_start[axis]
-			+ (record.core_stop_token[axis] - record.core_start_token[axis])
-			* patch[axis]
-			for axis in range(3)
+		token_source = _slices(
+			targets.token_source_start, targets.token_source_stop
 		)
-		core_mask[_slices(core_start, core_stop)] = True
-		supervision = core_mask & valid_voxels & section_mask & (label_crop >= 0)
-		if int(np.count_nonzero(supervision)) != record.supervised_voxels:
-			raise RuntimeError('runtime section mask no longer matches tile inspection')
+		token_destination = _slices(
+			targets.token_destination_start, targets.token_destination_stop
+		)
+		embedding_crop = np.zeros(
+			(*self.shared_tile_settings.input_size_tokens, self.geometry.embedding_dim),
+			dtype=np.float32,
+		)
+		embedding_crop[token_destination] = np.asarray(
+			embeddings[token_source], dtype=np.float32
+		)
 		return {
 			'embeddings': torch.from_numpy(
 				np.ascontiguousarray(np.moveaxis(embedding_crop, -1, 0))
 			),
-			'token_valid_mask': torch.from_numpy(np.ascontiguousarray(token_mask)),
-			'labels': torch.from_numpy(label_crop),
-			'supervision_mask': torch.from_numpy(supervision),
-			'core_mask': torch.from_numpy(core_mask),
-			'tile_id': record.index,
+			'token_valid_mask': torch.from_numpy(
+				np.ascontiguousarray(targets.token_valid_mask)
+			),
+			'labels': torch.from_numpy(targets.labels),
+			'supervision_mask': torch.from_numpy(targets.supervision_mask),
+			'core_mask': torch.from_numpy(targets.core_mask),
+			'tile_id': record.tile_id,
 		}
 
 	def __getstate__(self) -> dict[str, object]:
@@ -698,67 +641,18 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 			)
 			self._labels = np.load(self.labels_path, mmap_mode='r', allow_pickle=False)
 
-	def _build_records(self) -> tuple[tuple[_Tile, ...], tuple[int, int]]:
-		valid_tokens = _array(self._valid_tokens)
-		labels = _array(self._labels)
-		patch = self.geometry.patch_size_xyz
-		core = self.tile_settings.core_size_tokens
-		records: list[_Tile] = []
-		counts = np.zeros(2, dtype=np.int64)
-		index = 0
-		for tx in range(0, self.geometry.token_grid_shape_xyz[0], core[0]):
-			for ty in range(0, self.geometry.token_grid_shape_xyz[1], core[1]):
-				for tz in range(0, self.geometry.token_grid_shape_xyz[2], core[2]):
-					start_token = (tx, ty, tz)
-					stop_token = tuple(
-						min(
-							start_token[axis] + core[axis],
-							self.geometry.token_grid_shape_xyz[axis],
-						)
-						for axis in range(3)
-					)
-					voxel_start = tuple(
-						start_token[axis] * patch[axis] for axis in range(3)
-					)
-					voxel_stop = tuple(
-						min(
-							stop_token[axis] * patch[axis],
-							self.geometry.volume_shape_xyz[axis],
-						)
-						for axis in range(3)
-					)
-					shape = tuple(
-						voxel_stop[axis] - voxel_start[axis] for axis in range(3)
-					)
-					section = split_mask_for_crop(
-						shape=shape,
-						start_xyz=voxel_start,
-						train=self.lines,
-						validation=self.validation,
-						test=self.test,
-						split=self.split,
-					)
-					if not section.any():
-						index += 1
-						continue
-					token_valid = valid_tokens[_slices(start_token, stop_token)]
-					valid = token_valid
-					for axis, repeats in enumerate(patch):
-						valid = np.repeat(valid, repeats, axis=axis)
-					valid = valid[tuple(slice(0, size) for size in shape)]
-					mask = section & valid
-					if not mask.any():
-						index += 1
-						continue
-					binary = (
-						labels[_slices(voxel_start, voxel_stop)] == CHANNEL_CLASS_ID
-					)
-					positive = int(np.count_nonzero(binary & mask))
-					total = int(np.count_nonzero(mask))
-					counts += (total - positive, positive)
-					records.append(_Tile(index, start_token, stop_token, total))
-					index += 1
-		return tuple(records), (int(counts[0]), int(counts[1]))
+	def _build_records(
+		self,
+	) -> tuple[tuple[ChannelTileRecord, ...], tuple[int, int]]:
+		return enumerate_channel_tile_records(
+			valid_tokens=_array(self._valid_tokens),
+			labels=_array(self._labels),
+			settings=self.shared_tile_settings,
+			train=self.lines,
+			validation=self.validation,
+			test=self.test,
+			split=self.split,
+		)
 
 
 def deterministic_tile_order(tile_count: int, seed: int, epoch: int) -> tuple[int, ...]:
