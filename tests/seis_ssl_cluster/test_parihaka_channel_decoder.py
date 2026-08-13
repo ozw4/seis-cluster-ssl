@@ -33,6 +33,7 @@ def _config(tmp_path: Path) -> ChannelDecoderConfig:
 	return ChannelDecoderConfig(
 		survey_id='parihaka',
 		labels=tmp_path / 'labels.npy',
+		labels_metadata=tmp_path / 'parihaka_labels_metadata.json',
 		pretrained_embeddings=tmp_path / 'pretrained',
 		random_embeddings=tmp_path / 'random',
 		runs_root=tmp_path / 'runs',
@@ -56,6 +57,31 @@ def _config(tmp_path: Path) -> ChannelDecoderConfig:
 			gradient_clip_norm=1.0,
 		),
 		tiles=DecoderTiles((2, 2, 2), (1, 1, 1)),
+	)
+
+
+def _write_labels(config: ChannelDecoderConfig, labels: np.ndarray) -> None:
+	np.save(config.labels, labels, allow_pickle=False)
+	config.labels_metadata.write_text(
+		json.dumps(
+			{
+				'schema_version': 2,
+				'artifact_type': 'parihaka_channel_labels',
+				'output_labels': str(config.labels),
+				'prepared_label_identity': {
+					'labels_sha256': file_sha256(config.labels),
+					'source_npz_path': '/data/parihaka_labels.npz',
+					'source_key': 'labels',
+					'shape': list(labels.shape),
+					'dtype': labels.dtype.name,
+					'class_definition': {
+						'positive_class_id': 5,
+						'negative_class_ids': [1, 2, 3, 4, 6],
+					},
+				},
+			}
+		),
+		encoding='utf-8',
 	)
 
 
@@ -137,7 +163,10 @@ def _config_mapping(tmp_path: Path) -> dict[str, object]:
 	config = _config(tmp_path)
 	return {
 		'dataset': {'survey_id': config.survey_id},
-		'inputs': {'labels_npy': str(config.labels)},
+		'inputs': {
+			'labels_npy': str(config.labels),
+			'labels_metadata_json': str(config.labels_metadata),
+		},
 		'embeddings': {
 			'pretrained_dir': str(config.pretrained_embeddings),
 			'random_dir': str(config.random_embeddings),
@@ -488,7 +517,7 @@ def test_every_split_must_contain_both_channel_classes(
 		split=split,
 	)
 	labels[mask] = 1 if missing_class == 'Channel' else 5
-	np.save(config.labels, labels)
+	_write_labels(config, labels)
 	with pytest.raises(
 		ValueError,
 		match=rf'{split} sections must contain both Channel and non-Channel voxels',
@@ -499,6 +528,23 @@ def test_every_split_must_contain_both_channel_classes(
 			layout_id='layout_000',
 			data_size='small',
 			layout_config=layout_path,
+		)
+
+
+def test_decoder_preflight_rejects_replaced_label_content(tmp_path: Path) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	labels = np.ones((16, 16, 16), dtype=np.int8)
+	labels[:, :, ::2] = 5
+	_write_labels(config, labels)
+	np.save(config.labels, np.roll(labels, 1, axis=2), allow_pickle=False)
+	with pytest.raises(ValueError, match='SHA-256 does not match'):
+		inspect_channel_decoder_job(
+			config,
+			model='pretrained',
+			layout_id='layout_000',
+			data_size='small',
+			layout_config=_write_layout(tmp_path),
 		)
 
 
@@ -576,7 +622,7 @@ def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
 		)
 	labels = np.ones((8, 8, 8), dtype=np.int8)
 	labels[:, :, ::2] = 5
-	np.save(config.labels, labels)
+	_write_labels(config, labels)
 	training_lines = (0, 1, 2, 3, 6, 7)
 	layout_path = tmp_path / 'layouts.yaml'
 	layout_path.write_text(
@@ -644,6 +690,18 @@ def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
 		},
 	}
 	assert identity['label_path'] == str(config.labels)
+	assert identity['label_metadata_path'] == str(config.labels_metadata)
+	assert identity['prepared_label_identity'] == {
+		'labels_sha256': file_sha256(config.labels),
+		'source_npz_path': '/data/parihaka_labels.npz',
+		'source_key': 'labels',
+		'shape': [8, 8, 8],
+		'dtype': 'int8',
+		'class_definition': {
+			'positive_class_id': 5,
+			'negative_class_ids': [1, 2, 3, 4, 6],
+		},
+	}
 	assert identity['decoder']['spec'] == config.decoder.spec
 	assert identity['decoder_initial_state_sha256'] == decoder_initial_state_sha256(
 		config.decoder, plan.geometry.patch_size_xyz, config.train.seed

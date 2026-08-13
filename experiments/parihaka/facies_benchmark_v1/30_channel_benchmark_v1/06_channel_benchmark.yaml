@@ -2,6 +2,7 @@ dataset:
   survey_id: parihaka
 inputs:
   labels_npy: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_labels.npy
+  labels_metadata_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_labels_metadata.json
   runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/runs
 embeddings:
   pretrained_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x64

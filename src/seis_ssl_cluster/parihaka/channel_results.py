@@ -32,6 +32,8 @@ _BENCHMARK_IDENTITY_KEYS = {
 	'embedding',
 	'decoder_initial_state_sha256',
 	'label_path',
+	'label_metadata_path',
+	'prepared_label_identity',
 	'train_lines',
 	'validation',
 	'test',
@@ -62,6 +64,8 @@ _EMBEDDING_COMMON_METADATA_KEYS = {
 }
 _GLOBAL_IDENTITY_KEYS = (
 	'label_path',
+	'label_metadata_path',
+	'prepared_label_identity',
 	'geometry',
 	'decoder',
 	'decoder_initial_state_sha256',
@@ -386,9 +390,8 @@ def _validate_benchmark_identity(
 		identity.get('decoder_initial_state_sha256'),
 		f'{path} benchmark_identity.decoder_initial_state_sha256',
 	)
-	label_path = identity.get('label_path')
-	if not isinstance(label_path, str) or not label_path:
-		raise TypeError(f'{path} benchmark_identity.label_path must be non-empty')
+	_validate_label_identity_paths(identity, path)
+	_validate_prepared_label_identity(identity, path)
 	for key, expected_keys in (
 		('train_lines', {'inline', 'crossline'}),
 		('validation', {'inline', 'crossline'}),
@@ -434,10 +437,72 @@ def _validate_benchmark_identity(
 	):
 		value = _identity_mapping(identity, key, path)
 		if set(value) != expected_keys:
-				raise ValueError(
-					f'{path} benchmark_identity.{key} must contain exactly '
-					f'{sorted(expected_keys)!r}'
-				)
+			raise ValueError(
+				f'{path} benchmark_identity.{key} must contain exactly '
+				f'{sorted(expected_keys)!r}'
+			)
+
+
+def _validate_prepared_label_identity(
+	identity: Mapping[str, object], path: Path
+) -> None:
+	prepared_label = _identity_mapping(identity, 'prepared_label_identity', path)
+	expected_label_keys = {
+		'labels_sha256',
+		'source_npz_path',
+		'source_key',
+		'shape',
+		'dtype',
+		'class_definition',
+	}
+	if set(prepared_label) != expected_label_keys:
+		raise ValueError(
+			f'{path} benchmark_identity.prepared_label_identity has invalid fields'
+		)
+	_validate_sha256(
+		prepared_label.get('labels_sha256'),
+		f'{path} benchmark_identity.prepared_label_identity.labels_sha256',
+	)
+	for key in ('source_npz_path', 'source_key', 'dtype'):
+		value = prepared_label.get(key)
+		if not isinstance(value, str) or not value:
+			raise TypeError(
+				f'{path} benchmark_identity.prepared_label_identity.{key} '
+				'must be non-empty'
+			)
+	shape = prepared_label.get('shape')
+	if (
+		not isinstance(shape, list)
+		or len(shape) != 3
+		or any(
+			not isinstance(item, int) or isinstance(item, bool) or item <= 0
+			for item in shape
+		)
+	):
+		raise TypeError(
+			f'{path} benchmark_identity.prepared_label_identity.shape is invalid'
+		)
+	if prepared_label.get('dtype') != 'int8':
+		raise ValueError(
+			f'{path} benchmark_identity.prepared_label_identity.dtype must be int8'
+		)
+	if prepared_label.get('class_definition') != {
+		'positive_class_id': 5,
+		'negative_class_ids': [1, 2, 3, 4, 6],
+	}:
+		raise ValueError(
+			f'{path} benchmark_identity.prepared_label_identity.class_definition '
+			'is invalid'
+		)
+
+
+def _validate_label_identity_paths(
+	identity: Mapping[str, object], path: Path
+) -> None:
+	for key in ('label_path', 'label_metadata_path'):
+		value = identity.get(key)
+		if not isinstance(value, str) or not value:
+			raise TypeError(f'{path} benchmark_identity.{key} must be non-empty')
 
 
 def _validate_model_source(  # noqa: C901
@@ -531,7 +596,14 @@ def _validate_identity_redundancy(
 	identity_counts = _identity_mapping(identity, 'split_class_counts', path)
 	if identity_counts != supervision.get('split_class_counts'):
 		raise ValueError(
-			f'{path} benchmark_identity.split_class_counts does not match supervision'
+			f'{path} benchmark_identity.split_class_counts does not match '
+			'supervision'
+		)
+	prepared_label = _identity_mapping(identity, 'prepared_label_identity', path)
+	geometry = _identity_mapping(identity, 'geometry', path)
+	if prepared_label.get('shape') != geometry.get('volume_shape_xyz'):
+		raise ValueError(
+			f'{path} prepared label shape does not match benchmark geometry'
 		)
 	tile_counts = _identity_mapping(identity, 'tile_counts', path)
 	if any(

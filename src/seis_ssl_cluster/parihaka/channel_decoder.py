@@ -35,6 +35,7 @@ from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_CLASS_ID,
 	ChannelLayouts,
 	SectionLines,
+	inspect_prepared_label_identity,
 	load_channel_layouts,
 	selected_training_lines,
 	split_mask_for_crop,
@@ -129,6 +130,7 @@ class ChannelDecoderConfig:
 
 	survey_id: str
 	labels: Path
+	labels_metadata: Path
 	pretrained_embeddings: Path
 	random_embeddings: Path
 	runs_root: Path
@@ -174,6 +176,7 @@ class ChannelDecoderPlan:
 	geometry: EmbeddingGeometry
 	layouts: ChannelLayouts
 	train_lines: SectionLines
+	prepared_label_identity: Mapping[str, object]
 	class_counts: tuple[int, int]
 	class_weights: tuple[float, float]
 	split_counts: Mapping[str, tuple[int, int]]
@@ -197,6 +200,7 @@ def channel_decoder_config_from_mapping(
 	return ChannelDecoderConfig(
 		survey_id=survey_id,
 		labels=_absolute_path(inputs, 'labels_npy', 'inputs'),
+		labels_metadata=_absolute_path(inputs, 'labels_metadata_json', 'inputs'),
 		pretrained_embeddings=_absolute_path(
 			embeddings, 'pretrained_dir', 'embeddings'
 		),
@@ -486,6 +490,9 @@ def inspect_channel_decoder_job(
 		raise ValueError('prepared label shape does not match embedding volume shape')
 	if labels.dtype != np.int8:
 		raise TypeError('prepared labels must have dtype int8')
+	prepared_label_identity = inspect_prepared_label_identity(
+		config.labels, config.labels_metadata
+	)
 	layouts = load_channel_layouts(layout_config, geometry.volume_shape_xyz)
 	train_lines = selected_training_lines(layouts, layout_id, data_size)
 	split_counts: dict[str, tuple[int, int]] = {}
@@ -527,6 +534,7 @@ def inspect_channel_decoder_job(
 		geometry=geometry,
 		layouts=layouts,
 		train_lines=train_lines,
+		prepared_label_identity=prepared_label_identity,
 		class_counts=split_counts['train'],
 		class_weights=tuple(float(item) for item in weights.tolist()),
 		split_counts=split_counts,
@@ -1212,6 +1220,8 @@ def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
 			plan.config.train.seed,
 		),
 		'label_path': str(plan.config.labels),
+		'label_metadata_path': str(plan.config.labels_metadata),
+		'prepared_label_identity': dict(plan.prepared_label_identity),
 		'train_lines': {
 			'inline': list(plan.train_lines.inline),
 			'crossline': list(plan.train_lines.crossline),

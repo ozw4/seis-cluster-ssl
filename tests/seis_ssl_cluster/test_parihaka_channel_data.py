@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -49,6 +50,33 @@ def test_label_transpose_and_coordinate_mapping(
 	assert np.array_equal(prepared, source.transpose(1, 2, 0))
 	for z, x, y in ((0, 0, 0), (2, 3, 4), (1, 2, 3)):
 		assert prepared[x, y, z] == source[z, x, y]
+	metadata = json.loads(config.output_metadata.read_text(encoding='utf-8'))
+	identity = metadata['prepared_label_identity']
+	assert identity == data.inspect_prepared_label_identity(
+		config.output_labels, config.output_metadata
+	)
+	assert identity['source_npz_path'] == str(config.source_npz)
+	assert identity['source_key'] == 'labels'
+	assert identity['shape'] == list(prepared.shape)
+	assert identity['dtype'] == 'int8'
+	assert identity['class_definition'] == {
+		'positive_class_id': 5,
+		'negative_class_ids': [1, 2, 3, 4, 6],
+	}
+
+
+def test_prepared_label_identity_rejects_replaced_labels_npy(
+	tmp_path: Path, small_geometry: tuple[int, int, int]
+) -> None:
+	config = _label_config(tmp_path)
+	source = _source(small_geometry)
+	np.savez(config.source_npz, labels=source)
+	data.prepare_channel_labels(config)
+	np.save(config.output_labels, source.transpose(1, 2, 0)[::-1])
+	with pytest.raises(ValueError, match='SHA-256 does not match'):
+		data.inspect_prepared_label_identity(
+			config.output_labels, config.output_metadata
+		)
 
 
 @pytest.mark.parametrize('failure', ['key', 'shape', 'dtype', 'classes'])

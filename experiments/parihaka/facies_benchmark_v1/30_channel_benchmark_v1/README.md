@@ -5,6 +5,11 @@ architecture initialized randomly. The encoder embeddings are fixed; each job
 trains only the same binary `VoxelDecoder3D`, with seed 42000 and all selected
 section voxels used once per epoch.
 
+Pretraining used the full unlabeled Parihaka amplitude volume, including
+amplitudes from downstream validation and test sections. This benchmark
+therefore measures survey-specific transductive self-supervised pretraining
+benefit and does not establish inductive transfer to unseen surveys.
+
 The repository does not choose section indices. First prepare and inspect the
 labels, review `parihaka_channel_section_counts.csv`, copy
 `02_layouts.example.yaml` outside its example name, and replace every placeholder

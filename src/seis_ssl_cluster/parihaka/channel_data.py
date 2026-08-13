@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -155,7 +156,7 @@ def prepare_channel_labels(config: ChannelLabelConfig) -> tuple[Path, Path]:
 			_verify_coordinates(source, output)
 			del output
 		metadata = {
-			'schema_version': 1,
+			'schema_version': 2,
 			'artifact_type': 'parihaka_channel_labels',
 			**inspection,
 			'output_labels': str(config.output_labels),
@@ -163,6 +164,17 @@ def prepare_channel_labels(config: ChannelLabelConfig) -> tuple[Path, Path]:
 			'channel_definition': {
 				'positive_class_id': CHANNEL_CLASS_ID,
 				'negative_class_ids': [1, 2, 3, 4, 6],
+			},
+			'prepared_label_identity': {
+				'labels_sha256': _file_sha256(staged_labels),
+				'source_npz_path': str(config.source_npz),
+				'source_key': config.array_key,
+				'shape': list(PREPARED_SHAPE_XYZ),
+				'dtype': LABEL_DTYPE.name,
+				'class_definition': {
+					'positive_class_id': CHANNEL_CLASS_ID,
+					'negative_class_ids': [1, 2, 3, 4, 6],
+				},
 			},
 		}
 		staged_metadata.write_text(
@@ -176,6 +188,78 @@ def prepare_channel_labels(config: ChannelLabelConfig) -> tuple[Path, Path]:
 				path.unlink()
 		raise
 	return config.output_labels, config.output_metadata
+
+
+def inspect_prepared_label_identity(
+	labels_path: str | Path, metadata_path: str | Path
+) -> dict[str, object]:
+	"""Validate prepared labels against their recorded content identity."""
+	labels_path = Path(labels_path)
+	metadata_path = Path(metadata_path)
+	labels = np.load(labels_path, mmap_mode='r', allow_pickle=False)
+	if labels.ndim != 3:
+		raise ValueError('prepared labels must be a 3D XYZ array')
+	metadata = _read_label_metadata(metadata_path)
+	if metadata.get('artifact_type') != 'parihaka_channel_labels':
+		raise ValueError('prepared label metadata artifact_type mismatch')
+	if metadata.get('output_labels') != str(labels_path):
+		raise ValueError('prepared label metadata output_labels path mismatch')
+	identity = metadata.get('prepared_label_identity')
+	if not isinstance(identity, Mapping):
+		raise TypeError('prepared label metadata identity must be a mapping')
+	_validate_prepared_label_identity(identity, labels_path, labels)
+	return dict(identity)
+
+
+def _read_label_metadata(path: Path) -> Mapping[str, object]:
+	if not path.is_file():
+		raise FileNotFoundError(f'missing prepared label metadata: {path}')
+	try:
+		metadata = json.loads(path.read_text(encoding='utf-8'))
+	except json.JSONDecodeError as exc:
+		raise ValueError(f'invalid prepared label metadata JSON: {path}') from exc
+	if not isinstance(metadata, Mapping):
+		raise TypeError('prepared label metadata must be a mapping')
+	return metadata
+
+
+def _validate_prepared_label_identity(
+	identity: Mapping[str, object], labels_path: Path, labels: np.ndarray
+) -> None:
+	expected_keys = {
+		'labels_sha256',
+		'source_npz_path',
+		'source_key',
+		'shape',
+		'dtype',
+		'class_definition',
+	}
+	if set(identity) != expected_keys:
+		raise ValueError(
+			'prepared label metadata identity must contain exactly '
+			f'{sorted(expected_keys)!r}'
+		)
+	sha256 = identity.get('labels_sha256')
+	if not isinstance(sha256, str) or len(sha256) != 64 or any(
+		character not in '0123456789abcdef' for character in sha256
+	):
+		raise ValueError('prepared label metadata labels_sha256 is invalid')
+	if _file_sha256(labels_path) != sha256:
+		raise ValueError('prepared label SHA-256 does not match labels_npy')
+	if identity.get('shape') != list(labels.shape):
+		raise ValueError('prepared label metadata shape mismatch')
+	if identity.get('dtype') != labels.dtype.name:
+		raise ValueError('prepared label metadata dtype mismatch')
+	for key in ('source_npz_path', 'source_key'):
+		value = identity.get(key)
+		if not isinstance(value, str) or not value:
+			raise TypeError(f'prepared label metadata {key} must be non-empty')
+	expected_classes = {
+		'positive_class_id': CHANNEL_CLASS_ID,
+		'negative_class_ids': [1, 2, 3, 4, 6],
+	}
+	if identity.get('class_definition') != expected_classes:
+		raise ValueError('prepared label metadata class_definition mismatch')
 
 
 def inspect_prepared_labels(path: str | Path) -> np.ndarray:
@@ -337,6 +421,14 @@ def _verify_coordinates(source: np.ndarray, output: np.ndarray) -> None:
 		raise RuntimeError('prepared label output must be C-contiguous')
 
 
+def _file_sha256(path: Path) -> str:
+	digest = hashlib.sha256()
+	with path.open('rb') as file_obj:
+		for block in iter(lambda: file_obj.read(1024 * 1024), b''):
+			digest.update(block)
+	return digest.hexdigest()
+
+
 def _section_lines(
 	value: Mapping[str, object],
 	label: str,
@@ -437,6 +529,7 @@ __all__ = [
 	'SectionLines',
 	'channel_inspection_config_from_mapping',
 	'channel_label_config_from_mapping',
+	'inspect_prepared_label_identity',
 	'inspect_prepared_labels',
 	'inspect_source_labels',
 	'load_channel_layouts',

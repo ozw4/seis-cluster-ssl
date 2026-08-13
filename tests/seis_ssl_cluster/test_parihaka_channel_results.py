@@ -103,6 +103,18 @@ def _benchmark_identity(
 		},
 		'decoder_initial_state_sha256': 'c' * 64,
 		'label_path': '/data/parihaka_labels.npy',
+		'label_metadata_path': '/data/parihaka_labels_metadata.json',
+		'prepared_label_identity': {
+			'labels_sha256': 'd' * 64,
+			'source_npz_path': '/data/parihaka_labels.npz',
+			'source_key': 'labels',
+			'shape': [100, 200, 300],
+			'dtype': 'int8',
+			'class_definition': {
+				'positive_class_id': 5,
+				'negative_class_ids': [1, 2, 3, 4, 6],
+			},
+		},
 		'train_lines': {
 			'inline': supervision['train_inline'],
 			'crossline': supervision['train_crossline'],
@@ -270,6 +282,16 @@ def test_summary_requires_benchmark_identity(tmp_path: Path) -> None:
 	('keys', 'value', 'message'),
 	[
 		(('label_path',), '/data/different_labels.npy', 'label_path'),
+		(
+			('label_metadata_path',),
+			'/data/different_labels_metadata.json',
+			'label_metadata_path',
+		),
+		(
+			('prepared_label_identity', 'labels_sha256'),
+			'e' * 64,
+			'prepared_label_identity',
+		),
 		(
 			('embedding', 'common_metadata', 'source_amplitude_path'),
 			'/data/different_amplitude.npy',
