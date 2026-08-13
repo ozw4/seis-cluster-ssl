@@ -11,9 +11,10 @@ import pytest
 import torch
 import yaml
 
-from seis_ssl_cluster.embedding.writer import output_paths
+from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.parihaka.channel_data import SectionLines, split_mask_for_crop
 from seis_ssl_cluster.parihaka.channel_decoder import (
+	CHANNEL_PRETRAINED_MODEL_TAG,
 	ChannelDecoderConfig,
 	DecoderArchitecture,
 	DecoderTiles,
@@ -58,7 +59,41 @@ def _config(tmp_path: Path) -> ChannelDecoderConfig:
 	)
 
 
-def _write_pair(config: ChannelDecoderConfig) -> None:
+def _write_model_checkpoints(config: ChannelDecoderConfig) -> tuple[Path, Path]:
+	checkpoint_root = config.pretrained_embeddings.parent / 'pretraining'
+	pretrained_checkpoint = (
+		checkpoint_root
+		/ 'parihaka'
+		/ 'facies_benchmark_v1'
+		/ CHANNEL_PRETRAINED_MODEL_TAG
+		/ 'full_100ep'
+		/ 'latest.pt'
+	)
+	random_checkpoint = checkpoint_root / 'random' / 'mae_random_seed42.pt'
+	pretrained_checkpoint.parent.mkdir(parents=True)
+	random_checkpoint.parent.mkdir(parents=True)
+	torch.save(
+		{'model_state_dict': {'weight': torch.ones(1)}}, pretrained_checkpoint
+	)
+	torch.save(
+		{
+			'model_state_dict': {'weight': torch.zeros(1)},
+			'metadata': {
+				'random_encoder_baseline': True,
+				'pretrained_weights_loaded': False,
+				'seed': 42,
+				'reference_checkpoint': str(pretrained_checkpoint),
+				'reference_model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+			},
+			'training_state': {'checkpoint_kind': 'random_init'},
+		},
+		random_checkpoint,
+	)
+	return pretrained_checkpoint, random_checkpoint
+
+
+def _write_pair(config: ChannelDecoderConfig) -> tuple[Path, Path]:
+	pretrained_checkpoint, random_checkpoint = _write_model_checkpoints(config)
 	metadata = {
 		'survey_id': config.survey_id,
 		'source_amplitude_path': '/data/parihaka_amplitude.npy',
@@ -77,9 +112,9 @@ def _write_pair(config: ChannelDecoderConfig) -> None:
 		'precision': {'device_type': 'cpu', 'autocast': False},
 		'pretraining_objective': {'name': 'masked_autoencoding'},
 	}
-	for root, checkpoint_path, checkpoint_sha256 in (
-		(config.pretrained_embeddings, '/checkpoints/pretrained.pt', 'a' * 64),
-		(config.random_embeddings, '/checkpoints/random.pt', 'b' * 64),
+	for root, checkpoint_path in (
+		(config.pretrained_embeddings, pretrained_checkpoint),
+		(config.random_embeddings, random_checkpoint),
 	):
 		paths = output_paths(root, config.survey_id)
 		root.mkdir(parents=True)
@@ -89,12 +124,13 @@ def _write_pair(config: ChannelDecoderConfig) -> None:
 			json.dumps(
 				{
 					**metadata,
-					'checkpoint_path': checkpoint_path,
-					'checkpoint_sha256': checkpoint_sha256,
+					'checkpoint_path': str(checkpoint_path),
+					'checkpoint_sha256': file_sha256(checkpoint_path),
 				}
 			),
 			encoding='utf-8',
 		)
+	return pretrained_checkpoint, random_checkpoint
 
 
 def _config_mapping(tmp_path: Path) -> dict[str, object]:
@@ -261,11 +297,143 @@ def test_random_embedding_array_must_be_floating(tmp_path: Path) -> None:
 def test_embedding_pair_must_use_distinct_checkpoint_sha256(tmp_path: Path) -> None:
 	config = _config(tmp_path)
 	_write_pair(config)
+	pretrained_paths = output_paths(config.pretrained_embeddings, config.survey_id)
 	random_paths = output_paths(config.random_embeddings, config.survey_id)
+	pretrained_metadata = json.loads(
+		pretrained_paths.metadata.read_text(encoding='utf-8')
+	)
 	metadata = json.loads(random_paths.metadata.read_text(encoding='utf-8'))
-	metadata['checkpoint_sha256'] = 'a' * 64
+	metadata['checkpoint_sha256'] = pretrained_metadata['checkpoint_sha256']
 	random_paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
 	with pytest.raises(ValueError, match='checkpoint_sha256 must differ'):
+		inspect_embedding_pair(config)
+
+
+def test_embedding_pair_records_validated_model_sources(tmp_path: Path) -> None:
+	config = _config(tmp_path)
+	pretrained_checkpoint, random_checkpoint = _write_pair(config)
+	geometry = inspect_embedding_pair(config)
+
+	assert geometry.pretrained_model_source == {
+		'role': 'pretrained',
+		'checkpoint_path': str(pretrained_checkpoint),
+		'checkpoint_sha256': file_sha256(pretrained_checkpoint),
+		'model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+	}
+	assert geometry.random_model_source == {
+		'role': 'random',
+		'checkpoint_path': str(random_checkpoint),
+		'checkpoint_sha256': file_sha256(random_checkpoint),
+		'random_encoder_baseline': True,
+		'pretrained_weights_loaded': False,
+		'seed': 42,
+		'checkpoint_kind': 'random_init',
+		'reference_checkpoint': str(pretrained_checkpoint),
+		'reference_checkpoint_sha256': file_sha256(pretrained_checkpoint),
+		'reference_model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+	}
+
+
+@pytest.mark.parametrize(
+	('section', 'key', 'value', 'message'),
+	[
+		('metadata', 'random_encoder_baseline', False, 'random_encoder_baseline'),
+		('metadata', 'pretrained_weights_loaded', True, 'pretrained_weights_loaded'),
+		('metadata', 'seed', 43, 'metadata.seed'),
+		(
+			'training_state',
+			'checkpoint_kind',
+			'epoch',
+			'training_state.checkpoint_kind',
+		),
+		(
+			'metadata',
+			'reference_checkpoint',
+			'/wrong/latest.pt',
+			'reference_checkpoint',
+		),
+		('metadata', 'reference_model_tag', 'wrong-model', 'reference_model_tag'),
+	],
+)
+def test_random_checkpoint_source_metadata_is_required(
+	tmp_path: Path,
+	section: str,
+	key: str,
+	value: object,
+	message: str,
+) -> None:
+	config = _config(tmp_path)
+	_, random_checkpoint = _write_pair(config)
+	payload = torch.load(random_checkpoint, map_location='cpu', weights_only=False)
+	payload[section][key] = value
+	torch.save(payload, random_checkpoint)
+	random_paths = output_paths(config.random_embeddings, config.survey_id)
+	metadata = json.loads(random_paths.metadata.read_text(encoding='utf-8'))
+	metadata['checkpoint_sha256'] = file_sha256(random_checkpoint)
+	random_paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+	with pytest.raises(ValueError, match=message):
+		inspect_embedding_pair(config)
+
+
+def test_random_embedding_rejects_a_regular_trained_checkpoint(
+	tmp_path: Path,
+) -> None:
+	config = _config(tmp_path)
+	_, random_checkpoint = _write_pair(config)
+	torch.save(
+		{
+			'model_state_dict': {'weight': torch.ones(1)},
+			'training_state': {'checkpoint_kind': 'epoch'},
+		},
+		random_checkpoint,
+	)
+	random_paths = output_paths(config.random_embeddings, config.survey_id)
+	metadata = json.loads(random_paths.metadata.read_text(encoding='utf-8'))
+	metadata['checkpoint_sha256'] = file_sha256(random_checkpoint)
+	random_paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+	with pytest.raises(TypeError, match='checkpoint metadata must be a mapping'):
+		inspect_embedding_pair(config)
+
+
+def test_pretrained_and_random_embedding_directories_cannot_be_reversed(
+	tmp_path: Path,
+) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	reversed_config = replace(
+		config,
+		pretrained_embeddings=config.random_embeddings,
+		random_embeddings=config.pretrained_embeddings,
+	)
+	with pytest.raises(ValueError, match=r'expected Parihaka full_100ep/latest\.pt'):
+		inspect_embedding_pair(reversed_config)
+
+
+def test_pretrained_embedding_requires_expected_parihaka_checkpoint(
+	tmp_path: Path,
+) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	unexpected = tmp_path / 'other_model' / 'latest.pt'
+	unexpected.parent.mkdir(parents=True)
+	torch.save({'model_state_dict': {'weight': torch.ones(1)}}, unexpected)
+	pretrained_paths = output_paths(config.pretrained_embeddings, config.survey_id)
+	metadata = json.loads(pretrained_paths.metadata.read_text(encoding='utf-8'))
+	metadata['checkpoint_path'] = str(unexpected)
+	metadata['checkpoint_sha256'] = file_sha256(unexpected)
+	pretrained_paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+	with pytest.raises(ValueError, match=r'expected Parihaka full_100ep/latest\.pt'):
+		inspect_embedding_pair(config)
+
+
+def test_embedding_checkpoint_sha_must_match_actual_file(tmp_path: Path) -> None:
+	config = _config(tmp_path)
+	_write_pair(config)
+	random_paths = output_paths(config.random_embeddings, config.survey_id)
+	metadata = json.loads(random_paths.metadata.read_text(encoding='utf-8'))
+	metadata['checkpoint_sha256'] = 'c' * 64
+	random_paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+	with pytest.raises(ValueError, match='does not match checkpoint file'):
 		inspect_embedding_pair(config)
 
 
@@ -354,7 +522,9 @@ def test_channel_metrics() -> None:
 	assert metrics['balanced_accuracy'] == pytest.approx((0.8 + 0.7) / 2)
 
 
-def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
+def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
+	tmp_path: Path,
+) -> None:
 	config = _config(tmp_path)
 	config = replace(
 		config,
@@ -379,9 +549,16 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 		'precision': {'device_type': 'cpu', 'autocast': False},
 		'pretraining_objective': {'name': 'masked_autoencoding'},
 	}
+	pretrained_checkpoint, random_checkpoint = _write_model_checkpoints(config)
+	pretrained_checkpoint_sha256 = file_sha256(pretrained_checkpoint)
+	random_checkpoint_sha256 = file_sha256(random_checkpoint)
 	for root, checkpoint_path, checkpoint_sha256 in (
-		(config.pretrained_embeddings, '/checkpoints/pretrained.pt', 'a' * 64),
-		(config.random_embeddings, '/checkpoints/random.pt', 'b' * 64),
+		(
+			config.pretrained_embeddings,
+			pretrained_checkpoint,
+			pretrained_checkpoint_sha256,
+		),
+		(config.random_embeddings, random_checkpoint, random_checkpoint_sha256),
 	):
 		paths = output_paths(root, config.survey_id)
 		root.mkdir(parents=True)
@@ -391,7 +568,7 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 			json.dumps(
 				{
 					**metadata,
-					'checkpoint_path': checkpoint_path,
+					'checkpoint_path': str(checkpoint_path),
 					'checkpoint_sha256': checkpoint_sha256,
 				}
 			),
@@ -437,8 +614,14 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 	payload = torch.load(latest, map_location='cpu', weights_only=False)
 	identity = payload['run_identity']
 	assert identity['embedding'] == {
-		'checkpoint_path': '/checkpoints/pretrained.pt',
-		'checkpoint_sha256': 'a' * 64,
+		'checkpoint_path': str(pretrained_checkpoint),
+		'checkpoint_sha256': pretrained_checkpoint_sha256,
+		'model_source': {
+			'role': 'pretrained',
+			'checkpoint_path': str(pretrained_checkpoint),
+			'checkpoint_sha256': pretrained_checkpoint_sha256,
+			'model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+		},
 		'common_metadata': {
 			key: metadata[key]
 			for key in (
@@ -479,7 +662,12 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 	changed_metadata = json.loads(
 		pretrained_metadata_path.read_text(encoding='utf-8')
 	)
-	changed_metadata['checkpoint_sha256'] = 'c' * 64
+	original_checkpoint = pretrained_checkpoint.read_bytes()
+	torch.save(
+		{'model_state_dict': {'weight': torch.full((1,), 2.0)}},
+		pretrained_checkpoint,
+	)
+	changed_metadata['checkpoint_sha256'] = file_sha256(pretrained_checkpoint)
 	pretrained_metadata_path.write_text(
 		json.dumps(changed_metadata), encoding='utf-8'
 	)
@@ -492,7 +680,8 @@ def test_one_job_max_steps_resume_and_evaluate(tmp_path: Path) -> None:
 	)
 	with pytest.raises(ValueError, match='resume checkpoint does not match'):
 		run_channel_decoder_job(changed_plan, device='cpu', resume=latest)
-	changed_metadata['checkpoint_sha256'] = 'a' * 64
+	pretrained_checkpoint.write_bytes(original_checkpoint)
+	changed_metadata['checkpoint_sha256'] = pretrained_checkpoint_sha256
 	pretrained_metadata_path.write_text(
 		json.dumps(changed_metadata), encoding='utf-8'
 	)

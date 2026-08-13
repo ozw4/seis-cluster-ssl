@@ -8,10 +8,18 @@ from pathlib import Path
 import pytest
 
 from seis_ssl_cluster.parihaka.channel_data import DATA_SIZE_PREFIX, LAYOUT_IDS
+from seis_ssl_cluster.parihaka.channel_decoder import (
+	CHANNEL_PRETRAINED_MODEL_TAG,
+)
 from seis_ssl_cluster.parihaka.channel_results import (
 	ChannelSummaryConfig,
 	inspect_channel_benchmark_results,
 	summarize_channel_benchmark,
+)
+
+_EXPECTED_PRETRAINED_CHECKPOINT = (
+	'/artifacts/pretraining/parihaka/facies_benchmark_v1/'
+	f'{CHANNEL_PRETRAINED_MODEL_TAG}/full_100ep/latest.pt'
 )
 
 
@@ -39,13 +47,42 @@ def _benchmark_identity(
 	model: str, layout_index: int, layout_id: str, data_size: str
 ) -> dict[str, object]:
 	supervision = _supervision(layout_index, data_size)
+	pretrained_checkpoint = _EXPECTED_PRETRAINED_CHECKPOINT
+	checkpoint_path = (
+		pretrained_checkpoint
+		if model == 'pretrained'
+		else '/artifacts/pretraining/random/mae_random_seed42.pt'
+	)
+	checkpoint_sha256 = ('a' if model == 'pretrained' else 'b') * 64
+	model_source = (
+		{
+			'role': 'pretrained',
+			'checkpoint_path': checkpoint_path,
+			'checkpoint_sha256': checkpoint_sha256,
+			'model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+		}
+		if model == 'pretrained'
+		else {
+			'role': 'random',
+			'checkpoint_path': checkpoint_path,
+			'checkpoint_sha256': checkpoint_sha256,
+			'random_encoder_baseline': True,
+			'pretrained_weights_loaded': False,
+			'seed': 42,
+			'checkpoint_kind': 'random_init',
+			'reference_checkpoint': pretrained_checkpoint,
+			'reference_checkpoint_sha256': 'a' * 64,
+			'reference_model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+		}
+	)
 	return {
 		'model': model,
 		'layout_id': layout_id,
 		'data_size': data_size,
 		'embedding': {
-			'checkpoint_path': f'/checkpoints/{model}.pt',
-			'checkpoint_sha256': ('a' if model == 'pretrained' else 'b') * 64,
+			'checkpoint_path': checkpoint_path,
+			'checkpoint_sha256': checkpoint_sha256,
+			'model_source': model_source,
 			'common_metadata': {
 				'survey_id': 'parihaka_full',
 				'source_amplitude_path': '/data/parihaka.npy',
@@ -177,6 +214,19 @@ def _set_nested(
 	target[keys[-1]] = value
 
 
+def _set_embedding_checkpoint(
+	payload: dict[str, object], field: str, value: str
+) -> None:
+	identity = payload['benchmark_identity']
+	assert isinstance(identity, dict)
+	embedding = identity['embedding']
+	assert isinstance(embedding, dict)
+	embedding[field] = value
+	model_source = embedding['model_source']
+	assert isinstance(model_source, dict)
+	model_source[field] = value
+
+
 def test_summary_fails_when_any_of_30_jobs_is_missing(tmp_path: Path) -> None:
 	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
 	with pytest.raises(FileNotFoundError, match='all 30 jobs'):
@@ -257,7 +307,10 @@ def test_summary_rejects_global_benchmark_identity_drift(
 @pytest.mark.parametrize(
 	('field', 'value'),
 	[
-		('checkpoint_path', '/checkpoints/other_pretrained.pt'),
+		(
+			'checkpoint_path',
+			'/other' + _EXPECTED_PRETRAINED_CHECKPOINT,
+		),
 		('checkpoint_sha256', 'd' * 64),
 	],
 )
@@ -271,9 +324,7 @@ def test_summary_rejects_checkpoint_drift_within_model_jobs(
 		'pretrained',
 		'layout_004',
 		'large',
-		lambda payload: payload['benchmark_identity']['embedding'].__setitem__(
-			field, value
-		),
+		lambda payload: _set_embedding_checkpoint(payload, field, value),
 	)
 	with pytest.raises(ValueError, match='checkpoint does not match its other 15 jobs'):
 		inspect_channel_benchmark_results(config)
@@ -289,11 +340,66 @@ def test_summary_rejects_same_checkpoint_sha_for_both_models(tmp_path: Path) -> 
 				'random',
 				layout_id,
 				size,
-				lambda payload: payload['benchmark_identity'][
-					'embedding'
-				].__setitem__('checkpoint_sha256', 'a' * 64),
+				lambda payload: _set_embedding_checkpoint(
+					payload, 'checkpoint_sha256', 'a' * 64
+				),
 			)
 	with pytest.raises(ValueError, match='checkpoint SHA-256 must differ'):
+		inspect_channel_benchmark_results(config)
+
+
+@pytest.mark.parametrize(
+	('model', 'field', 'value', 'message'),
+	[
+		('pretrained', 'role', 'random', 'model-source role'),
+		('pretrained', 'model_tag', 'wrong-model', 'model_tag mismatch'),
+		('random', 'role', 'pretrained', 'model-source role'),
+		('random', 'random_encoder_baseline', False, 'random_encoder_baseline'),
+		('random', 'pretrained_weights_loaded', True, 'pretrained_weights_loaded'),
+		('random', 'seed', 43, 'seed mismatch'),
+		('random', 'checkpoint_kind', 'epoch', 'checkpoint_kind mismatch'),
+		('random', 'reference_model_tag', 'wrong-model', 'reference_model_tag'),
+	],
+)
+def test_summary_rejects_invalid_model_source_role_identity(
+	tmp_path: Path,
+	model: str,
+	field: str,
+	value: object,
+	message: str,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+	_mutate_metrics(
+		config,
+		model,
+		'layout_000',
+		'small',
+		lambda payload: payload['benchmark_identity']['embedding'][
+			'model_source'
+		].__setitem__(field, value),
+	)
+	with pytest.raises(ValueError, match=message):
+		inspect_channel_benchmark_results(config)
+
+
+def test_summary_rejects_random_reference_to_another_pretrained_source(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+	for layout_id in LAYOUT_IDS:
+		for size in DATA_SIZE_PREFIX:
+			_mutate_metrics(
+				config,
+				'random',
+				layout_id,
+				size,
+				lambda payload: payload['benchmark_identity']['embedding'][
+					'model_source'
+				].__setitem__('reference_checkpoint', '/other/latest.pt'),
+			)
+	with pytest.raises(ValueError, match='does not match pretrained source'):
 		inspect_channel_benchmark_results(config)
 
 

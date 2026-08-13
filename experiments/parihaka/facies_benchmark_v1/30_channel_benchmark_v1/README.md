@@ -70,8 +70,13 @@ and tile counts to match the interrupted run exactly.
 training from `best.pt`; no probability volume is written. The summary requires
 all 30 `metrics.json` files and reports paired test Channel-IoU deltas only.
 Each metrics file carries the same benchmark identity used for resume, including
-the seeded decoder-initial-state SHA-256. Before aggregation, the summary requires
-common label, embedding metadata, geometry, decoder, training, and tile identity
-across all jobs; one checkpoint path/SHA-256 within each model; distinct
-pretrained/random checkpoint SHA-256 values; and matching non-checkpoint identity,
-supervision, class weights, split counts, and tile counts within every pair.
+the seeded decoder-initial-state SHA-256 and the validated model-source role.
+Preflight hashes the checkpoint files referenced by embedding metadata, requires
+the pretrained source to be the benchmark's Parihaka `full_100ep/latest.pt`, and
+requires the random source to carry the seed-42 `random_init` metadata referencing
+that pretrained checkpoint and expected model tag. Before aggregation, the summary
+requires common label, embedding metadata, geometry, decoder, training, and tile
+identity across all jobs; one checkpoint and model-source identity within each
+model; distinct pretrained/random checkpoint SHA-256 values; valid model roles;
+and matching non-checkpoint identity, supervision, class weights, split counts,
+and tile counts within every pair.

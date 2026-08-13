@@ -1,3 +1,4 @@
+# ruff: noqa: CPY001
 """Random MAE checkpoint creation for encoder baseline comparisons."""
 
 from __future__ import annotations
@@ -221,22 +222,32 @@ def _checkpoint_config(payload: Mapping[str, object]) -> Mapping[str, object]:
 	return cast('Mapping[str, object]', value)
 
 
-def _load_checkpoint_config_without_weights(path: Path) -> Mapping[str, object]:
-	"""Read the resolved config from a torch checkpoint without tensor storages."""
-	with zipfile.ZipFile(path) as archive:
+def load_checkpoint_metadata_without_weights(
+	path: str | Path,
+) -> Mapping[str, object]:
+	"""Read a torch checkpoint mapping without materializing tensor storage."""
+	checkpoint_path = Path(path)
+	with zipfile.ZipFile(checkpoint_path) as archive:
 		data_names = [
 			name for name in archive.namelist() if name.endswith('/data.pkl')
 		]
 		if len(data_names) != 1:
-			msg = f'reference checkpoint has invalid torch archive metadata: {path}'
+			msg = (
+				'checkpoint has invalid torch archive metadata: '
+				f'{checkpoint_path}'
+			)
 			raise ValueError(msg)
 		payload = _ConfigOnlyCheckpointUnpickler(
 			io.BytesIO(archive.read(data_names[0])),
 		).load()
 	if not isinstance(payload, Mapping):
-		msg = 'reference checkpoint payload must be a mapping'
-		raise TypeError(msg)
-	return _checkpoint_config(payload)
+		raise TypeError('checkpoint payload must be a mapping')
+	return cast('Mapping[str, object]', payload)
+
+
+def _load_checkpoint_config_without_weights(path: Path) -> Mapping[str, object]:
+	"""Read the resolved config from a torch checkpoint without tensor storages."""
+	return _checkpoint_config(load_checkpoint_metadata_without_weights(path))
 
 
 def _first_mapping(

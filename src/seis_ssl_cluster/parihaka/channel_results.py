@@ -16,6 +16,11 @@ from seis_ssl_cluster.parihaka.channel_data import (
 	DATA_SIZE_PREFIX,
 	LAYOUT_IDS,
 )
+from seis_ssl_cluster.parihaka.channel_decoder import (
+	CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX,
+	CHANNEL_PRETRAINED_MODEL_TAG,
+	CHANNEL_RANDOM_ENCODER_SEED,
+)
 
 MODELS = ('pretrained', 'random')
 OUTPUT_NAMES = ('comparison.csv', 'summary.json', 'summary.md')
@@ -63,6 +68,24 @@ _GLOBAL_IDENTITY_KEYS = (
 	'training',
 	'tiles',
 )
+_PRETRAINED_MODEL_SOURCE_KEYS = {
+	'role',
+	'checkpoint_path',
+	'checkpoint_sha256',
+	'model_tag',
+}
+_RANDOM_MODEL_SOURCE_KEYS = {
+	'role',
+	'checkpoint_path',
+	'checkpoint_sha256',
+	'random_encoder_baseline',
+	'pretrained_weights_loaded',
+	'seed',
+	'checkpoint_kind',
+	'reference_checkpoint',
+	'reference_checkpoint_sha256',
+	'reference_model_tag',
+}
 
 
 @dataclass(frozen=True)
@@ -335,7 +358,12 @@ def _validate_benchmark_identity(
 				f'{path} benchmark_identity.{key} must equal {expected!r}'
 			)
 	embedding = _identity_mapping(identity, 'embedding', path)
-	if set(embedding) != {'checkpoint_path', 'checkpoint_sha256', 'common_metadata'}:
+	if set(embedding) != {
+		'checkpoint_path',
+		'checkpoint_sha256',
+		'model_source',
+		'common_metadata',
+	}:
 		raise ValueError(f'{path} benchmark_identity.embedding has invalid fields')
 	checkpoint_path = embedding.get('checkpoint_path')
 	if not isinstance(checkpoint_path, str) or not checkpoint_path:
@@ -346,6 +374,7 @@ def _validate_benchmark_identity(
 		embedding.get('checkpoint_sha256'),
 		f'{path} benchmark_identity.embedding.checkpoint_sha256',
 	)
+	_validate_model_source(embedding, model, path)
 	common_metadata = _identity_mapping(
 		embedding, 'common_metadata', path, prefix='benchmark_identity.embedding'
 	)
@@ -411,6 +440,74 @@ def _validate_benchmark_identity(
 				)
 
 
+def _validate_model_source(  # noqa: C901
+	embedding: Mapping[str, object], model: str, path: Path
+) -> None:
+	source = _identity_mapping(
+		embedding, 'model_source', path, prefix='benchmark_identity.embedding'
+	)
+	expected_keys = (
+		_PRETRAINED_MODEL_SOURCE_KEYS
+		if model == 'pretrained'
+		else _RANDOM_MODEL_SOURCE_KEYS
+	)
+	if set(source) != expected_keys:
+		raise ValueError(
+			f'{path} benchmark_identity.embedding.model_source has invalid fields '
+			f'for {model}'
+		)
+	if source.get('role') != model:
+		raise ValueError(
+			f'{path} benchmark_identity embedding model-source role must be {model}'
+		)
+	if source.get('checkpoint_path') != embedding.get('checkpoint_path'):
+		raise ValueError(
+			f'{path} model-source checkpoint_path does not match embedding identity'
+		)
+	if source.get('checkpoint_sha256') != embedding.get('checkpoint_sha256'):
+		raise ValueError(
+			f'{path} model-source checkpoint_sha256 does not match embedding identity'
+		)
+	if model == 'pretrained':
+		checkpoint_path = Path(str(source['checkpoint_path']))
+		if tuple(
+			checkpoint_path.parts[-len(CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX) :]
+		) != CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX:
+			raise ValueError(
+				f'{path} pretrained model-source checkpoint is not the expected '
+				'Parihaka full_100ep/latest.pt'
+			)
+		if source.get('model_tag') != CHANNEL_PRETRAINED_MODEL_TAG:
+			raise ValueError(f'{path} pretrained model-source model_tag mismatch')
+		return
+	_validate_sha256(
+		source.get('reference_checkpoint_sha256'),
+		f'{path} random model-source reference_checkpoint_sha256',
+	)
+	if source.get('random_encoder_baseline') is not True:
+		raise ValueError(
+			f'{path} random model-source random_encoder_baseline mismatch'
+		)
+	if source.get('pretrained_weights_loaded') is not False:
+		raise ValueError(
+			f'{path} random model-source pretrained_weights_loaded mismatch'
+		)
+	expected = {
+		'seed': CHANNEL_RANDOM_ENCODER_SEED,
+		'checkpoint_kind': 'random_init',
+		'reference_model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+	}
+	for key, value in expected.items():
+		if source.get(key) != value:
+			raise ValueError(f'{path} random model-source {key} mismatch')
+	if not isinstance(source.get('reference_checkpoint'), str) or not source.get(
+		'reference_checkpoint'
+	):
+		raise TypeError(
+			f'{path} random model-source reference_checkpoint must be non-empty'
+		)
+
+
 def _validate_identity_redundancy(
 	payload: Mapping[str, object], identity: Mapping[str, object], path: Path
 ) -> None:
@@ -448,7 +545,7 @@ def _validate_identity_redundancy(
 		)
 
 
-def _validate_benchmark_identity_parity(
+def _validate_benchmark_identity_parity(  # noqa: C901
 	rows: Mapping[tuple[str, str, str], Mapping[str, object]], runs_root: Path
 ) -> None:
 	first_key = (MODELS[0], LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
@@ -466,7 +563,7 @@ def _validate_benchmark_identity_parity(
 			raise ValueError(
 				f'{path} embedding common metadata does not match all 30 jobs'
 			)
-	model_checkpoints: dict[str, tuple[object, object]] = {}
+	model_checkpoints: dict[str, tuple[object, object, object]] = {}
 	for model in MODELS:
 		first_model_key = (model, LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
 		first_embedding = _embedding_identity(
@@ -477,6 +574,7 @@ def _validate_benchmark_identity_parity(
 		checkpoint = (
 			first_embedding['checkpoint_path'],
 			first_embedding['checkpoint_sha256'],
+			first_embedding['model_source'],
 		)
 		model_checkpoints[model] = checkpoint
 		for layout_id in LAYOUT_IDS:
@@ -488,6 +586,7 @@ def _validate_benchmark_identity_parity(
 				if (
 					embedding['checkpoint_path'],
 					embedding['checkpoint_sha256'],
+					embedding['model_source'],
 				) != checkpoint:
 					raise ValueError(
 						f'{_metrics_path(runs_root, *key)} {model} embedding '
@@ -495,6 +594,24 @@ def _validate_benchmark_identity_parity(
 					)
 	if model_checkpoints['pretrained'][1] == model_checkpoints['random'][1]:
 		raise ValueError('pretrained and random checkpoint SHA-256 must differ')
+	pretrained_source = model_checkpoints['pretrained'][2]
+	random_source = model_checkpoints['random'][2]
+	if not isinstance(pretrained_source, Mapping) or not isinstance(
+		random_source, Mapping
+	):
+		raise TypeError('benchmark model-source identity must be a mapping')
+	if random_source['reference_checkpoint'] != pretrained_source['checkpoint_path']:
+		raise ValueError(
+			'random model-source reference checkpoint does not match pretrained source'
+		)
+	if (
+		random_source['reference_checkpoint_sha256']
+		!= pretrained_source['checkpoint_sha256']
+	):
+		raise ValueError(
+			'random model-source reference checkpoint SHA-256 does not match '
+			'pretrained source'
+		)
 
 
 def _benchmark_identity(

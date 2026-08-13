@@ -1,3 +1,5 @@
+# ruff: noqa: CPY001, TC002
+
 from __future__ import annotations
 
 import json
@@ -21,6 +23,7 @@ from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training import load_checkpoint
 from seis_ssl_cluster.training.random_checkpoint import (
 	create_random_mae_checkpoint,
+	load_checkpoint_metadata_without_weights,
 	random_mae_checkpoint_config_from_mapping,
 )
 
@@ -105,6 +108,39 @@ def test_create_random_mae_checkpoint_reads_metadata_not_reference_weights(
 	)
 
 	assert result == output_checkpoint
+	assert any(name.endswith('/data.pkl') for name in read_names)
+	assert not any('/data/' in name for name in read_names)
+
+
+def test_random_checkpoint_metadata_reader_skips_tensor_storage(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	reference_checkpoint = _write_reference_checkpoint(tmp_path)
+	random_checkpoint = tmp_path / 'artifacts' / 'pretraining' / 'random.pt'
+	create_random_mae_checkpoint(
+		reference_checkpoint=reference_checkpoint,
+		reference_model_tag='reference-model',
+		seed=42,
+		output_checkpoint=random_checkpoint,
+	)
+	read_names: list[str] = []
+	original_read = random_checkpoint_module.zipfile.ZipFile.read
+
+	def record_read(
+		self: random_checkpoint_module.zipfile.ZipFile,
+		name: str,
+		*args: object,
+		**kwargs: object,
+	) -> bytes:
+		read_names.append(name)
+		return original_read(self, name, *args, **kwargs)
+
+	monkeypatch.setattr(random_checkpoint_module.zipfile.ZipFile, 'read', record_read)
+	payload = load_checkpoint_metadata_without_weights(random_checkpoint)
+
+	assert payload['metadata']['random_encoder_baseline'] is True
+	assert payload['training_state']['checkpoint_kind'] == 'random_init'
 	assert any(name.endswith('/data.pkl') for name in read_names)
 	assert not any('/data/' in name for name in read_names)
 
