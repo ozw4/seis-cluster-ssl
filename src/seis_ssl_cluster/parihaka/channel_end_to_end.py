@@ -941,11 +941,11 @@ def _validate_parihaka_mae_geometry(
 		out_channels=1,
 		patch_size_xyz=CHANNEL_PATCH_SIZE_VOXELS,
 		encoder_dim=384,
-		encoder_depth=12,
+		encoder_depth=8,
 		encoder_heads=6,
 		decoder_dim=256,
 		decoder_depth=4,
-		decoder_heads=8,
+		decoder_heads=4,
 	)
 	if geometry != expected_geometry:
 		raise ValueError('checkpoint model config is not the expected Parihaka MAE')

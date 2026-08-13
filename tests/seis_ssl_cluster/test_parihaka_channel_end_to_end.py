@@ -267,11 +267,11 @@ class _PreflightFixture:
 			'out_channels': 1,
 			'patch_size': [8, 8, 8],
 			'encoder_dim': 384,
-			'encoder_depth': 12,
+			'encoder_depth': 8,
 			'encoder_heads': 6,
 			'decoder_dim': 256,
 			'decoder_depth': 4,
-			'decoder_heads': 8,
+			'decoder_heads': 4,
 		}
 
 	def write_checkpoints(
@@ -327,7 +327,7 @@ class _PreflightFixture:
 			'token_grid_shape': [2, 2, 2],
 			'model_geometry': {
 				'embed_dim': 384,
-				'depth': 12,
+				'depth': 8,
 				'num_heads': 6,
 			},
 			'min_token_valid_fraction': 1.0,
