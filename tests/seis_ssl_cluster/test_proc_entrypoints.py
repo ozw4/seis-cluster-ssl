@@ -219,6 +219,15 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'run_parihaka_channel_end_to_end.py': (
+		'--config',
+		'--encoder-init',
+		'--layout',
+		'--size',
+		'--layout-config',
+		'--device',
+		'--dry-run',
+	),
 	'extract_embeddings.py': (
 		'--config',
 		'--dry-run',
