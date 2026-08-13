@@ -230,6 +230,15 @@ HELP_FLAG_CONTRACTS = {
 		'--max-steps',
 		'--resume',
 	),
+	'summarize_parihaka_channel_end_to_end.py': (
+		'--config',
+		'--dry-run',
+	),
+	'summarize_parihaka_channel_four_way.py': (
+		'--config',
+		'--frozen-config',
+		'--dry-run',
+	),
 	'extract_embeddings.py': (
 		'--config',
 		'--dry-run',
