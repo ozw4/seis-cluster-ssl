@@ -71,6 +71,9 @@ from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_control import (
 from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_results import (
 	f3_lithology_voxel_label_budget_results_config_from_mapping,
 )
+from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_split import (
+	f3_lithology_voxel_label_budget_split_config_from_mapping,
+)
 from seis_ssl_cluster.config.f3_lithology_voxel_label_budget_suite import (
 	f3_lithology_voxel_label_budget_suite_config_from_mapping,
 )
@@ -445,6 +448,12 @@ F3_VOXEL_LABEL_BUDGET_CONFIGS = [
 	F3_VOXEL_LABEL_BUDGET_ROOT / '02_run_voxel_label_budget_suite.yaml',
 	F3_VOXEL_LABEL_BUDGET_ROOT / '03_summarize_voxel_label_budget.yaml',
 ]
+F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_ROOT = (
+	F3_ROOT / '96_strat_hmm_multi_head_k6810_low_label_six_split_v1'
+)
+F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_CONFIGS = sorted(
+	F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_ROOT.glob('*.yaml')
+)
 F3_VOXEL_LABEL_BUDGET_CURRENT_K6_CONTROL_CONFIGS = [
 	F3_CURRENT_K6_CONTROL_ROOT / '07_run_current_k6_voxel_label_budget.yaml',
 	F3_CURRENT_K6_CONTROL_ROOT / '08_summarize_current_k6_control.yaml',
@@ -596,6 +605,10 @@ REQUIRED_ACTIVE_CONFIG_GROUPS = (
 	('f3 voxel evaluation', F3_VOXEL_EVALUATION_CONFIGS),
 	('f3 voxel report', F3_VOXEL_REPORT_CONFIGS),
 	('f3 voxel label budget', F3_VOXEL_LABEL_BUDGET_CONFIGS),
+	(
+		'f3 voxel label budget independent six split',
+		F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_CONFIGS,
+	),
 	(
 		'f3 voxel label budget current K6 control',
 		F3_VOXEL_LABEL_BUDGET_CURRENT_K6_CONTROL_CONFIGS,
@@ -1598,10 +1611,12 @@ def test_active_f3_voxel_label_budget_suite_config_resolves() -> None:
 
 
 def test_active_f3_voxel_label_budget_summary_config_resolves() -> None:
-	config = f3_lithology_voxel_label_budget_results_config_from_mapping(
-		load_config(F3_VOXEL_LABEL_BUDGET_CONFIGS[2])
-	)
+	raw = load_config(F3_VOXEL_LABEL_BUDGET_CONFIGS[2])
+	config = f3_lithology_voxel_label_budget_results_config_from_mapping(raw)
 
+	paths = raw['paths']
+	assert isinstance(paths, dict)
+	assert config.publish.reports_root == Path(paths['reports_root'])
 	assert config.decision.minimum_positive_budgets == 2
 	assert config.decision.minimum_primary_wins == 4
 	assert config.decision.negative_budget_count == 2
@@ -1612,6 +1627,40 @@ def test_active_f3_voxel_label_budget_summary_config_resolves() -> None:
 	assert config.publish.output_dir == Path(
 		'reports/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1'
 	)
+
+
+@pytest.mark.parametrize(
+	'config_path', F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_CONFIGS
+)
+def test_active_f3_voxel_label_budget_six_split_configs_resolve(
+	config_path: Path,
+) -> None:
+	raw = load_config(config_path)
+	config = f3_lithology_voxel_label_budget_split_config_from_mapping(raw)
+
+	paths = raw['paths']
+	assert isinstance(paths, dict)
+	assert config.reports_root == Path(paths['reports_root'])
+
+
+def test_active_f3_independent_low_label_configs_reject_legacy_results_root(
+) -> None:
+	for config_path, resolver in (
+		(
+			F3_VOXEL_LABEL_BUDGET_CONFIGS[2],
+			f3_lithology_voxel_label_budget_results_config_from_mapping,
+		),
+		(
+			F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_CONFIGS[0],
+			f3_lithology_voxel_label_budget_split_config_from_mapping,
+		),
+	):
+		raw = load_config(config_path)
+		paths = raw['paths']
+		assert isinstance(paths, dict)
+		paths['results_root'] = paths.pop('reports_root')
+		with pytest.raises(ValueError, match='results_root'):
+			resolver(raw)
 
 
 def test_active_f3_section_layout_model_roster_resolves(

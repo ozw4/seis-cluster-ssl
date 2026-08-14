@@ -28,7 +28,7 @@ class F3VoxelLabelBudgetSplitConfig:
 	"""Immutable paths and the intentionally fixed confirmatory matrix."""
 
 	artifact_root: Path
-	results_root: Path
+	reports_root: Path
 	output_root: Path
 	split_inventory_manifest: Path
 	split_dataset_manifest: Path
@@ -64,7 +64,7 @@ def f3_lithology_voxel_label_budget_split_config_from_mapping(
 	paths = _required_mapping(config, 'paths')
 	inputs = _required_mapping(config, 'inputs')
 	matrix = _required_mapping(config, 'matrix')
-	_validate_allowed_keys(paths, frozenset({'artifact_root', 'results_root', 'output_root'}), prefix='paths')
+	_validate_allowed_keys(paths, frozenset({'artifact_root', 'reports_root', 'output_root'}), prefix='paths')
 	_validate_allowed_keys(inputs, frozenset({
 		'split_inventory_manifest', 'split_dataset_manifest', 'voxel_dataset_manifest',
 		'original_dataset_manifest', 'multi_head_decisions', 'multi_head_handoff', 'embeddings',
@@ -81,7 +81,7 @@ def f3_lithology_voxel_label_budget_split_config_from_mapping(
 	}
 	result = F3VoxelLabelBudgetSplitConfig(
 		artifact_root=artifact_root,
-		results_root=_required_absolute_path(paths, 'results_root', prefix='paths'),
+		reports_root=_required_absolute_path(paths, 'reports_root', prefix='paths'),
 		output_root=_required_absolute_path(paths, 'output_root', prefix='paths'),
 		split_inventory_manifest=_required_absolute_path(inputs, 'split_inventory_manifest', prefix='inputs'),
 		split_dataset_manifest=_required_absolute_path(inputs, 'split_dataset_manifest', prefix='inputs'),

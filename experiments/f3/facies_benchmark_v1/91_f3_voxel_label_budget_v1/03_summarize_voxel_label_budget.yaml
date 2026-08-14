@@ -1,6 +1,6 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
-  results_root: reports
+  reports_root: reports
 suite:
   root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split
   dataset_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split/voxel_label_budget_dataset_manifest.json

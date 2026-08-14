@@ -15,7 +15,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_validate_allowed_keys,
 )
 
-DEFAULT_RESULTS_ROOT = Path('reports')
+DEFAULT_REPORTS_ROOT = Path('reports')
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 EXPECTED_BUDGET_COUNT = 3
 EXPECTED_SEED_COUNT = 5
@@ -82,7 +82,7 @@ class F3VoxelLabelBudgetResultsPublishConfig:
 	"""Lightweight result publication settings."""
 
 	enabled: bool = False
-	results_root: Path = DEFAULT_RESULTS_ROOT
+	reports_root: Path = DEFAULT_REPORTS_ROOT
 	output_dir: Path | None = None
 	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 	overwrite: bool = True
@@ -150,7 +150,7 @@ def f3_lithology_voxel_label_budget_results_config_from_mapping(
 	outputs = _required_mapping(config, 'outputs')
 	publish = _required_mapping(config, 'publish')
 	_validate_allowed_keys(
-		paths, frozenset({'artifact_root', 'results_root'}), prefix='paths'
+		paths, frozenset({'artifact_root', 'reports_root'}), prefix='paths'
 	)
 	_validate_allowed_keys(
 		suite,
@@ -183,7 +183,7 @@ def f3_lithology_voxel_label_budget_results_config_from_mapping(
 	artifact_root = _required_absolute_path(
 		paths, 'artifact_root', prefix='paths'
 	)
-	results_root = Path(_required_string(paths, 'results_root', prefix='paths'))
+	reports_root = Path(_required_string(paths, 'reports_root', prefix='paths'))
 	publish_enabled = _publish_optional_bool(publish, 'enabled', default=False)
 	publish_output = _optional_path(publish, 'output_dir')
 	if publish_enabled and publish_output is None:
@@ -229,7 +229,7 @@ def f3_lithology_voxel_label_budget_results_config_from_mapping(
 		overwrite=_required_bool(outputs, 'overwrite', prefix='outputs'),
 		publish=F3VoxelLabelBudgetResultsPublishConfig(
 			enabled=publish_enabled,
-			results_root=results_root,
+			reports_root=reports_root,
 			output_dir=publish_output,
 			max_file_size_bytes=_max_file_size_bytes(publish),
 			overwrite=_required_bool(publish, 'overwrite', prefix='publish'),

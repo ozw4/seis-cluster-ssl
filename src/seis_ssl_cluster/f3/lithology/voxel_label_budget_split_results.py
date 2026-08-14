@@ -843,7 +843,7 @@ def _preflight_six_split_publish_entries(
 
 
 def _publish_dir(config: object) -> Path:
-	return config.results_root / 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_six_split_v1'
+	return config.reports_root / 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_six_split_v1'
 
 
 def _publish_target_names() -> set[str]:

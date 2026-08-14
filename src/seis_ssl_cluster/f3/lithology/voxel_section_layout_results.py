@@ -166,8 +166,8 @@ def f3_lithology_voxel_section_layout_results_config_from_mapping(
 	)
 	if not benchmark_root.is_relative_to(artifact_root):
 		raise ValueError('outputs.benchmark_root must be inside paths.artifact_root')
-	expected_results_root = workspace_root / 'reports'
-	if not final_results_dir.is_relative_to(expected_results_root):
+	expected_reports_root = workspace_root / 'reports'
+	if not final_results_dir.is_relative_to(expected_reports_root):
 		raise ValueError(
 			'outputs.final_results_dir must be inside workspace_root/reports'
 		)

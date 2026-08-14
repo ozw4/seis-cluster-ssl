@@ -112,7 +112,7 @@ def test_publish_overwrite_false_preflights_late_target_conflict(
 	late_target.write_bytes(b'historical table\n')
 	publish_config = F3VoxelLabelBudgetResultsPublishConfig(
 		enabled=True,
-		results_root=tmp_path / 'reports',
+		reports_root=tmp_path / 'reports',
 		output_dir=publish_root,
 		overwrite=False,
 	)
@@ -453,7 +453,7 @@ def _fixture(
 			grid_identity=_identity(anchor_grid),
 		)
 		anchors[role] = root
-	results_root = tmp_path / 'reports'
+	reports_root = tmp_path / 'reports'
 	return F3VoxelLabelBudgetResultsConfig(
 		artifact_root=artifact_root,
 		suite_root=suite_root,
@@ -470,8 +470,8 @@ def _fixture(
 		),
 		publish=F3VoxelLabelBudgetResultsPublishConfig(
 			enabled=publish,
-			results_root=results_root,
-			output_dir=(results_root / 'f3' / 'low_label' if publish else None),
+			reports_root=reports_root,
+			output_dir=(reports_root / 'f3' / 'low_label' if publish else None),
 		),
 	)
 
@@ -845,11 +845,11 @@ def _write_evaluation(  # noqa: PLR0913
 def _raw_config(tmp_path: Path) -> dict[str, object]:
 	artifact_root = tmp_path / 'artifacts'
 	suite_root = artifact_root / 'voxel_label_budget'
-	results_root = tmp_path / 'reports'
+	reports_root = tmp_path / 'reports'
 	return {
 		'paths': {
 			'artifact_root': str(artifact_root),
-			'results_root': str(results_root),
+			'reports_root': str(reports_root),
 		},
 		'suite': {
 			'root': str(suite_root),
@@ -875,7 +875,7 @@ def _raw_config(tmp_path: Path) -> dict[str, object]:
 		'outputs': {'overwrite': False},
 		'publish': {
 			'enabled': False,
-			'output_dir': str(results_root / 'f3' / 'low_label'),
+			'output_dir': str(reports_root / 'f3' / 'low_label'),
 			'max_file_size_mb': 10,
 			'overwrite': True,
 		},
