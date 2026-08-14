@@ -46,6 +46,10 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'create_random_mae_checkpoint.py': (
+		'--config',
+		'--dry-run',
+	),
 	'run_parihaka_channel_end_to_end.py': (
 		'--config',
 		'--encoder-init',

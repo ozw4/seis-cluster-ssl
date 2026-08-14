@@ -12,6 +12,4 @@ Run stages `01` through `04` in order with
 [the scientific contract](../../../../docs/f3_center_trace_masked_periodic_hmm_refresh_plan.md)
 for refresh semantics.
 
-Complete outputs remain under `artifacts/seis_ssl_cluster/`. The former
-original/six-split low-label evaluation and tracked review publication are
-retired.
+Complete outputs remain under `artifacts/seis_ssl_cluster/`.

@@ -12,6 +12,6 @@ validation in numeric YAML order. The generic entrypoints are
 `build_strat_hmm_multi_head_targets.py`, `train_strat_hmm_pretext.py`,
 `extract_embeddings.py`, and `validate_f3_multi_head_pretraining.py`.
 
-Complete outputs remain under `artifacts/seis_ssl_cluster/`. The former
-voxel-count label-budget, multi-seed, six-split, aggregation, and report
-publication stages are retired.
+Complete outputs remain under `artifacts/seis_ssl_cluster/`. This directory
+contains only target production, pretraining, embedding extraction, and
+producer validation stages.

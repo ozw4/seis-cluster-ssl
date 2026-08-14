@@ -1,26 +1,15 @@
 # F3 Reports
 
-This directory is for lightweight, human-readable F3 summaries tracked by Git.
+`reports/f3/legacy/facies_benchmark_v1/` is the frozen reference for the F3
+`facies_benchmark_v1` voxel-count, multiple-seed protocol. Its producer Git
+revision is recorded in [legacy/README.md](legacy/README.md). The frozen files
+are not pipeline inputs.
 
-Recommended layout:
+The next active F3 benchmark will be implemented separately as
+`facies_benchmark_v2`, using section-count conditions and one seed. Its future
+report location is `reports/f3/facies_benchmark_v2/`; that directory and its
+scientific conditions are not defined yet.
 
-```text
-reports/
-└── <survey>/
-    └── <dataset-version>/
-        └── <report-id>/
-```
-
-For F3, report IDs include `inspection`, `lithology_probe`, and
-`baseline_comparison`; experiment-specific reports use the same level.
-
-Keep full F3 execution output under `/workspace/artifacts/seis_ssl_cluster/`.
-Commit only reproducible summaries such as selected Markdown reports, metrics,
-comparison tables, and representative figures. Do not use this directory as a
-pipeline input; experiment definitions and configuration stay in
-`experiments/f3/`.
-
-The retired `facies_benchmark_v1` reports are frozen under
-`reports/f3/legacy/facies_benchmark_v1/`. They are historical references only,
-not active pipeline inputs, and must not be compared directly with a future
-section-count, single-seed benchmark.
+Do not compare v1 and v2 as though they used the same protocol. Complete
+execution outputs, intermediate products, and downstream inputs belong under
+`artifacts/`, not `reports/`.

@@ -10,5 +10,4 @@ Run stages `01` through `05` in order with
 `validate_f3_xy_neighbor_consensus_pretraining.py`. The smoke root is
 separate from the full root and must not be used to resume full training.
 
-Complete outputs remain under `artifacts/seis_ssl_cluster/`. The former
-low-label screening and tracked review publication are retired.
+Complete outputs remain under `artifacts/seis_ssl_cluster/`.

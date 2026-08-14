@@ -26,6 +26,6 @@ python proc/seis_ssl_cluster/build_strat_hmm_pseudo_targets.py \
   --dry-run --device cpu --overwrite
 ```
 
-Complete outputs remain under `artifacts/seis_ssl_cluster/`. No active
-downstream lithology probe, voxel-count budget, robustness, result summary, or
-report publication belongs to this directory.
+Complete outputs remain under `artifacts/seis_ssl_cluster/`. This directory
+contains only target generation, pretraining, embedding extraction, and
+smoke-validation stages.

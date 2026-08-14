@@ -18,5 +18,5 @@ python proc/seis_ssl_cluster/extract_embeddings.py \
   --config "$EXP_CONTROL/03_extract_current_k6_embeddings.yaml" --dry-run
 ```
 
-The former token probe, voxel-count label-budget comparison, seed aggregation,
-and report publication are retired.
+Complete outputs remain under `artifacts/seis_ssl_cluster/`. This directory
+contains only smoke/full pretraining and embedding extraction stages.

@@ -17,6 +17,6 @@ Active stages are:
    `09_extract_shuffled_hmm_embeddings`: shuffled-target pretraining and
    extraction.
 
-Complete outputs remain under `artifacts/seis_ssl_cluster/`. Token probes,
-voxel-count label budgets, seed aggregation, downstream summaries, and report
-publication are retired.
+Complete outputs remain under `artifacts/seis_ssl_cluster/`. This directory
+contains only the guardrail target, pretraining, extraction, and validation
+stages listed above.

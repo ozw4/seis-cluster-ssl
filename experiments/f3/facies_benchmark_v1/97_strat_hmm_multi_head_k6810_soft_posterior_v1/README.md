@@ -83,4 +83,4 @@ full job. The final phase atomically publishes
 `preflight/soft_posterior_handoff.json`; use `--quarantine-invalid` only to
 preserve and replace stale or partial prior evidence. Do not mix temperature
 sweeps, hard/soft interpolation, smoothing, boundary auxiliaries, refreshes,
-or six-split jobs into this initial run.
+or other target variants into this run.

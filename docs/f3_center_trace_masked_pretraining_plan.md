@@ -1,11 +1,8 @@
 # F3 center-trace masked HMM path reconstruction
 
-This document is the source-of-truth scientific contract for a future
-center-trace masked pretraining treatment. It describes a new pretext identity
-without changing the existing K=6/8/10 hard-HMM prototype or its published
-evidence. This issue adds documentation only: it does not run the treatment or
-modify production code, tests, experiment YAML, checkpoints, artifacts, or
-published results.
+This document defines the scientific contract for the center-trace masked
+pretraining treatment. It uses a distinct pretext identity without changing
+the K=6/8/10 hard-HMM prototype or its target artifacts.
 
 ## Fixed baseline and immutable evidence
 
@@ -42,11 +39,8 @@ those results or target semantics may be mixed into the center-trace masked
 target. In particular, the center-trace treatment does not alter the HMM
 labels, posterior, confidence, boundary weight, or valid mask.
 
-The baseline identity and published decision context are recorded by the
-[K=6/8/10 multi-head experiment](../experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/README.md)
-and its frozen [results summary](../reports/f3/legacy/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/multi_head_results_summary.json).
-Those records remain historical evidence; this plan makes no new scientific
-claim.
+The baseline identity is recorded by the
+[K=6/8/10 multi-head experiment](../experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/README.md).
 
 ## Scientific identifiers
 

@@ -13,5 +13,4 @@ with `train_strat_hmm_pretext.py`, `extract_embeddings.py`, and
 `validate_f3_m5_lateral_smoothing_pretraining.py`.
 
 No facies labels or downstream metrics are target inputs. Complete outputs
-remain under `artifacts/seis_ssl_cluster/`; tracked report publication is
-retired.
+remain under `artifacts/seis_ssl_cluster/`.

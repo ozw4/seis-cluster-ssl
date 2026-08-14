@@ -7,7 +7,7 @@ survey embedding from the current student encoder, warm-starts the ordered
 HMM centers from the previous generation, and replaces the hard targets for
 the next generation.
 
-## Historical lineage and fixed baseline
+## Fixed lineage and baseline
 
 The fixed center-trace lineage is the scientific predecessor. Its active
 pretraining contract is recorded by [experiment 104](../experiments/f3/facies_benchmark_v1/104_strat_hmm_multi_head_k6810_center_trace_masked_v1/README.md).
@@ -251,8 +251,7 @@ experiments/f3/facies_benchmark_v1/
 The pretraining handoff has
 `artifact_type: f3_center_trace_masked_periodic_refresh_pretraining_handoff`,
 schema version 1, status `PASS`, and primary checkpoint role
-`completed_final_selected`. It remains under the configured artifact root;
-no tracked report publication is active.
+`completed_final_selected`. It remains under the configured artifact root.
 
 ## Explicit scope exclusions
 
@@ -265,6 +264,5 @@ This contract does not include:
 - making the prototype head and HMM centers identical, or copying one into
   the other.
 
-The fixed center-trace lineage, its historical artifacts, and all other
-experiment identities remain separate evidence and are not rewritten by this
-plan.
+The fixed center-trace lineage and all other experiment identities remain
+separate evidence and are not rewritten by this treatment.

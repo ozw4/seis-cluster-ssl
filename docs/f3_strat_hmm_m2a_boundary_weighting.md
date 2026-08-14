@@ -16,6 +16,3 @@ Use the configs and command order in the experiment
 [README](../experiments/f3/facies_benchmark_v1/84_strat_hmm_pretraining_m2a_boundary/README.md).
 Complete checkpoints, pseudo-targets, and embeddings remain under
 `artifacts/seis_ssl_cluster/`.
-
-The former token probe, voxel-count label-budget, split robustness, result
-summary, and tracked report publication are retired.

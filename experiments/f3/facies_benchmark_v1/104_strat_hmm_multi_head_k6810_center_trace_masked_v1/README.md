@@ -98,5 +98,3 @@ An incomplete full run may resume only from its own `latest.pt`; it must never
 resume from the isolated smoke root. A stale, partial, or invalid handoff must
 be preserved with `--quarantine-invalid` before the `complete` phase publishes
 a replacement.
-
-No downstream decoder or six-split result is part of this experiment root.

@@ -16,8 +16,7 @@ processing logic.
 
 `seis_ssl_cluster.f3.lithology` owns lithology data and reusable evaluation
 logic. Its focused modules cover baseline features, metrics, prediction,
-probes, token and voxel datasets, tokenization, visualization, and report
-generation.
+probes, token and voxel datasets, tokenization, and visualization.
 
 Top-level modules under `seis_ssl_cluster.f3` own inspection utilities and
 retained experiment-specific artifact validation that does not belong in the
@@ -71,7 +70,6 @@ The schema API is:
 - `save_f3_lithology_token_dataset`
 - `validate_f3_lithology_token_dataset`
 - `replace_token_features`
-
 
 ## Proc boundary
 

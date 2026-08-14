@@ -12,7 +12,7 @@ This directory contains runbooks and configuration contracts for
 - [Proc CLI contract](proc_cli_contract.md): thin entrypoint boundary, shared
   CLI helpers, overrides, dry-run behavior, and stdout rules.
 - [F3 module structure](f3_module_structure.md): package boundaries, public
-  imports, token dataset schema, and report responsibilities.
+  imports, token dataset schema, and artifact responsibilities.
 
 ## Active research runbooks
 

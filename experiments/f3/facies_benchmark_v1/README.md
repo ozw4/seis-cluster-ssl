@@ -1,14 +1,9 @@
 # F3 facies benchmark v1 artifact producers
 
-This directory retains only reusable F3 artifact-production stages from the
-retired facies benchmark v1 workflow. Active stages cover raw-data inspection
-and preparation, embedding and target generation, stratigraphic clustering,
-pretraining, extraction, and downstream-independent validation.
-
-The voxel-count label-budget, multiple-seed, split-robustness, downstream
-evaluation, and report-publication stages have been retired. The frozen v1
-reports are historical references under
-`reports/f3/legacy/facies_benchmark_v1/` and are never pipeline inputs.
+This directory contains reusable F3 artifact-production stages. Active stages
+cover raw-data inspection and preparation, embedding and target generation,
+stratigraphic clustering, pretraining, extraction, and downstream-independent
+validation. It is not a benchmark result-generation surface.
 
 Source-of-truth inputs:
 

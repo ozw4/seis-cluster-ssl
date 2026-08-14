@@ -11,5 +11,4 @@ Run stages `01` through `06` in order with
 `train_strat_hmm_pretext.py`, `extract_embeddings.py`, and
 `validate_f3_xy_neighbor_unanimous_pretraining.py`.
 
-Complete outputs remain under `artifacts/seis_ssl_cluster/`. The former
-voxel-count low-label evaluation and tracked review publication are retired.
+Complete outputs remain under `artifacts/seis_ssl_cluster/`.

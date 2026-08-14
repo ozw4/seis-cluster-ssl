@@ -22,6 +22,5 @@ python proc/seis_ssl_cluster/extract_embeddings.py \
   --config experiments/f3/facies_benchmark_v1/84_strat_hmm_pretraining_m2a_boundary/05_extract_student_embeddings.yaml
 ```
 
-Complete outputs remain under `artifacts/seis_ssl_cluster/`. The former
-lithology probe, robustness, result-summary, and report-publication stages are
-retired.
+Complete outputs remain under `artifacts/seis_ssl_cluster/`. This directory
+contains only target export, pretraining, and embedding extraction stages.

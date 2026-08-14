@@ -11,6 +11,3 @@ The active workflow consists only of target generation, smoke/full pretraining,
 embedding extraction, and producer validation. Use the configs and command
 order in the experiment
 [README](../experiments/f3/facies_benchmark_v1/83_strat_hmm_m1_guardrails/README.md).
-
-Downstream probes, voxel-count label budgets, seed aggregation, result
-summaries, and report publication are retired.

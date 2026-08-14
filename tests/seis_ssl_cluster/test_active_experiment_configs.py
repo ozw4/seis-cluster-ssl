@@ -292,6 +292,18 @@ def test_all_repository_configs_load_and_resolve_supported_stages(
 		assert resolved['stage']
 
 
+def test_f3_frozen_report_is_separate_from_active_configs() -> None:
+	legacy_root = Path('reports/f3/legacy/facies_benchmark_v1')
+	old_active_root = Path('reports/f3/facies_benchmark_v1')
+	assert legacy_root.is_dir()
+	assert not old_active_root.exists()
+
+	for config_path in ALL_CONFIGS:
+		config_text = config_path.read_text(encoding='utf-8')
+		assert 'reports/f3/legacy/facies_benchmark_v1' not in config_text
+		assert 'reports/f3/facies_benchmark_v1' not in config_text
+
+
 def test_repository_configs_preserve_legacy_optimization_defaults() -> None:
 	training = resolve_mae_training_config(
 		load_config(Path('proc/configs/seis_ssl_cluster/train_amp_mae.yaml')),
