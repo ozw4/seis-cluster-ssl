@@ -1,3 +1,11 @@
+training_selection:
+  semantics: stable_hash_partial_section_token_footprints_v1
+  allowed_relative_error: 0.05
+  target_train_voxel_counts:
+    small: 1377214
+    medium: 2752416
+    large: 5496784
+
 validation:
   inline: [350]
   crossline: [200]
