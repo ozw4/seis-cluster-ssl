@@ -38,6 +38,8 @@ from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_AXIS_MAPPING,
 	ChannelLayouts,
 	SectionLines,
+	channel_test_definition,
+	common_reserved_training_lines,
 	inspect_prepared_label_identity,
 	load_channel_layouts,
 	selected_training_lines,
@@ -160,6 +162,7 @@ class ChannelDecoderPlan:
 	geometry: EmbeddingGeometry
 	layouts: ChannelLayouts
 	train_lines: SectionLines
+	reserved_training_lines: SectionLines
 	prepared_label_identity: Mapping[str, object]
 	class_counts: tuple[int, int]
 	class_weights: tuple[float, float]
@@ -369,6 +372,7 @@ def inspect_channel_decoder_job(
 	)
 	layouts = load_channel_layouts(layout_config, geometry.volume_shape_xyz)
 	train_lines = selected_training_lines(layouts, layout_id, data_size)
+	reserved_training_lines = common_reserved_training_lines(layouts)
 	split_counts: dict[str, tuple[int, int]] = {}
 	tile_counts: dict[str, int] = {}
 	for split in ('train', 'validation', 'test'):
@@ -379,7 +383,7 @@ def inspect_channel_decoder_job(
 			geometry=geometry,
 			lines=train_lines,
 			validation=layouts.validation,
-			test=layouts.test,
+			reserved_training=reserved_training_lines,
 			split=split,
 			tiles=config.tiles,
 		)
@@ -408,6 +412,7 @@ def inspect_channel_decoder_job(
 		geometry=geometry,
 		layouts=layouts,
 		train_lines=train_lines,
+		reserved_training_lines=reserved_training_lines,
 		prepared_label_identity=prepared_label_identity,
 		class_counts=split_counts['train'],
 		class_weights=tuple(float(item) for item in weights.tolist()),
@@ -428,7 +433,7 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 		geometry: EmbeddingGeometry,
 		lines: SectionLines,
 		validation: SectionLines,
-		test: SectionLines,
+		reserved_training: SectionLines,
 		split: str,
 		tiles: DecoderTiles,
 	) -> None:
@@ -440,7 +445,7 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 		self.geometry = geometry
 		self.lines = lines
 		self.validation = validation
-		self.test = test
+		self.reserved_training = reserved_training
 		self.split = split
 		self.tile_settings = tiles
 		self.shared_tile_settings = ChannelTileSettings(
@@ -474,7 +479,7 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 			settings=self.shared_tile_settings,
 			train=self.lines,
 			validation=self.validation,
-			test=self.test,
+			reserved_training=self.reserved_training,
 			split=self.split,
 		)
 		token_source = _slices(
@@ -529,7 +534,7 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 			settings=self.shared_tile_settings,
 			train=self.lines,
 			validation=self.validation,
-			test=self.test,
+			reserved_training=self.reserved_training,
 			split=self.split,
 		)
 
@@ -607,7 +612,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 			geometry=plan.geometry,
 			lines=plan.train_lines,
 			validation=plan.layouts.validation,
-			test=plan.layouts.test,
+			reserved_training=plan.reserved_training_lines,
 			split=split,
 			tiles=plan.config.tiles,
 		)
@@ -809,8 +814,9 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 			'train_crossline': list(plan.train_lines.crossline),
 			'validation_inline': list(plan.layouts.validation.inline),
 			'validation_crossline': list(plan.layouts.validation.crossline),
-			'test_inline': list(plan.layouts.test.inline),
-			'test_crossline': list(plan.layouts.test.crossline),
+			'test_definition': channel_test_definition(
+				plan.reserved_training_lines
+			),
 			'split_class_counts': {
 				split: list(plan.split_counts[split])
 				for split in ('train', 'validation', 'test')
@@ -1002,10 +1008,7 @@ def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
 			'inline': list(plan.layouts.validation.inline),
 			'crossline': list(plan.layouts.validation.crossline),
 		},
-		'test': {
-			'inline': list(plan.layouts.test.inline),
-			'crossline': list(plan.layouts.test.crossline),
-		},
+		'test_definition': channel_test_definition(plan.reserved_training_lines),
 		'geometry': {
 			'embedding_shape': list(plan.geometry.embedding_shape),
 			'volume_shape_xyz': list(plan.geometry.volume_shape_xyz),

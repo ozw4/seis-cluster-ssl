@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from seis_ssl_cluster.parihaka.channel_data import DATA_SIZE_PREFIX, LAYOUT_IDS
+from seis_ssl_cluster.parihaka.channel_data import (
+	CHANNEL_TEST_MODE,
+	DATA_SIZE_PREFIX,
+	LAYOUT_IDS,
+)
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
 )
@@ -21,6 +25,11 @@ _EXPECTED_PRETRAINED_CHECKPOINT = (
 	'/artifacts/pretraining/parihaka/facies_benchmark_v1/'
 	f'{CHANNEL_PRETRAINED_MODEL_TAG}/full_100ep/latest.pt'
 )
+_TEST_DEFINITION = {
+	'mode': CHANNEL_TEST_MODE,
+	'reserved_large_inline': list(range(10, 54)),
+	'reserved_large_crossline': list(range(20, 64)),
+}
 
 
 def _supervision(layout_index: int, data_size: str) -> dict[str, object]:
@@ -33,8 +42,7 @@ def _supervision(layout_index: int, data_size: str) -> dict[str, object]:
 		'train_crossline': crossline[:prefix],
 		'validation_inline': [100, 101],
 		'validation_crossline': [200, 201],
-		'test_inline': [102, 103],
-		'test_crossline': [202, 203],
+		'test_definition': _TEST_DEFINITION,
 		'split_class_counts': {
 			'train': [1000 * prefix, 100 * prefix],
 			'validation': [2000, 200],
@@ -123,10 +131,7 @@ def _benchmark_identity(
 			'inline': supervision['validation_inline'],
 			'crossline': supervision['validation_crossline'],
 		},
-		'test': {
-			'inline': supervision['test_inline'],
-			'crossline': supervision['test_crossline'],
-		},
+		'test_definition': supervision['test_definition'],
 		'geometry': {
 			'embedding_shape': [13, 25, 38, 384],
 			'volume_shape_xyz': [100, 200, 300],
@@ -452,6 +457,58 @@ def test_summary_requires_complete_supervision(tmp_path: Path) -> None:
 		lambda payload: payload.pop('supervision'),
 	)
 	with pytest.raises(TypeError, match='supervision must be a mapping'):
+		inspect_channel_benchmark_results(config)
+
+
+def test_summary_rejects_explicit_test_line_schema(tmp_path: Path) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+
+	def mutate(payload: dict[str, object]) -> None:
+		supervision = payload['supervision']
+		assert isinstance(supervision, dict)
+		supervision.pop('test_definition')
+		supervision['test_inline'] = [102]
+		supervision['test_crossline'] = [202]
+
+	_mutate_metrics(config, 'pretrained', 'layout_000', 'small', mutate)
+	with pytest.raises(ValueError, match='supervision must contain exactly'):
+		inspect_channel_benchmark_results(config)
+
+
+@pytest.mark.parametrize(
+	'drift', ['definition', 'reserved', 'class_count', 'tile_count']
+)
+def test_summary_rejects_common_test_drift(tmp_path: Path, drift: str) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_results(config)
+
+	def mutate(payload: dict[str, object]) -> None:
+		supervision = payload['supervision']
+		identity = payload['benchmark_identity']
+		assert isinstance(supervision, dict)
+		assert isinstance(identity, dict)
+		if drift in {'definition', 'reserved'}:
+			definition = dict(supervision['test_definition'])
+			if drift == 'definition':
+				definition['mode'] = 'wrong'
+			else:
+				definition['reserved_large_inline'] = [*range(10, 54), 99]
+			supervision['test_definition'] = definition
+			identity['test_definition'] = definition
+		elif drift == 'class_count':
+			counts = dict(supervision['split_class_counts'])
+			counts['test'] = [3001, 300]
+			supervision['split_class_counts'] = counts
+			identity['split_class_counts'] = counts
+		else:
+			tiles = dict(identity['tile_counts'])
+			tiles['test'] = 5
+			identity['tile_counts'] = tiles
+
+	for model in ('pretrained', 'random'):
+		_mutate_metrics(config, model, 'layout_001', 'medium', mutate)
+	with pytest.raises(ValueError, match=r'mode|does not match|tile counts'):
 		inspect_channel_benchmark_results(config)
 
 

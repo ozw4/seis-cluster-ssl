@@ -132,32 +132,60 @@ def test_inline_crossline_intersection_is_counted_once() -> None:
 		start_xyz=(0, 0, 0),
 		train=data.SectionLines((1,), (2,)),
 		validation=data.SectionLines((8,), (8,)),
-		test=data.SectionLines((9,), (9,)),
+		reserved_training=data.SectionLines((1,), (2,)),
 		split='train',
 	)
 	assert np.count_nonzero(mask) == 4 * 2 + 3 * 2 - 2
 
 
-def test_split_priority_is_test_then_validation_then_train() -> None:
-	lines = data.SectionLines((1,), (1,))
+def test_split_masks_use_common_voxel_complement_and_validation_priority() -> None:
 	validation = data.SectionLines((2,), (2,))
-	test = data.SectionLines((3,), (3,))
+	reserved = data.SectionLines((1, 3), (1, 3))
 	kwargs = {
 		'shape': (5, 5, 1),
 		'start_xyz': (0, 0, 0),
-		'train': lines,
+		'train': data.SectionLines((1, 2), (1, 2)),
 		'validation': validation,
-		'test': test,
+		'reserved_training': reserved,
 	}
 	train = data.split_mask_for_crop(**kwargs, split='train')
 	valid = data.split_mask_for_crop(**kwargs, split='validation')
 	test_mask = data.split_mask_for_crop(**kwargs, split='test')
-	assert test_mask[3, 2, 0]
-	assert test_mask[1, 3, 0] and not train[1, 3, 0]
+	assert not test_mask[3, 4, 0]
+	assert not test_mask[4, 3, 0]
+	assert not test_mask[2, 4, 0]
+	assert test_mask[4, 4, 0]
 	assert valid[2, 1, 0] and not train[2, 1, 0]
+	assert valid[1, 2, 0] and not train[1, 2, 0]
 	assert not np.any(train & valid)
 	assert not np.any(train & test_mask)
 	assert not np.any(valid & test_mask)
+
+
+def test_common_reserved_lines_are_sorted_union_and_test_is_job_invariant(
+	tmp_path: Path,
+) -> None:
+	layouts = data.load_channel_layouts(_write_layout(tmp_path), (30, 30, 8))
+	reserved = data.common_reserved_training_lines(layouts)
+	assert reserved.inline == tuple(range(1, 21))
+	assert reserved.crossline == tuple(range(1, 21))
+	masks = [
+		data.split_mask_for_crop(
+			shape=(30, 30, 1),
+			start_xyz=(0, 0, 0),
+			train=data.selected_training_lines(layouts, layout_id, data_size),
+			validation=layouts.validation,
+			reserved_training=reserved,
+			split='test',
+		)
+		for layout_id in data.LAYOUT_IDS
+		for data_size in data.DATA_SIZE_PREFIX
+	]
+	assert all(np.array_equal(masks[0], mask) for mask in masks[1:])
+	assert not masks[0][4, 29, 0]
+	assert not masks[0][29, 4, 0]
+	assert not masks[0][28, 29, 0]
+	assert masks[0][29, 29, 0]
 
 
 def test_training_and_held_out_same_orientation_overlap_is_rejected(
@@ -167,7 +195,16 @@ def test_training_and_held_out_same_orientation_overlap_is_rejected(
 	payload = yaml.safe_load(path.read_text(encoding='utf-8'))
 	payload['layouts']['layout_003']['inline'][2] = payload['validation']['inline'][0]
 	path.write_text(yaml.safe_dump(payload), encoding='utf-8')
-	with pytest.raises(ValueError, match='training and held-out inline'):
+	with pytest.raises(ValueError, match='training and validation inline'):
+		data.load_channel_layouts(path, (30, 30, 8))
+
+
+def test_explicit_test_lines_schema_is_rejected(tmp_path: Path) -> None:
+	path = _write_layout(tmp_path)
+	payload = yaml.safe_load(path.read_text(encoding='utf-8'))
+	payload['test'] = {'inline': [29], 'crossline': [29]}
+	path.write_text(yaml.safe_dump(payload), encoding='utf-8')
+	with pytest.raises(ValueError, match='must contain exactly'):
 		data.load_channel_layouts(path, (30, 30, 8))
 
 
@@ -228,7 +265,6 @@ def test_prepare_cli_dry_run_writes_nothing(
 def _write_layout(tmp_path: Path) -> Path:
 	payload = {
 		'validation': {'inline': [28], 'crossline': [28]},
-		'test': {'inline': [29], 'crossline': [29]},
 		'layouts': {
 			layout_id: {
 				'inline': [1 + index, 6 + index, 11 + index, 16 + index],

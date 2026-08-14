@@ -51,14 +51,14 @@ def test_shared_helper_matches_frozen_dataset(tmp_path: Path) -> None:
 	np.save(paths.valid_tokens, valid)
 	lines = SectionLines((0,), (0,))
 	validation = SectionLines((8,), (8,))
-	test = SectionLines((9,), (9,))
+	reserved = SectionLines((0, 9), (0, 9))
 	records, counts = enumerate_channel_tile_records(
 		valid_tokens=valid,
 		labels=labels,
 		settings=settings,
 		train=lines,
 		validation=validation,
-		test=test,
+		reserved_training=reserved,
 		split='train',
 	)
 	geometry = EmbeddingGeometry(
@@ -81,7 +81,7 @@ def test_shared_helper_matches_frozen_dataset(tmp_path: Path) -> None:
 		geometry=geometry,
 		lines=lines,
 		validation=validation,
-		test=test,
+		reserved_training=reserved,
 		split='train',
 		tiles=DecoderTiles((1, 1, 1), (1, 1, 1)),
 	)
@@ -95,7 +95,7 @@ def test_shared_helper_matches_frozen_dataset(tmp_path: Path) -> None:
 			settings=settings,
 			train=lines,
 			validation=validation,
-			test=test,
+			reserved_training=reserved,
 			split='train',
 		)
 		item = dataset[index]
@@ -109,14 +109,14 @@ def test_edge_tile_padding_core_halo_and_split_priority(tmp_path: Path) -> None:
 	settings, valid, labels, _ = _fixture(tmp_path)
 	lines = SectionLines((0, 8), (0, 8))
 	validation = SectionLines((8,), (8,))
-	test = SectionLines((9,), (9,))
+	reserved = SectionLines((0, 8, 9), (0, 8, 9))
 	records, _ = enumerate_channel_tile_records(
 		valid_tokens=valid,
 		labels=labels,
 		settings=settings,
 		train=lines,
 		validation=validation,
-		test=test,
+		reserved_training=reserved,
 		split='validation',
 	)
 	record = next(item for item in records if item.core_start_token == (1, 1, 0))
@@ -127,14 +127,15 @@ def test_edge_tile_padding_core_halo_and_split_priority(tmp_path: Path) -> None:
 		settings=settings,
 		train=lines,
 		validation=validation,
-		test=test,
+		reserved_training=reserved,
 		split='validation',
 	)
 	assert targets.token_valid_mask.shape == (3, 3, 3)
 	assert targets.labels.shape == (24, 24, 24)
 	assert targets.core_mask[8:16, 8:16, 8:16].all()
 	assert not targets.core_mask[:8].any()
-	assert not targets.supervision_mask[9, 8, 8]
+	assert targets.supervision_mask[9, 8, 8]
+	assert not targets.supervision_mask[9, 9, 8]
 	assert targets.supervision_mask[8, 8, 8]
 	section_voxels = int(np.count_nonzero(targets.section_mask & targets.core_mask))
-	assert section_voxels == 48
+	assert section_voxels == 64

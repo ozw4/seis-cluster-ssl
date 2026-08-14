@@ -22,6 +22,7 @@ CHANNEL_CLASS_ID = 5
 CHANNEL_AXIS_MAPPING = {'inline': 'x', 'crossline': 'y'}
 LAYOUT_IDS = tuple(f'layout_{index:03d}' for index in range(5))
 DATA_SIZE_PREFIX = {'small': 1, 'medium': 2, 'large': 4}
+CHANNEL_TEST_MODE = 'voxel_complement_of_all_large_training_and_validation_planes'
 
 
 @dataclass(frozen=True)
@@ -53,10 +54,9 @@ class SectionLines:
 
 @dataclass(frozen=True)
 class ChannelLayouts:
-	"""Five training layouts and shared held-out sections."""
+	"""Five training layouts and shared validation sections."""
 
 	validation: SectionLines
-	test: SectionLines
 	layouts: Mapping[str, SectionLines]
 
 
@@ -316,14 +316,13 @@ def load_channel_layouts(
 ) -> ChannelLayouts:
 	"""Load and validate five explicit, ordered section layouts."""
 	raw = load_config(path)
-	expected_keys = {'validation', 'test', 'layouts'}
+	expected_keys = {'validation', 'layouts'}
 	if set(raw) != expected_keys:
 		raise ValueError(
 			f'layout config must contain exactly {sorted(expected_keys)!r}; '
 			'inline is fixed to X and crossline is fixed to Y'
 		)
 	validation = _section_lines(_mapping(raw, 'validation'), 'validation', volume_shape)
-	test = _section_lines(_mapping(raw, 'test'), 'test', volume_shape)
 	layout_values = _mapping(raw, 'layouts')
 	if set(layout_values) != set(LAYOUT_IDS):
 		raise ValueError(f'layouts must contain exactly {LAYOUT_IDS!r}')
@@ -333,11 +332,43 @@ def load_channel_layouts(
 		)
 		for layout_id in LAYOUT_IDS
 	}
-	_validate_disjoint_held_out(validation, test)
 	for layout_id, lines in layouts.items():
-		_validate_training_disjoint(lines, validation, test, layout_id)
+		_validate_training_disjoint(lines, validation, layout_id)
 	_validate_unique_training_selections(layouts)
-	return ChannelLayouts(validation=validation, test=test, layouts=layouts)
+	return ChannelLayouts(validation=validation, layouts=layouts)
+
+
+def common_reserved_training_lines(layouts: ChannelLayouts) -> SectionLines:
+	"""Return the sorted union of every layout's large training candidates."""
+	return SectionLines(
+		inline=tuple(
+			sorted(
+				{
+					index
+					for lines in layouts.layouts.values()
+					for index in lines.inline
+				}
+			)
+		),
+		crossline=tuple(
+			sorted(
+				{
+					index
+					for lines in layouts.layouts.values()
+					for index in lines.crossline
+				}
+			)
+		),
+	)
+
+
+def channel_test_definition(reserved_training: SectionLines) -> dict[str, object]:
+	"""Return the fixed common-test identity stored by both benchmark regimes."""
+	return {
+		'mode': CHANNEL_TEST_MODE,
+		'reserved_large_inline': list(reserved_training.inline),
+		'reserved_large_crossline': list(reserved_training.crossline),
+	}
 
 
 def selected_training_lines(
@@ -360,23 +391,23 @@ def split_mask_for_crop(  # noqa: PLR0913
 	start_xyz: Sequence[int],
 	train: SectionLines,
 	validation: SectionLines,
-	test: SectionLines,
+	reserved_training: SectionLines,
 	split: str,
 ) -> np.ndarray:
-	"""Build one crop mask using test > validation > train > ignore priority."""
+	"""Build one crop mask from train, validation, and common reserved planes."""
 	if len(shape) != 3 or len(start_xyz) != 3:
 		raise ValueError('shape and start_xyz must contain three values')
 	x = np.arange(start_xyz[0], start_xyz[0] + shape[0])[:, None, None]
 	y = np.arange(start_xyz[1], start_xyz[1] + shape[1])[None, :, None]
-	test_mask = np.isin(x, test.inline) | np.isin(y, test.crossline)
-	validation_mask = (~test_mask) & (
-		np.isin(x, validation.inline) | np.isin(y, validation.crossline)
+	validation_mask = np.isin(x, validation.inline) | np.isin(
+		y, validation.crossline
 	)
-	train_mask = (
-		(~test_mask)
-		& (~validation_mask)
-		& (np.isin(x, train.inline) | np.isin(y, train.crossline))
+	reserved_mask = np.isin(x, reserved_training.inline) | np.isin(
+		y, reserved_training.crossline
 	)
+	selected_train_mask = np.isin(x, train.inline) | np.isin(y, train.crossline)
+	train_mask = selected_train_mask & ~validation_mask
+	test_mask = ~reserved_mask & ~validation_mask
 	if split == 'test':
 		return np.broadcast_to(test_mask, tuple(shape)).copy()
 	if split == 'validation':
@@ -460,22 +491,13 @@ def _indices(value: object, label: str, bound: int) -> tuple[int, ...]:
 	return items
 
 
-def _validate_disjoint_held_out(validation: SectionLines, test: SectionLines) -> None:
-	for orientation in ('inline', 'crossline'):
-		if set(getattr(validation, orientation)) & set(getattr(test, orientation)):
-			raise ValueError(f'validation and test {orientation} line numbers overlap')
-
-
 def _validate_training_disjoint(
-	train: SectionLines, validation: SectionLines, test: SectionLines, layout_id: str
+	train: SectionLines, validation: SectionLines, layout_id: str
 ) -> None:
 	for orientation in ('inline', 'crossline'):
-		held_out = set(getattr(validation, orientation)) | set(
-			getattr(test, orientation)
-		)
-		if set(getattr(train, orientation)) & held_out:
+		if set(getattr(train, orientation)) & set(getattr(validation, orientation)):
 			raise ValueError(
-				f'{layout_id} training and held-out {orientation} lines overlap'
+				f'{layout_id} training and validation {orientation} lines overlap'
 			)
 
 
@@ -518,6 +540,7 @@ def _path(value: Mapping[str, object], key: str, prefix: str) -> Path:
 __all__ = [
 	'CHANNEL_AXIS_MAPPING',
 	'CHANNEL_CLASS_ID',
+	'CHANNEL_TEST_MODE',
 	'CLASS_IDS',
 	'DATA_SIZE_PREFIX',
 	'LAYOUT_IDS',
@@ -529,6 +552,8 @@ __all__ = [
 	'SectionLines',
 	'channel_inspection_config_from_mapping',
 	'channel_label_config_from_mapping',
+	'channel_test_definition',
+	'common_reserved_training_lines',
 	'inspect_prepared_label_identity',
 	'inspect_prepared_labels',
 	'inspect_source_labels',

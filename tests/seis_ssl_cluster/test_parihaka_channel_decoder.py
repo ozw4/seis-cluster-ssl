@@ -207,7 +207,6 @@ def _write_layout(tmp_path: Path) -> Path:
 		yaml.safe_dump(
 			{
 				'validation': {'inline': [12], 'crossline': [12]},
-				'test': {'inline': [13], 'crossline': [13]},
 				'layouts': {
 					f'layout_{index:03d}': {
 						'inline': [index, index + 1, index + 2, index + 3],
@@ -513,7 +512,7 @@ def test_every_split_must_contain_both_channel_classes(
 		start_xyz=(0, 0, 0),
 		train=SectionLines((0,), (0,)),
 		validation=SectionLines((12,), (12,)),
-		test=SectionLines((13,), (13,)),
+		reserved_training=SectionLines(tuple(range(8)), tuple(range(8))),
 		split=split,
 	)
 	labels[mask] = 1 if missing_class == 'Channel' else 5
@@ -629,7 +628,6 @@ def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
 		yaml.safe_dump(
 			{
 				'validation': {'inline': [4], 'crossline': [4]},
-				'test': {'inline': [5], 'crossline': [5]},
 				'layouts': {
 					f'layout_{index:03d}': {
 						'inline': [
@@ -754,8 +752,13 @@ def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
 		'train_crossline': [0],
 		'validation_inline': [4],
 		'validation_crossline': [4],
-		'test_inline': [5],
-		'test_crossline': [5],
+		'test_definition': {
+			'mode': (
+				'voxel_complement_of_all_large_training_and_validation_planes'
+			),
+			'reserved_large_inline': [0, 1, 2, 3, 6, 7],
+			'reserved_large_crossline': [0, 1, 2, 3, 6, 7],
+		},
 		'split_class_counts': {
 			split: list(plan.split_counts[split])
 			for split in ('train', 'validation', 'test')

@@ -1,0 +1,25 @@
+export PARIHAKA_DATA_ROOT=/home/dcuser/public_data/field/parihaka/seismic-facies-identification-challenge
+export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/workspace/artifacts/seis_ssl_cluster
+
+export PRETRAIN_EXP=experiments/parihaka/facies_benchmark_v1/20_pretrain/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+export PRETRAIN_CONFIG="$PRETRAIN_EXP/02_full_100ep.yaml"
+
+export FROZEN_EXP=experiments/parihaka/facies_benchmark_v1/30_channel_benchmark_v1
+export FROZEN_CONFIG="$FROZEN_EXP/06_channel_benchmark.yaml"
+export LAYOUT_CONFIG="$FROZEN_EXP/02_layouts.yaml"
+
+export E2E_EXP=experiments/parihaka/facies_benchmark_v1/31_channel_end_to_end_v1
+export E2E_CONFIG="$E2E_EXP/01_channel_end_to_end.yaml"
+
+export DATA_DIR="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/data/parihaka/facies_benchmark_v1"
+
+export PRETRAINED_CHECKPOINT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/parihaka/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/latest.pt"
+export RANDOM_CHECKPOINT_DIR="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1"
+
+export PRETRAINED_EMBEDDING_DIR="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/embeddings/parihaka/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x64"
+export RANDOM_EMBEDDING_DIR="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/embeddings/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64"
+
+export FROZEN_RUN_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/runs"
+export E2E_RUN_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_end_to_end/runs"
+
+export LOG_ROOT=/workspace/logs/parihaka_channel_clean_rerun

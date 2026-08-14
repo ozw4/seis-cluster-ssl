@@ -14,6 +14,15 @@ including amplitudes at downstream validation and test sections. Both
 comparisons are therefore survey-specific, transductive comparisons; they do
 not establish inductive transfer to an unseen survey.
 
+The fixed sparse validation inline/crossline planes remain checkpoint-selection
+only. Test is identical across all layouts, sizes, and frozen/end-to-end
+conditions: valid-label, valid-token voxels outside validation and outside the
+union of every inline and crossline in all five layouts' large training
+candidates. This is a voxel-level complement, not the union of remaining
+inline/crossline planes. Consequently, small and medium jobs do not test on
+their unused large candidates or on another layout's candidates. Test is
+evaluated once from the validation-selected best checkpoint.
+
 Within the end-to-end pair, encoder initialization is the only changed
 condition. Decoder initialization, supervision, tile order, optimizer,
 training settings, and runtime precision contract are paired. The frozen and

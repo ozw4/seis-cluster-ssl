@@ -86,7 +86,7 @@ def enumerate_channel_tile_records(  # noqa: PLR0913
 	settings: ChannelTileSettings,
 	train: SectionLines,
 	validation: SectionLines,
-	test: SectionLines,
+	reserved_training: SectionLines,
 	split: str,
 ) -> tuple[tuple[ChannelTileRecord, ...], tuple[int, int]]:
 	"""Enumerate supervised core tiles and count binary classes once."""
@@ -118,7 +118,7 @@ def enumerate_channel_tile_records(  # noqa: PLR0913
 					start_xyz=voxel_start,
 					train=train,
 					validation=validation,
-					test=test,
+					reserved_training=reserved_training,
 					split=split,
 				)
 				token_valid = valid_tokens[_slices(start_token, stop_token)]
@@ -151,7 +151,7 @@ def build_channel_tile_targets(  # noqa: PLR0913
 	settings: ChannelTileSettings,
 	train: SectionLines,
 	validation: SectionLines,
-	test: SectionLines,
+	reserved_training: SectionLines,
 	split: str,
 ) -> ChannelTileTargets:
 	"""Build the shared halo-padded target and supervision contract."""
@@ -210,7 +210,7 @@ def build_channel_tile_targets(  # noqa: PLR0913
 		start_xyz=voxel_source_start,
 		train=train,
 		validation=validation,
-		test=test,
+		reserved_training=reserved_training,
 		split=split,
 	)
 	core_mask = np.zeros(settings.input_size_voxels, dtype=np.bool_)

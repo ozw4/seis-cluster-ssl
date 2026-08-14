@@ -11,7 +11,11 @@ import pytest
 if TYPE_CHECKING:
 	from pathlib import Path
 
-from seis_ssl_cluster.parihaka.channel_data import DATA_SIZE_PREFIX, LAYOUT_IDS
+from seis_ssl_cluster.parihaka.channel_data import (
+	CHANNEL_TEST_MODE,
+	DATA_SIZE_PREFIX,
+	LAYOUT_IDS,
+)
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
 )
@@ -29,6 +33,11 @@ _PRETRAINED_CHECKPOINT = (
 )
 _RANDOM_CHECKPOINT = '/artifacts/pretraining/random/mae_random_seed42.pt'
 _DELTA_BY_LAYOUT = (0.1, 0.2, 0.0, -0.1, 0.3)
+_TEST_DEFINITION = {
+	'mode': CHANNEL_TEST_MODE,
+	'reserved_large_inline': list(range(10, 54)),
+	'reserved_large_crossline': list(range(20, 64)),
+}
 
 
 def _lines(layout_index: int, data_size: str) -> dict[str, object]:
@@ -40,8 +49,7 @@ def _lines(layout_index: int, data_size: str) -> dict[str, object]:
 		'train_crossline': crossline[:prefix],
 		'validation_inline': [100, 101],
 		'validation_crossline': [200, 201],
-		'test_inline': [102, 103],
-		'test_crossline': [202, 203],
+		'test_definition': _TEST_DEFINITION,
 		'split_class_counts': {
 			'train': [1000 * prefix, 100 * prefix],
 			'validation': [2000, 200],
@@ -151,10 +159,7 @@ def _end_identity(
 				'inline': lines['validation_inline'],
 				'crossline': lines['validation_crossline'],
 			},
-			'test_lines': {
-				'inline': lines['test_inline'],
-				'crossline': lines['test_crossline'],
-			},
+			'test_definition': lines['test_definition'],
 			'split_class_counts': lines['split_class_counts'],
 			'tile_counts': lines['tile_counts'],
 			'class_weights': [0.55, 5.5],
@@ -222,8 +227,7 @@ def _end_metrics(
 			'train_crossline': lines['train_crossline'],
 			'validation_inline': lines['validation_inline'],
 			'validation_crossline': lines['validation_crossline'],
-			'test_inline': lines['test_inline'],
-			'test_crossline': lines['test_crossline'],
+			'test_definition': lines['test_definition'],
 			'split_class_counts': lines['split_class_counts'],
 			'tile_counts': lines['tile_counts'],
 		},
@@ -300,10 +304,7 @@ def _frozen_identity(
 			'inline': lines['validation_inline'],
 			'crossline': lines['validation_crossline'],
 		},
-		'test': {
-			'inline': lines['test_inline'],
-			'crossline': lines['test_crossline'],
-		},
+		'test_definition': lines['test_definition'],
 		'geometry': {
 			'embedding_shape': [13, 25, 38, 384],
 			'volume_shape_xyz': [100, 200, 300],
@@ -357,8 +358,7 @@ def _frozen_metrics(
 			'train_crossline': lines['train_crossline'],
 			'validation_inline': lines['validation_inline'],
 			'validation_crossline': lines['validation_crossline'],
-			'test_inline': lines['test_inline'],
-			'test_crossline': lines['test_crossline'],
+			'test_definition': lines['test_definition'],
 			'split_class_counts': lines['split_class_counts'],
 		},
 		'class_weights': [0.55, 5.5],
@@ -537,6 +537,62 @@ def test_end_to_end_summary_rejects_same_checkpoint_sha(tmp_path: Path) -> None:
 				data_size=data_size,
 			)
 	with pytest.raises(ValueError, match='checkpoint SHA-256 must differ'):
+		inspect_channel_end_to_end_results(config)
+
+
+def test_end_to_end_summary_rejects_explicit_test_line_schema(
+	tmp_path: Path,
+) -> None:
+	config = _end_config(tmp_path)
+	_write_complete(config)
+
+	def mutate(payload: dict[str, object]) -> None:
+		supervision = payload['supervision']
+		assert isinstance(supervision, dict)
+		supervision.pop('test_definition')
+		supervision['test_inline'] = [102]
+		supervision['test_crossline'] = [202]
+
+	_mutate_end(config, 'pretrained', mutate)
+	with pytest.raises(ValueError, match='supervision has invalid fields'):
+		inspect_channel_end_to_end_results(config)
+
+
+@pytest.mark.parametrize('drift', ['reserved', 'class_count', 'tile_count'])
+def test_end_to_end_summary_rejects_common_test_drift(
+	tmp_path: Path, drift: str
+) -> None:
+	config = _end_config(tmp_path)
+	_write_complete(config)
+
+	def mutate(payload: dict[str, object]) -> None:
+		metrics = payload['supervision']
+		identity = payload['benchmark_identity']
+		assert isinstance(metrics, dict)
+		assert isinstance(identity, dict)
+		identity_supervision = identity['supervision']
+		assert isinstance(identity_supervision, dict)
+		if drift == 'reserved':
+			definition = dict(metrics['test_definition'])
+			definition['reserved_large_inline'] = [*range(10, 54), 99]
+			metrics['test_definition'] = definition
+			identity_supervision['test_definition'] = definition
+		else:
+			field = 'split_class_counts' if drift == 'class_count' else 'tile_counts'
+			values = dict(metrics[field])
+			values['test'] = [3001, 300] if drift == 'class_count' else 5
+			metrics[field] = values
+			identity_supervision[field] = values
+
+	for encoder_init in ('pretrained', 'random'):
+		_mutate_end(
+			config,
+			encoder_init,
+			mutate,
+			layout_id='layout_001',
+			data_size='medium',
+		)
+	with pytest.raises(ValueError, match='drift'):
 		inspect_channel_end_to_end_results(config)
 
 
@@ -723,6 +779,34 @@ def test_four_way_summary_rejects_cross_regime_supervision_drift(
 					identity_counts['test'] = [3001, 300]
 				path.write_text(json.dumps(payload), encoding='utf-8')
 	with pytest.raises(ValueError, match=message):
+		summarize_channel_four_way(end_config, frozen_config)
+
+
+def test_four_way_summary_rejects_test_definition_drift(tmp_path: Path) -> None:
+	end_config = _end_config(tmp_path)
+	frozen_config = ChannelSummaryConfig(
+		tmp_path / 'frozen_runs', tmp_path / 'frozen_summary'
+	)
+	_write_complete(end_config, frozen_config)
+	for model in ('pretrained', 'random'):
+		for layout_id in LAYOUT_IDS:
+			for data_size in DATA_SIZE_PREFIX:
+				path = (
+					frozen_config.runs_root
+					/ f'model={model}'
+					/ f'layout={layout_id}'
+					/ f'size={data_size}'
+					/ 'metrics.json'
+				)
+				payload = json.loads(path.read_text(encoding='utf-8'))
+				definition = {
+					**payload['supervision']['test_definition'],
+					'reserved_large_inline': [*range(10, 54), 99],
+				}
+				payload['supervision']['test_definition'] = definition
+				payload['benchmark_identity']['test_definition'] = definition
+				path.write_text(json.dumps(payload), encoding='utf-8')
+	with pytest.raises(ValueError, match='four-way supervision mismatch'):
 		summarize_channel_four_way(end_config, frozen_config)
 
 

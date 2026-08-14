@@ -29,7 +29,7 @@ from seis_ssl_cluster.data.window_preprocessing import (
 	read_amplitude_crop,
 )
 from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
-from seis_ssl_cluster.embedding.writer import file_sha256
+from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.voxel_decoder import (
 	VoxelDecoder3D,
@@ -43,6 +43,8 @@ from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_AXIS_MAPPING,
 	ChannelLayouts,
 	SectionLines,
+	channel_test_definition,
+	common_reserved_training_lines,
 	inspect_prepared_label_identity,
 	load_channel_layouts,
 	selected_training_lines,
@@ -168,6 +170,7 @@ class ChannelEndToEndPlan:
 	reference: ChannelReferenceArtifact
 	layouts: ChannelLayouts
 	train_lines: SectionLines
+	reserved_training_lines: SectionLines
 	prepared_label_identity: Mapping[str, object]
 	split_counts: Mapping[str, tuple[int, int]]
 	class_weights: tuple[float, float]
@@ -209,9 +212,9 @@ def resolve_channel_reference_artifact(
 	survey_id: str = 'parihaka',
 ) -> ChannelReferenceArtifact:
 	"""Resolve only valid-token and metadata files from an embedding artifact."""
-	root = Path(artifact_dir)
-	valid_tokens_path = root / f'{survey_id}.valid_tokens.npy'
-	metadata_path = root / f'{survey_id}.metadata.json'
+	paths = output_paths(artifact_dir, survey_id)
+	valid_tokens_path = paths.valid_tokens
+	metadata_path = paths.metadata
 	if not valid_tokens_path.is_file():
 		raise FileNotFoundError(
 			f'missing reference valid-token mask: {valid_tokens_path}'
@@ -277,7 +280,7 @@ class ChannelAmplitudeTileDataset(Dataset[dict[str, Any]]):
 		labels_path: str | Path,
 		lines: SectionLines,
 		validation: SectionLines,
-		test: SectionLines,
+		reserved_training: SectionLines,
 		split: str,
 		core_size_tokens: tuple[int, int, int] = CHANNEL_CORE_SIZE_TOKENS,
 		context_halo_tokens: tuple[int, int, int] = CHANNEL_CONTEXT_HALO_TOKENS,
@@ -289,7 +292,7 @@ class ChannelAmplitudeTileDataset(Dataset[dict[str, Any]]):
 		self.labels_path = Path(labels_path)
 		self.lines = lines
 		self.validation = validation
-		self.test = test
+		self.reserved_training = reserved_training
 		self.split = split
 		self.survey_id = survey_id
 		self.tile_settings = ChannelTileSettings(
@@ -315,7 +318,7 @@ class ChannelAmplitudeTileDataset(Dataset[dict[str, Any]]):
 			settings=self.tile_settings,
 			train=self.lines,
 			validation=self.validation,
-			test=self.test,
+			reserved_training=self.reserved_training,
 			split=self.split,
 		)
 
@@ -334,7 +337,7 @@ class ChannelAmplitudeTileDataset(Dataset[dict[str, Any]]):
 			settings=self.tile_settings,
 			train=self.lines,
 			validation=self.validation,
-			test=self.test,
+			reserved_training=self.reserved_training,
 			split=self.split,
 		)
 		start_xyz = tuple(
@@ -556,6 +559,7 @@ def inspect_channel_end_to_end_job(  # noqa: PLR0913
 	)
 	layouts = load_channel_layouts(layout_config, reference.volume_shape_xyz)
 	train_lines = selected_training_lines(layouts, layout_id, data_size)
+	reserved_training_lines = common_reserved_training_lines(layouts)
 	split_counts: dict[str, tuple[int, int]] = {}
 	tile_counts: dict[str, int] = {}
 	tile_ids: dict[str, tuple[int, ...]] = {}
@@ -565,7 +569,7 @@ def inspect_channel_end_to_end_job(  # noqa: PLR0913
 			labels_path=config.labels,
 			lines=train_lines,
 			validation=layouts.validation,
-			test=layouts.test,
+			reserved_training=reserved_training_lines,
 			split=split,
 			core_size_tokens=config.tiles.core_size_tokens,
 			context_halo_tokens=config.tiles.context_halo_tokens,
@@ -612,6 +616,7 @@ def inspect_channel_end_to_end_job(  # noqa: PLR0913
 		prepared_label_identity=prepared_label_identity,
 		layouts=layouts,
 		train_lines=train_lines,
+		reserved_training_lines=reserved_training_lines,
 		split_counts=split_counts,
 		class_weights=class_weights,
 		tile_counts=tile_counts,
@@ -632,6 +637,7 @@ def inspect_channel_end_to_end_job(  # noqa: PLR0913
 		reference=reference,
 		layouts=layouts,
 		train_lines=train_lines,
+		reserved_training_lines=reserved_training_lines,
 		prepared_label_identity=prepared_label_identity,
 		split_counts=split_counts,
 		class_weights=class_weights,
@@ -994,7 +1000,7 @@ def _channel_end_to_end_datasets(
 			labels_path=plan.config.labels,
 			lines=plan.train_lines,
 			validation=plan.layouts.validation,
-			test=plan.layouts.test,
+			reserved_training=plan.reserved_training_lines,
 			split=split,
 			core_size_tokens=plan.config.tiles.core_size_tokens,
 			context_halo_tokens=plan.config.tiles.context_halo_tokens,
@@ -1312,8 +1318,9 @@ def _end_to_end_metrics_payload(
 			'train_crossline': list(plan.train_lines.crossline),
 			'validation_inline': list(plan.layouts.validation.inline),
 			'validation_crossline': list(plan.layouts.validation.crossline),
-			'test_inline': list(plan.layouts.test.inline),
-			'test_crossline': list(plan.layouts.test.crossline),
+			'test_definition': channel_test_definition(
+				plan.reserved_training_lines
+			),
 			'split_class_counts': {
 				split: list(plan.split_counts[split])
 				for split in ('train', 'validation', 'test')
@@ -1444,6 +1451,7 @@ def _end_to_end_identity(  # noqa: PLR0913
 	prepared_label_identity: Mapping[str, object],
 	layouts: ChannelLayouts,
 	train_lines: SectionLines,
+	reserved_training_lines: SectionLines,
 	split_counts: Mapping[str, tuple[int, int]],
 	class_weights: tuple[float, float],
 	tile_counts: Mapping[str, int],
@@ -1500,7 +1508,7 @@ def _end_to_end_identity(  # noqa: PLR0913
 		'supervision': {
 			'train_lines': _lines_identity(train_lines),
 			'validation_lines': _lines_identity(layouts.validation),
-			'test_lines': _lines_identity(layouts.test),
+			'test_definition': channel_test_definition(reserved_training_lines),
 			'split_class_counts': {
 				split: list(split_counts[split])
 				for split in ('train', 'validation', 'test')

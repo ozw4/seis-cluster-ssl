@@ -2,10 +2,6 @@ validation:
   inline: [350]
   crossline: [200]
 
-test:
-  inline: [650]
-  crossline: [340]
-
 layouts:
   layout_000:
     inline: [50, 250, 490, 690]

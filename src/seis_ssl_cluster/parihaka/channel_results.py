@@ -12,6 +12,7 @@ from pathlib import Path
 
 from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_AXIS_MAPPING,
+	CHANNEL_TEST_MODE,
 	DATA_SIZE_PREFIX,
 	LAYOUT_IDS,
 )
@@ -35,7 +36,7 @@ _BENCHMARK_IDENTITY_KEYS = {
 	'prepared_label_identity',
 	'train_lines',
 	'validation',
-	'test',
+	'test_definition',
 	'geometry',
 	'class_weights',
 	'decoder',
@@ -70,6 +71,8 @@ _GLOBAL_IDENTITY_KEYS = (
 	'decoder_initial_state_sha256',
 	'training',
 	'tiles',
+	'validation',
+	'test_definition',
 )
 _PRETRAINED_MODEL_SOURCE_KEYS = {
 	'role',
@@ -287,8 +290,7 @@ def _validate_supervision(payload: Mapping[str, object], path: Path) -> None:
 		'train_crossline',
 		'validation_inline',
 		'validation_crossline',
-		'test_inline',
-		'test_crossline',
+		'test_definition',
 		'split_class_counts',
 	}
 	if set(supervision) != expected_keys:
@@ -305,10 +307,11 @@ def _validate_supervision(payload: Mapping[str, object], path: Path) -> None:
 		'train_crossline',
 		'validation_inline',
 		'validation_crossline',
-		'test_inline',
-		'test_crossline',
 	):
 		_indices(supervision.get(key), f'{path} supervision.{key}')
+	_validate_test_definition(
+		supervision.get('test_definition'), f'{path} supervision.test_definition'
+	)
 	counts = supervision.get('split_class_counts')
 	if not isinstance(counts, Mapping):
 		raise TypeError(f'{path} supervision.split_class_counts must be a mapping')
@@ -394,7 +397,10 @@ def _validate_benchmark_identity(
 	for key, expected_keys in (
 		('train_lines', {'inline', 'crossline'}),
 		('validation', {'inline', 'crossline'}),
-		('test', {'inline', 'crossline'}),
+		(
+			'test_definition',
+			{'mode', 'reserved_large_inline', 'reserved_large_crossline'},
+		),
 		(
 			'geometry',
 			{
@@ -440,6 +446,10 @@ def _validate_benchmark_identity(
 				f'{path} benchmark_identity.{key} must contain exactly '
 				f'{sorted(expected_keys)!r}'
 			)
+	_validate_test_definition(
+		identity.get('test_definition'),
+		f'{path} benchmark_identity.test_definition',
+	)
 
 
 def _validate_prepared_label_identity(
@@ -579,7 +589,6 @@ def _validate_identity_redundancy(
 	for identity_key, prefix in (
 		('train_lines', 'train'),
 		('validation', 'validation'),
-		('test', 'test'),
 	):
 		lines = _identity_mapping(identity, identity_key, path)
 		for orientation in ('inline', 'crossline'):
@@ -588,6 +597,10 @@ def _validate_identity_redundancy(
 					f'{path} benchmark_identity.{identity_key}.{orientation} '
 					'does not match supervision'
 				)
+	if identity.get('test_definition') != supervision.get('test_definition'):
+		raise ValueError(
+			f'{path} benchmark_identity.test_definition does not match supervision'
+		)
 	if _class_weights(identity, path) != _class_weights(payload, path):
 		raise ValueError(
 			f'{path} benchmark_identity.class_weights does not match metrics'
@@ -729,11 +742,32 @@ def _validate_common_held_out(
 	first_key = (MODELS[0], LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
 	common_supervision = _supervision(rows[first_key])
 	common_held_out = _held_out_identity(common_supervision)
+	common_identity = _benchmark_identity(
+		rows[first_key], _metrics_path(runs_root, *first_key)
+	)
+	common_tiles = _identity_mapping(
+		common_identity, 'tile_counts', _metrics_path(runs_root, *first_key)
+	)
+	common_held_out_tiles = tuple(
+		common_tiles.get(split) for split in ('validation', 'test')
+	)
 	for key, payload in rows.items():
 		if _held_out_identity(_supervision(payload)) != common_held_out:
 			raise ValueError(
 				f'{_metrics_path(runs_root, *key)} validation/test supervision '
 				'does not match all 30 jobs'
+			)
+		identity = _benchmark_identity(payload, _metrics_path(runs_root, *key))
+		current_tiles = _identity_mapping(
+			identity, 'tile_counts', _metrics_path(runs_root, *key)
+		)
+		if tuple(current_tiles.get(split) for split in ('validation', 'test')) != (
+			common_held_out_tiles
+		):
+			raise ValueError(
+				f'{_metrics_path(runs_root, *key)} validation/test tile counts '
+				'do not match '
+				'all 30 jobs'
 			)
 
 
@@ -876,11 +910,24 @@ def _held_out_identity(supervision: Mapping[str, object]) -> tuple[object, ...]:
 		supervision.get('axis_mapping'),
 		supervision.get('validation_inline'),
 		supervision.get('validation_crossline'),
-		supervision.get('test_inline'),
-		supervision.get('test_crossline'),
+		supervision.get('test_definition'),
 		counts.get('validation'),
 		counts.get('test'),
 	)
+
+
+def _validate_test_definition(value: object, label: str) -> None:
+	if not isinstance(value, Mapping):
+		raise TypeError(f'{label} must be a mapping')
+	expected = {'mode', 'reserved_large_inline', 'reserved_large_crossline'}
+	if set(value) != expected:
+		raise ValueError(f'{label} must contain exactly {sorted(expected)!r}')
+	if value.get('mode') != CHANNEL_TEST_MODE:
+		raise ValueError(f'{label}.mode must be {CHANNEL_TEST_MODE!r}')
+	for key in ('reserved_large_inline', 'reserved_large_crossline'):
+		indices = _indices(value.get(key), f'{label}.{key}')
+		if indices != tuple(sorted(indices)):
+			raise ValueError(f'{label}.{key} must be sorted')
 
 
 def _indices(value: object, label: str) -> tuple[int, ...]:

@@ -16,6 +16,7 @@ from seis_ssl_cluster.parihaka.channel_checkpoints import (
 )
 from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_AXIS_MAPPING,
+	CHANNEL_TEST_MODE,
 	DATA_SIZE_PREFIX,
 	LAYOUT_IDS,
 )
@@ -64,7 +65,7 @@ _REFERENCE_INPUT_KEYS = {
 _SUPERVISION_KEYS = {
 	'train_lines',
 	'validation_lines',
-	'test_lines',
+	'test_definition',
 	'split_class_counts',
 	'tile_counts',
 	'class_weights',
@@ -416,12 +417,15 @@ def _validate_common_identity_components(
 def _validate_identity_supervision(
 	supervision: Mapping[str, object], path: Path
 ) -> None:
-	for key in ('train_lines', 'validation_lines', 'test_lines'):
+	for key in ('train_lines', 'validation_lines'):
 		lines = _mapping(supervision, key, f'{path} supervision')
 		if set(lines) != {'inline', 'crossline'}:
 			raise ValueError(f'{path} supervision.{key} has invalid fields')
 		for orientation in ('inline', 'crossline'):
 			_indices(lines.get(orientation), f'{path} supervision.{key}.{orientation}')
+	_validate_test_definition(
+		supervision.get('test_definition'), f'{path} supervision.test_definition'
+	)
 	counts = _mapping(supervision, 'split_class_counts', f'{path} supervision')
 	tiles = _mapping(supervision, 'tile_counts', f'{path} supervision')
 	if set(counts) != {'train', 'validation', 'test'} or set(tiles) != {
@@ -445,6 +449,18 @@ def _validate_metrics_redundancy(
 	payload: Mapping[str, object], identity: Mapping[str, object], path: Path
 ) -> None:
 	metric_supervision = _mapping(payload, 'supervision', str(path))
+	expected_metric_keys = {
+		'axis_mapping',
+		'train_inline',
+		'train_crossline',
+		'validation_inline',
+		'validation_crossline',
+		'test_definition',
+		'split_class_counts',
+		'tile_counts',
+	}
+	if set(metric_supervision) != expected_metric_keys:
+		raise ValueError(f'{path} supervision has invalid fields')
 	if metric_supervision.get('axis_mapping') != CHANNEL_AXIS_MAPPING:
 		raise ValueError(f'{path} supervision axis mapping is invalid')
 	identity_supervision = _mapping(
@@ -453,7 +469,6 @@ def _validate_metrics_redundancy(
 	line_names = {
 		'train_lines': 'train',
 		'validation_lines': 'validation',
-		'test_lines': 'test',
 	}
 	for identity_key, metric_prefix in line_names.items():
 		lines = _mapping(identity_supervision, identity_key, f'{path} supervision')
@@ -462,6 +477,10 @@ def _validate_metrics_redundancy(
 				f'{metric_prefix}_{orientation}'
 			):
 				raise ValueError(f'{path} supervision line identity mismatch')
+	if identity_supervision.get('test_definition') != metric_supervision.get(
+		'test_definition'
+	):
+		raise ValueError(f'{path} supervision test definition identity mismatch')
 	for key in ('split_class_counts', 'tile_counts'):
 		if identity_supervision.get(key) != metric_supervision.get(key):
 			raise ValueError(f'{path} supervision {key} identity mismatch')
@@ -495,10 +514,32 @@ def _validate_end_to_end_collection(
 			'validation_lines'
 		) != _mapping(common, 'supervision', 'common').get('validation_lines'):
 			raise ValueError(f'{path} validation supervision drift')
-		if _mapping(identity, 'supervision', str(path)).get(
-			'test_lines'
-		) != _mapping(common, 'supervision', 'common').get('test_lines'):
+		current_supervision = _mapping(identity, 'supervision', str(path))
+		common_supervision = _mapping(common, 'supervision', 'common')
+		if current_supervision.get('test_definition') != common_supervision.get(
+			'test_definition'
+		):
 			raise ValueError(f'{path} test supervision drift')
+		current_counts = _mapping(
+			current_supervision, 'split_class_counts', f'{path} supervision'
+		)
+		common_counts = _mapping(
+			common_supervision, 'split_class_counts', 'common supervision'
+		)
+		if tuple(current_counts.get(split) for split in ('validation', 'test')) != (
+			tuple(common_counts.get(split) for split in ('validation', 'test'))
+		):
+			raise ValueError(f'{path} validation/test class count drift')
+		current_tiles = _mapping(
+			current_supervision, 'tile_counts', f'{path} supervision'
+		)
+		common_tiles = _mapping(
+			common_supervision, 'tile_counts', 'common supervision'
+		)
+		if tuple(current_tiles.get(split) for split in ('validation', 'test')) != (
+			tuple(common_tiles.get(split) for split in ('validation', 'test'))
+		):
+			raise ValueError(f'{path} validation/test tile count drift')
 	_validate_encoder_conditions(jobs, runs_root)
 	_validate_end_to_end_pairs(jobs)
 	_validate_nested_and_unique_layouts(jobs)
@@ -652,8 +693,7 @@ def _normalized_frozen_supervision(
 		'train_crossline': supervision.get('train_crossline'),
 		'validation_inline': supervision.get('validation_inline'),
 		'validation_crossline': supervision.get('validation_crossline'),
-		'test_inline': supervision.get('test_inline'),
-		'test_crossline': supervision.get('test_crossline'),
+		'test_definition': supervision.get('test_definition'),
 		'split_class_counts': supervision.get('split_class_counts'),
 		'tile_counts': identity.get('tile_counts'),
 	}
@@ -670,8 +710,7 @@ def _normalized_end_to_end_supervision(
 		'train_crossline': supervision.get('train_crossline'),
 		'validation_inline': supervision.get('validation_inline'),
 		'validation_crossline': supervision.get('validation_crossline'),
-		'test_inline': supervision.get('test_inline'),
-		'test_crossline': supervision.get('test_crossline'),
+		'test_definition': supervision.get('test_definition'),
 		'split_class_counts': supervision.get('split_class_counts'),
 		'tile_counts': identity_supervision.get('tile_counts'),
 	}
@@ -872,6 +911,20 @@ def _class_counts(value: object, label: str) -> tuple[int, int]:
 	):
 		raise TypeError(f'{label} must contain two positive integers')
 	return value[0], value[1]
+
+
+def _validate_test_definition(value: object, label: str) -> None:
+	if not isinstance(value, Mapping):
+		raise TypeError(f'{label} must be a mapping')
+	expected = {'mode', 'reserved_large_inline', 'reserved_large_crossline'}
+	if set(value) != expected:
+		raise ValueError(f'{label} has invalid fields')
+	if value.get('mode') != CHANNEL_TEST_MODE:
+		raise ValueError(f'{label}.mode must be {CHANNEL_TEST_MODE!r}')
+	for key in ('reserved_large_inline', 'reserved_large_crossline'):
+		indices = _indices(value.get(key), f'{label}.{key}')
+		if indices != tuple(sorted(indices)):
+			raise ValueError(f'{label}.{key} must be sorted')
 
 
 def _indices(value: object, label: str) -> tuple[int, ...]:

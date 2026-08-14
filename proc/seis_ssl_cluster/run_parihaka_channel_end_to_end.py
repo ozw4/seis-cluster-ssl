@@ -8,6 +8,7 @@ from pathlib import Path
 
 from seis_ssl_cluster.cli import load_config_for_cli
 from seis_ssl_cluster.config import load_config
+from seis_ssl_cluster.parihaka.channel_data import CHANNEL_TEST_MODE
 from seis_ssl_cluster.parihaka.channel_end_to_end import (
 	ChannelEndToEndPlan,
 	channel_end_to_end_config_from_mapping,
@@ -64,6 +65,14 @@ def _print_dry_run(plan: ChannelEndToEndPlan) -> None:
 	print(f'data_size: {plan.data_size}')
 	print(f'selected_inline_indices: {plan.train_lines.inline}')
 	print(f'selected_crossline_indices: {plan.train_lines.crossline}')
+	print(f'validation_inline_indices: {plan.layouts.validation.inline}')
+	print(f'validation_crossline_indices: {plan.layouts.validation.crossline}')
+	print(f'test_mode: {CHANNEL_TEST_MODE}')
+	print(f'reserved_large_inline_indices: {plan.reserved_training_lines.inline}')
+	print(
+		'reserved_large_crossline_indices: '
+		f'{plan.reserved_training_lines.crossline}'
+	)
 	print(f'split_class_counts: {dict(plan.split_counts)}')
 	print(f'class_weights: {plan.class_weights}')
 	print(f'tile_counts: {dict(plan.tile_counts)}')

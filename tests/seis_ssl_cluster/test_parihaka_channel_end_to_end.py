@@ -24,7 +24,12 @@ from seis_ssl_cluster.models.voxel_decoder import VoxelDecoder3D
 from seis_ssl_cluster.parihaka.channel_checkpoints import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
 )
-from seis_ssl_cluster.parihaka.channel_data import SectionLines
+from seis_ssl_cluster.parihaka.channel_data import (
+	DATA_SIZE_PREFIX,
+	LAYOUT_IDS,
+	SectionLines,
+	selected_training_lines,
+)
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	ChannelTileDataset,
 	DecoderArchitecture,
@@ -73,11 +78,12 @@ def _raw_fixture(tmp_path: Path) -> tuple[Path, Path]:
 	)
 	artifact_dir = tmp_path / 'reference'
 	artifact_dir.mkdir()
+	paths = output_paths(artifact_dir, 'parihaka')
 	np.save(
-		artifact_dir / 'parihaka.valid_tokens.npy',
+		paths.valid_tokens,
 		np.ones((8, 8, 8), dtype=np.bool_),
 	)
-	(artifact_dir / 'parihaka.metadata.json').write_text(
+	paths.metadata.write_text(
 		json.dumps(
 			{
 				'source_amplitude_path': str(amplitude_path),
@@ -99,6 +105,18 @@ def _raw_fixture(tmp_path: Path) -> tuple[Path, Path]:
 	return artifact_dir, labels_path
 
 
+def test_reference_artifact_uses_embedding_output_path_contract(
+	tmp_path: Path,
+) -> None:
+	artifact_dir, _ = _raw_fixture(tmp_path)
+	paths = output_paths(artifact_dir, 'parihaka')
+
+	artifact = resolve_channel_reference_artifact(artifact_dir)
+
+	assert artifact.metadata_path == paths.metadata
+	assert artifact.valid_tokens_path == paths.valid_tokens
+
+
 def _dataset(tmp_path: Path) -> ChannelAmplitudeTileDataset:
 	artifact_dir, labels_path = _raw_fixture(tmp_path)
 	return ChannelAmplitudeTileDataset(
@@ -106,7 +124,7 @@ def _dataset(tmp_path: Path) -> ChannelAmplitudeTileDataset:
 		labels_path=labels_path,
 		lines=SectionLines((0,), (0,)),
 		validation=SectionLines((62,), (62,)),
-		test=SectionLines((63,), (63,)),
+		reserved_training=SectionLines((0,), (0,)),
 		split='train',
 	)
 
@@ -202,8 +220,9 @@ class _PreflightFixture:
 		self.stats = tmp_path / 'stats.json'
 		self.reference_dir = tmp_path / 'reference'
 		self.reference_dir.mkdir()
-		self.reference_metadata = self.reference_dir / 'parihaka.metadata.json'
-		self.valid_tokens = self.reference_dir / 'parihaka.valid_tokens.npy'
+		reference_paths = output_paths(self.reference_dir, 'parihaka')
+		self.reference_metadata = reference_paths.metadata
+		self.valid_tokens = reference_paths.valid_tokens
 		self.pretrained = (
 			tmp_path
 			/ 'pretraining'
@@ -243,7 +262,6 @@ class _PreflightFixture:
 			yaml.safe_dump(
 				{
 					'validation': {'inline': [12], 'crossline': [12]},
-					'test': {'inline': [13], 'crossline': [13]},
 					'layouts': {
 						f'layout_{index:03d}': {
 							'inline': [
@@ -580,7 +598,7 @@ def test_frozen_and_end_to_end_supervision_counts_match(tmp_path: Path) -> None:
 			geometry=geometry,
 			lines=plan.train_lines,
 			validation=plan.layouts.validation,
-			test=plan.layouts.test,
+			reserved_training=plan.reserved_training_lines,
 			split=split,
 			tiles=plan.config.tiles,
 		)
@@ -589,6 +607,69 @@ def test_frozen_and_end_to_end_supervision_counts_match(tmp_path: Path) -> None:
 		assert tuple(record.tile_id for record in frozen.records) == (
 			plan.tile_ids[split]
 		)
+		end_dataset = ChannelAmplitudeTileDataset(
+			reference=plan.reference,
+			labels_path=fixture.labels,
+			lines=plan.train_lines,
+			validation=plan.layouts.validation,
+			reserved_training=plan.reserved_training_lines,
+			split=split,
+			core_size_tokens=plan.config.tiles.core_size_tokens,
+			context_halo_tokens=plan.config.tiles.context_halo_tokens,
+		)
+		assert end_dataset.records == frozen.records
+		for index in range(len(frozen)):
+			assert torch.equal(
+				frozen[index]['supervision_mask'],
+				end_dataset[index]['supervision_mask'],
+			)
+
+
+def test_common_test_tiles_and_counts_are_layout_and_size_invariant(
+	tmp_path: Path,
+) -> None:
+	fixture = _PreflightFixture(tmp_path)
+	plan = fixture.plan()
+	common_test: tuple[tuple[int, ...], tuple[int, int]] | None = None
+	common_validation: tuple[tuple[int, ...], tuple[int, int]] | None = None
+	train_counts_by_size: dict[str, set[tuple[int, int]]] = {
+		data_size: set() for data_size in DATA_SIZE_PREFIX
+	}
+	for layout_id in LAYOUT_IDS:
+		for data_size in DATA_SIZE_PREFIX:
+			lines = selected_training_lines(plan.layouts, layout_id, data_size)
+			datasets = {
+				split: ChannelAmplitudeTileDataset(
+					reference=plan.reference,
+					labels_path=fixture.labels,
+					lines=lines,
+					validation=plan.layouts.validation,
+					reserved_training=plan.reserved_training_lines,
+					split=split,
+					core_size_tokens=plan.config.tiles.core_size_tokens,
+					context_halo_tokens=plan.config.tiles.context_halo_tokens,
+				)
+				for split in ('train', 'validation', 'test')
+			}
+			test_identity = (
+				tuple(record.tile_id for record in datasets['test'].records),
+				datasets['test'].class_counts,
+			)
+			validation_identity = (
+				tuple(record.tile_id for record in datasets['validation'].records),
+				datasets['validation'].class_counts,
+			)
+			common_test = test_identity if common_test is None else common_test
+			common_validation = (
+				validation_identity
+				if common_validation is None
+				else common_validation
+			)
+			assert test_identity == common_test
+			assert validation_identity == common_validation
+			assert all(count > 0 for count in datasets['test'].class_counts)
+			train_counts_by_size[data_size].add(datasets['train'].class_counts)
+	assert len({next(iter(values)) for values in train_counts_by_size.values()}) == 3
 
 
 def test_optimizer_groups_exclude_unused_mae_decoder() -> None:
