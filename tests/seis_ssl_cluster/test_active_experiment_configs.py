@@ -18,6 +18,9 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 	stratigraphic_hmm_settings_from_config,
 )
 from seis_ssl_cluster.config import (
+	f3_lithology_voxel_label_budget_center_trace_masked_split as center_trace_six_split,
+)
+from seis_ssl_cluster.config import (
 	load_config,
 	resolve_cluster_visualization_config,
 	resolve_clustering_config,
@@ -453,6 +456,11 @@ F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_ROOT = (
 )
 F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_CONFIGS = sorted(
 	F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_ROOT.glob('*.yaml')
+)
+F3_CENTER_TRACE_MASKED_SIX_SPLIT_CONFIG = (
+	F3_ROOT
+	/ '106_strat_hmm_multi_head_k6810_center_trace_masked_six_split_v1'
+	/ '00_audit_center_trace_masked_six_split.yaml'
 )
 F3_VOXEL_LABEL_BUDGET_CURRENT_K6_CONTROL_CONFIGS = [
 	F3_CURRENT_K6_CONTROL_ROOT / '07_run_current_k6_voxel_label_budget.yaml',
@@ -1623,6 +1631,23 @@ def test_active_f3_voxel_label_budget_six_split_configs_resolve(
 	paths = raw['paths']
 	assert isinstance(paths, dict)
 	assert config.reports_root == Path(paths['reports_root'])
+	assert config.multi_head_decisions.is_relative_to(config.artifact_root)
+	assert not config.multi_head_decisions.is_relative_to(config.reports_root)
+
+
+def test_active_f3_center_trace_masked_six_split_inputs_are_artifact_side(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	config = center_trace_six_split.config_from_mapping(
+		load_config(F3_CENTER_TRACE_MASKED_SIX_SPLIT_CONFIG)
+	)
+
+	assert config.original_split_handoff.is_relative_to(config.artifact_root)
+	assert not config.original_split_handoff.is_relative_to(Path('/workspace/reports'))
 
 
 def test_active_f3_section_layout_model_roster_resolves(

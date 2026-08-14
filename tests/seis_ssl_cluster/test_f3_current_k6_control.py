@@ -5,14 +5,11 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 
 from seis_ssl_cluster.f3 import current_k6_control as control
-
-if TYPE_CHECKING:
-	from pathlib import Path
 
 
 def test_migration_gate_requires_exact_replay_evidence(
@@ -20,7 +17,7 @@ def test_migration_gate_requires_exact_replay_evidence(
 ) -> None:
 	root = tmp_path / 'migration'
 	_write_json(
-		root / 'performance_migration_decision.json',
+		root / 'reports' / 'performance_migration_decision.json',
 		{
 			'status': 'PASS_WITH_NUMERIC_DRIFT',
 			'required_rerun_scope': (
@@ -29,7 +26,7 @@ def test_migration_gate_requires_exact_replay_evidence(
 		},
 	)
 	_write_json(
-		root / 'pseudo_target_parity.json',
+		root / 'pseudo_targets' / 'pseudo_target_parity.json',
 		{
 			'labels': {'exact': True},
 			'confidence': {'exact': True, 'threshold_crossing_count': 0},
@@ -37,7 +34,7 @@ def test_migration_gate_requires_exact_replay_evidence(
 		},
 	)
 	_write_json(
-		root / 'hmm_parity.json',
+		root / 'clustering' / 'hmm_parity.json',
 		{
 			'labels': {
 				'decoded_labels_exact': True,
@@ -47,7 +44,7 @@ def test_migration_gate_requires_exact_replay_evidence(
 		},
 	)
 	_write_json(
-		root / 'probe_parity.json',
+		root / 'probe_parity' / 'probe_parity.json',
 		{
 			'parity': {
 				'linear_balanced_v1': {
@@ -61,7 +58,7 @@ def test_migration_gate_requires_exact_replay_evidence(
 		},
 	)
 	_write_json(
-		root / 'embedding_parity.json',
+		root / 'embedding_parity' / 'embedding_parity.json',
 		{
 			'comparisons': {
 				'B_current_cache_off_vs_C_current_memmap_cache': {
@@ -72,16 +69,37 @@ def test_migration_gate_requires_exact_replay_evidence(
 			},
 		},
 	)
-	monkeypatch.setattr(control, 'MIGRATION_ROOT', root)
+	monkeypatch.setattr(control, 'MIGRATION_ARTIFACT_ROOT', root)
 
 	evidence = control._migration_evidence()
 
 	assert evidence['decision']['status'] == 'PASS_WITH_NUMERIC_DRIFT'
-	decision = json.loads((root / 'performance_migration_decision.json').read_text())
+	decision_path = root / 'reports' / 'performance_migration_decision.json'
+	decision = json.loads(decision_path.read_text())
 	decision['status'] = 'REEXTRACT_REQUIRED'
-	_write_json(root / 'performance_migration_decision.json', decision)
+	_write_json(decision_path, decision)
 	with pytest.raises(ValueError, match='migration status blocks control'):
 		control._migration_evidence()
+
+
+def test_fixed_control_inputs_are_artifact_side() -> None:
+	tracked_reports = (Path.cwd() / 'reports').resolve()
+	paths = (
+		control.MIGRATION_ARTIFACT_ROOT,
+		control.HISTORICAL_TOKEN_METRICS,
+		control.MAE_TOKEN_METRICS,
+	)
+
+	assert all(
+		path.resolve(strict=False).is_relative_to(
+			(Path.cwd() / 'artifacts').resolve()
+		)
+		for path in paths
+	)
+	assert all(
+		not path.resolve(strict=False).is_relative_to(tracked_reports)
+		for path in paths
+	)
 
 
 def test_checkpoint_check_rejects_failed_structured_contracts() -> None:

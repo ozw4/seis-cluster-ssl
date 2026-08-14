@@ -7,7 +7,7 @@ inputs:
   split_dataset_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/split_index_m1_v1/split_dataset_manifest.json
   voxel_dataset_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1/voxel_split_dataset_manifest.json
   original_dataset_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split/voxel_label_budget_dataset_manifest.json
-  multi_head_decisions: /workspace/reports/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/multi_head_decisions.json
+  multi_head_decisions: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_multi_head_k6810_v1/original_split/reports/multi_head_decisions.json
   multi_head_handoff: /workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1/preflight/multi_head_handoff.json
   source_label_segy: /home/dcuser/data/public_data/field/F3/f3_labels.sgy
   class_info: /workspace/artifacts/seis_ssl_cluster/inspection/f3/facies_benchmark_v1/inventory/class_info.json

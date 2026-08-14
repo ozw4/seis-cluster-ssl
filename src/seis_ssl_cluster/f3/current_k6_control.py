@@ -28,7 +28,10 @@ from seis_ssl_cluster.training.strat_hmm.components import (
 MODEL_TAG = 'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
 HISTORICAL_M1_TAG = 'strat_hmm_pretext_m1_k6_topblock1_distill'
 MAE_TAG = 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
-MIGRATION_ROOT = Path('reports/f3/facies_benchmark_v1/performance_migration_validation')
+MIGRATION_ARTIFACT_ROOT = Path(
+	'artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/'
+	'main_332478be'
+)
 HISTORICAL_CONFIG = Path(
 	'experiments/f3/facies_benchmark_v1/80_strat_hmm_pretraining_m1/'
 	'03_train_single_head_topblock_distill_full.yaml'
@@ -42,14 +45,14 @@ HISTORICAL_EMBEDDING_ROOT = Path(
 	'strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16'
 )
 HISTORICAL_TOKEN_METRICS = Path(
-	'reports/f3/facies_benchmark_v1/lithology_probe/'
+	'artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/'
 	'strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/'
-	'png_slices_segy_labels_v1/linear_balanced_v1/metrics.json'
+	'png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.json'
 )
 MAE_TOKEN_METRICS = Path(
-	'reports/f3/facies_benchmark_v1/lithology_probe/'
+	'artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/'
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/'
-	'png_slices_segy_labels_v1/linear_balanced_v1/metrics.json'
+	'png_slices_segy_labels_v1/probes/linear_balanced_v1/metrics.json'
 )
 
 
@@ -287,7 +290,11 @@ def write_token_probe_comparison(
 
 
 def _migration_evidence() -> dict[str, object]:
-	decision_path = MIGRATION_ROOT / 'performance_migration_decision.json'
+	decision_path = (
+		MIGRATION_ARTIFACT_ROOT
+		/ 'reports'
+		/ 'performance_migration_decision.json'
+	)
 	decision = _read_json(decision_path)
 	if decision.get('status') not in {'PASS_REUSE_EXISTING', 'PASS_WITH_NUMERIC_DRIFT'}:
 		raise ValueError(f'migration status blocks control: {decision.get("status")!r}')
@@ -295,10 +302,14 @@ def _migration_evidence() -> dict[str, object]:
 		'no historical rerun; add a future current-code K=6 control'
 	):
 		raise ValueError('migration decision rerun scope mismatch')
-	pseudo = _read_json(MIGRATION_ROOT / 'pseudo_target_parity.json')
-	hmm = _read_json(MIGRATION_ROOT / 'hmm_parity.json')
-	probe = _read_json(MIGRATION_ROOT / 'probe_parity.json')
-	embedding = _read_json(MIGRATION_ROOT / 'embedding_parity.json')
+	pseudo = _read_json(
+		MIGRATION_ARTIFACT_ROOT / 'pseudo_targets' / 'pseudo_target_parity.json'
+	)
+	hmm = _read_json(MIGRATION_ARTIFACT_ROOT / 'clustering' / 'hmm_parity.json')
+	probe = _read_json(MIGRATION_ARTIFACT_ROOT / 'probe_parity' / 'probe_parity.json')
+	embedding = _read_json(
+		MIGRATION_ARTIFACT_ROOT / 'embedding_parity' / 'embedding_parity.json'
+	)
 	if not (
 		pseudo.get('labels', {}).get('exact')
 		and pseudo.get('confidence', {}).get('exact')
