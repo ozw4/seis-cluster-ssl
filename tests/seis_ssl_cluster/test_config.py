@@ -25,7 +25,6 @@ from seis_ssl_cluster.config.schema import (
 	F3_FACIES_DATASET_NAME,
 	F3_FACIES_DATASET_VERSION,
 	STAGE_F3_INSPECT_FILES,
-	STAGE_F3_INSPECTION_REPORT,
 	STAGE_F3_LABEL_CONSISTENCY,
 	STAGE_F3_PNG_LABELS,
 	STAGE_F3_QUICKLOOK,
@@ -76,10 +75,6 @@ F3_INSPECTION_CONFIGS = (
 	(
 		F3_INSPECTION_CONFIG_DIR / '06_make_tokenization_preview.yaml',
 		STAGE_F3_TOKENIZATION_PREVIEW,
-	),
-	(
-		F3_INSPECTION_CONFIG_DIR / '07_build_inspection_report.yaml',
-		STAGE_F3_INSPECTION_REPORT,
 	),
 )
 
@@ -254,8 +249,7 @@ def test_f3_inspection_configs_resolve_common_contract(
 
 	assert raw == original
 	required_top_level = {'paths', 'outputs', 'dataset', 'inspection'}
-	allowed_top_level = required_top_level | {'publish'}
-	assert required_top_level <= set(raw) <= allowed_top_level
+	assert set(raw) == required_top_level
 	assert 'stage' not in raw
 	assert raw['paths'] == {
 		'f3_root': DEFAULT_F3_ROOT,
@@ -266,15 +260,7 @@ def test_f3_inspection_configs_resolve_common_contract(
 		'name': F3_FACIES_DATASET_NAME,
 		'version': F3_FACIES_DATASET_VERSION,
 	}
-	if stage == STAGE_F3_INSPECTION_REPORT:
-		assert raw['publish'] == {
-			'enabled': True,
-			'output_dir': 'reports/f3/facies_benchmark_v1/inspection',
-			'include_figures': True,
-			'max_file_size_mb': 10,
-		}
-	else:
-		assert 'publish' not in raw
+	assert 'publish' not in raw
 	assert isinstance(raw['inspection'], dict)
 	assert raw['inspection']
 	assert resolved['stage'] == stage
@@ -327,11 +313,6 @@ def test_f3_inspection_config_preserves_runs_component() -> None:
 			F3_INSPECTION_CONFIG_DIR / '06_make_tokenization_preview.yaml',
 			STAGE_F3_TOKENIZATION_PREVIEW,
 			'tokenization_dir',
-		),
-		(
-			F3_INSPECTION_CONFIG_DIR / '07_build_inspection_report.yaml',
-			STAGE_F3_INSPECTION_REPORT,
-			'output_json',
 		),
 	],
 )

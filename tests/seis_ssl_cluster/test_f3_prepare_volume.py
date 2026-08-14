@@ -30,13 +30,6 @@ EMBEDDING_CONFIG = Path(
 	'experiments/f3/facies_benchmark_v1/20_embedding/'
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16.yaml',
 )
-PREDICT_CONFIG = Path(
-	'experiments/f3/facies_benchmark_v1/50_lithology/'
-	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/'
-	'png_slices_segy_labels_v1/04_predict_volume.yaml',
-)
-
-
 def test_prepare_f3_facies_volume_proc_writes_configured_outputs(
 	tmp_path: Path,
 ) -> None:
@@ -107,7 +100,6 @@ def test_f3_prepare_and_embedding_configs_preserve_explicit_paths() -> None:
 	prepare_config = f3_prepare_volume_config_from_mapping(prepare_raw)
 	embedding_raw = load_config(EMBEDDING_CONFIG)
 	embedding_config = resolve_embedding_extraction_config(embedding_raw)
-	predict_raw = load_config(PREDICT_CONFIG)
 
 	assert prepare_config.outputs.volume_dir == Path(
 		prepare_raw['outputs']['volume_dir']
@@ -124,13 +116,6 @@ def test_f3_prepare_and_embedding_configs_preserve_explicit_paths() -> None:
 	assert embedding_config['embeddings']['output_dir'] == (
 		embedding_raw['embeddings']['output_dir']
 	)
-	assert predict_raw['probe']['probe_joblib'].endswith(
-		'/probes/linear_balanced_v1/probe.joblib',
-	)
-	assert predict_raw['probe']['scaler_joblib'].endswith(
-		'/probes/linear_balanced_v1/scaler.joblib',
-	)
-	assert 'probe.pt' not in json.dumps(predict_raw)
 
 
 @pytest.mark.parametrize(

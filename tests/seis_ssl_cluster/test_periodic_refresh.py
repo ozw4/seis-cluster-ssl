@@ -520,23 +520,12 @@ def _write_initial_targets(
 			schema_version=2 if boundary_weight is not None else 1,
 			write_boundary_weight=boundary_weight is not None,
 		)
-	preflight = tmp_path / 'initial_preflight'
-	preflight.mkdir()
-	(preflight / 'migration.json').write_text(
-		'{"status":"PASS_WITH_NUMERIC_DRIFT"}\n', encoding='utf-8'
-	)
-	(preflight / 'control.json').write_text(
-		'{"readiness":{"status":"CONTROL_READY_POSITIVE"}}\n',
-		encoding='utf-8',
-	)
 	manifest_path = tmp_path / 'initial_target_manifest.json'
 	build_multi_head_target_manifest(
 		manifest_path=manifest_path,
 		source_embedding_dir=embedding_root,
 		head_roots=dict.fromkeys(CANONICAL_KS, target_root),
 		replay_k6_root=replay_root,
-		migration_decision=preflight / 'migration.json',
-		control_summary=preflight / 'control.json',
 	)
 	return manifest_path
 

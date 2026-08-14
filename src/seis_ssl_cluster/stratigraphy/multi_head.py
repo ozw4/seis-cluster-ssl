@@ -32,27 +32,20 @@ SCHEMA_VERSION = 2
 _LEGACY_SCHEMA_VERSION = 1
 
 
-def build_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0913
+def build_multi_head_target_manifest(  # noqa: C901, PLR0912
 	*,
 	manifest_path: str | Path,
 	source_embedding_dir: str | Path,
 	head_roots: Mapping[int | str, str | Path],
 	replay_k6_root: str | Path | None = None,
-	migration_decision: str | Path,
-	control_summary: str | Path,
 	ordering_orientation: str = 'increasing_downward',
 ) -> dict[str, object]:
 	"""Validate references and atomically write a complete multi-head manifest.
 
 	The manifest intentionally contains paths and hashes only; it never embeds target
 	arrays.  K=6 may point to an immutable historical root while exact replay
-	evidence is recorded separately before publication.  Publication also requires
-	the positive migration and current-control preflight gates.
+	evidence is recorded separately before publication.
 	"""
-	validate_multi_head_target_publication_preflight(
-		migration_decision=migration_decision,
-		control_summary=control_summary,
-	)
 	if ordering_orientation != 'increasing_downward':
 		raise ValueError('ordering_orientation must be increasing_downward')
 	roots = _normalized_head_roots(head_roots)
@@ -123,40 +116,6 @@ def build_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0913
 	return payload
 
 
-def validate_multi_head_target_publication_preflight(
-	*,
-	migration_decision: str | Path,
-	control_summary: str | Path,
-) -> None:
-	"""Reject manifest publication unless the required K=6 gates are positive."""
-	migration_status = _json_object(Path(migration_decision)).get('status')
-	if migration_status != 'PASS_WITH_NUMERIC_DRIFT':
-		raise ValueError(
-			'migration preflight requires PASS_WITH_NUMERIC_DRIFT; '
-			f'got {migration_status!r}'
-		)
-	control_payload = _json_object(Path(control_summary))
-	readiness = control_payload.get('readiness', control_payload)
-	if not isinstance(readiness, dict):
-		raise TypeError('control summary readiness must be an object')
-	control_status = readiness.get('status')
-	if control_status != 'CONTROL_READY_POSITIVE':
-		raise ValueError(
-			'control preflight requires CONTROL_READY_POSITIVE; '
-			f'got {control_status!r}'
-		)
-
-
-def _json_object(path: Path) -> dict[str, object]:
-	try:
-		payload = json.loads(path.read_text(encoding='utf-8'))
-	except json.JSONDecodeError as exc:
-		raise ValueError(f'expected JSON object: {path}') from exc
-	if not isinstance(payload, dict):
-		raise TypeError(f'expected JSON object: {path}')
-	return payload
-
-
 def load_multi_head_target_manifest(
 	path: str | Path,
 	*,
@@ -182,6 +141,16 @@ def load_multi_head_target_manifest(
 		verify_hashes=True,
 		validate_array_semantics=validate_array_semantics,
 	)
+	return payload
+
+
+def _json_object(path: Path) -> dict[str, object]:
+	try:
+		payload = json.loads(path.read_text(encoding='utf-8'))
+	except json.JSONDecodeError as exc:
+		raise ValueError(f'expected JSON object: {path}') from exc
+	if not isinstance(payload, dict):
+		raise TypeError(f'expected JSON object: {path}')
 	return payload
 
 
@@ -1547,6 +1516,5 @@ __all__ = [
 	'load_multi_head_target_manifest',
 	'multi_head_cross_head_diagnostics',
 	'validate_multi_head_target_manifest',
-	'validate_multi_head_target_publication_preflight',
 	'validate_multi_head_target_reference',
 ]

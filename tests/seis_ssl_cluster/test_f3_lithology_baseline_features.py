@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import csv
 import json
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
-import yaml
 
-from seis_ssl_cluster.f3 import (
+from seis_ssl_cluster.f3.lithology import (
 	F3BaselineFeatureConfig,
 	F3BaselineReferenceTokenDataset,
 	F3BaselineTokenDatasetOutputs,
@@ -18,7 +17,9 @@ from seis_ssl_cluster.f3 import (
 	load_f3_lithology_token_dataset,
 	load_token_dataset,
 )
-from tests.helpers import run_python_proc
+
+if TYPE_CHECKING:
+	from pathlib import Path
 
 
 def test_z_only_baseline_features_preserve_reference_split_and_labels(
@@ -357,83 +358,6 @@ def test_baseline_token_dataset_output_preserves_explicit_path(
 	assert config.outputs.metadata_json == (
 		explicit_output / 'token_dataset_metadata.json'
 	)
-
-
-def test_baseline_features_proc_dry_run_accepts_issue_style_config(
-	tmp_path: Path,
-) -> None:
-	reference = _write_reference_token_dataset(tmp_path)
-	config_path = tmp_path / 'build_baseline_features.yaml'
-	config_path.write_text(
-		yaml.safe_dump(
-			{
-				'paths': {'artifact_root': str(tmp_path / 'artifacts')},
-				'source_token_dataset': {'directory': str(reference.root)},
-				'baseline': {
-					'kind': 'z_only',
-					'output_dir': str(
-						tmp_path / 'artifacts' / 'baselines' / 'z' / 'token_dataset',
-					),
-					'z_only': {
-						'normalize': 'minmax',
-						'polynomial_degree': 1,
-					},
-				},
-			},
-		),
-		encoding='utf-8',
-	)
-
-	result = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_baseline_features.py'),
-		'--config',
-		config_path,
-		'--dry-run',
-	)
-
-	assert result.returncode == 0, result.stderr
-	assert 'stage: build_f3_lithology_baseline_token_dataset' in result.stdout
-	assert 'baseline.kind: z_only' in result.stdout
-	assert 'execution: dry-run; F3 lithology baseline token dataset build skipped' in (
-		result.stdout
-	)
-
-
-def test_baseline_features_proc_dry_run_accepts_xyz_issue_style_config(
-	tmp_path: Path,
-) -> None:
-	reference = _write_reference_token_dataset(tmp_path)
-	config_path = tmp_path / 'build_xyz_baseline_features.yaml'
-	config_path.write_text(
-		yaml.safe_dump(
-			{
-				'paths': {'artifact_root': str(tmp_path / 'artifacts')},
-				'source_token_dataset': {'directory': str(reference.root)},
-				'baseline': {
-					'kind': 'xyz_coordinates',
-					'output_dir': str(
-						tmp_path / 'artifacts' / 'baselines' / 'xyz' / 'token_dataset',
-					),
-					'xyz_coordinates': {
-						'normalize': 'minmax',
-						'polynomial_degree': 1,
-						'include_interactions': False,
-					},
-				},
-			},
-		),
-		encoding='utf-8',
-	)
-
-	result = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_baseline_features.py'),
-		'--config',
-		config_path,
-		'--dry-run',
-	)
-
-	assert result.returncode == 0, result.stderr
-	assert 'baseline.kind: xyz_coordinates' in result.stdout
 
 
 def _baseline_config(

@@ -26,7 +26,6 @@ from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_man
 from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
 	_artifacts,
 	_replay_k6_root,
-	_write_positive_preflight,
 )
 
 if TYPE_CHECKING:
@@ -161,14 +160,11 @@ def test_provider_manifest_path_does_not_load_target_arrays(
 ) -> None:
 	embeddings, heads = _artifacts(tmp_path)
 	manifest_path = tmp_path / 'multi_head_target_manifest.json'
-	migration, control = _write_positive_preflight(tmp_path)
 	build_multi_head_target_manifest(
 		manifest_path=manifest_path,
 		source_embedding_dir=embeddings,
 		head_roots=heads,
 		replay_k6_root=_replay_k6_root(tmp_path, heads[6]),
-		migration_decision=migration,
-		control_summary=control,
 	)
 
 	def fail_array_load(*_args: object, **_kwargs: object) -> object:

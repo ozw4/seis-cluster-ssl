@@ -6,29 +6,29 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import yaml
 
-from proc.seis_ssl_cluster.build_f3_lithology_token_dataset import (
+import seis_ssl_cluster.f3.lithology.tokens as lithology_tokens
+from seis_ssl_cluster.config.f3_lithology_token_dataset import (
 	f3_lithology_token_dataset_config_from_mapping,
 )
-from seis_ssl_cluster.f3 import (
-	F3ClassInfo,
-	F3LineGeometry,
+from seis_ssl_cluster.f3.labels import F3ClassInfo
+from seis_ssl_cluster.f3.lithology import (
 	F3LithologyTokenDatasetConfig,
 	F3LithologyTokenDatasetInputs,
 	F3LithologyTokenDatasetOutputs,
 	F3LithologyTokenPolicy,
 	F3ReferenceTokenDataset,
-	F3SliceSplitRecord,
 	build_f3_lithology_token_dataset,
-	f3_slice_split_manifest,
-	lithology_tokens,
 	load_f3_lithology_token_dataset,
-	load_f3_slice_split_records,
-	resolve_f3_slice_array_index,
 	tokenize_f3_lithology_slice,
 )
-from tests.helpers import run_python_proc
+from seis_ssl_cluster.f3.splits import (
+	F3LineGeometry,
+	F3SliceSplitRecord,
+	f3_slice_split_manifest,
+	load_f3_slice_split_records,
+	resolve_f3_slice_array_index,
+)
 
 
 def test_inline_and_crossline_slice_numbers_resolve_to_internal_indices() -> None:
@@ -413,29 +413,6 @@ def test_build_f3_lithology_token_dataset_reuses_reference_rows_for_random_encod
 	assert 'reference token dataset train/validation rows' in summary
 
 
-def test_build_f3_lithology_token_dataset_proc_dry_run(tmp_path: Path) -> None:
-	config = _write_dataset_fixture(tmp_path)
-	config_path = tmp_path / 'build_f3_lithology_token_dataset.yaml'
-	config_path.write_text(
-		yaml.safe_dump(_config_mapping(config)),
-		encoding='utf-8',
-	)
-
-	result = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_token_dataset.py'),
-		'--config',
-		config_path,
-		'--dry-run',
-	)
-
-	assert result.returncode == 0, result.stderr
-	assert 'stage: build_f3_lithology_token_dataset' in result.stdout
-	assert 'token_dataset.patch_size_source: embedding metadata' in result.stdout
-	assert 'execution: dry-run; F3 lithology token dataset build skipped' in (
-		result.stdout
-	)
-
-
 def test_pretrained_token_dataset_config_accepts_top_level_feature_source(
 	tmp_path: Path,
 ) -> None:
@@ -493,29 +470,6 @@ def test_pretrained_token_dataset_config_rejects_non_pretrained_feature_source(
 
 	with pytest.raises(ValueError, match=r'feature_source\.kind'):
 		f3_lithology_token_dataset_config_from_mapping(payload)
-
-
-def test_build_f3_lithology_token_dataset_proc_dry_run_reports_reference_dataset(
-	tmp_path: Path,
-) -> None:
-	config = _write_dataset_fixture(tmp_path)
-	payload = _config_mapping(config)
-	payload['token_dataset']['reference_token_dataset'] = {
-		'root': str(config.outputs.output_dir),
-	}
-	config_path = tmp_path / 'build_random_lithology_token_dataset.yaml'
-	config_path.write_text(yaml.safe_dump(payload), encoding='utf-8')
-
-	result = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_token_dataset.py'),
-		'--config',
-		config_path,
-		'--dry-run',
-	)
-
-	assert result.returncode == 0, result.stderr
-	assert 'token_dataset.split_source: reference_token_dataset' in result.stdout
-	assert 'token_dataset.reference.train_tokens:' in result.stdout
 
 
 def _write_dataset_fixture(tmp_path: Path) -> F3LithologyTokenDatasetConfig:

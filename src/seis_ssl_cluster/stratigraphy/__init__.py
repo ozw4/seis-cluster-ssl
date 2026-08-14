@@ -39,7 +39,6 @@ from seis_ssl_cluster.stratigraphy.multi_head import (
 	load_multi_head_target_manifest,
 	multi_head_cross_head_diagnostics,
 	validate_multi_head_target_manifest,
-	validate_multi_head_target_publication_preflight,
 )
 from seis_ssl_cluster.stratigraphy.multi_head_export import (
 	CANONICAL_KS,
@@ -260,7 +259,6 @@ __all__ = [
 	'validate_multi_head_lateral_target_manifest',
 	'validate_multi_head_state_posterior_manifest',
 	'validate_multi_head_target_manifest',
-	'validate_multi_head_target_publication_preflight',
 	'validate_multi_head_xy_neighbor_consensus_target_manifest',
 	'validate_multi_head_xy_neighbor_unanimous_target_manifest',
 	'validate_periodic_refresh_generation',

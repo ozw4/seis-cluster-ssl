@@ -4,8 +4,6 @@ import csv
 import json
 import os
 import shutil
-import subprocess
-import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -37,9 +35,6 @@ from seis_ssl_cluster.training.voxel_decoder.runner import (
 	inspect_f3_lithology_voxel_decoder,
 	run_f3_lithology_voxel_decoder,
 )
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-CLI = REPO_ROOT / 'proc' / 'seis_ssl_cluster' / 'train_f3_lithology_voxel_decoder.py'
 
 
 def _job(tmp_path, name: str, *, epochs: int = 2):
@@ -343,30 +338,6 @@ def test_dry_run_inspection_does_not_hash_array_contents(
 	plan = inspect_f3_lithology_voxel_decoder(config)
 
 	assert plan.volume_shape_xyz == (4, 1, 1)
-
-
-def test_cli_dry_run_does_not_write_output(tmp_path) -> None:
-	raw, _ = _job(tmp_path, 'cli-dry-run')
-	config_path = tmp_path / 'decoder.yaml'
-	config_path.write_text(json.dumps(raw), encoding='utf-8')
-	env = os.environ.copy()
-	env['PYTHONPATH'] = os.pathsep.join(
-		(str(REPO_ROOT / 'src'), env.get('PYTHONPATH', ''))
-	)
-	completed = subprocess.run(  # noqa: S603
-		[sys.executable, str(CLI), '--config', str(config_path), '--dry-run'],
-		cwd=REPO_ROOT,
-		env=env,
-		text=True,
-		capture_output=True,
-		check=True,
-		timeout=30,
-	)
-	assert 'execution: dry-run' in completed.stdout
-	assert f'decoder.spec: {VOXEL_DECODER_SPEC}' in completed.stdout
-	assert f'decoder.upsample_mode: {VOXEL_DECODER_UPSAMPLE_MODE}' in completed.stdout
-	assert f'decoder.normalization: {VOXEL_DECODER_NORMALIZATION}' in completed.stdout
-	assert not Path(raw['outputs']['output_dir']).exists()
 
 
 def test_nonempty_output_collision_is_rejected(tmp_path) -> None:

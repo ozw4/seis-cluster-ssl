@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 
 import pytest
-import yaml
 
 from seis_ssl_cluster.f3 import (
 	READINESS_CAUTION,
@@ -15,7 +14,6 @@ from seis_ssl_cluster.f3 import (
 	build_f3_inspection_report,
 	publish_f3_inspection_report,
 )
-from tests.helpers import run_python_proc
 
 
 def test_f3_inspection_report_outputs_markdown_json_and_missing_warning(
@@ -433,65 +431,6 @@ def test_f3_inspection_publish_rejects_source_target_collision(tmp_path: Path) -
 		)
 
 	assert config.output_markdown.read_bytes() == before
-
-
-def test_build_f3_inspection_report_proc_dry_run(tmp_path: Path) -> None:
-	inspection_dir = tmp_path / 'artifacts' / 'seis_ssl_cluster' / 'inspection'
-	inspection_dir = inspection_dir / 'f3' / 'facies_benchmark_v1'
-	config = {
-		'paths': {
-			'f3_root': str(tmp_path / 'F3'),
-			'artifact_root': str(tmp_path / 'artifacts' / 'seis_ssl_cluster'),
-		},
-		'outputs': {'inspection_dir': str(inspection_dir)},
-		'dataset': {
-			'name': 'f3_facies_benchmark',
-			'version': 'facies_benchmark_v1',
-		},
-		'inspection': {
-			'file_inventory_json': str(inspection_dir / 'inventory' / 'file.json'),
-			'class_info_json': str(inspection_dir / 'inventory' / 'classes.json'),
-			'segy_geometry_json': str(inspection_dir / 'segy' / 'geometry.json'),
-			'seismic_amplitude_stats_json': str(
-				inspection_dir / 'segy' / 'amplitude.json',
-			),
-			'label_unique_values_json': str(
-				inspection_dir / 'segy' / 'labels.json',
-			),
-			'png_label_summary_json': str(
-				inspection_dir / 'labels' / 'png_summary.json',
-			),
-			'png_label_inventory_json': str(
-				inspection_dir / 'labels' / 'png_inventory.json',
-			),
-			'quicklook_metadata_json': str(
-				inspection_dir / 'stats' / 'quicklook.json',
-			),
-			'label_consistency_json': str(
-				inspection_dir / 'stats' / 'label_consistency.json',
-			),
-			'tokenization_preview_json': str(
-				inspection_dir / 'stats' / 'tokenization.json',
-			),
-			'output_markdown': str(inspection_dir / 'report.md'),
-			'output_json': str(inspection_dir / 'report.json'),
-			'figure_paths': ['quicklook/seismic/seismic_xz_y_mid.png'],
-		},
-	}
-	config_path = tmp_path / 'build_report.yaml'
-	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
-
-	result = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_inspection_report.py'),
-		'--config',
-		config_path,
-		'--dry-run',
-	)
-
-	assert result.returncode == 0, result.stderr
-	assert 'stage: build_f3_inspection_report' in result.stdout
-	assert 'inspection.output_markdown:' in result.stdout
-	assert 'execution: dry-run; F3 inspection report skipped' in result.stdout
 
 
 def _report_config(root: Path) -> F3InspectionReportConfig:

@@ -1,8 +1,7 @@
 """Validate and publish the F3 K=6/8/10 pretraining handoff.
 
-This is deliberately upstream of the voxel-label-budget stages: a PASS
-handoff is evidence for an already complete paired pretraining run, not an
-input manufactured by a downstream aggregation command.
+The PASS handoff records evidence for an already complete paired pretraining
+run; it does not assert downstream lithology quality.
 """
 
 from __future__ import annotations

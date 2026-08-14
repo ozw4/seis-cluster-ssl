@@ -6,7 +6,6 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-import yaml
 
 from seis_ssl_cluster.config.f3_lithology import (
 	f3_lithology_report_config_from_mapping,
@@ -18,7 +17,6 @@ from seis_ssl_cluster.f3 import (
 	build_f3_lithology_comparison_report,
 	build_f3_lithology_report,
 )
-from tests.helpers import run_python_proc
 
 
 def test_f3_lithology_report_outputs_markdown_json_and_relative_links(
@@ -570,71 +568,6 @@ def test_f3_lithology_comparison_table_aggregates_multiple_runs(
 	assert '集約run数: 2' in markdown
 
 
-def test_build_f3_lithology_report_proc_dry_run(tmp_path: Path) -> None:
-	run = _write_probe_run(
-		tmp_path,
-		model_tag='amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1',
-		embed_spec='overlap_x16',
-		probe_spec='linear_balanced_v1',
-	)
-	artifact_root = tmp_path / 'artifacts' / 'seis_ssl_cluster'
-	config = {
-		'paths': {
-			'f3_root': str(tmp_path / 'F3'),
-			'artifact_root': str(artifact_root),
-		},
-		'dataset': {
-			'name': 'f3_facies_benchmark',
-			'version': 'facies_benchmark_v1',
-		},
-		'model': {
-			'tag': run['model_tag'],
-			'checkpoint': str(
-				artifact_root
-				/ 'pretraining'
-				/ 'nopims'
-				/ 'pretrain_v1'
-				/ run['model_tag']
-				/ 'full_100ep'
-				/ 'mae_best.pt'
-			),
-			'freeze_encoder': True,
-		},
-		'labels': {
-			'set': 'png_slices_segy_labels_v1',
-			'png_label_role': 'train_validation_slice_selection_and_visual_qc',
-		},
-		'lithology': {'root': str(run['lithology_root'])},
-		'probe': {
-			'spec': run['probe_spec'],
-			'metrics_json': str(run['metrics_json']),
-		},
-		'predictions': {'metadata_json': str(run['prediction_metadata_json'])},
-		'visualizations': {'metadata_json': str(run['visualization_metadata_json'])},
-		'reports': {
-			'output_dir': str(run['report_dir']),
-			'output_markdown': str(run['report_dir'] / 'report.md'),
-			'output_json': str(run['report_dir'] / 'report.json'),
-		},
-		'comparison': {},
-	}
-	config_path = tmp_path / 'build_lithology_report.yaml'
-	config_path.write_text(yaml.safe_dump(config), encoding='utf-8')
-
-	result = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_report.py'),
-		'--config',
-		config_path,
-		'--dry-run',
-	)
-
-	assert result.returncode == 0, result.stderr
-	assert 'stage: build_f3_lithology_report' in result.stdout
-	assert 'reports.output_markdown:' in result.stdout
-	assert 'comparison.output_csv:' not in result.stdout
-	assert 'execution: dry-run; F3 lithology report skipped' in result.stdout
-
-
 @pytest.mark.parametrize(
 	('output_section', 'output_key', 'collision_section', 'collision_key'),
 	[
@@ -708,71 +641,6 @@ def test_f3_lithology_report_config_preserves_explicit_comparison_paths(
 	assert resolved.comparison.output_markdown == Path(
 		raw['comparison']['output_markdown']
 	)
-
-
-def test_build_f3_lithology_report_proc_default_config_dry_run() -> None:
-	result = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_report.py'),
-		'--dry-run',
-	)
-
-	assert result.returncode == 0, result.stderr
-	assert 'stage: build_f3_lithology_report' in result.stdout
-	assert 'reports.output_markdown:' in result.stdout
-	assert 'comparison.output_csv:' not in result.stdout
-	assert 'prediction_metadata.json' in result.stdout
-	assert 'execution: dry-run; F3 lithology report skipped' in result.stdout
-
-
-def test_default_lithology_report_config_uses_prediction_metadata_json() -> None:
-	config_dir = _default_lithology_config_dir()
-	predict_config = yaml.safe_load(
-		(config_dir / '04_predict_volume.yaml').read_text(encoding='utf-8'),
-	)
-	report_config = yaml.safe_load(
-		(config_dir / '06_build_lithology_report.yaml').read_text(encoding='utf-8'),
-	)
-
-	assert report_config['predictions']['metadata_json'] == (
-		predict_config['predictions']['metadata_json']
-	)
-	assert report_config['predictions']['metadata_json'].endswith(
-		'/prediction_metadata.json',
-	)
-
-
-def test_default_lithology_report_config_publishes_to_explicit_results_path() -> None:
-	config_dir = _default_lithology_config_dir()
-	report_config = yaml.safe_load(
-		(config_dir / '06_build_lithology_report.yaml').read_text(encoding='utf-8'),
-	)
-	expected_output_dir = (
-		'reports/f3/facies_benchmark_v1/'
-		'lithology_probe/'
-		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/'
-		'overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1'
-	)
-
-	assert report_config['publish'] == {
-		'enabled': True,
-		'output_dir': expected_output_dir,
-		'include_figures': True,
-		'max_file_size_mb': 10,
-		'max_prediction_figures': 3,
-	}
-
-
-def test_default_lithology_configs_use_latest_checkpoint_contract() -> None:
-	config_dir = _default_lithology_config_dir()
-	expected_checkpoint = (
-		'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/'
-		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/'
-		'mae_latest.pt'
-	)
-
-	for yaml_path in sorted(config_dir.glob('*.yaml')):
-		payload = yaml.safe_load(yaml_path.read_text(encoding='utf-8'))
-		assert payload['model']['checkpoint'] == expected_checkpoint
 
 
 def _report_config(run: dict[str, object]) -> F3LithologyReportConfig:
@@ -1130,18 +998,6 @@ def _write_json(path: Path, payload: dict[str, object]) -> None:
 	path.write_text(
 		json.dumps(payload, indent=2, sort_keys=True) + '\n',
 		encoding='utf-8',
-	)
-
-
-def _default_lithology_config_dir() -> Path:
-	return (
-		Path('experiments')
-		/ 'f3'
-		/ 'facies_benchmark_v1'
-		/ '50_lithology'
-		/ 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
-		/ 'overlap_x16'
-		/ 'png_slices_segy_labels_v1'
 	)
 
 

@@ -2043,28 +2043,14 @@ def _generate_canonical_targets_and_manifest(
 			policy=policy,
 			initial_targets=initial_targets,
 		)
-	preflight = staging / '.manifest_preflight'
-	preflight.mkdir()
-	(preflight / 'migration.json').write_text(
-		'{"status":"PASS_WITH_NUMERIC_DRIFT"}\n', encoding='utf-8'
+	manifest_path = pseudo_root / 'multi_head_target_manifest.json'
+	build_multi_head_target_manifest(
+		manifest_path=manifest_path,
+		source_embedding_dir=staging / 'embeddings',
+		head_roots=dict.fromkeys(CANONICAL_KS, pseudo_root),
+		replay_k6_root=pseudo_root / 'k6_replay',
 	)
-	(preflight / 'control.json').write_text(
-		'{"readiness":{"status":"CONTROL_READY_POSITIVE"}}\n', encoding='utf-8'
-	)
-	try:
-		manifest_path = pseudo_root / 'multi_head_target_manifest.json'
-		build_multi_head_target_manifest(
-			manifest_path=manifest_path,
-			source_embedding_dir=staging / 'embeddings',
-			head_roots=dict.fromkeys(CANONICAL_KS, pseudo_root),
-			replay_k6_root=pseudo_root / 'k6_replay',
-			migration_decision=preflight / 'migration.json',
-			control_summary=preflight / 'control.json',
-		)
-		load_multi_head_target_manifest(manifest_path)
-	finally:
-		if preflight.exists():
-			shutil.rmtree(preflight)
+	load_multi_head_target_manifest(manifest_path)
 
 
 def _write_policy_targets(

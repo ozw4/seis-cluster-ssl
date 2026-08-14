@@ -3,9 +3,6 @@
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	f3_lithology_voxel_section_layout_contract_from_mapping,
 )
-from seis_ssl_cluster.config.f3_lithology_voxel_section_layout_roster import (
-	f3_lithology_voxel_section_layout_model_roster_from_mapping,
-)
 from seis_ssl_cluster.config.io import load_config
 from seis_ssl_cluster.config.validate import (
 	resolve_cluster_visualization_config,
@@ -23,7 +20,6 @@ from seis_ssl_cluster.config.validate import (
 
 __all__ = [
 	'f3_lithology_voxel_section_layout_contract_from_mapping',
-	'f3_lithology_voxel_section_layout_model_roster_from_mapping',
 	'load_config',
 	'resolve_cluster_visualization_config',
 	'resolve_clustering_config',

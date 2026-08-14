@@ -11,7 +11,6 @@ from seis_ssl_cluster.stratigraphy import (
 	build_multi_head_target_manifest,
 	compare_k6_replay,
 	load_multi_head_target_manifest,
-	validate_multi_head_target_publication_preflight,
 )
 
 if TYPE_CHECKING:
@@ -31,8 +30,6 @@ def build_parser() -> argparse.ArgumentParser:
 		type=Path,
 		help='Required when --head-root includes K=6.',
 	)
-	parser.add_argument('--migration-decision', type=Path, required=True)
-	parser.add_argument('--control-summary', type=Path, required=True)
 	parser.add_argument('--dry-run', action='store_true')
 	parser.add_argument('--only-missing', action='store_true')
 	parser.add_argument('--quarantine-invalid', action='store_true')
@@ -42,10 +39,6 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
 	"""Publish only after all referenced arrays and hashes validate."""
 	args = build_parser().parse_args(argv)
-	validate_multi_head_target_publication_preflight(
-		migration_decision=args.migration_decision,
-		control_summary=args.control_summary,
-	)
 	heads = _head_roots(args.head_root)
 	if args.only_missing and args.manifest.exists():
 		reused = False
@@ -82,8 +75,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 				source_embedding_dir=args.source_embedding_dir,
 				head_roots=heads,
 				replay_k6_root=args.replay_k6_root,
-				migration_decision=args.migration_decision,
-				control_summary=args.control_summary,
 			)
 		print(f'execution: dry-run; validated heads {payload["head_ks"]}')
 		return 0
@@ -92,8 +83,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 		source_embedding_dir=args.source_embedding_dir,
 		head_roots=heads,
 		replay_k6_root=args.replay_k6_root,
-		migration_decision=args.migration_decision,
-		control_summary=args.control_summary,
 	)
 	print(f'manifest: {args.manifest}')
 	print(f'head_ks: {payload["head_ks"]}')

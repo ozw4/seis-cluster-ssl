@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -40,10 +40,12 @@ from seis_ssl_cluster.f3.lithology.voxel_visualization import (
 from seis_ssl_cluster.models.voxel_decoder import (
 	voxel_decoder_architecture_mapping,
 )
-from tests.helpers import run_python_proc
 from tests.seis_ssl_cluster.test_f3_lithology_voxel_evaluation import (
 	_fixture as evaluation_fixture,
 )
+
+if TYPE_CHECKING:
+	from pathlib import Path
 
 
 def test_empty_selected_slices_preserve_validation_slice_fallback() -> None:
@@ -361,23 +363,6 @@ def test_voxel_report_failure_leaves_existing_output_untouched(
 	assert not tuple(
 		config.output_dir.parent.glob(f'.{config.output_dir.name}.staging-*')
 	)
-
-
-def test_voxel_report_cli_dry_run_does_not_write(tmp_path: Path) -> None:
-	config, raw = _evaluated_report_job(tmp_path)
-	config_path = tmp_path / 'report.json'
-	config_path.write_text(json.dumps(raw), encoding='utf-8')
-
-	completed = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_voxel_report.py'),
-		'--config',
-		config_path,
-		'--dry-run',
-	)
-
-	assert completed.returncode == 0, completed.stderr
-	assert 'execution: dry-run; F3 voxel lithology report skipped' in completed.stdout
-	assert not config.output_dir.exists()
 
 
 def test_voxel_report_config_rejects_existing_output(tmp_path: Path) -> None:

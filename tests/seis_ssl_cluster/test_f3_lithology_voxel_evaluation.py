@@ -29,7 +29,6 @@ from seis_ssl_cluster.f3.lithology.voxel_prediction_artifact import (
 from seis_ssl_cluster.models.voxel_decoder import (
 	voxel_decoder_architecture_mapping,
 )
-from tests.helpers import run_python_proc
 
 
 def test_perfect_evaluation_uses_unique_aggregate_and_duplicate_slices(
@@ -329,46 +328,6 @@ def test_v1_rejects_tampered_decoder_source_identity(
 
 	with pytest.raises(ValueError, match='source identity mismatch'):
 		inspect_f3_lithology_voxel_evaluation(config)
-
-
-def test_evaluator_cli_dry_run_validates_without_writing(tmp_path: Path) -> None:
-	config = _fixture(tmp_path)
-	raw = {
-		'paths': {
-			'artifact_root': str(config.artifact_root),
-			'f3_root': str(config.f3_root),
-		},
-		'dataset': dict(config.dataset),
-		'labels': {
-			'source_label_volume': str(config.source_label_volume),
-			'source_label_segy': str(config.source_label_segy),
-			'png_label_inventory': str(config.png_label_inventory),
-			'segy_geometry_json': str(config.segy_geometry_json),
-			'class_info': str(config.class_info),
-		},
-		'voxel_predictions': {'input_dir': str(config.prediction_input_dir)},
-		'voxel_dataset': {'input_dir': str(config.voxel_dataset_input_dir)},
-		'evaluation': {
-			'monitored_class_ids': list(config.monitored_class_ids),
-			'boundary_tolerances': list(config.boundary_tolerances),
-			'boundary_region_radii': list(config.boundary_region_radii),
-			'chunk_size_x': config.chunk_size_x,
-		},
-		'outputs': {'output_dir': str(config.output_dir)},
-	}
-	config_path = tmp_path / 'evaluation.json'
-	config_path.write_text(json.dumps(raw), encoding='utf-8')
-
-	completed = run_python_proc(
-		Path('proc/seis_ssl_cluster/evaluate_f3_lithology_voxels.py'),
-		'--config',
-		config_path,
-		'--dry-run',
-	)
-
-	assert completed.returncode == 0, completed.stderr
-	assert 'execution: dry-run; evaluation outputs skipped' in completed.stdout
-	assert not config.output_dir.exists()
 
 
 def _fixture(  # noqa: PLR0913, PLR0915

@@ -4,7 +4,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
-import sys
 import weakref
 from typing import TYPE_CHECKING
 
@@ -12,8 +11,16 @@ import numpy as np
 import pytest
 
 import seis_ssl_cluster.f3.lithology.voxel_section_layout as builder_module
-from proc.seis_ssl_cluster.build_f3_lithology_voxel_section_layout_datasets import (
-	main as builder_main,
+from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
+	CONTRACT_ARTIFACT_TYPE,
+	CONTRACT_SCHEMA_VERSION,
+	DECODER_SEED,
+	FIXED_DECODER_CONTRACT,
+	NESTING_SEMANTICS,
+	PATCH_SIZE,
+	STABLE_SELECTION_SEMANTICS,
+	STATISTICAL_UNIT,
+	VALIDATION_MASK_SEMANTICS,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout_dataset import (
 	F3SectionLayoutDatasetConfig,
@@ -31,12 +38,10 @@ from seis_ssl_cluster.f3.lithology.voxel_section_layout import (
 	validate_f3_lithology_voxel_section_layout_condition,
 	validate_f3_lithology_voxel_section_layout_manifest,
 )
-from seis_ssl_cluster.f3.lithology.voxel_section_layout_calibration import (
-	build_section_layout_contract,
-)
 from seis_ssl_cluster.f3.lithology.voxel_section_layout_selection import (
 	LayoutLines,
 	SectionLine,
+	SelectionPreview,
 	preview_nested_selection,
 )
 
@@ -248,30 +253,6 @@ def test_config_unknown_key_and_quarantine_without_reuse_rejected(
 		)
 
 
-def test_cli_dry_run_writes_and_quarantines_nothing(
-	tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-	config = _fixture(tmp_path)
-	config_path = tmp_path / 'builder.yaml'
-	_write_json(config_path, _config_mapping(config))
-	monkeypatch.setattr(
-		sys,
-		'argv',
-		[
-			'build_f3_lithology_voxel_section_layout_datasets.py',
-			'--config',
-			str(config_path),
-			'--dry-run',
-			'--only-missing',
-			'--quarantine-invalid',
-		],
-	)
-	builder_main()
-	assert 'condition_count: 15' in capsys.readouterr().out
-	assert not config.output_root.exists()
-	assert not list(tmp_path.rglob('*.quarantine_*'))
-
-
 def _fixture(tmp_path: Path) -> F3SectionLayoutDatasetConfig:
 	tmp_path.mkdir(parents=True, exist_ok=True)
 	canonical_root = tmp_path / 'canonical'
@@ -291,7 +272,6 @@ def _fixture(tmp_path: Path) -> F3SectionLayoutDatasetConfig:
 	class_path = tmp_path / 'class_info.json'
 	contract_path = tmp_path / 'contract.json'
 	layout_source = tmp_path / 'layout_lines.yaml'
-	legacy_source = tmp_path / 'legacy_manifest.json'
 	np.save(label_path, labels)
 	np.save(valid_path, np.ones((4, 4, 1), dtype=np.bool_))
 	np.save(canonical_root / GRID_NAME, grid)
@@ -321,7 +301,6 @@ def _fixture(tmp_path: Path) -> F3SectionLayoutDatasetConfig:
 		},
 	)
 	layout_source.write_text('synthetic layout source\n', encoding='utf-8')
-	legacy_source.write_text('synthetic legacy source\n', encoding='utf-8')
 	classes = read_f3_lithology_class_info(class_path)
 	canonical_manifest = {
 		'split_source': 'png_label_inventory',
@@ -377,7 +356,7 @@ def _fixture(tmp_path: Path) -> F3SectionLayoutDatasetConfig:
 		)
 	)
 	validation = grid == 2
-	contract = build_section_layout_contract(
+	contract = _section_layout_contract(
 		layouts,
 		targets,
 		previews,
@@ -398,7 +377,6 @@ def _fixture(tmp_path: Path) -> F3SectionLayoutDatasetConfig:
 			'segy_geometry_json': _identity(geometry_path),
 			'layout_lines': _identity(layout_source),
 		},
-		legacy_budget_source_identity=_identity(legacy_source),
 	)
 	_write_json(contract_path, contract)
 	return F3SectionLayoutDatasetConfig(
@@ -411,6 +389,69 @@ def _fixture(tmp_path: Path) -> F3SectionLayoutDatasetConfig:
 		reference_valid_tokens=valid_path,
 		output_root=tmp_path / 'output',
 	)
+
+
+def _section_layout_contract(  # noqa: PLR0913
+	layouts: tuple[LayoutLines, ...],
+	targets: dict[str, int],
+	previews: tuple[SelectionPreview, ...],
+	*,
+	allowed_relative_error: float,
+	validation_identity: dict[str, object],
+	source_file_identities: dict[str, dict[str, str]],
+) -> dict[str, object]:
+	preview_by_key = {
+		(preview.layout_id, preview.data_size): preview for preview in previews
+	}
+	contract_layouts = []
+	for layout in layouts:
+		sizes = {}
+		for data_size in ('small', 'medium', 'large'):
+			preview = preview_by_key[(layout.layout_id, data_size)]
+			sizes[data_size] = {
+				'inline_lines': list(preview.inline_lines),
+				'crossline_lines': list(preview.crossline_lines),
+				'target_train_voxel_count': preview.target_train_voxel_count,
+				'preview_actual_train_voxel_count': preview.actual_train_voxel_count,
+				'preview_count_error': preview.count_error,
+				'preview_relative_count_error': preview.relative_count_error,
+				'selected_token_xyz': [
+					list(value) for value in preview.selected_token_xyz
+				],
+				'per_line_contributions': dict(preview.per_line_contributions),
+				'per_class_voxel_counts': dict(preview.per_class_voxel_counts),
+			}
+		contract_layouts.append(
+			{
+				'layout_id': layout.layout_id,
+				'ordered_inlines': list(layout.ordered_inlines),
+				'ordered_crosslines': list(layout.ordered_crosslines),
+				'sizes': sizes,
+			}
+		)
+	return {
+		'artifact_type': CONTRACT_ARTIFACT_TYPE,
+		'schema_version': CONTRACT_SCHEMA_VERSION,
+		'selection_semantics': STABLE_SELECTION_SEMANTICS,
+		'stable_selection_semantics': STABLE_SELECTION_SEMANTICS,
+		'statistical_unit': STATISTICAL_UNIT,
+		'nesting_semantics': NESTING_SEMANTICS,
+		'validation_mask_semantics': VALIDATION_MASK_SEMANTICS,
+		'patch_size': list(PATCH_SIZE),
+		'patch_size_xyz': list(PATCH_SIZE),
+		'allowed_relative_error': allowed_relative_error,
+		'target_train_voxel_counts': targets,
+		'active_prefix_counts': {
+			'small': {'inline': 1, 'crossline': 1},
+			'medium': {'inline': 2, 'crossline': 2},
+			'large': {'inline': 4, 'crossline': 4},
+		},
+		'decoder_seed': DECODER_SEED,
+		'decoder': dict(FIXED_DECODER_CONTRACT),
+		'layouts': contract_layouts,
+		'validation_identity': validation_identity,
+		'source_file_identities': source_file_identities,
+	}
 
 
 def _section_lines() -> tuple[SectionLine, ...]:

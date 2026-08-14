@@ -7,7 +7,6 @@ import pytest
 
 from seis_ssl_cluster.config import (
 	f3_lithology_voxel_section_layout_contract_from_mapping,
-	f3_lithology_voxel_section_layout_model_roster_from_mapping,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	CONTRACT_SCHEMA_VERSION,
@@ -17,84 +16,6 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	STABLE_SELECTION_SEMANTICS,
 	VALIDATION_MASK_SEMANTICS,
 )
-from seis_ssl_cluster.config.f3_lithology_voxel_section_layout_roster import (
-	EXPECTED_MODEL_ROSTER,
-	ROSTER_SCHEMA_VERSION,
-)
-
-
-def test_exact_roster_resolves() -> None:
-	roster = f3_lithology_voxel_section_layout_model_roster_from_mapping(
-		_roster_mapping()
-	)
-
-	assert tuple(roster.model_by_id) == tuple(EXPECTED_MODEL_ROSTER)
-	assert len(roster.models) == 14
-	assert roster.model_by_id['mae'].parent_model_id is None
-	assert roster.model_by_id['mh_nocons'].selection_eligible is True
-	assert roster.model_by_id['m1_distill_only'].selection_eligible is False
-	assert roster.model_by_id['m1_shuffled_hmm'].selection_eligible is False
-
-
-@pytest.mark.parametrize(
-	('field', 'value'),
-	[
-		('model_id', 'mae'),
-		('model_tag', EXPECTED_MODEL_ROSTER['mae'][0]),
-		(
-			'embedding_root',
-			'/'.join(
-				(
-					'embeddings/f3/facies_benchmark_v1',
-					EXPECTED_MODEL_ROSTER['mae'][0],
-					'overlap_x16',
-				)
-			),
-		),
-	],
-)
-def test_roster_rejects_duplicate_id_tag_and_path(field: str, value: str) -> None:
-	raw = _roster_mapping()
-	raw['models'][1][field] = value
-
-	with pytest.raises(ValueError, match='unique'):
-		f3_lithology_voxel_section_layout_model_roster_from_mapping(raw)
-
-
-def test_roster_rejects_missing_parent() -> None:
-	raw = _roster_mapping()
-	raw['models'][1]['parent_model_id'] = 'not_in_roster'
-
-	with pytest.raises(ValueError, match='does not exist'):
-		f3_lithology_voxel_section_layout_model_roster_from_mapping(raw)
-
-
-def test_roster_rejects_parent_cycle() -> None:
-	raw = _roster_mapping()
-	raw['models'][0]['parent_model_id'] = 'm1_k6'
-
-	with pytest.raises(ValueError, match='cycle'):
-		f3_lithology_voxel_section_layout_model_roster_from_mapping(raw)
-
-
-@pytest.mark.parametrize(
-	'bad_path',
-	['../escape', 'embeddings/../../escape', '/synthetic/absolute'],
-)
-def test_roster_rejects_invalid_relative_path(bad_path: str) -> None:
-	raw = _roster_mapping()
-	raw['models'][0]['embedding_root'] = bad_path
-
-	with pytest.raises(ValueError, match='relative path'):
-		f3_lithology_voxel_section_layout_model_roster_from_mapping(raw)
-
-
-def test_roster_rejects_unknown_key() -> None:
-	raw = _roster_mapping()
-	raw['models'][0]['discover'] = True
-
-	with pytest.raises(ValueError, match='not allowed'):
-		f3_lithology_voxel_section_layout_model_roster_from_mapping(raw)
 
 
 def test_exact_five_layout_three_size_contract_resolves() -> None:
@@ -186,30 +107,6 @@ def test_contract_rejects_unsupported_selection_semantics() -> None:
 
 	with pytest.raises(ValueError, match='stable_selection_semantics'):
 		f3_lithology_voxel_section_layout_contract_from_mapping(raw)
-
-
-def _roster_mapping() -> dict[str, object]:
-	models = []
-	for model_id, (model_tag, parent_model_id, selection_role) in (
-		EXPECTED_MODEL_ROSTER.items()
-	):
-		models.append(
-			{
-				'model_id': model_id,
-				'model_tag': model_tag,
-				'embedding_root': (
-					'embeddings/f3/facies_benchmark_v1/'
-					f'{model_tag}/overlap_x16'
-				),
-				'parent_model_id': parent_model_id,
-				'selection_role': selection_role,
-			}
-		)
-	return {
-		'schema_version': ROSTER_SCHEMA_VERSION,
-		'artifact_root': '/synthetic/artifacts/seis_ssl_cluster',
-		'models': models,
-	}
 
 
 def _contract_mapping() -> dict[str, object]:

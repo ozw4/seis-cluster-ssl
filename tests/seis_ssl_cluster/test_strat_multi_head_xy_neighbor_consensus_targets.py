@@ -303,20 +303,12 @@ def _hard_manifest(tmp_path: Path) -> Path:
 		schema_version=1,
 		write_boundary_weight=False,
 	)
-	migration = tmp_path / 'migration.json'
-	migration.write_text('{"status":"PASS_WITH_NUMERIC_DRIFT"}', encoding='utf-8')
-	control = tmp_path / 'control.json'
-	control.write_text(
-		'{"readiness":{"status":"CONTROL_READY_POSITIVE"}}', encoding='utf-8'
-	)
 	path = tmp_path / 'hard-manifest.json'
 	build_multi_head_target_manifest(
 		manifest_path=path,
 		source_embedding_dir=embeddings,
 		head_roots=heads,
 		replay_k6_root=replay_root,
-		migration_decision=migration,
-		control_summary=control,
 	)
 	# The source-only successor must retain invalid source values verbatim.  The
 	# historical hard-manifest builder enforces -1, so change only the frozen

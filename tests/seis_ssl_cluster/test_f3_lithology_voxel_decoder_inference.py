@@ -36,7 +36,6 @@ from seis_ssl_cluster.models.voxel_decoder import (
 from seis_ssl_cluster.training.voxel_decoder.checkpoint import (
 	save_voxel_decoder_checkpoint,
 )
-from tests.helpers import run_python_proc
 
 
 class _LocalVoxelModel(torch.nn.Module):
@@ -357,27 +356,6 @@ def test_inference_inspection_rejects_incompatible_decoder_stages(
 
 	with pytest.raises(ValueError, match='must have the same length'):
 		inspect_f3_lithology_voxel_inference(config)
-
-
-def test_cli_dry_run_does_not_write(tmp_path: Path) -> None:
-	raw, _ = _write_job(tmp_path)
-	config_path = tmp_path / 'inference.json'
-	config_path.write_text(json.dumps(raw), encoding='utf-8')
-	config = f3_lithology_voxel_inference_config_from_mapping(raw)
-
-	completed = run_python_proc(
-		Path('proc/seis_ssl_cluster/predict_f3_lithology_voxels.py'),
-		'--config',
-		config_path,
-		'--dry-run',
-	)
-
-	assert completed.returncode == 0, completed.stderr
-	assert 'execution: dry-run; voxel decoder inference skipped' in completed.stdout
-	assert f'decoder.spec: {VOXEL_DECODER_SPEC}' in completed.stdout
-	assert f'decoder.upsample_mode: {VOXEL_DECODER_UPSAMPLE_MODE}' in completed.stdout
-	assert f'decoder.normalization: {VOXEL_DECODER_NORMALIZATION}' in completed.stdout
-	assert not config.output_dir.exists()
 
 
 def test_output_collision_is_rejected(tmp_path: Path) -> None:

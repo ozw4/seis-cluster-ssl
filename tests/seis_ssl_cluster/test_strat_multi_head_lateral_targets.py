@@ -1293,7 +1293,7 @@ def _assert_full_validation_and_reuse_idempotence(
 	assert _public_file_snapshot(config) == before
 
 
-def _real_lateral_export_fixture(  # noqa: PLR0915
+def _real_lateral_export_fixture(
 	tmp_path,
 ) -> MultiHeadLateralTargetExportConfig:
 	"""Create a small, fully hash-bound frozen HMM source chain."""
@@ -1450,20 +1450,12 @@ def _real_lateral_export_fixture(  # noqa: PLR0915
 		),
 		encoding='utf-8',
 	)
-	migration = tmp_path / 'migration.json'
-	control = tmp_path / 'control.json'
-	migration.write_text('{"status":"PASS_WITH_NUMERIC_DRIFT"}', encoding='utf-8')
-	control.write_text(
-		'{"readiness":{"status":"CONTROL_READY_POSITIVE"}}', encoding='utf-8'
-	)
 	hard_manifest = tmp_path / 'hard_manifest.json'
 	build_multi_head_target_manifest(
 		manifest_path=hard_manifest,
 		source_embedding_dir=embedding_root,
 		head_roots=dict.fromkeys((6, 8, 10), hard_root),
 		replay_k6_root=replay_root,
-		migration_decision=migration,
-		control_summary=control,
 	)
 	posterior_root = tmp_path / 'posterior'
 	posterior_config = MultiHeadStatePosteriorExportConfig(

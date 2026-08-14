@@ -14,14 +14,14 @@ processing logic.
 - `prepare_volume.py` builds the prepared seismic and label volumes used by
   downstream stages.
 
-`seis_ssl_cluster.f3.lithology` owns downstream lithology data and evaluation
-logic. Its focused modules cover baseline features, guardrails, milestone
-summaries, metrics, prediction, probes, robustness suites, token datasets,
-tokenization, visualization, and report generation.
+`seis_ssl_cluster.f3.lithology` owns lithology data and reusable evaluation
+logic. Its focused modules cover baseline features, metrics, prediction,
+probes, token and voxel datasets, tokenization, visualization, and report
+generation.
 
 Top-level modules under `seis_ssl_cluster.f3` own inspection utilities and
-experiment-specific validation, auditing, result aggregation, and execution
-coordination that does not belong in the reusable IO or lithology packages.
+retained experiment-specific artifact validation that does not belong in the
+reusable IO or lithology packages.
 
 ## Public import surface
 

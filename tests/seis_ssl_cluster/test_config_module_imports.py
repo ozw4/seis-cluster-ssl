@@ -74,9 +74,6 @@ PROC_IMPORTS = (
 	'proc.seis_ssl_cluster.cluster_embeddings',
 	'proc.seis_ssl_cluster.visualize_clusters',
 	'proc.seis_ssl_cluster.inspect_f3_files',
-	'proc.seis_ssl_cluster.build_f3_lithology_report',
-	'proc.seis_ssl_cluster.train_f3_lithology_probe',
-	'proc.seis_ssl_cluster.build_f3_lithology_comparison_report',
 )
 F3_LITHOLOGY_INTERNAL_IMPORTS = (
 	(

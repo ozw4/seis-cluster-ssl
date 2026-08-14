@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import seis_ssl_cluster.f3.lithology_report as lithology_report_module
-from proc.seis_ssl_cluster.build_f3_lithology_comparison_report import (
+from seis_ssl_cluster.config.f3_baselines import (
 	f3_lithology_comparison_report_config_from_mapping,
 )
 from seis_ssl_cluster.f3 import (
@@ -18,7 +18,6 @@ from seis_ssl_cluster.f3 import (
 	default_f3_lithology_comparison_figure_style,
 	publish_f3_lithology_comparison_report,
 )
-from tests.helpers import run_python_proc
 
 
 def test_f3_lithology_comparison_default_figure_style() -> None:
@@ -648,108 +647,6 @@ def test_f3_lithology_baseline_comparison_warns_for_missing_metrics(
 	assert 'missing input report component' in result.comparison_markdown.read_text(
 		encoding='utf-8',
 	)
-
-
-def test_f3_lithology_comparison_cli_requires_explicit_paths(
-	tmp_path: Path,
-) -> None:
-	output_dir = tmp_path / 'out' / 'baseline_comparison'
-
-	result = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py'),
-		'--search-root',
-		_search_root(tmp_path),
-		'--output-dir',
-		output_dir,
-		'--dry-run',
-	)
-
-	assert result.returncode == 0, result.stderr
-	assert 'stage: build_f3_lithology_comparison_report' in result.stdout
-	assert (
-		f'comparison.output_csv: {output_dir / "comparison_table.csv"}'
-		in result.stdout
-	)
-	assert 'execution: dry-run; F3 lithology comparison report skipped' in result.stdout
-
-	missing_search_root = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py'),
-		'--output-dir',
-		output_dir,
-		'--dry-run',
-	)
-	assert missing_search_root.returncode == 2
-	assert '--search-root is required' in missing_search_root.stderr
-
-	missing_outputs = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py'),
-		'--search-root',
-		_search_root(tmp_path),
-		'--dry-run',
-	)
-	assert missing_outputs.returncode == 2
-	assert '--output-dir or both --output-csv and --output-markdown' in (
-		missing_outputs.stderr
-	)
-
-
-def test_build_f3_lithology_comparison_report_proc_output_dir_override(
-	tmp_path: Path,
-) -> None:
-	search_root = _search_root(tmp_path)
-	old_output_dir = tmp_path / 'out' / 'old_baseline_comparison'
-	new_output_dir = tmp_path / 'out' / 'new_baseline_comparison'
-	config_path = tmp_path / 'comparison.yaml'
-	config_path.write_text(
-		f"""
-paths:
-  artifact_root: {tmp_path / 'artifacts' / 'seis_ssl_cluster'}
-dataset:
-  name: f3_facies_benchmark
-  version: facies_benchmark_v1
-comparison:
-  search_root: {search_root}
-  output_dir: {old_output_dir}
-  output_csv: {old_output_dir / 'comparison_table.csv'}
-  output_markdown: {old_output_dir / 'comparison_report.md'}
-  figure_dpi: 300
-publish:
-  enabled: true
-  output_dir: {tmp_path / 'reports' / 'baseline_comparison'}
-  include_figures: true
-  max_file_size_mb: 10
-""".lstrip(),
-		encoding='utf-8',
-	)
-
-	result = run_python_proc(
-		Path('proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py'),
-		'--config',
-		config_path,
-		'--output-dir',
-		new_output_dir,
-		'--dry-run',
-	)
-
-	assert result.returncode == 0, result.stderr
-	assert 'stage: build_f3_lithology_comparison_report' in result.stdout
-	assert f'comparison.search_root: {search_root}' in result.stdout
-	assert (
-		f'comparison.output_csv: {new_output_dir / "comparison_table.csv"}'
-		in result.stdout
-	)
-	assert (
-		f'comparison.output_markdown: {new_output_dir / "comparison_report.md"}'
-		in result.stdout
-	)
-	assert str(old_output_dir) not in result.stdout
-	assert 'comparison.figure_dpi: 300' in result.stdout
-	assert 'publish.enabled: True' in result.stdout
-	assert f"publish.output_dir: {tmp_path / 'reports' / 'baseline_comparison'}" in (
-		result.stdout
-	)
-	assert 'publish.include_figures: True' in result.stdout
-	assert 'publish.max_file_size_bytes: 10485760' in result.stdout
 
 
 def test_f3_lithology_probe_joblib_artifacts_are_gitignored() -> None:
