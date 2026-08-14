@@ -1,1 +1,0 @@
-run_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v1/108_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_low_label_v1/01_run_periodic_refresh_voxel_label_budget.yaml

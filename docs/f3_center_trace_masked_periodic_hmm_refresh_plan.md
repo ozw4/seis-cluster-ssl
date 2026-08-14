@@ -7,19 +7,10 @@ survey embedding from the current student encoder, warm-starts the ordered
 HMM centers from the previous generation, and replaces the hard targets for
 the next generation.
 
-Issue #313 adds this contract only. It does not run the treatment or modify
-production code, experiment YAML, checkpoints, embeddings, pseudo-targets,
-decoder jobs, or result artifacts. Existing experiment 104, 105, and 106
-records and their documentation and artifacts remain historical read-only
-evidence.
-
 ## Historical lineage and fixed baseline
 
-The fixed center-trace lineage is the read-only scientific predecessor. Its
-pretraining contract is recorded by [experiment 104](../experiments/f3/facies_benchmark_v1/104_strat_hmm_multi_head_k6810_center_trace_masked_v1/README.md),
-its original-split screening by [experiment 105](../experiments/f3/facies_benchmark_v1/105_strat_hmm_multi_head_k6810_center_trace_masked_low_label_v1/README.md),
-and its six-split preflight by [experiment 106](../experiments/f3/facies_benchmark_v1/106_strat_hmm_multi_head_k6810_center_trace_masked_six_split_v1/README.md).
-Those records are not inputs to be regenerated or rewritten by this plan.
+The fixed center-trace lineage is the scientific predecessor. Its active
+pretraining contract is recorded by [experiment 104](../experiments/f3/facies_benchmark_v1/104_strat_hmm_multi_head_k6810_center_trace_masked_v1/README.md).
 
 The fixed target and its initial ordered HMM centers are immutable inputs to
 the initial generation. The target representation is hard
@@ -248,103 +239,20 @@ Optimizer, head, encoder, learned replacement-token, AMP/RNG, and DataLoader
 state continue across refreshes. A target refresh does not reset or
 reinitialize any of those states.
 
-## Experiment and review roots
+## Experiment root and handoff
 
-The reserved experiment and review roots are:
+The active experiment root is:
 
 ```text
 experiments/f3/facies_benchmark_v1/
   107_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_v1/
-
-experiments/f3/facies_benchmark_v1/
-  108_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_low_label_v1/
-
-reports/f3/facies_benchmark_v1/
-  strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_v1/
-
-reports/f3/facies_benchmark_v1/
-  strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_original_split_v1/
 ```
 
-The pretraining handoff is fixed as:
-
-```text
-artifact_type:
-  f3_center_trace_masked_periodic_refresh_pretraining_handoff
-schema_version: 1
-status: PASS
-primary_checkpoint_role: completed_final_selected
-```
-
-This documentation issue does not create these roots or any files beneath
-them.
-
-## Original-split evaluation contract
-
-The new candidate evaluation has exactly 15 jobs: three budgets by five
-subsample seeds.
-
-```text
-new candidate jobs:
-  3 budgets x 5 subsample seeds = 15
-
-budgets:
-  cap25, cap50, cap100
-
-subsample seeds:
-  0, 1, 2, 3, 4
-
-decoder seed:
-  42000 + subsample_seed
-```
-
-The primary comparison is:
-
-```text
-mh_ctmask010_refresh3ep_hmm2_nocons
-  - mh_ctmask010_nocons
-```
-
-The diagnostic comparisons are:
-
-```text
-candidate - mh_nocons
-candidate - m1_current_k6
-candidate - mae
-```
-
-The primary budget decision uses the existing center-trace original-split
-rule. A budget is positive only when both primary metrics meet their
-condition:
-
-- Macro F1 mean delta `> 0` and wins `>= 4/5`; and
-- Mean IoU mean delta `> 0` and wins `>= 4/5`.
-
-A budget is negative only when both primary metrics meet their condition:
-
-- Macro F1 mean delta `< 0` and wins `<= 1/5`; and
-- Mean IoU mean delta `< 0` and wins `<= 1/5`.
-
-Systematic major degradation is present when, for classes 3 or 5 and one of
-`f1`, `iou`, `boundary_recall_t2`, or `boundary_recall_t4`, the same
-class/metric mean delta is `<= -0.05` at two or more budgets.
-
-The formal status is:
-
-```text
-CTMASK_REFRESH_ORIGINAL_GO:
-  at least 2 positive budgets and no systematic major degradation
-
-CTMASK_REFRESH_ORIGINAL_STOP:
-  at least 2 negative budgets or systematic major degradation
-
-CTMASK_REFRESH_ORIGINAL_HOLD:
-  otherwise
-```
-
-Only GO sets `six_split_follow_up.ready = true`. This series does not
-implement or execute a six-split config, runner, job, or result. The six-split
-job count is zero for every formal status.
+The pretraining handoff has
+`artifact_type: f3_center_trace_masked_periodic_refresh_pretraining_handoff`,
+schema version 1, status `PASS`, and primary checkpoint role
+`completed_final_selected`. It remains under the configured artifact root;
+no tracked report publication is active.
 
 ## Explicit scope exclusions
 

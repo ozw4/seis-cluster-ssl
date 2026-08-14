@@ -46,7 +46,7 @@ fixed-policy identity, checkpoint schema, and resume compatibility boundary.
 Hard baseline, M5-U posterior, and M5-LS lateral checkpoints cannot resume this
 run or be resumed by it.
 
-The final review rechecks the handoff's schema-v5 checkpoint and extraction
+Complete producer validation rechecks the handoff's schema-v5 checkpoint and extraction
 metadata identity against the selected target, and verifies the referenced
 checkpoint and extraction-file digests. It does not inspect target or embedding
 array values while doing so.

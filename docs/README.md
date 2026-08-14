@@ -17,13 +17,15 @@ This directory contains runbooks and configuration contracts for
 ## Active research runbooks
 
 - [Parihaka survey-specific 3D amplitude MAE pretraining](parihaka_mae_pretraining.md): amplitude provenance, ZXY-to-XYZ preparation, direct data paths, fixed training and checkpoint contracts, label exclusion, and transductive claim boundary.
-- [F3 M3-V voxel lithology benchmark](f3_voxel_lithology_benchmark.md): V0/V1 contracts, canonical `frozen_embedding_decoder_nearest_voxel_ln_v1` identity, exact original/six-split execution order, artifact migration checks, and release validation.
-- [F3 strat-HMM M2-A boundary weighting](f3_strat_hmm_m2a_boundary_weighting.md): ordered export-to-summary workflow, artifact paths, failure handling, and M1 housekeeping.
-- [F3 strat-HMM M2-A result decision](f3_strat_hmm_m2a_results.md): final Go/Stop/Hold evidence contract.
-- [F3 M5-LS lateral smoothing](f3_m5_lateral_smoothing_plan.md): fixed edge-aware lateral-message and ordered hard-reprojection algorithm plus staged artifact, training, and evaluation contract.
-- [F3 center-trace masked HMM path reconstruction](f3_center_trace_masked_pretraining_plan.md): fixed center-trace mask, hard-target loss, trainability, checkpoint identity, and original-split evaluation contract.
-- [F3 center-trace masked periodic HMM refresh](f3_center_trace_masked_periodic_hmm_refresh_plan.md): periodic student-embedding refresh, warm-start ordered-center update, generation artifacts, schema-8 checkpoint identity, and original-split evaluation contract.
+- [F3 inspection](f3_facies_benchmark_inspection.md): raw inventory, geometry, label checks, and quicklook evidence.
+- [F3 strat-HMM milestone-1 pretraining](strat_hmm_pretraining_milestone1.md): pseudo-target export, pretraining, extraction, and smoke validation.
+- [F3 strat-HMM guardrail producers](f3_strat_hmm_m1_guardrails.md): distillation-only and shuffled-target pretraining artifacts.
+- [F3 strat-HMM M2-A boundary weighting](f3_strat_hmm_m2a_boundary_weighting.md): boundary-weighted target export, pretraining, and embedding extraction.
+- [F3 M5-LS lateral smoothing](f3_m5_lateral_smoothing_plan.md): fixed edge-aware lateral-message and ordered hard-reprojection artifact contract.
+- [F3 center-trace masked HMM path reconstruction](f3_center_trace_masked_pretraining_plan.md): fixed center-trace mask, hard-target loss, trainability, and checkpoint identity.
+- [F3 center-trace masked periodic HMM refresh](f3_center_trace_masked_periodic_hmm_refresh_plan.md): periodic student-embedding refresh, generation artifacts, and schema-8 checkpoint identity.
 - [F3 XY-neighbour consensus hard-label smoothing](f3_xy_neighbor_consensus_hard_label_smoothing.md): single synchronous source-label consensus correction with an ordered-trace guard and no posterior, affinity, re-decoding, or beta calibration.
+- [F3 unanimous XY-neighbour correction](f3_xy_neighbor_unanimous_outlier_correction.md): unanimous-neighbour target correction and producer validation.
 
 ## Repository output policy
 

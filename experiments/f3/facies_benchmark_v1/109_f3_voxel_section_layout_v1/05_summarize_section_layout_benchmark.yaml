@@ -1,9 +1,0 @@
-paths:
-  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
-  workspace_root: ${SEIS_SSL_CLUSTER_WORKSPACE}
-references:
-  model_roster: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v1/109_f3_voxel_section_layout_v1/00_model_roster.yaml
-  section_layout_dataset_manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_section_layout_v1/datasets_v1/section_layout_dataset_manifest.json
-outputs:
-  benchmark_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_section_layout_v1/benchmark_v1
-  report_dir: ${SEIS_SSL_CLUSTER_WORKSPACE}/reports/f3/facies_benchmark_v1/voxel_section_layout_v1

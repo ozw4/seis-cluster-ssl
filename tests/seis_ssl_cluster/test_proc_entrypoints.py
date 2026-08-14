@@ -21,53 +21,7 @@ PROC_SCRIPTS = tuple(
 )
 
 HELP_FLAG_CONTRACTS = {
-	'summarize_f3_lithology_voxel_section_layout.py': (
-		'--config',
-		'--model-id',
-		'--no-publish',
-	),
-	'run_f3_lithology_voxel_section_layout_suite.py': (
-		'--config',
-		'--model-id',
-		'--layout-id',
-		'--data-size',
-		'--dry-run',
-		'--only-missing',
-		'--resume',
-		'--quarantine-invalid',
-		'--smoke-only',
-		'--device',
-	),
-	'build_f3_lithology_voxel_section_layout_datasets.py': (
-		'--config',
-		'--dry-run',
-		'--only-missing',
-		'--quarantine-invalid',
-	),
-	'prepare_f3_lithology_voxel_section_layout_contract.py': (
-		'--config',
-		'--mode',
-		'--dry-run',
-	),
 	'audit_f3_xy_neighbor_unanimous_targets.py': (
-		'--config',
-		'--dry-run',
-		'--only-missing',
-		'--quarantine-invalid',
-	),
-	'audit_f3_xy_neighbor_consensus_screening.py': (
-		'--config',
-		'--dry-run',
-		'--only-missing',
-		'--quarantine-invalid',
-	),
-	'audit_f3_center_trace_masked_screening.py': (
-		'--config',
-		'--dry-run',
-		'--only-missing',
-		'--quarantine-invalid',
-	),
-	'audit_f3_center_trace_masked_periodic_refresh_screening.py': (
 		'--config',
 		'--dry-run',
 		'--only-missing',
@@ -84,138 +38,11 @@ HELP_FLAG_CONTRACTS = {
 		'--dry-run',
 		'--overwrite',
 	),
-	'build_f3_lithology_baseline_features.py': (
-		'--config',
-		'--dry-run',
-	),
-	'build_f3_lithology_baseline_token_dataset.py': (
-		'--config',
-		'--dry-run',
-	),
-	'build_f3_lithology_label_budget_datasets.py': (
-		'--config',
-		'--dry-run',
-	),
-	'build_f3_lithology_voxel_label_budget_datasets.py': (
-		'--config',
-		'--dry-run',
-		'--only-missing',
-	),
-	'build_f3_lithology_split_sweep_datasets.py': (
-		'--config',
-		'--dry-run',
-		'--only-missing',
-	),
-	'generate_f3_lithology_split_inventories.py': (
-		'--config',
-		'--dry-run',
-	),
-	'run_f3_lithology_label_budget_probes.py': (
-		'--config',
-		'--dry-run',
-		'--only-missing',
-	),
-	'run_f3_lithology_voxel_label_budget_suite.py': (
-		'--config',
-		'--dry-run',
-		'--device',
-		'--only-missing',
-		'--smoke-only',
-		'--budget',
-		'--subsample-seed',
-		'--model',
-	),
-	'run_f3_lithology_voxel_label_budget_control.py': (
-		'--config',
-		'--dry-run',
-		'--device',
-		'--only-missing',
-		'--resume',
-		'--budget',
-		'--subsample-seed',
-	),
-	'run_f3_lithology_xy_neighbor_consensus_voxel_label_budget.py': (
-		'--config',
-		'--dry-run',
-		'--device',
-		'--only-missing',
-		'--resume',
-	),
-	'run_f3_lithology_center_trace_masked_voxel_label_budget.py': (
-		'--config',
-		'--dry-run',
-		'--device',
-		'--only-missing',
-		'--resume',
-	),
-	'run_f3_lithology_center_trace_masked_periodic_refresh_voxel_label_budget.py': (
-		'--config',
-		'--dry-run',
-		'--device',
-		'--only-missing',
-		'--resume',
-	),
-	'summarize_f3_lithology_voxel_label_budget_xy_neighbor_consensus.py': (
-		'--config',
-		'--dry-run',
-	),
-	'summarize_f3_lithology_voxel_label_budget_center_trace_masked.py': (
-		'--config',
-		'--dry-run',
-	),
-	'summarize_f3_lithology_voxel_label_budget_center_trace_masked_'
-	'periodic_refresh.py': (
-		'--config',
-		'--dry-run',
-	),
-	'run_f3_lithology_split_sweep_probes.py': (
-		'--config',
-		'--dry-run',
-		'--only-missing',
-	),
-	'summarize_f3_lithology_label_budget_robustness.py': (
-		'--suite-root',
-		'--dry-run',
-	),
-	'summarize_f3_lithology_voxel_label_budget.py': (
-		'--config',
-		'--dry-run',
-	),
-	'summarize_f3_lithology_voxel_label_budget_control.py': (
-		'--config',
-		'--dry-run',
-	),
-	'summarize_f3_lithology_split_robustness.py': (
-		'--suite-root',
-		'--dry-run',
-	),
-	'build_f3_lithology_comparison_report.py': (
-		'--config',
-		'--dry-run',
-		'--search-root',
-		'--output-dir',
-		'--output-csv',
-		'--output-markdown',
-		'--metrics-json',
-		'--figure-dpi',
-	),
-	'build_f3_lithology_report.py': (
-		'--config',
-		'--dry-run',
-	),
-	'build_f3_lithology_token_dataset.py': (
-		'--config',
-		'--dry-run',
-	),
 	'build_nopims_manifests.py': (
 		'--config',
 		'--dry-run',
 	),
 	'cluster_embeddings.py': (
-		'--config',
-		'--dry-run',
-	),
-	'create_random_mae_checkpoint.py': (
 		'--config',
 		'--dry-run',
 	),
@@ -281,10 +108,6 @@ HELP_FLAG_CONTRACTS = {
 		'--output-root',
 		'--resume',
 	),
-	'train_f3_lithology_probe.py': (
-		'--config',
-		'--dry-run',
-	),
 	'train_strat_hmm_pretext.py': (
 		'--config',
 		'--dry-run',
@@ -293,15 +116,6 @@ HELP_FLAG_CONTRACTS = {
 		'--output-root',
 		'--resume',
 		'--quarantine-invalid',
-	),
-	'validate_performance_migration.py': (
-		'--config',
-		'--stage',
-		'--embedding-config',
-		'--hmm-config',
-		'--device',
-		'--dry-run',
-		'--only-missing',
 	),
 	'export_strat_hmm_multi_head_state_posteriors.py': (
 		'--config',
@@ -312,10 +126,6 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 		'--only-missing',
-	),
-	'publish_f3_xy_neighbor_unanimous_results.py': (
-		'--config',
-		'--dry-run',
 	),
 	'validate_f3_xy_neighbor_unanimous_pretraining.py': (
 		'--config',
@@ -338,23 +148,7 @@ HELP_FLAG_CONTRACTS = {
 		'--only-missing',
 		'--quarantine-invalid',
 	),
-	'publish_f3_center_trace_masked_pretraining_results.py': (
-		'--artifact-root',
-		'--workspace-root',
-		'--pretraining-handoff',
-		'--output-dir',
-		'--dry-run',
-	),
-	'publish_f3_center_trace_masked_periodic_refresh_results.py': (
-		'--config',
-		'--dry-run',
-		'--quarantine-invalid',
-	),
 	'visualize_clusters.py': (
-		'--config',
-		'--dry-run',
-	),
-	'visualize_f3_lithology_predictions.py': (
 		'--config',
 		'--dry-run',
 	),
@@ -363,7 +157,7 @@ HELP_FLAG_CONTRACTS = {
 SMOKE_HELP_SCRIPTS = (
 	'train_amp_mae.py',
 	'extract_embeddings.py',
-	'build_f3_lithology_report.py',
+	'visualize_f3_quicklook.py',
 )
 
 

@@ -140,7 +140,7 @@ hard `mh_nocons`.
 Embedding extraction and downstream inference do not generate masks. They use
 the normal `AmplitudeMAE3D.encode_tokens` path and encode all tokens.
 
-## Identity, checkpoint, and evaluation contract
+## Identity and checkpoint contract
 
 Checkpoint schema 7 is a separate identity. It is not resume-compatible with
 existing schemas 2-6 in either direction. A schema 7 checkpoint binds all of
@@ -178,9 +178,4 @@ The center-trace masked treatment does not include:
   comparison;
 - sweeps over mask ratio, loss weight, unfreeze depth, K, or augmentation;
 - a raw-amplitude reconstruction decoder or a new HMM decoder;
-- downstream prediction smoothing; or
-- a six-split execution.
-
-The fixed evaluation gate is the original-split gate. A six-split study can be
-considered only as separate follow-up work if that original-split gate is GO;
-it is not part of this contract.
+- downstream prediction smoothing.

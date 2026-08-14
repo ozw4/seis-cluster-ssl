@@ -51,7 +51,7 @@ label.
 
 ## Staged implementation pipeline
 
-M5-LS is implemented and evaluated in this order:
+M5-LS is implemented in this order:
 
 1. One-trace lateral-message and ordered-reprojection core.
 2. The immutable lateral hard-target artifact/export.
@@ -59,9 +59,8 @@ M5-LS is implemented and evaluated in this order:
 4. The existing hard multi-head loss dispatch.
 5. Representation-specific scientific/checkpoint/resume identity.
 6. Separately versioned F3 config, smoke, full training, and embedding validation.
-7. Paired original-split low-label evaluation and preregistered gate.
 
-Stages 2-7 add no scientific loss terms or lateral operations. The smoothing
+Stages 2-6 add no scientific loss terms or lateral operations. The smoothing
 computation finishes offline in stage 2; the later stages are required
 implementation plumbing, not a second scientific treatment.
 
