@@ -46,13 +46,10 @@ DIRECT_STAGE_IMPORTS = (
 	('clustering', 'resolve_clustering_config'),
 	('embedding', 'resolve_embedding_extraction_config'),
 	('f3_baselines', 'f3_lithology_baseline_token_dataset_config_from_mapping'),
-	('f3_baselines', 'f3_lithology_comparison_report_config_from_mapping'),
 	('f3_baselines', 'random_mae_checkpoint_config_from_mapping'),
 	('f3_inspection', 'resolve_f3_facies_inspection_config'),
 	('f3_lithology', 'f3_lithology_prediction_config_from_mapping'),
 	('f3_lithology', 'f3_lithology_probe_config_from_mapping'),
-	('f3_lithology', 'f3_lithology_publish_config_from_mapping'),
-	('f3_lithology', 'f3_lithology_report_config_from_mapping'),
 	('f3_lithology', 'f3_lithology_token_dataset_config_from_mapping'),
 	('f3_lithology', 'f3_lithology_visualization_config_from_mapping'),
 	('f3_lithology', 'f3_prepare_volume_config_from_mapping'),
@@ -79,14 +76,6 @@ F3_LITHOLOGY_INTERNAL_IMPORTS = (
 	(
 		'f3_lithology_prediction',
 		'f3_lithology_prediction_config_from_mapping',
-	),
-	(
-		'f3_lithology_publish',
-		'f3_lithology_publish_config_from_mapping',
-	),
-	(
-		'f3_lithology_report',
-		'f3_lithology_report_config_from_mapping',
 	),
 	(
 		'f3_lithology_visualization',

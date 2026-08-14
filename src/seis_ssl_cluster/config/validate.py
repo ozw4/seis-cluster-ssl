@@ -40,15 +40,11 @@ from seis_ssl_cluster.config.strat_hmm_pseudo_targets import (
 if TYPE_CHECKING:
 	from seis_ssl_cluster.config.f3_baselines import (
 		f3_lithology_baseline_token_dataset_config_from_mapping,
-		f3_lithology_comparison_publish_config_from_mapping,
-		f3_lithology_comparison_report_config_from_mapping,
 		random_mae_checkpoint_config_from_mapping,
 	)
 	from seis_ssl_cluster.config.f3_lithology import (
 		f3_lithology_prediction_config_from_mapping,
 		f3_lithology_probe_config_from_mapping,
-		f3_lithology_publish_config_from_mapping,
-		f3_lithology_report_config_from_mapping,
 		f3_lithology_token_dataset_config_from_mapping,
 		f3_lithology_visualization_config_from_mapping,
 		f3_prepare_volume_config_from_mapping,
@@ -68,22 +64,10 @@ _LAZY_COMPAT_EXPORTS = {
 	'f3_lithology_baseline_token_dataset_config_from_mapping': (
 		'seis_ssl_cluster.config.f3_baselines'
 	),
-	'f3_lithology_comparison_publish_config_from_mapping': (
-		'seis_ssl_cluster.config.f3_baselines'
-	),
-	'f3_lithology_comparison_report_config_from_mapping': (
-		'seis_ssl_cluster.config.f3_baselines'
-	),
 	'f3_lithology_prediction_config_from_mapping': (
 		'seis_ssl_cluster.config.f3_lithology'
 	),
 	'f3_lithology_probe_config_from_mapping': (
-		'seis_ssl_cluster.config.f3_lithology'
-	),
-	'f3_lithology_publish_config_from_mapping': (
-		'seis_ssl_cluster.config.f3_lithology'
-	),
-	'f3_lithology_report_config_from_mapping': (
 		'seis_ssl_cluster.config.f3_lithology'
 	),
 	'f3_lithology_token_dataset_config_from_mapping': (
@@ -138,12 +122,8 @@ _STAGE_RESOLVERS: dict[str, _Resolver] = {
 
 __all__ = [
 	'f3_lithology_baseline_token_dataset_config_from_mapping',
-	'f3_lithology_comparison_publish_config_from_mapping',
-	'f3_lithology_comparison_report_config_from_mapping',
 	'f3_lithology_prediction_config_from_mapping',
 	'f3_lithology_probe_config_from_mapping',
-	'f3_lithology_publish_config_from_mapping',
-	'f3_lithology_report_config_from_mapping',
 	'f3_lithology_token_dataset_config_from_mapping',
 	'f3_lithology_visualization_config_from_mapping',
 	'f3_prepare_volume_config_from_mapping',

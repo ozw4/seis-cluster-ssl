@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import joblib
 import numpy as np
@@ -18,8 +18,11 @@ from seis_ssl_cluster.f3 import (
 	train_and_evaluate_f3_lithology_probe,
 )
 
-if TYPE_CHECKING:
-	from pathlib import Path
+
+def test_f3_lithology_probe_joblib_artifacts_are_gitignored() -> None:
+	gitignore = Path('.gitignore').read_text(encoding='utf-8')
+
+	assert '*.joblib' in gitignore
 
 
 def test_logistic_regression_probe_trains_writes_and_reloads_artifacts(

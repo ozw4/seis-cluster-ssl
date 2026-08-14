@@ -43,8 +43,6 @@ def test_f3_lithology_config_entrypoints_reexport_from_validate_module() -> None
 		'f3_lithology_probe_config_from_mapping',
 		'f3_lithology_prediction_config_from_mapping',
 		'f3_lithology_visualization_config_from_mapping',
-		'f3_lithology_report_config_from_mapping',
-		'f3_lithology_publish_config_from_mapping',
 	):
 		assert getattr(validate_config, name) is getattr(f3_lithology_config, name)
 

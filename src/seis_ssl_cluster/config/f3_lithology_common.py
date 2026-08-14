@@ -79,16 +79,6 @@ def _optional_absolute_path(
 	return path
 
 
-def _optional_path(parent: Mapping[str, object], key: str) -> Path | None:
-	value = parent.get(key)
-	if value is None:
-		return None
-	if not isinstance(value, str) or not value:
-		msg = f'publish.{key} must be a non-empty string; got {value!r}'
-		raise TypeError(msg)
-	return Path(value)
-
-
 def _required_str(
 	parent: Mapping[str, object],
 	key: str,
@@ -253,40 +243,6 @@ def _percentiles(value: object) -> tuple[float, float]:
 	low = float(value[0])
 	high = float(value[1])
 	return (low, high)
-
-
-def _publish_optional_bool(
-	parent: Mapping[str, object],
-	key: str,
-	*,
-	default: bool,
-) -> bool:
-	value = parent.get(key, default)
-	if not isinstance(value, bool):
-		msg = f'publish.{key} must be a boolean; got {value!r}'
-		raise TypeError(msg)
-	return value
-
-
-def _optional_non_negative_int(
-	parent: Mapping[str, object],
-	key: str,
-	*,
-	default: int,
-) -> int:
-	value = parent.get(key, default)
-	if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-		msg = f'publish.{key} must be a non-negative integer; got {value!r}'
-		raise ValueError(msg)
-	return value
-
-
-def _max_file_size_bytes(parent: Mapping[str, object]) -> int:
-	value = parent.get('max_file_size_mb', 10)
-	if isinstance(value, bool) or not isinstance(value, int | float) or value <= 0:
-		msg = f'publish.max_file_size_mb must be positive; got {value!r}'
-		raise ValueError(msg)
-	return int(value * 1024 * 1024)
 
 
 def _validate_frozen_encoder(model: Mapping[str, object], *, stage: str) -> None:

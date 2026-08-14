@@ -15,11 +15,9 @@ from seis_ssl_cluster.config.base import (
 from seis_ssl_cluster.config.common import (
 	_validate_absolute_path,
 	_validate_allowed_keys,
-	_validate_bool,
 	_validate_mapping,
 	_validate_output_path,
 	_validate_path,
-	_validate_positive_finite_number,
 	_validate_required_keys,
 )
 from seis_ssl_cluster.config.schema import (
@@ -32,7 +30,7 @@ Config: TypeAlias = dict[str, object]
 _T = TypeVar('_T', bound=Mapping[str, object])
 
 _F3_FACIES_INSPECTION_TOP_LEVEL = frozenset(
-	{'paths', 'outputs', 'dataset', 'inspection', 'publish'},
+	{'paths', 'outputs', 'dataset', 'inspection'},
 )
 _F3_FACIES_INSPECTION_REQUIRED_TOP_LEVEL = frozenset(
 	{'paths', 'outputs', 'dataset', 'inspection'},
@@ -40,9 +38,6 @@ _F3_FACIES_INSPECTION_REQUIRED_TOP_LEVEL = frozenset(
 _F3_FACIES_INSPECTION_PATH_KEYS = frozenset({'f3_root', 'artifact_root'})
 _F3_FACIES_INSPECTION_OUTPUT_KEYS = frozenset({'inspection_dir'})
 _F3_FACIES_INSPECTION_DATASET_KEYS = frozenset({'name', 'version'})
-_F3_FACIES_INSPECTION_PUBLISH_KEYS = frozenset(
-	{'enabled', 'output_dir', 'include_figures', 'max_file_size_mb'},
-)
 _F3_FACIES_INSPECTION_PATH_KEY_SUFFIXES = (
 	'_dir',
 	'_json',
@@ -76,10 +71,6 @@ def resolve_f3_facies_inspection_config(config: _T, *, stage: str) -> Config:
 		paths=paths,
 	)
 	_validate_f3_facies_dataset(_required_mapping(resolved, 'dataset'))
-	if 'publish' in resolved:
-		_validate_f3_facies_inspection_publish(
-			_required_mapping(resolved, 'publish'),
-		)
 	inspection = _required_mapping(resolved, 'inspection')
 	if not inspection:
 		msg = 'inspection must contain stage-specific settings'
@@ -214,31 +205,6 @@ def _validate_f3_facies_dataset(dataset: Mapping[str, object]) -> None:
 			f'got {dataset.get("version")!r}'
 		)
 		raise ValueError(msg)
-
-
-def _validate_f3_facies_inspection_publish(
-	publish: Mapping[str, object],
-) -> None:
-	_validate_allowed_keys(
-		publish,
-		_F3_FACIES_INSPECTION_PUBLISH_KEYS,
-		prefix='publish',
-	)
-	if 'enabled' in publish:
-		_validate_bool(publish, 'enabled', prefix='publish')
-	if 'include_figures' in publish:
-		_validate_bool(publish, 'include_figures', prefix='publish')
-	if 'output_dir' in publish:
-		_validate_path(publish, 'output_dir', prefix='publish')
-	if publish.get('enabled') is True and 'output_dir' not in publish:
-		msg = 'publish.output_dir is required when publish.enabled is true'
-		raise ValueError(msg)
-	if 'max_file_size_mb' in publish:
-		_validate_positive_finite_number(
-			publish,
-			'max_file_size_mb',
-			prefix='publish',
-		)
 
 
 __all__ = ['resolve_f3_facies_inspection_config']

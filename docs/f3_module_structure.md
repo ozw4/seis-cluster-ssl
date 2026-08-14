@@ -30,8 +30,7 @@ and lithology APIs used by proc entrypoints and downstream code.
 
 Compatibility modules such as `seis_ssl_cluster.f3.labels`,
 `seis_ssl_cluster.f3.prepare_volume`, `seis_ssl_cluster.f3.segy`,
-`seis_ssl_cluster.f3.lithology_tokens`, and
-`seis_ssl_cluster.f3.lithology_report` re-export their canonical package
+and `seis_ssl_cluster.f3.lithology_tokens` re-export their canonical package
 implementations. These modules provide one-hop imports only. They do not add
 fallback path discovery, data conversion, alternate behavior, or artifact
 transformation.
@@ -73,21 +72,6 @@ The schema API is:
 - `validate_f3_lithology_token_dataset`
 - `replace_token_features`
 
-## Lithology report package
-
-`seis_ssl_cluster.f3.lithology.report` separates report responsibilities:
-
-- `_core.py` builds a single-run report.
-- `metrics_loader.py` loads report inputs.
-- `markdown.py` renders Markdown.
-- `figures.py` renders comparison figures.
-- `comparison.py` aggregates comparison reports.
-- `publish.py` writes the producer-owned lightweight review file set.
-- `_common.py` contains report-internal shared types and helpers.
-
-The package `__init__.py` is the public report facade.
-`seis_ssl_cluster.f3.lithology_report` preserves the direct import surface by
-delegating to this package.
 
 ## Proc boundary
 
