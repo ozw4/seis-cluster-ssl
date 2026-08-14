@@ -42,11 +42,14 @@ from seis_ssl_cluster.parihaka.channel_checkpoints import (
 from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_AXIS_MAPPING,
 	ChannelLayouts,
+	ChannelSelectionResult,
 	SectionLines,
 	channel_test_definition,
 	common_reserved_training_lines,
 	inspect_prepared_label_identity,
 	load_channel_layouts,
+	select_channel_training,
+	selected_token_mask,
 	selected_training_lines,
 )
 from seis_ssl_cluster.parihaka.channel_decoder import (
@@ -172,6 +175,7 @@ class ChannelEndToEndPlan:
 	train_lines: SectionLines
 	reserved_training_lines: SectionLines
 	prepared_label_identity: Mapping[str, object]
+	selection: ChannelSelectionResult
 	split_counts: Mapping[str, tuple[int, int]]
 	class_weights: tuple[float, float]
 	tile_counts: Mapping[str, int]
@@ -285,6 +289,7 @@ class ChannelAmplitudeTileDataset(Dataset[dict[str, Any]]):
 		core_size_tokens: tuple[int, int, int] = CHANNEL_CORE_SIZE_TOKENS,
 		context_halo_tokens: tuple[int, int, int] = CHANNEL_CONTEXT_HALO_TOKENS,
 		survey_id: str = 'parihaka',
+		training_selection_mask: np.ndarray | None,
 	) -> None:
 		"""Validate inputs, open reference arrays, and enumerate core tiles."""
 		super().__init__()
@@ -295,6 +300,7 @@ class ChannelAmplitudeTileDataset(Dataset[dict[str, Any]]):
 		self.reserved_training = reserved_training
 		self.split = split
 		self.survey_id = survey_id
+		self.training_selection_mask = training_selection_mask
 		self.tile_settings = ChannelTileSettings(
 			volume_shape_xyz=reference.volume_shape_xyz,
 			token_grid_shape_xyz=reference.token_grid_shape_xyz,
@@ -320,6 +326,7 @@ class ChannelAmplitudeTileDataset(Dataset[dict[str, Any]]):
 			validation=self.validation,
 			reserved_training=self.reserved_training,
 			split=self.split,
+			training_selection_mask=self.training_selection_mask,
 		)
 
 	def __len__(self) -> int:
@@ -339,6 +346,7 @@ class ChannelAmplitudeTileDataset(Dataset[dict[str, Any]]):
 			validation=self.validation,
 			reserved_training=self.reserved_training,
 			split=self.split,
+			training_selection_mask=self.training_selection_mask,
 		)
 		start_xyz = tuple(
 			targets.input_start_token[axis]
@@ -500,7 +508,7 @@ def channel_end_to_end_config_from_mapping(
 	)
 
 
-def inspect_channel_end_to_end_job(  # noqa: PLR0913
+def inspect_channel_end_to_end_job(  # noqa: C901, PLR0913, PLR0915
 	config: ChannelEndToEndConfig,
 	*,
 	encoder_init: str,
@@ -559,6 +567,16 @@ def inspect_channel_end_to_end_job(  # noqa: PLR0913
 	)
 	layouts = load_channel_layouts(layout_config, reference.volume_shape_xyz)
 	train_lines = selected_training_lines(layouts, layout_id, data_size)
+	valid_tokens = np.load(
+		reference.valid_tokens_path, mmap_mode='r', allow_pickle=False
+	)
+	selections = select_channel_training(
+		layouts, layout_id, valid_tokens, labels, reference.patch_size_xyz
+	)
+	selection = next(item for item in selections if item.data_size == data_size)
+	training_selection_mask = selected_token_mask(
+		selection.selected_token_xyz, reference.token_grid_shape_xyz
+	)
 	reserved_training_lines = common_reserved_training_lines(layouts)
 	split_counts: dict[str, tuple[int, int]] = {}
 	tile_counts: dict[str, int] = {}
@@ -574,6 +592,9 @@ def inspect_channel_end_to_end_job(  # noqa: PLR0913
 			core_size_tokens=config.tiles.core_size_tokens,
 			context_halo_tokens=config.tiles.context_halo_tokens,
 			survey_id=config.survey_id,
+			training_selection_mask=(
+				training_selection_mask if split == 'train' else None
+			),
 		)
 		split_counts[split] = dataset.class_counts
 		tile_counts[split] = len(dataset)
@@ -585,6 +606,8 @@ def inspect_channel_end_to_end_job(  # noqa: PLR0913
 			)
 		if tile_counts[split] == 0:
 			raise ValueError(f'{split} sections must contain supervised tiles')
+	if split_counts['train'] != selection.class_counts:
+		raise RuntimeError('selection class counts do not match runtime supervision')
 	class_weights = tuple(
 		float(value)
 		for value in balanced_class_weights_from_counts(
@@ -616,6 +639,7 @@ def inspect_channel_end_to_end_job(  # noqa: PLR0913
 		prepared_label_identity=prepared_label_identity,
 		layouts=layouts,
 		train_lines=train_lines,
+		selection=selection,
 		reserved_training_lines=reserved_training_lines,
 		split_counts=split_counts,
 		class_weights=class_weights,
@@ -639,6 +663,7 @@ def inspect_channel_end_to_end_job(  # noqa: PLR0913
 		train_lines=train_lines,
 		reserved_training_lines=reserved_training_lines,
 		prepared_label_identity=prepared_label_identity,
+		selection=selection,
 		split_counts=split_counts,
 		class_weights=class_weights,
 		tile_counts=tile_counts,
@@ -1005,6 +1030,14 @@ def _channel_end_to_end_datasets(
 			core_size_tokens=plan.config.tiles.core_size_tokens,
 			context_halo_tokens=plan.config.tiles.context_halo_tokens,
 			survey_id=plan.config.survey_id,
+			training_selection_mask=(
+				selected_token_mask(
+					plan.selection.selected_token_xyz,
+					plan.reference.token_grid_shape_xyz,
+				)
+				if split == 'train'
+				else None
+			),
 		)
 		for split in ('train', 'validation', 'test')
 	}
@@ -1331,6 +1364,8 @@ def _end_to_end_metrics_payload(
 			},
 		},
 		'class_weights': list(plan.class_weights),
+		'train_channel_voxels': plan.split_counts['train'][1],
+		'train_non_channel_voxels': plan.split_counts['train'][0],
 		'best_epoch': best_epoch,
 		'benchmark_identity': dict(identity),
 		'validation': _public_end_to_end_metrics(validation),
@@ -1451,6 +1486,7 @@ def _end_to_end_identity(  # noqa: PLR0913
 	prepared_label_identity: Mapping[str, object],
 	layouts: ChannelLayouts,
 	train_lines: SectionLines,
+	selection: ChannelSelectionResult,
 	reserved_training_lines: SectionLines,
 	split_counts: Mapping[str, tuple[int, int]],
 	class_weights: tuple[float, float],
@@ -1507,6 +1543,7 @@ def _end_to_end_identity(  # noqa: PLR0913
 		},
 		'supervision': {
 			'train_lines': _lines_identity(train_lines),
+			'selection': selection.identity(),
 			'validation_lines': _lines_identity(layouts.validation),
 			'test_definition': channel_test_definition(reserved_training_lines),
 			'split_class_counts': {

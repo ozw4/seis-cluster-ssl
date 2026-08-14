@@ -15,6 +15,7 @@ from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_TEST_MODE,
 	DATA_SIZE_PREFIX,
 	LAYOUT_IDS,
+	selected_token_xyz_sha256,
 )
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
@@ -69,6 +70,26 @@ def _prepared_label_identity() -> dict[str, object]:
 		'class_definition': {
 			'positive_class_id': 5,
 			'negative_class_ids': [1, 2, 3, 4, 6],
+		},
+	}
+
+
+def _selection(layout_index: int, data_size: str) -> dict[str, object]:
+	lines = _lines(layout_index, data_size)
+	prefix = DATA_SIZE_PREFIX[data_size]
+	tokens = tuple((layout_index, index, 0) for index in range(prefix))
+	actual = 1100 * prefix
+	return {
+		'semantics': 'stable_hash_partial_section_token_footprints_v1',
+		'target_train_voxel_count': actual,
+		'actual_train_voxel_count': actual,
+		'count_error': 0,
+		'relative_count_error': 0.0,
+		'selected_token_xyz': [list(item) for item in tokens],
+		'selected_token_xyz_sha256': selected_token_xyz_sha256(tokens),
+		'per_line_contributions': {
+			**{f'inline:{line}': 550 for line in lines['train_inline']},
+			**{f'crossline:{line}': 550 for line in lines['train_crossline']},
 		},
 	}
 
@@ -155,6 +176,7 @@ def _end_identity(
 				'inline': lines['train_inline'],
 				'crossline': lines['train_crossline'],
 			},
+			'selection': _selection(layout_index, data_size),
 			'validation_lines': {
 				'inline': lines['validation_inline'],
 				'crossline': lines['validation_crossline'],
@@ -232,6 +254,8 @@ def _end_metrics(
 			'tile_counts': lines['tile_counts'],
 		},
 		'class_weights': [0.55, 5.5],
+		'train_channel_voxels': 100 * DATA_SIZE_PREFIX[data_size],
+		'train_non_channel_voxels': 1000 * DATA_SIZE_PREFIX[data_size],
 		'benchmark_identity': _end_identity(
 			encoder_init, layout_index, layout_id, data_size
 		),
@@ -300,6 +324,7 @@ def _frozen_identity(
 			'inline': lines['train_inline'],
 			'crossline': lines['train_crossline'],
 		},
+		'selection': _selection(layout_index, data_size),
 		'validation': {
 			'inline': lines['validation_inline'],
 			'crossline': lines['validation_crossline'],
@@ -310,6 +335,7 @@ def _frozen_identity(
 			'volume_shape_xyz': [100, 200, 300],
 			'token_grid_shape_xyz': [13, 25, 38],
 			'patch_size_xyz': [8, 8, 8],
+			'valid_tokens_sha256': '2' * 64,
 		},
 		'class_weights': [0.55, 5.5],
 		'decoder': {
@@ -362,6 +388,8 @@ def _frozen_metrics(
 			'split_class_counts': lines['split_class_counts'],
 		},
 		'class_weights': [0.55, 5.5],
+		'train_channel_voxels': 100 * DATA_SIZE_PREFIX[data_size],
+		'train_non_channel_voxels': 1000 * DATA_SIZE_PREFIX[data_size],
 		'test': {'channel_iou': 0.65 if model == 'pretrained' else 0.6},
 	}
 
@@ -767,6 +795,14 @@ def test_four_way_summary_rejects_cross_regime_supervision_drift(
 					train_lines = identity['train_lines']
 					assert isinstance(train_lines, dict)
 					train_lines['inline'] = changed
+					selection = identity['selection']
+					assert isinstance(selection, dict)
+					contributions = selection['per_line_contributions']
+					assert isinstance(contributions, dict)
+					for old, new in zip(train_inline, changed, strict=True):
+						contributions[f'inline:{new}'] = contributions.pop(
+							f'inline:{old}'
+						)
 				elif drift == 'class_weights':
 					payload['class_weights'] = [0.6, 5.0]
 					identity['class_weights'] = [0.6, 5.0]

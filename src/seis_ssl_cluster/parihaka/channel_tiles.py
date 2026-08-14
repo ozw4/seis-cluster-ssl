@@ -9,6 +9,7 @@ import numpy as np
 
 from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_CLASS_ID,
+	CLASS_IDS,
 	SectionLines,
 	split_mask_for_crop,
 )
@@ -82,6 +83,7 @@ class ChannelTileTargets:
 def enumerate_channel_tile_records(  # noqa: PLR0913
 	*,
 	valid_tokens: np.ndarray,
+	training_selection_mask: np.ndarray | None,
 	labels: np.ndarray,
 	settings: ChannelTileSettings,
 	train: SectionLines,
@@ -91,6 +93,7 @@ def enumerate_channel_tile_records(  # noqa: PLR0913
 ) -> tuple[tuple[ChannelTileRecord, ...], tuple[int, int]]:
 	"""Enumerate supervised core tiles and count binary classes once."""
 	_validate_inputs(valid_tokens, labels, settings)
+	_validate_training_selection(training_selection_mask, settings, split)
 	records: list[ChannelTileRecord] = []
 	counts = np.zeros(2, dtype=np.int64)
 	tile_id = 0
@@ -123,11 +126,22 @@ def enumerate_channel_tile_records(  # noqa: PLR0913
 				)
 				token_valid = valid_tokens[_slices(start_token, stop_token)]
 				valid_voxels = _expand_token_mask(token_valid, patch, shape)
+				selection_voxels = _training_selection_voxels(
+					training_selection_mask,
+					start_token,
+					stop_token,
+					patch,
+					shape,
+					split,
+				)
 				supervision = _supervision_mask(
 					core_mask=np.ones(shape, dtype=np.bool_),
 					valid_voxels=valid_voxels,
 					section_mask=section,
-					valid_labels=np.ones(shape, dtype=np.bool_),
+					valid_labels=np.isin(
+						labels[_slices(voxel_start, voxel_stop)], CLASS_IDS
+					),
+					training_selection_voxels=selection_voxels,
 				)
 				total = int(np.count_nonzero(supervision))
 				if total:
@@ -147,6 +161,7 @@ def build_channel_tile_targets(  # noqa: PLR0913
 	*,
 	record: ChannelTileRecord,
 	valid_tokens: np.ndarray,
+	training_selection_mask: np.ndarray | None,
 	labels: np.ndarray,
 	settings: ChannelTileSettings,
 	train: SectionLines,
@@ -156,6 +171,7 @@ def build_channel_tile_targets(  # noqa: PLR0913
 ) -> ChannelTileTargets:
 	"""Build the shared halo-padded target and supervision contract."""
 	_validate_inputs(valid_tokens, labels, settings)
+	_validate_training_selection(training_selection_mask, settings, split)
 	patch = settings.patch_size_xyz
 	halo = settings.context_halo_tokens
 	input_start = tuple(
@@ -201,8 +217,11 @@ def build_channel_tile_targets(  # noqa: PLR0913
 	voxel_destination = _slices(voxel_destination_start, voxel_destination_stop)
 
 	label_crop = np.full(settings.input_size_voxels, -1, dtype=np.int64)
-	label_crop[voxel_destination] = (
-		np.asarray(labels[voxel_source]) == CHANNEL_CLASS_ID
+	source_labels = np.asarray(labels[voxel_source])
+	source_valid_labels = np.isin(source_labels, CLASS_IDS)
+	destination_labels = label_crop[voxel_destination]
+	destination_labels[source_valid_labels] = (
+		source_labels[source_valid_labels] == CHANNEL_CLASS_ID
 	).astype(np.int64)
 	section_mask = np.zeros(settings.input_size_voxels, dtype=np.bool_)
 	section_mask[voxel_destination] = split_mask_for_crop(
@@ -226,11 +245,21 @@ def build_channel_tile_targets(  # noqa: PLR0913
 		patch,
 		settings.input_size_voxels,
 	)
+	selection_voxels = np.ones(settings.input_size_voxels, dtype=np.bool_)
+	if split == 'train':
+		selection_tokens = np.zeros(settings.input_size_tokens, dtype=np.bool_)
+		selection_tokens[token_destination] = np.asarray(training_selection_mask)[
+			token_source
+		]
+		selection_voxels = _expand_token_mask(
+			selection_tokens, patch, settings.input_size_voxels
+		)
 	supervision = _supervision_mask(
 		core_mask=core_mask,
 		valid_voxels=valid_voxels,
 		section_mask=section_mask,
 		valid_labels=label_crop >= 0,
+		training_selection_voxels=selection_voxels,
 	)
 	if int(np.count_nonzero(supervision)) != record.supervised_voxels:
 		raise RuntimeError('runtime section mask no longer matches tile inspection')
@@ -273,6 +302,37 @@ def _validate_inputs(
 		raise ValueError('context_halo_tokens must be a nonnegative integer triple')
 
 
+def _validate_training_selection(
+	mask: np.ndarray | None,
+	settings: ChannelTileSettings,
+	split: str,
+) -> None:
+	if split == 'train':
+		if mask is None:
+			raise ValueError('train split requires a training-selection mask')
+		if tuple(mask.shape) != settings.token_grid_shape_xyz:
+			raise ValueError('training-selection shape does not match token grid')
+		if mask.dtype != np.bool_:
+			raise TypeError('training-selection mask must have dtype bool')
+	elif split not in {'validation', 'test'}:
+		raise ValueError("split must be 'train', 'validation', or 'test'")
+
+
+def _training_selection_voxels(  # noqa: PLR0913, PLR0917
+	mask: np.ndarray | None,
+	start_token: Sequence[int],
+	stop_token: Sequence[int],
+	patch: Sequence[int],
+	shape: Sequence[int],
+	split: str,
+) -> np.ndarray:
+	if split != 'train':
+		return np.ones(tuple(shape), dtype=np.bool_)
+	return _expand_token_mask(
+		np.asarray(mask)[_slices(start_token, stop_token)], patch, shape
+	)
+
+
 def _expand_token_mask(
 	mask: np.ndarray,
 	patch: Sequence[int],
@@ -290,8 +350,15 @@ def _supervision_mask(
 	valid_voxels: np.ndarray,
 	section_mask: np.ndarray,
 	valid_labels: np.ndarray,
+	training_selection_voxels: np.ndarray,
 ) -> np.ndarray:
-	return core_mask & valid_voxels & section_mask & valid_labels
+	return (
+		core_mask
+		& valid_voxels
+		& section_mask
+		& valid_labels
+		& training_selection_voxels
+	)
 
 
 def _difference(

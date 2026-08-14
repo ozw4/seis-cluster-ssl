@@ -23,6 +23,15 @@ inline/crossline planes. Consequently, small and medium jobs do not test on
 their unused large candidates or on another layout's candidates. Test is
 evaluated once from the validation-selected best checkpoint.
 
+Training sections are candidate regions, not fully supervised planes. The shared
+external layout config explicitly supplies target train-voxel counts for small,
+medium, and large. Stable SHA-256-ordered partial-section token footprints are
+selected to make the actual count nearest to each target, with nested
+small/medium/large selections. Frozen and end-to-end jobs use exactly the same
+selected tokens and partial footprints for a given layout and size. Validation
+and test masks are unchanged and are not calibrated. The decoder still uses the
+single seed 42000.
+
 Within the end-to-end pair, encoder initialization is the only changed
 condition. Decoder initialization, supervision, tile order, optimizer,
 training settings, and runtime precision contract are paired. The frozen and
@@ -160,3 +169,7 @@ PYTHONPATH=src python proc/seis_ssl_cluster/summarize_parihaka_channel_four_way.
 The four-condition report presents `frozen_pretrained - frozen_random` and
 `finetune_pretrained - train_from_scratch` as separate paired deltas. It does
 not compute or name a cross-regime fine-tuning delta.
+
+Existing v1 output roots created with full selected-section supervision are not
+compatible with the current validators. Manually move or delete those outputs
+before rerunning; no automatic migration or deletion is provided.

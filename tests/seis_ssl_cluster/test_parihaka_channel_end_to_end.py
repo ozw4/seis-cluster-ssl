@@ -126,6 +126,7 @@ def _dataset(tmp_path: Path) -> ChannelAmplitudeTileDataset:
 		validation=SectionLines((62,), (62,)),
 		reserved_training=SectionLines((0,), (0,)),
 		split='train',
+		training_selection_mask=np.ones((8, 8, 8), dtype=np.bool_),
 	)
 
 
@@ -261,6 +262,17 @@ class _PreflightFixture:
 		self.layout.write_text(
 			yaml.safe_dump(
 				{
+					'training_selection': {
+						'semantics': (
+							'stable_hash_partial_section_token_footprints_v1'
+						),
+						'allowed_relative_error': 0.05,
+						'target_train_voxel_counts': {
+							'small': 448,
+							'medium': 896,
+							'large': 1664,
+						},
+					},
 					'validation': {'inline': [12], 'crossline': [12]},
 					'layouts': {
 						f'layout_{index:03d}': {
@@ -601,6 +613,11 @@ def test_frozen_and_end_to_end_supervision_counts_match(tmp_path: Path) -> None:
 			reserved_training=plan.reserved_training_lines,
 			split=split,
 			tiles=plan.config.tiles,
+			training_selection_mask=(
+				np.ones(plan.reference.token_grid_shape_xyz, dtype=np.bool_)
+				if split == 'train'
+				else None
+			),
 		)
 		assert frozen.class_counts == plan.split_counts[split]
 		assert len(frozen) == plan.tile_counts[split]
@@ -616,6 +633,11 @@ def test_frozen_and_end_to_end_supervision_counts_match(tmp_path: Path) -> None:
 			split=split,
 			core_size_tokens=plan.config.tiles.core_size_tokens,
 			context_halo_tokens=plan.config.tiles.context_halo_tokens,
+			training_selection_mask=(
+				np.ones(plan.reference.token_grid_shape_xyz, dtype=np.bool_)
+				if split == 'train'
+				else None
+			),
 		)
 		assert end_dataset.records == frozen.records
 		for index in range(len(frozen)):
@@ -648,6 +670,11 @@ def test_common_test_tiles_and_counts_are_layout_and_size_invariant(
 					split=split,
 					core_size_tokens=plan.config.tiles.core_size_tokens,
 					context_halo_tokens=plan.config.tiles.context_halo_tokens,
+					training_selection_mask=(
+						np.ones(plan.reference.token_grid_shape_xyz, dtype=np.bool_)
+						if split == 'train'
+						else None
+					),
 				)
 				for split in ('train', 'validation', 'test')
 			}

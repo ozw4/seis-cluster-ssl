@@ -11,6 +11,7 @@ from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_TEST_MODE,
 	DATA_SIZE_PREFIX,
 	LAYOUT_IDS,
+	selected_token_xyz_sha256,
 )
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
@@ -55,6 +56,28 @@ def _benchmark_identity(
 	model: str, layout_index: int, layout_id: str, data_size: str
 ) -> dict[str, object]:
 	supervision = _supervision(layout_index, data_size)
+	prefix = DATA_SIZE_PREFIX[data_size]
+	tokens = tuple((layout_index, index, 0) for index in range(prefix))
+	actual = 1100 * prefix
+	selection = {
+		'semantics': 'stable_hash_partial_section_token_footprints_v1',
+		'target_train_voxel_count': actual,
+		'actual_train_voxel_count': actual,
+		'count_error': 0,
+		'relative_count_error': 0.0,
+		'selected_token_xyz': [list(item) for item in tokens],
+		'selected_token_xyz_sha256': selected_token_xyz_sha256(tokens),
+		'per_line_contributions': {
+			**{
+				f'inline:{line}': 550
+				for line in supervision['train_inline']
+			},
+			**{
+				f'crossline:{line}': 550
+				for line in supervision['train_crossline']
+			},
+		},
+	}
 	pretrained_checkpoint = _EXPECTED_PRETRAINED_CHECKPOINT
 	checkpoint_path = (
 		pretrained_checkpoint
@@ -127,6 +150,7 @@ def _benchmark_identity(
 			'inline': supervision['train_inline'],
 			'crossline': supervision['train_crossline'],
 		},
+		'selection': selection,
 		'validation': {
 			'inline': supervision['validation_inline'],
 			'crossline': supervision['validation_crossline'],
@@ -137,6 +161,7 @@ def _benchmark_identity(
 			'volume_shape_xyz': [100, 200, 300],
 			'token_grid_shape_xyz': [13, 25, 38],
 			'patch_size_xyz': [8, 8, 8],
+			'valid_tokens_sha256': 'e' * 64,
 		},
 		'class_weights': [0.55, 5.5],
 		'decoder': {
@@ -188,6 +213,10 @@ def _write_complete_results(config: ChannelSummaryConfig) -> None:
 							),
 							'supervision': _supervision(layout_index, size),
 							'class_weights': [0.55, 5.5],
+							'train_channel_voxels': 100 * DATA_SIZE_PREFIX[size],
+							'train_non_channel_voxels': (
+								1000 * DATA_SIZE_PREFIX[size]
+							),
 							'test': {'channel_iou': value},
 						}
 					),

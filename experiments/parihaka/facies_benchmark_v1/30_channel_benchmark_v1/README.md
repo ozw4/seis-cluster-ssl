@@ -2,8 +2,8 @@
 
 This experiment compares one pretrained Parihaka amplitude MAE with the same
 architecture initialized randomly. The encoder embeddings are fixed; each job
-trains only the same binary `VoxelDecoder3D`, with seed 42000 and all selected
-section voxels used once per epoch.
+trains only the same binary `VoxelDecoder3D`, with the single decoder seed 42000
+and `all_tiles_once` sampling.
 
 Pretraining used the full unlabeled Parihaka amplitude volume, including
 amplitudes from downstream validation and test sections. This benchmark
@@ -20,6 +20,18 @@ used only for checkpoint selection. A training line may not reuse a validation
 line number in the same orientation. For each of small, medium, and large, all
 five layouts must select different training-section sets; line order does not
 make a set distinct.
+
+The configured sections define candidate teacher regions; training does not use
+every voxel on those sections. The layout YAML must explicitly define positive,
+strictly increasing `small`, `medium`, and `large` target train-voxel counts and
+the `stable_hash_partial_section_token_footprints_v1` semantics. For each size,
+valid partial-section footprints are added in stable SHA-256 token order until
+the actual train-voxel count is nearest to its target. Only candidate voxels on
+the active sections are supervised inside a selected token. The selections are
+nested from small through medium to large, and frozen and end-to-end jobs use
+the identical selection for the same layout and size. Review section statistics,
+set the three targets in the external layout config, and dry-run every layout to
+confirm feasibility within the configured relative error.
 
 Test supervision is also common to every layout and data size, but it is a
 voxel-level complement, not a set of test sections. It contains valid-label,
@@ -79,7 +91,8 @@ PYTHONPATH=src python proc/seis_ssl_cluster/summarize_parihaka_channel_benchmark
 An interrupted job resumes only from its own `latest.pt` using `--resume PATH`.
 Resume also requires the embedding/checkpoint metadata, label path, decoder and
 training settings, fixed 8x8x8-core/1x1x1-halo tile settings, split class counts,
-and tile counts to match the interrupted run exactly.
+tile counts, target/actual counts, and selected-token identity to match the
+interrupted run exactly.
 `best.pt` is selected by validation Channel IoU. Test is evaluated once after
 training from `best.pt`; no probability volume is written. The summary requires
 all 30 `metrics.json` files and reports paired test Channel-IoU deltas only.
@@ -94,3 +107,8 @@ identity across all jobs; one checkpoint and model-source identity within each
 model; distinct pretrained/random checkpoint SHA-256 values; valid model roles;
 and matching non-checkpoint identity, supervision, class weights, split counts,
 and tile counts within every pair.
+
+Validation and the common voxel-complement test retain their existing masks and
+are not target-calibrated. Existing v1 outputs produced with all selected-section
+voxels are incompatible with this contract; before rerunning, manually move or
+delete the existing output root. The code does not migrate or remove it.

@@ -126,6 +126,117 @@ def test_axis_mapping_is_fixed_and_not_a_layout_setting(tmp_path: Path) -> None:
 		data.load_channel_layouts(path, (30, 30, 8))
 
 
+@pytest.mark.parametrize(
+	('mutation', 'message'),
+	[
+		(lambda value: value.pop('training_selection'), 'must contain exactly'),
+		(
+			lambda value: value['training_selection'].__setitem__('unknown', 1),
+			'training_selection must contain exactly',
+		),
+		(
+			lambda value: value['training_selection'][
+				'target_train_voxel_counts'
+			].__setitem__('small', 0),
+			'positive integer',
+		),
+		(
+			lambda value: value['training_selection'].__setitem__(
+				'allowed_relative_error', 0.2
+			),
+			'finite and in',
+		),
+		(
+			lambda value: value['training_selection'][
+				'target_train_voxel_counts'
+			].update({'small': 300, 'medium': 200}),
+			'small < medium < large',
+		),
+	],
+)
+def test_layout_training_selection_schema_is_strict(
+	tmp_path: Path, mutation: object, message: str
+) -> None:
+	path = _write_layout(tmp_path)
+	payload = yaml.safe_load(path.read_text(encoding='utf-8'))
+	assert callable(mutation)
+	mutation(payload)
+	path.write_text(yaml.safe_dump(payload), encoding='utf-8')
+	with pytest.raises((TypeError, ValueError), match=message):
+		data.load_channel_layouts(path, (30, 30, 8))
+
+
+def test_training_selection_is_deterministic_nested_and_binary() -> None:
+	shape = (30, 30, 2)
+	layout_lines = {
+		layout_id: data.SectionLines(
+			tuple(1 + index + 5 * layout_index for index in range(4)),
+			tuple(1 + index + 5 * layout_index for index in range(4)),
+		)
+		for layout_index, layout_id in enumerate(data.LAYOUT_IDS)
+	}
+	layouts = data.ChannelLayouts(
+		training_selection=data.ChannelTrainingSelection(
+			semantics=data.CHANNEL_SELECTION_SEMANTICS,
+			allowed_relative_error=0.05,
+			target_train_voxel_counts={'small': 20, 'medium': 40, 'large': 80},
+		),
+		validation=data.SectionLines((28,), (28,)),
+		layouts=layout_lines,
+	)
+	labels = np.ones(shape, dtype=np.int8)
+	labels[:, :, ::2] = data.CHANNEL_CLASS_ID
+	valid = np.ones(shape, dtype=np.bool_)
+	first = data.select_channel_training(
+		layouts, 'layout_000', valid, labels, (1, 1, 1)
+	)
+	np.random.seed(123)  # noqa: NPY002
+	_ = np.random.random(100)  # noqa: NPY002
+	second = data.select_channel_training(
+		layouts, 'layout_000', valid, labels, (1, 1, 1)
+	)
+	assert first == second
+	selected = [set(item.selected_token_xyz) for item in first]
+	assert selected[0] < selected[1] < selected[2]
+	assert [item.actual_train_voxel_count for item in first] == [20, 40, 80]
+	assert all(
+		sum(item.per_line_contributions.values())
+		== item.actual_train_voxel_count
+		for item in first
+	)
+	assert all(all(value > 0 for value in item.class_counts) for item in first)
+	assert all(
+		item.selected_token_xyz_sha256
+		== data.selected_token_xyz_sha256(item.selected_token_xyz)
+		for item in first
+	)
+
+
+def test_last_token_is_added_only_when_it_is_closer_to_target() -> None:
+	shape = (30, 30, 2)
+	labels = np.ones(shape, dtype=np.int8)
+	labels[:, :, ::2] = data.CHANNEL_CLASS_ID
+	valid = np.ones((15, 15, 2), dtype=np.bool_)
+	line = data.SectionLines((1, 2, 3, 4), (1, 2, 3, 4))
+
+	def result(target: int) -> data.ChannelSelectionResult:
+		layouts = data.ChannelLayouts(
+			training_selection=data.ChannelTrainingSelection(
+				data.CHANNEL_SELECTION_SEMANTICS,
+				0.1,
+				{'small': target, 'medium': 80, 'large': 160},
+			),
+			validation=data.SectionLines((28,), (28,)),
+			layouts=dict.fromkeys(data.LAYOUT_IDS, line),
+		)
+		return data.select_channel_training(
+			layouts, 'layout_000', valid, labels, (2, 2, 1)
+		)[0]
+
+	assert result(37).actual_train_voxel_count == 36
+	assert result(38).actual_train_voxel_count == 39
+
+
 def test_inline_crossline_intersection_is_counted_once() -> None:
 	mask = data.split_mask_for_crop(
 		shape=(3, 4, 2),
@@ -264,6 +375,15 @@ def test_prepare_cli_dry_run_writes_nothing(
 
 def _write_layout(tmp_path: Path) -> Path:
 	payload = {
+		'training_selection': {
+			'semantics': data.CHANNEL_SELECTION_SEMANTICS,
+			'allowed_relative_error': 0.05,
+			'target_train_voxel_counts': {
+				'small': 100,
+				'medium': 200,
+				'large': 400,
+			},
+		},
 		'validation': {'inline': [28], 'crossline': [28]},
 		'layouts': {
 			layout_id: {

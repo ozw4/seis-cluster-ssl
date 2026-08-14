@@ -61,6 +61,26 @@ def main() -> None:
 		print(f'data_size: {plan.data_size}')
 		print(f'selected_inline_indices: {plan.train_lines.inline}')
 		print(f'selected_crossline_indices: {plan.train_lines.crossline}')
+		print(f'selection_semantics: {plan.selection.semantics}')
+		print(
+			f'target_train_voxel_count: '
+			f'{plan.selection.target_train_voxel_count}'
+		)
+		print(
+			f'actual_train_voxel_count: '
+			f'{plan.selection.actual_train_voxel_count}'
+		)
+		print(f'count_error: {plan.selection.count_error}')
+		print(f'relative_count_error: {plan.selection.relative_count_error}')
+		print(f'selected_token_count: {len(plan.selection.selected_token_xyz)}')
+		print(
+			f'selected_token_xyz_sha256: '
+			f'{plan.selection.selected_token_xyz_sha256}'
+		)
+		print(
+			f'per_line_contributions: '
+			f'{dict(plan.selection.per_line_contributions)}'
+		)
 		print(f'validation_inline_indices: {plan.layouts.validation.inline}')
 		print(f'validation_crossline_indices: {plan.layouts.validation.crossline}')
 		print(f'test_mode: {CHANNEL_TEST_MODE}')

@@ -19,6 +19,7 @@ from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_TEST_MODE,
 	DATA_SIZE_PREFIX,
 	LAYOUT_IDS,
+	selected_token_xyz_sha256,
 )
 from seis_ssl_cluster.parihaka.channel_results import (
 	ChannelSummaryConfig,
@@ -64,6 +65,7 @@ _REFERENCE_INPUT_KEYS = {
 }
 _SUPERVISION_KEYS = {
 	'train_lines',
+	'selection',
 	'validation_lines',
 	'test_definition',
 	'split_class_counts',
@@ -139,7 +141,7 @@ def summarize_channel_end_to_end(
 	comparison = _end_to_end_comparison(jobs, config.runs_root)
 	aggregates = _paired_aggregates(comparison, 'end_to_end_pretraining_delta')
 	payload = {
-		'schema_version': 1,
+		'schema_version': 2,
 		'primary_metric': 'test.channel_iou',
 		'paired_comparison': 'finetune_pretrained - train_from_scratch',
 		'job_count': len(jobs),
@@ -200,10 +202,13 @@ def summarize_channel_four_way(
 						frozen_pretrained - frozen_random
 					),
 					'end_to_end_pretraining_delta': finetune - scratch,
+					**_selection_comparison_fields(
+						end_to_end[('pretrained', layout_id, data_size)]
+					),
 				}
 			)
 	payload = {
-		'schema_version': 1,
+		'schema_version': 2,
 		'primary_metric': 'test.channel_iou',
 		'job_count': {'frozen': len(frozen), 'end_to_end': len(end_to_end)},
 		'comparison': comparison,
@@ -426,6 +431,17 @@ def _validate_identity_supervision(
 	_validate_test_definition(
 		supervision.get('test_definition'), f'{path} supervision.test_definition'
 	)
+	_validate_selection(
+		_mapping(supervision, 'selection', f'{path} supervision'), path
+	)
+	selection = _mapping(supervision, 'selection', f'{path} supervision')
+	train_lines = _mapping(supervision, 'train_lines', f'{path} supervision')
+	expected_lines = {
+		*(f'inline:{value}' for value in train_lines.get('inline', [])),
+		*(f'crossline:{value}' for value in train_lines.get('crossline', [])),
+	}
+	if set(_mapping(selection, 'per_line_contributions', str(path))) != expected_lines:
+		raise ValueError(f'{path} selection line identities mismatch')
 	counts = _mapping(supervision, 'split_class_counts', f'{path} supervision')
 	tiles = _mapping(supervision, 'tile_counts', f'{path} supervision')
 	if set(counts) != {'train', 'validation', 'test'} or set(tiles) != {
@@ -445,7 +461,7 @@ def _validate_identity_supervision(
 	_class_weights(supervision.get('class_weights'), path)
 
 
-def _validate_metrics_redundancy(
+def _validate_metrics_redundancy(  # noqa: C901
 	payload: Mapping[str, object], identity: Mapping[str, object], path: Path
 ) -> None:
 	metric_supervision = _mapping(payload, 'supervision', str(path))
@@ -488,6 +504,17 @@ def _validate_metrics_redundancy(
 	identity_weights = _class_weights(identity_supervision.get('class_weights'), path)
 	if metric_weights != identity_weights:
 		raise ValueError(f'{path} class weight identity mismatch')
+	train_counts = _class_counts(
+		_mapping(identity_supervision, 'split_class_counts', str(path)).get('train'),
+		f'{path} train class counts',
+	)
+	selection = _mapping(identity_supervision, 'selection', str(path))
+	if sum(train_counts) != selection.get('actual_train_voxel_count'):
+		raise ValueError(f'{path} selection count does not match train class counts')
+	if payload.get('train_channel_voxels') != train_counts[1] or payload.get(
+		'train_non_channel_voxels'
+	) != train_counts[0]:
+		raise ValueError(f'{path} calibrated train voxel metrics mismatch')
 
 
 def _validate_end_to_end_collection(
@@ -624,6 +651,25 @@ def _validate_nested_and_unique_layouts(
 							f'{encoder_init}/{layout_id} {orientation} training '
 							'lines are not nested'
 						)
+			selected = {
+				data_size: {
+					tuple(item)
+					for item in _mapping(
+						_mapping(
+							_identity(jobs[(encoder_init, layout_id, data_size)]),
+							'supervision',
+							'identity',
+						),
+						'selection',
+						'identity.supervision',
+					).get('selected_token_xyz', [])
+				}
+				for data_size in DATA_SIZE_PREFIX
+			}
+			if not selected['small'] <= selected['medium'] <= selected['large']:
+				raise ValueError(
+					f'{encoder_init}/{layout_id} selected tokens are not nested'
+				)
 		for data_size in DATA_SIZE_PREFIX:
 			seen: set[tuple[frozenset[int], frozenset[int]]] = set()
 			for layout_id in LAYOUT_IDS:
@@ -663,6 +709,16 @@ def _validate_four_way_pairing(
 			)
 			if frozen_label != end_label:
 				raise ValueError(f'{layout_id}/{data_size} label identity mismatch')
+			frozen_valid_sha = _mapping(
+				frozen_identity, 'geometry', 'frozen identity'
+			).get('valid_tokens_sha256')
+			end_valid_sha = _mapping(
+				end_identity, 'reference_input', 'end-to-end identity'
+			).get('reference_valid_tokens_sha256')
+			if frozen_valid_sha != end_valid_sha:
+				raise ValueError(
+					f'{layout_id}/{data_size} valid-token identity mismatch'
+				)
 			if _normalized_frozen_supervision(frozen_payload, frozen_identity) != (
 				_normalized_end_to_end_supervision(end_payload, end_identity)
 			):
@@ -696,6 +752,7 @@ def _normalized_frozen_supervision(
 		'test_definition': supervision.get('test_definition'),
 		'split_class_counts': supervision.get('split_class_counts'),
 		'tile_counts': identity.get('tile_counts'),
+		'selection': identity.get('selection'),
 	}
 
 
@@ -713,6 +770,7 @@ def _normalized_end_to_end_supervision(
 		'test_definition': supervision.get('test_definition'),
 		'split_class_counts': supervision.get('split_class_counts'),
 		'tile_counts': identity_supervision.get('tile_counts'),
+		'selection': identity_supervision.get('selection'),
 	}
 
 
@@ -741,6 +799,9 @@ def _end_to_end_comparison(
 					'finetune_pretrained_channel_iou': finetune,
 					'train_from_scratch_channel_iou': scratch,
 					'end_to_end_pretraining_delta': finetune - scratch,
+					**_selection_comparison_fields(
+						jobs[('pretrained', layout_id, data_size)]
+					),
 				}
 			)
 	return rows
@@ -911,6 +972,102 @@ def _class_counts(value: object, label: str) -> tuple[int, int]:
 	):
 		raise TypeError(f'{label} must contain two positive integers')
 	return value[0], value[1]
+
+
+def _validate_selection(  # noqa: C901
+	selection: Mapping[str, object], path: Path
+) -> None:
+	expected = {
+		'semantics',
+		'target_train_voxel_count',
+		'actual_train_voxel_count',
+		'count_error',
+		'relative_count_error',
+		'selected_token_xyz',
+		'selected_token_xyz_sha256',
+		'per_line_contributions',
+	}
+	if set(selection) != expected:
+		raise ValueError(f'{path} selection has invalid fields')
+	if selection.get('semantics') != (
+		'stable_hash_partial_section_token_footprints_v1'
+	):
+		raise ValueError(f'{path} selection semantics mismatch')
+	target = selection.get('target_train_voxel_count')
+	actual = selection.get('actual_train_voxel_count')
+	if not isinstance(target, int) or isinstance(target, bool) or target <= 0:
+		raise TypeError(f'{path} selection target must be positive')
+	if not isinstance(actual, int) or isinstance(actual, bool) or actual <= 0:
+		raise TypeError(f'{path} selection actual count must be positive')
+	if selection.get('count_error') != actual - target:
+		raise ValueError(f'{path} selection count error mismatch')
+	relative = selection.get('relative_count_error')
+	if (
+		not isinstance(relative, int | float)
+		or isinstance(relative, bool)
+		or not math.isfinite(relative)
+		or not math.isclose(relative, abs(actual - target) / target, abs_tol=1e-15)
+		or relative > 0.1
+	):
+		raise ValueError(f'{path} selection relative error is invalid')
+	coordinates = selection.get('selected_token_xyz')
+	if not isinstance(coordinates, list) or not coordinates:
+		raise TypeError(f'{path} selected_token_xyz must be non-empty')
+	if any(
+		not isinstance(row, list)
+		or len(row) != 3
+		or any(
+			not isinstance(item, int)
+			or isinstance(item, bool)
+			or item < 0
+			for item in row
+		)
+		for row in coordinates
+	):
+		raise ValueError(f'{path} selected_token_xyz is invalid')
+	tokens = tuple(tuple(row) for row in coordinates)
+	if tuple(sorted(tokens)) != tokens or len(set(tokens)) != len(tokens):
+		raise ValueError(f'{path} selected_token_xyz is invalid')
+	_validate_sha256(
+		selection.get('selected_token_xyz_sha256'),
+		f'{path} selection token SHA',
+	)
+	if selection.get('selected_token_xyz_sha256') != selected_token_xyz_sha256(
+		tokens
+	):
+		raise ValueError(f'{path} selection token SHA mismatch')
+	contributions = selection.get('per_line_contributions')
+	if (
+		not isinstance(contributions, Mapping)
+		or not contributions
+		or any(
+			not isinstance(value, int)
+			or isinstance(value, bool)
+			or value <= 0
+			for value in contributions.values()
+		)
+		or sum(int(value) for value in contributions.values()) != actual
+	):
+		raise ValueError(f'{path} selection line contributions are invalid')
+
+
+def _selection_comparison_fields(
+	payload: Mapping[str, object],
+) -> dict[str, object]:
+	selection = _mapping(
+		_mapping(_identity(payload), 'supervision', 'identity'),
+		'selection',
+		'identity.supervision',
+	)
+	coordinates = selection.get('selected_token_xyz')
+	if not isinstance(coordinates, list):
+		raise TypeError('selected_token_xyz must be a list')
+	return {
+		'target_train_voxel_count': selection['target_train_voxel_count'],
+		'actual_train_voxel_count': selection['actual_train_voxel_count'],
+		'relative_count_error': selection['relative_count_error'],
+		'selected_token_count': len(coordinates),
+	}
 
 
 def _validate_test_definition(value: object, label: str) -> None:

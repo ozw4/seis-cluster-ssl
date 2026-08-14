@@ -54,6 +54,7 @@ def test_shared_helper_matches_frozen_dataset(tmp_path: Path) -> None:
 	reserved = SectionLines((0, 9), (0, 9))
 	records, counts = enumerate_channel_tile_records(
 		valid_tokens=valid,
+		training_selection_mask=valid.copy(),
 		labels=labels,
 		settings=settings,
 		train=lines,
@@ -84,6 +85,7 @@ def test_shared_helper_matches_frozen_dataset(tmp_path: Path) -> None:
 		reserved_training=reserved,
 		split='train',
 		tiles=DecoderTiles((1, 1, 1), (1, 1, 1)),
+		training_selection_mask=valid.copy(),
 	)
 	assert dataset.records == records
 	assert dataset.class_counts == counts
@@ -91,6 +93,7 @@ def test_shared_helper_matches_frozen_dataset(tmp_path: Path) -> None:
 		targets = build_channel_tile_targets(
 			record=record,
 			valid_tokens=valid,
+			training_selection_mask=valid.copy(),
 			labels=labels,
 			settings=settings,
 			train=lines,
@@ -112,6 +115,7 @@ def test_edge_tile_padding_core_halo_and_split_priority(tmp_path: Path) -> None:
 	reserved = SectionLines((0, 8, 9), (0, 8, 9))
 	records, _ = enumerate_channel_tile_records(
 		valid_tokens=valid,
+		training_selection_mask=None,
 		labels=labels,
 		settings=settings,
 		train=lines,
@@ -123,6 +127,7 @@ def test_edge_tile_padding_core_halo_and_split_priority(tmp_path: Path) -> None:
 	targets = build_channel_tile_targets(
 		record=record,
 		valid_tokens=valid,
+		training_selection_mask=None,
 		labels=labels,
 		settings=settings,
 		train=lines,

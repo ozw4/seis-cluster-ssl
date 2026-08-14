@@ -1,3 +1,11 @@
+training_selection:
+  semantics: stable_hash_partial_section_token_footprints_v1
+  allowed_relative_error: 0.05
+  target_train_voxel_counts:
+    small: REPLACE_WITH_SMALL_TARGET
+    medium: REPLACE_WITH_MEDIUM_TARGET
+    large: REPLACE_WITH_LARGE_TARGET
+
 validation:
   inline: [REPLACE_WITH_X_INDEX]
   crossline: [REPLACE_WITH_Y_INDEX]

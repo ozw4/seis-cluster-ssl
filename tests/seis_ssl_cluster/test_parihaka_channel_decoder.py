@@ -206,6 +206,15 @@ def _write_layout(tmp_path: Path) -> Path:
 	layout_path.write_text(
 		yaml.safe_dump(
 			{
+				'training_selection': {
+					'semantics': 'stable_hash_partial_section_token_footprints_v1',
+					'allowed_relative_error': 0.05,
+					'target_train_voxel_counts': {
+						'small': 448,
+						'medium': 896,
+						'large': 1664,
+					},
+				},
 				'validation': {'inline': [12], 'crossline': [12]},
 				'layouts': {
 					f'layout_{index:03d}': {
@@ -627,6 +636,15 @@ def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
 	layout_path.write_text(
 		yaml.safe_dump(
 			{
+				'training_selection': {
+					'semantics': 'stable_hash_partial_section_token_footprints_v1',
+					'allowed_relative_error': 0.05,
+					'target_train_voxel_counts': {
+						'small': 104,
+						'medium': 192,
+						'large': 320,
+					},
+				},
 				'validation': {'inline': [4], 'crossline': [4]},
 				'layouts': {
 					f'layout_{index:03d}': {

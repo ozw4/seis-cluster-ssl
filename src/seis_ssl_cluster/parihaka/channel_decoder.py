@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader, Dataset, Subset
 
 from seis_ssl_cluster.embedding.writer import (
 	EmbeddingOutputPaths,
+	file_sha256,
 	output_paths,
 )
 from seis_ssl_cluster.models.voxel_decoder import (
@@ -37,11 +38,14 @@ from seis_ssl_cluster.parihaka.channel_checkpoints import (
 from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_AXIS_MAPPING,
 	ChannelLayouts,
+	ChannelSelectionResult,
 	SectionLines,
 	channel_test_definition,
 	common_reserved_training_lines,
 	inspect_prepared_label_identity,
 	load_channel_layouts,
+	select_channel_training,
+	selected_token_mask,
 	selected_training_lines,
 )
 from seis_ssl_cluster.parihaka.channel_tiles import (
@@ -164,6 +168,7 @@ class ChannelDecoderPlan:
 	train_lines: SectionLines
 	reserved_training_lines: SectionLines
 	prepared_label_identity: Mapping[str, object]
+	selection: ChannelSelectionResult
 	class_counts: tuple[int, int]
 	class_weights: tuple[float, float]
 	split_counts: Mapping[str, tuple[int, int]]
@@ -372,6 +377,16 @@ def inspect_channel_decoder_job(
 	)
 	layouts = load_channel_layouts(layout_config, geometry.volume_shape_xyz)
 	train_lines = selected_training_lines(layouts, layout_id, data_size)
+	valid_tokens = np.load(
+		geometry.pretrained.valid_tokens, mmap_mode='r', allow_pickle=False
+	)
+	selections = select_channel_training(
+		layouts, layout_id, valid_tokens, labels, geometry.patch_size_xyz
+	)
+	selection = next(item for item in selections if item.data_size == data_size)
+	training_selection_mask = selected_token_mask(
+		selection.selected_token_xyz, geometry.token_grid_shape_xyz
+	)
 	reserved_training_lines = common_reserved_training_lines(layouts)
 	split_counts: dict[str, tuple[int, int]] = {}
 	tile_counts: dict[str, int] = {}
@@ -386,6 +401,9 @@ def inspect_channel_decoder_job(
 			reserved_training=reserved_training_lines,
 			split=split,
 			tiles=config.tiles,
+			training_selection_mask=(
+				training_selection_mask if split == 'train' else None
+			),
 		)
 		split_counts[split] = dataset.class_counts
 		tile_counts[split] = len(dataset)
@@ -396,6 +414,8 @@ def inspect_channel_decoder_job(
 			)
 	if any(tile_counts[split] == 0 for split in ('train', 'validation', 'test')):
 		raise ValueError('train, validation, and test must each contain valid voxels')
+	if split_counts['train'] != selection.class_counts:
+		raise RuntimeError('selection class counts do not match runtime supervision')
 	weights = balanced_class_weights_from_counts(split_counts['train'])
 	output_dir = (
 		config.runs_root
@@ -414,6 +434,7 @@ def inspect_channel_decoder_job(
 		train_lines=train_lines,
 		reserved_training_lines=reserved_training_lines,
 		prepared_label_identity=prepared_label_identity,
+		selection=selection,
 		class_counts=split_counts['train'],
 		class_weights=tuple(float(item) for item in weights.tolist()),
 		split_counts=split_counts,
@@ -436,6 +457,7 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 		reserved_training: SectionLines,
 		split: str,
 		tiles: DecoderTiles,
+		training_selection_mask: np.ndarray | None,
 	) -> None:
 		"""Open the three memory maps and enumerate supervised core tiles."""
 		super().__init__()
@@ -448,6 +470,7 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 		self.reserved_training = reserved_training
 		self.split = split
 		self.tile_settings = tiles
+		self.training_selection_mask = training_selection_mask
 		self.shared_tile_settings = ChannelTileSettings(
 			volume_shape_xyz=geometry.volume_shape_xyz,
 			token_grid_shape_xyz=geometry.token_grid_shape_xyz,
@@ -481,6 +504,7 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 			validation=self.validation,
 			reserved_training=self.reserved_training,
 			split=self.split,
+			training_selection_mask=self.training_selection_mask,
 		)
 		token_source = _slices(
 			targets.token_source_start, targets.token_source_stop
@@ -536,6 +560,7 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 			validation=self.validation,
 			reserved_training=self.reserved_training,
 			split=self.split,
+			training_selection_mask=self.training_selection_mask,
 		)
 
 
@@ -614,7 +639,15 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 			validation=plan.layouts.validation,
 			reserved_training=plan.reserved_training_lines,
 			split=split,
-			tiles=plan.config.tiles,
+				tiles=plan.config.tiles,
+				training_selection_mask=(
+					selected_token_mask(
+						plan.selection.selected_token_xyz,
+						plan.geometry.token_grid_shape_xyz,
+					)
+					if split == 'train'
+					else None
+				),
 		)
 		for split in ('train', 'validation', 'test')
 	}
@@ -1004,6 +1037,7 @@ def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
 			'inline': list(plan.train_lines.inline),
 			'crossline': list(plan.train_lines.crossline),
 		},
+		'selection': plan.selection.identity(),
 		'validation': {
 			'inline': list(plan.layouts.validation.inline),
 			'crossline': list(plan.layouts.validation.crossline),
@@ -1014,6 +1048,9 @@ def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
 			'volume_shape_xyz': list(plan.geometry.volume_shape_xyz),
 			'token_grid_shape_xyz': list(plan.geometry.token_grid_shape_xyz),
 			'patch_size_xyz': list(plan.geometry.patch_size_xyz),
+			'valid_tokens_sha256': file_sha256(
+				plan.geometry.pretrained.valid_tokens
+			),
 		},
 		'class_weights': list(plan.class_weights),
 		'decoder': {

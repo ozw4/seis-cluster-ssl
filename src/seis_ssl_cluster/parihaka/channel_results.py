@@ -15,6 +15,7 @@ from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_TEST_MODE,
 	DATA_SIZE_PREFIX,
 	LAYOUT_IDS,
+	selected_token_xyz_sha256,
 )
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX,
@@ -35,6 +36,7 @@ _BENCHMARK_IDENTITY_KEYS = {
 	'label_metadata_path',
 	'prepared_label_identity',
 	'train_lines',
+	'selection',
 	'validation',
 	'test_definition',
 	'geometry',
@@ -180,6 +182,12 @@ def summarize_channel_benchmark(
 					'pretrained_channel_iou': pretrained,
 					'random_channel_iou': random,
 					'delta_channel_iou': pretrained - random,
+					**_selection_comparison_fields(
+						jobs[('pretrained', layout_id, data_size)],
+						_metrics_path(
+							config.runs_root, 'pretrained', layout_id, data_size
+						),
+					),
 				}
 			)
 	aggregates: dict[str, object] = {}
@@ -198,7 +206,7 @@ def summarize_channel_benchmark(
 			},
 		}
 	payload = {
-		'schema_version': 1,
+		'schema_version': 2,
 		'primary_metric': 'test.channel_iou',
 		'job_count': len(jobs),
 		'comparison': comparison,
@@ -394,6 +402,7 @@ def _validate_benchmark_identity(
 	)
 	_validate_label_identity_paths(identity, path)
 	_validate_prepared_label_identity(identity, path)
+	_validate_selection_identity(identity, path)
 	for key, expected_keys in (
 		('train_lines', {'inline', 'crossline'}),
 		('validation', {'inline', 'crossline'}),
@@ -408,6 +417,7 @@ def _validate_benchmark_identity(
 				'volume_shape_xyz',
 				'token_grid_shape_xyz',
 				'patch_size_xyz',
+				'valid_tokens_sha256',
 			},
 		),
 		(
@@ -449,6 +459,11 @@ def _validate_benchmark_identity(
 	_validate_test_definition(
 		identity.get('test_definition'),
 		f'{path} benchmark_identity.test_definition',
+	)
+	geometry = _identity_mapping(identity, 'geometry', path)
+	_validate_sha256(
+		geometry.get('valid_tokens_sha256'),
+		f'{path} benchmark_identity.geometry.valid_tokens_sha256',
 	)
 
 
@@ -503,6 +518,107 @@ def _validate_prepared_label_identity(
 			f'{path} benchmark_identity.prepared_label_identity.class_definition '
 			'is invalid'
 		)
+
+
+def _validate_selection_identity(  # noqa: C901
+	identity: Mapping[str, object], path: Path
+) -> None:
+	selection = _identity_mapping(identity, 'selection', path)
+	expected = {
+		'semantics',
+		'target_train_voxel_count',
+		'actual_train_voxel_count',
+		'count_error',
+		'relative_count_error',
+		'selected_token_xyz',
+		'selected_token_xyz_sha256',
+		'per_line_contributions',
+	}
+	if set(selection) != expected:
+		raise ValueError(f'{path} benchmark_identity.selection has invalid fields')
+	if selection.get('semantics') != (
+		'stable_hash_partial_section_token_footprints_v1'
+	):
+		raise ValueError(f'{path} selection semantics mismatch')
+	target = selection.get('target_train_voxel_count')
+	actual = selection.get('actual_train_voxel_count')
+	error = selection.get('count_error')
+	relative = selection.get('relative_count_error')
+	if not isinstance(target, int) or isinstance(target, bool) or target <= 0:
+		raise TypeError(f'{path} selection target must be a positive integer')
+	if not isinstance(actual, int) or isinstance(actual, bool) or actual <= 0:
+		raise TypeError(f'{path} selection actual count must be positive')
+	if error != actual - target:
+		raise ValueError(f'{path} selection count_error mismatch')
+	if (
+		not isinstance(relative, int | float)
+		or isinstance(relative, bool)
+		or not math.isfinite(relative)
+		or not math.isclose(relative, abs(actual - target) / target, abs_tol=1e-15)
+		or relative > 0.1
+	):
+		raise ValueError(f'{path} selection relative_count_error is invalid')
+	coordinates = selection.get('selected_token_xyz')
+	if not isinstance(coordinates, list) or not coordinates:
+		raise TypeError(f'{path} selected_token_xyz must be a non-empty list')
+	try:
+		tokens = tuple(tuple(int(value) for value in row) for row in coordinates)
+	except (TypeError, ValueError) as exc:
+		raise TypeError(f'{path} selected_token_xyz is invalid') from exc
+	if any(
+		not isinstance(row, list)
+		or len(row) != 3
+		or any(
+			not isinstance(value, int)
+			or isinstance(value, bool)
+			or value < 0
+			for value in row
+		)
+		for row in coordinates
+	) or tuple(sorted(tokens)) != tokens or len(set(tokens)) != len(tokens):
+		raise ValueError(f'{path} selected_token_xyz is invalid')
+	_validate_sha256(
+		selection.get('selected_token_xyz_sha256'),
+		f'{path} selection.selected_token_xyz_sha256',
+	)
+	if selection.get('selected_token_xyz_sha256') != selected_token_xyz_sha256(
+		tokens
+	):
+		raise ValueError(f'{path} selected-token SHA-256 mismatch')
+	contributions = selection.get('per_line_contributions')
+	train_lines = _identity_mapping(identity, 'train_lines', path)
+	expected_lines = {
+		*(f'inline:{value}' for value in train_lines.get('inline', [])),
+		*(f'crossline:{value}' for value in train_lines.get('crossline', [])),
+	}
+	if (
+		not isinstance(contributions, Mapping)
+		or not contributions
+		or set(contributions) != expected_lines
+		or any(
+			not isinstance(value, int)
+			or isinstance(value, bool)
+			or value <= 0
+			for value in contributions.values()
+		)
+		or sum(int(value) for value in contributions.values()) != actual
+	):
+		raise ValueError(f'{path} selection per-line contributions are invalid')
+
+
+def _selection_comparison_fields(
+	payload: Mapping[str, object], path: Path
+) -> dict[str, object]:
+	selection = _identity_mapping(_benchmark_identity(payload, path), 'selection', path)
+	coordinates = selection['selected_token_xyz']
+	if not isinstance(coordinates, list):
+		raise TypeError(f'{path} selected_token_xyz must be a list')
+	return {
+		'target_train_voxel_count': selection['target_train_voxel_count'],
+		'actual_train_voxel_count': selection['actual_train_voxel_count'],
+		'relative_count_error': selection['relative_count_error'],
+		'selected_token_count': len(coordinates),
+	}
 
 
 def _validate_label_identity_paths(
@@ -582,7 +698,7 @@ def _validate_model_source(  # noqa: C901
 		)
 
 
-def _validate_identity_redundancy(
+def _validate_identity_redundancy(  # noqa: C901
 	payload: Mapping[str, object], identity: Mapping[str, object], path: Path
 ) -> None:
 	supervision = _supervision(payload)
@@ -611,6 +727,19 @@ def _validate_identity_redundancy(
 			f'{path} benchmark_identity.split_class_counts does not match '
 			'supervision'
 		)
+	selection = _identity_mapping(identity, 'selection', path)
+	train_counts = identity_counts.get('train')
+	if (
+		not isinstance(train_counts, list)
+		or len(train_counts) != 2
+		or sum(int(value) for value in train_counts)
+		!= selection.get('actual_train_voxel_count')
+	):
+		raise ValueError(f'{path} selection count does not match train class counts')
+	if payload.get('train_channel_voxels') != train_counts[1] or payload.get(
+		'train_non_channel_voxels'
+	) != train_counts[0]:
+		raise ValueError(f'{path} calibrated train voxel metrics mismatch')
 	prepared_label = _identity_mapping(identity, 'prepared_label_identity', path)
 	geometry = _identity_mapping(identity, 'geometry', path)
 	if prepared_label.get('shape') != geometry.get('volume_shape_xyz'):
@@ -835,7 +964,10 @@ def _validate_nested_training(
 			}
 			for orientation in ('inline', 'crossline'):
 				key = f'train_{orientation}'
-				large: tuple[int, ...] | None = None
+				large = _indices(
+					by_size['large'].get(key),
+					f'{model}/{layout_id}/large supervision.{key}',
+				)
 				for data_size, prefix in DATA_SIZE_PREFIX.items():
 					current = _indices(
 						by_size[data_size].get(key),
@@ -846,20 +978,31 @@ def _validate_nested_training(
 							f'{model}/{layout_id}/{data_size} {key} must contain '
 							f'exactly {prefix} indices'
 						)
-					if data_size == 'large':
-						large = current
-				if large is None:
-					raise RuntimeError('large Channel supervision is unavailable')
-				for data_size, prefix in DATA_SIZE_PREFIX.items():
-					current = _indices(
-						by_size[data_size].get(key),
-						f'{model}/{layout_id}/{data_size} supervision.{key}',
-					)
 					if current != large[:prefix]:
 						raise ValueError(
 							f'{model}/{layout_id} {key} is not nested in '
 							'small/medium/large prefix order'
 						)
+			selected_by_size = {
+				data_size: {
+					tuple(item)
+					for item in _identity_mapping(
+						_benchmark_identity(
+							rows[(model, layout_id, data_size)], Path('metrics')
+						),
+						'selection',
+						Path('metrics'),
+					).get('selected_token_xyz', [])
+				}
+				for data_size in DATA_SIZE_PREFIX
+			}
+			if not (
+				selected_by_size['small'] <= selected_by_size['medium']
+				<= selected_by_size['large']
+			):
+				raise ValueError(
+					f'{model}/{layout_id} selected tokens are not nested by size'
+				)
 
 
 def _validate_unique_layout_training(
