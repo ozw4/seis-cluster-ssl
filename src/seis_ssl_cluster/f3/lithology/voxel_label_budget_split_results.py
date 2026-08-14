@@ -797,7 +797,7 @@ def _render_formal_handoff_note(formal: Mapping[str, object]) -> list[str]:
 def publish_low_label_split_summary(
 	config: object, paths: Mapping[str, Path]
 ) -> tuple[Path, ...]:
-	"""Copy the exact lightweight six-split summary into the results tree."""
+	"""Copy the exact lightweight six-split summary into the reports tree."""
 	sources = {path.name: path for path in paths.values()}
 	if set(sources) != set(OUTPUT_NAMES):
 		raise ValueError('six-split summary publish sources are incomplete or unexpected')

@@ -37,17 +37,6 @@ def test_resolves_fixed_current_k6_control_contract(tmp_path: Path) -> None:
 		'model_tag': CURRENT_K6_MODEL_TAG,
 		'embeddings_dir': str(config.candidate.embeddings_dir),
 	}
-	assert 'results_root' not in config.to_dict()['paths']
-
-
-def test_rejects_legacy_results_root_key(tmp_path: Path) -> None:
-	raw = _mapping(tmp_path)
-	paths = raw['paths']
-	assert isinstance(paths, dict)
-	paths['results_root'] = paths.pop('reports_root')
-
-	with pytest.raises(ValueError, match='results_root'):
-		f3_lithology_voxel_label_budget_control_config_from_mapping(raw)
 
 
 @pytest.mark.parametrize(

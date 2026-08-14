@@ -5,6 +5,11 @@ They are intentionally minimal; each proc entrypoint resolves them into a full
 runtime config before execution. See `docs/configuration.md` for the complete
 ownership table, schema rules, and YAML examples.
 
+Keep complete execution outputs, intermediate products, and downstream inputs
+in ignored `artifacts/`. Keep only lightweight human-readable summaries in
+tracked `reports/`, and never use them as pipeline inputs. Experiment
+definitions and configuration belong in `experiments/`.
+
 ## Handoff Policy
 
 This pipeline uses Option 1: explicit paths in every stage YAML. Do not rely on

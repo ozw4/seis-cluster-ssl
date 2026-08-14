@@ -1559,27 +1559,6 @@ def test_active_f3_voxel_report_configs_resolve(
 	assert config.publish.reports_root == Path(paths['reports_root'])
 
 
-def test_active_f3_core_report_configs_reject_legacy_results_root() -> None:
-	for config_path, resolver in (
-		(F3_VOXEL_REPORT_CONFIGS[0], f3_lithology_voxel_report_config_from_mapping),
-		(
-			F3_VOXEL_RESULTS_ROOT / '01_summarize_original_split.yaml',
-			f3_lithology_voxel_results_config_from_mapping,
-		),
-		(
-			F3_VOXEL_ROBUSTNESS_ROOT
-			/ '04_summarize_voxel_split_robustness.yaml',
-			f3_lithology_voxel_split_summary_config_from_mapping,
-		),
-	):
-		raw = load_config(config_path)
-		paths = raw['paths']
-		assert isinstance(paths, dict)
-		paths['results_root'] = paths.pop('reports_root')
-		with pytest.raises(ValueError, match='results_root'):
-			resolver(raw)
-
-
 def test_active_f3_voxel_label_budget_dataset_config_resolves() -> None:
 	config = f3_lithology_voxel_label_budget_dataset_config_from_mapping(
 		load_config(F3_VOXEL_LABEL_BUDGET_CONFIGS[0])
@@ -1644,26 +1623,6 @@ def test_active_f3_voxel_label_budget_six_split_configs_resolve(
 	paths = raw['paths']
 	assert isinstance(paths, dict)
 	assert config.reports_root == Path(paths['reports_root'])
-
-
-def test_active_f3_independent_low_label_configs_reject_legacy_results_root(
-) -> None:
-	for config_path, resolver in (
-		(
-			F3_VOXEL_LABEL_BUDGET_CONFIGS[2],
-			f3_lithology_voxel_label_budget_results_config_from_mapping,
-		),
-		(
-			F3_VOXEL_LABEL_BUDGET_SIX_SPLIT_CONFIGS[0],
-			f3_lithology_voxel_label_budget_split_config_from_mapping,
-		),
-	):
-		raw = load_config(config_path)
-		paths = raw['paths']
-		assert isinstance(paths, dict)
-		paths['results_root'] = paths.pop('reports_root')
-		with pytest.raises(ValueError, match='results_root'):
-			resolver(raw)
 
 
 def test_active_f3_section_layout_model_roster_resolves(

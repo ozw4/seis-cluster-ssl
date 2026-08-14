@@ -9,6 +9,11 @@ stage identity, and CLI overrides to the runtime config. Training writes that
 complete config to `resolved_config.json`, and checkpoints store the same
 resolved config under `config`.
 
+Repository storage has three roles: ignored `artifacts/` holds complete run
+outputs, intermediate products, and downstream inputs; tracked `reports/`
+holds lightweight human-readable summaries and is never a pipeline input; and
+`experiments/` holds experiment definitions and configuration.
+
 ## Configuration Ownership
 
 | Parameter group | Source of truth |

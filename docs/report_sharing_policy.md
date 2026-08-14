@@ -1,15 +1,16 @@
 # Report Sharing Policy
 
-Use `artifacts/` for complete local outputs and `reports/` for lightweight
-GitHub review artifacts.
+The repository uses three distinct locations:
 
-## Normal runs
+- `artifacts/`: complete execution outputs, intermediate products, and inputs
+  to later processing. Git does not track this directory.
+- `reports/`: lightweight, human-readable summaries tracked by Git. Pipeline
+  stages must not consume files from this directory.
+- `experiments/`: experiment definitions and configuration.
 
-Experiment, training, embedding, clustering, and visualization commands should
-continue to write large generated outputs under the configured artifact root.
-Do not move those outputs into `reports/`.
-
-## Sharing
+Normal experiment, training, embedding, clustering, and visualization commands
+write under the configured artifact root. Publishing copies only the small,
+producer-owned summary set into `reports/`; it does not change pipeline inputs.
 
 Commit only the small file set owned explicitly by each producer: Markdown,
 JSON, CSV, and representative figures needed for review.
@@ -19,8 +20,6 @@ volumes, clustering models, or raw SEGY data under `reports/`.
 
 Each producer's focused tests should fix the expected review file set and check
 that heavy artifacts are not emitted there.
-
-## Review
 
 Use `git diff` and normal code review as the final check for changes under
 `reports/`. For F3, start with the experiment-specific summary/report files and

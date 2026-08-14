@@ -68,6 +68,6 @@ python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_results.py \
 ```
 
 The `publish.enabled: true` block in that config copies the summary, tables,
-figures to the repository-relative result directory. Set
+figures to the repository-relative report directory. Set
 the explicit `outputs.output_dir` and `publish.output_dir` in the YAML to the
 desired editable paths before running.

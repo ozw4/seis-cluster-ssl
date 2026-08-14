@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Reusable Python code lives in `src/seis_ssl_cluster/`, organized by domain (`data/`, `models/`, `training/`, `embedding/`, `clustering/`, `visualization/`, and related packages). Keep command-line wrappers thin in `proc/seis_ssl_cluster/`; place their generic YAML in `proc/configs/seis_ssl_cluster/`. Versioned experiment configurations belong under `experiments/nopims/` or `experiments/f3/`. Tests mirror package and CLI behavior in `tests/seis_ssl_cluster/`. Use `docs/` for contracts and runbooks, `tools/` for repository checks, `artifacts/` for ignored local outputs, and `reports/` only for lightweight reproducible review artifacts.
+Reusable Python code lives in `src/seis_ssl_cluster/`, organized by domain (`data/`, `models/`, `training/`, `embedding/`, `clustering/`, `visualization/`, and related packages). Keep command-line wrappers thin in `proc/seis_ssl_cluster/`; place their generic YAML in `proc/configs/seis_ssl_cluster/`. Versioned experiment definitions and configurations belong under `experiments/nopims/` or `experiments/f3/`. Tests mirror package and CLI behavior in `tests/seis_ssl_cluster/`. Use `docs/` for contracts and runbooks and `tools/` for repository checks. Keep complete execution outputs, intermediate products, and downstream inputs in ignored `artifacts/`; keep only lightweight human-readable summaries in tracked `reports/`, and never use `reports/` as pipeline input.
 
 ## Setup, Test, and Development Commands
 

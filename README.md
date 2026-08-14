@@ -59,6 +59,9 @@ seis-cluster-ssl/
 ├── tests/
 │   └── seis_ssl_cluster/
 ├── docs/
+├── experiments/
+├── artifacts/               # ignored local execution products
+├── reports/                 # tracked lightweight summaries
 ├── tools/
 ├── pyproject.toml
 └── README.md
@@ -103,6 +106,16 @@ print(volume.shape)  # (X, Y, Z)
 
 The repository does not redistribute NOPIMS or other seismic data. Users are responsible for data access and licensing.
 
+## Repository output policy
+
+The repository uses three distinct locations:
+
+- `artifacts/`: complete execution outputs, intermediate products, and inputs
+  to later pipeline stages. Git does not track this directory.
+- `reports/`: lightweight, human-readable summaries tracked by Git. Pipeline
+  stages must not consume files from this directory.
+- `experiments/`: experiment definitions and configuration.
+
 ## Artifact layout
 
 Generated metadata and run products should be stored outside the raw-data directory.
@@ -111,10 +124,11 @@ The repository does not track `artifacts/`; it may contain checkpoints,
 embeddings, models, path lists, normalization statistics, large arrays, and
 machine-specific absolute paths.
 
-Use `reports/` only for lightweight artifacts intended for GitHub review, such
+Use `reports/` only for lightweight summaries intended for human review, such
 as selected reports, metrics, comparison tables, and representative figures.
 These files should be reproducible summaries, not raw data, checkpoints,
-embeddings, clustering models, full visualization dumps, or path lists.
+embeddings, clustering models, full visualization dumps, or path lists, and
+they must not become inputs to later pipeline stages.
 
 The following variables are convenient examples for runbook commands:
 

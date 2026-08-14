@@ -25,19 +25,17 @@ This directory contains runbooks and configuration contracts for
 - [F3 center-trace masked periodic HMM refresh](f3_center_trace_masked_periodic_hmm_refresh_plan.md): periodic student-embedding refresh, warm-start ordered-center update, generation artifacts, schema-8 checkpoint identity, and original-split evaluation contract.
 - [F3 XY-neighbour consensus hard-label smoothing](f3_xy_neighbor_consensus_hard_label_smoothing.md): single synchronous source-label consensus correction with an ordered-trace guard and no posterior, affinity, re-decoding, or beta calibration.
 
-## Artifacts And Results
+## Repository output policy
 
-`artifacts/` is the local generated-output area and is ignored by Git. Normal
-experiment, training, embedding, clustering, and visualization outputs should
-continue to use `/workspace/artifacts/seis_ssl_cluster/`.
+- `artifacts/`: complete execution outputs, intermediate products, and inputs
+  to later processing. It is not tracked by Git; local runs normally use
+  `/workspace/artifacts/seis_ssl_cluster/`.
+- `reports/`: lightweight, human-readable summaries tracked by Git. Do not use
+  files here as pipeline inputs.
+- `experiments/`: experiment definitions and configuration.
 
-`reports/` is the repository-managed area for lightweight GitHub review
-artifacts. Keep only selected Markdown, JSON, CSV, and representative figures
-there. Do not commit checkpoints, embeddings, clustering models, raw arrays,
-prediction volumes, or raw SEGY files.
-
-Each producer owns its explicit lightweight result file set. Verify that set in
-focused tests and inspect `git diff` during review. See
+Each report producer owns its explicit lightweight file set. Verify that set
+in focused tests and inspect `git diff` during review. See
 [report_sharing_policy.md](report_sharing_policy.md) for the repository policy.
 
 ## Test Selection

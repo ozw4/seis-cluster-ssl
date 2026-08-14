@@ -1468,7 +1468,7 @@ def _publish_dir(config: object) -> Path:
 def _publish_multi_head_results(
 	config: object, *, reports: Path
 ) -> tuple[Path, ...]:
-	"""Publish the current review files into the canonical results tree."""
+	"""Publish the current review files into the canonical reports tree."""
 	publish_dir = _publish_dir(config)
 	_validate_existing_multi_head_publish_tree(publish_dir)
 	publish_dir.mkdir(parents=True, exist_ok=True)
