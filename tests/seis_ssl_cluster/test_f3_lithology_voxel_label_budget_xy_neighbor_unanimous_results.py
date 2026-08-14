@@ -16,13 +16,13 @@ def test_unanimous_publishes_only_explicit_lightweight_files(
 	tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	reports = tmp_path / 'artifacts/reports'
-	results_root = tmp_path / 'reports'
+	reports_root = tmp_path / 'reports'
 	config = SimpleNamespace(
 		reports_dir=reports,
 		base=SimpleNamespace(
 			artifact_root=tmp_path / 'artifacts',
-			results_root=results_root,
-			publish=SimpleNamespace(results_root=results_root),
+			reports_root=reports_root,
+			publish=SimpleNamespace(reports_root=reports_root),
 		),
 	)
 	decisions = {
@@ -54,7 +54,7 @@ def test_unanimous_publishes_only_explicit_lightweight_files(
 	result = results.summarize_f3_lithology_voxel_label_budget_xy_neighbor_unanimous(
 		config
 	)
-	published = results_root / results._PUBLISHED_ROOT
+	published = reports_root / results._PUBLISHED_ROOT
 
 	assert result['decisions'] == decisions
 	assert {path.name for path in published.iterdir()} == set(

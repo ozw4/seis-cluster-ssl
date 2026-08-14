@@ -1,7 +1,7 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
   f3_root: /home/dcuser/data/public_data/field/F3
-  results_root: /workspace/reports
+  reports_root: /workspace/reports
 
 dataset:
   name: f3_facies_benchmark

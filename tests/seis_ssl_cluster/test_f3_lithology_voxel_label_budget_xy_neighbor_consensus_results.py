@@ -124,7 +124,7 @@ def test_xy_consensus_summary_publishes_only_portable_lightweight_files(
 	workspace = tmp_path / 'workspace'
 	artifact_root = workspace / 'artifacts' / 'seis_ssl_cluster'
 	reports = artifact_root / 'reports'
-	results_root = workspace / 'reports'
+	reports_root = workspace / 'reports'
 	audit_path = artifact_root / 'preflight' / 'audit.json'
 	audit_path.parent.mkdir(parents=True)
 	audit_path.write_text(json.dumps(_audit()), encoding='utf-8')
@@ -133,8 +133,8 @@ def test_xy_consensus_summary_publishes_only_portable_lightweight_files(
 		screening_audit=audit_path,
 		base=SimpleNamespace(
 			artifact_root=artifact_root,
-			results_root=results_root,
-			publish=SimpleNamespace(results_root=results_root),
+			reports_root=reports_root,
+			publish=SimpleNamespace(reports_root=reports_root),
 		),
 	)
 	inspection = _inspection(
@@ -154,7 +154,7 @@ def test_xy_consensus_summary_publishes_only_portable_lightweight_files(
 	)
 
 	result = summarize_f3_lithology_voxel_label_budget_xy_neighbor_consensus(config)
-	published = results_root / _RESULTS_ROOT
+	published = reports_root / _RESULTS_ROOT
 	assert result['decisions'] == inspection['decisions']
 	assert {path.name for path in published.iterdir()} == set(PUBLISHED_OUTPUT_NAMES)
 	assert {path.name for path in reports.iterdir()} == set(PUBLISHED_OUTPUT_NAMES)

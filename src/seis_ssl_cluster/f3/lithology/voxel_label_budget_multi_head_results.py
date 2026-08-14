@@ -1462,7 +1462,7 @@ def _handoff(decisions: Mapping[str, object]) -> str:
 
 
 def _publish_dir(config: object) -> Path:
-	return config.results_root / 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
+	return config.reports_root / 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
 
 
 def _publish_multi_head_results(

@@ -103,13 +103,13 @@ def test_soft_posterior_summarizer_publishes_portable_paths(
 	workspace_root = tmp_path / 'workspace'
 	artifact_root = workspace_root / 'artifacts' / 'seis_ssl_cluster'
 	reports_dir = artifact_root / 'reports'
-	results_root = workspace_root / 'reports'
+	reports_root = workspace_root / 'reports'
 	config = SimpleNamespace(
 		reports_dir=reports_dir,
 		base=SimpleNamespace(
 			artifact_root=artifact_root,
-			results_root=results_root,
-			publish=SimpleNamespace(results_root=results_root),
+			reports_root=reports_root,
+			publish=SimpleNamespace(reports_root=reports_root),
 		),
 	)
 	inspection = _portable_inspection(
@@ -124,7 +124,7 @@ def test_soft_posterior_summarizer_publishes_portable_paths(
 	)
 
 	result = summarize_f3_lithology_voxel_label_budget_soft_posterior(config)
-	published_dir = results_root / RESULTS_RELATIVE_ROOT
+	published_dir = reports_root / RESULTS_RELATIVE_ROOT
 	assert result['decisions'] == inspection['decisions']
 	assert {path.name for path in published_dir.iterdir()} == set(REQUIRED_RESULT_FILES)
 

@@ -268,11 +268,11 @@ def _closed_config_fixture(
 	)
 	artifact_root = (tmp_path / 'artifacts').resolve()
 	f3_root = (tmp_path / 'f3').resolve()
-	results_root = (tmp_path / 'reports').resolve()
+	reports_root = (tmp_path / 'reports').resolve()
 	hard['paths'] = {
 		'artifact_root': str(artifact_root),
 		'f3_root': str(f3_root),
-		'results_root': str(results_root),
+		'reports_root': str(reports_root),
 	}
 	hard['references'] = {
 		'dataset_manifest': str(artifact_root / 'datasets/manifest.json'),

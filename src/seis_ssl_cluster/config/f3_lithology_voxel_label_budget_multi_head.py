@@ -289,7 +289,7 @@ def _config_from_mapping(  # noqa: C901
 	base_raw['publish'] = {
 		'enabled': False,
 		'output_dir': str(
-			_required_absolute_path(paths, 'results_root', prefix='paths')
+			_required_absolute_path(paths, 'reports_root', prefix='paths')
 			/ 'f3/facies_benchmark_v1/multi_head_unused_publish'
 		),
 		'max_file_size_mb': 10,

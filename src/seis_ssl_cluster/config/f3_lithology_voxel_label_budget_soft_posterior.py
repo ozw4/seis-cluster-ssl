@@ -115,7 +115,7 @@ def _validate_hard_decoder_contract(
 	for name in (
 		'artifact_root',
 		'f3_root',
-		'results_root',
+		'reports_root',
 		'dataset',
 		'budgets',
 		'subsample_seeds',

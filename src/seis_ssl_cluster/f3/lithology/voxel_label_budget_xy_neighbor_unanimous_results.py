@@ -285,7 +285,7 @@ def summarize_f3_lithology_voxel_label_budget_xy_neighbor_unanimous(
 	)
 	published_files: tuple[Path, ...] = ()
 	if publish:
-		output = config.base.publish.results_root / _PUBLISHED_ROOT
+		output = config.base.publish.reports_root / _PUBLISHED_ROOT
 		output.mkdir(parents=True, exist_ok=True)
 		published_files = tuple(output / name for name in PUBLISHED_OUTPUT_NAMES)
 		for source, destination in zip(
@@ -584,7 +584,7 @@ def _handoff_payload(
 
 
 def _execution_git_state(config: object) -> Mapping[str, object]:
-	workspace = Path(config.base.results_root).parent
+	workspace = Path(config.base.reports_root).parent
 	try:
 		sha = subprocess.run(
 			('git', 'rev-parse', 'HEAD'),

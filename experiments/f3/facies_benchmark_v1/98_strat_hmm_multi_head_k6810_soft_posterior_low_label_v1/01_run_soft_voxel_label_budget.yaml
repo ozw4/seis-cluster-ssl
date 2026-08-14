@@ -1,7 +1,7 @@
 paths:
   artifact_root: ${SEIS_SSL_CLUSTER_WORKSPACE}/artifacts/seis_ssl_cluster
   f3_root: ${F3_ROOT}
-  results_root: ${SEIS_SSL_CLUSTER_WORKSPACE}/reports
+  reports_root: ${SEIS_SSL_CLUSTER_WORKSPACE}/reports
 hard_multi_head_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v1/95_strat_hmm_multi_head_k6810_low_label_v1/01_run_multi_head_voxel_label_budget.yaml
 dataset: {name: f3_facies_benchmark, version: facies_benchmark_v1}
 references:

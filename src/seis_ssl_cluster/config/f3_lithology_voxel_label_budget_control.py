@@ -90,7 +90,7 @@ class F3VoxelLabelBudgetControlPublishConfig:
 	"""Lightweight result publication settings for the current-code control."""
 
 	enabled: bool
-	results_root: Path
+	reports_root: Path
 	output_dir: Path
 	max_file_size_bytes: int
 	overwrite: bool
@@ -173,7 +173,7 @@ class F3VoxelLabelBudgetControlConfig:
 
 	artifact_root: Path
 	f3_root: Path
-	results_root: Path
+	reports_root: Path
 	dataset: Mapping[str, str]
 	references: F3VoxelLabelBudgetControlReferences
 	candidate: F3VoxelLabelBudgetControlCandidate
@@ -252,7 +252,7 @@ class F3VoxelLabelBudgetControlConfig:
 			'paths': {
 				'artifact_root': str(self.artifact_root),
 				'f3_root': str(self.f3_root),
-				'results_root': str(self.results_root),
+				'reports_root': str(self.reports_root),
 			},
 			'dataset': dict(self.dataset),
 			'references': {
@@ -373,7 +373,7 @@ def f3_lithology_voxel_label_budget_control_config_from_mapping(
 	decision = _required_mapping(config, 'decision')
 	outputs = _required_mapping(config, 'outputs')
 	publish = _required_mapping(config, 'publish')
-	_validate_section_keys(paths, {'artifact_root', 'f3_root', 'results_root'}, 'paths')
+	_validate_section_keys(paths, {'artifact_root', 'f3_root', 'reports_root'}, 'paths')
 	_validate_section_keys(dataset, {'name', 'version'}, 'dataset')
 	_validate_section_keys(
 		references,
@@ -477,7 +477,7 @@ def f3_lithology_voxel_label_budget_control_config_from_mapping(
 
 	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
-	results_root = _required_absolute_path(paths, 'results_root', prefix='paths')
+	reports_root = _required_absolute_path(paths, 'reports_root', prefix='paths')
 	base_seed = _integer(
 		seed_policy.get('base_seed'), 'seed_policy.base_seed', minimum=0
 	)
@@ -500,7 +500,7 @@ def f3_lithology_voxel_label_budget_control_config_from_mapping(
 	return F3VoxelLabelBudgetControlConfig(
 		artifact_root=artifact_root,
 		f3_root=f3_root,
-		results_root=results_root,
+		reports_root=reports_root,
 		dataset={
 			'name': _required_str(dataset, 'name', prefix='dataset'),
 			'version': _required_str(dataset, 'version', prefix='dataset'),
@@ -607,7 +607,7 @@ def f3_lithology_voxel_label_budget_control_config_from_mapping(
 		overwrite=_boolean(outputs.get('overwrite'), 'outputs.overwrite'),
 		publish=F3VoxelLabelBudgetControlPublishConfig(
 			enabled=_boolean(publish.get('enabled'), 'publish.enabled'),
-			results_root=results_root,
+			reports_root=reports_root,
 			output_dir=_required_absolute_path(
 				publish, 'output_dir', prefix='publish'
 			),

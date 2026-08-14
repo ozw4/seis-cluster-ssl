@@ -174,7 +174,7 @@ def summarize_f3_lithology_voxel_label_budget_soft_posterior(
 	published_files: tuple[Path, ...] = ()
 	if publish:
 		output = (
-			config.base.publish.results_root
+			config.base.publish.reports_root
 			/ 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_soft_posterior_v1'
 		)
 		output.mkdir(parents=True, exist_ok=True)
@@ -283,7 +283,7 @@ def _portable_payload(
 	published = _portable_value(
 		payload,
 		artifact_root=config.base.artifact_root,
-		workspace_root=config.base.results_root.parent,
+		workspace_root=config.base.reports_root.parent,
 	)
 	if not isinstance(published, Mapping):
 		raise TypeError('published M5-U payload must be a mapping')

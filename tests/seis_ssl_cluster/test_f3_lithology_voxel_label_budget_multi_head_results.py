@@ -1023,7 +1023,7 @@ def test_historical_blocked_preflight_archive_is_noncanonical() -> None:
 def _publish_config(tmp_path: Path) -> SimpleNamespace:
 	return SimpleNamespace(
 		reports_dir=tmp_path / 'artifacts' / 'reports',
-		results_root=tmp_path / 'reports',
+		reports_root=tmp_path / 'reports',
 		candidates=(),
 		budgets=(),
 		subsample_seeds=(),

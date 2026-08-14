@@ -1251,6 +1251,9 @@ def test_active_f3_current_k6_voxel_control_configs_resolve(
 
 	assert config.job_count == 15
 	assert config.candidate.model_id == 'm1_current_k6'
+	paths = load_config(config_path)['paths']
+	assert config.reports_root == Path(paths['reports_root'])
+	assert config.publish.reports_root == config.reports_root
 
 
 @pytest.mark.parametrize('config_path', F3_STRAT_HMM_SHUFFLED_TARGET_CONFIGS)
