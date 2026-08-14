@@ -14,7 +14,7 @@ The primary baseline role is `mh_nocons` with model tag
 `strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1`.
 
 The candidate must be the candidate admitted by the original-split handoff
-`reports/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_center_trace_masked_original_split_v1/center_trace_masked_original_handoff.json`.
+`reports/f3/legacy/facies_benchmark_v1/strat_hmm_multi_head_k6810_center_trace_masked_original_split_v1/center_trace_masked_original_handoff.json`.
 The hard baseline and all six-split inputs are read-only lineage from
 experiment 96. Experiment 96 and its published results are not rewritten by
 this follow-up.

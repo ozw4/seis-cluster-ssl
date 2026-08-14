@@ -44,7 +44,7 @@ labels, posterior, confidence, boundary weight, or valid mask.
 
 The baseline identity and published decision context are recorded by the
 [K=6/8/10 multi-head experiment](../experiments/f3/facies_benchmark_v1/94_strat_hmm_multi_head_k6810_v1/README.md)
-and its managed [results summary](../reports/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/multi_head_results_summary.json).
+and its frozen [results summary](../reports/f3/legacy/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1/multi_head_results_summary.json).
 Those records remain historical evidence; this plan makes no new scientific
 claim.
 

@@ -35,8 +35,8 @@ generalization. In addition:
 - the HMM label maps are diagnostic structured pretext targets, not final
   lithology labels or final evaluated outputs.
 
-The published summary is under
-`reports/f3/facies_benchmark_v1/strat_hmm_pretext_m1/`.
+The summary is frozen under
+`reports/f3/legacy/facies_benchmark_v1/strat_hmm_pretext_m1/`.
 
 ## Reproducible command order
 

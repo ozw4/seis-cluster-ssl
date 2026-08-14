@@ -19,3 +19,8 @@ Commit only reproducible summaries such as selected Markdown reports, metrics,
 comparison tables, and representative figures. Do not use this directory as a
 pipeline input; experiment definitions and configuration stay in
 `experiments/f3/`.
+
+The retired `facies_benchmark_v1` reports are frozen under
+`reports/f3/legacy/facies_benchmark_v1/`. They are historical references only,
+not active pipeline inputs, and must not be compared directly with a future
+section-count, single-seed benchmark.
