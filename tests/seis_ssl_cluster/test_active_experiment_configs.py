@@ -1586,7 +1586,7 @@ def test_active_f3_voxel_label_budget_summary_config_resolves() -> None:
 	assert config.decision.systematic_degradation_budget_count == 2
 	assert config.publish.enabled is True
 	assert config.publish.output_dir == Path(
-		'results/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1'
+		'reports/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1'
 	)
 
 
@@ -1681,7 +1681,7 @@ def test_active_f3_section_layout_results_config_resolves(
 	assert config.model_roster.name == '00_model_roster.yaml'
 	assert config.dataset_manifest.name == 'section_layout_dataset_manifest.json'
 	assert config.benchmark_root.is_relative_to(config.artifact_root)
-	assert config.final_results_dir.is_relative_to(config.workspace_root / 'results')
+	assert config.final_results_dir.is_relative_to(config.workspace_root / 'reports')
 
 
 def test_active_f3_voxel_paired_experiment_contract() -> None:

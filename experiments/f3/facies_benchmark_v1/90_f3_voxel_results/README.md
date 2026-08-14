@@ -24,7 +24,7 @@ Local output is
 `/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/voxel_benchmark_v1/`.
 This original-split step does not publish. After the six-split suite completes,
 its final summarizer publishes these products together with the robustness
-summary to `results/f3/facies_benchmark_v1/voxel_lithology_benchmark_v1/`.
+summary to `reports/f3/facies_benchmark_v1/voxel_lithology_benchmark_v1/`.
 The final manifest records SHA-256 and byte size; raw `.npy`, `.pt`, and
 `.joblib` files remain under the artifact root.
 

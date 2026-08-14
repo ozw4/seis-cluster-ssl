@@ -1,4 +1,4 @@
-paths: {artifact_root: /workspace/artifacts/seis_ssl_cluster, f3_root: /home/dcuser/data/public_data/field/F3, results_root: results}
+paths: {artifact_root: /workspace/artifacts/seis_ssl_cluster, f3_root: /home/dcuser/data/public_data/field/F3, results_root: reports}
 dataset: {name: f3_facies_benchmark, version: facies_benchmark_v1}
 labels:
   seismic_volume: /workspace/artifacts/seis_ssl_cluster/registry/volumes/f3/facies_benchmark_v1/f3_seismic.npy
@@ -11,4 +11,4 @@ voxel_dataset: {input_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/fa
 evaluation: {input_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/voxel_evaluations/token_projection_nearest_v1}
 report: {selected_slices: {}, dpi: 150, include_confidence: false, amplitude_clip_percentiles: [1.0, 99.0]}
 outputs: {output_dir: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/voxel_reports/token_projection_nearest_v1, overwrite: false}
-publish: {enabled: false, output_dir: results/f3/facies_benchmark_v1/voxel_lithology/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/token_projection_nearest_v1, max_file_size_mb: 10, overwrite: true}
+publish: {enabled: false, output_dir: reports/f3/facies_benchmark_v1/voxel_lithology/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/token_projection_nearest_v1, max_file_size_mb: 10, overwrite: true}

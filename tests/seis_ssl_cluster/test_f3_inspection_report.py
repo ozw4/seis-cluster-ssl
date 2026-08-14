@@ -141,7 +141,7 @@ def test_f3_inspection_report_publish_enabled_writes_lightweight_results(
 	_write_file(config.inspection_dir / 'checkpoint.pt', b'heavy')
 	_write_file(config.inspection_dir / 'embeddings.npy', b'heavy')
 	output_dir = (
-		tmp_path / 'results' / 'f3' / 'facies_benchmark_v1' / 'inspection'
+		tmp_path / 'reports' / 'f3' / 'facies_benchmark_v1' / 'inspection'
 	)
 
 	result = build_f3_inspection_report(
@@ -186,7 +186,7 @@ def test_f3_inspection_report_publish_disabled_writes_no_results(
 	config = _report_config(tmp_path)
 	_write_report_components(config)
 	_touch_figures(config)
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	result = build_f3_inspection_report(
 		config,
@@ -206,7 +206,7 @@ def test_f3_inspection_report_publish_include_figures_false_omits_links(
 	config = _report_config(tmp_path)
 	_write_report_components(config)
 	_touch_figures(config)
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	result = build_f3_inspection_report(
 		config,
@@ -237,7 +237,7 @@ def test_f3_inspection_report_publish_missing_optional_figure_warns(
 ) -> None:
 	config = _report_config(tmp_path)
 	_write_report_components(config)
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	result = build_f3_inspection_report(
 		config,
@@ -259,7 +259,7 @@ def test_f3_inspection_report_publish_missing_optional_figure_warns(
 
 def test_f3_inspection_report_publish_requires_report_files(tmp_path: Path) -> None:
 	config = _report_config(tmp_path)
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	with pytest.raises(FileNotFoundError, match='required publish source'):
 		publish_f3_inspection_report(
@@ -277,7 +277,7 @@ def test_f3_inspection_publish_validates_all_required_sources_before_writing(
 ) -> None:
 	config = _report_config(tmp_path)
 	_write_file(config.output_markdown, b'artifact report\n')
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	with pytest.raises(FileNotFoundError, match='required publish source'):
 		publish_f3_inspection_report(
@@ -298,7 +298,7 @@ def test_f3_inspection_publish_rejects_optional_figure_symlink_before_writing(
 	figure = config.inspection_dir / config.figure_paths[0]
 	figure.parent.mkdir(parents=True, exist_ok=True)
 	figure.symlink_to(_write_file(tmp_path / 'outside.png', b'png'))
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	with pytest.raises(FileNotFoundError, match='regular file'):
 		publish_f3_inspection_report(
@@ -314,7 +314,7 @@ def test_f3_inspection_publish_rejects_size_before_writing(tmp_path: Path) -> No
 	config = _report_config(tmp_path)
 	_write_file(config.output_markdown, b'artifact report\n')
 	_write_json(config.output_json, {})
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
 		publish_f3_inspection_report(
@@ -338,7 +338,7 @@ def test_f3_inspection_publish_rejects_unsafe_target_before_writing(
 	config = _report_config(tmp_path)
 	_write_file(config.output_markdown, b'artifact report\n')
 	_write_json(config.output_json, {})
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	unsafe_target = output_dir / 'report.json'
 	unsafe_target.parent.mkdir(parents=True)
 	if target_kind == 'symlink':
@@ -367,7 +367,7 @@ def test_f3_inspection_publish_rejects_unsafe_output_dir_before_writing(
 	_write_json(config.output_json, {})
 	outside = tmp_path / 'outside'
 	outside.mkdir()
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	if output_kind == 'symlink':
 		output_dir.symlink_to(outside, target_is_directory=True)
 	else:
@@ -393,7 +393,7 @@ def test_f3_inspection_publish_rejects_unsafe_figure_parent_before_writing(
 	_write_file(config.output_markdown, b'artifact report\n')
 	_write_json(config.output_json, {})
 	_write_file(config.inspection_dir / config.figure_paths[0], b'png')
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	output_dir.mkdir()
 	figures_dir = output_dir / 'figures'
 	outside = tmp_path / 'outside'

@@ -36,7 +36,7 @@ generalization. In addition:
   lithology labels or final evaluated outputs.
 
 The published summary is under
-`results/f3/facies_benchmark_v1/strat_hmm_pretext_m1/`.
+`reports/f3/facies_benchmark_v1/strat_hmm_pretext_m1/`.
 
 ## Reproducible command order
 

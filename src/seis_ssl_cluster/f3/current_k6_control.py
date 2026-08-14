@@ -28,7 +28,7 @@ from seis_ssl_cluster.training.strat_hmm.components import (
 MODEL_TAG = 'strat_hmm_pretext_m1_current_k6_topblock1_distill_v1'
 HISTORICAL_M1_TAG = 'strat_hmm_pretext_m1_k6_topblock1_distill'
 MAE_TAG = 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
-MIGRATION_ROOT = Path('results/f3/facies_benchmark_v1/performance_migration_validation')
+MIGRATION_ROOT = Path('reports/f3/facies_benchmark_v1/performance_migration_validation')
 HISTORICAL_CONFIG = Path(
 	'experiments/f3/facies_benchmark_v1/80_strat_hmm_pretraining_m1/'
 	'03_train_single_head_topblock_distill_full.yaml'
@@ -42,12 +42,12 @@ HISTORICAL_EMBEDDING_ROOT = Path(
 	'strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16'
 )
 HISTORICAL_TOKEN_METRICS = Path(
-	'results/f3/facies_benchmark_v1/lithology_probe/'
+	'reports/f3/facies_benchmark_v1/lithology_probe/'
 	'strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/'
 	'png_slices_segy_labels_v1/linear_balanced_v1/metrics.json'
 )
 MAE_TOKEN_METRICS = Path(
-	'results/f3/facies_benchmark_v1/lithology_probe/'
+	'reports/f3/facies_benchmark_v1/lithology_probe/'
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/'
 	'png_slices_segy_labels_v1/linear_balanced_v1/metrics.json'
 )

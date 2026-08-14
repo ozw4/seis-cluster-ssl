@@ -56,7 +56,7 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
-DEFAULT_RESULTS_ROOT = Path('results')
+DEFAULT_RESULTS_ROOT = Path('reports')
 if TYPE_CHECKING:
 	from seis_ssl_cluster.f3.labels import F3ClassInfo
 

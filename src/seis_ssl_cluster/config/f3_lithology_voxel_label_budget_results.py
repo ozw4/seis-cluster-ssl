@@ -15,7 +15,7 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 	_validate_allowed_keys,
 )
 
-DEFAULT_RESULTS_ROOT = Path('results')
+DEFAULT_RESULTS_ROOT = Path('reports')
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 EXPECTED_BUDGET_COUNT = 3
 EXPECTED_SEED_COUNT = 5

@@ -132,7 +132,7 @@ def test_results_validation_failure_writes_nothing(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	monkeypatch.setattr(
 		results_module,
 		'validate_parihaka_mae',
@@ -186,7 +186,7 @@ def _results_fixture(
 		}
 	)
 	run_metadata_path.write_text(json.dumps(run_metadata), encoding='utf-8')
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	return (
 		{
 			'prepare_config_path': prepare_path,

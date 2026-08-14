@@ -66,6 +66,6 @@ two negative budgets or degradation, and `CTMASK_ORIGINAL_HOLD` otherwise.
 six-split jobs; both six-split counters remain zero.
 
 Only lightweight CSV, JSON, and Markdown evidence is published under
-`results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_center_trace_masked_original_split_v1/`.
+`reports/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_center_trace_masked_original_split_v1/`.
 Raw predictions, checkpoints, embeddings, and logs remain under the ignored
 artifact root.

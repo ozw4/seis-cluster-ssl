@@ -69,7 +69,7 @@ def publish_f3_lithology_report(
 	*,
 	payload: Mapping[str, object] | None = None,
 ) -> tuple[Path, ...]:
-	"""Publish lightweight F3 lithology probe report artifacts into ``results/``."""
+	"""Publish lightweight F3 lithology probe report artifacts into ``reports/``."""
 	if publish_config is None or not publish_config.enabled:
 		return ()
 	if publish_config.output_dir is None:
@@ -88,7 +88,7 @@ def publish_f3_lithology_comparison_report(
 	config: F3LithologyComparisonReportConfig,
 	publish_config: F3LithologyComparisonPublishConfig | None,
 ) -> tuple[Path, ...]:
-	"""Publish lightweight F3 lithology comparison artifacts into ``results/``."""
+	"""Publish lightweight F3 lithology comparison artifacts into ``reports/``."""
 	if publish_config is None or not publish_config.enabled:
 		return ()
 	if publish_config.output_dir is None:

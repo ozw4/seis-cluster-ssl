@@ -345,7 +345,7 @@ def test_results_config_is_closed(tmp_path: Path) -> None:
 	config = results.f3_lithology_voxel_section_layout_results_config_from_mapping(
 		mapping
 	)
-	assert config.final_results_dir.is_relative_to(config.workspace_root / 'results')
+	assert config.final_results_dir.is_relative_to(config.workspace_root / 'reports')
 	mapping['decision'] = {'threshold': 0.1}
 	with pytest.raises(ValueError, match='not allowed'):
 		results.f3_lithology_voxel_section_layout_results_config_from_mapping(mapping)
@@ -541,7 +541,7 @@ def _config_mapping(tmp_path: Path) -> dict[str, object]:
 		},
 		'outputs': {
 			'benchmark_root': str(root / 'artifacts/benchmark'),
-			'final_results_dir': str(root / 'workspace/results/f3/section-layout'),
+			'final_results_dir': str(root / 'workspace/reports/f3/section-layout'),
 		},
 	}
 

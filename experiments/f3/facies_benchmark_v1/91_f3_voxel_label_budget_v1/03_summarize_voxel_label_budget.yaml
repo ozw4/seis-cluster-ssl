@@ -1,6 +1,6 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
-  results_root: results
+  results_root: reports
 suite:
   root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split
   dataset_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_label_budget_v1/original_split/voxel_label_budget_dataset_manifest.json
@@ -20,6 +20,6 @@ outputs:
   overwrite: false
 publish:
   enabled: true
-  output_dir: results/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1
+  output_dir: reports/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1
   max_file_size_mb: 10
   overwrite: true

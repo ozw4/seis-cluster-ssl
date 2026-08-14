@@ -101,13 +101,13 @@ def test_publish_copies_expected_small_files(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	_require_matplotlib_agg()
-	publish_dir = tmp_path / 'results' / 'f3' / 'facies_benchmark_v1' / 'm1'
+	publish_dir = tmp_path / 'reports' / 'f3' / 'facies_benchmark_v1' / 'm1'
 	monkeypatch.chdir(tmp_path)
 	config = _write_inputs(
 		tmp_path,
 		publish=F3StratHMMM1PublishConfig(
 			enabled=True,
-			output_dir=Path('results/f3/facies_benchmark_v1/m1'),
+			output_dir=Path('reports/f3/facies_benchmark_v1/m1'),
 			include_figures=True,
 		),
 	)
@@ -143,13 +143,13 @@ def test_publish_include_figures_false_omits_markdown_figure_links(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	_require_matplotlib_agg()
-	publish_dir = tmp_path / 'results' / 'f3' / 'facies_benchmark_v1' / 'm1'
+	publish_dir = tmp_path / 'reports' / 'f3' / 'facies_benchmark_v1' / 'm1'
 	monkeypatch.chdir(tmp_path)
 	config = _write_inputs(
 		tmp_path,
 		publish=F3StratHMMM1PublishConfig(
 			enabled=True,
-			output_dir=Path('results/f3/facies_benchmark_v1/m1'),
+			output_dir=Path('reports/f3/facies_benchmark_v1/m1'),
 			include_figures=False,
 		),
 	)
@@ -171,13 +171,13 @@ def test_publish_disabled_does_nothing(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	_require_matplotlib_agg()
-	publish_dir = tmp_path / 'results' / 'disabled'
+	publish_dir = tmp_path / 'reports' / 'disabled'
 	monkeypatch.chdir(tmp_path)
 	config = _write_inputs(
 		tmp_path,
 		publish=F3StratHMMM1PublishConfig(
 			enabled=False,
-			output_dir=Path('results/disabled'),
+			output_dir=Path('reports/disabled'),
 		),
 	)
 
@@ -210,7 +210,7 @@ def test_publish_refuses_prohibited_suffix(
 			result,
 			F3StratHMMM1PublishConfig(
 				enabled=True,
-				output_dir=Path('results'),
+				output_dir=Path('reports'),
 				include_figures=False,
 			),
 		)
@@ -237,12 +237,12 @@ def test_publish_refuses_oversized_file(
 			result,
 			F3StratHMMM1PublishConfig(
 				enabled=True,
-				output_dir=Path('results'),
+				output_dir=Path('reports'),
 				max_file_size_bytes=50,
 			),
 		)
 
-	assert not (tmp_path / 'results').exists()
+	assert not (tmp_path / 'reports').exists()
 
 
 def test_publish_rejects_missing_required_source_before_writing(
@@ -250,7 +250,7 @@ def test_publish_rejects_missing_required_source_before_writing(
 ) -> None:
 	result = _write_publishable_result(tmp_path)
 	result.table_paths[-1].unlink()
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	with pytest.raises(FileNotFoundError, match='regular file'):
 		publish_f3_strat_hmm_m1_results(
@@ -273,7 +273,7 @@ def test_publish_rejects_source_symlink_before_writing(tmp_path: Path) -> None:
 		figure_paths=result.figure_paths,
 		warnings=result.warnings,
 	)
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	with pytest.raises(FileNotFoundError, match='regular file'):
 		publish_f3_strat_hmm_m1_results(
@@ -290,7 +290,7 @@ def test_publish_rejects_unsafe_target_before_writing(
 	target_kind: str,
 ) -> None:
 	result = _write_publishable_result(tmp_path)
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	unsafe_target = output_dir / 'tables' / 'split_index_deltas.csv'
 	unsafe_target.parent.mkdir(parents=True)
 	if target_kind == 'symlink':
@@ -319,7 +319,7 @@ def test_publish_rejects_unsafe_output_dir_before_writing(
 	result = _write_publishable_result(tmp_path)
 	outside = tmp_path / 'outside'
 	outside.mkdir()
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	if output_kind == 'symlink':
 		output_dir.symlink_to(outside, target_is_directory=True)
 	else:
@@ -341,7 +341,7 @@ def test_publish_rejects_unsafe_table_parent_before_writing(
 	parent_kind: str,
 ) -> None:
 	result = _write_publishable_result(tmp_path)
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	output_dir.mkdir()
 	tables_dir = output_dir / 'tables'
 	outside = tmp_path / 'outside'
@@ -700,7 +700,7 @@ def test_cli_runs_end_to_end_and_publishes_synthetic_fixtures(
 ) -> None:
 	_require_matplotlib_agg()
 	config = _write_inputs(tmp_path)
-	publish_dir = tmp_path / 'results' / 'f3' / 'facies_benchmark_v1' / 'm1'
+	publish_dir = tmp_path / 'reports' / 'f3' / 'facies_benchmark_v1' / 'm1'
 	config_path = tmp_path / 'config.yaml'
 	config_path.write_text(
 		'\n'.join(
@@ -716,7 +716,7 @@ def test_cli_runs_end_to_end_and_publishes_synthetic_fixtures(
 				f'  output_dir: {config.output_dir}',
 				'publish:',
 				'  enabled: true',
-				'  output_dir: results/f3/facies_benchmark_v1/m1',
+				'  output_dir: reports/f3/facies_benchmark_v1/m1',
 				'  include_figures: true',
 				'  max_file_size_mb: 10',
 				'',

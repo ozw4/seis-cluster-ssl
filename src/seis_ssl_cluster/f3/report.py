@@ -136,7 +136,7 @@ def publish_f3_inspection_report(
 	*,
 	payload: Mapping[str, object] | None = None,
 ) -> tuple[Path, ...]:
-	"""Publish lightweight F3 inspection report artifacts into ``results/``."""
+	"""Publish lightweight F3 inspection report artifacts into ``reports/``."""
 	if publish_config is None or not publish_config.enabled:
 		return ()
 	if publish_config.output_dir is None:

@@ -259,10 +259,10 @@ experiments/f3/facies_benchmark_v1/
 experiments/f3/facies_benchmark_v1/
   108_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_low_label_v1/
 
-results/f3/facies_benchmark_v1/
+reports/f3/facies_benchmark_v1/
   strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_v1/
 
-results/f3/facies_benchmark_v1/
+reports/f3/facies_benchmark_v1/
   strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_original_split_v1/
 ```
 

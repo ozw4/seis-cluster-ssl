@@ -64,7 +64,7 @@ def test_f3_lithology_baseline_configs_are_present_and_have_metadata() -> None:
 			assert payload['publish'] == {
 				'enabled': True,
 				'output_dir': (
-					'results/f3/facies_benchmark_v1/baseline_comparison'
+					'reports/f3/facies_benchmark_v1/baseline_comparison'
 				),
 				'include_figures': True,
 				'max_file_size_mb': 10,

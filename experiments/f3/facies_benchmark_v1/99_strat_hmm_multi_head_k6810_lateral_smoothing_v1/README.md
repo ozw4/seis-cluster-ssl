@@ -54,7 +54,7 @@ only the calibration handoff and report; it never copies target arrays.
 
 ```bash
 export CALIBRATION_DIR="${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/strat_hmm_multi_k6810_lateral_mean_field_selected_v1"
-export RESULTS_DIR="results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_lateral_smoothing_v1"
+export RESULTS_DIR="reports/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_lateral_smoothing_v1"
 
 python proc/seis_ssl_cluster/publish_f3_m5_lateral_smoothing_results.py \
   --artifact-root "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT" \

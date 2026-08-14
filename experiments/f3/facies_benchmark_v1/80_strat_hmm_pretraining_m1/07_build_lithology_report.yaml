@@ -36,7 +36,7 @@ comparison:
   output_markdown: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/comparison_report.md
 publish:
   enabled: true
-  output_dir: results/f3/facies_benchmark_v1/lithology_probe/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1
+  output_dir: reports/f3/facies_benchmark_v1/lithology_probe/strat_hmm_pretext_m1_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1
   include_figures: true
   max_file_size_mb: 10
   max_prediction_figures: 3

@@ -158,7 +158,7 @@ comparison in this order:
    token dataset, and probe metrics already match the current reference split;
    otherwise rebuild it.
 7. Rebuild the comparison report.
-8. Publish lightweight comparison outputs to `results/` through the comparison
+8. Publish lightweight comparison outputs to `reports/` through the comparison
    config's `publish` block.
 9. Review the explicit published file set and `git diff` before committing it.
 
@@ -345,7 +345,7 @@ python proc/seis_ssl_cluster/build_f3_lithology_comparison_report.py \
 ```
 
 The same command publishes lightweight comparison outputs to
-`results/f3/facies_benchmark_v1/baseline_comparison/` because
+`reports/f3/facies_benchmark_v1/baseline_comparison/` because
 `05_build_baseline_comparison_report.yaml` has `publish.enabled: true`.
 Review that producer-owned file set and `git diff` before committing it.
 

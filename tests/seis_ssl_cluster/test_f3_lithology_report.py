@@ -263,7 +263,7 @@ def test_f3_lithology_report_publish_writes_lightweight_results(
 	)
 	(run['probe_dir'] / 'probe.joblib').write_bytes(b'heavy')
 	(run['prediction_dir'] / 'f3_token_predictions.npy').write_bytes(b'heavy')
-	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+	output_dir = tmp_path / 'reports' / 'f3' / 'lithology_probe'
 
 	result = build_f3_lithology_report(
 		_report_config(run),
@@ -329,7 +329,7 @@ def test_f3_lithology_report_publish_warns_for_missing_optional_prediction_figur
 			('validation', 'crossline', 350, False),
 		),
 	)
-	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+	output_dir = tmp_path / 'reports' / 'f3' / 'lithology_probe'
 
 	result = build_f3_lithology_report(
 		_report_config(run),
@@ -360,7 +360,7 @@ def test_f3_lithology_report_publish_requires_metrics(
 		write_metrics=False,
 	)
 
-	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+	output_dir = tmp_path / 'reports' / 'f3' / 'lithology_probe'
 	with pytest.raises(FileNotFoundError, match='required publish source'):
 		build_f3_lithology_report(
 			_report_config(run),
@@ -386,7 +386,7 @@ def test_f3_lithology_report_publish_can_exclude_figures(tmp_path: Path) -> None
 		probe_spec='linear_balanced_v1',
 		prediction_figures=(('validation', 'inline', 150, True),),
 	)
-	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+	output_dir = tmp_path / 'reports' / 'f3' / 'lithology_probe'
 
 	result = build_f3_lithology_report(
 		_report_config(run),
@@ -416,7 +416,7 @@ def test_f3_lithology_report_publish_enforces_size_limit(tmp_path: Path) -> None
 		embed_spec='overlap_x16',
 		probe_spec='linear_balanced_v1',
 	)
-	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+	output_dir = tmp_path / 'reports' / 'f3' / 'lithology_probe'
 
 	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
 		build_f3_lithology_report(
@@ -444,7 +444,7 @@ def test_f3_lithology_report_publish_rejects_source_symlink(
 	real_metrics_json = metrics_json.with_name('metrics-real.json')
 	metrics_json.rename(real_metrics_json)
 	metrics_json.symlink_to(real_metrics_json.name)
-	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+	output_dir = tmp_path / 'reports' / 'f3' / 'lithology_probe'
 
 	with pytest.raises(FileNotFoundError, match='regular file'):
 		build_f3_lithology_report(
@@ -489,7 +489,7 @@ def test_f3_lithology_report_publish_rejects_unsafe_target(
 		embed_spec='overlap_x16',
 		probe_spec='linear_balanced_v1',
 	)
-	output_dir = tmp_path / 'results' / 'f3' / 'lithology_probe'
+	output_dir = tmp_path / 'reports' / 'f3' / 'lithology_probe'
 	output_dir.mkdir(parents=True)
 	report_target = output_dir / 'report.md'
 	if target_kind == 'symlink':
@@ -747,7 +747,7 @@ def test_default_lithology_report_config_publishes_to_explicit_results_path() ->
 		(config_dir / '06_build_lithology_report.yaml').read_text(encoding='utf-8'),
 	)
 	expected_output_dir = (
-		'results/f3/facies_benchmark_v1/'
+		'reports/f3/facies_benchmark_v1/'
 		'lithology_probe/'
 		'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/'
 		'overlap_x16/png_slices_segy_labels_v1/linear_balanced_v1'

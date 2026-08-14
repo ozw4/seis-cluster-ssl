@@ -14,7 +14,7 @@ from statistics import mean
 
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
-DEFAULT_RESULTS_ROOT = Path('results')
+DEFAULT_RESULTS_ROOT = Path('reports')
 CORE_METRICS = (
 	'accuracy',
 	'balanced_accuracy',
@@ -216,7 +216,7 @@ def publish_f3_strat_hmm_m1_results(  # noqa: PLR0915
 	result: F3StratHMMM1ResultsResult,
 	publish_config: F3StratHMMM1PublishConfig | None,
 ) -> tuple[Path, ...]:
-	"""Publish lightweight M1 summary artifacts into ``results/``."""
+	"""Publish lightweight M1 summary artifacts into ``reports/``."""
 	if publish_config is None or not publish_config.enabled:
 		return ()
 	if publish_config.output_dir is None:

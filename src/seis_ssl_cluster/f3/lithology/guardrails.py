@@ -12,7 +12,7 @@ from pathlib import Path
 
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
-DEFAULT_RESULTS_ROOT = Path('results')
+DEFAULT_RESULTS_ROOT = Path('reports')
 F3_STRAT_HMM_M1_GUARDRAIL_SUITE_NAME = 'strat_hmm_m1_guardrails_v1'
 F3_STRAT_HMM_M1_BASELINE_MODEL_TAG = (
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
@@ -419,7 +419,7 @@ def publish_f3_strat_hmm_m1_guardrails(
 	summary_markdown: Path,
 	publish_config: F3GuardrailPublishConfig,
 ) -> tuple[Path, ...]:
-	"""Publish only lightweight guardrail summary formats into ``results/``."""
+	"""Publish only lightweight guardrail summary formats into ``reports/``."""
 	if not publish_config.enabled:
 		return ()
 	_validate_guardrail_publish_payload(summary_json)

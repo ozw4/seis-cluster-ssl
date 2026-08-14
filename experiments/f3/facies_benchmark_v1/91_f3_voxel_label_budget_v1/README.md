@@ -26,7 +26,7 @@ weights, and supervision geometry.
 read only as single seed-42 anchors and are never retrained or mixed into the
 five-seed paired means, medians, or win counts. Raw checkpoints, arrays,
 embeddings, label volumes, and predictions remain under the artifact root and
-are not published to `results/`.
+are not published to `reports/`.
 
 The scientific claim is limited to F3's original split and this fixed decoder.
 Six-split low-label evaluation is outside this milestone and may be selected
@@ -65,4 +65,4 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_voxel_label_budget.py \
 
 Only a complete 15-dataset / 45-job summary may publish the Markdown, JSON,
 CSV, and PNG review products to
-`results/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1/`.
+`reports/f3/facies_benchmark_v1/voxel_lithology_label_budget_v1/`.

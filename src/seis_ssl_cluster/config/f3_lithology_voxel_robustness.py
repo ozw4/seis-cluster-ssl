@@ -29,7 +29,7 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	validate_voxel_decoder_implementation,
 )
 
-DEFAULT_RESULTS_ROOT = Path('results')
+DEFAULT_RESULTS_ROOT = Path('reports')
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 BASELINE_MODEL_TAG = 'strat_hmm_pretext_m1_k6_topblock1_distill'
 CANDIDATE_MODEL_TAG = 'strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill'

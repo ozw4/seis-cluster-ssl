@@ -124,7 +124,7 @@ def test_xy_consensus_summary_publishes_only_portable_lightweight_files(
 	workspace = tmp_path / 'workspace'
 	artifact_root = workspace / 'artifacts' / 'seis_ssl_cluster'
 	reports = artifact_root / 'reports'
-	results_root = workspace / 'results'
+	results_root = workspace / 'reports'
 	audit_path = artifact_root / 'preflight' / 'audit.json'
 	audit_path.parent.mkdir(parents=True)
 	audit_path.write_text(json.dumps(_audit()), encoding='utf-8')

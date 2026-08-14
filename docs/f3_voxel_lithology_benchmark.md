@@ -264,13 +264,13 @@ $MODEL_ROOT/voxel_reports/frozen_embedding_decoder_nearest_voxel_ln_v1/     V1 r
 $ROOT/lithology/f3/facies_benchmark_v1/reports/voxel_benchmark_v1/
 $ROOT/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1/
   v1/frozen_embedding_decoder_nearest_voxel_ln_v1/split=<SPLIT>/model=<MODEL_TAG>/
-results/f3/facies_benchmark_v1/voxel_lithology_benchmark_v1/
+reports/f3/facies_benchmark_v1/voxel_lithology_benchmark_v1/
 ```
 
 Prediction artifacts contain labels, confidence, a valid mask, metadata, and
 optionally probabilities. Evaluation artifacts include overall, boundary,
 per-slice, and per-trace metrics. Complete local arrays and checkpoints stay in
-`artifacts/`; only selected review files enter `results/`.
+`artifacts/`; only selected review files enter `reports/`.
 
 Training writes `latest.pt` after each epoch for exact continuation and
 `best.pt` for inference. Resume a standalone full run with:

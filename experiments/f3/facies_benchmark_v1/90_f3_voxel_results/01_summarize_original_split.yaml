@@ -1,7 +1,7 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
   f3_root: /home/dcuser/data/public_data/field/F3
-  results_root: results
+  results_root: reports
 runs:
   mae:
     v0: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x16/png_slices_segy_labels_v1/voxel_evaluations/token_projection_nearest_v1
@@ -17,6 +17,6 @@ outputs:
   overwrite: false
 publish:
   enabled: false
-  output_dir: results/f3/facies_benchmark_v1/voxel_lithology_benchmark_v1
+  output_dir: reports/f3/facies_benchmark_v1/voxel_lithology_benchmark_v1
   max_file_size_mb: 10
   overwrite: true

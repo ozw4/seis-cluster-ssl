@@ -16,7 +16,7 @@ def _config() -> dict[str, object]:
 		'paths': {
 			'artifact_root': root,
 			'migration_root': f'{root}/migration_validation/f3/main_test',
-			'publish_root': '/workspace/results/f3/performance_migration_validation',
+			'publish_root': '/workspace/reports/f3/performance_migration_validation',
 		},
 		'migration': {
 			'current_git_sha': 'a' * 40,

@@ -269,7 +269,7 @@ def test_f3_inspection_configs_resolve_common_contract(
 	if stage == STAGE_F3_INSPECTION_REPORT:
 		assert raw['publish'] == {
 			'enabled': True,
-			'output_dir': 'results/f3/facies_benchmark_v1/inspection',
+			'output_dir': 'reports/f3/facies_benchmark_v1/inspection',
 			'include_figures': True,
 			'max_file_size_mb': 10,
 		}

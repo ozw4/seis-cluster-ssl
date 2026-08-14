@@ -41,7 +41,7 @@ Do not write this workflow under `runs/`.
 
 `artifacts/` is local generated output and is not tracked by Git. For GitHub
 review, copy only lightweight lithology probe reports, metrics, comparison
-tables, and representative figures to `results/f3/facies_benchmark_v1/`; do
+tables, and representative figures to `reports/f3/facies_benchmark_v1/`; do
 not commit checkpoints, embeddings, probe models, `.npy`, `.npz`, `.joblib`,
 path lists, normalization statistics, raw SEGY, or full visualization dumps.
 
@@ -176,7 +176,7 @@ lithology report:
   $ROOT/lithology/f3/facies_benchmark_v1/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/reports/$PROBE_SPEC
 
 results:
-  results/f3/facies_benchmark_v1/lithology_probe/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/$PROBE_SPEC
+  reports/f3/facies_benchmark_v1/lithology_probe/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/$PROBE_SPEC
 ```
 
 ## Baseline Comparison
@@ -247,7 +247,7 @@ $ROOT/lithology/f3/facies_benchmark_v1/reports/baseline_comparison/
 ```
 
 A lightweight shared copy, when needed, belongs under
-`results/f3/facies_benchmark_v1/baseline_comparison/`. The checked-in
+`reports/f3/facies_benchmark_v1/baseline_comparison/`. The checked-in
 comparison config publishes this copy through its `publish` block. Review the
 producer-owned file set and `git diff` before committing it.
 

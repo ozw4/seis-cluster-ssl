@@ -399,7 +399,7 @@ def test_m2a_publish_wrapper_enforces_exact_allowlist_and_size_guard(
 ) -> None:
 	pytest.importorskip('matplotlib').use('Agg', force=True)
 	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
-	publish_root = tmp_path / 'results'
+	publish_root = tmp_path / 'reports'
 	monkeypatch.setattr(m2_results, 'DEFAULT_RESULTS_ROOT', publish_root)
 	publish_config = F3StratHMMM2PublishConfig(
 		enabled=True,
@@ -438,7 +438,7 @@ def test_m2a_publish_include_figures_false_keeps_lightweight_contract(
 ) -> None:
 	pytest.importorskip('matplotlib').use('Agg', force=True)
 	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	published = publish_f3_strat_hmm_m2_results(
 		result,
@@ -466,7 +466,7 @@ def test_m2a_publish_rejects_missing_required_source_before_writing(
 	pytest.importorskip('matplotlib').use('Agg', force=True)
 	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
 	result.table_paths[-1].unlink()
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	with pytest.raises(FileNotFoundError, match='regular file'):
 		publish_f3_strat_hmm_m2_results(
@@ -484,7 +484,7 @@ def test_m2a_publish_rejects_source_symlink_before_writing(tmp_path: Path) -> No
 	symlink.parent.mkdir()
 	symlink.symlink_to(result.table_paths[-1])
 	result = replace(result, table_paths=(*result.table_paths[:-1], symlink))
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	with pytest.raises(FileNotFoundError, match='regular file'):
 		publish_f3_strat_hmm_m2_results(
@@ -502,7 +502,7 @@ def test_m2a_publish_rejects_unsafe_target_before_writing(
 ) -> None:
 	pytest.importorskip('matplotlib').use('Agg', force=True)
 	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	unsafe_target = output_dir / 'tables' / m2_results.MONITORED_CLASS_TABLE
 	unsafe_target.parent.mkdir(parents=True)
 	if target_kind == 'symlink':
@@ -532,7 +532,7 @@ def test_m2a_publish_rejects_unsafe_output_dir_before_writing(
 	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
 	outside = tmp_path / 'outside'
 	outside.mkdir()
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	if output_kind == 'symlink':
 		output_dir.symlink_to(outside, target_is_directory=True)
 	else:
@@ -555,7 +555,7 @@ def test_m2a_publish_rejects_unsafe_table_parent_before_writing(
 ) -> None:
 	pytest.importorskip('matplotlib').use('Agg', force=True)
 	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 	output_dir.mkdir()
 	tables_dir = output_dir / 'tables'
 	outside = tmp_path / 'outside'
@@ -599,7 +599,7 @@ def test_m2a_publish_rejects_source_target_collision_without_writing(
 def test_m2a_publish_rejects_size_before_writing(tmp_path: Path) -> None:
 	pytest.importorskip('matplotlib').use('Agg', force=True)
 	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
-	output_dir = tmp_path / 'results'
+	output_dir = tmp_path / 'reports'
 
 	with pytest.raises(ValueError, match='exceeds max_file_size_bytes'):
 		publish_f3_strat_hmm_m2_results(

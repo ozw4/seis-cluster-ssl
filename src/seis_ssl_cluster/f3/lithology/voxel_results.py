@@ -27,7 +27,7 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
-DEFAULT_RESULTS_ROOT = Path('results')
+DEFAULT_RESULTS_ROOT = Path('reports')
 REQUIRED_MODELS = ('MAE', 'M1', 'M2-A')
 REQUIRED_VERSIONS = ('V0', 'V1')
 EXPECTED_MODEL_TAGS = {

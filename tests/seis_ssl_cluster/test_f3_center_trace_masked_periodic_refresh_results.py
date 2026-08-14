@@ -24,7 +24,7 @@ def _config(tmp_path: Path) -> results.F3CenterTraceMaskedPeriodicRefreshReviewC
 		workspace_root=workspace_root,
 		validation_config=validation_config,
 		pretraining_handoff=handoff,
-		output_dir=workspace_root / 'results',
+		output_dir=workspace_root / 'reports',
 	)
 
 
@@ -187,7 +187,7 @@ def test_publication_rejects_raw_output_and_explicitly_quarantines_it(
 		live=live,
 		quarantine_invalid=True,
 	)
-	quarantined = list(config.output_dir.parent.glob('results.quarantine.*'))
+	quarantined = list(config.output_dir.parent.glob('reports.quarantine.*'))
 	assert len(quarantined) == 1
 	assert (quarantined[0] / 'checkpoint.pt').read_bytes() == b'raw'
 	assert (config.output_dir / results.SUMMARY_JSON).is_file()
@@ -217,7 +217,7 @@ def test_publication_failure_does_not_leave_canonical_partial_tree(
 		)
 
 	assert not config.output_dir.exists()
-	assert list(config.output_dir.parent.glob('.results.staging-*')) == []
+	assert list(config.output_dir.parent.glob('.reports.staging-*')) == []
 
 
 def test_portable_value_removes_local_artifact_and_workspace_roots(
@@ -227,12 +227,12 @@ def test_portable_value_removes_local_artifact_and_workspace_roots(
 	assert results._portable_value(
 		{
 			'artifact': config.artifact_root / 'pretraining' / 'latest.pt',
-			'workspace': config.workspace_root / 'results' / 'summary.json',
+			'workspace': config.workspace_root / 'reports' / 'summary.json',
 			'hash': 'a' * 64,
 		},
 		config=config,
 	) == {
 		'artifact': '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/latest.pt',
-		'workspace': 'results/summary.json',
+		'workspace': 'reports/summary.json',
 		'hash': 'a' * 64,
 	}

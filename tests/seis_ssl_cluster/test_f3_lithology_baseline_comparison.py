@@ -278,7 +278,7 @@ def test_f3_lithology_baseline_comparison_writes_table_report_and_figures(
 		per_class_f1={'3': 0.19, '5': 0.33},
 	)
 	output_dir = _comparison_output_dir(tmp_path)
-	publish_dir = tmp_path / 'results' / 'baseline_comparison'
+	publish_dir = tmp_path / 'reports' / 'baseline_comparison'
 	output_dir.mkdir(parents=True, exist_ok=True)
 	_write_json(output_dir / 'comparison_table.json', {'rows': []})
 	(output_dir / 'encoder.pt').write_bytes(b'heavy')
@@ -456,7 +456,7 @@ def test_f3_lithology_baseline_comparison_publish_warns_for_missing_optional_fig
 	tmp_path: Path,
 ) -> None:
 	output_dir = tmp_path / 'artifacts' / 'comparison'
-	publish_dir = tmp_path / 'results' / 'comparison'
+	publish_dir = tmp_path / 'reports' / 'comparison'
 	output_dir.mkdir(parents=True)
 	(output_dir / 'comparison_report.md').write_text('# report\n', encoding='utf-8')
 	(output_dir / 'comparison_table.csv').write_text(
@@ -490,7 +490,7 @@ def test_f3_lithology_baseline_comparison_publish_can_exclude_figures(
 	tmp_path: Path,
 ) -> None:
 	output_dir = tmp_path / 'artifacts' / 'comparison'
-	publish_dir = tmp_path / 'results' / 'comparison'
+	publish_dir = tmp_path / 'reports' / 'comparison'
 	figures_dir = output_dir / 'figures'
 	figures_dir.mkdir(parents=True)
 	(output_dir / 'comparison_report.md').write_text('# report\n', encoding='utf-8')
@@ -611,7 +611,7 @@ def test_f3_lithology_baseline_comparison_publish_requires_comparison_table(
 			),
 			F3LithologyComparisonPublishConfig(
 				enabled=True,
-				output_dir=tmp_path / 'results' / 'comparison',
+				output_dir=tmp_path / 'reports' / 'comparison',
 			),
 		)
 
@@ -715,7 +715,7 @@ comparison:
   figure_dpi: 300
 publish:
   enabled: true
-  output_dir: {tmp_path / 'results' / 'baseline_comparison'}
+  output_dir: {tmp_path / 'reports' / 'baseline_comparison'}
   include_figures: true
   max_file_size_mb: 10
 """.lstrip(),
@@ -745,7 +745,7 @@ publish:
 	assert str(old_output_dir) not in result.stdout
 	assert 'comparison.figure_dpi: 300' in result.stdout
 	assert 'publish.enabled: True' in result.stdout
-	assert f"publish.output_dir: {tmp_path / 'results' / 'baseline_comparison'}" in (
+	assert f"publish.output_dir: {tmp_path / 'reports' / 'baseline_comparison'}" in (
 		result.stdout
 	)
 	assert 'publish.include_figures: True' in result.stdout

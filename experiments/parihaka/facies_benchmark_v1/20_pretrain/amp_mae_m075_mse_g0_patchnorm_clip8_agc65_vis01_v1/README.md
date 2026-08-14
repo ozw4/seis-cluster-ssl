@@ -42,7 +42,7 @@ python proc/seis_ssl_cluster/summarize_parihaka_mae.py \
   --prepare-config "$EXP/10_prepare/01_prepare_parihaka_volume.yaml" \
   --full-config "$PRETRAIN/02_full_100ep.yaml" \
   --output-dir \
-    results/parihaka/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
+    reports/parihaka/facies_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
 ```
 
 The smoke and full resolved configs may differ only at these fields:

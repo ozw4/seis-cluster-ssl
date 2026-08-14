@@ -247,7 +247,7 @@ def _paths(tmp_path: Path) -> dict[str, Path]:
 	workspace_root = tmp_path / 'workspace'
 	artifact_root = workspace_root / 'artifacts' / 'seis_ssl_cluster'
 	artifact_root.mkdir(parents=True)
-	workspace_root.joinpath('results').mkdir()
+	workspace_root.joinpath('reports').mkdir()
 	return {
 		'workspace_root': workspace_root,
 		'artifact_root': artifact_root,
@@ -255,7 +255,7 @@ def _paths(tmp_path: Path) -> dict[str, Path]:
 		'calibration_report': artifact_root / 'm5_ls' / 'report.json',
 		'output_dir': (
 			workspace_root
-			/ 'results/f3/facies_benchmark_v1/'
+			/ 'reports/f3/facies_benchmark_v1/'
 			'strat_hmm_multi_head_k6810_lateral_smoothing_v1'
 		),
 	}

@@ -3,7 +3,7 @@
 The publisher deliberately consumes the complete periodic-refresh handoff and
 revalidates every live checkpoint, generation, event, and embedding reference
 before writing review files.  It never copies binary or array artifacts into
-``results/``.
+``reports/``.
 """
 # ruff: noqa: E501, PERF401
 

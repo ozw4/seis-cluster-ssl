@@ -103,7 +103,7 @@ def test_soft_posterior_summarizer_publishes_portable_paths(
 	workspace_root = tmp_path / 'workspace'
 	artifact_root = workspace_root / 'artifacts' / 'seis_ssl_cluster'
 	reports_dir = artifact_root / 'reports'
-	results_root = workspace_root / 'results'
+	results_root = workspace_root / 'reports'
 	config = SimpleNamespace(
 		reports_dir=reports_dir,
 		base=SimpleNamespace(
@@ -158,7 +158,7 @@ def test_soft_posterior_summarizer_publishes_portable_paths(
 def test_committed_soft_posterior_results_are_portable_and_valid() -> None:
 	"""Keep published M5-U results portable and complete."""
 	repository_root = Path(__file__).resolve().parents[2]
-	results_dir = repository_root / 'results' / RESULTS_RELATIVE_ROOT
+	results_dir = repository_root / 'reports' / RESULTS_RELATIVE_ROOT
 	assert {path.name for path in results_dir.iterdir()} >= set(REQUIRED_RESULT_FILES)
 
 	texts = {

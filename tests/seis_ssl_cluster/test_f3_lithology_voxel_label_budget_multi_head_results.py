@@ -802,7 +802,7 @@ def test_published_original_handoff_matches_current_renderer() -> None:
 	repository_root = Path(__file__).resolve().parents[2]
 	publish_dir = (
 		repository_root
-		/ 'results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
+		/ 'reports/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
 	)
 	decisions = json.loads(
 		(publish_dir / 'multi_head_decisions.json').read_text(encoding='utf-8')
@@ -991,11 +991,11 @@ def test_historical_blocked_preflight_archive_is_noncanonical() -> None:
 	repository_root = Path(__file__).resolve().parents[2]
 	canonical_root = (
 		repository_root
-		/ 'results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
+		/ 'reports/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1'
 	)
 	archive_root = (
 		repository_root
-		/ 'results/f3/facies_benchmark_v1/'
+		/ 'reports/f3/facies_benchmark_v1/'
 		'strat_hmm_multi_head_k6810_v1_historical_preflight_20260720'
 	)
 
@@ -1023,7 +1023,7 @@ def test_historical_blocked_preflight_archive_is_noncanonical() -> None:
 def _publish_config(tmp_path: Path) -> SimpleNamespace:
 	return SimpleNamespace(
 		reports_dir=tmp_path / 'artifacts' / 'reports',
-		results_root=tmp_path / 'results',
+		results_root=tmp_path / 'reports',
 		candidates=(),
 		budgets=(),
 		subsample_seeds=(),

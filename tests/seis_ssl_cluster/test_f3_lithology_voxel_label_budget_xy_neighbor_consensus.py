@@ -268,7 +268,7 @@ def _closed_config_fixture(
 	)
 	artifact_root = (tmp_path / 'artifacts').resolve()
 	f3_root = (tmp_path / 'f3').resolve()
-	results_root = (tmp_path / 'results').resolve()
+	results_root = (tmp_path / 'reports').resolve()
 	hard['paths'] = {
 		'artifact_root': str(artifact_root),
 		'f3_root': str(f3_root),

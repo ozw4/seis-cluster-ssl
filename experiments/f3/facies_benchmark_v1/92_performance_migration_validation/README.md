@@ -45,7 +45,7 @@ ordered transition/path-prior configuration, and seed 42. It writes only to
 the migration root. The pseudo-target export is legacy-compatible schema v1:
 no boundary-weight field is emitted for M1.
 
-`results/f3/facies_benchmark_v1/performance_migration_validation/` receives
+`reports/f3/facies_benchmark_v1/performance_migration_validation/` receives
 only the completed Markdown, JSON, CSV, small PNG files, and README.
 Checkpoints, arrays, joblib objects, embeddings, clustering labels,
 pseudo-target arrays, prepared-feature caches, temporary directories, and

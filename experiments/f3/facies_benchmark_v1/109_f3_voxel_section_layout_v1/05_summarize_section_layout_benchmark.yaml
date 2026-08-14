@@ -6,4 +6,4 @@ references:
   section_layout_dataset_manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_section_layout_v1/datasets_v1/section_layout_dataset_manifest.json
 outputs:
   benchmark_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v1/voxel_section_layout_v1/benchmark_v1
-  final_results_dir: ${SEIS_SSL_CLUSTER_WORKSPACE}/results/f3/facies_benchmark_v1/voxel_section_layout_v1
+  final_results_dir: ${SEIS_SSL_CLUSTER_WORKSPACE}/reports/f3/facies_benchmark_v1/voxel_section_layout_v1

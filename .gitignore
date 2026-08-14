@@ -36,7 +36,6 @@ data/
 !src/seis_ssl_cluster/data/**/
 !src/seis_ssl_cluster/data/*.py
 !src/seis_ssl_cluster/data/**/*.py
-result/
 tmp_code/
 debug_*/
 

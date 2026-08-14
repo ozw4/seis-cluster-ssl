@@ -168,7 +168,7 @@ def test_voxel_publish_excludes_raw_volume_and_enforces_size_guard(
 				config,
 				publish=replace(
 					config.publish,
-					output_dir=tmp_path / 'results' / 'too-small',
+					output_dir=tmp_path / 'reports' / 'too-small',
 					max_file_size_bytes=2,
 				),
 			),
@@ -212,7 +212,7 @@ def test_voxel_publish_default_dir_uses_versioned_prediction_spec(
 
 	expected_output_dir = (
 		tmp_path
-		/ 'results'
+		/ 'reports'
 		/ 'f3'
 		/ 'test'
 		/ 'voxel_lithology'
@@ -226,7 +226,7 @@ def test_voxel_publish_default_dir_uses_versioned_prediction_spec(
 def test_voxel_publish_preserves_explicit_output_dir(tmp_path: Path) -> None:
 	config = F3LithologyVoxelPublishConfig(
 		enabled=True,
-		results_root=tmp_path / 'results',
+		results_root=tmp_path / 'reports',
 		output_dir=tmp_path / 'outside-results',
 	)
 	assert config.output_dir == tmp_path / 'outside-results'
@@ -490,8 +490,8 @@ def _publish_config(
 		dataset={'name': 'f3', 'version': 'test'},
 		publish=F3LithologyVoxelPublishConfig(
 			enabled=True,
-			results_root=tmp_path / 'results',
-			output_dir=tmp_path / 'results' / 'published',
+			results_root=tmp_path / 'reports',
+			output_dir=tmp_path / 'reports' / 'published',
 		),
 	)
 
@@ -579,7 +579,7 @@ def _evaluated_report_job(
 		'paths': {
 			'artifact_root': str(evaluation_config.artifact_root),
 			'f3_root': str(evaluation_config.f3_root),
-			'results_root': str(tmp_path / 'results'),
+			'results_root': str(tmp_path / 'reports'),
 		},
 		'dataset': dict(evaluation_config.dataset),
 		'labels': {

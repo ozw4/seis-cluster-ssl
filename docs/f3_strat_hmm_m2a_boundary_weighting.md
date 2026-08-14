@@ -47,7 +47,7 @@ Expected artifact roots are:
 - full probe/report: `/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill/overlap_x16/png_slices_segy_labels_v1/`
 - label budget: `/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/label_budget_m2a_boundary_vs_m1_v1/`
 - split/index: `/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/robustness/split_index_m2a_boundary_vs_m1_v1/`
-- final summary: `/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/`, published to `results/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary/`.
+- final summary: `/workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/reports/strat_hmm_m2a_results/`, published to `reports/f3/facies_benchmark_v1/strat_hmm_pretext_m2a_boundary/`.
 
 The detailed alpha0 array-equality check is in the experiment
 [README](../experiments/f3/facies_benchmark_v1/84_strat_hmm_pretraining_m2a_boundary/README.md).
@@ -78,7 +78,7 @@ PYTHONPATH=src python proc/seis_ssl_cluster/summarize_f3_strat_hmm_m1_guardrails
 ```
 
 The default publish destination is
-`results/f3/facies_benchmark_v1/strat_hmm_m1_guardrails/`; only Markdown, JSON,
+`reports/f3/facies_benchmark_v1/strat_hmm_m1_guardrails/`; only Markdown, JSON,
 CSV, and PNG are allowed. This repository does not contain the full external
 guardrail artifacts, so no guardrail summary has been fabricated or published.
 

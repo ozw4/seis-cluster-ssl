@@ -67,8 +67,8 @@ Outputs:
 inspection:
   $ROOT/inspection/f3/facies_benchmark_v1
 
-results:
-  results/f3/facies_benchmark_v1/inspection
+reports:
+  reports/f3/facies_benchmark_v1/inspection
 ```
 
 See [docs/f3_facies_benchmark_inspection.md](../../../docs/f3_facies_benchmark_inspection.md)

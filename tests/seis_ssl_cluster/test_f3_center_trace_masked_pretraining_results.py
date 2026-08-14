@@ -176,7 +176,7 @@ def test_portable_review_paths_preserve_hashes_without_local_roots(
 			'artifact_root': artifact_root,
 			'artifact_child': artifact_root / 'pretraining' / 'metrics.csv',
 			'workspace_root': workspace_root,
-			'workspace_child': workspace_root / 'results' / 'summary.json',
+			'workspace_child': workspace_root / 'reports' / 'summary.json',
 			'sha256': digest,
 			'foreign': foreign,
 		},
@@ -186,7 +186,7 @@ def test_portable_review_paths_preserve_hashes_without_local_roots(
 		'artifact_root': '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}',
 		'artifact_child': '${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/metrics.csv',
 		'workspace_root': '.',
-		'workspace_child': 'results/summary.json',
+		'workspace_child': 'reports/summary.json',
 		'sha256': digest,
 		'foreign': str(foreign),
 	}

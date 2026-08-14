@@ -149,7 +149,7 @@ lithology report:
   $ROOT/lithology/f3/facies_benchmark_v1/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/reports/$PROBE_SPEC
 
 results:
-  results/f3/facies_benchmark_v1/lithology_probe/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/$PROBE_SPEC
+  reports/f3/facies_benchmark_v1/lithology_probe/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/$PROBE_SPEC
 ```
 
 `03_train_mlp_probe.yaml` is reserved for a lightweight MLP comparison after
@@ -184,7 +184,7 @@ python proc/seis_ssl_cluster/train_f3_lithology_probe.py \
 ```
 
 Then regenerate the comparison report. The comparison config publishes selected
-lightweight outputs to `results/f3/facies_benchmark_v1/baseline_comparison/`.
+lightweight outputs to `reports/f3/facies_benchmark_v1/baseline_comparison/`.
 Review the explicit published file set and `git diff` before committing it.
 
 ```bash
@@ -199,7 +199,7 @@ comparison report:
   $ROOT/lithology/f3/facies_benchmark_v1/reports/baseline_comparison
 
 results:
-  results/f3/facies_benchmark_v1/baseline_comparison
+  reports/f3/facies_benchmark_v1/baseline_comparison
 ```
 
 ## Figure Contract

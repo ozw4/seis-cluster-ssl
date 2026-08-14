@@ -25,7 +25,7 @@ def test_periodic_refresh_publishes_only_explicit_lightweight_files(
 	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
 	reports = tmp_path / 'artifacts/reports'
-	results_root = tmp_path / 'results'
+	results_root = tmp_path / 'reports'
 	config = SimpleNamespace(
 		reports_dir=reports,
 		base=SimpleNamespace(

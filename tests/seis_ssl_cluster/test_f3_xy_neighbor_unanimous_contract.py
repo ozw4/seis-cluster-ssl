@@ -286,7 +286,7 @@ def test_review_publishes_portable_evidence(
 			'target_manifest': str(target_path),
 			'target_audit': str(audit_path),
 			'pretraining_handoff': str(handoff_path),
-			'output_dir': str(workspace / 'results/f3/unanimous'),
+			'output_dir': str(workspace / 'reports/f3/unanimous'),
 		}
 	)
 	target = _target_manifest(artifact_root / 'source.json')

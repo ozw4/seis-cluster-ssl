@@ -106,5 +106,5 @@ python proc/seis_ssl_cluster/build_f3_lithology_report.py \
 Embedding extraction uses the M2-A full-run `best.pt` and the same
 `overlap_x16` geometry as M1. The token dataset, balanced linear probe, scaler,
 class weighting, and random seed are unchanged from M1. Checkpoints and NumPy
-artifacts remain under `/workspace/artifacts/seis_ssl_cluster`; `results/`
+artifacts remain under `/workspace/artifacts/seis_ssl_cluster`; `reports/`
 receives only the bounded lithology report publication.

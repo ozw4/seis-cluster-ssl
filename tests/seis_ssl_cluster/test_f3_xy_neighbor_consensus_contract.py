@@ -556,7 +556,7 @@ def _paths(tmp_path: Path) -> dict[str, Path]:
 		'hard': artifact_root / 'hard.json',
 		'target': artifact_root / 'targets.json',
 		'handoff': handoff,
-		'output_dir': workspace_root / 'results/f3/xy-neighbor-consensus',
+		'output_dir': workspace_root / 'reports/f3/xy-neighbor-consensus',
 	}
 
 

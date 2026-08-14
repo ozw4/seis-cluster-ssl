@@ -106,13 +106,13 @@ def test_publish_overwrite_false_preflights_late_target_conflict(
 	config = _fixture(tmp_path)
 	_patch_synthetic_completion_validators(monkeypatch)
 	result = summarize_f3_lithology_voxel_label_budget_results(config)
-	publish_root = tmp_path / 'results' / 'f3' / 'low_label'
+	publish_root = tmp_path / 'reports' / 'f3' / 'low_label'
 	late_target = publish_root / 'tables' / TABLE_NAMES[-1]
 	late_target.parent.mkdir(parents=True)
 	late_target.write_bytes(b'historical table\n')
 	publish_config = F3VoxelLabelBudgetResultsPublishConfig(
 		enabled=True,
-		results_root=tmp_path / 'results',
+		results_root=tmp_path / 'reports',
 		output_dir=publish_root,
 		overwrite=False,
 	)
@@ -453,7 +453,7 @@ def _fixture(
 			grid_identity=_identity(anchor_grid),
 		)
 		anchors[role] = root
-	results_root = tmp_path / 'results'
+	results_root = tmp_path / 'reports'
 	return F3VoxelLabelBudgetResultsConfig(
 		artifact_root=artifact_root,
 		suite_root=suite_root,
@@ -845,7 +845,7 @@ def _write_evaluation(  # noqa: PLR0913
 def _raw_config(tmp_path: Path) -> dict[str, object]:
 	artifact_root = tmp_path / 'artifacts'
 	suite_root = artifact_root / 'voxel_label_budget'
-	results_root = tmp_path / 'results'
+	results_root = tmp_path / 'reports'
 	return {
 		'paths': {
 			'artifact_root': str(artifact_root),

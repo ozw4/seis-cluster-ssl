@@ -301,12 +301,12 @@ def test_m2a_decision_monitored_class_gate_independently_forces_hold(
 
 def test_publish_uses_exact_lightweight_allowlist(tmp_path: Path) -> None:
 	config = _fixture(tmp_path, mode='positive')
-	publish_dir = tmp_path / 'results' / 'f3' / 'voxel'
+	publish_dir = tmp_path / 'reports' / 'f3' / 'voxel'
 	config = replace(
 		config,
 		publish=F3LithologyVoxelResultsPublishConfig(
 			enabled=True,
-			results_root=tmp_path / 'results',
+			results_root=tmp_path / 'reports',
 			output_dir=publish_dir,
 		),
 	)

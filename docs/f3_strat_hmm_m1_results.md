@@ -31,12 +31,12 @@ tables/
 
 ## Publish
 
-The summary config can publish lightweight review files into `results/`:
+The summary config can publish lightweight review files into `reports/`:
 
 ```yaml
 publish:
   enabled: true
-  output_dir: results/f3/facies_benchmark_v1/strat_hmm_pretext_m1
+  output_dir: reports/f3/facies_benchmark_v1/strat_hmm_pretext_m1
   include_figures: true
   max_file_size_mb: 10
 ```
@@ -48,7 +48,7 @@ refuses files larger than `publish.max_file_size_mb`.
 Expected review files:
 
 ```text
-results/f3/facies_benchmark_v1/strat_hmm_pretext_m1/
+reports/f3/facies_benchmark_v1/strat_hmm_pretext_m1/
   m1_results_summary.md
   m1_results_summary.json
   figures/label_budget_delta_curves.png

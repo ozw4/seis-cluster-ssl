@@ -96,7 +96,7 @@ class F3VoxelLabelBudgetControlPublishConfig:
 	overwrite: bool
 
 	def __post_init__(self) -> None:
-		"""Keep publishable files below the repository results root."""
+		"""Keep publishable files below the repository reports root."""
 		if self.max_file_size_bytes <= 0:
 			raise ValueError('publish.max_file_size_bytes must be positive')
 

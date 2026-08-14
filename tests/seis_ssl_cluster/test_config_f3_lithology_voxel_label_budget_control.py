@@ -117,7 +117,7 @@ def test_decoder_seed_rejects_unconfigured_subsample_seed(tmp_path: Path) -> Non
 def _mapping(tmp_path: Path) -> dict[str, object]:
 	artifact_root = tmp_path / 'artifacts'
 	f3_root = tmp_path / 'f3'
-	results_root = tmp_path / 'results'
+	results_root = tmp_path / 'reports'
 	return {
 		'paths': {
 			'artifact_root': str(artifact_root),

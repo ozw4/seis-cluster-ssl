@@ -5,7 +5,7 @@ This directory is for lightweight F3 artifacts shared through GitHub.
 Recommended layout:
 
 ```text
-results/f3/
+reports/f3/
 └── facies_benchmark_v1/
     ├── inspection/
     ├── lithology_probe/

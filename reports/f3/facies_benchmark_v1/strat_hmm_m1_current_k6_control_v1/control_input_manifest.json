@@ -109,7 +109,7 @@
   "migration": {
     "decision": {
       "decision_current_git_sha": "332478be21a021e46ee6c1d9423f14859b0cd819",
-      "path": "results/f3/facies_benchmark_v1/performance_migration_validation/performance_migration_decision.json",
+      "path": "reports/f3/facies_benchmark_v1/performance_migration_validation/performance_migration_decision.json",
       "required_rerun_scope": "no historical rerun; add a future current-code K=6 control",
       "sha256": "f740cadf505913fd04414642fae61c5add5e6856aaf79f9627ffc25883a50b3d",
       "status": "PASS_WITH_NUMERIC_DRIFT"

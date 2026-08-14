@@ -31,14 +31,14 @@ This directory contains runbooks and configuration contracts for
 experiment, training, embedding, clustering, and visualization outputs should
 continue to use `/workspace/artifacts/seis_ssl_cluster/`.
 
-`results/` is the repository-managed area for lightweight GitHub review
+`reports/` is the repository-managed area for lightweight GitHub review
 artifacts. Keep only selected Markdown, JSON, CSV, and representative figures
 there. Do not commit checkpoints, embeddings, clustering models, raw arrays,
 prediction volumes, or raw SEGY files.
 
 Each producer owns its explicit lightweight result file set. Verify that set in
 focused tests and inspect `git diff` during review. See
-[results_sharing_policy.md](results_sharing_policy.md) for the repository policy.
+[report_sharing_policy.md](report_sharing_policy.md) for the repository policy.
 
 ## Test Selection
 

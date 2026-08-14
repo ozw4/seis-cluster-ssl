@@ -424,7 +424,7 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 	first_metrics.write_bytes(metrics_bytes)
 	original = tmp_path / 'original'
 	_write_original_summary_bundle(tmp_path / 'original-runs', original)
-	publish_dir = tmp_path / 'results' / 'voxel'
+	publish_dir = tmp_path / 'reports' / 'voxel'
 	published = summarize_f3_lithology_voxel_split_robustness(
 		F3VoxelSplitRobustnessSummaryConfig(
 			suite_root=tmp_path / 'published-suite',
@@ -435,7 +435,7 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 			original_summary_dir=original,
 			publish=F3VoxelSplitRobustnessPublishConfig(
 				enabled=True,
-				results_root=tmp_path / 'results',
+				results_root=tmp_path / 'reports',
 				output_dir=publish_dir,
 			),
 		)
@@ -514,8 +514,8 @@ def test_publish_rejects_corrupt_original_summary_bundle(tmp_path: Path) -> None
 		original_summary_dir=original,
 		publish=F3VoxelSplitRobustnessPublishConfig(
 			enabled=True,
-			results_root=tmp_path / 'results',
-			output_dir=tmp_path / 'results' / 'voxel',
+			results_root=tmp_path / 'reports',
+			output_dir=tmp_path / 'reports' / 'voxel',
 		),
 	)
 

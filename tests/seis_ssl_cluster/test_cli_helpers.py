@@ -127,7 +127,7 @@ def test_build_config_parser_can_leave_config_optional() -> None:
 
 def test_generic_argument_helpers_preserve_option_shapes() -> None:
 	parser = argparse.ArgumentParser()
-	add_path_argument(parser, '--root', default=Path('results'), help_text='Root.')
+	add_path_argument(parser, '--root', default=Path('reports'), help_text='Root.')
 	add_append_path_argument(
 		parser,
 		'--required-file',

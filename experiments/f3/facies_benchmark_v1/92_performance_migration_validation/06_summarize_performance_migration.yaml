@@ -1,7 +1,7 @@
 paths:
   artifact_root: /workspace/artifacts/seis_ssl_cluster
   migration_root: /workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be
-  publish_root: /workspace/results/f3/facies_benchmark_v1/performance_migration_validation
+  publish_root: /workspace/reports/f3/facies_benchmark_v1/performance_migration_validation
 
 migration:
   current_git_sha: 332478be21a021e46ee6c1d9423f14859b0cd819

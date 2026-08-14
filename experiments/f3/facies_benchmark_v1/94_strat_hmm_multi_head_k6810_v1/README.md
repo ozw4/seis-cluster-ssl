@@ -150,5 +150,5 @@ starting a fresh job.
 - Next milestone: M5-U posterior-aware soft multi-resolution HMM pretraining.
 
 The 2026-07-20 blocked preflight is a historical archive only, retained under
-`results/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1_historical_preflight_20260720/`.
+`reports/f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_v1_historical_preflight_20260720/`.
 It is not the current execution status.

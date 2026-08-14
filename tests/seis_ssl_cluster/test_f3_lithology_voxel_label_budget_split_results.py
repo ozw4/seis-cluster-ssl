@@ -110,7 +110,7 @@ def test_summary_publish_writes_and_validates_exact_lightweight_tree(
 	tmp_path: Path,
 ) -> None:
 	paths = write_low_label_split_summary(_rows(), tmp_path / 'artifacts')
-	config = SimpleNamespace(results_root=tmp_path / 'results')
+	config = SimpleNamespace(results_root=tmp_path / 'reports')
 	published_files = publish_low_label_split_summary(config, paths)
 	publish_dir = (
 		config.results_root
@@ -212,7 +212,7 @@ def test_handoff_carries_mh_nocons_without_requiring_extra_decoder_seeds(
 
 def test_summary_publish_rejects_noncanonical_existing_tree(tmp_path: Path) -> None:
 	paths = write_low_label_split_summary(_rows(), tmp_path / 'artifacts')
-	config = SimpleNamespace(results_root=tmp_path / 'results')
+	config = SimpleNamespace(results_root=tmp_path / 'reports')
 	publish_dir = (
 		config.results_root
 		/ 'f3/facies_benchmark_v1/strat_hmm_multi_head_k6810_six_split_v1'
@@ -227,7 +227,7 @@ def test_summary_publish_rejects_missing_required_source(
 	tmp_path: Path,
 ) -> None:
 	paths = write_low_label_split_summary(_rows(), tmp_path / 'artifacts')
-	config = SimpleNamespace(results_root=tmp_path / 'results')
+	config = SimpleNamespace(results_root=tmp_path / 'reports')
 	paths['paired_metrics'].unlink()
 	with pytest.raises(FileNotFoundError, match='required six-split publish source'):
 		publish_low_label_split_summary(config, paths)

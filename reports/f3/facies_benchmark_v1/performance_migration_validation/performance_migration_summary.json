@@ -19635,7 +19635,7 @@
         "experiments/nopims/pretrain_v1/20_embedding/amp_mae_m075_mse_g0_patchnorm_clip8_vis01_v1/01_ten_surveys_overlap_x16.yaml",
         "experiments/nopims/pretrain_v1/20_embedding/amp_mae_m085_mse_g0_patchnorm_clip8_agc65_vis01_v1/ten_surveys/overlap_x16.yaml",
         "proc/configs/seis_ssl_cluster/extract_embeddings.yaml",
-        "results/performance/issue_259_embedding_vectorization.md",
+        "reports/performance/issue_259_embedding_vectorization.md",
         "src/seis_ssl_cluster/clustering/__init__.py",
         "src/seis_ssl_cluster/clustering/features.py",
         "src/seis_ssl_cluster/clustering/kmeans.py",
@@ -20486,7 +20486,7 @@
     "paths": {
       "artifact_root": "/workspace/artifacts/seis_ssl_cluster",
       "migration_root": "/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be",
-      "publish_root": "/workspace/results/f3/facies_benchmark_v1/performance_migration_validation"
+      "publish_root": "/workspace/reports/f3/facies_benchmark_v1/performance_migration_validation"
     },
     "schema_version": 1,
     "stage": "preflight_inventory"

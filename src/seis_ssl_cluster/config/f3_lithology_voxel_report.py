@@ -20,7 +20,7 @@ from seis_ssl_cluster.f3.lithology.voxel_visualization import (
 	F3LithologyVoxelFigureConfig,
 )
 
-DEFAULT_RESULTS_ROOT = Path('results')
+DEFAULT_RESULTS_ROOT = Path('reports')
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 

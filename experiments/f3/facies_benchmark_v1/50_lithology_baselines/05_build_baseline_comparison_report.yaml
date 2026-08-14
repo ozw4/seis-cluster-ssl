@@ -22,6 +22,6 @@ comparison:
       per_class: [8.0, 4.2]
 publish:
   enabled: true
-  output_dir: results/f3/facies_benchmark_v1/baseline_comparison
+  output_dir: reports/f3/facies_benchmark_v1/baseline_comparison
   include_figures: true
   max_file_size_mb: 10

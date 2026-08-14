@@ -111,7 +111,7 @@ The repository does not track `artifacts/`; it may contain checkpoints,
 embeddings, models, path lists, normalization statistics, large arrays, and
 machine-specific absolute paths.
 
-Use `results/` only for lightweight artifacts intended for GitHub review, such
+Use `reports/` only for lightweight artifacts intended for GitHub review, such
 as selected reports, metrics, comparison tables, and representative figures.
 These files should be reproducible summaries, not raw data, checkpoints,
 embeddings, clustering models, full visualization dumps, or path lists.
@@ -167,7 +167,7 @@ Each config's explicit input and output fields are the source of truth. Runtime
 validation requires output paths to be absolute and keeps generated outputs out
 of configured raw-data roots, but it does not enforce the recommended hierarchy.
 Publishing a report to the repository should copy only the selected lightweight
-outputs into `results/`. Keep large local artifacts outside the repository.
+outputs into `reports/`. Keep large local artifacts outside the repository.
 
 ## Quick start
 

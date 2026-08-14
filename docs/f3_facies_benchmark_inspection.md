@@ -26,7 +26,7 @@ Do not write F3 inspection outputs under `runs/`.
 
 `artifacts/` is local generated output and is not tracked by Git. For GitHub
 review, copy only lightweight inspection summaries and representative figures
-to `results/f3/facies_benchmark_v1/inspection/`; do not commit raw data, SEGY,
+to `reports/f3/facies_benchmark_v1/inspection/`; do not commit raw data, SEGY,
 full dumps, path lists, or other generated local artifacts.
 
 ## Config Contract
@@ -115,7 +115,7 @@ inspection:
   $ROOT/inspection/f3/facies_benchmark_v1
 
 results:
-  results/f3/facies_benchmark_v1/inspection
+  reports/f3/facies_benchmark_v1/inspection
 ```
 
 The final report links key figures by paths relative to the inspection root,
