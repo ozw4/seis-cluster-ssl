@@ -93,7 +93,7 @@ class F3SectionLayoutResultsConfig:
 	model_roster: Path
 	dataset_manifest: Path
 	benchmark_root: Path
-	final_results_dir: Path
+	report_dir: Path
 
 	def model_results_dir(self, model_id: str) -> Path:
 		"""Return the artifact-owned, non-published summary directory."""
@@ -151,7 +151,7 @@ def f3_lithology_voxel_section_layout_results_config_from_mapping(
 	)
 	_validate_allowed_keys(
 		outputs,
-		frozenset({'benchmark_root', 'final_results_dir'}),
+		frozenset({'benchmark_root', 'report_dir'}),
 		prefix='outputs',
 	)
 	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
@@ -161,16 +161,12 @@ def f3_lithology_voxel_section_layout_results_config_from_mapping(
 	benchmark_root = _required_absolute_path(
 		outputs, 'benchmark_root', prefix='outputs'
 	)
-	final_results_dir = _required_absolute_path(
-		outputs, 'final_results_dir', prefix='outputs'
-	)
+	report_dir = _required_absolute_path(outputs, 'report_dir', prefix='outputs')
 	if not benchmark_root.is_relative_to(artifact_root):
 		raise ValueError('outputs.benchmark_root must be inside paths.artifact_root')
 	expected_reports_root = workspace_root / 'reports'
-	if not final_results_dir.is_relative_to(expected_reports_root):
-		raise ValueError(
-			'outputs.final_results_dir must be inside workspace_root/reports'
-		)
+	if not report_dir.is_relative_to(expected_reports_root):
+		raise ValueError('outputs.report_dir must be inside workspace_root/reports')
 	return F3SectionLayoutResultsConfig(
 		artifact_root=artifact_root,
 		workspace_root=workspace_root,
@@ -181,7 +177,7 @@ def f3_lithology_voxel_section_layout_results_config_from_mapping(
 			references, 'section_layout_dataset_manifest', prefix='references'
 		),
 		benchmark_root=benchmark_root,
-		final_results_dir=final_results_dir,
+		report_dir=report_dir,
 	)
 
 
@@ -277,7 +273,7 @@ def summarize_f3_lithology_voxel_section_layout_results(
 		config, model_id=model_id
 	)
 	output_dir = (
-		config.final_results_dir
+		config.report_dir
 		if model_id is None
 		else config.model_results_dir(model_id)
 	)

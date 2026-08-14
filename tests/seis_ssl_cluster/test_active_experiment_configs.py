@@ -1741,7 +1741,7 @@ def test_active_f3_section_layout_results_config_resolves(
 	assert config.model_roster.name == '00_model_roster.yaml'
 	assert config.dataset_manifest.name == 'section_layout_dataset_manifest.json'
 	assert config.benchmark_root.is_relative_to(config.artifact_root)
-	assert config.final_results_dir.is_relative_to(config.workspace_root / 'reports')
+	assert config.report_dir.is_relative_to(config.workspace_root / 'reports')
 
 
 def test_active_f3_voxel_paired_experiment_contract() -> None:

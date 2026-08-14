@@ -175,7 +175,7 @@ lithology probe:
 lithology report:
   $ROOT/lithology/f3/facies_benchmark_v1/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/reports/$PROBE_SPEC
 
-results:
+report:
   reports/f3/facies_benchmark_v1/lithology_probe/$MODEL_TAG/$EMBED_SPEC/$LABEL_SET/$PROBE_SPEC
 ```
 

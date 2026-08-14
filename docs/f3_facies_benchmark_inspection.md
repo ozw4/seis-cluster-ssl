@@ -114,7 +114,7 @@ Outputs:
 inspection:
   $ROOT/inspection/f3/facies_benchmark_v1
 
-results:
+report:
   reports/f3/facies_benchmark_v1/inspection
 ```
 

@@ -255,7 +255,7 @@ def test_model_mode_no_publish_writes_only_lightweight_artifact_set(
 	assert result.output_dir.is_relative_to(config.artifact_root)
 	assert {path.name for path in result.files} == set(results.MODEL_OUTPUT_NAMES)
 	assert {path.suffix for path in result.files} <= {'.csv', '.json', '.md'}
-	assert not config.final_results_dir.exists()
+	assert not config.report_dir.exists()
 	assert not any('publish' in path.name for path in result.files)
 	assert not (result.output_dir / 'section_layout_handoff.json').exists()
 	review = json.loads(
@@ -345,9 +345,20 @@ def test_results_config_is_closed(tmp_path: Path) -> None:
 	config = results.f3_lithology_voxel_section_layout_results_config_from_mapping(
 		mapping
 	)
-	assert config.final_results_dir.is_relative_to(config.workspace_root / 'reports')
+	assert config.report_dir.is_relative_to(config.workspace_root / 'reports')
 	mapping['decision'] = {'threshold': 0.1}
 	with pytest.raises(ValueError, match='not allowed'):
+		results.f3_lithology_voxel_section_layout_results_config_from_mapping(mapping)
+
+
+def test_results_config_rejects_old_final_results_dir_key(tmp_path: Path) -> None:
+	mapping = _config_mapping(tmp_path)
+	outputs = cast('dict[str, object]', mapping['outputs'])
+	outputs['final_results_dir'] = outputs.pop('report_dir')
+	with pytest.raises(
+		ValueError,
+		match=r'outputs key\(s\) not allowed:.*final_results_dir',
+	):
 		results.f3_lithology_voxel_section_layout_results_config_from_mapping(mapping)
 
 
@@ -541,7 +552,7 @@ def _config_mapping(tmp_path: Path) -> dict[str, object]:
 		},
 		'outputs': {
 			'benchmark_root': str(root / 'artifacts/benchmark'),
-			'final_results_dir': str(root / 'workspace/reports/f3/section-layout'),
+			'report_dir': str(root / 'workspace/reports/f3/section-layout'),
 		},
 	}
 
