@@ -1,5 +1,5 @@
 suite: {root: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1}
-paths: {artifact_root: /workspace/artifacts/seis_ssl_cluster, f3_root: /home/dcuser/data/public_data/field/F3, results_root: reports}
+paths: {artifact_root: /workspace/artifacts/seis_ssl_cluster, f3_root: /home/dcuser/data/public_data/field/F3, reports_root: reports}
 inputs:
   v0_run_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1/v0_split_run_manifest.json
   v1_run_manifest: /workspace/artifacts/seis_ssl_cluster/lithology/f3/facies_benchmark_v1/voxel_robustness/m2a_vs_m1_v1/v1_split_run_manifest.json

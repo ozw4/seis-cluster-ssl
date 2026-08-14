@@ -29,7 +29,7 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 	validate_voxel_decoder_implementation,
 )
 
-DEFAULT_RESULTS_ROOT = Path('reports')
+DEFAULT_REPORTS_ROOT = Path('reports')
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 BASELINE_MODEL_TAG = 'strat_hmm_pretext_m1_k6_topblock1_distill'
 CANDIDATE_MODEL_TAG = 'strat_hmm_pretext_m2a_boundary_a050_t2_k6_topblock1_distill'
@@ -138,7 +138,7 @@ class F3VoxelSplitRobustnessPublishConfig:
 	"""Final lightweight publication settings for original and split evidence."""
 
 	enabled: bool = False
-	results_root: Path = DEFAULT_RESULTS_ROOT
+	reports_root: Path = DEFAULT_REPORTS_ROOT
 	output_dir: Path | None = None
 	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 	overwrite: bool = True
@@ -347,7 +347,7 @@ def f3_lithology_voxel_split_summary_config_from_mapping(
 	models = _mapping(config, 'models')
 	publish = _mapping(config, 'publish')
 	_exact_keys(suite, {'root'}, 'suite')
-	_exact_keys(paths, {'artifact_root', 'f3_root', 'results_root'}, 'paths')
+	_exact_keys(paths, {'artifact_root', 'f3_root', 'reports_root'}, 'paths')
 	_exact_keys(
 		inputs,
 		{'v0_run_manifest', 'v1_run_manifest', 'original_summary_dir'},
@@ -362,7 +362,7 @@ def f3_lithology_voxel_split_summary_config_from_mapping(
 	baseline = _string(models, 'baseline')
 	candidate = _string(models, 'candidate')
 	_validate_model_tags(baseline, candidate)
-	results_root = Path(_string(paths, 'results_root'))
+	reports_root = Path(_string(paths, 'reports_root'))
 	publish_output = Path(_string(publish, 'output_dir'))
 	return F3VoxelSplitRobustnessSummaryConfig(
 		suite_root=_path(suite, 'root'),
@@ -375,7 +375,7 @@ def f3_lithology_voxel_split_summary_config_from_mapping(
 		original_summary_dir=_path(inputs, 'original_summary_dir'),
 		publish=F3VoxelSplitRobustnessPublishConfig(
 			enabled=_publish_optional_bool(publish, 'enabled', default=False),
-			results_root=results_root,
+			reports_root=reports_root,
 			output_dir=publish_output,
 			max_file_size_bytes=_max_file_size_bytes(publish),
 			overwrite=_boolean(publish, 'overwrite'),

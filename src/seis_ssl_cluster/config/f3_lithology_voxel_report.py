@@ -20,7 +20,7 @@ from seis_ssl_cluster.f3.lithology.voxel_visualization import (
 	F3LithologyVoxelFigureConfig,
 )
 
-DEFAULT_RESULTS_ROOT = Path('reports')
+DEFAULT_REPORTS_ROOT = Path('reports')
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
 
@@ -58,7 +58,7 @@ def f3_lithology_voxel_report_config_from_mapping(
 		raise TypeError('publish must be a mapping')
 	_validate_allowed_keys(
 		paths,
-		frozenset({'artifact_root', 'f3_root', 'results_root'}),
+		frozenset({'artifact_root', 'f3_root', 'reports_root'}),
 		prefix='paths',
 	)
 	_validate_allowed_keys(dataset, frozenset({'name', 'version'}), prefix='dataset')
@@ -228,11 +228,11 @@ def _publish_config(
 		not isinstance(output_value, str) or not output_value
 	):
 		raise TypeError('publish.output_dir must be a non-empty path string')
-	results_value = paths.get('results_root')
-	if results_value is not None and (
-		not isinstance(results_value, str) or not results_value
+	reports_value = paths.get('reports_root')
+	if reports_value is not None and (
+		not isinstance(reports_value, str) or not reports_value
 	):
-		raise TypeError('paths.results_root must be a non-empty path string')
+		raise TypeError('paths.reports_root must be a non-empty path string')
 	max_mb = publish.get(
 		'max_file_size_mb', _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES / (1024 * 1024)
 	)
@@ -241,8 +241,8 @@ def _publish_config(
 	return F3LithologyVoxelPublishConfig(
 		enabled=enabled,
 		output_dir=None if output_value is None else Path(output_value),
-		results_root=(
-			DEFAULT_RESULTS_ROOT if results_value is None else Path(results_value)
+		reports_root=(
+			DEFAULT_REPORTS_ROOT if reports_value is None else Path(reports_value)
 		),
 		max_file_size_bytes=int(float(max_mb) * 1024 * 1024),
 		overwrite=overwrite,

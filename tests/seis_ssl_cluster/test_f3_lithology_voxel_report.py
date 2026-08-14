@@ -226,7 +226,7 @@ def test_voxel_publish_default_dir_uses_versioned_prediction_spec(
 def test_voxel_publish_preserves_explicit_output_dir(tmp_path: Path) -> None:
 	config = F3LithologyVoxelPublishConfig(
 		enabled=True,
-		results_root=tmp_path / 'reports',
+		reports_root=tmp_path / 'reports',
 		output_dir=tmp_path / 'outside-results',
 	)
 	assert config.output_dir == tmp_path / 'outside-results'
@@ -490,7 +490,7 @@ def _publish_config(
 		dataset={'name': 'f3', 'version': 'test'},
 		publish=F3LithologyVoxelPublishConfig(
 			enabled=True,
-			results_root=tmp_path / 'reports',
+			reports_root=tmp_path / 'reports',
 			output_dir=tmp_path / 'reports' / 'published',
 		),
 	)
@@ -579,7 +579,7 @@ def _evaluated_report_job(
 		'paths': {
 			'artifact_root': str(evaluation_config.artifact_root),
 			'f3_root': str(evaluation_config.f3_root),
-			'results_root': str(tmp_path / 'reports'),
+			'reports_root': str(tmp_path / 'reports'),
 		},
 		'dataset': dict(evaluation_config.dataset),
 		'labels': {

@@ -435,7 +435,7 @@ def test_synthetic_split_summary_uses_paired_split_deltas(  # noqa: PLR0915
 			original_summary_dir=original,
 			publish=F3VoxelSplitRobustnessPublishConfig(
 				enabled=True,
-				results_root=tmp_path / 'reports',
+				reports_root=tmp_path / 'reports',
 				output_dir=publish_dir,
 			),
 		)
@@ -514,7 +514,7 @@ def test_publish_rejects_corrupt_original_summary_bundle(tmp_path: Path) -> None
 		original_summary_dir=original,
 		publish=F3VoxelSplitRobustnessPublishConfig(
 			enabled=True,
-			results_root=tmp_path / 'reports',
+			reports_root=tmp_path / 'reports',
 			output_dir=tmp_path / 'reports' / 'voxel',
 		),
 	)

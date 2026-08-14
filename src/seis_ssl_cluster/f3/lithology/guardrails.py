@@ -12,7 +12,7 @@ from pathlib import Path
 
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
-DEFAULT_RESULTS_ROOT = Path('reports')
+DEFAULT_REPORTS_ROOT = Path('reports')
 F3_STRAT_HMM_M1_GUARDRAIL_SUITE_NAME = 'strat_hmm_m1_guardrails_v1'
 F3_STRAT_HMM_M1_BASELINE_MODEL_TAG = (
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
@@ -52,7 +52,7 @@ F3_STRAT_HMM_M1_GUARDRAIL_JOB_STAGES = frozenset(
 	},
 )
 F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_DIR = (
-	DEFAULT_RESULTS_ROOT / 'f3/facies_benchmark_v1/strat_hmm_m1_guardrails'
+	DEFAULT_REPORTS_ROOT / 'f3/facies_benchmark_v1/strat_hmm_m1_guardrails'
 )
 F3_STRAT_HMM_M1_GUARDRAIL_PUBLISH_SUFFIXES = frozenset(
 	{'.md', '.json', '.csv', '.png'}

@@ -16,7 +16,7 @@ from seis_ssl_cluster.f3.lithology import m1_results as m1
 
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
-DEFAULT_RESULTS_ROOT = Path('reports')
+DEFAULT_REPORTS_ROOT = Path('reports')
 REQUIRED_LOW_BUDGETS = ('cap25', 'cap50', 'cap100')
 REQUIRED_BUDGETS = (*REQUIRED_LOW_BUDGETS, 'full')
 REQUIRED_SUBSAMPLE_SEEDS = (0, 1, 2, 3, 4)

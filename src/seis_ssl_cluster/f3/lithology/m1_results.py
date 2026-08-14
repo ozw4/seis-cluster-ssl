@@ -14,7 +14,7 @@ from statistics import mean
 
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
-DEFAULT_RESULTS_ROOT = Path('reports')
+DEFAULT_REPORTS_ROOT = Path('reports')
 CORE_METRICS = (
 	'accuracy',
 	'balanced_accuracy',

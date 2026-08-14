@@ -1537,7 +1537,31 @@ def test_active_f3_voxel_report_configs_resolve(
 	config_path: Path, tmp_path: Path
 ) -> None:
 	raw = _config_with_available_output(config_path, tmp_path)
-	f3_lithology_voxel_report_config_from_mapping(raw)
+	config = f3_lithology_voxel_report_config_from_mapping(raw)
+	paths = raw['paths']
+	assert isinstance(paths, dict)
+	assert config.publish.reports_root == Path(paths['reports_root'])
+
+
+def test_active_f3_core_report_configs_reject_legacy_results_root() -> None:
+	for config_path, resolver in (
+		(F3_VOXEL_REPORT_CONFIGS[0], f3_lithology_voxel_report_config_from_mapping),
+		(
+			F3_VOXEL_RESULTS_ROOT / '01_summarize_original_split.yaml',
+			f3_lithology_voxel_results_config_from_mapping,
+		),
+		(
+			F3_VOXEL_ROBUSTNESS_ROOT
+			/ '04_summarize_voxel_split_robustness.yaml',
+			f3_lithology_voxel_split_summary_config_from_mapping,
+		),
+	):
+		raw = load_config(config_path)
+		paths = raw['paths']
+		assert isinstance(paths, dict)
+		paths['results_root'] = paths.pop('reports_root')
+		with pytest.raises(ValueError, match='results_root'):
+			resolver(raw)
 
 
 def test_active_f3_voxel_label_budget_dataset_config_resolves() -> None:
@@ -1808,6 +1832,12 @@ def test_active_f3_voxel_final_summary_publish_order_contract() -> None:
 
 	assert original.publish.enabled is False
 	assert robustness.publish.enabled is True
+	original_paths = original_raw['paths']
+	robustness_paths = robustness_raw['paths']
+	assert isinstance(original_paths, dict)
+	assert isinstance(robustness_paths, dict)
+	assert original.publish.reports_root == Path(original_paths['reports_root'])
+	assert robustness.publish.reports_root == Path(robustness_paths['reports_root'])
 	assert robustness.original_summary_dir == original.output_dir
 	assert robustness.publish.output_dir == original.publish.output_dir
 	assert robustness.artifact_root is not None

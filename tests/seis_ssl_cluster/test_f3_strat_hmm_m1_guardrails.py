@@ -272,7 +272,7 @@ def test_guardrail_summary_publishes_only_lightweight_summary_files(
 		_write_metrics(Path(raw['models'][role]['metrics_json']), offset=index / 100)
 	_write_complete_label_budget_inputs(raw, tmp_path)
 	publish_dir = tmp_path / 'reports' / 'f3' / 'guardrails'
-	monkeypatch.setattr(guardrails, 'DEFAULT_RESULTS_ROOT', tmp_path / 'reports')
+	monkeypatch.setattr(guardrails, 'DEFAULT_REPORTS_ROOT', tmp_path / 'reports')
 	raw['publish'] = {
 		'enabled': True,
 		'output_dir': str(publish_dir),
@@ -306,7 +306,7 @@ def test_guardrail_publish_requires_strict_complete_summary(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	publish_root = tmp_path / 'reports'
-	monkeypatch.setattr(guardrails, 'DEFAULT_RESULTS_ROOT', publish_root)
+	monkeypatch.setattr(guardrails, 'DEFAULT_REPORTS_ROOT', publish_root)
 	raw = _summary_config(tmp_path, strict=False)
 	raw['publish'] = {
 		'enabled': True,

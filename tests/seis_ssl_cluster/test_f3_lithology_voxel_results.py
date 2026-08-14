@@ -306,7 +306,7 @@ def test_publish_uses_exact_lightweight_allowlist(tmp_path: Path) -> None:
 		config,
 		publish=F3LithologyVoxelResultsPublishConfig(
 			enabled=True,
-			results_root=tmp_path / 'reports',
+			reports_root=tmp_path / 'reports',
 			output_dir=publish_dir,
 		),
 	)

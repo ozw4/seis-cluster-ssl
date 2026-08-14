@@ -400,7 +400,7 @@ def test_m2a_publish_wrapper_enforces_exact_allowlist_and_size_guard(
 	pytest.importorskip('matplotlib').use('Agg', force=True)
 	result = consolidate_f3_strat_hmm_m2_results(_fixture(tmp_path))
 	publish_root = tmp_path / 'reports'
-	monkeypatch.setattr(m2_results, 'DEFAULT_RESULTS_ROOT', publish_root)
+	monkeypatch.setattr(m2_results, 'DEFAULT_REPORTS_ROOT', publish_root)
 	publish_config = F3StratHMMM2PublishConfig(
 		enabled=True,
 		output_dir=publish_root / 'm2a',

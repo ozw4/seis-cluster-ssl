@@ -56,7 +56,7 @@ from seis_ssl_cluster.models.voxel_decoder.spec import (
 
 _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024
 
-DEFAULT_RESULTS_ROOT = Path('reports')
+DEFAULT_REPORTS_ROOT = Path('reports')
 if TYPE_CHECKING:
 	from seis_ssl_cluster.f3.labels import F3ClassInfo
 
@@ -85,7 +85,7 @@ class F3LithologyVoxelPublishConfig:
 
 	enabled: bool = False
 	output_dir: Path | None = None
-	results_root: Path = DEFAULT_RESULTS_ROOT
+	reports_root: Path = DEFAULT_REPORTS_ROOT
 	max_file_size_bytes: int = _DEFAULT_PUBLISH_MAX_FILE_SIZE_BYTES
 	overwrite: bool = True
 
@@ -556,7 +556,7 @@ def publish_f3_lithology_voxel_report(
 		else str(decoder.get('spec'))
 	)
 	output_dir = policy.output_dir or default_f3_lithology_voxel_publish_dir(
-		results_root=policy.results_root,
+		reports_root=policy.reports_root,
 		dataset_version=config.dataset.get('version', 'facies_benchmark_v1'),
 		model_tag=str(prediction.get('model_tag') or 'unknown_model'),
 		prediction_spec=prediction_spec,
@@ -626,11 +626,11 @@ def _preflight_voxel_report_publish_entries(
 
 
 def default_f3_lithology_voxel_publish_dir(
-	*, results_root: Path, dataset_version: str, model_tag: str, prediction_spec: str
+	*, reports_root: Path, dataset_version: str, model_tag: str, prediction_spec: str
 ) -> Path:
 	"""Return the documented lightweight voxel result location."""
 	return (
-		results_root
+		reports_root
 		/ 'f3'
 		/ _path_component(dataset_version)
 		/ 'voxel_lithology'

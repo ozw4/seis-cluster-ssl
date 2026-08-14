@@ -36,7 +36,7 @@ def f3_lithology_voxel_results_config_from_mapping(
 	if not isinstance(publish, Mapping):
 		raise TypeError('publish must be a mapping')
 	_validate_allowed_keys(
-		paths, frozenset({'artifact_root', 'f3_root', 'results_root'}), prefix='paths'
+		paths, frozenset({'artifact_root', 'f3_root', 'reports_root'}), prefix='paths'
 	)
 	_validate_allowed_keys(
 		runs,
@@ -53,7 +53,7 @@ def f3_lithology_voxel_results_config_from_mapping(
 	)
 	_required_absolute_path(paths, 'artifact_root', prefix='paths')
 	f3_root = _required_absolute_path(paths, 'f3_root', prefix='paths')
-	results_root = Path(_required_string(paths, 'results_root', prefix='paths'))
+	reports_root = Path(_required_string(paths, 'reports_root', prefix='paths'))
 	resolved_runs = []
 	for model in REQUIRED_MODELS:
 		model_key = model.lower().replace('-', '')
@@ -94,7 +94,7 @@ def f3_lithology_voxel_results_config_from_mapping(
 		overwrite=overwrite,
 		publish=F3LithologyVoxelResultsPublishConfig(
 			enabled=publish_enabled,
-			results_root=results_root,
+			reports_root=reports_root,
 			output_dir=publish_output,
 			max_file_size_bytes=_max_file_size_bytes(publish),
 			overwrite=_bool(publish.get('overwrite', True), 'publish.overwrite'),
