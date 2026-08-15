@@ -1,0 +1,2 @@
+?? logs/parihaka_channel_fp32_fresh_60job/
+?? run_parihaka_fp32_fresh_60job.sh
