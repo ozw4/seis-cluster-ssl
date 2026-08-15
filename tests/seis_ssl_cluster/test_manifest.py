@@ -56,6 +56,71 @@ def test_manifest_json_round_trip_preserves_amplitude_record(
 	payload = yaml.safe_load(path.read_text(encoding='utf-8'))
 	assert 'attribute_volumes' not in payload[0]
 	assert 'base_seismic_kind' not in str(payload[0])
+	assert set(payload[0]['amplitude']) == {
+		'survey_id',
+		'path',
+		'shape_xyz',
+		'dtype',
+		'grid_order',
+		'normalization_stats_path',
+	}
+
+
+def test_amplitude_record_preserves_legacy_positional_construction(
+	tmp_path: Path,
+) -> None:
+	record = AmplitudeVolumeRecord(
+		'survey',
+		Path('amplitude.npy'),
+		(8, 9, 10),
+		'float32',
+		GRID_ORDER_XYZ,
+		tmp_path / 'stats.json',
+	)
+
+	assert record.valid_mask_path is None
+
+
+def test_manifest_round_trip_preserves_optional_relative_valid_mask_path(
+	tmp_path: Path,
+) -> None:
+	payload = {
+		'survey_id': 'survey',
+		'root': str(tmp_path),
+		'amplitude': {
+			'survey_id': 'survey',
+			'path': 'amplitude.npy',
+			'shape_xyz': [8, 9, 10],
+			'dtype': 'float32',
+			'grid_order': ['x', 'y', 'z'],
+			'normalization_stats_path': str(tmp_path / 'stats.json'),
+			'valid_mask_path': 'valid_trace_mask.npy',
+		},
+	}
+
+	manifest = survey_manifest_from_dict(payload)
+
+	assert manifest.amplitude.valid_mask_path == Path('valid_trace_mask.npy')
+	assert survey_manifest_to_dict(manifest) == payload
+
+
+def test_manifest_rejects_non_npy_valid_mask_path(tmp_path: Path) -> None:
+	payload = {
+		'survey_id': 'survey',
+		'root': str(tmp_path),
+		'amplitude': {
+			'survey_id': 'survey',
+			'path': 'amplitude.npy',
+			'shape_xyz': [8, 9, 10],
+			'dtype': 'float32',
+			'grid_order': ['x', 'y', 'z'],
+			'normalization_stats_path': str(tmp_path / 'stats.json'),
+			'valid_mask_path': 'valid_trace_mask.json',
+		},
+	}
+
+	with pytest.raises(ValueError, match=r'valid_mask_path.*\.npy'):
+		survey_manifest_from_dict(payload)
 
 
 def test_manifest_rejects_relative_normalization_stats_path() -> None:

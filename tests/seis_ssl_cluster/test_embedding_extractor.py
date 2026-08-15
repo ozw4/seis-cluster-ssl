@@ -105,6 +105,45 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['amplitude_agc'] == {'enabled': False}
 
 
+def test_embedding_extraction_uses_manifest_source_valid_mask(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	config['embedding']['preprocessing_cache'] = {'mode': 'memory'}
+	manifest_path = Path(config['manifests']['input'])
+	manifest = read_manifest_json(manifest_path)[0]
+	amplitude_path = resolve_manifest_path(manifest, manifest.amplitude.path)
+	volume = np.load(amplitude_path)
+	volume[0:2, 0:2, :] = np.nan
+	np.save(amplitude_path, volume)
+	valid_mask = np.ones(volume.shape[:2], dtype=bool)
+	valid_mask[0:2, 0:2] = False
+	valid_mask_path = manifest.root / 'valid_mask.npy'
+	np.save(valid_mask_path, valid_mask)
+	masked_manifest = replace(
+		manifest,
+		amplitude=replace(
+			manifest.amplitude,
+			valid_mask_path=Path('valid_mask.npy'),
+		),
+	)
+	write_manifest_json([masked_manifest], manifest_path)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+	embeddings = np.load(result.embeddings_path)
+	valid_tokens = np.load(result.valid_tokens_path)
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+
+	assert np.isfinite(embeddings).all()
+	assert not valid_tokens[0, 0, :].any()
+	assert metadata['source_valid_mask_path'] == str(valid_mask_path)
+	assert metadata['preprocessing_cache']['requested_mode'] == 'memory'
+	assert metadata['preprocessing_cache']['effective_mode'] == 'off'
+	assert 'window-local memmap reads' in metadata['preprocessing_cache'][
+		'fallback_reason'
+	]
+
+
 def test_loaded_model_extraction_matches_checkpoint_and_publishes_descriptor(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,

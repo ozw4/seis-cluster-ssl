@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import Mock
 
@@ -24,7 +25,6 @@ from seis_ssl_cluster.data import (
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping, MutableMapping, Sequence
-	from pathlib import Path
 
 	from seis_ssl_cluster.data import TargetProviderContext
 
@@ -232,6 +232,50 @@ def test_crop_and_pretrain_datasets_share_amplitude_preprocessing(
 	assert crop_sample['coords'] == pretrain_sample['coords']
 
 
+def test_pretrain_dataset_uses_manifest_source_valid_mask(tmp_path: Path) -> None:
+	volume = np.ones((4, 4, 4), dtype=np.float32)
+	volume[1, 2, :] = np.nan
+	valid_mask = np.ones((4, 4), dtype=bool)
+	valid_mask[1, 2] = False
+	manifest = _manifest(tmp_path, volume=volume, valid_mask=valid_mask)
+	dataset = NopimsAmplitudePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		zero_mask=ZeroMaskConfig(enabled=False),
+	)
+
+	sample = dataset[0]
+
+	assert not sample['local_valid_mask'][1, 2, :].any()
+	np.testing.assert_array_equal(sample['x'][0, 1, 2, :], 0.0)
+	assert np.isfinite(sample['x']).all()
+
+
+def test_dataset_rejects_missing_manifest_source_valid_mask(tmp_path: Path) -> None:
+	manifest = _manifest(tmp_path)
+	manifest = SurveyManifest(
+		survey_id=manifest.survey_id,
+		root=manifest.root,
+		amplitude=AmplitudeVolumeRecord(
+			manifest.amplitude.survey_id,
+			manifest.amplitude.path,
+			manifest.amplitude.shape_xyz,
+			manifest.amplitude.dtype,
+			manifest.amplitude.grid_order,
+			manifest.amplitude.normalization_stats_path,
+			Path('missing.npy'),
+		),
+	)
+
+	with pytest.raises(FileNotFoundError, match='source-valid mask file'):
+		NopimsAmplitudeCropDataset(
+			[manifest],
+			local_crop_size_xyz=(4, 4, 4),
+			patch_size_xyz=(2, 2, 2),
+		)
+
+
 def test_missing_amplitude_file_raises(tmp_path: Path) -> None:
 	manifest = _manifest(tmp_path, write_amplitude=False, write_stats=True)
 
@@ -332,6 +376,7 @@ def _manifest(
 	volume: np.ndarray | None = None,
 	write_amplitude: bool = True,
 	write_stats: bool = True,
+	valid_mask: np.ndarray | None = None,
 ) -> SurveyManifest:
 	root = tmp_path / 'survey'
 	root.mkdir()
@@ -340,6 +385,10 @@ def _manifest(
 		volume = np.ones((4, 4, 4), dtype=np.float32)
 	if write_amplitude:
 		np.save(amplitude_path, volume)
+	valid_mask_path = None
+	if valid_mask is not None:
+		valid_mask_path = Path('valid_mask.npy')
+		np.save(root / valid_mask_path, valid_mask)
 	stats_path = root / 'stats.json'
 	if write_stats:
 		write_normalization_stats(
@@ -366,5 +415,6 @@ def _manifest(
 			dtype='float32',
 			grid_order=GRID_ORDER_XYZ,
 			normalization_stats_path=stats_path,
+			valid_mask_path=valid_mask_path,
 		),
 	)

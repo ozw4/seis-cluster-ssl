@@ -262,6 +262,19 @@ class AmplitudePretrainDataset:
 					f'does not exist: {stats_path}'
 				)
 				raise FileNotFoundError(msg)
+			valid_mask_path = manifest.amplitude.valid_mask_path
+			if valid_mask_path is not None:
+				resolved_mask_path = resolve_manifest_path(manifest, valid_mask_path)
+				if not resolved_mask_path.is_file():
+					msg = (
+						f'survey {manifest.survey_id!r} source-valid mask file '
+						f'does not exist: {resolved_mask_path}'
+					)
+					raise FileNotFoundError(msg)
+				self._store.open_source_valid_mask(
+					resolved_mask_path,
+					manifest.amplitude.shape_xyz,
+				)
 
 	def _read_amplitude_crop_candidate(
 		self,
@@ -276,6 +289,14 @@ class AmplitudePretrainDataset:
 			),
 			store=self._store,
 			settings=self._preprocess_settings,
+			valid_mask_path=(
+				None
+				if manifest.amplitude.valid_mask_path is None
+				else resolve_manifest_path(
+					manifest,
+					manifest.amplitude.valid_mask_path,
+				)
+			),
 		)
 
 	def _finalize_sample(

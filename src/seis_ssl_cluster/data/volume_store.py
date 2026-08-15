@@ -113,8 +113,9 @@ class NpyMemmapVolumeStore:
 		"""Close all memmaps cached by this store."""
 		self._ensure_current_process()
 		with self._cache_lock:
-			arrays = tuple(self._cache.values())
+			arrays = (*self._cache.values(), *self._valid_mask_cache.values())
 			self._cache.clear()
+			self._valid_mask_cache.clear()
 		for array in arrays:
 			_close_memmap(array)
 
@@ -164,17 +165,53 @@ class NpyMemmapVolumeStore:
 			return cached
 		return array
 
+	def open_source_valid_mask(
+		self,
+		path: str | Path,
+		shape_xyz: tuple[int, int, int],
+	) -> np.ndarray:
+		"""Open a boolean `[x, y]` or `[x, y, z]` source-valid mask."""
+		mask_path = _validate_npy_path(path)
+		resolved_path = mask_path.resolve(strict=True)
+		self._ensure_current_process()
+		if self.max_open_volumes == 0:
+			return _open_validated_source_valid_mask(resolved_path, shape_xyz)
+
+		key = _cache_key(resolved_path)
+		with self._cache_lock:
+			cached = self._valid_mask_cache.get(key)
+			if cached is not None:
+				_validate_source_valid_mask_array(cached, resolved_path, shape_xyz)
+				self._valid_mask_cache.move_to_end(key)
+				return cached
+		array = _open_validated_source_valid_mask(resolved_path, shape_xyz)
+		with self._cache_lock:
+			stale_keys = tuple(
+				cached_key
+				for cached_key in self._valid_mask_cache
+				if cached_key[0] == resolved_path
+			)
+			for stale_key in stale_keys:
+				del self._valid_mask_cache[stale_key]
+			self._valid_mask_cache[key] = array
+			while len(self._valid_mask_cache) > self.max_open_volumes:
+				_, evicted = self._valid_mask_cache.popitem(last=False)
+				_close_memmap(evicted)
+		return array
+
 	def _initialize_process_state(self) -> None:
 		self._pid = os.getpid()
 		self._cache: OrderedDict[_CacheKey, np.ndarray] = OrderedDict()
+		self._valid_mask_cache: OrderedDict[_CacheKey, np.ndarray] = OrderedDict()
 		self._cache_lock = threading.Lock()
 
 	def _ensure_current_process(self) -> None:
 		pid = os.getpid()
 		if pid == self._pid:
 			return
-		inherited_arrays = tuple(self._cache.values())
+		inherited_arrays = (*self._cache.values(), *self._valid_mask_cache.values())
 		self._cache = OrderedDict()
+		self._valid_mask_cache = OrderedDict()
 		self._cache_lock = threading.Lock()
 		self._pid = pid
 		for array in inherited_arrays:
@@ -268,6 +305,75 @@ class NpyMemmapVolumeStore:
 
 		return crop, valid_mask
 
+	def read_source_valid_mask_crop_with_padding(
+		self,
+		path: str | Path,
+		start_xyz: tuple[int, int, int],
+		size_xyz: tuple[int, int, int],
+		shape_xyz: tuple[int, int, int],
+	) -> np.ndarray:
+		"""Read and Z-broadcast a source-valid crop, using false for padding."""
+		array = self.open_source_valid_mask(path, shape_xyz)
+		start = _validate_xyz_tuple(start_xyz, 'start_xyz')
+		size = _validate_size_xyz(size_xyz)
+		stop = tuple(
+			start_axis + size_axis
+			for start_axis, size_axis in zip(start, size, strict=True)
+		)
+		source_start = tuple(max(axis_start, 0) for axis_start in start)
+		source_stop = tuple(
+			min(axis_stop, axis_size)
+			for axis_stop, axis_size in zip(stop, shape_xyz, strict=True)
+		)
+		crop = np.zeros(size, dtype=bool)
+		if not all(
+			stop_axis > start_axis
+			for start_axis, stop_axis in zip(source_start, source_stop, strict=True)
+		):
+			return crop
+		dest_start = tuple(
+			source_axis_start - request_axis_start
+			for source_axis_start, request_axis_start in zip(
+				source_start,
+				start,
+				strict=True,
+			)
+		)
+		dest_stop = tuple(
+			dest_axis_start + source_axis_stop - source_axis_start
+			for dest_axis_start, source_axis_start, source_axis_stop in zip(
+				dest_start,
+				source_start,
+				source_stop,
+				strict=True,
+			)
+		)
+		dest_slices = tuple(
+			slice(axis_start, axis_stop)
+			for axis_start, axis_stop in zip(dest_start, dest_stop, strict=True)
+		)
+		if array.ndim == 2:
+			source_slices_xy = tuple(
+				slice(axis_start, axis_stop)
+				for axis_start, axis_stop in zip(
+					source_start[:2],
+					source_stop[:2],
+					strict=True,
+				)
+			)
+			crop[dest_slices] = array[source_slices_xy][..., np.newaxis]
+		else:
+			source_slices = tuple(
+				slice(axis_start, axis_stop)
+				for axis_start, axis_stop in zip(
+					source_start,
+					source_stop,
+					strict=True,
+				)
+			)
+			crop[dest_slices] = array[source_slices]
+		return crop
+
 
 _CONVENIENCE_STORE = NpyMemmapVolumeStore()
 
@@ -304,6 +410,19 @@ def _open_validated_memmap(path: Path) -> np.ndarray:
 	return array
 
 
+def _open_validated_source_valid_mask(
+	path: Path,
+	shape_xyz: tuple[int, int, int],
+) -> np.ndarray:
+	array = _load_npy_memmap(path)
+	try:
+		_validate_source_valid_mask_array(array, path, shape_xyz)
+	except Exception:
+		_close_memmap(array)
+		raise
+	return array
+
+
 def _cache_key(path: Path) -> _CacheKey:
 	stat = path.stat()
 	return (path, stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns)
@@ -325,6 +444,26 @@ def _validate_volume_array(array: np.ndarray, path: Path) -> None:
 	if not np.issubdtype(array.dtype, np.number):
 		msg = f'volume dtype must be numeric; got {array.dtype}: {path}'
 		raise TypeError(msg)
+
+
+def _validate_source_valid_mask_array(
+	array: np.ndarray,
+	path: Path,
+	shape_xyz: tuple[int, int, int],
+) -> None:
+	if array.dtype.hasobject:
+		msg = f'source-valid mask must not use object dtype: {path}'
+		raise TypeError(msg)
+	if array.dtype != np.dtype(bool):
+		msg = f'source-valid mask dtype must be bool; got {array.dtype}: {path}'
+		raise TypeError(msg)
+	expected_shapes = (shape_xyz[:2], shape_xyz)
+	if array.shape not in expected_shapes:
+		msg = (
+			'source-valid mask shape must be [X, Y] or [X, Y, Z] matching '
+			f'amplitude shape {shape_xyz!r}; got {array.shape!r}: {path}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_xyz_tuple(value: tuple[int, int, int], name: str) -> tuple[int, int, int]:

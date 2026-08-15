@@ -132,6 +132,7 @@ def read_amplitude_crop(  # noqa: PLR0913
 	store: NpyMemmapVolumeStore,
 	patch_size_xyz: Sequence[int],
 	settings: AmplitudePreprocessSettings,
+	valid_mask_path: Path | None = None,
 ) -> PreparedAmplitudeCrop:
 	"""Read and preprocess one amplitude crop in `[1, X, Y, Z]` format."""
 	candidate = read_amplitude_crop_candidate(
@@ -139,6 +140,7 @@ def read_amplitude_crop(  # noqa: PLR0913
 		amplitude_path=amplitude_path,
 		store=store,
 		settings=settings,
+		valid_mask_path=valid_mask_path,
 	)
 	return finalize_amplitude_crop(
 		candidate=candidate,
@@ -234,6 +236,7 @@ def read_amplitude_crop_candidate(
 	amplitude_path: Path,
 	store: NpyMemmapVolumeStore,
 	settings: AmplitudePreprocessSettings,
+	valid_mask_path: Path | None = None,
 ) -> AmplitudeCropCandidate:
 	"""Read a crop and compute validity without amplitude transformations."""
 	_validate_settings(settings)
@@ -244,19 +247,37 @@ def read_amplitude_crop_candidate(
 		compute_request.start_xyz,
 		compute_request.size_xyz,
 	)
-	if settings.finite_check_mode == 'strict':
-		_validate_finite_valid_voxels(raw_compute, compute_valid_mask, amplitude_path)
-	raw_crop = raw_compute[payload_slices]
-	source_valid_mask = compute_valid_mask[payload_slices]
+	if valid_mask_path is not None:
+		explicit_valid_mask = store.read_source_valid_mask_crop_with_padding(
+			valid_mask_path,
+			compute_request.start_xyz,
+			compute_request.size_xyz,
+			cast('XYZ', tuple(int(axis) for axis in store.open(amplitude_path).shape)),
+		)
+		compute_valid_mask = np.logical_and(
+			compute_valid_mask,
+			explicit_valid_mask,
+		)
 	if settings.zero_mask.enabled:
-		zero_invalid = compute_zero_amplitude_invalid_mask(
+		zero_invalid_compute = compute_zero_amplitude_invalid_mask(
 			raw_compute,
 			valid_mask=compute_valid_mask,
 			config=settings.zero_mask,
-		)[payload_slices]
-		local_valid_mask = np.logical_and(source_valid_mask, ~zero_invalid)
+		)
+		local_valid_compute = np.logical_and(
+			compute_valid_mask,
+			~zero_invalid_compute,
+		)
 	else:
-		local_valid_mask = source_valid_mask
+		local_valid_compute = compute_valid_mask
+	if settings.finite_check_mode == 'strict':
+		_validate_finite_valid_voxels(
+			raw_compute,
+			local_valid_compute,
+			amplitude_path,
+		)
+	raw_crop = raw_compute[payload_slices]
+	local_valid_mask = local_valid_compute[payload_slices]
 	local_valid_mask = local_valid_mask.astype(bool, copy=False)
 	return AmplitudeCropCandidate(
 		request=request,
@@ -280,6 +301,7 @@ def finalize_amplitude_crop(
 	patch = _validate_positive_xyz(patch_size_xyz, 'patch_size_xyz')
 	_validate_settings(settings)
 	work_buffer = np.array(candidate.raw_crop, dtype=np.float32, copy=True)
+	work_buffer[~candidate.local_valid_mask] = np.float32(stats.median)
 	amplitude_norm = _normalize_amplitude_inplace(
 		work_buffer,
 		stats,

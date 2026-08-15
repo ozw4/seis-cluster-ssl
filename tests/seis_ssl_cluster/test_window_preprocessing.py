@@ -12,6 +12,7 @@ from seis_ssl_cluster.data import (
 	AmplitudeVolumeRecord,
 	CropRequest,
 	NpyMemmapVolumeStore,
+	PreparedAmplitudeCrop,
 	SurveyManifest,
 	SurveyNormalizationStats,
 	ZeroMaskConfig,
@@ -204,6 +205,108 @@ def test_read_amplitude_crop_rejects_non_finite_source_voxels(
 		)
 
 
+def test_read_amplitude_crop_broadcasts_2d_source_valid_mask_and_sanitizes_nan(
+	tmp_path: Path,
+) -> None:
+	volume = np.ones((2, 2, 2), dtype=np.float32)
+	volume[0, 1, :] = np.nan
+	mask = np.ones((2, 2), dtype=bool)
+	mask[0, 1] = False
+
+	prepared = _read_masked_crop(tmp_path, volume, mask, patch_size_xyz=(2, 2, 2))
+
+	assert not prepared.local_valid_mask[0, 1, :].any()
+	assert prepared.local_valid_mask[0, 0, :].all()
+	assert np.isfinite(prepared.x).all()
+	np.testing.assert_array_equal(prepared.x[0, 0, 1, :], 0.0)
+	assert not prepared.token_valid_mask[0, 0, 0]
+
+
+def test_read_amplitude_crop_uses_3d_source_valid_mask_without_broadcast(
+	tmp_path: Path,
+) -> None:
+	volume = np.ones((2, 2, 2), dtype=np.float32)
+	volume[1, 0, 1] = np.inf
+	mask = np.ones(volume.shape, dtype=bool)
+	mask[1, 0, 1] = False
+
+	prepared = _read_masked_crop(tmp_path, volume, mask, patch_size_xyz=(1, 1, 1))
+
+	assert prepared.local_valid_mask[1, 0, 0]
+	assert not prepared.local_valid_mask[1, 0, 1]
+	assert prepared.x[0, 1, 0, 1] == 0.0
+	assert np.isfinite(prepared.x).all()
+
+
+def test_read_amplitude_crop_rejects_nan_at_explicitly_valid_voxel(
+	tmp_path: Path,
+) -> None:
+	volume = np.ones((2, 2, 2), dtype=np.float32)
+	volume[0, 0, 0] = np.nan
+
+	with pytest.raises(ValueError, match='non-finite source voxels'):
+		_read_masked_crop(tmp_path, volume, np.ones((2, 2), dtype=bool))
+
+
+def test_read_amplitude_crop_all_true_mask_matches_maskless_preprocessing(
+	tmp_path: Path,
+) -> None:
+	volume = np.arange(1, 9, dtype=np.float32).reshape((2, 2, 2))
+	manifest = _manifest(tmp_path, volume)
+	mask_path = tmp_path / 'all_valid.npy'
+	np.save(mask_path, np.ones(volume.shape[:2], dtype=bool))
+	kwargs = {
+		'request': CropRequest('survey', (0, 0, 0), volume.shape),
+		'amplitude_path': manifest.amplitude.path,
+		'stats': _stats(manifest.amplitude.path),
+		'store': NpyMemmapVolumeStore(),
+		'patch_size_xyz': (1, 1, 1),
+		'settings': _mask_test_settings(),
+	}
+
+	maskless = read_amplitude_crop(**kwargs)
+	masked = read_amplitude_crop(**kwargs, valid_mask_path=mask_path)
+
+	np.testing.assert_array_equal(masked.x, maskless.x)
+	np.testing.assert_array_equal(masked.local_valid_mask, maskless.local_valid_mask)
+	np.testing.assert_array_equal(masked.token_valid_mask, maskless.token_valid_mask)
+
+
+@pytest.mark.parametrize(
+	('mask', 'error_type', 'message'),
+	[
+		(np.ones((2, 3), dtype=bool), ValueError, 'shape'),
+		(np.ones((2, 2), dtype=np.uint8), TypeError, 'dtype must be bool'),
+		(np.empty((2, 2), dtype=object), TypeError, 'object dtype'),
+	],
+)
+def test_read_amplitude_crop_rejects_invalid_source_valid_mask_arrays(
+	tmp_path: Path,
+	mask: np.ndarray,
+	error_type: type[Exception],
+	message: str,
+) -> None:
+	with pytest.raises(error_type, match=message):
+		_read_masked_crop(tmp_path, np.ones((2, 2, 2), dtype=np.float32), mask)
+
+
+def test_read_amplitude_crop_rejects_missing_source_valid_mask_path(
+	tmp_path: Path,
+) -> None:
+	manifest = _manifest(tmp_path, np.ones((2, 2, 2), dtype=np.float32))
+
+	with pytest.raises(FileNotFoundError, match='does not exist'):
+		read_amplitude_crop(
+			request=CropRequest('survey', (0, 0, 0), (2, 2, 2)),
+			amplitude_path=manifest.amplitude.path,
+			valid_mask_path=tmp_path / 'missing.npy',
+			stats=_stats(manifest.amplitude.path),
+			store=NpyMemmapVolumeStore(),
+			patch_size_xyz=(1, 1, 1),
+			settings=_mask_test_settings(),
+		)
+
+
 @pytest.mark.parametrize('mode', ['strict', 'output_only'])
 def test_read_amplitude_crop_finite_checks_reject_nonfinite_output(
 	tmp_path: Path,
@@ -332,4 +435,34 @@ def _stats(path: Path) -> SurveyNormalizationStats:
 		clip_high=1000.0,
 		median=0.0,
 		iqr=1.0,
+	)
+
+
+def _mask_test_settings() -> AmplitudePreprocessSettings:
+	return AmplitudePreprocessSettings(
+		zero_mask=ZeroMaskConfig(enabled=False),
+		normalized_clip_abs=None,
+		amplitude_agc=AmplitudeAgcConfig(),
+		min_token_valid_fraction=1.0,
+	)
+
+
+def _read_masked_crop(
+	tmp_path: Path,
+	volume: np.ndarray,
+	mask: np.ndarray,
+	*,
+	patch_size_xyz: tuple[int, int, int] = (1, 1, 1),
+) -> PreparedAmplitudeCrop:
+	manifest = _manifest(tmp_path, volume)
+	mask_path = tmp_path / 'valid_mask.npy'
+	np.save(mask_path, mask)
+	return read_amplitude_crop(
+		request=CropRequest('survey', (0, 0, 0), volume.shape),
+		amplitude_path=manifest.amplitude.path,
+		valid_mask_path=mask_path,
+		stats=_stats(manifest.amplitude.path),
+		store=NpyMemmapVolumeStore(),
+		patch_size_xyz=patch_size_xyz,
+		settings=_mask_test_settings(),
 	)

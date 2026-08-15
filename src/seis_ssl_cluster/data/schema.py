@@ -24,6 +24,7 @@ class AmplitudeVolumeRecord:
 	dtype: str
 	grid_order: tuple[str, str, str]
 	normalization_stats_path: Path
+	valid_mask_path: Path | None = None
 
 	def validate(self) -> None:
 		"""Validate amplitude volume metadata."""
@@ -47,6 +48,15 @@ class AmplitudeVolumeRecord:
 				'amplitude.normalization_stats_path must be an absolute '
 				'artifact-registry path; got '
 				f'{self.normalization_stats_path}'
+			)
+			raise ValueError(msg)
+		if (
+			self.valid_mask_path is not None
+			and self.valid_mask_path.suffix != '.npy'
+		):
+			msg = (
+				'amplitude.valid_mask_path must point to a .npy file: '
+				f'{self.valid_mask_path}'
 			)
 			raise ValueError(msg)
 
@@ -127,7 +137,7 @@ def read_manifest_json(path: Path) -> list[SurveyManifest]:
 
 
 def _amplitude_record_to_dict(record: AmplitudeVolumeRecord) -> dict[str, object]:
-	return {
+	payload: dict[str, object] = {
 		'survey_id': record.survey_id,
 		'path': str(record.path),
 		'shape_xyz': list(record.shape_xyz),
@@ -135,6 +145,9 @@ def _amplitude_record_to_dict(record: AmplitudeVolumeRecord) -> dict[str, object
 		'grid_order': list(record.grid_order),
 		'normalization_stats_path': str(record.normalization_stats_path),
 	}
+	if record.valid_mask_path is not None:
+		payload['valid_mask_path'] = str(record.valid_mask_path)
+	return payload
 
 
 def _amplitude_record_from_dict(
@@ -147,9 +160,20 @@ def _amplitude_record_from_dict(
 		dtype=_require_str(data, 'dtype'),
 		grid_order=_require_str_tuple3(data, 'grid_order'),
 		normalization_stats_path=Path(_require_str(data, 'normalization_stats_path')),
+		valid_mask_path=_optional_path(data, 'valid_mask_path'),
 	)
 	record.validate()
 	return record
+
+
+def _optional_path(data: Mapping[str, object], key: str) -> Path | None:
+	value = data.get(key)
+	if value is None:
+		return None
+	if not isinstance(value, str):
+		msg = f'{key!r} must be a string when provided; got {type(value).__name__}'
+		raise TypeError(msg)
+	return Path(value)
 
 
 def _require_nested_mapping(value: object, label: str) -> Mapping[str, object]:

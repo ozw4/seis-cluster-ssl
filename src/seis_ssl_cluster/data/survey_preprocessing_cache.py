@@ -116,18 +116,28 @@ class PreparedSurveyAmplitude:
 		self.close()
 
 
-def plan_survey_preprocessing_cache(
+def plan_survey_preprocessing_cache(  # noqa: PLR0913
 	*,
 	amplitude_path: Path,
 	stats: SurveyNormalizationStats,
 	preprocess_settings: AmplitudePreprocessSettings,
 	cache_settings: SurveyPreprocessingCacheSettings,
 	default_cache_root: Path,
+	valid_mask_path: Path | None = None,
 ) -> SurveyPreprocessingCachePlan:
 	"""Build a cache plan without creating cache artifacts."""
 	cache_settings.validate()
 	if cache_settings.mode == 'off':
 		return SurveyPreprocessingCachePlan('off', 'off', None, None, None)
+	if valid_mask_path is not None:
+		return SurveyPreprocessingCachePlan(
+			cache_settings.mode,
+			'off',
+			None,
+			None,
+			None,
+			'source-valid masks require window-local memmap reads',
+		)
 	unsafe_reason = _cache_fallback_reason(preprocess_settings)
 	if unsafe_reason is not None:
 		return SurveyPreprocessingCachePlan(

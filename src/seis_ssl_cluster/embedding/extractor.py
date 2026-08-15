@@ -1132,6 +1132,16 @@ def extract_survey_embeddings(  # noqa: PLR0913
 	"""Extract and write embeddings for one survey manifest."""
 	manifest.validate()
 	amplitude_path = resolve_manifest_path(manifest, manifest.amplitude.path)
+	valid_mask_path = (
+		None
+		if manifest.amplitude.valid_mask_path is None
+		else resolve_manifest_path(manifest, manifest.amplitude.valid_mask_path)
+	)
+	if valid_mask_path is not None:
+		store.open_source_valid_mask(
+			valid_mask_path,
+			manifest.amplitude.shape_xyz,
+		)
 	stats_path = resolve_manifest_path(
 		manifest,
 		manifest.amplitude.normalization_stats_path,
@@ -1144,6 +1154,7 @@ def extract_survey_embeddings(  # noqa: PLR0913
 		preprocess_settings=preprocess_settings,
 		cache_settings=settings.preprocessing_cache,
 		default_cache_root=settings.output_dir / '.preprocessing_cache',
+		valid_mask_path=valid_mask_path,
 	)
 	patch_size = model.patch_size_xyz
 	token_grid = token_grid_shape_xyz(manifest.amplitude.shape_xyz, patch_size)
@@ -1310,6 +1321,10 @@ def build_embedding_metadata(  # noqa: PLR0913
 		},
 		'pretraining_objective': _pretraining_objective(checkpoint_config),
 	}
+	if manifest.amplitude.valid_mask_path is not None:
+		metadata['source_valid_mask_path'] = str(
+			resolve_manifest_path(manifest, manifest.amplitude.valid_mask_path),
+		)
 	if checkpoint_payload is not None:
 		stratigraphy_pretext = _stratigraphy_pretext_metadata(checkpoint_payload)
 		if stratigraphy_pretext is not None:
@@ -1559,6 +1574,14 @@ def _read_window(  # noqa: PLR0913
 			store=store,
 			patch_size_xyz=patch_size_xyz,
 			settings=preprocess_settings,
+			valid_mask_path=(
+				None
+				if manifest.amplitude.valid_mask_path is None
+				else resolve_manifest_path(
+					manifest,
+					manifest.amplitude.valid_mask_path,
+				)
+			),
 		)
 	else:
 		prepared = read_prepared_survey_amplitude_crop(
