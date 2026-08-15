@@ -158,6 +158,31 @@ def test_valid_synthetic_smoke_and_full_artifacts_pass(
 	assert full_result.resolved_precision == 'bfloat16'
 
 
+def test_full_validator_runs_checkpoint_forward(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	inputs = _validated_inputs(tmp_path, monkeypatch)
+	monkeypatch.setattr(validation_module, '_build_mae_model', _tiny_model)
+	_write_run_artifacts(inputs, phase='full')
+	forward_labels: list[str] = []
+
+	def record_forward(_model: AmplitudeMAE3D, *, label: str) -> None:
+		forward_labels.append(label)
+
+	monkeypatch.setattr(
+		validation_module,
+		'_validate_checkpoint_forward',
+		record_forward,
+	)
+	validation_module._validate_full(  # noqa: SLF001
+		inputs,
+		base=_result_base(inputs, check='full'),
+	)
+
+	assert forward_labels == ['latest full']
+
+
 def test_validator_rejects_changed_scientific_input_snapshot(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -189,6 +214,21 @@ def test_proc_entrypoint_and_docs_contract() -> None:
 	assert VOLVE_CANONICAL_DATASET_ID in docs
 	assert 'transductive self-supervised pretraining' in docs
 	assert 'No F3, NOPIMS, Parihaka' in docs
+
+
+def test_experiment_readme_has_reentrant_full_runbook() -> None:
+	readme = (PRETRAIN_ROOT / 'README.md').read_text(encoding='utf-8')
+
+	assert 'prepare_volve_canonical_inputs.py \\\n  --only-missing' in readme
+	assert '02_full_100ep.yaml"\n' in readme
+	assert '--resume "$FULL_RUN/latest.pt"' in readme
+	assert '--check full' in readme
+	assert 'mae_random_seed42.pt' in readme
+	assert "random_payload['metadata']['random_encoder_baseline'] is True" in readme
+	assert (
+		"random_payload['config']['model'] "
+		"== reference_payload['config']['model']"
+	) in readme
 
 
 def _input_fixture(

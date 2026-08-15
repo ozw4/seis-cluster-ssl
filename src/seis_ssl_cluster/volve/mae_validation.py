@@ -397,7 +397,7 @@ def _validate_smoke(
 		expected_amp_enabled=False,
 		expected_scaler_enabled=False,
 	)
-	_validate_checkpoint_forward(model)
+	_validate_checkpoint_forward(model, label='latest smoke')
 	metrics = [value for _, value in latest.metrics]
 	return VolveMaeValidationResult(
 		**base,
@@ -436,6 +436,7 @@ def _validate_full(
 		expected_amp_enabled=amp_enabled,
 		expected_scaler_enabled=scaler_enabled,
 	)
+	_validate_checkpoint_forward(model, label='latest full')
 	metrics = [value for _, value in latest.metrics]
 	return VolveMaeValidationResult(
 		**base,
@@ -493,7 +494,7 @@ def _inspect_checkpoint(  # noqa: PLR0913
 	return inspection
 
 
-def _validate_checkpoint_forward(model: AmplitudeMAE3D) -> None:
+def _validate_checkpoint_forward(model: AmplitudeMAE3D, *, label: str) -> None:
 	patch = model.patch_size_xyz
 	x = torch.zeros((1, model.in_channels, *patch), dtype=torch.float32)
 	valid = torch.ones((1, *patch), dtype=torch.bool)
@@ -501,7 +502,7 @@ def _validate_checkpoint_forward(model: AmplitudeMAE3D) -> None:
 	with torch.inference_mode():
 		encoded = model.encode_tokens(x, valid_mask=valid)['tokens']
 	if not isinstance(encoded, torch.Tensor) or not bool(torch.isfinite(encoded).all()):
-		raise ValueError('latest smoke checkpoint forward produced non-finite tokens')
+		raise ValueError(f'{label} checkpoint forward produced non-finite tokens')
 
 
 def _validate_run_snapshots(
