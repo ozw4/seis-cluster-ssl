@@ -32,6 +32,11 @@ selected tokens and partial footprints for a given layout and size. Validation
 and test masks are unchanged and are not calibrated. The decoder still uses the
 single seed 42000.
 
+All downstream training, validation, and test computation uses float32 with
+automatic mixed precision disabled. Encoder and decoder parameters, raw input
+tiles, forward, backward, and loss computation are fixed to FP32. Jobs start
+fresh under this contract and do not resume incompatible checkpoints.
+
 Within the end-to-end pair, encoder initialization is the only changed
 condition. Decoder initialization, supervision, tile order, optimizer,
 training settings, and runtime precision contract are paired. The frozen and

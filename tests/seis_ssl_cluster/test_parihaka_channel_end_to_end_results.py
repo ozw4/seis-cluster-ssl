@@ -217,9 +217,9 @@ def _end_identity(
 		},
 		'runtime': {
 			'resolved_device_type': 'cuda',
-			'amp_enabled': True,
-			'autocast_dtype': 'float16',
-			'grad_scaler_enabled': True,
+			'amp_enabled': False,
+			'autocast_dtype': None,
+			'grad_scaler_enabled': False,
 		},
 	}
 
@@ -355,7 +355,7 @@ def _frozen_identity(
 			'class_weight': 'balanced_train_voxels',
 			'sampling_mode': 'all_tiles_once_per_epoch',
 			'seed': 42000,
-			'amp': True,
+			'amp': False,
 			'gradient_clip_norm': 1.0,
 		},
 		'tiles': {
@@ -528,7 +528,7 @@ def test_complete_end_to_end_summary_and_paired_statistics(tmp_path: Path) -> No
 		),
 		(
 			lambda value: value['benchmark_identity']['runtime'].__setitem__(
-				'amp_enabled', bool(0)
+				'amp_enabled', bool(1)
 			),
 			'runtime drift',
 		),

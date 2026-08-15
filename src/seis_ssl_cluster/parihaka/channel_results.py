@@ -456,6 +456,12 @@ def _validate_benchmark_identity(
 				f'{path} benchmark_identity.{key} must contain exactly '
 				f'{sorted(expected_keys)!r}'
 			)
+	training = _identity_mapping(identity, 'training', path)
+	if training.get('amp') is not False:
+		raise ValueError(
+			f'{path} benchmark_identity.training.amp must be false for '
+			'Parihaka Channel v1'
+		)
 	_validate_test_definition(
 		identity.get('test_definition'),
 		f'{path} benchmark_identity.test_definition',

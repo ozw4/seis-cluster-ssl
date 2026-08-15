@@ -8,6 +8,7 @@ import json
 import os
 import random
 from collections.abc import Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -909,7 +910,7 @@ def _evaluate(
 			token_mask = batch['token_valid_mask'].to(device)
 			labels = batch['labels'].to(device)
 			mask = batch['supervision_mask'].to(device) & batch['core_mask'].to(device)
-			with torch.autocast(device_type=device.type, enabled=amp):
+			with _autocast(device, enabled=amp):
 				logits = decoder(embeddings, token_mask)
 				loss, summary = masked_weighted_voxel_cross_entropy(
 					logits, labels, mask, weights
@@ -926,6 +927,15 @@ def _evaluate(
 	metrics['loss'] = loss_sum / voxel_count
 	metrics['supervised_voxel_count'] = voxel_count
 	return metrics
+
+
+def _autocast(
+	device: torch.device, *, enabled: bool
+) -> AbstractContextManager[None]:
+	"""Use autocast only for the legacy opt-in path."""
+	if not enabled:
+		return nullcontext()
+	return torch.autocast(device_type=device.type)
 
 
 def _public_metrics(metrics: Mapping[str, object]) -> dict[str, object]:
@@ -1175,7 +1185,7 @@ def _train(value: Mapping[str, object]) -> DecoderTrain:
 		class_weight='balanced',
 		sampling_mode='all_tiles_once',
 		seed=42000,
-		amp=True,
+		amp=False,
 		gradient_clip_norm=1.0,
 	)
 	if settings != expected:

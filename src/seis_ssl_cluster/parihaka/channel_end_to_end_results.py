@@ -417,6 +417,25 @@ def _validate_common_identity_components(
 		'context_halo_tokens': [1, 1, 1],
 	}:
 		raise ValueError(f'{path} tile geometry is invalid')
+	runtime = _mapping(identity, 'runtime', str(path))
+	if runtime.get('amp_enabled') is not False:
+		raise ValueError(
+			f'{path} runtime drift: benchmark_identity.runtime.amp_enabled '
+			'must be false '
+			'for Parihaka Channel v1'
+		)
+	if runtime.get('autocast_dtype') is not None:
+		raise ValueError(
+			f'{path} runtime drift: benchmark_identity.runtime.autocast_dtype '
+			'must be null '
+			'for Parihaka Channel v1'
+		)
+	if runtime.get('grad_scaler_enabled') is not False:
+		raise ValueError(
+			f'{path} runtime drift: '
+			'benchmark_identity.runtime.grad_scaler_enabled must be false '
+			'for Parihaka Channel v1'
+		)
 
 
 def _validate_identity_supervision(

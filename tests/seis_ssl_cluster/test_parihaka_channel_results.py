@@ -181,7 +181,7 @@ def _benchmark_identity(
 			'class_weight': 'balanced_train_voxels',
 			'sampling_mode': 'all_tiles_once_per_epoch',
 			'seed': 42000,
-			'amp': True,
+			'amp': False,
 			'gradient_clip_norm': 1.0,
 		},
 		'tiles': {
@@ -334,6 +334,7 @@ def test_summary_requires_benchmark_identity(tmp_path: Path) -> None:
 		(('geometry', 'token_grid_shape_xyz'), [99, 25, 38], 'geometry'),
 		(('decoder', 'hidden_channels'), [64, 32], 'decoder'),
 		(('training', 'epochs'), 51, 'training'),
+		(('training', 'amp'), True, 'training'),
 		(('tiles', 'core_size_tokens'), [4, 4, 4], 'tiles'),
 		(('decoder_initial_state_sha256',), 'd' * 64, 'decoder_initial_state'),
 	],

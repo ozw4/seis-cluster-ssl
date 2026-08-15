@@ -32,5 +32,5 @@ train:
   class_weight: balanced
   sampling_mode: all_tiles_once
   seed: 42000
-  amp: true
+  amp: false
   gradient_clip_norm: 1.0

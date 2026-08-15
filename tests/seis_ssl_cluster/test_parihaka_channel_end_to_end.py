@@ -48,6 +48,7 @@ from seis_ssl_cluster.parihaka.channel_end_to_end import (
 	channel_end_to_end_config_from_mapping,
 	channel_end_to_end_optimizer_groups,
 	inspect_channel_end_to_end_job,
+	resolve_channel_end_to_end_runtime,
 	resolve_channel_reference_artifact,
 	run_channel_end_to_end_job,
 	train_channel_end_to_end_step,
@@ -429,7 +430,7 @@ class _PreflightFixture:
 				class_weight='balanced',
 				sampling_mode='all_tiles_once',
 				seed=42000,
-				amp=True,
+				amp=False,
 				gradient_clip_norm=1.0,
 			),
 		)
@@ -471,7 +472,7 @@ class _PreflightFixture:
 				'class_weight': 'balanced',
 				'sampling_mode': 'all_tiles_once',
 				'seed': 42000,
-				'amp': True,
+				'amp': False,
 				'gradient_clip_norm': 1.0,
 			},
 		}
@@ -779,6 +780,14 @@ def test_config_mapping_and_cli_dry_run_are_read_only(
 	assert 'execution: dry-run; no files written' in output
 
 
+def test_end_to_end_config_rejects_amp_true(tmp_path: Path) -> None:
+	fixture = _PreflightFixture(tmp_path)
+	raw = fixture.config_mapping()
+	raw['train']['amp'] = True
+	with pytest.raises(ValueError, match='train settings differ'):
+		channel_end_to_end_config_from_mapping(raw)
+
+
 class _TinyChannelDataset(torch.utils.data.Dataset[dict[str, object]]):
 	def __init__(self, count: int) -> None:
 		self.count = count
@@ -822,6 +831,17 @@ def _tiny_model(encoder_init: str = 'pretrained') -> ChannelEndToEndModel:
 			patch_size_xyz=(2, 2, 2),
 		)
 	return ChannelEndToEndModel(mae, decoder).float()
+
+
+def test_fp32_cuda_runtime_disables_autocast_and_grad_scaler(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setattr(end_to_end.torch.cuda, 'is_available', lambda: True)
+	runtime = resolve_channel_end_to_end_runtime('cuda', amp=False)
+	assert runtime.device_type == 'cuda'
+	assert runtime.amp_enabled is False
+	assert runtime.autocast_dtype is None
+	assert runtime.grad_scaler_enabled is False
 
 
 def _tiny_training_plan(

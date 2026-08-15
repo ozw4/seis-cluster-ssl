@@ -21,6 +21,11 @@ line number in the same orientation. For each of small, medium, and large, all
 five layouts must select different training-section sets; line order does not
 make a set distinct.
 
+All downstream training, validation, and test computation uses float32 with
+automatic mixed precision disabled. Decoder parameters, input tiles, forward,
+backward, and loss computation are fixed to FP32. Jobs start fresh under this
+contract and do not resume incompatible checkpoints.
+
 The configured sections define candidate teacher regions; training does not use
 every voxel on those sections. The layout YAML must explicitly define positive,
 strictly increasing `small`, `medium`, and `large` target train-voxel counts and

@@ -8,6 +8,7 @@ import json
 import os
 import random
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -1061,7 +1062,7 @@ def train_channel_end_to_end_step(  # noqa: PLR0913, PLR0917
 	batch = _end_to_end_batch(next(iter(loader)), device)
 	mask = batch['supervision_mask'] & batch['core_mask']
 	optimizer.zero_grad(set_to_none=True)
-	with torch.autocast(device_type=device.type, enabled=amp_enabled):
+	with _autocast(device, enabled=amp_enabled):
 		logits = model(batch['amplitude'], batch['token_valid_mask'])
 		loss, summary = masked_weighted_voxel_cross_entropy(
 			logits, batch['labels'], mask, weights
@@ -1109,7 +1110,7 @@ def _evaluate_channel_end_to_end(
 		for raw_batch in loader:
 			batch = _end_to_end_batch(raw_batch, device)
 			mask = batch['supervision_mask'] & batch['core_mask']
-			with torch.autocast(device_type=device.type, enabled=amp_enabled):
+			with _autocast(device, enabled=amp_enabled):
 				logits = model(batch['amplitude'], batch['token_valid_mask'])
 				loss, summary = masked_weighted_voxel_cross_entropy(
 					logits, batch['labels'], mask, weights
@@ -1133,6 +1134,15 @@ def _evaluate_channel_end_to_end(
 	metrics['loss'] = loss_sum / voxel_count
 	metrics['supervised_voxel_count'] = voxel_count
 	return metrics
+
+
+def _autocast(
+	device: torch.device, *, enabled: bool
+) -> AbstractContextManager[None]:
+	"""Use autocast only for the legacy opt-in path."""
+	if not enabled:
+		return nullcontext()
+	return torch.autocast(device_type=device.type)
 
 
 def _end_to_end_batch(
@@ -1776,7 +1786,7 @@ def _end_to_end_train(value: Mapping[str, object]) -> ChannelEndToEndTrain:
 		class_weight='balanced',
 		sampling_mode='all_tiles_once',
 		seed=42000,
-		amp=True,
+		amp=False,
 		gradient_clip_norm=1.0,
 	)
 	if settings != expected:

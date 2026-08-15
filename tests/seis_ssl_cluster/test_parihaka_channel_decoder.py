@@ -53,7 +53,7 @@ def _config(tmp_path: Path) -> ChannelDecoderConfig:
 			class_weight='balanced',
 			sampling_mode='all_tiles_once',
 			seed=42000,
-			amp=True,
+			amp=False,
 			gradient_clip_norm=1.0,
 		),
 		tiles=DecoderTiles((2, 2, 2), (1, 1, 1)),
@@ -495,6 +495,13 @@ def test_channel_benchmark_tile_settings_are_fixed(
 		channel_decoder_config_from_mapping(raw)
 
 
+def test_channel_benchmark_rejects_amp_true(tmp_path: Path) -> None:
+	raw = _config_mapping(tmp_path)
+	raw['train']['amp'] = True
+	with pytest.raises(ValueError, match='train settings differ'):
+		channel_decoder_config_from_mapping(raw)
+
+
 @pytest.mark.parametrize(
 	('split', 'missing_class'),
 	[
@@ -675,6 +682,8 @@ def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
 	assert latest.is_file()
 	payload = torch.load(latest, map_location='cpu', weights_only=False)
 	identity = payload['run_identity']
+	assert identity['training']['amp'] is False
+	assert payload['scaler_state_dict'] is None
 	assert identity['embedding'] == {
 		'checkpoint_path': str(pretrained_checkpoint),
 		'checkpoint_sha256': pretrained_checkpoint_sha256,
