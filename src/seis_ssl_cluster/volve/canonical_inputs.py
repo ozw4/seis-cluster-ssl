@@ -37,6 +37,12 @@ VOLVE_AMPLITUDE_SHA256 = (
 )
 VOLVE_AMPLITUDE_SIZE_BYTES = 981_648_128
 VOLVE_SHAPE_XYZ = (401, 720, 850)
+VOLVE_INLINE_MIN = 9961
+VOLVE_INLINE_MAX = 10361
+VOLVE_CROSSLINE_MIN = 1961
+VOLVE_CROSSLINE_MAX = 2680
+VOLVE_FIRST_TWT_MS = 4.0
+VOLVE_SAMPLE_INTERVAL_MS = 4.0
 VOLVE_VALID_TRACE_COUNT = 288_694
 VOLVE_MISSING_TRACE_COUNT = 26
 
@@ -73,6 +79,12 @@ class VolveCanonicalIdentity:
 	survey_id: str = VOLVE_SURVEY_ID
 	shape_xyz: tuple[int, int, int] = VOLVE_SHAPE_XYZ
 	dtype: str = 'float32'
+	inline_min: int = VOLVE_INLINE_MIN
+	inline_max: int = VOLVE_INLINE_MAX
+	crossline_min: int = VOLVE_CROSSLINE_MIN
+	crossline_max: int = VOLVE_CROSSLINE_MAX
+	first_twt_ms: float = VOLVE_FIRST_TWT_MS
+	sample_interval_ms: float = VOLVE_SAMPLE_INTERVAL_MS
 	valid_trace_count: int = VOLVE_VALID_TRACE_COUNT
 	missing_trace_count: int = VOLVE_MISSING_TRACE_COUNT
 	source_segy_sha256: str = VOLVE_SOURCE_SEGY_SHA256
@@ -276,6 +288,7 @@ def _validate_identity(identity: VolveCanonicalIdentity) -> None:
 	if not identity.dataset_id or not identity.survey_id:
 		msg = 'canonical dataset_id and survey_id must be non-empty'
 		raise ValueError(msg)
+	_validate_fixed_volve_geometry(identity)
 	if len(identity.shape_xyz) != 3 or any(
 		axis <= 0 for axis in identity.shape_xyz
 	):
@@ -287,6 +300,24 @@ def _validate_identity(identity: VolveCanonicalIdentity) -> None:
 	if np.dtype(identity.dtype) != np.dtype(np.float32):
 		msg = f'canonical dtype must be float32; got {identity.dtype!r}'
 		raise ValueError(msg)
+	if identity.inline_max - identity.inline_min + 1 != identity.shape_xyz[0]:
+		msg = 'canonical inline range must exactly cover the inline axis'
+		raise ValueError(msg)
+	if (
+		identity.crossline_max - identity.crossline_min + 1
+		!= identity.shape_xyz[1]
+	):
+		msg = 'canonical crossline range must exactly cover the crossline axis'
+		raise ValueError(msg)
+	if not np.isfinite(identity.first_twt_ms):
+		msg = 'canonical first TWT must be finite'
+		raise ValueError(msg)
+	if (
+		not np.isfinite(identity.sample_interval_ms)
+		or identity.sample_interval_ms <= 0
+	):
+		msg = 'canonical sample interval must be finite and positive'
+		raise ValueError(msg)
 	trace_count = identity.shape_xyz[0] * identity.shape_xyz[1]
 	if identity.valid_trace_count + identity.missing_trace_count != trace_count:
 		msg = 'canonical valid and missing trace counts must cover the XY grid'
@@ -296,6 +327,29 @@ def _validate_identity(identity: VolveCanonicalIdentity) -> None:
 	if identity.amplitude_size_bytes <= 0:
 		msg = 'canonical amplitude size must be positive'
 		raise ValueError(msg)
+
+
+def _validate_fixed_volve_geometry(identity: VolveCanonicalIdentity) -> None:
+	if identity.dataset_id == VOLVE_CANONICAL_DATASET_ID:
+		actual_geometry = (
+			identity.inline_min,
+			identity.inline_max,
+			identity.crossline_min,
+			identity.crossline_max,
+			identity.first_twt_ms,
+			identity.sample_interval_ms,
+		)
+		expected_geometry = (
+			VOLVE_INLINE_MIN,
+			VOLVE_INLINE_MAX,
+			VOLVE_CROSSLINE_MIN,
+			VOLVE_CROSSLINE_MAX,
+			VOLVE_FIRST_TWT_MS,
+			VOLVE_SAMPLE_INTERVAL_MS,
+		)
+		if actual_geometry != expected_geometry:
+			msg = 'canonical Volve physical geometry must match the fixed contract'
+			raise ValueError(msg)
 
 
 def _validate_output_location(config: VolveCanonicalInputConfig) -> None:
@@ -518,40 +572,64 @@ def _validate_arrays_and_voxels(  # noqa: C901
 	if missing_count != identity.missing_trace_count:
 		msg = f'canonical missing trace count mismatch: {missing_count}'
 		raise ValueError(msg)
-	_validate_axis_array(root / _INLINE_VALUES_NAME, identity.shape_xyz[0], 'inline')
+	_validate_axis_array(
+		root / _INLINE_VALUES_NAME,
+		identity.inline_min,
+		identity.inline_max,
+		'inline',
+	)
 	_validate_axis_array(
 		root / _CROSSLINE_VALUES_NAME,
-		identity.shape_xyz[1],
+		identity.crossline_min,
+		identity.crossline_max,
 		'crossline',
 	)
-	_validate_time_axis(root / _TIME_NAME, identity.shape_xyz[2])
+	_validate_time_axis(root / _TIME_NAME, identity)
 	return valid_count, missing_count
 
 
-def _validate_axis_array(path: Path, expected_size: int, label: str) -> None:
+def _validate_axis_array(
+	path: Path,
+	expected_min: int,
+	expected_max: int,
+	label: str,
+) -> None:
 	array = _load_npy_readonly(path, label)
-	if array.ndim != 1 or array.size != expected_size:
+	expected = np.arange(expected_min, expected_max + 1, dtype=np.int64)
+	if array.ndim != 1 or array.size != expected.size:
 		msg = f'canonical {label} axis shape mismatch: {array.shape!r}'
 		raise ValueError(msg)
-	if not np.issubdtype(array.dtype, np.number) or not np.isfinite(array).all():
+	is_integer_or_float = np.issubdtype(
+		array.dtype, np.integer
+	) or np.issubdtype(array.dtype, np.floating)
+	if not is_integer_or_float or not np.isfinite(array).all():
 		msg = f'canonical {label} axis must be finite numeric values'
 		raise TypeError(msg)
-	if array.size > 1 and not np.all(np.diff(array) > 0):
-		msg = f'canonical {label} axis must be strictly increasing'
+	if not np.array_equal(array, expected):
+		msg = (
+			f'canonical {label} axis must exactly equal '
+			f'{expected_min} through {expected_max}'
+		)
 		raise ValueError(msg)
 
 
-def _validate_time_axis(path: Path, expected_size: int) -> None:
+def _validate_time_axis(path: Path, identity: VolveCanonicalIdentity) -> None:
 	array = _load_npy_readonly(path, 'time')
-	expected = np.arange(4.0, 4.0 * expected_size + 1.0, 4.0, dtype=np.float64)
-	if array.ndim != 1 or array.size != expected_size:
+	expected = identity.first_twt_ms + identity.sample_interval_ms * np.arange(
+		identity.shape_xyz[2], dtype=np.float64
+	)
+	if array.ndim != 1 or array.size != identity.shape_xyz[2]:
 		msg = f'canonical time axis shape mismatch: {array.shape!r}'
 		raise ValueError(msg)
 	if not np.issubdtype(array.dtype, np.number):
 		msg = f'canonical time axis must be numeric; got {array.dtype}'
 		raise TypeError(msg)
 	if not np.array_equal(np.asarray(array, dtype=np.float64), expected):
-		msg = 'canonical time axis must span 4 to 3400 ms at 4 ms intervals'
+		msg = (
+			'canonical time axis must exactly match first TWT '
+			f'{identity.first_twt_ms:g} ms at '
+			f'{identity.sample_interval_ms:g} ms intervals'
+		)
 		raise ValueError(msg)
 
 
@@ -635,6 +713,12 @@ def _build_outputs(
 		'shape_xyz': list(identity.shape_xyz),
 		'grid_order': list(GRID_ORDER_XYZ),
 		'dtype': identity.dtype,
+		'inline_min': identity.inline_min,
+		'inline_max': identity.inline_max,
+		'crossline_min': identity.crossline_min,
+		'crossline_max': identity.crossline_max,
+		'first_twt_ms': identity.first_twt_ms,
+		'sample_interval_ms': identity.sample_interval_ms,
 		'valid_trace_count': identity.valid_trace_count,
 		'missing_trace_count': identity.missing_trace_count,
 		'source_segy_sha256': identity.source_segy_sha256,
@@ -963,7 +1047,13 @@ __all__ = [
 	'VOLVE_AMPLITUDE_SHA256',
 	'VOLVE_CANONICAL_DATASET_ID',
 	'VOLVE_CANONICAL_RELATIVE_ROOT',
+	'VOLVE_CROSSLINE_MAX',
+	'VOLVE_CROSSLINE_MIN',
 	'VOLVE_DEFAULT_ROOT',
+	'VOLVE_FIRST_TWT_MS',
+	'VOLVE_INLINE_MAX',
+	'VOLVE_INLINE_MIN',
+	'VOLVE_SAMPLE_INTERVAL_MS',
 	'VOLVE_SOURCE_SEGY_SHA256',
 	'VOLVE_SURVEY_ID',
 	'VolveCanonicalIdentity',

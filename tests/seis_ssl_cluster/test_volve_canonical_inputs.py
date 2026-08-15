@@ -209,6 +209,59 @@ def test_rejects_time_axis_mismatch(tmp_path: Path) -> None:
 		prepare_volve_canonical_inputs(config, dry_run=True)
 
 
+def test_rejects_inline_axis_shifted_by_one(tmp_path: Path) -> None:
+	config = _synthetic_config(tmp_path)
+	path = config.paths.canonical_root / 'inline_values.npy'
+	values = np.load(path, allow_pickle=False)
+	np.save(path, values + 1)
+
+	with pytest.raises(ValueError, match='inline axis must exactly equal'):
+		prepare_volve_canonical_inputs(config, dry_run=True)
+
+
+def test_rejects_shifted_fixed_volve_identity(tmp_path: Path) -> None:
+	config = VolveCanonicalInputConfig(
+		volve_root=(tmp_path / 'public').resolve(),
+		artifact_root=(tmp_path / 'artifacts').resolve(),
+		identity=replace(
+			VolveCanonicalIdentity(),
+			inline_min=9962,
+			inline_max=10362,
+		),
+	)
+
+	with pytest.raises(ValueError, match='fixed contract'):
+		prepare_volve_canonical_inputs(config, dry_run=True)
+
+
+def test_rejects_crossline_axis_with_missing_value(tmp_path: Path) -> None:
+	config = _synthetic_config(tmp_path)
+	path = config.paths.canonical_root / 'crossline_values.npy'
+	values = np.load(path, allow_pickle=False)
+	values[1:] += 1
+	np.save(path, values)
+
+	with pytest.raises(ValueError, match='crossline axis must exactly equal'):
+		prepare_volve_canonical_inputs(config, dry_run=True)
+
+
+def test_accepts_exact_physical_axes_stored_as_float(tmp_path: Path) -> None:
+	config = _synthetic_config(tmp_path)
+	root = config.paths.canonical_root
+	for name in ('inline_values.npy', 'crossline_values.npy'):
+		path = root / name
+		np.save(path, np.load(path, allow_pickle=False).astype(np.float32))
+	manifest_path = root / 'canonical_volume_manifest.json'
+	manifest = _read_json(manifest_path)
+	for name in ('inline_values.npy', 'crossline_values.npy'):
+		manifest['artifacts'][name] = _artifact_record(root / name)
+	_write_json(manifest_path, manifest)
+
+	result = prepare_volve_canonical_inputs(config, dry_run=True)
+
+	assert result.action == 'DRY_RUN'
+
+
 def test_rejects_nonfinite_valid_trace(tmp_path: Path) -> None:
 	config = _synthetic_config(tmp_path)
 	amplitude_path = config.paths.canonical_root / 'amplitude.npy'
@@ -305,6 +358,12 @@ def _synthetic_config(tmp_path: Path) -> VolveCanonicalInputConfig:
 		survey_id='synthetic_survey',
 		shape_xyz=shape_xyz,
 		dtype='float32',
+		inline_min=100,
+		inline_max=101,
+		crossline_min=200,
+		crossline_max=202,
+		first_twt_ms=4.0,
+		sample_interval_ms=4.0,
 		valid_trace_count=5,
 		missing_trace_count=1,
 		source_segy_sha256='a' * 64,

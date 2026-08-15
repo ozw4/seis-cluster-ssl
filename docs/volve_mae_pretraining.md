@@ -16,8 +16,16 @@ on the complete Volve canonical amplitude volume. The input is amplitude only.
 | Source SEG-Y SHA-256 | `f902e2bdaa277caf93a32e5f35eae653eb8b923138db0efc1e91918ef6757b2e` |
 | Logical grid | `[inline, crossline, twt]`, registered as `[x, y, z]` |
 | Shape | `[401, 720, 850]` |
+| Physical inline axis | Every integer from `9961` through `10361`, exactly |
+| Physical crossline axis | Every integer from `1961` through `2680`, exactly |
+| TWT axis | `850` samples from `4` through `3400` ms at `4` ms intervals |
 | Dtype | `float32` |
 | Explicit source-valid mask | `valid_trace_mask.npy`, shape `[401, 720]`, dtype `bool` |
+
+Inline and crossline axis arrays may use an integer or floating-point numeric
+dtype, but every stored value must exactly equal the corresponding integer in
+the physical geometry above. Shifted axes, gaps, and non-integral values are
+invalid.
 
 Canonical registration produces only small artifacts under:
 
