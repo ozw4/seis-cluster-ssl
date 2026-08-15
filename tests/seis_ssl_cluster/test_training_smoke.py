@@ -13,14 +13,17 @@ import seis_ssl_cluster.training.mae as mae_training
 from seis_ssl_cluster import __version__
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
+	AmplitudeAgcConfig,
 	AmplitudePretrainDataset,
 	AmplitudeVolumeRecord,
 	SurveyManifest,
 	SurveyNormalizationStats,
+	ZeroMaskConfig,
 	read_manifest_json,
 	write_manifest_json,
 	write_normalization_stats,
 )
+from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.mae.patching import patchify_3d
 from seis_ssl_cluster.training import (
 	load_checkpoint,
@@ -143,6 +146,95 @@ def test_two_step_cpu_synthetic_smoke_run_writes_checkpoint(tmp_path: Path) -> N
 		'backward',
 		'optimizer',
 	}
+
+
+@pytest.mark.integration
+def test_source_valid_mask_zero_mask_agc_and_mae_train_one_step(
+	tmp_path: Path,
+) -> None:
+	manifest = _write_masked_nan_trace_manifest(tmp_path / 'survey')
+	dataset = AmplitudePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 4),
+		patch_size_xyz=(2, 2, 2),
+		spatial_mask_ratio=0.75,
+		block_size_tokens_xyz=(1, 1, 1),
+		seed=42,
+		samples_per_epoch=1,
+		zero_mask=ZeroMaskConfig(
+			enabled=True,
+			zero_atol=0.0,
+			z_sample_influence_radius=16,
+			xy_trace_influence_radius=1,
+		),
+		normalized_clip_abs=8.0,
+		amplitude_agc=AmplitudeAgcConfig(
+			enabled=True,
+			mode='trace_rms_z',
+			window_z=65,
+			eps=1.0e-3,
+			clip_abs=5.0,
+		),
+		finite_check_mode='strict',
+	)
+	sample = dataset[0]
+
+	assert sample['coords']['local_start_xyz'] == (0, 0, 0)
+	assert np.isfinite(sample['x']).all()
+	assert not sample['local_valid_mask'][1, 2, :].any()
+	np.testing.assert_array_equal(sample['x'][0, 1, 2, :], 0.0)
+
+	dataloader = torch.utils.data.DataLoader(
+		[sample],
+		batch_size=1,
+		collate_fn=mae_collate_fn,
+	)
+	model = AmplitudeMAE3D(
+		patch_size_xyz=(2, 2, 2),
+		encoder_dim=12,
+		encoder_depth=1,
+		encoder_heads=3,
+		decoder_dim=12,
+		decoder_depth=1,
+		decoder_heads=3,
+	)
+	optimizer = torch.optim.AdamW(model.parameters(), lr=1.0e-3, weight_decay=0.05)
+	parameters_before = {
+		name: parameter.detach().clone()
+		for name, parameter in model.named_parameters()
+	}
+
+	state = train_mae_one_epoch(
+		model=model,
+		dataloader=dataloader,
+		optimizer=optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		patch_size_xyz=(2, 2, 2),
+		loss_config={
+			'reconstruction': 'mse',
+			'gradient_weight': 0.0,
+			'visible_reconstruction_weight': 0.1,
+			'target_normalization': {
+				'mode': 'patch_zscore',
+				'eps': 1.0e-6,
+				'min_std': 0.05,
+			},
+		},
+		grad_clip_norm=1.0,
+	)
+
+	assert np.isfinite(state.metrics['loss'])
+	gradients = [parameter.grad for parameter in model.parameters()]
+	assert all(gradient is not None for gradient in gradients)
+	assert all(
+		gradient is not None and torch.isfinite(gradient).all()
+		for gradient in gradients
+	)
+	assert any(
+		not torch.equal(parameter.detach(), parameters_before[name])
+		for name, parameter in model.named_parameters()
+	)
 
 
 def test_run_snapshots_configured_train_path_list(tmp_path: Path) -> None:
@@ -1065,6 +1157,47 @@ def _write_synthetic_manifest(root: Path) -> Path:
 	manifest_path = root / 'manifest.json'
 	write_manifest_json([manifest], manifest_path)
 	return manifest_path
+
+
+def _write_masked_nan_trace_manifest(root: Path) -> SurveyManifest:
+	root.mkdir(parents=True, exist_ok=True)
+	volume_path = root / 'amplitude.npy'
+	rng = np.random.default_rng(42)
+	volume = rng.normal(size=(4, 4, 4)).astype(np.float32)
+	volume[1, 2, :] = np.nan
+	np.save(volume_path, volume)
+	valid_mask_path = root / 'valid_mask.npy'
+	valid_mask = np.ones((4, 4), dtype=np.bool_)
+	valid_mask[1, 2] = False
+	np.save(valid_mask_path, valid_mask)
+	stats_path = root / 'stats.json'
+	write_normalization_stats(
+		SurveyNormalizationStats(
+			survey_id='masked-nan-trace',
+			source_path=volume_path,
+			grid_order=GRID_ORDER_XYZ,
+			clip_low_percentile=0.0,
+			clip_high_percentile=100.0,
+			clip_low=-10.0,
+			clip_high=10.0,
+			median=0.0,
+			iqr=1.0,
+		),
+		stats_path,
+	)
+	return SurveyManifest(
+		survey_id='masked-nan-trace',
+		root=root,
+		amplitude=AmplitudeVolumeRecord(
+			survey_id='masked-nan-trace',
+			path=volume_path,
+			shape_xyz=tuple(int(axis) for axis in volume.shape),
+			dtype='float32',
+			grid_order=GRID_ORDER_XYZ,
+			normalization_stats_path=stats_path,
+			valid_mask_path=valid_mask_path,
+		),
+	)
 
 
 def _mae_sample() -> dict[str, object]:
