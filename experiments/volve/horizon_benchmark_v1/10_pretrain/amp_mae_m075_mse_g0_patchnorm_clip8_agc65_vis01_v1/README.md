@@ -45,4 +45,7 @@ python proc/seis_ssl_cluster/create_random_mae_checkpoint.py \
 The smoke and full resolved configs may differ only in output location, runtime
 resources, duration, AMP/device, `train.max_steps`, and debug visualization
 enablement. `latest.pt` after epoch 100 is the downstream reference. `best.pt`
-is a training-loss diagnostic and is not used for downstream selection.
+is a training-loss diagnostic and is not used for downstream selection. Each
+training run snapshots the registered normalization stats and canonical input
+metadata under `inputs/`; validation binds those copies and their hashes to the
+current registration identity.

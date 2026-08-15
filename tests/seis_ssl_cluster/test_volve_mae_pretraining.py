@@ -158,6 +158,26 @@ def test_valid_synthetic_smoke_and_full_artifacts_pass(
 	assert full_result.resolved_precision == 'bfloat16'
 
 
+def test_validator_rejects_changed_scientific_input_snapshot(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	inputs = _validated_inputs(tmp_path, monkeypatch)
+	monkeypatch.setattr(validation_module, '_build_mae_model', _tiny_model)
+	_write_run_artifacts(inputs, phase='smoke')
+	root = Path(cast('Mapping[str, object]', inputs.smoke['paths'])['output_root'])
+	(root / 'inputs' / inputs.normalization_stats_path.name).write_text(
+		'{}\n',
+		encoding='utf-8',
+	)
+
+	with pytest.raises(ValueError, match='normalization stats snapshot'):
+		validation_module._validate_smoke(  # noqa: SLF001
+			inputs,
+			base=_result_base(inputs, check='smoke'),
+		)
+
+
 def test_proc_entrypoint_and_docs_contract() -> None:
 	module = importlib.import_module('proc.seis_ssl_cluster.validate_volve_mae')
 	help_text = module.build_parser().format_help()
@@ -257,8 +277,29 @@ def _write_run_artifacts(
 	shutil.copy2(inputs.manifest_path, root / 'manifest.json')
 	(root / 'inputs').mkdir()
 	shutil.copy2(inputs.path_list_path, root / 'inputs' / inputs.path_list_path.name)
+	normalization_snapshot = root / 'inputs' / inputs.normalization_stats_path.name
+	canonical_metadata_snapshot = (
+		root / 'inputs' / inputs.canonical_input_metadata_path.name
+	)
+	shutil.copy2(inputs.normalization_stats_path, normalization_snapshot)
+	shutil.copy2(inputs.canonical_input_metadata_path, canonical_metadata_snapshot)
 	(root / 'run_metadata.json').write_text(
-		json.dumps({'runtime_check_mode': 'once', 'precision': precision}) + '\n',
+		json.dumps(
+			{
+				'runtime_check_mode': 'once',
+				'precision': precision,
+				'input_scientific_identity_sha256': (
+					inputs.scientific_identity_sha256
+				),
+				'normalization_stats_sha256': validation_module._file_sha256(  # noqa: SLF001
+					normalization_snapshot
+				),
+				'canonical_input_metadata_sha256': validation_module._file_sha256(  # noqa: SLF001
+					canonical_metadata_snapshot
+				),
+			}
+		)
+		+ '\n',
 		encoding='utf-8',
 	)
 

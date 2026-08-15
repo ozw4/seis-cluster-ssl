@@ -4,6 +4,7 @@ paths:
 manifests:
   train: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/volve_amplitude_manifest.json
   train_path_list: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/volve_npy_paths.txt
+  canonical_input_metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/volve_canonical_input_metadata.json
 data:
   local_crop_size: [128, 128, 128]
   min_valid_fraction: 0.1

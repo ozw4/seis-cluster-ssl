@@ -10,13 +10,18 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
+from hashlib import sha256
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 import torch
 
 import seis_ssl_cluster
-from seis_ssl_cluster.data import AmplitudePretrainDataset, read_manifest_json
+from seis_ssl_cluster.data import (
+	AmplitudePretrainDataset,
+	SurveyManifest,
+	read_manifest_json,
+)
 from seis_ssl_cluster.losses import mae_pretraining_loss
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.mae.patching import unpatchify_3d
@@ -400,9 +405,10 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		dataloader=dataloader,
 		device=device,
 	)
-	_snapshot_run_inputs(
+	scientific_run_metadata = _snapshot_run_inputs(
 		output_root=output_root,
 		config=config,
+		manifests=manifests,
 		runtime_metadata=runtime_metadata,
 		overwrite=allow_overwrite_output and resume is None,
 	)
@@ -438,7 +444,10 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		_write_run_metadata(
 			output_root=output_root,
 			config=config,
-			runtime_metadata=runtime_metadata,
+			runtime_metadata={
+				**dict(runtime_metadata),
+				**scientific_run_metadata,
+			},
 			overwrite=True,
 		)
 		if resume_state.skip_batches >= len(dataloader):
@@ -641,9 +650,10 @@ def _snapshot_run_inputs(
 	*,
 	output_root: Path,
 	config: Mapping[str, object],
+	manifests: Sequence[SurveyManifest],
 	runtime_metadata: Mapping[str, object],
 	overwrite: bool = False,
-) -> None:
+) -> dict[str, str]:
 	_write_json_snapshot(
 		output_root / 'resolved_config.json',
 		_to_json_safe(config),
@@ -655,12 +665,19 @@ def _snapshot_run_inputs(
 	inputs_dir = output_root / 'inputs'
 	inputs_dir.mkdir(parents=True, exist_ok=True)
 	_copy_snapshot(path_list, inputs_dir / path_list.name, overwrite=overwrite)
+	scientific_metadata = _snapshot_scientific_inputs(
+		config=config,
+		manifests=manifests,
+		inputs_dir=inputs_dir,
+		overwrite=overwrite,
+	)
 	_write_run_metadata(
 		output_root=output_root,
 		config=config,
-		runtime_metadata=runtime_metadata,
+		runtime_metadata={**dict(runtime_metadata), **scientific_metadata},
 		overwrite=overwrite,
 	)
+	return scientific_metadata
 
 
 def _write_run_metadata(
@@ -699,6 +716,111 @@ def _copy_snapshot(source: Path, target: Path, *, overwrite: bool) -> None:
 		return
 	target.parent.mkdir(parents=True, exist_ok=True)
 	shutil.copy2(source, target)
+
+
+def _snapshot_scientific_inputs(
+	*,
+	config: Mapping[str, object],
+	manifests: Sequence[SurveyManifest],
+	inputs_dir: Path,
+	overwrite: bool,
+) -> dict[str, str]:
+	metadata_source = _configured_canonical_input_metadata(config)
+	if metadata_source is None:
+		return {}
+	normalization_sources = {
+		manifest.amplitude.normalization_stats_path
+		for manifest in manifests
+	}
+	if len(normalization_sources) != 1:
+		msg = (
+			'manifests.canonical_input_metadata requires exactly one '
+			'normalization stats input'
+		)
+		raise ValueError(msg)
+	normalization_source = next(iter(normalization_sources))
+	if not normalization_source.is_file():
+		raise FileNotFoundError(
+			f'normalization stats input does not exist: {normalization_source}'
+		)
+	metadata_snapshot = inputs_dir / metadata_source.name
+	normalization_snapshot = inputs_dir / normalization_source.name
+	if metadata_snapshot == normalization_snapshot:
+		raise ValueError('scientific input snapshot filenames must be distinct')
+	_copy_exact_snapshot(
+		metadata_source,
+		metadata_snapshot,
+		overwrite=overwrite,
+	)
+	_copy_exact_snapshot(
+		normalization_source,
+		normalization_snapshot,
+		overwrite=overwrite,
+	)
+	metadata = _read_json_object(
+		metadata_snapshot,
+		label='canonical input metadata snapshot',
+	)
+	identity = metadata.get('scientific_identity_sha256')
+	if (
+		not isinstance(identity, str)
+		or len(identity) != 64
+		or any(character not in '0123456789abcdef' for character in identity)
+	):
+		msg = (
+			'canonical input metadata scientific_identity_sha256 must be '
+			'a lowercase SHA-256 hex digest'
+		)
+		raise ValueError(msg)
+	return {
+		'input_scientific_identity_sha256': identity,
+		'normalization_stats_sha256': _file_sha256(normalization_snapshot),
+		'canonical_input_metadata_sha256': _file_sha256(metadata_snapshot),
+	}
+
+
+def _configured_canonical_input_metadata(
+	config: Mapping[str, object],
+) -> Path | None:
+	manifests = _mapping(config, 'manifests')
+	value = manifests.get('canonical_input_metadata')
+	if value is None:
+		return None
+	if not isinstance(value, str) or not value:
+		msg = 'manifests.canonical_input_metadata must be a non-empty string'
+		raise ValueError(msg)
+	path = Path(value)
+	if not path.is_file():
+		raise FileNotFoundError(f'canonical input metadata does not exist: {path}')
+	return path
+
+
+def _copy_exact_snapshot(source: Path, target: Path, *, overwrite: bool) -> None:
+	if target.exists() and not overwrite:
+		if not target.is_file() or target.read_bytes() != source.read_bytes():
+			raise ValueError(
+				f'existing scientific input snapshot does not match source: {target}'
+			)
+		return
+	_copy_snapshot(source, target, overwrite=overwrite)
+
+
+def _read_json_object(path: Path, *, label: str) -> dict[str, object]:
+	try:
+		value = json.loads(path.read_text(encoding='utf-8'))
+	except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+		raise ValueError(f'{label} is not valid JSON: {path}') from exc
+	if not isinstance(value, dict):
+		raise TypeError(f'{label} must contain a JSON object: {path}')
+	return value
+
+
+def _file_sha256(path: Path) -> str:
+	digest = sha256()
+	with path.open('rb') as handle:
+		for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+			digest.update(chunk)
+	return digest.hexdigest()
 
 
 def _configured_path_list(config: Mapping[str, object]) -> Path:

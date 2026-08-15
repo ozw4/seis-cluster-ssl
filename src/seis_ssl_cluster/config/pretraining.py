@@ -600,6 +600,12 @@ def resolve_mae_training_config(config: _T) -> Config:
 	manifests = _required_mapping(resolved, 'manifests')
 	_validate_non_empty_path(manifests, 'train', prefix='manifests')
 	_validate_non_empty_path(manifests, 'train_path_list', prefix='manifests')
+	if 'canonical_input_metadata' in manifests:
+		_validate_non_empty_path(
+			manifests,
+			'canonical_input_metadata',
+			prefix='manifests',
+		)
 
 	data = _required_mapping(resolved, 'data')
 	model = _required_mapping(resolved, 'model')

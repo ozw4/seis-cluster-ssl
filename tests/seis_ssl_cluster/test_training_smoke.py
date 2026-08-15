@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
+from hashlib import sha256
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +17,7 @@ from seis_ssl_cluster.data import (
 	AmplitudeVolumeRecord,
 	SurveyManifest,
 	SurveyNormalizationStats,
+	read_manifest_json,
 	write_manifest_json,
 	write_normalization_stats,
 )
@@ -153,6 +155,39 @@ def test_run_snapshots_configured_train_path_list(tmp_path: Path) -> None:
 
 	snapshot = _path_like(cfg['paths']['output_root']) / 'inputs' / path_list.name
 	assert snapshot.read_text(encoding='utf-8') == 'survey/amplitude.npy\n'
+
+
+def test_run_snapshots_scientific_input_identity(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	manifest = read_manifest_json(_path_like(cfg['manifests']['train']))[0]
+	normalization_path = manifest.amplitude.normalization_stats_path
+	identity = 'a' * 64
+	metadata_path = tmp_path / 'volve_canonical_input_metadata.json'
+	metadata_path.write_text(
+		json.dumps({'scientific_identity_sha256': identity}) + '\n',
+		encoding='utf-8',
+	)
+	cfg['manifests']['canonical_input_metadata'] = str(metadata_path)
+
+	run_mae_pretraining(cfg)
+
+	inputs = _path_like(cfg['paths']['output_root']) / 'inputs'
+	normalization_snapshot = inputs / normalization_path.name
+	metadata_snapshot = inputs / metadata_path.name
+	assert normalization_snapshot.read_bytes() == normalization_path.read_bytes()
+	assert metadata_snapshot.read_bytes() == metadata_path.read_bytes()
+	run_metadata = json.loads(
+		(_path_like(cfg['paths']['output_root']) / 'run_metadata.json').read_text(
+			encoding='utf-8'
+		)
+	)
+	assert run_metadata['input_scientific_identity_sha256'] == identity
+	assert run_metadata['normalization_stats_sha256'] == sha256(
+		normalization_snapshot.read_bytes()
+	).hexdigest()
+	assert run_metadata['canonical_input_metadata_sha256'] == sha256(
+		metadata_snapshot.read_bytes()
+	).hexdigest()
 
 
 def test_run_rejects_missing_train_path_list(tmp_path: Path) -> None:

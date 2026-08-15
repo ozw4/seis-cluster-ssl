@@ -78,6 +78,21 @@ pretrained checkpoint. `best.pt` follows training loss and is diagnostic only;
 it is not selected using downstream labels. The CPU smoke uses two optimizer
 steps in a separate `smoke_2step/` directory.
 
+At run start, both smoke and full training copy the exact registration inputs
+used by the run into their own output directory:
+
+```text
+inputs/
+  volve.normalization_stats.json
+  volve_canonical_input_metadata.json
+```
+
+`run_metadata.json` records `input_scientific_identity_sha256`,
+`normalization_stats_sha256`, and `canonical_input_metadata_sha256`. Validation
+requires these hashes and the two snapshots to match the current canonical
+registration. A changed or regenerated registration therefore cannot be
+silently presented as the input identity of an older checkpoint.
+
 The paired random encoder checkpoint uses the same architecture and seed 42,
 contains no pretrained weights, and must have a different SHA-256 from the
 completed pretrained checkpoint.

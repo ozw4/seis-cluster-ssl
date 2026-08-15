@@ -203,6 +203,8 @@ class VolveMaeInputValidation:
 	manifest_path: Path
 	path_list_path: Path
 	valid_mask_path: Path
+	normalization_stats_path: Path
+	canonical_input_metadata_path: Path
 
 
 def validate_volve_mae(
@@ -284,6 +286,8 @@ def validate_volve_mae_inputs_from_configs(
 		manifest_path=input_config.paths.manifest_path,
 		path_list_path=input_config.paths.path_list_path,
 		valid_mask_path=valid_mask,
+		normalization_stats_path=input_config.paths.normalization_stats_path,
+		canonical_input_metadata_path=input_config.paths.metadata_path,
 	)
 
 
@@ -331,6 +335,11 @@ def _validate_training_configs(
 			manifests.get('train_path_list'),
 			str(input_config.paths.path_list_path),
 			f'{label} train path list',
+		)
+		_expected_equal(
+			manifests.get('canonical_input_metadata'),
+			str(input_config.paths.metadata_path),
+			f'{label} canonical input metadata',
 		)
 		_validate_output_outside_public_root(
 			Path(cast('str', paths['output_root'])), input_config.volve_root
@@ -506,8 +515,21 @@ def _validate_run_snapshots(
 	resolved_path = output_root / 'resolved_config.json'
 	manifest_snapshot = output_root / 'manifest.json'
 	path_list_snapshot = output_root / 'inputs' / inputs.path_list_path.name
+	normalization_snapshot = (
+		output_root / 'inputs' / inputs.normalization_stats_path.name
+	)
+	canonical_metadata_snapshot = (
+		output_root / 'inputs' / inputs.canonical_input_metadata_path.name
+	)
 	metadata_path = output_root / 'run_metadata.json'
-	for path in (resolved_path, manifest_snapshot, path_list_snapshot, metadata_path):
+	for path in (
+		resolved_path,
+		manifest_snapshot,
+		path_list_snapshot,
+		normalization_snapshot,
+		canonical_metadata_snapshot,
+		metadata_path,
+	):
 		if not path.is_file():
 			raise FileNotFoundError(f'{label} run snapshot does not exist: {path}')
 	expected_resolved = (
@@ -526,6 +548,25 @@ def _validate_run_snapshots(
 		inputs.path_list_path.read_bytes(),
 		f'{label} path-list snapshot',
 	)
+	_expected_equal(
+		normalization_snapshot.read_bytes(),
+		inputs.normalization_stats_path.read_bytes(),
+		f'{label} normalization stats snapshot',
+	)
+	_expected_equal(
+		canonical_metadata_snapshot.read_bytes(),
+		inputs.canonical_input_metadata_path.read_bytes(),
+		f'{label} canonical input metadata snapshot',
+	)
+	snapshot_metadata = _read_json_mapping(
+		canonical_metadata_snapshot,
+		f'{label} canonical input metadata snapshot',
+	)
+	_expected_equal(
+		snapshot_metadata.get('scientific_identity_sha256'),
+		inputs.scientific_identity_sha256,
+		f'{label} snapshot scientific identity SHA-256',
+	)
 	_reject_supervision_contract(
 		_read_json_value(resolved_path, f'{label} resolved config'),
 		label=f'{label} resolved config',
@@ -541,6 +582,15 @@ def _validate_run_snapshots(
 	_expected_equal(
 		metadata.get('precision'), dict(expected_precision), f'{label} precision'
 	)
+	for key, expected in (
+		('input_scientific_identity_sha256', inputs.scientific_identity_sha256),
+		('normalization_stats_sha256', _file_sha256(normalization_snapshot)),
+		(
+			'canonical_input_metadata_sha256',
+			_file_sha256(canonical_metadata_snapshot),
+		),
+	):
+		_expected_equal(metadata.get(key), expected, f'{label} run metadata {key}')
 	_reject_supervision_contract(metadata, label=f'{label} run metadata')
 
 
