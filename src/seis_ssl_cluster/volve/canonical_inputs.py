@@ -233,6 +233,30 @@ def prepare_volve_canonical_inputs(
 	)
 
 
+def validate_volve_canonical_input_registration(
+	config: VolveCanonicalInputConfig,
+) -> VolveCanonicalInputResult:
+	'''Validate canonical public inputs and an existing registration read-only.'''
+	_validate_config(config)
+	validated = _validate_canonical_inputs(config)
+	manifest, stats, metadata = _build_outputs(config, validated)
+	for path in _output_files(config.paths):
+		if not path.is_file():
+			raise FileNotFoundError(
+				f'Volve canonical input registration does not exist: {path}'
+			)
+	_validate_existing_outputs(config.paths, manifest, stats, metadata)
+	return VolveCanonicalInputResult(
+		paths=config.paths,
+		action='REUSE',
+		manifest=manifest,
+		normalization_stats=stats,
+		scientific_identity_sha256=cast(
+			'str', metadata['scientific_identity_sha256']
+		),
+	)
+
+
 def _validate_config(config: VolveCanonicalInputConfig) -> None:
 	if not isinstance(config, VolveCanonicalInputConfig):
 		msg = f'config must be VolveCanonicalInputConfig; got {config!r}'
@@ -948,4 +972,5 @@ __all__ = [
 	'VolveCanonicalInputResult',
 	'prepare_volve_canonical_inputs',
 	'resolve_volve_canonical_input_config',
+	'validate_volve_canonical_input_registration',
 ]

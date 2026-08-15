@@ -13,6 +13,14 @@ from seis_ssl_cluster.volve.canonical_inputs import (
 	VolveCanonicalInputResult,
 	prepare_volve_canonical_inputs,
 	resolve_volve_canonical_input_config,
+	validate_volve_canonical_input_registration,
+)
+from seis_ssl_cluster.volve.mae_validation import (
+	VolveMaeInputValidation,
+	VolveMaeValidationResult,
+	validate_volve_mae,
+	validate_volve_mae_inputs_from_configs,
+	write_volve_mae_validation_report,
 )
 
 __all__ = [
@@ -26,6 +34,12 @@ __all__ = [
 	'VolveCanonicalInputConfig',
 	'VolveCanonicalInputPaths',
 	'VolveCanonicalInputResult',
+	'VolveMaeInputValidation',
+	'VolveMaeValidationResult',
 	'prepare_volve_canonical_inputs',
 	'resolve_volve_canonical_input_config',
+	'validate_volve_canonical_input_registration',
+	'validate_volve_mae',
+	'validate_volve_mae_inputs_from_configs',
+	'write_volve_mae_validation_report',
 ]
