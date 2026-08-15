@@ -22,10 +22,11 @@ from seis_ssl_cluster.volve import (
 	prepare_volve_canonical_inputs,
 	resolve_volve_canonical_input_config,
 )
+from tests.seis_ssl_cluster.helpers_volve import synthetic_volve_canonical_config
 
 
 def test_prepare_registers_read_only_canonical_inputs(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	before = _directory_snapshot(config.paths.canonical_root)
 
 	result = prepare_volve_canonical_inputs(config)
@@ -79,7 +80,7 @@ def test_prepare_registers_read_only_canonical_inputs(tmp_path: Path) -> None:
 
 
 def test_dry_run_validates_without_creating_outputs(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	before = _directory_snapshot(config.volve_root)
 
 	result = prepare_volve_canonical_inputs(config, dry_run=True)
@@ -92,7 +93,7 @@ def test_dry_run_validates_without_creating_outputs(tmp_path: Path) -> None:
 def test_registered_manifest_reads_finite_crop_with_missing_trace_masked(
 	tmp_path: Path,
 ) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	prepare_volve_canonical_inputs(config)
 	manifest = read_manifest_json(config.paths.manifest_path)[0]
 	dataset = NopimsAmplitudeCropDataset(
@@ -110,7 +111,7 @@ def test_registered_manifest_reads_finite_crop_with_missing_trace_masked(
 
 
 def test_only_missing_reuses_only_complete_matching_outputs(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	first = prepare_volve_canonical_inputs(config)
 
 	reused = prepare_volve_canonical_inputs(config, only_missing=True)
@@ -127,7 +128,7 @@ def test_only_missing_reuses_only_complete_matching_outputs(tmp_path: Path) -> N
 
 
 def test_only_missing_rejects_incomplete_outputs(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	config.paths.output_dir.mkdir(parents=True)
 	config.paths.manifest_path.write_text('[]\n', encoding='utf-8')
 
@@ -148,7 +149,7 @@ def test_rejects_canonical_manifest_identity_mismatch(
 	field: str,
 	value: object,
 ) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	path = config.paths.canonical_root / 'canonical_volume_manifest.json'
 	payload = _read_json(path)
 	payload[field] = value
@@ -159,7 +160,7 @@ def test_rejects_canonical_manifest_identity_mismatch(
 
 
 def test_rejects_amplitude_hash_mismatch(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	path = config.paths.canonical_root / 'amplitude.npy'
 	array = np.load(path)
 	array[0, 0, 0] += 1.0
@@ -170,7 +171,7 @@ def test_rejects_amplitude_hash_mismatch(tmp_path: Path) -> None:
 
 
 def test_rejects_amplitude_shape_mismatch(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	path = config.paths.canonical_root / 'amplitude.npy'
 	np.save(path, np.ones((2, 3, 5), dtype=np.float32))
 
@@ -179,7 +180,7 @@ def test_rejects_amplitude_shape_mismatch(tmp_path: Path) -> None:
 
 
 def test_rejects_amplitude_dtype_mismatch(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	path = config.paths.canonical_root / 'amplitude.npy'
 	np.save(path, np.ones(config.identity.shape_xyz, dtype=np.float64))
 
@@ -188,7 +189,7 @@ def test_rejects_amplitude_dtype_mismatch(tmp_path: Path) -> None:
 
 
 def test_rejects_valid_mask_shape_and_dtype(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	mask_path = config.paths.canonical_root / 'valid_trace_mask.npy'
 	np.save(mask_path, np.ones((2, 2), dtype=np.uint8))
 
@@ -201,7 +202,7 @@ def test_rejects_valid_mask_shape_and_dtype(tmp_path: Path) -> None:
 
 
 def test_rejects_time_axis_mismatch(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	time_path = config.paths.canonical_root / 'time_ms.npy'
 	np.save(time_path, np.array([4.0, 8.0, 13.0, 16.0], dtype=np.float32))
 
@@ -210,7 +211,7 @@ def test_rejects_time_axis_mismatch(tmp_path: Path) -> None:
 
 
 def test_rejects_inline_axis_shifted_by_one(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	path = config.paths.canonical_root / 'inline_values.npy'
 	values = np.load(path, allow_pickle=False)
 	np.save(path, values + 1)
@@ -235,7 +236,7 @@ def test_rejects_shifted_fixed_volve_identity(tmp_path: Path) -> None:
 
 
 def test_rejects_crossline_axis_with_missing_value(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	path = config.paths.canonical_root / 'crossline_values.npy'
 	values = np.load(path, allow_pickle=False)
 	values[1:] += 1
@@ -246,7 +247,7 @@ def test_rejects_crossline_axis_with_missing_value(tmp_path: Path) -> None:
 
 
 def test_accepts_exact_physical_axes_stored_as_float(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	root = config.paths.canonical_root
 	for name in ('inline_values.npy', 'crossline_values.npy'):
 		path = root / name
@@ -263,7 +264,7 @@ def test_accepts_exact_physical_axes_stored_as_float(tmp_path: Path) -> None:
 
 
 def test_rejects_nonfinite_valid_trace(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	amplitude_path = config.paths.canonical_root / 'amplitude.npy'
 	amplitude = np.load(amplitude_path)
 	amplitude[0, 0, 1] = np.nan
@@ -274,7 +275,7 @@ def test_rejects_nonfinite_valid_trace(tmp_path: Path) -> None:
 
 
 def test_rejects_non_nan_invalid_trace(tmp_path: Path) -> None:
-	config = _synthetic_config(tmp_path)
+	config = synthetic_volve_canonical_config(tmp_path)
 	amplitude_path = config.paths.canonical_root / 'amplitude.npy'
 	amplitude = np.load(amplitude_path)
 	amplitude[1, 2, :] = 0.0
@@ -304,106 +305,6 @@ def test_config_resolver_and_proc_entrypoint_contract(tmp_path: Path) -> None:
 	assert '--dry-run' in help_text
 	assert '--only-missing' in help_text
 	assert callable(module.main)
-
-
-def _synthetic_config(tmp_path: Path) -> VolveCanonicalInputConfig:
-	volve_root = tmp_path / 'public' / 'volve'
-	artifact_root = tmp_path / 'artifacts'
-	canonical_root = volve_root / VOLVE_CANONICAL_RELATIVE_ROOT
-	canonical_root.mkdir(parents=True)
-	shape_xyz = (2, 3, 4)
-	amplitude = np.arange(np.prod(shape_xyz), dtype=np.float32).reshape(shape_xyz)
-	valid_mask = np.ones(shape_xyz[:2], dtype=bool)
-	valid_mask[1, 2] = False
-	amplitude[~valid_mask] = np.nan
-	amplitude_path = canonical_root / 'amplitude.npy'
-	np.save(amplitude_path, amplitude)
-	np.save(canonical_root / 'valid_trace_mask.npy', valid_mask)
-	np.save(canonical_root / 'inline_values.npy', np.array([100, 101]))
-	np.save(canonical_root / 'crossline_values.npy', np.array([200, 201, 202]))
-	np.save(
-		canonical_root / 'time_ms.npy',
-		np.array([4.0, 8.0, 12.0, 16.0], dtype=np.float32),
-	)
-	stats = {
-		'schema_version': 1,
-		'status': 'PASS',
-		'deterministic_sample': {
-			'policy': 'synthetic deterministic sample',
-			'value_quantiles': {
-				'p1': -4.0,
-				'p25': -1.0,
-				'p50': 0.25,
-				'p75': 1.0,
-				'p99': 5.0,
-			},
-		},
-	}
-	stats_path = canonical_root / 'normalization_stats.json'
-	_write_json(stats_path, stats)
-	parity = {
-		'schema_version': 1,
-		'status': 'PASS',
-		'all_exact': True,
-		'full_volume_checks': {
-			'valid_finite_voxel_count': 5 * shape_xyz[2],
-			'missing_nan_voxel_count': shape_xyz[2],
-		},
-	}
-	parity_path = canonical_root / 'trace_parity.json'
-	_write_json(parity_path, parity)
-	amplitude_hash = _sha256(amplitude_path)
-	identity = VolveCanonicalIdentity(
-		dataset_id='synthetic_volve',
-		survey_id='synthetic_survey',
-		shape_xyz=shape_xyz,
-		dtype='float32',
-		inline_min=100,
-		inline_max=101,
-		crossline_min=200,
-		crossline_max=202,
-		first_twt_ms=4.0,
-		sample_interval_ms=4.0,
-		valid_trace_count=5,
-		missing_trace_count=1,
-		source_segy_sha256='a' * 64,
-		amplitude_sha256=amplitude_hash,
-		amplitude_size_bytes=amplitude_path.stat().st_size,
-	)
-	canonical_manifest = {
-		'schema_version': 1,
-		'status': 'PASS',
-		'dataset_id': identity.dataset_id,
-		'shape': list(shape_xyz),
-		'axis_order': ['inline', 'crossline', 'twt'],
-		'dtype': 'float32',
-		'geometry': {
-			'valid_trace_count': 5,
-			'missing_trace_count': 1,
-		},
-		'sources': {'segy': {'sha256': identity.source_segy_sha256}},
-		'artifacts': {
-			'amplitude.npy': _artifact_record(amplitude_path),
-			'valid_trace_mask.npy': _artifact_record(
-				canonical_root / 'valid_trace_mask.npy'
-			),
-			'inline_values.npy': _artifact_record(
-				canonical_root / 'inline_values.npy'
-			),
-			'crossline_values.npy': _artifact_record(
-				canonical_root / 'crossline_values.npy'
-			),
-			'time_ms.npy': _artifact_record(canonical_root / 'time_ms.npy'),
-			'normalization_stats.json': _artifact_record(stats_path),
-			'trace_parity.json': _artifact_record(parity_path),
-		},
-	}
-	_write_json(canonical_root / 'canonical_volume_manifest.json', canonical_manifest)
-	return VolveCanonicalInputConfig(
-		volve_root=volve_root.resolve(),
-		artifact_root=artifact_root.resolve(),
-		identity=identity,
-	)
 
 
 def _refresh_amplitude_identity(

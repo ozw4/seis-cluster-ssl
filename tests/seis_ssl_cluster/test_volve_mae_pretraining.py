@@ -25,10 +25,9 @@ from seis_ssl_cluster.training.random_checkpoint import (
 )
 from seis_ssl_cluster.volve import (
 	VOLVE_CANONICAL_DATASET_ID,
-	prepare_volve_canonical_inputs,
 	validate_volve_mae_inputs_from_configs,
 )
-from tests.seis_ssl_cluster.test_volve_canonical_inputs import _synthetic_config
+from tests.seis_ssl_cluster.helpers_volve import write_synthetic_volve_registration
 
 if TYPE_CHECKING:
 	from collections.abc import Mapping
@@ -235,8 +234,7 @@ def _input_fixture(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[object, dict[str, object], dict[str, object]]:
-	config = _synthetic_config(tmp_path)
-	prepare_volve_canonical_inputs(config)
+	config = write_synthetic_volve_registration(tmp_path)
 	monkeypatch.setenv('SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str(config.artifact_root))
 	return config, load_config(SMOKE_CONFIG), load_config(FULL_CONFIG)
 
