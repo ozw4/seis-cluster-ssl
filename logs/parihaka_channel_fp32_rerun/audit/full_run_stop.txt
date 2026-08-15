@@ -1,0 +1,6 @@
+full 60-job loop stopped before completion due available GPU capacity/runtime; no scientific settings changed.
+partial job: frozen/pretrained/layout_000/small
+resume command:
+source ./parihaka_channel_env.sh
+export PYTHONPATH=src
+CUDA_VISIBLE_DEVICES=0 python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py --config "$FROZEN_CONFIG" --model pretrained --layout layout_000 --size small --layout-config "$LAYOUT_CONFIG" --device cuda --resume "$FROZEN_RUN_ROOT/model=pretrained/layout=layout_000/size=small/latest.pt"

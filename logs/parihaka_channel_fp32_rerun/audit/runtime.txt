@@ -1,0 +1,8 @@
+torch 2.13.0+cu130
+cuda 13.0
+cuda_available True
+gpu_count 2
+gpu 0 NVIDIA H100 NVL
+memory_bytes 0 99951706112
+gpu 1 NVIDIA H100 NVL
+memory_bytes 1 99951706112

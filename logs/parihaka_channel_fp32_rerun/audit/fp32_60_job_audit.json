@@ -1,0 +1,574 @@
+{
+  "counts": {
+    "end_to_end_completed": 0,
+    "end_to_end_expected": 30,
+    "frozen_completed": 1,
+    "frozen_expected": 30
+  },
+  "execution_sha": "d947c87b7b209f2db6b66df43feb4550d66b0a3e",
+  "failure_count": 0,
+  "jobs": {
+    "end_to_end": [
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_000/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_000/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_000/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_001/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_001/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_001/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_002/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_002/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_002/size=large",
+        "size": "large"
+      },
+      {
+        "checkpoint": {
+          "completed": false,
+          "floating_dtypes": [
+            "torch.float32"
+          ],
+          "global_step": 10,
+          "runtime": {
+            "amp_enabled": false,
+            "autocast_dtype": null,
+            "grad_scaler_enabled": false,
+            "resolved_device_type": "cuda"
+          },
+          "scaler_state_dict_is_none": true,
+          "training_amp": null
+        },
+        "condition": "pretrained",
+        "latest_exists": true,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_003/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_003/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_003/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_004/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_004/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=pretrained/layout=layout_004/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_000/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_000/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_000/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_001/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_001/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_001/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_002/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_002/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_002/size=large",
+        "size": "large"
+      },
+      {
+        "checkpoint": {
+          "completed": false,
+          "floating_dtypes": [
+            "torch.float32"
+          ],
+          "global_step": 10,
+          "runtime": {
+            "amp_enabled": false,
+            "autocast_dtype": null,
+            "grad_scaler_enabled": false,
+            "resolved_device_type": "cuda"
+          },
+          "scaler_state_dict_is_none": true,
+          "training_amp": null
+        },
+        "condition": "random",
+        "latest_exists": true,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_003/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_003/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_003/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_004/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_004/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_end_to_end/runs/encoder_init=random/layout=layout_004/size=large",
+        "size": "large"
+      }
+    ],
+    "frozen": [
+      {
+        "checkpoint": {
+          "completed": false,
+          "floating_dtypes": [
+            "torch.float32"
+          ],
+          "global_step": 1408,
+          "runtime": null,
+          "scaler_state_dict_is_none": true,
+          "training_amp": false
+        },
+        "condition": "pretrained",
+        "latest_exists": true,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_000/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_000/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_000/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_001/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_001/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_001/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_002/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_002/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_002/size=large",
+        "size": "large"
+      },
+      {
+        "checkpoint": {
+          "completed": false,
+          "floating_dtypes": [
+            "torch.float32"
+          ],
+          "global_step": 10,
+          "runtime": null,
+          "scaler_state_dict_is_none": true,
+          "training_amp": false
+        },
+        "condition": "pretrained",
+        "latest_exists": true,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_003/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_003/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_003/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_004/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_004/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "pretrained",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=pretrained/layout=layout_004/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_000/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_000/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_000",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_000/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_001/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_001",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_001/size=medium",
+        "size": "medium"
+      },
+      {
+        "checkpoint": {
+          "completed": true,
+          "floating_dtypes": [
+            "torch.float32"
+          ],
+          "global_step": 60800,
+          "runtime": null,
+          "scaler_state_dict_is_none": true,
+          "training_amp": false
+        },
+        "condition": "random",
+        "latest_exists": true,
+        "layout": "layout_001",
+        "metrics_contract": {
+          "e2e_runtime_fp32": true,
+          "frozen_amp_false": true,
+          "test_channel_iou": 0.17817125620702925
+        },
+        "metrics_exists": true,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_001/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_002/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_002/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_002",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_002/size=large",
+        "size": "large"
+      },
+      {
+        "checkpoint": {
+          "completed": false,
+          "floating_dtypes": [
+            "torch.float32"
+          ],
+          "global_step": 10,
+          "runtime": null,
+          "scaler_state_dict_is_none": true,
+          "training_amp": false
+        },
+        "condition": "random",
+        "latest_exists": true,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_003/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_003/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_003",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_003/size=large",
+        "size": "large"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_004/size=small",
+        "size": "small"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_004/size=medium",
+        "size": "medium"
+      },
+      {
+        "condition": "random",
+        "latest_exists": false,
+        "layout": "layout_004",
+        "metrics_exists": false,
+        "path": "/workspace/artifacts/seis_ssl_cluster/channel_benchmark/runs/model=random/layout=layout_004/size=large",
+        "size": "large"
+      }
+    ]
+  },
+  "resume_count": 4,
+  "status": "INCOMPLETE",
+  "stop_reason": "full 60-job loop stopped before completion due available GPU capacity/runtime; no scientific settings changed."
+}
