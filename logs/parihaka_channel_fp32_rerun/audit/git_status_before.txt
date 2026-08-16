@@ -1,2 +1,0 @@
-?? logs/parihaka_channel_clean_rerun/audit/
-?? logs/parihaka_channel_fp32_rerun/
