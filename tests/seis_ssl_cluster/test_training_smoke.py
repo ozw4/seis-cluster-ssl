@@ -359,6 +359,31 @@ def test_resume_advances_global_step(tmp_path: Path) -> None:
 	assert payload['training_state']['checkpoint_kind'] == 'epoch'
 
 
+def test_resume_rejects_changed_source_scientific_input(tmp_path: Path) -> None:
+	cfg = _tiny_config(tmp_path)
+	metadata_path = tmp_path / 'volve_canonical_input_metadata.json'
+	metadata_path.write_text(
+		json.dumps({'scientific_identity_sha256': 'a' * 64}) + '\n',
+		encoding='utf-8',
+	)
+	cfg['manifests']['canonical_input_metadata'] = str(metadata_path)
+	cfg['train']['max_steps'] = 1
+	checkpoint_path = run_mae_pretraining(cfg)
+	metadata_path.write_text(
+		json.dumps({'scientific_identity_sha256': 'b' * 64}) + '\n',
+		encoding='utf-8',
+	)
+	resume_cfg = deepcopy(cfg)
+	resume_cfg['train']['epochs'] = 2
+	resume_cfg['train']['max_steps'] = 2
+
+	with pytest.raises(
+		ValueError,
+		match='existing scientific input snapshot does not match source',
+	):
+		run_mae_pretraining(resume_cfg, resume=checkpoint_path)
+
+
 def test_resume_refreshes_runtime_metadata_for_allowed_overrides(
 	tmp_path: Path,
 ) -> None:

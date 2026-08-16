@@ -219,6 +219,8 @@ def test_experiment_readme_has_reentrant_full_runbook() -> None:
 	readme = (PRETRAIN_ROOT / 'README.md').read_text(encoding='utf-8')
 
 	assert 'prepare_volve_canonical_inputs.py \\\n  --only-missing' in readme
+	assert 'if [ ! -f "$SMOKE_RUN/latest.pt" ]; then' in readme
+	assert 'test -f "$SMOKE_RUN/latest.pt"' in readme
 	assert '02_full_100ep.yaml"\n' in readme
 	assert '--resume "$FULL_RUN/latest.pt"' in readme
 	assert '--check full' in readme

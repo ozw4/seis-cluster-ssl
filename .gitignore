@@ -60,6 +60,3 @@ debug_*/
 .work/
 vendor/issue_forge
 vendor/issue_forge/
-
-# Generated execution logs
-/logs/

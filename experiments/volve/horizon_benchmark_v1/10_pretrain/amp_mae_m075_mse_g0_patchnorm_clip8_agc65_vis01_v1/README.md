@@ -7,6 +7,7 @@ export SEIS_SSL_CLUSTER_VOLVE_ROOT=/home/dcuser/public_data/field/volve
 export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/path/to/artifacts/seis_ssl_cluster
 export EXP=experiments/volve/horizon_benchmark_v1
 export PRETRAIN="$EXP/10_pretrain/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1"
+export SMOKE_RUN="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/volve/horizon_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/smoke_2step"
 export FULL_RUN="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/volve/horizon_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep"
 export RANDOM_CHECKPOINT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt"
 
@@ -21,8 +22,11 @@ python proc/seis_ssl_cluster/validate_volve_mae.py \
 
 python proc/seis_ssl_cluster/train_amp_mae.py \
   --config "$PRETRAIN/01_smoke_2step.yaml" --dry-run
-python proc/seis_ssl_cluster/train_amp_mae.py \
-  --config "$PRETRAIN/01_smoke_2step.yaml"
+if [ ! -f "$SMOKE_RUN/latest.pt" ]; then
+  python proc/seis_ssl_cluster/train_amp_mae.py \
+    --config "$PRETRAIN/01_smoke_2step.yaml"
+fi
+test -f "$SMOKE_RUN/latest.pt"
 
 python proc/seis_ssl_cluster/validate_volve_mae.py \
   --input-config proc/configs/seis_ssl_cluster/prepare_volve_canonical_inputs.yaml \

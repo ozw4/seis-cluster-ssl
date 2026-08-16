@@ -1,0 +1,8 @@
+export SEIS_SSL_CLUSTER_VOLVE_ROOT=/home/dcuser/public_data/field/volve
+export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/workspace/artifacts/seis_ssl_cluster
+
+export EXP=experiments/volve/horizon_benchmark_v1
+export PRETRAIN="$EXP/10_pretrain/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1"
+
+export SMOKE_RUN="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/volve/horizon_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/smoke_2step"
+export FULL_RUN="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/volve/horizon_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep"
