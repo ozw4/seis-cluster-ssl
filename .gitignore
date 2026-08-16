@@ -24,6 +24,7 @@ Thumbs.db
 artifacts/
 
 # 実行ログや中間ファイル
+/logs/
 *.log
 *.out
 *.bak
@@ -59,3 +60,6 @@ debug_*/
 .work/
 vendor/issue_forge
 vendor/issue_forge/
+
+# Generated execution logs
+/logs/
