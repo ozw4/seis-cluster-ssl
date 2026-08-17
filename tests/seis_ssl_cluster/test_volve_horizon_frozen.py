@@ -17,6 +17,7 @@ from torch import nn
 
 from seis_ssl_cluster.config import load_config, resolve_embedding_extraction_config
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
+from seis_ssl_cluster.volve import horizon_frozen as horizon_frozen_module
 from seis_ssl_cluster.volve.horizon_data import HORIZON_NAMES
 from seis_ssl_cluster.volve.horizon_frozen import (
 	BEST_NAME,
@@ -122,6 +123,20 @@ def test_paired_job_preflight_reuses_split_and_decoder_identity(
 	assert pretrained.run_identity['decoder'] == random_plan.run_identity['decoder']
 	assert pretrained.run_identity['tiles'] == random_plan.run_identity['tiles']
 	assert pretrained.run_identity['training'] == random_plan.run_identity['training']
+	assert pretrained.run_identity['optimizer'] == {
+		'name': 'adamw',
+		'betas': [0.9, 0.999],
+		'eps': 1.0e-8,
+		'weight_decay': 1.0e-4,
+	}
+	assert pretrained.run_identity['objective'] == {
+		'loss': 'fractional_two_bin_per_tile_horizon_macro_v1',
+		'prediction': 'masked_soft_argmax_v1',
+		'checkpoint_selection': 'strict_lower_validation_macro_mae_v1',
+		'metrics_schema_version': 1,
+	}
+	assert pretrained.run_identity['optimizer'] == random_plan.run_identity['optimizer']
+	assert pretrained.run_identity['objective'] == random_plan.run_identity['objective']
 	assert pretrained.run_identity['canonical_scientific_identity'] == (
 		random_plan.run_identity['canonical_scientific_identity']
 	)
@@ -353,6 +368,15 @@ def test_two_step_cpu_resume_and_identity_mismatch_rejection(tmp_path: Path) -> 
 	latest = plan.output_dir / LATEST_NAME
 	first = torch.load(latest, map_location='cpu', weights_only=False)
 	assert first['global_step'] == 1
+	expected_precision = {
+		'device_type': 'cpu',
+		'amp_enabled': False,
+		'autocast_dtype': None,
+		'scaler_required': False,
+	}
+	assert first['runtime_precision'] == expected_precision
+	assert first['run_identity']['runtime_precision'] == expected_precision
+	assert first['scaler_state_dict'] is None
 	assert run_frozen_horizon_job(
 		plan,
 		device='cpu',
@@ -378,6 +402,54 @@ def test_two_step_cpu_resume_and_identity_mismatch_rejection(tmp_path: Path) -> 
 			max_steps=3,
 			resume=latest,
 			decoder_factory=_TinyHorizonDecoder,
+		)
+
+	second['runtime_precision'] = {
+		'device_type': 'cuda',
+		'amp_enabled': True,
+		'autocast_dtype': 'float16',
+		'scaler_required': True,
+	}
+	torch.save(second, latest)
+	with pytest.raises(ValueError, match='runtime precision'):
+		run_frozen_horizon_job(
+			plan,
+			device='cpu',
+			max_steps=3,
+			resume=latest,
+			decoder_factory=_TinyHorizonDecoder,
+		)
+
+
+def test_amp_resume_requires_grad_scaler_state() -> None:
+	runtime_precision = {
+		'device_type': 'cuda',
+		'amp_enabled': True,
+		'autocast_dtype': 'float16',
+		'scaler_required': True,
+	}
+	with pytest.raises(ValueError, match='runtime precision'):
+		horizon_frozen_module._validate_resume_runtime(  # noqa: SLF001
+			{
+				'runtime_precision': {
+					'device_type': 'cpu',
+					'amp_enabled': False,
+					'autocast_dtype': None,
+					'scaler_required': False,
+				},
+				'scaler_state_dict': None,
+			},
+			expected=runtime_precision,
+			scaler=object(),  # type: ignore[arg-type]
+		)
+	with pytest.raises(ValueError, match='missing required GradScaler state'):
+		horizon_frozen_module._validate_resume_runtime(  # noqa: SLF001
+			{
+				'runtime_precision': runtime_precision,
+				'scaler_state_dict': None,
+			},
+			expected=runtime_precision,
+			scaler=object(),  # type: ignore[arg-type]
 		)
 
 
@@ -407,6 +479,14 @@ def test_completed_job_selects_strict_best_and_tests_it_once(tmp_path: Path) -> 
 
 	assert metrics_path == plan.output_dir / 'metrics.json'
 	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+	expected_precision = {
+		'device_type': 'cpu',
+		'amp_enabled': False,
+		'autocast_dtype': None,
+		'scaler_required': False,
+	}
+	assert metrics['runtime_precision'] == expected_precision
+	assert metrics['benchmark_identity']['runtime_precision'] == expected_precision
 	assert metrics['test']['evaluation_pass_count'] == 1
 	assert metrics['test']['primary_common']['macro_mae_samples'] is not None
 	secondary_coverage = metrics['test']['secondary_per_horizon']['coverage']
@@ -426,6 +506,8 @@ def test_completed_job_selects_strict_best_and_tests_it_once(tmp_path: Path) -> 
 		plan.output_dir / LATEST_NAME, map_location='cpu', weights_only=False
 	)
 	assert latest['completed'] is True
+	assert best['runtime_precision'] == expected_precision
+	assert latest['runtime_precision'] == expected_precision
 	assert all(
 		torch.equal(best['model_state_dict'][key], latest['model_state_dict'][key])
 		for key in best['model_state_dict']

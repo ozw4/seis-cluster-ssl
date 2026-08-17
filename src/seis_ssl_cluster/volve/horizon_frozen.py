@@ -74,6 +74,15 @@ LATEST_NAME = 'latest.pt'
 BEST_NAME = 'best.pt'
 METRICS_NAME = 'metrics.json'
 HISTORY_NAME = 'history.json'
+OPTIMIZER_NAME = 'adamw'
+OPTIMIZER_BETAS = (0.9, 0.999)
+OPTIMIZER_EPS = 1.0e-8
+OBJECTIVE_IDENTITY = {
+	'loss': 'fractional_two_bin_per_tile_horizon_macro_v1',
+	'prediction': 'masked_soft_argmax_v1',
+	'checkpoint_selection': 'strict_lower_validation_macro_mae_v1',
+	'metrics_schema_version': 1,
+}
 VOLVE_MAE_MODEL_TAG = 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
 VOLVE_RANDOM_ENCODER_SEED = 42
 VOLVE_PRETRAINED_CHECKPOINT_SUFFIX = (
@@ -672,6 +681,13 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 	resume_path = None if resume is None else Path(resume)
 	_validate_output(plan.output_dir, resume_path)
 	run_device = _resolve_device(device)
+	runtime_precision = _runtime_precision_identity(
+		run_device, amp_requested=plan.config.train.amp
+	)
+	runtime_run_identity = {
+		**plan.run_identity,
+		'runtime_precision': runtime_precision,
+	}
 	_configure_determinism()
 	_seed_everything(plan.config.train.seed)
 	selected_paths = (
@@ -699,9 +715,11 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 	optimizer = torch.optim.AdamW(
 		decoder.parameters(),
 		lr=plan.config.train.learning_rate,
+		betas=OPTIMIZER_BETAS,
+		eps=OPTIMIZER_EPS,
 		weight_decay=plan.config.train.weight_decay,
 	)
-	amp_enabled = plan.config.train.amp and run_device.type == 'cuda'
+	amp_enabled = bool(runtime_precision['amp_enabled'])
 	scaler = torch.amp.GradScaler('cuda', enabled=True) if amp_enabled else None
 	history: list[dict[str, object]] = []
 	best_epoch: int | None = None
@@ -713,13 +731,18 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 	train_tile_count = 0
 	if resume_path is not None:
 		payload = torch.load(resume_path, map_location=run_device, weights_only=False)
-		if payload.get('run_identity') != plan.run_identity:
+		_validate_resume_runtime(
+			payload,
+			expected=runtime_precision,
+			scaler=scaler,
+		)
+		if payload.get('run_identity') != runtime_run_identity:
 			raise ValueError('resume checkpoint does not match this frozen horizon job')
 		if payload.get('completed') is True:
 			raise ValueError('completed frozen horizon job cannot be resumed')
 		decoder.load_state_dict(_state_dict(payload))
 		optimizer.load_state_dict(_mapping(payload, 'optimizer_state_dict'))
-		if scaler is not None and payload.get('scaler_state_dict') is not None:
+		if scaler is not None:
 			scaler.load_state_dict(_mapping(payload, 'scaler_state_dict'))
 		history = [
 			dict(cast('Mapping[str, object]', row))
@@ -755,6 +778,8 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 					train_loss_sum=train_loss_sum,
 					train_tile_count=train_tile_count,
 					completed=False,
+					runtime_precision=runtime_precision,
+					run_identity=runtime_run_identity,
 				)
 				_write_json(plan.output_dir / HISTORY_NAME, history)
 				return None
@@ -789,6 +814,8 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 					train_loss_sum=train_loss_sum,
 					train_tile_count=train_tile_count,
 					completed=False,
+					runtime_precision=runtime_precision,
+					run_identity=runtime_run_identity,
 				)
 				_write_json(plan.output_dir / HISTORY_NAME, history)
 				return None
@@ -825,7 +852,8 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 				optimizer=optimizer,
 				scaler=scaler,
 				payload={
-					'run_identity': plan.run_identity,
+					'run_identity': runtime_run_identity,
+					'runtime_precision': runtime_precision,
 					'epoch': epoch,
 					'global_step': global_step,
 					'validation': validation['secondary'],
@@ -845,6 +873,8 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 			train_loss_sum=0.0,
 			train_tile_count=0,
 			completed=False,
+			runtime_precision=runtime_precision,
+			run_identity=runtime_run_identity,
 		)
 		_write_json(plan.output_dir / HISTORY_NAME, history)
 		start_position = 0
@@ -856,8 +886,12 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 		raise RuntimeError('training completed without a best checkpoint')
 	best_path = plan.output_dir / BEST_NAME
 	best = torch.load(best_path, map_location=run_device, weights_only=False)
-	if best.get('run_identity') != plan.run_identity:
+	if best.get('run_identity') != runtime_run_identity:
 		raise ValueError('best checkpoint identity changed before test evaluation')
+	if best.get('runtime_precision') != runtime_precision:
+		raise ValueError(
+			'best checkpoint runtime precision changed before test evaluation'
+		)
 	decoder.load_state_dict(_state_dict(best))
 	test = _evaluate_horizon_dataset(
 		decoder,
@@ -875,7 +909,8 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 		'model': plan.model,
 		'layout_id': plan.layout_id,
 		'data_size': plan.data_size,
-		'benchmark_identity': plan.run_identity,
+		'benchmark_identity': runtime_run_identity,
+		'runtime_precision': runtime_precision,
 		'best_epoch': best_epoch,
 		'best_checkpoint': {
 			'path': str(best_path),
@@ -904,6 +939,8 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 		train_loss_sum=0.0,
 		train_tile_count=0,
 		completed=True,
+		runtime_precision=runtime_precision,
+		run_identity=runtime_run_identity,
 	)
 	return metrics_path
 
@@ -1040,7 +1077,7 @@ def _run_identity(  # noqa: PLR0913
 		else geometry.random_model_source
 	)
 	return {
-		'schema_version': 2,
+		'schema_version': 3,
 		'benchmark': 'mae_vs_random_frozen_v1',
 		'model': model,
 		'layout_id': split_plan.layout_id,
@@ -1103,6 +1140,13 @@ def _run_identity(  # noqa: PLR0913
 			'amp_on_cuda': config.train.amp,
 			'gradient_clip_norm': config.train.gradient_clip_norm,
 		},
+		'optimizer': {
+			'name': OPTIMIZER_NAME,
+			'betas': list(OPTIMIZER_BETAS),
+			'eps': OPTIMIZER_EPS,
+			'weight_decay': config.train.weight_decay,
+		},
+		'objective': dict(OBJECTIVE_IDENTITY),
 	}
 
 
@@ -1436,6 +1480,8 @@ def _save_latest(  # noqa: PLR0913
 	train_loss_sum: float,
 	train_tile_count: int,
 	completed: bool,
+	runtime_precision: Mapping[str, object],
+	run_identity: Mapping[str, object],
 ) -> None:
 	_save_checkpoint(
 		plan.output_dir / LATEST_NAME,
@@ -1443,7 +1489,8 @@ def _save_latest(  # noqa: PLR0913
 		optimizer=optimizer,
 		scaler=scaler,
 		payload={
-			'run_identity': plan.run_identity,
+			'run_identity': run_identity,
+			'runtime_precision': runtime_precision,
 			'history': list(history),
 			'best_epoch': best_epoch,
 			'best_validation_macro_mae_samples': best_mae,
@@ -1595,6 +1642,37 @@ def _resolve_device(value: str) -> torch.device:
 	if value == 'cuda' and not torch.cuda.is_available():
 		raise RuntimeError('CUDA was requested but is not available')
 	return torch.device(value)
+
+
+def _runtime_precision_identity(
+	device: torch.device, *, amp_requested: bool
+) -> dict[str, object]:
+	amp_enabled = amp_requested and device.type == 'cuda'
+	return {
+		'device_type': device.type,
+		'amp_enabled': amp_enabled,
+		'autocast_dtype': 'float16' if amp_enabled else None,
+		'scaler_required': amp_enabled,
+	}
+
+
+def _validate_resume_runtime(
+	payload: Mapping[str, object],
+	*,
+	expected: Mapping[str, object],
+	scaler: torch.amp.GradScaler | None,
+) -> None:
+	if payload.get('runtime_precision') != expected:
+		raise ValueError('resume checkpoint runtime precision does not match this run')
+	scaler_required = expected.get('scaler_required') is True
+	scaler_state = payload.get('scaler_state_dict')
+	if scaler_required:
+		if scaler is None:
+			raise ValueError('runtime precision requires a GradScaler')
+		if not isinstance(scaler_state, Mapping) or not scaler_state:
+			raise ValueError('resume checkpoint is missing required GradScaler state')
+	elif scaler_state is not None:
+		raise ValueError('resume checkpoint has unexpected GradScaler state')
 
 
 def _configure_determinism() -> None:

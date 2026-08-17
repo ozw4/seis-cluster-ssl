@@ -85,7 +85,18 @@ python proc/seis_ssl_cluster/run_volve_horizon_frozen.py \
 epochs, the runner reloads `best.pt` and traverses the fixed test tiles once,
 writing common-primary and per-horizon-secondary metrics to `metrics.json`.
 No probability volume is produced. `latest.pt` contains the complete resume
-identity and training position.
+identity and training position. Checkpoints and metrics record the resolved
+runtime precision (`device_type`, AMP state, autocast dtype, and whether a
+GradScaler is required). Resume requires an exact precision match, and an AMP
+checkpoint without its scaler state is rejected. Consequently, use the same
+`--device` precision mode when resuming a job and for both members of a paired
+pretrained/random comparison.
+
+The resume identity also fixes AdamW, its betas/epsilon/weight decay, the
+fractional two-bin horizon-macro loss, masked soft-argmax prediction, strict
+lower validation-MAE checkpoint selection, and metrics schema version. A
+checkpoint produced under an older or different training semantic contract is
+not resumable as the same job.
 
 After the one-condition smoke and dry-run checks, launch all 30 jobs with the
 same command contract (schedule these commands as appropriate for the host):
