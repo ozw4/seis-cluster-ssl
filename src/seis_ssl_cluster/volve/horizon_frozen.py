@@ -67,6 +67,9 @@ from seis_ssl_cluster.volve.horizon_tiles import (
 	frozen_survey_output_valid_mask,
 	horizon_supervision_mask,
 )
+from seis_ssl_cluster.volve.horizon_training import (
+	backward_and_step_horizon_optimizer,
+)
 
 FROZEN_MODEL_ROLES = ('pretrained', 'random')
 FROZEN_CONDITION_COUNT = 30
@@ -966,21 +969,13 @@ def _train_one_tile(  # noqa: PLR0913
 	with _autocast(device, enabled=amp_enabled):
 		logits = decoder(embeddings, valid)
 		loss, _ = fractional_horizon_cross_entropy(logits, target, effective_mask)
-	if scaler is None:
-		loss.backward()
-		torch.nn.utils.clip_grad_norm_(decoder.parameters(), gradient_clip_norm)
-		optimizer.step()
-	else:
-		scaler.scale(loss).backward()
-		scaler.unscale_(optimizer)
-		torch.nn.utils.clip_grad_norm_(decoder.parameters(), gradient_clip_norm)
-		scaler.step(optimizer)
-		scaler.update()
-	if not all(
-		parameter.grad is None or torch.isfinite(parameter.grad).all()
-		for parameter in decoder.parameters()
-	):
-		raise FloatingPointError('decoder gradient must be finite')
+	backward_and_step_horizon_optimizer(
+		loss=loss,
+		model=decoder,
+		optimizer=optimizer,
+		scaler=scaler,
+		gradient_clip_norm=gradient_clip_norm,
+	)
 	return float(loss.detach().cpu().item())
 
 
