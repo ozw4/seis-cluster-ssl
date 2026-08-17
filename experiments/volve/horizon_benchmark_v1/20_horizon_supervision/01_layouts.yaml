@@ -1,0 +1,27 @@
+selection:
+  semantics: explicit_section_prefix_all_available_horizon_points_v1
+
+validation:
+  inline: [10180]
+  crossline: [2258]
+
+layouts:
+  layout_000:
+    inline: [9980, 10070, 10160, 10250]
+    crossline: [2010, 2110, 2210, 2310]
+
+  layout_001:
+    inline: [9998, 10088, 10178, 10268]
+    crossline: [2030, 2130, 2230, 2330]
+
+  layout_002:
+    inline: [10016, 10106, 10196, 10286]
+    crossline: [2050, 2150, 2250, 2350]
+
+  layout_003:
+    inline: [10034, 10124, 10214, 10304]
+    crossline: [2070, 2170, 2270, 2370]
+
+  layout_004:
+    inline: [10052, 10142, 10232, 10322]
+    crossline: [2090, 2190, 2290, 2390]

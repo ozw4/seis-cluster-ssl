@@ -12,6 +12,14 @@ from seis_ssl_cluster.volve import (
 	VolveCanonicalInputConfig,
 	prepare_volve_canonical_inputs,
 )
+from seis_ssl_cluster.volve.horizon_data import (
+	BINDING_RELATIVE_ROOT,
+	CANONICAL_RELATIVE_ROOT,
+	HORIZON_NAMES,
+	VISUAL_QC_RELATIVE_ROOT,
+	VolveHorizonGeometry,
+	array_sha256,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -133,6 +141,118 @@ def write_synthetic_volve_registration(
 	config = synthetic_volve_canonical_config(tmp_path)
 	prepare_volve_canonical_inputs(config)
 	return config
+
+
+def write_synthetic_volve_horizon_root(
+	tmp_path: Path,
+) -> tuple[Path, VolveHorizonGeometry]:
+	root = (tmp_path / 'public' / 'volve_horizons').resolve()
+	canonical = root / CANONICAL_RELATIVE_ROOT
+	binding = root / BINDING_RELATIVE_ROOT
+	visual_qc = root / VISUAL_QC_RELATIVE_ROOT
+	canonical.mkdir(parents=True)
+	binding.mkdir(parents=True)
+	visual_qc.mkdir(parents=True)
+	geometry = VolveHorizonGeometry(
+		shape_xyz=(6, 7, 800),
+		inline_min=100,
+		inline_max=105,
+		crossline_min=200,
+		crossline_max=206,
+		first_twt_ms=4.0,
+		sample_interval_ms=4.0,
+	)
+	inline = np.arange(100, 106, dtype=np.int32)
+	crossline = np.arange(200, 207, dtype=np.int32)
+	time_ms = 4.0 + 4.0 * np.arange(800, dtype=np.float32)
+	valid = np.ones((6, 7), dtype=np.bool_)
+	valid[0, 0] = False
+	np.save(canonical / 'inline_values.npy', inline)
+	np.save(canonical / 'crossline_values.npy', crossline)
+	np.save(canonical / 'time_ms.npy', time_ms)
+	np.save(canonical / 'valid_trace_mask.npy', valid)
+
+	shape = (len(HORIZON_NAMES), 6, 7)
+	bound = np.broadcast_to(valid, shape).copy()
+	bound[0, 1, 1] = False
+	bound[4, 2, 2] = False
+	source = bound.copy()
+	base_samples = np.asarray([572, 610, 650, 700, 743], dtype=np.int16)
+	sample_index = np.broadcast_to(base_samples[:, None, None], shape).copy()
+	sample_index[~bound] = -1
+	sample_float = sample_index.astype(np.float32)
+	twt_ms = 4.0 + 4.0 * sample_float
+	residual = np.zeros(shape, dtype=np.float32)
+	for array in (sample_float, twt_ms, residual):
+		array[~bound] = np.nan
+	common = np.all(bound, axis=0)
+	continuous_order = common.copy()
+	sample_order = common.copy()
+	binding_npz = binding / 'volve_horizon_binding_v2.npz'
+	np.savez_compressed(
+		binding_npz,
+		horizon_names=np.asarray(HORIZON_NAMES),
+		twt_ms=twt_ms,
+		sample_float=sample_float,
+		sample_index=sample_index,
+		xy_residual_m=residual,
+		source_present_mask=source,
+		bound_valid_mask=bound,
+		common_bound_mask=common,
+		continuous_strict_order_mask=continuous_order,
+		sample_strict_order_mask=sample_order,
+	)
+	per_horizon = {
+		name: {'bound_valid_count': int(np.count_nonzero(bound[index]))}
+		for index, name in enumerate(HORIZON_NAMES)
+	}
+	horizon_summary = {
+		'artifact': str(binding_npz),
+		'artifact_sha256': _sha256(binding_npz),
+		'horizon_order': list(HORIZON_NAMES),
+		'per_horizon': per_horizon,
+		'common_bound_count': int(np.count_nonzero(common)),
+		'continuous_strict_order_count': int(
+			np.count_nonzero(continuous_order)
+		),
+		'sample_strict_order_count': int(np.count_nonzero(sample_order)),
+		'continuous_order_excluded_count': 0,
+		'sample_order_excluded_count': 0,
+		'common_bound_mask_sha256': array_sha256(common),
+		'sample_strict_order_mask_sha256': array_sha256(sample_order),
+		'adjacent_order': {},
+		'acceptance_checks': {'synthetic_horizons_pass': True},
+		'diagnostic_checks': {},
+	}
+	_write_json(binding / 'volve_horizon_binding_summary_v2.json', horizon_summary)
+	grid_summary = {
+		'schema_version': 2,
+		'artifact_type': 'volve_st10010_twt_interpretation_binding',
+		'status': 'PASS',
+		'acceptance_checks': {
+			'trace_grid': {'synthetic_trace_grid_pass': True},
+			'horizons': {'synthetic_horizons_pass': True},
+			'faults': {'synthetic_faults_pass': True},
+		},
+		'horizons': horizon_summary,
+		'trace_grid': {
+			'valid_trace_mask_sha256': array_sha256(valid),
+		},
+	}
+	grid_path = binding / 'volve_grid_binding_summary_v2.json'
+	_write_json(grid_path, grid_summary)
+	_write_json(
+		visual_qc / 'manual_review.json',
+		{
+			'schema_version': 1,
+			'artifact_type': 'volve_binding_visual_qc_manual_review',
+			'status': 'PASS',
+			'horizon_visual_qc': 'PASS',
+			'fault_visual_qc': 'PASS',
+			'source_binding_summary_sha256': _sha256(grid_path),
+		},
+	)
+	return root, geometry
 
 
 def _artifact_record(path: Path) -> dict[str, object]:

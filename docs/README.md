@@ -16,6 +16,9 @@ This directory contains runbooks and configuration contracts for
 
 ## Active research runbooks
 
+- [Volve horizon supervision](volve_horizon_supervision.md): binding-v2 inputs,
+  explicit physical-section layouts, fixed validation/common-test masks, and
+  reusable split-plan identities.
 - [Parihaka survey-specific 3D amplitude MAE pretraining](parihaka_mae_pretraining.md): amplitude provenance, ZXY-to-XYZ preparation, direct data paths, fixed training and checkpoint contracts, label exclusion, and transductive claim boundary.
 - [F3 inspection](f3_facies_benchmark_inspection.md): raw inventory, geometry, label checks, and quicklook evidence.
 - [F3 strat-HMM milestone-1 pretraining](strat_hmm_pretraining_milestone1.md): pseudo-target export, pretraining, extraction, and smoke validation.

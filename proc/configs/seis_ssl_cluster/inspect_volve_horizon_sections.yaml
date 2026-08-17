@@ -1,0 +1,8 @@
+paths:
+  volve_root: ${SEIS_SSL_CLUSTER_VOLVE_ROOT}
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  layout_config: experiments/volve/horizon_benchmark_v1/20_horizon_supervision/01_layouts.yaml
+
+outputs:
+  section_statistics_csv: data/volve/horizon_benchmark_v1/horizon_section_statistics.csv
+  split_plans_json: data/volve/horizon_benchmark_v1/horizon_split_plans.json

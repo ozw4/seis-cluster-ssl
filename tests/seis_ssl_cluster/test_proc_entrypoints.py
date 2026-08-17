@@ -50,6 +50,10 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'inspect_volve_horizon_sections.py': (
+		'--config',
+		'--dry-run',
+	),
 	'run_parihaka_channel_end_to_end.py': (
 		'--config',
 		'--encoder-init',
