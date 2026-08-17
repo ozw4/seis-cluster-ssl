@@ -30,13 +30,13 @@ from seis_ssl_cluster.data.window_preprocessing import (
 	resolve_manifest_path,
 )
 from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
-from seis_ssl_cluster.embedding.extractor import build_model_from_config
 from seis_ssl_cluster.embedding.sliding_window import (
 	SlidingWindow,
 	iter_sliding_windows,
 	token_grid_shape_xyz,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
+from seis_ssl_cluster.models.amplitude_encoder_factory import build_model_from_config
 from seis_ssl_cluster.stratigraphy.hmm_decode import decode_ordered_logits_survey
 from seis_ssl_cluster.stratigraphy.prototypes import OrderedPrototypeHead
 from seis_ssl_cluster.stratigraphy.targets import (

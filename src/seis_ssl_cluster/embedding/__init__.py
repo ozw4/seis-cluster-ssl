@@ -6,8 +6,6 @@ from seis_ssl_cluster.embedding.extractor import (
 	EmbeddingExtractionSettings,
 	SurveyEmbeddingResult,
 	build_embedding_metadata,
-	build_model_from_checkpoint_payload,
-	build_model_from_config,
 	extract_embeddings_from_loaded_model,
 	extract_survey_embeddings,
 	extraction_settings_from_config,
@@ -32,6 +30,10 @@ from seis_ssl_cluster.embedding.writer import (
 	output_paths,
 	prepare_outputs,
 	write_metadata,
+)
+from seis_ssl_cluster.models.amplitude_encoder_factory import (
+	build_model_from_checkpoint_payload,
+	build_model_from_config,
 )
 
 __all__ = [

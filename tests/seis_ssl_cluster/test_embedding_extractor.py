@@ -39,7 +39,6 @@ from seis_ssl_cluster.data.window_preprocessing import (
 )
 from seis_ssl_cluster.embedding import (
 	EmbeddingMerger,
-	build_model_from_checkpoint_payload,
 	extract_embeddings_from_loaded_model,
 	iter_sliding_windows,
 	run_embedding_extraction,
@@ -47,6 +46,9 @@ from seis_ssl_cluster.embedding import (
 )
 from seis_ssl_cluster.embedding import (
 	reduce_valid_mask_to_tokens as package_reduce_valid_mask_to_tokens,
+)
+from seis_ssl_cluster.models.amplitude_encoder_factory import (
+	build_model_from_checkpoint_payload,
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.voxel_decoder import VoxelDecoder3D

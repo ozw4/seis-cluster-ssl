@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 
 import torch
 
-from seis_ssl_cluster.embedding.extractor import build_model_from_config
+from seis_ssl_cluster.models.amplitude_encoder_factory import build_model_from_config
 from seis_ssl_cluster.models.mae import LearnedEncoderReplacementToken
 from seis_ssl_cluster.stratigraphy import (
 	MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,

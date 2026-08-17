@@ -34,8 +34,13 @@ from seis_ssl_cluster.data.window_preprocessing import (
 	read_amplitude_crop,
 )
 from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
-from seis_ssl_cluster.embedding.extractor import build_model_from_checkpoint_payload
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
+from seis_ssl_cluster.models.amplitude_encoder_factory import (
+	AMPLITUDE_ENCODER_TRAINED_PARAMETER_PREFIXES,
+	ENCODER_PARAMETER_PREFIX,
+	PATCH_PROJECTION_PARAMETER_PREFIX,
+	build_model_from_checkpoint_payload,
+)
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.voxel_decoder import (
 	VoxelDecoder3D,
@@ -87,7 +92,6 @@ if TYPE_CHECKING:
 	from torch.optim.optimizer import ParamGroup
 
 
-_ENCODER_PARAMETER_PREFIXES = ('patch_projection.', 'encoder.')
 _CHECKPOINT_SCHEMA_VERSION = 1
 
 LATEST_NAME = 'latest.pt'
@@ -1266,7 +1270,7 @@ def _trainable_encoder_state(
 	return {
 		key: value.detach().cpu()
 		for key, value in model.mae.state_dict().items()
-		if key.startswith(_ENCODER_PARAMETER_PREFIXES)
+		if key.startswith(AMPLITUDE_ENCODER_TRAINED_PARAMETER_PREFIXES)
 	}
 
 
@@ -1493,11 +1497,13 @@ def encoder_initial_state_sha256(path: str | Path) -> str:
 	selected = {
 		key: value
 		for key, value in state.items()
-		if key.startswith(_ENCODER_PARAMETER_PREFIXES)
+		if key.startswith(AMPLITUDE_ENCODER_TRAINED_PARAMETER_PREFIXES)
 	}
-	if not selected or not any(key.startswith('patch_projection.') for key in selected):
+	if not selected or not any(
+		key.startswith(PATCH_PROJECTION_PARAMETER_PREFIX) for key in selected
+	):
 		raise ValueError('checkpoint is missing trainable MAE encoder parameters')
-	if not any(key.startswith('encoder.') for key in selected):
+	if not any(key.startswith(ENCODER_PARAMETER_PREFIX) for key in selected):
 		raise ValueError('checkpoint is missing MAE encoder parameters')
 	digest = hashlib.sha256()
 	for key in sorted(selected):

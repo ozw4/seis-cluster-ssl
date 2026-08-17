@@ -13,6 +13,11 @@ from typing import Any
 import torch
 
 import seis_ssl_cluster
+from seis_ssl_cluster.models.amplitude_encoder_factory import (
+	AMPLITUDE_ENCODER_TRAINED_PARAMETER_PREFIXES,
+	BARLOW_TWINS_CHECKPOINT_KIND,
+	BARLOW_TWINS_PRETRAINING_METHOD,
+)
 from seis_ssl_cluster.training.checkpoint import (
 	capture_rng_state,
 	load_checkpoint,
@@ -20,9 +25,9 @@ from seis_ssl_cluster.training.checkpoint import (
 	save_checkpoint,
 )
 
-PRETRAINING_METHOD = 'barlow_twins_3d'
-CHECKPOINT_KIND = 'barlow_twins_pretraining'
-TRAINED_PARAMETER_PREFIXES = ('patch_projection.', 'encoder.')
+PRETRAINING_METHOD = BARLOW_TWINS_PRETRAINING_METHOD
+CHECKPOINT_KIND = BARLOW_TWINS_CHECKPOINT_KIND
+TRAINED_PARAMETER_PREFIXES = AMPLITUDE_ENCODER_TRAINED_PARAMETER_PREFIXES
 _REQUIRED_KEYS = frozenset(
 	{
 		'model_state_dict',

@@ -20,9 +20,6 @@ from typing import cast
 import numpy as np
 import torch
 
-from seis_ssl_cluster.config.pretraining import (
-	resolve_barlow_twins_training_config,
-)
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
@@ -75,16 +72,15 @@ from seis_ssl_cluster.embedding.writer import (
 	prepare_outputs,
 	write_metadata,
 )
+from seis_ssl_cluster.models.amplitude_encoder_factory import (
+	BARLOW_TWINS_PRETRAINING_METHOD,
+	build_model_from_checkpoint_payload,
+	build_model_from_config,
+	checkpoint_config_from_payload,
+	is_random_encoder_checkpoint,
+	validate_pretraining_checkpoint_config,
+)
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
-from seis_ssl_cluster.training.barlow_twins_checkpoint import (
-	CHECKPOINT_KIND as BARLOW_TWINS_CHECKPOINT_KIND,
-)
-from seis_ssl_cluster.training.barlow_twins_checkpoint import (
-	PRETRAINING_METHOD as BARLOW_TWINS_PRETRAINING_METHOD,
-)
-from seis_ssl_cluster.training.barlow_twins_checkpoint import (
-	TRAINED_PARAMETER_PREFIXES as BARLOW_TWINS_TRAINED_PARAMETER_PREFIXES,
-)
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
 	validate_stratigraphy_checkpoint_payload,
@@ -125,22 +121,6 @@ _CHECKPOINT_REQUIRED_TOP_LEVEL = frozenset(
 		'train',
 		'zero_mask',
 	},
-)
-_BARLOW_TWINS_CHECKPOINT_ALLOWED_TOP_LEVEL = frozenset(
-	{
-		'stage',
-		'paths',
-		'manifests',
-		'data',
-		'zero_mask',
-		'model',
-		'augmentations',
-		'barlow_twins',
-		'train',
-	}
-)
-_BARLOW_TWINS_CHECKPOINT_REQUIRED_TOP_LEVEL = (
-	_BARLOW_TWINS_CHECKPOINT_ALLOWED_TOP_LEVEL
 )
 _CHECKPOINT_MODEL_GEOMETRY_KEYS = (
 	'patch_size',
@@ -1106,53 +1086,6 @@ def extraction_settings_from_config(
 	)
 
 
-def build_model_from_config(config: Mapping[str, object]) -> AmplitudeMAE3D:
-	"""Instantiate an amplitude MAE from a checkpoint config."""
-	_validate_checkpoint_resolved_config(config)
-	model = _required_mapping(config, 'model')
-	_validate_checkpoint_model_contract(model)
-	return AmplitudeMAE3D(
-		in_channels=_positive_int(model.get('in_channels'), 'model.in_channels'),
-		out_channels=_positive_int(model.get('out_channels'), 'model.out_channels'),
-		patch_size_xyz=_xyz_from_mapping(
-			model,
-			'patch_size',
-			'model',
-			default=None,
-		),
-		encoder_dim=_positive_int(model.get('encoder_dim'), 'model.encoder_dim'),
-		encoder_depth=_positive_int(
-			model.get('encoder_depth'),
-			'model.encoder_depth',
-		),
-		encoder_heads=_positive_int(
-			model.get('encoder_heads'),
-			'model.encoder_heads',
-		),
-		decoder_dim=_positive_int(model.get('decoder_dim'), 'model.decoder_dim'),
-		decoder_depth=_positive_int(
-			model.get('decoder_depth'),
-			'model.decoder_depth',
-		),
-		decoder_heads=_positive_int(
-			model.get('decoder_heads'),
-			'model.decoder_heads',
-		),
-	)
-
-
-def build_model_from_checkpoint_payload(
-	payload: Mapping[str, object],
-) -> AmplitudeMAE3D:
-	"""Instantiate and strictly load a supported amplitude encoder checkpoint."""
-	config = _checkpoint_config(payload)
-	state_dict = _model_state_dict(payload)
-	model = build_model_from_config(config)
-	model.to(dtype=_checkpoint_floating_dtype(state_dict))
-	model.load_state_dict(state_dict, strict=True)
-	return model
-
-
 def extract_survey_embeddings(  # noqa: PLR0913
 	manifest: SurveyManifest,
 	*,
@@ -1361,7 +1294,7 @@ def build_embedding_metadata(  # noqa: PLR0913
 	}
 	if checkpoint_config.get('stage') == STAGE_BARLOW_TWINS_TRAINING and (
 		checkpoint_payload is None
-		or not _is_random_encoder_checkpoint(checkpoint_payload)
+		or not is_random_encoder_checkpoint(checkpoint_payload)
 	):
 		metadata['pretraining_method'] = BARLOW_TWINS_PRETRAINING_METHOD
 	if manifest.amplitude.valid_mask_path is not None:
@@ -1638,14 +1571,9 @@ def _read_window(  # noqa: PLR0913
 
 
 def _checkpoint_config(payload: Mapping[str, object]) -> Mapping[str, object]:
-	value = payload.get('config')
-	if isinstance(value, Mapping):
-		config = cast('Mapping[str, object]', value)
-		_validate_checkpoint_resolved_config(config)
-		_validate_checkpoint_method_identity(payload, config)
-		return config
-	msg = 'checkpoint is missing a resolved config'
-	raise TypeError(msg)
+	config = checkpoint_config_from_payload(payload)
+	_validate_checkpoint_resolved_config(config)
+	return config
 
 
 def _checkpoint_config_override(
@@ -1658,31 +1586,6 @@ def _checkpoint_config_override(
 	config = cast('Mapping[str, object]', override)
 	_validate_checkpoint_resolved_config(config)
 	return config
-
-
-def _model_state_dict(payload: Mapping[str, object]) -> Mapping[str, torch.Tensor]:
-	value = payload.get('model_state_dict')
-	if not isinstance(value, Mapping):
-		msg = 'checkpoint is missing model_state_dict'
-		raise TypeError(msg)
-	return cast('Mapping[str, torch.Tensor]', value)
-
-
-def _checkpoint_floating_dtype(
-	state_dict: Mapping[str, torch.Tensor],
-) -> torch.dtype:
-	dtypes = {
-		tensor.dtype
-		for tensor in state_dict.values()
-		if isinstance(tensor, torch.Tensor) and tensor.is_floating_point()
-	}
-	if not dtypes:
-		msg = 'checkpoint model_state_dict does not contain floating point tensors'
-		raise ValueError(msg)
-	if len(dtypes) != 1:
-		msg = f'checkpoint model_state_dict has multiple floating dtypes: {dtypes!r}'
-		raise ValueError(msg)
-	return next(iter(dtypes))
 
 
 def _model_floating_dtype(model: AmplitudeMAE3D) -> torch.dtype:
@@ -1715,28 +1618,10 @@ def _model_geometry(
 	}
 
 
-def _validate_checkpoint_model_contract(model: Mapping[str, object]) -> None:
-	if model.get('name') != FIXED_MODEL_CONTRACT['name']:
-		msg = "checkpoint model.name must be 'amp_mae3d'"
-		raise ValueError(msg)
-	if model.get('in_channels') != FIXED_MODEL_CONTRACT['in_channels']:
-		msg = 'checkpoint model.in_channels must be 1'
-		raise ValueError(msg)
-	if model.get('out_channels') != FIXED_MODEL_CONTRACT['out_channels']:
-		msg = 'checkpoint model.out_channels must be 1'
-		raise ValueError(msg)
-
-
 def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
-	if config.get('stage') == STAGE_BARLOW_TWINS_TRAINING:
-		_validate_barlow_twins_checkpoint_resolved_config(config)
-		return
+	validate_pretraining_checkpoint_config(config)
 	if config.get('stage') != STAGE_MAE_TRAINING:
-		msg = (
-			'checkpoint config.stage must identify a supported pretraining method; '
-			f'got {config.get("stage")!r}'
-		)
-		raise ValueError(msg)
+		return
 	unexpected = sorted(set(config) - _CHECKPOINT_ALLOWED_TOP_LEVEL)
 	if unexpected:
 		msg = f'checkpoint config has unsupported top-level key(s): {unexpected!r}'
@@ -1801,7 +1686,6 @@ def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
 		)
 	_validate_checkpoint_amplitude_agc(data)
 	_finite_check_mode_from_config(config)
-	_validate_checkpoint_model_contract(model)
 	_validate_positive_xyz(model['patch_size'], 'model.patch_size')
 	for key in _CHECKPOINT_MODEL_GEOMETRY_KEYS[1:]:
 		_positive_int(model[key], f'model.{key}')
@@ -1809,83 +1693,6 @@ def _validate_checkpoint_resolved_config(config: Mapping[str, object]) -> None:
 	_validate_checkpoint_loss(loss)
 	_validate_checkpoint_train(train)
 	_zero_mask_from_mapping(zero_mask)
-
-
-def _validate_barlow_twins_checkpoint_resolved_config(
-	config: Mapping[str, object],
-) -> None:
-	unexpected = sorted(set(config) - _BARLOW_TWINS_CHECKPOINT_ALLOWED_TOP_LEVEL)
-	if unexpected:
-		msg = f'checkpoint config has unsupported top-level key(s): {unexpected!r}'
-		raise ValueError(msg)
-	missing = sorted(_BARLOW_TWINS_CHECKPOINT_REQUIRED_TOP_LEVEL - set(config))
-	if missing:
-		msg = f'checkpoint config is missing resolved section(s): {missing!r}'
-		raise ValueError(msg)
-	raw = dict(config)
-	raw.pop('stage')
-	for section, fixed_contract in (
-		('data', FIXED_DATA_CONTRACT),
-		('model', FIXED_MODEL_CONTRACT),
-	):
-		resolved_section = _required_mapping(config, section)
-		raw[section] = {
-			key: value
-			for key, value in resolved_section.items()
-			if key not in fixed_contract
-		}
-	resolved = resolve_barlow_twins_training_config(raw)
-	if resolved != dict(config):
-		msg = 'Barlow Twins checkpoint config must contain the fully resolved config'
-		raise ValueError(msg)
-
-
-def _validate_checkpoint_method_identity(
-	payload: Mapping[str, object],
-	config: Mapping[str, object],
-) -> None:
-	if config.get('stage') != STAGE_BARLOW_TWINS_TRAINING:
-		return
-	if _is_random_encoder_checkpoint(payload):
-		return
-	if payload.get('pretraining_method') != BARLOW_TWINS_PRETRAINING_METHOD:
-		raise ValueError('Barlow Twins checkpoint pretraining_method is invalid')
-	if payload.get('checkpoint_kind') != BARLOW_TWINS_CHECKPOINT_KIND:
-		raise ValueError('Barlow Twins checkpoint checkpoint_kind is invalid')
-	prefixes = payload.get('trained_parameter_prefixes')
-	if not isinstance(prefixes, list | tuple) or tuple(prefixes) != (
-		BARLOW_TWINS_TRAINED_PARAMETER_PREFIXES
-	):
-		raise ValueError(
-			'Barlow Twins checkpoint trained_parameter_prefixes are invalid'
-		)
-	if not isinstance(payload.get('projector_state_dict'), Mapping):
-		raise TypeError(
-			'Barlow Twins checkpoint projector_state_dict must be a mapping'
-		)
-	state_dict = _model_state_dict(payload)
-	wrapper_keys = sorted(
-		key
-		for key in state_dict
-		if key.startswith(('backbone.', 'projector.'))
-	)
-	if wrapper_keys:
-		raise ValueError(
-			'Barlow Twins model_state_dict must use bare AmplitudeMAE3D keys; '
-			f'got wrapper key(s): {wrapper_keys!r}'
-		)
-
-
-def _is_random_encoder_checkpoint(payload: Mapping[str, object]) -> bool:
-	training_state = payload.get('training_state')
-	metadata = payload.get('metadata')
-	return (
-		isinstance(training_state, Mapping)
-		and training_state.get('checkpoint_kind') == 'random_init'
-		and isinstance(metadata, Mapping)
-		and metadata.get('random_encoder_baseline') is True
-		and metadata.get('pretrained_weights_loaded') is False
-	)
 
 
 def _validate_required_checkpoint_keys(
