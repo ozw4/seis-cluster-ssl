@@ -18,11 +18,13 @@ from seis_ssl_cluster.config.normalization import (
 	resolve_normalization_stats_config,
 )
 from seis_ssl_cluster.config.pretraining import (
+	resolve_barlow_twins_training_config,
 	resolve_mae_training_config,
 	resolve_strat_hmm_pretext_config,
 )
 from seis_ssl_cluster.config.schema import (
 	KNOWN_STAGES,
+	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_BUILD_MANIFESTS,
 	STAGE_CLUSTER_VISUALIZATION,
 	STAGE_CLUSTERING,
@@ -103,6 +105,7 @@ def __dir__() -> list[str]:
 
 
 _STAGE_RESOLVERS: dict[str, _Resolver] = {
+	STAGE_BARLOW_TWINS_TRAINING: resolve_barlow_twins_training_config,
 	STAGE_BUILD_MANIFESTS: resolve_manifest_build_config,
 	STAGE_NORMALIZATION_STATS: resolve_normalization_stats_config,
 	STAGE_NORMALIZATION_QC: resolve_normalization_qc_config,
@@ -122,6 +125,7 @@ __all__ = [
 	'f3_lithology_visualization_config_from_mapping',
 	'f3_prepare_volume_config_from_mapping',
 	'random_mae_checkpoint_config_from_mapping',
+	'resolve_barlow_twins_training_config',
 	'resolve_cluster_visualization_config',
 	'resolve_clustering_config',
 	'resolve_embedding_extraction_config',

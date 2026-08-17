@@ -28,6 +28,7 @@ def save_checkpoint(  # noqa: PLR0913
 	scaler_required: bool | None = None,
 	training_state: Mapping[str, object] | None = None,
 	rng_state: Mapping[str, object] | None = None,
+	extra_payload: Mapping[str, object] | None = None,
 ) -> Path:
 	"""Atomically write a training checkpoint and return its path."""
 	checkpoint_path = Path(path)
@@ -54,6 +55,12 @@ def save_checkpoint(  # noqa: PLR0913
 			{} if training_state is None else _to_plain_value(training_state)
 		),
 	}
+	if extra_payload is not None:
+		collisions = sorted(set(payload) & set(extra_payload))
+		if collisions:
+			msg = f'extra_payload must not replace checkpoint keys: {collisions!r}'
+			raise ValueError(msg)
+		payload.update(_to_plain_value(extra_payload))
 
 	fd, tmp_name = tempfile.mkstemp(
 		prefix=f'.{checkpoint_path.name}.',

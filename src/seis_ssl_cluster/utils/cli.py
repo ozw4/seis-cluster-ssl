@@ -10,6 +10,7 @@ from typing import Any
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
+	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_BUILD_MANIFESTS,
 	STAGE_CLUSTER_VISUALIZATION,
 	STAGE_CLUSTERING,
@@ -108,6 +109,8 @@ def print_config_summary(  # noqa: C901
 		)
 	elif stage == STAGE_MAE_TRAINING:
 		_add_training_rows(rows, cfg)
+	elif stage == STAGE_BARLOW_TWINS_TRAINING:
+		_add_barlow_twins_training_rows(rows, cfg)
 	elif stage == STAGE_STRAT_HMM_PRETEXT_TRAINING:
 		_add_strat_hmm_pretext_rows(rows, cfg)
 	elif stage == STAGE_STRAT_HMM_PSEUDO_TARGETS:
@@ -201,6 +204,37 @@ def _add_training_rows(
 		],
 	)
 	_add_mae_debug_visualization_rows(rows, cfg)
+
+
+def _add_barlow_twins_training_rows(
+	rows: list[tuple[str, Any]],
+	cfg: Mapping[str, Any],
+) -> None:
+	manifests = _mapping(cfg.get('manifests'))
+	data = _mapping(cfg.get('data'))
+	model = _mapping(cfg.get('model'))
+	augmentations = _mapping(cfg.get('augmentations'))
+	barlow = _mapping(cfg.get('barlow_twins'))
+	train = _mapping(cfg.get('train'))
+	rows.extend(
+		[
+			('manifests.train', manifests.get('train')),
+			('data.local_crop_size', data.get('local_crop_size')),
+			('model.patch_size', model.get('patch_size')),
+			('model.encoder_depth', model.get('encoder_depth')),
+			(
+				'augmentations.horizontal_flip_probability',
+				augmentations.get('horizontal_flip_probability'),
+			),
+			('barlow_twins.projector_dim', barlow.get('projector_dim')),
+			('barlow_twins.redundancy_weight', barlow.get('redundancy_weight')),
+			('barlow_twins.normalization_eps', barlow.get('normalization_eps')),
+			('train.batch_size', train.get('batch_size')),
+			('train.epochs', train.get('epochs')),
+			('train.max_steps', train.get('max_steps')),
+			('train.device', train.get('device')),
+		]
+	)
 
 
 def _add_strat_hmm_pretext_rows(

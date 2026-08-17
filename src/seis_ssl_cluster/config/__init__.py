@@ -5,6 +5,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 )
 from seis_ssl_cluster.config.io import load_config
 from seis_ssl_cluster.config.validate import (
+	resolve_barlow_twins_training_config,
 	resolve_cluster_visualization_config,
 	resolve_clustering_config,
 	resolve_embedding_extraction_config,
@@ -21,6 +22,7 @@ from seis_ssl_cluster.config.validate import (
 __all__ = [
 	'f3_lithology_voxel_section_layout_contract_from_mapping',
 	'load_config',
+	'resolve_barlow_twins_training_config',
 	'resolve_cluster_visualization_config',
 	'resolve_clustering_config',
 	'resolve_embedding_extraction_config',

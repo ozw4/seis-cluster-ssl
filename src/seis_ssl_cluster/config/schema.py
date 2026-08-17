@@ -38,6 +38,7 @@ STAGE_BUILD_MANIFESTS: Final = 'build_nopims_manifests'
 STAGE_NORMALIZATION_STATS: Final = 'prepare_nopims_normalization_stats'
 STAGE_NORMALIZATION_QC: Final = 'filter_manifest_by_normalization_qc'
 STAGE_MAE_TRAINING: Final = 'train_amp_mae'
+STAGE_BARLOW_TWINS_TRAINING: Final = 'barlow_twins_training'
 STAGE_STRAT_HMM_PRETEXT_TRAINING: Final = 'train_strat_hmm_pretext'
 STAGE_STRAT_HMM_PSEUDO_TARGETS: Final = 'build_strat_hmm_pseudo_targets'
 STAGE_EMBEDDING_EXTRACTION: Final = 'extract_embeddings'
@@ -65,6 +66,7 @@ KNOWN_STAGES: Final = {
 	STAGE_NORMALIZATION_STATS,
 	STAGE_NORMALIZATION_QC,
 	STAGE_MAE_TRAINING,
+	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 	STAGE_STRAT_HMM_PSEUDO_TARGETS,
 	STAGE_EMBEDDING_EXTRACTION,
@@ -77,6 +79,7 @@ STAGE_PATH_KEYS: Final = {
 	STAGE_NORMALIZATION_STATS: frozenset({'nopims_root', 'artifact_root'}),
 	STAGE_NORMALIZATION_QC: frozenset({'nopims_root', 'artifact_root'}),
 	STAGE_MAE_TRAINING: frozenset({'artifact_root', 'output_root'}),
+	STAGE_BARLOW_TWINS_TRAINING: frozenset({'artifact_root', 'output_root'}),
 	STAGE_STRAT_HMM_PRETEXT_TRAINING: frozenset(
 		{'artifact_root', 'output_root'},
 	),
@@ -140,6 +143,32 @@ DEFAULT_MAE_TRAIN_OPTIONS: Final = {
 	'grad_clip_norm': 1.0,
 	'runtime_check_mode': 'once',
 	'stage_timing': False,
+}
+
+DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS: Final = {
+	'horizontal_flip_probability': 0.5,
+}
+
+DEFAULT_BARLOW_TWINS_OPTIONS: Final = {
+	'projector_dim': 384,
+	'redundancy_weight': 0.005,
+	'normalization_eps': 1.0e-4,
+}
+
+DEFAULT_BARLOW_TWINS_TRAIN_OPTIONS: Final = {
+	'num_workers': 8,
+	'prefetch_factor': 2,
+	'persistent_workers': True,
+	'shuffle': True,
+	'lr': 3.0e-5,
+	'weight_decay': 0.05,
+	'amp': False,
+	'amp_dtype': 'auto',
+	'device': 'cuda',
+	'seed': 42,
+	'grad_clip_norm': 1.0,
+	'max_steps': None,
+	'allow_overwrite_output': False,
 }
 
 DEFAULT_STRAT_HMM_PRETEXT_DATA_OPTIONS: Final = {

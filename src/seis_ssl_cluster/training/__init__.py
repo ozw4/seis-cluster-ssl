@@ -1,5 +1,10 @@
 """Training components for seismic SSL clustering."""
 
+from seis_ssl_cluster.training.barlow_twins import (
+	BarlowTwinsTrainingState,
+	run_barlow_twins_pretraining,
+	train_barlow_twins_one_epoch,
+)
 from seis_ssl_cluster.training.checkpoint import load_checkpoint, save_checkpoint
 from seis_ssl_cluster.training.collate import (
 	barlow_twins_collate_fn,
@@ -27,6 +32,7 @@ from seis_ssl_cluster.training.random_checkpoint import (
 )
 
 __all__ = [
+	'BarlowTwinsTrainingState',
 	'MaeTrainingState',
 	'RandomMaeCheckpointConfig',
 	'barlow_twins_collate_fn',
@@ -40,9 +46,11 @@ __all__ = [
 	'mae_collate_fn',
 	'move_batch_to_device',
 	'random_mae_checkpoint_config_from_mapping',
+	'run_barlow_twins_pretraining',
 	'run_mae_pretraining',
 	'save_checkpoint',
 	'strat_multi_head_posterior_collate_fn',
 	'strat_multi_head_target_collate_fn',
+	'train_barlow_twins_one_epoch',
 	'train_mae_one_epoch',
 ]

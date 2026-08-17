@@ -17,6 +17,7 @@ from seis_ssl_cluster.config.common import (
 from seis_ssl_cluster.config.schema import (
 	LEGACY_ATTRIBUTE_KEY_NAMES,
 	LEGACY_ATTRIBUTE_KEY_PATHS,
+	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_BUILD_MANIFESTS,
 	STAGE_CLUSTER_VISUALIZATION,
 	STAGE_CLUSTERING,
@@ -36,6 +37,18 @@ if TYPE_CHECKING:
 Config: TypeAlias = dict[str, object]
 
 _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
+	STAGE_BARLOW_TWINS_TRAINING: frozenset(
+		{
+			'paths',
+			'manifests',
+			'data',
+			'zero_mask',
+			'model',
+			'augmentations',
+			'barlow_twins',
+			'train',
+		},
+	),
 	STAGE_BUILD_MANIFESTS: frozenset({'paths', 'manifest'}),
 	STAGE_NORMALIZATION_STATS: frozenset(
 		{'paths', 'manifests', 'normalization'},
@@ -93,6 +106,9 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 }
 
 _REQUIRED_TOP_LEVEL: dict[str, frozenset[str]] = {
+	STAGE_BARLOW_TWINS_TRAINING: frozenset(
+		{'paths', 'manifests', 'data', 'model', 'train'},
+	),
 	STAGE_BUILD_MANIFESTS: frozenset({'paths', 'manifest'}),
 	STAGE_NORMALIZATION_STATS: frozenset(
 		{'paths', 'manifests', 'normalization'},

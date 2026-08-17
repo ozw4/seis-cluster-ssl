@@ -45,6 +45,9 @@ from seis_ssl_cluster.config.common import (
 	_validate_required_keys,
 )
 from seis_ssl_cluster.config.schema import (
+	DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
+	DEFAULT_BARLOW_TWINS_OPTIONS,
+	DEFAULT_BARLOW_TWINS_TRAIN_OPTIONS,
 	DEFAULT_MAE_DATA_OPTIONS,
 	DEFAULT_MAE_DEBUG_VISUALIZATION_OPTIONS,
 	DEFAULT_MAE_LOSS_OPTIONS,
@@ -63,6 +66,7 @@ from seis_ssl_cluster.config.schema import (
 	FIXED_MODEL_CONTRACT,
 	MAE_DEBUG_VISUALIZATION_COLUMNS,
 	MAE_DEBUG_VISUALIZATION_KEYS,
+	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_MAE_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 	SUPPORTED_AMP_DTYPES,
@@ -90,6 +94,42 @@ _AMPLITUDE_AGC_KEYS = frozenset(
 )
 _AMPLITUDE_AGC_ENABLED_REQUIRED_KEYS = _AMPLITUDE_AGC_KEYS
 _MAE_TRAINING_VISUALIZATION_KEYS = frozenset({'mae_debug'})
+
+_BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
+	'manifests': frozenset({'train', 'train_path_list', 'canonical_input_metadata'}),
+	'data': frozenset(
+		{
+			'local_crop_size',
+			'min_valid_fraction',
+			'max_resample_attempts',
+			'normalized_clip_abs',
+			'amplitude_agc',
+			'finite_check_mode',
+		}
+	),
+	'zero_mask': frozenset(DEFAULT_ZERO_MASK_CONTRACT),
+	'model': frozenset(
+		{
+			'patch_size',
+			'encoder_dim',
+			'encoder_depth',
+			'encoder_heads',
+			'decoder_dim',
+			'decoder_depth',
+			'decoder_heads',
+		}
+	),
+	'augmentations': frozenset(DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS),
+	'barlow_twins': frozenset(DEFAULT_BARLOW_TWINS_OPTIONS),
+	'train': frozenset(
+		{
+			'batch_size',
+			'samples_per_epoch',
+			'epochs',
+			*DEFAULT_BARLOW_TWINS_TRAIN_OPTIONS,
+		}
+	),
+}
 
 _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 	'manifests': frozenset({'train', 'train_path_list'}),
@@ -576,6 +616,102 @@ MULTI_HEAD_SCIENTIFIC_TRAIN_FIELDS = frozenset(
 		'max_steps',
 	}
 )
+
+
+def resolve_barlow_twins_training_config(config: _T) -> Config:
+	"""Validate and resolve raw config for 3D Barlow Twins training."""
+	resolved, paths = _resolve_base(
+		config,
+		STAGE_BARLOW_TWINS_TRAINING,
+		require_nopims_root=False,
+	)
+	paths_config = _required_mapping(resolved, 'paths')
+	output_root = _validate_path(paths_config, 'output_root', prefix='paths')
+	_reject_fixed_contract_keys(resolved)
+	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
+	_merge_section_defaults(
+		resolved,
+		'augmentations',
+		DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
+	)
+	_merge_section_defaults(resolved, 'barlow_twins', DEFAULT_BARLOW_TWINS_OPTIONS)
+	_merge_section_defaults(resolved, 'train', DEFAULT_BARLOW_TWINS_TRAIN_OPTIONS)
+	_merge_section_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
+
+	for section, allowed_keys in _BARLOW_TWINS_SECTION_KEYS.items():
+		_validate_allowed_keys(
+			_required_mapping(resolved, section),
+			allowed_keys,
+			prefix=section,
+		)
+
+	manifests = _required_mapping(resolved, 'manifests')
+	_validate_manifests(manifests)
+	if 'canonical_input_metadata' in manifests:
+		_validate_non_empty_path(
+			manifests,
+			'canonical_input_metadata',
+			prefix='manifests',
+		)
+
+	data = _required_mapping(resolved, 'data')
+	local_crop_size = _validate_positive_int_triplet(
+		data,
+		'local_crop_size',
+		prefix='data',
+	)
+	_validate_optional_fraction(data, 'min_valid_fraction', prefix='data')
+	_validate_positive_int(data, 'max_resample_attempts', prefix='data')
+	if data.get('normalized_clip_abs') is not None:
+		_validate_positive_finite_number(
+			data,
+			'normalized_clip_abs',
+			prefix='data',
+		)
+	_validate_amplitude_agc(data)
+	_validate_finite_check_mode(data)
+
+	model = _required_mapping(resolved, 'model')
+	patch_size = _validate_positive_int_triplet(
+		model,
+		'patch_size',
+		prefix='model',
+	)
+	_validate_model(model)
+	_validate_divisible_crop_patch(local_crop_size, patch_size)
+
+	augmentations = _required_mapping(resolved, 'augmentations')
+	_validate_optional_fraction(
+		augmentations,
+		'horizontal_flip_probability',
+		prefix='augmentations',
+	)
+	barlow_twins = _required_mapping(resolved, 'barlow_twins')
+	_validate_positive_int(barlow_twins, 'projector_dim', prefix='barlow_twins')
+	_validate_nonnegative_finite_number(
+		barlow_twins,
+		'redundancy_weight',
+		prefix='barlow_twins',
+	)
+	_validate_positive_finite_number(
+		barlow_twins,
+		'normalization_eps',
+		prefix='barlow_twins',
+	)
+
+	train = _required_mapping(resolved, 'train')
+	_validate_barlow_twins_train(train)
+	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
+	_validate_output_path(
+		output_root,
+		'paths.output_root',
+		input_root=paths.nopims_root,
+		input_root_label='paths.nopims_root',
+	)
+
+	_merge_section_defaults(resolved, 'data', FIXED_DATA_CONTRACT)
+	_merge_section_defaults(resolved, 'model', FIXED_MODEL_CONTRACT)
+	return resolved
 
 
 def resolve_mae_training_config(config: _T) -> Config:
@@ -3543,6 +3679,37 @@ def _validate_train(train: Mapping[str, object]) -> None:
 	_validate_runtime_check_mode(train)
 
 
+def _validate_barlow_twins_train(train: Mapping[str, object]) -> None:
+	_validate_positive_int(train, 'batch_size', prefix='train')
+	if int(train['batch_size']) < 2:
+		raise ValueError('train.batch_size must be at least 2')
+	for key in ('samples_per_epoch', 'epochs'):
+		_validate_positive_int(train, key, prefix='train')
+	for key in ('num_workers', 'max_steps'):
+		_validate_optional_nonnegative_int(train, key, prefix='train')
+	if train.get('prefetch_factor') is not None:
+		_validate_positive_int(train, 'prefetch_factor', prefix='train')
+	for key in ('lr', 'grad_clip_norm'):
+		_validate_positive_finite_number(train, key, prefix='train')
+	_validate_nonnegative_finite_number(train, 'weight_decay', prefix='train')
+	for key in (
+		'amp',
+		'shuffle',
+		'allow_overwrite_output',
+		'persistent_workers',
+	):
+		_validate_bool(train, key, prefix='train')
+	amp_dtype = train.get('amp_dtype')
+	if amp_dtype not in SUPPORTED_AMP_DTYPES:
+		msg = (
+			'train.amp_dtype must be one of '
+			f'{sorted(SUPPORTED_AMP_DTYPES)!r}; got {amp_dtype!r}'
+		)
+		raise ValueError(msg)
+	_validate_optional_train_seed(train)
+	_validate_optional_train_device(train)
+
+
 def _validate_runtime_check_mode(train: Mapping[str, object]) -> None:
 	mode = train.get('runtime_check_mode')
 	if mode not in SUPPORTED_RUNTIME_CHECK_MODES:
@@ -3954,6 +4121,7 @@ __all__ = [
 	'PERIODIC_REFRESH_VARIANT',
 	'_is_center_trace_masked_config',
 	'_is_periodic_refresh_config',
+	'resolve_barlow_twins_training_config',
 	'resolve_mae_training_config',
 	'resolve_strat_hmm_pretext_config',
 ]
