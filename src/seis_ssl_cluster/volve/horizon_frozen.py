@@ -28,6 +28,7 @@ from seis_ssl_cluster.training.random_checkpoint import (
 from seis_ssl_cluster.volve.horizon_data import (
 	HORIZON_NAMES,
 	VolveHorizonData,
+	array_sha256,
 	load_volve_horizon_data,
 )
 from seis_ssl_cluster.volve.horizon_layouts import (
@@ -62,6 +63,9 @@ from seis_ssl_cluster.volve.horizon_tiles import (
 	build_frozen_horizon_tile,
 	build_horizon_tile_targets,
 	enumerate_horizon_tile_records,
+	frozen_core_output_valid_mask,
+	frozen_survey_output_valid_mask,
+	horizon_supervision_mask,
 )
 
 FROZEN_MODEL_ROLES = ('pretrained', 'random')
@@ -158,6 +162,8 @@ class FrozenEmbeddingGeometry:
 	pretrained_model_source: Mapping[str, object]
 	random_model_source: Mapping[str, object]
 	valid_tokens_sha256: str
+	model_valid_lateral_mask: np.ndarray
+	model_valid_lateral_mask_sha256: str
 	canonical_identity: Mapping[str, object]
 
 
@@ -174,8 +180,15 @@ class FrozenHorizonPlan:
 	split_plan: HorizonSplitPlan
 	geometry: FrozenEmbeddingGeometry
 	tile_records: Mapping[str, tuple[HorizonTileRecord, ...]]
-	per_horizon_counts: Mapping[str, tuple[int, ...]]
+	native_per_horizon_counts: Mapping[str, tuple[int, ...]]
+	effective_per_horizon_counts: Mapping[str, tuple[int, ...]]
+	excluded_by_token_validity_counts: Mapping[str, tuple[int, ...]]
 	run_identity: Mapping[str, object]
+
+	@property
+	def per_horizon_counts(self) -> Mapping[str, tuple[int, ...]]:
+		'''Return counts actually used by the frozen model.'''
+		return self.effective_per_horizon_counts
 
 
 class FrozenHorizonTileDataset(Dataset[dict[str, Any]]):
@@ -206,7 +219,28 @@ class FrozenHorizonTileDataset(Dataset[dict[str, Any]]):
 		self._valid_tokens: np.ndarray | None = None
 		self._open()
 		self._window_embeddings, self._window_valid_tokens = self._window_arrays()
-		self.split_mask = _split_mask(plan, split)
+		self.native_split_mask = _split_mask(plan, split)
+		self.output_valid_survey = frozen_survey_output_valid_mask(
+			self._window_valid_tokens, settings
+		)
+		self.split_mask = self.native_split_mask & self.output_valid_survey[
+			np.newaxis, :, :
+		]
+		self.primary_split_mask: np.ndarray | None = None
+		self.primary_supervision_mask: np.ndarray | None = None
+		if split == 'test':
+			self.primary_split_mask = np.broadcast_to(
+				self.plan.test_primary_mask,
+				self.data.bound_valid_mask.shape,
+			) & self.output_valid_survey[np.newaxis, :, :]
+			self.primary_supervision_mask = horizon_supervision_mask(
+				sample_float=self.data.sample_float,
+				native_valid_mask=self.data.bound_valid_mask,
+				split_mask=self.primary_split_mask,
+				trace_valid_mask=self.data.valid_trace_mask,
+				window_start=self.settings.window_start,
+				window_stop=self.settings.window_stop,
+			)
 		self.records = tuple(records) if records is not None else (
 			enumerate_horizon_tile_records(
 				sample_float=data.sample_float,
@@ -240,25 +274,31 @@ class FrozenHorizonTileDataset(Dataset[dict[str, Any]]):
 			valid_tokens=window_valid,
 			settings=self.settings,
 		)
-		primary_mask = targets.supervision_mask
+		output_valid = frozen_core_output_valid_mask(
+			frozen.token_valid_mask, self.settings
+		)
+		effective_mask = targets.supervision_mask & output_valid[np.newaxis, :, :]
+		primary_mask = effective_mask
 		if self.split == 'test':
+			primary_split = _array(self.primary_split_mask)
+			primary_supervision = _array(self.primary_supervision_mask)
 			primary_targets = build_horizon_tile_targets(
-				record=_record_for_mask(record, self.plan.test_primary_mask),
+				record=_record_for_supervision_mask(record, primary_supervision),
 				sample_float=self.data.sample_float,
 				native_valid_mask=self.data.bound_valid_mask,
-				split_mask=np.broadcast_to(
-					self.plan.test_primary_mask,
-					self.data.bound_valid_mask.shape,
-				),
+				split_mask=primary_split,
 				trace_valid_mask=self.data.valid_trace_mask,
 				settings=self.settings,
 			)
-			primary_mask = primary_targets.supervision_mask
+			primary_mask = primary_targets.supervision_mask & output_valid[
+				np.newaxis, :, :
+			]
 		return {
 			'embeddings': torch.from_numpy(frozen.embeddings),
 			'token_valid_mask': torch.from_numpy(frozen.token_valid_mask),
 			'target_sample_float': torch.from_numpy(targets.sample_float),
-			'supervision_mask': torch.from_numpy(targets.supervision_mask),
+			'output_valid_mask': torch.from_numpy(output_valid),
+			'supervision_mask': torch.from_numpy(effective_mask),
 			'primary_evaluation_mask': torch.from_numpy(primary_mask),
 			'tile_id': record.tile_id,
 		}
@@ -414,6 +454,15 @@ def inspect_frozen_embedding_pair(
 		trace_valid_mask=data.valid_trace_mask,
 		volume_shape=volume_shape,
 	)
+	window_start = HORIZON_WINDOW_START // HORIZON_PATCH_SIZE[2]
+	window_stop = HORIZON_WINDOW_STOP // HORIZON_PATCH_SIZE[2]
+	model_valid_lateral = frozen_survey_output_valid_mask(
+		pretrained_valid[:, :, window_start:window_stop],
+		HorizonTileSettings(
+			lateral_shape_xy=data.shape_xy,
+			min_token_valid_fraction=1.0,
+		),
+	)
 	pretrained_valid_sha = file_sha256(pretrained.valid_tokens)
 	if pretrained_valid_sha != file_sha256(random_paths.valid_tokens):
 		raise ValueError('pretrained/random valid-token artifact hashes differ')
@@ -438,6 +487,8 @@ def inspect_frozen_embedding_pair(
 		pretrained_model_source=pretrained_source,
 		random_model_source=random_source,
 		valid_tokens_sha256=pretrained_valid_sha,
+		model_valid_lateral_mask=model_valid_lateral,
+		model_valid_lateral_mask_sha256=array_sha256(model_valid_lateral),
 		canonical_identity=canonical_identity,
 	)
 
@@ -474,23 +525,71 @@ def inspect_frozen_horizon_job(  # noqa: PLR0913
 		raise ValueError('split plan must use the fixed [552, 768) TWT window')
 	geometry = inspect_frozen_embedding_pair(job_config, resolved_data)
 	records: dict[str, tuple[HorizonTileRecord, ...]] = {}
-	counts: dict[str, tuple[int, ...]] = {}
+	native_counts: dict[str, tuple[int, ...]] = {}
+	effective_counts: dict[str, tuple[int, ...]] = {}
+	excluded_counts: dict[str, tuple[int, ...]] = {}
+	model_valid = geometry.model_valid_lateral_mask[np.newaxis, :, :]
 	for split in ('train', 'validation', 'test'):
-		split_mask = _split_mask(split_plan, split)
+		native_split_mask = _split_mask(split_plan, split)
+		effective_split_mask = native_split_mask & model_valid
 		records[split] = enumerate_horizon_tile_records(
 			sample_float=resolved_data.sample_float,
 			native_valid_mask=resolved_data.bound_valid_mask,
-			split_mask=split_mask,
+			split_mask=effective_split_mask,
 			trace_valid_mask=resolved_data.valid_trace_mask,
 			settings=job_config.tiles,
 		)
-		counts[split] = tuple(
-			int(np.count_nonzero(split_mask[index]))
-			for index in range(len(HORIZON_NAMES))
+		native_supervision = horizon_supervision_mask(
+			sample_float=resolved_data.sample_float,
+			native_valid_mask=resolved_data.bound_valid_mask,
+			split_mask=native_split_mask,
+			trace_valid_mask=resolved_data.valid_trace_mask,
+			window_start=job_config.tiles.window_start,
+			window_stop=job_config.tiles.window_stop,
 		)
+		effective_supervision = native_supervision & model_valid
+		native_counts[split] = _per_horizon_counts(native_supervision)
+		effective_counts[split] = _per_horizon_counts(effective_supervision)
+		excluded_counts[split] = tuple(
+			native - effective
+			for native, effective in zip(
+				native_counts[split], effective_counts[split], strict=True
+			)
+		)
+	primary_split = np.broadcast_to(
+		split_plan.test_primary_mask, resolved_data.bound_valid_mask.shape
+	)
+	primary_native = horizon_supervision_mask(
+		sample_float=resolved_data.sample_float,
+		native_valid_mask=resolved_data.bound_valid_mask,
+		split_mask=primary_split,
+		trace_valid_mask=resolved_data.valid_trace_mask,
+		window_start=job_config.tiles.window_start,
+		window_stop=job_config.tiles.window_stop,
+	)
+	primary_effective = primary_native & model_valid
+	native_counts['test_primary'] = _per_horizon_counts(primary_native)
+	effective_counts['test_primary'] = _per_horizon_counts(primary_effective)
+	excluded_counts['test_primary'] = tuple(
+		native - effective
+		for native, effective in zip(
+			native_counts['test_primary'],
+			effective_counts['test_primary'],
+			strict=True,
+		)
+	)
+	validate_training_horizon_coverage(effective_counts['train'])
+	_require_positive_horizon_counts(
+		effective_counts['validation'], 'validation'
+	)
+	_require_positive_horizon_counts(
+		effective_counts['test_primary'], 'primary common test'
+	)
+	for split in ('train', 'validation', 'test'):
 		if not records[split]:
-			raise ValueError(f'{split} split has no supervised horizon tiles')
-	validate_training_horizon_coverage(counts['train'])
+			raise ValueError(
+				f'{split} split has no model-valid supervised horizon tiles'
+			)
 	output_dir = (
 		config.runs_root
 		/ f'model={model}'
@@ -503,7 +602,9 @@ def inspect_frozen_horizon_job(  # noqa: PLR0913
 		split_plan=split_plan,
 		geometry=geometry,
 		records=records,
-		counts=counts,
+		native_counts=native_counts,
+		effective_counts=effective_counts,
+		excluded_counts=excluded_counts,
 	)
 	return FrozenHorizonPlan(
 		config=job_config,
@@ -515,7 +616,9 @@ def inspect_frozen_horizon_job(  # noqa: PLR0913
 		split_plan=split_plan,
 		geometry=geometry,
 		tile_records=records,
-		per_horizon_counts=counts,
+		native_per_horizon_counts=native_counts,
+		effective_per_horizon_counts=effective_counts,
+		excluded_by_token_validity_counts=excluded_counts,
 		run_identity=identity,
 	)
 
@@ -694,7 +797,10 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 			datasets['validation'],
 			run_device,
 			amp_enabled=amp_enabled,
-			expected_counts=plan.per_horizon_counts['validation'],
+			expected_counts=plan.effective_per_horizon_counts['validation'],
+			expected_primary_counts=plan.effective_per_horizon_counts[
+				'validation'
+			],
 		)
 		validation_mae = _required_metric(
 			validation['secondary'], 'macro_mae_samples'
@@ -758,7 +864,10 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 		datasets['test'],
 		run_device,
 		amp_enabled=amp_enabled,
-		expected_counts=plan.per_horizon_counts['test'],
+		expected_counts=plan.effective_per_horizon_counts['test'],
+		expected_primary_counts=plan.effective_per_horizon_counts[
+			'test_primary'
+		],
 	)
 	metrics_payload = {
 		'schema_version': 1,
@@ -814,10 +923,12 @@ def _train_one_tile(  # noqa: PLR0913
 	valid = _tensor(item, 'token_valid_mask').unsqueeze(0).to(device)
 	target = _tensor(item, 'target_sample_float').unsqueeze(0).to(device)
 	mask = _tensor(item, 'supervision_mask').unsqueeze(0).to(device)
+	output_valid = _tensor(item, 'output_valid_mask').unsqueeze(0).to(device)
+	effective_mask = mask & output_valid.unsqueeze(1)
 	optimizer.zero_grad(set_to_none=True)
 	with _autocast(device, enabled=amp_enabled):
 		logits = decoder(embeddings, valid)
-		loss, _ = fractional_horizon_cross_entropy(logits, target, mask)
+		loss, _ = fractional_horizon_cross_entropy(logits, target, effective_mask)
 	if scaler is None:
 		loss.backward()
 		torch.nn.utils.clip_grad_norm_(decoder.parameters(), gradient_clip_norm)
@@ -836,13 +947,14 @@ def _train_one_tile(  # noqa: PLR0913
 	return float(loss.detach().cpu().item())
 
 
-def _evaluate_horizon_dataset(
+def _evaluate_horizon_dataset(  # noqa: PLR0913
 	decoder: VolveHorizonDecoder,
 	dataset: Dataset[dict[str, Any]],
 	device: torch.device,
 	*,
 	amp_enabled: bool,
 	expected_counts: Sequence[int],
+	expected_primary_counts: Sequence[int],
 ) -> dict[str, object]:
 	decoder.eval()
 	predictions: list[np.ndarray] = []
@@ -862,10 +974,20 @@ def _evaluate_horizon_dataset(
 				_tensor(item, 'target_sample_float').unsqueeze(0).numpy()
 			)
 			secondary_masks.append(
-				_tensor(item, 'supervision_mask').unsqueeze(0).numpy()
+				(
+					_tensor(item, 'supervision_mask')
+					& _tensor(item, 'output_valid_mask').unsqueeze(0)
+				)
+				.unsqueeze(0)
+				.numpy()
 			)
 			primary_masks.append(
-				_tensor(item, 'primary_evaluation_mask').unsqueeze(0).numpy()
+				(
+					_tensor(item, 'primary_evaluation_mask')
+					& _tensor(item, 'output_valid_mask').unsqueeze(0)
+				)
+				.unsqueeze(0)
+				.numpy()
 			)
 	predicted = np.concatenate(predictions)
 	target = np.concatenate(targets)
@@ -880,6 +1002,16 @@ def _evaluate_horizon_dataset(
 			'evaluation tiles do not provide exact-once lateral coverage; '
 			f'expected {tuple(expected_counts)!r}, got {actual_counts!r}'
 		)
+	actual_primary_counts = tuple(
+		int(np.count_nonzero(primary_mask[:, index]))
+		for index in range(len(HORIZON_NAMES))
+	)
+	if actual_primary_counts != tuple(expected_primary_counts):
+		raise RuntimeError(
+			'primary evaluation tiles do not provide exact-once model-valid coverage; '
+			f'expected {tuple(expected_primary_counts)!r}, '
+			f'got {actual_primary_counts!r}'
+		)
 	return {
 		'primary': compute_horizon_metrics(predicted, target, primary_mask),
 		'secondary': compute_horizon_metrics(predicted, target, secondary_mask),
@@ -893,7 +1025,9 @@ def _run_identity(  # noqa: PLR0913
 	split_plan: HorizonSplitPlan,
 	geometry: FrozenEmbeddingGeometry,
 	records: Mapping[str, tuple[HorizonTileRecord, ...]],
-	counts: Mapping[str, tuple[int, ...]],
+	native_counts: Mapping[str, tuple[int, ...]],
+	effective_counts: Mapping[str, tuple[int, ...]],
+	excluded_counts: Mapping[str, tuple[int, ...]],
 ) -> dict[str, object]:
 	metadata = (
 		geometry.pretrained_metadata
@@ -906,7 +1040,7 @@ def _run_identity(  # noqa: PLR0913
 		else geometry.random_model_source
 	)
 	return {
-		'schema_version': 1,
+		'schema_version': 2,
 		'benchmark': 'mae_vs_random_frozen_v1',
 		'model': model,
 		'layout_id': split_plan.layout_id,
@@ -930,6 +1064,12 @@ def _run_identity(  # noqa: PLR0913
 			'embedding_shape': list(geometry.embedding_shape),
 			'token_grid_shape_xyz': list(geometry.token_grid_shape_xyz),
 			'valid_tokens_sha256': geometry.valid_tokens_sha256,
+			'output_validity_policy': (
+				'full_216_sample_token_column_then_8x8_lateral_expansion_v1'
+			),
+			'model_valid_lateral_mask_sha256': (
+				geometry.model_valid_lateral_mask_sha256
+			),
 		},
 		'decoder': {
 			'architecture': create_volve_horizon_decoder().architecture,
@@ -948,13 +1088,11 @@ def _run_identity(  # noqa: PLR0913
 				split: _records_sha256(records[split]) for split in records
 			},
 		},
-		'per_horizon_observation_counts': {
-			split: {
-				name: counts[split][index]
-				for index, name in enumerate(HORIZON_NAMES)
-			}
-			for split in counts
-		},
+		'native_horizon_observation_counts': _identity_counts(native_counts),
+		'effective_model_valid_observation_counts': _identity_counts(
+			effective_counts
+		),
+		'excluded_by_token_validity_counts': _identity_counts(excluded_counts),
 		'training': {
 			'epochs': config.train.epochs,
 			'batch_size': config.train.batch_size,
@@ -1225,13 +1363,19 @@ def _split_mask(plan: HorizonSplitPlan, split: str) -> np.ndarray:
 	return np.empty(0, dtype=np.bool_)
 
 
-def _record_for_mask(record: HorizonTileRecord, mask: np.ndarray) -> HorizonTileRecord:
+def _record_for_supervision_mask(
+	record: HorizonTileRecord, supervision_mask: np.ndarray
+) -> HorizonTileRecord:
 	x0 = record.core_start_token_xy[0] * HORIZON_PATCH_SIZE[0]
 	y0 = record.core_start_token_xy[1] * HORIZON_PATCH_SIZE[1]
 	x1 = record.core_stop_token_xy[0] * HORIZON_PATCH_SIZE[0]
 	y1 = record.core_stop_token_xy[1] * HORIZON_PATCH_SIZE[1]
+	mask = np.asarray(supervision_mask)
+	if mask.ndim != 3 or mask.shape[0] != len(HORIZON_NAMES):
+		raise ValueError('supervision mask must have shape [5,X,Y]')
 	counts = tuple(
-		int(np.count_nonzero(mask[x0:x1, y0:y1])) for _ in HORIZON_NAMES
+		int(np.count_nonzero(mask[index, x0:x1, y0:y1]))
+		for index in range(len(HORIZON_NAMES))
 	)
 	return HorizonTileRecord(
 		tile_id=record.tile_id,
@@ -1239,6 +1383,42 @@ def _record_for_mask(record: HorizonTileRecord, mask: np.ndarray) -> HorizonTile
 		core_stop_token_xy=record.core_stop_token_xy,
 		per_horizon_observation_counts=counts,
 	)
+
+
+def _per_horizon_counts(mask: np.ndarray) -> tuple[int, ...]:
+	return tuple(
+		int(np.count_nonzero(mask[index])) for index in range(len(HORIZON_NAMES))
+	)
+
+
+def _require_positive_horizon_counts(
+	counts: Sequence[int], split_name: str
+) -> None:
+	missing = [
+		HORIZON_NAMES[index] for index, count in enumerate(counts) if count <= 0
+	]
+	if missing:
+		raise ValueError(
+			f'{split_name} has zero model-valid observations for horizons: '
+			f'{", ".join(missing)}'
+		)
+
+
+def _identity_counts(
+	counts: Mapping[str, tuple[int, ...]],
+) -> dict[str, dict[str, int]]:
+	identity_names = {
+		'train': 'train',
+		'validation': 'validation',
+		'test': 'test_secondary_per_horizon',
+		'test_primary': 'test_primary_common',
+	}
+	return {
+		identity_names[split]: {
+			name: values[index] for index, name in enumerate(HORIZON_NAMES)
+		}
+		for split, values in counts.items()
+	}
 
 
 def _save_latest(  # noqa: PLR0913

@@ -38,6 +38,14 @@ different checkpoint hashes, the completed Volve `full_100ep/latest.pt` role,
 and the seed-42 `random_init` role. With `min_token_valid_fraction: 1.0`, every
 token touching a missing trace or survey padding is invalid.
 
+Loss and metrics use only lateral locations whose complete 27-token
+`[552,768)` column is valid. The column-valid token mask is expanded to the
+decoder's 8 × 8 voxel footprint and cropped to the central 64 × 64 core. The
+dry-run and resume identity report native horizon counts, effective model-valid
+counts, and counts excluded by token validity separately. Preflight requires
+positive effective coverage for every training and validation horizon and for
+every horizon in the primary common test.
+
 Inspect one read-only condition before training:
 
 ```bash

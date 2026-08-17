@@ -23,12 +23,18 @@ from seis_ssl_cluster.volve.horizon_frozen import (
 	FROZEN_CONDITION_COUNT,
 	LATEST_NAME,
 	FrozenHorizonConfig,
+	FrozenHorizonTileDataset,
 	decoder_initial_state_sha256,
 	enumerate_frozen_horizon_conditions,
 	frozen_horizon_config_from_mapping,
 	inspect_frozen_horizon_job,
 	run_frozen_horizon_job,
 	validation_mae_improved,
+)
+from seis_ssl_cluster.volve.horizon_tiles import (
+	HorizonTileSettings,
+	frozen_core_output_valid_mask,
+	frozen_survey_output_valid_mask,
 )
 from tests.seis_ssl_cluster.helpers_volve import (
 	write_synthetic_frozen_horizon_data,
@@ -129,8 +135,15 @@ def test_paired_job_preflight_reuses_split_and_decoder_identity(
 		pretrained.geometry.random.valid_tokens
 	)
 	assert pretrained.per_horizon_counts['train'] == tuple(
-		int(np.count_nonzero(pretrained.split_plan.train_mask[index]))
-		for index in range(5)
+		pretrained.effective_per_horizon_counts['train']
+	)
+	assert all(
+		effective <= native
+		for native, effective in zip(
+			pretrained.native_per_horizon_counts['train'],
+			pretrained.effective_per_horizon_counts['train'],
+			strict=True,
+		)
 	)
 	assert all(count > 0 for count in pretrained.per_horizon_counts['test'])
 
@@ -147,6 +160,21 @@ def test_decoder_seed_and_all_available_section_supervision_are_paired(
 		layout_config=layout,
 		data=data,
 	)
+	assert plan.native_per_horizon_counts['train'] != (
+		plan.effective_per_horizon_counts['train']
+	)
+	assert any(
+		count > 0 for count in plan.excluded_by_token_validity_counts['train']
+	)
+	for split in ('train', 'validation', 'test', 'test_primary'):
+		assert plan.excluded_by_token_validity_counts[split] == tuple(
+			native - effective
+			for native, effective in zip(
+				plan.native_per_horizon_counts[split],
+				plan.effective_per_horizon_counts[split],
+				strict=True,
+			)
+		)
 	identity = plan.split_plan.identity()
 
 	assert identity['selection_semantics'] == (
@@ -157,13 +185,113 @@ def test_decoder_seed_and_all_available_section_supervision_are_paired(
 		'crossline': [200],
 	}
 	assert identity['per_horizon_counts']['train'] == {
-		name: plan.per_horizon_counts['train'][index]
+		name: plan.native_per_horizon_counts['train'][index]
+		for index, name in enumerate(HORIZON_NAMES)
+	}
+	assert plan.run_identity['effective_model_valid_observation_counts'][
+		'train'
+	] == {
+		name: plan.effective_per_horizon_counts['train'][index]
+		for index, name in enumerate(HORIZON_NAMES)
+	}
+	assert plan.run_identity['native_horizon_observation_counts']['train'] == {
+		name: plan.native_per_horizon_counts['train'][index]
+		for index, name in enumerate(HORIZON_NAMES)
+	}
+	assert plan.run_identity['excluded_by_token_validity_counts']['train'] == {
+		name: plan.excluded_by_token_validity_counts['train'][index]
 		for index, name in enumerate(HORIZON_NAMES)
 	}
 	assert plan.run_identity['decoder']['initialization_seed'] == 42000
 	assert plan.run_identity['decoder']['initial_state_sha256'] == (
 		decoder_initial_state_sha256()
 	)
+
+
+def test_token_valid_columns_expand_to_output_and_filter_dataset_masks(
+	tmp_path: Path,
+) -> None:
+	settings = HorizonTileSettings(
+		lateral_shape_xy=(24, 24), min_token_valid_fraction=1.0
+	)
+	survey_tokens = np.ones((3, 3, 27), dtype=np.bool_)
+	survey_tokens[2, 2, 4] = False
+	survey_mask = frozen_survey_output_valid_mask(survey_tokens, settings)
+	assert survey_mask.shape == (24, 24)
+	assert not survey_mask[16:24, 16:24].any()
+	assert survey_mask[:16].all()
+
+	tile_tokens = np.ones(settings.input_size_tokens, dtype=np.bool_)
+	tile_tokens[3, 2, 4] = False
+	core_mask = frozen_core_output_valid_mask(tile_tokens, settings)
+	assert core_mask.shape == (64, 64)
+	assert not core_mask[16:24, 8:16].any()
+	assert np.count_nonzero(~core_mask) == 64
+
+	config, data, layout = _write_frozen_fixture(tmp_path)
+	plan = inspect_frozen_horizon_job(
+		config,
+		model='pretrained',
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=layout,
+		data=data,
+	)
+	dataset = FrozenHorizonTileDataset(
+		data=plan.data,
+		plan=plan.split_plan,
+		embedding_path=plan.geometry.pretrained.embeddings,
+		valid_tokens_path=plan.geometry.pretrained.valid_tokens,
+		settings=plan.config.tiles,
+		split='train',
+		records=plan.tile_records['train'],
+	)
+	for index in range(len(dataset)):
+		item = dataset[index]
+		output_valid = item['output_valid_mask'].numpy()
+		supervision = item['supervision_mask'].numpy()
+		assert not np.any(supervision & ~output_valid[np.newaxis, :, :])
+
+
+def test_preflight_requires_model_valid_validation_and_primary_common_test(
+	tmp_path: Path,
+) -> None:
+	config, data, layout = _write_frozen_fixture(tmp_path / 'validation')
+	valid = np.load(
+		output_paths(
+			config.pretrained_embeddings_dir, config.survey_id
+		).valid_tokens
+	)
+	valid[2, :, :] = False
+	valid[:, 2, :] = False
+	_write_paired_valid_tokens(config, valid)
+	with pytest.raises(ValueError, match='validation has zero model-valid'):
+		inspect_frozen_horizon_job(
+			config,
+			model='pretrained',
+			layout_id='layout_000',
+			data_size='small',
+			layout_config=layout,
+			data=data,
+		)
+
+	config, data, layout = _write_frozen_fixture(tmp_path / 'primary')
+	valid = np.load(
+		output_paths(
+			config.pretrained_embeddings_dir, config.survey_id
+		).valid_tokens
+	)
+	valid[2, 2, :] = False
+	_write_paired_valid_tokens(config, valid)
+	with pytest.raises(ValueError, match='primary common test has zero model-valid'):
+		inspect_frozen_horizon_job(
+			config,
+			model='pretrained',
+			layout_id='layout_000',
+			data_size='small',
+			layout_config=layout,
+			data=data,
+		)
 
 
 def test_preflight_rejects_mismatched_valid_tokens_and_checkpoint_roles(
@@ -284,6 +412,12 @@ def test_completed_job_selects_strict_best_and_tests_it_once(tmp_path: Path) -> 
 	secondary_coverage = metrics['test']['secondary_per_horizon']['coverage']
 	assert secondary_coverage['eligible_count'] == sum(
 		plan.per_horizon_counts['test']
+	)
+	assert metrics['test']['primary_common']['coverage']['eligible_count'] == sum(
+		plan.effective_per_horizon_counts['test_primary']
+	)
+	assert metrics['validation']['coverage']['eligible_count'] == sum(
+		plan.effective_per_horizon_counts['validation']
 	)
 	best = torch.load(
 		plan.output_dir / BEST_NAME, map_location='cpu', weights_only=False
@@ -551,6 +685,16 @@ def _write_frozen_fixture(
 		}
 	)
 	return config, data, layout_path
+
+
+def _write_paired_valid_tokens(
+	config: FrozenHorizonConfig, valid_tokens: np.ndarray
+) -> None:
+	for directory in (
+		config.pretrained_embeddings_dir,
+		config.random_embeddings_dir,
+	):
+		np.save(output_paths(directory, config.survey_id).valid_tokens, valid_tokens)
 
 
 def _mae_model_config() -> dict[str, object]:

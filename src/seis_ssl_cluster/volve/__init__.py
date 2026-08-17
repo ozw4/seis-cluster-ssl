@@ -93,6 +93,8 @@ from seis_ssl_cluster.volve.horizon_tiles import (
 	build_horizon_tile_targets,
 	build_raw_horizon_tile,
 	enumerate_horizon_tile_records,
+	frozen_core_output_valid_mask,
+	frozen_survey_output_valid_mask,
 	horizon_supervision_mask,
 )
 from seis_ssl_cluster.volve.mae_validation import (
@@ -166,7 +168,9 @@ __all__ = [
 	'enumerate_horizon_tile_records',
 	'fractional_horizon_cross_entropy',
 	'fractional_target_weights',
+	'frozen_core_output_valid_mask',
 	'frozen_horizon_config_from_mapping',
+	'frozen_survey_output_valid_mask',
 	'hard_argmax_global_sample',
 	'horizon_supervision_mask',
 	'inspect_frozen_embedding_pair',

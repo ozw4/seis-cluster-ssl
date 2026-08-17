@@ -189,6 +189,59 @@ def horizon_supervision_mask(  # noqa: PLR0913
 	)
 
 
+def frozen_survey_output_valid_mask(
+	token_valid_mask: np.ndarray,
+	settings: HorizonTileSettings,
+) -> np.ndarray:
+	'''Return survey voxels backed by a fully valid 216-sample token column.'''
+	settings.validate()
+	valid = np.asarray(token_valid_mask)
+	if valid.shape != settings.token_grid_shape or valid.dtype != np.bool_:
+		raise ValueError(
+			'window token_valid_mask must be bool with the survey token-grid shape'
+		)
+	column_valid = np.all(valid, axis=2)
+	expanded = np.repeat(
+		np.repeat(column_valid, settings.patch_size_xyz[0], axis=0),
+		settings.patch_size_xyz[1],
+		axis=1,
+	)
+	return np.ascontiguousarray(
+		expanded[
+			: settings.lateral_shape_xy[0],
+			: settings.lateral_shape_xy[1],
+		]
+	)
+
+
+def frozen_core_output_valid_mask(
+	token_valid_mask: np.ndarray,
+	settings: HorizonTileSettings,
+) -> np.ndarray:
+	'''Return the central 64 by 64 output mask for one frozen decoder input.'''
+	settings.validate()
+	valid = np.asarray(token_valid_mask)
+	if valid.shape != settings.input_size_tokens or valid.dtype != np.bool_:
+		raise ValueError(
+			'tile token_valid_mask must be bool with the decoder input shape'
+		)
+	halo_x, halo_y = settings.context_halo_tokens[:2]
+	core_x, core_y = settings.core_size_tokens[:2]
+	core_tokens = valid[
+		halo_x : halo_x + core_x,
+		halo_y : halo_y + core_y,
+		:,
+	]
+	column_valid = np.all(core_tokens, axis=2)
+	return np.ascontiguousarray(
+		np.repeat(
+			np.repeat(column_valid, settings.patch_size_xyz[0], axis=0),
+			settings.patch_size_xyz[1],
+			axis=1,
+		)
+	)
+
+
 def enumerate_horizon_tile_records(
 	*,
 	sample_float: np.ndarray,
@@ -514,5 +567,7 @@ __all__ = [
 	'build_horizon_tile_targets',
 	'build_raw_horizon_tile',
 	'enumerate_horizon_tile_records',
+	'frozen_core_output_valid_mask',
+	'frozen_survey_output_valid_mask',
 	'horizon_supervision_mask',
 ]

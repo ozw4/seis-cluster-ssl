@@ -78,7 +78,18 @@ def main() -> None:
 			f'decoder_initial_state_sha256: '
 			f'{identity["decoder"]["initial_state_sha256"]}'
 		)
-		print(f'per_horizon_counts: {dict(plan.per_horizon_counts)}')
+		print(
+			'native_horizon_observation_counts: '
+			f'{dict(plan.native_per_horizon_counts)}'
+		)
+		print(
+			'effective_model_valid_observation_counts: '
+			f'{dict(plan.effective_per_horizon_counts)}'
+		)
+		print(
+			'excluded_by_token_validity_counts: '
+			f'{dict(plan.excluded_by_token_validity_counts)}'
+		)
 		print(
 			'tile_counts: '
 			f'{ {key: len(value) for key, value in plan.tile_records.items()} }'
