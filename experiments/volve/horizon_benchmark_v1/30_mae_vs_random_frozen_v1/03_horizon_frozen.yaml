@@ -1,0 +1,38 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  volve_root: ${SEIS_SSL_CLUSTER_VOLVE_ROOT}
+dataset:
+  survey_id: volve_st10010
+inputs:
+  canonical_input_metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/volve_canonical_input_metadata.json
+embeddings:
+  pretrained_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/overlap_x64
+  random_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64
+outputs:
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/mae_vs_random_frozen_v1/runs
+decoder:
+  embedding_dim: 384
+  class_count: 5
+  hidden_channels: [128, 64, 32]
+  upsample_factors:
+    - [2, 2, 2]
+    - [2, 2, 2]
+    - [2, 2, 2]
+  upsample_mode: nearest
+  normalization: voxelwise_layer_norm
+tiles:
+  patch_size: [8, 8, 8]
+  core_size_tokens: [8, 8, 27]
+  context_halo_tokens: [1, 1, 0]
+  window_start: 552
+  window_stop: 768
+  min_token_valid_fraction: 1.0
+train:
+  epochs: 50
+  batch_size: 1
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  sampling_mode: all_tiles_once
+  seed: 42000
+  amp: true
+  gradient_clip_norm: 1.0
