@@ -105,7 +105,7 @@ PARIHAKA_BARLOW_ROOT = Path(
 	'amp_barlow_twins_flipxy_l0005_v1',
 )
 PARIHAKA_BARLOW_CONFIGS = [
-	PARIHAKA_BARLOW_ROOT / '01_smoke_2step.yaml',
+	PARIHAKA_BARLOW_ROOT / '01_gpu_feasibility_1step.yaml',
 	PARIHAKA_BARLOW_ROOT / '02_full_100ep.yaml',
 ]
 STABLE_NOPIMS_FULL_MAE_CONFIG = (
@@ -491,10 +491,12 @@ def test_parihaka_barlow_twins_is_paired_with_mae_comparison(
 	for section in ('manifests', 'data', 'zero_mask', 'model', 'augmentations'):
 		assert smoke[section] == full[section]
 	assert smoke['barlow_twins'] == full['barlow_twins']
-	assert smoke['train']['max_steps'] == 2
-	assert smoke['train']['batch_size'] == 2
+	assert smoke['train']['max_steps'] == 1
+	assert smoke['train']['batch_size'] == full['train']['batch_size'] == 4
 	assert smoke['train']['samples_per_epoch'] == 4
 	assert smoke['train']['epochs'] == 1
+	assert smoke['train']['device'] == full['train']['device'] == 'cuda'
+	assert smoke['train']['amp'] is full['train']['amp'] is True
 	assert full['train']['max_steps'] is None
 	assert full['train']['epochs'] == 100
 

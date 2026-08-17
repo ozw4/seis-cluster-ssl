@@ -42,6 +42,8 @@ DIAGNOSTIC_METRICS = {
 	'weighted_off_diag',
 	'gradient_norm',
 	'learning_rate',
+	'step_time_seconds',
+	'peak_cuda_memory_mib',
 }
 
 
@@ -191,6 +193,8 @@ def test_epoch_checks_and_records_preclip_gradient_norm(
 	assert calls == [(1.5, True)]
 	assert state.metrics['gradient_norm'] == pytest.approx(0.75)
 	assert state.metrics['learning_rate'] == pytest.approx(0.025)
+	assert state.metrics['step_time_seconds'] > 0.0
+	assert state.metrics['peak_cuda_memory_mib'] == 0.0
 	assert set(state.metrics) >= DIAGNOSTIC_METRICS
 
 

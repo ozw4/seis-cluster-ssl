@@ -1,6 +1,6 @@
 paths:
   artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
-  output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/amp_barlow_twins_flipxy_l0005_v1/smoke_2step
+  output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/amp_barlow_twins_flipxy_l0005_v1/gpu_feasibility_1step
 manifests:
   train: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude_manifest.json
   train_path_list: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_npy_paths.txt
@@ -36,7 +36,7 @@ barlow_twins:
   redundancy_weight: 0.005
   normalization_eps: 1.0e-4
 train:
-  batch_size: 2
+  batch_size: 4
   samples_per_epoch: 4
   epochs: 1
   num_workers: 0
@@ -45,9 +45,9 @@ train:
   shuffle: true
   lr: 1.0e-4
   weight_decay: 0.05
-  amp: false
+  amp: true
   amp_dtype: auto
-  device: cpu
+  device: cuda
   seed: 42
   grad_clip_norm: 1.0
-  max_steps: 2
+  max_steps: 1

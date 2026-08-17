@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import random
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,12 +77,20 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 ) -> BarlowTwinsTrainingState:
 	"""Train for one epoch or until the supplied per-call step limit."""
 	model.train()
-	totals = dict.fromkeys((*_LOSS_METRICS, 'gradient_norm', 'learning_rate'), 0.0)
+	totals = dict.fromkeys(
+		(*_LOSS_METRICS, 'gradient_norm', 'learning_rate', 'step_time_seconds'),
+		0.0,
+	)
 	parameters = tuple(model.pretraining_parameters())
+	if device.type == 'cuda':
+		torch.cuda.reset_peak_memory_stats(device)
 	batches = 0
 	for raw_batch in dataloader:
 		if max_steps is not None and batches >= max_steps:
 			break
+		if device.type == 'cuda':
+			torch.cuda.synchronize(device)
+		step_started = time.perf_counter()
 		batch = move_batch_to_device(
 			raw_batch,
 			device,
@@ -117,6 +126,9 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 			grad_norm = _clip_and_check_gradients(parameters, grad_clip_norm)
 			scaler.step(optimizer)
 			scaler.update()
+		if device.type == 'cuda':
+			torch.cuda.synchronize(device)
+		step_time_seconds = time.perf_counter() - step_started
 		global_step += 1
 		batches += 1
 		totals['training_loss'] += float(loss.detach().cpu())
@@ -126,12 +138,19 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 			totals[key] += float(losses[key].detach().cpu())
 		totals['gradient_norm'] += float(grad_norm.detach().cpu())
 		totals['learning_rate'] += float(optimizer.param_groups[0]['lr'])
+		totals['step_time_seconds'] += step_time_seconds
 	if batches == 0:
 		raise ValueError('Barlow Twins dataloader produced no batches')
+	metrics = {key: value / batches for key, value in totals.items()}
+	metrics['peak_cuda_memory_mib'] = (
+		float(torch.cuda.max_memory_allocated(device)) / (1024.0**2)
+		if device.type == 'cuda'
+		else 0.0
+	)
 	return BarlowTwinsTrainingState(
 		epoch=epoch,
 		global_step=global_step,
-		metrics={key: value / batches for key, value in totals.items()},
+		metrics=metrics,
 		completed_epoch=batches == len(dataloader),
 	)
 
