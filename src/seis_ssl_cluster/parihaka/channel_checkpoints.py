@@ -27,8 +27,17 @@ CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX = (
 def inspect_channel_model_sources(
 	pretrained_metadata: Mapping[str, object],
 	random_metadata: Mapping[str, object],
+	*,
+	pretrained_model_tag: str = CHANNEL_PRETRAINED_MODEL_TAG,
+	pretrained_checkpoint_suffix: tuple[str, ...] = (
+		CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX
+	),
 ) -> tuple[dict[str, object], dict[str, object]]:
 	"""Validate checkpoint SHA and scientific roles for a paired comparison."""
+	_validate_pretrained_identity(
+		pretrained_model_tag,
+		pretrained_checkpoint_suffix,
+	)
 	pretrained_path, pretrained_sha = validated_channel_checkpoint(
 		pretrained_metadata, 'pretrained'
 	)
@@ -37,12 +46,12 @@ def inspect_channel_model_sources(
 	)
 	if pretrained_sha == random_sha:
 		raise ValueError('pretrained/random checkpoint_sha256 must differ')
-	if tuple(pretrained_path.parts[-len(CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX) :]) != (
-		CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX
+	if tuple(pretrained_path.parts[-len(pretrained_checkpoint_suffix) :]) != (
+		pretrained_checkpoint_suffix
 	):
 		raise ValueError(
-			'pretrained embedding checkpoint must be the expected Parihaka '
-			'full_100ep/latest.pt'
+			'pretrained embedding checkpoint does not match its declared '
+			'scientific identity suffix'
 		)
 	random_payload = load_checkpoint_metadata_without_weights(random_path)
 	metadata = _checkpoint_mapping(random_payload, 'metadata', random_path)
@@ -59,7 +68,7 @@ def inspect_channel_model_sources(
 		)
 	expected_metadata = {
 		'seed': CHANNEL_RANDOM_ENCODER_SEED,
-		'reference_model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+		'reference_model_tag': pretrained_model_tag,
 	}
 	for key, expected in expected_metadata.items():
 		if metadata.get(key) != expected:
@@ -87,7 +96,7 @@ def inspect_channel_model_sources(
 			'role': 'pretrained',
 			'checkpoint_path': str(pretrained_path),
 			'checkpoint_sha256': pretrained_sha,
-			'model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+			'model_tag': pretrained_model_tag,
 		},
 		{
 			'role': 'random',
@@ -99,9 +108,19 @@ def inspect_channel_model_sources(
 			'checkpoint_kind': 'random_init',
 			'reference_checkpoint': reference_value,
 			'reference_checkpoint_sha256': pretrained_sha,
-			'reference_model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
+			'reference_model_tag': pretrained_model_tag,
 		},
 	)
+
+
+def _validate_pretrained_identity(
+	model_tag: str,
+	checkpoint_suffix: tuple[str, ...],
+) -> None:
+	if not model_tag:
+		raise ValueError('pretrained_model_tag must be non-empty')
+	if not checkpoint_suffix or any(not part for part in checkpoint_suffix):
+		raise ValueError('pretrained_checkpoint_suffix must contain non-empty parts')
 
 
 def validated_channel_checkpoint(

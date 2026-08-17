@@ -18,6 +18,10 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset, Subset
 
+from seis_ssl_cluster.config.schema import (
+	STAGE_BARLOW_TWINS_TRAINING,
+	STAGE_MAE_TRAINING,
+)
 from seis_ssl_cluster.data.normalization import (
 	AmplitudeAgcConfig,
 	SurveyNormalizationStats,
@@ -30,6 +34,7 @@ from seis_ssl_cluster.data.window_preprocessing import (
 	read_amplitude_crop,
 )
 from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
+from seis_ssl_cluster.embedding.extractor import build_model_from_checkpoint_payload
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.voxel_decoder import (
@@ -38,6 +43,8 @@ from seis_ssl_cluster.models.voxel_decoder import (
 	validate_voxel_decoder_architecture,
 )
 from seis_ssl_cluster.parihaka.channel_checkpoints import (
+	CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX,
+	CHANNEL_PRETRAINED_MODEL_TAG,
 	inspect_channel_model_sources,
 )
 from seis_ssl_cluster.parihaka.channel_data import (
@@ -150,6 +157,10 @@ class ChannelEndToEndConfig:
 	decoder: DecoderArchitecture
 	tiles: DecoderTiles
 	train: ChannelEndToEndTrain
+	pretrained_model_tag: str = CHANNEL_PRETRAINED_MODEL_TAG
+	pretrained_checkpoint_suffix: tuple[str, ...] = (
+		CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX
+	)
 
 
 @dataclass(frozen=True)
@@ -506,6 +517,8 @@ def channel_end_to_end_config_from_mapping(
 		decoder=_end_to_end_decoder(_mapping(config, 'decoder')),
 		tiles=_end_to_end_tiles(_mapping(config, 'tiles')),
 		train=_end_to_end_train(_mapping(config, 'train')),
+		pretrained_model_tag=_optional_pretrained_model_tag(inputs),
+		pretrained_checkpoint_suffix=_optional_pretrained_checkpoint_suffix(inputs),
 	)
 
 
@@ -536,6 +549,8 @@ def inspect_channel_end_to_end_job(  # noqa: C901, PLR0913, PLR0915
 	pretrained_source, random_source = inspect_channel_model_sources(
 		reference.metadata,
 		random_metadata,
+		pretrained_model_tag=config.pretrained_model_tag,
+		pretrained_checkpoint_suffix=config.pretrained_checkpoint_suffix,
 	)
 	_validate_pretrained_checkpoint_role(config.pretrained_checkpoint)
 	pretrained_geometry = _checkpoint_geometry(config.pretrained_checkpoint)
@@ -704,25 +719,35 @@ def resolve_channel_end_to_end_runtime(
 def build_channel_end_to_end_model(plan: ChannelEndToEndPlan) -> ChannelEndToEndModel:
 	"""Build the selected float32 encoder and deterministic voxel decoder."""
 	geometry = plan.model_geometry
-	mae = AmplitudeMAE3D(
-		in_channels=geometry.in_channels,
-		out_channels=geometry.out_channels,
-		patch_size_xyz=geometry.patch_size_xyz,
-		encoder_dim=geometry.encoder_dim,
-		encoder_depth=geometry.encoder_depth,
-		encoder_heads=geometry.encoder_heads,
-		decoder_dim=geometry.decoder_dim,
-		decoder_depth=geometry.decoder_depth,
-		decoder_heads=geometry.decoder_heads,
-	)
 	checkpoint_path = (
 		plan.config.pretrained_checkpoint
 		if plan.encoder_init == 'pretrained'
 		else plan.config.random_checkpoint
 	)
 	payload = _load_checkpoint(checkpoint_path)
-	state = _model_state(payload, checkpoint_path)
-	mae.load_state_dict(state, strict=True)
+	checkpoint_config = _required_mapping(
+		payload,
+		'config',
+		f'{checkpoint_path} checkpoint',
+	)
+	if checkpoint_config.get('stage') in {
+		STAGE_BARLOW_TWINS_TRAINING,
+		STAGE_MAE_TRAINING,
+	}:
+		mae = build_model_from_checkpoint_payload(payload)
+	else:
+		mae = AmplitudeMAE3D(
+			in_channels=geometry.in_channels,
+			out_channels=geometry.out_channels,
+			patch_size_xyz=geometry.patch_size_xyz,
+			encoder_dim=geometry.encoder_dim,
+			encoder_depth=geometry.encoder_depth,
+			encoder_heads=geometry.encoder_heads,
+			decoder_dim=geometry.decoder_dim,
+			decoder_depth=geometry.decoder_depth,
+			decoder_heads=geometry.decoder_heads,
+		)
+		mae.load_state_dict(_model_state(payload, checkpoint_path), strict=True)
 	with torch.random.fork_rng(devices=[]):
 		torch.manual_seed(plan.config.train.seed)
 		decoder = VoxelDecoder3D(
@@ -1848,6 +1873,31 @@ def _absolute_path(value: Mapping[str, object], key: str, prefix: str) -> Path:
 	if not path.is_absolute():
 		raise ValueError(f'{prefix}.{key} must be absolute')
 	return path
+
+
+def _optional_pretrained_model_tag(inputs: Mapping[str, object]) -> str:
+	value = inputs.get('pretrained_model_tag', CHANNEL_PRETRAINED_MODEL_TAG)
+	if not isinstance(value, str) or not value:
+		raise TypeError('inputs.pretrained_model_tag must be a non-empty string')
+	return value
+
+
+def _optional_pretrained_checkpoint_suffix(
+	inputs: Mapping[str, object],
+) -> tuple[str, ...]:
+	value = inputs.get(
+		'pretrained_checkpoint_suffix',
+		CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX,
+	)
+	if not isinstance(value, list | tuple) or not value:
+		raise TypeError(
+			'inputs.pretrained_checkpoint_suffix must be a non-empty sequence'
+		)
+	if any(not isinstance(part, str) or not part for part in value):
+		raise TypeError(
+			'inputs.pretrained_checkpoint_suffix must contain non-empty strings'
+		)
+	return tuple(value)
 
 
 def _positive_integer(value: object, label: str) -> int:

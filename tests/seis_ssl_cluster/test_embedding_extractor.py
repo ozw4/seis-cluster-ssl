@@ -17,6 +17,7 @@ import torch
 
 import seis_ssl_cluster.data.survey_preprocessing_cache as cache_module
 import seis_ssl_cluster.embedding.extractor as extractor_module
+from seis_ssl_cluster.config import resolve_barlow_twins_training_config
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudePreprocessSettings,
@@ -38,6 +39,7 @@ from seis_ssl_cluster.data.window_preprocessing import (
 )
 from seis_ssl_cluster.embedding import (
 	EmbeddingMerger,
+	build_model_from_checkpoint_payload,
 	extract_embeddings_from_loaded_model,
 	iter_sliding_windows,
 	run_embedding_extraction,
@@ -47,6 +49,14 @@ from seis_ssl_cluster.embedding import (
 	reduce_valid_mask_to_tokens as package_reduce_valid_mask_to_tokens,
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
+from seis_ssl_cluster.models.voxel_decoder import VoxelDecoder3D
+from seis_ssl_cluster.parihaka.channel_end_to_end import ChannelEndToEndModel
+from seis_ssl_cluster.training.barlow_twins_checkpoint import (
+	PRETRAINING_METHOD as BARLOW_TWINS_PRETRAINING_METHOD,
+)
+from seis_ssl_cluster.training.barlow_twins_checkpoint import (
+	save_barlow_twins_checkpoint,
+)
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
 from tests.seis_ssl_cluster.helpers_window_preprocessing import (
 	PATCH_SIZE_XYZ,
@@ -103,6 +113,105 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['min_token_valid_fraction'] == 0.5
 	assert metadata['preprocessing']['amplitude_agc'] == {'enabled': False}
 	assert metadata['amplitude_agc'] == {'enabled': False}
+
+
+def test_barlow_checkpoint_uses_existing_full_volume_extraction_contract(
+	tmp_path: Path,
+) -> None:
+	mae_root = tmp_path / 'mae'
+	barlow_root = tmp_path / 'barlow'
+	mae_root.mkdir()
+	barlow_root.mkdir()
+	mae_config = _write_fixture(mae_root)
+	barlow_config = _write_fixture(barlow_root)
+	_make_fixture_checkpoint_barlow(barlow_config)
+
+	mae_result = run_embedding_extraction(mae_config, device='cpu')[0]
+	barlow_result = run_embedding_extraction(barlow_config, device='cpu')[0]
+	mae_embeddings = np.load(mae_result.embeddings_path)
+	barlow_embeddings = np.load(barlow_result.embeddings_path)
+	barlow_valid = np.load(barlow_result.valid_tokens_path)
+	metadata = json.loads(barlow_result.metadata_path.read_text(encoding='utf-8'))
+
+	assert barlow_embeddings.shape == mae_embeddings.shape == (3, 3, 4, 12)
+	assert barlow_valid.shape == (3, 3, 4)
+	assert metadata['pretraining_method'] == BARLOW_TWINS_PRETRAINING_METHOD
+	assert metadata['pretraining_objective'] == {
+		'method': BARLOW_TWINS_PRETRAINING_METHOD,
+		'projector_dim': 8,
+		'redundancy_weight': 0.005,
+		'normalization_eps': 1.0e-4,
+	}
+	assert metadata['model_geometry'] == json.loads(
+		mae_result.metadata_path.read_text(encoding='utf-8')
+	)['model_geometry']
+
+
+def test_barlow_checkpoint_loads_exact_encoder_without_projector_or_wrapper(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	_make_fixture_checkpoint_barlow(config)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+
+	mae = build_model_from_checkpoint_payload(payload)
+	for key, expected in payload['model_state_dict'].items():
+		assert torch.equal(mae.state_dict()[key], expected)
+	assert not any(
+		key.startswith(('backbone.', 'projector.')) for key in mae.state_dict()
+	)
+	assert set(payload['projector_state_dict']).isdisjoint(mae.state_dict())
+
+	voxel_decoder = VoxelDecoder3D(
+		embedding_dim=12,
+		class_count=2,
+		hidden_channels=(8,),
+		upsample_factors=((2, 2, 2),),
+		patch_size_xyz=(2, 2, 2),
+	)
+	downstream = ChannelEndToEndModel(mae, voxel_decoder)
+	encoder_ids = {id(parameter) for parameter in downstream.encoder_parameters()}
+	assert encoder_ids == {
+		id(parameter)
+		for name, parameter in mae.named_parameters()
+		if name.startswith(('patch_projection.', 'encoder.'))
+	}
+	assert all(
+		id(parameter) not in encoder_ids for parameter in mae.decoder.parameters()
+	)
+	for parameter in downstream.encoder_parameters():
+		parameter.requires_grad_(requires_grad=False)
+	assert all(
+		not parameter.requires_grad for parameter in downstream.encoder_parameters()
+	)
+	for parameter in downstream.encoder_parameters():
+		parameter.requires_grad_(requires_grad=True)
+	assert all(parameter.requires_grad for parameter in downstream.encoder_parameters())
+
+
+def test_barlow_checkpoint_rejects_method_identity_drift(tmp_path: Path) -> None:
+	config = _write_fixture(tmp_path)
+	_make_fixture_checkpoint_barlow(config)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	payload['pretraining_method'] = 'amp_mae3d'
+
+	with pytest.raises(ValueError, match='pretraining_method'):
+		build_model_from_checkpoint_payload(payload)
+
+
+def test_barlow_checkpoint_consumer_keeps_method_config_strict(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	_make_fixture_checkpoint_barlow(config)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	payload['config']['loss'] = {'reconstruction': 'mse'}
+
+	with pytest.raises(ValueError, match='unsupported top-level'):
+		build_model_from_checkpoint_payload(payload)
 
 
 def test_embedding_extraction_uses_manifest_source_valid_mask(
@@ -1462,6 +1571,83 @@ def _write_fixture(  # noqa: PLR0913
 		},
 	}
 	return config
+
+
+def _make_fixture_checkpoint_barlow(config: dict[str, object]) -> None:
+	embeddings = config['embeddings']
+	assert isinstance(embeddings, dict)
+	checkpoint_path = Path(embeddings['checkpoint'])
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	mae_config = payload['config']
+	assert isinstance(mae_config, dict)
+	model_config = mae_config['model']
+	assert isinstance(model_config, dict)
+	manifests = mae_config['manifests']
+	assert isinstance(manifests, dict)
+	zero_mask = mae_config['zero_mask']
+	assert isinstance(zero_mask, dict)
+	barlow_config = resolve_barlow_twins_training_config(
+		{
+			'paths': {
+				'artifact_root': str(checkpoint_path.parent / 'artifacts'),
+				'output_root': str(checkpoint_path.parent / 'artifacts' / 'barlow'),
+			},
+			'manifests': dict(manifests),
+			'data': {'local_crop_size': [4, 4, 4]},
+			'zero_mask': dict(zero_mask),
+			'model': {
+				key: model_config[key]
+				for key in (
+					'patch_size',
+					'encoder_dim',
+					'encoder_depth',
+					'encoder_heads',
+					'decoder_dim',
+					'decoder_depth',
+					'decoder_heads',
+				)
+			},
+			'barlow_twins': {'projector_dim': 8},
+			'train': {
+				'batch_size': 2,
+				'samples_per_epoch': 2,
+				'epochs': 1,
+				'num_workers': 0,
+				'shuffle': False,
+				'lr': 1.0e-4,
+				'weight_decay': 0.0,
+				'amp': False,
+				'device': 'cpu',
+				'seed': 7,
+				'grad_clip_norm': 1.0,
+			},
+		}
+	)
+	mae = build_model_from_checkpoint_payload(payload)
+	projector = torch.nn.Linear(mae.encoder_dim, 8)
+	optimizer = torch.optim.AdamW(
+		[
+			*mae.patch_projection.parameters(),
+			*mae.encoder.parameters(),
+			*projector.parameters(),
+		],
+		lr=1.0e-4,
+	)
+	save_barlow_twins_checkpoint(
+		checkpoint_path,
+		backbone=mae,
+		projector=projector,
+		optimizer=optimizer,
+		epoch=1,
+		global_step=1,
+		config=barlow_config,
+		metrics={'train_loss': 0.5},
+		amp_enabled=False,
+		scaler=None,
+		scaler_required=False,
+		dataset_epoch=1,
+		completed_epoch=True,
+	)
 
 
 def _expected_valid_tokens_from_shared_preprocessing(

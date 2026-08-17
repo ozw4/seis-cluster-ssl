@@ -23,6 +23,7 @@ from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.models.voxel_decoder import VoxelDecoder3D
 from seis_ssl_cluster.parihaka.channel_checkpoints import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
+	inspect_channel_model_sources,
 )
 from seis_ssl_cluster.parihaka.channel_data import (
 	DATA_SIZE_PREFIX,
@@ -542,6 +543,45 @@ def test_checkpoint_roles_cannot_be_swapped(tmp_path: Path) -> None:
 			layout_config=fixture.layout,
 			device='cpu',
 		)
+
+
+def test_checkpoint_source_identity_can_declare_barlow_experiment(
+	tmp_path: Path,
+) -> None:
+	model_tag = 'barlow_twins_3d_channel_v1'
+	pretrained = tmp_path / 'pretraining' / model_tag / 'latest.pt'
+	random = tmp_path / 'random.pt'
+	pretrained.parent.mkdir(parents=True)
+	torch.save({'model_state_dict': {}}, pretrained)
+	torch.save(
+		{
+			'model_state_dict': {},
+			'metadata': {
+				'random_encoder_baseline': True,
+				'pretrained_weights_loaded': False,
+				'seed': 42,
+				'reference_checkpoint': str(pretrained),
+				'reference_model_tag': model_tag,
+			},
+			'training_state': {'checkpoint_kind': 'random_init'},
+		},
+		random,
+	)
+	pretrained_source, random_source = inspect_channel_model_sources(
+		{
+			'checkpoint_path': str(pretrained),
+			'checkpoint_sha256': file_sha256(pretrained),
+		},
+		{
+			'checkpoint_path': str(random),
+			'checkpoint_sha256': file_sha256(random),
+		},
+		pretrained_model_tag=model_tag,
+		pretrained_checkpoint_suffix=(model_tag, 'latest.pt'),
+	)
+
+	assert pretrained_source['model_tag'] == model_tag
+	assert random_source['reference_model_tag'] == model_tag
 
 
 def test_checkpoint_file_sha_mismatch_is_rejected(tmp_path: Path) -> None:
