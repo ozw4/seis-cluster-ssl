@@ -30,6 +30,23 @@ def mae_collate_fn(
 	}
 
 
+def barlow_twins_collate_fn(
+	samples: Sequence[Mapping[str, object]],
+) -> dict[str, torch.Tensor | object]:
+	"""Collate paired amplitude views for Barlow Twins pretraining."""
+	if not samples:
+		msg = 'samples must contain at least one sample'
+		raise ValueError(msg)
+
+	return {
+		'view_a': _stack_arrays(samples, 'view_a'),
+		'view_b': _stack_arrays(samples, 'view_b'),
+		'valid_mask_a': _stack_arrays(samples, 'valid_mask_a'),
+		'valid_mask_b': _stack_arrays(samples, 'valid_mask_b'),
+		'coords': [sample.get('coords') for sample in samples],
+	}
+
+
 def strat_pseudo_target_collate_fn(
 	samples: Sequence[Mapping[str, object]],
 ) -> dict[str, torch.Tensor | object]:
@@ -370,6 +387,7 @@ def _torch_dtype(array: np.ndarray) -> torch.dtype:
 
 
 __all__ = [
+	'barlow_twins_collate_fn',
 	'mae_collate_fn',
 	'move_batch_to_device',
 	'strat_multi_head_posterior_collate_fn',

@@ -2,12 +2,14 @@
 
 from seis_ssl_cluster.training.checkpoint import load_checkpoint, save_checkpoint
 from seis_ssl_cluster.training.collate import (
+	barlow_twins_collate_fn,
 	mae_collate_fn,
 	move_batch_to_device,
 	strat_multi_head_posterior_collate_fn,
 	strat_multi_head_target_collate_fn,
 )
 from seis_ssl_cluster.training.dataloaders import (
+	build_barlow_twins_dataloader,
 	build_mae_dataloader,
 	build_strat_multi_head_posterior_dataloader,
 	build_strat_multi_head_target_dataloader,
@@ -27,6 +29,8 @@ from seis_ssl_cluster.training.random_checkpoint import (
 __all__ = [
 	'MaeTrainingState',
 	'RandomMaeCheckpointConfig',
+	'barlow_twins_collate_fn',
+	'build_barlow_twins_dataloader',
 	'build_mae_dataloader',
 	'build_strat_multi_head_posterior_dataloader',
 	'build_strat_multi_head_target_dataloader',

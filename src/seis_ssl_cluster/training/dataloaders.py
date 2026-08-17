@@ -9,6 +9,7 @@ import numpy as np
 import torch
 
 from seis_ssl_cluster.training.collate import (
+	barlow_twins_collate_fn,
 	mae_collate_fn,
 	strat_multi_head_posterior_collate_fn,
 	strat_multi_head_target_collate_fn,
@@ -17,6 +18,58 @@ from seis_ssl_cluster.training.collate import (
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
+
+
+def build_barlow_twins_dataloader(  # noqa: PLR0913
+	dataset: object,
+	*,
+	batch_size: int,
+	num_workers: int = 0,
+	shuffle: bool = True,
+	seed: int = 42,
+	device: str | torch.device = 'cpu',
+	prefetch_factor: int | None = 2,
+	persistent_workers: bool = True,
+) -> torch.utils.data.DataLoader:
+	"""Build a deterministic two-view Barlow Twins DataLoader."""
+	if isinstance(batch_size, bool) or not isinstance(batch_size, int):
+		msg = f'batch_size must be an integer; got {batch_size!r}'
+		raise TypeError(msg)
+	if batch_size < 2:
+		msg = f'Barlow Twins batch_size must be at least 2; got {batch_size!r}'
+		raise ValueError(msg)
+	if num_workers < 0:
+		msg = f'num_workers must be nonnegative; got {num_workers!r}'
+		raise ValueError(msg)
+	if prefetch_factor is not None and (
+		isinstance(prefetch_factor, bool)
+		or not isinstance(prefetch_factor, int)
+		or prefetch_factor <= 0
+	):
+		msg = (
+			'prefetch_factor must be a positive integer or None; '
+			f'got {prefetch_factor!r}'
+		)
+		raise ValueError(msg)
+	if not isinstance(persistent_workers, bool):
+		msg = f'persistent_workers must be a bool; got {persistent_workers!r}'
+		raise TypeError(msg)
+	generator = torch.Generator()
+	generator.manual_seed(seed)
+	torch_device = torch.device(device)
+	return torch.utils.data.DataLoader(
+		dataset,
+		batch_size=batch_size,
+		shuffle=shuffle,
+		num_workers=num_workers,
+		collate_fn=barlow_twins_collate_fn,
+		generator=generator,
+		drop_last=True,
+		pin_memory=torch_device.type == 'cuda',
+		prefetch_factor=prefetch_factor if num_workers > 0 else None,
+		persistent_workers=persistent_workers and num_workers > 0,
+		worker_init_fn=_make_worker_init_fn(seed),
+	)
 
 
 def build_mae_dataloader(  # noqa: PLR0913
@@ -161,6 +214,7 @@ def _make_worker_init_fn(seed: int) -> Callable[[int], None]:
 
 
 __all__ = [
+	'build_barlow_twins_dataloader',
 	'build_mae_dataloader',
 	'build_strat_multi_head_posterior_dataloader',
 	'build_strat_multi_head_target_dataloader',
