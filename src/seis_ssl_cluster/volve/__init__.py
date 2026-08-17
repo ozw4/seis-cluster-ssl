@@ -40,13 +40,11 @@ from seis_ssl_cluster.volve.horizon_frozen import (
 	FrozenHorizonTileDataset,
 	FrozenHorizonTrainSettings,
 	decoder_initial_state_sha256,
-	deterministic_tile_order,
 	enumerate_frozen_horizon_conditions,
 	frozen_horizon_config_from_mapping,
 	inspect_frozen_embedding_pair,
 	inspect_frozen_horizon_job,
 	run_frozen_horizon_job,
-	validation_mae_improved,
 )
 from seis_ssl_cluster.volve.horizon_layouts import (
 	DATA_SIZE_PREFIX,
@@ -79,6 +77,13 @@ from seis_ssl_cluster.volve.horizon_model import (
 	HorizonDecoderGeometry,
 	VolveHorizonDecoder,
 	create_volve_horizon_decoder,
+)
+from seis_ssl_cluster.volve.horizon_runner import (
+	HorizonRunnerSettings,
+	HorizonRuntimeContext,
+	deterministic_tile_order,
+	run_horizon_training_job,
+	validation_mae_improved,
 )
 from seis_ssl_cluster.volve.horizon_tiles import (
 	HORIZON_WINDOW_LENGTH,
@@ -137,6 +142,8 @@ __all__ = [
 	'FrozenHorizonTileDataset',
 	'FrozenHorizonTrainSettings',
 	'HorizonDecoderGeometry',
+	'HorizonRunnerSettings',
+	'HorizonRuntimeContext',
 	'HorizonSplitPlan',
 	'HorizonTileRecord',
 	'HorizonTileSettings',
@@ -182,6 +189,7 @@ __all__ = [
 	'resolve_volve_canonical_input_config',
 	'resolve_volve_horizon_inspection_config',
 	'run_frozen_horizon_job',
+	'run_horizon_training_job',
 	'section_statistics',
 	'soft_argmax_global_sample',
 	'training_horizon_observation_counts',

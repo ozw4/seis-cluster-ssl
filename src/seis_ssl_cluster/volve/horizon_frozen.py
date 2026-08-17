@@ -5,16 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import os
-import random
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
 import numpy as np
 import torch
+from torch import nn
 from torch.utils.data import Dataset
 
 from seis_ssl_cluster.embedding.writer import (
@@ -42,10 +40,7 @@ from seis_ssl_cluster.volve.horizon_loss import (
 	fractional_horizon_cross_entropy,
 	validate_training_horizon_coverage,
 )
-from seis_ssl_cluster.volve.horizon_metrics import (
-	compute_horizon_metrics,
-	soft_argmax_global_sample,
-)
+from seis_ssl_cluster.volve.horizon_metrics import soft_argmax_global_sample
 from seis_ssl_cluster.volve.horizon_model import (
 	HORIZON_DECODER_SEED,
 	HORIZON_EMBEDDING_DIM,
@@ -54,6 +49,18 @@ from seis_ssl_cluster.volve.horizon_model import (
 	HORIZON_UPSAMPLE_FACTORS,
 	VolveHorizonDecoder,
 	create_volve_horizon_decoder,
+)
+from seis_ssl_cluster.volve.horizon_runner import (
+	BEST_NAME,
+	LATEST_NAME,
+	METRICS_NAME,
+	HorizonRunnerSettings,
+	HorizonRuntimeContext,
+	backward_and_step_horizon_optimizer,
+	deterministic_tile_order,
+	horizon_autocast,
+	run_horizon_training_job,
+	validation_mae_improved,
 )
 from seis_ssl_cluster.volve.horizon_tiles import (
 	HORIZON_WINDOW_START,
@@ -67,16 +74,9 @@ from seis_ssl_cluster.volve.horizon_tiles import (
 	frozen_survey_output_valid_mask,
 	horizon_supervision_mask,
 )
-from seis_ssl_cluster.volve.horizon_training import (
-	backward_and_step_horizon_optimizer,
-)
 
 FROZEN_MODEL_ROLES = ('pretrained', 'random')
 FROZEN_CONDITION_COUNT = 30
-LATEST_NAME = 'latest.pt'
-BEST_NAME = 'best.pt'
-METRICS_NAME = 'metrics.json'
-HISTORY_NAME = 'history.json'
 OPTIMIZER_NAME = 'adamw'
 OPTIMIZER_BETAS = (0.9, 0.999)
 OPTIMIZER_EPS = 1.0e-8
@@ -647,28 +647,7 @@ def decoder_initial_state_sha256(seed: int = HORIZON_DECODER_SEED) -> str:
 	return digest.hexdigest()
 
 
-def deterministic_tile_order(tile_count: int, seed: int, epoch: int) -> tuple[int, ...]:
-	'''Return the all-tiles-once order for one epoch.'''
-	if tile_count <= 0:
-		raise ValueError('tile_count must be positive')
-	if epoch < 0:
-		raise ValueError('epoch must be non-negative')
-	generator = torch.Generator().manual_seed(seed + epoch)
-	return tuple(
-		int(index) for index in torch.randperm(tile_count, generator=generator)
-	)
-
-
-def validation_mae_improved(candidate: float, best: float) -> bool:
-	'''Return true only for a finite, strictly lower validation macro MAE.'''
-	if not math.isfinite(candidate):
-		raise ValueError('validation macro MAE candidate must be finite')
-	if math.isnan(best) or best == -math.inf:
-		raise ValueError('best validation macro MAE is invalid')
-	return candidate < best
-
-
-def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
+def run_frozen_horizon_job(
 	plan: FrozenHorizonPlan,
 	*,
 	device: str = 'auto',
@@ -676,23 +655,7 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 	resume: str | Path | None = None,
 	decoder_factory: Callable[[], VolveHorizonDecoder] | None = None,
 ) -> Path | None:
-	'''Train one decoder, select by validation macro MAE, and test best once.'''
-	if max_steps is not None and (
-		not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps <= 0
-	):
-		raise ValueError('max_steps must be a positive integer')
-	resume_path = None if resume is None else Path(resume)
-	_validate_output(plan.output_dir, resume_path)
-	run_device = _resolve_device(device)
-	runtime_precision = _runtime_precision_identity(
-		run_device, amp_requested=plan.config.train.amp
-	)
-	runtime_run_identity = {
-		**plan.run_identity,
-		'runtime_precision': runtime_precision,
-	}
-	_configure_determinism()
-	_seed_everything(plan.config.train.seed)
+	'''Connect frozen inputs and forward passes to the shared horizon runner.'''
 	selected_paths = (
 		plan.geometry.pretrained
 		if plan.model == 'pretrained'
@@ -710,344 +673,92 @@ def run_frozen_horizon_job(  # noqa: C901, PLR0912, PLR0915
 		)
 		for split in ('train', 'validation', 'test')
 	}
-	decoder = (
-		create_volve_horizon_decoder(seed=plan.config.train.seed)
-		if decoder_factory is None
-		else decoder_factory()
-	).to(run_device)
-	optimizer = torch.optim.AdamW(
-		decoder.parameters(),
-		lr=plan.config.train.learning_rate,
-		betas=OPTIMIZER_BETAS,
-		eps=OPTIMIZER_EPS,
-		weight_decay=plan.config.train.weight_decay,
-	)
-	amp_enabled = bool(runtime_precision['amp_enabled'])
-	scaler = torch.amp.GradScaler('cuda', enabled=True) if amp_enabled else None
-	history: list[dict[str, object]] = []
-	best_epoch: int | None = None
-	best_mae = math.inf
-	global_step = 0
-	start_epoch = 0
-	start_position = 0
-	train_loss_sum = 0.0
-	train_tile_count = 0
-	if resume_path is not None:
-		payload = torch.load(resume_path, map_location=run_device, weights_only=False)
-		_validate_resume_runtime(
-			payload,
-			expected=runtime_precision,
-			scaler=scaler,
+
+	def build_model_and_optimizer(
+		run_device: torch.device,
+	) -> tuple[nn.Module, torch.optim.Optimizer]:
+		decoder = (
+			create_volve_horizon_decoder(seed=plan.config.train.seed)
+			if decoder_factory is None
+			else decoder_factory()
+		).to(run_device)
+		optimizer = torch.optim.AdamW(
+			decoder.parameters(),
+			lr=plan.config.train.learning_rate,
+			betas=OPTIMIZER_BETAS,
+			eps=OPTIMIZER_EPS,
+			weight_decay=plan.config.train.weight_decay,
 		)
-		if payload.get('run_identity') != runtime_run_identity:
-			raise ValueError('resume checkpoint does not match this frozen horizon job')
-		if payload.get('completed') is True:
-			raise ValueError('completed frozen horizon job cannot be resumed')
-		decoder.load_state_dict(_state_dict(payload))
-		optimizer.load_state_dict(_mapping(payload, 'optimizer_state_dict'))
-		if scaler is not None:
-			scaler.load_state_dict(_mapping(payload, 'scaler_state_dict'))
-		history = [
-			dict(cast('Mapping[str, object]', row))
-			for row in _sequence(payload.get('history'), 'history')
-		]
-		best_epoch = _optional_int(payload.get('best_epoch'), 'best_epoch')
-		best_mae = float(payload.get('best_validation_macro_mae_samples', math.inf))
-		global_step = _nonnegative_int(payload.get('global_step'), 'global_step')
-		start_epoch = _nonnegative_int(payload.get('epoch'), 'epoch')
-		start_position = _nonnegative_int(payload.get('next_position'), 'next_position')
-		train_loss_sum = _finite_number(payload.get('train_loss_sum'), 'train_loss_sum')
-		train_tile_count = _nonnegative_int(
-			payload.get('train_tile_count'), 'train_tile_count'
-		)
-	plan.output_dir.mkdir(parents=True, exist_ok=True)
-	for epoch in range(start_epoch, plan.config.train.epochs):
-		order = deterministic_tile_order(
-			len(datasets['train']), plan.config.train.seed, epoch
-		)
-		for position in range(start_position, len(order)):
-			if max_steps is not None and global_step >= max_steps:
-				_save_latest(
-					plan,
-					decoder,
-					optimizer,
-					scaler,
-					history=history,
-					best_epoch=best_epoch,
-					best_mae=best_mae,
-					global_step=global_step,
-					epoch=epoch,
-					next_position=position,
-					train_loss_sum=train_loss_sum,
-					train_tile_count=train_tile_count,
-					completed=False,
-					runtime_precision=runtime_precision,
-					run_identity=runtime_run_identity,
-				)
-				_write_json(plan.output_dir / HISTORY_NAME, history)
-				return None
-			loss_value = _train_one_tile(
-				decoder,
-				datasets['train'][order[position]],
-				optimizer,
-				scaler,
-				run_device,
-				amp_enabled=amp_enabled,
-				gradient_clip_norm=plan.config.train.gradient_clip_norm,
-			)
-			train_loss_sum += loss_value
-			train_tile_count += 1
-			global_step += 1
-			if (
-				max_steps is not None
-				and global_step >= max_steps
-				and position + 1 < len(order)
-			):
-				_save_latest(
-					plan,
-					decoder,
-					optimizer,
-					scaler,
-					history=history,
-					best_epoch=best_epoch,
-					best_mae=best_mae,
-					global_step=global_step,
-					epoch=epoch,
-					next_position=position + 1,
-					train_loss_sum=train_loss_sum,
-					train_tile_count=train_tile_count,
-					completed=False,
-					runtime_precision=runtime_precision,
-					run_identity=runtime_run_identity,
-				)
-				_write_json(plan.output_dir / HISTORY_NAME, history)
-				return None
-		validation = _evaluate_horizon_dataset(
-			decoder,
-			datasets['validation'],
-			run_device,
-			amp_enabled=amp_enabled,
-			expected_counts=plan.effective_per_horizon_counts['validation'],
-			expected_primary_counts=plan.effective_per_horizon_counts[
-				'validation'
-			],
-		)
-		validation_mae = _required_metric(
-			validation['secondary'], 'macro_mae_samples'
-		)
-		history.append(
-			{
-				'epoch': epoch,
-				'global_step': global_step,
-				'train_macro_cross_entropy': train_loss_sum / train_tile_count,
-				'validation_macro_mae_samples': validation_mae,
-				'validation_macro_within_2_samples': _required_metric(
-					validation['secondary'], 'macro_within_2_samples'
-				),
-			}
-		)
-		if validation_mae_improved(validation_mae, best_mae):
-			best_mae = validation_mae
-			best_epoch = epoch
-			_save_checkpoint(
-				plan.output_dir / BEST_NAME,
-				decoder=decoder,
-				optimizer=optimizer,
-				scaler=scaler,
-				payload={
-					'run_identity': runtime_run_identity,
-					'runtime_precision': runtime_precision,
-					'epoch': epoch,
-					'global_step': global_step,
-					'validation': validation['secondary'],
-				},
-			)
-		_save_latest(
-			plan,
-			decoder,
-			optimizer,
-			scaler,
-			history=history,
-			best_epoch=best_epoch,
-			best_mae=best_mae,
-			global_step=global_step,
-			epoch=epoch + 1,
-			next_position=0,
-			train_loss_sum=0.0,
-			train_tile_count=0,
-			completed=False,
-			runtime_precision=runtime_precision,
-			run_identity=runtime_run_identity,
-		)
-		_write_json(plan.output_dir / HISTORY_NAME, history)
-		start_position = 0
-		train_loss_sum = 0.0
-		train_tile_count = 0
-		if max_steps is not None and global_step >= max_steps:
-			return None
-	if best_epoch is None:
-		raise RuntimeError('training completed without a best checkpoint')
-	best_path = plan.output_dir / BEST_NAME
-	best = torch.load(best_path, map_location=run_device, weights_only=False)
-	if best.get('run_identity') != runtime_run_identity:
-		raise ValueError('best checkpoint identity changed before test evaluation')
-	if best.get('runtime_precision') != runtime_precision:
-		raise ValueError(
-			'best checkpoint runtime precision changed before test evaluation'
-		)
-	decoder.load_state_dict(_state_dict(best))
-	test = _evaluate_horizon_dataset(
-		decoder,
-		datasets['test'],
-		run_device,
-		amp_enabled=amp_enabled,
-		expected_counts=plan.effective_per_horizon_counts['test'],
-		expected_primary_counts=plan.effective_per_horizon_counts[
-			'test_primary'
-		],
-	)
-	metrics_payload = {
-		'schema_version': 1,
-		'artifact_type': 'volve_frozen_horizon_job_metrics',
-		'model': plan.model,
-		'layout_id': plan.layout_id,
-		'data_size': plan.data_size,
-		'benchmark_identity': runtime_run_identity,
-		'runtime_precision': runtime_precision,
-		'best_epoch': best_epoch,
-		'best_checkpoint': {
-			'path': str(best_path),
-			'sha256': file_sha256(best_path),
+		return decoder, optimizer
+
+	return run_horizon_training_job(
+		output_dir=plan.output_dir,
+		run_identity=plan.run_identity,
+		settings=HorizonRunnerSettings(
+			epochs=plan.config.train.epochs,
+			seed=plan.config.train.seed,
+			amp_on_cuda=plan.config.train.amp,
+			gradient_clip_norm=plan.config.train.gradient_clip_norm,
+		),
+		datasets=datasets,
+		expected_counts=plan.effective_per_horizon_counts,
+		metrics_metadata={
+			'schema_version': 1,
+			'artifact_type': 'volve_frozen_horizon_job_metrics',
+			'model': plan.model,
+			'layout_id': plan.layout_id,
+			'data_size': plan.data_size,
 		},
-		'validation': best['validation'],
-		'test': {
-			'primary_common': test['primary'],
-			'secondary_per_horizon': test['secondary'],
-			'evaluation_pass_count': 1,
-		},
-	}
-	metrics_path = plan.output_dir / METRICS_NAME
-	_write_json(metrics_path, metrics_payload)
-	_save_latest(
-		plan,
-		decoder,
-		optimizer,
-		scaler,
-		history=history,
-		best_epoch=best_epoch,
-		best_mae=best_mae,
-		global_step=global_step,
-		epoch=plan.config.train.epochs,
-		next_position=0,
-		train_loss_sum=0.0,
-		train_tile_count=0,
-		completed=True,
-		runtime_precision=runtime_precision,
-		run_identity=runtime_run_identity,
+		build_model_and_optimizer=build_model_and_optimizer,
+		train_one_item=_train_one_tile,
+		predict_one_item=_predict_one_tile,
+		device=device,
+		max_steps=max_steps,
+		resume=resume,
 	)
-	return metrics_path
 
 
-def _train_one_tile(  # noqa: PLR0913
-	decoder: VolveHorizonDecoder,
+def _train_one_tile(
+	model: nn.Module,
 	item: Mapping[str, object],
 	optimizer: torch.optim.Optimizer,
-	scaler: torch.amp.GradScaler | None,
-	device: torch.device,
-	*,
-	amp_enabled: bool,
-	gradient_clip_norm: float,
+	runtime: HorizonRuntimeContext,
 ) -> float:
-	decoder.train()
-	embeddings = _tensor(item, 'embeddings').unsqueeze(0).to(device).detach()
-	valid = _tensor(item, 'token_valid_mask').unsqueeze(0).to(device)
-	target = _tensor(item, 'target_sample_float').unsqueeze(0).to(device)
-	mask = _tensor(item, 'supervision_mask').unsqueeze(0).to(device)
-	output_valid = _tensor(item, 'output_valid_mask').unsqueeze(0).to(device)
+	model.train()
+	embeddings = (
+		_tensor(item, 'embeddings').unsqueeze(0).to(runtime.device).detach()
+	)
+	valid = _tensor(item, 'token_valid_mask').unsqueeze(0).to(runtime.device)
+	target = _tensor(item, 'target_sample_float').unsqueeze(0).to(runtime.device)
+	mask = _tensor(item, 'supervision_mask').unsqueeze(0).to(runtime.device)
+	output_valid = (
+		_tensor(item, 'output_valid_mask').unsqueeze(0).to(runtime.device)
+	)
 	effective_mask = mask & output_valid.unsqueeze(1)
 	optimizer.zero_grad(set_to_none=True)
-	with _autocast(device, enabled=amp_enabled):
-		logits = decoder(embeddings, valid)
+	with horizon_autocast(runtime.device, enabled=runtime.amp_enabled):
+		logits = model(embeddings, valid)
 		loss, _ = fractional_horizon_cross_entropy(logits, target, effective_mask)
 	backward_and_step_horizon_optimizer(
 		loss=loss,
-		model=decoder,
+		model=model,
 		optimizer=optimizer,
-		scaler=scaler,
-		gradient_clip_norm=gradient_clip_norm,
+		scaler=runtime.scaler,
+		gradient_clip_norm=runtime.gradient_clip_norm,
 	)
 	return float(loss.detach().cpu().item())
 
 
-def _evaluate_horizon_dataset(  # noqa: PLR0913
-	decoder: VolveHorizonDecoder,
-	dataset: Dataset[dict[str, Any]],
-	device: torch.device,
-	*,
-	amp_enabled: bool,
-	expected_counts: Sequence[int],
-	expected_primary_counts: Sequence[int],
-) -> dict[str, object]:
-	decoder.eval()
-	predictions: list[np.ndarray] = []
-	targets: list[np.ndarray] = []
-	secondary_masks: list[np.ndarray] = []
-	primary_masks: list[np.ndarray] = []
-	with torch.inference_mode():
-		for index in range(len(dataset)):
-			item = dataset[index]
-			embeddings = _tensor(item, 'embeddings').unsqueeze(0).to(device)
-			valid = _tensor(item, 'token_valid_mask').unsqueeze(0).to(device)
-			with _autocast(device, enabled=amp_enabled):
-				logits = decoder(embeddings, valid)
-			prediction = soft_argmax_global_sample(logits)
-			predictions.append(prediction.cpu().numpy())
-			targets.append(
-				_tensor(item, 'target_sample_float').unsqueeze(0).numpy()
-			)
-			secondary_masks.append(
-				(
-					_tensor(item, 'supervision_mask')
-					& _tensor(item, 'output_valid_mask').unsqueeze(0)
-				)
-				.unsqueeze(0)
-				.numpy()
-			)
-			primary_masks.append(
-				(
-					_tensor(item, 'primary_evaluation_mask')
-					& _tensor(item, 'output_valid_mask').unsqueeze(0)
-				)
-				.unsqueeze(0)
-				.numpy()
-			)
-	predicted = np.concatenate(predictions)
-	target = np.concatenate(targets)
-	secondary_mask = np.concatenate(secondary_masks)
-	primary_mask = np.concatenate(primary_masks)
-	actual_counts = tuple(
-		int(np.count_nonzero(secondary_mask[:, index]))
-		for index in range(len(HORIZON_NAMES))
-	)
-	if actual_counts != tuple(expected_counts):
-		raise RuntimeError(
-			'evaluation tiles do not provide exact-once lateral coverage; '
-			f'expected {tuple(expected_counts)!r}, got {actual_counts!r}'
-		)
-	actual_primary_counts = tuple(
-		int(np.count_nonzero(primary_mask[:, index]))
-		for index in range(len(HORIZON_NAMES))
-	)
-	if actual_primary_counts != tuple(expected_primary_counts):
-		raise RuntimeError(
-			'primary evaluation tiles do not provide exact-once model-valid coverage; '
-			f'expected {tuple(expected_primary_counts)!r}, '
-			f'got {actual_primary_counts!r}'
-		)
-	return {
-		'primary': compute_horizon_metrics(predicted, target, primary_mask),
-		'secondary': compute_horizon_metrics(predicted, target, secondary_mask),
-	}
+def _predict_one_tile(
+	model: nn.Module,
+	item: Mapping[str, object],
+	runtime: HorizonRuntimeContext,
+) -> torch.Tensor:
+	embeddings = _tensor(item, 'embeddings').unsqueeze(0).to(runtime.device)
+	valid = _tensor(item, 'token_valid_mask').unsqueeze(0).to(runtime.device)
+	with horizon_autocast(runtime.device, enabled=runtime.amp_enabled):
+		logits = model(embeddings, valid)
+	return soft_argmax_global_sample(logits)
 
 
 def _run_identity(  # noqa: PLR0913
@@ -1460,78 +1171,6 @@ def _identity_counts(
 	}
 
 
-def _save_latest(  # noqa: PLR0913
-	plan: FrozenHorizonPlan,
-	decoder: VolveHorizonDecoder,
-	optimizer: torch.optim.Optimizer,
-	scaler: torch.amp.GradScaler | None,
-	*,
-	history: Sequence[Mapping[str, object]],
-	best_epoch: int | None,
-	best_mae: float,
-	global_step: int,
-	epoch: int,
-	next_position: int,
-	train_loss_sum: float,
-	train_tile_count: int,
-	completed: bool,
-	runtime_precision: Mapping[str, object],
-	run_identity: Mapping[str, object],
-) -> None:
-	_save_checkpoint(
-		plan.output_dir / LATEST_NAME,
-		decoder=decoder,
-		optimizer=optimizer,
-		scaler=scaler,
-		payload={
-			'run_identity': run_identity,
-			'runtime_precision': runtime_precision,
-			'history': list(history),
-			'best_epoch': best_epoch,
-			'best_validation_macro_mae_samples': best_mae,
-			'global_step': global_step,
-			'epoch': epoch,
-			'next_position': next_position,
-			'train_loss_sum': train_loss_sum,
-			'train_tile_count': train_tile_count,
-			'completed': completed,
-		},
-	)
-
-
-def _save_checkpoint(
-	path: Path,
-	*,
-	decoder: VolveHorizonDecoder,
-	optimizer: torch.optim.Optimizer,
-	scaler: torch.amp.GradScaler | None,
-	payload: Mapping[str, object],
-) -> None:
-	full = {
-		**payload,
-		'model_state_dict': {
-			name: value.detach().cpu() for name, value in decoder.state_dict().items()
-		},
-		'optimizer_state_dict': optimizer.state_dict(),
-		'scaler_state_dict': None if scaler is None else scaler.state_dict(),
-	}
-	temporary = path.with_name(f'.{path.name}.tmp')
-	torch.save(full, temporary)
-	temporary.replace(path)
-
-
-def _validate_output(output_dir: Path, resume: Path | None) -> None:
-	if resume is None:
-		if output_dir.exists() and any(output_dir.iterdir()):
-			raise FileExistsError(
-				f'frozen horizon job output is non-empty: {output_dir}'
-			)
-		return
-	if not resume.is_file() or resume.name != LATEST_NAME:
-		raise FileNotFoundError(f'resume must identify an existing {LATEST_NAME}')
-	if resume.parent.resolve() != output_dir.resolve():
-		raise ValueError('resume checkpoint must be in this job output directory')
-
 
 def _validated_checkpoint(
 	metadata: Mapping[str, object], role: str
@@ -1629,68 +1268,6 @@ def _tile_settings(value: Mapping[str, object]) -> HorizonTileSettings:
 	)
 
 
-def _resolve_device(value: str) -> torch.device:
-	if value not in {'auto', 'cpu', 'cuda'}:
-		raise ValueError('device must be auto, cpu, or cuda')
-	if value == 'auto':
-		return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-	if value == 'cuda' and not torch.cuda.is_available():
-		raise RuntimeError('CUDA was requested but is not available')
-	return torch.device(value)
-
-
-def _runtime_precision_identity(
-	device: torch.device, *, amp_requested: bool
-) -> dict[str, object]:
-	amp_enabled = amp_requested and device.type == 'cuda'
-	return {
-		'device_type': device.type,
-		'amp_enabled': amp_enabled,
-		'autocast_dtype': 'float16' if amp_enabled else None,
-		'scaler_required': amp_enabled,
-	}
-
-
-def _validate_resume_runtime(
-	payload: Mapping[str, object],
-	*,
-	expected: Mapping[str, object],
-	scaler: torch.amp.GradScaler | None,
-) -> None:
-	if payload.get('runtime_precision') != expected:
-		raise ValueError('resume checkpoint runtime precision does not match this run')
-	scaler_required = expected.get('scaler_required') is True
-	scaler_state = payload.get('scaler_state_dict')
-	if scaler_required:
-		if scaler is None:
-			raise ValueError('runtime precision requires a GradScaler')
-		if not isinstance(scaler_state, Mapping) or not scaler_state:
-			raise ValueError('resume checkpoint is missing required GradScaler state')
-	elif scaler_state is not None:
-		raise ValueError('resume checkpoint has unexpected GradScaler state')
-
-
-def _configure_determinism() -> None:
-	os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
-	torch.use_deterministic_algorithms(mode=True)
-	torch.backends.cudnn.benchmark = False
-	torch.backends.cudnn.deterministic = True
-
-
-def _seed_everything(seed: int) -> None:
-	random.seed(seed)
-	np.random.seed(seed)  # noqa: NPY002
-	torch.manual_seed(seed)
-	if torch.cuda.is_available():
-		torch.cuda.manual_seed_all(seed)
-
-
-def _autocast(
-	device: torch.device, *, enabled: bool
-) -> AbstractContextManager[None]:
-	return torch.autocast(device_type=device.type) if enabled else nullcontext()
-
-
 def _read_json(path: Path, label: str) -> Mapping[str, object]:
 	if not path.is_file():
 		raise FileNotFoundError(f'{label} does not exist: {path}')
@@ -1700,28 +1277,11 @@ def _read_json(path: Path, label: str) -> Mapping[str, object]:
 	return value
 
 
-def _write_json(path: Path, value: object) -> None:
-	path.parent.mkdir(parents=True, exist_ok=True)
-	temporary = path.with_name(f'.{path.name}.tmp')
-	temporary.write_text(
-		json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + '\n',
-		encoding='utf-8',
-	)
-	temporary.replace(path)
-
-
 def _mapping(value: Mapping[str, object], key: str) -> Mapping[str, object]:
 	child = value.get(key)
 	if not isinstance(child, Mapping):
 		raise TypeError(f'{key} must be a mapping')
 	return child
-
-
-def _state_dict(payload: Mapping[str, object]) -> Mapping[str, torch.Tensor]:
-	value = payload.get('model_state_dict')
-	if not isinstance(value, Mapping):
-		raise TypeError('checkpoint model_state_dict must be a mapping')
-	return cast('Mapping[str, torch.Tensor]', value)
 
 
 def _tensor(value: Mapping[str, object], key: str) -> torch.Tensor:
@@ -1780,10 +1340,6 @@ def _nonnegative_int(value: object, label: str) -> int:
 	return value
 
 
-def _optional_int(value: object, label: str) -> int | None:
-	return None if value is None else _nonnegative_int(value, label)
-
-
 def _positive_number(value: object, label: str) -> float:
 	result = _finite_number(value, label)
 	if result <= 0.0:
@@ -1811,25 +1367,6 @@ def _boolean(value: object, label: str) -> bool:
 	if not isinstance(value, bool):
 		raise TypeError(f'{label} must be boolean')
 	return value
-
-
-def _sequence(value: object, label: str) -> Sequence[object]:
-	if not isinstance(value, list):
-		raise TypeError(f'{label} must be a list')
-	return value
-
-
-def _required_metric(metrics: object, key: str) -> float:
-	if not isinstance(metrics, Mapping):
-		raise TypeError('metrics must be a mapping')
-	value = metrics.get(key)
-	if (
-		not isinstance(value, int | float)
-		or isinstance(value, bool)
-		or not math.isfinite(float(value))
-	):
-		raise ValueError(f'metric {key} must be finite')
-	return float(value)
 
 
 def _validate_sha256(value: object, label: str) -> None:

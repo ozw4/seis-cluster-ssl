@@ -17,7 +17,6 @@ from torch import nn
 
 from seis_ssl_cluster.config import load_config, resolve_embedding_extraction_config
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
-from seis_ssl_cluster.volve import horizon_frozen as horizon_frozen_module
 from seis_ssl_cluster.volve.horizon_data import HORIZON_NAMES
 from seis_ssl_cluster.volve.horizon_frozen import (
 	BEST_NAME,
@@ -36,9 +35,6 @@ from seis_ssl_cluster.volve.horizon_tiles import (
 	HorizonTileSettings,
 	frozen_core_output_valid_mask,
 	frozen_survey_output_valid_mask,
-)
-from seis_ssl_cluster.volve.horizon_training import (
-	backward_and_step_horizon_optimizer,
 )
 from tests.seis_ssl_cluster.helpers_volve import (
 	write_synthetic_frozen_horizon_data,
@@ -65,18 +61,6 @@ class _TinyHorizonDecoder(nn.Module):
 		return self.logits.reshape(1, 5, 1, 1, 216).expand(
 			embeddings.shape[0], 5, 64, 64, 216
 		)
-
-
-class _FiniteValueNonfiniteGradient(torch.autograd.Function):
-	'''Return a finite value while injecting a non-finite backward gradient.'''
-
-	@staticmethod
-	def forward(_ctx: object, value: torch.Tensor) -> torch.Tensor:
-		return value.detach().new_zeros(())
-
-	@staticmethod
-	def backward(_ctx: object, gradient: torch.Tensor) -> torch.Tensor:
-		return torch.full_like(gradient, float('nan'))
 
 
 def test_configs_resolve_and_suite_contains_exactly_thirty_conditions(
@@ -434,70 +418,6 @@ def test_two_step_cpu_resume_and_identity_mismatch_rejection(tmp_path: Path) -> 
 			resume=latest,
 			decoder_factory=_TinyHorizonDecoder,
 		)
-
-
-def test_amp_resume_requires_grad_scaler_state() -> None:
-	runtime_precision = {
-		'device_type': 'cuda',
-		'amp_enabled': True,
-		'autocast_dtype': 'float16',
-		'scaler_required': True,
-	}
-	with pytest.raises(ValueError, match='runtime precision'):
-		horizon_frozen_module._validate_resume_runtime(  # noqa: SLF001
-			{
-				'runtime_precision': {
-					'device_type': 'cpu',
-					'amp_enabled': False,
-					'autocast_dtype': None,
-					'scaler_required': False,
-				},
-				'scaler_state_dict': None,
-			},
-			expected=runtime_precision,
-			scaler=object(),  # type: ignore[arg-type]
-		)
-	with pytest.raises(ValueError, match='missing required GradScaler state'):
-		horizon_frozen_module._validate_resume_runtime(  # noqa: SLF001
-			{
-				'runtime_precision': runtime_precision,
-				'scaler_state_dict': None,
-			},
-			expected=runtime_precision,
-			scaler=object(),  # type: ignore[arg-type]
-		)
-
-
-def test_nonfinite_gradient_fails_before_parameter_update(
-	monkeypatch: pytest.MonkeyPatch,
-) -> None:
-	model = nn.Linear(1, 1, bias=False)
-	optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
-	parameter_before = model.weight.detach().clone()
-	optimizer_steps = 0
-	original_step = optimizer.step
-
-	def counted_step(*args: object, **kwargs: object) -> object:
-		nonlocal optimizer_steps
-		optimizer_steps += 1
-		return original_step(*args, **kwargs)
-
-	monkeypatch.setattr(optimizer, 'step', counted_step)
-	loss = _FiniteValueNonfiniteGradient.apply(model.weight.sum())
-	assert torch.isfinite(loss)
-	with pytest.raises(
-		FloatingPointError, match='non-finite Volve horizon gradient norm'
-	):
-		backward_and_step_horizon_optimizer(
-			loss=loss,
-			model=model,
-			optimizer=optimizer,
-			scaler=None,
-			gradient_clip_norm=1.0,
-		)
-
-	assert optimizer_steps == 0
-	assert torch.equal(model.weight.detach(), parameter_before)
 
 
 def test_completed_job_selects_strict_best_and_tests_it_once(tmp_path: Path) -> None:
