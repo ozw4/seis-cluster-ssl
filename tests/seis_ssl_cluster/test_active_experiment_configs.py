@@ -15,6 +15,7 @@ from seis_ssl_cluster.clustering.stratigraphic_hmm import (
 )
 from seis_ssl_cluster.config import (
 	load_config,
+	resolve_barlow_twins_training_config,
 	resolve_cluster_visualization_config,
 	resolve_clustering_config,
 	resolve_embedding_extraction_config,
@@ -96,6 +97,17 @@ PARIHAKA_FULL_MAE_CONFIG = Path(
 	'experiments/parihaka/facies_benchmark_v1/20_pretrain/'
 	'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/02_full_100ep.yaml',
 )
+PARIHAKA_SMOKE_MAE_CONFIG = PARIHAKA_FULL_MAE_CONFIG.with_name(
+	'01_smoke_2step.yaml',
+)
+PARIHAKA_BARLOW_ROOT = Path(
+	'experiments/parihaka/facies_benchmark_v1/20_pretrain/'
+	'amp_barlow_twins_flipxy_l0005_v1',
+)
+PARIHAKA_BARLOW_CONFIGS = [
+	PARIHAKA_BARLOW_ROOT / '01_smoke_2step.yaml',
+	PARIHAKA_BARLOW_ROOT / '02_full_100ep.yaml',
+]
 STABLE_NOPIMS_FULL_MAE_CONFIG = (
 	NOPIMS_ROOT
 	/ '10_pretrain'
@@ -403,6 +415,88 @@ def test_parihaka_full_mae_matches_stable_nopims_scientific_contract(
 	nopims_train = dict(nopims['train'])
 	nopims_train['amp'] = True
 	assert parihaka_train == nopims_train
+
+
+def test_parihaka_barlow_twins_configs_resolve_with_distinct_identity(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	raw_configs = [load_config(path) for path in PARIHAKA_BARLOW_CONFIGS]
+	resolved = [
+		resolve_barlow_twins_training_config(config) for config in raw_configs
+	]
+	mae_output_roots = {
+		resolve_mae_training_config(load_config(path))['paths']['output_root']
+		for path in (PARIHAKA_SMOKE_MAE_CONFIG, PARIHAKA_FULL_MAE_CONFIG)
+	}
+
+	assert {config['stage'] for config in resolved} == {
+		'barlow_twins_training',
+	}
+	barlow_output_roots = {config['paths']['output_root'] for config in resolved}
+	assert len(barlow_output_roots) == 2
+	assert barlow_output_roots.isdisjoint(mae_output_roots)
+	for raw, config in zip(raw_configs, resolved, strict=True):
+		assert config['augmentations']['horizontal_flip_probability'] == 0.5
+		assert config['barlow_twins'] == {
+			'projector_dim': 384,
+			'redundancy_weight': 0.005,
+			'normalization_eps': 1.0e-4,
+		}
+		assert not {'masking', 'loss', 'visualization'} & raw.keys()
+
+
+def test_parihaka_barlow_twins_is_paired_with_mae_comparison(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	smoke, full = [
+		resolve_barlow_twins_training_config(load_config(path))
+		for path in PARIHAKA_BARLOW_CONFIGS
+	]
+	mae = resolve_mae_training_config(load_config(PARIHAKA_FULL_MAE_CONFIG))
+
+	for section in ('manifests', 'data', 'zero_mask', 'model'):
+		assert full[section] == mae[section]
+	assert full['data']['local_crop_size'] == [128, 128, 128]
+	assert full['model']['patch_size'] == [8, 8, 8]
+	assert {
+		key: full['model'][key]
+		for key in ('encoder_dim', 'encoder_depth', 'encoder_heads')
+	} == {'encoder_dim': 384, 'encoder_depth': 8, 'encoder_heads': 6}
+	for key in (
+		'batch_size',
+		'samples_per_epoch',
+		'epochs',
+		'num_workers',
+		'prefetch_factor',
+		'persistent_workers',
+		'shuffle',
+		'lr',
+		'weight_decay',
+		'amp',
+		'amp_dtype',
+		'device',
+		'seed',
+		'grad_clip_norm',
+	):
+		assert full['train'][key] == mae['train'][key]
+
+	for section in ('manifests', 'data', 'zero_mask', 'model', 'augmentations'):
+		assert smoke[section] == full[section]
+	assert smoke['barlow_twins'] == full['barlow_twins']
+	assert smoke['train']['max_steps'] == 2
+	assert smoke['train']['batch_size'] == 2
+	assert smoke['train']['samples_per_epoch'] == 4
+	assert smoke['train']['epochs'] == 1
+	assert full['train']['max_steps'] is None
+	assert full['train']['epochs'] == 100
 
 
 @pytest.mark.parametrize('config_path', NOPIMS_EMBEDDING_CONFIGS)
