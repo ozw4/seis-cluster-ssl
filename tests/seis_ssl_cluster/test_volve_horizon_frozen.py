@@ -5,9 +5,9 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -31,6 +31,7 @@ from seis_ssl_cluster.volve.horizon_frozen import (
 	run_frozen_horizon_job,
 	validation_mae_improved,
 )
+from seis_ssl_cluster.volve.horizon_loss import fractional_horizon_cross_entropy
 from seis_ssl_cluster.volve.horizon_tiles import (
 	HorizonTileSettings,
 	frozen_core_output_valid_mask,
@@ -39,9 +40,6 @@ from seis_ssl_cluster.volve.horizon_tiles import (
 from tests.seis_ssl_cluster.helpers_volve import (
 	write_synthetic_frozen_horizon_data,
 )
-
-if TYPE_CHECKING:
-	from collections.abc import Mapping
 
 EXPERIMENT_ROOT = Path(
 	'experiments/volve/horizon_benchmark_v1/30_mae_vs_random_frozen_v1'
@@ -267,19 +265,115 @@ def test_token_valid_columns_expand_to_output_and_filter_dataset_masks(
 		assert not np.any(supervision & ~output_valid[np.newaxis, :, :])
 
 
+def test_partial_edge_token_is_excluded_from_loss_validation_and_test_masks(
+	tmp_path: Path,
+) -> None:
+	config, data, layout = _write_frozen_fixture(tmp_path, shape_xy=(65, 64))
+	valid_path = output_paths(
+		config.pretrained_embeddings_dir, config.survey_id
+	).valid_tokens
+	valid = np.load(valid_path)
+	valid[2, 0, :] = False
+	valid[3, 3, :] = False
+	_write_paired_valid_tokens(config, valid)
+	plan = inspect_frozen_horizon_job(
+		config,
+		model='pretrained',
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=layout,
+		data=data,
+	)
+
+	assert not plan.geometry.model_valid_lateral_mask[64, :].any()
+	assert all(
+		record.core_start_token_xy[0] != 8
+		for records in plan.tile_records.values()
+		for record in records
+	)
+	assert all(
+		count > 0
+		for count in plan.excluded_by_token_validity_counts['validation']
+	)
+	assert all(
+		count > 0 for count in plan.excluded_by_token_validity_counts['test']
+	)
+	assert all(
+		count > 0
+		for count in plan.excluded_by_token_validity_counts['test_primary']
+	)
+
+	selected_paths = plan.geometry.pretrained
+	for split in ('train', 'validation', 'test'):
+		dataset = FrozenHorizonTileDataset(
+			data=plan.data,
+			plan=plan.split_plan,
+			embedding_path=selected_paths.embeddings,
+			valid_tokens_path=selected_paths.valid_tokens,
+			settings=plan.config.tiles,
+			split=split,
+			records=plan.tile_records[split],
+		)
+		for index in range(len(dataset)):
+			item = dataset[index]
+			output_valid = item['output_valid_mask']
+			assert not torch.any(
+				item['supervision_mask'] & ~output_valid.unsqueeze(0)
+			)
+			assert not torch.any(
+				item['primary_evaluation_mask'] & ~output_valid.unsqueeze(0)
+			)
+
+	test_dataset = FrozenHorizonTileDataset(
+		data=plan.data,
+		plan=plan.split_plan,
+		embedding_path=selected_paths.embeddings,
+		valid_tokens_path=selected_paths.valid_tokens,
+		settings=plan.config.tiles,
+		split='test',
+		records=plan.tile_records['test'],
+	)
+	item = test_dataset[0]
+	assert torch.isfinite(item['target_sample_float'][:, 24, 24]).all()
+	assert not item['output_valid_mask'][24, 24]
+	assert not item['supervision_mask'][:, 24, 24].any()
+	assert not item['primary_evaluation_mask'][:, 24, 24].any()
+	logits = torch.zeros((1, 5, 64, 64, 216), dtype=torch.float32)
+	target = item['target_sample_float'].unsqueeze(0)
+	mask = item['supervision_mask'].unsqueeze(0)
+	baseline, _ = fractional_horizon_cross_entropy(logits, target, mask)
+	logits[:, :, 24, 24, :] = torch.linspace(-100.0, 100.0, 216)
+	changed, _ = fractional_horizon_cross_entropy(logits, target, mask)
+	assert torch.equal(baseline, changed)
+
+
 def test_preflight_requires_model_valid_validation_and_primary_common_test(
 	tmp_path: Path,
 ) -> None:
 	config, data, layout = _write_frozen_fixture(tmp_path / 'validation')
+	bound = np.array(data.bound_valid_mask, copy=True)
+	bound[0, 20, :] = False
+	bound[0, :, 20] = False
+	bound[0, 20, 20] = True
+	data = replace(
+		data,
+		bound_valid_mask=bound,
+		source_present_mask=bound.copy(),
+		common_bound_mask=np.all(bound, axis=0),
+		continuous_strict_order_mask=np.all(bound, axis=0),
+		sample_strict_order_mask=np.all(bound, axis=0),
+	)
 	valid = np.load(
 		output_paths(
 			config.pretrained_embeddings_dir, config.survey_id
 		).valid_tokens
 	)
-	valid[2, :, :] = False
-	valid[:, 2, :] = False
+	valid[2, 2, :] = False
 	_write_paired_valid_tokens(config, valid)
-	with pytest.raises(ValueError, match='validation has zero model-valid'):
+	with pytest.raises(
+		ValueError,
+		match='validation has zero model-valid observations for horizons: ty_top',
+	):
 		inspect_frozen_horizon_job(
 			config,
 			model='pretrained',
@@ -357,6 +451,20 @@ def test_two_step_cpu_resume_and_identity_mismatch_rejection(tmp_path: Path) -> 
 		layout_config=layout,
 		data=data,
 	)
+	uninterrupted_plan = replace(
+		plan, output_dir=plan.output_dir.with_name(f'{plan.output_dir.name}_continuous')
+	)
+	assert run_frozen_horizon_job(
+		uninterrupted_plan,
+		device='cpu',
+		max_steps=2,
+		decoder_factory=_TinyHorizonDecoder,
+	) is None
+	uninterrupted = torch.load(
+		uninterrupted_plan.output_dir / LATEST_NAME,
+		map_location='cpu',
+		weights_only=False,
+	)
 
 	assert run_frozen_horizon_job(
 		plan,
@@ -385,6 +493,17 @@ def test_two_step_cpu_resume_and_identity_mismatch_rejection(tmp_path: Path) -> 
 	) is None
 	second = torch.load(latest, map_location='cpu', weights_only=False)
 	assert second['global_step'] == 2
+	_assert_nested_equal(
+		second['model_state_dict'], uninterrupted['model_state_dict']
+	)
+	_assert_nested_equal(
+		second['optimizer_state_dict'], uninterrupted['optimizer_state_dict']
+	)
+	assert second['history'] == uninterrupted['history']
+	assert second['best_epoch'] == uninterrupted['best_epoch']
+	assert second['best_validation_macro_mae_samples'] == (
+		uninterrupted['best_validation_macro_mae_samples']
+	)
 
 	changed_identity = {
 		**plan.run_identity,
@@ -521,8 +640,10 @@ def test_proc_entrypoint_exposes_required_one_job_arguments() -> None:
 
 def _write_frozen_fixture(
 	tmp_path: Path,
+	*,
+	shape_xy: tuple[int, int] = (24, 24),
 ) -> tuple[FrozenHorizonConfig, object, Path]:
-	data = write_synthetic_frozen_horizon_data(tmp_path)
+	data = write_synthetic_frozen_horizon_data(tmp_path, shape_xy=shape_xy)
 	artifact_root = (tmp_path / 'artifacts').resolve()
 	artifact_root.mkdir(parents=True)
 	canonical_root = data.paths.valid_trace_mask.parent
@@ -540,7 +661,7 @@ def _write_frozen_fixture(
 	identity = {
 		'dataset_id': 'synthetic_frozen_volve',
 		'survey_id': 'volve_st10010',
-		'shape_xyz': [24, 24, 800],
+		'shape_xyz': [*shape_xy, 800],
 		'canonical_amplitude_sha256': file_sha256(amplitude_path),
 		'valid_trace_mask_sha256': file_sha256(data.paths.valid_trace_mask),
 		'inline_values_sha256': file_sha256(data.paths.inline_values),
@@ -629,16 +750,25 @@ def _write_frozen_fixture(
 	)
 	pretrained_dir = artifact_root / 'embeddings/pretrained'
 	random_dir = artifact_root / 'embeddings/random'
-	valid_tokens = np.ones((3, 3, 100), dtype=np.bool_)
+	token_shape = (
+		(shape_xy[0] + 7) // 8,
+		(shape_xy[1] + 7) // 8,
+		100,
+	)
+	valid_tokens = np.ones(token_shape, dtype=np.bool_)
 	valid_tokens[0, 0] = False
+	if shape_xy[0] % 8:
+		valid_tokens[-1, :, :] = False
+	if shape_xy[1] % 8:
+		valid_tokens[:, -1, :] = False
 	common_metadata = {
 		'survey_id': 'volve_st10010',
 		'source_amplitude_path': str(amplitude_path),
 		'source_valid_mask_path': str(data.paths.valid_trace_mask),
-		'volume_shape_xyz': [24, 24, 800],
+		'volume_shape_xyz': [*shape_xy, 800],
 		'model_geometry': {'name': 'amp_mae3d', **_mae_model_config()},
 		'patch_size': [8, 8, 8],
-		'token_grid_shape': [3, 3, 100],
+		'token_grid_shape': list(token_shape),
 		'window_size': [128, 128, 128],
 		'overlap': [64, 64, 64],
 		'output_dtype': 'float16',
@@ -658,7 +788,7 @@ def _write_frozen_fixture(
 	):
 		paths = output_paths(directory, 'volve_st10010')
 		directory.mkdir(parents=True)
-		np.save(paths.embeddings, np.zeros((3, 3, 100, 384), dtype=np.float16))
+		np.save(paths.embeddings, np.zeros((*token_shape, 384), dtype=np.float16))
 		np.save(paths.valid_tokens, valid_tokens)
 		paths.metadata.write_text(
 			json.dumps(
@@ -764,3 +894,23 @@ def _json_sha256(value: Mapping[str, object]) -> str:
 	return hashlib.sha256(
 		json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
 	).hexdigest()
+
+
+def _assert_nested_equal(left: object, right: object) -> None:
+	if isinstance(left, torch.Tensor):
+		assert isinstance(right, torch.Tensor)
+		assert torch.equal(left, right)
+		return
+	if isinstance(left, Mapping):
+		assert isinstance(right, Mapping)
+		assert left.keys() == right.keys()
+		for key in left:
+			_assert_nested_equal(left[key], right[key])
+		return
+	if isinstance(left, (list, tuple)):
+		assert isinstance(right, type(left))
+		assert len(left) == len(right)
+		for left_item, right_item in zip(left, right, strict=True):
+			_assert_nested_equal(left_item, right_item)
+		return
+	assert left == right

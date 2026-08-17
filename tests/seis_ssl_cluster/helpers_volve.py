@@ -257,8 +257,14 @@ def write_synthetic_volve_horizon_root(
 	return root, geometry
 
 
-def write_synthetic_frozen_horizon_data(tmp_path: Path) -> VolveHorizonData:
-	'''Write a 24 by 24 horizon input with room for fixed reserved test lines.'''
+def write_synthetic_frozen_horizon_data(
+	tmp_path: Path,
+	*,
+	shape_xy: tuple[int, int] = (24, 24),
+) -> VolveHorizonData:
+	'''Write horizon inputs with room for the fixed reserved test lines.'''
+	if shape_xy[0] < 24 or shape_xy[1] < 24:
+		raise ValueError('synthetic frozen horizon shape must be at least 24 by 24')
 	root = (tmp_path / 'public' / 'frozen_volve').resolve()
 	canonical = root / CANONICAL_RELATIVE_ROOT
 	binding = root / BINDING_RELATIVE_ROOT
@@ -266,9 +272,8 @@ def write_synthetic_frozen_horizon_data(tmp_path: Path) -> VolveHorizonData:
 	canonical.mkdir(parents=True)
 	binding.mkdir(parents=True)
 	visual_qc.mkdir(parents=True)
-	shape_xy = (24, 24)
-	inline = np.arange(100, 124, dtype=np.int32)
-	crossline = np.arange(200, 224, dtype=np.int32)
+	inline = np.arange(100, 100 + shape_xy[0], dtype=np.int32)
+	crossline = np.arange(200, 200 + shape_xy[1], dtype=np.int32)
 	time_ms = 4.0 + 4.0 * np.arange(800, dtype=np.float32)
 	valid = np.ones(shape_xy, dtype=np.bool_)
 	valid[0, 0] = False

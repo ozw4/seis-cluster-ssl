@@ -138,33 +138,38 @@ def test_runner_lifecycle_uses_only_regime_callables(tmp_path: Path) -> None:
 	assert latest['completed'] is True
 
 
-def test_amp_resume_requires_grad_scaler_state() -> None:
+def test_amp_resume_requires_matching_precision_and_grad_scaler_state(
+	tmp_path: Path,
+) -> None:
 	runtime_precision = {
 		'device_type': 'cuda',
 		'amp_enabled': True,
 		'autocast_dtype': 'float16',
 		'scaler_required': True,
 	}
+	checkpoint = tmp_path / 'synthetic_cuda_amp.pt'
+	torch.save(
+		{
+			'runtime_precision': runtime_precision,
+			'scaler_state_dict': None,
+		},
+		checkpoint,
+	)
+	payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
 	with pytest.raises(ValueError, match='runtime precision'):
 		validate_horizon_resume_runtime(
-			{
-				'runtime_precision': {
-					'device_type': 'cpu',
-					'amp_enabled': False,
-					'autocast_dtype': None,
-					'scaler_required': False,
-				},
-				'scaler_state_dict': None,
+			payload,
+			expected={
+				'device_type': 'cpu',
+				'amp_enabled': False,
+				'autocast_dtype': None,
+				'scaler_required': False,
 			},
-			expected=runtime_precision,
-			scaler=object(),  # type: ignore[arg-type]
+			scaler=None,
 		)
 	with pytest.raises(ValueError, match='missing required GradScaler state'):
 		validate_horizon_resume_runtime(
-			{
-				'runtime_precision': runtime_precision,
-				'scaler_state_dict': None,
-			},
+			payload,
 			expected=runtime_precision,
 			scaler=object(),  # type: ignore[arg-type]
 		)

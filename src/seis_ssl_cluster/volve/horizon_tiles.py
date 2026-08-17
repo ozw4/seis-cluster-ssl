@@ -8,7 +8,10 @@ from typing import cast
 
 import numpy as np
 
-from seis_ssl_cluster.data.window_preprocessing import reduce_valid_mask_to_tokens
+from seis_ssl_cluster.data.window_preprocessing import (
+	PreparedAmplitudeCrop,
+	reduce_valid_mask_to_tokens,
+)
 from seis_ssl_cluster.volve.horizon_data import HORIZON_NAMES
 from seis_ssl_cluster.volve.horizon_model import (
 	HORIZON_CONTEXT_HALO_TOKENS,
@@ -21,7 +24,6 @@ from seis_ssl_cluster.volve.horizon_model import (
 HORIZON_WINDOW_START = 552
 HORIZON_WINDOW_STOP = 768
 HORIZON_WINDOW_LENGTH = HORIZON_WINDOW_STOP - HORIZON_WINDOW_START
-HORIZON_MIN_TOKEN_VALID_FRACTION = 0.1
 
 
 @dataclass(frozen=True)
@@ -29,12 +31,12 @@ class HorizonTileSettings:
 	'''Fixed production geometry plus the canonical lateral survey shape.'''
 
 	lateral_shape_xy: tuple[int, int]
+	min_token_valid_fraction: float
 	patch_size_xyz: tuple[int, int, int] = HORIZON_PATCH_SIZE
 	core_size_tokens: tuple[int, int, int] = HORIZON_CORE_SIZE_TOKENS
 	context_halo_tokens: tuple[int, int, int] = HORIZON_CONTEXT_HALO_TOKENS
 	window_start: int = HORIZON_WINDOW_START
 	window_stop: int = HORIZON_WINDOW_STOP
-	min_token_valid_fraction: float = HORIZON_MIN_TOKEN_VALID_FRACTION
 
 	@property
 	def token_grid_shape(self) -> tuple[int, int, int]:
@@ -422,57 +424,91 @@ def build_frozen_horizon_tile(
 def build_raw_horizon_tile(
 	*,
 	record: HorizonTileRecord,
-	preprocessed_amplitude: np.ndarray,
-	trace_valid_mask: np.ndarray,
+	prepared_crop: PreparedAmplitudeCrop,
 	settings: HorizonTileSettings,
 ) -> RawHorizonTile:
-	'''Crop a preprocessed survey window, padding edges and missing traces with zero.'''
+	'''Validate and retain one shared-preprocessing crop for end-to-end use.'''
 	settings.validate()
-	values = np.asarray(preprocessed_amplitude)
-	traces = np.asarray(trace_valid_mask)
-	if values.ndim != 3 or tuple(values.shape[:2]) != settings.lateral_shape_xy:
-		raise ValueError('preprocessed_amplitude must match the survey lateral shape')
-	if values.shape[2] < settings.window_stop:
-		raise ValueError('preprocessed_amplitude does not contain the horizon window')
-	if not np.issubdtype(values.dtype, np.floating):
-		raise TypeError('preprocessed_amplitude must have a floating dtype')
-	if traces.shape != settings.lateral_shape_xy or traces.dtype != np.bool_:
-		raise ValueError('trace_valid_mask must be a bool lateral survey mask')
-	start_x = (
-		record.core_start_token_xy[0] - settings.context_halo_tokens[0]
-	) * settings.patch_size_xyz[0]
-	start_y = (
-		record.core_start_token_xy[1] - settings.context_halo_tokens[1]
-	) * settings.patch_size_xyz[1]
-	input_x, input_y, input_z = settings.input_size_voxels
-	stop_x = min(start_x + input_x, settings.lateral_shape_xy[0])
-	stop_y = min(start_y + input_y, settings.lateral_shape_xy[1])
-	source_x = slice(max(0, start_x), stop_x)
-	source_y = slice(max(0, start_y), stop_y)
-	destination_x = slice(max(0, -start_x), max(0, -start_x) + stop_x - max(0, start_x))
-	destination_y = slice(max(0, -start_y), max(0, -start_y) + stop_y - max(0, start_y))
-	window = np.asarray(
-		values[source_x, source_y, settings.window_start : settings.window_stop],
-		dtype=np.float32,
+	if not isinstance(prepared_crop, PreparedAmplitudeCrop):
+		raise TypeError('prepared_crop must be a PreparedAmplitudeCrop')
+	expected_start = _raw_horizon_expected_start(record, settings)
+	if prepared_crop.request.start_xyz != expected_start:
+		raise ValueError(
+			'prepared crop start does not match the horizon tile request; '
+			f'expected {expected_start!r}, got {prepared_crop.request.start_xyz!r}'
+		)
+	if prepared_crop.request.size_xyz != settings.input_size_voxels:
+		raise ValueError(
+			'prepared crop size must equal the fixed horizon input size '
+			f'{settings.input_size_voxels!r}'
+		)
+	values, local_valid, token_valid = _validate_prepared_horizon_crop(
+		prepared_crop, settings
 	)
-	valid_lateral = traces[source_x, source_y]
-	if not np.isfinite(window[valid_lateral]).all():
-		raise ValueError('valid preprocessed amplitude values must be finite')
-	amplitude = np.zeros((input_x, input_y, input_z), dtype=np.float32)
-	local_valid = np.zeros((input_x, input_y, input_z), dtype=np.bool_)
-	destination = (destination_x, destination_y, slice(None))
-	amplitude[destination] = np.where(valid_lateral[..., np.newaxis], window, 0.0)
-	local_valid[destination] = valid_lateral[..., np.newaxis]
-	token_valid = reduce_valid_mask_to_tokens(
+	return RawHorizonTile(
+		amplitude=np.ascontiguousarray(values, dtype=np.float32),
+		local_valid_mask=np.ascontiguousarray(local_valid),
+		token_valid_mask=np.ascontiguousarray(token_valid),
+	)
+
+
+def _raw_horizon_expected_start(
+	record: HorizonTileRecord,
+	settings: HorizonTileSettings,
+) -> tuple[int, int, int]:
+	return (
+		(
+			record.core_start_token_xy[0]
+			- settings.context_halo_tokens[0]
+		)
+		* settings.patch_size_xyz[0],
+		(
+			record.core_start_token_xy[1]
+			- settings.context_halo_tokens[1]
+		)
+		* settings.patch_size_xyz[1],
+		settings.window_start,
+	)
+
+
+def _validate_prepared_horizon_crop(
+	prepared_crop: PreparedAmplitudeCrop,
+	settings: HorizonTileSettings,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+	values = np.asarray(prepared_crop.x)
+	local_valid = np.asarray(prepared_crop.local_valid_mask)
+	token_valid = np.asarray(prepared_crop.token_valid_mask)
+	expected_amplitude_shape = (1, *settings.input_size_voxels)
+	if values.shape != expected_amplitude_shape:
+		raise ValueError(
+			'prepared crop amplitude must have shape '
+			f'{expected_amplitude_shape!r}'
+		)
+	if not np.issubdtype(values.dtype, np.floating):
+		raise TypeError('prepared crop amplitude must have a floating dtype')
+	if local_valid.shape != settings.input_size_voxels:
+		raise ValueError('prepared crop local_valid_mask has the wrong shape')
+	if local_valid.dtype != np.bool_:
+		raise TypeError('prepared crop local_valid_mask must have dtype bool')
+	if token_valid.shape != settings.input_size_tokens:
+		raise ValueError('prepared crop token_valid_mask has the wrong shape')
+	if token_valid.dtype != np.bool_:
+		raise TypeError('prepared crop token_valid_mask must have dtype bool')
+	if not np.isfinite(values).all():
+		raise ValueError('prepared crop amplitude must be finite')
+	if np.any(values[0][~local_valid] != 0.0):
+		raise ValueError('prepared crop amplitude must be zero outside local validity')
+	expected_token_valid = reduce_valid_mask_to_tokens(
 		local_valid,
 		patch_size_xyz=settings.patch_size_xyz,
 		min_valid_fraction=settings.min_token_valid_fraction,
 	)
-	return RawHorizonTile(
-		amplitude=amplitude[np.newaxis, ...],
-		local_valid_mask=local_valid,
-		token_valid_mask=token_valid,
-	)
+	if not np.array_equal(token_valid, expected_token_valid):
+		raise ValueError(
+			'prepared crop token_valid_mask does not match local validity and '
+			'min_token_valid_fraction'
+		)
+	return values, local_valid, token_valid
 
 
 def _validate_horizon_arrays(
@@ -554,7 +590,6 @@ def _ceil_div(value: int, divisor: int) -> int:
 
 
 __all__ = [
-	'HORIZON_MIN_TOKEN_VALID_FRACTION',
 	'HORIZON_WINDOW_LENGTH',
 	'HORIZON_WINDOW_START',
 	'HORIZON_WINDOW_STOP',

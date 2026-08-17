@@ -9,6 +9,14 @@ import pytest
 import torch
 from torch import nn
 
+from seis_ssl_cluster.data.normalization import AmplitudeAgcConfig
+from seis_ssl_cluster.data.schema import CropRequest
+from seis_ssl_cluster.data.window_preprocessing import (
+	AmplitudePreprocessSettings,
+	PreparedAmplitudeCrop,
+	read_prepared_survey_amplitude_crop,
+)
+from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
 from seis_ssl_cluster.volve.horizon_loss import (
 	fractional_horizon_cross_entropy,
 	fractional_target_weights,
@@ -27,6 +35,7 @@ from seis_ssl_cluster.volve.horizon_model import (
 )
 from seis_ssl_cluster.volve.horizon_tiles import (
 	HORIZON_WINDOW_LENGTH,
+	HorizonTileRecord,
 	HorizonTileSettings,
 	build_frozen_horizon_tile,
 	build_horizon_tile_targets,
@@ -192,7 +201,9 @@ def test_supervision_combines_native_split_trace_finite_and_window_masks() -> No
 
 
 def test_tile_enumeration_and_targets_keep_all_available_points() -> None:
-	settings = HorizonTileSettings(lateral_shape_xy=(65, 65))
+	settings = HorizonTileSettings(
+		lateral_shape_xy=(65, 65), min_token_valid_fraction=0.1
+	)
 	samples, native, split, traces = _tile_arrays()
 	split[:, 0, :] = True
 	split[:, :, 64] = True
@@ -230,8 +241,10 @@ def test_tile_enumeration_and_targets_keep_all_available_points() -> None:
 	assert not edge.trace_valid_mask[1:, :].any()
 
 
-def test_frozen_and_raw_edge_tiles_pad_zero_and_false() -> None:
-	settings = HorizonTileSettings(lateral_shape_xy=(65, 65))
+def test_frozen_and_raw_edge_tiles_pad_zero_and_preserve_preprocessing() -> None:
+	settings = HorizonTileSettings(
+		lateral_shape_xy=(65, 65), min_token_valid_fraction=1.0
+	)
 	samples, native, split, traces = _tile_arrays()
 	split[:, 0, 0] = True
 	record = enumerate_horizon_tile_records(
@@ -255,21 +268,84 @@ def test_frozen_and_raw_edge_tiles_pad_zero_and_false() -> None:
 	assert not frozen.token_valid_mask[:, 0].any()
 	assert np.count_nonzero(frozen.embeddings[:, 0]) == 0
 
-	amplitude = np.ones((65, 65, 768), dtype=np.float32)
-	traces[0, 0] = False
-	amplitude[0, 0] = np.nan
+	normalized_amplitude = np.ones((65, 65, 768), dtype=np.float32)
+	zero_like_mask = np.zeros(normalized_amplitude.shape, dtype=np.bool_)
+	zero_like_mask[0, 0, :] = True
+	zero_like_mask[:, :, 600] = True
+	request = CropRequest(
+		survey_id='volve',
+		start_xyz=(-8, -8, 552),
+		size_xyz=settings.input_size_voxels,
+	)
+	prepared = read_prepared_survey_amplitude_crop(
+		request=request,
+		normalized_amplitude=normalized_amplitude,
+		zero_like_mask=zero_like_mask,
+		patch_size_xyz=settings.patch_size_xyz,
+		settings=AmplitudePreprocessSettings(
+			zero_mask=ZeroMaskConfig(
+				enabled=True,
+				zero_atol=0.0,
+				z_sample_influence_radius=16,
+				xy_trace_influence_radius=1,
+			),
+			normalized_clip_abs=8.0,
+			amplitude_agc=AmplitudeAgcConfig(
+				enabled=True,
+				mode='trace_rms_z',
+				window_z=65,
+				eps=1.0e-3,
+				clip_abs=5.0,
+			),
+			min_token_valid_fraction=1.0,
+			finite_check_mode='strict',
+		),
+	)
 	raw = build_raw_horizon_tile(
 		record=record,
-		preprocessed_amplitude=amplitude,
-		trace_valid_mask=traces,
+		prepared_crop=prepared,
 		settings=settings,
 	)
 	assert raw.amplitude.shape == (1, 80, 80, 216)
 	assert not raw.local_valid_mask[:8].any()
 	assert not raw.local_valid_mask[:, :8].any()
 	assert not raw.local_valid_mask[8, 8].any()
+	assert not raw.local_valid_mask[:, :, 32:65].any()
 	assert np.count_nonzero(raw.amplitude[0, 8, 8]) == 0
+	np.testing.assert_array_equal(raw.local_valid_mask, prepared.local_valid_mask)
+	np.testing.assert_array_equal(raw.token_valid_mask, prepared.token_valid_mask)
 	assert np.isfinite(raw.amplitude).all()
+
+
+def test_raw_tile_rejects_token_validity_from_a_different_threshold() -> None:
+	settings = HorizonTileSettings(
+		lateral_shape_xy=(64, 64), min_token_valid_fraction=1.0
+	)
+	record = HorizonTileRecord(
+		tile_id=0,
+		core_start_token_xy=(0, 0),
+		core_stop_token_xy=(8, 8),
+		per_horizon_observation_counts=(1, 1, 1, 1, 1),
+	)
+	local_valid = np.ones(settings.input_size_voxels, dtype=np.bool_)
+	local_valid[0, 0, 0] = False
+	prepared = PreparedAmplitudeCrop(
+		request=CropRequest(
+			survey_id='volve',
+			start_xyz=(-8, -8, 552),
+			size_xyz=settings.input_size_voxels,
+		),
+		x=np.where(local_valid[np.newaxis], 1.0, 0.0).astype(np.float32),
+		local_valid_mask=local_valid,
+		token_valid_mask=np.ones(settings.input_size_tokens, dtype=np.bool_),
+	)
+
+	with pytest.raises(ValueError, match='min_token_valid_fraction'):
+		build_raw_horizon_tile(
+			record=record,
+			prepared_crop=prepared,
+			settings=settings,
+		)
 
 
 def test_training_preflight_rejects_any_zero_coverage_horizon() -> None:
