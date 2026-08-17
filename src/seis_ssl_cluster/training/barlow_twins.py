@@ -27,6 +27,19 @@ from seis_ssl_cluster.training.barlow_twins_checkpoint import (
 )
 from seis_ssl_cluster.training.collate import move_batch_to_device
 from seis_ssl_cluster.training.dataloaders import build_barlow_twins_dataloader
+from seis_ssl_cluster.training.logging import print_epoch_metrics
+
+_LOSS_METRICS = (
+	'training_loss',
+	'on_diag',
+	'off_diag',
+	'projection_std_mean',
+	'projection_std_min',
+	'projection_norm_mean',
+	'cross_correlation_diag_mean',
+	'cross_correlation_offdiag_rms',
+	'weighted_off_diag',
+)
 
 
 @dataclass(frozen=True)
@@ -63,7 +76,8 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 ) -> BarlowTwinsTrainingState:
 	"""Train for one epoch or until the supplied per-call step limit."""
 	model.train()
-	totals = {'training_loss': 0.0, 'on_diag': 0.0, 'off_diag': 0.0}
+	totals = dict.fromkeys((*_LOSS_METRICS, 'gradient_norm', 'learning_rate'), 0.0)
+	parameters = tuple(model.pretraining_parameters())
 	batches = 0
 	for raw_batch in dataloader:
 		if max_steps is not None and batches >= max_steps:
@@ -87,22 +101,20 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 			)
 			losses = loss_fn(outputs['z_a'], outputs['z_b'])
 			loss = losses['loss']
+		if not bool(torch.isfinite(loss).item()):
+			msg = (
+				'non-finite Barlow Twins loss '
+				f'at epoch={epoch}, global_step={global_step}'
+			)
+			raise FloatingPointError(msg)
 		if scaler is None:
 			loss.backward()
-			if grad_clip_norm is not None:
-				torch.nn.utils.clip_grad_norm_(
-					tuple(model.pretraining_parameters()),
-					grad_clip_norm,
-				)
+			grad_norm = _clip_and_check_gradients(parameters, grad_clip_norm)
 			optimizer.step()
 		else:
 			scaler.scale(loss).backward()
-			if grad_clip_norm is not None:
-				scaler.unscale_(optimizer)
-				torch.nn.utils.clip_grad_norm_(
-					tuple(model.pretraining_parameters()),
-					grad_clip_norm,
-				)
+			scaler.unscale_(optimizer)
+			grad_norm = _clip_and_check_gradients(parameters, grad_clip_norm)
 			scaler.step(optimizer)
 			scaler.update()
 		global_step += 1
@@ -110,6 +122,10 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 		totals['training_loss'] += float(loss.detach().cpu())
 		totals['on_diag'] += float(losses['on_diag'].detach().cpu())
 		totals['off_diag'] += float(losses['off_diag'].detach().cpu())
+		for key in _LOSS_METRICS[3:]:
+			totals[key] += float(losses[key].detach().cpu())
+		totals['gradient_norm'] += float(grad_norm.detach().cpu())
+		totals['learning_rate'] += float(optimizer.param_groups[0]['lr'])
 	if batches == 0:
 		raise ValueError('Barlow Twins dataloader produced no batches')
 	return BarlowTwinsTrainingState(
@@ -238,6 +254,7 @@ def run_barlow_twins_pretraining(
 			grad_clip_norm=_floating(train, 'grad_clip_norm'),
 		)
 		global_step = state.global_step
+		print_epoch_metrics(epoch, state.metrics)
 		history.append(
 			{'epoch': epoch, 'global_step': global_step, **state.metrics}
 		)
@@ -269,6 +286,17 @@ def run_barlow_twins_pretraining(
 	if checkpoint_path is None:
 		raise ValueError('no Barlow Twins training epochs were run')
 	return checkpoint_path
+
+
+def _clip_and_check_gradients(
+	parameters: tuple[torch.nn.Parameter, ...],
+	grad_clip_norm: float | None,
+) -> torch.Tensor:
+	return torch.nn.utils.clip_grad_norm_(
+		parameters,
+		float('inf') if grad_clip_norm is None else grad_clip_norm,
+		error_if_nonfinite=True,
+	)
 
 
 def _build_backbone(config: Mapping[str, object]) -> AmplitudeMAE3D:

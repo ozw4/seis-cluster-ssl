@@ -34,7 +34,7 @@ class BarlowTwinsLoss(nn.Module):
 		z_a: torch.Tensor,
 		z_b: torch.Tensor,
 	) -> dict[str, torch.Tensor]:
-		"""Return total, diagonal, and off-diagonal loss terms."""
+		"""Return the objective terms and representation diagnostics."""
 		return barlow_twins_loss(
 			z_a,
 			z_b,
@@ -50,7 +50,7 @@ def barlow_twins_loss(
 	redundancy_weight: float = 0.005,
 	normalization_eps: float = 1e-12,
 ) -> dict[str, torch.Tensor]:
-	"""Return the Barlow Twins loss for two ``[batch, feature]`` projections."""
+	"""Return the Barlow Twins objective and diagnostics for two projections."""
 	_validate_projections(z_a, z_b)
 	redundancy_weight = _validate_nonnegative_float(
 		redundancy_weight,
@@ -62,8 +62,10 @@ def barlow_twins_loss(
 	)
 
 	with torch.autocast(device_type=z_a.device.type, enabled=False):
-		normalized_a = _normalize_features(z_a.float(), normalization_eps)
-		normalized_b = _normalize_features(z_b.float(), normalization_eps)
+		projection_a = z_a.float()
+		projection_b = z_b.float()
+		normalized_a = _normalize_features(projection_a, normalization_eps)
+		normalized_b = _normalize_features(projection_b, normalization_eps)
 		cross_correlation = normalized_a.transpose(0, 1) @ normalized_b
 		cross_correlation = cross_correlation / z_a.shape[0]
 
@@ -74,9 +76,36 @@ def barlow_twins_loss(
 			dtype=torch.bool,
 			device=cross_correlation.device,
 		)
-		off_diag = cross_correlation[off_diagonal_mask].square().sum()
-		loss = on_diag + redundancy_weight * off_diag
-	return {'loss': loss, 'on_diag': on_diag, 'off_diag': off_diag}
+		off_diagonal = cross_correlation[off_diagonal_mask]
+		off_diag = off_diagonal.square().sum()
+		weighted_off_diag = redundancy_weight * off_diag
+		loss = on_diag + weighted_off_diag
+		with torch.no_grad():
+			projection_std = torch.cat(
+				(
+					projection_a.std(dim=0, unbiased=False),
+					projection_b.std(dim=0, unbiased=False),
+				)
+			)
+			projection_norm_mean = torch.cat(
+				(projection_a.norm(dim=1), projection_b.norm(dim=1))
+			).mean()
+			off_diagonal_rms = (
+				off_diagonal.square().mean().sqrt()
+				if off_diagonal.numel()
+				else off_diag.new_zeros(())
+			)
+	return {
+		'loss': loss,
+		'on_diag': on_diag,
+		'off_diag': off_diag,
+		'projection_std_mean': projection_std.mean(),
+		'projection_std_min': projection_std.min(),
+		'projection_norm_mean': projection_norm_mean,
+		'cross_correlation_diag_mean': diagonal.mean().detach(),
+		'cross_correlation_offdiag_rms': off_diagonal_rms,
+		'weighted_off_diag': weighted_off_diag.detach(),
+	}
 
 
 def _normalize_features(z: torch.Tensor, eps: float) -> torch.Tensor:

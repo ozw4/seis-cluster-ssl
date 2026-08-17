@@ -93,6 +93,43 @@ def test_loss_matches_reported_decomposition() -> None:
 	)
 
 
+def test_loss_reports_dimension_normalized_representation_diagnostics() -> None:
+	z_a = torch.tensor(
+		[[1.0, 2.0, 4.0], [3.0, 6.0, 8.0], [5.0, 10.0, 12.0]]
+	)
+	z_b = torch.tensor(
+		[[2.0, 1.0, 3.0], [4.0, 5.0, 7.0], [8.0, 9.0, 11.0]]
+	)
+	weight = 0.03
+
+	result = barlow_twins_loss(z_a, z_b, redundancy_weight=weight)
+	stds = torch.cat(
+		(z_a.std(dim=0, unbiased=False), z_b.std(dim=0, unbiased=False))
+	)
+	norm_mean = torch.cat((z_a.norm(dim=1), z_b.norm(dim=1))).mean()
+	normalized_a = (z_a - z_a.mean(dim=0)) / torch.sqrt(
+		(z_a - z_a.mean(dim=0)).square().mean(dim=0) + 1.0e-12
+	)
+	normalized_b = (z_b - z_b.mean(dim=0)) / torch.sqrt(
+		(z_b - z_b.mean(dim=0)).square().mean(dim=0) + 1.0e-12
+	)
+	cross_correlation = normalized_a.T @ normalized_b / z_a.shape[0]
+	off_diagonal = cross_correlation[~torch.eye(3, dtype=torch.bool)]
+
+	torch.testing.assert_close(result['projection_std_mean'], stds.mean())
+	torch.testing.assert_close(result['projection_std_min'], stds.min())
+	torch.testing.assert_close(result['projection_norm_mean'], norm_mean)
+	torch.testing.assert_close(
+		result['cross_correlation_diag_mean'],
+		cross_correlation.diagonal().mean(),
+	)
+	torch.testing.assert_close(
+		result['cross_correlation_offdiag_rms'],
+		off_diagonal.square().mean().sqrt(),
+	)
+	torch.testing.assert_close(result['weighted_off_diag'], weight * result['off_diag'])
+
+
 def test_identity_like_cross_correlation_beats_redundant_features() -> None:
 	identity_like = torch.tensor(
 		[[1.0, 0.0], [0.0, 1.0], [-1.0, 0.0], [0.0, -1.0]],
