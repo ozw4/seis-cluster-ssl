@@ -4,11 +4,13 @@ import json
 import subprocess
 import sys
 from typing import TYPE_CHECKING
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 import torch
 
+import seis_ssl_cluster.data.amplitude_dataset as amplitude_dataset_module
 from seis_ssl_cluster.config import resolve_barlow_twins_training_config
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
@@ -77,7 +79,14 @@ def test_cli_dry_run_applies_max_steps_without_creating_artifacts(
 def test_checkpoint_contract_round_trip_and_epoch_resume(
 	tmp_path: Path,
 	capsys: pytest.CaptureFixture[str],
+	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+	build_mask = Mock(side_effect=AssertionError('MAE mask should not be built'))
+	monkeypatch.setattr(
+		amplitude_dataset_module,
+		'build_spatial_masking_plan',
+		build_mask,
+	)
 	config = resolve_barlow_twins_training_config(_tiny_config(tmp_path))
 	first_path = run_barlow_twins_pretraining(config)
 	payload = load_barlow_twins_checkpoint(first_path, map_location='cpu')
@@ -132,6 +141,7 @@ def test_checkpoint_contract_round_trip_and_epoch_resume(
 	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
 	assert resumed['epoch'] == 2
 	assert resumed['global_step'] == 2
+	build_mask.assert_not_called()
 	history = json.loads(
 		(resumed_path.parent / 'history.json').read_text(encoding='utf-8')
 	)

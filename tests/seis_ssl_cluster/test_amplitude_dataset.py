@@ -143,6 +143,31 @@ def test_amplitude_dataset_returns_one_channel_sample_contract(tmp_path: Path) -
 	assert not any('attribute' in key for key in sample)
 
 
+def test_disabling_spatial_mask_preserves_crop_sample(tmp_path: Path) -> None:
+	volume = np.arange(8 * 8 * 8, dtype=np.float32).reshape(8, 8, 8)
+	manifest = _manifest(tmp_path, 'survey', volume)
+	kwargs = {
+		'local_crop_size_xyz': (4, 4, 4),
+		'patch_size_xyz': (2, 2, 2),
+		'seed': 7,
+		'zero_mask': ZeroMaskConfig(enabled=False),
+	}
+	masked = AmplitudePretrainDataset([manifest], **kwargs)[0]
+	unmasked = AmplitudePretrainDataset(
+		[manifest],
+		**kwargs,
+		emit_spatial_mask=False,
+	)[0]
+
+	assert set(unmasked) == {'x', 'local_valid_mask', 'coords'}
+	np.testing.assert_array_equal(unmasked['x'], masked['x'])
+	np.testing.assert_array_equal(
+		unmasked['local_valid_mask'],
+		masked['local_valid_mask'],
+	)
+	assert unmasked['coords'] == masked['coords']
+
+
 def test_amplitude_dataset_uses_manifest_order_round_robin(tmp_path: Path) -> None:
 	manifest_a = _manifest(tmp_path, 'a', np.ones((6, 6, 6), dtype=np.float32))
 	manifest_b = _manifest(tmp_path, 'b', np.ones((6, 6, 6), dtype=np.float32))

@@ -77,10 +77,22 @@ def _base_dataset(
 		[_manifest(tmp_path, volume, valid_mask=valid_mask)],
 		local_crop_size_xyz=volume.shape,
 		patch_size_xyz=(1, 1, 2),
+		emit_spatial_mask=False,
 		seed=19,
 		samples_per_epoch=samples_per_epoch,
 		zero_mask=ZeroMaskConfig(enabled=False),
 	)
+
+
+def test_base_dataset_does_not_build_mae_mask(tmp_path: Path) -> None:
+	base = _base_dataset(tmp_path)
+	build_mask = Mock(side_effect=AssertionError('MAE mask should not be built'))
+	base._add_spatial_masks = build_mask  # type: ignore[method-assign]  # noqa: SLF001
+
+	sample = base[0]
+
+	assert 'spatial_mask' not in sample
+	build_mask.assert_not_called()
 
 
 def test_two_views_share_one_physical_crop_and_coordinates(tmp_path: Path) -> None:

@@ -65,6 +65,8 @@ class AmplitudePretrainDataset:
 		normalized_clip_abs: float | None = None,
 		amplitude_agc: AmplitudeAgcConfig | Mapping[str, object] | None = None,
 		finite_check_mode: FiniteCheckMode = 'strict',
+		*,
+		emit_spatial_mask: bool = True,
 	) -> None:
 		self.manifests = tuple(manifests)
 		if not self.manifests:
@@ -98,6 +100,13 @@ class AmplitudePretrainDataset:
 			block_size_tokens_xyz,
 			'block_size_tokens_xyz',
 		)
+		if not isinstance(emit_spatial_mask, bool):
+			msg = (
+				'emit_spatial_mask must be a boolean; '
+				f'got {emit_spatial_mask!r}'
+			)
+			raise TypeError(msg)
+		self.emit_spatial_mask = emit_spatial_mask
 		self.seed = _validate_nonnegative_int(seed, 'seed')
 		self._epoch = torch.zeros((), dtype=torch.int64).share_memory_()
 		if samples_per_epoch is None:
@@ -215,7 +224,8 @@ class AmplitudePretrainDataset:
 			last_valid_fraction = candidate.valid_fraction
 			if last_valid_fraction >= self.min_valid_fraction:
 				sample = self._finalize_sample(manifest, candidate)
-				self._add_spatial_masks(sample, rng)
+				if self.emit_spatial_mask:
+					self._add_spatial_masks(sample, rng)
 				return sample
 
 		msg = (
