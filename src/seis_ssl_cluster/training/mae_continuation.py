@@ -124,17 +124,6 @@ def configure_mae_continuation_trainability(
 	)
 	if not trainable_parameters:
 		raise RuntimeError('MAE continuation has no trainable parameters')
-	trainable_ids = tuple(id(parameter) for parameter in trainable_parameters)
-	if len(trainable_ids) != len(set(trainable_ids)):
-		raise RuntimeError('MAE continuation trainable parameters contain duplicates')
-	expected_ids = {
-		id(parameter)
-		for parameter in model.parameters()
-		if parameter.requires_grad
-	}
-	if set(trainable_ids) != expected_ids:
-		msg = 'MAE continuation trainable parameters do not match model.requires_grad'
-		raise RuntimeError(msg)
 	return trainable_parameters
 
 

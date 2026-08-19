@@ -418,7 +418,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		model_config,
 		runtime_check_mode=runtime_check_mode,
 	).to(device)
-	optimizer_parameters = _prepare_mae_optimizer_parameters(
+	optimizer_parameters = _initialize_mae_training_parameters(
 		model,
 		config=config,
 		model_config=model_config,
@@ -656,7 +656,7 @@ def _build_model(
 	)
 
 
-def _prepare_mae_optimizer_parameters(
+def _initialize_mae_training_parameters(
 	model: AmplitudeMAE3D,
 	*,
 	config: Mapping[str, object],
