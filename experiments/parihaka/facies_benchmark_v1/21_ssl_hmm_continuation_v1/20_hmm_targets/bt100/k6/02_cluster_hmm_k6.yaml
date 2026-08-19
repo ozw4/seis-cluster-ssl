@@ -2,7 +2,7 @@ paths:
   artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
 
 embeddings:
-  input_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/hmm_targets/bt100/k6/overlap_x64
+  input_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/hmm_targets/bt100/overlap_x64
 
 clustering:
   output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/hmm_targets/bt100/k6

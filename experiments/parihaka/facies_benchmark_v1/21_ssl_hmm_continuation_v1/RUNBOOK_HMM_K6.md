@@ -87,20 +87,20 @@ PY
 
 ## 4. embedding抽出
 
-MAE100、BT100の順に、各configをdry-runしてからfull-volume embeddingを抽出する。
+MAE100、BT100の順に、各configをdry-runしてからfull-volume embeddingを抽出する。このartifactはKに依存しないためbase固有root直下へ保存し、後続のK=6 clustering（将来のK=8 / K=10を含む）から再利用する。
 
 ```bash
 python proc/seis_ssl_cluster/extract_embeddings.py \
-  --config "$TARGET_CONFIGS/mae100/k6/01_extract_embeddings.yaml" \
+  --config "$TARGET_CONFIGS/mae100/01_extract_embeddings.yaml" \
   --dry-run
 python proc/seis_ssl_cluster/extract_embeddings.py \
-  --config "$TARGET_CONFIGS/mae100/k6/01_extract_embeddings.yaml"
+  --config "$TARGET_CONFIGS/mae100/01_extract_embeddings.yaml"
 
 python proc/seis_ssl_cluster/extract_embeddings.py \
-  --config "$TARGET_CONFIGS/bt100/k6/01_extract_embeddings.yaml" \
+  --config "$TARGET_CONFIGS/bt100/01_extract_embeddings.yaml" \
   --dry-run
 python proc/seis_ssl_cluster/extract_embeddings.py \
-  --config "$TARGET_CONFIGS/bt100/k6/01_extract_embeddings.yaml"
+  --config "$TARGET_CONFIGS/bt100/01_extract_embeddings.yaml"
 ```
 
 完了後、manifestのsurvey setとembedding metadataのsurvey setを一致させ、各`checkpoint_path`が対応するStage 1 sourceを指すことを確認する。
@@ -108,9 +108,9 @@ python proc/seis_ssl_cluster/extract_embeddings.py \
 ```bash
 python - \
   "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/data/parihaka/facies_benchmark_v1/parihaka_amplitude_manifest.json" \
-  "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/hmm_targets/mae100/k6/overlap_x64" \
+  "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/hmm_targets/mae100/overlap_x64" \
   "$MAE100" \
-  "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/hmm_targets/bt100/k6/overlap_x64" \
+  "$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/hmm_targets/bt100/overlap_x64" \
   "$BT100" <<'PY'
 import json
 from pathlib import Path

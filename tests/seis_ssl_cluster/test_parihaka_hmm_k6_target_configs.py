@@ -35,7 +35,7 @@ def embedding_configs(
 	del artifact_root
 	return {
 		variant: resolve_embedding_extraction_config(
-			load_config(TARGET_ROOT / variant / 'k6/01_extract_embeddings.yaml')
+			load_config(TARGET_ROOT / variant / '01_extract_embeddings.yaml')
 		)
 		for variant in VARIANTS
 	}
@@ -69,14 +69,17 @@ def test_embedding_configs_resolve_from_separate_stage1_100ep_sources(
 	expected_outputs = {
 		variant: artifact_root
 		/ 'embeddings/parihaka/facies_benchmark_v1'
-		/ f'ssl_hmm_continuation_v1/hmm_targets/{variant}/k6/overlap_x64'
+		/ f'ssl_hmm_continuation_v1/hmm_targets/{variant}/overlap_x64'
 		for variant in VARIANTS
 	}
 
 	for variant, config in embedding_configs.items():
 		assert config['stage'] == 'extract_embeddings'
 		assert Path(config['embeddings']['checkpoint']) == expected_checkpoints[variant]
-		assert Path(config['embeddings']['output_dir']) == expected_outputs[variant]
+		output_dir = Path(config['embeddings']['output_dir'])
+		assert output_dir == expected_outputs[variant]
+		assert output_dir.parent.name == variant
+		assert 'k6' not in output_dir.parts
 		assert '25ep' not in config['embeddings']['checkpoint']
 		assert config['manifests']['input'] == str(
 			artifact_root
@@ -258,12 +261,12 @@ def test_export_scripts_are_paired_and_export_only(
 
 def test_target_pipeline_files_never_reference_25ep_controls() -> None:
 	for variant in VARIANTS:
-		for filename in (
-			'01_extract_embeddings.yaml',
-			'02_cluster_hmm_k6.yaml',
-			'03_export_pseudo_targets.sh',
+		for relative_path in (
+			Path('01_extract_embeddings.yaml'),
+			Path('k6/02_cluster_hmm_k6.yaml'),
+			Path('k6/03_export_pseudo_targets.sh'),
 		):
-			text = (TARGET_ROOT / variant / 'k6' / filename).read_text(
+			text = (TARGET_ROOT / variant / relative_path).read_text(
 				encoding='utf-8'
 			)
 			assert 'full_25ep' not in text

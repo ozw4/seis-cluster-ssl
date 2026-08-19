@@ -236,8 +236,8 @@ def test_hmm_k6_output_roots_are_unique_and_isolated(
 		/ 'parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1'
 		/ suffix
 		for namespace, suffix in (
-			('embeddings', 'hmm_targets/mae100/k6/overlap_x64'),
-			('embeddings', 'hmm_targets/bt100/k6/overlap_x64'),
+			('embeddings', 'hmm_targets/mae100/overlap_x64'),
+			('embeddings', 'hmm_targets/bt100/overlap_x64'),
 			('clustering', 'hmm_targets/mae100/k6'),
 			('clustering', 'hmm_targets/bt100/k6'),
 			('pseudo_targets', 'mae100'),

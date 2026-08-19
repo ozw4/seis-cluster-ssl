@@ -32,8 +32,8 @@ def test_suite_readme_links_the_compact_paired_hmm_matrix() -> None:
 def test_hmm_k6_runbook_fixes_all_pipeline_config_paths() -> None:
 	text = RUNBOOK.read_text(encoding='utf-8')
 	expected_paths = (
-		'20_hmm_targets/mae100/k6/01_extract_embeddings.yaml',
-		'20_hmm_targets/bt100/k6/01_extract_embeddings.yaml',
+		'20_hmm_targets/mae100/01_extract_embeddings.yaml',
+		'20_hmm_targets/bt100/01_extract_embeddings.yaml',
 		'20_hmm_targets/mae100/k6/02_cluster_hmm_k6.yaml',
 		'20_hmm_targets/bt100/k6/02_cluster_hmm_k6.yaml',
 		'20_hmm_targets/mae100/k6/03_export_pseudo_targets.sh',
@@ -49,6 +49,15 @@ def test_hmm_k6_runbook_fixes_all_pipeline_config_paths() -> None:
 		config_relative = relative_path.removeprefix('20_hmm_targets/')
 		config_relative = config_relative.removeprefix('30_stage2/')
 		assert config_relative in text
+
+	for variant in ('mae100', 'bt100'):
+		embedding_output = (
+			'embeddings/parihaka/facies_benchmark_v1/'
+			'ssl_hmm_continuation_v1/hmm_targets/'
+			f'{variant}/overlap_x64'
+		)
+		assert embedding_output in text
+		assert f'{variant}/k6/overlap_x64' not in text
 
 
 def test_hmm_k6_runbook_keeps_the_required_execution_order() -> None:
