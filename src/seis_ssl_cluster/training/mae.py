@@ -6,7 +6,7 @@ import json
 import math
 import shutil
 import subprocess
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import partial
@@ -51,6 +51,10 @@ from seis_ssl_cluster.training.mae_config_completion import (
 	_optional_positive_float_config,
 	_runtime_loss_values,
 	_xyz_config,
+)
+from seis_ssl_cluster.training.mae_continuation import (
+	configure_mae_continuation_trainability,
+	load_mae_continuation_weights,
 )
 from seis_ssl_cluster.training.mae_visualization_hooks import (
 	_mae_debug_epoch_triggered,
@@ -423,7 +427,12 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		runtime_check_mode=runtime_check_mode,
 	).to(device)
 	optimizer = torch.optim.AdamW(
-		model.parameters(),
+		_prepare_mae_optimizer_parameters(
+			model,
+			config=config,
+			model_config=model_config,
+			resume=resume,
+		),
 		lr=_float_config(train_config, 'lr', 3.0e-5),
 		weight_decay=_float_config(train_config, 'weight_decay', 0.05),
 	)
@@ -643,6 +652,39 @@ def _build_model(
 		decoder_depth=_int_config(model_config, 'decoder_depth', 4),
 		decoder_heads=_int_config(model_config, 'decoder_heads', 4),
 		runtime_check_mode=runtime_check_mode,
+	)
+
+
+def _prepare_mae_optimizer_parameters(
+	model: AmplitudeMAE3D,
+	*,
+	config: Mapping[str, object],
+	model_config: Mapping[str, object],
+	resume: str | Path | None,
+) -> Iterable[torch.nn.Parameter]:
+	continuation = config.get('continuation')
+	if continuation is None:
+		return model.parameters()
+	if not isinstance(continuation, Mapping):
+		msg = 'continuation must be a mapping'
+		raise TypeError(msg)
+	if resume is None:
+		init_checkpoint = continuation.get('init_checkpoint')
+		if not isinstance(init_checkpoint, str) or not init_checkpoint:
+			msg = 'continuation.init_checkpoint must be a non-empty string'
+			raise TypeError(msg)
+		load_mae_continuation_weights(
+			model,
+			init_checkpoint,
+			expected_model_config=model_config,
+		)
+	return configure_mae_continuation_trainability(
+		model,
+		unfreeze_top_blocks=_int_config(
+			continuation,
+			'unfreeze_top_blocks',
+			1,
+		),
 	)
 
 

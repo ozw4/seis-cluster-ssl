@@ -47,6 +47,7 @@ _RESUME_COMPATIBILITY_SECTIONS = (
 	'model',
 	'masking',
 	'loss',
+	'continuation',
 )
 _RESUME_ALLOWED_TRAIN_OVERRIDES = frozenset(
 	{
