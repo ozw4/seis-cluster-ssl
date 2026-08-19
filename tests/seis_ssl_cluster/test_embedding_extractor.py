@@ -279,6 +279,17 @@ def test_barlow_checkpoint_rejects_invalid_consumer_metadata(
 		build_model_from_checkpoint_payload(payload)
 
 
+def test_direct_barlow_checkpoint_requires_projector_state(tmp_path: Path) -> None:
+	config = _write_fixture(tmp_path)
+	_make_fixture_checkpoint_barlow(config)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	del payload['projector_state_dict']
+
+	with pytest.raises(TypeError, match='projector_state_dict'):
+		build_model_from_checkpoint_payload(payload)
+
+
 def test_barlow_checkpoint_consumer_keeps_method_config_strict(
 	tmp_path: Path,
 ) -> None:

@@ -15,6 +15,7 @@ from seis_ssl_cluster.config.schema import (
 	FIXED_MODEL_CONTRACT,
 	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_MAE_TRAINING,
+	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 )
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 
@@ -206,6 +207,16 @@ def is_random_encoder_checkpoint(payload: Mapping[str, object]) -> bool:
 	)
 
 
+def _is_strat_hmm_encoder_checkpoint(payload: Mapping[str, object]) -> bool:
+	stratigraphy_config = payload.get('stratigraphy_config')
+	training_state = payload.get('training_state')
+	return (
+		isinstance(stratigraphy_config, Mapping)
+		and isinstance(training_state, Mapping)
+		and training_state.get('stage') == STAGE_STRAT_HMM_PRETEXT_TRAINING
+	)
+
+
 def _validate_top_level(
 	config: Mapping[str, object],
 	*,
@@ -251,6 +262,8 @@ def _validate_method_identity(
 	if config.get('stage') != STAGE_BARLOW_TWINS_TRAINING:
 		return
 	if is_random_encoder_checkpoint(payload):
+		return
+	if _is_strat_hmm_encoder_checkpoint(payload):
 		return
 	if payload.get('pretraining_method') != BARLOW_TWINS_PRETRAINING_METHOD:
 		raise ValueError('Barlow Twins checkpoint pretraining_method is invalid')

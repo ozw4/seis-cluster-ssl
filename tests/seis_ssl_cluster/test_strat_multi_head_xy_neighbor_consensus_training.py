@@ -619,7 +619,7 @@ def _save_consensus_checkpoint(
 		head=heads,
 		optimizer=optimizer,
 		epoch=1,
-		mae_config={},
+		mae_config={'stage': 'train_amp_mae'},
 		stratigraphy_config=config,
 		metrics={'loss': 1.0},
 		global_step=2,

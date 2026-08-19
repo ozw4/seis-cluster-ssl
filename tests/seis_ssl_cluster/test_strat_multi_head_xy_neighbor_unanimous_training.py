@@ -295,7 +295,7 @@ def test_unanimous_checkpoint_uses_schema_six_and_rejects_schema_five(  # noqa: 
 		head=heads,
 		optimizer=optimizer,
 		epoch=1,
-		mae_config={},
+		mae_config={'stage': 'train_amp_mae'},
 		stratigraphy_config=config,
 		metrics={'loss': 1.0},
 		global_step=2,

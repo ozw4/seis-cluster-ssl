@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 import torch
 
+from seis_ssl_cluster.config import resolve_barlow_twins_training_config
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
@@ -20,6 +21,9 @@ from seis_ssl_cluster.data import (
 )
 from seis_ssl_cluster.embedding import run_embedding_extraction
 from seis_ssl_cluster.embedding.extractor import _stratigraphy_pretext_metadata
+from seis_ssl_cluster.models.amplitude_encoder_factory import (
+	build_model_from_checkpoint_payload,
+)
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.stratigraphy import lateral_targets
 from seis_ssl_cluster.stratigraphy.prototypes import (
@@ -101,6 +105,35 @@ def test_standard_mae_checkpoint_extracts_without_strat_metadata(
 		'huber_delta': 1.0,
 		'target_normalization': {'mode': 'none'},
 	}
+
+
+def test_barlow_base_strat_checkpoint_loads_bare_student_and_extracts_metadata(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path, strat=True, barlow_base=True)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert payload['config']['stage'] == 'barlow_twins_training'
+	assert 'projector_state_dict' not in payload
+	loaded = build_model_from_checkpoint_payload(payload)
+	for key, expected in payload['model_state_dict'].items():
+		assert torch.equal(loaded.state_dict()[key], expected)
+	assert set(payload['stratigraphy_state_dict']).isdisjoint(loaded.state_dict())
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	assert metadata['stratigraphy_pretext']['base_objective'] == 'barlow_twins_3d'
+
+
+def test_strat_metadata_rejects_unknown_base_stage(tmp_path: Path) -> None:
+	config = _write_fixture(tmp_path, strat=True)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	payload['config']['stage'] = 'unknown_pretraining'
+
+	with pytest.raises(ValueError, match='base pretraining method'):
+		_stratigraphy_pretext_metadata(payload)
 
 
 def test_strat_checkpoint_control_identity_is_carried_to_embedding_metadata(
@@ -1679,7 +1712,7 @@ def _save_multi_head_resume_checkpoint(
 		head=head,
 		optimizer=optimizer,
 		epoch=1,
-		mae_config={},
+		mae_config={'stage': 'train_amp_mae'},
 		stratigraphy_config=config,
 		metrics={'loss': 1.0},
 		global_step=2,
@@ -1915,7 +1948,12 @@ def _sha256(path: Path) -> str:
 	return sha256(path.read_bytes()).hexdigest()
 
 
-def _write_fixture(tmp_path: Path, *, strat: bool) -> dict[str, object]:
+def _write_fixture(
+	tmp_path: Path,
+	*,
+	strat: bool,
+	barlow_base: bool = False,
+) -> dict[str, object]:
 	manifest_path, path_list = _write_manifest_fixture(tmp_path)
 	model = AmplitudeMAE3D(
 		in_channels=1,
@@ -1933,12 +1971,13 @@ def _write_fixture(tmp_path: Path, *, strat: bool) -> dict[str, object]:
 		manifest_path=manifest_path,
 		path_list=path_list,
 	)
+	base_config = _barlow_config(mae_config) if barlow_base else mae_config
 	checkpoint_path = tmp_path / ('strat.pt' if strat else 'mae.pt')
 	if strat:
 		_write_strat_checkpoint(
 			checkpoint_path,
 			student=model,
-			mae_config=mae_config,
+			mae_config=base_config,
 			stratigraphy_config=_stratigraphy_config(
 				tmp_path,
 				manifest_path=manifest_path,
@@ -1966,6 +2005,34 @@ def _write_fixture(tmp_path: Path, *, strat: bool) -> dict[str, object]:
 			'min_token_valid_fraction': 0.0,
 		},
 	}
+
+
+def _barlow_config(mae_config: dict[str, object]) -> dict[str, object]:
+	model = mae_config['model']
+	assert isinstance(model, dict)
+	paths = deepcopy(mae_config['paths'])
+	assert isinstance(paths, dict)
+	paths['artifact_root'] = str(Path(paths['output_root']).parent / 'artifacts')
+	return resolve_barlow_twins_training_config(
+		{
+			'paths': paths,
+			'manifests': deepcopy(mae_config['manifests']),
+			'data': {'local_crop_size': [4, 4, 4]},
+			'model': {
+				key: model[key]
+				for key in (
+					'patch_size',
+					'encoder_dim',
+					'encoder_depth',
+					'encoder_heads',
+					'decoder_dim',
+					'decoder_depth',
+					'decoder_heads',
+				)
+			},
+			'train': {'batch_size': 2, 'samples_per_epoch': 2, 'epochs': 1},
+		}
+	)
 
 
 def _write_manifest_fixture(tmp_path: Path) -> tuple[Path, Path]:

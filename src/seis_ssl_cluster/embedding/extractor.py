@@ -1856,6 +1856,7 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 	if not isinstance(stratigraphy_config, Mapping):
 		msg = 'checkpoint stratigraphy_config must be a mapping'
 		raise TypeError(msg)
+	base_objective = _stratigraphy_base_objective(payload)
 	head = _required_mapping(stratigraphy_config, 'head')
 	checkpoint_identity = payload.get('stratigraphy_checkpoint')
 	if checkpoint_identity is not None:
@@ -1866,7 +1867,7 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 		loss = _required_mapping(stratigraphy_config, 'loss')
 		result = {
 			'method': 'strat_hmm_multi_head_pretext',
-			'base_objective': 'amp_mae3d',
+			'base_objective': base_objective,
 			'head_spec': checkpoint_identity['head_spec'],
 			'head_ks': checkpoint_identity['head_ks'],
 			'head_count': len(checkpoint_identity['head_ks']),
@@ -2070,7 +2071,7 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
 	result = {
 		'method': 'strat_hmm_pretext',
-		'base_objective': 'amp_mae3d',
+		'base_objective': base_objective,
 		'head_num_prototypes': _positive_int(
 			head.get('num_prototypes'),
 			'stratigraphy_config.head.num_prototypes',
@@ -2106,6 +2107,21 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 			).encode('utf-8'),
 		).hexdigest()
 	return result
+
+
+def _stratigraphy_base_objective(payload: Mapping[str, object]) -> str:
+	config = payload.get('config')
+	if not isinstance(config, Mapping):
+		raise TypeError('checkpoint config must be a mapping')
+	stage = config.get('stage')
+	if stage == STAGE_MAE_TRAINING:
+		return 'amp_mae3d'
+	if stage == STAGE_BARLOW_TWINS_TRAINING:
+		return BARLOW_TWINS_PRETRAINING_METHOD
+	raise ValueError(
+		'strat-HMM checkpoint config.stage must identify its base pretraining '
+		f'method; got {stage!r}'
+	)
 
 
 def _hard_target_pretext_metadata(
