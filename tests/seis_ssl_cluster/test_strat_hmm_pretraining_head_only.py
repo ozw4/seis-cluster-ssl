@@ -4,9 +4,9 @@ import math
 import os
 import subprocess
 import sys
+from collections.abc import Mapping
 from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
@@ -14,7 +14,10 @@ import torch
 import yaml
 
 import seis_ssl_cluster.training.strat_hmm.runner as strat_hmm_runner
-from seis_ssl_cluster.config.pretraining import resolve_strat_hmm_pretext_config
+from seis_ssl_cluster.config.pretraining import (
+	resolve_barlow_twins_training_config,
+	resolve_strat_hmm_pretext_config,
+)
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
@@ -26,13 +29,17 @@ from seis_ssl_cluster.data import (
 	write_manifest_json,
 	write_normalization_stats,
 )
+from seis_ssl_cluster.models.barlow_twins import BarlowTwins3D
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.stratigraphy import (
 	OrderedPrototypeHead,
 	discover_pseudo_target_inputs,
 	write_pseudo_target,
 )
-from seis_ssl_cluster.training import load_checkpoint
+from seis_ssl_cluster.training import load_checkpoint, save_checkpoint
+from seis_ssl_cluster.training.barlow_twins_checkpoint import (
+	save_barlow_twins_checkpoint,
+)
 from seis_ssl_cluster.training.dataloaders import build_strat_pseudo_target_dataloader
 from seis_ssl_cluster.training.strat_hmm import compute_strat_hmm_pretext_losses
 from seis_ssl_cluster.training.strat_hmm import (
@@ -44,9 +51,6 @@ from seis_ssl_cluster.training.strat_hmm_pretraining import (
 	run_strat_hmm_pretext_training,
 	train_strat_hmm_head_only_one_epoch,
 )
-
-if TYPE_CHECKING:
-	from collections.abc import Mapping
 
 
 def test_strat_hmm_pretraining_legacy_import_path_is_supported() -> None:
@@ -313,6 +317,180 @@ def test_unfreeze_top_block_optimizer_lrs_and_gradients(tmp_path: Path) -> None:
 	)
 	assert components.teacher is not None
 	assert all(parameter.grad is None for parameter in components.teacher.parameters())
+
+
+@pytest.mark.parametrize('base_method', ['mae', 'barlow_twins'])
+def test_k6_components_share_mae_and_barlow_backbone_contract(  # noqa: PLR0915
+	tmp_path: Path,
+	base_method: str,
+) -> None:
+	config, source_state, source_projector = _k6_component_fixture(
+		tmp_path,
+		base_method=base_method,
+	)
+	assert config['pseudo_targets'] == {
+		'input_dir': str(tmp_path / 'pseudo_targets'),
+		'k': 6,
+		'min_confidence': 0.0,
+	}
+	assert 'spec' not in config['head']
+	assert 'ks' not in config['head']
+
+	components = build_strat_hmm_head_only_components(
+		config,
+		device=torch.device('cpu'),
+	)
+	expected_stage = (
+		'train_amp_mae' if base_method == 'mae' else 'barlow_twins_training'
+	)
+	assert components.mae_checkpoint_config['stage'] == expected_stage
+	assert components.teacher is not None
+	_assert_tensor_state_equal(components.student.state_dict(), source_state)
+	_assert_tensor_state_equal(components.teacher.state_dict(), source_state)
+	assert components.teacher.training is False
+	assert all(
+		not parameter.requires_grad for parameter in components.teacher.parameters()
+	)
+	assert all(
+		not parameter.requires_grad
+		for parameter in components.student.patch_projection.parameters()
+	)
+	assert all(
+		not parameter.requires_grad
+		for parameter in components.student.encoder.layers[0].parameters()
+	)
+	assert all(
+		parameter.requires_grad
+		for parameter in components.student.encoder.layers[-1].parameters()
+	)
+	decoder_parameters = [
+		parameter
+		for name, parameter in components.student.named_parameters()
+		if not name.startswith(('patch_projection.', 'encoder.'))
+	]
+	assert decoder_parameters
+	assert all(not parameter.requires_grad for parameter in decoder_parameters)
+
+	trainable_names = tuple(
+		name
+		for name, parameter in components.student.named_parameters()
+		if parameter.requires_grad
+	)
+	assert trainable_names == components.trainability_summary.trainable_names
+	assert all(name.startswith('encoder.layers.1.') for name in trainable_names)
+	assert components.trainability_summary.trainable_parameter_count == sum(
+		parameter.numel()
+		for parameter in components.student.parameters()
+		if parameter.requires_grad
+	)
+	assert components.trainability_summary.frozen_parameter_count == sum(
+		parameter.numel()
+		for parameter in components.student.parameters()
+		if not parameter.requires_grad
+	)
+
+	assert isinstance(components.head, OrderedPrototypeHead)
+	assert components.head.num_prototypes == 6
+	assert components.head.projection_dim == 128
+	assert components.head.temperature == pytest.approx(0.1)
+	assert components.head.normalize is True
+	assert all(parameter.requires_grad for parameter in components.head.parameters())
+	assert isinstance(components.optimizer, torch.optim.AdamW)
+	assert components.optimizer.state == {}
+	assert components.optimizer.defaults['weight_decay'] == pytest.approx(0.05)
+	assert [group['name'] for group in components.optimizer.param_groups] == [
+		'head',
+		'encoder',
+	]
+	assert [group['lr'] for group in components.optimizer.param_groups] == [
+		pytest.approx(1.0e-5),
+		pytest.approx(1.0e-5),
+	]
+	optimizer_parameters = [
+		parameter
+		for group in components.optimizer.param_groups
+		for parameter in group['params']
+	]
+	expected_parameters = [
+		*components.head.parameters(),
+		*components.student.encoder.layers[-1].parameters(),
+	]
+	assert len({id(parameter) for parameter in optimizer_parameters}) == len(
+		optimizer_parameters
+	)
+	assert {id(parameter) for parameter in optimizer_parameters} == {
+		id(parameter) for parameter in expected_parameters
+	}
+	if source_projector is not None:
+		projector_parameter_ids = {
+			id(parameter) for parameter in source_projector.parameters()
+		}
+		component_parameter_ids = {
+			id(parameter)
+			for module in (components.student, components.teacher, components.head)
+			for parameter in module.parameters()
+		}
+		assert projector_parameter_ids.isdisjoint(component_parameter_ids)
+		assert projector_parameter_ids.isdisjoint(
+			{id(parameter) for parameter in optimizer_parameters}
+		)
+		assert not any(
+			isinstance(module, BarlowTwins3D)
+			for root in (components.student, components.teacher, components.head)
+			for module in root.modules()
+		)
+
+	student_before = _clone_tensor_state(components.student.state_dict())
+	teacher_before = _clone_tensor_state(components.teacher.state_dict())
+	head_before = _clone_tensor_state(components.head.state_dict())
+	state = train_strat_hmm_head_only_one_epoch(
+		student=components.student,
+		teacher=components.teacher,
+		head=components.head,
+		dataloader=_single_batch_dataloader(config),
+		optimizer=components.optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		loss_config=config['loss'],
+		pseudo_target_config=config['pseudo_targets'],
+		max_steps=1,
+		grad_clip_norm=1.0,
+	)
+
+	assert state.global_step == 1
+	for metric in ('loss', 'loss_prototype', 'loss_usage', 'loss_distillation'):
+		assert math.isfinite(state.metrics[metric])
+	gradients = [
+		parameter.grad.detach()
+		for parameter in expected_parameters
+		if parameter.grad is not None
+	]
+	assert gradients
+	gradient_norm = torch.linalg.vector_norm(
+		torch.stack([torch.linalg.vector_norm(gradient) for gradient in gradients])
+	)
+	assert bool(torch.isfinite(gradient_norm).item())
+	_assert_state_prefix_unchanged(
+		student_before,
+		components.student.state_dict(),
+		'patch_projection.',
+	)
+	_assert_state_prefix_unchanged(
+		student_before,
+		components.student.state_dict(),
+		'encoder.layers.0.',
+	)
+	_assert_decoder_state_unchanged(student_before, components.student.state_dict())
+	_assert_tensor_state_equal(components.teacher.state_dict(), teacher_before)
+	assert _state_prefix_changed(
+		student_before,
+		components.student.state_dict(),
+		'encoder.layers.1.',
+	)
+	assert any(
+		not torch.equal(head_before[name], value)
+		for name, value in components.head.state_dict().items()
+	)
 
 
 def test_distillation_only_skips_prototype_head_and_invalid_labels() -> None:
@@ -957,3 +1135,225 @@ def _teacher_checkpoint_config(
 			},
 		},
 	)
+
+
+def _k6_component_fixture(
+	tmp_path: Path,
+	*,
+	base_method: str,
+) -> tuple[dict[str, object], dict[str, torch.Tensor], torch.nn.Module | None]:
+	raw = _raw_config(
+		tmp_path,
+		encoder_depth=2,
+		unfreeze_top_blocks=1,
+		distillation_weight=0.2,
+	)
+	pseudo_root = tmp_path / 'pseudo_targets'
+	write_pseudo_target(
+		pseudo_root,
+		k=6,
+		survey_id='survey',
+		labels=(np.arange(8, dtype=np.int32) % 6).reshape(2, 2, 2),
+		confidence=np.ones((2, 2, 2), dtype=np.float32),
+		valid_tokens=np.ones((2, 2, 2), dtype=np.bool_),
+	)
+	raw['pseudo_targets'] = {
+		'input_dir': str(pseudo_root.resolve()),
+		'k': 6,
+		'min_confidence': 0.0,
+	}
+	raw['head'] = {
+		'num_prototypes': 6,
+		'projection_dim': 128,
+		'temperature': 0.1,
+		'normalize': True,
+	}
+	raw['loss'] = {
+		'prototype_weight': 1.0,
+		'usage_weight': 0.005,
+		'entropy_floor': None,
+		'distillation_weight': 0.2,
+	}
+	train = raw['train']
+	assert isinstance(train, dict)
+	train['lr'] = 1.0e-5
+	train['encoder_lr'] = 1.0e-5
+	train['weight_decay'] = 0.05
+	train['amp'] = False
+	train['grad_clip_norm'] = 1.0
+
+	teacher = raw['teacher']
+	assert isinstance(teacher, dict)
+	checkpoint_path = Path(teacher['checkpoint'])
+	initial_payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	checkpoint_config = initial_payload['config']
+	model_state = initial_payload['model_state_dict']
+	assert isinstance(checkpoint_config, dict)
+	assert isinstance(model_state, dict)
+	model = AmplitudeMAE3D(
+		in_channels=1,
+		out_channels=1,
+		patch_size_xyz=(2, 2, 2),
+		encoder_dim=12,
+		encoder_depth=2,
+		encoder_heads=3,
+		decoder_dim=12,
+		decoder_depth=1,
+		decoder_heads=3,
+	)
+	model.load_state_dict(model_state, strict=True)
+	projector: torch.nn.Module | None = None
+	if base_method == 'mae':
+		optimizer = torch.optim.AdamW(model.parameters(), lr=1.0e-4)
+		save_checkpoint(
+			checkpoint_path,
+			model=model,
+			optimizer=optimizer,
+			epoch=100,
+			global_step=1,
+			config=checkpoint_config,
+			metrics={'loss': 0.5},
+			amp_enabled=False,
+			scaler=None,
+			scaler_required=False,
+			training_state={
+				'schema_version': 2,
+				'stage': 'train_amp_mae',
+				'checkpoint_kind': 'epoch',
+				'batch_index': None,
+				'resolved_precision': 'float32',
+			},
+		)
+	elif base_method == 'barlow_twins':
+		barlow_config = _barlow_source_config(checkpoint_config, checkpoint_path)
+		wrapper = BarlowTwins3D(model, projector_dim=8)
+		optimizer = torch.optim.AdamW(wrapper.pretraining_parameters(), lr=1.0e-4)
+		save_barlow_twins_checkpoint(
+			checkpoint_path,
+			backbone=wrapper.backbone,
+			projector=wrapper.projector,
+			optimizer=optimizer,
+			epoch=100,
+			global_step=1,
+			config=barlow_config,
+			metrics={'train_loss': 0.5},
+			amp_enabled=False,
+			scaler=None,
+			scaler_required=False,
+			dataset_epoch=100,
+			completed_epoch=True,
+		)
+		projector = wrapper.projector
+	else:
+		raise ValueError(f'unsupported fixture base_method: {base_method!r}')
+
+	raw['student'] = {
+		'init_checkpoint': str(checkpoint_path),
+		'unfreeze_top_blocks': 1,
+	}
+	resolved = resolve_strat_hmm_pretext_config(raw)
+	source_payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	if base_method == 'barlow_twins':
+		assert source_payload['config']['stage'] == 'barlow_twins_training'
+		assert source_payload['pretraining_method'] == 'barlow_twins_3d'
+		assert source_payload['checkpoint_kind'] == 'barlow_twins_pretraining'
+		assert source_payload['trained_parameter_prefixes'] == [
+			'patch_projection.',
+			'encoder.',
+		]
+		assert isinstance(source_payload['projector_state_dict'], dict)
+	return resolved, _clone_tensor_state(source_payload['model_state_dict']), projector
+
+
+def _barlow_source_config(
+	mae_config: Mapping[str, object],
+	checkpoint_path: Path,
+) -> dict[str, object]:
+	manifests = mae_config['manifests']
+	model = mae_config['model']
+	assert isinstance(manifests, Mapping)
+	assert isinstance(model, Mapping)
+	return resolve_barlow_twins_training_config(
+		{
+			'paths': {
+				'artifact_root': str(checkpoint_path.parent / 'barlow_artifacts'),
+				'output_root': str(checkpoint_path.parent / 'barlow_artifacts' / 'run'),
+			},
+			'manifests': dict(manifests),
+			'data': {'local_crop_size': [4, 4, 4]},
+			'zero_mask': {'enabled': False},
+			'model': {
+				key: model[key]
+				for key in (
+					'patch_size',
+					'encoder_dim',
+					'encoder_depth',
+					'encoder_heads',
+					'decoder_dim',
+					'decoder_depth',
+					'decoder_heads',
+				)
+			},
+			'barlow_twins': {'projector_dim': 8},
+			'train': {
+				'batch_size': 2,
+				'samples_per_epoch': 2,
+				'epochs': 100,
+				'num_workers': 0,
+				'shuffle': False,
+				'lr': 1.0e-4,
+				'weight_decay': 0.05,
+				'amp': False,
+				'device': 'cpu',
+				'seed': 42,
+				'grad_clip_norm': 1.0,
+			},
+		},
+	)
+
+
+def _clone_tensor_state(
+	state: Mapping[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+	return {name: value.detach().clone() for name, value in state.items()}
+
+
+def _assert_tensor_state_equal(
+	actual: Mapping[str, torch.Tensor],
+	expected: Mapping[str, torch.Tensor],
+) -> None:
+	assert set(actual) == set(expected)
+	assert all(torch.equal(actual[name], expected[name]) for name in expected)
+
+
+def _assert_state_prefix_unchanged(
+	before: Mapping[str, torch.Tensor],
+	after: Mapping[str, torch.Tensor],
+	prefix: str,
+) -> None:
+	names = [name for name in before if name.startswith(prefix)]
+	assert names
+	assert all(torch.equal(before[name], after[name]) for name in names)
+
+
+def _state_prefix_changed(
+	before: Mapping[str, torch.Tensor],
+	after: Mapping[str, torch.Tensor],
+	prefix: str,
+) -> bool:
+	names = [name for name in before if name.startswith(prefix)]
+	assert names
+	return any(not torch.equal(before[name], after[name]) for name in names)
+
+
+def _assert_decoder_state_unchanged(
+	before: Mapping[str, torch.Tensor],
+	after: Mapping[str, torch.Tensor],
+) -> None:
+	names = [
+		name
+		for name in before
+		if not name.startswith(('patch_projection.', 'encoder.'))
+	]
+	assert names
+	assert all(torch.equal(before[name], after[name]) for name in names)
