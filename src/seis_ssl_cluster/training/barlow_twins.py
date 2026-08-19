@@ -26,6 +26,10 @@ from seis_ssl_cluster.training.barlow_twins_checkpoint import (
 	save_barlow_twins_checkpoint,
 	update_best_checkpoint,
 )
+from seis_ssl_cluster.training.barlow_twins_continuation import (
+	configure_barlow_twins_continuation_trainability,
+	load_barlow_twins_continuation_weights,
+)
 from seis_ssl_cluster.training.collate import move_batch_to_device
 from seis_ssl_cluster.training.dataloaders import build_barlow_twins_dataloader
 from seis_ssl_cluster.training.logging import print_epoch_metrics
@@ -81,7 +85,11 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 		(*_LOSS_METRICS, 'gradient_norm', 'learning_rate', 'step_time_seconds'),
 		0.0,
 	)
-	parameters = tuple(model.pretraining_parameters())
+	parameters = tuple(
+		parameter
+		for parameter in model.pretraining_parameters()
+		if parameter.requires_grad
+	)
 	if device.type == 'cuda':
 		torch.cuda.reset_peak_memory_stats(device)
 	batches = 0
@@ -168,6 +176,9 @@ def run_barlow_twins_pretraining(
 	data = _mapping(config, 'data')
 	barlow = _mapping(config, 'barlow_twins')
 	augmentations = _mapping(config, 'augmentations')
+	continuation = (
+		_mapping(config, 'continuation') if 'continuation' in config else None
+	)
 	device = _resolve_device(train)
 	seed = _integer(train, 'seed')
 	_seed_everything(seed, device=device)
@@ -179,15 +190,9 @@ def run_barlow_twins_pretraining(
 	)
 
 	output_root = Path(_string(_mapping(config, 'paths'), 'output_root'))
-	_prepare_run_directory(
-		output_root,
-		resume=resume,
-		allow_overwrite=_boolean(train, 'allow_overwrite_output'),
-	)
 	manifests = read_manifest_json(
 		Path(_string(_mapping(config, 'manifests'), 'train'))
 	)
-	_write_json(output_root / 'resolved_config.json', config)
 
 	base_dataset = AmplitudePretrainDataset(
 		manifests,
@@ -229,8 +234,15 @@ def run_barlow_twins_pretraining(
 		redundancy_weight=_floating(barlow, 'redundancy_weight'),
 		normalization_eps=_floating(barlow, 'normalization_eps'),
 	)
+	optimizer_parameters = _initialize_barlow_twins_model(
+		model,
+		continuation=continuation,
+		resume=resume,
+		model_config=model_config,
+		barlow_twins_config=barlow,
+	)
 	optimizer = torch.optim.AdamW(
-		model.pretraining_parameters(),
+		optimizer_parameters,
 		lr=_floating(train, 'lr'),
 		weight_decay=_floating(train, 'weight_decay'),
 	)
@@ -247,6 +259,12 @@ def run_barlow_twins_pretraining(
 			dataloader_generator=dataloader.generator,
 		)
 
+	_prepare_run_directory(
+		output_root,
+		resume=resume,
+		allow_overwrite=_boolean(train, 'allow_overwrite_output'),
+	)
+	_write_json(output_root / 'resolved_config.json', config)
 	history = _read_history(output_root / 'history.json') if resume else []
 	best_loss = _existing_best_loss(output_root / 'best.pt')
 	global_step = resume_state.global_step
@@ -304,6 +322,29 @@ def run_barlow_twins_pretraining(
 	if checkpoint_path is None:
 		raise ValueError('no Barlow Twins training epochs were run')
 	return checkpoint_path
+
+
+def _initialize_barlow_twins_model(
+	model: BarlowTwins3D,
+	*,
+	continuation: Mapping[str, object] | None,
+	resume: str | Path | None,
+	model_config: Mapping[str, object],
+	barlow_twins_config: Mapping[str, object],
+) -> tuple[torch.nn.Parameter, ...]:
+	if continuation is None:
+		return tuple(model.pretraining_parameters())
+	if resume is None:
+		load_barlow_twins_continuation_weights(
+			model,
+			_string(continuation, 'init_checkpoint'),
+			expected_model_config=model_config,
+			expected_barlow_twins_config=barlow_twins_config,
+		)
+	return configure_barlow_twins_continuation_trainability(
+		model,
+		unfreeze_top_blocks=_integer(continuation, 'unfreeze_top_blocks'),
+	)
 
 
 def _clip_and_check_gradients(

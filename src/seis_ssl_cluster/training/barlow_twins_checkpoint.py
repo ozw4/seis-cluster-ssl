@@ -53,6 +53,7 @@ _COMPATIBILITY_SECTIONS = (
 	'model',
 	'augmentations',
 	'barlow_twins',
+	'continuation',
 )
 _ALLOWED_TRAIN_OVERRIDES = frozenset(
 	{'epochs', 'max_steps', 'device', 'allow_overwrite_output'}

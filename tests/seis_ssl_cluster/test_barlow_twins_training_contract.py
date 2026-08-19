@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from typing import TYPE_CHECKING
+from pathlib import Path
 from unittest.mock import Mock
 
 import numpy as np
@@ -11,6 +11,7 @@ import pytest
 import torch
 
 import seis_ssl_cluster.data.amplitude_dataset as amplitude_dataset_module
+import seis_ssl_cluster.training.barlow_twins as barlow_twins_module
 from seis_ssl_cluster.config import resolve_barlow_twins_training_config
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
@@ -30,10 +31,6 @@ from seis_ssl_cluster.training.barlow_twins_checkpoint import (
 	load_barlow_twins_checkpoint,
 	restore_barlow_twins_checkpoint,
 )
-
-if TYPE_CHECKING:
-	from pathlib import Path
-
 
 DIAGNOSTIC_METRICS = {
 	'projection_std_mean',
@@ -149,6 +146,190 @@ def test_checkpoint_contract_round_trip_and_epoch_resume(
 	assert all(set(row) >= DIAGNOSTIC_METRICS for row in history)
 
 
+def test_continuation_fresh_and_stage2_resume_contract(  # noqa: PLR0915
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	stage1_config = resolve_barlow_twins_training_config(
+		_tiny_config(
+			tmp_path,
+			epochs=2,
+			max_steps=2,
+			output_name='stage1',
+			encoder_depth=2,
+		)
+	)
+	stage1_path = run_barlow_twins_pretraining(stage1_config)
+	stage1 = load_barlow_twins_checkpoint(stage1_path, map_location='cpu')
+	stage1_backbone = _clone_tensor_state(stage1, 'model_state_dict')
+	stage1_projector = _clone_tensor_state(stage1, 'projector_state_dict')
+	assert stage1['epoch'] == 2
+	assert stage1['global_step'] == 2
+	assert _optimizer_steps(stage1) == {2}
+
+	stage2_config = resolve_barlow_twins_training_config(
+		_continuation_config(
+			tmp_path,
+			source_checkpoint=stage1_path,
+			output_name='stage2',
+			training_steps=1,
+			unfreeze_top_blocks=1,
+		)
+	)
+	stage2_path = run_barlow_twins_pretraining(stage2_config)
+	stage2 = load_barlow_twins_checkpoint(stage2_path, map_location='cpu')
+	stage2_backbone = _clone_tensor_state(stage2, 'model_state_dict')
+	stage2_projector = _clone_tensor_state(stage2, 'projector_state_dict')
+
+	assert stage2['epoch'] == 1
+	assert stage2['global_step'] == 1
+	assert _optimizer_steps(stage2) == {1}
+	assert stage2['config']['continuation'] == {
+		'init_checkpoint': str(stage1_path),
+		'unfreeze_top_blocks': 1,
+	}
+	assert all(np.isfinite(value) for value in stage2['metrics'].values())
+	assert [
+		row['global_step']
+		for row in json.loads(
+			(stage2_path.parent / 'history.json').read_text(encoding='utf-8')
+		)
+	] == [1]
+	_assert_state_prefix_unchanged(
+		stage1_backbone,
+		stage2_backbone,
+		'patch_projection.',
+	)
+	_assert_state_prefix_unchanged(
+		stage1_backbone,
+		stage2_backbone,
+		'encoder.layers.0.',
+	)
+	assert _state_prefix_changed(
+		stage1_backbone,
+		stage2_backbone,
+		'encoder.layers.1.',
+	)
+	projector_parameter_names = {
+		name for name, _parameter in _backbone_wrapper().projector.named_parameters()
+	}
+	assert any(
+		not torch.equal(stage1_projector[name], stage2_projector[name])
+		for name in projector_parameter_names
+	)
+	for prefix in (
+		'mask_token',
+		'encoder_to_decoder.',
+		'decoder.',
+		'prediction_head.',
+	):
+		_assert_state_prefix_unchanged(
+			stage1_backbone,
+			stage2_backbone,
+			prefix,
+		)
+
+	def unexpected_source_load(*args: object, **kwargs: object) -> None:
+		del args, kwargs
+		raise AssertionError('Stage 1 source must not be loaded during Stage 2 resume')
+
+	source_loader = barlow_twins_module.load_barlow_twins_continuation_weights
+	monkeypatch.setattr(
+		barlow_twins_module,
+		'load_barlow_twins_continuation_weights',
+		unexpected_source_load,
+	)
+	resume_config = resolve_barlow_twins_training_config(
+		_continuation_config(
+			tmp_path,
+			source_checkpoint=stage1_path,
+			output_name='stage2',
+			training_steps=2,
+			unfreeze_top_blocks=1,
+		)
+	)
+	resumed_path = run_barlow_twins_pretraining(
+		resume_config,
+		resume=stage2_path,
+	)
+	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
+	assert resumed['epoch'] == 2
+	assert resumed['global_step'] == 2
+	assert _optimizer_steps(resumed) == {2}
+	assert [
+		row['global_step']
+		for row in json.loads(
+			(resumed_path.parent / 'history.json').read_text(encoding='utf-8')
+		)
+	] == [1, 2]
+
+	for name, source_checkpoint, unfreeze_top_blocks, match in (
+		(
+			'source-mismatch',
+			'/different/stage1/latest.pt',
+			1,
+			'continuation',
+		),
+		('top-block-mismatch', str(stage1_path), 2, 'continuation'),
+	):
+		invalid_config = resolve_barlow_twins_training_config(
+			_continuation_config(
+				tmp_path,
+				source_checkpoint=source_checkpoint,
+				output_name=name,
+				training_steps=3,
+				unfreeze_top_blocks=unfreeze_top_blocks,
+			)
+		)
+		invalid_output = Path(invalid_config['paths']['output_root'])  # type: ignore[index]
+		with pytest.raises(ValueError, match=match):
+			run_barlow_twins_pretraining(
+				invalid_config,
+				resume=resumed_path,
+			)
+		assert not invalid_output.exists()
+
+	stage1_resume_config = resolve_barlow_twins_training_config(
+		_continuation_config(
+			tmp_path,
+			source_checkpoint=stage1_path,
+			output_name='stage1-as-stage2-resume',
+			training_steps=3,
+			unfreeze_top_blocks=1,
+		)
+	)
+	stage1_resume_output = Path(  # type: ignore[arg-type]
+		stage1_resume_config['paths']['output_root'],  # type: ignore[index]
+	)
+	with pytest.raises(ValueError, match='continuation'):
+		run_barlow_twins_pretraining(
+			stage1_resume_config,
+			resume=stage1_path,
+		)
+	assert not stage1_resume_output.exists()
+
+	missing_source_config = resolve_barlow_twins_training_config(
+		_continuation_config(
+			tmp_path,
+			source_checkpoint=tmp_path / 'missing-source.pt',
+			output_name='missing-source',
+			training_steps=1,
+			unfreeze_top_blocks=1,
+		)
+	)
+	missing_source_output = Path(  # type: ignore[arg-type]
+		missing_source_config['paths']['output_root'],  # type: ignore[index]
+	)
+	monkeypatch.setattr(
+		barlow_twins_module,
+		'load_barlow_twins_continuation_weights',
+		source_loader,
+	)
+	with pytest.raises(FileNotFoundError, match='checkpoint file does not exist'):
+		run_barlow_twins_pretraining(missing_source_config)
+	assert not missing_source_output.exists()
+
+
 def test_epoch_rejects_nonfinite_loss_before_optimizer_step() -> None:
 	model = _backbone_wrapper()
 	optimizer = torch.optim.SGD(model.pretraining_parameters(), lr=0.1)
@@ -176,8 +357,10 @@ def test_epoch_checks_and_records_preclip_gradient_norm(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	model = _backbone_wrapper()
+	model.backbone.patch_projection.requires_grad_(requires_grad=False)
 	optimizer = torch.optim.SGD(model.pretraining_parameters(), lr=0.025)
 	calls: list[tuple[float, bool]] = []
+	clipped_parameter_ids: set[int] = set()
 
 	def fake_clip_grad_norm_(
 		parameters: object,
@@ -185,7 +368,8 @@ def test_epoch_checks_and_records_preclip_gradient_norm(
 		*,
 		error_if_nonfinite: bool,
 	) -> torch.Tensor:
-		list(parameters)  # type: ignore[arg-type]
+		parameter_list = list(parameters)  # type: ignore[arg-type]
+		clipped_parameter_ids.update(id(parameter) for parameter in parameter_list)
 		calls.append((max_norm, error_if_nonfinite))
 		return torch.tensor(0.75)
 
@@ -201,6 +385,11 @@ def test_epoch_checks_and_records_preclip_gradient_norm(
 	)
 
 	assert calls == [(1.5, True)]
+	assert clipped_parameter_ids == {
+		id(parameter)
+		for parameter in model.pretraining_parameters()
+		if parameter.requires_grad
+	}
 	assert state.metrics['gradient_norm'] == pytest.approx(0.75)
 	assert state.metrics['learning_rate'] == pytest.approx(0.025)
 	assert state.metrics['step_time_seconds'] > 0.0
@@ -266,6 +455,8 @@ def _tiny_config(
 	*,
 	epochs: int = 1,
 	max_steps: int = 1,
+	output_name: str = 'run',
+	encoder_depth: int = 1,
 ) -> dict[str, object]:
 	manifest_path = _write_synthetic_manifest(tmp_path / 'survey')
 	path_list = tmp_path / 'train_npy_paths.txt'
@@ -273,7 +464,7 @@ def _tiny_config(
 	return {
 		'paths': {
 			'artifact_root': str(tmp_path / 'artifacts'),
-			'output_root': str(tmp_path / 'artifacts' / 'run'),
+			'output_root': str(tmp_path / 'artifacts' / output_name),
 		},
 		'manifests': {
 			'train': str(manifest_path),
@@ -284,7 +475,7 @@ def _tiny_config(
 		'model': {
 			'patch_size': [2, 2, 2],
 			'encoder_dim': 4,
-			'encoder_depth': 1,
+			'encoder_depth': encoder_depth,
 			'encoder_heads': 1,
 			'decoder_dim': 4,
 			'decoder_depth': 1,
@@ -306,6 +497,79 @@ def _tiny_config(
 			'max_steps': max_steps,
 		},
 	}
+
+
+def _continuation_config(
+	tmp_path: Path,
+	*,
+	source_checkpoint: str | Path,
+	output_name: str,
+	training_steps: int,
+	unfreeze_top_blocks: int,
+) -> dict[str, object]:
+	config = _tiny_config(
+		tmp_path,
+		epochs=training_steps,
+		max_steps=training_steps,
+		output_name=output_name,
+		encoder_depth=2,
+	)
+	config['continuation'] = {
+		'init_checkpoint': str(source_checkpoint),
+		'unfreeze_top_blocks': unfreeze_top_blocks,
+	}
+	return config
+
+
+def _clone_tensor_state(
+	payload: dict[str, object],
+	key: str,
+) -> dict[str, torch.Tensor]:
+	state = payload[key]
+	assert isinstance(state, dict)
+	assert all(
+		isinstance(name, str) and isinstance(value, torch.Tensor)
+		for name, value in state.items()
+	)
+	return {
+		str(name): value.detach().clone()
+		for name, value in state.items()
+		if isinstance(value, torch.Tensor)
+	}
+
+
+def _optimizer_steps(payload: dict[str, object]) -> set[int]:
+	optimizer_state = payload['optimizer_state_dict']
+	assert isinstance(optimizer_state, dict)
+	state = optimizer_state['state']
+	assert isinstance(state, dict)
+	steps = set()
+	for parameter_state in state.values():
+		assert isinstance(parameter_state, dict)
+		step = parameter_state['step']
+		assert isinstance(step, int | float | torch.Tensor)
+		steps.add(int(step))
+	return steps
+
+
+def _assert_state_prefix_unchanged(
+	before: dict[str, torch.Tensor],
+	after: dict[str, torch.Tensor],
+	prefix: str,
+) -> None:
+	names = [name for name in before if name.startswith(prefix)]
+	assert names
+	assert all(torch.equal(before[name], after[name]) for name in names)
+
+
+def _state_prefix_changed(
+	before: dict[str, torch.Tensor],
+	after: dict[str, torch.Tensor],
+	prefix: str,
+) -> bool:
+	names = [name for name in before if name.startswith(prefix)]
+	assert names
+	return any(not torch.equal(before[name], after[name]) for name in names)
 
 
 def _backbone() -> AmplitudeMAE3D:
