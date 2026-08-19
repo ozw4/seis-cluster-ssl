@@ -21,6 +21,9 @@ from seis_ssl_cluster.data import (
 	write_manifest_json,
 	write_normalization_stats,
 )
+from seis_ssl_cluster.models.amplitude_encoder_factory import (
+	build_model_from_checkpoint_payload,
+)
 from seis_ssl_cluster.models.barlow_twins import BarlowTwins3D, BarlowTwinsLoss
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training.barlow_twins import (
@@ -189,6 +192,11 @@ def test_continuation_fresh_and_stage2_resume_contract(  # noqa: PLR0915
 		'unfreeze_top_blocks': 1,
 	}
 	assert all(np.isfinite(value) for value in stage2['metrics'].values())
+	loaded_encoder = build_model_from_checkpoint_payload(stage2)
+	loaded_encoder_state = loaded_encoder.state_dict()
+	for name, expected in stage2['model_state_dict'].items():
+		assert torch.equal(loaded_encoder_state[name], expected)
+	assert set(stage2['projector_state_dict']).isdisjoint(loaded_encoder_state)
 	assert [
 		row['global_step']
 		for row in json.loads(
