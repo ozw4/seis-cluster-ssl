@@ -176,6 +176,20 @@ def _add_training_rows(
 			('loss.reconstruction', loss.get('reconstruction')),
 		],
 	)
+	if 'continuation' in cfg:
+		continuation = _mapping(cfg.get('continuation'))
+		rows.extend(
+			[
+				(
+					'continuation.init_checkpoint',
+					continuation.get('init_checkpoint'),
+				),
+				(
+					'continuation.unfreeze_top_blocks',
+					continuation.get('unfreeze_top_blocks'),
+				),
+			],
+		)
 	if 'huber_delta' in loss:
 		rows.append(('loss.huber_delta', loss.get('huber_delta')))
 	target_normalization = _mapping(loss.get('target_normalization'))

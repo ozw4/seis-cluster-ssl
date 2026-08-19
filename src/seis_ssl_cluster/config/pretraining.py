@@ -94,6 +94,7 @@ _AMPLITUDE_AGC_KEYS = frozenset(
 )
 _AMPLITUDE_AGC_ENABLED_REQUIRED_KEYS = _AMPLITUDE_AGC_KEYS
 _MAE_TRAINING_VISUALIZATION_KEYS = frozenset({'mae_debug'})
+_CONTINUATION_KEYS = frozenset({'init_checkpoint', 'unfreeze_top_blocks'})
 
 _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 	'manifests': frozenset({'train', 'train_path_list', 'canonical_input_metadata'}),
@@ -772,6 +773,11 @@ def resolve_mae_training_config(config: _T) -> Config:
 		prefix='model',
 	)
 	_validate_model(model)
+	if 'continuation' in resolved:
+		_validate_continuation(
+			_required_mapping(resolved, 'continuation'),
+			encoder_depth=int(model['encoder_depth']),
+		)
 	_validate_divisible_crop_patch(local_crop_size, patch_size)
 	_validate_output_path(
 		output_root,
@@ -3634,6 +3640,40 @@ def _validate_model(model: Mapping[str, object]) -> None:
 		'decoder_heads',
 	):
 		_validate_positive_int(model, key, prefix='model')
+
+
+def _validate_continuation(
+	continuation: Mapping[str, object],
+	*,
+	encoder_depth: int,
+) -> None:
+	_validate_allowed_keys(
+		continuation,
+		_CONTINUATION_KEYS,
+		prefix='continuation',
+	)
+	_validate_required_keys(
+		continuation,
+		_CONTINUATION_KEYS,
+		prefix='continuation',
+	)
+	_validate_absolute_path(
+		continuation,
+		'init_checkpoint',
+		prefix='continuation',
+	)
+	_validate_positive_int(
+		continuation,
+		'unfreeze_top_blocks',
+		prefix='continuation',
+	)
+	unfreeze_top_blocks = int(continuation['unfreeze_top_blocks'])
+	if unfreeze_top_blocks > encoder_depth:
+		msg = (
+			'continuation.unfreeze_top_blocks must be less than or equal to '
+			f'model.encoder_depth ({encoder_depth}); got {unfreeze_top_blocks}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_masking(masking: Mapping[str, object]) -> None:

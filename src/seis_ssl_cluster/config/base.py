@@ -61,6 +61,7 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 			'data',
 			'zero_mask',
 			'model',
+			'continuation',
 			'masking',
 			'loss',
 			'train',

@@ -129,6 +129,8 @@ def test_proc_script_dry_run_exits_zero_and_prints_summary(
 	elif script_path == Path('proc/seis_ssl_cluster/train_amp_mae.py'):
 		assert 'model.encoder_depth:' in result.stdout
 		assert 'loss.gradient_weight:' in result.stdout
+		assert 'continuation.init_checkpoint:' not in result.stdout
+		assert 'continuation.unfreeze_top_blocks:' not in result.stdout
 		assert 'execution: dry-run; training skipped' in result.stdout
 	elif script_path == Path('proc/seis_ssl_cluster/extract_embeddings.py'):
 		assert 'manifests.input:' in result.stdout
@@ -310,6 +312,41 @@ def test_train_amp_mae_dry_run_prints_enabled_mae_debug_summary(
 	assert 'visualization.mae_debug.every_steps: 25' in result.stdout
 	assert 'visualization.mae_debug.every_epochs: null' in result.stdout
 	assert 'visualization.mae_debug.panel_width:' not in result.stdout
+
+
+def test_train_amp_mae_dry_run_prints_continuation_summary(
+	tmp_path: Path,
+) -> None:
+	config_path = tmp_path / 'continuation.yaml'
+	config_path.write_text(
+		Path('proc/configs/seis_ssl_cluster/train_amp_mae.yaml').read_text(
+			encoding='utf-8',
+		)
+		+ """
+continuation:
+  init_checkpoint: ${MAE_CONTINUATION_CHECKPOINT}
+  unfreeze_top_blocks: 1
+""",
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_mae.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+		extra_env={
+			'MAE_CONTINUATION_CHECKPOINT': '/checkpoints/mae/latest.pt',
+		},
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert (
+		'continuation.init_checkpoint: /checkpoints/mae/latest.pt'
+		in result.stdout
+	)
+	assert 'continuation.unfreeze_top_blocks: 1' in result.stdout
+	assert 'execution: dry-run; training skipped' in result.stdout
 
 
 @pytest.mark.parametrize(

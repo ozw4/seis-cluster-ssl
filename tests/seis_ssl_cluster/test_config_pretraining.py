@@ -11,11 +11,100 @@ def test_pretraining_config_resolves_from_stage_module() -> None:
 	resolved = resolve_mae_training_config(_minimal_training_config())
 
 	assert resolved['stage'] == 'train_amp_mae'
+	assert 'continuation' not in resolved
 	assert resolved['data']['amplitude_agc'] == {'enabled': False}
 	assert resolved['data']['finite_check_mode'] == 'strict'
 	assert resolved['loss']['visible_reconstruction_weight'] == 0.0
 	assert resolved['loss']['target_normalization'] == {'mode': 'none'}
 	assert resolved['train']['runtime_check_mode'] == 'once'
+
+
+def test_pretraining_config_accepts_continuation() -> None:
+	cfg = _minimal_training_config()
+	cfg['continuation'] = {
+		'init_checkpoint': '/checkpoints/mae/latest.pt',
+		'unfreeze_top_blocks': 1,
+	}
+
+	resolved = resolve_mae_training_config(cfg)
+
+	assert resolved['continuation'] == cfg['continuation']
+
+
+@pytest.mark.parametrize(
+	('continuation', 'error', 'message'),
+	[
+		(
+			{
+				'init_checkpoint': 'checkpoints/latest.pt',
+				'unfreeze_top_blocks': 1,
+			},
+			ValueError,
+			r'continuation\.init_checkpoint must be an absolute path',
+		),
+		(
+			{'init_checkpoint': '', 'unfreeze_top_blocks': 1},
+			TypeError,
+			r'continuation\.init_checkpoint must be a non-empty string',
+		),
+		(
+			{
+				'init_checkpoint': '/checkpoints/latest.pt',
+				'unfreeze_top_blocks': 1,
+				'optimizer': '/checkpoints/optimizer.pt',
+			},
+			ValueError,
+			r'continuation key\(s\) not allowed',
+		),
+		(
+			{'unfreeze_top_blocks': 1},
+			ValueError,
+			r'continuation\.init_checkpoint is required',
+		),
+		(
+			{'init_checkpoint': '/checkpoints/latest.pt'},
+			ValueError,
+			r'continuation\.unfreeze_top_blocks is required',
+		),
+		(
+			{
+				'init_checkpoint': '/checkpoints/latest.pt',
+				'unfreeze_top_blocks': 0,
+			},
+			ValueError,
+			r'continuation\.unfreeze_top_blocks must be a positive integer',
+		),
+		(
+			{
+				'init_checkpoint': '/checkpoints/latest.pt',
+				'unfreeze_top_blocks': True,
+			},
+			ValueError,
+			r'continuation\.unfreeze_top_blocks must be a positive integer',
+		),
+		(
+			{
+				'init_checkpoint': '/checkpoints/latest.pt',
+				'unfreeze_top_blocks': 9,
+			},
+			ValueError,
+			(
+				r'continuation\.unfreeze_top_blocks must be less than or equal to '
+				r'model\.encoder_depth \(8\)'
+			),
+		),
+	],
+)
+def test_pretraining_config_rejects_invalid_continuation(
+	continuation: dict[str, object],
+	error: type[Exception],
+	message: str,
+) -> None:
+	cfg = _minimal_training_config()
+	cfg['continuation'] = continuation
+
+	with pytest.raises(error, match=message):
+		resolve_mae_training_config(cfg)
 
 
 def test_pretraining_config_accepts_enabled_agc() -> None:
