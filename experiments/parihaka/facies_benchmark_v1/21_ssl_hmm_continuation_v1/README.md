@@ -4,6 +4,17 @@
 
 Parihaka固有の3D MAEと3D Barlow Twinsを同じ学習予算で事前学習し、HMM second-stage pretrainingの初期重みを作成する。
 
+## Paired HMM-K6
+
+target生成からHMM25、live artifact、bare encoder consumerまでの実行・監査手順は[RUNBOOK_HMM_K6.md](RUNBOOK_HMM_K6.md)にまとめる。
+
+| Phase 1条件 | target source | teacher / student初期値 | Stage 2 objective | 固定予算の主checkpoint |
+| --- | --- | --- | --- | --- |
+| MAE100 → HMM-K6 25 | MAE100 `latest.pt` | MAE100 `latest.pt` | single-head HMM K=6 | HMM `full_25ep/latest.pt` |
+| BT100 → HMM-K6 25 | BT100 `latest.pt` | BT100 `latest.pt` | single-head HMM K=6 | HMM `full_25ep/latest.pt` |
+| MAE100 → MAE25 control | なし | MAE100 `latest.pt` | MAE reconstruction | MAE25 `full_25ep/latest.pt` |
+| BT100 → BT25 control | なし | BT100 `latest.pt` | Barlow Twins | BT25 `full_25ep/latest.pt` |
+
 ## 学習条件
 
 両methodの共通条件は次のとおりである。
