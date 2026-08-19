@@ -12,6 +12,7 @@ from seis_ssl_cluster.config import (
 	resolve_clustering_config,
 	resolve_embedding_extraction_config,
 )
+from seis_ssl_cluster.stratigraphy import pseudo_target_paths
 
 TARGET_ROOT = Path(
 	'experiments/parihaka/facies_benchmark_v1/'
@@ -218,6 +219,7 @@ def test_export_scripts_are_paired_and_export_only(
 	}
 
 	pseudo_target_roots = set()
+	pseudo_target_directories = set()
 	for variant, args in arguments.items():
 		assert args['--clustering-output-dir'] == clustering_configs[variant][
 			'clustering'
@@ -225,10 +227,16 @@ def test_export_scripts_are_paired_and_export_only(
 		expected_pseudo_root = (
 			artifact_root
 			/ 'pseudo_targets/parihaka/facies_benchmark_v1'
-			/ f'ssl_hmm_continuation_v1/{variant}/k6'
+			/ f'ssl_hmm_continuation_v1/{variant}'
 		)
-		assert Path(args['--pseudo-target-root']) == expected_pseudo_root
+		export_root = Path(args['--pseudo-target-root'])
+		assert export_root == expected_pseudo_root
 		pseudo_target_roots.add(expected_pseudo_root)
+		paths = pseudo_target_paths(export_root, k=6, survey_id='survey')
+		assert paths.labels.parent == expected_pseudo_root / 'k6'
+		assert paths.labels.parent.parent.name == variant
+		assert paths.labels.parent != expected_pseudo_root / 'k6' / 'k6'
+		pseudo_target_directories.add(paths.labels.parent)
 		assert args['--k'] == '6'
 		assert args['--confidence'] == '1.0'
 		assert args['--boundary-alpha'] == '0.0'
@@ -236,6 +244,7 @@ def test_export_scripts_are_paired_and_export_only(
 		assert args['--schema-version'] == '2'
 
 	assert len(pseudo_target_roots) == 2
+	assert len(pseudo_target_directories) == 2
 	paired_flags = {
 		'--k',
 		'--confidence',

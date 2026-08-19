@@ -23,8 +23,8 @@ export HMM_CONFIGS="$SUITE/30_stage2"
 export ARTIFACT_SUITE="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1"
 export MAE100="$ARTIFACT_SUITE/stage1/mae/full_100ep/latest.pt"
 export BT100="$ARTIFACT_SUITE/stage1/barlow_twins/full_100ep/latest.pt"
-export MAE_TARGET_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/mae100/k6"
-export BT_TARGET_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/bt100/k6"
+export MAE_TARGET_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/mae100"
+export BT_TARGET_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/bt100"
 export MAE_HMM25="$ARTIFACT_SUITE/stage2/mae100/hmm/k6/full_25ep/latest.pt"
 export BT_HMM25="$ARTIFACT_SUITE/stage2/bt100/hmm/k6/full_25ep/latest.pt"
 ```
@@ -151,7 +151,7 @@ python proc/seis_ssl_cluster/cluster_embeddings.py \
 
 ## 6. pseudo target export
 
-各export scriptと同じ引数へ`--dry-run`を追加して入力を検証し、その後scriptを実行する。
+各export scriptと同じ引数へ`--dry-run`を追加して入力を検証し、その後scriptを実行する。`--pseudo-target-root`にはbase固有root（`mae100` / `bt100`）を渡す。pseudo-target APIがK固有directoryを追加するため、実artifactはそれぞれ`$MAE_TARGET_ROOT/k6`と`$BT_TARGET_ROOT/k6`に生成される。
 
 ```bash
 python proc/seis_ssl_cluster/export_strat_hmm_pseudo_targets.py \
@@ -179,7 +179,7 @@ bash "$TARGET_CONFIGS/bt100/k6/03_export_pseudo_targets.sh"
 
 ## 7. target live監査
 
-公開pseudo-target discovery/load APIで両rootを検証する。shape、label mask、confidence、boundary weightのschema validationはloader内でも実行される。occupancyとz方向の隣接境界数は表示するが、最小占有率は設定せず、空stateだけを失敗とする。
+公開pseudo-target discovery/load APIで両base rootを検証する。`discover_pseudo_target_inputs(root, k=6)`が検索する実directoryは`root/k6`である。shape、label mask、confidence、boundary weightのschema validationはloader内でも実行される。occupancyとz方向の隣接境界数は表示するが、最小占有率は設定せず、空stateだけを失敗とする。
 
 ```bash
 python - \
@@ -373,7 +373,9 @@ Stage 1 `latest.pt`はweights-onlyのteacher/student sourceであり、`--resume
 両HMM25 checkpointを対応するStage 1 sourceと比較する。frozen backbone/decoderの完全一致、top blockとheadの変化、fresh optimizerの15,625 stepを確認する。
 
 ```bash
-python - "$MAE100" "$MAE_HMM25" "$BT100" "$BT_HMM25" <<'PY'
+python - \
+  "$MAE100" "$MAE_HMM25" "$MAE_TARGET_ROOT" \
+  "$BT100" "$BT_HMM25" "$BT_TARGET_ROOT" <<'PY'
 import math
 from pathlib import Path
 import sys
@@ -384,9 +386,10 @@ from seis_ssl_cluster.training import load_checkpoint
 from seis_ssl_cluster.training.strat_hmm import build_strat_hmm_components
 
 
-def audit(source_text: str, hmm_text: str, *, target_fragment: str) -> None:
+def audit(source_text: str, hmm_text: str, target_root_text: str) -> None:
     source_path = Path(source_text)
     hmm_path = Path(hmm_text)
+    target_root = Path(target_root_text)
     assert source_path.is_file(), source_path
     assert hmm_path.is_file(), hmm_path
     assert hmm_path.name == 'latest.pt'
@@ -406,7 +409,7 @@ def audit(source_text: str, hmm_text: str, *, target_fragment: str) -> None:
     assert config['loss']['distillation_weight'] == 0.2
     assert Path(config['teacher']['checkpoint']).resolve() == source_path.resolve()
     assert Path(config['student']['init_checkpoint']).resolve() == source_path.resolve()
-    assert target_fragment in config['pseudo_targets']['input_dir']
+    assert Path(config['pseudo_targets']['input_dir']).resolve() == target_root.resolve()
     assert all(math.isfinite(float(value)) for value in hmm['metrics'].values())
 
     source_state = source['model_state_dict']
@@ -455,8 +458,8 @@ def audit(source_text: str, hmm_text: str, *, target_fragment: str) -> None:
     print(f'full PASS: {hmm_path}')
 
 
-audit(sys.argv[1], sys.argv[2], target_fragment='/mae100/k6')
-audit(sys.argv[3], sys.argv[4], target_fragment='/bt100/k6')
+audit(sys.argv[1], sys.argv[2], sys.argv[3])
+audit(sys.argv[4], sys.argv[5], sys.argv[6])
 PY
 ```
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from seis_ssl_cluster.stratigraphy import pseudo_target_paths
+
 SUITE_ROOT = Path(
 	'experiments/parihaka/facies_benchmark_v1/'
 	'21_ssl_hmm_continuation_v1'
@@ -81,14 +83,6 @@ def test_hmm_k6_runbook_fixes_source_target_and_resume_bindings() -> None:
 	for binding in (
 		'stage1/mae/full_100ep/latest.pt',
 		'stage1/barlow_twins/full_100ep/latest.pt',
-		(
-			'pseudo_targets/parihaka/facies_benchmark_v1/'
-			'ssl_hmm_continuation_v1/mae100/k6'
-		),
-		(
-			'pseudo_targets/parihaka/facies_benchmark_v1/'
-			'ssl_hmm_continuation_v1/bt100/k6'
-		),
 		'stage2/mae100/hmm/k6/full_25ep/latest.pt',
 		'stage2/bt100/hmm/k6/full_25ep/latest.pt',
 	):
@@ -99,6 +93,27 @@ def test_hmm_k6_runbook_fixes_source_target_and_resume_bindings() -> None:
 	assert 'Stage 1 `latest.pt`はweights-only' in text
 	assert 'MAE25 / BT25 controlも`--resume`へ渡さない' in text
 	assert '`best.pt`は診断専用' in text
+
+
+def test_hmm_k6_runbook_uses_base_pseudo_target_roots() -> None:
+	text = RUNBOOK.read_text(encoding='utf-8')
+	for variable, variant in (
+		('MAE_TARGET_ROOT', 'mae100'),
+		('BT_TARGET_ROOT', 'bt100'),
+	):
+		pattern = rf'export {variable}="\$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/(.+)"'
+		match = re.search(pattern, text)
+		assert match is not None
+		root = Path('/artifact-root') / match.group(1)
+		assert root.name == variant
+		assert root.name != 'k6'
+		paths = pseudo_target_paths(root, k=6, survey_id='survey')
+		assert paths.labels.parent == root / 'k6'
+		assert paths.labels.parent != root / 'k6' / 'k6'
+		assert f'--pseudo-target-root "${variable}"' in text
+
+	assert '$MAE_TARGET_ROOT/k6' in text
+	assert '$BT_TARGET_ROOT/k6' in text
 
 
 def test_hmm_k6_runbook_uses_existing_clis_and_live_audit_apis() -> None:

@@ -30,7 +30,7 @@ model:
   decoder_depth: 4
   decoder_heads: 4
 pseudo_targets:
-  input_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/mae100/k6
+  input_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/mae100
   k: 6
   min_confidence: 0.0
 teacher:

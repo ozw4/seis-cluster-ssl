@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from seis_ssl_cluster.config import load_config, resolve_strat_hmm_pretext_config
+from seis_ssl_cluster.stratigraphy import pseudo_target_paths
 
 SUITE_ROOT = Path(
 	'experiments/parihaka/facies_benchmark_v1/'
@@ -137,7 +138,7 @@ def test_hmm_k6_configs_bind_each_base_to_its_own_source_and_targets(
 	expected_targets = {
 		variant: artifact_root
 		/ 'pseudo_targets/parihaka/facies_benchmark_v1'
-		/ f'ssl_hmm_continuation_v1/{variant}/k6'
+		/ f'ssl_hmm_continuation_v1/{variant}'
 		for variant in VARIANTS
 	}
 
@@ -150,6 +151,11 @@ def test_hmm_k6_configs_bind_each_base_to_its_own_source_and_targets(
 			assert teacher == student == expected_sources[variant]
 			assert teacher.name == 'latest.pt'
 			assert targets == expected_targets[variant]
+			paths = pseudo_target_paths(targets, k=6, survey_id='survey')
+			assert paths.labels.parent == expected_targets[variant] / 'k6'
+			assert paths.labels.parent != expected_targets[variant] / 'k6' / 'k6'
+			assert paths.labels.parent.name == 'k6'
+			assert paths.labels.parent.parent.name == variant
 
 
 def test_hmm_k6_training_budgets_are_one_step_and_25_epochs(
@@ -234,8 +240,8 @@ def test_hmm_k6_output_roots_are_unique_and_isolated(
 			('embeddings', 'hmm_targets/bt100/k6/overlap_x64'),
 			('clustering', 'hmm_targets/mae100/k6'),
 			('clustering', 'hmm_targets/bt100/k6'),
-			('pseudo_targets', 'mae100/k6'),
-			('pseudo_targets', 'bt100/k6'),
+			('pseudo_targets', 'mae100'),
+			('pseudo_targets', 'bt100'),
 		)
 	}
 
