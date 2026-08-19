@@ -34,6 +34,7 @@ _MAE_ALLOWED_TOP_LEVEL = frozenset(
 		'manifests',
 		'data',
 		'model',
+		'continuation',
 		'masking',
 		'loss',
 		'train',
@@ -55,6 +56,20 @@ _MAE_REQUIRED_TOP_LEVEL = frozenset(
 	}
 )
 _BARLOW_TWINS_ALLOWED_TOP_LEVEL = frozenset(
+	{
+		'stage',
+		'paths',
+		'manifests',
+		'data',
+		'zero_mask',
+		'model',
+		'continuation',
+		'augmentations',
+		'barlow_twins',
+		'train',
+	}
+)
+_BARLOW_TWINS_REQUIRED_TOP_LEVEL = frozenset(
 	{
 		'stage',
 		'paths',
@@ -138,7 +153,7 @@ def validate_pretraining_checkpoint_config(config: Mapping[str, object]) -> None
 		_validate_top_level(
 			config,
 			allowed=_BARLOW_TWINS_ALLOWED_TOP_LEVEL,
-			required=_BARLOW_TWINS_ALLOWED_TOP_LEVEL,
+			required=_BARLOW_TWINS_REQUIRED_TOP_LEVEL,
 		)
 		_validate_resolved_barlow_twins_config(config)
 	else:

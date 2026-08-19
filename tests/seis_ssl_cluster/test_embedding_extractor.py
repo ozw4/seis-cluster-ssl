@@ -117,6 +117,45 @@ def test_embedding_extraction_writes_deterministic_nondivisible_outputs(
 	assert metadata['amplitude_agc'] == {'enabled': False}
 
 
+def test_stage1_mae_checkpoint_config_strict_loads_without_continuation(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert 'continuation' not in payload['config']
+	mae = build_model_from_checkpoint_payload(payload)
+
+	for key, expected in payload['model_state_dict'].items():
+		assert torch.equal(mae.state_dict()[key], expected)
+
+
+def test_mae_continuation_checkpoint_config_strict_loads_encoder(
+	tmp_path: Path,
+) -> None:
+	continuation = {
+		'init_checkpoint': '/checkpoints/mae/stage1/latest.pt',
+		'unfreeze_top_blocks': 1,
+	}
+
+	def add_continuation(checkpoint_config: dict[str, object]) -> None:
+		checkpoint_config['continuation'] = continuation
+
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_config_modifier=add_continuation,
+	)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert payload['config']['continuation'] == continuation
+	mae = build_model_from_checkpoint_payload(payload)
+
+	for key, expected in payload['model_state_dict'].items():
+		assert torch.equal(mae.state_dict()[key], expected)
+
+
 def test_barlow_checkpoint_uses_existing_full_volume_extraction_contract(
 	tmp_path: Path,
 ) -> None:
@@ -157,6 +196,7 @@ def test_barlow_checkpoint_loads_exact_encoder_without_projector_or_wrapper(
 	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
 
+	assert 'continuation' not in payload['config']
 	mae = build_model_from_checkpoint_payload(payload)
 	for key, expected in payload['model_state_dict'].items():
 		assert torch.equal(mae.state_dict()[key], expected)
@@ -192,14 +232,50 @@ def test_barlow_checkpoint_loads_exact_encoder_without_projector_or_wrapper(
 	assert all(parameter.requires_grad for parameter in downstream.encoder_parameters())
 
 
-def test_barlow_checkpoint_rejects_method_identity_drift(tmp_path: Path) -> None:
+def test_barlow_continuation_checkpoint_loads_bare_encoder_strictly(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	continuation = {
+		'init_checkpoint': '/checkpoints/barlow_twins/stage1/latest.pt',
+		'unfreeze_top_blocks': 1,
+	}
+	_make_fixture_checkpoint_barlow(config, continuation=continuation)
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert payload['config']['continuation'] == continuation
+	mae = build_model_from_checkpoint_payload(payload)
+
+	for key, expected in payload['model_state_dict'].items():
+		assert torch.equal(mae.state_dict()[key], expected)
+	assert not any(
+		key.startswith(('backbone.', 'projector.')) for key in mae.state_dict()
+	)
+	assert set(payload['projector_state_dict']).isdisjoint(mae.state_dict())
+
+
+@pytest.mark.parametrize(
+	('key', 'value', 'error'),
+	[
+		('pretraining_method', 'amp_mae3d', ValueError),
+		('checkpoint_kind', 'mae_pretraining', ValueError),
+		('projector_state_dict', None, TypeError),
+	],
+)
+def test_barlow_checkpoint_rejects_invalid_consumer_metadata(
+	tmp_path: Path,
+	key: str,
+	value: object,
+	error: type[Exception],
+) -> None:
 	config = _write_fixture(tmp_path)
 	_make_fixture_checkpoint_barlow(config)
 	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
-	payload['pretraining_method'] = 'amp_mae3d'
+	payload[key] = value
 
-	with pytest.raises(ValueError, match='pretraining_method'):
+	with pytest.raises(error, match=key):
 		build_model_from_checkpoint_payload(payload)
 
 
@@ -1575,7 +1651,11 @@ def _write_fixture(  # noqa: PLR0913
 	return config
 
 
-def _make_fixture_checkpoint_barlow(config: dict[str, object]) -> None:
+def _make_fixture_checkpoint_barlow(
+	config: dict[str, object],
+	*,
+	continuation: dict[str, object] | None = None,
+) -> None:
 	embeddings = config['embeddings']
 	assert isinstance(embeddings, dict)
 	checkpoint_path = Path(embeddings['checkpoint'])
@@ -1588,43 +1668,44 @@ def _make_fixture_checkpoint_barlow(config: dict[str, object]) -> None:
 	assert isinstance(manifests, dict)
 	zero_mask = mae_config['zero_mask']
 	assert isinstance(zero_mask, dict)
-	barlow_config = resolve_barlow_twins_training_config(
-		{
-			'paths': {
-				'artifact_root': str(checkpoint_path.parent / 'artifacts'),
-				'output_root': str(checkpoint_path.parent / 'artifacts' / 'barlow'),
-			},
-			'manifests': dict(manifests),
-			'data': {'local_crop_size': [4, 4, 4]},
-			'zero_mask': dict(zero_mask),
-			'model': {
-				key: model_config[key]
-				for key in (
-					'patch_size',
-					'encoder_dim',
-					'encoder_depth',
-					'encoder_heads',
-					'decoder_dim',
-					'decoder_depth',
-					'decoder_heads',
-				)
-			},
-			'barlow_twins': {'projector_dim': 8},
-			'train': {
-				'batch_size': 2,
-				'samples_per_epoch': 2,
-				'epochs': 1,
-				'num_workers': 0,
-				'shuffle': False,
-				'lr': 1.0e-4,
-				'weight_decay': 0.0,
-				'amp': False,
-				'device': 'cpu',
-				'seed': 7,
-				'grad_clip_norm': 1.0,
-			},
-		}
-	)
+	raw_barlow_config: dict[str, object] = {
+		'paths': {
+			'artifact_root': str(checkpoint_path.parent / 'artifacts'),
+			'output_root': str(checkpoint_path.parent / 'artifacts' / 'barlow'),
+		},
+		'manifests': dict(manifests),
+		'data': {'local_crop_size': [4, 4, 4]},
+		'zero_mask': dict(zero_mask),
+		'model': {
+			key: model_config[key]
+			for key in (
+				'patch_size',
+				'encoder_dim',
+				'encoder_depth',
+				'encoder_heads',
+				'decoder_dim',
+				'decoder_depth',
+				'decoder_heads',
+			)
+		},
+		'barlow_twins': {'projector_dim': 8},
+		'train': {
+			'batch_size': 2,
+			'samples_per_epoch': 2,
+			'epochs': 1,
+			'num_workers': 0,
+			'shuffle': False,
+			'lr': 1.0e-4,
+			'weight_decay': 0.0,
+			'amp': False,
+			'device': 'cpu',
+			'seed': 7,
+			'grad_clip_norm': 1.0,
+		},
+	}
+	if continuation is not None:
+		raw_barlow_config['continuation'] = continuation
+	barlow_config = resolve_barlow_twins_training_config(raw_barlow_config)
 	mae = build_model_from_checkpoint_payload(payload)
 	projector = torch.nn.Linear(mae.encoder_dim, 8)
 	optimizer = torch.optim.AdamW(
