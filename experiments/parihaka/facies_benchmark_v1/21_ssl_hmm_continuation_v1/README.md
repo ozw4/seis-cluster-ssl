@@ -37,7 +37,7 @@ ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_h
 リポジトリrootで環境変数を設定する。
 
 ```bash
-export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/absolute/path/to/seis_ssl_cluster_artifacts
+export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/workspace/artifacts/seis_ssl_cluster
 export STAGE1=experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v1/10_stage1
 ```
 

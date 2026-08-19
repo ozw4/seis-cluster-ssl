@@ -17,6 +17,9 @@ from seis_ssl_cluster.stratigraphy import (
 	OrderedPrototypeHead,
 )
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
+from seis_ssl_cluster.training.encoder_trainability import (
+	freeze_all_and_unfreeze_top_encoder_blocks,
+)
 from seis_ssl_cluster.training.strat_hmm.masking import (
 	center_trace_replacement_token_seed,
 )
@@ -289,31 +292,9 @@ def configure_student_trainability(
 	unfreeze_top_blocks: int,
 ) -> TrainabilitySummary:
 	"""Freeze all student params, then unfreeze only the last N encoder blocks."""
-	if isinstance(unfreeze_top_blocks, bool) or not isinstance(
-		unfreeze_top_blocks,
-		int,
-	):
-		msg = f'unfreeze_top_blocks must be an integer; got {unfreeze_top_blocks!r}'
-		raise TypeError(msg)
-	if unfreeze_top_blocks < 0:
-		msg = f'unfreeze_top_blocks must be nonnegative; got {unfreeze_top_blocks!r}'
-		raise ValueError(msg)
-	if unfreeze_top_blocks > model.encoder.depth:
-		msg = (
-			'unfreeze_top_blocks must be less than or equal to '
-			f'model.encoder.depth ({model.encoder.depth}); got {unfreeze_top_blocks}'
-		)
-		raise ValueError(msg)
-
-	for parameter in model.parameters():
-		parameter.requires_grad_(requires_grad=False)
-	if unfreeze_top_blocks > 0:
-		for layer in model.encoder.layers[-unfreeze_top_blocks:]:
-			for parameter in layer.parameters():
-				parameter.requires_grad_(requires_grad=True)
-
-	trainable_names = tuple(
-		name for name, parameter in model.named_parameters() if parameter.requires_grad
+	trainable_names = freeze_all_and_unfreeze_top_encoder_blocks(
+		model,
+		unfreeze_top_blocks=unfreeze_top_blocks,
 	)
 	trainable_count = sum(
 		parameter.numel() for parameter in model.parameters() if parameter.requires_grad
