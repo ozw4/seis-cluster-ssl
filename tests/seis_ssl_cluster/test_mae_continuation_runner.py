@@ -21,6 +21,23 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 
+def test_invalid_continuation_checkpoint_does_not_write_run_snapshots(
+	tmp_path: Path,
+) -> None:
+	config = _tiny_config(tmp_path)
+	output_root = tmp_path / 'artifacts' / 'run'
+	config['continuation'] = {
+		'init_checkpoint': str((tmp_path / 'missing-source.pt').resolve()),
+		'unfreeze_top_blocks': 1,
+	}
+
+	with pytest.raises(FileNotFoundError, match='checkpoint file does not exist'):
+		run_mae_pretraining(config)
+
+	assert output_root.is_dir()
+	assert list(output_root.iterdir()) == []
+
+
 def test_mae_continuation_fresh_and_resume_contract(  # noqa: PLR0915
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,

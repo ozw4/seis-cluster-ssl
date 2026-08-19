@@ -409,14 +409,6 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		dataloader=dataloader,
 		device=device,
 	)
-	scientific_run_metadata = _snapshot_run_inputs(
-		output_root=output_root,
-		config=config,
-		manifests=manifests,
-		runtime_metadata=runtime_metadata,
-		overwrite=allow_overwrite_output and resume is None,
-	)
-
 	runtime_check_mode = cast(
 		'RuntimeCheckMode',
 		train_config.get('runtime_check_mode', 'once'),
@@ -426,13 +418,22 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		model_config,
 		runtime_check_mode=runtime_check_mode,
 	).to(device)
+	optimizer_parameters = _prepare_mae_optimizer_parameters(
+		model,
+		config=config,
+		model_config=model_config,
+		resume=resume,
+	)
+	scientific_run_metadata = _snapshot_run_inputs(
+		output_root=output_root,
+		config=config,
+		manifests=manifests,
+		runtime_metadata=runtime_metadata,
+		overwrite=allow_overwrite_output and resume is None,
+	)
+
 	optimizer = torch.optim.AdamW(
-		_prepare_mae_optimizer_parameters(
-			model,
-			config=config,
-			model_config=model_config,
-			resume=resume,
-		),
+		optimizer_parameters,
 		lr=_float_config(train_config, 'lr', 3.0e-5),
 		weight_decay=_float_config(train_config, 'weight_decay', 0.05),
 	)
