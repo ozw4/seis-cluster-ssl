@@ -24,6 +24,78 @@ def test_barlow_twins_config_resolves_method_defaults() -> None:
 	assert resolved['model']['name'] == 'amp_mae3d'
 	assert 'masking' not in resolved
 	assert 'loss' not in resolved
+	assert 'continuation' not in resolved
+
+
+def test_barlow_twins_config_accepts_continuation() -> None:
+	config = _minimal_barlow_config()
+	config['continuation'] = {
+		'init_checkpoint': '/checkpoints/barlow_twins/latest.pt',
+		'unfreeze_top_blocks': 1,
+	}
+
+	resolved = resolve_barlow_twins_training_config(config)
+
+	assert resolved['continuation'] == config['continuation']
+
+
+@pytest.mark.parametrize(
+	('continuation', 'message'),
+	[
+		(
+			{
+				'init_checkpoint': 'checkpoints/latest.pt',
+				'unfreeze_top_blocks': 1,
+			},
+			r'continuation\.init_checkpoint must be an absolute path',
+		),
+		(
+			{
+				'init_checkpoint': '/checkpoints/latest.pt',
+				'unfreeze_top_blocks': 1,
+				'optimizer': '/checkpoints/optimizer.pt',
+			},
+			r'continuation key\(s\) not allowed',
+		),
+		(
+			{'unfreeze_top_blocks': 1},
+			r'continuation\.init_checkpoint is required',
+		),
+		(
+			{
+				'init_checkpoint': '/checkpoints/latest.pt',
+				'unfreeze_top_blocks': 0,
+			},
+			r'continuation\.unfreeze_top_blocks must be a positive integer',
+		),
+		(
+			{
+				'init_checkpoint': '/checkpoints/latest.pt',
+				'unfreeze_top_blocks': True,
+			},
+			r'continuation\.unfreeze_top_blocks must be a positive integer',
+		),
+		(
+			{
+				'init_checkpoint': '/checkpoints/latest.pt',
+				'unfreeze_top_blocks': 2,
+			},
+			(
+				r'continuation\.unfreeze_top_blocks must be less than or equal to '
+				r'model\.encoder_depth \(1\)'
+			),
+		),
+	],
+)
+def test_barlow_twins_config_rejects_invalid_continuation(
+	continuation: dict[str, object],
+	message: str,
+) -> None:
+	config = _minimal_barlow_config()
+	config['continuation'] = continuation
+
+	with pytest.raises(ValueError, match=message):
+		resolve_barlow_twins_training_config(config)
 
 
 def test_barlow_twins_config_rejects_unknown_nested_key() -> None:

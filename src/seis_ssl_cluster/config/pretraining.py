@@ -679,6 +679,11 @@ def resolve_barlow_twins_training_config(config: _T) -> Config:
 		prefix='model',
 	)
 	_validate_model(model)
+	if 'continuation' in resolved:
+		_validate_continuation(
+			_required_mapping(resolved, 'continuation'),
+			encoder_depth=int(model['encoder_depth']),
+		)
 	_validate_divisible_crop_patch(local_crop_size, patch_size)
 
 	augmentations = _required_mapping(resolved, 'augmentations')

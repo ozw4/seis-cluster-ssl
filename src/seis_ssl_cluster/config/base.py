@@ -44,6 +44,7 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 			'data',
 			'zero_mask',
 			'model',
+			'continuation',
 			'augmentations',
 			'barlow_twins',
 			'train',

@@ -249,6 +249,20 @@ def _add_barlow_twins_training_rows(
 			('train.device', train.get('device')),
 		]
 	)
+	if 'continuation' in cfg:
+		continuation = _mapping(cfg.get('continuation'))
+		rows.extend(
+			[
+				(
+					'continuation.init_checkpoint',
+					continuation.get('init_checkpoint'),
+				),
+				(
+					'continuation.unfreeze_top_blocks',
+					continuation.get('unfreeze_top_blocks'),
+				),
+			]
+		)
 
 
 def _add_strat_hmm_pretext_rows(

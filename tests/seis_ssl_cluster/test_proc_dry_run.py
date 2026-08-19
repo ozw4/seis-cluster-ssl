@@ -349,6 +349,63 @@ continuation:
 	assert 'execution: dry-run; training skipped' in result.stdout
 
 
+def test_train_amp_barlow_twins_dry_run_prints_continuation_summary(
+	tmp_path: Path,
+) -> None:
+	config_path = tmp_path / 'barlow_twins_continuation.yaml'
+	config_path.write_text(
+		Path('proc/configs/seis_ssl_cluster/train_amp_barlow_twins.yaml').read_text(
+			encoding='utf-8',
+		)
+		+ """
+continuation:
+  init_checkpoint: /checkpoints/barlow_twins/latest.pt
+  unfreeze_top_blocks: 1
+""",
+		encoding='utf-8',
+	)
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_barlow_twins.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert (
+		'continuation.init_checkpoint: /checkpoints/barlow_twins/latest.pt'
+		in result.stdout
+	)
+	assert 'continuation.unfreeze_top_blocks: 1' in result.stdout
+	assert 'execution: dry-run; training skipped' in result.stdout
+
+
+def test_stage1_barlow_twins_dry_run_omits_continuation_summary(
+	tmp_path: Path,
+) -> None:
+	config_path = Path(
+		'experiments/parihaka/facies_benchmark_v1/'
+		'21_ssl_hmm_continuation_v1/10_stage1/barlow_twins/'
+		'01_gpu_feasibility_1step.yaml'
+	)
+
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/train_amp_barlow_twins.py'),
+		'--config',
+		config_path,
+		'--dry-run',
+		extra_env={
+			'SEIS_SSL_CLUSTER_ARTIFACT_ROOT': str(tmp_path / 'artifacts'),
+		},
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert 'continuation.init_checkpoint:' not in result.stdout
+	assert 'continuation.unfreeze_top_blocks:' not in result.stdout
+	assert 'execution: dry-run; training skipped' in result.stdout
+
+
 @pytest.mark.parametrize(
 	'output_root',
 	[
