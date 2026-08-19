@@ -429,7 +429,7 @@ def _surveys(
 	return _mapping(head.get('surveys'), f'{label} surveys K={k}')
 
 
-def _survey_evidence(  # noqa: PLR0913
+def _survey_evidence(  # noqa: PLR0913, PLR0917
 	source: np.ndarray,
 	valid: np.ndarray,
 	consensus: np.ndarray,

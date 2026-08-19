@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
 import importlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
@@ -35,6 +34,9 @@ from seis_ssl_cluster.data.zero_mask import (
 	compute_zero_amplitude_invalid_mask,
 )
 from seis_ssl_cluster.utils.cli import print_config_summary
+
+if TYPE_CHECKING:
+	import argparse
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[1]

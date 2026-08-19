@@ -49,7 +49,10 @@ def normalize_target_patches(
 			low_std_mask=torch.zeros_like(valid_count, dtype=torch.bool),
 		)
 	if mode != 'patch_zscore':
-		msg = f'target normalization mode must be "none" or "patch_zscore"; got {mode!r}'
+		msg = (
+			'target normalization mode must be "none" or "patch_zscore"; '
+			f'got {mode!r}'
+		)
 		raise ValueError(msg)
 
 	eps_value = _positive_finite(eps, 'eps')

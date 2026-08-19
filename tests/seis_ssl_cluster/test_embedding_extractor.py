@@ -1358,9 +1358,7 @@ def test_embedding_extraction_rejects_incomplete_checkpoint_resolved_config(
 ) -> None:
 	config = _write_fixture(
 		tmp_path,
-		checkpoint_config_modifier=lambda checkpoint_config: mutate_checkpoint_config(
-			checkpoint_config,
-		),
+		checkpoint_config_modifier=mutate_checkpoint_config,
 	)
 
 	with pytest.raises(ValueError, match=error):

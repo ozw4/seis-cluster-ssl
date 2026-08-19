@@ -63,7 +63,7 @@ def select_visible_tokens(
 		runtime_checks = runtime_checks or RuntimeChecks('strict')
 		runtime_checks.assert_async(
 			'select_visible_equal_count',
-			lambda: (visible_counts == visible_counts[:1]).all(),
+			lambda: (visible_counts == visible_counts[:1]).all(),  # noqa: PLW0108
 			message=(
 				'equal_visible_count requires the same visible count in every sample'
 			),
@@ -123,7 +123,7 @@ def restore_decoder_sequence(  # noqa: PLR0913
 		runtime_checks = runtime_checks or RuntimeChecks('strict')
 		runtime_checks.assert_async(
 			'restore_visible_equal_count',
-			lambda: (visible_counts == max_visible_tokens).all(),
+			lambda: (visible_counts == max_visible_tokens).all(),  # noqa: PLW0108
 			message=(
 				'equal_visible_count requires visible_tokens to match every sample'
 			),

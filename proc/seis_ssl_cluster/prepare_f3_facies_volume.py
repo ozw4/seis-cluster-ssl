@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.cli import (
 	add_overwrite_argument,
@@ -18,6 +18,9 @@ from seis_ssl_cluster.f3 import (
 	f3_prepare_volume_config_from_mapping,
 	prepare_f3_facies_volume,
 )
+
+if TYPE_CHECKING:
+	import argparse
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[2]

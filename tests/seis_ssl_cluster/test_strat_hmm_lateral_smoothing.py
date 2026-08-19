@@ -191,7 +191,7 @@ def test_redecode_rejects_trace_with_no_finite_path() -> None:
 		),
 	],
 )
-def test_empty_and_single_token_traces(  # noqa: PLR0913
+def test_empty_and_single_token_traces(  # noqa: PLR0913, PLR0917
 	center, neighbors, posterior, valid, neighbor_valid, costs
 ) -> None:
 	result = smooth_and_redecode_ordered_trace(

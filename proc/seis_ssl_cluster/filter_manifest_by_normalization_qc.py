@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from seis_ssl_cluster.cli import build_config_parser
 from seis_ssl_cluster.config import (
@@ -27,6 +26,9 @@ from seis_ssl_cluster.data.schema import (
 	write_manifest_json,
 )
 from seis_ssl_cluster.utils.cli import print_config_summary
+
+if TYPE_CHECKING:
+	import argparse
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[1]

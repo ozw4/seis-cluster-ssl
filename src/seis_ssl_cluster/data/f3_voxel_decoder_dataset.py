@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 class F3VoxelDecoderDataset(Dataset[dict[str, Any]]):
 	"""Expose fixed-size, halo-padded crops without random sampling."""
 
-	def __init__(  # noqa: PLR0913
+	def __init__(  # noqa: PLR0913, PLR0917
 		self,
 		embedding_path: str | Path,
 		valid_tokens_path: str | Path,

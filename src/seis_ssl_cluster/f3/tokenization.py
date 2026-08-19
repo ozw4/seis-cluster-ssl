@@ -342,7 +342,7 @@ def token_plane_spec(
 	raise ValueError(msg)
 
 
-def tokenize_label_slice(
+def tokenize_label_slice(  # noqa: PLR0913
 	class_id_map: NDArray[np.generic],
 	*,
 	slice_type: str,

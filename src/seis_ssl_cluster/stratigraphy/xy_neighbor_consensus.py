@@ -229,7 +229,7 @@ def _xy_neighbor_planes(
 	return neighbor_labels, neighbor_valid
 
 
-def _consensus_proposals(  # noqa: PLR0913
+def _consensus_proposals(  # noqa: PLR0913, PLR0917
 	neighbor_labels: np.ndarray,
 	neighbor_valid: np.ndarray,
 	neighbor_count: np.ndarray,

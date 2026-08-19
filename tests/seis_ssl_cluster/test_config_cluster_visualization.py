@@ -10,7 +10,7 @@ from seis_ssl_cluster.config.cluster_visualization import (
 	resolve_cluster_visualization_config,
 )
 from seis_ssl_cluster.config.validate import (
-	resolve_cluster_visualization_config as validate_resolve_cluster_visualization_config,
+	resolve_cluster_visualization_config as validate_resolver,
 )
 
 CONFIG_DIR = Path('proc/configs/seis_ssl_cluster')
@@ -26,7 +26,7 @@ def test_cluster_visualization_config_resolves_from_stage_module() -> None:
 
 def test_cluster_visualization_validate_module_reexports_stage_resolver() -> None:
 	assert (
-		validate_resolve_cluster_visualization_config
+		validate_resolver
 		is resolve_cluster_visualization_config
 	)
 

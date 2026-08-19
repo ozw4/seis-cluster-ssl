@@ -272,7 +272,7 @@ def redecode_ordered_lateral_trace(  # noqa: PLR0913
 	return labels
 
 
-def smooth_and_redecode_ordered_trace(  # noqa: PLR0913
+def smooth_and_redecode_ordered_trace(  # noqa: PLR0913, PLR0917
 	center_embedding: np.ndarray,
 	neighbor_embeddings: np.ndarray,
 	neighbor_posterior: np.ndarray,

@@ -513,7 +513,7 @@ def _checkpoint_evidence(  # noqa: PLR0913
 	}
 
 
-def _identity_contract(  # noqa: PLR0913
+def _identity_contract(  # noqa: PLR0913, PLR0917
 	config: F3MultiHeadPretrainingValidationConfig,
 	training: Mapping[str, object],
 	payload: Mapping[str, object],

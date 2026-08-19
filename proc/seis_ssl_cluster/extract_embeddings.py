@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.cli import (
 	add_device_argument,
@@ -19,6 +19,9 @@ from seis_ssl_cluster.config import (
 )
 from seis_ssl_cluster.embedding import run_embedding_extraction
 from seis_ssl_cluster.utils.cli import print_config_summary
+
+if TYPE_CHECKING:
+	import argparse
 
 DEFAULT_CONFIG = (
 	Path(__file__).resolve().parents[1]

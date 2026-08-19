@@ -398,8 +398,8 @@ def render_f3_segy_summary_markdown(inspection: F3SegyInspection) -> str:
 		'',
 		f'- F3 root: `{inspection.f3_root}`',
 		f'- class_info: `{inspection.class_info_path}`',
-		'- XYZ仮定: cube axis 0 -> x / inline, '
-		'axis 1 -> y / crossline, axis 2 -> z / sample/time',
+		('- XYZ仮定: cube axis 0 -> x / inline, '
+		'axis 1 -> y / crossline, axis 2 -> z / sample/time'),
 		'- label値0は有効classとして扱う。',
 		'',
 		'## Geometry',

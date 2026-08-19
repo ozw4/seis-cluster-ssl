@@ -223,7 +223,10 @@ def test_default_configs_resolve_without_mutating_raw(
 		assert 'nopims_root' not in resolved['paths']
 		assert (
 			resolved['paths']['output_root']
-			== '/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/pretrain_v1/amp_mae_v1/full_100ep'
+			== (
+				'/workspace/artifacts/seis_ssl_cluster/pretraining/nopims/'
+				'pretrain_v1/amp_mae_v1/full_100ep'
+			)
 		)
 	elif config_path in {
 		CONFIG_DIR / 'extract_embeddings.yaml',
@@ -532,19 +535,34 @@ def test_cluster_visualization_config_rejects_invalid_comparison_alpha() -> None
 	('resolver', 'raw_config'),
 
 	[
-		(resolve_manifest_build_config, lambda: _minimal_manifest_build_config()),
+		(
+			resolve_manifest_build_config,
+			lambda: _minimal_manifest_build_config(),  # noqa: PLW0108
+		),
 		(
 			resolve_normalization_stats_config,
-			lambda: _minimal_normalization_stats_config(),
+			lambda: _minimal_normalization_stats_config(),  # noqa: PLW0108
 		),
 		(
 			resolve_normalization_qc_config,
-			lambda: _minimal_normalization_qc_config(),
+			lambda: _minimal_normalization_qc_config(),  # noqa: PLW0108
 		),
-		(resolve_mae_training_config, lambda: _minimal_training_config()),
-		(resolve_embedding_extraction_config, lambda: _minimal_embedding_config()),
-		(resolve_clustering_config, lambda: _minimal_clustering_config()),
-		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
+		(
+			resolve_mae_training_config,
+			lambda: _minimal_training_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_embedding_extraction_config,
+			lambda: _minimal_embedding_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_clustering_config,
+			lambda: _minimal_clustering_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_cluster_visualization_config,
+			lambda: _minimal_visualization_config(),  # noqa: PLW0108
+		),
 	],
 )
 def test_minimal_stage_configs_resolve_without_stage(
@@ -578,16 +596,34 @@ def test_unrelated_top_level_sections_are_rejected() -> None:
 @pytest.mark.parametrize(
 	('resolver', 'raw_config'),
 	[
-		(resolve_manifest_build_config, lambda: _minimal_manifest_build_config()),
+		(
+			resolve_manifest_build_config,
+			lambda: _minimal_manifest_build_config(),  # noqa: PLW0108
+		),
 		(
 			resolve_normalization_stats_config,
-			lambda: _minimal_normalization_stats_config(),
+			lambda: _minimal_normalization_stats_config(),  # noqa: PLW0108
 		),
-		(resolve_normalization_qc_config, lambda: _minimal_normalization_qc_config()),
-		(resolve_mae_training_config, lambda: _minimal_training_config()),
-		(resolve_embedding_extraction_config, lambda: _minimal_embedding_config()),
-		(resolve_clustering_config, lambda: _minimal_clustering_config()),
-		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
+		(
+			resolve_normalization_qc_config,
+			lambda: _minimal_normalization_qc_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_mae_training_config,
+			lambda: _minimal_training_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_embedding_extraction_config,
+			lambda: _minimal_embedding_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_clustering_config,
+			lambda: _minimal_clustering_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_cluster_visualization_config,
+			lambda: _minimal_visualization_config(),  # noqa: PLW0108
+		),
 	],
 )
 def test_stage_configs_reject_unknown_path_keys(
@@ -604,10 +640,22 @@ def test_stage_configs_reject_unknown_path_keys(
 @pytest.mark.parametrize(
 	('resolver', 'raw_config'),
 	[
-		(resolve_mae_training_config, lambda: _minimal_training_config()),
-		(resolve_embedding_extraction_config, lambda: _minimal_embedding_config()),
-		(resolve_clustering_config, lambda: _minimal_clustering_config()),
-		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
+		(
+			resolve_mae_training_config,
+			lambda: _minimal_training_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_embedding_extraction_config,
+			lambda: _minimal_embedding_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_clustering_config,
+			lambda: _minimal_clustering_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_cluster_visualization_config,
+			lambda: _minimal_visualization_config(),  # noqa: PLW0108
+		),
 	],
 )
 def test_non_registry_configs_reject_nopims_root_path(
@@ -624,8 +672,14 @@ def test_non_registry_configs_reject_nopims_root_path(
 @pytest.mark.parametrize(
 	('resolver', 'raw_config'),
 	[
-		(resolve_clustering_config, lambda: _minimal_clustering_config()),
-		(resolve_cluster_visualization_config, lambda: _minimal_visualization_config()),
+		(
+			resolve_clustering_config,
+			lambda: _minimal_clustering_config(),  # noqa: PLW0108
+		),
+		(
+			resolve_cluster_visualization_config,
+			lambda: _minimal_visualization_config(),  # noqa: PLW0108
+		),
 	],
 )
 @pytest.mark.parametrize('section', ['data', 'model', 'masking', 'loss', 'train'])
@@ -800,12 +854,18 @@ def test_cluster_visualization_config_rejects_invalid_alpha() -> None:
 @pytest.mark.parametrize(
 	('resolver', 'raw_config'),
 	[
-		(resolve_manifest_build_config, lambda: _minimal_manifest_build_config()),
+		(
+			resolve_manifest_build_config,
+			lambda: _minimal_manifest_build_config(),  # noqa: PLW0108
+		),
 		(
 			resolve_normalization_stats_config,
-			lambda: _minimal_normalization_stats_config(),
+			lambda: _minimal_normalization_stats_config(),  # noqa: PLW0108
 		),
-		(resolve_normalization_qc_config, lambda: _minimal_normalization_qc_config()),
+		(
+			resolve_normalization_qc_config,
+			lambda: _minimal_normalization_qc_config(),  # noqa: PLW0108
+		),
 	],
 )
 @pytest.mark.parametrize('section', ['model', 'train', 'loss', 'masking'])
@@ -1198,25 +1258,25 @@ def test_training_output_root_may_be_outside_artifact_root() -> None:
 	[
 		(
 			resolve_mae_training_config,
-			lambda: _minimal_training_config(),
+			lambda: _minimal_training_config(),  # noqa: PLW0108
 			'paths',
 			'output_root',
 		),
 		(
 			resolve_embedding_extraction_config,
-			lambda: _minimal_embedding_config(),
+			lambda: _minimal_embedding_config(),  # noqa: PLW0108
 			'embeddings',
 			'output_dir',
 		),
 		(
 			resolve_clustering_config,
-			lambda: _minimal_clustering_config(),
+			lambda: _minimal_clustering_config(),  # noqa: PLW0108
 			'clustering',
 			'output_dir',
 		),
 		(
 			resolve_cluster_visualization_config,
-			lambda: _minimal_visualization_config(),
+			lambda: _minimal_visualization_config(),  # noqa: PLW0108
 			'visualization',
 			'output_dir',
 		),
@@ -1242,28 +1302,28 @@ def test_explicit_output_paths_allow_runs_component(
 	[
 		(
 			resolve_mae_training_config,
-			lambda: _minimal_training_config(),
+			lambda: _minimal_training_config(),  # noqa: PLW0108
 			'paths',
 			'output_root',
 			'/artifacts/pretraining/nopims/pretrain_v1/amp_mae_v1',
 		),
 		(
 			resolve_embedding_extraction_config,
-			lambda: _minimal_embedding_config(),
+			lambda: _minimal_embedding_config(),  # noqa: PLW0108
 			'embeddings',
 			'output_dir',
 			'/artifacts/embeddings/nopims/pretrain_v1/amp_mae_v1/full',
 		),
 		(
 			resolve_clustering_config,
-			lambda: _minimal_clustering_config(),
+			lambda: _minimal_clustering_config(),  # noqa: PLW0108
 			'clustering',
 			'output_dir',
 			'/artifacts/clustering/nopims/pretrain_v1/amp_mae_v1/full/overlap_x64',
 		),
 		(
 			resolve_cluster_visualization_config,
-			lambda: _minimal_visualization_config(),
+			lambda: _minimal_visualization_config(),  # noqa: PLW0108
 			'visualization',
 			'output_dir',
 			'/artifacts/visualizations/clusters/nopims/pretrain_v1/amp_mae_v1/full/overlap_x64/k6_8',
@@ -1315,25 +1375,25 @@ def test_embedding_checkpoint_parent_is_explicit() -> None:
 	[
 		(
 			resolve_mae_training_config,
-			lambda: _minimal_training_config(),
+			lambda: _minimal_training_config(),  # noqa: PLW0108
 			'paths',
 			'output_root',
 		),
 		(
 			resolve_embedding_extraction_config,
-			lambda: _minimal_embedding_config(),
+			lambda: _minimal_embedding_config(),  # noqa: PLW0108
 			'embeddings',
 			'output_dir',
 		),
 		(
 			resolve_clustering_config,
-			lambda: _minimal_clustering_config(),
+			lambda: _minimal_clustering_config(),  # noqa: PLW0108
 			'clustering',
 			'output_dir',
 		),
 		(
 			resolve_cluster_visualization_config,
-			lambda: _minimal_visualization_config(),
+			lambda: _minimal_visualization_config(),  # noqa: PLW0108
 			'visualization',
 			'output_dir',
 		),

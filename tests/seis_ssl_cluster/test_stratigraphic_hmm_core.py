@@ -580,7 +580,7 @@ def test_disabled_path_prior_builders_return_zero_vectors() -> None:
 		),
 	],
 )
-def test_forward_backward_state_posteriors_matches_path_enumeration(  # noqa: PLR0913
+def test_forward_backward_state_posteriors_matches_path_enumeration(  # noqa: PLR0913, PLR0917
 	emissions: np.ndarray,
 	transitions: np.ndarray,
 	initial_costs: np.ndarray,

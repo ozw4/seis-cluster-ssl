@@ -41,7 +41,7 @@ def amplitude_clip_limits(
 	return float(vmin), float(vmax)
 
 
-def seismic_imshow(
+def seismic_imshow(  # noqa: PLR0913
 	ax: object,
 	image: object,
 	*,

@@ -1355,7 +1355,7 @@ class _LateralDiagnostics:
 			{'edge_count': 0, 'source_sum': 0.0, 'lateral_sum': 0.0} for _ in range(4)
 		]
 
-	def add_trace(  # noqa: PLR0913
+	def add_trace(  # noqa: PLR0913, PLR0917
 		self,
 		source: np.ndarray,
 		lateral: np.ndarray,
@@ -1522,7 +1522,7 @@ class _LateralDiagnostics:
 		}
 
 
-def _export_head(  # noqa: PLR0913
+def _export_head(  # noqa: PLR0913, PLR0917
 	root: Path,
 	k: int,
 	source: Mapping[str, object],
@@ -1589,7 +1589,7 @@ def _export_head(  # noqa: PLR0913
 	_write_json(root / 'head_metadata.json', head)
 
 
-def _export_survey(  # noqa: PLR0913
+def _export_survey(  # noqa: PLR0913, PLR0917
 	root: Path,
 	survey_id: str,
 	source: Mapping[str, object],
@@ -1799,7 +1799,7 @@ def _smooth_trace(  # noqa: PLR0913
 	)
 
 
-def _validate_complete_head(  # noqa: C901, PLR0913
+def _validate_complete_head(  # noqa: C901, PLR0913, PLR0917
 	path: Path,
 	k: int,
 	source: Mapping[str, object],
@@ -2596,7 +2596,7 @@ def _validate_diagnostics_from_arrays(
 		raise ValueError('aggregate lateral diagnostics differ from target arrays')
 
 
-def _validate_diagnostics_from_frozen_sources(  # noqa: PLR0913
+def _validate_diagnostics_from_frozen_sources(  # noqa: PLR0913, PLR0917
 	diagnostics: object,
 	surveys: Mapping[str, object],
 	hard_surveys: Mapping[str, object],

@@ -584,8 +584,8 @@ def render_markdown(report: dict[str, object]) -> str:
 		'',
 		'## Results',
 		'',
-		'| Case | Version | Input fingerprint | Median (s) | P25-P75 (s) '
-		'| Comparable | Baseline median (s) | Speedup | Note |',
+		('| Case | Version | Input fingerprint | Median (s) | P25-P75 (s) '
+		'| Comparable | Baseline median (s) | Speedup | Note |'),
 		'|---|---:|---|---:|---:|---|---:|---:|---|',
 	]
 	comparisons = _comparison_by_name(report)
@@ -619,12 +619,12 @@ def render_markdown(report: dict[str, object]) -> str:
 			'## Cautions',
 			'',
 			'- Speedup is baseline median divided by current median.',
-			'- A multiplier is omitted when the case name, version, or input '
-			'fingerprint differs, or when the current median is zero.',
-			'- Compare runs from the same machine and software environment; '
-			'interquartile overlap can indicate timing noise.',
-			'- AMP and lower-precision paths may be numerically close rather than '
-			'bitwise identical.',
+			('- A multiplier is omitted when the case name, version, or input '
+			'fingerprint differs, or when the current median is zero.'),
+			('- Compare runs from the same machine and software environment; '
+			'interquartile overlap can indicate timing noise.'),
+			('- AMP and lower-precision paths may be numerically close rather than '
+			'bitwise identical.'),
 			'',
 		],
 	)

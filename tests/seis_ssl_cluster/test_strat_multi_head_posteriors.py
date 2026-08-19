@@ -287,11 +287,26 @@ def test_posterior_provider_crops_memmaps_and_applies_token_mask(
 @pytest.mark.parametrize(
 	('mutate', 'match'),
 	[
-		(lambda paths: _make_k8_valid_mask_mismatch(paths), 'valid_tokens must match'),
-		(lambda paths: _make_k8_last_dimension_mismatch(paths), 'last dimension'),
-		(lambda paths: _make_k8_nonfinite(paths), 'finite and non-negative'),
-		(lambda paths: _make_k8_negative(paths), 'finite and non-negative'),
-		(lambda paths: _make_k8_nonunit(paths), 'valid rows must sum to one'),
+		(
+			lambda paths: _make_k8_valid_mask_mismatch(paths),  # noqa: PLW0108
+			'valid_tokens must match',
+		),
+		(
+			lambda paths: _make_k8_last_dimension_mismatch(paths),  # noqa: PLW0108
+			'last dimension',
+		),
+		(
+			lambda paths: _make_k8_nonfinite(paths),  # noqa: PLW0108
+			'finite and non-negative',
+		),
+		(
+			lambda paths: _make_k8_negative(paths),  # noqa: PLW0108
+			'finite and non-negative',
+		),
+		(
+			lambda paths: _make_k8_nonunit(paths),  # noqa: PLW0108
+			'valid rows must sum to one',
+		),
 	],
 )
 def test_posterior_provider_rejects_malformed_crops(

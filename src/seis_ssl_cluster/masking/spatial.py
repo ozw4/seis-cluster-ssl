@@ -38,7 +38,7 @@ def compute_token_grid_shape(
 	return tuple(token_grid_shape)
 
 
-def build_spatial_masking_plan(  # noqa: PLR0913
+def build_spatial_masking_plan(  # noqa: PLR0913, PLR0917
 	local_crop_size_xyz: Sequence[int],
 	patch_size_xyz: Sequence[int],
 	spatial_mask_ratio: float,

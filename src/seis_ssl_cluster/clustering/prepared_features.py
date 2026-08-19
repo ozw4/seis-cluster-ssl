@@ -535,7 +535,7 @@ def _prepare_one_survey(  # noqa: PLR0913
 	return prepared
 
 
-def _open_complete_cache(  # noqa: PLR0913
+def _open_complete_cache(  # noqa: PLR0913, PLR0917
 	item: EmbeddingInput,
 	token_shape_xyz: tuple[int, int, int],
 	cache_path: Path,

@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 class NopimsStratPseudoTargetDataset:
 	"""Preserve the strat dataset API using the generic crop dataset."""
 
-	def __init__(  # noqa: D107, PLR0913
+	def __init__(  # noqa: D107, PLR0913, PLR0917
 		self,
 		manifests: Sequence[SurveyManifest],
 		pseudo_target_inputs: Sequence[StratPseudoTargetInput],
@@ -86,7 +86,7 @@ class NopimsStratPseudoTargetDataset:
 class NopimsStratMultiHeadTargetDataset:
 	"""Token-aligned crops with all heads from one validated target manifest."""
 
-	def __init__(  # noqa: D107, PLR0913
+	def __init__(  # noqa: D107, PLR0913, PLR0917
 		self,
 		manifests: Sequence[SurveyManifest],
 		multi_head_target_manifest: StratMultiHeadTargetManifest | str | Path,
@@ -142,7 +142,7 @@ class NopimsStratMultiHeadTargetDataset:
 class NopimsStratMultiHeadPosteriorDataset:
 	"""Token-aligned crops with soft posteriors from a frozen HMM export."""
 
-	def __init__(  # noqa: D107, PLR0913
+	def __init__(  # noqa: D107, PLR0913, PLR0917
 		self,
 		manifests: Sequence[SurveyManifest],
 		multi_head_posterior_manifest: StratMultiHeadPosteriorManifest | str | Path,
