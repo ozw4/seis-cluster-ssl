@@ -102,6 +102,7 @@ _CHECKPOINT_ALLOWED_TOP_LEVEL = frozenset(
 		'manifests',
 		'data',
 		'model',
+		'continuation',
 		'masking',
 		'loss',
 		'train',

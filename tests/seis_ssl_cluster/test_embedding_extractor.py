@@ -121,9 +121,11 @@ def test_stage1_mae_checkpoint_config_strict_loads_without_continuation(
 	tmp_path: Path,
 ) -> None:
 	config = _write_fixture(tmp_path)
+	result = run_embedding_extraction(config, device='cpu')[0]
 	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
 
+	assert result.metadata_path.is_file()
 	assert 'continuation' not in payload['config']
 	mae = build_model_from_checkpoint_payload(payload)
 
@@ -146,14 +148,31 @@ def test_mae_continuation_checkpoint_config_strict_loads_encoder(
 		tmp_path,
 		checkpoint_config_modifier=add_continuation,
 	)
+	result = run_embedding_extraction(config, device='cpu')[0]
 	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
 
+	assert result.metadata_path.is_file()
 	assert payload['config']['continuation'] == continuation
 	mae = build_model_from_checkpoint_payload(payload)
 
 	for key, expected in payload['model_state_dict'].items():
 		assert torch.equal(mae.state_dict()[key], expected)
+
+
+def test_mae_checkpoint_config_rejects_unknown_top_level_key(
+	tmp_path: Path,
+) -> None:
+	def add_unknown_section(checkpoint_config: dict[str, object]) -> None:
+		checkpoint_config['unknown_section'] = {}
+
+	config = _write_fixture(
+		tmp_path,
+		checkpoint_config_modifier=add_unknown_section,
+	)
+
+	with pytest.raises(ValueError, match=r'unsupported top-level.*unknown_section'):
+		run_embedding_extraction(config, device='cpu')
 
 
 def test_barlow_checkpoint_uses_existing_full_volume_extraction_contract(
