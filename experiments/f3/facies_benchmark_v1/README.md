@@ -5,6 +5,9 @@ cover raw-data inspection and preparation, embedding and target generation,
 stratigraphic clustering, pretraining, extraction, and downstream-independent
 validation. It is not a benchmark result-generation surface.
 
+The F3-native MAE / Barlow Twins continuation and paired HMM-K6 suite is
+documented in [21_ssl_hmm_continuation_v1](21_ssl_hmm_continuation_v1/README.md).
+
 Source-of-truth inputs:
 
 ```bash
