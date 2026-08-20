@@ -29,6 +29,12 @@ EXPECTED_MODEL_NAME: Final = 'amp_mae3d'
 EXPECTED_SPATIAL_MASK_MODE: Final = 'block'
 BARLOW_TWINS_PRETRAINING_METHOD: Final = 'barlow_twins_3d'
 LOCAL_BARLOW_TWINS_PRETRAINING_METHOD: Final = 'local_barlow_twins_3d'
+SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS: Final = frozenset(
+	{
+		BARLOW_TWINS_PRETRAINING_METHOD,
+		LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	}
+)
 SUPPORTED_RECONSTRUCTION_LOSSES: Final = frozenset({'huber', 'mse', 'l1'})
 SUPPORTED_TARGET_NORMALIZATION_MODES: Final = frozenset({'none', 'patch_zscore'})
 SUPPORTED_FINITE_CHECK_MODES: Final = frozenset({'strict', 'output_only', 'off'})

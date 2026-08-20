@@ -7,14 +7,7 @@ from typing import cast
 
 from seis_ssl_cluster.config.schema import (
 	BARLOW_TWINS_PRETRAINING_METHOD,
-	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
-)
-
-_SUPPORTED_PRETRAINING_METHODS = frozenset(
-	{
-		BARLOW_TWINS_PRETRAINING_METHOD,
-		LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
-	}
+	SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS,
 )
 
 
@@ -35,10 +28,11 @@ def resolve_barlow_twins_pretraining_method(
 	)
 	if not isinstance(method, str):
 		raise TypeError('config.barlow_twins.method must be a string')
-	if method not in _SUPPORTED_PRETRAINING_METHODS:
+	if method not in SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS:
 		raise ValueError(
 			'config.barlow_twins.method must be one of '
-			f'{sorted(_SUPPORTED_PRETRAINING_METHODS)!r}; got {method!r}'
+			f'{sorted(SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS)!r}; '
+			f'got {method!r}'
 		)
 	return cast('str', method)
 

@@ -72,6 +72,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_MAE_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 	SUPPORTED_AMP_DTYPES,
+	SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS,
 	SUPPORTED_FINITE_CHECK_MODES,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_RUNTIME_CHECK_MODES,
@@ -3775,17 +3776,14 @@ def _validate_barlow_twins_method(
 	patch_size: Sequence[int],
 ) -> None:
 	method = barlow_twins.get('method', BARLOW_TWINS_PRETRAINING_METHOD)
-	supported_methods = (
-		BARLOW_TWINS_PRETRAINING_METHOD,
-		LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
-	)
 	if not isinstance(method, str):
 		msg = f'barlow_twins.method must be a string; got {method!r}'
 		raise TypeError(msg)
-	if method not in supported_methods:
+	if method not in SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS:
 		msg = (
 			'barlow_twins.method must be one of '
-			f'{list(supported_methods)!r}; got {method!r}'
+			f'{sorted(SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS)!r}; '
+			f'got {method!r}'
 		)
 		raise ValueError(msg)
 
