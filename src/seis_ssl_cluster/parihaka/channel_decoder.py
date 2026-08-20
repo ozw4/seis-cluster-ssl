@@ -34,6 +34,7 @@ from seis_ssl_cluster.parihaka.channel_checkpoints import (
 	CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX,
 	CHANNEL_PRETRAINED_MODEL_TAG,
 	CHANNEL_RANDOM_ENCODER_SEED,
+	inspect_channel_embedding_source,
 	inspect_channel_model_sources,
 )
 from seis_ssl_cluster.parihaka.channel_data import (
@@ -85,6 +86,11 @@ _PAIRED_EMBEDDING_METADATA_KEYS = (
 	'precision',
 	'pretraining_objective',
 )
+_COMMON_EMBEDDING_METADATA_KEYS = tuple(
+	key
+	for key in _PAIRED_EMBEDDING_METADATA_KEYS
+	if key != 'pretraining_objective'
+)
 
 
 @dataclass(frozen=True)
@@ -124,35 +130,145 @@ class DecoderTiles:
 
 
 @dataclass(frozen=True)
+class ChannelEmbeddingSourceConfig:
+	"""One configured frozen-embedding source."""
+
+	embedding_dir: Path
+	expected_checkpoint: Path | None
+
+
+@dataclass(frozen=True)
 class ChannelDecoderConfig:
 	"""Resolved common settings for all 30 jobs."""
 
 	survey_id: str
 	labels: Path
 	labels_metadata: Path
-	pretrained_embeddings: Path
-	random_embeddings: Path
+	models: Mapping[str, ChannelEmbeddingSourceConfig]
 	runs_root: Path
 	decoder: DecoderArchitecture
 	train: DecoderTrain
 	tiles: DecoderTiles
 
+	@property
+	def pretrained_embeddings(self) -> Path:
+		"""Return the legacy pretrained embedding directory."""
+		return self.models['pretrained'].embedding_dir
+
+	@property
+	def random_embeddings(self) -> Path:
+		"""Return the legacy random embedding directory."""
+		return self.models['random'].embedding_dir
+
 
 @dataclass(frozen=True)
-class EmbeddingGeometry:
-	"""Validated paired embedding inputs."""
+class ChannelEmbeddingInput:
+	"""Validated artifacts and identity for one configured model."""
 
-	pretrained: EmbeddingOutputPaths
-	random: EmbeddingOutputPaths
+	paths: EmbeddingOutputPaths
+	metadata: Mapping[str, object]
+	model_source: Mapping[str, object]
+
+
+@dataclass(frozen=True, init=False)
+class EmbeddingGeometry:
+	"""Validated embedding inputs with common geometry."""
+
+	models: Mapping[str, ChannelEmbeddingInput]
 	volume_shape_xyz: tuple[int, int, int]
 	token_grid_shape_xyz: tuple[int, int, int]
 	patch_size_xyz: tuple[int, int, int]
 	embedding_shape: tuple[int, int, int, int]
 	embedding_dim: int
-	pretrained_metadata: Mapping[str, object]
-	random_metadata: Mapping[str, object]
-	pretrained_model_source: Mapping[str, object]
-	random_model_source: Mapping[str, object]
+
+	def __init__(  # noqa: PLR0913
+		self,
+		*,
+		volume_shape_xyz: tuple[int, int, int],
+		token_grid_shape_xyz: tuple[int, int, int],
+		patch_size_xyz: tuple[int, int, int],
+		embedding_shape: tuple[int, int, int, int],
+		embedding_dim: int,
+		models: Mapping[str, ChannelEmbeddingInput] | None = None,
+		pretrained: EmbeddingOutputPaths | None = None,
+		random: EmbeddingOutputPaths | None = None,
+		pretrained_metadata: Mapping[str, object] | None = None,
+		random_metadata: Mapping[str, object] | None = None,
+		pretrained_model_source: Mapping[str, object] | None = None,
+		random_model_source: Mapping[str, object] | None = None,
+	) -> None:
+		"""Build canonical model inputs, accepting the old pair constructor."""
+		legacy_values = (
+			pretrained,
+			random,
+			pretrained_metadata,
+			random_metadata,
+			pretrained_model_source,
+			random_model_source,
+		)
+		if models is None:
+			if pretrained is None or random is None:
+				raise TypeError('models or pretrained/random inputs are required')
+			models = {
+				'pretrained': ChannelEmbeddingInput(
+					paths=pretrained,
+					metadata={} if pretrained_metadata is None else pretrained_metadata,
+					model_source=(
+						{}
+						if pretrained_model_source is None
+						else pretrained_model_source
+					),
+				),
+				'random': ChannelEmbeddingInput(
+					paths=random,
+					metadata={} if random_metadata is None else random_metadata,
+					model_source=(
+						{}
+						if random_model_source is None
+						else random_model_source
+					),
+				),
+			}
+		elif any(value is not None for value in legacy_values):
+			raise TypeError('models cannot be combined with legacy pair inputs')
+		if not models:
+			raise ValueError('models must not be empty')
+		object.__setattr__(self, 'models', dict(models))
+		object.__setattr__(self, 'volume_shape_xyz', volume_shape_xyz)
+		object.__setattr__(self, 'token_grid_shape_xyz', token_grid_shape_xyz)
+		object.__setattr__(self, 'patch_size_xyz', patch_size_xyz)
+		object.__setattr__(self, 'embedding_shape', embedding_shape)
+		object.__setattr__(self, 'embedding_dim', embedding_dim)
+
+	@property
+	def pretrained(self) -> EmbeddingOutputPaths:
+		"""Return the legacy pretrained artifact paths."""
+		return self.models['pretrained'].paths
+
+	@property
+	def random(self) -> EmbeddingOutputPaths:
+		"""Return the legacy random artifact paths."""
+		return self.models['random'].paths
+
+	@property
+	def pretrained_metadata(self) -> Mapping[str, object]:
+		"""Return the legacy pretrained metadata."""
+		return self.models['pretrained'].metadata
+
+	@property
+	def random_metadata(self) -> Mapping[str, object]:
+		"""Return the legacy random metadata."""
+		return self.models['random'].metadata
+
+	@property
+	def pretrained_model_source(self) -> Mapping[str, object]:
+		"""Return the legacy pretrained model identity."""
+		return self.models['pretrained'].model_source
+
+	@property
+	def random_model_source(self) -> Mapping[str, object]:
+		"""Return the legacy random model identity."""
+		return self.models['random'].model_source
 
 
 @dataclass(frozen=True)
@@ -194,10 +310,7 @@ def channel_decoder_config_from_mapping(
 		survey_id=survey_id,
 		labels=_absolute_path(inputs, 'labels_npy', 'inputs'),
 		labels_metadata=_absolute_path(inputs, 'labels_metadata_json', 'inputs'),
-		pretrained_embeddings=_absolute_path(
-			embeddings, 'pretrained_dir', 'embeddings'
-		),
-		random_embeddings=_absolute_path(embeddings, 'random_dir', 'embeddings'),
+		models=_embedding_sources(embeddings),
 		runs_root=_absolute_path(outputs, 'runs_root', 'outputs'),
 		decoder=decoder,
 		train=train,
@@ -205,10 +318,28 @@ def channel_decoder_config_from_mapping(
 	)
 
 
-def inspect_embedding_pair(  # noqa: C901
+def inspect_embedding_sources(config: ChannelDecoderConfig) -> EmbeddingGeometry:
+	"""Validate every configured embedding source and their shared geometry."""
+	if _is_legacy_embedding_pair(config):
+		return _inspect_embedding_pair(config)
+	return _inspect_generic_embedding_sources(config)
+
+
+def inspect_embedding_pair(
 	config: ChannelDecoderConfig,
 ) -> EmbeddingGeometry:
-	"""Require scientifically paired pretrained/random embedding inputs."""
+	"""Validate the legacy scientifically paired pretrained/random inputs."""
+	if not _is_legacy_embedding_pair(config):
+		raise ValueError(
+			'inspect_embedding_pair requires legacy pretrained/random inputs'
+		)
+	return _inspect_embedding_pair(config)
+
+
+def _inspect_embedding_pair(  # noqa: C901
+	config: ChannelDecoderConfig,
+) -> EmbeddingGeometry:
+	"""Implement the strict legacy pretrained/random inspection."""
 	pretrained = output_paths(config.pretrained_embeddings, config.survey_id)
 	random_paths = output_paths(config.random_embeddings, config.survey_id)
 	for paths in (pretrained, random_paths):
@@ -272,17 +403,154 @@ def inspect_embedding_pair(  # noqa: C901
 	if not np.array_equal(pretrained_valid, random_valid):
 		raise ValueError('pretrained/random valid-token mask mismatch')
 	return EmbeddingGeometry(
-		pretrained=pretrained,
-		random=random_paths,
+		models={
+			'pretrained': ChannelEmbeddingInput(
+				paths=pretrained,
+				metadata=dict(pretrained_meta),
+				model_source=pretrained_model_source,
+			),
+			'random': ChannelEmbeddingInput(
+				paths=random_paths,
+				metadata=dict(random_meta),
+				model_source=random_model_source,
+			),
+		},
 		volume_shape_xyz=volume,
 		token_grid_shape_xyz=token_grid,
 		patch_size_xyz=patch,
 		embedding_shape=tuple(int(item) for item in pretrained_array.shape),
 		embedding_dim=dimension,
-		pretrained_metadata=dict(pretrained_meta),
-		random_metadata=dict(random_meta),
-		pretrained_model_source=pretrained_model_source,
-		random_model_source=random_model_source,
+	)
+
+
+def _inspect_generic_embedding_sources(  # noqa: C901, PLR0912, PLR0915
+	config: ChannelDecoderConfig,
+) -> EmbeddingGeometry:
+	if not config.models:
+		raise ValueError('embeddings.models must not be empty')
+	validated_models: dict[str, ChannelEmbeddingInput] = {}
+	checkpoint_models: dict[str, str] = {}
+	reference_metadata: Mapping[str, object] | None = None
+	reference_valid: np.ndarray | None = None
+	reference_shape: tuple[int, int, int, int] | None = None
+	reference_dtype: np.dtype[Any] | None = None
+	reference_patch: tuple[int, int, int] | None = None
+	reference_token_grid: tuple[int, int, int] | None = None
+	reference_volume: tuple[int, int, int] | None = None
+	reference_dimension: int | None = None
+	for model_id, source in config.models.items():
+		_validate_generic_source_config(model_id, source)
+		expected_checkpoint = source.expected_checkpoint
+		if expected_checkpoint is None:
+			raise ValueError(
+				f'embeddings.models.{model_id}.checkpoint must be configured'
+			)
+		paths = output_paths(source.embedding_dir, config.survey_id)
+		for path in (paths.embeddings, paths.valid_tokens, paths.metadata):
+			if not path.is_file():
+				raise FileNotFoundError(f'missing Channel decoder input: {path}')
+		metadata = _read_json(paths.metadata)
+		for key in _COMMON_EMBEDDING_METADATA_KEYS:
+			if key not in metadata:
+				raise ValueError(f'{model_id} embedding metadata missing {key}')
+		array = np.load(paths.embeddings, mmap_mode='r', allow_pickle=False)
+		if array.ndim != 4 or not np.issubdtype(array.dtype, np.floating):
+			raise TypeError(
+				f'{model_id} embeddings must be a floating [TX,TY,TZ,D] array'
+			)
+		metadata_dtype = _metadata_dtype(metadata, model_id)
+		if array.dtype != metadata_dtype:
+			raise TypeError(
+				f'{model_id} embedding array dtype does not match metadata '
+				'output_dtype'
+			)
+		patch = _triplet(metadata.get('patch_size'), 'embedding patch_size')
+		token_grid = _triplet(
+			metadata.get('token_grid_shape'), 'embedding token_grid_shape'
+		)
+		volume = _triplet(
+			metadata.get('volume_shape_xyz'), 'embedding volume_shape_xyz'
+		)
+		dimension = _embedding_dim(metadata)
+		shape = tuple(int(item) for item in array.shape)
+		if reference_shape is not None and shape != reference_shape:
+			raise ValueError('embedding shape mismatch across models')
+		if reference_dtype is not None and array.dtype != reference_dtype:
+			raise TypeError('embedding array dtype mismatch across models')
+		if dimension != shape[3]:
+			raise ValueError(
+				f'{model_id} embedding dimension does not match array shape'
+			)
+		if shape[:3] != token_grid:
+			raise ValueError(
+				f'{model_id} embedding array shape does not match token-grid metadata'
+			)
+		expected_tokens = tuple(
+			(size + patch_size - 1) // patch_size
+			for size, patch_size in zip(volume, patch, strict=True)
+		)
+		if expected_tokens != token_grid:
+			raise ValueError(
+				f'{model_id} token-grid shape is inconsistent with volume and '
+				'patch size'
+			)
+		valid = np.load(paths.valid_tokens, mmap_mode='r', allow_pickle=False)
+		if valid.dtype != np.bool_ or valid.shape != token_grid:
+			raise TypeError(
+				f'{model_id} valid-token mask must be bool with the token-grid shape'
+			)
+		model_source = inspect_channel_embedding_source(
+			metadata,
+			model_id=model_id,
+			expected_checkpoint=expected_checkpoint,
+		)
+		checkpoint_sha256 = str(model_source['checkpoint_sha256'])
+		duplicate_model = checkpoint_models.get(checkpoint_sha256)
+		if duplicate_model is not None:
+			raise ValueError(
+				'duplicate checkpoint_sha256 across models: '
+				f'{duplicate_model!r} and {model_id!r}'
+			)
+		checkpoint_models[checkpoint_sha256] = model_id
+		if reference_metadata is None:
+			reference_metadata = metadata
+			reference_valid = valid
+			reference_shape = shape
+			reference_dtype = array.dtype
+			reference_patch = patch
+			reference_token_grid = token_grid
+			reference_volume = volume
+			reference_dimension = dimension
+		else:
+			if dimension != reference_dimension:
+				raise ValueError('embedding dimension mismatch across models')
+			for key in _COMMON_EMBEDDING_METADATA_KEYS:
+				if metadata[key] != reference_metadata[key]:
+					raise ValueError(
+						f'embedding metadata {key} mismatch across models'
+					)
+			if reference_valid is None or not np.array_equal(valid, reference_valid):
+				raise ValueError('valid-token mask mismatch across models')
+		validated_models[model_id] = ChannelEmbeddingInput(
+			paths=paths,
+			metadata=dict(metadata),
+			model_source=model_source,
+		)
+	if (
+		reference_shape is None
+		or reference_patch is None
+		or reference_token_grid is None
+		or reference_volume is None
+		or reference_dimension is None
+	):
+		raise RuntimeError('embedding source inspection produced no geometry')
+	return EmbeddingGeometry(
+		models=validated_models,
+		volume_shape_xyz=reference_volume,
+		token_grid_shape_xyz=reference_token_grid,
+		patch_size_xyz=reference_patch,
+		embedding_shape=reference_shape,
+		embedding_dim=reference_dimension,
 	)
 
 
@@ -1273,6 +1541,88 @@ def _mapping(value: Mapping[str, object], key: str) -> Mapping[str, object]:
 	return child
 
 
+def _embedding_sources(
+	value: Mapping[str, object],
+) -> Mapping[str, ChannelEmbeddingSourceConfig]:
+	if 'models' in value:
+		if 'pretrained_dir' in value or 'random_dir' in value:
+			raise ValueError(
+				'embeddings.models cannot be combined with legacy embedding directories'
+			)
+		models = value.get('models')
+		if not isinstance(models, Mapping):
+			raise TypeError('embeddings.models must be a mapping')
+		if not models:
+			raise ValueError('embeddings.models must not be empty')
+		resolved: dict[str, ChannelEmbeddingSourceConfig] = {}
+		for model_id, source_value in models.items():
+			if not isinstance(model_id, str) or not model_id:
+				raise ValueError(
+					'embeddings.models model IDs must be non-empty strings'
+				)
+			if not isinstance(source_value, Mapping):
+				raise TypeError(f'embeddings.models.{model_id} must be a mapping')
+			resolved[model_id] = ChannelEmbeddingSourceConfig(
+				embedding_dir=_absolute_path(
+					source_value, 'dir', f'embeddings.models.{model_id}'
+				),
+				expected_checkpoint=_absolute_path(
+					source_value, 'checkpoint', f'embeddings.models.{model_id}'
+				),
+			)
+		return resolved
+	return {
+		'pretrained': ChannelEmbeddingSourceConfig(
+			embedding_dir=_absolute_path(
+				value, 'pretrained_dir', 'embeddings'
+			),
+			expected_checkpoint=None,
+		),
+		'random': ChannelEmbeddingSourceConfig(
+			embedding_dir=_absolute_path(value, 'random_dir', 'embeddings'),
+			expected_checkpoint=None,
+		),
+	}
+
+
+def _is_legacy_embedding_pair(config: ChannelDecoderConfig) -> bool:
+	if set(config.models) != {'pretrained', 'random'}:
+		return False
+	return all(
+		isinstance(source, ChannelEmbeddingSourceConfig)
+		and source.expected_checkpoint is None
+		for source in config.models.values()
+	)
+
+
+def _validate_generic_source_config(
+	model_id: object, source: object
+) -> None:
+	if not isinstance(model_id, str) or not model_id:
+		raise ValueError('embedding model IDs must be non-empty strings')
+	if not isinstance(source, ChannelEmbeddingSourceConfig):
+		raise TypeError(
+			f'embedding source {model_id!r} must be ChannelEmbeddingSourceConfig'
+		)
+	if not isinstance(source.embedding_dir, Path):
+		raise TypeError(f'embedding source {model_id!r} directory must be a Path')
+	if not source.embedding_dir.is_absolute():
+		raise ValueError(f'embedding source {model_id!r} directory must be absolute')
+	if source.expected_checkpoint is not None and not isinstance(
+		source.expected_checkpoint, Path
+	):
+		raise TypeError(
+			f'embedding source {model_id!r} checkpoint must be a Path'
+		)
+	if (
+		source.expected_checkpoint is not None
+		and not source.expected_checkpoint.is_absolute()
+	):
+		raise ValueError(
+			f'embedding source {model_id!r} checkpoint must be absolute'
+		)
+
+
 def _absolute_path(value: Mapping[str, object], key: str, prefix: str) -> Path:
 	item = value.get(key)
 	if not isinstance(item, str) or not item:
@@ -1356,6 +1706,8 @@ __all__ = [
 	'CHANNEL_RANDOM_ENCODER_SEED',
 	'ChannelDecoderConfig',
 	'ChannelDecoderPlan',
+	'ChannelEmbeddingInput',
+	'ChannelEmbeddingSourceConfig',
 	'ChannelTileDataset',
 	'DecoderArchitecture',
 	'DecoderTiles',
@@ -1367,5 +1719,6 @@ __all__ = [
 	'deterministic_tile_order',
 	'inspect_channel_decoder_job',
 	'inspect_embedding_pair',
+	'inspect_embedding_sources',
 	'run_channel_decoder_job',
 ]

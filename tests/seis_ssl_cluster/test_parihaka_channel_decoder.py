@@ -11,11 +11,17 @@ import pytest
 import torch
 import yaml
 
-from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
+from seis_ssl_cluster.embedding.writer import (
+	EmbeddingOutputPaths,
+	file_sha256,
+	output_paths,
+)
 from seis_ssl_cluster.parihaka.channel_data import SectionLines, split_mask_for_crop
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
 	ChannelDecoderConfig,
+	ChannelEmbeddingInput,
+	ChannelEmbeddingSourceConfig,
 	DecoderArchitecture,
 	DecoderTiles,
 	DecoderTrain,
@@ -25,8 +31,26 @@ from seis_ssl_cluster.parihaka.channel_decoder import (
 	deterministic_tile_order,
 	inspect_channel_decoder_job,
 	inspect_embedding_pair,
+	inspect_embedding_sources,
 	run_channel_decoder_job,
 )
+
+_GENERIC_MODEL_IDS = (
+	'mae',
+	'barlow_twins',
+	'mae_hmm_k6',
+	'barlow_twins_hmm_k6',
+)
+_GENERIC_OBJECTIVES = {
+	'mae': {'name': 'masked_autoencoding'},
+	'barlow_twins': {'name': 'barlow_twins'},
+	'mae_hmm_k6': {'name': 'masked_autoencoding_hmm_continuation'},
+	'barlow_twins_hmm_k6': {'name': 'barlow_twins_hmm_continuation'},
+}
+_GENERIC_STRATIGRAPHY_PRETEXTS = {
+	'mae_hmm_k6': {'method': 'hmm', 'cluster_count': 6},
+	'barlow_twins_hmm_k6': {'method': 'hmm', 'cluster_count': 6},
+}
 
 
 def _config(tmp_path: Path) -> ChannelDecoderConfig:
@@ -34,8 +58,12 @@ def _config(tmp_path: Path) -> ChannelDecoderConfig:
 		survey_id='parihaka',
 		labels=tmp_path / 'labels.npy',
 		labels_metadata=tmp_path / 'parihaka_labels_metadata.json',
-		pretrained_embeddings=tmp_path / 'pretrained',
-		random_embeddings=tmp_path / 'random',
+		models={
+			'pretrained': ChannelEmbeddingSourceConfig(
+				tmp_path / 'pretrained', None
+			),
+			'random': ChannelEmbeddingSourceConfig(tmp_path / 'random', None),
+		},
 		runs_root=tmp_path / 'runs',
 		decoder=DecoderArchitecture(
 			embedding_dim=384,
@@ -201,6 +229,89 @@ def _config_mapping(tmp_path: Path) -> dict[str, object]:
 	}
 
 
+def _generic_config_mapping(tmp_path: Path) -> dict[str, object]:
+	raw = _config_mapping(tmp_path)
+	raw['embeddings'] = {
+		'models': {
+			model_id: {
+				'dir': str(tmp_path / 'generic_embeddings' / model_id),
+				'checkpoint': str(tmp_path / 'checkpoints' / f'{model_id}.pt'),
+			}
+			for model_id in _GENERIC_MODEL_IDS
+		}
+	}
+	return raw
+
+
+def _write_generic_sources(config: ChannelDecoderConfig) -> dict[str, Path]:
+	common_metadata = {
+		'survey_id': config.survey_id,
+		'source_amplitude_path': '/data/parihaka_amplitude.npy',
+		'patch_size': [8, 8, 8],
+		'token_grid_shape': [2, 2, 2],
+		'volume_shape_xyz': [16, 16, 16],
+		'embedding_dim': 384,
+		'model_geometry': {'embed_dim': 384, 'depth': 12, 'num_heads': 6},
+		'window_size': [16, 16, 16],
+		'overlap': [8, 8, 8],
+		'output_dtype': 'float16',
+		'min_token_valid_fraction': 0.5,
+		'normalization_stats_path': '/data/parihaka_stats.json',
+		'preprocessing': {'mode': 'same'},
+		'zero_mask': {'enabled': True},
+		'precision': {'device_type': 'cpu', 'autocast': False},
+	}
+	checkpoints: dict[str, Path] = {}
+	for model_id in _GENERIC_MODEL_IDS:
+		source = config.models[model_id]
+		checkpoint = source.expected_checkpoint
+		assert checkpoint is not None
+		checkpoint.parent.mkdir(parents=True, exist_ok=True)
+		checkpoint.write_bytes(f'checkpoint:{model_id}'.encode())
+		checkpoints[model_id] = checkpoint
+		paths = output_paths(source.embedding_dir, config.survey_id)
+		source.embedding_dir.mkdir(parents=True, exist_ok=True)
+		np.save(
+			paths.embeddings,
+			np.zeros((2, 2, 2, 384), dtype=np.float16),
+			allow_pickle=False,
+		)
+		np.save(
+			paths.valid_tokens,
+			np.ones((2, 2, 2), dtype=np.bool_),
+			allow_pickle=False,
+		)
+		metadata = {
+			**common_metadata,
+			'checkpoint_path': str(checkpoint),
+			'checkpoint_sha256': file_sha256(checkpoint),
+			'pretraining_objective': _GENERIC_OBJECTIVES[model_id],
+		}
+		if model_id in _GENERIC_STRATIGRAPHY_PRETEXTS:
+			metadata['stratigraphy_pretext'] = _GENERIC_STRATIGRAPHY_PRETEXTS[
+				model_id
+			]
+		paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+	return checkpoints
+
+
+def _generic_paths(
+	config: ChannelDecoderConfig, model_id: str
+) -> EmbeddingOutputPaths:
+	return output_paths(config.models[model_id].embedding_dir, config.survey_id)
+
+
+def _update_generic_metadata(
+	config: ChannelDecoderConfig,
+	model_id: str,
+	**updates: object,
+) -> None:
+	paths = _generic_paths(config, model_id)
+	metadata = json.loads(paths.metadata.read_text(encoding='utf-8'))
+	metadata.update(updates)
+	paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+
+
 def _write_layout(tmp_path: Path) -> Path:
 	layout_path = tmp_path / 'layouts.yaml'
 	layout_path.write_text(
@@ -228,6 +339,192 @@ def _write_layout(tmp_path: Path) -> Path:
 		encoding='utf-8',
 	)
 	return layout_path
+
+
+def test_generic_embedding_sources_resolve_and_inspect_four_models(
+	tmp_path: Path,
+) -> None:
+	raw = _generic_config_mapping(tmp_path)
+	config = channel_decoder_config_from_mapping(raw)
+	assert tuple(config.models) == _GENERIC_MODEL_IDS
+	for model_id in _GENERIC_MODEL_IDS:
+		assert config.models[model_id] == ChannelEmbeddingSourceConfig(
+			tmp_path / 'generic_embeddings' / model_id,
+			tmp_path / 'checkpoints' / f'{model_id}.pt',
+		)
+	checkpoints = _write_generic_sources(config)
+
+	geometry = inspect_embedding_sources(config)
+
+	assert tuple(geometry.models) == _GENERIC_MODEL_IDS
+	assert geometry.volume_shape_xyz == (16, 16, 16)
+	assert geometry.token_grid_shape_xyz == (2, 2, 2)
+	assert geometry.patch_size_xyz == (8, 8, 8)
+	assert geometry.embedding_shape == (2, 2, 2, 384)
+	assert geometry.embedding_dim == 384
+	for model_id in _GENERIC_MODEL_IDS:
+		item = geometry.models[model_id]
+		assert isinstance(item, ChannelEmbeddingInput)
+		assert item.paths == _generic_paths(config, model_id)
+		pretext = _GENERIC_STRATIGRAPHY_PRETEXTS.get(model_id)
+		assert item.model_source == {
+			'role': 'learned',
+			'model_id': model_id,
+			'checkpoint_path': str(checkpoints[model_id]),
+			'checkpoint_sha256': file_sha256(checkpoints[model_id]),
+			'pretraining_objective': _GENERIC_OBJECTIVES[model_id],
+			'stratigraphy_pretext': pretext,
+		}
+		assert item.metadata['pretraining_objective'] == _GENERIC_OBJECTIVES[
+			model_id
+		]
+		if pretext is None:
+			assert 'stratigraphy_pretext' not in item.metadata
+		else:
+			assert item.metadata['stratigraphy_pretext'] == pretext
+
+
+def test_generic_embedding_model_id_must_be_non_empty(tmp_path: Path) -> None:
+	raw = _generic_config_mapping(tmp_path)
+	embeddings = raw['embeddings']
+	assert isinstance(embeddings, dict)
+	embeddings['models'] = {
+		'': {
+			'dir': str(tmp_path / 'embeddings'),
+			'checkpoint': str(tmp_path / 'checkpoint.pt'),
+		}
+	}
+	with pytest.raises(ValueError, match='model ID'):
+		channel_decoder_config_from_mapping(raw)
+
+
+@pytest.mark.parametrize('key', ['dir', 'checkpoint'])
+def test_generic_embedding_paths_must_be_absolute(
+	tmp_path: Path,
+	key: str,
+) -> None:
+	raw = _generic_config_mapping(tmp_path)
+	embeddings = raw['embeddings']
+	assert isinstance(embeddings, dict)
+	models = embeddings['models']
+	assert isinstance(models, dict)
+	mae = models['mae']
+	assert isinstance(mae, dict)
+	mae[key] = 'relative/path'
+	with pytest.raises(ValueError, match='must be absolute'):
+		channel_decoder_config_from_mapping(raw)
+
+
+@pytest.mark.parametrize(
+	('key', 'different_value'),
+	[
+		('model_geometry', {'embed_dim': 384, 'depth': 24, 'num_heads': 6}),
+		('preprocessing', {'mode': 'different'}),
+		('window_size', [8, 16, 16]),
+		('overlap', [4, 8, 8]),
+		('precision', {'device_type': 'cuda', 'autocast': True}),
+	],
+)
+def test_generic_embedding_common_metadata_mismatch_is_rejected(
+	tmp_path: Path,
+	key: str,
+	different_value: object,
+) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	_write_generic_sources(config)
+	_update_generic_metadata(config, 'barlow_twins', **{key: different_value})
+	with pytest.raises(ValueError, match=key):
+		inspect_embedding_sources(config)
+
+
+def test_generic_valid_token_mask_mismatch_is_rejected(tmp_path: Path) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	_write_generic_sources(config)
+	paths = _generic_paths(config, 'mae_hmm_k6')
+	mask = np.ones((2, 2, 2), dtype=np.bool_)
+	mask[0, 0, 0] = False
+	np.save(paths.valid_tokens, mask, allow_pickle=False)
+	with pytest.raises(ValueError, match='valid-token mask mismatch'):
+		inspect_embedding_sources(config)
+
+
+def test_generic_configured_checkpoint_must_match_metadata(
+	tmp_path: Path,
+) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	_write_generic_sources(config)
+	unexpected = tmp_path / 'checkpoints' / 'unexpected.pt'
+	unexpected.write_bytes(b'unexpected checkpoint')
+	_update_generic_metadata(
+		config,
+		'barlow_twins',
+		checkpoint_path=str(unexpected),
+		checkpoint_sha256=file_sha256(unexpected),
+	)
+	with pytest.raises(ValueError, match='configured checkpoint'):
+		inspect_embedding_sources(config)
+
+
+def test_generic_checkpoint_sha_must_match_actual_file(tmp_path: Path) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	_write_generic_sources(config)
+	_update_generic_metadata(
+		config,
+		'barlow_twins_hmm_k6',
+		checkpoint_sha256='c' * 64,
+	)
+	with pytest.raises(ValueError, match='does not match checkpoint file'):
+		inspect_embedding_sources(config)
+
+
+def test_generic_checkpoint_sha_must_be_unique(tmp_path: Path) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	checkpoints = _write_generic_sources(config)
+	duplicate = checkpoints['barlow_twins']
+	duplicate.write_bytes(checkpoints['mae'].read_bytes())
+	_update_generic_metadata(
+		config,
+		'barlow_twins',
+		checkpoint_sha256=file_sha256(duplicate),
+	)
+	with pytest.raises(ValueError, match='checkpoint_sha256'):
+		inspect_embedding_sources(config)
+
+
+@pytest.mark.parametrize('metadata_dtype', ['float16', 'float32'])
+def test_generic_embedding_output_dtype_mismatch_is_rejected(
+	tmp_path: Path,
+	metadata_dtype: str,
+) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	_write_generic_sources(config)
+	paths = _generic_paths(config, 'barlow_twins')
+	np.save(
+		paths.embeddings,
+		np.zeros((2, 2, 2, 384), dtype=np.float32),
+		allow_pickle=False,
+	)
+	_update_generic_metadata(
+		config, 'barlow_twins', output_dtype=metadata_dtype
+	)
+	with pytest.raises(TypeError, match='dtype'):
+		inspect_embedding_sources(config)
+
+
+def test_generic_embedding_shape_mismatch_is_rejected(tmp_path: Path) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	_write_generic_sources(config)
+	paths = _generic_paths(config, 'barlow_twins_hmm_k6')
+	np.save(
+		paths.embeddings,
+		np.zeros((2, 2, 2, 385), dtype=np.float16),
+		allow_pickle=False,
+	)
+	_update_generic_metadata(
+		config, 'barlow_twins_hmm_k6', embedding_dim=385
+	)
+	with pytest.raises(ValueError, match='embedding shape mismatch'):
+		inspect_embedding_sources(config)
 
 
 def test_embedding_geometry_mismatch_is_rejected(tmp_path: Path) -> None:
@@ -350,6 +647,7 @@ def test_embedding_pair_records_validated_model_sources(tmp_path: Path) -> None:
 	config = _config(tmp_path)
 	pretrained_checkpoint, random_checkpoint = _write_pair(config)
 	geometry = inspect_embedding_pair(config)
+	assert inspect_embedding_sources(config) == geometry
 
 	assert geometry.pretrained_model_source == {
 		'role': 'pretrained',
@@ -439,8 +737,10 @@ def test_pretrained_and_random_embedding_directories_cannot_be_reversed(
 	_write_pair(config)
 	reversed_config = replace(
 		config,
-		pretrained_embeddings=config.random_embeddings,
-		random_embeddings=config.pretrained_embeddings,
+		models={
+			'pretrained': config.models['random'],
+			'random': config.models['pretrained'],
+		},
 	)
 	with pytest.raises(ValueError, match=r'expected Parihaka full_100ep/latest\.pt'):
 		inspect_embedding_pair(reversed_config)

@@ -49,9 +49,15 @@ def inspect_channel_model_sources(
 	if tuple(pretrained_path.parts[-len(pretrained_checkpoint_suffix) :]) != (
 		pretrained_checkpoint_suffix
 	):
+		expected_identity = (
+			'Parihaka full_100ep/latest.pt'
+			if pretrained_checkpoint_suffix
+			== CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX
+			else '/'.join(pretrained_checkpoint_suffix)
+		)
 		raise ValueError(
 			'pretrained embedding checkpoint does not match its declared '
-			'scientific identity suffix'
+			f'scientific identity suffix; expected {expected_identity}'
 		)
 	random_payload = load_checkpoint_metadata_without_weights(random_path)
 	metadata = _checkpoint_mapping(random_payload, 'metadata', random_path)
@@ -113,6 +119,43 @@ def inspect_channel_model_sources(
 	)
 
 
+def inspect_channel_embedding_source(
+	metadata: Mapping[str, object],
+	*,
+	model_id: str,
+	expected_checkpoint: Path,
+) -> dict[str, object]:
+	"""Validate and normalize one configured learned embedding source."""
+	if not isinstance(model_id, str) or not model_id:
+		raise ValueError('model_id must be a non-empty string')
+	if not isinstance(expected_checkpoint, Path):
+		raise TypeError('expected_checkpoint must be a Path')
+	if not expected_checkpoint.is_absolute():
+		raise ValueError('expected_checkpoint must be absolute')
+	if 'pretraining_objective' not in metadata:
+		raise ValueError(
+			f'{model_id} embedding metadata missing pretraining_objective'
+		)
+	checkpoint_path, checkpoint_sha256 = validated_channel_checkpoint(
+		metadata, model_id
+	)
+	if checkpoint_path.resolve(strict=False) != expected_checkpoint.resolve(
+		strict=False
+	):
+		raise ValueError(
+			f'{model_id} embedding checkpoint_path does not match configured '
+			'checkpoint'
+		)
+	return {
+		'role': 'learned',
+		'model_id': model_id,
+		'checkpoint_path': str(checkpoint_path),
+		'checkpoint_sha256': checkpoint_sha256,
+		'pretraining_objective': metadata['pretraining_objective'],
+		'stratigraphy_pretext': metadata.get('stratigraphy_pretext'),
+	}
+
+
 def _validate_pretrained_identity(
 	model_tag: str,
 	checkpoint_suffix: tuple[str, ...],
@@ -162,6 +205,7 @@ __all__ = [
 	'CHANNEL_PRETRAINED_CHECKPOINT_SUFFIX',
 	'CHANNEL_PRETRAINED_MODEL_TAG',
 	'CHANNEL_RANDOM_ENCODER_SEED',
+	'inspect_channel_embedding_source',
 	'inspect_channel_model_sources',
 	'validated_channel_checkpoint',
 ]
