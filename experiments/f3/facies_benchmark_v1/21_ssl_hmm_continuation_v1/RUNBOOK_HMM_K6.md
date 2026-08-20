@@ -301,7 +301,7 @@ python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$STAGE2_CONFIG
 ## 10. final checkpoint監査
 
 control 2本とHMM25 2本を1本で監査する。HMMではpaired binding、K=6 head、
-optimizer、frozen / trainable encoder範囲、bare encoder consumer、base objectiveも
+optimizer、frozen / trainable encoder範囲、bare encoder consumer、base stageも
 確認する。head初期値は再構築しない。
 
 ```bash
@@ -314,7 +314,6 @@ import sys
 
 import torch
 
-from seis_ssl_cluster.embedding.extractor import _stratigraphy_pretext_metadata
 from seis_ssl_cluster.models.amplitude_encoder_factory import (
     build_model_from_checkpoint_payload,
 )
@@ -350,7 +349,6 @@ def audit_hmm(
     target_root,
     checkpoint_path,
     expected_stage,
-    expected_base_objective,
 ):
     source_path = source_path.resolve()
     target_root = target_root.resolve()
@@ -363,6 +361,7 @@ def audit_hmm(
     assert payload['epoch'] == 25
     assert payload['global_step'] == 15_625
     assert payload['amp_enabled'] is False
+    assert payload['training_state']['stage'] == 'train_strat_hmm_pretext'
     assert config['stage'] == expected_stage
     assert stratigraphy['train']['amp'] is False
     assert stratigraphy['pseudo_targets']['k'] == 6
@@ -377,11 +376,6 @@ def audit_hmm(
     assert Path(stratigraphy['teacher']['checkpoint']).resolve() == source_path
     assert Path(stratigraphy['student']['init_checkpoint']).resolve() == source_path
     assert Path(stratigraphy['pseudo_targets']['input_dir']).resolve() == target_root
-    metadata = _stratigraphy_pretext_metadata(payload)
-    assert metadata is not None
-    assert metadata['method'] == 'strat_hmm_pretext'
-    assert metadata['base_objective'] == expected_base_objective
-    assert metadata['head_num_prototypes'] == 6
     assert_finite_metrics(payload)
 
     source_state = source['model_state_dict']
@@ -423,10 +417,7 @@ def audit_hmm(
         torch.equal(encoder.state_dict()[key], student_state[key])
         for key in student_state
     )
-    print(
-        f"HMM PASS: {checkpoint_path} "
-        f"base_objective={metadata['base_objective']}"
-    )
+    print(f'HMM PASS: {checkpoint_path} base_stage={expected_stage}')
 
 
 mae_source = Path(sys.argv[1])
@@ -436,7 +427,6 @@ audit_hmm(
     Path(sys.argv[3]),
     Path(sys.argv[4]),
     'train_amp_mae',
-    'amp_mae3d',
 )
 bt_source = Path(sys.argv[5])
 audit_control(bt_source, Path(sys.argv[6]), 'barlow_twins_training')
@@ -445,7 +435,6 @@ audit_hmm(
     Path(sys.argv[7]),
     Path(sys.argv[8]),
     'barlow_twins_training',
-    'barlow_twins_3d',
 )
 PY
 ```
