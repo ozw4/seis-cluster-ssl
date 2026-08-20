@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import csv
 import json
+import statistics
+import sys
 from pathlib import Path
 
 import pytest
 
+from proc.seis_ssl_cluster import summarize_parihaka_channel_ssl_hmm as summary_cli
 from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_TEST_MODE,
 	DATA_SIZE_PREFIX,
@@ -17,9 +21,12 @@ from seis_ssl_cluster.parihaka.channel_decoder import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
 )
 from seis_ssl_cluster.parihaka.channel_results import (
+	CHANNEL_SSL_HMM_MODEL_IDS,
 	ChannelSummaryConfig,
 	inspect_channel_benchmark_results,
+	inspect_channel_model_results,
 	summarize_channel_benchmark,
+	summarize_channel_ssl_hmm_four_way,
 )
 
 _EXPECTED_PRETRAINED_CHECKPOINT = (
@@ -31,6 +38,12 @@ _TEST_DEFINITION = {
 	'reserved_large_inline': list(range(10, 54)),
 	'reserved_large_crossline': list(range(20, 64)),
 }
+_GENERIC_CHECKPOINT_SHA = {
+	model_id: str(index) * 64
+	for index, model_id in enumerate(CHANNEL_SSL_HMM_MODEL_IDS, start=1)
+}
+_MAE_HMM_GAINS = (0.1, 0.05, 0.0, -0.05, 0.15)
+_BARLOW_TWINS_HMM_GAINS = (0.08, 0.0, -0.02, 0.04, 0.1)
 
 
 def _supervision(layout_index: int, data_size: str) -> dict[str, object]:
@@ -78,22 +91,21 @@ def _benchmark_identity(
 			},
 		},
 	}
+	legacy = model in {'pretrained', 'random'}
 	pretrained_checkpoint = _EXPECTED_PRETRAINED_CHECKPOINT
-	checkpoint_path = (
-		pretrained_checkpoint
-		if model == 'pretrained'
-		else '/artifacts/pretraining/random/mae_random_seed42.pt'
-	)
-	checkpoint_sha256 = ('a' if model == 'pretrained' else 'b') * 64
-	model_source = (
-		{
+	if legacy:
+		checkpoint_path = (
+			pretrained_checkpoint
+			if model == 'pretrained'
+			else '/artifacts/pretraining/random/mae_random_seed42.pt'
+		)
+		checkpoint_sha256 = ('a' if model == 'pretrained' else 'b') * 64
+		model_source = {
 			'role': 'pretrained',
 			'checkpoint_path': checkpoint_path,
 			'checkpoint_sha256': checkpoint_sha256,
 			'model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
-		}
-		if model == 'pretrained'
-		else {
+		} if model == 'pretrained' else {
 			'role': 'random',
 			'checkpoint_path': checkpoint_path,
 			'checkpoint_sha256': checkpoint_sha256,
@@ -105,7 +117,38 @@ def _benchmark_identity(
 			'reference_checkpoint_sha256': 'a' * 64,
 			'reference_model_tag': CHANNEL_PRETRAINED_MODEL_TAG,
 		}
-	)
+	else:
+		checkpoint_path = f'/artifacts/pretraining/{model}/latest.pt'
+		checkpoint_sha256 = _GENERIC_CHECKPOINT_SHA[model]
+		objective_name = 'mae' if model.startswith('mae') else 'barlow_twins'
+		model_source = {
+			'role': 'learned',
+			'model_id': model,
+			'checkpoint_path': checkpoint_path,
+			'checkpoint_sha256': checkpoint_sha256,
+			'pretraining_objective': {'name': objective_name},
+			'stratigraphy_pretext': (
+				{'kind': 'hmm', 'states': 6} if '_hmm_' in model else None
+			),
+		}
+	common_metadata = {
+		'survey_id': 'parihaka_full',
+		'source_amplitude_path': '/data/parihaka.npy',
+		'volume_shape_xyz': [100, 200, 300],
+		'model_geometry': {'embedding_dim': 384, 'depth': 12},
+		'patch_size': [8, 8, 8],
+		'token_grid_shape': [13, 25, 38],
+		'window_size': [16, 16, 16],
+		'overlap': [8, 8, 8],
+		'output_dtype': 'float16',
+		'min_token_valid_fraction': 0.5,
+		'normalization_stats_path': '/data/stats.json',
+		'preprocessing': {'normalization': 'zscore'},
+		'zero_mask': {'enabled': True},
+		'precision': {'autocast': True},
+	}
+	if legacy:
+		common_metadata['pretraining_objective'] = {'name': 'mae'}
 	return {
 		'model': model,
 		'layout_id': layout_id,
@@ -114,23 +157,7 @@ def _benchmark_identity(
 			'checkpoint_path': checkpoint_path,
 			'checkpoint_sha256': checkpoint_sha256,
 			'model_source': model_source,
-			'common_metadata': {
-				'survey_id': 'parihaka_full',
-				'source_amplitude_path': '/data/parihaka.npy',
-				'volume_shape_xyz': [100, 200, 300],
-				'model_geometry': {'embedding_dim': 384, 'depth': 12},
-				'patch_size': [8, 8, 8],
-				'token_grid_shape': [13, 25, 38],
-				'window_size': [16, 16, 16],
-				'overlap': [8, 8, 8],
-				'output_dtype': 'float16',
-				'min_token_valid_fraction': 0.5,
-				'normalization_stats_path': '/data/stats.json',
-				'preprocessing': {'normalization': 'zscore'},
-				'zero_mask': {'enabled': True},
-				'precision': {'autocast': True},
-				'pretraining_objective': {'name': 'mae'},
-			},
+			'common_metadata': common_metadata,
 		},
 		'decoder_initial_state_sha256': 'c' * 64,
 		'label_path': '/data/parihaka_labels.npy',
@@ -222,6 +249,53 @@ def _write_complete_results(config: ChannelSummaryConfig) -> None:
 					),
 					encoding='utf-8',
 				)
+
+
+def _write_complete_generic_results(config: ChannelSummaryConfig) -> None:
+	for model in CHANNEL_SSL_HMM_MODEL_IDS:
+		for layout_index, layout_id in enumerate(LAYOUT_IDS):
+			for size_index, size in enumerate(DATA_SIZE_PREFIX):
+				root = _job_root(config, model, layout_id, size)
+				root.mkdir(parents=True)
+				(root / 'metrics.json').write_text(
+					json.dumps(
+						{
+							'model': model,
+							'layout_id': layout_id,
+							'data_size': size,
+							'benchmark_identity': _benchmark_identity(
+								model, layout_index, layout_id, size
+							),
+							'supervision': _supervision(layout_index, size),
+							'class_weights': [0.55, 5.5],
+							'train_channel_voxels': (
+								100 * DATA_SIZE_PREFIX[size]
+							),
+							'train_non_channel_voxels': (
+								1000 * DATA_SIZE_PREFIX[size]
+							),
+							'test': {
+								'channel_iou': _generic_channel_iou(
+									model, layout_index, size_index
+								)
+							},
+						}
+					),
+					encoding='utf-8',
+				)
+
+
+def _generic_channel_iou(
+	model: str, layout_index: int, size_index: int
+) -> float:
+	mae = 0.4 + 0.03 * layout_index + 0.01 * size_index
+	if model == 'mae':
+		return mae
+	if model == 'barlow_twins':
+		return mae + 0.02
+	if model == 'mae_hmm_k6':
+		return mae + _MAE_HMM_GAINS[layout_index]
+	return mae + 0.02 + _BARLOW_TWINS_HMM_GAINS[layout_index]
 
 
 def _job_root(
@@ -636,3 +710,294 @@ def test_summary_rejects_paired_class_weight_mismatch(tmp_path: Path) -> None:
 	)
 	with pytest.raises(ValueError, match='pretrained/random class_weights mismatch'):
 		inspect_channel_benchmark_results(config)
+
+
+def test_generic_summary_inspects_all_60_model_results(tmp_path: Path) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	jobs = inspect_channel_model_results(
+		config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS
+	)
+	assert len(jobs) == 60
+	mae_source = jobs[('mae', 'layout_000', 'small')][
+		'benchmark_identity'
+	]['embedding']['model_source']
+	barlow_source = jobs[('barlow_twins', 'layout_000', 'small')][
+		'benchmark_identity'
+	]['embedding']['model_source']
+	mae_hmm_source = jobs[('mae_hmm_k6', 'layout_000', 'small')][
+		'benchmark_identity'
+	]['embedding']['model_source']
+	assert mae_source['model_id'] == 'mae'
+	assert mae_source['pretraining_objective'] == {'name': 'mae'}
+	assert barlow_source['pretraining_objective'] == {'name': 'barlow_twins'}
+	assert mae_source['stratigraphy_pretext'] is None
+	assert mae_hmm_source['stratigraphy_pretext'] == {
+		'kind': 'hmm',
+		'states': 6,
+	}
+
+
+def test_generic_summary_fails_when_one_of_60_jobs_is_missing(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	(_job_root(config, 'mae_hmm_k6', 'layout_003', 'medium') / 'metrics.json').unlink()
+	with pytest.raises(FileNotFoundError, match='all 60 jobs; missing 1'):
+		inspect_channel_model_results(config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS)
+
+
+@pytest.mark.parametrize(
+	'model_ids',
+	[(), ('mae', 'mae'), ('mae', '')],
+)
+def test_generic_summary_rejects_invalid_model_id_sets(
+	tmp_path: Path, model_ids: tuple[str, ...]
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	with pytest.raises(ValueError, match=r'model_ids.*(?:empty|duplicates|non-empty)'):
+		inspect_channel_model_results(config, model_ids=model_ids)
+
+
+def test_generic_summary_rejects_metrics_model_id_mismatch(tmp_path: Path) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	_mutate_metrics(
+		config,
+		'mae',
+		'layout_000',
+		'small',
+		lambda payload: payload.__setitem__('model', 'wrong'),
+	)
+	with pytest.raises(ValueError, match='incorrect model'):
+		inspect_channel_model_results(config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS)
+
+
+def test_generic_summary_rejects_non_finite_channel_iou(tmp_path: Path) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	_mutate_metrics(
+		config,
+		'mae',
+		'layout_000',
+		'small',
+		lambda payload: payload['test'].__setitem__('channel_iou', float('nan')),
+	)
+	with pytest.raises(ValueError, match='channel_iou must be finite'):
+		inspect_channel_model_results(config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS)
+
+
+def test_generic_summary_rejects_same_condition_supervision_drift(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	_mutate_metrics(
+		config,
+		'barlow_twins',
+		'layout_001',
+		'medium',
+		lambda payload: payload['supervision'].__setitem__(
+			'train_inline', [999, 1000]
+		),
+	)
+	with pytest.raises(ValueError, match='supervision mismatch'):
+		inspect_channel_model_results(config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS)
+
+
+@pytest.mark.parametrize(
+	('keys', 'value', 'message'),
+	[
+		(('decoder_initial_state_sha256',), 'f' * 64, 'decoder_initial_state'),
+		(
+			('embedding', 'common_metadata', 'preprocessing'),
+			{'normalization': 'different'},
+			'embedding common metadata',
+		),
+	],
+)
+def test_generic_summary_rejects_global_identity_drift(
+	tmp_path: Path,
+	keys: tuple[str, ...],
+	value: object,
+	message: str,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	for model in CHANNEL_SSL_HMM_MODEL_IDS:
+		_mutate_metrics(
+			config,
+			model,
+			'layout_004',
+			'large',
+			lambda payload: _set_nested(
+				payload['benchmark_identity'], keys, value
+			),
+		)
+	with pytest.raises(ValueError, match=message):
+		inspect_channel_model_results(config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS)
+
+
+def test_generic_summary_rejects_checkpoint_drift_within_model(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	_mutate_metrics(
+		config,
+		'mae_hmm_k6',
+		'layout_002',
+		'large',
+		lambda payload: _set_embedding_checkpoint(
+			payload, 'checkpoint_path', '/artifacts/pretraining/other/latest.pt'
+		),
+	)
+	with pytest.raises(ValueError, match='checkpoint does not match its other 15 jobs'):
+		inspect_channel_model_results(config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS)
+
+
+def test_generic_summary_rejects_duplicate_checkpoint_sha(tmp_path: Path) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	for layout_id in LAYOUT_IDS:
+		for size in DATA_SIZE_PREFIX:
+			_mutate_metrics(
+				config,
+				'barlow_twins_hmm_k6',
+				layout_id,
+				size,
+				lambda payload: _set_embedding_checkpoint(
+					payload,
+					'checkpoint_sha256',
+					_GENERIC_CHECKPOINT_SHA['mae_hmm_k6'],
+				),
+			)
+	with pytest.raises(ValueError, match='checkpoint SHA-256 must differ'):
+		inspect_channel_model_results(config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS)
+
+
+def test_generic_summary_rejects_model_source_model_id_mismatch(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	_mutate_metrics(
+		config,
+		'mae_hmm_k6',
+		'layout_000',
+		'small',
+		lambda payload: payload['benchmark_identity']['embedding'][
+			'model_source'
+		].__setitem__('model_id', 'mae'),
+	)
+	with pytest.raises(ValueError, match='model-source model_id'):
+		inspect_channel_model_results(config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS)
+
+
+def test_ssl_hmm_four_way_summary_writes_comparison_and_statistics(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	paths = summarize_channel_ssl_hmm_four_way(config)
+	assert {path.name for path in paths} == {
+		'comparison.csv',
+		'summary.json',
+		'summary.md',
+	}
+	with (config.output_dir / 'comparison.csv').open(
+		encoding='utf-8', newline=''
+	) as file_obj:
+		reader = csv.DictReader(file_obj)
+		comparison = list(reader)
+		assert reader.fieldnames == [
+			'data_size',
+			'layout_id',
+			'mae_channel_iou',
+			'barlow_twins_channel_iou',
+			'mae_hmm_k6_channel_iou',
+			'barlow_twins_hmm_k6_channel_iou',
+			'mae_hmm_gain',
+			'barlow_twins_hmm_gain',
+			'barlow_twins_minus_mae',
+			'barlow_twins_hmm_minus_mae_hmm',
+			'target_train_voxel_count',
+			'actual_train_voxel_count',
+			'relative_count_error',
+			'selected_token_count',
+			'selected_token_xyz_sha256',
+		]
+	assert len(comparison) == 15
+	first = comparison[0]
+	assert float(first['mae_channel_iou']) == pytest.approx(0.4)
+	assert float(first['barlow_twins_channel_iou']) == pytest.approx(0.42)
+	assert float(first['mae_hmm_k6_channel_iou']) == pytest.approx(0.5)
+	assert float(first['barlow_twins_hmm_k6_channel_iou']) == pytest.approx(0.5)
+	assert float(first['mae_hmm_gain']) == pytest.approx(0.1)
+	assert float(first['barlow_twins_hmm_gain']) == pytest.approx(0.08)
+	assert float(first['barlow_twins_minus_mae']) == pytest.approx(0.02)
+	assert float(first['barlow_twins_hmm_minus_mae_hmm']) == pytest.approx(0.0)
+	payload = json.loads((config.output_dir / 'summary.json').read_text())
+	assert payload['schema_version'] == 3
+	assert payload['job_count'] == 60
+	mae_small = payload['by_size']['small']['mae_hmm_gain']
+	assert mae_small['paired_mean'] == pytest.approx(
+		statistics.fmean(_MAE_HMM_GAINS)
+	)
+	assert mae_small['paired_median'] == pytest.approx(
+		statistics.median(_MAE_HMM_GAINS)
+	)
+	assert mae_small['sample_standard_deviation'] == pytest.approx(
+		statistics.stdev(_MAE_HMM_GAINS)
+	)
+	assert (mae_small['wins'], mae_small['ties'], mae_small['losses']) == (3, 1, 1)
+	assert mae_small['layout_deltas'] == pytest.approx(
+		dict(zip(LAYOUT_IDS, _MAE_HMM_GAINS, strict=True))
+	)
+
+
+def test_ssl_hmm_four_way_summary_does_not_overwrite_outputs(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	config.output_dir.mkdir(parents=True)
+	(config.output_dir / 'summary.json').write_text('{}', encoding='utf-8')
+	with pytest.raises(FileExistsError, match='outputs already exist'):
+		summarize_channel_ssl_hmm_four_way(config)
+	assert (config.output_dir / 'summary.json').read_text(encoding='utf-8') == '{}'
+
+
+def test_ssl_hmm_four_way_cli_dry_run_reports_60_jobs_without_writing(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config)
+	config_path = tmp_path / 'summary.yaml'
+	config_path.write_text(
+		'inputs:\n'
+		f'  runs_root: {config.runs_root}\n'
+		'outputs:\n'
+		f'  output_dir: {config.output_dir}\n',
+		encoding='utf-8',
+	)
+	monkeypatch.setattr(
+		sys,
+		'argv',
+		[
+			'summarize_parihaka_channel_ssl_hmm.py',
+			'--config',
+			str(config_path),
+			'--dry-run',
+		],
+	)
+	summary_cli.main()
+	output = capsys.readouterr().out
+	assert 'complete_jobs: 60' in output
+	assert 'models: mae, barlow_twins, mae_hmm_k6, barlow_twins_hmm_k6' in output
+	assert f'output_dir: {config.output_dir}' in output
+	assert 'execution: dry-run; no files written' in output
+	assert not config.output_dir.exists()

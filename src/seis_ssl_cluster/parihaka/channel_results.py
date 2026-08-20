@@ -24,6 +24,12 @@ from seis_ssl_cluster.parihaka.channel_decoder import (
 )
 
 MODELS = ('pretrained', 'random')
+CHANNEL_SSL_HMM_MODEL_IDS = (
+	'mae',
+	'barlow_twins',
+	'mae_hmm_k6',
+	'barlow_twins_hmm_k6',
+)
 OUTPUT_NAMES = ('comparison.csv', 'summary.json', 'summary.md')
 
 _BENCHMARK_IDENTITY_KEYS = {
@@ -47,7 +53,7 @@ _BENCHMARK_IDENTITY_KEYS = {
 	'split_class_counts',
 	'tile_counts',
 }
-_EMBEDDING_COMMON_METADATA_KEYS = {
+_LEGACY_EMBEDDING_COMMON_METADATA_KEYS = {
 	'survey_id',
 	'source_amplitude_path',
 	'volume_shape_xyz',
@@ -64,6 +70,9 @@ _EMBEDDING_COMMON_METADATA_KEYS = {
 	'precision',
 	'pretraining_objective',
 }
+_GENERIC_EMBEDDING_COMMON_METADATA_KEYS = (
+	_LEGACY_EMBEDDING_COMMON_METADATA_KEYS - {'pretraining_objective'}
+)
 _GLOBAL_IDENTITY_KEYS = (
 	'label_path',
 	'label_metadata_path',
@@ -94,6 +103,14 @@ _RANDOM_MODEL_SOURCE_KEYS = {
 	'reference_checkpoint_sha256',
 	'reference_model_tag',
 }
+_LEARNED_MODEL_SOURCE_KEYS = {
+	'role',
+	'model_id',
+	'checkpoint_path',
+	'checkpoint_sha256',
+	'pretraining_objective',
+	'stratigraphy_pretext',
+}
 
 
 @dataclass(frozen=True)
@@ -120,9 +137,21 @@ def inspect_channel_benchmark_results(
 	config: ChannelSummaryConfig,
 ) -> dict[tuple[str, str, str], Mapping[str, object]]:
 	"""Require and validate all 30 metrics files."""
+	return inspect_channel_model_results(config, model_ids=MODELS)
+
+
+def inspect_channel_model_results(
+	config: ChannelSummaryConfig,
+	*,
+	model_ids: Sequence[str],
+) -> dict[tuple[str, str, str], Mapping[str, object]]:
+	"""Require and validate all metrics files for the requested model set."""
+	models = _validated_model_ids(model_ids)
+	legacy = set(models) == set(MODELS)
+	expected_job_count = len(models) * len(LAYOUT_IDS) * len(DATA_SIZE_PREFIX)
 	rows: dict[tuple[str, str, str], Mapping[str, object]] = {}
 	missing: list[Path] = []
-	for model in MODELS:
+	for model in models:
 		for layout_id in LAYOUT_IDS:
 			for data_size in DATA_SIZE_PREFIX:
 				path = _metrics_path(config.runs_root, model, layout_id, data_size)
@@ -135,17 +164,31 @@ def inspect_channel_benchmark_results(
 				_validate_supervision(payload, path)
 				_class_weights(payload, path)
 				_validate_benchmark_identity(
-					payload, model, layout_id, data_size, path
+					payload,
+					model,
+					layout_id,
+					data_size,
+					path,
+					legacy=legacy,
 				)
 				rows[(model, layout_id, data_size)] = payload
 	if missing:
 		raise FileNotFoundError(
-			f'Parihaka Channel summary requires all 30 jobs; missing {len(missing)}: '
+			f'Parihaka Channel summary requires all {expected_job_count} jobs; '
+			f'missing {len(missing)}: '
 			+ ', '.join(str(path) for path in missing)
 		)
-	if len(rows) != 30:
-		raise ValueError(f'expected 30 unique benchmark conditions; got {len(rows)}')
-	_validate_supervision_parity(rows, config.runs_root)
+	if len(rows) != expected_job_count:
+		raise ValueError(
+			f'expected {expected_job_count} unique benchmark conditions; got '
+			f'{len(rows)}'
+		)
+	_validate_supervision_parity(
+		rows,
+		config.runs_root,
+		model_ids=models,
+		legacy=legacy,
+	)
 	return rows
 
 
@@ -227,6 +270,182 @@ def summarize_channel_benchmark(
 	return comparison_path, json_path, markdown_path
 
 
+def summarize_channel_ssl_hmm_four_way(
+	config: ChannelSummaryConfig,
+) -> tuple[Path, Path, Path]:
+	"""Write the four-model SSL/HMM Channel comparison and paired gains."""
+	jobs = inspect_channel_model_results(
+		config, model_ids=CHANNEL_SSL_HMM_MODEL_IDS
+	)
+	if config.output_dir.exists() and any(
+		(config.output_dir / name).exists() for name in OUTPUT_NAMES
+	):
+		raise FileExistsError(
+			f'channel summary outputs already exist: {config.output_dir}'
+		)
+	comparison: list[dict[str, object]] = []
+	for data_size in DATA_SIZE_PREFIX:
+		for layout_id in LAYOUT_IDS:
+			metrics = {
+				model_id: _metric(
+					jobs[(model_id, layout_id, data_size)],
+					'test',
+					'channel_iou',
+					_metrics_path(
+						config.runs_root, model_id, layout_id, data_size
+					),
+				)
+				for model_id in CHANNEL_SSL_HMM_MODEL_IDS
+			}
+			selection = _selection_comparison_fields(
+				jobs[('mae', layout_id, data_size)],
+				_metrics_path(config.runs_root, 'mae', layout_id, data_size),
+			)
+			identity = _benchmark_identity(
+				jobs[('mae', layout_id, data_size)],
+				_metrics_path(config.runs_root, 'mae', layout_id, data_size),
+			)
+			selection_identity = _identity_mapping(
+				identity,
+				'selection',
+				_metrics_path(config.runs_root, 'mae', layout_id, data_size),
+			)
+			comparison.append(
+				{
+					'data_size': data_size,
+					'layout_id': layout_id,
+					'mae_channel_iou': metrics['mae'],
+					'barlow_twins_channel_iou': metrics['barlow_twins'],
+					'mae_hmm_k6_channel_iou': metrics['mae_hmm_k6'],
+					'barlow_twins_hmm_k6_channel_iou': metrics[
+						'barlow_twins_hmm_k6'
+					],
+					'mae_hmm_gain': metrics['mae_hmm_k6'] - metrics['mae'],
+					'barlow_twins_hmm_gain': (
+						metrics['barlow_twins_hmm_k6']
+						- metrics['barlow_twins']
+					),
+					'barlow_twins_minus_mae': (
+						metrics['barlow_twins'] - metrics['mae']
+					),
+					'barlow_twins_hmm_minus_mae_hmm': (
+						metrics['barlow_twins_hmm_k6']
+						- metrics['mae_hmm_k6']
+					),
+					**selection,
+					'selected_token_xyz_sha256': selection_identity[
+						'selected_token_xyz_sha256'
+					],
+				}
+			)
+	aggregates = {
+		data_size: {
+			comparison_name: _paired_statistics(
+				[
+					row
+					for row in comparison
+					if row['data_size'] == data_size
+				],
+				comparison_name,
+			)
+			for comparison_name in ('mae_hmm_gain', 'barlow_twins_hmm_gain')
+		}
+		for data_size in DATA_SIZE_PREFIX
+	}
+	payload = {
+		'schema_version': 3,
+		'summary_name': 'parihaka_channel_ssl_hmm_four_way',
+		'primary_metric': 'test.channel_iou',
+		'models': list(CHANNEL_SSL_HMM_MODEL_IDS),
+		'job_count': len(jobs),
+		'comparison': comparison,
+		'by_size': aggregates,
+	}
+	config.output_dir.mkdir(parents=True, exist_ok=True)
+	comparison_path = config.output_dir / OUTPUT_NAMES[0]
+	with comparison_path.open('w', encoding='utf-8', newline='') as file_obj:
+		writer = csv.DictWriter(file_obj, fieldnames=tuple(comparison[0]))
+		writer.writeheader()
+		writer.writerows(comparison)
+	json_path = config.output_dir / OUTPUT_NAMES[1]
+	json_path.write_text(
+		json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+	)
+	markdown_path = config.output_dir / OUTPUT_NAMES[2]
+	markdown_path.write_text(
+		_ssl_hmm_markdown(aggregates, comparison), encoding='utf-8'
+	)
+	return comparison_path, json_path, markdown_path
+
+
+def _paired_statistics(
+	rows: Sequence[Mapping[str, object]], comparison_name: str
+) -> dict[str, object]:
+	deltas = [float(row[comparison_name]) for row in rows]
+	return {
+		'paired_mean': statistics.fmean(deltas),
+		'paired_median': statistics.median(deltas),
+		'sample_standard_deviation': statistics.stdev(deltas),
+		'wins': sum(delta > 0 for delta in deltas),
+		'ties': sum(delta == 0 for delta in deltas),
+		'losses': sum(delta < 0 for delta in deltas),
+		'layout_deltas': {
+			str(row['layout_id']): row[comparison_name] for row in rows
+		},
+	}
+
+
+def _ssl_hmm_markdown(
+	aggregates: Mapping[str, object], comparison: Sequence[Mapping[str, object]]
+) -> str:
+	lines = [
+		'# Parihaka Channel SSL/HMM four-way benchmark',
+		'',
+		'Primary metric: test Channel IoU. Positive gains favor HMM continuation.',
+		'',
+		(
+			'| size | comparison | paired mean | paired median | sample std | '
+			'wins/ties/losses |'
+		),
+		'|---|---|---:|---:|---:|---:|',
+	]
+	for data_size in DATA_SIZE_PREFIX:
+		by_comparison = _mapping(aggregates, data_size)
+		for comparison_name in ('mae_hmm_gain', 'barlow_twins_hmm_gain'):
+			row = _mapping(by_comparison, comparison_name)
+			lines.append(
+				f'| {data_size} | {comparison_name} | '
+				f'{float(row["paired_mean"]):.6f} | '
+				f'{float(row["paired_median"]):.6f} | '
+				f'{float(row["sample_standard_deviation"]):.6f} | '
+				f'{row["wins"]}/{row["ties"]}/{row["losses"]} |'
+			)
+	lines.extend(
+		[
+			'',
+			(
+				'| size | layout | MAE | Barlow Twins | MAE HMM K6 | '
+				'Barlow Twins HMM K6 | MAE HMM gain | Barlow Twins HMM gain | '
+				'Barlow Twins - MAE | Barlow Twins HMM - MAE HMM |'
+			),
+			'|---|---|---:|---:|---:|---:|---:|---:|---:|---:|',
+		]
+	)
+	lines.extend(
+		f'| {row["data_size"]} | {row["layout_id"]} | '
+		f'{float(row["mae_channel_iou"]):.6f} | '
+		f'{float(row["barlow_twins_channel_iou"]):.6f} | '
+		f'{float(row["mae_hmm_k6_channel_iou"]):.6f} | '
+		f'{float(row["barlow_twins_hmm_k6_channel_iou"]):.6f} | '
+		f'{float(row["mae_hmm_gain"]):.6f} | '
+		f'{float(row["barlow_twins_hmm_gain"]):.6f} | '
+		f'{float(row["barlow_twins_minus_mae"]):.6f} | '
+		f'{float(row["barlow_twins_hmm_minus_mae_hmm"]):.6f} |'
+		for row in comparison
+	)
+	return '\n'.join(lines) + '\n'
+
+
 def _markdown(
 	aggregates: Mapping[str, object], comparison: list[dict[str, object]]
 ) -> str:
@@ -285,7 +504,10 @@ def _metric(payload: Mapping[str, object], split: str, key: str, path: Path) -> 
 	metric = value.get(key)
 	if not isinstance(metric, int | float) or isinstance(metric, bool):
 		raise TypeError(f'{path} {split}.{key} must be numeric')
-	return float(metric)
+	result = float(metric)
+	if not math.isfinite(result):
+		raise ValueError(f'{path} {split}.{key} must be finite')
+	return result
 
 
 def _validate_supervision(payload: Mapping[str, object], path: Path) -> None:
@@ -335,26 +557,34 @@ def _validate_supervision(payload: Mapping[str, object], path: Path) -> None:
 
 
 def _validate_supervision_parity(
-	rows: Mapping[tuple[str, str, str], Mapping[str, object]], runs_root: Path
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]],
+	runs_root: Path,
+	*,
+	model_ids: tuple[str, ...],
+	legacy: bool,
 ) -> None:
-	_validate_common_held_out(rows, runs_root)
-	_validate_pairs(rows, runs_root)
-	_validate_nested_training(rows)
-	_validate_unique_layout_training(rows)
+	_validate_common_held_out(rows, runs_root, model_ids=model_ids)
+	_validate_model_groups(rows, runs_root, model_ids=model_ids, legacy=legacy)
+	_validate_nested_training(rows, model_ids=model_ids)
+	_validate_unique_layout_training(rows, model_ids=model_ids)
 	for key, payload in rows.items():
 		path = _metrics_path(runs_root, *key)
 		_validate_identity_redundancy(
 			payload, _benchmark_identity(payload, path), path
 		)
-	_validate_benchmark_identity_parity(rows, runs_root)
+	_validate_benchmark_identity_parity(
+		rows, runs_root, model_ids=model_ids, legacy=legacy
+	)
 
 
-def _validate_benchmark_identity(
+def _validate_benchmark_identity(  # noqa: PLR0913
 	payload: Mapping[str, object],
 	model: str,
 	layout_id: str,
 	data_size: str,
 	path: Path,
+	*,
+	legacy: bool,
 ) -> None:
 	identity = _benchmark_identity(payload, path)
 	if set(identity) != _BENCHMARK_IDENTITY_KEYS:
@@ -388,11 +618,16 @@ def _validate_benchmark_identity(
 		embedding.get('checkpoint_sha256'),
 		f'{path} benchmark_identity.embedding.checkpoint_sha256',
 	)
-	_validate_model_source(embedding, model, path)
+	_validate_model_source(embedding, model, path, legacy=legacy)
 	common_metadata = _identity_mapping(
 		embedding, 'common_metadata', path, prefix='benchmark_identity.embedding'
 	)
-	if set(common_metadata) != _EMBEDDING_COMMON_METADATA_KEYS:
+	expected_common_metadata = (
+		_LEGACY_EMBEDDING_COMMON_METADATA_KEYS
+		if legacy
+		else _GENERIC_EMBEDDING_COMMON_METADATA_KEYS
+	)
+	if set(common_metadata) != expected_common_metadata:
 		raise ValueError(
 			f'{path} benchmark_identity.embedding.common_metadata has invalid fields'
 		)
@@ -636,12 +871,19 @@ def _validate_label_identity_paths(
 			raise TypeError(f'{path} benchmark_identity.{key} must be non-empty')
 
 
-def _validate_model_source(  # noqa: C901
-	embedding: Mapping[str, object], model: str, path: Path
+def _validate_model_source(  # noqa: C901, PLR0912
+	embedding: Mapping[str, object],
+	model: str,
+	path: Path,
+	*,
+	legacy: bool,
 ) -> None:
 	source = _identity_mapping(
 		embedding, 'model_source', path, prefix='benchmark_identity.embedding'
 	)
+	if not legacy:
+		_validate_learned_model_source(source, embedding, model, path)
+		return
 	expected_keys = (
 		_PRETRAINED_MODEL_SOURCE_KEYS
 		if model == 'pretrained'
@@ -701,6 +943,36 @@ def _validate_model_source(  # noqa: C901
 	):
 		raise TypeError(
 			f'{path} random model-source reference_checkpoint must be non-empty'
+		)
+
+
+def _validate_learned_model_source(
+	source: Mapping[str, object],
+	embedding: Mapping[str, object],
+	model: str,
+	path: Path,
+) -> None:
+	if set(source) != _LEARNED_MODEL_SOURCE_KEYS:
+		raise ValueError(
+			f'{path} benchmark_identity.embedding.model_source has invalid fields '
+			f'for {model}'
+		)
+	if source.get('role') != 'learned':
+		raise ValueError(
+			f'{path} benchmark_identity embedding model-source role must be learned'
+		)
+	if source.get('model_id') != model:
+		raise ValueError(
+			f'{path} benchmark_identity embedding model-source model_id must equal '
+			f'{model!r}'
+		)
+	if source.get('checkpoint_path') != embedding.get('checkpoint_path'):
+		raise ValueError(
+			f'{path} model-source checkpoint_path does not match embedding identity'
+		)
+	if source.get('checkpoint_sha256') != embedding.get('checkpoint_sha256'):
+		raise ValueError(
+			f'{path} model-source checkpoint_sha256 does not match embedding identity'
 		)
 
 
@@ -764,10 +1036,15 @@ def _validate_identity_redundancy(  # noqa: C901
 		)
 
 
-def _validate_benchmark_identity_parity(  # noqa: C901
-	rows: Mapping[tuple[str, str, str], Mapping[str, object]], runs_root: Path
+def _validate_benchmark_identity_parity(  # noqa: C901, PLR0912
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]],
+	runs_root: Path,
+	*,
+	model_ids: tuple[str, ...],
+	legacy: bool,
 ) -> None:
-	first_key = (MODELS[0], LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
+	expected_job_count = len(model_ids) * len(LAYOUT_IDS) * len(DATA_SIZE_PREFIX)
+	first_key = (model_ids[0], LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
 	common = _benchmark_identity(rows[first_key], _metrics_path(runs_root, *first_key))
 	common_metadata = _embedding_identity(common)['common_metadata']
 	for key, payload in rows.items():
@@ -776,14 +1053,16 @@ def _validate_benchmark_identity_parity(  # noqa: C901
 		for field in _GLOBAL_IDENTITY_KEYS:
 			if identity[field] != common[field]:
 				raise ValueError(
-					f'{path} benchmark_identity.{field} does not match all 30 jobs'
+					f'{path} benchmark_identity.{field} does not match all '
+					f'{expected_job_count} jobs'
 				)
 		if _embedding_identity(identity)['common_metadata'] != common_metadata:
 			raise ValueError(
-				f'{path} embedding common metadata does not match all 30 jobs'
+				f'{path} embedding common metadata does not match all '
+				f'{expected_job_count} jobs'
 			)
 	model_checkpoints: dict[str, tuple[object, object, object]] = {}
-	for model in MODELS:
+	for model in model_ids:
 		first_model_key = (model, LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
 		first_embedding = _embedding_identity(
 			_benchmark_identity(
@@ -811,8 +1090,22 @@ def _validate_benchmark_identity_parity(  # noqa: C901
 						f'{_metrics_path(runs_root, *key)} {model} embedding '
 						'checkpoint does not match its other 15 jobs'
 					)
-	if model_checkpoints['pretrained'][1] == model_checkpoints['random'][1]:
-		raise ValueError('pretrained and random checkpoint SHA-256 must differ')
+	checkpoint_models: dict[object, str] = {}
+	for model, checkpoint in model_checkpoints.items():
+		checkpoint_sha256 = checkpoint[1]
+		duplicate = checkpoint_models.get(checkpoint_sha256)
+		if duplicate is not None:
+			if legacy:
+				raise ValueError(
+					'pretrained and random checkpoint SHA-256 must differ'
+				)
+			raise ValueError(
+				'checkpoint SHA-256 must differ across models; '
+				f'{duplicate!r} and {model!r} match'
+			)
+		checkpoint_models[checkpoint_sha256] = model
+	if not legacy:
+		return
 	pretrained_source = model_checkpoints['pretrained'][2]
 	random_source = model_checkpoints['random'][2]
 	if not isinstance(pretrained_source, Mapping) or not isinstance(
@@ -872,9 +1165,13 @@ def _validate_sha256(value: object, label: str) -> None:
 
 
 def _validate_common_held_out(
-	rows: Mapping[tuple[str, str, str], Mapping[str, object]], runs_root: Path
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]],
+	runs_root: Path,
+	*,
+	model_ids: tuple[str, ...],
 ) -> None:
-	first_key = (MODELS[0], LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
+	expected_job_count = len(model_ids) * len(LAYOUT_IDS) * len(DATA_SIZE_PREFIX)
+	first_key = (model_ids[0], LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
 	common_supervision = _supervision(rows[first_key])
 	common_held_out = _held_out_identity(common_supervision)
 	common_identity = _benchmark_identity(
@@ -890,7 +1187,7 @@ def _validate_common_held_out(
 		if _held_out_identity(_supervision(payload)) != common_held_out:
 			raise ValueError(
 				f'{_metrics_path(runs_root, *key)} validation/test supervision '
-				'does not match all 30 jobs'
+				f'does not match all {expected_job_count} jobs'
 			)
 		identity = _benchmark_identity(payload, _metrics_path(runs_root, *key))
 		current_tiles = _identity_mapping(
@@ -899,49 +1196,52 @@ def _validate_common_held_out(
 		if tuple(current_tiles.get(split) for split in ('validation', 'test')) != (
 			common_held_out_tiles
 		):
-			raise ValueError(
-				f'{_metrics_path(runs_root, *key)} validation/test tile counts '
-				'do not match '
-				'all 30 jobs'
-			)
+				raise ValueError(
+					f'{_metrics_path(runs_root, *key)} validation/test tile counts '
+					f'do not match all {expected_job_count} jobs'
+				)
 
 
-def _validate_pairs(
-	rows: Mapping[tuple[str, str, str], Mapping[str, object]], runs_root: Path
+def _validate_model_groups(
+	rows: Mapping[tuple[str, str, str], Mapping[str, object]],
+	runs_root: Path,
+	*,
+	model_ids: tuple[str, ...],
+	legacy: bool,
 ) -> None:
 	for layout_id in LAYOUT_IDS:
 		for data_size in DATA_SIZE_PREFIX:
-			pretrained = rows[('pretrained', layout_id, data_size)]
-			random = rows[('random', layout_id, data_size)]
-			pretrained_path = _metrics_path(
-				runs_root, 'pretrained', layout_id, data_size
+			reference_model = model_ids[0]
+			reference = rows[(reference_model, layout_id, data_size)]
+			reference_path = _metrics_path(
+				runs_root, reference_model, layout_id, data_size
 			)
-			random_path = _metrics_path(runs_root, 'random', layout_id, data_size)
-			if _supervision(pretrained) != _supervision(random):
-				raise ValueError(
-					f'{layout_id}/{data_size} pretrained/random supervision mismatch'
-				)
-			pretrained_weights = _class_weights(
-				pretrained,
-				pretrained_path,
+			reference_supervision = _supervision(reference)
+			reference_weights = _class_weights(reference, reference_path)
+			reference_identity = _paired_benchmark_identity(
+				_benchmark_identity(reference, reference_path)
 			)
-			random_weights = _class_weights(
-				random,
-				random_path,
-			)
-			if pretrained_weights != random_weights:
-				raise ValueError(
-					f'{layout_id}/{data_size} pretrained/random class_weights mismatch'
+			for model in model_ids[1:]:
+				payload = rows[(model, layout_id, data_size)]
+				path = _metrics_path(runs_root, model, layout_id, data_size)
+				model_label = (
+					'pretrained/random' if legacy else f'{reference_model}/{model}'
 				)
-			if _paired_benchmark_identity(
-				_benchmark_identity(pretrained, pretrained_path)
-			) != _paired_benchmark_identity(
-				_benchmark_identity(random, random_path)
-			):
-				raise ValueError(
-					f'{layout_id}/{data_size} pretrained/random benchmark identity '
-					'mismatch outside model-specific checkpoint'
-				)
+				if _supervision(payload) != reference_supervision:
+					raise ValueError(
+						f'{layout_id}/{data_size} {model_label} supervision mismatch'
+					)
+				if _class_weights(payload, path) != reference_weights:
+					raise ValueError(
+						f'{layout_id}/{data_size} {model_label} class_weights mismatch'
+					)
+				if _paired_benchmark_identity(
+					_benchmark_identity(payload, path)
+				) != reference_identity:
+					raise ValueError(
+						f'{layout_id}/{data_size} {model_label} benchmark identity '
+						'mismatch outside model-specific checkpoint'
+					)
 
 
 def _paired_benchmark_identity(
@@ -961,8 +1261,10 @@ def _paired_benchmark_identity(
 
 def _validate_nested_training(
 	rows: Mapping[tuple[str, str, str], Mapping[str, object]],
+	*,
+	model_ids: tuple[str, ...],
 ) -> None:
-	for model in MODELS:
+	for model in model_ids:
 		for layout_id in LAYOUT_IDS:
 			by_size = {
 				data_size: _supervision(rows[(model, layout_id, data_size)])
@@ -1013,8 +1315,10 @@ def _validate_nested_training(
 
 def _validate_unique_layout_training(
 	rows: Mapping[tuple[str, str, str], Mapping[str, object]],
+	*,
+	model_ids: tuple[str, ...],
 ) -> None:
-	for model in MODELS:
+	for model in model_ids:
 		for data_size in DATA_SIZE_PREFIX:
 			seen: dict[tuple[frozenset[int], frozenset[int]], str] = {}
 			for layout_id in LAYOUT_IDS:
@@ -1144,9 +1448,25 @@ def _absolute_path(value: Mapping[str, object], key: str, prefix: str) -> Path:
 	return path
 
 
+def _validated_model_ids(model_ids: Sequence[str]) -> tuple[str, ...]:
+	if isinstance(model_ids, str | bytes):
+		raise TypeError('model_ids must be a sequence of model ID strings')
+	models = tuple(model_ids)
+	if not models:
+		raise ValueError('model_ids must not be empty')
+	if any(not isinstance(model_id, str) or not model_id for model_id in models):
+		raise ValueError('model_ids must contain non-empty strings')
+	if len(set(models)) != len(models):
+		raise ValueError('model_ids must not contain duplicates')
+	return models
+
+
 __all__ = [
+	'CHANNEL_SSL_HMM_MODEL_IDS',
 	'ChannelSummaryConfig',
 	'channel_summary_config_from_mapping',
 	'inspect_channel_benchmark_results',
+	'inspect_channel_model_results',
 	'summarize_channel_benchmark',
+	'summarize_channel_ssl_hmm_four_way',
 ]
