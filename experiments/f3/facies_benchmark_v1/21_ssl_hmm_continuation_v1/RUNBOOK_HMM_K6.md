@@ -387,12 +387,27 @@ def audit_hmm(
         for key in source_state
         if any(key.startswith(f'encoder.layers.{index}.') for index in range(7))
     ]
+    decoder_keys = [
+        key
+        for key in source_state
+        if (
+            key == 'mask_token'
+            or key.startswith('encoder_to_decoder.')
+            or key.startswith('decoder.')
+            or key.startswith('prediction_head.')
+        )
+    ]
     top_keys = [
         key for key in source_state if key.startswith('encoder.layers.7.')
     ]
     assert patch_keys and lower_keys and top_keys
+    assert decoder_keys
     assert all(torch.equal(source_state[key], student_state[key]) for key in patch_keys)
     assert all(torch.equal(source_state[key], student_state[key]) for key in lower_keys)
+    assert all(
+        torch.equal(source_state[key], student_state[key])
+        for key in decoder_keys
+    )
     assert any(not torch.equal(source_state[key], student_state[key]) for key in top_keys)
 
     optimizer = payload['optimizer_state_dict']
