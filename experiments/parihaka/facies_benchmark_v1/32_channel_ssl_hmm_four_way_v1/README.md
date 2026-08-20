@@ -47,25 +47,18 @@ layouts, pseudo-targets, or pretraining checkpoints.
 
 ## Targeted tests
 
-Run generic source inspection and generic runner/resume coverage:
+Run the Channel source, runner/resume, summary, config, and runbook coverage:
 
 ```bash
-pytest -q tests/seis_ssl_cluster/test_parihaka_channel_decoder.py
-pytest -q tests/seis_ssl_cluster/test_proc_dry_run.py -k parihaka_channel
-```
+pytest -q \
+  tests/seis_ssl_cluster/test_parihaka_channel_decoder.py \
+  tests/seis_ssl_cluster/test_parihaka_channel_results.py \
+  tests/seis_ssl_cluster/test_parihaka_channel_ssl_hmm_four_way_configs.py \
+  tests/seis_ssl_cluster/test_parihaka_channel_ssl_hmm_four_way_runbook.py
 
-Run the four-way config and four-way summary coverage:
-
-```bash
-pytest -q tests/seis_ssl_cluster/test_parihaka_channel_ssl_hmm_four_way_configs.py
-pytest -q tests/seis_ssl_cluster/test_parihaka_channel_results.py
-```
-
-Run the existing legacy Channel regressions and light documentation checks:
-
-```bash
-pytest -q tests/seis_ssl_cluster/test_parihaka_channel_decoder.py tests/seis_ssl_cluster/test_parihaka_channel_results.py
-pytest -q tests/seis_ssl_cluster/test_parihaka_channel_ssl_hmm_four_way_runbook.py
+pytest -q \
+  tests/seis_ssl_cluster/test_proc_dry_run.py \
+  -k parihaka_channel
 ```
 
 These include the legacy `pretrained`/`random` pair. Portable tests do not need
@@ -163,6 +156,18 @@ for model_id, embedding_input in geometry.models.items():
         torch.load(checkpoint, map_location='cpu', weights_only=False),
         f'{model_id} checkpoint payload',
     )
+    if payload.get('epoch') != 25:
+        raise ValueError(
+            f'{model_id}: checkpoint epoch must be 25; '
+            f'got {payload.get("epoch")!r}'
+        )
+    if payload.get('global_step') != 15_625:
+        raise ValueError(
+            f'{model_id}: checkpoint global_step must be 15625; '
+            f'got {payload.get("global_step")!r}'
+        )
+    if payload.get('amp_enabled') is not False:
+        raise ValueError(f'{model_id}: checkpoint amp_enabled must be false')
     payload_configs[model_id] = mapping(payload.get('config'), f'{model_id} config')
     del payload
 if len(checkpoint_shas) != 4:

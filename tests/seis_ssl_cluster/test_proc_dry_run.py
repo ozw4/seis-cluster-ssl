@@ -269,7 +269,7 @@ def test_proc_script_help_exits_zero(script_path: Path) -> None:
 	'model_id',
 	[*_CHANNEL_MODEL_IDS, 'pretrained', 'random'],
 )
-def test_channel_decoder_cli_parser_accepts_dynamic_model_ids(
+def test_parihaka_channel_decoder_cli_parser_accepts_dynamic_model_ids(
 	model_id: str,
 ) -> None:
 	args = channel_cli.build_parser().parse_args(
@@ -291,7 +291,7 @@ def test_channel_decoder_cli_parser_accepts_dynamic_model_ids(
 	('model_id', 'pretext_present'),
 	[('mae', False), ('mae_hmm_k6', True)],
 )
-def test_channel_decoder_cli_generic_dry_run_prints_compact_source_identity(
+def test_parihaka_channel_decoder_cli_generic_dry_run_prints_compact_source_identity(
 	tmp_path: Path,
 	model_id: str,
 	*,
@@ -343,7 +343,7 @@ def test_channel_decoder_cli_generic_dry_run_prints_compact_source_identity(
 	assert not (tmp_path / 'runs').exists()
 
 
-def test_channel_decoder_cli_rejects_unknown_model_with_available_models(
+def test_parihaka_channel_decoder_cli_rejects_unknown_model_with_available_models(
 	tmp_path: Path,
 ) -> None:
 	config_path, layout_path, _ = _write_channel_cli_fixture(tmp_path)

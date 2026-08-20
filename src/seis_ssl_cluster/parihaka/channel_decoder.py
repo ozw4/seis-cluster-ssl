@@ -139,7 +139,7 @@ class ChannelEmbeddingSourceConfig:
 
 @dataclass(frozen=True)
 class ChannelDecoderConfig:
-	"""Resolved common settings for all 30 jobs."""
+	"""Resolved settings shared by all configured frozen-embedding jobs."""
 
 	survey_id: str
 	labels: Path
@@ -838,7 +838,7 @@ class ChannelTileDataset(Dataset[dict[str, Any]]):
 
 
 def deterministic_tile_order(tile_count: int, seed: int, epoch: int) -> tuple[int, ...]:
-	"""Return the all-tiles-once order shared by both encoder conditions."""
+	"""Return the all-tiles-once order shared by every model condition."""
 	if tile_count <= 0:
 		raise ValueError('tile_count must be positive')
 	generator = torch.Generator().manual_seed(seed + epoch)
