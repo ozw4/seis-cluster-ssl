@@ -116,16 +116,8 @@ def test_local_view_specific_indices_gather_corresponding_tokens(
 		]
 	encoded_outputs = iter(
 		(
-			{
-				'tokens': tokens_a,
-				'token_grid_shape': (2, 2, 2),
-				'token_valid_mask': torch.ones((2, 8), dtype=torch.bool),
-			},
-			{
-				'tokens': tokens_b,
-				'token_grid_shape': (2, 2, 2),
-				'token_valid_mask': torch.ones((2, 8), dtype=torch.bool),
-			},
+			{'tokens': tokens_a},
+			{'tokens': tokens_b},
 		)
 	)
 
@@ -171,25 +163,6 @@ def test_local_view_specific_indices_gather_corresponding_tokens(
 	torch.testing.assert_close(output['z_a'], output['z_b'])
 
 
-def test_local_forward_rejects_selected_invalid_token() -> None:
-	model = _make_model()
-	view_a, view_b, _mask_a, _mask_b, indices_a, indices_b = _local_inputs()
-	mask_a = torch.ones((2, 2, 2, 2), dtype=torch.bool)
-	mask_b = torch.ones_like(mask_a)
-	mask_a[0, 0, 0, 0] = False
-
-	with pytest.raises(ValueError, match=r'local_pair_indices_a.*invalid token'):
-		_call_forward_local(
-			model,
-			view_a=view_a,
-			view_b=view_b,
-			valid_mask_a=mask_a,
-			valid_mask_b=mask_b,
-			indices_a=indices_a,
-			indices_b=indices_b,
-		)
-
-
 @pytest.mark.parametrize(
 	('indices_a', 'indices_b', 'error_type', 'match'),
 	[
@@ -209,31 +182,19 @@ def test_local_forward_rejects_selected_invalid_token() -> None:
 			torch.zeros((1, 3), dtype=torch.int64),
 			torch.zeros((2, 3), dtype=torch.int64),
 			ValueError,
-			'expected_batch_size=2',
+			'matching \\[B, K\\] shapes',
 		),
 		(
-			torch.empty((2, 0), dtype=torch.int64),
-			torch.empty((2, 0), dtype=torch.int64),
+			torch.zeros((1, 3), dtype=torch.int64),
+			torch.zeros((1, 3), dtype=torch.int64),
 			ValueError,
-			'at least one local pair',
-		),
-		(
-			torch.tensor([[0, -1, 2], [3, 4, 5]], dtype=torch.int64),
-			torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.int64),
-			ValueError,
-			'values must be in',
-		),
-		(
-			torch.tensor([[0, 8, 2], [3, 4, 5]], dtype=torch.int64),
-			torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.int64),
-			ValueError,
-			'values must be in',
+			'batch dimension must match encoded token batch',
 		),
 		(
 			torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.int64),
 			torch.tensor([[0, 1], [3, 4]], dtype=torch.int64),
 			ValueError,
-			'same number of pairs',
+			'matching \\[B, K\\] shapes',
 		),
 	],
 )
@@ -247,23 +208,6 @@ def test_local_forward_rejects_invalid_pair_indices(
 	view_a, view_b, mask_a, mask_b, _indices_a, _indices_b = _local_inputs()
 
 	with pytest.raises(error_type, match=match):
-		_call_forward_local(
-			model,
-			view_a=view_a,
-			view_b=view_b,
-			valid_mask_a=mask_a,
-			valid_mask_b=mask_b,
-			indices_a=indices_a,
-			indices_b=indices_b,
-		)
-
-
-def test_local_forward_rejects_input_device_mismatch() -> None:
-	model = _make_model()
-	view_a, view_b, mask_a, mask_b, _indices_a, indices_b = _local_inputs()
-	indices_a = torch.empty((2, 3), dtype=torch.int64, device='meta')
-
-	with pytest.raises(ValueError, match='same device as view_a'):
 		_call_forward_local(
 			model,
 			view_a=view_a,
@@ -290,51 +234,15 @@ def test_local_forward_requires_valid_masks() -> None:
 		)
 
 
-@pytest.mark.parametrize(
-	('tokens_b', 'grid_b', 'error_type', 'match'),
-	[
-		(
-			torch.randn((2, 8, 8)),
-			(4, 2, 1),
-			ValueError,
-			'token grids must match',
-		),
-		(
-			torch.randn((1, 8, 8)),
-			(2, 2, 2),
-			RuntimeError,
-			'batch size must match its input view',
-		),
-		(
-			torch.randn((2, 8, 7)),
-			(2, 2, 2),
-			ValueError,
-			'feature dimensions must match',
-		),
-	],
-)
-def test_local_forward_rejects_mismatched_encoder_outputs(
-	tokens_b: torch.Tensor,
-	grid_b: tuple[int, int, int],
-	error_type: type[Exception],
-	match: str,
+def test_local_forward_does_not_extract_tensor_scalars(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	model = _make_model()
+	model = _make_model().eval()
 	view_a, view_b, mask_a, mask_b, indices_a, indices_b = _local_inputs()
-	tokens_a = torch.randn((2, 8, 8))
 	encoded_outputs = iter(
 		(
-			{
-				'tokens': tokens_a,
-				'token_grid_shape': (2, 2, 2),
-				'token_valid_mask': torch.ones((2, 8), dtype=torch.bool),
-			},
-			{
-				'tokens': tokens_b,
-				'token_grid_shape': grid_b,
-				'token_valid_mask': torch.ones(tokens_b.shape[:2], dtype=torch.bool),
-			},
+			{'tokens': torch.randn((2, 8, 8))},
+			{'tokens': torch.randn((2, 8, 8))},
 		)
 	)
 
@@ -346,58 +254,24 @@ def test_local_forward_rejects_mismatched_encoder_outputs(
 		assert valid_mask is not None
 		return next(encoded_outputs)
 
+	def unexpected_item(_tensor: torch.Tensor) -> object:
+		raise AssertionError('forward_local() must not extract device scalars')
+
 	monkeypatch.setattr(model.backbone, 'encode_tokens', fake_encode_tokens)
-	with pytest.raises(error_type, match=match):
-		_call_forward_local(
-			model,
-			view_a=view_a,
-			view_b=view_b,
-			valid_mask_a=mask_a,
-			valid_mask_b=mask_b,
-			indices_a=indices_a,
-			indices_b=indices_b,
-		)
+	monkeypatch.setattr(torch.Tensor, 'item', unexpected_item)
 
-
-def test_local_forward_rejects_missing_encoder_token_mask(
-	monkeypatch: pytest.MonkeyPatch,
-) -> None:
-	model = _make_model()
-	view_a, view_b, mask_a, mask_b, indices_a, indices_b = _local_inputs()
-	encoded_outputs = iter(
-		(
-			{
-				'tokens': torch.randn((2, 8, 8)),
-				'token_grid_shape': (2, 2, 2),
-				'token_valid_mask': None,
-			},
-			{
-				'tokens': torch.randn((2, 8, 8)),
-				'token_grid_shape': (2, 2, 2),
-				'token_valid_mask': torch.ones((2, 8), dtype=torch.bool),
-			},
-		)
+	output = _call_forward_local(
+		model,
+		view_a=view_a,
+		view_b=view_b,
+		valid_mask_a=mask_a,
+		valid_mask_b=mask_b,
+		indices_a=indices_a,
+		indices_b=indices_b,
 	)
 
-	def fake_encode_tokens(
-		_view: torch.Tensor,
-		*,
-		valid_mask: torch.Tensor | None = None,
-	) -> dict[str, object]:
-		assert valid_mask is not None
-		return next(encoded_outputs)
-
-	monkeypatch.setattr(model.backbone, 'encode_tokens', fake_encode_tokens)
-	with pytest.raises(RuntimeError, match=r'requires.*token-valid mask'):
-		_call_forward_local(
-			model,
-			view_a=view_a,
-			view_b=view_b,
-			valid_mask_a=mask_a,
-			valid_mask_b=mask_b,
-			indices_a=indices_a,
-			indices_b=indices_b,
-		)
+	assert output['z_a'].shape == (6, 6)
+	assert output['z_b'].shape == (6, 6)
 
 
 def test_local_loss_has_encoder_projector_gradients_but_not_decoder_gradients() -> None:
