@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
+import numpy as np
 import pytest
+import yaml
 
+from proc.seis_ssl_cluster import run_parihaka_channel_decoder as channel_cli
+from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from tests.helpers import run_python_proc
 
 pytestmark = pytest.mark.integration
@@ -81,6 +86,175 @@ DRY_RUN_FORBIDDEN_KEYS = {
 	),
 }
 
+_CHANNEL_MODEL_IDS = (
+	'mae',
+	'barlow_twins',
+	'mae_hmm_k6',
+	'barlow_twins_hmm_k6',
+)
+
+
+def _write_channel_cli_fixture(
+	tmp_path: Path,
+) -> tuple[Path, Path, dict[str, Path]]:
+	labels_path = tmp_path / 'labels.npy'
+	labels_metadata_path = tmp_path / 'labels_metadata.json'
+	labels = np.ones((8, 8, 8), dtype=np.int8)
+	labels[:, :, ::2] = 5
+	np.save(labels_path, labels, allow_pickle=False)
+	labels_metadata_path.write_text(
+		json.dumps(
+			{
+				'schema_version': 2,
+				'artifact_type': 'parihaka_channel_labels',
+				'output_labels': str(labels_path),
+				'prepared_label_identity': {
+					'labels_sha256': file_sha256(labels_path),
+					'source_npz_path': '/data/parihaka_labels.npz',
+					'source_key': 'labels',
+					'shape': [8, 8, 8],
+					'dtype': 'int8',
+					'class_definition': {
+						'positive_class_id': 5,
+						'negative_class_ids': [1, 2, 3, 4, 6],
+					},
+				},
+			}
+		),
+		encoding='utf-8',
+	)
+	common_metadata = {
+		'survey_id': 'parihaka',
+		'source_amplitude_path': '/data/parihaka_amplitude.npy',
+		'patch_size': [8, 8, 8],
+		'token_grid_shape': [1, 1, 1],
+		'volume_shape_xyz': [8, 8, 8],
+		'embedding_dim': 384,
+		'model_geometry': {'embed_dim': 384, 'depth': 12, 'num_heads': 6},
+		'window_size': [8, 8, 8],
+		'overlap': [0, 0, 0],
+		'output_dtype': 'float16',
+		'min_token_valid_fraction': 0.5,
+		'normalization_stats_path': '/data/parihaka_stats.json',
+		'preprocessing': {'mode': 'same'},
+		'zero_mask': {'enabled': True},
+		'precision': {'device_type': 'cpu', 'autocast': False},
+	}
+	checkpoints: dict[str, Path] = {}
+	embedding_models: dict[str, dict[str, str]] = {}
+	for model_id in _CHANNEL_MODEL_IDS:
+		checkpoint = tmp_path / 'checkpoints' / f'{model_id}.pt'
+		checkpoint.parent.mkdir(parents=True, exist_ok=True)
+		checkpoint.write_bytes(f'checkpoint:{model_id}'.encode())
+		checkpoints[model_id] = checkpoint
+		embedding_dir = tmp_path / 'embeddings' / model_id
+		embedding_dir.mkdir(parents=True)
+		paths = output_paths(embedding_dir, 'parihaka')
+		np.save(
+			paths.embeddings,
+			np.zeros((1, 1, 1, 384), dtype=np.float16),
+			allow_pickle=False,
+		)
+		np.save(
+			paths.valid_tokens,
+			np.ones((1, 1, 1), dtype=np.bool_),
+			allow_pickle=False,
+		)
+		metadata = {
+			**common_metadata,
+			'checkpoint_path': str(checkpoint),
+			'checkpoint_sha256': file_sha256(checkpoint),
+			'pretraining_objective': {'name': model_id},
+		}
+		if '_hmm_' in model_id:
+			metadata['stratigraphy_pretext'] = {
+				'method': 'hmm',
+				'cluster_count': 6,
+			}
+		paths.metadata.write_text(json.dumps(metadata), encoding='utf-8')
+		embedding_models[model_id] = {
+			'dir': str(embedding_dir),
+			'checkpoint': str(checkpoint),
+		}
+	config_path = tmp_path / 'channel.yaml'
+	config_path.write_text(
+		yaml.safe_dump(
+			{
+				'dataset': {'survey_id': 'parihaka'},
+				'inputs': {
+					'labels_npy': str(labels_path),
+					'labels_metadata_json': str(labels_metadata_path),
+				},
+				'embeddings': {'models': embedding_models},
+				'outputs': {'runs_root': str(tmp_path / 'runs')},
+				'decoder': {
+					'spec': 'frozen_embedding_decoder_nearest_voxel_ln_v1',
+					'embedding_dim': 384,
+					'class_count': 2,
+					'hidden_channels': [128, 64, 32],
+					'upsample_factors': [[2, 2, 2]] * 3,
+					'upsample_mode': 'nearest',
+					'normalization': 'voxelwise_layer_norm',
+				},
+				'train': {
+					'epochs': 50,
+					'batch_size': 1,
+					'learning_rate': 0.001,
+					'weight_decay': 0.0001,
+					'class_weight': 'balanced',
+					'sampling_mode': 'all_tiles_once',
+					'seed': 42000,
+					'amp': False,
+					'gradient_clip_norm': 1.0,
+				},
+				'tiles': {
+					'core_size_tokens': [8, 8, 8],
+					'context_halo_tokens': [1, 1, 1],
+				},
+			}
+		),
+		encoding='utf-8',
+	)
+	training_lines = (0, 1, 2, 3, 6, 7)
+	layout_path = tmp_path / 'layouts.yaml'
+	layout_path.write_text(
+		yaml.safe_dump(
+			{
+				'training_selection': {
+					'semantics': (
+						'stable_hash_partial_section_token_footprints_v1'
+					),
+					'allowed_relative_error': 0.05,
+					'target_train_voxel_counts': {
+						'small': 104,
+						'medium': 192,
+						'large': 320,
+					},
+				},
+				'validation': {'inline': [4], 'crossline': [4]},
+				'layouts': {
+					f'layout_{index:03d}': {
+						'inline': [
+							training_lines[
+								(index + offset) % len(training_lines)
+							]
+							for offset in range(4)
+						],
+						'crossline': [
+							training_lines[
+								(index + offset) % len(training_lines)
+							]
+							for offset in range(4)
+						],
+					}
+					for index in range(5)
+				},
+			}
+		),
+		encoding='utf-8',
+	)
+	return config_path, layout_path, checkpoints
+
 
 @pytest.mark.parametrize('script_path', PROC_SCRIPTS)
 def test_proc_script_help_exits_zero(script_path: Path) -> None:
@@ -89,6 +263,109 @@ def test_proc_script_help_exits_zero(script_path: Path) -> None:
 	assert result.returncode == 0, result.stderr
 	assert '--config' in result.stdout
 	assert '--dry-run' in result.stdout
+
+
+@pytest.mark.parametrize(
+	'model_id',
+	[*_CHANNEL_MODEL_IDS, 'pretrained', 'random'],
+)
+def test_channel_decoder_cli_parser_accepts_dynamic_model_ids(
+	model_id: str,
+) -> None:
+	args = channel_cli.build_parser().parse_args(
+		[
+			'--model',
+			model_id,
+			'--layout',
+			'layout_000',
+			'--size',
+			'small',
+			'--layout-config',
+			'layouts.yaml',
+		]
+	)
+	assert args.model == model_id
+
+
+@pytest.mark.parametrize(
+	('model_id', 'pretext_present'),
+	[('mae', False), ('mae_hmm_k6', True)],
+)
+def test_channel_decoder_cli_generic_dry_run_prints_compact_source_identity(
+	tmp_path: Path,
+	model_id: str,
+	*,
+	pretext_present: bool,
+) -> None:
+	config_path, layout_path, checkpoints = _write_channel_cli_fixture(tmp_path)
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/run_parihaka_channel_decoder.py'),
+		'--config',
+		config_path,
+		'--model',
+		model_id,
+		'--layout',
+		'layout_000',
+		'--size',
+		'small',
+		'--layout-config',
+		layout_path,
+		'--dry-run',
+	)
+
+	assert result.returncode == 0, result.stderr
+	assert f'model: {model_id}' in result.stdout
+	assert 'available_models:' in result.stdout
+	for available_model in _CHANNEL_MODEL_IDS:
+		assert available_model in result.stdout
+	assert f'checkpoint_path: {checkpoints[model_id]}' in result.stdout
+	assert (
+		f'checkpoint_sha256: {file_sha256(checkpoints[model_id])}'
+		in result.stdout
+	)
+	assert f"pretraining_objective: {{'name': '{model_id}'}}" in result.stdout
+	assert (
+		f'stratigraphy_pretext_present: {pretext_present}' in result.stdout
+	)
+	decoder_sha_line = next(
+		line
+		for line in result.stdout.splitlines()
+		if line.startswith('decoder_initial_state_sha256: ')
+	)
+	decoder_sha256 = decoder_sha_line.removeprefix(
+		'decoder_initial_state_sha256: '
+	)
+	assert len(decoder_sha256) == 64
+	assert set(decoder_sha256) <= set('0123456789abcdef')
+	assert 'source_amplitude_path' not in result.stdout
+	assert 'normalization_stats_path' not in result.stdout
+	assert 'execution: dry-run; no files written' in result.stdout
+	assert not (tmp_path / 'runs').exists()
+
+
+def test_channel_decoder_cli_rejects_unknown_model_with_available_models(
+	tmp_path: Path,
+) -> None:
+	config_path, layout_path, _ = _write_channel_cli_fixture(tmp_path)
+	result = run_python_proc(
+		Path('proc/seis_ssl_cluster/run_parihaka_channel_decoder.py'),
+		'--config',
+		config_path,
+		'--model',
+		'unknown',
+		'--layout',
+		'layout_000',
+		'--size',
+		'small',
+		'--layout-config',
+		layout_path,
+		'--dry-run',
+	)
+
+	assert result.returncode != 0
+	assert 'available models' in result.stderr
+	for model_id in _CHANNEL_MODEL_IDS:
+		assert model_id in result.stderr
 
 
 @pytest.mark.parametrize('script_path', PROC_SCRIPTS)

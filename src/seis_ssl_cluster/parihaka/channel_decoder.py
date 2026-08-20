@@ -619,12 +619,16 @@ def inspect_channel_decoder_job(
 	data_size: str,
 	layout_config: str | Path,
 ) -> ChannelDecoderPlan:
-	"""Validate paired inputs, explicit layout, geometry, and supervision counts."""
-	if model not in {'pretrained', 'random'}:
-		raise ValueError("model must be 'pretrained' or 'random'")
-	geometry = inspect_embedding_pair(config)
+	"""Validate embedding inputs, explicit layout, geometry, and supervision."""
+	if model not in config.models:
+		available = ', '.join(repr(model_id) for model_id in config.models)
+		raise ValueError(
+			f'model {model!r} is not configured; available models: {available}'
+		)
+	geometry = inspect_embedding_sources(config)
+	selected = geometry.models[model]
 	if geometry.embedding_dim != config.decoder.embedding_dim:
-		raise ValueError('decoder.embedding_dim does not match paired embeddings')
+		raise ValueError('decoder.embedding_dim does not match embeddings')
 	validate_voxel_decoder_architecture(
 		hidden_channels=config.decoder.hidden_channels,
 		upsample_factors=config.decoder.upsample_factors,
@@ -647,7 +651,7 @@ def inspect_channel_decoder_job(
 	layouts = load_channel_layouts(layout_config, geometry.volume_shape_xyz)
 	train_lines = selected_training_lines(layouts, layout_id, data_size)
 	valid_tokens = np.load(
-		geometry.pretrained.valid_tokens, mmap_mode='r', allow_pickle=False
+		selected.paths.valid_tokens, mmap_mode='r', allow_pickle=False
 	)
 	selections = select_channel_training(
 		layouts, layout_id, valid_tokens, labels, geometry.patch_size_xyz
@@ -661,8 +665,8 @@ def inspect_channel_decoder_job(
 	tile_counts: dict[str, int] = {}
 	for split in ('train', 'validation', 'test'):
 		dataset = ChannelTileDataset(
-			embedding_path=geometry.pretrained.embeddings,
-			valid_tokens_path=geometry.pretrained.valid_tokens,
+			embedding_path=selected.paths.embeddings,
+			valid_tokens_path=selected.paths.valid_tokens,
 			labels_path=config.labels,
 			geometry=geometry,
 			lines=train_lines,
@@ -895,13 +899,11 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 	run_device = _resolve_device(device)
 	_configure_determinism()
 	_seed_everything(plan.config.train.seed)
-	embedding_paths = (
-		plan.geometry.pretrained if plan.model == 'pretrained' else plan.geometry.random
-	)
+	selected = plan.geometry.models[plan.model]
 	datasets = {
 		split: ChannelTileDataset(
-			embedding_path=embedding_paths.embeddings,
-			valid_tokens_path=embedding_paths.valid_tokens,
+			embedding_path=selected.paths.embeddings,
+			valid_tokens_path=selected.paths.valid_tokens,
 			labels_path=plan.config.labels,
 			geometry=plan.geometry,
 			lines=plan.train_lines,
@@ -1280,27 +1282,25 @@ def _save_checkpoint(
 
 
 def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
-	selected_metadata = (
-		plan.geometry.pretrained_metadata
-		if plan.model == 'pretrained'
-		else plan.geometry.random_metadata
-	)
-	selected_model_source = (
-		plan.geometry.pretrained_model_source
-		if plan.model == 'pretrained'
-		else plan.geometry.random_model_source
+	selected = plan.geometry.models[plan.model]
+	selected_metadata = selected.metadata
+	selected_model_source = selected.model_source
+	common_metadata_keys = (
+		_PAIRED_EMBEDDING_METADATA_KEYS
+		if _is_legacy_embedding_pair(plan.config)
+		else _COMMON_EMBEDDING_METADATA_KEYS
 	)
 	return {
 		'model': plan.model,
 		'layout_id': plan.layout_id,
 		'data_size': plan.data_size,
 		'embedding': {
-			'checkpoint_path': selected_metadata['checkpoint_path'],
-			'checkpoint_sha256': selected_metadata['checkpoint_sha256'],
+			'checkpoint_path': selected_model_source['checkpoint_path'],
+			'checkpoint_sha256': selected_model_source['checkpoint_sha256'],
 			'model_source': dict(selected_model_source),
 			'common_metadata': {
 				key: selected_metadata[key]
-				for key in _PAIRED_EMBEDDING_METADATA_KEYS
+				for key in common_metadata_keys
 			},
 		},
 		'decoder_initial_state_sha256': decoder_initial_state_sha256(
@@ -1327,7 +1327,7 @@ def _run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
 			'token_grid_shape_xyz': list(plan.geometry.token_grid_shape_xyz),
 			'patch_size_xyz': list(plan.geometry.patch_size_xyz),
 			'valid_tokens_sha256': file_sha256(
-				plan.geometry.pretrained.valid_tokens
+				selected.paths.valid_tokens
 			),
 		},
 		'class_weights': list(plan.class_weights),

@@ -10,6 +10,7 @@ from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.parihaka.channel_data import CHANNEL_TEST_MODE
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	channel_decoder_config_from_mapping,
+	decoder_initial_state_sha256,
 	inspect_channel_decoder_job,
 	run_channel_decoder_job,
 )
@@ -28,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
 		description='Run one Parihaka Channel decoder job.'
 	)
 	parser.add_argument('--config', type=Path, default=DEFAULT_CONFIG)
-	parser.add_argument('--model', required=True, choices=('pretrained', 'random'))
+	parser.add_argument('--model', required=True)
 	parser.add_argument(
 		'--layout',
 		required=True,
@@ -56,7 +57,25 @@ def main() -> None:
 		layout_config=args.layout_config,
 	)
 	if args.dry_run:
+		selected = plan.geometry.models[plan.model]
+		decoder_sha256 = decoder_initial_state_sha256(
+			plan.config.decoder,
+			plan.geometry.patch_size_xyz,
+			plan.config.train.seed,
+		)
 		print(f'model: {plan.model}')
+		print(f'available_models: {tuple(plan.config.models)}')
+		print(f'checkpoint_path: {selected.model_source["checkpoint_path"]}')
+		print(f'checkpoint_sha256: {selected.model_source["checkpoint_sha256"]}')
+		print(
+			'pretraining_objective: '
+			f'{selected.metadata["pretraining_objective"]}'
+		)
+		print(
+			'stratigraphy_pretext_present: '
+			f'{selected.metadata.get("stratigraphy_pretext") is not None}'
+		)
+		print(f'decoder_initial_state_sha256: {decoder_sha256}')
 		print(f'layout_id: {plan.layout_id}')
 		print(f'data_size: {plan.data_size}')
 		print(f'selected_inline_indices: {plan.train_lines.inline}')

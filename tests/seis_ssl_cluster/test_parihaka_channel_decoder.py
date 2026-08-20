@@ -295,6 +295,33 @@ def _write_generic_sources(config: ChannelDecoderConfig) -> dict[str, Path]:
 	return checkpoints
 
 
+def _write_generic_one_token_sources(
+	config: ChannelDecoderConfig,
+) -> dict[str, Path]:
+	checkpoints = _write_generic_sources(config)
+	for value, model_id in enumerate(_GENERIC_MODEL_IDS, start=1):
+		paths = _generic_paths(config, model_id)
+		np.save(
+			paths.embeddings,
+			np.full((1, 1, 1, 384), value, dtype=np.float16),
+			allow_pickle=False,
+		)
+		np.save(
+			paths.valid_tokens,
+			np.ones((1, 1, 1), dtype=np.bool_),
+			allow_pickle=False,
+		)
+		_update_generic_metadata(
+			config,
+			model_id,
+			token_grid_shape=[1, 1, 1],
+			volume_shape_xyz=[8, 8, 8],
+			window_size=[8, 8, 8],
+			overlap=[0, 0, 0],
+		)
+	return checkpoints
+
+
 def _generic_paths(
 	config: ChannelDecoderConfig, model_id: str
 ) -> EmbeddingOutputPaths:
@@ -331,6 +358,48 @@ def _write_layout(tmp_path: Path) -> Path:
 					f'layout_{index:03d}': {
 						'inline': [index, index + 1, index + 2, index + 3],
 						'crossline': [index, index + 1, index + 2, index + 3],
+					}
+					for index in range(5)
+				},
+			}
+		),
+		encoding='utf-8',
+	)
+	return layout_path
+
+
+def _write_one_token_layout(tmp_path: Path) -> Path:
+	training_lines = (0, 1, 2, 3, 6, 7)
+	layout_path = tmp_path / 'one_token_layouts.yaml'
+	layout_path.write_text(
+		yaml.safe_dump(
+			{
+				'training_selection': {
+					'semantics': (
+						'stable_hash_partial_section_token_footprints_v1'
+					),
+					'allowed_relative_error': 0.05,
+					'target_train_voxel_counts': {
+						'small': 104,
+						'medium': 192,
+						'large': 320,
+					},
+				},
+				'validation': {'inline': [4], 'crossline': [4]},
+				'layouts': {
+					f'layout_{index:03d}': {
+						'inline': [
+							training_lines[
+								(index + offset) % len(training_lines)
+							]
+							for offset in range(4)
+						],
+						'crossline': [
+							training_lines[
+								(index + offset) % len(training_lines)
+							]
+							for offset in range(4)
+						],
 					}
 					for index in range(5)
 				},
@@ -382,6 +451,69 @@ def test_generic_embedding_sources_resolve_and_inspect_four_models(
 			assert 'stratigraphy_pretext' not in item.metadata
 		else:
 			assert item.metadata['stratigraphy_pretext'] == pretext
+
+
+def test_generic_model_registry_builds_paired_job_plans(tmp_path: Path) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	config = replace(config, tiles=DecoderTiles((2, 2, 2), (1, 1, 1)))
+	_write_generic_sources(config)
+	labels = np.ones((16, 16, 16), dtype=np.int8)
+	labels[:, :, ::2] = 5
+	_write_labels(config, labels)
+	layout_path = _write_layout(tmp_path)
+
+	plans = {
+		model_id: inspect_channel_decoder_job(
+			config,
+			model=model_id,
+			layout_id='layout_000',
+			data_size='small',
+			layout_config=layout_path,
+		)
+		for model_id in _GENERIC_MODEL_IDS
+	}
+
+	assert len({plan.output_dir for plan in plans.values()}) == 4
+	reference = plans['mae']
+	initial_state_shas = set()
+	for model_id, plan in plans.items():
+		assert plan.output_dir == (
+			config.runs_root
+			/ f'model={model_id}'
+			/ 'layout=layout_000'
+			/ 'size=small'
+		)
+		assert plan.geometry.models[model_id].paths == _generic_paths(
+			config, model_id
+		)
+		assert plan.selection == reference.selection
+		assert plan.class_weights == reference.class_weights
+		assert plan.split_counts == reference.split_counts
+		assert plan.tile_counts == reference.tile_counts
+		initial_state_shas.add(
+			decoder_initial_state_sha256(
+				config.decoder,
+				plan.geometry.patch_size_xyz,
+				config.train.seed,
+			)
+		)
+	assert len(initial_state_shas) == 1
+
+
+def test_job_plan_rejects_unknown_model_with_available_models(
+	tmp_path: Path,
+) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	with pytest.raises(ValueError, match='available models') as error:
+		inspect_channel_decoder_job(
+			config,
+			model='unknown',
+			layout_id='layout_000',
+			data_size='small',
+			layout_config=tmp_path / 'unused.yaml',
+		)
+	for model_id in _GENERIC_MODEL_IDS:
+		assert model_id in str(error.value)
 
 
 def test_generic_embedding_model_id_must_be_non_empty(tmp_path: Path) -> None:
@@ -881,6 +1013,100 @@ def test_channel_metrics() -> None:
 	assert metrics['channel_precision'] == pytest.approx(7 / 9)
 	assert metrics['channel_recall'] == pytest.approx(7 / 10)
 	assert metrics['balanced_accuracy'] == pytest.approx((0.8 + 0.7) / 2)
+
+
+def test_generic_one_job_identity_and_resume_are_model_specific(
+	tmp_path: Path,
+) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	config = replace(
+		config,
+		train=replace(config.train, epochs=1),
+		tiles=DecoderTiles((1, 1, 1), (1, 1, 1)),
+	)
+	checkpoints = _write_generic_one_token_sources(config)
+	labels = np.ones((8, 8, 8), dtype=np.int8)
+	labels[:, :, ::2] = 5
+	_write_labels(config, labels)
+	layout_path = _write_one_token_layout(tmp_path)
+	model_id = 'mae_hmm_k6'
+	plan = inspect_channel_decoder_job(
+		config,
+		model=model_id,
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=layout_path,
+	)
+	assert plan.geometry.models[model_id].paths.embeddings == _generic_paths(
+		config, model_id
+	).embeddings
+
+	assert run_channel_decoder_job(plan, device='cpu', max_steps=1) is None
+	latest = plan.output_dir / 'latest.pt'
+	payload = torch.load(latest, map_location='cpu', weights_only=False)
+	identity = payload['run_identity']
+	selected = plan.geometry.models[model_id]
+	assert identity['model'] == model_id
+	assert identity['embedding']['checkpoint_path'] == str(checkpoints[model_id])
+	assert identity['embedding']['checkpoint_sha256'] == file_sha256(
+		checkpoints[model_id]
+	)
+	assert identity['embedding']['model_source'] == selected.model_source
+	assert identity['embedding']['model_source']['pretraining_objective'] == (
+		_GENERIC_OBJECTIVES[model_id]
+	)
+	assert identity['embedding']['model_source']['stratigraphy_pretext'] == (
+		_GENERIC_STRATIGRAPHY_PRETEXTS[model_id]
+	)
+	assert 'pretraining_objective' not in identity['embedding']['common_metadata']
+	assert 'stratigraphy_pretext' not in identity['embedding']['common_metadata']
+	assert identity['geometry']['valid_tokens_sha256'] == file_sha256(
+		selected.paths.valid_tokens
+	)
+
+	other_plan = inspect_channel_decoder_job(
+		config,
+		model='barlow_twins',
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=layout_path,
+	)
+	other_latest = other_plan.output_dir / 'latest.pt'
+	other_latest.parent.mkdir(parents=True)
+	other_latest.write_bytes(latest.read_bytes())
+	with pytest.raises(ValueError, match='resume checkpoint does not match'):
+		run_channel_decoder_job(other_plan, device='cpu', resume=other_latest)
+
+	checkpoint = checkpoints[model_id]
+	original_checkpoint = checkpoint.read_bytes()
+	checkpoint.write_bytes(b'changed generic checkpoint')
+	_update_generic_metadata(
+		config,
+		model_id,
+		checkpoint_sha256=file_sha256(checkpoint),
+	)
+	changed_plan = inspect_channel_decoder_job(
+		config,
+		model=model_id,
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=layout_path,
+	)
+	with pytest.raises(ValueError, match='resume checkpoint does not match'):
+		run_channel_decoder_job(changed_plan, device='cpu', resume=latest)
+	checkpoint.write_bytes(original_checkpoint)
+	_update_generic_metadata(
+		config,
+		model_id,
+		checkpoint_sha256=file_sha256(checkpoint),
+	)
+
+	metrics_path = run_channel_decoder_job(plan, device='cpu', resume=latest)
+	assert metrics_path == plan.output_dir / 'metrics.json'
+	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+	assert metrics['model'] == model_id
+	assert metrics['benchmark_identity']['model'] == model_id
+	assert metrics_path.parts[-4] == f'model={model_id}'
 
 
 def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
