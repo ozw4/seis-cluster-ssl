@@ -43,30 +43,36 @@ class BarlowTwinsPretrainDataset:
 		"""Forward the sampling epoch to the wrapped dataset."""
 		self.base_dataset.set_epoch(epoch)
 
-	def __getitem__(self, index: int) -> dict[str, object]:
-		"""Return two augmented copies of one preprocessed physical crop."""
+	def _load_base_sample(
+		self,
+		index: int,
+	) -> tuple[
+		dict[str, object],
+		np.ndarray,
+		np.ndarray,
+		np.random.Generator,
+	]:
 		normalized_index = _normalize_index(index, len(self))
 		base_sample = self.base_dataset[normalized_index]
 		x = _require_array(base_sample, 'x')
 		valid_mask = _require_array(base_sample, 'local_valid_mask')
 		_validate_sample_shapes(x, valid_mask)
-
 		rng = rng_for_sample(
 			self.base_dataset.seed,
 			self.epoch,
 			normalized_index,
 		)
-		view_a, valid_mask_a = _augment_view(
+		return base_sample, x, valid_mask, rng
+
+	def __getitem__(self, index: int) -> dict[str, object]:
+		"""Return two augmented copies of one preprocessed physical crop."""
+		base_sample, x, valid_mask, rng = self._load_base_sample(index)
+		(view_a, valid_mask_a, _), (view_b, valid_mask_b, _) = _build_horizontal_views(
 			x,
 			valid_mask,
-			flip_inline=bool(rng.random() < self.horizontal_flip_probability),
-			flip_crossline=bool(rng.random() < self.horizontal_flip_probability),
-		)
-		view_b, valid_mask_b = _augment_view(
-			x,
-			valid_mask,
-			flip_inline=bool(rng.random() < self.horizontal_flip_probability),
-			flip_crossline=bool(rng.random() < self.horizontal_flip_probability),
+			rng,
+			probability=self.horizontal_flip_probability,
+			require_distinct=False,
 		)
 		return {
 			'view_a': view_a,
@@ -106,40 +112,16 @@ class LocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
 
 	def __getitem__(self, index: int) -> dict[str, object]:
 		"""Return two views plus C-order indices for canonical token pairs."""
-		normalized_index = _normalize_index(index, len(self))
-		base_sample = self.base_dataset[normalized_index]
-		x = _require_array(base_sample, 'x')
-		valid_mask = _require_array(base_sample, 'local_valid_mask')
-		_validate_sample_shapes(x, valid_mask)
-
-		rng = rng_for_sample(
-			self.base_dataset.seed,
-			self.epoch,
-			normalized_index,
-		)
-		flip_state_a = _sample_horizontal_flip_state(
-			rng,
-			probability=self.horizontal_flip_probability,
-		)
-		flip_state_b = _sample_horizontal_flip_state(
-			rng,
-			probability=self.horizontal_flip_probability,
-		)
-		if np.array_equal(flip_state_a, flip_state_b):
-			axis = int(rng.integers(0, 2))
-			flip_state_b[axis] = not bool(flip_state_b[axis])
-
-		view_a, valid_mask_a = _augment_view(
+		base_sample, x, valid_mask, rng = self._load_base_sample(index)
+		(
+			(view_a, valid_mask_a, flip_state_a),
+			(view_b, valid_mask_b, flip_state_b),
+		) = _build_horizontal_views(
 			x,
 			valid_mask,
-			flip_inline=bool(flip_state_a[0]),
-			flip_crossline=bool(flip_state_a[1]),
-		)
-		view_b, valid_mask_b = _augment_view(
-			x,
-			valid_mask,
-			flip_inline=bool(flip_state_b[0]),
-			flip_crossline=bool(flip_state_b[1]),
+			rng,
+			probability=self.horizontal_flip_probability,
+			require_distinct=True,
 		)
 
 		canonical_token_mask = reduce_valid_mask_to_tokens(
@@ -147,9 +129,7 @@ class LocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
 			patch_size_xyz=self.base_dataset.patch_size_xyz,
 			min_valid_fraction=1.0,
 		)
-		valid_canonical_indices = np.flatnonzero(
-			canonical_token_mask.ravel(order='C')
-		)
+		valid_canonical_indices = np.flatnonzero(canonical_token_mask.ravel(order='C'))
 		if valid_canonical_indices.size < self.local_pairs_per_crop:
 			msg = (
 				'base sample has fewer fully valid tokens than local_pairs_per_crop; '
@@ -186,6 +166,47 @@ class LocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
 				flip_state_b,
 			),
 		}
+
+
+def _build_horizontal_views(
+	x: np.ndarray,
+	valid_mask: np.ndarray,
+	rng: np.random.Generator,
+	*,
+	probability: float,
+	require_distinct: bool,
+) -> tuple[
+	tuple[np.ndarray, np.ndarray, np.ndarray],
+	tuple[np.ndarray, np.ndarray, np.ndarray],
+]:
+	flip_state_a = _sample_horizontal_flip_state(
+		rng,
+		probability=probability,
+	)
+	flip_state_b = _sample_horizontal_flip_state(
+		rng,
+		probability=probability,
+	)
+	if require_distinct and np.array_equal(flip_state_a, flip_state_b):
+		axis = int(rng.integers(0, 2))
+		flip_state_b[axis] = not bool(flip_state_b[axis])
+
+	view_a, valid_mask_a = _augment_view(
+		x,
+		valid_mask,
+		flip_inline=bool(flip_state_a[0]),
+		flip_crossline=bool(flip_state_a[1]),
+	)
+	view_b, valid_mask_b = _augment_view(
+		x,
+		valid_mask,
+		flip_inline=bool(flip_state_b[0]),
+		flip_crossline=bool(flip_state_b[1]),
+	)
+	return (
+		(view_a, valid_mask_a, flip_state_a),
+		(view_b, valid_mask_b, flip_state_b),
+	)
 
 
 def _augment_view(

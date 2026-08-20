@@ -16,9 +16,9 @@ from seis_ssl_cluster.data import (
 	SurveyManifest,
 	SurveyNormalizationStats,
 	ZeroMaskConfig,
-	reduce_valid_mask_to_tokens,
 	write_normalization_stats,
 )
+from seis_ssl_cluster.models.mae.patching import patchify_3d
 from seis_ssl_cluster.training import (
 	barlow_twins_collate_fn,
 	build_barlow_twins_dataloader,
@@ -349,42 +349,85 @@ def test_local_epoch_changes_at_least_one_sample_and_resets(tmp_path: Path) -> N
 			np.testing.assert_array_equal(dataset[index][key], expected[key])
 
 
-def test_local_pair_indices_map_to_same_canonical_physical_tokens(
+def test_local_pair_indices_select_same_physical_patches_after_patchify(
 	tmp_path: Path,
 ) -> None:
-	valid_mask = np.ones((2, 3, 4), dtype=bool)
-	valid_mask[0, 1, :2] = False
-	dataset = LocalBarlowTwinsPretrainDataset(
-		_base_dataset(
-			tmp_path,
-			valid_mask=valid_mask,
-			min_valid_token_count=4,
-		),
-		local_pairs_per_crop=4,
+	patch_size_xyz = (2, 2, 2)
+	token_grid_shape_xyz = (2, 3, 2)
+	patch_ids = np.arange(1, 13, dtype=np.float32).reshape(
+		token_grid_shape_xyz
 	)
-	sample = dataset[0]
-	token_shape = (2, 3, 2)
-	canonical_a = _canonical_token_coordinates(
-		sample['local_pair_indices_a'],
-		sample['horizontal_flip_state_a'],
-		token_shape,
-	)
-	canonical_b = _canonical_token_coordinates(
-		sample['local_pair_indices_b'],
-		sample['horizontal_flip_state_b'],
-		token_shape,
-	)
-
-	np.testing.assert_array_equal(canonical_a, canonical_b)
-	assert np.unique(canonical_a, axis=1).shape[1] == 4
-	for suffix in ('a', 'b'):
-		token_valid_mask = reduce_valid_mask_to_tokens(
-			sample[f'valid_mask_{suffix}'],
-			patch_size_xyz=(1, 1, 2),
-			min_valid_fraction=1.0,
+	volume = patch_ids.repeat(patch_size_xyz[0], axis=0)
+	volume = volume.repeat(patch_size_xyz[1], axis=1)
+	volume = volume.repeat(patch_size_xyz[2], axis=2)
+	valid_mask = np.ones_like(volume, dtype=bool)
+	invalid_token_xyz = (1, 1, 0)
+	invalid_slices = tuple(
+		slice(token * patch, (token + 1) * patch)
+		for token, patch in zip(
+			invalid_token_xyz,
+			patch_size_xyz,
+			strict=True,
 		)
-		indices = sample[f'local_pair_indices_{suffix}']
-		assert token_valid_mask.ravel(order='C')[indices].all()
+	)
+	valid_mask[invalid_slices] = False
+	invalid_patch_id = int(patch_ids[invalid_token_xyz])
+	valid_patch_ids = set(range(1, patch_ids.size + 1)) - {invalid_patch_id}
+	base = AmplitudePretrainDataset(
+		[_manifest(tmp_path, volume, valid_mask=valid_mask)],
+		local_crop_size_xyz=volume.shape,
+		patch_size_xyz=patch_size_xyz,
+		emit_spatial_mask=False,
+		seed=19,
+		samples_per_epoch=8,
+		zero_mask=ZeroMaskConfig(enabled=False),
+		min_valid_token_count=len(valid_patch_ids),
+	)
+	dataset = LocalBarlowTwinsPretrainDataset(
+		base,
+		local_pairs_per_crop=len(valid_patch_ids),
+	)
+	exercised_flip_axes = np.zeros(2, dtype=bool)
+
+	for index in range(len(dataset)):
+		sample = dataset[index]
+		patches_a = patchify_3d(
+			torch.as_tensor(sample['view_a']).unsqueeze(0),
+			patch_size_xyz,
+		)[0]
+		patches_b = patchify_3d(
+			torch.as_tensor(sample['view_b']).unsqueeze(0),
+			patch_size_xyz,
+		)[0]
+		selected_a = patches_a.index_select(
+			0,
+			torch.as_tensor(sample['local_pair_indices_a']),
+		)
+		selected_b = patches_b.index_select(
+			0,
+			torch.as_tensor(sample['local_pair_indices_b']),
+		)
+
+		torch.testing.assert_close(selected_a, selected_b)
+		selected_patch_ids = selected_a[:, 0, 0]
+		rounded_patch_ids = selected_patch_ids.round().to(torch.int64)
+		assert set(rounded_patch_ids.tolist()) == valid_patch_ids
+		torch.testing.assert_close(
+			selected_patch_ids,
+			rounded_patch_ids.to(selected_patch_ids.dtype),
+			rtol=0.0,
+			atol=2e-5,
+		)
+		torch.testing.assert_close(
+			selected_a,
+			selected_patch_ids[:, None, None].expand_as(selected_a),
+		)
+		exercised_flip_axes |= np.logical_xor(
+			sample['horizontal_flip_state_a'],
+			sample['horizontal_flip_state_b'],
+		)
+
+	assert exercised_flip_axes.all()
 
 
 def test_local_multi_worker_batch_matches_single_process(tmp_path: Path) -> None:
@@ -441,21 +484,3 @@ def test_dataloader_rejects_batch_size_one(tmp_path: Path) -> None:
 
 	with pytest.raises(ValueError, match='at least 2'):
 		build_barlow_twins_dataloader(dataset, batch_size=1)
-
-
-def _canonical_token_coordinates(
-	view_indices: object,
-	flip_state: object,
-	token_shape: tuple[int, int, int],
-) -> np.ndarray:
-	indices = np.asarray(view_indices, dtype=np.int64)
-	state = np.asarray(flip_state, dtype=bool)
-	coordinates = np.asarray(
-		np.unravel_index(indices, token_shape, order='C'),
-		dtype=np.int64,
-	)
-	if bool(state[0]):
-		coordinates[0] = token_shape[0] - 1 - coordinates[0]
-	if bool(state[1]):
-		coordinates[1] = token_shape[1] - 1 - coordinates[1]
-	return coordinates
