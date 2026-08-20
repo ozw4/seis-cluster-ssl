@@ -45,6 +45,7 @@ from seis_ssl_cluster.config.common import (
 	_validate_required_keys,
 )
 from seis_ssl_cluster.config.schema import (
+	BARLOW_TWINS_PRETRAINING_METHOD,
 	DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
 	DEFAULT_BARLOW_TWINS_OPTIONS,
 	DEFAULT_BARLOW_TWINS_TRAIN_OPTIONS,
@@ -64,6 +65,7 @@ from seis_ssl_cluster.config.schema import (
 	FIXED_LOSS_CONTRACT,
 	FIXED_MASKING_CONTRACT,
 	FIXED_MODEL_CONTRACT,
+	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 	MAE_DEBUG_VISUALIZATION_COLUMNS,
 	MAE_DEBUG_VISUALIZATION_KEYS,
 	STAGE_BARLOW_TWINS_TRAINING,
@@ -121,7 +123,13 @@ _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 		}
 	),
 	'augmentations': frozenset(DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS),
-	'barlow_twins': frozenset(DEFAULT_BARLOW_TWINS_OPTIONS),
+	'barlow_twins': frozenset(
+		{
+			*DEFAULT_BARLOW_TWINS_OPTIONS,
+			'local_pairs_per_crop',
+			'method',
+		}
+	),
 	'train': frozenset(
 		{
 			'batch_size',
@@ -703,6 +711,11 @@ def resolve_barlow_twins_training_config(config: _T) -> Config:
 		barlow_twins,
 		'normalization_eps',
 		prefix='barlow_twins',
+	)
+	_validate_barlow_twins_method(
+		barlow_twins,
+		local_crop_size=local_crop_size,
+		patch_size=patch_size,
 	)
 
 	train = _required_mapping(resolved, 'train')
@@ -3753,6 +3766,64 @@ def _validate_barlow_twins_train(train: Mapping[str, object]) -> None:
 		raise ValueError(msg)
 	_validate_optional_train_seed(train)
 	_validate_optional_train_device(train)
+
+
+def _validate_barlow_twins_method(
+	barlow_twins: Mapping[str, object],
+	*,
+	local_crop_size: Sequence[int],
+	patch_size: Sequence[int],
+) -> None:
+	method = barlow_twins.get('method', BARLOW_TWINS_PRETRAINING_METHOD)
+	supported_methods = (
+		BARLOW_TWINS_PRETRAINING_METHOD,
+		LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	)
+	if not isinstance(method, str):
+		msg = f'barlow_twins.method must be a string; got {method!r}'
+		raise TypeError(msg)
+	if method not in supported_methods:
+		msg = (
+			'barlow_twins.method must be one of '
+			f'{list(supported_methods)!r}; got {method!r}'
+		)
+		raise ValueError(msg)
+
+	if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+		if 'local_pairs_per_crop' in barlow_twins:
+			msg = (
+				'barlow_twins.local_pairs_per_crop is only allowed when '
+				'barlow_twins.method is '
+				f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+			)
+			raise ValueError(msg)
+		return
+
+	_validate_required_key(
+		barlow_twins,
+		'local_pairs_per_crop',
+		prefix='barlow_twins',
+	)
+	_validate_positive_int(
+		barlow_twins,
+		'local_pairs_per_crop',
+		prefix='barlow_twins',
+	)
+	local_pairs_per_crop = int(barlow_twins['local_pairs_per_crop'])
+	token_count = math.prod(
+		crop_axis // patch_axis
+		for crop_axis, patch_axis in zip(
+			local_crop_size,
+			patch_size,
+			strict=True,
+		)
+	)
+	if local_pairs_per_crop > token_count:
+		msg = (
+			'barlow_twins.local_pairs_per_crop must be less than or equal to '
+			f'the crop token count ({token_count}); got {local_pairs_per_crop}'
+		)
+		raise ValueError(msg)
 
 
 def _validate_runtime_check_mode(train: Mapping[str, object]) -> None:

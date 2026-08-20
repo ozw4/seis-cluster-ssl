@@ -12,12 +12,17 @@ from seis_ssl_cluster.data import (
 	AmplitudePretrainDataset,
 	AmplitudeVolumeRecord,
 	BarlowTwinsPretrainDataset,
+	LocalBarlowTwinsPretrainDataset,
 	SurveyManifest,
 	SurveyNormalizationStats,
 	ZeroMaskConfig,
+	reduce_valid_mask_to_tokens,
 	write_normalization_stats,
 )
-from seis_ssl_cluster.training import build_barlow_twins_dataloader
+from seis_ssl_cluster.training import (
+	barlow_twins_collate_fn,
+	build_barlow_twins_dataloader,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -71,6 +76,7 @@ def _base_dataset(
 	*,
 	valid_mask: np.ndarray | None = None,
 	samples_per_epoch: int = 8,
+	min_valid_token_count: int = 0,
 ) -> AmplitudePretrainDataset:
 	volume = np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4) + 1.0
 	return AmplitudePretrainDataset(
@@ -81,6 +87,7 @@ def _base_dataset(
 		seed=19,
 		samples_per_epoch=samples_per_epoch,
 		zero_mask=ZeroMaskConfig(enabled=False),
+		min_valid_token_count=min_valid_token_count,
 	)
 
 
@@ -240,8 +247,215 @@ def test_dataloader_returns_two_view_batch_without_mae_mask(tmp_path: Path) -> N
 	assert 'spatial_mask' not in batch
 
 
+@pytest.mark.parametrize('probability', [0.0, 0.5, 1.0])
+def test_local_views_always_have_distinct_flip_states(
+	tmp_path: Path,
+	probability: float,
+) -> None:
+	base = _base_dataset(tmp_path, min_valid_token_count=4)
+	read_candidate = Mock(wraps=base._read_amplitude_crop_candidate)  # noqa: SLF001
+	base._read_amplitude_crop_candidate = read_candidate  # type: ignore[method-assign]  # noqa: SLF001
+	dataset = LocalBarlowTwinsPretrainDataset(
+		base,
+		local_pairs_per_crop=4,
+		horizontal_flip_probability=probability,
+	)
+
+	for index in range(len(dataset)):
+		sample = dataset[index]
+		assert not np.array_equal(
+			sample['horizontal_flip_state_a'],
+			sample['horizontal_flip_state_b'],
+		)
+
+	assert read_candidate.call_count == len(dataset)
+
+
+def test_local_dataset_rejects_insufficient_base_token_contract(
+	tmp_path: Path,
+) -> None:
+	base = _base_dataset(tmp_path, min_valid_token_count=3)
+
+	with pytest.raises(ValueError, match=r'base_dataset\.min_valid_token_count'):
+		LocalBarlowTwinsPretrainDataset(base, local_pairs_per_crop=4)
+
+
+@pytest.mark.parametrize('value', [0, -1, True, 1.5])
+def test_local_dataset_rejects_invalid_pair_count(
+	tmp_path: Path,
+	value: object,
+) -> None:
+	base = _base_dataset(tmp_path, min_valid_token_count=4)
+
+	with pytest.raises((TypeError, ValueError), match='local_pairs_per_crop'):
+		LocalBarlowTwinsPretrainDataset(
+			base,
+			local_pairs_per_crop=value,  # type: ignore[arg-type]
+		)
+
+
+def test_local_seed_epoch_and_index_determine_complete_sample(tmp_path: Path) -> None:
+	dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(tmp_path, min_valid_token_count=4),
+		local_pairs_per_crop=4,
+	)
+
+	first = dataset[3]
+	second = dataset[3]
+
+	for key in (
+		'view_a',
+		'view_b',
+		'valid_mask_a',
+		'valid_mask_b',
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	):
+		np.testing.assert_array_equal(first[key], second[key])
+	assert first['coords'] == second['coords']
+
+
+def test_local_epoch_changes_at_least_one_sample_and_resets(tmp_path: Path) -> None:
+	dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(tmp_path, min_valid_token_count=4),
+		local_pairs_per_crop=4,
+	)
+	epoch_zero = [dataset[index] for index in range(len(dataset))]
+
+	dataset.set_epoch(1)
+	epoch_one = [dataset[index] for index in range(len(dataset))]
+	dataset.set_epoch(0)
+
+	assert any(
+		not np.array_equal(
+			zero['local_pair_indices_a'],
+			one['local_pair_indices_a'],
+		)
+		or not np.array_equal(
+			zero['horizontal_flip_state_a'],
+			one['horizontal_flip_state_a'],
+		)
+		for zero, one in zip(epoch_zero, epoch_one, strict=True)
+	)
+	for index, expected in enumerate(epoch_zero):
+		for key in (
+			'horizontal_flip_state_a',
+			'horizontal_flip_state_b',
+			'local_pair_indices_a',
+			'local_pair_indices_b',
+		):
+			np.testing.assert_array_equal(dataset[index][key], expected[key])
+
+
+def test_local_pair_indices_map_to_same_canonical_physical_tokens(
+	tmp_path: Path,
+) -> None:
+	valid_mask = np.ones((2, 3, 4), dtype=bool)
+	valid_mask[0, 1, :2] = False
+	dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(
+			tmp_path,
+			valid_mask=valid_mask,
+			min_valid_token_count=4,
+		),
+		local_pairs_per_crop=4,
+	)
+	sample = dataset[0]
+	token_shape = (2, 3, 2)
+	canonical_a = _canonical_token_coordinates(
+		sample['local_pair_indices_a'],
+		sample['horizontal_flip_state_a'],
+		token_shape,
+	)
+	canonical_b = _canonical_token_coordinates(
+		sample['local_pair_indices_b'],
+		sample['horizontal_flip_state_b'],
+		token_shape,
+	)
+
+	np.testing.assert_array_equal(canonical_a, canonical_b)
+	assert np.unique(canonical_a, axis=1).shape[1] == 4
+	for suffix in ('a', 'b'):
+		token_valid_mask = reduce_valid_mask_to_tokens(
+			sample[f'valid_mask_{suffix}'],
+			patch_size_xyz=(1, 1, 2),
+			min_valid_fraction=1.0,
+		)
+		indices = sample[f'local_pair_indices_{suffix}']
+		assert token_valid_mask.ravel(order='C')[indices].all()
+
+
+def test_local_multi_worker_batch_matches_single_process(tmp_path: Path) -> None:
+	dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(tmp_path, min_valid_token_count=4),
+		local_pairs_per_crop=4,
+	)
+	single_process = build_barlow_twins_dataloader(
+		dataset,
+		batch_size=2,
+		num_workers=0,
+		shuffle=False,
+	)
+	multi_worker = build_barlow_twins_dataloader(
+		dataset,
+		batch_size=2,
+		num_workers=2,
+		shuffle=False,
+		persistent_workers=False,
+	)
+
+	single_batch = next(iter(single_process))
+	multi_batch = next(iter(multi_worker))
+
+	for key in (
+		'view_a',
+		'view_b',
+		'valid_mask_a',
+		'valid_mask_b',
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	):
+		torch.testing.assert_close(single_batch[key], multi_batch[key])
+	assert single_batch['coords'] == multi_batch['coords']
+	assert single_batch['local_pair_indices_a'].dtype is torch.int64
+	assert single_batch['horizontal_flip_state_a'].dtype is torch.bool
+
+
+def test_barlow_collate_rejects_mixed_standard_and_local_samples(
+	tmp_path: Path,
+) -> None:
+	base = _base_dataset(tmp_path, min_valid_token_count=4)
+	standard = BarlowTwinsPretrainDataset(base)[0]
+	local = LocalBarlowTwinsPretrainDataset(base, local_pairs_per_crop=4)[1]
+
+	with pytest.raises(ValueError, match='all contain every local Barlow Twins key'):
+		barlow_twins_collate_fn([standard, local])
+
+
 def test_dataloader_rejects_batch_size_one(tmp_path: Path) -> None:
 	dataset = BarlowTwinsPretrainDataset(_base_dataset(tmp_path))
 
 	with pytest.raises(ValueError, match='at least 2'):
 		build_barlow_twins_dataloader(dataset, batch_size=1)
+
+
+def _canonical_token_coordinates(
+	view_indices: object,
+	flip_state: object,
+	token_shape: tuple[int, int, int],
+) -> np.ndarray:
+	indices = np.asarray(view_indices, dtype=np.int64)
+	state = np.asarray(flip_state, dtype=bool)
+	coordinates = np.asarray(
+		np.unravel_index(indices, token_shape, order='C'),
+		dtype=np.int64,
+	)
+	if bool(state[0]):
+		coordinates[0] = token_shape[0] - 1 - coordinates[0]
+	if bool(state[1]):
+		coordinates[1] = token_shape[1] - 1 - coordinates[1]
+	return coordinates

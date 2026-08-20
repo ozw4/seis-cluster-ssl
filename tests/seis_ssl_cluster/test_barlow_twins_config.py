@@ -27,6 +27,92 @@ def test_barlow_twins_config_resolves_method_defaults() -> None:
 	assert 'continuation' not in resolved
 
 
+def test_local_barlow_twins_config_preserves_scientific_contract() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+
+	resolved = resolve_barlow_twins_training_config(config)
+
+	assert resolved['barlow_twins'] == {
+		'projector_dim': 384,
+		'redundancy_weight': 0.005,
+		'normalization_eps': 1.0e-4,
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+
+
+def test_local_barlow_twins_config_requires_pair_count() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {'method': 'local_barlow_twins_3d'}
+
+	with pytest.raises(
+		ValueError,
+		match=r'barlow_twins\.local_pairs_per_crop.*required',
+	):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize('method', [None, 'barlow_twins_3d'])
+def test_nonlocal_barlow_twins_config_rejects_pair_count(
+	method: str | None,
+) -> None:
+	config = _minimal_barlow_config()
+	barlow_twins: dict[str, object] = {'local_pairs_per_crop': 1}
+	if method is not None:
+		barlow_twins['method'] = method
+	config['barlow_twins'] = barlow_twins
+
+	with pytest.raises(ValueError, match=r'barlow_twins\.local_pairs_per_crop'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize('local_pairs_per_crop', [0, True, 1.5, 9])
+def test_local_barlow_twins_config_rejects_invalid_pair_count(
+	local_pairs_per_crop: object,
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': local_pairs_per_crop,
+	}
+
+	with pytest.raises(ValueError, match=r'barlow_twins\.local_pairs_per_crop'):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_barlow_twins_config_rejects_unknown_method() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {'method': 'unknown'}
+
+	with pytest.raises(ValueError, match=r'barlow_twins\.method'):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_barlow_twins_config_rejects_non_string_method() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {'method': True}
+
+	with pytest.raises(TypeError, match=r'barlow_twins\.method must be a string'):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_local_barlow_twins_config_does_not_mutate_raw_mapping() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	original = deepcopy(config)
+
+	resolve_barlow_twins_training_config(config)
+
+	assert config == original
+
+
 def test_barlow_twins_config_accepts_continuation() -> None:
 	config = _minimal_barlow_config()
 	config['continuation'] = {

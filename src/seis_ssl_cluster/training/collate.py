@@ -38,13 +38,27 @@ def barlow_twins_collate_fn(
 		msg = 'samples must contain at least one sample'
 		raise ValueError(msg)
 
-	return {
+	batch: dict[str, torch.Tensor | object] = {
 		'view_a': _stack_arrays(samples, 'view_a'),
 		'view_b': _stack_arrays(samples, 'view_b'),
 		'valid_mask_a': _stack_arrays(samples, 'valid_mask_a'),
 		'valid_mask_b': _stack_arrays(samples, 'valid_mask_b'),
 		'coords': [sample.get('coords') for sample in samples],
 	}
+	local_keys = (
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	)
+	local_key_counts = [sum(key in sample for key in local_keys) for sample in samples]
+	if all(count == 0 for count in local_key_counts):
+		return batch
+	if not all(count == len(local_keys) for count in local_key_counts):
+		msg = 'samples must either all contain every local Barlow Twins key or none'
+		raise ValueError(msg)
+	batch.update({key: _stack_arrays(samples, key) for key in local_keys})
+	return batch
 
 
 def strat_pseudo_target_collate_fn(

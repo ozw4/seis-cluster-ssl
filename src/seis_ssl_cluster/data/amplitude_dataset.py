@@ -27,6 +27,7 @@ from seis_ssl_cluster.data.window_preprocessing import (
 	FiniteCheckMode,
 	finalize_amplitude_crop,
 	read_amplitude_crop_candidate,
+	reduce_valid_mask_to_tokens,
 	resolve_manifest_path,
 )
 from seis_ssl_cluster.data.zero_mask import (
@@ -67,6 +68,7 @@ class AmplitudePretrainDataset:
 		finite_check_mode: FiniteCheckMode = 'strict',
 		*,
 		emit_spatial_mask: bool = True,
+		min_valid_token_count: int = 0,
 	) -> None:
 		self.manifests = tuple(manifests)
 		if not self.manifests:
@@ -124,6 +126,10 @@ class AmplitudePretrainDataset:
 		self.min_valid_fraction = _validate_fraction(
 			min_valid_fraction,
 			'min_valid_fraction',
+		)
+		self.min_valid_token_count = _validate_nonnegative_int(
+			min_valid_token_count,
+			'min_valid_token_count',
 		)
 		self.max_resample_attempts = _validate_positive_int(
 			max_resample_attempts,
@@ -210,6 +216,7 @@ class AmplitudePretrainDataset:
 		]
 		rng = rng_for_sample(self.seed, self.epoch, index)
 		last_valid_fraction = 0.0
+		last_valid_token_count = 0
 		for _ in range(self.max_resample_attempts):
 			local_request = sample_random_local_crop(
 				manifest.amplitude.shape_xyz,
@@ -222,18 +229,47 @@ class AmplitudePretrainDataset:
 				local_request,
 			)
 			last_valid_fraction = candidate.valid_fraction
-			if last_valid_fraction >= self.min_valid_fraction:
-				sample = self._finalize_sample(manifest, candidate)
-				if self.emit_spatial_mask:
-					self._add_spatial_masks(sample, rng)
-				return sample
+			if last_valid_fraction < self.min_valid_fraction:
+				continue
+			if self.min_valid_token_count > 0:
+				token_valid_mask = reduce_valid_mask_to_tokens(
+					candidate.local_valid_mask,
+					patch_size_xyz=self.patch_size_xyz,
+					min_valid_fraction=1.0,
+				)
+				last_valid_token_count = int(np.count_nonzero(token_valid_mask))
+				if last_valid_token_count < self.min_valid_token_count:
+					continue
+			sample = self._finalize_sample(manifest, candidate)
+			if self.emit_spatial_mask:
+				self._add_spatial_masks(sample, rng)
+			return sample
 
+		if (
+			self.min_valid_token_count > 0
+			and last_valid_fraction < self.min_valid_fraction
+		):
+			last_valid_token_count = int(
+				np.count_nonzero(
+					reduce_valid_mask_to_tokens(
+						candidate.local_valid_mask,
+						patch_size_xyz=self.patch_size_xyz,
+						min_valid_fraction=1.0,
+					)
+				)
+			)
 		msg = (
 			f'survey {manifest.survey_id!r} did not produce a crop with '
 			f'min_valid_fraction={self.min_valid_fraction!r} after '
 			f'{self.max_resample_attempts} attempts; last fraction was '
 			f'{last_valid_fraction:.6f}'
 		)
+		if self.min_valid_token_count > 0:
+			msg = (
+				f'{msg}; requested min_valid_token_count='
+				f'{self.min_valid_token_count}; last valid token count was '
+				f'{last_valid_token_count}'
+			)
 		raise ValueError(msg)
 
 	def _normalize_index(self, index: int) -> int:

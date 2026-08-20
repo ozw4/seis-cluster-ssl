@@ -27,6 +27,50 @@ def _make_model(*, projector_dim: int = 6) -> BarlowTwins3D:
 	return BarlowTwins3D(backbone, projector_dim=projector_dim)
 
 
+def _local_inputs() -> tuple[
+	torch.Tensor,
+	torch.Tensor,
+	torch.Tensor,
+	torch.Tensor,
+	torch.Tensor,
+	torch.Tensor,
+]:
+	view_a = torch.randn((2, 1, 4, 4, 4))
+	view_b = torch.randn((2, 1, 4, 4, 4))
+	valid_mask_a = torch.ones((2, 4, 4, 4), dtype=torch.bool)
+	valid_mask_b = torch.ones((2, 4, 4, 4), dtype=torch.bool)
+	indices_a = torch.tensor([[0, 3, 7], [1, 4, 6]], dtype=torch.int64)
+	indices_b = torch.tensor([[6, 2, 0], [7, 3, 1]], dtype=torch.int64)
+	return (
+		view_a,
+		view_b,
+		valid_mask_a,
+		valid_mask_b,
+		indices_a,
+		indices_b,
+	)
+
+
+def _call_forward_local(  # noqa: PLR0913
+	model: BarlowTwins3D,
+	*,
+	view_a: torch.Tensor,
+	view_b: torch.Tensor,
+	valid_mask_a: torch.Tensor,
+	valid_mask_b: torch.Tensor,
+	indices_a: torch.Tensor,
+	indices_b: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+	return model.forward_local(
+		view_a,
+		view_b,
+		valid_mask_a=valid_mask_a,
+		valid_mask_b=valid_mask_b,
+		local_pair_indices_a=indices_a,
+		local_pair_indices_b=indices_b,
+	)
+
+
 def test_two_views_return_projection_shapes() -> None:
 	model = _make_model()
 	view_a = torch.randn((2, 1, 4, 4, 4))
@@ -36,6 +80,368 @@ def test_two_views_return_projection_shapes() -> None:
 
 	assert output['z_a'].shape == (2, 6)
 	assert output['z_b'].shape == (2, 6)
+
+
+def test_local_views_project_batch_times_pair_rows() -> None:
+	model = _make_model()
+	view_a, view_b, mask_a, mask_b, indices_a, indices_b = _local_inputs()
+
+	output = _call_forward_local(
+		model,
+		view_a=view_a,
+		view_b=view_b,
+		valid_mask_a=mask_a,
+		valid_mask_b=mask_b,
+		indices_a=indices_a,
+		indices_b=indices_b,
+	)
+
+	assert set(output) == {'z_a', 'z_b'}
+	assert output['z_a'].shape == (6, 6)
+	assert output['z_b'].shape == (6, 6)
+
+
+def test_local_view_specific_indices_gather_corresponding_tokens(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model().eval()
+	projector = model.projector
+	view_a, view_b, mask_a, mask_b, indices_a, indices_b = _local_inputs()
+	tokens_a = torch.arange(2 * 8 * 8, dtype=torch.float32).reshape(2, 8, 8)
+	tokens_b = torch.full_like(tokens_a, -1.0)
+	for batch_index in range(2):
+		tokens_b[batch_index, indices_b[batch_index]] = tokens_a[
+			batch_index,
+			indices_a[batch_index],
+		]
+	encoded_outputs = iter(
+		(
+			{
+				'tokens': tokens_a,
+				'token_grid_shape': (2, 2, 2),
+				'token_valid_mask': torch.ones((2, 8), dtype=torch.bool),
+			},
+			{
+				'tokens': tokens_b,
+				'token_grid_shape': (2, 2, 2),
+				'token_valid_mask': torch.ones((2, 8), dtype=torch.bool),
+			},
+		)
+	)
+
+	def fake_encode_tokens(
+		_view: torch.Tensor,
+		*,
+		valid_mask: torch.Tensor | None = None,
+	) -> dict[str, object]:
+		assert valid_mask is not None
+		return next(encoded_outputs)
+
+	projector_inputs: list[torch.Tensor] = []
+
+	def capture_projector_input(
+		_module: torch.nn.Module,
+		inputs: tuple[torch.Tensor, ...],
+	) -> None:
+		projector_inputs.append(inputs[0].detach().clone())
+
+	monkeypatch.setattr(model.backbone, 'encode_tokens', fake_encode_tokens)
+	handle = projector.register_forward_pre_hook(capture_projector_input)
+	output = _call_forward_local(
+		model,
+		view_a=view_a,
+		view_b=view_b,
+		valid_mask_a=mask_a,
+		valid_mask_b=mask_b,
+		indices_a=indices_a,
+		indices_b=indices_b,
+	)
+	handle.remove()
+
+	expected = torch.gather(
+		tokens_a,
+		1,
+		indices_a.unsqueeze(-1).expand(-1, -1, tokens_a.shape[2]),
+	).reshape(6, 8)
+	assert model.projector is projector
+	assert not any('local_projector' in name for name, _module in model.named_modules())
+	assert len(projector_inputs) == 2
+	torch.testing.assert_close(projector_inputs[0], expected)
+	torch.testing.assert_close(projector_inputs[1], expected)
+	torch.testing.assert_close(output['z_a'], output['z_b'])
+
+
+def test_local_forward_rejects_selected_invalid_token() -> None:
+	model = _make_model()
+	view_a, view_b, _mask_a, _mask_b, indices_a, indices_b = _local_inputs()
+	mask_a = torch.ones((2, 2, 2, 2), dtype=torch.bool)
+	mask_b = torch.ones_like(mask_a)
+	mask_a[0, 0, 0, 0] = False
+
+	with pytest.raises(ValueError, match=r'local_pair_indices_a.*invalid token'):
+		_call_forward_local(
+			model,
+			view_a=view_a,
+			view_b=view_b,
+			valid_mask_a=mask_a,
+			valid_mask_b=mask_b,
+			indices_a=indices_a,
+			indices_b=indices_b,
+		)
+
+
+@pytest.mark.parametrize(
+	('indices_a', 'indices_b', 'error_type', 'match'),
+	[
+		(
+			torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.int32),
+			torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.int64),
+			TypeError,
+			'dtype must be torch.int64',
+		),
+		(
+			torch.zeros((2, 3, 1), dtype=torch.int64),
+			torch.zeros((2, 3), dtype=torch.int64),
+			ValueError,
+			'shape \\[B, K\\]',
+		),
+		(
+			torch.zeros((1, 3), dtype=torch.int64),
+			torch.zeros((2, 3), dtype=torch.int64),
+			ValueError,
+			'expected_batch_size=2',
+		),
+		(
+			torch.empty((2, 0), dtype=torch.int64),
+			torch.empty((2, 0), dtype=torch.int64),
+			ValueError,
+			'at least one local pair',
+		),
+		(
+			torch.tensor([[0, -1, 2], [3, 4, 5]], dtype=torch.int64),
+			torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.int64),
+			ValueError,
+			'values must be in',
+		),
+		(
+			torch.tensor([[0, 8, 2], [3, 4, 5]], dtype=torch.int64),
+			torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.int64),
+			ValueError,
+			'values must be in',
+		),
+		(
+			torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.int64),
+			torch.tensor([[0, 1], [3, 4]], dtype=torch.int64),
+			ValueError,
+			'same number of pairs',
+		),
+	],
+)
+def test_local_forward_rejects_invalid_pair_indices(
+	indices_a: torch.Tensor,
+	indices_b: torch.Tensor,
+	error_type: type[Exception],
+	match: str,
+) -> None:
+	model = _make_model()
+	view_a, view_b, mask_a, mask_b, _indices_a, _indices_b = _local_inputs()
+
+	with pytest.raises(error_type, match=match):
+		_call_forward_local(
+			model,
+			view_a=view_a,
+			view_b=view_b,
+			valid_mask_a=mask_a,
+			valid_mask_b=mask_b,
+			indices_a=indices_a,
+			indices_b=indices_b,
+		)
+
+
+def test_local_forward_rejects_input_device_mismatch() -> None:
+	model = _make_model()
+	view_a, view_b, mask_a, mask_b, _indices_a, indices_b = _local_inputs()
+	indices_a = torch.empty((2, 3), dtype=torch.int64, device='meta')
+
+	with pytest.raises(ValueError, match='same device as view_a'):
+		_call_forward_local(
+			model,
+			view_a=view_a,
+			view_b=view_b,
+			valid_mask_a=mask_a,
+			valid_mask_b=mask_b,
+			indices_a=indices_a,
+			indices_b=indices_b,
+		)
+
+
+def test_local_forward_requires_valid_masks() -> None:
+	model = _make_model()
+	view_a, view_b, _mask_a, mask_b, indices_a, indices_b = _local_inputs()
+
+	with pytest.raises(TypeError, match='valid_mask_a must be a tensor'):
+		model.forward_local(
+			view_a,
+			view_b,
+			valid_mask_a=None,  # type: ignore[arg-type]
+			valid_mask_b=mask_b,
+			local_pair_indices_a=indices_a,
+			local_pair_indices_b=indices_b,
+		)
+
+
+@pytest.mark.parametrize(
+	('tokens_b', 'grid_b', 'error_type', 'match'),
+	[
+		(
+			torch.randn((2, 8, 8)),
+			(4, 2, 1),
+			ValueError,
+			'token grids must match',
+		),
+		(
+			torch.randn((1, 8, 8)),
+			(2, 2, 2),
+			RuntimeError,
+			'batch size must match its input view',
+		),
+		(
+			torch.randn((2, 8, 7)),
+			(2, 2, 2),
+			ValueError,
+			'feature dimensions must match',
+		),
+	],
+)
+def test_local_forward_rejects_mismatched_encoder_outputs(
+	tokens_b: torch.Tensor,
+	grid_b: tuple[int, int, int],
+	error_type: type[Exception],
+	match: str,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model()
+	view_a, view_b, mask_a, mask_b, indices_a, indices_b = _local_inputs()
+	tokens_a = torch.randn((2, 8, 8))
+	encoded_outputs = iter(
+		(
+			{
+				'tokens': tokens_a,
+				'token_grid_shape': (2, 2, 2),
+				'token_valid_mask': torch.ones((2, 8), dtype=torch.bool),
+			},
+			{
+				'tokens': tokens_b,
+				'token_grid_shape': grid_b,
+				'token_valid_mask': torch.ones(tokens_b.shape[:2], dtype=torch.bool),
+			},
+		)
+	)
+
+	def fake_encode_tokens(
+		_view: torch.Tensor,
+		*,
+		valid_mask: torch.Tensor | None = None,
+	) -> dict[str, object]:
+		assert valid_mask is not None
+		return next(encoded_outputs)
+
+	monkeypatch.setattr(model.backbone, 'encode_tokens', fake_encode_tokens)
+	with pytest.raises(error_type, match=match):
+		_call_forward_local(
+			model,
+			view_a=view_a,
+			view_b=view_b,
+			valid_mask_a=mask_a,
+			valid_mask_b=mask_b,
+			indices_a=indices_a,
+			indices_b=indices_b,
+		)
+
+
+def test_local_forward_rejects_missing_encoder_token_mask(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _make_model()
+	view_a, view_b, mask_a, mask_b, indices_a, indices_b = _local_inputs()
+	encoded_outputs = iter(
+		(
+			{
+				'tokens': torch.randn((2, 8, 8)),
+				'token_grid_shape': (2, 2, 2),
+				'token_valid_mask': None,
+			},
+			{
+				'tokens': torch.randn((2, 8, 8)),
+				'token_grid_shape': (2, 2, 2),
+				'token_valid_mask': torch.ones((2, 8), dtype=torch.bool),
+			},
+		)
+	)
+
+	def fake_encode_tokens(
+		_view: torch.Tensor,
+		*,
+		valid_mask: torch.Tensor | None = None,
+	) -> dict[str, object]:
+		assert valid_mask is not None
+		return next(encoded_outputs)
+
+	monkeypatch.setattr(model.backbone, 'encode_tokens', fake_encode_tokens)
+	with pytest.raises(RuntimeError, match=r'requires.*token-valid mask'):
+		_call_forward_local(
+			model,
+			view_a=view_a,
+			view_b=view_b,
+			valid_mask_a=mask_a,
+			valid_mask_b=mask_b,
+			indices_a=indices_a,
+			indices_b=indices_b,
+		)
+
+
+def test_local_loss_has_encoder_projector_gradients_but_not_decoder_gradients() -> None:
+	model = _make_model(projector_dim=4)
+	view_a, view_b, mask_a, mask_b, indices_a, indices_b = _local_inputs()
+	output = _call_forward_local(
+		model,
+		view_a=view_a,
+		view_b=view_b,
+		valid_mask_a=mask_a,
+		valid_mask_b=mask_b,
+		indices_a=indices_a,
+		indices_b=indices_b,
+	)
+
+	loss = barlow_twins_loss(output['z_a'], output['z_b'])['loss']
+	loss.backward()
+
+	assert torch.isfinite(loss)
+	assert model.backbone.patch_projection.weight.grad is not None
+	encoder_gradients = [
+		parameter.grad
+		for parameter in model.backbone.encoder.parameters()
+		if parameter.grad is not None
+	]
+	projector_gradients = [
+		parameter.grad
+		for parameter in model.projector.parameters()
+		if parameter.grad is not None
+	]
+	assert encoder_gradients
+	assert projector_gradients
+	assert all(torch.isfinite(gradient).all() for gradient in encoder_gradients)
+	assert all(torch.isfinite(gradient).all() for gradient in projector_gradients)
+	assert model.backbone.mask_token.grad is None
+	assert all(
+		parameter.grad is None
+		for module in (
+			model.backbone.encoder_to_decoder,
+			model.backbone.decoder,
+			model.backbone.prediction_head,
+		)
+		for parameter in module.parameters()
+	)
 
 
 def test_mean_pool_excludes_invalid_tokens() -> None:

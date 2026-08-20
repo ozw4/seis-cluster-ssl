@@ -68,6 +68,7 @@ def _manifest(
 	volume: np.ndarray,
 	*,
 	median: float = 0.0,
+	valid_mask: np.ndarray | None = None,
 ) -> SurveyManifest:
 	volume_path = _write_volume(tmp_path / survey_id / 'base.npy', volume)
 	stats_path = _write_stats(
@@ -76,6 +77,10 @@ def _manifest(
 		source_path=volume_path,
 		median=median,
 	)
+	valid_mask_path = None
+	if valid_mask is not None:
+		valid_mask_path = tmp_path / survey_id / 'valid.npy'
+		np.save(valid_mask_path, valid_mask.astype(bool, copy=False))
 	return SurveyManifest(
 		survey_id=survey_id,
 		root=tmp_path,
@@ -86,6 +91,7 @@ def _manifest(
 			dtype='float32',
 			grid_order=GRID_ORDER_XYZ,
 			normalization_stats_path=stats_path,
+			valid_mask_path=valid_mask_path,
 		),
 	)
 
@@ -342,6 +348,168 @@ def test_amplitude_dataset_respects_min_valid_fraction(tmp_path: Path) -> None:
 	)
 
 	with pytest.raises(ValueError, match='min_valid_fraction'):
+		dataset[0]
+
+
+def test_min_valid_token_count_zero_preserves_existing_sample(
+	tmp_path: Path,
+) -> None:
+	manifest = _manifest(
+		tmp_path,
+		'survey',
+		np.arange(8 * 8 * 8, dtype=np.float32).reshape(8, 8, 8),
+	)
+	kwargs = {
+		'local_crop_size_xyz': (4, 4, 4),
+		'patch_size_xyz': (2, 2, 2),
+		'spatial_mask_ratio': 0.5,
+		'block_size_tokens_xyz': (1, 1, 1),
+		'seed': 31,
+		'zero_mask': ZeroMaskConfig(enabled=False),
+	}
+	implicit = AmplitudePretrainDataset([manifest], **kwargs)[0]
+	explicit = AmplitudePretrainDataset(
+		[manifest],
+		**kwargs,
+		min_valid_token_count=0,
+	)[0]
+
+	assert implicit.keys() == explicit.keys()
+	for key in ('x', 'local_valid_mask', 'spatial_mask'):
+		np.testing.assert_array_equal(implicit[key], explicit[key])
+	assert implicit['coords'] == explicit['coords']
+
+
+@pytest.mark.parametrize('value', [-1, True, 1.5])
+def test_amplitude_dataset_rejects_invalid_min_valid_token_count(
+	tmp_path: Path,
+	value: object,
+) -> None:
+	manifest = _manifest(tmp_path, 'survey', np.ones((4, 4, 4), dtype=np.float32))
+
+	with pytest.raises((TypeError, ValueError), match='min_valid_token_count'):
+		AmplitudePretrainDataset(
+			[manifest],
+			local_crop_size_xyz=(4, 4, 4),
+			patch_size_xyz=(1, 1, 1),
+			min_valid_token_count=value,  # type: ignore[arg-type]
+		)
+
+
+def test_amplitude_dataset_resamples_for_min_valid_token_count(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	volume = np.ones((8, 4, 8), dtype=np.float32)
+	valid_mask = np.ones_like(volume, dtype=bool)
+	valid_mask[0, 0, 0] = False
+	manifest = _manifest(
+		tmp_path,
+		'survey',
+		volume,
+		valid_mask=valid_mask,
+	)
+	dataset = AmplitudePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 8),
+		patch_size_xyz=(1, 1, 1),
+		zero_mask=ZeroMaskConfig(enabled=False),
+		max_resample_attempts=2,
+		emit_spatial_mask=False,
+		min_valid_token_count=128,
+	)
+	sampler = Mock(
+		side_effect=[
+			CropRequest('survey', (0, 0, 0), (4, 4, 8)),
+			CropRequest('survey', (4, 0, 0), (4, 4, 8)),
+		],
+	)
+	finalize = Mock(wraps=dataset._finalize_sample)  # noqa: SLF001
+	monkeypatch.setattr(amplitude_dataset_module, 'sample_random_local_crop', sampler)
+	dataset._finalize_sample = finalize  # type: ignore[method-assign]  # noqa: SLF001
+
+	sample = dataset[0]
+
+	assert sample['coords']['local_start_xyz'] == (4, 0, 0)
+	assert sampler.call_count == 2
+	assert finalize.call_count == 1
+
+
+def test_amplitude_dataset_reports_min_valid_token_count_failure(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	volume = np.ones((8, 4, 8), dtype=np.float32)
+	valid_mask = np.ones_like(volume, dtype=bool)
+	valid_mask[0, 0, 0] = False
+	valid_mask[4, 0, 0] = False
+	manifest = _manifest(
+		tmp_path,
+		'survey',
+		volume,
+		valid_mask=valid_mask,
+	)
+	dataset = AmplitudePretrainDataset(
+		[manifest],
+		local_crop_size_xyz=(4, 4, 8),
+		patch_size_xyz=(1, 1, 1),
+		zero_mask=ZeroMaskConfig(enabled=False),
+		max_resample_attempts=2,
+		emit_spatial_mask=False,
+		min_valid_token_count=128,
+	)
+	monkeypatch.setattr(
+		amplitude_dataset_module,
+		'sample_random_local_crop',
+		Mock(
+			side_effect=[
+				CropRequest('survey', (0, 0, 0), (4, 4, 8)),
+				CropRequest('survey', (4, 0, 0), (4, 4, 8)),
+			]
+		),
+	)
+
+	with pytest.raises(
+		ValueError,
+		match=(
+			r'after 2 attempts.*requested min_valid_token_count=128.*'
+			r'last valid token count was 127'
+		),
+	):
+		dataset[0]
+
+
+def test_amplitude_dataset_reports_last_candidate_token_count(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	volume = np.ones((4, 2, 2), dtype=np.float32)
+	valid_mask = np.zeros_like(volume, dtype=bool)
+	valid_mask[:2] = True
+	valid_mask[0, 0, 0] = False
+	valid_mask[2, 0, 0] = True
+	dataset = AmplitudePretrainDataset(
+		[_manifest(tmp_path, 'survey', volume, valid_mask=valid_mask)],
+		local_crop_size_xyz=(2, 2, 2),
+		patch_size_xyz=(1, 1, 1),
+		zero_mask=ZeroMaskConfig(enabled=False),
+		min_valid_fraction=0.5,
+		max_resample_attempts=2,
+		emit_spatial_mask=False,
+		min_valid_token_count=8,
+	)
+	monkeypatch.setattr(
+		amplitude_dataset_module,
+		'sample_random_local_crop',
+		Mock(
+			side_effect=[
+				CropRequest('survey', (0, 0, 0), (2, 2, 2)),
+				CropRequest('survey', (2, 0, 0), (2, 2, 2)),
+			]
+		),
+	)
+
+	with pytest.raises(ValueError, match=r'last valid token count was 1'):
 		dataset[0]
 
 

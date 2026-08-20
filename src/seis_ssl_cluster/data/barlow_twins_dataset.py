@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from seis_ssl_cluster.data.crop_sampler import rng_for_sample
+from seis_ssl_cluster.data.window_preprocessing import reduce_valid_mask_to_tokens
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.data.amplitude_dataset import AmplitudePretrainDataset
@@ -73,6 +74,117 @@ class BarlowTwinsPretrainDataset:
 			'valid_mask_a': valid_mask_a,
 			'valid_mask_b': valid_mask_b,
 			'coords': base_sample.get('coords'),
+		}
+
+
+class LocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
+	"""Return flipped views and indices for matching physical tokens."""
+
+	def __init__(
+		self,
+		base_dataset: AmplitudePretrainDataset,
+		*,
+		local_pairs_per_crop: int,
+		horizontal_flip_probability: float = 0.5,
+	) -> None:
+		"""Initialize the local-pair wrapper and validate its sampling contract."""
+		super().__init__(
+			base_dataset,
+			horizontal_flip_probability=horizontal_flip_probability,
+		)
+		self.local_pairs_per_crop = _validate_positive_int(
+			local_pairs_per_crop,
+			'local_pairs_per_crop',
+		)
+		if base_dataset.min_valid_token_count < self.local_pairs_per_crop:
+			msg = (
+				'base_dataset.min_valid_token_count must be greater than or equal '
+				f'to local_pairs_per_crop ({self.local_pairs_per_crop}); got '
+				f'{base_dataset.min_valid_token_count}'
+			)
+			raise ValueError(msg)
+
+	def __getitem__(self, index: int) -> dict[str, object]:
+		"""Return two views plus C-order indices for canonical token pairs."""
+		normalized_index = _normalize_index(index, len(self))
+		base_sample = self.base_dataset[normalized_index]
+		x = _require_array(base_sample, 'x')
+		valid_mask = _require_array(base_sample, 'local_valid_mask')
+		_validate_sample_shapes(x, valid_mask)
+
+		rng = rng_for_sample(
+			self.base_dataset.seed,
+			self.epoch,
+			normalized_index,
+		)
+		flip_state_a = _sample_horizontal_flip_state(
+			rng,
+			probability=self.horizontal_flip_probability,
+		)
+		flip_state_b = _sample_horizontal_flip_state(
+			rng,
+			probability=self.horizontal_flip_probability,
+		)
+		if np.array_equal(flip_state_a, flip_state_b):
+			axis = int(rng.integers(0, 2))
+			flip_state_b[axis] = not bool(flip_state_b[axis])
+
+		view_a, valid_mask_a = _augment_view(
+			x,
+			valid_mask,
+			flip_inline=bool(flip_state_a[0]),
+			flip_crossline=bool(flip_state_a[1]),
+		)
+		view_b, valid_mask_b = _augment_view(
+			x,
+			valid_mask,
+			flip_inline=bool(flip_state_b[0]),
+			flip_crossline=bool(flip_state_b[1]),
+		)
+
+		canonical_token_mask = reduce_valid_mask_to_tokens(
+			valid_mask,
+			patch_size_xyz=self.base_dataset.patch_size_xyz,
+			min_valid_fraction=1.0,
+		)
+		valid_canonical_indices = np.flatnonzero(
+			canonical_token_mask.ravel(order='C')
+		)
+		if valid_canonical_indices.size < self.local_pairs_per_crop:
+			msg = (
+				'base sample has fewer fully valid tokens than local_pairs_per_crop; '
+				f'got {valid_canonical_indices.size} and '
+				f'{self.local_pairs_per_crop}'
+			)
+			raise ValueError(msg)
+		canonical_indices = np.asarray(
+			rng.choice(
+				valid_canonical_indices,
+				size=self.local_pairs_per_crop,
+				replace=False,
+			),
+			dtype=np.int64,
+		)
+		token_shape = tuple(int(axis) for axis in canonical_token_mask.shape)
+
+		return {
+			'view_a': view_a,
+			'view_b': view_b,
+			'valid_mask_a': valid_mask_a,
+			'valid_mask_b': valid_mask_b,
+			'coords': base_sample.get('coords'),
+			'horizontal_flip_state_a': flip_state_a,
+			'horizontal_flip_state_b': flip_state_b,
+			'local_pair_indices_a': _map_token_indices_for_view(
+				canonical_indices,
+				token_shape,
+				flip_state_a,
+			),
+			'local_pair_indices_b': _map_token_indices_for_view(
+				canonical_indices,
+				token_shape,
+				flip_state_b,
+			),
 		}
 
 
@@ -143,4 +255,45 @@ def _validate_probability(value: object, name: str) -> float:
 	return probability
 
 
-__all__ = ['BarlowTwinsPretrainDataset']
+def _validate_positive_int(value: object, name: str) -> int:
+	if isinstance(value, bool) or not isinstance(value, Integral):
+		msg = f'{name} must be an integer; got {value!r}'
+		raise TypeError(msg)
+	integer = int(value)
+	if integer <= 0:
+		msg = f'{name} must be positive; got {integer!r}'
+		raise ValueError(msg)
+	return integer
+
+
+def _sample_horizontal_flip_state(
+	rng: np.random.Generator,
+	*,
+	probability: float,
+) -> np.ndarray:
+	return np.asarray(
+		[rng.random() < probability, rng.random() < probability],
+		dtype=bool,
+	)
+
+
+def _map_token_indices_for_view(
+	canonical_indices: np.ndarray,
+	token_shape: tuple[int, int, int],
+	flip_state: np.ndarray,
+) -> np.ndarray:
+	coordinates = np.asarray(
+		np.unravel_index(canonical_indices, token_shape, order='C'),
+		dtype=np.int64,
+	)
+	if bool(flip_state[0]):
+		coordinates[0] = token_shape[0] - 1 - coordinates[0]
+	if bool(flip_state[1]):
+		coordinates[1] = token_shape[1] - 1 - coordinates[1]
+	return np.asarray(
+		np.ravel_multi_index(tuple(coordinates), token_shape, order='C'),
+		dtype=np.int64,
+	)
+
+
+__all__ = ['BarlowTwinsPretrainDataset', 'LocalBarlowTwinsPretrainDataset']
