@@ -9,10 +9,15 @@ from unittest.mock import Mock
 import numpy as np
 import pytest
 import torch
+import yaml
 
 import seis_ssl_cluster.data.amplitude_dataset as amplitude_dataset_module
 import seis_ssl_cluster.training.barlow_twins as barlow_twins_module
 from seis_ssl_cluster.config import resolve_barlow_twins_training_config
+from seis_ssl_cluster.config.schema import (
+	BARLOW_TWINS_PRETRAINING_METHOD,
+	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+)
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudeVolumeRecord,
@@ -72,6 +77,41 @@ def test_cli_dry_run_applies_max_steps_without_creating_artifacts(
 
 	assert 'stage: barlow_twins_training' in result.stdout
 	assert 'train.max_steps: 7' in result.stdout
+	assert 'execution: dry-run; training skipped' in result.stdout
+	assert not output_root.exists()
+
+
+def test_cli_dry_run_displays_local_method_without_creating_artifacts(
+	tmp_path: Path,
+) -> None:
+	raw_config = _tiny_local_config(
+		tmp_path,
+		output_name='local-dry-run-output',
+	)
+	config_path = tmp_path / 'local-barlow.yaml'
+	config_path.write_text(
+		yaml.safe_dump(raw_config, sort_keys=False),
+		encoding='utf-8',
+	)
+	output_root = tmp_path / 'artifacts' / 'local-dry-run-output'
+
+	result = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			'proc/seis_ssl_cluster/train_amp_barlow_twins.py',
+			'--config',
+			str(config_path),
+			'--dry-run',
+		],
+		check=True,
+		capture_output=True,
+		text=True,
+	)
+
+	assert (
+		'barlow_twins.method: local_barlow_twins_3d' in result.stdout
+	)
+	assert 'barlow_twins.local_pairs_per_crop: 4' in result.stdout
 	assert 'execution: dry-run; training skipped' in result.stdout
 	assert not output_root.exists()
 
@@ -147,6 +187,111 @@ def test_checkpoint_contract_round_trip_and_epoch_resume(
 	)
 	assert [row['global_step'] for row in history] == [1, 2]
 	assert all(set(row) >= DIAGNOSTIC_METRICS for row in history)
+
+
+def test_local_checkpoint_contract_round_trip_and_epoch_resume(
+	tmp_path: Path,
+) -> None:
+	config = resolve_barlow_twins_training_config(
+		_tiny_local_config(tmp_path, output_name='local-run')
+	)
+	first_path = run_barlow_twins_pretraining(config)
+	payload = load_barlow_twins_checkpoint(first_path, map_location='cpu')
+
+	assert first_path.name == 'latest.pt'
+	assert (first_path.parent / 'best.pt').is_file()
+	assert (first_path.parent / 'history.json').is_file()
+	resolved_path = first_path.parent / 'resolved_config.json'
+	assert resolved_path.is_file()
+	assert payload['pretraining_method'] == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+	assert payload['checkpoint_kind'] == 'barlow_twins_pretraining'
+	assert payload['config']['barlow_twins'] == config['barlow_twins']
+	assert payload['config']['barlow_twins']['local_pairs_per_crop'] == 4
+	assert json.loads(resolved_path.read_text(encoding='utf-8')) == config
+	loaded_encoder = build_model_from_checkpoint_payload(payload)
+	for key, expected in payload['model_state_dict'].items():
+		assert torch.equal(loaded_encoder.state_dict()[key], expected)
+
+	resume_config = resolve_barlow_twins_training_config(
+		_tiny_local_config(
+			tmp_path,
+			epochs=2,
+			max_steps=2,
+			output_name='local-run',
+		)
+	)
+	resumed_path = run_barlow_twins_pretraining(
+		resume_config,
+		resume=first_path,
+	)
+	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
+	assert resumed['epoch'] == 2
+	assert resumed['global_step'] == 2
+	assert resumed['pretraining_method'] == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+
+
+def test_resume_rejects_cross_method_before_creating_output_and_accepts_legacy(
+	tmp_path: Path,
+) -> None:
+	standard_path = run_barlow_twins_pretraining(
+		resolve_barlow_twins_training_config(
+			_tiny_config(tmp_path, output_name='standard-source')
+		)
+	)
+	local_path = run_barlow_twins_pretraining(
+		resolve_barlow_twins_training_config(
+			_tiny_local_config(tmp_path, output_name='local-source')
+		)
+	)
+
+	standard_target = tmp_path / 'artifacts' / 'standard-from-local'
+	standard_config = resolve_barlow_twins_training_config(
+		_tiny_config(
+			tmp_path,
+			epochs=2,
+			max_steps=2,
+			output_name='standard-from-local',
+		)
+	)
+	with pytest.raises(ValueError, match='pretraining_method'):
+		run_barlow_twins_pretraining(standard_config, resume=local_path)
+	assert not standard_target.exists()
+
+	local_target = tmp_path / 'artifacts' / 'local-from-standard'
+	local_config = resolve_barlow_twins_training_config(
+		_tiny_local_config(
+			tmp_path,
+			epochs=2,
+			max_steps=2,
+			output_name='local-from-standard',
+		)
+	)
+	with pytest.raises(ValueError, match='pretraining_method'):
+		run_barlow_twins_pretraining(local_config, resume=standard_path)
+	assert not local_target.exists()
+
+	explicit_standard = _tiny_config(
+		tmp_path,
+		epochs=2,
+		max_steps=2,
+		output_name='explicit-standard-resume',
+	)
+	barlow_twins = explicit_standard['barlow_twins']
+	assert isinstance(barlow_twins, dict)
+	barlow_twins['method'] = BARLOW_TWINS_PRETRAINING_METHOD
+	explicit_path = run_barlow_twins_pretraining(
+		resolve_barlow_twins_training_config(explicit_standard),
+		resume=standard_path,
+	)
+	explicit_payload = load_barlow_twins_checkpoint(
+		explicit_path,
+		map_location='cpu',
+	)
+	assert explicit_payload['epoch'] == 2
+	assert (
+		explicit_payload['pretraining_method']
+		== BARLOW_TWINS_PRETRAINING_METHOD
+	)
 
 
 def test_continuation_fresh_and_stage2_resume_contract(  # noqa: PLR0915
@@ -405,6 +550,39 @@ def test_epoch_checks_and_records_preclip_gradient_norm(
 	assert set(state.metrics) >= DIAGNOSTIC_METRICS
 
 
+def test_epoch_local_method_projects_batch_times_pair_rows(
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	model = _backbone_wrapper()
+	optimizer = torch.optim.SGD(model.pretraining_parameters(), lr=0.025)
+	original_forward_local = model.forward_local
+	projection_rows: list[int] = []
+
+	def recording_forward_local(
+		view_a: torch.Tensor,
+		view_b: torch.Tensor,
+		**kwargs: torch.Tensor,
+	) -> dict[str, torch.Tensor]:
+		outputs = original_forward_local(view_a, view_b, **kwargs)
+		projection_rows.append(int(outputs['z_a'].shape[0]))
+		return outputs
+
+	monkeypatch.setattr(model, 'forward_local', recording_forward_local)
+	state = train_barlow_twins_one_epoch(
+		model=model,
+		loss_fn=BarlowTwinsLoss(),
+		dataloader=[_local_barlow_batch(local_pairs_per_crop=3)],  # type: ignore[arg-type]
+		optimizer=optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		grad_clip_norm=1.0,
+		method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	)
+
+	assert projection_rows == [2 * 3]
+	assert state.global_step == 1
+
+
 def test_epoch_rejects_nonfinite_gradient_before_optimizer_step() -> None:
 	model = _backbone_wrapper()
 	optimizer = torch.optim.SGD(model.pretraining_parameters(), lr=0.1)
@@ -507,6 +685,30 @@ def _tiny_config(
 	}
 
 
+def _tiny_local_config(  # noqa: PLR0913
+	tmp_path: Path,
+	*,
+	epochs: int = 1,
+	max_steps: int = 1,
+	output_name: str = 'local-run',
+	encoder_depth: int = 1,
+	local_pairs_per_crop: int = 4,
+) -> dict[str, object]:
+	config = _tiny_config(
+		tmp_path,
+		epochs=epochs,
+		max_steps=max_steps,
+		output_name=output_name,
+		encoder_depth=encoder_depth,
+	)
+	config['barlow_twins'] = {
+		'method': LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		'local_pairs_per_crop': local_pairs_per_crop,
+		'projector_dim': 4,
+	}
+	return config
+
+
 def _continuation_config(
 	tmp_path: Path,
 	*,
@@ -603,6 +805,20 @@ def _barlow_batch() -> dict[str, torch.Tensor]:
 		'valid_mask_a': torch.ones((2, 4, 4, 4), dtype=torch.bool),
 		'valid_mask_b': torch.ones((2, 4, 4, 4), dtype=torch.bool),
 	}
+
+
+def _local_barlow_batch(
+	*,
+	local_pairs_per_crop: int,
+) -> dict[str, torch.Tensor]:
+	batch = _barlow_batch()
+	indices = torch.arange(
+		2 * local_pairs_per_crop,
+		dtype=torch.int64,
+	).reshape(2, local_pairs_per_crop)
+	batch['local_pair_indices_a'] = indices
+	batch['local_pair_indices_b'] = indices.clone()
+	return batch
 
 
 class _NonfiniteLoss(torch.nn.Module):

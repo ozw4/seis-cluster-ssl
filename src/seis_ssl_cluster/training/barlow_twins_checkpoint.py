@@ -13,10 +13,14 @@ from typing import Any
 import torch
 
 import seis_ssl_cluster
+from seis_ssl_cluster.config.barlow_twins import (
+	barlow_twins_config_compatibility_identity,
+	resolve_barlow_twins_pretraining_method,
+)
+from seis_ssl_cluster.config.schema import BARLOW_TWINS_PRETRAINING_METHOD
 from seis_ssl_cluster.models.amplitude_encoder_factory import (
 	AMPLITUDE_ENCODER_TRAINED_PARAMETER_PREFIXES,
 	BARLOW_TWINS_CHECKPOINT_KIND,
-	BARLOW_TWINS_PRETRAINING_METHOD,
 )
 from seis_ssl_cluster.training.checkpoint import (
 	capture_rng_state,
@@ -86,6 +90,7 @@ def save_barlow_twins_checkpoint(  # noqa: PLR0913
 	dataloader_generator: torch.Generator | None = None,
 ) -> Path:
 	"""Write a Barlow checkpoint with bare MAE and separate projector states."""
+	pretraining_method = resolve_barlow_twins_pretraining_method(config)
 	rng_state = capture_rng_state()
 	if dataloader_generator is not None:
 		rng_state['dataloader_generator'] = dataloader_generator.get_state()
@@ -111,7 +116,7 @@ def save_barlow_twins_checkpoint(  # noqa: PLR0913
 		},
 		extra_payload={
 			'projector_state_dict': projector.state_dict(),
-			'pretraining_method': PRETRAINING_METHOD,
+			'pretraining_method': pretraining_method,
 			'checkpoint_kind': CHECKPOINT_KIND,
 			'trained_parameter_prefixes': TRAINED_PARAMETER_PREFIXES,
 		},
@@ -187,7 +192,7 @@ def update_best_checkpoint(
 	return loss
 
 
-def _validate_payload(  # noqa: C901
+def _validate_payload(  # noqa: C901, PLR0912
 	payload: Mapping[str, Any],
 	*,
 	scaler_required: bool,
@@ -199,8 +204,20 @@ def _validate_payload(  # noqa: C901
 	for key in ('model_state_dict', 'projector_state_dict', 'optimizer_state_dict'):
 		if not isinstance(payload[key], Mapping):
 			raise TypeError(f'checkpoint {key} must be a mapping')
-	if payload['pretraining_method'] != PRETRAINING_METHOD:
-		raise ValueError('checkpoint pretraining_method is not barlow_twins_3d')
+	saved_config = payload['config']
+	if not isinstance(saved_config, Mapping):
+		raise TypeError('checkpoint config must be a mapping')
+	saved_method = resolve_barlow_twins_pretraining_method(saved_config)
+	expected_method = resolve_barlow_twins_pretraining_method(config)
+	if payload['pretraining_method'] != saved_method:
+		raise ValueError(
+			'checkpoint pretraining_method does not match checkpoint config'
+		)
+	if saved_method != expected_method:
+		raise ValueError(
+			'checkpoint pretraining_method does not match current config: '
+			f'checkpoint={saved_method!r}, current={expected_method!r}'
+		)
 	if payload['checkpoint_kind'] != CHECKPOINT_KIND:
 		raise ValueError('checkpoint kind is not Barlow Twins pretraining')
 	if tuple(payload['trained_parameter_prefixes']) != TRAINED_PARAMETER_PREFIXES:
@@ -218,7 +235,7 @@ def _validate_payload(  # noqa: C901
 		raise ValueError('checkpoint is missing required GradScaler state')
 	if not scaler_required and payload['scaler_state_dict'] is not None:
 		raise ValueError('checkpoint scaler state is incompatible with this run')
-	_validate_config_compatibility(payload['config'], config)
+	_validate_config_compatibility(saved_config, config)
 
 
 def _validate_config_compatibility(
@@ -228,13 +245,25 @@ def _validate_config_compatibility(
 	if not isinstance(saved, Mapping):
 		raise TypeError('checkpoint config must be a mapping')
 	for section in _COMPATIBILITY_SECTIONS:
-		if saved.get(section) != current.get(section):
+		if _compatibility_section(saved, section) != _compatibility_section(
+			current,
+			section,
+		):
 			raise ValueError(f'resume config section {section!r} does not match')
 	for key, value in _mapping(saved, 'train').items():
 		if key not in _ALLOWED_TRAIN_OVERRIDES and _mapping(current, 'train').get(
 			key
 		) != value:
 			raise ValueError(f'resume train setting {key!r} does not match')
+
+
+def _compatibility_section(
+	config: Mapping[str, object],
+	section: str,
+) -> object:
+	if section == 'barlow_twins':
+		return barlow_twins_config_compatibility_identity(config)
+	return config.get(section)
 
 
 def _mapping(value: Mapping[str, object], key: str) -> Mapping[str, object]:

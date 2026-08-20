@@ -20,6 +20,9 @@ from typing import cast
 import numpy as np
 import torch
 
+from seis_ssl_cluster.config.barlow_twins import (
+	resolve_barlow_twins_pretraining_method,
+)
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_MAE_DATA_OPTIONS,
 	DEFAULT_MAE_TRAIN_OPTIONS,
@@ -74,6 +77,7 @@ from seis_ssl_cluster.embedding.writer import (
 )
 from seis_ssl_cluster.models.amplitude_encoder_factory import (
 	BARLOW_TWINS_PRETRAINING_METHOD,
+	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 	build_model_from_checkpoint_payload,
 	build_model_from_config,
 	checkpoint_config_from_payload,
@@ -1297,7 +1301,9 @@ def build_embedding_metadata(  # noqa: PLR0913
 		checkpoint_payload is None
 		or not is_random_encoder_checkpoint(checkpoint_payload)
 	):
-		metadata['pretraining_method'] = BARLOW_TWINS_PRETRAINING_METHOD
+		metadata['pretraining_method'] = resolve_barlow_twins_pretraining_method(
+			checkpoint_config
+		)
 	if manifest.amplitude.valid_mask_path is not None:
 		metadata['source_valid_mask_path'] = str(
 			resolve_manifest_path(manifest, manifest.amplitude.valid_mask_path),
@@ -1812,8 +1818,9 @@ def _validate_checkpoint_target_normalization(loss: Mapping[str, object]) -> Non
 def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 	if config.get('stage') == STAGE_BARLOW_TWINS_TRAINING:
 		barlow_twins = _required_mapping(config, 'barlow_twins')
-		return {
-			'method': BARLOW_TWINS_PRETRAINING_METHOD,
+		method = resolve_barlow_twins_pretraining_method(config)
+		objective = {
+			'method': method,
 			'projector_dim': _positive_int(
 				barlow_twins.get('projector_dim'),
 				'barlow_twins.projector_dim',
@@ -1827,6 +1834,12 @@ def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 				'barlow_twins.normalization_eps',
 			),
 		}
+		if method == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+			objective['local_pairs_per_crop'] = _positive_int(
+				barlow_twins.get('local_pairs_per_crop'),
+				'barlow_twins.local_pairs_per_crop',
+			)
+		return objective
 	loss = _required_mapping(config, 'loss')
 	objective: dict[str, object] = {
 		'reconstruction': loss.get('reconstruction'),

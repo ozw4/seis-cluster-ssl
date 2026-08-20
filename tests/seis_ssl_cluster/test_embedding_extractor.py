@@ -18,6 +18,7 @@ import torch
 import seis_ssl_cluster.data.survey_preprocessing_cache as cache_module
 import seis_ssl_cluster.embedding.extractor as extractor_module
 from seis_ssl_cluster.config import resolve_barlow_twins_training_config
+from seis_ssl_cluster.config.schema import LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudePreprocessSettings,
@@ -205,6 +206,120 @@ def test_barlow_checkpoint_uses_existing_full_volume_extraction_contract(
 	assert metadata['model_geometry'] == json.loads(
 		mae_result.metadata_path.read_text(encoding='utf-8')
 	)['model_geometry']
+
+
+def test_local_barlow_checkpoint_extracts_encoder_dim_and_objective_metadata(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	_make_fixture_checkpoint_barlow(
+		config,
+		method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+	embeddings = np.load(result.embeddings_path)
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	payload = load_checkpoint(
+		Path(config['embeddings']['checkpoint']),  # type: ignore[index]
+		map_location='cpu',
+	)
+	loaded = build_model_from_checkpoint_payload(payload)
+
+	assert embeddings.shape[-1] == loaded.encoder_dim == 12
+	assert metadata['pretraining_method'] == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+	assert metadata['pretraining_objective'] == {
+		'method': LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		'projector_dim': 8,
+		'redundancy_weight': 0.005,
+		'normalization_eps': 1.0e-4,
+		'local_pairs_per_crop': 128,
+	}
+	for key, expected in payload['model_state_dict'].items():
+		assert torch.equal(loaded.state_dict()[key], expected)
+	assert set(payload['projector_state_dict']).isdisjoint(loaded.state_dict())
+
+
+def test_barlow_checkpoint_rejects_payload_and_config_method_mismatch(
+	tmp_path: Path,
+) -> None:
+	local_root = tmp_path / 'local'
+	standard_root = tmp_path / 'standard'
+	local_root.mkdir()
+	standard_root.mkdir()
+	local_config = _write_fixture(local_root)
+	_make_fixture_checkpoint_barlow(
+		local_config,
+		method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	)
+	local_payload = load_checkpoint(
+		Path(local_config['embeddings']['checkpoint']),  # type: ignore[index]
+		map_location='cpu',
+	)
+	local_payload['pretraining_method'] = BARLOW_TWINS_PRETRAINING_METHOD
+
+	with pytest.raises(ValueError, match=r'pretraining_method.*config'):
+		build_model_from_checkpoint_payload(local_payload)
+
+	standard_config = _write_fixture(standard_root)
+	_make_fixture_checkpoint_barlow(standard_config)
+	standard_payload = load_checkpoint(
+		Path(standard_config['embeddings']['checkpoint']),  # type: ignore[index]
+		map_location='cpu',
+	)
+	standard_payload['pretraining_method'] = (
+		LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+	)
+
+	with pytest.raises(ValueError, match=r'pretraining_method.*config'):
+		build_model_from_checkpoint_payload(standard_payload)
+
+
+def test_local_and_standard_embeddings_ignore_projector_state(
+	tmp_path: Path,
+) -> None:
+	standard_root = tmp_path / 'standard'
+	local_root = tmp_path / 'local'
+	standard_root.mkdir()
+	local_root.mkdir()
+	standard_config = _write_fixture(standard_root)
+	_make_fixture_checkpoint_barlow(standard_config)
+	local_config = _write_fixture(local_root)
+	_make_fixture_checkpoint_barlow(
+		local_config,
+		method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	)
+
+	standard_result = run_embedding_extraction(
+		standard_config,
+		device='cpu',
+	)[0]
+	local_result = run_embedding_extraction(local_config, device='cpu')[0]
+	standard_embeddings = np.load(standard_result.embeddings_path)
+	standard_valid = np.load(standard_result.valid_tokens_path)
+	local_embeddings = np.load(local_result.embeddings_path)
+	local_valid = np.load(local_result.valid_tokens_path)
+
+	np.testing.assert_array_equal(local_embeddings, standard_embeddings)
+	np.testing.assert_array_equal(local_valid, standard_valid)
+
+	embeddings_config = local_config['embeddings']
+	assert isinstance(embeddings_config, dict)
+	checkpoint_path = Path(embeddings_config['checkpoint'])
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	projector_state = payload['projector_state_dict']
+	assert isinstance(projector_state, dict)
+	for name, value in projector_state.items():
+		if isinstance(value, torch.Tensor) and value.is_floating_point():
+			projector_state[name] = value + 17.0
+	torch.save(payload, checkpoint_path)
+	embeddings_config['output_dir'] = str(tmp_path / 'local-projector-mutated')
+
+	mutated_result = run_embedding_extraction(local_config, device='cpu')[0]
+	mutated_embeddings = np.load(mutated_result.embeddings_path)
+	mutated_valid = np.load(mutated_result.valid_tokens_path)
+	np.testing.assert_array_equal(mutated_embeddings, local_embeddings)
+	np.testing.assert_array_equal(mutated_valid, local_valid)
 
 
 def test_barlow_checkpoint_loads_exact_encoder_without_projector_or_wrapper(
@@ -1683,6 +1798,7 @@ def _make_fixture_checkpoint_barlow(
 	config: dict[str, object],
 	*,
 	continuation: dict[str, object] | None = None,
+	method: str | None = None,
 ) -> None:
 	embeddings = config['embeddings']
 	assert isinstance(embeddings, dict)
@@ -1696,13 +1812,20 @@ def _make_fixture_checkpoint_barlow(
 	assert isinstance(manifests, dict)
 	zero_mask = mae_config['zero_mask']
 	assert isinstance(zero_mask, dict)
+	barlow_twins: dict[str, object] = {'projector_dim': 8}
+	local_crop_size = [4, 4, 4]
+	if method is not None:
+		barlow_twins['method'] = method
+	if method == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+		barlow_twins['local_pairs_per_crop'] = 128
+		local_crop_size = [8, 8, 16]
 	raw_barlow_config: dict[str, object] = {
 		'paths': {
 			'artifact_root': str(checkpoint_path.parent / 'artifacts'),
 			'output_root': str(checkpoint_path.parent / 'artifacts' / 'barlow'),
 		},
 		'manifests': dict(manifests),
-		'data': {'local_crop_size': [4, 4, 4]},
+		'data': {'local_crop_size': local_crop_size},
 		'zero_mask': dict(zero_mask),
 		'model': {
 			key: model_config[key]
@@ -1716,7 +1839,7 @@ def _make_fixture_checkpoint_barlow(
 				'decoder_heads',
 			)
 		},
-		'barlow_twins': {'projector_dim': 8},
+		'barlow_twins': barlow_twins,
 		'train': {
 			'batch_size': 2,
 			'samples_per_epoch': 2,

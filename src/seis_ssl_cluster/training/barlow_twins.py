@@ -13,8 +13,18 @@ from typing import Any, cast
 import numpy as np
 import torch
 
+from seis_ssl_cluster.config.barlow_twins import (
+	resolve_barlow_twins_pretraining_method,
+)
+from seis_ssl_cluster.config.schema import (
+	BARLOW_TWINS_PRETRAINING_METHOD,
+	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+)
 from seis_ssl_cluster.data.amplitude_dataset import AmplitudePretrainDataset
-from seis_ssl_cluster.data.barlow_twins_dataset import BarlowTwinsPretrainDataset
+from seis_ssl_cluster.data.barlow_twins_dataset import (
+	BarlowTwinsPretrainDataset,
+	LocalBarlowTwinsPretrainDataset,
+)
 from seis_ssl_cluster.data.schema import read_manifest_json
 from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
 from seis_ssl_cluster.models.barlow_twins import BarlowTwins3D, BarlowTwinsLoss
@@ -78,6 +88,7 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 	amp_dtype: torch.dtype | None = None,
 	scaler: torch.amp.GradScaler | None = None,
 	grad_clip_norm: float | None = None,
+	method: str = BARLOW_TWINS_PRETRAINING_METHOD,
 ) -> BarlowTwinsTrainingState:
 	"""Train for one epoch or until the supplied per-call step limit."""
 	model.train()
@@ -110,11 +121,10 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 			dtype=amp_dtype,
 			enabled=amp_enabled,
 		):
-			outputs = model(
-				_tensor(batch, 'view_a'),
-				_tensor(batch, 'view_b'),
-				valid_mask_a=_tensor(batch, 'valid_mask_a'),
-				valid_mask_b=_tensor(batch, 'valid_mask_b'),
+			outputs = _forward_barlow_twins_batch(
+				model,
+				batch,
+				method=method,
 			)
 			losses = loss_fn(outputs['z_a'], outputs['z_b'])
 			loss = losses['loss']
@@ -163,7 +173,7 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 	)
 
 
-def run_barlow_twins_pretraining(
+def run_barlow_twins_pretraining(  # noqa: PLR0915
 	config: Mapping[str, object],
 	*,
 	resume: str | Path | None = None,
@@ -175,6 +185,12 @@ def run_barlow_twins_pretraining(
 	model_config = _mapping(config, 'model')
 	data = _mapping(config, 'data')
 	barlow = _mapping(config, 'barlow_twins')
+	method = resolve_barlow_twins_pretraining_method(config)
+	local_pairs_per_crop = (
+		_integer(barlow, 'local_pairs_per_crop')
+		if method == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+		else None
+	)
 	augmentations = _mapping(config, 'augmentations')
 	continuation = (
 		_mapping(config, 'continuation') if 'continuation' in config else None
@@ -207,13 +223,25 @@ def run_barlow_twins_pretraining(
 		normalized_clip_abs=_optional_float(data, 'normalized_clip_abs'),
 		amplitude_agc=cast('Mapping[str, object]', data['amplitude_agc']),
 		finite_check_mode=cast('Any', data['finite_check_mode']),
-	)
-	dataset = BarlowTwinsPretrainDataset(
-		base_dataset,
-		horizontal_flip_probability=_floating(
-			augmentations,
-			'horizontal_flip_probability',
+		min_valid_token_count=(
+			0 if local_pairs_per_crop is None else local_pairs_per_crop
 		),
+	)
+	flip_probability = _floating(
+		augmentations,
+		'horizontal_flip_probability',
+	)
+	dataset = (
+		BarlowTwinsPretrainDataset(
+			base_dataset,
+			horizontal_flip_probability=flip_probability,
+		)
+		if local_pairs_per_crop is None
+		else LocalBarlowTwinsPretrainDataset(
+			base_dataset,
+			local_pairs_per_crop=local_pairs_per_crop,
+			horizontal_flip_probability=flip_probability,
+		)
 	)
 	dataloader = build_barlow_twins_dataloader(
 		dataset,
@@ -288,6 +316,7 @@ def run_barlow_twins_pretraining(
 			amp_dtype=precision.autocast_dtype,
 			scaler=scaler,
 			grad_clip_norm=_floating(train, 'grad_clip_norm'),
+			method=method,
 		)
 		global_step = state.global_step
 		print_epoch_metrics(epoch, state.metrics)
@@ -322,6 +351,31 @@ def run_barlow_twins_pretraining(
 	if checkpoint_path is None:
 		raise ValueError('no Barlow Twins training epochs were run')
 	return checkpoint_path
+
+
+def _forward_barlow_twins_batch(
+	model: BarlowTwins3D,
+	batch: Mapping[str, object],
+	*,
+	method: str,
+) -> dict[str, torch.Tensor]:
+	if method == BARLOW_TWINS_PRETRAINING_METHOD:
+		return model(
+			_tensor(batch, 'view_a'),
+			_tensor(batch, 'view_b'),
+			valid_mask_a=_tensor(batch, 'valid_mask_a'),
+			valid_mask_b=_tensor(batch, 'valid_mask_b'),
+		)
+	if method == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+		return model.forward_local(
+			_tensor(batch, 'view_a'),
+			_tensor(batch, 'view_b'),
+			valid_mask_a=_tensor(batch, 'valid_mask_a'),
+			valid_mask_b=_tensor(batch, 'valid_mask_b'),
+			local_pair_indices_a=_tensor(batch, 'local_pair_indices_a'),
+			local_pair_indices_b=_tensor(batch, 'local_pair_indices_b'),
+		)
+	raise ValueError(f'unsupported Barlow Twins method: {method!r}')
 
 
 def _initialize_barlow_twins_model(

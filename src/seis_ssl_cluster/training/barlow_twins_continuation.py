@@ -8,11 +8,14 @@ from typing import cast
 
 import torch
 
+from seis_ssl_cluster.config.barlow_twins import (
+	barlow_twins_config_compatibility_identity,
+	resolve_barlow_twins_pretraining_method,
+)
 from seis_ssl_cluster.config.schema import STAGE_BARLOW_TWINS_TRAINING
 from seis_ssl_cluster.models.barlow_twins import BarlowTwins3D
 from seis_ssl_cluster.training.barlow_twins_checkpoint import (
 	CHECKPOINT_KIND,
-	PRETRAINING_METHOD,
 	TRAINED_PARAMETER_PREFIXES,
 )
 from seis_ssl_cluster.training.checkpoint import load_checkpoint
@@ -97,12 +100,12 @@ def _continuation_states(
 		)
 		raise TypeError(msg)
 
-	_validate_source_config(
+	source_method = _validate_source_config(
 		payload.get('config'),
 		expected_model_config=expected_model_config,
 		expected_barlow_twins_config=expected_barlow_twins_config,
 	)
-	_validate_source_identity(payload)
+	_validate_source_identity(payload, expected_method=source_method)
 	_validate_source_training_state(payload.get('training_state'))
 	return backbone_state, projector_state
 
@@ -112,7 +115,7 @@ def _validate_source_config(
 	*,
 	expected_model_config: Mapping[str, object],
 	expected_barlow_twins_config: Mapping[str, object],
-) -> None:
+) -> str:
 	if not isinstance(value, Mapping):
 		raise TypeError('Barlow Twins continuation checkpoint config must be a mapping')
 	source_model_config = value.get('model')
@@ -132,17 +135,39 @@ def _validate_source_config(
 			'must be a mapping'
 		)
 		raise TypeError(msg)
-	if source_barlow_twins_config != expected_barlow_twins_config:
+	source_method = resolve_barlow_twins_pretraining_method(value)
+	expected_method = resolve_barlow_twins_pretraining_method(
+		{'barlow_twins': expected_barlow_twins_config}
+	)
+	if source_method != expected_method:
+		msg = (
+			'Barlow Twins continuation checkpoint pretraining_method does not '
+			'match the current resolved Barlow Twins config'
+		)
+		raise ValueError(msg)
+	if barlow_twins_config_compatibility_identity(
+		value
+	) != barlow_twins_config_compatibility_identity(
+		{'barlow_twins': expected_barlow_twins_config}
+	):
 		msg = (
 			'Barlow Twins continuation checkpoint config.barlow_twins does not match '
 			'the current resolved Barlow Twins config'
 		)
 		raise ValueError(msg)
+	return source_method
 
 
-def _validate_source_identity(payload: Mapping[object, object]) -> None:
-	if payload.get('pretraining_method') != PRETRAINING_METHOD:
-		msg = 'Barlow Twins continuation checkpoint pretraining_method is invalid'
+def _validate_source_identity(
+	payload: Mapping[object, object],
+	*,
+	expected_method: str,
+) -> None:
+	if payload.get('pretraining_method') != expected_method:
+		msg = (
+			'Barlow Twins continuation checkpoint pretraining_method does not '
+			'match checkpoint config'
+		)
 		raise ValueError(msg)
 	if payload.get('checkpoint_kind') != CHECKPOINT_KIND:
 		msg = 'Barlow Twins continuation checkpoint checkpoint_kind is invalid'

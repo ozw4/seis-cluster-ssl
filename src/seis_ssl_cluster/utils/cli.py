@@ -230,16 +230,27 @@ def _add_barlow_twins_training_rows(
 	augmentations = _mapping(cfg.get('augmentations'))
 	barlow = _mapping(cfg.get('barlow_twins'))
 	train = _mapping(cfg.get('train'))
-	rows.extend(
-		[
-			('manifests.train', manifests.get('train')),
-			('data.local_crop_size', data.get('local_crop_size')),
-			('model.patch_size', model.get('patch_size')),
-			('model.encoder_depth', model.get('encoder_depth')),
+	barlow_rows = [
+		('manifests.train', manifests.get('train')),
+		('data.local_crop_size', data.get('local_crop_size')),
+		('model.patch_size', model.get('patch_size')),
+		('model.encoder_depth', model.get('encoder_depth')),
+		(
+			'augmentations.horizontal_flip_probability',
+			augmentations.get('horizontal_flip_probability'),
+		),
+	]
+	if 'method' in barlow:
+		barlow_rows.append(('barlow_twins.method', barlow.get('method')))
+	if 'local_pairs_per_crop' in barlow:
+		barlow_rows.append(
 			(
-				'augmentations.horizontal_flip_probability',
-				augmentations.get('horizontal_flip_probability'),
-			),
+				'barlow_twins.local_pairs_per_crop',
+				barlow.get('local_pairs_per_crop'),
+			)
+		)
+	barlow_rows.extend(
+		[
 			('barlow_twins.projector_dim', barlow.get('projector_dim')),
 			('barlow_twins.redundancy_weight', barlow.get('redundancy_weight')),
 			('barlow_twins.normalization_eps', barlow.get('normalization_eps')),
@@ -249,6 +260,7 @@ def _add_barlow_twins_training_rows(
 			('train.device', train.get('device')),
 		]
 	)
+	rows.extend(barlow_rows)
 	if 'continuation' in cfg:
 		continuation = _mapping(cfg.get('continuation'))
 		rows.extend(

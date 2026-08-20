@@ -5,7 +5,11 @@ from typing import TYPE_CHECKING
 import pytest
 import torch
 
-from seis_ssl_cluster.config.schema import STAGE_BARLOW_TWINS_TRAINING
+from seis_ssl_cluster.config.schema import (
+	BARLOW_TWINS_PRETRAINING_METHOD,
+	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	STAGE_BARLOW_TWINS_TRAINING,
+)
 from seis_ssl_cluster.models.barlow_twins import BarlowTwins3D
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training.barlow_twins_checkpoint import (
@@ -40,6 +44,92 @@ def test_loads_backbone_and_projector_weights_without_optimizer_state(
 
 	_assert_state_equal(target.backbone.state_dict(), source.backbone.state_dict())
 	_assert_state_equal(target.projector.state_dict(), source.projector.state_dict())
+
+
+def test_loads_local_backbone_and_projector_weights(tmp_path: Path) -> None:
+	source = _model()
+	with torch.no_grad():
+		for index, parameter in enumerate(source.parameters(), start=1):
+			parameter.fill_(index / 100.0)
+	target = _model()
+	payload = _checkpoint_payload(
+		source,
+		barlow_twins_config=_barlow_twins_config(
+			method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		),
+	)
+	checkpoint_path = tmp_path / 'local-latest.pt'
+	torch.save(payload, checkpoint_path)
+
+	load_barlow_twins_continuation_weights(
+		target,
+		checkpoint_path,
+		expected_model_config=_model_config(),
+		expected_barlow_twins_config=_barlow_twins_config(
+			method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		),
+	)
+
+	_assert_state_equal(target.backbone.state_dict(), source.backbone.state_dict())
+	_assert_state_equal(target.projector.state_dict(), source.projector.state_dict())
+
+
+@pytest.mark.parametrize(
+	('source_method', 'target_method'),
+	[
+		(BARLOW_TWINS_PRETRAINING_METHOD, LOCAL_BARLOW_TWINS_PRETRAINING_METHOD),
+		(LOCAL_BARLOW_TWINS_PRETRAINING_METHOD, BARLOW_TWINS_PRETRAINING_METHOD),
+	],
+)
+def test_rejects_cross_method_continuation(
+	tmp_path: Path,
+	source_method: str,
+	target_method: str,
+) -> None:
+	source_config = _barlow_twins_config(
+		method=(
+			None
+			if source_method == BARLOW_TWINS_PRETRAINING_METHOD
+			else source_method
+		),
+	)
+	payload = _checkpoint_payload(
+		_model(),
+		barlow_twins_config=source_config,
+	)
+	checkpoint_path = tmp_path / f'{source_method}.pt'
+	torch.save(payload, checkpoint_path)
+	target_config = _barlow_twins_config(
+		method=(
+			None
+			if target_method == BARLOW_TWINS_PRETRAINING_METHOD
+			else target_method
+		),
+	)
+
+	with pytest.raises(ValueError, match='pretraining_method'):
+		load_barlow_twins_continuation_weights(
+			_model(),
+			checkpoint_path,
+			expected_model_config=_model_config(),
+			expected_barlow_twins_config=target_config,
+		)
+
+
+def test_legacy_standard_continuation_accepts_explicit_standard_method(
+	tmp_path: Path,
+) -> None:
+	checkpoint_path = tmp_path / 'legacy-standard.pt'
+	torch.save(_checkpoint_payload(_model()), checkpoint_path)
+
+	load_barlow_twins_continuation_weights(
+		_model(),
+		checkpoint_path,
+		expected_model_config=_model_config(),
+		expected_barlow_twins_config=_barlow_twins_config(
+			method=BARLOW_TWINS_PRETRAINING_METHOD,
+		),
+	)
 
 
 def test_rejects_missing_checkpoint_file(tmp_path: Path) -> None:
@@ -313,17 +403,29 @@ def _load(model: BarlowTwins3D, checkpoint_path: Path) -> None:
 	)
 
 
-def _checkpoint_payload(model: BarlowTwins3D) -> dict[str, object]:
+def _checkpoint_payload(
+	model: BarlowTwins3D,
+	*,
+	barlow_twins_config: dict[str, object] | None = None,
+) -> dict[str, object]:
+	resolved_barlow_twins_config = (
+		_barlow_twins_config(projector_dim=model.projector_dim)
+		if barlow_twins_config is None
+		else barlow_twins_config
+	)
 	return {
 		'model_state_dict': dict(model.backbone.state_dict()),
 		'projector_state_dict': dict(model.projector.state_dict()),
 		'config': {
 			'model': _model_config(encoder_depth=model.backbone.encoder.depth),
-			'barlow_twins': _barlow_twins_config(
-				projector_dim=model.projector_dim,
-			),
+			'barlow_twins': resolved_barlow_twins_config,
 		},
-		'pretraining_method': PRETRAINING_METHOD,
+		'pretraining_method': (
+			resolved_barlow_twins_config.get(
+				'method',
+				PRETRAINING_METHOD,
+			)
+		),
 		'checkpoint_kind': CHECKPOINT_KIND,
 		'trained_parameter_prefixes': list(TRAINED_PARAMETER_PREFIXES),
 		'training_state': {
@@ -370,12 +472,21 @@ def _model_config(*, encoder_depth: int = 2) -> dict[str, object]:
 	}
 
 
-def _barlow_twins_config(*, projector_dim: int = 8) -> dict[str, object]:
-	return {
+def _barlow_twins_config(
+	*,
+	projector_dim: int = 8,
+	method: str | None = None,
+) -> dict[str, object]:
+	config: dict[str, object] = {
 		'projector_dim': projector_dim,
 		'redundancy_weight': 0.005,
 		'normalization_eps': 1.0e-4,
 	}
+	if method is not None:
+		config['method'] = method
+	if method == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+		config['local_pairs_per_crop'] = 128
+	return config
 
 
 def _assert_state_equal(

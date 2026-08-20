@@ -7,12 +7,17 @@ from typing import cast
 
 import torch
 
+from seis_ssl_cluster.config.barlow_twins import (
+	resolve_barlow_twins_pretraining_method,
+)
 from seis_ssl_cluster.config.pretraining import (
 	resolve_barlow_twins_training_config,
 )
 from seis_ssl_cluster.config.schema import (
+	BARLOW_TWINS_PRETRAINING_METHOD,
 	FIXED_DATA_CONTRACT,
 	FIXED_MODEL_CONTRACT,
+	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_MAE_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
@@ -25,7 +30,6 @@ AMPLITUDE_ENCODER_TRAINED_PARAMETER_PREFIXES = (
 	PATCH_PROJECTION_PARAMETER_PREFIX,
 	ENCODER_PARAMETER_PREFIX,
 )
-BARLOW_TWINS_PRETRAINING_METHOD = 'barlow_twins_3d'
 BARLOW_TWINS_CHECKPOINT_KIND = 'barlow_twins_pretraining'
 
 _MAE_ALLOWED_TOP_LEVEL = frozenset(
@@ -265,8 +269,11 @@ def _validate_method_identity(
 		return
 	if _is_strat_hmm_encoder_checkpoint(payload):
 		return
-	if payload.get('pretraining_method') != BARLOW_TWINS_PRETRAINING_METHOD:
-		raise ValueError('Barlow Twins checkpoint pretraining_method is invalid')
+	expected_method = resolve_barlow_twins_pretraining_method(config)
+	if payload.get('pretraining_method') != expected_method:
+		raise ValueError(
+			'Barlow Twins checkpoint pretraining_method does not match config'
+		)
 	if payload.get('checkpoint_kind') != BARLOW_TWINS_CHECKPOINT_KIND:
 		raise ValueError('Barlow Twins checkpoint checkpoint_kind is invalid')
 	prefixes = payload.get('trained_parameter_prefixes')
@@ -367,6 +374,7 @@ __all__ = [
 	'BARLOW_TWINS_CHECKPOINT_KIND',
 	'BARLOW_TWINS_PRETRAINING_METHOD',
 	'ENCODER_PARAMETER_PREFIX',
+	'LOCAL_BARLOW_TWINS_PRETRAINING_METHOD',
 	'PATCH_PROJECTION_PARAMETER_PREFIX',
 	'build_model_from_checkpoint_payload',
 	'build_model_from_config',
