@@ -107,14 +107,37 @@ def test_standard_mae_checkpoint_extracts_without_strat_metadata(
 	}
 
 
+@pytest.mark.parametrize(
+	('barlow_variant', 'expected_base_objective'),
+	[
+		pytest.param('global', 'barlow_twins_3d', id='global'),
+		pytest.param('local', 'local_barlow_twins_3d', id='local'),
+	],
+)
 def test_barlow_base_strat_checkpoint_loads_bare_student_and_extracts_metadata(
 	tmp_path: Path,
+	barlow_variant: str,
+	expected_base_objective: str,
 ) -> None:
-	config = _write_fixture(tmp_path, strat=True, barlow_base=True)
+	local_barlow = barlow_variant == 'local'
+	config = _write_fixture(
+		tmp_path,
+		strat=True,
+		barlow_base=True,
+		local_barlow=local_barlow,
+	)
 	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
 	payload = load_checkpoint(checkpoint_path, map_location='cpu')
 
 	assert payload['config']['stage'] == 'barlow_twins_training'
+	barlow_twins = payload['config']['barlow_twins']
+	assert isinstance(barlow_twins, dict)
+	if local_barlow:
+		assert barlow_twins['method'] == 'local_barlow_twins_3d'
+		assert barlow_twins['local_pairs_per_crop'] == 4
+	else:
+		assert barlow_twins.get('method', 'barlow_twins_3d') == 'barlow_twins_3d'
+		assert 'local_pairs_per_crop' not in barlow_twins
 	assert 'projector_state_dict' not in payload
 	loaded = build_model_from_checkpoint_payload(payload)
 	for key, expected in payload['model_state_dict'].items():
@@ -123,7 +146,9 @@ def test_barlow_base_strat_checkpoint_loads_bare_student_and_extracts_metadata(
 
 	result = run_embedding_extraction(config, device='cpu')[0]
 	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
-	assert metadata['stratigraphy_pretext']['base_objective'] == 'barlow_twins_3d'
+	assert metadata['stratigraphy_pretext']['base_objective'] == (
+		expected_base_objective
+	)
 
 
 def test_strat_metadata_rejects_unknown_base_stage(tmp_path: Path) -> None:
@@ -1953,6 +1978,7 @@ def _write_fixture(
 	*,
 	strat: bool,
 	barlow_base: bool = False,
+	local_barlow: bool = False,
 ) -> dict[str, object]:
 	manifest_path, path_list = _write_manifest_fixture(tmp_path)
 	model = AmplitudeMAE3D(
@@ -1971,7 +1997,11 @@ def _write_fixture(
 		manifest_path=manifest_path,
 		path_list=path_list,
 	)
-	base_config = _barlow_config(mae_config) if barlow_base else mae_config
+	base_config = (
+		_barlow_config(mae_config, local=local_barlow)
+		if barlow_base
+		else mae_config
+	)
 	checkpoint_path = tmp_path / ('strat.pt' if strat else 'mae.pt')
 	if strat:
 		_write_strat_checkpoint(
@@ -2007,12 +2037,22 @@ def _write_fixture(
 	}
 
 
-def _barlow_config(mae_config: dict[str, object]) -> dict[str, object]:
+def _barlow_config(
+	mae_config: dict[str, object],
+	*,
+	local: bool = False,
+) -> dict[str, object]:
 	model = mae_config['model']
 	assert isinstance(model, dict)
 	paths = deepcopy(mae_config['paths'])
 	assert isinstance(paths, dict)
 	paths['artifact_root'] = str(Path(paths['output_root']).parent / 'artifacts')
+	barlow_twins: dict[str, object] = {}
+	if local:
+		barlow_twins.update(
+			method='local_barlow_twins_3d',
+			local_pairs_per_crop=4,
+		)
 	return resolve_barlow_twins_training_config(
 		{
 			'paths': paths,
@@ -2030,6 +2070,7 @@ def _barlow_config(mae_config: dict[str, object]) -> dict[str, object]:
 					'decoder_heads',
 				)
 			},
+			'barlow_twins': barlow_twins,
 			'train': {'batch_size': 2, 'samples_per_epoch': 2, 'epochs': 1},
 		}
 	)

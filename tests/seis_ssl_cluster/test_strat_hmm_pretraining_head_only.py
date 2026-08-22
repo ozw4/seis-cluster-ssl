@@ -319,7 +319,10 @@ def test_unfreeze_top_block_optimizer_lrs_and_gradients(tmp_path: Path) -> None:
 	assert all(parameter.grad is None for parameter in components.teacher.parameters())
 
 
-@pytest.mark.parametrize('base_method', ['mae', 'barlow_twins'])
+@pytest.mark.parametrize(
+	'base_method',
+	['mae', 'barlow_twins', 'local_barlow_twins'],
+)
 def test_k6_components_share_mae_and_barlow_backbone_contract(  # noqa: PLR0915
 	tmp_path: Path,
 	base_method: str,
@@ -344,6 +347,13 @@ def test_k6_components_share_mae_and_barlow_backbone_contract(  # noqa: PLR0915
 		'train_amp_mae' if base_method == 'mae' else 'barlow_twins_training'
 	)
 	assert components.mae_checkpoint_config['stage'] == expected_stage
+	if base_method == 'local_barlow_twins':
+		assert components.mae_checkpoint_config['barlow_twins']['method'] == (
+			'local_barlow_twins_3d'
+		)
+		assert components.mae_checkpoint_config['barlow_twins'][
+			'local_pairs_per_crop'
+		] == 4
 	assert components.teacher is not None
 	_assert_tensor_state_equal(components.student.state_dict(), source_state)
 	_assert_tensor_state_equal(components.teacher.state_dict(), source_state)
@@ -1224,8 +1234,12 @@ def _k6_component_fixture(
 				'resolved_precision': 'float32',
 			},
 		)
-	elif base_method == 'barlow_twins':
-		barlow_config = _barlow_source_config(checkpoint_config, checkpoint_path)
+	elif base_method in {'barlow_twins', 'local_barlow_twins'}:
+		barlow_config = _barlow_source_config(
+			checkpoint_config,
+			checkpoint_path,
+			local=base_method == 'local_barlow_twins',
+		)
 		wrapper = BarlowTwins3D(model, projector_dim=8)
 		optimizer = torch.optim.AdamW(wrapper.pretraining_parameters(), lr=1.0e-4)
 		save_barlow_twins_checkpoint(
@@ -1253,9 +1267,14 @@ def _k6_component_fixture(
 	}
 	resolved = resolve_strat_hmm_pretext_config(raw)
 	source_payload = load_checkpoint(checkpoint_path, map_location='cpu')
-	if base_method == 'barlow_twins':
+	if base_method in {'barlow_twins', 'local_barlow_twins'}:
+		expected_method = (
+			'local_barlow_twins_3d'
+			if base_method == 'local_barlow_twins'
+			else 'barlow_twins_3d'
+		)
 		assert source_payload['config']['stage'] == 'barlow_twins_training'
-		assert source_payload['pretraining_method'] == 'barlow_twins_3d'
+		assert source_payload['pretraining_method'] == expected_method
 		assert source_payload['checkpoint_kind'] == 'barlow_twins_pretraining'
 		assert source_payload['trained_parameter_prefixes'] == [
 			'patch_projection.',
@@ -1268,11 +1287,19 @@ def _k6_component_fixture(
 def _barlow_source_config(
 	mae_config: Mapping[str, object],
 	checkpoint_path: Path,
+	*,
+	local: bool = False,
 ) -> dict[str, object]:
 	manifests = mae_config['manifests']
 	model = mae_config['model']
 	assert isinstance(manifests, Mapping)
 	assert isinstance(model, Mapping)
+	barlow_twins: dict[str, object] = {'projector_dim': 8}
+	if local:
+		barlow_twins.update(
+			method='local_barlow_twins_3d',
+			local_pairs_per_crop=4,
+		)
 	return resolve_barlow_twins_training_config(
 		{
 			'paths': {
@@ -1294,7 +1321,7 @@ def _barlow_source_config(
 					'decoder_heads',
 				)
 			},
-			'barlow_twins': {'projector_dim': 8},
+			'barlow_twins': barlow_twins,
 			'train': {
 				'batch_size': 2,
 				'samples_per_epoch': 2,

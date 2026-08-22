@@ -76,7 +76,6 @@ from seis_ssl_cluster.embedding.writer import (
 	write_metadata,
 )
 from seis_ssl_cluster.models.amplitude_encoder_factory import (
-	BARLOW_TWINS_PRETRAINING_METHOD,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 	build_model_from_checkpoint_payload,
 	build_model_from_config,
@@ -2131,7 +2130,7 @@ def _stratigraphy_base_objective(payload: Mapping[str, object]) -> str:
 	if stage == STAGE_MAE_TRAINING:
 		return 'amp_mae3d'
 	if stage == STAGE_BARLOW_TWINS_TRAINING:
-		return BARLOW_TWINS_PRETRAINING_METHOD
+		return resolve_barlow_twins_pretraining_method(config)
 	raise ValueError(
 		'strat-HMM checkpoint config.stage must identify its base pretraining '
 		f'method; got {stage!r}'
