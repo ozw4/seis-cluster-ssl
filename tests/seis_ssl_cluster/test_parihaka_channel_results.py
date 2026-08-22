@@ -1,4 +1,3 @@
-# ruff: noqa: TC003
 
 from __future__ import annotations
 
@@ -10,6 +9,9 @@ from pathlib import Path
 
 import pytest
 
+from proc.seis_ssl_cluster import (
+	summarize_parihaka_channel_mae_local_bt as mae_local_summary_cli,
+)
 from proc.seis_ssl_cluster import summarize_parihaka_channel_ssl_hmm as summary_cli
 from seis_ssl_cluster.parihaka.channel_data import (
 	CHANNEL_TEST_MODE,
@@ -21,11 +23,13 @@ from seis_ssl_cluster.parihaka.channel_decoder import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
 )
 from seis_ssl_cluster.parihaka.channel_results import (
+	CHANNEL_MAE_LOCAL_BT_MODEL_IDS,
 	CHANNEL_SSL_HMM_MODEL_IDS,
 	ChannelSummaryConfig,
 	inspect_channel_benchmark_results,
 	inspect_channel_model_results,
 	summarize_channel_benchmark,
+	summarize_channel_mae_local_bt_four_way,
 	summarize_channel_ssl_hmm_four_way,
 )
 
@@ -38,12 +42,31 @@ _TEST_DEFINITION = {
 	'reserved_large_inline': list(range(10, 54)),
 	'reserved_large_crossline': list(range(20, 64)),
 }
+_GENERIC_MODEL_IDS = tuple(
+	dict.fromkeys(CHANNEL_SSL_HMM_MODEL_IDS + CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+)
 _GENERIC_CHECKPOINT_SHA = {
 	model_id: str(index) * 64
-	for index, model_id in enumerate(CHANNEL_SSL_HMM_MODEL_IDS, start=1)
+	for index, model_id in enumerate(_GENERIC_MODEL_IDS, start=1)
 }
 _MAE_HMM_GAINS = (0.1, 0.05, 0.0, -0.05, 0.15)
 _BARLOW_TWINS_HMM_GAINS = (0.08, 0.0, -0.02, 0.04, 0.1)
+_LOCAL_BARLOW_TWINS_HMM_GAINS = (0.06, 0.0, -0.03, 0.04, 0.11)
+_LOCAL_BARLOW_TWINS_MINUS_MAE = (0.03, -0.01, 0.0, 0.02, 0.05)
+_LOCAL_BARLOW_TWINS_HMM_MINUS_MAE_HMM = tuple(
+	_LOCAL_BARLOW_TWINS_MINUS_MAE[index]
+	+ _LOCAL_BARLOW_TWINS_HMM_GAINS[index]
+	- _MAE_HMM_GAINS[index]
+	for index in range(len(LAYOUT_IDS))
+)
+_LOCAL_BT_COMPARISON_DELTAS = {
+	'mae_hmm_gain': _MAE_HMM_GAINS,
+	'local_barlow_twins_hmm_gain': _LOCAL_BARLOW_TWINS_HMM_GAINS,
+	'local_barlow_twins_minus_mae': _LOCAL_BARLOW_TWINS_MINUS_MAE,
+	'local_barlow_twins_hmm_minus_mae_hmm': (
+		_LOCAL_BARLOW_TWINS_HMM_MINUS_MAE_HMM
+	),
+}
 
 
 def _supervision(layout_index: int, data_size: str) -> dict[str, object]:
@@ -120,7 +143,7 @@ def _benchmark_identity(
 	else:
 		checkpoint_path = f'/artifacts/pretraining/{model}/latest.pt'
 		checkpoint_sha256 = _GENERIC_CHECKPOINT_SHA[model]
-		objective_name = 'mae' if model.startswith('mae') else 'barlow_twins'
+		objective_name = model.removesuffix('_hmm_k6')
 		model_source = {
 			'role': 'learned',
 			'model_id': model,
@@ -251,8 +274,11 @@ def _write_complete_results(config: ChannelSummaryConfig) -> None:
 				)
 
 
-def _write_complete_generic_results(config: ChannelSummaryConfig) -> None:
-	for model in CHANNEL_SSL_HMM_MODEL_IDS:
+def _write_complete_generic_results(
+	config: ChannelSummaryConfig,
+	model_ids: tuple[str, ...] = CHANNEL_SSL_HMM_MODEL_IDS,
+) -> None:
+	for model in model_ids:
 		for layout_index, layout_id in enumerate(LAYOUT_IDS):
 			for size_index, size in enumerate(DATA_SIZE_PREFIX):
 				root = _job_root(config, model, layout_id, size)
@@ -295,7 +321,17 @@ def _generic_channel_iou(
 		return mae + 0.02
 	if model == 'mae_hmm_k6':
 		return mae + _MAE_HMM_GAINS[layout_index]
-	return mae + 0.02 + _BARLOW_TWINS_HMM_GAINS[layout_index]
+	if model == 'barlow_twins_hmm_k6':
+		return mae + 0.02 + _BARLOW_TWINS_HMM_GAINS[layout_index]
+	if model == 'local_barlow_twins':
+		return mae + _LOCAL_BARLOW_TWINS_MINUS_MAE[layout_index]
+	if model == 'local_barlow_twins_hmm_k6':
+		return (
+			mae
+			+ _LOCAL_BARLOW_TWINS_MINUS_MAE[layout_index]
+			+ _LOCAL_BARLOW_TWINS_HMM_GAINS[layout_index]
+		)
+	raise ValueError(f'unsupported synthetic model: {model}')
 
 
 def _job_root(
@@ -307,6 +343,20 @@ def _job_root(
 		/ f'layout={layout_id}'
 		/ f'size={size}'
 	)
+
+
+def _write_summary_cli_config(
+	tmp_path: Path, config: ChannelSummaryConfig
+) -> Path:
+	config_path = tmp_path / 'summary.yaml'
+	config_path.write_text(
+		'inputs:\n'
+		f'  runs_root: {config.runs_root}\n'
+		'outputs:\n'
+		f'  output_dir: {config.output_dir}\n',
+		encoding='utf-8',
+	)
+	return config_path
 
 
 def _mutate_metrics(
@@ -967,6 +1017,262 @@ def test_ssl_hmm_four_way_summary_does_not_overwrite_outputs(
 	with pytest.raises(FileExistsError, match='outputs already exist'):
 		summarize_channel_ssl_hmm_four_way(config)
 	assert (config.output_dir / 'summary.json').read_text(encoding='utf-8') == '{}'
+
+
+def test_mae_local_bt_summary_inspects_all_60_model_results(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config, CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+	jobs = inspect_channel_model_results(
+		config, model_ids=CHANNEL_MAE_LOCAL_BT_MODEL_IDS
+	)
+	assert len(jobs) == 60
+	sources = {
+		model_id: jobs[(model_id, 'layout_000', 'small')][
+			'benchmark_identity'
+		]['embedding']['model_source']
+		for model_id in CHANNEL_MAE_LOCAL_BT_MODEL_IDS
+	}
+	assert len(
+		{source['checkpoint_sha256'] for source in sources.values()}
+	) == len(CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+	assert sources['local_barlow_twins']['pretraining_objective'] == {
+		'name': 'local_barlow_twins'
+	}
+	for model_id, source in sources.items():
+		expected_pretext = (
+			{'kind': 'hmm', 'states': 6} if '_hmm_' in model_id else None
+		)
+		assert source['stratigraphy_pretext'] == expected_pretext
+
+
+def test_mae_local_bt_summary_fails_when_one_of_60_jobs_is_missing(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config, CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+	(
+		_job_root(
+			config,
+			'local_barlow_twins_hmm_k6',
+			'layout_003',
+			'medium',
+		)
+		/ 'metrics.json'
+	).unlink()
+	with pytest.raises(FileNotFoundError, match='all 60 jobs; missing 1'):
+		inspect_channel_model_results(
+			config, model_ids=CHANNEL_MAE_LOCAL_BT_MODEL_IDS
+		)
+
+
+def test_mae_local_bt_four_way_summary_writes_comparison_and_statistics(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config, CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+	paths = summarize_channel_mae_local_bt_four_way(config)
+	assert {path.name for path in paths} == {
+		'comparison.csv',
+		'summary.json',
+		'summary.md',
+	}
+	assert {path.name for path in config.output_dir.iterdir()} == {
+		'comparison.csv',
+		'summary.json',
+		'summary.md',
+	}
+	with (config.output_dir / 'comparison.csv').open(
+		encoding='utf-8', newline=''
+	) as file_obj:
+		reader = csv.DictReader(file_obj)
+		comparison = list(reader)
+		assert reader.fieldnames == [
+			'data_size',
+			'layout_id',
+			'mae_channel_iou',
+			'local_barlow_twins_channel_iou',
+			'mae_hmm_k6_channel_iou',
+			'local_barlow_twins_hmm_k6_channel_iou',
+			'mae_hmm_gain',
+			'local_barlow_twins_hmm_gain',
+			'local_barlow_twins_minus_mae',
+			'local_barlow_twins_hmm_minus_mae_hmm',
+			'target_train_voxel_count',
+			'actual_train_voxel_count',
+			'relative_count_error',
+			'selected_token_count',
+			'selected_token_xyz_sha256',
+		]
+	assert len(comparison) == 15
+	first = comparison[0]
+	assert float(first['mae_channel_iou']) == pytest.approx(0.4)
+	assert float(first['local_barlow_twins_channel_iou']) == pytest.approx(0.43)
+	assert float(first['mae_hmm_k6_channel_iou']) == pytest.approx(0.5)
+	assert float(first['local_barlow_twins_hmm_k6_channel_iou']) == pytest.approx(
+		0.49
+	)
+	assert float(first['mae_hmm_gain']) == pytest.approx(0.1)
+	assert float(first['local_barlow_twins_hmm_gain']) == pytest.approx(0.06)
+	assert float(first['local_barlow_twins_minus_mae']) == pytest.approx(0.03)
+	assert float(first['local_barlow_twins_hmm_minus_mae_hmm']) == pytest.approx(
+		-0.01
+	)
+	payload = json.loads((config.output_dir / 'summary.json').read_text())
+	assert payload['schema_version'] == 3
+	assert payload['summary_name'] == 'parihaka_channel_mae_local_bt_four_way'
+	assert payload['primary_metric'] == 'test.channel_iou'
+	assert payload['models'] == list(CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+	assert payload['job_count'] == 60
+	for data_size in DATA_SIZE_PREFIX:
+		for comparison_name, deltas in _LOCAL_BT_COMPARISON_DELTAS.items():
+			statistics_row = payload['by_size'][data_size][comparison_name]
+			assert statistics_row['paired_mean'] == pytest.approx(
+				statistics.fmean(deltas)
+			)
+			assert statistics_row['paired_median'] == pytest.approx(
+				statistics.median(deltas)
+			)
+			assert statistics_row['sample_standard_deviation'] == pytest.approx(
+				statistics.stdev(deltas)
+			)
+			assert (
+				statistics_row['wins'],
+				statistics_row['ties'],
+				statistics_row['losses'],
+			) == (
+				sum(delta > 0 for delta in deltas),
+				sum(delta == 0 for delta in deltas),
+				sum(delta < 0 for delta in deltas),
+			)
+			assert statistics_row['layout_deltas'] == pytest.approx(
+				dict(zip(LAYOUT_IDS, deltas, strict=True))
+			)
+	markdown = (config.output_dir / 'summary.md').read_text(encoding='utf-8')
+	assert 'Primary metric: test Channel IoU.' in markdown
+	assert 'HMM continuation' in markdown
+	for comparison_name in _LOCAL_BT_COMPARISON_DELTAS:
+		assert comparison_name in markdown
+
+
+def test_mae_local_bt_four_way_summary_does_not_overwrite_outputs(
+	tmp_path: Path,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config, CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+	config.output_dir.mkdir(parents=True)
+	(config.output_dir / 'summary.json').write_text('{}', encoding='utf-8')
+	with pytest.raises(FileExistsError, match='outputs already exist'):
+		summarize_channel_mae_local_bt_four_way(config)
+	assert (config.output_dir / 'summary.json').read_text(encoding='utf-8') == '{}'
+
+
+def test_mae_local_bt_cli_default_config_points_to_new_experiment() -> None:
+	expected = (
+		Path(
+			'experiments/parihaka/facies_benchmark_v1/'
+			'33_channel_mae_local_bt_four_way_v1/'
+			'03_channel_mae_local_bt_four_way.yaml'
+		).resolve()
+	)
+
+	assert expected == mae_local_summary_cli.DEFAULT_CONFIG
+	assert mae_local_summary_cli.DEFAULT_CONFIG.is_file()
+
+
+def test_mae_local_bt_cli_dry_run_reports_60_jobs_without_writing(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config, CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+	config_path = _write_summary_cli_config(tmp_path, config)
+	monkeypatch.setattr(
+		sys,
+		'argv',
+		[
+			'summarize_parihaka_channel_mae_local_bt.py',
+			'--config',
+			str(config_path),
+			'--dry-run',
+		],
+	)
+
+	mae_local_summary_cli.main()
+
+	output = capsys.readouterr().out
+	assert 'complete_jobs: 60' in output
+	assert (
+		'models: mae, local_barlow_twins, mae_hmm_k6, '
+		'local_barlow_twins_hmm_k6'
+	) in output
+	assert f'output_dir: {config.output_dir}' in output
+	assert 'execution: dry-run; no files written' in output
+	assert not config.output_dir.exists()
+
+
+def test_mae_local_bt_cli_writes_and_reports_three_outputs(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	capsys: pytest.CaptureFixture[str],
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config, CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+	config_path = _write_summary_cli_config(tmp_path, config)
+	monkeypatch.setattr(
+		sys,
+		'argv',
+		[
+			'summarize_parihaka_channel_mae_local_bt.py',
+			'--config',
+			str(config_path),
+		],
+	)
+
+	mae_local_summary_cli.main()
+
+	output = capsys.readouterr().out
+	expected_paths = tuple(
+		config.output_dir / name
+		for name in ('comparison.csv', 'summary.json', 'summary.md')
+	)
+	for path in expected_paths:
+		assert f'output: {path}' in output
+		assert path.is_file()
+	assert {path.name for path in config.output_dir.iterdir()} == {
+		'comparison.csv',
+		'summary.json',
+		'summary.md',
+	}
+
+
+def test_mae_local_bt_cli_missing_job_fails_without_summary(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = ChannelSummaryConfig(tmp_path / 'runs', tmp_path / 'summary')
+	_write_complete_generic_results(config, CHANNEL_MAE_LOCAL_BT_MODEL_IDS)
+	(
+		_job_root(config, 'local_barlow_twins', 'layout_004', 'large')
+		/ 'metrics.json'
+	).unlink()
+	config_path = _write_summary_cli_config(tmp_path, config)
+	monkeypatch.setattr(
+		sys,
+		'argv',
+		[
+			'summarize_parihaka_channel_mae_local_bt.py',
+			'--config',
+			str(config_path),
+		],
+	)
+
+	with pytest.raises(FileNotFoundError, match='all 60 jobs; missing 1'):
+		mae_local_summary_cli.main()
+
+	assert not config.output_dir.exists()
 
 
 def test_ssl_hmm_four_way_cli_dry_run_reports_60_jobs_without_writing(

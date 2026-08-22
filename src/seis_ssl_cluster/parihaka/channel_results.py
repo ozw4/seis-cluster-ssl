@@ -30,7 +30,20 @@ CHANNEL_SSL_HMM_MODEL_IDS = (
 	'mae_hmm_k6',
 	'barlow_twins_hmm_k6',
 )
+CHANNEL_MAE_LOCAL_BT_MODEL_IDS = (
+	'mae',
+	'local_barlow_twins',
+	'mae_hmm_k6',
+	'local_barlow_twins_hmm_k6',
+)
 OUTPUT_NAMES = ('comparison.csv', 'summary.json', 'summary.md')
+
+_CHANNEL_MAE_LOCAL_BT_COMPARISON_NAMES = (
+	'mae_hmm_gain',
+	'local_barlow_twins_hmm_gain',
+	'local_barlow_twins_minus_mae',
+	'local_barlow_twins_hmm_minus_mae_hmm',
+)
 
 _BENCHMARK_IDENTITY_KEYS = {
 	'model',
@@ -378,6 +391,116 @@ def summarize_channel_ssl_hmm_four_way(
 	return comparison_path, json_path, markdown_path
 
 
+def summarize_channel_mae_local_bt_four_way(
+	config: ChannelSummaryConfig,
+) -> tuple[Path, Path, Path]:
+	"""Write the MAE/local-BT four-model comparison and paired statistics."""
+	jobs = inspect_channel_model_results(
+		config, model_ids=CHANNEL_MAE_LOCAL_BT_MODEL_IDS
+	)
+	if config.output_dir.exists() and any(
+		(config.output_dir / name).exists() for name in OUTPUT_NAMES
+	):
+		raise FileExistsError(
+			f'channel summary outputs already exist: {config.output_dir}'
+		)
+	comparison: list[dict[str, object]] = []
+	for data_size in DATA_SIZE_PREFIX:
+		for layout_id in LAYOUT_IDS:
+			metrics = {
+				model_id: _metric(
+					jobs[(model_id, layout_id, data_size)],
+					'test',
+					'channel_iou',
+					_metrics_path(
+						config.runs_root, model_id, layout_id, data_size
+					),
+				)
+				for model_id in CHANNEL_MAE_LOCAL_BT_MODEL_IDS
+			}
+			selection = _selection_comparison_fields(
+				jobs[('mae', layout_id, data_size)],
+				_metrics_path(config.runs_root, 'mae', layout_id, data_size),
+			)
+			identity = _benchmark_identity(
+				jobs[('mae', layout_id, data_size)],
+				_metrics_path(config.runs_root, 'mae', layout_id, data_size),
+			)
+			selection_identity = _identity_mapping(
+				identity,
+				'selection',
+				_metrics_path(config.runs_root, 'mae', layout_id, data_size),
+			)
+			comparison.append(
+				{
+					'data_size': data_size,
+					'layout_id': layout_id,
+					'mae_channel_iou': metrics['mae'],
+					'local_barlow_twins_channel_iou': metrics[
+						'local_barlow_twins'
+					],
+					'mae_hmm_k6_channel_iou': metrics['mae_hmm_k6'],
+					'local_barlow_twins_hmm_k6_channel_iou': metrics[
+						'local_barlow_twins_hmm_k6'
+					],
+					'mae_hmm_gain': metrics['mae_hmm_k6'] - metrics['mae'],
+					'local_barlow_twins_hmm_gain': (
+						metrics['local_barlow_twins_hmm_k6']
+						- metrics['local_barlow_twins']
+					),
+					'local_barlow_twins_minus_mae': (
+						metrics['local_barlow_twins'] - metrics['mae']
+					),
+					'local_barlow_twins_hmm_minus_mae_hmm': (
+						metrics['local_barlow_twins_hmm_k6']
+						- metrics['mae_hmm_k6']
+					),
+					**selection,
+					'selected_token_xyz_sha256': selection_identity[
+						'selected_token_xyz_sha256'
+					],
+				}
+			)
+	aggregates = {
+		data_size: {
+			comparison_name: _paired_statistics(
+				[
+					row
+					for row in comparison
+					if row['data_size'] == data_size
+				],
+				comparison_name,
+			)
+			for comparison_name in _CHANNEL_MAE_LOCAL_BT_COMPARISON_NAMES
+		}
+		for data_size in DATA_SIZE_PREFIX
+	}
+	payload = {
+		'schema_version': 3,
+		'summary_name': 'parihaka_channel_mae_local_bt_four_way',
+		'primary_metric': 'test.channel_iou',
+		'models': list(CHANNEL_MAE_LOCAL_BT_MODEL_IDS),
+		'job_count': len(jobs),
+		'comparison': comparison,
+		'by_size': aggregates,
+	}
+	config.output_dir.mkdir(parents=True, exist_ok=True)
+	comparison_path = config.output_dir / OUTPUT_NAMES[0]
+	with comparison_path.open('w', encoding='utf-8', newline='') as file_obj:
+		writer = csv.DictWriter(file_obj, fieldnames=tuple(comparison[0]))
+		writer.writeheader()
+		writer.writerows(comparison)
+	json_path = config.output_dir / OUTPUT_NAMES[1]
+	json_path.write_text(
+		json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
+	)
+	markdown_path = config.output_dir / OUTPUT_NAMES[2]
+	markdown_path.write_text(
+		_mae_local_bt_markdown(aggregates, comparison), encoding='utf-8'
+	)
+	return comparison_path, json_path, markdown_path
+
+
 def _paired_statistics(
 	rows: Sequence[Mapping[str, object]], comparison_name: str
 ) -> dict[str, object]:
@@ -441,6 +564,70 @@ def _ssl_hmm_markdown(
 		f'{float(row["barlow_twins_hmm_gain"]):.6f} | '
 		f'{float(row["barlow_twins_minus_mae"]):.6f} | '
 		f'{float(row["barlow_twins_hmm_minus_mae_hmm"]):.6f} |'
+		for row in comparison
+	)
+	return '\n'.join(lines) + '\n'
+
+
+def _mae_local_bt_markdown(
+	aggregates: Mapping[str, object], comparison: Sequence[Mapping[str, object]]
+) -> str:
+	lines = [
+		'# Parihaka Channel MAE/local BT four-way benchmark',
+		'',
+		'Primary metric: test Channel IoU.',
+		(
+			'Positive mae_hmm_gain and local_barlow_twins_hmm_gain values favor '
+			'HMM continuation.'
+		),
+		(
+			'Positive local_barlow_twins_minus_mae values favor the local BT '
+			'control.'
+		),
+		(
+			'Positive local_barlow_twins_hmm_minus_mae_hmm values favor the '
+			'local-BT-initialized HMM model.'
+		),
+		'',
+		(
+			'| size | comparison | paired mean | paired median | sample std | '
+			'wins/ties/losses |'
+		),
+		'|---|---|---:|---:|---:|---:|',
+	]
+	for data_size in DATA_SIZE_PREFIX:
+		by_comparison = _mapping(aggregates, data_size)
+		for comparison_name in _CHANNEL_MAE_LOCAL_BT_COMPARISON_NAMES:
+			row = _mapping(by_comparison, comparison_name)
+			lines.append(
+				f'| {data_size} | {comparison_name} | '
+				f'{float(row["paired_mean"]):.6f} | '
+				f'{float(row["paired_median"]):.6f} | '
+				f'{float(row["sample_standard_deviation"]):.6f} | '
+				f'{row["wins"]}/{row["ties"]}/{row["losses"]} |'
+			)
+	lines.extend(
+		[
+			'',
+			(
+				'| size | layout | MAE | Local Barlow Twins | MAE HMM K6 | '
+				'Local Barlow Twins HMM K6 | MAE HMM gain | Local Barlow Twins '
+				'HMM gain | Local Barlow Twins - MAE | Local Barlow Twins HMM - '
+				'MAE HMM |'
+			),
+			'|---|---|---:|---:|---:|---:|---:|---:|---:|---:|',
+		]
+	)
+	lines.extend(
+		f'| {row["data_size"]} | {row["layout_id"]} | '
+		f'{float(row["mae_channel_iou"]):.6f} | '
+		f'{float(row["local_barlow_twins_channel_iou"]):.6f} | '
+		f'{float(row["mae_hmm_k6_channel_iou"]):.6f} | '
+		f'{float(row["local_barlow_twins_hmm_k6_channel_iou"]):.6f} | '
+		f'{float(row["mae_hmm_gain"]):.6f} | '
+		f'{float(row["local_barlow_twins_hmm_gain"]):.6f} | '
+		f'{float(row["local_barlow_twins_minus_mae"]):.6f} | '
+		f'{float(row["local_barlow_twins_hmm_minus_mae_hmm"]):.6f} |'
 		for row in comparison
 	)
 	return '\n'.join(lines) + '\n'
@@ -1462,11 +1649,13 @@ def _validated_model_ids(model_ids: Sequence[str]) -> tuple[str, ...]:
 
 
 __all__ = [
+	'CHANNEL_MAE_LOCAL_BT_MODEL_IDS',
 	'CHANNEL_SSL_HMM_MODEL_IDS',
 	'ChannelSummaryConfig',
 	'channel_summary_config_from_mapping',
 	'inspect_channel_benchmark_results',
 	'inspect_channel_model_results',
 	'summarize_channel_benchmark',
+	'summarize_channel_mae_local_bt_four_way',
 	'summarize_channel_ssl_hmm_four_way',
 ]
