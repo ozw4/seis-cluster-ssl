@@ -12,7 +12,12 @@ SUITE_ROOT = Path(
 	'21_ssl_hmm_continuation_v1'
 )
 HMM_ROOT = SUITE_ROOT / '30_stage2'
-VARIANTS = ('mae100', 'bt100')
+VARIANT_SOURCES = {
+	'mae100': 'mae',
+	'bt100': 'barlow_twins',
+	'local_bt100': 'local_barlow_twins_v1',
+}
+VARIANTS = tuple(VARIANT_SOURCES)
 RUNS = {
 	'feasibility': '01_gpu_feasibility_1step.yaml',
 	'full': '02_full_25ep.yaml',
@@ -23,10 +28,7 @@ RUNS = {
 def artifact_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 	root = tmp_path / 'artifacts'
 	monkeypatch.setenv('SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str(root))
-	for variant, source_method in (
-		('mae100', 'mae'),
-		('bt100', 'barlow_twins'),
-	):
+	for variant, source_method in VARIANT_SOURCES.items():
 		checkpoint = (
 			root
 			/ 'pretraining/parihaka/facies_benchmark_v1'
@@ -66,12 +68,20 @@ def test_hmm_k6_configs_share_the_paired_single_head_contract(
 	hmm_configs: dict[str, dict[str, dict[str, object]]],
 ) -> None:
 	for run in RUNS:
-		mae = hmm_configs['mae100'][run]
-		barlow_twins = hmm_configs['bt100'][run]
-		for section in ('manifests', 'data', 'zero_mask', 'model'):
-			assert mae[section] == barlow_twins[section]
+		reference = hmm_configs['bt100'][run]
+		for variant in VARIANTS:
+			config = hmm_configs[variant][run]
+			for section in (
+				'manifests',
+				'data',
+				'zero_mask',
+				'model',
+				'head',
+				'loss',
+				'train',
+			):
+				assert config[section] == reference[section]
 
-		for config in (mae, barlow_twins):
 			assert config['stage'] == 'train_strat_hmm_pretext'
 			assert config['pseudo_targets']['k'] == 6
 			assert config['pseudo_targets']['min_confidence'] == 0.0
@@ -134,6 +144,12 @@ def test_hmm_k6_configs_bind_each_base_to_its_own_source_and_targets(
 		'bt100': artifact_root
 		/ 'pretraining/parihaka/facies_benchmark_v1'
 		/ 'ssl_hmm_continuation_v1/stage1/barlow_twins/full_100ep/latest.pt',
+		'local_bt100': artifact_root
+		/ 'pretraining/parihaka/facies_benchmark_v1'
+		/ (
+			'ssl_hmm_continuation_v1/stage1/local_barlow_twins_v1/'
+			'full_100ep/latest.pt'
+		),
 	}
 	expected_targets = {
 		variant: artifact_root
@@ -150,6 +166,7 @@ def test_hmm_k6_configs_bind_each_base_to_its_own_source_and_targets(
 			targets = Path(config['pseudo_targets']['input_dir'])
 			assert teacher == student == expected_sources[variant]
 			assert teacher.name == 'latest.pt'
+			assert '/stage2/' not in str(teacher)
 			assert targets == expected_targets[variant]
 			paths = pseudo_target_paths(targets, k=6, survey_id='survey')
 			assert paths.labels.parent == expected_targets[variant] / 'k6'
@@ -193,7 +210,7 @@ def test_hmm_k6_sources_never_use_controls_or_best_checkpoints(
 			)
 			for value in inputs:
 				assert 'mae_continue/full_25ep' not in value
-				assert 'bt_continue/full_25ep' not in value
+				assert '/bt_continue/' not in value
 				assert 'best.pt' not in value
 
 
@@ -226,8 +243,11 @@ def test_hmm_k6_output_roots_are_unique_and_isolated(
 			'stage1/mae/full_100ep',
 			'stage1/barlow_twins/gpu_feasibility_1step',
 			'stage1/barlow_twins/full_100ep',
+			'stage1/local_barlow_twins_v1/gpu_feasibility_1step',
+			'stage1/local_barlow_twins_v1/full_100ep',
 			'stage2/mae100/mae_continue/full_25ep',
 			'stage2/bt100/bt_continue/full_25ep',
+			'stage2/local_bt100/bt_continue/full_25ep',
 		)
 	}
 	target_generation_outputs = {
@@ -238,14 +258,17 @@ def test_hmm_k6_output_roots_are_unique_and_isolated(
 		for namespace, suffix in (
 			('embeddings', 'hmm_targets/mae100/overlap_x64'),
 			('embeddings', 'hmm_targets/bt100/overlap_x64'),
+			('embeddings', 'hmm_targets/local_bt100/overlap_x64'),
 			('clustering', 'hmm_targets/mae100/k6'),
 			('clustering', 'hmm_targets/bt100/k6'),
+			('clustering', 'hmm_targets/local_bt100/k6'),
 			('pseudo_targets', 'mae100'),
 			('pseudo_targets', 'bt100'),
+			('pseudo_targets', 'local_bt100'),
 		)
 	}
 
 	assert actual_outputs == expected_outputs
-	assert len(actual_outputs) == 4
+	assert len(actual_outputs) == 6
 	assert actual_outputs.isdisjoint(stage1_and_control_outputs)
 	assert actual_outputs.isdisjoint(target_generation_outputs)
