@@ -2,7 +2,7 @@
 
 ## 目的
 
-Parihaka固有の3D MAEと3D Barlow Twinsを同じ学習予算で事前学習し、HMM second-stage pretrainingの初期重みを作成する。
+Parihaka固有の3D MAE、global 3D Barlow Twins、local 3D Barlow Twinsを同じ学習予算で事前学習し、HMM second-stage pretrainingの初期重みを作成する。
 
 ## Paired HMM-K6
 
@@ -12,12 +12,34 @@ target生成からHMM25、live artifact、bare encoder consumerまでの実行�
 | --- | --- | --- | --- | --- |
 | MAE100 → HMM-K6 25 | MAE100 `latest.pt` | MAE100 `latest.pt` | single-head HMM K=6 | HMM `full_25ep/latest.pt` |
 | BT100 → HMM-K6 25 | BT100 `latest.pt` | BT100 `latest.pt` | single-head HMM K=6 | HMM `full_25ep/latest.pt` |
+| local BT100 → HMM-K6 25 | local BT100 `latest.pt` | local BT100 `latest.pt` | single-head HMM K=6 | HMM `full_25ep/latest.pt` |
 | MAE100 → MAE25 control | なし | MAE100 `latest.pt` | MAE reconstruction | MAE25 `full_25ep/latest.pt` |
 | BT100 → BT25 control | なし | BT100 `latest.pt` | Barlow Twins | BT25 `full_25ep/latest.pt` |
+| local BT100 → local BT25 control | なし | local BT100 `latest.pt` | local Barlow Twins | local BT25 `full_25ep/latest.pt` |
+
+experiment configは同じsuite内で次の構造を取る。
+
+```text
+21_ssl_hmm_continuation_v1/
+├── 10_stage1/
+│   ├── mae/
+│   ├── barlow_twins/
+│   └── local_barlow_twins_v1/
+├── 20_hmm_targets/
+│   ├── mae100/
+│   ├── bt100/
+│   └── local_bt100/
+└── 30_stage2/
+    ├── mae100/
+    ├── bt100/
+    └── local_bt100/
+```
+
+local branchのconfig rootは`10_stage1/local_barlow_twins_v1`、`20_hmm_targets/local_bt100`、`30_stage2/local_bt100`である。
 
 ## 学習条件
 
-両methodの共通条件は次のとおりである。
+三methodの共通条件は次のとおりである。
 
 - Parihaka amplitude manifestとpath list
 - amplitude preprocessing（normalized clip 8.0、trace RMS z-score AGC、window 65）とzero mask
@@ -29,7 +51,7 @@ target生成からHMM25、live artifact、bare encoder consumerまでの実行�
 
 full runは100 epoch、10,000 samples/epochであり、625 steps/epoch、合計62,500 global stepsとなる。
 
-MAEはspatial mask ratio 0.75、MSE reconstruction、gradient weight 0.0、visible reconstruction weight 0.1、patch z-score target normalizationを使用する。Barlow Twinsはhorizontal flip probability 0.5、projector dim 384、redundancy weight 0.005、normalization epsilon `1.0e-4`を使用する。
+MAEはspatial mask ratio 0.75、MSE reconstruction、gradient weight 0.0、visible reconstruction weight 0.1、patch z-score target normalizationを使用する。global/local Barlow Twinsはhorizontal flip probability 0.5、projector dim 384、redundancy weight 0.005、normalization epsilon `1.0e-4`を使用する。local methodの固有条件は`method: local_barlow_twins_3d`と`local_pairs_per_crop: 128`だけである。embedding抽出ではprojectorを使わず、bare encoderのtoken embeddingを出力する。
 
 artifact output rootは次の配下に分離して保存する。
 
@@ -38,7 +60,10 @@ ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_h
 ├── mae/
 │   ├── gpu_feasibility_1step/
 │   └── full_100ep/
-└── barlow_twins/
+├── barlow_twins/
+│   ├── gpu_feasibility_1step/
+│   └── full_100ep/
+└── local_barlow_twins_v1/
     ├── gpu_feasibility_1step/
     └── full_100ep/
 ```
@@ -58,19 +83,22 @@ export STAGE1=experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v
    pytest -q tests/seis_ssl_cluster/test_parihaka_stage1_ssl_configs.py
    ```
 
-2. 4設定をdry-runして解決結果を確認する。
+2. 6設定をdry-runして解決結果を確認する。
 
    ```bash
    python proc/seis_ssl_cluster/train_amp_mae.py --config "$STAGE1/mae/01_gpu_feasibility_1step.yaml" --dry-run
    python proc/seis_ssl_cluster/train_amp_mae.py --config "$STAGE1/mae/02_full_100ep.yaml" --dry-run
    python proc/seis_ssl_cluster/train_amp_barlow_twins.py --config "$STAGE1/barlow_twins/01_gpu_feasibility_1step.yaml" --dry-run
    python proc/seis_ssl_cluster/train_amp_barlow_twins.py --config "$STAGE1/barlow_twins/02_full_100ep.yaml" --dry-run
+   python proc/seis_ssl_cluster/train_amp_barlow_twins.py --config "$STAGE1/local_barlow_twins_v1/01_gpu_feasibility_1step.yaml" --dry-run
+   python proc/seis_ssl_cluster/train_amp_barlow_twins.py --config "$STAGE1/local_barlow_twins_v1/02_full_100ep.yaml" --dry-run
    ```
 
-3. Barlow TwinsのCUDA 1-step feasibilityを実行する。
+3. global/local Barlow TwinsのCUDA 1-step feasibilityを実行する。
 
    ```bash
    python proc/seis_ssl_cluster/train_amp_barlow_twins.py --config "$STAGE1/barlow_twins/01_gpu_feasibility_1step.yaml"
+   python proc/seis_ssl_cluster/train_amp_barlow_twins.py --config "$STAGE1/local_barlow_twins_v1/01_gpu_feasibility_1step.yaml"
    ```
 
 4. MAEのCUDA 1-step feasibilityを実行する。
@@ -79,10 +107,11 @@ export STAGE1=experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v
    python proc/seis_ssl_cluster/train_amp_mae.py --config "$STAGE1/mae/01_gpu_feasibility_1step.yaml"
    ```
 
-5. 両方のfeasibilityが完了条件を満たした場合に限り、100 epoch本学習を実行する。
+5. 全feasibilityが完了条件を満たした場合に限り、100 epoch本学習を実行する。
 
    ```bash
    python proc/seis_ssl_cluster/train_amp_barlow_twins.py --config "$STAGE1/barlow_twins/02_full_100ep.yaml"
+   python proc/seis_ssl_cluster/train_amp_barlow_twins.py --config "$STAGE1/local_barlow_twins_v1/02_full_100ep.yaml"
    python proc/seis_ssl_cluster/train_amp_mae.py --config "$STAGE1/mae/02_full_100ep.yaml"
    ```
 
@@ -90,7 +119,7 @@ export STAGE1=experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v
 
 各GPU feasibilityでは、CUDA OOMが発生しないこと、lossとgradient normがfiniteであること、`latest.pt`が保存されること、peak CUDA memoryに本学習を継続できる余裕があることを確認する。Barlow Twinsではprojection metricsとcorrelation metricsもfiniteであることを確認する。
 
-各100 epoch runは、epoch 100、global step 62,500に到達し、対応する`full_100ep/latest.pt`が存在することを確認する。resolved configがFP32 / `amp: false`であり、lossとgradient metricsが全期間でfiniteであることも必要とする。
+各100 epoch runは、epoch 100、global step 62,500に到達し、対応する`full_100ep/latest.pt`が存在することを確認する。resolved configがFP32 / `amp: false`であり、lossとgradient metricsが全期間でfiniteであることも必要とする。local checkpointでは`pretraining_method == local_barlow_twins_3d`、`checkpoint_kind == barlow_twins_pretraining`、`barlow_twins.local_pairs_per_crop == 128`、completed epoch、およびprojector stateも確認する。
 
 Stage 2の初期値には`best.pt`ではなく、固定学習予算を完了した各methodの`full_100ep/latest.pt`を使用する。
 
