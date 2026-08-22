@@ -16,10 +16,19 @@ from seis_ssl_cluster.config import (
 
 SURVEYS = ('f3', 'parihaka')
 LOCAL_ROOTS = {
-	survey: Path(
-		f'experiments/{survey}/facies_benchmark_v1/22_local_barlow_twins_v1'
-	)
-	for survey in SURVEYS
+	'f3': Path('experiments/f3/facies_benchmark_v1/22_local_barlow_twins_v1'),
+	'parihaka': Path(
+		'experiments/parihaka/facies_benchmark_v1/'
+		'21_ssl_hmm_continuation_v1/10_stage1/local_barlow_twins_v1'
+	),
+}
+EMBEDDING_CONFIGS = {
+	'f3': LOCAL_ROOTS['f3'] / '03_extract_embeddings.yaml',
+	'parihaka': Path(
+		'experiments/parihaka/facies_benchmark_v1/'
+		'21_ssl_hmm_continuation_v1/20_hmm_targets/local_bt100/'
+		'01_extract_embeddings.yaml'
+	),
 }
 STANDARD_ROOTS = {
 	survey: Path(
@@ -31,7 +40,6 @@ STANDARD_ROOTS = {
 TRAINING_CONFIGS = ('01_gpu_feasibility_1step.yaml', '02_full_100ep.yaml')
 METADATA_FILENAMES = {
 	'f3': 'f3_facies_benchmark.embedding_metadata.json',
-	'parihaka': 'parihaka.embedding_metadata.json',
 }
 
 
@@ -83,6 +91,12 @@ def test_local_training_budgets_match_standard(survey: str) -> None:
 		== standard_full['train']['samples_per_epoch']
 		== 10_000
 	)
+	assert (
+		full['train']['samples_per_epoch']
+		* full['train']['epochs']
+		// full['train']['batch_size']
+		== 62_500
+	)
 
 
 def test_local_output_roots_do_not_collide() -> None:
@@ -93,7 +107,7 @@ def test_local_output_roots_do_not_collide() -> None:
 			load_config(LOCAL_ROOTS[survey] / TRAINING_CONFIGS[1])
 		)
 		extraction = resolve_embedding_extraction_config(
-			load_config(LOCAL_ROOTS[survey] / '03_extract_embeddings.yaml')
+			load_config(EMBEDDING_CONFIGS[survey])
 		)
 		checkpoint = extraction['embeddings']['checkpoint']
 		assert checkpoint == f'{full["paths"]["output_root"]}/latest.pt'
@@ -104,8 +118,8 @@ def test_local_output_roots_do_not_collide() -> None:
 	assert len(extraction_outputs) == len(SURVEYS)
 
 
-@pytest.mark.parametrize('survey', SURVEYS)
-def test_local_runbook_references_existing_commands_and_configs(survey: str) -> None:
+def test_f3_local_runbook_references_existing_commands_and_configs() -> None:
+	survey = 'f3'
 	readme = (LOCAL_ROOTS[survey] / 'README.md').read_text(encoding='utf-8')
 	for script in (
 		'proc/seis_ssl_cluster/train_amp_barlow_twins.py',

@@ -18,7 +18,7 @@ TARGET_ROOT = Path(
 	'experiments/parihaka/facies_benchmark_v1/'
 	'21_ssl_hmm_continuation_v1/20_hmm_targets'
 )
-VARIANTS = ('mae100', 'bt100')
+VARIANTS = ('mae100', 'bt100', 'local_bt100')
 
 
 @pytest.fixture
@@ -65,6 +65,12 @@ def test_embedding_configs_resolve_from_separate_stage1_100ep_sources(
 		'bt100': artifact_root
 		/ 'pretraining/parihaka/facies_benchmark_v1'
 		/ 'ssl_hmm_continuation_v1/stage1/barlow_twins/full_100ep/latest.pt',
+		'local_bt100': artifact_root
+		/ 'pretraining/parihaka/facies_benchmark_v1'
+		/ (
+			'ssl_hmm_continuation_v1/stage1/'
+			'local_barlow_twins_v1/full_100ep/latest.pt'
+		),
 	}
 	expected_outputs = {
 		variant: artifact_root
@@ -87,21 +93,31 @@ def test_embedding_configs_resolve_from_separate_stage1_100ep_sources(
 			'parihaka_amplitude_manifest.json'
 		)
 
-	assert len(set(expected_checkpoints.values())) == 2
-	assert len(set(expected_outputs.values())) == 2
+	assert len(set(expected_checkpoints.values())) == len(VARIANTS)
+	assert len(set(expected_outputs.values())) == len(VARIANTS)
 
 
 def test_embedding_configs_are_scientifically_paired(
 	embedding_configs: dict[str, dict[str, object]],
 ) -> None:
 	mae = embedding_configs['mae100']
-	barlow_twins = embedding_configs['bt100']
-
-	assert mae['paths'] == barlow_twins['paths']
-	assert mae['manifests'] == barlow_twins['manifests']
-	assert mae['embedding'] == barlow_twins['embedding']
-	assert mae['embeddings']['checkpoint'] != barlow_twins['embeddings']['checkpoint']
-	assert mae['embeddings']['output_dir'] != barlow_twins['embeddings']['output_dir']
+	for variant in VARIANTS:
+		config = embedding_configs[variant]
+		assert config['paths'] == mae['paths']
+		assert config['manifests'] == mae['manifests']
+		assert config['embedding'] == mae['embedding']
+	assert len(
+		{
+			config['embeddings']['checkpoint']
+			for config in embedding_configs.values()
+		}
+	) == len(VARIANTS)
+	assert len(
+		{
+			config['embeddings']['output_dir']
+			for config in embedding_configs.values()
+		}
+	) == len(VARIANTS)
 	assert mae['embedding'] == {
 		'window_size': [128, 128, 128],
 		'overlap': [64, 64, 64],
@@ -127,21 +143,20 @@ def test_clustering_configs_resolve_as_paired_anchor_only_k6(
 	artifact_root: Path,
 ) -> None:
 	mae = clustering_configs['mae100']
-	barlow_twins = clustering_configs['bt100']
-
-	assert mae['stage'] == barlow_twins['stage'] == 'cluster_embeddings'
-	assert mae['paths'] == barlow_twins['paths']
-	assert mae['embeddings']['input_dir'] != barlow_twins['embeddings']['input_dir']
-	assert mae['clustering']['output_dir'] != barlow_twins['clustering']['output_dir']
-	assert {
+	mae_scientific_config = {
 		key: value
 		for key, value in mae['clustering'].items()
 		if key != 'output_dir'
-	} == {
-		key: value
-		for key, value in barlow_twins['clustering'].items()
-		if key != 'output_dir'
 	}
+	for variant in VARIANTS:
+		config = clustering_configs[variant]
+		assert config['stage'] == 'cluster_embeddings'
+		assert config['paths'] == mae['paths']
+		assert {
+			key: value
+			for key, value in config['clustering'].items()
+			if key != 'output_dir'
+		} == mae_scientific_config
 
 	output_roots = set()
 	for variant, config in clustering_configs.items():
@@ -155,7 +170,7 @@ def test_clustering_configs_resolve_as_paired_anchor_only_k6(
 		)
 		assert Path(config['clustering']['output_dir']) == expected_output
 		output_roots.add(expected_output)
-	assert len(output_roots) == 2
+	assert len(output_roots) == len(VARIANTS)
 
 
 def test_clustering_scientific_contract_is_explicit(
@@ -246,8 +261,8 @@ def test_export_scripts_are_paired_and_export_only(
 		assert args['--boundary-tau'] == '1.0'
 		assert args['--schema-version'] == '2'
 
-	assert len(pseudo_target_roots) == 2
-	assert len(pseudo_target_directories) == 2
+	assert len(pseudo_target_roots) == len(VARIANTS)
+	assert len(pseudo_target_directories) == len(VARIANTS)
 	paired_flags = {
 		'--k',
 		'--confidence',
@@ -256,7 +271,10 @@ def test_export_scripts_are_paired_and_export_only(
 		'--schema-version',
 	}
 	for flag in paired_flags:
-		assert arguments['mae100'][flag] == arguments['bt100'][flag]
+		assert all(
+			arguments[variant][flag] == arguments['mae100'][flag]
+			for variant in VARIANTS
+		)
 
 
 def test_target_pipeline_files_never_reference_25ep_controls() -> None:
@@ -273,6 +291,7 @@ def test_target_pipeline_files_never_reference_25ep_controls() -> None:
 			assert 'mae25' not in text
 			assert 'bt25' not in text
 			assert '/stage2/' not in text
+			assert 'best.pt' not in text
 
 
 def _export_script_arguments(path: Path) -> dict[str, str]:

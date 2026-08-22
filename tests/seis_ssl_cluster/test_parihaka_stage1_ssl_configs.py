@@ -41,6 +41,17 @@ def stage1_configs(
 		'barlow_twins_full': resolve_barlow_twins_training_config(
 			load_config(STAGE1_ROOT / 'barlow_twins/02_full_100ep.yaml')
 		),
+		'local_barlow_twins_feasibility': resolve_barlow_twins_training_config(
+			load_config(
+				STAGE1_ROOT
+				/ 'local_barlow_twins_v1/01_gpu_feasibility_1step.yaml'
+			)
+		),
+		'local_barlow_twins_full': resolve_barlow_twins_training_config(
+			load_config(
+				STAGE1_ROOT / 'local_barlow_twins_v1/02_full_100ep.yaml'
+			)
+		),
 	}
 
 
@@ -55,6 +66,14 @@ def test_all_stage1_configs_resolve(
 	)
 	assert (
 		stage1_configs['barlow_twins_full']['stage']
+		== 'barlow_twins_training'
+	)
+	assert (
+		stage1_configs['local_barlow_twins_feasibility']['stage']
+		== 'barlow_twins_training'
+	)
+	assert (
+		stage1_configs['local_barlow_twins_full']['stage']
 		== 'barlow_twins_training'
 	)
 
@@ -119,11 +138,18 @@ def test_full_configs_preserve_method_specific_contract(
 	assert barlow_twins['barlow_twins']['redundancy_weight'] == 0.005
 	assert barlow_twins['barlow_twins']['normalization_eps'] == 1.0e-4
 
+	local_barlow_twins = stage1_configs['local_barlow_twins_full']
+	assert (
+		local_barlow_twins['barlow_twins']['method']
+		== 'local_barlow_twins_3d'
+	)
+	assert local_barlow_twins['barlow_twins']['local_pairs_per_crop'] == 128
+
 
 def test_feasibility_configs_match_full_geometry_and_runtime_contract(
 	stage1_configs: dict[str, dict[str, object]],
 ) -> None:
-	for method in ('mae', 'barlow_twins'):
+	for method in ('mae', 'barlow_twins', 'local_barlow_twins'):
 		feasibility = stage1_configs[f'{method}_feasibility']
 		full = stage1_configs[f'{method}_full']
 
@@ -171,5 +197,5 @@ def test_output_roots_are_unique_and_isolated(
 		for config in stage1_configs.values()
 	}
 
-	assert len(output_roots) == 4
+	assert len(output_roots) == 6
 	assert all(path.is_relative_to(expected_parent) for path in output_roots)

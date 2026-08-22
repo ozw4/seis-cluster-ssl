@@ -1,6 +1,6 @@
 paths:
   artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
-  output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/local_barlow_twins_v1/gpu_feasibility_1step
+  output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage1/local_barlow_twins_v1/gpu_feasibility_1step
 manifests:
   train: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude_manifest.json
   train_path_list: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_npy_paths.txt

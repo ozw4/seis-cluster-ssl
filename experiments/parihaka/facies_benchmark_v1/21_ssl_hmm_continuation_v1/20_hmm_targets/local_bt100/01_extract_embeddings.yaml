@@ -3,8 +3,8 @@ paths:
 manifests:
   input: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude_manifest.json
 embeddings:
-  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/local_barlow_twins_v1/full_100ep/latest.pt
-  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/local_barlow_twins_v1/overlap_x64
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage1/local_barlow_twins_v1/full_100ep/latest.pt
+  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/hmm_targets/local_bt100/overlap_x64
 embedding:
   window_size: [128, 128, 128]
   overlap: [64, 64, 64]
