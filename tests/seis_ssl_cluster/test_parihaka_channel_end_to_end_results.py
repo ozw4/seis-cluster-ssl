@@ -589,10 +589,21 @@ def test_complete_end_to_end_summary_and_paired_statistics(tmp_path: Path) -> No
 		'primary_metric',
 		'paired_comparison',
 		'job_count',
+		'tile_geometry',
 		'comparison',
 		'by_size',
 	}
 	assert payload['schema_version'] == 2
+	assert payload['tile_geometry'] == {
+		'core_size_tokens': [8, 8, 8],
+		'context_halo_tokens': [1, 1, 1],
+		'patch_size_voxels': [8, 8, 8],
+		'raw_input_shape_voxels': [80, 80, 80],
+		'supervised_core_shape_voxels': [64, 64, 64],
+	}
+	markdown = paths[2].read_text(encoding='utf-8')
+	assert 'Raw encoder input: 80³ voxels. Supervised core: 64³ voxels.' in markdown
+	assert 'Tile geometry: core=[8,8,8], halo=[1,1,1], patch=[8,8,8].' in markdown
 	small = payload['by_size']['small']
 	assert small['paired_mean'] == pytest.approx(statistics.fmean(_DELTA_BY_LAYOUT))
 	assert small['paired_median'] == pytest.approx(statistics.median(_DELTA_BY_LAYOUT))
@@ -639,7 +650,34 @@ def test_halo4_complete_end_to_end_summary(tmp_path: Path) -> None:
 		for payload in jobs.values()
 	)
 	paths = summarize_channel_end_to_end(config)
-	assert json.loads(paths[1].read_text(encoding='utf-8'))['job_count'] == 30
+	payload = json.loads(paths[1].read_text(encoding='utf-8'))
+	assert payload['job_count'] == 30
+	assert payload['tile_geometry'] == {
+		'core_size_tokens': [8, 8, 8],
+		'context_halo_tokens': [4, 4, 4],
+		'patch_size_voxels': [8, 8, 8],
+		'raw_input_shape_voxels': [128, 128, 128],
+		'supervised_core_shape_voxels': [64, 64, 64],
+	}
+	markdown = paths[2].read_text(encoding='utf-8')
+	assert 'Raw encoder input: 128³ voxels. Supervised core: 64³ voxels.' in markdown
+	assert 'Tile geometry: core=[8,8,8], halo=[4,4,4], patch=[8,8,8].' in markdown
+
+
+def test_end_to_end_summary_rejects_invalid_reference_patch_size(
+	tmp_path: Path,
+) -> None:
+	config = _end_config(tmp_path)
+	_write_complete(config)
+	_mutate_end(
+		config,
+		'pretrained',
+		lambda payload: payload['benchmark_identity']['reference_input'].__setitem__(
+			'patch_size', [8, True, 8]
+		),
+	)
+	with pytest.raises(ValueError, match=r'reference_input\.patch_size'):
+		inspect_channel_end_to_end_results(config)
 
 
 @pytest.mark.parametrize(
@@ -899,12 +937,24 @@ def test_four_way_summary_validates_pairing_and_has_no_cross_regime_delta(
 	assert float(rows[0]['end_to_end_pretraining_delta']) == pytest.approx(0.1)
 	assert not any('cross_regime' in key or 'fine_tuning' in key for key in rows[0])
 	payload = json.loads(paths[1].read_text(encoding='utf-8'))
+	expected_raw_size = (8 + 2 * context_halo_tokens[0]) * 8
+	assert payload['end_to_end_tile_geometry'] == {
+		'core_size_tokens': [8, 8, 8],
+		'context_halo_tokens': list(context_halo_tokens),
+		'patch_size_voxels': [8, 8, 8],
+		'raw_input_shape_voxels': [expected_raw_size] * 3,
+		'supervised_core_shape_voxels': [64, 64, 64],
+	}
 	assert payload['claim_boundary'] == (
 		'Cross-regime score differences do not isolate encoder fine-tuning '
 		'because frozen evaluation uses offline overlap-aggregated embeddings '
 		'while end-to-end evaluation encodes raw tiles during supervised training.'
 	)
 	markdown = paths[2].read_text(encoding='utf-8')
+	assert (
+		f'End-to-end Raw encoder input: {expected_raw_size}³ voxels. '
+		'Supervised core: 64³ voxels.'
+	) in markdown
 	assert 'different scientific questions' in markdown
 	assert 'offline overlap-aggregated embeddings' in markdown
 	assert 'encodes raw tiles during supervised training' in markdown

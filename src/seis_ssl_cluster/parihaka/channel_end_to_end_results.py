@@ -158,11 +158,13 @@ def summarize_channel_end_to_end(
 	_require_outputs_absent(config.output_dir, END_TO_END_OUTPUT_NAMES)
 	comparison = _end_to_end_comparison(jobs, config.runs_root)
 	aggregates = _paired_aggregates(comparison, 'end_to_end_pretraining_delta')
+	tile_geometry = _end_to_end_tile_geometry(config, jobs)
 	payload = {
 		'schema_version': 2,
 		'primary_metric': 'test.channel_iou',
 		'paired_comparison': 'finetune_pretrained - train_from_scratch',
 		'job_count': len(jobs),
+		'tile_geometry': tile_geometry,
 		'comparison': comparison,
 		'by_size': aggregates,
 	}
@@ -173,7 +175,7 @@ def summarize_channel_end_to_end(
 	_write_json(json_path, payload)
 	markdown_path = config.output_dir / END_TO_END_OUTPUT_NAMES[2]
 	markdown_path.write_text(
-		_end_to_end_markdown(aggregates, comparison), encoding='utf-8'
+		_end_to_end_markdown(tile_geometry, aggregates, comparison), encoding='utf-8'
 	)
 	return comparison_path, json_path, markdown_path
 
@@ -229,6 +231,9 @@ def summarize_channel_four_way(
 		'schema_version': 2,
 		'primary_metric': 'test.channel_iou',
 		'job_count': {'frozen': len(frozen), 'end_to_end': len(end_to_end)},
+		'end_to_end_tile_geometry': _end_to_end_tile_geometry(
+			end_to_end_config, end_to_end
+		),
 		'comparison': comparison,
 		'by_size': {
 			'frozen_representation_delta': _paired_aggregates(
@@ -251,7 +256,10 @@ def summarize_channel_four_way(
 	json_path = output_dir / FOUR_WAY_OUTPUT_NAMES[1]
 	_write_json(json_path, payload)
 	markdown_path = output_dir / FOUR_WAY_OUTPUT_NAMES[2]
-	markdown_path.write_text(_four_way_markdown(comparison), encoding='utf-8')
+	markdown_path.write_text(
+		_four_way_markdown(payload['end_to_end_tile_geometry'], comparison),
+		encoding='utf-8',
+	)
 	return csv_path, json_path, markdown_path
 
 
@@ -301,6 +309,9 @@ def _validate_end_to_end_job(  # noqa: C901, PLR0912, PLR0913
 	reference = _mapping(identity, 'reference_input', f'{path} benchmark_identity')
 	if set(reference) != _REFERENCE_INPUT_KEYS:
 		raise ValueError(f'{path} reference_input has invalid fields')
+	_positive_triplet(
+		reference.get('patch_size'), f'{path} reference_input.patch_size'
+	)
 	for key in ('reference_metadata_sha256', 'reference_valid_tokens_sha256'):
 		_validate_sha256(reference.get(key), f'{path} reference_input.{key}')
 	labels = _mapping(identity, 'labels', f'{path} benchmark_identity')
@@ -867,11 +878,49 @@ def _paired_aggregates(
 	return result
 
 
+def _end_to_end_tile_geometry(
+	config: ChannelEndToEndSummaryConfig,
+	jobs: Mapping[tuple[str, str, str], Mapping[str, object]],
+) -> dict[str, list[int]]:
+	first_key = ('pretrained', LAYOUT_IDS[0], next(iter(DATA_SIZE_PREFIX)))
+	reference = _mapping(
+		_identity(jobs[first_key]), 'reference_input', 'benchmark_identity'
+	)
+	patch_size = _positive_triplet(
+		reference.get('patch_size'), 'benchmark_identity.reference_input.patch_size'
+	)
+	raw_input_tokens = tuple(
+		core + 2 * halo
+		for core, halo in zip(
+			config.core_size_tokens, config.context_halo_tokens, strict=True
+		)
+	)
+	return {
+		'core_size_tokens': list(config.core_size_tokens),
+		'context_halo_tokens': list(config.context_halo_tokens),
+		'patch_size_voxels': list(patch_size),
+		'raw_input_shape_voxels': [
+			tokens * patch
+			for tokens, patch in zip(raw_input_tokens, patch_size, strict=True)
+		],
+		'supervised_core_shape_voxels': [
+			core * patch
+			for core, patch in zip(
+				config.core_size_tokens, patch_size, strict=True
+			)
+		],
+	}
+
+
 def _end_to_end_markdown(
-	aggregates: Mapping[str, object], comparison: Sequence[Mapping[str, object]]
+	tile_geometry: Mapping[str, object],
+	aggregates: Mapping[str, object],
+	comparison: Sequence[Mapping[str, object]],
 ) -> str:
 	lines = [
 		'# Parihaka Channel end-to-end initialization comparison',
+		'',
+		_tile_geometry_markdown(tile_geometry),
 		'',
 		(
 			'Primary metric: test Channel IoU. Deltas are finetune pretrained '
@@ -907,9 +956,14 @@ def _end_to_end_markdown(
 	return '\n'.join(lines) + '\n'
 
 
-def _four_way_markdown(comparison: Sequence[Mapping[str, object]]) -> str:
+def _four_way_markdown(
+	tile_geometry: Mapping[str, object],
+	comparison: Sequence[Mapping[str, object]],
+) -> str:
 	lines = [
 		'# Parihaka Channel four-condition comparison',
+		'',
+		'End-to-end ' + _tile_geometry_markdown(tile_geometry),
 		'',
 		(
 			'Frozen representation delta and end-to-end pretraining delta answer '
@@ -944,6 +998,36 @@ def _four_way_markdown(comparison: Sequence[Mapping[str, object]]) -> str:
 		for row in comparison
 	)
 	return '\n'.join(lines) + '\n'
+
+
+def _tile_geometry_markdown(tile_geometry: Mapping[str, object]) -> str:
+	raw_shape = _positive_triplet(
+		tile_geometry.get('raw_input_shape_voxels'), 'raw input shape'
+	)
+	core_shape = _positive_triplet(
+		tile_geometry.get('supervised_core_shape_voxels'), 'supervised core shape'
+	)
+	core = _positive_triplet(tile_geometry.get('core_size_tokens'), 'core size')
+	halo = _nonnegative_triplet(
+		tile_geometry.get('context_halo_tokens'), 'context halo'
+	)
+	patch = _positive_triplet(tile_geometry.get('patch_size_voxels'), 'patch size')
+	return (
+		f'Raw encoder input: {_shape_markdown(raw_shape)} voxels. '
+		f'Supervised core: {_shape_markdown(core_shape)} voxels.\n'
+		f'Tile geometry: core={_compact_triplet(core)}, '
+		f'halo={_compact_triplet(halo)}, patch={_compact_triplet(patch)}.'
+	)
+
+
+def _shape_markdown(shape: tuple[int, int, int]) -> str:
+	if len(set(shape)) == 1:
+		return f'{shape[0]}³'
+	return 'x'.join(str(value) for value in shape)
+
+
+def _compact_triplet(values: tuple[int, int, int]) -> str:
+	return '[' + ','.join(str(value) for value in values) + ']'
 
 
 def _train_lines(
