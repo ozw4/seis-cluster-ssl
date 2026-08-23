@@ -1,0 +1,44 @@
+dataset:
+  survey_id: parihaka
+inputs:
+  labels_npy: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_labels.npy
+  labels_metadata_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_labels_metadata.json
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs
+embeddings:
+  models:
+    local_barlow_twins:
+      dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/channel_mae_local_bt_four_way_v1/local_barlow_twins/overlap_x64
+      checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/local_bt100/bt_continue/full_25ep/latest.pt
+    local_barlow_twins_d4_trace_drop:
+      dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/channel_local_bt_d4_trace_drop_v1/local_barlow_twins_d4_trace_drop/overlap_x64
+      checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/local_bt100/bt_continue_d4_trace_drop/full_25ep/latest.pt
+    local_barlow_twins_hmm_k6:
+      dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/channel_mae_local_bt_four_way_v1/local_barlow_twins_hmm_k6/overlap_x64
+      checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/local_bt100/hmm/k6/full_25ep/latest.pt
+outputs:
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs
+  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/local_bt_d4_trace_drop_v1/summary
+decoder:
+  spec: frozen_embedding_decoder_nearest_voxel_ln_v1
+  embedding_dim: 384
+  class_count: 2
+  hidden_channels: [128, 64, 32]
+  upsample_factors:
+    - [2, 2, 2]
+    - [2, 2, 2]
+    - [2, 2, 2]
+  upsample_mode: nearest
+  normalization: voxelwise_layer_norm
+tiles:
+  core_size_tokens: [8, 8, 8]
+  context_halo_tokens: [1, 1, 1]
+train:
+  epochs: 50
+  batch_size: 1
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  class_weight: balanced
+  sampling_mode: all_tiles_once
+  seed: 42000
+  amp: false
+  gradient_clip_norm: 1.0
