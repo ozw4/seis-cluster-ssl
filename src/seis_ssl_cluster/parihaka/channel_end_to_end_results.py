@@ -81,6 +81,8 @@ class ChannelEndToEndSummaryConfig:
 	runs_root: Path
 	output_dir: Path
 	four_way_output_dir: Path
+	core_size_tokens: tuple[int, int, int] = (8, 8, 8)
+	context_halo_tokens: tuple[int, int, int] = (1, 1, 1)
 
 
 def channel_end_to_end_summary_config_from_mapping(
@@ -88,11 +90,18 @@ def channel_end_to_end_summary_config_from_mapping(
 ) -> ChannelEndToEndSummaryConfig:
 	"""Resolve summary paths from the one-job end-to-end config."""
 	outputs = _mapping(config, 'outputs', 'config')
+	tiles = _mapping(config, 'tiles', 'config')
 	return ChannelEndToEndSummaryConfig(
 		runs_root=_absolute_path(outputs, 'runs_root', 'outputs'),
 		output_dir=_absolute_path(outputs, 'output_dir', 'outputs'),
 		four_way_output_dir=_absolute_path(
 			outputs, 'four_way_output_dir', 'outputs'
+		),
+		core_size_tokens=_positive_triplet(
+			tiles.get('core_size_tokens'), 'tiles.core_size_tokens'
+		),
+		context_halo_tokens=_nonnegative_triplet(
+			tiles.get('context_halo_tokens'), 'tiles.context_halo_tokens'
 		),
 	)
 
@@ -103,6 +112,10 @@ def inspect_channel_end_to_end_results(
 	"""Require and fail-closed validate all 30 end-to-end metrics files."""
 	jobs: dict[tuple[str, str, str], Mapping[str, object]] = {}
 	missing: list[Path] = []
+	expected_tiles = {
+		'core_size_tokens': list(config.core_size_tokens),
+		'context_halo_tokens': list(config.context_halo_tokens),
+	}
 	for encoder_init in ENCODER_INITIALIZATIONS:
 		for layout_id in LAYOUT_IDS:
 			for data_size in DATA_SIZE_PREFIX:
@@ -114,7 +127,12 @@ def inspect_channel_end_to_end_results(
 					continue
 				payload = _read_json(path)
 				_validate_end_to_end_job(
-					payload, encoder_init, layout_id, data_size, path
+					payload,
+					encoder_init,
+					layout_id,
+					data_size,
+					path,
+					expected_tiles=expected_tiles,
 				)
 				key = (encoder_init, layout_id, data_size)
 				if key in jobs:
@@ -222,7 +240,8 @@ def summarize_channel_four_way(
 		},
 		'claim_boundary': (
 			'Cross-regime score differences do not isolate encoder fine-tuning '
-			'because the encoder input context differs.'
+			'because frozen evaluation uses offline overlap-aggregated embeddings '
+			'while end-to-end evaluation encodes raw tiles during supervised training.'
 		),
 	}
 	output_dir = end_to_end_config.four_way_output_dir
@@ -250,12 +269,14 @@ def inspect_channel_four_way_results(
 	return end_to_end, frozen
 
 
-def _validate_end_to_end_job(  # noqa: C901, PLR0912
+def _validate_end_to_end_job(  # noqa: C901, PLR0912, PLR0913
 	payload: Mapping[str, object],
 	encoder_init: str,
 	layout_id: str,
 	data_size: str,
 	path: Path,
+	*,
+	expected_tiles: Mapping[str, object],
 ) -> None:
 	expected = {
 		'encoder_init': encoder_init,
@@ -295,7 +316,7 @@ def _validate_end_to_end_job(  # noqa: C901, PLR0912
 	if set(decoder) != {'architecture', 'initial_state_sha256'}:
 		raise ValueError(f'{path} decoder identity has invalid fields')
 	_validate_sha256(decoder.get('initial_state_sha256'), f'{path} decoder SHA')
-	_validate_common_identity_components(identity, path)
+	_validate_common_identity_components(identity, path, expected_tiles)
 	source = _mapping(identity, 'encoder_source', f'{path} benchmark_identity')
 	_validate_encoder_source(source, encoder_init, path)
 	initial_states = _mapping(
@@ -380,7 +401,9 @@ def _validate_encoder_source(  # noqa: C901
 
 
 def _validate_common_identity_components(
-	identity: Mapping[str, object], path: Path
+	identity: Mapping[str, object],
+	path: Path,
+	expected_tiles: Mapping[str, object],
 ) -> None:
 	expected_fields = {
 		'optimizer': {
@@ -412,10 +435,7 @@ def _validate_common_identity_components(
 	if optimizer.get('parameter_group_names') != ['encoder', 'decoder']:
 		raise ValueError(f'{path} optimizer parameter groups are invalid')
 	tiles = _mapping(identity, 'tiles', str(path))
-	if tiles != {
-		'core_size_tokens': [8, 8, 8],
-		'context_halo_tokens': [1, 1, 1],
-	}:
+	if tiles != expected_tiles:
 		raise ValueError(f'{path} tile geometry is invalid')
 	runtime = _mapping(identity, 'runtime', str(path))
 	if runtime.get('amp_enabled') is not False:
@@ -894,13 +914,17 @@ def _four_way_markdown(comparison: Sequence[Mapping[str, object]]) -> str:
 		(
 			'Frozen representation delta and end-to-end pretraining delta answer '
 			'different scientific questions. Cross-regime score differences do not '
-			'isolate encoder fine-tuning because the encoder input context differs.'
+			'isolate encoder fine-tuning because frozen evaluation uses offline '
+			'overlap-aggregated embeddings while end-to-end evaluation encodes raw '
+			'tiles during supervised training.'
 		),
 		'',
 		(
-			'Frozen jobs use 128^3 overlap embeddings; end-to-end jobs use an 80^3 '
-			'raw-amplitude encoder crop. This is a descriptive table of two paired '
-			'experiments.'
+			'Frozen evaluation precomputes and merges full-volume embeddings from '
+			'overlapping windows before passing them to the decoder. End-to-end '
+			'evaluation encodes each supervised tile\'s raw amplitude during '
+			'supervised training and updates the encoder. This is a descriptive '
+			'table of two paired experiments.'
 		),
 		'',
 		(
@@ -1158,6 +1182,27 @@ def _mapping(
 	if not isinstance(child, Mapping):
 		raise TypeError(f'{prefix}.{key} must be a mapping')
 	return child
+
+
+def _positive_triplet(value: object, label: str) -> tuple[int, int, int]:
+	return _integer_triplet(value, label, minimum=1)
+
+
+def _nonnegative_triplet(value: object, label: str) -> tuple[int, int, int]:
+	return _integer_triplet(value, label, minimum=0)
+
+
+def _integer_triplet(
+	value: object, label: str, *, minimum: int
+) -> tuple[int, int, int]:
+	if not isinstance(value, list | tuple) or len(value) != 3:
+		raise TypeError(f'{label} must be an integer triple')
+	if any(
+		not isinstance(item, int) or isinstance(item, bool) or item < minimum
+		for item in value
+	):
+		raise ValueError(f'{label} must contain integers >= {minimum}')
+	return (int(value[0]), int(value[1]), int(value[2]))
 
 
 def _absolute_path(value: Mapping[str, object], key: str, prefix: str) -> Path:

@@ -22,6 +22,7 @@ from seis_ssl_cluster.parihaka.channel_decoder import (
 )
 from seis_ssl_cluster.parihaka.channel_end_to_end_results import (
 	ChannelEndToEndSummaryConfig,
+	channel_end_to_end_summary_config_from_mapping,
 	inspect_channel_end_to_end_results,
 	summarize_channel_end_to_end,
 	summarize_channel_four_way,
@@ -139,8 +140,14 @@ def _encoder_source(encoder_init: str) -> dict[str, object]:
 	}
 
 
-def _end_identity(
-	encoder_init: str, layout_index: int, layout_id: str, data_size: str
+def _end_identity(  # noqa: PLR0913
+	encoder_init: str,
+	layout_index: int,
+	layout_id: str,
+	data_size: str,
+	*,
+	core_size_tokens: tuple[int, int, int] = (8, 8, 8),
+	context_halo_tokens: tuple[int, int, int] = (1, 1, 1),
 ) -> dict[str, object]:
 	lines = _lines(layout_index, data_size)
 	return {
@@ -212,8 +219,8 @@ def _end_identity(
 			'gradient_clip_norm': 1.0,
 		},
 		'tiles': {
-			'core_size_tokens': [8, 8, 8],
-			'context_halo_tokens': [1, 1, 1],
+			'core_size_tokens': list(core_size_tokens),
+			'context_halo_tokens': list(context_halo_tokens),
 		},
 		'runtime': {
 			'resolved_device_type': 'cuda',
@@ -224,8 +231,14 @@ def _end_identity(
 	}
 
 
-def _end_metrics(
-	encoder_init: str, layout_index: int, layout_id: str, data_size: str
+def _end_metrics(  # noqa: PLR0913
+	encoder_init: str,
+	layout_index: int,
+	layout_id: str,
+	data_size: str,
+	*,
+	core_size_tokens: tuple[int, int, int] = (8, 8, 8),
+	context_halo_tokens: tuple[int, int, int] = (1, 1, 1),
 ) -> dict[str, object]:
 	lines = _lines(layout_index, data_size)
 	scratch = 0.5 + layout_index / 100
@@ -257,7 +270,12 @@ def _end_metrics(
 		'train_channel_voxels': 100 * DATA_SIZE_PREFIX[data_size],
 		'train_non_channel_voxels': 1000 * DATA_SIZE_PREFIX[data_size],
 		'benchmark_identity': _end_identity(
-			encoder_init, layout_index, layout_id, data_size
+			encoder_init,
+			layout_index,
+			layout_id,
+			data_size,
+			core_size_tokens=core_size_tokens,
+			context_halo_tokens=context_halo_tokens,
 		),
 		'test': {'channel_iou': channel_iou},
 	}
@@ -412,7 +430,14 @@ def _write_complete(
 				path.write_text(
 					json.dumps(
 						_end_metrics(
-							encoder_init, layout_index, layout_id, data_size
+							encoder_init,
+							layout_index,
+							layout_id,
+							data_size,
+							core_size_tokens=end_config.core_size_tokens,
+							context_halo_tokens=(
+								end_config.context_halo_tokens
+							),
 						)
 					),
 					encoding='utf-8',
@@ -438,9 +463,16 @@ def _write_complete(
 				)
 
 
-def _end_config(tmp_path: Path) -> ChannelEndToEndSummaryConfig:
+def _end_config(
+	tmp_path: Path,
+	*,
+	context_halo_tokens: tuple[int, int, int] = (1, 1, 1),
+) -> ChannelEndToEndSummaryConfig:
 	return ChannelEndToEndSummaryConfig(
-		tmp_path / 'end_runs', tmp_path / 'summary', tmp_path / 'four_way'
+		tmp_path / 'end_runs',
+		tmp_path / 'summary',
+		tmp_path / 'four_way',
+		context_halo_tokens=context_halo_tokens,
 	)
 
 
@@ -465,6 +497,77 @@ def _mutate_end(
 	path.write_text(json.dumps(payload), encoding='utf-8')
 
 
+def _set_end_tiles(
+	payload: dict[str, object],
+	*,
+	core_size_tokens: tuple[int, int, int] = (8, 8, 8),
+	context_halo_tokens: tuple[int, int, int],
+) -> None:
+	identity = payload['benchmark_identity']
+	assert isinstance(identity, dict)
+	identity['tiles'] = {
+		'core_size_tokens': list(core_size_tokens),
+		'context_halo_tokens': list(context_halo_tokens),
+	}
+
+
+def test_summary_config_constructor_defaults_to_halo1(tmp_path: Path) -> None:
+	config = ChannelEndToEndSummaryConfig(
+		tmp_path / 'runs', tmp_path / 'summary', tmp_path / 'four_way'
+	)
+	assert config.core_size_tokens == (8, 8, 8)
+	assert config.context_halo_tokens == (1, 1, 1)
+
+
+def test_summary_config_resolver_preserves_halo4(tmp_path: Path) -> None:
+	config = channel_end_to_end_summary_config_from_mapping(
+		{
+			'outputs': {
+				'runs_root': str(tmp_path / 'runs'),
+				'output_dir': str(tmp_path / 'summary'),
+				'four_way_output_dir': str(tmp_path / 'four_way'),
+			},
+			'tiles': {
+				'core_size_tokens': [8, 8, 8],
+				'context_halo_tokens': [4, 4, 4],
+			},
+		}
+	)
+	assert config.core_size_tokens == (8, 8, 8)
+	assert config.context_halo_tokens == (4, 4, 4)
+
+
+@pytest.mark.parametrize(
+	('field', 'value'),
+	[
+		('core_size_tokens', [0, 8, 8]),
+		('core_size_tokens', [True, 8, 8]),
+		('context_halo_tokens', [-1, 4, 4]),
+		('context_halo_tokens', [4.0, 4, 4]),
+		('context_halo_tokens', [4, 4]),
+	],
+)
+def test_summary_config_resolver_rejects_invalid_tiles(
+	tmp_path: Path, field: str, value: object
+) -> None:
+	tiles: dict[str, object] = {
+		'core_size_tokens': [8, 8, 8],
+		'context_halo_tokens': [4, 4, 4],
+	}
+	tiles[field] = value
+	with pytest.raises((TypeError, ValueError), match=field):
+		channel_end_to_end_summary_config_from_mapping(
+			{
+				'outputs': {
+					'runs_root': str(tmp_path / 'runs'),
+					'output_dir': str(tmp_path / 'summary'),
+					'four_way_output_dir': str(tmp_path / 'four_way'),
+				},
+				'tiles': tiles,
+			}
+		)
+
+
 def test_end_to_end_summary_requires_all_30_jobs(tmp_path: Path) -> None:
 	config = _end_config(tmp_path)
 	with pytest.raises(FileNotFoundError, match='all 30 jobs'):
@@ -481,6 +584,15 @@ def test_complete_end_to_end_summary_and_paired_statistics(tmp_path: Path) -> No
 		'summary.md',
 	}
 	payload = json.loads((config.output_dir / 'summary.json').read_text())
+	assert set(payload) == {
+		'schema_version',
+		'primary_metric',
+		'paired_comparison',
+		'job_count',
+		'comparison',
+		'by_size',
+	}
+	assert payload['schema_version'] == 2
 	small = payload['by_size']['small']
 	assert small['paired_mean'] == pytest.approx(statistics.fmean(_DELTA_BY_LAYOUT))
 	assert small['paired_median'] == pytest.approx(statistics.median(_DELTA_BY_LAYOUT))
@@ -494,11 +606,87 @@ def test_complete_end_to_end_summary_and_paired_statistics(tmp_path: Path) -> No
 	)
 	assert list(small['layout_deltas']) == list(LAYOUT_IDS)
 	with (config.output_dir / 'comparison.csv').open(newline='') as file_obj:
-		rows = list(csv.DictReader(file_obj))
+		reader = csv.DictReader(file_obj)
+		rows = list(reader)
+	assert reader.fieldnames == [
+		'data_size',
+		'layout_id',
+		'finetune_pretrained_channel_iou',
+		'train_from_scratch_channel_iou',
+		'end_to_end_pretraining_delta',
+		'target_train_voxel_count',
+		'actual_train_voxel_count',
+		'relative_count_error',
+		'selected_token_count',
+	]
 	assert len(rows) == 15
 	assert float(rows[0]['end_to_end_pretraining_delta']) == pytest.approx(0.1)
 	with pytest.raises(FileExistsError, match='already exist'):
 		summarize_channel_end_to_end(config)
+
+
+def test_halo4_complete_end_to_end_summary(tmp_path: Path) -> None:
+	config = _end_config(tmp_path, context_halo_tokens=(4, 4, 4))
+	_write_complete(config)
+	jobs = inspect_channel_end_to_end_results(config)
+	assert len(jobs) == 30
+	assert all(
+		payload['benchmark_identity']['tiles']
+		== {
+			'core_size_tokens': [8, 8, 8],
+			'context_halo_tokens': [4, 4, 4],
+		}
+		for payload in jobs.values()
+	)
+	paths = summarize_channel_end_to_end(config)
+	assert json.loads(paths[1].read_text(encoding='utf-8'))['job_count'] == 30
+
+
+@pytest.mark.parametrize(
+	('summary_halo', 'metrics_halo'),
+	[
+		((4, 4, 4), (1, 1, 1)),
+		((1, 1, 1), (4, 4, 4)),
+	],
+)
+def test_end_to_end_summary_rejects_one_mixed_halo_job(
+	tmp_path: Path,
+	summary_halo: tuple[int, int, int],
+	metrics_halo: tuple[int, int, int],
+) -> None:
+	config = _end_config(tmp_path, context_halo_tokens=summary_halo)
+	_write_complete(config)
+	_mutate_end(
+		config,
+		'pretrained',
+		lambda payload: _set_end_tiles(
+			payload, context_halo_tokens=metrics_halo
+		),
+		layout_id='layout_002',
+		data_size='medium',
+	)
+	with pytest.raises(ValueError, match='tile geometry is invalid'):
+		inspect_channel_end_to_end_results(config)
+
+
+def test_end_to_end_summary_rejects_pretrained_random_tile_drift(
+	tmp_path: Path,
+) -> None:
+	config = _end_config(tmp_path)
+	_write_complete(config)
+	for layout_id in LAYOUT_IDS:
+		for data_size in DATA_SIZE_PREFIX:
+			_mutate_end(
+				config,
+				'random',
+				lambda payload: _set_end_tiles(
+					payload, context_halo_tokens=(4, 4, 4)
+				),
+				layout_id=layout_id,
+				data_size=data_size,
+			)
+	with pytest.raises(ValueError, match='tile geometry is invalid'):
+		inspect_channel_end_to_end_results(config)
 
 
 @pytest.mark.parametrize(
@@ -686,10 +874,14 @@ def test_end_to_end_summary_preserves_layout_nesting_and_uniqueness(
 		inspect_channel_end_to_end_results(config)
 
 
+@pytest.mark.parametrize('context_halo_tokens', [(1, 1, 1), (4, 4, 4)])
 def test_four_way_summary_validates_pairing_and_has_no_cross_regime_delta(
 	tmp_path: Path,
+	context_halo_tokens: tuple[int, int, int],
 ) -> None:
-	end_config = _end_config(tmp_path)
+	end_config = _end_config(
+		tmp_path, context_halo_tokens=context_halo_tokens
+	)
 	frozen_config = ChannelSummaryConfig(
 		tmp_path / 'frozen_runs', tmp_path / 'frozen_summary'
 	)
@@ -706,9 +898,19 @@ def test_four_way_summary_validates_pairing_and_has_no_cross_regime_delta(
 	assert float(rows[0]['frozen_representation_delta']) == pytest.approx(0.05)
 	assert float(rows[0]['end_to_end_pretraining_delta']) == pytest.approx(0.1)
 	assert not any('cross_regime' in key or 'fine_tuning' in key for key in rows[0])
+	payload = json.loads(paths[1].read_text(encoding='utf-8'))
+	assert payload['claim_boundary'] == (
+		'Cross-regime score differences do not isolate encoder fine-tuning '
+		'because frozen evaluation uses offline overlap-aggregated embeddings '
+		'while end-to-end evaluation encodes raw tiles during supervised training.'
+	)
 	markdown = paths[2].read_text(encoding='utf-8')
 	assert 'different scientific questions' in markdown
-	assert 'input context differs' in markdown
+	assert 'offline overlap-aggregated embeddings' in markdown
+	assert 'encodes raw tiles during supervised training' in markdown
+	assert 'full-volume embeddings from overlapping windows' in markdown
+	assert "each supervised tile's raw amplitude" in markdown
+	assert 'updates the encoder' in markdown
 	with pytest.raises(FileExistsError, match='already exist'):
 		summarize_channel_four_way(end_config, frozen_config)
 
