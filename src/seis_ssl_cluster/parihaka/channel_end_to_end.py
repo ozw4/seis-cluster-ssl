@@ -1786,12 +1786,10 @@ def _end_to_end_tiles(value: Mapping[str, object]) -> DecoderTiles:
 			value.get('context_halo_tokens'), 'tiles.context_halo_tokens'
 		),
 	)
-	expected = DecoderTiles(
-		core_size_tokens=CHANNEL_CORE_SIZE_TOKENS,
-		context_halo_tokens=CHANNEL_CONTEXT_HALO_TOKENS,
-	)
-	if tiles != expected:
-		raise ValueError('tile settings differ from the fixed Channel benchmark')
+	if tiles.core_size_tokens != CHANNEL_CORE_SIZE_TOKENS:
+		raise ValueError(
+			'tiles.core_size_tokens differs from the fixed Channel benchmark'
+		)
 	return tiles
 
 

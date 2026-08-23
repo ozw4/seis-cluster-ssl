@@ -119,7 +119,11 @@ def test_reference_artifact_uses_embedding_output_path_contract(
 	assert artifact.valid_tokens_path == paths.valid_tokens
 
 
-def _dataset(tmp_path: Path) -> ChannelAmplitudeTileDataset:
+def _dataset(
+	tmp_path: Path,
+	*,
+	context_halo_tokens: tuple[int, int, int] = (1, 1, 1),
+) -> ChannelAmplitudeTileDataset:
 	artifact_dir, labels_path = _raw_fixture(tmp_path)
 	return ChannelAmplitudeTileDataset(
 		reference=resolve_channel_reference_artifact(artifact_dir),
@@ -128,32 +132,91 @@ def _dataset(tmp_path: Path) -> ChannelAmplitudeTileDataset:
 		validation=SectionLines((62,), (62,)),
 		reserved_training=SectionLines((0,), (0,)),
 		split='train',
+		context_halo_tokens=context_halo_tokens,
 		training_selection_mask=np.ones((8, 8, 8), dtype=np.bool_),
 	)
 
 
+@pytest.mark.parametrize(
+	('context_halo_tokens', 'input_size', 'core_start'),
+	[
+		((1, 1, 1), 80, 8),
+		((4, 4, 4), 128, 32),
+	],
+)
 def test_raw_amplitude_uses_shared_preprocessing_and_matches_reference(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
+	context_halo_tokens: tuple[int, int, int],
+	input_size: int,
+	core_start: int,
 ) -> None:
-	dataset = _dataset(tmp_path)
+	dataset = _dataset(tmp_path, context_halo_tokens=context_halo_tokens)
 	called = 0
+	runtime_token_valid_mask: np.ndarray | None = None
 	original = end_to_end.read_amplitude_crop
 
 	def wrapped(**kwargs: object) -> object:
-		nonlocal called
+		nonlocal called, runtime_token_valid_mask
 		called += 1
-		return original(**kwargs)  # type: ignore[arg-type]
+		prepared = original(**kwargs)  # type: ignore[arg-type]
+		runtime_token_valid_mask = prepared.token_valid_mask.copy()
+		return prepared
 
 	monkeypatch.setattr(end_to_end, 'read_amplitude_crop', wrapped)
 	item = dataset[0]
 	assert called == 1
 	assert item['amplitude'].dtype == torch.float32
-	assert item['amplitude'].shape == (1, 80, 80, 80)
-	assert item['token_valid_mask'].shape == (10, 10, 10)
-	assert item['labels'].shape == (80, 80, 80)
-	assert item['core_mask'][8:72, 8:72, 8:72].all()
+	assert item['amplitude'].shape == (1, input_size, input_size, input_size)
+	token_size = input_size // 8
+	assert item['token_valid_mask'].shape == (token_size, token_size, token_size)
+	assert item['labels'].shape == (input_size, input_size, input_size)
+	assert item['core_mask'].shape == (input_size, input_size, input_size)
+	expected_core = torch.zeros_like(item['core_mask'])
+	core_stop = core_start + 64
+	expected_core[
+		core_start:core_stop, core_start:core_stop, core_start:core_stop
+	] = True
+	assert torch.equal(item['core_mask'], expected_core)
+	assert not item['supervision_mask'][~expected_core].any()
 	assert int(item['supervision_mask'].sum()) == dataset.records[0].supervised_voxels
+	assert runtime_token_valid_mask is not None
+	assert np.array_equal(item['token_valid_mask'].numpy(), runtime_token_valid_mask)
+	expected_token_valid = torch.zeros_like(item['token_valid_mask'])
+	halo = context_halo_tokens[0]
+	expected_token_valid[halo : halo + 8, halo : halo + 8, halo : halo + 8] = True
+	assert torch.equal(item['token_valid_mask'], expected_token_valid)
+	voxel_valid = item['token_valid_mask']
+	for axis in range(3):
+		voxel_valid = voxel_valid.repeat_interleave(8, dim=axis)
+	assert not item['supervision_mask'][~voxel_valid].any()
+
+
+def test_context_halo_does_not_change_supervised_core_identity(
+	tmp_path: Path,
+) -> None:
+	halo1_root = tmp_path / 'halo1'
+	halo4_root = tmp_path / 'halo4'
+	halo1_root.mkdir()
+	halo4_root.mkdir()
+	halo1 = _dataset(halo1_root, context_halo_tokens=(1, 1, 1))
+	halo4 = _dataset(halo4_root, context_halo_tokens=(4, 4, 4))
+	halo1_item = halo1[0]
+	halo4_item = halo4[0]
+
+	assert halo1.records == halo4.records
+	assert halo1.class_counts == halo4.class_counts
+	assert [record.tile_id for record in halo1.records] == [
+		record.tile_id for record in halo4.records
+	]
+	assert torch.equal(
+		halo1_item['supervision_mask'][8:72, 8:72, 8:72],
+		halo4_item['supervision_mask'][32:96, 32:96, 32:96],
+	)
+	assert torch.equal(
+		halo1_item['labels'][8:72, 8:72, 8:72],
+		halo4_item['labels'][32:96, 32:96, 32:96],
+	)
 
 
 def test_runtime_token_valid_mismatch_is_rejected(
@@ -402,7 +465,12 @@ class _PreflightFixture:
 			encoding='utf-8',
 		)
 
-	def config(self) -> ChannelEndToEndConfig:
+	def config(
+		self,
+		*,
+		core_size_tokens: tuple[int, int, int] = (8, 8, 8),
+		context_halo_tokens: tuple[int, int, int] = (1, 1, 1),
+	) -> ChannelEndToEndConfig:
 		return ChannelEndToEndConfig(
 			survey_id='parihaka',
 			labels=self.labels,
@@ -421,7 +489,7 @@ class _PreflightFixture:
 				upsample_mode='nearest',
 				normalization='voxelwise_layer_norm',
 			),
-			tiles=DecoderTiles((8, 8, 8), (1, 1, 1)),
+			tiles=DecoderTiles(core_size_tokens, context_halo_tokens),
 			train=ChannelEndToEndTrain(
 				epochs=50,
 				batch_size=1,
@@ -436,8 +504,16 @@ class _PreflightFixture:
 			),
 		)
 
-	def config_mapping(self) -> dict[str, object]:
-		config = self.config()
+	def config_mapping(
+		self,
+		*,
+		core_size_tokens: tuple[int, int, int] = (8, 8, 8),
+		context_halo_tokens: tuple[int, int, int] = (1, 1, 1),
+	) -> dict[str, object]:
+		config = self.config(
+			core_size_tokens=core_size_tokens,
+			context_halo_tokens=context_halo_tokens,
+		)
 		return {
 			'dataset': {'survey_id': 'parihaka'},
 			'inputs': {
@@ -461,8 +537,8 @@ class _PreflightFixture:
 				'normalization': 'voxelwise_layer_norm',
 			},
 			'tiles': {
-				'core_size_tokens': [8, 8, 8],
-				'context_halo_tokens': [1, 1, 1],
+				'core_size_tokens': list(config.tiles.core_size_tokens),
+				'context_halo_tokens': list(config.tiles.context_halo_tokens),
 			},
 			'train': {
 				'epochs': 50,
@@ -478,9 +554,14 @@ class _PreflightFixture:
 			},
 		}
 
-	def plan(self, encoder_init: str = 'pretrained') -> Any:
+	def plan(
+		self,
+		encoder_init: str = 'pretrained',
+		*,
+		context_halo_tokens: tuple[int, int, int] = (1, 1, 1),
+	) -> Any:
 		return inspect_channel_end_to_end_job(
-			self.config(),
+			self.config(context_halo_tokens=context_halo_tokens),
 			encoder_init=encoder_init,
 			layout_id='layout_000',
 			data_size='small',
@@ -511,6 +592,38 @@ def test_preflight_geometry_identity_and_condition_parity(tmp_path: Path) -> Non
 		'weight_decay': 0.0001,
 		'parameter_group_names': ['encoder', 'decoder'],
 	}
+
+
+def test_halo4_preflight_uses_validator_and_preserves_condition_parity(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	fixture = _PreflightFixture(tmp_path)
+	validated: list[dict[str, object]] = []
+	original = end_to_end.validate_context_halo_tokens
+
+	def wrapped(**kwargs: object) -> None:
+		validated.append(dict(kwargs))
+		original(**kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(end_to_end, 'validate_context_halo_tokens', wrapped)
+	pretrained = fixture.plan(
+		'pretrained', context_halo_tokens=(4, 4, 4)
+	)
+	random = fixture.plan('random', context_halo_tokens=(4, 4, 4))
+
+	assert len(validated) == 2
+	assert all(
+		call['context_halo_tokens'] == (4, 4, 4) for call in validated
+	)
+	assert pretrained.config.tiles == DecoderTiles((8, 8, 8), (4, 4, 4))
+	assert pretrained.benchmark_identity['tiles'] == {
+		'core_size_tokens': [8, 8, 8],
+		'context_halo_tokens': [4, 4, 4],
+	}
+	assert random.benchmark_identity['tiles'] == pretrained.benchmark_identity['tiles']
+	assert pretrained.tile_ids == random.tile_ids
+	assert pretrained.split_counts == random.split_counts
 
 
 def test_checkpoint_geometry_mismatch_is_rejected(tmp_path: Path) -> None:
@@ -792,6 +905,7 @@ def test_config_mapping_and_cli_dry_run_are_read_only(
 	)
 	resolved = channel_end_to_end_config_from_mapping(fixture.config_mapping())
 	assert resolved.pretrained_checkpoint == fixture.pretrained
+	assert resolved.tiles == DecoderTiles((8, 8, 8), (1, 1, 1))
 	before = {path.relative_to(tmp_path) for path in tmp_path.rglob('*')}
 	monkeypatch.setattr(
 		'sys.argv',
@@ -818,6 +932,44 @@ def test_config_mapping_and_cli_dry_run_are_read_only(
 	output = capsys.readouterr().out
 	assert 'encoder_init: pretrained' in output
 	assert 'execution: dry-run; no files written' in output
+
+
+def test_end_to_end_config_preserves_halo4(tmp_path: Path) -> None:
+	fixture = _PreflightFixture(tmp_path)
+	resolved = channel_end_to_end_config_from_mapping(
+		fixture.config_mapping(context_halo_tokens=(4, 4, 4))
+	)
+	assert resolved.tiles == DecoderTiles((8, 8, 8), (4, 4, 4))
+
+
+def test_end_to_end_config_rejects_changed_core_size(tmp_path: Path) -> None:
+	fixture = _PreflightFixture(tmp_path)
+	with pytest.raises(ValueError, match='core_size_tokens'):
+		channel_end_to_end_config_from_mapping(
+			fixture.config_mapping(core_size_tokens=(16, 16, 16))
+		)
+
+
+@pytest.mark.parametrize(
+	'context_halo_tokens',
+	[
+		[-1, 1, 1],
+		[True, 1, 1],
+		[1.0, 1, 1],
+		[1, 1],
+	],
+)
+def test_end_to_end_config_rejects_invalid_context_halo(
+	tmp_path: Path,
+	context_halo_tokens: list[object],
+) -> None:
+	fixture = _PreflightFixture(tmp_path)
+	raw = fixture.config_mapping()
+	raw_tiles = raw['tiles']
+	assert isinstance(raw_tiles, dict)
+	raw_tiles['context_halo_tokens'] = context_halo_tokens
+	with pytest.raises((TypeError, ValueError), match='context_halo_tokens'):
+		channel_end_to_end_config_from_mapping(raw)
 
 
 def test_end_to_end_config_rejects_amp_true(tmp_path: Path) -> None:
@@ -885,12 +1037,18 @@ def test_fp32_cuda_runtime_disables_autocast_and_grad_scaler(
 
 
 def _tiny_training_plan(
-	tmp_path: Path, *, encoder_init: str = 'pretrained', name: str = 'run'
+	tmp_path: Path,
+	*,
+	encoder_init: str = 'pretrained',
+	name: str = 'run',
+	context_halo_tokens: tuple[int, int, int] = (1, 1, 1),
 ) -> Any:
 	fixture_root = tmp_path / f'fixture-{name}'
 	fixture_root.mkdir()
 	fixture = _PreflightFixture(fixture_root)
-	plan = fixture.plan(encoder_init)
+	plan = fixture.plan(
+		encoder_init, context_halo_tokens=context_halo_tokens
+	)
 	train = replace(plan.config.train, epochs=2)
 	config = replace(plan.config, train=train)
 	identity = json.loads(json.dumps(plan.benchmark_identity))
@@ -1053,6 +1211,56 @@ def test_resume_rejects_identity_drift_and_new_run_rejects_output(
 		run_channel_end_to_end_job(precision_drifted, resume=latest)
 	with pytest.raises(FileExistsError, match='non-empty'):
 		run_channel_end_to_end_job(plan)
+
+
+def test_halo4_checkpoint_resumes_with_same_plan(
+	tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	_patch_tiny_training(monkeypatch)
+	plan = _tiny_training_plan(
+		tmp_path,
+		name='halo4-resume',
+		context_halo_tokens=(4, 4, 4),
+	)
+	assert run_channel_end_to_end_job(plan, max_steps=1) is None
+	latest = plan.output_dir / LATEST_NAME
+	assert run_channel_end_to_end_job(plan, resume=latest) is not None
+
+
+@pytest.mark.parametrize(
+	('checkpoint_halo', 'resume_halo'),
+	[
+		((1, 1, 1), (4, 4, 4)),
+		((4, 4, 4), (1, 1, 1)),
+	],
+)
+def test_resume_rejects_context_halo_drift(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	checkpoint_halo: tuple[int, int, int],
+	resume_halo: tuple[int, int, int],
+) -> None:
+	_patch_tiny_training(monkeypatch)
+	plan = _tiny_training_plan(
+		tmp_path,
+		name=f'halo-{checkpoint_halo[0]}-to-{resume_halo[0]}',
+		context_halo_tokens=checkpoint_halo,
+	)
+	assert run_channel_end_to_end_job(plan, max_steps=1) is None
+	latest = plan.output_dir / LATEST_NAME
+	resume_identity = json.loads(json.dumps(plan.benchmark_identity))
+	resume_identity['tiles']['context_halo_tokens'] = list(resume_halo)
+	resume_config = replace(
+		plan.config,
+		tiles=DecoderTiles((8, 8, 8), resume_halo),
+	)
+	resume_plan = replace(
+		plan,
+		config=resume_config,
+		benchmark_identity=resume_identity,
+	)
+	with pytest.raises(ValueError, match='does not match'):
+		run_channel_end_to_end_job(resume_plan, resume=latest)
 
 
 def test_strict_best_selection_and_test_reload_best_state(
