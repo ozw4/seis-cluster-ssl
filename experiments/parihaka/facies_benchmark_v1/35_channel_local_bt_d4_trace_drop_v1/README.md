@@ -133,16 +133,30 @@ if barlow.get('method') != 'local_barlow_twins_3d':
 	raise ValueError('unexpected pretraining method')
 if barlow.get('local_pairs_per_crop') != 128:
 	raise ValueError('local pair count must be 128')
-for key in ('training_loss', 'gradient_norm'):
+realization_metrics = (
+	'd4_same_transform_fraction',
+	'd4_reflection_fraction_a',
+	'd4_reflection_fraction_b',
+	'd4_nonzero_rotation_fraction_a',
+	'd4_nonzero_rotation_fraction_b',
+	'trace_drop_fraction_a',
+	'trace_drop_fraction_b',
+)
+for key in ('training_loss', 'gradient_norm', *realization_metrics):
 	value = metrics.get(key)
 	if not isinstance(value, int | float) or not math.isfinite(float(value)):
 		raise ValueError(f'{key} must be finite')
+for key in realization_metrics:
+	if not 0.0 <= float(metrics[key]) <= 1.0:
+		raise ValueError(f'{key} must be in [0, 1]')
+print({key: metrics[key] for key in realization_metrics})
 print('one-step feasibility audit: passed')
 PY
 ```
 
-The stored resolved config is also the audit record that the policy was saved
-in the checkpoint.
+The stored resolved config records the requested policy. The realization
+metrics record the transforms and eligible-trace drops that were actually
+sampled; do not require a one-step run to be close to population expectations.
 
 ## 3. Train the full 25-epoch continuation
 
@@ -173,6 +187,8 @@ is `xy_d4_trace_drop_v1` with reflection `0.5` and trace drop `0.02`.
 python - <<'PY'
 from __future__ import annotations
 
+import json
+import math
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -186,8 +202,9 @@ path = root / (
 )
 payload = load_checkpoint(path, map_location='cpu')
 config = payload.get('config')
-if not isinstance(config, Mapping):
-	raise TypeError('checkpoint config must be a mapping')
+metrics = payload.get('metrics')
+if not isinstance(config, Mapping) or not isinstance(metrics, Mapping):
+	raise TypeError('checkpoint config and metrics must be mappings')
 continuation = config.get('continuation')
 if not isinstance(continuation, Mapping):
 	raise TypeError('checkpoint continuation must be a mapping')
@@ -206,6 +223,37 @@ if Path(str(continuation.get('init_checkpoint'))).resolve() != expected_source:
 	raise ValueError('full continuation source mismatch')
 if config.get('augmentations') != expected_augmentation:
 	raise ValueError('full checkpoint augmentation contract mismatch')
+realization_metrics = (
+	'd4_same_transform_fraction',
+	'd4_reflection_fraction_a',
+	'd4_reflection_fraction_b',
+	'd4_nonzero_rotation_fraction_a',
+	'd4_nonzero_rotation_fraction_b',
+	'trace_drop_fraction_a',
+	'trace_drop_fraction_b',
+)
+history = json.loads((path.parent / 'history.json').read_text(encoding='utf-8'))
+if not isinstance(history, list) or len(history) != 25:
+	raise ValueError('full history must contain 25 epochs')
+for expected_epoch, row in enumerate(history, start=1):
+	if not isinstance(row, Mapping) or row.get('epoch') != expected_epoch:
+		raise ValueError('full history has an invalid epoch sequence')
+	for key in realization_metrics:
+		value = row.get(key)
+		if (
+			not isinstance(value, int | float)
+			or not math.isfinite(float(value))
+			or not 0.0 <= float(value) <= 1.0
+		):
+			raise ValueError(f'epoch {expected_epoch} has invalid {key}')
+if any(metrics.get(key) != history[-1].get(key) for key in realization_metrics):
+	raise ValueError('latest checkpoint realization metrics mismatch history')
+print(
+	'expected sampling rates: same transform 0.125, reflection 0.5, '
+	'trace drop 0.02, nonzero rotation 0.75'
+)
+for row in history:
+	print(row['epoch'], {key: row[key] for key in realization_metrics})
 print('full continuation audit: passed')
 PY
 ```

@@ -58,6 +58,30 @@ _LOSS_METRICS = (
 	'weighted_off_diag',
 )
 
+_D4_AUGMENTATION_METRICS = (
+	'd4_same_transform_fraction',
+	'd4_reflection_fraction_a',
+	'd4_reflection_fraction_b',
+	'd4_nonzero_rotation_fraction_a',
+	'd4_nonzero_rotation_fraction_b',
+	'trace_drop_fraction_a',
+	'trace_drop_fraction_b',
+)
+
+_D4_AUGMENTATION_TOTALS = (
+	'samples',
+	'same_transform',
+	'reflections_a',
+	'reflections_b',
+	'nonzero_rotations_a',
+	'nonzero_rotations_b',
+	'trace_drops_a',
+	'trace_drops_b',
+	'eligible_traces_a',
+	'eligible_traces_b',
+	'invalid_transform_ids',
+)
+
 
 @dataclass(frozen=True)
 class BarlowTwinsTrainingState:
@@ -91,6 +115,7 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 	scaler: torch.amp.GradScaler | None = None,
 	grad_clip_norm: float | None = None,
 	method: str = BARLOW_TWINS_PRETRAINING_METHOD,
+	augmentation_policy: str | None = None,
 ) -> BarlowTwinsTrainingState:
 	"""Train for one epoch or until the supplied per-call step limit."""
 	model.train()
@@ -102,6 +127,10 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 		parameter
 		for parameter in model.pretraining_parameters()
 		if parameter.requires_grad
+	)
+	d4_totals = _new_d4_augmentation_totals(
+		augmentation_policy,
+		device=device,
 	)
 	if device.type == 'cuda':
 		torch.cuda.reset_peak_memory_stats(device)
@@ -117,6 +146,7 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 			device,
 			non_blocking=device.type == 'cuda',
 		)
+		_update_d4_augmentation_totals(d4_totals, batch)
 		optimizer.zero_grad(set_to_none=True)
 		with torch.autocast(
 			device_type=device.type,
@@ -162,6 +192,7 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 	if batches == 0:
 		raise ValueError('Barlow Twins dataloader produced no batches')
 	metrics = {key: value / batches for key, value in totals.items()}
+	metrics.update(_d4_augmentation_metrics(d4_totals))
 	metrics['peak_cuda_memory_mib'] = (
 		float(torch.cuda.max_memory_allocated(device)) / (1024.0**2)
 		if device.type == 'cuda'
@@ -229,7 +260,9 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 			0 if local_pairs_per_crop is None else local_pairs_per_crop
 		),
 	)
-	augmentation_policy = augmentations.get('policy')
+	augmentation_policy = (
+		_string(augmentations, 'policy') if 'policy' in augmentations else None
+	)
 	if local_pairs_per_crop is None:
 		dataset = BarlowTwinsPretrainDataset(
 			base_dataset,
@@ -334,6 +367,7 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 			scaler=scaler,
 			grad_clip_norm=_floating(train, 'grad_clip_norm'),
 			method=method,
+			augmentation_policy=augmentation_policy,
 		)
 		global_step = state.global_step
 		print_epoch_metrics(epoch, state.metrics)
@@ -393,6 +427,100 @@ def _forward_barlow_twins_batch(
 			local_pair_indices_b=_tensor(batch, 'local_pair_indices_b'),
 		)
 	raise ValueError(f'unsupported Barlow Twins method: {method!r}')
+
+
+def _new_d4_augmentation_totals(
+	augmentation_policy: str | None,
+	*,
+	device: torch.device,
+) -> torch.Tensor | None:
+	if augmentation_policy != XY_D4_TRACE_DROP_AUGMENTATION_POLICY:
+		return None
+	return torch.zeros(
+		len(_D4_AUGMENTATION_TOTALS),
+		dtype=torch.int64,
+		device=device,
+	)
+
+
+def _update_d4_augmentation_totals(
+	totals: torch.Tensor | None,
+	batch: Mapping[str, object],
+) -> None:
+	if totals is None:
+		return
+	transform_a = _tensor(batch, 'xy_transform_id_a')
+	transform_b = _tensor(batch, 'xy_transform_id_b')
+	trace_drops_a = _tensor(batch, 'trace_drop_count_a')
+	trace_drops_b = _tensor(batch, 'trace_drop_count_b')
+	valid_mask_a = _tensor(batch, 'valid_mask_a')
+	valid_mask_b = _tensor(batch, 'valid_mask_b')
+	if (
+		transform_a.ndim != 1
+		or transform_b.shape != transform_a.shape
+		or trace_drops_a.shape != transform_a.shape
+		or trace_drops_b.shape != transform_a.shape
+	):
+		raise ValueError('D4 augmentation metadata must have shape [batch]')
+	if (
+		valid_mask_a.ndim != 4
+		or valid_mask_b.ndim != 4
+		or valid_mask_a.shape[0] != transform_a.shape[0]
+		or valid_mask_b.shape[0] != transform_a.shape[0]
+	):
+		raise ValueError('D4 valid masks must have shape [batch, X, Y, Z]')
+	eligible_a = valid_mask_a.to(dtype=torch.bool).any(dim=-1).sum()
+	eligible_b = valid_mask_b.to(dtype=torch.bool).any(dim=-1).sum()
+	totals.add_(
+		torch.stack(
+			(
+				transform_a.new_tensor(transform_a.numel()),
+				(transform_a == transform_b).sum(),
+				(transform_a >= 4).sum(),
+				(transform_b >= 4).sum(),
+				(transform_a.remainder(4) != 0).sum(),
+				(transform_b.remainder(4) != 0).sum(),
+				trace_drops_a.sum(),
+				trace_drops_b.sum(),
+				eligible_a,
+				eligible_b,
+				(
+					((transform_a < 0) | (transform_a > 7)).sum()
+					+ ((transform_b < 0) | (transform_b > 7)).sum()
+				),
+			)
+		)
+	)
+
+
+def _d4_augmentation_metrics(
+	totals: torch.Tensor | None,
+) -> dict[str, float]:
+	if totals is None:
+		return {}
+	values = totals.detach().cpu().tolist()
+	counts = dict(zip(_D4_AUGMENTATION_TOTALS, values, strict=True))
+	samples = counts['samples']
+	eligible_a = counts['eligible_traces_a']
+	eligible_b = counts['eligible_traces_b']
+	if samples <= 0 or eligible_a <= 0 or eligible_b <= 0:
+		raise ValueError('D4 augmentation metrics require eligible samples and traces')
+	if counts['invalid_transform_ids']:
+		raise ValueError('D4 transform IDs must be in [0, 7]')
+	if (
+		counts['trace_drops_a'] > eligible_a
+		or counts['trace_drops_b'] > eligible_b
+	):
+		raise ValueError('D4 trace-drop count exceeds eligible trace count')
+	return {
+		_D4_AUGMENTATION_METRICS[0]: counts['same_transform'] / samples,
+		_D4_AUGMENTATION_METRICS[1]: counts['reflections_a'] / samples,
+		_D4_AUGMENTATION_METRICS[2]: counts['reflections_b'] / samples,
+		_D4_AUGMENTATION_METRICS[3]: counts['nonzero_rotations_a'] / samples,
+		_D4_AUGMENTATION_METRICS[4]: counts['nonzero_rotations_b'] / samples,
+		_D4_AUGMENTATION_METRICS[5]: counts['trace_drops_a'] / eligible_a,
+		_D4_AUGMENTATION_METRICS[6]: counts['trace_drops_b'] / eligible_b,
+	}
 
 
 def _initialize_barlow_twins_model(

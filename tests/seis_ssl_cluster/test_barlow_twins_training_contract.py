@@ -54,6 +54,16 @@ DIAGNOSTIC_METRICS = {
 	'peak_cuda_memory_mib',
 }
 
+D4_AUGMENTATION_METRICS = {
+	'd4_same_transform_fraction',
+	'd4_reflection_fraction_a',
+	'd4_reflection_fraction_b',
+	'd4_nonzero_rotation_fraction_a',
+	'd4_nonzero_rotation_fraction_b',
+	'trace_drop_fraction_a',
+	'trace_drop_fraction_b',
+}
+
 
 def test_cli_dry_run_applies_max_steps_without_creating_artifacts(
 	tmp_path: Path,
@@ -274,6 +284,13 @@ def test_d4_trace_drop_one_step_uses_policy_dataset_and_saves_config(
 	assert payload['global_step'] == 1
 	assert all(np.isfinite(value) for value in payload['metrics'].values())
 	assert np.isfinite(payload['metrics']['gradient_norm'])
+	assert set(payload['metrics']) >= D4_AUGMENTATION_METRICS
+	history = json.loads(
+		(checkpoint_path.parent / 'history.json').read_text(encoding='utf-8')
+	)
+	assert set(history[0]) >= D4_AUGMENTATION_METRICS
+	for key in D4_AUGMENTATION_METRICS:
+		assert history[0][key] == payload['metrics'][key]
 
 
 def test_d4_resume_is_strict_about_augmentation_identity(tmp_path: Path) -> None:
@@ -746,6 +763,37 @@ def test_epoch_local_method_projects_batch_times_pair_rows(
 
 	assert projection_rows == [2 * 3]
 	assert state.global_step == 1
+	assert D4_AUGMENTATION_METRICS.isdisjoint(state.metrics)
+
+
+def test_epoch_records_weighted_d4_augmentation_realizations() -> None:
+	model = _backbone_wrapper()
+	optimizer = torch.optim.SGD(model.pretraining_parameters(), lr=0.025)
+	batch = _d4_local_barlow_batch(local_pairs_per_crop=3)
+	batch['valid_mask_a'][1, 0, 0, :] = False
+	batch['valid_mask_b'][1, :2, :2, :] = False
+	state = train_barlow_twins_one_epoch(
+		model=model,
+		loss_fn=BarlowTwinsLoss(),
+		dataloader=[  # type: ignore[arg-type]
+			batch,
+			_d4_local_barlow_batch(local_pairs_per_crop=3),
+		],
+		optimizer=optimizer,
+		device=torch.device('cpu'),
+		epoch=1,
+		grad_clip_norm=1.0,
+		method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		augmentation_policy=XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+	)
+
+	assert state.metrics['d4_same_transform_fraction'] == pytest.approx(0.5)
+	assert state.metrics['d4_reflection_fraction_a'] == pytest.approx(0.5)
+	assert state.metrics['d4_reflection_fraction_b'] == pytest.approx(0.5)
+	assert state.metrics['d4_nonzero_rotation_fraction_a'] == pytest.approx(0.5)
+	assert state.metrics['d4_nonzero_rotation_fraction_b'] == pytest.approx(0.5)
+	assert state.metrics['trace_drop_fraction_a'] == pytest.approx(8 / 63)
+	assert state.metrics['trace_drop_fraction_b'] == pytest.approx(14 / 60)
 
 
 def test_epoch_rejects_nonfinite_gradient_before_optimizer_step() -> None:
@@ -1008,6 +1056,24 @@ def _local_barlow_batch(
 	).reshape(2, local_pairs_per_crop)
 	batch['local_pair_indices_a'] = indices
 	batch['local_pair_indices_b'] = indices.clone()
+	return batch
+
+
+def _d4_local_barlow_batch(
+	*,
+	local_pairs_per_crop: int,
+) -> dict[str, torch.Tensor]:
+	batch = _local_barlow_batch(
+		local_pairs_per_crop=local_pairs_per_crop,
+	)
+	batch.update(
+		{
+			'xy_transform_id_a': torch.tensor([0, 5]),
+			'xy_transform_id_b': torch.tensor([0, 6]),
+			'trace_drop_count_a': torch.tensor([1, 3]),
+			'trace_drop_count_b': torch.tensor([2, 5]),
+		}
+	)
 	return batch
 
 

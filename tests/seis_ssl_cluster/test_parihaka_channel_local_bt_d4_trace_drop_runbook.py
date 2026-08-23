@@ -102,6 +102,33 @@ def test_runbook_states_scientific_identity_and_exact_augmentation() -> None:
 	)
 
 
+def test_runbook_audits_live_d4_and_trace_drop_realizations() -> None:
+	text = _text()
+	feasibility = _section(text, '## 2.', '## 3.')
+	full = _section(text, '## 3.', '## 4.')
+	metric_names = (
+		'd4_same_transform_fraction',
+		'd4_reflection_fraction_a',
+		'd4_reflection_fraction_b',
+		'd4_nonzero_rotation_fraction_a',
+		'd4_nonzero_rotation_fraction_b',
+		'trace_drop_fraction_a',
+		'trace_drop_fraction_b',
+	)
+	for metric_name in metric_names:
+		assert metric_name in feasibility
+		assert metric_name in full
+	assert "path.parent / 'history.json'" in full
+	assert 'len(history) != 25' in full
+	for expectation in (
+		'same transform 0.125',
+		'reflection 0.5',
+		'trace drop 0.02',
+		'nonzero rotation 0.75',
+	):
+		assert expectation in full
+
+
 def test_runbook_uses_requested_environment_and_separate_output_root() -> None:
 	text = _text()
 	for assignment in (
