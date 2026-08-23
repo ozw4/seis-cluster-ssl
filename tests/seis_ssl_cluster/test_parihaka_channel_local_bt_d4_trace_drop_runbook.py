@@ -49,6 +49,7 @@ def test_runbook_references_configs_public_clis_and_compilable_python() -> None:
 	text = _text()
 	for filename in (*TRAINING_CONFIGS, *EXPERIMENT_CONFIGS):
 		assert filename in text
+	assert 'tests/seis_ssl_cluster/test_barlow_twins_training_contract.py' in text
 	for cli in CLIS:
 		assert str(cli) in text
 

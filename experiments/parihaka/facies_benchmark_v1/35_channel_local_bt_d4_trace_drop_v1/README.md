@@ -50,14 +50,22 @@ pytest -q \
   tests/seis_ssl_cluster/test_barlow_twins_dataset.py \
   tests/seis_ssl_cluster/test_barlow_twins_config.py \
   tests/seis_ssl_cluster/test_barlow_twins_continuation.py \
+  tests/seis_ssl_cluster/test_barlow_twins_training_contract.py \
   tests/seis_ssl_cluster/test_parihaka_local_barlow_d4_trace_drop_configs.py \
   tests/seis_ssl_cluster/test_parihaka_channel_local_bt_d4_trace_drop_configs.py \
   tests/seis_ssl_cluster/test_parihaka_channel_local_bt_d4_trace_drop_runbook.py
 ```
 
 These tests cover the D4 geometry and pairing contract, trace-drop validity,
-legacy compatibility, continuation trainability, config sources, and this
-runbook without requiring live artifacts.
+legacy compatibility, dataset selection by the training runner, one-step
+checkpointing, strict resume, continuation trainability, config sources, and
+this runbook without requiring live artifacts.
+
+Run the embedding metadata regression separately:
+
+```bash
+pytest -q tests/seis_ssl_cluster/test_embedding_extractor.py
+```
 
 ## 2. Run the one-step GPU feasibility check
 
