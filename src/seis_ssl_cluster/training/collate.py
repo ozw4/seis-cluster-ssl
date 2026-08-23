@@ -38,6 +38,43 @@ def barlow_twins_collate_fn(
 		msg = 'samples must contain at least one sample'
 		raise ValueError(msg)
 
+	pair_keys = (
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	)
+	legacy_local_keys = (
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		*pair_keys,
+	)
+	d4_trace_drop_local_keys = (
+		'xy_transform_id_a',
+		'xy_transform_id_b',
+		'trace_drop_count_a',
+		'trace_drop_count_b',
+		*pair_keys,
+	)
+	known_local_keys = set(legacy_local_keys) | set(d4_trace_drop_local_keys)
+	contracts = (
+		frozenset(),
+		frozenset(legacy_local_keys),
+		frozenset(d4_trace_drop_local_keys),
+	)
+	sample_local_keys = [
+		frozenset(key for key in known_local_keys if key in sample)
+		for sample in samples
+	]
+	if (
+		any(keys not in contracts for keys in sample_local_keys)
+		or len(set(sample_local_keys)) != 1
+	):
+		msg = (
+			'samples must all use one complete Barlow Twins contract: global, '
+			'legacy local, or D4 trace-drop local; all contain every local '
+			'Barlow Twins key for that contract'
+		)
+		raise ValueError(msg)
+	contract = sample_local_keys[0]
 	batch: dict[str, torch.Tensor | object] = {
 		'view_a': _stack_arrays(samples, 'view_a'),
 		'view_b': _stack_arrays(samples, 'view_b'),
@@ -45,18 +82,13 @@ def barlow_twins_collate_fn(
 		'valid_mask_b': _stack_arrays(samples, 'valid_mask_b'),
 		'coords': [sample.get('coords') for sample in samples],
 	}
-	local_keys = (
-		'horizontal_flip_state_a',
-		'horizontal_flip_state_b',
-		'local_pair_indices_a',
-		'local_pair_indices_b',
-	)
-	local_key_counts = [sum(key in sample for key in local_keys) for sample in samples]
-	if all(count == 0 for count in local_key_counts):
+	if not contract:
 		return batch
-	if not all(count == len(local_keys) for count in local_key_counts):
-		msg = 'samples must either all contain every local Barlow Twins key or none'
-		raise ValueError(msg)
+	local_keys = (
+		legacy_local_keys
+		if contract == frozenset(legacy_local_keys)
+		else d4_trace_drop_local_keys
+	)
 	batch.update({key: _stack_arrays(samples, key) for key in local_keys})
 	return batch
 

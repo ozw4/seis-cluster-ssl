@@ -7,6 +7,7 @@ from seis_ssl_cluster.data.amplitude_dataset import (
 )
 from seis_ssl_cluster.data.barlow_twins_dataset import (
 	BarlowTwinsPretrainDataset,
+	LocalBarlowTwinsD4TraceDropPretrainDataset,
 	LocalBarlowTwinsPretrainDataset,
 )
 from seis_ssl_cluster.data.crop_sampler import (
@@ -139,6 +140,7 @@ __all__ = [
 	'CropRequest',
 	'FilteredManifestStatsQcResult',
 	'FiniteCheckMode',
+	'LocalBarlowTwinsD4TraceDropPretrainDataset',
 	'LocalBarlowTwinsPretrainDataset',
 	'ManifestBuildResult',
 	'ManifestBuildSummary',

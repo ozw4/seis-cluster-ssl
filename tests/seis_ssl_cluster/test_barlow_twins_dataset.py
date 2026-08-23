@@ -7,11 +7,13 @@ import numpy as np
 import pytest
 import torch
 
+import seis_ssl_cluster.data.barlow_twins_dataset as barlow_dataset_module
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudePretrainDataset,
 	AmplitudeVolumeRecord,
 	BarlowTwinsPretrainDataset,
+	LocalBarlowTwinsD4TraceDropPretrainDataset,
 	LocalBarlowTwinsPretrainDataset,
 	SurveyManifest,
 	SurveyNormalizationStats,
@@ -85,6 +87,35 @@ def _base_dataset(
 		patch_size_xyz=(1, 1, 2),
 		emit_spatial_mask=False,
 		seed=19,
+		samples_per_epoch=samples_per_epoch,
+		zero_mask=ZeroMaskConfig(enabled=False),
+		min_valid_token_count=min_valid_token_count,
+	)
+
+
+def _square_d4_base_dataset(
+	tmp_path: Path,
+	*,
+	valid_mask: np.ndarray | None = None,
+	patch_size_xyz: tuple[int, int, int] = (2, 2, 2),
+	samples_per_epoch: int = 8,
+	min_valid_token_count: int = 8,
+) -> AmplitudePretrainDataset:
+	token_shape = tuple(4 // patch for patch in patch_size_xyz)
+	patch_ids = np.arange(
+		1,
+		int(np.prod(token_shape)) + 1,
+		dtype=np.float32,
+	).reshape(token_shape)
+	volume = patch_ids
+	for axis, repeat in enumerate(patch_size_xyz):
+		volume = volume.repeat(repeat, axis=axis)
+	return AmplitudePretrainDataset(
+		[_manifest(tmp_path, volume, valid_mask=valid_mask)],
+		local_crop_size_xyz=volume.shape,
+		patch_size_xyz=patch_size_xyz,
+		emit_spatial_mask=False,
+		seed=31,
 		samples_per_epoch=samples_per_epoch,
 		zero_mask=ZeroMaskConfig(enabled=False),
 		min_valid_token_count=min_valid_token_count,
@@ -477,6 +508,399 @@ def test_barlow_collate_rejects_mixed_standard_and_local_samples(
 
 	with pytest.raises(ValueError, match='all contain every local Barlow Twins key'):
 		barlow_twins_collate_fn([standard, local])
+
+
+def test_xy_d4_ids_produce_eight_distinct_square_permutations() -> None:
+	grid = np.arange(9, dtype=np.int64).reshape(3, 3, 1)
+	permutations = {
+		tuple(
+			barlow_dataset_module._apply_xy_d4(  # noqa: SLF001
+				grid,
+				transform_id,
+				xy_axes=(0, 1),
+			).ravel()
+		)
+		for transform_id in range(8)
+	}
+
+	assert len(permutations) == 8
+
+
+def test_xy_d4_rotation_geometry_matches_contract() -> None:
+	grid = np.arange(2 * 2 * 3, dtype=np.int64).reshape(2, 2, 3)
+
+	r180 = barlow_dataset_module._apply_xy_d4(  # noqa: SLF001
+		grid,
+		2,
+		xy_axes=(0, 1),
+	)
+	r90 = barlow_dataset_module._apply_xy_d4(  # noqa: SLF001
+		grid,
+		1,
+		xy_axes=(0, 1),
+	)
+	r270 = barlow_dataset_module._apply_xy_d4(  # noqa: SLF001
+		grid,
+		3,
+		xy_axes=(0, 1),
+	)
+
+	np.testing.assert_array_equal(r180, grid[::-1, ::-1, :])
+	np.testing.assert_array_equal(r90[0, 0], grid[0, 1])
+	np.testing.assert_array_equal(r90[1, 0], grid[0, 0])
+	np.testing.assert_array_equal(r270[0, 0], grid[1, 0])
+	np.testing.assert_array_equal(r270[0, 1], grid[0, 0])
+
+
+@pytest.mark.parametrize('transform_id', range(8))
+def test_xy_d4_uses_same_physical_transform_and_preserves_z(
+	transform_id: int,
+) -> None:
+	physical_ids = np.arange(3 * 3, dtype=np.int64).reshape(3, 3, 1)
+	z_offsets = np.arange(4, dtype=np.int64).reshape(1, 1, 4)
+	mask_values = physical_ids * 10 + z_offsets
+	amplitude = mask_values[None, ...]
+	token_grid = physical_ids.copy()
+
+	transformed_amplitude = barlow_dataset_module._apply_xy_d4(  # noqa: SLF001
+		amplitude,
+		transform_id,
+		xy_axes=(1, 2),
+	)
+	transformed_mask = barlow_dataset_module._apply_xy_d4(  # noqa: SLF001
+		mask_values,
+		transform_id,
+		xy_axes=(0, 1),
+	)
+	transformed_tokens = barlow_dataset_module._apply_xy_d4(  # noqa: SLF001
+		token_grid,
+		transform_id,
+		xy_axes=(0, 1),
+	)
+
+	np.testing.assert_array_equal(transformed_amplitude[0], transformed_mask)
+	np.testing.assert_array_equal(
+		transformed_mask[..., 0] // 10,
+		transformed_tokens[..., 0],
+	)
+	assert np.all(np.diff(transformed_mask, axis=2) == 1)
+
+
+def test_d4_dataset_rejects_non_square_raw_or_patch_xy(tmp_path: Path) -> None:
+	with pytest.raises(ValueError, match='local crop X/Y sizes must be equal'):
+		LocalBarlowTwinsD4TraceDropPretrainDataset(
+			_base_dataset(tmp_path, min_valid_token_count=4),
+			local_pairs_per_crop=4,
+			reflection_probability=0.5,
+			trace_drop_probability=0.02,
+		)
+
+	base = _square_d4_base_dataset(
+		tmp_path,
+		patch_size_xyz=(1, 2, 2),
+		min_valid_token_count=4,
+	)
+	with pytest.raises(ValueError, match='patch size X/Y sizes must be equal'):
+		LocalBarlowTwinsD4TraceDropPretrainDataset(
+			base,
+			local_pairs_per_crop=4,
+			reflection_probability=0.5,
+			trace_drop_probability=0.02,
+		)
+
+
+@pytest.mark.parametrize('name', ['reflection_probability', 'trace_drop_probability'])
+@pytest.mark.parametrize('value', [-0.1, 1.1, np.inf, np.nan, True])
+def test_d4_dataset_rejects_invalid_probabilities(
+	tmp_path: Path,
+	name: str,
+	value: object,
+) -> None:
+	kwargs: dict[str, object] = {
+		'local_pairs_per_crop': 4,
+		'reflection_probability': 0.5,
+		'trace_drop_probability': 0.02,
+	}
+	kwargs[name] = value
+
+	with pytest.raises((TypeError, ValueError), match=name):
+		LocalBarlowTwinsD4TraceDropPretrainDataset(
+			_square_d4_base_dataset(tmp_path),
+			**kwargs,  # type: ignore[arg-type]
+		)
+
+
+def test_d4_pair_mapping_selects_same_physical_patch_for_all_view_pairs(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		_square_d4_base_dataset(tmp_path),
+		local_pairs_per_crop=8,
+		reflection_probability=0.5,
+		trace_drop_probability=0.0,
+	)
+
+	for transform_id_a in range(8):
+		for transform_id_b in range(8):
+			monkeypatch.setattr(
+				barlow_dataset_module,
+				'_sample_xy_d4_transform_id',
+				Mock(side_effect=(transform_id_a, transform_id_b)),
+			)
+			sample = dataset[0]
+			patches_a = patchify_3d(
+				torch.as_tensor(sample['view_a']).unsqueeze(0),
+				(2, 2, 2),
+			)[0]
+			patches_b = patchify_3d(
+				torch.as_tensor(sample['view_b']).unsqueeze(0),
+				(2, 2, 2),
+			)[0]
+			selected_a = patches_a.index_select(
+				0,
+				torch.as_tensor(sample['local_pair_indices_a']),
+			)
+			selected_b = patches_b.index_select(
+				0,
+				torch.as_tensor(sample['local_pair_indices_b']),
+			)
+
+			torch.testing.assert_close(selected_a, selected_b)
+			assert set(selected_a[:, 0, 0].round().tolist()) == set(range(1, 9))
+
+
+def test_d4_pair_candidates_exclude_not_fully_valid_tokens(tmp_path: Path) -> None:
+	valid_mask = np.ones((4, 4, 4), dtype=bool)
+	valid_mask[2:4, 0:2, 0:2] = False
+	dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		_square_d4_base_dataset(
+			tmp_path,
+			valid_mask=valid_mask,
+			min_valid_token_count=7,
+		),
+		local_pairs_per_crop=7,
+		reflection_probability=0.5,
+		trace_drop_probability=0.0,
+	)
+
+	sample = dataset[0]
+	patches = patchify_3d(
+		torch.as_tensor(sample['view_a']).unsqueeze(0),
+		(2, 2, 2),
+	)[0]
+	selected = patches.index_select(
+		0,
+		torch.as_tensor(sample['local_pair_indices_a']),
+	)
+
+	assert set(selected[:, 0, 0].round().tolist()) == set(range(1, 9)) - {5}
+
+
+def test_d4_trace_drop_zero_does_not_change_transformed_amplitude(
+	tmp_path: Path,
+) -> None:
+	base = _square_d4_base_dataset(tmp_path)
+	dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		base,
+		local_pairs_per_crop=4,
+		reflection_probability=0.5,
+		trace_drop_probability=0.0,
+	)
+	base_sample = base[0]
+	sample = dataset[0]
+
+	for suffix in ('a', 'b'):
+		expected = barlow_dataset_module._apply_xy_d4(  # noqa: SLF001
+			base_sample['x'],
+			int(sample[f'xy_transform_id_{suffix}']),
+			xy_axes=(1, 2),
+		)
+		np.testing.assert_array_equal(sample[f'view_{suffix}'], expected)
+		assert int(sample[f'trace_drop_count_{suffix}']) == 0
+
+
+def test_d4_trace_drop_one_zeros_only_eligible_traces_and_counts_them(
+	tmp_path: Path,
+) -> None:
+	valid_mask = np.ones((4, 4, 4), dtype=bool)
+	valid_mask[1, 2, :] = False
+	dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		_square_d4_base_dataset(
+			tmp_path,
+			valid_mask=valid_mask,
+			min_valid_token_count=6,
+		),
+		local_pairs_per_crop=4,
+		reflection_probability=0.5,
+		trace_drop_probability=1.0,
+	)
+
+	sample = dataset[0]
+	for suffix in ('a', 'b'):
+		view = sample[f'view_{suffix}']
+		transformed_mask = sample[f'valid_mask_{suffix}']
+		eligible_xy = transformed_mask.any(axis=2)
+		assert np.all(view[:, eligible_xy, :] == 0.0)
+		assert int(sample[f'trace_drop_count_{suffix}']) == 15
+
+
+def test_trace_drop_keeps_masks_and_pair_indices_and_can_drop_selected_pairs(
+	tmp_path: Path,
+) -> None:
+	base_zero = _square_d4_base_dataset(tmp_path / 'zero')
+	base_one = _square_d4_base_dataset(tmp_path / 'one')
+	without_drop = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		base_zero,
+		local_pairs_per_crop=8,
+		reflection_probability=0.5,
+		trace_drop_probability=0.0,
+	)[0]
+	with_drop = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		base_one,
+		local_pairs_per_crop=8,
+		reflection_probability=0.5,
+		trace_drop_probability=1.0,
+	)[0]
+
+	for suffix in ('a', 'b'):
+		np.testing.assert_array_equal(
+			without_drop[f'valid_mask_{suffix}'],
+			with_drop[f'valid_mask_{suffix}'],
+		)
+		np.testing.assert_array_equal(
+			without_drop[f'local_pair_indices_{suffix}'],
+			with_drop[f'local_pair_indices_{suffix}'],
+		)
+		patches = patchify_3d(
+			torch.as_tensor(with_drop[f'view_{suffix}']).unsqueeze(0),
+			(2, 2, 2),
+		)[0]
+		selected = patches.index_select(
+			0,
+			torch.as_tensor(with_drop[f'local_pair_indices_{suffix}']),
+		)
+		assert torch.count_nonzero(selected) == 0
+
+
+def test_d4_view_trace_drop_sampling_is_independent(tmp_path: Path) -> None:
+	dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		_square_d4_base_dataset(tmp_path, samples_per_epoch=16),
+		local_pairs_per_crop=4,
+		reflection_probability=0.5,
+		trace_drop_probability=0.5,
+	)
+
+	assert any(
+		int(sample['trace_drop_count_a']) != int(sample['trace_drop_count_b'])
+		for sample in (dataset[index] for index in range(len(dataset)))
+	)
+
+
+def test_d4_seed_epoch_index_determinism_and_epoch_reset(tmp_path: Path) -> None:
+	dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		_square_d4_base_dataset(tmp_path),
+		local_pairs_per_crop=4,
+		reflection_probability=0.5,
+		trace_drop_probability=0.25,
+	)
+	epoch_zero = [dataset[index] for index in range(len(dataset))]
+
+	for index, expected in enumerate(epoch_zero):
+		actual = dataset[index]
+		for key, value in expected.items():
+			if isinstance(value, np.ndarray):
+				np.testing.assert_array_equal(actual[key], value)
+			else:
+				assert actual[key] == value
+
+	dataset.set_epoch(1)
+	epoch_one = [dataset[index] for index in range(len(dataset))]
+	metadata_keys = (
+		'xy_transform_id_a',
+		'xy_transform_id_b',
+		'trace_drop_count_a',
+		'trace_drop_count_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	)
+	assert any(
+		any(not np.array_equal(zero[key], one[key]) for key in metadata_keys)
+		for zero, one in zip(epoch_zero, epoch_one, strict=True)
+	)
+
+	dataset.set_epoch(0)
+	for index, expected in enumerate(epoch_zero):
+		for key in metadata_keys:
+			np.testing.assert_array_equal(dataset[index][key], expected[key])
+
+
+def test_d4_multi_worker_batch_and_collate_metadata(tmp_path: Path) -> None:
+	dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		_square_d4_base_dataset(tmp_path),
+		local_pairs_per_crop=4,
+		reflection_probability=0.5,
+		trace_drop_probability=0.25,
+	)
+	single_process = build_barlow_twins_dataloader(
+		dataset,
+		batch_size=2,
+		num_workers=0,
+		shuffle=False,
+	)
+	multi_worker = build_barlow_twins_dataloader(
+		dataset,
+		batch_size=2,
+		num_workers=2,
+		shuffle=False,
+		persistent_workers=False,
+	)
+
+	single_batch = next(iter(single_process))
+	multi_batch = next(iter(multi_worker))
+	expected_keys = {
+		'view_a',
+		'view_b',
+		'valid_mask_a',
+		'valid_mask_b',
+		'coords',
+		'xy_transform_id_a',
+		'xy_transform_id_b',
+		'trace_drop_count_a',
+		'trace_drop_count_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	}
+	assert set(single_batch) == expected_keys
+	for key in expected_keys - {'coords'}:
+		torch.testing.assert_close(single_batch[key], multi_batch[key])
+	assert single_batch['coords'] == multi_batch['coords']
+	assert single_batch['xy_transform_id_a'].dtype is torch.int64
+	assert single_batch['trace_drop_count_a'].dtype is torch.int64
+
+
+def test_barlow_collate_rejects_partial_or_mixed_local_contracts(
+	tmp_path: Path,
+) -> None:
+	base = _square_d4_base_dataset(tmp_path)
+	d4_sample = LocalBarlowTwinsD4TraceDropPretrainDataset(
+		base,
+		local_pairs_per_crop=4,
+		reflection_probability=0.5,
+		trace_drop_probability=0.25,
+	)[0]
+	partial = dict(d4_sample)
+	del partial['trace_drop_count_b']
+	legacy_base = _base_dataset(tmp_path / 'legacy', min_valid_token_count=4)
+	legacy_sample = LocalBarlowTwinsPretrainDataset(
+		legacy_base,
+		local_pairs_per_crop=4,
+	)[0]
+
+	with pytest.raises(ValueError, match='complete Barlow Twins contract'):
+		barlow_twins_collate_fn([partial])
+	with pytest.raises(ValueError, match='complete Barlow Twins contract'):
+		barlow_twins_collate_fn([legacy_sample, d4_sample])
 
 
 def test_dataloader_rejects_batch_size_one(tmp_path: Path) -> None:
