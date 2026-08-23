@@ -19,10 +19,12 @@ from seis_ssl_cluster.config.barlow_twins import (
 from seis_ssl_cluster.config.schema import (
 	BARLOW_TWINS_PRETRAINING_METHOD,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
 from seis_ssl_cluster.data.amplitude_dataset import AmplitudePretrainDataset
 from seis_ssl_cluster.data.barlow_twins_dataset import (
 	BarlowTwinsPretrainDataset,
+	LocalBarlowTwinsD4TraceDropPretrainDataset,
 	LocalBarlowTwinsPretrainDataset,
 )
 from seis_ssl_cluster.data.schema import read_manifest_json
@@ -227,22 +229,37 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 			0 if local_pairs_per_crop is None else local_pairs_per_crop
 		),
 	)
-	flip_probability = _floating(
-		augmentations,
-		'horizontal_flip_probability',
-	)
-	dataset = (
-		BarlowTwinsPretrainDataset(
+	augmentation_policy = augmentations.get('policy')
+	if local_pairs_per_crop is None:
+		dataset = BarlowTwinsPretrainDataset(
 			base_dataset,
-			horizontal_flip_probability=flip_probability,
+			horizontal_flip_probability=_floating(
+				augmentations,
+				'horizontal_flip_probability',
+			),
 		)
-		if local_pairs_per_crop is None
-		else LocalBarlowTwinsPretrainDataset(
+	elif augmentation_policy == XY_D4_TRACE_DROP_AUGMENTATION_POLICY:
+		dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
 			base_dataset,
 			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=flip_probability,
+			reflection_probability=_floating(
+				augmentations,
+				'reflection_probability',
+			),
+			trace_drop_probability=_floating(
+				augmentations,
+				'trace_drop_probability',
+			),
 		)
-	)
+	else:
+		dataset = LocalBarlowTwinsPretrainDataset(
+			base_dataset,
+			local_pairs_per_crop=local_pairs_per_crop,
+			horizontal_flip_probability=_floating(
+				augmentations,
+				'horizontal_flip_probability',
+			),
+		)
 	dataloader = build_barlow_twins_dataloader(
 		dataset,
 		batch_size=_integer(train, 'batch_size'),

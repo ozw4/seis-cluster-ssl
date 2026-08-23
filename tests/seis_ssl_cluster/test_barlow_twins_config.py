@@ -8,6 +8,18 @@ from seis_ssl_cluster.config import (
 	resolve_barlow_twins_training_config,
 	resolve_mae_training_config,
 )
+from seis_ssl_cluster.config.schema import (
+	DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
+	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+)
+
+
+def _d4_augmentations() -> dict[str, object]:
+	return {
+		'policy': XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+		'reflection_probability': 0.5,
+		'trace_drop_probability': 0.02,
+	}
 
 
 def test_barlow_twins_config_resolves_method_defaults() -> None:
@@ -43,6 +55,134 @@ def test_local_barlow_twins_config_preserves_scientific_contract() -> None:
 		'method': 'local_barlow_twins_3d',
 		'local_pairs_per_crop': 8,
 	}
+
+
+def test_legacy_augmentation_resolution_is_unchanged() -> None:
+	config = _minimal_barlow_config()
+	config['augmentations'] = {'horizontal_flip_probability': 0.25}
+
+	resolved = resolve_barlow_twins_training_config(config)
+
+	assert DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS == {
+		'horizontal_flip_probability': 0.5
+	}
+	assert resolved['augmentations'] == {'horizontal_flip_probability': 0.25}
+
+
+def test_d4_trace_drop_augmentation_resolves_exact_mapping() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = _d4_augmentations()
+
+	resolved = resolve_barlow_twins_training_config(config)
+
+	assert resolved['augmentations'] == {
+		'policy': XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+		'reflection_probability': 0.5,
+		'trace_drop_probability': 0.02,
+	}
+	assert 'horizontal_flip_probability' not in resolved['augmentations']
+
+
+@pytest.mark.parametrize(
+	'augmentations',
+	[
+		{
+			**_d4_augmentations(),
+			'policy': 'unknown',
+		},
+		{
+			**_d4_augmentations(),
+			'horizontal_flip_probability': 0.5,
+		},
+		{
+			**_d4_augmentations(),
+			'unknown': True,
+		},
+		{
+			'policy': XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+			'reflection_probability': 0.5,
+		},
+	],
+)
+def test_d4_trace_drop_augmentation_rejects_nonexact_contract(
+	augmentations: dict[str, object],
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = augmentations
+
+	with pytest.raises((TypeError, ValueError), match='augmentations'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize(
+	('key', 'value'),
+	[
+		('reflection_probability', -0.1),
+		('reflection_probability', 1.1),
+		('reflection_probability', float('inf')),
+		('trace_drop_probability', -0.1),
+		('trace_drop_probability', 1.1),
+		('trace_drop_probability', float('nan')),
+		('trace_drop_probability', True),
+	],
+)
+def test_d4_trace_drop_augmentation_rejects_invalid_probability(
+	key: str,
+	value: object,
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = {**_d4_augmentations(), key: value}
+
+	with pytest.raises((TypeError, ValueError), match=key):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_global_barlow_rejects_d4_trace_drop_policy() -> None:
+	config = _minimal_barlow_config()
+	config['augmentations'] = _d4_augmentations()
+
+	with pytest.raises(ValueError, match=r'requires barlow_twins\.method'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize(
+	('section', 'shape', 'message'),
+	[
+		('data', [4, 6, 4], r'data\.local_crop_size X/Y'),
+		('model', [1, 2, 2], r'model\.patch_size X/Y'),
+	],
+)
+def test_d4_trace_drop_policy_rejects_non_square_xy(
+	section: str,
+	shape: list[int],
+	message: str,
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = _d4_augmentations()
+	section_mapping = config[section]
+	assert isinstance(section_mapping, dict)
+	section_mapping[
+		'local_crop_size' if section == 'data' else 'patch_size'
+	] = shape
+
+	with pytest.raises(ValueError, match=message):
+		resolve_barlow_twins_training_config(config)
 
 
 def test_local_barlow_twins_config_requires_pair_count() -> None:

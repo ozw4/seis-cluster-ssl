@@ -11,7 +11,7 @@ from copy import deepcopy
 from hashlib import sha256
 from numbers import Real
 from pathlib import Path
-from typing import TypeAlias, TypeVar
+from typing import TypeAlias, TypeVar, cast
 
 import numpy as np
 import yaml
@@ -27,6 +27,7 @@ from seis_ssl_cluster.config.common import (
 	_validate_absolute_path,
 	_validate_allowed_keys,
 	_validate_bool,
+	_validate_fraction,
 	_validate_non_empty_path,
 	_validate_non_empty_str,
 	_validate_nonnegative_finite_number,
@@ -77,6 +78,7 @@ from seis_ssl_cluster.config.schema import (
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_RUNTIME_CHECK_MODES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
+	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
 from seis_ssl_cluster.stratigraphy.prototypes import (
 	MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
@@ -98,6 +100,9 @@ _AMPLITUDE_AGC_KEYS = frozenset(
 _AMPLITUDE_AGC_ENABLED_REQUIRED_KEYS = _AMPLITUDE_AGC_KEYS
 _MAE_TRAINING_VISUALIZATION_KEYS = frozenset({'mae_debug'})
 _CONTINUATION_KEYS = frozenset({'init_checkpoint', 'unfreeze_top_blocks'})
+_D4_TRACE_DROP_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'reflection_probability', 'trace_drop_probability'}
+)
 
 _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 	'manifests': frozenset({'train', 'train_path_list', 'canonical_input_metadata'}),
@@ -123,7 +128,12 @@ _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 			'decoder_heads',
 		}
 	),
-	'augmentations': frozenset(DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS),
+	'augmentations': frozenset(
+		{
+			*DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
+			*_D4_TRACE_DROP_AUGMENTATION_KEYS,
+		}
+	),
 	'barlow_twins': frozenset(
 		{
 			*DEFAULT_BARLOW_TWINS_OPTIONS,
@@ -639,11 +649,16 @@ def resolve_barlow_twins_training_config(config: _T) -> Config:
 	output_root = _validate_path(paths_config, 'output_root', prefix='paths')
 	_reject_fixed_contract_keys(resolved)
 	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
-	_merge_section_defaults(
-		resolved,
-		'augmentations',
-		DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
-	)
+	raw_augmentations = resolved.get('augmentations')
+	if not (
+		isinstance(raw_augmentations, Mapping)
+		and 'policy' in raw_augmentations
+	):
+		_merge_section_defaults(
+			resolved,
+			'augmentations',
+			DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
+		)
 	_merge_section_defaults(resolved, 'barlow_twins', DEFAULT_BARLOW_TWINS_OPTIONS)
 	_merge_section_defaults(resolved, 'train', DEFAULT_BARLOW_TWINS_TRAIN_OPTIONS)
 	_merge_section_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
@@ -695,12 +710,6 @@ def resolve_barlow_twins_training_config(config: _T) -> Config:
 		)
 	_validate_divisible_crop_patch(local_crop_size, patch_size)
 
-	augmentations = _required_mapping(resolved, 'augmentations')
-	_validate_optional_fraction(
-		augmentations,
-		'horizontal_flip_probability',
-		prefix='augmentations',
-	)
 	barlow_twins = _required_mapping(resolved, 'barlow_twins')
 	_validate_positive_int(barlow_twins, 'projector_dim', prefix='barlow_twins')
 	_validate_nonnegative_finite_number(
@@ -715,6 +724,12 @@ def resolve_barlow_twins_training_config(config: _T) -> Config:
 	)
 	_validate_barlow_twins_method(
 		barlow_twins,
+		local_crop_size=local_crop_size,
+		patch_size=patch_size,
+	)
+	_validate_barlow_twins_augmentations(
+		_required_mapping(resolved, 'augmentations'),
+		method=cast('str', barlow_twins.get('method', BARLOW_TWINS_PRETRAINING_METHOD)),
 		local_crop_size=local_crop_size,
 		patch_size=patch_size,
 	)
@@ -3822,6 +3837,68 @@ def _validate_barlow_twins_method(
 			f'the crop token count ({token_count}); got {local_pairs_per_crop}'
 		)
 		raise ValueError(msg)
+
+
+def _validate_barlow_twins_augmentations(
+	augmentations: Mapping[str, object],
+	*,
+	method: str,
+	local_crop_size: Sequence[int],
+	patch_size: Sequence[int],
+) -> None:
+	if 'policy' not in augmentations:
+		legacy_keys = frozenset(DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS)
+		_validate_allowed_keys(
+			augmentations,
+			legacy_keys,
+			prefix='augmentations',
+		)
+		_validate_optional_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		return
+
+	_validate_allowed_keys(
+		augmentations,
+		_D4_TRACE_DROP_AUGMENTATION_KEYS,
+		prefix='augmentations',
+	)
+	_validate_required_keys(
+		augmentations,
+		_D4_TRACE_DROP_AUGMENTATION_KEYS,
+		prefix='augmentations',
+	)
+	policy = augmentations.get('policy')
+	if not isinstance(policy, str):
+		msg = f'augmentations.policy must be a string; got {policy!r}'
+		raise TypeError(msg)
+	if policy != XY_D4_TRACE_DROP_AUGMENTATION_POLICY:
+		msg = (
+			'augmentations.policy must be '
+			f'{XY_D4_TRACE_DROP_AUGMENTATION_POLICY!r}; got {policy!r}'
+		)
+		raise ValueError(msg)
+	if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+		msg = (
+			f'augmentations.policy {XY_D4_TRACE_DROP_AUGMENTATION_POLICY!r} '
+			'requires barlow_twins.method '
+			f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+		)
+		raise ValueError(msg)
+	for key in ('reflection_probability', 'trace_drop_probability'):
+		_validate_fraction(augmentations, key, prefix='augmentations')
+	if local_crop_size[0] != local_crop_size[1]:
+		raise ValueError(
+			'data.local_crop_size X/Y dimensions must be equal for '
+			f'augmentations.policy {XY_D4_TRACE_DROP_AUGMENTATION_POLICY!r}'
+		)
+	if patch_size[0] != patch_size[1]:
+		raise ValueError(
+			'model.patch_size X/Y dimensions must be equal for '
+			f'augmentations.policy {XY_D4_TRACE_DROP_AUGMENTATION_POLICY!r}'
+		)
 
 
 def _validate_runtime_check_mode(train: Mapping[str, object]) -> None:

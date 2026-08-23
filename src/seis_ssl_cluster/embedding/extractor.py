@@ -1838,6 +1838,11 @@ def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 				barlow_twins.get('local_pairs_per_crop'),
 				'barlow_twins.local_pairs_per_crop',
 			)
+		augmentations = config.get('augmentations')
+		if isinstance(augmentations, Mapping) and 'policy' in augmentations:
+			objective['augmentations'] = {
+				str(key): value for key, value in augmentations.items()
+			}
 		return objective
 	loss = _required_mapping(config, 'loss')
 	objective: dict[str, object] = {

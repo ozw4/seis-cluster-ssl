@@ -18,7 +18,10 @@ import torch
 import seis_ssl_cluster.data.survey_preprocessing_cache as cache_module
 import seis_ssl_cluster.embedding.extractor as extractor_module
 from seis_ssl_cluster.config import resolve_barlow_twins_training_config
-from seis_ssl_cluster.config.schema import LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+from seis_ssl_cluster.config.schema import (
+	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+)
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
 	AmplitudePreprocessSettings,
@@ -238,6 +241,34 @@ def test_local_barlow_checkpoint_extracts_encoder_dim_and_objective_metadata(
 	for key, expected in payload['model_state_dict'].items():
 		assert torch.equal(loaded.state_dict()[key], expected)
 	assert set(payload['projector_state_dict']).isdisjoint(loaded.state_dict())
+
+
+def test_d4_barlow_checkpoint_metadata_copies_explicit_augmentation_policy(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	augmentations = {
+		'policy': XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+		'reflection_probability': 0.5,
+		'trace_drop_probability': 0.02,
+	}
+	_make_fixture_checkpoint_barlow(
+		config,
+		method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		augmentations=augmentations,
+	)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+
+	assert metadata['pretraining_objective'] == {
+		'method': LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		'projector_dim': 8,
+		'redundancy_weight': 0.005,
+		'normalization_eps': 1.0e-4,
+		'local_pairs_per_crop': 128,
+		'augmentations': augmentations,
+	}
 
 
 def test_barlow_checkpoint_rejects_payload_and_config_method_mismatch(
@@ -1799,6 +1830,7 @@ def _make_fixture_checkpoint_barlow(
 	*,
 	continuation: dict[str, object] | None = None,
 	method: str | None = None,
+	augmentations: dict[str, object] | None = None,
 ) -> None:
 	embeddings = config['embeddings']
 	assert isinstance(embeddings, dict)
@@ -1856,6 +1888,8 @@ def _make_fixture_checkpoint_barlow(
 	}
 	if continuation is not None:
 		raw_barlow_config['continuation'] = continuation
+	if augmentations is not None:
+		raw_barlow_config['augmentations'] = dict(augmentations)
 	barlow_config = resolve_barlow_twins_training_config(raw_barlow_config)
 	mae = build_model_from_checkpoint_payload(payload)
 	projector = torch.nn.Linear(mae.encoder_dim, 8)

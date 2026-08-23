@@ -17,6 +17,7 @@ from seis_ssl_cluster.config import resolve_barlow_twins_training_config
 from seis_ssl_cluster.config.schema import (
 	BARLOW_TWINS_PRETRAINING_METHOD,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
 from seis_ssl_cluster.data import (
 	GRID_ORDER_XYZ,
@@ -228,6 +229,170 @@ def test_local_checkpoint_contract_round_trip_and_epoch_resume(
 	assert resumed['epoch'] == 2
 	assert resumed['global_step'] == 2
 	assert resumed['pretraining_method'] == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+
+
+def test_d4_trace_drop_one_step_uses_policy_dataset_and_saves_config(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	original_dataset = (
+		barlow_twins_module.LocalBarlowTwinsD4TraceDropPretrainDataset
+	)
+	dataset_calls: list[dict[str, object]] = []
+
+	def record_dataset(
+		base_dataset: object,
+		**kwargs: object,
+	) -> object:
+		dataset_calls.append(kwargs)
+		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(
+		barlow_twins_module,
+		'LocalBarlowTwinsD4TraceDropPretrainDataset',
+		record_dataset,
+	)
+	config = resolve_barlow_twins_training_config(
+		_tiny_d4_config(tmp_path, output_name='d4-one-step')
+	)
+
+	checkpoint_path = run_barlow_twins_pretraining(config)
+	payload = load_barlow_twins_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert dataset_calls == [
+		{
+			'local_pairs_per_crop': 4,
+			'reflection_probability': 0.5,
+			'trace_drop_probability': 0.02,
+		}
+	]
+	assert payload['config']['augmentations'] == {
+		'policy': XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+		'reflection_probability': 0.5,
+		'trace_drop_probability': 0.02,
+	}
+	assert payload['global_step'] == 1
+	assert all(np.isfinite(value) for value in payload['metrics'].values())
+	assert np.isfinite(payload['metrics']['gradient_norm'])
+
+
+def test_d4_resume_is_strict_about_augmentation_identity(tmp_path: Path) -> None:
+	flip_path = run_barlow_twins_pretraining(
+		resolve_barlow_twins_training_config(
+			_tiny_local_config(tmp_path, output_name='flip-source')
+		)
+	)
+	d4_path = run_barlow_twins_pretraining(
+		resolve_barlow_twins_training_config(
+			_tiny_d4_config(tmp_path, output_name='d4-source')
+		)
+	)
+
+	d4_resume = resolve_barlow_twins_training_config(
+		_tiny_d4_config(
+			tmp_path,
+			epochs=2,
+			max_steps=2,
+			output_name='d4-source',
+		)
+	)
+	resumed_path = run_barlow_twins_pretraining(d4_resume, resume=d4_path)
+	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
+	assert resumed['epoch'] == 2
+	assert resumed['global_step'] == 2
+
+	for current_config, source_path in (
+		(
+			_tiny_d4_config(
+				tmp_path,
+				epochs=2,
+				max_steps=2,
+				output_name='d4-from-flip',
+			),
+			flip_path,
+		),
+		(
+			_tiny_local_config(
+				tmp_path,
+				epochs=2,
+				max_steps=2,
+				output_name='flip-from-d4',
+			),
+			d4_path,
+		),
+	):
+		resolved = resolve_barlow_twins_training_config(current_config)
+		with pytest.raises(ValueError, match='augmentations'):
+			run_barlow_twins_pretraining(resolved, resume=source_path)
+
+
+def test_flip_local_checkpoint_initializes_d4_continuation_weights_only(
+	tmp_path: Path,
+) -> None:
+	source_path = run_barlow_twins_pretraining(
+		resolve_barlow_twins_training_config(
+			_tiny_local_config(
+				tmp_path,
+				output_name='flip-local-source',
+				encoder_depth=2,
+			)
+		)
+	)
+	source = load_barlow_twins_checkpoint(source_path, map_location='cpu')
+	target_raw = _tiny_d4_config(
+		tmp_path,
+		output_name='d4-continuation',
+		encoder_depth=2,
+	)
+	target_raw['continuation'] = {
+		'init_checkpoint': str(source_path),
+		'unfreeze_top_blocks': 1,
+	}
+	target_config = resolve_barlow_twins_training_config(target_raw)
+
+	target_path = run_barlow_twins_pretraining(target_config)
+	target = load_barlow_twins_checkpoint(target_path, map_location='cpu')
+	source_backbone = _clone_tensor_state(source, 'model_state_dict')
+	target_backbone = _clone_tensor_state(target, 'model_state_dict')
+	source_projector = _clone_tensor_state(source, 'projector_state_dict')
+	target_projector = _clone_tensor_state(target, 'projector_state_dict')
+
+	_assert_state_prefix_unchanged(
+		source_backbone,
+		target_backbone,
+		'patch_projection.',
+	)
+	_assert_state_prefix_unchanged(
+		source_backbone,
+		target_backbone,
+		'encoder.layers.0.',
+	)
+	assert _state_prefix_changed(
+		source_backbone,
+		target_backbone,
+		'encoder.layers.1.',
+	)
+	projector_parameters = {
+		name for name, _ in _backbone_wrapper().projector.named_parameters()
+	}
+	assert any(
+		not torch.equal(source_projector[name], target_projector[name])
+		for name in projector_parameters
+	)
+
+	fresh_resume_raw = _tiny_d4_config(
+		tmp_path,
+		epochs=2,
+		max_steps=2,
+		output_name='source-as-resume',
+		encoder_depth=2,
+	)
+	fresh_resume_raw['continuation'] = target_raw['continuation']
+	with pytest.raises(ValueError, match=r'augmentations|continuation'):
+		run_barlow_twins_pretraining(
+			resolve_barlow_twins_training_config(fresh_resume_raw),
+			resume=source_path,
+		)
 
 
 def test_resume_rejects_cross_method_before_creating_output_and_accepts_legacy(
@@ -705,6 +870,31 @@ def _tiny_local_config(  # noqa: PLR0913
 		'method': LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 		'local_pairs_per_crop': local_pairs_per_crop,
 		'projector_dim': 4,
+	}
+	return config
+
+
+def _tiny_d4_config(  # noqa: PLR0913
+	tmp_path: Path,
+	*,
+	epochs: int = 1,
+	max_steps: int = 1,
+	output_name: str = 'd4-run',
+	encoder_depth: int = 1,
+	local_pairs_per_crop: int = 4,
+) -> dict[str, object]:
+	config = _tiny_local_config(
+		tmp_path,
+		epochs=epochs,
+		max_steps=max_steps,
+		output_name=output_name,
+		encoder_depth=encoder_depth,
+		local_pairs_per_crop=local_pairs_per_crop,
+	)
+	config['augmentations'] = {
+		'policy': XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+		'reflection_probability': 0.5,
+		'trace_drop_probability': 0.02,
 	}
 	return config
 
