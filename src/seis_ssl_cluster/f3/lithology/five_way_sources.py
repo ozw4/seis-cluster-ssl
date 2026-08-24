@@ -10,15 +10,24 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from seis_ssl_cluster.config.f3_lithology_five_way import (
+	FIVE_WAY_DISTILLATION_WEIGHT,
+	FIVE_WAY_HMM_HEAD_CONTRACT,
 	FIVE_WAY_HMM_K,
+	FIVE_WAY_HMM_LOSS_CONTRACT,
 	FIVE_WAY_MIN_CONFIDENCE,
+	FIVE_WAY_PRETEXT_TRAIN_CONTRACT,
 	FIVE_WAY_RANDOM_SEED,
 	FIVE_WAY_STAGE1_EPOCHS,
+	FIVE_WAY_STAGE1_TRAIN_CONTRACT,
 	FIVE_WAY_STAGE2_EPOCHS,
 	FIVE_WAY_STAGE2_GLOBAL_STEPS,
+	FIVE_WAY_STAGE2_TRAIN_CONTRACT,
 	FIVE_WAY_UNFREEZE_TOP_BLOCKS,
 	LOCAL_BARLOW_TWINS_METHOD,
+	LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT,
 	LOCAL_BARLOW_TWINS_PAIRS_PER_CROP,
+	MAE_LOSS_CONTRACT,
+	MAE_MASKING_CONTRACT,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.training.random_checkpoint import (
@@ -353,8 +362,8 @@ def _validate_pretext_identity(
 		'method': STRAT_HMM_PRETEXT_METHOD,
 		'base_objective': expected['base_objective'],
 		'head_num_prototypes': FIVE_WAY_HMM_K,
-		'unfreeze_top_blocks': 1,
-		'distillation_weight': 0.2,
+		'unfreeze_top_blocks': FIVE_WAY_UNFREEZE_TOP_BLOCKS,
+		'distillation_weight': FIVE_WAY_DISTILLATION_WEIGHT,
 	}
 	for key, expected_value in checks.items():
 		if pretext.get(key) != expected_value:
@@ -437,6 +446,18 @@ def _validate_base_objective(
 				f'{model_id} {role} stage must be train_amp_mae; '
 				f'got {config.get("stage")!r}'
 			)
+		_validate_contract(
+			model_id,
+			config.get('masking'),
+			MAE_MASKING_CONTRACT,
+			prefix=f'{role} masking',
+		)
+		_validate_contract(
+			model_id,
+			config.get('loss'),
+			MAE_LOSS_CONTRACT,
+			prefix=f'{role} loss',
+		)
 		_reject_trace_drop_augmentations(model_id, config)
 		return
 	if config.get('stage') != 'barlow_twins_training':
@@ -444,20 +465,36 @@ def _validate_base_objective(
 			f'{model_id} {role} stage must be barlow_twins_training; '
 			f'got {config.get("stage")!r}'
 		)
-	barlow_twins = config.get('barlow_twins')
-	if not isinstance(barlow_twins, Mapping) or (
-		barlow_twins.get('method') != LOCAL_BARLOW_TWINS_METHOD
-	):
-		raise ValueError(
-			f'{model_id} {role} barlow_twins.method must equal '
-			f'{LOCAL_BARLOW_TWINS_METHOD!r}'
-		)
-	if barlow_twins.get('local_pairs_per_crop') != LOCAL_BARLOW_TWINS_PAIRS_PER_CROP:
-		raise ValueError(
-			f'{model_id} {role} barlow_twins.local_pairs_per_crop must equal '
-			f'{LOCAL_BARLOW_TWINS_PAIRS_PER_CROP}'
-		)
+	_validate_contract(
+		model_id,
+		config.get('barlow_twins'),
+		LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT,
+		prefix=f'{role} barlow_twins',
+	)
 	_reject_trace_drop_augmentations(model_id, config)
+
+
+def _validate_contract(
+	model_id: str,
+	values: object,
+	contract: Mapping[str, object],
+	*,
+	prefix: str,
+) -> None:
+	"""Reject drift in the settings the comparison declares scientifically fixed."""
+	if not isinstance(values, Mapping):
+		raise ValueError(  # noqa: TRY004 - a missing block is a value error
+			f'{model_id} does not record {prefix}'
+		)
+	for key, expected in contract.items():
+		value = values.get(key)
+		# Booleans compare equal to 0 and 1, so an identity check keeps amp: 0
+		# from passing as amp: false.
+		matches = value is expected if isinstance(expected, bool) else value == expected
+		if not matches:
+			raise ValueError(
+				f'{model_id} {prefix}.{key} must equal {expected!r}; got {value!r}'
+			)
 
 
 def _reject_trace_drop_augmentations(
@@ -474,7 +511,7 @@ def _reject_trace_drop_augmentations(
 		)
 
 
-def _validate_ancestry(  # noqa: C901
+def _validate_ancestry(
 	model_id: str,
 	init_value: object,
 	*,
@@ -525,15 +562,12 @@ def _validate_ancestry(  # noqa: C901
 				f'{model_id} {role} must be the {FIVE_WAY_STAGE1_EPOCHS} epoch '
 				f'stage-1 source; got epoch {base_payload.get("epoch")!r}'
 			)
-		train = base_config.get('train')
-		if (
-			not isinstance(train, Mapping)
-			or train.get('epochs') != FIVE_WAY_STAGE1_EPOCHS
-		):
-			raise ValueError(
-				f'{model_id} {role} train.epochs must equal '
-				f'{FIVE_WAY_STAGE1_EPOCHS}'
-			)
+		_validate_contract(
+			model_id,
+			base_config.get('train'),
+			FIVE_WAY_STAGE1_TRAIN_CONTRACT,
+			prefix=f'{role} train',
+		)
 	continuation = base_config.get('continuation')
 	if isinstance(continuation, Mapping) and continuation.get('init_checkpoint'):
 		_validate_ancestry(
@@ -574,7 +608,12 @@ def _validate_continuation_budget(
 			f'{label} checkpoint continuation.unfreeze_top_blocks must equal '
 			f'{FIVE_WAY_UNFREEZE_TOP_BLOCKS}'
 		)
-	_validate_configured_epochs(label, base_config.get('train'), 'train')
+	_validate_contract(
+		label,
+		base_config.get('train'),
+		FIVE_WAY_STAGE2_TRAIN_CONTRACT,
+		prefix='train',
+	)
 	_validate_ancestry(
 		label,
 		continuation.get('init_checkpoint'),
@@ -600,8 +639,23 @@ def _validate_pretext_budget(
 		raise ValueError(  # noqa: TRY004 - missing config is a value error
 			f'{label} checkpoint must record its stratigraphy config'
 		)
-	_validate_configured_epochs(
-		label, stratigraphy.get('train'), 'stratigraphy_config.train'
+	_validate_contract(
+		label,
+		stratigraphy.get('train'),
+		FIVE_WAY_PRETEXT_TRAIN_CONTRACT,
+		prefix='stratigraphy_config.train',
+	)
+	_validate_contract(
+		label,
+		stratigraphy.get('head'),
+		FIVE_WAY_HMM_HEAD_CONTRACT,
+		prefix='stratigraphy_config.head',
+	)
+	_validate_contract(
+		label,
+		stratigraphy.get('loss'),
+		FIVE_WAY_HMM_LOSS_CONTRACT,
+		prefix='stratigraphy_config.loss',
 	)
 	student = stratigraphy.get('student')
 	if not isinstance(student, Mapping) or (
@@ -662,20 +716,6 @@ def _validate_budget_counters(
 				f'{label} checkpoint {key} must equal the fixed budget '
 				f'{expected_value}; got {value!r}'
 			)
-
-
-def _validate_configured_epochs(
-	label: str, train: object, prefix: str
-) -> None:
-	if not isinstance(train, Mapping):
-		raise ValueError(  # noqa: TRY004 - missing config is a value error
-			f'{label} checkpoint must record {prefix}'
-		)
-	if train.get('epochs') != FIVE_WAY_STAGE2_EPOCHS:
-		raise ValueError(
-			f'{label} checkpoint {prefix}.epochs must equal the fixed budget '
-			f'{FIVE_WAY_STAGE2_EPOCHS}; got {train.get("epochs")!r}'
-		)
 
 
 def _validate_random_checkpoint_payload(  # noqa: C901

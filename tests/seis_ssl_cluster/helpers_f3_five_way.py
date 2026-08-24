@@ -14,7 +14,15 @@ import torch
 
 from seis_ssl_cluster.config.f3_lithology_five_way import (
 	EXPECTED_MODEL_IDENTITIES,
+	FIVE_WAY_HMM_HEAD_CONTRACT,
+	FIVE_WAY_HMM_LOSS_CONTRACT,
 	FIVE_WAY_MODEL_IDS,
+	FIVE_WAY_PRETEXT_TRAIN_CONTRACT,
+	FIVE_WAY_STAGE1_TRAIN_CONTRACT,
+	FIVE_WAY_STAGE2_TRAIN_CONTRACT,
+	LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT,
+	MAE_LOSS_CONTRACT,
+	MAE_MASKING_CONTRACT,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
 
@@ -139,25 +147,29 @@ STAGE1_EPOCHS = 100
 STAGE1_GLOBAL_STEPS = 62_500
 
 
+def stage1_train() -> dict[str, object]:
+	return deepcopy(dict(FIVE_WAY_STAGE1_TRAIN_CONTRACT))
+
+
+def stage2_train() -> dict[str, object]:
+	return deepcopy(dict(FIVE_WAY_STAGE2_TRAIN_CONTRACT))
+
+
 def mae_stage1_config() -> dict[str, object]:
 	return {
 		'stage': 'train_amp_mae',
-		'train': {'epochs': STAGE1_EPOCHS},
-		'masking': {'spatial_mask_ratio': 0.75},
-		'loss': {'reconstruction': 'mse'},
+		'train': stage1_train(),
+		'masking': deepcopy(dict(MAE_MASKING_CONTRACT)),
+		'loss': deepcopy(dict(MAE_LOSS_CONTRACT)),
 	}
 
 
 def local_bt_stage1_config() -> dict[str, object]:
 	return {
 		'stage': 'barlow_twins_training',
-		'barlow_twins': {
-			'method': 'local_barlow_twins_3d',
-			'local_pairs_per_crop': 128,
-			'projector_dim': 384,
-		},
+		'barlow_twins': deepcopy(dict(LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT)),
 		'augmentations': {'horizontal_flip_probability': 0.5},
-		'train': {'epochs': STAGE1_EPOCHS},
+		'train': stage1_train(),
 	}
 
 
@@ -192,19 +204,14 @@ def _stratigraphy_config(
 ) -> dict[str, object]:
 	return {
 		'stage': 'train_strat_hmm_pretext',
-		'head': {'num_prototypes': 6, 'projection_dim': 128, 'temperature': 0.1},
-		'train': {'epochs': FIXED_BUDGET_EPOCHS, 'batch_size': 16},
+		'head': deepcopy(dict(FIVE_WAY_HMM_HEAD_CONTRACT)),
+		'train': deepcopy(dict(FIVE_WAY_PRETEXT_TRAIN_CONTRACT)),
 		'teacher': {'checkpoint': str(stage1_checkpoint)},
 		'student': {
 			'init_checkpoint': str(stage1_checkpoint),
 			'unfreeze_top_blocks': 1,
 		},
-		'loss': {
-			'prototype_weight': 1.0,
-			'usage_weight': 0.005,
-			'entropy_floor': None,
-			'distillation_weight': 0.2,
-		},
+		'loss': deepcopy(dict(FIVE_WAY_HMM_LOSS_CONTRACT)),
 		'pseudo_targets': {
 			'k': 6,
 			'min_confidence': 0.0,
@@ -232,12 +239,12 @@ def checkpoint_payload(
 	}
 	mae_config = {
 		**mae_stage1_config(),
-		'train': {'epochs': FIXED_BUDGET_EPOCHS},
+		'train': stage2_train(),
 		'continuation': _continuation(mae_stage1),
 	}
 	local_bt_config = {
 		**local_bt_stage1_config(),
-		'train': {'epochs': FIXED_BUDGET_EPOCHS},
+		'train': stage2_train(),
 		'continuation': _continuation(bt_stage1),
 	}
 	if model_id == 'mae':

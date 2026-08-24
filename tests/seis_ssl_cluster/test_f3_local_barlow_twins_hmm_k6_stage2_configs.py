@@ -13,6 +13,12 @@ from seis_ssl_cluster.config import (
 	resolve_barlow_twins_training_config,
 	resolve_strat_hmm_pretext_config,
 )
+from seis_ssl_cluster.config.f3_lithology_five_way import (
+	FIVE_WAY_HMM_HEAD_CONTRACT,
+	FIVE_WAY_HMM_LOSS_CONTRACT,
+	FIVE_WAY_PRETEXT_TRAIN_CONTRACT,
+	LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT,
+)
 
 FIVE_WAY_ROOT = Path(
 	'experiments/f3/facies_benchmark_v1/110_lithology_mae_local_bt_five_way_v1'
@@ -109,8 +115,8 @@ def test_source_checkpoint_is_the_local_bt_objective(
 	stage1 = resolve_barlow_twins_training_config(
 		load_config(LOCAL_BT_STAGE1_CONFIG)
 	)
-	assert stage1['barlow_twins']['method'] == 'local_barlow_twins_3d'
-	assert stage1['barlow_twins']['local_pairs_per_crop'] == 128
+	for key, expected in LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT.items():
+		assert stage1['barlow_twins'][key] == expected
 	expected_checkpoint = f'{stage1["paths"]["output_root"]}/latest.pt'
 	for config in local_bt_hmm_configs.values():
 		assert config['teacher']['checkpoint'] == expected_checkpoint
@@ -135,38 +141,13 @@ def test_head_loss_and_budget_match_the_fixed_contract(
 	local_bt_hmm_configs: dict[str, dict[str, object]],
 ) -> None:
 	for config in local_bt_hmm_configs.values():
-		assert config['head'] == {
-			'num_prototypes': 6,
-			'projection_dim': 128,
-			'temperature': 0.1,
-			'normalize': True,
-		}
-		loss = {
-			key: config['loss'][key]
-			for key in (
-				'prototype_weight',
-				'usage_weight',
-				'entropy_floor',
-				'distillation_weight',
-			)
-		}
-		assert loss == {
-			'prototype_weight': 1.0,
-			'usage_weight': 0.005,
-			'entropy_floor': None,
-			'distillation_weight': 0.2,
-		}
+		assert config['head'] == dict(FIVE_WAY_HMM_HEAD_CONTRACT)
+		for key, expected in FIVE_WAY_HMM_LOSS_CONTRACT.items():
+			assert config['loss'][key] == expected
 
 	full = local_bt_hmm_configs['full']['train']
-	assert full['batch_size'] == 16
-	assert full['samples_per_epoch'] == 10_000
-	assert full['epochs'] == 25
-	assert full['lr'] == 1.0e-5
-	assert full['encoder_lr'] == 1.0e-5
-	assert full['weight_decay'] == 0.05
-	assert full['amp'] is False
-	assert full['seed'] == 42
-	assert full['grad_clip_norm'] == 1.0
+	for key, expected in FIVE_WAY_PRETEXT_TRAIN_CONTRACT.items():
+		assert full[key] == expected
 	assert full['max_steps'] is None
 	assert full['allow_overwrite_output'] is False
 

@@ -12,6 +12,10 @@ from seis_ssl_cluster.config import (
 	load_config,
 	resolve_barlow_twins_training_config,
 )
+from seis_ssl_cluster.config.f3_lithology_five_way import (
+	FIVE_WAY_STAGE2_TRAIN_CONTRACT,
+	LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT,
+)
 
 FIVE_WAY_ROOT = Path(
 	'experiments/f3/facies_benchmark_v1/110_lithology_mae_local_bt_five_way_v1'
@@ -64,8 +68,8 @@ def test_local_bt_continue_uses_local_method_without_trace_drop(
 	raw = load_config(LOCAL_BT_CONTINUE_ROOT / filename)
 	config = _resolved(LOCAL_BT_CONTINUE_ROOT, filename)
 
-	assert config['barlow_twins']['method'] == 'local_barlow_twins_3d'
-	assert config['barlow_twins']['local_pairs_per_crop'] == 128
+	for key, expected in LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT.items():
+		assert config['barlow_twins'][key] == expected
 	for augmentations in (raw['augmentations'], config['augmentations']):
 		for key in TRACE_DROP_KEYS:
 			assert key not in augmentations
@@ -75,19 +79,13 @@ def test_local_bt_continue_full_is_fixed_budget_25ep() -> None:
 	full = _resolved(LOCAL_BT_CONTINUE_ROOT, CONFIG_NAMES[1])
 	train = full['train']
 
-	assert train['epochs'] == 25
-	assert train['samples_per_epoch'] == 10_000
-	assert train['batch_size'] == 16
+	for key, expected in FIVE_WAY_STAGE2_TRAIN_CONTRACT.items():
+		assert train[key] == expected
 	assert train.get('max_steps') is None
 	assert (
 		train['epochs'] * train['samples_per_epoch'] // train['batch_size']
 		== 15_625
 	)
-	assert train['lr'] == 1.0e-5
-	assert train['weight_decay'] == 0.05
-	assert train['amp'] is False
-	assert train['seed'] == 42
-	assert train['grad_clip_norm'] == 1.0
 
 
 def test_local_bt_continue_only_changes_local_identity_and_paths() -> None:

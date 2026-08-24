@@ -11,7 +11,15 @@ import pytest
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.f3_lithology_five_way import (
 	EXPECTED_MODEL_IDENTITIES,
+	FIVE_WAY_HMM_HEAD_CONTRACT,
+	FIVE_WAY_HMM_LOSS_CONTRACT,
 	FIVE_WAY_MODEL_IDS,
+	FIVE_WAY_PRETEXT_TRAIN_CONTRACT,
+	FIVE_WAY_STAGE1_TRAIN_CONTRACT,
+	FIVE_WAY_STAGE2_TRAIN_CONTRACT,
+	LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT,
+	MAE_LOSS_CONTRACT,
+	MAE_MASKING_CONTRACT,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	DATA_SIZES,
@@ -208,6 +216,72 @@ def test_upstream_outputs_match_downstream_sources(env_root: Path) -> None:
 			extraction['embeddings']['output_dir']
 			== by_id[model_id]['embeddings_dir']
 		)
+
+
+UPSTREAM_ROOT = Path('experiments/f3/facies_benchmark_v1')
+CONTRACT_SOURCES = (
+	(
+		UPSTREAM_ROOT / '21_ssl_hmm_continuation_v1/10_stage1/mae/02_full_100ep.yaml',
+		{
+			'train': FIVE_WAY_STAGE1_TRAIN_CONTRACT,
+			'masking': MAE_MASKING_CONTRACT,
+			'loss': MAE_LOSS_CONTRACT,
+		},
+	),
+	(
+		UPSTREAM_ROOT / '22_local_barlow_twins_v1/02_full_100ep.yaml',
+		{
+			'train': FIVE_WAY_STAGE1_TRAIN_CONTRACT,
+			'barlow_twins': LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT,
+		},
+	),
+	(
+		UPSTREAM_ROOT
+		/ '21_ssl_hmm_continuation_v1/30_stage2/mae100/mae_continue/02_full_25ep.yaml',
+		{
+			'train': FIVE_WAY_STAGE2_TRAIN_CONTRACT,
+			'masking': MAE_MASKING_CONTRACT,
+			'loss': MAE_LOSS_CONTRACT,
+		},
+	),
+	(
+		EXP_ROOT / '10_stage2/local_bt100/local_bt_continue/02_full_25ep.yaml',
+		{
+			'train': FIVE_WAY_STAGE2_TRAIN_CONTRACT,
+			'barlow_twins': LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT,
+		},
+	),
+	(
+		UPSTREAM_ROOT
+		/ '21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml',
+		{
+			'train': FIVE_WAY_PRETEXT_TRAIN_CONTRACT,
+			'head': FIVE_WAY_HMM_HEAD_CONTRACT,
+			'loss': FIVE_WAY_HMM_LOSS_CONTRACT,
+		},
+	),
+	(
+		EXP_ROOT / '30_stage2/local_bt100/hmm/k6/02_full_25ep.yaml',
+		{
+			'train': FIVE_WAY_PRETEXT_TRAIN_CONTRACT,
+			'head': FIVE_WAY_HMM_HEAD_CONTRACT,
+			'loss': FIVE_WAY_HMM_LOSS_CONTRACT,
+		},
+	),
+)
+
+
+@pytest.mark.parametrize(('config_path', 'contracts'), CONTRACT_SOURCES)
+def test_upstream_configs_realize_the_fixed_contract(
+	env_root: Path,
+	config_path: Path,
+	contracts: dict[str, dict[str, object]],
+) -> None:
+	del env_root
+	config = load_config(config_path)
+	for section, contract in contracts.items():
+		for key, expected in contract.items():
+			assert config[section][key] == expected
 
 
 def test_random_seed_matches_the_audited_identity(env_root: Path) -> None:
