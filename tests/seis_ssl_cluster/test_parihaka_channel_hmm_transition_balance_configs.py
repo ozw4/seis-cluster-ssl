@@ -105,36 +105,15 @@ FORBIDDEN_MODEL_IDS = {
 	'random',
 }
 EXPECTED_PHASE1_CONDITIONS = {
-	('mae_hmm_k6_neutral', 'layout_000', 'medium'),
-	('mae_hmm_k6_neutral', 'layout_001', 'medium'),
-	('mae_hmm_k6_neutral', 'layout_002', 'medium'),
-	('mae_hmm_k6_neutral', 'layout_003', 'medium'),
-	('mae_hmm_k6_neutral', 'layout_004', 'medium'),
-	('mae_hmm_k6_persist003', 'layout_000', 'medium'),
-	('mae_hmm_k6_persist003', 'layout_001', 'medium'),
-	('mae_hmm_k6_persist003', 'layout_002', 'medium'),
-	('mae_hmm_k6_persist003', 'layout_003', 'medium'),
-	('mae_hmm_k6_persist003', 'layout_004', 'medium'),
-	('mae_hmm_k6_persist010', 'layout_000', 'medium'),
-	('mae_hmm_k6_persist010', 'layout_001', 'medium'),
-	('mae_hmm_k6_persist010', 'layout_002', 'medium'),
-	('mae_hmm_k6_persist010', 'layout_003', 'medium'),
-	('mae_hmm_k6_persist010', 'layout_004', 'medium'),
-	('local_barlow_twins_hmm_k6_neutral', 'layout_000', 'medium'),
-	('local_barlow_twins_hmm_k6_neutral', 'layout_001', 'medium'),
-	('local_barlow_twins_hmm_k6_neutral', 'layout_002', 'medium'),
-	('local_barlow_twins_hmm_k6_neutral', 'layout_003', 'medium'),
-	('local_barlow_twins_hmm_k6_neutral', 'layout_004', 'medium'),
-	('local_barlow_twins_hmm_k6_persist003', 'layout_000', 'medium'),
-	('local_barlow_twins_hmm_k6_persist003', 'layout_001', 'medium'),
-	('local_barlow_twins_hmm_k6_persist003', 'layout_002', 'medium'),
-	('local_barlow_twins_hmm_k6_persist003', 'layout_003', 'medium'),
-	('local_barlow_twins_hmm_k6_persist003', 'layout_004', 'medium'),
-	('local_barlow_twins_hmm_k6_persist010', 'layout_000', 'medium'),
-	('local_barlow_twins_hmm_k6_persist010', 'layout_001', 'medium'),
-	('local_barlow_twins_hmm_k6_persist010', 'layout_002', 'medium'),
-	('local_barlow_twins_hmm_k6_persist010', 'layout_003', 'medium'),
-	('local_barlow_twins_hmm_k6_persist010', 'layout_004', 'medium'),
+	(model_id, layout_id, 'medium')
+	for model_id in NEW_MODEL_IDS
+	for layout_id in (
+		'layout_000',
+		'layout_001',
+		'layout_002',
+		'layout_003',
+		'layout_004',
+	)
 }
 
 
