@@ -1,0 +1,60 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+
+embeddings:
+  input_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/hmm_targets/local_bt100/overlap_x64
+
+clustering:
+  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/clustering/parihaka/facies_benchmark_v1/hmm_transition_balance_v1/local_bt100/persist010
+  embedding_normalization: l2
+
+  residualization:
+    enabled: true
+    mode: local_token_position
+    group_by: token_phase
+    add_global_mean_back: true
+    min_group_count: 32
+
+  pca:
+    enabled: true
+    n_components: 64
+    whiten: false
+
+  sample_tokens: 1000000
+  method: stratigraphic_hmm_kmeans
+  k_values: [6]
+  minibatch_size: 8192
+  prediction_batch_size: 65536
+  seed: 42
+
+  stratigraphic_hmm:
+    emission_source: embedding
+    iterations: 10
+    z_axis: 2
+    z_direction: increasing_downward
+    edge_margin_tokens: [8, 8, 0]
+
+    transition:
+      same_cost: 0.0
+      advance_cost: 0.10
+      jump_cost: 1.0
+      reverse_cost: 1000000.0
+      forbid_reverse: true
+      max_jump: 1
+
+    path_prior:
+      enabled: true
+      initial_state:
+        mode: shallow_anchor
+        weight: 0.25
+      terminal_state:
+        mode: deep_anchor
+        weight: 0.25
+      expected_boundaries:
+        enabled: false
+
+    init:
+      order_by: mean_z
+
+    update:
+      empty_cluster_policy: keep_previous
