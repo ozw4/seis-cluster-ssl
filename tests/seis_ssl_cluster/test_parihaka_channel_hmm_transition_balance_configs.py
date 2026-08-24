@@ -18,6 +18,7 @@ EXPERIMENT_ROOT = Path(
 )
 EMBEDDING_ROOT = EXPERIMENT_ROOT / '30_embeddings'
 CHANNEL_CONFIG = EXPERIMENT_ROOT / '40_channel_transition_balance.yaml'
+FINAL_CHANNEL_CONFIG = EXPERIMENT_ROOT / '41_channel_transition_balance_final.yaml'
 MAE_EXTRACTION_REFERENCE = Path(
 	'experiments/parihaka/facies_benchmark_v1/'
 	'32_channel_ssl_hmm_four_way_v1/'
@@ -185,6 +186,12 @@ def reference_channel_raw(artifact_root: Path) -> dict[str, object]:
 
 
 @pytest.fixture
+def final_channel_raw(artifact_root: Path) -> dict[str, object]:
+	del artifact_root
+	return load_config(FINAL_CHANNEL_CONFIG)
+
+
+@pytest.fixture
 def channel_config(channel_raw: Mapping[str, object]) -> ChannelDecoderConfig:
 	return channel_decoder_config_from_mapping(channel_raw)
 
@@ -195,6 +202,7 @@ def test_exact_six_embedding_extraction_configs_are_present() -> None:
 
 	assert actual_files == expected_files
 	assert CHANNEL_CONFIG.is_file()
+	assert FINAL_CHANNEL_CONFIG.is_file()
 
 
 def test_extractions_resolve_to_exact_full_stage2_checkpoints_and_outputs(
@@ -290,8 +298,9 @@ def test_channel_config_reuses_controls_and_binds_candidate_extractions(
 	assert set(models) & set(reference_models) == set(REUSED_MODEL_IDS)
 
 
-def test_channel_config_reuses_downstream_contract_and_existing_runs(
+def test_channel_configs_reuse_downstream_contract_and_isolate_run_modes(
 	channel_raw: Mapping[str, object],
+	final_channel_raw: Mapping[str, object],
 	reference_channel_raw: Mapping[str, object],
 	channel_config: ChannelDecoderConfig,
 	artifact_root: Path,
@@ -300,17 +309,29 @@ def test_channel_config_reuses_downstream_contract_and_existing_runs(
 	outputs = _mapping(channel_raw, 'outputs')
 	reference_inputs = _mapping(reference_channel_raw, 'inputs')
 	reference_outputs = _mapping(reference_channel_raw, 'outputs')
+	final_inputs = _mapping(final_channel_raw, 'inputs')
+	final_outputs = _mapping(final_channel_raw, 'outputs')
 
 	assert channel_raw['dataset'] == reference_channel_raw['dataset']
-	assert inputs == reference_inputs
+	assert {
+		key: value for key, value in inputs.items() if key != 'runs_root'
+	} == {key: value for key, value in reference_inputs.items() if key != 'runs_root'}
 	for section in ('decoder', 'tiles', 'train'):
 		assert channel_raw[section] == reference_channel_raw[section]
+		assert final_channel_raw[section] == channel_raw[section]
+	assert final_channel_raw['dataset'] == channel_raw['dataset']
+	assert final_channel_raw['embeddings'] == channel_raw['embeddings']
 
 	assert set(outputs) == set(reference_outputs)
 	assert inputs['runs_root'] == outputs['runs_root']
-	assert outputs['runs_root'] == reference_outputs['runs_root']
+	assert final_inputs['runs_root'] == final_outputs['runs_root']
 	assert channel_config.runs_root == (
-		artifact_root / 'channel_benchmark/ssl_hmm_four_way_v1/runs'
+		artifact_root
+		/ 'channel_benchmark/hmm_transition_balance_v1/validation_runs'
+	)
+	final_config = channel_decoder_config_from_mapping(final_channel_raw)
+	assert final_config.runs_root == (
+		artifact_root / 'channel_benchmark/hmm_transition_balance_v1/final_runs'
 	)
 	new_summary = Path(str(outputs['output_dir']))
 	reference_summary = Path(str(reference_outputs['output_dir']))
@@ -319,6 +340,7 @@ def test_channel_config_reuses_downstream_contract_and_existing_runs(
 	)
 	assert _paths_do_not_overlap(new_summary, reference_summary)
 	assert _paths_do_not_overlap(new_summary, channel_config.runs_root)
+	assert _paths_do_not_overlap(channel_config.runs_root, final_config.runs_root)
 
 
 def test_candidate_model_ids_checkpoints_and_embedding_outputs_are_unique(

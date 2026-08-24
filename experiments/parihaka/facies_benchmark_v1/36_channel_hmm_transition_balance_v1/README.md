@@ -35,10 +35,13 @@ selection metric = validation.channel_iou
 ```
 
 This is a survey-specific, transductive screening because SSL pretraining saw
-the unlabelled Parihaka amplitude volume. Phase 1 reads only validation Channel
-IoU. It does not read test IoU and does not run `small` or `large`. Validation
-screening is a human-reviewed comparison, not an automatic gate that starts a
-later experiment. Test IoU is not read; `small` and `large` are not run.
+the unlabelled Parihaka amplitude volume. Phase 1 computes and saves only
+validation Channel IoU for new candidates: the decoder runner does not
+run test inference or save test metrics in `--validation-only` mode. Phase 1
+does not run `small` or `large`. Validation screening is a human-reviewed comparison,
+not an automatic gate that starts a later experiment. Existing metrics files
+may contain historical test results, but neither the screening code nor the
+human review may inspect them; Phase 1 does not read test IoU.
 
 ## 1. Environment
 
@@ -53,12 +56,15 @@ export TARGET_CONFIGS="$EXP/10_hmm_targets"
 export STAGE2_CONFIGS="$EXP/20_stage2"
 export EMBEDDING_CONFIGS="$EXP/30_embeddings"
 export CHANNEL_CONFIG="$EXP/40_channel_transition_balance.yaml"
+export FINAL_CHANNEL_CONFIG="$EXP/41_channel_transition_balance_final.yaml"
 export LAYOUT_CONFIG=experiments/parihaka/facies_benchmark_v1/30_channel_benchmark_v1/02_layouts.yaml
 export CLUSTER_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/clustering/parihaka/facies_benchmark_v1/hmm_transition_balance_v1"
 export PSEUDO_TARGET_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/parihaka/facies_benchmark_v1/hmm_transition_balance_v1"
 export STAGE1_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage1"
 export STAGE2_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/parihaka/facies_benchmark_v1/hmm_transition_balance_v1"
-export RUNS_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/ssl_hmm_four_way_v1/runs"
+export EXISTING_RUNS_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/ssl_hmm_four_way_v1/runs"
+export VALIDATION_RUNS_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/hmm_transition_balance_v1/validation_runs"
+export FINAL_RUNS_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/hmm_transition_balance_v1/final_runs"
 export REPORT_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/hmm_transition_balance_v1/summary"
 export SMOKE_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/parihaka/facies_benchmark_v1/hmm_transition_balance_v1_smoke_1step"
 export CUDA_VISIBLE_DEVICES=1
@@ -643,6 +649,7 @@ for model in "${CANDIDATE_MODELS[@]}"; do
       --layout "$layout" \
       --size medium \
       --layout-config "$LAYOUT_CONFIG" \
+      --validation-only \
       --dry-run
   done
 done
@@ -650,7 +657,9 @@ done
 
 ## 11. Run the 30 new medium decoder jobs
 
-Run the same six models and five layouts without `--dry-run`:
+Run the same six models and five layouts without `--dry-run`. Keep
+`--validation-only`; this is what prevents test evaluation rather than merely
+hiding test metrics from the report:
 
 ```bash
 for model in "${CANDIDATE_MODELS[@]}"; do
@@ -660,7 +669,8 @@ for model in "${CANDIDATE_MODELS[@]}"; do
       --model "$model" \
       --layout "$layout" \
       --size medium \
-      --layout-config "$LAYOUT_CONFIG"
+      --layout-config "$LAYOUT_CONFIG" \
+      --validation-only
   done
 done
 ```
@@ -668,7 +678,9 @@ done
 Do not rerun decoder jobs for the MAE control, Local BT control, or either
 existing H0 model. A restartable job may be skipped only when its own
 `metrics.json` exists; an interrupted job may resume only from its own
-`latest.pt`.
+`latest.pt` under `$VALIDATION_RUNS_ROOT`. Every new candidate `metrics.json`
+must say `"evaluation_mode": "validation_only"` and must not contain a
+top-level `test` field.
 
 ## 12. Write the validation screening summary
 
@@ -739,7 +751,8 @@ layouts = (
 	'layout_004',
 )
 variant_order = tuple(variant_transition_settings)
-runs_root = Path(os.environ['RUNS_ROOT'])
+existing_runs_root = Path(os.environ['EXISTING_RUNS_ROOT'])
+validation_runs_root = Path(os.environ['VALIDATION_RUNS_ROOT'])
 report_root = Path(os.environ['REPORT_ROOT'])
 if len(variant_order) != 4:
 	raise AssertionError('screening must define exactly 4 variants')
@@ -767,6 +780,11 @@ if len(model_ids) != 10:
 
 
 def read_metrics(model: str, layout: str) -> Mapping[str, object]:
+	runs_root = (
+		existing_runs_root
+		if model in {'mae', 'mae_hmm_k6', 'local_barlow_twins', 'local_barlow_twins_hmm_k6'}
+		else validation_runs_root
+	)
 	path = (
 		runs_root
 		/ f'model={model}'
@@ -784,6 +802,11 @@ def read_metrics(model: str, layout: str) -> Mapping[str, object]:
 		raise ValueError(f'{path}: layout identity mismatch')
 	if payload.get('data_size') != 'medium':
 		raise ValueError(f'{path}: data_size must be medium')
+	if runs_root == validation_runs_root:
+		if payload.get('evaluation_mode') != 'validation_only':
+			raise ValueError(f'{path}: candidate must be validation-only')
+		if 'test' in payload:
+			raise ValueError(f'{path}: validation-only metrics contain test results')
 	return payload
 
 
@@ -976,5 +999,45 @@ PY
 
 Inspect both `$REPORT_ROOT/screening_validation.json` and
 `$REPORT_ROOT/screening_validation.md`. Phase 1 ends here. A human uses these
-validation-only summaries to choose any Phase 2 condition; do not proceed to
-other supervision sizes or a held-out report.
+validation-only summaries to choose any Phase 2 condition. Reviewers must not
+open the historical top-level `test` fields under `$EXISTING_RUNS_ROOT`. Do not
+proceed to other supervision sizes or a held-out report.
+
+## 13. Final test protocol after all validation phases
+
+Do not run this section during Phase 1. After the complete multi-phase study
+has frozen one final model and layout without reference to any test result, set
+those IDs explicitly. The final config uses `$FINAL_RUNS_ROOT`, which is
+disjoint from both historical runs and Phase 1 validation-only runs.
+
+```bash
+export FINAL_MODEL=mae_hmm_k6_persist003
+export FINAL_LAYOUT=layout_002
+python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
+  --config "$FINAL_CHANNEL_CONFIG" \
+  --model "$FINAL_MODEL" \
+  --layout "$FINAL_LAYOUT" \
+  --size medium \
+  --layout-config "$LAYOUT_CONFIG" \
+  --dry-run
+```
+
+Record the frozen choice before continuing. Then run exactly that job in the
+normal mode, deliberately omitting `--validation-only`. This retrains the
+deterministic decoder in the clean final namespace, selects `best.pt` by
+validation Channel IoU, and evaluates the test dataset once.
+
+```bash
+python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
+  --config "$FINAL_CHANNEL_CONFIG" \
+  --model "$FINAL_MODEL" \
+  --layout "$FINAL_LAYOUT" \
+  --size medium \
+  --layout-config "$LAYOUT_CONFIG"
+```
+
+The resulting `$FINAL_RUNS_ROOT/model=$FINAL_MODEL/layout=$FINAL_LAYOUT/size=medium/metrics.json`
+must say `"evaluation_mode": "validation_and_test"` and contain the single
+authorized top-level `test` result. Do not copy a validation-only checkpoint
+into this namespace and do not run alternative models or layouts after seeing
+that result.

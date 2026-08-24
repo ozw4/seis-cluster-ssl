@@ -3,7 +3,7 @@ dataset:
 inputs:
   labels_npy: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_labels.npy
   labels_metadata_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_labels_metadata.json
-  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/hmm_transition_balance_v1/validation_runs
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/hmm_transition_balance_v1/final_runs
 embeddings:
   models:
     mae:
@@ -37,7 +37,7 @@ embeddings:
       dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/hmm_transition_balance_v1/local_barlow_twins_hmm_k6_persist010/overlap_x64
       checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/hmm_transition_balance_v1/local_bt100/persist010/full_25ep/latest.pt
 outputs:
-  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/hmm_transition_balance_v1/validation_runs
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/hmm_transition_balance_v1/final_runs
   output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/hmm_transition_balance_v1/summary
 decoder:
   spec: frozen_embedding_decoder_nearest_voxel_ln_v1

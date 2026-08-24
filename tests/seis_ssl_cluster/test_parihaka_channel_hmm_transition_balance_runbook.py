@@ -50,6 +50,7 @@ EXTRACTION_CONFIGS = tuple(
 	)
 )
 CHANNEL_CONFIG = EXPERIMENT_ROOT / '40_channel_transition_balance.yaml'
+FINAL_CHANNEL_CONFIG = EXPERIMENT_ROOT / '41_channel_transition_balance_final.yaml'
 LAYOUT_CONFIG = Path(
 	'experiments/parihaka/facies_benchmark_v1/'
 	'30_channel_benchmark_v1/02_layouts.yaml'
@@ -110,7 +111,13 @@ def test_runbook_references_existing_configs_scripts_layout_and_clis() -> None:
 		assert path.is_file()
 	for path in EXPORT_SCRIPTS:
 		assert os.access(path, os.X_OK)
-	for path in (*EXTRACTION_CONFIGS, CHANNEL_CONFIG, LAYOUT_CONFIG, *CLIS):
+	for path in (
+		*EXTRACTION_CONFIGS,
+		CHANNEL_CONFIG,
+		FINAL_CHANNEL_CONFIG,
+		LAYOUT_CONFIG,
+		*CLIS,
+	):
 		assert path.is_file()
 
 	for source in SOURCES:
@@ -260,6 +267,7 @@ def test_runbook_decoder_commands_target_only_six_candidates_and_medium() -> Non
 		assert '--layout "$layout"' in section
 		assert section.count('--size medium') == 1
 		assert 'run_parihaka_channel_decoder.py' in section
+		assert '--validation-only' in section
 	assert '--dry-run' in preflight
 	assert '--dry-run' not in _bash_blocks(execution)
 
@@ -316,6 +324,26 @@ def test_screening_reads_validation_only_and_validates_exact_matrix() -> None:
 	assert "payload.get('layout_id')" in script
 	assert "payload.get('data_size') != 'medium'" in script
 	assert 'paired_identity(metrics[(model, layout)])' in script
+	assert "os.environ['EXISTING_RUNS_ROOT']" in script
+	assert "os.environ['VALIDATION_RUNS_ROOT']" in script
+	assert "payload.get('evaluation_mode') != 'validation_only'" in script
+	assert "'test' in payload" in script
+
+
+def test_final_test_protocol_uses_disjoint_config_and_normal_mode() -> None:
+	text = _text()
+	section = _section(text, '## 13. Final test protocol after all validation phases')
+	assert 'Do not run this section during Phase 1' in section
+	assert '--config "$FINAL_CHANNEL_CONFIG"' in section
+	assert '--model "$FINAL_MODEL"' in section
+	assert '--layout "$FINAL_LAYOUT"' in section
+	assert '--size medium' in section
+	assert section.count('run_parihaka_channel_decoder.py') == 2
+	normal_command = section.rsplit('```bash', maxsplit=1)[1].split(
+		'```', maxsplit=1
+	)[0]
+	assert '--validation-only' not in normal_command
+	assert 'evaluation_mode": "validation_and_test"' in section
 
 
 def test_screening_computes_required_statistics_and_recommendation_rule() -> None:
