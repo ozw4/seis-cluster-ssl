@@ -901,6 +901,9 @@ def run_channel_decoder_job(  # noqa: C901, PLR0912, PLR0915
 	_configure_determinism()
 	_seed_everything(plan.config.train.seed)
 	selected = plan.geometry.models[plan.model]
+	evaluation_mode = (
+		'validation_only' if validation_only else 'validation_and_test'
+	)
 	evaluation_splits = (
 		('train', 'validation')
 		if validation_only
@@ -956,6 +959,11 @@ def run_channel_decoder_job(  # noqa: C901, PLR0912, PLR0915
 		payload = torch.load(resume_path, map_location=run_device, weights_only=False)
 		if payload.get('run_identity') != identity:
 			raise ValueError('resume checkpoint does not match this Channel job')
+		stored_mode = payload.get('evaluation_mode', 'validation_and_test')
+		if stored_mode != evaluation_mode:
+			raise ValueError(
+				'resume checkpoint evaluation mode does not match this job'
+			)
 		if payload.get('completed') is True:
 			raise ValueError('completed Channel job cannot be resumed')
 		decoder.load_state_dict(payload['model_state_dict'])
@@ -984,6 +992,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0912, PLR0915
 					optimizer,
 					scaler,
 					identity,
+					evaluation_mode,
 					history,
 					best_epoch,
 					best_iou,
@@ -1029,6 +1038,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0912, PLR0915
 					optimizer,
 					scaler,
 					identity,
+					evaluation_mode,
 					history,
 					best_epoch,
 					best_iou,
@@ -1081,6 +1091,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0912, PLR0915
 			optimizer,
 			scaler,
 			identity,
+			evaluation_mode,
 			history,
 			best_epoch,
 			best_iou,
@@ -1110,9 +1121,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0912, PLR0915
 		'model': plan.model,
 		'layout_id': plan.layout_id,
 		'data_size': plan.data_size,
-		'evaluation_mode': (
-			'validation_only' if validation_only else 'validation_and_test'
-		),
+		'evaluation_mode': evaluation_mode,
 		'benchmark_identity': identity,
 		'supervision': {
 			'axis_mapping': dict(CHANNEL_AXIS_MAPPING),
@@ -1157,6 +1166,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0912, PLR0915
 		optimizer,
 		scaler,
 		identity,
+		evaluation_mode,
 		history,
 		best_epoch,
 		best_iou,
@@ -1237,6 +1247,7 @@ def _save_latest(  # noqa: PLR0913, PLR0917
 	optimizer: torch.optim.Optimizer,
 	scaler: torch.amp.GradScaler | None,
 	identity: Mapping[str, object],
+	evaluation_mode: str,
 	history: Sequence[Mapping[str, object]],
 	best_epoch: int | None,
 	best_iou: float,
@@ -1256,6 +1267,7 @@ def _save_latest(  # noqa: PLR0913, PLR0917
 		scaler=scaler,
 		payload={
 			'run_identity': identity,
+			'evaluation_mode': evaluation_mode,
 			'history': list(history),
 			'best_epoch': best_epoch,
 			'best_iou': best_iou,

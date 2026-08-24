@@ -1155,6 +1155,80 @@ def test_validation_only_job_never_evaluates_test(
 		plan.output_dir / 'latest.pt', map_location='cpu', weights_only=False
 	)
 	assert latest['completed'] is True
+	assert latest['evaluation_mode'] == 'validation_only'
+
+
+@pytest.mark.parametrize(
+	('initial_validation_only', 'resume_validation_only', 'expected_mode'),
+	[
+		(True, False, 'validation_only'),
+		(False, True, 'validation_and_test'),
+	],
+)
+def test_resume_requires_the_checkpoint_evaluation_mode(
+	tmp_path: Path,
+	*,
+	initial_validation_only: bool,
+	resume_validation_only: bool,
+	expected_mode: str,
+) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	config = replace(
+		config,
+		train=replace(config.train, epochs=1),
+		tiles=DecoderTiles((1, 1, 1), (1, 1, 1)),
+	)
+	_write_generic_one_token_sources(config)
+	labels = np.ones((8, 8, 8), dtype=np.int8)
+	labels[:, :, ::2] = 5
+	_write_labels(config, labels)
+	plan = inspect_channel_decoder_job(
+		config,
+		model='mae_hmm_k6',
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=_write_one_token_layout(tmp_path),
+	)
+
+	assert (
+		run_channel_decoder_job(
+			plan,
+			device='cpu',
+			max_steps=1,
+			validation_only=initial_validation_only,
+		)
+		is None
+	)
+	latest = plan.output_dir / 'latest.pt'
+	payload = torch.load(latest, map_location='cpu', weights_only=False)
+	assert payload['evaluation_mode'] == expected_mode
+	if not initial_validation_only:
+		payload.pop('evaluation_mode')
+		torch.save(payload, latest)
+
+	with pytest.raises(
+		ValueError,
+		match='resume checkpoint evaluation mode does not match this job',
+	):
+		run_channel_decoder_job(
+			plan,
+			device='cpu',
+			resume=latest,
+			validation_only=resume_validation_only,
+		)
+
+	metrics_path = run_channel_decoder_job(
+		plan,
+		device='cpu',
+		resume=latest,
+		validation_only=initial_validation_only,
+	)
+	assert metrics_path is not None
+	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+	assert metrics['evaluation_mode'] == expected_mode
+	completed = torch.load(latest, map_location='cpu', weights_only=False)
+	assert completed['completed'] is True
+	assert completed['evaluation_mode'] == expected_mode
 
 
 def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
