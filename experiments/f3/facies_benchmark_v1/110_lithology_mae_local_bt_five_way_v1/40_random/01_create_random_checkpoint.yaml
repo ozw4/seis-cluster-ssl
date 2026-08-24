@@ -1,0 +1,8 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+reference_model:
+  tag: ssl_hmm_continuation_v1_stage2_mae100_mae_continue_full_25ep
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/mae_continue/full_25ep/latest.pt
+random_checkpoint:
+  seed: 42
+  output_checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt
