@@ -285,6 +285,25 @@ def test_parihaka_channel_decoder_cli_parser_accepts_dynamic_model_ids(
 		]
 	)
 	assert args.model == model_id
+	assert args.validation_only is False
+
+
+def test_parihaka_channel_decoder_cli_accepts_validation_only() -> None:
+	args = channel_cli.build_parser().parse_args(
+		[
+			'--model',
+			'mae_hmm_k6',
+			'--layout',
+			'layout_000',
+			'--size',
+			'medium',
+			'--layout-config',
+			'layouts.yaml',
+			'--validation-only',
+		]
+	)
+
+	assert args.validation_only is True
 
 
 @pytest.mark.parametrize(
