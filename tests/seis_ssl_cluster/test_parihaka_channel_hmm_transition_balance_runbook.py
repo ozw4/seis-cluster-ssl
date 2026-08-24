@@ -229,6 +229,23 @@ def test_runbook_uses_required_execution_order_and_six_conditions() -> None:
 	assert '--dry-run' in extraction_section
 
 
+def test_runbook_bash_blocks_fail_fast() -> None:
+	blocks = re.findall(r'```bash\n(.*?)\n```', _text(), flags=re.DOTALL)
+	assert blocks
+	assert all(block.startswith('set -euo pipefail\n') for block in blocks)
+
+
+def test_full_training_block_is_self_contained() -> None:
+	section = _section(
+		_text(),
+		'## 6. Run the six full 25-epoch trainings',
+		'## 7. Audit the six full checkpoints',
+	)
+	full_run = re.findall(r'```bash\n(.*?)\n```', section, flags=re.DOTALL)[0]
+	assert len(_array_items(full_run, 'TRAINING_CONFIGS')) == 6
+	assert 'for config in "${TRAINING_CONFIGS[@]}"' in full_run
+
+
 def test_runbook_resume_examples_bind_each_run_to_its_own_latest() -> None:
 	section = _section(
 		_text(),
@@ -262,6 +279,8 @@ def test_runbook_decoder_commands_target_only_six_candidates_and_medium() -> Non
 	)
 	assert _array_items(preflight, 'CANDIDATE_MODELS') == CANDIDATE_MODELS
 	assert _array_items(preflight, 'LAYOUTS') == LAYOUTS
+	assert _array_items(execution, 'CANDIDATE_MODELS') == CANDIDATE_MODELS
+	assert _array_items(execution, 'LAYOUTS') == LAYOUTS
 	for section in (preflight, execution):
 		assert '--model "$model"' in section
 		assert '--layout "$layout"' in section
@@ -270,6 +289,28 @@ def test_runbook_decoder_commands_target_only_six_candidates_and_medium() -> Non
 		assert '--validation-only' in section
 	assert '--dry-run' in preflight
 	assert '--dry-run' not in _bash_blocks(execution)
+
+
+def test_runbook_decoder_loop_skips_complete_and_stops_on_partial_job() -> None:
+	section = _section(
+		_text(),
+		'## 11. Run the 30 new medium decoder jobs',
+		'## 12. Write the validation screening summary',
+	)
+	block = re.findall(r'```bash\n(.*?)\n```', section, flags=re.DOTALL)[0]
+	job_dir = '$VALIDATION_RUNS_ROOT/model=$model/layout=$layout/size=medium'
+	assert f'job_dir="{job_dir}"' in block
+	assert 'if [[ -f "$job_dir/metrics.json" ]]' in block
+	assert 'continue' in block
+	assert 'if [[ -f "$job_dir/latest.pt" ]]' in block
+	assert 'incomplete Channel job requires explicit resume' in block
+	assert 'exit 1' in block
+	assert block.index('metrics.json') < block.index('latest.pt')
+	assert (
+		'--resume\n'
+		'"$VALIDATION_RUNS_ROOT/model=<model>/layout=<layout>/'
+		'size=medium/latest.pt"' in section
+	)
 
 
 def test_runbook_reuses_existing_models_without_rerunning_them() -> None:

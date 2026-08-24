@@ -49,6 +49,7 @@ Run from an installed development checkout. The artifact root and smoke root
 must be absolute. Reuse the reviewed layout file directly.
 
 ```bash
+set -euo pipefail
 cd /workspace
 export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/workspace/artifacts/seis_ssl_cluster
 export EXP=experiments/parihaka/facies_benchmark_v1/36_channel_hmm_transition_balance_v1
@@ -79,6 +80,7 @@ reused source appear under a new namespace.
 Run the three config contracts and this runbook contract before execution:
 
 ```bash
+set -euo pipefail
 pytest -q \
   tests/seis_ssl_cluster/test_parihaka_hmm_transition_balance_target_configs.py \
   tests/seis_ssl_cluster/test_parihaka_hmm_transition_balance_training_configs.py \
@@ -95,6 +97,7 @@ The six clustering configs are explicit. Dry-run all six before executing any
 of them.
 
 ```bash
+set -euo pipefail
 CLUSTER_CONFIGS=(
   "$TARGET_CONFIGS/mae100/neutral/01_cluster_hmm_k6.yaml"
   "$TARGET_CONFIGS/mae100/persist003/01_cluster_hmm_k6.yaml"
@@ -118,6 +121,7 @@ Run the six reviewed export scripts. Each invokes
 confidence 1.0, boundary alpha 0.0, boundary tau 1.0, and schema version 2.
 
 ```bash
+set -euo pipefail
 EXPORT_SCRIPTS=(
   "$TARGET_CONFIGS/mae100/neutral/02_export_pseudo_targets.sh"
   "$TARGET_CONFIGS/mae100/persist003/02_export_pseudo_targets.sh"
@@ -141,6 +145,7 @@ counts are diagnostics: they are printed without an arbitrary pass/fail
 threshold.
 
 ```bash
+set -euo pipefail
 python - <<'PY'
 from __future__ import annotations
 
@@ -353,6 +358,7 @@ PY
 Dry-run all six full-budget configs. There are no dedicated feasibility YAMLs.
 
 ```bash
+set -euo pipefail
 TRAINING_CONFIGS=(
   "$STAGE2_CONFIGS/mae100/neutral/01_full_25ep.yaml"
   "$STAGE2_CONFIGS/mae100/persist003/01_full_25ep.yaml"
@@ -372,6 +378,7 @@ If a live one-step check is needed, use the existing CLI overrides and an
 isolated smoke root. Do not add smoke YAMLs.
 
 ```bash
+set -euo pipefail
 SMOKE_SPECS=(
   "$STAGE2_CONFIGS/mae100/neutral/01_full_25ep.yaml|$SMOKE_ROOT/mae100/neutral"
   "$STAGE2_CONFIGS/mae100/persist003/01_full_25ep.yaml|$SMOKE_ROOT/mae100/persist003"
@@ -394,6 +401,15 @@ done
 Start each full run without `--resume`:
 
 ```bash
+set -euo pipefail
+TRAINING_CONFIGS=(
+  "$STAGE2_CONFIGS/mae100/neutral/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/mae100/persist003/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/mae100/persist010/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/local_bt100/neutral/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/local_bt100/persist003/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/local_bt100/persist010/01_full_25ep.yaml"
+)
 for config in "${TRAINING_CONFIGS[@]}"; do
   python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$config"
 done
@@ -403,6 +419,7 @@ After an interruption, resume only from that same full run's `latest.pt`. Do
 not use Stage 1, control, H0, `best.pt`, another variant, or a smoke checkpoint.
 
 ```bash
+set -euo pipefail
 python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
   --config "$STAGE2_CONFIGS/mae100/neutral/01_full_25ep.yaml" \
   --resume "$STAGE2_ROOT/mae100/neutral/full_25ep/latest.pt"
@@ -430,6 +447,7 @@ pseudo-target root, K=6, distillation weight 0.2, top block 1, and FP32
 training.
 
 ```bash
+set -euo pipefail
 python - <<'PY'
 from __future__ import annotations
 
@@ -520,6 +538,7 @@ PY
 Dry-run every extraction config, then execute those same six configs.
 
 ```bash
+set -euo pipefail
 EXTRACTION_CONFIGS=(
   "$EMBEDDING_CONFIGS/01_extract_mae_hmm_k6_neutral.yaml"
   "$EMBEDDING_CONFIGS/02_extract_mae_hmm_k6_persist003.yaml"
@@ -549,6 +568,7 @@ geometry and preprocessing, embedding shape/dtype, and valid-token mask parity.
 This read-only block also fixes the expected ten-model order.
 
 ```bash
+set -euo pipefail
 python - <<'PY'
 from __future__ import annotations
 
@@ -626,6 +646,7 @@ Only the six new candidates are execution targets. Dry-run their five reviewed
 layouts at `medium` size.
 
 ```bash
+set -euo pipefail
 CANDIDATE_MODELS=(
   mae_hmm_k6_neutral
   mae_hmm_k6_persist003
@@ -662,8 +683,33 @@ Run the same six models and five layouts without `--dry-run`. Keep
 hiding test metrics from the report:
 
 ```bash
+set -euo pipefail
+CANDIDATE_MODELS=(
+  mae_hmm_k6_neutral
+  mae_hmm_k6_persist003
+  mae_hmm_k6_persist010
+  local_barlow_twins_hmm_k6_neutral
+  local_barlow_twins_hmm_k6_persist003
+  local_barlow_twins_hmm_k6_persist010
+)
+LAYOUTS=(
+  layout_000
+  layout_001
+  layout_002
+  layout_003
+  layout_004
+)
 for model in "${CANDIDATE_MODELS[@]}"; do
   for layout in "${LAYOUTS[@]}"; do
+    job_dir="$VALIDATION_RUNS_ROOT/model=$model/layout=$layout/size=medium"
+    if [[ -f "$job_dir/metrics.json" ]]; then
+      echo "skip completed Channel job: model=$model layout=$layout"
+      continue
+    fi
+    if [[ -f "$job_dir/latest.pt" ]]; then
+      echo "incomplete Channel job requires explicit resume: $job_dir" >&2
+      exit 1
+    fi
     python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
       --config "$CHANNEL_CONFIG" \
       --model "$model" \
@@ -676,11 +722,15 @@ done
 ```
 
 Do not rerun decoder jobs for the MAE control, Local BT control, or either
-existing H0 model. A restartable job may be skipped only when its own
-`metrics.json` exists; an interrupted job may resume only from its own
-`latest.pt` under `$VALIDATION_RUNS_ROOT`. Every new candidate `metrics.json`
-must say `"evaluation_mode": "validation_only"` and must not contain a
-top-level `test` field.
+existing H0 model. The loop skips a job only when its own `metrics.json`
+exists. If it finds `latest.pt` without `metrics.json`, it prints that job and
+stops instead of silently starting over or automatically resuming. Resume that
+one job explicitly with the same model, layout, size, layout config, and
+`--validation-only`, adding `--resume
+"$VALIDATION_RUNS_ROOT/model=<model>/layout=<layout>/size=medium/latest.pt"`;
+then rerun the loop. The runner accepts only that same job's `latest.pt`. Every
+new candidate `metrics.json` must say `"evaluation_mode": "validation_only"`
+and must not contain a top-level `test` field.
 
 ## 12. Write the validation screening summary
 
@@ -691,6 +741,7 @@ embedding identity, reads only `validation.channel_iou`, and writes the JSON
 and Markdown screening summaries.
 
 ```bash
+set -euo pipefail
 python - <<'PY'
 from __future__ import annotations
 
@@ -1011,6 +1062,7 @@ those IDs explicitly. The final config uses `$FINAL_RUNS_ROOT`, which is
 disjoint from both historical runs and Phase 1 validation-only runs.
 
 ```bash
+set -euo pipefail
 export FINAL_MODEL=mae_hmm_k6_persist003
 export FINAL_LAYOUT=layout_002
 python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
@@ -1028,6 +1080,7 @@ deterministic decoder in the clean final namespace, selects `best.pt` by
 validation Channel IoU, and evaluates the test dataset once.
 
 ```bash
+set -euo pipefail
 python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
   --config "$FINAL_CHANNEL_CONFIG" \
   --model "$FINAL_MODEL" \
