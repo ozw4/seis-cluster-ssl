@@ -77,7 +77,8 @@ reused source appear under a new namespace.
 
 ## 2. Targeted tests
 
-Run the three config contracts and this runbook contract before execution:
+Run the three config contracts, the executable screening tests, and this
+runbook contract before execution:
 
 ```bash
 set -euo pipefail
@@ -85,6 +86,7 @@ pytest -q \
   tests/seis_ssl_cluster/test_parihaka_hmm_transition_balance_target_configs.py \
   tests/seis_ssl_cluster/test_parihaka_hmm_transition_balance_training_configs.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_configs.py \
+  tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_summary.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_runbook.py
 ```
 
@@ -734,325 +736,27 @@ and must not contain a top-level `test` field.
 
 ## 12. Write the validation screening summary
 
-This self-contained report script reads exactly 50 `medium` metrics: two
+The experiment-local report script reads exactly 50 `medium` metrics: two
 controls, two existing H0 models, and six new candidates over five layouts. It
 checks paired downstream identity after removing only model/source-specific
 embedding identity, reads only `validation.channel_iou`, and writes the JSON
-and Markdown screening summaries.
+and Markdown screening summaries. Its ranking and rejection behavior are
+covered by executable tests with known metrics fixtures.
 
 ```bash
 set -euo pipefail
-python - <<'PY'
-from __future__ import annotations
-
-import json
-import math
-import os
-import statistics
-from collections.abc import Mapping
-from pathlib import Path
-
-variant_transition_settings = {
-	'advance_favored_m003': {
-		'same_cost': 0.03,
-		'advance_cost': 0.00,
-		'delta': -0.03,
-	},
-	'neutral': {
-		'same_cost': 0.00,
-		'advance_cost': 0.00,
-		'delta': 0.00,
-	},
-	'persist003': {
-		'same_cost': 0.00,
-		'advance_cost': 0.03,
-		'delta': 0.03,
-	},
-	'persist010': {
-		'same_cost': 0.00,
-		'advance_cost': 0.10,
-		'delta': 0.10,
-	},
-}
-branches = {
-	'mae': {
-		'control': 'mae',
-		'variants': {
-			'advance_favored_m003': 'mae_hmm_k6',
-			'neutral': 'mae_hmm_k6_neutral',
-			'persist003': 'mae_hmm_k6_persist003',
-			'persist010': 'mae_hmm_k6_persist010',
-		},
-	},
-	'local_bt': {
-		'control': 'local_barlow_twins',
-		'variants': {
-			'advance_favored_m003': 'local_barlow_twins_hmm_k6',
-			'neutral': 'local_barlow_twins_hmm_k6_neutral',
-			'persist003': 'local_barlow_twins_hmm_k6_persist003',
-			'persist010': 'local_barlow_twins_hmm_k6_persist010',
-		},
-	},
-}
-layouts = (
-	'layout_000',
-	'layout_001',
-	'layout_002',
-	'layout_003',
-	'layout_004',
-)
-variant_order = tuple(variant_transition_settings)
-existing_runs_root = Path(os.environ['EXISTING_RUNS_ROOT'])
-validation_runs_root = Path(os.environ['VALIDATION_RUNS_ROOT'])
-report_root = Path(os.environ['REPORT_ROOT'])
-if len(variant_order) != 4:
-	raise AssertionError('screening must define exactly 4 variants')
-if tuple(branches) != ('mae', 'local_bt'):
-	raise AssertionError('screening must define exactly 2 control branches')
-
-
-def mapping(value: object, label: str) -> Mapping[str, object]:
-	if not isinstance(value, Mapping):
-		raise TypeError(f'{label} must be a mapping')
-	return value
-
-
-model_ids: list[str] = []
-for branch in branches.values():
-	control = branch.get('control')
-	variants = mapping(branch.get('variants'), 'branch variants')
-	if not isinstance(control, str):
-		raise TypeError('branch control must be a model ID')
-	model_ids.append(control)
-	model_ids.extend(str(variants[variant]) for variant in variant_order)
-model_ids = list(dict.fromkeys(model_ids))
-if len(model_ids) != 10:
-	raise AssertionError('screening must define exactly 10 models')
-
-
-def read_metrics(model: str, layout: str) -> Mapping[str, object]:
-	runs_root = (
-		existing_runs_root
-		if model in {'mae', 'mae_hmm_k6', 'local_barlow_twins', 'local_barlow_twins_hmm_k6'}
-		else validation_runs_root
-	)
-	path = (
-		runs_root
-		/ f'model={model}'
-		/ f'layout={layout}'
-		/ 'size=medium'
-		/ 'metrics.json'
-	)
-	payload = mapping(
-		json.loads(path.read_text(encoding='utf-8')),
-		f'{path} metrics payload',
-	)
-	if payload.get('model') != model:
-		raise ValueError(f'{path}: model identity mismatch')
-	if payload.get('layout_id') != layout:
-		raise ValueError(f'{path}: layout identity mismatch')
-	if payload.get('data_size') != 'medium':
-		raise ValueError(f'{path}: data_size must be medium')
-	if runs_root == validation_runs_root:
-		if payload.get('evaluation_mode') != 'validation_only':
-			raise ValueError(f'{path}: candidate must be validation-only')
-		if 'test' in payload:
-			raise ValueError(f'{path}: validation-only metrics contain test results')
-	return payload
-
-
-def paired_identity(payload: Mapping[str, object]) -> dict[str, object]:
-	identity = mapping(payload.get('benchmark_identity'), 'benchmark identity')
-	embedding = mapping(identity.get('embedding'), 'benchmark embedding identity')
-	common_metadata = mapping(
-		embedding.get('common_metadata'),
-		'benchmark embedding common metadata',
-	)
-	return {
-		**{
-			key: value
-			for key, value in identity.items()
-			if key not in {'model', 'embedding'}
-		},
-		'embedding': {'common_metadata': dict(common_metadata)},
-	}
-
-
-def validation_channel_iou(payload: Mapping[str, object]) -> float:
-	validation = payload.get('validation')
-	if not isinstance(validation, Mapping):
-		raise TypeError('validation metrics must be a mapping')
-	value = validation.get('channel_iou')
-	if (
-		not isinstance(value, int | float)
-		or isinstance(value, bool)
-		or not math.isfinite(float(value))
-	):
-		raise ValueError('validation Channel IoU must be finite')
-	return float(value)
-
-
-metrics = {
-	(model, layout): read_metrics(model, layout)
-	for model in model_ids
-	for layout in layouts
-}
-expected_metric_count = 50
-if len(metrics) != expected_metric_count:
-	raise AssertionError('screening must read exactly 50 metrics')
-for layout in layouts:
-	reference = paired_identity(metrics[(model_ids[0], layout)])
-	for model in model_ids[1:]:
-		if paired_identity(metrics[(model, layout)]) != reference:
-			raise ValueError(f'{model}/{layout}: downstream benchmark identity mismatch')
-
-
-def summarize(gains: Mapping[str, float] | list[float]) -> dict[str, object]:
-	values = list(gains.values()) if isinstance(gains, Mapping) else list(gains)
-	return {
-		'mean': statistics.mean(values),
-		'median': statistics.median(values),
-		'sample_standard_deviation': statistics.stdev(values),
-		'wins': sum(value > 0.0 for value in values),
-		'ties': sum(value == 0.0 for value in values),
-		'losses': sum(value < 0.0 for value in values),
-	}
-
-
-per_variant: dict[str, dict[str, object]] = {}
-for variant in variant_order:
-	branch_results: dict[str, dict[str, object]] = {}
-	combined_gains: list[float] = []
-	for branch_name, branch in branches.items():
-		control = str(branch['control'])
-		variant_models = mapping(branch['variants'], f'{branch_name} variants')
-		model = str(variant_models[variant])
-		layout_gains = {
-			layout: (
-				validation_channel_iou(metrics[(model, layout)])
-				- validation_channel_iou(metrics[(control, layout)])
-			)
-			for layout in layouts
-		}
-		combined_gains.extend(layout_gains.values())
-		branch_results[branch_name] = {
-			'control_model': control,
-			'variant_model': model,
-			'layout_gains': layout_gains,
-			**summarize(layout_gains),
-		}
-	mae_mean = float(branch_results['mae']['mean'])
-	local_bt_mean = float(branch_results['local_bt']['mean'])
-	eligible = mae_mean >= 0.0 and local_bt_mean >= 0.0
-	per_variant[variant] = {
-		'transition_settings': variant_transition_settings[variant],
-		'mae': branch_results['mae'],
-		'local_bt': branch_results['local_bt'],
-		'combined': summarize(combined_gains),
-		'eligible': eligible,
-	}
-
-eligible_variants = [
-	variant for variant in variant_order if bool(per_variant[variant]['eligible'])
-]
-ranking = sorted(
-	eligible_variants,
-	key=lambda variant: (
-		-float(mapping(per_variant[variant]['combined'], 'combined')['mean']),
-		-float(mapping(per_variant[variant]['combined'], 'combined')['median']),
-		variant_order.index(variant),
-	),
-)
-recommended_variant = ranking[0] if ranking else None
-selection_rule = {
-	'eligibility': 'mae_mean >= 0 and local_bt_mean >= 0',
-	'primary': 'largest combined mean among eligible variants',
-	'first_tie_break': 'largest combined median',
-	'second_tie_break': 'variant table order',
-	'no_eligible_variant': 'recommended_variant is null',
-	'automatic_phase2_gate': False,
-}
-result = {
-	'metric': 'validation.channel_iou',
-	'data_size': 'medium',
-	'variant_transition_settings': variant_transition_settings,
-	'per_variant': per_variant,
-	'ranking': ranking,
-	'recommended_variant': recommended_variant,
-	'selection_rule': selection_rule,
-}
-
-report_root.mkdir(parents=True, exist_ok=True)
-(report_root / 'screening_validation.json').write_text(
-	json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n',
-	encoding='utf-8',
-)
-lines = [
-	'# HMM transition balance validation screening',
-	'',
-	'Metric: validation.channel_iou; size: medium.',
-	'',
-	'## Summary',
-	'',
-	'| variant | branch | mean | median | sample std | wins | ties | losses | eligible |',
-	'|---|---|---:|---:|---:|---:|---:|---:|:---:|',
-]
-for variant in variant_order:
-	for branch_name in ('mae', 'local_bt', 'combined'):
-		summary = mapping(per_variant[variant][branch_name], branch_name)
-		lines.append(
-			'| '
-			f'{variant} | {branch_name} | {float(summary["mean"]):+.6f} | '
-			f'{float(summary["median"]):+.6f} | '
-			f'{float(summary["sample_standard_deviation"]):.6f} | '
-			f'{int(summary["wins"])} | {int(summary["ties"])} | '
-			f'{int(summary["losses"])} | '
-			f'{per_variant[variant]["eligible"]} |'
-		)
-lines.extend(
-	[
-		'',
-		'## Layout gains',
-		'',
-		'| variant | layout | MAE gain | Local BT gain |',
-		'|---|---|---:|---:|',
-	]
-)
-for variant in variant_order:
-	mae = mapping(per_variant[variant]['mae'], f'{variant} MAE')
-	local_bt = mapping(per_variant[variant]['local_bt'], f'{variant} Local BT')
-	mae_gains = mapping(mae['layout_gains'], f'{variant} MAE gains')
-	local_bt_gains = mapping(local_bt['layout_gains'], f'{variant} Local BT gains')
-	for layout in layouts:
-		lines.append(
-			f'| {variant} | {layout} | {float(mae_gains[layout]):+.6f} | '
-			f'{float(local_bt_gains[layout]):+.6f} |'
-		)
-lines.extend(
-	[
-		'',
-		f'- Eligible ranking: {ranking}',
-		f'- Recommended variant: {recommended_variant}',
-		'- This recommendation requires human review and does not start Phase 2.',
-	]
-)
-(report_root / 'screening_validation.md').write_text(
-	'\n'.join(lines) + '\n',
-	encoding='utf-8',
-)
-print(f'metrics read: {len(metrics)}')
-for variant in variant_order:
-	print(variant, per_variant[variant])
-print(f'eligible ranking: {ranking}')
-print(f'recommended_variant: {recommended_variant}')
-PY
+python "$EXP/scripts/summarize_validation.py" \
+  --existing-runs-root "$EXISTING_RUNS_ROOT" \
+  --validation-runs-root "$VALIDATION_RUNS_ROOT" \
+  --report-root "$REPORT_ROOT"
 ```
 
 Inspect both `$REPORT_ROOT/screening_validation.json` and
 `$REPORT_ROOT/screening_validation.md`. Phase 1 ends here. A human uses these
 validation-only summaries to choose any Phase 2 condition. Reviewers must not
-open the historical top-level `test` fields under `$EXISTING_RUNS_ROOT`. Do not
-proceed to other supervision sizes or a held-out report.
+open the historical top-level `test` fields under `$EXISTING_RUNS_ROOT`. This
+report does not start Phase 2. Do not proceed to other supervision sizes or a
+held-out report.
 
 ## 13. Final test protocol after all validation phases
 

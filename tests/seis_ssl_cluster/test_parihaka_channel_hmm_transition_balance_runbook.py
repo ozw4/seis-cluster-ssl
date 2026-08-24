@@ -51,6 +51,7 @@ EXTRACTION_CONFIGS = tuple(
 )
 CHANNEL_CONFIG = EXPERIMENT_ROOT / '40_channel_transition_balance.yaml'
 FINAL_CHANNEL_CONFIG = EXPERIMENT_ROOT / '41_channel_transition_balance_final.yaml'
+SUMMARY_SCRIPT = EXPERIMENT_ROOT / 'scripts/summarize_validation.py'
 LAYOUT_CONFIG = Path(
 	'experiments/parihaka/facies_benchmark_v1/'
 	'30_channel_benchmark_v1/02_layouts.yaml'
@@ -115,6 +116,7 @@ def test_runbook_references_existing_configs_scripts_layout_and_clis() -> None:
 		*EXTRACTION_CONFIGS,
 		CHANNEL_CONFIG,
 		FINAL_CHANNEL_CONFIG,
+		SUMMARY_SCRIPT,
 		LAYOUT_CONFIG,
 		*CLIS,
 	):
@@ -142,9 +144,9 @@ def test_runbook_references_existing_configs_scripts_layout_and_clis() -> None:
 		assert str(cli) in text
 
 
-def test_runbook_has_four_compilable_inline_python_blocks() -> None:
+def test_runbook_has_three_compilable_inline_python_blocks() -> None:
 	blocks = _inline_python(_text())
-	assert len(blocks) == 4
+	assert len(blocks) == 3
 	for index, source in enumerate(blocks, start=1):
 		compile(source, f'{README}:inline-{index}', 'exec')
 
@@ -334,41 +336,21 @@ def test_runbook_reuses_existing_models_without_rerunning_them() -> None:
 	assert 'existing H0 model' in text
 
 
-def test_screening_reads_validation_only_and_validates_exact_matrix() -> None:
-	script = _inline_python(_text())[-1]
-	assert "payload.get('validation')" in script
-	assert "validation.get('channel_iou')" in script
-	assert "'metric': 'validation.channel_iou'" in script
-	for forbidden in (
-		"payload.get('test')",
-		'payload.get("test")',
-		"payload['test']",
-		'payload["test"]',
-		'test.channel_iou',
-	):
-		assert forbidden not in script
-	assert 'expected_metric_count = 50' in script
-	assert 'len(model_ids) != 10' in script
-	assert 'len(variant_order) != 4' in script
-	assert "tuple(branches) != ('mae', 'local_bt')" in script
-	for model in (
-		'mae',
-		'mae_hmm_k6',
-		'local_barlow_twins',
-		'local_barlow_twins_hmm_k6',
-		*CANDIDATE_MODELS,
-	):
-		assert f"'{model}'" in script
-	for layout in LAYOUTS:
-		assert f"'{layout}'" in script
-	assert "payload.get('model')" in script
-	assert "payload.get('layout_id')" in script
-	assert "payload.get('data_size') != 'medium'" in script
-	assert 'paired_identity(metrics[(model, layout)])' in script
-	assert "os.environ['EXISTING_RUNS_ROOT']" in script
-	assert "os.environ['VALIDATION_RUNS_ROOT']" in script
-	assert "payload.get('evaluation_mode') != 'validation_only'" in script
-	assert "'test' in payload" in script
+def test_runbook_calls_executable_validation_summary_with_explicit_roots() -> None:
+	section = _section(
+		_text(),
+		'## 12. Write the validation screening summary',
+		'## 13. Final test protocol after all validation phases',
+	)
+	assert 'scripts/summarize_validation.py' in section
+	assert '--existing-runs-root "$EXISTING_RUNS_ROOT"' in section
+	assert '--validation-runs-root "$VALIDATION_RUNS_ROOT"' in section
+	assert '--report-root "$REPORT_ROOT"' in section
+	assert "python - <<'PY'" not in section
+	assert (
+		'tests/seis_ssl_cluster/'
+		'test_parihaka_channel_hmm_transition_balance_summary.py' in _text()
+	)
 
 
 def test_final_test_protocol_uses_disjoint_config_and_normal_mode() -> None:
@@ -387,41 +369,6 @@ def test_final_test_protocol_uses_disjoint_config_and_normal_mode() -> None:
 	assert 'evaluation_mode": "validation_and_test"' in section
 
 
-def test_screening_computes_required_statistics_and_recommendation_rule() -> None:
-	script = _inline_python(_text())[-1]
-	for statistic in (
-		'statistics.mean',
-		'statistics.median',
-		'statistics.stdev',
-		"'sample_standard_deviation'",
-		"'wins'",
-		"'ties'",
-		"'losses'",
-		"'layout_gains'",
-	):
-		assert statistic in script
-	assert 'eligible = mae_mean >= 0.0 and local_bt_mean >= 0.0' in script
-	assert 'eligible_variants' in script
-	assert 'ranking = sorted(' in script
-	assert "'combined'" in script
-	assert "['mean']" in script
-	assert "['median']" in script
-	assert 'variant_order.index(variant)' in script
-	assert 'recommended_variant = ranking[0] if ranking else None' in script
-	for key in (
-		'metric',
-		'data_size',
-		'variant_transition_settings',
-		'per_variant',
-		'ranking',
-		'recommended_variant',
-		'selection_rule',
-	):
-		assert f"'{key}'" in script
-	for filename in ('screening_validation.json', 'screening_validation.md'):
-		assert f"'{filename}'" in script
-
-
 def test_runbook_avoids_other_sizes_unsafe_artifact_commands_and_summary_cli() -> None:
 	text = _text()
 	commands = _bash_blocks(text)
@@ -431,7 +378,7 @@ def test_runbook_avoids_other_sizes_unsafe_artifact_commands_and_summary_cli() -
 		r'(?m)^\s*(?:rm\s+-rf|cp\s|rsync(?:\s|$)|ln\s+-s(?:\s|$))',
 		commands,
 	)
-	assert 'summarize_' not in text
+	assert text.count('scripts/summarize_validation.py') == 1
 	assert (
 		'$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/'
 		'ssl_hmm_four_way_v1/runs'
