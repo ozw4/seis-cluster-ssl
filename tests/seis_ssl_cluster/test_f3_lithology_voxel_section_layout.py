@@ -529,3 +529,27 @@ def _write_json(path: Path, payload: object) -> None:
 	path.write_text(
 		json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
 	)
+
+
+def test_condition_metadata_publishes_active_inline_and_crossline_lines(
+	tmp_path: Path,
+) -> None:
+	config = _fixture(tmp_path)
+	result = build_f3_lithology_voxel_section_layout_datasets(config)
+
+	for root in result.condition_roots:
+		metadata = json.loads(
+			(root / 'section_layout_metadata.json').read_text(encoding='utf-8')
+		)
+		active_lines = metadata['active_lines']
+		assert set(active_lines) == {'inline', 'crossline'}
+		for key in ('inline', 'crossline'):
+			assert active_lines[key]
+			assert all(isinstance(line, int) for line in active_lines[key])
+		contributions = metadata['identity']['per_line_contributions']
+		expected_keys = {
+			f'{slice_type}:{line}'
+			for slice_type in ('inline', 'crossline')
+			for line in active_lines[slice_type]
+		}
+		assert set(contributions) == expected_keys
