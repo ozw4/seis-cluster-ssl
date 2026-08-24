@@ -168,7 +168,9 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 	_validate_allowed_keys(dataset, frozenset({'name', 'version'}), prefix='dataset')
 	_validate_allowed_keys(model, frozenset({'tag', 'freeze_encoder'}), prefix='model')
 	_validate_allowed_keys(
-		embeddings, frozenset({'input_dir', 'spec'}), prefix='embeddings'
+		embeddings,
+		frozenset({'input_dir', 'spec', 'checkpoint_path'}),
+		prefix='embeddings',
 	)
 	_validate_allowed_keys(
 		voxel_dataset, frozenset({'input_dir'}), prefix='voxel_dataset'
@@ -326,7 +328,18 @@ def f3_lithology_voxel_decoder_config_from_mapping(
 				{'spec': _required_str(embeddings, 'spec', prefix='embeddings')}
 				if 'spec' in embeddings
 				else {}
-			)
+			),
+			**(
+				{
+					'checkpoint_path': str(
+						_required_absolute_path(
+							embeddings, 'checkpoint_path', prefix='embeddings'
+						)
+					)
+				}
+				if 'checkpoint_path' in embeddings
+				else {}
+			),
 		},
 	)
 
