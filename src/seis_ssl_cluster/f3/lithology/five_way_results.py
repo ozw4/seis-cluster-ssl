@@ -17,18 +17,25 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	DATA_SIZES,
 	LAYOUT_IDS,
 )
+from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.f3.lithology.five_way_runner import (
+	BEST_CHECKPOINT_NAME,
 	DECODER_DIR_NAME,
 	EVALUATION_DIR_NAME,
 	FIVE_WAY_EVALUATION_POLICY,
 	METRICS_NAME,
+	PREDICTION_DIR_NAME,
+	PREDICTION_METADATA_NAME,
 )
 from seis_ssl_cluster.f3.lithology.voxel_section_layout import (
 	LAYOUT_METADATA_NAME,
 )
 
 if TYPE_CHECKING:
-	from seis_ssl_cluster.config.f3_lithology_five_way import F3FiveWayConfig
+	from seis_ssl_cluster.config.f3_lithology_five_way import (
+		F3FiveWayConfig,
+		F3FiveWayModelSource,
+	)
 
 COMPARISON_CSV_NAME = 'comparison.csv'
 PAIRED_DELTAS_CSV_NAME = 'paired_deltas.csv'
@@ -62,12 +69,30 @@ PAIRED_COMPARISONS = (
 	('local_bt_minus_random', 'local_barlow_twins', 'random'),
 	('local_bt_hmm_k6_minus_random', 'local_barlow_twins_hmm_k6', 'random'),
 )
+EXPECTED_AGGREGATION_UNIT = 'unique_validation_voxel'
+SOURCE_IDENTITY_FIELDS = (
+	'encoder_checkpoint_sha256',
+	'embeddings_sha256',
+	'embedding_metadata_sha256',
+	'valid_tokens_sha256',
+	'decoder_checkpoint_sha256',
+)
+PER_MODEL_IDENTITY_FIELDS = (
+	'encoder_checkpoint_sha256',
+	'embeddings_sha256',
+	'embedding_metadata_sha256',
+)
 COMPARISON_FIELDNAMES = (
 	'model_id',
 	'layout_id',
 	'data_size',
 	'checkpoint_path',
+	'encoder_checkpoint_sha256',
 	'embeddings_dir',
+	'embeddings_sha256',
+	'embedding_metadata_sha256',
+	'valid_tokens_sha256',
+	'decoder_checkpoint_sha256',
 	'supervision_identity',
 	'validation_identity',
 	'macro_f1',
@@ -282,6 +307,13 @@ def _load_job_row(  # noqa: C901, PLR0912
 			)
 		if not math.isfinite(float(value)):
 			raise ValueError(f'{label} metrics {key} must be finite')
+	if metrics.get('aggregation_unit') != EXPECTED_AGGREGATION_UNIT:
+		# Metrics aggregated over anything but unique validation voxels are a
+		# different quantity and must not be averaged with these rows.
+		raise ValueError(
+			f'{label} metrics aggregation_unit must equal '
+			f'{EXPECTED_AGGREGATION_UNIT!r}; got {metrics.get("aggregation_unit")!r}'
+		)
 	declared_voxels = condition['validation_voxel_count']
 	if int(metrics['evaluation_voxel_count']) != declared_voxels:
 		raise ValueError(
@@ -338,12 +370,20 @@ def _load_job_row(  # noqa: C901, PLR0912
 		raise ValueError(
 			f'{label} decoder validation tile manifest identity missing'
 		)
+	identity = _job_source_identity(
+		label=label,
+		model=model,
+		survey_id=config.dataset['name'],
+		job_dir=job_dir,
+		evaluation_metadata=evaluation_metadata,
+	)
 	return {
 		'model_id': model_id,
 		'layout_id': layout_id,
 		'data_size': data_size,
 		'checkpoint_path': str(model.checkpoint),
 		'embeddings_dir': str(model.embeddings_dir),
+		**identity,
 		'supervision_identity': supervision_identity,
 		'validation_identity': str(condition['validation_mask_sha256']),
 		'macro_f1': float(metrics['macro_f1']),
@@ -354,6 +394,124 @@ def _load_job_row(  # noqa: C901, PLR0912
 		'metrics_path': str(job_dir / EVALUATION_DIR_NAME / METRICS_NAME),
 		'_validation_tile_manifest_sha256': validation_manifest,
 	}
+
+
+def _job_source_identity(
+	*,
+	label: str,
+	model: F3FiveWayModelSource,
+	survey_id: str,
+	job_dir: Path,
+	evaluation_metadata: Mapping[str, object],
+) -> dict[str, str]:
+	"""Read the recorded SHAs that make one comparison row reproducible."""
+	prediction_metadata_path = (
+		job_dir / PREDICTION_DIR_NAME / PREDICTION_METADATA_NAME
+	)
+	recorded_path, recorded_sha256 = _identity_entry(
+		evaluation_metadata.get('inputs'),
+		'prediction_metadata',
+		label=label,
+		prefix='evaluation inputs',
+	)
+	if not _same_path(recorded_path, prediction_metadata_path):
+		raise ValueError(
+			f'{label} metrics were not evaluated from this job prediction: '
+			f'{recorded_path}'
+		)
+	if file_sha256(prediction_metadata_path) != recorded_sha256:
+		raise ValueError(
+			f'{label} prediction artifact changed after its evaluation: '
+			f'{prediction_metadata_path}'
+		)
+	prediction_metadata = _read_json(prediction_metadata_path)
+	source_identity = prediction_metadata.get('source_identity')
+	decoder_path, decoder_sha256 = _identity_entry(
+		source_identity,
+		'decoder_checkpoint',
+		label=label,
+		prefix='prediction source_identity',
+	)
+	expected_decoder = job_dir / DECODER_DIR_NAME / BEST_CHECKPOINT_NAME
+	if not _same_path(decoder_path, expected_decoder):
+		raise ValueError(
+			f'{label} prediction used a foreign decoder checkpoint: {decoder_path}'
+		)
+	artifact_identities = (
+		source_identity.get('artifact_identities')
+		if isinstance(source_identity, Mapping)
+		else None
+	)
+	files = output_paths(model.embeddings_dir, survey_id)
+	shas: dict[str, str] = {}
+	for key, expected_path in (
+		('embeddings', files.embeddings),
+		('embedding_metadata', files.metadata),
+		('valid_tokens', files.valid_tokens),
+	):
+		recorded, sha256 = _identity_entry(
+			artifact_identities,
+			key,
+			label=label,
+			prefix='prediction artifact_identities',
+		)
+		if not _same_path(recorded, expected_path):
+			raise ValueError(
+				f'{label} prediction {key} is not the configured five-way source: '
+				f'{recorded}'
+			)
+		shas[key] = sha256
+	if file_sha256(files.metadata) != shas['embedding_metadata']:
+		# The recorded encoder SHA is only trustworthy while the metadata file it
+		# was read from still holds the content this job consumed.
+		raise ValueError(
+			f'{label} embedding metadata changed after this job ran: {files.metadata}'
+		)
+	metadata = _read_json(files.metadata)
+	encoder_sha256 = metadata.get('checkpoint_sha256')
+	if not isinstance(encoder_sha256, str) or len(encoder_sha256) != 64:
+		raise ValueError(
+			f'{label} embedding metadata checkpoint_sha256 must be a SHA-256 digest'
+		)
+	if metadata.get('checkpoint_path') != str(model.checkpoint):
+		raise ValueError(
+			f'{label} embedding metadata checkpoint_path is not the configured '
+			f'five-way checkpoint: {metadata.get("checkpoint_path")!r}'
+		)
+	return {
+		'encoder_checkpoint_sha256': encoder_sha256,
+		'embeddings_sha256': shas['embeddings'],
+		'embedding_metadata_sha256': shas['embedding_metadata'],
+		'valid_tokens_sha256': shas['valid_tokens'],
+		'decoder_checkpoint_sha256': decoder_sha256,
+	}
+
+
+def _identity_entry(
+	container: object, key: str, *, label: str, prefix: str
+) -> tuple[str, str]:
+	if not isinstance(container, Mapping):
+		raise ValueError(  # noqa: TRY004 - a missing block is a value error
+			f'{label} {prefix} must be a mapping'
+		)
+	entry = container.get(key)
+	if not isinstance(entry, Mapping):
+		raise ValueError(  # noqa: TRY004 - a missing identity is a value error
+			f'{label} {prefix}.{key} identity is required'
+		)
+	path = entry.get('path')
+	sha256 = entry.get('sha256')
+	if not isinstance(path, str) or not path:
+		raise ValueError(f'{label} {prefix}.{key} path is required')
+	if not isinstance(sha256, str) or len(sha256) != 64:
+		raise ValueError(
+			f'{label} {prefix}.{key} sha256 must be a SHA-256 digest'
+		)
+	return path, sha256
+
+
+def _same_path(recorded: str, expected: Path) -> bool:
+	return Path(recorded).resolve(strict=False) == expected.resolve(strict=False)
 
 
 def _validate_cross_job_identity(rows: list[dict[str, object]]) -> None:
@@ -374,8 +532,39 @@ def _validate_cross_job_identity(rows: list[dict[str, object]]) -> None:
 					f'{layout_id}/{data_size} supervision identity differs '
 					'between models'
 				)
+	_validate_source_identity(rows)
 	for row in rows:
 		del row['_validation_tile_manifest_sha256']
+
+
+def _validate_source_identity(rows: list[dict[str, object]]) -> None:
+	"""Reject sources that were regenerated in place between the 75 jobs."""
+	by_model: dict[str, list[dict[str, object]]] = {}
+	for row in rows:
+		by_model.setdefault(str(row['model_id']), []).append(row)
+	for model_id, group in by_model.items():
+		for key in PER_MODEL_IDENTITY_FIELDS:
+			values = {str(row[key]) for row in group}
+			if len(values) != 1:
+				raise ValueError(
+					f'{model_id} {key} differs between its {len(group)} jobs; '
+					f'got {sorted(values)!r}'
+				)
+	valid_tokens = {str(row['valid_tokens_sha256']) for row in rows}
+	if len(valid_tokens) != 1:
+		raise ValueError(
+			'valid-token identity must be shared by all 75 jobs; '
+			f'got {sorted(valid_tokens)!r}'
+		)
+	encoders: dict[str, str] = {}
+	for model_id, group in by_model.items():
+		encoder = str(group[0]['encoder_checkpoint_sha256'])
+		duplicate = encoders.setdefault(encoder, model_id)
+		if duplicate != model_id:
+			raise ValueError(
+				'encoder checkpoint SHA-256 must differ across models; '
+				f'{duplicate!r} and {model_id!r} match'
+			)
 
 
 def _grouped(
@@ -543,10 +732,13 @@ __all__ = [
 	'BY_SIZE_FIELDNAMES',
 	'COMPARISON_CSV_NAME',
 	'COMPARISON_FIELDNAMES',
+	'EXPECTED_AGGREGATION_UNIT',
 	'PAIRED_COMPARISONS',
 	'PAIRED_DELTAS_CSV_NAME',
 	'PAIRED_FIELDNAMES',
+	'PER_MODEL_IDENTITY_FIELDS',
 	'PRIMARY_METRIC',
+	'SOURCE_IDENTITY_FIELDS',
 	'SUMMARY_BY_SIZE_CSV_NAME',
 	'SUMMARY_JSON_NAME',
 	'SUMMARY_MD_NAME',

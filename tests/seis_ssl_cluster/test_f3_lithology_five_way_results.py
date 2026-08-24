@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import subprocess
 import sys
@@ -19,12 +20,15 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.five_way_results import (
+	EXPECTED_AGGREGATION_UNIT,
+	SOURCE_IDENTITY_FIELDS,
 	SUMMARY_METRICS,
 	SUMMARY_OUTPUT_NAMES,
 	inspect_f3_lithology_five_way_results,
 	summarize_f3_lithology_five_way,
 )
 from tests.seis_ssl_cluster.helpers_f3_five_way import (
+	SURVEY_ID,
 	build_five_way_universe,
 	write_condition,
 )
@@ -49,11 +53,18 @@ def _metric_value(
 	)
 
 
-def _write_run(
+def _identity(path: Path) -> dict[str, str]:
+	return {'path': str(path), 'sha256': file_sha256(path)}
+
+
+def _write_run(  # noqa: PLR0913
 	universe: dict[str, object],
 	model_id: str,
 	layout_id: str,
 	data_size: str,
+	*,
+	embeddings_sha256: str | None = None,
+	aggregation_unit: str = EXPECTED_AGGREGATION_UNIT,
 ) -> Path:
 	job_dir = (
 		Path(universe['outputs']['runs_root'])
@@ -63,16 +74,55 @@ def _write_run(
 	)
 	evaluation = job_dir / 'evaluation'
 	decoder = job_dir / 'decoder'
+	prediction = job_dir / 'prediction'
 	evaluation.mkdir(parents=True, exist_ok=True)
 	decoder.mkdir(parents=True, exist_ok=True)
+	prediction.mkdir(parents=True, exist_ok=True)
 	metrics = {
 		metric: _metric_value(model_id, layout_id, data_size, metric)
 		for metric in SUMMARY_METRICS
 	}
 	metrics['evaluation_voxel_count'] = VALIDATION_VOXEL_COUNT
+	metrics['aggregation_unit'] = aggregation_unit
 	metrics['accuracy'] = 0.9
 	(evaluation / 'metrics.json').write_text(
 		json.dumps(metrics), encoding='utf-8'
+	)
+	model = next(
+		item
+		for item in universe['models']
+		if item['model_id'] == model_id
+	)
+	embeddings_dir = Path(model['embeddings_dir'])
+	embeddings = embeddings_dir / f'{SURVEY_ID}.embeddings.npy'
+	embedding_metadata = embeddings_dir / f'{SURVEY_ID}.embedding_metadata.json'
+	valid_tokens = embeddings_dir / f'{SURVEY_ID}.valid_tokens.npy'
+	embeddings_identity = _identity(embeddings)
+	if embeddings_sha256 is not None:
+		embeddings_identity['sha256'] = embeddings_sha256
+	prediction_metadata = prediction / 'prediction_metadata.json'
+	prediction_metadata.write_text(
+		json.dumps(
+			{
+				'artifact_type': 'f3_lithology_voxel_prediction',
+				'model_tag': model_id,
+				'source_identity': {
+					'decoder_checkpoint': {
+						'path': str(decoder / 'best.pt'),
+						'sha256': hashlib.sha256(
+							f'{model_id}/{layout_id}/{data_size}'.encode()
+						).hexdigest(),
+					},
+					'artifact_identities': {
+						'name': 'f3_voxel_decoder_sources',
+						'embeddings': embeddings_identity,
+						'embedding_metadata': _identity(embedding_metadata),
+						'valid_tokens': _identity(valid_tokens),
+					},
+				},
+			}
+		),
+		encoding='utf-8',
 	)
 	(evaluation / 'evaluation_metadata.json').write_text(
 		json.dumps(
@@ -85,14 +135,10 @@ def _write_run(
 					'boundary_region_radii': [1, 2, 4, 8],
 					'chunk_size_x': 8,
 				},
+				'inputs': {'prediction_metadata': _identity(prediction_metadata)},
 			}
 		),
 		encoding='utf-8',
-	)
-	model = next(
-		item
-		for item in universe['models']
-		if item['model_id'] == model_id
 	)
 	(decoder / 'resolved_config.json').write_text(
 		json.dumps(
@@ -355,6 +401,95 @@ def test_checkpoint_identity_drift_rejects_summary(
 
 	with pytest.raises(ValueError, match='checkpoint identity'):
 		inspect_f3_lithology_five_way_results(config)
+
+
+def test_comparison_rows_carry_the_recorded_source_shas(
+	results_universe: dict[str, object],
+) -> None:
+	config = f3_lithology_five_way_config_from_mapping(results_universe)
+	summarize_f3_lithology_five_way(config)
+
+	with (config.summary_root / 'comparison.csv').open(
+		encoding='utf-8', newline=''
+	) as handle:
+		comparison = list(csv.DictReader(handle))
+	for field in SOURCE_IDENTITY_FIELDS:
+		assert all(len(row[field]) == 64 for row in comparison)
+	by_model: dict[str, set[str]] = {}
+	for row in comparison:
+		by_model.setdefault(row['model_id'], set()).add(row['embeddings_sha256'])
+	assert set(by_model) == set(FIVE_WAY_MODEL_IDS)
+	assert all(len(values) == 1 for values in by_model.values())
+	assert len({row['valid_tokens_sha256'] for row in comparison}) == 1
+	assert len({row['encoder_checkpoint_sha256'] for row in comparison}) == len(
+		FIVE_WAY_MODEL_IDS
+	)
+	assert len({row['decoder_checkpoint_sha256'] for row in comparison}) == 75
+	for row in comparison:
+		model = next(
+			item
+			for item in results_universe['models']
+			if item['model_id'] == row['model_id']
+		)
+		assert row['encoder_checkpoint_sha256'] == file_sha256(
+			Path(model['checkpoint'])
+		)
+
+
+def test_embedding_sha_drift_between_jobs_rejects_summary(
+	results_universe: dict[str, object],
+) -> None:
+	config = f3_lithology_five_way_config_from_mapping(results_universe)
+	for layout_id in LAYOUT_IDS[2:]:
+		for data_size in DATA_SIZES:
+			_write_run(
+				results_universe,
+				'local_barlow_twins',
+				layout_id,
+				data_size,
+				embeddings_sha256='b' * 64,
+			)
+
+	with pytest.raises(
+		ValueError, match=r'local_barlow_twins embeddings_sha256 differs'
+	):
+		inspect_f3_lithology_five_way_results(config)
+	with pytest.raises(ValueError, match=r'embeddings_sha256 differs'):
+		summarize_f3_lithology_five_way(config)
+	assert not config.summary_root.exists()
+
+
+def test_reextracted_embedding_metadata_rejects_summary(
+	results_universe: dict[str, object],
+) -> None:
+	config = f3_lithology_five_way_config_from_mapping(results_universe)
+	metadata_path = (
+		Path(results_universe['models'][0]['embeddings_dir'])
+		/ f'{SURVEY_ID}.embedding_metadata.json'
+	)
+	payload = json.loads(metadata_path.read_text(encoding='utf-8'))
+	payload['extraction_note'] = 're-extracted in place'
+	metadata_path.write_text(json.dumps(payload), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='embedding metadata changed'):
+		inspect_f3_lithology_five_way_results(config)
+
+
+def test_non_unique_voxel_aggregation_rejects_summary(
+	results_universe: dict[str, object],
+) -> None:
+	config = f3_lithology_five_way_config_from_mapping(results_universe)
+	_write_run(
+		results_universe,
+		'mae_hmm_k6',
+		LAYOUT_IDS[1],
+		DATA_SIZES[0],
+		aggregation_unit='validation_slice',
+	)
+
+	with pytest.raises(ValueError, match='aggregation_unit must equal'):
+		inspect_f3_lithology_five_way_results(config)
+	assert not config.summary_root.exists()
 
 
 def test_summary_refuses_to_overwrite_existing_outputs(

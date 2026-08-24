@@ -301,7 +301,31 @@ def test_synthetic_end_to_end_connection(
 		run_metadata['initial_model_state_sha256']
 		== inspection['decoder_initial_state_sha256']
 	)
-	assert (job.prediction_dir / 'prediction_metadata.json').is_file()
+	prediction_metadata_path = job.prediction_dir / 'prediction_metadata.json'
+	assert prediction_metadata_path.is_file()
+	# The summary reads its comparison identity out of these two artifacts, so a
+	# completed job must carry every SHA that identity is built from.
+	assert metrics['aggregation_unit'] == 'unique_validation_voxel'
+	evaluation_metadata = json.loads(
+		(job.evaluation_dir / 'evaluation_metadata.json').read_text(encoding='utf-8')
+	)
+	recorded_prediction = evaluation_metadata['inputs']['prediction_metadata']
+	assert recorded_prediction['path'] == str(prediction_metadata_path)
+	assert recorded_prediction['sha256'] == file_sha256(prediction_metadata_path)
+	source_identity = json.loads(
+		prediction_metadata_path.read_text(encoding='utf-8')
+	)['source_identity']
+	assert source_identity['decoder_checkpoint']['path'] == str(
+		job.decoder_dir / 'best.pt'
+	)
+	identities = source_identity['artifact_identities']
+	for key, name in (
+		('embeddings', f'{SURVEY_ID}.embeddings.npy'),
+		('embedding_metadata', f'{SURVEY_ID}.embedding_metadata.json'),
+		('valid_tokens', f'{SURVEY_ID}.valid_tokens.npy'),
+	):
+		assert identities[key]['path'] == str(job.model.embeddings_dir / name)
+		assert len(identities[key]['sha256']) == 64
 
 	with pytest.raises(FileExistsError, match='already completed'):
 		run_f3_lithology_five_way_job(job, device='cpu')

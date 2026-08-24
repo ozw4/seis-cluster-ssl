@@ -215,6 +215,14 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py --config "$CONFI
 `complete_jobs: 75`を確認してから次へ進む。欠損・重複・identity driftが
 1件でもあればsummaryは書かれない。
 
+identityはpathではなくSHA-256で照合する。各jobの`prediction_metadata.json`が
+記録したencoder embedding・embedding metadata・valid token・decoder checkpointの
+SHAを読み、同じmodelの15 jobsでencoder checkpointとembeddingのSHAが一致すること、
+五者でvalid tokenのSHAが一致すること、五者のencoder checkpoint SHAが互いに異なる
+ことを検証する。途中で同じpathにembeddingを再抽出した場合はここで停止する。
+`metrics.json`の`aggregation_unit`が`unique_validation_voxel`であることも確認し、
+別の集計単位のmetricsが混ざらないようにする。
+
 ## 11. summary生成
 
 ```bash
@@ -224,7 +232,8 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py --config "$CONFI
 出力は`f3_lithology_benchmark/mae_local_bt_five_way_v1/summary/`の5ファイルに
 限定される。
 
-- `comparison.csv`: 75 jobs × 1行（checkpoint/embedding/supervision identity付き）
+- `comparison.csv`: 75 jobs × 1行（encoder checkpoint・embedding・valid token・
+  decoder checkpointのSHA-256とsupervision identity付き）
 - `paired_deltas.csv`: 同じ`layout/size`内のpaired delta（符号は常に`left - right`）
 - `summary_by_size.csv`: size × comparison × metricごとの5 layouts集計
 - `summary.json` / `summary.md`
