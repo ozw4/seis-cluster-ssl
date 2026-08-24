@@ -599,6 +599,25 @@ def test_audit_reports_an_unreadable_ancestor_with_model_context(
 		audit_f3_lithology_five_way_sources(config)
 
 
+def test_audit_rejects_missing_stage1_ancestor(
+	universe: dict[str, object],
+	tmp_path: Path,
+) -> None:
+	config = f3_lithology_five_way_config_from_mapping(universe)
+	base = tmp_path / 'moved_away' / 'full_100ep' / 'latest.pt'
+	checkpoint = Path(universe['models'][2]['checkpoint'])
+	payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
+	payload['config']['continuation']['init_checkpoint'] = str(base)
+	_repoint_checkpoint(universe, 2, payload)
+
+	with pytest.raises(FileNotFoundError, match='does not exist') as excinfo:
+		audit_f3_lithology_five_way_sources(config)
+	message = str(excinfo.value)
+	assert 'local_barlow_twins' in message
+	assert 'continuation.init_checkpoint' in message
+	assert str(base) in message
+
+
 def test_audit_rejects_a_lineage_deeper_than_it_can_verify(
 	universe: dict[str, object],
 	tmp_path: Path,

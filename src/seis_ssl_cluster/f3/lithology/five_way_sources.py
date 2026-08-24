@@ -491,7 +491,11 @@ def _validate_ancestry(  # noqa: C901
 		)
 	init_path = Path(init_value)
 	if not init_path.is_file():
-		return
+		# An unverifiable ancestor cannot certify the 100+25 budget, the base
+		# objective, or the absence of trace drop, so the audit fails closed.
+		raise FileNotFoundError(
+			f'{model_id} {role} does not exist: {init_path}'
+		)
 	if depth >= _MAX_LINEAGE_DEPTH:
 		raise ValueError(
 			f'{model_id} lineage is deeper than the audit can verify at {init_path}'
