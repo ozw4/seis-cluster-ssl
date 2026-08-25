@@ -1,0 +1,35 @@
+# v2 section layouts, fixed from the v2 candidate report
+# (lithology/f3/facies_benchmark_v2/voxel_section_layout_v2_calibration/section_candidates.csv)
+# over the v2 section inventory (../10_prepare/section_inventory_v2.csv).
+#
+# Rule (deterministic, position-only; no model identity or metric is used):
+#   1. train candidates per axis, sorted ascending (positions 0..19)
+#        inlines    250, 270, ..., 630                       (20 lines, step 20)
+#        crosslines 450, 475, ..., 625 and 850, 875, ..., 1125 (20 lines, step 25)
+#      validation lines (inline 150; crosslines 350, 750) are never candidates.
+#   2. layout k (k = 0..4) takes positions k, k+5, k+10, k+15 on each axis
+#      (quartet index j = 0..3). The five quartets partition the inventory, so
+#      no line is shared between layouts, and every layout spans the survey.
+#   3. the nested order walks the quartet cyclically starting at
+#      j0 = (k + 1) mod 4: small = first line, medium = first two, large = all.
+#      (Starting at j0 = k mod 4 would pair inline 610 with crossline 1100 in
+#      layout_003, whose union has no class 4; shifting the start by one
+#      position is the smallest change that satisfies every class gate.)
+# Class gates (all six classes, classes 3 and 5 nonzero, positive contribution
+# of every active line) are verified by finalize for every layout and size.
+layouts:
+  - layout_id: layout_000
+    ordered_inlines: [350, 450, 550, 250]
+    ordered_crosslines: [575, 900, 1025, 450]
+  - layout_id: layout_001
+    ordered_inlines: [470, 570, 270, 370]
+    ordered_crosslines: [925, 1050, 475, 600]
+  - layout_id: layout_002
+    ordered_inlines: [590, 290, 390, 490]
+    ordered_crosslines: [1075, 500, 625, 950]
+  - layout_id: layout_003
+    ordered_inlines: [310, 410, 510, 610]
+    ordered_crosslines: [525, 850, 975, 1100]
+  - layout_id: layout_004
+    ordered_inlines: [430, 530, 630, 330]
+    ordered_crosslines: [875, 1000, 1125, 550]

@@ -1,0 +1,20 @@
+inputs:
+  canonical_split_grid: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_supervision/dense_label_sections_v2/supervision_split_grid.npy
+  label_volume: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2/f3_facies_labels.npy
+  line_inventory: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/10_prepare/section_inventory_v2.csv
+  segy_geometry_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/segy_geometry.json
+  layout_lines: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/109_f3_voxel_section_layout_v2/02_layout_lines.yaml
+selection:
+  semantics: stable_hash_partial_section_token_footprints_v1
+  patch_size_xyz: [8, 8, 8]
+  allowed_relative_error: 0.05
+targets:
+  # Per size, the largest teacher-voxel count that all five layouts can reach
+  # with their own active sections; derived from v2 candidates only.
+  rule: max_common_reachable_active_pool_v1
+outputs:
+  # Kept beside (not inside) the dataset root so the builder can commit the
+  # dataset root atomically.
+  candidate_statistics_csv: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_section_layout_v2_calibration/section_candidates.csv
+  candidate_statistics_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_section_layout_v2_calibration/section_candidates.json
+  canonical_contract: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_section_layout_v2_calibration/f3_voxel_section_layout_contract.json
