@@ -52,6 +52,7 @@ EXTRACTION_CONFIGS = tuple(
 CHANNEL_CONFIG = EXPERIMENT_ROOT / '40_channel_transition_balance.yaml'
 FINAL_CHANNEL_CONFIG = EXPERIMENT_ROOT / '41_channel_transition_balance_final.yaml'
 SUMMARY_SCRIPT = EXPERIMENT_ROOT / 'scripts/summarize_validation.py'
+FINAL_SUMMARY_SCRIPT = EXPERIMENT_ROOT / 'scripts/summarize_final_test.py'
 LAYOUT_CONFIG = Path(
 	'experiments/parihaka/facies_benchmark_v1/'
 	'30_channel_benchmark_v1/02_layouts.yaml'
@@ -117,6 +118,7 @@ def test_runbook_references_existing_configs_scripts_layout_and_clis() -> None:
 		CHANNEL_CONFIG,
 		FINAL_CHANNEL_CONFIG,
 		SUMMARY_SCRIPT,
+		FINAL_SUMMARY_SCRIPT,
 		LAYOUT_CONFIG,
 		*CLIS,
 	):
@@ -245,6 +247,10 @@ def test_targeted_tests_cover_decoder_runner_and_cli() -> None:
 	)
 	assert 'tests/seis_ssl_cluster/test_parihaka_channel_decoder.py' in section
 	assert 'tests/seis_ssl_cluster/test_proc_dry_run.py' in section
+	assert (
+		'tests/seis_ssl_cluster/'
+		'test_parihaka_channel_hmm_transition_balance_final_summary.py' in section
+	)
 	assert '-k parihaka_channel_decoder' in section
 
 
@@ -364,20 +370,57 @@ def test_runbook_calls_executable_validation_summary_with_explicit_roots() -> No
 	)
 
 
-def test_final_test_protocol_uses_disjoint_config_and_normal_mode() -> None:
+def test_final_test_protocol_uses_all_layouts_in_disjoint_normal_runs() -> None:
 	text = _text()
 	section = _section(text, '## 13. Final test protocol after all validation phases')
 	assert 'Do not run this section during Phase 1' in section
+	assert 'FINAL_LAYOUT' not in section
+	assert section.count('export FINAL_MODEL=') == 1
 	assert '--config "$FINAL_CHANNEL_CONFIG"' in section
 	assert '--model "$FINAL_MODEL"' in section
-	assert '--layout "$FINAL_LAYOUT"' in section
+	assert '--layout "$layout"' in section
 	assert '--size medium' in section
 	assert section.count('run_parihaka_channel_decoder.py') == 2
-	normal_command = section.rsplit('```bash', maxsplit=1)[1].split(
-		'```', maxsplit=1
-	)[0]
-	assert '--validation-only' not in normal_command
-	assert 'evaluation_mode": "validation_and_test"' in section
+	blocks = re.findall(r'```bash\n(.*?)\n```', section, flags=re.DOTALL)
+	assert len(blocks) == 4
+	dry_run = blocks[1]
+	normal_run = blocks[2]
+	for block in (dry_run, normal_run):
+		assert _array_items(block, 'LAYOUTS') == LAYOUTS
+		assert 'for layout in "${LAYOUTS[@]}"' in block
+		assert '--model "$FINAL_MODEL"' in block
+		assert '--layout "$layout"' in block
+	assert '--dry-run' in dry_run
+	assert '--dry-run' not in normal_run
+	assert '--validation-only' not in normal_run
+	assert 'job_dir="$FINAL_RUNS_ROOT/model=$FINAL_MODEL/' in normal_run
+	assert 'if [[ -f "$job_dir/metrics.json" ]]' in normal_run
+	assert 'if [[ -f "$job_dir/latest.pt" ]]' in normal_run
+	assert 'incomplete final test job requires explicit resume' in normal_run
+	assert 'evaluation_mode` equal to' in section
+	assert '`validation_and_test`' in section
+	assert 'exactly five final test jobs' in section
+	assert 'Layouts must not be ranked or selected after test evaluation' in section
+	assert 'must not trigger another model, transition condition, layout' in section
+	assert 'disjoint from historical' in section
+	assert '/validation_runs"' in text
+	assert '/final_runs"' in text
+
+
+def test_final_test_protocol_calls_executable_summary_with_explicit_roots() -> None:
+	section = _section(
+		_text(),
+		'## 13. Final test protocol after all validation phases',
+	)
+	assert 'scripts/summarize_final_test.py' in section
+	assert '--runs-root "$FINAL_RUNS_ROOT"' in section
+	assert '--model "$FINAL_MODEL"' in section
+	assert '--report-root "$REPORT_ROOT/final_test"' in section
+	assert 'final_test_layouts.csv' in section
+	assert 'final_test_summary.json' in section
+	assert 'final_test_summary.md' in section
+	assert 'mean, median, and sample standard deviation' in section
+	assert 'statistics.stdev()' in section
 
 
 def test_runbook_avoids_other_sizes_unsafe_artifact_commands_and_summary_cli() -> None:
@@ -390,6 +433,7 @@ def test_runbook_avoids_other_sizes_unsafe_artifact_commands_and_summary_cli() -
 		commands,
 	)
 	assert text.count('scripts/summarize_validation.py') == 1
+	assert text.count('scripts/summarize_final_test.py') == 1
 	assert (
 		'$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/'
 		'ssl_hmm_four_way_v1/runs'

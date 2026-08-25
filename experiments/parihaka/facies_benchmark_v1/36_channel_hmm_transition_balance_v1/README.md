@@ -77,9 +77,9 @@ reused source appear under a new namespace.
 
 ## 2. Targeted tests
 
-Run the production decoder tests, the three config contracts, the executable
-screening tests, this runbook contract, and the focused decoder CLI tests
-before execution:
+Run the production decoder tests, the three config contracts, both executable
+summary tests, this runbook contract, and the focused decoder CLI tests before
+execution:
 
 ```bash
 set -euo pipefail
@@ -89,6 +89,7 @@ pytest -q \
   tests/seis_ssl_cluster/test_parihaka_hmm_transition_balance_training_configs.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_configs.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_summary.py \
+  tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_final_summary.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_runbook.py
 
 pytest -q \
@@ -766,41 +767,106 @@ held-out report.
 
 ## 13. Final test protocol after all validation phases
 
-Do not run this section during Phase 1. After the complete multi-phase study
-has frozen one final model and layout without reference to any test result, set
-those IDs explicitly. The final config uses `$FINAL_RUNS_ROOT`, which is
-disjoint from both historical runs and Phase 1 validation-only runs.
+Do not run this section during Phase 1. Complete all validation-only
+hyperparameter studies first, then freeze exactly one final model without
+reference to any test result.
+
+Layouts are not hyperparameters. Evaluate the frozen final model on all five
+predefined layouts:
+
+- `layout_000`
+- `layout_001`
+- `layout_002`
+- `layout_003`
+- `layout_004`
+
+The final config uses `$FINAL_RUNS_ROOT`, which is disjoint from historical
+runs and validation-only runs. Set only the frozen model ID:
 
 ```bash
 set -euo pipefail
 export FINAL_MODEL=mae_hmm_k6_persist003
-export FINAL_LAYOUT=layout_002
-python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
-  --config "$FINAL_CHANNEL_CONFIG" \
-  --model "$FINAL_MODEL" \
-  --layout "$FINAL_LAYOUT" \
-  --size medium \
-  --layout-config "$LAYOUT_CONFIG" \
-  --dry-run
 ```
 
-Record the frozen choice before continuing. Then run exactly that job in the
-normal mode, deliberately omitting `--validation-only`. This retrains the
-deterministic decoder in the clean final namespace, selects `best.pt` by
-validation Channel IoU, and evaluates the test dataset once.
+Record the frozen model choice before continuing. Dry-run all five final jobs:
 
 ```bash
 set -euo pipefail
-python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
-  --config "$FINAL_CHANNEL_CONFIG" \
-  --model "$FINAL_MODEL" \
-  --layout "$FINAL_LAYOUT" \
-  --size medium \
-  --layout-config "$LAYOUT_CONFIG"
+LAYOUTS=(
+  layout_000
+  layout_001
+  layout_002
+  layout_003
+  layout_004
+)
+for layout in "${LAYOUTS[@]}"; do
+  python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
+    --config "$FINAL_CHANNEL_CONFIG" \
+    --model "$FINAL_MODEL" \
+    --layout "$layout" \
+    --size medium \
+    --layout-config "$LAYOUT_CONFIG" \
+    --dry-run
+done
 ```
 
-The resulting `$FINAL_RUNS_ROOT/model=$FINAL_MODEL/layout=$FINAL_LAYOUT/size=medium/metrics.json`
-must say `"evaluation_mode": "validation_and_test"` and contain the single
-authorized top-level `test` result. Do not copy a validation-only checkpoint
-into this namespace and do not run alternative models or layouts after seeing
-that result.
+After recording the frozen model choice, run exactly the five predefined
+layouts in normal mode. Deliberately omit `--validation-only`:
+
+```bash
+set -euo pipefail
+LAYOUTS=(
+  layout_000
+  layout_001
+  layout_002
+  layout_003
+  layout_004
+)
+for layout in "${LAYOUTS[@]}"; do
+  job_dir="$FINAL_RUNS_ROOT/model=$FINAL_MODEL/layout=$layout/size=medium"
+
+  if [[ -f "$job_dir/metrics.json" ]]; then
+    echo "skip completed final test job: layout=$layout"
+    continue
+  fi
+
+  if [[ -f "$job_dir/latest.pt" ]]; then
+    echo "incomplete final test job requires explicit resume: $job_dir" >&2
+    exit 1
+  fi
+
+  python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
+    --config "$FINAL_CHANNEL_CONFIG" \
+    --model "$FINAL_MODEL" \
+    --layout "$layout" \
+    --size medium \
+    --layout-config "$LAYOUT_CONFIG"
+done
+```
+
+Every final `metrics.json` must use the frozen `$FINAL_MODEL`, have
+`data_size` equal to `medium`, have `evaluation_mode` equal to
+`validation_and_test`, contain a top-level `test` mapping, and use one of the
+five predefined layouts.
+
+After all five jobs complete, write the final descriptive report:
+
+```bash
+set -euo pipefail
+python "$EXP/scripts/summarize_final_test.py" \
+  --runs-root "$FINAL_RUNS_ROOT" \
+  --model "$FINAL_MODEL" \
+  --report-root "$REPORT_ROOT/final_test"
+```
+
+Inspect `$REPORT_ROOT/final_test/final_test_layouts.csv`,
+`final_test_summary.json`, and `final_test_summary.md`. Report all five test
+Channel IoU values and their mean, median, and sample standard deviation. The
+summary uses `statistics.stdev()` and requires exactly the five predefined
+`medium` jobs for the frozen model in the final namespace.
+
+Layouts must not be ranked or selected after test evaluation. Test results
+must not trigger another model, transition condition, layout, or
+hyperparameter search. Do not copy a validation-only checkpoint into the
+final namespace. The final experimental unit is one frozen model multiplied
+by five predefined layouts, for exactly five final test jobs.
