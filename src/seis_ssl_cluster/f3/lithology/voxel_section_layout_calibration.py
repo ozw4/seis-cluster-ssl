@@ -35,6 +35,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	NESTING_SEMANTICS,
 	PATCH_SIZE,
 	STATISTICAL_UNIT,
+	TARGET_CALIBRATION_RULE,
 	VALIDATION_MASK_SEMANTICS,
 	f3_lithology_voxel_section_layout_contract_from_mapping,
 )
@@ -62,7 +63,9 @@ if TYPE_CHECKING:
 	from numpy.typing import NDArray
 
 CANDIDATE_ARTIFACT_TYPE = 'f3_lithology_voxel_section_candidates'
-TARGET_RULE = 'max_common_reachable_active_pool_v1'
+# Producer and contract resolver share one rule constant so a stored contract
+# is always replayable by the resolver that consumes it.
+TARGET_RULE = TARGET_CALIBRATION_RULE
 MONITORED_CLASS_IDS = (3, 5)
 ACTIVE_PREFIX_COUNTS = {
 	data_size: {'inline': counts[0], 'crossline': counts[1]}
