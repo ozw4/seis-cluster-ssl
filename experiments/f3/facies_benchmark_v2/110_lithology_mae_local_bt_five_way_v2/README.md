@@ -46,7 +46,9 @@ split生成規則。出力pathとdataset versionだけがv2である。
 
 - 5つのencoder checkpointはv1 fixed-budget artifactを再学習せずに参照する
   （`60_five_way.yaml`の`models[].checkpoint`）。v2 directoryへコピー・symlinkして
-  version表記だけを変えることはしない。
+  version表記だけを変えることはしない。checkpointをv2 amplitudeに適用する前に、
+  v1/v2 prepared volumeの同一性を生成済みartifactで確認する（手順9の
+  `check_f3_prepared_volume_parity.py`。config値の一致だけでは足りない）。
   - `mae`: `pretraining/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/mae_continue/full_25ep/latest.pt`
   - `mae_hmm_k6`: `pretraining/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/hmm/k6/full_25ep/latest.pt`
   - `local_barlow_twins`: `pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/stage2/local_bt100/local_bt_continue/full_25ep/latest.pt`
@@ -211,7 +213,43 @@ source planを確認する。
 python proc/seis_ssl_cluster/audit_f3_lithology_five_way_sources.py --config "$CONFIG" --dry-run
 ```
 
-## 9. v2 embedding extraction（GPU）
+## 9. v1/v2 prepared volume parity gate（CPU、read-only）
+
+v1で学習したcheckpointをv2 amplitudeに適用する科学的前提は、v1/v2の
+prepared volumeが同一であることである。上の「v1から変えない前処理条件」は
+config値の一致にすぎないので、embedding抽出の前に生成済みartifactそのものを
+比較する。比較対象は v1/v2 `f3_seismic.npy`・`f3_facies_labels.npy`の
+SHA-256、shape / dtype / grid_order、normalization statsの意味的な数値field
+（clip percentiles、epsilon、sample count、seed、computed clip bounds、
+center = median / scale = iqr）、class orderで、出力pathとdataset versionは
+比較しない（sample countとseedはstats JSONに記録されないためprepare configから
+取る）。何も書かない。
+
+```bash
+python proc/seis_ssl_cluster/check_f3_prepared_volume_parity.py --dry-run
+python proc/seis_ssl_cluster/check_f3_prepared_volume_parity.py
+```
+
+既定の`--reference-config`はv1の`01_prepare_f3_volume.yaml`、
+`--candidate-config`はv2の同名configである。`f3_prepared_parity.status: FAIL`
+（exit code非0）なら、v1 checkpointをそのまま比較に入れず、
+`f3_prepared_parity.mismatch:`行の原因を確認して停止する。
+
+2026-08-25の実行結果（PASS）:
+
+```text
+seismic_sha256: 47108252f4bd670889da1ea6f36abe8acba41a6ad772db515b5902d4545bb276  (v1 == v2)
+label_sha256:   daf2b900a6c68cc1dc5864f5ef0a1bd527c48c9f29842453d0b889378b3bf09d  (v1 == v2)
+shape_xyz (601, 901, 255) / seismic float32 / label int16 / grid_order (x, y, z)
+normalization: percentiles [0.5, 99.5], eps 1e-06, max_samples 1000000, seed 42,
+               clip_low -0.8653416681289673, clip_high 0.6771933567523928,
+               median 0.008167065680027008, iqr 0.20806461572647095
+class_order: 0=Upper North Sea, 1=Middle North Sea, 2=Lower North Sea,
+             3=Rijnland/Chalk, 4=Scruff, 5=Zechstein
+f3_prepared_parity.status: PASS
+```
+
+## 10. v2 embedding extraction（GPU）
 
 抽出条件はfive-way v1と同じ（window `[128,128,128]`、overlap `[64,64,64]`、
 float16、`amp: false`、min token valid fraction 0.5、encoder出力のみ。Local BT
@@ -232,7 +270,7 @@ done
 
 出力: `embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/<model>/overlap_x64/`。
 
-## 10. five-way source audit
+## 11. five-way source audit
 
 decoderはsource auditがPASSするまで開始しない。
 
@@ -246,7 +284,7 @@ valid-token maskのbyte一致に加えて、固定予算(25 epoch / 15,625 globa
 encoder top-1)とtrace-dropなしの系譜を検証する。`random`はepoch 0の未学習表現で
 あることを確認する。
 
-## 11. preflight（`layout_000/small`の五者dry-run）
+## 12. preflight（`layout_000/small`の五者dry-run）
 
 ```bash
 for model in \
@@ -269,7 +307,7 @@ done
 `selected_token_identity_sha256`、`validation_mask_sha256`、
 `train_voxel_count`が一致することを確認する。
 
-## 12. full suite（75 decoder jobs）
+## 13. full suite（75 decoder jobs）
 
 schedulerや独自queueは使わず、単純な3重loopで実行する。最初のjobは学習前に
 condition datasetのreference valid-token SHAとembeddingのvalid-token SHAの一致を
@@ -301,7 +339,7 @@ done
 `f3_lithology_benchmark/mae_local_bt_five_way_v2/runs/model=<model>/layout=<layout>/size=<size>/`
 配下の`decoder/` `prediction/` `evaluation/`に分かれる。
 
-## 13. summary dry-run（完全性監査）
+## 14. summary dry-run（完全性監査）
 
 ```bash
 python proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py --config "$CONFIG" --dry-run
@@ -310,7 +348,7 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py --config "$CONFI
 `complete_jobs: 75`を確認してから次へ進む。欠損・重複・identity driftが
 1件でもあればsummaryは書かれない。identityはpathではなくSHA-256で照合する。
 
-## 14. summary生成
+## 15. summary生成
 
 ```bash
 python proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py --config "$CONFIG"
@@ -320,7 +358,7 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py --config "$CONFI
 （`comparison.csv` `paired_deltas.csv` `summary_by_size.csv` `summary.json`
 `summary.md`）。主指標は`macro_f1`、sizeを跨いだ集計は行わない。
 
-## 15. resume手順（runnerが実際に提供する契約）
+## 16. resume手順（runnerが実際に提供する契約）
 
 - 各stageは自身の完了成果物があればskipされる。decoder学習が終わったあとに
   inferenceやevaluationで失敗したjobは、同じコマンドをそのまま再実行すれば
@@ -338,6 +376,7 @@ python proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py --config "$CONFI
 ```bash
 pytest -q \
   tests/seis_ssl_cluster/test_f3_facies_benchmark_v2_configs.py \
+  tests/seis_ssl_cluster/test_f3_prepared_volume_parity.py \
   tests/seis_ssl_cluster/test_f3_lithology_voxel_section_layout_calibration.py \
   tests/seis_ssl_cluster/test_f3_lithology_voxel_section_layout.py \
   tests/seis_ssl_cluster/test_f3_lithology_voxel_section_layout_config.py \

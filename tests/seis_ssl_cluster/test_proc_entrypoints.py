@@ -100,6 +100,11 @@ HELP_FLAG_CONTRACTS = {
 		'--dry-run',
 		'--overwrite',
 	),
+	'check_f3_prepared_volume_parity.py': (
+		'--reference-config',
+		'--candidate-config',
+		'--dry-run',
+	),
 	'prepare_parihaka_volume.py': (
 		'--config',
 		'--dry-run',

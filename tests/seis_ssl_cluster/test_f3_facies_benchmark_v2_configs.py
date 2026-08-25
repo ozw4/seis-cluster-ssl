@@ -150,6 +150,7 @@ RUNBOOK_CLIS = (
 	'proc/seis_ssl_cluster/build_f3_lithology_voxel_dataset.py',
 	'proc/seis_ssl_cluster/prepare_f3_lithology_voxel_section_layout_contract.py',
 	'proc/seis_ssl_cluster/build_f3_lithology_voxel_section_layout_datasets.py',
+	'proc/seis_ssl_cluster/check_f3_prepared_volume_parity.py',
 	'proc/seis_ssl_cluster/extract_embeddings.py',
 	'proc/seis_ssl_cluster/audit_f3_lithology_five_way_sources.py',
 	'proc/seis_ssl_cluster/run_f3_lithology_five_way.py',
@@ -165,13 +166,14 @@ RUNBOOK_ORDER = (
 	'## 6. contract finalize',
 	'## 7. 15 section-layout datasets',
 	'## 8. checkpoint audit',
-	'## 9. v2 embedding extraction',
-	'## 10. five-way source audit',
-	'## 11. preflight',
-	'## 12. full suite',
-	'## 13. summary dry-run',
-	'## 14. summary生成',
-	'## 15. resume手順',
+	'## 9. v1/v2 prepared volume parity gate',
+	'## 10. v2 embedding extraction',
+	'## 11. five-way source audit',
+	'## 12. preflight',
+	'## 13. full suite',
+	'## 14. summary dry-run',
+	'## 15. summary生成',
+	'## 16. resume手順',
 )
 
 
@@ -544,6 +546,7 @@ def test_runbook_order_dry_runs_and_matrix() -> None:
 		'build_f3_lithology_voxel_dataset.py',
 		'prepare_f3_lithology_voxel_section_layout_contract.py',
 		'build_f3_lithology_voxel_section_layout_datasets.py',
+		'check_f3_prepared_volume_parity.py',
 		'audit_f3_lithology_five_way_sources.py',
 		'summarize_f3_lithology_five_way.py',
 	):

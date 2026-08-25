@@ -32,6 +32,13 @@ from seis_ssl_cluster.f3.inspection import (
 	scan_f3_file_inventory,
 	write_f3_file_inventory_outputs,
 )
+from seis_ssl_cluster.f3.io.prepared_volume_parity import (
+	NORMALIZATION_PARITY_FIELDS,
+	F3PreparedVolumeIdentity,
+	F3PreparedVolumeParity,
+	check_f3_prepared_volume_parity,
+	inspect_f3_prepared_volume_identity,
+)
 from seis_ssl_cluster.f3.labels import (
 	F3ClassInfo,
 	LabelPngNameParts,
@@ -244,6 +251,7 @@ __all__ = [
 	'F3_SEISMIC_NPY_NAME',
 	'F3_SPLIT_NAME',
 	'F3_SURVEY_ID',
+	'NORMALIZATION_PARITY_FIELDS',
 	'ORTHOGONAL_VIEWS',
 	'PNG_LABEL_CLASS_COUNT_FIELDNAMES',
 	'PNG_LABEL_INVENTORY_FIELDNAMES',
@@ -304,6 +312,8 @@ __all__ = [
 	'F3PrepareRootPaths',
 	'F3PrepareVolumeConfig',
 	'F3PrepareVolumeResult',
+	'F3PreparedVolumeIdentity',
+	'F3PreparedVolumeParity',
 	'F3QuicklookFigureConfig',
 	'F3QuicklookOutputConfig',
 	'F3QuicklookResult',
@@ -342,6 +352,7 @@ __all__ = [
 	'calculate_label_unique_values',
 	'calculate_seismic_amplitude_stats',
 	'check_f3_label_consistency',
+	'check_f3_prepared_volume_parity',
 	'class_id_image_to_rgb',
 	'class_info_inventory_to_dict',
 	'compute_lithology_metrics',
@@ -358,6 +369,7 @@ __all__ = [
 	'find_class_info_file',
 	'find_f3_segy_paths',
 	'inspect_f3_png_labels',
+	'inspect_f3_prepared_volume_identity',
 	'inspect_f3_segy_files',
 	'label_consistency_report_to_dict',
 	'label_unique_values_to_dict',
