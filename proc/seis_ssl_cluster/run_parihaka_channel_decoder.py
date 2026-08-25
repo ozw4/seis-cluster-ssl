@@ -41,6 +41,11 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument('--dry-run', action='store_true')
 	parser.add_argument('--max-steps', type=int)
 	parser.add_argument('--resume', type=Path)
+	parser.add_argument(
+		'--validation-only',
+		action='store_true',
+		help='save validation metrics without test inference or test metrics',
+	)
 	return parser
 
 
@@ -114,10 +119,18 @@ def main() -> None:
 		print(f'class_weights: {plan.class_weights}')
 		print(f'tile_counts: {dict(plan.tile_counts)}')
 		print(f'output_dir: {plan.output_dir}')
+		print(
+			'evaluation_mode: '
+			f'{"validation_only" if args.validation_only else "validation_and_test"}'
+		)
 		print('execution: dry-run; no files written')
 		return
 	metrics = run_channel_decoder_job(
-		plan, device=args.device, max_steps=args.max_steps, resume=args.resume
+		plan,
+		device=args.device,
+		max_steps=args.max_steps,
+		resume=args.resume,
+		validation_only=args.validation_only,
 	)
 	if metrics is None:
 		print(f'latest: {plan.output_dir / "latest.pt"}')

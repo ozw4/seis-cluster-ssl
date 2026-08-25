@@ -16,6 +16,7 @@ from seis_ssl_cluster.embedding.writer import (
 	file_sha256,
 	output_paths,
 )
+from seis_ssl_cluster.parihaka import channel_decoder as channel_decoder_module
 from seis_ssl_cluster.parihaka.channel_data import SectionLines, split_mask_for_crop
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	CHANNEL_PRETRAINED_MODEL_TAG,
@@ -1109,6 +1110,127 @@ def test_generic_one_job_identity_and_resume_are_model_specific(
 	assert metrics_path.parts[-4] == f'model={model_id}'
 
 
+def test_validation_only_job_never_evaluates_test(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	config = replace(
+		config,
+		train=replace(config.train, epochs=1),
+		tiles=DecoderTiles((1, 1, 1), (1, 1, 1)),
+	)
+	_write_generic_one_token_sources(config)
+	labels = np.ones((8, 8, 8), dtype=np.int8)
+	labels[:, :, ::2] = 5
+	_write_labels(config, labels)
+	plan = inspect_channel_decoder_job(
+		config,
+		model='mae_hmm_k6',
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=_write_one_token_layout(tmp_path),
+	)
+	evaluated_splits: list[str] = []
+	original_evaluate = channel_decoder_module._evaluate  # noqa: SLF001
+
+	def recording_evaluate(*args: object, **kwargs: object) -> dict[str, object]:
+		dataset = args[1]
+		assert isinstance(dataset, channel_decoder_module.ChannelTileDataset)
+		evaluated_splits.append(dataset.split)
+		return original_evaluate(*args, **kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(channel_decoder_module, '_evaluate', recording_evaluate)
+	metrics_path = run_channel_decoder_job(
+		plan, device='cpu', validation_only=True
+	)
+
+	assert metrics_path is not None
+	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+	assert evaluated_splits == ['validation']
+	assert metrics['evaluation_mode'] == 'validation_only'
+	assert 'test' not in metrics
+	assert (plan.output_dir / 'best.pt').is_file()
+	latest = torch.load(
+		plan.output_dir / 'latest.pt', map_location='cpu', weights_only=False
+	)
+	assert latest['completed'] is True
+	assert latest['evaluation_mode'] == 'validation_only'
+
+
+@pytest.mark.parametrize(
+	('initial_validation_only', 'resume_validation_only', 'expected_mode'),
+	[
+		(True, False, 'validation_only'),
+		(False, True, 'validation_and_test'),
+	],
+)
+def test_resume_requires_the_checkpoint_evaluation_mode(
+	tmp_path: Path,
+	*,
+	initial_validation_only: bool,
+	resume_validation_only: bool,
+	expected_mode: str,
+) -> None:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	config = replace(
+		config,
+		train=replace(config.train, epochs=1),
+		tiles=DecoderTiles((1, 1, 1), (1, 1, 1)),
+	)
+	_write_generic_one_token_sources(config)
+	labels = np.ones((8, 8, 8), dtype=np.int8)
+	labels[:, :, ::2] = 5
+	_write_labels(config, labels)
+	plan = inspect_channel_decoder_job(
+		config,
+		model='mae_hmm_k6',
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=_write_one_token_layout(tmp_path),
+	)
+
+	assert (
+		run_channel_decoder_job(
+			plan,
+			device='cpu',
+			max_steps=1,
+			validation_only=initial_validation_only,
+		)
+		is None
+	)
+	latest = plan.output_dir / 'latest.pt'
+	payload = torch.load(latest, map_location='cpu', weights_only=False)
+	assert payload['evaluation_mode'] == expected_mode
+	if not initial_validation_only:
+		payload.pop('evaluation_mode')
+		torch.save(payload, latest)
+
+	with pytest.raises(
+		ValueError,
+		match='resume checkpoint evaluation mode does not match this job',
+	):
+		run_channel_decoder_job(
+			plan,
+			device='cpu',
+			resume=latest,
+			validation_only=resume_validation_only,
+		)
+
+	metrics_path = run_channel_decoder_job(
+		plan,
+		device='cpu',
+		resume=latest,
+		validation_only=initial_validation_only,
+	)
+	assert metrics_path is not None
+	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+	assert metrics['evaluation_mode'] == expected_mode
+	completed = torch.load(latest, map_location='cpu', weights_only=False)
+	assert completed['completed'] is True
+	assert completed['evaluation_mode'] == expected_mode
+
+
 def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
 	tmp_path: Path,
 ) -> None:
@@ -1297,6 +1419,7 @@ def test_one_job_max_steps_resume_and_evaluate(  # noqa: PLR0915
 	metrics_path = run_channel_decoder_job(plan, device='cpu', resume=latest)
 	assert metrics_path is not None and metrics_path.is_file()
 	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+	assert metrics['evaluation_mode'] == 'validation_and_test'
 	assert metrics['best_epoch'] == 0
 	assert metrics['benchmark_identity'] == identity
 	assert metrics['supervision'] == {

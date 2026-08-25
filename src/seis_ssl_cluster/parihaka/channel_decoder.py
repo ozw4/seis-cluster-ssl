@@ -882,14 +882,15 @@ def channel_metrics(confusion: np.ndarray) -> dict[str, float | list[list[int]]]
 	}
 
 
-def run_channel_decoder_job(  # noqa: C901, PLR0915
+def run_channel_decoder_job(  # noqa: C901, PLR0912, PLR0915
 	plan: ChannelDecoderPlan,
 	*,
 	device: str = 'auto',
 	max_steps: int | None = None,
 	resume: str | Path | None = None,
+	validation_only: bool = False,
 ) -> Path | None:
-	"""Train one decoder, select by validation Channel IoU, and test once."""
+	"""Train and select by validation Channel IoU, optionally evaluating test."""
 	if max_steps is not None and (
 		not isinstance(max_steps, int) or isinstance(max_steps, bool) or max_steps <= 0
 	):
@@ -900,6 +901,14 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 	_configure_determinism()
 	_seed_everything(plan.config.train.seed)
 	selected = plan.geometry.models[plan.model]
+	evaluation_mode = (
+		'validation_only' if validation_only else 'validation_and_test'
+	)
+	evaluation_splits = (
+		('train', 'validation')
+		if validation_only
+		else ('train', 'validation', 'test')
+	)
 	datasets = {
 		split: ChannelTileDataset(
 			embedding_path=selected.paths.embeddings,
@@ -920,7 +929,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 					else None
 				),
 		)
-		for split in ('train', 'validation', 'test')
+		for split in evaluation_splits
 	}
 	decoder = _make_decoder(plan.config.decoder, plan.geometry.patch_size_xyz).to(
 		run_device
@@ -950,6 +959,11 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 		payload = torch.load(resume_path, map_location=run_device, weights_only=False)
 		if payload.get('run_identity') != identity:
 			raise ValueError('resume checkpoint does not match this Channel job')
+		stored_mode = payload.get('evaluation_mode', 'validation_and_test')
+		if stored_mode != evaluation_mode:
+			raise ValueError(
+				'resume checkpoint evaluation mode does not match this job'
+			)
 		if payload.get('completed') is True:
 			raise ValueError('completed Channel job cannot be resumed')
 		decoder.load_state_dict(payload['model_state_dict'])
@@ -978,6 +992,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 					optimizer,
 					scaler,
 					identity,
+					evaluation_mode,
 					history,
 					best_epoch,
 					best_iou,
@@ -1023,6 +1038,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 					optimizer,
 					scaler,
 					identity,
+					evaluation_mode,
 					history,
 					best_epoch,
 					best_iou,
@@ -1075,6 +1091,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 			optimizer,
 			scaler,
 			identity,
+			evaluation_mode,
 			history,
 			best_epoch,
 			best_iou,
@@ -1100,17 +1117,11 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 	)
 	decoder.load_state_dict(best['model_state_dict'])
 	validation_metrics = dict(best['validation'])
-	test_metrics = _evaluate(
-		decoder,
-		datasets['test'],
-		weights,
-		run_device,
-		amp=plan.config.train.amp,
-	)
 	metrics_payload = {
 		'model': plan.model,
 		'layout_id': plan.layout_id,
 		'data_size': plan.data_size,
+		'evaluation_mode': evaluation_mode,
 		'benchmark_identity': identity,
 		'supervision': {
 			'axis_mapping': dict(CHANNEL_AXIS_MAPPING),
@@ -1135,8 +1146,16 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 		'class_weights': list(plan.class_weights),
 		'best_epoch': best_epoch,
 		'validation': _public_metrics(validation_metrics),
-		'test': _public_metrics(test_metrics),
 	}
+	if not validation_only:
+		test_metrics = _evaluate(
+			decoder,
+			datasets['test'],
+			weights,
+			run_device,
+			amp=plan.config.train.amp,
+		)
+		metrics_payload['test'] = _public_metrics(test_metrics)
 	metrics_path = plan.output_dir / METRICS_NAME
 	metrics_path.write_text(
 		json.dumps(metrics_payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
@@ -1147,6 +1166,7 @@ def run_channel_decoder_job(  # noqa: C901, PLR0915
 		optimizer,
 		scaler,
 		identity,
+		evaluation_mode,
 		history,
 		best_epoch,
 		best_iou,
@@ -1227,6 +1247,7 @@ def _save_latest(  # noqa: PLR0913, PLR0917
 	optimizer: torch.optim.Optimizer,
 	scaler: torch.amp.GradScaler | None,
 	identity: Mapping[str, object],
+	evaluation_mode: str,
 	history: Sequence[Mapping[str, object]],
 	best_epoch: int | None,
 	best_iou: float,
@@ -1246,6 +1267,7 @@ def _save_latest(  # noqa: PLR0913, PLR0917
 		scaler=scaler,
 		payload={
 			'run_identity': identity,
+			'evaluation_mode': evaluation_mode,
 			'history': list(history),
 			'best_epoch': best_epoch,
 			'best_iou': best_iou,

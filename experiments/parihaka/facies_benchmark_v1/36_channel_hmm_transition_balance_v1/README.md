@@ -35,10 +35,13 @@ selection metric = validation.channel_iou
 ```
 
 This is a survey-specific, transductive screening because SSL pretraining saw
-the unlabelled Parihaka amplitude volume. Phase 1 reads only validation Channel
-IoU. It does not read test IoU and does not run `small` or `large`. Validation
-screening is a human-reviewed comparison, not an automatic gate that starts a
-later experiment. Test IoU is not read; `small` and `large` are not run.
+the unlabelled Parihaka amplitude volume. Phase 1 computes and saves only
+validation Channel IoU for new candidates: the decoder runner does not
+run test inference or save test metrics in `--validation-only` mode. Phase 1
+does not run `small` or `large`. Validation screening is a human-reviewed comparison,
+not an automatic gate that starts a later experiment. Existing metrics files
+may contain historical test results, but neither the screening code nor the
+human review may inspect them; Phase 1 does not read test IoU.
 
 ## 1. Environment
 
@@ -46,6 +49,7 @@ Run from an installed development checkout. The artifact root and smoke root
 must be absolute. Reuse the reviewed layout file directly.
 
 ```bash
+set -euo pipefail
 cd /workspace
 export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/workspace/artifacts/seis_ssl_cluster
 export EXP=experiments/parihaka/facies_benchmark_v1/36_channel_hmm_transition_balance_v1
@@ -53,12 +57,15 @@ export TARGET_CONFIGS="$EXP/10_hmm_targets"
 export STAGE2_CONFIGS="$EXP/20_stage2"
 export EMBEDDING_CONFIGS="$EXP/30_embeddings"
 export CHANNEL_CONFIG="$EXP/40_channel_transition_balance.yaml"
+export FINAL_CHANNEL_CONFIG="$EXP/41_channel_transition_balance_final.yaml"
 export LAYOUT_CONFIG=experiments/parihaka/facies_benchmark_v1/30_channel_benchmark_v1/02_layouts.yaml
 export CLUSTER_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/clustering/parihaka/facies_benchmark_v1/hmm_transition_balance_v1"
 export PSEUDO_TARGET_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pseudo_targets/parihaka/facies_benchmark_v1/hmm_transition_balance_v1"
 export STAGE1_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage1"
 export STAGE2_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/parihaka/facies_benchmark_v1/hmm_transition_balance_v1"
-export RUNS_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/ssl_hmm_four_way_v1/runs"
+export EXISTING_RUNS_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/ssl_hmm_four_way_v1/runs"
+export VALIDATION_RUNS_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/hmm_transition_balance_v1/validation_runs"
+export FINAL_RUNS_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/hmm_transition_balance_v1/final_runs"
 export REPORT_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/hmm_transition_balance_v1/summary"
 export SMOKE_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/pretraining/parihaka/facies_benchmark_v1/hmm_transition_balance_v1_smoke_1step"
 export CUDA_VISIBLE_DEVICES=1
@@ -70,14 +77,24 @@ reused source appear under a new namespace.
 
 ## 2. Targeted tests
 
-Run the three config contracts and this runbook contract before execution:
+Run the production decoder tests, the three config contracts, both executable
+summary tests, this runbook contract, and the focused decoder CLI tests before
+execution:
 
 ```bash
+set -euo pipefail
 pytest -q \
+  tests/seis_ssl_cluster/test_parihaka_channel_decoder.py \
   tests/seis_ssl_cluster/test_parihaka_hmm_transition_balance_target_configs.py \
   tests/seis_ssl_cluster/test_parihaka_hmm_transition_balance_training_configs.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_configs.py \
+  tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_summary.py \
+  tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_final_summary.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_runbook.py
+
+pytest -q \
+  tests/seis_ssl_cluster/test_proc_dry_run.py \
+  -k parihaka_channel_decoder
 ```
 
 These tests do not require live checkpoints, embeddings, pseudo-targets, or
@@ -89,6 +106,7 @@ The six clustering configs are explicit. Dry-run all six before executing any
 of them.
 
 ```bash
+set -euo pipefail
 CLUSTER_CONFIGS=(
   "$TARGET_CONFIGS/mae100/neutral/01_cluster_hmm_k6.yaml"
   "$TARGET_CONFIGS/mae100/persist003/01_cluster_hmm_k6.yaml"
@@ -112,6 +130,7 @@ Run the six reviewed export scripts. Each invokes
 confidence 1.0, boundary alpha 0.0, boundary tau 1.0, and schema version 2.
 
 ```bash
+set -euo pipefail
 EXPORT_SCRIPTS=(
   "$TARGET_CONFIGS/mae100/neutral/02_export_pseudo_targets.sh"
   "$TARGET_CONFIGS/mae100/persist003/02_export_pseudo_targets.sh"
@@ -135,6 +154,7 @@ counts are diagnostics: they are printed without an arbitrary pass/fail
 threshold.
 
 ```bash
+set -euo pipefail
 python - <<'PY'
 from __future__ import annotations
 
@@ -347,6 +367,7 @@ PY
 Dry-run all six full-budget configs. There are no dedicated feasibility YAMLs.
 
 ```bash
+set -euo pipefail
 TRAINING_CONFIGS=(
   "$STAGE2_CONFIGS/mae100/neutral/01_full_25ep.yaml"
   "$STAGE2_CONFIGS/mae100/persist003/01_full_25ep.yaml"
@@ -366,6 +387,7 @@ If a live one-step check is needed, use the existing CLI overrides and an
 isolated smoke root. Do not add smoke YAMLs.
 
 ```bash
+set -euo pipefail
 SMOKE_SPECS=(
   "$STAGE2_CONFIGS/mae100/neutral/01_full_25ep.yaml|$SMOKE_ROOT/mae100/neutral"
   "$STAGE2_CONFIGS/mae100/persist003/01_full_25ep.yaml|$SMOKE_ROOT/mae100/persist003"
@@ -388,6 +410,15 @@ done
 Start each full run without `--resume`:
 
 ```bash
+set -euo pipefail
+TRAINING_CONFIGS=(
+  "$STAGE2_CONFIGS/mae100/neutral/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/mae100/persist003/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/mae100/persist010/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/local_bt100/neutral/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/local_bt100/persist003/01_full_25ep.yaml"
+  "$STAGE2_CONFIGS/local_bt100/persist010/01_full_25ep.yaml"
+)
 for config in "${TRAINING_CONFIGS[@]}"; do
   python proc/seis_ssl_cluster/train_strat_hmm_pretext.py --config "$config"
 done
@@ -397,6 +428,7 @@ After an interruption, resume only from that same full run's `latest.pt`. Do
 not use Stage 1, control, H0, `best.pt`, another variant, or a smoke checkpoint.
 
 ```bash
+set -euo pipefail
 python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
   --config "$STAGE2_CONFIGS/mae100/neutral/01_full_25ep.yaml" \
   --resume "$STAGE2_ROOT/mae100/neutral/full_25ep/latest.pt"
@@ -424,6 +456,7 @@ pseudo-target root, K=6, distillation weight 0.2, top block 1, and FP32
 training.
 
 ```bash
+set -euo pipefail
 python - <<'PY'
 from __future__ import annotations
 
@@ -514,6 +547,7 @@ PY
 Dry-run every extraction config, then execute those same six configs.
 
 ```bash
+set -euo pipefail
 EXTRACTION_CONFIGS=(
   "$EMBEDDING_CONFIGS/01_extract_mae_hmm_k6_neutral.yaml"
   "$EMBEDDING_CONFIGS/02_extract_mae_hmm_k6_persist003.yaml"
@@ -543,6 +577,7 @@ geometry and preprocessing, embedding shape/dtype, and valid-token mask parity.
 This read-only block also fixes the expected ten-model order.
 
 ```bash
+set -euo pipefail
 python - <<'PY'
 from __future__ import annotations
 
@@ -620,6 +655,7 @@ Only the six new candidates are execution targets. Dry-run their five reviewed
 layouts at `medium` size.
 
 ```bash
+set -euo pipefail
 CANDIDATE_MODELS=(
   mae_hmm_k6_neutral
   mae_hmm_k6_persist003
@@ -643,6 +679,7 @@ for model in "${CANDIDATE_MODELS[@]}"; do
       --layout "$layout" \
       --size medium \
       --layout-config "$LAYOUT_CONFIG" \
+      --validation-only \
       --dry-run
   done
 done
@@ -650,331 +687,186 @@ done
 
 ## 11. Run the 30 new medium decoder jobs
 
-Run the same six models and five layouts without `--dry-run`:
+Run the same six models and five layouts without `--dry-run`. Keep
+`--validation-only`; this is what prevents test evaluation rather than merely
+hiding test metrics from the report:
 
 ```bash
+set -euo pipefail
+CANDIDATE_MODELS=(
+  mae_hmm_k6_neutral
+  mae_hmm_k6_persist003
+  mae_hmm_k6_persist010
+  local_barlow_twins_hmm_k6_neutral
+  local_barlow_twins_hmm_k6_persist003
+  local_barlow_twins_hmm_k6_persist010
+)
+LAYOUTS=(
+  layout_000
+  layout_001
+  layout_002
+  layout_003
+  layout_004
+)
 for model in "${CANDIDATE_MODELS[@]}"; do
   for layout in "${LAYOUTS[@]}"; do
+    job_dir="$VALIDATION_RUNS_ROOT/model=$model/layout=$layout/size=medium"
+    if [[ -f "$job_dir/metrics.json" ]]; then
+      echo "skip completed Channel job: model=$model layout=$layout"
+      continue
+    fi
+    if [[ -f "$job_dir/latest.pt" ]]; then
+      echo "incomplete Channel job requires explicit resume: $job_dir" >&2
+      exit 1
+    fi
     python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
       --config "$CHANNEL_CONFIG" \
       --model "$model" \
       --layout "$layout" \
       --size medium \
-      --layout-config "$LAYOUT_CONFIG"
+      --layout-config "$LAYOUT_CONFIG" \
+      --validation-only
   done
 done
 ```
 
 Do not rerun decoder jobs for the MAE control, Local BT control, or either
-existing H0 model. A restartable job may be skipped only when its own
-`metrics.json` exists; an interrupted job may resume only from its own
-`latest.pt`.
+existing H0 model. The loop skips a job only when its own `metrics.json`
+exists. If it finds `latest.pt` without `metrics.json`, it prints that job and
+stops instead of silently starting over or automatically resuming. Resume that
+one job explicitly with the same model, layout, size, layout config, and
+`--validation-only`, adding `--resume
+"$VALIDATION_RUNS_ROOT/model=<model>/layout=<layout>/size=medium/latest.pt"`;
+then rerun the loop. The runner accepts only that same job's `latest.pt`. Every
+new candidate `metrics.json` must say `"evaluation_mode": "validation_only"`
+and must not contain a top-level `test` field.
 
 ## 12. Write the validation screening summary
 
-This self-contained report script reads exactly 50 `medium` metrics: two
+The experiment-local report script reads exactly 50 `medium` metrics: two
 controls, two existing H0 models, and six new candidates over five layouts. It
 checks paired downstream identity after removing only model/source-specific
 embedding identity, reads only `validation.channel_iou`, and writes the JSON
-and Markdown screening summaries.
+and Markdown screening summaries. Its ranking and rejection behavior are
+covered by executable tests with known metrics fixtures.
 
 ```bash
-python - <<'PY'
-from __future__ import annotations
-
-import json
-import math
-import os
-import statistics
-from collections.abc import Mapping
-from pathlib import Path
-
-variant_transition_settings = {
-	'advance_favored_m003': {
-		'same_cost': 0.03,
-		'advance_cost': 0.00,
-		'delta': -0.03,
-	},
-	'neutral': {
-		'same_cost': 0.00,
-		'advance_cost': 0.00,
-		'delta': 0.00,
-	},
-	'persist003': {
-		'same_cost': 0.00,
-		'advance_cost': 0.03,
-		'delta': 0.03,
-	},
-	'persist010': {
-		'same_cost': 0.00,
-		'advance_cost': 0.10,
-		'delta': 0.10,
-	},
-}
-branches = {
-	'mae': {
-		'control': 'mae',
-		'variants': {
-			'advance_favored_m003': 'mae_hmm_k6',
-			'neutral': 'mae_hmm_k6_neutral',
-			'persist003': 'mae_hmm_k6_persist003',
-			'persist010': 'mae_hmm_k6_persist010',
-		},
-	},
-	'local_bt': {
-		'control': 'local_barlow_twins',
-		'variants': {
-			'advance_favored_m003': 'local_barlow_twins_hmm_k6',
-			'neutral': 'local_barlow_twins_hmm_k6_neutral',
-			'persist003': 'local_barlow_twins_hmm_k6_persist003',
-			'persist010': 'local_barlow_twins_hmm_k6_persist010',
-		},
-	},
-}
-layouts = (
-	'layout_000',
-	'layout_001',
-	'layout_002',
-	'layout_003',
-	'layout_004',
-)
-variant_order = tuple(variant_transition_settings)
-runs_root = Path(os.environ['RUNS_ROOT'])
-report_root = Path(os.environ['REPORT_ROOT'])
-if len(variant_order) != 4:
-	raise AssertionError('screening must define exactly 4 variants')
-if tuple(branches) != ('mae', 'local_bt'):
-	raise AssertionError('screening must define exactly 2 control branches')
-
-
-def mapping(value: object, label: str) -> Mapping[str, object]:
-	if not isinstance(value, Mapping):
-		raise TypeError(f'{label} must be a mapping')
-	return value
-
-
-model_ids: list[str] = []
-for branch in branches.values():
-	control = branch.get('control')
-	variants = mapping(branch.get('variants'), 'branch variants')
-	if not isinstance(control, str):
-		raise TypeError('branch control must be a model ID')
-	model_ids.append(control)
-	model_ids.extend(str(variants[variant]) for variant in variant_order)
-model_ids = list(dict.fromkeys(model_ids))
-if len(model_ids) != 10:
-	raise AssertionError('screening must define exactly 10 models')
-
-
-def read_metrics(model: str, layout: str) -> Mapping[str, object]:
-	path = (
-		runs_root
-		/ f'model={model}'
-		/ f'layout={layout}'
-		/ 'size=medium'
-		/ 'metrics.json'
-	)
-	payload = mapping(
-		json.loads(path.read_text(encoding='utf-8')),
-		f'{path} metrics payload',
-	)
-	if payload.get('model') != model:
-		raise ValueError(f'{path}: model identity mismatch')
-	if payload.get('layout_id') != layout:
-		raise ValueError(f'{path}: layout identity mismatch')
-	if payload.get('data_size') != 'medium':
-		raise ValueError(f'{path}: data_size must be medium')
-	return payload
-
-
-def paired_identity(payload: Mapping[str, object]) -> dict[str, object]:
-	identity = mapping(payload.get('benchmark_identity'), 'benchmark identity')
-	embedding = mapping(identity.get('embedding'), 'benchmark embedding identity')
-	common_metadata = mapping(
-		embedding.get('common_metadata'),
-		'benchmark embedding common metadata',
-	)
-	return {
-		**{
-			key: value
-			for key, value in identity.items()
-			if key not in {'model', 'embedding'}
-		},
-		'embedding': {'common_metadata': dict(common_metadata)},
-	}
-
-
-def validation_channel_iou(payload: Mapping[str, object]) -> float:
-	validation = payload.get('validation')
-	if not isinstance(validation, Mapping):
-		raise TypeError('validation metrics must be a mapping')
-	value = validation.get('channel_iou')
-	if (
-		not isinstance(value, int | float)
-		or isinstance(value, bool)
-		or not math.isfinite(float(value))
-	):
-		raise ValueError('validation Channel IoU must be finite')
-	return float(value)
-
-
-metrics = {
-	(model, layout): read_metrics(model, layout)
-	for model in model_ids
-	for layout in layouts
-}
-expected_metric_count = 50
-if len(metrics) != expected_metric_count:
-	raise AssertionError('screening must read exactly 50 metrics')
-for layout in layouts:
-	reference = paired_identity(metrics[(model_ids[0], layout)])
-	for model in model_ids[1:]:
-		if paired_identity(metrics[(model, layout)]) != reference:
-			raise ValueError(f'{model}/{layout}: downstream benchmark identity mismatch')
-
-
-def summarize(gains: Mapping[str, float] | list[float]) -> dict[str, object]:
-	values = list(gains.values()) if isinstance(gains, Mapping) else list(gains)
-	return {
-		'mean': statistics.mean(values),
-		'median': statistics.median(values),
-		'sample_standard_deviation': statistics.stdev(values),
-		'wins': sum(value > 0.0 for value in values),
-		'ties': sum(value == 0.0 for value in values),
-		'losses': sum(value < 0.0 for value in values),
-	}
-
-
-per_variant: dict[str, dict[str, object]] = {}
-for variant in variant_order:
-	branch_results: dict[str, dict[str, object]] = {}
-	combined_gains: list[float] = []
-	for branch_name, branch in branches.items():
-		control = str(branch['control'])
-		variant_models = mapping(branch['variants'], f'{branch_name} variants')
-		model = str(variant_models[variant])
-		layout_gains = {
-			layout: (
-				validation_channel_iou(metrics[(model, layout)])
-				- validation_channel_iou(metrics[(control, layout)])
-			)
-			for layout in layouts
-		}
-		combined_gains.extend(layout_gains.values())
-		branch_results[branch_name] = {
-			'control_model': control,
-			'variant_model': model,
-			'layout_gains': layout_gains,
-			**summarize(layout_gains),
-		}
-	mae_mean = float(branch_results['mae']['mean'])
-	local_bt_mean = float(branch_results['local_bt']['mean'])
-	eligible = mae_mean >= 0.0 and local_bt_mean >= 0.0
-	per_variant[variant] = {
-		'transition_settings': variant_transition_settings[variant],
-		'mae': branch_results['mae'],
-		'local_bt': branch_results['local_bt'],
-		'combined': summarize(combined_gains),
-		'eligible': eligible,
-	}
-
-eligible_variants = [
-	variant for variant in variant_order if bool(per_variant[variant]['eligible'])
-]
-ranking = sorted(
-	eligible_variants,
-	key=lambda variant: (
-		-float(mapping(per_variant[variant]['combined'], 'combined')['mean']),
-		-float(mapping(per_variant[variant]['combined'], 'combined')['median']),
-		variant_order.index(variant),
-	),
-)
-recommended_variant = ranking[0] if ranking else None
-selection_rule = {
-	'eligibility': 'mae_mean >= 0 and local_bt_mean >= 0',
-	'primary': 'largest combined mean among eligible variants',
-	'first_tie_break': 'largest combined median',
-	'second_tie_break': 'variant table order',
-	'no_eligible_variant': 'recommended_variant is null',
-	'automatic_phase2_gate': False,
-}
-result = {
-	'metric': 'validation.channel_iou',
-	'data_size': 'medium',
-	'variant_transition_settings': variant_transition_settings,
-	'per_variant': per_variant,
-	'ranking': ranking,
-	'recommended_variant': recommended_variant,
-	'selection_rule': selection_rule,
-}
-
-report_root.mkdir(parents=True, exist_ok=True)
-(report_root / 'screening_validation.json').write_text(
-	json.dumps(result, indent=2, sort_keys=True, allow_nan=False) + '\n',
-	encoding='utf-8',
-)
-lines = [
-	'# HMM transition balance validation screening',
-	'',
-	'Metric: validation.channel_iou; size: medium.',
-	'',
-	'## Summary',
-	'',
-	'| variant | branch | mean | median | sample std | wins | ties | losses | eligible |',
-	'|---|---|---:|---:|---:|---:|---:|---:|:---:|',
-]
-for variant in variant_order:
-	for branch_name in ('mae', 'local_bt', 'combined'):
-		summary = mapping(per_variant[variant][branch_name], branch_name)
-		lines.append(
-			'| '
-			f'{variant} | {branch_name} | {float(summary["mean"]):+.6f} | '
-			f'{float(summary["median"]):+.6f} | '
-			f'{float(summary["sample_standard_deviation"]):.6f} | '
-			f'{int(summary["wins"])} | {int(summary["ties"])} | '
-			f'{int(summary["losses"])} | '
-			f'{per_variant[variant]["eligible"]} |'
-		)
-lines.extend(
-	[
-		'',
-		'## Layout gains',
-		'',
-		'| variant | layout | MAE gain | Local BT gain |',
-		'|---|---|---:|---:|',
-	]
-)
-for variant in variant_order:
-	mae = mapping(per_variant[variant]['mae'], f'{variant} MAE')
-	local_bt = mapping(per_variant[variant]['local_bt'], f'{variant} Local BT')
-	mae_gains = mapping(mae['layout_gains'], f'{variant} MAE gains')
-	local_bt_gains = mapping(local_bt['layout_gains'], f'{variant} Local BT gains')
-	for layout in layouts:
-		lines.append(
-			f'| {variant} | {layout} | {float(mae_gains[layout]):+.6f} | '
-			f'{float(local_bt_gains[layout]):+.6f} |'
-		)
-lines.extend(
-	[
-		'',
-		f'- Eligible ranking: {ranking}',
-		f'- Recommended variant: {recommended_variant}',
-		'- This recommendation requires human review and does not start Phase 2.',
-	]
-)
-(report_root / 'screening_validation.md').write_text(
-	'\n'.join(lines) + '\n',
-	encoding='utf-8',
-)
-print(f'metrics read: {len(metrics)}')
-for variant in variant_order:
-	print(variant, per_variant[variant])
-print(f'eligible ranking: {ranking}')
-print(f'recommended_variant: {recommended_variant}')
-PY
+set -euo pipefail
+python "$EXP/scripts/summarize_validation.py" \
+  --existing-runs-root "$EXISTING_RUNS_ROOT" \
+  --validation-runs-root "$VALIDATION_RUNS_ROOT" \
+  --report-root "$REPORT_ROOT"
 ```
 
 Inspect both `$REPORT_ROOT/screening_validation.json` and
 `$REPORT_ROOT/screening_validation.md`. Phase 1 ends here. A human uses these
-validation-only summaries to choose any Phase 2 condition; do not proceed to
-other supervision sizes or a held-out report.
+validation-only summaries to choose any Phase 2 condition. Reviewers must not
+open the historical top-level `test` fields under `$EXISTING_RUNS_ROOT`. This
+report does not start Phase 2. Do not proceed to other supervision sizes or a
+held-out report.
+
+## 13. Final test protocol after all validation phases
+
+Do not run this section during Phase 1. Complete all validation-only
+hyperparameter studies first, then freeze exactly one final model without
+reference to any test result.
+
+Layouts are not hyperparameters. Evaluate the frozen final model on all five
+predefined layouts:
+
+- `layout_000`
+- `layout_001`
+- `layout_002`
+- `layout_003`
+- `layout_004`
+
+The final config uses `$FINAL_RUNS_ROOT`, which is disjoint from historical
+runs and validation-only runs. Set only the frozen model ID:
+
+```bash
+set -euo pipefail
+export FINAL_MODEL=mae_hmm_k6_persist003
+```
+
+Record the frozen model choice before continuing. Dry-run all five final jobs:
+
+```bash
+set -euo pipefail
+LAYOUTS=(
+  layout_000
+  layout_001
+  layout_002
+  layout_003
+  layout_004
+)
+for layout in "${LAYOUTS[@]}"; do
+  python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
+    --config "$FINAL_CHANNEL_CONFIG" \
+    --model "$FINAL_MODEL" \
+    --layout "$layout" \
+    --size medium \
+    --layout-config "$LAYOUT_CONFIG" \
+    --dry-run
+done
+```
+
+After recording the frozen model choice, run exactly the five predefined
+layouts in normal mode. Deliberately omit `--validation-only`:
+
+```bash
+set -euo pipefail
+LAYOUTS=(
+  layout_000
+  layout_001
+  layout_002
+  layout_003
+  layout_004
+)
+for layout in "${LAYOUTS[@]}"; do
+  job_dir="$FINAL_RUNS_ROOT/model=$FINAL_MODEL/layout=$layout/size=medium"
+
+  if [[ -f "$job_dir/metrics.json" ]]; then
+    echo "skip completed final test job: layout=$layout"
+    continue
+  fi
+
+  if [[ -f "$job_dir/latest.pt" ]]; then
+    echo "incomplete final test job requires explicit resume: $job_dir" >&2
+    exit 1
+  fi
+
+  python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
+    --config "$FINAL_CHANNEL_CONFIG" \
+    --model "$FINAL_MODEL" \
+    --layout "$layout" \
+    --size medium \
+    --layout-config "$LAYOUT_CONFIG"
+done
+```
+
+Every final `metrics.json` must use the frozen `$FINAL_MODEL`, have
+`data_size` equal to `medium`, have `evaluation_mode` equal to
+`validation_and_test`, contain a top-level `test` mapping, and use one of the
+five predefined layouts.
+
+After all five jobs complete, write the final descriptive report:
+
+```bash
+set -euo pipefail
+python "$EXP/scripts/summarize_final_test.py" \
+  --runs-root "$FINAL_RUNS_ROOT" \
+  --model "$FINAL_MODEL" \
+  --report-root "$REPORT_ROOT/final_test"
+```
+
+Inspect `$REPORT_ROOT/final_test/final_test_layouts.csv`,
+`final_test_summary.json`, and `final_test_summary.md`. Report all five test
+Channel IoU values and their mean, median, and sample standard deviation. The
+summary uses `statistics.stdev()` and requires exactly the five predefined
+`medium` jobs for the frozen model in the final namespace.
+
+Layouts must not be ranked or selected after test evaluation. Test results
+must not trigger another model, transition condition, layout, or
+hyperparameter search. Do not copy a validation-only checkpoint into the
+final namespace. The final experimental unit is one frozen model multiplied
+by five predefined layouts, for exactly five final test jobs.

@@ -50,6 +50,9 @@ EXTRACTION_CONFIGS = tuple(
 	)
 )
 CHANNEL_CONFIG = EXPERIMENT_ROOT / '40_channel_transition_balance.yaml'
+FINAL_CHANNEL_CONFIG = EXPERIMENT_ROOT / '41_channel_transition_balance_final.yaml'
+SUMMARY_SCRIPT = EXPERIMENT_ROOT / 'scripts/summarize_validation.py'
+FINAL_SUMMARY_SCRIPT = EXPERIMENT_ROOT / 'scripts/summarize_final_test.py'
 LAYOUT_CONFIG = Path(
 	'experiments/parihaka/facies_benchmark_v1/'
 	'30_channel_benchmark_v1/02_layouts.yaml'
@@ -110,7 +113,15 @@ def test_runbook_references_existing_configs_scripts_layout_and_clis() -> None:
 		assert path.is_file()
 	for path in EXPORT_SCRIPTS:
 		assert os.access(path, os.X_OK)
-	for path in (*EXTRACTION_CONFIGS, CHANNEL_CONFIG, LAYOUT_CONFIG, *CLIS):
+	for path in (
+		*EXTRACTION_CONFIGS,
+		CHANNEL_CONFIG,
+		FINAL_CHANNEL_CONFIG,
+		SUMMARY_SCRIPT,
+		FINAL_SUMMARY_SCRIPT,
+		LAYOUT_CONFIG,
+		*CLIS,
+	):
 		assert path.is_file()
 
 	for source in SOURCES:
@@ -135,9 +146,9 @@ def test_runbook_references_existing_configs_scripts_layout_and_clis() -> None:
 		assert str(cli) in text
 
 
-def test_runbook_has_four_compilable_inline_python_blocks() -> None:
+def test_runbook_has_three_compilable_inline_python_blocks() -> None:
 	blocks = _inline_python(_text())
-	assert len(blocks) == 4
+	assert len(blocks) == 3
 	for index, source in enumerate(blocks, start=1):
 		compile(source, f'{README}:inline-{index}', 'exec')
 
@@ -222,6 +233,38 @@ def test_runbook_uses_required_execution_order_and_six_conditions() -> None:
 	assert '--dry-run' in extraction_section
 
 
+def test_runbook_bash_blocks_fail_fast() -> None:
+	blocks = re.findall(r'```bash\n(.*?)\n```', _text(), flags=re.DOTALL)
+	assert blocks
+	assert all(block.startswith('set -euo pipefail\n') for block in blocks)
+
+
+def test_targeted_tests_cover_decoder_runner_and_cli() -> None:
+	section = _section(
+		_text(),
+		'## 2. Targeted tests',
+		'## 3. Build the six new clustering results and pseudo-targets',
+	)
+	assert 'tests/seis_ssl_cluster/test_parihaka_channel_decoder.py' in section
+	assert 'tests/seis_ssl_cluster/test_proc_dry_run.py' in section
+	assert (
+		'tests/seis_ssl_cluster/'
+		'test_parihaka_channel_hmm_transition_balance_final_summary.py' in section
+	)
+	assert '-k parihaka_channel_decoder' in section
+
+
+def test_full_training_block_is_self_contained() -> None:
+	section = _section(
+		_text(),
+		'## 6. Run the six full 25-epoch trainings',
+		'## 7. Audit the six full checkpoints',
+	)
+	full_run = re.findall(r'```bash\n(.*?)\n```', section, flags=re.DOTALL)[0]
+	assert len(_array_items(full_run, 'TRAINING_CONFIGS')) == 6
+	assert 'for config in "${TRAINING_CONFIGS[@]}"' in full_run
+
+
 def test_runbook_resume_examples_bind_each_run_to_its_own_latest() -> None:
 	section = _section(
 		_text(),
@@ -255,13 +298,38 @@ def test_runbook_decoder_commands_target_only_six_candidates_and_medium() -> Non
 	)
 	assert _array_items(preflight, 'CANDIDATE_MODELS') == CANDIDATE_MODELS
 	assert _array_items(preflight, 'LAYOUTS') == LAYOUTS
+	assert _array_items(execution, 'CANDIDATE_MODELS') == CANDIDATE_MODELS
+	assert _array_items(execution, 'LAYOUTS') == LAYOUTS
 	for section in (preflight, execution):
 		assert '--model "$model"' in section
 		assert '--layout "$layout"' in section
 		assert section.count('--size medium') == 1
 		assert 'run_parihaka_channel_decoder.py' in section
+		assert '--validation-only' in section
 	assert '--dry-run' in preflight
 	assert '--dry-run' not in _bash_blocks(execution)
+
+
+def test_runbook_decoder_loop_skips_complete_and_stops_on_partial_job() -> None:
+	section = _section(
+		_text(),
+		'## 11. Run the 30 new medium decoder jobs',
+		'## 12. Write the validation screening summary',
+	)
+	block = re.findall(r'```bash\n(.*?)\n```', section, flags=re.DOTALL)[0]
+	job_dir = '$VALIDATION_RUNS_ROOT/model=$model/layout=$layout/size=medium'
+	assert f'job_dir="{job_dir}"' in block
+	assert 'if [[ -f "$job_dir/metrics.json" ]]' in block
+	assert 'continue' in block
+	assert 'if [[ -f "$job_dir/latest.pt" ]]' in block
+	assert 'incomplete Channel job requires explicit resume' in block
+	assert 'exit 1' in block
+	assert block.index('metrics.json') < block.index('latest.pt')
+	assert (
+		'--resume\n'
+		'"$VALIDATION_RUNS_ROOT/model=<model>/layout=<layout>/'
+		'size=medium/latest.pt"' in section
+	)
 
 
 def test_runbook_reuses_existing_models_without_rerunning_them() -> None:
@@ -285,72 +353,74 @@ def test_runbook_reuses_existing_models_without_rerunning_them() -> None:
 	assert 'existing H0 model' in text
 
 
-def test_screening_reads_validation_only_and_validates_exact_matrix() -> None:
-	script = _inline_python(_text())[-1]
-	assert "payload.get('validation')" in script
-	assert "validation.get('channel_iou')" in script
-	assert "'metric': 'validation.channel_iou'" in script
-	for forbidden in (
-		"payload.get('test')",
-		'payload.get("test")',
-		"payload['test']",
-		'payload["test"]',
-		'test.channel_iou',
-	):
-		assert forbidden not in script
-	assert 'expected_metric_count = 50' in script
-	assert 'len(model_ids) != 10' in script
-	assert 'len(variant_order) != 4' in script
-	assert "tuple(branches) != ('mae', 'local_bt')" in script
-	for model in (
-		'mae',
-		'mae_hmm_k6',
-		'local_barlow_twins',
-		'local_barlow_twins_hmm_k6',
-		*CANDIDATE_MODELS,
-	):
-		assert f"'{model}'" in script
-	for layout in LAYOUTS:
-		assert f"'{layout}'" in script
-	assert "payload.get('model')" in script
-	assert "payload.get('layout_id')" in script
-	assert "payload.get('data_size') != 'medium'" in script
-	assert 'paired_identity(metrics[(model, layout)])' in script
+def test_runbook_calls_executable_validation_summary_with_explicit_roots() -> None:
+	section = _section(
+		_text(),
+		'## 12. Write the validation screening summary',
+		'## 13. Final test protocol after all validation phases',
+	)
+	assert 'scripts/summarize_validation.py' in section
+	assert '--existing-runs-root "$EXISTING_RUNS_ROOT"' in section
+	assert '--validation-runs-root "$VALIDATION_RUNS_ROOT"' in section
+	assert '--report-root "$REPORT_ROOT"' in section
+	assert "python - <<'PY'" not in section
+	assert (
+		'tests/seis_ssl_cluster/'
+		'test_parihaka_channel_hmm_transition_balance_summary.py' in _text()
+	)
 
 
-def test_screening_computes_required_statistics_and_recommendation_rule() -> None:
-	script = _inline_python(_text())[-1]
-	for statistic in (
-		'statistics.mean',
-		'statistics.median',
-		'statistics.stdev',
-		"'sample_standard_deviation'",
-		"'wins'",
-		"'ties'",
-		"'losses'",
-		"'layout_gains'",
-	):
-		assert statistic in script
-	assert 'eligible = mae_mean >= 0.0 and local_bt_mean >= 0.0' in script
-	assert 'eligible_variants' in script
-	assert 'ranking = sorted(' in script
-	assert "'combined'" in script
-	assert "['mean']" in script
-	assert "['median']" in script
-	assert 'variant_order.index(variant)' in script
-	assert 'recommended_variant = ranking[0] if ranking else None' in script
-	for key in (
-		'metric',
-		'data_size',
-		'variant_transition_settings',
-		'per_variant',
-		'ranking',
-		'recommended_variant',
-		'selection_rule',
-	):
-		assert f"'{key}'" in script
-	for filename in ('screening_validation.json', 'screening_validation.md'):
-		assert f"'{filename}'" in script
+def test_final_test_protocol_uses_all_layouts_in_disjoint_normal_runs() -> None:
+	text = _text()
+	section = _section(text, '## 13. Final test protocol after all validation phases')
+	assert 'Do not run this section during Phase 1' in section
+	assert 'FINAL_LAYOUT' not in section
+	assert section.count('export FINAL_MODEL=') == 1
+	assert '--config "$FINAL_CHANNEL_CONFIG"' in section
+	assert '--model "$FINAL_MODEL"' in section
+	assert '--layout "$layout"' in section
+	assert '--size medium' in section
+	assert section.count('run_parihaka_channel_decoder.py') == 2
+	blocks = re.findall(r'```bash\n(.*?)\n```', section, flags=re.DOTALL)
+	assert len(blocks) == 4
+	dry_run = blocks[1]
+	normal_run = blocks[2]
+	for block in (dry_run, normal_run):
+		assert _array_items(block, 'LAYOUTS') == LAYOUTS
+		assert 'for layout in "${LAYOUTS[@]}"' in block
+		assert '--model "$FINAL_MODEL"' in block
+		assert '--layout "$layout"' in block
+	assert '--dry-run' in dry_run
+	assert '--dry-run' not in normal_run
+	assert '--validation-only' not in normal_run
+	assert 'job_dir="$FINAL_RUNS_ROOT/model=$FINAL_MODEL/' in normal_run
+	assert 'if [[ -f "$job_dir/metrics.json" ]]' in normal_run
+	assert 'if [[ -f "$job_dir/latest.pt" ]]' in normal_run
+	assert 'incomplete final test job requires explicit resume' in normal_run
+	assert 'evaluation_mode` equal to' in section
+	assert '`validation_and_test`' in section
+	assert 'exactly five final test jobs' in section
+	assert 'Layouts must not be ranked or selected after test evaluation' in section
+	assert 'must not trigger another model, transition condition, layout' in section
+	assert 'disjoint from historical' in section
+	assert '/validation_runs"' in text
+	assert '/final_runs"' in text
+
+
+def test_final_test_protocol_calls_executable_summary_with_explicit_roots() -> None:
+	section = _section(
+		_text(),
+		'## 13. Final test protocol after all validation phases',
+	)
+	assert 'scripts/summarize_final_test.py' in section
+	assert '--runs-root "$FINAL_RUNS_ROOT"' in section
+	assert '--model "$FINAL_MODEL"' in section
+	assert '--report-root "$REPORT_ROOT/final_test"' in section
+	assert 'final_test_layouts.csv' in section
+	assert 'final_test_summary.json' in section
+	assert 'final_test_summary.md' in section
+	assert 'mean, median, and sample standard deviation' in section
+	assert 'statistics.stdev()' in section
 
 
 def test_runbook_avoids_other_sizes_unsafe_artifact_commands_and_summary_cli() -> None:
@@ -362,7 +432,8 @@ def test_runbook_avoids_other_sizes_unsafe_artifact_commands_and_summary_cli() -
 		r'(?m)^\s*(?:rm\s+-rf|cp\s|rsync(?:\s|$)|ln\s+-s(?:\s|$))',
 		commands,
 	)
-	assert 'summarize_' not in text
+	assert text.count('scripts/summarize_validation.py') == 1
+	assert text.count('scripts/summarize_final_test.py') == 1
 	assert (
 		'$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/channel_benchmark/'
 		'ssl_hmm_four_way_v1/runs'
