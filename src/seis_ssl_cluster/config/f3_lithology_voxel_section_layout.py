@@ -122,6 +122,7 @@ def f3_lithology_voxel_section_layout_contract_from_mapping(
 				'patch_size_xyz',
 				'allowed_relative_error',
 				'target_train_voxel_counts',
+				'target_calibration',
 				'active_prefix_counts',
 				'decoder_seed',
 				'layouts',
@@ -164,6 +165,7 @@ def f3_lithology_voxel_section_layout_contract_from_mapping(
 	layouts = _resolve_layouts(config.get('layouts'))
 	_validate_target_counts(layouts)
 	_validate_generated_summary(config, layouts)
+	_validate_target_calibration(config, layouts)
 	_validate_validation_disjoint(layouts, line_inventory=line_inventory)
 	decoder = _resolve_fixed_decoder(config.get('decoder'))
 	return F3SectionLayoutContract(
@@ -329,6 +331,49 @@ def _validate_generated_summary(
 			if actual != expected:
 				raise ValueError(
 					f'active_prefix_counts.{size} must be exactly {expected!r}'
+				)
+
+
+def _validate_target_calibration(
+	config: Mapping[str, object], layouts: tuple[F3SectionLayoutSpec, ...]
+) -> None:
+	if 'target_calibration' not in config:
+		return
+	calibration = config.get('target_calibration')
+	if not isinstance(calibration, Mapping):
+		raise TypeError('target_calibration must be a mapping')
+	_validate_allowed_keys(
+		calibration,
+		frozenset({'rule', 'active_pool_train_voxel_counts'}),
+		prefix='target_calibration',
+	)
+	_required_str(calibration, 'rule', prefix='target_calibration')
+	pools = calibration.get('active_pool_train_voxel_counts')
+	if pools is None:
+		return
+	if not isinstance(pools, Mapping) or set(pools) != set(DATA_SIZES):
+		raise ValueError(
+			'target_calibration.active_pool_train_voxel_counts must define '
+			'exactly all sizes'
+		)
+	for size in DATA_SIZES:
+		by_layout = pools[size]
+		if not isinstance(by_layout, Mapping) or set(by_layout) != set(LAYOUT_IDS):
+			raise ValueError(
+				f'target_calibration.active_pool_train_voxel_counts.{size} must '
+				'define exactly all layouts'
+			)
+		for layout in layouts:
+			pool = _positive_integer(
+				by_layout[layout.layout_id],
+				f'target_calibration.active_pool_train_voxel_counts.{size}.'
+				f'{layout.layout_id}',
+			)
+			# A target above a layout's own pool can never be reached by that
+			# layout, whatever tolerance the contract allows.
+			if layout.size_by_name[size].target_train_voxel_count > pool:
+				raise ValueError(
+					f'{layout.layout_id}/{size} target exceeds its active pool'
 				)
 
 

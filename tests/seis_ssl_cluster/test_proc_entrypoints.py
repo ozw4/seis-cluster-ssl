@@ -42,6 +42,21 @@ HELP_FLAG_CONTRACTS = {
 		'--config',
 		'--dry-run',
 	),
+	'build_f3_lithology_voxel_dataset.py': (
+		'--config',
+		'--dry-run',
+	),
+	'build_f3_lithology_voxel_section_layout_datasets.py': (
+		'--config',
+		'--dry-run',
+		'--only-missing',
+		'--quarantine-invalid',
+	),
+	'prepare_f3_lithology_voxel_section_layout_contract.py': (
+		'--config',
+		'--dry-run',
+		'--mode',
+	),
 	'cluster_embeddings.py': (
 		'--config',
 		'--dry-run',
