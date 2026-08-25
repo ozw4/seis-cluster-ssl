@@ -93,8 +93,8 @@ def _print_summary(
 	)
 	print(f'voxel_dataset.output_dir: {config.output_dir}')
 	print(
-		'voxel_dataset.split_policy: PNG inventory; validation precedence; '
-		'no random split'
+		f'voxel_dataset.split_policy: {config.inventory_semantics}; '
+		'validation precedence; no random split'
 	)
 
 

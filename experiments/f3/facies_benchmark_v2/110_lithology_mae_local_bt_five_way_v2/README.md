@@ -122,7 +122,11 @@ python proc/seis_ssl_cluster/extract_embeddings.py --config "$PREP/02_extract_re
 v2 section inventory（`$PREP/section_inventory_v2.csv`）は、benchmarkのvalidation
 section（inline 150、crossline 350・750）を据え置き、train sectionをdense SEGY label
 から規則的に増やしたものである（規則は`$LAYOUT/README.md`）。labelは常に
-`f3_labels.sgy`由来のlabel volumeから読む。
+`f3_labels.sgy`由来のlabel volumeから読む。`voxel_dataset.inventory_semantics:
+dense_segy_label_section_inventory_v1`がその事実をartifactのsplit provenance
+（`split_manifest.json`の`split_source`/`strategy`、
+`voxel_dataset_metadata.json`の`split_strategy`）に記録する（省略時は
+`png_label_inventory_v1`、v1のPNG annotation inventoryの意味）。
 
 ```bash
 python proc/seis_ssl_cluster/build_f3_lithology_voxel_dataset.py --config "$PREP/03_build_voxel_supervision.yaml" --dry-run

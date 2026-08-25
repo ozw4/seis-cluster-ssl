@@ -37,7 +37,10 @@ validation sectionを据え置き、train sectionをdense SEGY label（`f3_label
   確認済み。
 
 canonical supervision: train 6,620,640 voxels、validation 470,136 voxels
-（`lithology/f3/facies_benchmark_v2/voxel_supervision/dense_label_sections_v2`）。
+（`lithology/f3/facies_benchmark_v2/voxel_supervision/dense_label_sections_v2`、
+split provenance `dense_segy_label_section_inventory_v1`）。各条件の
+`split_manifest.json`はcanonicalのcopy、`voxel_dataset_metadata.json`は
+canonical metadataを継承するので、この provenance は15条件にもそのまま入る。
 
 ## 入力
 
