@@ -237,6 +237,17 @@ def test_runbook_bash_blocks_fail_fast() -> None:
 	assert all(block.startswith('set -euo pipefail\n') for block in blocks)
 
 
+def test_targeted_tests_cover_decoder_runner_and_cli() -> None:
+	section = _section(
+		_text(),
+		'## 2. Targeted tests',
+		'## 3. Build the six new clustering results and pseudo-targets',
+	)
+	assert 'tests/seis_ssl_cluster/test_parihaka_channel_decoder.py' in section
+	assert 'tests/seis_ssl_cluster/test_proc_dry_run.py' in section
+	assert '-k parihaka_channel_decoder' in section
+
+
 def test_full_training_block_is_self_contained() -> None:
 	section = _section(
 		_text(),

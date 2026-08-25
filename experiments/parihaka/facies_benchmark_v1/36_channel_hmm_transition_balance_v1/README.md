@@ -77,17 +77,23 @@ reused source appear under a new namespace.
 
 ## 2. Targeted tests
 
-Run the three config contracts, the executable screening tests, and this
-runbook contract before execution:
+Run the production decoder tests, the three config contracts, the executable
+screening tests, this runbook contract, and the focused decoder CLI tests
+before execution:
 
 ```bash
 set -euo pipefail
 pytest -q \
+  tests/seis_ssl_cluster/test_parihaka_channel_decoder.py \
   tests/seis_ssl_cluster/test_parihaka_hmm_transition_balance_target_configs.py \
   tests/seis_ssl_cluster/test_parihaka_hmm_transition_balance_training_configs.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_configs.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_summary.py \
   tests/seis_ssl_cluster/test_parihaka_channel_hmm_transition_balance_runbook.py
+
+pytest -q \
+  tests/seis_ssl_cluster/test_proc_dry_run.py \
+  -k parihaka_channel_decoder
 ```
 
 These tests do not require live checkpoints, embeddings, pseudo-targets, or
