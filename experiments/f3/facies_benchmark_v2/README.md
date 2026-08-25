@@ -14,7 +14,7 @@ v1（`../facies_benchmark_v1`）は実装・前処理・decoder・checkpoint・�
 | raw inspection | `00_inspection/` | `inspect_f3_*`, `visualize_f3_quicklook`, `check_f3_label_consistency`, `preview_f3_tokenization` |
 | prepared volume / canonical supervision | `10_prepare/` | `prepare_f3_facies_volume.py`, `build_f3_lithology_voxel_dataset.py` |
 | section-layout contract / 15 datasets | `109_f3_voxel_section_layout_v2/` | `prepare_f3_lithology_voxel_section_layout_contract.py`, `build_f3_lithology_voxel_section_layout_datasets.py` |
-| five-way comparison | `110_lithology_mae_local_bt_five_way_v2/` | `extract_embeddings.py`, `audit_f3_lithology_five_way_sources.py`, `run_f3_lithology_five_way.py`, `summarize_f3_lithology_five_way.py` |
+| five-way comparison | `110_lithology_mae_local_bt_five_way_v2/` | `check_f3_prepared_volume_parity.py`（v1/v2 prepared volume parity gate）, `extract_embeddings.py`, `audit_f3_lithology_five_way_sources.py`, `run_f3_lithology_five_way.py`, `summarize_f3_lithology_five_way.py` |
 
 全手順は
 [`110_lithology_mae_local_bt_five_way_v2/README.md`](110_lithology_mae_local_bt_five_way_v2/README.md)
