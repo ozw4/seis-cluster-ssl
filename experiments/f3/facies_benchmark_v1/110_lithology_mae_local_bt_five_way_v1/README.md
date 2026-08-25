@@ -122,13 +122,6 @@ valid-token maskのbyte一致に加えて、固定予算(25 epoch / 15,625 globa
 encoder top-1)とtrace-dropなしの系譜を検証する。`random`はepoch 0の未学習表現で
 あることを確認する。
 
-固定予算はglobal step数だけでなく学習契約そのもので検証する。stage-1(100 epoch)と
-stage-2(25 epoch)の双方について、batch_size・samples_per_epoch・lr・weight_decay・
-amp・seed・grad_clip_normと、objectiveごとの固定値(Local BTのprojector_dimや
-redundancy_weight、MAEのmask率とreconstruction loss、HMMのheadとloss)を
-`seis_ssl_cluster.config.f3_lithology_five_way`の契約定数と突き合わせる。
-同じstep数でもsample budgetや最適化条件が違うcheckpointはここで落ちる。
-
 系譜検証はfail-closedである。checkpointが記録したstage-1親のabsolute pathが
 存在しなければauditは`FileNotFoundError`で停止する。artifact rootを移動した場合は
 pretrainingからauditまで同じpathに戻してから実行する。

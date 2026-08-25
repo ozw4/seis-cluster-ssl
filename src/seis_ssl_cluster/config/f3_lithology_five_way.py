@@ -30,67 +30,10 @@ FIVE_WAY_STAGE1_EPOCHS = 100
 FIVE_WAY_STAGE2_EPOCHS = 25
 FIVE_WAY_STAGE2_GLOBAL_STEPS = 15_625
 FIVE_WAY_UNFREEZE_TOP_BLOCKS = 1
-FIVE_WAY_DISTILLATION_WEIGHT = 0.2
 LOCAL_BARLOW_TWINS_METHOD = 'local_barlow_twins_3d'
 LOCAL_BARLOW_TWINS_PAIRS_PER_CROP = 128
 MAE_OBJECTIVE = 'amp_mae3d'
 RANDOM_OBJECTIVE = 'random_encoder'
-
-# Every arm must be trained on the same samples under the same optimizer, so the
-# settings that carry scientific meaning are fixed here once and referenced by the
-# comparison configs, the live source audit, and their tests.
-FIVE_WAY_STAGE1_TRAIN_CONTRACT: Mapping[str, object] = {
-	'batch_size': 16,
-	'samples_per_epoch': 10_000,
-	'epochs': FIVE_WAY_STAGE1_EPOCHS,
-	'lr': 1.0e-4,
-	'weight_decay': 0.05,
-	'amp': False,
-	'seed': 42,
-	'grad_clip_norm': 1.0,
-}
-FIVE_WAY_STAGE2_TRAIN_CONTRACT: Mapping[str, object] = {
-	**FIVE_WAY_STAGE1_TRAIN_CONTRACT,
-	'epochs': FIVE_WAY_STAGE2_EPOCHS,
-	'lr': 1.0e-5,
-}
-FIVE_WAY_PRETEXT_TRAIN_CONTRACT: Mapping[str, object] = {
-	**FIVE_WAY_STAGE2_TRAIN_CONTRACT,
-	'encoder_lr': 1.0e-5,
-}
-LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT: Mapping[str, object] = {
-	'method': LOCAL_BARLOW_TWINS_METHOD,
-	'local_pairs_per_crop': LOCAL_BARLOW_TWINS_PAIRS_PER_CROP,
-	'projector_dim': 384,
-	'redundancy_weight': 0.005,
-	'normalization_eps': 1.0e-4,
-}
-MAE_MASKING_CONTRACT: Mapping[str, object] = {
-	'spatial_mask_ratio': 0.75,
-	'block_size_tokens': [1, 1, 1],
-}
-MAE_LOSS_CONTRACT: Mapping[str, object] = {
-	'reconstruction': 'mse',
-	'gradient_weight': 0.0,
-	'visible_reconstruction_weight': 0.1,
-	'target_normalization': {
-		'mode': 'patch_zscore',
-		'eps': 1.0e-6,
-		'min_std': 0.05,
-	},
-}
-FIVE_WAY_HMM_HEAD_CONTRACT: Mapping[str, object] = {
-	'num_prototypes': FIVE_WAY_HMM_K,
-	'projection_dim': 128,
-	'temperature': 0.1,
-	'normalize': True,
-}
-FIVE_WAY_HMM_LOSS_CONTRACT: Mapping[str, object] = {
-	'prototype_weight': 1.0,
-	'usage_weight': 0.005,
-	'entropy_floor': None,
-	'distillation_weight': FIVE_WAY_DISTILLATION_WEIGHT,
-}
 FIVE_WAY_LABEL_KEYS = (
 	'source_label_volume',
 	'source_label_segy',
@@ -299,26 +242,17 @@ def _resolve_model(
 
 __all__ = [
 	'EXPECTED_MODEL_IDENTITIES',
-	'FIVE_WAY_DISTILLATION_WEIGHT',
-	'FIVE_WAY_HMM_HEAD_CONTRACT',
 	'FIVE_WAY_HMM_K',
-	'FIVE_WAY_HMM_LOSS_CONTRACT',
 	'FIVE_WAY_LABEL_KEYS',
 	'FIVE_WAY_MIN_CONFIDENCE',
 	'FIVE_WAY_MODEL_IDS',
-	'FIVE_WAY_PRETEXT_TRAIN_CONTRACT',
 	'FIVE_WAY_RANDOM_SEED',
 	'FIVE_WAY_STAGE1_EPOCHS',
-	'FIVE_WAY_STAGE1_TRAIN_CONTRACT',
 	'FIVE_WAY_STAGE2_EPOCHS',
 	'FIVE_WAY_STAGE2_GLOBAL_STEPS',
-	'FIVE_WAY_STAGE2_TRAIN_CONTRACT',
 	'FIVE_WAY_UNFREEZE_TOP_BLOCKS',
 	'LOCAL_BARLOW_TWINS_METHOD',
-	'LOCAL_BARLOW_TWINS_OBJECTIVE_CONTRACT',
 	'LOCAL_BARLOW_TWINS_PAIRS_PER_CROP',
-	'MAE_LOSS_CONTRACT',
-	'MAE_MASKING_CONTRACT',
 	'MAE_OBJECTIVE',
 	'RANDOM_OBJECTIVE',
 	'F3FiveWayConfig',

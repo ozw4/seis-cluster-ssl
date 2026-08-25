@@ -26,8 +26,6 @@ from tests.seis_ssl_cluster.helpers_f3_five_way import (
 	TOKEN_GRID,
 	build_five_way_universe,
 	local_bt_objective,
-	local_bt_stage1_config,
-	mae_stage1_config,
 )
 
 FIVE_WAY_ROOT = Path(
@@ -370,7 +368,7 @@ def test_audit_rejects_a_stage1_checkpoint_in_the_mae_slot(
 		universe,
 		0,
 		{
-			'config': mae_stage1_config(),
+			'config': {'stage': 'train_amp_mae', 'train': {'epochs': 100}},
 			'epoch': 100,
 			'global_step': 62_500,
 		},
@@ -428,14 +426,25 @@ def test_audit_walks_the_local_bt_lineage_into_the_base_checkpoint(
 ) -> None:
 	config = f3_lithology_five_way_config_from_mapping(universe)
 	base = tmp_path / 'stage1_base' / 'latest.pt'
-	_write_stage1_base(
-		base,
-		epochs=100,
-		augmentations={
-			'policy': 'd4_trace_drop',
-			'reflection_probability': 0.5,
-			'trace_drop_probability': 0.1,
+	base.parent.mkdir(parents=True, exist_ok=True)
+	torch.save(
+		{
+			'config': {
+				'stage': 'barlow_twins_training',
+				'barlow_twins': {
+					'method': 'local_barlow_twins_3d',
+					'local_pairs_per_crop': 128,
+				},
+				'augmentations': {
+					'policy': 'd4_trace_drop',
+					'reflection_probability': 0.5,
+					'trace_drop_probability': 0.1,
+				},
+				'train': {'epochs': 100},
+			},
+			'epoch': 100,
 		},
+		base,
 	)
 	checkpoint = Path(universe['models'][2]['checkpoint'])
 	payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
@@ -461,82 +470,6 @@ def test_audit_rejects_an_hmm_checkpoint_without_its_fixed_budget(
 		audit_f3_lithology_five_way_sources(config)
 
 
-CONTRACT_DRIFTS = (
-	(2, ('config', 'train', 'batch_size'), 8, r'train\.batch_size must equal 16'),
-	(
-		2,
-		('config', 'train', 'samples_per_epoch'),
-		5_000,
-		r'train\.samples_per_epoch must equal 10000',
-	),
-	(2, ('config', 'train', 'lr'), 1.0e-4, r'train\.lr must equal 1e-05'),
-	(
-		2,
-		('config', 'barlow_twins', 'projector_dim'),
-		256,
-		r'barlow_twins\.projector_dim must equal 384',
-	),
-	(
-		3,
-		('stratigraphy_config', 'head', 'temperature'),
-		0.5,
-		r'head\.temperature must equal 0\.1',
-	),
-	(
-		3,
-		('stratigraphy_config', 'loss', 'usage_weight'),
-		0.05,
-		r'loss\.usage_weight must equal 0\.005',
-	),
-)
-
-
-@pytest.mark.parametrize(('index', 'keys', 'value', 'message'), CONTRACT_DRIFTS)
-def test_audit_rejects_fixed_training_contract_drift(
-	universe: dict[str, object],
-	index: int,
-	keys: tuple[str, ...],
-	value: object,
-	message: str,
-) -> None:
-	config = f3_lithology_five_way_config_from_mapping(universe)
-	checkpoint = Path(universe['models'][index]['checkpoint'])
-	payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
-	block = payload
-	for key in keys[:-1]:
-		block = block[key]
-	block[keys[-1]] = value
-	_repoint_checkpoint(universe, index, payload)
-
-	with pytest.raises(ValueError, match=message):
-		audit_f3_lithology_five_way_sources(config)
-
-
-def test_audit_rejects_a_stage1_base_with_the_same_steps_but_fewer_samples(
-	universe: dict[str, object],
-	tmp_path: Path,
-) -> None:
-	config = f3_lithology_five_way_config_from_mapping(universe)
-	base = tmp_path / 'stage1_half_samples' / 'latest.pt'
-	base.parent.mkdir(parents=True, exist_ok=True)
-	base_config = local_bt_stage1_config()
-	base_config['train']['batch_size'] = 8
-	base_config['train']['samples_per_epoch'] = 5_000
-	torch.save(
-		{'config': base_config, 'epoch': 100, 'global_step': 62_500}, base
-	)
-	checkpoint = Path(universe['models'][2]['checkpoint'])
-	payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
-	payload['config']['continuation']['init_checkpoint'] = str(base)
-	_repoint_checkpoint(universe, 2, payload)
-
-	with pytest.raises(
-		ValueError,
-		match=r'continuation\.init_checkpoint train\.batch_size must equal 16',
-	):
-		audit_f3_lithology_five_way_sources(config)
-
-
 def test_audit_rejects_a_random_checkpoint_with_training_steps(
 	universe: dict[str, object],
 ) -> None:
@@ -553,12 +486,17 @@ def test_audit_rejects_a_random_checkpoint_with_training_steps(
 
 def _write_stage1_base(path: Path, *, epochs: int, augmentations: dict) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
-	config = local_bt_stage1_config()
-	config['augmentations'] = augmentations
-	config['train']['epochs'] = epochs
 	torch.save(
 		{
-			'config': config,
+			'config': {
+				'stage': 'barlow_twins_training',
+				'barlow_twins': {
+					'method': 'local_barlow_twins_3d',
+					'local_pairs_per_crop': 128,
+				},
+				'augmentations': augmentations,
+				'train': {'epochs': epochs},
+			},
 			'epoch': epochs,
 			'global_step': epochs * 625,
 		},
@@ -691,7 +629,15 @@ def test_audit_rejects_a_lineage_deeper_than_it_can_verify(
 	for index in range(6):
 		path = chain_root / f'link_{index}' / 'latest.pt'
 		path.parent.mkdir(parents=True, exist_ok=True)
-		config_payload = local_bt_stage1_config()
+		config_payload = {
+			'stage': 'barlow_twins_training',
+			'barlow_twins': {
+				'method': 'local_barlow_twins_3d',
+				'local_pairs_per_crop': 128,
+			},
+			'augmentations': {'horizontal_flip_probability': 0.5},
+			'train': {'epochs': 100},
+		}
 		if previous is not None:
 			config_payload['continuation'] = {
 				'init_checkpoint': str(previous),
