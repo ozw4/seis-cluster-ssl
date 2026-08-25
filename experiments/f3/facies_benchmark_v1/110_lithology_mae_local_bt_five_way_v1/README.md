@@ -122,10 +122,6 @@ valid-token maskのbyte一致に加えて、固定予算(25 epoch / 15,625 globa
 encoder top-1)とtrace-dropなしの系譜を検証する。`random`はepoch 0の未学習表現で
 あることを確認する。
 
-系譜検証はfail-closedである。checkpointが記録したstage-1親のabsolute pathが
-存在しなければauditは`FileNotFoundError`で停止する。artifact rootを移動した場合は
-pretrainingからauditまで同じpathに戻してから実行する。
-
 ## 8. preflight（`layout_000/small`の五者dry-run）
 
 ```bash
