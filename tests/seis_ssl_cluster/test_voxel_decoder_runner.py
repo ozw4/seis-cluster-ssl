@@ -278,6 +278,49 @@ def test_dry_run_inspection_does_not_create_output(tmp_path) -> None:
 	assert not config.output_dir.exists()
 
 
+def test_declared_checkpoint_path_admits_a_suite_namespace(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'declared-checkpoint')
+	root = tmp_path / 'artifacts'
+	suite_dir = root / 'embeddings' / 'f3' / 'v1' / 'suite-v1' / 'encoder-v1'
+	suite_dir.mkdir(parents=True)
+	source_dir = Path(raw['embeddings']['input_dir'])
+	shutil.copytree(source_dir, suite_dir / 'tiny-spec')
+	raw['embeddings']['input_dir'] = str(suite_dir / 'tiny-spec')
+	metadata_checkpoint = str(
+		root / 'pretraining' / 'f3' / 'v1' / 'encoder-v1' / 'best.pt'
+	)
+
+	with pytest.raises(ValueError, match=r'model\.tag does not match'):
+		inspect_f3_lithology_voxel_decoder(
+			f3_lithology_voxel_decoder_config_from_mapping(raw)
+		)
+
+	raw['embeddings']['checkpoint_path'] = metadata_checkpoint
+	plan = inspect_f3_lithology_voxel_decoder(
+		f3_lithology_voxel_decoder_config_from_mapping(raw)
+	)
+	assert plan.token_grid_shape_xyz == (4, 1, 1)
+
+	raw['embeddings']['checkpoint_path'] = str(tmp_path / 'other' / 'best.pt')
+	with pytest.raises(ValueError, match=r'does not match embeddings\.checkpoint_path'):
+		inspect_f3_lithology_voxel_decoder(
+			f3_lithology_voxel_decoder_config_from_mapping(raw)
+		)
+
+
+def test_declared_checkpoint_path_still_anchors_the_model_tag(tmp_path) -> None:
+	raw, _ = _job(tmp_path, 'declared-anchor')
+	raw['embeddings']['checkpoint_path'] = str(
+		tmp_path / 'artifacts' / 'pretraining' / 'f3' / 'v1' / 'encoder-v1' / 'best.pt'
+	)
+	raw['model']['tag'] = 'tiny-spec'
+
+	with pytest.raises(ValueError, match=r'model\.tag does not match'):
+		inspect_f3_lithology_voxel_decoder(
+			f3_lithology_voxel_decoder_config_from_mapping(raw)
+		)
+
+
 def test_training_inspection_rejects_insufficient_context_halo(tmp_path) -> None:
 	raw, _ = _job(tmp_path, 'insufficient-halo')
 	raw['tiles']['context_halo_tokens'] = [0, 0, 0]

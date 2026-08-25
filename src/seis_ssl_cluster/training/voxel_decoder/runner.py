@@ -650,7 +650,18 @@ def _validate_source_provenance(
 		raise ValueError(
 			'embeddings.input_dir must identify the configured dataset and model'
 		) from error
-	if len(relative.parts) < 2 or relative.parts[0] != config.model['tag']:
+	expected_checkpoint = config.embeddings.get('checkpoint_path')
+	if len(relative.parts) < 2:
+		raise ValueError(
+			'embeddings.input_dir must identify the configured dataset and model'
+		)
+	# A declared source checkpoint allows a suite namespace above the model
+	# directory, so the tag anchors on the directory holding the embedding spec
+	# instead of the first path segment.
+	tag_segment = (
+		relative.parts[-2] if expected_checkpoint is not None else relative.parts[0]
+	)
+	if tag_segment != config.model['tag']:
 		raise ValueError(
 			'model.tag does not match embeddings.input_dir model tag; '
 			f'config={config.model["tag"]!r}'
@@ -658,7 +669,19 @@ def _validate_source_provenance(
 	checkpoint_value = embedding_payload.get('checkpoint_path')
 	if not isinstance(checkpoint_value, str) or not checkpoint_value:
 		raise ValueError('embedding metadata checkpoint_path is required')
-	if config.model['tag'] not in Path(checkpoint_value).parts:
+	if expected_checkpoint is not None:
+		# A declared source checkpoint replaces the tag-containment heuristic
+		# with an exact identity match; comparison suites reference encoders
+		# trained under foreign artifact namespaces.
+		if Path(checkpoint_value).resolve(strict=False) != Path(
+			str(expected_checkpoint)
+		).resolve(strict=False):
+			raise ValueError(
+				'embedding metadata checkpoint_path does not match '
+				'embeddings.checkpoint_path; '
+				f'config={expected_checkpoint!r}'
+			)
+	elif config.model['tag'] not in Path(checkpoint_value).parts:
 		raise ValueError(
 			'model.tag does not match embedding metadata checkpoint_path; '
 			f'config={config.model["tag"]!r}'
