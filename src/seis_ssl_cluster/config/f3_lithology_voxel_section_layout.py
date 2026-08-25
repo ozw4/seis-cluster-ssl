@@ -25,6 +25,9 @@ NESTING_SEMANTICS = 'strict_small_medium_large'
 VALIDATION_MASK_SEMANTICS = 'shared_across_all_layouts_sizes_and_models'
 STABLE_SELECTION_SEMANTICS = 'stable_hash_partial_section_token_footprints_v1'
 CONTRACT_ARTIFACT_TYPE = 'f3_lithology_voxel_section_layout_contract'
+# Every size target is the largest common target reachable by all layouts:
+# the minimum over layouts of the active-prefix teacher pool.
+TARGET_CALIBRATION_RULE = 'max_common_reachable_active_pool_v1'
 PATCH_SIZE = (8, 8, 8)
 DECODER_SEED = 42000
 
@@ -347,10 +350,12 @@ def _validate_target_calibration(
 		frozenset({'rule', 'active_pool_train_voxel_counts'}),
 		prefix='target_calibration',
 	)
-	_required_str(calibration, 'rule', prefix='target_calibration')
+	rule = _required_str(calibration, 'rule', prefix='target_calibration')
+	if rule != TARGET_CALIBRATION_RULE:
+		raise ValueError(
+			f'target_calibration.rule must be exactly {TARGET_CALIBRATION_RULE!r}'
+		)
 	pools = calibration.get('active_pool_train_voxel_counts')
-	if pools is None:
-		return
 	if not isinstance(pools, Mapping) or set(pools) != set(DATA_SIZES):
 		raise ValueError(
 			'target_calibration.active_pool_train_voxel_counts must define '
@@ -363,17 +368,21 @@ def _validate_target_calibration(
 				f'target_calibration.active_pool_train_voxel_counts.{size} must '
 				'define exactly all layouts'
 			)
-		for layout in layouts:
-			pool = _positive_integer(
-				by_layout[layout.layout_id],
+		common_target = min(
+			_positive_integer(
+				by_layout[layout_id],
 				f'target_calibration.active_pool_train_voxel_counts.{size}.'
-				f'{layout.layout_id}',
+				f'{layout_id}',
 			)
-			# A target above a layout's own pool can never be reached by that
-			# layout, whatever tolerance the contract allows.
-			if layout.size_by_name[size].target_train_voxel_count > pool:
+			for layout_id in LAYOUT_IDS
+		)
+		# The stored targets must replay the rule from the stored pools; a
+		# smaller target would silently drop teacher voxels every layout has.
+		for layout in layouts:
+			if layout.size_by_name[size].target_train_voxel_count != common_target:
 				raise ValueError(
-					f'{layout.layout_id}/{size} target exceeds its active pool'
+					f'{layout.layout_id}/{size} target must equal the minimum '
+					f'active pool {common_target} under {TARGET_CALIBRATION_RULE!r}'
 				)
 
 
@@ -589,6 +598,7 @@ __all__ = [
 	'PATCH_SIZE',
 	'STABLE_SELECTION_SEMANTICS',
 	'STATISTICAL_UNIT',
+	'TARGET_CALIBRATION_RULE',
 	'VALIDATION_MASK_SEMANTICS',
 	'F3SectionLayoutContract',
 	'F3SectionLayoutSizeSpec',

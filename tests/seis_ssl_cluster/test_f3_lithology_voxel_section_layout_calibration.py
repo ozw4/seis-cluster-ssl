@@ -10,6 +10,8 @@ import pytest
 import yaml
 
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
+	LAYOUT_IDS,
+	TARGET_CALIBRATION_RULE,
 	f3_lithology_voxel_section_layout_contract_from_mapping,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
@@ -149,6 +151,8 @@ def test_contract_gates_target_class_monitored_class_line_and_nesting() -> None:
 	contract = _preview_contract(base)
 	assert contract['selection_semantics'] == SELECTION_SEMANTICS
 	assert contract['target_calibration']['rule'] == TARGET_RULE
+	assert TARGET_RULE == TARGET_CALIBRATION_RULE
+	assert TARGET_RULE == 'max_common_reachable_active_pool_v1'
 	assert 'legacy_budget_source_identity' not in contract
 	outside = replace(base, relative_count_error=0.100001)
 	with pytest.raises(ValueError, match='relative error'):
@@ -174,7 +178,7 @@ def test_contract_gates_target_class_monitored_class_line_and_nesting() -> None:
 			allowed_relative_error=0.1,
 			validation_identity={'unchanged_by_preview': True},
 			source_file_identities={},
-			target_calibration={'rule': TARGET_RULE},
+			target_calibration=_fixture_calibration(),
 		)
 	with pytest.raises(ValueError, match='validation mask'):
 		build_section_layout_contract(
@@ -184,30 +188,64 @@ def test_contract_gates_target_class_monitored_class_line_and_nesting() -> None:
 			allowed_relative_error=0.1,
 			validation_identity={'unchanged_by_preview': False},
 			source_file_identities={},
-			target_calibration={'rule': TARGET_RULE},
+			target_calibration=_fixture_calibration(),
 		)
 
 
-def test_contract_resolver_rejects_target_above_active_pool() -> None:
+def test_contract_resolver_replays_targets_from_stored_pools() -> None:
 	contract = _preview_contract(_manual_preview(relative_error=0.0))
-	pools = {
-		size: {f'layout_{index:03d}': 1_000 for index in range(5)}
-		for size in ('small', 'medium', 'large')
-	}
-	accepted = {
-		**contract,
-		'target_calibration': {
-			'rule': TARGET_RULE,
-			'active_pool_train_voxel_counts': pools,
-		},
-	}
-	f3_lithology_voxel_section_layout_contract_from_mapping(accepted)
+	f3_lithology_voxel_section_layout_contract_from_mapping(contract)
+	# One layout with a larger pool leaves the common minimum unchanged.
+	pools = _fixture_pools()
+	pools['large']['layout_003'] = 401
+	f3_lithology_voxel_section_layout_contract_from_mapping(
+		{**contract, 'target_calibration': _fixture_calibration(pools)}
+	)
 	pools['large']['layout_003'] = 399
-	with pytest.raises(ValueError, match='exceeds its active pool'):
-		f3_lithology_voxel_section_layout_contract_from_mapping(accepted)
+	with pytest.raises(ValueError, match='must equal the minimum active pool 399'):
+		f3_lithology_voxel_section_layout_contract_from_mapping(
+			{**contract, 'target_calibration': _fixture_calibration(pools)}
+		)
 	with pytest.raises(ValueError, match='not allowed'):
 		f3_lithology_voxel_section_layout_contract_from_mapping(
-			{**contract, 'target_calibration': {'rule': TARGET_RULE, 'extra': 1}}
+			{**contract, 'target_calibration': {**_fixture_calibration(), 'extra': 1}}
+		)
+	legacy = dict(contract)
+	del legacy['target_calibration']
+	f3_lithology_voxel_section_layout_contract_from_mapping(legacy)
+
+
+def test_contract_resolver_rejects_unrelated_target_rule() -> None:
+	contract = _preview_contract(_manual_preview(relative_error=0.0))
+	with pytest.raises(ValueError, match=r'target_calibration\.rule must be exactly'):
+		f3_lithology_voxel_section_layout_contract_from_mapping(
+			{
+				**contract,
+				'target_calibration': {
+					**_fixture_calibration(),
+					'rule': 'unrelated_rule',
+				},
+			}
+		)
+
+
+def test_contract_resolver_rejects_omitted_active_pools() -> None:
+	contract = _preview_contract(_manual_preview(relative_error=0.0))
+	with pytest.raises(ValueError, match='active_pool_train_voxel_counts must'):
+		f3_lithology_voxel_section_layout_contract_from_mapping(
+			{**contract, 'target_calibration': {'rule': TARGET_RULE}}
+		)
+
+
+def test_contract_resolver_rejects_target_below_common_minimum_pool() -> None:
+	contract = _preview_contract(_manual_preview(relative_error=0.0))
+	pools = _fixture_pools()
+	pools['small'] = {
+		layout_id: 1_000 + 10 * index for index, layout_id in enumerate(LAYOUT_IDS)
+	}
+	with pytest.raises(ValueError, match='layout_000/small target must equal'):
+		f3_lithology_voxel_section_layout_contract_from_mapping(
+			{**contract, 'target_calibration': _fixture_calibration(pools)}
 		)
 
 
@@ -437,6 +475,24 @@ def _preview_matrix(base: SelectionPreview) -> tuple[SelectionPreview, ...]:
 	return tuple(result)
 
 
+def _fixture_pools() -> dict[str, dict[str, int]]:
+	return {
+		size: dict.fromkeys(LAYOUT_IDS, count)
+		for size, count in (('small', 100), ('medium', 200), ('large', 400))
+	}
+
+
+def _fixture_calibration(
+	pools: dict[str, dict[str, int]] | None = None,
+) -> dict[str, object]:
+	return {
+		'rule': TARGET_RULE,
+		'active_pool_train_voxel_counts': (
+			_fixture_pools() if pools is None else pools
+		),
+	}
+
+
 def _preview_contract(
 	preview: SelectionPreview, *, allowed_relative_error: float = 0.1
 ) -> dict[str, object]:
@@ -447,7 +503,7 @@ def _preview_contract(
 		allowed_relative_error=allowed_relative_error,
 		validation_identity={'unchanged_by_preview': True},
 		source_file_identities={},
-		target_calibration={'rule': TARGET_RULE},
+		target_calibration=_fixture_calibration(),
 	)
 
 
