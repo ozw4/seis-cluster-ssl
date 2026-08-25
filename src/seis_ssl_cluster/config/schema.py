@@ -13,6 +13,11 @@ DEFAULT_ARTIFACT_ROOT: Final = '/workspace/artifacts/seis_ssl_cluster'
 DEFAULT_F3_ROOT: Final = '/home/dcuser/data/public_data/field/F3'
 F3_FACIES_DATASET_NAME: Final = 'f3_facies_benchmark'
 F3_FACIES_DATASET_VERSION: Final = 'facies_benchmark_v1'
+# Dataset versions share one raw survey; the version only separates artifact
+# namespaces, so inspection and preparation accept every registered version.
+F3_FACIES_DATASET_VERSIONS: Final = frozenset(
+	{F3_FACIES_DATASET_VERSION, 'facies_benchmark_v2'},
+)
 F3_FACIES_INSPECTION_ARTIFACT_SUBDIR: Final = (
 	'inspection/f3/facies_benchmark_v1'
 )
