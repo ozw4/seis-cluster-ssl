@@ -21,5 +21,9 @@ reference_embedding:
 voxel_dataset:
   output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_supervision/dense_label_sections_v2
   ignore_z_border_samples: 1
+  # Recorded as split_manifest.split_source/strategy and
+  # voxel_dataset_metadata.split_strategy: the inventory rows are dense SEGY
+  # label sections, not PNG annotations (default png_label_inventory_v1).
+  inventory_semantics: dense_segy_label_section_inventory_v1
 outputs:
   overwrite: false

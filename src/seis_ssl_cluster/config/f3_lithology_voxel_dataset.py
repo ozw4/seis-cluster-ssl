@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config.f3_lithology_common import (
+	_optional_str,
 	_required_absolute_path,
 	_required_mapping,
 	_required_nonnegative_int,
@@ -17,6 +18,15 @@ from seis_ssl_cluster.config.f3_lithology_common import (
 if TYPE_CHECKING:
 	from collections.abc import Mapping
 	from pathlib import Path
+
+# What the supervised-section inventory rows mean. The value is recorded verbatim
+# as the split provenance of the voxel artifact (split_manifest.split_source,
+# split_manifest.strategy, voxel_dataset_metadata.split_strategy).
+PNG_LABEL_INVENTORY_SEMANTICS = 'png_label_inventory_v1'
+DENSE_SEGY_LABEL_SECTION_INVENTORY_SEMANTICS = 'dense_segy_label_section_inventory_v1'
+INVENTORY_SEMANTICS = frozenset(
+	{PNG_LABEL_INVENTORY_SEMANTICS, DENSE_SEGY_LABEL_SECTION_INVENTORY_SEMANTICS}
+)
 
 
 @dataclass(frozen=True)
@@ -36,6 +46,7 @@ class F3LithologyVoxelDatasetConfig:
 	output_dir: Path
 	ignore_z_border_samples: int
 	overwrite: bool
+	inventory_semantics: str = PNG_LABEL_INVENTORY_SEMANTICS
 
 
 def f3_lithology_voxel_dataset_config_from_mapping(
@@ -86,7 +97,7 @@ def f3_lithology_voxel_dataset_config_from_mapping(
 	)
 	_validate_allowed_keys(
 		voxel,
-		frozenset({'output_dir', 'ignore_z_border_samples'}),
+		frozenset({'output_dir', 'ignore_z_border_samples', 'inventory_semantics'}),
 		prefix='voxel_dataset',
 	)
 	_validate_allowed_keys(outputs, frozenset({'overwrite'}), prefix='outputs')
@@ -122,6 +133,17 @@ def f3_lithology_voxel_dataset_config_from_mapping(
 		'voxel_dataset.output_dir',
 		f3_root=f3_root,
 	)
+	inventory_semantics = _optional_str(
+		voxel,
+		'inventory_semantics',
+		default=PNG_LABEL_INVENTORY_SEMANTICS,
+		prefix='voxel_dataset',
+	)
+	if inventory_semantics not in INVENTORY_SEMANTICS:
+		raise ValueError(
+			'voxel_dataset.inventory_semantics must be one of '
+			f'{sorted(INVENTORY_SEMANTICS)!r}; got {inventory_semantics!r}'
+		)
 	overwrite = outputs.get('overwrite')
 	if not isinstance(overwrite, bool):
 		raise TypeError(f'outputs.overwrite must be a boolean; got {overwrite!r}')
@@ -144,10 +166,14 @@ def f3_lithology_voxel_dataset_config_from_mapping(
 			voxel, 'ignore_z_border_samples', prefix='voxel_dataset'
 		),
 		overwrite=overwrite,
+		inventory_semantics=inventory_semantics,
 	)
 
 
 __all__ = [
+	'DENSE_SEGY_LABEL_SECTION_INVENTORY_SEMANTICS',
+	'INVENTORY_SEMANTICS',
+	'PNG_LABEL_INVENTORY_SEMANTICS',
 	'F3LithologyVoxelDatasetConfig',
 	'f3_lithology_voxel_dataset_config_from_mapping',
 ]

@@ -211,7 +211,13 @@ def _write_artifact(
 		)
 		writer.writeheader()
 		writer.writerows(rows)
-	manifest = f3_slice_split_manifest(inspection.records)
+	# The config states what the inventory rows are (PNG annotations or dense
+	# SEGY label sections); record that verbatim instead of a fixed PNG wording.
+	manifest = f3_slice_split_manifest(
+		inspection.records,
+		split_source=config.inventory_semantics,
+		strategy=config.inventory_semantics,
+	)
 	manifest['validation_precedence'] = True
 	manifest['precedence_contract'] = (
 		'validation voxels replace overlapping train voxels'
@@ -249,7 +255,7 @@ def _write_artifact(
 		'classes': [item.to_dict() for item in inspection.classes],
 		'geometry': inspection.geometry.to_dict(),
 		'split_codes': {'unsupervised': 0, 'train': 1, 'validation': 2},
-		'split_strategy': 'png_label_inventory_slice_split_no_random_voxel_split',
+		'split_strategy': config.inventory_semantics,
 		'no_random_split': True,
 		'validation_precedence': True,
 		'ignore_z_border_samples': config.ignore_z_border_samples,

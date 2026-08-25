@@ -212,6 +212,12 @@ def test_png_inventory_split_manifest_is_slice_level_and_not_random(
 	assert [record.split for record in records] == ['train', 'validation']
 	assert manifest['split_unit'] == 'slice'
 	assert manifest['no_random_split'] is True
+	# Token datasets keep the PNG-inventory wording; voxel builders name theirs.
+	assert manifest['split_source'] == 'png_label_inventory'
+	assert manifest['strategy'] == 'inventory_split_no_random_token_split'
+	named = f3_slice_split_manifest(records, split_source='segy', strategy='dense')
+	assert (named['split_source'], named['strategy']) == ('segy', 'dense')
+	assert named['splits'] == manifest['splits']
 	assert manifest['splits']['train'][0]['slice_type'] == 'inline'
 	assert manifest['splits']['validation'][0]['slice_type'] == 'crossline'
 
