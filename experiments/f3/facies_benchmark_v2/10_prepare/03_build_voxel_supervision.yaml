@@ -1,0 +1,25 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  f3_root: ${F3_ROOT}
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v2
+labels:
+  source_label_volume: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2/f3_facies_labels.npy
+  source_label_segy: ${F3_ROOT}/f3_labels.sgy
+  # v2 section inventory: the benchmark's validation sections plus a regular
+  # dense-label train grid (20 inlines + 20 crosslines) so five 4+4 layouts can
+  # be disjoint. Labels always come from the SEGY label volume.
+  png_label_inventory: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/10_prepare/section_inventory_v2.csv
+  class_info: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/inventory/class_info.json
+  segy_geometry_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/segy_geometry.json
+reference_embedding:
+  # Produced by 02_extract_reference_valid_tokens.yaml against the v2 prepared
+  # amplitude with the five-way extraction geometry (window 128, overlap 64).
+  metadata_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/reference_token_geometry/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/f3_facies_benchmark.embedding_metadata.json
+  valid_tokens: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/reference_token_geometry/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/f3_facies_benchmark.valid_tokens.npy
+voxel_dataset:
+  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_supervision/dense_label_sections_v2
+  ignore_z_border_samples: 1
+outputs:
+  overwrite: false
