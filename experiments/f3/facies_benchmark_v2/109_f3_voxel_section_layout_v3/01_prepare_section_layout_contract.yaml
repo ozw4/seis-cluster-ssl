@@ -1,0 +1,40 @@
+inputs:
+  canonical_split_grid: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_supervision/dense_label_sections_v2/supervision_split_grid.npy
+  label_volume: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2/f3_facies_labels.npy
+  line_inventory: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/10_prepare/section_inventory_v2.csv
+  segy_geometry_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/segy_geometry.json
+  reference_valid_tokens: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/reference_token_geometry/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/f3_facies_benchmark.valid_tokens.npy
+  layout_lines: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/109_f3_voxel_section_layout_v3/02_layout_lines.yaml
+selection:
+  semantics: seeded_nested_class_balanced_section_token_rows_v1
+  patch_size_xyz: [8, 8, 8]
+  allowed_relative_error: 0.05
+  tokenization_policy:
+    min_labeled_fraction: 0.5
+    min_majority_fraction: 0.7
+    ignore_z_border_samples: 1
+  # The layout remains the statistical unit: one fixed selection seed is bound
+  # one-to-one to each layout rather than adding a sixth experiment dimension.
+  layout_subsample_seeds:
+    layout_000: 0
+    layout_001: 1
+    layout_002: 2
+    layout_003: 3
+    layout_004: 4
+targets:
+  rule: fixed_per_class_token_row_caps_v1
+  per_class_token_row_caps:
+    small: 25
+    medium: 50
+    large: 100
+  # Six classes times cap times the nominal 8 x 8 section footprint.
+  nominal_train_voxel_counts:
+    small: 9600
+    medium: 19200
+    large: 38400
+outputs:
+  # Kept beside (not inside) the dataset root so the builder can commit the
+  # dataset root atomically.
+  candidate_statistics_csv: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_section_layout_v3_calibration/section_candidates.csv
+  candidate_statistics_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_section_layout_v3_calibration/section_candidates.json
+  canonical_contract: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_section_layout_v3_calibration/f3_voxel_section_layout_contract.json

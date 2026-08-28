@@ -1,0 +1,19 @@
+# Layout generation v3 uses the same five disjoint line quartets as v2. The only ordering change
+# is layout_002: inline 290 precedes inline 590 so class 5 reaches the exact
+# cap25 and cap50 row budgets while small/medium/large remain strict prefixes.
+layouts:
+  - layout_id: layout_000
+    ordered_inlines: [350, 450, 550, 250]
+    ordered_crosslines: [575, 900, 1025, 450]
+  - layout_id: layout_001
+    ordered_inlines: [470, 570, 270, 370]
+    ordered_crosslines: [925, 1050, 475, 600]
+  - layout_id: layout_002
+    ordered_inlines: [290, 590, 390, 490]
+    ordered_crosslines: [1075, 500, 625, 950]
+  - layout_id: layout_003
+    ordered_inlines: [310, 410, 510, 610]
+    ordered_crosslines: [525, 850, 975, 1100]
+  - layout_id: layout_004
+    ordered_inlines: [430, 530, 630, 330]
+    ordered_crosslines: [875, 1000, 1125, 550]
