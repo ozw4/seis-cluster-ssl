@@ -32,6 +32,12 @@ FIVE_WAY_ROOT = Path(
 	'experiments/f3/facies_benchmark_v1/110_lithology_mae_local_bt_five_way_v1'
 )
 FIVE_WAY_CONFIG = FIVE_WAY_ROOT / '60_five_way.yaml'
+V3_FIVE_WAY_CONFIG = Path(
+	'experiments/f3/facies_benchmark_v2/'
+	'110_lithology_mae_local_bt_five_way_v3/60_five_way.yaml'
+)
+LEGACY_SUMMARY_NAME = 'f3_lithology_mae_local_bt_five_way_v1'
+V3_SUMMARY_NAME = 'f3_lithology_mae_local_bt_five_way_v3'
 EXTRACTION_CONFIGS = {
 	'mae': '01_extract_mae.yaml',
 	'mae_hmm_k6': '02_extract_mae_hmm_k6.yaml',
@@ -74,6 +80,7 @@ def test_experiment_config_resolves_with_fixed_order_and_extraction_parity(
 	assert config.summary_root == (
 		env_root / 'f3_lithology_benchmark/mae_local_bt_five_way_v1/summary'
 	)
+	assert config.summary_name == LEGACY_SUMMARY_NAME
 	for model in config.models:
 		extraction = resolve_embedding_extraction_config(
 			load_config(
@@ -90,6 +97,29 @@ def test_experiment_config_resolves_with_fixed_order_and_extraction_parity(
 		assert extraction['embedding']['batch_size'] == 1
 		assert extraction['embedding']['amp'] is False
 		assert extraction['embedding']['min_token_valid_fraction'] == 0.5
+
+
+def test_v3_config_declares_versioned_summary_name(
+	env_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_WORKSPACE', str(Path.cwd()))
+	config = f3_lithology_five_way_config_from_mapping(
+		load_config(V3_FIVE_WAY_CONFIG)
+	)
+
+	assert config.artifact_root == env_root
+	assert config.summary_name == V3_SUMMARY_NAME
+
+
+@pytest.mark.parametrize('value', ['', False, None])
+def test_resolver_rejects_invalid_explicit_summary_name(
+	universe: dict[str, object], value: object
+) -> None:
+	invalid = deepcopy(universe)
+	invalid['outputs']['summary_name'] = value
+
+	with pytest.raises(TypeError, match=r'outputs\.summary_name'):
+		f3_lithology_five_way_config_from_mapping(invalid)
 
 
 def test_resolver_rejects_wrong_order_unknown_ids_and_duplicates(

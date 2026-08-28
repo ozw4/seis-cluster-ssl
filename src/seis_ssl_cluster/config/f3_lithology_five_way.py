@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config.f3_lithology_common import (
+	_optional_str,
 	_required_absolute_path,
 	_required_mapping,
 	_required_str,
@@ -34,6 +35,7 @@ LOCAL_BARLOW_TWINS_METHOD = 'local_barlow_twins_3d'
 LOCAL_BARLOW_TWINS_PAIRS_PER_CROP = 128
 MAE_OBJECTIVE = 'amp_mae3d'
 RANDOM_OBJECTIVE = 'random_encoder'
+DEFAULT_FIVE_WAY_SUMMARY_NAME = 'f3_lithology_mae_local_bt_five_way_v1'
 FIVE_WAY_LABEL_KEYS = (
 	'source_label_volume',
 	'source_label_segy',
@@ -94,6 +96,7 @@ class F3FiveWayConfig:
 	models: tuple[F3FiveWayModelSource, ...]
 	runs_root: Path
 	summary_root: Path
+	summary_name: str = DEFAULT_FIVE_WAY_SUMMARY_NAME
 
 	@property
 	def model_ids(self) -> tuple[str, ...]:
@@ -141,7 +144,9 @@ def f3_lithology_five_way_config_from_mapping(
 		section_layout, frozenset({'dataset_root'}), prefix='section_layout'
 	)
 	_validate_allowed_keys(
-		outputs, frozenset({'runs_root', 'summary_root'}), prefix='outputs'
+		outputs,
+		frozenset({'runs_root', 'summary_root', 'summary_name'}),
+		prefix='outputs',
 	)
 
 	artifact_root = _required_absolute_path(paths, 'artifact_root', prefix='paths')
@@ -167,6 +172,12 @@ def f3_lithology_five_way_config_from_mapping(
 		models=models,
 		runs_root=runs_root,
 		summary_root=summary_root,
+		summary_name=_optional_str(
+			outputs,
+			'summary_name',
+			default=DEFAULT_FIVE_WAY_SUMMARY_NAME,
+			prefix='outputs',
+		),
 	)
 
 
@@ -241,6 +252,7 @@ def _resolve_model(
 
 
 __all__ = [
+	'DEFAULT_FIVE_WAY_SUMMARY_NAME',
 	'EXPECTED_MODEL_IDENTITIES',
 	'FIVE_WAY_HMM_K',
 	'FIVE_WAY_LABEL_KEYS',

@@ -17,6 +17,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_decoder import (
 	f3_lithology_voxel_decoder_config_from_mapping,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
+	CLASS_BALANCED_SELECTION_SEMANTICS,
 	DATA_SIZES,
 	FIXED_DECODER_CONTRACT,
 	LAYOUT_IDS,
@@ -205,10 +206,19 @@ def test_dry_run_shares_supervision_identity_and_writes_nothing(
 	assert 'decoder_initial_state_sha256' in result.stdout
 	shared_keys = (
 		'condition_dir',
+		'inline_lines',
+		'crossline_lines',
+		'selection_semantics',
+		'subsample_seed',
+		'per_class_token_row_cap',
+		'selected_token_row_count',
+		'selected_token_row_identity_sha256',
+		'selected_token_count',
 		'selected_token_identity_sha256',
 		'train_voxel_count',
 		'validation_mask_sha256',
 		'validation_voxel_count',
+		'decoder_initial_state_sha256',
 	)
 	for key in shared_keys:
 		assert len({str(summary[key]) for summary in summaries}) == 1
@@ -517,3 +527,81 @@ def test_dry_run_rejects_per_line_contributions_that_miss_a_line(
 
 	with pytest.raises(ValueError, match='must cover exactly'):
 		inspect_f3_lithology_five_way_job(job)
+
+
+def test_dry_run_validates_class_balanced_selection_identity(
+	universe: dict[str, object],
+) -> None:
+	config = f3_lithology_five_way_config_from_mapping(universe)
+	condition = write_condition(universe, 'layout_000', 'small')
+	metadata_path = condition / 'section_layout_metadata.json'
+	payload = json.loads(metadata_path.read_text(encoding='utf-8'))
+	_mark_class_balanced_identity(payload)
+	metadata_path.write_text(json.dumps(payload), encoding='utf-8')
+	job = resolve_f3_lithology_five_way_job(
+		config, model='mae', layout='layout_000', size='small'
+	)
+
+	summary = inspect_f3_lithology_five_way_job(job)
+
+	assert summary['selection_semantics'] == CLASS_BALANCED_SELECTION_SEMANTICS
+	assert summary['subsample_seed'] == 0
+	assert summary['per_class_token_row_cap'] == 1
+	assert summary['selected_token_row_count'] == 6
+
+
+def test_dry_run_rejects_missing_class_balanced_selection_identity(
+	universe: dict[str, object],
+) -> None:
+	config = f3_lithology_five_way_config_from_mapping(universe)
+	condition = write_condition(universe, 'layout_000', 'small')
+	metadata_path = condition / 'section_layout_metadata.json'
+	payload = json.loads(metadata_path.read_text(encoding='utf-8'))
+	_mark_class_balanced_identity(payload)
+	del payload['identity']['selected_token_row_identity_sha256']
+	metadata_path.write_text(json.dumps(payload), encoding='utf-8')
+	job = resolve_f3_lithology_five_way_job(
+		config, model='mae', layout='layout_000', size='small'
+	)
+
+	with pytest.raises(ValueError, match='must be a lowercase SHA-256'):
+		inspect_f3_lithology_five_way_job(job)
+
+
+def test_dry_run_rejects_boolean_common_selection_count(
+	universe: dict[str, object],
+) -> None:
+	config = f3_lithology_five_way_config_from_mapping(universe)
+	condition = write_condition(universe, 'layout_000', 'small')
+	metadata_path = condition / 'section_layout_metadata.json'
+	payload = json.loads(metadata_path.read_text(encoding='utf-8'))
+	payload['identity']['selected_token_count'] = True
+	metadata_path.write_text(json.dumps(payload), encoding='utf-8')
+	job = resolve_f3_lithology_five_way_job(
+		config, model='mae', layout='layout_000', size='small'
+	)
+
+	with pytest.raises(TypeError, match='selected_token_count must be an integer'):
+		inspect_f3_lithology_five_way_job(job)
+
+
+def _mark_class_balanced_identity(payload: dict[str, object]) -> None:
+	payload['selection_semantics'] = CLASS_BALANCED_SELECTION_SEMANTICS
+	identity = payload['identity']
+	assert isinstance(identity, dict)
+	identity.update({
+		'subsample_seed': 0,
+		'per_class_token_row_cap': 1,
+		'selected_token_row_count': 6,
+		'selected_token_row_identity_sha256': 'a' * 64,
+		'per_class_selected_token_row_counts': {
+			str(class_id): 1 for class_id in range(6)
+		},
+		'active_pool_per_class_token_row_counts': {
+			str(class_id): 2 for class_id in range(6)
+		},
+		'per_line_selected_token_row_counts': {
+			'inline:100': 3,
+			'crossline:200': 3,
+		},
+	})

@@ -673,7 +673,7 @@ def _summary_payload(
 		}
 	return {
 		'schema_version': 1,
-		'summary_name': 'f3_lithology_mae_local_bt_five_way_v1',
+		'summary_name': config.summary_name,
 		'primary_metric': PRIMARY_METRIC,
 		'models': list(config.model_ids),
 		'job_count': len(config.model_ids) * len(LAYOUT_IDS) * len(DATA_SIZES),

@@ -15,17 +15,22 @@ F3岩相推定で、次の5表現を同一のfrozen full-volume token embedding�
 
 ## v2の科学契約
 
-v2はv1のline配置や教師量を再現する実験ではない。v1は実装・前処理・decoder・
-checkpoint・評価方法の参照であり、v2のsection-layout条件の正解データではない。
+v2はv1のline配置やper-class-cap選択を再現する実験ではない。v1は実装・前処理・
+decoder・checkpoint・評価方法に加え、総教師voxel規模の参照である。
 
 - dataset identity: `f3_facies_benchmark` / `facies_benchmark_v2` / `f3_facies_benchmark`
 - data sizeはsection本数で定義する: small = inline 1本 + crossline 1本、
-  medium = 2本 + 2本、large = 4本 + 4本（各layout内で厳密なprefix入れ子）
+  medium = 2本 + 2本、large = 4本 + 4本（各layout内で厳密なprefix入れ子）。
+  section本数は教師の空間配置・範囲を定義し、section内の全voxelは使わない
 - line配置はv2 candidate statisticsから新規に決定する
   （規則は[`../109_f3_voxel_section_layout_v2/README.md`](../109_f3_voxel_section_layout_v2/README.md)）
-- 教師量（`target_train_voxel_count`）はv2 candidateから新規にcalibrateする
-  （`max_common_reachable_active_pool_v1`）。cap25/cap50/cap100や過去のactual
-  countとの一致は要求しない
+- 教師量（`target_train_voxel_count`）は`fixed_train_voxel_counts_v1`で固定する。
+  v1 cap25/cap50/cap100の5 subsample seedsにおけるtrain voxel countの中央値
+  10,152 / 20,184 / 40,520を、small/medium/largeの全5 layouts共通targetにする
+- active section内では`stable_hash_partial_section_token_footprints_v1`を使って
+  token footprintを選ぶ。token粒度によりactualはtargetと完全一致しない場合があるが、
+  `allowed_relative_error: 0.05`以内でなければならない。v1と同じなのは総教師voxel
+  規模であり、v1のper-class-cap選択そのものではない
 - 下流評価: frozen encoder token embedding + 既存F3 voxel decoder
 - layouts: `layout_000` `layout_001` `layout_002` `layout_003` `layout_004`
 - data sizes: `small` `medium` `large`
@@ -152,14 +157,21 @@ python proc/seis_ssl_cluster/prepare_f3_lithology_voxel_section_layout_contract.
 ## 4. v2 line selection
 
 `$LAYOUT/02_layout_lines.yaml`をcandidate reportから決める。規則と結果は
-`$LAYOUT/README.md`に記録済み（sort済みtrain候補をlayout index kから周期的に
-stride 2で4本歩く。model identity・metricは使わない）。
+`$LAYOUT/README.md`に記録済み（sort済みtrain候補から各軸の位置
+k, k+5, k+10, k+15（k = layout index）を取り、quartet内を指定の開始位置から
+循環順に並べる。model identity・metricは使わない）。
 
 ## 5. v2 target calibration
 
-targetはfinalizeが`targets.rule: max_common_reachable_active_pool_v1`で導出する
-（sizeごとに、5 layoutsのactive pool最小値 = 全layoutが到達できる最大の共通target）。
-手作業で数値を入力しない。
+`targets.rule: fixed_train_voxel_counts_v1`で、small = 10,152、medium = 20,184、
+large = 40,520を指定する。これらは
+`reports/f3/legacy/facies_benchmark_v1/voxel_lithology_label_budget_v1/tables/paired_metrics.csv`
+にあるcap25/cap50/cap100の5 subsample seedsの中央値であり、versioned configへ
+固定する。実行時にreportは読まない。
+
+finalizeは各layout/sizeのactive poolを診断用に計算し、固定targetが全layoutで
+到達可能であることを確認してから、stable-hash token footprint selectionを行う。
+preview actualはtargetに対する許容誤差内でなければならない。
 
 ## 6. contract finalize（CPU）
 
@@ -305,7 +317,7 @@ done
 
 五者の`condition_dir`、`inline_lines`、`crossline_lines`、
 `selected_token_identity_sha256`、`validation_mask_sha256`、
-`train_voxel_count`が一致することを確認する。
+`train_voxel_count`、`decoder_initial_state_sha256`が一致することを確認する。
 
 ## 13. full suite（75 decoder jobs）
 
@@ -314,16 +326,16 @@ condition datasetのreference valid-token SHAとembeddingのvalid-token SHAの�
 検証し、不一致なら停止する。
 
 ```bash
-for model in \
-  mae \
-  mae_hmm_k6 \
-  local_barlow_twins \
-  local_barlow_twins_hmm_k6 \
-  random
+for size in small medium large
 do
   for layout in layout_000 layout_001 layout_002 layout_003 layout_004
   do
-    for size in small medium large
+    for model in \
+      mae \
+      mae_hmm_k6 \
+      local_barlow_twins \
+      local_barlow_twins_hmm_k6 \
+      random
     do
       python proc/seis_ssl_cluster/run_f3_lithology_five_way.py \
         --config "$CONFIG" \
