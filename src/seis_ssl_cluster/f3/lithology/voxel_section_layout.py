@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, cast
 import numpy as np
 
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
+	CLASS_BALANCED_SELECTION_SEMANTICS,
 	CONTRACT_ARTIFACT_TYPE,
 	DATA_SIZES,
 	LAYOUT_IDS,
@@ -26,6 +27,10 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology.tokens import read_f3_lithology_class_info
+from seis_ssl_cluster.f3.lithology.voxel_section_layout_calibration import (
+	build_section_token_row_pool,
+	preview_class_balanced_layout_selection,
+)
 from seis_ssl_cluster.f3.lithology.voxel_section_layout_selection import (
 	CLASS_IDS,
 	SELECTION_SEMANTICS,
@@ -97,6 +102,13 @@ class _ConditionPlan:
 	validation_mask_sha256: str
 	grid_array_sha256: str
 	parent_size: str | None
+	subsample_seed: int | None = None
+	per_class_token_row_cap: int | None = None
+	selected_token_row_count: int | None = None
+	selected_token_row_identity_sha256: str | None = None
+	per_class_selected_token_row_counts: Mapping[str, int] | None = None
+	active_pool_per_class_token_row_counts: Mapping[str, int] | None = None
+	per_line_selected_token_row_counts: Mapping[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -115,6 +127,7 @@ class _Inspection:
 	source_identities: Mapping[str, Mapping[str, str]]
 	validation_mask_sha256: str
 	validation_voxel_count: int
+	selection_semantics: str
 
 
 @dataclass(frozen=True)
@@ -247,21 +260,62 @@ def inspect_f3_lithology_voxel_section_layout_datasets(  # noqa: C901, PLR0912, 
 		class_ids=class_ids,
 	)
 	conditions: list[_ConditionPlan] = []
+	token_row_pool = None
+	class_caps: Mapping[str, int] | None = None
+	layout_seeds: Mapping[str, int] | None = None
+	if contract.selection_semantics == CLASS_BALANCED_SELECTION_SEMANTICS:
+		selection = contract.class_balanced_selection
+		if selection is None:
+			raise AssertionError('class-balanced contract metadata was not resolved')
+		token_row_pool = build_section_token_row_pool(
+			records,
+			label_volume=labels,
+			valid_tokens=cast('NDArray[np.bool_]', valid_tokens),
+			geometry=geometry,
+			patch_size_xyz=patch,
+		)
+		stored_pool_provenance = cast(
+			'Mapping[str, object]', selection['token_row_pool_provenance']
+		)
+		if token_row_pool.provenance() != dict(stored_pool_provenance):
+			raise ValueError('class-balanced token-row pool provenance drift')
+		class_caps = cast(
+			'Mapping[str, int]', selection['per_class_token_row_caps']
+		)
+		layout_seeds = cast(
+			'Mapping[str, int]', selection['layout_subsample_seeds']
+		)
 	for layout in contract.layouts:
 		layout_lines = LayoutLines(
 			layout.layout_id,
 			layout.size_by_name['large'].inline_lines,
 			layout.size_by_name['large'].crossline_lines,
 		)
-		previews = preview_nested_selection(
-			layout_lines,
-			targets,
-			grid,
-			labels,
-			lines,
-			patch_size_xyz=patch,
-			allowed_relative_error=contract.allowed_relative_error,
-		)
+		if contract.selection_semantics == CLASS_BALANCED_SELECTION_SEMANTICS:
+			if token_row_pool is None or class_caps is None or layout_seeds is None:
+				raise AssertionError('class-balanced selection inputs were lost')
+			previews = preview_class_balanced_layout_selection(
+				layout_lines,
+				token_row_pool,
+				grid,
+				labels,
+				lines,
+				subsample_seed=layout_seeds[layout.layout_id],
+				per_class_token_row_caps=class_caps,
+				target_train_voxel_counts=targets,
+				patch_size_xyz=patch,
+				allowed_relative_error=contract.allowed_relative_error,
+			)
+		else:
+			previews = preview_nested_selection(
+				layout_lines,
+				targets,
+				grid,
+				labels,
+				lines,
+				patch_size_xyz=patch,
+				allowed_relative_error=contract.allowed_relative_error,
+			)
 		for preview in previews:
 			_validate_preview_matches_contract(contract_payload, preview=preview)
 			conditions.append(
@@ -311,6 +365,7 @@ def inspect_f3_lithology_voxel_section_layout_datasets(  # noqa: C901, PLR0912, 
 		source_identities=source_identities,
 		validation_mask_sha256=validation_hash,
 		validation_voxel_count=validation_count,
+		selection_semantics=contract.selection_semantics,
 	)
 
 
@@ -447,7 +502,10 @@ def validate_f3_lithology_voxel_section_layout_manifest(  # noqa: C901, PLR0912
 		raise ValueError('section-layout dataset manifest condition_count must be 15')
 	if payload.get('row_order') != 'layout_id_then_small_medium_large':
 		raise ValueError('section-layout dataset manifest row-order drift')
-	if payload.get('selection_semantics') != SELECTION_SEMANTICS:
+	if payload.get('selection_semantics') not in {
+		SELECTION_SEMANTICS,
+		CLASS_BALANCED_SELECTION_SEMANTICS,
+	}:
 		raise ValueError('section-layout dataset manifest selection semantics drift')
 	if payload.get('statistical_unit') != 'layout_id':
 		raise ValueError('section-layout dataset manifest statistical unit drift')
@@ -581,6 +639,25 @@ def _condition_plan_from_preview(  # noqa: PLR0913
 		validation_mask_sha256=validation_mask_sha256,
 		grid_array_sha256=grid_hash,
 		parent_size=parent_size,
+		subsample_seed=getattr(preview, 'subsample_seed', None),
+		per_class_token_row_cap=getattr(
+			preview, 'per_class_token_row_cap', None
+		),
+		selected_token_row_count=getattr(
+			preview, 'selected_token_row_count', None
+		),
+		selected_token_row_identity_sha256=getattr(
+			preview, 'selected_token_row_identity_sha256', None
+		),
+		per_class_selected_token_row_counts=getattr(
+			preview, 'per_class_selected_token_row_counts', None
+		),
+		active_pool_per_class_token_row_counts=getattr(
+			preview, 'active_pool_per_class_token_row_counts', None
+		),
+		per_line_selected_token_row_counts=getattr(
+			preview, 'per_line_selected_token_row_counts', None
+		),
 	)
 
 
@@ -813,7 +890,7 @@ def _write_condition_files(
 		'source_identities': {
 			key: dict(value) for key, value in inspection.source_identities.items()
 		},
-		'selection_semantics': SELECTION_SEMANTICS,
+		'selection_semantics': inspection.selection_semantics,
 		'outputs': {
 			name: _identity(root / name, recorded_path=recorded_root / name)
 			for name in REQUIRED_CONDITION_FILES
@@ -841,7 +918,7 @@ def _validate_committed_condition(  # noqa: PLR0913
 		raise ValueError('committed condition identity mismatch')
 	if metadata.get('source_identities') != inspection.source_identities:
 		raise ValueError('committed source identities mismatch')
-	if metadata.get('selection_semantics') != SELECTION_SEMANTICS:
+	if metadata.get('selection_semantics') != inspection.selection_semantics:
 		raise ValueError('committed selection semantics mismatch')
 	if _read_json(root / VOXEL_METADATA_NAME) != _voxel_metadata(
 		condition, inspection=inspection, recorded_root=condition.output_dir
@@ -862,7 +939,7 @@ def _validate_committed_condition(  # noqa: PLR0913
 def _condition_identity(
 	condition: _ConditionPlan, *, inspection: _Inspection
 ) -> dict[str, object]:
-	return {
+	payload: dict[str, object] = {
 		'layout_id': condition.layout_id,
 		'data_size': condition.data_size,
 		'parent_size': condition.parent_size,
@@ -884,6 +961,25 @@ def _condition_identity(
 			condition.per_class_validation_voxel_counts
 		),
 	}
+	if inspection.selection_semantics == CLASS_BALANCED_SELECTION_SEMANTICS:
+		payload.update({
+			'subsample_seed': condition.subsample_seed,
+			'per_class_token_row_cap': condition.per_class_token_row_cap,
+			'selected_token_row_count': condition.selected_token_row_count,
+			'selected_token_row_identity_sha256': (
+				condition.selected_token_row_identity_sha256
+			),
+			'per_class_selected_token_row_counts': dict(
+				condition.per_class_selected_token_row_counts or {}
+			),
+			'active_pool_per_class_token_row_counts': dict(
+				condition.active_pool_per_class_token_row_counts or {}
+			),
+			'per_line_selected_token_row_counts': dict(
+				condition.per_line_selected_token_row_counts or {}
+			),
+		})
+	return payload
 
 
 def _voxel_metadata(
@@ -906,9 +1002,12 @@ def _voxel_metadata(
 		'layout_id': condition.layout_id,
 		'data_size': condition.data_size,
 		'parent_size': condition.parent_size,
-		'selection_semantics': SELECTION_SEMANTICS,
+		'selection_semantics': inspection.selection_semantics,
 		'dense_voxel_labels_preserved': True,
 		'partial_active_plane_footprints_only': True,
+		'class_balanced_token_row_selection': (
+			inspection.selection_semantics == CLASS_BALANCED_SELECTION_SEMANTICS
+		),
 		'validation_reuse': 'canonical_validation_bitwise',
 	}
 	return cast('dict[str, object]', payload)
@@ -947,7 +1046,7 @@ def _manifest_payload(
 		'schema_version': SCHEMA_VERSION,
 		'condition_count': len(rows),
 		'row_order': 'layout_id_then_small_medium_large',
-		'selection_semantics': SELECTION_SEMANTICS,
+		'selection_semantics': inspection.selection_semantics,
 		'statistical_unit': 'layout_id',
 		'source_identities': {
 			key: dict(value) for key, value in inspection.source_identities.items()
@@ -1144,6 +1243,24 @@ def _validate_preview_matches_contract(
 		'per_line_contributions': dict(preview.per_line_contributions),
 		'per_class_voxel_counts': dict(preview.per_class_voxel_counts),
 	}
+	if preview.selection_semantics == CLASS_BALANCED_SELECTION_SEMANTICS:
+		expected.update({
+			'subsample_seed': preview.subsample_seed,
+			'per_class_token_row_cap': preview.per_class_token_row_cap,
+			'selected_token_row_count': preview.selected_token_row_count,
+			'selected_token_row_identity_sha256': (
+				preview.selected_token_row_identity_sha256
+			),
+			'per_class_selected_token_row_counts': dict(
+				preview.per_class_selected_token_row_counts or {}
+			),
+			'active_pool_per_class_token_row_counts': dict(
+				preview.active_pool_per_class_token_row_counts or {}
+			),
+			'per_line_selected_token_row_counts': dict(
+				preview.per_line_selected_token_row_counts or {}
+			),
+		})
 	for key, value in expected.items():
 		if recorded.get(key) != value:
 			raise ValueError(
@@ -1223,6 +1340,11 @@ def _validate_contract_source_identities(
 		'line_inventory': config.png_label_inventory,
 		'segy_geometry_json': config.segy_geometry_json,
 	}
+	if (
+		payload.get('selection_semantics') == CLASS_BALANCED_SELECTION_SEMANTICS
+		or 'reference_valid_tokens' in sources
+	):
+		expected['reference_valid_tokens'] = config.reference_valid_tokens
 	for label, path in expected.items():
 		_validate_source_identity(sources.get(label), path, label=f'contract {label}')
 

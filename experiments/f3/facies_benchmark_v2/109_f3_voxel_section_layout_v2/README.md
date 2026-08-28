@@ -1,21 +1,24 @@
 # F3 voxel section-layout v2
 
 `facies_benchmark_v2`の五者比較（`../110_lithology_mae_local_bt_five_way_v2`）が
-使うmodel非依存のsection-layout supervisionを、v2 canonical supervisionと
-v2 candidate statisticsだけから決めるstageである。
+使うmodel非依存のsection-layout supervisionを、v2 canonical supervision、
+v2 candidate statistics、versioned configの固定targetから決めるstageである。
 
-v1の`109_f3_voxel_section_layout_v1`（current treeでは退役済み）は実装・schemaの
-参照元であり、v2のline配置・教師量の正解データではない。v1のline配置、
-cap25/cap50/cap100、過去のactual voxel countとの一致は要求しない。
+v1の`109_f3_voxel_section_layout_v1`（current treeでは退役済み）は実装・schemaと
+総教師voxel規模の参照元である。v2はv1のline配置やper-class-cap選択そのものは
+再現しないが、cap25/cap50/cap100の5 subsample seedsで得たtrain voxel countの
+中央値を、small/medium/largeの固定targetとして使う。
 
 ## 科学契約（v1 five-wayと共通）
 
 - data sizeはsection本数で定義する: small = inline 1本 + crossline 1本、
   medium = 2本 + 2本、large = 4本 + 4本。各layout内でsmall < medium < largeは
-  ordered listのprefixとして厳密に入れ子。
+  ordered listのprefixとして厳密に入れ子。section本数は教師の空間配置・範囲を
+  定義するものであり、active section内の全voxelを教師に使うことを意味しない。
 - layouts: `layout_000` … `layout_004`、統計単位は`layout_id`。
 - selection semantics: `stable_hash_partial_section_token_footprints_v1`
-  （patch `[8, 8, 8]`、tolerance `allowed_relative_error: 0.05`）。
+  （patch `[8, 8, 8]`、tolerance `allowed_relative_error: 0.05`）。各layoutの
+  active sectionからstable-hash順にtoken footprintを選び、固定targetへ絞る。
 - validation maskは全layout・size・modelで共通（canonical validationをbitwise保持）。
 - decoder契約は`FIXED_DECODER_CONTRACT`（seed 42000）に固定。
 
@@ -137,28 +140,53 @@ model identity・metric・過去のfive-way結果は使わない。位置だけ�
 - 20 inline・20 crosslineがすべて使われ、layout間の重複はない（large含む）。
 - 5つのsmall条件は互いに異なるinline/crossline対。
 - class gate（6 class全部、class 3・5非ゼロ、active line寄与正）はfinalizeが
-  全15条件で検証済み。最小のclass 5はlayout_002/smallの1,243 voxels、
-  最小のclass 4はlayout_002/smallの2,912 voxels。
+  全15条件で検証する。
 
 ## target calibration規則（v2）
 
-`targets.rule: max_common_reachable_active_pool_v1`。sizeごとに、各layoutの
-active section（prefix）上のcanonical train voxel poolを数え、5 layoutsの最小値を
-共通targetとする。これは全layoutが到達できる最大の共通targetであり、model
-performanceには依存しない。
+`targets.rule: fixed_train_voxel_counts_v1`。固定値の参照元は
+`reports/f3/legacy/facies_benchmark_v1/voxel_lithology_label_budget_v1/tables/paired_metrics.csv`
+であり、v1 cap25/cap50/cap100の5 subsample seedsにおける
+`train_voxel_count`の中央値を、全5 layouts共通のtargetとして使う。
 
-| size | active pool（全5 layoutで同一） | target | preview actual | relative error |
-|---|---:|---:|---:|---:|
-| small | 335,288 | 335,288 | 335,288 | 0 |
-| medium | 670,128 | 670,128 | 670,128 | 0 |
-| large | 1,338,464 | 1,338,464 | 1,338,464 | 0 |
+| size | v1 budget | seed 0–4のtrain voxel count | 固定target（中央値） |
+|---|---|---|---:|
+| small | cap25 | 10,024 / 10,152 / 10,024 / 10,256 / 10,160 | 10,152 |
+| medium | cap50 | 20,520 / 20,128 / 20,184 / 20,192 / 19,904 | 20,184 |
+| large | cap100 | 40,504 / 40,320 / 40,520 / 40,672 / 40,616 | 40,520 |
 
-全lineの有効voxel数が一様で、line交差のtrain voxel数も一様なため、poolは
-layout間で完全一致し、各条件はactive section上のcanonical train voxelを
-すべて教師に使う（selected tokens: small 5,235 / medium 10,414 / large 20,604）。
-poolはcontractの`target_calibration.active_pool_train_voxel_counts`に、
-target/actual/relative errorは各`layouts[].sizes[]`と
-`section_layout_dataset_manifest.json`に記録される。
+active poolは各layout/sizeで必ず計算し、固定targetが全layoutで到達可能かを検証する。
+その後、既存の`stable_hash_partial_section_token_footprints_v1`でactive section内の
+token footprintを選ぶ。token-footprint粒度のためactual countはtargetと完全一致しない
+場合があるが、`allowed_relative_error: 0.05`以内でなければならない。v1と揃えるのは
+総教師voxel規模であり、v1のper-class-cap選択を再現するものではない。
+
+固定targetはcontractの
+`target_calibration.fixed_target_train_voxel_counts`とtop-levelの
+`target_train_voxel_counts`に、poolは
+`target_calibration.active_pool_train_voxel_counts`に記録される。
+target/preview actual/relative errorは各`layouts[].sizes[]`に、build後のactualは
+`section_layout_dataset_manifest.json`にも記録される。
+
+2026-08-27に再生成したcontractのpreview（relative errorはfraction）:
+
+| layout | size | target | preview actual | relative error |
+|---|---|---:|---:|---:|
+| layout_000 | small | 10,152 | 10,160 | 0.000788022064618 |
+| layout_000 | medium | 20,184 | 20,200 | 0.000792707094728 |
+| layout_000 | large | 40,520 | 40,512 | 0.000197433366239 |
+| layout_001 | small | 10,152 | 10,160 | 0.000788022064618 |
+| layout_001 | medium | 20,184 | 20,152 | 0.00158541418946 |
+| layout_001 | large | 40,520 | 40,528 | 0.000197433366239 |
+| layout_002 | small | 10,152 | 10,120 | 0.00315208825847 |
+| layout_002 | medium | 20,184 | 20,160 | 0.00118906064209 |
+| layout_002 | large | 40,520 | 40,504 | 0.000394866732478 |
+| layout_003 | small | 10,152 | 10,152 | 0 |
+| layout_003 | medium | 20,184 | 20,200 | 0.000792707094728 |
+| layout_003 | large | 40,520 | 40,488 | 0.000789733464956 |
+| layout_004 | small | 10,152 | 10,160 | 0.000788022064618 |
+| layout_004 | medium | 20,184 | 20,168 | 0.000792707094728 |
+| layout_004 | large | 40,520 | 40,512 | 0.000197433366239 |
 
 validation identity: 470,136 voxels、mask SHA-256
 `0a6d134e4ea276ea15c29381cc8a1dd85cbdd928ece3df6882aa06e324129c70`
@@ -169,6 +197,7 @@ validation identity: 470,136 voxels、mask SHA-256
 - contractがresolver（`f3_lithology_voxel_section_layout_contract_from_mapping`）で
   再読込でき、layout ID・4+4 lines・1+1/2+2/4+4 prefix・strict nesting・
   patch size・selection/validation semantics・decoder seed 42000・fixed decoder・
-  v2 source path/SHA・target/preview count・class gateを満たす。
+  v2 source path/SHA・固定target provenance・preview actualの許容誤差・class gateを
+  満たす。
 - 15 conditionが`section_layout_dataset_manifest.json`に列挙され、各conditionの
   7 fileが揃い、validation mask SHAが15条件でbyte一致する。
