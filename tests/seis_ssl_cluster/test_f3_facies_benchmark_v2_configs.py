@@ -46,6 +46,8 @@ INSPECTION_ROOT = V2_ROOT / '00_inspection'
 PREPARE_ROOT = V2_ROOT / '10_prepare'
 LAYOUT_ROOT = V2_ROOT / '109_f3_voxel_section_layout_v2'
 FIVE_WAY_ROOT = V2_ROOT / '110_lithology_mae_local_bt_five_way_v2'
+LAYOUT_V3_ROOT = V2_ROOT / '109_f3_voxel_section_layout_v3'
+FIVE_WAY_V3_ROOT = V2_ROOT / '110_lithology_mae_local_bt_five_way_v3'
 README = FIVE_WAY_ROOT / 'README.md'
 ARTIFACT_ROOT = '/test/artifacts/seis_ssl_cluster'
 RAW_F3_ROOT = '/test/f3'
@@ -66,9 +68,36 @@ SIZES = ('small', 'medium', 'large')
 PREFIX_COUNTS = {'small': 1, 'medium': 2, 'large': 4}
 JOB_COUNT = 75
 RANDOM_SEED = 42
-TARGET_RULE = 'max_common_reachable_active_pool_v1'
+TARGET_RULE = 'fixed_train_voxel_counts_v1'
+TARGET_TRAIN_VOXEL_COUNTS = {
+	'small': 10_152,
+	'medium': 20_184,
+	'large': 40_520,
+}
 SELECTION_SEMANTICS = 'stable_hash_partial_section_token_footprints_v1'
 ALLOWED_RELATIVE_ERROR = 0.05
+V3_SELECTION_SEMANTICS = 'seeded_nested_class_balanced_section_token_rows_v1'
+V3_TARGET_RULE = 'fixed_per_class_token_row_caps_v1'
+V3_PER_CLASS_TOKEN_ROW_CAPS = {'small': 25, 'medium': 50, 'large': 100}
+V3_NOMINAL_TRAIN_VOXEL_COUNTS = {
+	'small': 9_600,
+	'medium': 19_200,
+	'large': 38_400,
+}
+V3_LAYOUT_SUBSAMPLE_SEEDS = {
+	'layout_000': 0,
+	'layout_001': 1,
+	'layout_002': 2,
+	'layout_003': 3,
+	'layout_004': 4,
+}
+V3_TOKENIZATION_POLICY = {
+	'min_labeled_fraction': 0.5,
+	'min_majority_fraction': 0.7,
+	'ignore_z_border_samples': 1,
+}
+V3_LAYOUT_002_INLINE_ORDER = [290, 590, 390, 490]
+V3_SUMMARY_NAME = 'f3_lithology_mae_local_bt_five_way_v3'
 EXTRACTION_CONTRACT = {
 	'window_size': [128, 128, 128],
 	'overlap': [64, 64, 64],
@@ -231,6 +260,16 @@ def test_every_v2_config_resolves_with_its_owning_resolver() -> None:
 		_load(LAYOUT_ROOT / '03_build_section_layout_datasets.yaml')
 	)
 	covered.add(LAYOUT_ROOT / '03_build_section_layout_datasets.yaml')
+	f3_section_layout_calibration_config_from_mapping(
+		_load(LAYOUT_V3_ROOT / '01_prepare_section_layout_contract.yaml')
+	)
+	covered.add(LAYOUT_V3_ROOT / '01_prepare_section_layout_contract.yaml')
+	assert set(_load(LAYOUT_V3_ROOT / '02_layout_lines.yaml')) == {'layouts'}
+	covered.add(LAYOUT_V3_ROOT / '02_layout_lines.yaml')
+	f3_lithology_voxel_section_layout_dataset_config_from_mapping(
+		_load(LAYOUT_V3_ROOT / '03_build_section_layout_datasets.yaml')
+	)
+	covered.add(LAYOUT_V3_ROOT / '03_build_section_layout_datasets.yaml')
 	for name in EXTRACTION_CONFIGS.values():
 		resolve_embedding_extraction_config(
 			_load(FIVE_WAY_ROOT / '50_embeddings' / name)
@@ -241,6 +280,11 @@ def test_every_v2_config_resolves_with_its_owning_resolver() -> None:
 	)
 	assert dict(five_way.dataset) == V2_DATASET
 	covered.add(FIVE_WAY_ROOT / '60_five_way.yaml')
+	five_way_v3 = f3_lithology_five_way_config_from_mapping(
+		_load(FIVE_WAY_V3_ROOT / '60_five_way.yaml')
+	)
+	assert dict(five_way_v3.dataset) == V2_DATASET
+	covered.add(FIVE_WAY_V3_ROOT / '60_five_way.yaml')
 	assert covered == set(_v2_yaml_files())
 
 
@@ -446,11 +490,14 @@ def test_layout_lines_follow_the_documented_rule_and_nest_strictly() -> None:
 	assert len(small_pairs) == 5
 
 
-def test_calibration_config_derives_targets_from_v2_candidates_only() -> None:
+def test_calibration_config_uses_literal_v1_median_targets() -> None:
 	raw = _load(LAYOUT_ROOT / '01_prepare_section_layout_contract.yaml')
 	assert set(raw) == {'inputs', 'selection', 'targets', 'outputs'}
 	assert 'legacy_budget_manifest' not in raw['inputs']
-	assert raw['targets'] == {'rule': TARGET_RULE}
+	assert raw['targets'] == {
+		'rule': TARGET_RULE,
+		'train_voxel_counts': TARGET_TRAIN_VOXEL_COUNTS,
+	}
 	assert raw['selection'] == {
 		'semantics': SELECTION_SEMANTICS,
 		'patch_size_xyz': [8, 8, 8],
@@ -458,12 +505,175 @@ def test_calibration_config_derives_targets_from_v2_candidates_only() -> None:
 	}
 	config = f3_section_layout_calibration_config_from_mapping(raw)
 	assert config.target_rule == TARGET_RULE
+	assert dict(config.target_train_voxel_counts or {}) == TARGET_TRAIN_VOXEL_COUNTS
 	for path in (
 		config.canonical_split_grid,
 		config.label_volume,
 		config.canonical_contract,
 	):
 		assert f'/{V2_VERSION}/' in str(path)
+
+
+def test_v3_calibration_config_uses_literal_class_balanced_contract() -> None:
+	raw = _load(LAYOUT_V3_ROOT / '01_prepare_section_layout_contract.yaml')
+	assert set(raw) == {'inputs', 'selection', 'targets', 'outputs'}
+	assert raw['selection'] == {
+		'semantics': V3_SELECTION_SEMANTICS,
+		'patch_size_xyz': [8, 8, 8],
+		'allowed_relative_error': 0.05,
+		'tokenization_policy': V3_TOKENIZATION_POLICY,
+		'layout_subsample_seeds': V3_LAYOUT_SUBSAMPLE_SEEDS,
+	}
+	assert raw['targets'] == {
+		'rule': V3_TARGET_RULE,
+		'per_class_token_row_caps': V3_PER_CLASS_TOKEN_ROW_CAPS,
+		'nominal_train_voxel_counts': V3_NOMINAL_TRAIN_VOXEL_COUNTS,
+	}
+	calibration_root = (
+		f'{ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/'
+		'voxel_section_layout_v3_calibration'
+	)
+	assert raw['outputs'] == {
+		'candidate_statistics_csv': f'{calibration_root}/section_candidates.csv',
+		'candidate_statistics_json': f'{calibration_root}/section_candidates.json',
+		'canonical_contract': (
+			f'{calibration_root}/f3_voxel_section_layout_contract.json'
+		),
+	}
+	assert raw['inputs']['layout_lines'] == (
+		f'{Path.cwd()}/{LAYOUT_V3_ROOT}/02_layout_lines.yaml'
+	)
+	assert raw['inputs']['reference_valid_tokens'] == (
+		f'{ARTIFACT_ROOT}/{REFERENCE_GEOMETRY_DIR}/'
+		'f3_facies_benchmark.valid_tokens.npy'
+	)
+	config = f3_section_layout_calibration_config_from_mapping(raw)
+	assert config.selection_semantics == V3_SELECTION_SEMANTICS
+	assert config.target_rule == V3_TARGET_RULE
+	assert dict(config.per_class_token_row_caps or {}) == V3_PER_CLASS_TOKEN_ROW_CAPS
+	assert dict(config.target_train_voxel_counts or {}) == (
+		V3_NOMINAL_TRAIN_VOXEL_COUNTS
+	)
+	assert dict(config.layout_subsample_seeds or {}) == V3_LAYOUT_SUBSAMPLE_SEEDS
+	assert dict(config.tokenization_policy or {}) == V3_TOKENIZATION_POLICY
+
+
+def test_v3_layout_lines_use_literal_layout_002_order() -> None:
+	v2_layouts = _load(LAYOUT_ROOT / '02_layout_lines.yaml')['layouts']
+	v3_layouts = _load(LAYOUT_V3_ROOT / '02_layout_lines.yaml')['layouts']
+	assert [layout['layout_id'] for layout in v3_layouts] == [
+		'layout_000',
+		'layout_001',
+		'layout_002',
+		'layout_003',
+		'layout_004',
+	]
+	assert v3_layouts[2]['ordered_inlines'] == V3_LAYOUT_002_INLINE_ORDER
+	assert v3_layouts[2]['ordered_crosslines'] == [1075, 500, 625, 950]
+	for index, (v2_layout, v3_layout) in enumerate(
+		zip(v2_layouts, v3_layouts, strict=True)
+	):
+		assert v3_layout['layout_id'] == v2_layout['layout_id']
+		if index == 2:
+			assert set(v3_layout['ordered_inlines']) == set(
+				v2_layout['ordered_inlines']
+			)
+		else:
+			assert v3_layout['ordered_inlines'] == v2_layout['ordered_inlines']
+		assert v3_layout['ordered_crosslines'] == v2_layout['ordered_crosslines']
+
+
+@pytest.mark.parametrize(
+	'path',
+	[
+		LAYOUT_V3_ROOT / 'README.md',
+		FIVE_WAY_V3_ROOT / 'README.md',
+	],
+)
+def test_v3_runbook_shell_blocks_are_fail_fast_and_valid_bash(
+	path: Path, tmp_path: Path
+) -> None:
+	blocks = re.findall(
+		r'```bash\n(.*?)```', path.read_text(encoding='utf-8'), flags=re.DOTALL
+	)
+	assert blocks
+	for index, block in enumerate(blocks):
+		assert 'set -euo pipefail' in block
+		script = tmp_path / f'{path.parent.name}_{index}.sh'
+		script.write_text(block, encoding='utf-8')
+		subprocess.run(  # noqa: S603
+			['bash', '-n', str(script)],  # noqa: S607
+			check=True,
+			capture_output=True,
+			text=True,
+		)
+
+
+def test_v3_five_way_runbook_uses_size_layout_model_loop_order() -> None:
+	text = (FIVE_WAY_V3_ROOT / 'README.md').read_text(encoding='utf-8')
+	full_suite = text[text.index('## full suite') : text.index('## summary')]
+	assert full_suite.index('for size in small medium large') < full_suite.index(
+		'for layout in layout_000'
+	)
+	assert full_suite.index('for layout in layout_000') < full_suite.index(
+		'for model in'
+	)
+
+
+def test_v3_builder_and_five_way_use_versioned_outputs_and_reused_sources() -> None:
+	calibration = _load(
+		LAYOUT_V3_ROOT / '01_prepare_section_layout_contract.yaml'
+	)
+	builder = _load(LAYOUT_V3_ROOT / '03_build_section_layout_datasets.yaml')
+	five_way_raw = _load(FIVE_WAY_V3_ROOT / '60_five_way.yaml')
+	dataset_root = (
+		f'{ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/'
+		'voxel_section_layout_v3'
+	)
+	assert builder['inputs']['section_layout_contract'] == (
+		calibration['outputs']['canonical_contract']
+	)
+	assert builder['outputs'] == {'output_root': dataset_root}
+	assert five_way_raw['dataset'] == {
+		'name': 'f3_facies_benchmark',
+		'version': 'facies_benchmark_v2',
+	}
+	assert five_way_raw['section_layout'] == {'dataset_root': dataset_root}
+	assert five_way_raw['outputs'] == {
+		'runs_root': (
+			f'{ARTIFACT_ROOT}/f3_lithology_benchmark/'
+			'mae_local_bt_five_way_v3/runs'
+		),
+		'summary_root': (
+			f'{ARTIFACT_ROOT}/f3_lithology_benchmark/'
+			'mae_local_bt_five_way_v3/summary'
+		),
+		'summary_name': V3_SUMMARY_NAME,
+	}
+	v2_models = {
+		model['model_id']: model
+		for model in _load(FIVE_WAY_ROOT / '60_five_way.yaml')['models']
+	}
+	assert [model['model_id'] for model in five_way_raw['models']] == list(
+		MODEL_IDS
+	)
+	for model in five_way_raw['models']:
+		model_id = model['model_id']
+		assert model['checkpoint'] == (
+			f'{ARTIFACT_ROOT}/{UPSTREAM_CHECKPOINTS[model_id]}'
+		)
+		assert model['embeddings_dir'] == (
+			f'{ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/'
+			f'mae_local_bt_five_way_v2/{model_id}/overlap_x64'
+		)
+		assert model['expected'] == v2_models[model_id]['expected']
+	config = f3_lithology_five_way_config_from_mapping(five_way_raw)
+	assert dict(config.dataset) == {
+		'name': 'f3_facies_benchmark',
+		'version': 'facies_benchmark_v2',
+	}
+	assert config.summary_name == V3_SUMMARY_NAME
+	assert len(plan_f3_lithology_five_way_jobs(config)) == 75
 
 
 def test_prepare_and_inspection_resolvers_accept_v2_only() -> None:
@@ -563,7 +773,7 @@ def test_runbook_order_dry_runs_and_matrix() -> None:
 		assert dry[0] < live[0], cli
 	loop_models = [
 		name
-		for name in re.findall(r'^  (\w+)(?: \\)?$', text, flags=re.MULTILINE)
+		for name in re.findall(r'^\s+(\w+)(?: \\)?$', text, flags=re.MULTILINE)
 		if name in MODEL_IDS
 	]
 	assert loop_models == list(MODEL_IDS) * 2
@@ -576,6 +786,15 @@ def test_runbook_order_dry_runs_and_matrix() -> None:
 	assert 'seed 42' in text
 	assert not re.search(r'(?m)^\s*(?:rm\s+-rf|cp\s|rsync\s|ln\s+-s)', text)
 	assert text.index('--dry-run\ndone') < text.index('for layout in layout_000')
+	full_suite = text[
+		text.index('## 13. full suite') : text.index('## 14. summary dry-run')
+	]
+	assert full_suite.index('for size in small medium large') < full_suite.index(
+		'for layout in layout_000'
+	)
+	assert full_suite.index('for layout in layout_000') < full_suite.index(
+		'for model in'
+	)
 
 
 def test_layout_yaml_documents_the_rule_and_inventory() -> None:

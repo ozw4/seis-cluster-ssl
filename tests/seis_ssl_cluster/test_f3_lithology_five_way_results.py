@@ -264,6 +264,22 @@ def test_summary_writes_exactly_five_output_files(
 	assert summary['models'] == list(FIVE_WAY_MODEL_IDS)
 	assert summary['job_count'] == 75
 	assert summary['primary_metric'] == 'macro_f1'
+	assert summary['summary_name'] == 'f3_lithology_mae_local_bt_five_way_v1'
+
+
+def test_summary_uses_configured_summary_name(
+	results_universe: dict[str, object],
+) -> None:
+	configured_name = 'f3_lithology_mae_local_bt_five_way_v3'
+	results_universe['outputs']['summary_name'] = configured_name
+	config = f3_lithology_five_way_config_from_mapping(results_universe)
+
+	summarize_f3_lithology_five_way(config)
+
+	summary = json.loads(
+		(config.summary_root / 'summary.json').read_text(encoding='utf-8')
+	)
+	assert summary['summary_name'] == configured_name
 
 
 def test_paired_deltas_have_correct_signs_and_size_isolation(

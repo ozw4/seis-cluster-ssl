@@ -19,9 +19,12 @@ from seis_ssl_cluster.config.f3_lithology_voxel_inference import (
 	f3_lithology_voxel_inference_config_from_mapping,
 )
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
+	CLASS_BALANCED_SELECTION_SEMANTICS,
 	DATA_SIZES,
 	FIXED_DECODER_CONTRACT,
 	LAYOUT_IDS,
+	LINE_COUNTS,
+	STABLE_SELECTION_SEMANTICS,
 )
 from seis_ssl_cluster.f3.lithology.five_way_sources import (
 	audit_f3_lithology_five_way_sources,
@@ -157,7 +160,7 @@ def resolve_f3_lithology_five_way_job(
 	)
 
 
-def inspect_f3_lithology_five_way_job(  # noqa: C901
+def inspect_f3_lithology_five_way_job(  # noqa: C901, PLR0912, PLR0915
 	job: F3FiveWayJob,
 ) -> dict[str, object]:
 	"""Resolve one job dry-run summary from small metadata files only."""
@@ -185,47 +188,174 @@ def inspect_f3_lithology_five_way_job(  # noqa: C901
 	active_lines = metadata.get('active_lines')
 	if not isinstance(active_lines, Mapping):
 		raise TypeError(f'{metadata_path} active_lines must be a mapping')
+	expected_line_counts = dict(
+		zip(('inline', 'crossline'), LINE_COUNTS[job.data_size], strict=True)
+	)
+	resolved_active_lines: dict[str, list[int]] = {}
 	for key in ('inline', 'crossline'):
 		lines = active_lines.get(key)
-		if not isinstance(lines, list) or not lines:
-			raise ValueError(
-				f'{metadata_path} active_lines.{key} must be a non-empty list'
+		if (
+			not isinstance(lines, list)
+			or len(lines) != expected_line_counts[key]
+			or any(
+				not isinstance(line, int) or isinstance(line, bool) for line in lines
 			)
-	per_line_contributions = identity.get('per_line_contributions')
-	if not isinstance(per_line_contributions, Mapping):
-		raise TypeError(
-			f'{metadata_path} identity.per_line_contributions must be a mapping'
+			or len(lines) != len(set(lines))
+		):
+			raise ValueError(
+				f'{metadata_path} active_lines.{key} must be a non-empty list '
+				'containing exactly '
+				f'{expected_line_counts[key]} unique integers'
+			)
+		resolved_active_lines[key] = lines
+	selection_semantics = metadata.get('selection_semantics')
+	if selection_semantics not in {
+		STABLE_SELECTION_SEMANTICS,
+		CLASS_BALANCED_SELECTION_SEMANTICS,
+	}:
+		raise ValueError(f'{metadata_path} selection_semantics is unsupported')
+	actual_train_voxel_count = _positive_integer(
+		identity.get('actual_train_voxel_count'),
+		f'{metadata_path} identity.actual_train_voxel_count',
+	)
+	selected_token_count = _positive_integer(
+		identity.get('selected_token_count'),
+		f'{metadata_path} identity.selected_token_count',
+	)
+	selected_token_identity_sha256 = _sha256(
+		identity.get('selected_token_identity_sha256'),
+		f'{metadata_path} identity.selected_token_identity_sha256',
+	)
+	validation_mask_sha256 = _sha256(
+		identity.get('validation_mask_sha256'),
+		f'{metadata_path} identity.validation_mask_sha256',
+	)
+	validation_voxel_count = _positive_integer(
+		identity.get('validation_voxel_count'),
+		f'{metadata_path} identity.validation_voxel_count',
+	)
+	per_class_train_voxel_counts = _positive_counts(
+		identity.get('per_class_train_voxel_counts'),
+		expected_keys={str(class_id) for class_id in range(6)},
+		label=f'{metadata_path} identity.per_class_train_voxel_counts',
+	)
+	if sum(per_class_train_voxel_counts.values()) != actual_train_voxel_count:
+		raise ValueError(
+			f'{metadata_path} identity.per_class_train_voxel_counts must sum to '
+			'actual_train_voxel_count'
 		)
+	per_line_contributions = identity.get('per_line_contributions')
 	expected_lines = {
 		f'{slice_type}:{line}'
 		for slice_type in ('inline', 'crossline')
-		for line in active_lines[slice_type]
+		for line in resolved_active_lines[slice_type]
 	}
-	if set(per_line_contributions) != expected_lines:
+	resolved_per_line_contributions = _positive_counts(
+		per_line_contributions,
+		expected_keys=expected_lines,
+		label=f'{metadata_path} identity.per_line_contributions',
+	)
+	if sum(resolved_per_line_contributions.values()) != actual_train_voxel_count:
 		raise ValueError(
-			f'{metadata_path} identity.per_line_contributions must cover exactly '
-			f'{sorted(expected_lines)!r}'
+			f'{metadata_path} identity.per_line_contributions must sum to '
+			'actual_train_voxel_count'
 		)
+	subsample_seed: int | None = None
+	per_class_token_row_cap: int | None = None
+	selected_token_row_count: int | None = None
+	selected_token_row_identity_sha256: str | None = None
+	if selection_semantics == CLASS_BALANCED_SELECTION_SEMANTICS:
+		subsample_seed = _nonnegative_integer(
+			identity.get('subsample_seed'),
+			f'{metadata_path} identity.subsample_seed',
+		)
+		expected_seed = int(job.layout_id.removeprefix('layout_'))
+		if subsample_seed != expected_seed:
+			raise ValueError(
+				f'{metadata_path} identity.subsample_seed must equal '
+				f'layout suffix {expected_seed}'
+			)
+		per_class_token_row_cap = _positive_integer(
+			identity.get('per_class_token_row_cap'),
+			f'{metadata_path} identity.per_class_token_row_cap',
+		)
+		selected_token_row_count = _positive_integer(
+			identity.get('selected_token_row_count'),
+			f'{metadata_path} identity.selected_token_row_count',
+		)
+		if selected_token_row_count != 6 * per_class_token_row_cap:
+			raise ValueError(
+				f'{metadata_path} identity.selected_token_row_count must equal '
+				'six classes times per_class_token_row_cap'
+			)
+		if selected_token_count > selected_token_row_count:
+			raise ValueError(
+				f'{metadata_path} identity.selected_token_count cannot exceed '
+				'selected_token_row_count'
+			)
+		selected_token_row_identity_sha256 = _sha256(
+			identity.get('selected_token_row_identity_sha256'),
+			f'{metadata_path} identity.selected_token_row_identity_sha256',
+		)
+		class_keys = {str(class_id) for class_id in range(6)}
+		per_class_selected = _positive_counts(
+			identity.get('per_class_selected_token_row_counts'),
+			expected_keys=class_keys,
+			label=(
+				f'{metadata_path} identity.per_class_selected_token_row_counts'
+			),
+		)
+		if set(per_class_selected.values()) != {per_class_token_row_cap}:
+			raise ValueError(
+				f'{metadata_path} identity.per_class_selected_token_row_counts '
+				'must all equal per_class_token_row_cap'
+			)
+		active_pool = _positive_counts(
+			identity.get('active_pool_per_class_token_row_counts'),
+			expected_keys=class_keys,
+			label=(
+				f'{metadata_path} identity.active_pool_per_class_token_row_counts'
+			),
+		)
+		if any(count < per_class_token_row_cap for count in active_pool.values()):
+			raise ValueError(
+				f'{metadata_path} identity active token-row pool is below cap'
+			)
+		per_line_selected = _positive_counts(
+			identity.get('per_line_selected_token_row_counts'),
+			expected_keys=expected_lines,
+			label=(
+				f'{metadata_path} identity.per_line_selected_token_row_counts'
+			),
+		)
+		if sum(per_line_selected.values()) != selected_token_row_count:
+			raise ValueError(
+				f'{metadata_path} identity.per_line_selected_token_row_counts '
+				'must sum to selected_token_row_count'
+			)
 	return {
 		'model_id': job.model.model_id,
 		'checkpoint': str(job.model.checkpoint),
 		'embeddings_dir': str(job.model.embeddings_dir),
 		'layout_id': job.layout_id,
 		'data_size': job.data_size,
-		'inline_lines': active_lines['inline'],
-		'crossline_lines': active_lines['crossline'],
-		'per_line_contributions': dict(per_line_contributions),
+		'inline_lines': resolved_active_lines['inline'],
+		'crossline_lines': resolved_active_lines['crossline'],
+		'per_line_contributions': resolved_per_line_contributions,
 		'condition_dir': str(job.condition_dir),
-		'selected_token_count': identity.get('selected_token_count'),
-		'selected_token_identity_sha256': identity.get(
-			'selected_token_identity_sha256'
+		'selection_semantics': selection_semantics,
+		'subsample_seed': subsample_seed,
+		'per_class_token_row_cap': per_class_token_row_cap,
+		'selected_token_row_count': selected_token_row_count,
+		'selected_token_row_identity_sha256': (
+			selected_token_row_identity_sha256
 		),
-		'train_voxel_count': identity.get('actual_train_voxel_count'),
-		'per_class_train_voxel_counts': identity.get(
-			'per_class_train_voxel_counts'
-		),
-		'validation_mask_sha256': identity.get('validation_mask_sha256'),
-		'validation_voxel_count': identity.get('validation_voxel_count'),
+		'selected_token_count': selected_token_count,
+		'selected_token_identity_sha256': selected_token_identity_sha256,
+		'train_voxel_count': actual_train_voxel_count,
+		'per_class_train_voxel_counts': per_class_train_voxel_counts,
+		'validation_mask_sha256': validation_mask_sha256,
+		'validation_voxel_count': validation_voxel_count,
 		'decoder_contract': dict(FIXED_DECODER_CONTRACT),
 		'decoder_seed': decoder_config.train.seed,
 		'decoder_initial_state_sha256': _decoder_initial_state_sha256(
@@ -470,6 +600,50 @@ def _decoder_initial_state_sha256(
 			patch_size_xyz=tuple(patch_size),
 		)
 	return stable_model_state_sha256(model)
+
+
+def _positive_integer(value: object, label: str) -> int:
+	if not isinstance(value, int) or isinstance(value, bool):
+		raise TypeError(f'{label} must be an integer')
+	if value <= 0:
+		raise ValueError(f'{label} must be positive')
+	return value
+
+
+def _nonnegative_integer(value: object, label: str) -> int:
+	if not isinstance(value, int) or isinstance(value, bool):
+		raise TypeError(f'{label} must be an integer')
+	if value < 0:
+		raise ValueError(f'{label} must be nonnegative')
+	return value
+
+
+def _sha256(value: object, label: str) -> str:
+	if (
+		not isinstance(value, str)
+		or len(value) != 64
+		or any(character not in '0123456789abcdef' for character in value)
+	):
+		raise ValueError(f'{label} must be a lowercase SHA-256')
+	return value
+
+
+def _positive_counts(
+	value: object,
+	*,
+	expected_keys: set[str],
+	label: str,
+) -> dict[str, int]:
+	if not isinstance(value, Mapping):
+		raise TypeError(f'{label} must be a mapping')
+	if set(value) != expected_keys:
+		raise ValueError(
+			f'{label} must cover exactly {sorted(expected_keys)!r}'
+		)
+	return {
+		key: _positive_integer(value[key], f'{label}.{key}')
+		for key in sorted(expected_keys)
+	}
 
 
 __all__ = [
