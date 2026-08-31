@@ -196,6 +196,7 @@ class FrozenHorizonPlan:
 	effective_per_horizon_counts: Mapping[str, tuple[int, ...]]
 	excluded_by_token_validity_counts: Mapping[str, tuple[int, ...]]
 	run_identity: Mapping[str, object]
+	selected_embedding_paths: EmbeddingOutputPaths | None = None
 
 	@property
 	def per_horizon_counts(self) -> Mapping[str, tuple[int, ...]]:
@@ -536,6 +537,45 @@ def inspect_frozen_horizon_job(  # noqa: PLR0913
 	) != (HORIZON_WINDOW_START, HORIZON_WINDOW_STOP):
 		raise ValueError('split plan must use the fixed [552, 768) TWT window')
 	geometry = inspect_frozen_embedding_pair(job_config, resolved_data)
+	selected_paths = (
+		geometry.pretrained if model == 'pretrained' else geometry.random
+	)
+	selected_metadata = (
+		geometry.pretrained_metadata
+		if model == 'pretrained'
+		else geometry.random_metadata
+	)
+	selected_model_source = (
+		geometry.pretrained_model_source
+		if model == 'pretrained'
+		else geometry.random_model_source
+	)
+	return build_frozen_horizon_plan(
+		config=job_config,
+		model=model,
+		data=resolved_data,
+		split_plan=split_plan,
+		geometry=geometry,
+		selected_paths=selected_paths,
+		selected_metadata=selected_metadata,
+		selected_model_source=selected_model_source,
+		benchmark='mae_vs_random_frozen_v1',
+	)
+
+
+def build_frozen_horizon_plan(  # noqa: PLR0913
+	*,
+	config: FrozenHorizonConfig,
+	model: str,
+	data: VolveHorizonData,
+	split_plan: HorizonSplitPlan,
+	geometry: FrozenEmbeddingGeometry,
+	selected_paths: EmbeddingOutputPaths,
+	selected_metadata: Mapping[str, object],
+	selected_model_source: Mapping[str, object],
+	benchmark: str,
+) -> FrozenHorizonPlan:
+	'''Build one frozen-decoder plan from an already validated embedding source.'''
 	records: dict[str, tuple[HorizonTileRecord, ...]] = {}
 	native_counts: dict[str, tuple[int, ...]] = {}
 	effective_counts: dict[str, tuple[int, ...]] = {}
@@ -545,19 +585,19 @@ def inspect_frozen_horizon_job(  # noqa: PLR0913
 		native_split_mask = _split_mask(split_plan, split)
 		effective_split_mask = native_split_mask & model_valid
 		records[split] = enumerate_horizon_tile_records(
-			sample_float=resolved_data.sample_float,
-			native_valid_mask=resolved_data.bound_valid_mask,
+			sample_float=data.sample_float,
+			native_valid_mask=data.bound_valid_mask,
 			split_mask=effective_split_mask,
-			trace_valid_mask=resolved_data.valid_trace_mask,
-			settings=job_config.tiles,
+			trace_valid_mask=data.valid_trace_mask,
+			settings=config.tiles,
 		)
 		native_supervision = horizon_supervision_mask(
-			sample_float=resolved_data.sample_float,
-			native_valid_mask=resolved_data.bound_valid_mask,
+			sample_float=data.sample_float,
+			native_valid_mask=data.bound_valid_mask,
 			split_mask=native_split_mask,
-			trace_valid_mask=resolved_data.valid_trace_mask,
-			window_start=job_config.tiles.window_start,
-			window_stop=job_config.tiles.window_stop,
+			trace_valid_mask=data.valid_trace_mask,
+			window_start=config.tiles.window_start,
+			window_stop=config.tiles.window_stop,
 		)
 		effective_supervision = native_supervision & model_valid
 		native_counts[split] = _per_horizon_counts(native_supervision)
@@ -569,15 +609,15 @@ def inspect_frozen_horizon_job(  # noqa: PLR0913
 			)
 		)
 	primary_split = np.broadcast_to(
-		split_plan.test_primary_mask, resolved_data.bound_valid_mask.shape
+		split_plan.test_primary_mask, data.bound_valid_mask.shape
 	)
 	primary_native = horizon_supervision_mask(
-		sample_float=resolved_data.sample_float,
-		native_valid_mask=resolved_data.bound_valid_mask,
+		sample_float=data.sample_float,
+		native_valid_mask=data.bound_valid_mask,
 		split_mask=primary_split,
-		trace_valid_mask=resolved_data.valid_trace_mask,
-		window_start=job_config.tiles.window_start,
-		window_stop=job_config.tiles.window_stop,
+		trace_valid_mask=data.valid_trace_mask,
+		window_start=config.tiles.window_start,
+		window_stop=config.tiles.window_stop,
 	)
 	primary_effective = primary_native & model_valid
 	native_counts['test_primary'] = _per_horizon_counts(primary_native)
@@ -605,11 +645,11 @@ def inspect_frozen_horizon_job(  # noqa: PLR0913
 	output_dir = (
 		config.runs_root
 		/ f'model={model}'
-		/ f'layout={layout_id}'
-		/ f'size={data_size}'
+		/ f'layout={split_plan.layout_id}'
+		/ f'size={split_plan.data_size}'
 	)
 	identity = _run_identity(
-		config=job_config,
+		config=config,
 		model=model,
 		split_plan=split_plan,
 		geometry=geometry,
@@ -617,14 +657,18 @@ def inspect_frozen_horizon_job(  # noqa: PLR0913
 		native_counts=native_counts,
 		effective_counts=effective_counts,
 		excluded_counts=excluded_counts,
+		selected_paths=selected_paths,
+		selected_metadata=selected_metadata,
+		selected_model_source=selected_model_source,
+		benchmark=benchmark,
 	)
 	return FrozenHorizonPlan(
-		config=job_config,
+		config=config,
 		model=model,
-		layout_id=layout_id,
-		data_size=data_size,
+		layout_id=split_plan.layout_id,
+		data_size=split_plan.data_size,
 		output_dir=output_dir,
-		data=resolved_data,
+		data=data,
 		split_plan=split_plan,
 		geometry=geometry,
 		tile_records=records,
@@ -632,6 +676,7 @@ def inspect_frozen_horizon_job(  # noqa: PLR0913
 		effective_per_horizon_counts=effective_counts,
 		excluded_by_token_validity_counts=excluded_counts,
 		run_identity=identity,
+		selected_embedding_paths=selected_paths,
 	)
 
 
@@ -656,7 +701,7 @@ def run_frozen_horizon_job(
 	decoder_factory: Callable[[], VolveHorizonDecoder] | None = None,
 ) -> Path | None:
 	'''Connect frozen inputs and forward passes to the shared horizon runner.'''
-	selected_paths = (
+	selected_paths = plan.selected_embedding_paths or (
 		plan.geometry.pretrained
 		if plan.model == 'pretrained'
 		else plan.geometry.random
@@ -771,36 +816,35 @@ def _run_identity(  # noqa: PLR0913
 	native_counts: Mapping[str, tuple[int, ...]],
 	effective_counts: Mapping[str, tuple[int, ...]],
 	excluded_counts: Mapping[str, tuple[int, ...]],
+	selected_paths: EmbeddingOutputPaths | None = None,
+	selected_metadata: Mapping[str, object] | None = None,
+	selected_model_source: Mapping[str, object] | None = None,
+	benchmark: str = 'mae_vs_random_frozen_v1',
 ) -> dict[str, object]:
-	metadata = (
+	metadata = selected_metadata or (
 		geometry.pretrained_metadata
 		if model == 'pretrained'
 		else geometry.random_metadata
 	)
-	model_source = (
+	model_source = selected_model_source or (
 		geometry.pretrained_model_source
 		if model == 'pretrained'
 		else geometry.random_model_source
 	)
+	paths = selected_paths or (
+		geometry.pretrained if model == 'pretrained' else geometry.random
+	)
 	return {
 		'schema_version': 3,
-		'benchmark': 'mae_vs_random_frozen_v1',
+		'benchmark': benchmark,
 		'model': model,
 		'layout_id': split_plan.layout_id,
 		'data_size': split_plan.data_size,
 		'canonical_scientific_identity': dict(geometry.canonical_identity),
 		'horizon_split_plan': split_plan.identity(),
 		'embedding': {
-			'metadata_path': str(
-				geometry.pretrained.metadata
-				if model == 'pretrained'
-				else geometry.random.metadata
-			),
-			'metadata_sha256': file_sha256(
-				geometry.pretrained.metadata
-				if model == 'pretrained'
-				else geometry.random.metadata
-			),
+			'metadata_path': str(paths.metadata),
+			'metadata_sha256': file_sha256(paths.metadata),
 			'checkpoint_path': metadata['checkpoint_path'],
 			'checkpoint_sha256': metadata['checkpoint_sha256'],
 			'model_source': dict(model_source),
@@ -1403,6 +1447,7 @@ __all__ = [
 	'FrozenHorizonPlan',
 	'FrozenHorizonTileDataset',
 	'FrozenHorizonTrainSettings',
+	'build_frozen_horizon_plan',
 	'decoder_initial_state_sha256',
 	'deterministic_tile_order',
 	'enumerate_frozen_horizon_conditions',
