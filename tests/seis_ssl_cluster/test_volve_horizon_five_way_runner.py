@@ -16,6 +16,7 @@ from seis_ssl_cluster.volve.horizon_five_way_runner import (
 	plan_volve_horizon_five_way_jobs,
 	resolve_volve_horizon_five_way_job,
 	run_volve_horizon_five_way_job,
+	run_volve_horizon_five_way_suite,
 )
 from seis_ssl_cluster.volve.horizon_layouts import DATA_SIZE_PREFIX, LAYOUT_IDS
 
@@ -166,6 +167,163 @@ def test_run_accepts_exact_cell_resume_and_delegates(
 	assert captured == {'device': 'cpu', 'max_steps': 1, 'resume': resume}
 
 
+def test_suite_preflights_shared_inputs_once_and_continues_cells(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = volve_horizon_five_way_config_from_mapping(_config_mapping(tmp_path))
+	conditions = plan_volve_horizon_five_way_jobs(config)
+	complete = resolve_volve_horizon_five_way_job(
+		config,
+		model=conditions[0][0],
+		layout=conditions[0][1],
+		size=conditions[0][2],
+	)
+	incomplete = resolve_volve_horizon_five_way_job(
+		config,
+		model=conditions[1][0],
+		layout=conditions[1][1],
+		size=conditions[1][2],
+	)
+	complete.output_dir.mkdir(parents=True)
+	complete.metrics_path.write_text('{}', encoding='utf-8')
+	incomplete.output_dir.mkdir(parents=True)
+	incomplete.latest_path.write_bytes(b'checkpoint')
+	source_audit = object()
+	embedding_suite = object()
+	data = object()
+	calls: dict[str, list[object]] = {
+		'audit': [],
+		'suite': [],
+		'data': [],
+		'inspect': [],
+		'run': [],
+	}
+
+	def fake_audit(received_config):
+		calls['audit'].append(received_config)
+		return source_audit
+
+	def fake_suite(received_config, *, source_audit):
+		calls['suite'].append((received_config, source_audit))
+		return embedding_suite
+
+	def fake_load_data(volve_root):
+		calls['data'].append(volve_root)
+		return data
+
+	def fake_inspect(job, **kwargs):
+		calls['inspect'].append((job, kwargs))
+		return SimpleNamespace(output_dir=job.output_dir)
+
+	def fake_run(plan, **kwargs):
+		calls['run'].append((plan, kwargs))
+		return plan.output_dir / 'metrics.json'
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'audit_volve_horizon_five_way_sources',
+		fake_audit,
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'inspect_volve_horizon_five_way_embedding_suite',
+		fake_suite,
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'load_volve_horizon_data',
+		fake_load_data,
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'inspect_volve_horizon_five_way_job',
+		fake_inspect,
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'run_volve_horizon_five_way_job',
+		fake_run,
+	)
+
+	results = run_volve_horizon_five_way_suite(
+		config,
+		layout_config=tmp_path / 'layouts.yaml',
+		device='cpu',
+		max_steps=3,
+		continue_existing=True,
+	)
+
+	assert len(calls['audit']) == len(calls['suite']) == len(calls['data']) == 1
+	assert calls['suite'] == [(config, source_audit)]
+	assert calls['data'] == [config.volve_root]
+	assert len(calls['inspect']) == len(calls['run']) == 74
+	assert [result.action for result in results[:3]] == [
+		'skip',
+		'resume',
+		'fresh',
+	]
+	assert results[0].result == complete.metrics_path
+	for _job, kwargs in calls['inspect']:
+		assert kwargs['data'] is data
+		assert kwargs['embedding_suite'] is embedding_suite
+	for index, (_plan, kwargs) in enumerate(calls['run']):
+		assert kwargs['device'] == 'cpu'
+		assert kwargs['max_steps'] == 3
+		expected_resume = incomplete.latest_path if index == 0 else None
+		assert kwargs['resume'] == expected_resume
+
+
+def test_suite_default_does_not_skip_or_resume_existing_cells(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = volve_horizon_five_way_config_from_mapping(_config_mapping(tmp_path))
+	first = resolve_volve_horizon_five_way_job(
+		config,
+		model='mae',
+		layout='layout_000',
+		size='small',
+	)
+	first.output_dir.mkdir(parents=True)
+	first.metrics_path.write_text('{}', encoding='utf-8')
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'audit_volve_horizon_five_way_sources',
+		lambda _config: {},
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'inspect_volve_horizon_five_way_embedding_suite',
+		lambda *_args, **_kwargs: object(),
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'load_volve_horizon_data',
+		lambda _root: object(),
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'inspect_volve_horizon_five_way_job',
+		lambda job, **_kwargs: SimpleNamespace(output_dir=job.output_dir),
+	)
+
+	def reject_completed(plan, **kwargs):
+		assert kwargs['resume'] is None
+		raise FileExistsError(f'already complete: {plan.output_dir}')
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'run_volve_horizon_five_way_job',
+		reject_completed,
+	)
+	with pytest.raises(FileExistsError, match='already complete'):
+		run_volve_horizon_five_way_suite(
+			config,
+			layout_config=tmp_path / 'layouts.yaml',
+		)
+
+
 def test_cli_dry_run_branch_writes_nothing(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -242,5 +400,16 @@ def test_cli_validates_model_after_loading_config() -> None:
 		]
 	)
 	assert args.model == 'not-yet-validated'
+	assert args.dry_run is True
+	assert args.device == 'auto'
+
+
+def test_suite_cli_exposes_explicit_continue_mode() -> None:
+	module = importlib.import_module(
+		'proc.seis_ssl_cluster.run_volve_horizon_five_way_suite'
+	)
+	args = module.build_parser().parse_args(['--continue', '--dry-run'])
+
+	assert args.continue_existing is True
 	assert args.dry_run is True
 	assert args.device == 'auto'

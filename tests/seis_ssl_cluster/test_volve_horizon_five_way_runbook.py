@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import subprocess
-from itertools import product
 from pathlib import Path
 
 import pytest
@@ -36,6 +34,7 @@ RUNBOOK_CLIS = (
 	'proc/seis_ssl_cluster/train_strat_hmm_pretext.py',
 	'proc/seis_ssl_cluster/audit_volve_horizon_five_way_sources.py',
 	'proc/seis_ssl_cluster/run_volve_horizon_five_way.py',
+	'proc/seis_ssl_cluster/run_volve_horizon_five_way_suite.py',
 	'proc/seis_ssl_cluster/summarize_volve_horizon_five_way.py',
 )
 
@@ -68,12 +67,12 @@ def test_main_config_preserves_the_legacy_downstream_contract(
 	)
 
 
-def test_launcher_lists_preflight_then_exactly_75_jobs_without_artifacts(
+def test_launcher_uses_python_planner_for_exactly_75_jobs_without_artifacts(
 	tmp_path: Path,
 ) -> None:
 	environment = os.environ.copy()
-	environment.pop('SEIS_SSL_CLUSTER_ARTIFACT_ROOT', None)
-	environment.pop('SEIS_SSL_CLUSTER_VOLVE_ROOT', None)
+	environment['SEIS_SSL_CLUSTER_ARTIFACT_ROOT'] = str(tmp_path / 'artifacts')
+	environment['SEIS_SSL_CLUSTER_VOLVE_ROOT'] = str(tmp_path / 'volve')
 	environment['DRY_RUN'] = '1'
 	completed = subprocess.run(  # noqa: S603
 		['/usr/bin/bash', str(LAUNCHER)],
@@ -83,32 +82,30 @@ def test_launcher_lists_preflight_then_exactly_75_jobs_without_artifacts(
 		capture_output=True,
 		text=True,
 	)
-	lines = [line for line in completed.stdout.splitlines() if line.strip()]
-	commands = [shlex.split(line) for line in lines]
-
-	assert len(commands) == 76
-	assert 'audit_volve_horizon_five_way_sources.py' in commands[0][1]
-	assert commands[0][-1] == '--dry-run'
-	runner_commands = commands[1:]
-	assert all(
-		'run_volve_horizon_five_way.py' in command[1]
-		for command in runner_commands
-	)
-	assert all(command[-1] == '--dry-run' for command in runner_commands)
+	lines = [
+		line
+		for line in completed.stdout.splitlines()
+		if line.startswith('model=')
+	]
+	assert len(lines) == 75
 	actual = [
 		(
-			_option(command, '--model'),
-			_option(command, '--layout'),
-			_option(command, '--size'),
+			_option(line, 'model'),
+			_option(line, 'layout'),
+			_option(line, 'size'),
 		)
-		for command in runner_commands
+		for line in lines
 	]
-	expected = list(product(FIVE_WAY_MODEL_IDS, LAYOUT_IDS, DATA_SIZE_PREFIX))
+	expected = [
+		(model, layout, size)
+		for model in FIVE_WAY_MODEL_IDS
+		for layout in LAYOUT_IDS
+		for size in DATA_SIZE_PREFIX
+	]
 	assert actual == expected
 	assert len(set(actual)) == 75
-	assert {
-		_option(command, '--config') for command in commands
-	} == {str(MAIN_CONFIG)}
+	assert all(_option(line, 'action') == 'fresh' for line in lines)
+	assert 'no artifact preflight or files written' in completed.stdout
 	assert 'summarize_volve_horizon_five_way.py' not in LAUNCHER.read_text(
 		encoding='utf-8'
 	)
@@ -151,6 +148,7 @@ def test_runbook_documents_complete_execution_and_recovery_contract() -> None:
 	assert '--resume "$RUN_DIR/latest.pt"' in text
 	assert 'cellの完了判定fileは`metrics.json`' in text
 	assert 'DRY_RUN=1 bash "$EXP/run_five_way.sh"' in text
+	assert 'bash "$EXP/run_five_way.sh" --continue' in text
 	assert '--check-only' in text
 	assert 'complete_jobs: 75' in text
 	assert 'comparison.csv' in text
@@ -164,5 +162,10 @@ def test_new_experiment_inventory_excludes_forbidden_augmentation_token() -> Non
 			assert forbidden not in path.read_text(encoding='utf-8'), path
 
 
-def _option(command: list[str], flag: str) -> str:
-	return command[command.index(flag) + 1]
+def _option(line: str, name: str) -> str:
+	prefix = f'{name}='
+	return next(
+		part.removeprefix(prefix)
+		for part in line.split()
+		if part.startswith(prefix)
+	)
