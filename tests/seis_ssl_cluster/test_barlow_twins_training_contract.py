@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 import sys
@@ -153,6 +154,7 @@ def test_checkpoint_contract_round_trip_and_epoch_resume(
 		'encoder.',
 	]
 	assert payload['global_step'] == 1
+	assert payload['resume_count'] == 0
 	assert payload['training_state']['completed_epoch'] is True
 	assert set(payload['metrics']) >= DIAGNOSTIC_METRICS
 	assert all(np.isfinite(payload['metrics'][key]) for key in DIAGNOSTIC_METRICS)
@@ -180,6 +182,7 @@ def test_checkpoint_contract_round_trip_and_epoch_resume(
 	)
 	assert state.start_epoch == 2
 	assert state.global_step == 1
+	assert state.resume_count == 1
 	for key, value in backbone.state_dict().items():
 		assert torch.equal(value, payload['model_state_dict'][key])
 	for key, value in wrapper.projector.state_dict().items():
@@ -192,12 +195,72 @@ def test_checkpoint_contract_round_trip_and_epoch_resume(
 	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
 	assert resumed['epoch'] == 2
 	assert resumed['global_step'] == 2
+	assert resumed['resume_count'] == 1
 	build_mask.assert_not_called()
 	history = json.loads(
 		(resumed_path.parent / 'history.json').read_text(encoding='utf-8')
 	)
 	assert [row['global_step'] for row in history] == [1, 2]
 	assert all(set(row) >= DIAGNOSTIC_METRICS for row in history)
+
+
+def test_resume_accepts_legacy_checkpoint_without_counter_and_marks_descendant(
+	tmp_path: Path,
+) -> None:
+	source_path = run_barlow_twins_pretraining(
+		resolve_barlow_twins_training_config(
+			_tiny_config(tmp_path, output_name='legacy-counter-source')
+		)
+	)
+	legacy_payload = load_barlow_twins_checkpoint(source_path, map_location='cpu')
+	assert legacy_payload.pop('resume_count') == 0
+	legacy_path = tmp_path / 'legacy-barlow-checkpoint.pt'
+	torch.save(legacy_payload, legacy_path)
+	resume_config = resolve_barlow_twins_training_config(
+		_tiny_config(
+			tmp_path,
+			epochs=2,
+			max_steps=2,
+			output_name='legacy-counter-descendant',
+		)
+	)
+
+	resumed_path = run_barlow_twins_pretraining(
+		resume_config,
+		resume=legacy_path,
+	)
+	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
+
+	assert resumed['epoch'] == 2
+	assert resumed['resume_count'] == 1
+
+
+def test_resume_rejects_malformed_checkpoint_resume_count(tmp_path: Path) -> None:
+	config = resolve_barlow_twins_training_config(
+		_tiny_config(tmp_path, output_name='invalid-resume-count-source')
+	)
+	checkpoint_path = run_barlow_twins_pretraining(config)
+	payload = load_barlow_twins_checkpoint(checkpoint_path, map_location='cpu')
+	backbone = _backbone()
+	wrapper = BarlowTwins3D(backbone, projector_dim=4)
+	optimizer = torch.optim.AdamW(wrapper.pretraining_parameters(), lr=1.0e-3)
+
+	for value, error, match in (
+		(False, TypeError, 'must be an integer'),
+		(1.5, TypeError, 'must be an integer'),
+		(-1, ValueError, 'must be non-negative'),
+	):
+		malformed = {**payload, 'resume_count': value}
+		with pytest.raises(error, match=match):
+			restore_barlow_twins_checkpoint(
+				malformed,
+				backbone=backbone,
+				projector=wrapper.projector,
+				optimizer=optimizer,
+				scaler=None,
+				scaler_required=False,
+				config=config,
+			)
 
 
 def test_local_checkpoint_contract_round_trip_and_epoch_resume(
@@ -495,6 +558,7 @@ def test_continuation_fresh_and_stage2_resume_contract(  # noqa: PLR0915
 	stage1_projector = _clone_tensor_state(stage1, 'projector_state_dict')
 	assert stage1['epoch'] == 2
 	assert stage1['global_step'] == 2
+	assert stage1['resume_count'] == 0
 	assert _optimizer_steps(stage1) == {2}
 
 	stage2_config = resolve_barlow_twins_training_config(
@@ -513,10 +577,19 @@ def test_continuation_fresh_and_stage2_resume_contract(  # noqa: PLR0915
 
 	assert stage2['epoch'] == 1
 	assert stage2['global_step'] == 1
+	assert stage2['resume_count'] == 0
 	assert _optimizer_steps(stage2) == {1}
 	assert stage2['config']['continuation'] == {
 		'init_checkpoint': str(stage1_path),
 		'unfreeze_top_blocks': 1,
+	}
+	assert stage2['continuation_lineage'] == {
+		'schema_version': 1,
+		'init_checkpoint': str(stage1_path),
+		'init_checkpoint_sha256': hashlib.sha256(
+			stage1_path.read_bytes()
+		).hexdigest(),
+		'resume_count': 0,
 	}
 	assert all(np.isfinite(value) for value in stage2['metrics'].values())
 	loaded_encoder = build_model_from_checkpoint_payload(stage2)
@@ -590,6 +663,11 @@ def test_continuation_fresh_and_stage2_resume_contract(  # noqa: PLR0915
 	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
 	assert resumed['epoch'] == 2
 	assert resumed['global_step'] == 2
+	assert resumed['resume_count'] == 1
+	assert resumed['continuation_lineage'] == {
+		**stage2['continuation_lineage'],
+		'resume_count': 1,
+	}
 	assert _optimizer_steps(resumed) == {2}
 	assert [
 		row['global_step']
