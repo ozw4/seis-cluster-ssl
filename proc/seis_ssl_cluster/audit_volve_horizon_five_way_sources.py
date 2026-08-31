@@ -12,7 +12,6 @@ from seis_ssl_cluster.cli import (
 	resolve_config_for_cli,
 )
 from seis_ssl_cluster.config import load_config
-from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.volve.horizon_five_way_config import (
 	volve_horizon_five_way_config_from_mapping,
 )
@@ -84,9 +83,11 @@ def main() -> None:
 					'sources': {
 						model_id: {
 							'embeddings': str(source.paths.embeddings),
+							'embeddings_sha256': source.embeddings_sha256,
 							'valid_tokens': str(source.paths.valid_tokens),
+							'valid_tokens_sha256': source.valid_tokens_sha256,
 							'metadata': str(source.paths.metadata),
-							'metadata_sha256': file_sha256(source.paths.metadata),
+							'metadata_sha256': source.metadata_sha256,
 							'checkpoint_sha256': source.checkpoint_identity[
 								'checkpoint_sha256'
 							],

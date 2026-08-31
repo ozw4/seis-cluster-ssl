@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
+from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.training.random_checkpoint import (
 	load_checkpoint_metadata_without_weights,
 )
@@ -22,6 +22,11 @@ from seis_ssl_cluster.volve.horizon_five_way_config import FIVE_WAY_MODEL_IDS
 from seis_ssl_cluster.volve.horizon_five_way_runner import (
 	FIVE_WAY_BENCHMARK_ID,
 	FIVE_WAY_CONDITION_COUNT,
+)
+from seis_ssl_cluster.volve.horizon_five_way_sources import (
+	VolveHorizonFiveWayEmbeddingSuite,
+	audit_volve_horizon_five_way_sources,
+	inspect_volve_horizon_five_way_embedding_suite,
 )
 from seis_ssl_cluster.volve.horizon_frozen import (
 	OBJECTIVE_IDENTITY,
@@ -94,6 +99,7 @@ COMPARISON_FIELDNAMES = (
 	'checkpoint_path',
 	'checkpoint_sha256',
 	'embeddings_dir',
+	'embeddings_sha256',
 	'embedding_metadata_path',
 	'embedding_metadata_sha256',
 	'valid_tokens_sha256',
@@ -162,6 +168,11 @@ def inspect_volve_horizon_five_way_results(
 	)
 	if len(cells) != EXPECTED_JOB_COUNT or len(set(cells)) != EXPECTED_JOB_COUNT:
 		raise RuntimeError('Volve five-way result matrix must contain 75 cells')
+	source_audit = audit_volve_horizon_five_way_sources(config)
+	embedding_suite = inspect_volve_horizon_five_way_embedding_suite(
+		config,
+		source_audit=source_audit,
+	)
 	_reject_unexpected_run_directories(config)
 	missing = [
 		str(_job_dir(config, *cell) / METRICS_NAME)
@@ -173,7 +184,7 @@ def inspect_volve_horizon_five_way_results(
 			f'missing {len(missing)} of {EXPECTED_JOB_COUNT} Volve five-way '
 			f'evaluations: {missing!r}'
 		)
-	sources = _inspect_configured_sources(config)
+	sources = _inspect_configured_sources(config, embedding_suite=embedding_suite)
 	expected_downstream = _expected_downstream_contract(config)
 	rows = [
 		_load_job_row(
@@ -306,47 +317,28 @@ def _expected_children(root: Path, expected: set[str]) -> None:
 
 def _inspect_configured_sources(
 	config: VolveHorizonFiveWayConfig,
+	*,
+	embedding_suite: VolveHorizonFiveWayEmbeddingSuite,
 ) -> dict[str, dict[str, object]]:
 	sources: dict[str, dict[str, object]] = {}
 	for model_id in config.model_ids:
 		model = config.model_by_id(model_id)
-		if not model.checkpoint.is_file():
-			raise FileNotFoundError(
-				f'{model_id} configured checkpoint is missing: {model.checkpoint}'
-			)
-		paths = output_paths(model.embeddings_dir, config.survey_id)
-		for label, path in (
-			('embedding metadata', paths.metadata),
-			('valid-token mask', paths.valid_tokens),
-		):
-			if not path.is_file():
-				raise FileNotFoundError(
-					f'{model_id} configured {label} is missing: {path}'
-				)
-		metadata = _read_json(paths.metadata)
-		if not _same_path_value(metadata.get('checkpoint_path'), model.checkpoint):
-			raise ValueError(
-				f'{model_id} embedding metadata checkpoint_path does not match '
-				'the configured source'
-			)
+		inspected = embedding_suite.source_by_id(model_id)
 		checkpoint_sha256 = _sha256(
-			metadata.get('checkpoint_sha256'),
-			f'{model_id} embedding metadata checkpoint_sha256',
+			inspected.checkpoint_identity.get('checkpoint_sha256'),
+			f'{model_id} source audit checkpoint_sha256',
 		)
-		actual_checkpoint_sha256 = file_sha256(model.checkpoint)
-		if checkpoint_sha256 != actual_checkpoint_sha256:
-			raise ValueError(
-				f'{model_id} configured checkpoint SHA-256 does not match '
-				'embedding metadata'
-			)
 		sources[model_id] = {
 			'model': model,
 			'checkpoint_path': str(model.checkpoint),
-			'checkpoint_sha256': actual_checkpoint_sha256,
+			'checkpoint_sha256': checkpoint_sha256,
 			'embeddings_dir': str(model.embeddings_dir),
-			'embedding_metadata_path': str(paths.metadata),
-			'embedding_metadata_sha256': file_sha256(paths.metadata),
-			'valid_tokens_sha256': file_sha256(paths.valid_tokens),
+			'embeddings_path': str(inspected.paths.embeddings),
+			'embeddings_sha256': inspected.embeddings_sha256,
+			'embedding_metadata_path': str(inspected.paths.metadata),
+			'embedding_metadata_sha256': inspected.metadata_sha256,
+			'valid_tokens_sha256': inspected.valid_tokens_sha256,
+			'model_source': dict(inspected.checkpoint_identity),
 		}
 	return sources
 
@@ -413,6 +405,16 @@ def _load_job_row(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			)
 	embedding = _required_mapping(identity, 'embedding', f'{label} identity')
 	if not _same_path_value(
+		embedding.get('embeddings_path'), Path(str(source['embeddings_path']))
+	):
+		raise ValueError(
+			f'{label} embedding array path does not match configured source'
+		)
+	if embedding.get('embeddings_sha256') != source['embeddings_sha256']:
+		raise ValueError(
+			f'{label} embedding array SHA-256 does not match configured source'
+		)
+	if not _same_path_value(
 		embedding.get('checkpoint_path'), Path(str(source['checkpoint_path']))
 	):
 		raise ValueError(
@@ -436,6 +438,11 @@ def _load_job_row(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	if embedding.get('valid_tokens_sha256') != source['valid_tokens_sha256']:
 		raise ValueError(
 			f'{label} valid-token SHA-256 does not match configured source'
+		)
+	model_source = _required_mapping(embedding, 'model_source', f'{label} embedding')
+	if _json_normalized(model_source) != _json_normalized(source['model_source']):
+		raise ValueError(
+			f'{label} embedding model_source does not match the source audit'
 		)
 	test_metrics = _required_mapping(metrics, 'test', label)
 	if test_metrics.get('evaluation_pass_count') != 1:
@@ -522,6 +529,7 @@ def _load_job_row(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		'checkpoint_path': source['checkpoint_path'],
 		'checkpoint_sha256': source['checkpoint_sha256'],
 		'embeddings_dir': source['embeddings_dir'],
+		'embeddings_sha256': source['embeddings_sha256'],
 		'embedding_metadata_path': source['embedding_metadata_path'],
 		'embedding_metadata_sha256': source['embedding_metadata_sha256'],
 		'valid_tokens_sha256': source['valid_tokens_sha256'],
@@ -748,6 +756,7 @@ def _validate_cross_job_identity(rows: list[dict[str, object]]) -> None:
 	for model_id, group in by_model.items():
 		for key in (
 			'checkpoint_sha256',
+			'embeddings_sha256',
 			'embedding_metadata_sha256',
 			'valid_tokens_sha256',
 		):

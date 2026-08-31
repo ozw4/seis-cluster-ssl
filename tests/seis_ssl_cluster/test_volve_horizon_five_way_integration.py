@@ -111,9 +111,23 @@ def test_synthetic_five_way_contract_connects_preflight_plans_and_results(
 			for plan in plans
 		}
 	) == 1
+	for plan in plans:
+		source = suite.source_by_id(plan.model)
+		embedding_identity = plan.run_identity['embedding']
+		assert embedding_identity['embeddings_path'] == str(
+			source.paths.embeddings
+		)
+		assert embedding_identity['embeddings_sha256'] == source.embeddings_sha256
+		assert embedding_identity['model_source'] == source.checkpoint_identity
 
 	for model_id, layout_id, data_size in conditions:
-		_write_run(config, model_id, layout_id, data_size)
+		_write_run(
+			config,
+			model_id,
+			layout_id,
+			data_size,
+			embedding_suite=suite,
+		)
 	for plan in plans:
 		_write_completed_plan_metrics(plan)
 	report = inspect_volve_horizon_five_way_results(config)

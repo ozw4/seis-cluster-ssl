@@ -8,6 +8,7 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pytest
 import torch
 import yaml
@@ -16,10 +17,8 @@ from proc.seis_ssl_cluster import summarize_volve_horizon_five_way as summary_cl
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
 from seis_ssl_cluster.volve.horizon_data import HORIZON_NAMES
 from seis_ssl_cluster.volve.horizon_five_way_config import (
-	EXPECTED_MODEL_IDENTITIES,
 	FIVE_WAY_MODEL_IDS,
 	VolveHorizonFiveWayConfig,
-	VolveHorizonFiveWayModelSource,
 )
 from seis_ssl_cluster.volve.horizon_five_way_results import (
 	PAIRED_COMPARISONS,
@@ -29,17 +28,23 @@ from seis_ssl_cluster.volve.horizon_five_way_results import (
 	inspect_volve_horizon_five_way_results,
 	summarize_volve_horizon_five_way,
 )
+from seis_ssl_cluster.volve.horizon_five_way_sources import (
+	VolveHorizonFiveWayEmbeddingSuite,
+	audit_volve_horizon_five_way_sources,
+	inspect_volve_horizon_five_way_embedding_suite,
+)
 from seis_ssl_cluster.volve.horizon_frozen import (
 	OBJECTIVE_IDENTITY,
 	OPTIMIZER_BETAS,
 	OPTIMIZER_EPS,
 	OPTIMIZER_NAME,
-	FrozenHorizonTrainSettings,
 	decoder_initial_state_sha256,
 )
 from seis_ssl_cluster.volve.horizon_layouts import DATA_SIZE_PREFIX, LAYOUT_IDS
 from seis_ssl_cluster.volve.horizon_model import create_volve_horizon_decoder
-from seis_ssl_cluster.volve.horizon_tiles import HorizonTileSettings
+from tests.seis_ssl_cluster.test_volve_horizon_five_way_sources import (
+	_write_universe as _write_source_universe,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -143,10 +148,11 @@ def _run_identity(  # noqa: PLR0913
 	*,
 	primary_counts: dict[str, int],
 	secondary_counts: dict[str, int],
+	embedding_suite: VolveHorizonFiveWayEmbeddingSuite,
 ) -> dict[str, object]:
 	model = config.model_by_id(model_id)
-	paths = output_paths(model.embeddings_dir, config.survey_id)
-	metadata = json.loads(paths.metadata.read_text(encoding='utf-8'))
+	source = embedding_suite.source_by_id(model_id)
+	paths = source.paths
 	return {
 		'schema_version': 3,
 		'benchmark': 'mae_local_bt_hmm_five_way_v1',
@@ -164,11 +170,14 @@ def _run_identity(  # noqa: PLR0913
 			),
 		},
 		'embedding': {
+			'embeddings_path': str(paths.embeddings),
+			'embeddings_sha256': source.embeddings_sha256,
 			'metadata_path': str(paths.metadata),
-			'metadata_sha256': file_sha256(paths.metadata),
+			'metadata_sha256': source.metadata_sha256,
 			'checkpoint_path': str(model.checkpoint),
-			'checkpoint_sha256': metadata['checkpoint_sha256'],
-			'valid_tokens_sha256': file_sha256(paths.valid_tokens),
+			'checkpoint_sha256': source.checkpoint_identity['checkpoint_sha256'],
+			'model_source': dict(source.checkpoint_identity),
+			'valid_tokens_sha256': source.valid_tokens_sha256,
 		},
 		'decoder': {
 			'initialization_seed': 42000,
@@ -257,6 +266,8 @@ def _write_run(
 	model_id: str,
 	layout_id: str,
 	data_size: str,
+	*,
+	embedding_suite: VolveHorizonFiveWayEmbeddingSuite | None = None,
 ) -> None:
 	job_dir = _job_dir(config, model_id, layout_id, data_size)
 	job_dir.mkdir(parents=True)
@@ -266,6 +277,12 @@ def _write_run(
 	secondary_counts = {
 		name: 20 + index for index, name in enumerate(HORIZON_NAMES)
 	}
+	if embedding_suite is None:
+		source_audit = audit_volve_horizon_five_way_sources(config)
+		embedding_suite = inspect_volve_horizon_five_way_embedding_suite(
+			config,
+			source_audit=source_audit,
+		)
 	identity = _run_identity(
 		config,
 		model_id,
@@ -273,6 +290,7 @@ def _write_run(
 		data_size,
 		primary_counts=primary_counts,
 		secondary_counts=secondary_counts,
+		embedding_suite=embedding_suite,
 	)
 	metrics = {
 		'schema_version': 1,
@@ -309,60 +327,24 @@ def _write_run(
 
 
 def _build_universe(tmp_path: Path) -> VolveHorizonFiveWayConfig:
-	artifact_root = tmp_path / 'artifacts'
-	models = []
-	for model_id in FIVE_WAY_MODEL_IDS:
-		checkpoint = artifact_root / 'checkpoints' / model_id / 'latest.pt'
-		checkpoint.parent.mkdir(parents=True)
-		checkpoint.write_bytes(f'checkpoint/{model_id}'.encode())
-		embeddings_dir = artifact_root / 'embeddings' / model_id
-		paths = output_paths(embeddings_dir, 'volve_st10010')
-		paths.metadata.parent.mkdir(parents=True)
-		paths.metadata.write_text(
-			json.dumps(
-				{
-					'checkpoint_path': str(checkpoint),
-					'checkpoint_sha256': file_sha256(checkpoint),
-				}
-			),
-			encoding='utf-8',
-		)
-		paths.valid_tokens.write_bytes(b'shared-valid-token-mask')
-		models.append(
-			VolveHorizonFiveWayModelSource(
-				model_id=model_id,
-				checkpoint=checkpoint,
-				embeddings_dir=embeddings_dir,
-				expected=dict(EXPECTED_MODEL_IDENTITIES[model_id]),
-			)
-		)
-	config = VolveHorizonFiveWayConfig(
-		artifact_root=artifact_root,
-		volve_root=tmp_path / 'volve',
-		survey_id='volve_st10010',
-		canonical_input_metadata=artifact_root / 'canonical.json',
-		models=tuple(models),
-		runs_root=artifact_root / 'horizon/five_way/runs',
-		summary_root=artifact_root / 'horizon/five_way/summary',
-		train=FrozenHorizonTrainSettings(
-			epochs=50,
-			batch_size=1,
-			learning_rate=1.0e-3,
-			weight_decay=1.0e-4,
-			sampling_mode='all_tiles_once',
-			seed=42000,
-			amp=True,
-			gradient_clip_norm=1.0,
-		),
-		tiles=HorizonTileSettings(
-			lateral_shape_xy=(1, 1),
-			min_token_valid_fraction=1.0,
-		),
+	universe = _write_source_universe(tmp_path, embeddings=True)
+	config = universe['config']
+	assert isinstance(config, VolveHorizonFiveWayConfig)
+	source_audit = audit_volve_horizon_five_way_sources(config)
+	embedding_suite = inspect_volve_horizon_five_way_embedding_suite(
+		config,
+		source_audit=source_audit,
 	)
 	for model_id in FIVE_WAY_MODEL_IDS:
 		for layout_id in LAYOUT_IDS:
 			for data_size in DATA_SIZE_PREFIX:
-				_write_run(config, model_id, layout_id, data_size)
+				_write_run(
+					config,
+					model_id,
+					layout_id,
+					data_size,
+					embedding_suite=embedding_suite,
+				)
 	return config
 
 
@@ -447,6 +429,10 @@ def test_complete_results_write_exactly_five_outputs(tmp_path: Path) -> None:
 	) as handle:
 		comparison = list(csv.DictReader(handle))
 	assert len(comparison) == 75
+	assert 'embeddings_sha256' in comparison[0]
+	for model_id in FIVE_WAY_MODEL_IDS:
+		model_rows = [row for row in comparison if row['model_id'] == model_id]
+		assert len({row['embeddings_sha256'] for row in model_rows}) == 1
 	with (config.summary_root / 'paired_deltas.csv').open(
 		encoding='utf-8', newline=''
 	) as handle:
@@ -559,6 +545,63 @@ def test_source_identity_mismatch_is_rejected(tmp_path: Path) -> None:
 		inspect_volve_horizon_five_way_results(config)
 
 
+def test_embedding_reextraction_between_cells_is_rejected(tmp_path: Path) -> None:
+	config = _build_universe(tmp_path)
+	model = config.model_by_id('mae')
+	paths = output_paths(model.embeddings_dir, config.survey_id)
+	embeddings = np.load(paths.embeddings, allow_pickle=False)
+	embeddings[0, 0, 0, 0] = np.float16(1.0)
+	np.save(paths.embeddings, embeddings)
+	new_sha256 = file_sha256(paths.embeddings)
+
+	completed_after_reextraction = tuple(
+		(layout_id, data_size)
+		for layout_id in LAYOUT_IDS
+		for data_size in DATA_SIZE_PREFIX
+	)[8:]
+	for layout_id, data_size in completed_after_reextraction:
+		def mutate(metrics: dict[str, object]) -> None:
+			identity = metrics['benchmark_identity']
+			assert isinstance(identity, dict)
+			embedding = identity['embedding']
+			assert isinstance(embedding, dict)
+			embedding['embeddings_sha256'] = new_sha256
+
+		_rewrite_job(config, 'mae', layout_id, data_size, mutate)
+
+	with pytest.raises(ValueError, match='embedding array SHA-256'):
+		inspect_volve_horizon_five_way_results(config)
+
+
+def test_missing_embedding_array_is_rejected(tmp_path: Path) -> None:
+	config = _build_universe(tmp_path)
+	model = config.model_by_id('mae')
+	paths = output_paths(model.embeddings_dir, config.survey_id)
+	paths.embeddings.unlink()
+
+	assert paths.metadata.is_file()
+	assert paths.valid_tokens.is_file()
+	with pytest.raises(FileNotFoundError, match='embedding source is missing'):
+		summarize_volve_horizon_five_way(config)
+	assert not config.summary_root.exists()
+
+
+def test_missing_embedding_model_source_is_rejected(tmp_path: Path) -> None:
+	config = _build_universe(tmp_path)
+
+	def mutate(metrics: dict[str, object]) -> None:
+		identity = metrics['benchmark_identity']
+		assert isinstance(identity, dict)
+		embedding = identity['embedding']
+		assert isinstance(embedding, dict)
+		embedding.pop('model_source')
+
+	_rewrite_job(config, 'mae', 'layout_000', 'small', mutate)
+
+	with pytest.raises(TypeError, match='model_source must be a mapping'):
+		inspect_volve_horizon_five_way_results(config)
+
+
 def test_foreign_benchmark_identity_is_rejected(tmp_path: Path) -> None:
 	config = _build_universe(tmp_path)
 
@@ -608,7 +651,7 @@ def test_changed_configured_checkpoint_is_rejected(tmp_path: Path) -> None:
 	config = _build_universe(tmp_path)
 	config.model_by_id('mae').checkpoint.write_bytes(b'changed-after-extraction')
 
-	with pytest.raises(ValueError, match='configured checkpoint SHA-256'):
+	with pytest.raises(ValueError, match='checkpoint metadata is unreadable'):
 		inspect_volve_horizon_five_way_results(config)
 
 
