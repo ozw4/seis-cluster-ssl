@@ -146,6 +146,8 @@ def test_paired_job_preflight_reuses_split_and_decoder_identity(
 	assert pretrained.geometry.valid_tokens_sha256 == file_sha256(
 		pretrained.geometry.random.valid_tokens
 	)
+	assert pretrained.selected_embedding_paths == pretrained.geometry.pretrained
+	assert random_plan.selected_embedding_paths == random_plan.geometry.random
 	assert pretrained.per_horizon_counts['train'] == tuple(
 		pretrained.effective_per_horizon_counts['train']
 	)
