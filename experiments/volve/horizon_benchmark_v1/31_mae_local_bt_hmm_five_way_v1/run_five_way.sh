@@ -14,54 +14,14 @@ if [[ "${LIST_ONLY}" != '0' && "${LIST_ONLY}" != '1' ]]; then
 	exit 2
 fi
 
-models=(
-	mae
-	mae_hmm_k6
-	local_barlow_twins
-	local_barlow_twins_hmm_k6
-	random
-)
-layouts=(layout_000 layout_001 layout_002 layout_003 layout_004)
-sizes=(small medium large)
-
-run_or_list() {
-	if [[ "${LIST_ONLY}" == '1' ]]; then
-		printf '%q' "$1"
-		shift
-		printf ' %q' "$@"
-		printf '\n'
-		return
-	fi
-	"$@"
-}
-
-preflight=(
+command=(
 	"${PYTHON_BIN}"
-	"${REPO_ROOT}/proc/seis_ssl_cluster/audit_volve_horizon_five_way_sources.py"
+	"${REPO_ROOT}/proc/seis_ssl_cluster/run_volve_horizon_five_way_suite.py"
 	--config "${CONFIG}"
+	--layout-config "${LAYOUT_CONFIG}"
+	--device "${DEVICE_NAME}"
 )
 if [[ "${LIST_ONLY}" == '1' ]]; then
-	preflight+=(--dry-run)
+	command+=(--dry-run)
 fi
-run_or_list "${preflight[@]}"
-
-for model in "${models[@]}"; do
-	for layout in "${layouts[@]}"; do
-		for size in "${sizes[@]}"; do
-			command=(
-				"${PYTHON_BIN}"
-				"${REPO_ROOT}/proc/seis_ssl_cluster/run_volve_horizon_five_way.py"
-				--config "${CONFIG}"
-				--model "${model}"
-				--layout "${layout}"
-				--size "${size}"
-				--layout-config "${LAYOUT_CONFIG}"
-				--device "${DEVICE_NAME}"
-			)
-			if [[ "${LIST_ONLY}" == '1' ]]; then
-				command+=(--dry-run)
-			fi
-			run_or_list "${command[@]}"
-		done
-	done
-done
+"${command[@]}" "$@"

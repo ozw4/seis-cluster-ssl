@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from seis_ssl_cluster.volve.horizon_data import load_volve_horizon_data
 from seis_ssl_cluster.volve.horizon_five_way_sources import (
@@ -31,6 +31,8 @@ from seis_ssl_cluster.volve.horizon_tiles import (
 )
 
 if TYPE_CHECKING:
+	from collections.abc import Callable
+
 	from seis_ssl_cluster.volve.horizon_data import VolveHorizonData
 	from seis_ssl_cluster.volve.horizon_five_way_config import (
 		VolveHorizonFiveWayConfig,
@@ -60,6 +62,15 @@ class VolveHorizonFiveWayJob:
 	def latest_path(self) -> Path:
 		'''Return the only checkpoint accepted for exact-cell resume.'''
 		return self.output_dir / 'latest.pt'
+
+
+@dataclass(frozen=True)
+class VolveHorizonFiveWaySuiteCellResult:
+	'''Execution outcome for one cell of a sequential suite run.'''
+
+	job: VolveHorizonFiveWayJob
+	action: Literal['fresh', 'resume', 'skip']
+	result: Path | None
 
 
 def plan_volve_horizon_five_way_jobs(
@@ -228,6 +239,75 @@ def run_volve_horizon_five_way_job(
 	)
 
 
+def run_volve_horizon_five_way_suite(  # noqa: PLR0913
+	config: VolveHorizonFiveWayConfig,
+	*,
+	layout_config: str | Path,
+	device: str = 'auto',
+	max_steps: int | None = None,
+	continue_existing: bool = False,
+	progress: Callable[[VolveHorizonFiveWaySuiteCellResult], None] | None = None,
+) -> tuple[VolveHorizonFiveWaySuiteCellResult, ...]:
+	'''Preflight shared inputs once and execute the canonical 75-cell suite.'''
+	source_audit = audit_volve_horizon_five_way_sources(config)
+	embedding_suite = inspect_volve_horizon_five_way_embedding_suite(
+		config,
+		source_audit=source_audit,
+	)
+	data = load_volve_horizon_data(config.volve_root)
+	results: list[VolveHorizonFiveWaySuiteCellResult] = []
+	for model, layout, size in plan_volve_horizon_five_way_jobs(config):
+		job = resolve_volve_horizon_five_way_job(
+			config,
+			model=model,
+			layout=layout,
+			size=size,
+		)
+		action = _suite_cell_action(job, continue_existing=continue_existing)
+		if action == 'skip':
+			cell = VolveHorizonFiveWaySuiteCellResult(
+				job=job,
+				action=action,
+				result=job.metrics_path,
+			)
+		else:
+			plan = inspect_volve_horizon_five_way_job(
+				job,
+				layout_config=layout_config,
+				data=data,
+				embedding_suite=embedding_suite,
+			)
+			result = run_volve_horizon_five_way_job(
+				plan,
+				device=device,
+				max_steps=max_steps,
+				resume=job.latest_path if action == 'resume' else None,
+			)
+			cell = VolveHorizonFiveWaySuiteCellResult(
+				job=job,
+				action=action,
+				result=result,
+			)
+		results.append(cell)
+		if progress is not None:
+			progress(cell)
+	return tuple(results)
+
+
+def _suite_cell_action(
+	job: VolveHorizonFiveWayJob,
+	*,
+	continue_existing: bool,
+) -> Literal['fresh', 'resume', 'skip']:
+	if not continue_existing:
+		return 'fresh'
+	if job.metrics_path.is_file():
+		return 'skip'
+	if job.latest_path.is_file():
+		return 'resume'
+	return 'fresh'
+
+
 def _one_alias(first: str | None, second: str | None, *, label: str) -> str:
 	if first is None and second is None:
 		raise TypeError(f'{label} is required')
@@ -240,9 +320,11 @@ __all__ = [
 	'FIVE_WAY_BENCHMARK_ID',
 	'FIVE_WAY_CONDITION_COUNT',
 	'VolveHorizonFiveWayJob',
+	'VolveHorizonFiveWaySuiteCellResult',
 	'enumerate_volve_horizon_five_way_conditions',
 	'inspect_volve_horizon_five_way_job',
 	'plan_volve_horizon_five_way_jobs',
 	'resolve_volve_horizon_five_way_job',
 	'run_volve_horizon_five_way_job',
+	'run_volve_horizon_five_way_suite',
 ]

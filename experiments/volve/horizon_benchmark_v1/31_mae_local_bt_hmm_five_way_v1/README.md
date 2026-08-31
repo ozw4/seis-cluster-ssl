@@ -272,10 +272,9 @@ do
 done
 ```
 
-これはcanonical runs rootへ`latest.pt`を作る実runである。bulk launcherはresumeを
-推測しないため、このoptional smokeを実行した場合は5セルをそれぞれexact
-`latest.pt`から完了させ、残りのcommandはlistingから実行する。freshな75-job runを
-launcherへ任せる場合は、このoptional blockを省略する。
+これはcanonical runs rootへ`latest.pt`を作る実runである。このoptional smokeを
+実行した場合は、bulk launcherの明示的な`--continue` modeで各cell自身の
+`latest.pt`から再開できる。
 
 ## 9. Exact-cell resumeと完了判定
 
@@ -300,22 +299,33 @@ strictly lowerになったepoch、`metrics.json`はbest checkpointによる固�
 
 ## 10. 75 jobs
 
-listing modeはartifactを要求せず、preflight 1 commandに続いて固定順の75 unique
-one-job commandsを表示する。最初にinventoryを確認する。
+launcherは`proc/seis_ssl_cluster/run_volve_horizon_five_way_suite.py`を1 processだけ
+起動し、cell単位のSlurm用途には既存のone-job CLIを残す。
+
+listing modeはsource artifactを開かず、Python plannerが固定順の75 unique cellを
+表示する。最初にinventoryを確認する。
 
 ```bash
 DRY_RUN=1 bash "$EXP/run_five_way.sh"
 ```
 
-fresh runs rootで、read-only preflight後に75 jobsをfail-fastで逐次実行する。
-launcherはresumeもsummaryも自動実行しない。
+fresh runs rootで、source audit、embedding suite preflight、horizon data loadを各1回
+だけ実行した後、同じprocessで75 jobsをfail-fastに逐次実行する。summaryは自動実行
+しない。
 
 ```bash
 DEVICE=cuda bash "$EXP/run_five_way.sh"
 ```
 
-中断時は上記exact-cell resumeを使い、listingから未実行cellを再開する。全cellの
-完了数は次で確認できる。
+中断後は`--continue`を明示する。`metrics.json`があるcellはskipし、`latest.pt`だけが
+あるcellはそのcell自身のcheckpointからresumeし、どちらもないcellはfresh実行する。
+defaultはfresh-onlyで、既存cellを暗黙にskip／resumeしない。
+
+```bash
+DEVICE=cuda bash "$EXP/run_five_way.sh" --continue
+```
+
+全cellの完了数は次で確認できる。
 
 ```bash
 test "$(find "$RUNS_ROOT" -type f -name metrics.json | wc -l)" -eq 75
