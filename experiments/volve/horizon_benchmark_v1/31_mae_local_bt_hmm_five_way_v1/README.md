@@ -120,6 +120,10 @@ python proc/seis_ssl_cluster/train_amp_barlow_twins.py \
 ```
 
 完了fileは`stage2/local_bt100/local_bt_continue/full_25ep/latest.pt`である。
+Stage 2のresume checkpointには親path、親SHA-256、再開回数を含む
+`continuation_lineage`が必須である。このfield導入前のcontinuation checkpointは
+監査可能な親SHAを復元できないためresumeせず、Stage 1 checkpointからStage 2を
+再実行する。
 
 ## 4. MAE HMM K=6 targetとcontinuation
 
