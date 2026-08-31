@@ -1915,6 +1915,16 @@ def _make_fixture_checkpoint_barlow(
 		scaler_required=False,
 		dataset_epoch=1,
 		completed_epoch=True,
+		continuation_lineage=(
+			{
+				'schema_version': 1,
+				'init_checkpoint': continuation['init_checkpoint'],
+				'init_checkpoint_sha256': '0' * 64,
+				'resume_count': 0,
+			}
+			if continuation is not None
+			else None
+		),
 	)
 
 
