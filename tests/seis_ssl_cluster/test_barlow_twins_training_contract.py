@@ -656,6 +656,32 @@ def test_continuation_fresh_and_stage2_resume_contract(  # noqa: PLR0915
 			unfreeze_top_blocks=1,
 		)
 	)
+	legacy_stage2 = dict(stage2)
+	legacy_stage2.pop('continuation_lineage')
+	legacy_stage2.pop('resume_count')
+	legacy_stage2_path = tmp_path / 'legacy-stage2-without-lineage.pt'
+	torch.save(legacy_stage2, legacy_stage2_path)
+	with pytest.raises(TypeError, match='missing continuation lineage'):
+		run_barlow_twins_pretraining(
+			resume_config,
+			resume=legacy_stage2_path,
+		)
+
+	mismatched_stage2 = {
+		**stage2,
+		'continuation_lineage': {
+			**stage2['continuation_lineage'],
+			'resume_count': 1,
+		},
+	}
+	mismatched_stage2_path = tmp_path / 'mismatched-lineage-resume-count.pt'
+	torch.save(mismatched_stage2, mismatched_stage2_path)
+	with pytest.raises(ValueError, match='resume_count does not match'):
+		run_barlow_twins_pretraining(
+			resume_config,
+			resume=mismatched_stage2_path,
+		)
+
 	resumed_path = run_barlow_twins_pretraining(
 		resume_config,
 		resume=stage2_path,

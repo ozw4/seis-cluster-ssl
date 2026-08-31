@@ -95,6 +95,11 @@ def save_barlow_twins_checkpoint(  # noqa: PLR0913
 	"""Write a Barlow checkpoint with bare MAE and separate projector states."""
 	pretraining_method = resolve_barlow_twins_pretraining_method(config)
 	_validate_resume_count(resume_count)
+	_validate_continuation_lineage_contract(
+		continuation_lineage,
+		config=config,
+		resume_count=resume_count,
+	)
 	rng_state = capture_rng_state()
 	if dataloader_generator is not None:
 		rng_state['dataloader_generator'] = dataloader_generator.get_state()
@@ -244,7 +249,12 @@ def _validate_payload(  # noqa: C901, PLR0912
 		raise ValueError('checkpoint is missing required GradScaler state')
 	if not scaler_required and payload['scaler_state_dict'] is not None:
 		raise ValueError('checkpoint scaler state is incompatible with this run')
-	_checkpoint_resume_count(payload)
+	resume_count = _checkpoint_resume_count(payload)
+	_validate_continuation_lineage_contract(
+		payload.get('continuation_lineage'),
+		config=saved_config,
+		resume_count=resume_count,
+	)
 	_validate_config_compatibility(saved_config, config)
 
 
@@ -262,6 +272,43 @@ def _validate_resume_count(value: object) -> None:
 		raise TypeError('checkpoint resume_count must be an integer')
 	if value < 0:
 		raise ValueError('checkpoint resume_count must be non-negative')
+
+
+def _validate_continuation_lineage_contract(
+	value: object,
+	*,
+	config: Mapping[str, object],
+	resume_count: int,
+) -> None:
+	continuation = config.get('continuation')
+	if continuation is None:
+		if value is not None:
+			raise ValueError(
+				'base Barlow Twins checkpoint must not have continuation lineage'
+			)
+		return
+	if not isinstance(continuation, Mapping):
+		raise TypeError('continuation must be a mapping')
+	if not isinstance(value, Mapping):
+		raise TypeError(
+			'continued Barlow Twins checkpoint is missing continuation lineage'
+		)
+	if value.get('schema_version') != 1:
+		raise ValueError('continuation lineage schema_version must be 1')
+	expected_checkpoint = continuation.get('init_checkpoint')
+	if value.get('init_checkpoint') != expected_checkpoint:
+		raise ValueError('continuation lineage init_checkpoint does not match config')
+	sha256 = value.get('init_checkpoint_sha256')
+	if not isinstance(sha256, str) or len(sha256) != 64 or any(
+		character not in '0123456789abcdef' for character in sha256
+	):
+		raise ValueError('continuation lineage SHA-256 is invalid')
+	lineage_resume_count = value.get('resume_count')
+	_validate_resume_count(lineage_resume_count)
+	if lineage_resume_count != resume_count:
+		raise ValueError(
+			'checkpoint resume_count does not match continuation lineage'
+		)
 
 
 def _validate_config_compatibility(
