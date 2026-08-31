@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -22,8 +23,8 @@ def load_mae_continuation_weights(
 	checkpoint_path: str | Path,
 	*,
 	expected_model_config: Mapping[str, object],
-) -> None:
-	"""Load only compatible MAE model weights from an epoch checkpoint."""
+) -> str:
+	"""Load compatible MAE weights and return the stable source SHA-256."""
 	path = Path(checkpoint_path)
 	if not path.is_file():
 		msg = f'MAE continuation checkpoint file does not exist: {path}'
@@ -32,7 +33,10 @@ def load_mae_continuation_weights(
 		msg = 'expected_model_config must be a mapping'
 		raise TypeError(msg)
 
+	source_sha256 = _file_sha256(path)
 	payload = load_checkpoint(path, map_location='cpu')
+	if _file_sha256(path) != source_sha256:
+		raise RuntimeError(f'MAE continuation checkpoint changed while loading: {path}')
 	model_state = _continuation_model_state(payload, expected_model_config)
 	_validate_finite_model_state(model_state)
 	try:
@@ -46,6 +50,15 @@ def load_mae_continuation_weights(
 			f'{path}: {exc}'
 		)
 		raise ValueError(msg) from exc
+	return source_sha256
+
+
+def _file_sha256(path: Path) -> str:
+	digest = hashlib.sha256()
+	with path.open('rb') as handle:
+		for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+			digest.update(chunk)
+	return digest.hexdigest()
 
 
 def _continuation_model_state(

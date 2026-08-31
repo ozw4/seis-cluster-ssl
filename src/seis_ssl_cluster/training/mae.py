@@ -418,7 +418,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 		model_config,
 		runtime_check_mode=runtime_check_mode,
 	).to(device)
-	optimizer_parameters = _initialize_mae_training_parameters(
+	optimizer_parameters, continuation_lineage = _initialize_mae_training_parameters(
 		model,
 		config=config,
 		model_config=model_config,
@@ -449,6 +449,10 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 			amp_enabled=amp_enabled,
 			scaler_required=precision.scaler_enabled,
 			config=config,
+		)
+		continuation_lineage = _resumed_mae_continuation_lineage(
+			payload,
+			continuation=config.get('continuation'),
 		)
 		_restore_dataloader_generator_state(payload=payload, dataloader=dataloader)
 		_write_run_metadata(
@@ -537,6 +541,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 					batch_index=step_state.batch_index,
 				),
 				best_score=best_score,
+				continuation_lineage=continuation_lineage,
 			)
 			best_score = result.best_score
 			checkpoint_path = result.latest_path
@@ -594,6 +599,7 @@ def run_mae_pretraining(  # noqa: C901, PLR0915
 				)
 			),
 			best_score=best_score,
+			continuation_lineage=continuation_lineage,
 		)
 		best_score = result.best_score
 		checkpoint_path = result.latest_path
@@ -662,31 +668,83 @@ def _initialize_mae_training_parameters(
 	config: Mapping[str, object],
 	model_config: Mapping[str, object],
 	resume: str | Path | None,
-) -> Iterable[torch.nn.Parameter]:
+) -> tuple[Iterable[torch.nn.Parameter], dict[str, object] | None]:
 	continuation = config.get('continuation')
 	if continuation is None:
-		return model.parameters()
+		return model.parameters(), None
 	if not isinstance(continuation, Mapping):
 		msg = 'continuation must be a mapping'
 		raise TypeError(msg)
+	lineage: dict[str, object] | None = None
 	if resume is None:
 		init_checkpoint = continuation.get('init_checkpoint')
 		if not isinstance(init_checkpoint, str) or not init_checkpoint:
 			msg = 'continuation.init_checkpoint must be a non-empty string'
 			raise TypeError(msg)
-		load_mae_continuation_weights(
+		init_checkpoint_sha256 = load_mae_continuation_weights(
 			model,
 			init_checkpoint,
 			expected_model_config=model_config,
 		)
-	return configure_mae_continuation_trainability(
-		model,
-		unfreeze_top_blocks=_int_config(
-			continuation,
-			'unfreeze_top_blocks',
-			1,
+		lineage = {
+			'schema_version': 1,
+			'init_checkpoint': init_checkpoint,
+			'init_checkpoint_sha256': init_checkpoint_sha256,
+			'resume_count': 0,
+		}
+	return (
+		configure_mae_continuation_trainability(
+			model,
+			unfreeze_top_blocks=_int_config(
+				continuation,
+				'unfreeze_top_blocks',
+				1,
+			),
 		),
+		lineage,
 	)
+
+
+def _resumed_mae_continuation_lineage(
+	payload: Mapping[str, object],
+	*,
+	continuation: object,
+) -> dict[str, object] | None:
+	value = payload.get('continuation_lineage')
+	if continuation is None:
+		if value is not None:
+			raise ValueError('base MAE checkpoint must not have continuation lineage')
+		return None
+	if not isinstance(continuation, Mapping):
+		raise TypeError('continuation must be a mapping')
+	if not isinstance(value, Mapping):
+		raise TypeError(
+			'continued MAE resume checkpoint is missing continuation lineage'
+		)
+	expected_checkpoint = continuation.get('init_checkpoint')
+	if value.get('schema_version') != 1:
+		raise ValueError('MAE continuation lineage schema_version must be 1')
+	if value.get('init_checkpoint') != expected_checkpoint:
+		raise ValueError(
+			'MAE continuation lineage does not match '
+			'config continuation.init_checkpoint'
+		)
+	sha256_value = value.get('init_checkpoint_sha256')
+	if not isinstance(sha256_value, str) or len(sha256_value) != 64 or any(
+		character not in '0123456789abcdef' for character in sha256_value
+	):
+		raise ValueError('MAE continuation lineage SHA-256 is invalid')
+	resume_count = value.get('resume_count')
+	if isinstance(resume_count, bool) or not isinstance(resume_count, int):
+		raise TypeError('MAE continuation lineage resume_count must be an integer')
+	if resume_count < 0:
+		raise ValueError('MAE continuation lineage resume_count must be non-negative')
+	return {
+		'schema_version': 1,
+		'init_checkpoint': expected_checkpoint,
+		'init_checkpoint_sha256': sha256_value,
+		'resume_count': resume_count + 1,
+	}
 
 
 def _snapshot_run_inputs(
