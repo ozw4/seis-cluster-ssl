@@ -1,0 +1,22 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+manifests:
+  input: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/volve_amplitude_manifest.json
+embeddings:
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/stage2/local_bt100/local_bt_continue/full_25ep/latest.pt
+  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/local_barlow_twins/overlap_x64
+embedding:
+  window_size: [128, 128, 128]
+  overlap: [64, 64, 64]
+  output_dtype: float16
+  batch_size: 1
+  prefetch_queue_depth: 0
+  amp: true
+  amp_dtype: auto
+  stage_timing: false
+  min_token_valid_fraction: 1.0
+  preprocessing_cache:
+    mode: 'off'
+    chunk_size_x: 16
+    reuse: true
+    cleanup: false
