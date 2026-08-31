@@ -188,6 +188,10 @@ def test_embedding_suite_accepts_distinct_objectives_on_shared_support(
 	assert suite.embedding_dim == 384
 	assert suite.model_valid_lateral_mask.shape == (16, 16)
 	assert len(suite.valid_tokens_sha256) == 64
+	for source in suite.sources.values():
+		assert source.embeddings_sha256 == file_sha256(source.paths.embeddings)
+		assert source.metadata_sha256 == file_sha256(source.paths.metadata)
+		assert source.valid_tokens_sha256 == file_sha256(source.paths.valid_tokens)
 	assert suite.sources['mae'].metadata['pretraining_objective'] != (
 		suite.sources['local_barlow_twins'].metadata['pretraining_objective']
 	)

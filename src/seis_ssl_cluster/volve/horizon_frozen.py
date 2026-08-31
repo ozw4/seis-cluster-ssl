@@ -574,6 +574,9 @@ def build_frozen_horizon_plan(  # noqa: PLR0913
 	selected_metadata: Mapping[str, object],
 	selected_model_source: Mapping[str, object],
 	benchmark: str,
+	selected_embeddings_sha256: str | None = None,
+	selected_metadata_sha256: str | None = None,
+	selected_valid_tokens_sha256: str | None = None,
 ) -> FrozenHorizonPlan:
 	'''Build one frozen-decoder plan from an already validated embedding source.'''
 	records: dict[str, tuple[HorizonTileRecord, ...]] = {}
@@ -660,6 +663,9 @@ def build_frozen_horizon_plan(  # noqa: PLR0913
 		selected_paths=selected_paths,
 		selected_metadata=selected_metadata,
 		selected_model_source=selected_model_source,
+		selected_embeddings_sha256=selected_embeddings_sha256,
+		selected_metadata_sha256=selected_metadata_sha256,
+		selected_valid_tokens_sha256=selected_valid_tokens_sha256,
 		benchmark=benchmark,
 	)
 	return FrozenHorizonPlan(
@@ -819,6 +825,9 @@ def _run_identity(  # noqa: PLR0913
 	selected_paths: EmbeddingOutputPaths | None = None,
 	selected_metadata: Mapping[str, object] | None = None,
 	selected_model_source: Mapping[str, object] | None = None,
+	selected_embeddings_sha256: str | None = None,
+	selected_metadata_sha256: str | None = None,
+	selected_valid_tokens_sha256: str | None = None,
 	benchmark: str = 'mae_vs_random_frozen_v1',
 ) -> dict[str, object]:
 	metadata = selected_metadata or (
@@ -843,14 +852,22 @@ def _run_identity(  # noqa: PLR0913
 		'canonical_scientific_identity': dict(geometry.canonical_identity),
 		'horizon_split_plan': split_plan.identity(),
 		'embedding': {
+			'embeddings_path': str(paths.embeddings),
+			'embeddings_sha256': (
+				selected_embeddings_sha256 or file_sha256(paths.embeddings)
+			),
 			'metadata_path': str(paths.metadata),
-			'metadata_sha256': file_sha256(paths.metadata),
+			'metadata_sha256': (
+				selected_metadata_sha256 or file_sha256(paths.metadata)
+			),
 			'checkpoint_path': metadata['checkpoint_path'],
 			'checkpoint_sha256': metadata['checkpoint_sha256'],
 			'model_source': dict(model_source),
 			'embedding_shape': list(geometry.embedding_shape),
 			'token_grid_shape_xyz': list(geometry.token_grid_shape_xyz),
-			'valid_tokens_sha256': geometry.valid_tokens_sha256,
+			'valid_tokens_sha256': (
+				selected_valid_tokens_sha256 or geometry.valid_tokens_sha256
+			),
 			'output_validity_policy': (
 				'full_216_sample_token_column_then_8x8_lateral_expansion_v1'
 			),

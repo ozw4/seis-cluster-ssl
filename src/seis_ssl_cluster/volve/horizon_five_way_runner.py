@@ -195,6 +195,9 @@ def inspect_volve_horizon_five_way_job(
 		selected_paths=selected.paths,
 		selected_metadata=selected.metadata,
 		selected_model_source=selected.checkpoint_identity,
+		selected_embeddings_sha256=selected.embeddings_sha256,
+		selected_metadata_sha256=selected.metadata_sha256,
+		selected_valid_tokens_sha256=selected.valid_tokens_sha256,
 		benchmark=FIVE_WAY_BENCHMARK_ID,
 	)
 

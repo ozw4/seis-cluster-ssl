@@ -100,6 +100,9 @@ class VolveHorizonFiveWayEmbeddingSource:
 	paths: EmbeddingOutputPaths
 	metadata: Mapping[str, object]
 	checkpoint_identity: Mapping[str, object]
+	embeddings_sha256: str
+	metadata_sha256: str
+	valid_tokens_sha256: str
 
 
 @dataclass(frozen=True)
@@ -201,7 +204,7 @@ def audit_volve_horizon_five_way_sources(
 	}
 
 
-def inspect_volve_horizon_five_way_embedding_suite(
+def inspect_volve_horizon_five_way_embedding_suite(  # noqa: PLR0915
 	config: VolveHorizonFiveWayConfig,
 	*,
 	source_audit: Mapping[str, object] | None = None,
@@ -216,6 +219,7 @@ def inspect_volve_horizon_five_way_embedding_suite(
 	reference_metadata: Mapping[str, object] | None = None
 	reference_paths: EmbeddingOutputPaths | None = None
 	reference_valid: np.ndarray | None = None
+	reference_valid_sha256: str | None = None
 	resolved_sources: dict[str, VolveHorizonFiveWayEmbeddingSource] = {}
 	volume_shape: tuple[int, int, int] | None = None
 	token_grid: tuple[int, int, int] | None = None
@@ -230,6 +234,9 @@ def inspect_volve_horizon_five_way_embedding_suite(
 					f'{model.model_id} embedding source is missing: {path}'
 				)
 		metadata = _read_json(paths.metadata, f'{model.model_id} embedding metadata')
+		embeddings_sha256 = file_sha256(paths.embeddings)
+		metadata_sha256 = file_sha256(paths.metadata)
+		valid_tokens_sha256 = file_sha256(paths.valid_tokens)
 		_validate_extraction_metadata(model.model_id, metadata)
 		if reference_metadata is None:
 			reference_metadata = metadata
@@ -256,6 +263,7 @@ def inspect_volve_horizon_five_way_embedding_suite(
 		)
 		if reference_valid is None:
 			reference_valid = valid_tokens
+			reference_valid_sha256 = valid_tokens_sha256
 		else:
 			_validate_masks_identical(
 				model.model_id,
@@ -284,12 +292,16 @@ def inspect_volve_horizon_five_way_embedding_suite(
 			paths=paths,
 			metadata=MappingProxyType(dict(metadata)),
 			checkpoint_identity=MappingProxyType(dict(checkpoint_report)),
+			embeddings_sha256=embeddings_sha256,
+			metadata_sha256=metadata_sha256,
+			valid_tokens_sha256=valid_tokens_sha256,
 		)
 
 	if (
 		reference_metadata is None
 		or reference_paths is None
 		or reference_valid is None
+		or reference_valid_sha256 is None
 		or volume_shape is None
 		or token_grid is None
 		or embedding_shape is None
@@ -323,7 +335,7 @@ def inspect_volve_horizon_five_way_embedding_suite(
 		token_grid_shape_xyz=token_grid,
 		embedding_shape=embedding_shape,
 		embedding_dim=embedding_dim,
-		valid_tokens_sha256=file_sha256(reference_paths.valid_tokens),
+		valid_tokens_sha256=reference_valid_sha256,
 		model_valid_lateral_mask=model_valid_lateral,
 		model_valid_lateral_mask_sha256=array_sha256(model_valid_lateral),
 		canonical_identity=MappingProxyType(dict(canonical_identity)),
