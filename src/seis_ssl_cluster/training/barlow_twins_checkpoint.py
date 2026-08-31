@@ -70,6 +70,7 @@ class BarlowTwinsResumeState:
 
 	start_epoch: int
 	global_step: int
+	resume_count: int = 0
 
 
 def save_barlow_twins_checkpoint(  # noqa: PLR0913
@@ -88,12 +89,24 @@ def save_barlow_twins_checkpoint(  # noqa: PLR0913
 	dataset_epoch: int,
 	completed_epoch: bool,
 	dataloader_generator: torch.Generator | None = None,
+	continuation_lineage: Mapping[str, object] | None = None,
+	resume_count: int = 0,
 ) -> Path:
 	"""Write a Barlow checkpoint with bare MAE and separate projector states."""
 	pretraining_method = resolve_barlow_twins_pretraining_method(config)
+	_validate_resume_count(resume_count)
 	rng_state = capture_rng_state()
 	if dataloader_generator is not None:
 		rng_state['dataloader_generator'] = dataloader_generator.get_state()
+	extra_payload: dict[str, object] = {
+		'projector_state_dict': projector.state_dict(),
+		'pretraining_method': pretraining_method,
+		'checkpoint_kind': CHECKPOINT_KIND,
+		'trained_parameter_prefixes': TRAINED_PARAMETER_PREFIXES,
+		'resume_count': resume_count,
+	}
+	if continuation_lineage is not None:
+		extra_payload['continuation_lineage'] = dict(continuation_lineage)
 	return save_checkpoint(
 		path,
 		model=backbone,
@@ -114,12 +127,7 @@ def save_barlow_twins_checkpoint(  # noqa: PLR0913
 			'dataset_epoch': dataset_epoch,
 			'completed_epoch': completed_epoch,
 		},
-		extra_payload={
-			'projector_state_dict': projector.state_dict(),
-			'pretraining_method': pretraining_method,
-			'checkpoint_kind': CHECKPOINT_KIND,
-			'trained_parameter_prefixes': TRAINED_PARAMETER_PREFIXES,
-		},
+		extra_payload=extra_payload,
 	)
 
 
@@ -153,6 +161,7 @@ def restore_barlow_twins_checkpoint(  # noqa: PLR0913
 	return BarlowTwinsResumeState(
 		start_epoch=int(payload['epoch']) + 1,
 		global_step=int(payload['global_step']),
+		resume_count=_checkpoint_resume_count(payload) + 1,
 	)
 
 
@@ -235,7 +244,24 @@ def _validate_payload(  # noqa: C901, PLR0912
 		raise ValueError('checkpoint is missing required GradScaler state')
 	if not scaler_required and payload['scaler_state_dict'] is not None:
 		raise ValueError('checkpoint scaler state is incompatible with this run')
+	_checkpoint_resume_count(payload)
 	_validate_config_compatibility(saved_config, config)
+
+
+def _checkpoint_resume_count(payload: Mapping[str, Any]) -> int:
+	"""Return the saved count, treating pre-counter checkpoints as fresh legacy."""
+	if 'resume_count' not in payload:
+		return 0
+	value = payload['resume_count']
+	_validate_resume_count(value)
+	return value
+
+
+def _validate_resume_count(value: object) -> None:
+	if isinstance(value, bool) or not isinstance(value, int):
+		raise TypeError('checkpoint resume_count must be an integer')
+	if value < 0:
+		raise ValueError('checkpoint resume_count must be non-negative')
 
 
 def _validate_config_compatibility(

@@ -312,7 +312,7 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 		redundancy_weight=_floating(barlow, 'redundancy_weight'),
 		normalization_eps=_floating(barlow, 'normalization_eps'),
 	)
-	optimizer_parameters = _initialize_barlow_twins_model(
+	optimizer_parameters, continuation_lineage = _initialize_barlow_twins_model(
 		model,
 		continuation=continuation,
 		resume=resume,
@@ -324,10 +324,15 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 		lr=_floating(train, 'lr'),
 		weight_decay=_floating(train, 'weight_decay'),
 	)
-	resume_state = BarlowTwinsResumeState(start_epoch=1, global_step=0)
+	resume_state = BarlowTwinsResumeState(
+		start_epoch=1,
+		global_step=0,
+		resume_count=0,
+	)
 	if resume is not None:
+		resume_payload = load_barlow_twins_checkpoint(resume, map_location=device)
 		resume_state = restore_barlow_twins_checkpoint(
-			load_barlow_twins_checkpoint(resume, map_location=device),
+			resume_payload,
 			backbone=backbone,
 			projector=model.projector,
 			optimizer=optimizer,
@@ -335,6 +340,10 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 			scaler_required=precision.scaler_required,
 			config=config,
 			dataloader_generator=dataloader.generator,
+		)
+		continuation_lineage = _resumed_continuation_lineage(
+			resume_payload,
+			continuation=continuation,
 		)
 
 	_prepare_run_directory(
@@ -390,6 +399,8 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 			dataset_epoch=dataset.epoch,
 			completed_epoch=state.completed_epoch,
 			dataloader_generator=dataloader.generator,
+			continuation_lineage=continuation_lineage,
+			resume_count=resume_state.resume_count,
 		)
 		best_loss = update_best_checkpoint(
 			checkpoint_path,
@@ -530,20 +541,70 @@ def _initialize_barlow_twins_model(
 	resume: str | Path | None,
 	model_config: Mapping[str, object],
 	barlow_twins_config: Mapping[str, object],
-) -> tuple[torch.nn.Parameter, ...]:
+) -> tuple[tuple[torch.nn.Parameter, ...], dict[str, object] | None]:
 	if continuation is None:
-		return tuple(model.pretraining_parameters())
+		return tuple(model.pretraining_parameters()), None
+	lineage: dict[str, object] | None = None
 	if resume is None:
-		load_barlow_twins_continuation_weights(
+		init_checkpoint = _string(continuation, 'init_checkpoint')
+		init_checkpoint_sha256 = load_barlow_twins_continuation_weights(
 			model,
-			_string(continuation, 'init_checkpoint'),
+			init_checkpoint,
 			expected_model_config=model_config,
 			expected_barlow_twins_config=barlow_twins_config,
 		)
-	return configure_barlow_twins_continuation_trainability(
-		model,
-		unfreeze_top_blocks=_integer(continuation, 'unfreeze_top_blocks'),
+		lineage = {
+			'schema_version': 1,
+			'init_checkpoint': init_checkpoint,
+			'init_checkpoint_sha256': init_checkpoint_sha256,
+			'resume_count': 0,
+		}
+	return (
+		configure_barlow_twins_continuation_trainability(
+			model,
+			unfreeze_top_blocks=_integer(continuation, 'unfreeze_top_blocks'),
+		),
+		lineage,
 	)
+
+
+def _resumed_continuation_lineage(
+	payload: Mapping[str, Any],
+	*,
+	continuation: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+	value = payload.get('continuation_lineage')
+	if continuation is None:
+		if value is not None:
+			raise ValueError(
+				'base Barlow Twins checkpoint must not have continuation lineage'
+			)
+		return None
+	if not isinstance(value, Mapping):
+		raise TypeError(
+			'continued Barlow Twins resume checkpoint is missing continuation lineage'
+		)
+	expected_checkpoint = _string(continuation, 'init_checkpoint')
+	if value.get('schema_version') != 1:
+		raise ValueError('continuation lineage schema_version must be 1')
+	if value.get('init_checkpoint') != expected_checkpoint:
+		raise ValueError('continuation lineage init_checkpoint does not match config')
+	sha256 = value.get('init_checkpoint_sha256')
+	if not isinstance(sha256, str) or len(sha256) != 64 or any(
+		character not in '0123456789abcdef' for character in sha256
+	):
+		raise ValueError('continuation lineage SHA-256 is invalid')
+	resume_count = value.get('resume_count')
+	if isinstance(resume_count, bool) or not isinstance(resume_count, int):
+		raise TypeError('continuation lineage resume_count must be an integer')
+	if resume_count < 0:
+		raise ValueError('continuation lineage resume_count must be non-negative')
+	return {
+		'schema_version': 1,
+		'init_checkpoint': expected_checkpoint,
+		'init_checkpoint_sha256': sha256,
+		'resume_count': resume_count + 1,
+	}
 
 
 def _clip_and_check_gradients(
