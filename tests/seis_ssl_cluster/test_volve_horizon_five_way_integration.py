@@ -113,6 +113,10 @@ def test_synthetic_five_way_contract_connects_preflight_plans_and_results(
 	) == 1
 	for plan in plans:
 		source = suite.source_by_id(plan.model)
+		assert plan.selected_embedding_paths == source.paths
+		assert plan.selected_embedding_paths.embeddings.parent == (
+			config.model_by_id(plan.model).embeddings_dir
+		)
 		embedding_identity = plan.run_identity['embedding']
 		assert embedding_identity['embeddings_path'] == str(
 			source.paths.embeddings

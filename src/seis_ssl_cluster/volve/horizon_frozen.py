@@ -196,7 +196,7 @@ class FrozenHorizonPlan:
 	effective_per_horizon_counts: Mapping[str, tuple[int, ...]]
 	excluded_by_token_validity_counts: Mapping[str, tuple[int, ...]]
 	run_identity: Mapping[str, object]
-	selected_embedding_paths: EmbeddingOutputPaths | None = None
+	selected_embedding_paths: EmbeddingOutputPaths
 
 	@property
 	def per_horizon_counts(self) -> Mapping[str, tuple[int, ...]]:
@@ -707,17 +707,12 @@ def run_frozen_horizon_job(
 	decoder_factory: Callable[[], VolveHorizonDecoder] | None = None,
 ) -> Path | None:
 	'''Connect frozen inputs and forward passes to the shared horizon runner.'''
-	selected_paths = plan.selected_embedding_paths or (
-		plan.geometry.pretrained
-		if plan.model == 'pretrained'
-		else plan.geometry.random
-	)
 	datasets = {
 		split: FrozenHorizonTileDataset(
 			data=plan.data,
 			plan=plan.split_plan,
-			embedding_path=selected_paths.embeddings,
-			valid_tokens_path=selected_paths.valid_tokens,
+			embedding_path=plan.selected_embedding_paths.embeddings,
+			valid_tokens_path=plan.selected_embedding_paths.valid_tokens,
 			settings=plan.config.tiles,
 			split=split,
 			records=plan.tile_records[split],
