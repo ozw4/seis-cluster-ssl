@@ -533,6 +533,11 @@ def _comparison_rows(
 			provenance['canonical_random'],
 			label=f'random/{layout_id}/{data_size}',
 		)
+		_assert_paired_condition_matches(
+			candidate_evidence,
+			random_evidence,
+			label=f'{layout_id}/{data_size}',
+		)
 		candidate_value, candidate_voxels = _macro_f1(
 			candidate_path, label=f'candidate/{layout_id}/{data_size}'
 		)
@@ -585,6 +590,20 @@ def _assert_job_source_matches(
 				f'{label} completed job {evidence_key} does not match '
 				'the current source'
 			)
+
+
+def _assert_paired_condition_matches(
+	candidate: Mapping[str, object],
+	random: Mapping[str, object],
+	*,
+	label: str,
+) -> None:
+	for key in (
+		'supervision_identity',
+		'_validation_tile_manifest_sha256',
+	):
+		if candidate.get(key) != random.get(key):
+			raise ValueError(f'{label} candidate and random {key} differ')
 
 
 def _metrics_path(

@@ -468,3 +468,37 @@ def test_summary_rejects_completed_runs_from_previous_candidate_source(
 	with pytest.raises(ValueError, match='does not match the configured source'):
 		summarize_f3_lithology_candidate(config_c2, canonical)
 	assert not config_c2.summary_root.exists()
+
+
+@pytest.mark.parametrize(
+	('metadata_key', 'evidence_key'),
+	[
+		('train_tile_manifest_sha256', 'supervision_identity'),
+		(
+			'validation_tile_manifest_sha256',
+			'_validation_tile_manifest_sha256',
+		),
+	],
+)
+def test_summary_rejects_candidate_random_tile_manifest_mismatch(
+	candidate_universe: dict[str, object],
+	metadata_key: str,
+	evidence_key: str,
+) -> None:
+	config, canonical = _resolved(candidate_universe)
+	_write_complete_runs(candidate_universe, config, canonical)
+	run_metadata_path = (
+		config.runs_root
+		/ f'model={config.candidate_id}'
+		/ 'layout=layout_000/size=small/decoder/run_metadata.json'
+	)
+	run_metadata = json.loads(run_metadata_path.read_text(encoding='utf-8'))
+	run_metadata[metadata_key] = 'different-tile-manifest'
+	run_metadata_path.write_text(json.dumps(run_metadata), encoding='utf-8')
+
+	with pytest.raises(
+		ValueError,
+		match=rf'layout_000/small candidate and random {evidence_key} differ',
+	):
+		summarize_f3_lithology_candidate(config, canonical)
+	assert not config.summary_root.exists()
