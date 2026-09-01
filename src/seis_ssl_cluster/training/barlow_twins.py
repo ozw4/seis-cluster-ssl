@@ -18,19 +18,11 @@ from seis_ssl_cluster.config.barlow_twins import (
 )
 from seis_ssl_cluster.config.schema import (
 	BARLOW_TWINS_PRETRAINING_METHOD,
-	HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
-	HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
-	HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
-	IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
 from seis_ssl_cluster.data.amplitude_dataset import AmplitudePretrainDataset
-from seis_ssl_cluster.data.barlow_twins_dataset import (
-	BarlowTwinsPretrainDataset,
-	LocalBarlowTwinsD4TraceDropPretrainDataset,
-	LocalBarlowTwinsPretrainDataset,
-)
+from seis_ssl_cluster.data.barlow_twins_dataset import BarlowTwinsPretrainDataset
 from seis_ssl_cluster.data.schema import read_manifest_json
 from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
 from seis_ssl_cluster.models.barlow_twins import BarlowTwins3D, BarlowTwinsLoss
@@ -48,6 +40,9 @@ from seis_ssl_cluster.training.barlow_twins_continuation import (
 )
 from seis_ssl_cluster.training.collate import move_batch_to_device
 from seis_ssl_cluster.training.dataloaders import build_barlow_twins_dataloader
+from seis_ssl_cluster.training.joint_embedding_common import (
+	build_local_joint_embedding_dataset,
+)
 from seis_ssl_cluster.training.logging import print_epoch_metrics
 
 _LOSS_METRICS = (
@@ -210,7 +205,7 @@ def train_barlow_twins_one_epoch(  # noqa: PLR0913
 	)
 
 
-def run_barlow_twins_pretraining(  # noqa: C901, PLR0912, PLR0915
+def run_barlow_twins_pretraining(  # noqa: PLR0915
 	config: Mapping[str, object],
 	*,
 	resume: str | Path | None = None,
@@ -275,77 +270,11 @@ def run_barlow_twins_pretraining(  # noqa: C901, PLR0912, PLR0915
 				'horizontal_flip_probability',
 			),
 		)
-	elif augmentation_policy == IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY:
-		dataset = LocalBarlowTwinsPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=0.0,
-			gaussian_noise_std=_floating(
-				augmentations,
-				'gaussian_noise_std',
-			),
-			require_distinct_horizontal_views=False,
-		)
-	elif augmentation_policy == HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY:
-		dataset = LocalBarlowTwinsPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=_floating(
-				augmentations,
-				'horizontal_flip_probability',
-			),
-			gaussian_noise_std=_floating(
-				augmentations,
-				'gaussian_noise_std',
-			),
-		)
-	elif augmentation_policy == HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY:
-		dataset = LocalBarlowTwinsPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=_floating(
-				augmentations,
-				'horizontal_flip_probability',
-			),
-			trace_drop_probability=_floating(
-				augmentations,
-				'trace_drop_probability',
-			),
-		)
-	elif augmentation_policy == HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY:
-		dataset = LocalBarlowTwinsPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=_floating(
-				augmentations,
-				'horizontal_flip_probability',
-			),
-			z_filter_side_weight=_floating(
-				augmentations,
-				'z_filter_side_weight',
-			),
-		)
-	elif augmentation_policy == XY_D4_TRACE_DROP_AUGMENTATION_POLICY:
-		dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			reflection_probability=_floating(
-				augmentations,
-				'reflection_probability',
-			),
-			trace_drop_probability=_floating(
-				augmentations,
-				'trace_drop_probability',
-			),
-		)
 	else:
-		dataset = LocalBarlowTwinsPretrainDataset(
+		dataset = build_local_joint_embedding_dataset(
 			base_dataset,
 			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=_floating(
-				augmentations,
-				'horizontal_flip_probability',
-			),
+			augmentations=augmentations,
 		)
 	dataloader = build_barlow_twins_dataloader(
 		dataset,

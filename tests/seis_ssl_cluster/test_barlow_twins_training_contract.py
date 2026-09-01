@@ -14,6 +14,7 @@ import yaml
 
 import seis_ssl_cluster.data.amplitude_dataset as amplitude_dataset_module
 import seis_ssl_cluster.training.barlow_twins as barlow_twins_module
+import seis_ssl_cluster.training.joint_embedding_common as joint_embedding_common_module
 from seis_ssl_cluster.config import resolve_barlow_twins_training_config
 from seis_ssl_cluster.config.schema import (
 	BARLOW_TWINS_PRETRAINING_METHOD,
@@ -445,7 +446,7 @@ def test_d4_trace_drop_one_step_uses_policy_dataset_and_saves_config(
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	original_dataset = (
-		barlow_twins_module.LocalBarlowTwinsD4TraceDropPretrainDataset
+		joint_embedding_common_module.LocalBarlowTwinsD4TraceDropPretrainDataset
 	)
 	dataset_calls: list[dict[str, object]] = []
 
@@ -457,7 +458,7 @@ def test_d4_trace_drop_one_step_uses_policy_dataset_and_saves_config(
 		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
 
 	monkeypatch.setattr(
-		barlow_twins_module,
+		joint_embedding_common_module,
 		'LocalBarlowTwinsD4TraceDropPretrainDataset',
 		record_dataset,
 	)
@@ -496,7 +497,7 @@ def test_gaussian_noise_one_step_dispatches_policy_and_saves_config(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	original_dataset = barlow_twins_module.LocalBarlowTwinsPretrainDataset
+	original_dataset = joint_embedding_common_module.LocalBarlowTwinsPretrainDataset
 	dataset_calls: list[dict[str, object]] = []
 
 	def record_dataset(
@@ -507,7 +508,7 @@ def test_gaussian_noise_one_step_dispatches_policy_and_saves_config(
 		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
 
 	monkeypatch.setattr(
-		barlow_twins_module,
+		joint_embedding_common_module,
 		'LocalBarlowTwinsPretrainDataset',
 		record_dataset,
 	)
@@ -542,7 +543,7 @@ def test_horizontal_trace_drop_one_step_dispatches_policy_and_saves_config(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	original_dataset = barlow_twins_module.LocalBarlowTwinsPretrainDataset
+	original_dataset = joint_embedding_common_module.LocalBarlowTwinsPretrainDataset
 	dataset_calls: list[dict[str, object]] = []
 
 	def record_dataset(
@@ -553,7 +554,7 @@ def test_horizontal_trace_drop_one_step_dispatches_policy_and_saves_config(
 		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
 
 	monkeypatch.setattr(
-		barlow_twins_module,
+		joint_embedding_common_module,
 		'LocalBarlowTwinsPretrainDataset',
 		record_dataset,
 	)
@@ -588,7 +589,7 @@ def test_zero_phase_z_filter_one_step_dispatches_policy_and_saves_config(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	original_dataset = barlow_twins_module.LocalBarlowTwinsPretrainDataset
+	original_dataset = joint_embedding_common_module.LocalBarlowTwinsPretrainDataset
 	dataset_calls: list[dict[str, object]] = []
 
 	def record_dataset(
@@ -599,7 +600,7 @@ def test_zero_phase_z_filter_one_step_dispatches_policy_and_saves_config(
 		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
 
 	monkeypatch.setattr(
-		barlow_twins_module,
+		joint_embedding_common_module,
 		'LocalBarlowTwinsPretrainDataset',
 		record_dataset,
 	)
@@ -634,7 +635,7 @@ def test_identity_gaussian_one_step_dispatches_policy_and_saves_config(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-	original_dataset = barlow_twins_module.LocalBarlowTwinsPretrainDataset
+	original_dataset = joint_embedding_common_module.LocalBarlowTwinsPretrainDataset
 	dataset_calls: list[dict[str, object]] = []
 
 	def record_dataset(
@@ -645,7 +646,7 @@ def test_identity_gaussian_one_step_dispatches_policy_and_saves_config(
 		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
 
 	monkeypatch.setattr(
-		barlow_twins_module,
+		joint_embedding_common_module,
 		'LocalBarlowTwinsPretrainDataset',
 		record_dataset,
 	)

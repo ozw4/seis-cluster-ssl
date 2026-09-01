@@ -116,6 +116,25 @@ def test_cpu_training_checkpoint_factory_and_embedding_contract(
 	assert set(history[0]) >= VICREG_METRICS
 
 
+def test_training_rejects_unknown_augmentation_policy_after_resolution(
+	tmp_path: Path,
+) -> None:
+	config = resolve_vicreg_training_config(
+		_tiny_config(tmp_path, output_name='unknown-policy')
+	)
+	augmentations = config['augmentations']
+	assert isinstance(augmentations, dict)
+	augmentations['policy'] = 'future_v1'
+
+	with pytest.raises(
+		ValueError,
+		match="unsupported local joint-embedding augmentation policy: 'future_v1'",
+	):
+		run_vicreg_pretraining(config)
+
+	assert not (tmp_path / 'artifacts/unknown-policy').exists()
+
+
 def test_completed_epoch_resume_matches_uninterrupted_training(
 	tmp_path: Path,
 ) -> None:

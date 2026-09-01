@@ -10,19 +10,8 @@ from typing import Any, cast
 
 import torch
 
-from seis_ssl_cluster.config.schema import (
-	HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
-	HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
-	HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
-	IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
-	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
-)
 from seis_ssl_cluster.config.vicreg import resolve_vicreg_pretraining_method
 from seis_ssl_cluster.data.amplitude_dataset import AmplitudePretrainDataset
-from seis_ssl_cluster.data.barlow_twins_dataset import (
-	LocalBarlowTwinsD4TraceDropPretrainDataset,
-	LocalBarlowTwinsPretrainDataset,
-)
 from seis_ssl_cluster.data.schema import read_manifest_json
 from seis_ssl_cluster.models.barlow_twins import BarlowTwins3D
 from seis_ssl_cluster.models.vicreg import VICRegLoss
@@ -52,6 +41,9 @@ from seis_ssl_cluster.training.barlow_twins import (
 from seis_ssl_cluster.training.barlow_twins_checkpoint import update_best_checkpoint
 from seis_ssl_cluster.training.collate import move_batch_to_device
 from seis_ssl_cluster.training.dataloaders import build_barlow_twins_dataloader
+from seis_ssl_cluster.training.joint_embedding_common import (
+	build_local_joint_embedding_dataset,
+)
 from seis_ssl_cluster.training.logging import print_epoch_metrics
 from seis_ssl_cluster.training.vicreg_checkpoint import (
 	VICRegResumeState,
@@ -189,7 +181,7 @@ def train_vicreg_one_epoch(  # noqa: PLR0913
 	)
 
 
-def run_vicreg_pretraining(  # noqa: C901, PLR0915
+def run_vicreg_pretraining(  # noqa: PLR0915
 	config: Mapping[str, object],
 	*,
 	resume: str | Path | None = None,
@@ -239,66 +231,11 @@ def run_vicreg_pretraining(  # noqa: C901, PLR0915
 	augmentation_policy = (
 		_string(augmentations, 'policy') if 'policy' in augmentations else None
 	)
-	if augmentation_policy == IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY:
-		dataset = LocalBarlowTwinsPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=0.0,
-			gaussian_noise_std=_floating(augmentations, 'gaussian_noise_std'),
-			require_distinct_horizontal_views=False,
-		)
-	elif augmentation_policy == HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY:
-		dataset = LocalBarlowTwinsPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=_floating(
-				augmentations, 'horizontal_flip_probability'
-			),
-			gaussian_noise_std=_floating(augmentations, 'gaussian_noise_std'),
-		)
-	elif augmentation_policy == HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY:
-		dataset = LocalBarlowTwinsPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=_floating(
-				augmentations, 'horizontal_flip_probability'
-			),
-			trace_drop_probability=_floating(
-				augmentations, 'trace_drop_probability'
-			),
-		)
-	elif (
-		augmentation_policy
-		== HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY
-	):
-		dataset = LocalBarlowTwinsPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=_floating(
-				augmentations, 'horizontal_flip_probability'
-			),
-			z_filter_side_weight=_floating(augmentations, 'z_filter_side_weight'),
-		)
-	elif augmentation_policy == XY_D4_TRACE_DROP_AUGMENTATION_POLICY:
-		dataset = LocalBarlowTwinsD4TraceDropPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			reflection_probability=_floating(
-				augmentations, 'reflection_probability'
-			),
-			trace_drop_probability=_floating(
-				augmentations, 'trace_drop_probability'
-			),
-		)
-	else:
-		dataset = LocalBarlowTwinsPretrainDataset(
-			base_dataset,
-			local_pairs_per_crop=local_pairs_per_crop,
-			horizontal_flip_probability=_floating(
-				augmentations,
-				'horizontal_flip_probability',
-			),
-		)
+	dataset = build_local_joint_embedding_dataset(
+		base_dataset,
+		local_pairs_per_crop=local_pairs_per_crop,
+		augmentations=augmentations,
+	)
 	dataloader = build_barlow_twins_dataloader(
 		dataset,
 		batch_size=_integer(train, 'batch_size'),
