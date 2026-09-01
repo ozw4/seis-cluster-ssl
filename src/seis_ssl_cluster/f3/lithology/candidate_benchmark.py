@@ -143,8 +143,43 @@ def load_f3_lithology_candidate_canonical_config(
 		raise FileNotFoundError(
 			f'canonical five-way config does not exist: {config.canonical_config}'
 		)
-	return f3_lithology_five_way_config_from_mapping(
+	canonical_config = f3_lithology_five_way_config_from_mapping(
 		load_config(config.canonical_config)
+	)
+	_validate_candidate_namespace(config, canonical_config)
+	return canonical_config
+
+
+def _validate_candidate_namespace(
+	config: F3LithologyCandidateConfig,
+	canonical_config: F3FiveWayConfig,
+) -> None:
+	if config.candidate_id in canonical_config.model_ids:
+		raise ValueError(
+			f'candidate.id conflicts with canonical model ID: {config.candidate_id!r}'
+		)
+	for candidate_label, candidate_root in (
+		('outputs.runs_root', config.runs_root),
+		('outputs.summary_root', config.summary_root),
+	):
+		for canonical_label, canonical_root in (
+			('canonical runs_root', canonical_config.runs_root),
+			('canonical summary_root', canonical_config.summary_root),
+		):
+			if _paths_overlap(candidate_root, canonical_root):
+				raise ValueError(
+					f'{candidate_label} overlaps {canonical_label}: '
+					f'{candidate_root} and {canonical_root}'
+				)
+
+
+def _paths_overlap(first: Path, second: Path) -> bool:
+	first = first.resolve(strict=False)
+	second = second.resolve(strict=False)
+	return (
+		first == second
+		or first.is_relative_to(second)
+		or second.is_relative_to(first)
 	)
 
 

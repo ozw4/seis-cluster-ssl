@@ -276,6 +276,45 @@ def test_candidate_config_requires_exact_minimal_keys() -> None:
 		)
 
 
+def test_candidate_config_rejects_canonical_model_id(
+	candidate_universe: dict[str, object],
+) -> None:
+	candidate_universe['candidate_mapping']['candidate']['id'] = 'random'
+	config = f3_lithology_candidate_config_from_mapping(
+		candidate_universe['candidate_mapping']
+	)
+
+	with pytest.raises(ValueError, match='conflicts with canonical model ID'):
+		load_f3_lithology_candidate_canonical_config(config)
+
+
+@pytest.mark.parametrize(
+	('output_name', 'canonical_output_name', 'suffix'),
+	[
+		('runs_root', 'runs_root', None),
+		('summary_root', 'summary_root', 'candidate'),
+	],
+)
+def test_candidate_config_rejects_canonical_output_overlap(
+	candidate_universe: dict[str, object],
+	output_name: str,
+	canonical_output_name: str,
+	suffix: str | None,
+) -> None:
+	canonical_root = Path(
+		candidate_universe['canonical_mapping']['outputs'][canonical_output_name]
+	)
+	candidate_universe['candidate_mapping']['outputs'][output_name] = str(
+		canonical_root if suffix is None else canonical_root / suffix
+	)
+	config = f3_lithology_candidate_config_from_mapping(
+		candidate_universe['candidate_mapping']
+	)
+
+	with pytest.raises(ValueError, match=f'outputs.{output_name} overlaps canonical'):
+		load_f3_lithology_candidate_canonical_config(config)
+
+
 def test_candidate_source_audit_records_actual_sha_provenance(
 	candidate_universe: dict[str, object],
 ) -> None:
