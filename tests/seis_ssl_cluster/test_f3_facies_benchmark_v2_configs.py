@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import runpy
 import subprocess
 from copy import deepcopy
 from pathlib import Path
@@ -12,6 +13,7 @@ import yaml
 
 from seis_ssl_cluster.config import (
 	load_config,
+	resolve_barlow_twins_training_config,
 	resolve_embedding_extraction_config,
 	resolve_f3_facies_inspection_config,
 )
@@ -48,6 +50,12 @@ LAYOUT_ROOT = V2_ROOT / '109_f3_voxel_section_layout_v2'
 FIVE_WAY_ROOT = V2_ROOT / '110_lithology_mae_local_bt_five_way_v2'
 LAYOUT_V3_ROOT = V2_ROOT / '109_f3_voxel_section_layout_v3'
 FIVE_WAY_V3_ROOT = V2_ROOT / '110_lithology_mae_local_bt_five_way_v3'
+GAUSSIAN_VIEW_ROOT = V2_ROOT / '111_local_barlow_twins_gaussian_view_v1'
+TRACE_DROP_VIEW_ROOT = V2_ROOT / '112_local_barlow_twins_trace_drop_view_v1'
+TRACE_DROP_P002_VIEW_ROOT = V2_ROOT / '113_local_barlow_twins_trace_drop_p002_view_v1'
+ZERO_PHASE_Z_FILTER_VIEW_ROOT = (
+	V2_ROOT / '114_local_barlow_twins_zero_phase_z_filter_view_v1'
+)
 README = FIVE_WAY_ROOT / 'README.md'
 ARTIFACT_ROOT = '/test/artifacts/seis_ssl_cluster'
 RAW_F3_ROOT = '/test/f3'
@@ -148,10 +156,158 @@ REFERENCE_GEOMETRY_CHECKPOINT = (
 	'random_init/mae_random_seed42.pt'
 )
 RAW_QC_REPORT = 'inspection/f3/facies_benchmark_v1/report.json'
+GAUSSIAN_VIEW_VARIANTS = (
+	'gaussian_noise_std005',
+	'gaussian_noise_std010',
+	'identity_gaussian_noise_std010',
+	'legacy_flip_25ep',
+)
+GAUSSIAN_VIEW_PRETRAINING_ROOT = (
+	'pretraining/f3/facies_benchmark_v1/local_barlow_twins_gaussian_view_v1'
+)
+TRACE_DROP_VIEW_PRETRAINING_ROOT = (
+	'pretraining/f3/facies_benchmark_v1/local_barlow_twins_trace_drop_view_v1/base1ep'
+)
+TRACE_DROP_P002_VIEW_PRETRAINING_ROOT = (
+	'pretraining/f3/facies_benchmark_v1/'
+	'local_barlow_twins_trace_drop_p002_view_v1/base1ep'
+)
+ZERO_PHASE_Z_FILTER_VIEW_PRETRAINING_ROOT = (
+	'pretraining/f3/facies_benchmark_v1/'
+	'local_barlow_twins_zero_phase_z_filter_view_v1/base1ep'
+)
+GAUSSIAN_VIEW_BASE5_VARIANTS = (
+	'gaussian_noise_std010_base5ep',
+	'legacy_flip_base5ep',
+)
+GAUSSIAN_VIEW_BASE1_VARIANTS = (
+	'gaussian_noise_std010_base1ep',
+	'legacy_flip_base1ep',
+)
+# The search changes the existing v1 pretraining lineage, then evaluates its
+# frozen continuation outputs with the v2 downstream contract.
+GAUSSIAN_VIEW_V1_REFERENCES = (
+	'registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json',
+	'registry/splits/f3/facies_benchmark_v1/f3_npy_paths.txt',
+	('pretraining/f3/facies_benchmark_v1/local_barlow_twins_v1/full_100ep/latest.pt'),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/stage1/{variant}/full_25ep'
+		for variant in GAUSSIAN_VIEW_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/stage1/{variant}/full_25ep/latest.pt'
+		for variant in GAUSSIAN_VIEW_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/stage2/{variant}/local_bt_continue/full_25ep'
+		for variant in GAUSSIAN_VIEW_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/stage2/{variant}/'
+		'local_bt_continue/full_25ep/latest.pt'
+		for variant in GAUSSIAN_VIEW_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/base5ep/stage1/{variant}/full_5ep'
+		for variant in GAUSSIAN_VIEW_BASE5_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/base5ep/stage1/{variant}/full_5ep/latest.pt'
+		for variant in GAUSSIAN_VIEW_BASE5_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/base5ep/stage2/{variant}/'
+		'local_bt_continue/full_25ep'
+		for variant in GAUSSIAN_VIEW_BASE5_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/base5ep/stage2/{variant}/'
+		'local_bt_continue/full_25ep/latest.pt'
+		for variant in GAUSSIAN_VIEW_BASE5_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/base1ep/stage1/{variant}/full_1ep'
+		for variant in GAUSSIAN_VIEW_BASE1_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/base1ep/stage1/{variant}/full_1ep/latest.pt'
+		for variant in GAUSSIAN_VIEW_BASE1_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/base1ep/stage2/{variant}/'
+		'local_bt_continue/full_25ep'
+		for variant in GAUSSIAN_VIEW_BASE1_VARIANTS
+	),
+	*(
+		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/base1ep/stage2/{variant}/'
+		'local_bt_continue/full_25ep/latest.pt'
+		for variant in GAUSSIAN_VIEW_BASE1_VARIANTS
+	),
+)
+TRACE_DROP_VIEW_V1_REFERENCES = (
+	(
+		f'{TRACE_DROP_VIEW_PRETRAINING_ROOT}/stage1/'
+		'horizontal_trace_drop_p001_base1ep/full_1ep'
+	),
+	(
+		f'{TRACE_DROP_VIEW_PRETRAINING_ROOT}/stage1/'
+		'horizontal_trace_drop_p001_base1ep/full_1ep/latest.pt'
+	),
+	(
+		f'{TRACE_DROP_VIEW_PRETRAINING_ROOT}/stage2/'
+		'horizontal_trace_drop_p001_base1ep/local_bt_continue/full_25ep'
+	),
+	(
+		f'{TRACE_DROP_VIEW_PRETRAINING_ROOT}/stage2/'
+		'horizontal_trace_drop_p001_base1ep/local_bt_continue/'
+		'full_25ep/latest.pt'
+	),
+)
+TRACE_DROP_P002_VIEW_V1_REFERENCES = (
+	(
+		f'{TRACE_DROP_P002_VIEW_PRETRAINING_ROOT}/stage1/'
+		'horizontal_trace_drop_p002_base1ep/full_1ep'
+	),
+	(
+		f'{TRACE_DROP_P002_VIEW_PRETRAINING_ROOT}/stage1/'
+		'horizontal_trace_drop_p002_base1ep/full_1ep/latest.pt'
+	),
+	(
+		f'{TRACE_DROP_P002_VIEW_PRETRAINING_ROOT}/stage2/'
+		'horizontal_trace_drop_p002_base1ep/local_bt_continue/full_25ep'
+	),
+	(
+		f'{TRACE_DROP_P002_VIEW_PRETRAINING_ROOT}/stage2/'
+		'horizontal_trace_drop_p002_base1ep/local_bt_continue/'
+		'full_25ep/latest.pt'
+	),
+)
+ZERO_PHASE_Z_FILTER_VIEW_V1_REFERENCES = (
+	(
+		f'{ZERO_PHASE_Z_FILTER_VIEW_PRETRAINING_ROOT}/stage1/'
+		'zero_phase_z_filter_w025_base1ep/full_1ep'
+	),
+	(
+		f'{ZERO_PHASE_Z_FILTER_VIEW_PRETRAINING_ROOT}/stage1/'
+		'zero_phase_z_filter_w025_base1ep/full_1ep/latest.pt'
+	),
+	(
+		f'{ZERO_PHASE_Z_FILTER_VIEW_PRETRAINING_ROOT}/stage2/'
+		'zero_phase_z_filter_w025_base1ep/local_bt_continue/full_25ep'
+	),
+	(
+		f'{ZERO_PHASE_Z_FILTER_VIEW_PRETRAINING_ROOT}/stage2/'
+		'zero_phase_z_filter_w025_base1ep/local_bt_continue/full_25ep/latest.pt'
+	),
+)
 ALLOWED_V1_REFERENCES = (
 	*UPSTREAM_CHECKPOINTS.values(),
 	REFERENCE_GEOMETRY_CHECKPOINT,
 	RAW_QC_REPORT,
+	*GAUSSIAN_VIEW_V1_REFERENCES,
+	*TRACE_DROP_VIEW_V1_REFERENCES,
+	*TRACE_DROP_P002_VIEW_V1_REFERENCES,
+	*ZERO_PHASE_Z_FILTER_VIEW_V1_REFERENCES,
 )
 REFERENCE_GEOMETRY_DIR = (
 	'embeddings/f3/facies_benchmark_v2/reference_token_geometry/'
@@ -231,7 +387,30 @@ def _v2_yaml_files() -> list[Path]:
 	return sorted(V2_ROOT.rglob('*.yaml'))
 
 
-def test_every_v2_config_resolves_with_its_owning_resolver() -> None:
+def _resolve_barlow_branch_configs(root: Path, covered: set[Path]) -> None:
+	for stage_dir in ('10_stage1', '15_stage2'):
+		for path in sorted((root / stage_dir).rglob('*.yaml')):
+			resolve_barlow_twins_training_config(_load(path))
+			covered.add(path)
+	for path in sorted((root / '20_embeddings').glob('*.yaml')):
+		resolve_embedding_extraction_config(_load(path))
+		covered.add(path)
+
+
+def _resolve_experiment_validation_config(
+	path: Path,
+	*,
+	runner_path: Path,
+	covered: set[Path],
+) -> None:
+	runner = runpy.run_path(str(runner_path))
+	resolver = runner['validation_settings_from_mapping']
+	assert callable(resolver)
+	resolver(_load(path))
+	covered.add(path)
+
+
+def test_every_v2_config_resolves_with_its_owning_resolver() -> None:  # noqa: PLR0915
 	covered: set[Path] = set()
 	for name, stage in INSPECTION_STAGES.items():
 		path = INSPECTION_ROOT / name
@@ -285,14 +464,58 @@ def test_every_v2_config_resolves_with_its_owning_resolver() -> None:
 	)
 	assert dict(five_way_v3.dataset) == V2_DATASET
 	covered.add(FIVE_WAY_V3_ROOT / '60_five_way.yaml')
+	_resolve_barlow_branch_configs(GAUSSIAN_VIEW_ROOT, covered)
+	base5_root = GAUSSIAN_VIEW_ROOT / '40_base5ep'
+	_resolve_barlow_branch_configs(base5_root, covered)
+	base1_root = GAUSSIAN_VIEW_ROOT / '50_base1ep'
+	_resolve_barlow_branch_configs(base1_root, covered)
+	validation_path = GAUSSIAN_VIEW_ROOT / '30_validation/01_candidates.yaml'
+	_resolve_experiment_validation_config(
+		validation_path,
+		runner_path=GAUSSIAN_VIEW_ROOT / 'run_validation.py',
+		covered=covered,
+	)
+	_resolve_experiment_validation_config(
+		base5_root / '30_validation/01_candidates.yaml',
+		runner_path=base5_root / 'run_validation.py',
+		covered=covered,
+	)
+	_resolve_experiment_validation_config(
+		base1_root / '30_validation/01_candidates.yaml',
+		runner_path=base1_root / 'run_validation.py',
+		covered=covered,
+	)
+	_resolve_barlow_branch_configs(TRACE_DROP_VIEW_ROOT, covered)
+	_resolve_experiment_validation_config(
+		TRACE_DROP_VIEW_ROOT / '30_validation/01_candidate.yaml',
+		runner_path=TRACE_DROP_VIEW_ROOT / 'run_validation.py',
+		covered=covered,
+	)
+	_resolve_barlow_branch_configs(TRACE_DROP_P002_VIEW_ROOT, covered)
+	_resolve_experiment_validation_config(
+		TRACE_DROP_P002_VIEW_ROOT / '30_validation/01_candidate.yaml',
+		runner_path=TRACE_DROP_P002_VIEW_ROOT / 'run_validation.py',
+		covered=covered,
+	)
+	_resolve_barlow_branch_configs(ZERO_PHASE_Z_FILTER_VIEW_ROOT, covered)
+	_resolve_experiment_validation_config(
+		ZERO_PHASE_Z_FILTER_VIEW_ROOT / '30_validation/01_candidate.yaml',
+		runner_path=ZERO_PHASE_Z_FILTER_VIEW_ROOT / 'run_validation.py',
+		covered=covered,
+	)
 	assert covered == set(_v2_yaml_files())
 
 
-def test_v2_paths_stay_in_v2_namespace_except_explicit_upstream_reuse() -> None:
+def test_v2_paths_stay_in_v2_namespace_except_explicit_v1_lineage() -> None:
 	seen_allowed: set[str] = set()
 	for path in _v2_yaml_files():
 		for value in _strings(_load(path)):
-			assert 'trace_drop' not in value, (path, value)
+			if not (
+				path.is_relative_to(TRACE_DROP_VIEW_ROOT)
+				or path.is_relative_to(TRACE_DROP_P002_VIEW_ROOT)
+				or path.is_relative_to(ZERO_PHASE_Z_FILTER_VIEW_ROOT)
+			):
+				assert 'trace_drop' not in value, (path, value)
 			assert 'datasets_v1' not in value, (path, value)
 			if 'facies_benchmark_v1' not in value:
 				continue
@@ -544,8 +767,7 @@ def test_v3_calibration_config_uses_literal_class_balanced_contract() -> None:
 		f'{Path.cwd()}/{LAYOUT_V3_ROOT}/02_layout_lines.yaml'
 	)
 	assert raw['inputs']['reference_valid_tokens'] == (
-		f'{ARTIFACT_ROOT}/{REFERENCE_GEOMETRY_DIR}/'
-		'f3_facies_benchmark.valid_tokens.npy'
+		f'{ARTIFACT_ROOT}/{REFERENCE_GEOMETRY_DIR}/f3_facies_benchmark.valid_tokens.npy'
 	)
 	config = f3_section_layout_calibration_config_from_mapping(raw)
 	assert config.selection_semantics == V3_SELECTION_SEMANTICS
@@ -621,17 +843,15 @@ def test_v3_five_way_runbook_uses_size_layout_model_loop_order() -> None:
 
 
 def test_v3_builder_and_five_way_use_versioned_outputs_and_reused_sources() -> None:
-	calibration = _load(
-		LAYOUT_V3_ROOT / '01_prepare_section_layout_contract.yaml'
-	)
+	calibration = _load(LAYOUT_V3_ROOT / '01_prepare_section_layout_contract.yaml')
 	builder = _load(LAYOUT_V3_ROOT / '03_build_section_layout_datasets.yaml')
 	five_way_raw = _load(FIVE_WAY_V3_ROOT / '60_five_way.yaml')
 	dataset_root = (
-		f'{ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/'
-		'voxel_section_layout_v3'
+		f'{ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_section_layout_v3'
 	)
-	assert builder['inputs']['section_layout_contract'] == (
-		calibration['outputs']['canonical_contract']
+	assert (
+		builder['inputs']['section_layout_contract']
+		== (calibration['outputs']['canonical_contract'])
 	)
 	assert builder['outputs'] == {'output_root': dataset_root}
 	assert five_way_raw['dataset'] == {
@@ -641,12 +861,10 @@ def test_v3_builder_and_five_way_use_versioned_outputs_and_reused_sources() -> N
 	assert five_way_raw['section_layout'] == {'dataset_root': dataset_root}
 	assert five_way_raw['outputs'] == {
 		'runs_root': (
-			f'{ARTIFACT_ROOT}/f3_lithology_benchmark/'
-			'mae_local_bt_five_way_v3/runs'
+			f'{ARTIFACT_ROOT}/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs'
 		),
 		'summary_root': (
-			f'{ARTIFACT_ROOT}/f3_lithology_benchmark/'
-			'mae_local_bt_five_way_v3/summary'
+			f'{ARTIFACT_ROOT}/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary'
 		),
 		'summary_name': V3_SUMMARY_NAME,
 	}
@@ -654,9 +872,7 @@ def test_v3_builder_and_five_way_use_versioned_outputs_and_reused_sources() -> N
 		model['model_id']: model
 		for model in _load(FIVE_WAY_ROOT / '60_five_way.yaml')['models']
 	}
-	assert [model['model_id'] for model in five_way_raw['models']] == list(
-		MODEL_IDS
-	)
+	assert [model['model_id'] for model in five_way_raw['models']] == list(MODEL_IDS)
 	for model in five_way_raw['models']:
 		model_id = model['model_id']
 		assert model['checkpoint'] == (
