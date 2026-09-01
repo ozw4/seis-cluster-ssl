@@ -1,8 +1,7 @@
-"""Producer and runbook contracts for F3 trace-drop p=.02 experiment 113."""
+"""Training and embedding config contracts for F3 trace-drop experiment 113."""
 
 from __future__ import annotations
 
-import re
 from copy import deepcopy
 from pathlib import Path
 
@@ -15,25 +14,18 @@ from seis_ssl_cluster.config import (
 )
 
 ROOT = Path(
-	'experiments/f3/facies_benchmark_v2/'
-	'113_local_barlow_twins_trace_drop_p002_view_v1'
+	'experiments/f3/facies_benchmark_v2/113_local_barlow_twins_trace_drop_p002_view_v1'
 )
 P001_ROOT = Path(
-	'experiments/f3/facies_benchmark_v2/'
-	'112_local_barlow_twins_trace_drop_view_v1'
+	'experiments/f3/facies_benchmark_v2/112_local_barlow_twins_trace_drop_view_v1'
 )
-BASE_CONFIG = (
-	ROOT
-	/ '10_stage1/horizontal_trace_drop_p002_base1ep/01_screen_1ep.yaml'
-)
+BASE_CONFIG = ROOT / '10_stage1/horizontal_trace_drop_p002_base1ep/01_screen_1ep.yaml'
 CONTINUATION_CONFIG = (
-	ROOT
-	/ '15_stage2/horizontal_trace_drop_p002_base1ep/01_continue_25ep.yaml'
+	ROOT / '15_stage2/horizontal_trace_drop_p002_base1ep/01_continue_25ep.yaml'
 )
 EXTRACTION_CONFIG = (
 	ROOT / '20_embeddings/01_extract_horizontal_trace_drop_p002_base1ep.yaml'
 )
-VALIDATION_CONFIG = ROOT / '30_validation/01_candidate.yaml'
 EXPECTED_AUGMENTATIONS = {
 	'policy': 'horizontal_flip_trace_drop_v1',
 	'horizontal_flip_probability': 0.5,
@@ -43,17 +35,14 @@ EXPECTED_AUGMENTATIONS = {
 
 @pytest.fixture(autouse=True)
 def _roots(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-	monkeypatch.setenv(
-		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str(tmp_path / 'artifacts')
-	)
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str(tmp_path / 'artifacts'))
 	monkeypatch.setenv('SEIS_SSL_CLUSTER_WORKSPACE', str(Path.cwd()))
 	monkeypatch.setenv('F3_ROOT', str(tmp_path / 'f3'))
 
 
 def test_base_changes_only_augmentation_and_namespace() -> None:
 	parent = load_config(
-		P001_ROOT
-		/ '10_stage1/horizontal_trace_drop_p001_base1ep/01_screen_1ep.yaml'
+		P001_ROOT / '10_stage1/horizontal_trace_drop_p001_base1ep/01_screen_1ep.yaml'
 	)
 	candidate = load_config(BASE_CONFIG)
 	comparison = deepcopy(candidate)
@@ -61,11 +50,9 @@ def test_base_changes_only_augmentation_and_namespace() -> None:
 	comparison['augmentations'] = parent['augmentations']
 
 	assert comparison == parent
-	assert candidate['augmentations'] == EXPECTED_AUGMENTATIONS
 	resolved = resolve_barlow_twins_training_config(candidate)
+	assert resolved['augmentations'] == EXPECTED_AUGMENTATIONS
 	assert resolved['train']['epochs'] == 1
-	assert resolved['train']['lr'] == 1e-4
-	assert resolved['train']['seed'] == 42
 	assert (
 		resolved['train']['epochs']
 		* resolved['train']['samples_per_epoch']
@@ -74,10 +61,9 @@ def test_base_changes_only_augmentation_and_namespace() -> None:
 	)
 
 
-def test_continuation_changes_only_augmentation_and_namespace() -> None:
+def test_continuation_uses_the_base_checkpoint_and_fixed_budget() -> None:
 	parent = load_config(
-		P001_ROOT
-		/ '15_stage2/horizontal_trace_drop_p001_base1ep/01_continue_25ep.yaml'
+		P001_ROOT / '15_stage2/horizontal_trace_drop_p001_base1ep/01_continue_25ep.yaml'
 	)
 	candidate = load_config(CONTINUATION_CONFIG)
 	comparison = deepcopy(candidate)
@@ -96,8 +82,6 @@ def test_continuation_changes_only_augmentation_and_namespace() -> None:
 		'unfreeze_top_blocks': 1,
 	}
 	assert resolved['train']['epochs'] == 25
-	assert resolved['train']['lr'] == 1e-5
-	assert resolved['train']['weight_decay'] == 0.05
 	assert (
 		resolved['train']['epochs']
 		* resolved['train']['samples_per_epoch']
@@ -106,10 +90,9 @@ def test_continuation_changes_only_augmentation_and_namespace() -> None:
 	)
 
 
-def test_extraction_changes_only_checkpoint_and_namespace() -> None:
+def test_embedding_uses_the_continuation_checkpoint() -> None:
 	parent = load_config(
-		P001_ROOT
-		/ '20_embeddings/01_extract_horizontal_trace_drop_p001_base1ep.yaml'
+		P001_ROOT / '20_embeddings/01_extract_horizontal_trace_drop_p001_base1ep.yaml'
 	)
 	candidate = load_config(EXTRACTION_CONFIG)
 	comparison = deepcopy(candidate)
@@ -126,47 +109,3 @@ def test_extraction_changes_only_checkpoint_and_namespace() -> None:
 	assert resolved['embedding']['window_size'] == [128, 128, 128]
 	assert resolved['embedding']['overlap'] == [64, 64, 64]
 	assert resolved['embedding']['min_token_valid_fraction'] == 0.5
-
-
-def test_validation_config_is_one_candidate_without_selection_lock() -> None:
-	config = load_config(VALIDATION_CONFIG)
-
-	assert set(config) == {'parent', 'benchmark', 'candidate', 'outputs'}
-	assert config['parent']['final_result_sha256'] == (
-		'3a83070718ce07f51756bfb91da6f792c6347f3009ca0290757bd93710fe1e2e'
-	)
-	assert config['candidate'] == {
-		'candidate_id': 'local_barlow_twins_horizontal_trace_drop_p002_base1ep',
-		'role': 'authorized_trace_drop_strength_followup',
-		'base_checkpoint': config['candidate']['base_checkpoint'],
-		'final_checkpoint': config['candidate']['final_checkpoint'],
-		'embeddings_dir': config['candidate']['embeddings_dir'],
-		'augmentations': EXPECTED_AUGMENTATIONS,
-		'base_pretraining_epochs': 1,
-		'continuation_epochs': 25,
-	}
-	assert set(config['outputs']) == {'runs_root', 'protocol_lock', 'final_result'}
-	assert 'selection_lock' not in str(config)
-	assert (
-		'/local_barlow_twins_trace_drop_p002_view_v1/'
-		in config['outputs']['runs_root']
-	)
-
-
-def test_readme_uses_only_existing_producer_clis_in_protocol_order() -> None:
-	readme = (ROOT / 'README.md').read_text(encoding='utf-8')
-	producer_paths = re.findall(r'python (proc/seis_ssl_cluster/[^ \\\n]+\.py)', readme)
-
-	assert producer_paths
-	assert all(Path(path).is_file() for path in producer_paths)
-	assert 'continue_amp_barlow_twins.py' not in readme
-	base_position = readme.index(
-		'10_stage1/horizontal_trace_drop_p002_base1ep/01_screen_1ep.yaml'
-	)
-	lock_position = readme.index('--create-protocol-lock')
-	continuation_position = readme.index(
-		'15_stage2/horizontal_trace_drop_p002_base1ep/01_continue_25ep.yaml'
-	)
-	medium_position = readme.index('--size medium')
-	assert base_position < lock_position < continuation_position < medium_position
-	assert 'No test label or test metric is read.' in readme

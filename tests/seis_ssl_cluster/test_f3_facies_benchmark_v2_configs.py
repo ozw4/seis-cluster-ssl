@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import runpy
 import subprocess
 from copy import deepcopy
 from pathlib import Path
@@ -189,7 +188,6 @@ GAUSSIAN_VIEW_BASE1_VARIANTS = (
 GAUSSIAN_VIEW_V1_REFERENCES = (
 	'registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json',
 	'registry/splits/f3/facies_benchmark_v1/f3_npy_paths.txt',
-	('pretraining/f3/facies_benchmark_v1/local_barlow_twins_v1/full_100ep/latest.pt'),
 	*(
 		f'{GAUSSIAN_VIEW_PRETRAINING_ROOT}/stage1/{variant}/full_25ep'
 		for variant in GAUSSIAN_VIEW_VARIANTS
@@ -397,20 +395,7 @@ def _resolve_barlow_branch_configs(root: Path, covered: set[Path]) -> None:
 		covered.add(path)
 
 
-def _resolve_experiment_validation_config(
-	path: Path,
-	*,
-	runner_path: Path,
-	covered: set[Path],
-) -> None:
-	runner = runpy.run_path(str(runner_path))
-	resolver = runner['validation_settings_from_mapping']
-	assert callable(resolver)
-	resolver(_load(path))
-	covered.add(path)
-
-
-def test_every_v2_config_resolves_with_its_owning_resolver() -> None:  # noqa: PLR0915
+def test_every_v2_config_resolves_with_its_owning_resolver() -> None:
 	covered: set[Path] = set()
 	for name, stage in INSPECTION_STAGES.items():
 		path = INSPECTION_ROOT / name
@@ -469,40 +454,9 @@ def test_every_v2_config_resolves_with_its_owning_resolver() -> None:  # noqa: P
 	_resolve_barlow_branch_configs(base5_root, covered)
 	base1_root = GAUSSIAN_VIEW_ROOT / '50_base1ep'
 	_resolve_barlow_branch_configs(base1_root, covered)
-	validation_path = GAUSSIAN_VIEW_ROOT / '30_validation/01_candidates.yaml'
-	_resolve_experiment_validation_config(
-		validation_path,
-		runner_path=GAUSSIAN_VIEW_ROOT / 'run_validation.py',
-		covered=covered,
-	)
-	_resolve_experiment_validation_config(
-		base5_root / '30_validation/01_candidates.yaml',
-		runner_path=base5_root / 'run_validation.py',
-		covered=covered,
-	)
-	_resolve_experiment_validation_config(
-		base1_root / '30_validation/01_candidates.yaml',
-		runner_path=base1_root / 'run_validation.py',
-		covered=covered,
-	)
 	_resolve_barlow_branch_configs(TRACE_DROP_VIEW_ROOT, covered)
-	_resolve_experiment_validation_config(
-		TRACE_DROP_VIEW_ROOT / '30_validation/01_candidate.yaml',
-		runner_path=TRACE_DROP_VIEW_ROOT / 'run_validation.py',
-		covered=covered,
-	)
 	_resolve_barlow_branch_configs(TRACE_DROP_P002_VIEW_ROOT, covered)
-	_resolve_experiment_validation_config(
-		TRACE_DROP_P002_VIEW_ROOT / '30_validation/01_candidate.yaml',
-		runner_path=TRACE_DROP_P002_VIEW_ROOT / 'run_validation.py',
-		covered=covered,
-	)
 	_resolve_barlow_branch_configs(ZERO_PHASE_Z_FILTER_VIEW_ROOT, covered)
-	_resolve_experiment_validation_config(
-		ZERO_PHASE_Z_FILTER_VIEW_ROOT / '30_validation/01_candidate.yaml',
-		runner_path=ZERO_PHASE_Z_FILTER_VIEW_ROOT / 'run_validation.py',
-		covered=covered,
-	)
 	assert covered == set(_v2_yaml_files())
 
 

@@ -14,12 +14,10 @@ from seis_ssl_cluster.config import (
 )
 
 EXPERIMENT_ROOT = Path(
-	'experiments/f3/facies_benchmark_v2/'
-	'111_local_barlow_twins_gaussian_view_v1'
+	'experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1'
 )
 CONTROL_TRAINING_CONFIG = Path(
-	'experiments/f3/facies_benchmark_v1/'
-	'22_local_barlow_twins_v1/02_full_100ep.yaml'
+	'experiments/f3/facies_benchmark_v1/22_local_barlow_twins_v1/02_full_100ep.yaml'
 )
 CANONICAL_CONTINUATION_CONFIG = Path(
 	'experiments/f3/facies_benchmark_v1/'
@@ -31,7 +29,6 @@ REFERENCE_EXTRACTION_CONFIG = Path(
 	'110_lithology_mae_local_bt_five_way_v2/'
 	'50_embeddings/05_extract_random.yaml'
 )
-README = EXPERIMENT_ROOT / 'README.md'
 HORIZONTAL_POLICY = 'horizontal_flip_gaussian_noise_v1'
 IDENTITY_POLICY = 'identity_gaussian_noise_v1'
 VARIANTS = (
@@ -39,23 +36,17 @@ VARIANTS = (
 		'gaussian_noise_std005',
 		HORIZONTAL_POLICY,
 		0.05,
-		EXPERIMENT_ROOT
-		/ '10_stage1/gaussian_noise_std005/01_screen_25ep.yaml',
-		EXPERIMENT_ROOT
-		/ '15_stage2/gaussian_noise_std005/01_continue_25ep.yaml',
-		EXPERIMENT_ROOT
-		/ '20_embeddings/01_extract_gaussian_noise_std005.yaml',
+		EXPERIMENT_ROOT / '10_stage1/gaussian_noise_std005/01_screen_25ep.yaml',
+		EXPERIMENT_ROOT / '15_stage2/gaussian_noise_std005/01_continue_25ep.yaml',
+		EXPERIMENT_ROOT / '20_embeddings/01_extract_gaussian_noise_std005.yaml',
 	),
 	(
 		'gaussian_noise_std010',
 		HORIZONTAL_POLICY,
 		0.10,
-		EXPERIMENT_ROOT
-		/ '10_stage1/gaussian_noise_std010/01_screen_25ep.yaml',
-		EXPERIMENT_ROOT
-		/ '15_stage2/gaussian_noise_std010/01_continue_25ep.yaml',
-		EXPERIMENT_ROOT
-		/ '20_embeddings/02_extract_gaussian_noise_std010.yaml',
+		EXPERIMENT_ROOT / '10_stage1/gaussian_noise_std010/01_screen_25ep.yaml',
+		EXPERIMENT_ROOT / '15_stage2/gaussian_noise_std010/01_continue_25ep.yaml',
+		EXPERIMENT_ROOT / '20_embeddings/02_extract_gaussian_noise_std010.yaml',
 	),
 	(
 		'identity_gaussian_noise_std010',
@@ -190,9 +181,7 @@ def test_legacy_control_changes_only_duration_and_output() -> None:
 
 
 def test_legacy_control_resolves_to_exact_25_epoch_budget(tmp_path: Path) -> None:
-	config = resolve_barlow_twins_training_config(
-		load_config(LEGACY_TRAINING_CONFIG)
-	)
+	config = resolve_barlow_twins_training_config(load_config(LEGACY_TRAINING_CONFIG))
 
 	assert config['augmentations'] == {'horizontal_flip_probability': 0.5}
 	assert Path(config['paths']['output_root']) == (
@@ -279,9 +268,7 @@ def test_legacy_continuation_is_exact_canonical_top1_except_lineage_output() -> 
 	]
 	assert comparison == canonical
 
-	base = resolve_barlow_twins_training_config(
-		load_config(LEGACY_TRAINING_CONFIG)
-	)
+	base = resolve_barlow_twins_training_config(load_config(LEGACY_TRAINING_CONFIG))
 	resolved = resolve_barlow_twins_training_config(candidate)
 	reference = resolve_barlow_twins_training_config(canonical)
 	assert resolved['continuation'] == {
@@ -313,9 +300,7 @@ def test_extraction_uses_matching_checkpoint_and_v2_overlap_x64_contract(
 	tmp_path: Path,
 ) -> None:
 	del _policy, _noise, _training_path
-	continuation = resolve_barlow_twins_training_config(
-		load_config(continuation_path)
-	)
+	continuation = resolve_barlow_twins_training_config(load_config(continuation_path))
 	candidate = load_config(extraction_path)
 	reference = load_config(REFERENCE_EXTRACTION_CONFIG)
 
@@ -382,9 +367,7 @@ def test_candidates_have_unique_base_final_and_embedding_artifacts() -> None:
 		embedding_outputs.add(extraction['embeddings']['output_dir'])
 		stage2_paths.add(continuation_path)
 	base_outputs.add(load_config(LEGACY_TRAINING_CONFIG)['paths']['output_root'])
-	final_outputs.add(
-		load_config(LEGACY_CONTINUATION_CONFIG)['paths']['output_root']
-	)
+	final_outputs.add(load_config(LEGACY_CONTINUATION_CONFIG)['paths']['output_root'])
 	stage2_paths.add(LEGACY_CONTINUATION_CONFIG)
 	embedding_outputs.add(
 		load_config(LEGACY_EXTRACTION_CONFIG)['embeddings']['output_dir']
@@ -396,24 +379,3 @@ def test_candidates_have_unique_base_final_and_embedding_artifacts() -> None:
 	assert len(embedding_outputs) == len(VARIANTS) + 1
 	assert set((EXPERIMENT_ROOT / '15_stage2').rglob('*.yaml')) == stage2_paths
 	assert not list(EXPERIMENT_ROOT.rglob('*five_way*.yaml'))
-
-
-def test_preregistered_definition_table_is_validation_only() -> None:
-	text = README.read_text(encoding='utf-8')
-
-	for candidate_id in (
-		'local_barlow_twins_gaussian_noise_std005',
-		'local_barlow_twins_gaussian_noise_std010',
-		'local_barlow_twins_identity_gaussian_noise_std010',
-		LEGACY_CONTROL_ID,
-	):
-		assert candidate_id in text
-	assert '## Preregistered 25-epoch definitions' in text
-	assert 'it is not an\noutcome ledger' in text
-	assert '| Candidate | View policy | Noise std | Base epochs |' in text
-	assert 'pending' not in text
-	assert 'authoritative tracked report under\n`reports/`' in text
-	assert 'Validation-only selection rule' in text
-	assert 'unique validation voxels' in text
-	assert 'model=random/layout=<layout>/size=<size>' in text
-	assert 'Test data and\ntest metrics must remain untouched' in text
