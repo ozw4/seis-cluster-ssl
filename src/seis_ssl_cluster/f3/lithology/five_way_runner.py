@@ -374,7 +374,25 @@ def run_f3_lithology_five_way_job(
 	max_steps: int | None = None,
 	resume: Path | None = None,
 ) -> dict[str, object]:
-	"""Audit sources, then train, predict, and evaluate one matrix cell.
+	"""Audit canonical sources, then execute one matrix cell."""
+	if job.metrics_path.is_file():
+		raise FileExistsError(
+			f'job already completed; refusing to overwrite {job.metrics_path}'
+		)
+	audit_f3_lithology_five_way_sources(job.config)
+	return run_f3_lithology_frozen_encoder_job(
+		job, device=device, max_steps=max_steps, resume=resume
+	)
+
+
+def run_f3_lithology_frozen_encoder_job(
+	job: F3FiveWayJob,
+	*,
+	device: str = 'auto',
+	max_steps: int | None = None,
+	resume: Path | None = None,
+) -> dict[str, object]:
+	"""Train, predict, and evaluate one already-audited frozen encoder cell.
 
 	Each stage is skipped when its own completed artifact is already present, so
 	a job interrupted after training can be restarted without retraining.
@@ -383,7 +401,6 @@ def run_f3_lithology_five_way_job(
 		raise FileExistsError(
 			f'job already completed; refusing to overwrite {job.metrics_path}'
 		)
-	audit_f3_lithology_five_way_sources(job.config)
 	validate_f3_lithology_voxel_section_layout_condition(job.condition_dir)
 	if resume is not None and resume != job.decoder_dir / LATEST_CHECKPOINT_NAME:
 		raise ValueError(
@@ -662,4 +679,5 @@ __all__ = [
 	'plan_f3_lithology_five_way_jobs',
 	'resolve_f3_lithology_five_way_job',
 	'run_f3_lithology_five_way_job',
+	'run_f3_lithology_frozen_encoder_job',
 ]
