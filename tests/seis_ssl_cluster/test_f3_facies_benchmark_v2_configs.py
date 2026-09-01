@@ -13,8 +13,11 @@ import yaml
 from seis_ssl_cluster.config import (
 	load_config,
 	resolve_barlow_twins_training_config,
+	resolve_clustering_config,
 	resolve_embedding_extraction_config,
 	resolve_f3_facies_inspection_config,
+	resolve_strat_hmm_pretext_config,
+	resolve_vicreg_training_config,
 )
 from seis_ssl_cluster.config.f3_lithology_five_way import (
 	f3_lithology_five_way_config_from_mapping,
@@ -36,6 +39,9 @@ from seis_ssl_cluster.config.schema import (
 from seis_ssl_cluster.f3.lithology.five_way_runner import (
 	plan_f3_lithology_five_way_jobs,
 )
+from seis_ssl_cluster.f3.lithology.vicreg_benchmark import (
+	f3_vicreg_extension_config_from_mapping,
+)
 from seis_ssl_cluster.f3.lithology.voxel_section_layout_calibration import (
 	f3_section_layout_calibration_config_from_mapping,
 )
@@ -55,6 +61,8 @@ TRACE_DROP_P002_VIEW_ROOT = V2_ROOT / '113_local_barlow_twins_trace_drop_p002_vi
 ZERO_PHASE_Z_FILTER_VIEW_ROOT = (
 	V2_ROOT / '114_local_barlow_twins_zero_phase_z_filter_view_v1'
 )
+LOCAL_VICREG_ROOT = V2_ROOT / '115_local_vicreg_v1'
+LOCAL_VICREG_EXTENSION_ROOT = V2_ROOT / '116_local_vicreg_extension_v1'
 README = FIVE_WAY_ROOT / 'README.md'
 ARTIFACT_ROOT = '/test/artifacts/seis_ssl_cluster'
 RAW_F3_ROOT = '/test/f3'
@@ -298,6 +306,49 @@ ZERO_PHASE_Z_FILTER_VIEW_V1_REFERENCES = (
 		'zero_phase_z_filter_w025_base1ep/local_bt_continue/full_25ep/latest.pt'
 	),
 )
+LOCAL_VICREG_V1_REFERENCES = (
+	(
+		'clustering/f3/facies_benchmark_v1/local_vicreg_v1/hmm_targets/'
+		'vicreg100/k6'
+	),
+	(
+		'embeddings/f3/facies_benchmark_v1/local_vicreg_v1/hmm_targets/'
+		'vicreg100/overlap_x64'
+	),
+	'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/full_100ep',
+	'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/full_100ep/latest.pt',
+	(
+		'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/'
+		'gpu_feasibility_1step'
+	),
+	(
+		'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/stage2/'
+		'vicreg100/hmm/k6/full_25ep'
+	),
+	(
+		'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/stage2/'
+		'vicreg100/hmm/k6/full_25ep/latest.pt'
+	),
+	(
+		'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/stage2/'
+		'vicreg100/hmm/k6/gpu_feasibility_1step'
+	),
+	(
+		'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/stage2/'
+		'vicreg100/vicreg_continue/full_25ep'
+	),
+	(
+		'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/stage2/'
+		'vicreg100/vicreg_continue/full_25ep/latest.pt'
+	),
+	(
+		'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/stage2/'
+		'vicreg100/vicreg_continue/gpu_feasibility_1step'
+	),
+	'pseudo_targets/f3/facies_benchmark_v1/local_vicreg_v1/vicreg100',
+	'registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json',
+	'registry/splits/f3/facies_benchmark_v1/f3_npy_paths.txt',
+)
 ALLOWED_V1_REFERENCES = (
 	*UPSTREAM_CHECKPOINTS.values(),
 	REFERENCE_GEOMETRY_CHECKPOINT,
@@ -306,6 +357,7 @@ ALLOWED_V1_REFERENCES = (
 	*TRACE_DROP_VIEW_V1_REFERENCES,
 	*TRACE_DROP_P002_VIEW_V1_REFERENCES,
 	*ZERO_PHASE_Z_FILTER_VIEW_V1_REFERENCES,
+	*LOCAL_VICREG_V1_REFERENCES,
 )
 REFERENCE_GEOMETRY_DIR = (
 	'embeddings/f3/facies_benchmark_v2/reference_token_geometry/'
@@ -395,7 +447,67 @@ def _resolve_barlow_branch_configs(root: Path, covered: set[Path]) -> None:
 		covered.add(path)
 
 
-def test_every_v2_config_resolves_with_its_owning_resolver() -> None:
+def _resolve_local_vicreg_configs(
+	covered: set[Path],
+	*,
+	artifact_root: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str(artifact_root))
+	stage1_checkpoint = (
+		artifact_root
+		/ 'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/'
+		'full_100ep/latest.pt'
+	)
+	stage1_checkpoint.parent.mkdir(parents=True)
+	stage1_checkpoint.touch()
+	(
+		artifact_root
+		/ 'pseudo_targets/f3/facies_benchmark_v1/local_vicreg_v1/vicreg100'
+	).mkdir(parents=True)
+	for path in (
+		LOCAL_VICREG_ROOT / '01_gpu_feasibility_1step.yaml',
+		LOCAL_VICREG_ROOT / '02_full_100ep.yaml',
+		LOCAL_VICREG_ROOT
+		/ '10_stage2/vicreg100/vicreg_continue/01_gpu_feasibility_1step.yaml',
+		LOCAL_VICREG_ROOT
+		/ '10_stage2/vicreg100/vicreg_continue/02_full_25ep.yaml',
+	):
+		resolve_vicreg_training_config(_load(path))
+		covered.add(path)
+	for path in (
+		LOCAL_VICREG_ROOT / '03_extract_v2_embeddings.yaml',
+		LOCAL_VICREG_ROOT / '20_hmm_targets/vicreg100/01_extract_embeddings.yaml',
+		LOCAL_VICREG_EXTENSION_ROOT
+		/ '50_embeddings/01_extract_local_vicreg.yaml',
+		LOCAL_VICREG_EXTENSION_ROOT
+		/ '50_embeddings/02_extract_local_vicreg_hmm_k6.yaml',
+	):
+		resolve_embedding_extraction_config(_load(path))
+		covered.add(path)
+	cluster = (
+		LOCAL_VICREG_ROOT
+		/ '20_hmm_targets/vicreg100/k6/02_cluster_hmm_k6.yaml'
+	)
+	resolve_clustering_config(_load(cluster))
+	covered.add(cluster)
+	for path in (
+		LOCAL_VICREG_ROOT
+		/ '30_stage2/vicreg100/hmm/k6/01_gpu_feasibility_1step.yaml',
+		LOCAL_VICREG_ROOT
+		/ '30_stage2/vicreg100/hmm/k6/02_full_25ep.yaml',
+	):
+		resolve_strat_hmm_pretext_config(_load(path))
+		covered.add(path)
+	extension = LOCAL_VICREG_EXTENSION_ROOT / '60_extension.yaml'
+	f3_vicreg_extension_config_from_mapping(_load(extension))
+	covered.add(extension)
+
+
+def test_every_v2_config_resolves_with_its_owning_resolver(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
 	covered: set[Path] = set()
 	for name, stage in INSPECTION_STAGES.items():
 		path = INSPECTION_ROOT / name
@@ -457,6 +569,11 @@ def test_every_v2_config_resolves_with_its_owning_resolver() -> None:
 	_resolve_barlow_branch_configs(TRACE_DROP_VIEW_ROOT, covered)
 	_resolve_barlow_branch_configs(TRACE_DROP_P002_VIEW_ROOT, covered)
 	_resolve_barlow_branch_configs(ZERO_PHASE_Z_FILTER_VIEW_ROOT, covered)
+	_resolve_local_vicreg_configs(
+		covered,
+		artifact_root=tmp_path / 'vicreg_artifacts',
+		monkeypatch=monkeypatch,
+	)
 	assert covered == set(_v2_yaml_files())
 
 
