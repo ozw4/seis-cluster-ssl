@@ -31,6 +31,9 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	LAYOUT_IDS,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
+from seis_ssl_cluster.f3.lithology.five_way_results import (
+	read_f3_lithology_job_evidence,
+)
 from seis_ssl_cluster.f3.lithology.five_way_runner import (
 	EVALUATION_DIR_NAME,
 	METRICS_NAME,
@@ -224,6 +227,23 @@ def audit_f3_lithology_candidate_source(
 			'the checkpoint file'
 		)
 	_compare_metadata_identity(candidate_metadata, random_metadata)
+	random_checkpoint_path = random_metadata.get('checkpoint_path')
+	if not isinstance(random_checkpoint_path, str) or Path(
+		random_checkpoint_path
+	).resolve(strict=False) != random_source.checkpoint.resolve(strict=False):
+		raise ValueError(
+			'canonical random embedding metadata checkpoint_path does not match '
+			'the canonical config'
+		)
+	random_checkpoint_sha256 = random_metadata.get('checkpoint_sha256')
+	if (
+		not isinstance(random_checkpoint_sha256, str)
+		or len(random_checkpoint_sha256) != 64
+	):
+		raise ValueError(
+			'canonical random embedding metadata checkpoint_sha256 must be a '
+			'SHA-256 digest'
+		)
 	_compare_embedding_arrays(candidate_files, random_files)
 	valid_tokens_sha256 = file_sha256(candidate_files.valid_tokens)
 	random_valid_tokens_sha256 = file_sha256(random_files.valid_tokens)
@@ -244,6 +264,8 @@ def audit_f3_lithology_candidate_source(
 		'valid_tokens_sha256': valid_tokens_sha256,
 		'canonical_random': {
 			'model_id': random_source.model_id,
+			'checkpoint_path': str(random_source.checkpoint),
+			'checkpoint_sha256': random_checkpoint_sha256,
 			'embeddings_path': str(random_files.embeddings),
 			'embeddings_sha256': file_sha256(random_files.embeddings),
 			'embedding_metadata_path': str(random_files.metadata),
@@ -443,7 +465,39 @@ def _comparison_rows(
 			f'missing {len(missing)} candidate/random metric cell(s): {missing!r}'
 		)
 	rows = []
+	candidate_source = F3FiveWayModelSource(
+		model_id=config.candidate_id,
+		checkpoint=config.checkpoint,
+		embeddings_dir=config.embeddings_dir,
+		expected={},
+	)
 	for layout_id, data_size, candidate_path, random_path in paths:
+		candidate_job_dir = candidate_path.parent.parent
+		random_job_dir = random_path.parent.parent
+		candidate_evidence = read_f3_lithology_job_evidence(
+			canonical_config,
+			model=candidate_source,
+			layout_id=layout_id,
+			data_size=data_size,
+			job_dir=candidate_job_dir,
+		)
+		random_evidence = read_f3_lithology_job_evidence(
+			canonical_config,
+			model=random_source,
+			layout_id=layout_id,
+			data_size=data_size,
+			job_dir=random_job_dir,
+		)
+		_assert_job_source_matches(
+			candidate_evidence,
+			provenance,
+			label=f'candidate/{layout_id}/{data_size}',
+		)
+		_assert_job_source_matches(
+			random_evidence,
+			provenance['canonical_random'],
+			label=f'random/{layout_id}/{data_size}',
+		)
 		candidate_value, candidate_voxels = _macro_f1(
 			candidate_path, label=f'candidate/{layout_id}/{data_size}'
 		)
@@ -475,6 +529,27 @@ def _comparison_rows(
 			}
 		)
 	return rows
+
+
+def _assert_job_source_matches(
+	evidence: Mapping[str, object],
+	current_source: object,
+	*,
+	label: str,
+) -> None:
+	if not isinstance(current_source, Mapping):
+		raise TypeError(f'{label} current source provenance must be a mapping')
+	for evidence_key, source_key in (
+		('encoder_checkpoint_sha256', 'checkpoint_sha256'),
+		('embeddings_sha256', 'embeddings_sha256'),
+		('embedding_metadata_sha256', 'embedding_metadata_sha256'),
+		('valid_tokens_sha256', 'valid_tokens_sha256'),
+	):
+		if evidence.get(evidence_key) != current_source.get(source_key):
+			raise ValueError(
+				f'{label} completed job {evidence_key} does not match '
+				'the current source'
+			)
 
 
 def _metrics_path(
