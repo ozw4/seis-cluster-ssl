@@ -10,6 +10,10 @@ from seis_ssl_cluster.config import (
 )
 from seis_ssl_cluster.config.schema import (
 	DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
+	HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+	IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
 	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
 
@@ -19,6 +23,37 @@ def _d4_augmentations() -> dict[str, object]:
 		'policy': XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 		'reflection_probability': 0.5,
 		'trace_drop_probability': 0.02,
+	}
+
+
+def _gaussian_noise_augmentations() -> dict[str, object]:
+	return {
+		'policy': HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'gaussian_noise_std': 0.05,
+	}
+
+
+def _horizontal_trace_drop_augmentations() -> dict[str, object]:
+	return {
+		'policy': HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'trace_drop_probability': 0.1,
+	}
+
+
+def _zero_phase_z_filter_augmentations() -> dict[str, object]:
+	return {
+		'policy': HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'z_filter_side_weight': 0.125,
+	}
+
+
+def _identity_gaussian_noise_augmentations() -> dict[str, object]:
+	return {
+		'policy': IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		'gaussian_noise_std': 0.05,
 	}
 
 
@@ -85,6 +120,332 @@ def test_d4_trace_drop_augmentation_resolves_exact_mapping() -> None:
 		'trace_drop_probability': 0.02,
 	}
 	assert 'horizontal_flip_probability' not in resolved['augmentations']
+
+
+def test_gaussian_noise_augmentation_resolves_exact_mapping() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = _gaussian_noise_augmentations()
+
+	resolved = resolve_barlow_twins_training_config(config)
+
+	assert resolved['augmentations'] == {
+		'policy': HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'gaussian_noise_std': 0.05,
+	}
+
+
+def test_horizontal_trace_drop_resolves_exact_mapping_without_square_xy() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = _horizontal_trace_drop_augmentations()
+	data = config['data']
+	model = config['model']
+	assert isinstance(data, dict)
+	assert isinstance(model, dict)
+	data['local_crop_size'] = [4, 6, 4]
+	model['patch_size'] = [1, 2, 2]
+
+	resolved = resolve_barlow_twins_training_config(config)
+
+	assert resolved['augmentations'] == {
+		'policy': HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'trace_drop_probability': 0.1,
+	}
+
+
+def test_zero_phase_z_filter_resolves_exact_mapping_without_square_xy() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = _zero_phase_z_filter_augmentations()
+	data = config['data']
+	model = config['model']
+	assert isinstance(data, dict)
+	assert isinstance(model, dict)
+	data['local_crop_size'] = [4, 6, 4]
+	model['patch_size'] = [1, 2, 2]
+
+	resolved = resolve_barlow_twins_training_config(config)
+
+	assert resolved['augmentations'] == {
+		'policy': HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'z_filter_side_weight': 0.125,
+	}
+
+
+@pytest.mark.parametrize(
+	'augmentations',
+	[
+		{
+			'policy': HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+			'horizontal_flip_probability': 0.5,
+		},
+		{
+			**_zero_phase_z_filter_augmentations(),
+			'trace_drop_probability': 0.02,
+		},
+	],
+)
+def test_zero_phase_z_filter_rejects_nonexact_contract(
+	augmentations: dict[str, object],
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = augmentations
+
+	with pytest.raises((TypeError, ValueError), match='augmentations'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize(
+	('key', 'value'),
+	[
+		('horizontal_flip_probability', -0.1),
+		('z_filter_side_weight', 0.0),
+		('z_filter_side_weight', 0.5),
+		('z_filter_side_weight', float('nan')),
+	],
+)
+def test_zero_phase_z_filter_rejects_invalid_contract(
+	key: str,
+	value: object,
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = {
+		**_zero_phase_z_filter_augmentations(),
+		key: value,
+	}
+
+	with pytest.raises((TypeError, ValueError), match=key):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_zero_phase_z_filter_requires_local_barlow_twins_method() -> None:
+	config = _minimal_barlow_config()
+	config['augmentations'] = _zero_phase_z_filter_augmentations()
+
+	with pytest.raises(ValueError, match=r'requires barlow_twins\.method'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize(
+	'augmentations',
+	[
+		{
+			'policy': HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+			'horizontal_flip_probability': 0.5,
+		},
+		{
+			**_horizontal_trace_drop_augmentations(),
+			'gaussian_noise_std': 0.05,
+		},
+		{**_horizontal_trace_drop_augmentations(), 'unknown': True},
+	],
+)
+def test_horizontal_trace_drop_rejects_nonexact_contract(
+	augmentations: dict[str, object],
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = augmentations
+
+	with pytest.raises((TypeError, ValueError), match='augmentations'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize(
+	('key', 'value'),
+	[
+		('horizontal_flip_probability', -0.1),
+		('horizontal_flip_probability', True),
+		('trace_drop_probability', 1.1),
+		('trace_drop_probability', float('nan')),
+	],
+)
+def test_horizontal_trace_drop_rejects_invalid_probability(
+	key: str,
+	value: object,
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = {
+		**_horizontal_trace_drop_augmentations(),
+		key: value,
+	}
+
+	with pytest.raises((TypeError, ValueError), match=key):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_global_barlow_rejects_horizontal_trace_drop_policy() -> None:
+	config = _minimal_barlow_config()
+	config['augmentations'] = _horizontal_trace_drop_augmentations()
+
+	with pytest.raises(ValueError, match=r'requires barlow_twins\.method'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize(
+	'augmentations',
+	[
+		{
+			'policy': HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+			'horizontal_flip_probability': 0.5,
+		},
+		{
+			**_gaussian_noise_augmentations(),
+			'trace_drop_probability': 0.02,
+		},
+		{
+			**_gaussian_noise_augmentations(),
+			'unknown': True,
+		},
+	],
+)
+def test_gaussian_noise_augmentation_rejects_nonexact_contract(
+	augmentations: dict[str, object],
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = augmentations
+
+	with pytest.raises((TypeError, ValueError), match='augmentations'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize(
+	('key', 'value'),
+	[
+		('horizontal_flip_probability', -0.1),
+		('horizontal_flip_probability', 1.1),
+		('horizontal_flip_probability', float('inf')),
+		('horizontal_flip_probability', True),
+		('gaussian_noise_std', -0.1),
+		('gaussian_noise_std', float('inf')),
+		('gaussian_noise_std', float('nan')),
+		('gaussian_noise_std', True),
+	],
+)
+def test_gaussian_noise_augmentation_rejects_invalid_value(
+	key: str,
+	value: object,
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = {**_gaussian_noise_augmentations(), key: value}
+
+	with pytest.raises((TypeError, ValueError), match=key):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_global_barlow_rejects_gaussian_noise_policy() -> None:
+	config = _minimal_barlow_config()
+	config['augmentations'] = _gaussian_noise_augmentations()
+
+	with pytest.raises(ValueError, match=r'requires barlow_twins\.method'):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_identity_gaussian_noise_augmentation_resolves_exact_mapping() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = _identity_gaussian_noise_augmentations()
+
+	resolved = resolve_barlow_twins_training_config(config)
+
+	assert resolved['augmentations'] == {
+		'policy': IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		'gaussian_noise_std': 0.05,
+	}
+	assert 'horizontal_flip_probability' not in resolved['augmentations']
+
+
+@pytest.mark.parametrize(
+	'augmentations',
+	[
+		{'policy': IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY},
+		{
+			**_identity_gaussian_noise_augmentations(),
+			'horizontal_flip_probability': 0.0,
+		},
+		{**_identity_gaussian_noise_augmentations(), 'unknown': True},
+	],
+)
+def test_identity_gaussian_noise_rejects_nonexact_mapping(
+	augmentations: dict[str, object],
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = augmentations
+
+	with pytest.raises((TypeError, ValueError), match='augmentations'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize(
+	'gaussian_noise_std',
+	[0.0, -0.1, float('inf'), float('nan'), True, '0.05'],
+)
+def test_identity_gaussian_noise_requires_positive_finite_std(
+	gaussian_noise_std: object,
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 8,
+	}
+	config['augmentations'] = {
+		**_identity_gaussian_noise_augmentations(),
+		'gaussian_noise_std': gaussian_noise_std,
+	}
+
+	with pytest.raises(ValueError, match='gaussian_noise_std'):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_global_barlow_rejects_identity_gaussian_noise_policy() -> None:
+	config = _minimal_barlow_config()
+	config['augmentations'] = _identity_gaussian_noise_augmentations()
+
+	with pytest.raises(ValueError, match=r'requires barlow_twins\.method'):
+		resolve_barlow_twins_training_config(config)
 
 
 @pytest.mark.parametrize(
@@ -177,9 +538,7 @@ def test_d4_trace_drop_policy_rejects_non_square_xy(
 	config['augmentations'] = _d4_augmentations()
 	section_mapping = config[section]
 	assert isinstance(section_mapping, dict)
-	section_mapping[
-		'local_crop_size' if section == 'data' else 'patch_size'
-	] = shape
+	section_mapping['local_crop_size' if section == 'data' else 'patch_size'] = shape
 
 	with pytest.raises(ValueError, match=message):
 		resolve_barlow_twins_training_config(config)

@@ -34,6 +34,16 @@ EXPECTED_MODEL_NAME: Final = 'amp_mae3d'
 EXPECTED_SPATIAL_MASK_MODE: Final = 'block'
 BARLOW_TWINS_PRETRAINING_METHOD: Final = 'barlow_twins_3d'
 LOCAL_BARLOW_TWINS_PRETRAINING_METHOD: Final = 'local_barlow_twins_3d'
+HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_gaussian_noise_v1'
+)
+HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_trace_drop_v1'
+)
+HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_zero_phase_z_filter_v1'
+)
+IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY: Final = 'identity_gaussian_noise_v1'
 XY_D4_TRACE_DROP_AUGMENTATION_POLICY: Final = 'xy_d4_trace_drop_v1'
 SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS: Final = frozenset(
 	{

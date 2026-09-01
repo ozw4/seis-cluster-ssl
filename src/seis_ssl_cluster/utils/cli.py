@@ -235,11 +235,37 @@ def _add_barlow_twins_training_rows(
 		('data.local_crop_size', data.get('local_crop_size')),
 		('model.patch_size', model.get('patch_size')),
 		('model.encoder_depth', model.get('encoder_depth')),
-		(
-			'augmentations.horizontal_flip_probability',
-			augmentations.get('horizontal_flip_probability'),
-		),
 	]
+	if 'horizontal_flip_probability' in augmentations:
+		barlow_rows.append(
+			(
+				'augmentations.horizontal_flip_probability',
+				augmentations.get('horizontal_flip_probability'),
+			)
+		)
+	if 'policy' in augmentations:
+		barlow_rows.append(('augmentations.policy', augmentations.get('policy')))
+	if 'gaussian_noise_std' in augmentations:
+		barlow_rows.append(
+			(
+				'augmentations.gaussian_noise_std',
+				augmentations.get('gaussian_noise_std'),
+			)
+		)
+	if 'trace_drop_probability' in augmentations:
+		barlow_rows.append(
+			(
+				'augmentations.trace_drop_probability',
+				augmentations.get('trace_drop_probability'),
+			)
+		)
+	if 'z_filter_side_weight' in augmentations:
+		barlow_rows.append(
+			(
+				'augmentations.z_filter_side_weight',
+				augmentations.get('z_filter_side_weight'),
+			)
+		)
 	if 'method' in barlow:
 		barlow_rows.append(('barlow_twins.method', barlow.get('method')))
 	if 'local_pairs_per_crop' in barlow:

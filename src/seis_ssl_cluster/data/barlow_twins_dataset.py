@@ -84,16 +84,20 @@ class BarlowTwinsPretrainDataset:
 
 
 class LocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
-	"""Return flipped views and indices for matching physical tokens."""
+	"""Return independently perturbed views and matching physical-token indices."""
 
-	def __init__(
+	def __init__(  # noqa: PLR0913
 		self,
 		base_dataset: AmplitudePretrainDataset,
 		*,
 		local_pairs_per_crop: int,
 		horizontal_flip_probability: float = 0.5,
+		gaussian_noise_std: float = 0.0,
+		trace_drop_probability: float = 0.0,
+		z_filter_side_weight: float = 0.0,
+		require_distinct_horizontal_views: bool = True,
 	) -> None:
-		"""Initialize the local-pair wrapper and validate its sampling contract."""
+		"""Initialize the local-pair wrapper and validate its view contract."""
 		super().__init__(
 			base_dataset,
 			horizontal_flip_probability=horizontal_flip_probability,
@@ -101,6 +105,22 @@ class LocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
 		self.local_pairs_per_crop = _validate_positive_int(
 			local_pairs_per_crop,
 			'local_pairs_per_crop',
+		)
+		self.gaussian_noise_std = _validate_nonnegative_finite_real(
+			gaussian_noise_std,
+			'gaussian_noise_std',
+		)
+		self.trace_drop_probability = _validate_probability(
+			trace_drop_probability,
+			'trace_drop_probability',
+		)
+		self.z_filter_side_weight = _validate_zero_phase_z_filter_side_weight(
+			z_filter_side_weight,
+			'z_filter_side_weight',
+		)
+		self.require_distinct_horizontal_views = _validate_bool(
+			require_distinct_horizontal_views,
+			'require_distinct_horizontal_views',
 		)
 		if base_dataset.min_valid_token_count < self.local_pairs_per_crop:
 			msg = (
@@ -121,7 +141,7 @@ class LocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
 			valid_mask,
 			rng,
 			probability=self.horizontal_flip_probability,
-			require_distinct=True,
+			require_distinct=self.require_distinct_horizontal_views,
 		)
 
 		canonical_indices, token_shape = _sample_canonical_token_indices(
@@ -130,6 +150,44 @@ class LocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
 			self.local_pairs_per_crop,
 			rng,
 		)
+		_apply_gaussian_noise(
+			view_a,
+			valid_mask_a,
+			rng,
+			standard_deviation=self.gaussian_noise_std,
+		)
+		_apply_gaussian_noise(
+			view_b,
+			valid_mask_b,
+			rng,
+			standard_deviation=self.gaussian_noise_std,
+		)
+		if self.trace_drop_probability != 0.0:
+			_apply_trace_drop(
+				view_a,
+				valid_mask_a,
+				rng,
+				probability=self.trace_drop_probability,
+			)
+			_apply_trace_drop(
+				view_b,
+				valid_mask_b,
+				rng,
+				probability=self.trace_drop_probability,
+			)
+		if self.z_filter_side_weight != 0.0:
+			if bool(rng.integers(0, 2)):
+				_apply_zero_phase_z_filter(
+					view_a,
+					valid_mask_a,
+					side_weight=self.z_filter_side_weight,
+				)
+			else:
+				_apply_zero_phase_z_filter(
+					view_b,
+					valid_mask_b,
+					side_weight=self.z_filter_side_weight,
+				)
 
 		return {
 			'view_a': view_a,
@@ -417,6 +475,62 @@ def _apply_trace_drop(
 	return int(drop_x.size)
 
 
+def _apply_gaussian_noise(
+	view: np.ndarray,
+	valid_mask: np.ndarray,
+	rng: np.random.Generator,
+	*,
+	standard_deviation: float,
+) -> None:
+	if standard_deviation == 0.0:
+		return
+	noise = rng.standard_normal(view.shape, dtype=np.float32)
+	noise *= np.float32(standard_deviation)
+	noise *= valid_mask[np.newaxis, ...]
+	view += noise
+
+
+def _apply_zero_phase_z_filter(
+	view: np.ndarray,
+	valid_mask: np.ndarray,
+	*,
+	side_weight: float,
+) -> None:
+	"""Apply a centered unit-DC Z filter without crossing invalid samples."""
+	if side_weight == 0.0:
+		return
+	center_weight = np.float32(1.0 - 2.0 * side_weight)
+	side_weight_float32 = np.float32(side_weight)
+	valid = valid_mask.astype(np.float32, copy=False)
+	weights = center_weight * valid
+	filtered = center_weight * view * valid[np.newaxis, ...]
+	if view.shape[-1] > 1:
+		left_valid = valid[..., :-1]
+		right_valid = valid[..., 1:]
+		left_values = np.where(left_valid[np.newaxis, ...], view[..., :-1], 0.0)
+		right_values = np.where(
+			right_valid[np.newaxis, ...],
+			view[..., 1:],
+			0.0,
+		)
+		filtered[..., 1:] += (
+			side_weight_float32 * left_values
+		)
+		weights[..., 1:] += side_weight_float32 * left_valid
+		filtered[..., :-1] += (
+			side_weight_float32 * right_values
+		)
+		weights[..., :-1] += side_weight_float32 * right_valid
+	output = view.copy()
+	np.divide(
+		filtered,
+		weights[np.newaxis, ...],
+		out=output,
+		where=valid_mask[np.newaxis, ...],
+	)
+	view[...] = output
+
+
 def _validate_square_xy(shape_xyz: tuple[int, int, int], name: str) -> None:
 	if shape_xyz[0] != shape_xyz[1]:
 		msg = f'{name} X/Y sizes must be equal; got {shape_xyz!r}'
@@ -476,6 +590,32 @@ def _validate_positive_int(value: object, name: str) -> int:
 		msg = f'{name} must be positive; got {integer!r}'
 		raise ValueError(msg)
 	return integer
+
+
+def _validate_nonnegative_finite_real(value: object, name: str) -> float:
+	if isinstance(value, bool) or not isinstance(value, Real):
+		msg = f'{name} must be a real number; got {value!r}'
+		raise TypeError(msg)
+	validated = float(value)
+	if not np.isfinite(validated) or validated < 0.0:
+		msg = f'{name} must be a nonnegative finite number; got {validated!r}'
+		raise ValueError(msg)
+	return validated
+
+
+def _validate_zero_phase_z_filter_side_weight(value: object, name: str) -> float:
+	validated = _validate_nonnegative_finite_real(value, name)
+	if validated >= 0.5:
+		msg = f'{name} must be in [0, 0.5); got {validated!r}'
+		raise ValueError(msg)
+	return validated
+
+
+def _validate_bool(value: object, name: str) -> bool:
+	if not isinstance(value, bool):
+		msg = f'{name} must be a bool; got {value!r}'
+		raise TypeError(msg)
+	return value
 
 
 def _sample_horizontal_flip_state(

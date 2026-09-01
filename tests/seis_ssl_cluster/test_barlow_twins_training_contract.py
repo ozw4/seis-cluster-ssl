@@ -17,6 +17,10 @@ import seis_ssl_cluster.training.barlow_twins as barlow_twins_module
 from seis_ssl_cluster.config import resolve_barlow_twins_training_config
 from seis_ssl_cluster.config.schema import (
 	BARLOW_TWINS_PRETRAINING_METHOD,
+	HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+	IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
@@ -126,6 +130,138 @@ def test_cli_dry_run_displays_local_method_without_creating_artifacts(
 	assert 'barlow_twins.local_pairs_per_crop: 4' in result.stdout
 	assert 'execution: dry-run; training skipped' in result.stdout
 	assert not output_root.exists()
+
+
+def test_cli_dry_run_displays_gaussian_view_policy(
+	tmp_path: Path,
+) -> None:
+	raw_config = _tiny_gaussian_noise_config(
+		tmp_path,
+		output_name='gaussian-dry-run-output',
+	)
+	config_path = tmp_path / 'gaussian-barlow.yaml'
+	config_path.write_text(
+		yaml.safe_dump(raw_config, sort_keys=False),
+		encoding='utf-8',
+	)
+
+	result = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			'proc/seis_ssl_cluster/train_amp_barlow_twins.py',
+			'--config',
+			str(config_path),
+			'--dry-run',
+		],
+		check=True,
+		capture_output=True,
+		text=True,
+	)
+
+	assert 'augmentations.policy: horizontal_flip_gaussian_noise_v1' in result.stdout
+	assert 'augmentations.gaussian_noise_std: 0.05' in result.stdout
+	assert 'execution: dry-run; training skipped' in result.stdout
+
+
+def test_cli_dry_run_displays_horizontal_trace_drop_policy(
+	tmp_path: Path,
+) -> None:
+	raw_config = _tiny_horizontal_trace_drop_config(
+		tmp_path,
+		output_name='horizontal-trace-drop-dry-run-output',
+	)
+	config_path = tmp_path / 'horizontal-trace-drop-barlow.yaml'
+	config_path.write_text(
+		yaml.safe_dump(raw_config, sort_keys=False),
+		encoding='utf-8',
+	)
+	output_root = tmp_path / 'artifacts' / 'horizontal-trace-drop-dry-run-output'
+
+	result = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			'proc/seis_ssl_cluster/train_amp_barlow_twins.py',
+			'--config',
+			str(config_path),
+			'--dry-run',
+		],
+		check=True,
+		capture_output=True,
+		text=True,
+	)
+
+	assert 'augmentations.policy: horizontal_flip_trace_drop_v1' in result.stdout
+	assert 'augmentations.horizontal_flip_probability: 0.5' in result.stdout
+	assert 'augmentations.trace_drop_probability: 0.25' in result.stdout
+	assert 'execution: dry-run; training skipped' in result.stdout
+	assert not output_root.exists()
+
+
+def test_cli_dry_run_displays_zero_phase_z_filter_policy(
+	tmp_path: Path,
+) -> None:
+	raw_config = _tiny_zero_phase_z_filter_config(
+		tmp_path,
+		output_name='zero-phase-z-filter-dry-run-output',
+	)
+	config_path = tmp_path / 'zero-phase-z-filter-barlow.yaml'
+	config_path.write_text(
+		yaml.safe_dump(raw_config, sort_keys=False),
+		encoding='utf-8',
+	)
+
+	result = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			'proc/seis_ssl_cluster/train_amp_barlow_twins.py',
+			'--config',
+			str(config_path),
+			'--dry-run',
+		],
+		check=True,
+		capture_output=True,
+		text=True,
+	)
+
+	assert (
+		'augmentations.policy: horizontal_flip_zero_phase_z_filter_v1'
+		in result.stdout
+	)
+	assert 'augmentations.horizontal_flip_probability: 0.5' in result.stdout
+	assert 'augmentations.z_filter_side_weight: 0.125' in result.stdout
+	assert 'execution: dry-run; training skipped' in result.stdout
+
+
+def test_cli_dry_run_displays_identity_gaussian_without_flip_probability(
+	tmp_path: Path,
+) -> None:
+	raw_config = _tiny_identity_gaussian_noise_config(
+		tmp_path,
+		output_name='identity-gaussian-dry-run-output',
+	)
+	config_path = tmp_path / 'identity-gaussian-barlow.yaml'
+	config_path.write_text(
+		yaml.safe_dump(raw_config, sort_keys=False),
+		encoding='utf-8',
+	)
+
+	result = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			'proc/seis_ssl_cluster/train_amp_barlow_twins.py',
+			'--config',
+			str(config_path),
+			'--dry-run',
+		],
+		check=True,
+		capture_output=True,
+		text=True,
+	)
+
+	assert 'augmentations.policy: identity_gaussian_noise_v1' in result.stdout
+	assert 'augmentations.gaussian_noise_std: 0.05' in result.stdout
+	assert 'augmentations.horizontal_flip_probability' not in result.stdout
+	assert 'execution: dry-run; training skipped' in result.stdout
 
 
 def test_checkpoint_contract_round_trip_and_epoch_resume(
@@ -354,6 +490,293 @@ def test_d4_trace_drop_one_step_uses_policy_dataset_and_saves_config(
 	assert set(history[0]) >= D4_AUGMENTATION_METRICS
 	for key in D4_AUGMENTATION_METRICS:
 		assert history[0][key] == payload['metrics'][key]
+
+
+def test_gaussian_noise_one_step_dispatches_policy_and_saves_config(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	original_dataset = barlow_twins_module.LocalBarlowTwinsPretrainDataset
+	dataset_calls: list[dict[str, object]] = []
+
+	def record_dataset(
+		base_dataset: object,
+		**kwargs: object,
+	) -> object:
+		dataset_calls.append(kwargs)
+		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(
+		barlow_twins_module,
+		'LocalBarlowTwinsPretrainDataset',
+		record_dataset,
+	)
+	config = resolve_barlow_twins_training_config(
+		_tiny_gaussian_noise_config(
+			tmp_path,
+			output_name='gaussian-noise-one-step',
+		)
+	)
+
+	checkpoint_path = run_barlow_twins_pretraining(config)
+	payload = load_barlow_twins_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert dataset_calls == [
+		{
+			'local_pairs_per_crop': 4,
+			'horizontal_flip_probability': 0.5,
+			'gaussian_noise_std': 0.05,
+		}
+	]
+	assert payload['config']['augmentations'] == {
+		'policy': HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'gaussian_noise_std': 0.05,
+	}
+	assert payload['global_step'] == 1
+	assert all(np.isfinite(value) for value in payload['metrics'].values())
+	assert D4_AUGMENTATION_METRICS.isdisjoint(payload['metrics'])
+
+
+def test_horizontal_trace_drop_one_step_dispatches_policy_and_saves_config(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	original_dataset = barlow_twins_module.LocalBarlowTwinsPretrainDataset
+	dataset_calls: list[dict[str, object]] = []
+
+	def record_dataset(
+		base_dataset: object,
+		**kwargs: object,
+	) -> object:
+		dataset_calls.append(kwargs)
+		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(
+		barlow_twins_module,
+		'LocalBarlowTwinsPretrainDataset',
+		record_dataset,
+	)
+	config = resolve_barlow_twins_training_config(
+		_tiny_horizontal_trace_drop_config(
+			tmp_path,
+			output_name='horizontal-trace-drop-one-step',
+		)
+	)
+
+	checkpoint_path = run_barlow_twins_pretraining(config)
+	payload = load_barlow_twins_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert dataset_calls == [
+		{
+			'local_pairs_per_crop': 4,
+			'horizontal_flip_probability': 0.5,
+			'trace_drop_probability': 0.25,
+		}
+	]
+	assert payload['config']['augmentations'] == {
+		'policy': HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'trace_drop_probability': 0.25,
+	}
+	assert payload['global_step'] == 1
+	assert all(np.isfinite(value) for value in payload['metrics'].values())
+	assert D4_AUGMENTATION_METRICS.isdisjoint(payload['metrics'])
+
+
+def test_zero_phase_z_filter_one_step_dispatches_policy_and_saves_config(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	original_dataset = barlow_twins_module.LocalBarlowTwinsPretrainDataset
+	dataset_calls: list[dict[str, object]] = []
+
+	def record_dataset(
+		base_dataset: object,
+		**kwargs: object,
+	) -> object:
+		dataset_calls.append(kwargs)
+		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(
+		barlow_twins_module,
+		'LocalBarlowTwinsPretrainDataset',
+		record_dataset,
+	)
+	config = resolve_barlow_twins_training_config(
+		_tiny_zero_phase_z_filter_config(
+			tmp_path,
+			output_name='zero-phase-z-filter-one-step',
+		)
+	)
+
+	checkpoint_path = run_barlow_twins_pretraining(config)
+	payload = load_barlow_twins_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert dataset_calls == [
+		{
+			'local_pairs_per_crop': 4,
+			'horizontal_flip_probability': 0.5,
+			'z_filter_side_weight': 0.125,
+		}
+	]
+	assert payload['config']['augmentations'] == {
+		'policy': HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'z_filter_side_weight': 0.125,
+	}
+	assert payload['global_step'] == 1
+	assert all(np.isfinite(value) for value in payload['metrics'].values())
+	assert D4_AUGMENTATION_METRICS.isdisjoint(payload['metrics'])
+
+
+def test_identity_gaussian_one_step_dispatches_policy_and_saves_config(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	original_dataset = barlow_twins_module.LocalBarlowTwinsPretrainDataset
+	dataset_calls: list[dict[str, object]] = []
+
+	def record_dataset(
+		base_dataset: object,
+		**kwargs: object,
+	) -> object:
+		dataset_calls.append(kwargs)
+		return original_dataset(base_dataset, **kwargs)  # type: ignore[arg-type]
+
+	monkeypatch.setattr(
+		barlow_twins_module,
+		'LocalBarlowTwinsPretrainDataset',
+		record_dataset,
+	)
+	config = resolve_barlow_twins_training_config(
+		_tiny_identity_gaussian_noise_config(
+			tmp_path,
+			output_name='identity-gaussian-one-step',
+		)
+	)
+
+	checkpoint_path = run_barlow_twins_pretraining(config)
+	payload = load_barlow_twins_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert dataset_calls == [
+		{
+			'local_pairs_per_crop': 4,
+			'horizontal_flip_probability': 0.0,
+			'gaussian_noise_std': 0.05,
+			'require_distinct_horizontal_views': False,
+		}
+	]
+	assert payload['config']['augmentations'] == {
+		'policy': IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		'gaussian_noise_std': 0.05,
+	}
+	assert payload['global_step'] == 1
+	assert all(np.isfinite(value) for value in payload['metrics'].values())
+	assert D4_AUGMENTATION_METRICS.isdisjoint(payload['metrics'])
+
+
+def test_identity_gaussian_resume_preserves_exact_policy_identity(
+	tmp_path: Path,
+) -> None:
+	source_path = run_barlow_twins_pretraining(
+		resolve_barlow_twins_training_config(
+			_tiny_identity_gaussian_noise_config(
+				tmp_path,
+				output_name='identity-resume-source',
+			)
+		)
+	)
+	resume_config = resolve_barlow_twins_training_config(
+		_tiny_identity_gaussian_noise_config(
+			tmp_path,
+			epochs=2,
+			max_steps=2,
+			output_name='identity-resume-source',
+		)
+	)
+
+	resumed_path = run_barlow_twins_pretraining(
+		resume_config,
+		resume=source_path,
+	)
+	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
+
+	assert resumed['epoch'] == 2
+	assert resumed['global_step'] == 2
+	assert resumed['config']['augmentations'] == {
+		'policy': IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		'gaussian_noise_std': 0.05,
+	}
+
+	for raw_config in (
+		_tiny_gaussian_noise_config(
+			tmp_path,
+			epochs=3,
+			max_steps=3,
+			output_name='horizontal-from-identity',
+		),
+		_tiny_identity_gaussian_noise_config(
+			tmp_path,
+			epochs=3,
+			max_steps=3,
+			output_name='changed-std-from-identity',
+			gaussian_noise_std=0.10,
+		),
+	):
+		with pytest.raises(ValueError, match='augmentations'):
+			run_barlow_twins_pretraining(
+				resolve_barlow_twins_training_config(raw_config),
+				resume=resumed_path,
+				)
+
+
+def test_horizontal_trace_drop_resume_preserves_exact_policy_identity(
+	tmp_path: Path,
+) -> None:
+	source_path = run_barlow_twins_pretraining(
+		resolve_barlow_twins_training_config(
+			_tiny_horizontal_trace_drop_config(
+				tmp_path,
+				output_name='horizontal-trace-drop-resume-source',
+			)
+		)
+	)
+	resume_config = resolve_barlow_twins_training_config(
+		_tiny_horizontal_trace_drop_config(
+			tmp_path,
+			epochs=2,
+			max_steps=2,
+			output_name='horizontal-trace-drop-resume-source',
+		)
+	)
+
+	resumed_path = run_barlow_twins_pretraining(
+		resume_config,
+		resume=source_path,
+	)
+	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
+
+	assert resumed['epoch'] == 2
+	assert resumed['global_step'] == 2
+	assert resumed['config']['augmentations'] == {
+		'policy': HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'trace_drop_probability': 0.25,
+	}
+
+	changed_probability = _tiny_horizontal_trace_drop_config(
+		tmp_path,
+		epochs=3,
+		max_steps=3,
+		output_name='horizontal-trace-drop-changed-probability',
+		trace_drop_probability=0.5,
+	)
+	with pytest.raises(ValueError, match='augmentations'):
+		run_barlow_twins_pretraining(
+			resolve_barlow_twins_training_config(changed_probability),
+			resume=resumed_path,
+		)
 
 
 def test_d4_resume_is_strict_about_augmentation_identity(tmp_path: Path) -> None:
@@ -1047,6 +1470,108 @@ def _tiny_d4_config(  # noqa: PLR0913
 		'policy': XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 		'reflection_probability': 0.5,
 		'trace_drop_probability': 0.02,
+	}
+	return config
+
+
+def _tiny_gaussian_noise_config(  # noqa: PLR0913
+	tmp_path: Path,
+	*,
+	epochs: int = 1,
+	max_steps: int = 1,
+	output_name: str = 'gaussian-noise-run',
+	encoder_depth: int = 1,
+	local_pairs_per_crop: int = 4,
+) -> dict[str, object]:
+	config = _tiny_local_config(
+		tmp_path,
+		epochs=epochs,
+		max_steps=max_steps,
+		output_name=output_name,
+		encoder_depth=encoder_depth,
+		local_pairs_per_crop=local_pairs_per_crop,
+	)
+	config['augmentations'] = {
+		'policy': HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'gaussian_noise_std': 0.05,
+	}
+	return config
+
+
+def _tiny_horizontal_trace_drop_config(  # noqa: PLR0913
+	tmp_path: Path,
+	*,
+	epochs: int = 1,
+	max_steps: int = 1,
+	output_name: str = 'horizontal-trace-drop-run',
+	encoder_depth: int = 1,
+	local_pairs_per_crop: int = 4,
+	trace_drop_probability: float = 0.25,
+) -> dict[str, object]:
+	config = _tiny_local_config(
+		tmp_path,
+		epochs=epochs,
+		max_steps=max_steps,
+		output_name=output_name,
+		encoder_depth=encoder_depth,
+		local_pairs_per_crop=local_pairs_per_crop,
+	)
+	config['augmentations'] = {
+		'policy': HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'trace_drop_probability': trace_drop_probability,
+	}
+	return config
+
+
+def _tiny_zero_phase_z_filter_config(  # noqa: PLR0913
+	tmp_path: Path,
+	*,
+	epochs: int = 1,
+	max_steps: int = 1,
+	output_name: str = 'zero-phase-z-filter-run',
+	encoder_depth: int = 1,
+	local_pairs_per_crop: int = 4,
+	z_filter_side_weight: float = 0.125,
+) -> dict[str, object]:
+	config = _tiny_local_config(
+		tmp_path,
+		epochs=epochs,
+		max_steps=max_steps,
+		output_name=output_name,
+		encoder_depth=encoder_depth,
+		local_pairs_per_crop=local_pairs_per_crop,
+	)
+	config['augmentations'] = {
+		'policy': HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'z_filter_side_weight': z_filter_side_weight,
+	}
+	return config
+
+
+def _tiny_identity_gaussian_noise_config(  # noqa: PLR0913
+	tmp_path: Path,
+	*,
+	epochs: int = 1,
+	max_steps: int = 1,
+	output_name: str = 'identity-gaussian-noise-run',
+	encoder_depth: int = 1,
+	local_pairs_per_crop: int = 4,
+	gaussian_noise_std: float = 0.05,
+) -> dict[str, object]:
+	config = _tiny_local_config(
+		tmp_path,
+		epochs=epochs,
+		max_steps=max_steps,
+		output_name=output_name,
+		encoder_depth=encoder_depth,
+		local_pairs_per_crop=local_pairs_per_crop,
+	)
+	config['augmentations'] = {
+		'policy': IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		'gaussian_noise_std': gaussian_noise_std,
 	}
 	return config
 

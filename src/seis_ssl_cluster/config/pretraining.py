@@ -66,6 +66,10 @@ from seis_ssl_cluster.config.schema import (
 	FIXED_LOSS_CONTRACT,
 	FIXED_MASKING_CONTRACT,
 	FIXED_MODEL_CONTRACT,
+	HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+	IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 	MAE_DEBUG_VISUALIZATION_COLUMNS,
 	MAE_DEBUG_VISUALIZATION_KEYS,
@@ -103,6 +107,16 @@ _CONTINUATION_KEYS = frozenset({'init_checkpoint', 'unfreeze_top_blocks'})
 _D4_TRACE_DROP_AUGMENTATION_KEYS = frozenset(
 	{'policy', 'reflection_probability', 'trace_drop_probability'}
 )
+_HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'gaussian_noise_std'}
+)
+_HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'trace_drop_probability'}
+)
+_HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'z_filter_side_weight'}
+)
+_IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS = frozenset({'policy', 'gaussian_noise_std'})
 
 _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 	'manifests': frozenset({'train', 'train_path_list', 'canonical_input_metadata'}),
@@ -132,6 +146,10 @@ _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 		{
 			*DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
 			*_D4_TRACE_DROP_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS,
+			*_IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
 		}
 	),
 	'barlow_twins': frozenset(
@@ -3839,7 +3857,7 @@ def _validate_barlow_twins_method(
 		raise ValueError(msg)
 
 
-def _validate_barlow_twins_augmentations(
+def _validate_barlow_twins_augmentations(  # noqa: C901, PLR0912, PLR0915
 	augmentations: Mapping[str, object],
 	*,
 	method: str,
@@ -3860,6 +3878,121 @@ def _validate_barlow_twins_augmentations(
 		)
 		return
 
+	policy = augmentations.get('policy')
+	if not isinstance(policy, str):
+		msg = f'augmentations.policy must be a string; got {policy!r}'
+		raise TypeError(msg)
+	if policy == IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+			msg = (
+				'augmentations.policy '
+				f'{IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY!r} '
+				'requires barlow_twins.method '
+				f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+			)
+			raise ValueError(msg)
+		_validate_positive_finite_number(
+			augmentations,
+			'gaussian_noise_std',
+			prefix='augmentations',
+		)
+		return
+
+	if policy == HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY!r} '
+				'requires barlow_twins.method '
+				f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_nonnegative_finite_number(
+			augmentations,
+			'gaussian_noise_std',
+			prefix='augmentations',
+		)
+		return
+
+	if policy == HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY!r} '
+				'requires barlow_twins.method '
+				f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+			)
+			raise ValueError(msg)
+		for key in ('horizontal_flip_probability', 'trace_drop_probability'):
+			_validate_fraction(augmentations, key, prefix='augmentations')
+		return
+
+	if policy == HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY!r} '
+				'requires barlow_twins.method '
+				f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_zero_phase_z_filter_side_weight(
+			augmentations,
+			'z_filter_side_weight',
+			prefix='augmentations',
+		)
+		return
+
 	_validate_allowed_keys(
 		augmentations,
 		_D4_TRACE_DROP_AUGMENTATION_KEYS,
@@ -3870,10 +4003,6 @@ def _validate_barlow_twins_augmentations(
 		_D4_TRACE_DROP_AUGMENTATION_KEYS,
 		prefix='augmentations',
 	)
-	policy = augmentations.get('policy')
-	if not isinstance(policy, str):
-		msg = f'augmentations.policy must be a string; got {policy!r}'
-		raise TypeError(msg)
 	if policy != XY_D4_TRACE_DROP_AUGMENTATION_POLICY:
 		msg = (
 			'augmentations.policy must be '
@@ -3899,6 +4028,20 @@ def _validate_barlow_twins_augmentations(
 			'model.patch_size X/Y dimensions must be equal for '
 			f'augmentations.policy {XY_D4_TRACE_DROP_AUGMENTATION_POLICY!r}'
 		)
+
+
+def _validate_zero_phase_z_filter_side_weight(
+	values: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	"""Require a non-degenerate convex centered Z-filter coefficient."""
+	_validate_nonnegative_finite_number(values, key, prefix=prefix)
+	side_weight = float(values[key])
+	if not 0.0 < side_weight < 0.5:
+		msg = f'{prefix}.{key} must be in (0, 0.5); got {side_weight!r}'
+		raise ValueError(msg)
 
 
 def _validate_runtime_check_mode(train: Mapping[str, object]) -> None:
