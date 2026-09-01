@@ -39,7 +39,7 @@ from seis_ssl_cluster.config.schema import (
 from seis_ssl_cluster.f3.lithology.five_way_runner import (
 	plan_f3_lithology_five_way_jobs,
 )
-from seis_ssl_cluster.f3.lithology.vicreg_benchmark import (
+from seis_ssl_cluster.f3.lithology.vicreg_sources import (
 	f3_vicreg_extension_config_from_mapping,
 )
 from seis_ssl_cluster.f3.lithology.voxel_section_layout_calibration import (

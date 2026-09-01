@@ -23,7 +23,7 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	LAYOUT_IDS,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
-from seis_ssl_cluster.f3.lithology import vicreg_benchmark
+from seis_ssl_cluster.f3.lithology import vicreg_results
 from seis_ssl_cluster.f3.lithology.five_way_results import (
 	EXPECTED_AGGREGATION_UNIT,
 	SUMMARY_METRICS,
@@ -32,27 +32,34 @@ from seis_ssl_cluster.f3.lithology.five_way_runner import (
 	FIVE_WAY_EVALUATION_POLICY,
 	FIVE_WAY_TILE_SETTINGS,
 )
-from seis_ssl_cluster.f3.lithology.vicreg_benchmark import (
+from seis_ssl_cluster.f3.lithology.vicreg_results import (
 	BENCHMARK_SUMMARY_OUTPUT_NAMES,
-	EXTENSION_MODEL_IDS,
-	SCREENING_MODEL_IDS,
 	SCREENING_SUMMARY_OUTPUT_NAMES,
 	SEVEN_WAY_MODEL_IDS,
-	VICREG_GATE_FAIL,
-	VICREG_GATE_PASS,
 	assert_f3_vicreg_full_benchmark_ready,
-	audit_f3_vicreg_screening_source,
-	audit_f3_vicreg_sources,
-	f3_vicreg_extension_config_from_mapping,
 	inspect_f3_vicreg_combined_results,
 	inspect_f3_vicreg_extension_results,
-	load_f3_vicreg_canonical_config,
-	plan_f3_vicreg_extension_jobs,
-	plan_f3_vicreg_screening_jobs,
-	resolve_f3_vicreg_screening_job,
 	summarize_f3_vicreg_combined,
 	summarize_f3_vicreg_extension,
 	summarize_f3_vicreg_screening,
+)
+from seis_ssl_cluster.f3.lithology.vicreg_runner import (
+	inspect_f3_vicreg_job,
+	plan_f3_vicreg_extension_jobs,
+	plan_f3_vicreg_screening_jobs,
+	resolve_f3_vicreg_extension_job,
+	resolve_f3_vicreg_screening_job,
+	run_f3_vicreg_job,
+)
+from seis_ssl_cluster.f3.lithology.vicreg_sources import (
+	EXTENSION_MODEL_IDS,
+	SCREENING_MODEL_IDS,
+	VICREG_GATE_FAIL,
+	VICREG_GATE_PASS,
+	audit_f3_vicreg_screening_source,
+	audit_f3_vicreg_sources,
+	f3_vicreg_extension_config_from_mapping,
+	load_f3_vicreg_canonical_config,
 )
 from seis_ssl_cluster.stratigraphy import (
 	discover_pseudo_target_inputs,
@@ -496,7 +503,27 @@ def vicreg_universe(tmp_path: Path) -> dict[str, object]:
 	canonical_mapping = build_five_way_universe(root / 'canonical')
 	for layout_id in LAYOUT_IDS:
 		for data_size in DATA_SIZES:
-			write_condition(canonical_mapping, layout_id, data_size)
+			condition = write_condition(canonical_mapping, layout_id, data_size)
+			metadata_path = condition / 'section_layout_metadata.json'
+			metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
+			line_count = {'small': 1, 'medium': 2, 'large': 4}[data_size]
+			active_lines = {
+				'inline': list(range(100, 100 + line_count)),
+				'crossline': list(range(200, 200 + line_count)),
+			}
+			metadata['active_lines'] = active_lines
+			line_keys = [
+				f'{line_type}:{line}'
+				for line_type, lines in active_lines.items()
+				for line in lines
+			]
+			train_count = metadata['identity']['actual_train_voxel_count']
+			base_count, remainder = divmod(train_count, len(line_keys))
+			metadata['identity']['per_line_contributions'] = {
+				key: base_count + (index < remainder)
+				for index, key in enumerate(line_keys)
+			}
+			metadata_path.write_text(json.dumps(metadata), encoding='utf-8')
 	canonical_config_path = root / 'canonical_five_way.yaml'
 	canonical_config_path.parent.mkdir(parents=True, exist_ok=True)
 	canonical_config_path.write_text(
@@ -681,6 +708,106 @@ def test_exact_job_plans_and_medium_only_contract(
 	]
 	with pytest.raises(ValueError, match='must be disjoint'):
 		f3_vicreg_extension_config_from_mapping(overlap)
+
+
+def test_runner_inspects_and_identity_skips_completed_jobs(
+	vicreg_universe: dict[str, object],
+) -> None:
+	_write_canonical_jobs(vicreg_universe)
+	_write_screening_jobs(vicreg_universe)
+	_write_extension_jobs(vicreg_universe)
+	config = vicreg_universe['config']
+	canonical = vicreg_universe['canonical']
+	summarize_f3_vicreg_screening(config, canonical)
+
+	jobs = (
+		(
+			'screening',
+			resolve_f3_vicreg_screening_job(
+				config,
+				canonical,
+				model='local_vicreg_100',
+				layout='layout_000',
+				size='medium',
+			),
+		),
+		(
+			'screening',
+			resolve_f3_vicreg_screening_job(
+				config,
+				canonical,
+				model='random',
+				layout='layout_000',
+				size='medium',
+			),
+		),
+		(
+			'extension',
+			resolve_f3_vicreg_extension_job(
+				config,
+				canonical,
+				model='local_vicreg',
+				layout='layout_000',
+				size='small',
+			),
+		),
+	)
+	for suite, job in jobs:
+		inspection = inspect_f3_vicreg_job(
+			config,
+			canonical,
+			job,
+			suite=suite,
+		)
+		assert inspection['suite'] == suite
+		result = run_f3_vicreg_job(config, canonical, job, suite=suite)
+		assert result['completed'] is True
+		assert result['skipped'] is True
+		assert result['metrics_sha256'] == file_sha256(job.metrics_path)
+
+	screening_job = jobs[0][1]
+	resolved_path = screening_job.decoder_dir / 'resolved_config.json'
+	resolved = json.loads(resolved_path.read_text(encoding='utf-8'))
+	resolved['train']['seed'] = 999
+	resolved_path.write_text(json.dumps(resolved), encoding='utf-8')
+	with pytest.raises(ValueError, match=r'decoder resolved train\.seed'):
+		run_f3_vicreg_job(
+			config,
+			canonical,
+			screening_job,
+			suite='screening',
+		)
+	resolved['train']['seed'] = FIXED_DECODER_CONTRACT['seed']
+	resolved_path.write_text(json.dumps(resolved), encoding='utf-8')
+	run_metadata_path = screening_job.decoder_dir / 'run_metadata.json'
+	run_metadata = json.loads(run_metadata_path.read_text(encoding='utf-8'))
+	run_metadata['initial_model_state_sha256'] = run_metadata[
+		'initial_model_state_sha256'
+	].upper()
+	run_metadata_path.write_text(json.dumps(run_metadata), encoding='utf-8')
+	with pytest.raises(ValueError, match='lowercase SHA-256'):
+		run_f3_vicreg_job(
+			config,
+			canonical,
+			screening_job,
+			suite='screening',
+		)
+
+	random_job = resolve_f3_vicreg_screening_job(
+		config,
+		canonical,
+		model='random',
+		layout='layout_001',
+		size='medium',
+	)
+	random_job.metrics_path.unlink()
+	with pytest.raises(FileNotFoundError, match='canonical random screening result'):
+		run_f3_vicreg_job(
+			config,
+			canonical,
+			random_job,
+			suite='screening',
+		)
 
 
 def test_source_audits_require_common_vicreg100_lineage(
@@ -999,6 +1126,11 @@ def test_screening_gate_fail_uses_mean_median_and_wins(
 	assert result['gate_status'] == VICREG_GATE_FAIL
 	assert payload['wins'] == 2
 	assert payload['gate_status'] == VICREG_GATE_FAIL
+	with pytest.raises(RuntimeError, match='screening gate is'):
+		assert_f3_vicreg_full_benchmark_ready(
+			config,
+			vicreg_universe['canonical'],
+		)
 
 
 def test_extension_and_combined_reports_are_exact_and_read_only(
@@ -1075,7 +1207,7 @@ def test_missing_extra_and_source_drift_are_rejected(
 	duplicate_plan = (*original_plan[:-1], original_plan[0])
 	with monkeypatch.context() as patcher:
 		patcher.setattr(
-			vicreg_benchmark,
+			vicreg_results,
 			'plan_f3_vicreg_extension_jobs',
 			lambda: duplicate_plan,
 		)

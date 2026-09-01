@@ -9,7 +9,7 @@ import math
 import shutil
 import statistics
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -181,8 +181,20 @@ def summarize_f3_lithology_five_way(
 	"""Write the five summary outputs after the full completeness audit."""
 	report = inspect_f3_lithology_five_way_results(config)
 	rows = report['rows']
-	paired = _paired_rows(rows)
-	by_size = _by_size_rows(paired)
+	paired = build_paired_rows(
+		rows,
+		comparisons=PAIRED_COMPARISONS,
+		metrics=SUMMARY_METRICS,
+		data_sizes=DATA_SIZES,
+		layout_ids=LAYOUT_IDS,
+	)
+	by_size = aggregate_paired_rows_by_size(
+		paired,
+		comparisons=PAIRED_COMPARISONS,
+		metrics=SUMMARY_METRICS,
+		data_sizes=DATA_SIZES,
+		layout_ids=LAYOUT_IDS,
+	)
 	summary_payload = _summary_payload(config, by_size)
 	outputs = {
 		COMPARISON_CSV_NAME: _csv_text(COMPARISON_FIELDNAMES, rows),
@@ -193,23 +205,7 @@ def summarize_f3_lithology_five_way(
 		SUMMARY_MD_NAME: _summary_markdown(by_size),
 	}
 	summary_root = config.summary_root
-	if summary_root.exists():
-		raise FileExistsError(
-			f'refusing to overwrite existing summary: {summary_root}'
-		)
-	summary_root.parent.mkdir(parents=True, exist_ok=True)
-	staging = Path(
-		tempfile.mkdtemp(
-			prefix=f'.{summary_root.name}.staging-', dir=summary_root.parent
-		)
-	)
-	try:
-		for name, text in outputs.items():
-			(staging / name).write_text(text, encoding='utf-8')
-		staging.replace(summary_root)
-	except BaseException:
-		shutil.rmtree(staging, ignore_errors=True)
-		raise
+	write_atomic_summary(summary_root, outputs)
 	return {
 		'complete_jobs': report['complete_jobs'],
 		'summary_root': str(summary_root),
@@ -641,18 +637,32 @@ def _grouped(
 	return grouped
 
 
-def _paired_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def build_paired_rows(
+	rows: Sequence[Mapping[str, object]],
+	*,
+	comparisons: Sequence[tuple[str, str, str]],
+	metrics: Sequence[str],
+	data_sizes: Sequence[str],
+	layout_ids: Sequence[str],
+) -> list[dict[str, object]]:
+	"""Build exact layout-paired metric deltas for requested conditions."""
 	by_cell = {
 		(str(row['model_id']), str(row['layout_id']), str(row['data_size'])): row
 		for row in rows
 	}
 	paired = []
-	for data_size in DATA_SIZES:
-		for layout_id in LAYOUT_IDS:
-			for comparison_id, left_model, right_model in PAIRED_COMPARISONS:
-				left = by_cell[left_model, layout_id, data_size]
-				right = by_cell[right_model, layout_id, data_size]
-				for metric in SUMMARY_METRICS:
+	for data_size in data_sizes:
+		for layout_id in layout_ids:
+			for comparison_id, left_model, right_model in comparisons:
+				try:
+					left = by_cell[left_model, layout_id, data_size]
+					right = by_cell[right_model, layout_id, data_size]
+				except KeyError as error:
+					raise ValueError(
+						'missing paired cell for '
+						f'{comparison_id}/{layout_id}/{data_size}'
+					) from error
+				for metric in metrics:
 					left_value = float(left[metric])
 					right_value = float(right[metric])
 					paired.append(
@@ -671,11 +681,19 @@ def _paired_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 	return paired
 
 
-def _by_size_rows(paired: list[dict[str, object]]) -> list[dict[str, object]]:
+def aggregate_paired_rows_by_size(
+	paired: Sequence[Mapping[str, object]],
+	*,
+	comparisons: Sequence[tuple[str, str, str]],
+	metrics: Sequence[str],
+	data_sizes: Sequence[str],
+	layout_ids: Sequence[str],
+) -> list[dict[str, object]]:
+	"""Aggregate exact layout-paired deltas by requested data size."""
 	rows = []
-	for data_size in DATA_SIZES:
-		for comparison_id, _, _ in PAIRED_COMPARISONS:
-			for metric in SUMMARY_METRICS:
+	for data_size in data_sizes:
+		for comparison_id, _, _ in comparisons:
+			for metric in metrics:
 				deltas = [
 					float(row['delta'])
 					for row in paired
@@ -683,10 +701,10 @@ def _by_size_rows(paired: list[dict[str, object]]) -> list[dict[str, object]]:
 					and row['comparison_id'] == comparison_id
 					and row['metric'] == metric
 				]
-				if len(deltas) != len(LAYOUT_IDS):
+				if len(deltas) != len(layout_ids):
 					raise ValueError(
 						f'{data_size}/{comparison_id}/{metric} must aggregate '
-						f'exactly {len(LAYOUT_IDS)} layouts'
+						f'exactly {len(layout_ids)} layouts'
 					)
 				rows.append(
 					{
@@ -705,6 +723,23 @@ def _by_size_rows(paired: list[dict[str, object]]) -> list[dict[str, object]]:
 					}
 				)
 	return rows
+
+
+def write_atomic_summary(root: Path, outputs: Mapping[str, str]) -> None:
+	"""Publish a new summary directory atomically without overwriting."""
+	if root.exists():
+		raise FileExistsError(f'refusing to overwrite existing summary: {root}')
+	root.parent.mkdir(parents=True, exist_ok=True)
+	staging = Path(
+		tempfile.mkdtemp(prefix=f'.{root.name}.staging-', dir=root.parent)
+	)
+	try:
+		for name, text in outputs.items():
+			(staging / name).write_text(text, encoding='utf-8')
+		staging.replace(root)
+	except BaseException:
+		shutil.rmtree(staging, ignore_errors=True)
+		raise
 
 
 def _summary_payload(
@@ -801,7 +836,10 @@ __all__ = [
 	'SUMMARY_MD_NAME',
 	'SUMMARY_METRICS',
 	'SUMMARY_OUTPUT_NAMES',
+	'aggregate_paired_rows_by_size',
+	'build_paired_rows',
 	'inspect_f3_lithology_five_way_results',
 	'read_f3_lithology_job_evidence',
 	'summarize_f3_lithology_five_way',
+	'write_atomic_summary',
 ]

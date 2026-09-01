@@ -17,15 +17,17 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	DATA_SIZES,
 	LAYOUT_IDS,
 )
-from seis_ssl_cluster.f3.lithology.vicreg_benchmark import (
-	EXTENSION_MODEL_IDS,
-	SCREENING_MODEL_IDS,
-	f3_vicreg_extension_config_from_mapping,
+from seis_ssl_cluster.f3.lithology.vicreg_runner import (
 	inspect_f3_vicreg_job,
-	load_f3_vicreg_canonical_config,
 	resolve_f3_vicreg_extension_job,
 	resolve_f3_vicreg_screening_job,
 	run_f3_vicreg_job,
+)
+from seis_ssl_cluster.f3.lithology.vicreg_sources import (
+	EXTENSION_MODEL_IDS,
+	SCREENING_MODEL_IDS,
+	f3_vicreg_extension_config_from_mapping,
+	load_f3_vicreg_canonical_config,
 )
 
 if TYPE_CHECKING:

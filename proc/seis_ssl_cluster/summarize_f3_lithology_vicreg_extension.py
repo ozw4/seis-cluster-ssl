@@ -11,19 +11,23 @@ from seis_ssl_cluster.cli import (
 	resolve_config_for_cli,
 )
 from seis_ssl_cluster.config import load_config
-from seis_ssl_cluster.f3.lithology.vicreg_benchmark import (
-	audit_f3_vicreg_screening_source,
-	audit_f3_vicreg_sources,
-	f3_vicreg_extension_config_from_mapping,
+from seis_ssl_cluster.f3.lithology.vicreg_results import (
 	inspect_f3_vicreg_combined_results,
 	inspect_f3_vicreg_extension_results,
 	inspect_f3_vicreg_screening_results,
-	load_f3_vicreg_canonical_config,
-	plan_f3_vicreg_extension_jobs,
-	plan_f3_vicreg_screening_jobs,
 	summarize_f3_vicreg_combined,
 	summarize_f3_vicreg_extension,
 	summarize_f3_vicreg_screening,
+)
+from seis_ssl_cluster.f3.lithology.vicreg_runner import (
+	plan_f3_vicreg_extension_jobs,
+	plan_f3_vicreg_screening_jobs,
+)
+from seis_ssl_cluster.f3.lithology.vicreg_sources import (
+	audit_f3_vicreg_screening_source,
+	audit_f3_vicreg_sources,
+	f3_vicreg_extension_config_from_mapping,
+	load_f3_vicreg_canonical_config,
 )
 
 if TYPE_CHECKING:
