@@ -1,0 +1,461 @@
+{
+  "arm_results": {
+    "local_barlow_twins_horizontal_trace_drop_p002_base1ep": {
+      "evaluated_cell_count": 5,
+      "paired_macro_f1_deltas_over_random": {
+        "layout_000/medium": -0.013089264613569851,
+        "layout_001/medium": -0.014615582350831546,
+        "layout_002/medium": 0.013958188245432157,
+        "layout_003/medium": 0.02196572986839873,
+        "layout_004/medium": -0.015301377854454845
+      },
+      "positive_delta_count": 2,
+      "wins_all_15_over_random": false
+    }
+  },
+  "attempt_count": 1,
+  "attempts": [
+    {
+      "attempt_order": 1,
+      "augmentations_json": "{\"horizontal_flip_probability\":0.5,\"policy\":\"horizontal_flip_trace_drop_v1\",\"trace_drop_probability\":0.02}",
+      "base_checkpoint_path": "artifacts/pretraining/f3/facies_benchmark_v1/local_barlow_twins_trace_drop_p002_view_v1/base1ep/stage1/horizontal_trace_drop_p002_base1ep/full_1ep/latest.pt",
+      "base_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+      "base_config_path": "experiments/f3/facies_benchmark_v2/113_local_barlow_twins_trace_drop_p002_view_v1/10_stage1/horizontal_trace_drop_p002_base1ep/01_screen_1ep.yaml",
+      "base_config_sha256": "957de58e38a81ce881435f2becc1d9c72c0dfc1d4c275a24cc505a236ce9403a",
+      "base_pretraining_epochs": 1,
+      "candidate_id": "local_barlow_twins_horizontal_trace_drop_p002_base1ep",
+      "continuation_config_path": "experiments/f3/facies_benchmark_v2/113_local_barlow_twins_trace_drop_p002_view_v1/15_stage2/horizontal_trace_drop_p002_base1ep/01_continue_25ep.yaml",
+      "continuation_config_sha256": "e7814254e8dec6333fd2675f2d6ccefd28a2f97320ce73e881cb1ce34e94adb9",
+      "continuation_epochs": 25,
+      "embedding_metadata_sha256": "9ce0987b7705f29a21e0394dc9ba678e09de6c0bd646185d0b115254fd6a408b",
+      "embeddings_dir": "artifacts/embeddings/f3/facies_benchmark_v2/local_barlow_twins_trace_drop_p002_view_v1/base1ep/local_barlow_twins_horizontal_trace_drop_p002_base1ep/overlap_x64",
+      "embeddings_sha256": "9782c64e4c21ea392a71be7f551cf50573663f5b99a64bb564ce1cf2f55c0216",
+      "evaluated_cell_count": 5,
+      "extraction_config_path": "experiments/f3/facies_benchmark_v2/113_local_barlow_twins_trace_drop_p002_view_v1/20_embeddings/01_extract_horizontal_trace_drop_p002_base1ep.yaml",
+      "extraction_config_sha256": "89731df0c6d40fa132da70d9e08eca2cb8b4363bf92a3106e4491b6ee69b4783",
+      "final_checkpoint_path": "artifacts/pretraining/f3/facies_benchmark_v1/local_barlow_twins_trace_drop_p002_view_v1/base1ep/stage2/horizontal_trace_drop_p002_base1ep/local_bt_continue/full_25ep/latest.pt",
+      "final_checkpoint_sha256": "a7f02c589fdd513de8325ae4ec6da7bc7b4b63be471f904aed9938fb2891d4de",
+      "final_outcome": "failed",
+      "medium_delta_vs_p001_mean": -0.004363446855733377,
+      "medium_delta_vs_random_mean": -0.001416461341005071,
+      "medium_macro_f1_mean": 0.510727765933897,
+      "medium_p001_macro_f1_mean": 0.5150912127896303,
+      "medium_positive_count": 2,
+      "medium_random_macro_f1_mean": 0.512144227274902,
+      "positive_vs_random_count": 2,
+      "role": "authorized_trace_drop_strength_followup",
+      "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7",
+      "wins_all_15_over_random": false
+    }
+  ],
+  "augmentations": {
+    "horizontal_flip_probability": 0.5,
+    "policy": "horizontal_flip_trace_drop_v1",
+    "trace_drop_probability": 0.02
+  },
+  "authorized_additional_trace_drop_probability": null,
+  "authorizes_additional_trace_drop_followup": false,
+  "base_pretraining_epochs": 1,
+  "candidate_id": "local_barlow_twins_horizontal_trace_drop_p002_base1ep",
+  "configuration": {
+    "path": "experiments/f3/facies_benchmark_v2/113_local_barlow_twins_trace_drop_p002_view_v1/30_validation/01_candidate.yaml",
+    "sha256": "db469b85fd6c402996e4ee5568b7c22fbcba0fff9cda7df132ff9b72527b1363"
+  },
+  "continuation_epochs": 25,
+  "failure_stage": "medium_5of5",
+  "final_result_sha256": "8b27c1141b5e7740653f8585acb0a9e978e74a82355bbbcdb947fd888cc711cd",
+  "frozen_control_validation_cell_count": 5,
+  "live_candidate_validation_cell_count": 5,
+  "medium_gate": {
+    "candidate_id": "local_barlow_twins_horizontal_trace_drop_p002_base1ep",
+    "criterion": "strict_positive_delta_over_random_all_5_medium_layouts",
+    "gate_open": false,
+    "inputs": [
+      {
+        "base_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_000/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "a18cbd2dcf9864cb812ab63795bc3886b8dda7a0ae738f449d3eed0611c6222c",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p002_base1ep",
+        "continuation_init_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "9ce0987b7705f29a21e0394dc9ba678e09de6c0bd646185d0b115254fd6a408b",
+        "embeddings_sha256": "9782c64e4c21ea392a71be7f551cf50573663f5b99a64bb564ce1cf2f55c0216",
+        "final_checkpoint_sha256": "a7f02c589fdd513de8325ae4ec6da7bc7b4b63be471f904aed9938fb2891d4de",
+        "layout_id": "layout_000",
+        "macro_f1": 0.5155629713727233,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_000/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "44d39c1c53368b28df0a12ae448a709cc49cea6aa6a07c9c1ed0a3054277d74f",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      {
+        "base_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_001/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "6857b9cc182da48bab0a1d11ac4409d011f6ad708ad5debd07914ebe47f77ebb",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p002_base1ep",
+        "continuation_init_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "9ce0987b7705f29a21e0394dc9ba678e09de6c0bd646185d0b115254fd6a408b",
+        "embeddings_sha256": "9782c64e4c21ea392a71be7f551cf50573663f5b99a64bb564ce1cf2f55c0216",
+        "final_checkpoint_sha256": "a7f02c589fdd513de8325ae4ec6da7bc7b4b63be471f904aed9938fb2891d4de",
+        "layout_id": "layout_001",
+        "macro_f1": 0.48192549767062975,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_001/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "dcd6d48d8082c3d926c2bc911454daea0b3e10b7bca35f7cb043e59dc5d472c7",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      {
+        "base_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_002/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "abb9d3097adc61ba98d91c648bf32bb7973080c69591026952ad2978385f0f4b",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p002_base1ep",
+        "continuation_init_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "9ce0987b7705f29a21e0394dc9ba678e09de6c0bd646185d0b115254fd6a408b",
+        "embeddings_sha256": "9782c64e4c21ea392a71be7f551cf50573663f5b99a64bb564ce1cf2f55c0216",
+        "final_checkpoint_sha256": "a7f02c589fdd513de8325ae4ec6da7bc7b4b63be471f904aed9938fb2891d4de",
+        "layout_id": "layout_002",
+        "macro_f1": 0.5377722860203447,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_002/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "1704690185c1ccdf8e3678be749a2d3ce5f146eedd7ebb163a1e533ea3cec4c4",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      {
+        "base_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_003/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "a3fed727c327769f196693a21d3fb501ec2e482c1336463e02088790e7da8d6d",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p002_base1ep",
+        "continuation_init_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "9ce0987b7705f29a21e0394dc9ba678e09de6c0bd646185d0b115254fd6a408b",
+        "embeddings_sha256": "9782c64e4c21ea392a71be7f551cf50573663f5b99a64bb564ce1cf2f55c0216",
+        "final_checkpoint_sha256": "a7f02c589fdd513de8325ae4ec6da7bc7b4b63be471f904aed9938fb2891d4de",
+        "layout_id": "layout_003",
+        "macro_f1": 0.5562274093477058,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_003/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "5467edb6d84397ddc4077c47115efc1be591401243dc6539e8d200db726a57f5",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      {
+        "base_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_004/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "9c9f42b996b4f981f09069a71102a51846dff1343f44a29eea28fb9a314b4c66",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p002_base1ep",
+        "continuation_init_checkpoint_sha256": "c9964467a167bb6c957b6f39c50b1074d282448ca38fdf858f918cfb3f6ed877",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "9ce0987b7705f29a21e0394dc9ba678e09de6c0bd646185d0b115254fd6a408b",
+        "embeddings_sha256": "9782c64e4c21ea392a71be7f551cf50573663f5b99a64bb564ce1cf2f55c0216",
+        "final_checkpoint_sha256": "a7f02c589fdd513de8325ae4ec6da7bc7b4b63be471f904aed9938fb2891d4de",
+        "layout_id": "layout_004",
+        "macro_f1": 0.4621506652580814,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_p002_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p002_base1ep/layout=layout_004/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "4ca21b27e6a26fca725b87e708dc5f65a0058051df3c04ab71bb338b31b82085",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_000",
+        "macro_f1": 0.5286522359862932,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "7018ca21bfe4f0628834b41e1c33e39490fbb87ee2be93dcc77afffa0dc9da8d"
+      },
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_001",
+        "macro_f1": 0.4965410800214613,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_001/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "825f49a5e9f98087402fdfe135df1817155f548f68cf39d1c25a50000e26e506"
+      },
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_002",
+        "macro_f1": 0.5238140977749125,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_002/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "74a9f508b4075929047232c1033753ab646639ac8c8da5eb0f9c5d6bcbc20daa"
+      },
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_003",
+        "macro_f1": 0.534261679479307,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_003/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "129f3145dc465182d32acdb24f89583f1e1a52ab28571f37ba6c6d1ea13cc02f"
+      },
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_004",
+        "macro_f1": 0.47745204311253625,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_004/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "9be095931470ab6e69713fcf2448342d033f2aa2abf29306850f7257a0e11a00"
+      }
+    ],
+    "layout_ids": [
+      "layout_000",
+      "layout_001",
+      "layout_002",
+      "layout_003",
+      "layout_004"
+    ],
+    "paired_macro_f1_deltas_over_random": {
+      "layout_000": -0.013089264613569851,
+      "layout_001": -0.014615582350831546,
+      "layout_002": 0.013958188245432157,
+      "layout_003": 0.02196572986839873,
+      "layout_004": -0.015301377854454845
+    },
+    "positive_delta_count": 2,
+    "required_positive_delta_count": 5,
+    "wins_all_5_over_random": false
+  },
+  "paired_delta_count": 10,
+  "parent_result": {
+    "authorized_trace_drop_probability": 0.02,
+    "authorizes_trace_drop_p002_followup": true,
+    "failure_stage": "medium_5of5",
+    "final_result_type": "f3_local_barlow_twins_horizontal_trace_drop_p001_final_validation_v1",
+    "fresh_random_type_sensitive_match": true,
+    "frozen_medium_control_ids": [
+      "local_barlow_twins_horizontal_trace_drop_p001_base1ep"
+    ],
+    "frozen_medium_control_inputs": [
+      {
+        "base_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_000/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "4a13529393f7822261d5d0a333603f9d2a8d6b4d4aaccfe8f98d249d4e8050d4",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p001_base1ep",
+        "continuation_init_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "30de82f42592f972da38b43ac4515795dfbc98ca963e1859f33865f987d48e8b",
+        "embeddings_sha256": "07fb9550b7060211208c69ad5f4a784e9caa0f695d54ca0c442286e0ff19be0b",
+        "final_checkpoint_sha256": "53d5840f2012c5c83377f4baf2bc1139950d11318bfba09f5bf31e3d32035b1c",
+        "layout_id": "layout_000",
+        "macro_f1": 0.5066721128904638,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_000/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "287e49b36e34be50d7127f063d4d6a0e604c7633de212cf36edeef8499c39ae5",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      {
+        "base_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_001/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "eeb997627a9986be8f5580eb5f408d45144d17d860387a0000d5d73219229e24",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p001_base1ep",
+        "continuation_init_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "30de82f42592f972da38b43ac4515795dfbc98ca963e1859f33865f987d48e8b",
+        "embeddings_sha256": "07fb9550b7060211208c69ad5f4a784e9caa0f695d54ca0c442286e0ff19be0b",
+        "final_checkpoint_sha256": "53d5840f2012c5c83377f4baf2bc1139950d11318bfba09f5bf31e3d32035b1c",
+        "layout_id": "layout_001",
+        "macro_f1": 0.4702104111844287,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_001/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "b73298adb3212149dc6017ca43ef1751f17de41af5a3a0904542f405df773536",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      {
+        "base_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_002/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "42aa5c00792a0231878b3aca753cfb4aa952dfc26834cc3b5006551395eb939b",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p001_base1ep",
+        "continuation_init_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "30de82f42592f972da38b43ac4515795dfbc98ca963e1859f33865f987d48e8b",
+        "embeddings_sha256": "07fb9550b7060211208c69ad5f4a784e9caa0f695d54ca0c442286e0ff19be0b",
+        "final_checkpoint_sha256": "53d5840f2012c5c83377f4baf2bc1139950d11318bfba09f5bf31e3d32035b1c",
+        "layout_id": "layout_002",
+        "macro_f1": 0.5455306717288337,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_002/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "bf4168300c0e9d4a8ac45e9ef313a13fa4d28ae5b5a9c6e649c1490bee6bc928",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      {
+        "base_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_003/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "3189c7f74e6314dd98de291b530da93f5a51543b00e475cc4553bb4c19e773cb",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p001_base1ep",
+        "continuation_init_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "30de82f42592f972da38b43ac4515795dfbc98ca963e1859f33865f987d48e8b",
+        "embeddings_sha256": "07fb9550b7060211208c69ad5f4a784e9caa0f695d54ca0c442286e0ff19be0b",
+        "final_checkpoint_sha256": "53d5840f2012c5c83377f4baf2bc1139950d11318bfba09f5bf31e3d32035b1c",
+        "layout_id": "layout_003",
+        "macro_f1": 0.5703670694608506,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_003/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "8a7f1d541341f0a88ba50ce0622223e27d701b6c5e5d73f9d81e35018131f87d",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      },
+      {
+        "base_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "candidate_audit_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_004/size=medium/candidate_source_audit.json",
+        "candidate_audit_sha256": "f7d66bc8121de73d36024b5d8185259d6c708052fd1e86e031a1274e2de62d66",
+        "candidate_id": "local_barlow_twins_horizontal_trace_drop_p001_base1ep",
+        "continuation_init_checkpoint_sha256": "8539b8eb387ce8eb648a1167fd28c953e18f2f05714e46a916e63047a0052a0b",
+        "data_size": "medium",
+        "embedding_metadata_sha256": "30de82f42592f972da38b43ac4515795dfbc98ca963e1859f33865f987d48e8b",
+        "embeddings_sha256": "07fb9550b7060211208c69ad5f4a784e9caa0f695d54ca0c442286e0ff19be0b",
+        "final_checkpoint_sha256": "53d5840f2012c5c83377f4baf2bc1139950d11318bfba09f5bf31e3d32035b1c",
+        "layout_id": "layout_004",
+        "macro_f1": 0.482675798683575,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/runs/model=local_barlow_twins_horizontal_trace_drop_p001_base1ep/layout=layout_004/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "72429ec820b61ea1ad470a0c81ad2cf934b690eafe8c0bc30727d1c4085890a7",
+        "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+      }
+    ],
+    "frozen_parent_random_inputs": [
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_000",
+        "macro_f1": 0.5286522359862932,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "7018ca21bfe4f0628834b41e1c33e39490fbb87ee2be93dcc77afffa0dc9da8d"
+      },
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_001",
+        "macro_f1": 0.4965410800214613,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_001/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "825f49a5e9f98087402fdfe135df1817155f548f68cf39d1c25a50000e26e506"
+      },
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_002",
+        "macro_f1": 0.5238140977749125,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_002/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "74a9f508b4075929047232c1033753ab646639ac8c8da5eb0f9c5d6bcbc20daa"
+      },
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_003",
+        "macro_f1": 0.534261679479307,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_003/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "129f3145dc465182d32acdb24f89583f1e1a52ab28571f37ba6c6d1ea13cc02f"
+      },
+      {
+        "candidate_id": "random",
+        "canonical_comparison": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+        "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+        "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+        "data_size": "medium",
+        "layout_id": "layout_004",
+        "macro_f1": 0.47745204311253625,
+        "metrics_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_004/size=medium/evaluation/metrics.json",
+        "metrics_sha256": "9be095931470ab6e69713fcf2448342d033f2aa2abf29306850f7257a0e11a00"
+      }
+    ],
+    "parent_protocol_lock": {
+      "path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/trace_drop_p001_protocol_lock.json",
+      "sha256": "872c18bed2465245b7fe9e3b3c9bb3163f466976ef7aa327eaea30ee9930e29d"
+    },
+    "passed": false,
+    "path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_trace_drop_view_v1/base1ep/validation/trace_drop_p001_final_result.json",
+    "recomputed_parent_arm_result": {
+      "evaluated_cell_count": 5,
+      "paired_macro_f1_deltas_over_random": {
+        "layout_000/medium": -0.021980123095829418,
+        "layout_001/medium": -0.02633066883703261,
+        "layout_002/medium": 0.021716573953921237,
+        "layout_003/medium": 0.036105389981543556,
+        "layout_004/medium": 0.005223755571038768
+      },
+      "positive_delta_count": 3,
+      "wins_all_15_over_random": false
+    },
+    "recomputed_parent_trace_drop_attribution": {
+      "trace_minus_gaussian": {
+        "contrast_id": "trace_drop_p001_minus_gaussian_std010_base1",
+        "data_size": "medium",
+        "evaluated_cell_count": 5,
+        "left_candidate_id": "local_barlow_twins_horizontal_trace_drop_p001_base1ep",
+        "paired_macro_f1_deltas": {
+          "layout_000/medium": -0.0008886597298389809,
+          "layout_001/medium": -0.0062727882679963765,
+          "layout_002/medium": 0.00403530510655703,
+          "layout_003/medium": 0.02219451545235529,
+          "layout_004/medium": -0.005459278453480321
+        },
+        "positive_delta_count": 2,
+        "right_candidate_id": "local_barlow_twins_gaussian_noise_std010_base1ep",
+        "wins_all_5": false
+      },
+      "trace_minus_legacy": {
+        "contrast_id": "trace_drop_p001_minus_legacy_flip_base1",
+        "data_size": "medium",
+        "evaluated_cell_count": 5,
+        "left_candidate_id": "local_barlow_twins_horizontal_trace_drop_p001_base1ep",
+        "paired_macro_f1_deltas": {
+          "layout_000/medium": -0.0029919201847619092,
+          "layout_001/medium": -0.007871201661076743,
+          "layout_002/medium": 0.0018044264400882692,
+          "layout_003/medium": 0.02373264903946337,
+          "layout_004/medium": -0.007270379380252934
+        },
+        "positive_delta_count": 2,
+        "right_candidate_id": "local_barlow_twins_legacy_flip_base1ep",
+        "wins_all_5": false
+      }
+    },
+    "schema_version": 1,
+    "sha256": "3a83070718ce07f51756bfb91da6f792c6347f3009ca0290757bd93710fe1e2e"
+  },
+  "parent_result_sha256": "3a83070718ce07f51756bfb91da6f792c6347f3009ca0290757bd93710fe1e2e",
+  "passed": false,
+  "pipeline_input": false,
+  "protocol_lock_sha256": "e33312550fb5223093c5a72b0d897afc87335067c84971d27ff4c5c0640ce727",
+  "random_validation_cell_count": 5,
+  "report_type": "f3_local_barlow_twins_trace_drop_p002_validation_report_v1",
+  "schema_version": 1,
+  "source_note": "Human-readable validation projection only; artifacts and immutable protocol/final result remain the scientific source of truth. Earlier Gaussian, legacy, and p=.01 history remains in the p=.01 parent report.",
+  "trace_drop_attribution": {
+    "p002_minus_p001": {
+      "contrast_id": "trace_drop_p002_minus_trace_drop_p001_base1",
+      "data_size": "medium",
+      "evaluated_cell_count": 5,
+      "left_candidate_id": "local_barlow_twins_horizontal_trace_drop_p002_base1ep",
+      "paired_macro_f1_deltas": {
+        "layout_000/medium": 0.008890858482259567,
+        "layout_001/medium": 0.011715086486201065,
+        "layout_002/medium": -0.0077583857084890795,
+        "layout_003/medium": -0.014139660113144825,
+        "layout_004/medium": -0.020525133425493614
+      },
+      "positive_delta_count": 2,
+      "right_candidate_id": "local_barlow_twins_horizontal_trace_drop_p001_base1ep",
+      "wins_all_5": false
+    }
+  },
+  "validation_only": true,
+  "validation_row_count": 15,
+  "winner_candidate_id": null
+}

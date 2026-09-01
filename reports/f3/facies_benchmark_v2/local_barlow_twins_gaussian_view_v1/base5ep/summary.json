@@ -1,0 +1,150 @@
+{
+  "arm_results": {
+    "local_barlow_twins_gaussian_noise_std010_base5ep": {
+      "evaluated_cell_count": 5,
+      "paired_macro_f1_deltas_over_random": {
+        "layout_000/medium": -0.013569595286742508,
+        "layout_001/medium": -0.05349153761131581,
+        "layout_002/medium": -0.007902489766698051,
+        "layout_003/medium": -0.01354038804512736,
+        "layout_004/medium": -0.024397529160052667
+      },
+      "positive_delta_count": 0,
+      "wins_all_15_over_random": false
+    },
+    "local_barlow_twins_legacy_flip_base5ep": {
+      "evaluated_cell_count": 5,
+      "paired_macro_f1_deltas_over_random": {
+        "layout_000/medium": -0.052151984715115174,
+        "layout_001/medium": -0.08104427390206886,
+        "layout_002/medium": -0.037952145852328256,
+        "layout_003/medium": -0.03748686751418423,
+        "layout_004/medium": -0.013097554149387403
+      },
+      "positive_delta_count": 0,
+      "wins_all_15_over_random": false
+    }
+  },
+  "attempt_count": 2,
+  "attempts": [
+    {
+      "attempt_order": 1,
+      "augmentations_json": "{\"gaussian_noise_std\":0.1,\"horizontal_flip_probability\":0.5,\"policy\":\"horizontal_flip_gaussian_noise_v1\"}",
+      "base_checkpoint_path": "artifacts/pretraining/f3/facies_benchmark_v1/local_barlow_twins_gaussian_view_v1/base5ep/stage1/gaussian_noise_std010_base5ep/full_5ep/latest.pt",
+      "base_checkpoint_sha256": "0e082d55b5539f25d01ba212c93c03398376827af55db64715d13f175cd19a74",
+      "base_config_path": "experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1/40_base5ep/10_stage1/gaussian_noise_std010_base5ep/01_screen_5ep.yaml",
+      "base_config_sha256": "5925db4aa0d197d23794d0a10c70301bfed8f54aff76e5175939a5d995e76af2",
+      "base_pretraining_epochs": 5,
+      "candidate_id": "local_barlow_twins_gaussian_noise_std010_base5ep",
+      "continuation_config_path": "experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1/40_base5ep/15_stage2/gaussian_noise_std010_base5ep/01_continue_25ep.yaml",
+      "continuation_config_sha256": "0683d7766f5cef8be659373a88344277bb433809be7d1c01bb42fcb5b4caeb7c",
+      "continuation_epochs": 25,
+      "embedding_metadata_sha256": "09fb34de26762b0940990660fadbecc0ad062f395722917ebc4a97287a647820",
+      "embeddings_dir": "artifacts/embeddings/f3/facies_benchmark_v2/local_barlow_twins_gaussian_view_v1/base5ep/local_barlow_twins_gaussian_noise_std010_base5ep/overlap_x64",
+      "embeddings_sha256": "01703a01ae6ec04a50d1e1ca5b3560252964017dab43b5d1ee1072e34aa5a087",
+      "evaluated_cell_count": 5,
+      "extraction_config_path": "experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1/40_base5ep/20_embeddings/01_extract_gaussian_noise_std010_base5ep.yaml",
+      "extraction_config_sha256": "17eefac4bb2d0c4a880db6d103ccbe28679b5a150b340563eb287ba9a43886d0",
+      "final_checkpoint_path": "artifacts/pretraining/f3/facies_benchmark_v1/local_barlow_twins_gaussian_view_v1/base5ep/stage2/gaussian_noise_std010_base5ep/local_bt_continue/full_25ep/latest.pt",
+      "final_checkpoint_sha256": "31319504456411cfa2519b4bb1abf366971b3dec80132270f7d45c471102b69e",
+      "final_outcome": "failed",
+      "medium_delta_vs_random_mean": -0.02258030797398728,
+      "medium_macro_f1_mean": 0.48956391930091475,
+      "medium_positive_count": 0,
+      "medium_random_macro_f1_mean": 0.512144227274902,
+      "parent_candidate_id": "local_barlow_twins_gaussian_noise_std010",
+      "positive_vs_random_count": 0,
+      "role": "inherited_selected_view",
+      "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7",
+      "wins_all_15_over_random": false
+    },
+    {
+      "attempt_order": 2,
+      "augmentations_json": "{\"horizontal_flip_probability\":0.5}",
+      "base_checkpoint_path": "artifacts/pretraining/f3/facies_benchmark_v1/local_barlow_twins_gaussian_view_v1/base5ep/stage1/legacy_flip_base5ep/full_5ep/latest.pt",
+      "base_checkpoint_sha256": "7ce7eeac95e7cd6d744ae7bdab296e334d8e0d07b9d8730485f7a2bcd3a21c4a",
+      "base_config_path": "experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1/40_base5ep/10_stage1/legacy_flip_base5ep/01_matched_5ep.yaml",
+      "base_config_sha256": "3b78edc8bc2b0e8c480164f4fff3a90a46603991e796913a1792b89f68438e11",
+      "base_pretraining_epochs": 5,
+      "candidate_id": "local_barlow_twins_legacy_flip_base5ep",
+      "continuation_config_path": "experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1/40_base5ep/15_stage2/legacy_flip_base5ep/01_continue_25ep.yaml",
+      "continuation_config_sha256": "b0b1161838ef99ee98125e652f9d0129ed771d988286777fa38a1a8e4efcaa6d",
+      "continuation_epochs": 25,
+      "embedding_metadata_sha256": "1e2e290476a7f263b3683ac1cdac522327b41f635e8c182560875c6493cc64e7",
+      "embeddings_dir": "artifacts/embeddings/f3/facies_benchmark_v2/local_barlow_twins_gaussian_view_v1/base5ep/local_barlow_twins_legacy_flip_base5ep/overlap_x64",
+      "embeddings_sha256": "9c20cb0fdfa53c5b1a84ae5d4b0b917844d8e4eb26f9335a4220e1ef738f5ad5",
+      "evaluated_cell_count": 5,
+      "extraction_config_path": "experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1/40_base5ep/20_embeddings/02_extract_legacy_flip_base5ep.yaml",
+      "extraction_config_sha256": "06a3cc87851ba77feafd563c307eebafe1cd87e493ba58a9d9eb70e646a76fa7",
+      "final_checkpoint_path": "artifacts/pretraining/f3/facies_benchmark_v1/local_barlow_twins_gaussian_view_v1/base5ep/stage2/legacy_flip_base5ep/local_bt_continue/full_25ep/latest.pt",
+      "final_checkpoint_sha256": "fc071c2725b96466fdaf987e4ad8ea85811c7524d1477bdfdb5b0b3411543b43",
+      "final_outcome": "failed",
+      "medium_delta_vs_random_mean": -0.044346565226616785,
+      "medium_macro_f1_mean": 0.46779766204828527,
+      "medium_positive_count": 0,
+      "medium_random_macro_f1_mean": 0.512144227274902,
+      "parent_candidate_id": "",
+      "positive_vs_random_count": 0,
+      "role": "matched_legacy_control",
+      "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7",
+      "wins_all_15_over_random": false
+    }
+  ],
+  "authorized_next_base_pretraining_epochs": 1,
+  "authorizes_next_base_duration": true,
+  "base_pretraining_epochs": 5,
+  "candidate_validation_cell_count": 10,
+  "configuration": {
+    "path": "experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1/40_base5ep/30_validation/01_candidates.yaml",
+    "sha256": "417f18a63984da6ebb554f44e47c1783e6a3a8a483bdcdc7da09c23d437d7e21"
+  },
+  "continuation_epochs": 25,
+  "failure_stage": "medium_5of5",
+  "final_result_sha256": "5b1e9c8778892d1226179c92e7d9fd788cb13329e05e5663ed3dd8ddb1e18d43",
+  "gaussian_attribution": {
+    "contrast_id": "selected_gaussian_minus_matched_legacy",
+    "evaluated_cell_count": 5,
+    "left_candidate_id": "local_barlow_twins_gaussian_noise_std010_base5ep",
+    "paired_macro_f1_deltas": {
+      "layout_000/medium": 0.038582389428372665,
+      "layout_001/medium": 0.027552736290753055,
+      "layout_002/medium": 0.030049656085630205,
+      "layout_003/medium": 0.02394647946905687,
+      "layout_004/medium": -0.011299975010665264
+    },
+    "positive_delta_count": 4,
+    "right_candidate_id": "local_barlow_twins_legacy_flip_base5ep",
+    "wins_all_15": false
+  },
+  "medium_gate": {
+    "gate_open": false,
+    "legacy_wins_over_random": false,
+    "selected_wins_over_random": false
+  },
+  "paired_delta_count": 15,
+  "parent_result": {
+    "authorizes_next_base_duration": true,
+    "final_result_type": "f3_local_barlow_twins_gaussian25_final_validation_v1",
+    "parent_selection_lock": {
+      "path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_gaussian_view_v1/validation/gaussian25_selection_lock.json",
+      "selected_candidate_id": "local_barlow_twins_gaussian_noise_std010",
+      "selected_gaussian_noise_std": 0.1,
+      "selected_view_policy": "horizontal_flip_gaussian_noise_v1",
+      "sha256": "89e42aa554de7a7fdd6ac27e5e02b7473f396ed9ecc483f56b684b051ea012d6"
+    },
+    "passed": false,
+    "path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/local_barlow_twins_gaussian_view_v1/validation/gaussian25_final_result.json",
+    "schema_version": 2,
+    "sha256": "33584533226842bac41dc9bac57e9479e4346caef2104eca60c595217997c15b"
+  },
+  "passed": false,
+  "pipeline_input": false,
+  "protocol_lock_sha256": "e4bede7391ad5e5aa033366cef7e6a1bf501b498ee9c1a07ea2788b69c5769a6",
+  "random_validation_cell_count": 5,
+  "report_type": "f3_local_barlow_twins_gaussian_base5_validation_report_v1",
+  "schema_version": 1,
+  "selection_lock_sha256": "41cef83f3f87eb2d5afc8159cb1fbc91a9287855a20172f4ebe7c55374c9a502",
+  "source_note": "Human-readable validation projection only; artifacts and immutable locks remain the scientific source of truth.",
+  "validation_only": true,
+  "winner_candidate_id": null
+}
