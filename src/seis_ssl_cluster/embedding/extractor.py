@@ -33,9 +33,11 @@ from seis_ssl_cluster.config.schema import (
 	FIXED_MODEL_CONTRACT,
 	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_MAE_TRAINING,
+	STAGE_VICREG_TRAINING,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
 )
+from seis_ssl_cluster.config.vicreg import resolve_vicreg_pretraining_method
 from seis_ssl_cluster.data.normalization import (
 	AmplitudeAgcConfig,
 	SurveyNormalizationStats,
@@ -77,6 +79,7 @@ from seis_ssl_cluster.embedding.writer import (
 )
 from seis_ssl_cluster.models.amplitude_encoder_factory import (
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	LOCAL_VICREG_PRETRAINING_METHOD,
 	build_model_from_checkpoint_payload,
 	build_model_from_config,
 	checkpoint_config_from_payload,
@@ -1296,12 +1299,17 @@ def build_embedding_metadata(  # noqa: PLR0913
 		},
 		'pretraining_objective': _pretraining_objective(checkpoint_config),
 	}
-	if checkpoint_config.get('stage') == STAGE_BARLOW_TWINS_TRAINING and (
+	if checkpoint_config.get('stage') in {
+		STAGE_BARLOW_TWINS_TRAINING,
+		STAGE_VICREG_TRAINING,
+	} and (
 		checkpoint_payload is None
 		or not is_random_encoder_checkpoint(checkpoint_payload)
 	):
-		metadata['pretraining_method'] = resolve_barlow_twins_pretraining_method(
-			checkpoint_config
+		metadata['pretraining_method'] = (
+			resolve_vicreg_pretraining_method(checkpoint_config)
+			if checkpoint_config.get('stage') == STAGE_VICREG_TRAINING
+			else resolve_barlow_twins_pretraining_method(checkpoint_config)
 		)
 	if manifest.amplitude.valid_mask_path is not None:
 		metadata['source_valid_mask_path'] = str(
@@ -1844,6 +1852,48 @@ def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 				str(key): value for key, value in augmentations.items()
 			}
 		return objective
+	if config.get('stage') == STAGE_VICREG_TRAINING:
+		vicreg = _required_mapping(config, 'vicreg')
+		method = resolve_vicreg_pretraining_method(config)
+		objective = {
+			'method': method,
+			'local_pairs_per_crop': _positive_int(
+				vicreg.get('local_pairs_per_crop'),
+				'vicreg.local_pairs_per_crop',
+			),
+			'projector_dim': _positive_int(
+				vicreg.get('projector_dim'),
+				'vicreg.projector_dim',
+			),
+			'invariance_weight': _nonnegative_finite_number(
+				vicreg.get('invariance_weight'),
+				'vicreg.invariance_weight',
+			),
+			'variance_weight': _nonnegative_finite_number(
+				vicreg.get('variance_weight'),
+				'vicreg.variance_weight',
+			),
+			'covariance_weight': _nonnegative_finite_number(
+				vicreg.get('covariance_weight'),
+				'vicreg.covariance_weight',
+			),
+			'variance_target_std': _positive_finite_number(
+				vicreg.get('variance_target_std'),
+				'vicreg.variance_target_std',
+			),
+			'variance_eps': _positive_finite_number(
+				vicreg.get('variance_eps'),
+				'vicreg.variance_eps',
+			),
+		}
+		if method != LOCAL_VICREG_PRETRAINING_METHOD:
+			raise ValueError(f'unsupported VICReg method: {method!r}')
+		augmentations = config.get('augmentations')
+		if isinstance(augmentations, Mapping) and 'policy' in augmentations:
+			objective['augmentations'] = {
+				str(key): value for key, value in augmentations.items()
+			}
+		return objective
 	loss = _required_mapping(config, 'loss')
 	objective: dict[str, object] = {
 		'reconstruction': loss.get('reconstruction'),
@@ -2136,6 +2186,8 @@ def _stratigraphy_base_objective(payload: Mapping[str, object]) -> str:
 		return 'amp_mae3d'
 	if stage == STAGE_BARLOW_TWINS_TRAINING:
 		return resolve_barlow_twins_pretraining_method(config)
+	if stage == STAGE_VICREG_TRAINING:
+		return resolve_vicreg_pretraining_method(config)
 	raise ValueError(
 		'strat-HMM checkpoint config.stage must identify its base pretraining '
 		f'method; got {stage!r}'

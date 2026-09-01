@@ -30,11 +30,17 @@ from seis_ssl_cluster.training.random_checkpoint import (
 	create_random_mae_checkpoint_from_config,
 	random_mae_checkpoint_config_from_mapping,
 )
+from seis_ssl_cluster.training.vicreg import (
+	VICRegTrainingState,
+	run_vicreg_pretraining,
+	train_vicreg_one_epoch,
+)
 
 __all__ = [
 	'BarlowTwinsTrainingState',
 	'MaeTrainingState',
 	'RandomMaeCheckpointConfig',
+	'VICRegTrainingState',
 	'barlow_twins_collate_fn',
 	'build_barlow_twins_dataloader',
 	'build_mae_dataloader',
@@ -48,9 +54,11 @@ __all__ = [
 	'random_mae_checkpoint_config_from_mapping',
 	'run_barlow_twins_pretraining',
 	'run_mae_pretraining',
+	'run_vicreg_pretraining',
 	'save_checkpoint',
 	'strat_multi_head_posterior_collate_fn',
 	'strat_multi_head_target_collate_fn',
 	'train_barlow_twins_one_epoch',
 	'train_mae_one_epoch',
+	'train_vicreg_one_epoch',
 ]

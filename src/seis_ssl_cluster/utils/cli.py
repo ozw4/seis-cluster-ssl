@@ -20,6 +20,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_NORMALIZATION_STATS,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 	STAGE_STRAT_HMM_PSEUDO_TARGETS,
+	STAGE_VICREG_TRAINING,
 )
 
 
@@ -44,7 +45,7 @@ def parse_config_args(
 	return parser.parse_args()
 
 
-def print_config_summary(  # noqa: C901
+def print_config_summary(  # noqa: C901, PLR0912
 	cfg: Mapping[str, Any],
 	*,
 	device_override: str | None = None,
@@ -111,6 +112,8 @@ def print_config_summary(  # noqa: C901
 		_add_training_rows(rows, cfg)
 	elif stage == STAGE_BARLOW_TWINS_TRAINING:
 		_add_barlow_twins_training_rows(rows, cfg)
+	elif stage == STAGE_VICREG_TRAINING:
+		_add_vicreg_training_rows(rows, cfg)
 	elif stage == STAGE_STRAT_HMM_PRETEXT_TRAINING:
 		_add_strat_hmm_pretext_rows(rows, cfg)
 	elif stage == STAGE_STRAT_HMM_PSEUDO_TARGETS:
@@ -287,6 +290,67 @@ def _add_barlow_twins_training_rows(
 		]
 	)
 	rows.extend(barlow_rows)
+	if 'continuation' in cfg:
+		continuation = _mapping(cfg.get('continuation'))
+		rows.extend(
+			[
+				(
+					'continuation.init_checkpoint',
+					continuation.get('init_checkpoint'),
+				),
+				(
+					'continuation.unfreeze_top_blocks',
+					continuation.get('unfreeze_top_blocks'),
+				),
+			]
+		)
+
+
+def _add_vicreg_training_rows(
+	rows: list[tuple[str, Any]],
+	cfg: Mapping[str, Any],
+) -> None:
+	manifests = _mapping(cfg.get('manifests'))
+	data = _mapping(cfg.get('data'))
+	model = _mapping(cfg.get('model'))
+	augmentations = _mapping(cfg.get('augmentations'))
+	vicreg = _mapping(cfg.get('vicreg'))
+	train = _mapping(cfg.get('train'))
+	vicreg_rows = [
+		('manifests.train', manifests.get('train')),
+		('data.local_crop_size', data.get('local_crop_size')),
+		('model.patch_size', model.get('patch_size')),
+		('model.encoder_depth', model.get('encoder_depth')),
+	]
+	vicreg_rows.extend(
+		(f'augmentations.{key}', augmentations.get(key))
+		for key in (
+			'horizontal_flip_probability',
+			'policy',
+			'gaussian_noise_std',
+			'reflection_probability',
+			'trace_drop_probability',
+			'z_filter_side_weight',
+		)
+		if key in augmentations
+	)
+	vicreg_rows.extend(
+		[
+			('vicreg.method', vicreg.get('method')),
+			('vicreg.local_pairs_per_crop', vicreg.get('local_pairs_per_crop')),
+			('vicreg.projector_dim', vicreg.get('projector_dim')),
+			('vicreg.invariance_weight', vicreg.get('invariance_weight')),
+			('vicreg.variance_weight', vicreg.get('variance_weight')),
+			('vicreg.covariance_weight', vicreg.get('covariance_weight')),
+			('vicreg.variance_target_std', vicreg.get('variance_target_std')),
+			('vicreg.variance_eps', vicreg.get('variance_eps')),
+			('train.batch_size', train.get('batch_size')),
+			('train.epochs', train.get('epochs')),
+			('train.max_steps', train.get('max_steps')),
+			('train.device', train.get('device')),
+		]
+	)
+	rows.extend(vicreg_rows)
 	if 'continuation' in cfg:
 		continuation = _mapping(cfg.get('continuation'))
 		rows.extend(
