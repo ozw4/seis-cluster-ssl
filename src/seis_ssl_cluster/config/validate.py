@@ -21,6 +21,7 @@ from seis_ssl_cluster.config.pretraining import (
 	resolve_barlow_twins_training_config,
 	resolve_mae_training_config,
 	resolve_strat_hmm_pretext_config,
+	resolve_vicreg_training_config,
 )
 from seis_ssl_cluster.config.schema import (
 	KNOWN_STAGES,
@@ -34,6 +35,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_NORMALIZATION_STATS,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 	STAGE_STRAT_HMM_PSEUDO_TARGETS,
+	STAGE_VICREG_TRAINING,
 )
 from seis_ssl_cluster.config.strat_hmm_pseudo_targets import (
 	resolve_strat_hmm_pseudo_target_config,
@@ -106,6 +108,7 @@ def __dir__() -> list[str]:
 
 _STAGE_RESOLVERS: dict[str, _Resolver] = {
 	STAGE_BARLOW_TWINS_TRAINING: resolve_barlow_twins_training_config,
+	STAGE_VICREG_TRAINING: resolve_vicreg_training_config,
 	STAGE_BUILD_MANIFESTS: resolve_manifest_build_config,
 	STAGE_NORMALIZATION_STATS: resolve_normalization_stats_config,
 	STAGE_NORMALIZATION_QC: resolve_normalization_qc_config,
@@ -136,5 +139,6 @@ __all__ = [
 	'resolve_normalization_stats_config',
 	'resolve_strat_hmm_pretext_config',
 	'resolve_strat_hmm_pseudo_target_config',
+	'resolve_vicreg_training_config',
 	'validate_config',
 ]
