@@ -15,9 +15,11 @@ from seis_ssl_cluster.data import (
 	BarlowTwinsPretrainDataset,
 	LocalBarlowTwinsD4TraceDropPretrainDataset,
 	LocalBarlowTwinsPretrainDataset,
+	OverlappingLocalBarlowTwinsPretrainDataset,
 	SurveyManifest,
 	SurveyNormalizationStats,
 	ZeroMaskConfig,
+	derive_overlapping_parent_crop_size,
 	write_normalization_stats,
 )
 from seis_ssl_cluster.models.mae.patching import patchify_3d
@@ -119,6 +121,56 @@ def _square_d4_base_dataset(
 		samples_per_epoch=samples_per_epoch,
 		zero_mask=ZeroMaskConfig(enabled=False),
 		min_valid_token_count=min_valid_token_count,
+	)
+
+
+def _overlapping_base_dataset(
+	tmp_path: Path,
+	*,
+	valid_token_mask: np.ndarray | None = None,
+	samples_per_epoch: int = 8,
+	max_resample_attempts: int = 16,
+) -> AmplitudePretrainDataset:
+	patch_size_xyz = (2, 2, 1)
+	view_crop_size_xyz = (4, 4, 2)
+	max_shift_tokens = (1, 1, 0)
+	parent_crop_size_xyz = derive_overlapping_parent_crop_size(
+		view_crop_size_xyz,
+		patch_size_xyz,
+		max_shift_tokens,
+	)
+	parent_token_shape = tuple(
+		parent // patch
+		for parent, patch in zip(
+			parent_crop_size_xyz,
+			patch_size_xyz,
+			strict=True,
+		)
+	)
+	patch_ids = np.arange(
+		1,
+		int(np.prod(parent_token_shape)) + 1,
+		dtype=np.float32,
+	).reshape(parent_token_shape)
+	volume = patch_ids
+	for axis, repeat in enumerate(patch_size_xyz):
+		volume = volume.repeat(repeat, axis=axis)
+	valid_mask = None
+	if valid_token_mask is not None:
+		if valid_token_mask.shape != parent_token_shape:
+			raise ValueError('valid_token_mask has the wrong shape')
+		valid_mask = valid_token_mask
+		for axis, repeat in enumerate(patch_size_xyz):
+			valid_mask = valid_mask.repeat(repeat, axis=axis)
+	return AmplitudePretrainDataset(
+		[_manifest(tmp_path, volume, valid_mask=valid_mask)],
+		local_crop_size_xyz=parent_crop_size_xyz,
+		patch_size_xyz=patch_size_xyz,
+		emit_spatial_mask=False,
+		seed=37,
+		samples_per_epoch=samples_per_epoch,
+		zero_mask=ZeroMaskConfig(enabled=False),
+		max_resample_attempts=max_resample_attempts,
 	)
 
 
@@ -939,6 +991,190 @@ def test_local_multi_worker_batch_matches_single_process(tmp_path: Path) -> None
 	assert single_batch['coords'] == multi_batch['coords']
 	assert single_batch['local_pair_indices_a'].dtype is torch.int64
 	assert single_batch['horizontal_flip_state_a'].dtype is torch.bool
+
+
+def test_overlapping_parent_crop_size_adds_patch_aligned_shift_margin() -> None:
+	assert derive_overlapping_parent_crop_size(
+		(128, 128, 128),
+		(8, 8, 8),
+		(4, 4, 0),
+	) == (160, 160, 128)
+
+
+def test_overlapping_subcrops_pair_same_parent_patch_ids_and_preserve_contract(
+	tmp_path: Path,
+) -> None:
+	base = _overlapping_base_dataset(tmp_path)
+	read_candidate = Mock(wraps=base._read_amplitude_crop_candidate)  # noqa: SLF001
+	base._read_amplitude_crop_candidate = read_candidate  # type: ignore[method-assign]  # noqa: SLF001
+	dataset = OverlappingLocalBarlowTwinsPretrainDataset(
+		base,
+		view_crop_size_xyz=(4, 4, 2),
+		local_pairs_per_crop=2,
+		max_subcrop_shift_tokens=(1, 1, 0),
+	)
+
+	first = dataset[3]
+	second = dataset[3]
+
+	expected_keys = {
+		'view_a',
+		'view_b',
+		'valid_mask_a',
+		'valid_mask_b',
+		'coords',
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	}
+	assert set(first) == expected_keys
+	for key in expected_keys - {'coords'}:
+		np.testing.assert_array_equal(first[key], second[key])
+	assert first['coords'] == second['coords'] == {
+		'survey_id': 'survey',
+		'local_start_xyz': (0, 0, 0),
+		'local_size_xyz': (6, 6, 2),
+	}
+	assert read_candidate.call_count == 2
+	assert np.asarray(first['view_a']).shape == (1, 4, 4, 2)
+	assert np.asarray(first['valid_mask_a']).shape == (4, 4, 2)
+	assert np.asarray(first['view_a']).dtype == np.float32
+	assert np.asarray(first['valid_mask_a']).dtype == np.bool_
+	assert np.asarray(first['horizontal_flip_state_a']).dtype == np.bool_
+	assert np.asarray(first['local_pair_indices_a']).dtype == np.int64
+	assert np.asarray(first['local_pair_indices_a']).shape == (2,)
+	assert not np.array_equal(
+		first['horizontal_flip_state_a'],
+		first['horizontal_flip_state_b'],
+	)
+
+	patch_size_xyz = (2, 2, 1)
+	patches: dict[str, torch.Tensor] = {}
+	selected: dict[str, torch.Tensor] = {}
+	view_patch_id_sets: dict[str, set[int]] = {}
+	for suffix in ('a', 'b'):
+		patches[suffix] = patchify_3d(
+			torch.as_tensor(first[f'view_{suffix}']).unsqueeze(0),
+			patch_size_xyz,
+		)[0]
+		indices = torch.as_tensor(first[f'local_pair_indices_{suffix}'])
+		selected[suffix] = patches[suffix].index_select(0, indices)
+		view_patch_id_sets[suffix] = set(
+			patches[suffix][:, 0, 0].round().to(torch.int64).tolist()
+		)
+		mask_patches = patchify_3d(
+			torch.as_tensor(
+				first[f'valid_mask_{suffix}'],
+				dtype=torch.float32,
+			)
+			.unsqueeze(0)
+			.unsqueeze(0),
+			patch_size_xyz,
+		)[0]
+		assert torch.all(mask_patches.index_select(0, indices) == 1.0)
+
+	assert view_patch_id_sets['a'] != view_patch_id_sets['b']
+	torch.testing.assert_close(selected['a'], selected['b'])
+	selected_ids = selected['a'][:, 0, 0]
+	torch.testing.assert_close(
+		selected['a'],
+		selected_ids[:, None, None].expand_as(selected['a']),
+	)
+
+
+def test_overlapping_subcrop_retries_only_offsets_until_overlap_is_valid(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	valid_tokens = np.zeros((3, 3, 2), dtype=bool)
+	valid_tokens[1, 0, :] = True
+	base = _overlapping_base_dataset(
+		tmp_path,
+		valid_token_mask=valid_tokens,
+		max_resample_attempts=2,
+	)
+	read_candidate = Mock(wraps=base._read_amplitude_crop_candidate)  # noqa: SLF001
+	base._read_amplitude_crop_candidate = read_candidate  # type: ignore[method-assign]  # noqa: SLF001
+	dataset = OverlappingLocalBarlowTwinsPretrainDataset(
+		base,
+		view_crop_size_xyz=(4, 4, 2),
+		local_pairs_per_crop=2,
+		max_subcrop_shift_tokens=(1, 1, 0),
+	)
+	offset_sampler = Mock(
+		side_effect=[
+			(
+				np.asarray([0, 0, 0]),
+				np.asarray([1, 1, 0]),
+			),
+			(
+				np.asarray([0, 0, 0]),
+				np.asarray([1, 0, 0]),
+			),
+		]
+	)
+	monkeypatch.setattr(
+		barlow_dataset_module,
+		'_sample_distinct_subcrop_offsets',
+		offset_sampler,
+	)
+
+	sample = dataset[0]
+
+	assert offset_sampler.call_count == 2
+	assert read_candidate.call_count == 1
+	assert np.asarray(sample['local_pair_indices_a']).shape == (2,)
+	for suffix in ('a', 'b'):
+		mask_patches = patchify_3d(
+			torch.as_tensor(
+				sample[f'valid_mask_{suffix}'],
+				dtype=torch.float32,
+			)
+			.unsqueeze(0)
+			.unsqueeze(0),
+			(2, 2, 1),
+		)[0]
+		selected_mask = mask_patches.index_select(
+			0,
+			torch.as_tensor(sample[f'local_pair_indices_{suffix}']),
+		)
+		assert torch.all(selected_mask == 1.0)
+
+
+def test_overlapping_subcrop_reports_bounded_offset_retry_failure(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	valid_tokens = np.zeros((3, 3, 2), dtype=bool)
+	valid_tokens[0, 0, :] = True
+	base = _overlapping_base_dataset(
+		tmp_path,
+		valid_token_mask=valid_tokens,
+		max_resample_attempts=2,
+	)
+	dataset = OverlappingLocalBarlowTwinsPretrainDataset(
+		base,
+		view_crop_size_xyz=(4, 4, 2),
+		local_pairs_per_crop=2,
+		max_subcrop_shift_tokens=(1, 1, 0),
+	)
+	offset_sampler = Mock(
+		return_value=(
+			np.asarray([0, 0, 0]),
+			np.asarray([1, 1, 0]),
+		)
+	)
+	monkeypatch.setattr(
+		barlow_dataset_module,
+		'_sample_distinct_subcrop_offsets',
+		offset_sampler,
+	)
+
+	with pytest.raises(ValueError, match=r'after 2 attempts.*last overlap had 0'):
+		dataset[0]
+
+	assert offset_sampler.call_count == 2
 
 
 def test_barlow_collate_rejects_mixed_standard_and_local_samples(

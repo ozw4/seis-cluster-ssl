@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from numbers import Integral, Real
 from typing import TYPE_CHECKING
 
@@ -12,6 +13,32 @@ from seis_ssl_cluster.data.window_preprocessing import reduce_valid_mask_to_toke
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.data.amplitude_dataset import AmplitudePretrainDataset
+
+
+def derive_overlapping_parent_crop_size(
+	view_crop_size_xyz: Sequence[int],
+	patch_size_xyz: Sequence[int],
+	max_subcrop_shift_tokens: Sequence[int],
+) -> tuple[int, int, int]:
+	"""Return the parent size needed to contain every allowed subcrop."""
+	view_crop_size = _validate_positive_xyz(
+		view_crop_size_xyz,
+		'view_crop_size_xyz',
+	)
+	patch_size = _validate_positive_xyz(patch_size_xyz, 'patch_size_xyz')
+	max_shift_tokens = _validate_nonnegative_xyz(
+		max_subcrop_shift_tokens,
+		'max_subcrop_shift_tokens',
+	)
+	return tuple(
+		view + patch * shift
+		for view, patch, shift in zip(
+			view_crop_size,
+			patch_size,
+			max_shift_tokens,
+			strict=True,
+		)
+	)
 
 
 class BarlowTwinsPretrainDataset:
@@ -210,6 +237,209 @@ class LocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
 		}
 
 
+class OverlappingLocalBarlowTwinsPretrainDataset(BarlowTwinsPretrainDataset):
+	"""Return matching tokens from two overlapping parent-volume subcrops."""
+
+	def __init__(
+		self,
+		base_dataset: AmplitudePretrainDataset,
+		*,
+		view_crop_size_xyz: Sequence[int],
+		local_pairs_per_crop: int,
+		max_subcrop_shift_tokens: Sequence[int],
+		horizontal_flip_probability: float = 0.5,
+	) -> None:
+		"""Initialize and validate the overlapping-subcrop geometry."""
+		super().__init__(
+			base_dataset,
+			horizontal_flip_probability=horizontal_flip_probability,
+		)
+		self.view_crop_size_xyz = _validate_positive_xyz(
+			view_crop_size_xyz,
+			'view_crop_size_xyz',
+		)
+		self.local_pairs_per_crop = _validate_positive_int(
+			local_pairs_per_crop,
+			'local_pairs_per_crop',
+		)
+		self.max_subcrop_shift_tokens = _validate_nonnegative_xyz(
+			max_subcrop_shift_tokens,
+			'max_subcrop_shift_tokens',
+		)
+		patch_size_xyz = tuple(int(axis) for axis in base_dataset.patch_size_xyz)
+		if any(
+			view % patch != 0
+			for view, patch in zip(
+				self.view_crop_size_xyz,
+				patch_size_xyz,
+				strict=True,
+			)
+		):
+			msg = (
+				'view_crop_size_xyz dimensions must be divisible by '
+				'base_dataset.patch_size_xyz'
+			)
+			raise ValueError(msg)
+		self.view_token_shape_xyz = tuple(
+			view // patch
+			for view, patch in zip(
+				self.view_crop_size_xyz,
+				patch_size_xyz,
+				strict=True,
+			)
+		)
+		if self.max_subcrop_shift_tokens[2] != 0:
+			raise ValueError('max_subcrop_shift_tokens Z shift must be 0')
+		if (
+			self.max_subcrop_shift_tokens[0] == 0
+			and self.max_subcrop_shift_tokens[1] == 0
+		):
+			raise ValueError(
+				'max_subcrop_shift_tokens X or Y shift must be positive'
+			)
+		if any(
+			shift >= token_count
+			for shift, token_count in zip(
+				self.max_subcrop_shift_tokens,
+				self.view_token_shape_xyz,
+				strict=True,
+			)
+		):
+			msg = (
+				'max_subcrop_shift_tokens values must be less than the view '
+				f'token shape {self.view_token_shape_xyz!r}; got '
+				f'{self.max_subcrop_shift_tokens!r}'
+			)
+			raise ValueError(msg)
+		minimum_overlap_token_count = int(
+			np.prod(
+				[
+					token_count - shift
+					for token_count, shift in zip(
+						self.view_token_shape_xyz,
+						self.max_subcrop_shift_tokens,
+						strict=True,
+					)
+				]
+			)
+		)
+		if minimum_overlap_token_count < self.local_pairs_per_crop:
+			msg = (
+				'minimum overlapping token count must be greater than or equal '
+				f'to local_pairs_per_crop; got {minimum_overlap_token_count} and '
+				f'{self.local_pairs_per_crop}'
+			)
+			raise ValueError(msg)
+		self.parent_crop_size_xyz = derive_overlapping_parent_crop_size(
+			self.view_crop_size_xyz,
+			patch_size_xyz,
+			self.max_subcrop_shift_tokens,
+		)
+		base_crop_size_xyz = tuple(
+			int(axis) for axis in base_dataset.local_crop_size_xyz
+		)
+		if base_crop_size_xyz != self.parent_crop_size_xyz:
+			msg = (
+				'base_dataset.local_crop_size_xyz must equal the derived parent '
+				f'crop size {self.parent_crop_size_xyz!r}; got '
+				f'{base_crop_size_xyz!r}'
+			)
+			raise ValueError(msg)
+
+	def __getitem__(self, index: int) -> dict[str, object]:
+		"""Return overlapping views and C-order indices for physical pairs."""
+		base_sample, parent, parent_valid_mask, rng = self._load_base_sample(index)
+		parent_token_mask = reduce_valid_mask_to_tokens(
+			parent_valid_mask,
+			patch_size_xyz=self.base_dataset.patch_size_xyz,
+			min_valid_fraction=1.0,
+		)
+		last_valid_overlap_count = 0
+		for _ in range(self.base_dataset.max_resample_attempts):
+			offset_a, offset_b = _sample_distinct_subcrop_offsets(
+				rng,
+				self.max_subcrop_shift_tokens,
+			)
+			valid_parent_coordinates = _valid_overlap_parent_token_coordinates(
+				parent_token_mask,
+				offset_a,
+				offset_b,
+				self.view_token_shape_xyz,
+			)
+			last_valid_overlap_count = int(valid_parent_coordinates.shape[0])
+			if last_valid_overlap_count >= self.local_pairs_per_crop:
+				break
+		else:
+			msg = (
+				'parent sample did not produce an offset pair with enough fully '
+				'valid overlapping tokens after '
+				f'{self.base_dataset.max_resample_attempts} attempts; requested '
+				f'{self.local_pairs_per_crop}, last overlap had '
+				f'{last_valid_overlap_count}'
+			)
+			raise ValueError(msg)
+
+		patch_size_xyz = self.base_dataset.patch_size_xyz
+		view_a_raw, valid_mask_a_raw = _slice_token_aligned_subcrop(
+			parent,
+			parent_valid_mask,
+			offset_a,
+			self.view_crop_size_xyz,
+			patch_size_xyz,
+		)
+		view_b_raw, valid_mask_b_raw = _slice_token_aligned_subcrop(
+			parent,
+			parent_valid_mask,
+			offset_b,
+			self.view_crop_size_xyz,
+			patch_size_xyz,
+		)
+		(
+			(view_a, valid_mask_a, flip_state_a),
+			(view_b, valid_mask_b, flip_state_b),
+		) = _build_horizontal_views(
+			view_a_raw,
+			valid_mask_a_raw,
+			rng,
+			probability=self.horizontal_flip_probability,
+			require_distinct=True,
+			view_b_x=view_b_raw,
+			view_b_valid_mask=valid_mask_b_raw,
+		)
+		selected_rows = np.asarray(
+			rng.choice(
+				valid_parent_coordinates.shape[0],
+				size=self.local_pairs_per_crop,
+				replace=False,
+			),
+			dtype=np.int64,
+		)
+		selected_parent_coordinates = valid_parent_coordinates[selected_rows]
+		local_indices_a = _parent_coordinates_to_view_indices(
+			selected_parent_coordinates,
+			offset_a,
+			self.view_token_shape_xyz,
+			flip_state_a,
+		)
+		local_indices_b = _parent_coordinates_to_view_indices(
+			selected_parent_coordinates,
+			offset_b,
+			self.view_token_shape_xyz,
+			flip_state_b,
+		)
+		return {
+			'view_a': view_a,
+			'view_b': view_b,
+			'valid_mask_a': valid_mask_a,
+			'valid_mask_b': valid_mask_b,
+			'coords': base_sample.get('coords'),
+			'horizontal_flip_state_a': flip_state_a,
+			'horizontal_flip_state_b': flip_state_b,
+			'local_pair_indices_a': local_indices_a,
+			'local_pair_indices_b': local_indices_b,
+		}
+
+
 class LocalBarlowTwinsD4TraceDropPretrainDataset(BarlowTwinsPretrainDataset):
 	"""Return XY-D4 views, trace-drop metadata, and physical token pairs."""
 
@@ -319,13 +549,15 @@ class LocalBarlowTwinsD4TraceDropPretrainDataset(BarlowTwinsPretrainDataset):
 		}
 
 
-def _build_horizontal_views(
+def _build_horizontal_views(  # noqa: PLR0913
 	x: np.ndarray,
 	valid_mask: np.ndarray,
 	rng: np.random.Generator,
 	*,
 	probability: float,
 	require_distinct: bool,
+	view_b_x: np.ndarray | None = None,
+	view_b_valid_mask: np.ndarray | None = None,
 ) -> tuple[
 	tuple[np.ndarray, np.ndarray, np.ndarray],
 	tuple[np.ndarray, np.ndarray, np.ndarray],
@@ -349,8 +581,8 @@ def _build_horizontal_views(
 		flip_crossline=bool(flip_state_a[1]),
 	)
 	view_b, valid_mask_b = _augment_view(
-		x,
-		valid_mask,
+		x if view_b_x is None else view_b_x,
+		valid_mask if view_b_valid_mask is None else view_b_valid_mask,
 		flip_inline=bool(flip_state_b[0]),
 		flip_crossline=bool(flip_state_b[1]),
 	)
@@ -380,6 +612,75 @@ def _augment_view(
 	return (
 		np.flip(x, axis=tuple(amplitude_axes)).copy(),
 		np.flip(valid_mask, axis=tuple(mask_axes)).copy(),
+	)
+
+
+def _sample_distinct_subcrop_offsets(
+	rng: np.random.Generator,
+	max_shift_tokens: tuple[int, int, int],
+) -> tuple[np.ndarray, np.ndarray]:
+	high = np.asarray(max_shift_tokens, dtype=np.int64) + 1
+	offset_a = np.asarray(rng.integers(0, high), dtype=np.int64)
+	offset_b = np.asarray(rng.integers(0, high), dtype=np.int64)
+	if np.array_equal(offset_a, offset_b):
+		axis = 0 if max_shift_tokens[0] > 0 else 1
+		offset_b[axis] = (offset_b[axis] + 1) % high[axis]
+	return offset_a, offset_b
+
+
+def _valid_overlap_parent_token_coordinates(
+	parent_token_mask: np.ndarray,
+	offset_a: np.ndarray,
+	offset_b: np.ndarray,
+	view_token_shape: tuple[int, int, int],
+) -> np.ndarray:
+	lower = np.maximum(offset_a, offset_b)
+	upper = np.minimum(
+		offset_a + np.asarray(view_token_shape),
+		offset_b + np.asarray(view_token_shape),
+	)
+	overlap_slices = tuple(
+		slice(int(start), int(stop))
+		for start, stop in zip(lower, upper, strict=True)
+	)
+	coordinates = np.argwhere(parent_token_mask[overlap_slices])
+	return np.asarray(coordinates + lower, dtype=np.int64)
+
+
+def _slice_token_aligned_subcrop(
+	parent: np.ndarray,
+	parent_valid_mask: np.ndarray,
+	offset_tokens: np.ndarray,
+	view_crop_size_xyz: tuple[int, int, int],
+	patch_size_xyz: tuple[int, int, int],
+) -> tuple[np.ndarray, np.ndarray]:
+	voxel_start = offset_tokens * np.asarray(patch_size_xyz, dtype=np.int64)
+	voxel_slices = tuple(
+		slice(int(start), int(start) + size)
+		for start, size in zip(voxel_start, view_crop_size_xyz, strict=True)
+	)
+	return parent[(slice(None), *voxel_slices)], parent_valid_mask[voxel_slices]
+
+
+def _parent_coordinates_to_view_indices(
+	parent_coordinates: np.ndarray,
+	offset_tokens: np.ndarray,
+	view_token_shape: tuple[int, int, int],
+	flip_state: np.ndarray,
+) -> np.ndarray:
+	local_coordinates = parent_coordinates - offset_tokens
+	unflipped_indices = np.asarray(
+		np.ravel_multi_index(
+			tuple(local_coordinates.T),
+			view_token_shape,
+			order='C',
+		),
+		dtype=np.int64,
+	)
+	return _map_token_indices_for_view(
+		unflipped_indices,
+		view_token_shape,
+		flip_state,
 	)
 
 
@@ -592,6 +893,38 @@ def _validate_positive_int(value: object, name: str) -> int:
 	return integer
 
 
+def _validate_positive_xyz(value: object, name: str) -> tuple[int, int, int]:
+	if (
+		not isinstance(value, Sequence)
+		or isinstance(value, str | bytes)
+		or len(value) != 3
+		or any(
+			isinstance(axis, bool) or not isinstance(axis, Integral) or axis <= 0
+			for axis in value
+		)
+	):
+		msg = f'{name} must be a length-3 positive integer sequence; got {value!r}'
+		raise ValueError(msg)
+	return tuple(int(axis) for axis in value)
+
+
+def _validate_nonnegative_xyz(value: object, name: str) -> tuple[int, int, int]:
+	if (
+		not isinstance(value, Sequence)
+		or isinstance(value, str | bytes)
+		or len(value) != 3
+		or any(
+			isinstance(axis, bool) or not isinstance(axis, Integral) or axis < 0
+			for axis in value
+		)
+	):
+		msg = (
+			f'{name} must be a length-3 nonnegative integer sequence; got {value!r}'
+		)
+		raise ValueError(msg)
+	return tuple(int(axis) for axis in value)
+
+
 def _validate_nonnegative_finite_real(value: object, name: str) -> float:
 	if isinstance(value, bool) or not isinstance(value, Real):
 		msg = f'{name} must be a real number; got {value!r}'
@@ -652,4 +985,6 @@ __all__ = [
 	'BarlowTwinsPretrainDataset',
 	'LocalBarlowTwinsD4TraceDropPretrainDataset',
 	'LocalBarlowTwinsPretrainDataset',
+	'OverlappingLocalBarlowTwinsPretrainDataset',
+	'derive_overlapping_parent_crop_size',
 ]

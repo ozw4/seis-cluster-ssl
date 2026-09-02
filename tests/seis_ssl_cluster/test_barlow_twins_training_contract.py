@@ -23,6 +23,7 @@ from seis_ssl_cluster.config.schema import (
 	HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
 	IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
 	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
 from seis_ssl_cluster.data import (
@@ -439,6 +440,119 @@ def test_local_checkpoint_contract_round_trip_and_epoch_resume(
 	assert resumed['epoch'] == 2
 	assert resumed['global_step'] == 2
 	assert resumed['pretraining_method'] == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+
+
+def test_overlapping_subcrop_one_step_uses_parent_crop_and_resumes(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	original_base_dataset = barlow_twins_module.AmplitudePretrainDataset
+	original_overlap_dataset = (
+		barlow_twins_module.OverlappingLocalBarlowTwinsPretrainDataset
+	)
+	original_forward_local = BarlowTwins3D.forward_local
+	base_crop_sizes: list[tuple[int, int, int]] = []
+	dataset_calls: list[dict[str, object]] = []
+	encoder_input_shapes: list[tuple[int, ...]] = []
+	projection_rows: list[int] = []
+
+	def record_base_dataset(
+		*args: object,
+		**kwargs: object,
+	) -> object:
+		crop_size = kwargs.get('local_crop_size_xyz')
+		assert isinstance(crop_size, tuple)
+		base_crop_sizes.append(crop_size)
+		return original_base_dataset(*args, **kwargs)  # type: ignore[arg-type]
+
+	def record_overlap_dataset(
+		base_dataset: object,
+		**kwargs: object,
+	) -> object:
+		dataset_calls.append(kwargs)
+		return original_overlap_dataset(  # type: ignore[arg-type]
+			base_dataset,
+			**kwargs,
+		)
+
+	def record_forward_local(
+		model: BarlowTwins3D,
+		view_a: torch.Tensor,
+		view_b: torch.Tensor,
+		**kwargs: torch.Tensor,
+	) -> dict[str, torch.Tensor]:
+		assert tuple(view_b.shape) == tuple(view_a.shape)
+		encoder_input_shapes.append(tuple(view_a.shape))
+		outputs = original_forward_local(model, view_a, view_b, **kwargs)
+		projection_rows.append(int(outputs['z_a'].shape[0]))
+		return outputs
+
+	monkeypatch.setattr(
+		barlow_twins_module,
+		'AmplitudePretrainDataset',
+		record_base_dataset,
+	)
+	monkeypatch.setattr(
+		barlow_twins_module,
+		'OverlappingLocalBarlowTwinsPretrainDataset',
+		record_overlap_dataset,
+	)
+	monkeypatch.setattr(BarlowTwins3D, 'forward_local', record_forward_local)
+	config = resolve_barlow_twins_training_config(
+		_tiny_overlapping_subcrop_config(
+			tmp_path,
+			output_name='overlapping-subcrop-one-step',
+		)
+	)
+
+	checkpoint_path = run_barlow_twins_pretraining(config)
+	payload = load_barlow_twins_checkpoint(checkpoint_path, map_location='cpu')
+
+	assert base_crop_sizes == [(6, 6, 4)]
+	assert dataset_calls == [
+		{
+			'view_crop_size_xyz': (4, 4, 4),
+			'local_pairs_per_crop': 2,
+			'max_subcrop_shift_tokens': (1, 1, 0),
+			'horizontal_flip_probability': 0.5,
+		}
+	]
+	assert encoder_input_shapes == [(2, 1, 4, 4, 4)]
+	assert projection_rows == [2 * 2]
+	assert payload['checkpoint_kind'] == 'barlow_twins_pretraining'
+	assert payload['pretraining_method'] == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+	assert payload['config']['augmentations'] == {
+		'policy': OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'max_subcrop_shift_tokens': [1, 1, 0],
+	}
+	assert 'continuation' not in payload['config']
+	loaded_encoder = build_model_from_checkpoint_payload(payload)
+	for key, expected in payload['model_state_dict'].items():
+		assert torch.equal(loaded_encoder.state_dict()[key], expected)
+
+	resume_config = resolve_barlow_twins_training_config(
+		_tiny_overlapping_subcrop_config(
+			tmp_path,
+			epochs=2,
+			max_steps=2,
+			output_name='overlapping-subcrop-one-step',
+		)
+	)
+	resumed_path = run_barlow_twins_pretraining(
+		resume_config,
+		resume=checkpoint_path,
+	)
+	resumed = load_barlow_twins_checkpoint(resumed_path, map_location='cpu')
+
+	assert base_crop_sizes == [(6, 6, 4), (6, 6, 4)]
+	assert encoder_input_shapes == [(2, 1, 4, 4, 4)] * 2
+	assert projection_rows == [2 * 2, 2 * 2]
+	assert resumed['epoch'] == 2
+	assert resumed['global_step'] == 2
+	assert resumed['resume_count'] == 1
+	assert resumed['pretraining_method'] == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+	assert resumed['config']['augmentations'] == payload['config']['augmentations']
 
 
 def test_d4_trace_drop_one_step_uses_policy_dataset_and_saves_config(
@@ -1446,6 +1560,30 @@ def _tiny_local_config(  # noqa: PLR0913
 		'method': LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 		'local_pairs_per_crop': local_pairs_per_crop,
 		'projector_dim': 4,
+	}
+	return config
+
+
+def _tiny_overlapping_subcrop_config(
+	tmp_path: Path,
+	*,
+	epochs: int = 1,
+	max_steps: int = 1,
+	output_name: str = 'overlapping-subcrop-run',
+	encoder_depth: int = 1,
+) -> dict[str, object]:
+	config = _tiny_local_config(
+		tmp_path,
+		epochs=epochs,
+		max_steps=max_steps,
+		output_name=output_name,
+		encoder_depth=encoder_depth,
+		local_pairs_per_crop=2,
+	)
+	config['augmentations'] = {
+		'policy': OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'max_subcrop_shift_tokens': [1, 1, 0],
 	}
 	return config
 

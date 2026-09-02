@@ -19,10 +19,15 @@ from seis_ssl_cluster.config.barlow_twins import (
 from seis_ssl_cluster.config.schema import (
 	BARLOW_TWINS_PRETRAINING_METHOD,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
 	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
 from seis_ssl_cluster.data.amplitude_dataset import AmplitudePretrainDataset
-from seis_ssl_cluster.data.barlow_twins_dataset import BarlowTwinsPretrainDataset
+from seis_ssl_cluster.data.barlow_twins_dataset import (
+	BarlowTwinsPretrainDataset,
+	OverlappingLocalBarlowTwinsPretrainDataset,
+	derive_overlapping_parent_crop_size,
+)
 from seis_ssl_cluster.data.schema import read_manifest_json
 from seis_ssl_cluster.data.zero_mask import ZeroMaskConfig
 from seis_ssl_cluster.models.barlow_twins import BarlowTwins3D, BarlowTwinsLoss
@@ -224,6 +229,23 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 		else None
 	)
 	augmentations = _mapping(config, 'augmentations')
+	augmentation_policy = (
+		_string(augmentations, 'policy') if 'policy' in augmentations else None
+	)
+	view_crop_size_xyz = _xyz(data, 'local_crop_size')
+	patch_size_xyz = _xyz(model_config, 'patch_size')
+	max_subcrop_shift_tokens: tuple[int, int, int] | None = None
+	base_crop_size_xyz = view_crop_size_xyz
+	if augmentation_policy == OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY:
+		max_subcrop_shift_tokens = _xyz(
+			augmentations,
+			'max_subcrop_shift_tokens',
+		)
+		base_crop_size_xyz = derive_overlapping_parent_crop_size(
+			view_crop_size_xyz,
+			patch_size_xyz,
+			max_subcrop_shift_tokens,
+		)
 	continuation = (
 		_mapping(config, 'continuation') if 'continuation' in config else None
 	)
@@ -244,8 +266,8 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 
 	base_dataset = AmplitudePretrainDataset(
 		manifests,
-		local_crop_size_xyz=_xyz(data, 'local_crop_size'),
-		patch_size_xyz=_xyz(model_config, 'patch_size'),
+		local_crop_size_xyz=base_crop_size_xyz,
+		patch_size_xyz=patch_size_xyz,
 		emit_spatial_mask=False,
 		seed=seed,
 		samples_per_epoch=_integer(train, 'samples_per_epoch'),
@@ -259,12 +281,23 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 			0 if local_pairs_per_crop is None else local_pairs_per_crop
 		),
 	)
-	augmentation_policy = (
-		_string(augmentations, 'policy') if 'policy' in augmentations else None
-	)
 	if local_pairs_per_crop is None:
 		dataset = BarlowTwinsPretrainDataset(
 			base_dataset,
+			horizontal_flip_probability=_floating(
+				augmentations,
+				'horizontal_flip_probability',
+			),
+		)
+	elif augmentation_policy == OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY:
+		dataset = OverlappingLocalBarlowTwinsPretrainDataset(
+			base_dataset,
+			view_crop_size_xyz=view_crop_size_xyz,
+			local_pairs_per_crop=local_pairs_per_crop,
+			max_subcrop_shift_tokens=cast(
+				'tuple[int, int, int]',
+				max_subcrop_shift_tokens,
+			),
 			horizontal_flip_probability=_floating(
 				augmentations,
 				'horizontal_flip_probability',

@@ -20,6 +20,7 @@ import seis_ssl_cluster.embedding.extractor as extractor_module
 from seis_ssl_cluster.config import resolve_barlow_twins_training_config
 from seis_ssl_cluster.config.schema import (
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
 	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
 from seis_ssl_cluster.data import (
@@ -241,6 +242,62 @@ def test_local_barlow_checkpoint_extracts_encoder_dim_and_objective_metadata(
 	for key, expected in payload['model_state_dict'].items():
 		assert torch.equal(loaded.state_dict()[key], expected)
 	assert set(payload['projector_state_dict']).isdisjoint(loaded.state_dict())
+
+
+def test_overlapping_subcrop_checkpoint_extracts_bare_encoder_and_metadata(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	augmentations = {
+		'policy': OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'max_subcrop_shift_tokens': [4, 4, 0],
+	}
+	_make_fixture_checkpoint_barlow(
+		config,
+		method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		augmentations=augmentations,
+		local_crop_size=(16, 16, 16),
+		projector_dim=11,
+	)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+	embeddings = np.load(result.embeddings_path)
+	valid_tokens = np.load(result.valid_tokens_path)
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+	checkpoint_path = Path(config['embeddings']['checkpoint'])  # type: ignore[index]
+	payload = load_checkpoint(checkpoint_path, map_location='cpu')
+	loaded = build_model_from_checkpoint_payload(payload)
+
+	assert embeddings.shape[-1] == loaded.encoder_dim == 12
+	assert metadata['pretraining_method'] == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+	assert metadata['pretraining_objective'] == {
+		'method': LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		'projector_dim': 11,
+		'redundancy_weight': 0.005,
+		'normalization_eps': 1.0e-4,
+		'local_pairs_per_crop': 128,
+		'augmentations': augmentations,
+	}
+	for key, expected in payload['model_state_dict'].items():
+		assert torch.equal(loaded.state_dict()[key], expected)
+	assert set(payload['projector_state_dict']).isdisjoint(loaded.state_dict())
+
+	projector_state = payload['projector_state_dict']
+	assert isinstance(projector_state, dict)
+	for name, value in projector_state.items():
+		if isinstance(value, torch.Tensor) and value.is_floating_point():
+			projector_state[name] = value + 23.0
+	torch.save(payload, checkpoint_path)
+	embeddings_config = config['embeddings']
+	assert isinstance(embeddings_config, dict)
+	embeddings_config['output_dir'] = str(tmp_path / 'overlap-projector-mutated')
+
+	mutated_result = run_embedding_extraction(config, device='cpu')[0]
+	mutated_embeddings = np.load(mutated_result.embeddings_path)
+	mutated_valid_tokens = np.load(mutated_result.valid_tokens_path)
+	np.testing.assert_array_equal(mutated_embeddings, embeddings)
+	np.testing.assert_array_equal(mutated_valid_tokens, valid_tokens)
 
 
 def test_d4_barlow_checkpoint_metadata_copies_explicit_augmentation_policy(
@@ -1825,12 +1882,14 @@ def _write_fixture(  # noqa: PLR0913
 	return config
 
 
-def _make_fixture_checkpoint_barlow(
+def _make_fixture_checkpoint_barlow(  # noqa: PLR0913
 	config: dict[str, object],
 	*,
 	continuation: dict[str, object] | None = None,
 	method: str | None = None,
 	augmentations: dict[str, object] | None = None,
+	local_crop_size: tuple[int, int, int] | None = None,
+	projector_dim: int = 8,
 ) -> None:
 	embeddings = config['embeddings']
 	assert isinstance(embeddings, dict)
@@ -1844,20 +1903,23 @@ def _make_fixture_checkpoint_barlow(
 	assert isinstance(manifests, dict)
 	zero_mask = mae_config['zero_mask']
 	assert isinstance(zero_mask, dict)
-	barlow_twins: dict[str, object] = {'projector_dim': 8}
-	local_crop_size = [4, 4, 4]
+	barlow_twins: dict[str, object] = {'projector_dim': projector_dim}
+	resolved_local_crop_size = (
+		[4, 4, 4] if local_crop_size is None else list(local_crop_size)
+	)
 	if method is not None:
 		barlow_twins['method'] = method
 	if method == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
 		barlow_twins['local_pairs_per_crop'] = 128
-		local_crop_size = [8, 8, 16]
+		if local_crop_size is None:
+			resolved_local_crop_size = [8, 8, 16]
 	raw_barlow_config: dict[str, object] = {
 		'paths': {
 			'artifact_root': str(checkpoint_path.parent / 'artifacts'),
 			'output_root': str(checkpoint_path.parent / 'artifacts' / 'barlow'),
 		},
 		'manifests': dict(manifests),
-		'data': {'local_crop_size': local_crop_size},
+		'data': {'local_crop_size': resolved_local_crop_size},
 		'zero_mask': dict(zero_mask),
 		'model': {
 			key: model_config[key]
@@ -1892,7 +1954,7 @@ def _make_fixture_checkpoint_barlow(
 		raw_barlow_config['augmentations'] = dict(augmentations)
 	barlow_config = resolve_barlow_twins_training_config(raw_barlow_config)
 	mae = build_model_from_checkpoint_payload(payload)
-	projector = torch.nn.Linear(mae.encoder_dim, 8)
+	projector = torch.nn.Linear(mae.encoder_dim, projector_dim)
 	optimizer = torch.optim.AdamW(
 		[
 			*mae.patch_projection.parameters(),
@@ -1901,6 +1963,14 @@ def _make_fixture_checkpoint_barlow(
 		],
 		lr=1.0e-4,
 	)
+	continuation_lineage = None
+	if continuation is not None:
+		continuation_lineage = {
+			'schema_version': 1,
+			'init_checkpoint': continuation['init_checkpoint'],
+			'init_checkpoint_sha256': '0' * 64,
+			'resume_count': 0,
+		}
 	save_barlow_twins_checkpoint(
 		checkpoint_path,
 		backbone=mae,
@@ -1915,6 +1985,7 @@ def _make_fixture_checkpoint_barlow(
 		scaler_required=False,
 		dataset_epoch=1,
 		completed_epoch=True,
+		continuation_lineage=continuation_lineage,
 	)
 
 

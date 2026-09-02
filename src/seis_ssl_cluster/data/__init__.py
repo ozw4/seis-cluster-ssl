@@ -9,6 +9,8 @@ from seis_ssl_cluster.data.barlow_twins_dataset import (
 	BarlowTwinsPretrainDataset,
 	LocalBarlowTwinsD4TraceDropPretrainDataset,
 	LocalBarlowTwinsPretrainDataset,
+	OverlappingLocalBarlowTwinsPretrainDataset,
+	derive_overlapping_parent_crop_size,
 )
 from seis_ssl_cluster.data.crop_sampler import (
 	expand_request_with_margin,
@@ -157,6 +159,7 @@ __all__ = [
 	'NormalizationStatsQcThresholds',
 	'NpyMemmapVolumeStore',
 	'NpyVolumeInfo',
+	'OverlappingLocalBarlowTwinsPretrainDataset',
 	'PreparedAmplitudeCrop',
 	'PreparedSurveyAmplitude',
 	'StratMultiHeadLateralTargetManifest',
@@ -181,6 +184,7 @@ __all__ = [
 	'build_nopims_manifests',
 	'compute_normalization_stats',
 	'compute_zero_amplitude_invalid_mask',
+	'derive_overlapping_parent_crop_size',
 	'detect_all_zero_traces',
 	'detect_all_zero_z_samples',
 	'dilate_zero_sample_mask',

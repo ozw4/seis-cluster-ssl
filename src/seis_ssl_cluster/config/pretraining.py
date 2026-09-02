@@ -32,6 +32,7 @@ from seis_ssl_cluster.config.common import (
 	_validate_non_empty_str,
 	_validate_nonnegative_finite_number,
 	_validate_nonnegative_int,
+	_validate_nonnegative_int_triplet,
 	_validate_nonnegative_number,
 	_validate_optional_fraction,
 	_validate_optional_nonnegative_int,
@@ -75,6 +76,7 @@ from seis_ssl_cluster.config.schema import (
 	LOCAL_VICREG_PRETRAINING_METHOD,
 	MAE_DEBUG_VISUALIZATION_COLUMNS,
 	MAE_DEBUG_VISUALIZATION_KEYS,
+	OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
 	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_MAE_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
@@ -121,6 +123,9 @@ _HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS = frozenset(
 	{'policy', 'horizontal_flip_probability', 'z_filter_side_weight'}
 )
 _IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS = frozenset({'policy', 'gaussian_noise_std'})
+_OVERLAPPING_SUBCROP_XY_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'max_subcrop_shift_tokens'}
+)
 
 _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 	'manifests': frozenset({'train', 'train_path_list', 'canonical_input_metadata'}),
@@ -154,6 +159,7 @@ _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 			*_HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_KEYS,
 			*_HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS,
 			*_IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			*_OVERLAPPING_SUBCROP_XY_AUGMENTATION_KEYS,
 		}
 	),
 	'barlow_twins': frozenset(
@@ -770,6 +776,10 @@ def resolve_barlow_twins_training_config(config: _T) -> Config:
 		method=cast('str', barlow_twins.get('method', BARLOW_TWINS_PRETRAINING_METHOD)),
 		local_crop_size=local_crop_size,
 		patch_size=patch_size,
+		local_pairs_per_crop=cast(
+			'int | None',
+			barlow_twins.get('local_pairs_per_crop'),
+		),
 	)
 
 	train = _required_mapping(resolved, 'train')
@@ -879,6 +889,7 @@ def resolve_vicreg_training_config(config: _T) -> Config:
 		method=cast('str', vicreg['method']),
 		local_crop_size=local_crop_size,
 		patch_size=patch_size,
+		local_pairs_per_crop=int(vicreg['local_pairs_per_crop']),
 		local_method=LOCAL_VICREG_PRETRAINING_METHOD,
 		method_section='vicreg',
 	)
@@ -4070,6 +4081,7 @@ def _validate_barlow_twins_augmentations(  # noqa: C901, PLR0912, PLR0913, PLR09
 	method: str,
 	local_crop_size: Sequence[int],
 	patch_size: Sequence[int],
+	local_pairs_per_crop: int | None,
 	local_method: str = LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 	method_section: str = 'barlow_twins',
 ) -> None:
@@ -4200,6 +4212,81 @@ def _validate_barlow_twins_augmentations(  # noqa: C901, PLR0912, PLR0913, PLR09
 			'z_filter_side_weight',
 			prefix='augmentations',
 		)
+		return
+
+	if policy == OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_OVERLAPPING_SUBCROP_XY_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_OVERLAPPING_SUBCROP_XY_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+			msg = (
+				'augmentations.policy '
+				f'{OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY!r} requires '
+				'barlow_twins.method '
+				f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		max_shift_tokens = _validate_nonnegative_int_triplet(
+			augmentations,
+			'max_subcrop_shift_tokens',
+			prefix='augmentations',
+		)
+		if max_shift_tokens[2] != 0:
+			raise ValueError(
+				'augmentations.max_subcrop_shift_tokens Z shift must be 0'
+			)
+		if max_shift_tokens[0] == 0 and max_shift_tokens[1] == 0:
+			raise ValueError(
+				'augmentations.max_subcrop_shift_tokens X or Y shift must be positive'
+			)
+		view_token_shape = tuple(
+			crop // patch
+			for crop, patch in zip(local_crop_size, patch_size, strict=True)
+		)
+		if any(
+			shift >= token_count
+			for shift, token_count in zip(
+				max_shift_tokens,
+				view_token_shape,
+				strict=True,
+			)
+		):
+			raise ValueError(
+				'augmentations.max_subcrop_shift_tokens values must be less than '
+				f'the view token shape {view_token_shape!r}; got '
+				f'{max_shift_tokens!r}'
+			)
+		minimum_overlap_token_count = math.prod(
+			token_count - shift
+			for token_count, shift in zip(
+				view_token_shape,
+				max_shift_tokens,
+				strict=True,
+			)
+		)
+		if local_pairs_per_crop is None:
+			raise ValueError(
+				'barlow_twins.local_pairs_per_crop is required for '
+				f'augmentations.policy {OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY!r}'
+			)
+		if minimum_overlap_token_count < local_pairs_per_crop:
+			raise ValueError(
+				'minimum overlapping token count must be greater than or equal to '
+				'barlow_twins.local_pairs_per_crop; got '
+				f'{minimum_overlap_token_count} and {local_pairs_per_crop}'
+			)
 		return
 
 	_validate_allowed_keys(

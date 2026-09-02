@@ -14,6 +14,7 @@ from seis_ssl_cluster.config.schema import (
 	HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
 	HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
 	IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+	OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
 	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
 )
 
@@ -54,6 +55,14 @@ def _identity_gaussian_noise_augmentations() -> dict[str, object]:
 	return {
 		'policy': IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
 		'gaussian_noise_std': 0.05,
+	}
+
+
+def _overlapping_subcrop_augmentations() -> dict[str, object]:
+	return {
+		'policy': OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'max_subcrop_shift_tokens': [4, 4, 0],
 	}
 
 
@@ -120,6 +129,104 @@ def test_d4_trace_drop_augmentation_resolves_exact_mapping() -> None:
 		'trace_drop_probability': 0.02,
 	}
 	assert 'horizontal_flip_probability' not in resolved['augmentations']
+
+
+def test_overlapping_subcrop_augmentation_resolves_exact_mapping() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 128,
+	}
+	config['augmentations'] = _overlapping_subcrop_augmentations()
+	data = config['data']
+	model = config['model']
+	assert isinstance(data, dict)
+	assert isinstance(model, dict)
+	data['local_crop_size'] = [128, 128, 128]
+	model['patch_size'] = [8, 8, 8]
+
+	resolved = resolve_barlow_twins_training_config(config)
+
+	assert resolved['augmentations'] == _overlapping_subcrop_augmentations()
+
+
+@pytest.mark.parametrize(
+	'augmentations',
+	[
+		{
+			'policy': OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
+			'horizontal_flip_probability': 0.5,
+		},
+		{**_overlapping_subcrop_augmentations(), 'unknown': True},
+	],
+)
+def test_overlapping_subcrop_rejects_nonexact_contract(
+	augmentations: dict[str, object],
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 1,
+	}
+	config['augmentations'] = augmentations
+
+	with pytest.raises((TypeError, ValueError), match='augmentations'):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_global_barlow_rejects_overlapping_subcrop_policy() -> None:
+	config = _minimal_barlow_config()
+	config['augmentations'] = {
+		**_overlapping_subcrop_augmentations(),
+		'max_subcrop_shift_tokens': [1, 1, 0],
+	}
+
+	with pytest.raises(ValueError, match=r'requires barlow_twins\.method'):
+		resolve_barlow_twins_training_config(config)
+
+
+@pytest.mark.parametrize(
+	('max_shift_tokens', 'message'),
+	[
+		([-1, 1, 0], 'nonnegative'),
+		([1, 0, 1], 'Z shift'),
+		([0, 0, 0], 'X or Y shift'),
+		([2, 0, 0], 'less than the view token shape'),
+	],
+)
+def test_overlapping_subcrop_rejects_invalid_shift_contract(
+	max_shift_tokens: list[int],
+	message: str,
+) -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 1,
+	}
+	config['augmentations'] = {
+		'policy': OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'max_subcrop_shift_tokens': max_shift_tokens,
+	}
+
+	with pytest.raises(ValueError, match=message):
+		resolve_barlow_twins_training_config(config)
+
+
+def test_overlapping_subcrop_rejects_insufficient_minimum_overlap() -> None:
+	config = _minimal_barlow_config()
+	config['barlow_twins'] = {
+		'method': 'local_barlow_twins_3d',
+		'local_pairs_per_crop': 3,
+	}
+	config['augmentations'] = {
+		'policy': OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
+		'horizontal_flip_probability': 0.5,
+		'max_subcrop_shift_tokens': [1, 1, 0],
+	}
+
+	with pytest.raises(ValueError, match='minimum overlapping token count'):
+		resolve_barlow_twins_training_config(config)
 
 
 def test_gaussian_noise_augmentation_resolves_exact_mapping() -> None:
