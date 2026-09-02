@@ -29,6 +29,18 @@ LATEST_NAME = 'latest.pt'
 BEST_NAME = 'best.pt'
 METRICS_NAME = 'metrics.json'
 HISTORY_NAME = 'history.json'
+CHECKPOINT_SELECTION_VALIDATION_MAE = (
+	'strict_lower_validation_macro_mae_v1'
+)
+CHECKPOINT_SELECTION_VALIDATION_WITHIN_2 = (
+	'strict_higher_validation_macro_within_2_v1'
+)
+CHECKPOINT_SELECTION_IDS = frozenset(
+	{
+		CHECKPOINT_SELECTION_VALIDATION_MAE,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	}
+)
 
 
 @dataclass(frozen=True)
@@ -39,6 +51,7 @@ class HorizonRunnerSettings:
 	seed: int
 	amp_on_cuda: bool
 	gradient_clip_norm: float
+	checkpoint_selection: str = CHECKPOINT_SELECTION_VALIDATION_MAE
 
 
 @dataclass(frozen=True)
@@ -115,7 +128,7 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	)
 	history: list[dict[str, object]] = []
 	best_epoch: int | None = None
-	best_mae = math.inf
+	best_score = initial_best_validation_score(settings.checkpoint_selection)
 	global_step = 0
 	start_epoch = 0
 	start_position = 0
@@ -141,7 +154,10 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			for row in _sequence(payload.get('history'), 'history')
 		]
 		best_epoch = _optional_int(payload.get('best_epoch'), 'best_epoch')
-		best_mae = float(payload.get('best_validation_macro_mae_samples', math.inf))
+		best_score = _resume_best_validation_score(
+			payload,
+			selection=settings.checkpoint_selection,
+		)
 		global_step = _nonnegative_int(payload.get('global_step'), 'global_step')
 		start_epoch = _nonnegative_int(payload.get('epoch'), 'epoch')
 		start_position = _nonnegative_int(
@@ -168,7 +184,8 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					scaler,
 					history=history,
 					best_epoch=best_epoch,
-					best_mae=best_mae,
+					checkpoint_selection=settings.checkpoint_selection,
+					best_score=best_score,
 					global_step=global_step,
 					epoch=epoch,
 					next_position=position,
@@ -203,7 +220,8 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					scaler,
 					history=history,
 					best_epoch=best_epoch,
-					best_mae=best_mae,
+					checkpoint_selection=settings.checkpoint_selection,
+					best_score=best_score,
 					global_step=global_step,
 					epoch=epoch,
 					next_position=position + 1,
@@ -226,6 +244,9 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		validation_mae = _required_metric(
 			validation['secondary'], 'macro_mae_samples'
 		)
+		validation_within_2 = _required_metric(
+			validation['secondary'], 'macro_within_2_samples'
+		)
 		history.append(
 			{
 				'epoch': epoch,
@@ -234,13 +255,19 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					train_loss_sum / train_item_count
 				),
 				'validation_macro_mae_samples': validation_mae,
-				'validation_macro_within_2_samples': _required_metric(
-					validation['secondary'], 'macro_within_2_samples'
-				),
+				'validation_macro_within_2_samples': validation_within_2,
 			}
 		)
-		if validation_mae_improved(validation_mae, best_mae):
-			best_mae = validation_mae
+		candidate_score = validation_checkpoint_score(
+			cast('Mapping[str, object]', validation['secondary']),
+			settings.checkpoint_selection,
+		)
+		if validation_score_improved(
+			candidate_score,
+			best_score,
+			settings.checkpoint_selection,
+		):
+			best_score = candidate_score
 			best_epoch = epoch
 			_save_checkpoint(
 				output_dir / BEST_NAME,
@@ -250,6 +277,8 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				payload={
 					'run_identity': runtime_run_identity,
 					'runtime_precision': runtime_precision,
+					'checkpoint_selection': settings.checkpoint_selection,
+					'best_validation_score': best_score,
 					'epoch': epoch,
 					'global_step': global_step,
 					'validation': validation['secondary'],
@@ -262,7 +291,8 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			scaler,
 			history=history,
 			best_epoch=best_epoch,
-			best_mae=best_mae,
+			checkpoint_selection=settings.checkpoint_selection,
+			best_score=best_score,
 			global_step=global_step,
 			epoch=epoch + 1,
 			next_position=0,
@@ -302,6 +332,8 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		'benchmark_identity': runtime_run_identity,
 		'runtime_precision': runtime_precision,
 		'best_epoch': best_epoch,
+		'checkpoint_selection': settings.checkpoint_selection,
+		'best_validation_score': best_score,
 		'best_checkpoint': {
 			'path': str(best_path),
 			'sha256': file_sha256(best_path),
@@ -322,7 +354,8 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		scaler,
 		history=history,
 		best_epoch=best_epoch,
-		best_mae=best_mae,
+		checkpoint_selection=settings.checkpoint_selection,
+		best_score=best_score,
 		global_step=global_step,
 		epoch=settings.epochs,
 		next_position=0,
@@ -433,13 +466,50 @@ def deterministic_tile_order(tile_count: int, seed: int, epoch: int) -> tuple[in
 	)
 
 
-def validation_mae_improved(candidate: float, best: float) -> bool:
-	'''Return true only for a finite, strictly lower validation macro MAE.'''
+def initial_best_validation_score(selection: str) -> float:
+	'''Return the sentinel score for one supported checkpoint policy.'''
+	if selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		return math.inf
+	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		return -math.inf
+	raise ValueError(f'unknown horizon checkpoint selection: {selection!r}')
+
+
+def validation_checkpoint_score(
+	validation_metrics: Mapping[str, object],
+	selection: str,
+) -> float:
+	'''Read the finite validation score selected by one supported policy.'''
+	if selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		key = 'macro_mae_samples'
+	elif selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		key = 'macro_within_2_samples'
+	else:
+		raise ValueError(f'unknown horizon checkpoint selection: {selection!r}')
+	return _required_metric(validation_metrics, key)
+
+
+def validation_score_improved(
+	candidate: float,
+	best: float,
+	selection: str,
+) -> bool:
+	'''Compare finite scores strictly in the configured policy direction.'''
 	if not math.isfinite(candidate):
-		raise ValueError('validation macro MAE candidate must be finite')
-	if math.isnan(best) or best == -math.inf:
-		raise ValueError('best validation macro MAE is invalid')
-	return candidate < best
+		raise ValueError('validation checkpoint score candidate must be finite')
+	_validate_best_validation_score(best, selection=selection)
+	if selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		return candidate < best
+	return candidate > best
+
+
+def validation_mae_improved(candidate: float, best: float) -> bool:
+	'''Compatibility wrapper for strict validation macro MAE selection.'''
+	return validation_score_improved(
+		candidate,
+		best,
+		CHECKPOINT_SELECTION_VALIDATION_MAE,
+	)
 
 
 def resolve_horizon_device(value: str) -> torch.device:
@@ -500,6 +570,7 @@ def _validate_runner_inputs(  # noqa: C901
 	expected_counts: Mapping[str, Sequence[int]],
 	max_steps: int | None,
 ) -> None:
+	initial_best_validation_score(settings.checkpoint_selection)
 	if settings.epochs <= 0:
 		raise ValueError('epochs must be positive')
 	if settings.seed < 0:
@@ -550,7 +621,8 @@ def _save_latest(  # noqa: PLR0913
 	*,
 	history: Sequence[Mapping[str, object]],
 	best_epoch: int | None,
-	best_mae: float,
+	checkpoint_selection: str,
+	best_score: float,
 	global_step: int,
 	epoch: int,
 	next_position: int,
@@ -570,7 +642,8 @@ def _save_latest(  # noqa: PLR0913
 			'runtime_precision': runtime_precision,
 			'history': list(history),
 			'best_epoch': best_epoch,
-			'best_validation_macro_mae_samples': best_mae,
+			'checkpoint_selection': checkpoint_selection,
+			'best_validation_score': best_score,
 			'global_step': global_step,
 			'epoch': epoch,
 			'next_position': next_position,
@@ -581,6 +654,38 @@ def _save_latest(  # noqa: PLR0913
 			'completed': completed,
 		},
 	)
+
+
+def _resume_best_validation_score(
+	payload: Mapping[str, object],
+	*,
+	selection: str,
+) -> float:
+	checkpoint_selection = payload.get('checkpoint_selection')
+	if checkpoint_selection is not None and checkpoint_selection != selection:
+		raise ValueError('resume checkpoint selection does not match this run')
+	if 'best_validation_score' in payload:
+		best = _number(
+			payload.get('best_validation_score'),
+			'best_validation_score',
+		)
+	elif selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		best = _number(
+			payload.get('best_validation_macro_mae_samples', math.inf),
+			'best_validation_macro_mae_samples',
+		)
+	else:
+		raise ValueError(
+			'within-2 checkpoint selection cannot resume a legacy MAE-only state'
+		)
+	_validate_best_validation_score(best, selection=selection)
+	return best
+
+
+def _validate_best_validation_score(best: float, *, selection: str) -> None:
+	initial = initial_best_validation_score(selection)
+	if math.isnan(best) or (math.isinf(best) and best != initial):
+		raise ValueError('best validation checkpoint score is invalid')
 
 
 def _save_checkpoint(
@@ -688,6 +793,12 @@ def _finite_number(value: object, label: str) -> float:
 	return result
 
 
+def _number(value: object, label: str) -> float:
+	if not isinstance(value, int | float) or isinstance(value, bool):
+		raise TypeError(f'{label} must be numeric')
+	return float(value)
+
+
 def _required_metric(metrics: object, key: str) -> float:
 	if not isinstance(metrics, Mapping):
 		raise TypeError('metrics must be a mapping')
@@ -703,6 +814,9 @@ def _required_metric(metrics: object, key: str) -> float:
 
 __all__ = [
 	'BEST_NAME',
+	'CHECKPOINT_SELECTION_IDS',
+	'CHECKPOINT_SELECTION_VALIDATION_MAE',
+	'CHECKPOINT_SELECTION_VALIDATION_WITHIN_2',
 	'HISTORY_NAME',
 	'LATEST_NAME',
 	'METRICS_NAME',
@@ -713,8 +827,11 @@ __all__ = [
 	'evaluate_horizon_dataset',
 	'horizon_autocast',
 	'horizon_runtime_precision_identity',
+	'initial_best_validation_score',
 	'resolve_horizon_device',
 	'run_horizon_training_job',
 	'validate_horizon_resume_runtime',
+	'validation_checkpoint_score',
 	'validation_mae_improved',
+	'validation_score_improved',
 ]

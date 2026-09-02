@@ -52,6 +52,7 @@ from seis_ssl_cluster.volve.horizon_model import (
 )
 from seis_ssl_cluster.volve.horizon_runner import (
 	BEST_NAME,
+	CHECKPOINT_SELECTION_VALIDATION_MAE,
 	LATEST_NAME,
 	METRICS_NAME,
 	HorizonRunnerSettings,
@@ -83,7 +84,7 @@ OPTIMIZER_EPS = 1.0e-8
 OBJECTIVE_IDENTITY = {
 	'loss': 'fractional_two_bin_per_tile_horizon_macro_v1',
 	'prediction': 'masked_soft_argmax_v1',
-	'checkpoint_selection': 'strict_lower_validation_macro_mae_v1',
+	'checkpoint_selection': CHECKPOINT_SELECTION_VALIDATION_MAE,
 	'metrics_schema_version': 1,
 }
 VOLVE_MAE_MODEL_TAG = 'amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1'
@@ -197,6 +198,7 @@ class FrozenHorizonPlan:
 	excluded_by_token_validity_counts: Mapping[str, tuple[int, ...]]
 	run_identity: Mapping[str, object]
 	selected_embedding_paths: EmbeddingOutputPaths
+	checkpoint_selection: str = CHECKPOINT_SELECTION_VALIDATION_MAE
 
 	@property
 	def per_horizon_counts(self) -> Mapping[str, tuple[int, ...]]:
@@ -574,6 +576,7 @@ def build_frozen_horizon_plan(  # noqa: PLR0913
 	selected_metadata: Mapping[str, object],
 	selected_model_source: Mapping[str, object],
 	benchmark: str,
+	checkpoint_selection: str = CHECKPOINT_SELECTION_VALIDATION_MAE,
 	selected_embeddings_sha256: str | None = None,
 	selected_metadata_sha256: str | None = None,
 	selected_valid_tokens_sha256: str | None = None,
@@ -667,6 +670,7 @@ def build_frozen_horizon_plan(  # noqa: PLR0913
 		selected_metadata_sha256=selected_metadata_sha256,
 		selected_valid_tokens_sha256=selected_valid_tokens_sha256,
 		benchmark=benchmark,
+		checkpoint_selection=checkpoint_selection,
 	)
 	return FrozenHorizonPlan(
 		config=config,
@@ -683,6 +687,7 @@ def build_frozen_horizon_plan(  # noqa: PLR0913
 		excluded_by_token_validity_counts=excluded_counts,
 		run_identity=identity,
 		selected_embedding_paths=selected_paths,
+		checkpoint_selection=checkpoint_selection,
 	)
 
 
@@ -745,6 +750,7 @@ def run_frozen_horizon_job(
 			seed=plan.config.train.seed,
 			amp_on_cuda=plan.config.train.amp,
 			gradient_clip_norm=plan.config.train.gradient_clip_norm,
+			checkpoint_selection=plan.checkpoint_selection,
 		),
 		datasets=datasets,
 		expected_counts=plan.effective_per_horizon_counts,
@@ -824,6 +830,7 @@ def _run_identity(  # noqa: PLR0913
 	selected_metadata_sha256: str | None = None,
 	selected_valid_tokens_sha256: str | None = None,
 	benchmark: str = 'mae_vs_random_frozen_v1',
+	checkpoint_selection: str = CHECKPOINT_SELECTION_VALIDATION_MAE,
 ) -> dict[str, object]:
 	metadata = selected_metadata or (
 		geometry.pretrained_metadata
@@ -908,7 +915,15 @@ def _run_identity(  # noqa: PLR0913
 			'eps': OPTIMIZER_EPS,
 			'weight_decay': config.train.weight_decay,
 		},
-		'objective': dict(OBJECTIVE_IDENTITY),
+		'objective': objective_identity(checkpoint_selection),
+	}
+
+
+def objective_identity(checkpoint_selection: str) -> dict[str, object]:
+	'''Build the fixed horizon objective with its plan-specific selection policy.'''
+	return {
+		**OBJECTIVE_IDENTITY,
+		'checkpoint_selection': checkpoint_selection,
 	}
 
 

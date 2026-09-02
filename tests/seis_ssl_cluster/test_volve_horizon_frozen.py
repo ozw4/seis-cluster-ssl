@@ -503,9 +503,7 @@ def test_two_step_cpu_resume_and_identity_mismatch_rejection(tmp_path: Path) -> 
 	)
 	assert second['history'] == uninterrupted['history']
 	assert second['best_epoch'] == uninterrupted['best_epoch']
-	assert second['best_validation_macro_mae_samples'] == (
-		uninterrupted['best_validation_macro_mae_samples']
-	)
+	assert second['best_validation_score'] == uninterrupted['best_validation_score']
 
 	changed_identity = {
 		**plan.run_identity,

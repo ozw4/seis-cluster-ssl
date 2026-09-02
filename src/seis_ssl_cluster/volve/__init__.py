@@ -79,11 +79,17 @@ from seis_ssl_cluster.volve.horizon_model import (
 	create_volve_horizon_decoder,
 )
 from seis_ssl_cluster.volve.horizon_runner import (
+	CHECKPOINT_SELECTION_IDS,
+	CHECKPOINT_SELECTION_VALIDATION_MAE,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
 	HorizonRunnerSettings,
 	HorizonRuntimeContext,
 	deterministic_tile_order,
+	initial_best_validation_score,
 	run_horizon_training_job,
+	validation_checkpoint_score,
 	validation_mae_improved,
+	validation_score_improved,
 )
 from seis_ssl_cluster.volve.horizon_tiles import (
 	HORIZON_WINDOW_LENGTH,
@@ -111,6 +117,9 @@ from seis_ssl_cluster.volve.mae_validation import (
 )
 
 __all__ = [
+	'CHECKPOINT_SELECTION_IDS',
+	'CHECKPOINT_SELECTION_VALIDATION_MAE',
+	'CHECKPOINT_SELECTION_VALIDATION_WITHIN_2',
 	'DATA_SIZE_PREFIX',
 	'FROZEN_CONDITION_COUNT',
 	'FROZEN_MODEL_ROLES',
@@ -180,6 +189,7 @@ __all__ = [
 	'frozen_survey_output_valid_mask',
 	'hard_argmax_global_sample',
 	'horizon_supervision_mask',
+	'initial_best_validation_score',
 	'inspect_frozen_embedding_pair',
 	'inspect_frozen_horizon_job',
 	'load_volve_horizon_data',
@@ -197,7 +207,9 @@ __all__ = [
 	'validate_volve_canonical_input_registration',
 	'validate_volve_mae',
 	'validate_volve_mae_inputs_from_configs',
+	'validation_checkpoint_score',
 	'validation_mae_improved',
+	'validation_score_improved',
 	'write_section_statistics_csv',
 	'write_volve_mae_validation_report',
 ]
