@@ -20,7 +20,6 @@ from seis_ssl_cluster.training.random_checkpoint import (
 from seis_ssl_cluster.volve.horizon_data import HORIZON_NAMES
 from seis_ssl_cluster.volve.horizon_five_way_config import FIVE_WAY_MODEL_IDS
 from seis_ssl_cluster.volve.horizon_five_way_runner import (
-	FIVE_WAY_BENCHMARK_ID,
 	FIVE_WAY_CONDITION_COUNT,
 )
 from seis_ssl_cluster.volve.horizon_five_way_sources import (
@@ -29,15 +28,21 @@ from seis_ssl_cluster.volve.horizon_five_way_sources import (
 	inspect_volve_horizon_five_way_embedding_suite,
 )
 from seis_ssl_cluster.volve.horizon_frozen import (
-	OBJECTIVE_IDENTITY,
 	OPTIMIZER_BETAS,
 	OPTIMIZER_EPS,
 	OPTIMIZER_NAME,
 	decoder_initial_state_sha256,
+	objective_identity,
 )
 from seis_ssl_cluster.volve.horizon_layouts import DATA_SIZE_PREFIX, LAYOUT_IDS
 from seis_ssl_cluster.volve.horizon_model import create_volve_horizon_decoder
-from seis_ssl_cluster.volve.horizon_runner import BEST_NAME, METRICS_NAME
+from seis_ssl_cluster.volve.horizon_runner import (
+	BEST_NAME,
+	CHECKPOINT_SELECTION_VALIDATION_MAE,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	HISTORY_NAME,
+	METRICS_NAME,
+)
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.volve.horizon_five_way_config import (
@@ -60,10 +65,21 @@ SUMMARY_OUTPUT_NAMES = (
 	SUMMARY_MD_NAME,
 )
 PRIMARY_METRIC = 'macro_mae_samples'
+WITHIN2_PRIMARY_METRIC = 'macro_within_2_samples'
+MACRO_WITHIN_1_METRIC = 'macro_within_1_samples'
+MACRO_WITHIN_4_METRIC = 'macro_within_4_samples'
+ORDER_VIOLATION_METRIC = 'predicted_adjacent_order_violation_rate'
 PER_HORIZON_METRICS = tuple(
 	f'{horizon_name}_mae_samples' for horizon_name in HORIZON_NAMES
 )
 SUMMARY_METRICS = (PRIMARY_METRIC, *PER_HORIZON_METRICS)
+WITHIN2_SUMMARY_METRICS = (
+	WITHIN2_PRIMARY_METRIC,
+	PRIMARY_METRIC,
+	MACRO_WITHIN_1_METRIC,
+	MACRO_WITHIN_4_METRIC,
+	ORDER_VIOLATION_METRIC,
+)
 PAIRED_COMPARISONS = (
 	('mae_minus_mae_hmm_k6', 'mae', 'mae_hmm_k6'),
 	(
@@ -216,11 +232,12 @@ def summarize_volve_horizon_five_way(
 	rows = report['rows']
 	if not isinstance(rows, list):
 		raise TypeError('five-way inspection rows must be a list')
-	paired = _paired_rows(rows)
-	by_size = _by_size_rows(paired)
+	paired = _paired_rows(rows, config=config)
+	by_size = _by_size_rows(paired, config=config)
 	summary_payload = _summary_payload(config, rows, by_size)
+	comparison_fieldnames = _comparison_fieldnames(config)
 	outputs = {
-		COMPARISON_CSV_NAME: _csv_text(COMPARISON_FIELDNAMES, rows),
+		COMPARISON_CSV_NAME: _csv_text(comparison_fieldnames, rows),
 		PAIRED_DELTAS_CSV_NAME: _csv_text(PAIRED_FIELDNAMES, paired),
 		SUMMARY_BY_SIZE_CSV_NAME: _csv_text(BY_SIZE_FIELDNAMES, by_size),
 		SUMMARY_JSON_NAME: json.dumps(
@@ -230,7 +247,7 @@ def summarize_volve_horizon_five_way(
 			allow_nan=False,
 		)
 		+ '\n',
-		SUMMARY_MD_NAME: _summary_markdown(by_size),
+		SUMMARY_MD_NAME: _summary_markdown(config, by_size),
 	}
 	summary_root = config.summary_root
 	if summary_root.exists():
@@ -377,9 +394,9 @@ def _load_job_row(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	identity = _required_mapping(metrics, 'benchmark_identity', label)
 	if identity.get('schema_version') != 3:
 		raise ValueError(f'{label} benchmark identity schema_version must equal 3')
-	if identity.get('benchmark') != FIVE_WAY_BENCHMARK_ID:
+	if identity.get('benchmark') != config.benchmark_id:
 		raise ValueError(
-			f'{label} benchmark identity must equal {FIVE_WAY_BENCHMARK_ID!r}'
+			f'{label} benchmark identity must equal {config.benchmark_id!r}'
 		)
 	_validate_downstream_contract(
 		identity,
@@ -500,6 +517,15 @@ def _load_job_row(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		raise ValueError(f'{label} best checkpoint runtime precision mismatch')
 	if identity.get('runtime_precision') != metrics.get('runtime_precision'):
 		raise ValueError(f'{label} metrics runtime precision identity mismatch')
+	_validate_checkpoint_selection_artifacts(
+		config,
+		job_dir=job_dir,
+		metrics=metrics,
+		best_payload=best_payload,
+		validation=validation,
+		best_epoch=best_epoch,
+		label=label,
+	)
 	shared_identity = {}
 	for key in _SHARED_RUN_IDENTITY_KEYS:
 		if key not in identity:
@@ -586,8 +612,101 @@ def _expected_downstream_contract(
 			'eps': OPTIMIZER_EPS,
 			'weight_decay': config.train.weight_decay,
 		},
-		'objective': dict(OBJECTIVE_IDENTITY),
+		'objective': objective_identity(config.checkpoint_selection),
 	}
+
+
+def _validate_checkpoint_selection_artifacts(  # noqa: C901, PLR0912, PLR0913
+	config: VolveHorizonFiveWayConfig,
+	*,
+	job_dir: Path,
+	metrics: Mapping[str, object],
+	best_payload: Mapping[str, object],
+	validation: Mapping[str, object],
+	best_epoch: int,
+	label: str,
+) -> None:
+	selection = config.checkpoint_selection
+	if selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		validation_key = PRIMARY_METRIC
+		history_key = 'validation_macro_mae_samples'
+		best_from_history = min
+	elif selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		validation_key = WITHIN2_PRIMARY_METRIC
+		history_key = 'validation_macro_within_2_samples'
+		best_from_history = max
+	else:  # Config loading rejects this before artifact inspection.
+		raise ValueError(f'unknown horizon checkpoint selection: {selection!r}')
+
+	checkpoint_selection = best_payload.get('checkpoint_selection')
+	if checkpoint_selection is None:
+		if selection != CHECKPOINT_SELECTION_VALIDATION_MAE:
+			raise ValueError(f'{label} best.pt is missing checkpoint_selection')
+	elif checkpoint_selection != selection:
+		raise ValueError(f'{label} best.pt checkpoint selection mismatch')
+
+	validation_score = _finite_number(
+		validation.get(validation_key),
+		f'{label} validation {validation_key}',
+	)
+	if 'best_validation_score' in best_payload:
+		best_score = _finite_number(
+			best_payload.get('best_validation_score'),
+			f'{label} best.pt best_validation_score',
+		)
+	elif selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		best_score = validation_score
+	else:
+		raise ValueError(f'{label} best.pt is missing best_validation_score')
+	if not math.isclose(
+		best_score, validation_score, rel_tol=1.0e-12, abs_tol=1.0e-12
+	):
+		raise ValueError(f'{label} best validation score differs from best.pt')
+
+	metrics_selection = metrics.get('checkpoint_selection')
+	if metrics_selection is not None and metrics_selection != selection:
+		raise ValueError(f'{label} metrics checkpoint selection mismatch')
+	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2 and (
+		metrics_selection is None
+	):
+		raise ValueError(f'{label} metrics is missing checkpoint_selection')
+	if 'best_validation_score' in metrics:
+		metrics_score = _finite_number(
+			metrics.get('best_validation_score'),
+			f'{label} metrics best_validation_score',
+		)
+		if not math.isclose(
+			metrics_score, best_score, rel_tol=1.0e-12, abs_tol=1.0e-12
+		):
+			raise ValueError(f'{label} metrics best validation score mismatch')
+	elif selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		raise ValueError(f'{label} metrics is missing best_validation_score')
+
+	history = _read_history(job_dir / HISTORY_NAME)
+	epochs = [
+		_nonnegative_int(row.get('epoch'), f'{label} history epoch')
+		for row in history
+	]
+	if not epochs or epochs != sorted(epochs) or len(epochs) != len(set(epochs)):
+		raise ValueError(f'{label} history epochs must be unique and increasing')
+	scores = [
+		_finite_number(row.get(history_key), f'{label} history {history_key}')
+		for row in history
+	]
+	selected_score = best_from_history(scores)
+	selected_epoch = min(
+		epoch
+		for epoch, score in zip(epochs, scores, strict=True)
+		if score == selected_score
+	)
+	if selected_epoch != best_epoch:
+		raise ValueError(
+			f'{label} best_epoch does not match the first optimal history epoch'
+		)
+	if not math.isclose(
+		selected_score, best_score, rel_tol=1.0e-12, abs_tol=1.0e-12
+	):
+		raise ValueError(f'{label} history best validation score mismatch')
 
 
 def _validate_downstream_contract(
@@ -611,10 +730,25 @@ def _metric_values_and_support(
 	*,
 	label: str,
 ) -> tuple[dict[str, float], dict[str, object]]:
+	macro = _required_mapping(payload, 'macro', label)
 	values = {
 		PRIMARY_METRIC: _finite_number(
 			payload.get(PRIMARY_METRIC), f'{label} {PRIMARY_METRIC}'
-		)
+		),
+		WITHIN2_PRIMARY_METRIC: _finite_number(
+			payload.get(WITHIN2_PRIMARY_METRIC),
+			f'{label} {WITHIN2_PRIMARY_METRIC}',
+		),
+		MACRO_WITHIN_1_METRIC: _finite_number(
+			macro.get('within_1'), f'{label} macro.within_1'
+		),
+		MACRO_WITHIN_4_METRIC: _finite_number(
+			macro.get('within_4'), f'{label} macro.within_4'
+		),
+		ORDER_VIOLATION_METRIC: _finite_number(
+			payload.get(ORDER_VIOLATION_METRIC),
+			f'{label} {ORDER_VIOLATION_METRIC}',
+		),
 	}
 	per_horizon = _required_mapping(payload, 'per_horizon', label)
 	if set(per_horizon) != set(HORIZON_NAMES):
@@ -778,7 +912,38 @@ def _validate_cross_job_identity(rows: list[dict[str, object]]) -> None:
 				)
 
 
-def _paired_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def _comparison_fieldnames(
+	config: VolveHorizonFiveWayConfig,
+) -> tuple[str, ...]:
+	if config.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		return COMPARISON_FIELDNAMES
+	fields = list(COMPARISON_FIELDNAMES)
+	insert_at = fields.index(PRIMARY_METRIC) + 1
+	for metric in reversed(
+		(
+			WITHIN2_PRIMARY_METRIC,
+			MACRO_WITHIN_1_METRIC,
+			MACRO_WITHIN_4_METRIC,
+			ORDER_VIOLATION_METRIC,
+		)
+	):
+		fields.insert(insert_at, metric)
+	return tuple(fields)
+
+
+def _summary_metrics(
+	config: VolveHorizonFiveWayConfig,
+) -> tuple[str, ...]:
+	if config.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		return SUMMARY_METRICS
+	return WITHIN2_SUMMARY_METRICS
+
+
+def _paired_rows(
+	rows: list[dict[str, object]],
+	*,
+	config: VolveHorizonFiveWayConfig,
+) -> list[dict[str, object]]:
 	by_cell = {
 		(str(row['model_id']), str(row['layout_id']), str(row['data_size'])): row
 		for row in rows
@@ -789,9 +954,17 @@ def _paired_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 			for comparison_id, left_model, right_model in PAIRED_COMPARISONS:
 				left = by_cell[left_model, layout_id, data_size]
 				right = by_cell[right_model, layout_id, data_size]
-				for metric in SUMMARY_METRICS:
+				for metric in _summary_metrics(config):
 					left_value = float(left[metric])
 					right_value = float(right[metric])
+					if metric in {
+						WITHIN2_PRIMARY_METRIC,
+						MACRO_WITHIN_1_METRIC,
+						MACRO_WITHIN_4_METRIC,
+					}:
+						delta = right_value - left_value
+					else:
+						delta = left_value - right_value
 					paired.append(
 						{
 							'data_size': data_size,
@@ -802,7 +975,7 @@ def _paired_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 							'right_model': right_model,
 							'left_value': left_value,
 							'right_value': right_value,
-							'delta': left_value - right_value,
+							'delta': delta,
 						}
 					)
 	return paired
@@ -810,11 +983,13 @@ def _paired_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 
 def _by_size_rows(
 	paired: list[dict[str, object]],
+	*,
+	config: VolveHorizonFiveWayConfig,
 ) -> list[dict[str, object]]:
 	rows: list[dict[str, object]] = []
 	for data_size in DATA_SIZE_PREFIX:
 		for comparison_id, _, _ in PAIRED_COMPARISONS:
-			for metric in SUMMARY_METRICS:
+			for metric in _summary_metrics(config):
 				deltas = [
 					float(row['delta'])
 					for row in paired
@@ -869,31 +1044,69 @@ def _summary_payload(
 				'negative_count',
 			)
 		}
+	within2 = (
+		config.checkpoint_selection
+		== CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
+	)
 	return {
 		'schema_version': 1,
-		'summary_name': 'volve_horizon_mae_local_bt_hmm_five_way_v1',
-		'primary_metric': PRIMARY_METRIC,
+		'summary_name': (
+			'volve_horizon_mae_local_bt_hmm_five_way_within2_v1'
+			if within2
+			else 'volve_horizon_mae_local_bt_hmm_five_way_v1'
+		),
+		'primary_metric': WITHIN2_PRIMARY_METRIC if within2 else PRIMARY_METRIC,
 		'models': list(config.model_ids),
 		'job_count': EXPECTED_JOB_COUNT,
 		'statistical_unit': 'layout_id',
-		'delta_definition': 'left_mae_minus_right_mae',
-		'positive_delta_interpretation': 'right_model_has_lower_mae',
+		'delta_definition': (
+			'right_minus_left_for_within_metrics; '
+			'left_minus_right_for_mae_and_order_violation'
+			if within2
+			else 'left_mae_minus_right_mae'
+		),
+		'positive_delta_interpretation': (
+			'right_model_is_better_for_every_metric'
+			if within2
+			else 'right_model_has_lower_mae'
+		),
 		'comparison': comparison_rows,
 		'by_size': summaries,
 	}
 
 
-def _summary_markdown(by_size: list[dict[str, object]]) -> str:
+def _summary_markdown(
+	config: VolveHorizonFiveWayConfig,
+	by_size: list[dict[str, object]],
+) -> str:
+	within2 = (
+		config.checkpoint_selection
+		== CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
+	)
+	primary_metric = WITHIN2_PRIMARY_METRIC if within2 else PRIMARY_METRIC
 	lines = [
 		'# Volve horizon five-way summary',
 		'',
-		(
-			'Delta convention: `left_MAE - right_MAE`. A positive delta means '
-			'the right-hand model has lower MAE.'
+		*(
+			[
+				(
+					'Delta/improvement convention: `right - left` for within-1, '
+					'within-2, and within-4; `left - right` for MAE and '
+					'adjacent-order violation rate. A positive value always means the '
+					'right-hand model is better.'
+				)
+			]
+			if within2
+			else [
+				(
+					'Delta convention: `left_MAE - right_MAE`. A positive delta means '
+					'the right-hand model has lower MAE.'
+				)
+			]
 		),
 		'',
 		(
-			f'Primary metric: `{PRIMARY_METRIC}` on the common test support; '
+			f'Primary metric: `{primary_metric}` on the common test support; '
 			'paired unit is `layout_id` and each supervision size is summarized '
 			'separately.'
 		),
@@ -909,7 +1122,7 @@ def _summary_markdown(by_size: list[dict[str, object]]) -> str:
 			)
 		)
 		for row in by_size:
-			if row['data_size'] != data_size or row['metric'] != PRIMARY_METRIC:
+			if row['data_size'] != data_size or row['metric'] != primary_metric:
 				continue
 			lines.append(
 				f'| {row["comparison_id"]} | {row["n_layouts"]} '
@@ -940,6 +1153,17 @@ def _read_json(path: Path) -> Mapping[str, object]:
 	payload = json.loads(path.read_text(encoding='utf-8'))
 	if not isinstance(payload, Mapping):
 		raise TypeError(f'{path} must contain a JSON object')
+	return payload
+
+
+def _read_history(path: Path) -> list[Mapping[str, object]]:
+	if not path.is_file():
+		raise FileNotFoundError(f'missing Volve five-way artifact: {path}')
+	payload = json.loads(path.read_text(encoding='utf-8'))
+	if not isinstance(payload, list) or any(
+		not isinstance(row, Mapping) for row in payload
+	):
+		raise TypeError(f'{path} must contain a list of history mappings')
 	return payload
 
 
@@ -1011,7 +1235,10 @@ __all__ = [
 	'COMPARISON_FIELDNAMES',
 	'EXPECTED_JOB_COUNT',
 	'EXPECTED_METRICS_ARTIFACT_TYPE',
+	'MACRO_WITHIN_1_METRIC',
+	'MACRO_WITHIN_4_METRIC',
 	'MODEL_IDS',
+	'ORDER_VIOLATION_METRIC',
 	'PAIRED_COMPARISONS',
 	'PAIRED_DELTAS_CSV_NAME',
 	'PAIRED_FIELDNAMES',
@@ -1022,6 +1249,8 @@ __all__ = [
 	'SUMMARY_MD_NAME',
 	'SUMMARY_METRICS',
 	'SUMMARY_OUTPUT_NAMES',
+	'WITHIN2_PRIMARY_METRIC',
+	'WITHIN2_SUMMARY_METRICS',
 	'inspect_volve_horizon_five_way_results',
 	'summarize_volve_horizon_five_way',
 ]

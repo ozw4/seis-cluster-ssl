@@ -8,6 +8,7 @@ from pathlib import Path
 from seis_ssl_cluster.cli import load_config_for_cli
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.volve.horizon_five_way_config import (
+	FIVE_WAY_MODEL_IDS,
 	volve_horizon_five_way_config_from_mapping,
 )
 from seis_ssl_cluster.volve.horizon_five_way_runner import (
@@ -43,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument('--device', default='auto', choices=('auto', 'cpu', 'cuda'))
 	parser.add_argument('--max-steps', type=int)
 	parser.add_argument(
+		'--models',
+		nargs='+',
+		choices=FIVE_WAY_MODEL_IDS,
+		help='Run only this non-empty model subset; defaults to all five models.',
+	)
+	parser.add_argument(
 		'--continue',
 		dest='continue_existing',
 		action='store_true',
@@ -60,7 +67,9 @@ def main() -> None:
 	raw = load_config_for_cli(args.config, loader=load_config)
 	config = volve_horizon_five_way_config_from_mapping(raw)
 	if args.dry_run:
-		for model, layout, size in plan_volve_horizon_five_way_jobs(config):
+		for model, layout, size in plan_volve_horizon_five_way_jobs(
+			config, model_ids=args.models
+		):
 			job = resolve_volve_horizon_five_way_job(
 				config,
 				model=model,
@@ -84,6 +93,7 @@ def main() -> None:
 		device=args.device,
 		max_steps=args.max_steps,
 		continue_existing=args.continue_existing,
+		model_ids=args.models,
 		progress=_print_result,
 	)
 

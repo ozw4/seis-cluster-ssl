@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ EXPERIMENT_ROOT = (
 	/ '31_mae_local_bt_hmm_five_way_v1'
 )
 MAIN_CONFIG = EXPERIMENT_ROOT / '50_five_way.yaml'
+WITHIN2_CONFIG = EXPERIMENT_ROOT / '51_five_way_within2.yaml'
 LAUNCHER = EXPERIMENT_ROOT / 'run_five_way.sh'
 README = EXPERIMENT_ROOT / 'README.md'
 LEGACY_CONFIG = (
@@ -111,6 +113,46 @@ def test_launcher_uses_python_planner_for_exactly_75_jobs_without_artifacts(
 	)
 
 
+def test_within2_first_phase_dry_run_plans_exactly_45_new_root_cells(
+	tmp_path: Path,
+) -> None:
+	environment = os.environ.copy()
+	environment['SEIS_SSL_CLUSTER_ARTIFACT_ROOT'] = str(tmp_path / 'artifacts')
+	environment['SEIS_SSL_CLUSTER_VOLVE_ROOT'] = str(tmp_path / 'volve')
+	completed = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			'proc/seis_ssl_cluster/run_volve_horizon_five_way_suite.py',
+			'--config',
+			str(WITHIN2_CONFIG),
+			'--models',
+			'mae',
+			'mae_hmm_k6',
+			'random',
+			'--device',
+			'cuda',
+			'--dry-run',
+		],
+		cwd=REPOSITORY_ROOT,
+		env=environment,
+		check=True,
+		capture_output=True,
+		text=True,
+	)
+	lines = [
+		line for line in completed.stdout.splitlines() if line.startswith('model=')
+	]
+	assert len(lines) == 45
+	assert {str(_option(line, 'model')) for line in lines} == {
+		'mae',
+		'mae_hmm_k6',
+		'random',
+	}
+	assert all('mae_local_bt_hmm_five_way_within2_v1/runs' in line for line in lines)
+	assert 'no artifact preflight or files written' in completed.stdout
+	assert not (tmp_path / 'artifacts').exists()
+
+
 def test_launcher_and_readme_shell_are_valid_bash(tmp_path: Path) -> None:
 	subprocess.run(  # noqa: S603
 		['/usr/bin/bash', '-n', str(LAUNCHER)],
@@ -153,6 +195,16 @@ def test_runbook_documents_complete_execution_and_recovery_contract() -> None:
 	assert 'complete_jobs: 75' in text
 	assert 'comparison.csv' in text
 	assert 'Definition of Done' in text
+	for required in (
+		'51_five_way_within2.yaml',
+		'mae_local_bt_hmm_five_way_within2_v1',
+		'history.json',
+		'best_validation_score',
+		'--models mae mae_hmm_k6 random',
+		'--models local_barlow_twins local_barlow_twins_hmm_k6',
+		'正式summaryは75セル完了後だけ生成する',
+	):
+		assert required in text
 
 
 def test_new_experiment_inventory_excludes_forbidden_augmentation_token() -> None:

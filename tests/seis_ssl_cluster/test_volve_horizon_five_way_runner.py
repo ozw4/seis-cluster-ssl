@@ -19,6 +19,9 @@ from seis_ssl_cluster.volve.horizon_five_way_runner import (
 	run_volve_horizon_five_way_suite,
 )
 from seis_ssl_cluster.volve.horizon_layouts import DATA_SIZE_PREFIX, LAYOUT_IDS
+from seis_ssl_cluster.volve.horizon_runner import (
+	CHECKPOINT_SELECTION_VALIDATION_MAE,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -90,6 +93,11 @@ def test_plan_contains_exactly_75_fixed_order_cells(tmp_path: Path) -> None:
 	assert {row[0] for row in conditions} == set(FIVE_WAY_MODEL_IDS)
 	assert {row[1] for row in conditions} == set(LAYOUT_IDS)
 	assert {row[2] for row in conditions} == set(DATA_SIZE_PREFIX)
+	first_phase = plan_volve_horizon_five_way_jobs(
+		config, model_ids=('mae', 'mae_hmm_k6', 'random')
+	)
+	assert len(first_phase) == 45
+	assert {row[0] for row in first_phase} == {'mae', 'mae_hmm_k6', 'random'}
 
 
 def test_resolver_rejects_unknown_cells_and_uses_canonical_output_path(
@@ -349,6 +357,7 @@ def test_cli_dry_run_branch_writes_nothing(
 		effective_per_horizon_counts={'train': (1, 1, 1, 1, 1)},
 		tile_records={'train': (object(),), 'validation': (), 'test': ()},
 		output_dir=tmp_path / 'artifacts/runs/model=mae/layout=layout_000/size=small',
+		checkpoint_selection=CHECKPOINT_SELECTION_VALIDATION_MAE,
 	)
 	monkeypatch.setattr(
 		module,

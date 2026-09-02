@@ -387,3 +387,102 @@ subtreeには複製しない。
 - summary rootに上記5 filesが1回だけ生成される。
 - upstream artifactsはcanonical unlabeled amplitudeだけから作られ、ホライゾンラベルは
   frozen decoder段階だけで使われる。
+
+## Validation within-2 checkpoint selection protocol
+
+`51_five_way_within2.yaml`は、validation `macro_within_2_samples`がstrictly higherに
+なった最初のepochを`best.pt`として選ぶ探索的protocolである。既存の
+`50_five_way.yaml`と、そのMAE選択で完了済みの45件は再現性のため変更しない。この
+selection変更は既存test結果を確認した後に定義したため、benchmark ID
+`mae_local_bt_hmm_five_way_within2_v1`と次の専用rootへ旧v1とは別結果として保存する。
+
+```bash
+export CONFIG="$EXP/51_five_way_within2.yaml"
+export RUNS_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_within2_v1/runs"
+export SUMMARY_ROOT="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_within2_v1/summary"
+```
+
+旧45件の`history.json`にはepochごとの指標はあるがepochごとのweightsはなく、残って
+いるweightsはMAE基準の`best.pt`とrolling `latest.pt`だけである。このためhistoryから
+within-2最良epochを特定できても、そのepochの`best.pt`を後生成できず、旧45件を
+再利用できない。encoder checkpointと既存embeddingは同じものを再利用し、下流
+decoderだけを新rootへ再学習する。
+
+まず`mae_hmm_k6/layout_000/small`の1セルを実行する。
+
+```bash
+python proc/seis_ssl_cluster/run_volve_horizon_five_way.py \
+  --config "$EXP/51_five_way_within2.yaml" \
+  --model mae_hmm_k6 \
+  --layout layout_000 \
+  --size small \
+  --layout-config "$LAYOUTS" \
+  --device cuda
+```
+
+完了後、history内の最大within-2が同値なら最初のepochを選び、metricsとbest.ptが
+一致することを確認する。
+
+```bash
+export RUN_DIR="$RUNS_ROOT/model=mae_hmm_k6/layout=layout_000/size=small"
+python - "$RUN_DIR" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+import torch
+
+run_dir = Path(sys.argv[1])
+history = json.loads((run_dir / 'history.json').read_text(encoding='utf-8'))
+metrics = json.loads((run_dir / 'metrics.json').read_text(encoding='utf-8'))
+best = torch.load(run_dir / 'best.pt', map_location='cpu', weights_only=False)
+best_row = max(history, key=lambda row: row['validation_macro_within_2_samples'])
+assert metrics['best_epoch'] == best_row['epoch'] == best['epoch']
+assert metrics['validation']['macro_within_2_samples'] == best['best_validation_score']
+print(metrics['best_epoch'], best['best_validation_score'])
+PY
+```
+
+続いてMAE、MAE-HMM、Randomの45セルをplanし、同じmodel subsetを実行する。先の
+1セルは`--continue`で安全にskipされる。
+
+```bash
+python proc/seis_ssl_cluster/run_volve_horizon_five_way_suite.py \
+  --config "$EXP/51_five_way_within2.yaml" \
+  --layout-config "$LAYOUTS" \
+  --models mae mae_hmm_k6 random \
+  --device cuda \
+  --dry-run
+python proc/seis_ssl_cluster/run_volve_horizon_five_way_suite.py \
+  --config "$EXP/51_five_way_within2.yaml" \
+  --layout-config "$LAYOUTS" \
+  --models mae mae_hmm_k6 random \
+  --device cuda \
+  --continue
+```
+
+Local BT系30セルは後から同じrootへ追加できる。
+
+```bash
+python proc/seis_ssl_cluster/run_volve_horizon_five_way_suite.py \
+  --config "$EXP/51_five_way_within2.yaml" \
+  --layout-config "$LAYOUTS" \
+  --models local_barlow_twins local_barlow_twins_hmm_k6 \
+  --device cuda \
+  --continue
+```
+
+正式summaryは75セル完了後だけ生成する。主比較はtest primary common supportの
+within-2である。paired improvementはwithin-1/2/4で`right - left`、MAEと
+adjacent-order violation rateで`left - right`とし、どのmetricも正ならright modelが
+良い。summaryにはwithin-2、MAE、within-1、within-4、adjacent-order violation rate、
+best epochをlayout別に含める。
+
+```bash
+test "$(find "$RUNS_ROOT" -type f -name metrics.json | wc -l)" -eq 75
+python proc/seis_ssl_cluster/summarize_volve_horizon_five_way.py \
+  --config "$EXP/51_five_way_within2.yaml" \
+  --check-only
+python proc/seis_ssl_cluster/summarize_volve_horizon_five_way.py \
+  --config "$EXP/51_five_way_within2.yaml"
+```

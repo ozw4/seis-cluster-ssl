@@ -29,14 +29,17 @@ from seis_ssl_cluster.volve.horizon_five_way_sources import (
 	inspect_volve_horizon_five_way_embedding_suite,
 )
 from seis_ssl_cluster.volve.horizon_frozen import (
-	OBJECTIVE_IDENTITY,
 	OPTIMIZER_BETAS,
 	OPTIMIZER_EPS,
 	OPTIMIZER_NAME,
 	decoder_initial_state_sha256,
+	objective_identity,
 )
 from seis_ssl_cluster.volve.horizon_layouts import DATA_SIZE_PREFIX, LAYOUT_IDS
 from seis_ssl_cluster.volve.horizon_model import create_volve_horizon_decoder
+from seis_ssl_cluster.volve.horizon_runner import (
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+)
 from tests.seis_ssl_cluster.helpers_volve import (
 	write_synthetic_frozen_horizon_data,
 )
@@ -63,10 +66,14 @@ def five_way_embedding_sentinel(model_id: str) -> float:
 	return float(FIVE_WAY_MODEL_IDS.index(model_id) + 1)
 
 
-def five_way_config_mapping(tmp_path: Path) -> dict[str, object]:
+def five_way_config_mapping(
+	tmp_path: Path,
+	*,
+	checkpoint_selection: str | None = None,
+) -> dict[str, object]:
 	'''Build a portable five-way config rooted below a pytest directory.'''
 	artifact_root = (tmp_path / 'artifacts').resolve()
-	return {
+	config: dict[str, object] = {
 		'paths': {
 			'artifact_root': str(artifact_root),
 			'volve_root': str((tmp_path / 'public').resolve()),
@@ -117,15 +124,21 @@ def five_way_config_mapping(tmp_path: Path) -> dict[str, object]:
 			'gradient_clip_norm': 1.0,
 		},
 	}
+	if checkpoint_selection is not None:
+		config['checkpoint_selection'] = checkpoint_selection
+	return config
 
 
 def write_five_way_universe(  # noqa: PLR0915
 	tmp_path: Path,
 	*,
 	embeddings: bool,
+	checkpoint_selection: str | None = None,
 ) -> dict[str, Any]:
 	'''Write valid checkpoint lineage and optionally all five embedding sources.'''
-	raw = five_way_config_mapping(tmp_path)
+	raw = five_way_config_mapping(
+		tmp_path, checkpoint_selection=checkpoint_selection
+	)
 	models = cast('dict[str, dict[str, str]]', raw['models'])
 	checkpoint_paths = {
 		model_id: Path(models[model_id]['checkpoint'])
@@ -646,9 +659,17 @@ def write_five_way_completed_run(
 	_write_best_and_metrics(job_dir, metrics)
 
 
-def write_five_way_completed_matrix(tmp_path: Path) -> VolveHorizonFiveWayConfig:
+def write_five_way_completed_matrix(
+	tmp_path: Path,
+	*,
+	checkpoint_selection: str | None = None,
+) -> VolveHorizonFiveWayConfig:
 	'''Write the complete 5 by 5 by 3 synthetic result universe.'''
-	universe = write_five_way_universe(tmp_path, embeddings=True)
+	universe = write_five_way_universe(
+		tmp_path,
+		embeddings=True,
+		checkpoint_selection=checkpoint_selection,
+	)
 	config = cast('VolveHorizonFiveWayConfig', universe['config'])
 	source_audit = audit_volve_horizon_five_way_sources(config)
 	embedding_suite = inspect_volve_horizon_five_way_embedding_suite(
@@ -694,12 +715,21 @@ def write_completed_plan_metrics(plan: FrozenHorizonPlan) -> None:
 	validation = _plan_evaluation(plan.effective_per_horizon_counts['validation'])
 	primary = _plan_evaluation(plan.effective_per_horizon_counts['test_primary'])
 	secondary = _plan_evaluation(plan.effective_per_horizon_counts['test'])
+	selection = plan.checkpoint_selection
+	best_score_key = (
+		'macro_within_2_samples'
+		if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
+		else 'macro_mae_samples'
+	)
+	best_score = float(validation[best_score_key])
 	best_path = plan.output_dir / 'best.pt'
 	torch.save(
 		{
 			'epoch': 2,
 			'run_identity': identity,
 			'runtime_precision': runtime_precision,
+			'checkpoint_selection': selection,
+			'best_validation_score': best_score,
 			'validation': validation,
 			'model_state_dict': {'weight': torch.zeros(1)},
 		},
@@ -714,6 +744,8 @@ def write_completed_plan_metrics(plan: FrozenHorizonPlan) -> None:
 		'benchmark_identity': identity,
 		'runtime_precision': runtime_precision,
 		'best_epoch': 2,
+		'checkpoint_selection': selection,
+		'best_validation_score': best_score,
 		'best_checkpoint': {
 			'path': str(best_path),
 			'sha256': file_sha256(best_path),
@@ -726,6 +758,21 @@ def write_completed_plan_metrics(plan: FrozenHorizonPlan) -> None:
 		},
 	}
 	write_json(plan.output_dir / 'metrics.json', payload)
+	write_json(
+		plan.output_dir / 'history.json',
+		[
+			{
+				'epoch': epoch,
+				'validation_macro_mae_samples': (
+					float(validation['macro_mae_samples']) + 2 - epoch
+				),
+				'validation_macro_within_2_samples': (
+					float(validation['macro_within_2_samples']) - 0.1 * (2 - epoch)
+				),
+			}
+			for epoch in range(3)
+		],
+	)
 
 
 def five_way_job_dir(
@@ -778,7 +825,7 @@ def _run_identity(  # noqa: PLR0913
 	paths = source.paths
 	return {
 		'schema_version': 3,
-		'benchmark': 'mae_local_bt_hmm_five_way_v1',
+		'benchmark': config.benchmark_id,
 		'model': model_id,
 		'layout_id': layout_id,
 		'data_size': data_size,
@@ -848,7 +895,7 @@ def _run_identity(  # noqa: PLR0913
 			'eps': OPTIMIZER_EPS,
 			'weight_decay': 1.0e-4,
 		},
-		'objective': dict(OBJECTIVE_IDENTITY),
+		'objective': objective_identity(config.checkpoint_selection),
 		'runtime_precision': {
 			'device_type': 'cpu',
 			'amp_enabled': False,
@@ -890,8 +937,11 @@ def _evaluation_metrics(
 			float(item['mae_samples']) for item in per_horizon.values()
 		)
 		/ len(per_horizon),
-		'macro_within_2_samples': 0.5,
-		'macro': {'within_1': 0.25, 'within_4': 0.75},
+		'macro_within_2_samples': 0.1 * (10.0 - _MODEL_MAE[model_id]),
+		'macro': {
+			'within_1': 0.05 * (10.0 - _MODEL_MAE[model_id]),
+			'within_4': 0.1 * (11.0 - _MODEL_MAE[model_id]),
+		},
 		'per_horizon': per_horizon,
 		'coverage': {
 			'eligible_count': sum(counts.values()),
@@ -925,13 +975,27 @@ def _write_best_and_metrics(
 	metrics: dict[str, object],
 ) -> None:
 	identity = metrics['benchmark_identity']
+	assert isinstance(identity, dict)
+	objective = identity['objective']
+	assert isinstance(objective, dict)
+	selection = str(objective['checkpoint_selection'])
+	validation = metrics['validation']
+	assert isinstance(validation, dict)
+	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		best_score = float(validation['macro_within_2_samples'])
+	else:
+		best_score = float(validation['macro_mae_samples'])
+	metrics['checkpoint_selection'] = selection
+	metrics['best_validation_score'] = best_score
 	best_path = job_dir / 'best.pt'
 	torch.save(
 		{
 			'epoch': metrics['best_epoch'],
 			'run_identity': identity,
 			'runtime_precision': metrics['runtime_precision'],
-			'validation': metrics['validation'],
+			'checkpoint_selection': selection,
+			'best_validation_score': best_score,
+			'validation': validation,
 			'model_state_dict': {'weight': torch.zeros(1)},
 		},
 		best_path,
@@ -943,6 +1007,24 @@ def _write_best_and_metrics(
 	(job_dir / 'metrics.json').write_text(
 		json.dumps(metrics),
 		encoding='utf-8',
+	)
+	best_epoch = int(metrics['best_epoch'])
+	history = []
+	for epoch in range(best_epoch + 1):
+		distance = best_epoch - epoch
+		history.append(
+			{
+				'epoch': epoch,
+				'validation_macro_mae_samples': (
+					float(validation['macro_mae_samples']) + distance
+				),
+				'validation_macro_within_2_samples': (
+					float(validation['macro_within_2_samples']) - 0.1 * distance
+				),
+			}
+		)
+	(job_dir / 'history.json').write_text(
+		json.dumps(history), encoding='utf-8'
 	)
 
 

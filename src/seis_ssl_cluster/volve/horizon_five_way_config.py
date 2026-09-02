@@ -11,6 +11,11 @@ from seis_ssl_cluster.volve.horizon_frozen import (
 	FrozenHorizonTrainSettings,
 	frozen_horizon_config_from_mapping,
 )
+from seis_ssl_cluster.volve.horizon_runner import (
+	CHECKPOINT_SELECTION_IDS,
+	CHECKPOINT_SELECTION_VALIDATION_MAE,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+)
 
 if TYPE_CHECKING:
 	from seis_ssl_cluster.volve.horizon_tiles import HorizonTileSettings
@@ -32,6 +37,8 @@ LOCAL_BARLOW_TWINS_METHOD = 'local_barlow_twins_3d'
 LOCAL_BARLOW_TWINS_PAIRS_PER_CROP = 128
 MAE_OBJECTIVE = 'amp_mae3d'
 RANDOM_OBJECTIVE = 'random_encoder'
+FIVE_WAY_BENCHMARK_ID = 'mae_local_bt_hmm_five_way_v1'
+FIVE_WAY_WITHIN2_BENCHMARK_ID = 'mae_local_bt_hmm_five_way_within2_v1'
 
 EXPECTED_MODEL_IDENTITIES: Mapping[str, Mapping[str, object]] = {
 	'mae': {
@@ -63,7 +70,7 @@ EXPECTED_MODEL_IDENTITIES: Mapping[str, Mapping[str, object]] = {
 	},
 }
 
-_TOP_LEVEL_KEYS = frozenset(
+_TOP_LEVEL_REQUIRED_KEYS = frozenset(
 	{
 		'paths',
 		'dataset',
@@ -75,6 +82,7 @@ _TOP_LEVEL_KEYS = frozenset(
 		'train',
 	}
 )
+_TOP_LEVEL_KEYS = _TOP_LEVEL_REQUIRED_KEYS | frozenset({'checkpoint_selection'})
 
 
 @dataclass(frozen=True)
@@ -100,6 +108,8 @@ class VolveHorizonFiveWayConfig:
 	summary_root: Path
 	train: FrozenHorizonTrainSettings
 	tiles: HorizonTileSettings
+	checkpoint_selection: str
+	benchmark_id: str
 
 	@property
 	def model_ids(self) -> tuple[str, ...]:
@@ -121,7 +131,7 @@ def volve_horizon_five_way_config_from_mapping(
 	config: Mapping[str, object],
 ) -> VolveHorizonFiveWayConfig:
 	'''Resolve the strict five-model config without touching artifacts.'''
-	_validate_exact_keys(config, _TOP_LEVEL_KEYS, 'config')
+	_validate_top_level_keys(config)
 	paths = _required_mapping(config, 'paths', 'config')
 	dataset = _required_mapping(config, 'dataset', 'config')
 	inputs = _required_mapping(config, 'inputs', 'config')
@@ -174,6 +184,9 @@ def volve_horizon_five_way_config_from_mapping(
 			'train': _required_mapping(config, 'train', 'config'),
 		}
 	)
+	checkpoint_selection = _checkpoint_selection(
+		config.get('checkpoint_selection', CHECKPOINT_SELECTION_VALIDATION_MAE)
+	)
 	return VolveHorizonFiveWayConfig(
 		artifact_root=artifact_root,
 		volve_root=volve_root,
@@ -188,7 +201,31 @@ def volve_horizon_five_way_config_from_mapping(
 		summary_root=summary_root,
 		train=legacy_config.train,
 		tiles=legacy_config.tiles,
+		checkpoint_selection=checkpoint_selection,
+		benchmark_id=(
+			FIVE_WAY_WITHIN2_BENCHMARK_ID
+			if checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
+			else FIVE_WAY_BENCHMARK_ID
+		),
 	)
+
+
+def _validate_top_level_keys(config: Mapping[str, object]) -> None:
+	missing = sorted(set(_TOP_LEVEL_REQUIRED_KEYS) - set(config))
+	extra = sorted(set(config) - set(_TOP_LEVEL_KEYS))
+	if missing or extra:
+		raise ValueError(
+			'config keys differ from the fixed contract; '
+			f'missing={missing!r}, extra={extra!r}'
+		)
+
+
+def _checkpoint_selection(value: object) -> str:
+	if not isinstance(value, str):
+		raise TypeError('checkpoint_selection must be a string')
+	if value not in CHECKPOINT_SELECTION_IDS:
+		raise ValueError(f'unknown horizon checkpoint selection: {value!r}')
+	return value
 
 
 def _resolve_models(value: object) -> tuple[VolveHorizonFiveWayModelSource, ...]:
@@ -303,12 +340,14 @@ def _is_relative_to(path: Path, root: Path) -> bool:
 
 __all__ = [
 	'EXPECTED_MODEL_IDENTITIES',
+	'FIVE_WAY_BENCHMARK_ID',
 	'FIVE_WAY_HMM_K',
 	'FIVE_WAY_MODEL_IDS',
 	'FIVE_WAY_RANDOM_SEED',
 	'FIVE_WAY_STAGE1_EPOCHS',
 	'FIVE_WAY_STAGE2_EPOCHS',
 	'FIVE_WAY_UNFREEZE_TOP_BLOCKS',
+	'FIVE_WAY_WITHIN2_BENCHMARK_ID',
 	'LOCAL_BARLOW_TWINS_METHOD',
 	'LOCAL_BARLOW_TWINS_PAIRS_PER_CROP',
 	'MAE_OBJECTIVE',

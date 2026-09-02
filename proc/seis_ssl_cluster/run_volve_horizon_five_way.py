@@ -70,6 +70,8 @@ def main() -> None:
 		print(f'embeddings_dir: {job.model.embeddings_dir}')
 		print(f'layout_id: {plan.layout_id}')
 		print(f'data_size: {plan.data_size}')
+		print(f'benchmark_id: {job.config.benchmark_id}')
+		print(f'checkpoint_selection: {plan.checkpoint_selection}')
 		print(
 			'selected_physical_lines: '
 			f'{plan.split_plan.identity()["selected_physical_lines"]}'

@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from seis_ssl_cluster.volve.horizon_data import load_volve_horizon_data
+from seis_ssl_cluster.volve.horizon_five_way_config import FIVE_WAY_BENCHMARK_ID
 from seis_ssl_cluster.volve.horizon_five_way_sources import (
 	VolveHorizonFiveWayEmbeddingSuite,
 	audit_volve_horizon_five_way_sources,
@@ -31,7 +32,7 @@ from seis_ssl_cluster.volve.horizon_tiles import (
 )
 
 if TYPE_CHECKING:
-	from collections.abc import Callable
+	from collections.abc import Callable, Sequence
 
 	from seis_ssl_cluster.volve.horizon_data import VolveHorizonData
 	from seis_ssl_cluster.volve.horizon_five_way_config import (
@@ -40,7 +41,6 @@ if TYPE_CHECKING:
 	)
 
 FIVE_WAY_CONDITION_COUNT = 75
-FIVE_WAY_BENCHMARK_ID = 'mae_local_bt_hmm_five_way_v1'
 
 
 @dataclass(frozen=True)
@@ -75,16 +75,24 @@ class VolveHorizonFiveWaySuiteCellResult:
 
 def plan_volve_horizon_five_way_jobs(
 	config: VolveHorizonFiveWayConfig,
+	*,
+	model_ids: Sequence[str] | None = None,
 ) -> tuple[tuple[str, str, str], ...]:
-	'''Enumerate the canonical 5 by 5 by 3 comparison matrix.'''
+	'''Enumerate all cells for the configured model subset.'''
+	models = config.model_ids if model_ids is None else tuple(model_ids)
+	if not models or len(models) != len(set(models)):
+		raise ValueError('five-way model selection must be non-empty and unique')
+	for model_id in models:
+		config.model_by_id(model_id)
 	jobs = tuple(
 		(model_id, layout_id, data_size)
-		for model_id in config.model_ids
+		for model_id in models
 		for layout_id in LAYOUT_IDS
 		for data_size in DATA_SIZE_PREFIX
 	)
-	if len(jobs) != FIVE_WAY_CONDITION_COUNT or len(set(jobs)) != len(jobs):
-		raise RuntimeError('Volve horizon five-way suite must contain 75 unique jobs')
+	expected_count = len(models) * len(LAYOUT_IDS) * len(DATA_SIZE_PREFIX)
+	if len(jobs) != expected_count or len(set(jobs)) != len(jobs):
+		raise RuntimeError('Volve horizon five-way suite cells must be unique')
 	return jobs
 
 
@@ -209,7 +217,8 @@ def inspect_volve_horizon_five_way_job(
 		selected_embeddings_sha256=selected.embeddings_sha256,
 		selected_metadata_sha256=selected.metadata_sha256,
 		selected_valid_tokens_sha256=selected.valid_tokens_sha256,
-		benchmark=FIVE_WAY_BENCHMARK_ID,
+		benchmark=job.config.benchmark_id,
+		checkpoint_selection=job.config.checkpoint_selection,
 	)
 
 
@@ -246,6 +255,7 @@ def run_volve_horizon_five_way_suite(  # noqa: PLR0913
 	device: str = 'auto',
 	max_steps: int | None = None,
 	continue_existing: bool = False,
+	model_ids: Sequence[str] | None = None,
 	progress: Callable[[VolveHorizonFiveWaySuiteCellResult], None] | None = None,
 ) -> tuple[VolveHorizonFiveWaySuiteCellResult, ...]:
 	'''Preflight shared inputs once and execute the canonical 75-cell suite.'''
@@ -256,7 +266,9 @@ def run_volve_horizon_five_way_suite(  # noqa: PLR0913
 	)
 	data = load_volve_horizon_data(config.volve_root)
 	results: list[VolveHorizonFiveWaySuiteCellResult] = []
-	for model, layout, size in plan_volve_horizon_five_way_jobs(config):
+	for model, layout, size in plan_volve_horizon_five_way_jobs(
+		config, model_ids=model_ids
+	):
 		job = resolve_volve_horizon_five_way_job(
 			config,
 			model=model,

@@ -7,13 +7,16 @@ from pathlib import Path
 
 import pytest
 
+from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.volve.horizon_five_way_config import (
+	FIVE_WAY_BENCHMARK_ID,
 	FIVE_WAY_HMM_K,
 	FIVE_WAY_MODEL_IDS,
 	FIVE_WAY_RANDOM_SEED,
 	FIVE_WAY_STAGE1_EPOCHS,
 	FIVE_WAY_STAGE2_EPOCHS,
 	FIVE_WAY_UNFREEZE_TOP_BLOCKS,
+	FIVE_WAY_WITHIN2_BENCHMARK_ID,
 	LOCAL_BARLOW_TWINS_METHOD,
 	LOCAL_BARLOW_TWINS_PAIRS_PER_CROP,
 	volve_horizon_five_way_config_from_mapping,
@@ -21,6 +24,17 @@ from seis_ssl_cluster.volve.horizon_five_way_config import (
 from seis_ssl_cluster.volve.horizon_frozen import (
 	FROZEN_CONDITION_COUNT,
 	enumerate_frozen_horizon_conditions,
+)
+from seis_ssl_cluster.volve.horizon_runner import (
+	CHECKPOINT_SELECTION_VALIDATION_MAE,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+)
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+EXPERIMENT_ROOT = (
+	REPOSITORY_ROOT
+	/ 'experiments/volve/horizon_benchmark_v1'
+	/ '31_mae_local_bt_hmm_five_way_v1'
 )
 
 
@@ -42,6 +56,41 @@ def test_resolves_exact_mapping_in_code_order(tmp_path: Path) -> None:
 	assert FIVE_WAY_STAGE1_EPOCHS == 100
 	assert FIVE_WAY_STAGE2_EPOCHS == 25
 	assert FIVE_WAY_UNFREEZE_TOP_BLOCKS == 1
+	assert config.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_MAE
+	assert config.benchmark_id == FIVE_WAY_BENCHMARK_ID
+
+
+def test_repository_configs_resolve_distinct_selection_and_output_identity(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str((tmp_path / 'artifacts').resolve())
+	)
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_VOLVE_ROOT', str((tmp_path / 'volve').resolve())
+	)
+	mae = volve_horizon_five_way_config_from_mapping(
+		load_config(EXPERIMENT_ROOT / '50_five_way.yaml')
+	)
+	within2 = volve_horizon_five_way_config_from_mapping(
+		load_config(EXPERIMENT_ROOT / '51_five_way_within2.yaml')
+	)
+
+	assert mae.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_MAE
+	assert within2.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
+	assert mae.benchmark_id == FIVE_WAY_BENCHMARK_ID
+	assert within2.benchmark_id == FIVE_WAY_WITHIN2_BENCHMARK_ID
+	assert mae.runs_root != within2.runs_root
+	assert mae.summary_root != within2.summary_root
+
+
+def test_rejects_unknown_checkpoint_selection(tmp_path: Path) -> None:
+	raw = _config(tmp_path)
+	raw['checkpoint_selection'] = 'unknown'
+
+	with pytest.raises(ValueError, match='unknown horizon checkpoint selection'):
+		volve_horizon_five_way_config_from_mapping(raw)
 
 
 @pytest.mark.parametrize('mode', ['missing', 'extra'])

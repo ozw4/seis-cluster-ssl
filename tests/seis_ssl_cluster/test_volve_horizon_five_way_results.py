@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+import torch
 import yaml
 
 from proc.seis_ssl_cluster import summarize_volve_horizon_five_way as summary_cli
@@ -19,14 +20,22 @@ from seis_ssl_cluster.volve.horizon_five_way_config import (
 	VolveHorizonFiveWayConfig,
 )
 from seis_ssl_cluster.volve.horizon_five_way_results import (
+	MACRO_WITHIN_1_METRIC,
+	MACRO_WITHIN_4_METRIC,
+	ORDER_VIOLATION_METRIC,
 	PAIRED_COMPARISONS,
 	PRIMARY_METRIC,
 	SUMMARY_METRICS,
 	SUMMARY_OUTPUT_NAMES,
+	WITHIN2_PRIMARY_METRIC,
+	WITHIN2_SUMMARY_METRICS,
 	inspect_volve_horizon_five_way_results,
 	summarize_volve_horizon_five_way,
 )
 from seis_ssl_cluster.volve.horizon_layouts import DATA_SIZE_PREFIX, LAYOUT_IDS
+from seis_ssl_cluster.volve.horizon_runner import (
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+)
 from tests.seis_ssl_cluster.helpers_volve_five_way import (
 	five_way_job_dir,
 	rewrite_five_way_completed_run,
@@ -38,6 +47,7 @@ if TYPE_CHECKING:
 
 def _raw_config(config: VolveHorizonFiveWayConfig) -> dict[str, object]:
 	return {
+		'checkpoint_selection': config.checkpoint_selection,
 		'paths': {
 			'artifact_root': str(config.artifact_root),
 			'volve_root': str(config.volve_root),
@@ -84,6 +94,114 @@ def _raw_config(config: VolveHorizonFiveWayConfig) -> dict[str, object]:
 			'gradient_clip_norm': 1.0,
 		},
 	}
+
+
+def test_within2_summary_includes_metrics_and_positive_right_improvement(
+	tmp_path: Path,
+) -> None:
+	config = write_five_way_completed_matrix(
+		tmp_path,
+		checkpoint_selection=CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	)
+	report = inspect_volve_horizon_five_way_results(config)
+	summarize_volve_horizon_five_way(config)
+	assert report['complete_jobs'] == 75
+
+	with (config.summary_root / 'comparison.csv').open(
+		encoding='utf-8', newline=''
+	) as handle:
+		comparison = list(csv.DictReader(handle))
+	for field in (
+		WITHIN2_PRIMARY_METRIC,
+		PRIMARY_METRIC,
+		MACRO_WITHIN_1_METRIC,
+		MACRO_WITHIN_4_METRIC,
+		ORDER_VIOLATION_METRIC,
+		'best_epoch',
+	):
+		assert field in comparison[0]
+
+	with (config.summary_root / 'paired_deltas.csv').open(
+		encoding='utf-8', newline=''
+	) as handle:
+		paired = list(csv.DictReader(handle))
+	assert len(paired) == (
+		3 * 5 * len(PAIRED_COMPARISONS) * len(WITHIN2_SUMMARY_METRICS)
+	)
+	within = next(
+		row
+		for row in paired
+		if row['comparison_id'] == 'mae_minus_mae_hmm_k6'
+		and row['metric'] == WITHIN2_PRIMARY_METRIC
+	)
+	mae = next(
+		row
+		for row in paired
+		if row['comparison_id'] == 'mae_minus_mae_hmm_k6'
+		and row['metric'] == PRIMARY_METRIC
+	)
+	assert float(within['delta']) == pytest.approx(0.1)
+	assert float(mae['delta']) == pytest.approx(1.0)
+	markdown = (config.summary_root / 'summary.md').read_text(encoding='utf-8')
+	assert '`right - left` for within-1, within-2, and within-4' in markdown
+	assert '`left - right` for MAE' in markdown
+
+
+def test_within2_audit_rejects_mae_epoch_tampered_best_epoch(
+	tmp_path: Path,
+) -> None:
+	config = write_five_way_completed_matrix(
+		tmp_path,
+		checkpoint_selection=CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	)
+	job_dir = five_way_job_dir(config, 'mae', 'layout_000', 'small')
+	metrics_path = job_dir / 'metrics.json'
+	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+	metrics['best_epoch'] = 0
+	metrics_path.write_text(json.dumps(metrics), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='selected best epoch'):
+		inspect_volve_horizon_five_way_results(config)
+
+
+def test_within2_audit_rejects_tampered_best_checkpoint_score(
+	tmp_path: Path,
+) -> None:
+	config = write_five_way_completed_matrix(
+		tmp_path,
+		checkpoint_selection=CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	)
+	job_dir = five_way_job_dir(config, 'mae', 'layout_000', 'small')
+	best_path = job_dir / 'best.pt'
+	best = torch.load(best_path, map_location='cpu', weights_only=False)
+	best['best_validation_score'] = float(best['best_validation_score']) - 0.1
+	torch.save(best, best_path)
+	metrics_path = job_dir / 'metrics.json'
+	metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+	metrics['best_checkpoint']['sha256'] = file_sha256(best_path)
+	metrics_path.write_text(json.dumps(metrics), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='best validation score differs'):
+		inspect_volve_horizon_five_way_results(config)
+
+
+def test_within2_audit_rejects_later_epoch_for_tied_maximum(
+	tmp_path: Path,
+) -> None:
+	config = write_five_way_completed_matrix(
+		tmp_path,
+		checkpoint_selection=CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	)
+	job_dir = five_way_job_dir(config, 'mae', 'layout_000', 'small')
+	history_path = job_dir / 'history.json'
+	history = json.loads(history_path.read_text(encoding='utf-8'))
+	history[1]['validation_macro_within_2_samples'] = history[2][
+		'validation_macro_within_2_samples'
+	]
+	history_path.write_text(json.dumps(history), encoding='utf-8')
+
+	with pytest.raises(ValueError, match='first optimal history epoch'):
+		inspect_volve_horizon_five_way_results(config)
 
 
 def test_complete_results_write_exactly_five_outputs(tmp_path: Path) -> None:
