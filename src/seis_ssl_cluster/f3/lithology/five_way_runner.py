@@ -373,13 +373,15 @@ def run_f3_lithology_five_way_job(
 	device: str = 'auto',
 	max_steps: int | None = None,
 	resume: Path | None = None,
+	audit_sources: bool = True,
 ) -> dict[str, object]:
-	"""Audit canonical sources, then execute one matrix cell."""
+	"""Optionally audit canonical sources, then execute one matrix cell."""
 	if job.metrics_path.is_file():
 		raise FileExistsError(
 			f'job already completed; refusing to overwrite {job.metrics_path}'
 		)
-	audit_f3_lithology_five_way_sources(job.config)
+	if audit_sources:
+		audit_f3_lithology_five_way_sources(job.config)
 	return run_f3_lithology_frozen_encoder_job(
 		job, device=device, max_steps=max_steps, resume=resume
 	)

@@ -1,0 +1,55 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  f3_root: ${F3_ROOT}
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v2
+labels:
+  source_label_volume: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2/f3_facies_labels.npy
+  source_label_segy: ${F3_ROOT}/f3_labels.sgy
+  png_label_inventory: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/10_prepare/section_inventory_v2.csv
+  segy_geometry_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/segy_geometry.json
+  class_info: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/inventory/class_info.json
+section_layout:
+  dataset_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_section_layout_v3
+models:
+  - model_id: mae
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/mae_continue/full_25ep/latest.pt
+    embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/mae/overlap_x64
+    expected:
+      objective: amp_mae3d
+      stratigraphy_pretext: false
+  - model_id: mae_hmm_k6
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/hmm/k6/full_25ep/latest.pt
+    embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/mae_hmm_k6/overlap_x64
+    expected:
+      objective: amp_mae3d
+      stratigraphy_pretext: true
+      base_objective: amp_mae3d
+      hmm_k: 6
+  - model_id: local_barlow_twins
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/local_bt_overlap_subcrop_poc_v1/shift04_proj384_pairs128_lambda005/latest.pt
+    embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_bt_overlap_subcrop_poc_v1/shift04_proj384_pairs128_lambda005/local_barlow_twins/overlap_x64
+    expected:
+      objective: local_barlow_twins_3d
+      local_pairs_per_crop: 128
+      stratigraphy_pretext: false
+  - model_id: local_barlow_twins_hmm_k6
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/stage2/local_bt100/hmm/k6/full_25ep/latest.pt
+    embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/local_barlow_twins_hmm_k6/overlap_x64
+    expected:
+      objective: local_barlow_twins_3d
+      stratigraphy_pretext: true
+      base_objective: local_barlow_twins_3d
+      hmm_k: 6
+  - model_id: random
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt
+    embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/random/overlap_x64
+    expected:
+      objective: random_encoder
+      random_seed: 42
+      stratigraphy_pretext: false
+outputs:
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_bt_overlap_subcrop_poc_v1/shift04_proj384_pairs128_lambda005/runs
+  summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_bt_overlap_subcrop_poc_v1/shift04_proj384_pairs128_lambda005/summary
+  summary_name: f3_local_bt_overlap_subcrop_poc_v1
