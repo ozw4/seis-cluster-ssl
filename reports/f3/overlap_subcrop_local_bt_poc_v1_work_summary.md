@@ -28,7 +28,11 @@ Date: 2026-09-02
 - Overlap, embedding, PoC, and five-way focused suite: 322 passed.
 - Representation-diagnostic, extractor, and PoC suite: 101 passed.
 - Phase-A config contract suite after adding shift02/shift06: 23 passed.
-- Python compilation, focused Ruff lint/format, and `git diff --check` passed.
+- Final combined focused suite after the commits: 341 passed.
+- Python compilation, focused Ruff lint, and `git diff --check` passed.
+- Informational `ruff format --check` reported mechanical reformatting for 11
+  touched shared/PoC files. No broad formatter-only churn was applied during
+  this stop handoff.
 - One-step H100 feasibility completed with finite metrics and peak CUDA memory
   27,610 MiB.
 
