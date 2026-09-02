@@ -435,24 +435,29 @@ def backward_and_step_horizon_optimizer(
 	scaler: torch.amp.GradScaler | None,
 	gradient_clip_norm: float,
 ) -> torch.Tensor:
-	'''Backpropagate, reject non-finite gradients, then update parameters.'''
+	'''Backpropagate, clip gradients, and delegate AMP overflow to GradScaler.'''
 	if scaler is None:
 		loss.backward()
 	else:
 		scaler.scale(loss).backward()
 		scaler.unscale_(optimizer)
 	gradient_norm = torch.nn.utils.clip_grad_norm_(
-		model.parameters(), max_norm=gradient_clip_norm
+		model.parameters(),
+		max_norm=gradient_clip_norm,
+		error_if_nonfinite=False,
 	)
-	if not bool(torch.isfinite(gradient_norm).item()):
-		raise FloatingPointError('non-finite Volve horizon gradient norm')
+	gradient_is_finite = bool(torch.isfinite(gradient_norm).item())
 	if scaler is None:
+		if not gradient_is_finite:
+			raise FloatingPointError(
+				'non-finite Volve horizon gradient norm'
+			)
 		optimizer.step()
 	else:
+		# GradScaler must run so it can skip an overflowed update and lower its scale.
 		scaler.step(optimizer)
 		scaler.update()
 	return gradient_norm.detach()
-
 
 def deterministic_tile_order(tile_count: int, seed: int, epoch: int) -> tuple[int, ...]:
 	'''Return the all-items-once order for one epoch.'''

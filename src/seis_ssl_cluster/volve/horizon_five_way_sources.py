@@ -1292,7 +1292,6 @@ def _inspect_canonical_identity(
 	for key, identity_key in (
 		('source_amplitude_path', 'canonical_amplitude_sha256'),
 		('source_valid_mask_path', 'valid_trace_mask_sha256'),
-		('normalization_stats_path', 'canonical_normalization_stats_sha256'),
 	):
 		path = _identity_artifact_path(
 			'canonical input',
@@ -1305,10 +1304,37 @@ def _inspect_canonical_identity(
 			identity.get(identity_key),
 			identity_key,
 		)
+
+	# The scientific identity records the read-only source statistics, while
+	# embeddings use the derived normalization file under the artifact root.
+	# Validate each file against its own role instead of comparing their bytes.
+	source_normalization_value = (
+		public_inputs.get('normalization_stats.json')
+		or checks['normalization_stats_path']
+	)
+	source_normalization_path = _identity_artifact_path(
+		'canonical input',
+		source_normalization_value,
+		'canonical normalization source',
+	)
+	_validate_live_sha(
+		'canonical input',
+		source_normalization_path,
+		identity.get('canonical_normalization_stats_sha256'),
+		'canonical_normalization_stats_sha256',
+	)
+	normalization_output_path = _identity_artifact_path(
+		'canonical input',
+		checks['normalization_stats_path'],
+		'normalization_stats_path',
+	)
 	return {
 		'scientific_identity_sha256': identity_sha,
 		'canonical_input_metadata_sha256': file_sha256(
 			config.canonical_input_metadata
+		),
+		'normalization_stats_sha256': file_sha256(
+			normalization_output_path
 		),
 		**{
 			key: identity[key]
