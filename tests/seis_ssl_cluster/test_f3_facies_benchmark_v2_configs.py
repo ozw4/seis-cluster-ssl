@@ -63,6 +63,38 @@ ZERO_PHASE_Z_FILTER_VIEW_ROOT = (
 )
 LOCAL_VICREG_ROOT = V2_ROOT / '115_local_vicreg_v1'
 LOCAL_VICREG_EXTENSION_ROOT = V2_ROOT / '116_local_vicreg_extension_v1'
+# These suites check every declared candidate config and its source lineage.
+# Counts reject additional YAML that their explicit inventories do not cover.
+CANDIDATE_CONFIG_SUITES = {
+	'117_local_vicreg_10ep_poc_v1': (
+		'test_f3_local_vicreg_10ep_poc_configs.py',
+		4,
+	),
+	'118_local_vicreg_15ep_resume_poc_v1': (
+		'test_f3_local_vicreg_15ep_resume_poc_configs.py',
+		3,
+	),
+	'119_local_bt_anticollapse_search_v1': (
+		'test_f3_local_bt_anticollapse_search_configs.py',
+		31,
+	),
+	'120_local_bt_region_positive_poc_v1': (
+		'test_f3_local_bt_region_positive_poc_configs.py',
+		7,
+	),
+	'121_local_bt_view_region_search_v1': (
+		'test_f3_local_bt_view_region_search_configs.py',
+		50,
+	),
+	'122_local_bt_nuisance_region_ascent_v1': (
+		'test_f3_local_bt_nuisance_region_ascent_configs.py',
+		91,
+	),
+	'123_local_bt_noise_rotation_search_v1': (
+		'test_f3_local_bt_noise_rotation_search_configs.py',
+		138,
+	),
+}
 README = FIVE_WAY_ROOT / 'README.md'
 ARTIFACT_ROOT = '/test/artifacts/seis_ssl_cluster'
 RAW_F3_ROOT = '/test/f3'
@@ -434,7 +466,11 @@ def _strings(value: object) -> list[str]:
 
 
 def _v2_yaml_files() -> list[Path]:
-	return sorted(V2_ROOT.rglob('*.yaml'))
+	return sorted(
+		path
+		for path in V2_ROOT.rglob('*.yaml')
+		if path.relative_to(V2_ROOT).parts[0] not in CANDIDATE_CONFIG_SUITES
+	)
 
 
 def _resolve_barlow_branch_configs(root: Path, covered: set[Path]) -> None:
@@ -502,6 +538,13 @@ def _resolve_local_vicreg_configs(
 	extension = LOCAL_VICREG_EXTENSION_ROOT / '60_extension.yaml'
 	f3_vicreg_extension_config_from_mapping(_load(extension))
 	covered.add(extension)
+
+
+@pytest.mark.parametrize('namespace', CANDIDATE_CONFIG_SUITES)
+def test_candidate_config_inventories_have_dedicated_suites(namespace: str) -> None:
+	suite, expected_count = CANDIDATE_CONFIG_SUITES[namespace]
+	assert Path(__file__).with_name(suite).is_file()
+	assert len(list((V2_ROOT / namespace).rglob('*.yaml'))) == expected_count
 
 
 def test_every_v2_config_resolves_with_its_owning_resolver(
