@@ -10,6 +10,8 @@ from seis_ssl_cluster.data.barlow_twins_dataset import (
 	LocalBarlowTwinsD4TraceDropPretrainDataset,
 	LocalBarlowTwinsPretrainDataset,
 	OverlappingLocalBarlowTwinsPretrainDataset,
+	RegionLocalBarlowTwinsPretrainDataset,
+	XyRotationLocalBarlowTwinsPretrainDataset,
 	derive_overlapping_parent_crop_size,
 )
 from seis_ssl_cluster.data.crop_sampler import (
@@ -162,6 +164,7 @@ __all__ = [
 	'OverlappingLocalBarlowTwinsPretrainDataset',
 	'PreparedAmplitudeCrop',
 	'PreparedSurveyAmplitude',
+	'RegionLocalBarlowTwinsPretrainDataset',
 	'StratMultiHeadLateralTargetManifest',
 	'StratMultiHeadPosteriorArrays',
 	'StratMultiHeadPosteriorInput',
@@ -177,6 +180,7 @@ __all__ = [
 	'SurveyPreprocessingCacheSettings',
 	'TargetProvider',
 	'TargetProviderContext',
+	'XyRotationLocalBarlowTwinsPretrainDataset',
 	'ZeroMaskConfig',
 	'apply_configured_agc',
 	'apply_trace_rms_agc',

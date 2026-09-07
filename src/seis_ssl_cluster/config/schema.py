@@ -44,6 +44,30 @@ HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY: Final = (
 HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY: Final = (
 	'horizontal_flip_zero_phase_z_filter_v1'
 )
+HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_token_dropout_v1'  # noqa: S105
+)
+HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_smooth_gain_v1'
+)
+HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_colored_noise_v1'
+)
+HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_laplace_noise_v1'
+)
+HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_asymmetric_noise_v1'
+)
+HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_gaussian_trace_drop_v1'
+)
+XY_ROT90_GAUSSIAN_NOISE_AUGMENTATION_POLICY: Final = 'xy_rot90_gaussian_noise_v1'
+XY_ROT90_LAPLACE_NOISE_AUGMENTATION_POLICY: Final = 'xy_rot90_laplace_noise_v1'
+XY_ROT90_ASYMMETRIC_NOISE_AUGMENTATION_POLICY: Final = (
+	'xy_rot90_asymmetric_noise_v1'
+)
+XY_D4_GAUSSIAN_NOISE_AUGMENTATION_POLICY: Final = 'xy_d4_gaussian_noise_v1'
 IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY: Final = 'identity_gaussian_noise_v1'
 OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY: Final = 'overlapping_subcrop_xy_v1'
 XY_D4_TRACE_DROP_AUGMENTATION_POLICY: Final = 'xy_d4_trace_drop_v1'

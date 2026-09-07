@@ -515,6 +515,7 @@ def test_overlapping_subcrop_one_step_uses_parent_crop_and_resumes(
 			'local_pairs_per_crop': 2,
 			'max_subcrop_shift_tokens': (1, 1, 0),
 			'horizontal_flip_probability': 0.5,
+			'positive_window_tokens': None,
 		}
 	]
 	assert encoder_input_shapes == [(2, 1, 4, 4, 4)]

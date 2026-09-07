@@ -176,13 +176,13 @@ def test_local_view_specific_indices_gather_corresponding_tokens(
 			torch.zeros((2, 3, 1), dtype=torch.int64),
 			torch.zeros((2, 3), dtype=torch.int64),
 			ValueError,
-			'shape \\[B, K\\]',
+			'matching \\[B, K\\] or \\[B, K, W\\]',
 		),
 		(
 			torch.zeros((1, 3), dtype=torch.int64),
 			torch.zeros((2, 3), dtype=torch.int64),
 			ValueError,
-			'matching \\[B, K\\] shapes',
+			'matching \\[B, K\\] or \\[B, K, W\\]',
 		),
 		(
 			torch.zeros((1, 3), dtype=torch.int64),
@@ -194,7 +194,7 @@ def test_local_view_specific_indices_gather_corresponding_tokens(
 			torch.tensor([[0, 1, 2], [3, 4, 5]], dtype=torch.int64),
 			torch.tensor([[0, 1], [3, 4]], dtype=torch.int64),
 			ValueError,
-			'matching \\[B, K\\] shapes',
+			'matching \\[B, K\\] or \\[B, K, W\\]',
 		),
 	],
 )

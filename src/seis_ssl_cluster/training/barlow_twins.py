@@ -249,6 +249,11 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 	continuation = (
 		_mapping(config, 'continuation') if 'continuation' in config else None
 	)
+	positive_window_tokens = (
+		_xyz(barlow, 'positive_window_tokens')
+		if 'positive_window_tokens' in barlow
+		else None
+	)
 	device = _resolve_device(train)
 	seed = _integer(train, 'seed')
 	_seed_everything(seed, device=device)
@@ -302,12 +307,14 @@ def run_barlow_twins_pretraining(  # noqa: PLR0915
 				augmentations,
 				'horizontal_flip_probability',
 			),
+			positive_window_tokens=positive_window_tokens,
 		)
 	else:
 		dataset = build_local_joint_embedding_dataset(
 			base_dataset,
 			local_pairs_per_crop=local_pairs_per_crop,
 			augmentations=augmentations,
+			positive_window_tokens=positive_window_tokens,
 		)
 	dataloader = build_barlow_twins_dataloader(
 		dataset,

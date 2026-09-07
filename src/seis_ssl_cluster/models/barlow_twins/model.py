@@ -158,14 +158,18 @@ def _validate_local_input_tensors(
 		if indices.dtype != torch.int64:
 			msg = f'{name} dtype must be torch.int64; got {indices.dtype}'
 			raise TypeError(msg)
-		if indices.ndim != 2:
-			msg = f'{name} must have shape [B, K]; got shape={tuple(indices.shape)!r}'
+		if indices.ndim not in (2, 3):
+			msg = (
+				f'{name} must have shape [B, K] or [B, K, W]; '
+				f'got shape={tuple(indices.shape)!r}'
+			)
 			raise ValueError(msg)
 
 	if local_pair_indices_a.shape != local_pair_indices_b.shape:
 		msg = (
-			'local pair index tensors must have matching [B, K] shapes; '
-			f'got local_pair_indices_a={tuple(local_pair_indices_a.shape)!r}, '
+			'local pair index tensors must have matching [B, K] or [B, K, W] '
+			'shapes; got '
+			f'local_pair_indices_a={tuple(local_pair_indices_a.shape)!r}, '
 			f'local_pair_indices_b={tuple(local_pair_indices_b.shape)!r}'
 		)
 		raise ValueError(msg)
@@ -184,6 +188,17 @@ def _gather_local_tokens(
 			f'tokens_batch={tokens.shape[0]!r}'
 		)
 		raise ValueError(msg)
+	if indices.ndim == 3:
+		batch_size, pairs_per_crop, window_tokens = indices.shape
+		flat_indices = indices.reshape(batch_size, pairs_per_crop * window_tokens)
+		gather_indices = flat_indices.unsqueeze(-1).expand(-1, -1, tokens.shape[2])
+		gathered = torch.gather(tokens, dim=1, index=gather_indices)
+		return gathered.reshape(
+			batch_size,
+			pairs_per_crop,
+			window_tokens,
+			tokens.shape[2],
+		).mean(dim=2)
 	gather_indices = indices.unsqueeze(-1).expand(-1, -1, tokens.shape[2])
 	return torch.gather(tokens, dim=1, index=gather_indices)
 
