@@ -23,9 +23,13 @@ ENV HTTP_PROXY=${HTTP_PROXY} \
 
 RUN echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" | debconf-set-selections
 
+# The base image can contain a GitHub CLI source without the current signing key.
 RUN --mount=type=cache,target=/var/lib/apt,sharing=locked \
     --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    apt-get update && apt-get install -y --no-install-recommends \
+    rm -f \
+    /etc/apt/sources.list.d/github-cli.list \
+    /etc/apt/sources.list.d/github-cli.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     gnupg \
@@ -39,7 +43,7 @@ RUN --mount=type=cache,target=/var/lib/apt,sharing=locked \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && mkdir -p -m 755 /etc/apt/sources.list.d \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/github-cli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs gh \
