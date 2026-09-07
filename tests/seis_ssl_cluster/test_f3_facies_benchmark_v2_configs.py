@@ -94,6 +94,10 @@ CANDIDATE_CONFIG_SUITES = {
 		'test_f3_local_bt_noise_rotation_search_configs.py',
 		138,
 	),
+	'124_lithology_random_init_hmm_k6_distill010_v1': (
+		'test_f3_random_init_hmm_k6_distill010_configs.py',
+		4,
+	),
 }
 README = FIVE_WAY_ROOT / 'README.md'
 ARTIFACT_ROOT = '/test/artifacts/seis_ssl_cluster'
