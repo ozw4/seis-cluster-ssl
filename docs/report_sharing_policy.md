@@ -1,26 +1,21 @@
-# Report Sharing Policy
+# Report sharing policy
 
-The repository uses three distinct locations:
+Repository data has three distinct owners:
 
-- `artifacts/`: complete execution outputs, intermediate products, and inputs
-  to later processing. Git does not track this directory.
-- `reports/`: lightweight, human-readable summaries tracked by Git. Pipeline
-  stages must not consume files from this directory.
-- `experiments/`: experiment definitions and configuration.
+| Location | Purpose | Git |
+|---|---|---|
+| `experiments/` | Versioned experiment definitions and configuration | Tracked |
+| `artifacts/` | Complete execution outputs, intermediate products, and every input consumed by a later stage | Ignored |
+| `reports/` | Small, reviewable result summaries for people | Tracked |
 
-Normal experiment, training, embedding, clustering, and visualization commands
-write under the configured artifact root. Publishing copies only the small,
-producer-owned summary set into `reports/`; it does not change pipeline inputs.
+Pipeline stages must never consume files from `reports/`. When results are
+curated into `reports/`, include only the producer's explicitly owned review
+files; this does not change the artifact lineage.
 
-Commit only the small file set owned explicitly by each producer: Markdown,
-JSON, CSV, and representative figures needed for review.
+Reports may contain Markdown, JSON, CSV, and a small set of representative
+figures. Do not publish raw data, checkpoints, embeddings, prediction volumes,
+clustering models, path lists, normalization products, full visualization dumps,
+or bulk NumPy, PyTorch, pickle, Joblib, or SEG-Y files.
 
-Do not commit checkpoints, embeddings, raw `.npy`/`.npz` arrays, prediction
-volumes, clustering models, or raw SEGY data under `reports/`.
-
-Each producer's focused tests should fix the expected review file set and check
-that heavy artifacts are not emitted there.
-
-Use `git diff` and normal code review as the final check for changes under
-`reports/`. For F3, start with the experiment-specific summary/report files and
-representative figures committed by the producer.
+Each report producer must define its exact published file set, and tests must
+verify it. Review changes under `reports/` with `git diff` before committing.

@@ -27,8 +27,8 @@ Historical checkpoints, embeddings, HMM artifacts, pseudo-targets, probes, and M
 
 ## Quarantine
 
-- `/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/quarantine/performance_migration_validation.20260717T153342Z.invalid_publish.0a999653`
-- `/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/quarantine/performance_migration_validation.20260717T154034Z.invalid_publish.34737544`
+- `${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/migration_validation/f3/facies_benchmark_v1/main_332478be/quarantine/performance_migration_validation.20260717T153342Z.invalid_publish.0a999653`
+- `${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/migration_validation/f3/facies_benchmark_v1/main_332478be/quarantine/performance_migration_validation.20260717T154034Z.invalid_publish.34737544`
 
 ## Resume
 

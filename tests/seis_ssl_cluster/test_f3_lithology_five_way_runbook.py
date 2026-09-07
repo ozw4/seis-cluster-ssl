@@ -11,11 +11,6 @@ import pytest
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.f3_lithology_five_way import (
 	EXPECTED_MODEL_IDENTITIES,
-	FIVE_WAY_MODEL_IDS,
-)
-from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
-	DATA_SIZES,
-	LAYOUT_IDS,
 )
 
 EXP_ROOT = Path(
@@ -28,9 +23,6 @@ RUNBOOK_CLIS = (
 	'proc/seis_ssl_cluster/cluster_embeddings.py',
 	'proc/seis_ssl_cluster/train_strat_hmm_pretext.py',
 	'proc/seis_ssl_cluster/create_random_mae_checkpoint.py',
-	'proc/seis_ssl_cluster/audit_f3_lithology_five_way_sources.py',
-	'proc/seis_ssl_cluster/run_f3_lithology_five_way.py',
-	'proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py',
 )
 
 
@@ -46,7 +38,7 @@ def _readme_text() -> str:
 	return README.read_text(encoding='utf-8')
 
 
-def test_readme_references_existing_configs_clis_and_tests() -> None:
+def test_readme_references_existing_configs_clis_and_docs() -> None:
 	text = _readme_text()
 	for cli in RUNBOOK_CLIS:
 		assert cli in text
@@ -59,38 +51,11 @@ def test_readme_references_existing_configs_clis_and_tests() -> None:
 	assert config_references
 	for reference in config_references:
 		assert (EXP_ROOT / reference).is_file()
-	loop_extractions = re.findall(
-		r'^  (0\d_extract_\w+)(?: \\)?$',
-		text,
-		flags=re.MULTILINE,
-	)
-	assert len(loop_extractions) == 5
-	for name in loop_extractions:
-		assert (EXP_ROOT / '50_embeddings' / f'{name}.yaml').is_file()
-	for test_path in re.findall(r'tests/seis_ssl_cluster/\S+\.py', text):
-		assert Path(test_path).is_file()
-	assert '60_five_way.yaml' in text
 	assert (EXP_ROOT / '60_five_way.yaml').is_file()
-
-
-def test_readme_model_matrix_is_exact() -> None:
-	text = _readme_text()
-	for model_id in FIVE_WAY_MODEL_IDS:
-		assert f'- `{model_id}`' in text
-	loop_models = re.findall(r'^  (\w+)(?: \\)?$', text, flags=re.MULTILINE)
-	loop_models = [
-		name for name in loop_models if name in FIVE_WAY_MODEL_IDS
-	]
-	assert loop_models == list(FIVE_WAY_MODEL_IDS) * 2
-	for layout_id in LAYOUT_IDS:
-		assert layout_id in text
-	for data_size in DATA_SIZES:
-		assert data_size in text
-	assert '75' in text
-	assert len(FIVE_WAY_MODEL_IDS) * len(LAYOUT_IDS) * len(DATA_SIZES) == 75
-	assert 'trace_drop' not in text
-	assert 'd4' not in text
-	assert 'macro_f1' in text
+	links = re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', text)
+	assert links
+	for link in links:
+		assert (README.parent / link).resolve().is_file(), link
 
 
 def test_shell_blocks_are_valid_bash(tmp_path: Path) -> None:
@@ -107,33 +72,14 @@ def test_shell_blocks_are_valid_bash(tmp_path: Path) -> None:
 		)
 
 
-def test_dry_run_commands_precede_live_commands() -> None:
+def test_runbook_phase_order_is_explicit() -> None:
 	text = _readme_text()
-	for cli in (
-		'proc/seis_ssl_cluster/audit_f3_lithology_five_way_sources.py',
-		'proc/seis_ssl_cluster/run_f3_lithology_five_way.py',
-		'proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py',
-	):
-		lines = [line for line in text.splitlines() if cli in line]
-		assert len(lines) >= 2
-	audit_dry = text.index(
-		'audit_f3_lithology_five_way_sources.py --config "$CONFIG" --dry-run'
+	headings = (
+		'## Source production',
+		'## Historical v1 evaluation',
 	)
-	audit_live = text.index(
-		'audit_f3_lithology_five_way_sources.py --config "$CONFIG"\n'
-	)
-	assert audit_dry < audit_live
-	preflight = text.index('--dry-run\ndone')
-	full_loop = text.index('for layout in layout_000')
-	assert preflight < full_loop
-	summary_dry = text.index(
-		'summarize_f3_lithology_five_way.py --config "$CONFIG" --dry-run'
-	)
-	summary_live = text.index(
-		'summarize_f3_lithology_five_way.py --config "$CONFIG"\n'
-	)
-	assert summary_dry < summary_live
-	assert 'complete_jobs: 75' in text
+	positions = [text.index(heading) for heading in headings]
+	assert positions == sorted(positions)
 	assert not re.search(r'(?m)^\s*(?:rm\s+-rf|cp\s|rsync\s)', text)
 
 
@@ -232,19 +178,9 @@ def test_summary_root_is_consistent_with_runner_root(env_root: Path) -> None:
 	assert runs_root.parent == summary_root.parent
 	assert runs_root.parent.name == 'mae_local_bt_five_way_v1'
 	assert runs_root.parent.parent.name == 'f3_lithology_benchmark'
-	text = _readme_text()
-	assert 'f3_lithology_benchmark/mae_local_bt_five_way_v1/runs' in text
-	assert 'f3_lithology_benchmark/mae_local_bt_five_way_v1/summary' in text
 
 
-def test_runbook_restart_contract_matches_the_runner() -> None:
-	text = _readme_text()
-	restart = text[text.index('中断jobの扱い') : text.index('## 10.')]
-
-	assert '--resume <run_dir>/decoder/latest.pt' in restart
-	assert 'skip' in restart
-	assert '再学習せず' in restart
-	assert '原子的' in restart
+def test_runner_restart_contract_is_implemented() -> None:
 	source = Path(
 		'src/seis_ssl_cluster/f3/lithology/five_way_runner.py'
 	).read_text(encoding='utf-8')

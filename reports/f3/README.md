@@ -1,15 +1,17 @@
-# F3 Reports
+# F3 reports
 
-`reports/f3/legacy/facies_benchmark_v1/` is the frozen reference for the F3
-`facies_benchmark_v1` voxel-count, multiple-seed protocol. Its producer Git
-revision is recorded in [legacy/README.md](legacy/README.md). The frozen files
-are not pipeline inputs.
+## Collections
 
-The next active F3 benchmark will be implemented separately as
-`facies_benchmark_v2`, using section-count conditions and one seed. Its future
-report location is `reports/f3/facies_benchmark_v2/`; that directory and its
-scientific conditions are not defined yet.
+- [Facies benchmark v2](facies_benchmark_v2/)
+- [Legacy facies benchmark v1](legacy/facies_benchmark_v1/)
 
-Do not compare v1 and v2 as though they used the same protocol. Complete
-execution outputs, intermediate products, and downstream inputs belong under
-`artifacts/`, not `reports/`.
+## Top-level reports
+
+- [Local BT anti-collapse search](local_bt_anticollapse_search_v1_summary.md)
+- [Local BT epoch scaling](local_bt_epoch_scaling_v1.md)
+- [Local BT random-parity breakthrough](local_bt_random_parity_breakthrough.md)
+- [Local BT region-positive proof of concept](local_bt_region_positive_poc_v1_summary.md)
+- [Local BT rotation and asymmetric-noise recipe](local_bt_rot90_asymmetric_noise_recipe.md)
+- [Local BT view-by-region search](local_bt_view_region_search_v1_summary.md)
+- [Local VICReg 10-epoch proof of concept](local_vicreg_10ep_poc_v1.md)
+- [Overlapping-subcrop local BT proof of concept](overlap_subcrop_local_bt_poc_v1_work_summary.md)

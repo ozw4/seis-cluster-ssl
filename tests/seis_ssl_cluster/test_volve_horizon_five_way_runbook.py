@@ -29,7 +29,6 @@ LEGACY_CONFIG = (
 	/ '30_mae_vs_random_frozen_v1/03_horizon_frozen.yaml'
 )
 RUNBOOK_CLIS = (
-	'proc/seis_ssl_cluster/prepare_volve_canonical_inputs.py',
 	'proc/seis_ssl_cluster/train_amp_barlow_twins.py',
 	'proc/seis_ssl_cluster/train_amp_mae.py',
 	'proc/seis_ssl_cluster/extract_embeddings.py',
@@ -216,36 +215,21 @@ def test_launcher_and_readme_shell_are_valid_bash(tmp_path: Path) -> None:
 		)
 
 
-def test_runbook_documents_complete_execution_and_recovery_contract() -> None:
+def test_runbook_links_the_workflow_without_copying_runtime_contracts() -> None:
 	text = README.read_text(encoding='utf-8')
-	for model_id in FIVE_WAY_MODEL_IDS:
-		assert f'- `{model_id}`' in text
 	for cli in RUNBOOK_CLIS:
 		assert cli in text
 		assert (REPOSITORY_ROOT / cli).is_file()
 	for reference in re.findall(r'\$EXP/([^"\s]+\.(?:yaml|sh))', text):
 		assert (EXPERIMENT_ROOT / reference).is_file(), reference
 
-	assert '**75 jobs**' in text
-	assert '--max-steps 1' in text
-	assert '--resume "$RUN_DIR/latest.pt"' in text
-	assert 'cellの完了判定fileは`metrics.json`' in text
 	assert 'DRY_RUN=1 bash "$EXP/run_five_way.sh"' in text
 	assert 'bash "$EXP/run_five_way.sh" --continue' in text
 	assert '--check-only' in text
-	assert 'complete_jobs: 75' in text
-	assert 'comparison.csv' in text
-	assert 'Definition of Done' in text
-	for required in (
-		'51_five_way_within2.yaml',
-		'mae_local_bt_hmm_five_way_within2_v1',
-		'history.json',
-		'best_validation_score',
-		'--models mae mae_hmm_k6 random',
-		'--models local_barlow_twins local_barlow_twins_hmm_k6',
-		'正式summaryは75セル完了後だけ生成する',
-	):
-		assert required in text
+	assert '51_five_way_within2.yaml' in text
+	assert '52_five_way_within4.yaml' in text
+	assert 'checkpoint_selection_45cell_comparison.md' in text
+	assert '```python' not in text
 
 
 def test_new_experiment_inventory_excludes_forbidden_augmentation_token() -> None:

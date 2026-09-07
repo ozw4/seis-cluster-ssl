@@ -1,109 +1,27 @@
-# Volve Survey-Specific Amplitude MAE Pretraining
+# Volve survey-specific MAE pretraining
 
-This is the current contract for survey-specific 3D amplitude MAE pretraining
-on the complete Volve canonical amplitude volume. The input is amplitude only.
+This note records the data-use and scientific claim boundaries for
+amplitude-only MAE pretraining on the canonical Volve volume.
 
-## Data identity and access
+## Data boundary
 
-| Field | Contract |
-| --- | --- |
-| Public root | `${SEIS_SSL_CLUSTER_VOLVE_ROOT}` |
-| Default public root | `/home/dcuser/public_data/field/volve` |
-| Access | Read-only |
-| Canonical dataset ID | `volve_st10010_full_t_v1` |
-| Survey ID | `volve_st10010` |
-| Canonical amplitude SHA-256 | `8e6a66c671658b2b24b9a961652972802e2735eaad3f7166642e52064bf46567` |
-| Source SEG-Y SHA-256 | `f902e2bdaa277caf93a32e5f35eae653eb8b923138db0efc1e91918ef6757b2e` |
-| Logical grid | `[inline, crossline, twt]`, registered as `[x, y, z]` |
-| Shape | `[401, 720, 850]` |
-| Physical inline axis | Every integer from `9961` through `10361`, exactly |
-| Physical crossline axis | Every integer from `1961` through `2680`, exactly |
-| TWT axis | `850` samples from `4` through `3400` ms at `4` ms intervals |
-| Dtype | `float32` |
-| Explicit source-valid mask | `valid_trace_mask.npy`, shape `[401, 720]`, dtype `bool` |
+The workflow uses the read-only public canonical dataset
+`volve_st10010_full_t_v1` and its explicit valid-trace mask. Registration points
+to those public arrays; training handles invalid samples in memory and does not
+copy, interpolate, overwrite, or regenerate the public data.
 
-Inline and crossline axis arrays may use an integer or floating-point numeric
-dtype, but every stored value must exactly equal the corresponding integer in
-the physical geometry above. Shifted axes, gaps, and non-integral values are
-invalid.
+Horizon bindings and interpretations, fault sticks, layout definitions, and
+validation or test labels are not inputs to MAE training or its checkpoints.
+Initialization does not load a checkpoint from F3, NOPIMS, Parihaka, or another
+survey. Downstream labels are introduced only by later benchmark stages.
 
-Canonical registration produces only small artifacts under:
+Registration inputs are snapshotted with each run so validation can bind a
+checkpoint to the data identity it actually used. A regenerated registration
+must not be presented as the identity of an older checkpoint.
 
-```text
-${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/
-  volve_amplitude_manifest.json
-  volve_npy_paths.txt
-  volve.normalization_stats.json
-  volve_canonical_input_metadata.json
-```
+Because this run uses the complete amplitude survey, interpret it under the
+shared [same-survey pretraining claim boundary](same_survey_pretraining_claims.md).
 
-The manifest points back to the public canonical amplitude and explicit valid
-trace mask. Training replaces invalid trace samples only in its in-memory crop
-processing; it does not copy, overwrite, interpolate, or regenerate public
-data.
-
-## Amplitude-only boundary
-
-Horizon bindings, horizon interpretations, fault sticks, layout definitions,
-and validation or test labels are not inputs to the MAE config, dataset,
-training batch, checkpoint, or run snapshot. Initialization is random from seed
-42. No F3, NOPIMS, Parihaka, or other pretrained checkpoint initializes this
-run.
-
-## Model and training contract
-
-The fixed model tag is:
-
-```text
-amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1
-```
-
-It uses `128 x 128 x 128` crops, `8 x 8 x 8` patches, spatial mask ratio
-`0.75`, patch-z-score targets, MSE reconstruction, zero gradient loss weight,
-visible reconstruction weight `0.1`, normalized clip magnitude `8.0`, and
-trace-RMS AGC with a 65-sample Z window. The encoder has dimension 384, depth
-8, and 6 heads; the decoder has dimension 256, depth 4, and 4 heads.
-
-The full run uses batch size 4, 10,000 samples per epoch, 100 epochs, AdamW
-with learning rate `1e-4` and weight decay `0.05`, CUDA AMP, and seed 42. Its
-output is:
-
-```text
-${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/
-  amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/
-```
-
-`latest.pt` after epoch 100 and global step 250,000 is the downstream
-pretrained checkpoint. `best.pt` follows training loss and is diagnostic only;
-it is not selected using downstream labels. The CPU smoke uses two optimizer
-steps in a separate `smoke_2step/` directory.
-
-At run start, both smoke and full training copy the exact registration inputs
-used by the run into their own output directory:
-
-```text
-inputs/
-  volve.normalization_stats.json
-  volve_canonical_input_metadata.json
-```
-
-`run_metadata.json` records `input_scientific_identity_sha256`,
-`normalization_stats_sha256`, and `canonical_input_metadata_sha256`. Validation
-requires these hashes and the two snapshots to match the current canonical
-registration. A changed or regenerated registration therefore cannot be
-silently presented as the input identity of an older checkpoint.
-
-The paired random encoder checkpoint uses the same architecture and seed 42,
-contains no pretrained weights, and must have a different SHA-256 from the
-completed pretrained checkpoint.
-
-## Scientific claim boundary
-
-The complete Volve amplitude survey may include regions used by later
-within-survey evaluation. The supported claim is therefore **same-survey
-transductive self-supervised pretraining**. Pretraining alone does not establish
-an inductive holdout result, cross-survey transfer, absence of downstream label
-leakage, or improved horizon accuracy.
-
-Commands and phase ordering are maintained in the experiment
-`10_pretrain/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/README.md`.
+Commands and phase ordering are maintained only in the
+[`Volve amplitude MAE execution`](../experiments/volve/horizon_benchmark_v1/10_pretrain/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/README.md)
+runbook.

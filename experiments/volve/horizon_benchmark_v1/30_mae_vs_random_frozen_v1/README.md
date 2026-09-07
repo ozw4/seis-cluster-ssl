@@ -1,105 +1,41 @@
-# Volve frozen MAE versus random horizon benchmark
+# Volve frozen MAE versus Random horizon benchmark
 
-This suite trains the shared five-horizon decoder on frozen Volve MAE or
-seed-42 random embeddings. The 004 physical layouts and fixed split plan are
-reused unchanged, producing 2 model sources × 5 layouts × 3 nested sizes = 30
-paired jobs. The decoder is initialized with seed 42000 in every job.
+This suite compares frozen Volve MAE embeddings with the matched Random encoder
+under the shared horizon split and decoder. Scientific split semantics are
+documented in
+[`docs/volve_horizon_supervision.md`](../../../../docs/volve_horizon_supervision.md).
+The YAML files and runner own sources, settings, output paths, metrics, and
+resume validation.
 
-Set the read-only public root and a writable artifact root:
+Start with the shared [Volve benchmark environment](../README.md).
+Complete the linked [MAE pretraining workflow](../10_pretrain/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/README.md),
+which owns canonical-input preparation, before extracting embeddings here.
 
-```bash
-export SEIS_SSL_CLUSTER_VOLVE_ROOT=/home/dcuser/public_data/field/volve
-export SEIS_SSL_CLUSTER_ARTIFACT_ROOT=/absolute/path/to/artifacts
-
-FROZEN=experiments/volve/horizon_benchmark_v1/30_mae_vs_random_frozen_v1
-LAYOUTS=experiments/volve/horizon_benchmark_v1/20_horizon_supervision/01_layouts.yaml
-```
-
-Create or verify the canonical registration, then extract the paired embeddings
-with the existing generic extractor:
+## Execution order
 
 ```bash
-python proc/seis_ssl_cluster/prepare_volve_canonical_inputs.py --only-missing
+export FROZEN="$VOLVE_EXP/30_mae_vs_random_frozen_v1"
 
 python proc/seis_ssl_cluster/extract_embeddings.py \
   --config "$FROZEN/01_extract_pretrained_embeddings.yaml" \
-  --device cuda \
-  --skip-existing
-
+  --device cuda --skip-existing
 python proc/seis_ssl_cluster/extract_embeddings.py \
   --config "$FROZEN/02_extract_random_embeddings.yaml" \
-  --device cuda \
-  --skip-existing
+  --device cuda --skip-existing
 ```
 
-The extraction preflight requires identical architecture, geometry, token-valid
-mask, preprocessing, and canonical scientific identity. It also requires
-different checkpoint hashes, the completed Volve `full_100ep/latest.pt` role,
-and the seed-42 `random_init` role. With `min_token_valid_fraction: 1.0`, every
-token touching a missing trace or survey padding is invalid.
-
-Loss and metrics use only lateral locations whose complete 27-token
-`[552,768)` column is valid. The column-valid token mask is expanded to the
-decoder's 8 × 8 voxel footprint and cropped to the central 64 × 64 core. The
-dry-run and resume identity report native horizon counts, effective model-valid
-counts, and counts excluded by token validity separately. Preflight requires
-positive effective coverage for every training and validation horizon and for
-every horizon in the primary common test.
-
-Inspect one read-only condition before training:
+Inspect one paired condition before live training:
 
 ```bash
 python proc/seis_ssl_cluster/run_volve_horizon_frozen.py \
   --config "$FROZEN/03_horizon_frozen.yaml" \
-  --model pretrained \
-  --layout layout_000 \
-  --size small \
-  --layout-config "$LAYOUTS" \
-  --dry-run
+  --model pretrained --layout layout_000 --size small \
+  --layout-config "$VOLVE_LAYOUTS" --dry-run
 ```
 
-Run one job and resume its rolling checkpoint if interrupted:
-
-```bash
-python proc/seis_ssl_cluster/run_volve_horizon_frozen.py \
-  --config "$FROZEN/03_horizon_frozen.yaml" \
-  --model pretrained \
-  --layout layout_000 \
-  --size small \
-  --layout-config "$LAYOUTS" \
-  --device cuda
-
-RUN="$SEIS_SSL_CLUSTER_ARTIFACT_ROOT/horizon/volve/horizon_benchmark_v1/mae_vs_random_frozen_v1/runs/model=pretrained/layout=layout_000/size=small"
-
-python proc/seis_ssl_cluster/run_volve_horizon_frozen.py \
-  --config "$FROZEN/03_horizon_frozen.yaml" \
-  --model pretrained \
-  --layout layout_000 \
-  --size small \
-  --layout-config "$LAYOUTS" \
-  --device cuda \
-  --resume "$RUN/latest.pt"
-```
-
-`best.pt` changes only when validation macro MAE is strictly lower. After 50
-epochs, the runner reloads `best.pt` and traverses the fixed test tiles once,
-writing common-primary and per-horizon-secondary metrics to `metrics.json`.
-No probability volume is produced. `latest.pt` contains the complete resume
-identity and training position. Checkpoints and metrics record the resolved
-runtime precision (`device_type`, AMP state, autocast dtype, and whether a
-GradScaler is required). Resume requires an exact precision match, and an AMP
-checkpoint without its scaler state is rejected. Consequently, use the same
-`--device` precision mode when resuming a job and for both members of a paired
-pretrained/random comparison.
-
-The resume identity also fixes AdamW, its betas/epsilon/weight decay, the
-fractional two-bin horizon-macro loss, masked soft-argmax prediction, strict
-lower validation-MAE checkpoint selection, and metrics schema version. A
-checkpoint produced under an older or different training semantic contract is
-not resumable as the same job.
-
-After the one-condition smoke and dry-run checks, launch all 30 jobs with the
-same command contract (schedule these commands as appropriate for the host):
+Run every model/layout/size cell with the same config. If a cell is interrupted,
+resume only that cell from its own rolling checkpoint and with the same runtime
+precision.
 
 ```bash
 for model in pretrained random; do
@@ -107,12 +43,12 @@ for model in pretrained random; do
     for size in small medium large; do
       python proc/seis_ssl_cluster/run_volve_horizon_frozen.py \
         --config "$FROZEN/03_horizon_frozen.yaml" \
-        --model "$model" \
-        --layout "$layout" \
-        --size "$size" \
-        --layout-config "$LAYOUTS" \
-        --device cuda
+        --model "$model" --layout "$layout" --size "$size" \
+        --layout-config "$VOLVE_LAYOUTS" --device cuda
     done
   done
 done
 ```
+
+For a resume, pass the exact cell's `latest.pt` through `--resume`; do not reuse
+a checkpoint from another model, layout, or size.

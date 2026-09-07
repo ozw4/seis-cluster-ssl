@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-Reusable Python code lives in `src/seis_ssl_cluster/`, organized by domain (`data/`, `models/`, `training/`, `embedding/`, `clustering/`, `visualization/`, and related packages). Keep command-line wrappers thin in `proc/seis_ssl_cluster/`; place their generic YAML in `proc/configs/seis_ssl_cluster/`. Versioned experiment definitions and configurations belong under `experiments/nopims/` or `experiments/f3/`. Tests mirror package and CLI behavior in `tests/seis_ssl_cluster/`. Use `docs/` for contracts and runbooks and `tools/` for repository checks. Keep complete execution outputs, intermediate products, and downstream inputs in ignored `artifacts/`; keep only lightweight human-readable summaries in tracked `reports/`, and never use `reports/` as pipeline input.
+Reusable Python code lives in `src/seis_ssl_cluster/`. Keep command-line wrappers thin in `proc/seis_ssl_cluster/`; place their generic YAML in `proc/configs/seis_ssl_cluster/`. Versioned definitions belong below the matching survey namespace in `experiments/`, and tests live in `tests/seis_ssl_cluster/`. Use `docs/` for guidance that should not be copied into individual experiments and `tools/` for repository checks. Follow the storage boundaries in `docs/report_sharing_policy.md`.
 
 ## Setup, Test, and Development Commands
 
@@ -25,4 +25,4 @@ Use pytest files and functions named `test_*.py` and `test_*`. Add focused regre
 
 ## Commit & Pull Request Guidelines
 
-Recent history favors concise imperative subjects (`Add ...`, `Update ...`) and issue-focused forms such as `chore: address issue #245` or `Batch: address issues #241-#243 (#247)`. Keep commits focused and reference issues when applicable. PRs should explain scope, configuration/artifact effects, and exact validation run; include representative figures or report links for visual changes. Never commit raw data, checkpoints, embeddings, or machine-specific paths. Keep `reports/` limited to reviewable Markdown, JSON, CSV, and representative figures; verify the concrete producer file set in focused tests and inspect `git diff` during review.
+Recent history favors concise imperative subjects (`Add ...`, `Update ...`) and issue-focused forms such as `chore: address issue #245` or `Batch: address issues #241-#243 (#247)`. Keep commits focused and reference issues when applicable. PRs should explain scope, configuration/artifact effects, and exact validation run; include representative figures or report links for visual changes. Never commit raw data, checkpoints, embeddings, or machine-specific paths. Verify each report producer's concrete file set in focused tests and inspect `git diff` during review.

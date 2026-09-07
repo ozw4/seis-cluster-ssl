@@ -412,35 +412,15 @@ EXTRACTION_CONFIGS = {
 	'random': '05_extract_random.yaml',
 }
 RUNBOOK_CLIS = (
-	'proc/seis_ssl_cluster/inspect_f3_files.py',
 	'proc/seis_ssl_cluster/prepare_f3_facies_volume.py',
 	'proc/seis_ssl_cluster/build_f3_lithology_voxel_dataset.py',
-	'proc/seis_ssl_cluster/prepare_f3_lithology_voxel_section_layout_contract.py',
-	'proc/seis_ssl_cluster/build_f3_lithology_voxel_section_layout_datasets.py',
 	'proc/seis_ssl_cluster/check_f3_prepared_volume_parity.py',
 	'proc/seis_ssl_cluster/extract_embeddings.py',
-	'proc/seis_ssl_cluster/audit_f3_lithology_five_way_sources.py',
-	'proc/seis_ssl_cluster/run_f3_lithology_five_way.py',
-	'proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py',
 )
 RUNBOOK_ORDER = (
-	'## 環境',
-	'## 1. v2 prepared volume',
-	'## 2. v2 canonical voxel supervision',
-	'## 3. candidate inspection',
-	'## 4. v2 line selection',
-	'## 5. v2 target calibration',
-	'## 6. contract finalize',
-	'## 7. 15 section-layout datasets',
-	'## 8. checkpoint audit',
-	'## 9. v1/v2 prepared volume parity gate',
-	'## 10. v2 embedding extraction',
-	'## 11. five-way source audit',
-	'## 12. preflight',
-	'## 13. full suite',
-	'## 14. summary dry-run',
-	'## 15. summary生成',
-	'## 16. resume手順',
+	'## Shared prepared sources',
+	'## Historical v2 downstream',
+	'## Recovery',
 )
 
 
@@ -929,8 +909,9 @@ def test_v3_layout_lines_use_literal_layout_002_order() -> None:
 def test_v3_runbook_shell_blocks_are_fail_fast_and_valid_bash(
 	path: Path, tmp_path: Path
 ) -> None:
+	text = path.read_text(encoding='utf-8')
 	blocks = re.findall(
-		r'```bash\n(.*?)```', path.read_text(encoding='utf-8'), flags=re.DOTALL
+		r'```bash\n(.*?)```', text, flags=re.DOTALL
 	)
 	assert blocks
 	for index, block in enumerate(blocks):
@@ -943,17 +924,18 @@ def test_v3_runbook_shell_blocks_are_fail_fast_and_valid_bash(
 			capture_output=True,
 			text=True,
 		)
+	for link in re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', text):
+		assert (path.parent / link).resolve().is_file(), link
 
 
-def test_v3_five_way_runbook_uses_size_layout_model_loop_order() -> None:
+def test_v3_five_way_runbook_links_canonical_inputs() -> None:
 	text = (FIVE_WAY_V3_ROOT / 'README.md').read_text(encoding='utf-8')
-	full_suite = text[text.index('## full suite') : text.index('## summary')]
-	assert full_suite.index('for size in small medium large') < full_suite.index(
-		'for layout in layout_000'
-	)
-	assert full_suite.index('for layout in layout_000') < full_suite.index(
-		'for model in'
-	)
+	links = re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', text)
+	assert links
+	for link in links:
+		assert (FIVE_WAY_V3_ROOT / link).resolve().is_file(), link
+	for cli in set(re.findall(r'proc/seis_ssl_cluster/\w+\.py', text)):
+		assert Path(cli).is_file(), cli
 
 
 def test_v3_builder_and_five_way_use_versioned_outputs_and_reused_sources() -> None:
@@ -1034,7 +1016,7 @@ def _readme_variables(text: str) -> dict[str, str]:
 	return variables
 
 
-def test_runbook_references_existing_clis_configs_and_tests() -> None:
+def test_runbook_references_existing_clis_configs_and_docs() -> None:
 	text = _readme_text()
 	for cli in RUNBOOK_CLIS:
 		assert cli in text
@@ -1052,23 +1034,20 @@ def test_runbook_references_existing_clis_configs_and_tests() -> None:
 	for variable, relative in references:
 		assert variable in variables, variable
 		assert (Path(variables[variable]) / relative).is_file(), (variable, relative)
-	loop_extractions = re.findall(
-		r'^  (0\d_extract_\w+)(?: \\)?$', text, flags=re.MULTILINE
-	)
-	assert loop_extractions == [
-		name.removesuffix('.yaml') for name in EXTRACTION_CONFIGS.values()
-	]
-	for test_path in re.findall(r'tests/seis_ssl_cluster/\S+\.py', text):
-		assert Path(test_path).is_file(), test_path
-	assert '60_five_way.yaml' in text
-	assert 'trace_drop' not in text
+	links = re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', text)
+	assert links
+	for link in links:
+		assert (README.parent / link).resolve().is_file(), link
 
 
-def test_runbook_shell_blocks_are_valid_bash(tmp_path: Path) -> None:
-	blocks = re.findall(r'```bash\n(.*?)```', _readme_text(), flags=re.DOTALL)
+def test_runbook_shell_blocks_and_historical_layout_links_are_valid(
+	tmp_path: Path,
+) -> None:
+	text = README.read_text(encoding='utf-8')
+	blocks = re.findall(r'```bash\n(.*?)```', text, flags=re.DOTALL)
 	assert blocks
 	for index, block in enumerate(blocks):
-		script = tmp_path / f'block_{index}.sh'
+		script = tmp_path / f'{README.parent.name}_{index}.sh'
 		script.write_text(block, encoding='utf-8')
 		subprocess.run(  # noqa: S603
 			['bash', '-n', str(script)],  # noqa: S607
@@ -1077,63 +1056,25 @@ def test_runbook_shell_blocks_are_valid_bash(tmp_path: Path) -> None:
 			text=True,
 		)
 
+	for readme in (README, LAYOUT_ROOT / 'README.md'):
+		readme_text = readme.read_text(encoding='utf-8')
+		links = re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', readme_text)
+		assert links
+		for link in links:
+			assert (readme.parent / link).resolve().is_file(), link
 
-def test_runbook_order_dry_runs_and_matrix() -> None:
+
+def test_runbook_phase_order_is_explicit() -> None:
 	text = _readme_text()
 	positions = [text.index(heading) for heading in RUNBOOK_ORDER]
 	assert positions == sorted(positions)
-	for cli in (
-		'build_f3_lithology_voxel_dataset.py',
-		'prepare_f3_lithology_voxel_section_layout_contract.py',
-		'build_f3_lithology_voxel_section_layout_datasets.py',
-		'check_f3_prepared_volume_parity.py',
-		'audit_f3_lithology_five_way_sources.py',
-		'summarize_f3_lithology_five_way.py',
-	):
-		lines = [
-			index
-			for index, line in enumerate(text.splitlines())
-			if cli in line and 'python' in line
-		]
-		text_lines = text.splitlines()
-		dry = [index for index in lines if '--dry-run' in text_lines[index]]
-		live = [index for index in lines if '--dry-run' not in text_lines[index]]
-		assert dry, cli
-		assert live, cli
-		assert dry[0] < live[0], cli
-	loop_models = [
-		name
-		for name in re.findall(r'^\s+(\w+)(?: \\)?$', text, flags=re.MULTILINE)
-		if name in MODEL_IDS
-	]
-	assert loop_models == list(MODEL_IDS) * 2
-	for layout_id in LAYOUT_IDS:
-		assert layout_id in text
-	for size in SIZES:
-		assert size in text
-	assert 'complete_jobs: 75' in text
-	assert 'macro_f1' in text
-	assert 'seed 42' in text
 	assert not re.search(r'(?m)^\s*(?:rm\s+-rf|cp\s|rsync\s|ln\s+-s)', text)
-	assert text.index('--dry-run\ndone') < text.index('for layout in layout_000')
-	full_suite = text[
-		text.index('## 13. full suite') : text.index('## 14. summary dry-run')
-	]
-	assert full_suite.index('for size in small medium large') < full_suite.index(
-		'for layout in layout_000'
-	)
-	assert full_suite.index('for layout in layout_000') < full_suite.index(
-		'for model in'
-	)
 
 
 def test_layout_yaml_documents_the_rule_and_inventory() -> None:
 	text = (LAYOUT_ROOT / '02_layout_lines.yaml').read_text(encoding='utf-8')
 	assert 'j0 = (k + 1) mod 4' in text
 	assert 'section_inventory_v2.csv' in text
-	readme = (LAYOUT_ROOT / 'README.md').read_text(encoding='utf-8')
-	assert TARGET_RULE in readme
-	assert 'cap25' in readme
 	data = yaml.safe_load(
 		(LAYOUT_ROOT / '02_layout_lines.yaml').read_text(encoding='utf-8')
 	)

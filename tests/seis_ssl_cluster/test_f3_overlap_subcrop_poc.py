@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from copy import deepcopy
@@ -59,6 +60,7 @@ V2_RANDOM_EMBEDDING = Path(
 	'110_lithology_mae_local_bt_five_way_v2/50_embeddings/05_extract_random.yaml'
 )
 DECIDE = ROOT / 'decide.py'
+README = ROOT / 'README.md'
 
 
 @pytest.fixture(autouse=True)
@@ -76,6 +78,32 @@ def _resolved_training(path: Path) -> dict[str, object]:
 
 def _resolved_embedding(path: Path) -> dict[str, object]:
 	return resolve_embedding_extraction_config(load_config(path))
+
+
+def test_runbook_links_resolve_and_shell_blocks_are_valid() -> None:
+	text = README.read_text(encoding='utf-8')
+	links = re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', text)
+	assert links
+	for link in links:
+		assert (README.parent / link).resolve().is_file(), link
+	for cli in set(re.findall(r'proc/seis_ssl_cluster/\w+\.py', text)):
+		assert Path(cli).is_file(), cli
+	for block in re.findall(r'```bash\n(.*?)```', text, flags=re.DOTALL):
+		subprocess.run(
+			['/bin/bash', '-n'],
+			input=block,
+			text=True,
+			check=True,
+			capture_output=True,
+		)
+	headings = (
+		'## Pretraining と embedding',
+		'## Representation diagnostic',
+		'## Screen と最終判定',
+		'## 再開',
+	)
+	positions = [text.index(heading) for heading in headings]
+	assert positions == sorted(positions)
 
 
 def _decision_module() -> ModuleType:

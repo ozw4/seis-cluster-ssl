@@ -1,13 +1,9 @@
-# F3 XY-neighbour consensus hard-label artifact producers
+# F3 XY-neighbour consensus producers
 
-This experiment creates one immutable K=6/8/10 hard-target artifact with a
-single synchronous XY four-neighbour consensus pass and an ordered-trace safety
-guard. Target generation does not read facies labels or downstream metrics.
+The scientific question and interpretation limits are recorded in
+[`docs/f3_xy_neighbor_consensus_hard_label_smoothing.md`](../../../../docs/f3_xy_neighbor_consensus_hard_label_smoothing.md).
+This directory owns only the executable conditions.
 
-Run stages `01` through `05` in order with
-`export_strat_hmm_multi_head_xy_neighbor_consensus_targets.py`,
-`train_strat_hmm_pretext.py`, `extract_embeddings.py`, and
-`validate_f3_xy_neighbor_consensus_pretraining.py`. The smoke root is
-separate from the full root and must not be used to resume full training.
-
-Complete outputs remain under `artifacts/seis_ssl_cluster/`.
+Run the numbered YAML stages in order: export the immutable target, run smoke
+and full pretraining, extract embeddings, and validate the handoff. Exact
+inputs, settings, and outputs belong to the YAML and validators.

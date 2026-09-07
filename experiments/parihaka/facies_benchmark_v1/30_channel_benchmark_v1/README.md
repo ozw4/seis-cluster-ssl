@@ -1,119 +1,26 @@
 # Parihaka Channel benchmark v1
 
-This experiment compares one pretrained Parihaka amplitude MAE with the same
-architecture initialized randomly. The encoder embeddings are fixed; each job
-trains only the same binary `VoxelDecoder3D`, with the single decoder seed 42000
-and `all_tiles_once` sampling.
+This experiment measures the benefit of a frozen Parihaka-pretrained amplitude
+encoder against the same architecture initialized randomly. Both embedding
+volumes are fixed; only the common binary Channel decoder is trained.
 
-Pretraining used the full unlabeled Parihaka amplitude volume, including
-amplitudes from downstream validation and test sections. This benchmark
-therefore measures survey-specific transductive self-supervised pretraining
-benefit and does not establish inductive transfer to unseen surveys.
+Study-wide context is in the
+[Parihaka benchmark overview](../README.md). Experiment definitions:
+[benchmark configuration](06_channel_benchmark.yaml) and reviewed
+[layout definition](02_layouts.yaml).
 
-The repository does not choose section indices. First prepare and inspect the
-labels, review `parihaka_channel_section_counts.csv`, copy
-`02_layouts.example.yaml` outside its example name, and replace every placeholder
-with explicit integer X/Y indices. Inline is fixed to the prepared volume's X axis
-and crossline is fixed to its Y axis; this is a benchmark contract, not a layout
-setting. The fixed sparse validation planes are shared by all 30 jobs and are
-used only for checkpoint selection. A training line may not reuse a validation
-line number in the same orientation. For each of small, medium, and large, all
-five layouts must select different training-section sets; line order does not
-make a set distinct.
+## Phase order
 
-All downstream training, validation, and test computation uses float32 with
-automatic mixed precision disabled. Decoder parameters, input tiles, forward,
-backward, and loss computation are fixed to FP32. Jobs start fresh under this
-contract and do not resume incompatible checkpoints.
+1. Prepare and inspect Channel labels with
+   [the preparation config](01_prepare_channel_labels.yaml), then review the
+   concrete layout definition. Layout review is a human prerequisite because
+   the repository does not choose geological sections.
+2. Create the architecture-matched random source, then extract pretrained and
+   random embeddings from their explicit YAML configurations.
+3. Dry-run the paired decoder matrix and confirm that both sources resolve to
+   the same supervision and decoder identity.
+4. Run the frozen-decoder jobs and aggregate only after every configured pair
+   is complete.
 
-The configured sections define candidate teacher regions; training does not use
-every voxel on those sections. The layout YAML must explicitly define positive,
-strictly increasing `small`, `medium`, and `large` target train-voxel counts and
-the `stable_hash_partial_section_token_footprints_v1` semantics. For each size,
-valid partial-section footprints are added in stable SHA-256 token order until
-the actual train-voxel count is nearest to its target. Only candidate voxels on
-the active sections are supervised inside a selected token. The selections are
-nested from small through medium to large, and frozen and end-to-end jobs use
-the identical selection for the same layout and size. Review section statistics,
-set the three targets in the external layout config, and dry-run every layout to
-confirm feasibility within the configured relative error.
-
-Test supervision is also common to every layout and data size, but it is a
-voxel-level complement, not a set of test sections. It contains valid-label,
-valid-token voxels that belong to neither a validation plane nor any inline or
-crossline in the union of all five layouts' large training candidates. Thus,
-even for small and medium jobs, unused medium/large candidates and candidates
-from other layouts remain excluded from test. Test is not the union of the
-remaining inline and crossline planes. It is evaluated once from `best.pt`.
-
-```bash
-EXP=experiments/parihaka/facies_benchmark_v1/30_channel_benchmark_v1
-
-PYTHONPATH=src python proc/seis_ssl_cluster/prepare_parihaka_channel_labels.py \
-  --config "$EXP/01_prepare_channel_labels.yaml" --dry-run
-PYTHONPATH=src python proc/seis_ssl_cluster/prepare_parihaka_channel_labels.py \
-  --config "$EXP/01_prepare_channel_labels.yaml"
-PYTHONPATH=src python proc/seis_ssl_cluster/inspect_parihaka_channel_sections.py \
-  --config "$EXP/01_prepare_channel_labels.yaml"
-```
-
-Create the random checkpoint with the existing generic entrypoint, then run the
-two extraction configs. They are identical except for checkpoint, model-tag path,
-and output directory.
-
-```bash
-PYTHONPATH=src python proc/seis_ssl_cluster/create_random_mae_checkpoint.py \
-  --config "$EXP/03_create_random_checkpoint.yaml"
-PYTHONPATH=src python proc/seis_ssl_cluster/extract_embeddings.py \
-  --config "$EXP/04_extract_pretrained_embeddings.yaml"
-PYTHONPATH=src python proc/seis_ssl_cluster/extract_embeddings.py \
-  --config "$EXP/05_extract_random_embeddings.yaml"
-```
-
-Run one read-only preflight, then the simple 30-job loop. Set `LAYOUT_CONFIG` to
-the reviewed, concrete YAML rather than the example file.
-
-```bash
-LAYOUT_CONFIG=/absolute/path/to/parihaka_channel_layouts.yaml
-PYTHONPATH=src python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
-  --config "$EXP/06_channel_benchmark.yaml" --model pretrained \
-  --layout layout_000 --size small --layout-config "$LAYOUT_CONFIG" --dry-run
-
-for model in pretrained random; do
-  for layout in layout_000 layout_001 layout_002 layout_003 layout_004; do
-    for size in small medium large; do
-      PYTHONPATH=src python proc/seis_ssl_cluster/run_parihaka_channel_decoder.py \
-        --config "$EXP/06_channel_benchmark.yaml" --model "$model" \
-        --layout "$layout" --size "$size" --layout-config "$LAYOUT_CONFIG"
-    done
-  done
-done
-
-PYTHONPATH=src python proc/seis_ssl_cluster/summarize_parihaka_channel_benchmark.py \
-  --config "$EXP/06_channel_benchmark.yaml"
-```
-
-An interrupted job resumes only from its own `latest.pt` using `--resume PATH`.
-Resume also requires the embedding/checkpoint metadata, label path, decoder and
-training settings, fixed 8x8x8-core/1x1x1-halo tile settings, split class counts,
-tile counts, target/actual counts, and selected-token identity to match the
-interrupted run exactly.
-`best.pt` is selected by validation Channel IoU. Test is evaluated once after
-training from `best.pt`; no probability volume is written. The summary requires
-all 30 `metrics.json` files and reports paired test Channel-IoU deltas only.
-Each metrics file carries the same benchmark identity used for resume, including
-the seeded decoder-initial-state SHA-256 and the validated model-source role.
-Preflight hashes the checkpoint files referenced by embedding metadata, requires
-the pretrained source to be the benchmark's Parihaka `full_100ep/latest.pt`, and
-requires the random source to carry the seed-42 `random_init` metadata referencing
-that pretrained checkpoint and expected model tag. Before aggregation, the summary
-requires common label, embedding metadata, geometry, decoder, training, and tile
-identity across all jobs; one checkpoint and model-source identity within each
-model; distinct pretrained/random checkpoint SHA-256 values; valid model roles;
-and matching non-checkpoint identity, supervision, class weights, split counts,
-and tile counts within every pair.
-
-Validation and the common voxel-complement test retain their existing masks and
-are not target-calibrated. Existing v1 outputs produced with all selected-section
-voxels are incompatible with this contract; before rerunning, manually move or
-delete the existing output root. The code does not migrate or remove it.
+Outputs created under an older supervision contract are incompatible and must
+be isolated before a fresh run rather than silently resumed.

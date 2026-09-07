@@ -61,7 +61,6 @@ RUNBOOK_CLIS = (
 	'proc/seis_ssl_cluster/check_f3_prepared_volume_parity.py',
 	'proc/seis_ssl_cluster/extract_embeddings.py',
 	'proc/seis_ssl_cluster/cluster_embeddings.py',
-	'proc/seis_ssl_cluster/export_strat_hmm_pseudo_targets.py',
 	'proc/seis_ssl_cluster/train_strat_hmm_pretext.py',
 )
 
@@ -447,34 +446,39 @@ def test_configs_do_not_mix_unrequested_augmentations_or_sources() -> None:
 	).read_text(encoding='utf-8')
 
 
-def test_runbook_references_existing_clis_configs_and_gate() -> None:
+def test_runbook_references_existing_clis_configs_and_extension() -> None:
 	text = README.read_text(encoding='utf-8')
 	for cli in RUNBOOK_CLIS:
 		assert Path(cli).is_file()
 		assert cli in text
-	for path in sorted(ROOT.rglob('*')):
-		if path.suffix in {'.yaml', '.sh'}:
-			assert path.name in text
-	assert 'VICREG_BASELINE_GATE_PASS' in text
-	assert 'VICREG_BASELINE_GATE_FAIL' in text
-	assert '62,500' in text
-	assert '15,625' in text
-	assert 'local_vicreg_screen_v1/summary/summary.json' in text
-	assert 'facies_benchmark_v1' in text
-	assert 'facies_benchmark_v2' in text
+	roots = {
+		'VICREG_EXP': ROOT,
+		'VICREG_CONTROL': CONTROL_ROOT,
+		'VICREG_TARGET': TARGET_ROOT,
+		'VICREG_HMM': HMM_ROOT,
+	}
+	references = re.findall(
+		r'\$(VICREG_EXP|VICREG_CONTROL|VICREG_TARGET|VICREG_HMM)/'
+		r'([^"\s]+\.(?:yaml|sh))',
+		text,
+	)
+	assert references
+	for variable, relative in references:
+		assert (roots[variable] / relative).is_file(), (variable, relative)
+	links = re.findall(r'\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)', text)
+	assert links
+	for link in links:
+		assert (README.parent / link).resolve().is_file(), link
 
 
-def test_runbook_stage1_order_and_shell_blocks_are_valid(tmp_path: Path) -> None:
+def test_runbook_phase_order_and_shell_blocks_are_valid(tmp_path: Path) -> None:
 	text = README.read_text(encoding='utf-8')
 	headings = (
-		'### 1. Config tests',
-		'### 2. 1-step dry-run',
-		'### 3. 1-step live',
-		'### 4. Full 100 epoch dry-run',
-		'### 5. Full 100 epoch live',
-		'### 6. Checkpoint and prepared-volume audit',
-		'### 7. F3 v2 embedding dry-run',
-		'### 8. F3 v2 embedding live',
+		'## Stage 1',
+		'## Screening gate',
+		'## Control branch',
+		'## HMM branch',
+		'## 再開',
 	)
 	positions = [text.index(heading) for heading in headings]
 	assert positions == sorted(positions)
