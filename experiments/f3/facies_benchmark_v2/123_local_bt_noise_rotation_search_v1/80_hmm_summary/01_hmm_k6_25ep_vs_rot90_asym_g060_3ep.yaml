@@ -1,0 +1,25 @@
+benchmark:
+  canonical_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/110_lithology_mae_local_bt_five_way_v3/60_five_way.yaml
+inputs:
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_bt_noise_rotation_search_v1/runs
+models:
+  candidate:
+    id: local_bt_nr_rot90_asym_g060_3ep_hmm_k6_25ep
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/local_bt_noise_rotation_search_v1/rot90_asym_g060_3ep/hmm/k6/full_25ep/latest.pt
+    embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_bt_noise_rotation_search_v1/local_bt_nr_rot90_asym_g060_3ep_hmm_k6_25ep/overlap_x64
+    expected:
+      base_training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/10_pretraining/rot90_asym_g060_3ep.yaml
+      stratigraphy_training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/50_hmm_pretraining/rot90_asym_g060_3ep/hmm/k6/02_full_25ep.yaml
+      epoch: 25
+      global_step: 15625
+  control:
+    id: local_bt_nr_rot90_asym_g060_3ep
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/local_bt_noise_rotation_search_v1/rot90_asym_g060/full_3ep/latest.pt
+    embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_bt_noise_rotation_search_v1/local_bt_nr_rot90_asym_g060_3ep/overlap_x64
+    expected:
+      base_training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/10_pretraining/rot90_asym_g060_3ep.yaml
+      stratigraphy_training_config: null
+      epoch: 3
+      global_step: 1875
+outputs:
+  summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_bt_noise_rotation_search_v1/paired_summary/local_bt_nr_rot90_asym_g060_3ep_hmm_k6_25ep_vs_local_bt_nr_rot90_asym_g060_3ep

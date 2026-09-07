@@ -92,7 +92,7 @@ CANDIDATE_CONFIG_SUITES = {
 	),
 	'123_local_bt_noise_rotation_search_v1': (
 		'test_f3_local_bt_noise_rotation_search_configs.py',
-		138,
+		145,
 	),
 }
 README = FIVE_WAY_ROOT / 'README.md'
