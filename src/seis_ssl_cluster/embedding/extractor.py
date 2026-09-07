@@ -1822,6 +1822,25 @@ def _validate_checkpoint_target_normalization(loss: Mapping[str, object]) -> Non
 		raise ValueError(msg)
 
 
+def _local_barlow_twins_objective(
+	barlow_twins: Mapping[str, object],
+) -> dict[str, object]:
+	objective: dict[str, object] = {
+		'local_pairs_per_crop': _positive_int(
+			barlow_twins.get('local_pairs_per_crop'),
+			'barlow_twins.local_pairs_per_crop',
+		),
+	}
+	if 'positive_window_tokens' in barlow_twins:
+		objective['positive_window_tokens'] = list(
+			_validate_positive_xyz(
+				barlow_twins['positive_window_tokens'],
+				'barlow_twins.positive_window_tokens',
+			)
+		)
+	return objective
+
+
 def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 	if config.get('stage') == STAGE_BARLOW_TWINS_TRAINING:
 		barlow_twins = _required_mapping(config, 'barlow_twins')
@@ -1842,10 +1861,7 @@ def _pretraining_objective(config: Mapping[str, object]) -> dict[str, object]:
 			),
 		}
 		if method == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
-			objective['local_pairs_per_crop'] = _positive_int(
-				barlow_twins.get('local_pairs_per_crop'),
-				'barlow_twins.local_pairs_per_crop',
-			)
+			objective.update(_local_barlow_twins_objective(barlow_twins))
 		augmentations = config.get('augmentations')
 		if isinstance(augmentations, Mapping) and 'policy' in augmentations:
 			objective['augmentations'] = {

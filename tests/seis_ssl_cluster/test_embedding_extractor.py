@@ -232,6 +232,7 @@ def test_local_barlow_checkpoint_extracts_encoder_dim_and_objective_metadata(
 
 	assert embeddings.shape[-1] == loaded.encoder_dim == 12
 	assert metadata['pretraining_method'] == LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
+	assert 'positive_window_tokens' not in metadata['pretraining_objective']
 	assert metadata['pretraining_objective'] == {
 		'method': LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 		'projector_dim': 8,
@@ -242,6 +243,59 @@ def test_local_barlow_checkpoint_extracts_encoder_dim_and_objective_metadata(
 	for key, expected in payload['model_state_dict'].items():
 		assert torch.equal(loaded.state_dict()[key], expected)
 	assert set(payload['projector_state_dict']).isdisjoint(loaded.state_dict())
+
+
+def test_local_barlow_checkpoint_records_positive_window_objective_metadata(
+	tmp_path: Path,
+) -> None:
+	config = _write_fixture(tmp_path)
+	_make_fixture_checkpoint_barlow(
+		config,
+		method=LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		local_crop_size=(16, 16, 16),
+		positive_window_tokens=(2, 2, 1),
+	)
+
+	result = run_embedding_extraction(config, device='cpu')[0]
+	metadata = json.loads(result.metadata_path.read_text(encoding='utf-8'))
+
+	assert metadata['pretraining_objective'] == {
+		'method': LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+		'projector_dim': 8,
+		'redundancy_weight': 0.005,
+		'normalization_eps': 1.0e-4,
+		'local_pairs_per_crop': 128,
+		'positive_window_tokens': [2, 2, 1],
+	}
+
+
+@pytest.mark.parametrize(
+	('positive_window_tokens', 'error_type', 'message'),
+	[
+		([2, 2], TypeError, 'must be a length-3 integer sequence'),
+		([2, True, 1], TypeError, 'must be a length-3 integer sequence'),
+		([2, 0, 1], ValueError, 'values must be positive'),
+	],
+)
+def test_local_barlow_objective_rejects_invalid_positive_window_tokens(
+	positive_window_tokens: object,
+	error_type: type[Exception],
+	message: str,
+) -> None:
+	config: dict[str, object] = {
+		'stage': 'barlow_twins_training',
+		'barlow_twins': {
+			'method': LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+			'projector_dim': 8,
+			'redundancy_weight': 0.005,
+			'normalization_eps': 1.0e-4,
+			'local_pairs_per_crop': 128,
+			'positive_window_tokens': positive_window_tokens,
+		},
+	}
+
+	with pytest.raises(error_type, match=message):
+		extractor_module._pretraining_objective(config)  # noqa: SLF001
 
 
 def test_overlapping_subcrop_checkpoint_extracts_bare_encoder_and_metadata(
@@ -1890,6 +1944,7 @@ def _make_fixture_checkpoint_barlow(  # noqa: PLR0913
 	augmentations: dict[str, object] | None = None,
 	local_crop_size: tuple[int, int, int] | None = None,
 	projector_dim: int = 8,
+	positive_window_tokens: tuple[int, int, int] | None = None,
 ) -> None:
 	embeddings = config['embeddings']
 	assert isinstance(embeddings, dict)
@@ -1913,6 +1968,8 @@ def _make_fixture_checkpoint_barlow(  # noqa: PLR0913
 		barlow_twins['local_pairs_per_crop'] = 128
 		if local_crop_size is None:
 			resolved_local_crop_size = [8, 8, 16]
+		if positive_window_tokens is not None:
+			barlow_twins['positive_window_tokens'] = list(positive_window_tokens)
 	raw_barlow_config: dict[str, object] = {
 		'paths': {
 			'artifact_root': str(checkpoint_path.parent / 'artifacts'),
