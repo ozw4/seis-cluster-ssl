@@ -39,7 +39,7 @@ RUN --mount=type=cache,target=/var/lib/apt,sharing=locked \
     && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
     && mkdir -p -m 755 /etc/apt/sources.list.d \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/github-cli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get update \
     && apt-get install -y --no-install-recommends nodejs gh \
@@ -48,8 +48,7 @@ RUN --mount=type=cache,target=/var/lib/apt,sharing=locked \
 
 RUN fc-cache -fv
 
-# Codex CLI
-RUN npm i -g @openai/codex
+RUN npm i -g @openai/codex @anthropic-ai/claude-code
 
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     pip install torchaudio==2.7.0
