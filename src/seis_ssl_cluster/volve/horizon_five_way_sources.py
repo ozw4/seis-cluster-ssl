@@ -163,44 +163,107 @@ def plan_volve_horizon_five_way_embeddings(
 	return tuple(rows)
 
 
+def normalize_volve_horizon_five_way_model_ids(
+	config: VolveHorizonFiveWayConfig,
+	model_ids: Sequence[str] | None,
+) -> tuple[str, ...]:
+	'''Resolve a non-empty, unique model selection in caller-supplied order.'''
+	if model_ids is None:
+		return config.model_ids
+	if isinstance(model_ids, str | bytes):
+		raise TypeError('five-way model selection must be a sequence of model IDs')
+	selected = tuple(model_ids)
+	if not selected:
+		raise ValueError('five-way model selection must be non-empty and unique')
+	if any(not isinstance(model_id, str) for model_id in selected):
+		raise TypeError('five-way model IDs must be strings')
+	if len(selected) != len(set(selected)):
+		raise ValueError('five-way model selection must be non-empty and unique')
+	for model_id in selected:
+		config.model_by_id(model_id)
+	return selected
+
+
 def audit_volve_horizon_five_way_sources(
 	config: VolveHorizonFiveWayConfig,
+	*,
+	model_ids: Sequence[str] | None = None,
 ) -> dict[str, object]:
-	'''Audit the five checkpoint identities and their bounded ancestry.'''
-	sources: list[dict[str, object]] = []
-	for model in config.models:
-		if model.model_id == 'random':
-			if not sources:
-				raise RuntimeError(
-					'random source must follow the learned model sources'
-				)
-			mae_parent = _parent_identity(sources[0])
-			source = _audit_random_checkpoint(model, mae_parent=mae_parent)
-		else:
-			source = _audit_learned_checkpoint(
-				model,
-				survey_id=config.survey_id,
-			)
-		sources.append(source)
+	'''Audit selected checkpoint identities and their bounded ancestry.'''
+	selected_ids = normalize_volve_horizon_five_way_model_ids(config, model_ids)
+	reports: dict[str, dict[str, object]] = {}
+	for model_id in selected_ids:
+		if model_id == 'random':
+			continue
+		model = config.model_by_id(model_id)
+		reports[model_id] = _audit_learned_checkpoint(
+			model,
+			survey_id=config.survey_id,
+		)
+	if 'random' in selected_ids:
+		mae_report_id = next(
+			(
+				model_id
+				for model_id in ('mae', 'mae_hmm_k6')
+				if model_id in reports
+			),
+			None,
+		)
+		mae_parent = (
+			_parent_identity(reports[mae_report_id])
+			if mae_report_id is not None
+			else None
+		)
+		reports['random'] = _audit_random_checkpoint(
+			config.model_by_id('random'),
+			mae_parent=mae_parent,
+		)
 
-	mae_parent = _parent_identity(sources[0])
-	mae_hmm_parent = _parent_identity(sources[1])
-	local_parent = _parent_identity(sources[2])
-	local_hmm_parent = _parent_identity(sources[3])
-	if mae_parent != mae_hmm_parent:
+	if {'mae', 'mae_hmm_k6'} <= reports.keys() and _parent_identity(
+		reports['mae']
+	) != _parent_identity(reports['mae_hmm_k6']):
 		raise ValueError('mae_hmm_k6 must use the same stage-1 parent as mae')
-	if local_parent != local_hmm_parent:
+	if {
+		'local_barlow_twins',
+		'local_barlow_twins_hmm_k6',
+	} <= reports.keys() and _parent_identity(
+		reports['local_barlow_twins']
+	) != _parent_identity(reports['local_barlow_twins_hmm_k6']):
 		raise ValueError(
 			'local_barlow_twins_hmm_k6 must use the same stage-1 parent as '
 			'local_barlow_twins'
 		)
-	if mae_parent == local_parent:
+	mae_report_id = next(
+		(
+			model_id
+			for model_id in ('mae', 'mae_hmm_k6', 'random')
+			if model_id in reports
+		),
+		None,
+	)
+	local_report_id = next(
+		(
+			model_id
+			for model_id in (
+				'local_barlow_twins',
+				'local_barlow_twins_hmm_k6',
+			)
+			if model_id in reports
+		),
+		None,
+	)
+	if (
+		mae_report_id is not None
+		and local_report_id is not None
+		and _parent_identity(reports[mae_report_id])
+		== _parent_identity(reports[local_report_id])
+	):
 		raise ValueError('MAE and Local Barlow Twins must use distinct stage-1 sources')
 	return {
 		'schema_version': 1,
 		'survey_id': config.survey_id,
-		'model_order': list(config.model_ids),
-		'sources': sources,
+		'model_order': list(selected_ids),
+		'sources': [reports[model_id] for model_id in selected_ids],
 	}
 
 
@@ -208,14 +271,20 @@ def inspect_volve_horizon_five_way_embedding_suite(  # noqa: PLR0915
 	config: VolveHorizonFiveWayConfig,
 	*,
 	source_audit: Mapping[str, object] | None = None,
+	model_ids: Sequence[str] | None = None,
 ) -> VolveHorizonFiveWayEmbeddingSuite:
-	'''Inspect five memory-mapped embedding artifacts on identical support.'''
+	'''Inspect selected memory-mapped embedding artifacts on identical support.'''
+	selected_ids = normalize_volve_horizon_five_way_model_ids(config, model_ids)
 	audit = (
-		audit_volve_horizon_five_way_sources(config)
+		audit_volve_horizon_five_way_sources(config, model_ids=selected_ids)
 		if source_audit is None
 		else source_audit
 	)
-	checkpoint_reports = _checkpoint_reports_from_audit(config, audit)
+	checkpoint_reports = _checkpoint_reports_from_audit(
+		config,
+		audit,
+		model_ids=selected_ids,
+	)
 	reference_metadata: Mapping[str, object] | None = None
 	reference_paths: EmbeddingOutputPaths | None = None
 	reference_valid: np.ndarray | None = None
@@ -226,7 +295,8 @@ def inspect_volve_horizon_five_way_embedding_suite(  # noqa: PLR0915
 	embedding_shape: tuple[int, int, int, int] | None = None
 	embedding_dim: int | None = None
 
-	for model in config.models:
+	for model_id in selected_ids:
+		model = config.model_by_id(model_id)
 		paths = output_paths(model.embeddings_dir, config.survey_id)
 		for path in (paths.embeddings, paths.valid_tokens, paths.metadata):
 			if not path.is_file():
@@ -307,7 +377,7 @@ def inspect_volve_horizon_five_way_embedding_suite(  # noqa: PLR0915
 		or embedding_shape is None
 		or embedding_dim is None
 	):
-		raise RuntimeError('the five-way embedding suite is empty')
+		raise RuntimeError('the selected five-way embedding suite is empty')
 	_validate_grid_geometry(volume_shape, token_grid)
 	canonical_identity = _inspect_canonical_identity(
 		config,
@@ -402,7 +472,7 @@ def _audit_learned_checkpoint(
 def _audit_random_checkpoint(  # noqa: C901
 	model: VolveHorizonFiveWayModelSource,
 	*,
-	mae_parent: tuple[Path, str],
+	mae_parent: tuple[Path, str] | None,
 ) -> dict[str, object]:
 	checkpoint_sha = _checkpoint_sha256(model.model_id, model.checkpoint)
 	payload = _load_checkpoint(model.model_id, model.checkpoint)
@@ -436,16 +506,26 @@ def _audit_random_checkpoint(  # noqa: C901
 			raise ValueError(f'random checkpoint must not contain {forbidden}')
 	config = _required_mapping(payload, 'config', 'random checkpoint')
 	_validate_encoder_geometry('random', config)
+	reference = _lineage_path(
+		'random',
+		metadata.get('reference_checkpoint'),
+		'metadata.reference_checkpoint',
+	)
+	if mae_parent is None:
+		mae_parent = (
+			reference,
+			_validate_stage1_parent(
+				'random MAE reference',
+				reference,
+				expected_objective=MAE_OBJECTIVE,
+			),
+		)
 	mae_parent_path, mae_parent_sha = mae_parent
 	mae_payload = _load_checkpoint('mae stage-1 parent', mae_parent_path)
 	mae_config = _required_mapping(mae_payload, 'config', 'mae stage-1 parent')
 	if _model_geometry(config) != _model_geometry(mae_config):
 		raise ValueError('random checkpoint encoder geometry differs from MAE stage 1')
-	reference = _required_string(
-		metadata.get('reference_checkpoint'),
-		'random checkpoint metadata.reference_checkpoint',
-	)
-	if Path(reference).resolve(strict=False) != mae_parent_path.resolve(strict=False):
+	if reference.resolve(strict=False) != mae_parent_path.resolve(strict=False):
 		raise ValueError('random checkpoint must reference the MAE stage-1 source')
 	recorded_sha = metadata.get('reference_checkpoint_sha256')
 	if recorded_sha is not None and recorded_sha != mae_parent_sha:
@@ -1395,10 +1475,12 @@ def _parent_identity(source: Mapping[str, object]) -> tuple[Path, str]:
 def _checkpoint_reports_from_audit(
 	config: VolveHorizonFiveWayConfig,
 	report: Mapping[str, object],
+	*,
+	model_ids: tuple[str, ...],
 ) -> dict[str, Mapping[str, object]]:
 	if report.get('survey_id') != config.survey_id:
 		raise ValueError('five-way source report survey_id differs from config')
-	if report.get('model_order') != list(config.model_ids):
+	if report.get('model_order') != list(model_ids):
 		raise ValueError('five-way source report model_order differs from config')
 	value = report.get('sources')
 	if not isinstance(value, list) or not all(
@@ -1406,10 +1488,11 @@ def _checkpoint_reports_from_audit(
 	):
 		raise TypeError('five-way source report sources must be a list of mappings')
 	sources = cast('list[Mapping[str, object]]', value)
-	if [source.get('model_id') for source in sources] != list(config.model_ids):
+	if [source.get('model_id') for source in sources] != list(model_ids):
 		raise ValueError('five-way source report sources differ from fixed model order')
 	reports: dict[str, Mapping[str, object]] = {}
-	for model, source in zip(config.models, sources, strict=True):
+	for model_id, source in zip(model_ids, sources, strict=True):
+		model = config.model_by_id(model_id)
 		checkpoint = _lineage_path(
 			model.model_id,
 			source.get('checkpoint'),
@@ -1533,6 +1616,7 @@ __all__ = [
 	'VolveHorizonFiveWayEmbeddingSuite',
 	'audit_volve_horizon_five_way_sources',
 	'inspect_volve_horizon_five_way_embedding_suite',
+	'normalize_volve_horizon_five_way_model_ids',
 	'plan_volve_horizon_five_way_embeddings',
 	'plan_volve_horizon_five_way_sources',
 ]

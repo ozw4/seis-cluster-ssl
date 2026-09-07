@@ -15,6 +15,7 @@ from seis_ssl_cluster.volve.horizon_runner import (
 	CHECKPOINT_SELECTION_IDS,
 	CHECKPOINT_SELECTION_VALIDATION_MAE,
 	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
 )
 
 if TYPE_CHECKING:
@@ -39,6 +40,7 @@ MAE_OBJECTIVE = 'amp_mae3d'
 RANDOM_OBJECTIVE = 'random_encoder'
 FIVE_WAY_BENCHMARK_ID = 'mae_local_bt_hmm_five_way_v1'
 FIVE_WAY_WITHIN2_BENCHMARK_ID = 'mae_local_bt_hmm_five_way_within2_v1'
+FIVE_WAY_WITHIN4_BENCHMARK_ID = 'mae_local_bt_hmm_five_way_within4_v1'
 
 EXPECTED_MODEL_IDENTITIES: Mapping[str, Mapping[str, object]] = {
 	'mae': {
@@ -82,7 +84,9 @@ _TOP_LEVEL_REQUIRED_KEYS = frozenset(
 		'train',
 	}
 )
-_TOP_LEVEL_KEYS = _TOP_LEVEL_REQUIRED_KEYS | frozenset({'checkpoint_selection'})
+_TOP_LEVEL_KEYS = _TOP_LEVEL_REQUIRED_KEYS | frozenset(
+	{'benchmark_id', 'checkpoint_selection', 'checkpoint_selections'}
+)
 
 
 @dataclass(frozen=True)
@@ -109,6 +113,7 @@ class VolveHorizonFiveWayConfig:
 	train: FrozenHorizonTrainSettings
 	tiles: HorizonTileSettings
 	checkpoint_selection: str
+	checkpoint_selections: tuple[str, ...]
 	benchmark_id: str
 
 	@property
@@ -187,6 +192,15 @@ def volve_horizon_five_way_config_from_mapping(
 	checkpoint_selection = _checkpoint_selection(
 		config.get('checkpoint_selection', CHECKPOINT_SELECTION_VALIDATION_MAE)
 	)
+	checkpoint_selections = _checkpoint_selections(
+		config.get('checkpoint_selections'),
+		primary=checkpoint_selection,
+	)
+	benchmark_id = (
+		_non_empty_string(config.get('benchmark_id'), 'benchmark_id')
+		if 'benchmark_id' in config
+		else _benchmark_id(checkpoint_selection)
+	)
 	return VolveHorizonFiveWayConfig(
 		artifact_root=artifact_root,
 		volve_root=volve_root,
@@ -202,11 +216,8 @@ def volve_horizon_five_way_config_from_mapping(
 		train=legacy_config.train,
 		tiles=legacy_config.tiles,
 		checkpoint_selection=checkpoint_selection,
-		benchmark_id=(
-			FIVE_WAY_WITHIN2_BENCHMARK_ID
-			if checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
-			else FIVE_WAY_BENCHMARK_ID
-		),
+		checkpoint_selections=checkpoint_selections,
+		benchmark_id=benchmark_id,
 	)
 
 
@@ -226,6 +237,39 @@ def _checkpoint_selection(value: object) -> str:
 	if value not in CHECKPOINT_SELECTION_IDS:
 		raise ValueError(f'unknown horizon checkpoint selection: {value!r}')
 	return value
+
+
+def _checkpoint_selections(
+	value: object,
+	*,
+	primary: str,
+) -> tuple[str, ...]:
+	if value is None:
+		return (primary,)
+	if not isinstance(value, list | tuple) or isinstance(value, str | bytes):
+		raise TypeError('checkpoint_selections must be a sequence of strings')
+	selections = tuple(_checkpoint_selection(item) for item in value)
+	if not selections:
+		raise ValueError('checkpoint_selections must not be empty')
+	if len(selections) != len(set(selections)):
+		raise ValueError('checkpoint_selections must be unique')
+	if primary not in selections:
+		raise ValueError(
+			'checkpoint_selections must include the primary checkpoint_selection'
+		)
+	return selections
+
+
+def _benchmark_id(checkpoint_selection: str) -> str:
+	if checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		return FIVE_WAY_BENCHMARK_ID
+	if checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		return FIVE_WAY_WITHIN2_BENCHMARK_ID
+	if checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_4:
+		return FIVE_WAY_WITHIN4_BENCHMARK_ID
+	raise ValueError(
+		f'unknown horizon checkpoint selection: {checkpoint_selection!r}'
+	)
 
 
 def _resolve_models(value: object) -> tuple[VolveHorizonFiveWayModelSource, ...]:
@@ -348,6 +392,7 @@ __all__ = [
 	'FIVE_WAY_STAGE2_EPOCHS',
 	'FIVE_WAY_UNFREEZE_TOP_BLOCKS',
 	'FIVE_WAY_WITHIN2_BENCHMARK_ID',
+	'FIVE_WAY_WITHIN4_BENCHMARK_ID',
 	'LOCAL_BARLOW_TWINS_METHOD',
 	'LOCAL_BARLOW_TWINS_PAIRS_PER_CROP',
 	'MAE_OBJECTIVE',

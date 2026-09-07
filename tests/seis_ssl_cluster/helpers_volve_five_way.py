@@ -39,6 +39,7 @@ from seis_ssl_cluster.volve.horizon_layouts import DATA_SIZE_PREFIX, LAYOUT_IDS
 from seis_ssl_cluster.volve.horizon_model import create_volve_horizon_decoder
 from seis_ssl_cluster.volve.horizon_runner import (
 	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
 )
 from tests.seis_ssl_cluster.helpers_volve import (
 	write_synthetic_frozen_horizon_data,
@@ -716,12 +717,11 @@ def write_completed_plan_metrics(plan: FrozenHorizonPlan) -> None:
 	primary = _plan_evaluation(plan.effective_per_horizon_counts['test_primary'])
 	secondary = _plan_evaluation(plan.effective_per_horizon_counts['test'])
 	selection = plan.checkpoint_selection
-	best_score_key = (
-		'macro_within_2_samples'
-		if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
-		else 'macro_mae_samples'
+	best_score = _validation_checkpoint_score(validation, selection)
+	validation_within_4 = _validation_checkpoint_score(
+		validation,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
 	)
-	best_score = float(validation[best_score_key])
 	best_path = plan.output_dir / 'best.pt'
 	torch.save(
 		{
@@ -768,6 +768,9 @@ def write_completed_plan_metrics(plan: FrozenHorizonPlan) -> None:
 				),
 				'validation_macro_within_2_samples': (
 					float(validation['macro_within_2_samples']) - 0.1 * (2 - epoch)
+				),
+				'validation_macro_within_4_samples': (
+					validation_within_4 - 0.1 * (2 - epoch)
 				),
 			}
 			for epoch in range(3)
@@ -981,10 +984,7 @@ def _write_best_and_metrics(
 	selection = str(objective['checkpoint_selection'])
 	validation = metrics['validation']
 	assert isinstance(validation, dict)
-	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
-		best_score = float(validation['macro_within_2_samples'])
-	else:
-		best_score = float(validation['macro_mae_samples'])
+	best_score = _validation_checkpoint_score(validation, selection)
 	metrics['checkpoint_selection'] = selection
 	metrics['best_validation_score'] = best_score
 	best_path = job_dir / 'best.pt'
@@ -1009,6 +1009,10 @@ def _write_best_and_metrics(
 		encoding='utf-8',
 	)
 	best_epoch = int(metrics['best_epoch'])
+	validation_within_4 = _validation_checkpoint_score(
+		validation,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
+	)
 	history = []
 	for epoch in range(best_epoch + 1):
 		distance = best_epoch - epoch
@@ -1021,11 +1025,27 @@ def _write_best_and_metrics(
 				'validation_macro_within_2_samples': (
 					float(validation['macro_within_2_samples']) - 0.1 * distance
 				),
+				'validation_macro_within_4_samples': (
+					validation_within_4 - 0.1 * distance
+				),
 			}
 		)
 	(job_dir / 'history.json').write_text(
 		json.dumps(history), encoding='utf-8'
 	)
+
+
+def _validation_checkpoint_score(
+	validation: dict[str, object],
+	selection: str,
+) -> float:
+	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		return float(validation['macro_within_2_samples'])
+	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_4:
+		macro = validation['macro']
+		assert isinstance(macro, dict)
+		return float(macro['within_4'])
+	return float(validation['macro_mae_samples'])
 
 
 def _plan_evaluation(counts: tuple[int, ...]) -> dict[str, object]:

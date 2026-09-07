@@ -20,6 +20,7 @@ EXPERIMENT_ROOT = (
 )
 MAIN_CONFIG = EXPERIMENT_ROOT / '50_five_way.yaml'
 WITHIN2_CONFIG = EXPERIMENT_ROOT / '51_five_way_within2.yaml'
+WITHIN4_CONFIG = EXPERIMENT_ROOT / '52_five_way_within4.yaml'
 LAUNCHER = EXPERIMENT_ROOT / 'run_five_way.sh'
 README = EXPERIMENT_ROOT / 'README.md'
 LEGACY_CONFIG = (
@@ -149,6 +150,46 @@ def test_within2_first_phase_dry_run_plans_exactly_45_new_root_cells(
 		'random',
 	}
 	assert all('mae_local_bt_hmm_five_way_within2_v1/runs' in line for line in lines)
+	assert 'no artifact preflight or files written' in completed.stdout
+	assert not (tmp_path / 'artifacts').exists()
+
+
+def test_within4_first_phase_dry_run_plans_exactly_45_new_root_cells(
+	tmp_path: Path,
+) -> None:
+	environment = os.environ.copy()
+	environment['SEIS_SSL_CLUSTER_ARTIFACT_ROOT'] = str(tmp_path / 'artifacts')
+	environment['SEIS_SSL_CLUSTER_VOLVE_ROOT'] = str(tmp_path / 'volve')
+	completed = subprocess.run(  # noqa: S603
+		[
+			sys.executable,
+			'proc/seis_ssl_cluster/run_volve_horizon_five_way_suite.py',
+			'--config',
+			str(WITHIN4_CONFIG),
+			'--models',
+			'mae',
+			'mae_hmm_k6',
+			'random',
+			'--device',
+			'cuda',
+			'--dry-run',
+		],
+		cwd=REPOSITORY_ROOT,
+		env=environment,
+		check=True,
+		capture_output=True,
+		text=True,
+	)
+	lines = [
+		line for line in completed.stdout.splitlines() if line.startswith('model=')
+	]
+	assert len(lines) == 45
+	assert {str(_option(line, 'model')) for line in lines} == {
+		'mae',
+		'mae_hmm_k6',
+		'random',
+	}
+	assert all('mae_local_bt_hmm_five_way_within4_v1/runs' in line for line in lines)
 	assert 'no artifact preflight or files written' in completed.stdout
 	assert not (tmp_path / 'artifacts').exists()
 

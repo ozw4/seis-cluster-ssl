@@ -17,6 +17,7 @@ from seis_ssl_cluster.volve.horizon_five_way_config import (
 	FIVE_WAY_STAGE2_EPOCHS,
 	FIVE_WAY_UNFREEZE_TOP_BLOCKS,
 	FIVE_WAY_WITHIN2_BENCHMARK_ID,
+	FIVE_WAY_WITHIN4_BENCHMARK_ID,
 	LOCAL_BARLOW_TWINS_METHOD,
 	LOCAL_BARLOW_TWINS_PAIRS_PER_CROP,
 	volve_horizon_five_way_config_from_mapping,
@@ -28,6 +29,7 @@ from seis_ssl_cluster.volve.horizon_frozen import (
 from seis_ssl_cluster.volve.horizon_runner import (
 	CHECKPOINT_SELECTION_VALIDATION_MAE,
 	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -36,6 +38,7 @@ EXPERIMENT_ROOT = (
 	/ 'experiments/volve/horizon_benchmark_v1'
 	/ '31_mae_local_bt_hmm_five_way_v1'
 )
+DISTILL010_ROOT = EXPERIMENT_ROOT / '60_distill010'
 
 
 def test_resolves_exact_mapping_in_code_order(tmp_path: Path) -> None:
@@ -57,7 +60,51 @@ def test_resolves_exact_mapping_in_code_order(tmp_path: Path) -> None:
 	assert FIVE_WAY_STAGE2_EPOCHS == 25
 	assert FIVE_WAY_UNFREEZE_TOP_BLOCKS == 1
 	assert config.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_MAE
+	assert config.checkpoint_selections == (CHECKPOINT_SELECTION_VALIDATION_MAE,)
 	assert config.benchmark_id == FIVE_WAY_BENCHMARK_ID
+
+
+def test_resolves_explicit_bundled_selections_and_benchmark_id(
+	tmp_path: Path,
+) -> None:
+	raw = _config(tmp_path)
+	raw['checkpoint_selections'] = [
+		CHECKPOINT_SELECTION_VALIDATION_MAE,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
+	]
+	raw['benchmark_id'] = 'mae_local_bt_hmm_distill010_v1'
+
+	config = volve_horizon_five_way_config_from_mapping(raw)
+
+	assert config.checkpoint_selections == tuple(raw['checkpoint_selections'])
+	assert config.benchmark_id == 'mae_local_bt_hmm_distill010_v1'
+
+
+@pytest.mark.parametrize(
+	('checkpoint_selections', 'message'),
+	[
+		([], 'must not be empty'),
+		([CHECKPOINT_SELECTION_VALIDATION_WITHIN_2], 'must include the primary'),
+		(
+			[
+				CHECKPOINT_SELECTION_VALIDATION_MAE,
+				CHECKPOINT_SELECTION_VALIDATION_MAE,
+			],
+			'must be unique',
+		),
+	],
+)
+def test_rejects_invalid_bundled_checkpoint_selections(
+	tmp_path: Path,
+	checkpoint_selections: list[str],
+	message: str,
+) -> None:
+	raw = _config(tmp_path)
+	raw['checkpoint_selections'] = checkpoint_selections
+
+	with pytest.raises(ValueError, match=message):
+		volve_horizon_five_way_config_from_mapping(raw)
 
 
 def test_repository_configs_resolve_distinct_selection_and_output_identity(
@@ -76,13 +123,68 @@ def test_repository_configs_resolve_distinct_selection_and_output_identity(
 	within2 = volve_horizon_five_way_config_from_mapping(
 		load_config(EXPERIMENT_ROOT / '51_five_way_within2.yaml')
 	)
+	within4 = volve_horizon_five_way_config_from_mapping(
+		load_config(EXPERIMENT_ROOT / '52_five_way_within4.yaml')
+	)
 
 	assert mae.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_MAE
 	assert within2.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
+	assert within4.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_4
 	assert mae.benchmark_id == FIVE_WAY_BENCHMARK_ID
 	assert within2.benchmark_id == FIVE_WAY_WITHIN2_BENCHMARK_ID
-	assert mae.runs_root != within2.runs_root
-	assert mae.summary_root != within2.summary_root
+	assert within4.benchmark_id == FIVE_WAY_WITHIN4_BENCHMARK_ID
+	assert len({mae.runs_root, within2.runs_root, within4.runs_root}) == 3
+	assert len({mae.summary_root, within2.summary_root, within4.summary_root}) == 3
+	assert 'mae_local_bt_hmm_five_way_within4_v1/runs' in str(
+		within4.runs_root
+	)
+	assert 'mae_local_bt_hmm_five_way_within4_v1/summary' in str(
+		within4.summary_root
+	)
+
+
+def test_distill010_configs_bind_weight_and_shared_checkpoint_bundle(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	artifact_root = (tmp_path / 'artifacts').resolve()
+	monkeypatch.setenv('SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str(artifact_root))
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_VOLVE_ROOT', str((tmp_path / 'volve').resolve())
+	)
+	for name in (
+		'30_stage2/mae100_hmm_k6_25ep.yaml',
+		'30_stage2/local_bt100_hmm_k6_25ep.yaml',
+	):
+		stage2 = load_config(DISTILL010_ROOT / name)
+		assert stage2['loss']['distillation_weight'] == 0.1
+		assert stage2['train']['epochs'] == 25
+		assert stage2['train']['samples_per_epoch'] == 10_000
+		assert 'mae_local_bt_hmm_five_way_distill010_v1' in stage2['paths'][
+			'output_root'
+		]
+
+	configs = [
+		volve_horizon_five_way_config_from_mapping(
+			load_config(DISTILL010_ROOT / name)
+		)
+		for name in (
+			'50_five_way_macro_mae.yaml',
+			'51_five_way_within2.yaml',
+			'52_five_way_within4.yaml',
+		)
+	]
+	assert {config.benchmark_id for config in configs} == {
+		'mae_local_bt_hmm_five_way_distill010_v1'
+	}
+	assert len({config.runs_root for config in configs}) == 1
+	assert len({config.summary_root for config in configs}) == 3
+	assert all(len(config.checkpoint_selections) == 3 for config in configs)
+	assert [config.checkpoint_selection for config in configs] == [
+		CHECKPOINT_SELECTION_VALIDATION_MAE,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
+	]
 
 
 def test_rejects_unknown_checkpoint_selection(tmp_path: Path) -> None:

@@ -12,6 +12,7 @@ from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.volve.horizon_five_way_config import (
 	FIVE_WAY_MODEL_IDS,
 	FIVE_WAY_WITHIN2_BENCHMARK_ID,
+	FIVE_WAY_WITHIN4_BENCHMARK_ID,
 	VolveHorizonFiveWayConfig,
 	volve_horizon_five_way_config_from_mapping,
 )
@@ -22,6 +23,7 @@ from seis_ssl_cluster.volve.horizon_five_way_runner import (
 	inspect_volve_horizon_five_way_job,
 	plan_volve_horizon_five_way_jobs,
 	resolve_volve_horizon_five_way_job,
+	run_volve_horizon_five_way_suite,
 )
 from seis_ssl_cluster.volve.horizon_five_way_sources import (
 	audit_volve_horizon_five_way_sources,
@@ -34,6 +36,7 @@ from seis_ssl_cluster.volve.horizon_frozen import (
 )
 from seis_ssl_cluster.volve.horizon_runner import (
 	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
 )
 from tests.seis_ssl_cluster.helpers_volve_five_way import (
 	write_completed_plan_metrics,
@@ -81,6 +84,92 @@ def test_within2_plan_records_selection_in_scientific_identity(
 		'checkpoint_selection': CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
 		'metrics_schema_version': 1,
 	}
+
+
+def test_within4_plan_records_selection_in_scientific_identity(
+	tmp_path: Path,
+) -> None:
+	universe = write_five_way_universe(
+		tmp_path,
+		embeddings=True,
+		checkpoint_selection=CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
+	)
+	config = universe['config']
+	assert isinstance(config, VolveHorizonFiveWayConfig)
+	data, layout_path = write_five_way_horizon_fixture(tmp_path, config)
+	source_audit = audit_volve_horizon_five_way_sources(config)
+	suite = inspect_volve_horizon_five_way_embedding_suite(
+		config, source_audit=source_audit
+	)
+	plan = inspect_volve_horizon_five_way_job(
+		resolve_volve_horizon_five_way_job(
+			config,
+			model='mae_hmm_k6',
+			layout='layout_000',
+			size='small',
+		),
+		layout_config=layout_path,
+		data=data,
+		embedding_suite=suite,
+	)
+
+	assert plan.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_4
+	assert plan.run_identity['benchmark'] == FIVE_WAY_WITHIN4_BENCHMARK_ID
+	assert plan.run_identity['objective'] == {
+		'loss': 'fractional_two_bin_per_tile_horizon_macro_v1',
+		'prediction': 'masked_soft_argmax_v1',
+		'checkpoint_selection': CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
+		'metrics_schema_version': 1,
+	}
+
+
+def test_three_model_subset_does_not_open_local_bt_sources(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	selected_model_ids = ('mae', 'mae_hmm_k6', 'random')
+	universe = write_five_way_universe(tmp_path, embeddings=True)
+	config = universe['config']
+	assert isinstance(config, VolveHorizonFiveWayConfig)
+
+	for model_id in ('local_barlow_twins', 'local_barlow_twins_hmm_k6'):
+		model = config.model_by_id(model_id)
+		model.checkpoint.unlink()
+		for path in model.embeddings_dir.iterdir():
+			path.unlink()
+
+	conditions = plan_volve_horizon_five_way_jobs(
+		config,
+		model_ids=selected_model_ids,
+	)
+	for model_id, layout_id, data_size in conditions:
+		job = resolve_volve_horizon_five_way_job(
+			config,
+			model=model_id,
+			layout=layout_id,
+			size=data_size,
+		)
+		job.output_dir.mkdir(parents=True)
+		job.metrics_path.write_text('{}', encoding='utf-8')
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'load_volve_horizon_data',
+		lambda _root: object(),
+	)
+	results = run_volve_horizon_five_way_suite(
+		config,
+		layout_config=tmp_path / 'unused-layouts.yaml',
+		continue_existing=True,
+		model_ids=selected_model_ids,
+	)
+
+	assert len(conditions) == len(results) == 45
+	assert tuple(
+		(result.job.model.model_id, result.job.layout_id, result.job.data_size)
+		for result in results
+	) == conditions
+	assert {result.action for result in results} == {'skip'}
 
 
 def test_synthetic_five_way_contract_connects_preflight_plans_and_results(

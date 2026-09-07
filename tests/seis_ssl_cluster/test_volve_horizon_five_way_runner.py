@@ -13,6 +13,7 @@ from seis_ssl_cluster.volve.horizon_five_way_config import (
 )
 from seis_ssl_cluster.volve.horizon_five_way_runner import (
 	FIVE_WAY_CONDITION_COUNT,
+	inspect_volve_horizon_five_way_job,
 	plan_volve_horizon_five_way_jobs,
 	resolve_volve_horizon_five_way_job,
 	run_volve_horizon_five_way_job,
@@ -175,6 +176,116 @@ def test_run_accepts_exact_cell_resume_and_delegates(
 	assert captured == {'device': 'cpu', 'max_steps': 1, 'resume': resume}
 
 
+def test_one_job_implicit_preflight_audits_only_selected_model(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = volve_horizon_five_way_config_from_mapping(_config_mapping(tmp_path))
+	job = resolve_volve_horizon_five_way_job(
+		config,
+		model='mae_hmm_k6',
+		layout='layout_000',
+		size='small',
+	)
+	expected_source_audit = object()
+	calls: list[tuple[str, tuple[str, ...]]] = []
+
+	def fake_audit(_config, *, model_ids):
+		calls.append(('audit', model_ids))
+		return expected_source_audit
+
+	def fake_suite(_config, *, source_audit: object, model_ids):
+		assert source_audit is expected_source_audit
+		calls.append(('embeddings', model_ids))
+		return SimpleNamespace(volume_shape_xyz=(1, 1, 1))
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'audit_volve_horizon_five_way_sources',
+		fake_audit,
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'inspect_volve_horizon_five_way_embedding_suite',
+		fake_suite,
+	)
+	data = SimpleNamespace(shape_xy=(2, 2), time_ms=(0.0,))
+	with pytest.raises(ValueError, match='embedding volume geometry'):
+		inspect_volve_horizon_five_way_job(
+			job,
+			layout_config=tmp_path / 'layouts.yaml',
+			data=data,  # type: ignore[arg-type]
+		)
+
+	assert calls == [
+		('audit', ('mae_hmm_k6',)),
+		('embeddings', ('mae_hmm_k6',)),
+	]
+
+
+def test_suite_propagates_three_model_subset_to_shared_preflight(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	config = volve_horizon_five_way_config_from_mapping(_config_mapping(tmp_path))
+	selected_model_ids = ('mae', 'mae_hmm_k6', 'random')
+	expected_source_audit = object()
+	embedding_suite = object()
+	calls: list[tuple[str, tuple[str, ...]]] = []
+
+	def fake_audit(_config, *, model_ids):
+		assert not any(model_id.startswith('local_') for model_id in model_ids)
+		calls.append(('audit', model_ids))
+		return expected_source_audit
+
+	def fake_suite(_config, *, source_audit: object, model_ids):
+		assert source_audit is expected_source_audit
+		assert not any(model_id.startswith('local_') for model_id in model_ids)
+		calls.append(('embeddings', model_ids))
+		return embedding_suite
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'audit_volve_horizon_five_way_sources',
+		fake_audit,
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'inspect_volve_horizon_five_way_embedding_suite',
+		fake_suite,
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'load_volve_horizon_data',
+		lambda _root: object(),
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'inspect_volve_horizon_five_way_job',
+		lambda job, **_kwargs: SimpleNamespace(output_dir=job.output_dir),
+	)
+	monkeypatch.setattr(
+		'seis_ssl_cluster.volve.horizon_five_way_runner.'
+		'run_volve_horizon_five_way_job',
+		lambda plan, **_kwargs: plan.output_dir / 'metrics.json',
+	)
+
+	results = run_volve_horizon_five_way_suite(
+		config,
+		layout_config=tmp_path / 'layouts.yaml',
+		model_ids=selected_model_ids,
+	)
+
+	assert calls == [
+		('audit', selected_model_ids),
+		('embeddings', selected_model_ids),
+	]
+	assert len(results) == 45
+	assert {result.job.model.model_id for result in results} == set(
+		selected_model_ids
+	)
+
+
 def test_suite_preflights_shared_inputs_once_and_continues_cells(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
@@ -208,12 +319,12 @@ def test_suite_preflights_shared_inputs_once_and_continues_cells(
 		'run': [],
 	}
 
-	def fake_audit(received_config):
-		calls['audit'].append(received_config)
+	def fake_audit(received_config, *, model_ids):
+		calls['audit'].append((received_config, model_ids))
 		return source_audit
 
-	def fake_suite(received_config, *, source_audit):
-		calls['suite'].append((received_config, source_audit))
+	def fake_suite(received_config, *, source_audit, model_ids):
+		calls['suite'].append((received_config, source_audit, model_ids))
 		return embedding_suite
 
 	def fake_load_data(volve_root):
@@ -263,7 +374,8 @@ def test_suite_preflights_shared_inputs_once_and_continues_cells(
 	)
 
 	assert len(calls['audit']) == len(calls['suite']) == len(calls['data']) == 1
-	assert calls['suite'] == [(config, source_audit)]
+	assert calls['audit'] == [(config, config.model_ids)]
+	assert calls['suite'] == [(config, source_audit, config.model_ids)]
 	assert calls['data'] == [config.volve_root]
 	assert len(calls['inspect']) == len(calls['run']) == 74
 	assert [result.action for result in results[:3]] == [
@@ -298,7 +410,7 @@ def test_suite_default_does_not_skip_or_resume_existing_cells(
 	monkeypatch.setattr(
 		'seis_ssl_cluster.volve.horizon_five_way_runner.'
 		'audit_volve_horizon_five_way_sources',
-		lambda _config: {},
+		lambda _config, **_kwargs: {},
 	)
 	monkeypatch.setattr(
 		'seis_ssl_cluster.volve.horizon_five_way_runner.'

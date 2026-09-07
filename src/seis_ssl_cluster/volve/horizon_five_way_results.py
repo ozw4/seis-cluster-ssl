@@ -40,8 +40,11 @@ from seis_ssl_cluster.volve.horizon_runner import (
 	BEST_NAME,
 	CHECKPOINT_SELECTION_VALIDATION_MAE,
 	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
 	HISTORY_NAME,
 	METRICS_NAME,
+	bundled_best_name,
+	bundled_metrics_name,
 )
 
 if TYPE_CHECKING:
@@ -78,6 +81,13 @@ WITHIN2_SUMMARY_METRICS = (
 	PRIMARY_METRIC,
 	MACRO_WITHIN_1_METRIC,
 	MACRO_WITHIN_4_METRIC,
+	ORDER_VIOLATION_METRIC,
+)
+WITHIN4_SUMMARY_METRICS = (
+	MACRO_WITHIN_4_METRIC,
+	PRIMARY_METRIC,
+	MACRO_WITHIN_1_METRIC,
+	WITHIN2_PRIMARY_METRIC,
 	ORDER_VIOLATION_METRIC,
 )
 PAIRED_COMPARISONS = (
@@ -190,10 +200,11 @@ def inspect_volve_horizon_five_way_results(
 		source_audit=source_audit,
 	)
 	_reject_unexpected_run_directories(config)
+	metrics_name = _metrics_name(config)
 	missing = [
-		str(_job_dir(config, *cell) / METRICS_NAME)
+		str(_job_dir(config, *cell) / metrics_name)
 		for cell in cells
-		if not (_job_dir(config, *cell) / METRICS_NAME).is_file()
+		if not (_job_dir(config, *cell) / metrics_name).is_file()
 	]
 	if missing:
 		raise FileNotFoundError(
@@ -297,6 +308,18 @@ def _job_dir(
 	)
 
 
+def _metrics_name(config: VolveHorizonFiveWayConfig) -> str:
+	if len(config.checkpoint_selections) > 1:
+		return bundled_metrics_name(config.checkpoint_selection)
+	return METRICS_NAME
+
+
+def _best_name(config: VolveHorizonFiveWayConfig) -> str:
+	if len(config.checkpoint_selections) > 1:
+		return bundled_best_name(config.checkpoint_selection)
+	return BEST_NAME
+
+
 def _reject_unexpected_run_directories(
 	config: VolveHorizonFiveWayConfig,
 ) -> None:
@@ -370,7 +393,7 @@ def _load_job_row(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	expected_downstream: Mapping[str, Mapping[str, object]],
 ) -> dict[str, object]:
 	job_dir = _job_dir(config, model_id, layout_id, data_size)
-	metrics_path = job_dir / METRICS_NAME
+	metrics_path = job_dir / _metrics_name(config)
 	metrics = _read_json(metrics_path)
 	label = f'{model_id}/{layout_id}/{data_size}'
 	_reject_nonfinite_numbers(metrics, label=f'{label} metrics')
@@ -496,7 +519,7 @@ def _load_job_row(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	)
 	best_epoch = _nonnegative_int(metrics.get('best_epoch'), f'{label} best_epoch')
 	best_identity = _required_mapping(metrics, 'best_checkpoint', label)
-	best_path = job_dir / BEST_NAME
+	best_path = job_dir / _best_name(config)
 	if not _same_path_value(best_identity.get('path'), best_path):
 		raise ValueError(
 			f'{label} best checkpoint path does not identify {best_path}'
@@ -616,7 +639,7 @@ def _expected_downstream_contract(
 	}
 
 
-def _validate_checkpoint_selection_artifacts(  # noqa: C901, PLR0912, PLR0913
+def _validate_checkpoint_selection_artifacts(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	config: VolveHorizonFiveWayConfig,
 	*,
 	job_dir: Path,
@@ -635,6 +658,10 @@ def _validate_checkpoint_selection_artifacts(  # noqa: C901, PLR0912, PLR0913
 		validation_key = WITHIN2_PRIMARY_METRIC
 		history_key = 'validation_macro_within_2_samples'
 		best_from_history = max
+	elif selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_4:
+		validation_key = MACRO_WITHIN_4_METRIC
+		history_key = 'validation_macro_within_4_samples'
+		best_from_history = max
 	else:  # Config loading rejects this before artifact inspection.
 		raise ValueError(f'unknown horizon checkpoint selection: {selection!r}')
 
@@ -645,10 +672,17 @@ def _validate_checkpoint_selection_artifacts(  # noqa: C901, PLR0912, PLR0913
 	elif checkpoint_selection != selection:
 		raise ValueError(f'{label} best.pt checkpoint selection mismatch')
 
-	validation_score = _finite_number(
-		validation.get(validation_key),
-		f'{label} validation {validation_key}',
-	)
+	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_4:
+		validation_macro = _required_mapping(validation, 'macro', f'{label} validation')
+		validation_score = _finite_number(
+			validation_macro.get('within_4'),
+			f'{label} validation macro.within_4',
+		)
+	else:
+		validation_score = _finite_number(
+			validation.get(validation_key),
+			f'{label} validation {validation_key}',
+		)
 	if 'best_validation_score' in best_payload:
 		best_score = _finite_number(
 			best_payload.get('best_validation_score'),
@@ -666,9 +700,7 @@ def _validate_checkpoint_selection_artifacts(  # noqa: C901, PLR0912, PLR0913
 	metrics_selection = metrics.get('checkpoint_selection')
 	if metrics_selection is not None and metrics_selection != selection:
 		raise ValueError(f'{label} metrics checkpoint selection mismatch')
-	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2 and (
-		metrics_selection is None
-	):
+	if selection != CHECKPOINT_SELECTION_VALIDATION_MAE and metrics_selection is None:
 		raise ValueError(f'{label} metrics is missing checkpoint_selection')
 	if 'best_validation_score' in metrics:
 		metrics_score = _finite_number(
@@ -679,7 +711,7 @@ def _validate_checkpoint_selection_artifacts(  # noqa: C901, PLR0912, PLR0913
 			metrics_score, best_score, rel_tol=1.0e-12, abs_tol=1.0e-12
 		):
 			raise ValueError(f'{label} metrics best validation score mismatch')
-	elif selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+	elif selection != CHECKPOINT_SELECTION_VALIDATION_MAE:
 		raise ValueError(f'{label} metrics is missing best_validation_score')
 
 	history = _read_history(job_dir / HISTORY_NAME)
@@ -936,7 +968,13 @@ def _summary_metrics(
 ) -> tuple[str, ...]:
 	if config.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
 		return SUMMARY_METRICS
-	return WITHIN2_SUMMARY_METRICS
+	if config.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		return WITHIN2_SUMMARY_METRICS
+	if config.checkpoint_selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_4:
+		return WITHIN4_SUMMARY_METRICS
+	raise ValueError(
+		f'unknown horizon checkpoint selection: {config.checkpoint_selection!r}'
+	)
 
 
 def _paired_rows(
@@ -1044,30 +1082,27 @@ def _summary_payload(
 				'negative_count',
 			)
 		}
-	within2 = (
-		config.checkpoint_selection
-		== CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
-	)
+	summary_name, primary_metric = _summary_identity(config)
+	enhanced = config.checkpoint_selection != CHECKPOINT_SELECTION_VALIDATION_MAE
 	return {
 		'schema_version': 1,
-		'summary_name': (
-			'volve_horizon_mae_local_bt_hmm_five_way_within2_v1'
-			if within2
-			else 'volve_horizon_mae_local_bt_hmm_five_way_v1'
-		),
-		'primary_metric': WITHIN2_PRIMARY_METRIC if within2 else PRIMARY_METRIC,
+		'summary_name': summary_name,
+		'benchmark_id': config.benchmark_id,
+		'checkpoint_selection': config.checkpoint_selection,
+		'checkpoint_selections': list(config.checkpoint_selections),
+		'primary_metric': primary_metric,
 		'models': list(config.model_ids),
 		'job_count': EXPECTED_JOB_COUNT,
 		'statistical_unit': 'layout_id',
 		'delta_definition': (
 			'right_minus_left_for_within_metrics; '
 			'left_minus_right_for_mae_and_order_violation'
-			if within2
+			if enhanced
 			else 'left_mae_minus_right_mae'
 		),
 		'positive_delta_interpretation': (
 			'right_model_is_better_for_every_metric'
-			if within2
+			if enhanced
 			else 'right_model_has_lower_mae'
 		),
 		'comparison': comparison_rows,
@@ -1079,13 +1114,14 @@ def _summary_markdown(
 	config: VolveHorizonFiveWayConfig,
 	by_size: list[dict[str, object]],
 ) -> str:
-	within2 = (
-		config.checkpoint_selection
-		== CHECKPOINT_SELECTION_VALIDATION_WITHIN_2
-	)
-	primary_metric = WITHIN2_PRIMARY_METRIC if within2 else PRIMARY_METRIC
+	_, primary_metric = _summary_identity(config)
+	enhanced = config.checkpoint_selection != CHECKPOINT_SELECTION_VALIDATION_MAE
 	lines = [
 		'# Volve horizon five-way summary',
+		'',
+		f'Benchmark: `{config.benchmark_id}`',
+		'',
+		f'Checkpoint selection: `{config.checkpoint_selection}`',
 		'',
 		*(
 			[
@@ -1096,7 +1132,7 @@ def _summary_markdown(
 					'right-hand model is better.'
 				)
 			]
-			if within2
+			if enhanced
 			else [
 				(
 					'Delta convention: `left_MAE - right_MAE`. A positive delta means '
@@ -1133,6 +1169,25 @@ def _summary_markdown(
 			)
 	lines.append('')
 	return '\n'.join(lines)
+
+
+def _summary_identity(
+	config: VolveHorizonFiveWayConfig,
+) -> tuple[str, str]:
+	selection = config.checkpoint_selection
+	if selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		return 'volve_horizon_mae_local_bt_hmm_five_way_v1', PRIMARY_METRIC
+	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		return (
+			'volve_horizon_mae_local_bt_hmm_five_way_within2_v1',
+			WITHIN2_PRIMARY_METRIC,
+		)
+	if selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_4:
+		return (
+			'volve_horizon_mae_local_bt_hmm_five_way_within4_v1',
+			MACRO_WITHIN_4_METRIC,
+		)
+	raise ValueError(f'unknown horizon checkpoint selection: {selection!r}')
 
 
 def _csv_text(
@@ -1251,6 +1306,7 @@ __all__ = [
 	'SUMMARY_OUTPUT_NAMES',
 	'WITHIN2_PRIMARY_METRIC',
 	'WITHIN2_SUMMARY_METRICS',
+	'WITHIN4_SUMMARY_METRICS',
 	'inspect_volve_horizon_five_way_results',
 	'summarize_volve_horizon_five_way',
 ]

@@ -20,6 +20,7 @@ from seis_ssl_cluster.volve.horizon_five_way_sources import (
 	FIVE_WAY_STAGE2_GLOBAL_STEPS,
 	audit_volve_horizon_five_way_sources,
 	inspect_volve_horizon_five_way_embedding_suite,
+	normalize_volve_horizon_five_way_model_ids,
 	plan_volve_horizon_five_way_embeddings,
 	plan_volve_horizon_five_way_sources,
 )
@@ -67,6 +68,112 @@ def test_checkpoint_audit_passes_and_reports_fixed_budgets(tmp_path: Path) -> No
 		'parent_checkpoint_sha256'
 	]
 	assert sources[-1]['stage_2'] is None
+
+
+def test_model_selection_is_validated_and_preserves_explicit_order(
+	tmp_path: Path,
+) -> None:
+	config = volve_horizon_five_way_config_from_mapping(
+		five_way_config_mapping(tmp_path)
+	)
+
+	assert normalize_volve_horizon_five_way_model_ids(config, None) == (
+		FIVE_WAY_MODEL_IDS
+	)
+	assert normalize_volve_horizon_five_way_model_ids(
+		config,
+		('random', 'mae'),
+	) == ('random', 'mae')
+	with pytest.raises(ValueError, match='non-empty and unique'):
+		normalize_volve_horizon_five_way_model_ids(config, ())
+	with pytest.raises(ValueError, match='non-empty and unique'):
+		normalize_volve_horizon_five_way_model_ids(config, ('mae', 'mae'))
+	with pytest.raises(ValueError, match='unknown Volve horizon five-way model'):
+		normalize_volve_horizon_five_way_model_ids(config, ('unknown',))
+
+
+def test_three_model_subset_does_not_open_local_bt_sources(tmp_path: Path) -> None:
+	universe = write_five_way_universe(tmp_path, embeddings=True)
+	config = universe['config']
+	selected = ('mae', 'mae_hmm_k6', 'random')
+	for model_id in ('local_barlow_twins', 'local_barlow_twins_hmm_k6'):
+		universe['checkpoints'][model_id].write_bytes(b'unreadable checkpoint')
+		paths = output_paths(
+			config.model_by_id(model_id).embeddings_dir,
+			config.survey_id,
+		)
+		paths.embeddings.unlink()
+		paths.valid_tokens.unlink()
+		paths.metadata.unlink()
+
+	report = audit_volve_horizon_five_way_sources(
+		config,
+		model_ids=selected,
+	)
+	suite = inspect_volve_horizon_five_way_embedding_suite(
+		config,
+		source_audit=report,
+		model_ids=selected,
+	)
+
+	assert report['model_order'] == list(selected)
+	assert [source['model_id'] for source in report['sources']] == list(selected)
+	assert tuple(suite.sources) == selected
+	with pytest.raises(ValueError, match='model_order differs from config'):
+		inspect_volve_horizon_five_way_embedding_suite(
+			config,
+			source_audit=report,
+			model_ids=('mae',),
+		)
+
+
+def test_random_only_audit_uses_recorded_mae_stage1_reference(
+	tmp_path: Path,
+) -> None:
+	universe = write_five_way_universe(tmp_path, embeddings=True)
+	config = universe['config']
+	for model_id in FIVE_WAY_MODEL_IDS:
+		if model_id == 'random':
+			continue
+		universe['checkpoints'][model_id].unlink()
+		paths = output_paths(
+			config.model_by_id(model_id).embeddings_dir,
+			config.survey_id,
+		)
+		paths.embeddings.unlink()
+		paths.valid_tokens.unlink()
+		paths.metadata.unlink()
+
+	report = audit_volve_horizon_five_way_sources(
+		config,
+		model_ids=('random',),
+	)
+	suite = inspect_volve_horizon_five_way_embedding_suite(
+		config,
+		source_audit=report,
+		model_ids=('random',),
+	)
+
+	assert report['model_order'] == ['random']
+	assert tuple(suite.sources) == ('random',)
+	assert report['sources'][0]['parent_checkpoint'] == str(universe['parents']['mae'])
+
+
+def test_random_uses_selected_mae_hmm_parent_when_plain_mae_is_excluded(
+	tmp_path: Path,
+) -> None:
+	universe = write_five_way_universe(tmp_path, embeddings=False)
+	universe['checkpoints']['mae'].write_bytes(b'unreadable checkpoint')
+
+	report = audit_volve_horizon_five_way_sources(
+		universe['config'],
+		model_ids=('mae_hmm_k6', 'random'),
+	)
+	sources = cast('list[dict[str, object]]', report['sources'])
+
+	assert sources[0]['parent_checkpoint_sha256'] == sources[1][
+		'parent_checkpoint_sha256'
+	]
 
 
 def test_checkpoint_audit_rejects_hmm_k_and_pseudo_source_swap(

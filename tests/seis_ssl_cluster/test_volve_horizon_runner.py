@@ -12,11 +12,15 @@ from torch.utils.data import Dataset
 
 import seis_ssl_cluster.volve.horizon_runner as horizon_runner_module
 from seis_ssl_cluster.volve.horizon_runner import (
+	CHECKPOINT_SELECTION_ORDER,
 	CHECKPOINT_SELECTION_VALIDATION_MAE,
 	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
 	HorizonRunnerSettings,
 	HorizonRuntimeContext,
 	backward_and_step_horizon_optimizer,
+	bundled_best_name,
+	bundled_metrics_name,
 	initial_best_validation_score,
 	run_horizon_training_job,
 	validate_horizon_resume_runtime,
@@ -60,6 +64,9 @@ class _ScalarHorizonModel(nn.Module):
 		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_2, 0.4, 0.3, True),
 		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_2, 0.3, 0.3, False),
 		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_2, 0.2, 0.3, False),
+		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_4, 0.4, 0.3, True),
+		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_4, 0.3, 0.3, False),
+		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_4, 0.2, 0.3, False),
 	],
 )
 def test_validation_checkpoint_score_improvement_is_strict(
@@ -69,6 +76,27 @@ def test_validation_checkpoint_score_improvement_is_strict(
 	expected: object,
 ) -> None:
 	assert validation_score_improved(candidate, best, selection) is expected
+
+
+@pytest.mark.parametrize(
+	('selection', 'expected'),
+	[
+		(CHECKPOINT_SELECTION_VALIDATION_MAE, 4.0),
+		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_2, 0.25),
+		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_4, 0.75),
+	],
+)
+def test_validation_checkpoint_score_reads_policy_metric(
+	selection: str,
+	expected: float,
+) -> None:
+	metrics = {
+		'macro_mae_samples': 4.0,
+		'macro_within_2_samples': 0.25,
+		'macro': {'within_4': 0.75},
+	}
+
+	assert validation_checkpoint_score(metrics, selection) == expected
 
 
 @pytest.mark.parametrize('candidate', [float('nan'), float('inf'), -float('inf')])
@@ -190,6 +218,7 @@ def test_runner_lifecycle_uses_only_regime_callables(tmp_path: Path) -> None:
 	[
 		(CHECKPOINT_SELECTION_VALIDATION_MAE, 1, 2.0),
 		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_2, 2, 3.0),
+		(CHECKPOINT_SELECTION_VALIDATION_WITHIN_4, 0, 1.0),
 	],
 )
 def test_runner_selects_policy_epoch_and_resume_matches_uninterrupted(
@@ -200,9 +229,9 @@ def test_runner_selects_policy_epoch_and_resume_matches_uninterrupted(
 	expected_weight: float,
 ) -> None:
 	validation_by_weight = {
-		1: (5.0, 0.20),
-		2: (4.0, 0.25),
-		3: (4.5, 0.40),
+		1: (5.0, 0.20, 0.60),
+		2: (4.0, 0.25, 0.50),
+		3: (4.5, 0.40, 0.40),
 	}
 
 	def fake_evaluate(
@@ -211,10 +240,11 @@ def test_runner_selects_policy_epoch_and_resume_matches_uninterrupted(
 		**_kwargs: object,
 	) -> dict[str, object]:
 		weight = round(float(next(model.parameters()).detach()))
-		mae, within_2 = validation_by_weight[weight]
+		mae, within_2, within_4 = validation_by_weight[weight]
 		metrics = {
 			'macro_mae_samples': mae,
 			'macro_within_2_samples': within_2,
+			'macro': {'within_4': within_4},
 		}
 		return {'primary': dict(metrics), 'secondary': dict(metrics)}
 
@@ -314,8 +344,18 @@ def test_runner_selects_policy_epoch_and_resume_matches_uninterrupted(
 		assert best['checkpoint_selection'] == selection
 		assert latest['checkpoint_selection'] == selection
 		assert latest['best_validation_score'] == best['best_validation_score']
+		assert metrics['best_validation_score'] == validation_checkpoint_score(
+			best['validation'],
+			selection,
+		)
 		assert float(best['model_state_dict']['value']) == expected_weight
 		assert float(latest['model_state_dict']['value']) == expected_weight
+		history = json.loads(
+			(output_dir / 'history.json').read_text(encoding='utf-8')
+		)
+		assert [
+			row['validation_macro_within_4_samples'] for row in history
+		] == [0.60, 0.50, 0.40]
 	assert json.loads(
 		(uninterrupted_dir / 'metrics.json').read_text(encoding='utf-8')
 	)['validation'] == json.loads(
@@ -323,14 +363,150 @@ def test_runner_selects_policy_epoch_and_resume_matches_uninterrupted(
 	)['validation']
 
 
-def test_resume_legacy_mae_score_fallback_and_within2_rejection(
+def test_runner_bundles_three_best_checkpoints_and_evaluations_in_one_run(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	validation_by_weight = {
+		1: (5.0, 0.20, 0.60),
+		2: (4.0, 0.25, 0.50),
+		3: (4.5, 0.40, 0.40),
+	}
+
+	def fake_evaluate(
+		model: nn.Module,
+		*_args: object,
+		**_kwargs: object,
+	) -> dict[str, object]:
+		weight = round(float(next(model.parameters()).detach()))
+		mae, within_2, within_4 = validation_by_weight[weight]
+		metrics = {
+			'macro_mae_samples': mae,
+			'macro_within_2_samples': within_2,
+			'macro': {'within_4': within_4},
+		}
+		return {'primary': dict(metrics), 'secondary': dict(metrics)}
+
+	monkeypatch.setattr(
+		horizon_runner_module,
+		'evaluate_horizon_dataset',
+		fake_evaluate,
+	)
+
+	def run(*, max_steps: int | None = None, resume: Path | None = None):
+		def build(
+			device: torch.device,
+		) -> tuple[nn.Module, torch.optim.Optimizer]:
+			model = _ScalarHorizonModel().to(device)
+			with torch.no_grad():
+				model.value.zero_()
+			return model, torch.optim.SGD(model.parameters(), lr=0.1)
+
+		def train(
+			model: nn.Module,
+			_item: dict[str, object],
+			_optimizer: torch.optim.Optimizer,
+			_runtime: HorizonRuntimeContext,
+		) -> float:
+			with torch.no_grad():
+				next(model.parameters()).add_(1.0)
+			return 1.0
+
+		def predict(
+			_model: nn.Module,
+			item: dict[str, object],
+			_runtime: HorizonRuntimeContext,
+		) -> torch.Tensor:
+			target = item['target_sample_float']
+			assert isinstance(target, torch.Tensor)
+			return target.unsqueeze(0)
+
+		dataset = _OneItemHorizonDataset()
+		return run_horizon_training_job(
+			output_dir=tmp_path / 'bundled',
+			run_identity={
+				'benchmark': 'synthetic_bundle_v1',
+				'objective': {
+					'checkpoint_selection': CHECKPOINT_SELECTION_VALIDATION_MAE
+				},
+			},
+			settings=HorizonRunnerSettings(
+				epochs=3,
+				seed=7,
+				amp_on_cuda=False,
+				gradient_clip_norm=1.0,
+				checkpoint_selection=CHECKPOINT_SELECTION_VALIDATION_MAE,
+				checkpoint_selections=CHECKPOINT_SELECTION_ORDER,
+			),
+			datasets=dict.fromkeys(
+				('train', 'validation', 'test'),
+				dataset,
+			),
+			expected_counts=dict.fromkeys(
+				('train', 'validation', 'test', 'test_primary'),
+				(1, 1, 1, 1, 1),
+			),
+			metrics_metadata={'schema_version': 1},
+			build_model_and_optimizer=build,
+			train_one_item=train,
+			predict_one_item=predict,
+			device='cpu',
+			max_steps=max_steps,
+			resume=resume,
+		)
+
+	output_dir = tmp_path / 'bundled'
+	assert run(max_steps=2) is None
+	assert run(resume=output_dir / 'latest.pt') == output_dir / 'metrics.json'
+
+	expected = {
+		CHECKPOINT_SELECTION_VALIDATION_MAE: (1, 2.0),
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_2: (2, 3.0),
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_4: (0, 1.0),
+	}
+	for selection, (epoch, weight) in expected.items():
+		best_path = output_dir / bundled_best_name(selection)
+		metrics_path = output_dir / bundled_metrics_name(selection)
+		best = torch.load(best_path, map_location='cpu', weights_only=False)
+		metrics = json.loads(metrics_path.read_text(encoding='utf-8'))
+		assert best['epoch'] == metrics['best_epoch'] == epoch
+		assert best['checkpoint_selection'] == selection
+		assert metrics['checkpoint_selection'] == selection
+		assert metrics['best_checkpoint']['path'] == str(best_path)
+		assert float(best['model_state_dict']['value']) == weight
+		assert best['run_identity']['objective']['checkpoint_selection'] == selection
+		assert best['run_identity']['checkpoint_selections'] == list(
+			CHECKPOINT_SELECTION_ORDER
+		)
+
+	primary_best = torch.load(
+		output_dir / 'best.pt', map_location='cpu', weights_only=False
+	)
+	primary_metrics = json.loads(
+		(output_dir / 'metrics.json').read_text(encoding='utf-8')
+	)
+	latest = torch.load(
+		output_dir / 'latest.pt', map_location='cpu', weights_only=False
+	)
+	assert primary_best['epoch'] == primary_metrics['best_epoch'] == 1
+	assert primary_metrics['best_checkpoint']['path'] == str(output_dir / 'best.pt')
+	assert latest['completed'] is True
+	assert set(latest['best_checkpoints']) == set(CHECKPOINT_SELECTION_ORDER)
+	assert float(latest['model_state_dict']['value']) == 2.0
+
+
+def test_resume_legacy_mae_score_fallback_and_non_mae_rejection(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	dataset = _OneItemHorizonDataset()
 
 	def fake_evaluate(*_args: object, **_kwargs: object) -> dict[str, object]:
-		metrics = {'macro_mae_samples': 4.0, 'macro_within_2_samples': 0.25}
+		metrics = {
+			'macro_mae_samples': 4.0,
+			'macro_within_2_samples': 0.25,
+			'macro': {'within_4': 0.75},
+		}
 		return {'primary': dict(metrics), 'secondary': dict(metrics)}
 
 	monkeypatch.setattr(
@@ -413,20 +589,24 @@ def test_resume_legacy_mae_score_fallback_and_within2_rejection(
 		resume=mae_latest,
 	) == mae_dir / 'metrics.json'
 
-	within_dir = tmp_path / 'legacy_within2'
-	assert run(within_dir, CHECKPOINT_SELECTION_VALIDATION_WITHIN_2) is None
-	within_latest = within_dir / 'latest.pt'
-	payload = torch.load(within_latest, map_location='cpu', weights_only=False)
-	payload['best_validation_macro_mae_samples'] = 4.0
-	payload.pop('best_validation_score')
-	payload.pop('checkpoint_selection')
-	torch.save(payload, within_latest)
-	with pytest.raises(ValueError, match='legacy MAE-only state'):
-		run(
-			within_dir,
-			CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
-			resume=within_latest,
-		)
+	for name, selection in (
+		('legacy_within2', CHECKPOINT_SELECTION_VALIDATION_WITHIN_2),
+		('legacy_within4', CHECKPOINT_SELECTION_VALIDATION_WITHIN_4),
+	):
+		within_dir = tmp_path / name
+		assert run(within_dir, selection) is None
+		within_latest = within_dir / 'latest.pt'
+		payload = torch.load(within_latest, map_location='cpu', weights_only=False)
+		payload['best_validation_macro_mae_samples'] = 4.0
+		payload.pop('best_validation_score')
+		payload.pop('checkpoint_selection')
+		torch.save(payload, within_latest)
+		with pytest.raises(ValueError, match='legacy MAE-only state'):
+			run(
+				within_dir,
+				selection,
+				resume=within_latest,
+			)
 
 
 def test_amp_resume_requires_matching_precision_and_grad_scaler_state(

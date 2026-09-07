@@ -199,6 +199,7 @@ class FrozenHorizonPlan:
 	run_identity: Mapping[str, object]
 	selected_embedding_paths: EmbeddingOutputPaths
 	checkpoint_selection: str = CHECKPOINT_SELECTION_VALIDATION_MAE
+	checkpoint_selections: tuple[str, ...] | None = None
 
 	@property
 	def per_horizon_counts(self) -> Mapping[str, tuple[int, ...]]:
@@ -577,6 +578,7 @@ def build_frozen_horizon_plan(  # noqa: PLR0913
 	selected_model_source: Mapping[str, object],
 	benchmark: str,
 	checkpoint_selection: str = CHECKPOINT_SELECTION_VALIDATION_MAE,
+	checkpoint_selections: tuple[str, ...] | None = None,
 	selected_embeddings_sha256: str | None = None,
 	selected_metadata_sha256: str | None = None,
 	selected_valid_tokens_sha256: str | None = None,
@@ -688,6 +690,7 @@ def build_frozen_horizon_plan(  # noqa: PLR0913
 		run_identity=identity,
 		selected_embedding_paths=selected_paths,
 		checkpoint_selection=checkpoint_selection,
+		checkpoint_selections=checkpoint_selections,
 	)
 
 
@@ -751,6 +754,7 @@ def run_frozen_horizon_job(
 			amp_on_cuda=plan.config.train.amp,
 			gradient_clip_norm=plan.config.train.gradient_clip_norm,
 			checkpoint_selection=plan.checkpoint_selection,
+			checkpoint_selections=plan.checkpoint_selections,
 		),
 		datasets=datasets,
 		expected_counts=plan.effective_per_horizon_counts,

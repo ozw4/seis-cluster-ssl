@@ -12,6 +12,7 @@ from seis_ssl_cluster.volve.horizon_five_way_sources import (
 	VolveHorizonFiveWayEmbeddingSuite,
 	audit_volve_horizon_five_way_sources,
 	inspect_volve_horizon_five_way_embedding_suite,
+	normalize_volve_horizon_five_way_model_ids,
 )
 from seis_ssl_cluster.volve.horizon_frozen import (
 	FrozenEmbeddingGeometry,
@@ -79,11 +80,7 @@ def plan_volve_horizon_five_way_jobs(
 	model_ids: Sequence[str] | None = None,
 ) -> tuple[tuple[str, str, str], ...]:
 	'''Enumerate all cells for the configured model subset.'''
-	models = config.model_ids if model_ids is None else tuple(model_ids)
-	if not models or len(models) != len(set(models)):
-		raise ValueError('five-way model selection must be non-empty and unique')
-	for model_id in models:
-		config.model_by_id(model_id)
+	models = normalize_volve_horizon_five_way_model_ids(config, model_ids)
 	jobs = tuple(
 		(model_id, layout_id, data_size)
 		for model_id in models
@@ -149,10 +146,15 @@ def inspect_volve_horizon_five_way_job(
 ) -> FrozenHorizonPlan:
 	'''Run read-only source/support preflight and build one decoder plan.'''
 	if embedding_suite is None:
-		source_audit = audit_volve_horizon_five_way_sources(job.config)
+		model_ids = (job.model.model_id,)
+		source_audit = audit_volve_horizon_five_way_sources(
+			job.config,
+			model_ids=model_ids,
+		)
 		suite = inspect_volve_horizon_five_way_embedding_suite(
 			job.config,
 			source_audit=source_audit,
+			model_ids=model_ids,
 		)
 	else:
 		suite = embedding_suite
@@ -219,6 +221,7 @@ def inspect_volve_horizon_five_way_job(
 		selected_valid_tokens_sha256=selected.valid_tokens_sha256,
 		benchmark=job.config.benchmark_id,
 		checkpoint_selection=job.config.checkpoint_selection,
+		checkpoint_selections=job.config.checkpoint_selections,
 	)
 
 
@@ -258,16 +261,25 @@ def run_volve_horizon_five_way_suite(  # noqa: PLR0913
 	model_ids: Sequence[str] | None = None,
 	progress: Callable[[VolveHorizonFiveWaySuiteCellResult], None] | None = None,
 ) -> tuple[VolveHorizonFiveWaySuiteCellResult, ...]:
-	'''Preflight shared inputs once and execute the canonical 75-cell suite.'''
-	source_audit = audit_volve_horizon_five_way_sources(config)
+	'''Preflight shared inputs once and execute the selected suite cells.'''
+	selected_model_ids = normalize_volve_horizon_five_way_model_ids(
+		config,
+		model_ids,
+	)
+	source_audit = audit_volve_horizon_five_way_sources(
+		config,
+		model_ids=selected_model_ids,
+	)
 	embedding_suite = inspect_volve_horizon_five_way_embedding_suite(
 		config,
 		source_audit=source_audit,
+		model_ids=selected_model_ids,
 	)
 	data = load_volve_horizon_data(config.volve_root)
 	results: list[VolveHorizonFiveWaySuiteCellResult] = []
 	for model, layout, size in plan_volve_horizon_five_way_jobs(
-		config, model_ids=model_ids
+		config,
+		model_ids=selected_model_ids,
 	):
 		job = resolve_volve_horizon_five_way_job(
 			config,
