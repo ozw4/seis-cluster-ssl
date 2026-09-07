@@ -16,3 +16,4 @@
 - [Local VICReg 10-epoch proof of concept](local_vicreg_10ep_poc_v1.md)
 - [Overlapping-subcrop local BT proof of concept](overlap_subcrop_local_bt_poc_v1_work_summary.md)
 - [Random-init HMM-K6 (distillation 0.1) control](random_init_hmm_k6_distill010_control_v1.md)
+- [Random-init self-target HMM-K6 (distillation 0.1) control](random_init_self_target_hmm_k6_distill010_control_v1.md)

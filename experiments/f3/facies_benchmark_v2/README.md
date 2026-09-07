@@ -28,6 +28,13 @@ Experiment [`124`](124_lithology_random_init_hmm_k6_distill010_v1/README.md) is 
 random-init HMM-K6 Stage 2 control evaluated on the v3 five-way cells through
 the candidate path; it is not a member of the fixed five-way model set.
 
+Experiment
+[`125`](125_lithology_random_init_self_target_hmm_k6_distill010_v1/README.md)
+is the complete random-init control: it derives the K=6 stratigraphic HMM
+targets from the untrained random encoder itself, so no SSL training enters
+the pipeline anywhere, whereas `124` reused the MAE100-derived targets. It uses
+the same Stage 2 budget and candidate-path evaluation as `124`.
+
 Concrete paths, model settings, and producer commands belong to the linked
 experiment YAML and runbooks rather than this index.
 

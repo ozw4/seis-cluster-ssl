@@ -98,6 +98,10 @@ CANDIDATE_CONFIG_SUITES = {
 		'test_f3_random_init_hmm_k6_distill010_configs.py',
 		4,
 	),
+	'125_lithology_random_init_self_target_hmm_k6_distill010_v1': (
+		'test_f3_random_init_self_target_hmm_k6_distill010_configs.py',
+		6,
+	),
 }
 README = FIVE_WAY_ROOT / 'README.md'
 ARTIFACT_ROOT = '/test/artifacts/seis_ssl_cluster'

@@ -1,0 +1,192 @@
+{
+  "aggregation_unit": "unique_validation_voxel",
+  "by_size": {
+    "large": {
+      "candidate_mean": 0.6809069622709407,
+      "data_size": "large",
+      "mean": 0.10224361326093472,
+      "median": 0.10401676191428644,
+      "n_layouts": 5,
+      "negative_count": 0,
+      "positive_count": 5,
+      "random_mean": 0.5786633490100059,
+      "sample_std": 0.01998338299990912,
+      "zero_count": 0
+    },
+    "medium": {
+      "candidate_mean": 0.5958710305192076,
+      "data_size": "medium",
+      "mean": 0.08372680324430562,
+      "median": 0.0752143282639105,
+      "n_layouts": 5,
+      "negative_count": 0,
+      "positive_count": 5,
+      "random_mean": 0.512144227274902,
+      "sample_std": 0.03412802288065688,
+      "zero_count": 0
+    },
+    "small": {
+      "candidate_mean": 0.5325393785058885,
+      "data_size": "small",
+      "mean": 0.06575281706571659,
+      "median": 0.05467316467874511,
+      "n_layouts": 5,
+      "negative_count": 0,
+      "positive_count": 5,
+      "random_mean": 0.46678656144017194,
+      "sample_std": 0.040248493233955025,
+      "zero_count": 0
+    }
+  },
+  "candidate_id": "random_init_self_target_hmm_k6_distill010",
+  "job_count": 15,
+  "primary_metric": "macro_f1",
+  "provenance": {
+    "candidate": {
+      "candidate_id": "random_init_self_target_hmm_k6_distill010",
+      "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/random_init_self_target_hmm_k6_distill010_v1/stage2/random_init/hmm/k6/full_25ep/latest.pt",
+      "checkpoint_sha256": "b2e09065f3f4fe65d660a4d93023bee4bcdbc949d7a013b86794dfba53c5136f",
+      "embedding_metadata_path": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v2/random_init_self_target_hmm_k6_distill010_v1/random_init_self_target_hmm_k6_distill010/overlap_x64/f3_facies_benchmark.embedding_metadata.json",
+      "embedding_metadata_sha256": "ad037f749bec8c0b72430961036cc4256ca61545f0ac2ea261ea6e18d70c46fe",
+      "embeddings_path": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v2/random_init_self_target_hmm_k6_distill010_v1/random_init_self_target_hmm_k6_distill010/overlap_x64/f3_facies_benchmark.embeddings.npy",
+      "embeddings_sha256": "ac3871235abb19778473c1f3c6a212001fd0e03a5aa50cac527625a5a4fe195a",
+      "valid_tokens_path": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v2/random_init_self_target_hmm_k6_distill010_v1/random_init_self_target_hmm_k6_distill010/overlap_x64/f3_facies_benchmark.valid_tokens.npy",
+      "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+    },
+    "canonical_random": {
+      "checkpoint_path": "/workspace/artifacts/seis_ssl_cluster/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+      "checkpoint_sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c",
+      "embedding_metadata_path": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/random/overlap_x64/f3_facies_benchmark.embedding_metadata.json",
+      "embedding_metadata_sha256": "cfce51c16eda87e0fa506ea26e9192d43ff7d9d2bb89c92a48d8ef0b67311e99",
+      "embeddings_path": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/random/overlap_x64/f3_facies_benchmark.embeddings.npy",
+      "embeddings_sha256": "85257d6cf2d6b765e29cad023b4f3bda6ef384a2aa00619a6a508661d6fca089",
+      "model_id": "random",
+      "valid_tokens_path": "/workspace/artifacts/seis_ssl_cluster/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/random/overlap_x64/f3_facies_benchmark.valid_tokens.npy",
+      "valid_tokens_sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+    },
+    "metrics": [
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_000/size=small/evaluation/metrics.json",
+        "candidate_sha256": "e40de3a1c60ab77fe5504794286a40b10bc0cd4baeeaddcb2b60bfd8da79a25e",
+        "data_size": "small",
+        "layout_id": "layout_000",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=small/evaluation/metrics.json",
+        "random_sha256": "1567f0dbda11fd2dbb9a3463bb86a91c87a3549f47cc58f74709c4c376a20d30"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_001/size=small/evaluation/metrics.json",
+        "candidate_sha256": "fa0f9a03a059725cba677de84872513ed48e673bf4e7fca2d83dcff856c39501",
+        "data_size": "small",
+        "layout_id": "layout_001",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_001/size=small/evaluation/metrics.json",
+        "random_sha256": "48ed64f1125ae2da41751a0f31cf376c224a4b854c5cc7900e1f162339180cc9"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_002/size=small/evaluation/metrics.json",
+        "candidate_sha256": "3300b00d56591886204298ceffd80c58e6b2bf13061ad90576a7fd2f294721c7",
+        "data_size": "small",
+        "layout_id": "layout_002",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_002/size=small/evaluation/metrics.json",
+        "random_sha256": "cb7623c4ea47fff8b085edc187100fe4a925f517d8d619f0b6073e954ee72003"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_003/size=small/evaluation/metrics.json",
+        "candidate_sha256": "82b5c0bea387a7f4710cfcb66b25122f53f38444374b5095c9793b14ea892ba5",
+        "data_size": "small",
+        "layout_id": "layout_003",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_003/size=small/evaluation/metrics.json",
+        "random_sha256": "1fa6685539ce1216aaa4c663235525d0dc7891860ffd8c495e2736d210503818"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_004/size=small/evaluation/metrics.json",
+        "candidate_sha256": "54a284cc76283f5a16cb4409d5fad4a9e45fff5ea3187630fc213199f7a5047e",
+        "data_size": "small",
+        "layout_id": "layout_004",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_004/size=small/evaluation/metrics.json",
+        "random_sha256": "e4ac0acde2ca1cab0b22804158f7e72b88785f036b496da85b8c2fb81fba21d9"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_000/size=medium/evaluation/metrics.json",
+        "candidate_sha256": "9612a55f633493d213a12d667938da955decf6fc4d2783b4e2b6c8253687fa89",
+        "data_size": "medium",
+        "layout_id": "layout_000",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=medium/evaluation/metrics.json",
+        "random_sha256": "7018ca21bfe4f0628834b41e1c33e39490fbb87ee2be93dcc77afffa0dc9da8d"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_001/size=medium/evaluation/metrics.json",
+        "candidate_sha256": "f7e4a3bbc1f3105414b60d05c94741006881f3357936707d362b8e74d9305192",
+        "data_size": "medium",
+        "layout_id": "layout_001",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_001/size=medium/evaluation/metrics.json",
+        "random_sha256": "825f49a5e9f98087402fdfe135df1817155f548f68cf39d1c25a50000e26e506"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_002/size=medium/evaluation/metrics.json",
+        "candidate_sha256": "8619d72bc407141cb424664bdcfaf098eb15f129f118ac7f216452e316e88817",
+        "data_size": "medium",
+        "layout_id": "layout_002",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_002/size=medium/evaluation/metrics.json",
+        "random_sha256": "74a9f508b4075929047232c1033753ab646639ac8c8da5eb0f9c5d6bcbc20daa"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_003/size=medium/evaluation/metrics.json",
+        "candidate_sha256": "58eff2802a76d0b6dccb7bca690bec7ff1c1470405981cbea41722048b9ec799",
+        "data_size": "medium",
+        "layout_id": "layout_003",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_003/size=medium/evaluation/metrics.json",
+        "random_sha256": "129f3145dc465182d32acdb24f89583f1e1a52ab28571f37ba6c6d1ea13cc02f"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_004/size=medium/evaluation/metrics.json",
+        "candidate_sha256": "b0ad21bd8617701509a77ee0bdaf52a5aa1a5751ee25d5b708bbe12ca025add4",
+        "data_size": "medium",
+        "layout_id": "layout_004",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_004/size=medium/evaluation/metrics.json",
+        "random_sha256": "9be095931470ab6e69713fcf2448342d033f2aa2abf29306850f7257a0e11a00"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_000/size=large/evaluation/metrics.json",
+        "candidate_sha256": "15bca694677b40147d5d702900ecb43e5b4225ab7ff55f8d22034bd7e1e63ab3",
+        "data_size": "large",
+        "layout_id": "layout_000",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=large/evaluation/metrics.json",
+        "random_sha256": "e82b43eed71ae5dc4684b48d7c81c4e30ef12b95b023d399033c5f25312a52a9"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_001/size=large/evaluation/metrics.json",
+        "candidate_sha256": "200b75fa5ccb8414bfca3af7dd55188b7ad85e0f47779ad4a324a15d20831568",
+        "data_size": "large",
+        "layout_id": "layout_001",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_001/size=large/evaluation/metrics.json",
+        "random_sha256": "d6002b6f94b43d38e617c700bf28b6af4a3527f1e7624d76ac8829627a72a9db"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_002/size=large/evaluation/metrics.json",
+        "candidate_sha256": "6dc15ebd7b6cafd434aa0460f447f852d46d5c7170cb244a2a239b8de6b8c473",
+        "data_size": "large",
+        "layout_id": "layout_002",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_002/size=large/evaluation/metrics.json",
+        "random_sha256": "553903ab4199e319c72d132d48b19a13a176a87c3151b69c5736c5620685b7d8"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_003/size=large/evaluation/metrics.json",
+        "candidate_sha256": "ea8dc102bc6a00c44496dfcaaee5910956c0b900254f20b6e60c2951160ef161",
+        "data_size": "large",
+        "layout_id": "layout_003",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_003/size=large/evaluation/metrics.json",
+        "random_sha256": "065937e69e9128e17889a1fe24c6bc2078f55c87074a0c2d2931097822bcb98a"
+      },
+      {
+        "candidate_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs/model=random_init_self_target_hmm_k6_distill010/layout=layout_004/size=large/evaluation/metrics.json",
+        "candidate_sha256": "376f0e53d2d15ad4e284e35d012193ccf27e492b294f70147f0ee82ca3d3d3d6",
+        "data_size": "large",
+        "layout_id": "layout_004",
+        "random_path": "/workspace/artifacts/seis_ssl_cluster/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_004/size=large/evaluation/metrics.json",
+        "random_sha256": "efe86ba386a3fc964d3c9d564729228a32008de5b4426d3283c65b173d6bb950"
+      }
+    ]
+  },
+  "schema_version": 1,
+  "statistical_unit": "layout_id"
+}
