@@ -17,6 +17,7 @@ import numpy as np
 
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.f3_lithology_common import (
+	_optional_absolute_path,
 	_required_absolute_path,
 	_required_mapping,
 	_required_str,
@@ -31,8 +32,17 @@ from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
 	LAYOUT_IDS,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256, output_paths
+from seis_ssl_cluster.f3.lithology import five_way_results
 from seis_ssl_cluster.f3.lithology.five_way_results import (
+	BY_SIZE_FIELDNAMES,
+	PAIRED_DELTAS_CSV_NAME,
+	PAIRED_FIELDNAMES,
+	SUMMARY_BY_SIZE_CSV_NAME,
+	SUMMARY_METRICS,
+	aggregate_paired_rows_by_size,
+	build_paired_rows,
 	read_f3_lithology_job_evidence,
+	write_atomic_summary,
 )
 from seis_ssl_cluster.f3.lithology.five_way_runner import (
 	EVALUATION_DIR_NAME,
@@ -89,6 +99,55 @@ COMPARISON_FIELDNAMES = (
 	'embedding_metadata_sha256',
 	'valid_tokens_sha256',
 )
+FIVE_WAY_SUMMARY_ROOT_KEY = 'five_way_summary_root'
+FIVE_WAY_COMPARISON_FIELDNAMES = five_way_results.COMPARISON_FIELDNAMES
+FIVE_WAY_SUMMARY_OUTPUT_NAMES = five_way_results.SUMMARY_OUTPUT_NAMES
+CANDIDATE_MODEL_PLACEHOLDER = '<candidate>'
+CANDIDATE_FIVE_WAY_COMPARISONS = (
+	('candidate_minus_random', CANDIDATE_MODEL_PLACEHOLDER, 'random'),
+	('candidate_minus_mae', CANDIDATE_MODEL_PLACEHOLDER, 'mae'),
+	('candidate_minus_mae_hmm_k6', CANDIDATE_MODEL_PLACEHOLDER, 'mae_hmm_k6'),
+	(
+		'candidate_minus_local_bt',
+		CANDIDATE_MODEL_PLACEHOLDER,
+		'local_barlow_twins',
+	),
+	(
+		'candidate_minus_local_bt_hmm_k6',
+		CANDIDATE_MODEL_PLACEHOLDER,
+		'local_barlow_twins_hmm_k6',
+	),
+)
+CANDIDATE_PROVENANCE_KEYS = (
+	'candidate_id',
+	'checkpoint_path',
+	'checkpoint_sha256',
+	'embeddings_path',
+	'embeddings_sha256',
+	'embedding_metadata_path',
+	'embedding_metadata_sha256',
+	'valid_tokens_path',
+	'valid_tokens_sha256',
+)
+SOURCE_SHA_KEYS = (
+	'checkpoint_sha256',
+	'embeddings_sha256',
+	'embedding_metadata_sha256',
+	'valid_tokens_sha256',
+)
+BY_SIZE_AGGREGATE_KEYS = (
+	'n_layouts',
+	'mean',
+	'sample_std',
+	'median',
+	'min',
+	'max',
+	'positive_count',
+	'zero_count',
+	'negative_count',
+	'candidate_mean',
+	'reference_mean',
+)
 
 
 @dataclass(frozen=True)
@@ -101,6 +160,7 @@ class F3LithologyCandidateConfig:
 	embeddings_dir: Path
 	runs_root: Path
 	summary_root: Path
+	five_way_summary_root: Path | None = None
 
 
 def f3_lithology_candidate_config_from_mapping(
@@ -113,7 +173,12 @@ def f3_lithology_candidate_config_from_mapping(
 	outputs = _required_mapping(config, 'outputs')
 	_require_exact_keys(benchmark, {'canonical_config'}, 'benchmark')
 	_require_exact_keys(candidate, {'id', 'checkpoint', 'embeddings_dir'}, 'candidate')
-	_require_exact_keys(outputs, {'runs_root', 'summary_root'}, 'outputs')
+	_require_exact_keys(
+		outputs,
+		{'runs_root', 'summary_root'},
+		'outputs',
+		optional={FIVE_WAY_SUMMARY_ROOT_KEY},
+	)
 	candidate_id = _required_str(candidate, 'id', prefix='candidate')
 	if Path(candidate_id).name != candidate_id or candidate_id in {'.', '..'}:
 		raise ValueError('candidate.id must be one path segment')
@@ -121,6 +186,17 @@ def f3_lithology_candidate_config_from_mapping(
 	summary_root = _required_absolute_path(outputs, 'summary_root', prefix='outputs')
 	if runs_root == summary_root:
 		raise ValueError('outputs.runs_root and outputs.summary_root must differ')
+	five_way_summary_root = _optional_absolute_path(
+		outputs, FIVE_WAY_SUMMARY_ROOT_KEY, prefix='outputs'
+	)
+	if five_way_summary_root is not None and any(
+		_paths_overlap(five_way_summary_root, other)
+		for other in (runs_root, summary_root)
+	):
+		raise ValueError(
+			f'outputs.{FIVE_WAY_SUMMARY_ROOT_KEY} must differ from and not nest '
+			'within outputs.runs_root or outputs.summary_root'
+		)
 	return F3LithologyCandidateConfig(
 		canonical_config=_required_absolute_path(
 			benchmark, 'canonical_config', prefix='benchmark'
@@ -132,6 +208,7 @@ def f3_lithology_candidate_config_from_mapping(
 		),
 		runs_root=runs_root,
 		summary_root=summary_root,
+		five_way_summary_root=five_way_summary_root,
 	)
 
 
@@ -158,10 +235,15 @@ def _validate_candidate_namespace(
 		raise ValueError(
 			f'candidate.id conflicts with canonical model ID: {config.candidate_id!r}'
 		)
-	for candidate_label, candidate_root in (
+	candidate_roots = [
 		('outputs.runs_root', config.runs_root),
 		('outputs.summary_root', config.summary_root),
-	):
+	]
+	if config.five_way_summary_root is not None:
+		candidate_roots.append(
+			(f'outputs.{FIVE_WAY_SUMMARY_ROOT_KEY}', config.five_way_summary_root)
+		)
+	for candidate_label, candidate_root in candidate_roots:
 		for canonical_label, canonical_root in (
 			('canonical runs_root', canonical_config.runs_root),
 			('canonical summary_root', canonical_config.summary_root),
@@ -177,9 +259,7 @@ def _paths_overlap(first: Path, second: Path) -> bool:
 	first = first.resolve(strict=False)
 	second = second.resolve(strict=False)
 	return (
-		first == second
-		or first.is_relative_to(second)
-		or second.is_relative_to(first)
+		first == second or first.is_relative_to(second) or second.is_relative_to(first)
 	)
 
 
@@ -391,18 +471,415 @@ def summarize_f3_lithology_candidate(
 	}
 
 
+def candidate_five_way_comparisons(
+	candidate_id: str,
+) -> tuple[tuple[str, str, str], ...]:
+	"""Resolve the fixed candidate-versus-five-way comparisons for one candidate."""
+	return tuple(
+		(
+			comparison_id,
+			candidate_id if left_model == CANDIDATE_MODEL_PLACEHOLDER else left_model,
+			right_model,
+		)
+		for comparison_id, left_model, right_model in CANDIDATE_FIVE_WAY_COMPARISONS
+	)
+
+
+def inspect_f3_lithology_candidate_five_way(
+	config: F3LithologyCandidateConfig,
+	canonical_config: F3FiveWayConfig,
+) -> dict[str, object]:
+	"""Audit the 15 candidate plus 75 canonical evaluations read-only."""
+	_five_way_summary_root(config)
+	provenance = audit_f3_lithology_candidate_source(config, canonical_config)
+	sources = _candidate_five_way_sources(config, canonical_config, provenance)
+	cells = [
+		(
+			source,
+			layout_id,
+			data_size,
+			_metrics_path(
+				source.runs_root, source.model.model_id, layout_id, data_size
+			),
+		)
+		for source in sources
+		for layout_id in LAYOUT_IDS
+		for data_size in DATA_SIZES
+	]
+	missing = [str(path) for _, _, _, path in cells if not path.is_file()]
+	if missing:
+		raise FileNotFoundError(
+			f'missing {len(missing)} of {len(cells)} candidate/five-way '
+			f'evaluations: {missing!r}'
+		)
+	rows = [
+		_five_way_row(
+			canonical_config,
+			source,
+			layout_id=layout_id,
+			data_size=data_size,
+			metrics_path=metrics_path,
+		)
+		for source, layout_id, data_size, metrics_path in cells
+	]
+	model_ids = [source.model.model_id for source in sources]
+	_validate_candidate_five_way_identity(rows, model_ids=model_ids)
+	return {
+		'candidate_id': config.candidate_id,
+		'complete_jobs': len(rows),
+		'models': model_ids,
+		'comparisons': [
+			comparison_id
+			for comparison_id, _, _ in candidate_five_way_comparisons(
+				config.candidate_id
+			)
+		],
+		'rows': rows,
+		'provenance': {
+			'candidate': {key: provenance[key] for key in CANDIDATE_PROVENANCE_KEYS},
+			'canonical': {
+				source.model.model_id: dict(source.current) for source in sources[1:]
+			},
+		},
+	}
+
+
+def summarize_f3_lithology_candidate_five_way(
+	config: F3LithologyCandidateConfig,
+	canonical_config: F3FiveWayConfig,
+) -> dict[str, object]:
+	"""Write the five-file candidate-versus-five-way summary after the audit."""
+	summary_root = _five_way_summary_root(config)
+	report = inspect_f3_lithology_candidate_five_way(config, canonical_config)
+	rows = report['rows']
+	comparisons = candidate_five_way_comparisons(config.candidate_id)
+	paired = build_paired_rows(
+		rows,
+		comparisons=comparisons,
+		metrics=SUMMARY_METRICS,
+		data_sizes=DATA_SIZES,
+		layout_ids=LAYOUT_IDS,
+	)
+	by_size = _with_paired_means(
+		aggregate_paired_rows_by_size(
+			paired,
+			comparisons=comparisons,
+			metrics=SUMMARY_METRICS,
+			data_sizes=DATA_SIZES,
+			layout_ids=LAYOUT_IDS,
+		),
+		paired,
+	)
+	outputs = {
+		COMPARISON_CSV_NAME: _csv_text(FIVE_WAY_COMPARISON_FIELDNAMES, rows),
+		PAIRED_DELTAS_CSV_NAME: _csv_text(PAIRED_FIELDNAMES, paired),
+		SUMMARY_BY_SIZE_CSV_NAME: _csv_text(BY_SIZE_FIELDNAMES, by_size),
+		SUMMARY_JSON_NAME: json.dumps(
+			_five_way_summary_payload(config, report, comparisons, by_size),
+			indent=2,
+			sort_keys=True,
+		)
+		+ '\n',
+		SUMMARY_MD_NAME: _five_way_summary_markdown(config, report, by_size),
+	}
+	write_atomic_summary(summary_root, outputs)
+	return {
+		'candidate_id': config.candidate_id,
+		'complete_jobs': report['complete_jobs'],
+		'summary_root': str(summary_root),
+		'outputs': [str(summary_root / name) for name in FIVE_WAY_SUMMARY_OUTPUT_NAMES],
+	}
+
+
 def _require_exact_keys(
-	value: Mapping[str, object], expected: set[str], label: str
+	value: Mapping[str, object],
+	expected: set[str],
+	label: str,
+	*,
+	optional: set[str] | None = None,
 ) -> None:
-	keys = set(value)
+	keys = set(value) - (optional or set())
 	if keys == expected:
 		return
 	missing = sorted(expected - keys)
 	unexpected = sorted(str(key) for key in keys - expected)
+	allowed = f'{sorted(expected)!r}'
+	if optional:
+		allowed += f' plus optional {sorted(optional)!r}'
 	raise ValueError(
-		f'{label} keys must be exactly {sorted(expected)!r}; '
+		f'{label} keys must be exactly {allowed}; '
 		f'missing={missing!r}, unexpected={unexpected!r}'
 	)
+
+
+def _five_way_summary_root(config: F3LithologyCandidateConfig) -> Path:
+	if config.five_way_summary_root is None:
+		raise ValueError(
+			f'outputs.{FIVE_WAY_SUMMARY_ROOT_KEY} is required for the candidate '
+			'versus five-way summary'
+		)
+	return config.five_way_summary_root
+
+
+@dataclass(frozen=True)
+class _FiveWaySource:
+	"""One model of the candidate-versus-five-way matrix and its current SHAs."""
+
+	model: F3FiveWayModelSource
+	runs_root: Path
+	current: Mapping[str, object]
+
+
+def _candidate_five_way_sources(
+	config: F3LithologyCandidateConfig,
+	canonical_config: F3FiveWayConfig,
+	provenance: Mapping[str, object],
+) -> list[_FiveWaySource]:
+	survey_id = canonical_config.dataset['name']
+	sources = [
+		_FiveWaySource(
+			model=F3FiveWayModelSource(
+				model_id=config.candidate_id,
+				checkpoint=config.checkpoint,
+				embeddings_dir=config.embeddings_dir,
+				expected={},
+			),
+			runs_root=config.runs_root,
+			current={key: provenance[key] for key in SOURCE_SHA_KEYS},
+		)
+	]
+	sources.extend(
+		_FiveWaySource(
+			model=model,
+			runs_root=canonical_config.runs_root,
+			current=_current_source_provenance(model, survey_id),
+		)
+		for model in canonical_config.models
+	)
+	return sources
+
+
+def _current_source_provenance(
+	model: F3FiveWayModelSource, survey_id: str
+) -> dict[str, str]:
+	label = f'canonical {model.model_id}'
+	if not model.checkpoint.is_file():
+		raise FileNotFoundError(
+			f'{label} checkpoint does not exist: {model.checkpoint}'
+		)
+	files = _required_embedding_files(model.embeddings_dir, survey_id, label=label)
+	return {
+		'checkpoint_path': str(model.checkpoint),
+		'checkpoint_sha256': file_sha256(model.checkpoint),
+		'embeddings_dir': str(model.embeddings_dir),
+		'embeddings_sha256': file_sha256(files.embeddings),
+		'embedding_metadata_sha256': file_sha256(files.metadata),
+		'valid_tokens_sha256': file_sha256(files.valid_tokens),
+	}
+
+
+def _five_way_row(
+	canonical_config: F3FiveWayConfig,
+	source: _FiveWaySource,
+	*,
+	layout_id: str,
+	data_size: str,
+	metrics_path: Path,
+) -> dict[str, object]:
+	model = source.model
+	label = f'{model.model_id}/{layout_id}/{data_size}'
+	metrics = _summary_metrics(metrics_path, label=label)
+	evidence = read_f3_lithology_job_evidence(
+		canonical_config,
+		model=model,
+		layout_id=layout_id,
+		data_size=data_size,
+		job_dir=metrics_path.parent.parent,
+	)
+	_assert_job_source_matches(evidence, source.current, label=label)
+	return {
+		'model_id': model.model_id,
+		'layout_id': layout_id,
+		'data_size': data_size,
+		'checkpoint_path': str(model.checkpoint),
+		'embeddings_dir': str(model.embeddings_dir),
+		**evidence,
+		**metrics,
+		'metrics_path': str(metrics_path),
+	}
+
+
+def _summary_metrics(path: Path, *, label: str) -> dict[str, float]:
+	metrics = _read_json(path, label=label)
+	values: dict[str, float] = {}
+	for key in SUMMARY_METRICS:
+		value = metrics.get(key)
+		if not isinstance(value, int | float) or isinstance(value, bool):
+			raise ValueError(  # noqa: TRY004 - malformed artifacts are stale data
+				f'{label} metrics {key} must be numeric'
+			)
+		if not math.isfinite(float(value)):
+			raise ValueError(f'{label} metrics {key} must be finite')
+		values[key] = float(value)
+	return values
+
+
+def _validate_candidate_five_way_identity(
+	rows: list[dict[str, object]], *, model_ids: list[str]
+) -> None:
+	_validate_shared_row_value(
+		rows, key='valid_tokens_sha256', label='valid-token identity'
+	)
+	_validate_shared_row_value(
+		rows, key='validation_identity', label='validation mask identity'
+	)
+	_validate_shared_row_value(
+		rows, key='validation_voxel_count', label='validation voxel count'
+	)
+	_validate_cell_groups(rows, model_ids=model_ids)
+	_validate_distinct_encoders(rows)
+	for row in rows:
+		del row['_validation_tile_manifest_sha256']
+
+
+def _validate_shared_row_value(
+	rows: list[dict[str, object]], *, key: str, label: str
+) -> None:
+	values = {row[key] for row in rows}
+	if len(values) != 1:
+		raise ValueError(
+			f'{label} must be shared by all {len(rows)} jobs; '
+			f'got {sorted(str(value) for value in values)!r}'
+		)
+
+
+def _validate_cell_groups(
+	rows: list[dict[str, object]], *, model_ids: list[str]
+) -> None:
+	grouped: dict[tuple[str, str], list[dict[str, object]]] = {}
+	for row in rows:
+		key = (str(row['layout_id']), str(row['data_size']))
+		grouped.setdefault(key, []).append(row)
+	for (layout_id, data_size), group in grouped.items():
+		models = sorted(str(row['model_id']) for row in group)
+		if models != sorted(model_ids):
+			raise ValueError(
+				f'{layout_id}/{data_size} must contain exactly one job per model; '
+				f'got {models!r}'
+			)
+		for key in ('supervision_identity', '_validation_tile_manifest_sha256'):
+			if len({str(row[key]) for row in group}) != 1:
+				raise ValueError(
+					f'{layout_id}/{data_size} {key} differs between models'
+				)
+
+
+def _validate_distinct_encoders(rows: list[dict[str, object]]) -> None:
+	encoders: dict[str, str] = {}
+	for row in rows:
+		model_id = str(row['model_id'])
+		duplicate = encoders.setdefault(str(row['encoder_checkpoint_sha256']), model_id)
+		if duplicate != model_id:
+			raise ValueError(
+				'encoder checkpoint SHA-256 must differ across models; '
+				f'{duplicate!r} and {model_id!r} match'
+			)
+
+
+def _with_paired_means(
+	by_size: list[dict[str, object]], paired: list[dict[str, object]]
+) -> list[dict[str, object]]:
+	enriched = []
+	for row in by_size:
+		cell = [
+			pair
+			for pair in paired
+			if pair['data_size'] == row['data_size']
+			and pair['comparison_id'] == row['comparison_id']
+			and pair['metric'] == row['metric']
+		]
+		enriched.append(
+			{
+				**row,
+				'candidate_mean': statistics.fmean(
+					float(pair['left_value']) for pair in cell
+				),
+				'reference_mean': statistics.fmean(
+					float(pair['right_value']) for pair in cell
+				),
+			}
+		)
+	return enriched
+
+
+def _five_way_summary_payload(
+	config: F3LithologyCandidateConfig,
+	report: Mapping[str, object],
+	comparisons: tuple[tuple[str, str, str], ...],
+	by_size: list[dict[str, object]],
+) -> dict[str, object]:
+	nested: dict[str, dict[str, dict[str, object]]] = {}
+	for row in by_size:
+		nested.setdefault(str(row['data_size']), {}).setdefault(
+			str(row['comparison_id']), {}
+		)[str(row['metric'])] = {key: row[key] for key in BY_SIZE_AGGREGATE_KEYS}
+	return {
+		'schema_version': 1,
+		'candidate_id': config.candidate_id,
+		'primary_metric': PRIMARY_METRIC,
+		'aggregation_unit': EXPECTED_AGGREGATION_UNIT,
+		'statistical_unit': 'layout_id',
+		'models': list(report['models']),
+		'job_count': report['complete_jobs'],
+		'comparisons': [
+			{
+				'comparison_id': comparison_id,
+				'left_model': left_model,
+				'right_model': right_model,
+			}
+			for comparison_id, left_model, right_model in comparisons
+		],
+		'by_size': nested,
+		'provenance': report['provenance'],
+	}
+
+
+def _five_way_summary_markdown(
+	config: F3LithologyCandidateConfig,
+	report: Mapping[str, object],
+	by_size: list[dict[str, object]],
+) -> str:
+	canonical_models = ', '.join(f'`{model_id}`' for model_id in report['models'][1:])
+	lines = [
+		'# F3 lithology candidate versus five-way summary',
+		'',
+		(
+			f'Candidate `{config.candidate_id}` versus the canonical five-way '
+			f'models {canonical_models}. Primary metric: `{PRIMARY_METRIC}` on '
+			'unique validation voxels; paired unit is `layout_id`, aggregated '
+			'per size.'
+		),
+		'',
+		(
+			'| size | comparison | candidate mean | reference mean | delta mean '
+			'| median | sample std | +/0/- |'
+		),
+		'|---|---|---:|---:|---:|---:|---:|---|',
+	]
+	lines.extend(
+		(
+			f'| {row["data_size"]} | {row["comparison_id"]} '
+			f'| {row["candidate_mean"]:.6f} | {row["reference_mean"]:.6f} '
+			f'| {row["mean"]:.6f} | {row["median"]:.6f} '
+			f'| {row["sample_std"]:.6f} '
+			f'| {row["positive_count"]}/{row["zero_count"]}'
+			f'/{row["negative_count"]} |'
+		)
+		for row in by_size
+		if row['metric'] == PRIMARY_METRIC
+	)
+	lines.append('')
+	return '\n'.join(lines)
 
 
 def _required_embedding_files(
@@ -759,9 +1236,14 @@ def _csv_text(fieldnames: tuple[str, ...], rows: list[dict[str, object]]) -> str
 
 
 __all__ = [
+	'CANDIDATE_FIVE_WAY_COMPARISONS',
+	'CANDIDATE_MODEL_PLACEHOLDER',
 	'COMPARISON_CSV_NAME',
 	'COMPARISON_FIELDNAMES',
 	'EXPECTED_AGGREGATION_UNIT',
+	'FIVE_WAY_COMPARISON_FIELDNAMES',
+	'FIVE_WAY_SUMMARY_OUTPUT_NAMES',
+	'FIVE_WAY_SUMMARY_ROOT_KEY',
 	'METADATA_IDENTITY_KEYS',
 	'PRIMARY_METRIC',
 	'SUMMARY_JSON_NAME',
@@ -769,10 +1251,13 @@ __all__ = [
 	'SUMMARY_OUTPUT_NAMES',
 	'F3LithologyCandidateConfig',
 	'audit_f3_lithology_candidate_source',
+	'candidate_five_way_comparisons',
 	'f3_lithology_candidate_config_from_mapping',
+	'inspect_f3_lithology_candidate_five_way',
 	'inspect_f3_lithology_candidate_job',
 	'load_f3_lithology_candidate_canonical_config',
 	'resolve_f3_lithology_candidate_job',
 	'run_f3_lithology_candidate_job',
 	'summarize_f3_lithology_candidate',
+	'summarize_f3_lithology_candidate_five_way',
 ]
