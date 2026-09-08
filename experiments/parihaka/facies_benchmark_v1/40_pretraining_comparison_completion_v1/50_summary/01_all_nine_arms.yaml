@@ -1,0 +1,68 @@
+output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/pretraining_comparison_completion_v1/summary
+models:
+  mae:
+    model_id: mae
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/mae_continue/full_25ep/latest.pt
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs
+    epoch: 25
+    global_step: 15625
+  mae_hmm_k6_distill010:
+    model_id: mae_hmm_k6_distill010
+    train_config: experiments/parihaka/facies_benchmark_v1/38_channel_hmm_distillation_weight_v1/20_stage2/mae100/distill010/01_full_25ep.yaml
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/hmm_distillation_weight_v1/mae100/distill010/full_25ep/latest.pt
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/pretraining_comparison_completion_v1/runs
+    epoch: 25
+    global_step: 15625
+    distillation_weight: 0.1
+  mae_hmm_k6:
+    model_id: mae_hmm_k6
+    train_config: experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/hmm/k6/full_25ep/latest.pt
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs
+    epoch: 25
+    global_step: 15625
+    distillation_weight: 0.2
+  local_barlow_twins_rot90_asym_g060_3ep:
+    model_id: local_barlow_twins_rot90_asym_g060_3ep
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/local_bt_rot90_asym_g060_v1/full_3ep/latest.pt
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs
+    epoch: 3
+    global_step: 1875
+  local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill010:
+    model_id: local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill010
+    train_config: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/local_bt3/distill010/01_full_25ep.yaml
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/local_bt3/distill010/full_25ep/latest.pt
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/pretraining_comparison_completion_v1/runs
+    epoch: 25
+    global_step: 15625
+    distillation_weight: 0.1
+  local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill020:
+    model_id: local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill020
+    train_config: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/local_bt3/distill020/01_full_25ep.yaml
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/local_bt3/distill020/full_25ep/latest.pt
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/pretraining_comparison_completion_v1/runs
+    epoch: 25
+    global_step: 15625
+    distillation_weight: 0.2
+  random:
+    model_id: random
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/runs
+    epoch: 0
+    global_step: 0
+  random_init_self_target_hmm_k6_distill010:
+    model_id: random_init_self_target_hmm_k6_distill010
+    train_config: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/random/distill010/01_full_25ep.yaml
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/random/distill010/full_25ep/latest.pt
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/pretraining_comparison_completion_v1/runs
+    epoch: 25
+    global_step: 15625
+    distillation_weight: 0.1
+  random_init_self_target_hmm_k6_distill020:
+    model_id: random_init_self_target_hmm_k6_distill020
+    train_config: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/random/distill020/01_full_25ep.yaml
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/random/distill020/full_25ep/latest.pt
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/pretraining_comparison_completion_v1/runs
+    epoch: 25
+    global_step: 15625
+    distillation_weight: 0.2
