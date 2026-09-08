@@ -43,16 +43,54 @@ training each frozen horizon decoder. Every arm runs all five layouts × three
 data sizes with the existing 50-epoch decoder contract. Random baseline cells are
 reused under `local_bt_recipe_arm_v1/runs`; each new model has its own directory.
 
-If execution stops after the smoke run but before the first full checkpoint,
-re-running the pretraining driver will refuse the existing smoke output instead
-of overwriting it. Inspect that interrupted stage before resuming; do not delete
-or overwrite its artifacts merely to bypass the safety check.
+If a LocalBT execution stops after the smoke run but before the first full
+checkpoint, re-running the pretraining driver will refuse the existing smoke
+output instead of overwriting it. Inspect that interrupted stage before resuming;
+do not delete or overwrite its artifacts merely to bypass the safety check.
+The two exact random recipes use the coordination rules below, including strict
+reuse of a completed, independent two-step smoke checkpoint.
 
 Each paired summary requires 30 cells: 15 new arm cells and the same 15 completed
 Random cells. Summary JSON, Markdown, and per-cell CSV stay under
 `artifacts/` in `horizon/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/summary/`.
 The drivers write no reports or bulk files to versioned directories. See the
 [report sharing policy](../../../../docs/report_sharing_policy.md).
+
+## Coordinated random HMM execution
+
+The shared HMM CLI coordinates only this experiment's canonical random
+`distill010` and `distill020` recipes, with their unchanged `full_25ep` and
+independent `smoke_2step` outputs. LocalBT and unrelated jobs retain their existing
+behavior. The same arm's smoke and full commands share one POSIX lock outside
+the four scientific checkpoint outputs, under the pretraining suite's
+`.random_hmm_locks/` directory. Different arms do not share a lane-wide lock.
+
+The CLI obtains this lock before training initializes CUDA. After acquiring it,
+it rechecks the exact resolved recipe, current input identities, and checkpoint
+state. A strictly completed checkpoint is reused without training or rewriting
+its outputs; a valid partial checkpoint resumes from the canonical latest file.
+Foreign, inconsistent, or aliased evidence fails closed. The driver may have
+observed a partial checkpoint before waiting, so this second inspection is
+required even when it supplied `--resume`. Dry-runs create neither locks nor
+outputs and do not initialize CUDA.
+
+Before a fresh run, the coordinator atomically creates an immutable
+`<arm>.<full_25ep|smoke_2step>.inputs.json` receipt in `.random_hmm_locks/` without
+replacing an existing file. The receipt binds the resolved configuration, parent
+checkpoint, pseudo-targets, manifests, and declared embedding/clustering lineage.
+Resume and completed-run reuse require this receipt and unchanged inputs; the
+coordinator never backfills a missing receipt for existing checkpoint outputs.
+Smoke and full runs have separate receipts while sharing the same arm lock.
+
+An auxiliary invocation may use the same CLI and canonical YAML as the main
+driver, after a supported `--dry-run`, input validation, and an explicit GPU
+capacity check. A lock is not a GPU reservation: the operator must assign an
+available device and limit concurrent jobs. Before enabling auxiliary execution,
+verify that no random-arm producer started without this coordination is still
+running. Do not stop a healthy producer to retrofit a lock, and do not rely on
+the main driver's current phase or an estimated time gap to prevent two writers.
+The source, epoch, batch-size, precision, seed, and downstream contracts above
+remain unchanged.
 
 ## Final completion evidence
 

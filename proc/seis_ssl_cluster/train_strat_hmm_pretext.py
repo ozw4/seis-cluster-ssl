@@ -1,6 +1,5 @@
 """Thin entrypoint for strat HMM pretext training."""
 
-
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -23,6 +22,7 @@ from seis_ssl_cluster.training.strat_hmm import (
 	run_strat_hmm_pretext_training,
 )
 from seis_ssl_cluster.utils.cli import print_config_summary
+from seis_ssl_cluster.volve.coordinated_hmm import run_coordinated_volve_hmm_if_scoped
 
 if TYPE_CHECKING:
 	import argparse
@@ -108,6 +108,13 @@ def main() -> None:
 		resume=args.resume,
 		quarantine_invalid=args.quarantine_invalid,
 	)
+	if checkpoint_path is None:
+		checkpoint_path = run_coordinated_volve_hmm_if_scoped(
+			config,
+			config_path=config_path,
+			resume=args.resume,
+			quarantine_invalid=args.quarantine_invalid,
+		)
 	if checkpoint_path is None:
 		checkpoint_path = run_strat_hmm_pretext_training(
 			config,
