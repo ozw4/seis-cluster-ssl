@@ -131,3 +131,64 @@ driver also has its own exclusive lock; lock paths reject symlinks, hardlinks,
 and non-regular files without truncating their contents. Each invocation has a
 fresh `logs/hmm_lane_*` directory, preserving earlier logs on re-entry.
 The supported `--dry-run` does not create locks, logs, or training outputs.
+
+## Optional cooperative GPU 1 Channel lane
+
+Once all ten MAE-HMM0.1 staging cells have naturally finished and have been
+audited and byte-identically published, GPU 1 can run three canonical decoders
+for one ready new HMM arm. First let every main decoder started before the
+cooperative CLI was installed finish naturally. Do not stop, migrate, or adopt
+an incomplete old decoder. Also wait for the chosen arm's main embedding
+producer to exit successfully; metadata presence alone is not sufficient.
+
+```bash
+bash experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/run_channel_lane.sh \
+  --model local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill010 --dry-run
+bash experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/run_channel_lane.sh \
+  --model local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill010
+```
+
+Only the four new LocalBT/Random HMM model IDs are accepted. Each invocation
+handles all fifteen cells of that one arm, in reverse layout order and
+large/medium/small order, with exactly three worker slots and four CPU threads
+per child. It cannot change seeds, budgets, precision, layouts, or output roots.
+The dry run lists the exact commands and validates configuration and CLI
+coordination without opening locks, loading GPU inputs, or writing artifacts.
+Repeat for another arm only after the main driver publishes its embeddings.
+The existing main queue remains responsible for all four arms and the summary.
+
+Before execution, the auxiliary takes a nonblocking singleton lock and the
+existing staging driver's lock. It requires strict completion of all ten old
+staging cells, expected cell identities, and byte-identical canonical copies.
+It rejects live staging workers, live embedding producers for the chosen arm,
+and any live new-arm decoder that does not hold its exact shared cell lock.
+An inaccessible or ambiguous process record fails closed. A failed gate
+releases its locks, allowing legitimate old staging recovery. Both driver locks
+are inherited by children, so a surviving child keeps the GPU-1 lane reserved
+even if its parent exits unexpectedly. Lock files must never be unlinked.
+This is not a general GPU allocator: continue checking other users' GPU capacity
+and retain the existing limit of three owned GPU-1 decoders.
+
+New main and auxiliary decoder CLI processes cooperate only for the sixty
+canonical new-arm cells. They take the same cell lock before CUDA setup, then
+re-read the exact recipe, audit the full HMM source, all embedding arrays and
+metadata, and construct a fresh benchmark identity. Complete cells are audited
+and skipped read-only; owned partial cells resume their own latest checkpoint.
+Foreign inputs, mismatched hashes, ambiguous partial outputs, or scientific
+overrides fail closed. Initial input hashes are atomically recorded outside the
+canonical four-file cell, alongside its lock in `.channel_cell_locks` under
+the comparison run root. These receipts pin checkpoint, embedding, label, and
+configuration bytes across future resumes. An old partial without a receipt
+cannot be adopted. An old complete cell may be checked and reused, but historical
+embedding-body hashes cannot be retroactively proved if the old format did not
+record them. No receipt is added to an old complete output.
+
+Each invocation preserves logs in a new `logs/channel_lane_*` directory. On a
+child failure, queued work is suppressed and already-running children are
+allowed to finish; no trainer is killed. The main driver still owns embeddings
+and the final nine-arm summary. Since older main scripts use metrics presence
+to skip cells, a summary can encounter the brief final-checkpoint publication
+window and fail its strict audit. After **all** writers finish, run the full
+`--check-only` summary command above; generate the summary only if that passes
+and the summary output does not already exist. Never overwrite a failed audit
+or a partial result to make the queue continue.
