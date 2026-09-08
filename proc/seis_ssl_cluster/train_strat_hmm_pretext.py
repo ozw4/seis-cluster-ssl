@@ -17,6 +17,7 @@ from seis_ssl_cluster.config import (
 	load_config,
 	resolve_strat_hmm_pretext_config,
 )
+from seis_ssl_cluster.parihaka.coordinated_hmm import run_coordinated_hmm_if_scoped
 from seis_ssl_cluster.training.strat_hmm import (
 	inspect_strat_hmm_pretext_plan,
 	run_strat_hmm_pretext_training,
@@ -101,11 +102,18 @@ def main() -> None:
 		print('execution: dry-run; training skipped')
 		return
 
-	checkpoint_path = run_strat_hmm_pretext_training(
+	checkpoint_path = run_coordinated_hmm_if_scoped(
 		config,
+		config_path=config_path,
 		resume=args.resume,
 		quarantine_invalid=args.quarantine_invalid,
 	)
+	if checkpoint_path is None:
+		checkpoint_path = run_strat_hmm_pretext_training(
+			config,
+			resume=args.resume,
+			quarantine_invalid=args.quarantine_invalid,
+		)
 	print(f'checkpoint: {checkpoint_path}')
 
 
