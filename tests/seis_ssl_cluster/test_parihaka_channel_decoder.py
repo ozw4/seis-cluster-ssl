@@ -30,6 +30,7 @@ from seis_ssl_cluster.parihaka.channel_decoder import (
 	channel_metrics,
 	decoder_initial_state_sha256,
 	deterministic_tile_order,
+	evaluate_completed_validation_channel_job,
 	inspect_channel_decoder_job,
 	inspect_embedding_pair,
 	inspect_embedding_sources,
@@ -1156,6 +1157,103 @@ def test_validation_only_job_never_evaluates_test(
 	)
 	assert latest['completed'] is True
 	assert latest['evaluation_mode'] == 'validation_only'
+
+
+def _completed_validation_plan(
+	tmp_path: Path,
+) -> channel_decoder_module.ChannelDecoderPlan:
+	config = channel_decoder_config_from_mapping(_generic_config_mapping(tmp_path))
+	config = replace(
+		config,
+		train=replace(config.train, epochs=1),
+		tiles=DecoderTiles((1, 1, 1), (1, 1, 1)),
+	)
+	_write_generic_one_token_sources(config)
+	labels = np.ones((8, 8, 8), dtype=np.int8)
+	labels[:, :, ::2] = 5
+	_write_labels(config, labels)
+	plan = inspect_channel_decoder_job(
+		config,
+		model='mae_hmm_k6',
+		layout_id='layout_000',
+		data_size='small',
+		layout_config=_write_one_token_layout(tmp_path),
+	)
+	assert run_channel_decoder_job(plan, device='cpu', validation_only=True)
+	return plan
+
+
+def test_completed_validation_adds_test_without_training_or_source_changes(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	plan = _completed_validation_plan(tmp_path)
+	source = plan.output_dir
+	before = {path.name: file_sha256(path) for path in source.iterdir()}
+	source_metrics = json.loads((source / 'metrics.json').read_text())
+	output = tmp_path / 'completed_evaluation'
+
+	def no_training(*_args: object, **_kwargs: object) -> None:
+		raise AssertionError('test-only evaluation must not train')
+
+	monkeypatch.setattr(
+		channel_decoder_module, 'train_voxel_decoder_one_epoch', no_training
+	)
+	path = evaluate_completed_validation_channel_job(
+		replace(plan, output_dir=output), source_dir=source, device='cpu'
+	)
+	metrics = json.loads(path.read_text())
+	assert metrics['evaluation_mode'] == 'validation_and_test'
+	assert 'test' in metrics
+	assert metrics['best_epoch'] == source_metrics['best_epoch']
+	assert metrics['validation'] == source_metrics['validation']
+	assert metrics['benchmark_identity'] == source_metrics['benchmark_identity']
+	assert metrics['evaluation_provenance']['additional_optimizer_steps'] == 0
+	assert {path.name for path in output.iterdir()} == {
+		'best.pt',
+		'latest.pt',
+		'history.csv',
+		'metrics.json',
+	}
+	assert {path.name: file_sha256(path) for path in source.iterdir()} == before
+	for name in ('best.pt', 'latest.pt', 'history.csv'):
+		assert file_sha256(output / name) == before[name]
+	with pytest.raises(FileExistsError, match='non-empty'):
+		evaluate_completed_validation_channel_job(
+			replace(plan, output_dir=output), source_dir=source, device='cpu'
+		)
+	with pytest.raises(ValueError, match='separate output'):
+		evaluate_completed_validation_channel_job(plan, source_dir=source, device='cpu')
+
+
+@pytest.mark.parametrize(
+	('filename', 'field', 'value', 'message'),
+	[
+		('latest.pt', 'epoch', 0, 'completed validation-only'),
+		('latest.pt', 'completed', False, 'completed validation-only'),
+		('latest.pt', 'run_identity', {}, 'source identity'),
+		('best.pt', 'epoch', 99, 'validation-selected'),
+	],
+)
+def test_completed_validation_rejects_invalid_source(
+	tmp_path: Path,
+	filename: str,
+	field: str,
+	value: object,
+	message: str,
+) -> None:
+	plan = _completed_validation_plan(tmp_path)
+	source = plan.output_dir
+	checkpoint = source / filename
+	payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
+	payload[field] = value
+	torch.save(payload, checkpoint)
+	output = tmp_path / 'rejected_evaluation'
+	with pytest.raises(ValueError, match=message):
+		evaluate_completed_validation_channel_job(
+			replace(plan, output_dir=output), source_dir=source, device='cpu'
+		)
+	assert not output.exists()
 
 
 @pytest.mark.parametrize(

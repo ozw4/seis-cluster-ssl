@@ -11,6 +11,7 @@ from seis_ssl_cluster.parihaka.channel_data import CHANNEL_TEST_MODE
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	channel_decoder_config_from_mapping,
 	decoder_initial_state_sha256,
+	evaluate_completed_validation_channel_job,
 	inspect_channel_decoder_job,
 	run_channel_decoder_job,
 )
@@ -42,6 +43,14 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument('--max-steps', type=int)
 	parser.add_argument('--resume', type=Path)
 	parser.add_argument(
+		'--evaluate-completed-validation',
+		type=Path,
+		help=(
+			'Evaluate test from a completed validation-only job '
+			'in a separate output root.'
+		),
+	)
+	parser.add_argument(
 		'--validation-only',
 		action='store_true',
 		help='save validation metrics without test inference or test metrics',
@@ -52,6 +61,10 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
 	"""Inspect or execute exactly one condition."""
 	args = build_parser().parse_args()
+	if args.evaluate_completed_validation is not None and (
+		args.resume is not None or args.max_steps is not None or args.validation_only
+	):
+		raise ValueError('completed validation evaluation cannot train or resume')
 	raw = load_config_for_cli(args.config, loader=load_config)
 	config = channel_decoder_config_from_mapping(raw)
 	plan = inspect_channel_decoder_job(
@@ -124,6 +137,12 @@ def main() -> None:
 			f'{"validation_only" if args.validation_only else "validation_and_test"}'
 		)
 		print('execution: dry-run; no files written')
+		return
+	if args.evaluate_completed_validation is not None:
+		metrics = evaluate_completed_validation_channel_job(
+			plan, source_dir=args.evaluate_completed_validation, device=args.device
+		)
+		print(f'metrics: {metrics}')
 		return
 	metrics = run_channel_decoder_job(
 		plan,

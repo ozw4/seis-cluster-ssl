@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import random
+import shutil
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
@@ -1177,6 +1178,104 @@ def run_channel_decoder_job(  # noqa: C901, PLR0912, PLR0915
 		0.0,
 		0,
 		completed=True,
+	)
+	return metrics_path
+
+
+def evaluate_completed_validation_channel_job(
+	plan: ChannelDecoderPlan,
+	*,
+	source_dir: Path,
+	device: str = 'auto',
+) -> Path:
+	"""Add held-out test metrics using a completed validation-selected decoder.
+
+	The source validation artifacts remain intact. Exact checkpoint copies and
+	provenance are published to the new job directory alongside the test metrics.
+	"""
+	if source_dir.resolve() == plan.output_dir.resolve():
+		raise ValueError('test evaluation requires a separate output directory')
+	_validate_output(plan.output_dir, None)
+	identity = _run_identity(plan)
+	source_metrics = _read_json(source_dir / METRICS_NAME)
+	latest = torch.load(
+		source_dir / LATEST_NAME, map_location='cpu', weights_only=False
+	)
+	best = torch.load(source_dir / BEST_NAME, map_location='cpu', weights_only=False)
+	if (
+		source_metrics.get('benchmark_identity') != identity
+		or latest.get('run_identity') != identity
+		or best.get('run_identity') != identity
+	):
+		raise ValueError('validation source identity does not match this Channel job')
+	if (
+		source_metrics.get('evaluation_mode') != 'validation_only'
+		or 'test' in source_metrics
+		or latest.get('evaluation_mode') != 'validation_only'
+		or latest.get('completed') is not True
+		or latest.get('epoch') != plan.config.train.epochs
+		or latest.get('global_step')
+		!= plan.config.train.epochs * plan.tile_counts['train']
+	):
+		raise ValueError('source must be a completed validation-only Channel job')
+	history = latest['history']
+	if len(history) != plan.config.train.epochs:
+		raise ValueError('validation source history does not cover the full budget')
+	selected_epoch = max(history, key=lambda row: row['validation_channel_iou'])[
+		'epoch'
+	]
+	if (
+		best.get('epoch') != selected_epoch
+		or latest.get('best_epoch') != selected_epoch
+		or source_metrics.get('best_epoch') != selected_epoch
+		or source_metrics.get('validation') != _public_metrics(best['validation'])
+	):
+		raise ValueError('source best checkpoint is not the validation-selected epoch')
+	run_device = _resolve_device(device)
+	_configure_determinism()
+	_seed_everything(plan.config.train.seed)
+	selected = plan.geometry.models[plan.model]
+	dataset = ChannelTileDataset(
+		embedding_path=selected.paths.embeddings,
+		valid_tokens_path=selected.paths.valid_tokens,
+		labels_path=plan.config.labels,
+		geometry=plan.geometry,
+		lines=plan.train_lines,
+		validation=plan.layouts.validation,
+		reserved_training=plan.reserved_training_lines,
+		split='test',
+		tiles=plan.config.tiles,
+		training_selection_mask=None,
+	)
+	decoder = _make_decoder(plan.config.decoder, plan.geometry.patch_size_xyz).to(
+		run_device
+	)
+	decoder.load_state_dict(best['model_state_dict'])
+	weights = torch.tensor(plan.class_weights, dtype=torch.float32, device=run_device)
+	test_metrics = _evaluate(
+		decoder, dataset, weights, run_device, amp=plan.config.train.amp
+	)
+	payload = {
+		**source_metrics,
+		'evaluation_mode': 'validation_and_test',
+		'test': _public_metrics(test_metrics),
+		'evaluation_provenance': {
+			'method': 'completed_validation_selected_checkpoint_test_only',
+			'source_dir': str(source_dir.resolve()),
+			'source_metrics_sha256': file_sha256(source_dir / METRICS_NAME),
+			'source_latest_sha256': file_sha256(source_dir / LATEST_NAME),
+			'source_best_sha256': file_sha256(source_dir / BEST_NAME),
+			'additional_optimizer_steps': 0,
+		},
+	}
+	plan.output_dir.mkdir(parents=True)
+	for name in (BEST_NAME, LATEST_NAME, HISTORY_NAME):
+		shutil.copy2(source_dir / name, plan.output_dir / name)
+		if file_sha256(source_dir / name) != file_sha256(plan.output_dir / name):
+			raise RuntimeError(f'copied validation artifact checksum mismatch: {name}')
+	metrics_path = plan.output_dir / METRICS_NAME
+	metrics_path.write_text(
+		json.dumps(payload, indent=2, sort_keys=True) + '\n', encoding='utf-8'
 	)
 	return metrics_path
 
