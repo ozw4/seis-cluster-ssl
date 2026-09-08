@@ -86,3 +86,48 @@ artifact root. They are not automatically published into canonical results.
 Adoption requires the complete-cell audit and a separate check that the main
 driver is not writing the corresponding canonical cell. Medium cells are not
 part of this staging driver.
+
+## Optional shared GPU 0 HMM lane
+
+After the first LocalBT-HMM0.1 source has finished and its GPU 0 HMM slot is
+available, the three remaining HMM sources can run ahead of the main driver's
+decoder queue. Check live GPU/process ownership and capacity before starting;
+this driver is not a GPU resource allocator. Keep the existing GPU 0 limit of
+three simultaneous HMM trainings and the GPU 1 staging limit of three decoders.
+
+```bash
+bash experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/run_hmm_lane.sh --dry-run
+bash experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/run_hmm_lane.sh
+```
+
+The auxiliary driver uses GPU 0 and four CPU threads, runs LocalBT-HMM0.2,
+Random-HMM0.1, and Random-HMM0.2 sequentially, and leaves embedding generation,
+all downstream cells, and the final comparison to `run_all.sh`. Each source
+retains its isolated one-step smoke run and unchanged 25-epoch full recipe.
+No live main script, running trainer, or scientific YAML needs to be modified
+or restarted. New main and auxiliary HMM CLI processes cooperate automatically
+only for these three canonical recipes and their exact smoke outputs.
+
+Before entering the training runner or initializing CUDA, they acquire the same
+Parihaka HMM lane lock and then the recipe lock. They re-read the exact canonical
+configuration and checkpoint after waiting. A strictly completed output is
+reused without training or modifying its files; a valid owned partial resumes
+its latest checkpoint. Foreign or corrupt evidence and noncanonical overrides
+fail closed. Full and smoke share the lane, so a main-process smoke cannot add
+an extra HMM alongside an auxiliary full run. Smoke completion is verified as
+one actual optimizer step, never inferred from a full-run checkpoint.
+
+Completion/resume checks include the full resolved configuration and its saved
+hash, model/scientific identity, exact current parent and pseudo-target file
+sets and hashes, checkpoint stage/kind/boundary counters, and optimizer/RNG
+state. The final full run must prove 25 epochs and 15,625 steps. Healthy training
+must still not be interrupted to exploit resume: the shuffle caveat above
+continues to apply.
+
+Shared locks live outside training outputs under
+`pretraining/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/.remaining_hmm_locks`
+within the artifact root. Do not unlink or replace lock files. The auxiliary
+driver also has its own exclusive lock; lock paths reject symlinks, hardlinks,
+and non-regular files without truncating their contents. Each invocation has a
+fresh `logs/hmm_lane_*` directory, preserving earlier logs on re-entry.
+The supported `--dry-run` does not create locks, logs, or training outputs.
