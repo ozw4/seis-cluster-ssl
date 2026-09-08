@@ -1,4 +1,4 @@
-'''Strict configuration and audit for one Volve horizon pretraining recipe arm.
+"""Strict configuration and audit for one Volve horizon pretraining recipe arm.
 
 The five-way benchmark pins the Local Barlow Twins lineage to a 100-epoch
 Stage 1 plus a 25-epoch Stage 2 continuation, so it cannot express a different
@@ -9,13 +9,13 @@ single-stage recipe that the config declares and the audit verifies against its
 own checkpoint.  The paired baseline is the same canonical random encoder the
 five-way benchmark uses, so recipe arms and the published random column measure
 the same quantity.
-'''
+"""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -27,6 +27,8 @@ from seis_ssl_cluster.volve.horizon_five_way_config import (
 	EXPECTED_MODEL_IDENTITIES,
 	FIVE_WAY_RANDOM_SEED,
 	LOCAL_BARLOW_TWINS_METHOD,
+	MAE_OBJECTIVE,
+	RANDOM_OBJECTIVE,
 	VolveHorizonFiveWayConfig,
 	VolveHorizonFiveWayModelSource,
 )
@@ -98,7 +100,7 @@ _RECIPE_KEYS = frozenset(
 
 @dataclass(frozen=True)
 class VolveHorizonRecipeArmRecipe:
-	'''One declared single-stage Local Barlow Twins pretraining recipe.'''
+	"""One declared single-stage Local Barlow Twins pretraining recipe."""
 
 	method: str
 	local_pairs_per_crop: int
@@ -113,18 +115,18 @@ class VolveHorizonRecipeArmRecipe:
 
 	@property
 	def steps_per_epoch(self) -> int:
-		'''Return the optimizer steps one epoch of this recipe performs.'''
+		"""Return the optimizer steps one epoch of this recipe performs."""
 		return self.samples_per_epoch // self.batch_size
 
 	@property
 	def global_steps(self) -> int:
-		'''Return the optimizer steps the finished checkpoint must report.'''
+		"""Return the optimizer steps the finished checkpoint must report."""
 		return self.epochs * self.steps_per_epoch
 
 
 @dataclass(frozen=True)
 class VolveHorizonRecipeArmConfig:
-	'''Resolved settings for one recipe arm paired with the random encoder.'''
+	"""Resolved settings for one recipe arm paired with the random encoder."""
 
 	artifact_root: Path
 	volve_root: Path
@@ -143,17 +145,18 @@ class VolveHorizonRecipeArmConfig:
 	checkpoint_selection: str
 	checkpoint_selections: tuple[str, ...]
 	benchmark_id: str
+	hmm: Mapping[str, object] | None = None
 
 	@property
 	def model_ids(self) -> tuple[str, ...]:
-		'''Return the fixed arm-then-baseline comparison order.'''
+		"""Return the fixed arm-then-baseline comparison order."""
 		return (self.arm_id, RECIPE_ARM_BASELINE_MODEL_ID)
 
 
 def volve_horizon_recipe_arm_config_from_mapping(
 	config: Mapping[str, object],
 ) -> VolveHorizonRecipeArmConfig:
-	'''Resolve the strict recipe-arm config without touching any artifact.'''
+	"""Resolve the strict recipe-arm config without touching any artifact."""
 	_validate_top_level_keys(config)
 	paths = _required_mapping(config, 'paths', 'config')
 	dataset = _required_mapping(config, 'dataset', 'config')
@@ -164,11 +167,8 @@ def volve_horizon_recipe_arm_config_from_mapping(
 	_validate_exact_keys(paths, frozenset({'artifact_root', 'volve_root'}), 'paths')
 	_validate_exact_keys(dataset, frozenset({'survey_id'}), 'dataset')
 	_validate_exact_keys(inputs, frozenset({'canonical_input_metadata'}), 'inputs')
-	_validate_exact_keys(
-		arm,
-		frozenset({'arm_id', 'checkpoint', 'embeddings_dir', 'recipe'}),
-		'arm',
-	)
+	arm_keys = frozenset({'arm_id', 'checkpoint', 'embeddings_dir', 'recipe'})
+	_validate_exact_keys(arm, arm_keys | ({'hmm'} if 'hmm' in arm else set()), 'arm')
 	_validate_exact_keys(
 		baseline,
 		frozenset({'checkpoint', 'embeddings_dir'}),
@@ -193,9 +193,7 @@ def volve_horizon_recipe_arm_config_from_mapping(
 		if not _is_relative_to(output_root, artifact_root):
 			raise ValueError(f'outputs.{key} must be below paths.artifact_root')
 		if _is_relative_to(output_root, volve_root):
-			raise ValueError(
-				f'outputs.{key} must not be below public paths.volve_root'
-			)
+			raise ValueError(f'outputs.{key} must not be below public paths.volve_root')
 
 	arm_id = _non_empty_string(arm.get('arm_id'), 'arm.arm_id')
 	if arm_id == RECIPE_ARM_BASELINE_MODEL_ID:
@@ -266,21 +264,28 @@ def volve_horizon_recipe_arm_config_from_mapping(
 		checkpoint_selection=checkpoint_selection,
 		checkpoint_selections=checkpoint_selections,
 		benchmark_id=benchmark_id,
+		hmm=_resolve_hmm(arm['hmm']) if 'hmm' in arm else None,
 	)
 
 
 def as_five_way_config(
 	config: VolveHorizonRecipeArmConfig,
 ) -> VolveHorizonFiveWayConfig:
-	'''Express the arm and its baseline in the shared two-source runner shape.'''
+	"""Express the arm and its baseline in the shared two-source runner shape."""
+	objective = (
+		MAE_OBJECTIVE
+		if config.hmm is not None and config.recipe.method == RANDOM_OBJECTIVE
+		else config.recipe.method
+	)
 	arm_source = VolveHorizonFiveWayModelSource(
 		model_id=config.arm_id,
 		checkpoint=config.arm_checkpoint,
 		embeddings_dir=config.arm_embeddings_dir,
 		expected={
-			'objective': config.recipe.method,
+			'objective': objective,
 			'local_pairs_per_crop': config.recipe.local_pairs_per_crop,
-			'stratigraphy_pretext': False,
+			'stratigraphy_pretext': config.hmm is not None,
+			**({'base_objective': objective, 'hmm_k': 6} if config.hmm else {}),
 		},
 	)
 	baseline_source = VolveHorizonFiveWayModelSource(
@@ -308,7 +313,7 @@ def as_five_way_config(
 def plan_volve_horizon_recipe_arm_sources(
 	config: VolveHorizonRecipeArmConfig,
 ) -> tuple[dict[str, object], ...]:
-	'''Return the declared source plan without opening an artifact.'''
+	"""Return the declared source plan without opening an artifact."""
 	return (
 		{
 			'model_id': config.arm_id,
@@ -316,6 +321,7 @@ def plan_volve_horizon_recipe_arm_sources(
 			'checkpoint': str(config.arm_checkpoint),
 			'embeddings_dir': str(config.arm_embeddings_dir),
 			'recipe': _recipe_identity(config.recipe),
+			**({'hmm': dict(config.hmm)} if config.hmm is not None else {}),
 		},
 		{
 			'model_id': RECIPE_ARM_BASELINE_MODEL_ID,
@@ -332,11 +338,11 @@ def audit_volve_horizon_recipe_arm_sources(
 	*,
 	model_ids: Sequence[str] | None = None,
 ) -> dict[str, object]:
-	'''Audit the selected arm and baseline checkpoints against the config.
+	"""Audit the selected arm and baseline checkpoints against the config.
 
 	Selecting one model audits only that source, so the baseline cells can run
 	before the arm checkpoint exists.
-	'''
+	"""
 	selected = _normalize_model_ids(config, model_ids)
 	reports: dict[str, dict[str, object]] = {}
 	if config.arm_id in selected:
@@ -357,7 +363,7 @@ def inspect_volve_horizon_recipe_arm_embedding_suite(
 	source_audit: Mapping[str, object] | None = None,
 	model_ids: Sequence[str] | None = None,
 ) -> VolveHorizonFiveWayEmbeddingSuite:
-	'''Inspect the selected embeddings on the shared frozen support.'''
+	"""Inspect the selected embeddings on the shared frozen support."""
 	selected = _normalize_model_ids(config, model_ids)
 	audit = (
 		audit_volve_horizon_recipe_arm_sources(config, model_ids=selected)
@@ -376,7 +382,7 @@ def plan_volve_horizon_recipe_arm_jobs(
 	*,
 	model_ids: Sequence[str] | None = None,
 ) -> tuple[tuple[str, str, str], ...]:
-	'''Enumerate every cell of the selected model subset.'''
+	"""Enumerate every cell of the selected model subset."""
 	selected = _normalize_model_ids(config, model_ids)
 	jobs = tuple(
 		(model_id, layout_id, data_size)
@@ -397,7 +403,7 @@ def resolve_volve_horizon_recipe_arm_job(
 	layout: str,
 	size: str,
 ) -> VolveHorizonFiveWayJob:
-	'''Resolve one fixed cell without opening any source artifact.'''
+	"""Resolve one fixed cell without opening any source artifact."""
 	_normalize_model_ids(config, (model,))
 	return resolve_volve_horizon_five_way_job(
 		as_five_way_config(config),
@@ -415,7 +421,7 @@ def inspect_volve_horizon_recipe_arm_job(
 	data: VolveHorizonData | None = None,
 	embedding_suite: VolveHorizonFiveWayEmbeddingSuite | None = None,
 ) -> FrozenHorizonPlan:
-	'''Run the recipe-arm preflight and build one frozen decoder plan.'''
+	"""Run the recipe-arm preflight and build one frozen decoder plan."""
 	suite = (
 		inspect_volve_horizon_recipe_arm_embedding_suite(
 			config,
@@ -439,7 +445,7 @@ def run_volve_horizon_recipe_arm_job(
 	max_steps: int | None = None,
 	resume: str | Path | None = None,
 ) -> Path | None:
-	'''Execute one preflighted cell through the shared frozen decoder loop.'''
+	"""Execute one preflighted cell through the shared frozen decoder loop."""
 	return run_volve_horizon_five_way_job(
 		plan,
 		device=device,
@@ -451,6 +457,17 @@ def run_volve_horizon_recipe_arm_job(
 def _audit_recipe_arm_checkpoint(  # noqa: C901
 	config: VolveHorizonRecipeArmConfig,
 ) -> dict[str, object]:
+	if config.hmm is not None:
+		from seis_ssl_cluster.volve.horizon_hmm_recipe import (  # noqa: PLC0415
+			audit_hmm_recipe_checkpoint,
+		)
+
+		return audit_hmm_recipe_checkpoint(config)
+	if config.recipe.method == RANDOM_OBJECTIVE:
+		report = _audit_baseline_checkpoint(
+			replace(config, baseline_checkpoint=config.arm_checkpoint)
+		)
+		return {**report, 'model_id': config.arm_id, 'role': 'recipe_arm'}
 	recipe = config.recipe
 	label = f'{config.arm_id} checkpoint'
 	checkpoint_sha = _checkpoint_sha256(label, config.arm_checkpoint)
@@ -458,8 +475,7 @@ def _audit_recipe_arm_checkpoint(  # noqa: C901
 	training_state = _required_mapping(payload, 'training_state', label)
 	if training_state.get('stage') != BARLOW_TWINS_TRAINING_STAGE:
 		raise ValueError(
-			f'{label} training_state.stage must equal '
-			f'{BARLOW_TWINS_TRAINING_STAGE!r}'
+			f'{label} training_state.stage must equal {BARLOW_TWINS_TRAINING_STAGE!r}'
 		)
 	if training_state.get('completed_epoch') is not True:
 		raise ValueError(f'{label} must be a completed pretraining epoch')
@@ -561,6 +577,8 @@ def _audit_baseline_checkpoint(
 
 
 def _recipe_identity(recipe: VolveHorizonRecipeArmRecipe) -> dict[str, object]:
+	if recipe.method == RANDOM_OBJECTIVE:
+		return {'method': RANDOM_OBJECTIVE, 'seed': recipe.seed, 'stages': 0}
 	return {
 		'method': recipe.method,
 		'local_pairs_per_crop': recipe.local_pairs_per_crop,
@@ -584,12 +602,26 @@ def _recipe_identity(recipe: VolveHorizonRecipeArmRecipe) -> dict[str, object]:
 
 def _resolve_recipe(value: object) -> VolveHorizonRecipeArmRecipe:
 	recipe = _required_mapping({'recipe': value}, 'recipe', 'arm')
+	if recipe.get('method') == RANDOM_OBJECTIVE:
+		_validate_exact_keys(recipe, frozenset({'method', 'seed'}), 'arm.recipe')
+		if recipe.get('seed') != FIVE_WAY_RANDOM_SEED:
+			raise ValueError('random arm.recipe.seed must equal 42')
+		return VolveHorizonRecipeArmRecipe(
+			method=RANDOM_OBJECTIVE,
+			local_pairs_per_crop=0,
+			positive_window_tokens=None,
+			augmentations={},
+			epochs=0,
+			samples_per_epoch=0,
+			batch_size=1,
+			learning_rate=0.0,
+			weight_decay=0.0,
+			seed=FIVE_WAY_RANDOM_SEED,
+		)
 	_validate_exact_keys(recipe, _RECIPE_KEYS, 'arm.recipe')
 	method = _non_empty_string(recipe.get('method'), 'arm.recipe.method')
 	if method != LOCAL_BARLOW_TWINS_METHOD:
-		raise ValueError(
-			f'arm.recipe.method must equal {LOCAL_BARLOW_TWINS_METHOD!r}'
-		)
+		raise ValueError(f'arm.recipe.method must equal {LOCAL_BARLOW_TWINS_METHOD!r}')
 	augmentations = _required_mapping(recipe, 'augmentations', 'arm.recipe')
 	if not augmentations:
 		raise ValueError('arm.recipe.augmentations must declare the view contract')
@@ -628,6 +660,26 @@ def _resolve_recipe(value: object) -> VolveHorizonRecipeArmRecipe:
 		),
 		seed=_nonnegative_int(recipe.get('seed'), 'arm.recipe.seed'),
 	)
+
+
+def _resolve_hmm(value: object) -> Mapping[str, object]:
+	hmm = _required_mapping({'hmm': value}, 'hmm', 'arm')
+	keys = frozenset(
+		{
+			'init_checkpoint',
+			'source_embeddings_dir',
+			'pseudo_targets_dir',
+			'clustering_config',
+			'distillation_weight',
+		}
+	)
+	_validate_exact_keys(hmm, keys, 'arm.hmm')
+	for key in ('init_checkpoint', 'source_embeddings_dir', 'pseudo_targets_dir'):
+		_absolute_path(hmm, key, 'arm.hmm')
+	_non_empty_string(hmm.get('clustering_config'), 'arm.hmm.clustering_config')
+	if hmm.get('distillation_weight') not in (0.1, 0.2):
+		raise ValueError('arm.hmm.distillation_weight must equal 0.1 or 0.2')
+	return dict(hmm)
 
 
 def _normalize_model_ids(

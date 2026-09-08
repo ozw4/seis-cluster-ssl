@@ -67,6 +67,11 @@ def main() -> None:
 		print(f'checkpoint_selection: {plan.checkpoint_selection}')
 		print(f'recipe_epochs: {config.recipe.epochs}')
 		print(f'recipe_global_steps: {config.recipe.global_steps}')
+		if config.hmm is not None:
+			print('hmm_epochs: 25')
+			print('hmm_global_steps: 62500')
+			print(f'hmm_distillation_weight: {config.hmm["distillation_weight"]}')
+			print(f'hmm_init_checkpoint: {config.hmm["init_checkpoint"]}')
 		print(f'recipe_augmentations: {dict(config.recipe.augmentations)}')
 		print(
 			f'recipe_positive_window_tokens: {config.recipe.positive_window_tokens}'
