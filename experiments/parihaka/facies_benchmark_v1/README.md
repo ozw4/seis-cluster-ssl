@@ -56,3 +56,5 @@ and follows the shared recovery rule above.
 - [HMM transition-balance screening](36_channel_hmm_transition_balance_v1/README.md)
 - [HMM boundary-weight screening](37_channel_hmm_boundary_weight_v1/README.md)
 - [HMM distillation-weight screening](38_channel_hmm_distillation_weight_v1/README.md)
+- [Local-BT rot90 asymmetric-noise recipe transfer](39_channel_local_bt_rot90_asym_g060_v1/README.md)
+- [Nine-arm pretraining comparison completion](40_pretraining_comparison_completion_v1/README.md)

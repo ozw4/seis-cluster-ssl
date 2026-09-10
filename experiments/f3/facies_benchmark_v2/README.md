@@ -16,10 +16,9 @@ The positional layout and downstream comparison under the `v2`-named `109` and
 and encoder-source phases reused by v3; its README marks that shared subset
 explicitly. New downstream runs use the v3 workflow.
 
-The `111`–`114` Local Barlow Twins view screens are also historical. Their
-experiment-specific training and reporting programs were removed; the retained
-YAML and linked reports preserve the record. Use the current candidate workflow
-for new screens.
+The `111`–`114` Local Barlow Twins view screens are also historical; their
+retained YAML and linked reports preserve the record. Use the current candidate
+workflow for new screens.
 
 Experiments `119`–`123` share one
 [Local Barlow Twins candidate runbook](LOCAL_BT_CANDIDATE_RUNBOOK.md).
