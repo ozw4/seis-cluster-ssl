@@ -4,12 +4,13 @@ Date: 2026-09-02
 
 The experimental question, candidate definitions, and execution sequence are in
 the [experiment runbook](../../experiments/f3/facies_benchmark_v1/112_local_bt_overlap_subcrop_poc_v1/README.md).
-This report records only the measured screen and its interpretation.
+This report records only the measured screen.
 
 ## Screen result
 
-The Random baseline reached macro-F1 `0.4965410800` on 470,136 unique validation
-voxels for `layout_001 / medium`.
+- Survey/task: F3 facies benchmark v1, downstream screen on `layout_001 / medium`.
+- Comparator: Random baseline, macro-F1 `0.4965410800` on 470,136 unique validation voxels.
+- Sign convention: Delta = candidate minus Random; higher macro-F1 is better.
 
 | Candidate | Shift | Macro-F1 | Delta vs Random | Decision |
 |---|---:|---:|---:|---|
@@ -26,10 +27,6 @@ run and neither candidate was adopted.
 | Random | 26.4523632615 | 0.6585601699 | 23.9998007592 | 0.5220072650 | 25.4812122319 |
 | `shift04_proj384_pairs128_lambda005` | 95.7963889138 | 4.7375605914 | 21.8244936985 | 0.9725560302 | 21.9308540078 |
 | `shift02_proj384_pairs128_lambda005` | 95.6020204637 | 4.7402329837 | 21.8931642113 | 0.9752670668 | 22.0107362799 |
-
-The trained candidates changed feature scale substantially but did not recover
-the Random baseline in this downstream screen. The rank diagnostics therefore
-do not justify advancing either arm by themselves.
 
 `shift06_proj384_pairs128_lambda005` is configured but has no recorded result;
 no conclusion is made for that arm.

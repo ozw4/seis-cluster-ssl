@@ -4,28 +4,22 @@
 - 実験: [123 Local BT noise/rotation search](../../experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/README.md)
   の Phase B
 - 対象処方: [rot90_asym_g040](../../experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/10_pretraining/rot90_asym_g040_3ep.yaml)
-  (純回転 + 非対称ガウス雑音 σ0.40 +
-  region window [2,2,1])。3ep で 15 セル平均 **+0.035310**(t(14)=+3.75)を
-  記録した当時の最良処方。
-- 結論: **この arm の 3 → 6 → 10 epochs では、下流 macro_f1 は
-  −0.0064/ep 〜 −0.0075/ep の
-  ほぼ一定勾配で単調に悪化する。10ep では Random を有意に下回る
-  (−0.014043、t(14)=−2.77)。測定した範囲では 3ep が最良。**
-- 同時に、**事前学習側の指標(loss / 不変性 / 冗長性 / effective rank /
-  ノルム)は 1 つ残らず単調に改善している**。同一 arm・同一軌跡上で
-  「rank 回復と下流悪化が同時に起きる」ことを示した、交絡のない反証である。
+  (純回転 + 非対称ガウス雑音 σ0.40 + region window [2,2,1])。
+  3ep で 15 セル平均 **+0.035310**(t(14)=+3.75)を記録した当時の最良処方。
 
-## 実験設計
+## 実験条件
 
-- 6ep / 10ep はいずれも同じ 3ep checkpoint から延長し、encoder と下流契約は
-  変更していない。
-- **軌跡の同一性を実測で確認**: 6ep run と 10ep run の epoch 4/5/6 の
-  training loss が一致(0.4842 / 0.4550 / 0.4428 と 0.4842 / 0.4550 / 0.4427)。
-  したがって 3 → 6 → 10 は独立 3 実験ではなく **1 本の軌跡上の 3 点**である。
-- 評価は全 15 セル(small / medium / large × layout_000..004)。単一セル screen は
-  選抜に使わない(本実験で 3 回順位が逆転した実績があるため)。
-- 学習予算: 3 epochs = 1,875 steps / 6 epochs = 3,750 steps /
-  10 epochs = 6,250 steps。
+- 6ep / 10ep はいずれも同じ 3ep checkpoint から延長(view / loss / optimizer / encoder /
+  下流契約はすべて不変。変化させたのは epoch 数のみ)。3 → 6 → 10 は 1 本の軌跡上の 3 点。
+- 3ep は探索範囲の下限。3ep 未満は未評価。
+- 軌跡の同一性: 6ep run と 10ep run の epoch 4/5/6 の training loss が一致
+  (0.4842 / 0.4550 / 0.4428 と 0.4842 / 0.4550 / 0.4427)。
+- 評価: 全 15 セル(small / medium / large × layout_000..004)。単一セル screen は
+  選抜に使わない(本実験で 3 回順位が逆転)。
+- 学習予算: 3 epochs = 1,875 steps / 6 epochs = 3,750 steps / 10 epochs = 6,250 steps。
+- 20 epochs は未実行: 事前登録ゲート(10ep 平均 > 3ep 平均のときのみ延長)により `SKIP_20EP`。
+- 符号: 候補 − canonical random(正が候補優位)。metric = macro_f1 on unique validation
+  voxels。t の統計単位 = セル(n=15)、size 内は layout(n=5)。
 
 ## 結果: 下流(canonical random 比、macro_f1 on unique validation voxels)
 
@@ -42,13 +36,9 @@
 | 6ep − 3ep | −0.019260 | −3.90 | 3/15 | −0.021595 | −0.017174 | −0.019012 |
 | 10ep − 3ep | −0.049353 | −6.01 | 1/15 | −0.033554 | −0.044107 | −0.070397 |
 
-勾配は 3→6 で **−0.006420/ep**、6→10 で **−0.007523/ep**。加速も減衰もなく、
-ほぼ一定の線形劣化である。劣化は small / medium / large にほぼ均等に及ぶ
-(6ep 時点で −0.0216 / −0.0172 / −0.0190)。特定 size の問題ではない。
-
-10ep では 15 セル中 14 セルが 3ep より悪化し、large は 5/5 で悪化した。
-3ep で large が示していた「5 layout 全勝、t(4)=+15.32」という異常な安定性は
-完全に失われている。
+- 15 セル平均の勾配: 3→6 で **−0.006420/ep**、6→10 で **−0.007523/ep**。
+- 10ep: 15 セル中 14 セルが 3ep より悪化。large は 5/5 で悪化。
+- 3ep large(canonical random 比): 5 layout 全勝、t(4)=+15.32。
 
 ## 全 15 セル明細
 
@@ -82,7 +72,7 @@
 | layout_003 | +0.065783 | +0.006490 | −0.010770 |
 | layout_004 | +0.047473 | +0.044142 | −0.017519 |
 
-## 事前学習側: すべての指標が単調に「改善」している
+## 事前学習側の指標
 
 | epoch | loss | xcorr_diag | offdiag_rms | ln eff. rank | raw eff. rank | raw norm | token std |
 |---:|---:|---:|---:|---:|---:|---:|---:|
@@ -96,41 +86,12 @@
 | 10 | 0.4223 | 0.99320 | 0.02345 | 14.637 | 14.353 | 111.0 | 5.452 |
 | (参照)random | — | — | — | 25.481 | 24.000 | 26.5 | 0.659 |
 
-- training loss は 3ep 比で 24% 低下
-- 不変性(cross-correlation 対角)は 0.99117 → 0.99320 と単調強化
-- 冗長性(off-diagonal RMS)は 0.02678 → 0.02345 と単調減少
-- **effective rank は 12.84 → 14.64 と単調に回復**(崩壊から遠ざかる)
-- feature norm・token-wise std も単調増加
-
-SSL の物差しでは 10ep が最良のモデルである。それでも下流は +0.035 から
-−0.014 へ落ちる。
-
-## 意義: 「rank は律速でない」の決定的な確認
-
-119 以降、本リポジトリでは「effective rank の回復は下流改善をもたらさない」を
-5 回確認してきたが、いずれも **arm 間比較**であり、view / 目的関数が同時に
-変わるため交絡があった。
-
-本実験は **同一 arm・同一処方・同一軌跡上**で、rank が 12.84 → 14.64 と
-単調に回復する一方、下流が +0.035 → −0.014 と単調に悪化することを示した。
-view も loss も optimizer も何ひとつ変えていない。交絡は epoch 数のみである。
-
-したがって、この arm の劣化を表現 rank の崩壊だけで説明することはできない。
-同一軌跡では、目的関数をさらに最適化するほど下流が悪化した。
-
-## 実務上の含意と留意点
-
-- 測定した 3 / 6 / 10ep では **3ep が最良であり、許容された探索範囲の下限**
-  だった。真の最適がさらに手前にある可能性は未検証である。
-- 処方 `rot90_asym_g040` が Random を +0.035 上回るのは、**不変性目的関数を
-  十分に最適化していないから**である。この優位は early-stopping に依存しており、
-  「よく学習された BT 表現」が良いのではない点に注意が必要。
-- 他データセットや σ0.60 へ移す場合は最適 epoch を再評価する。この実験の 3ep
-  は参照点であり、普遍的な最適値ではない。
-- 20 epochs への延長は事前登録ゲート(10ep 平均 > 3ep 平均のときのみ延長)により
-  `SKIP_20EP` で実行しなかった。曲線が単調減少であるため追加測定の価値はない。
+- 各列の改善方向: loss ↓、xcorr_diag ↑(不変性)、offdiag_rms ↓(冗長性)、
+  eff. rank ↑(崩壊から遠ざかる)、raw norm / token std ↑。3 → 10ep で全列が単調改善。
+- (参照)random = random-init encoder。
+- 同一軌跡上で、事前学習指標は 3 → 10ep で単調改善、下流 15 セル平均は単調悪化
+  (+0.035310 → −0.014043)。
 
 ## Provenance
 
-Exact 3ep / 6ep / 10ep definitions and stage order belong to the linked 123
-experiment. This report owns the measured epoch comparison and its interpretation.
+Exact 3ep / 6ep / 10ep definitions and stage order belong to the linked 123 experiment.

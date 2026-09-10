@@ -1,23 +1,25 @@
 # F3 Local Barlow Twins が Random encoder を全 size で上回った処方
 
-- 日付: 2026-09-05
+- 日付: 2026-09-05(σ0.60 の 15 セル評価: 2026-09-06)
 - 実験: [123 Local BT noise/rotation search](../../experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/README.md)
-- 更新: 2026-09-06(σ0.60 の 15 セル評価で処方を σ0.40 → σ0.60 へ改訂)
-- 結論: **`rot90_asym_g060`(純回転 + 非対称ガウス雑音 σ0.60 + region window
-  [2,2,1]、3 epochs)が canonical five-way と同じ 15 セルで平均 +0.047615
-  (t(14)=+6.01)を達成し、15 セル全勝**。small / medium / large すべてで
-  5 layout 全勝。凍結契約(encoder / LR / optimizer / 下流 voxel decoder)は
-  一切変更していない。
+- 結果: `rot90_asym_g060` は canonical five-way と同じ 15 セルで canonical Random 比
+  平均 +0.047615(t(14)=+6.01、統計単位 = セル)、15/15 勝ち。small / medium / large
+  それぞれ 5 layout 全勝。凍結契約(encoder / LR / optimizer / 下流 voxel decoder)は
+  変更なし。
 
 ## 処方
 
-実行可能な定義は
-[`rot90_asym_g060_3ep.yaml`](../../experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/10_pretraining/rot90_asym_g060_3ep.yaml)を正典とする。
-長い学習予算を採用しない根拠は、σ0.40 で測定した
-[epoch scaling report](local_bt_epoch_scaling_v1.md)が所有する。この測定を σ0.60
-の未測定 epoch へそのまま一般化はしない。
+- `rot90_asym_g060` = 純回転(rot90)+ 非対称ガウス雑音 σ0.60(view_a 無傷 / view_b のみ劣化)
+  + region window [2,2,1]、3 epochs。
+- 正典定義: [`rot90_asym_g060_3ep.yaml`](../../experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/10_pretraining/rot90_asym_g060_3ep.yaml)
+- epoch scaling の根拠(3ep 最良、σ0.40 上で測定)は
+  [epoch scaling report](local_bt_epoch_scaling_v1.md)、λ・projector 幅の探索は
+  [anti-collapse report](local_bt_anticollapse_search_v1_summary.md)を参照。
 
 ## 全 15 セル(canonical random 比、macro_f1 on unique validation voxels)
+
+- 指標: macro_f1 on unique validation voxels。値 = 候補 − canonical Random(正が候補優位)。
+- セル: canonical five-way の 15 セル(size small / medium / large × layout_000〜004)。
 
 | layout | small | medium | large |
 |---|---:|---:|---:|
@@ -41,12 +43,25 @@ canonical BT five-way(small −0.061 / medium −0.052 / large −0.047)から�
 
 ## σ0.40 との対比較(同一 15 セル)
 
-σ0.60 は旧処方 σ0.40 を同一セル対比較で **+0.012306(t(14)=+3.23、13/15 勝ち)**
-上回る。改善は small +0.018577 > medium +0.013534 > large +0.004806 と、
-**σ0.40 の弱点だった小 size ほど大きい**。σ0.40 で負けていた 4 セル
-(small/000 −0.0287、small/002 −0.0053、medium/000 −0.0009、medium/001 −0.0012)
-はすべて正に転じた。large はほぼ互角(差 +0.0048)で、σ 増加の利得は
-**小 size 専用**である。
+値 = `rot90_asym_g060`(σ0.60)− `rot90_asym_g040`(σ0.40)、同一セル対比較、統計単位 = セル。
+
+| 項目 | 値 |
+|---|---:|
+| 15 セル平均 | +0.012306 |
+| t(14) | +3.23 |
+| wins | 13/15 |
+| small 平均 | +0.018577 |
+| medium 平均 | +0.013534 |
+| large 平均 | +0.004806 |
+
+σ0.40 で canonical Random に負けていた 4 セル(σ0.40 − Random)はすべて σ0.60 で正に転じた。
+
+| セル | σ0.40 − Random |
+|---|---:|
+| small/000 | −0.0287 |
+| small/002 | −0.0053 |
+| medium/000 | −0.0009 |
+| medium/001 | −0.0012 |
 
 ## 到達までの経路(15 セル平均)
 
@@ -60,37 +75,17 @@ canonical BT five-way(small −0.061 / medium −0.052 / large −0.047)から�
 | `rot90_asym_g040`(合成 σ0.40) | +0.0149 | +0.0274 | +0.0637 | +0.0353 (t=3.75) |
 | **`rot90_asym_g060`(合成 σ0.60)** | **+0.0335** | **+0.0409** | **+0.0685** | **+0.0476 (t=6.01)** |
 
-## 3 つの決定因子
+## 単一 cell screen 値(layout_001)
 
-1. **純回転 vs 鏡像**: flip → rot90 で large が +0.0265 → +0.0405。反射を含む D4 は
-   layout_001 で −0.0288 と有害。90 度回転は inline/crossline を入れ替えるだけで
-   堆積構造の統計は保たれるが、鏡像は地層の重なり順や断層センスを反転させ、
-   実在しない構造を「同一」と教える。**物理的に realizable な変換のみが有益**。
-2. **非対称雑音**(view_a 無傷 / view_b のみ劣化): 対称雑音では両 view が劣化して
-   復元目標が定まらないが、片側を無傷にすると明確な復元目標ができ、実質的に
-   **埋め込み空間での denoising 事前学習**になる。small を初めて正に転じさせた
-   (対称 −0.0198 → 非対称 +0.0059)。
-3. **雑音レベル**: 非対称構成では σ0.20 → 0.40 → 0.60 と**単調に改善**し、
-   15 セル平均は +0.0220 → +0.0353 → +0.0476。対称構成の最適 σ0.10 の 6 倍で
-   ある。片側が無傷なら強い雑音ほど頑健性への圧力が強まる。σ0.80 は単一 cell
-   screen で −0.0238 だが、この cell の予測力は低い(σ0.60 自身も screen では
-   +0.0129 と控えめだった)ので、**σ の最適点は 0.60 以上のどこかで未確定**。
+| arm | 値 |
+|---|---:|
+| D4(反射を含む) | −0.0288 |
+| σ0.80 非対称 | −0.0238 |
+| σ0.60 非対称(`rot90_asym_g060`) | +0.0129 |
+| window `[2,2,2]` | +0.0013 |
 
-## 副次的知見
+## 補足事実
 
-- **effective rank は最後まで非律速**(7 回確認)。最良処方の rank は 13〜17 で
-  Random(24.0)を大きく下回るのに下流は勝つ。
-- **単一 cell(layout_001)screen は順位を 4 回逆転させた**。`[2,2,2]` window、
-  `laplace_g010`、`rot90_g010` に加え、最終的な最良処方 σ0.60 自身も screen では
-  5 位相当だった。arm 選抜は必ず複数 size × 複数 layout で行うこと。
-- epoch の比較は上記の専用レポート、λ・projector 幅の初期探索は
-  [anti-collapse report](local_bt_anticollapse_search_v1_summary.md)を参照する。
-
-## 未確定
-
-- **σ0.80 の 15 セル評価**。σ 曲線は 0.60 まで単調増加で頭打ちの兆候がない。
-- window `[2,2,2]`(単一 cell screen +0.0013)の 15 セル評価。
-- epoch の最適値 3 は **σ0.40 上で測ったもの**であり、σ0.60 で 3 epoch が
-  最適かは未検証。雑音が強いほど最適 epoch が動く可能性がある。
-- size 依存性は残る(small +0.0335 < large +0.0685)が、σ0.60 では
-  **全 size・全 layout で正**になった。
+- 最良処方の effective rank は 13〜17(7 回確認)で、Random(24.0)を下回る。
+- 単一 cell(layout_001)screen と 15 セル評価の順位は window `[2,2,2]`、`laplace_g010`、`rot90_g010`、σ0.60(screen では 5 位相当)で逆転した。
+- 未実施: σ0.80 の 15 セル評価、window `[2,2,2]` の 15 セル評価、σ0.60 上での epoch 比較。

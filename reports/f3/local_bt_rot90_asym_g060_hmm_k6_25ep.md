@@ -2,33 +2,28 @@
 
 - 日付: 2026-09-07
 - 実験: [123 Local BT noise/rotation search](../../experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/README.md)
-- 状態: **FINAL**。手法、control、HMM target、candidate completion、下流 15 セル、
-  artifact provenance を paired summary と live files から再検証済み。
 - 対比較: `local_bt_nr_rot90_asym_g060_3ep_hmm_k6_25ep` −
-  `local_bt_nr_rot90_asym_g060_3ep`
-- 主指標: unique validation voxels 上の `macro_f1`
-
-この文書は人間向けのレビュー用レポートであり、pipeline input ではない。
-数値は exact paired summary と live artifact identities から転記した。
+  `local_bt_nr_rot90_asym_g060_3ep`（差分は candidate − control、正なら candidate 優位）
+- 主指標: unique validation voxels 上の `macro_f1`（高いほど良い）
+- control recipe の参照: [noise/rotation report](local_bt_rot90_asymmetric_noise_recipe.md)
 
 ## 固定した実験条件
 
-control は純回転、片側だけへの Gaussian noise σ0.60、positive window
-`[2,2,1]` で 3 epochs 学習した Local Barlow Twins である。採択根拠と
-Random 比の結果は
-[noise/rotation report](local_bt_rot90_asymmetric_noise_recipe.md)に記録している。
-candidate はこの control checkpoint から作った専用 embedding を ordered
-stratigraphic HMM K=6 でクラスタリングし、その hard pseudo-target を使って
-25 epochs 学習する。
-
-teacher と student の初期値は同じ control checkpoint に固定する。HMM stage で
-更新する encoder は最上位 block 1 層だけで、prototype head は 6 prototypes、
-projection dimension 128、temperature 0.1、L2 normalization を使う。loss weight は
-prototype 1.0、usage 0.005、distillation 0.2。batch size 16、10,000 samples/epoch、
-encoder/head learning rate `1e-5`、weight decay 0.05、seed 42 で、完了点は
-epoch 25 / global step 15,625 とする。実行定義は
-[`02_full_25ep.yaml`](../../experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/50_hmm_pretraining/rot90_asym_g060_3ep/hmm/k6/02_full_25ep.yaml)
-を正典とする。
+| 項目 | 固定値 |
+|---|---|
+| control | Local Barlow Twins、純回転 (rot90)、片側だけへの Gaussian noise σ0.60、positive window `[2,2,1]`、3 epochs |
+| candidate | control checkpoint から作った専用 embedding を ordered stratigraphic HMM K=6 でクラスタリングし、その hard pseudo-target で 25 epochs 学習 |
+| teacher / student 初期値 | 同じ control checkpoint |
+| HMM stage で更新する encoder | 最上位 block 1 層のみ |
+| prototype head | 6 prototypes、projection dimension 128、temperature 0.1、L2 normalization |
+| loss weight | prototype 1.0、usage 0.005、distillation 0.2 |
+| batch size | 16 |
+| samples/epoch | 10,000 |
+| learning rate | encoder/head `1e-5` |
+| weight decay | 0.05 |
+| seed | 42 |
+| 完了点 | epoch 25 / global step 15,625 |
+| 実行定義（正典） | [`02_full_25ep.yaml`](../../experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/50_hmm_pretraining/rot90_asym_g060_3ep/hmm/k6/02_full_25ep.yaml) |
 
 ### Ordered HMM K=6 target
 
@@ -44,27 +39,28 @@ epoch 25 / global step 15,625 とする。実行定義は
 | initialization/update | `mean_z` / empty cluster は previous center を維持 |
 | pseudo-target export | confidence 1.0、boundary alpha 0.0 / tau 1.0 |
 
-生成済み target の token grid は `[76,113,32]`、有効 162,960 tokens、無効
-111,856 tokens である。cluster counts は K0..K5 の順に
-27,374 / 29,964 / 21,044 / 29,866 / 19,180 / 35,532 で、6 cluster はすべて
-非空である。
+生成済み target:
+
+| 項目 | 値 |
+|---|---|
+| token grid | `[76,113,32]` |
+| 有効 tokens | 162,960 |
+| 無効 tokens | 111,856 |
+| cluster counts (K0..K5) | 27,374 / 29,964 / 21,044 / 29,866 / 19,180 / 35,532（6 cluster すべて非空） |
 
 ### 下流契約
 
-評価は canonical five-way v3 の `small` / `medium` / `large` ×
-`layout_000`..`layout_004` の exact 15 cells を使う。encoder は凍結し、control と
-candidate は同じ voxel supervision、validation mask、decoder 初期値、tile manifest、
-50-epoch decoder 契約を共有する。decoder は
-`frozen_embedding_decoder_nearest_voxel_ln_v1`、seed 42,000、440 steps/epoch である。
-
-size ごとの paired t statistic は 5 layouts を統計単位にする。`all_15` は
-layout × size cell の記述統計だけを示す。全体の paired t statistic は、各 layout
-内で 3 sizes の差を平均した 5 layout means を統計単位にする。
+- 評価セル: canonical five-way v3 の `small` / `medium` / `large` ×
+  `layout_000`..`layout_004` の exact 15 cells。
+- encoder は凍結。control と candidate は同じ voxel supervision、validation mask、
+  decoder 初期値、tile manifest、50-epoch decoder 契約を共有。
+- decoder: `frozen_embedding_decoder_nearest_voxel_ln_v1`、seed 42,000、440 steps/epoch。
+- paired t の統計単位: size ごとは 5 layouts。`all_15` は layout × size cell の
+  記述統計のみ（t なし）。overall は各 layout 内で 3 sizes の差を平均した 5 layout means。
 
 ## Paired 15-cell 結果
 
-candidate、control、差分は完了済みの paired 15 jobs から再検証した
-`macro_f1` である。
+完了済み paired 15 jobs の `macro_f1`。
 
 | size | layout | candidate | control | candidate − control |
 |---|---|---:|---:|---:|
@@ -136,13 +132,14 @@ HMM transition/path recipe、source labels、pseudo-target export、control chec
 
 ### Shared evaluation inputs
 
-全 15 control jobs で evaluation voxel count 470,136、validation mask identity
-`0a6d134e4ea276ea15c29381cc8a1dd85cbdd928ece3df6882aa06e324129c70`、
-validation tile manifest identity
-`1f7e24f1a68d0020567af2966c4ac1472335c85d59d08526c3a0174bdebdc65b`、
-prediction valid-mask SHA
-`a1e4ad9b2ea27d10dffa1d91a2c7a64251b198201af6b5167910f977f4d93088`
-を共有する。
+全 15 control jobs で共有する評価入力:
+
+| 項目 | 値 |
+|---|---|
+| evaluation voxel count | 470,136 |
+| validation mask identity | `0a6d134e4ea276ea15c29381cc8a1dd85cbdd928ece3df6882aa06e324129c70` |
+| validation tile manifest identity | `1f7e24f1a68d0020567af2966c4ac1472335c85d59d08526c3a0174bdebdc65b` |
+| prediction valid-mask SHA | `a1e4ad9b2ea27d10dffa1d91a2c7a64251b198201af6b5167910f977f4d93088` |
 
 | ground-truth input | path | SHA-256 |
 |---|---|---|
@@ -168,15 +165,12 @@ ground-truth input の path/SHA を所有する。
 
 ## Provenance の Low 制約
 
-現行 clustering metadata schema の `embedding_inputs` は target embedding、valid-token
-mask、metadata の path と metadata SHA を記録するが、`embeddings.npy` と
-`valid_tokens.npy` 自体の content SHA は記録しない。現在の audit は正しい絶対 path、
-survey 名、ファイルの存在、embedding metadata SHA、control checkpoint path/SHA を
-検証する。そのため、clustering 実行後に同じ path の embedding array が metadata を
-変えずに置換された場合、生成時に読んだ array bytes との一致は暗号学的に再証明
-できない。
-
-この制約は clustering より上流の履歴再構成に限られる。cluster labels と
-pseudo-target の label/valid identities、HMM candidate checkpoint が記録する
+clustering metadata の `embedding_inputs` は target embedding、valid-token mask、metadata の
+path と metadata SHA を記録するが、`embeddings.npy` / `valid_tokens.npy` 自体の content SHA
+は記録しない。audit は絶対 path、survey 名、ファイルの存在、embedding metadata SHA、
+control checkpoint path/SHA を検証するため、clustering 実行後に同じ path の embedding
+array が metadata を変えずに置換された場合、生成時に読んだ array bytes との一致は
+暗号学的に再証明できない。この制約は clustering より上流の履歴再構成に限られ、cluster
+labels と pseudo-target の label/valid identities、HMM candidate checkpoint が記録する
 pseudo-target input identities、下流 15-cell の paired provenance は個別に SHA と
 内容整合性を検証する。
