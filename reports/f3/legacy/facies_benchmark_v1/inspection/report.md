@@ -1,7 +1,5 @@
 # F3 facies benchmark inspection report
 
-このreportはF3 facies benchmark inspectionの出力を統合し、少量教師の岩相判別MVPへ進むための判断材料をまとめる。
-
 ## 1. Dataset files
 
 - seismic SEGY: 1件
@@ -98,11 +96,7 @@
 ## 9. Readiness for downstream
 
 - 判定: `caution`
-- 推奨: MVPへ進む前にwarningと不足componentを確認する。
-- 理由:
-  - raw mismatch is confined to ignored z-border samples.
-- training前のrequired fixes:
-  - z-border sample差分の影響範囲を確認する。
+- 理由: raw mismatch is confined to ignored z-border samples.
 
 ## Warnings
 

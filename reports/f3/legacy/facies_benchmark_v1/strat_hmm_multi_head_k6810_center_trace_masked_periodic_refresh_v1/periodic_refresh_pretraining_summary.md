@@ -4,7 +4,6 @@
 - Model tag: `strat_hmm_pretext_mh_k6810_ctmask010_refresh3ep_hmm2_nocons_topblock1_distill_v1`
 - Variant: `ctmask010_refresh3ep_hmm2_nocons`
 - Execution Git SHA: `3ee1e5485408f3d179675afddc6136897135aec8`
-- Execution dirty status: `['M src/seis_ssl_cluster/embedding/extractor.py', ' M src/seis_ssl_cluster/f3/center_trace_masked_periodic_refresh_validation.py', ' M tests/seis_ssl_cluster/test_proc_entrypoints.py', '?? experiments/f3/facies_benchmark_v1/107_strat_hmm_multi_head_k6810_center_trace_masked_periodic_refresh_v1/05_review_periodic_refresh_results.yaml', '?? proc/seis_ssl_cluster/publish_f3_center_trace_masked_periodic_refresh_results.py', '?? src/seis_ssl_cluster/f3/center_trace_masked_periodic_refresh_results.py', '?? tests/seis_ssl_cluster/test_f3_center_trace_masked_periodic_refresh_results.py']`
 - Refreshes/generations: `7` / `8`
 - Final checkpoint: epoch `25`, global step `25600`
 - Selected checkpoint SHA-256: `46c084c82c5c4cdb70375b432bd54aab7f2c68477b8027d01e1773bdfffea663`

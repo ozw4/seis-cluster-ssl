@@ -26,7 +26,6 @@
 - pretrained encoderがamplitude-onlyを上回るか: 上回る (macro F1差分 +0.4259, mean IoU差分 +0.4416)。
 - pretrained encoderがrandom encoderを上回るか: 上回る (macro F1差分 +0.0660, mean IoU差分 +0.0953)。
 - class 3/5など弱いclassで改善があるか: class 3: F1差分 +0.0358、class 5: F1差分 +0.0084。
-- F3 faciesが深度だけで説明できる程度: z-onlyとの差がある (macro F1差分 +0.3915) ため、深度以外の特徴が効いている可能性がある。
 
 ## Warnings
 

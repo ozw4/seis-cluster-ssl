@@ -35,7 +35,6 @@
 | --- | ---: | ---: |
 | macro_f1 | +0.059690198730827149 | +0.014035314487712947 |
 | mean_iou | +0.069676276961439743 | +0.016813738241475602 |
-- The original split overestimated the multi-head incremental effect.
 
 ## MAE evidence
 
@@ -45,7 +44,6 @@
 | mh_nocons - MAE | cap50 | +0.022557693487874748 | 4/6 | +0.031891207389166176 | 6/6 |
 | current K6 - MAE | cap25 | +0.020970951028830082 | 5/6 | +0.030965785356979813 | 5/6 |
 | current K6 - MAE | cap50 | +0.0085223790001618029 | 5/6 | +0.015077469147690573 | 5/6 |
-- Structured HMM pretraining relative to MAE is the most robust conclusion in this evaluation.
 
 ## Class and boundary findings
 
@@ -57,12 +55,3 @@
 | cap50 | +0.026374731167941895 | +0.03557461991898684 | +0.0040274906707428544 |
 - Vertical boundary-position MAE worsens at cap25 (its oriented delta is negative; lower raw MAE is better).
 - Class 3 / Class 5 and boundary recall are not uniformly improved across splits.
-- Interpret overall Macro F1 / Mean IoU separately from boundary localization.
-
-## Interpretation
-
-- cap25 is robust in the preregistered primary evidence.
-- cap50 is split-dependent in the preregistered primary evidence.
-- The six-split evidence does not establish mh_nocons superiority as a formal confirmatory result.
-- mh_nocons is adopted as the baseline for the next method-development stage.
-- Proceed to soft-posterior target development; its effectiveness remains unverified.
