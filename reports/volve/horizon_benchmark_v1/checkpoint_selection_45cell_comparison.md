@@ -130,5 +130,3 @@ Epoch deltaは`left - right`。Earlier / same / laterも左側selectionを基準
 - 45セル等重み平均のOrder violation最良はMAE selection（13.166%）。
 - 9 model×size groups × 5 metricsの平均最良判定は、within-2が25件、MAEが13件、
   within-4が7件。
-- validation objectiveを変えてもtest上で常に同じ方向へ改善するわけではない。
-- selection間の科学的比較では、上記model×size別結果とpaired W/T/Lを優先する。
