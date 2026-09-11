@@ -1,6 +1,6 @@
 # F3 HMM_v2 Multi-Head screening v1
 
-Tasks 01–04 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
+Tasks 01–05 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
 [4,6,8], and [6,8,10].
 
 The immutable K=6 training baseline is
@@ -201,3 +201,78 @@ Any missing or incompatible input aborts without emitting a `complete` result.
 This is a completed-source audit, not the legacy K6810 publication handoff or
 a best-checkpoint ranking audit. It performs no training or embedding extraction.
 Live artifacts remain required before a real completion result can be obtained.
+
+## Task 05: embeddings and the 60-cell downstream matrix
+
+`40_embeddings/<candidate ID>.yaml` and `50_downstream/<candidate ID>.yaml`
+provide one extraction and one candidate benchmark recipe per candidate.
+The matrix is **4 candidates × 5 layouts × 3 sizes = 60 cells**, with one
+canonical decoder seed per cell. Each candidate contributes 15 cells.
+
+Extraction uses the Task 04 audited full `latest.pt`, the existing F3 v2
+amplitude manifest, 128-cube windows with overlap 64, batch size 1, and
+`min_token_valid_fraction: 0.5`. Settings match the existing Condition 2b
+extraction recipe exactly except checkpoint and output paths. AMP is disabled;
+float16 is the existing on-disk embedding dtype. Preprocessing, model, and
+zero-mask settings come from the checkpoint through the generic extractor.
+It retains Multi-Head checkpoint provenance in embedding metadata.
+
+The downstream configs reference the immutable experiment 110 v3 canonical
+benchmark. The existing candidate runner supplies its decoder, optimizer,
+seed, tiles, supervision, shared validation mask, and evaluation policy.
+It runs only the selected candidate. Its source audit also reads the existing
+canonical Random embedding metadata and valid-token mask as a geometry/mask
+reference; it does not initialize or train a Random candidate. The old
+five-way publication source validator is not used for Multi-Head candidates.
+Task 06 provides paired screening against historical MAE100 HMM K6;
+the generic candidate-vs-Random summary is not that screening comparison.
+
+Artifacts remain in:
+
+```text
+${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/hmm_v2_multi_head_screening_v1/<candidate ID>/overlap_x64/
+${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=<candidate ID>/layout=<layout>/size=<size>/
+${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/summary/<candidate ID>/
+```
+
+From the repository root, set `SEIS_SSL_CLUSTER_WORKSPACE` to that root,
+`SEIS_SSL_CLUSTER_ARTIFACT_ROOT` to the artifact store, and `F3_ROOT` to the
+existing F3 input root. First run Task 04's live audit successfully. For one
+candidate, inspect extraction and then the downstream cell as follows:
+
+```bash
+candidate=mae100_hmm_v2_mh_k46_distill020
+python proc/seis_ssl_cluster/extract_embeddings.py \
+  --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/40_embeddings/${candidate}.yaml" \
+  --device cuda --skip-existing --dry-run
+# The following source-audited dry-run requires completed live embeddings.
+python proc/seis_ssl_cluster/run_f3_lithology_candidate.py \
+  --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/50_downstream/${candidate}.yaml" \
+  --layout layout_000 --size small --dry-run
+```
+
+Remove `--dry-run` for scheduled execution. Extract each candidate before its
+downstream cells. `--skip-existing` uses the extractor's metadata validation;
+it does not authorize stale outputs. Downstream source auditing checks the
+configured checkpoint path/hash, embedding geometry and byte-identical
+canonical valid-token masks before decoder execution. Keep audited full
+checkpoints immutable throughout extraction and downstream evaluation.
+
+This is the complete dry-run matrix after embeddings exist:
+
+```bash
+for candidate in mae100_hmm_v2_mh_k46_distill020 mae100_hmm_v2_mh_k68_distill020 mae100_hmm_v2_mh_k468_distill020 mae100_hmm_v2_mh_k6810_distill020; do
+  for layout in layout_000 layout_001 layout_002 layout_003 layout_004; do
+    for size in small medium large; do
+      python proc/seis_ssl_cluster/run_f3_lithology_candidate.py \
+        --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/50_downstream/${candidate}.yaml" \
+        --layout "$layout" --size "$size" --dry-run || exit "$?"
+    done
+  done
+done
+```
+
+Resume an interrupted decoder with its own `--resume <cell root>/decoder/latest.pt`.
+The generic runner validates completed cell artifacts before reusing them.
+Task 07 will consolidate execution order, logging, and explicit resume. Live extraction and decoder training are
+not run during config implementation.

@@ -1,0 +1,9 @@
+benchmark:
+  canonical_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/110_lithology_mae_local_bt_five_way_v3/60_five_way.yaml
+candidate:
+  id: mae100_hmm_v2_mh_k68_distill020
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mae100_hmm_v2_mh_k68_distill020/full_25ep/latest.pt
+  embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/hmm_v2_multi_head_screening_v1/mae100_hmm_v2_mh_k68_distill020/overlap_x64
+outputs:
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs
+  summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/summary/mae100_hmm_v2_mh_k68_distill020
