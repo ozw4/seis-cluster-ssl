@@ -1,0 +1,70 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  workspace: ${SEIS_SSL_CLUSTER_WORKSPACE}
+  volve_root: ${SEIS_SSL_CLUSTER_VOLVE_ROOT}
+models:
+  - condition_id: '1'
+    model_id: mae
+    family: mae_local_bt_hmm_five_way_v1
+    display_name: MAE
+    hmm: false
+  - condition_id: '2b'
+    model_id: mae_hmm_k6
+    family: mae_local_bt_hmm_five_way_v1
+    display_name: MAE + HMM
+    hmm: true
+  - condition_id: '3'
+    model_id: rot90_asym_g060_3ep
+    family: local_bt_recipe_arm_v1
+    display_name: LocalBT
+    hmm: false
+  - condition_id: '4b'
+    model_id: rot90_asym_g060_3ep_hmm_k6_distill020
+    family: local_bt_recipe_arm_v1
+    display_name: LocalBT + HMM
+    hmm: true
+  - condition_id: '5'
+    model_id: random
+    family: mae_local_bt_hmm_five_way_v1
+    display_name: Random
+    hmm: false
+  - condition_id: '6b'
+    model_id: random_init_hmm_k6_distill020
+    family: local_bt_recipe_arm_v1
+    display_name: Random + HMM
+    hmm: true
+comparison:
+  layout_id: layout_000
+  data_size: large
+  fixed_distillation_weight: 0.2
+  hmm_k: 6
+inference:
+  device: cuda:0
+  precision: float16
+  window_start: 552
+  window_stop: 768
+selection:
+  count_per_domain: 10
+  quantiles: [0.05, 0.15, 0.25, 0.35, 0.45, 0.55, 0.65, 0.75, 0.85, 0.95]
+  common_valid_thresholds: [0.95, 0.90, 0.80]
+  minimum_ground_truth_horizons: 2
+  exclude_active_training_lines: true
+figure:
+  width_mm: 180
+  height_mm: 105
+  dpi: 300
+  font_family: Arial
+  title_size: 9
+  axis_label_size: 9
+  tick_label_size: 8
+  legend_size: 8
+  panel_label_size: 10
+  axis_spine_width: 0.8
+  horizon_line_width: 1.2
+  amplitude_clip_percentiles: [1.0, 99.0]
+  amplitude_sample_count: 1000000
+  amplitude_sample_seed: 42
+  horizon_colors: ['#0072B2', '#E69F00', '#009E73', '#CC79A7', '#D55E00']
+outputs:
+  predictions: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/paper_predictions/hmm_v1/volve/layout_000/large
+  figures: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/paper_figures/hmm_v1/volve/layout_000/large
