@@ -1,363 +1,119 @@
-# F3 HMM_v2 Multi-Head screening v1
+# F3 HMM_v2 Multi-Head screening
 
-Tasks 01–08 define shared hard Viterbi targets, four independent manifests,
-continuation training, source audit, embeddings, downstream, and paired
-screening for K=[4,6], [6,8], [4,6,8], and [6,8,10]. The full execution
-driver is documented in [RUNBOOK.md](RUNBOOK.md); the preparation review is
-recorded in [INTEGRATION_REVIEW.md](INTEGRATION_REVIEW.md).
+Compare four Multi-Head continuations against the frozen HMM_v1 F3
+Condition 2b (`mae_hmm_k6`) under the same training and downstream conditions.
+The experimental factor is the set of ordered prototype heads. This screening
+covers F3; selection and subsequent Volve/Parihaka experiments require separate
+decisions. Use [RUNBOOK.md](RUNBOOK.md) for execution and recovery.
 
-The immutable K=6 training baseline is
+| Candidate ID | Head K values | Manifest directory |
+| --- | --- | --- |
+| `mae100_hmm_v2_mh_k46_distill020` | [4, 6] | `mh_k46` |
+| `mae100_hmm_v2_mh_k68_distill020` | [6, 8] | `mh_k68` |
+| `mae100_hmm_v2_mh_k468_distill020` | [4, 6, 8] | `mh_k468` |
+| `mae100_hmm_v2_mh_k6810_distill020` | [6, 8, 10] | `mh_k6810` |
+
+The screening resolver requires exactly these four ID/head-set combinations
+and this control. A partial candidate set cannot produce a complete summary.
+Each candidate has an independent `multi_head_target_manifest.json`; shared
+heads refer to the same targets and all manifests share one embedding identity.
+
+## Fixed scientific conditions
+
+| Component | HMM_v1 Condition 2b conditions retained |
+| --- | --- |
+| Initialization | F3 survey-specific MAE 100-epoch checkpoint for student and frozen teacher. |
+| Continuation | 25 epochs, 10,000 samples/epoch, batch size 16, 15,625 optimizer steps; top encoder block only; seed 42; FP32. |
+| Data and optimizer | Existing F3 split, preprocessing, zero mask, model shape and optimizer recipe from experiment 21's MAE100 HMM K6 continuation. |
+| Losses | Distillation weight 0.2; prototype and usage losses use the existing equal per-head means; consistency weight 0.0. |
+| Targets | Hard Viterbi labels from the existing HMM_v1 MAE100 `overlap_x64` embeddings; no re-extraction. |
+| Extraction | Canonical Condition 2b settings: 128-cube windows, overlap 64, batch size 1, minimum valid-token fraction 0.5, AMP disabled. Float16 is the existing storage dtype. |
+| Downstream | Experiment 110 v3's decoder, optimizer, supervision, validation mask and evaluation policy; layouts `layout_000`–`layout_004`, sizes `small`, `medium`, `large`, decoder seed 42000. |
+
+Except for K and output paths, clustering retains the entire
+[historical K6 configuration](../../facies_benchmark_v1/21_ssl_hmm_continuation_v1/20_hmm_targets/mae100/k6/02_cluster_hmm_k6.yaml):
+embedding normalization and token-position residualization, PCA 64 without
+whitening, token sample and batch sizes, seed 42, ten HMM iterations, z axis
+and direction, edge margin, transition costs, reverse prohibition, max jump 1,
+anchors, mean-z initialization and empty-cluster policy. Expected boundaries
+remain disabled. Export retains schema v2, confidence 1.0, boundary alpha 0.0
+and tau 1.0.
+
+Historical K6 targets are immutable and are consumed directly from
 `${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/mae100/k6`.
-Reuse it directly; do not overwrite, copy, or symlink it. The new K=6 replay
-is exclusively for exact manifest parity verification, never a replacement
-training target. Exactness is established from live arrays by the existing
-Multi-Head manifest builder in task 02, not claimed from configuration alone.
+The separate K6 replay is solely exact-parity evidence for every manifest;
+it never replaces the training target. No copy, rename or symlink is needed.
+Manifest construction rejects mismatched token grids, valid masks,
+source-target alignment, hashes or K6 replay arrays.
 
-Both clustering configs read the existing HMM_v1 MAE100 `overlap_x64`
-embedding. Do not re-extract it. Apart from K and output directory, the entire
-configuration matches experiment 21's MAE100 K=6 recipe, including disabled
-expected boundaries. The clustering implementation shares preprocessing across
-K and initializes each K with seed 42. The older experiment 94 embedding and
-expected-boundary prior are not used.
+Soft posterior targets, lateral smoothing, XY-neighbor processing,
+center-trace masking, periodic refresh and consistency-loss exploration are
+excluded. LocalBT and Random are not screening candidates. The canonical
+Random embedding metadata and valid mask are read only as the existing
+downstream auditor's geometry reference. HMM_v1 definitions, Single-Head
+branches and frozen reports remain unchanged.
 
-## Target generation
+## Definitions and artifact locations
 
-Run from the repository root with `SEIS_SSL_CLUSTER_ARTIFACT_ROOT` set to the
-existing artifact store. First validate the clustering configurations:
+The numbered directories contain configs for targets, manifests, pretraining,
+embeddings, downstream and summary. One-step smoke recipes are feasibility
+checks; each full recipe starts independently from MAE100. The source selected
+for downstream is the audited full-run `latest.pt` at epoch 25/step 15,625.
 
-```bash
-TARGETS=experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/10_targets
-python proc/seis_ssl_cluster/cluster_embeddings.py --config "$TARGETS/01_cluster_hmm_k4810.yaml" --dry-run
-python proc/seis_ssl_cluster/cluster_embeddings.py --config "$TARGETS/02_replay_hmm_k6.yaml" --dry-run
-```
+All generated targets, manifests, checkpoints, embeddings and results stay
+outside Git under `${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}`:
 
-When ready for live processing, run those two commands without `--dry-run`.
-Only after both clustering outputs exist, validate and export:
-
-```bash
-bash "$TARGETS/03_export_pseudo_targets.sh" --dry-run
-bash "$TARGETS/03_export_pseudo_targets.sh"
-```
-
-The wrapper stops on failure and accepts only `--dry-run`; existing exports
-are not overwritten. The generic single-K exporter supports all four K values
-and preserves the baseline's schema v2, confidence 1.0, boundary alpha 0.0,
-and tau 1.0. Targets come from decoded hard labels; no soft posterior, lateral
-smoothing, XY neighbors, or target refresh is introduced. The legacy
-Multi-Head exporter is restricted to K=6/8/10 and schema v1, so it is not used.
-
-All new artifacts remain outside Git, below
-`${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}`:
-
-| Artifact | Relative root |
+| Artifact | Relative path |
 | --- | --- |
-| K=4/8/10 clustering | `clustering/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mae100/k4810` |
-| K=6 replay clustering | `clustering/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mae100/k6_replay` |
-| Shared targets | `pseudo_targets/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mae100/shared/k{4,8,10}` |
-| Parity-only replay target | `pseudo_targets/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mae100/k6_replay/k6` |
+| K4/8/10 clustering; K6 replay clustering | `clustering/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mae100/{k4810,k6_replay}/` |
+| Shared targets; parity-only K6 replay | `pseudo_targets/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mae100/{shared,k6_replay}/k<K>/` |
+| Four manifests | `pseudo_targets/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mh_k<46,68,468,6810>/multi_head_target_manifest.json` |
+| Training | `pretraining/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/<candidate>/{smoke_1step,full_25ep}/` |
+| Embeddings | `embeddings/f3/facies_benchmark_v2/hmm_v2_multi_head_screening_v1/<candidate>/overlap_x64/` |
+| Downstream cells | `f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=<candidate>/layout=<layout>/size=<size>/` |
+| Candidate runner summaries | `f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/summary/<candidate>/` |
+| Paired screening results | `f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/paired_summary/` |
+| Execution logs | `f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/logs/` |
 
-For task 02, each head's root is the parent of its `kN` directory because
-the loader appends `kN`; `replay_k6_root` ends in `mae100/k6_replay`. The existing manifest builder computes parity
-evidence and rejects mismatches. No live targets or parity evidence have been
-generated by this preparation task.
+## Frozen control and completion criteria
 
-## Multi-Head manifests
+`60_summary/01_paired_screening.yaml` requires the versioned
+`control_freeze_receipt`, [hmm_v1_condition_2b_receipt.json](60_summary/hmm_v1_condition_2b_receipt.json).
+This audit-only receipt is generated once from the authoritative HMM_v1 freeze
+records (`manifest.json`, `cells.csv`, `summary.json`) dated 2026-09-11.
+It binds the historical checkpoint SHA-256 and the canonical serialization
+of all 15 F3 Condition 2b cells' layout, data size, Mean IoU and Macro F1.
+Generation verifies the complete 405-cell freeze and records its file hashes.
+Hashes and results must not be entered manually or regenerated to accommodate
+a changed live control.
 
-The four configs in `20_manifests/` use ascending, unique `head_roots` keys
-as the complete head set. Every config references the same MAE100 embedding,
-the same immutable historical K=6 target, and the separate parity-only replay.
-Shared K=4/8/10 heads reference task 01's targets directly.
+Runtime summary reads the receipt and live artifacts; it does not read the
+frozen reports. All metric calculations use the audited live metrics. The
+live checkpoint and 15 control cells must match the receipt, in addition to
+passing source, decoder and evaluation provenance checks. Canonical historical
+cells are read directly from their existing runs root.
 
-Manifest outputs are under
-`${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/`:
+Completion requires all four full-source audits, all 60 candidate cells
+(four candidates × five layouts × three sizes), and the same 15 frozen
+historical cells. Missing or duplicate cells, changed control metrics or
+checkpoint bytes, or inconsistent source, training or evaluation evidence
+abort summary publication. A successful plan, smoke run or partial stage is
+not screening completion.
 
-| Candidate / config basename | Manifest path relative to that root |
-| --- | --- |
-| `mae100_hmm_v2_mh_k46_distill020` | `mh_k46/multi_head_target_manifest.json` |
-| `mae100_hmm_v2_mh_k68_distill020` | `mh_k68/multi_head_target_manifest.json` |
-| `mae100_hmm_v2_mh_k468_distill020` | `mh_k468/multi_head_target_manifest.json` |
-| `mae100_hmm_v2_mh_k6810_distill020` | `mh_k6810/multi_head_target_manifest.json` |
+Mean IoU on unique validation voxels is primary; Macro F1 is secondary.
+Positive deltas favor the candidate. By-size statistics use five paired
+layouts; across sizes, inference first averages within each layout (n=5).
+The pooled 15-cell statistics are descriptive. Comparisons are exploratory,
+without automatic winner selection or multiplicity-adjusted significance.
 
-After task 01's exports exist, run from the repository root. The existing CLI
-accepts explicit arguments, so this bridge reads the configs with the repository
-loader and passes them to that CLI. First use `--dry-run`; remove that argument
-to publish. `--only-missing` revalidates existing manifests and live K=6 parity.
+The paired summary atomically publishes exactly:
 
-```bash
-python - --dry-run <<'PY'
-import sys
-from pathlib import Path
-
-from proc.seis_ssl_cluster.build_strat_hmm_multi_head_targets import main
-from seis_ssl_cluster.config import load_config
-
-configs = Path('experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/20_manifests')
-for path in sorted(configs.glob('*.yaml')):
-    config = load_config(path)
-    args = ['--source-embedding-dir', config['source_embedding_dir'],
-            '--manifest', config['manifest'],
-            '--replay-k6-root', config['replay_k6_root'], '--only-missing']
-    for k, root in config['head_roots'].items():
-        args.extend(['--head-root', f'{k}={root}'])
-    main([*args, *sys.argv[1:]])
-PY
-```
-
-The generic builder and loader retain their schema, file hashes, token-grid,
-cross-head valid-mask, source-target alignment, and exact K=6 replay checks.
-Any mismatch fails before a complete new manifest is published. Dry-run builds
-only a temporary manifest for validation. Live manifests contain references and
-hashes, not target arrays, and remain outside Git. The old K6810 publication
-handoff validator is not part of this path and is unchanged.
-
-## Task 03: continuation pretraining
-
-`30_pretraining/<candidate ID>/` contains `01_gpu_feasibility_1step.yaml`
-(smoke) and `02_full_25ep.yaml` (screening) for each of the four candidates.
-These configs derive from experiment 21's MAE100 / HMM K6 Condition 2b.
-Both student and frozen teacher start from the F3 survey-specific
-`stage1/mae/full_100ep/latest.pt`. They preserve the baseline data split,
-AGC, zero mask, model shape, optimizer, seed 42, FP32, batch size 16, and
-one unfrozen encoder block. Full runs use 10,000 samples per epoch for
-25 epochs with no step limit. Smoke uses the baseline feasibility budget:
-one epoch, 16 samples, one optimizer step, zero workers. It retains the
-full model and CUDA device; it is not a screening result or a full-run
-initialization checkpoint.
-
-Each candidate consumes its Task 02 manifest directly. Hard Viterbi labels
-are explicit; prototype and usage losses use the existing equal per-head
-means. Distillation weight is 0.2 and consistency weight is 0.0.
-`consistency_beta: 0.1` and the recorded consistency policy are required
-existing schema fields; they do not activate consistency loss. No posterior,
-lateral, XY-neighbor, center-trace, or periodic-refresh path is configured.
-The generic hard Multi-Head resolver accepts experiment-owned model IDs;
-legacy publication IDs retain their variant binding. Manifest hashes,
-head sets, and scientific identity checks remain mandatory.
-
-Outputs are separated as:
-
-```text
-${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/<candidate ID>/smoke_1step/
-${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/<candidate ID>/full_25ep/
-```
-
-After Task 02 has produced the live manifests, run from the repository root.
-The following dry-run example selects K=[4,6]; select `68`, `468`, or `6810`
-for the other candidates. Compute the hash anew for the selected manifest;
-it must not be reused across candidates or entered into this README.
-
-```bash
-candidate=mae100_hmm_v2_mh_k46_distill020
-manifest="${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mh_k46/multi_head_target_manifest.json"
-SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256="$(python - "$manifest" <<'PY'
-import sys
-from seis_ssl_cluster.clustering.features import file_sha256
-print(file_sha256(sys.argv[1]))
-PY
-)"
-export SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256
-python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
-  --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/${candidate}/01_gpu_feasibility_1step.yaml" \
-  --dry-run
-python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
-  --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/${candidate}/02_full_25ep.yaml" \
-  --dry-run
-```
-
-For scheduled execution, remove `--dry-run`, first for smoke and then for
-full. Full always initializes from MAE100; do not pass the smoke checkpoint
-as `--resume`. To resume an interrupted full run, use the same full config
-and its own `--resume <full output root>/latest.pt`. Output overwrite remains
-disabled. Live training is intentionally not part of config implementation.
-Task 07 coordinates stage selection, explicit resume, and logs; see [RUNBOOK.md](RUNBOOK.md).
-
-## Task 04: read-only completed-source audit
-
-`30_pretraining/03_audit_completed_sources.yaml` selects all four Task 03
-full recipes. Run from the repository root:
-
-```bash
-python proc/seis_ssl_cluster/audit_strat_hmm_multi_head_sources.py \
-  --config experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/03_audit_completed_sources.yaml \
-  --dry-run
-```
-
-Remove `--dry-run` after the four full runs finish. Dry-run only lists recipes
-and reports `planned`; it does not certify a checkpoint. Live audit requires
-`SEIS_SSL_CLUSTER_ARTIFACT_ROOT` and prints JSON to stdout only. It resolves
-each recipe's manifest-hash placeholder from that manifest, independently
-of the hash environment variable used by the training CLI. Explicit hashes
-in recipes still have to match. No checkpoint, target, manifest, report,
-quarantine, or recovery file is written by the auditor.
-
-The audited downstream source is **full-run `latest.pt`**, at epoch 25 and
-step 15,625 with an epoch boundary and no partial batch. `best.pt` and smoke
-checkpoints are not selected. The audit checks exact resolved recipe equality,
-versioned Multi-Head checkpoint/state/optimizer identity, per-head target hashes,
-current parent checkpoint hashes, manifest array semantics and source alignment,
-live K6 replay parity, AMP state, trainability evidence, and unchanged frozen
-student weights relative to initialization. A changed top block is required.
-All four sources must share the same embedding identity. The checkpoint digest
-is checked again after inspection to reject a concurrent rolling replacement.
-Any missing or incompatible input aborts without emitting a `complete` result.
-
-This is a completed-source audit, not the legacy K6810 publication handoff or
-a best-checkpoint ranking audit. It performs no training or embedding extraction.
-Live artifacts remain required before a real completion result can be obtained.
-
-## Task 05: embeddings and the 60-cell downstream matrix
-
-`40_embeddings/<candidate ID>.yaml` and `50_downstream/<candidate ID>.yaml`
-provide one extraction and one candidate benchmark recipe per candidate.
-The matrix is **4 candidates × 5 layouts × 3 sizes = 60 cells**, with one
-canonical decoder seed per cell. Each candidate contributes 15 cells.
-
-Extraction uses the Task 04 audited full `latest.pt`, the existing F3 v2
-amplitude manifest, 128-cube windows with overlap 64, batch size 1, and
-`min_token_valid_fraction: 0.5`. Settings match the existing Condition 2b
-extraction recipe exactly except checkpoint and output paths. AMP is disabled;
-float16 is the existing on-disk embedding dtype. Preprocessing, model, and
-zero-mask settings come from the checkpoint through the generic extractor.
-It retains Multi-Head checkpoint provenance in embedding metadata.
-
-The downstream configs reference the immutable experiment 110 v3 canonical
-benchmark. The existing candidate runner supplies its decoder, optimizer,
-seed, tiles, supervision, shared validation mask, and evaluation policy.
-It runs only the selected candidate. Its source audit also reads the existing
-canonical Random embedding metadata and valid-token mask as a geometry/mask
-reference; it does not initialize or train a Random candidate. The old
-five-way publication source validator is not used for Multi-Head candidates.
-Task 06 provides paired screening against historical MAE100 HMM K6;
-the generic candidate-vs-Random summary is not that screening comparison.
-
-Artifacts remain in:
-
-```text
-${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/hmm_v2_multi_head_screening_v1/<candidate ID>/overlap_x64/
-${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=<candidate ID>/layout=<layout>/size=<size>/
-${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/summary/<candidate ID>/
-```
-
-From the repository root, set `SEIS_SSL_CLUSTER_WORKSPACE` to that root,
-`SEIS_SSL_CLUSTER_ARTIFACT_ROOT` to the artifact store, and `F3_ROOT` to the
-existing F3 input root. First run Task 04's live audit successfully. For one
-candidate, inspect extraction and then the downstream cell as follows:
-
-```bash
-candidate=mae100_hmm_v2_mh_k46_distill020
-python proc/seis_ssl_cluster/extract_embeddings.py \
-  --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/40_embeddings/${candidate}.yaml" \
-  --device cuda --skip-existing --dry-run
-# The following source-audited dry-run requires completed live embeddings.
-python proc/seis_ssl_cluster/run_f3_lithology_candidate.py \
-  --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/50_downstream/${candidate}.yaml" \
-  --layout layout_000 --size small --dry-run
-```
-
-Remove `--dry-run` for scheduled execution. Extract each candidate before its
-downstream cells. `--skip-existing` uses the extractor's metadata validation;
-it does not authorize stale outputs. Downstream source auditing checks the
-configured checkpoint path/hash, embedding geometry and byte-identical
-canonical valid-token masks before decoder execution. Keep audited full
-checkpoints immutable throughout extraction and downstream evaluation.
-
-This is the complete dry-run matrix after embeddings exist:
-
-```bash
-for candidate in mae100_hmm_v2_mh_k46_distill020 mae100_hmm_v2_mh_k68_distill020 mae100_hmm_v2_mh_k468_distill020 mae100_hmm_v2_mh_k6810_distill020; do
-  for layout in layout_000 layout_001 layout_002 layout_003 layout_004; do
-    for size in small medium large; do
-      python proc/seis_ssl_cluster/run_f3_lithology_candidate.py \
-        --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/50_downstream/${candidate}.yaml" \
-        --layout "$layout" --size "$size" --dry-run || exit "$?"
-    done
-  done
-done
-```
-
-Resume an interrupted decoder with its own `--resume <cell root>/decoder/latest.pt`.
-The generic runner validates completed cell artifacts before reusing them.
-Task 07 consolidates execution order, logging, and explicit resume in
-`run_all.sh`; see [RUNBOOK.md](RUNBOOK.md). Live extraction and decoder training are
-not run during config implementation.
-
-
-## Task 06: paired screening against HMM_v1 Condition 2b
-
-`60_summary/01_paired_screening.yaml` binds the four Task 05 downstream
-recipes and Task 03 full training recipes. Its control is the canonical
-`mae_hmm_k6` source in experiment 110 v3, audited against experiment 21's
-MAE100 / HMM K6 full 25-epoch recipe. Historical runs are read directly from
-that canonical benchmark's `runs_root`; no baseline runs are copied,
-renamed, linked, regenerated, or overwritten.
-
-The new thin CLI reuses the existing paired cell evidence readers, completed
-decoder contract, completed evaluation provenance, and paired statistics.
-The older paired-candidate CLI retains its LocalBT source audit and is not
-used here. Each Multi-Head source passes the Task 04 live audit again; the
-historical source passes the existing final HMM source audit. Source audit
-checkpoint paths and hashes must match the live embedding source identities.
-All four comparisons must share canonical config, historical cell evidence,
-source embedding identity, validation identity, and evaluation input hashes.
-
-The complete matrix is 60 candidate cells paired with the same 15 historical
-cells, by exact `(layout_id, data_size)`. Missing or duplicate cells, changed
-metrics, incompatible supervision/validation, decoder initialization or
-training contract, stale source hashes, or incomplete checkpoints fail closed.
-The summary is published only after all four candidates pass. Neither
-`reports/hmm_v1/` nor Task 05's candidate-vs-Random summaries are pipeline inputs.
-
-Following the HMM_v1 F3 reporting contract, **mean IoU on unique validation
-voxels is primary; macro F1 is secondary**. Primary deltas are candidate minus
-historical K6, with positive values favoring Multi-Head. The output includes
-all paired values, by-size means, sample SD of deltas, wins/ties/losses, and
-paired t statistics over five layouts. Across sizes, inference first averages
-the three deltas within each layout (n=5). The pooled 15-cell statistics are
-descriptive only. These exploratory comparisons do not provide multiplicity-
-adjusted significance, select a winner automatically, or authorize expansion
-to Volve/Parihaka.
-
-After all live sources, embeddings, and downstream cells are complete, run
-from the repository root with the same environment variables as Task 05:
-
-```bash
-summary_config=experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/60_summary/01_paired_screening.yaml
-python proc/seis_ssl_cluster/summarize_f3_multi_head_screening.py \
-  --config "$summary_config" --check-only
-python proc/seis_ssl_cluster/summarize_f3_multi_head_screening.py \
-  --config "$summary_config"
-```
-
-`--dry-run` aliases `--check-only`: both perform the complete live read-only
-audit and write nothing. They require the artifacts; neither mode treats
-missing results as a successful plan. The write command atomically publishes
-exactly these three files under
-`${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/paired_summary/`:
-
-- `comparison.csv`: 60 pairs with mean IoU, macro F1, deltas, and evidence hashes.
-- `summary.json`: complete paired evidence, source audits, and statistics.
+- `comparison.csv`: 60 audited pairs with `candidate_mean_iou`,
+  `control_mean_iou`, `mean_iou_candidate_minus_control`, `candidate_macro_f1`,
+  `control_macro_f1`, `macro_f1_candidate_minus_control`, and evidence hashes.
+- `summary.json`: paired evidence, source and freeze audits, and statistics.
 - `summary.md`: primary by-size screening table and interpretation contract.
 
-An existing summary directory is never overwritten. Rechecking remains
-read-only; an intentionally revised execution must use a separate output
-namespace. Portable tests use synthetic temporary evidence and do not
-produce live screening artifacts or hand-enter results/hashes in this README.
-
-
-## Task 07: execution driver
-
-[RUNBOOK.md](RUNBOOK.md) describes prerequisites, stage order, restart boundaries,
-and logs. `run_all.sh` defaults to an artifact-free command plan; live work
-requires `--execute`. `--dry-run` delegates to existing CLI checks and requires
-the selected stage's live prerequisites.
-
-```bash
-bash experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/run_all.sh --plan
-```
-
-
-## Task 08: integration review
-
-[INTEGRATION_REVIEW.md](INTEGRATION_REVIEW.md) records the cross-stage contracts,
-validation coverage, and remaining live checks. The portable preparation review
-is complete; it does not certify live screening artifacts or scientific results.
+The candidate runner's summaries compare against its canonical reference;
+use `paired_summary/` for this frozen K6 screening. Existing paired summaries
+are never overwritten.
