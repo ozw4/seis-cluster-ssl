@@ -1,0 +1,27 @@
+output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/paper_predictions/hmm_v1/parihaka/layout_000/large
+device: cuda:1
+models:
+  - condition_id: "1"
+    model_id: mae
+    run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs/model=mae/layout=layout_000/size=large
+    embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/channel_four_way/mae/overlap_x64
+  - condition_id: "2b"
+    model_id: mae_hmm_k6
+    run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs/model=mae_hmm_k6/layout=layout_000/size=large
+    embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/channel_four_way/mae_hmm_k6/overlap_x64
+  - condition_id: "3"
+    model_id: local_barlow_twins_rot90_asym_g060_3ep
+    run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs/model=local_barlow_twins_rot90_asym_g060_3ep/layout=layout_000/size=large
+    embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/local_bt_rot90_asym_g060_v1/local_barlow_twins_rot90_asym_g060_3ep/overlap_x64
+  - condition_id: "4b"
+    model_id: local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill020
+    run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/pretraining_comparison_completion_v1/runs/model=local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill020/layout=layout_000/size=large
+    embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill020/overlap_x64
+  - condition_id: "5"
+    model_id: random
+    run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/runs/model=random/layout=layout_000/size=large
+    embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64
+  - condition_id: "6b"
+    model_id: random_init_self_target_hmm_k6_distill020
+    run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/pretraining_comparison_completion_v1/runs/model=random_init_self_target_hmm_k6_distill020/layout=layout_000/size=large
+    embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/random_init_self_target_hmm_k6_distill020/overlap_x64

@@ -1,0 +1,25 @@
+data_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1
+prediction_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/paper_predictions/hmm_v1/parihaka/layout_000/large
+output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/paper_figures/hmm_v1/parihaka/layout_000/large
+figure:
+  rows: 2
+  columns: 4
+  dpi: 300
+  width_mm: 180
+  height_mm: 105
+  font_size: 8
+  title_size: 9
+  axis_spine_width: 0.8
+  font_family: Arial
+  axis_label_size: 9
+  tick_label_size: 8
+  legend_size: 8
+  panel_label_size: 10
+  background: white
+  amplitude_cmap: seismic
+  amplitude_clip_percentiles: [1.0, 99.0]
+  amplitude_sample_count: 1000000
+  amplitude_sample_seed: 42
+  label_interpolation: nearest
+  invalid_prediction_rgb: [226, 226, 226]
+  output_format: png
