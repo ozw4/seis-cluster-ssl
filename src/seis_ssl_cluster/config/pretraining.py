@@ -2766,11 +2766,15 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0911, PLR0912, PLR09
 			'identity.scientific_identity.consistency_weight does not match '
 			'identity.scientific_identity.variant'
 		)
-	expected_tag = {
+	legacy_tags = {
 		'nocons': 'strat_hmm_pretext_mh_k6810_nocons_topblock1_distill_v1',
 		'cons010': 'strat_hmm_pretext_mh_k6810_cons010_topblock1_distill_v1',
-	}[scientific['variant']]
-	if model_tag != expected_tag:
+	}
+	# Publication tags retain their variant binding; other experiments own their IDs.
+	if (
+		model_tag in legacy_tags.values()
+		and model_tag != legacy_tags[scientific['variant']]
+	):
 		raise ValueError(
 			'identity.model_tag does not match identity.scientific_identity.variant'
 		)

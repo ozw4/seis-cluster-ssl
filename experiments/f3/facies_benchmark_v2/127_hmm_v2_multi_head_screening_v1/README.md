@@ -1,6 +1,6 @@
 # F3 HMM_v2 Multi-Head screening v1
 
-Tasks 01–02 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
+Tasks 01–03 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
 [4,6,8], and [6,8,10].
 
 The immutable K=6 training baseline is
@@ -106,3 +106,64 @@ Any mismatch fails before a complete new manifest is published. Dry-run builds
 only a temporary manifest for validation. Live manifests contain references and
 hashes, not target arrays, and remain outside Git. The old K6810 publication
 handoff validator is not part of this path and is unchanged.
+
+## Task 03: continuation pretraining
+
+`30_pretraining/<candidate ID>/` contains `01_gpu_feasibility_1step.yaml`
+(smoke) and `02_full_25ep.yaml` (screening) for each of the four candidates.
+These configs derive from experiment 21's MAE100 / HMM K6 Condition 2b.
+Both student and frozen teacher start from the F3 survey-specific
+`stage1/mae/full_100ep/latest.pt`. They preserve the baseline data split,
+AGC, zero mask, model shape, optimizer, seed 42, FP32, batch size 16, and
+one unfrozen encoder block. Full runs use 10,000 samples per epoch for
+25 epochs with no step limit. Smoke uses the baseline feasibility budget:
+one epoch, 16 samples, one optimizer step, zero workers. It retains the
+full model and CUDA device; it is not a screening result or a full-run
+initialization checkpoint.
+
+Each candidate consumes its Task 02 manifest directly. Hard Viterbi labels
+are explicit; prototype and usage losses use the existing equal per-head
+means. Distillation weight is 0.2 and consistency weight is 0.0.
+`consistency_beta: 0.1` and the recorded consistency policy are required
+existing schema fields; they do not activate consistency loss. No posterior,
+lateral, XY-neighbor, center-trace, or periodic-refresh path is configured.
+The generic hard Multi-Head resolver accepts experiment-owned model IDs;
+legacy publication IDs retain their variant binding. Manifest hashes,
+head sets, and scientific identity checks remain mandatory.
+
+Outputs are separated as:
+
+```text
+${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/<candidate ID>/smoke_1step/
+${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/<candidate ID>/full_25ep/
+```
+
+After Task 02 has produced the live manifests, run from the repository root.
+The following dry-run example selects K=[4,6]; select `68`, `468`, or `6810`
+for the other candidates. Compute the hash anew for the selected manifest;
+it must not be reused across candidates or entered into this README.
+
+```bash
+candidate=mae100_hmm_v2_mh_k46_distill020
+manifest="${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mh_k46/multi_head_target_manifest.json"
+SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256="$(python - "$manifest" <<'PY'
+import sys
+from seis_ssl_cluster.clustering.features import file_sha256
+print(file_sha256(sys.argv[1]))
+PY
+)"
+export SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/${candidate}/01_gpu_feasibility_1step.yaml" \
+  --dry-run
+python proc/seis_ssl_cluster/train_strat_hmm_pretext.py \
+  --config "experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/${candidate}/02_full_25ep.yaml" \
+  --dry-run
+```
+
+For scheduled execution, remove `--dry-run`, first for smoke and then for
+full. Full always initializes from MAE100; do not pass the smoke checkpoint
+as `--resume`. To resume an interrupted full run, use the same full config
+and its own `--resume <full output root>/latest.pt`. Output overwrite remains
+disabled. Live training is intentionally not part of config implementation.
+Task 07 will coordinate stage selection, explicit resume, and logs.
