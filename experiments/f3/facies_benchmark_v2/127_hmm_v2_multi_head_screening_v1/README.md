@@ -1,6 +1,6 @@
 # F3 HMM_v2 Multi-Head screening v1
 
-Tasks 01–03 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
+Tasks 01–04 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
 [4,6,8], and [6,8,10].
 
 The immutable K=6 training baseline is
@@ -167,3 +167,37 @@ as `--resume`. To resume an interrupted full run, use the same full config
 and its own `--resume <full output root>/latest.pt`. Output overwrite remains
 disabled. Live training is intentionally not part of config implementation.
 Task 07 will coordinate stage selection, explicit resume, and logs.
+
+## Task 04: read-only completed-source audit
+
+`30_pretraining/03_audit_completed_sources.yaml` selects all four Task 03
+full recipes. Run from the repository root:
+
+```bash
+python proc/seis_ssl_cluster/audit_strat_hmm_multi_head_sources.py \
+  --config experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/03_audit_completed_sources.yaml \
+  --dry-run
+```
+
+Remove `--dry-run` after the four full runs finish. Dry-run only lists recipes
+and reports `planned`; it does not certify a checkpoint. Live audit requires
+`SEIS_SSL_CLUSTER_ARTIFACT_ROOT` and prints JSON to stdout only. It resolves
+each recipe's manifest-hash placeholder from that manifest, independently
+of the hash environment variable used by the training CLI. Explicit hashes
+in recipes still have to match. No checkpoint, target, manifest, report,
+quarantine, or recovery file is written by the auditor.
+
+The audited downstream source is **full-run `latest.pt`**, at epoch 25 and
+step 15,625 with an epoch boundary and no partial batch. `best.pt` and smoke
+checkpoints are not selected. The audit checks exact resolved recipe equality,
+versioned Multi-Head checkpoint/state/optimizer identity, per-head target hashes,
+current parent checkpoint hashes, manifest array semantics and source alignment,
+live K6 replay parity, AMP state, trainability evidence, and unchanged frozen
+student weights relative to initialization. A changed top block is required.
+All four sources must share the same embedding identity. The checkpoint digest
+is checked again after inspection to reject a concurrent rolling replacement.
+Any missing or incompatible input aborts without emitting a `complete` result.
+
+This is a completed-source audit, not the legacy K6810 publication handoff or
+a best-checkpoint ranking audit. It performs no training or embedding extraction.
+Live artifacts remain required before a real completion result can be obtained.
