@@ -659,12 +659,15 @@ def test_manifest_rejects_unknown_k6_replay_parity_fields(tmp_path: Path) -> Non
 		validate_multi_head_target_manifest(payload)
 
 
-def _artifacts(
+def _artifacts(  # noqa: PLR0913
 	tmp_path: Path,
 	*,
 	ks: tuple[int, ...] = (6, 8, 10),
 	source_root: Path | None = None,
 	target_valid_tokens: np.ndarray | None = None,
+	embedding_root: Path | None = None,
+	head_roots: dict[int, Path] | None = None,
+	schema_version: int = 1,
 ) -> tuple[Path, dict[int, Path]]:
 	shape = (2, 2, 12)
 	target_valid = (
@@ -674,7 +677,7 @@ def _artifacts(
 	)
 	if target_valid.shape != shape:
 		raise ValueError('target_valid_tokens shape mismatch')
-	embeddings = tmp_path / 'embeddings'
+	embeddings = embedding_root or tmp_path / 'embeddings'
 	embeddings.mkdir(parents=True)
 	np.save(embeddings / 'survey.embeddings.npy', np.zeros((*shape, 3), np.float32))
 	np.save(embeddings / 'survey.valid_tokens.npy', np.ones(shape, np.bool_))
@@ -699,7 +702,7 @@ def _artifacts(
 	)
 	heads: dict[int, Path] = {}
 	for k in ks:
-		root = tmp_path / f'head{k}'
+		root = head_roots[k] if head_roots is not None else tmp_path / f'head{k}'
 		labels = np.tile(np.minimum(np.arange(12), k - 1), (2, 2, 1)).astype(
 			np.int32,
 		)
@@ -726,8 +729,8 @@ def _artifacts(
 				'source_clustering_output_dir': str(source_label_path.parents[2]),
 				'source_label_path': str(source_label_path),
 			},
-			schema_version=1,
-			write_boundary_weight=False,
+			schema_version=schema_version,
+			write_boundary_weight=schema_version == 2,
 		)
 		heads[k] = root
 	return embeddings, heads
@@ -738,11 +741,13 @@ def _replay_k6_root(
 	historical_root: Path,
 	*,
 	labels: np.ndarray | None = None,
+	replay_root: Path | None = None,
+	schema_version: int = 1,
 ) -> Path:
 	index = 0
 	while (tmp_path / f'replay_k6_{index}').exists():
 		index += 1
-	replay_root = tmp_path / f'replay_k6_{index}'
+	replay_root = replay_root or tmp_path / f'replay_k6_{index}'
 	historical_labels = np.load(
 		historical_root / 'k6' / 'survey.hmm_labels_token.npy',
 	)
@@ -771,7 +776,7 @@ def _replay_k6_root(
 			'source_clustering_output_dir': str(source_label_path.parents[2]),
 			'source_label_path': str(source_label_path),
 		},
-		schema_version=1,
-		write_boundary_weight=False,
+		schema_version=schema_version,
+		write_boundary_weight=schema_version == 2,
 	)
 	return replay_root
