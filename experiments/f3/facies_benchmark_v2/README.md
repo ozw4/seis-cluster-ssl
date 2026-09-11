@@ -23,6 +23,10 @@ workflow for new screens.
 Experiments `119`–`123` share one
 [Local Barlow Twins candidate runbook](LOCAL_BT_CANDIDATE_RUNBOOK.md).
 
+The retained [Random self-target HMM condition](125_lithology_random_init_self_target_hmm_k6_distill010_v1/README.md)
+and [nine-condition completion definitions](126_pretraining_comparison_completion_v1/README.md)
+are frozen as part of [HMM_v1](../../../reports/hmm_v1/README.md).
+
 Concrete paths, model settings, and producer commands belong to the linked
 experiment YAML and runbooks rather than this index.
 

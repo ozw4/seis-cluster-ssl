@@ -18,6 +18,9 @@ from seis_ssl_cluster.f3.lithology.candidate_benchmark import (
 ROOT = Path(
 	'experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1'
 )
+FROZEN_HMM_V1_COMPLETION_ROOT = Path(
+	'experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1'
+)
 BASELINE_ROOT = Path('experiments/f3/facies_benchmark_v1/22_local_barlow_twins_v1')
 ASCENT_ROOT = Path(
 	'experiments/f3/facies_benchmark_v2/122_local_bt_nuisance_region_ascent_v1'
@@ -469,7 +472,9 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 		for epochs in arm_epochs(arm)
 	)
 	for path in sorted(Path('experiments').rglob('*.yaml')):
-		if path.is_relative_to(ROOT):
+		if path.is_relative_to(ROOT) or path.is_relative_to(
+			FROZEN_HMM_V1_COMPLETION_ROOT
+		):
 			continue
 		text = path.read_text(encoding='utf-8')
 		for token in tokens:

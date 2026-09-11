@@ -1,0 +1,331 @@
+{
+  "completeness": {
+    "cells_per_condition_per_dataset": 15,
+    "duplicate_cell_identities": 0,
+    "expected_cells": 405,
+    "loaded_cells": 405,
+    "missing_cells": 0,
+    "non_finite_selected_metrics": 0,
+    "unreadable_results": 0
+  },
+  "datasets": {
+    "f3": {
+      "best_condition": "2b",
+      "conditions": {
+        "1": {
+          "cells": 15,
+          "mean": 0.5530729683570874,
+          "population_sd": 0.08433432128194344,
+          "secondary_mean": 0.6737900270041192
+        },
+        "2a": {
+          "cells": 15,
+          "mean": 0.5754730580614215,
+          "paired_vs_parent": {
+            "better_cells": 12,
+            "improvement_mean": 0.022400089704334002,
+            "parent_condition": "1",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.07463588234890288,
+          "secondary_mean": 0.6926090061257757
+        },
+        "2b": {
+          "cells": 15,
+          "mean": 0.5825621911146475,
+          "paired_vs_parent": {
+            "better_cells": 14,
+            "improvement_mean": 0.029489222757560093,
+            "parent_condition": "1",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.0693383711027919,
+          "secondary_mean": 0.6980941414072311
+        },
+        "3": {
+          "cells": 15,
+          "mean": 0.4279409830583125,
+          "population_sd": 0.06653150856289183,
+          "secondary_mean": 0.5668133614038956
+        },
+        "4a": {
+          "cells": 15,
+          "mean": 0.43786219699329515,
+          "paired_vs_parent": {
+            "better_cells": 12,
+            "improvement_mean": 0.009921213934982624,
+            "parent_condition": "3",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.06622494972899223,
+          "secondary_mean": 0.5775127671043667
+        },
+        "4b": {
+          "cells": 15,
+          "mean": 0.44150261217374553,
+          "paired_vs_parent": {
+            "better_cells": 13,
+            "improvement_mean": 0.013561629115433045,
+            "parent_condition": "3",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.06619012997295076,
+          "secondary_mean": 0.5779719731803991
+        },
+        "5": {
+          "cells": 15,
+          "mean": 0.38945890470239436,
+          "population_sd": 0.04399203428463875,
+          "secondary_mean": 0.5191980459083599
+        },
+        "6a": {
+          "cells": 15,
+          "mean": 0.473486144618705,
+          "paired_vs_parent": {
+            "better_cells": 15,
+            "improvement_mean": 0.08402723991631066,
+            "parent_condition": "5",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.07377212985486085,
+          "secondary_mean": 0.6031057904320123
+        },
+        "6b": {
+          "cells": 15,
+          "mean": 0.4658797465389305,
+          "paired_vs_parent": {
+            "better_cells": 15,
+            "improvement_mean": 0.07642084183653616,
+            "parent_condition": "5",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.07170080695526035,
+          "secondary_mean": 0.5967402122710567
+        }
+      },
+      "direction": "higher",
+      "primary_metric": "mean_iou_unique_validation_voxels",
+      "secondary_metric": "macro_f1_unique_validation_voxels",
+      "task": "lithology facies classification"
+    },
+    "parihaka": {
+      "best_condition": "2b",
+      "conditions": {
+        "1": {
+          "cells": 15,
+          "mean": 0.3438149397089853,
+          "population_sd": 0.10107176389680873,
+          "secondary_mean": 0.5028402691517622
+        },
+        "2a": {
+          "cells": 15,
+          "mean": 0.3621141547665063,
+          "paired_vs_parent": {
+            "better_cells": 11,
+            "improvement_mean": 0.018299215057521027,
+            "parent_condition": "1",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.09450746026065959,
+          "secondary_mean": 0.5240909247585321
+        },
+        "2b": {
+          "cells": 15,
+          "mean": 0.3646935461676095,
+          "paired_vs_parent": {
+            "better_cells": 12,
+            "improvement_mean": 0.0208786064586242,
+            "parent_condition": "1",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.08905391603779594,
+          "secondary_mean": 0.5279281360026884
+        },
+        "3": {
+          "cells": 15,
+          "mean": 0.15452129304927856,
+          "population_sd": 0.050723498787472475,
+          "secondary_mean": 0.26433591886251057
+        },
+        "4a": {
+          "cells": 15,
+          "mean": 0.16467108003497946,
+          "paired_vs_parent": {
+            "better_cells": 11,
+            "improvement_mean": 0.010149786985700904,
+            "parent_condition": "3",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.05725812285805465,
+          "secondary_mean": 0.27862810398858184
+        },
+        "4b": {
+          "cells": 15,
+          "mean": 0.16399600933755432,
+          "paired_vs_parent": {
+            "better_cells": 11,
+            "improvement_mean": 0.009474716288275746,
+            "parent_condition": "3",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.058481757188673565,
+          "secondary_mean": 0.277418381979932
+        },
+        "5": {
+          "cells": 15,
+          "mean": 0.0763231694816371,
+          "population_sd": 0.0877408871564185,
+          "secondary_mean": 0.1298376808283668
+        },
+        "6a": {
+          "cells": 15,
+          "mean": 0.13905920828190457,
+          "paired_vs_parent": {
+            "better_cells": 11,
+            "improvement_mean": 0.06273603880026746,
+            "parent_condition": "5",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.10539326607823649,
+          "secondary_mean": 0.2285205794188469
+        },
+        "6b": {
+          "cells": 15,
+          "mean": 0.1393621860129895,
+          "paired_vs_parent": {
+            "better_cells": 9,
+            "improvement_mean": 0.0630390165313524,
+            "parent_condition": "5",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 0.09063282604504432,
+          "secondary_mean": 0.23287752643969276
+        }
+      },
+      "direction": "higher",
+      "primary_metric": "test_channel_iou",
+      "secondary_metric": "test_channel_f1",
+      "task": "channel facies classification"
+    },
+    "volve": {
+      "best_condition": "2b",
+      "conditions": {
+        "1": {
+          "cells": 15,
+          "mean": 8.941649794853044,
+          "population_sd": 2.5082360700466717,
+          "secondary_mean": 0.45211796086846384
+        },
+        "2a": {
+          "cells": 15,
+          "mean": 8.556300238416263,
+          "paired_vs_parent": {
+            "better_cells": 10,
+            "improvement_mean": 0.3853495564367807,
+            "parent_condition": "1",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 2.693196026738284,
+          "secondary_mean": 0.49801430125449975
+        },
+        "2b": {
+          "cells": 15,
+          "mean": 8.502418936574871,
+          "paired_vs_parent": {
+            "better_cells": 11,
+            "improvement_mean": 0.4392308582781708,
+            "parent_condition": "1",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 2.653019226153859,
+          "secondary_mean": 0.4644217230904164
+        },
+        "3": {
+          "cells": 15,
+          "mean": 13.701310261710868,
+          "population_sd": 2.729081713783226,
+          "secondary_mean": 0.3922545870241342
+        },
+        "4a": {
+          "cells": 15,
+          "mean": 12.92380000084445,
+          "paired_vs_parent": {
+            "better_cells": 11,
+            "improvement_mean": 0.7775102608664173,
+            "parent_condition": "3",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 3.0507747515189703,
+          "secondary_mean": 0.40242972310744674
+        },
+        "4b": {
+          "cells": 15,
+          "mean": 12.945703895181506,
+          "paired_vs_parent": {
+            "better_cells": 13,
+            "improvement_mean": 0.755606366529361,
+            "parent_condition": "3",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 2.4867469531724375,
+          "secondary_mean": 0.4116236543345489
+        },
+        "5": {
+          "cells": 15,
+          "mean": 15.636861456956684,
+          "population_sd": 3.440448918462793,
+          "secondary_mean": 0.35560352443538995
+        },
+        "6a": {
+          "cells": 15,
+          "mean": 10.668741398305889,
+          "paired_vs_parent": {
+            "better_cells": 15,
+            "improvement_mean": 4.968120058650795,
+            "parent_condition": "5",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 2.630897607743597,
+          "secondary_mean": 0.4344191472467211
+        },
+        "6b": {
+          "cells": 15,
+          "mean": 11.12656945653361,
+          "paired_vs_parent": {
+            "better_cells": 15,
+            "improvement_mean": 4.510292000423073,
+            "parent_condition": "5",
+            "sign_convention": "positive_is_improvement",
+            "total_cells": 15
+          },
+          "population_sd": 2.596521712810954,
+          "secondary_mean": 0.42254693463956283
+        }
+      },
+      "direction": "lower",
+      "primary_metric": "test_macro_mae_samples",
+      "secondary_metric": "test_macro_within_2_samples",
+      "task": "five-horizon estimation"
+    }
+  },
+  "experiment_snapshot": "2026-09-10T06:52:00Z",
+  "schema_version": 1,
+  "version": "HMM_v1"
+}
