@@ -1,7 +1,10 @@
 # F3 HMM_v2 Multi-Head screening v1
 
-Tasks 01–07 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
-[4,6,8], and [6,8,10].
+Tasks 01–08 define shared hard Viterbi targets, four independent manifests,
+continuation training, source audit, embeddings, downstream, and paired
+screening for K=[4,6], [6,8], [4,6,8], and [6,8,10]. The full execution
+driver is documented in [RUNBOOK.md](RUNBOOK.md); the preparation review is
+recorded in [INTEGRATION_REVIEW.md](INTEGRATION_REVIEW.md).
 
 The immutable K=6 training baseline is
 `${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/mae100/k6`.
@@ -351,3 +354,10 @@ the selected stage's live prerequisites.
 ```bash
 bash experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/run_all.sh --plan
 ```
+
+
+## Task 08: integration review
+
+[INTEGRATION_REVIEW.md](INTEGRATION_REVIEW.md) records the cross-stage contracts,
+validation coverage, and remaining live checks. The portable preparation review
+is complete; it does not certify live screening artifacts or scientific results.
