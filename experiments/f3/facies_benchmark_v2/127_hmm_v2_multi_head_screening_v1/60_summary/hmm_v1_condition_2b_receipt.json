@@ -1,0 +1,14 @@
+{
+  "canonical_control_cells_sha256": "b1ababf213602051a9dd53c82140c78eaf88de07297918638f9f802a4c92443d",
+  "checkpoint_sha256": "c09e885a3d892f7e3a84d6929ac1e35c952d634b552349f11617a8bae51393d2",
+  "condition_id": "2b",
+  "control_id": "mae_hmm_k6",
+  "f3_cell_count": 15,
+  "freeze_date": "2026-09-11",
+  "freeze_record_sha256": {
+    "cells.csv": "ffc80292a651a9fdf3e6117a09308e2f1a9c08dfaea807c78d6ff0cbdefb280d",
+    "manifest.json": "94e1dd9c743afcb03fcce194333093da2e4938a35fd040f4fd073cd8841a0387",
+    "summary.json": "eef30cec91bb986a9b5da24711fa9573cda8949b2944741fb9ef6a8078c1dbec"
+  },
+  "schema_version": 1
+}
