@@ -1,0 +1,96 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  workspace: ${SEIS_SSL_CLUSTER_WORKSPACE}
+  f3_root: ${F3_ROOT}
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v2
+# Reference only: no pipeline stage consumes files from reports/.
+source_freeze_manifest: reports/hmm_v1/manifest.json
+source_git_commit: 01da413293b7fdcd138b7ad3a9171a76c5f62f0f
+comparison:
+  hmm_version: HMM_v1
+  layout_id: layout_000
+  data_size: large
+  fixed_distillation_weight: 0.2
+  condition_order: ["1", "2b", "3", "4b", "5", "6b"]
+models:
+  - condition_id: "1"
+    model_id: mae
+    display_name: MAE100 + MAE25
+    hmm: false
+    prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=mae/layout=layout_000/size=large/prediction
+  - condition_id: "2b"
+    model_id: mae_hmm_k6
+    display_name: MAE100 + HMM25
+    hmm: true
+    hmm_k: 6
+    distillation_weight: 0.2
+    prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=mae_hmm_k6/layout=layout_000/size=large/prediction
+  - condition_id: "3"
+    model_id: local_bt_nr_rot90_asym_g060_3ep
+    display_name: asym LocalBT3
+    hmm: false
+    prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_bt_noise_rotation_search_v1/runs/model=local_bt_nr_rot90_asym_g060_3ep/layout=layout_000/size=large/prediction
+  - condition_id: "4b"
+    model_id: local_bt_nr_rot90_asym_g060_3ep_hmm_k6_25ep
+    display_name: asym LocalBT3 + HMM25
+    hmm: true
+    hmm_k: 6
+    distillation_weight: 0.2
+    prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_bt_noise_rotation_search_v1/runs/model=local_bt_nr_rot90_asym_g060_3ep_hmm_k6_25ep/layout=layout_000/size=large/prediction
+  - condition_id: "5"
+    model_id: random
+    display_name: Random weight
+    hmm: false
+    prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=large/prediction
+  - condition_id: "6b"
+    model_id: random_self_target_hmm_k6_distill020
+    display_name: Random weight + HMM25
+    hmm: true
+    hmm_k: 6
+    distillation_weight: 0.2
+    prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/pretraining_comparison_completion_v1/runs/model=random_self_target_hmm_k6_distill020/layout=layout_000/size=large/prediction
+inputs:
+  seismic_volume: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2/f3_seismic.npy
+  label_volume: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2/f3_facies_labels.npy
+  volume_metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2/f3_metadata.json
+  normalization_stats: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/normalization_stats/f3/facies_benchmark_v2/f3_seismic.normalization_stats.json
+  segy_geometry: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/segy_geometry.json
+  seismic_segy: ${F3_ROOT}/f3_seismic.sgy
+  label_segy: ${F3_ROOT}/f3_labels.sgy
+  class_info: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/inventory/class_info.json
+  section_layout_metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_section_layout_v3/datasets/layout=layout_000/size=large/voxel_supervision/section_layout_metadata.json
+selection:
+  count_per_domain: 10
+  quantile_min: 0.05
+  quantile_max: 0.95
+  common_valid_thresholds: [0.95, 0.90, 0.80]
+  minimum_ground_truth_classes: 2
+  exclude_active_training_lines: true
+figure:
+  rows: 2
+  columns: 4
+  dpi: 300
+  width_mm: 180
+  height_mm: 105
+  font_size: 8
+  title_size: 9
+  axis_spine_width: 0.8
+  font_family: Arial
+  axis_label_size: 9
+  tick_label_size: 8
+  legend_size: 8
+  panel_label_size: 10
+  background: white
+  amplitude_cmap: seismic
+  amplitude_clip_percentiles: [1.0, 99.0]
+  amplitude_sample_count: 1000000
+  amplitude_sample_seed: 42
+  label_interpolation: nearest
+  invalid_prediction_rgb: [226, 226, 226]
+  output_format: png
+outputs:
+  root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/paper_figures/hmm_v1/f3/layout_000/large
+  selected_slices_csv: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/paper_figures/hmm_v1/f3/layout_000/large/selected_slices.csv
+  manifest_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/paper_figures/hmm_v1/f3/layout_000/large/manifest.json
