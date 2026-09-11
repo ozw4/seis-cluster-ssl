@@ -12,10 +12,14 @@ import pytest
 
 from proc.seis_ssl_cluster import summarize_f3_multi_head_screening as cli
 from seis_ssl_cluster.config import load_config
+from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.f3.lithology import multi_head_screening_results as screening
 from seis_ssl_cluster.f3.lithology.candidate_benchmark import (
 	f3_lithology_candidate_config_from_mapping,
 	load_f3_lithology_candidate_canonical_config,
+)
+from seis_ssl_cluster.f3.lithology.hmm_v1_freeze_receipt import (
+	canonical_control_cells_sha256,
 )
 from seis_ssl_cluster.f3.lithology.paired_candidate_results import _audit_job_rows
 from tests.seis_ssl_cluster.test_f3_hmm_v2_manifest_configs import (
@@ -50,12 +54,14 @@ def test_config_binds_four_recipes_and_historical_control(
 		CANDIDATES.values()
 	)
 	assert config['control_id'] == 'mae_hmm_k6'
+	assert config['control_freeze_receipt'].is_file()
 	assert config['control_training_config'].is_file()
 	baseline = load_config(config['control_training_config'])
 	for entry in config['candidates']:
 		candidate = f3_lithology_candidate_config_from_mapping(
 			load_config(entry['downstream_config'])
 		)
+		assert entry['candidate_id'] == candidate.candidate_id
 		canonical = load_f3_lithology_candidate_canonical_config(candidate)
 		assert (
 			canonical.model_by_id('mae_hmm_k6').checkpoint
@@ -92,7 +98,34 @@ def evidence(
 		'head_drift': False,
 		'checkpoint_drift': False,
 		'source_drift': False,
+		'control_checkpoint_sha256': 'e' * 64,
 	}
+	config['control_freeze_receipt'] = tmp_path / 'control_receipt.json'
+	config['control_freeze_receipt'].write_text(
+		json.dumps(
+			{
+				'control_id': 'mae_hmm_k6',
+				'condition_id': '2b',
+				'checkpoint_sha256': state['control_checkpoint_sha256'],
+				'f3_cell_count': 15,
+				'canonical_control_cells_sha256': canonical_control_cells_sha256(
+					[
+						{
+							'layout_id': row['layout_id'],
+							'data_size': row['data_size'],
+							'mean_iou': json.loads(
+								Path(row['control_metrics_path']).read_text()
+							)['mean_iou'],
+							'macro_f1': row['control_macro_f1'],
+						}
+						for row in rows
+					]
+				),
+			}
+		)
+	)
+	state['config_path'] = tmp_path / 'screening.json'
+	state['config_path'].write_text(json.dumps(config, default=str))
 	candidates = {
 		entry['training_config']: (
 			entry,
@@ -112,6 +145,8 @@ def evidence(
 		result = _source_provenance(pair, role)
 		result['checkpoint_path'] = str(candidate.checkpoint)
 		result['candidate_id'] = candidate.candidate_id
+		if role == CONTROL:
+			result['checkpoint_sha256'] = state['control_checkpoint_sha256']
 		return result
 
 	def audit_training(path: Path) -> dict[str, object]:
@@ -147,7 +182,10 @@ def evidence(
 		screening,
 		'audit_f3_hmm_final_source',
 		lambda _path: {
-			'checkpoint': {'path': str(control.checkpoint), 'sha256': 'e' * 64}
+			'checkpoint': {
+				'path': str(control.checkpoint),
+				'sha256': state['control_checkpoint_sha256'],
+			}
 		},
 	)
 	monkeypatch.setattr(screening, 'audit_multi_head_source', audit_training)
@@ -166,18 +204,41 @@ def test_summary_has_exact_file_set_sixty_pairs_and_layout_statistics(
 	assert {p.name for p in paths} == {'comparison.csv', 'summary.json', 'summary.md'}
 	assert {p.name for p in config['summary_root'].iterdir()} == {p.name for p in paths}
 	with paths[0].open() as handle:
-		assert len(list(csv.DictReader(handle))) == 60
+		reader = csv.DictReader(handle)
+		assert 'candidate_minus_control' not in reader.fieldnames
+		assert reader.fieldnames[-6:] == [
+			'candidate_mean_iou',
+			'control_mean_iou',
+			'mean_iou_candidate_minus_control',
+			'candidate_macro_f1',
+			'control_macro_f1',
+			'macro_f1_candidate_minus_control',
+		]
+		csv_rows = list(reader)
+		assert len(csv_rows) == 60
 	payload = json.loads(paths[1].read_text())
 	assert payload['control_cells'] == 15
 	assert payload['primary_metric'] == 'mean_iou'
 	assert payload['secondary_metric'] == 'macro_f1'
+	assert payload['control_freeze_receipt']['sha256'] == file_sha256(
+		config['control_freeze_receipt']
+	)
+	for row in payload['comparison']:
+		assert 'candidate_minus_control' not in row
+		for metric in ('mean_iou', 'macro_f1'):
+			assert row[f'{metric}_candidate_minus_control'] == pytest.approx(
+				row[f'candidate_{metric}'] - row[f'control_{metric}']
+			)
 	for candidate in payload['candidates']:
 		assert candidate['overall_layout_clustered']['n'] == 5
+		assert candidate['overall_layout_clustered'][
+			'mean_iou_candidate_minus_control'
+		]['mean'] == pytest.approx(0.005)
 		assert candidate['secondary_macro_f1_by_size']['medium'][
-			'candidate_minus_control'
+			'macro_f1_candidate_minus_control'
 		]['mean'] == pytest.approx(0.01)
 		assert candidate['all_15_descriptive']['paired_t_statistical_unit'] is None
-		assert candidate['by_size']['medium']['candidate_minus_control'][
+		assert candidate['by_size']['medium']['mean_iou_candidate_minus_control'][
 			'mean'
 		] == pytest.approx(0.005)
 	before = {path: path.read_bytes() for path in paths}
@@ -224,8 +285,9 @@ def test_cli_check_only_writes_nothing(
 	capsys: pytest.CaptureFixture[str],
 	flag: str,
 ) -> None:
-	del evidence
-	monkeypatch.setattr(sys, 'argv', ['summary', '--config', str(CONFIG), flag])
+	monkeypatch.setattr(
+		sys, 'argv', ['summary', '--config', str(evidence['config_path']), flag]
+	)
 	cli.main()
 	assert json.loads(capsys.readouterr().out)['candidate_cells'] == 60
 	assert not config['summary_root'].exists()
@@ -294,6 +356,79 @@ def test_duplicate_recipes_rejected(config: dict[str, object]) -> None:
 	raw['candidates'][1] = deepcopy(raw['candidates'][0])
 	with pytest.raises(ValueError, match='duplicate candidate'):
 		screening.screening_config_from_mapping(raw)
+
+
+@pytest.mark.parametrize('drift', ['missing', 'extra', 'id', 'head_ks', 'control'])
+def test_screening_config_requires_exact_candidate_mapping(
+	config: dict[str, object], drift: str
+) -> None:
+	del config
+	raw = load_config(CONFIG)
+	if drift == 'missing':
+		raw['candidates'].pop()
+	elif drift == 'extra':
+		raw['candidates'].append(deepcopy(raw['candidates'][0]))
+	elif drift == 'id':
+		raw['candidates'][0]['candidate_id'] = 'unplanned_candidate'
+	elif drift == 'head_ks':
+		raw['candidates'][0]['head_ks'] = [4, 8]
+	else:
+		raw['control_id'] = 'random_init'
+	with pytest.raises(ValueError, match=r'four|control_id'):
+		screening.screening_config_from_mapping(raw)
+
+
+def test_candidate_order_is_not_part_of_scientific_contract(
+	config: dict[str, object],
+) -> None:
+	raw = load_config(CONFIG)
+	raw['candidates'].reverse()
+	resolved = screening.screening_config_from_mapping(raw)
+	assert resolved['candidates'] == list(reversed(config['candidates']))
+
+
+def test_downstream_candidate_id_must_match_declared_id(
+	config: dict[str, object], evidence: dict[str, object]
+) -> None:
+	del evidence
+	config['candidates'][0]['downstream_config'] = config['candidates'][1][
+		'downstream_config'
+	]
+	with pytest.raises(ValueError, match='candidate ID differs from downstream'):
+		screening.summarize_multi_head_screening(config)
+	assert not config['summary_root'].exists()
+
+
+@pytest.mark.parametrize('drift', ['mean_iou', 'macro_f1', 'checkpoint', 'missing'])
+def test_valid_live_control_must_match_frozen_receipt(
+	config: dict[str, object], evidence: dict[str, object], drift: str
+) -> None:
+	if drift == 'checkpoint':
+		evidence['control_checkpoint_sha256'] = 'f' * 64
+	elif drift == 'missing':
+		evidence['rows'].pop()
+	else:
+		row = evidence['rows'][0]
+		path = Path(row['control_metrics_path'])
+		metrics = json.loads(path.read_text())
+		metrics[drift] += 0.01
+		path.write_text(json.dumps(metrics))
+		row['control_metrics_sha256'] = file_sha256(path)
+		if drift == 'macro_f1':
+			row['control_macro_f1'] = metrics[drift]
+	with pytest.raises(ValueError, match=r'freeze|frozen|15.*cells'):
+		screening.summarize_multi_head_screening(config)
+	assert not config['summary_root'].exists()
+
+
+def test_missing_freeze_receipt_rejected_without_output(
+	config: dict[str, object], evidence: dict[str, object]
+) -> None:
+	del evidence
+	config['control_freeze_receipt'].unlink()
+	with pytest.raises(FileNotFoundError):
+		screening.summarize_multi_head_screening(config)
+	assert not config['summary_root'].exists()
 
 
 def test_summary_cannot_overlap_historical_runs(

@@ -76,6 +76,7 @@ def test_every_stage_uses_the_same_four_candidate_handoffs(
 		)
 		assert training_path in audit_paths
 		assert {
+			'candidate_id': candidate,
 			'training_config': str(training_path),
 			'downstream_config': str(downstream_path),
 			'head_ks': ks,
