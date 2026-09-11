@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import io
 import json
 import math
 import sys
@@ -26,6 +27,9 @@ from seis_ssl_cluster.f3.lithology import paired_candidate_results as paired_res
 from seis_ssl_cluster.f3.lithology.paired_candidate_results import (
 	OUTPUT_NAMES,
 	F3PairedCandidateSummaryConfig,
+	_aggregate_layout_clustered,
+	_aggregate_scope,
+	_comparison_csv,
 	f3_paired_candidate_summary_config_from_mapping,
 	inspect_f3_paired_candidate_results,
 	summarize_f3_paired_candidate_results,
@@ -503,6 +507,94 @@ def _assert_statistical_aggregates(payload: dict[str, object]) -> None:
 			'within_layout_reduction': 'mean_across_data_sizes',
 		},
 	}
+
+
+@pytest.mark.parametrize('metric', ['mean_iou', 'macro_f1'])
+@pytest.mark.parametrize('include_ambiguous_delta', [False, True])
+def test_aggregates_use_explicit_metric_delta(
+	metric: str,
+	*,
+	include_ambiguous_delta: bool,
+) -> None:
+	rows = []
+	for size_index, data_size in enumerate(DATA_SIZES):
+		for layout_index, layout_id in enumerate(LAYOUT_IDS):
+			candidate, control = _cell_values(size_index, layout_index)
+			row = {
+				'layout_id': layout_id,
+				'data_size': data_size,
+				'candidate_macro_f1': candidate,
+				'control_macro_f1': control,
+				'macro_f1_candidate_minus_control': candidate - control,
+				'candidate_mean_iou': candidate * 0.5,
+				'control_mean_iou': control * 0.5,
+				'mean_iou_candidate_minus_control': (candidate - control) * 0.5,
+			}
+			if include_ambiguous_delta:
+				row['candidate_minus_control'] = 99.0
+			rows.append(row)
+	delta_key = f'{metric}_candidate_minus_control'
+	aggregate = _aggregate_scope(
+		rows,
+		expected_count=15,
+		label='all_15',
+		descriptive_unit='layout_id_x_data_size',
+		paired_t_unit=None,
+		metric=metric,
+		delta_key=delta_key,
+	)
+	clustered = _aggregate_layout_clustered(rows, delta_key=delta_key)
+	metric_scale = 0.5 if metric == 'mean_iou' else 1.0
+	assert 'candidate_minus_control' not in aggregate
+	assert 'candidate_minus_control' not in clustered
+	assert aggregate['candidate_mean'] == pytest.approx(0.48 * metric_scale)
+	assert aggregate['control_mean'] == pytest.approx(0.47 * metric_scale)
+	assert aggregate[delta_key]['mean'] == pytest.approx(0.01 * metric_scale)
+	assert clustered[delta_key]['mean'] == pytest.approx(0.01 * metric_scale)
+	assert clustered['layout_mean_deltas'] == pytest.approx(
+		{
+			layout_id: 0.01 * (layout_index - 1) * metric_scale
+			for layout_index, layout_id in enumerate(LAYOUT_IDS)
+		}
+	)
+
+
+@pytest.mark.parametrize('include_ambiguous_delta', [False, True])
+def test_comparison_csv_emits_only_requested_explicit_metric_fields(
+	*,
+	include_ambiguous_delta: bool,
+) -> None:
+	row = {
+		'candidate_mean_iou': 0.61234567891,
+		'control_mean_iou': 0.59876543219,
+		'mean_iou_candidate_minus_control': 0.01358024672,
+		'candidate_macro_f1': 0.71234567891,
+		'control_macro_f1': 0.69876543219,
+		'macro_f1_candidate_minus_control': 0.01358024672,
+	}
+	fieldnames = tuple(row)
+	if include_ambiguous_delta:
+		row['candidate_minus_control'] = 'unused'
+	result = list(
+		csv.DictReader(io.StringIO(_comparison_csv([row], fieldnames=fieldnames)))
+	)
+	assert result == [
+		{
+			'candidate_mean_iou': '0.612345679',
+			'control_mean_iou': '0.598765432',
+			'mean_iou_candidate_minus_control': '0.013580247',
+			'candidate_macro_f1': '0.712345679',
+			'control_macro_f1': '0.698765432',
+			'macro_f1_candidate_minus_control': '0.013580247',
+		}
+	]
+
+
+def test_comparison_csv_does_not_require_unrequested_metrics() -> None:
+	result = _comparison_csv(
+		[{'candidate_mean_iou': 0.6}], fieldnames=('candidate_mean_iou',)
+	)
+	assert result == 'candidate_mean_iou\n0.600000000\n'
 
 
 def test_config_resolves_exact_pair_and_paths(tmp_path: Path) -> None:

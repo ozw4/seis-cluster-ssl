@@ -965,13 +965,14 @@ def _aggregate_scope(  # noqa: PLR0913
 	descriptive_unit: str,
 	paired_t_unit: str | None,
 	metric: str = 'macro_f1',
+	delta_key: str = 'candidate_minus_control',
 ) -> dict[str, object]:
 	if len(rows) != expected_count:
 		raise ValueError(
 			f'{label} must contain exactly {expected_count} paired cells; '
 			f'got {len(rows)}'
 		)
-	values = [float(row['candidate_minus_control']) for row in rows]
+	values = [float(row[delta_key]) for row in rows]
 	statistics_payload = _delta_statistics(values)
 	if paired_t_unit is not None:
 		statistics_payload['paired_t_statistic'] = _paired_t_statistic(values)
@@ -985,12 +986,14 @@ def _aggregate_scope(  # noqa: PLR0913
 		'control_mean': statistics.fmean(
 			float(row[f'control_{metric}']) for row in rows
 		),
-		'candidate_minus_control': statistics_payload,
+		delta_key: statistics_payload,
 	}
 
 
 def _aggregate_layout_clustered(
 	rows: Sequence[Mapping[str, object]],
+	*,
+	delta_key: str = 'candidate_minus_control',
 ) -> dict[str, object]:
 	expected_count = len(DATA_SIZES) * len(LAYOUT_IDS)
 	if len(rows) != expected_count:
@@ -1006,7 +1009,7 @@ def _aggregate_layout_clustered(
 				'overall layout-clustered inference contains duplicate cell '
 				f'{key[0]}/{key[1]}'
 			)
-		indexed[key] = float(row['candidate_minus_control'])
+		indexed[key] = float(row[delta_key])
 	layout_mean_deltas: dict[str, float] = {}
 	for layout_id in LAYOUT_IDS:
 		missing = [
@@ -1031,7 +1034,7 @@ def _aggregate_layout_clustered(
 		'within_layout_reduction': 'mean_across_data_sizes',
 		'data_sizes_per_layout': len(DATA_SIZES),
 		'layout_mean_deltas': layout_mean_deltas,
-		'candidate_minus_control': statistics_payload,
+		delta_key: statistics_payload,
 	}
 
 
@@ -1100,11 +1103,16 @@ def _comparison_csv(
 	for row in rows:
 		formatted = dict(row)
 		for key in (
+			'candidate_mean_iou',
+			'control_mean_iou',
+			'mean_iou_candidate_minus_control',
 			'candidate_macro_f1',
 			'control_macro_f1',
+			'macro_f1_candidate_minus_control',
 			'candidate_minus_control',
 		):
-			formatted[key] = f'{float(row[key]):.9f}'
+			if key in fieldnames:
+				formatted[key] = f'{float(row[key]):.9f}'
 		writer.writerow({key: formatted[key] for key in fieldnames})
 	return buffer.getvalue()
 
