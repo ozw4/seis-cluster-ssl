@@ -7,6 +7,6 @@
 - Active pipeline input: no
 - Producer revision: `ea6ba334084f90122813aad993a1463f8e84ea36`
 
-The next active F3 benchmark will be a separate `facies_benchmark_v2` with a
-section-count, single-seed protocol. Do not compare it directly with v1 as
-though the protocols were identical.
+The active F3 benchmark is [`facies_benchmark_v2`](../facies_benchmark_v2/)
+(section-count, single-seed protocol). Its protocol differs from v1; do not
+compare v1 and v2 values directly.

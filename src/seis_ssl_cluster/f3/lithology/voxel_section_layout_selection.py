@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -23,6 +25,11 @@ if TYPE_CHECKING:
 
 CLASS_IDS = tuple(range(6))
 SELECTION_SEMANTICS = 'stable_hash_partial_section_token_footprints_v1'
+CLASS_BALANCED_SELECTION_SEMANTICS = (
+	'seeded_nested_class_balanced_section_token_rows_v1'
+)
+
+TokenRowIdentity = tuple[str, int, int, int, int, int]
 
 
 @dataclass(frozen=True)
@@ -56,6 +63,7 @@ class TokenFootprint:
 	token_xyz: tuple[int, int, int]
 	flat_voxel_indices: tuple[int, ...]
 	per_line_flat_voxel_indices: Mapping[tuple[str, int], tuple[int, ...]]
+	per_class_voxel_counts: Mapping[str, int] | None = None
 
 	@property
 	def voxel_count(self) -> int:
@@ -65,6 +73,27 @@ class TokenFootprint:
 	def line_voxel_count(self, line_key: tuple[str, int]) -> int:
 		"""Return teacher voxels owned by one line under ordered attribution."""
 		return len(self.per_line_flat_voxel_indices.get(line_key, ()))
+
+
+@dataclass(frozen=True)
+class TokenRow:
+	"""One v1-style labeled section/token row before token deduplication."""
+
+	slice_type: str
+	slice_index: int
+	token_xyz: tuple[int, int, int]
+	class_id: int
+
+	@property
+	def line_key(self) -> tuple[str, int]:
+		"""Return the physical section identity that produced this row."""
+		return (self.slice_type, self.slice_index)
+
+	@property
+	def identity(self) -> TokenRowIdentity:
+		"""Return the canonical v1-style row identity."""
+		x, y, z = self.token_xyz
+		return (self.slice_type, self.slice_index, x, y, z, self.class_id)
 
 
 @dataclass(frozen=True)
@@ -83,6 +112,17 @@ class SelectionPreview:
 	selected_flat_voxel_indices: tuple[int, ...]
 	per_line_contributions: Mapping[str, int]
 	per_class_voxel_counts: Mapping[str, int]
+	selection_semantics: str = SELECTION_SEMANTICS
+	subsample_seed: int | None = None
+	per_class_token_row_cap: int | None = None
+	selected_token_row_count: int | None = None
+	selected_token_row_identity_sha256: str | None = None
+	per_class_selected_token_row_counts: Mapping[str, int] | None = None
+	active_pool_per_class_token_row_counts: Mapping[str, int] | None = None
+	per_line_selected_token_row_counts: Mapping[str, int] | None = None
+	selected_token_row_identities: tuple[TokenRowIdentity, ...] = ()
+	selected_token_identity_sha256: str | None = None
+	selected_voxel_identity_sha256: str | None = None
 
 
 def candidate_token_footprints(
@@ -126,7 +166,12 @@ def candidate_token_footprints(
 			flat_voxel_indices=flat,
 			lines=lines,
 		)
-		result.append(TokenFootprint(coordinate, flat, per_line))
+		flat_labels = labels.reshape(-1)[np.asarray(flat, dtype=np.int64)]
+		per_class = {
+			str(class_id): int(np.count_nonzero(flat_labels == class_id))
+			for class_id in CLASS_IDS
+		}
+		result.append(TokenFootprint(coordinate, flat, per_line, per_class))
 	return tuple(result)
 
 
@@ -239,6 +284,261 @@ def preview_nested_selection(  # noqa: PLR0913
 		)
 		_validate_preview_gate(preview, allowed_relative_error=tolerance)
 		previews.append(preview)
+	return tuple(previews)
+
+
+def preview_seeded_nested_class_cap_selection(  # noqa: C901, PLR0912, PLR0913, PLR0915
+	layout: LayoutLines,
+	*,
+	subsample_seed: int,
+	per_class_token_row_caps: Mapping[str, int],
+	target_train_voxel_counts: Mapping[str, int],
+	token_rows_by_size: Mapping[str, Sequence[TokenRow]],
+	token_footprints_by_size: Mapping[str, Sequence[TokenFootprint]],
+	allowed_relative_error: float = 0.05,
+) -> tuple[SelectionPreview, ...]:
+	"""Select exact nested per-class token-row caps for one layout.
+
+	The caller supplies pools after applying validation-token precedence. Rows
+	remain distinct by physical section even when several rows share one token
+	coordinate. Token coordinates are deduplicated only after row selection.
+	Input row order is never scientific identity: each pool is normalized to
+	lexicographic ``TokenRow.identity`` order before a single per-layout RNG is
+	consumed in ascending class order for small, medium, then large.
+	"""
+	seed = _layout_seed(layout.layout_id, subsample_seed)
+	caps = _class_cap_counts(per_class_token_row_caps)
+	targets = _target_counts(target_train_voxel_counts)
+	tolerance = _relative_error(allowed_relative_error)
+	for data_size in DATA_SIZES:
+		nominal = len(CLASS_IDS) * caps[data_size] * PATCH_SIZE[1] * PATCH_SIZE[2]
+		if targets[data_size] != nominal:
+			raise ValueError(
+				f'target_train_voxel_counts.{data_size} must equal six classes * '
+				f'cap * 8 * 8 ({nominal})'
+			)
+	rows_by_size = _token_row_pools(token_rows_by_size)
+	footprints_by_size = _token_footprint_pools(token_footprints_by_size)
+	_validate_token_row_pool_nesting(rows_by_size)
+	rng = np.random.default_rng(seed)
+	selected_by_class: dict[int, set[TokenRowIdentity]] = {
+		class_id: set() for class_id in CLASS_IDS
+	}
+	previous_rows: set[TokenRowIdentity] = set()
+	previous_tokens: set[tuple[int, int, int]] = set()
+	previous_voxels: set[int] = set()
+	previews: list[SelectionPreview] = []
+	for data_size in DATA_SIZES:
+		inline_count, crossline_count = LINE_COUNTS[data_size]
+		inline_lines = layout.ordered_inlines[:inline_count]
+		crossline_lines = layout.ordered_crosslines[:crossline_count]
+		if len(inline_lines) != inline_count or len(crossline_lines) != crossline_count:
+			raise ValueError(
+				f'{layout.layout_id}/{data_size} layout does not define enough lines'
+			)
+		line_keys = tuple(('inline', line) for line in inline_lines) + tuple(
+			('crossline', line) for line in crossline_lines
+		)
+		if len(line_keys) != len(set(line_keys)):
+			raise ValueError(
+				f'{layout.layout_id}/{data_size} active lines contain duplicates'
+			)
+		pool = rows_by_size[data_size]
+		escaped_lines = {row.line_key for row in pool} - set(line_keys)
+		if escaped_lines:
+			raise ValueError(
+				f'{layout.layout_id}/{data_size} token rows escaped active lines: '
+				f'{sorted(escaped_lines, key=_line_key_sort_key)!r}'
+			)
+		row_by_identity = {row.identity: row for row in pool}
+		per_class_pool = {
+			class_id: tuple(row for row in pool if row.class_id == class_id)
+			for class_id in CLASS_IDS
+		}
+		for class_id in CLASS_IDS:
+			class_pool = per_class_pool[class_id]
+			cap = caps[data_size]
+			if len(class_pool) < cap:
+				raise ValueError(
+					f'{layout.layout_id}/{data_size} class {class_id} token-row pool '
+					f'{len(class_pool)} is below cap {cap} after validation '
+					'precedence'
+				)
+			pool_identities = {row.identity for row in class_pool}
+			retained = selected_by_class[class_id]
+			if not retained <= pool_identities:
+				raise ValueError(
+					f'{layout.layout_id}/{data_size} class {class_id} active pool lost '
+					'previously selected token rows'
+				)
+			needed = cap - len(retained)
+			if needed < 0:
+				raise ValueError(
+					f'{layout.layout_id}/{data_size} class {class_id} cap {cap} is '
+					'smaller than the retained nested selection'
+				)
+			available = tuple(
+				row for row in class_pool if row.identity not in retained
+			)
+			if needed == len(available):
+				# Match the v1 cap sampler's full-pool boundary: taking every
+				# available row is deterministic and must not advance the RNG.
+				retained.update(row.identity for row in available)
+			elif needed:
+				chosen = rng.choice(len(available), size=needed, replace=False)
+				retained.update(
+					available[int(index)].identity for index in np.atleast_1d(chosen)
+				)
+			if len(retained) != cap:
+				raise AssertionError('per-class token-row selection missed its cap')
+		selected_identities = tuple(
+			sorted(
+				(
+					identity
+					for identities in selected_by_class.values()
+					for identity in identities
+				),
+				key=_token_row_identity_sort_key,
+			)
+		)
+		selected_rows = tuple(
+			row_by_identity[identity] for identity in selected_identities
+		)
+		selected_tokens = tuple(
+			sorted({row.token_xyz for row in selected_rows})
+		)
+		footprint_by_xyz = footprints_by_size[data_size]
+		missing_footprints = set(selected_tokens) - set(footprint_by_xyz)
+		if missing_footprints:
+			raise ValueError(
+				f'{layout.layout_id}/{data_size} selected token rows lack footprints: '
+				f'{sorted(missing_footprints)!r}'
+			)
+		selected_footprints = tuple(
+			footprint_by_xyz[xyz] for xyz in selected_tokens
+		)
+		selected_voxels = tuple(
+			sorted({
+				flat
+				for footprint in selected_footprints
+				for flat in footprint.flat_voxel_indices
+			})
+		)
+		current_rows = set(selected_identities)
+		current_tokens = set(selected_tokens)
+		current_voxels = set(selected_voxels)
+		if previews:
+			_validate_strict_nested_identity(
+				previous_rows,
+				current_rows,
+				label=f'{layout.layout_id}/{data_size} selected token rows',
+			)
+			_validate_strict_nested_identity(
+				previous_tokens,
+				current_tokens,
+				label=f'{layout.layout_id}/{data_size} selected token_xyz',
+			)
+			_validate_strict_nested_identity(
+				previous_voxels,
+				current_voxels,
+				label=f'{layout.layout_id}/{data_size} selected teacher voxels',
+			)
+		previous_rows = current_rows
+		previous_tokens = current_tokens
+		previous_voxels = current_voxels
+		line_row_counts = {
+			_line_key_string(key): sum(row.line_key == key for row in selected_rows)
+			for key in line_keys
+		}
+		line_voxel_counts = per_line_contributions(
+			selected_footprints,
+			tuple(
+				SectionLine(
+					slice_type=key[0],
+					slice_index=key[1],
+					array_index=0,
+					is_validation_line=False,
+				)
+				for key in line_keys
+			),
+		)
+		zero_row_lines = [
+			key for key, count in line_row_counts.items() if count <= 0
+		]
+		if zero_row_lines:
+			raise ValueError(
+				f'{layout.layout_id}/{data_size} active lines have zero selected '
+				f'token rows: {zero_row_lines!r}'
+			)
+		zero_voxel_lines = [
+			key for key, count in line_voxel_counts.items() if count <= 0
+		]
+		if zero_voxel_lines:
+			raise ValueError(
+				f'{layout.layout_id}/{data_size} active lines contribute zero '
+				f'teacher voxels: {zero_voxel_lines!r}'
+			)
+		per_class_selected = {
+			str(class_id): sum(row.class_id == class_id for row in selected_rows)
+			for class_id in CLASS_IDS
+		}
+		if any(value != caps[data_size] for value in per_class_selected.values()):
+			raise AssertionError('selected token-row class counts differ from cap')
+		per_class_voxels = _selected_footprint_class_counts(selected_footprints)
+		if sum(per_class_voxels.values()) != len(selected_voxels):
+			raise AssertionError(
+				'selected token footprint class counts do not cover teacher voxels'
+			)
+		missing_classes = [
+			key for key, count in per_class_voxels.items() if count <= 0
+		]
+		if missing_classes:
+			raise ValueError(
+				f'{layout.layout_id}/{data_size} is missing dense voxel classes '
+				f'{missing_classes!r}'
+			)
+		actual = len(selected_voxels)
+		error = actual - targets[data_size]
+		relative_error = abs(error) / targets[data_size]
+		if relative_error > tolerance + 1e-15:
+			raise ValueError(
+				f'{layout.layout_id}/{data_size} target relative error '
+				f'{relative_error:.6g} exceeds {tolerance:.6g}'
+			)
+		previews.append(
+			SelectionPreview(
+				layout_id=layout.layout_id,
+				data_size=data_size,
+				inline_lines=inline_lines,
+				crossline_lines=crossline_lines,
+				target_train_voxel_count=targets[data_size],
+				actual_train_voxel_count=actual,
+				count_error=error,
+				relative_count_error=relative_error,
+				selected_token_xyz=selected_tokens,
+				selected_flat_voxel_indices=selected_voxels,
+				per_line_contributions=line_voxel_counts,
+				per_class_voxel_counts=per_class_voxels,
+				selection_semantics=CLASS_BALANCED_SELECTION_SEMANTICS,
+				subsample_seed=seed,
+				per_class_token_row_cap=caps[data_size],
+				selected_token_row_count=len(selected_rows),
+				selected_token_row_identity_sha256=_identity_sha256(
+					selected_identities
+				),
+				per_class_selected_token_row_counts=per_class_selected,
+				active_pool_per_class_token_row_counts={
+					str(class_id): len(per_class_pool[class_id])
+					for class_id in CLASS_IDS
+				},
+				per_line_selected_token_row_counts=line_row_counts,
+				selected_token_row_identities=selected_identities,
+				selected_token_identity_sha256=_integer_array_sha256(
+					selected_tokens
+				),
+				selected_voxel_identity_sha256=_integer_array_sha256(selected_voxels),
+			)
+		)
 	return tuple(previews)
 
 
@@ -417,6 +717,19 @@ def _selected_class_counts(
 	}
 
 
+def _selected_footprint_class_counts(
+	selected: Sequence[TokenFootprint],
+) -> dict[str, int]:
+	result = {str(class_id): 0 for class_id in CLASS_IDS}
+	for footprint in selected:
+		counts = footprint.per_class_voxel_counts
+		if counts is None:
+			raise AssertionError('class-balanced footprint lacks dense class counts')
+		for class_id in CLASS_IDS:
+			result[str(class_id)] += counts[str(class_id)]
+	return result
+
+
 def _validate_preview_gate(
 	preview: SelectionPreview, *, allowed_relative_error: float
 ) -> None:
@@ -512,6 +825,209 @@ def _target_counts(value: Mapping[str, int]) -> dict[str, int]:
 	}
 
 
+def _layout_seed(layout_id: str, value: object) -> int:
+	if layout_id not in LAYOUT_IDS:
+		raise ValueError(f'unsupported layout_id {layout_id!r}')
+	seed = _nonnegative_integer(value, 'subsample_seed')
+	expected = LAYOUT_IDS.index(layout_id)
+	if seed != expected:
+		raise ValueError(
+			f'{layout_id} subsample_seed must be exactly {expected}; got {seed}'
+		)
+	return seed
+
+
+def _class_cap_counts(value: Mapping[str, int]) -> dict[str, int]:
+	if not isinstance(value, Mapping) or set(value) != set(DATA_SIZES):
+		raise ValueError(
+			'per_class_token_row_caps must define exactly '
+			f'{list(DATA_SIZES)!r}'
+		)
+	result = {
+		size: _positive_integer(
+			value[size], f'per_class_token_row_caps.{size}'
+		)
+		for size in DATA_SIZES
+	}
+	if not result['small'] < result['medium'] < result['large']:
+		raise ValueError(
+			'per_class_token_row_caps must strictly increase '
+			'small < medium < large'
+		)
+	return result
+
+
+def _token_row_pools(
+	value: Mapping[str, Sequence[TokenRow]],
+) -> dict[str, tuple[TokenRow, ...]]:
+	if not isinstance(value, Mapping) or set(value) != set(DATA_SIZES):
+		raise ValueError(
+			f'token_rows_by_size must define exactly {list(DATA_SIZES)!r}'
+		)
+	return {
+		size: _canonical_token_rows(value[size], label=f'{size} token rows')
+		for size in DATA_SIZES
+	}
+
+
+def _canonical_token_rows(
+	value: object, *, label: str
+) -> tuple[TokenRow, ...]:
+	if not isinstance(value, Sequence) or isinstance(value, str | bytes):
+		raise TypeError(f'{label} must be a sequence of TokenRow values')
+	rows: list[TokenRow] = []
+	seen: set[TokenRowIdentity] = set()
+	for index, item in enumerate(value):
+		if not isinstance(item, TokenRow):
+			raise TypeError(f'{label}[{index}] must be a TokenRow')
+		if item.slice_type not in {'inline', 'crossline'}:
+			raise ValueError(
+				f'{label}[{index}].slice_type must be inline or crossline'
+			)
+		row = TokenRow(
+			item.slice_type,
+			_positive_integer(item.slice_index, f'{label}[{index}].slice_index'),
+			_token_triplet(item.token_xyz, f'{label}[{index}].token_xyz'),
+			_nonnegative_integer(item.class_id, f'{label}[{index}].class_id'),
+		)
+		if row.class_id not in CLASS_IDS:
+			raise ValueError(
+				f'{label}[{index}].class_id must be one of {list(CLASS_IDS)!r}'
+			)
+		if row.identity in seen:
+			raise ValueError(f'{label} contains duplicate row {row.identity!r}')
+		seen.add(row.identity)
+		rows.append(row)
+	return tuple(sorted(rows, key=_token_row_sort_key))
+
+
+def _token_footprint_pools(
+	value: Mapping[str, Sequence[TokenFootprint]],
+) -> dict[str, dict[tuple[int, int, int], TokenFootprint]]:
+	if not isinstance(value, Mapping) or set(value) != set(DATA_SIZES):
+		raise ValueError(
+			f'token_footprints_by_size must define exactly {list(DATA_SIZES)!r}'
+		)
+	result: dict[str, dict[tuple[int, int, int], TokenFootprint]] = {}
+	for size in DATA_SIZES:
+		items = value[size]
+		if not isinstance(items, Sequence) or isinstance(items, str | bytes):
+			raise TypeError(f'{size} token footprints must be a sequence')
+		by_xyz: dict[tuple[int, int, int], TokenFootprint] = {}
+		for index, item in enumerate(items):
+			if not isinstance(item, TokenFootprint):
+				raise TypeError(
+					f'{size} token footprints[{index}] must be a TokenFootprint'
+				)
+			xyz = _token_triplet(
+				item.token_xyz, f'{size} token footprints[{index}].token_xyz'
+			)
+			if xyz in by_xyz:
+				raise ValueError(
+					f'{size} token footprints contain duplicate token_xyz {xyz!r}'
+				)
+			flat = tuple(
+				_nonnegative_integer(
+					flat_index,
+					f'{size} token footprints[{index}].flat_voxel_indices entry',
+				)
+				for flat_index in item.flat_voxel_indices
+			)
+			if len(flat) != len(set(flat)):
+				raise ValueError(
+					f'{size} token footprint {xyz!r} contains duplicate voxels'
+				)
+			counts = item.per_class_voxel_counts
+			if not isinstance(counts, Mapping) or set(counts) != {
+				str(class_id) for class_id in CLASS_IDS
+			}:
+				raise ValueError(
+					f'{size} token footprint {xyz!r} per_class_voxel_counts '
+					f'must define exactly {list(CLASS_IDS)!r}'
+				)
+			normalized_counts = {
+				str(class_id): _nonnegative_integer(
+					counts[str(class_id)],
+					f'{size} token footprint {xyz!r} class {class_id} count',
+				)
+				for class_id in CLASS_IDS
+			}
+			if sum(normalized_counts.values()) != len(flat):
+				raise ValueError(
+					f'{size} token footprint {xyz!r} class counts do not '
+					'cover flat_voxel_indices'
+				)
+			by_xyz[xyz] = TokenFootprint(
+				xyz,
+				flat,
+				item.per_line_flat_voxel_indices,
+				normalized_counts,
+			)
+		result[size] = by_xyz
+	return result
+
+
+def _validate_token_row_pool_nesting(
+	rows_by_size: Mapping[str, Sequence[TokenRow]],
+) -> None:
+	identities = {
+		size: {row.identity for row in rows_by_size[size]} for size in DATA_SIZES
+	}
+	if not (
+		identities['small'] <= identities['medium']
+		and identities['medium'] <= identities['large']
+	):
+		raise ValueError(
+			'token-row pools must be nested small <= medium <= large'
+		)
+
+
+def _validate_strict_nested_identity(
+	previous: AbstractSet[object], current: AbstractSet[object], *, label: str
+) -> None:
+	if not previous < current:
+		raise ValueError(f'{label} must be strictly nested')
+
+
+def _token_row_sort_key(
+	row: TokenRow,
+) -> TokenRowIdentity:
+	return row.identity
+
+
+def _token_row_identity_sort_key(
+	identity: TokenRowIdentity,
+) -> TokenRowIdentity:
+	return identity
+
+
+def _line_key_sort_key(value: tuple[str, int]) -> tuple[int, int]:
+	return (0 if value[0] == 'inline' else 1, value[1])
+
+
+def _line_key_string(value: tuple[str, int]) -> str:
+	return f'{value[0]}:{value[1]}'
+
+
+def _identity_sha256(values: Sequence[object]) -> str:
+	digest = hashlib.sha256()
+	for value in values:
+		parts = value if isinstance(value, tuple) else (value,)
+		encoded = '\x1f'.join(str(part) for part in parts).encode('utf-8')
+		digest.update(len(encoded).to_bytes(8, byteorder='big'))
+		digest.update(encoded)
+	return digest.hexdigest()
+
+
+def _integer_array_sha256(values: Sequence[object]) -> str:
+	array = np.ascontiguousarray(np.asarray(values, dtype=np.int64))
+	digest = hashlib.sha256()
+	digest.update(array.dtype.str.encode('ascii'))
+	digest.update(json.dumps(list(array.shape), separators=(',', ':')).encode('ascii'))
+	digest.update(array.view(np.uint8))
+	return digest.hexdigest()
+
+
 def _positive_triplet(value: object, label: str) -> tuple[int, int, int]:
 	if (
 		not isinstance(value, Sequence)
@@ -561,15 +1077,19 @@ def _nonnegative_integer(value: object, label: str) -> int:
 
 
 __all__ = [
+	'CLASS_BALANCED_SELECTION_SEMANTICS',
 	'CLASS_IDS',
 	'SELECTION_SEMANTICS',
 	'LayoutLines',
 	'SectionLine',
 	'SelectionPreview',
 	'TokenFootprint',
+	'TokenRow',
+	'TokenRowIdentity',
 	'candidate_token_footprints',
 	'per_line_contributions',
 	'preview_nested_selection',
+	'preview_seeded_nested_class_cap_selection',
 	'replay_selected_teacher_mask',
 	'stable_token_order',
 ]

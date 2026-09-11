@@ -1,0 +1,22 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+manifests:
+  input: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/volve_amplitude_manifest.json
+embeddings:
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt
+  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64
+embedding:
+  window_size: [128, 128, 128]
+  overlap: [64, 64, 64]
+  output_dtype: float16
+  batch_size: 1
+  prefetch_queue_depth: 0
+  amp: true
+  amp_dtype: auto
+  stage_timing: false
+  min_token_valid_fraction: 1.0
+  preprocessing_cache:
+    mode: 'off'
+    chunk_size_x: 16
+    reuse: true
+    cleanup: false

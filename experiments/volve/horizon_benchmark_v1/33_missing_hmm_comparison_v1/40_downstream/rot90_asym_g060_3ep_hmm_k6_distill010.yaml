@@ -1,0 +1,63 @@
+benchmark_id: local_bt_recipe_arm_v1
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  volve_root: ${SEIS_SSL_CLUSTER_VOLVE_ROOT}
+dataset:
+  survey_id: volve_st10010
+inputs:
+  canonical_input_metadata: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/volve_canonical_input_metadata.json
+arm:
+  arm_id: rot90_asym_g060_3ep_hmm_k6_distill010
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/rot90_asym_g060_3ep_hmm_k6_distill010/full_25ep/latest.pt
+  embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/rot90_asym_g060_3ep_hmm_k6_distill010/overlap_x64
+  recipe:
+    method: local_barlow_twins_3d
+    local_pairs_per_crop: 128
+    positive_window_tokens: [2, 2, 1]
+    augmentations:
+      policy: xy_rot90_asymmetric_noise_v1
+      gaussian_noise_std: 0.6
+    epochs: 3
+    samples_per_epoch: 10000
+    batch_size: 16
+    learning_rate: 1.0e-4
+    weight_decay: 0.05
+    seed: 42
+  hmm:
+    init_checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/full_3ep/latest.pt
+    source_embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/overlap_x64
+    pseudo_targets_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/rot90_asym_g060_3ep
+    clustering_config: experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/10_hmm_targets/rot90_asym_g060_3ep.yaml
+    distillation_weight: 0.1
+baseline:
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt
+  embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64
+outputs:
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/runs
+  summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/summary/rot90_asym_g060_3ep_hmm_k6_distill010
+decoder:
+  embedding_dim: 384
+  class_count: 5
+  hidden_channels: [128, 64, 32]
+  upsample_factors:
+    - [2, 2, 2]
+    - [2, 2, 2]
+    - [2, 2, 2]
+  upsample_mode: nearest
+  normalization: voxelwise_layer_norm
+tiles:
+  patch_size: [8, 8, 8]
+  core_size_tokens: [8, 8, 27]
+  context_halo_tokens: [1, 1, 0]
+  window_start: 552
+  window_stop: 768
+  min_token_valid_fraction: 1.0
+train:
+  epochs: 50
+  batch_size: 1
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  sampling_mode: all_tiles_once
+  seed: 42000
+  amp: true
+  gradient_clip_norm: 1.0

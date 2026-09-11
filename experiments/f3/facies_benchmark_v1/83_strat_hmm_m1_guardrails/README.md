@@ -6,17 +6,6 @@ They preserve the milestone-1 data, initialization, and training geometry while
 isolating whether adaptation or ordered pseudo-target structure drives the
 pretext behavior.
 
-Active stages are:
-
-1. `01` and `02`: distillation-only smoke and full pretraining.
-2. `03_build_shuffled_hmm_pseudo_targets`: deterministic shuffled-target
-   generation.
-3. `03_extract_distillation_only_embeddings`: distillation-only extraction.
-4. `05_extract_guardrail_embeddings`: shared extraction validation.
-5. `07_train_shuffled_hmm_smoke`, `08_train_shuffled_hmm_full`, and
-   `09_extract_shuffled_hmm_embeddings`: shuffled-target pretraining and
-   extraction.
-
-Complete outputs remain under `artifacts/seis_ssl_cluster/`. This directory
-contains only the guardrail target, pretraining, extraction, and validation
-stages listed above.
+Run each numbered branch in order. The YAML filenames identify target
+generation, smoke/full training, extraction, and validation; their settings and
+artifacts are not repeated here.

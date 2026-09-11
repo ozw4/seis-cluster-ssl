@@ -195,6 +195,7 @@ def _save_mae_rolling_checkpoint(  # noqa: PLR0913
 	batch_index: int | None,
 	rng_state: Mapping[str, object] | None = None,
 	best_score: float | None = None,
+	continuation_lineage: Mapping[str, object] | None = None,
 ) -> RollingCheckpointResult:
 	"""Write rolling ``latest.pt`` and update ``best.pt`` on metric improvement."""
 	checkpoint_path = _save_mae_checkpoint(
@@ -210,6 +211,7 @@ def _save_mae_rolling_checkpoint(  # noqa: PLR0913
 		checkpoint_kind=checkpoint_kind,
 		batch_index=batch_index,
 		rng_state=rng_state,
+		continuation_lineage=continuation_lineage,
 	)
 	metric_key, metric_value = _best_metric_from_metrics(metrics)
 	best_updated = _is_improved_best_metric(metric_value, best_score)
@@ -241,7 +243,13 @@ def _save_mae_checkpoint(  # noqa: PLR0913
 	checkpoint_kind: Literal['step', 'epoch'],
 	batch_index: int | None,
 	rng_state: Mapping[str, object] | None = None,
+	continuation_lineage: Mapping[str, object] | None = None,
 ) -> Path:
+	extra_payload = (
+		None
+		if continuation_lineage is None
+		else {'continuation_lineage': dict(continuation_lineage)}
+	)
 	return save_checkpoint(
 		path,
 		model=model,
@@ -265,6 +273,7 @@ def _save_mae_checkpoint(  # noqa: PLR0913
 			),
 		},
 		rng_state=rng_state,
+		extra_payload=extra_payload,
 	)
 
 

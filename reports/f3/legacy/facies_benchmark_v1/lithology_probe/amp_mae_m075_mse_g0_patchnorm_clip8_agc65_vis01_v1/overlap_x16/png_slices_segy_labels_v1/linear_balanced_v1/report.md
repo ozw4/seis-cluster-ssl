@@ -1,7 +1,5 @@
 # F3 token-level lithology probe report
 
-このreportはF3 token-level lithology probeの既存artifactを統合し、pretrained model、AGC有無、probe種別の比較に使う。
-
 ## Dataset
 
 - F3 shape: [601, 901, 255]
@@ -77,32 +75,6 @@
 - [validation_slice_inline_150](figures/validation_inline_0150_prediction.png)
 - [validation_slice_crossline_350](figures/validation_crossline_0350_prediction.png)
 - [validation_slice_crossline_750](figures/validation_crossline_0750_prediction.png)
-
-## Interpretation
-
-### 良い点
-
-- weighted F1は0.8955で、頻出classの性能を確認できる。
-- balanced accuracyは0.8438で、class imbalanceを考慮した比較指標になる。
-
-### 失敗しているclass
-
-- class 5 Zechstein: F1=0.3956, IoU=0.2466
-- class 3 Rijnland/Chalk: F1=0.5349, IoU=0.3651
-
-### class imbalanceの影響
-
-- class countの最大/最小比が40.1で、minor classのF1低下に注意する。
-
-### AGCあり/なし比較
-
-- このrunはAGCありとして集計される。AGCあり/なしの優劣はcomparison_table.csvで同じEMBED_SPEC、LABEL_SET、PROBE_SPECを揃えて比較する。
-
-### 次の改善候補
-
-- comparison_table.csvでMODEL_TAG、EMBED_SPEC、PROBE_SPECごとのmacro F1とmean IoUを比較する。
-- 低F1 classは教師slice追加、tokenization閾値、class weightingの影響を切り分ける。
-- linear probeで頭打ちなら同じfrozen encoder上でMLP probeを比較する。
 
 ## Warnings
 

@@ -15,9 +15,11 @@ from seis_ssl_cluster.data import (
 	BarlowTwinsPretrainDataset,
 	LocalBarlowTwinsD4TraceDropPretrainDataset,
 	LocalBarlowTwinsPretrainDataset,
+	OverlappingLocalBarlowTwinsPretrainDataset,
 	SurveyManifest,
 	SurveyNormalizationStats,
 	ZeroMaskConfig,
+	derive_overlapping_parent_crop_size,
 	write_normalization_stats,
 )
 from seis_ssl_cluster.models.mae.patching import patchify_3d
@@ -119,6 +121,56 @@ def _square_d4_base_dataset(
 		samples_per_epoch=samples_per_epoch,
 		zero_mask=ZeroMaskConfig(enabled=False),
 		min_valid_token_count=min_valid_token_count,
+	)
+
+
+def _overlapping_base_dataset(
+	tmp_path: Path,
+	*,
+	valid_token_mask: np.ndarray | None = None,
+	samples_per_epoch: int = 8,
+	max_resample_attempts: int = 16,
+) -> AmplitudePretrainDataset:
+	patch_size_xyz = (2, 2, 1)
+	view_crop_size_xyz = (4, 4, 2)
+	max_shift_tokens = (1, 1, 0)
+	parent_crop_size_xyz = derive_overlapping_parent_crop_size(
+		view_crop_size_xyz,
+		patch_size_xyz,
+		max_shift_tokens,
+	)
+	parent_token_shape = tuple(
+		parent // patch
+		for parent, patch in zip(
+			parent_crop_size_xyz,
+			patch_size_xyz,
+			strict=True,
+		)
+	)
+	patch_ids = np.arange(
+		1,
+		int(np.prod(parent_token_shape)) + 1,
+		dtype=np.float32,
+	).reshape(parent_token_shape)
+	volume = patch_ids
+	for axis, repeat in enumerate(patch_size_xyz):
+		volume = volume.repeat(repeat, axis=axis)
+	valid_mask = None
+	if valid_token_mask is not None:
+		if valid_token_mask.shape != parent_token_shape:
+			raise ValueError('valid_token_mask has the wrong shape')
+		valid_mask = valid_token_mask
+		for axis, repeat in enumerate(patch_size_xyz):
+			valid_mask = valid_mask.repeat(repeat, axis=axis)
+	return AmplitudePretrainDataset(
+		[_manifest(tmp_path, volume, valid_mask=valid_mask)],
+		local_crop_size_xyz=parent_crop_size_xyz,
+		patch_size_xyz=patch_size_xyz,
+		emit_spatial_mask=False,
+		seed=37,
+		samples_per_epoch=samples_per_epoch,
+		zero_mask=ZeroMaskConfig(enabled=False),
+		max_resample_attempts=max_resample_attempts,
 	)
 
 
@@ -325,6 +377,448 @@ def test_local_dataset_rejects_invalid_pair_count(
 		)
 
 
+@pytest.mark.parametrize('value', [-0.1, np.inf, np.nan, True, '0.1'])
+def test_local_dataset_rejects_invalid_gaussian_noise_std(
+	tmp_path: Path,
+	value: object,
+) -> None:
+	base = _base_dataset(tmp_path, min_valid_token_count=4)
+
+	with pytest.raises((TypeError, ValueError), match='gaussian_noise_std'):
+		LocalBarlowTwinsPretrainDataset(
+			base,
+			local_pairs_per_crop=4,
+			gaussian_noise_std=value,  # type: ignore[arg-type]
+		)
+
+
+@pytest.mark.parametrize('value', [-0.1, 1.1, np.inf, np.nan, True, '0.1'])
+def test_local_dataset_rejects_invalid_trace_drop_probability(
+	tmp_path: Path,
+	value: object,
+) -> None:
+	base = _base_dataset(tmp_path, min_valid_token_count=4)
+
+	with pytest.raises((TypeError, ValueError), match='trace_drop_probability'):
+		LocalBarlowTwinsPretrainDataset(
+			base,
+			local_pairs_per_crop=4,
+			trace_drop_probability=value,  # type: ignore[arg-type]
+		)
+
+
+@pytest.mark.parametrize('value', [-0.1, 0.5, 1.0, float('inf'), 'invalid'])
+def test_local_dataset_rejects_invalid_z_filter_side_weight(
+	tmp_path: Path,
+	value: object,
+) -> None:
+	with pytest.raises((TypeError, ValueError), match='z_filter_side_weight'):
+		LocalBarlowTwinsPretrainDataset(
+			_base_dataset(tmp_path, min_valid_token_count=4),
+			local_pairs_per_crop=4,
+			z_filter_side_weight=value,  # type: ignore[arg-type]
+		)
+
+
+@pytest.mark.parametrize('value', [0, 1, None, 'false'])
+def test_local_dataset_rejects_invalid_distinct_view_bool(
+	tmp_path: Path,
+	value: object,
+) -> None:
+	base = _base_dataset(tmp_path, min_valid_token_count=4)
+
+	with pytest.raises(
+		TypeError,
+		match='require_distinct_horizontal_views',
+	):
+		LocalBarlowTwinsPretrainDataset(
+			base,
+			local_pairs_per_crop=4,
+			require_distinct_horizontal_views=value,  # type: ignore[arg-type]
+		)
+
+
+def test_local_identity_gaussian_views_preserve_canonical_geometry(
+	tmp_path: Path,
+) -> None:
+	valid_mask = np.ones((2, 3, 4), dtype=bool)
+	valid_mask[0, 1, 2] = False
+	base = _base_dataset(
+		tmp_path,
+		valid_mask=valid_mask,
+		min_valid_token_count=4,
+	)
+	reference = base[0]
+	dataset = LocalBarlowTwinsPretrainDataset(
+		base,
+		local_pairs_per_crop=4,
+		horizontal_flip_probability=0.0,
+		gaussian_noise_std=0.25,
+		require_distinct_horizontal_views=False,
+	)
+
+	sample = dataset[0]
+	repeated = dataset[0]
+
+	for key in (
+		'view_a',
+		'view_b',
+		'valid_mask_a',
+		'valid_mask_b',
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	):
+		np.testing.assert_array_equal(sample[key], repeated[key])
+	for suffix in ('a', 'b'):
+		assert not np.asarray(sample[f'horizontal_flip_state_{suffix}']).any()
+		np.testing.assert_array_equal(
+			sample[f'valid_mask_{suffix}'],
+			reference['local_valid_mask'],
+		)
+	np.testing.assert_array_equal(
+		sample['local_pair_indices_a'],
+		sample['local_pair_indices_b'],
+	)
+
+	mask = np.asarray(reference['local_valid_mask'])
+	base_view = np.asarray(reference['x'])
+	residual_a = np.asarray(sample['view_a']) - base_view
+	residual_b = np.asarray(sample['view_b']) - base_view
+	for view in (sample['view_a'], sample['view_b']):
+		np.testing.assert_array_equal(
+			np.asarray(view)[0][~mask],
+			base_view[0][~mask],
+		)
+	assert np.any(residual_a[0][mask] != 0.0)
+	assert np.any(residual_b[0][mask] != 0.0)
+	assert not np.array_equal(residual_a[0][mask], residual_b[0][mask])
+
+
+def test_local_gaussian_noise_is_independent_and_only_changes_valid_voxels(
+	tmp_path: Path,
+) -> None:
+	valid_mask = np.ones((2, 3, 4), dtype=bool)
+	valid_mask[0, 1, 2] = False
+	without_noise = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(
+			tmp_path / 'without-noise',
+			valid_mask=valid_mask,
+			min_valid_token_count=4,
+		),
+		local_pairs_per_crop=4,
+		horizontal_flip_probability=0.5,
+		gaussian_noise_std=0.0,
+	)[0]
+	noisy_dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(
+			tmp_path / 'noisy',
+			valid_mask=valid_mask,
+			min_valid_token_count=4,
+		),
+		local_pairs_per_crop=4,
+		horizontal_flip_probability=0.5,
+		gaussian_noise_std=0.25,
+	)
+	with_noise = noisy_dataset[0]
+
+	for key in (
+		'valid_mask_a',
+		'valid_mask_b',
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	):
+		np.testing.assert_array_equal(with_noise[key], without_noise[key])
+	residuals = []
+	for suffix in ('a', 'b'):
+		view_key = f'view_{suffix}'
+		mask = with_noise[f'valid_mask_{suffix}']
+		residual = with_noise[view_key] - without_noise[view_key]
+		assert with_noise[view_key].dtype == np.float32
+		np.testing.assert_array_equal(
+			with_noise[view_key][0][~mask],
+			without_noise[view_key][0][~mask],
+		)
+		assert np.any(residual[0][mask] != 0.0)
+		residuals.append(residual)
+	assert not np.array_equal(*residuals)
+
+	repeated = noisy_dataset[0]
+	for key in ('view_a', 'view_b'):
+		np.testing.assert_array_equal(repeated[key], with_noise[key])
+
+
+def test_local_trace_drop_zero_preserves_sample_bytes_and_skips_rng_calls(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	default_dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(
+			tmp_path / 'default',
+			min_valid_token_count=4,
+		),
+		local_pairs_per_crop=4,
+		gaussian_noise_std=0.25,
+	)
+	explicit_zero_dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(
+			tmp_path / 'explicit-zero',
+			min_valid_token_count=4,
+		),
+		local_pairs_per_crop=4,
+		gaussian_noise_std=0.25,
+		trace_drop_probability=0.0,
+	)
+	apply_trace_drop = Mock(
+		side_effect=AssertionError('p=0 must not sample trace-drop RNG')
+	)
+	monkeypatch.setattr(
+		barlow_dataset_module,
+		'_apply_trace_drop',
+		apply_trace_drop,
+	)
+
+	for index in range(len(default_dataset)):
+		default_sample = default_dataset[index]
+		explicit_sample = explicit_zero_dataset[index]
+		assert default_sample.keys() == explicit_sample.keys()
+		for key, expected in default_sample.items():
+			actual = explicit_sample[key]
+			if isinstance(expected, np.ndarray):
+				assert isinstance(actual, np.ndarray)
+				assert actual.dtype == expected.dtype
+				assert actual.shape == expected.shape
+				assert actual.tobytes() == expected.tobytes()
+			else:
+				assert actual == expected
+	apply_trace_drop.assert_not_called()
+
+
+def test_local_trace_drop_one_runs_after_noise_without_changing_contract(
+	tmp_path: Path,
+) -> None:
+	valid_mask = np.ones((2, 3, 4), dtype=bool)
+	valid_mask[0, 1, :] = False
+	without_drop = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(
+			tmp_path / 'without-drop',
+			valid_mask=valid_mask,
+			min_valid_token_count=4,
+		),
+		local_pairs_per_crop=4,
+		gaussian_noise_std=0.25,
+		trace_drop_probability=0.0,
+	)[0]
+	with_drop = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(
+			tmp_path / 'with-drop',
+			valid_mask=valid_mask,
+			min_valid_token_count=4,
+		),
+		local_pairs_per_crop=4,
+		gaussian_noise_std=0.25,
+		trace_drop_probability=1.0,
+	)[0]
+	expected_keys = {
+		'view_a',
+		'view_b',
+		'valid_mask_a',
+		'valid_mask_b',
+		'coords',
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	}
+
+	assert set(with_drop) == expected_keys == set(without_drop)
+	for key in (
+		'valid_mask_a',
+		'valid_mask_b',
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	):
+		np.testing.assert_array_equal(with_drop[key], without_drop[key])
+	for suffix in ('a', 'b'):
+		mask = np.asarray(with_drop[f'valid_mask_{suffix}'])
+		eligible_xy = mask.any(axis=2)
+		view = np.asarray(with_drop[f'view_{suffix}'])
+		baseline = np.asarray(without_drop[f'view_{suffix}'])
+		assert eligible_xy.any()
+		assert np.all(view[:, eligible_xy, :] == 0.0)
+		np.testing.assert_array_equal(
+			view[:, ~eligible_xy, :],
+			baseline[:, ~eligible_xy, :],
+		)
+
+
+def test_local_trace_drop_is_independent_and_deterministic(tmp_path: Path) -> None:
+	dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(
+			tmp_path,
+			samples_per_epoch=16,
+			min_valid_token_count=4,
+		),
+		local_pairs_per_crop=4,
+		trace_drop_probability=0.5,
+	)
+	first = [dataset[index] for index in range(len(dataset))]
+
+	for index, expected in enumerate(first):
+		actual = dataset[index]
+		for key, value in expected.items():
+			if isinstance(value, np.ndarray):
+				np.testing.assert_array_equal(actual[key], value)
+			else:
+				assert actual[key] == value
+	assert any(
+		not np.array_equal(
+			np.all(np.asarray(sample['view_a']) == 0.0, axis=(0, 3)),
+			np.all(np.asarray(sample['view_b']) == 0.0, axis=(0, 3)),
+		)
+		for sample in first
+	)
+
+
+def test_zero_phase_z_filter_is_centered_and_preserves_dc() -> None:
+	impulse = np.zeros((1, 1, 1, 5), dtype=np.float32)
+	impulse[..., 2] = 1.0
+	valid_mask = np.ones((1, 1, 5), dtype=bool)
+
+	barlow_dataset_module._apply_zero_phase_z_filter(  # noqa: SLF001
+		impulse,
+		valid_mask,
+		side_weight=0.125,
+	)
+
+	np.testing.assert_allclose(
+		impulse,
+		np.asarray([[[[0.0, 0.125, 0.75, 0.125, 0.0]]]], dtype=np.float32),
+		rtol=0.0,
+		atol=1e-7,
+	)
+	constant = np.ones((1, 2, 3, 5), dtype=np.float32)
+	barlow_dataset_module._apply_zero_phase_z_filter(  # noqa: SLF001
+		constant,
+		np.ones((2, 3, 5), dtype=bool),
+		side_weight=0.125,
+	)
+	np.testing.assert_allclose(constant, 1.0, rtol=0.0, atol=1e-7)
+
+
+def test_zero_phase_z_filter_does_not_cross_invalid_z_gaps() -> None:
+	view = np.asarray([[[[1.0, 2.0, np.nan, 100.0, 5.0]]]], dtype=np.float32)
+	valid_mask = np.asarray([[[True, True, False, True, True]]])
+
+	barlow_dataset_module._apply_zero_phase_z_filter(  # noqa: SLF001
+		view,
+		valid_mask,
+		side_weight=0.125,
+	)
+
+	np.testing.assert_allclose(
+		view[..., [0, 1, 3, 4]],
+		np.asarray(
+			[[[[8.0 / 7.0, 13.0 / 7.0, 605.0 / 7.0, 130.0 / 7.0]]]],
+			dtype=np.float32,
+		),
+		rtol=0.0,
+		atol=1e-6,
+	)
+	assert np.isnan(view[..., 2]).all()
+
+
+def test_local_zero_phase_z_filter_assigns_one_view_symmetrically_and_deterministically(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(
+			tmp_path,
+			samples_per_epoch=16,
+			min_valid_token_count=4,
+		),
+		local_pairs_per_crop=4,
+		z_filter_side_weight=0.125,
+	)
+	original_filter = barlow_dataset_module._apply_zero_phase_z_filter  # noqa: SLF001
+	filtered_views: list[np.ndarray] = []
+
+	def record_filter(
+		view: np.ndarray,
+		valid_mask: np.ndarray,
+		*,
+		side_weight: float,
+	) -> None:
+		filtered_views.append(view)
+		original_filter(view, valid_mask, side_weight=side_weight)
+
+	monkeypatch.setattr(
+		barlow_dataset_module,
+		'_apply_zero_phase_z_filter',
+		record_filter,
+	)
+	first = [dataset[index] for index in range(len(dataset))]
+
+	def assignment_for(samples: list[dict[str, object]]) -> list[str]:
+		assignments: list[str] = []
+		for sample, filtered_view in zip(samples, filtered_views, strict=True):
+			if filtered_view is sample['view_a']:
+				assignments.append('a')
+			elif filtered_view is sample['view_b']:
+				assignments.append('b')
+			else:
+				raise AssertionError('filter target was not returned as a view')
+		return assignments
+
+	first_assignments = assignment_for(first)
+	assert set(first_assignments) == {'a', 'b'}
+	assert len(filtered_views) == len(first)
+	filtered_views.clear()
+	second = [dataset[index] for index in range(len(dataset))]
+	second_assignments = assignment_for(second)
+	assert second_assignments == first_assignments
+	for expected, actual in zip(first, second, strict=True):
+		for key, value in expected.items():
+			if isinstance(value, np.ndarray):
+				np.testing.assert_array_equal(actual[key], value)
+			else:
+				assert actual[key] == value
+
+
+def test_local_zero_phase_z_filter_zero_preserves_legacy_sample_bytes(
+	tmp_path: Path,
+) -> None:
+	default_dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(tmp_path / 'default', min_valid_token_count=4),
+		local_pairs_per_crop=4,
+		gaussian_noise_std=0.25,
+	)
+	explicit_zero_dataset = LocalBarlowTwinsPretrainDataset(
+		_base_dataset(tmp_path / 'explicit-zero', min_valid_token_count=4),
+		local_pairs_per_crop=4,
+		gaussian_noise_std=0.25,
+		z_filter_side_weight=0.0,
+	)
+
+	for index in range(len(default_dataset)):
+		default_sample = default_dataset[index]
+		explicit_zero_sample = explicit_zero_dataset[index]
+		assert default_sample.keys() == explicit_zero_sample.keys()
+		for key, expected in default_sample.items():
+			actual = explicit_zero_sample[key]
+			if isinstance(expected, np.ndarray):
+				assert isinstance(actual, np.ndarray)
+				assert actual.tobytes() == expected.tobytes()
+			else:
+				assert actual == expected
+
+
 def test_local_seed_epoch_and_index_determine_complete_sample(tmp_path: Path) -> None:
 	dataset = LocalBarlowTwinsPretrainDataset(
 		_base_dataset(tmp_path, min_valid_token_count=4),
@@ -497,6 +991,190 @@ def test_local_multi_worker_batch_matches_single_process(tmp_path: Path) -> None
 	assert single_batch['coords'] == multi_batch['coords']
 	assert single_batch['local_pair_indices_a'].dtype is torch.int64
 	assert single_batch['horizontal_flip_state_a'].dtype is torch.bool
+
+
+def test_overlapping_parent_crop_size_adds_patch_aligned_shift_margin() -> None:
+	assert derive_overlapping_parent_crop_size(
+		(128, 128, 128),
+		(8, 8, 8),
+		(4, 4, 0),
+	) == (160, 160, 128)
+
+
+def test_overlapping_subcrops_pair_same_parent_patch_ids_and_preserve_contract(
+	tmp_path: Path,
+) -> None:
+	base = _overlapping_base_dataset(tmp_path)
+	read_candidate = Mock(wraps=base._read_amplitude_crop_candidate)  # noqa: SLF001
+	base._read_amplitude_crop_candidate = read_candidate  # type: ignore[method-assign]  # noqa: SLF001
+	dataset = OverlappingLocalBarlowTwinsPretrainDataset(
+		base,
+		view_crop_size_xyz=(4, 4, 2),
+		local_pairs_per_crop=2,
+		max_subcrop_shift_tokens=(1, 1, 0),
+	)
+
+	first = dataset[3]
+	second = dataset[3]
+
+	expected_keys = {
+		'view_a',
+		'view_b',
+		'valid_mask_a',
+		'valid_mask_b',
+		'coords',
+		'horizontal_flip_state_a',
+		'horizontal_flip_state_b',
+		'local_pair_indices_a',
+		'local_pair_indices_b',
+	}
+	assert set(first) == expected_keys
+	for key in expected_keys - {'coords'}:
+		np.testing.assert_array_equal(first[key], second[key])
+	assert first['coords'] == second['coords'] == {
+		'survey_id': 'survey',
+		'local_start_xyz': (0, 0, 0),
+		'local_size_xyz': (6, 6, 2),
+	}
+	assert read_candidate.call_count == 2
+	assert np.asarray(first['view_a']).shape == (1, 4, 4, 2)
+	assert np.asarray(first['valid_mask_a']).shape == (4, 4, 2)
+	assert np.asarray(first['view_a']).dtype == np.float32
+	assert np.asarray(first['valid_mask_a']).dtype == np.bool_
+	assert np.asarray(first['horizontal_flip_state_a']).dtype == np.bool_
+	assert np.asarray(first['local_pair_indices_a']).dtype == np.int64
+	assert np.asarray(first['local_pair_indices_a']).shape == (2,)
+	assert not np.array_equal(
+		first['horizontal_flip_state_a'],
+		first['horizontal_flip_state_b'],
+	)
+
+	patch_size_xyz = (2, 2, 1)
+	patches: dict[str, torch.Tensor] = {}
+	selected: dict[str, torch.Tensor] = {}
+	view_patch_id_sets: dict[str, set[int]] = {}
+	for suffix in ('a', 'b'):
+		patches[suffix] = patchify_3d(
+			torch.as_tensor(first[f'view_{suffix}']).unsqueeze(0),
+			patch_size_xyz,
+		)[0]
+		indices = torch.as_tensor(first[f'local_pair_indices_{suffix}'])
+		selected[suffix] = patches[suffix].index_select(0, indices)
+		view_patch_id_sets[suffix] = set(
+			patches[suffix][:, 0, 0].round().to(torch.int64).tolist()
+		)
+		mask_patches = patchify_3d(
+			torch.as_tensor(
+				first[f'valid_mask_{suffix}'],
+				dtype=torch.float32,
+			)
+			.unsqueeze(0)
+			.unsqueeze(0),
+			patch_size_xyz,
+		)[0]
+		assert torch.all(mask_patches.index_select(0, indices) == 1.0)
+
+	assert view_patch_id_sets['a'] != view_patch_id_sets['b']
+	torch.testing.assert_close(selected['a'], selected['b'])
+	selected_ids = selected['a'][:, 0, 0]
+	torch.testing.assert_close(
+		selected['a'],
+		selected_ids[:, None, None].expand_as(selected['a']),
+	)
+
+
+def test_overlapping_subcrop_retries_only_offsets_until_overlap_is_valid(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	valid_tokens = np.zeros((3, 3, 2), dtype=bool)
+	valid_tokens[1, 0, :] = True
+	base = _overlapping_base_dataset(
+		tmp_path,
+		valid_token_mask=valid_tokens,
+		max_resample_attempts=2,
+	)
+	read_candidate = Mock(wraps=base._read_amplitude_crop_candidate)  # noqa: SLF001
+	base._read_amplitude_crop_candidate = read_candidate  # type: ignore[method-assign]  # noqa: SLF001
+	dataset = OverlappingLocalBarlowTwinsPretrainDataset(
+		base,
+		view_crop_size_xyz=(4, 4, 2),
+		local_pairs_per_crop=2,
+		max_subcrop_shift_tokens=(1, 1, 0),
+	)
+	offset_sampler = Mock(
+		side_effect=[
+			(
+				np.asarray([0, 0, 0]),
+				np.asarray([1, 1, 0]),
+			),
+			(
+				np.asarray([0, 0, 0]),
+				np.asarray([1, 0, 0]),
+			),
+		]
+	)
+	monkeypatch.setattr(
+		barlow_dataset_module,
+		'_sample_distinct_subcrop_offsets',
+		offset_sampler,
+	)
+
+	sample = dataset[0]
+
+	assert offset_sampler.call_count == 2
+	assert read_candidate.call_count == 1
+	assert np.asarray(sample['local_pair_indices_a']).shape == (2,)
+	for suffix in ('a', 'b'):
+		mask_patches = patchify_3d(
+			torch.as_tensor(
+				sample[f'valid_mask_{suffix}'],
+				dtype=torch.float32,
+			)
+			.unsqueeze(0)
+			.unsqueeze(0),
+			(2, 2, 1),
+		)[0]
+		selected_mask = mask_patches.index_select(
+			0,
+			torch.as_tensor(sample[f'local_pair_indices_{suffix}']),
+		)
+		assert torch.all(selected_mask == 1.0)
+
+
+def test_overlapping_subcrop_reports_bounded_offset_retry_failure(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	valid_tokens = np.zeros((3, 3, 2), dtype=bool)
+	valid_tokens[0, 0, :] = True
+	base = _overlapping_base_dataset(
+		tmp_path,
+		valid_token_mask=valid_tokens,
+		max_resample_attempts=2,
+	)
+	dataset = OverlappingLocalBarlowTwinsPretrainDataset(
+		base,
+		view_crop_size_xyz=(4, 4, 2),
+		local_pairs_per_crop=2,
+		max_subcrop_shift_tokens=(1, 1, 0),
+	)
+	offset_sampler = Mock(
+		return_value=(
+			np.asarray([0, 0, 0]),
+			np.asarray([1, 1, 0]),
+		)
+	)
+	monkeypatch.setattr(
+		barlow_dataset_module,
+		'_sample_distinct_subcrop_offsets',
+		offset_sampler,
+	)
+
+	with pytest.raises(ValueError, match=r'after 2 attempts.*last overlap had 0'):
+		dataset[0]
+
+	assert offset_sampler.call_count == 2
 
 
 def test_barlow_collate_rejects_mixed_standard_and_local_samples(

@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING
 import pytest
 
 from seis_ssl_cluster.config.f3_lithology_voxel_dataset import (
+	DENSE_SEGY_LABEL_SECTION_INVENTORY_SEMANTICS,
+	PNG_LABEL_INVENTORY_SEMANTICS,
 	f3_lithology_voxel_dataset_config_from_mapping,
 )
 
@@ -42,6 +44,32 @@ def test_voxel_dataset_config_resolves_contract(tmp_path: Path) -> None:
 	assert resolved.output_dir == tmp_path / 'artifacts' / 'voxel'
 	assert resolved.ignore_z_border_samples == 1
 	assert resolved.overwrite is False
+	# v1 configs omit the field and keep meaning PNG-annotation inventories.
+	assert resolved.inventory_semantics == PNG_LABEL_INVENTORY_SEMANTICS
+	assert PNG_LABEL_INVENTORY_SEMANTICS == 'png_label_inventory_v1'
+
+
+def test_voxel_dataset_config_accepts_dense_segy_inventory_semantics(
+	tmp_path: Path,
+) -> None:
+	config = _config(tmp_path)
+	config['voxel_dataset']['inventory_semantics'] = (  # type: ignore[index]
+		DENSE_SEGY_LABEL_SECTION_INVENTORY_SEMANTICS
+	)
+
+	resolved = f3_lithology_voxel_dataset_config_from_mapping(config)
+
+	assert resolved.inventory_semantics == 'dense_segy_label_section_inventory_v1'
+
+
+def test_voxel_dataset_config_rejects_unknown_inventory_semantics(
+	tmp_path: Path,
+) -> None:
+	config = _config(tmp_path)
+	config['voxel_dataset']['inventory_semantics'] = 'segy'  # type: ignore[index]
+
+	with pytest.raises(ValueError, match='inventory_semantics must be one of'):
+		f3_lithology_voxel_dataset_config_from_mapping(config)
 
 
 @pytest.mark.parametrize(

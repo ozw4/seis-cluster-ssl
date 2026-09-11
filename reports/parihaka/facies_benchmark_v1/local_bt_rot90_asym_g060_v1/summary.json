@@ -1,0 +1,243 @@
+{
+  "aggregates": {
+    "candidate_minus_random": {
+      "all_15": {
+        "losses": 1,
+        "mean": 0.07819812356764146,
+        "median": 0.0772205580850842,
+        "n": 15,
+        "paired_t_statistic": 5.507458796437562,
+        "sample_standard_deviation": 0.05499088444893073,
+        "ties": 0,
+        "wins": 14
+      },
+      "large": {
+        "losses": 1,
+        "mean": 0.027722586334981914,
+        "median": 0.03231223554565904,
+        "n": 5,
+        "paired_t_statistic": 2.8508201796558255,
+        "sample_standard_deviation": 0.021744474800445047,
+        "ties": 0,
+        "wins": 4
+      },
+      "medium": {
+        "losses": 0,
+        "mean": 0.10619947279876078,
+        "median": 0.1427836841697721,
+        "n": 5,
+        "paired_t_statistic": 3.4762188784864856,
+        "sample_standard_deviation": 0.06831251099357154,
+        "ties": 0,
+        "wins": 5
+      },
+      "small": {
+        "losses": 0,
+        "mean": 0.10067231156918166,
+        "median": 0.09185731510670994,
+        "n": 5,
+        "paired_t_statistic": 8.8405095372061,
+        "sample_standard_deviation": 0.025463479358665015,
+        "ties": 0,
+        "wins": 5
+      }
+    },
+    "candidate_minus_reference": {
+      "all_15": {
+        "losses": 1,
+        "mean": 0.022234584398271955,
+        "median": 0.01909347794434796,
+        "n": 15,
+        "paired_t_statistic": 4.238051146877404,
+        "sample_standard_deviation": 0.020319286412529367,
+        "ties": 0,
+        "wins": 14
+      },
+      "large": {
+        "losses": 0,
+        "mean": 0.014036202800002206,
+        "median": 0.014012174515765058,
+        "n": 5,
+        "paired_t_statistic": 2.7020043964981935,
+        "sample_standard_deviation": 0.011615785543300394,
+        "ties": 0,
+        "wins": 5
+      },
+      "medium": {
+        "losses": 1,
+        "mean": 0.020763240240990154,
+        "median": 0.007390347192965413,
+        "n": 5,
+        "paired_t_statistic": 1.887936464986319,
+        "sample_standard_deviation": 0.024591938062041477,
+        "ties": 0,
+        "wins": 4
+      },
+      "small": {
+        "losses": 0,
+        "mean": 0.0319043101538235,
+        "median": 0.0235076446233541,
+        "n": 5,
+        "paired_t_statistic": 3.18481597095628,
+        "sample_standard_deviation": 0.02240010315502322,
+        "ties": 0,
+        "wins": 5
+      }
+    }
+  },
+  "candidate_model_id": "local_barlow_twins_rot90_asym_g060_3ep",
+  "comparison": [
+    {
+      "candidate_channel_iou": 0.10032776248506767,
+      "candidate_minus_random": 0.10032776248506767,
+      "candidate_minus_reference": 0.028973889869204766,
+      "data_size": "small",
+      "layout_id": "layout_000",
+      "random_channel_iou": 0.0,
+      "reference_channel_iou": 0.0713538726158629
+    },
+    {
+      "candidate_channel_iou": 0.09185731510670994,
+      "candidate_minus_random": 0.09185731510670994,
+      "candidate_minus_reference": 0.016028194777495564,
+      "data_size": "small",
+      "layout_id": "layout_001",
+      "random_channel_iou": 0.0,
+      "reference_channel_iou": 0.07582912032921438
+    },
+    {
+      "candidate_channel_iou": 0.1437548083016499,
+      "candidate_minus_random": 0.1437548083016499,
+      "candidate_minus_reference": 0.07105888526694183,
+      "data_size": "small",
+      "layout_id": "layout_002",
+      "random_channel_iou": 0.0,
+      "reference_channel_iou": 0.07269592303470808
+    },
+    {
+      "candidate_channel_iou": 0.0772205580850842,
+      "candidate_minus_random": 0.0772205580850842,
+      "candidate_minus_reference": 0.01995293623212123,
+      "data_size": "small",
+      "layout_id": "layout_003",
+      "random_channel_iou": 0.0,
+      "reference_channel_iou": 0.05726762185296297
+    },
+    {
+      "candidate_channel_iou": 0.09020111386739656,
+      "candidate_minus_random": 0.09020111386739656,
+      "candidate_minus_reference": 0.0235076446233541,
+      "data_size": "small",
+      "layout_id": "layout_004",
+      "random_channel_iou": 0.0,
+      "reference_channel_iou": 0.06669346924404246
+    },
+    {
+      "candidate_channel_iou": 0.12459707155120679,
+      "candidate_minus_random": 0.048215444590203396,
+      "candidate_minus_reference": 0.007390347192965413,
+      "data_size": "medium",
+      "layout_id": "layout_000",
+      "random_channel_iou": 0.0763816269610034,
+      "reference_channel_iou": 0.11720672435824138
+    },
+    {
+      "candidate_channel_iou": 0.1427836841697721,
+      "candidate_minus_random": 0.1427836841697721,
+      "candidate_minus_reference": 0.003303686432020697,
+      "data_size": "medium",
+      "layout_id": "layout_001",
+      "random_channel_iou": 0.0,
+      "reference_channel_iou": 0.1394799977377514
+    },
+    {
+      "candidate_channel_iou": 0.17039612319358066,
+      "candidate_minus_random": 0.17039612319358066,
+      "candidate_minus_reference": 0.03746554862939305,
+      "data_size": "medium",
+      "layout_id": "layout_002",
+      "random_channel_iou": 0.0,
+      "reference_channel_iou": 0.1329305745641876
+    },
+    {
+      "candidate_channel_iou": 0.13935708116702716,
+      "candidate_minus_random": 0.017984702554529497,
+      "candidate_minus_reference": 0.05572621146481571,
+      "data_size": "medium",
+      "layout_id": "layout_003",
+      "random_channel_iou": 0.12137237861249767,
+      "reference_channel_iou": 0.08363086970221145
+    },
+    {
+      "candidate_channel_iou": 0.15161740948571825,
+      "candidate_minus_random": 0.15161740948571825,
+      "candidate_minus_reference": -6.959251424409896e-05,
+      "data_size": "medium",
+      "layout_id": "layout_004",
+      "random_channel_iou": 0.0,
+      "reference_channel_iou": 0.15168700199996235
+    },
+    {
+      "candidate_channel_iou": 0.2179110284580304,
+      "candidate_minus_random": 0.02795668083561645,
+      "candidate_minus_reference": 0.01909347794434796,
+      "data_size": "large",
+      "layout_id": "layout_000",
+      "random_channel_iou": 0.18995434762241395,
+      "reference_channel_iou": 0.19881755051368244
+    },
+    {
+      "candidate_channel_iou": 0.2104834917526883,
+      "candidate_minus_random": 0.03231223554565904,
+      "candidate_minus_reference": 0.0028738451538899423,
+      "data_size": "large",
+      "layout_id": "layout_001",
+      "random_channel_iou": 0.17817125620702925,
+      "reference_channel_iou": 0.20760964659879835
+    },
+    {
+      "candidate_channel_iou": 0.20463041043132418,
+      "candidate_minus_random": 0.037719013055615674,
+      "candidate_minus_reference": 0.003485545044205174,
+      "data_size": "large",
+      "layout_id": "layout_002",
+      "random_channel_iou": 0.1669113973757085,
+      "reference_channel_iou": 0.201144865387119
+    },
+    {
+      "candidate_channel_iou": 0.22593450298710369,
+      "candidate_minus_random": 0.04912588155483716,
+      "candidate_minus_reference": 0.014012174515765058,
+      "data_size": "large",
+      "layout_id": "layout_003",
+      "random_channel_iou": 0.17680862143226653,
+      "reference_channel_iou": 0.21192232847133863
+    },
+    {
+      "candidate_channel_iou": 0.22674703469681853,
+      "candidate_minus_random": -0.008500879316818755,
+      "candidate_minus_reference": 0.0307159713418029,
+      "data_size": "large",
+      "layout_id": "layout_004",
+      "random_channel_iou": 0.2352479140136373,
+      "reference_channel_iou": 0.19603106335501563
+    }
+  ],
+  "delta_convention": "candidate minus comparator; positive values favor the candidate",
+  "downstream_identity_parity": true,
+  "job_counts": {
+    "compared_cells": 15,
+    "learned": 30,
+    "legacy_pretrained_random": 30
+  },
+  "legacy_random_model_id": "random",
+  "model_means_all_15": {
+    "local_barlow_twins": 0.1322867086510066,
+    "local_barlow_twins_rot90_asym_g060_3ep": 0.15452129304927856,
+    "random": 0.0763231694816371
+  },
+  "primary_metric": "test.channel_iou",
+  "reference_model_id": "local_barlow_twins",
+  "schema_version": 1,
+  "summary_name": "parihaka_channel_recipe_transfer"
+}

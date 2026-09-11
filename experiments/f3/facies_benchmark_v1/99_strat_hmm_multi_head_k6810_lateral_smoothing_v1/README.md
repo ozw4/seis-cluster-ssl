@@ -1,16 +1,10 @@
-# F3 M5-LS lateral hard-target artifact producers
+# F3 lateral hard-target producers
 
-M5-LS creates offline hard pseudo-targets using one XY four-neighbour,
-source-embedding cosine-RBF lateral mean-field message and one ordered Viterbi
-reprojection. Training consumes only hard labels through the existing
-multi-head data, collate, and loss route.
+The scientific question and interpretation limits are recorded in
+[`docs/f3_m5_lateral_smoothing_plan.md`](../../../../docs/f3_m5_lateral_smoothing_plan.md).
+This directory owns only the executable conditions.
 
-The fixed target candidates are `beta010`, `beta025`, and `beta050`.
-Run YAML stages `01` through `04` with
-`export_strat_hmm_multi_head_lateral_targets.py` and
-`calibrate_f3_m5_lateral_targets.py`. Then run stages `05` through `08`
-with `train_strat_hmm_pretext.py`, `extract_embeddings.py`, and
-`validate_f3_m5_lateral_smoothing_pretraining.py`.
-
-No facies labels or downstream metrics are target inputs. Complete outputs
-remain under `artifacts/seis_ssl_cluster/`.
+Run the numbered YAML stages in order: export the candidates, calibrate the
+target, run smoke and full pretraining, extract embeddings, and validate the
+handoff. The filenames identify the corresponding proc entrypoint; exact
+inputs, settings, and outputs belong to the YAML and validators.

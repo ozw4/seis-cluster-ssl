@@ -12,16 +12,20 @@ from seis_ssl_cluster.config.barlow_twins import (
 )
 from seis_ssl_cluster.config.pretraining import (
 	resolve_barlow_twins_training_config,
+	resolve_vicreg_training_config,
 )
 from seis_ssl_cluster.config.schema import (
 	BARLOW_TWINS_PRETRAINING_METHOD,
 	FIXED_DATA_CONTRACT,
 	FIXED_MODEL_CONTRACT,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	LOCAL_VICREG_PRETRAINING_METHOD,
 	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_MAE_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
+	STAGE_VICREG_TRAINING,
 )
+from seis_ssl_cluster.config.vicreg import resolve_vicreg_pretraining_method
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 
 PATCH_PROJECTION_PARAMETER_PREFIX = 'patch_projection.'
@@ -31,6 +35,7 @@ AMPLITUDE_ENCODER_TRAINED_PARAMETER_PREFIXES = (
 	ENCODER_PARAMETER_PREFIX,
 )
 BARLOW_TWINS_CHECKPOINT_KIND = 'barlow_twins_pretraining'
+VICREG_CHECKPOINT_KIND = 'vicreg_pretraining'
 
 _MAE_ALLOWED_TOP_LEVEL = frozenset(
 	{
@@ -84,6 +89,33 @@ _BARLOW_TWINS_REQUIRED_TOP_LEVEL = frozenset(
 		'model',
 		'augmentations',
 		'barlow_twins',
+		'train',
+	}
+)
+_VICREG_ALLOWED_TOP_LEVEL = frozenset(
+	{
+		'stage',
+		'paths',
+		'manifests',
+		'data',
+		'zero_mask',
+		'model',
+		'continuation',
+		'augmentations',
+		'vicreg',
+		'train',
+	}
+)
+_VICREG_REQUIRED_TOP_LEVEL = frozenset(
+	{
+		'stage',
+		'paths',
+		'manifests',
+		'data',
+		'zero_mask',
+		'model',
+		'augmentations',
+		'vicreg',
 		'train',
 	}
 )
@@ -161,6 +193,13 @@ def validate_pretraining_checkpoint_config(config: Mapping[str, object]) -> None
 			required=_BARLOW_TWINS_REQUIRED_TOP_LEVEL,
 		)
 		_validate_resolved_barlow_twins_config(config)
+	elif stage == STAGE_VICREG_TRAINING:
+		_validate_top_level(
+			config,
+			allowed=_VICREG_ALLOWED_TOP_LEVEL,
+			required=_VICREG_REQUIRED_TOP_LEVEL,
+		)
+		_validate_resolved_vicreg_config(config)
 	else:
 		raise ValueError(
 			'checkpoint config.stage must identify a supported pretraining method; '
@@ -259,15 +298,56 @@ def _validate_resolved_barlow_twins_config(config: Mapping[str, object]) -> None
 		)
 
 
-def _validate_method_identity(
+def _validate_resolved_vicreg_config(config: Mapping[str, object]) -> None:
+	raw = dict(config)
+	raw.pop('stage')
+	for section, fixed_contract in (
+		('data', FIXED_DATA_CONTRACT),
+		('model', FIXED_MODEL_CONTRACT),
+	):
+		resolved_section = _required_mapping(config, section)
+		raw[section] = {
+			key: value
+			for key, value in resolved_section.items()
+			if key not in fixed_contract
+		}
+	resolved = resolve_vicreg_training_config(raw)
+	if resolved != dict(config):
+		raise ValueError(
+			'VICReg checkpoint config must contain the fully resolved config'
+		)
+
+
+def _validate_method_identity(  # noqa: C901
 	payload: Mapping[str, object],
 	config: Mapping[str, object],
 ) -> None:
-	if config.get('stage') != STAGE_BARLOW_TWINS_TRAINING:
+	stage = config.get('stage')
+	if stage not in {STAGE_BARLOW_TWINS_TRAINING, STAGE_VICREG_TRAINING}:
 		return
 	if is_random_encoder_checkpoint(payload):
 		return
 	if _is_strat_hmm_encoder_checkpoint(payload):
+		return
+	if stage == STAGE_VICREG_TRAINING:
+		expected_method = resolve_vicreg_pretraining_method(config)
+		if payload.get('pretraining_method') != expected_method:
+			raise ValueError(
+				'VICReg checkpoint pretraining_method does not match config'
+			)
+		if payload.get('checkpoint_kind') != VICREG_CHECKPOINT_KIND:
+			raise ValueError('VICReg checkpoint checkpoint_kind is invalid')
+		prefixes = payload.get('trained_parameter_prefixes')
+		if not isinstance(prefixes, list | tuple) or tuple(prefixes) != (
+			AMPLITUDE_ENCODER_TRAINED_PARAMETER_PREFIXES
+		):
+			raise ValueError(
+				'VICReg checkpoint trained_parameter_prefixes are invalid'
+			)
+		if not isinstance(payload.get('projector_state_dict'), Mapping):
+			raise TypeError(
+				'VICReg checkpoint projector_state_dict must be a mapping'
+			)
 		return
 	expected_method = resolve_barlow_twins_pretraining_method(config)
 	if payload.get('pretraining_method') != expected_method:
@@ -300,11 +380,11 @@ def _validate_bare_model_state(
 		if key.startswith(('backbone.', 'projector.'))
 	)
 	if wrapper_keys:
-		method = (
-			'Barlow Twins'
-			if config.get('stage') == STAGE_BARLOW_TWINS_TRAINING
-			else 'MAE'
-		)
+		stage = config.get('stage')
+		method = {
+			STAGE_BARLOW_TWINS_TRAINING: 'Barlow Twins',
+			STAGE_VICREG_TRAINING: 'VICReg',
+		}.get(stage, 'MAE')
 		raise ValueError(
 			f'{method} model_state_dict must use bare AmplitudeMAE3D keys; '
 			f'got wrapper key(s): {wrapper_keys!r}'
@@ -375,7 +455,9 @@ __all__ = [
 	'BARLOW_TWINS_PRETRAINING_METHOD',
 	'ENCODER_PARAMETER_PREFIX',
 	'LOCAL_BARLOW_TWINS_PRETRAINING_METHOD',
+	'LOCAL_VICREG_PRETRAINING_METHOD',
 	'PATCH_PROJECTION_PARAMETER_PREFIX',
+	'VICREG_CHECKPOINT_KIND',
 	'build_model_from_checkpoint_payload',
 	'build_model_from_config',
 	'checkpoint_config_from_payload',

@@ -32,6 +32,7 @@ from seis_ssl_cluster.config.common import (
 	_validate_non_empty_str,
 	_validate_nonnegative_finite_number,
 	_validate_nonnegative_int,
+	_validate_nonnegative_int_triplet,
 	_validate_nonnegative_number,
 	_validate_optional_fraction,
 	_validate_optional_nonnegative_int,
@@ -60,25 +61,44 @@ from seis_ssl_cluster.config.schema import (
 	DEFAULT_STRAT_HMM_PRETEXT_PSEUDO_TARGET_OPTIONS,
 	DEFAULT_STRAT_HMM_PRETEXT_STUDENT_OPTIONS,
 	DEFAULT_STRAT_HMM_PRETEXT_TRAIN_OPTIONS,
+	DEFAULT_VICREG_OPTIONS,
 	DEFAULT_ZERO_MASK_CONTRACT,
 	EXPECTED_VALID_MASK_MODE,
 	FIXED_DATA_CONTRACT,
 	FIXED_LOSS_CONTRACT,
 	FIXED_MASKING_CONTRACT,
 	FIXED_MODEL_CONTRACT,
+	HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+	HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+	IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
 	LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	LOCAL_VICREG_PRETRAINING_METHOD,
 	MAE_DEBUG_VISUALIZATION_COLUMNS,
 	MAE_DEBUG_VISUALIZATION_KEYS,
+	OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
 	STAGE_BARLOW_TWINS_TRAINING,
 	STAGE_MAE_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
+	STAGE_VICREG_TRAINING,
 	SUPPORTED_AMP_DTYPES,
 	SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS,
 	SUPPORTED_FINITE_CHECK_MODES,
 	SUPPORTED_RECONSTRUCTION_LOSSES,
 	SUPPORTED_RUNTIME_CHECK_MODES,
 	SUPPORTED_TARGET_NORMALIZATION_MODES,
+	SUPPORTED_VICREG_PRETRAINING_METHODS,
+	XY_D4_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
 	XY_D4_TRACE_DROP_AUGMENTATION_POLICY,
+	XY_ROT90_ASYMMETRIC_NOISE_AUGMENTATION_POLICY,
+	XY_ROT90_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+	XY_ROT90_LAPLACE_NOISE_AUGMENTATION_POLICY,
 )
 from seis_ssl_cluster.stratigraphy.prototypes import (
 	MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1,
@@ -102,6 +122,48 @@ _MAE_TRAINING_VISUALIZATION_KEYS = frozenset({'mae_debug'})
 _CONTINUATION_KEYS = frozenset({'init_checkpoint', 'unfreeze_top_blocks'})
 _D4_TRACE_DROP_AUGMENTATION_KEYS = frozenset(
 	{'policy', 'reflection_probability', 'trace_drop_probability'}
+)
+_HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'gaussian_noise_std'}
+)
+_HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'trace_drop_probability'}
+)
+_HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'z_filter_side_weight'}
+)
+_HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'token_dropout_fraction'}
+)
+_HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'gain_jitter'}
+)
+_HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_KEYS = frozenset(
+	{
+		'policy',
+		'horizontal_flip_probability',
+		'gaussian_noise_std',
+		'noise_z_smoothing',
+	}
+)
+_HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'gaussian_noise_std'}
+)
+_XY_ROTATION_NOISE_AUGMENTATION_KEYS = frozenset({'policy', 'gaussian_noise_std'})
+_HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'gaussian_noise_std'}
+)
+_HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_KEYS = frozenset(
+	{
+		'policy',
+		'horizontal_flip_probability',
+		'gaussian_noise_std',
+		'trace_drop_probability',
+	}
+)
+_IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS = frozenset({'policy', 'gaussian_noise_std'})
+_OVERLAPPING_SUBCROP_XY_AUGMENTATION_KEYS = frozenset(
+	{'policy', 'horizontal_flip_probability', 'max_subcrop_shift_tokens'}
 )
 
 _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
@@ -132,6 +194,18 @@ _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 		{
 			*DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
 			*_D4_TRACE_DROP_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_KEYS,
+			*_XY_ROTATION_NOISE_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_KEYS,
+			*_HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS,
+			*_IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			*_OVERLAPPING_SUBCROP_XY_AUGMENTATION_KEYS,
 		}
 	),
 	'barlow_twins': frozenset(
@@ -139,6 +213,7 @@ _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 			*DEFAULT_BARLOW_TWINS_OPTIONS,
 			'local_pairs_per_crop',
 			'method',
+			'positive_window_tokens',
 		}
 	),
 	'train': frozenset(
@@ -149,6 +224,22 @@ _BARLOW_TWINS_SECTION_KEYS: dict[str, frozenset[str]] = {
 			*DEFAULT_BARLOW_TWINS_TRAIN_OPTIONS,
 		}
 	),
+}
+
+_VICREG_SECTION_KEYS: dict[str, frozenset[str]] = {
+	'manifests': _BARLOW_TWINS_SECTION_KEYS['manifests'],
+	'data': _BARLOW_TWINS_SECTION_KEYS['data'],
+	'zero_mask': _BARLOW_TWINS_SECTION_KEYS['zero_mask'],
+	'model': _BARLOW_TWINS_SECTION_KEYS['model'],
+	'augmentations': _BARLOW_TWINS_SECTION_KEYS['augmentations'],
+	'vicreg': frozenset(
+		{
+			*DEFAULT_VICREG_OPTIONS,
+			'local_pairs_per_crop',
+			'method',
+		}
+	),
+	'train': _BARLOW_TWINS_SECTION_KEYS['train'],
 }
 
 _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
@@ -727,15 +818,141 @@ def resolve_barlow_twins_training_config(config: _T) -> Config:
 		local_crop_size=local_crop_size,
 		patch_size=patch_size,
 	)
+	method = cast(
+		'str',
+		barlow_twins.get('method', BARLOW_TWINS_PRETRAINING_METHOD),
+	)
 	_validate_barlow_twins_augmentations(
 		_required_mapping(resolved, 'augmentations'),
-		method=cast('str', barlow_twins.get('method', BARLOW_TWINS_PRETRAINING_METHOD)),
+		method=method,
+		local_crop_size=local_crop_size,
+		patch_size=patch_size,
+		local_pairs_per_crop=cast(
+			'int | None',
+			barlow_twins.get('local_pairs_per_crop'),
+		),
+	)
+	_validate_barlow_twins_positive_window(
+		barlow_twins,
+		method=method,
+		augmentations=_required_mapping(resolved, 'augmentations'),
 		local_crop_size=local_crop_size,
 		patch_size=patch_size,
 	)
 
 	train = _required_mapping(resolved, 'train')
 	_validate_barlow_twins_train(train)
+	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
+	_validate_output_path(
+		output_root,
+		'paths.output_root',
+		input_root=paths.nopims_root,
+		input_root_label='paths.nopims_root',
+	)
+
+	_merge_section_defaults(resolved, 'data', FIXED_DATA_CONTRACT)
+	_merge_section_defaults(resolved, 'model', FIXED_MODEL_CONTRACT)
+	return resolved
+
+
+def resolve_vicreg_training_config(config: _T) -> Config:
+	"""Validate and resolve raw config for local 3D VICReg training."""
+	resolved, paths = _resolve_base(
+		config,
+		STAGE_VICREG_TRAINING,
+		require_nopims_root=False,
+	)
+	paths_config = _required_mapping(resolved, 'paths')
+	output_root = _validate_path(paths_config, 'output_root', prefix='paths')
+	_reject_fixed_contract_keys(resolved)
+	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
+	raw_augmentations = resolved.get('augmentations')
+	if not (
+		isinstance(raw_augmentations, Mapping)
+		and 'policy' in raw_augmentations
+	):
+		_merge_section_defaults(
+			resolved,
+			'augmentations',
+			DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS,
+		)
+	_merge_section_defaults(resolved, 'vicreg', DEFAULT_VICREG_OPTIONS)
+	_merge_section_defaults(resolved, 'train', DEFAULT_BARLOW_TWINS_TRAIN_OPTIONS)
+	_merge_section_defaults(resolved, 'zero_mask', DEFAULT_ZERO_MASK_CONTRACT)
+
+	for section, allowed_keys in _VICREG_SECTION_KEYS.items():
+		_validate_allowed_keys(
+			_required_mapping(resolved, section),
+			allowed_keys,
+			prefix=section,
+		)
+
+	manifests = _required_mapping(resolved, 'manifests')
+	_validate_manifests(manifests)
+	if 'canonical_input_metadata' in manifests:
+		_validate_non_empty_path(
+			manifests,
+			'canonical_input_metadata',
+			prefix='manifests',
+		)
+
+	data = _required_mapping(resolved, 'data')
+	local_crop_size = _validate_positive_int_triplet(
+		data,
+		'local_crop_size',
+		prefix='data',
+	)
+	_validate_optional_fraction(data, 'min_valid_fraction', prefix='data')
+	_validate_positive_int(data, 'max_resample_attempts', prefix='data')
+	if data.get('normalized_clip_abs') is not None:
+		_validate_positive_finite_number(
+			data,
+			'normalized_clip_abs',
+			prefix='data',
+		)
+	_validate_amplitude_agc(data)
+	_validate_finite_check_mode(data)
+
+	model = _required_mapping(resolved, 'model')
+	patch_size = _validate_positive_int_triplet(
+		model,
+		'patch_size',
+		prefix='model',
+	)
+	_validate_model(model)
+	if 'continuation' in resolved:
+		_validate_vicreg_continuation(
+			_required_mapping(resolved, 'continuation'),
+			encoder_depth=int(model['encoder_depth']),
+		)
+	_validate_divisible_crop_patch(local_crop_size, patch_size)
+
+	vicreg = _required_mapping(resolved, 'vicreg')
+	_validate_positive_int(vicreg, 'projector_dim', prefix='vicreg')
+	for key in (
+		'invariance_weight',
+		'variance_weight',
+		'covariance_weight',
+	):
+		_validate_nonnegative_finite_number(vicreg, key, prefix='vicreg')
+	for key in ('variance_target_std', 'variance_eps'):
+		_validate_positive_finite_number(vicreg, key, prefix='vicreg')
+	_validate_vicreg_method(
+		vicreg,
+		local_crop_size=local_crop_size,
+		patch_size=patch_size,
+	)
+	_validate_barlow_twins_augmentations(
+		_required_mapping(resolved, 'augmentations'),
+		method=cast('str', vicreg['method']),
+		local_crop_size=local_crop_size,
+		patch_size=patch_size,
+		local_pairs_per_crop=int(vicreg['local_pairs_per_crop']),
+		local_method=LOCAL_VICREG_PRETRAINING_METHOD,
+		method_section='vicreg',
+	)
+
+	_validate_barlow_twins_train(_required_mapping(resolved, 'train'))
 	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
 	_validate_output_path(
 		output_root,
@@ -3710,6 +3927,40 @@ def _validate_continuation(
 		raise ValueError(msg)
 
 
+def _validate_vicreg_continuation(
+	continuation: Mapping[str, object],
+	*,
+	encoder_depth: int,
+) -> None:
+	_validate_allowed_keys(
+		continuation,
+		_CONTINUATION_KEYS,
+		prefix='continuation',
+	)
+	_validate_required_keys(
+		continuation,
+		_CONTINUATION_KEYS,
+		prefix='continuation',
+	)
+	_validate_absolute_path(
+		continuation,
+		'init_checkpoint',
+		prefix='continuation',
+	)
+	_validate_nonnegative_int(
+		continuation,
+		'unfreeze_top_blocks',
+		prefix='continuation',
+	)
+	unfreeze_top_blocks = int(continuation['unfreeze_top_blocks'])
+	if unfreeze_top_blocks > encoder_depth:
+		msg = (
+			'continuation.unfreeze_top_blocks must be less than or equal to '
+			f'model.encoder_depth ({encoder_depth}); got {unfreeze_top_blocks}'
+		)
+		raise ValueError(msg)
+
+
 def _validate_masking(masking: Mapping[str, object]) -> None:
 	ratio = masking.get('spatial_mask_ratio')
 	if (
@@ -3839,12 +4090,149 @@ def _validate_barlow_twins_method(
 		raise ValueError(msg)
 
 
-def _validate_barlow_twins_augmentations(
+_REGION_POSITIVE_ALLOWED_POLICIES = frozenset(
+	{
+		HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_POLICY,
+		HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_POLICY,
+		HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_POLICY,
+		HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_POLICY,
+		IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		XY_D4_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		XY_ROT90_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		XY_ROT90_LAPLACE_NOISE_AUGMENTATION_POLICY,
+		XY_ROT90_ASYMMETRIC_NOISE_AUGMENTATION_POLICY,
+		HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_POLICY,
+		HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_POLICY,
+		HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY,
+		HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY,
+		OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY,
+	}
+)
+
+
+def _validate_barlow_twins_positive_window(
+	barlow_twins: Mapping[str, object],
+	*,
+	method: str,
+	augmentations: Mapping[str, object],
+	local_crop_size: Sequence[int],
+	patch_size: Sequence[int],
+) -> None:
+	if 'positive_window_tokens' not in barlow_twins:
+		return
+	if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+		msg = (
+			'barlow_twins.positive_window_tokens is only allowed when '
+			'barlow_twins.method is '
+			f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+		)
+		raise ValueError(msg)
+	policy = augmentations.get('policy')
+	if policy is not None and policy not in _REGION_POSITIVE_ALLOWED_POLICIES:
+		msg = (
+			'barlow_twins.positive_window_tokens is not supported for '
+			f'augmentations.policy {policy!r}'
+		)
+		raise ValueError(msg)
+	window = _validate_positive_int_triplet(
+		barlow_twins,
+		'positive_window_tokens',
+		prefix='barlow_twins',
+	)
+	token_shape = tuple(
+		crop_axis // patch_axis
+		for crop_axis, patch_axis in zip(local_crop_size, patch_size, strict=True)
+	)
+	shift_tokens: tuple[int, int, int] = (0, 0, 0)
+	if policy == OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY:
+		shift_tokens = cast(
+			'tuple[int, int, int]',
+			tuple(
+				int(axis)
+				for axis in cast(
+					'Sequence[int]',
+					augmentations['max_subcrop_shift_tokens'],
+				)
+			),
+		)
+	anchor_count = 1
+	for window_axis, token_axis, shift_axis in zip(
+		window,
+		token_shape,
+		shift_tokens,
+		strict=True,
+	):
+		if window_axis + shift_axis > token_axis:
+			msg = (
+				'barlow_twins.positive_window_tokens must fit within the '
+				f'minimum overlapping token grid of {list(token_shape)!r} with '
+				f'subcrop shifts {list(shift_tokens)!r}; got {list(window)!r}'
+			)
+			raise ValueError(msg)
+		anchor_count *= token_axis - shift_axis - window_axis + 1
+	local_pairs_per_crop = int(cast('int', barlow_twins['local_pairs_per_crop']))
+	if local_pairs_per_crop > anchor_count:
+		msg = (
+			'barlow_twins.local_pairs_per_crop must be less than or equal to '
+			f'the positive-window anchor count ({anchor_count}); '
+			f'got {local_pairs_per_crop}'
+		)
+		raise ValueError(msg)
+
+
+def _validate_vicreg_method(
+	vicreg: Mapping[str, object],
+	*,
+	local_crop_size: Sequence[int],
+	patch_size: Sequence[int],
+) -> None:
+	_validate_required_keys(
+		vicreg,
+		frozenset({'method', 'local_pairs_per_crop'}),
+		prefix='vicreg',
+	)
+	method = vicreg['method']
+	if not isinstance(method, str):
+		msg = f'vicreg.method must be a string; got {method!r}'
+		raise TypeError(msg)
+	if method not in SUPPORTED_VICREG_PRETRAINING_METHODS:
+		msg = (
+			'vicreg.method must be one of '
+			f'{sorted(SUPPORTED_VICREG_PRETRAINING_METHODS)!r}; got {method!r}'
+		)
+		raise ValueError(msg)
+	_validate_positive_int(
+		vicreg,
+		'local_pairs_per_crop',
+		prefix='vicreg',
+	)
+	local_pairs_per_crop = int(vicreg['local_pairs_per_crop'])
+	token_count = math.prod(
+		crop_axis // patch_axis
+		for crop_axis, patch_axis in zip(
+			local_crop_size,
+			patch_size,
+			strict=True,
+		)
+	)
+	if local_pairs_per_crop > token_count:
+		msg = (
+			'vicreg.local_pairs_per_crop must be less than or equal to '
+			f'the crop token count ({token_count}); got {local_pairs_per_crop}'
+		)
+		raise ValueError(msg)
+
+
+def _validate_barlow_twins_augmentations(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915
 	augmentations: Mapping[str, object],
 	*,
 	method: str,
 	local_crop_size: Sequence[int],
 	patch_size: Sequence[int],
+	local_pairs_per_crop: int | None,
+	local_method: str = LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
+	method_section: str = 'barlow_twins',
 ) -> None:
 	if 'policy' not in augmentations:
 		legacy_keys = frozenset(DEFAULT_BARLOW_TWINS_AUGMENTATION_OPTIONS)
@@ -3860,6 +4248,448 @@ def _validate_barlow_twins_augmentations(
 		)
 		return
 
+	policy = augmentations.get('policy')
+	if not isinstance(policy, str):
+		msg = f'augmentations.policy must be a string; got {policy!r}'
+		raise TypeError(msg)
+	if policy == IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method '
+				f'{local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_positive_finite_number(
+			augmentations,
+			'gaussian_noise_std',
+			prefix='augmentations',
+		)
+		return
+
+	if policy == HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method '
+				f'{local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_nonnegative_finite_number(
+			augmentations,
+			'gaussian_noise_std',
+			prefix='augmentations',
+		)
+		return
+
+	if policy == HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method '
+				f'{local_method!r}'
+			)
+			raise ValueError(msg)
+		for key in ('horizontal_flip_probability', 'trace_drop_probability'):
+			_validate_fraction(augmentations, key, prefix='augmentations')
+		return
+
+	if policy == HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method '
+				f'{local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_zero_phase_z_filter_side_weight(
+			augmentations,
+			'z_filter_side_weight',
+			prefix='augmentations',
+		)
+		return
+
+	if policy == HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method {local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_positive_finite_number(
+			augmentations,
+			'gaussian_noise_std',
+			prefix='augmentations',
+		)
+		return
+
+	if policy == HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method {local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_positive_finite_number(
+			augmentations,
+			'gaussian_noise_std',
+			prefix='augmentations',
+		)
+		_validate_fraction(
+			augmentations,
+			'trace_drop_probability',
+			prefix='augmentations',
+		)
+		return
+
+	if policy == HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method {local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_positive_finite_number(
+			augmentations,
+			'gaussian_noise_std',
+			prefix='augmentations',
+		)
+		_validate_positive_int(
+			augmentations,
+			'noise_z_smoothing',
+			prefix='augmentations',
+		)
+		if int(cast('int', augmentations['noise_z_smoothing'])) < 2:
+			raise ValueError(
+				'augmentations.noise_z_smoothing must be at least 2 to band-limit '
+				'the noise'
+			)
+		return
+
+	if policy == HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method {local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_positive_finite_number(
+			augmentations,
+			'gaussian_noise_std',
+			prefix='augmentations',
+		)
+		return
+
+	if policy in (
+		XY_ROT90_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+		XY_ROT90_LAPLACE_NOISE_AUGMENTATION_POLICY,
+		XY_ROT90_ASYMMETRIC_NOISE_AUGMENTATION_POLICY,
+		XY_D4_GAUSSIAN_NOISE_AUGMENTATION_POLICY,
+	):
+		_validate_allowed_keys(
+			augmentations,
+			_XY_ROTATION_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_XY_ROTATION_NOISE_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				f'augmentations.policy {policy!r} requires '
+				f'{method_section}.method {local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_positive_finite_number(
+			augmentations,
+			'gaussian_noise_std',
+			prefix='augmentations',
+		)
+		if local_crop_size[0] != local_crop_size[1]:
+			raise ValueError(
+				'data.local_crop_size X/Y dimensions must be equal for '
+				f'augmentations.policy {policy!r}'
+			)
+		if patch_size[0] != patch_size[1]:
+			raise ValueError(
+				'model.patch_size X/Y dimensions must be equal for '
+				f'augmentations.policy {policy!r}'
+			)
+		return
+
+	if policy == HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method '
+				f'{local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_fraction(
+			augmentations,
+			'token_dropout_fraction',
+			prefix='augmentations',
+		)
+		token_dropout_fraction = float(
+			cast('float', augmentations['token_dropout_fraction'])
+		)
+		if not 0.0 < token_dropout_fraction < 1.0:
+			msg = (
+				'augmentations.token_dropout_fraction must be greater than 0 '
+				f'and less than 1; got {token_dropout_fraction!r}'
+			)
+			raise ValueError(msg)
+		return
+
+	if policy == HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != local_method:
+			msg = (
+				'augmentations.policy '
+				f'{HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_POLICY!r} '
+				f'requires {method_section}.method '
+				f'{local_method!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		_validate_fraction(
+			augmentations,
+			'gain_jitter',
+			prefix='augmentations',
+		)
+		gain_jitter = float(cast('float', augmentations['gain_jitter']))
+		if not 0.0 < gain_jitter < 1.0:
+			msg = (
+				'augmentations.gain_jitter must be greater than 0 '
+				f'and less than 1; got {gain_jitter!r}'
+			)
+			raise ValueError(msg)
+		return
+
+	if policy == OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY:
+		_validate_allowed_keys(
+			augmentations,
+			_OVERLAPPING_SUBCROP_XY_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		_validate_required_keys(
+			augmentations,
+			_OVERLAPPING_SUBCROP_XY_AUGMENTATION_KEYS,
+			prefix='augmentations',
+		)
+		if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+			msg = (
+				'augmentations.policy '
+				f'{OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY!r} requires '
+				'barlow_twins.method '
+				f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+			)
+			raise ValueError(msg)
+		_validate_fraction(
+			augmentations,
+			'horizontal_flip_probability',
+			prefix='augmentations',
+		)
+		max_shift_tokens = _validate_nonnegative_int_triplet(
+			augmentations,
+			'max_subcrop_shift_tokens',
+			prefix='augmentations',
+		)
+		if max_shift_tokens[2] != 0:
+			raise ValueError(
+				'augmentations.max_subcrop_shift_tokens Z shift must be 0'
+			)
+		if max_shift_tokens[0] == 0 and max_shift_tokens[1] == 0:
+			raise ValueError(
+				'augmentations.max_subcrop_shift_tokens X or Y shift must be positive'
+			)
+		view_token_shape = tuple(
+			crop // patch
+			for crop, patch in zip(local_crop_size, patch_size, strict=True)
+		)
+		if any(
+			shift >= token_count
+			for shift, token_count in zip(
+				max_shift_tokens,
+				view_token_shape,
+				strict=True,
+			)
+		):
+			raise ValueError(
+				'augmentations.max_subcrop_shift_tokens values must be less than '
+				f'the view token shape {view_token_shape!r}; got '
+				f'{max_shift_tokens!r}'
+			)
+		minimum_overlap_token_count = math.prod(
+			token_count - shift
+			for token_count, shift in zip(
+				view_token_shape,
+				max_shift_tokens,
+				strict=True,
+			)
+		)
+		if local_pairs_per_crop is None:
+			raise ValueError(
+				'barlow_twins.local_pairs_per_crop is required for '
+				f'augmentations.policy {OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY!r}'
+			)
+		if minimum_overlap_token_count < local_pairs_per_crop:
+			raise ValueError(
+				'minimum overlapping token count must be greater than or equal to '
+				'barlow_twins.local_pairs_per_crop; got '
+				f'{minimum_overlap_token_count} and {local_pairs_per_crop}'
+			)
+		return
+
 	_validate_allowed_keys(
 		augmentations,
 		_D4_TRACE_DROP_AUGMENTATION_KEYS,
@@ -3870,21 +4700,17 @@ def _validate_barlow_twins_augmentations(
 		_D4_TRACE_DROP_AUGMENTATION_KEYS,
 		prefix='augmentations',
 	)
-	policy = augmentations.get('policy')
-	if not isinstance(policy, str):
-		msg = f'augmentations.policy must be a string; got {policy!r}'
-		raise TypeError(msg)
 	if policy != XY_D4_TRACE_DROP_AUGMENTATION_POLICY:
 		msg = (
 			'augmentations.policy must be '
 			f'{XY_D4_TRACE_DROP_AUGMENTATION_POLICY!r}; got {policy!r}'
 		)
 		raise ValueError(msg)
-	if method != LOCAL_BARLOW_TWINS_PRETRAINING_METHOD:
+	if method != local_method:
 		msg = (
 			f'augmentations.policy {XY_D4_TRACE_DROP_AUGMENTATION_POLICY!r} '
-			'requires barlow_twins.method '
-			f'{LOCAL_BARLOW_TWINS_PRETRAINING_METHOD!r}'
+			f'requires {method_section}.method '
+			f'{local_method!r}'
 		)
 		raise ValueError(msg)
 	for key in ('reflection_probability', 'trace_drop_probability'):
@@ -3899,6 +4725,20 @@ def _validate_barlow_twins_augmentations(
 			'model.patch_size X/Y dimensions must be equal for '
 			f'augmentations.policy {XY_D4_TRACE_DROP_AUGMENTATION_POLICY!r}'
 		)
+
+
+def _validate_zero_phase_z_filter_side_weight(
+	values: Mapping[str, object],
+	key: str,
+	*,
+	prefix: str,
+) -> None:
+	"""Require a non-degenerate convex centered Z-filter coefficient."""
+	_validate_nonnegative_finite_number(values, key, prefix=prefix)
+	side_weight = float(values[key])
+	if not 0.0 < side_weight < 0.5:
+		msg = f'{prefix}.{key} must be in (0, 0.5); got {side_weight!r}'
+		raise ValueError(msg)
 
 
 def _validate_runtime_check_mode(train: Mapping[str, object]) -> None:
@@ -4315,4 +5155,5 @@ __all__ = [
 	'resolve_barlow_twins_training_config',
 	'resolve_mae_training_config',
 	'resolve_strat_hmm_pretext_config',
+	'resolve_vicreg_training_config',
 ]

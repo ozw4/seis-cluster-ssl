@@ -12,6 +12,7 @@ import pytest
 
 import seis_ssl_cluster.f3.lithology.voxel_section_layout as builder_module
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
+	CLASS_BALANCED_SELECTION_SEMANTICS,
 	CONTRACT_ARTIFACT_TYPE,
 	CONTRACT_SCHEMA_VERSION,
 	DECODER_SEED,
@@ -199,6 +200,31 @@ def test_source_shape_dtype_hash_class_and_validation_drift_fail_closed(
 	_write_json(config.section_layout_contract, contract)
 	with pytest.raises(ValueError, match='validation identity drift'):
 		inspect_f3_lithology_voxel_section_layout_datasets(config)
+
+
+def test_class_balanced_contract_requires_reference_valid_token_identity(
+	tmp_path: Path,
+) -> None:
+	config = _fixture(tmp_path)
+	payload = json.loads(config.section_layout_contract.read_text())
+	payload['selection_semantics'] = CLASS_BALANCED_SELECTION_SEMANTICS
+	canonical_grid = config.canonical_voxel_dataset / GRID_NAME
+
+	with pytest.raises(TypeError, match='contract reference_valid_tokens'):
+		builder_module._validate_contract_source_identities(  # noqa: SLF001
+			payload,
+			config=config,
+			canonical_grid=canonical_grid,
+		)
+
+	payload['source_file_identities']['reference_valid_tokens'] = _identity(
+		config.reference_valid_tokens
+	)
+	builder_module._validate_contract_source_identities(  # noqa: SLF001
+		payload,
+		config=config,
+		canonical_grid=canonical_grid,
+	)
 
 
 def test_staging_failure_leaves_no_partial_final(

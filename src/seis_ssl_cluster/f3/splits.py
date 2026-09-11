@@ -132,13 +132,20 @@ def resolve_f3_slice_array_index(
 
 def f3_slice_split_manifest(
 	records: Sequence[F3SliceSplitRecord],
+	*,
+	split_source: str = 'png_label_inventory',
+	strategy: str = 'inventory_split_no_random_token_split',
 ) -> dict[str, object]:
-	"""Return a deterministic slice-level split manifest without random splits."""
+	"""Return a deterministic slice-level split manifest without random splits.
+
+	``split_source``/``strategy`` name the inventory the records came from; the
+	defaults keep the wording of the PNG-inventory token datasets.
+	"""
 	sorted_records = _sort_records(records)
 	return {
-		'split_source': 'png_label_inventory',
+		'split_source': split_source,
 		'split_unit': 'slice',
-		'strategy': 'inventory_split_no_random_token_split',
+		'strategy': strategy,
 		'no_random_split': True,
 		'splits': {
 			split: [

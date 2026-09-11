@@ -1,0 +1,693 @@
+{
+  "schema_version": 1,
+  "version": "HMM_v1",
+  "status": "frozen",
+  "freeze_date": "2026-09-11",
+  "source_commit": "01da413293b7fdcd138b7ad3a9171a76c5f62f0f",
+  "source_revisions": {
+    "workspace_start": "01da413293b7fdcd138b7ad3a9171a76c5f62f0f",
+    "f3_existing_definitions_recovered_from": "b4d6dececf2802808bd0c340f83101414db5646d"
+  },
+  "experiment_snapshot": "2026-09-10T06:52:00Z",
+  "head_mode": "single",
+  "expected_cells": 405,
+  "loaded_cells": 405,
+  "missing_cells": 0,
+  "duplicate_cell_identities": 0,
+  "unreadable_results": 0,
+  "non_finite_selected_metrics": 0,
+  "cells_per_condition_per_dataset": 15,
+  "condition_ids": [
+    "1",
+    "2a",
+    "2b",
+    "3",
+    "4a",
+    "4b",
+    "5",
+    "6a",
+    "6b"
+  ],
+  "conditions": {
+    "1": {
+      "description": "MAE 100 epochs + MAE 25 epochs",
+      "parent_series": "mae",
+      "hmm": false
+    },
+    "3": {
+      "description": "asymmetric LocalBT 3 epochs",
+      "parent_series": "local_bt",
+      "hmm": false
+    },
+    "5": {
+      "description": "random weight",
+      "parent_series": "random",
+      "hmm": false
+    },
+    "2a": {
+      "description": "MAE 100 epochs + Single-Head HMM 25 epochs, distill 0.1",
+      "parent_series": "mae",
+      "hmm": true,
+      "distillation_weight": 0.1,
+      "parent_condition": "1"
+    },
+    "2b": {
+      "description": "MAE 100 epochs + Single-Head HMM 25 epochs, distill 0.2",
+      "parent_series": "mae",
+      "hmm": true,
+      "distillation_weight": 0.2,
+      "parent_condition": "1"
+    },
+    "4a": {
+      "description": "asymmetric LocalBT 3 epochs + Single-Head HMM 25 epochs, distill 0.1",
+      "parent_series": "local_bt",
+      "hmm": true,
+      "distillation_weight": 0.1,
+      "parent_condition": "3"
+    },
+    "4b": {
+      "description": "asymmetric LocalBT 3 epochs + Single-Head HMM 25 epochs, distill 0.2",
+      "parent_series": "local_bt",
+      "hmm": true,
+      "distillation_weight": 0.2,
+      "parent_condition": "3"
+    },
+    "6a": {
+      "description": "random weight + Single-Head HMM 25 epochs, distill 0.1",
+      "parent_series": "random",
+      "hmm": true,
+      "distillation_weight": 0.1,
+      "parent_condition": "5"
+    },
+    "6b": {
+      "description": "random weight + Single-Head HMM 25 epochs, distill 0.2",
+      "parent_series": "random",
+      "hmm": true,
+      "distillation_weight": 0.2,
+      "parent_condition": "5"
+    }
+  },
+  "datasets_tasks": {
+    "f3": {
+      "task": "lithology facies classification",
+      "evaluation_split": "validation",
+      "primary_metric": "mean IoU on unique validation voxels",
+      "direction": "higher"
+    },
+    "parihaka": {
+      "task": "channel facies classification",
+      "evaluation_split": "test",
+      "primary_metric": "test channel IoU",
+      "direction": "higher"
+    },
+    "volve": {
+      "task": "five-horizon estimation",
+      "evaluation_split": "test",
+      "primary_metric": "test macro MAE in samples",
+      "direction": "lower",
+      "improvement_sign": "parent MAE minus HMM MAE; positive is improvement"
+    }
+  },
+  "representative_condition": "2b",
+  "implementation_paths": [
+    "src/seis_ssl_cluster/config/pretraining.py",
+    "src/seis_ssl_cluster/stratigraphy/prototypes.py",
+    "src/seis_ssl_cluster/training/strat_hmm/components.py",
+    "src/seis_ssl_cluster/training/strat_hmm/epoch.py",
+    "src/seis_ssl_cluster/training/strat_hmm/runner.py",
+    "src/seis_ssl_cluster/training/strat_hmm/state.py",
+    "src/seis_ssl_cluster/training/strat_hmm_checkpoint.py",
+    "src/seis_ssl_cluster/clustering/stratigraphic_hmm.py",
+    "src/seis_ssl_cluster/f3/lithology/hmm_final_source_audit.py",
+    "proc/seis_ssl_cluster/train_strat_hmm_pretext.py",
+    "proc/seis_ssl_cluster/export_strat_hmm_pseudo_targets.py",
+    "proc/seis_ssl_cluster/audit_f3_hmm_final_sources.py"
+  ],
+  "hmm_training_configs": [
+    {
+      "dataset": "f3",
+      "condition_id": "2a",
+      "distillation_weight": 0.1,
+      "path": "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/10_pretraining/mae100_hmm_k6_distill010/02_full_25ep.yaml"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "2b",
+      "distillation_weight": 0.2,
+      "path": "experiments/f3/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "4a",
+      "distillation_weight": 0.1,
+      "path": "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/10_pretraining/local_bt_rot90_asym_g060_3ep_hmm_k6_distill010/02_full_25ep.yaml"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "4b",
+      "distillation_weight": 0.2,
+      "path": "experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/50_hmm_pretraining/rot90_asym_g060_3ep/hmm/k6/02_full_25ep.yaml"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "6a",
+      "distillation_weight": 0.1,
+      "path": "experiments/f3/facies_benchmark_v2/125_lithology_random_init_self_target_hmm_k6_distill010_v1/20_stage2/random_init/hmm/k6/02_full_25ep.yaml"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "6b",
+      "distillation_weight": 0.2,
+      "path": "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/10_pretraining/random_self_target_hmm_k6_distill020/02_full_25ep.yaml"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "2a",
+      "distillation_weight": 0.1,
+      "path": "experiments/parihaka/facies_benchmark_v1/38_channel_hmm_distillation_weight_v1/20_stage2/mae100/distill010/01_full_25ep.yaml"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "2b",
+      "distillation_weight": 0.2,
+      "path": "experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "4a",
+      "distillation_weight": 0.1,
+      "path": "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/local_bt3/distill010/01_full_25ep.yaml"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "4b",
+      "distillation_weight": 0.2,
+      "path": "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/local_bt3/distill020/01_full_25ep.yaml"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "6a",
+      "distillation_weight": 0.1,
+      "path": "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/random/distill010/01_full_25ep.yaml"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "6b",
+      "distillation_weight": 0.2,
+      "path": "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/random/distill020/01_full_25ep.yaml"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "2a",
+      "distillation_weight": 0.1,
+      "path": "experiments/volve/horizon_benchmark_v1/31_mae_local_bt_hmm_five_way_v1/60_distill010/30_stage2/mae100_hmm_k6_25ep.yaml"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "2b",
+      "distillation_weight": 0.2,
+      "path": "experiments/volve/horizon_benchmark_v1/31_mae_local_bt_hmm_five_way_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "4a",
+      "distillation_weight": 0.1,
+      "path": "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/rot90_asym_g060_3ep_hmm_k6_distill010.yaml"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "4b",
+      "distillation_weight": 0.2,
+      "path": "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/rot90_asym_g060_3ep_hmm_k6_distill020.yaml"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "6a",
+      "distillation_weight": 0.1,
+      "path": "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/random_init_hmm_k6_distill010.yaml"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "6b",
+      "distillation_weight": 0.2,
+      "path": "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/random_init_hmm_k6_distill020.yaml"
+    }
+  ],
+  "config_paths": [
+    "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/10_pretraining/mae100_hmm_k6_distill010/02_full_25ep.yaml",
+    "experiments/f3/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml",
+    "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/10_pretraining/local_bt_rot90_asym_g060_3ep_hmm_k6_distill010/02_full_25ep.yaml",
+    "experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/50_hmm_pretraining/rot90_asym_g060_3ep/hmm/k6/02_full_25ep.yaml",
+    "experiments/f3/facies_benchmark_v2/125_lithology_random_init_self_target_hmm_k6_distill010_v1/20_stage2/random_init/hmm/k6/02_full_25ep.yaml",
+    "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/10_pretraining/random_self_target_hmm_k6_distill020/02_full_25ep.yaml",
+    "experiments/parihaka/facies_benchmark_v1/38_channel_hmm_distillation_weight_v1/20_stage2/mae100/distill010/01_full_25ep.yaml",
+    "experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml",
+    "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/local_bt3/distill010/01_full_25ep.yaml",
+    "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/local_bt3/distill020/01_full_25ep.yaml",
+    "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/random/distill010/01_full_25ep.yaml",
+    "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/random/distill020/01_full_25ep.yaml",
+    "experiments/volve/horizon_benchmark_v1/31_mae_local_bt_hmm_five_way_v1/60_distill010/30_stage2/mae100_hmm_k6_25ep.yaml",
+    "experiments/volve/horizon_benchmark_v1/31_mae_local_bt_hmm_five_way_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml",
+    "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/rot90_asym_g060_3ep_hmm_k6_distill010.yaml",
+    "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/rot90_asym_g060_3ep_hmm_k6_distill020.yaml",
+    "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/random_init_hmm_k6_distill010.yaml",
+    "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/random_init_hmm_k6_distill020.yaml",
+    "experiments/f3/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/mae_continue/02_full_25ep.yaml",
+    "experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/10_pretraining/rot90_asym_g060_3ep.yaml",
+    "experiments/f3/facies_benchmark_v1/110_lithology_mae_local_bt_five_way_v1/40_random/01_create_random_checkpoint.yaml",
+    "experiments/f3/facies_benchmark_v2/110_lithology_mae_local_bt_five_way_v3/60_five_way.yaml",
+    "experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/70_hmm_downstream/rot90_asym_g060_3ep_hmm_k6_25ep.yaml",
+    "experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/80_hmm_summary/01_hmm_k6_25ep_vs_rot90_asym_g060_3ep.yaml",
+    "experiments/f3/facies_benchmark_v2/125_lithology_random_init_self_target_hmm_k6_distill010_v1/40_downstream/01_candidate.yaml",
+    "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/30_downstream/mae100_hmm_k6_distill010.yaml",
+    "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/30_downstream/local_bt_rot90_asym_g060_3ep_hmm_k6_distill010.yaml",
+    "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/30_downstream/random_self_target_hmm_k6_distill020.yaml",
+    "experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/mae_continue/02_full_25ep.yaml",
+    "experiments/parihaka/facies_benchmark_v1/39_channel_local_bt_rot90_asym_g060_v1/10_pretraining/01_full_3ep.yaml",
+    "experiments/parihaka/facies_benchmark_v1/30_channel_benchmark_v1/03_create_random_checkpoint.yaml",
+    "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/50_summary/01_all_nine_arms.yaml",
+    "experiments/volve/horizon_benchmark_v1/31_mae_local_bt_hmm_five_way_v1/30_stage2/mae100/mae_continue/02_full_25ep.yaml",
+    "experiments/volve/horizon_benchmark_v1/32_local_bt_recipe_arm_v1/10_pretraining/rot90_asym_g060_3ep.yaml",
+    "experiments/volve/horizon_benchmark_v1/10_pretrain/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/03_create_random_checkpoint.yaml",
+    "experiments/volve/horizon_benchmark_v1/31_mae_local_bt_hmm_five_way_v1/50_five_way.yaml",
+    "experiments/volve/horizon_benchmark_v1/31_mae_local_bt_hmm_five_way_v1/60_distill010/50_five_way_macro_mae.yaml",
+    "experiments/volve/horizon_benchmark_v1/32_local_bt_recipe_arm_v1/30_downstream/rot90_asym_g060_3ep.yaml",
+    "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/40_downstream/rot90_asym_g060_3ep_hmm_k6_distill010.yaml",
+    "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/40_downstream/rot90_asym_g060_3ep_hmm_k6_distill020.yaml",
+    "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/40_downstream/random_init_hmm_k6_distill010.yaml",
+    "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/40_downstream/random_init_hmm_k6_distill020.yaml"
+  ],
+  "runbook_paths": [
+    "experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/README.md",
+    "experiments/f3/facies_benchmark_v2/125_lithology_random_init_self_target_hmm_k6_distill010_v1/README.md",
+    "experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/README.md",
+    "experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/README.md",
+    "experiments/volve/horizon_benchmark_v1/31_mae_local_bt_hmm_five_way_v1/README.md",
+    "experiments/volve/horizon_benchmark_v1/32_local_bt_recipe_arm_v1/README.md",
+    "experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/README.md"
+  ],
+  "aggregation_script_paths": [
+    "tools/freeze_hmm_v1.py",
+    "proc/seis_ssl_cluster/summarize_f3_lithology_five_way.py",
+    "proc/seis_ssl_cluster/summarize_f3_lithology_candidate.py",
+    "proc/seis_ssl_cluster/summarize_f3_lithology_paired_candidates.py",
+    "src/seis_ssl_cluster/parihaka/pretraining_comparison.py",
+    "proc/seis_ssl_cluster/summarize_volve_horizon_five_way.py",
+    "proc/seis_ssl_cluster/summarize_volve_horizon_recipe_arm.py"
+  ],
+  "canonical_results": [
+    {
+      "path": "reports/hmm_v1/cells.csv",
+      "size_bytes": 58194,
+      "sha256": "ffc80292a651a9fdf3e6117a09308e2f1a9c08dfaea807c78d6ff0cbdefb280d"
+    },
+    {
+      "path": "reports/hmm_v1/summary.json",
+      "size_bytes": 10660,
+      "sha256": "eef30cec91bb986a9b5da24711fa9573cda8949b2944741fb9ef6a8078c1dbec"
+    }
+  ],
+  "canonical_source_aggregates": [
+    {
+      "storage": "external_artifact_root",
+      "path": "f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+      "size_bytes": 75018,
+      "sha256": "b135122a7db2b6b359817096ac546f99d4e4fac1ee003a99ce7289c0445cf913"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "f3_lithology_benchmark/pretraining_comparison_completion_v1/summary_five_way/mae100_hmm_k6_distill010/comparison.csv",
+      "size_bytes": 91058,
+      "sha256": "60c5a963ef11fb1af17bd476e82a4dc2bf8e6d3965dd5de6769e5530bfdb3e86"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "f3_lithology_benchmark/pretraining_comparison_completion_v1/summary_five_way/local_bt_rot90_asym_g060_3ep_hmm_k6_distill010/comparison.csv",
+      "size_bytes": 92382,
+      "sha256": "bad34b79acad243f02a6841e5029e6308e36a3db37195feca4e086d6ad22ca98"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/summary_five_way/comparison.csv",
+      "size_bytes": 92205,
+      "sha256": "27b538910c84c4111a00189f0a04e9a006eb27086bc3ef159a2a488e1e07ddb0"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "f3_lithology_benchmark/pretraining_comparison_completion_v1/summary_five_way/random_self_target_hmm_k6_distill020/comparison.csv",
+      "size_bytes": 91782,
+      "sha256": "5cab07688dc5dd4142c77ecc31df3892968060a33a4750da2aed8ebf4913615d"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "f3_lithology_benchmark/local_bt_noise_rotation_search_v1/paired_summary/local_bt_nr_rot90_asym_g060_3ep_hmm_k6_25ep_vs_local_bt_nr_rot90_asym_g060_3ep/comparison.csv",
+      "size_bytes": 81798,
+      "sha256": "95370c094af0eb8c0fcf88ef55501025f4c0ab9929087636d83dd822ed6aeb05"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "channel_benchmark/pretraining_comparison_completion_v1/summary/comparison.csv",
+      "size_bytes": 13360,
+      "sha256": "93a335355f85218c11d0c2b364ecabf543b27533887ab111426f444836f998c1"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "channel_benchmark/pretraining_comparison_completion_v1/summary/summary.json",
+      "size_bytes": 33306,
+      "sha256": "212b383dd0f51acffb6fe221a5ec1a00797eed95fcc0ca13953e6f44fec1239f"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "channel_benchmark/pretraining_comparison_completion_v1/summary/summary.md",
+      "size_bytes": 903,
+      "sha256": "aaec479009276e404a28803dabb5504b697635c44614cc616130fae9b336ee3c"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/summary/comparison.csv",
+      "size_bytes": 107292,
+      "sha256": "4ba3d787fb81eb84e7b4fe8cc1db7adcf24282054bae591ee17fa47538fbc890"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_distill010_v1/summary/macro_mae/comparison.csv",
+      "size_bytes": 111417,
+      "sha256": "e337885962cd644997150f0b109c3cf9b8548399e39d7ff90bd5764073cb6233"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "horizon/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/summary/rot90_asym_g060_3ep/per_cell.csv",
+      "size_bytes": 1454,
+      "sha256": "455448e934d7473badc6890f2a46407a61961c464b20f84923e6a694f123fdc5"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "horizon/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/summary/rot90_asym_g060_3ep_hmm_k6_distill010/per_cell.csv",
+      "size_bytes": 1451,
+      "sha256": "e2d0f3dd96f837bd062a52348f21d1d7923cfa0f9a30ddf0660e5cf027937f7c"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "horizon/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/summary/rot90_asym_g060_3ep_hmm_k6_distill020/per_cell.csv",
+      "size_bytes": 1452,
+      "sha256": "d9394834cff552609959f109b3e2f40106c107c63e583c0c1ded50dbb4af2c56"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "horizon/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/summary/random_init_hmm_k6_distill010/per_cell.csv",
+      "size_bytes": 1449,
+      "sha256": "4021dfe7766ca111b0797abf46474c57d757aa8b63420f63a44a87844db756fd"
+    },
+    {
+      "storage": "external_artifact_root",
+      "path": "horizon/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/summary/random_init_hmm_k6_distill020/per_cell.csv",
+      "size_bytes": 1449,
+      "sha256": "215198df996f329e8f1bfc058b904fceb696fb42b7456b9112bdc8336a607112"
+    }
+  ],
+  "checkpoints": [
+    {
+      "dataset": "f3",
+      "condition_id": "1",
+      "checkpoint_id": "mae",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/mae_continue/full_25ep/latest.pt",
+      "size_bytes": 112573507,
+      "sha256": "a02b34ee1edcd7691630d6dbf2c83236ef2b32027b606e9726080a62fad2f28d"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "2a",
+      "checkpoint_id": "mae100_hmm_k6_distill010",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/f3/facies_benchmark_v1/pretraining_comparison_completion_v1/mae100_hmm_k6_distill010/full_25ep/latest.pt",
+      "size_bytes": 86016363,
+      "sha256": "a8d9c233f4c976e1492805075a8f3d20bac5014f26ace7635e272086d48695a9"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "2b",
+      "checkpoint_id": "mae_hmm_k6",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/hmm/k6/full_25ep/latest.pt",
+      "size_bytes": 86011561,
+      "sha256": "c09e885a3d892f7e3a84d6929ac1e35c952d634b552349f11617a8bae51393d2"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "3",
+      "checkpoint_id": "local_bt_nr_rot90_asym_g060_3ep",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/f3/facies_benchmark_v1/local_bt_noise_rotation_search_v1/rot90_asym_g060/full_3ep/latest.pt",
+      "size_bytes": 191790755,
+      "sha256": "c77fa1b58f644641012d1e4cae19358a43c8e480707be3d7ddd8d224c81f7130"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "4a",
+      "checkpoint_id": "local_bt_rot90_asym_g060_3ep_hmm_k6_distill010",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/f3/facies_benchmark_v1/pretraining_comparison_completion_v1/local_bt_rot90_asym_g060_3ep_hmm_k6_distill010/full_25ep/latest.pt",
+      "size_bytes": 86015915,
+      "sha256": "ff2972aebd397bb6bc1b018d0e242061665635ae93056db3e9ce456d08c832eb"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "4b",
+      "checkpoint_id": "local_bt_nr_rot90_asym_g060_3ep_hmm_k6_25ep",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/f3/facies_benchmark_v1/local_bt_noise_rotation_search_v1/rot90_asym_g060_3ep/hmm/k6/full_25ep/latest.pt",
+      "size_bytes": 86017131,
+      "sha256": "0ab25d0545eea325f0a2fafb6276c2d9e92720abdf556beb24049d82e0852fa1"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "5",
+      "checkpoint_id": "random",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+      "size_bytes": 71192715,
+      "sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "6a",
+      "checkpoint_id": "random_init_self_target_hmm_k6_distill010",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/f3/facies_benchmark_v1/random_init_self_target_hmm_k6_distill010_v1/stage2/random_init/hmm/k6/full_25ep/latest.pt",
+      "size_bytes": 86017771,
+      "sha256": "b2e09065f3f4fe65d660a4d93023bee4bcdbc949d7a013b86794dfba53c5136f"
+    },
+    {
+      "dataset": "f3",
+      "condition_id": "6b",
+      "checkpoint_id": "random_self_target_hmm_k6_distill020",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/f3/facies_benchmark_v1/pretraining_comparison_completion_v1/random_self_target_hmm_k6_distill020/full_25ep/latest.pt",
+      "size_bytes": 86016619,
+      "sha256": "1074a7401bb59d2682e19c383e6354b2fcd202fd805ddb9dcccdb0f2b1e84545"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "1",
+      "checkpoint_id": "mae",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/mae_continue/full_25ep/latest.pt",
+      "size_bytes": 112573317,
+      "sha256": "603662377c62f3b2f5793ecd633761ee455e1bba94c076834c23418dd9614e37"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "2a",
+      "checkpoint_id": "mae_hmm_k6_distill010",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/parihaka/facies_benchmark_v1/hmm_distillation_weight_v1/mae100/distill010/full_25ep/latest.pt",
+      "size_bytes": 86011561,
+      "sha256": "010696c00f5bef2f8e9d5b7375a28fa2ffbd43b2f703cb986612fc2d78d3008f"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "2b",
+      "checkpoint_id": "mae_hmm_k6",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/hmm/k6/full_25ep/latest.pt",
+      "size_bytes": 86011307,
+      "sha256": "666f2cf1b6a5d864e0b351d6c539bbb4b300ccea134bc459961377e995c34ade"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "3",
+      "checkpoint_id": "local_barlow_twins_rot90_asym_g060_3ep",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/parihaka/facies_benchmark_v1/local_bt_rot90_asym_g060_v1/full_3ep/latest.pt",
+      "size_bytes": 191790755,
+      "sha256": "a314e19a29dd1510878aacfff4ed761e16c335688d3b4f902904557b151221ee"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "4a",
+      "checkpoint_id": "local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill010",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/local_bt3/distill010/full_25ep/latest.pt",
+      "size_bytes": 86018347,
+      "sha256": "6e69958a393b47c33bbee282e896848892e151f28680a855c541caa69449ae67"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "4b",
+      "checkpoint_id": "local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill020",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/local_bt3/distill020/full_25ep/latest.pt",
+      "size_bytes": 86015915,
+      "sha256": "76444200aab7677e6c98b1f51981b6c2af1a67141ef517a3bef9eae9ca61716f"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "5",
+      "checkpoint_id": "random",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt",
+      "size_bytes": 71192523,
+      "sha256": "b459668d50e14144a5590615d588f042480554f5811767f5c97c882982d9dbd0"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "6a",
+      "checkpoint_id": "random_init_self_target_hmm_k6_distill010",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/random/distill010/full_25ep/latest.pt",
+      "size_bytes": 86016683,
+      "sha256": "f29072aa68a7d57592d979ee21f5487819ac5d0d4f795a87ddf9d13d1797d632"
+    },
+    {
+      "dataset": "parihaka",
+      "condition_id": "6b",
+      "checkpoint_id": "random_init_self_target_hmm_k6_distill020",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/random/distill020/full_25ep/latest.pt",
+      "size_bytes": 86016619,
+      "sha256": "16e5b7814bd4c9d74a54be4e25606c20db5e7a508d236e404f21cbfeab2b49d7"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "1",
+      "checkpoint_id": "mae",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/stage2/mae100/mae_continue/full_25ep/latest.pt",
+      "size_bytes": 112573827,
+      "sha256": "276e1b5894cb95e952788c0f15942d38461cc4c3ff76f0476683e3dc99bbbf66"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "2a",
+      "checkpoint_id": "mae_hmm_k6",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_distill010_v1/stage2/mae100/hmm/k6/full_25ep/latest.pt",
+      "size_bytes": 86019243,
+      "sha256": "29951fd71c641e64316ed4ce985fafbf4dd7d16b08f17f5eaa2c0d2ec5ff7ec3"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "2b",
+      "checkpoint_id": "mae_hmm_k6",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/stage2/mae100/hmm/k6/full_25ep/latest.pt",
+      "size_bytes": 86017769,
+      "sha256": "d5cc1c64ce144e9baf9cb661e585af89ec0437b0f701d487c1410dd9d5c16d75"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "3",
+      "checkpoint_id": "rot90_asym_g060_3ep",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/full_3ep/latest.pt",
+      "size_bytes": 191790883,
+      "sha256": "5f4d4cc185d5c97d5309b3cb9db4bf7441f0ec8d23f2fe4bac8b962bb4c8d7a3"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "4a",
+      "checkpoint_id": "rot90_asym_g060_3ep_hmm_k6_distill010",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/rot90_asym_g060_3ep_hmm_k6_distill010/full_25ep/latest.pt",
+      "size_bytes": 86018027,
+      "sha256": "840c2afad2ceebb6629859706ea40a279c457214c69d565d88f4fc9675dd8ea4"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "4b",
+      "checkpoint_id": "rot90_asym_g060_3ep_hmm_k6_distill020",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/rot90_asym_g060_3ep_hmm_k6_distill020/full_25ep/latest.pt",
+      "size_bytes": 86015723,
+      "sha256": "069509840755ab78d066c4b8d810c4bd6dcca7f84370480102cf1d1bbfe3459f"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "5",
+      "checkpoint_id": "random",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt",
+      "size_bytes": 71192651,
+      "sha256": "d357e3444a8dfe2d35fee319f8bbe241d5fe14ddbc2bc38f469a28c282c0006e"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "6a",
+      "checkpoint_id": "random_init_hmm_k6_distill010",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/random_init_hmm_k6_distill010/full_25ep/latest.pt",
+      "size_bytes": 86016363,
+      "sha256": "afa512fb1beafbbbd6fccbfbdd695077c49cb4ebebe7c98d0d5b8e149746788d"
+    },
+    {
+      "dataset": "volve",
+      "condition_id": "6b",
+      "checkpoint_id": "random_init_hmm_k6_distill020",
+      "storage": "external_artifact_root",
+      "present_at_freeze": true,
+      "path": "pretraining/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/random_init_hmm_k6_distill020/full_25ep/latest.pt",
+      "size_bytes": 86016363,
+      "sha256": "2ebf44a9d40f3bf6ee607b76491dd6f75999e1e20940b4f387737faa4cf5128b"
+    }
+  ],
+  "checkpoint_retrieval": "Set SEIS_SSL_CLUSTER_ARTIFACT_ROOT to the preserved artifact store and append each checkpoint path. Checkpoints are not stored in Git.",
+  "known_limitations": [
+    "Results are descriptive statistics from one training seed; no statistical significance or multi-seed training uncertainty is claimed.",
+    "F3 uses validation voxels, while Parihaka and Volve use test data; absolute values must not be compared across surveys.",
+    "A resumed HMM run preserves the epoch and step budget but persistent-worker recreation can alter the subsequent shuffle sequence.",
+    "Checkpoints and complete execution artifacts are external to Git and require the preserved artifact root.",
+    "LocalBT and Random optimal distillation weights are task-dependent; 0.2 is not universally best.",
+    "The preliminary LocalBT continuation check used to select the 3-epoch parent is not part of the 405-cell canonical result table."
+  ],
+  "multihead_boundary": {
+    "rule": "Do not edit HMM_v1 configs or reinterpret configs without head.spec.",
+    "extension": "Use a new experiment namespace and explicit multi-head head.spec/factory branch; do not change HMM_v1 argument names or defaults."
+  }
+}

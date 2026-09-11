@@ -1,0 +1,22 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+manifests:
+  input: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/manifests/f3/facies_benchmark_v2/f3_amplitude_manifest.json
+embeddings:
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/local_bt_overlap_subcrop_poc_v1/shift02_proj384_pairs128_lambda005/latest.pt
+  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_bt_overlap_subcrop_poc_v1/shift02_proj384_pairs128_lambda005/local_barlow_twins/overlap_x64
+embedding:
+  window_size: [128, 128, 128]
+  overlap: [64, 64, 64]
+  output_dtype: float16
+  batch_size: 1
+  prefetch_queue_depth: 0
+  amp: false
+  amp_dtype: auto
+  stage_timing: false
+  min_token_valid_fraction: 0.5
+  preprocessing_cache:
+    mode: 'off'
+    chunk_size_x: 16
+    reuse: true
+    cleanup: false

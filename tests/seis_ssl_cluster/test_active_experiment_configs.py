@@ -123,11 +123,18 @@ F3_INSPECTION_STAGES = {
 	'05_check_label_consistency.yaml': STAGE_F3_LABEL_CONSISTENCY,
 	'06_make_tokenization_preview.yaml': STAGE_F3_TOKENIZATION_PREVIEW,
 }
+F3_V2_ROOT = Path('experiments/f3/facies_benchmark_v2')
 F3_INSPECTION_CONFIGS = [
 	(path, F3_INSPECTION_STAGES[path.name])
-	for path in sorted((F3_ROOT / '00_inspection').rglob('*.yaml'))
+	for root in (F3_ROOT, F3_V2_ROOT)
+	for path in sorted((root / '00_inspection').rglob('*.yaml'))
 ]
-F3_PREPARE_CONFIGS = sorted((F3_ROOT / '10_prepare').rglob('*.yaml'))
+F3_PREPARE_CONFIGS = sorted(
+	[
+		*(F3_ROOT / '10_prepare').rglob('*.yaml'),
+		F3_V2_ROOT / '10_prepare' / '01_prepare_f3_volume.yaml',
+	]
+)
 F3_EMBEDDING_CONFIGS = sorted((F3_ROOT / '20_embedding').rglob('*.yaml'))
 F3_STRATIGRAPHIC_CLUSTERING_CONFIGS = sorted(
 	(F3_ROOT / '60_stratigraphic_clustering').rglob('*.yaml'),
@@ -522,13 +529,27 @@ def test_active_nopims_cluster_visualization_configs_resolve(
 def test_active_f3_inspection_configs_resolve(
 	config_path: Path,
 	stage: str,
+	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+	_set_f3_environment(monkeypatch)
 	resolve_f3_facies_inspection_config(load_config(config_path), stage=stage)
 
 
 @pytest.mark.parametrize('config_path', F3_PREPARE_CONFIGS)
-def test_active_f3_prepare_configs_resolve(config_path: Path) -> None:
+def test_active_f3_prepare_configs_resolve(
+	config_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	_set_f3_environment(monkeypatch)
 	f3_prepare_volume_config_from_mapping(load_config(config_path))
+
+
+def _set_f3_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+	monkeypatch.setenv(
+		'SEIS_SSL_CLUSTER_ARTIFACT_ROOT',
+		'/test/artifacts/seis_ssl_cluster',
+	)
+	monkeypatch.setenv('F3_ROOT', '/test/f3')
 
 
 @pytest.mark.parametrize(

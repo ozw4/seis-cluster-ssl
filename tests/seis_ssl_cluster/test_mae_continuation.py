@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import TYPE_CHECKING
 
 import pytest
@@ -24,12 +25,13 @@ def test_loads_strict_model_weights_without_optimizer_state(tmp_path: Path) -> N
 	checkpoint_path = tmp_path / 'latest.pt'
 	torch.save(_checkpoint_payload(source), checkpoint_path)
 
-	load_mae_continuation_weights(
+	source_sha256 = load_mae_continuation_weights(
 		target,
 		checkpoint_path,
 		expected_model_config=_model_config(),
 	)
 
+	assert source_sha256 == hashlib.sha256(checkpoint_path.read_bytes()).hexdigest()
 	assert all(
 		torch.equal(target_value, source_value)
 		for target_value, source_value in zip(

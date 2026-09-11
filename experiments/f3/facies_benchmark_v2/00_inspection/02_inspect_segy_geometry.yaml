@@ -1,0 +1,22 @@
+paths:
+  f3_root: ${F3_ROOT}
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+outputs:
+  inspection_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v2
+inspection:
+  inventory_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/inventory/file_inventory.json
+  segy_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy
+  output_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/segy_geometry.json
+  output_csv: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/segy_geometry.csv
+  metadata_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/segy_metadata.json
+  summary_markdown: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/segy_summary.md
+  seismic_amplitude_stats_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/seismic_amplitude_stats.json
+  label_unique_values_json: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/segy/label_unique_values.json
+  candidate_extensions:
+    - .segy
+    - .sgy
+  trace_sample_limit: 1000
+  header_sample_limit: 1000

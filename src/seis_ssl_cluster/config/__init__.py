@@ -16,6 +16,7 @@ from seis_ssl_cluster.config.validate import (
 	resolve_normalization_stats_config,
 	resolve_strat_hmm_pretext_config,
 	resolve_strat_hmm_pseudo_target_config,
+	resolve_vicreg_training_config,
 	validate_config,
 )
 
@@ -33,5 +34,6 @@ __all__ = [
 	'resolve_normalization_stats_config',
 	'resolve_strat_hmm_pretext_config',
 	'resolve_strat_hmm_pseudo_target_config',
+	'resolve_vicreg_training_config',
 	'validate_config',
 ]

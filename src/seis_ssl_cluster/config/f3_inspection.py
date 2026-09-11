@@ -22,7 +22,7 @@ from seis_ssl_cluster.config.common import (
 )
 from seis_ssl_cluster.config.schema import (
 	F3_FACIES_DATASET_NAME,
-	F3_FACIES_DATASET_VERSION,
+	F3_FACIES_DATASET_VERSIONS,
 	F3_FACIES_INSPECTION_STAGES,
 )
 
@@ -199,9 +199,10 @@ def _validate_f3_facies_dataset(dataset: Mapping[str, object]) -> None:
 			f'got {dataset.get("name")!r}'
 		)
 		raise ValueError(msg)
-	if dataset.get('version') != F3_FACIES_DATASET_VERSION:
+	if dataset.get('version') not in F3_FACIES_DATASET_VERSIONS:
 		msg = (
-			f'dataset.version must be {F3_FACIES_DATASET_VERSION!r}; '
+			'dataset.version must be one of '
+			f'{sorted(F3_FACIES_DATASET_VERSIONS)!r}; '
 			f'got {dataset.get("version")!r}'
 		)
 		raise ValueError(msg)

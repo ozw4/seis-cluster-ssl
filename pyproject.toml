@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "seis-cluster-ssl"
 dynamic = ["version"]
-description = "Amplitude-only 3D seismic self-supervised learning and unsupervised clustering."
+description = "Research workflows for seismic self-supervised pretraining, clustering, and downstream interpretation."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

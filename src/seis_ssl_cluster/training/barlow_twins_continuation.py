@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
@@ -30,8 +31,8 @@ def load_barlow_twins_continuation_weights(
 	*,
 	expected_model_config: Mapping[str, object],
 	expected_barlow_twins_config: Mapping[str, object],
-) -> None:
-	"""Load only compatible backbone and projector weights from a checkpoint."""
+) -> str:
+	"""Load compatible weights and return the stable source SHA-256."""
 	path = Path(checkpoint_path)
 	if not path.is_file():
 		msg = f'Barlow Twins continuation checkpoint file does not exist: {path}'
@@ -44,7 +45,11 @@ def load_barlow_twins_continuation_weights(
 	if not isinstance(expected_barlow_twins_config, Mapping):
 		raise TypeError('expected_barlow_twins_config must be a mapping')
 
+	source_sha256 = _file_sha256(path)
 	payload = load_checkpoint(path, map_location='cpu')
+	if _file_sha256(path) != source_sha256:
+		msg = f'Barlow Twins continuation checkpoint changed while loading: {path}'
+		raise RuntimeError(msg)
 	backbone_state, projector_state = _continuation_states(
 		payload,
 		expected_model_config=expected_model_config,
@@ -75,6 +80,15 @@ def load_barlow_twins_continuation_weights(
 			f'{path}: {exc}'
 		)
 		raise ValueError(msg) from exc
+	return source_sha256
+
+
+def _file_sha256(path: Path) -> str:
+	digest = hashlib.sha256()
+	with path.open('rb') as file_obj:
+		for chunk in iter(lambda: file_obj.read(1024 * 1024), b''):
+			digest.update(chunk)
+	return digest.hexdigest()
 
 
 def _continuation_states(

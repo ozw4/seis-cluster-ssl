@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import json
 import subprocess
 import sys
@@ -78,6 +77,9 @@ def _write_run(  # noqa: PLR0913
 	evaluation.mkdir(parents=True, exist_ok=True)
 	decoder.mkdir(parents=True, exist_ok=True)
 	prediction.mkdir(parents=True, exist_ok=True)
+	(decoder / 'best.pt').write_text(
+		f'{model_id}/{layout_id}/{data_size}', encoding='utf-8'
+	)
 	metrics = {
 		metric: _metric_value(model_id, layout_id, data_size, metric)
 		for metric in SUMMARY_METRICS
@@ -107,12 +109,7 @@ def _write_run(  # noqa: PLR0913
 				'artifact_type': 'f3_lithology_voxel_prediction',
 				'model_tag': model_id,
 				'source_identity': {
-					'decoder_checkpoint': {
-						'path': str(decoder / 'best.pt'),
-						'sha256': hashlib.sha256(
-							f'{model_id}/{layout_id}/{data_size}'.encode()
-						).hexdigest(),
-					},
+					'decoder_checkpoint': _identity(decoder / 'best.pt'),
 					'artifact_identities': {
 						'name': 'f3_voxel_decoder_sources',
 						'embeddings': embeddings_identity,
@@ -123,6 +120,13 @@ def _write_run(  # noqa: PLR0913
 			}
 		),
 		encoding='utf-8',
+	)
+	condition_dir = (
+		Path(universe['section_layout']['dataset_root'])
+		/ 'datasets'
+		/ f'layout={layout_id}'
+		/ f'size={data_size}'
+		/ 'voxel_supervision'
 	)
 	(evaluation / 'evaluation_metadata.json').write_text(
 		json.dumps(
@@ -135,7 +139,15 @@ def _write_run(  # noqa: PLR0913
 					'boundary_region_radii': [1, 2, 4, 8],
 					'chunk_size_x': 8,
 				},
-				'inputs': {'prediction_metadata': _identity(prediction_metadata)},
+				'inputs': {
+					'prediction_metadata': _identity(prediction_metadata),
+					'voxel_dataset_metadata': _identity(
+						condition_dir / 'voxel_dataset_metadata.json'
+					),
+					'voxel_split_grid': _identity(
+						condition_dir / 'supervision_split_grid.npy'
+					),
+				},
 			}
 		),
 		encoding='utf-8',
@@ -151,13 +163,6 @@ def _write_run(  # noqa: PLR0913
 			}
 		),
 		encoding='utf-8',
-	)
-	condition_dir = (
-		Path(universe['section_layout']['dataset_root'])
-		/ 'datasets'
-		/ f'layout={layout_id}'
-		/ f'size={data_size}'
-		/ 'voxel_supervision'
 	)
 	(decoder / 'run_metadata.json').write_text(
 		json.dumps(
@@ -264,6 +269,22 @@ def test_summary_writes_exactly_five_output_files(
 	assert summary['models'] == list(FIVE_WAY_MODEL_IDS)
 	assert summary['job_count'] == 75
 	assert summary['primary_metric'] == 'macro_f1'
+	assert summary['summary_name'] == 'f3_lithology_mae_local_bt_five_way_v1'
+
+
+def test_summary_uses_configured_summary_name(
+	results_universe: dict[str, object],
+) -> None:
+	configured_name = 'f3_lithology_mae_local_bt_five_way_v3'
+	results_universe['outputs']['summary_name'] = configured_name
+	config = f3_lithology_five_way_config_from_mapping(results_universe)
+
+	summarize_f3_lithology_five_way(config)
+
+	summary = json.loads(
+		(config.summary_root / 'summary.json').read_text(encoding='utf-8')
+	)
+	assert summary['summary_name'] == configured_name
 
 
 def test_paired_deltas_have_correct_signs_and_size_isolation(

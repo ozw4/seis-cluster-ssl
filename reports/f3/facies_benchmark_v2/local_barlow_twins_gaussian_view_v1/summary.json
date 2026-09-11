@@ -1,0 +1,371 @@
+{
+  "artifact_type": "f3_local_barlow_twins_gaussian_view_validation_report",
+  "benchmark_provenance": {
+    "canonical_comparison": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/mae_local_bt_five_way_v3/summary/comparison.csv",
+      "sha256": "b135122a7db2b6b359817096ac546f99d4e4fac1ee003a99ce7289c0445cf913"
+    },
+    "pretraining_manifest": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json",
+      "sha256": "c5dbc3a66a5c2eed0ec5df8745f8bf5a461b1e2e66156700091f1a751bdc0ef5"
+    },
+    "pretraining_path_list": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/splits/f3/facies_benchmark_v1/f3_npy_paths.txt",
+      "sha256": "b52fd5e0c57edb2d2158be12b94046b554b5e6e13ba17008321bcdbe0ae2acb1"
+    },
+    "random_checkpoint": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+      "sha256": "6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c"
+    },
+    "reference_base_checkpoint": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/local_barlow_twins_v1/full_100ep/latest.pt",
+      "sha256": "84550ed658166e8e6a40cd664e2e9ffbeab0c12d6917006abb417cd25e228ac0"
+    },
+    "reference_final_checkpoint": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/stage2/local_bt100/local_bt_continue/full_25ep/latest.pt",
+      "sha256": "1c5312244f290dbfdcf2688ffa9fa8b5c64452ade162d5335be1bb8a0e256291"
+    }
+  },
+  "created_at_utc": "2026-08-30T08:39:27.415720Z",
+  "evidence_counts": {
+    "attempts": 4,
+    "paired_deltas": 30,
+    "validation_cells": 25
+  },
+  "execution_evidence": {
+    "base_launch_freshness": "operator_observed",
+    "checkpoint_authenticated_resume_count": false,
+    "limitation": "the 25-epoch base checkpoint schema predates an invocation resume counter, so freshness is external execution evidence rather than checkpoint-authenticated",
+    "output_root_absence_checked_before_launch": true,
+    "resume_argument_used": false
+  },
+  "experiment_id": "local_barlow_twins_gaussian_view_v1",
+  "final_validation": {
+    "arm_results": {
+      "local_barlow_twins_gaussian_noise_std010": {
+        "evaluated_cell_count": 5,
+        "paired_macro_f1_deltas_over_random": {
+          "layout_000/medium": -0.05050815366126277,
+          "layout_001/medium": -0.07499429534549462,
+          "layout_002/medium": -0.04620295887155029,
+          "layout_003/medium": -0.059329191540082316,
+          "layout_004/medium": -0.020096486572209304
+        },
+        "positive_delta_count": 0,
+        "wins_all_15_over_random": false
+      },
+      "local_barlow_twins_legacy_flip_25ep": {
+        "evaluated_cell_count": 5,
+        "paired_macro_f1_deltas_over_random": {
+          "layout_000/medium": -0.033635496557248845,
+          "layout_001/medium": -0.07177174945483622,
+          "layout_002/medium": -0.03318442655456855,
+          "layout_003/medium": -0.04930333027485634,
+          "layout_004/medium": -0.020172902838295148
+        },
+        "positive_delta_count": 0,
+        "wins_all_15_over_random": false
+      }
+    },
+    "authorizes_next_base_duration": true,
+    "failure_stage": "medium_5of5",
+    "gaussian_attribution": {
+      "contrast_id": "selected_gaussian_minus_matched_legacy",
+      "evaluated_cell_count": 5,
+      "left_candidate_id": "local_barlow_twins_gaussian_noise_std010",
+      "paired_macro_f1_deltas": {
+        "layout_000/medium": -0.01687265710401392,
+        "layout_001/medium": -0.0032225458906584015,
+        "layout_002/medium": -0.013018532316981746,
+        "layout_003/medium": -0.010025861265225977,
+        "layout_004/medium": 7.641626608584362e-05
+      },
+      "positive_delta_count": 1,
+      "right_candidate_id": "local_barlow_twins_legacy_flip_25ep",
+      "wins_all_15": false
+    },
+    "identity_vs_forced_geometry": {
+      "complete": true,
+      "contrast_id": "identity_std010_minus_forced_flip_std010",
+      "evaluated_cell_count": 5,
+      "full_15_cell_geometry_required": false,
+      "left_candidate_id": "local_barlow_twins_identity_gaussian_noise_std010",
+      "paired_macro_f1_deltas": {
+        "layout_000/medium": 0.018887424221830762,
+        "layout_001/medium": -0.01246460202044225,
+        "layout_002/medium": 0.019037019437335267,
+        "layout_003/medium": -0.03237231081788017,
+        "layout_004/medium": -0.018094326106485314
+      },
+      "positive_delta_count": 2,
+      "required_cell_count": 5,
+      "right_candidate_id": "local_barlow_twins_gaussian_noise_std010",
+      "wins_all_15": false
+    },
+    "passed": false,
+    "winner_candidate_id": null
+  },
+  "macro_f1_by_source_and_size": {
+    "local_barlow_twins_gaussian_noise_std005": {
+      "medium": {
+        "max": 0.46741709074258425,
+        "mean": 0.45654123122718965,
+        "median": 0.4611804145305858,
+        "min": 0.4402891890289781,
+        "n": 5,
+        "negative_count": 0,
+        "positive_count": 5,
+        "sample_std": 0.012146906221559544,
+        "zero_count": 0
+      }
+    },
+    "local_barlow_twins_gaussian_noise_std010": {
+      "medium": {
+        "max": 0.4781440823250304,
+        "mean": 0.4619180100767822,
+        "median": 0.4749324879392247,
+        "min": 0.4215467846759667,
+        "n": 5,
+        "negative_count": 0,
+        "positive_count": 5,
+        "sample_std": 0.02413290372935248,
+        "zero_count": 0
+      }
+    },
+    "local_barlow_twins_identity_gaussian_noise_std010": {
+      "medium": {
+        "max": 0.4970315065468612,
+        "mean": 0.45691665101965384,
+        "median": 0.44256017712134454,
+        "min": 0.40908218265552443,
+        "n": 5,
+        "negative_count": 0,
+        "positive_count": 5,
+        "sample_std": 0.03870966575192983,
+        "zero_count": 0
+      }
+    },
+    "local_barlow_twins_legacy_flip_25ep": {
+      "medium": {
+        "max": 0.49501673942904434,
+        "mean": 0.470530646138941,
+        "median": 0.4849583492044507,
+        "min": 0.4247693305666251,
+        "n": 5,
+        "negative_count": 0,
+        "positive_count": 5,
+        "sample_std": 0.029501688935433364,
+        "zero_count": 0
+      }
+    },
+    "random": {
+      "medium": {
+        "max": 0.534261679479307,
+        "mean": 0.512144227274902,
+        "median": 0.5238140977749125,
+        "min": 0.47745204311253625,
+        "n": 5,
+        "negative_count": 0,
+        "positive_count": 5,
+        "sample_std": 0.02421202060591277,
+        "zero_count": 0
+      }
+    }
+  },
+  "medium_gate": {
+    "gate_open": false,
+    "legacy_wins_over_random": false,
+    "locked_candidate_wins_over_random": false
+  },
+  "paired_delta_aggregates": {
+    "identity_std010_minus_forced_flip_std010": {
+      "max": 0.019037019437335267,
+      "mean": -0.005001359057128341,
+      "median": -0.01246460202044225,
+      "min": -0.03237231081788017,
+      "n": 5,
+      "negative_count": 3,
+      "positive_count": 2,
+      "sample_std": 0.02304784365817425,
+      "zero_count": 0
+    },
+    "local_barlow_twins_gaussian_noise_std005_minus_random": {
+      "max": -0.03716285408355813,
+      "mean": -0.055602996047712364,
+      "median": -0.057261169218088714,
+      "min": -0.07308126494872125,
+      "n": 5,
+      "negative_count": 5,
+      "positive_count": 0,
+      "sample_std": 0.013416860967142974,
+      "zero_count": 0
+    },
+    "local_barlow_twins_gaussian_noise_std010_minus_random": {
+      "max": -0.020096486572209304,
+      "mean": -0.05022621719811986,
+      "median": -0.05050815366126277,
+      "min": -0.07499429534549462,
+      "n": 5,
+      "negative_count": 5,
+      "positive_count": 0,
+      "sample_std": 0.020127025365825817,
+      "zero_count": 0
+    },
+    "local_barlow_twins_identity_gaussian_noise_std010_minus_random": {
+      "max": -0.027165939434215025,
+      "mean": -0.0552275762552482,
+      "median": -0.03819081267869462,
+      "min": -0.09170150235796248,
+      "n": 5,
+      "negative_count": 5,
+      "positive_count": 0,
+      "sample_std": 0.031639355780068226,
+      "zero_count": 0
+    },
+    "local_barlow_twins_legacy_flip_25ep_minus_random": {
+      "max": -0.020172902838295148,
+      "mean": -0.04161358113596102,
+      "median": -0.033635496557248845,
+      "min": -0.07177174945483622,
+      "n": 5,
+      "negative_count": 5,
+      "positive_count": 0,
+      "sample_std": 0.019767716892289587,
+      "zero_count": 0
+    },
+    "selected_gaussian_minus_matched_legacy": {
+      "max": 7.641626608584362e-05,
+      "mean": -0.00861263606215884,
+      "median": -0.010025861265225977,
+      "min": -0.01687265710401392,
+      "n": 5,
+      "negative_count": 4,
+      "positive_count": 1,
+      "sample_std": 0.006967599610242672,
+      "zero_count": 0
+    }
+  },
+  "pipeline_input": false,
+  "protocol": {
+    "base_pretraining_epochs": 25,
+    "continuation_epochs": 25,
+    "evaluation_aggregation_unit": "unique_validation_voxel",
+    "evaluation_split": "validation",
+    "final_gate": "strict positive paired delta in 15/15 layout/size cells",
+    "layout_ids": [
+      "layout_000",
+      "layout_001",
+      "layout_002",
+      "layout_003",
+      "layout_004"
+    ],
+    "medium_gate": "strict positive paired delta in 5/5 layouts",
+    "primary_metric": "macro_f1",
+    "reached_data_sizes": [
+      "medium"
+    ],
+    "statistical_unit": "layout_id",
+    "view_selection_rule": "maximum unrounded mean macro_f1",
+    "view_selection_size": "medium"
+  },
+  "report_files": [
+    "attempts.csv",
+    "validation_cells.csv",
+    "paired_deltas.csv",
+    "summary.json",
+    "summary.md"
+  ],
+  "repository_state": {
+    "git_dirty": true,
+    "git_head": "8b942e9f22572762c592d06f3b0716c3c94b0d2a",
+    "relevant_git_status_sha256": "e2eba55cf5bfc0fb0e7846704af28bcc4b9084eb8153338120734bb3d5c8ea4e"
+  },
+  "schema_version": 1,
+  "selection": {
+    "candidate_means": {
+      "local_barlow_twins_gaussian_noise_std005": 0.45654123122718965,
+      "local_barlow_twins_gaussian_noise_std010": 0.4619180100767822,
+      "local_barlow_twins_identity_gaussian_noise_std010": 0.45691665101965384
+    },
+    "created_at_utc": "2026-08-30T07:20:48.582798Z",
+    "fixed_strength_geometry_contrast": {
+      "contrast_id": "identity_std010_minus_forced_flip_std010",
+      "forced_flip_candidate_id": "local_barlow_twins_gaussian_noise_std010",
+      "gaussian_noise_std": 0.1,
+      "identity_candidate_id": "local_barlow_twins_identity_gaussian_noise_std010",
+      "mean_macro_f1_delta": -0.005001359057128341,
+      "per_layout_macro_f1_delta": {
+        "layout_000": 0.018887424221830762,
+        "layout_001": -0.01246460202044225,
+        "layout_002": 0.019037019437335267,
+        "layout_003": -0.03237231081788017,
+        "layout_004": -0.018094326106485314
+      }
+    },
+    "input_count": 15,
+    "selected_candidate_id": "local_barlow_twins_gaussian_noise_std010",
+    "selected_gaussian_noise_std": 0.1,
+    "selected_view_policy": "horizontal_flip_gaussian_noise_v1",
+    "tie_priority": [
+      "local_barlow_twins_gaussian_noise_std005",
+      "local_barlow_twins_gaussian_noise_std010",
+      "local_barlow_twins_identity_gaussian_noise_std010"
+    ],
+    "tie_rule": "exact_mean_tie_uses_priority_order"
+  },
+  "source_artifacts": {
+    "canonical_five_way_config": {
+      "path": "experiments/f3/facies_benchmark_v2/110_lithology_mae_local_bt_five_way_v3/60_five_way.yaml",
+      "sha256": "285b0233ff82fe83808f82e929b611f570a67f01fa983ef191dda23d1858061b"
+    },
+    "final_result": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_barlow_twins_gaussian_view_v1/validation/gaussian25_final_result.json",
+      "sha256": "33584533226842bac41dc9bac57e9479e4346caef2104eca60c595217997c15b"
+    },
+    "protocol_lock": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_barlow_twins_gaussian_view_v1/validation/gaussian25_protocol_lock.json",
+      "sha256": "ceb49975fd14bc9034c86cdffb50e807858040945d43bcb797226c7851337e9e"
+    },
+    "selection_lock": {
+      "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_barlow_twins_gaussian_view_v1/validation/gaussian25_selection_lock.json",
+      "sha256": "89e42aa554de7a7fdd6ac27e5e02b7473f396ed9ecc483f56b684b051ea012d6"
+    },
+    "validation_config": {
+      "path": "experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1/30_validation/01_candidates.yaml",
+      "sha256": "12dc2844725fd4055585233ab4de9129ebc3cbe440d6d61c89348a6cce3b4bba"
+    },
+    "validation_runner": {
+      "path": "experiments/f3/facies_benchmark_v2/111_local_barlow_twins_gaussian_view_v1/run_validation.py",
+      "sha256": "a704e64a2da59c85a4e82e318bb3156c2cf74825ad50b4fb7463bd8dd2c1bccd"
+    }
+  },
+  "test_data_or_metrics_used": false,
+  "validation_only": true,
+  "view_diagnostic": {
+    "caveat": "the preserved diagnostic does not cover the identity policy or rule out its fixed-position shortcut",
+    "metric_scope": "all_valid_physical_voxels_after_inverse_flip_alignment",
+    "path": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/diagnostics/f3/local_barlow_twins_gaussian_view_v1/view_diagnostic.json",
+    "rationale": "legacy inverse-aligned views are amplitude-identical, while the Gaussian policies add controlled view-specific amplitude perturbations",
+    "sha256": "b4f89206bc49ae1fbf14cd62adccee396d6829adea6ff88243c0acf1f5b88d47",
+    "views": {
+      "gaussian_noise_std005": {
+        "paired_correlation": 0.9973224853382454,
+        "paired_rms": 0.07069812701896469,
+        "per_view_rms_from_unaugmented": 0.04999424538747451,
+        "voxel_count": 33046528
+      },
+      "gaussian_noise_std010": {
+        "paired_correlation": 0.9893753712321898,
+        "paired_rms": 0.14139625480142812,
+        "per_view_rms_from_unaugmented": 0.0999884913145204,
+        "voxel_count": 33046528
+      },
+      "legacy": {
+        "paired_correlation": 1.0,
+        "paired_rms": 0.0,
+        "per_view_rms_from_unaugmented": 0.0,
+        "voxel_count": 33046528
+      }
+    }
+  }
+}

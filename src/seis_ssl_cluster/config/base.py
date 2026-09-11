@@ -28,6 +28,7 @@ from seis_ssl_cluster.config.schema import (
 	STAGE_PATH_KEYS,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 	STAGE_STRAT_HMM_PSEUDO_TARGETS,
+	STAGE_VICREG_TRAINING,
 )
 
 if TYPE_CHECKING:
@@ -47,6 +48,19 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 			'continuation',
 			'augmentations',
 			'barlow_twins',
+			'train',
+		},
+	),
+	STAGE_VICREG_TRAINING: frozenset(
+		{
+			'paths',
+			'manifests',
+			'data',
+			'zero_mask',
+			'model',
+			'continuation',
+			'augmentations',
+			'vicreg',
 			'train',
 		},
 	),
@@ -110,6 +124,9 @@ _ALLOWED_TOP_LEVEL: dict[str, frozenset[str]] = {
 _REQUIRED_TOP_LEVEL: dict[str, frozenset[str]] = {
 	STAGE_BARLOW_TWINS_TRAINING: frozenset(
 		{'paths', 'manifests', 'data', 'model', 'train'},
+	),
+	STAGE_VICREG_TRAINING: frozenset(
+		{'paths', 'manifests', 'data', 'model', 'vicreg', 'train'},
 	),
 	STAGE_BUILD_MANIFESTS: frozenset({'paths', 'manifest'}),
 	STAGE_NORMALIZATION_STATS: frozenset(

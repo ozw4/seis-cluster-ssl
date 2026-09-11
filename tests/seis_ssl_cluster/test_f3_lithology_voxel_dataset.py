@@ -9,6 +9,8 @@ import numpy as np
 import pytest
 
 from seis_ssl_cluster.config.f3_lithology_voxel_dataset import (
+	DENSE_SEGY_LABEL_SECTION_INVENTORY_SEMANTICS,
+	PNG_LABEL_INVENTORY_SEMANTICS,
 	F3LithologyVoxelDatasetConfig,
 )
 from seis_ssl_cluster.embedding.writer import file_sha256
@@ -136,6 +138,36 @@ def test_builds_complete_voxel_supervision_artifact(tmp_path: Path) -> None:
 	assert [row for row in rows if row['class_id'] == '2']
 	assert all(row['count'] == '0' for row in rows if row['class_id'] == '2')
 	assert metadata['summary']['final_train_voxels'] == result.train_voxel_count
+	assert metadata['split_strategy'] == PNG_LABEL_INVENTORY_SEMANTICS
+	manifest = json.loads(result.split_manifest_json.read_text())
+	assert manifest['split_source'] == PNG_LABEL_INVENTORY_SEMANTICS
+	assert manifest['strategy'] == PNG_LABEL_INVENTORY_SEMANTICS
+	assert manifest['no_random_split'] is True
+
+
+def test_inventory_semantics_is_recorded_as_split_provenance(tmp_path: Path) -> None:
+	png_config = _fixture(tmp_path)
+	png_result = build_f3_lithology_voxel_dataset(png_config)
+	dense_config = replace(
+		png_config,
+		output_dir=png_config.output_dir.with_name('dense'),
+		inventory_semantics=DENSE_SEGY_LABEL_SECTION_INVENTORY_SEMANTICS,
+	)
+
+	dense_result = build_f3_lithology_voxel_dataset(dense_config)
+
+	metadata = json.loads(dense_result.metadata_json.read_text())
+	manifest = json.loads(dense_result.split_manifest_json.read_text())
+	assert metadata['split_strategy'] == 'dense_segy_label_section_inventory_v1'
+	assert manifest['split_source'] == 'dense_segy_label_section_inventory_v1'
+	assert manifest['strategy'] == 'dense_segy_label_section_inventory_v1'
+	png_manifest = json.loads(png_result.split_manifest_json.read_text())
+	assert manifest['splits'] == png_manifest['splits']
+	# Semantics is provenance only: the supervision grid is unaffected.
+	assert file_sha256(dense_result.split_grid) == file_sha256(png_result.split_grid)
+	assert dense_result.class_counts_csv.read_bytes() == (
+		png_result.class_counts_csv.read_bytes()
+	)
 
 
 def test_collision_overwrite_and_dry_inspection(tmp_path: Path) -> None:

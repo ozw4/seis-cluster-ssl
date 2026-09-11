@@ -13,6 +13,16 @@ from seis_ssl_cluster.embedding.extractor import (
 	run_embedding_extraction,
 )
 from seis_ssl_cluster.embedding.merge import EmbeddingMerger
+from seis_ssl_cluster.embedding.representation_diagnostics import (
+	DEFAULT_REPRESENTATION_LAYER_NORM_EPS,
+	DEFAULT_REPRESENTATION_SAMPLE_SIZE,
+	REPRESENTATION_METRIC_KEYS,
+	EmbeddingRepresentationSource,
+	build_embedding_representation_diagnostics,
+	representation_metrics,
+	systematic_valid_token_indices,
+	write_embedding_representation_diagnostics,
+)
 from seis_ssl_cluster.embedding.sliding_window import (
 	SlidingWindow,
 	compute_stride_xyz,
@@ -38,13 +48,18 @@ from seis_ssl_cluster.models.amplitude_encoder_factory import (
 
 __all__ = [
 	'CURRENT_STUDENT_UNMASKED_EMBEDDING_SEMANTICS',
+	'DEFAULT_REPRESENTATION_LAYER_NORM_EPS',
+	'DEFAULT_REPRESENTATION_SAMPLE_SIZE',
 	'REFRESH_EXTRACTION_DESCRIPTOR_NAME',
+	'REPRESENTATION_METRIC_KEYS',
 	'EmbeddingExtractionSettings',
 	'EmbeddingMerger',
 	'EmbeddingOutputPaths',
+	'EmbeddingRepresentationSource',
 	'SlidingWindow',
 	'SurveyEmbeddingResult',
 	'build_embedding_metadata',
+	'build_embedding_representation_diagnostics',
 	'build_model_from_checkpoint_payload',
 	'build_model_from_config',
 	'cleanup_temp_outputs',
@@ -61,7 +76,10 @@ __all__ = [
 	'padded_volume_shape_xyz',
 	'prepare_outputs',
 	'reduce_valid_mask_to_tokens',
+	'representation_metrics',
 	'run_embedding_extraction',
+	'systematic_valid_token_indices',
 	'token_grid_shape_xyz',
+	'write_embedding_representation_diagnostics',
 	'write_metadata',
 ]

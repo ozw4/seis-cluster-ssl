@@ -13,6 +13,11 @@ DEFAULT_ARTIFACT_ROOT: Final = '/workspace/artifacts/seis_ssl_cluster'
 DEFAULT_F3_ROOT: Final = '/home/dcuser/data/public_data/field/F3'
 F3_FACIES_DATASET_NAME: Final = 'f3_facies_benchmark'
 F3_FACIES_DATASET_VERSION: Final = 'facies_benchmark_v1'
+# Dataset versions share one raw survey; the version only separates artifact
+# namespaces, so inspection and preparation accept every registered version.
+F3_FACIES_DATASET_VERSIONS: Final = frozenset(
+	{F3_FACIES_DATASET_VERSION, 'facies_benchmark_v2'},
+)
 F3_FACIES_INSPECTION_ARTIFACT_SUBDIR: Final = (
 	'inspection/f3/facies_benchmark_v1'
 )
@@ -29,12 +34,51 @@ EXPECTED_MODEL_NAME: Final = 'amp_mae3d'
 EXPECTED_SPATIAL_MASK_MODE: Final = 'block'
 BARLOW_TWINS_PRETRAINING_METHOD: Final = 'barlow_twins_3d'
 LOCAL_BARLOW_TWINS_PRETRAINING_METHOD: Final = 'local_barlow_twins_3d'
+LOCAL_VICREG_PRETRAINING_METHOD: Final = 'local_vicreg_3d'
+HORIZONTAL_FLIP_GAUSSIAN_NOISE_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_gaussian_noise_v1'
+)
+HORIZONTAL_FLIP_TRACE_DROP_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_trace_drop_v1'
+)
+HORIZONTAL_FLIP_ZERO_PHASE_Z_FILTER_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_zero_phase_z_filter_v1'
+)
+HORIZONTAL_FLIP_TOKEN_DROPOUT_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_token_dropout_v1'  # noqa: S105
+)
+HORIZONTAL_FLIP_SMOOTH_GAIN_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_smooth_gain_v1'
+)
+HORIZONTAL_FLIP_COLORED_NOISE_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_colored_noise_v1'
+)
+HORIZONTAL_FLIP_LAPLACE_NOISE_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_laplace_noise_v1'
+)
+HORIZONTAL_FLIP_ASYMMETRIC_NOISE_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_asymmetric_noise_v1'
+)
+HORIZONTAL_FLIP_GAUSSIAN_TRACE_DROP_AUGMENTATION_POLICY: Final = (
+	'horizontal_flip_gaussian_trace_drop_v1'
+)
+XY_ROT90_GAUSSIAN_NOISE_AUGMENTATION_POLICY: Final = 'xy_rot90_gaussian_noise_v1'
+XY_ROT90_LAPLACE_NOISE_AUGMENTATION_POLICY: Final = 'xy_rot90_laplace_noise_v1'
+XY_ROT90_ASYMMETRIC_NOISE_AUGMENTATION_POLICY: Final = (
+	'xy_rot90_asymmetric_noise_v1'
+)
+XY_D4_GAUSSIAN_NOISE_AUGMENTATION_POLICY: Final = 'xy_d4_gaussian_noise_v1'
+IDENTITY_GAUSSIAN_NOISE_AUGMENTATION_POLICY: Final = 'identity_gaussian_noise_v1'
+OVERLAPPING_SUBCROP_XY_AUGMENTATION_POLICY: Final = 'overlapping_subcrop_xy_v1'
 XY_D4_TRACE_DROP_AUGMENTATION_POLICY: Final = 'xy_d4_trace_drop_v1'
 SUPPORTED_BARLOW_TWINS_PRETRAINING_METHODS: Final = frozenset(
 	{
 		BARLOW_TWINS_PRETRAINING_METHOD,
 		LOCAL_BARLOW_TWINS_PRETRAINING_METHOD,
 	}
+)
+SUPPORTED_VICREG_PRETRAINING_METHODS: Final = frozenset(
+	{LOCAL_VICREG_PRETRAINING_METHOD}
 )
 SUPPORTED_RECONSTRUCTION_LOSSES: Final = frozenset({'huber', 'mse', 'l1'})
 SUPPORTED_TARGET_NORMALIZATION_MODES: Final = frozenset({'none', 'patch_zscore'})
@@ -48,6 +92,7 @@ STAGE_NORMALIZATION_STATS: Final = 'prepare_nopims_normalization_stats'
 STAGE_NORMALIZATION_QC: Final = 'filter_manifest_by_normalization_qc'
 STAGE_MAE_TRAINING: Final = 'train_amp_mae'
 STAGE_BARLOW_TWINS_TRAINING: Final = 'barlow_twins_training'
+STAGE_VICREG_TRAINING: Final = 'vicreg_training'
 STAGE_STRAT_HMM_PRETEXT_TRAINING: Final = 'train_strat_hmm_pretext'
 STAGE_STRAT_HMM_PSEUDO_TARGETS: Final = 'build_strat_hmm_pseudo_targets'
 STAGE_EMBEDDING_EXTRACTION: Final = 'extract_embeddings'
@@ -76,6 +121,7 @@ KNOWN_STAGES: Final = {
 	STAGE_NORMALIZATION_QC,
 	STAGE_MAE_TRAINING,
 	STAGE_BARLOW_TWINS_TRAINING,
+	STAGE_VICREG_TRAINING,
 	STAGE_STRAT_HMM_PRETEXT_TRAINING,
 	STAGE_STRAT_HMM_PSEUDO_TARGETS,
 	STAGE_EMBEDDING_EXTRACTION,
@@ -89,6 +135,7 @@ STAGE_PATH_KEYS: Final = {
 	STAGE_NORMALIZATION_QC: frozenset({'nopims_root', 'artifact_root'}),
 	STAGE_MAE_TRAINING: frozenset({'artifact_root', 'output_root'}),
 	STAGE_BARLOW_TWINS_TRAINING: frozenset({'artifact_root', 'output_root'}),
+	STAGE_VICREG_TRAINING: frozenset({'artifact_root', 'output_root'}),
 	STAGE_STRAT_HMM_PRETEXT_TRAINING: frozenset(
 		{'artifact_root', 'output_root'},
 	),
@@ -162,6 +209,15 @@ DEFAULT_BARLOW_TWINS_OPTIONS: Final = {
 	'projector_dim': 384,
 	'redundancy_weight': 0.005,
 	'normalization_eps': 1.0e-4,
+}
+
+DEFAULT_VICREG_OPTIONS: Final = {
+	'projector_dim': 384,
+	'invariance_weight': 25.0,
+	'variance_weight': 25.0,
+	'covariance_weight': 1.0,
+	'variance_target_std': 1.0,
+	'variance_eps': 1.0e-4,
 }
 
 DEFAULT_BARLOW_TWINS_TRAIN_OPTIONS: Final = {

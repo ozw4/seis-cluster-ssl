@@ -1,14 +1,7 @@
-# Performance migration validation handoff
+# Performance migration validation stage artifacts
 
-status: COMPLETE
-current git SHA: 332478be21a021e46ee6c1d9423f14859b0cd819
-historical baseline SHA: 7731f341a293ea0c5cb5c5dfabba574148861e3a
-migration decision: PASS_WITH_NUMERIC_DRIFT
-required rerun scope: no historical rerun; add a future current-code K=6 control
-multi-head baseline policy: train a current-code single-head K=6 control under the same conditions before comparing multi-head K=6/8/10.
-atomic path provenance: Producer runtime configuration may retain its temporary staging path; the committed artifact directory and completion manifest identify the final location. These are path-only provenance fields, not scientific identity.
-
-## Stage artifacts
+Status, decision, and policy fields are recorded in
+[`performance_migration_summary.md`](performance_migration_summary.md).
 
 | Stage | Exists | SHA-256 |
 | --- | --- | --- |
@@ -21,15 +14,5 @@ atomic path provenance: Producer runtime configuration may retain its temporary 
 | pseudo_target_parity | True | `d37e00a558e9cea8609c0f7dfe8d02bc9c6415371cb7c0ad0edc2e26787e79b7` |
 | benchmark | True | `0b32f5645aae763dbb9a3c87e4bb9fa63fb8f87f76a916a4a6a578fcaf43d346` |
 
-## Preserved artifacts
-
-Historical checkpoints, embeddings, HMM artifacts, pseudo-targets, probes, and M3-V/M3-V-LB outputs were read-only inputs.
-
-## Quarantine
-
-- `/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/quarantine/performance_migration_validation.20260717T153342Z.invalid_publish.0a999653`
-- `/workspace/artifacts/seis_ssl_cluster/migration_validation/f3/facies_benchmark_v1/main_332478be/quarantine/performance_migration_validation.20260717T154034Z.invalid_publish.34737544`
-
-## Resume
-
-Use the documented `validate_performance_migration.py --stage ... --only-missing` commands from the experiment README.
+Historical checkpoints, embeddings, HMM artifacts, pseudo-targets, probes, and
+M3-V/M3-V-LB outputs were read-only inputs.

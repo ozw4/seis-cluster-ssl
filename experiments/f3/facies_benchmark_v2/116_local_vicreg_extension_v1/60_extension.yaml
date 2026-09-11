@@ -1,0 +1,24 @@
+benchmark:
+  canonical_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/110_lithology_mae_local_bt_five_way_v3/60_five_way.yaml
+screening:
+  model:
+    model_id: local_vicreg_100
+    checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/local_vicreg_v1/full_100ep/latest.pt
+    embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_vicreg_v1/base100/overlap_x64
+  outputs:
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_vicreg_screen_v1/runs
+    job_logs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_vicreg_screen_v1/job_logs
+    summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_vicreg_screen_v1/summary
+extension:
+  models:
+    - model_id: local_vicreg
+      checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/local_vicreg_v1/stage2/vicreg100/vicreg_continue/full_25ep/latest.pt
+      embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_vicreg_extension_v1/local_vicreg/overlap_x64
+    - model_id: local_vicreg_hmm_k6
+      checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/local_vicreg_v1/stage2/vicreg100/hmm/k6/full_25ep/latest.pt
+      embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_vicreg_extension_v1/local_vicreg_hmm_k6/overlap_x64
+  outputs:
+    runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_vicreg_extension_v1/runs
+    job_logs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_vicreg_extension_v1/job_logs
+    summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_vicreg_extension_v1/summary
+    combined_summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/local_vicreg_extension_v1/combined_seven_way_summary

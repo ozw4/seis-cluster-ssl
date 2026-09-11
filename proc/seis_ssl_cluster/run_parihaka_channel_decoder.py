@@ -11,8 +11,12 @@ from seis_ssl_cluster.parihaka.channel_data import CHANNEL_TEST_MODE
 from seis_ssl_cluster.parihaka.channel_decoder import (
 	channel_decoder_config_from_mapping,
 	decoder_initial_state_sha256,
+	evaluate_completed_validation_channel_job,
 	inspect_channel_decoder_job,
 	run_channel_decoder_job,
+)
+from seis_ssl_cluster.parihaka.coordinated_channel import (
+	run_coordinated_channel_if_scoped,
 )
 
 DEFAULT_CONFIG = (
@@ -42,6 +46,14 @@ def build_parser() -> argparse.ArgumentParser:
 	parser.add_argument('--max-steps', type=int)
 	parser.add_argument('--resume', type=Path)
 	parser.add_argument(
+		'--evaluate-completed-validation',
+		type=Path,
+		help=(
+			'Evaluate test from a completed validation-only job '
+			'in a separate output root.'
+		),
+	)
+	parser.add_argument(
 		'--validation-only',
 		action='store_true',
 		help='save validation metrics without test inference or test metrics',
@@ -49,10 +61,31 @@ def build_parser() -> argparse.ArgumentParser:
 	return parser
 
 
-def main() -> None:
+def main() -> None:  # noqa: PLR0915 - Preserve the existing dry-run report verbatim.
 	"""Inspect or execute exactly one condition."""
 	args = build_parser().parse_args()
+	if args.evaluate_completed_validation is not None and (
+		args.resume is not None or args.max_steps is not None or args.validation_only
+	):
+		raise ValueError('completed validation evaluation cannot train or resume')
 	raw = load_config_for_cli(args.config, loader=load_config)
+	coordinated = run_coordinated_channel_if_scoped(
+		raw,
+		config_path=args.config,
+		model=args.model,
+		layout_id=args.layout,
+		data_size=args.size,
+		layout_config=args.layout_config,
+		device=args.device,
+		dry_run=args.dry_run,
+		max_steps=args.max_steps,
+		resume=args.resume,
+		validation_only=args.validation_only,
+		evaluate_completed_validation=args.evaluate_completed_validation,
+	)
+	if coordinated is not None:
+		print(f'metrics: {coordinated}')
+		return
 	config = channel_decoder_config_from_mapping(raw)
 	plan = inspect_channel_decoder_job(
 		config,
@@ -72,10 +105,7 @@ def main() -> None:
 		print(f'available_models: {tuple(plan.config.models)}')
 		print(f'checkpoint_path: {selected.model_source["checkpoint_path"]}')
 		print(f'checkpoint_sha256: {selected.model_source["checkpoint_sha256"]}')
-		print(
-			'pretraining_objective: '
-			f'{selected.metadata["pretraining_objective"]}'
-		)
+		print(f'pretraining_objective: {selected.metadata["pretraining_objective"]}')
 		print(
 			'stratigraphy_pretext_present: '
 			f'{selected.metadata.get("stratigraphy_pretext") is not None}'
@@ -86,31 +116,17 @@ def main() -> None:
 		print(f'selected_inline_indices: {plan.train_lines.inline}')
 		print(f'selected_crossline_indices: {plan.train_lines.crossline}')
 		print(f'selection_semantics: {plan.selection.semantics}')
-		print(
-			f'target_train_voxel_count: '
-			f'{plan.selection.target_train_voxel_count}'
-		)
-		print(
-			f'actual_train_voxel_count: '
-			f'{plan.selection.actual_train_voxel_count}'
-		)
+		print(f'target_train_voxel_count: {plan.selection.target_train_voxel_count}')
+		print(f'actual_train_voxel_count: {plan.selection.actual_train_voxel_count}')
 		print(f'count_error: {plan.selection.count_error}')
 		print(f'relative_count_error: {plan.selection.relative_count_error}')
 		print(f'selected_token_count: {len(plan.selection.selected_token_xyz)}')
-		print(
-			f'selected_token_xyz_sha256: '
-			f'{plan.selection.selected_token_xyz_sha256}'
-		)
-		print(
-			f'per_line_contributions: '
-			f'{dict(plan.selection.per_line_contributions)}'
-		)
+		print(f'selected_token_xyz_sha256: {plan.selection.selected_token_xyz_sha256}')
+		print(f'per_line_contributions: {dict(plan.selection.per_line_contributions)}')
 		print(f'validation_inline_indices: {plan.layouts.validation.inline}')
 		print(f'validation_crossline_indices: {plan.layouts.validation.crossline}')
 		print(f'test_mode: {CHANNEL_TEST_MODE}')
-		print(
-			f'reserved_large_inline_indices: {plan.reserved_training_lines.inline}'
-		)
+		print(f'reserved_large_inline_indices: {plan.reserved_training_lines.inline}')
 		print(
 			'reserved_large_crossline_indices: '
 			f'{plan.reserved_training_lines.crossline}'
@@ -124,6 +140,12 @@ def main() -> None:
 			f'{"validation_only" if args.validation_only else "validation_and_test"}'
 		)
 		print('execution: dry-run; no files written')
+		return
+	if args.evaluate_completed_validation is not None:
+		metrics = evaluate_completed_validation_channel_job(
+			plan, source_dir=args.evaluate_completed_validation, device=args.device
+		)
+		print(f'metrics: {metrics}')
 		return
 	metrics = run_channel_decoder_job(
 		plan,

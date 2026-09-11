@@ -206,30 +206,30 @@ def test_proc_entrypoint_and_docs_contract() -> None:
 	module = importlib.import_module('proc.seis_ssl_cluster.validate_volve_mae')
 	help_text = module.build_parser().format_help()
 	docs = Path('docs/volve_mae_pretraining.md').read_text(encoding='utf-8')
+	claim_boundary = Path('docs/same_survey_pretraining_claims.md').read_text(
+		encoding='utf-8',
+	)
 
 	assert '--input-config' in help_text
 	assert '--check {inputs,smoke,full}' in help_text
 	assert callable(module.main)
 	assert VOLVE_CANONICAL_DATASET_ID in docs
-	assert 'transductive self-supervised pretraining' in docs
-	assert 'No F3, NOPIMS, Parihaka' in docs
+	assert '(same_survey_pretraining_claims.md)' in docs
+	assert 'same-survey, transductive' in claim_boundary
+	assert 'unseen survey' in claim_boundary
+	assert '../experiments/volve/' in docs
 
 
-def test_experiment_readme_has_reentrant_full_runbook() -> None:
+def test_experiment_readme_has_the_ordered_execution_commands() -> None:
 	readme = (PRETRAIN_ROOT / 'README.md').read_text(encoding='utf-8')
 
-	assert 'prepare_volve_canonical_inputs.py \\\n  --only-missing' in readme
-	assert 'if [ ! -f "$SMOKE_RUN/latest.pt" ]; then' in readme
-	assert 'test -f "$SMOKE_RUN/latest.pt"' in readme
+	assert 'prepare_volve_canonical_inputs.py --only-missing' in readme
+	assert '--check inputs' in readme
+	assert '--check smoke' in readme
 	assert '02_full_100ep.yaml"\n' in readme
 	assert '--resume "$FULL_RUN/latest.pt"' in readme
 	assert '--check full' in readme
-	assert 'mae_random_seed42.pt' in readme
-	assert "random_payload['metadata']['random_encoder_baseline'] is True" in readme
-	assert (
-		"random_payload['config']['model'] "
-		"== reference_payload['config']['model']"
-	) in readme
+	assert 'create_random_mae_checkpoint.py' in readme
 
 
 def _input_fixture(

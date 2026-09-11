@@ -14,7 +14,7 @@ import numpy as np
 from seis_ssl_cluster.config.common import _validate_distinct_paths
 from seis_ssl_cluster.config.schema import (
 	F3_FACIES_DATASET_NAME,
-	F3_FACIES_DATASET_VERSION,
+	F3_FACIES_DATASET_VERSIONS,
 )
 from seis_ssl_cluster.data.normalization import (
 	compute_normalization_stats,
@@ -546,10 +546,10 @@ def _parse_dataset(dataset: Mapping[str, object]) -> F3PrepareDatasetConfig:
 	if name != F3_FACIES_DATASET_NAME:
 		msg = f'dataset.name must be {F3_FACIES_DATASET_NAME!r}; got {name!r}'
 		raise ValueError(msg)
-	if version != F3_FACIES_DATASET_VERSION:
+	if version not in F3_FACIES_DATASET_VERSIONS:
 		msg = (
-			f'dataset.version must be {F3_FACIES_DATASET_VERSION!r}; '
-			f'got {version!r}'
+			'dataset.version must be one of '
+			f'{sorted(F3_FACIES_DATASET_VERSIONS)!r}; got {version!r}'
 		)
 		raise ValueError(msg)
 	if survey_id != F3_SURVEY_ID:

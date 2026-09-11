@@ -1,0 +1,25 @@
+paths:
+  f3_root: ${F3_ROOT}
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+inputs:
+  seismic_segy: ${F3_ROOT}/f3_seismic.sgy
+  label_segy: ${F3_ROOT}/f3_labels.sgy
+  class_info: ${F3_ROOT}/interpretation/class_info.json
+  # Raw-data QC report. Its producer CLI was retired with the v1 report layer,
+  # so v2 reuses the raw-data report instead of re-implementing the builder.
+  inspection_report: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v1/report.json
+outputs:
+  volume_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2
+  manifest_path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/manifests/f3/facies_benchmark_v2/f3_amplitude_manifest.json
+  split_path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/splits/f3/facies_benchmark_v2/f3_npy_paths.txt
+  normalization_stats_path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/normalization_stats/f3/facies_benchmark_v2/f3_seismic.normalization_stats.json
+  metadata_path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2/f3_metadata.json
+dataset:
+  name: f3_facies_benchmark
+  version: facies_benchmark_v2
+  survey_id: f3_facies_benchmark
+normalization:
+  clipping_percentiles: [0.5, 99.5]
+  epsilon: 1.0e-6
+  max_samples: 1000000
+  seed: 42

@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/var/lib/apt,sharing=locked \
 
 RUN fc-cache -fv
 
-RUN npm i -g @openai/codex @anthropic-ai/claude-code
+RUN npm i -g @openai/codex@latest @anthropic-ai/claude-code
 
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked \
     pip install torchaudio==2.7.0

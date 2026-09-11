@@ -8,6 +8,7 @@ import pytest
 import torch
 
 import seis_ssl_cluster.training.mae as mae_training
+from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.models.mae import AmplitudeMAE3D
 from seis_ssl_cluster.training import load_checkpoint, run_mae_pretraining
 from seis_ssl_cluster.training.mae_continuation import (
@@ -87,6 +88,12 @@ def test_mae_continuation_fresh_and_resume_contract(  # noqa: PLR0915
 	assert continuation_payload['config']['continuation'] == (
 		continuation_config['continuation']
 	)
+	assert continuation_payload['continuation_lineage'] == {
+		'schema_version': 1,
+		'init_checkpoint': str(stage1_checkpoint.resolve()),
+		'init_checkpoint_sha256': file_sha256(stage1_checkpoint),
+		'resume_count': 0,
+	}
 	optimizer_state = continuation_payload['optimizer_state_dict']
 	assert len(optimizer_state['param_groups']) == 1
 	assert optimizer_state['param_groups'][0]['lr'] == pytest.approx(5.0e-3)
@@ -163,6 +170,12 @@ def test_mae_continuation_fresh_and_resume_contract(  # noqa: PLR0915
 	assert resumed_payload['config']['continuation'] == (
 		continuation_config['continuation']
 	)
+	assert resumed_payload['continuation_lineage'] == {
+		'schema_version': 1,
+		'init_checkpoint': str(stage1_checkpoint.resolve()),
+		'init_checkpoint_sha256': file_sha256(stage1_checkpoint),
+		'resume_count': 1,
+	}
 
 
 def _optimizer_step(state: dict[str, object]) -> int:

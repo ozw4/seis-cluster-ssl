@@ -9,7 +9,7 @@ import math
 import shutil
 import statistics
 import tempfile
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -133,7 +133,7 @@ def inspect_f3_lithology_five_way_results(
 	config: F3FiveWayConfig,
 ) -> dict[str, object]:
 	"""Audit all 75 evaluation artifacts read-only; raise on any drift."""
-	conditions = _condition_identities(config)
+	_condition_identities(config)
 	_reject_unexpected_run_directories(config)
 	cells = [
 		(model_id, layout_id, data_size)
@@ -164,7 +164,6 @@ def inspect_f3_lithology_five_way_results(
 			model_id=model_id,
 			layout_id=layout_id,
 			data_size=data_size,
-			condition=conditions[layout_id, data_size],
 		)
 		for model_id, layout_id, data_size in cells
 	]
@@ -182,8 +181,20 @@ def summarize_f3_lithology_five_way(
 	"""Write the five summary outputs after the full completeness audit."""
 	report = inspect_f3_lithology_five_way_results(config)
 	rows = report['rows']
-	paired = _paired_rows(rows)
-	by_size = _by_size_rows(paired)
+	paired = build_paired_rows(
+		rows,
+		comparisons=PAIRED_COMPARISONS,
+		metrics=SUMMARY_METRICS,
+		data_sizes=DATA_SIZES,
+		layout_ids=LAYOUT_IDS,
+	)
+	by_size = aggregate_paired_rows_by_size(
+		paired,
+		comparisons=PAIRED_COMPARISONS,
+		metrics=SUMMARY_METRICS,
+		data_sizes=DATA_SIZES,
+		layout_ids=LAYOUT_IDS,
+	)
 	summary_payload = _summary_payload(config, by_size)
 	outputs = {
 		COMPARISON_CSV_NAME: _csv_text(COMPARISON_FIELDNAMES, rows),
@@ -194,23 +205,7 @@ def summarize_f3_lithology_five_way(
 		SUMMARY_MD_NAME: _summary_markdown(by_size),
 	}
 	summary_root = config.summary_root
-	if summary_root.exists():
-		raise FileExistsError(
-			f'refusing to overwrite existing summary: {summary_root}'
-		)
-	summary_root.parent.mkdir(parents=True, exist_ok=True)
-	staging = Path(
-		tempfile.mkdtemp(
-			prefix=f'.{summary_root.name}.staging-', dir=summary_root.parent
-		)
-	)
-	try:
-		for name, text in outputs.items():
-			(staging / name).write_text(text, encoding='utf-8')
-		staging.replace(summary_root)
-	except BaseException:
-		shutil.rmtree(staging, ignore_errors=True)
-		raise
+	write_atomic_summary(summary_root, outputs)
 	return {
 		'complete_jobs': report['complete_jobs'],
 		'summary_root': str(summary_root),
@@ -235,26 +230,9 @@ def _condition_identities(
 	conditions: dict[tuple[str, str], dict[str, object]] = {}
 	for layout_id in LAYOUT_IDS:
 		for data_size in DATA_SIZES:
-			condition_dir = (
-				config.section_layout_dataset_root
-				/ 'datasets'
-				/ f'layout={layout_id}'
-				/ f'size={data_size}'
-				/ 'voxel_supervision'
+			conditions[layout_id, data_size] = _condition_identity(
+				config, layout_id=layout_id, data_size=data_size
 			)
-			metadata_path = condition_dir / LAYOUT_METADATA_NAME
-			if not metadata_path.is_file():
-				raise FileNotFoundError(
-					f'missing section-layout condition metadata: {metadata_path}'
-				)
-			identity = _read_json(metadata_path).get('identity')
-			if not isinstance(identity, Mapping):
-				raise TypeError(f'{metadata_path} identity must be a mapping')
-			conditions[layout_id, data_size] = {
-				'condition_dir': condition_dir,
-				'validation_mask_sha256': identity.get('validation_mask_sha256'),
-				'validation_voxel_count': identity.get('validation_voxel_count'),
-			}
 	masks = {
 		str(condition['validation_mask_sha256'])
 		for condition in conditions.values()
@@ -264,6 +242,35 @@ def _condition_identities(
 			'validation mask identity must be shared by all 15 conditions'
 		)
 	return conditions
+
+
+def _condition_identity(
+	config: F3FiveWayConfig, *, layout_id: str, data_size: str
+) -> dict[str, object]:
+	condition_dir = (
+		config.section_layout_dataset_root
+		/ 'datasets'
+		/ f'layout={layout_id}'
+		/ f'size={data_size}'
+		/ 'voxel_supervision'
+	)
+	metadata_path = condition_dir / LAYOUT_METADATA_NAME
+	if not metadata_path.is_file():
+		raise FileNotFoundError(
+			f'missing section-layout condition metadata: {metadata_path}'
+		)
+	identity = _read_json(metadata_path).get('identity')
+	if not isinstance(identity, Mapping):
+		raise TypeError(f'{metadata_path} identity must be a mapping')
+	if identity.get('layout_id') != layout_id:
+		raise ValueError(f'{metadata_path} layout_id does not match {layout_id!r}')
+	if identity.get('data_size') != data_size:
+		raise ValueError(f'{metadata_path} data_size does not match {data_size!r}')
+	return {
+		'condition_dir': condition_dir,
+		'validation_mask_sha256': identity.get('validation_mask_sha256'),
+		'validation_voxel_count': identity.get('validation_voxel_count'),
+	}
 
 
 def _reject_unexpected_run_directories(config: F3FiveWayConfig) -> None:
@@ -287,18 +294,17 @@ def _reject_unexpected_run_directories(config: F3FiveWayConfig) -> None:
 					)
 
 
-def _load_job_row(  # noqa: C901, PLR0912
+def _load_job_row(
 	config: F3FiveWayConfig,
 	*,
 	model_id: str,
 	layout_id: str,
 	data_size: str,
-	condition: Mapping[str, object],
 ) -> dict[str, object]:
 	job_dir = _job_dir(config, model_id, layout_id, data_size)
 	label = f'{model_id}/{layout_id}/{data_size}'
 	metrics = _read_json(job_dir / EVALUATION_DIR_NAME / METRICS_NAME)
-	for key in (*SUMMARY_METRICS, 'evaluation_voxel_count'):
+	for key in SUMMARY_METRICS:
 		value = metrics.get(key)
 		if not isinstance(value, int | float) or isinstance(value, bool):
 			# A malformed metrics artifact is stale data, not a caller bug.
@@ -307,26 +313,62 @@ def _load_job_row(  # noqa: C901, PLR0912
 			)
 		if not math.isfinite(float(value)):
 			raise ValueError(f'{label} metrics {key} must be finite')
+	model = config.model_by_id(model_id)
+	evidence = read_f3_lithology_job_evidence(
+		config,
+		model=model,
+		layout_id=layout_id,
+		data_size=data_size,
+		job_dir=job_dir,
+	)
+	return {
+		'model_id': model_id,
+		'layout_id': layout_id,
+		'data_size': data_size,
+		'checkpoint_path': str(model.checkpoint),
+		'embeddings_dir': str(model.embeddings_dir),
+		**evidence,
+		'macro_f1': float(metrics['macro_f1']),
+		'mean_iou': float(metrics['mean_iou']),
+		'balanced_accuracy': float(metrics['balanced_accuracy']),
+		'weighted_f1': float(metrics['weighted_f1']),
+		'metrics_path': str(job_dir / EVALUATION_DIR_NAME / METRICS_NAME),
+	}
+
+
+def read_f3_lithology_job_evidence(  # noqa: C901, PLR0912
+	config: F3FiveWayConfig,
+	*,
+	model: F3FiveWayModelSource,
+	layout_id: str,
+	data_size: str,
+	job_dir: Path,
+) -> dict[str, object]:
+	"""Bind one completed evaluation to its source and canonical condition."""
+	label = f'{model.model_id}/{layout_id}/{data_size}'
+	condition = _condition_identity(config, layout_id=layout_id, data_size=data_size)
+	metrics = _read_json(job_dir / EVALUATION_DIR_NAME / METRICS_NAME)
 	if metrics.get('aggregation_unit') != EXPECTED_AGGREGATION_UNIT:
-		# Metrics aggregated over anything but unique validation voxels are a
-		# different quantity and must not be averaged with these rows.
 		raise ValueError(
 			f'{label} metrics aggregation_unit must equal '
 			f'{EXPECTED_AGGREGATION_UNIT!r}; got {metrics.get("aggregation_unit")!r}'
 		)
+	voxels = metrics.get('evaluation_voxel_count')
+	if not isinstance(voxels, int) or isinstance(voxels, bool) or voxels <= 0:
+		raise ValueError(f'{label} metrics evaluation_voxel_count must be positive')
 	declared_voxels = condition['validation_voxel_count']
-	if int(metrics['evaluation_voxel_count']) != declared_voxels:
+	if voxels != declared_voxels:
 		raise ValueError(
-			f'{label} evaluated {int(metrics["evaluation_voxel_count"])} voxels '
-			f'but its section-layout condition declares {declared_voxels}'
+			f'{label} evaluated {voxels} voxels but its section-layout condition '
+			f'declares {declared_voxels}'
 		)
 	evaluation_metadata = _read_json(
 		job_dir / EVALUATION_DIR_NAME / 'evaluation_metadata.json'
 	)
 	if evaluation_metadata.get('dataset') != dict(config.dataset):
 		raise ValueError(f'{label} evaluation dataset does not match config')
-	if evaluation_metadata.get('model_tag') != model_id:
-		raise ValueError(f'{label} evaluation model_tag must equal {model_id!r}')
+	if evaluation_metadata.get('model_tag') != model.model_id:
+		raise ValueError(f'{label} evaluation model_tag must equal {model.model_id!r}')
 	policy = evaluation_metadata.get('policy')
 	if not isinstance(policy, Mapping):
 		raise TypeError(f'{label} evaluation policy must be a mapping')
@@ -338,25 +380,40 @@ def _load_job_row(  # noqa: C901, PLR0912
 				f'{label} evaluation policy {key} must equal {normalized!r}; '
 				f'got {recorded!r}'
 			)
+	condition_dir = Path(str(condition['condition_dir']))
+	for key, name in (
+		('voxel_dataset_metadata', 'voxel_dataset_metadata.json'),
+		('voxel_split_grid', 'supervision_split_grid.npy'),
+	):
+		recorded_path, recorded_sha256 = _identity_entry(
+			evaluation_metadata.get('inputs'),
+			key,
+			label=label,
+			prefix='evaluation inputs',
+		)
+		expected_path = condition_dir / name
+		if not _same_path(recorded_path, expected_path):
+			raise ValueError(
+				f'{label} evaluation used a foreign {key}: {recorded_path}'
+			)
+		if file_sha256(expected_path) != recorded_sha256:
+			raise ValueError(
+				f'{label} condition artifact changed after evaluation: {expected_path}'
+			)
 	resolved_config = _read_json(job_dir / DECODER_DIR_NAME / 'resolved_config.json')
 	embeddings = resolved_config.get('embeddings')
 	if not isinstance(embeddings, Mapping):
 		raise TypeError(f'{label} decoder resolved config embeddings missing')
-	model = config.model_by_id(model_id)
 	if embeddings.get('checkpoint_path') != str(model.checkpoint):
 		raise ValueError(
-			f'{label} decoder checkpoint identity does not match the '
-			'configured five-way checkpoint'
+			f'{label} decoder checkpoint identity does not match the configured source'
 		)
 	if embeddings.get('input_dir') != str(model.embeddings_dir):
 		raise ValueError(
-			f'{label} decoder embedding directory does not match the '
-			'configured five-way source'
+			f'{label} decoder embedding directory does not match the configured source'
 		)
 	run_metadata = _read_json(job_dir / DECODER_DIR_NAME / 'run_metadata.json')
-	expected_voxel_metadata = str(
-		Path(str(condition['condition_dir'])) / 'voxel_dataset_metadata.json'
-	)
+	expected_voxel_metadata = str(condition_dir / 'voxel_dataset_metadata.json')
 	if run_metadata.get('voxel_dataset_metadata') != expected_voxel_metadata:
 		raise ValueError(
 			f'{label} decoder supervision dataset does not match the shared '
@@ -378,25 +435,15 @@ def _load_job_row(  # noqa: C901, PLR0912
 		evaluation_metadata=evaluation_metadata,
 	)
 	return {
-		'model_id': model_id,
-		'layout_id': layout_id,
-		'data_size': data_size,
-		'checkpoint_path': str(model.checkpoint),
-		'embeddings_dir': str(model.embeddings_dir),
 		**identity,
 		'supervision_identity': supervision_identity,
 		'validation_identity': str(condition['validation_mask_sha256']),
-		'macro_f1': float(metrics['macro_f1']),
-		'mean_iou': float(metrics['mean_iou']),
-		'balanced_accuracy': float(metrics['balanced_accuracy']),
-		'weighted_f1': float(metrics['weighted_f1']),
-		'validation_voxel_count': int(metrics['evaluation_voxel_count']),
-		'metrics_path': str(job_dir / EVALUATION_DIR_NAME / METRICS_NAME),
+		'validation_voxel_count': voxels,
 		'_validation_tile_manifest_sha256': validation_manifest,
 	}
 
 
-def _job_source_identity(
+def _job_source_identity(  # noqa: C901
 	*,
 	label: str,
 	model: F3FiveWayModelSource,
@@ -425,6 +472,8 @@ def _job_source_identity(
 			f'{prediction_metadata_path}'
 		)
 	prediction_metadata = _read_json(prediction_metadata_path)
+	if prediction_metadata.get('model_tag') != model.model_id:
+		raise ValueError(f'{label} prediction model_tag must equal {model.model_id!r}')
 	source_identity = prediction_metadata.get('source_identity')
 	decoder_path, decoder_sha256 = _identity_entry(
 		source_identity,
@@ -436,6 +485,10 @@ def _job_source_identity(
 	if not _same_path(decoder_path, expected_decoder):
 		raise ValueError(
 			f'{label} prediction used a foreign decoder checkpoint: {decoder_path}'
+		)
+	if file_sha256(expected_decoder) != decoder_sha256:
+		raise ValueError(
+			f'{label} decoder checkpoint changed after prediction: {expected_decoder}'
 		)
 	artifact_identities = (
 		source_identity.get('artifact_identities')
@@ -584,18 +637,32 @@ def _grouped(
 	return grouped
 
 
-def _paired_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+def build_paired_rows(
+	rows: Sequence[Mapping[str, object]],
+	*,
+	comparisons: Sequence[tuple[str, str, str]],
+	metrics: Sequence[str],
+	data_sizes: Sequence[str],
+	layout_ids: Sequence[str],
+) -> list[dict[str, object]]:
+	"""Build exact layout-paired metric deltas for requested conditions."""
 	by_cell = {
 		(str(row['model_id']), str(row['layout_id']), str(row['data_size'])): row
 		for row in rows
 	}
 	paired = []
-	for data_size in DATA_SIZES:
-		for layout_id in LAYOUT_IDS:
-			for comparison_id, left_model, right_model in PAIRED_COMPARISONS:
-				left = by_cell[left_model, layout_id, data_size]
-				right = by_cell[right_model, layout_id, data_size]
-				for metric in SUMMARY_METRICS:
+	for data_size in data_sizes:
+		for layout_id in layout_ids:
+			for comparison_id, left_model, right_model in comparisons:
+				try:
+					left = by_cell[left_model, layout_id, data_size]
+					right = by_cell[right_model, layout_id, data_size]
+				except KeyError as error:
+					raise ValueError(
+						'missing paired cell for '
+						f'{comparison_id}/{layout_id}/{data_size}'
+					) from error
+				for metric in metrics:
 					left_value = float(left[metric])
 					right_value = float(right[metric])
 					paired.append(
@@ -614,11 +681,19 @@ def _paired_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
 	return paired
 
 
-def _by_size_rows(paired: list[dict[str, object]]) -> list[dict[str, object]]:
+def aggregate_paired_rows_by_size(
+	paired: Sequence[Mapping[str, object]],
+	*,
+	comparisons: Sequence[tuple[str, str, str]],
+	metrics: Sequence[str],
+	data_sizes: Sequence[str],
+	layout_ids: Sequence[str],
+) -> list[dict[str, object]]:
+	"""Aggregate exact layout-paired deltas by requested data size."""
 	rows = []
-	for data_size in DATA_SIZES:
-		for comparison_id, _, _ in PAIRED_COMPARISONS:
-			for metric in SUMMARY_METRICS:
+	for data_size in data_sizes:
+		for comparison_id, _, _ in comparisons:
+			for metric in metrics:
 				deltas = [
 					float(row['delta'])
 					for row in paired
@@ -626,10 +701,10 @@ def _by_size_rows(paired: list[dict[str, object]]) -> list[dict[str, object]]:
 					and row['comparison_id'] == comparison_id
 					and row['metric'] == metric
 				]
-				if len(deltas) != len(LAYOUT_IDS):
+				if len(deltas) != len(layout_ids):
 					raise ValueError(
 						f'{data_size}/{comparison_id}/{metric} must aggregate '
-						f'exactly {len(LAYOUT_IDS)} layouts'
+						f'exactly {len(layout_ids)} layouts'
 					)
 				rows.append(
 					{
@@ -648,6 +723,23 @@ def _by_size_rows(paired: list[dict[str, object]]) -> list[dict[str, object]]:
 					}
 				)
 	return rows
+
+
+def write_atomic_summary(root: Path, outputs: Mapping[str, str]) -> None:
+	"""Publish a new summary directory atomically without overwriting."""
+	if root.exists():
+		raise FileExistsError(f'refusing to overwrite existing summary: {root}')
+	root.parent.mkdir(parents=True, exist_ok=True)
+	staging = Path(
+		tempfile.mkdtemp(prefix=f'.{root.name}.staging-', dir=root.parent)
+	)
+	try:
+		for name, text in outputs.items():
+			(staging / name).write_text(text, encoding='utf-8')
+		staging.replace(root)
+	except BaseException:
+		shutil.rmtree(staging, ignore_errors=True)
+		raise
 
 
 def _summary_payload(
@@ -673,7 +765,7 @@ def _summary_payload(
 		}
 	return {
 		'schema_version': 1,
-		'summary_name': 'f3_lithology_mae_local_bt_five_way_v1',
+		'summary_name': config.summary_name,
 		'primary_metric': PRIMARY_METRIC,
 		'models': list(config.model_ids),
 		'job_count': len(config.model_ids) * len(LAYOUT_IDS) * len(DATA_SIZES),
@@ -744,6 +836,10 @@ __all__ = [
 	'SUMMARY_MD_NAME',
 	'SUMMARY_METRICS',
 	'SUMMARY_OUTPUT_NAMES',
+	'aggregate_paired_rows_by_size',
+	'build_paired_rows',
 	'inspect_f3_lithology_five_way_results',
+	'read_f3_lithology_job_evidence',
 	'summarize_f3_lithology_five_way',
+	'write_atomic_summary',
 ]

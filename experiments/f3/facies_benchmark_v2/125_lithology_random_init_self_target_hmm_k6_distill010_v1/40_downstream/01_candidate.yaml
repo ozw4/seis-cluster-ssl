@@ -1,0 +1,10 @@
+benchmark:
+  canonical_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/110_lithology_mae_local_bt_five_way_v3/60_five_way.yaml
+candidate:
+  id: random_init_self_target_hmm_k6_distill010
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/random_init_self_target_hmm_k6_distill010_v1/stage2/random_init/hmm/k6/full_25ep/latest.pt
+  embeddings_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/random_init_self_target_hmm_k6_distill010_v1/random_init_self_target_hmm_k6_distill010/overlap_x64
+outputs:
+  runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/runs
+  summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/summary
+  five_way_summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/random_init_self_target_hmm_k6_distill010_v1/summary_five_way

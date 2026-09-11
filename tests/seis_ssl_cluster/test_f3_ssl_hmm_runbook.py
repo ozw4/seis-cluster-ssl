@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 SUITE_ROOT = Path(
@@ -20,32 +21,10 @@ def test_readmes_link_the_suite_and_execution_entrypoints() -> None:
 		'[21_ssl_hmm_continuation_v1]('
 		'21_ssl_hmm_continuation_v1/README.md)'
 	) in root_text
-	for relative_path in (
-		'10_stage1/mae/02_full_100ep.yaml',
-		'10_stage1/barlow_twins/02_full_100ep.yaml',
-		'30_stage2/mae100/mae_continue/02_full_25ep.yaml',
-		'30_stage2/bt100/bt_continue/02_full_25ep.yaml',
-		'20_hmm_targets/mae100/01_extract_embeddings.yaml',
-		'20_hmm_targets/bt100/01_extract_embeddings.yaml',
-		'30_stage2/mae100/hmm/k6/02_full_25ep.yaml',
-		'30_stage2/bt100/hmm/k6/02_full_25ep.yaml',
-	):
-		assert relative_path in readme_text
-		assert (SUITE_ROOT / relative_path).is_file()
-	for cli in (
-		'train_amp_mae.py',
-		'train_amp_barlow_twins.py',
-		'extract_embeddings.py',
-		'cluster_embeddings.py',
-		'export_strat_hmm_pseudo_targets.py',
-		'train_strat_hmm_pretext.py',
-	):
-		relative_path = f'proc/seis_ssl_cluster/{cli}'
-		assert relative_path in readme_text
-		assert Path(relative_path).is_file()
+	assert RUNBOOK.is_file()
 
 
-def test_runbook_references_exist_and_inline_audits_compile() -> None:
+def test_runbook_references_exist_and_shell_blocks_are_valid() -> None:
 	text = RUNBOOK.read_text(encoding='utf-8')
 	roots = {
 		'STAGE1_CONFIGS': SUITE_ROOT / '10_stage1',
@@ -60,29 +39,25 @@ def test_runbook_references_exist_and_inline_audits_compile() -> None:
 	assert references
 	for variable, relative_path in references:
 		assert (roots[variable] / relative_path).is_file()
+	for cli in set(re.findall(r'proc/seis_ssl_cluster/\w+\.py', text)):
+		assert Path(cli).is_file(), cli
 
-	focused_tests = (
-		'tests/seis_ssl_cluster/test_f3_stage1_ssl_configs.py',
-		'tests/seis_ssl_cluster/test_f3_ssl_continuation_configs.py',
-		'tests/seis_ssl_cluster/test_f3_hmm_k6_target_configs.py',
-		'tests/seis_ssl_cluster/test_f3_hmm_k6_configs.py',
-		'tests/seis_ssl_cluster/test_f3_ssl_hmm_runbook.py',
+	headings = (
+		'## Stage 1',
+		'## Control branches',
+		'## HMM target branches',
+		'## 再開',
 	)
-	for test_path in focused_tests:
-		assert text.count(test_path) == 1
-	for test_path in (
-		'tests/seis_ssl_cluster/test_mae_continuation_runner.py',
-		'tests/seis_ssl_cluster/test_barlow_twins_continuation.py',
-		'tests/seis_ssl_cluster/test_barlow_twins_training_contract.py',
-		'tests/seis_ssl_cluster/test_embedding_extractor.py',
-		'tests/seis_ssl_cluster/test_strat_checkpoint_extraction.py',
-		'tests/seis_ssl_cluster/test_strat_hmm_pretraining_head_only.py',
-		'tests/seis_ssl_cluster/test_strat_hmm_barlow_runner_integration.py',
-	):
-		assert text.count(test_path) == 1
-		assert Path(test_path).is_file()
+	positions = [text.index(heading) for heading in headings]
+	assert positions == sorted(positions)
 
-	blocks = re.findall(r"<<'PY'\n(.*?)\nPY", text, flags=re.DOTALL)
+	blocks = re.findall(r'```bash\n(.*?)```', text, flags=re.DOTALL)
 	assert blocks
-	for index, source in enumerate(blocks, start=1):
-		compile(source, f'{RUNBOOK}:inline-{index}', 'exec')
+	for block in blocks:
+		subprocess.run(
+			['/bin/bash', '-n'],
+			input=block,
+			text=True,
+			check=True,
+			capture_output=True,
+		)

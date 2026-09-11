@@ -6,6 +6,7 @@ import json
 import math
 import os
 import random
+import shutil
 from collections.abc import Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
@@ -29,6 +30,32 @@ LATEST_NAME = 'latest.pt'
 BEST_NAME = 'best.pt'
 METRICS_NAME = 'metrics.json'
 HISTORY_NAME = 'history.json'
+CHECKPOINT_SELECTION_VALIDATION_MAE = (
+	'strict_lower_validation_macro_mae_v1'
+)
+CHECKPOINT_SELECTION_VALIDATION_WITHIN_2 = (
+	'strict_higher_validation_macro_within_2_v1'
+)
+CHECKPOINT_SELECTION_VALIDATION_WITHIN_4 = (
+	'strict_higher_validation_macro_within_4_v1'
+)
+CHECKPOINT_SELECTION_IDS = frozenset(
+	{
+		CHECKPOINT_SELECTION_VALIDATION_MAE,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
+	}
+)
+CHECKPOINT_SELECTION_ORDER = (
+	CHECKPOINT_SELECTION_VALIDATION_MAE,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
+)
+_CHECKPOINT_SELECTION_ARTIFACT_STEMS = {
+	CHECKPOINT_SELECTION_VALIDATION_MAE: 'macro_mae',
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_2: 'within2',
+	CHECKPOINT_SELECTION_VALIDATION_WITHIN_4: 'within4',
+}
 
 
 @dataclass(frozen=True)
@@ -39,6 +66,8 @@ class HorizonRunnerSettings:
 	seed: int
 	amp_on_cuda: bool
 	gradient_clip_norm: float
+	checkpoint_selection: str = CHECKPOINT_SELECTION_VALIDATION_MAE
+	checkpoint_selections: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +119,8 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		expected_counts=expected_counts,
 		max_steps=max_steps,
 	)
+	checkpoint_selections = _resolved_checkpoint_selections(settings)
+	bundled_checkpoints = len(checkpoint_selections) > 1
 	resume_path = None if resume is None else Path(resume)
 	_validate_output(output_dir, resume_path)
 	run_device = resolve_horizon_device(device)
@@ -100,6 +131,8 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		**run_identity,
 		'runtime_precision': runtime_precision,
 	}
+	if bundled_checkpoints:
+		runtime_run_identity['checkpoint_selections'] = list(checkpoint_selections)
 	_configure_determinism()
 	_seed_everything(settings.seed)
 	model, optimizer = build_model_and_optimizer(run_device)
@@ -114,8 +147,13 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		gradient_clip_norm=settings.gradient_clip_norm,
 	)
 	history: list[dict[str, object]] = []
-	best_epoch: int | None = None
-	best_mae = math.inf
+	best_epochs: dict[str, int | None] = dict.fromkeys(checkpoint_selections)
+	best_scores = {
+		selection: initial_best_validation_score(selection)
+		for selection in checkpoint_selections
+	}
+	best_epoch = best_epochs[settings.checkpoint_selection]
+	best_score = best_scores[settings.checkpoint_selection]
 	global_step = 0
 	start_epoch = 0
 	start_position = 0
@@ -140,8 +178,27 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			dict(cast('Mapping[str, object]', row))
 			for row in _sequence(payload.get('history'), 'history')
 		]
-		best_epoch = _optional_int(payload.get('best_epoch'), 'best_epoch')
-		best_mae = float(payload.get('best_validation_macro_mae_samples', math.inf))
+		if bundled_checkpoints:
+			best_epochs, best_scores = _resume_best_checkpoints(
+				payload,
+				selections=checkpoint_selections,
+			)
+			_validate_resumed_bundled_checkpoint_files(
+				output_dir,
+				best_epochs=best_epochs,
+			)
+		else:
+			best_epochs[settings.checkpoint_selection] = _optional_int(
+				payload.get('best_epoch'), 'best_epoch'
+			)
+			best_scores[settings.checkpoint_selection] = (
+				_resume_best_validation_score(
+					payload,
+					selection=settings.checkpoint_selection,
+				)
+			)
+		best_epoch = best_epochs[settings.checkpoint_selection]
+		best_score = best_scores[settings.checkpoint_selection]
 		global_step = _nonnegative_int(payload.get('global_step'), 'global_step')
 		start_epoch = _nonnegative_int(payload.get('epoch'), 'epoch')
 		start_position = _nonnegative_int(
@@ -168,7 +225,13 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					scaler,
 					history=history,
 					best_epoch=best_epoch,
-					best_mae=best_mae,
+					checkpoint_selection=settings.checkpoint_selection,
+					best_score=best_score,
+					best_checkpoints=_best_checkpoint_state(
+						best_epochs,
+						best_scores,
+						bundled=bundled_checkpoints,
+					),
 					global_step=global_step,
 					epoch=epoch,
 					next_position=position,
@@ -203,7 +266,13 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					scaler,
 					history=history,
 					best_epoch=best_epoch,
-					best_mae=best_mae,
+					checkpoint_selection=settings.checkpoint_selection,
+					best_score=best_score,
+					best_checkpoints=_best_checkpoint_state(
+						best_epochs,
+						best_scores,
+						bundled=bundled_checkpoints,
+					),
 					global_step=global_step,
 					epoch=epoch,
 					next_position=position + 1,
@@ -223,8 +292,18 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			expected_counts=expected_counts['validation'],
 			expected_primary_counts=expected_counts['validation'],
 		)
+		validation_metrics = cast(
+			'Mapping[str, object]', validation['secondary']
+		)
 		validation_mae = _required_metric(
-			validation['secondary'], 'macro_mae_samples'
+			validation_metrics, 'macro_mae_samples'
+		)
+		validation_within_2 = _required_metric(
+			validation_metrics, 'macro_within_2_samples'
+		)
+		validation_within_4 = validation_checkpoint_score(
+			validation_metrics,
+			CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
 		)
 		history.append(
 			{
@@ -234,27 +313,51 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					train_loss_sum / train_item_count
 				),
 				'validation_macro_mae_samples': validation_mae,
-				'validation_macro_within_2_samples': _required_metric(
-					validation['secondary'], 'macro_within_2_samples'
-				),
+				'validation_macro_within_2_samples': validation_within_2,
+				'validation_macro_within_4_samples': validation_within_4,
 			}
 		)
-		if validation_mae_improved(validation_mae, best_mae):
-			best_mae = validation_mae
-			best_epoch = epoch
+		for selection in checkpoint_selections:
+			candidate_score = validation_checkpoint_score(
+				validation_metrics,
+				selection,
+			)
+			if not validation_score_improved(
+				candidate_score,
+				best_scores[selection],
+				selection,
+			):
+				continue
+			best_scores[selection] = candidate_score
+			best_epochs[selection] = epoch
+			selection_identity = _run_identity_for_checkpoint_selection(
+				runtime_run_identity,
+				selection=selection,
+			)
+			checkpoint_path = _best_checkpoint_path(
+				output_dir,
+				selection=selection,
+				bundled=bundled_checkpoints,
+			)
 			_save_checkpoint(
-				output_dir / BEST_NAME,
+				checkpoint_path,
 				model=model,
 				optimizer=optimizer,
 				scaler=scaler,
 				payload={
-					'run_identity': runtime_run_identity,
+					'run_identity': selection_identity,
 					'runtime_precision': runtime_precision,
+					'checkpoint_selection': selection,
+					'best_validation_score': candidate_score,
 					'epoch': epoch,
 					'global_step': global_step,
 					'validation': validation['secondary'],
 				},
 			)
+			if bundled_checkpoints and selection == settings.checkpoint_selection:
+				_atomic_copy(checkpoint_path, output_dir / BEST_NAME)
+		best_epoch = best_epochs[settings.checkpoint_selection]
+		best_score = best_scores[settings.checkpoint_selection]
 		_save_latest(
 			output_dir,
 			model,
@@ -262,7 +365,13 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			scaler,
 			history=history,
 			best_epoch=best_epoch,
-			best_mae=best_mae,
+			checkpoint_selection=settings.checkpoint_selection,
+			best_score=best_score,
+			best_checkpoints=_best_checkpoint_state(
+				best_epochs,
+				best_scores,
+				bundled=bundled_checkpoints,
+			),
 			global_step=global_step,
 			epoch=epoch + 1,
 			next_position=0,
@@ -278,43 +387,81 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		train_item_count = 0
 		if max_steps is not None and global_step >= max_steps:
 			return None
-	if best_epoch is None:
-		raise RuntimeError('training completed without a best checkpoint')
-	best_path = output_dir / BEST_NAME
-	best = torch.load(best_path, map_location=run_device, weights_only=False)
-	if best.get('run_identity') != runtime_run_identity:
-		raise ValueError('best checkpoint identity changed before test evaluation')
-	if best.get('runtime_precision') != runtime_precision:
-		raise ValueError(
-			'best checkpoint runtime precision changed before test evaluation'
+	if any(best_epochs[selection] is None for selection in checkpoint_selections):
+		raise RuntimeError('training completed without all requested best checkpoints')
+	primary_metrics_payload: dict[str, object] | None = None
+	for selection in checkpoint_selections:
+		best_path = _best_checkpoint_path(
+			output_dir,
+			selection=selection,
+			bundled=bundled_checkpoints,
 		)
-	model.load_state_dict(_state_dict(best))
-	test = evaluate_horizon_dataset(
-		model,
-		datasets['test'],
-		runtime,
-		predict_one_item=predict_one_item,
-		expected_counts=expected_counts['test'],
-		expected_primary_counts=expected_counts['test_primary'],
+		best = torch.load(best_path, map_location=run_device, weights_only=False)
+		selection_identity = _run_identity_for_checkpoint_selection(
+			runtime_run_identity,
+			selection=selection,
+		)
+		if best.get('run_identity') != selection_identity:
+			raise ValueError('best checkpoint identity changed before test evaluation')
+		if best.get('runtime_precision') != runtime_precision:
+			raise ValueError(
+				'best checkpoint runtime precision changed before test evaluation'
+			)
+		model.load_state_dict(_state_dict(best))
+		test = evaluate_horizon_dataset(
+			model,
+			datasets['test'],
+			runtime,
+			predict_one_item=predict_one_item,
+			expected_counts=expected_counts['test'],
+			expected_primary_counts=expected_counts['test_primary'],
+		)
+		metrics_payload: dict[str, object] = {
+			**metrics_metadata,
+			'benchmark_identity': selection_identity,
+			'runtime_precision': runtime_precision,
+			'best_epoch': best_epochs[selection],
+			'checkpoint_selection': selection,
+			'best_validation_score': best_scores[selection],
+			'best_checkpoint': {
+				'path': str(best_path),
+				'sha256': file_sha256(best_path),
+			},
+			'validation': best['validation'],
+			'test': {
+				'primary_common': test['primary'],
+				'secondary_per_horizon': test['secondary'],
+				'evaluation_pass_count': 1,
+			},
+		}
+		if bundled_checkpoints:
+			_write_json(
+				output_dir / bundled_metrics_name(selection),
+				metrics_payload,
+			)
+		if selection == settings.checkpoint_selection:
+			primary_metrics_payload = metrics_payload
+	if primary_metrics_payload is None:
+		raise RuntimeError('primary checkpoint metrics were not evaluated')
+	primary_best_path = output_dir / BEST_NAME
+	model.load_state_dict(
+		_state_dict(
+			torch.load(
+				primary_best_path,
+				map_location=run_device,
+				weights_only=False,
+			)
+		)
 	)
-	metrics_payload = {
-		**metrics_metadata,
-		'benchmark_identity': runtime_run_identity,
-		'runtime_precision': runtime_precision,
-		'best_epoch': best_epoch,
+	primary_metrics_payload = {
+		**primary_metrics_payload,
 		'best_checkpoint': {
-			'path': str(best_path),
-			'sha256': file_sha256(best_path),
-		},
-		'validation': best['validation'],
-		'test': {
-			'primary_common': test['primary'],
-			'secondary_per_horizon': test['secondary'],
-			'evaluation_pass_count': 1,
+			'path': str(primary_best_path),
+			'sha256': file_sha256(primary_best_path),
 		},
 	}
 	metrics_path = output_dir / METRICS_NAME
-	_write_json(metrics_path, metrics_payload)
+	_write_json(metrics_path, primary_metrics_payload)
 	_save_latest(
 		output_dir,
 		model,
@@ -322,7 +469,13 @@ def run_horizon_training_job(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		scaler,
 		history=history,
 		best_epoch=best_epoch,
-		best_mae=best_mae,
+		checkpoint_selection=settings.checkpoint_selection,
+		best_score=best_score,
+		best_checkpoints=_best_checkpoint_state(
+			best_epochs,
+			best_scores,
+			bundled=bundled_checkpoints,
+		),
 		global_step=global_step,
 		epoch=settings.epochs,
 		next_position=0,
@@ -402,24 +555,29 @@ def backward_and_step_horizon_optimizer(
 	scaler: torch.amp.GradScaler | None,
 	gradient_clip_norm: float,
 ) -> torch.Tensor:
-	'''Backpropagate, reject non-finite gradients, then update parameters.'''
+	'''Backpropagate, clip gradients, and delegate AMP overflow to GradScaler.'''
 	if scaler is None:
 		loss.backward()
 	else:
 		scaler.scale(loss).backward()
 		scaler.unscale_(optimizer)
 	gradient_norm = torch.nn.utils.clip_grad_norm_(
-		model.parameters(), max_norm=gradient_clip_norm
+		model.parameters(),
+		max_norm=gradient_clip_norm,
+		error_if_nonfinite=False,
 	)
-	if not bool(torch.isfinite(gradient_norm).item()):
-		raise FloatingPointError('non-finite Volve horizon gradient norm')
+	gradient_is_finite = bool(torch.isfinite(gradient_norm).item())
 	if scaler is None:
+		if not gradient_is_finite:
+			raise FloatingPointError(
+				'non-finite Volve horizon gradient norm'
+			)
 		optimizer.step()
 	else:
+		# GradScaler must run so it can skip an overflowed update and lower its scale.
 		scaler.step(optimizer)
 		scaler.update()
 	return gradient_norm.detach()
-
 
 def deterministic_tile_order(tile_count: int, seed: int, epoch: int) -> tuple[int, ...]:
 	'''Return the all-items-once order for one epoch.'''
@@ -433,13 +591,192 @@ def deterministic_tile_order(tile_count: int, seed: int, epoch: int) -> tuple[in
 	)
 
 
-def validation_mae_improved(candidate: float, best: float) -> bool:
-	'''Return true only for a finite, strictly lower validation macro MAE.'''
+def bundled_best_name(selection: str) -> str:
+	'''Return the stable best-checkpoint name for one bundled policy.'''
+	return f'best_{_checkpoint_selection_artifact_stem(selection)}.pt'
+
+
+def bundled_metrics_name(selection: str) -> str:
+	'''Return the stable evaluation name for one bundled policy.'''
+	return f'metrics_{_checkpoint_selection_artifact_stem(selection)}.json'
+
+
+def _checkpoint_selection_artifact_stem(selection: str) -> str:
+	try:
+		return _CHECKPOINT_SELECTION_ARTIFACT_STEMS[selection]
+	except KeyError as error:
+		raise ValueError(
+			f'unknown horizon checkpoint selection: {selection!r}'
+		) from error
+
+
+def _resolved_checkpoint_selections(
+	settings: HorizonRunnerSettings,
+) -> tuple[str, ...]:
+	value = settings.checkpoint_selections
+	if value is None:
+		return (settings.checkpoint_selection,)
+	if not isinstance(value, tuple) or any(
+		not isinstance(selection, str) for selection in value
+	):
+		raise TypeError('checkpoint_selections must be a tuple of strings')
+	if not value:
+		raise ValueError('checkpoint_selections must not be empty')
+	if len(value) != len(set(value)):
+		raise ValueError('checkpoint_selections must be unique')
+	for selection in value:
+		initial_best_validation_score(selection)
+	if settings.checkpoint_selection not in value:
+		raise ValueError(
+			'checkpoint_selections must include the primary checkpoint_selection'
+		)
+	return value
+
+
+def _best_checkpoint_path(
+	output_dir: Path,
+	*,
+	selection: str,
+	bundled: bool,
+) -> Path:
+	return output_dir / (bundled_best_name(selection) if bundled else BEST_NAME)
+
+
+def _best_checkpoint_state(
+	best_epochs: Mapping[str, int | None],
+	best_scores: Mapping[str, float],
+	*,
+	bundled: bool,
+) -> dict[str, dict[str, object]] | None:
+	if not bundled:
+		return None
+	return {
+		selection: {
+			'best_epoch': best_epochs[selection],
+			'best_validation_score': best_scores[selection],
+		}
+		for selection in best_epochs
+	}
+
+
+def _resume_best_checkpoints(
+	payload: Mapping[str, object],
+	*,
+	selections: tuple[str, ...],
+) -> tuple[dict[str, int | None], dict[str, float]]:
+	value = payload.get('best_checkpoints')
+	if not isinstance(value, Mapping):
+		raise TypeError('bundled resume checkpoint is missing best_checkpoints')
+	if set(value) != set(selections):
+		raise ValueError('bundled resume checkpoint selections do not match this run')
+	epochs: dict[str, int | None] = {}
+	scores: dict[str, float] = {}
+	for selection in selections:
+		item = value.get(selection)
+		if not isinstance(item, Mapping):
+			raise TypeError('bundled best checkpoint state must be a mapping')
+		if set(item) != {'best_epoch', 'best_validation_score'}:
+			raise ValueError('bundled best checkpoint state fields are not closed')
+		epoch = _optional_int(item.get('best_epoch'), 'best_epoch')
+		score = _number(
+			item.get('best_validation_score'),
+			'best_validation_score',
+		)
+		_validate_best_validation_score(score, selection=selection)
+		if epoch is None and score != initial_best_validation_score(selection):
+			raise ValueError('unselected bundled checkpoint has a non-initial score')
+		if epoch is not None and not math.isfinite(score):
+			raise ValueError('selected bundled checkpoint score must be finite')
+		epochs[selection] = epoch
+		scores[selection] = score
+	return epochs, scores
+
+
+def _validate_resumed_bundled_checkpoint_files(
+	output_dir: Path,
+	*,
+	best_epochs: Mapping[str, int | None],
+) -> None:
+	for selection, epoch in best_epochs.items():
+		checkpoint_path = output_dir / bundled_best_name(selection)
+		if epoch is not None and not checkpoint_path.is_file():
+			raise FileNotFoundError(
+				'resume is missing a selected bundled best checkpoint: '
+				f'{checkpoint_path}'
+			)
+
+
+def _run_identity_for_checkpoint_selection(
+	run_identity: Mapping[str, object],
+	*,
+	selection: str,
+) -> dict[str, object]:
+	initial_best_validation_score(selection)
+	result = dict(run_identity)
+	objective = result.get('objective')
+	if objective is None:
+		return result
+	if not isinstance(objective, Mapping):
+		raise TypeError('run identity objective must be a mapping')
+	result['objective'] = {**objective, 'checkpoint_selection': selection}
+	return result
+
+
+def _atomic_copy(source: Path, destination: Path) -> None:
+	temporary = destination.with_name(f'.{destination.name}.tmp')
+	shutil.copyfile(source, temporary)
+	temporary.replace(destination)
+
+
+def initial_best_validation_score(selection: str) -> float:
+	'''Return the sentinel score for one supported checkpoint policy.'''
+	if selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		return math.inf
+	if selection in {
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_2,
+		CHECKPOINT_SELECTION_VALIDATION_WITHIN_4,
+	}:
+		return -math.inf
+	raise ValueError(f'unknown horizon checkpoint selection: {selection!r}')
+
+
+def validation_checkpoint_score(
+	validation_metrics: Mapping[str, object],
+	selection: str,
+) -> float:
+	'''Read the finite validation score selected by one supported policy.'''
+	if selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		key = 'macro_mae_samples'
+	elif selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_2:
+		key = 'macro_within_2_samples'
+	elif selection == CHECKPOINT_SELECTION_VALIDATION_WITHIN_4:
+		return _required_metric(_mapping(validation_metrics, 'macro'), 'within_4')
+	else:
+		raise ValueError(f'unknown horizon checkpoint selection: {selection!r}')
+	return _required_metric(validation_metrics, key)
+
+
+def validation_score_improved(
+	candidate: float,
+	best: float,
+	selection: str,
+) -> bool:
+	'''Compare finite scores strictly in the configured policy direction.'''
 	if not math.isfinite(candidate):
-		raise ValueError('validation macro MAE candidate must be finite')
-	if math.isnan(best) or best == -math.inf:
-		raise ValueError('best validation macro MAE is invalid')
-	return candidate < best
+		raise ValueError('validation checkpoint score candidate must be finite')
+	_validate_best_validation_score(best, selection=selection)
+	if selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		return candidate < best
+	return candidate > best
+
+
+def validation_mae_improved(candidate: float, best: float) -> bool:
+	'''Compatibility wrapper for strict validation macro MAE selection.'''
+	return validation_score_improved(
+		candidate,
+		best,
+		CHECKPOINT_SELECTION_VALIDATION_MAE,
+	)
 
 
 def resolve_horizon_device(value: str) -> torch.device:
@@ -500,6 +837,7 @@ def _validate_runner_inputs(  # noqa: C901
 	expected_counts: Mapping[str, Sequence[int]],
 	max_steps: int | None,
 ) -> None:
+	initial_best_validation_score(settings.checkpoint_selection)
 	if settings.epochs <= 0:
 		raise ValueError('epochs must be positive')
 	if settings.seed < 0:
@@ -550,7 +888,9 @@ def _save_latest(  # noqa: PLR0913
 	*,
 	history: Sequence[Mapping[str, object]],
 	best_epoch: int | None,
-	best_mae: float,
+	checkpoint_selection: str,
+	best_score: float,
+	best_checkpoints: Mapping[str, Mapping[str, object]] | None,
 	global_step: int,
 	epoch: int,
 	next_position: int,
@@ -560,27 +900,63 @@ def _save_latest(  # noqa: PLR0913
 	runtime_precision: Mapping[str, object],
 	run_identity: Mapping[str, object],
 ) -> None:
+	payload: dict[str, object] = {
+		'run_identity': run_identity,
+		'runtime_precision': runtime_precision,
+		'history': list(history),
+		'best_epoch': best_epoch,
+		'checkpoint_selection': checkpoint_selection,
+		'best_validation_score': best_score,
+		'global_step': global_step,
+		'epoch': epoch,
+		'next_position': next_position,
+		'train_loss_sum': train_loss_sum,
+		'train_item_count': train_item_count,
+		# Retain the 006 checkpoint field while 007 adopts the shared name.
+		'train_tile_count': train_item_count,
+		'completed': completed,
+	}
+	if best_checkpoints is not None:
+		payload['best_checkpoints'] = dict(best_checkpoints)
 	_save_checkpoint(
 		output_dir / LATEST_NAME,
 		model=model,
 		optimizer=optimizer,
 		scaler=scaler,
-		payload={
-			'run_identity': run_identity,
-			'runtime_precision': runtime_precision,
-			'history': list(history),
-			'best_epoch': best_epoch,
-			'best_validation_macro_mae_samples': best_mae,
-			'global_step': global_step,
-			'epoch': epoch,
-			'next_position': next_position,
-			'train_loss_sum': train_loss_sum,
-			'train_item_count': train_item_count,
-			# Retain the 006 checkpoint field while 007 adopts the shared name.
-			'train_tile_count': train_item_count,
-			'completed': completed,
-		},
+		payload=payload,
 	)
+
+
+def _resume_best_validation_score(
+	payload: Mapping[str, object],
+	*,
+	selection: str,
+) -> float:
+	checkpoint_selection = payload.get('checkpoint_selection')
+	if checkpoint_selection is not None and checkpoint_selection != selection:
+		raise ValueError('resume checkpoint selection does not match this run')
+	if 'best_validation_score' in payload:
+		best = _number(
+			payload.get('best_validation_score'),
+			'best_validation_score',
+		)
+	elif selection == CHECKPOINT_SELECTION_VALIDATION_MAE:
+		best = _number(
+			payload.get('best_validation_macro_mae_samples', math.inf),
+			'best_validation_macro_mae_samples',
+		)
+	else:
+		raise ValueError(
+			'non-MAE checkpoint selection cannot resume a legacy MAE-only state'
+		)
+	_validate_best_validation_score(best, selection=selection)
+	return best
+
+
+def _validate_best_validation_score(best: float, *, selection: str) -> None:
+	initial = initial_best_validation_score(selection)
+	if math.isnan(best) or (math.isinf(best) and best != initial):
+		raise ValueError('best validation checkpoint score is invalid')
 
 
 def _save_checkpoint(
@@ -688,6 +1064,12 @@ def _finite_number(value: object, label: str) -> float:
 	return result
 
 
+def _number(value: object, label: str) -> float:
+	if not isinstance(value, int | float) or isinstance(value, bool):
+		raise TypeError(f'{label} must be numeric')
+	return float(value)
+
+
 def _required_metric(metrics: object, key: str) -> float:
 	if not isinstance(metrics, Mapping):
 		raise TypeError('metrics must be a mapping')
@@ -703,18 +1085,28 @@ def _required_metric(metrics: object, key: str) -> float:
 
 __all__ = [
 	'BEST_NAME',
+	'CHECKPOINT_SELECTION_IDS',
+	'CHECKPOINT_SELECTION_ORDER',
+	'CHECKPOINT_SELECTION_VALIDATION_MAE',
+	'CHECKPOINT_SELECTION_VALIDATION_WITHIN_2',
+	'CHECKPOINT_SELECTION_VALIDATION_WITHIN_4',
 	'HISTORY_NAME',
 	'LATEST_NAME',
 	'METRICS_NAME',
 	'HorizonRunnerSettings',
 	'HorizonRuntimeContext',
 	'backward_and_step_horizon_optimizer',
+	'bundled_best_name',
+	'bundled_metrics_name',
 	'deterministic_tile_order',
 	'evaluate_horizon_dataset',
 	'horizon_autocast',
 	'horizon_runtime_precision_identity',
+	'initial_best_validation_score',
 	'resolve_horizon_device',
 	'run_horizon_training_job',
 	'validate_horizon_resume_runtime',
+	'validation_checkpoint_score',
 	'validation_mae_improved',
+	'validation_score_improved',
 ]

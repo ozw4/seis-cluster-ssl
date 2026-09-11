@@ -1,25 +1,22 @@
 # Volve horizon supervision
 
-This benchmark reads the five Official TWT horizons in binding schema 2 from the
-read-only root selected by `SEIS_SSL_CLUSTER_VOLVE_ROOT`. It requires PASS status
-for the binding, manual review, horizon visual QC, and fault visual QC. Native TWT,
-fractional sample, integer sample, and validity values are retained without
-smoothing, sorting, swapping, or crossing correction.
+The benchmark compares representation methods with nested budgets of complete
+physical inline and crossline sections. It does not subsample points from a
+section or tune the number of labels to equalize conditions.
 
-The explicit layout contract uses physical line numbers. `small`, `medium`, and
-`large` are the first 1+1, 2+2, and 4+4 sections, respectively. Every available
-per-horizon observation on an active section is used; point subsampling, partial
-sections, and target-count calibration are not part of this contract. Inline and
-crossline intersections are represented once by boolean lateral masks.
+All conditions share a fixed validation pair used only for checkpoint selection.
+The common test excludes validation and every section that could be used for
+training in any layout, preventing unused candidates from returning to the test
+set. Results on common five-horizon support are the primary comparison; native
+per-horizon support is secondary.
 
-Validation is the same fixed inline/crossline pair for all conditions and is only
-for checkpoint selection. The common test removes validation and the union of all
-five layouts' large candidates before applying either five-horizon common support
-(primary) or native per-horizon support (secondary). Unused small/medium candidate
-lines therefore never return to test.
+The bound horizons are treated as observations: this workflow does not smooth,
+reorder, swap, or repair them. Manual and visual QC remain prerequisites, not
+model-selection signals.
 
-Each plan records binding and review hashes, layout-config SHA-256, physical lines
-and array indices, train/validation/test counts, mask hashes, and a canonical plan
-identity. Frozen and end-to-end benchmarks consume that same identity. The fixed
-TWT window is samples `[552, 768)`, derived once from native bound samples with a
-16-sample margin and outward alignment to the 8-sample grid.
+[`01_layouts.yaml`](../experiments/volve/horizon_benchmark_v1/20_horizon_supervision/01_layouts.yaml)
+owns the physical line assignments. The layout builder owns derived support
+masks, data identities and hashes, time-window derivation, and the emitted plan
+schema; its tests verify those contracts rather than define them. Phase ordering
+is documented in the
+[`horizon supervision runbook`](../experiments/volve/horizon_benchmark_v1/20_horizon_supervision/README.md).

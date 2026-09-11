@@ -1,0 +1,22 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+manifests:
+  input: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude_manifest.json
+embeddings:
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/hmm_distillation_weight_v1/mae100/distill005/full_25ep/latest.pt
+  output_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/hmm_distillation_weight_v1/mae_hmm_k6_distill005/overlap_x64
+embedding:
+  window_size: [128, 128, 128]
+  overlap: [64, 64, 64]
+  output_dtype: float16
+  batch_size: 1
+  prefetch_queue_depth: 0
+  amp: false
+  amp_dtype: auto
+  stage_timing: false
+  min_token_valid_fraction: 0.5
+  preprocessing_cache:
+    mode: 'off'
+    chunk_size_x: 16
+    reuse: true
+    cleanup: false
