@@ -1,6 +1,6 @@
 # F3 HMM_v2 Multi-Head screening v1
 
-Tasks 01–06 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
+Tasks 01–07 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
 [4,6,8], and [6,8,10].
 
 The immutable K=6 training baseline is
@@ -166,7 +166,7 @@ full. Full always initializes from MAE100; do not pass the smoke checkpoint
 as `--resume`. To resume an interrupted full run, use the same full config
 and its own `--resume <full output root>/latest.pt`. Output overwrite remains
 disabled. Live training is intentionally not part of config implementation.
-Task 07 will coordinate stage selection, explicit resume, and logs.
+Task 07 coordinates stage selection, explicit resume, and logs; see [RUNBOOK.md](RUNBOOK.md).
 
 ## Task 04: read-only completed-source audit
 
@@ -274,7 +274,8 @@ done
 
 Resume an interrupted decoder with its own `--resume <cell root>/decoder/latest.pt`.
 The generic runner validates completed cell artifacts before reusing them.
-Task 07 will consolidate execution order, logging, and explicit resume. Live extraction and decoder training are
+Task 07 consolidates execution order, logging, and explicit resume in
+`run_all.sh`; see [RUNBOOK.md](RUNBOOK.md). Live extraction and decoder training are
 not run during config implementation.
 
 
@@ -338,3 +339,15 @@ An existing summary directory is never overwritten. Rechecking remains
 read-only; an intentionally revised execution must use a separate output
 namespace. Portable tests use synthetic temporary evidence and do not
 produce live screening artifacts or hand-enter results/hashes in this README.
+
+
+## Task 07: execution driver
+
+[RUNBOOK.md](RUNBOOK.md) describes prerequisites, stage order, restart boundaries,
+and logs. `run_all.sh` defaults to an artifact-free command plan; live work
+requires `--execute`. `--dry-run` delegates to existing CLI checks and requires
+the selected stage's live prerequisites.
+
+```bash
+bash experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/run_all.sh --plan
+```
