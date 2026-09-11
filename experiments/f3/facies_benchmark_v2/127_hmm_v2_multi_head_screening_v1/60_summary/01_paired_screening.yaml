@@ -1,0 +1,16 @@
+control_id: mae_hmm_k6
+control_training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml
+summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/paired_summary
+candidates:
+  - downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/50_downstream/mae100_hmm_v2_mh_k46_distill020.yaml
+    training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/mae100_hmm_v2_mh_k46_distill020/02_full_25ep.yaml
+    head_ks: [4, 6]
+  - downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/50_downstream/mae100_hmm_v2_mh_k68_distill020.yaml
+    training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/mae100_hmm_v2_mh_k68_distill020/02_full_25ep.yaml
+    head_ks: [6, 8]
+  - downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/50_downstream/mae100_hmm_v2_mh_k468_distill020.yaml
+    training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/mae100_hmm_v2_mh_k468_distill020/02_full_25ep.yaml
+    head_ks: [4, 6, 8]
+  - downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill020.yaml
+    training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill020/02_full_25ep.yaml
+    head_ks: [6, 8, 10]

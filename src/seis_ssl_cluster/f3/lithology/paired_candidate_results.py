@@ -10,7 +10,7 @@ import shutil
 import statistics
 import tempfile
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from seis_ssl_cluster.config.f3_lithology_five_way import (
@@ -136,7 +136,7 @@ class F3PairedCandidateModel:
 	model_id: str
 	checkpoint: Path
 	embeddings_dir: Path
-	expected: F3PairedCandidateExpectedSource
+	expected: F3PairedCandidateExpectedSource | None = None
 
 
 @dataclass(frozen=True)
@@ -402,9 +402,16 @@ def _audit_job_rows(
 	config: F3PairedCandidateSummaryConfig,
 	canonical: F3FiveWayConfig,
 	provenance: Mapping[str, Mapping[str, object]],
+	*,
+	control_runs_root: Path | None = None,
 ) -> list[dict[str, object]]:
+	control_config = (
+		config
+		if control_runs_root is None
+		else replace(config, runs_root=control_runs_root)
+	)
 	_reject_unexpected_job_directories(config, config.candidate)
-	_reject_unexpected_job_directories(config, config.control)
+	_reject_unexpected_job_directories(control_config, config.control)
 	rows: list[dict[str, object]] = []
 	for data_size in DATA_SIZES:
 		for layout_id in LAYOUT_IDS:
@@ -417,7 +424,7 @@ def _audit_job_rows(
 				data_size=data_size,
 			)
 			control = _read_job(
-				config,
+				control_config,
 				canonical,
 				config.control,
 				provenance['control'],
@@ -950,13 +957,14 @@ def _read_macro_f1(
 	return result
 
 
-def _aggregate_scope(
+def _aggregate_scope(  # noqa: PLR0913
 	rows: Sequence[Mapping[str, object]],
 	*,
 	expected_count: int,
 	label: str,
 	descriptive_unit: str,
 	paired_t_unit: str | None,
+	metric: str = 'macro_f1',
 ) -> dict[str, object]:
 	if len(rows) != expected_count:
 		raise ValueError(
@@ -972,10 +980,10 @@ def _aggregate_scope(
 		'descriptive_unit': descriptive_unit,
 		'paired_t_statistical_unit': paired_t_unit,
 		'candidate_mean': statistics.fmean(
-			float(row['candidate_macro_f1']) for row in rows
+			float(row[f'candidate_{metric}']) for row in rows
 		),
 		'control_mean': statistics.fmean(
-			float(row['control_macro_f1']) for row in rows
+			float(row[f'control_{metric}']) for row in rows
 		),
 		'candidate_minus_control': statistics_payload,
 	}
@@ -1081,11 +1089,13 @@ def _scope_model_means(
 	}
 
 
-def _comparison_csv(rows: Sequence[Mapping[str, object]]) -> str:
+def _comparison_csv(
+	rows: Sequence[Mapping[str, object]],
+	*,
+	fieldnames: tuple[str, ...] = COMPARISON_FIELDNAMES,
+) -> str:
 	buffer = io.StringIO()
-	writer = csv.DictWriter(
-		buffer, fieldnames=COMPARISON_FIELDNAMES, lineterminator='\n'
-	)
+	writer = csv.DictWriter(buffer, fieldnames=fieldnames, lineterminator='\n')
 	writer.writeheader()
 	for row in rows:
 		formatted = dict(row)
@@ -1095,7 +1105,7 @@ def _comparison_csv(rows: Sequence[Mapping[str, object]]) -> str:
 			'candidate_minus_control',
 		):
 			formatted[key] = f'{float(row[key]):.9f}'
-		writer.writerow({key: formatted[key] for key in COMPARISON_FIELDNAMES})
+		writer.writerow({key: formatted[key] for key in fieldnames})
 	return buffer.getvalue()
 
 

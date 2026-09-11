@@ -1,6 +1,6 @@
 # F3 HMM_v2 Multi-Head screening v1
 
-Tasks 01–05 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
+Tasks 01–06 prepare F3 HMM_v2 screening for K=[4,6], [6,8],
 [4,6,8], and [6,8,10].
 
 The immutable K=6 training baseline is
@@ -276,3 +276,65 @@ Resume an interrupted decoder with its own `--resume <cell root>/decoder/latest.
 The generic runner validates completed cell artifacts before reusing them.
 Task 07 will consolidate execution order, logging, and explicit resume. Live extraction and decoder training are
 not run during config implementation.
+
+
+## Task 06: paired screening against HMM_v1 Condition 2b
+
+`60_summary/01_paired_screening.yaml` binds the four Task 05 downstream
+recipes and Task 03 full training recipes. Its control is the canonical
+`mae_hmm_k6` source in experiment 110 v3, audited against experiment 21's
+MAE100 / HMM K6 full 25-epoch recipe. Historical runs are read directly from
+that canonical benchmark's `runs_root`; no baseline runs are copied,
+renamed, linked, regenerated, or overwritten.
+
+The new thin CLI reuses the existing paired cell evidence readers, completed
+decoder contract, completed evaluation provenance, and paired statistics.
+The older paired-candidate CLI retains its LocalBT source audit and is not
+used here. Each Multi-Head source passes the Task 04 live audit again; the
+historical source passes the existing final HMM source audit. Source audit
+checkpoint paths and hashes must match the live embedding source identities.
+All four comparisons must share canonical config, historical cell evidence,
+source embedding identity, validation identity, and evaluation input hashes.
+
+The complete matrix is 60 candidate cells paired with the same 15 historical
+cells, by exact `(layout_id, data_size)`. Missing or duplicate cells, changed
+metrics, incompatible supervision/validation, decoder initialization or
+training contract, stale source hashes, or incomplete checkpoints fail closed.
+The summary is published only after all four candidates pass. Neither
+`reports/hmm_v1/` nor Task 05's candidate-vs-Random summaries are pipeline inputs.
+
+Following the HMM_v1 F3 reporting contract, **mean IoU on unique validation
+voxels is primary; macro F1 is secondary**. Primary deltas are candidate minus
+historical K6, with positive values favoring Multi-Head. The output includes
+all paired values, by-size means, sample SD of deltas, wins/ties/losses, and
+paired t statistics over five layouts. Across sizes, inference first averages
+the three deltas within each layout (n=5). The pooled 15-cell statistics are
+descriptive only. These exploratory comparisons do not provide multiplicity-
+adjusted significance, select a winner automatically, or authorize expansion
+to Volve/Parihaka.
+
+After all live sources, embeddings, and downstream cells are complete, run
+from the repository root with the same environment variables as Task 05:
+
+```bash
+summary_config=experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/60_summary/01_paired_screening.yaml
+python proc/seis_ssl_cluster/summarize_f3_multi_head_screening.py \
+  --config "$summary_config" --check-only
+python proc/seis_ssl_cluster/summarize_f3_multi_head_screening.py \
+  --config "$summary_config"
+```
+
+`--dry-run` aliases `--check-only`: both perform the complete live read-only
+audit and write nothing. They require the artifacts; neither mode treats
+missing results as a successful plan. The write command atomically publishes
+exactly these three files under
+`${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/paired_summary/`:
+
+- `comparison.csv`: 60 pairs with mean IoU, macro F1, deltas, and evidence hashes.
+- `summary.json`: complete paired evidence, source audits, and statistics.
+- `summary.md`: primary by-size screening table and interpretation contract.
+
+An existing summary directory is never overwritten. Rechecking remains
+read-only; an intentionally revised execution must use a separate output
+namespace. Portable tests use synthetic temporary evidence and do not
+produce live screening artifacts or hand-enter results/hashes in this README.

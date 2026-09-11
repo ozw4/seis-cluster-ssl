@@ -151,6 +151,7 @@ def _write_jobs(config: F3PairedCandidateSummaryConfig) -> None:
 							'aggregation_unit': 'unique_validation_voxel',
 							'evaluation_voxel_count': 1000,
 							'macro_f1': value,
+							'mean_iou': value * 0.5,
 						}
 					),
 					encoding='utf-8',
@@ -177,13 +178,14 @@ def _source_provenance(
 	}
 
 
-def _patch_auditors(  # noqa: C901
+def _patch_auditors(  # noqa: C901, PLR0913
 	monkeypatch: MonkeyPatch,
 	config: F3PairedCandidateSummaryConfig,
 	*,
 	evidence_drift: tuple[str, str, str, str, object] | None = None,
 	decoder_drift: tuple[str, str, str, str, object] | None = None,
 	evaluation_drift: tuple[str, str, str, str, object] | None = None,
+	control_runs_root: Path | None = None,
 ) -> list[str]:
 	config.canonical_config.parent.mkdir(parents=True, exist_ok=True)
 	config.canonical_config.write_text('canonical fixture\n', encoding='utf-8')
@@ -230,7 +232,11 @@ def _patch_auditors(  # noqa: C901
 	) -> dict[str, object]:
 		model_id = model.model_id
 		assert job_dir == (
-			config.runs_root
+			(
+				control_runs_root
+				if model_id == CONTROL and control_runs_root
+				else config.runs_root
+			)
 			/ f'model={model_id}'
 			/ f'layout={layout_id}'
 			/ f'size={data_size}'
@@ -269,7 +275,11 @@ def _patch_auditors(  # noqa: C901
 	) -> dict[str, object]:
 		assert freeze_encoder is True
 		assert job_dir == (
-			config.runs_root
+			(
+				control_runs_root
+				if model_id == CONTROL and control_runs_root
+				else config.runs_root
+			)
 			/ f'model={model_id}'
 			/ f'layout={layout_id}'
 			/ f'size={data_size}'
@@ -328,7 +338,11 @@ def _patch_auditors(  # noqa: C901
 		data_size: str,
 	) -> dict[str, object]:
 		assert job_dir == (
-			config.runs_root
+			(
+				control_runs_root
+				if model_id == CONTROL and control_runs_root
+				else config.runs_root
+			)
 			/ f'model={model_id}'
 			/ f'layout={layout_id}'
 			/ f'size={data_size}'
