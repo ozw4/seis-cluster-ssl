@@ -68,7 +68,7 @@ LOCAL_VICREG_EXTENSION_ROOT = V2_ROOT / '116_local_vicreg_extension_v1'
 CANDIDATE_CONFIG_SUITES = {
 	'128_hmm_v2_k6810_multi_source_v1': (
 		'test_hmm_v2_multi_source_configs.py',
-		20,
+		18,
 	),
 	'127_hmm_v2_multi_head_screening_v1': (
 		'test_strat_multi_head_pretraining_validation.py',

@@ -21,7 +21,6 @@ from seis_ssl_cluster.hmm.multi_source_receipts import DATA_SIZES
 
 STAGES = (
 	'targets',
-	'replay',
 	'export',
 	'manifests',
 	'smoke',
@@ -118,19 +117,19 @@ def command_plan(  # noqa: C901, PLR0912, PLR0915
 		for arm in arms.values():
 			cid = arm['candidate_id']
 			family = arm['target_family']
-			if stage in ('targets', 'replay'):
-				name = (
-					'01_cluster_hmm_k8k10.yaml'
-					if stage == 'targets'
-					else '02_replay_hmm_k6.yaml'
-				)
+			if stage == 'targets':
 				add(
 					stage,
 					[
 						python,
 						'proc/seis_ssl_cluster/cluster_embeddings.py',
 						'--config',
-						str(experiment / '10_targets' / family / name),
+						str(
+							experiment
+							/ '10_targets'
+							/ family
+							/ '01_cluster_hmm_k8k10.yaml'
+						),
 					],
 				)
 			elif stage == 'export':
@@ -148,17 +147,27 @@ def command_plan(  # noqa: C901, PLR0912, PLR0915
 				)
 			elif stage == 'manifests':
 				c = _read(experiment / '20_manifests' / f'{cid}.yaml')
-				cmd = [
+				common = [
 					python,
 					'proc/seis_ssl_cluster/build_strat_hmm_multi_head_targets.py',
 					'--source-embedding-dir',
 					_expand(c['source_embedding_dir']),
-					'--manifest',
-					_expand(c['manifest']),
-					'--replay-k6-root',
-					_expand(c['replay_k6_root']),
+					'--frozen-k6-receipt',
+					_expand(c['frozen_k6_receipt']),
 					'--only-missing',
 				]
+				add(
+					stage,
+					[
+						*common,
+						'--freeze-k6-receipt',
+						'--reference-training-config',
+						_expand(c['k6_evidence']['reference_training_config']),
+						'--head-root',
+						f'6={_expand(c["head_roots"][6])}',
+					],
+				)
+				cmd = [*common, '--manifest', _expand(c['manifest'])]
 				for k, root in c['head_roots'].items():
 					cmd += ['--head-root', f'{k}={_expand(root)}']
 				add(stage, cmd)
@@ -295,7 +304,7 @@ def run_command(
 			audit_existing_embeddings(path)
 			print('execution: reused audited complete embeddings')
 			return
-	if stage in ('targets', 'replay') and not dry_run:
+	if stage == 'targets' and not dry_run:
 		path = Path(command[command.index('--config') + 1])
 		output = Path(_expand(_read(path)['clustering']['output_dir']))
 		if output.exists():

@@ -50,9 +50,7 @@ def configured_environment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
 
 @pytest.mark.usefixtures('configured_environment')
 @pytest.mark.parametrize('root', ROOTS, ids=lambda p: p.parts[-3])
-def test_all_source_contracts_and_config_resolution(
-	root: Path, tmp_path: Path
-) -> None:
+def test_all_source_contracts_and_config_resolution(root: Path, tmp_path: Path) -> None:
 	validate_multi_source_experiment_definition(root)
 	definition = _read(root / 'execution.yaml')
 	survey = definition['survey']
@@ -60,8 +58,9 @@ def test_all_source_contracts_and_config_resolution(
 	for family, entry in definition['arms'].items():
 		cid = entry['candidate_id']
 		fam = entry['target_family']
-		for filename in ('01_cluster_hmm_k8k10.yaml', '02_replay_hmm_k6.yaml'):
-			resolve_clustering_config(load_config(root / '10_targets' / fam / filename))
+		resolve_clustering_config(
+			load_config(root / '10_targets' / fam / '01_cluster_hmm_k8k10.yaml')
+		)
 		for filename in ('01_gpu_feasibility_1step.yaml', '02_full_25ep.yaml'):
 			path = root / '30_pretraining' / cid / filename
 			raw = load_config(path)

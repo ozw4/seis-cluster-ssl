@@ -81,3 +81,41 @@ also pass.
 `src/seis_ssl_cluster/hmm/multi_source_aggregate.py` and
 `tests/seis_ssl_cluster/test_hmm_k6810_receipts_aggregate.py`: PASS.
 `git diff --check`: PASS. No live experiment stages were executed.
+
+## Frozen historical K6 targets
+
+Validated base: `39b027e`, plus the frozen K6 evidence change.
+
+```bash
+pytest -q tests/seis_ssl_cluster/test_strat_hmm_source_audit.py \
+  tests/seis_ssl_cluster/test_strat_frozen_k6_reference.py \
+  tests/seis_ssl_cluster/test_strat_multi_head_target_manifest.py
+```
+
+PASS: 81 tests, including the final frozen-source audit regression. Frozen
+manifests require exactly one evidence mode, reject changed target, embedding,
+checkpoint, reference-config and receipt hashes, and cannot be replaced through
+a replay request. Legacy replay manifests remain supported.
+
+All eight actual receipt freeze commands passed `--dry-run`, then created
+`frozen_k6_reference.json` in each new arm's artifact namespace. This only read
+existing artifacts and wrote receipts; no clustering, target export, training,
+embedding extraction or downstream execution was performed. Independent review
+verified all 40 historical K6 files (including boundary weights) and the existing
+F3 MAE manifest retained their original hashes. The latter also passes the
+current manifest validator with its original replay evidence; its SHA-256 is
+`ede820efae53c73c4177023207d1bf1ff24ac7428b10e6aa43d84d40d216e1cd`.
+
+Plans retain 2/3/3 full runs and 30/45/45 downstream cells. Command totals remain
+47/70/70: each deleted replay command is replaced by one receipt-freeze command
+inside the manifests stage. The eight replay configs and K6 export commands
+are removed. Existing F3 MAE has no write commands.
+
+`pytest -q -m "not slow and not requires_segy and not requires_cuda"`: PASS,
+5,760 tests; 3 deselected; 11 warnings; 446.55 seconds. The final added
+frozen-source audit regression also passed in the 81-test focused run above.
+`python -m compileall -q src proc tests`, `python -m ruff check --no-fix .`,
+scoped Ruff formatting checks, `python tools/check_seis_ssl_cluster_isolation.py`,
+`bash -n` on the survey shell scripts, and `git diff --check`: PASS.
+Independent Astra medium review has no unresolved findings. Implementation
+readiness remains GO; new live training and end-to-end execution remain unverified.

@@ -99,17 +99,12 @@ def test_preflight_rejects_training_source_drift(experiment, section, field, val
 		validate_multi_source_experiment_definition(experiment)
 
 
-@pytest.mark.parametrize('stage', ['cluster', 'replay', 'embedding', 'smoke'])
+@pytest.mark.parametrize('stage', ['cluster', 'embedding', 'smoke'])
 def test_preflight_rejects_other_stage_drift(experiment, stage):
 	arm = read(experiment / 'execution.yaml')['arms']['random']
 	cid, family = arm['candidate_id'], arm['target_family']
-	if stage in ('cluster', 'replay'):
-		name = (
-			'01_cluster_hmm_k8k10.yaml'
-			if stage == 'cluster'
-			else '02_replay_hmm_k6.yaml'
-		)
-		path = experiment / '10_targets' / family / name
+	if stage == 'cluster':
+		path = experiment / '10_targets' / family / '01_cluster_hmm_k8k10.yaml'
 		config = read(path)
 		config['clustering']['transition'] = 'changed'
 	elif stage == 'embedding':
@@ -209,16 +204,28 @@ def test_validated_definition_retains_exact_plan(experiment):
 	assert sum(stage == 'downstream' for stage, _ in plan) == count * 15
 
 
-def test_preflight_rejects_shared_target_and_replay_outputs(experiment):
+@pytest.mark.parametrize(
+	'change',
+	['historical_root', 'reference', 'mode', 'replay', 'shared_root', 'receipt'],
+)
+def test_preflight_rejects_frozen_evidence_definition_drift(experiment, change):
 	arm = read(experiment / 'execution.yaml')['arms']['random']
-	root = experiment / '10_targets' / arm['target_family']
-	path = root / '02_replay_hmm_k6.yaml'
+	path = experiment / '20_manifests' / f'{arm["candidate_id"]}.yaml'
 	config = read(path)
-	config['clustering']['output_dir'] = read(root / '01_cluster_hmm_k8k10.yaml')[
-		'clustering'
-	]['output_dir']
+	if change == 'historical_root':
+		config['k6_evidence']['historical_root'] = 'wrong'
+	elif change == 'reference':
+		config['k6_evidence']['reference_training_config'] = 'wrong'
+	elif change == 'mode':
+		config['k6_evidence']['mode'] = 'replay'
+	elif change == 'replay':
+		config['replay_k6_root'] = 'wrong'
+	elif change == 'shared_root':
+		config['head_roots'][8] = config['head_roots'][6]
+	else:
+		config['frozen_k6_receipt'] = 'foreign-receipt.json'
 	write(path, config)
-	with pytest.raises(ValueError, match='require separate outputs'):
+	with pytest.raises(ValueError, match=r'inheritance drift|own new-arm namespace'):
 		validate_multi_source_experiment_definition(experiment)
 
 

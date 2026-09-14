@@ -43,6 +43,9 @@ def test_exact_command_matrix_and_audit_order(root: Path) -> None:
 	assert sum(stage == 'full' for stage, _ in plan) == count
 	assert sum(stage == 'downstream' for stage, _ in plan) == count * 15
 	assert sum(stage == 'audit' for stage, _ in plan) == count
+	assert 'replay' not in driver.STAGES
+	assert all('replay' not in ' '.join(command) for _, command in plan)
+	assert sum('--freeze-k6-receipt' in command for _, command in plan) == count
 	if survey == 'f3':
 		assert all(CANDIDATE_IDS['mae'] not in ' '.join(command) for _, command in plan)
 	last_audit = max(i for i, (stage, _) in enumerate(plan) if stage == 'audit')
@@ -52,6 +55,38 @@ def test_exact_command_matrix_and_audit_order(root: Path) -> None:
 	assert [
 		stage for stage, _ in driver.command_plan(root, _args(first='summary'))
 	] == ['audit'] * count + ['summary']
+
+
+@pytest.mark.parametrize('root', ROOTS, ids=lambda p: p.parts[-3])
+def test_only_new_heads_are_generated_and_historical_k6_is_frozen(root: Path) -> None:
+	definition = yaml.safe_load((root / 'execution.yaml').read_text())
+	plan = driver.command_plan(root, _args(first='manifests', last='manifests'))
+	assert len(plan) == len(definition['arms']) * 2
+	for index, arm in enumerate(definition['arms'].values()):
+		targets = root / '10_targets' / arm['target_family']
+		assert {p.name for p in targets.iterdir()} == {
+			'01_cluster_hmm_k8k10.yaml',
+			'03_export_pseudo_targets.sh',
+		}
+		cluster = yaml.safe_load((targets / '01_cluster_hmm_k8k10.yaml').read_text())
+		assert cluster['clustering']['k_values'] == [8, 10]
+		exports = (targets / '03_export_pseudo_targets.sh').read_text().splitlines()
+		commands = [line for line in exports if line.startswith('python ')]
+		assert len(commands) == 2
+		assert '--k 8 ' in commands[0]
+		assert '--k 10 ' in commands[1]
+		freeze, build = plan[index * 2][1], plan[index * 2 + 1][1]
+		assert '--freeze-k6-receipt' in freeze
+		assert '--freeze-k6-receipt' not in build
+		assert (
+			freeze[freeze.index('--frozen-k6-receipt') + 1]
+			== (build[build.index('--frozen-k6-receipt') + 1])
+		)
+		assert freeze.count('--head-root') == 1
+		assert freeze[freeze.index('--head-root') + 1].startswith('6=')
+		assert build.count('--head-root') == 3
+		assert '--only-missing' in freeze
+		assert '--only-missing' in build
 
 
 def test_reuse_candidate_never_has_write_commands() -> None:

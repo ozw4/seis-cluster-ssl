@@ -48,6 +48,20 @@ F3 files read-only. Receipt construction is available only through explicit
 `--build-receipts` with `--freeze-root`, `--source-summary` and
 `--artifact-root`; it refuses existing receipt outputs.
 
+Each new arm uses historical K=6 targets plus newly generated K=8 and K=10.
+Its manifest configuration names a `frozen_k6_receipt` in the new artifact
+namespace and a `k6_evidence` definition binding the historical root to the
+source-family training reference. The manifests stage first records the existing
+K6 target and source embedding hashes, then builds the combined manifest.
+Existing receipts are verified and never silently replaced. Receipt creation
+performs no HMM clustering or pseudo-target regeneration.
+
+A K6 manifest requires exactly one of `k6_frozen_reference` or
+`k6_replay_parity`. Source audit validates the selected evidence mode against
+the live files. F3 MAE retains its existing replay-based manifest unchanged;
+the eight new arms use frozen references. Both modes protect the historical
+K6 identity and may coexist in the final aggregate.
+
 ## Execution and aggregation
 
 Use the per-survey `RUNBOOK.md` and `run_all.sh` under:
@@ -68,6 +82,9 @@ definition, including the fixed F3 reuse reference.
 The default driver mode prints commands. Live execution is sequential and
 requires `--execute`; interrupted training can resume only its own latest
 checkpoint. Complete sources, embeddings and cells are audited before reuse.
+Stages are targets, export, manifests, smoke, full, audit, embeddings,
+downstream and summary. Targets and export produce only K=8 and K=10;
+the new experiment drivers have no replay stage.
 Partial clustering/export/embedding outputs require inspection and are never
 silently replaced. Survey summaries require all 45 cells and paired source,
 completion, decoder and evaluation-support audits.

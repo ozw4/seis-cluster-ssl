@@ -9,7 +9,7 @@ Run `bash experiments/parihaka/facies_benchmark_v1/41_hmm_v2_k6810_multi_source_
 `--dry-run` calls read-only stage validation and requires existing inputs.
 Neither mode creates logs or artifact outputs. Live work uses `--execute`.
 
-Stages execute in order: targets, replay, export, manifests, smoke, full,
+Stages execute in order: targets, export, manifests, smoke, full,
 audit, embeddings, downstream, summary. Use `--from STAGE --to STAGE` to
 select a contiguous range. Full training starts from the original source,
 independently of smoke. Each candidate binds its own live manifest digest.
@@ -32,3 +32,15 @@ F3 MAE is read-only reuse of experiment 127. It has no write commands and
 cannot be selected as a candidate in the F3 driver. Parihaka and Volve are
 fixed external test evaluations: do not tune heads, loss, or epochs using
 their test results. Matching HMM_v1 conditions 2b/4b/6b remain immutable.
+
+Targets and export generate K=8 and K=10 only. Manifests combine historical
+K=6 with those new heads. The manifests stage first freezes a K6 receipt from
+the existing artifacts (or verifies the existing receipt), then binds its hash
+in the multi-head manifest. Receipt creation only reads and hashes the historical
+targets and source embeddings; it performs no clustering or target export.
+Changed frozen inputs fail validation; receipts are never silently replaced.
+
+Run each stage with `--execute --from STAGE --to STAGE` in this order:
+`targets`, `export`, `manifests`, `smoke`, `full`, `audit`, `embeddings`,
+`downstream`, `summary`. There is no replay stage. Existing F3 MAE retains its
+original replay-based manifest and remains read-only reuse.

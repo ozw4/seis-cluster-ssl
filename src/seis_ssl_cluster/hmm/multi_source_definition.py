@@ -83,32 +83,51 @@ def _training(root: Path, cid: str, reference: dict[str, Any]) -> dict[str, Any]
 def _targets(
 	root: Path, arm: dict[str, Any], cluster: dict[str, Any], train: dict[str, Any]
 ) -> None:
-	outputs = set()
-	for name, ks in (
-		('01_cluster_hmm_k8k10.yaml', [8, 10]),
-		('02_replay_hmm_k6.yaml', [6]),
-	):
-		path = root / '10_targets' / arm['target_family'] / name
-		actual = _read(path)
-		_output(actual, cluster, 'clustering', 'output_dir')
-		output = actual['clustering']['output_dir']
-		if output in outputs:
-			raise ValueError('target and replay clustering require separate outputs')
-		outputs.add(output)
-		expected = copy.deepcopy(cluster)
-		expected['clustering'].update(
-			k_values=ks, output_dir=actual['clustering']['output_dir']
-		)
-		_compare(actual, expected, path)
+	path = root / '10_targets' / arm['target_family'] / '01_cluster_hmm_k8k10.yaml'
+	actual = _read(path)
+	_output(actual, cluster, 'clustering', 'output_dir')
+	expected = copy.deepcopy(cluster)
+	expected['clustering'].update(
+		k_values=[8, 10], output_dir=actual['clustering']['output_dir']
+	)
+	_compare(actual, expected, path)
 	path = root / '20_manifests' / f'{arm["candidate_id"]}.yaml'
 	manifest = _read(path)
 	if (
-		list(manifest['head_roots']) != [6, 8, 10]
+		set(manifest)
+		!= {
+			'source_embedding_dir',
+			'head_roots',
+			'manifest',
+			'frozen_k6_receipt',
+			'k6_evidence',
+		}
+		or list(manifest['head_roots']) != [6, 8, 10]
 		or manifest['head_roots'][6] != train['pseudo_targets']['input_dir']
-		or manifest['head_roots'][6] == manifest['replay_k6_root']
+		or manifest['head_roots'][6]
+		in (manifest['head_roots'][8], manifest['head_roots'][10])
 		or manifest['source_embedding_dir'] != cluster['embeddings']['input_dir']
+		or manifest['k6_evidence']
+		!= {
+			'mode': 'frozen_reference',
+			'reference_training_config': (
+				'${SEIS_SSL_CLUSTER_WORKSPACE}/' + arm['training_reference']
+			),
+			'historical_root': train['pseudo_targets']['input_dir'],
+		}
 	):
 		raise ValueError(f'{path}: manifest source reference inheritance drift')
+	receipt = manifest['frozen_k6_receipt']
+	if (
+		not isinstance(receipt, str)
+		or not receipt
+		or receipt
+		!= str(Path(manifest['manifest']).parent.parent / 'frozen_k6_reference.json')
+		or '/hmm_v2_k6810_multi_source_v1/' not in receipt
+	):
+		raise ValueError(
+			f'{path}: frozen K6 receipt must use its own new-arm namespace'
+		)
 
 
 def validate_multi_source_experiment_definition(experiment_root: Path) -> None:
