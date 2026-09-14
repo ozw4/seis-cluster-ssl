@@ -91,3 +91,6 @@ classification and K6 minus K6810 for Volve error. Metrics are never averaged
 across surveys, and no winner or automatic promotion is produced. All summary
 outputs are immutable. Optional source-summary SHA-256 values in
 `aggregate.yaml` can additionally pin a particular set of completed summaries.
+Before publication, the aggregate requires each survey summary's task, evaluation
+split, primary metric, primary direction and secondary metric to match the fixed
+survey contract exactly, even when its content digest is valid.

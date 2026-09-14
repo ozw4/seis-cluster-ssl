@@ -307,6 +307,25 @@ def test_aggregate_rejects_partial_or_drifting_inputs(synthetic, change):
 	assert not (root / 'output').exists()
 
 
+@pytest.mark.parametrize('survey', receipts.SURVEYS)
+@pytest.mark.parametrize(
+	'field', ['primary_metric', 'primary_direction', 'secondary_metric']
+)
+def test_aggregate_rejects_top_level_metric_contract_drift(synthetic, survey, field):
+	config, root = synthetic
+	entry = config['summaries'][survey]
+	path = Path(entry['path'])
+	payload = json.loads(path.read_text())
+	payload[field] = 'changed'
+	payload.pop('summary_sha256')
+	payload['summary_sha256'] = receipts.object_sha256(payload)
+	write_json(path, payload)
+	entry['sha256'] = receipts.file_sha256(path)
+	with pytest.raises(ValueError, match=f'^survey metric contract drift: {field}$'):
+		aggregate.summarize_aggregate(config)
+	assert not (root / 'output').exists()
+
+
 def summary_definition(survey):
 	root = next(ROOT.glob(f'experiments/{survey}/*/*hmm_v2_k6810_multi_source_v1'))
 	raw = (root / '60_summary/01_paired_comparison.yaml').read_text()

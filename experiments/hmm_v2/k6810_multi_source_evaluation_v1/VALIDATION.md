@@ -65,3 +65,19 @@ through the production validator.
 `python -m ruff check --no-fix .`, `python -m compileall -q src proc tests`,
 `python tools/check_seis_ssl_cluster_isolation.py`, and `git diff --check`: PASS.
 No live experiment stages were executed. Implementation readiness remains GO.
+
+## Aggregate metric identity
+
+Validated base: `b72104b`, plus the aggregate metric identity change.
+
+`pytest -q tests/seis_ssl_cluster/test_hmm_k6810_receipts_aggregate.py`: PASS,
+69 tests. Nine regression cases alter the top-level primary metric, primary
+direction or secondary metric across all three surveys, update both summary
+digests, and verify the aggregate rejects the specific contract mismatch before
+publishing any output. Existing exact-output and successful aggregation checks
+also pass.
+
+`python -m ruff check --no-fix` and `python -m ruff format --check` on
+`src/seis_ssl_cluster/hmm/multi_source_aggregate.py` and
+`tests/seis_ssl_cluster/test_hmm_k6810_receipts_aggregate.py`: PASS.
+`git diff --check`: PASS. No live experiment stages were executed.

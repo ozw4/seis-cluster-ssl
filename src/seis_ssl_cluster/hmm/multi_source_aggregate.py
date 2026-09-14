@@ -191,11 +191,11 @@ def _validate_summary_identity(
 		payload.get('schema_version') != 1
 		or payload.get('status') != 'complete'
 		or payload.get('survey') != survey
-		or any(
-			payload.get(k) != METRICS[survey][k] for k in ('task', 'evaluation_split')
-		)
 	):
 		raise ValueError('survey summary identity or completion drift')
+	for key, expected in METRICS[survey].items():
+		if payload.get(key) != expected:
+			raise ValueError(f'survey metric contract drift: {key}')
 	for name, expected in bindings.items():
 		actual = payload[name]
 		if (
