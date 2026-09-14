@@ -14,14 +14,19 @@ from seis_ssl_cluster.f3.lithology.multi_head_screening_results import (
 )
 
 
-def main() -> None:
-	"""Require live evidence even in read-only check mode."""
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the command-line parser without reading artifacts."""
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument('--config', type=Path, required=True)
 	parser.add_argument(
 		'--check-only', '--dry-run', dest='check_only', action='store_true'
 	)
-	args = parser.parse_args()
+	return parser
+
+
+def main() -> None:
+	"""Require live evidence even in read-only check mode."""
+	args = build_parser().parse_args()
 	config = screening_config_from_mapping(load_config(args.config))
 	if args.check_only:
 		print(

@@ -13,12 +13,17 @@ from seis_ssl_cluster.volve.horizon_recipe_arm import (
 )
 
 
-def main() -> None:
-	'''Print the selected live checkpoint lineage audits.'''
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the command-line parser without reading artifacts."""
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument('--config', type=Path, required=True)
 	parser.add_argument('--models', nargs='+')
-	args = parser.parse_args()
+	return parser
+
+
+def main() -> None:
+	'''Print the selected live checkpoint lineage audits.'''
+	args = build_parser().parse_args()
 	config = volve_horizon_recipe_arm_config_from_mapping(load_config(args.config))
 	result = audit_volve_horizon_recipe_arm_sources(config, model_ids=args.models)
 	print(json.dumps(result, indent=2, sort_keys=True))

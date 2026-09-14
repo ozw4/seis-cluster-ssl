@@ -10,12 +10,17 @@ from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.training.strat_hmm_source_audit import audit_multi_head_source
 
 
-def main() -> None:
-	"""Audit all configured full recipes; dry-run only lists the intended reads."""
+def build_parser() -> argparse.ArgumentParser:
+	"""Build the command-line parser without reading artifacts."""
 	parser = argparse.ArgumentParser(description=__doc__)
 	parser.add_argument('--config', type=Path, required=True)
 	parser.add_argument('--dry-run', action='store_true')
-	args = parser.parse_args()
+	return parser
+
+
+def main() -> None:
+	"""Audit all configured full recipes; dry-run only lists the intended reads."""
+	args = build_parser().parse_args()
 	config = load_config(args.config)
 	paths = config.get('training_configs')
 	if set(config) != {'training_configs'} or not isinstance(paths, list) or not paths:
