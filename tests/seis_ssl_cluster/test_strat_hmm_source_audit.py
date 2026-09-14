@@ -8,11 +8,15 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 import torch
+import yaml
 
 from proc.seis_ssl_cluster import audit_strat_hmm_multi_head_sources as cli
 from seis_ssl_cluster.clustering.features import file_sha256
 from seis_ssl_cluster.config import load_config, resolve_strat_hmm_pretext_config
-from seis_ssl_cluster.stratigraphy.multi_head import build_multi_head_target_manifest
+from seis_ssl_cluster.stratigraphy.multi_head import (
+	build_frozen_k6_reference_receipt,
+	build_multi_head_target_manifest,
+)
 from seis_ssl_cluster.stratigraphy.prototypes import (
 	MultiResolutionOrderedPrototypeHeads,
 )
@@ -36,7 +40,7 @@ def completed_source(
 	live_configs: dict[str, dict[str, Any]],  # noqa: F811
 	monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[Path, Path]:
-	tag = request.param
+	tag = '6810' if request.param == 'frozen' else request.param
 	build = live_configs[tag]
 	manifest = Path(build['manifest'])
 	build_multi_head_target_manifest(
@@ -64,6 +68,39 @@ def completed_source(
 	parent = Path(raw['student']['init_checkpoint'])
 	parent.parent.mkdir(parents=True, exist_ok=True)
 	torch.save({'model_state_dict': student.state_dict()}, parent)
+	if request.param == 'frozen':
+		metadata_path = (
+			Path(build['source_embedding_dir']) / 'survey.embedding_metadata.json'
+		)
+		metadata = json.loads(metadata_path.read_text())
+		metadata.update(
+			checkpoint_path=str(parent), checkpoint_sha256=file_sha256(parent)
+		)
+		metadata_path.write_text(json.dumps(metadata))
+		reference = manifest.parent / 'historical_training.yaml'
+		reference.write_text(
+			yaml.safe_dump(
+				{
+					'pseudo_targets': {'input_dir': build['head_roots'][6], 'k': 6},
+					'teacher': {'checkpoint': str(parent)},
+					'student': {'init_checkpoint': str(parent)},
+				}
+			)
+		)
+		receipt = manifest.parent / 'frozen_k6.json'
+		build_frozen_k6_reference_receipt(
+			receipt_path=receipt,
+			reference_training_config=reference,
+			historical_root=build['head_roots'][6],
+			source_embedding_dir=build['source_embedding_dir'],
+		)
+		manifest.unlink()
+		build_multi_head_target_manifest(
+			manifest_path=manifest,
+			source_embedding_dir=build['source_embedding_dir'],
+			head_roots=build['head_roots'],
+			frozen_k6_receipt=receipt,
+		)
 	monkeypatch.setenv(
 		'SEIS_SSL_CLUSTER_MULTI_HEAD_TARGET_MANIFEST_SHA256', file_sha256(manifest)
 	)
@@ -194,3 +231,28 @@ def test_audit_plan_is_portable_and_selects_only_full_configs(
 	monkeypatch.setattr(sys, 'argv', ['audit', '--config', str(path), '--dry-run'])
 	cli.main()
 	assert '"status": "planned"' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('completed_source', ['frozen'], indirect=True)
+def test_frozen_completed_source_audit_never_uses_replay(
+	completed_source: tuple[Path, Path],
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	def forbidden(**_kwargs: object) -> None:
+		raise AssertionError('frozen source audit must not use replay')
+
+	monkeypatch.setattr(
+		'seis_ssl_cluster.training.strat_hmm_source_audit.compare_k6_replay', forbidden
+	)
+	path, checkpoint = completed_source
+	before = file_sha256(checkpoint)
+	result = audit_multi_head_source(path)
+	assert result['status'] == 'complete'
+	assert result['head_ks'] == [6, 8, 10]
+	assert file_sha256(checkpoint) == before
+	manifest = Path(load_config(path)['pseudo_targets']['manifest'])
+	reference = manifest.parent / 'historical_training.yaml'
+	reference.write_text(reference.read_text() + '\n')
+	with pytest.raises(ValueError, match='hash mismatch'):
+		audit_multi_head_source(path)
+	assert file_sha256(checkpoint) == before

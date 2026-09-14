@@ -34,10 +34,12 @@ from seis_ssl_cluster.stratigraphy.losses import (
 	usage_entropy_floor_loss,
 )
 from seis_ssl_cluster.stratigraphy.multi_head import (
+	build_frozen_k6_reference_receipt,
 	build_multi_head_target_manifest,
 	compare_k6_replay,
 	load_multi_head_target_manifest,
 	multi_head_cross_head_diagnostics,
+	validate_frozen_k6_reference,
 	validate_multi_head_target_manifest,
 )
 from seis_ssl_cluster.stratigraphy.multi_head_export import (
@@ -202,6 +204,7 @@ __all__ = [
 	'apply_lateral_message_to_emission_costs',
 	'boundary_distance_tokens',
 	'boundary_weight_tokens',
+	'build_frozen_k6_reference_receipt',
 	'build_initial_periodic_refresh_generation',
 	'build_multi_head_target_manifest',
 	'build_periodic_refresh_generation',
@@ -256,6 +259,7 @@ __all__ = [
 	'soft_categorical_cross_entropy',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
+	'validate_frozen_k6_reference',
 	'validate_multi_head_lateral_target_manifest',
 	'validate_multi_head_state_posterior_manifest',
 	'validate_multi_head_target_manifest',

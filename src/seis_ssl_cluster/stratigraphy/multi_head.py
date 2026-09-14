@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import tempfile
@@ -32,24 +33,36 @@ SCHEMA_VERSION = 2
 _LEGACY_SCHEMA_VERSION = 1
 
 
-def build_multi_head_target_manifest(  # noqa: C901, PLR0912
+def build_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0913
 	*,
 	manifest_path: str | Path,
 	source_embedding_dir: str | Path,
 	head_roots: Mapping[int | str, str | Path],
 	replay_k6_root: str | Path | None = None,
+	frozen_k6_receipt: str | Path | None = None,
 	ordering_orientation: str = 'increasing_downward',
 ) -> dict[str, object]:
 	"""Validate references and atomically write a complete multi-head manifest.
 
 	The manifest intentionally contains paths and hashes only; it never embeds target
-	arrays.  K=6 may point to an immutable historical root while exact replay
-	evidence is recorded separately before publication.
+	arrays. K=6 references an immutable historical root, bound by either exact
+	replay evidence or a frozen receipt of its original training inputs.
 	"""
 	if ordering_orientation != 'increasing_downward':
 		raise ValueError('ordering_orientation must be increasing_downward')
 	roots = _normalized_head_roots(head_roots)
 	ks = _validate_head_ks(roots)
+	if replay_k6_root is not None and frozen_k6_receipt is not None:
+		raise ValueError(
+			'K=6 replay and frozen reference evidence are mutually exclusive'
+		)
+	if Path(manifest_path).exists() and (
+		frozen_k6_receipt is not None
+		or 'k6_frozen_reference' in _json_object(Path(manifest_path))
+	):
+		raise FileExistsError(
+			f'frozen-reference manifest already exists: {manifest_path}'
+		)
 	embeddings = tuple(discover_embedding_inputs(source_embedding_dir))
 	if not embeddings:
 		raise ValueError('source_embedding_dir contains no embedding artifacts')
@@ -92,14 +105,23 @@ def build_multi_head_target_manifest(  # noqa: C901, PLR0912
 		'heads': head_payloads,
 		'cross_head_diagnostics': multi_head_cross_head_diagnostics(roots),
 	}
-	if 6 in ks:
+	if 6 in ks and frozen_k6_receipt is not None:
+		payload['k6_frozen_reference'] = validate_frozen_k6_reference(
+			receipt_path=frozen_k6_receipt,
+			historical_root=roots[6],
+			source_embedding=payload['source_embedding'],
+			historical_targets=head_payloads['6']['surveys'],
+		)
+	elif 6 in ks:
 		if replay_k6_root is None:
-			raise ValueError('K=6 manifests require replay_k6_root')
+			raise ValueError(
+				'K=6 manifests require replay_k6_root or frozen_k6_receipt'
+			)
 		if _same_resolved_path(Path(roots[6]), Path(replay_k6_root)):
 			raise ValueError(
-			'K=6 replay root must differ from the immutable historical '
-			'training-target root'
-		)
+				'K=6 replay root must differ from the immutable historical '
+				'training-target root'
+			)
 		payload['k6_replay_parity'] = compare_k6_replay(
 			historical_root=Path(roots[6]),
 			replay_root=replay_k6_root,
@@ -109,10 +131,12 @@ def build_multi_head_target_manifest(  # noqa: C901, PLR0912
 			raise ValueError(
 				'K=6 replay parity is not exact; refusing complete manifest'
 			)
-	elif replay_k6_root is not None:
-		raise ValueError('replay_k6_root requires a K=6 head')
+	elif replay_k6_root is not None or frozen_k6_receipt is not None:
+		raise ValueError('K=6 evidence requires a K=6 head')
 	validate_multi_head_target_manifest(payload, verify_hashes=True)
-	_write_json_atomic(Path(manifest_path), payload)
+	_write_json_atomic(
+		Path(manifest_path), payload, overwrite=frozen_k6_receipt is None
+	)
 	return payload
 
 
@@ -174,7 +198,7 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 			'cross_head_diagnostics',
 		},
 		'manifest',
-		optional_keys={'k6_replay_parity'},
+		optional_keys={'k6_replay_parity', 'k6_frozen_reference'},
 	)
 	if payload['artifact_type'] != ARTIFACT_TYPE or payload['schema_version'] not in {
 		_LEGACY_SCHEMA_VERSION,
@@ -298,19 +322,224 @@ def validate_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0915
 			common_source_target_alignment,
 			validate_array_semantics=validate_array_semantics,
 		)
+	evidence_keys = {'k6_replay_parity', 'k6_frozen_reference'} & set(payload)
 	if 6 in ks:
-		if 'k6_replay_parity' not in payload:
-			raise ValueError('manifest is missing K=6 replay parity evidence')
+		if len(evidence_keys) != 1:
+			raise ValueError(
+				'manifest requires exactly one K=6 replay parity evidence '
+				'or frozen reference'
+			)
 		historical_head = _mapping(head_values['6'], 'head k=6')
-		_validate_k6_replay_parity(
-			payload['k6_replay_parity'],
-			survey_ids,
-			historical_root=Path(str(historical_head['pseudo_target_root'])),
-			historical_targets=_mapping(historical_head['surveys'], 'head k=6 surveys'),
-			verify_hashes=verify_hashes,
+		if 'k6_frozen_reference' in payload:
+			evidence = _mapping(payload['k6_frozen_reference'], 'K=6 frozen reference')
+			expected = validate_frozen_k6_reference(
+				receipt_path=_mapping(evidence.get('receipt'), 'K=6 receipt')['path'],
+				historical_root=historical_head['pseudo_target_root'],
+				source_embedding=source_embedding,
+				historical_targets=_mapping(
+					historical_head['surveys'], 'head k=6 surveys'
+				),
+				verify_hashes=verify_hashes,
+			)
+			if evidence != expected:
+				raise ValueError('K=6 frozen reference evidence drift')
+		else:
+			_validate_k6_replay_parity(
+				payload['k6_replay_parity'],
+				survey_ids,
+				historical_root=Path(str(historical_head['pseudo_target_root'])),
+				historical_targets=_mapping(
+					historical_head['surveys'], 'head k=6 surveys'
+				),
+				verify_hashes=verify_hashes,
+			)
+	elif evidence_keys:
+		raise ValueError('K=6 evidence requires a K=6 head')
+
+
+def build_frozen_k6_reference_receipt(
+	*,
+	receipt_path: str | Path,
+	reference_training_config: str | Path,
+	historical_root: str | Path,
+	source_embedding_dir: str | Path,
+	dry_run: bool = False,
+) -> dict[str, object]:
+	"""Freeze existing K=6 inputs without computing or publishing target arrays.
+
+	An existing receipt is validated against all current inputs and never replaced.
+	"""
+	path = Path(receipt_path).resolve()
+	root = Path(historical_root).resolve()
+	embedding_root = Path(source_embedding_dir).resolve()
+	training_path = Path(reference_training_config).resolve()
+	if any('reports' in p.parts for p in (path, root, embedding_root, training_path)):
+		raise ValueError('reports cannot be frozen K=6 inputs or outputs')
+	if (
+		path.is_relative_to(root)
+		or path.is_relative_to(embedding_root)
+		or path == training_path
+	):
+		raise ValueError(
+			'frozen K=6 receipt must not modify a historical input namespace'
 		)
-	elif 'k6_replay_parity' in payload:
-		raise ValueError('K=6 replay parity evidence requires a K=6 head')
+	head = _head_reference(root, k=6)
+	embeddings = {
+		item.survey_id: item for item in discover_embedding_inputs(embedding_root)
+	}
+	if not embeddings or set(head['surveys']) != set(embeddings):
+		raise ValueError('frozen K=6 targets and source embedding survey sets differ')
+	_validate_head_embedding_alignment(head, embeddings, k=6)
+	source = _embedding_identity(embedding_root, embeddings)
+	payload = {
+		'artifact_type': 'strat_hmm_frozen_k6_reference',
+		'schema_version': 1,
+		'historical_root': str(root),
+		'reference_training_config': _file_reference(training_path),
+		'source_embedding': source,
+		'targets': _frozen_target_references(head['surveys']),
+	}
+	payload['source_checkpoint'] = _frozen_k6_training_checkpoint(
+		payload, verify_hashes=True
+	)
+	if path.exists():
+		if _json_object(path) != payload:
+			raise ValueError('frozen K=6 receipt input drift; refusing to refreeze')
+		return payload
+	if dry_run:
+		return payload
+	_write_json_atomic(path, payload, overwrite=False)
+	return payload
+
+
+def validate_frozen_k6_reference(  # noqa: C901
+	*,
+	receipt_path: str | Path,
+	historical_root: str | Path,
+	source_embedding: Mapping[str, object],
+	historical_targets: Mapping[str, object],
+	verify_hashes: bool = True,
+) -> dict[str, object]:
+	"""Bind one immutable receipt to the manifest's exact K=6 references."""
+	path = Path(receipt_path)
+	before = file_sha256(path)
+	payload = _json_object(path)
+	_required_keys(
+		payload,
+		{
+			'artifact_type',
+			'schema_version',
+			'historical_root',
+			'reference_training_config',
+			'source_embedding',
+			'source_checkpoint',
+			'targets',
+		},
+		'frozen K=6 receipt',
+	)
+	if (
+		payload['artifact_type'] != 'strat_hmm_frozen_k6_reference'
+		or payload['schema_version'] != 1
+	):
+		raise ValueError('unsupported frozen K=6 receipt schema')
+	if not _same_resolved_path(
+		Path(str(payload['historical_root'])), Path(historical_root)
+	):
+		raise ValueError('frozen K=6 historical root drift')
+	if payload['source_embedding'] != source_embedding:
+		raise ValueError('frozen K=6 source embedding identity drift')
+	targets = _frozen_target_references(historical_targets)
+	if payload['targets'] != targets:
+		raise ValueError('frozen K=6 target identity drift')
+	_validate_embedding_identity(source_embedding, verify_hashes=verify_hashes)
+	checkpoint = _frozen_k6_training_checkpoint(payload, verify_hashes=verify_hashes)
+	if checkpoint != payload['source_checkpoint']:
+		raise ValueError('frozen K=6 source checkpoint drift')
+	for survey_id, references in targets.items():
+		for name, reference in references.items():
+			file_path = Path(str(reference['path']))
+			if not file_path.resolve().is_relative_to(
+				Path(historical_root).resolve() / 'k6'
+			):
+				raise ValueError('frozen K=6 target is outside historical root')
+			if verify_hashes and file_sha256(file_path) != reference['sha256']:
+				raise ValueError(f'frozen K=6 {survey_id} {name} hash mismatch')
+	if file_sha256(path) != before:
+		raise ValueError('frozen K=6 receipt changed during validation')
+	return {
+		'receipt': {'path': str(path), 'sha256': before},
+		'historical_root': payload['historical_root'],
+		'reference_training_config': payload['reference_training_config'],
+		'source_checkpoint': checkpoint,
+		'source_embedding_sha256': hashlib.sha256(
+			json.dumps(
+				source_embedding, sort_keys=True, separators=(',', ':'), allow_nan=False
+			).encode()
+		).hexdigest(),
+		'target_hashes': {
+			survey: {name: ref['sha256'] for name, ref in refs.items()}
+			for survey, refs in targets.items()
+		},
+	}
+
+
+def _frozen_target_references(surveys: Mapping[str, object]) -> dict[str, object]:
+	required = {'labels', 'confidence', 'valid_tokens', 'metadata'}
+	return {
+		survey: {
+			name: dict(_mapping(entry[name], name))
+			for name in sorted(
+				required
+				| ({'boundary_weight'} if 'boundary_weight' in entry else set())
+			)
+		}
+		for survey, value in sorted(surveys.items())
+		for entry in [_mapping(value, 'frozen K=6 target')]
+	}
+
+
+def _frozen_k6_training_checkpoint(
+	payload: Mapping[str, object], *, verify_hashes: bool
+) -> dict[str, str]:
+	from seis_ssl_cluster.config import load_config  # noqa: PLC0415
+
+	reference = _mapping(payload['reference_training_config'], 'K=6 training config')
+	_required_keys(reference, {'path', 'sha256'}, 'K=6 training config')
+	path = Path(str(reference['path']))
+	if verify_hashes and file_sha256(path) != reference['sha256']:
+		raise ValueError('frozen K=6 reference training config hash mismatch')
+	config = load_config(path)
+	pseudo = _mapping(config.get('pseudo_targets'), 'reference pseudo_targets')
+	if pseudo.get('k') != 6 or not _same_resolved_path(
+		Path(str(pseudo.get('input_dir'))), Path(str(payload['historical_root']))
+	):
+		raise ValueError(
+			'reference training config does not consume historical K=6 root'
+		)
+	teacher = _mapping(config.get('teacher'), 'reference teacher')
+	student = _mapping(config.get('student'), 'reference student')
+	checkpoint_path = Path(str(teacher.get('checkpoint'))).resolve()
+	if not _same_resolved_path(
+		checkpoint_path, Path(str(student.get('init_checkpoint')))
+	):
+		raise ValueError('reference teacher and student checkpoint differ')
+	source = _mapping(payload['source_embedding'], 'reference source embedding')
+	identities = []
+	for value in _mapping(source['surveys'], 'source embedding surveys').values():
+		entry = _mapping(value, 'source embedding survey')
+		metadata = _json_object(Path(str(entry['metadata_path'])))
+		if not _same_resolved_path(
+			checkpoint_path, Path(str(metadata.get('checkpoint_path')))
+		):
+			raise ValueError(
+				'reference training config source checkpoint differs from embedding'
+			)
+		identities.append(str(metadata.get('checkpoint_sha256')))
+	if not identities or len(set(identities)) != 1:
+		raise ValueError('source embedding checkpoint hashes differ')
+	if verify_hashes and file_sha256(checkpoint_path) != identities[0]:
+		raise ValueError('frozen K=6 source checkpoint hash mismatch')
+	return {'path': str(checkpoint_path), 'sha256': identities[0]}
 
 
 def compare_k6_replay(
@@ -560,13 +789,10 @@ def _validate_occupancy_diagnostics(
 
 def _validate_confidence_quantiles(value: object, *, name: str) -> None:
 	"""Validate persisted bootstrap-confidence summary quantiles."""
-	confidence = _finite_number_list(
-		value, k=5, name=f'{name} confidence quantiles'
-	)
-	if (
-		any(quantile < 0.0 or quantile > 1.0 for quantile in confidence)
-		or confidence != sorted(confidence)
-	):
+	confidence = _finite_number_list(value, k=5, name=f'{name} confidence quantiles')
+	if any(
+		quantile < 0.0 or quantile > 1.0 for quantile in confidence
+	) or confidence != sorted(confidence):
 		raise ValueError(
 			f'{name} confidence quantiles must be ordered values in [0, 1]'
 		)
@@ -618,7 +844,8 @@ def _validate_k6_replay_parity(  # noqa: C901, PLR0912, PLR0915
 		raise TypeError('k6_replay_parity exact must be a boolean')
 	checks = _mapping(parity['checks'], 'k6_replay_parity checks')
 	historical_boundary = {
-		'boundary_weight' in _mapping(
+		'boundary_weight'
+		in _mapping(
 			historical_targets[str(survey_id)],
 			f'K=6 historical target {survey_id}',
 		)
@@ -644,8 +871,8 @@ def _validate_k6_replay_parity(  # noqa: C901, PLR0912, PLR0915
 	}
 	if has_boundary:
 		expected.update(
-		f'{survey_id}.pseudo_target_boundary_weight' for survey_id in survey_ids
-	)
+			f'{survey_id}.pseudo_target_boundary_weight' for survey_id in survey_ids
+		)
 	_required_keys(checks, expected, 'k6_replay_parity checks')
 	if not all(isinstance(result, bool) for result in checks.values()):
 		raise TypeError('k6_replay_parity checks must contain booleans')
@@ -1025,10 +1252,13 @@ def _validate_manifest_embedding_alignment(  # noqa: C901, PLR0913
 				)
 		if target_valid is None:
 			raise AssertionError('at least one head is required')
-		if _source_target_alignment_evidence(
-			embedding_valid,
-			target_valid,
-		) != common_source_target_alignment[str(survey_id)]:
+		if (
+			_source_target_alignment_evidence(
+				embedding_valid,
+				target_valid,
+			)
+			!= common_source_target_alignment[str(survey_id)]
+		):
 			raise ValueError(
 				f'{survey_id} persisted source-to-target alignment '
 				'does not match arrays'
@@ -1059,9 +1289,7 @@ def _validate_legacy_manifest_embedding_alignment(
 		)
 		for survey_id in survey_ids:
 			entry = _mapping(surveys[str(survey_id)], 'target reference')
-			embedding = _mapping(
-				embeddings[str(survey_id)], 'source embedding survey'
-			)
+			embedding = _mapping(embeddings[str(survey_id)], 'source embedding survey')
 			valid_reference = _mapping(
 				entry['valid_tokens'],
 				'target valid_tokens reference',
@@ -1332,9 +1560,7 @@ def _validate_referenced_target_metadata(
 	try:
 		metadata = json.loads(metadata_path.read_text(encoding='utf-8'))
 	except json.JSONDecodeError as exc:
-		raise ValueError(
-			f'head k={k} {survey_id} metadata must be valid JSON'
-		) from exc
+		raise ValueError(f'head k={k} {survey_id} metadata must be valid JSON') from exc
 	if not isinstance(metadata, Mapping):
 		raise TypeError(f'head k={k} {survey_id} metadata must be an object')
 	if (
@@ -1403,14 +1629,15 @@ def _validate_common_target_contract(
 ) -> None:
 	if common_token_grid_shapes[survey_id] != entry['token_grid_shape']:
 		raise ValueError(
-		f'manifest common token grid does not match target reference for {survey_id}'
-	)
+			'manifest common token grid does not match target reference '
+			f'for {survey_id}'
+		)
 	valid_tokens = _mapping(entry['valid_tokens'], 'valid_tokens reference')
 	if common_valid_tokens_sha256[survey_id] != valid_tokens['sha256']:
 		raise ValueError(
-		f'manifest common valid-token hash does not match target reference for '
-		f'{survey_id}'
-	)
+			f'manifest common valid-token hash does not match target reference for '
+			f'{survey_id}'
+		)
 
 
 def _load_reference_arrays(entry: Mapping[str, object]) -> dict[str, np.ndarray]:
@@ -1494,7 +1721,9 @@ def _required_keys(
 		raise ValueError(f'{name} is missing fields: {sorted(missing)!r}')
 
 
-def _write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
+def _write_json_atomic(
+	path: Path, payload: Mapping[str, object], *, overwrite: bool = True
+) -> None:
 	path.parent.mkdir(parents=True, exist_ok=True)
 	with tempfile.NamedTemporaryFile(
 		'w', dir=path.parent, delete=False, encoding='utf-8'
@@ -1503,7 +1732,10 @@ def _write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
 		json.dump(payload, handle, indent=2, sort_keys=True, allow_nan=False)
 		handle.write('\n')
 	try:
-		temporary.replace(path)
+		if overwrite:
+			temporary.replace(path)
+		else:
+			path.hardlink_to(temporary)
 	finally:
 		temporary.unlink(missing_ok=True)
 
@@ -1511,10 +1743,12 @@ def _write_json_atomic(path: Path, payload: Mapping[str, object]) -> None:
 __all__ = [
 	'ARTIFACT_TYPE',
 	'SCHEMA_VERSION',
+	'build_frozen_k6_reference_receipt',
 	'build_multi_head_target_manifest',
 	'compare_k6_replay',
 	'load_multi_head_target_manifest',
 	'multi_head_cross_head_diagnostics',
+	'validate_frozen_k6_reference',
 	'validate_multi_head_target_manifest',
 	'validate_multi_head_target_reference',
 ]

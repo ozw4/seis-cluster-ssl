@@ -15,6 +15,7 @@ from seis_ssl_cluster.config.io import _expand_environment_variables
 from seis_ssl_cluster.stratigraphy.multi_head import (
 	compare_k6_replay,
 	load_multi_head_target_manifest,
+	validate_frozen_k6_reference,
 )
 from seis_ssl_cluster.training import load_checkpoint
 from seis_ssl_cluster.training.strat_hmm_checkpoint import (
@@ -25,7 +26,7 @@ if TYPE_CHECKING:
 	from collections.abc import Mapping
 
 
-def audit_multi_head_source(config_path: Path) -> dict[str, object]:
+def audit_multi_head_source(config_path: Path) -> dict[str, object]:  # noqa: C901
 	"""Validate a final latest checkpoint without repairing or publishing artifacts."""
 	raw = yaml.safe_load(config_path.read_text())
 	manifest_path = Path(
@@ -45,7 +46,14 @@ def audit_multi_head_source(config_path: Path) -> dict[str, object]:
 	if config['pseudo_targets']['target_representation'] != 'hard_viterbi_labels_v1':
 		raise ValueError('source audit requires hard Viterbi targets')
 	manifest = load_multi_head_target_manifest(manifest_path)
-	if 6 in manifest['head_ks']:
+	if 'k6_frozen_reference' in manifest:
+		validate_frozen_k6_reference(
+			receipt_path=manifest['k6_frozen_reference']['receipt']['path'],
+			historical_root=manifest['heads']['6']['pseudo_target_root'],
+			source_embedding=manifest['source_embedding'],
+			historical_targets=manifest['heads']['6']['surveys'],
+		)
+	elif 6 in manifest['head_ks']:
 		parity = compare_k6_replay(
 			historical_root=manifest['heads']['6']['pseudo_target_root'],
 			replay_root=manifest['k6_replay_parity']['replay_root'],
