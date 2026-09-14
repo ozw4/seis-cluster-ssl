@@ -1843,3 +1843,8 @@ __all__ = [
 	'inspect_embedding_sources',
 	'run_channel_decoder_job',
 ]
+
+
+def channel_decoder_run_identity(plan: ChannelDecoderPlan) -> dict[str, object]:
+	"""Return the exact identity used by decoder checkpoints and evaluations."""
+	return _run_identity(plan)

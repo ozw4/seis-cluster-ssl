@@ -1,0 +1,15 @@
+schema_version: 1
+survey: f3
+arms:
+  local_bt:
+    candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020
+    target_family: local_bt3
+    clustering_reference: experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/40_hmm_targets/rot90_asym_g060_3ep/k6/02_cluster_hmm_k6.yaml
+    training_reference: experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/50_hmm_pretraining/rot90_asym_g060_3ep/hmm/k6/02_full_25ep.yaml
+    embedding_reference: experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill020.yaml
+  random:
+    candidate_id: random_init_hmm_v2_mh_k6810_distill020
+    target_family: random
+    clustering_reference: experiments/f3/facies_benchmark_v2/125_lithology_random_init_self_target_hmm_k6_distill010_v1/10_hmm_targets/random_init/k6/02_cluster_hmm_k6.yaml
+    training_reference: experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/10_pretraining/random_self_target_hmm_k6_distill020/02_full_25ep.yaml
+    embedding_reference: experiments/f3/facies_benchmark_v2/127_hmm_v2_multi_head_screening_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill020.yaml

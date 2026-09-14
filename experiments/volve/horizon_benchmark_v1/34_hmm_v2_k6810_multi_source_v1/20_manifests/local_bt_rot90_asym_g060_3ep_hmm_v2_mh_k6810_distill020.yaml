@@ -1,0 +1,7 @@
+source_embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/overlap_x64
+head_roots:
+  6: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/rot90_asym_g060_3ep
+  8: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/volve/horizon_benchmark_v1/hmm_v2_k6810_multi_source_v1/local_bt3/shared
+  10: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/volve/horizon_benchmark_v1/hmm_v2_k6810_multi_source_v1/local_bt3/shared
+replay_k6_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/volve/horizon_benchmark_v1/hmm_v2_k6810_multi_source_v1/local_bt3/k6_replay
+manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/volve/horizon_benchmark_v1/hmm_v2_k6810_multi_source_v1/local_bt3/mh_k6810/multi_head_target_manifest.json

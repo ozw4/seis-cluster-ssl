@@ -1,0 +1,11 @@
+matrix: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/k6810_multi_source_evaluation_v1/matrix.yaml
+control_receipt: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/k6810_multi_source_evaluation_v1/hmm_v1_controls_receipt.json
+selection_receipt: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/k6810_multi_source_evaluation_v1/f3_mae_k6810_reuse_receipt.json
+summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/hmm_v2/k6810_multi_source_evaluation_v1/summary
+summaries:
+  f3:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/f3_lithology_benchmark/hmm_v2_k6810_multi_source_v1/paired_summary/summary.json
+  parihaka:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/hmm_v2_k6810_multi_source_v1/paired_summary/summary.json
+  volve:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/hmm_v2_k6810_multi_source_v1/paired_summary/summary.json

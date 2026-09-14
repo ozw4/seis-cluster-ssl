@@ -415,7 +415,7 @@ def _audit_job_rows(
 	rows: list[dict[str, object]] = []
 	for data_size in DATA_SIZES:
 		for layout_id in LAYOUT_IDS:
-			candidate = _read_job(
+			candidate = read_f3_paired_candidate_job(
 				config,
 				canonical,
 				config.candidate,
@@ -423,7 +423,7 @@ def _audit_job_rows(
 				layout_id=layout_id,
 				data_size=data_size,
 			)
-			control = _read_job(
+			control = read_f3_paired_candidate_job(
 				control_config,
 				canonical,
 				config.control,
@@ -725,7 +725,7 @@ def _reject_unexpected_job_directories(
 				raise ValueError(f'unexpected paired run condition: {size_entry}')
 
 
-def _read_job(  # noqa: PLR0913
+def read_f3_paired_candidate_job(  # noqa: PLR0913
 	config: F3PairedCandidateSummaryConfig,
 	canonical: F3FiveWayConfig,
 	model: F3PairedCandidateModel,
@@ -734,6 +734,7 @@ def _read_job(  # noqa: PLR0913
 	layout_id: str,
 	data_size: str,
 ) -> dict[str, object]:
+	"""Audit one completed candidate against its source and frozen contracts."""
 	job_dir = (
 		config.runs_root
 		/ f'model={model.model_id}'
@@ -1413,3 +1414,16 @@ __all__ = [
 	'inspect_f3_paired_candidate_results',
 	'summarize_f3_paired_candidate_results',
 ]
+
+
+def validate_f3_paired_completed_jobs(
+	candidate: Mapping[str, object], control: Mapping[str, object], *, label: str
+) -> None:
+	"""Require identical frozen decoder and evaluation support for a cell pair."""
+	_assert_paired_identity(candidate['evidence'], control['evidence'], label=label)
+	_assert_paired_decoder_identity(
+		candidate['decoder_contract'], control['decoder_contract'], label=label
+	)
+	_assert_paired_evaluation_identity(
+		candidate['evaluation'], control['evaluation'], label=label
+	)

@@ -210,7 +210,12 @@ def test_recipe_arm_namespace_has_only_declared_recipe_and_continuation_users() 
 	}
 	# Experiment 33 consumes the completed three-epoch source and reuses the
 	# paired random decoder cells. Its four new model IDs have isolated paths.
-	assert users == {ROOT.name, '33_missing_hmm_comparison_v1'}
+	assert users == {
+		ROOT.name,
+		'33_missing_hmm_comparison_v1',
+		'34_hmm_v1_paper_sections_v1',
+		'34_hmm_v2_k6810_multi_source_v1',
+	}
 
 
 def test_readme_documents_the_workflow_and_result_provenance() -> None:

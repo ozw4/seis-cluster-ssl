@@ -1,0 +1,7 @@
+source_embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v1/random_init_self_target_hmm_k6_distill010_v1/hmm_targets/random_init/overlap_x64
+head_roots:
+  6: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/random_init_self_target_hmm_k6_distill010_v1/random_init
+  8: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/hmm_v2_k6810_multi_source_v1/random/shared
+  10: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/hmm_v2_k6810_multi_source_v1/random/shared
+replay_k6_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/hmm_v2_k6810_multi_source_v1/random/k6_replay
+manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/hmm_v2_k6810_multi_source_v1/random/mh_k6810/multi_head_target_manifest.json

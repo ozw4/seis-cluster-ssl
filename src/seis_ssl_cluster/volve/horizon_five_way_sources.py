@@ -1301,6 +1301,15 @@ def _validate_embedding_objective(  # noqa: C901
 		'head_num_prototypes': FIVE_WAY_HMM_K,
 		'unfreeze_top_blocks': FIVE_WAY_UNFREEZE_TOP_BLOCKS,
 	}
+	if 'head_ks' in model.expected:
+		checks.pop('head_num_prototypes')
+		checks.update(
+			method='strat_hmm_multi_head_pretext',
+			distillation_weight=0.2,
+			consistency_weight=0.0,
+			head_ks=model.expected['head_ks'],
+			head_spec='multi_resolution_ordered_prototypes_v1',
+		)
 	for key, expected in checks.items():
 		if pretext.get(key) != expected:
 			raise ValueError(

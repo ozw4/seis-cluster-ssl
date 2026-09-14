@@ -146,6 +146,7 @@ class VolveHorizonRecipeArmConfig:
 	checkpoint_selections: tuple[str, ...]
 	benchmark_id: str
 	hmm: Mapping[str, object] | None = None
+	multi_head_training_config: Path | None = None
 
 	@property
 	def model_ids(self) -> tuple[str, ...]:
@@ -167,8 +168,20 @@ def volve_horizon_recipe_arm_config_from_mapping(
 	_validate_exact_keys(paths, frozenset({'artifact_root', 'volve_root'}), 'paths')
 	_validate_exact_keys(dataset, frozenset({'survey_id'}), 'dataset')
 	_validate_exact_keys(inputs, frozenset({'canonical_input_metadata'}), 'inputs')
+	if 'hmm' in arm and 'multi_head_training_config' in arm:
+		raise ValueError('arm requires exactly one continuation lineage')
 	arm_keys = frozenset({'arm_id', 'checkpoint', 'embeddings_dir', 'recipe'})
-	_validate_exact_keys(arm, arm_keys | ({'hmm'} if 'hmm' in arm else set()), 'arm')
+	_validate_exact_keys(
+		arm,
+		arm_keys
+		| ({'hmm'} if 'hmm' in arm else set())
+		| (
+			{'multi_head_training_config'}
+			if 'multi_head_training_config' in arm
+			else set()
+		),
+		'arm',
+	)
 	_validate_exact_keys(
 		baseline,
 		frozenset({'checkpoint', 'embeddings_dir'}),
@@ -254,7 +267,9 @@ def volve_horizon_recipe_arm_config_from_mapping(
 		arm_id=arm_id,
 		arm_checkpoint=arm_checkpoint,
 		arm_embeddings_dir=arm_embeddings_dir,
-		recipe=_resolve_recipe(arm.get('recipe')),
+		recipe=_resolve_recipe(
+			arm.get('recipe'), allow_mae='multi_head_training_config' in arm
+		),
 		baseline_checkpoint=baseline_checkpoint,
 		baseline_embeddings_dir=baseline_embeddings_dir,
 		runs_root=runs_root,
@@ -265,6 +280,11 @@ def volve_horizon_recipe_arm_config_from_mapping(
 		checkpoint_selections=checkpoint_selections,
 		benchmark_id=benchmark_id,
 		hmm=_resolve_hmm(arm['hmm']) if 'hmm' in arm else None,
+		multi_head_training_config=(
+			_absolute_path(arm, 'multi_head_training_config', 'arm')
+			if 'multi_head_training_config' in arm
+			else None
+		),
 	)
 
 
@@ -274,7 +294,8 @@ def as_five_way_config(
 	"""Express the arm and its baseline in the shared two-source runner shape."""
 	objective = (
 		MAE_OBJECTIVE
-		if config.hmm is not None and config.recipe.method == RANDOM_OBJECTIVE
+		if (config.hmm is not None or config.multi_head_training_config is not None)
+		and config.recipe.method == RANDOM_OBJECTIVE
 		else config.recipe.method
 	)
 	arm_source = VolveHorizonFiveWayModelSource(
@@ -284,7 +305,13 @@ def as_five_way_config(
 		expected={
 			'objective': objective,
 			'local_pairs_per_crop': config.recipe.local_pairs_per_crop,
-			'stratigraphy_pretext': config.hmm is not None,
+			'stratigraphy_pretext': config.hmm is not None
+			or config.multi_head_training_config is not None,
+			**(
+				{'base_objective': objective, 'head_ks': [6, 8, 10]}
+				if config.multi_head_training_config
+				else {}
+			),
 			**({'base_objective': objective, 'hmm_k': 6} if config.hmm else {}),
 		},
 	)
@@ -454,9 +481,15 @@ def run_volve_horizon_recipe_arm_job(
 	)
 
 
-def _audit_recipe_arm_checkpoint(  # noqa: C901
+def _audit_recipe_arm_checkpoint(  # noqa: C901, PLR0912
 	config: VolveHorizonRecipeArmConfig,
 ) -> dict[str, object]:
+	if config.multi_head_training_config is not None:
+		from seis_ssl_cluster.hmm.multi_source_volve import (  # noqa: PLC0415
+			audit_multi_head_recipe_source,
+		)
+
+		return audit_multi_head_recipe_source(config)
 	if config.hmm is not None:
 		from seis_ssl_cluster.volve.horizon_hmm_recipe import (  # noqa: PLC0415
 			audit_hmm_recipe_checkpoint,
@@ -600,14 +633,18 @@ def _recipe_identity(recipe: VolveHorizonRecipeArmRecipe) -> dict[str, object]:
 	}
 
 
-def _resolve_recipe(value: object) -> VolveHorizonRecipeArmRecipe:
+def _resolve_recipe(
+	value: object, *, allow_mae: bool = False
+) -> VolveHorizonRecipeArmRecipe:
 	recipe = _required_mapping({'recipe': value}, 'recipe', 'arm')
-	if recipe.get('method') == RANDOM_OBJECTIVE:
+	if recipe.get('method') == RANDOM_OBJECTIVE or (
+		allow_mae and recipe.get('method') == MAE_OBJECTIVE
+	):
 		_validate_exact_keys(recipe, frozenset({'method', 'seed'}), 'arm.recipe')
 		if recipe.get('seed') != FIVE_WAY_RANDOM_SEED:
 			raise ValueError('random arm.recipe.seed must equal 42')
 		return VolveHorizonRecipeArmRecipe(
-			method=RANDOM_OBJECTIVE,
+			method=str(recipe['method']),
 			local_pairs_per_crop=0,
 			positive_window_tokens=None,
 			augmentations={},

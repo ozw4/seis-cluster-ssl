@@ -1,0 +1,2 @@
+training_configs:
+- ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/128_hmm_v2_k6810_multi_source_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020/02_full_25ep.yaml

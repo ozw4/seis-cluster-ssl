@@ -1,0 +1,2 @@
+training_configs:
+- ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/volve/horizon_benchmark_v1/34_hmm_v2_k6810_multi_source_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill020/02_full_25ep.yaml

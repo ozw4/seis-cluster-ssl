@@ -10,6 +10,7 @@ import shutil
 import statistics
 import tempfile
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -1310,3 +1311,108 @@ __all__ = [
 	'inspect_volve_horizon_five_way_results',
 	'summarize_volve_horizon_five_way',
 ]
+
+
+def inspect_volve_horizon_recipe_arm_cell(
+	config: object, *, layout_id: str, data_size: str
+) -> dict[str, object]:
+	"""Audit one recipe-arm cell with the full frozen completion contract."""
+	from seis_ssl_cluster.volve.horizon_recipe_arm import (  # noqa: PLC0415
+		as_five_way_config,
+		inspect_volve_horizon_recipe_arm_embedding_suite,
+	)
+
+	suite = inspect_volve_horizon_recipe_arm_embedding_suite(
+		config, model_ids=(config.arm_id,)
+	)
+	five_way = as_five_way_config(config)
+	five_way = replace(five_way, models=(five_way.models[0],))
+	sources = _inspect_configured_sources(five_way, embedding_suite=suite)
+	row = _load_job_row(
+		five_way,
+		model_id=config.arm_id,
+		layout_id=layout_id,
+		data_size=data_size,
+		source=sources[config.arm_id],
+		expected_downstream=_expected_downstream_contract(five_way),
+	)
+	row['completion'] = audit_volve_horizon_completed_budget(
+		Path(str(row['metrics_path'])).parent, epochs=config.train.epochs
+	)
+	row['shared_run_identity'] = row.pop('_shared_run_identity')
+	row['support_identity'] = row.pop('_support_identity')
+	return row
+
+
+def inspect_volve_horizon_five_way_cell(
+	config: VolveHorizonFiveWayConfig, *, model_id: str, layout_id: str, data_size: str
+) -> dict[str, object]:
+	"""Audit one fixed five-way control with complete source and decoder evidence."""
+	audit = audit_volve_horizon_five_way_sources(config, model_ids=(model_id,))
+	suite = inspect_volve_horizon_five_way_embedding_suite(
+		config, source_audit=audit, model_ids=(model_id,)
+	)
+	selected = replace(config, models=(config.model_by_id(model_id),))
+	sources = _inspect_configured_sources(selected, embedding_suite=suite)
+	row = _load_job_row(
+		selected,
+		model_id=model_id,
+		layout_id=layout_id,
+		data_size=data_size,
+		source=sources[model_id],
+		expected_downstream=_expected_downstream_contract(selected),
+	)
+	row['completion'] = audit_volve_horizon_completed_budget(
+		Path(str(row['metrics_path'])).parent, epochs=config.train.epochs
+	)
+	row['shared_run_identity'] = row.pop('_shared_run_identity')
+	row['support_identity'] = row.pop('_support_identity')
+	return row
+
+
+def audit_volve_horizon_completed_budget(
+	job_dir: Path, *, epochs: int
+) -> dict[str, object]:
+	"""Require a completed decoder, exact epoch budget and matching evaluation."""
+	latest_path = job_dir / 'latest.pt'
+	before = file_sha256(latest_path)
+	latest = load_checkpoint_metadata_without_weights(latest_path)
+	metrics = _read_json(job_dir / 'metrics.json')
+	if (
+		latest.get('completed') is not True
+		or latest.get('epoch') != epochs
+		or latest.get('next_position') != 0
+	):
+		raise ValueError('horizon decoder has not completed its full epoch budget')
+	if _json_normalized(latest.get('run_identity')) != metrics.get(
+		'benchmark_identity'
+	):
+		raise ValueError('completed horizon decoder identity differs from evaluation')
+	history = latest.get('history')
+	if not isinstance(history, list) or [row.get('epoch') for row in history] != list(
+		range(epochs)
+	):
+		raise ValueError('horizon completed history does not cover every epoch')
+	steps = [row.get('global_step') for row in history]
+	if (
+		not steps
+		or not isinstance(steps[0], int)
+		or steps[0] <= 0
+		or steps != [steps[0] * (i + 1) for i in range(epochs)]
+		or latest.get('global_step') != steps[-1]
+	):
+		raise ValueError(
+			'horizon decoder step budget differs from its complete history'
+		)
+	if latest.get('best_epoch') != metrics.get('best_epoch'):
+		raise ValueError('horizon decoder best selection differs from evaluation')
+	if _read_history(job_dir / HISTORY_NAME) != history:
+		raise ValueError('horizon history differs from completed checkpoint')
+	if file_sha256(latest_path) != before:
+		raise ValueError('horizon decoder changed during completed audit')
+	return {
+		'latest_path': str(latest_path),
+		'latest_sha256': before,
+		'epochs': epochs,
+		'global_step': steps[-1],
+	}

@@ -1,0 +1,44 @@
+schema_version: 1
+selected_head_ks:
+- 6
+- 8
+- 10
+distillation_weight: 0.2
+consistency_weight: 0.0
+surveys:
+  f3:
+    evaluation_split: validation
+    arms:
+      mae:
+        candidate_id: mae100_hmm_v2_mh_k6810_distill020
+        execution: reuse
+      local_bt:
+        candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020
+        execution: new
+      random:
+        candidate_id: random_init_hmm_v2_mh_k6810_distill020
+        execution: new
+  parihaka:
+    evaluation_split: test
+    arms:
+      mae:
+        candidate_id: mae100_hmm_v2_mh_k6810_distill020
+        execution: new
+      local_bt:
+        candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020
+        execution: new
+      random:
+        candidate_id: random_init_hmm_v2_mh_k6810_distill020
+        execution: new
+  volve:
+    evaluation_split: test
+    arms:
+      mae:
+        candidate_id: mae100_hmm_v2_mh_k6810_distill020
+        execution: new
+      local_bt:
+        candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020
+        execution: new
+      random:
+        candidate_id: random_init_hmm_v2_mh_k6810_distill020
+        execution: new

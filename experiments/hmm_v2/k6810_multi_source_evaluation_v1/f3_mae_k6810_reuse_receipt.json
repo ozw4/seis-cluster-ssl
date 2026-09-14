@@ -1,0 +1,159 @@
+{
+  "candidate_id": "mae100_hmm_v2_mh_k6810_distill020",
+  "canonical_cells_sha256": "b99d14e5ac4b2f8a01545fa9d6785f59887fc86f99355d7e1eb9d5e8095f2d6d",
+  "cells": [
+    {
+      "data_size": "small",
+      "layout_id": "layout_000",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_000/size=small/evaluation/metrics.json",
+      "metrics_sha256": "b2b0f9b135c82ea96839f112c0fe417d12ffe3d02d8d9adc4da2137cc6ed39bb",
+      "primary": 0.5698234107172767,
+      "secondary": 0.694735311955356
+    },
+    {
+      "data_size": "small",
+      "layout_id": "layout_001",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_001/size=small/evaluation/metrics.json",
+      "metrics_sha256": "62c40821e288f9912d12cc5ff89f768a749cae3d7ad09961baac76ff61566b42",
+      "primary": 0.4774807648696578,
+      "secondary": 0.5831648522939271
+    },
+    {
+      "data_size": "small",
+      "layout_id": "layout_002",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_002/size=small/evaluation/metrics.json",
+      "metrics_sha256": "de896e15bfb1042d2a817bea84d565578011716da5f9195269d78b930a7f0625",
+      "primary": 0.49183674854376586,
+      "secondary": 0.6201994291131625
+    },
+    {
+      "data_size": "small",
+      "layout_id": "layout_003",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_003/size=small/evaluation/metrics.json",
+      "metrics_sha256": "42553c83ef524f8bb3fb67e03ecd413fe146f790d835a9abde08b105e0e98135",
+      "primary": 0.538112668588619,
+      "secondary": 0.6697253873748908
+    },
+    {
+      "data_size": "small",
+      "layout_id": "layout_004",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_004/size=small/evaluation/metrics.json",
+      "metrics_sha256": "0eff8eb2f3f310b73415e8446a93c997c33d9d2875716e53805761c86448977d",
+      "primary": 0.4714004886138355,
+      "secondary": 0.5836239881416131
+    },
+    {
+      "data_size": "medium",
+      "layout_id": "layout_000",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_000/size=medium/evaluation/metrics.json",
+      "metrics_sha256": "2fcb8538a94b66bf2e64575aefc5d11f520659203b33177ba76bbfdfdd2ecc80",
+      "primary": 0.6241162373829634,
+      "secondary": 0.7432531073323431
+    },
+    {
+      "data_size": "medium",
+      "layout_id": "layout_001",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_001/size=medium/evaluation/metrics.json",
+      "metrics_sha256": "7c34da72fcc5535885deef3be1db81e50e9c9958c1b1e2b5f875269e1a1addd5",
+      "primary": 0.5428725294726878,
+      "secondary": 0.644651096940071
+    },
+    {
+      "data_size": "medium",
+      "layout_id": "layout_002",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_002/size=medium/evaluation/metrics.json",
+      "metrics_sha256": "d2cb134c9e46d52ff74b7ffc0492c647be335a9a49495a1198178d3d6db30d5f",
+      "primary": 0.5731486796832141,
+      "secondary": 0.6925549193159589
+    },
+    {
+      "data_size": "medium",
+      "layout_id": "layout_003",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_003/size=medium/evaluation/metrics.json",
+      "metrics_sha256": "e9f7c1f736f07e9ef68795b6fa9b17427ddd5924a68cbc58954d9d34c4f005b9",
+      "primary": 0.6433417996822305,
+      "secondary": 0.7589124024171704
+    },
+    {
+      "data_size": "medium",
+      "layout_id": "layout_004",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_004/size=medium/evaluation/metrics.json",
+      "metrics_sha256": "2f5166a7efeb5fa0e0f7cc115ba8dc4cfc8bf644186108de93220f25f702e721",
+      "primary": 0.5286775356740296,
+      "secondary": 0.6353721106188899
+    },
+    {
+      "data_size": "large",
+      "layout_id": "layout_000",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_000/size=large/evaluation/metrics.json",
+      "metrics_sha256": "450f3885a0da7f88e955041fc8156233b0bb65fe7e6c979f9e3d781956f61a71",
+      "primary": 0.7089566784175544,
+      "secondary": 0.8111100445952886
+    },
+    {
+      "data_size": "large",
+      "layout_id": "layout_001",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_001/size=large/evaluation/metrics.json",
+      "metrics_sha256": "d8abfa64cd6d936f50c7e05a8c51308d8cdd274e1784182726bd6241d1b1d788",
+      "primary": 0.7180367003290434,
+      "secondary": 0.8234555649826568
+    },
+    {
+      "data_size": "large",
+      "layout_id": "layout_002",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_002/size=large/evaluation/metrics.json",
+      "metrics_sha256": "13d1a67766092a5966b250e7f17ddd7c34893cc12e0f5665025b3905262c3b87",
+      "primary": 0.6406895730816218,
+      "secondary": 0.7476714676889492
+    },
+    {
+      "data_size": "large",
+      "layout_id": "layout_003",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_003/size=large/evaluation/metrics.json",
+      "metrics_sha256": "5302840ad090be4c540728f81003a94f24484c4c818deb29e519ae9cbb5bfdff",
+      "primary": 0.6810891754199245,
+      "secondary": 0.7915380210823697
+    },
+    {
+      "data_size": "large",
+      "layout_id": "layout_004",
+      "metrics_path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/runs/model=mae100_hmm_v2_mh_k6810_distill020/layout=layout_004/size=large/evaluation/metrics.json",
+      "metrics_sha256": "d75afb69837230c8d1735a6769fcfc0b7db1050cf117d6fd6bd88051ef1542c7",
+      "primary": 0.6651514044782498,
+      "secondary": 0.7780028145942098
+    }
+  ],
+  "checkpoint": {
+    "path": "pretraining/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mae100_hmm_v2_mh_k6810_distill020/full_25ep/latest.pt",
+    "sha256": "8535c6547924ce1f8482ae72fc31ac8f1a4ef2efdc8ca26e55479c43df85d4b2"
+  },
+  "consistency_weight": 0.0,
+  "distillation_weight": 0.2,
+  "embedding_metadata": {
+    "path": "embeddings/f3/facies_benchmark_v2/hmm_v2_multi_head_screening_v1/mae100_hmm_v2_mh_k6810_distill020/overlap_x64/f3_facies_benchmark.embedding_metadata.json",
+    "sha256": "bc3bd42c88df8ea6b9009c6f6e8f55ba30045d2b71f1b575856a3989b83991e7"
+  },
+  "embeddings": {
+    "path": "embeddings/f3/facies_benchmark_v2/hmm_v2_multi_head_screening_v1/mae100_hmm_v2_mh_k6810_distill020/overlap_x64/f3_facies_benchmark.embeddings.npy",
+    "sha256": "2881767a74cd6ff80f701b449e4b0260140eda18d95d61599d31a37647a091a1"
+  },
+  "head_ks": [
+    6,
+    8,
+    10
+  ],
+  "receipt_sha256": "515d710884f2b227d2db45ea5d773e5d6eb6516ffa4fe9febc9bc641084489f5",
+  "resolved_training_config": {
+    "path": "pretraining/f3/facies_benchmark_v1/hmm_v2_multi_head_screening_v1/mae100_hmm_v2_mh_k6810_distill020/full_25ep/resolved_config.json",
+    "sha256": "66d59d92a648d973f14eaf898bde1212637843b1d95836fca6647106c1d25fe4"
+  },
+  "schema_version": 1,
+  "source_summary": {
+    "path": "f3_lithology_benchmark/hmm_v2_multi_head_screening_v1/paired_summary/summary.json",
+    "sha256": "8dcf81e81325d2ab246f576ccdb369f9734674566a7877db579133b886568485"
+  },
+  "valid_tokens": {
+    "path": "embeddings/f3/facies_benchmark_v2/hmm_v2_multi_head_screening_v1/mae100_hmm_v2_mh_k6810_distill020/overlap_x64/f3_facies_benchmark.valid_tokens.npy",
+    "sha256": "3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7"
+  }
+}

@@ -66,6 +66,18 @@ LOCAL_VICREG_EXTENSION_ROOT = V2_ROOT / '116_local_vicreg_extension_v1'
 # These suites check every declared candidate config and its source lineage.
 # Counts reject additional YAML that their explicit inventories do not cover.
 CANDIDATE_CONFIG_SUITES = {
+	'128_hmm_v2_k6810_multi_source_v1': (
+		'test_hmm_v2_multi_source_configs.py',
+		20,
+	),
+	'127_hmm_v2_multi_head_screening_v1': (
+		'test_strat_multi_head_pretraining_validation.py',
+		24,
+	),
+	'127_hmm_v1_paper_sections_v1': (
+		'test_f3_hmm_v1_comparison_visualization.py',
+		1,
+	),
 	'117_local_vicreg_10ep_poc_v1': (
 		'test_f3_local_vicreg_10ep_poc_configs.py',
 		4,

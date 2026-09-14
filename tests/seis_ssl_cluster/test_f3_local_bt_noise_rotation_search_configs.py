@@ -476,6 +476,13 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 			FROZEN_HMM_V1_COMPLETION_ROOT
 		):
 			continue
+		if path.parts[3] in {
+			'127_hmm_v1_paper_sections_v1',
+			'128_hmm_v2_k6810_multi_source_v1',
+			'41_hmm_v2_k6810_multi_source_v1',
+			'34_hmm_v2_k6810_multi_source_v1',
+		}:
+			continue
 		text = path.read_text(encoding='utf-8')
 		for token in tokens:
 			assert token not in text, (path, token)

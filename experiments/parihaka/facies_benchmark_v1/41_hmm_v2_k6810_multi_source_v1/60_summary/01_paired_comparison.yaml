@@ -1,0 +1,23 @@
+schema_version: 1
+survey: parihaka
+matrix: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/k6810_multi_source_evaluation_v1/matrix.yaml
+control_receipt: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/k6810_multi_source_evaluation_v1/hmm_v1_controls_receipt.json
+selection_receipt: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/k6810_multi_source_evaluation_v1/f3_mae_k6810_reuse_receipt.json
+artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/hmm_v2_k6810_multi_source_v1/paired_summary
+arms:
+  mae:
+    candidate_id: mae100_hmm_v2_mh_k6810_distill020
+    training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/41_hmm_v2_k6810_multi_source_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill020/02_full_25ep.yaml
+    downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/41_hmm_v2_k6810_multi_source_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill020.yaml
+    control_downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/32_channel_ssl_hmm_four_way_v1/05_channel_four_way.yaml
+  local_bt:
+    candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020
+    training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/41_hmm_v2_k6810_multi_source_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020/02_full_25ep.yaml
+    downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/41_hmm_v2_k6810_multi_source_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020.yaml
+    control_downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/40_downstream/01_local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill020.yaml
+  random:
+    candidate_id: random_init_hmm_v2_mh_k6810_distill020
+    training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/41_hmm_v2_k6810_multi_source_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill020/02_full_25ep.yaml
+    downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/41_hmm_v2_k6810_multi_source_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill020.yaml
+    control_downstream_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/40_downstream/01_random_init_self_target_hmm_k6_distill020.yaml

@@ -1,0 +1,21 @@
+schema_version: 1
+survey: parihaka
+arms:
+  mae:
+    candidate_id: mae100_hmm_v2_mh_k6810_distill020
+    target_family: mae100
+    clustering_reference: experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v1/20_hmm_targets/mae100/k6/02_cluster_hmm_k6.yaml
+    training_reference: experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml
+    embedding_reference: experiments/parihaka/facies_benchmark_v1/32_channel_ssl_hmm_four_way_v1/03_extract_mae_hmm_k6_embeddings.yaml
+  local_bt:
+    candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020
+    target_family: local_bt3
+    clustering_reference: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/10_hmm_targets/local_bt3/01_cluster_hmm_k6.yaml
+    training_reference: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/local_bt3/distill020/01_full_25ep.yaml
+    embedding_reference: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/30_embeddings/01_extract_local_barlow_twins_rot90_asym_g060_3ep_hmm_k6_distill020.yaml
+  random:
+    candidate_id: random_init_hmm_v2_mh_k6810_distill020
+    target_family: random
+    clustering_reference: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/10_hmm_targets/random/01_cluster_hmm_k6.yaml
+    training_reference: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/random/distill020/01_full_25ep.yaml
+    embedding_reference: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/30_embeddings/01_extract_random_init_self_target_hmm_k6_distill020.yaml
