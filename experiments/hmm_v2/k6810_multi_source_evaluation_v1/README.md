@@ -56,6 +56,15 @@ Use the per-survey `RUNBOOK.md` and `run_all.sh` under:
 - `experiments/parihaka/facies_benchmark_v1/41_hmm_v2_k6810_multi_source_v1/`
 - `experiments/volve/horizon_benchmark_v1/34_hmm_v2_k6810_multi_source_v1/`
 
+Both driver planning and the direct survey summary CLI validate the source
+references in each `execution.yaml` before reading live artifacts. Preflight
+compares raw definitions without environment expansion: clustering retains its
+K6 reference except K/output; full training retains the parent, input, masks,
+model and training settings; extraction retains its reference except checkpoint
+and output. Smoke differs from full only in output and its one-step budget.
+Summary `experiment_root` binds the training/downstream paths to the validated
+definition, including the fixed F3 reuse reference.
+
 The default driver mode prints commands. Live execution is sequential and
 requires `--execute`; interrupted training can resume only its own latest
 checkpoint. Complete sources, embeddings and cells are audited before reuse.

@@ -42,3 +42,26 @@ after their predecessors have produced those artifacts.
 
 Experiment-start decision: **GO for implementation readiness**. New live
 artifacts and complete live executions remain unverified.
+
+## Source-family preflight
+
+Validated base: `7602c08`, plus the source-family preflight change.
+
+```bash
+pytest -q tests/seis_ssl_cluster/test_hmm_v2_multi_source_definition.py \
+  tests/seis_ssl_cluster/test_hmm_v2_multi_source_configs.py \
+  tests/seis_ssl_cluster/test_hmm_k6810_receipts_aggregate.py \
+  tests/seis_ssl_cluster/test_hmm_v2_multi_source_driver.py \
+  tests/seis_ssl_cluster/test_hmm_v2_multi_source_adapters.py \
+  tests/seis_ssl_cluster/test_f3_facies_benchmark_v2_configs.py
+```
+
+PASS: 201 tests. Raw-definition checks require no live artifacts or environment
+expansion. Both driver execution and the direct summary CLI reject inheritance
+drift before artifact reads/writes. Summary input paths must identify the
+validated experiment files. The previous test-only source comparisons now run
+through the production validator.
+
+`python -m ruff check --no-fix .`, `python -m compileall -q src proc tests`,
+`python tools/check_seis_ssl_cluster_isolation.py`, and `git diff --check`: PASS.
+No live experiment stages were executed. Implementation readiness remains GO.

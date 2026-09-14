@@ -14,12 +14,10 @@ from pathlib import Path
 
 import yaml
 
-from seis_ssl_cluster.hmm.multi_source_receipts import (
-	CANDIDATE_IDS,
-	DATA_SIZES,
-	load_matrix,
-	validate_fixed_training_config,
+from seis_ssl_cluster.hmm.multi_source_definition import (
+	validate_multi_source_experiment_definition,
 )
+from seis_ssl_cluster.hmm.multi_source_receipts import DATA_SIZES
 
 STAGES = (
 	'targets',
@@ -48,27 +46,10 @@ def command_plan(  # noqa: C901, PLR0912, PLR0915
 	experiment: Path, args: argparse.Namespace
 ) -> list[tuple[str, list[str]]]:
 	"""Enumerate only the eight new arms; the reused arm has no write route."""
-	matrix_path = (
-		experiment.parents[2] / 'hmm_v2/k6810_multi_source_evaluation_v1/matrix.yaml'
-	)
-	load_matrix(matrix_path)
+	validate_multi_source_experiment_definition(experiment)
 	definition = _read(experiment / 'execution.yaml')
 	survey = definition['survey']
 	arms = definition['arms']
-	expected = set(CANDIDATE_IDS) - ({'mae'} if survey == 'f3' else set())
-	if set(arms) != expected or any(
-		a['candidate_id'] != CANDIDATE_IDS[f] for f, a in arms.items()
-	):
-		raise ValueError('execution arms differ from the fixed new-arm matrix')
-	for arm in arms.values():
-		validate_fixed_training_config(
-			_read(
-				experiment
-				/ '30_pretraining'
-				/ arm['candidate_id']
-				/ '02_full_25ep.yaml'
-			)
-		)
 	if args.candidate:
 		arms = {f: a for f, a in arms.items() if a['candidate_id'] == args.candidate}
 		if not arms:

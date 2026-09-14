@@ -1,4 +1,5 @@
 schema_version: 1
+experiment_root: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/41_hmm_v2_k6810_multi_source_v1
 survey: parihaka
 matrix: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/k6810_multi_source_evaluation_v1/matrix.yaml
 control_receipt: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/k6810_multi_source_evaluation_v1/hmm_v1_controls_receipt.json

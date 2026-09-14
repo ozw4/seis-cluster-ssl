@@ -19,6 +19,9 @@ from seis_ssl_cluster.hmm.multi_source_aggregate import (
 	publish_summary,
 )
 from seis_ssl_cluster.hmm.multi_source_cell import audit_completed_cell
+from seis_ssl_cluster.hmm.multi_source_definition import (
+	validate_multi_source_experiment_definition,
+)
 from seis_ssl_cluster.hmm.multi_source_receipts import (
 	CANDIDATE_IDS,
 	CELL_IDENTITIES,
@@ -251,6 +254,29 @@ def _audited_arm(
 	return cells, {'source': lineage, 'paired_cells': audits}
 
 
+def _validate_experiment_inputs(config: dict[str, Any]) -> None:
+	root = Path(config['experiment_root']).resolve()
+	validate_multi_source_experiment_definition(root)
+	if root.parents[1].name != config['survey']:
+		raise ValueError('summary survey differs from experiment definition')
+	for family, entry in config['arms'].items():
+		arm_root = root
+		if (config['survey'], family) == ('f3', 'mae'):
+			arm_root = root.parent / '127_hmm_v2_multi_head_screening_v1'
+		cid = CANDIDATE_IDS[family]
+		expected = {
+			'training_config': arm_root / '30_pretraining' / cid / '02_full_25ep.yaml',
+			'downstream_config': arm_root / '50_downstream' / f'{cid}.yaml',
+		}
+		if entry['candidate_id'] != cid or any(
+			Path(entry[field]).resolve() != path.resolve()
+			for field, path in expected.items()
+		):
+			raise ValueError(
+				'summary inputs differ from validated experiment definition'
+			)
+
+
 def inspect_survey(config: dict[str, Any]) -> dict[str, Any]:
 	"""Return a complete 45-cell payload only after source and paired-cell audits."""
 	if (
@@ -259,6 +285,7 @@ def inspect_survey(config: dict[str, Any]) -> dict[str, Any]:
 		or set(config['arms']) != set(SOURCE_FAMILIES)
 	):
 		raise ValueError('expected one survey and all three fixed source families')
+	_validate_experiment_inputs(config)
 	survey = config['survey']
 	load_matrix(Path(config['matrix']))
 	for field in ('matrix', 'control_receipt', 'selection_receipt', 'summary_root'):

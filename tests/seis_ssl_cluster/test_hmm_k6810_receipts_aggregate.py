@@ -307,6 +307,13 @@ def test_aggregate_rejects_partial_or_drifting_inputs(synthetic, change):
 	assert not (root / 'output').exists()
 
 
+def summary_definition(survey):
+	root = next(ROOT.glob(f'experiments/{survey}/*/*hmm_v2_k6810_multi_source_v1'))
+	raw = (root / '60_summary/01_paired_comparison.yaml').read_text()
+	definition = yaml.safe_load(raw.replace('${SEIS_SSL_CLUSTER_WORKSPACE}', str(ROOT)))
+	return {k: definition[k] for k in ('experiment_root', 'arms')}
+
+
 @pytest.mark.parametrize('survey', receipts.SURVEYS)
 def test_survey_summary_complete_atomic_and_paired(synthetic, monkeypatch, survey):
 	config, root = synthetic
@@ -316,7 +323,7 @@ def test_survey_summary_complete_atomic_and_paired(synthetic, monkeypatch, surve
 		'schema_version': 1,
 		'survey': survey,
 		'artifact_root': str(root),
-		'arms': {f: {} for f in receipts.SOURCE_FAMILIES},
+		**summary_definition(survey),
 	}
 
 	def audit(_config, family, _receipt):
@@ -349,7 +356,7 @@ def test_survey_failure_creates_no_output(synthetic, monkeypatch, change):
 		'schema_version': 1,
 		'survey': 'f3',
 		'artifact_root': str(root),
-		'arms': {f: {} for f in receipts.SOURCE_FAMILIES},
+		**summary_definition('f3'),
 	}
 
 	def audit(_config, family, _receipt):
