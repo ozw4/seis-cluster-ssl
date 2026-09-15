@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import yaml
 
 from seis_ssl_cluster.config.io import _expand_environment_variables
+from seis_ssl_cluster.embedding.extractor import _stratigraphy_base_objective
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.training.random_checkpoint import (
 	load_checkpoint_metadata_without_weights,
@@ -44,7 +45,7 @@ def audit_multi_head_recipe_source(
 		if config.recipe.method == 'local_barlow_twins_3d'
 		else 'amp_mae3d'
 	)
-	if payload.get('pretraining_method', 'amp_mae3d') != objective:
+	if _stratigraphy_base_objective(payload) != objective:
 		raise ValueError(
 			'Multi-Head source base objective differs from declared recipe'
 		)

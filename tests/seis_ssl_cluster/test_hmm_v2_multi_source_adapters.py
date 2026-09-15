@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 import torch
 
+from seis_ssl_cluster.hmm import multi_source_volve
 from seis_ssl_cluster.hmm.multi_source_cell import audit_completed_cell
 from seis_ssl_cluster.parihaka import channel_decoder
 from seis_ssl_cluster.volve.horizon_five_way_results import (
@@ -163,3 +164,41 @@ def test_volve_multi_head_embedding_metadata_matches_extractor_contract(
 	metadata['stratigraphy_pretext']['method'] = 'strat_hmm_pretext'
 	with pytest.raises(ValueError, match='method'):
 		_validate_embedding_objective(model, metadata)
+
+
+def test_volve_multi_head_source_uses_checkpoint_config_objective(
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+) -> None:
+	universe = write_recipe_arm_universe(tmp_path, embeddings=True)
+	path = tmp_path / 'full.yaml'
+	config = replace(universe['config'], multi_head_training_config=path)
+	path.write_text(
+		json.dumps({'student': {'init_checkpoint': str(config.arm_checkpoint)}})
+	)
+	evidence = {
+		'head_ks': [6, 8, 10],
+		'model_tag': config.arm_id,
+		'checkpoint': {'path': str(config.arm_checkpoint), 'sha256': 'a' * 64},
+	}
+	monkeypatch.setattr(
+		multi_source_volve, 'audit_multi_head_source', lambda _: evidence
+	)
+	payload = {
+		'config': {
+			'stage': 'barlow_twins_training',
+			'barlow_twins': {'method': 'local_barlow_twins_3d'},
+		}
+	}
+	monkeypatch.setattr(
+		multi_source_volve,
+		'load_checkpoint_metadata_without_weights',
+		lambda _: payload,
+	)
+	assert (
+		multi_source_volve.audit_multi_head_recipe_source(config)['objective']
+		== 'local_barlow_twins_3d'
+	)
+	payload['config'] = {'stage': 'train_amp_mae'}
+	with pytest.raises(ValueError, match='base objective differs'):
+		multi_source_volve.audit_multi_head_recipe_source(config)
