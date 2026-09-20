@@ -207,9 +207,12 @@ def test_barlow_checkpoint_uses_existing_full_volume_extraction_contract(
 		'redundancy_weight': 0.005,
 		'normalization_eps': 1.0e-4,
 	}
-	assert metadata['model_geometry'] == json.loads(
-		mae_result.metadata_path.read_text(encoding='utf-8')
-	)['model_geometry']
+	assert (
+		metadata['model_geometry']
+		== json.loads(mae_result.metadata_path.read_text(encoding='utf-8'))[
+			'model_geometry'
+		]
+	)
 
 
 def test_local_barlow_checkpoint_extracts_encoder_dim_and_objective_metadata(
@@ -409,9 +412,7 @@ def test_barlow_checkpoint_rejects_payload_and_config_method_mismatch(
 		Path(standard_config['embeddings']['checkpoint']),  # type: ignore[index]
 		map_location='cpu',
 	)
-	standard_payload['pretraining_method'] = (
-		LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
-	)
+	standard_payload['pretraining_method'] = LOCAL_BARLOW_TWINS_PRETRAINING_METHOD
 
 	with pytest.raises(ValueError, match=r'pretraining_method.*config'):
 		build_model_from_checkpoint_payload(standard_payload)
@@ -613,9 +614,10 @@ def test_embedding_extraction_uses_manifest_source_valid_mask(
 	assert metadata['source_valid_mask_path'] == str(valid_mask_path)
 	assert metadata['preprocessing_cache']['requested_mode'] == 'memory'
 	assert metadata['preprocessing_cache']['effective_mode'] == 'off'
-	assert 'window-local memmap reads' in metadata['preprocessing_cache'][
-		'fallback_reason'
-	]
+	assert (
+		'window-local memmap reads'
+		in metadata['preprocessing_cache']['fallback_reason']
+	)
 
 
 def test_loaded_model_extraction_matches_checkpoint_and_publishes_descriptor(
@@ -638,8 +640,7 @@ def test_loaded_model_extraction_matches_checkpoint_and_publishes_descriptor(
 		name: module.training for name, module in student.named_modules()
 	}
 	state_before = {
-		name: value.detach().clone()
-		for name, value in student.state_dict().items()
+		name: value.detach().clone() for name, value in student.state_dict().items()
 	}
 	cpu_rng_before = torch.random.get_rng_state()
 
@@ -704,8 +705,7 @@ def test_loaded_model_extraction_restores_mode_state_and_rng_on_failure(
 		name: module.training for name, module in student.named_modules()
 	}
 	state_before = {
-		name: value.detach().clone()
-		for name, value in student.state_dict().items()
+		name: value.detach().clone() for name, value in student.state_dict().items()
 	}
 	cpu_rng_before = torch.random.get_rng_state()
 
@@ -927,12 +927,15 @@ def test_cached_window_amplitude_and_masks_match_legacy_exactly(
 		),
 	)
 	assert any(
-		any(start + size > shape for start, size, shape in zip(
-			window.start_xyz,
-			window.size_xyz,
-			manifest.amplitude.shape_xyz,
-			strict=True,
-		))
+		any(
+			start + size > shape
+			for start, size, shape in zip(
+				window.start_xyz,
+				window.size_xyz,
+				manifest.amplitude.shape_xyz,
+				strict=True,
+			)
+		)
 		for window in windows
 	)
 	for window in windows:
@@ -1136,7 +1139,7 @@ def test_extraction_settings_resolve_average_chunk_size(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(
 	('batch_size', 'prefetch_queue_depth'),
-	[(1, 0), (2, 1), (5, 3)],
+	[(1, 0), (1, 2), (2, 1), (5, 3)],
 )
 def test_batched_prefetch_matches_synchronous_reference(
 	tmp_path: Path,
@@ -1178,6 +1181,94 @@ def test_batched_prefetch_matches_synchronous_reference(
 	assert sum(encode_batch_sizes) == 12
 	assert len(encode_batch_sizes) == math.ceil(12 / batch_size)
 	assert encode_batch_sizes[-1] == (12 % batch_size or batch_size)
+
+
+@pytest.mark.parametrize(
+	('device', 'amp_enabled'),
+	[
+		('cpu', False),
+		pytest.param(
+			'cuda',
+			False,
+			marks=[
+				pytest.mark.requires_cuda,
+				pytest.mark.skipif(
+					not torch.cuda.is_available(), reason='CUDA is unavailable'
+				),
+			],
+		),
+		pytest.param(
+			'cuda',
+			True,
+			marks=[
+				pytest.mark.requires_cuda,
+				pytest.mark.skipif(
+					not torch.cuda.is_available(), reason='CUDA is unavailable'
+				),
+			],
+		),
+	],
+)
+@pytest.mark.parametrize('output_dtype', ['float16', 'float32'])
+@pytest.mark.parametrize('agc_enabled', [False, True])
+def test_single_window_prefetch_preserves_artifact_bytes_and_skip_existing(  # noqa: PLR0913
+	tmp_path: Path,
+	monkeypatch: pytest.MonkeyPatch,
+	*,
+	device: str,
+	amp_enabled: bool,
+	output_dtype: str,
+	agc_enabled: bool,
+) -> None:
+	agc = (
+		{
+			'enabled': True,
+			'mode': 'trace_rms_z',
+			'window_z': 3,
+			'eps': 0.001,
+			'clip_abs': 5.0,
+		}
+		if agc_enabled
+		else {'enabled': False}
+	)
+	config = _write_fixture(tmp_path, checkpoint_amplitude_agc=agc)
+	config['embedding'].update(
+		batch_size=1, prefetch_queue_depth=0, output_dtype=output_dtype, amp=amp_enabled
+	)
+	reference = run_embedding_extraction(config, device=device)[0]
+	config['embedding']['prefetch_queue_depth'] = 2
+	assert run_embedding_extraction(config, device=device, skip_existing=True)[
+		0
+	].skipped
+	config['embeddings']['output_dir'] = str(tmp_path / 'prefetched')
+	producer_threads: list[str] = []
+	consumer_threads: list[str] = []
+	original_read = extractor_module._read_window  # noqa: SLF001
+	original_encode = AmplitudeMAE3D.encode_tokens
+
+	def record_read(*args: object, **kwargs: object) -> object:
+		producer_threads.append(threading.current_thread().name)
+		return original_read(*args, **kwargs)
+
+	def record_encode(
+		self: AmplitudeMAE3D, x: torch.Tensor, **kwargs: object
+	) -> object:
+		assert x.shape[0] == 1
+		consumer_threads.append(threading.current_thread().name)
+		return original_encode(self, x, **kwargs)
+
+	monkeypatch.setattr(extractor_module, '_read_window', record_read)
+	monkeypatch.setattr(AmplitudeMAE3D, 'encode_tokens', record_encode)
+	actual = run_embedding_extraction(config, device=device)[0]
+	assert actual.embeddings_path.read_bytes() == reference.embeddings_path.read_bytes()
+	assert (
+		actual.valid_tokens_path.read_bytes()
+		== reference.valid_tokens_path.read_bytes()
+	)
+	assert actual.metadata_path.read_bytes() == reference.metadata_path.read_bytes()
+	assert producer_threads == ['embedding-prefetch'] * 12
+	assert consumer_threads == [threading.current_thread().name] * 12
+	assert all(thread.name != 'embedding-prefetch' for thread in threading.enumerate())
 
 
 @pytest.mark.parametrize('prefetch_queue_depth', [0, 2])
@@ -1228,9 +1319,7 @@ def test_prefetch_producer_exception_stops_worker(
 	with pytest.raises(RuntimeError, match='injected producer failure'):
 		run_embedding_extraction(config, device='cpu')
 
-	assert all(
-		thread.name != 'embedding-prefetch' for thread in threading.enumerate()
-	)
+	assert all(thread.name != 'embedding-prefetch' for thread in threading.enumerate())
 
 
 @pytest.mark.parametrize('error_type', [RuntimeError, KeyboardInterrupt])
@@ -1250,9 +1339,7 @@ def test_prefetch_consumer_exception_stops_worker(
 	with pytest.raises(error_type, match='injected consumer failure'):
 		run_embedding_extraction(config, device='cpu')
 
-	assert all(
-		thread.name != 'embedding-prefetch' for thread in threading.enumerate()
-	)
+	assert all(thread.name != 'embedding-prefetch' for thread in threading.enumerate())
 
 
 @pytest.mark.parametrize('prefetch_queue_depth', [0, 1])

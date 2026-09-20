@@ -32,6 +32,7 @@ from seis_ssl_cluster.stratigraphy.losses import (
 	soft_categorical_cross_entropy,
 	structured_hmm_prototype_loss,
 	usage_entropy_floor_loss,
+	usage_entropy_floor_loss_with_entropy,
 )
 from seis_ssl_cluster.stratigraphy.multi_head import (
 	build_frozen_k6_reference_receipt,
@@ -259,6 +260,7 @@ __all__ = [
 	'soft_categorical_cross_entropy',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
+	'usage_entropy_floor_loss_with_entropy',
 	'validate_frozen_k6_reference',
 	'validate_multi_head_lateral_target_manifest',
 	'validate_multi_head_state_posterior_manifest',

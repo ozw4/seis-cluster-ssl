@@ -9,6 +9,7 @@ import torch
 
 from seis_ssl_cluster.models.mae.patching import compute_num_patches, patchify_3d
 from seis_ssl_cluster.training.collate import move_batch_to_device
+from seis_ssl_cluster.training.strat_hmm.encoding import UnmaskedEncoderPair
 from seis_ssl_cluster.training.strat_hmm.losses import (
 	compute_strat_hmm_center_trace_masked_losses,
 	compute_strat_hmm_multi_head_losses,
@@ -25,6 +26,10 @@ from seis_ssl_cluster.training.strat_hmm.runtime import (
 	_required_tensor,
 )
 from seis_ssl_cluster.training.strat_hmm.state import StratHmmTrainingState
+from seis_ssl_cluster.training.strat_hmm.tensor_ops import (
+	all_tensors_finite,
+	materialize_metrics,
+)
 
 if TYPE_CHECKING:
 	from collections.abc import Callable
@@ -39,7 +44,7 @@ if TYPE_CHECKING:
 	)
 
 
-def train_strat_hmm_head_only_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR0915
+def train_strat_hmm_head_only_one_epoch(  # noqa: C901, PLR0913
 	*,
 	student: AmplitudeMAE3D,
 	teacher: AmplitudeMAE3D | None = None,
@@ -61,6 +66,11 @@ def train_strat_hmm_head_only_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR091
 	"""Train the ordered prototype head for one epoch."""
 	_set_student_training_mode(student)
 	head.train()
+	encoder_pair = UnmaskedEncoderPair(
+		student,
+		teacher,
+		use_teacher=_float_config(loss_config, 'distillation_weight', 0.0) > 0.0,
+	)
 	totals: dict[str, float] = {}
 	batches = 0
 	last_batch_index = -1
@@ -69,28 +79,13 @@ def train_strat_hmm_head_only_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR091
 			continue
 		if max_steps is not None and batches >= max_steps:
 			break
-		batch = move_batch_to_device(raw_batch, device)
+		batch = move_batch_to_device(raw_batch, device, non_blocking=True)
 		optimizer.zero_grad(set_to_none=True)
 
-		student_grad_enabled = any(
-			parameter.requires_grad for parameter in student.parameters()
+		encoded, teacher_encoded = encoder_pair.encode(
+			_required_tensor(batch, 'x'),
+			valid_mask=_required_tensor(batch, 'local_valid_mask'),
 		)
-		with torch.set_grad_enabled(student_grad_enabled):
-			encoded = student.encode_tokens(
-				_required_tensor(batch, 'x'),
-				valid_mask=_required_tensor(batch, 'local_valid_mask'),
-			)
-		teacher_encoded = None
-		if _float_config(loss_config, 'distillation_weight', 0.0) > 0.0:
-			if teacher is None:
-				msg = 'teacher is required when loss.distillation_weight is positive'
-				raise ValueError(msg)
-			teacher.eval()
-			with torch.no_grad():
-				teacher_encoded = teacher.encode_tokens(
-					_required_tensor(batch, 'x'),
-					valid_mask=_required_tensor(batch, 'local_valid_mask'),
-				)
 		with torch.amp.autocast('cuda', enabled=amp_enabled):
 			losses = compute_strat_hmm_pretext_losses(
 				head=head,
@@ -108,13 +103,6 @@ def train_strat_hmm_head_only_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR091
 			global_step=global_step,
 			batch_index=batch_index,
 		)
-		if not torch.isfinite(loss).all():
-			msg = (
-				'non-finite strat HMM pretext loss at '
-				f'epoch {epoch}, step {global_step}, batch {batch_index}'
-			)
-			raise FloatingPointError(msg)
-
 		if amp_enabled:
 			if scaler is None:
 				msg = 'scaler is required when amp_enabled is true'
@@ -157,9 +145,7 @@ def train_strat_hmm_head_only_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR091
 				)
 			optimizer.step()
 
-		step_metrics = {
-			key: float(value.detach().cpu().item()) for key, value in losses.items()
-		}
+		step_metrics = materialize_metrics(losses)
 		if batches > 0 and set(step_metrics) != set(totals):
 			raise ValueError('strat HMM epoch metric keys changed between batches')
 		for key, value in step_metrics.items():
@@ -213,6 +199,11 @@ def train_strat_hmm_multi_head_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR09
 	"""Train all ordered-prototype resolutions from one shared token encoding."""
 	_set_student_training_mode(student)
 	heads.train()
+	encoder_pair = UnmaskedEncoderPair(
+		student,
+		teacher,
+		use_teacher=_float_config(loss_config, 'distillation_weight', 0.0) > 0.0,
+	)
 	totals: dict[str, float] = {}
 	batches = 0
 	last_batch_index = -1
@@ -221,28 +212,12 @@ def train_strat_hmm_multi_head_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR09
 			continue
 		if max_steps is not None and batches >= max_steps:
 			break
-		batch = move_batch_to_device(raw_batch, device)
+		batch = move_batch_to_device(raw_batch, device, non_blocking=True)
 		optimizer.zero_grad(set_to_none=True)
-		student_grad_enabled = any(
-			parameter.requires_grad for parameter in student.parameters()
+		encoded, teacher_encoded = encoder_pair.encode(
+			_required_tensor(batch, 'x'),
+			valid_mask=_required_tensor(batch, 'local_valid_mask'),
 		)
-		with torch.set_grad_enabled(student_grad_enabled):
-			encoded = student.encode_tokens(
-				_required_tensor(batch, 'x'),
-				valid_mask=_required_tensor(batch, 'local_valid_mask'),
-			)
-		teacher_encoded = None
-		if _float_config(loss_config, 'distillation_weight', 0.0) > 0.0:
-			if teacher is None:
-				raise ValueError(
-					'teacher is required when loss.distillation_weight is positive',
-				)
-			teacher.eval()
-			with torch.no_grad():
-				teacher_encoded = teacher.encode_tokens(
-					_required_tensor(batch, 'x'),
-					valid_mask=_required_tensor(batch, 'local_valid_mask'),
-				)
 		with torch.amp.autocast('cuda', enabled=amp_enabled):
 			if target_representation == 'ordered_path_state_posterior_v1':
 				losses = compute_strat_hmm_multi_head_posterior_losses(
@@ -335,9 +310,7 @@ def train_strat_hmm_multi_head_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR09
 					batch_index=batch_index,
 				)
 			optimizer.step()
-		step_metrics = {
-			key: float(value.detach().cpu().item()) for key, value in losses.items()
-		}
+		step_metrics = materialize_metrics(losses)
 		if batches > 0 and set(step_metrics) != set(totals):
 			raise ValueError('strat HMM epoch metric keys changed between batches')
 		for key, value in step_metrics.items():
@@ -419,7 +392,7 @@ def train_strat_hmm_center_trace_masked_one_epoch(  # noqa: C901, PLR0912, PLR09
 			continue
 		if max_steps is not None and batches >= max_steps:
 			break
-		batch = move_batch_to_device(raw_batch, device)
+		batch = move_batch_to_device(raw_batch, device, non_blocking=True)
 		x = _required_tensor(batch, 'x')
 		local_valid_mask = _required_tensor(batch, 'local_valid_mask')
 		common_target_valid_mask = _center_trace_common_target_valid_mask(batch)
@@ -527,9 +500,7 @@ def train_strat_hmm_center_trace_masked_one_epoch(  # noqa: C901, PLR0912, PLR09
 				)
 			optimizer.step()
 
-		step_metrics = {
-			key: float(value.detach().cpu().item()) for key, value in losses.items()
-		}
+		step_metrics = materialize_metrics(losses)
 		if batches > 0 and set(step_metrics) != set(totals):
 			raise ValueError('center-trace epoch metric keys changed between batches')
 		for key, value in step_metrics.items():
@@ -689,7 +660,7 @@ def _ensure_finite_losses(
 	global_step: int,
 	batch_index: int,
 ) -> None:
-	if all(torch.isfinite(value).all() for value in losses.values()):
+	if all_tensors_finite(losses.values()):
 		return
 	raise FloatingPointError(
 		'non-finite strat HMM pretext loss at '
@@ -710,7 +681,7 @@ def _ensure_finite_gradients(
 		for parameter in module.parameters()
 		if parameter.requires_grad and parameter.grad is not None
 	]
-	if all(torch.isfinite(gradient).all() for gradient in gradients):
+	if all_tensors_finite(gradients):
 		return
 	raise FloatingPointError(
 		'non-finite strat HMM pretext gradient at '
@@ -756,18 +727,16 @@ def _clip_gradients_for_modules(
 		for parameter in parameters
 		if parameter.grad is not None
 	]
-	if not torch.isfinite(grad_norm.detach()).all():
-		msg = (
-			'non-finite strat HMM pretext gradient norm at '
-			f'epoch {epoch}, step {global_step}, batch {batch_index}'
+	norms = [grad_norm.detach()]
+	if gradients:
+		norms.append(
+			torch.linalg.vector_norm(
+				torch.stack(
+					[torch.linalg.vector_norm(gradient) for gradient in gradients]
+				),
+			)
 		)
-		raise FloatingPointError(msg)
-	if not gradients:
-		return
-	post_clip_grad_norm = torch.linalg.vector_norm(
-		torch.stack([torch.linalg.vector_norm(gradient) for gradient in gradients]),
-	)
-	if torch.isfinite(post_clip_grad_norm).all():
+	if all_tensors_finite(norms):
 		return
 	msg = (
 		'non-finite strat HMM pretext gradient norm at '

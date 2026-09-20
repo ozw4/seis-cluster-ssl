@@ -164,6 +164,32 @@ class AmplitudeMAE3D(nn.Module):
 		replacement_token: torch.Tensor | None = None,
 	) -> dict[str, torch.Tensor | tuple[int, int, int] | None]:
 		"""Encode all spatial tokens, optionally replacing selected inputs."""
+		tokens, token_grid_shape, token_valid_mask = self.prepare_encoder_tokens(
+			x,
+			valid_mask=valid_mask,
+			replacement_mask=replacement_mask,
+			replacement_token=replacement_token,
+		)
+		key_padding_mask = None if token_valid_mask is None else ~token_valid_mask
+		encoded = self.encoder(tokens, key_padding_mask)
+		output: dict[str, torch.Tensor | tuple[int, int, int] | None] = {
+			'tokens': encoded,
+			'token_grid_shape': token_grid_shape,
+			'token_valid_mask': token_valid_mask,
+		}
+		if replacement_mask is not None:
+			output['replacement_mask'] = replacement_mask
+		return output
+
+	def prepare_encoder_tokens(
+		self,
+		x: torch.Tensor,
+		*,
+		valid_mask: torch.Tensor | None = None,
+		replacement_mask: torch.Tensor | None = None,
+		replacement_token: torch.Tensor | None = None,
+	) -> tuple[torch.Tensor, tuple[int, int, int], torch.Tensor | None]:
+		"""Project and position tokens, retaining the normal input/mask checks."""
 		if (replacement_mask is None) != (replacement_token is None):
 			raise ValueError(
 				'replacement_mask and replacement_token must be provided together'
@@ -198,19 +224,7 @@ class AmplitudeMAE3D(nn.Module):
 			token_grid_shape,
 			self.runtime_checks,
 		)
-		key_padding_mask = None
-		if token_valid_mask is not None:
-			key_padding_mask = ~token_valid_mask
-
-		encoded = self.encoder(tokens + pos.unsqueeze(0), key_padding_mask)
-		output: dict[str, torch.Tensor | tuple[int, int, int] | None] = {
-			'tokens': encoded,
-			'token_grid_shape': token_grid_shape,
-			'token_valid_mask': token_valid_mask,
-		}
-		if replacement_mask is not None:
-			output['replacement_mask'] = replacement_mask
-		return output
+		return tokens + pos.unsqueeze(0), token_grid_shape, token_valid_mask
 
 	def _project_patches(
 		self,
@@ -223,11 +237,13 @@ class AmplitudeMAE3D(nn.Module):
 			self.patch_size_xyz,
 		)[:3]
 		patches = patchify_3d(x, self.patch_size_xyz)
-		projected = self.patch_projection(patches.reshape(
-			batch_size,
-			-1,
-			self.in_channels * self.patch_volume,
-		))
+		projected = self.patch_projection(
+			patches.reshape(
+				batch_size,
+				-1,
+				self.in_channels * self.patch_volume,
+			)
+		)
 		return patches, projected, token_grid_shape
 
 	def _position_embedding(
@@ -374,8 +390,7 @@ def _validate_replacement_mask(
 ) -> None:
 	if not isinstance(replacement_mask, torch.Tensor):
 		raise TypeError(
-			'replacement_mask must be a tensor; '
-			f'got {type(replacement_mask).__name__}'
+			f'replacement_mask must be a tensor; got {type(replacement_mask).__name__}'
 		)
 	if replacement_mask.ndim != 4 or tuple(replacement_mask.shape) != (
 		batch_size,

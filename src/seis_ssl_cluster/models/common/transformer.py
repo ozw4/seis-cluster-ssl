@@ -137,8 +137,20 @@ class TransformerStack(nn.Module):
 		self,
 		tokens: torch.Tensor,
 		key_padding_mask: torch.Tensor | None = None,
+		*,
+		start_layer: int = 0,
+		stop_layer: int | None = None,
 	) -> torch.Tensor:
-		"""Apply each transformer block in sequence."""
+		"""Apply a contiguous range of blocks, or the complete stack by default."""
+		stop_layer = len(self.layers) if stop_layer is None else stop_layer
+		if (
+			isinstance(start_layer, bool)
+			or not isinstance(start_layer, int)
+			or isinstance(stop_layer, bool)
+			or not isinstance(stop_layer, int)
+			or not 0 <= start_layer <= stop_layer <= len(self.layers)
+		):
+			raise ValueError('layer range must satisfy 0 <= start <= stop <= depth')
 		batch_size, num_tokens = _validate_tokens(tokens, self.embed_dim)
 		_validate_key_padding_mask(
 			key_padding_mask,
@@ -151,8 +163,8 @@ class TransformerStack(nn.Module):
 			frozenset(id(layer) for layer in self.layers),
 		)
 		try:
-			for layer in self.layers:
-				tokens = layer(tokens, key_padding_mask)
+			for index in range(start_layer, stop_layer):
+				tokens = self.layers[index](tokens, key_padding_mask)
 			return tokens
 		finally:
 			_PREVALIDATED_BLOCK_IDS.reset(context_token)

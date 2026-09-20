@@ -115,8 +115,7 @@ def soft_categorical_cross_entropy(
 	prefix_shape = logits.shape[:-1]
 	if not isinstance(target_posterior, torch.Tensor):
 		raise TypeError(
-			'target_posterior must be a torch.Tensor; got '
-			f'{type(target_posterior)!r}',
+			f'target_posterior must be a torch.Tensor; got {type(target_posterior)!r}',
 		)
 	if tuple(target_posterior.shape) != tuple(logits.shape):
 		raise ValueError(
@@ -142,20 +141,26 @@ def soft_categorical_cross_entropy(
 	if not bool(torch.all(flat_target[~flat_valid] == 0.0).item()):
 		raise ValueError('invalid target_posterior rows must be zero')
 	valid_row_sums = flat_target[flat_valid].sum(dim=-1)
-	if not bool(torch.all(torch.isclose(
-		valid_row_sums,
-		torch.ones((), device=logits.device, dtype=target_posterior.dtype),
-		rtol=0.0,
-		atol=2.0e-6,
-	)).item()):
+	if not bool(
+		torch.all(
+			torch.isclose(
+				valid_row_sums,
+				torch.ones((), device=logits.device, dtype=target_posterior.dtype),
+				rtol=0.0,
+				atol=2.0e-6,
+			)
+		).item()
+	):
 		raise ValueError('valid target_posterior rows must sum to one')
 	if not bool(flat_valid.any().item()):
 		return logits.sum() * 0.0
 	selected_target = flat_target[flat_valid].to(dtype=logits.dtype)
 	selected_logits = logits.reshape(-1, logits.shape[-1])[flat_valid]
-	return -(selected_target * torch.nn.functional.log_softmax(
-		selected_logits, dim=-1
-	)).sum(dim=-1).mean()
+	return (
+		-(selected_target * torch.nn.functional.log_softmax(selected_logits, dim=-1))
+		.sum(dim=-1)
+		.mean()
+	)
 
 
 def usage_entropy_floor_loss(
@@ -166,6 +171,27 @@ def usage_entropy_floor_loss(
 	eps: float = 1.0e-8,
 ) -> torch.Tensor:
 	"""Penalize valid-token prototype usage entropy below ``entropy_floor``."""
+	loss, _ = usage_entropy_floor_loss_with_entropy(
+		probs,
+		valid_mask=valid_mask,
+		entropy_floor=entropy_floor,
+		eps=eps,
+	)
+	return loss
+
+
+def usage_entropy_floor_loss_with_entropy(
+	probs: torch.Tensor,
+	*,
+	valid_mask: torch.Tensor,
+	entropy_floor: float,
+	eps: float = 1.0e-8,
+) -> tuple[torch.Tensor, torch.Tensor]:
+	"""Return ``(floor_loss, entropy)`` from one valid-token usage reduction.
+
+	Validation and arithmetic match :func:`usage_entropy_floor_loss`. The entropy
+	retains its gradient path and can also serve as the current batch's metric.
+	"""
 	_validate_eps(eps)
 	_validate_probability_tensor(probs)
 	prefix_shape = probs.shape[:-1]
@@ -180,7 +206,7 @@ def usage_entropy_floor_loss(
 	q_bar = probs.reshape(-1, probs.shape[-1])[flat_valid].mean(dim=0)
 	entropy = -(q_bar * (q_bar + eps).log()).sum()
 	floor = probs.new_tensor(float(entropy_floor))
-	return (floor - entropy).clamp_min(0.0).square()
+	return (floor - entropy).clamp_min(0.0).square(), entropy
 
 
 def feature_distillation_loss(
@@ -384,16 +410,10 @@ def _validate_matching_feature_tensors(
 	teacher_features: torch.Tensor,
 ) -> None:
 	if not isinstance(student_features, torch.Tensor):
-		msg = (
-			'student_features must be a torch.Tensor; '
-			f'got {type(student_features)!r}'
-		)
+		msg = f'student_features must be a torch.Tensor; got {type(student_features)!r}'
 		raise TypeError(msg)
 	if not isinstance(teacher_features, torch.Tensor):
-		msg = (
-			'teacher_features must be a torch.Tensor; '
-			f'got {type(teacher_features)!r}'
-		)
+		msg = f'teacher_features must be a torch.Tensor; got {type(teacher_features)!r}'
 		raise TypeError(msg)
 	if tuple(student_features.shape) != tuple(teacher_features.shape):
 		msg = (
@@ -433,4 +453,5 @@ __all__ = [
 	'soft_categorical_cross_entropy',
 	'structured_hmm_prototype_loss',
 	'usage_entropy_floor_loss',
+	'usage_entropy_floor_loss_with_entropy',
 ]
