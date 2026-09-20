@@ -2,6 +2,8 @@
 
 ## General
 
+- [Development](development.md): setup, change-appropriate validation, and the
+  consumer checks hook.
 - [Configuration](configuration.md): configuration sources of truth and explicit
   artifact handoffs.
 - [Same-survey pretraining claims](same_survey_pretraining_claims.md): shared

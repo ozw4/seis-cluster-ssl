@@ -3,6 +3,7 @@ set -euo pipefail
 
 readonly WORK_EXCLUDE_PATHSPEC=':(exclude).work'
 readonly VENDOR_EXCLUDE_PATHSPEC=':(exclude)vendor/issue_forge'
+readonly PORTABLE_MARKERS='not slow and not requires_segy and not requires_cuda'
 
 fail() {
   printf '%s\n' "$1" >&2
@@ -38,24 +39,43 @@ run_shellcheck_if_needed() {
 }
 
 run_pytest_if_needed() {
-  local should_run="$1"
+  local scope="$1"
+  shift
+  local -a test_targets=("$@")
+  local -a pytest_args=(-q)
+  local -A seen_targets=()
+  local target
 
-  if [[ "$should_run" -ne 1 ]]; then
+  if [[ "$scope" == none && "${#test_targets[@]}" -eq 0 ]]; then
     printf 'pytest: skipped (no Python-related changes)\n'
     return 0
   fi
 
   require_command pytest
-  printf 'pytest: pytest -q\n'
-  pytest -q
+  if [[ "$scope" == portable ]]; then
+    pytest_args+=(-m "$PORTABLE_MARKERS")
+  fi
+  if [[ "$scope" == none ]]; then
+    for target in "${test_targets[@]}"; do
+      if [[ -z "${seen_targets[$target]:-}" ]]; then
+        pytest_args+=("$target")
+        seen_targets["$target"]=1
+      fi
+    done
+  fi
+  printf 'pytest:'
+  printf ' %q' pytest "${pytest_args[@]}"
+  printf '\n'
+  pytest "${pytest_args[@]}"
 }
 
 main() {
   local base_ref
   local path
-  local run_pytest=0
+  local pytest_scope=none
   local -a changed_files=()
   local -a shell_targets=()
+  local -a test_targets=()
 
   if [[ "$#" -ne 1 ]]; then
     fail "Usage: $0 <base-ref>"
@@ -83,14 +103,27 @@ main() {
     esac
 
     case "$path" in
-      *.py|tests/*|pytest.ini|pyproject.toml|setup.cfg|tox.ini|requirements*.txt|Pipfile|Pipfile.lock|poetry.lock|uv.lock)
-        run_pytest=1
+      pytest.ini|pyproject.toml|setup.py|setup.cfg|tox.ini|requirements*.txt|Pipfile|Pipfile.lock|poetry.lock|uv.lock)
+        pytest_scope=full
+        ;;
+      tests/test_*.py|tests/*/test_*.py)
+        if [[ -f "$path" ]]; then
+          test_targets+=("$path")
+        elif [[ "$pytest_scope" != full ]]; then
+          pytest_scope=portable
+        fi
+        ;;
+      *.py|tests/*)
+        [[ "$pytest_scope" == full ]] || pytest_scope=portable
+        ;;
+      .issue_forge/checks/run_changed.sh)
+        test_targets+=(tests/seis_ssl_cluster/test_issue_forge_checks.py)
         ;;
     esac
   done
 
   run_shellcheck_if_needed "${shell_targets[@]}"
-  run_pytest_if_needed "$run_pytest"
+  run_pytest_if_needed "$pytest_scope" "${test_targets[@]}"
 }
 
 main "$@"

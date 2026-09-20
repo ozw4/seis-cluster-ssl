@@ -1,28 +1,21 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Repository boundaries
 
-Reusable Python code lives in `src/seis_ssl_cluster/`. Keep command-line wrappers thin in `proc/seis_ssl_cluster/`; place their generic YAML in `proc/configs/seis_ssl_cluster/`. Versioned definitions belong below the matching survey namespace in `experiments/`, and tests live in `tests/seis_ssl_cluster/`. Use `docs/` for guidance that should not be copied into individual experiments and `tools/` for repository checks. Follow the storage boundaries in `docs/report_sharing_policy.md`.
+Reusable Python code lives in `src/seis_ssl_cluster/`; import through `seis_ssl_cluster` and preserve independence from legacy namespaces. Keep command-line wrappers thin in `proc/seis_ssl_cluster/` and their generic YAML in `proc/configs/seis_ssl_cluster/`. Versioned definitions belong under the matching survey in `experiments/`, tests in `tests/seis_ssl_cluster/`, shared guidance in `docs/`, and repository checks in `tools/`.
 
-## Setup, Test, and Development Commands
+Keep execution outputs and downstream inputs in `artifacts/`. Tracked `reports/` contain curated review outputs and must never be pipeline inputs. Never commit raw data, checkpoints, embeddings, or machine-specific paths. Consult [the report policy](docs/report_sharing_policy.md) when changing artifact production or publication; report producers must define and test their exact published file set.
 
-- `python -m pip install -e ".[dev,cluster,visualization]"` installs the package and common development extras (Python 3.10+).
-- `python -m compileall -q src proc tests` catches syntax/import compilation errors.
-- `python -m ruff check .` runs the configured lint suite and safe fixes.
-- `pytest -q` runs the full test suite.
-- `pytest -q -m "not slow and not requires_segy and not requires_cuda"` runs the portable local subset.
-- `python tools/check_seis_ssl_cluster_isolation.py` verifies independence from legacy namespaces.
+## Development and completion
 
-Pipeline stages are config-driven. Prefer a supported `--dry-run` before execution, for example `python proc/seis_ssl_cluster/build_nopims_manifests.py --config proc/configs/seis_ssl_cluster/build_nopims_manifests.yaml --dry-run`.
+Follow `ruff.toml` for formatting and lint rules. Annotate reusable Python APIs, respecting existing test exceptions. Use [the development guide](docs/development.md) for setup and validation commands and [configuration guidance](docs/configuration.md) when changing YAML resolution or artifact handoffs. Consult the relevant scientific note or experiment runbook for changes to data use, comparisons, or execution. Prefer a supported `--dry-run` before executing a pipeline stage.
 
-## Coding Style & Naming Conventions
+For behavior changes, add or update focused regression coverage beside the affected package or CLI contract. Cover meaningful success and failure behavior, preserving explicit contract tests. Use marker meanings from `pytest.ini`; mark slow, SEG-Y-dependent, and CUDA-dependent tests explicitly.
 
-Ruff targets Python 3.10 and selects all lint families with repository-specific exclusions. Follow its formatter settings: tabs for indentation, single-quoted strings, and formatted code in docstrings. Use type annotations, `snake_case` for modules/functions/variables, `PascalCase` for classes, and `UPPER_SNAKE_CASE` for constants. Import through `seis_ssl_cluster`; reusable logic does not belong in `proc/` scripts.
+Complete the requested change, including affected documentation and appropriate validation. Reuse successful checks unless new changes, failures, or unresolved concerns justify another run. For an Issue Forge phase, complete the assigned phase and return control to its orchestrator, which owns the configured Checks and subsequent flow phases.
 
-## Testing Guidelines
+Do not write tests for reversible, low-impact changes that mirror the implementation
 
-Use pytest files and functions named `test_*.py` and `test_*`. Add focused regression tests beside the corresponding package or CLI contract. Mark expensive or environment-dependent coverage with the registered `integration`, `smoke`, `slow`, `requires_segy`, or `requires_cuda` markers. No numeric coverage threshold is configured; new behavior should cover success, validation, and failure paths.
+## Commits and pull requests
 
-## Commit & Pull Request Guidelines
-
-Recent history favors concise imperative subjects (`Add ...`, `Update ...`) and issue-focused forms such as `chore: address issue #245` or `Batch: address issues #241-#243 (#247)`. Keep commits focused and reference issues when applicable. PRs should explain scope, configuration/artifact effects, and exact validation run; include representative figures or report links for visual changes. Never commit raw data, checkpoints, embeddings, or machine-specific paths. Verify each report producer's concrete file set in focused tests and inspect `git diff` during review.
+Use concise, focused commit subjects and reference relevant issues. PRs should explain scope, configuration/artifact effects, and exact validation run; include representative figures or report links for visual changes.
