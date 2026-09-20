@@ -1,0 +1,24 @@
+schema_version: 1
+survey: f3
+arms:
+  mae:
+    candidate_id: mae100_hmm_v2_mh_k468_distill020_cons010
+    baseline_configs_sha256:
+      training: 408a5a81c876ea75157acc55ccd10f3ce09d9c6801a595d79c50ce790194c53c
+      embeddings: cda9cf21472f48b8551e0b90836275f4a6d3295b2cfcec37384917a7a33c76b9
+      downstream: 4072dd165c9a6e36230fbc72c980f2138a18c939c941b9119045e787af0b9f1a
+    target_manifest_sha256: 4ee9492cfe45c4eed1d6cea803a1e43ed3683a8464b5cf09b3ba646901439564
+  local_bt:
+    candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k468_distill020_cons010
+    baseline_configs_sha256:
+      training: da7fc5dd7ed51a4540db68bac7197dcedf5d1ad6e09cf2282b6e068a1818ab5f
+      embeddings: 077c7ae0fd01ed4fc34b3df092ac8e2b3cafd67b9447927d9443f92d182b8af9
+      downstream: be9ef220947931f0bb8b7cc9ffd4e75895d7f9b201e2972e060a87b9bddfef6f
+    target_manifest_sha256: 98a629b66bedf9298ea0fab8545a0a811fbb9407616c2587c9ad4319754d443e
+  random:
+    candidate_id: random_init_hmm_v2_mh_k468_distill020_cons010
+    baseline_configs_sha256:
+      training: 8d5e3b5e179782f67bf924a228124dbd6e0e7a6b932873b8f3786b0e2e737ac9
+      embeddings: c0c8c36eed55d87a6595886f66660ec2ea920d827cc2a30bcf495268bd5e7130
+      downstream: aedbc6000068cc8a685997bbb26c3f1959a4d8967eaf7e3e9bc2f0f24c58dd6c
+    target_manifest_sha256: ec700fb92dd9b2a26184ad88de0a4bc88e68b0f84cb202310382c47f079779ba

@@ -214,6 +214,8 @@ def test_recipe_arm_namespace_has_only_declared_recipe_and_continuation_users() 
 		'34_hmm_v1_paper_sections_v1',
 		'34_hmm_v2_k6810_multi_source_v1',
 		'35_hmm_v2_k468_multi_source_v1',
+		'36_hmm_v2_k468_cons010_multi_source_v1',
+		'37_hmm_v2_k6810_cons010_multi_source_v1',
 	}
 
 

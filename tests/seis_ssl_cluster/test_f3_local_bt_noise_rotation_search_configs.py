@@ -463,6 +463,12 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 			'41_hmm_v2_k6810_multi_source_v1',
 			'34_hmm_v2_k6810_multi_source_v1',
 			'129_hmm_v2_k468_multi_source_v1',
+			'130_hmm_v2_k468_cons010_multi_source_v1',
+			'131_hmm_v2_k6810_cons010_multi_source_v1',
+			'43_hmm_v2_k468_cons010_multi_source_v1',
+			'44_hmm_v2_k6810_cons010_multi_source_v1',
+			'36_hmm_v2_k468_cons010_multi_source_v1',
+			'37_hmm_v2_k6810_cons010_multi_source_v1',
 			'42_hmm_v2_k468_multi_source_v1',
 			'35_hmm_v2_k468_multi_source_v1',
 		}:
