@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config import load_config
 from seis_ssl_cluster.config.f3_lithology_voxel_section_layout import (
@@ -18,9 +18,6 @@ from seis_ssl_cluster.f3.lithology.candidate_benchmark import (
 	audit_f3_lithology_candidate_source,
 	f3_lithology_candidate_config_from_mapping,
 	load_f3_lithology_candidate_canonical_config,
-)
-from seis_ssl_cluster.f3.lithology.hmm_final_source_audit import (
-	audit_f3_hmm_final_source,
 )
 from seis_ssl_cluster.f3.lithology.hmm_v1_freeze_receipt import (
 	load_control_freeze_receipt,
@@ -46,10 +43,6 @@ from seis_ssl_cluster.f3.lithology.paired_candidate_results import (
 	_write_atomic_summary,
 )
 from seis_ssl_cluster.training.strat_hmm_source_audit import audit_multi_head_source
-
-if TYPE_CHECKING:
-	from collections.abc import Mapping
-
 
 EXPECTED_CANDIDATES = {
 	'mae100_hmm_v2_mh_k46_distill020': (4, 6),
@@ -126,10 +119,47 @@ def screening_config_from_mapping(raw: Mapping[str, object]) -> dict[str, object
 	}
 
 
+def _audit_frozen_control_checkpoint(
+	training_config_path: Path,
+	receipt: Mapping[str, object],
+) -> dict[str, object]:
+	"""Bind the legacy HMM_v1 checkpoint by path and frozen digest only."""
+	recipe = load_config(training_config_path)
+	paths = recipe.get('paths')
+	if not isinstance(paths, Mapping):
+		raise TypeError('control training config paths must be a mapping')
+
+	output_root = paths.get('output_root')
+	if not isinstance(output_root, str) or not output_root:
+		raise TypeError(
+			'control training config paths.output_root must be a non-empty string'
+		)
+
+	checkpoint = Path(output_root) / 'latest.pt'
+	digest = file_sha256(checkpoint)
+	if digest != receipt['checkpoint_sha256']:
+		raise ValueError(
+			'live control checkpoint SHA-256 differs from frozen HMM_v1 Condition 2b'
+		)
+
+	return {
+		'status': 'frozen',
+		'model_tag': receipt['control_id'],
+		'condition_id': receipt['condition_id'],
+		'checkpoint': {
+			'path': str(checkpoint),
+			'sha256': digest,
+		},
+		'training_config': str(training_config_path),
+	}
+
+
 def inspect_multi_head_screening(config: Mapping[str, object]) -> dict[str, object]:
 	"""Audit every source and paired cell; return no partial screening result."""
 	receipt = load_control_freeze_receipt(config['control_freeze_receipt'])
-	control_audit = audit_f3_hmm_final_source(config['control_training_config'])
+	control_audit = _audit_frozen_control_checkpoint(
+		config['control_training_config'], receipt
+	)
 	rows = []
 	results = []
 	shared = None

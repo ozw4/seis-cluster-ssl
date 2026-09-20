@@ -14,6 +14,8 @@
   purpose and interpretation caveats.
 - [Report sharing policy](report_sharing_policy.md): the sole repository policy
   for experiment definitions, execution artifacts, and tracked reports.
+- [Artifact migration](artifact_migration.md): preflight, compatibility links,
+  verification, and rollback for storage reorganization.
 
 ## Survey and experiment notes
 

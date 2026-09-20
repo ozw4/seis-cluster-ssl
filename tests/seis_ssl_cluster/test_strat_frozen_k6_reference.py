@@ -18,9 +18,9 @@ from tests.seis_ssl_cluster.test_strat_multi_head_target_manifest import (
 )
 
 
-@pytest.fixture
-def frozen_inputs(tmp_path: Path) -> dict:
-	embeddings, heads = _artifacts(tmp_path, schema_version=2)
+@pytest.fixture(params=[(6, 8, 10), (4, 6, 8)], ids=['k6810', 'k468'])
+def frozen_inputs(tmp_path: Path, request: pytest.FixtureRequest) -> dict:
+	embeddings, heads = _artifacts(tmp_path, schema_version=2, ks=request.param)
 	checkpoint = tmp_path / 'parent.pt'
 	checkpoint.write_bytes(b'original source checkpoint')
 	metadata_path = embeddings / 'survey.embedding_metadata.json'
@@ -215,3 +215,93 @@ def test_frozen_manifest_cannot_be_replaced_by_replay(frozen_inputs: dict) -> No
 	with pytest.raises(ValueError, match='cannot change evidence mode'):
 		main(arguments)
 	assert frozen_inputs['manifest'].read_bytes() == before
+
+
+@pytest.mark.parametrize('aliases', ['source', 'k6', 'both'])
+def test_frozen_manifest_resolves_compatibility_links_without_refreezing(
+	frozen_inputs: dict, tmp_path: Path, aliases: str
+) -> None:
+	inputs = {**frozen_inputs, 'heads': dict(frozen_inputs['heads'])}
+	if aliases in ('source', 'both'):
+		link = tmp_path / 'legacy_embeddings'
+		link.symlink_to(inputs['embeddings'], target_is_directory=True)
+		inputs['embeddings'] = link
+	if aliases in ('k6', 'both'):
+		link = tmp_path / 'legacy_k6'
+		link.symlink_to(inputs['heads'][6], target_is_directory=True)
+		inputs['heads'][6] = link
+	_freeze(inputs)
+	receipt_bytes = inputs['receipt'].read_bytes()
+	manifest = _manifest(inputs)
+	assert manifest['source_embedding']['input_dir'] == str(frozen_inputs['embeddings'])
+	assert manifest['heads']['6']['pseudo_target_root'] == str(
+		frozen_inputs['heads'][6]
+	)
+	assert multi_head.load_multi_head_target_manifest(inputs['manifest']) == manifest
+	assert inputs['receipt'].read_bytes() == receipt_bytes
+	args = [
+		'--source-embedding-dir',
+		str(inputs['embeddings']),
+		'--manifest',
+		str(inputs['manifest']),
+		'--frozen-k6-receipt',
+		str(inputs['receipt']),
+		'--only-missing',
+	]
+	for k, root in inputs['heads'].items():
+		args += ['--head-root', f'{k}={root}']
+	before = inputs['manifest'].read_bytes()
+	assert main(args) == 0
+	assert inputs['manifest'].read_bytes() == before
+
+
+def test_frozen_manifest_rejects_retargeted_compatibility_link(
+	frozen_inputs: dict, tmp_path: Path
+) -> None:
+	import shutil  # noqa: PLC0415
+
+	link = tmp_path / 'legacy_embeddings'
+	link.symlink_to(frozen_inputs['embeddings'], target_is_directory=True)
+	inputs = {**frozen_inputs, 'embeddings': link}
+	_freeze(inputs)
+	receipt_bytes = inputs['receipt'].read_bytes()
+	foreign = tmp_path / 'foreign_embeddings'
+	shutil.copytree(frozen_inputs['embeddings'], foreign)
+	link.unlink()
+	link.symlink_to(foreign, target_is_directory=True)
+	with pytest.raises(ValueError, match='source embedding identity drift'):
+		_manifest(inputs)
+	assert not inputs['manifest'].exists()
+	assert inputs['receipt'].read_bytes() == receipt_bytes
+
+
+def test_frozen_checkpoint_survives_storage_migration_without_rewriting_evidence(
+	frozen_inputs: dict, tmp_path: Path
+) -> None:
+	_freeze(frozen_inputs)
+	manifest = _manifest(frozen_inputs)
+	before = {key: frozen_inputs[key].read_bytes() for key in ('receipt', 'manifest')}
+	checkpoint = frozen_inputs['checkpoint']
+	migrated = tmp_path / 'canonical_parent.pt'
+	checkpoint.rename(migrated)
+	checkpoint.symlink_to(migrated)
+	assert (
+		multi_head.load_multi_head_target_manifest(frozen_inputs['manifest'])
+		== manifest
+	)
+	assert {key: frozen_inputs[key].read_bytes() for key in before} == before
+	migrated.write_bytes(b'changed checkpoint')
+	with pytest.raises(ValueError, match='checkpoint hash mismatch'):
+		multi_head.load_multi_head_target_manifest(frozen_inputs['manifest'])
+
+
+def test_frozen_checkpoint_rejects_byte_identical_foreign_recorded_path(
+	frozen_inputs: dict, tmp_path: Path
+) -> None:
+	receipt = _freeze(frozen_inputs)
+	foreign = tmp_path / 'foreign_parent.pt'
+	foreign.write_bytes(frozen_inputs['checkpoint'].read_bytes())
+	receipt['source_checkpoint']['path'] = str(foreign)
+	frozen_inputs['receipt'].write_text(json.dumps(receipt))
+	with pytest.raises(ValueError, match='source checkpoint drift'):
+		_manifest(frozen_inputs)

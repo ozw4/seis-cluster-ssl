@@ -33,7 +33,7 @@ SCHEMA_VERSION = 2
 _LEGACY_SCHEMA_VERSION = 1
 
 
-def build_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0913
+def build_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	*,
 	manifest_path: str | Path,
 	source_embedding_dir: str | Path,
@@ -63,6 +63,11 @@ def build_multi_head_target_manifest(  # noqa: C901, PLR0912, PLR0913
 		raise FileExistsError(
 			f'frozen-reference manifest already exists: {manifest_path}'
 		)
+	if frozen_k6_receipt is not None:
+		# Receipt construction records resolved inputs. Use the same identities
+		# when publishing a new manifest through historical compatibility links.
+		source_embedding_dir = Path(source_embedding_dir).resolve()
+		roots = {k: Path(root).resolve() for k, root in roots.items()}
 	embeddings = tuple(discover_embedding_inputs(source_embedding_dir))
 	if not embeddings:
 		raise ValueError('source_embedding_dir contains no embedding artifacts')
@@ -453,7 +458,11 @@ def validate_frozen_k6_reference(  # noqa: C901
 		raise ValueError('frozen K=6 target identity drift')
 	_validate_embedding_identity(source_embedding, verify_hashes=verify_hashes)
 	checkpoint = _frozen_k6_training_checkpoint(payload, verify_hashes=verify_hashes)
-	if checkpoint != payload['source_checkpoint']:
+	recorded_checkpoint = _mapping(payload['source_checkpoint'], 'K=6 checkpoint')
+	_required_keys(recorded_checkpoint, {'path', 'sha256'}, 'K=6 checkpoint')
+	if checkpoint['sha256'] != recorded_checkpoint['sha256'] or not _same_resolved_path(
+		Path(checkpoint['path']), Path(str(recorded_checkpoint['path']))
+	):
 		raise ValueError('frozen K=6 source checkpoint drift')
 	for survey_id, references in targets.items():
 		for name, reference in references.items():
@@ -470,7 +479,9 @@ def validate_frozen_k6_reference(  # noqa: C901
 		'receipt': {'path': str(path), 'sha256': before},
 		'historical_root': payload['historical_root'],
 		'reference_training_config': payload['reference_training_config'],
-		'source_checkpoint': checkpoint,
+		# Preserve frozen evidence bytes when a compatibility link resolves to the
+		# same checkpoint after an artifact storage migration.
+		'source_checkpoint': dict(recorded_checkpoint),
 		'source_embedding_sha256': hashlib.sha256(
 			json.dumps(
 				source_embedding, sort_keys=True, separators=(',', ':'), allow_nan=False

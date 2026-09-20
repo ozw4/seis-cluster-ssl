@@ -93,12 +93,19 @@ def evidence(
 			'control': _source_provenance(pair, CONTROL),
 		},
 	)
+	checkpoint = (
+		Path(load_config(config['control_training_config'])['paths']['output_root'])
+		/ 'latest.pt'
+	)
+	checkpoint.parent.mkdir(parents=True)
+	checkpoint.write_bytes(b'frozen legacy checkpoint without control_identity')
 	state = {
 		'rows': rows,
 		'head_drift': False,
 		'checkpoint_drift': False,
 		'source_drift': False,
-		'control_checkpoint_sha256': 'e' * 64,
+		'control_checkpoint_sha256': file_sha256(checkpoint),
+		'control_checkpoint': checkpoint,
 	}
 	config['control_freeze_receipt'] = tmp_path / 'control_receipt.json'
 	config['control_freeze_receipt'].write_text(
@@ -135,10 +142,6 @@ def evidence(
 		)
 		for entry in config['candidates']
 	}
-	canonical = load_f3_lithology_candidate_canonical_config(
-		next(iter(candidates.values()))[1]
-	)
-	control = canonical.model_by_id(config['control_id'])
 
 	def audit_source(candidate: object, _canonical_config: object) -> dict[str, object]:
 		role = CONTROL if candidate.candidate_id == config['control_id'] else CANDIDATE
@@ -178,16 +181,6 @@ def evidence(
 			row['control_id'] = config['control_id']
 		return result
 
-	monkeypatch.setattr(
-		screening,
-		'audit_f3_hmm_final_source',
-		lambda _path: {
-			'checkpoint': {
-				'path': str(control.checkpoint),
-				'sha256': state['control_checkpoint_sha256'],
-			}
-		},
-	)
 	monkeypatch.setattr(screening, 'audit_multi_head_source', audit_training)
 	monkeypatch.setattr(screening, 'audit_f3_lithology_candidate_source', audit_source)
 	monkeypatch.setattr(screening, '_audit_job_rows', audit_rows)
@@ -404,7 +397,7 @@ def test_valid_live_control_must_match_frozen_receipt(
 	config: dict[str, object], evidence: dict[str, object], drift: str
 ) -> None:
 	if drift == 'checkpoint':
-		evidence['control_checkpoint_sha256'] = 'f' * 64
+		evidence['control_checkpoint'].write_bytes(b'changed checkpoint bytes')
 	elif drift == 'missing':
 		evidence['rows'].pop()
 	else:
@@ -456,5 +449,33 @@ def test_invalid_or_changed_primary_metric_rejected(
 	payload['mean_iou'] = value
 	path.write_text(json.dumps(payload))
 	with pytest.raises(ValueError, match=r'mean_iou|metrics changed'):
+		screening.summarize_multi_head_screening(config)
+	assert not config['summary_root'].exists()
+
+
+@pytest.mark.parametrize(
+	'paths',
+	[None, [], {}, {'output_root': ''}, {'output_root': 42}],
+)
+def test_frozen_control_rejects_invalid_checkpoint_paths(
+	config: dict[str, object],
+	evidence: dict[str, object],
+	tmp_path: Path,
+	paths: object,
+) -> None:
+	del evidence
+	recipe = tmp_path / 'control.json'
+	recipe.write_text(json.dumps({'paths': paths}))
+	config['control_training_config'] = recipe
+	with pytest.raises(TypeError, match='control training config paths'):
+		screening.summarize_multi_head_screening(config)
+	assert not config['summary_root'].exists()
+
+
+def test_missing_frozen_control_checkpoint_rejected_without_output(
+	config: dict[str, object], evidence: dict[str, object]
+) -> None:
+	evidence['control_checkpoint'].unlink()
+	with pytest.raises(FileNotFoundError):
 		screening.summarize_multi_head_screening(config)
 	assert not config['summary_root'].exists()

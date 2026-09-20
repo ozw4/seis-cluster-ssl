@@ -20,3 +20,10 @@ the supplied overrides.
 
 Repository storage rules are defined only in the
 [report sharing policy](report_sharing_policy.md).
+
+When adding an experiment, use the canonical artifact layout in that policy.
+Existing versioned definitions and immutable execution records may still name
+historical paths maintained through compatibility links. Keep their logical
+identity intact during a storage-only relocation; do not bulk-rewrite frozen
+receipts, checkpoint configuration, or recorded source hashes. A path migration
+does not change environment expansion or any stage's resolver contract.
