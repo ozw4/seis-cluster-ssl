@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from seis_ssl_cluster.embedding.writer import file_sha256
+from seis_ssl_cluster.hmm.multi_source_volve import multi_head_recipe_ks
 from seis_ssl_cluster.training.random_checkpoint import (
 	load_checkpoint_metadata_without_weights,
 )
@@ -308,7 +309,10 @@ def as_five_way_config(
 			'stratigraphy_pretext': config.hmm is not None
 			or config.multi_head_training_config is not None,
 			**(
-				{'base_objective': objective, 'head_ks': [6, 8, 10]}
+				{
+					'base_objective': objective,
+					'head_ks': multi_head_recipe_ks(config.multi_head_training_config),
+				}
 				if config.multi_head_training_config
 				else {}
 			),

@@ -75,7 +75,9 @@ def test_all_source_contracts_and_config_resolution(root: Path, tmp_path: Path) 
 			assert resolved['loss']['distillation_weight'] == 0.2
 			assert resolved['loss']['consistency_weight'] == 0.0
 		embpath = root / '40_embeddings' / f'{cid}.yaml'
-		resolve_embedding_extraction_config(load_config(embpath))
+		embedding = resolve_embedding_extraction_config(load_config(embpath))
+		assert embedding['embedding']['prefetch_queue_depth'] == 2
+		assert embedding['embedding']['batch_size'] == 1
 		down = load_config(root / '50_downstream' / f'{cid}.yaml')
 		if survey == 'f3':
 			f3_lithology_candidate_config_from_mapping(down)

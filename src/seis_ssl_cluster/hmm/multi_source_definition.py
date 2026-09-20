@@ -1,4 +1,4 @@
-"""Read-only validation of source-family inheritance in fixed K6810 definitions."""
+"""Validate source-family inheritance in fixed multi-source definitions."""
 
 from __future__ import annotations
 
@@ -8,6 +8,13 @@ from typing import Any
 
 import yaml
 
+from seis_ssl_cluster.hmm.multi_source_consistency import (
+	validate_consistency_definition,
+)
+from seis_ssl_cluster.hmm.multi_source_protocol import (
+	MultiSourceProtocol,
+	experiment_protocol,
+)
 from seis_ssl_cluster.hmm.multi_source_receipts import (
 	SURVEYS,
 	load_matrix,
@@ -59,10 +66,26 @@ def _reference(workspace: Path, survey: str, value: object) -> dict[str, Any]:
 	return _read(workspace / path)
 
 
-def _training(root: Path, cid: str, reference: dict[str, Any]) -> dict[str, Any]:
+def _embedding_prefetch_override(
+	actual: dict[str, Any], expected: dict[str, Any], path: Path
+) -> None:
+	"""Allow only the order-preserving prefetch depth to differ at runtime."""
+	if 'prefetch_queue_depth' not in actual['embedding']:
+		return
+	depth = actual['embedding']['prefetch_queue_depth']
+	if type(depth) is not int or depth < 0:
+		raise ValueError(
+			f'{path}: embedding.prefetch_queue_depth must be a nonnegative integer'
+		)
+	expected['embedding']['prefetch_queue_depth'] = depth
+
+
+def _training(
+	root: Path, cid: str, reference: dict[str, Any], protocol: MultiSourceProtocol
+) -> dict[str, Any]:
 	path = root / '30_pretraining' / cid / '02_full_25ep.yaml'
 	full = _read(path)
-	validate_fixed_training_config(full)
+	validate_fixed_training_config(full, protocol)
 	_output(full, reference, 'paths', 'output_root')
 	expected = copy.deepcopy(reference)
 	expected['paths']['output_root'] = full['paths']['output_root']
@@ -81,14 +104,18 @@ def _training(root: Path, cid: str, reference: dict[str, Any]) -> dict[str, Any]
 
 
 def _targets(
-	root: Path, arm: dict[str, Any], cluster: dict[str, Any], train: dict[str, Any]
+	root: Path,
+	arm: dict[str, Any],
+	cluster: dict[str, Any],
+	train: dict[str, Any],
+	protocol: MultiSourceProtocol,
 ) -> None:
-	path = root / '10_targets' / arm['target_family'] / '01_cluster_hmm_k8k10.yaml'
+	path = root / '10_targets' / arm['target_family'] / protocol.cluster_filename
 	actual = _read(path)
 	_output(actual, cluster, 'clustering', 'output_dir')
 	expected = copy.deepcopy(cluster)
 	expected['clustering'].update(
-		k_values=[8, 10], output_dir=actual['clustering']['output_dir']
+		k_values=protocol.new_ks, output_dir=actual['clustering']['output_dir']
 	)
 	_compare(actual, expected, path)
 	path = root / '20_manifests' / f'{arm["candidate_id"]}.yaml'
@@ -102,10 +129,10 @@ def _targets(
 			'frozen_k6_receipt',
 			'k6_evidence',
 		}
-		or list(manifest['head_roots']) != [6, 8, 10]
+		or list(manifest['head_roots']) != list(protocol.head_ks)
 		or manifest['head_roots'][6] != train['pseudo_targets']['input_dir']
 		or manifest['head_roots'][6]
-		in (manifest['head_roots'][8], manifest['head_roots'][10])
+		in tuple(manifest['head_roots'][k] for k in protocol.new_ks)
 		or manifest['source_embedding_dir'] != cluster['embeddings']['input_dir']
 		or manifest['k6_evidence']
 		!= {
@@ -123,7 +150,7 @@ def _targets(
 		or not receipt
 		or receipt
 		!= str(Path(manifest['manifest']).parent.parent / 'frozen_k6_reference.json')
-		or '/hmm_v2_k6810_multi_source_v1/' not in receipt
+		or f'/hmm_v2_{protocol.tag}_multi_source_v1/' not in receipt
 	):
 		raise ValueError(
 			f'{path}: frozen K6 receipt must use its own new-arm namespace'
@@ -149,8 +176,9 @@ def validate_multi_source_experiment_definition(experiment_root: Path) -> None:
 	):
 		raise ValueError('invalid execution schema_version or survey namespace')
 	workspace = root.parents[3]
+	protocol = experiment_protocol(root)
 	matrix = load_matrix(
-		workspace / 'experiments/hmm_v2/k6810_multi_source_evaluation_v1/matrix.yaml'
+		workspace / 'experiments/hmm_v2' / protocol.study / 'matrix.yaml'
 	)
 	expected_arms = {
 		f: a
@@ -160,6 +188,9 @@ def validate_multi_source_experiment_definition(experiment_root: Path) -> None:
 	arms = definition['arms']
 	if not isinstance(arms, dict) or set(arms) != set(expected_arms):
 		raise ValueError('execution arms differ from the fixed new-arm matrix')
+	if protocol.consistency_weight:
+		validate_consistency_definition(root, definition)
+		return
 	for family, arm in arms.items():
 		if (
 			not isinstance(arm, dict)
@@ -182,8 +213,8 @@ def validate_multi_source_experiment_definition(experiment_root: Path) -> None:
 			for stage in ('clustering', 'training', 'embedding')
 		}
 		cid = arm['candidate_id']
-		full = _training(root, cid, references['training'])
-		_targets(root, arm, references['clustering'], references['training'])
+		full = _training(root, cid, references['training'], protocol)
+		_targets(root, arm, references['clustering'], references['training'], protocol)
 		path = root / '40_embeddings' / f'{cid}.yaml'
 		embedding = _read(path)
 		reference = references['embedding']
@@ -193,4 +224,5 @@ def validate_multi_source_experiment_definition(experiment_root: Path) -> None:
 			full['paths']['output_root'] + '/latest.pt'
 		)
 		expected['embeddings']['output_dir'] = embedding['embeddings']['output_dir']
+		_embedding_prefetch_override(embedding, expected, path)
 		_compare(embedding, expected, path)

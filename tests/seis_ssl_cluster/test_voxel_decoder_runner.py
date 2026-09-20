@@ -740,3 +740,52 @@ def test_resume_rejects_modified_best_checkpoint_snapshot(tmp_path) -> None:
 		run_f3_lithology_voxel_decoder(
 			config, device='cpu', resume=partial.latest_checkpoint
 		)
+
+
+@pytest.mark.parametrize('layout', ['legacy', 'canonical', 'compatibility_link'])
+def test_source_provenance_accepts_canonical_and_historical_layouts(tmp_path, layout):
+	raw, embedding = _job(tmp_path, 'decoder')
+	root = Path(raw['paths']['artifact_root'])
+	canonical = root / 'surveys/f3/v1/embeddings/study/encoder-v1/tiny-spec'
+	checkpoint = root / 'surveys/f3/v1/pretraining/study/encoder-v1/latest.pt'
+	if layout != 'legacy':
+		canonical.mkdir(parents=True)
+		if layout == 'compatibility_link':
+			shutil.rmtree(embedding.parent)
+			embedding.parent.symlink_to(canonical, target_is_directory=True)
+		else:
+			raw['embeddings']['input_dir'] = str(canonical)
+	raw['embeddings']['checkpoint_path'] = str(checkpoint)
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	voxel_decoder_runner._validate_source_provenance(  # noqa: SLF001
+		config, embedding_payload={'checkpoint_path': str(checkpoint)}
+	)
+
+
+@pytest.mark.parametrize(
+	'drift', ['survey', 'version', 'model', 'checkpoint', 'escape']
+)
+def test_canonical_source_provenance_rejects_foreign_inputs(tmp_path, drift):
+	raw, _embedding = _job(tmp_path, 'decoder')
+	root = Path(raw['paths']['artifact_root'])
+	path = root / 'surveys/f3/v1/embeddings/study/encoder-v1/tiny-spec'
+	checkpoint = root / 'surveys/f3/v1/pretraining/study/encoder-v1/latest.pt'
+	if drift == 'survey':
+		path = root / 'surveys/parihaka/v1/embeddings/study/encoder-v1/tiny-spec'
+	elif drift == 'version':
+		path = root / 'surveys/f3/v2/embeddings/study/encoder-v1/tiny-spec'
+	elif drift == 'model':
+		path = root / 'surveys/f3/v1/embeddings/study/foreign/tiny-spec'
+	elif drift == 'escape':
+		path.parent.mkdir(parents=True)
+		path.symlink_to(tmp_path / 'foreign', target_is_directory=True)
+	raw['embeddings']['input_dir'] = str(path)
+	raw['embeddings']['checkpoint_path'] = str(checkpoint)
+	metadata_checkpoint = (
+		tmp_path / 'foreign.pt' if drift == 'checkpoint' else checkpoint
+	)
+	config = f3_lithology_voxel_decoder_config_from_mapping(raw)
+	with pytest.raises(ValueError, match=r'must identify|does not match'):
+		voxel_decoder_runner._validate_source_provenance(  # noqa: SLF001
+			config, embedding_payload={'checkpoint_path': str(metadata_checkpoint)}
+		)

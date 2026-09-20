@@ -1,4 +1,4 @@
-"""Sequential, resumable command driver for the fixed K6810 experiment."""
+"""Sequential, resumable command driver for fixed multi-source experiments."""
 
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import yaml
 from seis_ssl_cluster.hmm.multi_source_definition import (
 	validate_multi_source_experiment_definition,
 )
+from seis_ssl_cluster.hmm.multi_source_protocol import K6810, experiment_protocol
 from seis_ssl_cluster.hmm.multi_source_receipts import DATA_SIZES
 
 STAGES = (
@@ -44,9 +45,10 @@ def _expand(value: str) -> str:
 def command_plan(  # noqa: C901, PLR0912, PLR0915
 	experiment: Path, args: argparse.Namespace
 ) -> list[tuple[str, list[str]]]:
-	"""Enumerate only the eight new arms; the reused arm has no write route."""
+	"""Enumerate declared new arms; completed model reuse has no write route."""
 	validate_multi_source_experiment_definition(experiment)
 	definition = _read(experiment / 'execution.yaml')
+	protocol = experiment_protocol(experiment)
 	survey = definition['survey']
 	arms = definition['arms']
 	if args.candidate:
@@ -97,6 +99,8 @@ def command_plan(  # noqa: C901, PLR0912, PLR0915
 
 	audited = False
 	for stage in STAGES[start : stop + 1]:
+		if protocol.consistency_weight and stage in ('targets', 'export', 'manifests'):
+			continue
 		if stage in ('audit', 'embeddings', 'downstream', 'summary') and not audited:
 			audit()
 			audited = True
@@ -116,7 +120,7 @@ def command_plan(  # noqa: C901, PLR0912, PLR0915
 			continue
 		for arm in arms.values():
 			cid = arm['candidate_id']
-			family = arm['target_family']
+			family = arm.get('target_family')
 			if stage == 'targets':
 				add(
 					stage,
@@ -128,7 +132,7 @@ def command_plan(  # noqa: C901, PLR0912, PLR0915
 							experiment
 							/ '10_targets'
 							/ family
-							/ '01_cluster_hmm_k8k10.yaml'
+							/ protocol.cluster_filename
 						),
 					],
 				)
@@ -353,7 +357,13 @@ def main() -> None:
 	if not artifact.is_absolute():
 		raise ValueError('artifact root must be absolute')
 	survey = _read(args.experiment / 'execution.yaml')['survey']
-	logs = artifact / 'hmm_v2/k6810_multi_source_evaluation_v1' / survey / 'logs'
+	protocol = experiment_protocol(args.experiment)
+	log_root = (
+		artifact / 'hmm_v2' / protocol.study
+		if protocol == K6810
+		else artifact / 'operations/hmm_v2' / protocol.study
+	)
+	logs = log_root / survey / 'logs'
 	logs.mkdir(parents=True, exist_ok=True)
 	with (logs / 'driver.lock').open('a') as lock:
 		fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)

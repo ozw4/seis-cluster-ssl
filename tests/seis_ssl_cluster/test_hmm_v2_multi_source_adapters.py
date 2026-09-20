@@ -136,13 +136,16 @@ def test_channel_completed_adapter_uses_public_plan_identity(
 		audit_completed_cell('parihaka', raw, 'mae', 'layout_000', 'small')
 
 
+@pytest.mark.parametrize('ks', [[6, 8, 10], [4, 6, 8]])
 def test_volve_multi_head_embedding_metadata_matches_extractor_contract(
 	tmp_path: Path,
+	ks: list[int],
 ) -> None:
 	universe = write_recipe_arm_universe(tmp_path, embeddings=True)
 	config = replace(
 		universe['config'], multi_head_training_config=tmp_path / 'full.yaml'
 	)
+	config.multi_head_training_config.write_text(json.dumps({'head': {'ks': ks}}))
 	model = as_five_way_config(config).models[0]
 	metadata = {
 		'pretraining_method': 'local_barlow_twins_3d',
@@ -154,7 +157,7 @@ def test_volve_multi_head_embedding_metadata_matches_extractor_contract(
 			'method': 'strat_hmm_multi_head_pretext',
 			'base_objective': 'local_barlow_twins_3d',
 			'head_spec': 'multi_resolution_ordered_prototypes_v1',
-			'head_ks': [6, 8, 10],
+			'head_ks': ks,
 			'unfreeze_top_blocks': 1,
 			'distillation_weight': 0.2,
 			'consistency_weight': 0.0,
@@ -166,18 +169,25 @@ def test_volve_multi_head_embedding_metadata_matches_extractor_contract(
 		_validate_embedding_objective(model, metadata)
 
 
+@pytest.mark.parametrize('ks', [[6, 8, 10], [4, 6, 8]])
 def test_volve_multi_head_source_uses_checkpoint_config_objective(
 	tmp_path: Path,
+	ks: list[int],
 	monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 	universe = write_recipe_arm_universe(tmp_path, embeddings=True)
 	path = tmp_path / 'full.yaml'
 	config = replace(universe['config'], multi_head_training_config=path)
 	path.write_text(
-		json.dumps({'student': {'init_checkpoint': str(config.arm_checkpoint)}})
+		json.dumps(
+			{
+				'student': {'init_checkpoint': str(config.arm_checkpoint)},
+				'head': {'ks': ks},
+			}
+		)
 	)
 	evidence = {
-		'head_ks': [6, 8, 10],
+		'head_ks': ks,
 		'model_tag': config.arm_id,
 		'checkpoint': {'path': str(config.arm_checkpoint), 'sha256': 'a' * 64},
 	}

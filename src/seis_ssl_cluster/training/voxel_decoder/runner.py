@@ -639,17 +639,24 @@ def _validate_source_provenance(
 	*,
 	embedding_payload: Mapping[str, object],
 ) -> None:
-	expected_root = (
-		config.artifact_root / 'embeddings' / 'f3' / config.dataset['version']
+	expected_roots = (
+		config.artifact_root / 'embeddings' / 'f3' / config.dataset['version'],
+		config.artifact_root
+		/ 'surveys'
+		/ 'f3'
+		/ config.dataset['version']
+		/ 'embeddings',
 	)
-	try:
-		relative = config.embeddings_input_dir.resolve(strict=False).relative_to(
-			expected_root.resolve(strict=False)
-		)
-	except ValueError as error:
+	resolved = config.embeddings_input_dir.resolve(strict=False)
+	for expected_root in expected_roots:
+		root = expected_root.resolve(strict=False)
+		if resolved.is_relative_to(root):
+			relative = resolved.relative_to(root)
+			break
+	else:
 		raise ValueError(
 			'embeddings.input_dir must identify the configured dataset and model'
-		) from error
+		)
 	expected_checkpoint = config.embeddings.get('checkpoint_path')
 	if len(relative.parts) < 2:
 		raise ValueError(

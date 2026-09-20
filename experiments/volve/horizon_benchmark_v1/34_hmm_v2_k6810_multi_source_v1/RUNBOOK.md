@@ -44,3 +44,11 @@ Run each stage with `--execute --from STAGE --to STAGE` in this order:
 `targets`, `export`, `manifests`, `smoke`, `full`, `audit`, `embeddings`,
 `downstream`, `summary`. There is no replay stage. Existing F3 MAE retains its
 original replay-based manifest and remains read-only reuse.
+
+Embedding extraction uses `prefetch_queue_depth: 2` with batch size 1. The
+bounded FIFO queue overlaps window reading/preprocessing with GPU inference
+while preserving window order and merge order. Prefetch depth is the only
+embedding runtime override allowed against the historical source reference;
+zero disables it. Window geometry, precision, preprocessing, and source lineage
+retain their reference settings. Completed embedding outputs remain reusable
+because prefetch depth does not change their scientific metadata.

@@ -66,6 +66,10 @@ LOCAL_VICREG_EXTENSION_ROOT = V2_ROOT / '116_local_vicreg_extension_v1'
 # These suites check every declared candidate config and its source lineage.
 # Counts reject additional YAML that their explicit inventories do not cover.
 CANDIDATE_CONFIG_SUITES = {
+	'129_hmm_v2_k468_multi_source_v1': (
+		'test_hmm_v2_k468_multi_source.py',
+		18,
+	),
 	'128_hmm_v2_k6810_multi_source_v1': (
 		'test_hmm_v2_multi_source_configs.py',
 		18,
@@ -359,20 +363,14 @@ ZERO_PHASE_Z_FILTER_VIEW_V1_REFERENCES = (
 	),
 )
 LOCAL_VICREG_V1_REFERENCES = (
-	(
-		'clustering/f3/facies_benchmark_v1/local_vicreg_v1/hmm_targets/'
-		'vicreg100/k6'
-	),
+	('clustering/f3/facies_benchmark_v1/local_vicreg_v1/hmm_targets/vicreg100/k6'),
 	(
 		'embeddings/f3/facies_benchmark_v1/local_vicreg_v1/hmm_targets/'
 		'vicreg100/overlap_x64'
 	),
 	'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/full_100ep',
 	'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/full_100ep/latest.pt',
-	(
-		'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/'
-		'gpu_feasibility_1step'
-	),
+	('pretraining/f3/facies_benchmark_v1/local_vicreg_v1/gpu_feasibility_1step'),
 	(
 		'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/stage2/'
 		'vicreg100/hmm/k6/full_25ep'
@@ -491,8 +489,7 @@ def _resolve_local_vicreg_configs(
 ) -> None:
 	monkeypatch.setenv('SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str(artifact_root))
 	stage1_checkpoint = (
-		artifact_root
-		/ 'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/'
+		artifact_root / 'pretraining/f3/facies_benchmark_v1/local_vicreg_v1/'
 		'full_100ep/latest.pt'
 	)
 	stage1_checkpoint.parent.mkdir(parents=True)
@@ -506,32 +503,25 @@ def _resolve_local_vicreg_configs(
 		LOCAL_VICREG_ROOT / '02_full_100ep.yaml',
 		LOCAL_VICREG_ROOT
 		/ '10_stage2/vicreg100/vicreg_continue/01_gpu_feasibility_1step.yaml',
-		LOCAL_VICREG_ROOT
-		/ '10_stage2/vicreg100/vicreg_continue/02_full_25ep.yaml',
+		LOCAL_VICREG_ROOT / '10_stage2/vicreg100/vicreg_continue/02_full_25ep.yaml',
 	):
 		resolve_vicreg_training_config(_load(path))
 		covered.add(path)
 	for path in (
 		LOCAL_VICREG_ROOT / '03_extract_v2_embeddings.yaml',
 		LOCAL_VICREG_ROOT / '20_hmm_targets/vicreg100/01_extract_embeddings.yaml',
-		LOCAL_VICREG_EXTENSION_ROOT
-		/ '50_embeddings/01_extract_local_vicreg.yaml',
+		LOCAL_VICREG_EXTENSION_ROOT / '50_embeddings/01_extract_local_vicreg.yaml',
 		LOCAL_VICREG_EXTENSION_ROOT
 		/ '50_embeddings/02_extract_local_vicreg_hmm_k6.yaml',
 	):
 		resolve_embedding_extraction_config(_load(path))
 		covered.add(path)
-	cluster = (
-		LOCAL_VICREG_ROOT
-		/ '20_hmm_targets/vicreg100/k6/02_cluster_hmm_k6.yaml'
-	)
+	cluster = LOCAL_VICREG_ROOT / '20_hmm_targets/vicreg100/k6/02_cluster_hmm_k6.yaml'
 	resolve_clustering_config(_load(cluster))
 	covered.add(cluster)
 	for path in (
-		LOCAL_VICREG_ROOT
-		/ '30_stage2/vicreg100/hmm/k6/01_gpu_feasibility_1step.yaml',
-		LOCAL_VICREG_ROOT
-		/ '30_stage2/vicreg100/hmm/k6/02_full_25ep.yaml',
+		LOCAL_VICREG_ROOT / '30_stage2/vicreg100/hmm/k6/01_gpu_feasibility_1step.yaml',
+		LOCAL_VICREG_ROOT / '30_stage2/vicreg100/hmm/k6/02_full_25ep.yaml',
 	):
 		resolve_strat_hmm_pretext_config(_load(path))
 		covered.add(path)
@@ -930,9 +920,7 @@ def test_v3_runbook_shell_blocks_are_fail_fast_and_valid_bash(
 	path: Path, tmp_path: Path
 ) -> None:
 	text = path.read_text(encoding='utf-8')
-	blocks = re.findall(
-		r'```bash\n(.*?)```', text, flags=re.DOTALL
-	)
+	blocks = re.findall(r'```bash\n(.*?)```', text, flags=re.DOTALL)
 	assert blocks
 	for index, block in enumerate(blocks):
 		assert 'set -euo pipefail' in block

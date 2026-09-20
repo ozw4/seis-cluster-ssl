@@ -16,7 +16,7 @@ embedding:
   - 64
   output_dtype: float16
   batch_size: 1
-  prefetch_queue_depth: 0
+  prefetch_queue_depth: 2
   amp: false
   amp_dtype: auto
   stage_timing: false

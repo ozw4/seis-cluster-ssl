@@ -9,13 +9,22 @@ import yaml
 from seis_ssl_cluster.config.io import _expand_environment_variables
 from seis_ssl_cluster.embedding.extractor import _stratigraphy_base_objective
 from seis_ssl_cluster.embedding.writer import file_sha256
+from seis_ssl_cluster.hmm.multi_source_protocol import protocol_for_heads
 from seis_ssl_cluster.training.random_checkpoint import (
 	load_checkpoint_metadata_without_weights,
 )
 from seis_ssl_cluster.training.strat_hmm_source_audit import audit_multi_head_source
 
 if TYPE_CHECKING:
+	from pathlib import Path
+
 	from seis_ssl_cluster.volve.horizon_recipe_arm import VolveHorizonRecipeArmConfig
+
+
+def multi_head_recipe_ks(path: Path) -> list[int]:
+	"""Read the fixed head selection without expanding future manifest hashes."""
+	raw = yaml.safe_load(path.read_text())
+	return list(protocol_for_heads(raw['head']['ks']).head_ks)
 
 
 def audit_multi_head_recipe_source(
@@ -26,7 +35,10 @@ def audit_multi_head_recipe_source(
 	if path is None or config.hmm is not None:
 		raise ValueError('Multi-Head source requires exactly one training recipe')
 	evidence = audit_multi_head_source(path)
-	if evidence['head_ks'] != [6, 8, 10] or evidence['model_tag'] != config.arm_id:
+	if (
+		evidence['head_ks'] != multi_head_recipe_ks(path)
+		or evidence['model_tag'] != config.arm_id
+	):
 		raise ValueError('Multi-Head source candidate/head mismatch')
 	checkpoint = evidence['checkpoint']
 	if checkpoint['path'] != str(config.arm_checkpoint):

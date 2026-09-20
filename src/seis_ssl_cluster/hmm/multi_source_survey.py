@@ -1,4 +1,4 @@
-"""Audit complete K6810 arms and pair them with frozen source-family controls."""
+"""Audit complete multi-source arms and pair them with frozen source-family controls."""
 
 from __future__ import annotations
 
@@ -22,8 +22,11 @@ from seis_ssl_cluster.hmm.multi_source_cell import audit_completed_cell
 from seis_ssl_cluster.hmm.multi_source_definition import (
 	validate_multi_source_experiment_definition,
 )
+from seis_ssl_cluster.hmm.multi_source_protocol import (
+	experiment_protocol,
+	protocol_for_matrix,
+)
 from seis_ssl_cluster.hmm.multi_source_receipts import (
-	CANDIDATE_IDS,
 	CELL_IDENTITIES,
 	DATA_SIZES,
 	METRICS,
@@ -35,9 +38,9 @@ from seis_ssl_cluster.hmm.multi_source_receipts import (
 	file_sha256,
 	load_control_receipts,
 	load_matrix,
-	load_reuse_receipt,
 	object_sha256,
 	read_json,
+	selection_receipt,
 	validate_fixed_training_config,
 	verify_control,
 	verify_reuse_receipt,
@@ -105,7 +108,9 @@ def _paired_identity(
 	survey: str, candidate: dict[str, Any], control: dict[str, Any]
 ) -> None:
 	if survey == 'f3':
-		validate_f3_paired_completed_jobs(candidate, control, label='K6810/matching K6')
+		validate_f3_paired_completed_jobs(
+			candidate, control, label='Multi-Head/matching K6'
+		)
 	elif survey == 'parihaka':
 
 		def shared(evidence: dict[str, Any]) -> dict[str, Any]:
@@ -157,7 +162,8 @@ def _audited_arm(
 	for field in ('training_config', 'downstream_config', 'control_downstream_config'):
 		if 'reports' in Path(entry[field]).resolve().parts:
 			raise ValueError('reports cannot be pipeline inputs')
-	candidate_id = CANDIDATE_IDS[family]
+	protocol = protocol_for_matrix(load_matrix(Path(config['matrix'])))
+	candidate_id = protocol.candidate_ids[family]
 	if entry['candidate_id'] != candidate_id:
 		raise ValueError('summary candidate identity drift')
 	candidate = load_config(entry['downstream_config'])
@@ -169,12 +175,12 @@ def _audited_arm(
 	):
 		raise ValueError('control checkpoint path identity drift')
 	validate_fixed_training_config(
-		yaml.safe_load(Path(entry['training_config']).read_text())
+		yaml.safe_load(Path(entry['training_config']).read_text()), protocol
 	)
 	lineage = audit_multi_head_source(Path(entry['training_config']))
 	if (
 		lineage['model_tag'] != candidate_id
-		or lineage['head_ks'] != [6, 8, 10]
+		or lineage['head_ks'] != list(protocol.head_ks)
 		or lineage['epoch'] != 25
 		or lineage['checkpoint']
 		!= {
@@ -182,7 +188,7 @@ def _audited_arm(
 			'sha256': file_sha256(candidate_checkpoint),
 		}
 	):
-		raise ValueError('K6810 source lineage drift')
+		raise ValueError('Multi-Head source lineage drift')
 	for root, model in (
 		(candidate_root, candidate_id),
 		(control_root, receipt['checkpoint_id']),
@@ -226,7 +232,7 @@ def _audited_arm(
 				'secondary': secondary,
 				'control_primary': control_primary,
 				'control_secondary': control_secondary,
-				'reused_existing': (survey, family) == ('f3', 'mae'),
+				'reused_existing': protocol.reuses_arm(survey, family),
 				'metrics_path': str(candidate_metrics),
 				'metrics_sha256': digest,
 				'control_metrics_path': str(control_metrics),
@@ -257,13 +263,16 @@ def _audited_arm(
 def _validate_experiment_inputs(config: dict[str, Any]) -> None:
 	root = Path(config['experiment_root']).resolve()
 	validate_multi_source_experiment_definition(root)
+	protocol = experiment_protocol(root)
+	if protocol_for_matrix(load_matrix(Path(config['matrix']))) != protocol:
+		raise ValueError('summary matrix differs from experiment definition')
 	if root.parents[1].name != config['survey']:
 		raise ValueError('summary survey differs from experiment definition')
 	for family, entry in config['arms'].items():
 		arm_root = root
-		if (config['survey'], family) == ('f3', 'mae'):
+		if protocol.reuses_arm(config['survey'], family):
 			arm_root = root.parent / '127_hmm_v2_multi_head_screening_v1'
-		cid = CANDIDATE_IDS[family]
+		cid = protocol.candidate_ids[family]
 		expected = {
 			'training_config': arm_root / '30_pretraining' / cid / '02_full_25ep.yaml',
 			'downstream_config': arm_root / '50_downstream' / f'{cid}.yaml',
@@ -287,32 +296,35 @@ def inspect_survey(config: dict[str, Any]) -> dict[str, Any]:
 		raise ValueError('expected one survey and all three fixed source families')
 	_validate_experiment_inputs(config)
 	survey = config['survey']
-	load_matrix(Path(config['matrix']))
-	for field in ('matrix', 'control_receipt', 'selection_receipt', 'summary_root'):
+	protocol = protocol_for_matrix(load_matrix(Path(config['matrix'])))
+	for field in ('matrix', 'control_receipt', 'summary_root'):
 		if 'reports' in Path(config[field]).resolve().parts:
 			raise ValueError('reports cannot be pipeline inputs or outputs')
 	controls = load_control_receipts(Path(config['control_receipt']))
-	reuse = load_reuse_receipt(Path(config['selection_receipt']))
-	if survey == 'f3':
-		verify_reuse_receipt(reuse, Path(config['artifact_root']))
+	reuse, reuse_binding = selection_receipt(config, protocol)
+	if protocol.reuses_arm(survey, 'mae'):
+		verify_reuse_receipt(reuse, Path(config['artifact_root']), protocol)
 	cells, rows, arms, evidence = [], [], [], {}
 	for family in SOURCE_FAMILIES:
 		selected, audit = _audited_arm(
 			config, family, control_receipt_for(controls, survey, family)
 		)
-		if (survey, family) == ('f3', 'mae') and canonical_cells_sha256(
-			survey, selected
-		) != reuse['canonical_cells_sha256']:
+		if (
+			protocol.reuses_arm(survey, family)
+			and canonical_cells_sha256(survey, selected)
+			!= reuse['canonical_cells_sha256']
+		):
 			raise ValueError('live F3 reused cells drift from receipt')
 		cells.extend(selected)
 		rows.extend(
-			comparison_row(survey, family, size, selected) for size in DATA_SIZES
+			comparison_row(survey, family, size, selected, protocol)
+			for size in DATA_SIZES
 		)
 		arms.append(
 			{
 				'source_family': family,
-				'candidate_id': CANDIDATE_IDS[family],
-				**arm_statistics(survey, selected),
+				'candidate_id': protocol.candidate_ids[family],
+				**arm_statistics(survey, selected, protocol),
 			}
 		)
 		evidence[family] = audit
@@ -327,8 +339,9 @@ def inspect_survey(config: dict[str, Any]) -> dict[str, Any]:
 		'evidence': evidence,
 		**{
 			name: {'path': str(config[name]), 'sha256': file_sha256(Path(config[name]))}
-			for name in ('matrix', 'control_receipt', 'selection_receipt')
+			for name in ('matrix', 'control_receipt')
 		},
+		**reuse_binding,
 	}
 	payload['summary_sha256'] = object_sha256(payload)
 	return payload
@@ -340,8 +353,11 @@ def summarize_survey(config: dict[str, Any]) -> tuple[Path, Path, Path]:
 	if output.exists() or output.is_symlink():
 		raise FileExistsError('survey summary output already exists')
 	payload = inspect_survey(config)
+	protocol = protocol_for_matrix(load_matrix(Path(config['matrix'])))
 	lines = [
-		f'# {payload["survey"]} K6810 multi-source comparison',
+		f'# {payload["survey"]} {protocol.tag.upper()} multi-source comparison',
+		'',
+		f'Consistency weight: {protocol.consistency_weight}; distillation weight: 0.2.',
 		'',
 		(
 			f'Evaluation: {payload["evaluation_split"]}. '
@@ -350,24 +366,29 @@ def summarize_survey(config: dict[str, Any]) -> tuple[Path, Path, Path]:
 		),
 		'',
 		(
-			'Positive primary improvement favors K6810. '
+			f'Positive primary improvement favors {protocol.tag.upper()}. '
 			'All-15 results are descriptive; '
 			'overall statistics use five layout clusters. '
 			'No automatic selection or promotion.'
 		),
 		'',
-		'| Source | Size | K6810 | K6 | Improvement | SD | Wins/ties/losses |',
+		(
+			f'| Source | Size | {protocol.tag.upper()} | K6 | Improvement | SD | '
+			'Wins/ties/losses |'
+		),
 		'| --- | --- | ---: | ---: | ---: | ---: | --- |',
 	]
 	lines.extend(
 		f'| {r["source_family"]} | {r["data_size"]} | '
-		f'{r["k6810_mean"]:.6f} | {r["k6_mean"]:.6f} | '
+		f'{r[protocol.tag + "_mean"]:.6f} | {r["k6_mean"]:.6f} | '
 		f'{r["primary_improvement"]:.6f} | '
 		f'{r["primary_improvement_sample_sd"]:.6f} | '
 		f'{r["wins"]}/{r["ties"]}/{r["losses"]} |'
 		for r in payload['rows']
 	)
-	return publish_summary(output, payload, payload['rows'], '\n'.join(lines) + '\n')
+	return publish_summary(
+		output, payload, payload['rows'], '\n'.join(lines) + '\n', protocol
+	)
 
 
 def main() -> None:

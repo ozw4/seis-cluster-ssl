@@ -1,4 +1,4 @@
-'''Config contracts for the Volve local Barlow Twins recipe-arm experiment.'''
+"""Config contracts for the Volve local Barlow Twins recipe-arm experiment."""
 
 from __future__ import annotations
 
@@ -51,7 +51,7 @@ def artifact_environment(
 	tmp_path: Path,
 	monkeypatch: pytest.MonkeyPatch,
 ) -> Path:
-	'''Point both required roots at a writable pytest directory.'''
+	"""Point both required roots at a writable pytest directory."""
 	artifact_root = tmp_path / 'artifacts'
 	monkeypatch.setenv('SEIS_SSL_CLUSTER_ARTIFACT_ROOT', str(artifact_root))
 	monkeypatch.setenv('SEIS_SSL_CLUSTER_VOLVE_ROOT', str(tmp_path / 'public'))
@@ -79,9 +79,7 @@ def test_pretraining_differs_from_canonical_only_in_the_declared_recipe(
 	augmentations, window = ARM_CONTRACTS[arm_id]
 	canonical = deepcopy(load_config(CANONICAL_PRETRAINING))
 	arm = load_config(ROOT / '10_pretraining' / f'{arm_id}.yaml')
-	_mapping(canonical, 'paths')['output_root'] = _mapping(arm, 'paths')[
-		'output_root'
-	]
+	_mapping(canonical, 'paths')['output_root'] = _mapping(arm, 'paths')['output_root']
 	canonical['augmentations'] = dict(augmentations)
 	_mapping(canonical, 'train')['epochs'] = RECIPE_EPOCHS
 	if window is not None:
@@ -179,8 +177,8 @@ def test_downstream_binds_the_arm_checkpoint_and_embeddings(arm_id: str) -> None
 	arm_block = _mapping(downstream, 'arm')
 	output_root = str(_mapping(pretraining, 'paths')['output_root'])
 	assert arm_block['checkpoint'] == f'{output_root}/latest.pt'
-	assert arm_block['embeddings_dir'] == (
-		_mapping(embedding, 'embeddings')['output_dir']
+	assert (
+		arm_block['embeddings_dir'] == (_mapping(embedding, 'embeddings')['output_dir'])
 	)
 
 
@@ -215,6 +213,7 @@ def test_recipe_arm_namespace_has_only_declared_recipe_and_continuation_users() 
 		'33_missing_hmm_comparison_v1',
 		'34_hmm_v1_paper_sections_v1',
 		'34_hmm_v2_k6810_multi_source_v1',
+		'35_hmm_v2_k468_multi_source_v1',
 	}
 
 

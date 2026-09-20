@@ -1,0 +1,11 @@
+source_embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/overlap_x64
+head_roots:
+  4: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pseudo_targets/hmm_v2_k468_multi_source_v1/local_bt3/shared
+  6: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/rot90_asym_g060_3ep
+  8: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pseudo_targets/hmm_v2_k468_multi_source_v1/local_bt3/shared
+manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pseudo_targets/hmm_v2_k468_multi_source_v1/local_bt3/mh_k468/multi_head_target_manifest.json
+frozen_k6_receipt: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pseudo_targets/hmm_v2_k468_multi_source_v1/local_bt3/frozen_k6_reference.json
+k6_evidence:
+  mode: frozen_reference
+  reference_training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/rot90_asym_g060_3ep_hmm_k6_distill020.yaml
+  historical_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/volve/horizon_benchmark_v1/missing_hmm_comparison_v1/rot90_asym_g060_3ep

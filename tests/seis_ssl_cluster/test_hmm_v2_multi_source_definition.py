@@ -15,11 +15,11 @@ from seis_ssl_cluster.hmm import multi_source_survey as summary
 from seis_ssl_cluster.hmm.multi_source_definition import (
 	validate_multi_source_experiment_definition,
 )
+from seis_ssl_cluster.hmm.multi_source_protocol import experiment_protocol
 from tests.seis_ssl_cluster.test_hmm_v2_multi_source_driver import _args
 
 WORKSPACE = Path(__file__).resolve().parents[2]
 SURVEYS = ('f3', 'parihaka', 'volve')
-MATRIX = Path('experiments/hmm_v2/k6810_multi_source_evaluation_v1/matrix.yaml')
 
 
 def read(path):
@@ -30,16 +30,16 @@ def write(path, value):
 	path.write_text(yaml.safe_dump(value, sort_keys=False))
 
 
-@pytest.fixture(params=SURVEYS)
+@pytest.fixture(params=[(s, k) for s in SURVEYS for k in ('k6810', 'k468')])
 def experiment(request, tmp_path, monkeypatch):
-	survey = request.param
+	survey, tag = request.param
 	original = next(
-		WORKSPACE.glob(f'experiments/{survey}/*/*hmm_v2_k6810_multi_source_v1')
+		WORKSPACE.glob(f'experiments/{survey}/*/*hmm_v2_{tag}_multi_source_v1')
 	)
 	workspace = tmp_path / 'workspace with spaces'
 	root = workspace / original.relative_to(WORKSPACE)
 	shutil.copytree(original, root)
-	paths = {MATRIX}
+	paths = {Path(f'experiments/hmm_v2/{tag}_multi_source_evaluation_v1/matrix.yaml')}
 	for arm in read(original / 'execution.yaml')['arms'].values():
 		paths.update(
 			Path(arm[f'{s}_reference']) for s in ('clustering', 'training', 'embedding')
@@ -104,7 +104,12 @@ def test_preflight_rejects_other_stage_drift(experiment, stage):
 	arm = read(experiment / 'execution.yaml')['arms']['random']
 	cid, family = arm['candidate_id'], arm['target_family']
 	if stage == 'cluster':
-		path = experiment / '10_targets' / family / '01_cluster_hmm_k8k10.yaml'
+		path = (
+			experiment
+			/ '10_targets'
+			/ family
+			/ experiment_protocol(experiment).cluster_filename
+		)
 		config = read(path)
 		config['clustering']['transition'] = 'changed'
 	elif stage == 'embedding':
@@ -238,6 +243,55 @@ def test_embedding_inheritance_preserves_inputs_and_checkpoint(experiment, field
 		field
 	]
 	config[field][key] = 'wrong-source'
+	write(path, config)
+	with pytest.raises(ValueError, match='inheritance drift'):
+		validate_multi_source_experiment_definition(experiment)
+
+
+@pytest.mark.parametrize('depth', [0, 1, 2, 4])
+def test_embedding_prefetch_depth_is_a_runtime_override(experiment, depth):
+	arm = read(experiment / 'execution.yaml')['arms']['random']
+	path = experiment / '40_embeddings' / f'{arm["candidate_id"]}.yaml'
+	config = read(path)
+	config['embedding']['prefetch_queue_depth'] = depth
+	write(path, config)
+	before = snapshot(experiment.parents[3])
+	validate_multi_source_experiment_definition(experiment)
+	assert snapshot(experiment.parents[3]) == before
+
+
+@pytest.mark.parametrize('depth', [-1, True, 2.5, '2', None])
+def test_embedding_prefetch_rejects_invalid_depth_before_live_work(experiment, depth):
+	arm = read(experiment / 'execution.yaml')['arms']['random']
+	path = experiment / '40_embeddings' / f'{arm["candidate_id"]}.yaml'
+	config = read(path)
+	config['embedding']['prefetch_queue_depth'] = depth
+	write(path, config)
+	with pytest.raises(ValueError, match=r'prefetch_queue_depth.*nonnegative integer'):
+		driver.command_plan(experiment, _args())
+	assert not (experiment.parents[3] / 'artifacts').exists()
+
+
+@pytest.mark.parametrize(
+	('field', 'value'),
+	[
+		('batch_size', 2),
+		('amp', True),
+		('output_dtype', 'float32'),
+		('window_size', [64, 64, 64]),
+		('min_token_valid_fraction', 0.25),
+	],
+)
+def test_prefetch_override_still_rejects_numeric_setting_drift(
+	experiment, field, value
+):
+	arm = read(experiment / 'execution.yaml')['arms']['random']
+	path = experiment / '40_embeddings' / f'{arm["candidate_id"]}.yaml'
+	config = read(path)
+	config['embedding']['prefetch_queue_depth'] = 2
+	config['embedding'][field] = (
+		not config['embedding']['amp'] if field == 'amp' else value
+	)
 	write(path, config)
 	with pytest.raises(ValueError, match='inheritance drift'):
 		validate_multi_source_experiment_definition(experiment)

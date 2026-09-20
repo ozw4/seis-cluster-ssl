@@ -9,8 +9,43 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from seis_ssl_cluster.config import load_config
+
+if TYPE_CHECKING:
+	from seis_ssl_cluster.config.f3_lithology_five_way import F3FiveWayConfig
+	from seis_ssl_cluster.f3.lithology.candidate_benchmark import (
+		F3LithologyCandidateConfig,
+	)
+
+
+def _f3_completed_cell_canonical(
+	config: F3LithologyCandidateConfig,
+) -> F3FiveWayConfig:
+	"""Allow read-only canonical reuse only at its original source/output paths."""
+	from seis_ssl_cluster.config.f3_lithology_five_way import (
+		f3_lithology_five_way_config_from_mapping,
+	)
+	from seis_ssl_cluster.f3.lithology.candidate_benchmark import (
+		load_f3_lithology_candidate_canonical_config,
+	)
+
+	canonical = f3_lithology_five_way_config_from_mapping(
+		load_config(config.canonical_config)
+	)
+	if config.candidate_id not in canonical.model_ids:
+		return load_f3_lithology_candidate_canonical_config(config)
+	model = canonical.model_by_id(config.candidate_id)
+	for field, expected in (
+		('checkpoint', model.checkpoint),
+		('embeddings_dir', model.embeddings_dir),
+		('runs_root', canonical.runs_root),
+		('summary_root', canonical.summary_root),
+	):
+		if getattr(config, field).resolve() != expected.resolve():
+			raise ValueError(f'canonical completed F3 cell {field} identity drift')
+	return canonical
 
 
 def audit_completed_cell(
@@ -21,7 +56,6 @@ def audit_completed_cell(
 		from seis_ssl_cluster.f3.lithology.candidate_benchmark import (
 			audit_f3_lithology_candidate_source,
 			f3_lithology_candidate_config_from_mapping,
-			load_f3_lithology_candidate_canonical_config,
 		)
 		from seis_ssl_cluster.f3.lithology.paired_candidate_results import (
 			F3PairedCandidateModel,
@@ -30,7 +64,9 @@ def audit_completed_cell(
 		)
 
 		config = f3_lithology_candidate_config_from_mapping(raw)
-		canonical = load_f3_lithology_candidate_canonical_config(config)
+		if candidate != config.candidate_id:
+			raise ValueError('completed F3 cell candidate identity drift')
+		canonical = _f3_completed_cell_canonical(config)
 		model = F3PairedCandidateModel(
 			candidate, config.checkpoint, config.embeddings_dir
 		)
@@ -82,9 +118,7 @@ def audit_completed_cell(
 		raise ValueError('completed Channel cell differs from current plan')
 	return {
 		'benchmark_identity': metrics['benchmark_identity'],
-		'completion': inspect_completed_channel_job(
-			plan.output_dir, metrics=metrics
-		),
+		'completion': inspect_completed_channel_job(plan.output_dir, metrics=metrics),
 		'metrics_path': str(plan.output_dir / 'metrics.json'),
 	}
 

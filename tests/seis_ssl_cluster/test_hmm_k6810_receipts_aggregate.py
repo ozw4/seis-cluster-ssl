@@ -508,6 +508,7 @@ def test_audited_arm_binds_paths_sources_and_cell_metrics(  # noqa: C901, PLR091
 		'random_init_hmm_v2_mh_k6810_distill020/02_full_25ep.yaml'
 	)
 	config = {
+		'matrix': str(EXPERIMENT / 'matrix.yaml'),
 		'survey': survey,
 		'artifact_root': str(tmp_path),
 		'arms': {

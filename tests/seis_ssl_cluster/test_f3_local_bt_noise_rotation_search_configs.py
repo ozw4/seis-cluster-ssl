@@ -15,9 +15,7 @@ from seis_ssl_cluster.f3.lithology.candidate_benchmark import (
 	load_f3_lithology_candidate_canonical_config,
 )
 
-ROOT = Path(
-	'experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1'
-)
+ROOT = Path('experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1')
 FROZEN_HMM_V1_COMPLETION_ROOT = Path(
 	'experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1'
 )
@@ -191,9 +189,7 @@ EPOCH_SWEEP_BUDGETS = {6: 3_750, 20: 12_500}
 EPOCH_SWEEP_RESUME_SOURCES = {6: 3, 10: 3, 20: 10}
 README = ROOT / 'README.md'
 SHARED_RUNBOOK = ROOT.parent / 'LOCAL_BT_CANDIDATE_RUNBOOK.md'
-RESULT_REPORT_LINK = (
-	'../../../../reports/f3/local_bt_rot90_asymmetric_noise_recipe.md'
-)
+RESULT_REPORT_LINK = '../../../../reports/f3/local_bt_rot90_asymmetric_noise_recipe.md'
 EPOCH_REPORT_LINK = '../../../../reports/f3/local_bt_epoch_scaling_v1.md'
 
 
@@ -304,9 +300,9 @@ def test_noise_axis_arms_differ_only_in_the_noise_declaration() -> None:
 		config = load_config(pretrain_config(arm, 3))
 		comparison = deepcopy(config)
 		comparison['paths']['output_root'] = reference['paths']['output_root']
-		comparison['augmentations']['gaussian_noise_std'] = (
-			reference['augmentations']['gaussian_noise_std']
-		)
+		comparison['augmentations']['gaussian_noise_std'] = reference['augmentations'][
+			'gaussian_noise_std'
+		]
 		assert comparison == reference, arm
 
 
@@ -321,21 +317,17 @@ def test_window_axis_arms_differ_only_in_the_positive_window() -> None:
 
 		comparison = deepcopy(config)
 		comparison['paths']['output_root'] = reference['paths']['output_root']
-		comparison['barlow_twins']['positive_window_tokens'] = (
-			reference['barlow_twins']['positive_window_tokens']
-		)
+		comparison['barlow_twins']['positive_window_tokens'] = reference[
+			'barlow_twins'
+		]['positive_window_tokens']
 		assert comparison == reference, arm
 
 
 def test_asymmetric_arms_mirror_their_symmetric_twin_except_the_policy() -> None:
-	symmetric = load_config(
-		ASCENT_ROOT / '10_pretraining/gauss020_r221_3ep.yaml'
-	)
+	symmetric = load_config(ASCENT_ROOT / '10_pretraining/gauss020_r221_3ep.yaml')
 	asymmetric = load_config(pretrain_config('asym_g020', 3))
 
-	assert symmetric['augmentations']['policy'] == (
-		'horizontal_flip_gaussian_noise_v1'
-	)
+	assert symmetric['augmentations']['policy'] == ('horizontal_flip_gaussian_noise_v1')
 	assert asymmetric['augmentations']['policy'] == (
 		'horizontal_flip_asymmetric_noise_v1'
 	)
@@ -380,9 +372,7 @@ def test_epoch_sweep_resume_sources_form_one_ascending_chain(
 			/ EPOCH_SWEEP_ARM
 			/ f'full_{source}ep'
 		), epochs
-		header = pretrain_config(EPOCH_SWEEP_ARM, epochs).read_text(
-			encoding='utf-8'
-		)
+		header = pretrain_config(EPOCH_SWEEP_ARM, epochs).read_text(encoding='utf-8')
 		assert f'full_{source}ep/latest.pt' in header, epochs
 
 
@@ -411,8 +401,7 @@ def test_extractions_reference_arm_checkpoints_and_v2_manifest(
 			), arm
 
 
-def test_extractions_match_vicreg_poc_conditions_except_source_and_output(
-) -> None:
+def test_extractions_match_vicreg_poc_conditions_except_source_and_output() -> None:
 	baseline = load_config(VICREG_POC_ROOT / '03_extract_v2_embeddings.yaml')
 	for arm in ARM_CONTRACTS:
 		for epochs in arm_epochs(arm):
@@ -451,25 +440,17 @@ def test_candidates_resolve_against_canonical_v3_without_collisions(
 			), arm
 			assert candidate.embeddings_dir.parent.name == candidate.candidate_id
 			assert candidate.runs_root == (
-				artifact_root
-				/ 'f3_lithology_benchmark'
-				/ SEARCH_NAMESPACE
-				/ 'runs'
+				artifact_root / 'f3_lithology_benchmark' / SEARCH_NAMESPACE / 'runs'
 			)
 			assert candidate.summary_root == (
-				artifact_root
-				/ 'f3_lithology_benchmark'
-				/ SEARCH_NAMESPACE
-				/ 'summary'
+				artifact_root / 'f3_lithology_benchmark' / SEARCH_NAMESPACE / 'summary'
 			)
 
 
 def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 	tokens = [SEARCH_NAMESPACE]
 	tokens.extend(
-		candidate_id(arm, epochs)
-		for arm in ARM_CONTRACTS
-		for epochs in arm_epochs(arm)
+		candidate_id(arm, epochs) for arm in ARM_CONTRACTS for epochs in arm_epochs(arm)
 	)
 	for path in sorted(Path('experiments').rglob('*.yaml')):
 		if path.is_relative_to(ROOT) or path.is_relative_to(
@@ -481,6 +462,9 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 			'128_hmm_v2_k6810_multi_source_v1',
 			'41_hmm_v2_k6810_multi_source_v1',
 			'34_hmm_v2_k6810_multi_source_v1',
+			'129_hmm_v2_k468_multi_source_v1',
+			'42_hmm_v2_k468_multi_source_v1',
+			'35_hmm_v2_k468_multi_source_v1',
 		}:
 			continue
 		text = path.read_text(encoding='utf-8')

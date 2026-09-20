@@ -14,8 +14,12 @@ from pathlib import Path
 from typing import Any
 
 from seis_ssl_cluster.config import load_config
+from seis_ssl_cluster.hmm.multi_source_protocol import (
+	K6810,
+	MultiSourceProtocol,
+	protocol_for_matrix,
+)
 from seis_ssl_cluster.hmm.multi_source_receipts import (
-	CANDIDATE_IDS,
 	DATA_SIZES,
 	METRICS,
 	SOURCE_FAMILIES,
@@ -25,9 +29,9 @@ from seis_ssl_cluster.hmm.multi_source_receipts import (
 	file_sha256,
 	load_control_receipts,
 	load_matrix,
-	load_reuse_receipt,
 	object_sha256,
 	read_json,
+	selection_receipt,
 )
 
 COMPARISON_FIELDS = (
@@ -55,7 +59,11 @@ COMPARISON_FIELDS = (
 
 
 def comparison_row(
-	survey: str, family: str, size: str, cells: list[dict[str, Any]]
+	survey: str,
+	family: str,
+	size: str,
+	cells: list[dict[str, Any]],
+	protocol: MultiSourceProtocol = K6810,
 ) -> dict[str, Any]:
 	"""Summarize five paired layouts; positive primary improvement is always better."""
 	selected = [c for c in cells if c['data_size'] == size]
@@ -69,28 +77,32 @@ def comparison_row(
 		'survey': survey,
 		**METRICS[survey],
 		'source_family': family,
-		'candidate_id': CANDIDATE_IDS[family],
+		'candidate_id': protocol.candidate_ids[family],
 		'data_size': size,
-		'reused_existing': (survey, family) == ('f3', 'mae'),
-		'k6810_mean': statistics.fmean(c['primary'] for c in selected),
+		'reused_existing': protocol.reuses_arm(survey, family),
+		f'{protocol.tag}_mean': statistics.fmean(c['primary'] for c in selected),
 		'k6_mean': statistics.fmean(c['control_primary'] for c in selected),
 		'primary_improvement': statistics.fmean(deltas),
 		'wins': sum(d > 0 for d in deltas),
 		'ties': sum(d == 0 for d in deltas),
 		'losses': sum(d < 0 for d in deltas),
-		'k6810_secondary_mean': statistics.fmean(c['secondary'] for c in selected),
+		f'{protocol.tag}_secondary_mean': statistics.fmean(
+			c['secondary'] for c in selected
+		),
 		'k6_secondary_mean': statistics.fmean(c['control_secondary'] for c in selected),
 		'secondary_delta': statistics.fmean(
 			c['secondary'] - c['control_secondary'] for c in selected
 		),
 		'cell_count': 5,
 		'primary_improvement_sample_sd': statistics.stdev(deltas),
-		'k6810_sample_sd': statistics.stdev(c['primary'] for c in selected),
+		f'{protocol.tag}_sample_sd': statistics.stdev(c['primary'] for c in selected),
 		'k6_sample_sd': statistics.stdev(c['control_primary'] for c in selected),
 	}
 
 
-def arm_statistics(survey: str, cells: list[dict[str, Any]]) -> dict[str, Any]:
+def arm_statistics(
+	survey: str, cells: list[dict[str, Any]], protocol: MultiSourceProtocol = K6810
+) -> dict[str, Any]:
 	"""Keep all-15 descriptives separate from five independent layout clusters."""
 	sign = -1 if survey == 'volve' else 1
 	deltas = [sign * (c['primary'] - c['control_primary']) for c in cells]
@@ -105,7 +117,7 @@ def arm_statistics(survey: str, cells: list[dict[str, Any]]) -> dict[str, Any]:
 	return {
 		'all_15': {
 			'cell_count': 15,
-			'k6810_mean': statistics.fmean(c['primary'] for c in cells),
+			f'{protocol.tag}_mean': statistics.fmean(c['primary'] for c in cells),
 			'k6_mean': statistics.fmean(c['control_primary'] for c in cells),
 			'primary_improvement': statistics.fmean(deltas),
 			'primary_improvement_sample_sd': statistics.stdev(deltas),
@@ -125,12 +137,17 @@ def publish_summary(
 	payload: dict[str, Any],
 	rows: list[dict[str, Any]],
 	markdown: str,
+	protocol: MultiSourceProtocol = K6810,
 ) -> tuple[Path, Path, Path]:
 	"""Publish exactly three files with an atomic rename and no replacement."""
 	if output_root.exists() or output_root.is_symlink():
 		raise FileExistsError(f'summary output already exists: {output_root}')
 	stream = io.StringIO(newline='')
-	writer = csv.DictWriter(stream, fieldnames=COMPARISON_FIELDS, extrasaction='ignore')
+	writer = csv.DictWriter(
+		stream,
+		fieldnames=tuple(f.replace('k6810', protocol.tag) for f in COMPARISON_FIELDS),
+		extrasaction='ignore',
+	)
 	writer.writeheader()
 	writer.writerows(rows)
 	contents = {
@@ -205,19 +222,20 @@ def _validate_summary_identity(
 			raise ValueError('survey summary receipt binding drift')
 
 
-def _validated_arm_cells(
+def _validated_arm_cells(  # noqa: PLR0913, PLR0917
 	survey: str,
 	family: str,
 	cells: list[dict[str, Any]],
 	controls: dict[str, Any],
 	reuse: dict[str, Any],
+	protocol: MultiSourceProtocol = K6810,
 ) -> list[dict[str, Any]]:
 	selected = [c for c in cells if c['source_family'] == family]
 	canonical_cells_sha256(survey, selected)
 	for cell in selected:
-		if cell['candidate_id'] != CANDIDATE_IDS[family] or cell[
+		if cell['candidate_id'] != protocol.candidate_ids[family] or cell[
 			'reused_existing'
-		] is not ((survey, family) == ('f3', 'mae')):
+		] is not (protocol.reuses_arm(survey, family)):
 			raise ValueError('cell candidate or reuse identity drift')
 	control = control_receipt_for(controls, survey, family)
 	control_cells = [
@@ -233,9 +251,10 @@ def _validated_arm_cells(
 		!= control['canonical_cells_sha256']
 	):
 		raise ValueError('aggregate matching control cell drift')
-	if (survey, family) == ('f3', 'mae') and canonical_cells_sha256(
-		survey, selected
-	) != reuse['canonical_cells_sha256']:
+	if (
+		protocol.reuses_arm(survey, family)
+		and canonical_cells_sha256(survey, selected) != reuse['canonical_cells_sha256']
+	):
 		raise ValueError('aggregate F3 reuse cell drift')
 	return selected
 
@@ -252,23 +271,24 @@ def inspect_aggregate(config: dict[str, Any]) -> dict[str, Any]:
 	"""Validate all 135 cells and recompute every one of the 27 comparison rows."""
 	matrix_path = Path(config['matrix'])
 	control_path = Path(config['control_receipt'])
-	reuse_path = Path(config['selection_receipt'])
-	for path in (matrix_path, control_path, reuse_path):
+	for path in (matrix_path, control_path):
 		if 'reports' in path.resolve().parts:
 			raise ValueError('reports cannot be pipeline inputs')
-	load_matrix(matrix_path)
+	protocol = protocol_for_matrix(load_matrix(matrix_path))
 	controls = load_control_receipts(control_path)
-	reuse = load_reuse_receipt(reuse_path)
+	reuse, reuse_binding = selection_receipt(config, protocol)
 	bindings = {
 		'control_receipt': {
 			'path': str(control_path),
 			'sha256': file_sha256(control_path),
 		},
-		'selection_receipt': {
-			'path': str(reuse_path),
-			'sha256': file_sha256(reuse_path),
-		},
+		**reuse_binding,
 	}
+	if protocol.consistency_weight:
+		bindings['matrix'] = {
+			'path': str(matrix_path),
+			'sha256': file_sha256(matrix_path),
+		}
 	if set(config['summaries']) != set(SURVEYS):
 		raise ValueError('aggregate requires every survey summary')
 	rows, all_cells, arms, evidence = [], [], [], {}
@@ -284,9 +304,11 @@ def inspect_aggregate(config: dict[str, Any]) -> dict[str, Any]:
 		}:
 			raise ValueError('duplicate or missing survey/source/size row')
 		for family in SOURCE_FAMILIES:
-			selected = _validated_arm_cells(survey, family, cells, controls, reuse)
+			selected = _validated_arm_cells(
+				survey, family, cells, controls, reuse, protocol
+			)
 			for size in DATA_SIZES:
-				row = comparison_row(survey, family, size, selected)
+				row = comparison_row(survey, family, size, selected, protocol)
 				given = next(
 					r
 					for r in payload['rows']
@@ -298,9 +320,9 @@ def inspect_aggregate(config: dict[str, Any]) -> dict[str, Any]:
 				{
 					'survey': survey,
 					'source_family': family,
-					'candidate_id': CANDIDATE_IDS[family],
-					'reused_existing': (survey, family) == ('f3', 'mae'),
-					**arm_statistics(survey, selected),
+					'candidate_id': protocol.candidate_ids[family],
+					'reused_existing': protocol.reuses_arm(survey, family),
+					**arm_statistics(survey, selected, protocol),
 				}
 			)
 		all_cells.extend({**c, 'survey': survey} for c in cells)
@@ -310,10 +332,10 @@ def inspect_aggregate(config: dict[str, Any]) -> dict[str, Any]:
 		'status': 'complete',
 		'completeness': {
 			'arms': 9,
-			'new_arms': 8,
+			'new_arms': 8 if protocol.reuses_arm('f3', 'mae') else 9,
 			'total_cells': 135,
-			'new_cells': 120,
-			'reused_cells': 15,
+			'new_cells': 120 if protocol.reuses_arm('f3', 'mae') else 135,
+			'reused_cells': 15 if protocol.reuses_arm('f3', 'mae') else 0,
 			'comparison_rows': 27,
 		},
 		'matrix': {'path': str(matrix_path), 'sha256': file_sha256(matrix_path)},
@@ -332,12 +354,16 @@ def summarize_aggregate(config: dict[str, Any]) -> tuple[Path, Path, Path]:
 	if output.exists() or output.is_symlink():
 		raise FileExistsError('aggregate output already exists')
 	payload = inspect_aggregate(config)
+	protocol = protocol_for_matrix(load_matrix(Path(config['matrix'])))
 	lines = [
-		'# K6810 multi-source evaluation',
+		f'# {protocol.tag.upper()} multi-source evaluation',
+		'',
+		f'Consistency weight: {protocol.consistency_weight}; distillation weight: 0.2.',
 		'',
 		(
 			'Each survey retains its own metric and evaluation split. '
-			'Positive primary improvement favors K6810. The 15 cells are descriptive; '
+			f'Positive primary improvement favors {protocol.tag.upper()}. '
+			'The 15 cells are descriptive; '
 			'overall variability uses five layout clusters.'
 		),
 		'',
@@ -352,20 +378,23 @@ def summarize_aggregate(config: dict[str, Any]) -> tuple[Path, Path, Path]:
 					f'secondary: {METRICS[survey]["secondary_metric"]}.'
 				),
 				'',
-				'| Source | Size | K6810 | K6 | Improvement | Wins/ties/losses |',
+				(
+					f'| Source | Size | {protocol.tag.upper()} | K6 | Improvement | '
+					'Wins/ties/losses |'
+				),
 				'| --- | --- | ---: | ---: | ---: | --- |',
 			]
 		)
 		lines.extend(
 			f'| {row["source_family"]} | {row["data_size"]} | '
-			f'{row["k6810_mean"]:.6f} | {row["k6_mean"]:.6f} | '
+			f'{row[protocol.tag + "_mean"]:.6f} | {row["k6_mean"]:.6f} | '
 			f'{row["primary_improvement"]:.6f} | '
 			f'{row["wins"]}/{row["ties"]}/{row["losses"]} |'
 			for row in payload['rows']
 			if row['survey'] == survey
 		)
 		lines.append('')
-	return publish_summary(output, payload, payload['rows'], '\n'.join(lines))
+	return publish_summary(output, payload, payload['rows'], '\n'.join(lines), protocol)
 
 
 def main() -> None:

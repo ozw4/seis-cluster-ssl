@@ -1,0 +1,11 @@
+source_embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64
+head_roots:
+  4: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/pseudo_targets/hmm_v2_k468_multi_source_v1/random/shared
+  6: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/random
+  8: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/pseudo_targets/hmm_v2_k468_multi_source_v1/random/shared
+manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/pseudo_targets/hmm_v2_k468_multi_source_v1/random/mh_k468/multi_head_target_manifest.json
+frozen_k6_receipt: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/pseudo_targets/hmm_v2_k468_multi_source_v1/random/frozen_k6_reference.json
+k6_evidence:
+  mode: frozen_reference
+  reference_training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/random/distill020/01_full_25ep.yaml
+  historical_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/parihaka/facies_benchmark_v1/pretraining_comparison_completion_v1/random

@@ -16,6 +16,11 @@ from seis_ssl_cluster.f3.lithology.hmm_v1_freeze_receipt import (
 	build_control_freeze_receipt,
 	canonical_control_cells_sha256,
 )
+from seis_ssl_cluster.hmm.multi_source_protocol import (
+	K6810,
+	MultiSourceProtocol,
+	protocol_for_matrix,
+)
 
 SURVEYS = ('f3', 'parihaka', 'volve')
 SOURCE_FAMILIES = ('mae', 'local_bt', 'random')
@@ -124,12 +129,14 @@ def canonical_cells_sha256(survey: str, cells: list[dict[str, Any]]) -> str:
 	)
 
 
-def validate_fixed_training_config(config: dict[str, Any]) -> None:
+def validate_fixed_training_config(
+	config: dict[str, Any], protocol: MultiSourceProtocol = K6810
+) -> None:
 	"""Enforce the selected scientific recipe while retaining family batch/workers."""
 	expected = {
 		'head': {
 			'spec': 'multi_resolution_ordered_prototypes_v1',
-			'ks': [6, 8, 10],
+			'ks': list(protocol.head_ks),
 			'projection_dim': 128,
 			'temperature': 0.1,
 			'normalize': True,
@@ -138,7 +145,7 @@ def validate_fixed_training_config(config: dict[str, Any]) -> None:
 			'prototype_weight': 1.0,
 			'usage_weight': 0.005,
 			'distillation_weight': 0.2,
-			'consistency_weight': 0.0,
+			'consistency_weight': protocol.consistency_weight,
 			'consistency_beta': 0.1,
 		},
 		'student': {'unfreeze_top_blocks': 1},
@@ -158,12 +165,15 @@ def validate_fixed_training_config(config: dict[str, Any]) -> None:
 		if not isinstance(config.get(section), dict) or any(
 			config[section].get(key) != value for key, value in fields.items()
 		):
-			raise ValueError(f'fixed K6810 training contract drift: {section}')
+			raise ValueError(
+				f'fixed {protocol.tag.upper()} training contract drift: {section}'
+			)
 
 
 def load_matrix(path: Path) -> dict[str, Any]:
 	"""Require the complete fixed matrix; reject result-dependent switches."""
 	matrix = load_config(path)
+	protocol = protocol_for_matrix(matrix)
 	if set(matrix) != {
 		'schema_version',
 		'selected_head_ks',
@@ -174,12 +184,12 @@ def load_matrix(path: Path) -> dict[str, Any]:
 		matrix.get(k) != v
 		for k, v in {
 			'schema_version': 1,
-			'selected_head_ks': [6, 8, 10],
+			'selected_head_ks': list(protocol.head_ks),
 			'distillation_weight': 0.2,
-			'consistency_weight': 0.0,
+			'consistency_weight': protocol.consistency_weight,
 		}.items()
 	):
-		raise ValueError('matrix must preserve the fixed K6810 scientific contract')
+		raise ValueError('matrix must preserve the fixed scientific contract')
 	if set(matrix['surveys']) != set(SURVEYS):
 		raise ValueError('matrix must contain exactly three surveys')
 	for survey, entry in matrix['surveys'].items():
@@ -192,8 +202,8 @@ def load_matrix(path: Path) -> dict[str, Any]:
 			raise ValueError('matrix must contain exactly three source families')
 		for family, arm in entry['arms'].items():
 			if arm != {
-				'candidate_id': CANDIDATE_IDS[family],
-				'execution': 'reuse' if (survey, family) == ('f3', 'mae') else 'new',
+				'candidate_id': protocol.candidate_ids[family],
+				'execution': 'reuse' if protocol.reuses_arm(survey, family) else 'new',
 			}:
 				raise ValueError('matrix arm identity or execution drift')
 	return matrix
@@ -245,6 +255,22 @@ def load_control_receipts(path: Path) -> dict[str, Any]:
 	for entry in entries:
 		_validate_control(entry)
 	return receipt
+
+
+def selection_receipt(
+	config: dict[str, Any], protocol: MultiSourceProtocol
+) -> tuple[dict[str, Any], dict[str, Any]]:
+	"""Require historical reuse only for the original zero-consistency studies."""
+	if not protocol.reuses_arm('f3', 'mae'):
+		if 'selection_receipt' in config:
+			raise ValueError('consistency study cannot reuse completed F3 MAE results')
+		return {}, {}
+	path = Path(config['selection_receipt'])
+	if 'reports' in path.resolve().parts:
+		raise ValueError('reports cannot be pipeline inputs')
+	return load_reuse_receipt(path, protocol), {
+		'selection_receipt': {'path': str(path), 'sha256': file_sha256(path)}
+	}
 
 
 def control_receipt_for(
@@ -337,14 +363,16 @@ def build_control_receipts(freeze_root: Path) -> dict[str, Any]:
 	)
 
 
-def _validate_reuse(receipt: dict[str, Any]) -> None:
+def _validate_reuse(
+	receipt: dict[str, Any], protocol: MultiSourceProtocol = K6810
+) -> None:
 	_check_seal(receipt)
 	if any(
 		receipt.get(k) != v
 		for k, v in {
 			'schema_version': 1,
-			'candidate_id': CANDIDATE_IDS['mae'],
-			'head_ks': [6, 8, 10],
+			'candidate_id': protocol.candidate_ids['mae'],
+			'head_ks': list(protocol.head_ks),
 			'distillation_weight': 0.2,
 			'consistency_weight': 0.0,
 		}.items()
@@ -371,32 +399,38 @@ def _validate_reuse(receipt: dict[str, Any]) -> None:
 		artifact_path(cell['metrics_path'], Path('/artifact_identity'))
 
 
-def load_reuse_receipt(path: Path) -> dict[str, Any]:
+def load_reuse_receipt(
+	path: Path, protocol: MultiSourceProtocol = K6810
+) -> dict[str, Any]:
 	"""Read selected-arm evidence without executing any part of experiment 127."""
 	receipt = read_json(path)
-	_validate_reuse(receipt)
+	_validate_reuse(receipt, protocol)
 	return receipt
 
 
-def build_reuse_receipt(source_summary: Path, artifact_root: Path) -> dict[str, Any]:
+def build_reuse_receipt(
+	source_summary: Path, artifact_root: Path, protocol: MultiSourceProtocol = K6810
+) -> dict[str, Any]:
 	"""Extract selected-arm evidence from an already completed paired summary."""
 	summary = read_json(source_summary)
 	selected = [
-		e for e in summary['candidates'] if e['candidate_id'] == CANDIDATE_IDS['mae']
+		e
+		for e in summary['candidates']
+		if e['candidate_id'] == protocol.candidate_ids['mae']
 	]
 	if (
 		summary['status'] != 'complete'
 		or len(selected) != 1
-		or selected[0]['head_ks'] != [6, 8, 10]
+		or selected[0]['head_ks'] != list(protocol.head_ks)
 	):
-		raise ValueError('expected complete selected F3 K6810 summary')
+		raise ValueError('expected complete selected F3 summary')
 	source = selected[0]['sources']['candidate']
 	lineage = source['semantic_lineage']
 	if (
 		lineage['status'] != 'complete'
-		or lineage['head_ks'] != [6, 8, 10]
+		or lineage['head_ks'] != list(protocol.head_ks)
 		or lineage['epoch'] != 25
-		or lineage['model_tag'] != CANDIDATE_IDS['mae']
+		or lineage['model_tag'] != protocol.candidate_ids['mae']
 		or lineage['stratigraphy_checkpoint']['consistency_weight'] != 0
 	):
 		raise ValueError('selected source audit drift')
@@ -408,7 +442,7 @@ def build_reuse_receipt(source_summary: Path, artifact_root: Path) -> dict[str, 
 
 	resolved_path = Path(source['checkpoint_path']).parent / 'resolved_config.json'
 	resolved = read_json(resolved_path)
-	validate_fixed_training_config(resolved)
+	validate_fixed_training_config(resolved, protocol)
 	from seis_ssl_cluster.training.random_checkpoint import (  # noqa: PLC0415
 		load_checkpoint_metadata_without_weights,
 	)
@@ -419,7 +453,7 @@ def build_reuse_receipt(source_summary: Path, artifact_root: Path) -> dict[str, 
 	if checkpoint_metadata.get('stratigraphy_config') != resolved:
 		raise ValueError('resolved training config differs from checkpoint')
 	if (
-		resolved['head']['ks'] != [6, 8, 10]
+		resolved['head']['ks'] != list(protocol.head_ks)
 		or resolved['loss']['distillation_weight'] != 0.2
 		or resolved['loss']['consistency_weight'] != 0.0
 		or resolved['train']['epochs'] != 25
@@ -440,12 +474,12 @@ def build_reuse_receipt(source_summary: Path, artifact_root: Path) -> dict[str, 
 			'metrics_sha256': r['candidate_metrics_sha256'],
 		}
 		for r in summary['comparison']
-		if r['candidate_id'] == CANDIDATE_IDS['mae']
+		if r['candidate_id'] == protocol.candidate_ids['mae']
 	]
 	payload = {
 		'schema_version': 1,
-		'candidate_id': CANDIDATE_IDS['mae'],
-		'head_ks': [6, 8, 10],
+		'candidate_id': protocol.candidate_ids['mae'],
+		'head_ks': list(protocol.head_ks),
 		'distillation_weight': 0.2,
 		'consistency_weight': 0.0,
 		'cells': cells,
@@ -470,15 +504,15 @@ def build_reuse_receipt(source_summary: Path, artifact_root: Path) -> dict[str, 
 		'sha256': file_sha256(resolved_path),
 	}
 	receipt = _seal(payload)
-	verify_reuse_receipt(receipt, artifact_root)
+	verify_reuse_receipt(receipt, artifact_root, protocol)
 	return receipt
 
 
 def verify_reuse_receipt(
-	receipt: dict[str, Any], artifact_root: Path
+	receipt: dict[str, Any], artifact_root: Path, protocol: MultiSourceProtocol = K6810
 ) -> list[dict[str, Any]]:
 	"""Read-only hash audit of the selected source, summary, and 15 metrics files."""
-	_validate_reuse(receipt)
+	_validate_reuse(receipt, protocol)
 	for name in (
 		'checkpoint',
 		'embeddings',
@@ -519,7 +553,7 @@ def main() -> None:
 	parser.add_argument('--source-summary', type=Path)
 	parser.add_argument('--artifact-root', type=Path)
 	args = parser.parse_args()
-	load_matrix(args.matrix)
+	protocol = protocol_for_matrix(load_matrix(args.matrix))
 	if args.build_receipts:
 		if not all((args.freeze_root, args.source_summary, args.artifact_root)):
 			parser.error(
@@ -528,7 +562,7 @@ def main() -> None:
 		if args.controls.exists() or args.reuse.exists():
 			raise FileExistsError('receipt output already exists')
 		controls = build_control_receipts(args.freeze_root)
-		reuse = build_reuse_receipt(args.source_summary, args.artifact_root)
+		reuse = build_reuse_receipt(args.source_summary, args.artifact_root, protocol)
 		for path, value in ((args.controls, controls), (args.reuse, reuse)):
 			with path.open('x', encoding='utf-8') as stream:
 				stream.write(
@@ -536,10 +570,10 @@ def main() -> None:
 				)
 	else:
 		load_control_receipts(args.controls)
-		receipt = load_reuse_receipt(args.reuse)
+		receipt = load_reuse_receipt(args.reuse, protocol)
 		if args.artifact_root:
-			verify_reuse_receipt(receipt, args.artifact_root)
-	print('K6810 matrix and receipts validated')
+			verify_reuse_receipt(receipt, args.artifact_root, protocol)
+	print(f'{protocol.tag.upper()} matrix and receipts validated')
 
 
 if __name__ == '__main__':
