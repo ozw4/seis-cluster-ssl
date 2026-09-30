@@ -1,5 +1,9 @@
 # K6810 consistency-weight 0.1 study
 
+This completed study is the canonical HMM v2 multi-source protocol. The
+versioned decision and bound evidence are recorded in
+[`../canonical_multi_source_v1/selection.yaml`](../canonical_multi_source_v1/selection.yaml).
+
 The [shared runbook](../cons010_multi_source_evaluation_v1/README.md) defines
 scientific controls, environment setup, GPU0/GPU1 launch, outputs and restart.
 This study runs nine new 25-epoch continuations and 135 downstream cells.
