@@ -2,12 +2,12 @@ schema_version: 1
 status: canonical
 scope: hmm_v2_multi_source_protocol
 selected_on: '2026-09-30'
-selected_experiment: k6810_cons010_multi_source_evaluation_v1
+selected_experiment: k468_cons010_multi_source_evaluation_v1
 scientific_contract:
   selected_head_ks:
+  - 4
   - 6
   - 8
-  - 10
   distillation_weight: 0.2
   consistency_weight: 0.1
   source_families:
@@ -24,12 +24,12 @@ scientific_contract:
   - large
   layouts_per_condition: 5
 evidence:
-  matrix: experiments/hmm_v2/k6810_cons010_multi_source_evaluation_v1/matrix.yaml
-  matrix_sha256: edf8ec8816fe5e047332b8012bc8eb1cbd5efd75d0c16105c91e89ca59a8df12
-  aggregate_config: experiments/hmm_v2/k6810_cons010_multi_source_evaluation_v1/aggregate.yaml
-  aggregate_config_sha256: da1ac6f0edfb7a8a2552c22a672d4d0c7b274a2fa23abfd7e8e2b0ec972f93e2
-  artifact_summary: studies/hmm_v2/k6810_cons010_multi_source_evaluation_v1/summary/summary.json
-  artifact_summary_sha256: 76af6c4bfc0a3a07051b5622b191f74b61bd55a84a6613f9123568af84087666
+  matrix: experiments/hmm_v2/k468_cons010_multi_source_evaluation_v1/matrix.yaml
+  matrix_sha256: a53d402a84b9a7601f2200614a46480b4159a65423e38396426b42125773cd3d
+  aggregate_config: experiments/hmm_v2/k468_cons010_multi_source_evaluation_v1/aggregate.yaml
+  aggregate_config_sha256: 471ae62bdcdc007a0a056bbd35363112529be5bffd95a42054b077faa0918f96
+  artifact_summary: studies/hmm_v2/k468_cons010_multi_source_evaluation_v1/summary/summary.json
+  artifact_summary_sha256: b255a8a1042fb60479407db69043183c74d17cb2db0a62c429834f6806f14445
   artifact_summary_status: complete
   aggregate_cell_count: 135
 decision:
