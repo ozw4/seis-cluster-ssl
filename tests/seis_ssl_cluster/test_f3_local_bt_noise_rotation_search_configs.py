@@ -473,7 +473,9 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 			'133_hmm_v3_mask_token_lr_sweep_v1',
 			'134_hmm_v3_masked_visible_weight_sweep_v1',
 			'45_hmm_v3_k6810_trace_mask_multi_source_v1',
+			'46_hmm_v3_k6810_trace_mask_masklr3em5_v1',
 			'38_hmm_v3_k6810_trace_mask_multi_source_v1',
+			'39_hmm_v3_k6810_trace_mask_masklr3em5_v1',
 			'42_hmm_v2_k468_multi_source_v1',
 			'35_hmm_v2_k468_multi_source_v1',
 		}:

@@ -58,3 +58,13 @@ arms at the same LR supply the audited control subset. Each of the six new
 Weights are bound to versioned model identities and checkpoint/resume validation.
 Ninety paired evaluations are reported separately for small/medium/large.
 Neither unfinished `1e-4` runs nor stopped surveys are resumed.
+
+## Non-F3 transfer of the 3e-5/50:50 setting
+
+The [Parihaka/Volve follow-up](../experiments/hmm_v3/trace_mask_masklr3em5_multi_survey_v1/README.md)
+transfers the F3 mask-token LR `3e-5`, equal-branch-weight setting. New runs
+start from original source parents for 25 epochs rather than changing the LR
+of old partial trace-mask checkpoints. Canonical nonmasked v02 is the paired
+reference. Candidate-only requested scopes retain 15 complete paired decoder
+cells and separate small/medium/large summaries; full three-source scopes
+require all 45 cells. Old stopped studies are not implicitly resumed.

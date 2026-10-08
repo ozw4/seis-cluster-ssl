@@ -1,0 +1,6 @@
+{
+  "training_configs": [
+    "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/46_hmm_v3_k6810_trace_mask_masklr3em5_v1/30_pretraining/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/02_full_25ep.yaml"
+  ]
+}
+
