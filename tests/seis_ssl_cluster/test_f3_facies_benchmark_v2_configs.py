@@ -82,6 +82,10 @@ CANDIDATE_CONFIG_SUITES = {
 		'test_hmm_v2_multi_source_configs.py',
 		18,
 	),
+	'132_hmm_v3_k6810_trace_mask_multi_source_v1': (
+		'test_hmm_v3_trace_mask_driver.py',
+		16,
+	),
 	'127_hmm_v2_multi_head_screening_v1': (
 		'test_strat_multi_head_pretraining_validation.py',
 		24,

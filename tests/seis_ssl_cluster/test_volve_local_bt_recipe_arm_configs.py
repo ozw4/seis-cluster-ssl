@@ -216,6 +216,7 @@ def test_recipe_arm_namespace_has_only_declared_recipe_and_continuation_users() 
 		'35_hmm_v2_k468_multi_source_v1',
 		'36_hmm_v2_k468_cons010_multi_source_v1',
 		'37_hmm_v2_k6810_cons010_multi_source_v1',
+		'38_hmm_v3_k6810_trace_mask_multi_source_v1',
 	}
 
 

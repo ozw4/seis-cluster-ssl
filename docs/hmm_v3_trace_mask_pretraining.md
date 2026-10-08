@@ -32,3 +32,6 @@ Parihaka uses test channel IoU and F1; Volve uses test horizon error and
 within-two-samples accuracy. Results retain each survey's metric and direction.
 Labels and downstream scores do not choose masks, targets or checkpoints.
 The completed epoch-25 checkpoint is used for every candidate.
+
+See the [study runbook](../experiments/hmm_v3/k6810_trace_mask_multi_source_v1/README.md)
+for versioned definitions, execution, recovery and paired publication.

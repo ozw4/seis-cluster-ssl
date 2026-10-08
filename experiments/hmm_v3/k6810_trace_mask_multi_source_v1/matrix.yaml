@@ -1,0 +1,44 @@
+schema_version: 1
+study_id: k6810_trace_mask_multi_source_v1
+canonical_selection:
+  path: experiments/hmm_v2/canonical_multi_source_v1/selection.yaml
+  sha256: b8f277fbd3403115f464362d3020b7ec2771d8f77fd130d92397769ca7ab743c
+scientific_contract:
+  head_ks: [6, 8, 10]
+  source_families: [mae, local_bt, random]
+  column_fraction: 0.1
+  masked_prototype_weight: 0.5
+  visible_prototype_weight: 0.5
+  distillation_scope: visible_only_v1
+  distillation_weight: 0.2
+  consistency_weight: 0.1
+  consistency_policy: normalized_order_smooth_l1_v1
+  epochs: 25
+  samples_per_epoch: 10000
+  seed: 42
+  data_sizes: [small, medium, large]
+  layouts_per_condition: 5
+  continuation_count: 9
+  downstream_cell_count: 135
+surveys:
+  f3:
+    execution_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/execution.yaml
+    evaluation_split: validation
+    candidate_ids:
+    - mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+    - local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+    - random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+  parihaka:
+    execution_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/45_hmm_v3_k6810_trace_mask_multi_source_v1/execution.yaml
+    evaluation_split: test
+    candidate_ids:
+    - mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+    - local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+    - random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+  volve:
+    execution_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/volve/horizon_benchmark_v1/38_hmm_v3_k6810_trace_mask_multi_source_v1/execution.yaml
+    evaluation_split: test
+    candidate_ids:
+    - mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+    - local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+    - random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010

@@ -1,0 +1,116 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/pretraining/hmm_v3_k6810_trace_mask_multi_source_v1/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010/gpu_feasibility_1step
+manifests:
+  train: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_amplitude_manifest.json
+  train_path_list: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/parihaka/facies_benchmark_v1/parihaka_npy_paths.txt
+data:
+  local_crop_size:
+  - 128
+  - 128
+  - 128
+  min_valid_fraction: 0.1
+  max_resample_attempts: 16
+  normalized_clip_abs: 8.0
+  finite_check_mode: strict
+  amplitude_agc:
+    enabled: true
+    mode: trace_rms_z
+    window_z: 65
+    eps: 0.001
+    clip_abs: 5.0
+zero_mask:
+  enabled: true
+  zero_atol: 0.0
+  z_sample_influence_radius: 16
+  xy_trace_influence_radius: 1
+model:
+  patch_size:
+  - 8
+  - 8
+  - 8
+  encoder_dim: 384
+  encoder_depth: 8
+  encoder_heads: 6
+  decoder_dim: 256
+  decoder_depth: 4
+  decoder_heads: 4
+pseudo_targets:
+  manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/parihaka/facies_benchmark_v1/hmm_v2_k6810_multi_source_v1/mae100/mh_k6810/multi_head_target_manifest.json
+  target_representation: hard_viterbi_labels_v1
+  min_confidence: 0.0
+teacher:
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage1/mae/full_100ep/latest.pt
+student:
+  init_checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage1/mae/full_100ep/latest.pt
+  unfreeze_top_blocks: 1
+head:
+  spec: multi_resolution_ordered_prototypes_v1
+  ks:
+  - 6
+  - 8
+  - 10
+  projection_dim: 128
+  temperature: 0.1
+  normalize: true
+loss:
+  prototype_weight: 1.0
+  usage_weight: 0.005
+  entropy_floor: null
+  distillation_weight: 0.2
+  consistency_weight: 0.1
+  consistency_beta: 0.1
+train:
+  batch_size: 16
+  samples_per_epoch: 10000
+  epochs: 1
+  num_workers: 8
+  shuffle: true
+  lr: 1.0e-05
+  encoder_lr: 1.0e-05
+  weight_decay: 0.05
+  amp: false
+  device: cuda
+  seed: 42
+  grad_clip_norm: 1.0
+  max_steps: 1
+  allow_overwrite_output: false
+identity:
+  model_tag: mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+  scientific_identity:
+    experiment_role: multi_head_center_trace_masked_hard_pretext
+    variant: ctmask010_cons010
+    head_spec: multi_resolution_ordered_prototypes_v1
+    head_ks:
+    - 6
+    - 8
+    - 10
+    target_manifest_sha256: 48384814f68911c8f524e1562127114575c71cf49bbd03b78cc53a88e4d4d2c3
+    consistency_policy: normalized_order_smooth_l1_v1
+    target_representation: hard_viterbi_labels_v1
+    target_head_hashes: {"6":{"parihaka":{"labels":"4649f944cf5c7a17beec339bf04f8731b1c8273505fbd6d94b63e0d7f2c863ee","confidence":"a504d610233e25701c1bbec1454a5b6950893d4bb246f3075e4620279e229d87","valid_tokens":"ba793a70db5b9df64bc179d338d563e46ba7dd984727a980cd20279b061f55e9","metadata":"16d279a01b74c42474c8018bff3f47b0e8a22a18f9bd049e4de62b105c887c5f"}},"8":{"parihaka":{"labels":"eb7cb0ffcd6efeae9491669ce391964d09896fcab157819d9df2969d856ae987","confidence":"a504d610233e25701c1bbec1454a5b6950893d4bb246f3075e4620279e229d87","valid_tokens":"ba793a70db5b9df64bc179d338d563e46ba7dd984727a980cd20279b061f55e9","metadata":"a8b14d39ecce9f0b390b81dfbfe951364ea5b4453c736569adf61b401b782b90"}},"10":{"parihaka":{"labels":"0b4c58fb6d34e47e7b2d8f6509b1c84a366450cc815f1e22672d393bda39e912","confidence":"a504d610233e25701c1bbec1454a5b6950893d4bb246f3075e4620279e229d87","valid_tokens":"ba793a70db5b9df64bc179d338d563e46ba7dd984727a980cd20279b061f55e9","metadata":"0c2d27310a94ce3786f541adf03d34f1d0132ce111cb2adfd2e0909c0641cd88"}}}
+    objective_semantics: center_trace_masked_hmm_path_reconstruction_v1
+    mask_semantics: xy_token_column_full_z_v1
+    column_fraction: 0.1
+    selection_policy: supervised_valid_xy_columns_round_half_up_leave_one_v1
+    replacement: learned_encoder_mask_token_v1
+    replacement_initialization: normal_std_0p02_train_seed_salted_v1
+    rng_policy: stateless_step_seed_v1
+    masked_prototype_weight: 0.5
+    visible_prototype_weight: 0.5
+    distillation_scope: visible_only_v1
+    supervised_loss: structured_hmm_center_trace_masked_hard_v1
+  runtime_identity:
+    device: cuda
+    workers: 8
+spatial_context:
+  objective: center_trace_masked_hmm_path_reconstruction_v1
+  mask_semantics: xy_token_column_full_z_v1
+  column_fraction: 0.1
+  selection_policy: supervised_valid_xy_columns_round_half_up_leave_one_v1
+  replacement: learned_encoder_mask_token_v1
+  replacement_initialization: normal_std_0p02_train_seed_salted_v1
+  rng_policy: stateless_step_seed_v1
+  masked_prototype_weight: 0.5
+  visible_prototype_weight: 0.5
+  distillation_scope: visible_only_v1

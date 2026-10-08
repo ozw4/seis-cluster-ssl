@@ -1,0 +1,116 @@
+paths:
+  artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+  output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pretraining/hmm_v3_k6810_trace_mask_multi_source_v1/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010/full_25ep
+identity:
+  model_tag: mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010
+  scientific_identity:
+    experiment_role: multi_head_center_trace_masked_hard_pretext
+    variant: ctmask010_cons010
+    head_spec: multi_resolution_ordered_prototypes_v1
+    head_ks:
+    - 6
+    - 8
+    - 10
+    target_manifest_sha256: bef74ebc6e479846c9652aee5512f825878f401f270b8bedc857e723acce6151
+    consistency_policy: normalized_order_smooth_l1_v1
+    target_representation: hard_viterbi_labels_v1
+    target_head_hashes: {"6":{"volve_st10010":{"labels":"ea47715abf7c7485dafd643ee4bf5148570149f854ed5c29b5fde9edb2fe7865","confidence":"5f01cb372193426661247dca04b2a4175ba78096fde29358af5b624aa79a24a9","valid_tokens":"c6a966a0dfa06c542109302f696beaabf1cb8af99e932f55027e176f972da74a","metadata":"ba38940a727eadb7be7fd7c2c756f95009e21bdd48c00af292c8e7402869c013"}},"8":{"volve_st10010":{"labels":"43a4c97a2369254529779a0e1eeb24addec4a24ae01245185b678cb8cb2e1182","confidence":"5f01cb372193426661247dca04b2a4175ba78096fde29358af5b624aa79a24a9","valid_tokens":"c6a966a0dfa06c542109302f696beaabf1cb8af99e932f55027e176f972da74a","metadata":"2f7efa554b67400eb49235f6b78750d4b1f6bd6aa62e8be01b61b6bfa67e2952"}},"10":{"volve_st10010":{"labels":"028daf04c6778babdc41ef7b2a372b0deb7bbb646b3d3412388e528eb3a00336","confidence":"5f01cb372193426661247dca04b2a4175ba78096fde29358af5b624aa79a24a9","valid_tokens":"c6a966a0dfa06c542109302f696beaabf1cb8af99e932f55027e176f972da74a","metadata":"766dace218d75fe31d316bacf46d305c412a163a83ad1dc363b077d64e37e3c6"}}}
+    objective_semantics: center_trace_masked_hmm_path_reconstruction_v1
+    mask_semantics: xy_token_column_full_z_v1
+    column_fraction: 0.1
+    selection_policy: supervised_valid_xy_columns_round_half_up_leave_one_v1
+    replacement: learned_encoder_mask_token_v1
+    replacement_initialization: normal_std_0p02_train_seed_salted_v1
+    rng_policy: stateless_step_seed_v1
+    masked_prototype_weight: 0.5
+    visible_prototype_weight: 0.5
+    distillation_scope: visible_only_v1
+    supervised_loss: structured_hmm_center_trace_masked_hard_v1
+  runtime_identity:
+    device: cuda
+    workers: 8
+manifests:
+  train: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/volve_amplitude_manifest.json
+  train_path_list: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/data/volve/horizon_benchmark_v1/volve_npy_paths.txt
+data:
+  local_crop_size:
+  - 128
+  - 128
+  - 128
+  min_valid_fraction: 0.1
+  max_resample_attempts: 16
+  normalized_clip_abs: 8.0
+  finite_check_mode: strict
+  amplitude_agc:
+    enabled: true
+    mode: trace_rms_z
+    window_z: 65
+    eps: 0.001
+    clip_abs: 5.0
+zero_mask:
+  enabled: true
+  zero_atol: 0.0
+  z_sample_influence_radius: 16
+  xy_trace_influence_radius: 1
+model:
+  patch_size:
+  - 8
+  - 8
+  - 8
+  encoder_dim: 384
+  encoder_depth: 8
+  encoder_heads: 6
+  decoder_dim: 256
+  decoder_depth: 4
+  decoder_heads: 4
+pseudo_targets:
+  manifest: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/volve/horizon_benchmark_v1/hmm_v2_k6810_multi_source_v1/mae100/mh_k6810/multi_head_target_manifest.json
+  target_representation: hard_viterbi_labels_v1
+  min_confidence: 0.0
+teacher:
+  checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/latest.pt
+student:
+  init_checkpoint: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_v1/full_100ep/latest.pt
+  unfreeze_top_blocks: 1
+head:
+  spec: multi_resolution_ordered_prototypes_v1
+  ks:
+  - 6
+  - 8
+  - 10
+  projection_dim: 128
+  temperature: 0.1
+  normalize: true
+loss:
+  prototype_weight: 1.0
+  usage_weight: 0.005
+  entropy_floor: null
+  distillation_weight: 0.2
+  consistency_weight: 0.1
+  consistency_beta: 0.1
+train:
+  batch_size: 4
+  samples_per_epoch: 10000
+  epochs: 25
+  num_workers: 8
+  shuffle: true
+  lr: 1.0e-05
+  encoder_lr: 1.0e-05
+  weight_decay: 0.05
+  amp: false
+  device: cuda
+  seed: 42
+  grad_clip_norm: 1.0
+  max_steps: null
+  allow_overwrite_output: false
+spatial_context:
+  objective: center_trace_masked_hmm_path_reconstruction_v1
+  mask_semantics: xy_token_column_full_z_v1
+  column_fraction: 0.1
+  selection_policy: supervised_valid_xy_columns_round_half_up_leave_one_v1
+  replacement: learned_encoder_mask_token_v1
+  replacement_initialization: normal_std_0p02_train_seed_salted_v1
+  rng_policy: stateless_step_seed_v1
+  masked_prototype_weight: 0.5
+  visible_prototype_weight: 0.5
+  distillation_scope: visible_only_v1
