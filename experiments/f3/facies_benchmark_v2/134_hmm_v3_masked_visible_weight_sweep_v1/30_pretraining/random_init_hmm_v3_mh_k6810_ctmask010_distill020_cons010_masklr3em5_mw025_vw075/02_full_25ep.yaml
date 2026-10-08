@@ -1,0 +1,164 @@
+{
+  "paths": {
+    "artifact_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}",
+    "output_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/pretraining/hmm_v3_masked_visible_weight_sweep_v1/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5_mw025_vw075/full_25ep"
+  },
+  "identity": {
+    "model_tag": "random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5_mw025_vw075",
+    "scientific_identity": {
+      "experiment_role": "multi_head_center_trace_masked_hard_pretext",
+      "variant": "ctmask010_cons010",
+      "head_spec": "multi_resolution_ordered_prototypes_v1",
+      "head_ks": [
+        6,
+        8,
+        10
+      ],
+      "target_manifest_sha256": "616ff274cd855a27c48874ed19b0c2a50d311100c4e3646652cf20c14b849b4b",
+      "consistency_policy": "normalized_order_smooth_l1_v1",
+      "target_representation": "hard_viterbi_labels_v1",
+      "target_head_hashes": {
+        "6": {
+          "f3_facies_benchmark": {
+            "labels": "5eb6b067487c465b4013f1fa65ffb0edb8010c7f24b289d9cffd9f8e9d84da9c",
+            "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+            "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526",
+            "metadata": "45784ccb84224b1857befe22532af06517221a2ed683e899c917807fc1be9749"
+          }
+        },
+        "8": {
+          "f3_facies_benchmark": {
+            "labels": "8fddb3972666fa5fcc2f5b4428412ec5935883bd7cf00f24b81dc89b05498c4c",
+            "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+            "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526",
+            "metadata": "d0c08ee8c06dae3a5123e27af0a80d9ec90919c8cdf9862bea1e467d1fc68c8f"
+          }
+        },
+        "10": {
+          "f3_facies_benchmark": {
+            "labels": "a556346d68af079a110d863a3c979fe9e6f9471c3fdf3ccdbf49db6c52fc0a6c",
+            "confidence": "ffc856ec3b615fecd1b6210b6006996ff70857b817540d2681597eb69dc88dc2",
+            "valid_tokens": "b420c53b5cdc2f939d0399d349c712f5212fbf8d0d885ddae5cfe64c8e21e526",
+            "metadata": "ba793cc2fd9362cc56ed8332390130f4c911683135ec0d9236a148f15f54b4eb"
+          }
+        }
+      },
+      "objective_semantics": "center_trace_masked_hmm_path_reconstruction_v1",
+      "mask_semantics": "xy_token_column_full_z_v1",
+      "column_fraction": 0.1,
+      "selection_policy": "supervised_valid_xy_columns_round_half_up_leave_one_v1",
+      "replacement": "learned_encoder_mask_token_v1",
+      "replacement_initialization": "normal_std_0p02_train_seed_salted_v1",
+      "rng_policy": "stateless_step_seed_v1",
+      "masked_prototype_weight": 0.25,
+      "visible_prototype_weight": 0.75,
+      "distillation_scope": "visible_only_v1",
+      "supervised_loss": "structured_hmm_center_trace_masked_hard_v1"
+    },
+    "runtime_identity": {
+      "device": "cuda",
+      "workers": 4
+    }
+  },
+  "manifests": {
+    "train": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/manifests/f3/facies_benchmark_v1/f3_amplitude_manifest.json",
+    "train_path_list": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/splits/f3/facies_benchmark_v1/f3_npy_paths.txt"
+  },
+  "data": {
+    "local_crop_size": [
+      128,
+      128,
+      128
+    ],
+    "min_valid_fraction": 0.1,
+    "max_resample_attempts": 16,
+    "normalized_clip_abs": 8,
+    "finite_check_mode": "strict",
+    "amplitude_agc": {
+      "enabled": true,
+      "mode": "trace_rms_z",
+      "window_z": 65,
+      "eps": 0.001,
+      "clip_abs": 5
+    }
+  },
+  "zero_mask": {
+    "enabled": true,
+    "zero_atol": 0,
+    "z_sample_influence_radius": 16,
+    "xy_trace_influence_radius": 1
+  },
+  "model": {
+    "patch_size": [
+      8,
+      8,
+      8
+    ],
+    "encoder_dim": 384,
+    "encoder_depth": 8,
+    "encoder_heads": 6,
+    "decoder_dim": 256,
+    "decoder_depth": 4,
+    "decoder_heads": 4
+  },
+  "pseudo_targets": {
+    "manifest": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pseudo_targets/f3/facies_benchmark_v1/hmm_v2_k6810_multi_source_v1/random/mh_k6810/multi_head_target_manifest.json",
+    "target_representation": "hard_viterbi_labels_v1",
+    "min_confidence": 0
+  },
+  "teacher": {
+    "checkpoint": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt"
+  },
+  "student": {
+    "init_checkpoint": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt",
+    "unfreeze_top_blocks": 1
+  },
+  "head": {
+    "spec": "multi_resolution_ordered_prototypes_v1",
+    "ks": [
+      6,
+      8,
+      10
+    ],
+    "projection_dim": 128,
+    "temperature": 0.1,
+    "normalize": true
+  },
+  "loss": {
+    "prototype_weight": 1,
+    "usage_weight": 0.005,
+    "entropy_floor": null,
+    "distillation_weight": 0.2,
+    "consistency_weight": 0.1,
+    "consistency_beta": 0.1
+  },
+  "train": {
+    "batch_size": 16,
+    "samples_per_epoch": 10000,
+    "epochs": 25,
+    "num_workers": 4,
+    "shuffle": true,
+    "lr": 0.00001,
+    "encoder_lr": 0.00001,
+    "weight_decay": 0.05,
+    "amp": false,
+    "device": "cuda",
+    "seed": 42,
+    "grad_clip_norm": 1,
+    "max_steps": null,
+    "allow_overwrite_output": false,
+    "mask_token_lr": 0.00003
+  },
+  "spatial_context": {
+    "objective": "center_trace_masked_hmm_path_reconstruction_v1",
+    "mask_semantics": "xy_token_column_full_z_v1",
+    "column_fraction": 0.1,
+    "selection_policy": "supervised_valid_xy_columns_round_half_up_leave_one_v1",
+    "replacement": "learned_encoder_mask_token_v1",
+    "replacement_initialization": "normal_std_0p02_train_seed_salted_v1",
+    "rng_policy": "stateless_step_seed_v1",
+    "masked_prototype_weight": 0.25,
+    "visible_prototype_weight": 0.75,
+    "distillation_scope": "visible_only_v1"
+  }
+}

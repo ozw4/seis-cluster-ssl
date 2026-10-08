@@ -1,0 +1,14 @@
+{
+  "benchmark": {
+    "canonical_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/110_lithology_mae_local_bt_five_way_v3/60_five_way.yaml"
+  },
+  "candidate": {
+    "id": "random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5_mw025_vw075",
+    "checkpoint": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/pretraining/hmm_v3_masked_visible_weight_sweep_v1/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5_mw025_vw075/full_25ep/latest.pt",
+    "embeddings_dir": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v3_masked_visible_weight_sweep_v1/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5_mw025_vw075/overlap_x64"
+  },
+  "outputs": {
+    "runs_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v3_masked_visible_weight_sweep_v1/runs",
+    "summary_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v3_masked_visible_weight_sweep_v1/summary/candidates"
+  }
+}

@@ -46,3 +46,15 @@ original parents, immutable targets and the completed v3 masking/loss contract.
 Completed masked v3 is the paired control, not the unmasked v02 model.
 The five-layout, three-size decoder matrix contributes 90 new evaluation cells.
 This follow-up does not resume stopped Parihaka or Volve runs.
+
+## F3-only masked/visible prototype-weight follow-up
+
+[Experiment 134](../experiments/f3/facies_benchmark_v2/134_hmm_v3_masked_visible_weight_sweep_v1/README.md)
+fixes mask-token LR at `3e-5` and changes only the separately normalized
+masked/visible prototype weights to `25:75` or `75:25`. Completed `50:50`
+arms at the same LR supply the audited control subset. Each of the six new
+25-epoch arms starts from its original parent. The masking fraction remains
+10%; usage, distillation and consistency objectives retain their definitions.
+Weights are bound to versioned model identities and checkpoint/resume validation.
+Ninety paired evaluations are reported separately for small/medium/large.
+Neither unfinished `1e-4` runs nor stopped surveys are resumed.
