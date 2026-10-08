@@ -236,7 +236,34 @@ def _refresh_decoder_checkpoint_identity(job_dir: Path) -> None:
 
 
 def test_reads_complete_evaluation_lineage(completed_job: Path) -> None:
-	evidence = _read(completed_job)
+	_read(completed_job)
+
+
+def test_reads_prediction_outputs_recorded_through_resolved_runs_symlink(
+	tmp_path: Path,
+) -> None:
+	physical_root = tmp_path / 'physical'
+	physical_root.mkdir()
+	configured_root = tmp_path / 'configured'
+	configured_root.symlink_to(physical_root, target_is_directory=True)
+	job_dir = _write_job(configured_root)
+	prediction_path = job_dir / 'prediction/prediction_metadata.json'
+	metadata = _read_json(prediction_path)
+	outputs = metadata['outputs']
+	assert isinstance(outputs, dict)
+	for key, (_, name) in PREDICTION_FILES.items():
+		outputs[key] = str((job_dir / 'prediction' / name).resolve())
+	_write_json(prediction_path, metadata)
+	_refresh_prediction_metadata_identity(job_dir)
+
+	evidence = read_f3_completed_evaluation_provenance(
+		job_dir,
+		model_id=MODEL_ID,
+		layout_id=LAYOUT_ID,
+		data_size=DATA_SIZE,
+	)
+
+	assert evidence['macro_f1'] == pytest.approx(0.625)
 
 	assert evidence['model_id'] == MODEL_ID
 	assert evidence['layout_id'] == LAYOUT_ID

@@ -353,6 +353,8 @@ def train_strat_hmm_center_trace_masked_one_epoch(  # noqa: C901, PLR0912, PLR09
 	pseudo_target_config: Mapping[str, object],
 	training_seed: int = 42,
 	column_fraction: float = 0.10,
+	masked_prototype_weight: float = 0.5,
+	visible_prototype_weight: float = 0.5,
 	amp_enabled: bool = False,
 	scaler: torch.amp.GradScaler | None = None,
 	global_step: int = 0,
@@ -447,6 +449,8 @@ def train_strat_hmm_center_trace_masked_one_epoch(  # noqa: C901, PLR0912, PLR09
 				replacement_mask=plan.mask,
 				loss_config=loss_config,
 				pseudo_target_config=pseudo_target_config,
+				masked_prototype_weight=masked_prototype_weight,
+				visible_prototype_weight=visible_prototype_weight,
 			)
 			losses['eligible_xy_column_count'] = plan.eligible_counts.to(
 				dtype=_required_tensor(encoded, 'tokens').dtype

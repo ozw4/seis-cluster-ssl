@@ -333,7 +333,7 @@ def _validate_prediction_metadata(
 		('confidence', CONFIDENCE_NAME),
 		('valid_mask', VALID_MASK_NAME),
 	):
-		_exact_path(
+		_configured_or_resolved_path(
 			outputs.get(key),
 			expected=prediction_dir / name,
 			label=f'{label} prediction outputs.{key}',
@@ -358,7 +358,7 @@ def _validate_prediction_arrays(
 		('valid_mask', 'voxel_valid_mask', VALID_MASK_NAME, 'voxel_valid_mask'),
 	):
 		expected_path = prediction_dir / name
-		_exact_path(
+		_configured_or_resolved_path(
 			outputs.get(output_key),
 			expected=expected_path,
 			label=f'{label} prediction outputs.{output_key}',
@@ -700,6 +700,14 @@ def _mapping(value: object, *, label: str) -> Mapping[str, object]:
 def _exact_path(value: object, *, expected: Path, label: str) -> None:
 	if not isinstance(value, str) or value != str(expected):
 		raise ValueError(f'{label} must equal the exact path {expected}')
+
+
+def _configured_or_resolved_path(value: object, *, expected: Path, label: str) -> None:
+	accepted = {str(expected), str(expected.resolve(strict=False))}
+	if not isinstance(value, str) or value not in accepted:
+		raise ValueError(
+			f'{label} must equal the configured or resolved path {expected}'
+		)
 
 
 def _lowercase_sha256(value: object, *, label: str) -> str:

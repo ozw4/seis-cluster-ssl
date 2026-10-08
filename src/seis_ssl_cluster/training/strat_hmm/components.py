@@ -415,7 +415,9 @@ def _center_trace_optimizer_param_groups(
 		},
 		{
 			'params': spatial_context_params,
-			'lr': _float_config(train_config, 'lr', 3.0e-4),
+			'lr': _float_config(
+				train_config, 'mask_token_lr', _float_config(train_config, 'lr', 3.0e-4)
+			),
 			'name': 'spatial_context',
 		},
 	]

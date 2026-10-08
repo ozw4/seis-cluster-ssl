@@ -19,13 +19,10 @@ import torch
 
 import seis_ssl_cluster
 from seis_ssl_cluster.config.pretraining import (
-	CENTER_TRACE_CONSISTENCY_POLICY,
 	CENTER_TRACE_EXPERIMENT_ROLE,
-	CENTER_TRACE_MODEL_TAG,
 	CENTER_TRACE_REPLACEMENT_INITIALIZATION,
 	CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT,
 	CENTER_TRACE_SUPERVISED_LOSS,
-	CENTER_TRACE_VARIANT,
 	PERIODIC_REFRESH_CENTER_UPDATE_SEMANTICS,
 	PERIODIC_REFRESH_CHECKPOINT_SELECTION_POLICY,
 	PERIODIC_REFRESH_EMBEDDING_SEMANTICS,
@@ -41,6 +38,9 @@ from seis_ssl_cluster.config.pretraining import (
 	PERIODIC_REFRESH_VARIANT,
 	_is_periodic_refresh_config,
 	_validate_periodic_refresh_config,
+	center_trace_consistency_contract,
+	center_trace_mask_token_lr,
+	center_trace_spatial_context_contract,
 )
 from seis_ssl_cluster.stratigraphy.lateral_targets import (
 	load_multi_head_lateral_target_manifest,
@@ -1175,7 +1175,7 @@ def _validate_center_trace_optimizer_layout(  # noqa: C901
 	expected_lrs = (
 		_required_positive_finite_number(train.get('lr'), 'train.lr'),
 		_required_positive_finite_number(train.get('encoder_lr'), 'train.encoder_lr'),
-		_required_positive_finite_number(train.get('lr'), 'train.lr'),
+		center_trace_mask_token_lr(stratigraphy_config),
 	)
 	for group, expected_lr in zip(groups, expected_lrs, strict=True):
 		actual_lr = _required_positive_finite_number(
@@ -1759,7 +1759,9 @@ def _center_trace_checkpoint_identity(  # noqa: PLR0913
 	) != _CENTER_TRACE_HEAD_KS:
 		raise ValueError('schema-7 checkpoint requires head K=(6, 8, 10)')
 	spatial = _required_mapping(stratigraphy_config, 'spatial_context')
-	for key, expected in CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT.items():
+	for key, expected in center_trace_spatial_context_contract(
+		_required_mapping(stratigraphy_config, 'identity').get('model_tag')
+	).items():
 		if spatial.get(key) != expected:
 			raise ValueError(f'schema-7 spatial_context.{key} contract mismatch')
 	pseudo_targets = _required_mapping(stratigraphy_config, 'pseudo_targets')
@@ -3559,33 +3561,44 @@ def _validate_center_trace_identity(  # noqa: C901, PLR0912
 def _validate_center_trace_config_identity_values(  # noqa: C901
 	config: Mapping[str, object], scientific: Mapping[str, object]
 ) -> None:
+	variant, consistency_policy, consistency_weight = center_trace_consistency_contract(
+		_required_mapping(config, 'identity').get('model_tag')
+	)
+	mask_lr = center_trace_mask_token_lr(config)
+	if (
+		'mask_token_lr' in _required_mapping(config, 'train')
+		and _required_mapping(scientific, 'train').get('mask_token_lr') != mask_lr
+	):
+		raise ValueError('schema-7 center-trace mask_token_lr identity mismatch')
 	spatial = _required_mapping(config, 'spatial_context')
-	for key, expected in CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT.items():
-		if spatial.get(key) != expected or scientific.get(
-			'objective_semantics' if key == 'objective' else key
-		) != expected:
+	for key, expected in center_trace_spatial_context_contract(
+		_required_mapping(config, 'identity').get('model_tag')
+	).items():
+		if (
+			spatial.get(key) != expected
+			or scientific.get('objective_semantics' if key == 'objective' else key)
+			!= expected
+		):
 			raise ValueError(f'schema-7 center-trace {key} identity mismatch')
 	if scientific.get('experiment_role') != CENTER_TRACE_EXPERIMENT_ROLE:
 		raise ValueError('schema-7 center-trace experiment role mismatch')
-	if scientific.get('variant') != CENTER_TRACE_VARIANT:
+	if scientific.get('variant') != variant:
 		raise ValueError('schema-7 center-trace variant mismatch')
 	if scientific.get('target_representation') != _CENTER_TRACE_TARGET_REPRESENTATION:
 		raise ValueError('schema-7 center-trace target representation mismatch')
 	if scientific.get('supervised_loss') != CENTER_TRACE_SUPERVISED_LOSS:
 		raise ValueError('schema-7 center-trace supervised loss mismatch')
-	if scientific.get('consistency_policy') != CENTER_TRACE_CONSISTENCY_POLICY:
+	if scientific.get('consistency_policy') != consistency_policy:
 		raise ValueError('schema-7 center-trace consistency policy mismatch')
 	if scientific.get('student_unfreeze_top_blocks') != 1:
 		raise ValueError('schema-7 center-trace unfreeze depth must be 1')
 	if scientific.get('head_ks') != list(_CENTER_TRACE_HEAD_KS):
 		raise ValueError('schema-7 center-trace head K identity mismatch')
-	if _required_mapping(config, 'identity').get('model_tag') != CENTER_TRACE_MODEL_TAG:
-		raise ValueError('schema-7 center-trace model tag mismatch')
 	loss = _required_mapping(config, 'loss')
 	for key, expected in (
 		('prototype_weight', 1.0),
 		('usage_weight', 0.005),
-		('consistency_weight', 0.0),
+		('consistency_weight', consistency_weight),
 		('consistency_beta', 0.1),
 		('distillation_weight', 0.2),
 	):
@@ -3804,6 +3817,7 @@ def _validate_expected_center_trace_identity(
 	scientific = _required_mapping(
 		_required_mapping(config, 'identity'), 'scientific_identity'
 	)
+	_validate_center_trace_config_identity_values(config, scientific)
 	teacher = _required_mapping(config, 'teacher')
 	student = _required_mapping(config, 'student')
 	pseudo_targets = _required_mapping(config, 'pseudo_targets')

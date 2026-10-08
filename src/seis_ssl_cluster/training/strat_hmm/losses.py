@@ -12,6 +12,7 @@ import torch
 
 from seis_ssl_cluster.stratigraphy import (
 	MultiResolutionOrderedPrototypeHeads,
+	MultiResolutionOrderedPrototypeOutput,
 	OrderedPrototypeHead,
 	expected_normalized_order_coordinate,
 	feature_distillation_loss,
@@ -331,55 +332,14 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 		)
 		head_values[head_key] = values._replace(valid_mask=valid_mask)
 
-	consistency_losses: list[torch.Tensor] = []
-	eligible_pair_count = 0
-	for first_k, second_k in combinations(sorted(head_ks), 2):
-		first_key = _head_key(first_k)
-		second_key = _head_key(second_k)
-		first = head_values[first_key]
-		second = head_values[second_key]
-		pair_valid = first.valid_mask & second.valid_mask
-		# ``sqrt(a) * sqrt(b)`` is algebraically the requested geometric mean,
-		# while ``sqrt(a * b)`` can overflow for otherwise valid float inputs.
-		pair_weight = torch.sqrt(first.confidence) * torch.sqrt(second.confidence)
-		pair_name = f'{first_key}_{second_key}'
-		if bool(pair_weight[pair_valid].detach().gt(0.0).any().item()):
-			first_coordinate = expected_normalized_order_coordinate(
-				outputs.outputs[first_key].logits,
-			)
-			second_coordinate = expected_normalized_order_coordinate(
-				outputs.outputs[second_key].logits,
-			)
-			error = torch.nn.functional.smooth_l1_loss(
-				first_coordinate,
-				second_coordinate,
-				beta=consistency_beta,
-				reduction='none',
-			)
-			pair_loss = _stable_weighted_mean(error, pair_weight, pair_valid)
-			eligible_pair_count += 1
-		else:
-			pair_loss = _graph_zero(outputs.outputs[first_key].logits) + _graph_zero(
-				outputs.outputs[second_key].logits,
-			)
-		consistency_losses.append(pair_loss)
-		result[f'loss_consistency_{pair_name}'] = pair_loss
-		result[f'mean_consistency_weight_{pair_name}'] = _masked_mean(
-			pair_weight,
-			pair_valid,
+	consistency_loss, eligible_pair_count, consistency_metrics = (
+		_multi_head_consistency_losses(
+			outputs, head_values, consistency_beta=consistency_beta, reference=tokens
 		)
-		result[f'valid_consistency_token_fraction_{pair_name}'] = _safe_fraction(
-			pair_valid,
-			dtype=tokens.dtype,
-		)
-
+	)
+	result.update(consistency_metrics)
 	prototype_loss = torch.stack(prototype_losses).mean()
 	usage_loss = torch.stack(usage_losses).mean()
-	consistency_loss = (
-		torch.stack(consistency_losses).sum() / eligible_pair_count
-		if eligible_pair_count > 0
-		else torch.stack(consistency_losses).sum()
-	)
 	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
 	if distillation_weight > 0.0:
 		if teacher_encoded is None:
@@ -424,6 +384,63 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 	return result
 
 
+def _multi_head_consistency_losses(
+	outputs: MultiResolutionOrderedPrototypeOutput,
+	head_values: Mapping[str, _MultiHeadTargetValues],
+	*,
+	consistency_beta: float,
+	reference: torch.Tensor,
+) -> tuple[torch.Tensor, int, dict[str, torch.Tensor]]:
+	"""Use the canonical confidence-weighted ordered coordinate for each head pair."""
+	consistency_losses: list[torch.Tensor] = []
+	eligible_pair_count = 0
+	result: dict[str, torch.Tensor] = {}
+	for first_k, second_k in combinations(sorted(outputs.head_ks), 2):
+		first_key = _head_key(first_k)
+		second_key = _head_key(second_k)
+		first = head_values[first_key]
+		second = head_values[second_key]
+		pair_valid = first.valid_mask & second.valid_mask
+		# Taking the roots separately avoids overflow in the confidence product.
+		pair_weight = torch.sqrt(first.confidence) * torch.sqrt(second.confidence)
+		pair_name = f'{first_key}_{second_key}'
+		if bool(pair_weight[pair_valid].detach().gt(0.0).any().item()):
+			first_coordinate = expected_normalized_order_coordinate(
+				outputs.outputs[first_key].logits,
+			)
+			second_coordinate = expected_normalized_order_coordinate(
+				outputs.outputs[second_key].logits,
+			)
+			error = torch.nn.functional.smooth_l1_loss(
+				first_coordinate,
+				second_coordinate,
+				beta=consistency_beta,
+				reduction='none',
+			)
+			pair_loss = _stable_weighted_mean(error, pair_weight, pair_valid)
+			eligible_pair_count += 1
+		else:
+			pair_loss = _graph_zero(outputs.outputs[first_key].logits) + _graph_zero(
+				outputs.outputs[second_key].logits,
+			)
+		consistency_losses.append(pair_loss)
+		result[f'loss_consistency_{pair_name}'] = pair_loss
+		result[f'mean_consistency_weight_{pair_name}'] = _masked_mean(
+			pair_weight,
+			pair_valid,
+		)
+		result[f'valid_consistency_token_fraction_{pair_name}'] = _safe_fraction(
+			pair_valid,
+			dtype=reference.dtype,
+		)
+	consistency_loss = (
+		torch.stack(consistency_losses).sum() / eligible_pair_count
+		if eligible_pair_count > 0
+		else torch.stack(consistency_losses).sum()
+	)
+	return consistency_loss, eligible_pair_count, result
+
+
 def compute_strat_hmm_center_trace_masked_losses(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	*,
 	heads: MultiResolutionOrderedPrototypeHeads,
@@ -433,8 +450,24 @@ def compute_strat_hmm_center_trace_masked_losses(  # noqa: C901, PLR0912, PLR091
 	replacement_mask: torch.Tensor,
 	loss_config: Mapping[str, object],
 	pseudo_target_config: Mapping[str, object],
+	masked_prototype_weight: float = 0.5,
+	visible_prototype_weight: float = 0.5,
 ) -> dict[str, torch.Tensor]:
 	"""Compute the masked/visible hard objective for center-trace pretraining."""
+	if (
+		isinstance(masked_prototype_weight, bool)
+		or isinstance(visible_prototype_weight, bool)
+		or not math.isfinite(masked_prototype_weight)
+		or not math.isfinite(visible_prototype_weight)
+		or masked_prototype_weight <= 0.0
+		or visible_prototype_weight <= 0.0
+		or not math.isclose(
+			masked_prototype_weight + visible_prototype_weight, 1.0, abs_tol=1.0e-12
+		)
+	):
+		raise ValueError(
+			'masked/visible prototype weights must be positive and sum to 1'
+		)
 	tokens = _encoded_tokens(encoded)
 	if not bool(torch.isfinite(tokens).all().item()):
 		raise FloatingPointError('non-finite student encoded tokens')
@@ -448,10 +481,13 @@ def compute_strat_hmm_center_trace_masked_losses(  # noqa: C901, PLR0912, PLR091
 			f'got {heads.head_ks!r}'
 		)
 	consistency_weight = _float_config(loss_config, 'consistency_weight', 0.0)
-	if consistency_weight != 0.0:
+	if consistency_weight not in {0.0, 0.1}:
 		raise ValueError(
-			'center-trace masked training requires consistency_weight to be zero'
+			'center-trace masked training requires consistency_weight 0.0 or 0.1'
 		)
+	consistency_beta = _float_config(loss_config, 'consistency_beta', 0.1)
+	if consistency_beta <= 0.0:
+		raise ValueError('consistency_beta must be positive')
 	prototype_weight = _float_config(loss_config, 'prototype_weight', 1.0)
 	usage_weight = _float_config(loss_config, 'usage_weight', 0.0)
 	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
@@ -593,7 +629,10 @@ def compute_strat_hmm_center_trace_masked_losses(  # noqa: C901, PLR0912, PLR091
 
 	prototype_masked = torch.stack(prototype_losses_masked).mean()
 	prototype_visible = torch.stack(prototype_losses_visible).mean()
-	prototype_loss = 0.5 * prototype_masked + 0.5 * prototype_visible
+	prototype_loss = (
+		masked_prototype_weight * prototype_masked
+		+ visible_prototype_weight * prototype_visible
+	)
 	usage_loss = torch.stack(usage_losses).mean()
 
 	# Distillation uses one shared token mask; require every head to keep the
@@ -624,13 +663,34 @@ def compute_strat_hmm_center_trace_masked_losses(  # noqa: C901, PLR0912, PLR091
 	else:
 		distillation_loss = _graph_zero(tokens)
 
-	consistency_contribution = _graph_zero(
-		torch.stack([output.logits.sum() for output in outputs.outputs.values()])
-	)
+	if consistency_weight > 0.0:
+		consistency_values = {
+			key: values._replace(valid_mask=supervised_valid_by_head[key])
+			for key, values in values_by_head.items()
+		}
+		consistency_loss, eligible_pair_count, consistency_metrics = (
+			_multi_head_consistency_losses(
+				outputs,
+				consistency_values,
+				consistency_beta=consistency_beta,
+				reference=tokens,
+			)
+		)
+		result.update(consistency_metrics)
+		result['loss_consistency'] = consistency_loss
+		result['consistency_eligible_pair_count'] = tokens.new_tensor(
+			eligible_pair_count
+		)
+		consistency_contribution = consistency_weight * consistency_loss
+	else:
+		consistency_contribution = _graph_zero(
+			torch.stack([output.logits.sum() for output in outputs.outputs.values()])
+		)
 	result.update(
 		{
 			'loss': prototype_weight * prototype_loss
 			+ usage_weight * usage_loss
+			+ consistency_contribution
 			+ distillation_weight * distillation_loss,
 			'loss_prototype': prototype_loss,
 			'loss_prototype_masked': prototype_masked,

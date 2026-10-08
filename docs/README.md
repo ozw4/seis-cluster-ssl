@@ -21,6 +21,7 @@
 
 - [F3 lateral smoothing](f3_m5_lateral_smoothing_plan.md)
 - [F3 center-trace masking](f3_center_trace_masked_pretraining_plan.md)
+- [HMM v3 trace masking](hmm_v3_trace_mask_pretraining.md)
 - [F3 periodic HMM refresh](f3_center_trace_masked_periodic_hmm_refresh_plan.md)
 - [F3 XY-neighbour consensus](f3_xy_neighbor_consensus_hard_label_smoothing.md)
 - [Parihaka MAE pretraining](parihaka_mae_pretraining.md)

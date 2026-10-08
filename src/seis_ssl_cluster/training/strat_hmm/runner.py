@@ -662,6 +662,12 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				column_fraction=float(
 					_mapping(config, 'spatial_context')['column_fraction']
 				),
+				masked_prototype_weight=float(
+					_mapping(config, 'spatial_context')['masked_prototype_weight']
+				),
+				visible_prototype_weight=float(
+					_mapping(config, 'spatial_context')['visible_prototype_weight']
+				),
 				amp_enabled=amp_enabled,
 				scaler=scaler,
 				global_step=(
@@ -679,9 +685,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 					else None
 				),
 				initial_epoch_batch_count=(
-					resume_epoch_batch_count
-					if epoch == resume_state.start_epoch
-					else 0
+					resume_epoch_batch_count if epoch == resume_state.start_epoch else 0
 				),
 			)
 			trainability_metrics = _trainability_metrics(
@@ -924,6 +928,12 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				training_seed=seed,
 				column_fraction=float(
 					_mapping(config, 'spatial_context')['column_fraction']
+				),
+				masked_prototype_weight=float(
+					_mapping(config, 'spatial_context')['masked_prototype_weight']
+				),
+				visible_prototype_weight=float(
+					_mapping(config, 'spatial_context')['visible_prototype_weight']
 				),
 				amp_enabled=amp_enabled,
 				scaler=scaler,

@@ -299,6 +299,7 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 			'shuffle',
 			'lr',
 			'encoder_lr',
+			'mask_token_lr',
 			'weight_decay',
 			'amp',
 			'device',
@@ -367,6 +368,26 @@ _STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_SEMANTICS = (
 CENTER_TRACE_MODEL_TAG = (
 	'strat_hmm_pretext_mh_k6810_ctmask010_nocons_topblock1_distill_v1'
 )
+CENTER_TRACE_V3_MODEL_TAGS = frozenset(
+	f'{source}_hmm_v3_mh_k6810_ctmask010_distill020_cons010'
+	for source in ('mae100', 'local_bt_rot90_asym_g060_3ep', 'random_init')
+)
+CENTER_TRACE_MASK_LR_TAGS = {
+	f'{tag}_masklr{suffix}': rate
+	for tag in CENTER_TRACE_V3_MODEL_TAGS
+	for suffix, rate in (('3em5', 3.0e-5), ('1em4', 1.0e-4))
+}
+CENTER_TRACE_LOSS_WEIGHT_TAGS = {
+	f'{tag}_masklr3em5_mw{masked}_vw{visible}': weights
+	for tag in CENTER_TRACE_V3_MODEL_TAGS
+	for masked, visible, weights in (
+		('025', '075', (0.25, 0.75)),
+		('075', '025', (0.75, 0.25)),
+	)
+}
+CENTER_TRACE_V3_VARIANT = 'ctmask010_cons010'
+CENTER_TRACE_V3_CONSISTENCY_POLICY = 'normalized_order_smooth_l1_v1'
+CENTER_TRACE_V3_CONSISTENCY_WEIGHT = 0.1
 CENTER_TRACE_EXPERIMENT_ROLE = 'multi_head_center_trace_masked_hard_pretext'
 CENTER_TRACE_VARIANT = 'ctmask010_nocons'
 CENTER_TRACE_OBJECTIVE = 'center_trace_masked_hmm_path_reconstruction_v1'
@@ -1114,7 +1135,8 @@ def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0915
 				'spatial_context is only supported for multi-head strat HMM pretext'
 			)
 		_validate_center_trace_spatial_context(
-			_required_mapping(resolved, 'spatial_context')
+			_required_mapping(resolved, 'spatial_context'),
+			model_tag=_required_mapping(resolved, 'identity').get('model_tag'),
 		)
 	_validate_strat_hmm_pretext_teacher(teacher)
 	_validate_strat_hmm_pretext_student(
@@ -1180,6 +1202,13 @@ def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0915
 		_validate_strat_hmm_pretext_cross_section_values(pseudo_targets, head)
 		_validate_strat_hmm_pretext_identity(resolved, multi_head=False)
 	_validate_strat_hmm_pretext_train(train)
+	if (
+		'mask_token_lr' in train
+		or resolved.get('identity', {}).get('model_tag') in CENTER_TRACE_MASK_LR_TAGS
+		or resolved.get('identity', {}).get('model_tag')
+		in CENTER_TRACE_LOSS_WEIGHT_TAGS
+	):
+		center_trace_mask_token_lr(resolved)
 	if _is_center_trace_masked_config(resolved) and int(train['seed']) < 0:
 		raise ValueError('train.seed must be nonnegative for center-trace masking')
 	_validate_zero_mask(_required_mapping(resolved, 'zero_mask'))
@@ -1236,6 +1265,8 @@ def _is_periodic_refresh_config(config: Mapping[str, object]) -> bool:
 
 def _validate_center_trace_spatial_context(
 	spatial_context: Mapping[str, object],
+	*,
+	model_tag: object = None,
 ) -> None:
 	"""Validate the single closed center-trace masking contract."""
 	_validate_allowed_keys(
@@ -1248,7 +1279,7 @@ def _validate_center_trace_spatial_context(
 	)
 	if missing:
 		raise ValueError(f'spatial_context is missing required key(s): {missing!r}')
-	for key, expected in CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT.items():
+	for key, expected in center_trace_spatial_context_contract(model_tag).items():
 		actual = spatial_context.get(key)
 		if actual != expected:
 			raise ValueError(
@@ -2812,7 +2843,7 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0911, PLR0912, PLR09
 		)
 
 
-def _expected_or_record_multi_head_scientific_identity(  # noqa: C901
+def _expected_or_record_multi_head_scientific_identity(  # noqa: C901, PLR0912
 	scientific: dict[str, object],
 	*,
 	config: Mapping[str, object],
@@ -2846,6 +2877,8 @@ def _expected_or_record_multi_head_scientific_identity(  # noqa: C901
 		'zero_mask': zero_mask,
 		'train': {key: train[key] for key in MULTI_HEAD_SCIENTIFIC_TRAIN_FIELDS},
 	}
+	if 'mask_token_lr' in train:
+		expected['train']['mask_token_lr'] = train['mask_token_lr']
 	if _is_periodic_refresh_config(config):
 		spatial_context = _required_mapping(config, 'spatial_context')
 		periodic = periodic_refresh_identity
@@ -3621,6 +3654,67 @@ def _validate_m5_u_scientific_identity(
 		)
 
 
+def validate_center_trace_model_tag(model_tag: object) -> None:
+	"""Accept the legacy experiment and the three fixed HMM_v3 source identities."""
+	if not isinstance(model_tag, str) or (
+		model_tag != CENTER_TRACE_MODEL_TAG
+		and model_tag not in CENTER_TRACE_V3_MODEL_TAGS
+		and model_tag not in CENTER_TRACE_MASK_LR_TAGS
+		and model_tag not in CENTER_TRACE_LOSS_WEIGHT_TAGS
+	):
+		raise ValueError(
+			'identity.model_tag does not match the fixed center-trace masked contract'
+		)
+
+
+def center_trace_mask_token_lr(config: Mapping[str, object]) -> float:
+	"""Bind the optional mask-only rate to its versioned experiment identity."""
+	train = _required_mapping(config, 'train')
+	tag = _required_mapping(config, 'identity').get('model_tag')
+	expected = CENTER_TRACE_MASK_LR_TAGS.get(tag) if isinstance(tag, str) else None
+	if isinstance(tag, str) and tag in CENTER_TRACE_LOSS_WEIGHT_TAGS:
+		expected = 3.0e-5
+	if expected is None:
+		if 'mask_token_lr' in train:
+			raise ValueError(
+				'train.mask_token_lr requires a versioned mask-LR model tag'
+			)
+		return float(train['lr'])
+	if not _is_center_trace_masked_config(config) or _is_periodic_refresh_config(
+		config
+	):
+		raise ValueError(
+			'train.mask_token_lr requires fixed-target center-trace masking'
+		)
+	_validate_positive_finite_number(train, 'mask_token_lr', prefix='train')
+	if train['mask_token_lr'] != expected:
+		raise ValueError('train.mask_token_lr does not match the versioned model tag')
+	return expected
+
+
+def center_trace_spatial_context_contract(model_tag: object) -> dict[str, object]:
+	"""Return fixed mask semantics with only versioned branch-weight changes."""
+	contract = dict(CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT)
+	if isinstance(model_tag, str) and model_tag in CENTER_TRACE_LOSS_WEIGHT_TAGS:
+		masked, visible = CENTER_TRACE_LOSS_WEIGHT_TAGS[model_tag]
+		contract.update(
+			masked_prototype_weight=masked, visible_prototype_weight=visible
+		)
+	return contract
+
+
+def center_trace_consistency_contract(model_tag: object) -> tuple[str, str, float]:
+	"""Return the fixed variant, policy and consistency weight for a masked source."""
+	validate_center_trace_model_tag(model_tag)
+	if model_tag == CENTER_TRACE_MODEL_TAG:
+		return CENTER_TRACE_VARIANT, CENTER_TRACE_CONSISTENCY_POLICY, 0.0
+	return (
+		CENTER_TRACE_V3_VARIANT,
+		CENTER_TRACE_V3_CONSISTENCY_POLICY,
+		CENTER_TRACE_V3_CONSISTENCY_WEIGHT,
+	)
+
+
 def _validate_center_trace_scientific_identity(
 	scientific: Mapping[str, object],
 	*,
@@ -3629,10 +3723,13 @@ def _validate_center_trace_scientific_identity(
 	manifest: Mapping[str, object],
 	loss: Mapping[str, object],
 ) -> None:
-	"""Validate the fixed schema-7 center-trace scientific identity."""
+	"""Validate the legacy or HMM_v3 schema-7 center-trace scientific identity."""
+	variant, consistency_policy, consistency_weight = center_trace_consistency_contract(
+		model_tag
+	)
 	expected = {
 		'experiment_role': CENTER_TRACE_EXPERIMENT_ROLE,
-		'variant': CENTER_TRACE_VARIANT,
+		'variant': variant,
 		'head_spec': _STRAT_HMM_MULTI_HEAD_SPEC,
 		'head_ks': [6, 8, 10],
 		'target_representation': _STRAT_HMM_HARD_TARGET_REPRESENTATION,
@@ -3645,17 +3742,17 @@ def _validate_center_trace_scientific_identity(
 		'replacement': CENTER_TRACE_REPLACEMENT,
 		'replacement_initialization': CENTER_TRACE_REPLACEMENT_INITIALIZATION,
 		'rng_policy': CENTER_TRACE_RNG_POLICY,
-		'masked_prototype_weight': 0.50,
-		'visible_prototype_weight': 0.50,
+		'masked_prototype_weight': center_trace_spatial_context_contract(model_tag)[
+			'masked_prototype_weight'
+		],
+		'visible_prototype_weight': center_trace_spatial_context_contract(model_tag)[
+			'visible_prototype_weight'
+		],
 		'distillation_scope': CENTER_TRACE_DISTILLATION_SCOPE,
 		'supervised_loss': CENTER_TRACE_SUPERVISED_LOSS,
-		'consistency_policy': CENTER_TRACE_CONSISTENCY_POLICY,
-		'consistency_weight': 0.0,
+		'consistency_policy': consistency_policy,
+		'consistency_weight': consistency_weight,
 	}
-	if model_tag != CENTER_TRACE_MODEL_TAG:
-		raise ValueError(
-			'identity.model_tag does not match the fixed center-trace masked contract'
-		)
 	for key, value in expected.items():
 		if scientific.get(key) != value:
 			raise ValueError(
@@ -3667,7 +3764,7 @@ def _validate_center_trace_scientific_identity(
 	for key, value in (
 		('prototype_weight', 1.0),
 		('usage_weight', 0.005),
-		('consistency_weight', 0.0),
+		('consistency_weight', consistency_weight),
 		('distillation_weight', 0.2),
 	):
 		if loss.get(key) != value:
@@ -5132,6 +5229,8 @@ __all__ = [
 	'CENTER_TRACE_CONSISTENCY_POLICY',
 	'CENTER_TRACE_DISTILLATION_SCOPE',
 	'CENTER_TRACE_EXPERIMENT_ROLE',
+	'CENTER_TRACE_LOSS_WEIGHT_TAGS',
+	'CENTER_TRACE_MASK_LR_TAGS',
 	'CENTER_TRACE_MASK_SEMANTICS',
 	'CENTER_TRACE_MODEL_TAG',
 	'CENTER_TRACE_OBJECTIVE',
@@ -5141,6 +5240,10 @@ __all__ = [
 	'CENTER_TRACE_SELECTION_POLICY',
 	'CENTER_TRACE_SPATIAL_CONTEXT_CONTRACT',
 	'CENTER_TRACE_SUPERVISED_LOSS',
+	'CENTER_TRACE_V3_CONSISTENCY_POLICY',
+	'CENTER_TRACE_V3_CONSISTENCY_WEIGHT',
+	'CENTER_TRACE_V3_MODEL_TAGS',
+	'CENTER_TRACE_V3_VARIANT',
 	'CENTER_TRACE_VARIANT',
 	'PERIODIC_REFRESH_CENTER_UPDATE_SEMANTICS',
 	'PERIODIC_REFRESH_CHECKPOINT_SELECTION_POLICY',
@@ -5156,8 +5259,12 @@ __all__ = [
 	'PERIODIC_REFRESH_VARIANT',
 	'_is_center_trace_masked_config',
 	'_is_periodic_refresh_config',
+	'center_trace_consistency_contract',
+	'center_trace_mask_token_lr',
+	'center_trace_spatial_context_contract',
 	'resolve_barlow_twins_training_config',
 	'resolve_mae_training_config',
 	'resolve_strat_hmm_pretext_config',
 	'resolve_vicreg_training_config',
+	'validate_center_trace_model_tag',
 ]

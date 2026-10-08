@@ -1306,7 +1306,7 @@ def _validate_embedding_objective(  # noqa: C901
 		checks.update(
 			method='strat_hmm_multi_head_pretext',
 			distillation_weight=0.2,
-			consistency_weight=0.0,
+			consistency_weight=model.expected.get('consistency_weight', 0.0),
 			head_ks=model.expected['head_ks'],
 			head_spec='multi_resolution_ordered_prototypes_v1',
 		)

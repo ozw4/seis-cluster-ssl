@@ -27,6 +27,12 @@ def multi_head_recipe_ks(path: Path) -> list[int]:
 	return list(protocol_for_heads(raw['head']['ks']).head_ks)
 
 
+def multi_head_recipe_consistency_weight(path: Path) -> float:
+	"""Read the consistency weight declared by a Multi-Head training recipe."""
+	raw = yaml.safe_load(path.read_text())
+	return float(raw.get('loss', {}).get('consistency_weight', 0.0))
+
+
 def audit_multi_head_recipe_source(
 	config: VolveHorizonRecipeArmConfig,
 ) -> dict[str, object]:

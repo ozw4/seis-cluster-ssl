@@ -137,15 +137,24 @@ def test_channel_completed_adapter_uses_public_plan_identity(
 
 
 @pytest.mark.parametrize('ks', [[6, 8, 10], [4, 6, 8]])
+@pytest.mark.parametrize('consistency_weight', [0.0, 0.1])
 def test_volve_multi_head_embedding_metadata_matches_extractor_contract(
 	tmp_path: Path,
 	ks: list[int],
+	consistency_weight: float,
 ) -> None:
 	universe = write_recipe_arm_universe(tmp_path, embeddings=True)
 	config = replace(
 		universe['config'], multi_head_training_config=tmp_path / 'full.yaml'
 	)
-	config.multi_head_training_config.write_text(json.dumps({'head': {'ks': ks}}))
+	config.multi_head_training_config.write_text(
+		json.dumps(
+			{
+				'head': {'ks': ks},
+				'loss': {'consistency_weight': consistency_weight},
+			}
+		)
+	)
 	model = as_five_way_config(config).models[0]
 	metadata = {
 		'pretraining_method': 'local_barlow_twins_3d',
@@ -160,10 +169,16 @@ def test_volve_multi_head_embedding_metadata_matches_extractor_contract(
 			'head_ks': ks,
 			'unfreeze_top_blocks': 1,
 			'distillation_weight': 0.2,
-			'consistency_weight': 0.0,
+			'consistency_weight': consistency_weight,
 		},
 	}
 	_validate_embedding_objective(model, metadata)
+	metadata['stratigraphy_pretext']['consistency_weight'] = (
+		0.1 if consistency_weight == 0.0 else 0.0
+	)
+	with pytest.raises(ValueError, match='consistency_weight'):
+		_validate_embedding_objective(model, metadata)
+	metadata['stratigraphy_pretext']['consistency_weight'] = consistency_weight
 	metadata['stratigraphy_pretext']['method'] = 'strat_hmm_pretext'
 	with pytest.raises(ValueError, match='method'):
 		_validate_embedding_objective(model, metadata)

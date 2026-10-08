@@ -15,6 +15,7 @@ from seis_ssl_cluster.training.strat_hmm import (
 	build_strat_hmm_center_trace_masked_components,
 	build_strat_hmm_multi_head_components,
 	compute_strat_hmm_center_trace_masked_losses,
+	compute_strat_hmm_multi_head_losses,
 	train_strat_hmm_center_trace_masked_one_epoch,
 )
 from seis_ssl_cluster.training.strat_hmm import components as components_module
@@ -90,9 +91,95 @@ def test_center_trace_loss_separates_weighted_masked_and_visible_branches() -> N
 	assert losses['masked_supervised_token_fraction'].item() == pytest.approx(0.25)
 	assert losses['visible_supervised_token_fraction'].item() == pytest.approx(0.75)
 	assert losses['valid_distillation_token_fraction'].item() == pytest.approx(0.75)
-
 	losses['loss'].backward()
 	assert teacher.grad is None
+
+
+@pytest.mark.parametrize('masked_weight', [0.25, 0.5, 0.75])
+def test_center_trace_loss_weights_change_only_branch_contributions(masked_weight):
+	logits = [
+		torch.randn(
+			(1, 4, k), generator=torch.Generator().manual_seed(k), requires_grad=True
+		)
+		for k in (6, 8, 10)
+	]
+	heads = _StaticHeads(logits)
+	kwargs = {
+		'heads': heads,
+		'encoded': {'tokens': torch.ones((1, 4, 2), requires_grad=True)},
+		'teacher_encoded': None,
+		'batch': _target_batch(
+			labels=torch.zeros((1, 4), dtype=torch.long),
+			confidence=torch.ones((1, 4)),
+			boundary_weight=torch.ones((1, 4)),
+		),
+		'replacement_mask': torch.tensor([[[[True], [False]], [[False], [False]]]]),
+		'loss_config': {
+			'prototype_weight': 1.0,
+			'usage_weight': 0.0,
+			'distillation_weight': 0.0,
+			'consistency_weight': 0.0,
+		},
+		'pseudo_target_config': {},
+	}
+	baseline = compute_strat_hmm_center_trace_masked_losses(**kwargs)
+	weighted = compute_strat_hmm_center_trace_masked_losses(
+		**kwargs,
+		masked_prototype_weight=masked_weight,
+		visible_prototype_weight=1.0 - masked_weight,
+	)
+	for key in (
+		'loss_prototype_masked',
+		'loss_prototype_visible',
+		'loss_usage',
+		'loss_distillation',
+		'masked_supervised_token_fraction',
+		'visible_supervised_token_fraction',
+	):
+		torch.testing.assert_close(weighted[key], baseline[key])
+	torch.testing.assert_close(
+		weighted['loss'],
+		masked_weight * baseline['loss_prototype_masked']
+		+ (1.0 - masked_weight) * baseline['loss_prototype_visible'],
+	)
+	parameters = list(heads.parameters())
+	base_gradients = torch.autograd.grad(
+		baseline['loss'], parameters, retain_graph=True
+	)
+	new_gradients = torch.autograd.grad(weighted['loss'], parameters)
+	for original, updated in zip(base_gradients, new_gradients, strict=True):
+		torch.testing.assert_close(
+			updated[:, :1], original[:, :1] * (masked_weight / 0.5)
+		)
+		torch.testing.assert_close(
+			updated[:, 1:], original[:, 1:] * ((1.0 - masked_weight) / 0.5)
+		)
+
+
+@pytest.mark.parametrize(
+	('masked', 'visible'),
+	[
+		(0, 1),
+		(-0.25, 1.25),
+		(0.5, 0.75),
+		(float('nan'), 0.5),
+		(float('inf'), 0.5),
+		(True, 0.5),
+	],
+)
+def test_center_trace_loss_rejects_invalid_branch_weights(masked, visible):
+	with pytest.raises(ValueError, match='weights'):
+		compute_strat_hmm_center_trace_masked_losses(
+			heads=None,
+			encoded={},
+			teacher_encoded=None,
+			batch={},
+			replacement_mask=torch.zeros((1, 1), dtype=torch.bool),
+			loss_config={},
+			pseudo_target_config={},
+			masked_prototype_weight=masked,
+			visible_prototype_weight=visible,
+		)
 
 
 def test_center_trace_distillation_respects_min_confidence() -> None:
@@ -136,7 +223,61 @@ def test_center_trace_distillation_respects_min_confidence() -> None:
 	assert losses['loss_distillation'].item() == pytest.approx(0.5)
 
 
-def test_center_trace_loss_rejects_consistency_and_empty_branch() -> None:
+def test_center_trace_consistency_matches_v2_and_updates_masked_logits() -> None:
+	heads = _StaticHeads(
+		[
+			torch.linspace(start, end, k).reshape(1, 1, k).repeat(1, 4, 1)
+			for k, (start, end) in zip(
+				(6, 8, 10), ((-1.0, 1.0), (1.0, -1.0), (-0.5, 0.5)), strict=True
+			)
+		]
+	)
+	batch = _target_batch(
+		labels=torch.zeros((1, 4), dtype=torch.long),
+		confidence=torch.tensor([[0.8, 0.9, 0.1, 0.9]]),
+		boundary_weight=torch.ones((1, 4)),
+	)
+	batch['strat_multi_targets']['k8']['confidence'] = torch.tensor(  # type: ignore[index]
+		[[0.8, 0.1, 0.9, 0.9]]
+	)
+	kwargs = {
+		'heads': heads,
+		'encoded': {
+			'tokens': torch.ones((1, 4, 2), requires_grad=True),
+			'token_valid_mask': torch.tensor([[True, True, True, False]]),
+		},
+		'teacher_encoded': None,
+		'batch': batch,
+		'loss_config': {
+			'prototype_weight': 0.0,
+			'usage_weight': 0.0,
+			'distillation_weight': 0.0,
+			'consistency_weight': 0.1,
+			'consistency_beta': 0.1,
+		},
+		'pseudo_target_config': {'min_confidence': 0.5},
+	}
+	unmasked = compute_strat_hmm_multi_head_losses(**kwargs)
+	masked = compute_strat_hmm_center_trace_masked_losses(
+		**kwargs,
+		replacement_mask=torch.tensor([[[[True], [False]], [[False], [False]]]]),
+	)
+	assert masked['loss_consistency'].item() > 0.0
+	assert masked['consistency_eligible_pair_count'].item() == 3.0
+	for key, value in unmasked.items():
+		if 'consistency' in key:
+			torch.testing.assert_close(masked[key], value)
+	torch.testing.assert_close(masked['loss'], 0.1 * unmasked['loss_consistency'])
+	assert masked['valid_consistency_token_fraction_k6_k8'].item() == 0.25
+	assert masked['valid_consistency_token_fraction_k6_k10'].item() == 0.5
+	masked['loss'].backward()
+	for parameter in heads.parameters():
+		assert parameter.grad is not None
+		assert parameter.grad[0, 0].abs().sum().item() > 0.0
+		assert parameter.grad[0, 3].count_nonzero().item() == 0
+
+
+def test_center_trace_loss_rejects_unsupported_consistency_and_empty_branch() -> None:
 	heads = _StaticHeads(
 		[torch.zeros((1, 4, k), requires_grad=True) for k in (6, 8, 10)]
 	)
@@ -158,7 +299,7 @@ def test_center_trace_loss_rejects_consistency_and_empty_branch() -> None:
 	with pytest.raises(ValueError, match='consistency_weight'):
 		compute_strat_hmm_center_trace_masked_losses(
 			**kwargs,
-			loss_config={'consistency_weight': 0.1},
+			loss_config={'consistency_weight': 0.2},
 		)
 
 	empty_branch_kwargs = dict(kwargs)
@@ -172,9 +313,52 @@ def test_center_trace_loss_rejects_consistency_and_empty_branch() -> None:
 		)
 
 
+def test_center_trace_consistency_alone_backpropagates_to_replacement_token() -> None:
+	with torch.random.fork_rng(devices=[]):
+		torch.manual_seed(27)
+		student = _RuntimeStudent()
+		heads = MultiResolutionOrderedPrototypeHeads(
+			feature_dim=4,
+			ks=(6, 8, 10),
+			projection_dim=3,
+			temperature=0.5,
+			normalize=True,
+		)
+		replacement_token = LearnedEncoderReplacementToken(4, seed=5)
+		batch = _runtime_batch()
+		mask = torch.tensor([[[[True], [False]], [[False], [False]]]])
+		encoded = student.encode_tokens(
+			batch['x'],
+			valid_mask=batch['local_valid_mask'],
+			replacement_mask=mask,
+			replacement_token=replacement_token(),
+		)
+		losses = compute_strat_hmm_center_trace_masked_losses(
+			heads=heads,
+			encoded=encoded,
+			teacher_encoded=None,
+			batch=batch,
+			replacement_mask=mask,
+			loss_config={
+				'prototype_weight': 0.0,
+				'usage_weight': 0.0,
+				'distillation_weight': 0.0,
+				'consistency_weight': 0.1,
+			},
+			pseudo_target_config={},
+		)
+		losses['loss_consistency_contribution'].backward()
+		gradient = replacement_token.replacement_token.grad
+		assert gradient is not None
+		assert torch.isfinite(gradient).all()
+		assert gradient.abs().sum().item() > 0.0
+
+
+@pytest.mark.parametrize('mask_token_lr', [None, 3.0e-5, 1.0e-4])
 def test_center_trace_builder_preserves_hard_multi_head_initialization_parity(
 	monkeypatch: pytest.MonkeyPatch,
 	tmp_path,
+	mask_token_lr: float | None,
 ) -> None:
 	def build_student_teacher(*_args, **_kwargs):
 		student = _BuilderStudent()
@@ -215,6 +399,8 @@ def test_center_trace_builder_preserves_hard_multi_head_initialization_parity(
 			'weight_decay': 0.05,
 		},
 	}
+	if mask_token_lr is not None:
+		config['train']['mask_token_lr'] = mask_token_lr
 	torch.manual_seed(273)
 	baseline = build_strat_hmm_multi_head_components(config, device='cpu')
 	baseline_rng_state = torch.get_rng_state()
@@ -243,7 +429,7 @@ def test_center_trace_builder_preserves_hard_multi_head_initialization_parity(
 	assert [group['lr'] for group in center.optimizer.param_groups] == [
 		3.0e-4,
 		1.0e-5,
-		3.0e-4,
+		3.0e-4 if mask_token_lr is None else mask_token_lr,
 	]
 	group_ids = [
 		id(parameter)
@@ -259,7 +445,12 @@ def test_center_trace_builder_preserves_hard_multi_head_initialization_parity(
 	} == set(group_ids)
 
 
-def test_center_trace_cpu_one_step_masks_student_and_trains_replacement_token() -> None:
+@pytest.mark.parametrize('consistency_weight', [0.0, 0.1])
+@pytest.mark.parametrize('masked_weight', [0.25, 0.5, 0.75])
+def test_center_trace_cpu_one_step_masks_student_and_trains_replacement_token(
+	consistency_weight: float,
+	masked_weight: float,
+) -> None:
 	student = _RuntimeStudent()
 	teacher = _RuntimeStudent()
 	teacher.requires_grad_(requires_grad=False)
@@ -298,17 +489,23 @@ def test_center_trace_cpu_one_step_masks_student_and_trains_replacement_token() 
 		device=torch.device('cpu'),
 		epoch=1,
 		training_seed=273,
+		masked_prototype_weight=masked_weight,
+		visible_prototype_weight=1.0 - masked_weight,
 		loss_config={
 			'prototype_weight': 1.0,
 			'usage_weight': 0.005,
 			'distillation_weight': 0.2,
-			'consistency_weight': 0.0,
+			'consistency_weight': consistency_weight,
 		},
 		pseudo_target_config={},
 		grad_clip_norm=0.1,
 	)
 
 	assert state.global_step == 1
+	assert state.metrics['loss_prototype'] == pytest.approx(
+		masked_weight * state.metrics['loss_prototype_masked']
+		+ (1.0 - masked_weight) * state.metrics['loss_prototype_visible']
+	)
 	assert state.metrics['eligible_xy_column_count'] == pytest.approx(4.0)
 	assert state.metrics['selected_xy_column_count'] == pytest.approx(1.0)
 	assert torch.isfinite(torch.tensor(tuple(state.metrics.values()))).all()
@@ -324,6 +521,9 @@ def test_center_trace_cpu_one_step_masks_student_and_trains_replacement_token() 
 		torch.equal(teacher_before[name], parameter)
 		for name, parameter in teacher.named_parameters()
 	)
+	if consistency_weight > 0.0:
+		assert state.metrics['loss_consistency_contribution'] > 0.0
+		assert state.metrics['consistency_eligible_pair_count'] == 3.0
 
 
 def test_center_trace_final_step_callback_preserves_epoch_metrics() -> None:
