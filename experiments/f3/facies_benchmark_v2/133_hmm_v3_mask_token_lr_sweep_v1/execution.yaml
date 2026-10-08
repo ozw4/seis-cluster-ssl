@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "experiment_id": "133_hmm_v3_mask_token_lr_sweep_v1",
+  "experiment_root": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1",
+  "output_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/operations/hmm_v3/mask_token_lr_sweep_v1/f3/hmm_v3_mask_token_lr_sweep_v1",
+  "summary_root": "${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v3_mask_token_lr_sweep_v1/summary/paired_comparison",
+  "control_definition_sha256": "c09a9bc8d77bcc02db7195ffe6f45db651c58913ca0f7fdf9e121d1f91fc8fb5",
+  "control_summary_sha256": "2d88e389f80c69ffa033378d189c27cf3bce6a925be4dd0c88945d7b98d8e255",
+  "cells": [
+    {
+      "survey": "f3",
+      "source": "mae",
+      "candidate_id": "mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5",
+      "mask_token_lr": 0.00003,
+      "train_smoke_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/01_gpu_feasibility_1step.yaml",
+      "train_full_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/02_full_25ep.yaml",
+      "audit_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/03_audit.yaml",
+      "embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/40_embeddings/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5.yaml",
+      "downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/50_downstream/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5.yaml",
+      "baseline_train_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/30_pretraining/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010/02_full_25ep.yaml",
+      "baseline_embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/40_embeddings/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "baseline_downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/50_downstream/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "target_manifest_sha256": "ede820efae53c73c4177023207d1bf1ff24ac7428b10e6aa43d84d40d216e1cd",
+      "baseline_checkpoint_sha256": "097faac06196b3a574db32a4e3f5342e4855eca57052b71adbee130b9c4da50f",
+      "baseline_config_sha256": {
+        "train": "6f6035f25a2184fd8e6ffdec6529baeb9ffd1ab58f0cd88811984737b1876d7a",
+        "embedding": "d468bb204df37967730c16dde627c4557df6a00202c68582bf7107166cdec605",
+        "downstream": "763925caaf474ef90d1ac108d24b732de3c70b9d5825f61cee086120fcbde783"
+      }
+    },
+    {
+      "survey": "f3",
+      "source": "local_bt",
+      "candidate_id": "local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5",
+      "mask_token_lr": 0.00003,
+      "train_smoke_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/01_gpu_feasibility_1step.yaml",
+      "train_full_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/02_full_25ep.yaml",
+      "audit_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/03_audit.yaml",
+      "embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5.yaml",
+      "downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5.yaml",
+      "baseline_train_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010/02_full_25ep.yaml",
+      "baseline_embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "baseline_downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "target_manifest_sha256": "580b98faff9fbb1e09bcc64d4b822ae1c233ec0d358b231b1008867c872a77a7",
+      "baseline_checkpoint_sha256": "6a7d5b6002848462eb501a99c5f0eb330bf13da34e0ccc899adab43572754731",
+      "baseline_config_sha256": {
+        "train": "8866f51411f5bef13340e0301e7aa21407e6a1dd5bd3daf48a92042932931d6f",
+        "embedding": "5c5a0206ea9fd7307f60fdd0ea2034189ef6a7ee92c17b899bed5924c135762a",
+        "downstream": "4c63bd21fc1c6d3ea6b4e2a0bbacd5659b83f5e5214bd821f461909b56ca5774"
+      }
+    },
+    {
+      "survey": "f3",
+      "source": "random",
+      "candidate_id": "random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5",
+      "mask_token_lr": 0.00003,
+      "train_smoke_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/01_gpu_feasibility_1step.yaml",
+      "train_full_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/02_full_25ep.yaml",
+      "audit_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5/03_audit.yaml",
+      "embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/40_embeddings/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5.yaml",
+      "downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/50_downstream/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5.yaml",
+      "baseline_train_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/30_pretraining/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010/02_full_25ep.yaml",
+      "baseline_embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/40_embeddings/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "baseline_downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/50_downstream/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "target_manifest_sha256": "616ff274cd855a27c48874ed19b0c2a50d311100c4e3646652cf20c14b849b4b",
+      "baseline_checkpoint_sha256": "ac36d3ba1d55a1c98718ee555ac7756bf7e6208d68850a1ed664a7cc9122c121",
+      "baseline_config_sha256": {
+        "train": "bf6245a998e52c3784416b8261352ef8c6e22009c88d5f7dc37ae89becf6c979",
+        "embedding": "c8b76a94a60d1bf4bee2be225c5051eb7433666a33a8b2c0c3015511e0bd51a1",
+        "downstream": "1000abec1bc7c0ab3b7ff770ab310534528d7c5fb621bcf618477ee1c0c41426"
+      }
+    },
+    {
+      "survey": "f3",
+      "source": "mae",
+      "candidate_id": "mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4",
+      "mask_token_lr": 0.0001,
+      "train_smoke_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4/01_gpu_feasibility_1step.yaml",
+      "train_full_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4/02_full_25ep.yaml",
+      "audit_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4/03_audit.yaml",
+      "embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/40_embeddings/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4.yaml",
+      "downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/50_downstream/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4.yaml",
+      "baseline_train_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/30_pretraining/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010/02_full_25ep.yaml",
+      "baseline_embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/40_embeddings/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "baseline_downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/50_downstream/mae100_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "target_manifest_sha256": "ede820efae53c73c4177023207d1bf1ff24ac7428b10e6aa43d84d40d216e1cd",
+      "baseline_checkpoint_sha256": "097faac06196b3a574db32a4e3f5342e4855eca57052b71adbee130b9c4da50f",
+      "baseline_config_sha256": {
+        "train": "6f6035f25a2184fd8e6ffdec6529baeb9ffd1ab58f0cd88811984737b1876d7a",
+        "embedding": "d468bb204df37967730c16dde627c4557df6a00202c68582bf7107166cdec605",
+        "downstream": "763925caaf474ef90d1ac108d24b732de3c70b9d5825f61cee086120fcbde783"
+      }
+    },
+    {
+      "survey": "f3",
+      "source": "local_bt",
+      "candidate_id": "local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4",
+      "mask_token_lr": 0.0001,
+      "train_smoke_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4/01_gpu_feasibility_1step.yaml",
+      "train_full_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4/02_full_25ep.yaml",
+      "audit_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4/03_audit.yaml",
+      "embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4.yaml",
+      "downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4.yaml",
+      "baseline_train_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010/02_full_25ep.yaml",
+      "baseline_embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "baseline_downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "target_manifest_sha256": "580b98faff9fbb1e09bcc64d4b822ae1c233ec0d358b231b1008867c872a77a7",
+      "baseline_checkpoint_sha256": "6a7d5b6002848462eb501a99c5f0eb330bf13da34e0ccc899adab43572754731",
+      "baseline_config_sha256": {
+        "train": "8866f51411f5bef13340e0301e7aa21407e6a1dd5bd3daf48a92042932931d6f",
+        "embedding": "5c5a0206ea9fd7307f60fdd0ea2034189ef6a7ee92c17b899bed5924c135762a",
+        "downstream": "4c63bd21fc1c6d3ea6b4e2a0bbacd5659b83f5e5214bd821f461909b56ca5774"
+      }
+    },
+    {
+      "survey": "f3",
+      "source": "random",
+      "candidate_id": "random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4",
+      "mask_token_lr": 0.0001,
+      "train_smoke_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4/01_gpu_feasibility_1step.yaml",
+      "train_full_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4/02_full_25ep.yaml",
+      "audit_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/30_pretraining/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4/03_audit.yaml",
+      "embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/40_embeddings/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4.yaml",
+      "downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/50_downstream/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr1em4.yaml",
+      "baseline_train_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/30_pretraining/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010/02_full_25ep.yaml",
+      "baseline_embedding_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/40_embeddings/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "baseline_downstream_config": "${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/132_hmm_v3_k6810_trace_mask_multi_source_v1/50_downstream/random_init_hmm_v3_mh_k6810_ctmask010_distill020_cons010.yaml",
+      "target_manifest_sha256": "616ff274cd855a27c48874ed19b0c2a50d311100c4e3646652cf20c14b849b4b",
+      "baseline_checkpoint_sha256": "ac36d3ba1d55a1c98718ee555ac7756bf7e6208d68850a1ed664a7cc9122c121",
+      "baseline_config_sha256": {
+        "train": "bf6245a998e52c3784416b8261352ef8c6e22009c88d5f7dc37ae89becf6c979",
+        "embedding": "c8b76a94a60d1bf4bee2be225c5051eb7433666a33a8b2c0c3015511e0bd51a1",
+        "downstream": "1000abec1bc7c0ab3b7ff770ab310534528d7c5fb621bcf618477ee1c0c41426"
+      }
+    }
+  ]
+}

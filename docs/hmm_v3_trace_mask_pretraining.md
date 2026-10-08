@@ -35,3 +35,14 @@ The completed epoch-25 checkpoint is used for every candidate.
 
 See the [study runbook](../experiments/hmm_v3/k6810_trace_mask_multi_source_v1/README.md)
 for versioned definitions, execution, recovery and paired publication.
+
+## F3-only mask-token LR follow-up
+
+[Experiment 133](../experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/README.md)
+changes only the learned replacement-token optimizer group from `1e-5` to
+`3e-5` or `1e-4`, for all three F3 initialization families. Encoder/head LR
+remain `1e-5`. All six 25-epoch runs retain canonical v02 consistency `0.1`,
+original parents, immutable targets and the completed v3 masking/loss contract.
+Completed masked v3 is the paired control, not the unmasked v02 model.
+The five-layout, three-size decoder matrix contributes 90 new evaluation cells.
+This follow-up does not resume stopped Parihaka or Volve runs.
