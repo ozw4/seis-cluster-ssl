@@ -19,6 +19,16 @@ common held-out voxel complement is evaluated only by phases that explicitly
 permit test inference. Validation-only searches must finish before a final
 model is frozen.
 
+## Current no-HMM MAE large reference
+
+For new cross-version comparisons, the user-selected canonical result for
+Parihaka / no-HMM / MAE / large is decoder seed 42001 across five layouts:
+see the [selection record](47_mae_no_hmm_large_decoder_seed42001_v1/selection.yaml)
+and [runbook](47_mae_no_hmm_large_decoder_seed42001_v1/README.md).
+This replaces only that result reference, not small/medium, LocalBT, random,
+or HMM results. Historical seed 42000 artifacts and frozen v1/v2 records remain
+unchanged. Disclose the decoder-seed difference in cross-version comparisons.
+
 ## Shared execution and recovery
 
 Complete prerequisites and dry-runs before starting a writing phase. A fresh

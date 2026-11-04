@@ -1,0 +1,39 @@
+schema_version: 1
+status: canonical
+scope: parihaka_no_hmm_mae_large_results
+selected_on: '2026-10-13'
+selected_experiment: 47_mae_no_hmm_large_decoder_seed42001_v1
+scientific_contract:
+  survey: parihaka
+  model: mae
+  pretraining: mae100_plus_mae25
+  hmm: false
+  data_size: large
+  layouts: [layout_000, layout_001, layout_002, layout_003, layout_004]
+  decoder_seed: 42001
+  decoder_epochs: 50
+  checkpoint_selection: first_maximum_validation_channel_iou
+  frozen_encoder_sha256: 603662377c62f3b2f5793ecd633761ee455e1bba94c076834c23418dd9614e37
+evidence:
+  execution_config: experiments/parihaka/facies_benchmark_v1/47_mae_no_hmm_large_decoder_seed42001_v1/execution.yaml
+  execution_config_sha256: d58dbc31feab0cf8332389d92c9488ff9453ce32e8f1a36b289a1efeaaf0cc5e
+  artifact_runs: surveys/parihaka/facies_benchmark_v1/benchmark/mae_no_hmm_large_decoder_seed42001_v1/runs
+  artifact_summary: surveys/parihaka/facies_benchmark_v1/benchmark/mae_no_hmm_large_decoder_seed42001_v1/summary/summary.json
+  artifact_summary_sha256: 965d8bffe7144920b5b25bbf635343917a04886f655d6c41428644c1cc3d6a4b
+  artifact_summary_status: complete_requested_scope
+  cell_count: 5
+  metrics_sha256:
+    layout_000: 605d270cd9176f638739753526055b71c56d2f54e2ad59cf7ebadec3de5a9f2e
+    layout_001: 5d7492b301d93bce5d33f01c4cde938fba59449e06b8f6d03b38f03fa778ffe3
+    layout_002: 0121335eb5193bbd773620b94a6635b2ac4a56ce604777f3d734a857936dea65
+    layout_003: 406022e8df645f98a6e055d0f114bf9f9aa033507131fc1e15c449397c9caac0
+    layout_004: 63a57a0b1970db5cd9f1f6cb7b481e050bdc7bcaa518efdb6d24b6d3a6ee5c15
+decision:
+  authority: explicit_user_selection
+  timing: after_both_decoder_seed_results_were_reported
+  use: default_reference_for_future_parihaka_no_hmm_mae_large_comparisons
+  superseded_decoder_seed: 42000
+  preserves_historical_results: true
+  modifies_frozen_hmm_v1_v2_records: false
+  unaffected: [small, medium, local_bt, random, f3, volve, hmm_v1, hmm_v2, hmm_v3]
+  interpretation: Explicit reference designation, not a test-ranked seed search or evidence of a method gain. Cross-version decoder seeds differ; disclose this in comparisons.
