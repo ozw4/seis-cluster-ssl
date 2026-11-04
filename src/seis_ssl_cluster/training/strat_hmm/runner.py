@@ -1,7 +1,5 @@
 """Runner for stratigraphic HMM pretext training."""
 
-
-
 from __future__ import annotations
 
 import csv
@@ -231,11 +229,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 	)
 	components = build_strat_hmm_components(config, device=device)
 	is_center_trace = isinstance(components, StratHmmCenterTraceMaskedComponents)
-	identity_head = (
-		components.heads
-		if is_multi_head
-		else components.head
-	)
+	identity_head = components.heads if is_multi_head else components.head
 	if control_identity is not None:
 		control_identity = _with_initial_parameter_identities(
 			control_identity,
@@ -269,32 +263,22 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		payload = periodic_resume_payload or load_checkpoint(
 			resume, map_location=device
 		)
-		resume_checkpoint_kind = _mapping(
-			payload, 'training_state'
-		).get('checkpoint_kind')
+		resume_checkpoint_kind = _mapping(payload, 'training_state').get(
+			'checkpoint_kind'
+		)
 		resume_state = restore_strat_hmm_training_checkpoint(
 			payload=payload,
 			student=components.student,
-			head=(
-				components.heads
-				if is_multi_head
-				else components.head
-			),
-			spatial_context=(
-				components.replacement_token if is_center_trace else None
-			),
+			head=(components.heads if is_multi_head else components.head),
+			spatial_context=(components.replacement_token if is_center_trace else None),
 			optimizer=components.optimizer,
 			scaler=scaler,
 			amp_enabled=amp_enabled,
 			config=config,
 		)
 		if is_periodic_refresh and resume_checkpoint_kind == 'step':
-			epoch_metrics_state = _mapping(
-				payload, 'epoch_metrics_state'
-			)
-			raw_totals = _mapping(
-				epoch_metrics_state, 'totals'
-			)
+			epoch_metrics_state = _mapping(payload, 'epoch_metrics_state')
+			raw_totals = _mapping(epoch_metrics_state, 'totals')
 			resume_epoch_metric_totals = {
 				str(key): float(value) for key, value in raw_totals.items()
 			}
@@ -331,9 +315,8 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 					target_refresh_state=periodic_state,
 				)
 		_restore_dataloader_generator_state(payload=payload, dataloader=dataloader)
-		if (
-			resume_checkpoint_kind == 'step'
-			and resume_state.skip_batches >= len(dataloader)
+		if resume_checkpoint_kind == 'step' and resume_state.skip_batches >= len(
+			dataloader
 		):
 			if is_periodic_refresh:
 				if not isinstance(periodic_state, Mapping):
@@ -447,9 +430,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				'student_state_sha256': _state_dict_sha256(
 					components.student.state_dict()
 				),
-				'optimizer_state_sha256': _optimizer_state_sha256(
-					components.optimizer
-				),
+				'optimizer_state_sha256': _optimizer_state_sha256(components.optimizer),
 				'refresh_phase': checkpoint_state['refresh_phase'],
 				'recovered_from_completed_step': True,
 			},
@@ -825,10 +806,7 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				checkpoint_state = _periodic_state_with_phase(
 					periodic_state, phase='training'
 				)
-				if (
-					state.epoch_metric_totals is None
-					or state.epoch_batch_count <= 0
-				):
+				if state.epoch_metric_totals is None or state.epoch_batch_count <= 0:
 					raise ValueError(
 						'periodic step checkpoint is missing epoch metric totals'
 					)
@@ -1075,14 +1053,8 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		result = save_strat_hmm_rolling_checkpoint(
 			output_root,
 			student=components.student,
-			head=(
-				components.heads
-				if is_multi_head
-				else components.head
-			),
-			spatial_context=(
-				components.replacement_token if is_center_trace else None
-			),
+			head=(components.heads if is_multi_head else components.head),
+			spatial_context=(components.replacement_token if is_center_trace else None),
 			optimizer=components.optimizer,
 			epoch=epoch,
 			mae_config=components.mae_checkpoint_config,
@@ -1177,6 +1149,7 @@ def _build_strat_hmm_dataset_and_dataloader(
 			)
 		if target_representation not in {
 			'hard_viterbi_labels_v1',
+			'unordered_kmeans_labels_v1',
 			'lateral_mean_field_hard_labels_v1',
 			'xy_neighbor_consensus_hard_labels_v1',
 			'xy_neighbor_unanimous_hard_labels_v1',
@@ -1192,11 +1165,9 @@ def _build_strat_hmm_dataset_and_dataloader(
 		)
 		if target_manifest_override is None:
 			if target_representation == 'lateral_mean_field_hard_labels_v1':
-				target_manifest = (
-					load_strat_multi_head_lateral_target_manifest_adapter(
-						target_manifest
-					).target_manifest
-				)
+				target_manifest = load_strat_multi_head_lateral_target_manifest_adapter(
+					target_manifest
+				).target_manifest
 			elif target_representation == 'xy_neighbor_consensus_hard_labels_v1':
 				target_manifest = (
 					load_strat_multi_head_xy_neighbor_consensus_target_manifest_adapter(
@@ -1216,12 +1187,10 @@ def _build_strat_hmm_dataset_and_dataloader(
 			dataset, **loader_kwargs
 		)
 	pseudo_inputs = discover_pseudo_target_inputs(
-			_path_config(pseudo_config, 'input_dir'),
-			k=_int_config(pseudo_config, 'k', 1),
-		)
-	dataset = NopimsStratPseudoTargetDataset(
-		manifests, pseudo_inputs, **dataset_kwargs
+		_path_config(pseudo_config, 'input_dir'),
+		k=_int_config(pseudo_config, 'k', 1),
 	)
+	dataset = NopimsStratPseudoTargetDataset(manifests, pseudo_inputs, **dataset_kwargs)
 	return dataset, build_strat_pseudo_target_dataloader(dataset, **loader_kwargs)
 
 
@@ -1254,13 +1223,11 @@ def _periodic_initial_artifacts(
 	HashedArtifactReference,
 	HashedArtifactReference,
 	HashedArtifactReference,
-	]:
+]:
 	refresh = _periodic_refresh_mapping(config)
 	initial = _mapping(refresh, 'initial_hmm_artifacts')
 	common = _mapping(initial, 'common')
-	clustering_config = _artifact_reference(
-		_path_config(common, 'clustering_config')
-	)
+	clustering_config = _artifact_reference(_path_config(common, 'clustering_config'))
 	preprocessor = _artifact_reference(_path_config(common, 'preprocessor'))
 	residualizer_value = common.get('residualizer')
 	residualizer = (
@@ -1299,15 +1266,11 @@ def _periodic_target_policy(
 	manifest_path: Path,
 ) -> HardTargetPolicy:
 	payload = load_multi_head_target_manifest(manifest_path)
-	heads = _periodic_nested_mapping(
-		payload.get('heads'), 'target manifest heads'
-	)
+	heads = _periodic_nested_mapping(payload.get('heads'), 'target manifest heads')
 	confidence_values: list[float] = []
 	boundary_modes: set[bool] = set()
 	for k in CANONICAL_KS:
-		head = _periodic_nested_mapping(
-			heads.get(str(k)), f'target manifest k={k}'
-		)
+		head = _periodic_nested_mapping(heads.get(str(k)), f'target manifest k={k}')
 		surveys = _periodic_nested_mapping(
 			head.get('surveys'), f'target manifest k={k} surveys'
 		)
@@ -1326,11 +1289,7 @@ def _periodic_target_policy(
 				None
 				if boundary is None
 				else Path(
-					str(
-						_periodic_nested_mapping(
-							boundary, 'boundary_weight'
-						)['path']
-					)
+					str(_periodic_nested_mapping(boundary, 'boundary_weight')['path'])
 				)
 			)
 			item = StratPseudoTargetInput(
@@ -1359,9 +1318,7 @@ def _periodic_target_policy(
 	return HardTargetPolicy(
 		confidence_mode='constant' if constant else 'source_array',
 		confidence=confidence_values[0] if constant else 1.0,
-		boundary_weight_mode=(
-			'source_array' if boundary_modes.pop() else 'absent'
-		),
+		boundary_weight_mode=('source_array' if boundary_modes.pop() else 'absent'),
 	)
 
 
@@ -1412,9 +1369,7 @@ def _append_target_refresh_event(  # noqa: C901
 ) -> None:
 	path = output_root / 'target_refresh_events.jsonl'
 	path.parent.mkdir(parents=True, exist_ok=True)
-	existing_events = (
-		_read_target_refresh_events(path) if path.is_file() else []
-	)
+	existing_events = _read_target_refresh_events(path) if path.is_file() else []
 	if payload.get('event_type') == 'refresh' and payload.get('status') in {
 		'start',
 		'complete',
@@ -1441,12 +1396,11 @@ def _append_target_refresh_event(  # noqa: C901
 				existing.get(key) == payload.get(key)
 				for key in ('event_type', 'status', 'refresh_epoch')
 			) and not all(
-					existing.get(key) == payload.get(key)
-				for key in identity_fields
+				existing.get(key) == payload.get(key) for key in identity_fields
 			):
-					raise ValueError(
-						'conflicting periodic refresh lifecycle event already exists'
-					)
+				raise ValueError(
+					'conflicting periodic refresh lifecycle event already exists'
+				)
 			if all(existing.get(key) == payload.get(key) for key in identity_fields):
 				return
 	checkpoint_identity = (
@@ -1487,11 +1441,7 @@ def _read_target_refresh_events(path: Path) -> list[Mapping[str, object]]:
 	raw = path.read_bytes()
 	chunks = raw.splitlines(keepends=True)
 	last_content_index = next(
-		(
-			index
-			for index in range(len(chunks) - 1, -1, -1)
-			if chunks[index].strip()
-		),
+		(index for index in range(len(chunks) - 1, -1, -1) if chunks[index].strip()),
 		None,
 	)
 	events: list[Mapping[str, object]] = []
@@ -1517,9 +1467,7 @@ def _read_target_refresh_events(path: Path) -> list[Mapping[str, object]]:
 
 
 def _quarantine_target_refresh_event_fragment(path: Path, fragment: bytes) -> None:
-	fd, _ = tempfile.mkstemp(
-		prefix=f'{path.name}.quarantine.', dir=path.parent
-	)
+	fd, _ = tempfile.mkstemp(prefix=f'{path.name}.quarantine.', dir=path.parent)
 	with os.fdopen(fd, 'wb') as handle:
 		handle.write(fragment)
 		handle.flush()
@@ -1569,12 +1517,8 @@ def _recover_periodic_checkpoint_event(
 			],
 			'active_target_manifest_sha256': state['active_target_manifest_sha256'],
 			'source_student_state_sha256': state['source_student_state_sha256'],
-			'student_state_sha256': _state_dict_sha256(
-				components.student.state_dict()
-			),
-			'optimizer_state_sha256': _optimizer_state_sha256(
-				components.optimizer
-			),
+			'student_state_sha256': _state_dict_sha256(components.student.state_dict()),
+			'optimizer_state_sha256': _optimizer_state_sha256(components.optimizer),
 			'refresh_phase': state['refresh_phase'],
 		},
 	)
@@ -1587,9 +1531,7 @@ def _periodic_generation_record(manifest_path: Path) -> dict[str, object]:
 		None
 		if previous is None
 		else str(
-			_periodic_nested_mapping(
-				previous, 'previous_generation_manifest'
-			)['sha256']
+			_periodic_nested_mapping(previous, 'previous_generation_manifest')['sha256']
 		)
 	)
 	source_hash = payload.get('source_student_state_sha256')
@@ -1735,8 +1677,8 @@ def _rollback_periodic_refresh_pointer(
 	_json_write_atomic(pointer_path, dict(old_pointer))
 	if _periodic_pointer(pointer_path) != dict(old_pointer):
 		raise RuntimeError(
-		'periodic refresh rollback did not restore the active target pointer'
-	)
+			'periodic refresh rollback did not restore the active target pointer'
+		)
 
 
 def _periodic_state_for_generation(  # noqa: PLR0913
@@ -1770,9 +1712,7 @@ def _periodic_state_for_generation(  # noqa: PLR0913
 		'active_generation_id': str(active['generation_id']),
 		'active_generation_manifest_path': str(active_manifest.resolve()),
 		'active_generation_manifest_sha256': str(active['manifest_sha256']),
-		'active_generation_content_sha256': str(
-			active['generation_content_sha256']
-		),
+		'active_generation_content_sha256': str(active['generation_content_sha256']),
 		'active_target_manifest_path': str(Path(str(target['path'])).resolve()),
 		'active_target_manifest_sha256': str(target['sha256']),
 		'periodic_refresh_chain_path': str(chain_path.resolve()),
@@ -1830,9 +1770,7 @@ def _initialize_periodic_refresh_state(  # noqa: C901, PLR0912, PLR0915
 		except (OSError, TypeError, ValueError, KeyError):
 			if not quarantine_invalid:
 				raise
-			quarantine_periodic_refresh_generation(
-				initial_config.output_generation_dir
-			)
+			quarantine_periodic_refresh_generation(initial_config.output_generation_dir)
 			result = produce_initial_periodic_refresh_generation(initial_config)
 			initial_manifest = result.manifest_path.resolve()
 	else:
@@ -1909,9 +1847,10 @@ def _initialize_periodic_refresh_state(  # noqa: C901, PLR0912, PLR0915
 		last_completed_refresh_epoch=0,
 		source_student_state_sha256=None,
 	)
-	if Path(str(initial_target['path'])).resolve() != Path(
-		state['active_target_manifest_path']
-	).resolve():
+	if (
+		Path(str(initial_target['path'])).resolve()
+		!= Path(state['active_target_manifest_path']).resolve()
+	):
 		raise ValueError('initial periodic target binding is inconsistent')
 	_append_target_refresh_event(
 		output_root,
@@ -1988,9 +1927,7 @@ def _periodic_embedding_extraction_config(
 	output_dir: Path,
 	source_embedding_metadata: HashedArtifactReference,
 ) -> dict[str, object]:
-	metadata = json.loads(
-		source_embedding_metadata.path.read_text(encoding='utf-8')
-	)
+	metadata = json.loads(source_embedding_metadata.path.read_text(encoding='utf-8'))
 	if not isinstance(metadata, Mapping):
 		raise TypeError('source embedding metadata must be a JSON object')
 	for key in ('window_size', 'overlap', 'output_dtype', 'min_token_valid_fraction'):
@@ -2318,9 +2255,7 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	refresh_root = _path_config(refresh, 'generation_root').resolve()
 	old_manifest = Path(str(state['active_generation_manifest_path'])).resolve()
 	generation_index = int(state['active_generation_index']) + 1
-	generation_id = (
-		f'refresh_{generation_index:04d}_epoch{refresh_epoch:03d}'
-	)
+	generation_id = f'refresh_{generation_index:04d}_epoch{refresh_epoch:03d}'
 	generation_dir = refresh_root / 'generations' / generation_id
 	embedding_dir = refresh_root / 'embeddings' / generation_id
 	initial_artifacts, clustering_config, source_metadata, initial_target = (
@@ -2364,9 +2299,7 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				'refresh_epoch': refresh_epoch,
 				'source_student_state_sha256': student_hash,
 				'student_state_sha256': student_hash,
-				'optimizer_state_sha256': _optimizer_state_sha256(
-					components.optimizer
-				),
+				'optimizer_state_sha256': _optimizer_state_sha256(components.optimizer),
 				'active_generation_id_before': state['active_generation_id'],
 				'global_step_before': global_step,
 				'rng_before_sha256': _rng_state_hash(rng_before),
@@ -2460,9 +2393,7 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		if isinstance(diagnostics_ref, Mapping):
 			diagnostics_path = Path(str(diagnostics_ref['path']))
 			if diagnostics_path.is_file():
-				diagnostics = json.loads(
-					diagnostics_path.read_text(encoding='utf-8')
-				)
+				diagnostics = json.loads(diagnostics_path.read_text(encoding='utf-8'))
 		_append_target_refresh_event(
 			output_root,
 			{
@@ -2475,18 +2406,14 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 				'student_state_sha256': _state_dict_sha256(
 					components.student.state_dict()
 				),
-				'optimizer_state_sha256': _optimizer_state_sha256(
-					components.optimizer
-				),
+				'optimizer_state_sha256': _optimizer_state_sha256(components.optimizer),
 				'output_generation_manifest_path': new_state[
 					'active_generation_manifest_path'
 				],
 				'output_generation_manifest_sha256': new_state[
 					'active_generation_manifest_sha256'
 				],
-				'active_target_manifest_path': new_state[
-					'active_target_manifest_path'
-				],
+				'active_target_manifest_path': new_state['active_target_manifest_path'],
 				'active_target_manifest_sha256': new_state[
 					'active_target_manifest_sha256'
 				],
@@ -2544,9 +2471,7 @@ def _perform_periodic_refresh(  # noqa: C901, PLR0912, PLR0913, PLR0915
 					),
 					'global_step_before': global_step,
 					'rng_before_sha256': _rng_state_hash(rng_before),
-					'rng_after_restore_sha256': _rng_state_hash(
-						capture_rng_state()
-					),
+					'rng_after_restore_sha256': _rng_state_hash(capture_rng_state()),
 					'error_type': type(exc).__name__,
 					'error': str(exc),
 				},

@@ -10,11 +10,14 @@ import torch
 import yaml
 
 from seis_ssl_cluster.clustering.features import file_sha256
+from seis_ssl_cluster.clustering.kmeans_targets import (
+	TARGET_REPRESENTATION,
+	load_hard_target_manifest,
+)
 from seis_ssl_cluster.config import resolve_strat_hmm_pretext_config
 from seis_ssl_cluster.config.io import _expand_environment_variables
 from seis_ssl_cluster.stratigraphy.multi_head import (
 	compare_k6_replay,
-	load_multi_head_target_manifest,
 	validate_frozen_k6_reference,
 )
 from seis_ssl_cluster.training import load_checkpoint
@@ -43,9 +46,12 @@ def audit_multi_head_source(config_path: Path) -> dict[str, object]:  # noqa: C9
 	train = config['train']
 	if train['max_steps'] is not None:
 		raise ValueError('completed source requires an unlimited full training recipe')
-	if config['pseudo_targets']['target_representation'] != 'hard_viterbi_labels_v1':
+	if config['pseudo_targets']['target_representation'] not in {
+		'hard_viterbi_labels_v1',
+		TARGET_REPRESENTATION,
+	}:
 		raise ValueError('source audit requires hard Viterbi targets')
-	manifest = load_multi_head_target_manifest(manifest_path)
+	manifest = load_hard_target_manifest(manifest_path)
 	if 'k6_frozen_reference' in manifest:
 		validate_frozen_k6_reference(
 			receipt_path=manifest['k6_frozen_reference']['receipt']['path'],
@@ -53,7 +59,10 @@ def audit_multi_head_source(config_path: Path) -> dict[str, object]:  # noqa: C9
 			source_embedding=manifest['source_embedding'],
 			historical_targets=manifest['heads']['6']['surveys'],
 		)
-	elif 6 in manifest['head_ks']:
+	elif (
+		6 in manifest['head_ks']
+		and config['pseudo_targets']['target_representation'] != TARGET_REPRESENTATION
+	):
 		parity = compare_k6_replay(
 			historical_root=manifest['heads']['6']['pseudo_target_root'],
 			replay_root=manifest['k6_replay_parity']['replay_root'],

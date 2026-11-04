@@ -1,6 +1,5 @@
 """Full-volume amplitude MAE encoder embedding extraction."""
 
-
 from __future__ import annotations
 
 import hashlib
@@ -350,9 +349,7 @@ def extract_embeddings_from_loaded_model(  # noqa: C901, PLR0913, PLR0915
 		)
 		raise ValueError(msg)
 	output_root.parent.mkdir(parents=True, exist_ok=True)
-	staging = output_root.with_name(
-		f'.{output_root.name}.staging-{uuid.uuid4().hex}'
-	)
+	staging = output_root.with_name(f'.{output_root.name}.staging-{uuid.uuid4().hex}')
 	staging.mkdir()
 	try:
 		staged_cache = replace(
@@ -398,13 +395,16 @@ def extract_embeddings_from_loaded_model(  # noqa: C901, PLR0913, PLR0915
 			_write_embedding_execution_summary(staging, results)
 		if staged_settings.stage_timing:
 			timer.write_json(staging / 'stage_timings.json')
-		if _refresh_identity(
-			standard_config=standard_config,
-			resolved_checkpoint_config=resolved_checkpoint_config,
-			manifests=manifests,
-			student_state_sha256=student_state_sha256,
-			model=student,
-		) != identity:
+		if (
+			_refresh_identity(
+				standard_config=standard_config,
+				resolved_checkpoint_config=resolved_checkpoint_config,
+				manifests=manifests,
+				student_state_sha256=student_state_sha256,
+				model=student,
+			)
+			!= identity
+		):
 			msg = 'refresh source identity changed during extraction'
 			raise ValueError(msg)
 		descriptor = _build_refresh_descriptor(
@@ -808,9 +808,10 @@ def _validate_refresh_descriptor(  # noqa: C901, PLR0912, PLR0913
 	if descriptor.get('schema_version') != 1:
 		msg = 'refresh descriptor schema_version is invalid'
 		raise ValueError(msg)
-	if descriptor.get('status') != 'COMPLETE' or descriptor.get(
-		'completion_status'
-	) != 'COMPLETE':
+	if (
+		descriptor.get('status') != 'COMPLETE'
+		or descriptor.get('completion_status') != 'COMPLETE'
+	):
 		msg = 'refresh descriptor is not complete'
 		raise ValueError(msg)
 	for key, expected in identity.items():
@@ -958,9 +959,7 @@ def _publish_refresh_staging(
 	if not overwrite:
 		msg = f'refresh output already exists: {output_root}'
 		raise FileExistsError(msg)
-	backup = output_root.with_name(
-		f'.{output_root.name}.backup-{uuid.uuid4().hex}'
-	)
+	backup = output_root.with_name(f'.{output_root.name}.backup-{uuid.uuid4().hex}')
 	output_root.replace(backup)
 	try:
 		staging.replace(output_root)
@@ -1979,9 +1978,9 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 			'scientific_identity_sha256': checkpoint_identity[
 				'scientific_identity_sha256'
 			],
-		'checkpoint_stratigraphy_state_sha256': checkpoint_identity[
-			'stratigraphy_state_sha256'
-		],
+			'checkpoint_stratigraphy_state_sha256': checkpoint_identity[
+				'stratigraphy_state_sha256'
+			],
 		}
 		if checkpoint_identity.get('schema_version') == 3:
 			posterior = _required_mapping(checkpoint_identity, 'posterior_manifest')
@@ -2003,9 +2002,7 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 			return {
 				**result,
 				'model_role': checkpoint_identity['model_role'],
-				'target_representation': checkpoint_identity[
-					'target_representation'
-				],
+				'target_representation': checkpoint_identity['target_representation'],
 				'target_refresh_semantics': checkpoint_identity[
 					'target_refresh_semantics'
 				],
@@ -2021,9 +2018,7 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 				'refresh_embedding_semantics': checkpoint_identity[
 					'refresh_embedding_semantics'
 				],
-				'center_initialization': checkpoint_identity[
-					'center_initialization'
-				],
+				'center_initialization': checkpoint_identity['center_initialization'],
 				'center_update': checkpoint_identity['center_update'],
 				'center_update_semantics': checkpoint_identity[
 					'center_update_semantics'
@@ -2043,9 +2038,7 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 				'target_manifest_sha256': target_refresh_state[
 					'active_target_manifest_sha256'
 				],
-				'active_generation_id': target_refresh_state[
-					'active_generation_id'
-				],
+				'active_generation_id': target_refresh_state['active_generation_id'],
 				'active_generation_manifest_path': target_refresh_state[
 					'active_generation_manifest_path'
 				],
@@ -2142,6 +2135,11 @@ def _stratigraphy_pretext_metadata(  # noqa: C901, PLR0911, PLR0912
 			return _hard_target_pretext_metadata(
 				result,
 				checkpoint_identity,
+			)
+		if checkpoint_identity.get('schema_version') == 9:
+			result.update(
+				target_representation=checkpoint_identity['target_representation'],
+				clustering_method='minibatch_kmeans',
 			)
 		target_manifest = _required_mapping(checkpoint_identity, 'target_manifest')
 		return {

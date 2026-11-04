@@ -229,6 +229,7 @@ def train_strat_hmm_multi_head_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR09
 				)
 			elif target_representation in {
 				'hard_viterbi_labels_v1',
+				'unordered_kmeans_labels_v1',
 				'lateral_mean_field_hard_labels_v1',
 				'xy_neighbor_consensus_hard_labels_v1',
 				'xy_neighbor_unanimous_hard_labels_v1',

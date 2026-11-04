@@ -332,12 +332,24 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 		)
 		head_values[head_key] = values._replace(valid_mask=valid_mask)
 
-	consistency_loss, eligible_pair_count, consistency_metrics = (
-		_multi_head_consistency_losses(
-			outputs, head_values, consistency_beta=consistency_beta, reference=tokens
-		)
+	unordered = (
+		pseudo_target_config.get('target_representation')
+		== 'unordered_kmeans_labels_v1'
 	)
-	result.update(consistency_metrics)
+	if unordered:
+		if consistency_weight != 0.0:
+			raise ValueError('unordered targets require zero consistency weight')
+		consistency_loss, eligible_pair_count = _graph_zero(tokens), 0
+	else:
+		consistency_loss, eligible_pair_count, consistency_metrics = (
+			_multi_head_consistency_losses(
+				outputs,
+				head_values,
+				consistency_beta=consistency_beta,
+				reference=tokens,
+			)
+		)
+		result.update(consistency_metrics)
 	prototype_loss = torch.stack(prototype_losses).mean()
 	usage_loss = torch.stack(usage_losses).mean()
 	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)

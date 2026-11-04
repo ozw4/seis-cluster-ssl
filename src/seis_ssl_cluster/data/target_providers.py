@@ -11,11 +11,15 @@ from typing import TYPE_CHECKING, Protocol, cast
 import numpy as np
 
 from seis_ssl_cluster.clustering.features import file_sha256
+from seis_ssl_cluster.clustering.kmeans_targets import (
+	TARGET_REPRESENTATION,
+	load_hard_target_manifest,
+	validate_unordered_target_reference,
+)
 from seis_ssl_cluster.stratigraphy.lateral_targets import (
 	load_multi_head_lateral_target_manifest,
 )
 from seis_ssl_cluster.stratigraphy.multi_head import (
-	load_multi_head_target_manifest,
 	validate_multi_head_target_reference,
 )
 from seis_ssl_cluster.stratigraphy.state_posterior import (
@@ -64,6 +68,7 @@ class StratMultiHeadTargetInput:
 	valid_tokens_path: Path
 	metadata_path: Path
 	hashes: Mapping[str, str]
+	target_representation: str = 'hard_viterbi_labels_v1'
 
 
 @dataclass(frozen=True)
@@ -749,7 +754,7 @@ def load_strat_multi_head_target_manifest(
 	path: str | Path,
 ) -> StratMultiHeadTargetManifest:
 	"""Load #268's references without materializing pseudo-target arrays."""
-	payload = load_multi_head_target_manifest(
+	payload = load_hard_target_manifest(
 		path,
 		validate_array_semantics=False,
 	)
@@ -779,6 +784,9 @@ def load_strat_multi_head_target_manifest(
 					),
 					metadata_path=Path(
 						str(cast('Mapping[str, object]', entry['metadata'])['path'])
+					),
+					target_representation=str(
+						payload.get('target_representation', 'hard_viterbi_labels_v1')
 					),
 					hashes={
 						name: str(cast('Mapping[str, object]', entry[name])['sha256'])
@@ -1196,7 +1204,12 @@ def _validate_multi_head_target_input(
 		)
 	):
 		raise TypeError('multi-head target artifact paths must be Path instances')
-	validate_multi_head_target_reference(
+	validator = (
+		validate_unordered_target_reference
+		if item.target_representation == TARGET_REPRESENTATION
+		else validate_multi_head_target_reference
+	)
+	validator(
 		k=item.k,
 		survey_id=survey_id,
 		labels_path=item.labels_path,

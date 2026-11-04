@@ -1,6 +1,5 @@
 """Validation and resolution for MAE pretraining configs."""
 
-
 from __future__ import annotations
 
 import importlib
@@ -347,6 +346,7 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 
 _STRAT_HMM_MULTI_HEAD_SPEC = MULTI_RESOLUTION_ORDERED_PROTOTYPES_V1
 _STRAT_HMM_MULTI_HEAD_CONSISTENCY_POLICY = 'normalized_order_smooth_l1_v1'
+_UNORDERED_TARGET_REPRESENTATION = 'unordered_kmeans_labels_v1'
 _STRAT_HMM_HARD_TARGET_REPRESENTATION = 'hard_viterbi_labels_v1'
 _STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION = 'ordered_path_state_posterior_v1'
 _STRAT_HMM_LATERAL_TARGET_REPRESENTATION = 'lateral_mean_field_hard_labels_v1'
@@ -392,13 +392,9 @@ CENTER_TRACE_EXPERIMENT_ROLE = 'multi_head_center_trace_masked_hard_pretext'
 CENTER_TRACE_VARIANT = 'ctmask010_nocons'
 CENTER_TRACE_OBJECTIVE = 'center_trace_masked_hmm_path_reconstruction_v1'
 CENTER_TRACE_MASK_SEMANTICS = 'xy_token_column_full_z_v1'
-CENTER_TRACE_SELECTION_POLICY = (
-	'supervised_valid_xy_columns_round_half_up_leave_one_v1'
-)
+CENTER_TRACE_SELECTION_POLICY = 'supervised_valid_xy_columns_round_half_up_leave_one_v1'
 CENTER_TRACE_REPLACEMENT = 'learned_encoder_mask_token_v1'
-CENTER_TRACE_REPLACEMENT_INITIALIZATION = (
-	'normal_std_0p02_train_seed_salted_v1'
-)
+CENTER_TRACE_REPLACEMENT_INITIALIZATION = 'normal_std_0p02_train_seed_salted_v1'
 CENTER_TRACE_RNG_POLICY = 'stateless_step_seed_v1'
 CENTER_TRACE_DISTILLATION_SCOPE = 'visible_only_v1'
 CENTER_TRACE_SUPERVISED_LOSS = 'structured_hmm_center_trace_masked_hard_v1'
@@ -430,9 +426,7 @@ PERIODIC_REFRESH_SCHEDULE_SEMANTICS = 'after_epochs_2_5_8_11_14_17_20_v1'
 PERIODIC_REFRESH_CENTER_UPDATE_SEMANTICS = (
 	'warm_start_full_mean_two_iterations_final_decode_v1'
 )
-PERIODIC_REFRESH_EMBEDDING_SEMANTICS = (
-	'current_student_unmasked_eval_full_survey_v1'
-)
+PERIODIC_REFRESH_EMBEDDING_SEMANTICS = 'current_student_unmasked_eval_full_survey_v1'
 PERIODIC_REFRESH_PREPROCESSING_POLICY = 'freeze_initial_residualizer_pca_v1'
 PERIODIC_REFRESH_TARGET_ACTIVATION_POLICY = 'atomic_next_epoch_activation_v1'
 PERIODIC_REFRESH_CHECKPOINT_SELECTION_POLICY = 'final_completed_epoch_v1'
@@ -762,10 +756,7 @@ def resolve_barlow_twins_training_config(config: _T) -> Config:
 	_reject_fixed_contract_keys(resolved)
 	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
 	raw_augmentations = resolved.get('augmentations')
-	if not (
-		isinstance(raw_augmentations, Mapping)
-		and 'policy' in raw_augmentations
-	):
+	if not (isinstance(raw_augmentations, Mapping) and 'policy' in raw_augmentations):
 		_merge_section_defaults(
 			resolved,
 			'augmentations',
@@ -888,10 +879,7 @@ def resolve_vicreg_training_config(config: _T) -> Config:
 	_reject_fixed_contract_keys(resolved)
 	_merge_section_defaults(resolved, 'data', DEFAULT_MAE_DATA_OPTIONS)
 	raw_augmentations = resolved.get('augmentations')
-	if not (
-		isinstance(raw_augmentations, Mapping)
-		and 'policy' in raw_augmentations
-	):
+	if not (isinstance(raw_augmentations, Mapping) and 'policy' in raw_augmentations):
 		_merge_section_defaults(
 			resolved,
 			'augmentations',
@@ -1384,8 +1372,7 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		not isinstance(schedule, Sequence)
 		or isinstance(schedule, str | bytes)
 		or any(
-			isinstance(epoch, bool) or not isinstance(epoch, int)
-			for epoch in schedule
+			isinstance(epoch, bool) or not isinstance(epoch, int) for epoch in schedule
 		)
 		or tuple(schedule) != PERIODIC_REFRESH_SCHEDULE
 	):
@@ -1570,14 +1557,21 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		raise ValueError(
 			'pseudo_target_refresh initial centers must share one feature dimension'
 		)
-	if len({
-		json.dumps(identity, sort_keys=True, separators=(',', ':'), allow_nan=False)
-		for identity in metadata_identities
-	}) != 1:
+	if (
+		len(
+			{
+				json.dumps(
+					identity, sort_keys=True, separators=(',', ':'), allow_nan=False
+				)
+				for identity in metadata_identities
+			}
+		)
+		!= 1
+	):
 		raise ValueError(
-		'pseudo_target_refresh initial HMM metadata/preprocessing identity differs '
-		'across K values'
-	)
+			'pseudo_target_refresh initial HMM metadata/preprocessing identity differs '
+			'across K values'
+		)
 
 	target_manifest_path = _validate_absolute_path(
 		pseudo_targets,
@@ -1592,8 +1586,8 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 	)
 	if target_manifest.get('head_ks') != [6, 8, 10]:
 		raise ValueError(
-		'pseudo_target_refresh initial target manifest must have head_ks [6, 8, 10]'
-	)
+			'pseudo_target_refresh initial target manifest must have head_ks [6, 8, 10]'
+		)
 	_source_target_roots_must_be_immutable(
 		target_manifest,
 		generation_root,
@@ -1606,9 +1600,7 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 		Path(str(common_refs['source_embedding_metadata']['path'])),
 	]
 	if common_refs['residualizer'] is not None:
-		initial_artifact_paths.append(
-			Path(str(common_refs['residualizer']['path']))
-		)
+		initial_artifact_paths.append(Path(str(common_refs['residualizer']['path'])))
 	initial_artifact_paths.extend(
 		Path(str(reference['path']))
 		for head in initial_heads.values()
@@ -1663,9 +1655,9 @@ def _validate_periodic_refresh_config(  # noqa: C901, PLR0912, PLR0913, PLR0915
 			else common_refs['residualizer']['sha256']
 		),
 		'fixed_clustering_config_sha256': common_refs['clustering_config']['sha256'],
-		'source_embedding_metadata_sha256': common_refs[
-			'source_embedding_metadata'
-		]['sha256'],
+		'source_embedding_metadata_sha256': common_refs['source_embedding_metadata'][
+			'sha256'
+		],
 		'source_valid_token_hashes': source_valid_token_hashes,
 		'feature_dimension': next(iter(feature_dimensions)),
 	}
@@ -1689,9 +1681,7 @@ def _validate_initial_artifact_not_in_generation_root(
 	label: str,
 ) -> None:
 	try:
-		path.resolve(strict=False).relative_to(
-			generation_root.resolve(strict=False)
-		)
+		path.resolve(strict=False).relative_to(generation_root.resolve(strict=False))
 	except ValueError:
 		return
 	raise ValueError(
@@ -1735,7 +1725,7 @@ def _load_json_object(path: Path, label: str) -> dict[str, object]:
 
 
 def _periodic_metadata_identity(  # noqa: C901, PLR0912, PLR0915
-	value: Mapping[str, object]
+	value: Mapping[str, object],
 ) -> dict[str, object]:
 	"""Return the cross-K identity that fixes the initial HMM input contract."""
 	embedding_inputs = value.get('embedding_inputs')
@@ -1771,14 +1761,14 @@ def _periodic_metadata_identity(  # noqa: C901, PLR0912, PLR0915
 					f'periodic refresh embedding input {key} is missing for {survey_id}'
 				)
 		ordered_inputs.append(
-				{
-					'survey_id': survey_id,
-					'embeddings_path': str(entry['embeddings_path']),
-					'valid_tokens_path': str(entry['valid_tokens_path']),
-					'metadata_path': str(entry['metadata_path']),
-					'metadata_sha256': str(entry['metadata_sha256']),
-				}
-			)
+			{
+				'survey_id': survey_id,
+				'embeddings_path': str(entry['embeddings_path']),
+				'valid_tokens_path': str(entry['valid_tokens_path']),
+				'metadata_path': str(entry['metadata_path']),
+				'metadata_sha256': str(entry['metadata_sha256']),
+			}
+		)
 
 	compatibility = value.get('embedding_compatibility_signature')
 	if not isinstance(compatibility, Mapping):
@@ -1807,31 +1797,27 @@ def _periodic_metadata_identity(  # noqa: C901, PLR0912, PLR0915
 	if strat.get('emission_source') != 'embedding':
 		raise ValueError(
 			'periodic refresh initial HMM ordering requires embedding emissions'
-	)
-	if strat.get('z_axis') != 2 or strat.get('z_direction') != (
-		'increasing_downward'
-	):
+		)
+	if strat.get('z_axis') != 2 or strat.get('z_direction') != ('increasing_downward'):
 		raise ValueError(
 			'periodic refresh initial HMM ordering identity is invalid '
 			'(z_axis/z_direction)'
-	)
+		)
 	initialization = strat.get('init')
-	if not isinstance(initialization, Mapping) or initialization.get(
-		'order_by'
-	) != 'mean_z':
+	if (
+		not isinstance(initialization, Mapping)
+		or initialization.get('order_by') != 'mean_z'
+	):
 		raise ValueError(
-			'periodic refresh initial HMM ordering requires init.order_by == '
-			'mean_z'
-	)
+			'periodic refresh initial HMM ordering requires init.order_by == mean_z'
+		)
 	edge_margin = _periodic_nonnegative_int_triplet(
 		strat.get('edge_margin_tokens'),
 		'periodic initial HMM edge_margin_tokens',
 	)
 	update = strat.get('update')
 	if not isinstance(update, Mapping):
-		raise TypeError(
-			'periodic refresh initial HMM update policy must be a mapping'
-		)
+		raise TypeError('periodic refresh initial HMM update policy must be a mapping')
 	if not isinstance(update.get('empty_cluster_policy'), str):
 		raise TypeError(
 			'periodic refresh initial HMM ordering metadata is missing update policy'
@@ -1839,12 +1825,12 @@ def _periodic_metadata_identity(  # noqa: C901, PLR0912, PLR0915
 	prepared = strat.get('prepared_feature_cache')
 	if not isinstance(prepared, Mapping):
 		raise TypeError(
-		'periodic refresh model metadata is missing prepared_feature_cache identity'
-	)
+			'periodic refresh model metadata is missing prepared_feature_cache identity'
+		)
 	if prepared.get('feature_mode') != 'embedding':
 		raise ValueError(
-		'periodic refresh prepared-feature identity must use embedding features'
-	)
+			'periodic refresh prepared-feature identity must use embedding features'
+		)
 	prepared_surveys = prepared.get('surveys')
 	if (
 		not isinstance(prepared_surveys, Sequence)
@@ -1852,8 +1838,8 @@ def _periodic_metadata_identity(  # noqa: C901, PLR0912, PLR0915
 		or not prepared_surveys
 	):
 		raise ValueError(
-		'periodic refresh prepared-feature identity must record surveys'
-	)
+			'periodic refresh prepared-feature identity must record surveys'
+		)
 	prepared_identity: list[dict[str, object]] = []
 	feature_dimensions: set[int] = set()
 	for entry in prepared_surveys:
@@ -1914,9 +1900,7 @@ def _periodic_metadata_identity(  # noqa: C901, PLR0912, PLR0915
 	}
 
 
-def _periodic_preprocessing_identity(
-	value: object, label: str
-) -> dict[str, object]:
+def _periodic_preprocessing_identity(value: object, label: str) -> dict[str, object]:
 	if not isinstance(value, Mapping):
 		raise TypeError(f'periodic refresh metadata {label} must be a mapping')
 	enabled = value.get('enabled')
@@ -1926,9 +1910,7 @@ def _periodic_preprocessing_identity(
 	if enabled:
 		for key in ('mode', 'group_by', 'add_global_mean_back', 'min_group_count'):
 			if key not in value:
-				raise ValueError(
-					f'periodic refresh metadata {label} is missing {key}'
-				)
+				raise ValueError(f'periodic refresh metadata {label} is missing {key}')
 		identity.update(
 			{
 				key: _json_normalize(value[key])
@@ -1959,16 +1941,16 @@ def _periodic_pca_identity(value: object) -> dict[str, object]:
 	if effective is not None:
 		effective = _periodic_positive_int(
 			effective, 'periodic PCA effective_n_components'
-	)
+		)
 	if enabled and effective is None:
 		raise ValueError(
 			'periodic refresh model metadata must record enabled PCA output dimension'
-	)
+		)
 	if not enabled and effective is not None:
 		raise ValueError(
 			'periodic refresh model metadata must not record disabled PCA output '
 			'dimension'
-	)
+		)
 	return {
 		'enabled': enabled,
 		'n_components': n_components,
@@ -1995,9 +1977,7 @@ def _periodic_nonnegative_int_triplet(
 			for item in value
 		)
 	):
-		raise ValueError(
-			f'{label} must be a length-three nonnegative integer sequence'
-		)
+		raise ValueError(f'{label} must be a length-three nonnegative integer sequence')
 	return (int(value[0]), int(value[1]), int(value[2]))
 
 
@@ -2072,9 +2052,7 @@ def _validate_periodic_initial_artifact_identity(  # noqa: C901, PLR0912, PLR091
 	)
 	source_survey_id = source_metadata.get('survey_id')
 	if not isinstance(source_survey_id, str):
-		raise TypeError(
-			'pseudo_target_refresh source metadata must record survey_id'
-		)
+		raise TypeError('pseudo_target_refresh source metadata must record survey_id')
 	matching_inputs = [
 		entry for entry in input_identity if entry['survey_id'] == source_survey_id
 	]
@@ -2089,9 +2067,7 @@ def _validate_periodic_initial_artifact_identity(  # noqa: C901, PLR0912, PLR091
 		raise ValueError(
 			'pseudo_target_refresh source metadata path does not match model inputs'
 		)
-	if matching_inputs[0]['metadata_sha256'] != _file_sha256(
-		str(source_metadata_path)
-	):
+	if matching_inputs[0]['metadata_sha256'] != _file_sha256(str(source_metadata_path)):
 		raise ValueError(
 			'pseudo_target_refresh source metadata hash does not match model inputs'
 		)
@@ -2104,9 +2080,7 @@ def _validate_periodic_initial_artifact_identity(  # noqa: C901, PLR0912, PLR091
 		'zero_mask',
 	):
 		if key not in source_metadata:
-			raise ValueError(
-				f'pseudo_target_refresh source metadata is missing {key}'
-			)
+			raise ValueError(f'pseudo_target_refresh source metadata is missing {key}')
 		if (
 			key not in metadata_compatibility
 			or _json_normalize(source_metadata[key]) != metadata_compatibility[key]
@@ -2116,14 +2090,10 @@ def _validate_periodic_initial_artifact_identity(  # noqa: C901, PLR0912, PLR091
 			)
 	target_heads = target_manifest.get('heads')
 	if not isinstance(target_heads, Mapping):
-		raise TypeError(
-			'pseudo_target_refresh target manifest heads must be a mapping'
-		)
+		raise TypeError('pseudo_target_refresh target manifest heads must be a mapping')
 	common_head = target_heads.get('6')
 	if not isinstance(common_head, Mapping):
-		raise TypeError(
-			'pseudo_target_refresh target manifest must contain a K=6 head'
-		)
+		raise TypeError('pseudo_target_refresh target manifest must contain a K=6 head')
 	common_head_surveys = common_head.get('surveys')
 	if not isinstance(common_head_surveys, Mapping):
 		raise TypeError(
@@ -2185,8 +2155,7 @@ def _validate_periodic_initial_artifact_identity(  # noqa: C901, PLR0912, PLR091
 		common_valid_path = common_valid_reference.get('path')
 		if not isinstance(common_valid_path, str) or not common_valid_path:
 			raise ValueError(
-				f'pseudo_target_refresh K=6 valid-token path is missing for '
-				f'{survey_id}'
+				f'pseudo_target_refresh K=6 valid-token path is missing for {survey_id}'
 			)
 		if _file_sha256(common_valid_path) != common_valid_hashes[survey_id]:
 			raise ValueError(
@@ -2262,29 +2231,27 @@ def _validate_periodic_common_config_binding(  # noqa: C901, PLR0912
 		raise ValueError(
 			'pseudo_target_refresh clustering_config must select '
 			'stratigraphic_hmm_kmeans'
-	)
+		)
 	if tuple(clustering.get('k_values', ())) != (6, 8, 10):
 		raise ValueError(
-		'pseudo_target_refresh clustering_config k_values must be [6, 8, 10]'
-	)
+			'pseudo_target_refresh clustering_config k_values must be [6, 8, 10]'
+		)
 	if clustering.get('embedding_normalization') != metadata_identity['normalization']:
 		raise ValueError(
-		'pseudo_target_refresh normalization differs between clustering_config and '
-		'model metadata'
-	)
+			'pseudo_target_refresh normalization differs between clustering_config and '
+			'model metadata'
+		)
 	config_residualization = clustering.get('residualization')
 	if not isinstance(config_residualization, Mapping):
 		raise TypeError(
 			'pseudo_target_refresh clustering_config residualization must be a mapping'
 		)
-	metadata_residualization = _required_mapping(
-		metadata_identity, 'residualization'
-	)
+	metadata_residualization = _required_mapping(metadata_identity, 'residualization')
 	if config_residualization.get('enabled') != metadata_residualization.get('enabled'):
 		raise ValueError(
-		'pseudo_target_refresh residualization identity differs between common '
-		'artifacts'
-	)
+			'pseudo_target_refresh residualization identity differs between common '
+			'artifacts'
+		)
 	if config_residualization.get('enabled') is True:
 		for key in ('mode', 'group_by', 'add_global_mean_back', 'min_group_count'):
 			if config_residualization.get(key) != metadata_residualization.get(key):
@@ -2312,13 +2279,12 @@ def _validate_periodic_common_config_binding(  # noqa: C901, PLR0912
 		raise ValueError('pseudo_target_refresh emission ordering identity mismatch')
 	for key in ('z_axis', 'z_direction'):
 		if hmm.get(key) != ordering[key]:
-			raise ValueError(
-				f'pseudo_target_refresh ordering {key} identity mismatch'
-			)
+			raise ValueError(f'pseudo_target_refresh ordering {key} identity mismatch')
 	for section, key in (('init', 'order_by'), ('update', 'empty_cluster_policy')):
 		config_section = hmm.get(section)
-		if not isinstance(config_section, Mapping) or config_section.get(key) != (
-			_required_mapping(ordering, section)[key]
+		if (
+			not isinstance(config_section, Mapping)
+			or config_section.get(key) != (_required_mapping(ordering, section)[key])
 		):
 			raise ValueError(
 				f'pseudo_target_refresh ordering {section}.{key} identity mismatch'
@@ -2329,7 +2295,7 @@ def _validate_periodic_common_config_binding(  # noqa: C901, PLR0912
 	) != tuple(ordering['edge_margin_tokens']):
 		raise ValueError(
 			'pseudo_target_refresh ordering edge_margin_tokens identity mismatch'
-	)
+		)
 
 
 def _validate_periodic_preprocessing_artifacts(  # noqa: C901, PLR0912, PLR0915
@@ -2397,19 +2363,16 @@ def _validate_periodic_preprocessing_artifacts(  # noqa: C901, PLR0912, PLR0915
 		) from exc
 	if prepared.shape != (1, feature_dimension) or not np.isfinite(prepared).all():
 		raise ValueError(
-			'pseudo_target_refresh preprocessor output dimension does not match '
-			'centers'
+			'pseudo_target_refresh preprocessor output dimension does not match centers'
 		)
 
-	metadata_residualization = _required_mapping(
-		metadata_identity, 'residualization'
-	)
+	metadata_residualization = _required_mapping(metadata_identity, 'residualization')
 	residualizer_ref = common_refs.get('residualizer')
 	if (residualizer_ref is None) != (metadata_residualization['enabled'] is False):
 		raise ValueError(
 			'pseudo_target_refresh residualizer presence does not match preprocessing '
 			'identity'
-	)
+		)
 	if residualizer_ref is None:
 		return
 	if not isinstance(residualizer_ref, Mapping):
@@ -2418,9 +2381,7 @@ def _validate_periodic_preprocessing_artifacts(  # noqa: C901, PLR0912, PLR0915
 		)
 	residualizer_path_value = residualizer_ref.get('path')
 	if not isinstance(residualizer_path_value, str) or not residualizer_path_value:
-		raise ValueError(
-			'pseudo_target_refresh residualizer reference path is missing'
-		)
+		raise ValueError('pseudo_target_refresh residualizer reference path is missing')
 	residualizer_path = Path(residualizer_path_value)
 	try:
 		residualizer = read_residualizer_npz(residualizer_path)
@@ -2433,7 +2394,7 @@ def _validate_periodic_preprocessing_artifacts(  # noqa: C901, PLR0912, PLR0915
 		raise ValueError(
 			'pseudo_target_refresh residualizer feature dimension does not match '
 			'source embeddings'
-	)
+		)
 	for key in ('mode', 'group_by', 'add_global_mean_back', 'min_group_count'):
 		if getattr(residualizer, key) != metadata_residualization[key]:
 			raise ValueError(
@@ -2441,9 +2402,7 @@ def _validate_periodic_preprocessing_artifacts(  # noqa: C901, PLR0912, PLR0915
 			)
 
 
-def _periodic_valid_token_hashes(
-	value: object, label: str
-) -> dict[str, str]:
+def _periodic_valid_token_hashes(value: object, label: str) -> dict[str, str]:
 	if not isinstance(value, Mapping) or not value:
 		raise ValueError(f'{label} must be a non-empty mapping')
 	result: dict[str, str] = {}
@@ -2539,6 +2498,42 @@ def _validate_strat_hmm_pretext_identity(  # noqa: C901, PLR0911, PLR0912, PLR09
 		raise AssertionError('multi-head identity validation requires a manifest')
 	if not isinstance(scientific, dict):
 		raise TypeError('identity.scientific_identity must be a mutable mapping')
+	if target_representation == _UNORDERED_TARGET_REPRESENTATION:
+		_expected_or_record_multi_head_scientific_identity(
+			scientific,
+			config=config,
+			manifest=manifest,
+			target_representation=target_representation,
+		)
+		_validate_allowed_keys(
+			scientific,
+			_MULTI_HEAD_HARD_SCIENTIFIC_IDENTITY_FIELDS,
+			prefix='identity.scientific_identity',
+		)
+		expected = {
+			'experiment_role': 'multi_head_unordered_kmeans_pretext',
+			'variant': 'kmeans_nocons',
+			'head_spec': _STRAT_HMM_MULTI_HEAD_SPEC,
+			'head_ks': list(manifest['head_ks']),
+			'target_representation': _UNORDERED_TARGET_REPRESENTATION,
+			'target_manifest_sha256': manifest_sha256,
+			'consistency_policy': 'disabled_for_unordered_kmeans_v1',
+		}
+		for key, expected_value in expected.items():
+			if scientific.get(key) != expected_value:
+				raise ValueError(f'unordered scientific identity mismatch: {key}')
+		if _required_mapping(config, 'loss')['consistency_weight'] != 0.0:
+			raise ValueError('unordered targets require zero consistency weight')
+		if _required_mapping(config, 'pseudo_targets')['min_confidence'] != 0.0:
+			raise ValueError('unordered targets require min_confidence 0.0')
+		runtime = value.get('runtime_identity')
+		if runtime is not None:
+			_validate_allowed_keys(
+				runtime,
+				MULTI_HEAD_RUNTIME_IDENTITY_FIELDS,
+				prefix='identity.runtime_identity',
+			)
+		return
 	if periodic_refresh_identity is not None:
 		_validate_periodic_refresh_scientific_identity(
 			scientific,
@@ -2905,12 +2900,8 @@ def _expected_or_record_multi_head_scientific_identity(  # noqa: C901, PLR0912
 					'replacement_initialization'
 				],
 				'rng_policy': spatial_context['rng_policy'],
-				'masked_prototype_weight': spatial_context[
-					'masked_prototype_weight'
-				],
-				'visible_prototype_weight': spatial_context[
-					'visible_prototype_weight'
-				],
+				'masked_prototype_weight': spatial_context['masked_prototype_weight'],
+				'visible_prototype_weight': spatial_context['visible_prototype_weight'],
 				'distillation_scope': spatial_context['distillation_scope'],
 				'supervised_loss': CENTER_TRACE_SUPERVISED_LOSS,
 				'consistency_policy': CENTER_TRACE_CONSISTENCY_POLICY,
@@ -2968,12 +2959,8 @@ def _expected_or_record_multi_head_scientific_identity(  # noqa: C901, PLR0912
 					'replacement_initialization'
 				],
 				'rng_policy': spatial_context['rng_policy'],
-				'masked_prototype_weight': spatial_context[
-					'masked_prototype_weight'
-				],
-				'visible_prototype_weight': spatial_context[
-					'visible_prototype_weight'
-				],
+				'masked_prototype_weight': spatial_context['masked_prototype_weight'],
+				'visible_prototype_weight': spatial_context['visible_prototype_weight'],
 				'distillation_scope': spatial_context['distillation_scope'],
 				'supervised_loss': CENTER_TRACE_SUPERVISED_LOSS,
 			}
@@ -3217,8 +3204,9 @@ def _validate_periodic_refresh_scientific_identity(  # noqa: C901
 		raise ValueError('periodic refresh requires student.unfreeze_top_blocks == 1')
 	if scientific.get('student_unfreeze_top_blocks') != 1:
 		raise ValueError(
-		'periodic refresh scientific identity requires student_unfreeze_top_blocks == 1'
-	)
+			'periodic refresh scientific identity requires '
+			'student_unfreeze_top_blocks == 1'
+		)
 	if _required_mapping(config, 'train').get('epochs') != 25:
 		raise ValueError('periodic refresh requires train.epochs == 25')
 
@@ -3414,6 +3402,7 @@ def _strat_hmm_multi_head_target_representation(
 	if not isinstance(value, str):
 		raise TypeError('pseudo_targets.target_representation must be a string')
 	if value not in {
+		_UNORDERED_TARGET_REPRESENTATION,
 		_STRAT_HMM_HARD_TARGET_REPRESENTATION,
 		_STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION,
 		_STRAT_HMM_LATERAL_TARGET_REPRESENTATION,
@@ -3421,6 +3410,7 @@ def _strat_hmm_multi_head_target_representation(
 		_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_TARGET_REPRESENTATION,
 	}:
 		supported = [
+			_UNORDERED_TARGET_REPRESENTATION,
 			_STRAT_HMM_HARD_TARGET_REPRESENTATION,
 			_STRAT_HMM_POSTERIOR_TARGET_REPRESENTATION,
 			_STRAT_HMM_LATERAL_TARGET_REPRESENTATION,
@@ -3440,7 +3430,14 @@ def _validate_strat_hmm_multi_head_manifest(
 	target_representation: str,
 ) -> Mapping[str, object]:
 	"""Validate manifest references without loading pseudo-target arrays."""
-	if target_representation == _STRAT_HMM_HARD_TARGET_REPRESENTATION:
+	if target_representation == _UNORDERED_TARGET_REPRESENTATION:
+		unordered = importlib.import_module(
+			'seis_ssl_cluster.clustering.kmeans_targets'
+		)
+		manifest = unordered.load_unordered_target_manifest(
+			str(pseudo_targets['manifest']), validate_array_semantics=False
+		)
+	elif target_representation == _STRAT_HMM_HARD_TARGET_REPRESENTATION:
 		multi_head = importlib.import_module('seis_ssl_cluster.stratigraphy.multi_head')
 		manifest = multi_head.load_multi_head_target_manifest(
 			str(pseudo_targets['manifest']),
@@ -3462,8 +3459,7 @@ def _validate_strat_hmm_multi_head_manifest(
 			str(pseudo_targets['manifest']), validate_array_semantics=False
 		)
 	elif (
-		target_representation
-		== _STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION
+		target_representation == _STRAT_HMM_XY_NEIGHBOR_CONSENSUS_TARGET_REPRESENTATION
 	):
 		xy_neighbor_consensus_targets = importlib.import_module(
 			'seis_ssl_cluster.stratigraphy.xy_neighbor_consensus_targets'
@@ -3474,8 +3470,7 @@ def _validate_strat_hmm_multi_head_manifest(
 			str(pseudo_targets['manifest']), validate_array_semantics=False
 		)
 	elif (
-		target_representation
-		== _STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_TARGET_REPRESENTATION
+		target_representation == _STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_TARGET_REPRESENTATION
 	):
 		xy_neighbor_unanimous_targets = importlib.import_module(
 			'seis_ssl_cluster.stratigraphy.xy_neighbor_unanimous_targets'
@@ -3891,18 +3886,14 @@ def _validate_xy_neighbor_unanimous_scientific_identity(
 ) -> None:
 	"""Keep unanimous hard labels independent of all older pretext routes."""
 	expected = {
-		'experiment_role': (
-			'multi_head_ordered_xy_neighbor_unanimous_hard_pretext'
-		),
+		'experiment_role': ('multi_head_ordered_xy_neighbor_unanimous_hard_pretext'),
 		'variant': 'xyunanim1_nocons',
 		'target_representation': (
 			_STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_TARGET_REPRESENTATION
 		),
 		'target_semantics': _STRAT_HMM_XY_NEIGHBOR_UNANIMOUS_SEMANTICS,
 		'xy_neighbor_unanimous_target_manifest_sha256': manifest_sha256,
-		'xy_neighbor_unanimous_target_head_hashes': _multi_head_target_hashes(
-			manifest
-		),
+		'xy_neighbor_unanimous_target_head_hashes': _multi_head_target_hashes(manifest),
 		'source_hard_manifest_sha256': _manifest_reference_sha256(
 			manifest, 'source_hard_manifest'
 		),
@@ -4746,9 +4737,7 @@ def _validate_barlow_twins_augmentations(  # noqa: C901, PLR0911, PLR0912, PLR09
 			prefix='augmentations',
 		)
 		if max_shift_tokens[2] != 0:
-			raise ValueError(
-				'augmentations.max_subcrop_shift_tokens Z shift must be 0'
-			)
+			raise ValueError('augmentations.max_subcrop_shift_tokens Z shift must be 0')
 		if max_shift_tokens[0] == 0 and max_shift_tokens[1] == 0:
 			raise ValueError(
 				'augmentations.max_subcrop_shift_tokens X or Y shift must be positive'
