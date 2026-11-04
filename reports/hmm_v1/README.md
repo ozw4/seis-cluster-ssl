@@ -18,6 +18,11 @@ source aggregates and their referenced metrics by the
 
 ## Conditions
 
+For the paper visualization panels, the display label is now **Barlow Twins**.
+The [v1/v2 figure index](../hmm_paper_labels_barlow_twins_v1/README.md) links the
+label-only revisions. Frozen IDs, numerical tables and source manifests below
+are unchanged.
+
 | ID | Frozen definition |
 |---|---|
 | 1 | MAE 100 epochs + MAE 25 epochs |

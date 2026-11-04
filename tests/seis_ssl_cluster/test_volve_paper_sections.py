@@ -153,7 +153,12 @@ def test_layout_axes_and_active_exclusion(config: dict[str, Any], domain: str) -
 		assert [a.get_title() for a in fig.axes] == [
 			'Seismic amplitude',
 			'Ground truth',
-			*[m['display_name'] for m in config['models']],
+			'MAE',
+			'MAE + HMM',
+			'Barlow Twins',
+			'Barlow Twins + HMM',
+			'Random',
+			'Random + HMM',
 		]
 		assert len(fig.axes[0].lines) == 0
 		assert fig.axes[0].images[0].get_cmap().name == 'seismic'

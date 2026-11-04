@@ -23,6 +23,7 @@ from seis_ssl_cluster.f3.lithology.hmm_v1_comparison_visualization import (
 	apply_font_family,
 	coordinate_edges,
 	coordinate_step,
+	panel_subtitle,
 	read_json,
 	resolve_font_files,
 	sha256,
@@ -334,7 +335,7 @@ def style_axes(
 	ax: Axes, panel: int, title: str, settings: dict[str, Any], xlabel: str
 ) -> None:
 	"""Apply the shared paper typography and tick policy to one panel."""
-	ax.set_title(title, fontsize=settings['title_size'], pad=6)
+	ax.set_title(panel_subtitle(title), fontsize=settings['title_size'], pad=6)
 	ax.annotate(
 		f'({chr(97 + panel)})',
 		xy=(0, 0.5),

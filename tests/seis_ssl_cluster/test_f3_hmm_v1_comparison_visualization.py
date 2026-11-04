@@ -190,8 +190,8 @@ def test_figure_layout_palette_and_orientation(prepared, domain):
 			'Ground truth',
 			'MAE',
 			'MAE + HMM',
-			'LocalBT',
-			'LocalBT + HMM',
+			'Barlow Twins',
+			'Barlow Twins + HMM',
 			'Random',
 			'Random + HMM',
 		]

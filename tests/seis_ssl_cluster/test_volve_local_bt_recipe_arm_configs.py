@@ -202,7 +202,11 @@ def test_every_downstream_config_resolves_and_shares_one_runs_root() -> None:
 @pytest.mark.usefixtures('artifact_environment')
 def test_recipe_arm_namespace_has_only_declared_recipe_and_continuation_users() -> None:
 	users = {
-		path.parts[3]
+		(
+			path.parts[3]
+			if path.parts[1] in {'f3', 'parihaka', 'volve'}
+			else path.parts[2]
+		)
 		for path in Path('experiments').rglob('*.yaml')
 		if ARM_NAMESPACE in path.read_text(encoding='utf-8')
 	}
@@ -210,6 +214,7 @@ def test_recipe_arm_namespace_has_only_declared_recipe_and_continuation_users() 
 	# paired random decoder cells. Its four new model IDs have isolated paths.
 	assert users == {
 		ROOT.name,
+		'canonical_paper_sections_v1',
 		'33_missing_hmm_comparison_v1',
 		'34_hmm_v1_paper_sections_v1',
 		'34_hmm_v2_k6810_multi_source_v1',

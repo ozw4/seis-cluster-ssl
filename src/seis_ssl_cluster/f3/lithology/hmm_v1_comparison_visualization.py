@@ -667,6 +667,8 @@ def panel_subtitle(title: str) -> str:
 	return (
 		title.replace('MAE100 + MAE25', 'MAE')
 		.replace('asym LocalBT3', 'LocalBT')
+		.replace('LocalBT', 'Barlow Twins')
+		.replace('Local BT', 'Barlow Twins')
 		.replace('Random weight', 'Random')
 		.replace('MAE100', 'MAE')
 		.replace('HMM25', 'HMM')

@@ -20,6 +20,20 @@ PROC_SCRIPTS = tuple(
 )
 
 HELP_FLAG_CONTRACTS = {
+	'evaluate_f3_common_test.py': ('--config', '--dry-run', '--execute', '--resume'),
+	'run_f3_decoder_seed_repeat.py': ('--config', '--dry-run', '--execute'),
+	'run_parihaka_channel_seed_repeat.py': (
+		'--config',
+		'--dry-run',
+		'--execute',
+		'--publish-summary',
+	),
+	'visualize_hmm_v2_paper_sections.py': (
+		'--config',
+		'--dry-run',
+		'--execute',
+		'--survey',
+	),
 	'run_kmeans_study.py': (
 		'--matrix',
 		'--plan',
