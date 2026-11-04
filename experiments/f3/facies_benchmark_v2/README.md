@@ -30,6 +30,18 @@ are frozen as part of [HMM_v1](../../../reports/hmm_v1/README.md).
 Concrete paths, model settings, and producer commands belong to the linked
 experiment YAML and runbooks rather than this index.
 
+## Scoped final-result designation
+
+On 2026-10-21 the user designated **decoder seed 42001** as the final result
+for **F3 / LocalBT / HMM v3 / mask-token LR=3e-5 / masked:visible=50:50**,
+covering small/medium/large and all five layouts (15 cells).
+The [decision and immutable result bindings](137_local_bt_v3_masklr3em5_decoder_seed42001_v1/selection.yaml)
+and [runbook](137_local_bt_v3_masklr3em5_decoder_seed42001_v1/README.md)
+are authoritative for future comparisons of that condition. Seed 42000 remains
+historical; other models, v3 settings, HMMなし/v1/v2 and other surveys are
+unaffected. This later user designation does not change the canonical
+five-way training defaults or rewrite existing aggregates.
+
 All active v2-namespace runbooks use the same repository-root environment:
 
 ```bash

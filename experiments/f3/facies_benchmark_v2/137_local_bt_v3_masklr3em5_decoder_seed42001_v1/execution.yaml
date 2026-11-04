@@ -1,0 +1,35 @@
+schema_version: 1
+experiment_id: local_bt_v3_masklr3em5_decoder_seed42001_v1
+artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+baseline_condition_id: v3__local_bt__k6810__masklr3e-5__mw0.5__vw0.5
+baseline_decoder_seed: 42000
+decoder_seed: 42001
+layouts:
+- layout_000
+- layout_001
+- layout_002
+- layout_003
+- layout_004
+sizes:
+- small
+- medium
+- large
+runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/local_bt_v3_masklr3em5_decoder_seed42001_v1/runs
+test_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/local_bt_v3_masklr3em5_decoder_seed42001_v1
+operations_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/operations/f3/local_bt_v3_masklr3em5_decoder_seed42001_v1
+inputs:
+  baseline_receipt:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_common_test_v3_v1/selection_receipt.json
+    sha256: fb08a2d9166418099c94d4af165f351af9de188e460c289ce0137cd60fc9fb43
+  candidate_config:
+    path: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/133_hmm_v3_mask_token_lr_sweep_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v3_mh_k6810_ctmask010_distill020_cons010_masklr3em5.yaml
+    sha256: 3b21891a6c2c4c140720c993eb624be6e721207811e12647d87ea6c4a17e1aa8
+  canonical_config:
+    path: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/110_lithology_mae_local_bt_five_way_v3/60_five_way.yaml
+    sha256: 285b0233ff82fe83808f82e929b611f570a67f01fa983ef191dda23d1858061b
+  test_mask:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_common_test_v1/inputs/test_mask.npy
+    sha256: 2bac34f4ebf8612d120673ae3dbda1a8720624e27a1701491059abf1c60cfe1d
+  baseline_test_summary:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_common_test_v3_v1/summary/summary.json
+    sha256: a331533437544353fd6ff8ecb26116462d197438e418319156894d9cdabcef1e

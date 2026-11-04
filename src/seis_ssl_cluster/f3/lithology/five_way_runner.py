@@ -89,6 +89,8 @@ class F3FiveWayJob:
 	data_size: str
 	condition_dir: Path
 	output_dir: Path
+	# Canonical resolvers retain 42000; isolated repeat definitions opt in explicitly.
+	decoder_seed: int = 42000
 
 	@property
 	def decoder_dir(self) -> Path:
@@ -301,9 +303,7 @@ def inspect_f3_lithology_five_way_job(  # noqa: C901, PLR0912, PLR0915
 		per_class_selected = _positive_counts(
 			identity.get('per_class_selected_token_row_counts'),
 			expected_keys=class_keys,
-			label=(
-				f'{metadata_path} identity.per_class_selected_token_row_counts'
-			),
+			label=(f'{metadata_path} identity.per_class_selected_token_row_counts'),
 		)
 		if set(per_class_selected.values()) != {per_class_token_row_cap}:
 			raise ValueError(
@@ -313,9 +313,7 @@ def inspect_f3_lithology_five_way_job(  # noqa: C901, PLR0912, PLR0915
 		active_pool = _positive_counts(
 			identity.get('active_pool_per_class_token_row_counts'),
 			expected_keys=class_keys,
-			label=(
-				f'{metadata_path} identity.active_pool_per_class_token_row_counts'
-			),
+			label=(f'{metadata_path} identity.active_pool_per_class_token_row_counts'),
 		)
 		if any(count < per_class_token_row_cap for count in active_pool.values()):
 			raise ValueError(
@@ -324,9 +322,7 @@ def inspect_f3_lithology_five_way_job(  # noqa: C901, PLR0912, PLR0915
 		per_line_selected = _positive_counts(
 			identity.get('per_line_selected_token_row_counts'),
 			expected_keys=expected_lines,
-			label=(
-				f'{metadata_path} identity.per_line_selected_token_row_counts'
-			),
+			label=(f'{metadata_path} identity.per_line_selected_token_row_counts'),
 		)
 		if sum(per_line_selected.values()) != selected_token_row_count:
 			raise ValueError(
@@ -347,16 +343,14 @@ def inspect_f3_lithology_five_way_job(  # noqa: C901, PLR0912, PLR0915
 		'subsample_seed': subsample_seed,
 		'per_class_token_row_cap': per_class_token_row_cap,
 		'selected_token_row_count': selected_token_row_count,
-		'selected_token_row_identity_sha256': (
-			selected_token_row_identity_sha256
-		),
+		'selected_token_row_identity_sha256': (selected_token_row_identity_sha256),
 		'selected_token_count': selected_token_count,
 		'selected_token_identity_sha256': selected_token_identity_sha256,
 		'train_voxel_count': actual_train_voxel_count,
 		'per_class_train_voxel_counts': per_class_train_voxel_counts,
 		'validation_mask_sha256': validation_mask_sha256,
 		'validation_voxel_count': validation_voxel_count,
-		'decoder_contract': dict(FIXED_DECODER_CONTRACT),
+		'decoder_contract': dict(FIXED_DECODER_CONTRACT, seed=job.decoder_seed),
 		'decoder_seed': decoder_config.train.seed,
 		'decoder_initial_state_sha256': _decoder_initial_state_sha256(
 			decoder_config, identity
@@ -466,6 +460,11 @@ def run_f3_lithology_frozen_encoder_job(
 	}
 
 
+def decoder_config_for_job(job: F3FiveWayJob) -> F3LithologyVoxelDecoderConfig:
+	"""Resolve the immutable architecture/training contract for one seeded job."""
+	return f3_lithology_voxel_decoder_config_from_mapping(_decoder_config_mapping(job))
+
+
 def _decoder_dir_is_occupied(job: F3FiveWayJob) -> bool:
 	return job.decoder_dir.is_dir() and any(job.decoder_dir.iterdir())
 
@@ -519,9 +518,7 @@ def _decoder_config_mapping(job: F3FiveWayJob) -> dict[str, object]:
 		},
 		'tiles': {
 			'core_size_tokens': list(FIVE_WAY_TILE_SETTINGS['core_size_tokens']),
-			'context_halo_tokens': list(
-				FIVE_WAY_TILE_SETTINGS['context_halo_tokens']
-			),
+			'context_halo_tokens': list(FIVE_WAY_TILE_SETTINGS['context_halo_tokens']),
 		},
 		'train': {
 			'epochs': contract['epochs'],
@@ -529,7 +526,7 @@ def _decoder_config_mapping(job: F3FiveWayJob) -> dict[str, object]:
 			'learning_rate': contract['learning_rate'],
 			'weight_decay': contract['weight_decay'],
 			'class_weight': contract['class_weight'],
-			'seed': contract['seed'],
+			'seed': job.decoder_seed,
 			'num_workers': 0,
 			'amp': contract['amp'],
 			'gradient_clip_norm': contract['gradient_clip_norm'],
@@ -556,9 +553,7 @@ def _inference_config_mapping(job: F3FiveWayJob) -> dict[str, object]:
 		'decoder': {'checkpoint': str(job.decoder_dir / BEST_CHECKPOINT_NAME)},
 		'tiles': {
 			'core_size_tokens': list(FIVE_WAY_TILE_SETTINGS['core_size_tokens']),
-			'context_halo_tokens': list(
-				FIVE_WAY_TILE_SETTINGS['context_halo_tokens']
-			),
+			'context_halo_tokens': list(FIVE_WAY_TILE_SETTINGS['context_halo_tokens']),
 		},
 		'inference': {
 			'write_probabilities': FIXED_DECODER_CONTRACT['write_probabilities'],
@@ -656,9 +651,7 @@ def _positive_counts(
 	if not isinstance(value, Mapping):
 		raise TypeError(f'{label} must be a mapping')
 	if set(value) != expected_keys:
-		raise ValueError(
-			f'{label} must cover exactly {sorted(expected_keys)!r}'
-		)
+		raise ValueError(f'{label} must cover exactly {sorted(expected_keys)!r}')
 	return {
 		key: _positive_integer(value[key], f'{label}.{key}')
 		for key in sorted(expected_keys)

@@ -1,0 +1,122 @@
+schema_version: 1
+status: canonical
+scope: f3_local_bt_hmm_v3_masklr3em5_mw050_vw050_results
+selected_on: '2026-10-21'
+selected_experiment: 137_local_bt_v3_masklr3em5_decoder_seed42001_v1
+scientific_contract:
+  survey: f3
+  source_family: local_bt
+  initialization: asymmetric_local_bt_rot90_g060_3ep
+  hmm_version: v3
+  head_ks:
+  - 6
+  - 8
+  - 10
+  distillation_weight: 0.2
+  consistency_weight: 0.1
+  trace_column_mask_fraction: 0.1
+  mask_token_lr: 3.0e-05
+  masked_prototype_weight: 0.5
+  visible_prototype_weight: 0.5
+  encoder_head_lr: 1.0e-05
+  encoder_frozen: true
+  frozen_encoder_sha256: fff49d6f4a240167a84bb68e8bd88a0e98c7585dc971f0653b6a0eee643f4ddf
+  decoder_seed: 42001
+  decoder_epochs: 50
+  decoder_steps: 22000
+  checkpoint_selection:
+  - validation.macro_f1 higher
+  - validation.mean_iou higher
+  - validation.weighted_cross_entropy lower
+  data_sizes:
+  - small
+  - medium
+  - large
+  layouts:
+  - layout_000
+  - layout_001
+  - layout_002
+  - layout_003
+  - layout_004
+  evaluation_split: test
+  test_voxel_count: 113979624
+  test_mask_sha256: 2bac34f4ebf8612d120673ae3dbda1a8720624e27a1701491059abf1c60cfe1d
+evidence:
+  execution_config: experiments/f3/facies_benchmark_v2/137_local_bt_v3_masklr3em5_decoder_seed42001_v1/execution.yaml
+  execution_config_sha256: 21a4561ea510624870ed6fe559983c88662f65b8cb7b831899742ced17f25d4a
+  artifact_runs: surveys/f3/facies_benchmark_v2/benchmark/local_bt_v3_masklr3em5_decoder_seed42001_v1/runs
+  artifact_test_root: surveys/f3/facies_benchmark_v2/evaluation/local_bt_v3_masklr3em5_decoder_seed42001_v1
+  artifact_summary: surveys/f3/facies_benchmark_v2/evaluation/local_bt_v3_masklr3em5_decoder_seed42001_v1/summary/summary.json
+  artifact_summary_sha256: 4924af38fb491ebc4681d6e8186e30f362edb76fbc570976620ff54ec90bc929
+  artifact_comparison_csv: surveys/f3/facies_benchmark_v2/evaluation/local_bt_v3_masklr3em5_decoder_seed42001_v1/summary/comparison.csv
+  artifact_comparison_csv_sha256: 46effd847103980d083ceb6cd66395a717fe66f31171d4203c3bb946f70a5573
+  artifact_per_layout_csv: surveys/f3/facies_benchmark_v2/evaluation/local_bt_v3_masklr3em5_decoder_seed42001_v1/summary/per_layout.csv
+  artifact_per_layout_csv_sha256: 1eb1381a6de4d3cdb2871bc7bc868d7b71827fcebc31b735857c1de4d0beeb8a
+  artifact_selection_receipt: surveys/f3/facies_benchmark_v2/evaluation/local_bt_v3_masklr3em5_decoder_seed42001_v1/selection_receipt.json
+  artifact_selection_receipt_sha256: 6fa957e15255246d13b739b6ec656fe0ec20c45683d4f94d0002a7e571ba1c31
+  artifact_summary_status: complete
+  cell_count: 15
+  run_identity: c946f2fa891b2cbb0ecfe4e21ec688ceaa5c720eaf46ce47377b4767b277eb69
+  metrics_sha256:
+    layout_000:
+      small: 8953262fe84926c10ec936960411cf99cd427b31a55a630890d3b4b024c1fda7
+      medium: 300f7d6b6b220adc56d545779dec97808706868d7685ef08fdaf4a9354044778
+      large: 2c765539a085dbef8d206641d0a05620bcd6a38b61f2b24cf660ef00a55b45a6
+    layout_001:
+      small: a31911830e9a10d7312b48c782bf129fb73b0bb2038971bdfb4b669738681ba5
+      medium: 5150dc6c604fc7bb58cec4a705ffba9954c12989fb282ad473871eb8ce86cf32
+      large: d77fd89217bc47b58e96b7de4ef6c3e98d98c79ea86bd6a120628394a58614a7
+    layout_002:
+      small: 20a5ddf48273c4711221c4a2ca9d830b7b4a00a49e793b33b2df10b8535dc455
+      medium: 3ddd52c73719580e764c3446c9f8fbeb606646b8e0258d4d272c6aef00eeae68
+      large: d6ef90baf7b5a2a35d31b9be1a50d02c1f6c31f6d865a3d4004f7ade5cd20afb
+    layout_003:
+      small: 8a96764bb7269399c3ee1a2449fccfaaff9529d41fb77d71ff8af13581cc6407
+      medium: f6dfcb83d3cf336835d6ad6852f3206996840971af5e2c2e090caedb5ead23a9
+      large: 409bce613386e2e730faf77f32e683de77a48fb1739710c49132957f1e8817a5
+    layout_004:
+      small: 0c651d7e2fba2db475db0466b81d3d844aeb19c3952337036d2875a23d9504f3
+      medium: 755f0a11cc89fd0ff0671db8f9b36d6dbe121ed1d5eb0cc5ccb676e51c522e1f
+      large: 4b38ac2d25eb73853fa1e1e5f65856b35a4cb59164876b0246844ddf9aa7fa1b
+  decoder_best_checkpoint_sha256:
+    layout_000:
+      small: 6597afb6b58dd4e7bffcc7fc011b3a818f9beaa9dc79ea57b9f5725d18398c21
+      medium: 994b2d1da071f1ddf9439a551bef9c57e991ab0d59c7289648c004eb42059921
+      large: dac8a25623e427e6ba1840a1d811d2da5a8dfa094b52778b3924aa84a8478222
+    layout_001:
+      small: 28ff3bf55ee8fde1da059eb3da6b5ff91f463cf3c959a5232f2da57b19051d24
+      medium: 99eeba5122f895f290dd35e55148a5388748560c419555a12c30e0e89febfc26
+      large: 3c412a3d1763cbf41980ab7e7cb0b087422a4b8c412c15d70a9a5b64b3d33237
+    layout_002:
+      small: 1642a3a7c493f488685f59ca55ab0633740a063f7ffbe9f5d912432079021b5d
+      medium: 783574ffa5eafd8a6fd955323eb65965f53434a3e349904770fe73cbf7733204
+      large: 8e036da65e1928d50173895deb26cfd9266a42c90db75509cd8f14f9b11dcc8d
+    layout_003:
+      small: 6308210729244c13e505cd93e8a865c9c8e91bd1bc8c2f2e333ecdd4646bdcc6
+      medium: 1cb9f13cf411988152c1c28ba93d76fbf1bf82bca8fd4075acbfbaac21bed968
+      large: 78e7294546ac00fb856bfa9703f22d1ee718d5ad86bd0be00e747421e9be2879
+    layout_004:
+      small: 47b2c04d46276715e4e833f775555ef731d3253ae8cd20ba08659dee33d11ef8
+      medium: c51dab7f74195f906f9e6a4fd1cc972294448c9cb599b8601409efcd4b9a2614
+      large: 1e65622038ad447690b2052473e878b8a4801a2166da5e9c05e3dd4b27e2b52f
+decision:
+  authority: explicit_user_selection
+  timing: after_both_decoder_seed_results_were_reported
+  use: final_result_for_future_f3_local_bt_v3_masklr3em5_50_50_comparisons
+  superseded_decoder_seed: 42000
+  preserves_historical_results: true
+  modifies_existing_execution_definitions: false
+  modifies_frozen_hmm_v1_v2_records: false
+  unaffected:
+  - mae
+  - random
+  - other_v3_mask_token_learning_rates
+  - other_v3_branch_weights
+  - hmm_none
+  - hmm_v1
+  - hmm_v2
+  - parihaka
+  - volve
+  interpretation: Explicit post-report user designation, not an automatic best-seed
+    ranking or proof of a method gain. Comparisons to seed-42000 baselines must disclose
+    the different decoder seed.

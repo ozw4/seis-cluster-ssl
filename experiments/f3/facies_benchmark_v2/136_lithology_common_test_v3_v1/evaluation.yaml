@@ -1,0 +1,41 @@
+schema_version: 1
+experiment_id: lithology_common_test_v3_v1
+workspace_root: ${SEIS_SSL_CLUSTER_WORKSPACE}
+artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_common_test_v3_v1
+mask_policy: reference_valid_and_canonical_split_zero_v1
+class_ids:
+- 0
+- 1
+- 2
+- 3
+- 4
+- 5
+volume_shape_xyz:
+- 601
+- 901
+- 255
+summary_ddof: 1
+chunk_size_x: 8
+expected_conditions: 9
+expected_cells: 135
+expected_test_voxels: 113979624
+inputs:
+  inventory:
+    path: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/f3/facies_benchmark_v2/136_lithology_common_test_v3_v1/condition_inventory.csv
+    sha256: 5d3a0a2c297ccaa757c909703ea8bd6bbd96e000f0828677170cefc4a552a470
+  labels:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/registry/volumes/f3/facies_benchmark_v2/f3_facies_labels.npy
+    sha256: daf2b900a6c68cc1dc5864f5ef0a1bd527c48c9f29842453d0b889378b3bf09d
+  canonical_grid:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/lithology/f3/facies_benchmark_v2/voxel_supervision/dense_label_sections_v2/supervision_split_grid.npy
+    sha256: 75921d941497b469c116f028c3d0344f34f183d58e95dde71630cd26077f4472
+  reference_valid_tokens:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/reference_token_geometry/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/f3_facies_benchmark.valid_tokens.npy
+    sha256: 3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7
+  class_info:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/inspection/f3/facies_benchmark_v2/inventory/class_info.json
+    sha256: 97ae41d06e57c5b2fed5a6005c7378a179e522fff27825327e9f857209ea9f01
+  reference_test_mask:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_common_test_v1/inputs/test_mask.npy
+    sha256: 2bac34f4ebf8612d120673ae3dbda1a8720624e27a1701491059abf1c60cfe1d

@@ -66,6 +66,12 @@ LOCAL_VICREG_EXTENSION_ROOT = V2_ROOT / '116_local_vicreg_extension_v1'
 # These suites check every declared candidate config and its source lineage.
 # Counts reject additional YAML that their explicit inventories do not cover.
 CANDIDATE_CONFIG_SUITES = {
+	'135_lithology_independent_test_audit_v1': ('test_f3_common_test.py', 1),
+	'136_lithology_common_test_v3_v1': ('test_f3_common_test.py', 1),
+	'137_local_bt_v3_masklr3em5_decoder_seed42001_v1': (
+		'test_f3_decoder_seed_repeat.py',
+		2,
+	),
 	'138_kmeans_k6810_multi_source_v1': ('test_kmeans_study.py', 15),
 	'134_hmm_v3_masked_visible_weight_sweep_v1': (
 		'test_f3_masked_visible_weights.py',
