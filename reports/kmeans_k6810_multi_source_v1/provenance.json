@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "study": "kmeans_k6810_multi_source_v1",
+  "status": "complete",
+  "completed_at_utc": "2026-10-30T12:49:43.891401+00:00",
+  "training_conditions": 9,
+  "downstream_cells": 135,
+  "comparison_rows": 27,
+  "layouts_per_condition": 5,
+  "matrix": {
+    "path": "experiments/kmeans/kmeans_k6810_multi_source_v1/matrix.yaml",
+    "sha256": "fbbb5ffbcd933fa9e611ff7488bcd98c288a135f68f6ae444652515c64b05c31"
+  },
+  "source_artifacts": [
+    {
+      "path": "studies/kmeans/kmeans_k6810_multi_source_v1/summary/comparison.csv",
+      "sha256": "d508d3e3a9f53bfe166cd8d05c18710f78cdfae59c254aa0129b9b4465605a96"
+    },
+    {
+      "path": "studies/kmeans/kmeans_k6810_multi_source_v1/summary/summary.json",
+      "sha256": "073e37b48c01c5b76e4280fffa65fcdcca73fe87ef3a2d73dd0ce2a2842e4657"
+    },
+    {
+      "path": "studies/kmeans/kmeans_k6810_multi_source_v1/analysis/hmm_advantage_by_source_and_budget.png",
+      "sha256": "78feca9575e9436a3d29d29ddb90cb9eb915133feea9bc9d08f84132ca209c4f"
+    }
+  ],
+  "published_files": [
+    "README.md",
+    "comparison.csv",
+    "hmm_advantage_by_source_and_budget.png",
+    "provenance.json"
+  ],
+  "review_files_sha256": {
+    "README.md": "93c615fc0f2b2f2b31b460320bec45b39a2bf3d99b78d6830d5ceb966de0ab64",
+    "comparison.csv": "695cf1ad45c5a4f9353f5311e3af35247a80f9324265fdc254fc99c19ea69166",
+    "hmm_advantage_by_source_and_budget.png": "78feca9575e9436a3d29d29ddb90cb9eb915133feea9bc9d08f84132ca209c4f"
+  },
+  "csv_normalization": "crlf_to_lf"
+}

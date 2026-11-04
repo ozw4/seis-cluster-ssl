@@ -104,3 +104,29 @@ IoU for Parihaka, and lower horizon MAE for Volve. This is a descriptive paired
 comparison of HMM target generation plus ordered cross-head consistency against
 unordered k-means; it does not isolate HMM decoding or establish statistical
 significance.
+
+## 2026-11-04 commit-scope validation
+
+Before publication, the tracked base plus only the k-means implementation,
+experiment definitions, and curated result files were copied to a separate
+verification checkout. Other in-progress workspace changes were excluded.
+
+The portable suite completed successfully:
+
+```text
+6664 passed, 2 skipped, 145 deselected, 11 warnings in 518.57s (0:08:38)
+```
+
+Command: `python -m pytest -q -m "not slow and not requires_segy and not requires_cuda"`.
+The earlier four workspace-only failures did not occur in this isolated scope.
+Ruff lint and formatting passed for all 19 Python files in scope, as did the
+package-isolation check, documentation links, and Git whitespace validation.
+The curated report's two focused publication tests also passed after CSV line
+endings were normalized to LF; reconstruction of the original CRLF bytes
+matches the recorded source hash.
+
+The review output is tracked under
+[`reports/kmeans_k6810_multi_source_v1/`](../../../reports/kmeans_k6810_multi_source_v1/).
+Its exact published set is `README.md`, `comparison.csv`,
+`hmm_advantage_by_source_and_budget.png`, and `provenance.json`. Checkpoints,
+embeddings, target arrays, and the large audit JSON remain in artifacts.
