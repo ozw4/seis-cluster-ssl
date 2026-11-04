@@ -457,7 +457,12 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 			FROZEN_HMM_V1_COMPLETION_ROOT
 		):
 			continue
+		if path.is_relative_to(Path('experiments/kmeans/kmeans_k6810_multi_source_v1')):
+			continue
 		if path.parts[3] in {
+			'138_kmeans_k6810_multi_source_v1',
+			'48_kmeans_k6810_multi_source_v1',
+			'40_kmeans_k6810_multi_source_v1',
 			'127_hmm_v1_paper_sections_v1',
 			'128_hmm_v2_k6810_multi_source_v1',
 			'41_hmm_v2_k6810_multi_source_v1',
