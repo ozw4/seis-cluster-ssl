@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, cast
 from seis_ssl_cluster.embedding.writer import file_sha256
 from seis_ssl_cluster.hmm.multi_source_volve import (
 	multi_head_recipe_consistency_weight,
+	multi_head_recipe_distillation_weight,
 	multi_head_recipe_ks,
 )
 from seis_ssl_cluster.training.random_checkpoint import (
@@ -302,6 +303,11 @@ def as_five_way_config(
 		and config.recipe.method == RANDOM_OBJECTIVE
 		else config.recipe.method
 	)
+	distillation_weight = (
+		multi_head_recipe_distillation_weight(config.multi_head_training_config)
+		if config.multi_head_training_config
+		else 0.2
+	)
 	arm_source = VolveHorizonFiveWayModelSource(
 		model_id=config.arm_id,
 		checkpoint=config.arm_checkpoint,
@@ -317,6 +323,11 @@ def as_five_way_config(
 					'head_ks': multi_head_recipe_ks(config.multi_head_training_config),
 					'consistency_weight': multi_head_recipe_consistency_weight(
 						config.multi_head_training_config
+					),
+					**(
+						{'distillation_weight': distillation_weight}
+						if distillation_weight != 0.2
+						else {}
 					),
 				}
 				if config.multi_head_training_config

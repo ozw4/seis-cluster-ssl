@@ -255,7 +255,33 @@ def _build_student_teacher(
 		_mapping(config, 'loss'), 'distillation_weight', 0.0
 	)
 	unfreeze_top_blocks = _int_config(student_config, 'unfreeze_top_blocks', 0)
-	if unfreeze_top_blocks > 0 and distillation_weight <= 0.0:
+	diagnostics = (
+		_mapping(config, 'train').get('feature_diagnostics_samples') is not None
+	)
+	zero_distillation_ablation = _bool_config(
+		_mapping(config, 'train'),
+		'single_head_zero_distillation_ablation',
+		default=False,
+	)
+	if zero_distillation_ablation and (
+		'spec' in _mapping(config, 'head')
+		or unfreeze_top_blocks != 1
+		or distillation_weight != 0.0
+		or _float_config(_mapping(config, 'loss'), 'prototype_weight', 0.0) <= 0.0
+	):
+		raise ValueError('invalid single_head_zero_distillation_ablation configuration')
+	if distillation_weight < 0.0:
+		raise ValueError('loss.distillation_weight must be finite and nonnegative')
+	if diagnostics and (
+		'spec' not in _mapping(config, 'head') or 'spatial_context' in config
+	):
+		raise ValueError('feature diagnostics require unmasked multi-head training')
+	if (
+		unfreeze_top_blocks > 0
+		and distillation_weight <= 0.0
+		and not diagnostics
+		and not zero_distillation_ablation
+	):
 		raise ValueError(
 			'loss.distillation_weight must be positive when '
 			'student.unfreeze_top_blocks is greater than 0',
@@ -277,7 +303,7 @@ def _build_student_teacher(
 	student.to(resolved_device)
 	student.eval()
 	teacher = None
-	if distillation_weight > 0.0:
+	if distillation_weight > 0.0 or diagnostics or zero_distillation_ablation:
 		teacher = cast('AmplitudeMAE3D', build_model_from_config(teacher_config))
 		teacher.load_state_dict(_model_state_dict(teacher_payload))
 		teacher.requires_grad_(requires_grad=False)

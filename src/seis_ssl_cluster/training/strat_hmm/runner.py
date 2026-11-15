@@ -83,6 +83,9 @@ from seis_ssl_cluster.training.strat_hmm.epoch import (
 	train_strat_hmm_head_only_one_epoch,
 	train_strat_hmm_multi_head_one_epoch,
 )
+from seis_ssl_cluster.training.strat_hmm.feature_diagnostics import (
+	FixedCropFeatureDiagnostics,
+)
 from seis_ssl_cluster.training.strat_hmm.resume import (
 	restore_strat_hmm_training_checkpoint,
 )
@@ -228,6 +231,16 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 		target_manifest_override=target_manifest_override,
 	)
 	components = build_strat_hmm_components(config, device=device)
+	feature_diagnostics = None
+	if train_config.get('feature_diagnostics_samples') is not None:
+		feature_diagnostics = FixedCropFeatureDiagnostics(
+			dataset,
+			samples=int(train_config['feature_diagnostics_samples']),
+			output_root=output_root,
+		)
+		feature_diagnostics.record(
+			components.student, components.teacher, epoch=0, global_step=0
+		)
 	is_center_trace = isinstance(components, StratHmmCenterTraceMaskedComponents)
 	identity_head = components.heads if is_multi_head else components.head
 	if control_identity is not None:
@@ -1046,6 +1059,18 @@ def run_strat_hmm_pretext_training(  # noqa: C901, PLR0912, PLR0915
 				skip_batches=skip_batches,
 				step_callback=save_step_checkpoint,
 			)
+		if feature_diagnostics is not None:
+			for name in ('prototype', 'usage', 'consistency', 'distillation'):
+				state.metrics[f'loss_{name}_weighted'] = state.metrics[
+					f'loss_{name}'
+				] * float(_mapping(config, 'loss')[f'{name}_weight'])
+			if state.completed_epoch:
+				feature_diagnostics.record(
+					components.student,
+					components.teacher,
+					epoch=epoch,
+					global_step=state.global_step,
+				)
 		trainability_metrics = _trainability_metrics(components.trainability_summary)
 		checkpoint_kind: Literal['step', 'epoch'] = (
 			'epoch' if state.completed_epoch else 'step'

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 import yaml
@@ -31,6 +32,17 @@ def multi_head_recipe_consistency_weight(path: Path) -> float:
 	"""Read the consistency weight declared by a Multi-Head training recipe."""
 	raw = yaml.safe_load(path.read_text())
 	return float(raw.get('loss', {}).get('consistency_weight', 0.0))
+
+
+def multi_head_recipe_distillation_weight(path: Path) -> float:
+	"""Read the declared coefficient, retaining the legacy 0.2 default."""
+	raw = yaml.safe_load(path.read_text())
+	weight = float(raw.get('loss', {}).get('distillation_weight', 0.2))
+	if not math.isfinite(weight) or weight < 0.0:
+		raise ValueError(
+			'multi-head recipe distillation_weight must be finite and nonnegative'
+		)
+	return weight
 
 
 def audit_multi_head_recipe_source(

@@ -138,10 +138,12 @@ def test_channel_completed_adapter_uses_public_plan_identity(
 
 @pytest.mark.parametrize('ks', [[6, 8, 10], [4, 6, 8]])
 @pytest.mark.parametrize('consistency_weight', [0.0, 0.1])
+@pytest.mark.parametrize('distillation_weight', [0.0, 0.1, 0.2, 0.4])
 def test_volve_multi_head_embedding_metadata_matches_extractor_contract(
 	tmp_path: Path,
 	ks: list[int],
 	consistency_weight: float,
+	distillation_weight: float,
 ) -> None:
 	universe = write_recipe_arm_universe(tmp_path, embeddings=True)
 	config = replace(
@@ -151,7 +153,10 @@ def test_volve_multi_head_embedding_metadata_matches_extractor_contract(
 		json.dumps(
 			{
 				'head': {'ks': ks},
-				'loss': {'consistency_weight': consistency_weight},
+				'loss': {
+					'consistency_weight': consistency_weight,
+					'distillation_weight': distillation_weight,
+				},
 			}
 		)
 	)
@@ -168,11 +173,18 @@ def test_volve_multi_head_embedding_metadata_matches_extractor_contract(
 			'head_spec': 'multi_resolution_ordered_prototypes_v1',
 			'head_ks': ks,
 			'unfreeze_top_blocks': 1,
-			'distillation_weight': 0.2,
+			'distillation_weight': distillation_weight,
 			'consistency_weight': consistency_weight,
 		},
 	}
 	_validate_embedding_objective(model, metadata)
+	assert ('distillation_weight' in model.expected) is (distillation_weight != 0.2)
+	metadata['stratigraphy_pretext']['distillation_weight'] = (
+		0.4 if distillation_weight != 0.4 else 0.0
+	)
+	with pytest.raises(ValueError, match='distillation_weight'):
+		_validate_embedding_objective(model, metadata)
+	metadata['stratigraphy_pretext']['distillation_weight'] = distillation_weight
 	metadata['stratigraphy_pretext']['consistency_weight'] = (
 		0.1 if consistency_weight == 0.0 else 0.0
 	)

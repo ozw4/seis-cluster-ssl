@@ -353,7 +353,7 @@ def compute_strat_hmm_multi_head_losses(  # noqa: C901, PLR0912, PLR0913, PLR091
 	prototype_loss = torch.stack(prototype_losses).mean()
 	usage_loss = torch.stack(usage_losses).mean()
 	distillation_weight = _float_config(loss_config, 'distillation_weight', 0.0)
-	if distillation_weight > 0.0:
+	if distillation_weight > 0.0 or teacher_encoded is not None:
 		if teacher_encoded is None:
 			raise ValueError(
 				'teacher encoded tokens are required for feature distillation',

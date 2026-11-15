@@ -1,0 +1,36 @@
+{
+  "study": "hmm_v2_k6810_random_distillation_ablation_v1",
+  "new_full_training": 3,
+  "new_downstream_cells": 45,
+  "reused_models": 3,
+  "reused_downstream_cells": 45,
+  "final_test_cells": 90,
+  "files": [
+    {
+      "report": "f3_validation.csv",
+      "artifact_study_relative": "summary/f3_validation.csv",
+      "sha256": "0531a683b8eac69b887958d2c6d113cbbab8fb21da6270e094dae449c096e4f8"
+    },
+    {
+      "report": "cells.csv",
+      "artifact_study_relative": "summary/cells.csv",
+      "sha256": "b424048b83bbc0e5de76ab8fa754e68fdb1fcc0bbc2a9028eeda8634dded545b"
+    },
+    {
+      "report": "comparison.csv",
+      "artifact_study_relative": "summary/comparison.csv",
+      "sha256": "3e0c9db5491255d3ed78cd06098f84fd02daa4ad94237e832d97bdd8bdc2f290"
+    },
+    {
+      "report": "feature_diagnostics.csv",
+      "artifact_study_relative": "summary/feature_diagnostics.csv",
+      "sha256": "ca53431d0687d3a6c502b16371cf430217bfc94ef42d351f3d216365c5f33833"
+    },
+    {
+      "report": "sensitivity.png",
+      "artifact_study_relative": "summary/sensitivity.png",
+      "sha256": "ce8017f929d4e0bbd70bc529d98ca0a003aea185ade1d0f7639af0f309ac69f7"
+    }
+  ],
+  "full_summary_sha256": "e924bb5dcf476583d0a6879150adb778f00b711762aefc7cdc12c662567c0d20"
+}

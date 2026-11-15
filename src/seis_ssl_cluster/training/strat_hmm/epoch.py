@@ -202,7 +202,10 @@ def train_strat_hmm_multi_head_one_epoch(  # noqa: C901, PLR0912, PLR0913, PLR09
 	encoder_pair = UnmaskedEncoderPair(
 		student,
 		teacher,
-		use_teacher=_float_config(loss_config, 'distillation_weight', 0.0) > 0.0,
+		use_teacher=(
+			teacher is not None
+			or _float_config(loss_config, 'distillation_weight', 0.0) > 0.0
+		),
 	)
 	totals: dict[str, float] = {}
 	batches = 0

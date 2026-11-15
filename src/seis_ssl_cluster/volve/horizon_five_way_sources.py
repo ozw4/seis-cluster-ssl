@@ -1,4 +1,4 @@
-'''Read-only checkpoint and embedding audit for Volve horizon five-way.'''
+"""Read-only checkpoint and embedding audit for Volve horizon five-way."""
 
 from __future__ import annotations
 
@@ -94,7 +94,7 @@ _MAX_LINEAGE_DEPTH = 4
 
 @dataclass(frozen=True)
 class VolveHorizonFiveWayEmbeddingSource:
-	'''Validated files and identity for one model embedding.'''
+	"""Validated files and identity for one model embedding."""
 
 	model_id: str
 	paths: EmbeddingOutputPaths
@@ -107,7 +107,7 @@ class VolveHorizonFiveWayEmbeddingSource:
 
 @dataclass(frozen=True)
 class VolveHorizonFiveWayEmbeddingSuite:
-	'''Common geometry and per-model files of the five embeddings.'''
+	"""Common geometry and per-model files of the five embeddings."""
 
 	sources: Mapping[str, VolveHorizonFiveWayEmbeddingSource]
 	volume_shape_xyz: tuple[int, int, int]
@@ -120,7 +120,7 @@ class VolveHorizonFiveWayEmbeddingSuite:
 	canonical_identity: Mapping[str, object]
 
 	def source_by_id(self, model_id: str) -> VolveHorizonFiveWayEmbeddingSource:
-		'''Return one inspected embedding source.'''
+		"""Return one inspected embedding source."""
 		try:
 			return self.sources[model_id]
 		except KeyError as error:
@@ -132,7 +132,7 @@ class VolveHorizonFiveWayEmbeddingSuite:
 def plan_volve_horizon_five_way_sources(
 	config: VolveHorizonFiveWayConfig,
 ) -> tuple[dict[str, object], ...]:
-	'''Return the fixed checkpoint plan without opening an artifact.'''
+	"""Return the fixed checkpoint plan without opening an artifact."""
 	return tuple(
 		{
 			'model_id': model.model_id,
@@ -146,7 +146,7 @@ def plan_volve_horizon_five_way_sources(
 def plan_volve_horizon_five_way_embeddings(
 	config: VolveHorizonFiveWayConfig,
 ) -> tuple[dict[str, object], ...]:
-	'''Return deterministic embedding paths without requiring them to exist.'''
+	"""Return deterministic embedding paths without requiring them to exist."""
 	rows: list[dict[str, object]] = []
 	for model in config.models:
 		paths = output_paths(model.embeddings_dir, config.survey_id)
@@ -167,7 +167,7 @@ def normalize_volve_horizon_five_way_model_ids(
 	config: VolveHorizonFiveWayConfig,
 	model_ids: Sequence[str] | None,
 ) -> tuple[str, ...]:
-	'''Resolve a non-empty, unique model selection in caller-supplied order.'''
+	"""Resolve a non-empty, unique model selection in caller-supplied order."""
 	if model_ids is None:
 		return config.model_ids
 	if isinstance(model_ids, str | bytes):
@@ -189,7 +189,7 @@ def audit_volve_horizon_five_way_sources(
 	*,
 	model_ids: Sequence[str] | None = None,
 ) -> dict[str, object]:
-	'''Audit selected checkpoint identities and their bounded ancestry.'''
+	"""Audit selected checkpoint identities and their bounded ancestry."""
 	selected_ids = normalize_volve_horizon_five_way_model_ids(config, model_ids)
 	reports: dict[str, dict[str, object]] = {}
 	for model_id in selected_ids:
@@ -202,11 +202,7 @@ def audit_volve_horizon_five_way_sources(
 		)
 	if 'random' in selected_ids:
 		mae_report_id = next(
-			(
-				model_id
-				for model_id in ('mae', 'mae_hmm_k6')
-				if model_id in reports
-			),
+			(model_id for model_id in ('mae', 'mae_hmm_k6') if model_id in reports),
 			None,
 		)
 		mae_parent = (
@@ -273,7 +269,7 @@ def inspect_volve_horizon_five_way_embedding_suite(  # noqa: PLR0915
 	source_audit: Mapping[str, object] | None = None,
 	model_ids: Sequence[str] | None = None,
 ) -> VolveHorizonFiveWayEmbeddingSuite:
-	'''Inspect selected memory-mapped embedding artifacts on identical support.'''
+	"""Inspect selected memory-mapped embedding artifacts on identical support."""
 	selected_ids = normalize_volve_horizon_five_way_model_ids(config, model_ids)
 	audit = (
 		audit_volve_horizon_five_way_sources(config, model_ids=selected_ids)
@@ -706,9 +702,7 @@ def _validate_stage1_parent(
 		raise ValueError(f'{model_id} stage-1 parent epoch must equal 100')
 	is_local = expected_objective == LOCAL_BARLOW_TWINS_METHOD
 	expected_batch_size = (
-		VOLVE_LOCAL_BT_STAGE1_BATCH_SIZE
-		if is_local
-		else VOLVE_PRETRAIN_BATCH_SIZE
+		VOLVE_LOCAL_BT_STAGE1_BATCH_SIZE if is_local else VOLVE_PRETRAIN_BATCH_SIZE
 	)
 	expected_global_steps = (
 		FIVE_WAY_LOCAL_BT_STAGE1_GLOBAL_STEPS
@@ -717,8 +711,7 @@ def _validate_stage1_parent(
 	)
 	if payload.get('global_step') != expected_global_steps:
 		raise ValueError(
-			f'{model_id} stage-1 parent global_step must equal '
-			f'{expected_global_steps}'
+			f'{model_id} stage-1 parent global_step must equal {expected_global_steps}'
 		)
 	train = _required_mapping(config, 'train', f'{model_id} stage-1 config')
 	_validate_train_budget(
@@ -760,12 +753,9 @@ def _validate_train_budget(
 	for key, expected in checks.items():
 		if train.get(key) != expected:
 			raise ValueError(
-				f'{model_id} train.{key} must equal {expected}; '
-				f'got {train.get(key)!r}'
+				f'{model_id} train.{key} must equal {expected}; got {train.get(key)!r}'
 			)
-	derived = math.ceil(
-		VOLVE_PRETRAIN_SAMPLES_PER_EPOCH / batch_size
-	) * epochs
+	derived = math.ceil(VOLVE_PRETRAIN_SAMPLES_PER_EPOCH / batch_size) * epochs
 	if derived != global_steps:
 		raise RuntimeError('internal Volve optimizer update budget is inconsistent')
 	max_steps = train.get('max_steps')
@@ -937,9 +927,7 @@ def _validate_pseudo_target_lineage(  # noqa: PLR0913
 			)
 		if source_sha != parent_sha:
 			raise ValueError(f'{model_id} pseudo target parent SHA-256 mismatch')
-		metadata_identities.append(
-			{'path': str(path), 'sha256': file_sha256(path)}
-		)
+		metadata_identities.append({'path': str(path), 'sha256': file_sha256(path)})
 	_validate_checkpoint_pseudo_target_bindings(
 		model_id,
 		checkpoint_payload,
@@ -959,7 +947,7 @@ def _pseudo_source_checkpoint_identity(
 	model_id: str,
 	source: Mapping[str, object],
 ) -> tuple[Path, str]:
-	'''Resolve direct builder or exported-clustering checkpoint provenance.'''
+	"""Resolve direct builder or exported-clustering checkpoint provenance."""
 	if 'checkpoint_path' in source or 'checkpoint_sha256' in source:
 		return (
 			_lineage_path(
@@ -1092,9 +1080,7 @@ def _validate_checkpoint_pseudo_target_bindings(  # noqa: C901
 				boundary.get('sha256'),
 				f'control pseudo_targets[{index}].boundary_weight',
 			)
-	expected_metadata = {
-		path.resolve(strict=False) for path in metadata_paths
-	}
+	expected_metadata = {path.resolve(strict=False) for path in metadata_paths}
 	if recorded_metadata != expected_metadata:
 		raise ValueError(
 			f'{model_id} checkpoint pseudo-target metadata identities differ '
@@ -1305,7 +1291,7 @@ def _validate_embedding_objective(  # noqa: C901
 		checks.pop('head_num_prototypes')
 		checks.update(
 			method='strat_hmm_multi_head_pretext',
-			distillation_weight=0.2,
+			distillation_weight=model.expected.get('distillation_weight', 0.2),
 			consistency_weight=model.expected.get('consistency_weight', 0.0),
 			head_ks=model.expected['head_ks'],
 			head_spec='multi_resolution_ordered_prototypes_v1',
@@ -1419,12 +1405,8 @@ def _inspect_canonical_identity(
 	)
 	return {
 		'scientific_identity_sha256': identity_sha,
-		'canonical_input_metadata_sha256': file_sha256(
-			config.canonical_input_metadata
-		),
-		'normalization_stats_sha256': file_sha256(
-			normalization_output_path
-		),
+		'canonical_input_metadata_sha256': file_sha256(config.canonical_input_metadata),
+		'normalization_stats_sha256': file_sha256(normalization_output_path),
 		**{
 			key: identity[key]
 			for key in (

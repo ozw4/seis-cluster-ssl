@@ -1,0 +1,203 @@
+schema_version: 1
+study: hmm_v2_k6810_distillation_sensitivity_v1
+base_head_ks:
+- 6
+- 8
+- 10
+weights:
+- 0.0
+- 0.1
+- 0.2
+- 0.4
+seed: 42
+new_continuations: 9
+new_downstream_cells: 135
+final_cells: 180
+diagnostic_samples: 16
+surveys:
+  f3:
+    '0.0':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill000_cons010
+      execution: new
+      configs:
+        training:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+          sha256: 179e9064261c1910be8ae8d7b9d262e41ec0667a07b72397b15bc928a622f3de
+        smoke:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+          sha256: ac29e2bafc744223e37b2dbdb2ffafad90ed11503ca765ed4c2b84cd34320e52
+        embeddings:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+          sha256: 397bc76915845ad6192465f0c4e94edd66cad5336bb9550f45880b3ff6ad2c68
+        downstream:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+          sha256: 7ef08d142fbcc46002098a5754c82e71422c6ec818158780f2d96878682005cb
+    '0.1':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill010_cons010
+      execution: new
+      configs:
+        training:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill010_cons010/02_full_25ep.yaml
+          sha256: 2d8d92818754cc74f30a1ed1e2b0cfb233dd8b86924ee5e8ced5861f0bb77e9d
+        smoke:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill010_cons010/01_gpu_feasibility_1step.yaml
+          sha256: 84db71c995655a598792c9fb1197e426fa55b704844a0e40b532d0f374a7ef2a
+        embeddings:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill010_cons010.yaml
+          sha256: c5572aae1ae96b55d77d527d9e6caa12db2692c63886085778e199fad4b4840d
+        downstream:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill010_cons010.yaml
+          sha256: 7d367d3b5876c78daa4390d21114078197af056c8b613ae2103460dcf2b315be
+    '0.2':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill020_cons010
+      execution: reuse
+      configs:
+        training:
+          path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+          sha256: 0cee58b49d8a787f4cca6ae5ab777d6383f9d84b8b8e4c16cffeff741a2567dc
+        embeddings:
+          path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+          sha256: b626b22fc08dce56466fa6edbd335ace43940b7be084d378890338a12041cf8f
+        downstream:
+          path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+          sha256: 5b55404b6054758910f648b02f226ed73eee22585a5fd3a3a82bb1796ab25ad1
+    '0.4':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill040_cons010
+      execution: new
+      configs:
+        training:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill040_cons010/02_full_25ep.yaml
+          sha256: 8b7c90c1973bd1c03dc74dd6bfdf3361a7b30c9ad9d6eb7f20ef519ed07aa477
+        smoke:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill040_cons010/01_gpu_feasibility_1step.yaml
+          sha256: e23266a3b75d1dded5dc7bdeeed6d7ec2e5334f914519b3116ec7a79d36fab30
+        embeddings:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill040_cons010.yaml
+          sha256: 5ab405a31c2f2a3e110c8861796344a9db747414167c27312c40c5c73eb3e994
+        downstream:
+          path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill040_cons010.yaml
+          sha256: 510cf2b0a9be9c229715567381e7ad057177f827b3bb604a28f1ae866cb617c7
+  parihaka:
+    '0.0':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill000_cons010
+      execution: new
+      configs:
+        training:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+          sha256: be13c94f4fb7ec86b36422bfc00aacab4e68784e62a88a6aa29fe98bddb12a27
+        smoke:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+          sha256: 35c7ddeed128d48b351486a2cacdf9a9da0e13adbe2b8ffc735228ab672cf413
+        embeddings:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+          sha256: 56347c8b379b59e060e27816790e1af09cb3fecbf2f618300aed55086dcad296
+        downstream:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+          sha256: 1214eac8bea5095c115eb854d00e919e7758bb3972dcd2dbf2008bdbdb9d6b37
+    '0.1':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill010_cons010
+      execution: new
+      configs:
+        training:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill010_cons010/02_full_25ep.yaml
+          sha256: ab12afc6d6688525b80ae5337ec11daa289993388ed56867da695656d47ee620
+        smoke:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill010_cons010/01_gpu_feasibility_1step.yaml
+          sha256: 09fdc98793fbe37245121996b22ab05990f7fb4bdff624715dd260e2d5244d1d
+        embeddings:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill010_cons010.yaml
+          sha256: 51fc20ea4e5b2d83d7661934e312561c4b13068920b7d8747a8f941b39bb20ad
+        downstream:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill010_cons010.yaml
+          sha256: 6f4ef7e3e3f6d0ad371ace0badb77ee155498a8c50b2e3521c89c11bb47b20e7
+    '0.2':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill020_cons010
+      execution: reuse
+      configs:
+        training:
+          path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+          sha256: fce2ab792358de6fd64c70a6ee2bd870bf770b7233cea3d37ffd0f2915043620
+        embeddings:
+          path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+          sha256: da0ee76466103c86826ce7bec6941c59119a6af95e997bff22cd03f3bba72397
+        downstream:
+          path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+          sha256: 498e848b67017f9431a0eec2d1a4213e3b716a1940e10c73b9ca74d5270ebc0f
+    '0.4':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill040_cons010
+      execution: new
+      configs:
+        training:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill040_cons010/02_full_25ep.yaml
+          sha256: 423d952017ac61ac805fac69a39b5b94be55bf305271fa0172d62a92b5034e7f
+        smoke:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill040_cons010/01_gpu_feasibility_1step.yaml
+          sha256: 3de2ed6eb0ad4bbb898c9f52a7be91498916511f2505fac579aca5f42d7eee40
+        embeddings:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill040_cons010.yaml
+          sha256: 62a8bf9289e13e77edf017c5ad0824420a4132a4fa0647eeec217c3f3b47b56c
+        downstream:
+          path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill040_cons010.yaml
+          sha256: 98659fe1fe2465831b38a52f93d6cd97e42886c8f4e73a781497a810a43a892a
+  volve:
+    '0.0':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill000_cons010
+      execution: new
+      configs:
+        training:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+          sha256: e0c1bbbd0dd37ae3255727dd5e8919ae07535c8c99b78fc025a64d9e4c275f55
+        smoke:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+          sha256: fff134088eaca98b314f9b239f759c6a73feb9c9dedd1b6cd59424707c5ee6fe
+        embeddings:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+          sha256: 39f46577cbb3e72a7a67e323bec9fb316d79446de8542986450a77bb398ee2dd
+        downstream:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+          sha256: 31ea07d08a22f15cc4bfe320e519d03f8a6d49a66263cceecc06b7ad08efcbc5
+    '0.1':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill010_cons010
+      execution: new
+      configs:
+        training:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill010_cons010/02_full_25ep.yaml
+          sha256: 6e9aaccaf06ae307c2a1f8f8d253e9ab8a8786fc32314dafb963650bdb5fd4b4
+        smoke:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill010_cons010/01_gpu_feasibility_1step.yaml
+          sha256: dfc8cb743adc44c837146f31a99ba34972ba07bd11d27c4dc0fb060b7ff2a1f7
+        embeddings:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill010_cons010.yaml
+          sha256: 742e75e427f9c0ae1158721f52b660793e461375c89469f585b982a13f77ea4c
+        downstream:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill010_cons010.yaml
+          sha256: c2e060f99c1a0dc9c798dccd5fee89278d871b1e11c8532aa0a87e4b759c783e
+    '0.2':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill020_cons010
+      execution: reuse
+      configs:
+        training:
+          path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+          sha256: dc44572b3d503d08dfcaf7da4fc39f569dc2edddeb29bea567b63ea673c7f50f
+        embeddings:
+          path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+          sha256: 285ebd84c189b380dcc081c9cbe2e5382c564f41e8e2c9f8c7ea3c31e340571f
+        downstream:
+          path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+          sha256: 7fbb84675e55a54d6982af14f33b7ee942b23fbc32c13502f981af5a0c457a6e
+    '0.4':
+      candidate_id: mae100_hmm_v2_mh_k6810_distill040_cons010
+      execution: new
+      configs:
+        training:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill040_cons010/02_full_25ep.yaml
+          sha256: 7799b4e2b895e0e1fd935562bff2ea6c93a49065c389b592fcaad63e14a6f82e
+        smoke:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill040_cons010/01_gpu_feasibility_1step.yaml
+          sha256: 4a8bd7b85128f3b6e5fcc42950a9c934d82adb8dc7492db27740d612af446ec6
+        embeddings:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill040_cons010.yaml
+          sha256: 376f3b96fca7015621abe2886f6e1f767b0327fb549ec7302857b1327981a0d3
+        downstream:
+          path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill040_cons010.yaml
+          sha256: 7b1f8fe0778bbe7b46b9daa45f180789b8eb876225ffe23480d49909394b8cd2

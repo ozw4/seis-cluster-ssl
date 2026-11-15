@@ -30,6 +30,11 @@ if TYPE_CHECKING:
 
 NAMESPACE = 'lithology_common_test_v1'
 V3_NAMESPACE = 'lithology_common_test_v3_v1'
+DISTILLATION_NAMESPACE = 'lithology_common_test_distillation_sensitivity_v1'
+RANDOM_DISTILLATION_NAMESPACE = 'lithology_common_test_random_distillation_v1'
+ZERO_CONSTRAINT_NAMESPACE = 'lithology_common_test_v2_dis0_con0_v1'
+V1_ZERO_DISTILLATION_NAMESPACE = 'lithology_common_test_v1_zero_distillation_v1'
+BARLOW_ZERO_DISTILLATION_NAMESPACE = 'lithology_common_test_barlow_zero_distillation_v1'
 CONDITION_KEYS = (
 	'version',
 	'source',
@@ -108,7 +113,27 @@ def _artifact_path(root: Path, relative: str) -> Path:
 	return path
 
 
-def _expected_conditions(namespace: str = NAMESPACE) -> set[tuple[str, ...]]:
+def _expected_conditions(namespace: str = NAMESPACE) -> set[tuple[str, ...]]:  # noqa: C901, PLR0911, PLR0912
+	if namespace == V1_ZERO_DISTILLATION_NAMESPACE:
+		return {
+			('v1', source, '6', '0.0', '0') for source in ('mae', 'local_bt', 'random')
+		}
+	if namespace == BARLOW_ZERO_DISTILLATION_NAMESPACE:
+		return {
+			('v2', 'local_bt', '6|8|10', weight, '0.1') for weight in ('0.0', '0.2')
+		}
+	if namespace == ZERO_CONSTRAINT_NAMESPACE:
+		return {
+			('v2', source, '6|8|10', '0.0', '0')
+			for source in ('mae', 'local_bt', 'random')
+		}
+	if namespace == RANDOM_DISTILLATION_NAMESPACE:
+		return {('v2', 'random', '6|8|10', weight, '0.1') for weight in ('0.0', '0.2')}
+	if namespace == DISTILLATION_NAMESPACE:
+		return {
+			('v2', 'mae', '6|8|10', weight, '0.1')
+			for weight in ('0.0', '0.1', '0.2', '0.4')
+		}
 	if namespace == V3_NAMESPACE:
 		conditions = {
 			('v3', source, '6|8|10', '0.2', '0.1', lr, '0.5', '0.5')
@@ -144,8 +169,21 @@ def _scope(config: Mapping[str, Any]) -> tuple[tuple[str, ...], set[tuple[str, .
 	] != len(expected) * len(LAYOUTS) * len(SIZES):
 		raise ValueError('fixed existing-condition scope/count mismatch')
 	keys = CONDITION_KEYS + (V3_KEYS if namespace == V3_NAMESPACE else ())
-	if namespace == V3_NAMESPACE and 'reference_test_mask' not in config['inputs']:
-		raise ValueError('v3 requires the previously agreed reference test mask')
+	if (
+		namespace
+		in (
+			V3_NAMESPACE,
+			DISTILLATION_NAMESPACE,
+			RANDOM_DISTILLATION_NAMESPACE,
+			ZERO_CONSTRAINT_NAMESPACE,
+			V1_ZERO_DISTILLATION_NAMESPACE,
+			BARLOW_ZERO_DISTILLATION_NAMESPACE,
+		)
+		and 'reference_test_mask' not in config['inputs']
+	):
+		raise ValueError(
+			'test extension requires the previously agreed reference test mask'
+		)
 	return keys, expected
 
 

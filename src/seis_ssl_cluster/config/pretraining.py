@@ -305,6 +305,8 @@ _STRAT_HMM_PRETEXT_SECTION_KEYS: dict[str, frozenset[str]] = {
 			'seed',
 			'grad_clip_norm',
 			'checkpoint_every_steps',
+			'feature_diagnostics_samples',
+			'single_head_zero_distillation_ablation',
 			'max_steps',
 			'allow_overwrite_output',
 		},
@@ -1061,7 +1063,7 @@ def resolve_mae_training_config(config: _T) -> Config:
 	return resolved
 
 
-def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0915
+def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0912, PLR0915
 	config: _T,
 ) -> Config:
 	"""Validate and resolve raw config for strat HMM pretext training."""
@@ -1132,10 +1134,40 @@ def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0915
 		encoder_depth=int(model['encoder_depth']),
 	)
 	_validate_strat_hmm_pretext_head(head, multi_head=multi_head)
+	zero_distillation_ablation = train.get(
+		'single_head_zero_distillation_ablation', False
+	)
+	if 'single_head_zero_distillation_ablation' in train:
+		_validate_bool(train, 'single_head_zero_distillation_ablation', prefix='train')
+	if zero_distillation_ablation and (
+		multi_head
+		or int(student['unfreeze_top_blocks']) != 1
+		or float(loss['distillation_weight']) != 0.0
+		or float(loss['prototype_weight']) <= 0.0
+	):
+		raise ValueError(
+			'single_head_zero_distillation_ablation requires a single head, '
+			'one unfrozen encoder block, zero distillation and positive prototype loss'
+		)
+	diagnostic_samples = train.get('feature_diagnostics_samples')
+	if diagnostic_samples is not None:
+		_validate_positive_int(train, 'feature_diagnostics_samples', prefix='train')
+		if (
+			not multi_head
+			or 'spatial_context' in resolved
+			or 'pseudo_target_refresh' in resolved
+			or pseudo_targets.get('target_representation', 'hard_viterbi_labels_v1')
+			!= 'hard_viterbi_labels_v1'
+		):
+			raise ValueError(
+				'feature diagnostics require unmasked fixed-target multi-head training'
+			)
 	_validate_strat_hmm_pretext_loss(
 		loss,
 		unfreeze_top_blocks=int(student['unfreeze_top_blocks']),
 		multi_head=multi_head,
+		allow_zero_distillation=diagnostic_samples is not None
+		or zero_distillation_ablation,
 	)
 	if multi_head:
 		target_representation = _strat_hmm_multi_head_target_representation(
@@ -3362,6 +3394,7 @@ def _validate_strat_hmm_pretext_loss(
 	*,
 	unfreeze_top_blocks: int,
 	multi_head: bool,
+	allow_zero_distillation: bool = False,
 ) -> None:
 	if not multi_head and ('consistency_weight' in loss or 'consistency_beta' in loss):
 		raise ValueError(
@@ -3380,7 +3413,11 @@ def _validate_strat_hmm_pretext_loss(
 		raise ValueError(msg)
 	if loss.get('entropy_floor') is not None:
 		_validate_nonnegative_finite_number(loss, 'entropy_floor', prefix='loss')
-	if unfreeze_top_blocks > 0 and float(loss['distillation_weight']) <= 0.0:
+	if (
+		unfreeze_top_blocks > 0
+		and float(loss['distillation_weight']) <= 0.0
+		and not allow_zero_distillation
+	):
 		msg = (
 			'loss.distillation_weight must be positive when '
 			'student.unfreeze_top_blocks is greater than 0'
