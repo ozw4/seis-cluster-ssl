@@ -1,0 +1,11 @@
+{
+  "study": "v2_dis0_con0_v1",
+  "artifact_summary": "studies/hmm_v2/v2_dis0_con0_v1/summary",
+  "summary_sha256": "fc8ddddbdc8f8ee7a542099db14146e24b4e1b5aba9e21eb328bb39de2f69bb7",
+  "published_files": [
+    "README.md",
+    "cells.csv",
+    "comparison.csv",
+    "provenance.json"
+  ]
+}

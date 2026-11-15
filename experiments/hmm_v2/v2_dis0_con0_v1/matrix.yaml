@@ -1,0 +1,334 @@
+schema_version: 1
+study: v2_dis0_con0_v1
+display_name: v2_dis0_con0
+head_ks:
+- 6
+- 8
+- 10
+distillation_weight: 0.0
+consistency_weight: 0.0
+seed: 42
+epochs: 25
+layouts:
+- layout_000
+- layout_001
+- layout_002
+- layout_003
+- layout_004
+sizes:
+- small
+- medium
+- large
+new_continuations: 9
+new_downstream_cells: 135
+test_namespace: lithology_common_test_v2_dis0_con0_v1
+arms:
+- survey: f3
+  source: mae
+  candidate_id: mae100_hmm_v2_mh_k6810_distill000_cons000
+  reference_study: hmm_v2_k6810_distillation_sensitivity_v1
+  reference_candidate_id: mae100_hmm_v2_mh_k6810_distill000_cons010
+  configs:
+    training:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+      sha256: 9fb35757138db497997d25304e3e7a08cfc7d4af592506c811efbd3edae06aee
+    smoke:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons000/01_gpu_feasibility_1step.yaml
+      sha256: cf237f183fb8444db8fbf9aaaacc7b404677e99ff98327b1b7000c70efbf2454
+    embeddings:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 0967c21ef3491674398e1676db983db307f37067d1ac3dc7c560ec5bab52d03b
+    downstream:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 1f8435cca2172c567356dfe35053b8184fe14f42a59989f24180420b04cc709e
+  reference_configs:
+    training:
+      path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+      sha256: 179e9064261c1910be8ae8d7b9d262e41ec0667a07b72397b15bc928a622f3de
+    smoke:
+      path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+      sha256: ac29e2bafc744223e37b2dbdb2ffafad90ed11503ca765ed4c2b84cd34320e52
+    embeddings:
+      path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 397bc76915845ad6192465f0c4e94edd66cad5336bb9550f45880b3ff6ad2c68
+    downstream:
+      path: experiments/f3/facies_benchmark_v2/139_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 7ef08d142fbcc46002098a5754c82e71422c6ec818158780f2d96878682005cb
+  historical_training:
+    path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+    sha256: 0cee58b49d8a787f4cca6ae5ab777d6383f9d84b8b8e4c16cffeff741a2567dc
+- survey: f3
+  source: random
+  candidate_id: random_init_hmm_v2_mh_k6810_distill000_cons000
+  reference_study: hmm_v2_k6810_random_distillation_ablation_v1
+  reference_candidate_id: random_init_hmm_v2_mh_k6810_distill000_cons010
+  configs:
+    training:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+      sha256: 6ccb31ffecd1726b14f94a5c707fc3bb19212a60b570ac69117a27a3d33beb3c
+    smoke:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons000/01_gpu_feasibility_1step.yaml
+      sha256: b9f48d3e6e53182daeb096c1359b50efb59e7a212e45b54f6fbd91a3e211481d
+    embeddings:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/40_embeddings/random_init_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 3a744bc491923a9315821f23e3b87ff4203ca51fe746fadb11e7c501251a7326
+    downstream:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 15cc9e9ba108a559b8a4a8bd7bd276a166d764b439e6dfc066817daf8e8ab472
+  reference_configs:
+    training:
+      path: experiments/f3/facies_benchmark_v2/140_hmm_v2_k6810_random_distillation_ablation_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+      sha256: a250e8be51cbb501f2b1d11eff383fb491153705c8511df30d7076d098df54f2
+    smoke:
+      path: experiments/f3/facies_benchmark_v2/140_hmm_v2_k6810_random_distillation_ablation_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+      sha256: 7be0698d016ce736afdb47f32f62d92c0f8e228738de8b58c523b2d3ab1e5fcf
+    embeddings:
+      path: experiments/f3/facies_benchmark_v2/140_hmm_v2_k6810_random_distillation_ablation_v1/40_embeddings/random_init_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: e750f591715e334e7f885b07f014530f6e050309c612fd1d2d1a86e9a9693b93
+    downstream:
+      path: experiments/f3/facies_benchmark_v2/140_hmm_v2_k6810_random_distillation_ablation_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 5dc418448a40f67541eb81362d8f45f5c3df329ded5d78407f0f1405e4bc1be3
+  historical_training:
+    path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+    sha256: 91678ac3e23d3074555134071c59a571ebd15520d8e334551c0f3fbcc2ac4b6c
+- survey: f3
+  source: local_bt
+  candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000
+  reference_study: hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1
+  reference_candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010
+  configs:
+    training:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+      sha256: ea24c48f92cc2611fbc57bd26365def6e9fff8a95ad34b92ab5957ad28879dc6
+    smoke:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000/01_gpu_feasibility_1step.yaml
+      sha256: d36fe90d898fb322760c008096f24bdab5ba53374c2db5aa0fcdd5586bcad8cc
+    embeddings:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 9b87dddd66c71e73ee36df33cf5fa7732a9af979be204fd68b9ccf7251ede999
+    downstream:
+      path: experiments/f3/facies_benchmark_v2/143_v2_dis0_con0_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 29b06a641aca1d53681393a05c7c067a8671b8107b0e99069d4d835029d471a5
+  reference_configs:
+    training:
+      path: experiments/f3/facies_benchmark_v2/142_hmm_v2_barlow_zero_distillation_paper_sources_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+      sha256: 90ac1c1c69e8570d86b2b1d874281aab181b339a26c76f636a9ae5eee776a00a
+    smoke:
+      path: experiments/f3/facies_benchmark_v2/142_hmm_v2_barlow_zero_distillation_paper_sources_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+      sha256: d8aa5e9ff556a7e560690175f93aee3db525b3316746f4cafa8338f047bdb219
+    embeddings:
+      path: experiments/f3/facies_benchmark_v2/142_hmm_v2_barlow_zero_distillation_paper_sources_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 5a2de6fafe789fddebf616ee81dd07f695adfcb37af1689459b7bfd5671023ec
+    downstream:
+      path: experiments/f3/facies_benchmark_v2/142_hmm_v2_barlow_zero_distillation_paper_sources_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 972297c8bfba57fce34867b9b620bac3f7af92ab31ce1b9501421c6ba1201b6d
+  historical_training:
+    path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+    sha256: 5cf8dcfc6882416d69b11d76a2b1e04ce54dad8a7260765272fb787a5e8102a2
+- survey: parihaka
+  source: mae
+  candidate_id: mae100_hmm_v2_mh_k6810_distill000_cons000
+  reference_study: hmm_v2_k6810_distillation_sensitivity_v1
+  reference_candidate_id: mae100_hmm_v2_mh_k6810_distill000_cons010
+  configs:
+    training:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+      sha256: 70596b1b8cd9fe86abbc358d052e6744ec5aba91bc37b60c71e3cea02697baac
+    smoke:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons000/01_gpu_feasibility_1step.yaml
+      sha256: 81060f938273c855df9c3f755022746fefdbc1275bbbc278ced0efab7b845a6d
+    embeddings:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: deefe954bdf1218027574aafe52963d1e6d2fad3becf5c8fa8812b48a936b81c
+    downstream:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 337bb24f13eab39c263d2e38aeaf8d6a2d0dda80856ca85882a22e325bc9c944
+  reference_configs:
+    training:
+      path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+      sha256: be13c94f4fb7ec86b36422bfc00aacab4e68784e62a88a6aa29fe98bddb12a27
+    smoke:
+      path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+      sha256: 35c7ddeed128d48b351486a2cacdf9a9da0e13adbe2b8ffc735228ab672cf413
+    embeddings:
+      path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 56347c8b379b59e060e27816790e1af09cb3fecbf2f618300aed55086dcad296
+    downstream:
+      path: experiments/parihaka/facies_benchmark_v1/49_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 1214eac8bea5095c115eb854d00e919e7758bb3972dcd2dbf2008bdbdb9d6b37
+  historical_training:
+    path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+    sha256: fce2ab792358de6fd64c70a6ee2bd870bf770b7233cea3d37ffd0f2915043620
+- survey: parihaka
+  source: random
+  candidate_id: random_init_hmm_v2_mh_k6810_distill000_cons000
+  reference_study: hmm_v2_k6810_random_distillation_ablation_v1
+  reference_candidate_id: random_init_hmm_v2_mh_k6810_distill000_cons010
+  configs:
+    training:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+      sha256: 26c62cb969acc4ac6c2214f7788e7d5cf379fb9113148bd3d827e7f8f68a82c3
+    smoke:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons000/01_gpu_feasibility_1step.yaml
+      sha256: 15149762bfa190d17ef650aeb324ad014ea2c3f5b2f50044b3221b040ffced46
+    embeddings:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/40_embeddings/random_init_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: e2dc29652b17c087ca28149a82a7e8a9fd7070611efb17d6dde9a321900310e9
+    downstream:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: ab84996a2f9bd81328f4b4b72dfea8bb2a4be63363b5568b5bb9b75541032f01
+  reference_configs:
+    training:
+      path: experiments/parihaka/facies_benchmark_v1/50_hmm_v2_k6810_random_distillation_ablation_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+      sha256: cb28fdc999d1e8124e3b0b0dbe5b1aee0cd1245a7cc9a4cc12cf3cb81a7aeff7
+    smoke:
+      path: experiments/parihaka/facies_benchmark_v1/50_hmm_v2_k6810_random_distillation_ablation_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+      sha256: 29018a396463c541d3fea44d8f0b2549a01f424643d15e24b031a5f59a266a23
+    embeddings:
+      path: experiments/parihaka/facies_benchmark_v1/50_hmm_v2_k6810_random_distillation_ablation_v1/40_embeddings/random_init_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 96d1b48a2b492a9f38c18d4f85eae4f151b165ab277414f2d3aecc5abf25bd94
+    downstream:
+      path: experiments/parihaka/facies_benchmark_v1/50_hmm_v2_k6810_random_distillation_ablation_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 3d5276b1a2bcd569350175fb69ba5e8afaa0ca1d1d1e3f08408ac6ba4084fb62
+  historical_training:
+    path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+    sha256: f58c8d4a5edd19dfcd6709988ab5601468612f567a14c0560383c8dc93c1f2e8
+- survey: parihaka
+  source: local_bt
+  candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000
+  reference_study: hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1
+  reference_candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010
+  configs:
+    training:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+      sha256: 5ae576401497e32d6bc7712b3c95c56aea9953c27a73fcd724bb2fbc406d770b
+    smoke:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000/01_gpu_feasibility_1step.yaml
+      sha256: 55b084a6112eb6a425d62d57cb3bd36b5072714380203f3bc3ea949284529ba8
+    embeddings:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 92f2645756059cc3bbd35bd01a13befc96743d700e5ff0931083ee04b6eef37f
+    downstream:
+      path: experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: b7d15cc992de8a2b915cd9fa6c2637873f50a25901befde1bcdae8ef274de160
+  reference_configs:
+    training:
+      path: experiments/parihaka/facies_benchmark_v1/52_hmm_v2_barlow_zero_distillation_paper_sources_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+      sha256: da96858c3997cc477e121972eeb4fa8b26e967094a5b68a2ab24df3c2f9cf13d
+    smoke:
+      path: experiments/parihaka/facies_benchmark_v1/52_hmm_v2_barlow_zero_distillation_paper_sources_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+      sha256: 71e2ff2d194125c565a4d3fbec263903c21d27dddfc7ba2d9522b73838929ec9
+    embeddings:
+      path: experiments/parihaka/facies_benchmark_v1/52_hmm_v2_barlow_zero_distillation_paper_sources_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: fa50d0181bddd66944e8cafd796adb042c8ee9c7239cb5bd2b12836322af79f8
+    downstream:
+      path: experiments/parihaka/facies_benchmark_v1/52_hmm_v2_barlow_zero_distillation_paper_sources_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 38256c62911d913ea3056051f1a337a61a92f317a8abdf92a7ffa3be877acb89
+  historical_training:
+    path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+    sha256: bfb265155fdeb5f7faf94d7c2acf8934bcaca614c654f1c21ff117f29743cd65
+- survey: volve
+  source: mae
+  candidate_id: mae100_hmm_v2_mh_k6810_distill000_cons000
+  reference_study: hmm_v2_k6810_distillation_sensitivity_v1
+  reference_candidate_id: mae100_hmm_v2_mh_k6810_distill000_cons010
+  configs:
+    training:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+      sha256: f891453d9a39fcea2a304aea0c94fcd1ffce9937bbc0b45ac94ad6f4fc67a3e7
+    smoke:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons000/01_gpu_feasibility_1step.yaml
+      sha256: 456d3e60bcafba773c12d7a88e90298202be856eb4eb3b5f04a1845f766fd391
+    embeddings:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 19e0bfe7b59e14035c4e8d8fa50ad1d8c604efcfa2e63ca94b2b5229e0ccf90f
+    downstream:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: 34a2f6345d5a2b2f88fb78880b5004f3e580e58725cdcfbfe61873a1b08cd638
+  reference_configs:
+    training:
+      path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+      sha256: e0c1bbbd0dd37ae3255727dd5e8919ae07535c8c99b78fc025a64d9e4c275f55
+    smoke:
+      path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+      sha256: fff134088eaca98b314f9b239f759c6a73feb9c9dedd1b6cd59424707c5ee6fe
+    embeddings:
+      path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 39f46577cbb3e72a7a67e323bec9fb316d79446de8542986450a77bb398ee2dd
+    downstream:
+      path: experiments/volve/horizon_benchmark_v1/41_hmm_v2_k6810_distillation_sensitivity_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 31ea07d08a22f15cc4bfe320e519d03f8a6d49a66263cceecc06b7ad08efcbc5
+  historical_training:
+    path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+    sha256: dc44572b3d503d08dfcaf7da4fc39f569dc2edddeb29bea567b63ea673c7f50f
+  legacy_smoke_output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pretraining/vis_dis0_con0_v1/mae100_hmm_v2_mh_k6810_distill000_cons000/smoke_1step
+- survey: volve
+  source: random
+  candidate_id: random_init_hmm_v2_mh_k6810_distill000_cons000
+  reference_study: hmm_v2_k6810_random_distillation_ablation_v1
+  reference_candidate_id: random_init_hmm_v2_mh_k6810_distill000_cons010
+  configs:
+    training:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+      sha256: a8a9240c40e810c7bd9714d41859c70bbdfb036a0b6292d9e423c1e27fcf231e
+    smoke:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons000/01_gpu_feasibility_1step.yaml
+      sha256: fffaf5d7281e76658f15f12773faa8a91654a56323f63a555308dc73652ea637
+    embeddings:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/40_embeddings/random_init_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: dcdcb73c772af36cf0cc443cf8ce146898e4934faab10e4e504bee0b2d04ce07
+    downstream:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: dbd98e3786fa23d902dc98119f7ec976371f8dbafb66c1c912351b0da4949745
+  reference_configs:
+    training:
+      path: experiments/volve/horizon_benchmark_v1/42_hmm_v2_k6810_random_distillation_ablation_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+      sha256: 9f7f5c2ff018ea27bff0d8206e73d820efc2db39e0c120684d798784fb9dbdca
+    smoke:
+      path: experiments/volve/horizon_benchmark_v1/42_hmm_v2_k6810_random_distillation_ablation_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+      sha256: 007feab6fc7b1fd139076d26de61a0b355cbf5250765bfc1fe4f6a607695b294
+    embeddings:
+      path: experiments/volve/horizon_benchmark_v1/42_hmm_v2_k6810_random_distillation_ablation_v1/40_embeddings/random_init_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 2e60f7a5fee2e98e61820357a803f68603ddd37266dd1b9d8913ddfdcafa8c66
+    downstream:
+      path: experiments/volve/horizon_benchmark_v1/42_hmm_v2_k6810_random_distillation_ablation_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 716bced4f7a5410de8e3457ee51bb2de4490f41a668977d1e15d5187bc804b3d
+  historical_training:
+    path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+    sha256: dff787fc725740fd0063a8ea33242cdcf6e778dac4d58ceb98f377dd75c148d1
+  legacy_smoke_output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pretraining/vis_dis0_con0_v1/random_init_hmm_v2_mh_k6810_distill000_cons000/smoke_1step
+- survey: volve
+  source: local_bt
+  candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000
+  reference_study: hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1
+  reference_candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010
+  configs:
+    training:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+      sha256: 72cad17be54b073e37df14ea8f8634f359e36b1d7e860199d8423e7176cf3f06
+    smoke:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000/01_gpu_feasibility_1step.yaml
+      sha256: f1fd597f1d3b569083406d9f38d116d5acdc3def8914913d48859cd66bcb8001
+    embeddings:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: aa6e4b0f76ec77aed132df7e00843ec6f2f0ea86fac4b517f09f27a6bb634cb3
+    downstream:
+      path: experiments/volve/horizon_benchmark_v1/45_v2_dis0_con0_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000.yaml
+      sha256: ab387e47d80dfd576229e29463247bbaf914d7b7c10b1d38408f016fbfefd273
+  reference_configs:
+    training:
+      path: experiments/volve/horizon_benchmark_v1/44_hmm_v2_barlow_zero_distillation_paper_sources_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/02_full_25ep.yaml
+      sha256: f8aa5e760fbc7487f862ce67a031c409f9c15acda8f8e3339bb2d3dc6fed6ad9
+    smoke:
+      path: experiments/volve/horizon_benchmark_v1/44_hmm_v2_barlow_zero_distillation_paper_sources_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/01_gpu_feasibility_1step.yaml
+      sha256: 4e18038f41c178ad2b6efbeb8ea53d376789bde450a5012fbdb4c8ce2e005e4c
+    embeddings:
+      path: experiments/volve/horizon_benchmark_v1/44_hmm_v2_barlow_zero_distillation_paper_sources_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 3b05f1f92ace395d0ef8e720ab9bcb6da7ccea7d363a4bb2513a865d097e1104
+    downstream:
+      path: experiments/volve/horizon_benchmark_v1/44_hmm_v2_barlow_zero_distillation_paper_sources_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010.yaml
+      sha256: 1ff993b8a0352f141e1667a2cd0e25e328f346ad418a656789dca4a977e618bf
+  historical_training:
+    path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020_cons010/02_full_25ep.yaml
+    sha256: ea289f1fdb0bcd5ef29898a785dae608faf22eea50d6e35278fdc0692a6f2420
+  legacy_smoke_output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pretraining/vis_dis0_con0_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000/smoke_1step

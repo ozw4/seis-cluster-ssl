@@ -66,21 +66,22 @@ LOCAL_VICREG_EXTENSION_ROOT = V2_ROOT / '116_local_vicreg_extension_v1'
 # These suites check every declared candidate config and its source lineage.
 # Counts reject additional YAML that their explicit inventories do not cover.
 CANDIDATE_CONFIG_SUITES = {
-	'139_hmm_v2_k6810_distillation_sensitivity_v1': (
-		'test_hmm_distillation_sensitivity.py',
-		12,
-	),
-	'140_hmm_v2_k6810_random_distillation_ablation_v1': (
-		'test_hmm_distillation_sensitivity.py',
+	'143_v2_dis0_con0_v1': ('test_v2_dis0_con0.py', 12),
+	'142_hmm_v2_barlow_zero_distillation_paper_sources_v1': (
+		'test_hmm_v2_dis0_paper_sections.py',
 		4,
 	),
 	'141_hmm_v1_k6_zero_distillation_ablation_v1': (
 		'test_hmm_v1_zero_distillation.py',
 		12,
 	),
-	'142_hmm_v2_barlow_zero_distillation_paper_sources_v1': (
-		'test_hmm_v2_dis0_paper_sections.py',
+	'140_hmm_v2_k6810_random_distillation_ablation_v1': (
+		'test_hmm_distillation_sensitivity.py',
 		4,
+	),
+	'139_hmm_v2_k6810_distillation_sensitivity_v1': (
+		'test_hmm_distillation_sensitivity.py',
+		12,
 	),
 	'135_lithology_independent_test_audit_v1': ('test_f3_common_test.py', 1),
 	'136_lithology_common_test_v3_v1': ('test_f3_common_test.py', 1),

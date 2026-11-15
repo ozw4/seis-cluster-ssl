@@ -471,6 +471,7 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 		):
 			continue
 		if path.parts[3] in {
+			'143_v2_dis0_con0_v1',
 			'142_hmm_v2_barlow_zero_distillation_paper_sources_v1',
 			'141_hmm_v1_k6_zero_distillation_ablation_v1',
 			'138_kmeans_k6810_multi_source_v1',
