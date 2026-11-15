@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -31,10 +32,12 @@ from seis_ssl_cluster.volve import paper_sections as horizon_figures
 from seis_ssl_cluster.volve.horizon_data import load_volve_horizon_data
 
 EXPERIMENT = 'hmm_v2_canonical_paper_sections_v1'
+DIS0_EXPERIMENT = 'hmm_v2_zero_distillation_paper_sections_v1'
 SURVEYS = ('f3', 'parihaka', 'volve')
 MODEL_ORDER = tuple(
 	(f, t) for f in ('mae', 'local_bt', 'random') for t in ('none', 'v2')
 )
+DIS0_REVIEW_FILES = frozenset({'README.md'})
 
 
 def _read(path: str | Path) -> dict[str, Any]:
@@ -52,31 +55,35 @@ def verify_bound(record: dict[str, str]) -> Path:
 
 
 def validate_pretext(metadata: dict[str, Any], treatment: str) -> None:
-	"""Require the real canonical multi-head recipe, never infer it from names."""
+	"""Require the declared v2 or v2_dis0 recipe in actual embedding metadata."""
 	pretext = metadata.get('stratigraphy_pretext')
 	if treatment == 'none':
 		if pretext:
 			raise ValueError('non-HMM parent has HMM provenance')
 		return
 	if (
-		treatment != 'v2'
+		treatment not in ('v2', 'v2_dis0')
 		or not pretext
 		or any(
 			pretext.get(k) != v
 			for k, v in {
 				'head_spec': 'multi_resolution_ordered_prototypes_v1',
 				'head_ks': [6, 8, 10],
-				'distillation_weight': 0.2,
+				'distillation_weight': 0.0 if treatment == 'v2_dis0' else 0.2,
 				'consistency_weight': 0.1,
 				'method': 'strat_hmm_multi_head_pretext',
 			}.items()
 		)
 	):
-		raise ValueError('expected canonical v2 K6810/dist0.2/consistency0.1')
+		raise ValueError(f'expected canonical {treatment} K6810/consistency0.1 recipe')
 
 
-def fixed_rows(reference: dict[str, Any], survey: str) -> list[dict[str, Any]]:
+def fixed_rows(
+	reference: dict[str, Any], survey: str, *, treatment: str = 'v2'
+) -> list[dict[str, Any]]:
 	"""Reuse original section identities, without selecting by new predictions."""
+	if treatment not in ('v2', 'v2_dis0'):
+		raise ValueError('unsupported figure treatment')
 	if survey == 'f3':
 		rows = [
 			r
@@ -106,8 +113,67 @@ def fixed_rows(reference: dict[str, Any], survey: str) -> list[dict[str, Any]]:
 		old = row['output_png']
 		if '_hmm_v1_' not in old or '..' in Path(old).parts or Path(old).is_absolute():
 			raise ValueError('unsafe or non-v1 reference output name')
-		row['output_png'] = old.replace('_hmm_v1_', '_hmm_v2_')
+		row['output_png'] = old.replace('_hmm_v1_', f'_hmm_{treatment}_')
 	return rows
+
+
+def _verify_reference(record: dict[str, str]) -> dict[str, Any]:
+	path = verify_bound(record)
+	reference = _read(path)
+	for output in reference['outputs']['pngs']:
+		relative = output.get('relative_path', output.get('path'))
+		verify_bound({'path': str(path.parent / relative), 'sha256': output['sha256']})
+	return reference
+
+
+def _bind_dis0_source(
+	config: dict[str, Any], model: dict[str, Any], survey: str
+) -> None:
+	family = model['source_family']
+	summary = _read(config['inputs'][f'{family}_sources']['path'])
+	if summary['status'] != 'complete':
+		raise ValueError('zero-distillation study is incomplete')
+	records = [
+		r
+		for r in summary['evidence']
+		if r['survey'] == survey
+		and r['weight'] == '0.0'
+		and r['layout'] == 'layout_000'
+		and r['size'] == 'large'
+	]
+	if len(records) != 1 or (
+		records[0]['candidate_id'] != model['model_id']
+		or records[0]['metrics_sha256'][0] != model['metrics']['sha256']
+		or Path(records[0]['metrics_paths'][0]).resolve()
+		!= Path(model['metrics']['path']).resolve()
+	):
+		raise ValueError('source not bound to the completed v2_dis0 study')
+
+
+def _dis0_model(
+	model: dict[str, Any],
+	survey: str,
+	config: dict[str, Any],
+	baseline: dict[str, Any],
+	reference: dict[str, Any],
+) -> dict[str, Any]:
+	if model['treatment'] == 'v2_dis0':
+		_bind_dis0_source(config, model, survey)
+		return model
+	parent = next(
+		m
+		for m in baseline['surveys'][survey]['models']
+		if m['condition_id'] == model['condition_id']
+	)
+	if model != parent:
+		raise ValueError('v2_dis0 non-HMM parent differs from the original v2 figure')
+	if survey == 'f3':
+		return model
+	previous = next(
+		m for m in reference['models'] if m['condition_id'] == model['condition_id']
+	)
+	metadata = verify_bound(previous['render_prediction_metadata'])
+	return dict(model, reuse_prediction_dir=str(metadata.parent))
 
 
 def expected_figure_files(rows: list[dict[str, Any]]) -> set[str]:
@@ -207,10 +273,17 @@ def inspect_plan(config_path: Path) -> dict[str, Any]:  # noqa: C901, PLR0912
 	"""Hash and audit all eighteen sources and all reference figures, read-only."""
 	config = load_config(config_path)
 	root = Path(config['artifact_root'])
+	is_dis0 = config['experiment_id'] == DIS0_EXPERIMENT
+	treatment = 'v2_dis0' if is_dis0 else 'v2'
+	namespace = (
+		'zero_distillation_paper_sections_v1'
+		if is_dis0
+		else 'canonical_paper_sections_v1'
+	)
 	if (
-		config['experiment_id'] != EXPERIMENT
+		config['experiment_id'] not in (EXPERIMENT, DIS0_EXPERIMENT)
 		or Path(config['output_root']).resolve()
-		!= (root / 'studies/hmm_v2/canonical_paper_sections_v1').resolve()
+		!= (root / 'studies/hmm_v2' / namespace).resolve()
 	):
 		raise ValueError('unexpected experiment/output namespace')
 	for record in config['inputs'].values():
@@ -224,24 +297,33 @@ def inspect_plan(config_path: Path) -> dict[str, Any]:  # noqa: C901, PLR0912
 	) != ([6, 8, 10], 0.2, 0.1):
 		raise ValueError('canonical selection changed')
 	aggregate = _read(config['inputs']['canonical_summary']['path'])
+	baseline_config = (
+		load_config(config['inputs']['v2_execution']['path']) if is_dis0 else None
+	)
 	plans = {}
 	for survey in SURVEYS:
 		sc = config['surveys'][survey]
-		if (
-			tuple((m['source_family'], m['treatment']) for m in sc['models'])
-			!= MODEL_ORDER
+		if tuple((m['source_family'], m['treatment']) for m in sc['models']) != tuple(
+			(f, treatment if t == 'v2' else t) for f, t in MODEL_ORDER
 		):
 			raise ValueError('six-model comparison order changed')
-		refpath = verify_bound(sc['reference_manifest'])
 		verify_bound(sc['reference_csv'])
-		reference = _read(refpath)
-		for output in reference['outputs']['pngs']:
-			relative = output.get('relative_path', output.get('path'))
-			verify_bound(
-				{'path': str(refpath.parent / relative), 'sha256': output['sha256']}
-			)
+		reference = _verify_reference(sc['reference_manifest'])
+		v2_reference = None
+		if is_dis0:
+			v2_reference = _verify_reference(sc['v2_manifest'])
+			verify_bound(sc['v2_csv'])
+			if fixed_rows(reference, survey) != v2_reference['selected_slices']:
+				raise ValueError(
+					'v2 reference sections differ from the fixed v1 sections'
+				)
 		sources = []
 		for model in sc['models']:
+			selected = (
+				_dis0_model(model, survey, config, baseline_config, v2_reference)
+				if is_dis0
+				else model
+			)
 			if model['treatment'] == 'v2':
 				cell = next(
 					x
@@ -254,7 +336,7 @@ def inspect_plan(config_path: Path) -> dict[str, Any]:  # noqa: C901, PLR0912
 				if model['metrics']['sha256'] != cell['metrics_sha256']:
 					raise ValueError('source not bound to the selected v2 aggregate')
 			print(f'Preflight {survey}/{model["condition_id"]}', flush=True)
-			sources.append(_inspect_source(model, survey))
+			sources.append(_inspect_source(selected, survey))
 		if survey == 'parihaka':
 			baseline_selection = load_config(
 				Path(config['inputs']['parihaka_mae_selection']['path'])
@@ -283,7 +365,7 @@ def inspect_plan(config_path: Path) -> dict[str, Any]:  # noqa: C901, PLR0912
 		plans[survey] = {
 			'sources': sources,
 			'reference': reference,
-			'rows': fixed_rows(reference, survey),
+			'rows': fixed_rows(reference, survey, treatment=treatment),
 		}
 	return {
 		'config': config,
@@ -392,6 +474,9 @@ def _predictions(plan: dict[str, Any], survey: str) -> list[Any]:  # noqa: C901,
 
 def _manifest(plan: dict[str, Any], survey: str) -> dict[str, Any]:
 	sp = plan['surveys'][survey]
+	treatment = (
+		'v2_dis0' if plan['config'].get('experiment_id') == DIS0_EXPERIMENT else 'v2'
+	)
 	manifest = copy.deepcopy(sp['reference'])
 	for key in (
 		'outputs',
@@ -405,14 +490,18 @@ def _manifest(plan: dict[str, Any], survey: str) -> dict[str, Any]:
 	):
 		manifest.pop(key, None)
 	manifest.update(
-		artifact_type=f'{survey}_hmm_v2_canonical_paper_sections',
-		hmm_version='HMM_v2',
+		artifact_type=(
+			f'{survey}_hmm_v2_dis0_paper_sections'
+			if treatment == 'v2_dis0'
+			else f'{survey}_hmm_v2_canonical_paper_sections'
+		),
+		hmm_version=f'HMM_{treatment}',
 		generated_at_utc=datetime.now(timezone.utc).isoformat(),
 		comparison={
 			'layout_id': 'layout_000',
 			'data_size': 'large',
 			'head_ks': [6, 8, 10],
-			'distillation_weight': 0.2,
+			'distillation_weight': 0.0 if treatment == 'v2_dis0' else 0.2,
 			'consistency_weight': 0.1,
 		},
 		models=[{k: v for k, v in s.items() if k != 'identity'} for s in sp['sources']],
@@ -436,6 +525,14 @@ def _manifest(plan: dict[str, Any], survey: str) -> dict[str, Any]:
 		metric_evaluation=False,
 		prediction_postprocessing=False,
 	)
+	if treatment == 'v2_dis0':
+		manifest['v2_reference_manifest'] = plan['config']['surveys'][survey][
+			'v2_manifest'
+		]
+		manifest['source_studies'] = {
+			family: plan['config']['inputs'][f'{family}_sources']
+			for family in ('mae', 'local_bt', 'random')
+		}
 	if survey == 'parihaka':
 		manifest['baseline_note'] = (
 			'MAE/no-HMM uses designated decoder seed 42001; '
@@ -552,6 +649,66 @@ def render_survey(plan: dict[str, Any], survey: str) -> Path:
 	return root
 
 
+def publish_dis0_review(plan: dict[str, Any], root: Path) -> Path:
+	"""Publish only a Markdown index linking all eighty artifact-side figures."""
+	if plan['config']['experiment_id'] != DIS0_EXPERIMENT:
+		raise ValueError('review index requires a v2_dis0 plan')
+	if root.exists():
+		raise FileExistsError(f'refusing to replace completed review: {root}')
+	lines = [
+		'# v2_dis0: 全断面比較図',
+		'',
+		'F3 30枚・Parihaka 30枚・Volve 20枚、計80枚。',
+		'',
+		'v2と同じlayout_000/large、断面位置・表示範囲・振幅スケール・配色・',
+		'2x4配置・180x105 mm/300 dpiです。蒸留係数だけを0にした',
+		'MAE・Barlow Twins・Randomを、それぞれHMMなしの親モデルと並べています。',
+		'',
+		'Barlow Twinsは各データセットで25 epoch学習・特徴抽出と、図に使用する',
+		'layout_000/largeのdecoder学習を追加しました。他のレイアウト・教師量は',
+		'今回の追加実験の対象に含めていません。MAE・Randomは既存結果を再利用しました。',
+		'',
+		'K=[6,8,10]・整合性0.1。元のv2モデル・図は保持しています。',
+		'ParihakaのHMMなしMAEは指定済みdecoder seed 42001、他は42000です。',
+		'全断面の定性的比較であり、新たな独立test領域を示す図ではありません。',
+		'',
+		'公開ファイルはREADME.mdの1点のみ。予測配列と全図はartifactsに保存し、',
+		'このレビュー文書はパイプライン入力には使用しません。',
+		'',
+	]
+	for survey in SURVEYS:
+		folder = (
+			Path(plan['config']['output_root'])
+			/ 'figures'
+			/ survey
+			/ 'layout_000/large'
+		)
+		rows = plan['surveys'][survey]['rows']
+		verify_publication(folder, rows)
+		lines += [f'## {survey.upper() if survey == "f3" else survey.title()}', '']
+		for name in ('manifest.json', 'selected_slices.csv'):
+			lines += [f'[{name}]({os.path.relpath(folder / name, root)})', '']
+		for domain in facies.DOMAINS:
+			selected = [r for r in rows if r['domain'] == domain]
+			if not selected:
+				continue
+			lines += [f'### {domain.title()}', '']
+			lines += [
+				f'- [{r["actual_coordinate"]}]'
+				f'({os.path.relpath(folder / r["output_png"], root)})'
+				for r in selected
+			]
+			lines += ['']
+	root.parent.mkdir(parents=True, exist_ok=True)
+	with tempfile.TemporaryDirectory(prefix='.review-', dir=root.parent) as tmp:
+		stage = Path(tmp)
+		(stage / 'README.md').write_text('\n'.join(lines))
+		if {p.name for p in stage.iterdir()} != DIS0_REVIEW_FILES:
+			raise ValueError('unexpected review publication files')
+		stage.rename(root)
+	return root / 'README.md'
+
+
 def build_parser() -> argparse.ArgumentParser:
 	"""Build the CLI without reading artifacts or starting execution."""
 	parser = argparse.ArgumentParser(description=__doc__)
@@ -583,3 +740,5 @@ def main() -> None:
 		torch.backends.cudnn.deterministic = True
 		for survey in (args.survey,) if args.survey else SURVEYS:
 			render_survey(plan, survey)
+		if plan['config'].get('experiment_id') == DIS0_EXPERIMENT and not args.survey:
+			publish_dis0_review(plan, Path(plan['config']['review_root']))

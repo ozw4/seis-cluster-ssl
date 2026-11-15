@@ -1,0 +1,533 @@
+schema_version: 1
+experiment_id: hmm_v2_zero_distillation_paper_sections_v1
+artifact_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}
+output_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/zero_distillation_paper_sections_v1
+volve_root: ${SEIS_SSL_CLUSTER_VOLVE_ROOT}
+inference_device: cuda
+inputs:
+  canonical_selection:
+    path: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/canonical_multi_source_v1/selection.yaml
+    sha256: b8f277fbd3403115f464362d3020b7ec2771d8f77fd130d92397769ca7ab743c
+  canonical_summary:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/k6810_cons010_multi_source_evaluation_v1/summary/summary.json
+    sha256: 76af6c4bfc0a3a07051b5622b191f74b61bd55a84a6613f9123568af84087666
+  parihaka_mae_selection:
+    path: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/47_mae_no_hmm_large_decoder_seed42001_v1/selection.yaml
+    sha256: 60339900f85a7338a43b46fb281fcd59c62be00505cfa4b497cbc6f19fa076e9
+  v2_execution:
+    path: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/hmm_v2/canonical_paper_sections_v1/execution.yaml
+    sha256: 0f16bba5a90042e5440625b240bb0c6218901982745167abff625ec9d57c035d
+  mae_sources:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/distillation_sensitivity_v1/summary/summary.json
+    sha256: 848abf999daa928eb70f25a202eb7d6a867f3a2e2eb0f8ece3aa173816ed2b47
+  random_sources:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/random_distillation_ablation_v1/summary/summary.json
+    sha256: e924bb5dcf476583d0a6879150adb778f00b711762aefc7cdc12c662567c0d20
+  local_bt_sources:
+    path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/zero_distillation_paper_sections_v1/barlow_sources.json
+    sha256: 784b7b7e956f1bfd4cd4a19ebbd941a40e9a927985c6aae3466bfab50744f2ea
+surveys:
+  f3:
+    reference_manifest:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_figures/f3/layout_000/large/manifest.json
+      sha256: 2794a1398fde41b5ba4728bb7b127b83e0ca7cb8ab4188a2bb4d4580a22c2422
+    reference_csv:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_figures/f3/layout_000/large/selected_slices.csv
+      sha256: db178c924b7c2bb578330d1b6ea1dff682f303f99198bff50c2d25824c78e4c6
+    models:
+    - source_family: mae
+      treatment: none
+      model_id: mae
+      condition_id: mae_none
+      display_name: MAE
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/mae_local_bt_five_way_v3/runs/model=mae/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/mae/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/mae_local_bt_five_way_v3/runs/model=mae/layout=layout_000/size=large/evaluation/metrics.json
+        sha256: d25e3b1eb0b70af0f166e0ae5ae08dd8d3c61c02b1829efde758d281d3f96d43
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/mae_local_bt_five_way_v3/runs/model=mae/layout=layout_000/size=large/decoder/best.pt
+        sha256: 1c292536020eb0858c35b51d217cd6e4b2c57dfe0988f4bfd8ed204e4c7efab5
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/mae_continue/full_25ep/latest.pt
+        sha256: a02b34ee1edcd7691630d6dbf2c83236ef2b32027b606e9726080a62fad2f28d
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/mae/overlap_x64/f3_facies_benchmark.embedding_metadata.json
+        sha256: 3d8869f31354e01c8d5071dc07b9756fba2789b746219306dcf251bf76f19f43
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/mae/overlap_x64/f3_facies_benchmark.embeddings.npy
+        sha256: b497d26d63ef608b6b471ebfbca2e9cbc1cde7130db26aedb89546c697ce1d1f
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/mae/overlap_x64/f3_facies_benchmark.valid_tokens.npy
+        sha256: 3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7
+      prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/mae_local_bt_five_way_v3/runs/model=mae/layout=layout_000/size=large/prediction
+    - source_family: mae
+      treatment: v2_dis0
+      model_id: mae100_hmm_v2_mh_k6810_distill000_cons010
+      condition_id: mae_v2_dis0
+      display_name: MAE + v2_dis0
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/evaluation/metrics.json
+        sha256: 31ea324ecac8939f5cd7ac573f767e13b9d095b297b042af63d6b7b3c0cfba1f
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/decoder/best.pt
+        sha256: cf975c5fb8496ae57b195ea3849922d59fe2bdae637fcd96462b81a342a17f31
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v1/pretraining/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/full_25ep/latest.pt
+        sha256: 6d9fb2db3a1adbd4d5d90e5423c03308e421ee34cc573266ba3cd55e0a47d9bb
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/f3_facies_benchmark.embedding_metadata.json
+        sha256: a65f9a3ab66a7ab10a6c8b13ab41b8042a45934a9c299dd55193965c94973da8
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/f3_facies_benchmark.embeddings.npy
+        sha256: c6a478e7792bc89a440946c7dfae778ea4a5d63027529d7ae4cbe741e0c27b75
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/f3_facies_benchmark.valid_tokens.npy
+        sha256: 3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7
+      prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/prediction
+    - source_family: local_bt
+      treatment: none
+      model_id: local_bt_nr_rot90_asym_g060_3ep
+      condition_id: local_bt_none
+      display_name: Barlow Twins
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/local_bt_noise_rotation_search_v1/runs/model=local_bt_nr_rot90_asym_g060_3ep/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_bt_noise_rotation_search_v1/local_bt_nr_rot90_asym_g060_3ep/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/local_bt_noise_rotation_search_v1/runs/model=local_bt_nr_rot90_asym_g060_3ep/layout=layout_000/size=large/evaluation/metrics.json
+        sha256: ed598eab2bd2045e78fb40598b4252aa7a5364eb756d4d04a6b292fd4539e769
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/local_bt_noise_rotation_search_v1/runs/model=local_bt_nr_rot90_asym_g060_3ep/layout=layout_000/size=large/decoder/best.pt
+        sha256: b28fbc905c53fbec347279c1a460a1d78c08d3d9f61ad831794ef7c2a0379c4b
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/local_bt_noise_rotation_search_v1/rot90_asym_g060/full_3ep/latest.pt
+        sha256: c77fa1b58f644641012d1e4cae19358a43c8e480707be3d7ddd8d224c81f7130
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_bt_noise_rotation_search_v1/local_bt_nr_rot90_asym_g060_3ep/overlap_x64/f3_facies_benchmark.embedding_metadata.json
+        sha256: 2512c5d041973c39c4d972ed9581fe4f2cda783e136fbedd88d4f64d2ab97313
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_bt_noise_rotation_search_v1/local_bt_nr_rot90_asym_g060_3ep/overlap_x64/f3_facies_benchmark.embeddings.npy
+        sha256: 2775466a7f19f1bb84737c088bca9780d7ada44b0e5fa3596ebbff8f598f9abb
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/local_bt_noise_rotation_search_v1/local_bt_nr_rot90_asym_g060_3ep/overlap_x64/f3_facies_benchmark.valid_tokens.npy
+        sha256: 3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7
+      prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/local_bt_noise_rotation_search_v1/runs/model=local_bt_nr_rot90_asym_g060_3ep/layout=layout_000/size=large/prediction
+    - source_family: local_bt
+      treatment: v2_dis0
+      model_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010
+      condition_id: local_bt_v2_dis0
+      display_name: Barlow Twins + v2_dis0
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/evaluation/metrics.json
+        sha256: 308b23a378b7a438e239f5f320db227e405f082cf63bfb6e66a07a72739d1b22
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/decoder/best.pt
+        sha256: 0e3e211124dbedd59a9eb98da2430acea34168ddc2d8e6164e1e241a68cc5445
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v1/pretraining/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/full_25ep/latest.pt
+        sha256: 1d191698dfb796c698bd5ad3b19620864da7f3d969c3f3eb1d9de19a62749c54
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/f3_facies_benchmark.embedding_metadata.json
+        sha256: e73866a94776d4799e2cfcd5ed8527fde336383f4886c0cdec556e2a0d584d63
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/f3_facies_benchmark.embeddings.npy
+        sha256: 8c0195ccce012bf9000df7d6a7700e03e59682515236a2726b9f6676d924ad63
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/f3_facies_benchmark.valid_tokens.npy
+        sha256: 3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7
+      prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/prediction
+    - source_family: random
+      treatment: none
+      model_id: random
+      condition_id: random_none
+      display_name: Random
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/random/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=large/evaluation/metrics.json
+        sha256: e82b43eed71ae5dc4684b48d7c81c4e30ef12b95b023d399033c5f25312a52a9
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=large/decoder/best.pt
+        sha256: 0ed1beca8d40bcf6d79a00c3dbb32aa0febc548c8deff3ee47970271944e37fc
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/f3/facies_benchmark_v1/mae_local_bt_five_way_v1/random/random_init.pt
+        sha256: 6548d52446e7d6b9b57acd2bd39a8389a76bc5df55b52a9eda0472eb182a438c
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/random/overlap_x64/f3_facies_benchmark.embedding_metadata.json
+        sha256: cfce51c16eda87e0fa506ea26e9192d43ff7d9d2bb89c92a48d8ef0b67311e99
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/random/overlap_x64/f3_facies_benchmark.embeddings.npy
+        sha256: 85257d6cf2d6b765e29cad023b4f3bda6ef384a2aa00619a6a508661d6fca089
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/f3/facies_benchmark_v2/mae_local_bt_five_way_v2/random/overlap_x64/f3_facies_benchmark.valid_tokens.npy
+        sha256: 3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7
+      prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/evaluation/lithology_benchmark/mae_local_bt_five_way_v3/runs/model=random/layout=layout_000/size=large/prediction
+    - source_family: random
+      treatment: v2_dis0
+      model_id: random_init_hmm_v2_mh_k6810_distill000_cons010
+      condition_id: random_v2_dis0
+      display_name: Random + v2_dis0
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/evaluation/metrics.json
+        sha256: fb078280f5fd1e9904e6c9b6522e7ef018e5d0487fdc7e98a078c892d0cb9e0d
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/decoder/best.pt
+        sha256: 75880964481c4bc02fc8d360330f81474bd5e51c7b1610d673df6fd3675d9ebe
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v1/pretraining/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/full_25ep/latest.pt
+        sha256: 73fd43d07ac33f378d7c6398f963f3ebb7aeebe34d252cb99678a3c982469c16
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/f3_facies_benchmark.embedding_metadata.json
+        sha256: e54e8874099896e8b56f36be0b466bf6dd9969dd12b805aa0a74d0e1a917ba52
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/f3_facies_benchmark.embeddings.npy
+        sha256: ddff125499b173a3c7e5d3732101976f2acd7e76ca34e9d6c981a382be460abf
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/f3_facies_benchmark.valid_tokens.npy
+        sha256: 3bfeb8db8a47420ae7671db90a7e4d6e5a07fceba27648ec76213df3c2b38fd7
+      prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/f3/facies_benchmark_v2/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/prediction
+    v2_manifest:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/canonical_paper_sections_v1/figures/f3/layout_000/large/manifest.json
+      sha256: a4c8099189c471a3a74e9d3e2d5eaee3a2de8fbee83a71c1659e43f1d1c5c48d
+    v2_csv:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/canonical_paper_sections_v1/figures/f3/layout_000/large/selected_slices.csv
+      sha256: 3c9364af60bb38d133646a4e73d6b3d38c4c94773c2b4a29c5a24b8627327361
+  parihaka:
+    reference_manifest:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_figures/parihaka/layout_000/large/manifest.json
+      sha256: 7996e3c544fabb3e9ff708689f96c3abb20999724c430dccfb01fde76deac47b
+    reference_csv:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_figures/parihaka/layout_000/large/selected_slices.csv
+      sha256: 0ed2329092e8a67a1d789800402c3e911f5466ca8b36d059082c90d4bc261b75
+    models:
+    - source_family: mae
+      treatment: none
+      model_id: mae
+      condition_id: mae_none
+      display_name: MAE
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/mae_no_hmm_large_decoder_seed42001_v1/runs/model=mae/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/channel_four_way/mae/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/mae_no_hmm_large_decoder_seed42001_v1/runs/model=mae/layout=layout_000/size=large/metrics.json
+        sha256: 605d270cd9176f638739753526055b71c56d2f54e2ad59cf7ebadec3de5a9f2e
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/mae_no_hmm_large_decoder_seed42001_v1/runs/model=mae/layout=layout_000/size=large/best.pt
+        sha256: 00aa33576fed2f1f0ef87ee6bfc2bf5cefb228506019e4f99461c802e3601ffd
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/stage2/mae100/mae_continue/full_25ep/latest.pt
+        sha256: 603662377c62f3b2f5793ecd633761ee455e1bba94c076834c23418dd9614e37
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/channel_four_way/mae/overlap_x64/parihaka.embedding_metadata.json
+        sha256: b6a9099f41a33d9c714046d9f484dcfb2c6b09125c4b656db2d770402a3074d0
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/channel_four_way/mae/overlap_x64/parihaka.embeddings.npy
+        sha256: fc1c394ec3bbc3ec0609abaa14be64ccce257d8b5ad81d430fcb5f3717ade507
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/ssl_hmm_continuation_v1/channel_four_way/mae/overlap_x64/parihaka.valid_tokens.npy
+        sha256: 729f057c97aa3e3f0793d489976608eac9b33c0fad794918425ad698d9390774
+    - source_family: mae
+      treatment: v2_dis0
+      model_id: mae100_hmm_v2_mh_k6810_distill000_cons010
+      condition_id: mae_v2_dis0
+      display_name: MAE + v2_dis0
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/metrics.json
+        sha256: 7919dfe51116d6de66e5d2b468a516fbe0118f2cb57c43489ec02ee82b8ff297
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/best.pt
+        sha256: b7c28498c6b4b82b2d0eff221615c8d4f34cc4a32d79a691c9940fd44a946c50
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/pretraining/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/full_25ep/latest.pt
+        sha256: cdc80b6b9d9486f0ffe0bb3b518fdfdf36068ca4a06d25bfd4bc5978983569ee
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/parihaka.embedding_metadata.json
+        sha256: 84a144b8b0c794db93961247df060238e7cf1d997a925799c9dc46085ae63c75
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/parihaka.embeddings.npy
+        sha256: 88f6aa2c582dbec2d8aab64e9945e5c59cbf7f45d2fe36adee461f6b39a09e26
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/parihaka.valid_tokens.npy
+        sha256: 729f057c97aa3e3f0793d489976608eac9b33c0fad794918425ad698d9390774
+    - source_family: local_bt
+      treatment: none
+      model_id: local_barlow_twins_rot90_asym_g060_3ep
+      condition_id: local_bt_none
+      display_name: Barlow Twins
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs/model=local_barlow_twins_rot90_asym_g060_3ep/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/local_bt_rot90_asym_g060_v1/local_barlow_twins_rot90_asym_g060_3ep/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs/model=local_barlow_twins_rot90_asym_g060_3ep/layout=layout_000/size=large/metrics.json
+        sha256: bb52ff81c404c6bc28caee8d2d3abe9ca50292a9f0f622603f36e2bde6e18897
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/ssl_hmm_four_way_v1/runs/model=local_barlow_twins_rot90_asym_g060_3ep/layout=layout_000/size=large/best.pt
+        sha256: 116181bb1fb0bff729522ca0c14a3de836201db13f4fab88d7583ce71d2ecab7
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/local_bt_rot90_asym_g060_v1/full_3ep/latest.pt
+        sha256: a314e19a29dd1510878aacfff4ed761e16c335688d3b4f902904557b151221ee
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/local_bt_rot90_asym_g060_v1/local_barlow_twins_rot90_asym_g060_3ep/overlap_x64/parihaka.embedding_metadata.json
+        sha256: b396133e7073be66b673fe1063fafbb57e81ca7bb4128a881d082d4e980b54f7
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/local_bt_rot90_asym_g060_v1/local_barlow_twins_rot90_asym_g060_3ep/overlap_x64/parihaka.embeddings.npy
+        sha256: 42f14f53d907133ad213a69dbd64c88d7fec9a3640e48a776e30292b19bb34ec
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/local_bt_rot90_asym_g060_v1/local_barlow_twins_rot90_asym_g060_3ep/overlap_x64/parihaka.valid_tokens.npy
+        sha256: 729f057c97aa3e3f0793d489976608eac9b33c0fad794918425ad698d9390774
+      reuse_prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_predictions/parihaka/layout_000/large/model=local_barlow_twins_rot90_asym_g060_3ep
+    - source_family: local_bt
+      treatment: v2_dis0
+      model_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010
+      condition_id: local_bt_v2_dis0
+      display_name: Barlow Twins + v2_dis0
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/metrics.json
+        sha256: 97f60b105ed4f36774e1179d8eb1960355ef265a247e9776f07b4c37d6014838
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/best.pt
+        sha256: 5f44c5b1165fe1b0a75e6f3ac31c75ba9faf4eb63fe1db515ce32f01033f1ea3
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/pretraining/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/full_25ep/latest.pt
+        sha256: eb0a27b774af76fecb7f0356c337f8869641910a7eaf97cbf03b6d454925cc48
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/parihaka.embedding_metadata.json
+        sha256: bc57202fa3b8d7d98f1069571a517b30fcafec07a22a8f50b52d6292159d8a54
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/parihaka.embeddings.npy
+        sha256: d2509ce8424ae1f59823e7cbc2fabad0a4b8a5adbf818e96588e0122f16c8c4c
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/parihaka.valid_tokens.npy
+        sha256: 729f057c97aa3e3f0793d489976608eac9b33c0fad794918425ad698d9390774
+    - source_family: random
+      treatment: none
+      model_id: random
+      condition_id: random_none
+      display_name: Random
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/runs/model=random/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/runs/model=random/layout=layout_000/size=large/metrics.json
+        sha256: 7cf841be43e7b035d0eb536810ea050acc7785a0778cf0cd2b97255ea3b136e3
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/channel_benchmark/runs/model=random/layout=layout_000/size=large/best.pt
+        sha256: 22f83524561680d1457a7c26502bbee9ff0cf3a5c66a26ecd698b263a9a5a717
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt
+        sha256: b459668d50e14144a5590615d588f042480554f5811767f5c97c882982d9dbd0
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/parihaka.embedding_metadata.json
+        sha256: 0bebe7ba3b21454383b33d4b2e52bc00ea52059e4e615b4f3e6eb76754bdba19
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/parihaka.embeddings.npy
+        sha256: b49f0f9954028b70c957d0827ff11577355b3af6b3b24a21ca83ebff6d6a8ae8
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/parihaka/facies_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/parihaka.valid_tokens.npy
+        sha256: 729f057c97aa3e3f0793d489976608eac9b33c0fad794918425ad698d9390774
+      reuse_prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_predictions/parihaka/layout_000/large/model=random
+    - source_family: random
+      treatment: v2_dis0
+      model_id: random_init_hmm_v2_mh_k6810_distill000_cons010
+      condition_id: random_v2_dis0
+      display_name: Random + v2_dis0
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/metrics.json
+        sha256: 046050d54733705a6e225add22c05c7661415e57136ae73d78d6742f4efa7412
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/best.pt
+        sha256: 7844f991c28ebe0e28ea545849674fcd427b9d2cc0d6934c6de12ad950962334
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/pretraining/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/full_25ep/latest.pt
+        sha256: cfc3e985ea915c183c26374a4214ccbbc9b51a6ec08c9626eeac77bc06a1c325
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/parihaka.embedding_metadata.json
+        sha256: 011503ef6fd9b43d13e5eee17e3fdb2107790c0595d92e5585c8f1adfcc989a3
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/parihaka.embeddings.npy
+        sha256: 908c896ffa9f3d2824ac6e1a72773071c5e627f9288ebebabcd62b4dbc040371
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/parihaka.valid_tokens.npy
+        sha256: 729f057c97aa3e3f0793d489976608eac9b33c0fad794918425ad698d9390774
+    v2_manifest:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/canonical_paper_sections_v1/figures/parihaka/layout_000/large/manifest.json
+      sha256: 42ca9b60a74f67c2eec2f3e0632139fadf1efccc8ac3bc09b820d1d0ec7b43d8
+    v2_csv:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/canonical_paper_sections_v1/figures/parihaka/layout_000/large/selected_slices.csv
+      sha256: aba5b06259648fbadd5cb0794ac366c1029a7b2e848e8674fa5c74715afae42a
+  volve:
+    reference_manifest:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_figures/volve/layout_000/large/manifest.json
+      sha256: a5dd84f82b26597291214ecb9b875455a0b5ed42200d4bc06261b7410d98939c
+    reference_csv:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_figures/volve/layout_000/large/selected_slices.csv
+      sha256: c88f523c59d2964675a892c6a168d4794f456ff43e03085dcbe8cbfd09b1e48c
+    models:
+    - source_family: mae
+      treatment: none
+      model_id: mae
+      condition_id: mae_none
+      display_name: MAE
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/runs/model=mae/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/mae/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/runs/model=mae/layout=layout_000/size=large/metrics.json
+        sha256: 33086d36d75c52e7efd3f6c1582371417b997fbf08392a1545de3bae5c52cc6c
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/runs/model=mae/layout=layout_000/size=large/best.pt
+        sha256: a0e3ab1f8c5d6d4d2d047bd86898ee91e1b85f355c296fa5c6647854b3af3b66
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/stage2/mae100/mae_continue/full_25ep/latest.pt
+        sha256: 276e1b5894cb95e952788c0f15942d38461cc4c3ff76f0476683e3dc99bbbf66
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/mae/overlap_x64/volve_st10010.embedding_metadata.json
+        sha256: f9852b6b175dc3ecb295c777f4cbb6e550a2fb7f183302136b4febcaf6fc89b0
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/mae/overlap_x64/volve_st10010.embeddings.npy
+        sha256: 071a1e3ab57bb1b3e2408dc730736fa4eea4016d306e82f9d576452e2974956b
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/mae/overlap_x64/volve_st10010.valid_tokens.npy
+        sha256: 87705b2b04f4c623186f40374aa6e3cd228d0babebcd010b47dadbf7a0d0dc40
+      reuse_prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_predictions/volve/layout_000/large/model=mae
+    - source_family: mae
+      treatment: v2_dis0
+      model_id: mae100_hmm_v2_mh_k6810_distill000_cons010
+      condition_id: mae_v2_dis0
+      display_name: MAE + v2_dis0
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/metrics.json
+        sha256: 2833baa37f08ce87b95f7d3926eb27dce1d9d513a4aa6ce9b66a7644e06b14c2
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/benchmark/hmm_v2_k6810_distillation_sensitivity_v1/runs/model=mae100_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/best.pt
+        sha256: d7bb1b0b40a373a48f852cf3fea0537985baa616914d3ac0fcff4189f838bdf0
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pretraining/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/full_25ep/latest.pt
+        sha256: c3af6d70cc2168c40d90c9f8b12c87428c8e5731fca0e6d38c34a3d59473f15b
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/volve_st10010.embedding_metadata.json
+        sha256: cda274e51efbaa7659fbe282626f50068b47479790204fafa60ddab41da19022
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/volve_st10010.embeddings.npy
+        sha256: 07a0b8b44810458aecc95e4fe5d5c2c0cf1df2a6037c5afbccd6e6dc77b95910
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_distillation_sensitivity_v1/mae100_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/volve_st10010.valid_tokens.npy
+        sha256: 87705b2b04f4c623186f40374aa6e3cd228d0babebcd010b47dadbf7a0d0dc40
+    - source_family: local_bt
+      treatment: none
+      model_id: rot90_asym_g060_3ep
+      condition_id: local_bt_none
+      display_name: Barlow Twins
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/runs/model=rot90_asym_g060_3ep/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/runs/model=rot90_asym_g060_3ep/layout=layout_000/size=large/metrics.json
+        sha256: 73c2339d2941af41c8fcee855cc73352ed74b76c0171ecbda4080f165f92c2fa
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/runs/model=rot90_asym_g060_3ep/layout=layout_000/size=large/best.pt
+        sha256: 19308f16ad704d2da3b0e82496785214e27516c9e4c1829772d252851148bfb3
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/full_3ep/latest.pt
+        sha256: 5f4d4cc185d5c97d5309b3cb9db4bf7441f0ec8d23f2fe4bac8b962bb4c8d7a3
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/overlap_x64/volve_st10010.embedding_metadata.json
+        sha256: 689e751ae9b12fa2cf3f6f75dcde6efa6567f48141bbd8f5f1eab6cf3a3f94ca
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/overlap_x64/volve_st10010.embeddings.npy
+        sha256: c36bea9150ad02d00c24100eb740adf13032f8356a4a808a415bf83f68c3efaa
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/local_bt_recipe_arm_v1/rot90_asym_g060/overlap_x64/volve_st10010.valid_tokens.npy
+        sha256: 87705b2b04f4c623186f40374aa6e3cd228d0babebcd010b47dadbf7a0d0dc40
+      reuse_prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_predictions/volve/layout_000/large/model=rot90_asym_g060_3ep
+    - source_family: local_bt
+      treatment: v2_dis0
+      model_id: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010
+      condition_id: local_bt_v2_dis0
+      display_name: Barlow Twins + v2_dis0
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/metrics.json
+        sha256: fae4512bb5d8d51a302c733d80cc6475d8ffbe2632f08761e858b0d9e351bfe1
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/benchmark/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/runs/model=local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/best.pt
+        sha256: 2011477a8fcd9aa3a43c7a744cb071a27c299d875fd658ab06b0841ec3c6fa8c
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pretraining/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/full_25ep/latest.pt
+        sha256: 5d26294c7193deed24ba00cced535d248cc48a61f948242c8fe04daa05fac7d9
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/volve_st10010.embedding_metadata.json
+        sha256: 636481e1d02dc54a78aa9334eb0f6c1bc4e02f37394a8726fc32a1ce7b19edfc
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/volve_st10010.embeddings.npy
+        sha256: 8da9315e3e7219f455ae4f824754ac0b0bc7a5b8c520480a3d52ae99548cc047
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/volve_st10010.valid_tokens.npy
+        sha256: 87705b2b04f4c623186f40374aa6e3cd228d0babebcd010b47dadbf7a0d0dc40
+    - source_family: random
+      treatment: none
+      model_id: random
+      condition_id: random_none
+      display_name: Random
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/runs/model=random/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/runs/model=random/layout=layout_000/size=large/metrics.json
+        sha256: 4212ff95e6a353daef8d91782caab2dd7bf5ff8d967ff088f059215144e7fb4c
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/horizon/volve/horizon_benchmark_v1/mae_local_bt_hmm_five_way_v1/runs/model=random/layout=layout_000/size=large/best.pt
+        sha256: eed25100adc204ad5bd1ffcf15a47a9323dc2ac78df920fac018259c2e2d5cba
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/pretraining/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/random_init/mae_random_seed42.pt
+        sha256: d357e3444a8dfe2d35fee319f8bbe241d5fe14ddbc2bc38f469a28c282c0006e
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/volve_st10010.embedding_metadata.json
+        sha256: cc10551cfb76156d45ad3afb5b9c47af3bc6515ad702415c92525d5ab941f4a1
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/volve_st10010.embeddings.npy
+        sha256: 28c95de7dd8ba7145be350935948a8fc9fc4f9ad50278dbea03bf51ea7efbd29
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/embeddings/volve/horizon_benchmark_v1/random_encoder_amp_mae_m075_mse_g0_patchnorm_clip8_agc65_vis01_seed42_v1/overlap_x64/volve_st10010.valid_tokens.npy
+        sha256: 87705b2b04f4c623186f40374aa6e3cd228d0babebcd010b47dadbf7a0d0dc40
+      reuse_prediction_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v1/paper_predictions/volve/layout_000/large/model=random
+    - source_family: random
+      treatment: v2_dis0
+      model_id: random_init_hmm_v2_mh_k6810_distill000_cons010
+      condition_id: random_v2_dis0
+      display_name: Random + v2_dis0
+      run_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large
+      embedding_dir: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64
+      metrics:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/metrics.json
+        sha256: 97793cf07e7ed0f24651c19b44a83498f744de1493e9c4beada34fe495dbe381
+      decoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/benchmark/hmm_v2_k6810_random_distillation_ablation_v1/runs/model=random_init_hmm_v2_mh_k6810_distill000_cons010/layout=layout_000/size=large/best.pt
+        sha256: 335981ff93323bf876482d5370a648695fa59676b2ea2574fbc6f8a89c7bd84c
+      encoder_checkpoint:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/pretraining/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/full_25ep/latest.pt
+        sha256: e30518b4fdf47b3bbdd032761c9b1d00ebaed75c537ec738bcd8ff122acd8065
+      embedding_metadata:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/volve_st10010.embedding_metadata.json
+        sha256: 70a29e0552bd9a4be181fa8ea8c64f21831f8d321ac8be10672d81b4d27513bc
+      embeddings:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/volve_st10010.embeddings.npy
+        sha256: ac61e355c711323ef243e064bea1de0ca914a9d4277f8ca08437d9cbe35f463b
+      valid_tokens:
+        path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/volve/horizon_benchmark_v1/embeddings/hmm_v2_k6810_random_distillation_ablation_v1/random_init_hmm_v2_mh_k6810_distill000_cons010/overlap_x64/volve_st10010.valid_tokens.npy
+        sha256: 87705b2b04f4c623186f40374aa6e3cd228d0babebcd010b47dadbf7a0d0dc40
+    v2_manifest:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/canonical_paper_sections_v1/figures/volve/layout_000/large/manifest.json
+      sha256: 3aed4a4c10a8f63865257659b25f606f8f7f832a453638efa9f580ba9742cbf1
+    v2_csv:
+      path: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/studies/hmm_v2/canonical_paper_sections_v1/figures/volve/layout_000/large/selected_slices.csv
+      sha256: 886663800b9a9e5ff5183a35750d0f96ab1d173245078adf3cc7a76184f657b0
+review_root: ${SEIS_SSL_CLUSTER_WORKSPACE}/reports/hmm_v2_dis0_paper_sections_v1

@@ -78,6 +78,10 @@ CANDIDATE_CONFIG_SUITES = {
 		'test_hmm_v1_zero_distillation.py',
 		12,
 	),
+	'142_hmm_v2_barlow_zero_distillation_paper_sources_v1': (
+		'test_hmm_v2_dis0_paper_sections.py',
+		4,
+	),
 	'135_lithology_independent_test_audit_v1': ('test_f3_common_test.py', 1),
 	'136_lithology_common_test_v3_v1': ('test_f3_common_test.py', 1),
 	'137_local_bt_v3_masklr3em5_decoder_seed42001_v1': (

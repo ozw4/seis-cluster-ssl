@@ -459,6 +459,10 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 			continue
 		if path.is_relative_to(Path('experiments/hmm_v2/canonical_paper_sections_v1')):
 			continue
+		if path == Path(
+			'experiments/hmm_v2/zero_distillation_paper_sections_v1/execution.yaml'
+		):
+			continue
 		if path.is_relative_to(Path('experiments/kmeans/kmeans_k6810_multi_source_v1')):
 			continue
 		# This ablation explicitly binds and reuses this source's frozen K6 targets.
@@ -467,6 +471,7 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 		):
 			continue
 		if path.parts[3] in {
+			'142_hmm_v2_barlow_zero_distillation_paper_sources_v1',
 			'141_hmm_v1_k6_zero_distillation_ablation_v1',
 			'138_kmeans_k6810_multi_source_v1',
 			'48_kmeans_k6810_multi_source_v1',
