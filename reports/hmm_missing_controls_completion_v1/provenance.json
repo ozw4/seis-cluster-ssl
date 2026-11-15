@@ -1,0 +1,21 @@
+{
+  "artifact_summary": "studies/hmm_v2/missing_controls_completion_v1/summary",
+  "summary_sha256": "b4d78e7d9c324c88808791fd572ac66cbd4543c25e4f9d9ea1489d5d1ab41271",
+  "lineage_sha256": "fc0a63ee6553b62298f39d9c57ca421f28eab41feea60940f23019e420ac5b79",
+  "source_file_sha256": {
+    "barlow_comparison.csv": "cab37d512733fb83d777b3dec60cc4d6f6b54d9ddbc25939a63773d25d7487d7",
+    "factorial_cells.csv": "52c15f8bfc98d16c7beacb4b13f5ecbbb251069c18289679ed24287da1cd12b3",
+    "factorial_comparison.csv": "deccd323d8de113fe52b1e3bb8edcbc6bafb4ad632be9c43acf5c793487de5e5",
+    "factorial_contrasts.csv": "b793202e4301df67deec5075a8ade0bd0af2c675df9235b83410e032b7214945",
+    "v1_comparison.csv": "2ad1bfa794c52f03258c858f74b4807c543e48c23769350cc8e1a60ef88670a4"
+  },
+  "published_files": [
+    "README.md",
+    "barlow_comparison.csv",
+    "factorial_cells.csv",
+    "factorial_comparison.csv",
+    "factorial_contrasts.csv",
+    "provenance.json",
+    "v1_comparison.csv"
+  ]
+}

@@ -1,0 +1,41 @@
+schema_version: 1
+study: missing_controls_completion_v1
+new_decoder_cells: 42
+reused_barlow_cells: 3
+barlow_final_cells: 90
+f3_new_v1_common_test_cells: 45
+f3_barlow_common_test_cells: 30
+factorial_cells: 540
+v1_aligned_cells: 405
+selection: all five layouts and all three budgets; no outcome-dependent selection
+inputs:
+  barlow_matrix:
+    path: experiments/hmm_v2/zero_distillation_paper_sections_v1/barlow_sources.yaml
+    sha256: cbb84afb5260b2c20da1c54e9d525fcb10311962b62b5260753ebd13b17e73dc
+  v1_matrix:
+    path: experiments/hmm_v1/zero_distillation_ablation_v1/matrix.yaml
+    sha256: eddafc14e500a77c8899203588db8f249082e3e7a138c12dc2f6befc1684128e
+  v1_cells:
+    path: artifacts/seis_ssl_cluster/studies/hmm_v1/zero_distillation_ablation_v1/summary/cells.csv
+    sha256: a876715a7dd1bc4c1220852c14c5dc0fd902fbaa2b4a045684328c330a777636
+  test_template:
+    path: experiments/f3/facies_benchmark_v2/136_lithology_common_test_v3_v1/evaluation.yaml
+    sha256: ebb414c067219a7c7052ed10256ba2aa6dbd7bdd6511f5673fbf857d85e1d9bb
+  common_test_cells:
+    path: artifacts/seis_ssl_cluster/surveys/f3/facies_benchmark_v2/evaluation/lithology_common_test_v1/summary/per_layout.csv
+    sha256: c351d5c5fcf3f65f1a051eca66ec5736496a51630a3bf366efd9ad48f8d0979b
+  nocons_summary:
+    path: artifacts/seis_ssl_cluster/studies/hmm_v2/k6810_multi_source_evaluation_v1/summary/summary.json
+    sha256: 911ed222827331b3d8f9f62090c295f6fa28660fe283b5197f9dbdcb199c4520
+  cons_summary:
+    path: artifacts/seis_ssl_cluster/studies/hmm_v2/k6810_cons010_multi_source_evaluation_v1/summary/summary.json
+    sha256: 76af6c4bfc0a3a07051b5622b191f74b61bd55a84a6613f9123568af84087666
+  zero_constraints_cells:
+    path: artifacts/seis_ssl_cluster/studies/hmm_v2/v2_dis0_con0_v1/summary/cells.csv
+    sha256: 7f7ffa73f04c1e6305ff8b166fc572d050c87ed4319a445ec8a94df9fb08dc94
+  mae_zero_cells:
+    path: artifacts/seis_ssl_cluster/studies/hmm_v2/distillation_sensitivity_v1/summary/cells.csv
+    sha256: 359b5b48edc35f3df6d2203b7df83268fdf57e9d30ac199d98702c454bad6d2b
+  random_zero_cells:
+    path: artifacts/seis_ssl_cluster/studies/hmm_v2/random_distillation_ablation_v1/summary/cells.csv
+    sha256: b424048b83bbc0e5de76ab8fa754e68fdb1fcc0bbc2a9028eeda8634dded545b
