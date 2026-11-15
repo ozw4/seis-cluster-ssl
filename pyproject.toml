@@ -38,3 +38,6 @@ version = {attr = "seis_ssl_cluster._version.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+"seis_ssl_cluster.results" = ["experiment_catalog.html"]

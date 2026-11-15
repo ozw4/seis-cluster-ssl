@@ -20,6 +20,13 @@ PROC_SCRIPTS = tuple(
 )
 
 HELP_FLAG_CONTRACTS = {
+	'export_experiment_metrics.py': (
+		'--workspace',
+		'--artifact-root',
+		'--output',
+		'--dry-run',
+		'--zip',
+	),
 	'evaluate_f3_common_test.py': ('--config', '--dry-run', '--execute', '--resume'),
 	'run_f3_decoder_seed_repeat.py': ('--config', '--dry-run', '--execute'),
 	'run_parihaka_channel_seed_repeat.py': (
