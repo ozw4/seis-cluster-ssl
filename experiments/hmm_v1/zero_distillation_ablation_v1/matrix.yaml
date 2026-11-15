@@ -1,0 +1,242 @@
+schema_version: 1
+study: hmm_v1_k6_zero_distillation_ablation_v1
+head_k: 6
+weights:
+- 0.0
+- 0.1
+- 0.2
+new_continuations: 9
+new_downstream_cells: 135
+reused_control_cells: 270
+controls:
+  path: experiments/hmm_v1/zero_distillation_ablation_v1/controls.csv
+  sha256: c18801d481207d63ea93f20a56c7ac88aa5cfbee2bb550d8498bfa1ea3d047a6
+control_origin:
+  path: artifacts/seis_ssl_cluster/studies/hmm_v2/distillation_sensitivity_v1/v1_recovered/cells.csv
+  sha256: ffc80292a651a9fdf3e6117a09308e2f1a9c08dfaea807c78d6ff0cbdefb280d
+arms:
+- survey: f3
+  source: mae
+  candidate_id: mae100_hmm_v1_k6_distill000
+  configs:
+    baseline_training:
+      path: experiments/f3/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml
+      sha256: b103655f03ede0cb12580461b48067b4d4a2b3ebd0146f0a5a253b6e3d7f871e
+    training:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/30_training/mae100_hmm_v1_k6_distill000.yaml
+      sha256: d5bf09337183602e1816128befe8f99772ba49f4c8ef7d26fd42f630eefa2533
+    smoke:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/20_smoke/mae100_hmm_v1_k6_distill000.yaml
+      sha256: 7a9526764228c574ea5c9c118a6bf282ce4c1aa3b1d0f4a8cc16919ce9cc9740
+    embeddings:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/40_embeddings/mae100_hmm_v1_k6_distill000.yaml
+      sha256: 16d0fb1a944d59cf5feebc6c15364879f7cacd6e0f5870b330fac35519593c09
+    downstream:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/50_downstream/mae100_hmm_v1_k6_distill000.yaml
+      sha256: c118224e964e90f25890668cb52e4a778ba2ee6e2c247cb2918df72f6498bec5
+    embedding_reference:
+      path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: b626b22fc08dce56466fa6edbd335ace43940b7be084d378890338a12041cf8f
+    downstream_reference:
+      path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 5b55404b6054758910f648b02f226ed73eee22585a5fd3a3a82bb1796ab25ad1
+- survey: f3
+  source: local_bt
+  candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000
+  configs:
+    baseline_training:
+      path: experiments/f3/facies_benchmark_v2/123_local_bt_noise_rotation_search_v1/50_hmm_pretraining/rot90_asym_g060_3ep/hmm/k6/02_full_25ep.yaml
+      sha256: 50bff466ffab658f9ce8ed27cc2f9d809e3b4bb544a0d883dd502b1749971a93
+    training:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/30_training/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: b9a4d2fc564c2287bd92f55626231b8c54ddd33819bceb95a302ae86970d2b83
+    smoke:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/20_smoke/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: a5cebe9e9431265c53610e4ece4f138dc2a45f19fab16d4bcaa4f7454ae3a60e
+    embeddings:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: 3dbcc153f2340fc2610618de1f47182a1730eb2aad13ab38186901d1bf432f0e
+    downstream:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: ca8e77ada7a301c84e80f90cc3478097de920d81ab45571ca25629e6dc4209e8
+    embedding_reference:
+      path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 69d867e608fc93e7881e94743cfd1447a615f0e2fb2fae53b5942b68e09bc4c2
+    downstream_reference:
+      path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: b6dca0ec0e052a4723195c825d52a6d75f05197f2b343b6d81716b41139c0af6
+- survey: f3
+  source: random
+  candidate_id: random_init_hmm_v1_k6_distill000
+  configs:
+    baseline_training:
+      path: experiments/f3/facies_benchmark_v2/126_pretraining_comparison_completion_v1/10_pretraining/random_self_target_hmm_k6_distill020/02_full_25ep.yaml
+      sha256: a792bb6a918ae981925b718e2573e68db32b78ed0efe25186fb5a3377b42525d
+    training:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/30_training/random_init_hmm_v1_k6_distill000.yaml
+      sha256: c980cd83d82730a5a239247dcb73f9aac27ee908ebead544768fd4a673fcc8b1
+    smoke:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/20_smoke/random_init_hmm_v1_k6_distill000.yaml
+      sha256: aaae54b82f21e743e674af1de264999413920665a105de29ad2645841b1c6c50
+    embeddings:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/40_embeddings/random_init_hmm_v1_k6_distill000.yaml
+      sha256: f902e35e8e65e7b1d985ee72acdca6009fb917ce17e4d1a56d29bcc6185af378
+    downstream:
+      path: experiments/f3/facies_benchmark_v2/141_hmm_v1_k6_zero_distillation_ablation_v1/50_downstream/random_init_hmm_v1_k6_distill000.yaml
+      sha256: 1f1cbd4934eba9eb6128549d105b0d57c172fb49ff11d1f0c0b7303e3d284466
+    embedding_reference:
+      path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/random_init_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 0dd8e568b464b898ab4ec626c08bc23ccbd6c12bacd58974b2b9373bf85923e1
+    downstream_reference:
+      path: experiments/f3/facies_benchmark_v2/131_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 2586fa87116e62a3c741df320cd6d65e48304c2ffb8f7b3e1c6eec65fe5bdd9a
+- survey: parihaka
+  source: mae
+  candidate_id: mae100_hmm_v1_k6_distill000
+  configs:
+    baseline_training:
+      path: experiments/parihaka/facies_benchmark_v1/21_ssl_hmm_continuation_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml
+      sha256: 3a17819f3066760dd73a176ec75c2a80dc1e4a74b80a8df5e5dcadcc0cd9f798
+    training:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/30_training/mae100_hmm_v1_k6_distill000.yaml
+      sha256: 3106aaa29ef709e255af6e9512db99f4928e4fe090e0cb4e5d2f8d11e1e9bc7e
+    smoke:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/20_smoke/mae100_hmm_v1_k6_distill000.yaml
+      sha256: 00a11c4aea8ee93c700c9a37dc689c33e58b8bdde10393d240bb0a22f9bf8900
+    embeddings:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/40_embeddings/mae100_hmm_v1_k6_distill000.yaml
+      sha256: 4aefda80efc063b9f9533d46c095b9c8903ff0498f32ec259c73d23b36f69a72
+    downstream:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/50_downstream/mae100_hmm_v1_k6_distill000.yaml
+      sha256: 33785c18baa3d0e88c878196d16c27729c9574310d8c57e7f16e6dcead3ffe4f
+    embedding_reference:
+      path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: da0ee76466103c86826ce7bec6941c59119a6af95e997bff22cd03f3bba72397
+    downstream_reference:
+      path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 498e848b67017f9431a0eec2d1a4213e3b716a1940e10c73b9ca74d5270ebc0f
+- survey: parihaka
+  source: local_bt
+  candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000
+  configs:
+    baseline_training:
+      path: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/local_bt3/distill020/01_full_25ep.yaml
+      sha256: fe460113bbe706c7752b3b23db8d0856328f39b7dff0f841c2af238b5bc2aa35
+    training:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/30_training/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: b80370500a9701c158a4532fbe379d1b84319401569ea2b05a13fc6a3eb4cb91
+    smoke:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/20_smoke/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: de4b081f53fe0424e38d43bf569a2f55b5a2eb3c588935b0560e028a57fa3118
+    embeddings:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: ef55756e7dc9719edb891036b7868cec5feb4d89664afa439537be94c96d57c3
+    downstream:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: f752c4b70d284da71b92a71cce485b00c1f16faab0bd524ece862df17cb9d5d9
+    embedding_reference:
+      path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 1370871b77416711339f92df8a581c46d48fbcdde02e70966a12a14331ef73d7
+    downstream_reference:
+      path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: b47b3b16f69b10c31775fcad5080d040df3611a67375d529cdad42d51b645aa9
+- survey: parihaka
+  source: random
+  candidate_id: random_init_hmm_v1_k6_distill000
+  configs:
+    baseline_training:
+      path: experiments/parihaka/facies_benchmark_v1/40_pretraining_comparison_completion_v1/20_stage2/random/distill020/01_full_25ep.yaml
+      sha256: 8e22989bebc5124a895de38b3e03306ffb78c9187ea313349861eec4597b7272
+    training:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/30_training/random_init_hmm_v1_k6_distill000.yaml
+      sha256: 0103919186d89012d56b9869f28d1cc887020fb331227ed3469a2abd75006017
+    smoke:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/20_smoke/random_init_hmm_v1_k6_distill000.yaml
+      sha256: ad48b00122e2145c24d9b784fefd475859abe27b7acce9315111ba312382806e
+    embeddings:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/40_embeddings/random_init_hmm_v1_k6_distill000.yaml
+      sha256: 77589ac618c2f41d75f8cf55325a6b18d1c2cc613be0ec4ab6a04bac0b00b523
+    downstream:
+      path: experiments/parihaka/facies_benchmark_v1/51_hmm_v1_k6_zero_distillation_ablation_v1/50_downstream/random_init_hmm_v1_k6_distill000.yaml
+      sha256: 980b65c9e1dd32a0c0e8e851ff2d36b45ffb2826f47651706201ed2c01d3d833
+    embedding_reference:
+      path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/random_init_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 82a333cb0ce33b10da198320a24725cc8ba86dfbc342433805f21ab6b448a6cf
+    downstream_reference:
+      path: experiments/parihaka/facies_benchmark_v1/44_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: bb8b2424783c6279bcf620173603e0e1dca080215b13cf2c7ecaaa8b503dd1bf
+- survey: volve
+  source: mae
+  candidate_id: mae100_hmm_v1_k6_distill000
+  configs:
+    baseline_training:
+      path: experiments/volve/horizon_benchmark_v1/31_mae_local_bt_hmm_five_way_v1/30_stage2/mae100/hmm/k6/02_full_25ep.yaml
+      sha256: 58a30d4c72deb5212d47521a4893585a0d5bef1e214009fa076f604c4a4f4a13
+    training:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/30_training/mae100_hmm_v1_k6_distill000.yaml
+      sha256: d389492549a48b3c8913027aedb900a90226e8601245e52b506549ea67844810
+    smoke:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/20_smoke/mae100_hmm_v1_k6_distill000.yaml
+      sha256: b2c0c49b66d3bab3cea3c34a1021c681947e28d1bd904b86d29ffa5013b39795
+    embeddings:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/40_embeddings/mae100_hmm_v1_k6_distill000.yaml
+      sha256: 049cefdb06e7f19980c57e27661c5e62248e0fabf49ca745b355d179e8ef3e68
+    downstream:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/50_downstream/mae100_hmm_v1_k6_distill000.yaml
+      sha256: 3390e249793de4063cb1810117850d93ee48b2640687a6130e01b984ff89faef
+    embedding_reference:
+      path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 285ebd84c189b380dcc081c9cbe2e5382c564f41e8e2c9f8c7ea3c31e340571f
+    downstream_reference:
+      path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 7fbb84675e55a54d6982af14f33b7ee942b23fbc32c13502f981af5a0c457a6e
+- survey: volve
+  source: local_bt
+  candidate_id: local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000
+  configs:
+    baseline_training:
+      path: experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/rot90_asym_g060_3ep_hmm_k6_distill020.yaml
+      sha256: 6f83844dc6355b067ff732ed45129c738458cc752574412890e9951bb3eaa321
+    training:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/30_training/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: e28ab1dacea464ed8034251db1f61f97bbf6bd729f449c333f2c12575bc445a7
+    smoke:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/20_smoke/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: ce57639e847b89780f94630b96aaac792f841fba99268999e67c401922c09412
+    embeddings:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: 97267a816eec1a1f6f37c8ce8660dd5496a19cd598dcf9e32ae0d1a608d07132
+    downstream:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v1_k6_distill000.yaml
+      sha256: b2863dafde8417c7745c039f3423a27841aab06186b73ce7dd36ba22cf50e91b
+    embedding_reference:
+      path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 5b44b7e3e225f63de0487123cfbdce15b52963188475e535de0ece01e73a0af2
+    downstream_reference:
+      path: experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/40_downstream/rot90_asym_g060_3ep_hmm_k6_distill020.yaml
+      sha256: 632da391457f9969fc765db392483eb6adb6f2b667c692fa7d582bec39f07a19
+- survey: volve
+  source: random
+  candidate_id: random_init_hmm_v1_k6_distill000
+  configs:
+    baseline_training:
+      path: experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/20_pretraining/random_init_hmm_k6_distill020.yaml
+      sha256: 6cd2838791410db4ecd701b3d0c8f91cbb2600ecebc2cf6962a1df7c51ccd65b
+    training:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/30_training/random_init_hmm_v1_k6_distill000.yaml
+      sha256: 8b4b8cc0016b434e75ef5ac5054ad890569e09088ddbecfb3abad7f271f8b3ef
+    smoke:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/20_smoke/random_init_hmm_v1_k6_distill000.yaml
+      sha256: 3ac25858d078425cdf01285fb0a4935fd436e0a27130a03d49256257b62880d8
+    embeddings:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/40_embeddings/random_init_hmm_v1_k6_distill000.yaml
+      sha256: c7401d9db15330a49190b086655ec6dfabfab4ac884dc044f302d044399d220f
+    downstream:
+      path: experiments/volve/horizon_benchmark_v1/43_hmm_v1_k6_zero_distillation_ablation_v1/50_downstream/random_init_hmm_v1_k6_distill000.yaml
+      sha256: 5ea27f188d6ba22aae16cf066a4011cd3efe7a73904351450cdf66c4cf7dfa18
+    embedding_reference:
+      path: experiments/volve/horizon_benchmark_v1/37_hmm_v2_k6810_cons010_multi_source_v1/40_embeddings/random_init_hmm_v2_mh_k6810_distill020_cons010.yaml
+      sha256: 922899475db55924d100d2d3496b25eb3aefbafc46cdec74ff9771b347e6e5f8
+    downstream_reference:
+      path: experiments/volve/horizon_benchmark_v1/33_missing_hmm_comparison_v1/40_downstream/random_init_hmm_k6_distill020.yaml
+      sha256: 5792f984e63286cc3017a466738b44b1987050fbcabbf065f53f104d3b94e1f4

@@ -152,6 +152,7 @@ class VolveHorizonRecipeArmConfig:
 	benchmark_id: str
 	hmm: Mapping[str, object] | None = None
 	multi_head_training_config: Path | None = None
+	single_head_training_config: Path | None = None
 
 	@property
 	def model_ids(self) -> tuple[str, ...]:
@@ -173,7 +174,17 @@ def volve_horizon_recipe_arm_config_from_mapping(
 	_validate_exact_keys(paths, frozenset({'artifact_root', 'volve_root'}), 'paths')
 	_validate_exact_keys(dataset, frozenset({'survey_id'}), 'dataset')
 	_validate_exact_keys(inputs, frozenset({'canonical_input_metadata'}), 'inputs')
-	if 'hmm' in arm and 'multi_head_training_config' in arm:
+	if (
+		sum(
+			key in arm
+			for key in (
+				'hmm',
+				'multi_head_training_config',
+				'single_head_training_config',
+			)
+		)
+		> 1
+	):
 		raise ValueError('arm requires exactly one continuation lineage')
 	arm_keys = frozenset({'arm_id', 'checkpoint', 'embeddings_dir', 'recipe'})
 	_validate_exact_keys(
@@ -183,6 +194,11 @@ def volve_horizon_recipe_arm_config_from_mapping(
 		| (
 			{'multi_head_training_config'}
 			if 'multi_head_training_config' in arm
+			else set()
+		)
+		| (
+			{'single_head_training_config'}
+			if 'single_head_training_config' in arm
 			else set()
 		),
 		'arm',
@@ -273,7 +289,11 @@ def volve_horizon_recipe_arm_config_from_mapping(
 		arm_checkpoint=arm_checkpoint,
 		arm_embeddings_dir=arm_embeddings_dir,
 		recipe=_resolve_recipe(
-			arm.get('recipe'), allow_mae='multi_head_training_config' in arm
+			arm.get('recipe'),
+			allow_mae=any(
+				key in arm
+				for key in ('multi_head_training_config', 'single_head_training_config')
+			),
 		),
 		baseline_checkpoint=baseline_checkpoint,
 		baseline_embeddings_dir=baseline_embeddings_dir,
@@ -290,6 +310,11 @@ def volve_horizon_recipe_arm_config_from_mapping(
 			if 'multi_head_training_config' in arm
 			else None
 		),
+		single_head_training_config=(
+			_absolute_path(arm, 'single_head_training_config', 'arm')
+			if 'single_head_training_config' in arm
+			else None
+		),
 	)
 
 
@@ -299,7 +324,11 @@ def as_five_way_config(
 	"""Express the arm and its baseline in the shared two-source runner shape."""
 	objective = (
 		MAE_OBJECTIVE
-		if (config.hmm is not None or config.multi_head_training_config is not None)
+		if (
+			config.hmm is not None
+			or config.multi_head_training_config is not None
+			or config.single_head_training_config is not None
+		)
 		and config.recipe.method == RANDOM_OBJECTIVE
 		else config.recipe.method
 	)
@@ -316,7 +345,8 @@ def as_five_way_config(
 			'objective': objective,
 			'local_pairs_per_crop': config.recipe.local_pairs_per_crop,
 			'stratigraphy_pretext': config.hmm is not None
-			or config.multi_head_training_config is not None,
+			or config.multi_head_training_config is not None
+			or config.single_head_training_config is not None,
 			**(
 				{
 					'base_objective': objective,
@@ -333,7 +363,11 @@ def as_five_way_config(
 				if config.multi_head_training_config
 				else {}
 			),
-			**({'base_objective': objective, 'hmm_k': 6} if config.hmm else {}),
+			**(
+				{'base_objective': objective, 'hmm_k': 6}
+				if config.hmm or config.single_head_training_config
+				else {}
+			),
 		},
 	)
 	baseline_source = VolveHorizonFiveWayModelSource(
@@ -505,6 +539,12 @@ def run_volve_horizon_recipe_arm_job(
 def _audit_recipe_arm_checkpoint(  # noqa: C901, PLR0912
 	config: VolveHorizonRecipeArmConfig,
 ) -> dict[str, object]:
+	if config.single_head_training_config is not None:
+		from seis_ssl_cluster.hmm.single_head_distillation import (  # noqa: PLC0415
+			audit_volve_single_head_source,
+		)
+
+		return audit_volve_single_head_source(config)
 	if config.multi_head_training_config is not None:
 		from seis_ssl_cluster.hmm.multi_source_volve import (  # noqa: PLC0415
 			audit_multi_head_recipe_source,

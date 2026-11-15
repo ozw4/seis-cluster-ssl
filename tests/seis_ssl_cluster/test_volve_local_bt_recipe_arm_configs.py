@@ -225,6 +225,7 @@ def test_recipe_arm_namespace_has_only_declared_recipe_and_continuation_users() 
 		'39_hmm_v3_k6810_trace_mask_masklr3em5_v1',
 		'40_kmeans_k6810_multi_source_v1',
 		'42_hmm_v2_k6810_random_distillation_ablation_v1',
+		'43_hmm_v1_k6_zero_distillation_ablation_v1',
 	}
 
 
