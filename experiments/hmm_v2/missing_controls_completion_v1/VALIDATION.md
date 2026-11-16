@@ -37,3 +37,20 @@ Barlow Twins' descriptive 15-cell mean favors zero distillation on each survey:
 
 These means span five layouts and three nested budgets. They are descriptive,
 not 15 independent encoder repetitions. The fixed continuation seed is 42.
+
+## Paired HMM/no-HMM CSV update (2026-11-16)
+
+The 540-row review now includes the matched no-HMM score and signed improvement
+for both metrics. The independent 135 no-HMM evaluations are reused four times,
+with decoder seed 42000 throughout. No checkpoint, training, or evaluation was
+rerun. The original 540 HMM scores match bit for bit; the derived outputs are
+separate from the immutable original artifact summary.
+
+Verification checked all 675 input file hashes, all 540 paired differences,
+and 648 group/metric mean-and-SD pairs across 108 groups to 1e-12. Volve input
+valid-token/lateral-mask hashes and output-validity policies also matched in
+every pair. Seed, split and full decoder/support identities are checked before
+joining. Focused tests cover improvement directions, paired SDs, missing or
+mismatched controls, recorded model identities, and exact five/seven-file
+artifact/review publication. The numerical receipt is in the operation's
+`no_hmm_comparison_20261116/numerical_validation.json`.

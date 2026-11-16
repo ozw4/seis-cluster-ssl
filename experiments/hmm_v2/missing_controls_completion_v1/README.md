@@ -114,3 +114,43 @@ The exact review set is `README.md`, `provenance.json`, `factorial_cells.csv`,
 and `v1_comparison.csv`. Publication refuses existing or incomplete outputs;
 focused tests verify membership and byte-preserving copies. Review files are
 never pipeline inputs. [Open the tracked comparison](../../../reports/hmm_missing_controls_completion_v1/README.md).
+
+## HMM versus no-HMM comparison
+
+The shared 540-row `factorial_cells.csv` now places `without_hmm_primary`,
+`with_hmm_primary`, and `primary_improvement` side by side, with the metric
+name, unit, and direction. The original artifact summary remains immutable;
+the derived comparison is under `hmm_vs_no_hmm_v1/` in the same artifact study.
+`no_hmm_comparison.yaml` fixes the original 540-cell checksum, nine no-HMM
+source definitions, and the HMM source summaries before joining scores.
+
+All 135 distinct no-HMM baseline cells use decoder seed 42000 and the same
+layout, label budget, evaluation split, and decoder/support identity as their
+HMM cells. Their metrics are reused for four HMM loss settings. The separate
+Parihaka MAE seed-42001 figure selection is excluded. The no-HMM benchmarks
+retain their established pretraining budgets: MAE reconstruction continuation,
+three-epoch Barlow Twins, and an untrained Random encoder.
+
+Positive improvement always favors HMM. For F3 mean IoU and Parihaka channel
+IoU it is HMM minus no-HMM; for Volve MAE [samples] it is no-HMM minus HMM.
+Secondary improvements (macro F1, channel F1, within-two accuracy) use HMM minus
+no-HMM. The 108-row summary reports means/SDs for both models, the mean/sample
+SD of the five within-layout improvements, and HMM wins/ties/losses. It does
+not combine different metric units. Layout SDs are not encoder-seed SDs.
+
+Generate the five-file artifact bundle and update the seven-file review:
+
+```bash
+python -m seis_ssl_cluster.results.hmm_baseline_comparison \
+  --output artifacts/seis_ssl_cluster/studies/hmm_v2/missing_controls_completion_v1/hmm_vs_no_hmm_v1 \
+  --review-output reports/hmm_missing_controls_completion_v1
+```
+
+For an existing derived bundle, add `--reuse-existing`; its definition hash is
+checked before reuse. The exact derived set is `factorial_cells.csv`,
+`factorial_comparison.csv`, `no_hmm_cells.csv`, `provenance.json`, and
+`README.md`. The review set remains the seven files listed above; the paired
+factorial tables replace their HMM-only views. Other comparison tables retain
+their original bytes. All numerical inputs come from artifacts, never reports.
+Focused coverage tests metric directions, seed/support mismatch rejection,
+paired SDs, negative effects, recorded source identity and exact publication.

@@ -1,0 +1,60 @@
+schema_version: 1
+source_cells:
+  path: studies/hmm_v2/missing_controls_completion_v1/summary/factorial_cells.csv
+  sha256: 52c15f8bfc98d16c7beacb4b13f5ecbbb251069c18289679ed24287da1cd12b3
+decoder_seed: 42000
+baselines:
+- survey: f3
+  source: mae
+  model: mae
+- survey: f3
+  source: local_bt
+  model: local_bt_nr_rot90_asym_g060_3ep
+- survey: f3
+  source: random
+  model: random
+- survey: parihaka
+  source: mae
+  model: mae
+  metrics_template: surveys/parihaka/facies_benchmark_v1/evaluation/channel_benchmark/ssl_hmm_four_way_v1/runs/model=mae/layout={layout}/size={size}/metrics.json
+- survey: parihaka
+  source: local_bt
+  model: local_barlow_twins_rot90_asym_g060_3ep
+  metrics_template: surveys/parihaka/facies_benchmark_v1/evaluation/channel_benchmark/ssl_hmm_four_way_v1/runs/model=local_barlow_twins_rot90_asym_g060_3ep/layout={layout}/size={size}/metrics.json
+- survey: parihaka
+  source: random
+  model: random
+  metrics_template: surveys/parihaka/facies_benchmark_v1/evaluation/channel_benchmark/runs/model=random/layout={layout}/size={size}/metrics.json
+- survey: volve
+  source: mae
+  model: mae
+  metrics_template: surveys/volve/horizon_benchmark_v1/evaluation/horizon/mae_local_bt_hmm_five_way_v1/runs/model=mae/layout={layout}/size={size}/metrics.json
+- survey: volve
+  source: local_bt
+  model: rot90_asym_g060_3ep
+  metrics_template: surveys/volve/horizon_benchmark_v1/evaluation/horizon/local_bt_recipe_arm_v1/runs/model=rot90_asym_g060_3ep/layout={layout}/size={size}/metrics.json
+- survey: volve
+  source: random
+  model: random
+  metrics_template: surveys/volve/horizon_benchmark_v1/evaluation/horizon/mae_local_bt_hmm_five_way_v1/runs/model=random/layout={layout}/size={size}/metrics.json
+f3_test_namespaces:
+- lithology_common_test_v1
+- lithology_common_test_distillation_sensitivity_v1
+- lithology_common_test_random_distillation_v1
+- lithology_common_test_v2_dis0_con0_v1
+- lithology_common_test_barlow_zero_distillation_v1
+hmm_cohorts:
+  0.2|0.0: hmm_v2_k6810_multi_source_v1
+  0.2|0.1: hmm_v2_k6810_cons010_multi_source_v1
+  0.0|0.0: v2_dis0_con0_v1
+  0.0|0.1:
+    mae: hmm_v2_k6810_distillation_sensitivity_v1
+    random: hmm_v2_k6810_random_distillation_ablation_v1
+    local_bt: hmm_v2_k6810_barlow_zero_distillation_paper_sources_v1
+hmm_source_summaries:
+  0.2|0.0:
+    path: studies/hmm_v2/k6810_multi_source_evaluation_v1/summary/summary.json
+    sha256: 911ed222827331b3d8f9f62090c295f6fa28660fe283b5197f9dbdcb199c4520
+  0.2|0.1:
+    path: studies/hmm_v2/k6810_cons010_multi_source_evaluation_v1/summary/summary.json
+    sha256: 76af6c4bfc0a3a07051b5622b191f74b61bd55a84a6613f9123568af84087666
