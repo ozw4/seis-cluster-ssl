@@ -38,7 +38,7 @@ Barlow Twins' descriptive 15-cell mean favors zero distillation on each survey:
 These means span five layouts and three nested budgets. They are descriptive,
 not 15 independent encoder repetitions. The fixed continuation seed is 42.
 
-## Paired HMM/no-HMM CSV update (2026-11-16)
+## Initial paired HMM/no-HMM CSV update (2026-11-16; superseded below)
 
 The 540-row review now includes the matched no-HMM score and signed improvement
 for both metrics. The independent 135 no-HMM evaluations are reused four times,
@@ -54,3 +54,41 @@ joining. Focused tests cover improvement directions, paired SDs, missing or
 mismatched controls, recorded model identities, and exact five/seven-file
 artifact/review publication. The numerical receipt is in the operation's
 `no_hmm_comparison_20261116/numerical_validation.json`.
+
+
+## Retain all baseline seeds (2026-11-16)
+
+The initial paired table incorrectly omitted the five Parihaka MAE/large
+seed-42001 results. The current CSVs overwrite that derived table and retain
+both seeds: 560 comparison rows, 140 distinct no-HMM evaluations and 112
+five-layout summaries. All original 540 comparisons and their numerical values
+remain present. The additional 20 comparisons use the five seed-42001 baselines
+with each of the four HMM loss settings. Both seeds, same/cross-seed status and
+canonical/historical reference status are explicit; seeds are never pooled.
+The existing experiment-47 selection designates 42001 as canonical and
+preserves 42000 as historical for Parihaka MAE/large.
+
+Independent verification checked all 680 input hashes, all 560 signed paired
+differences and 672 mean/SD checks across 112 groups. The five seed-42001
+source hashes match the canonical selection record. Original HMM-only summary
+bytes and the three other review comparison tables remain unchanged. No model
+training or evaluation was rerun.
+
+The full saved-experiment CSV/HTML catalog was also refreshed at its existing
+artifact path. It contains 6,898 split/support evaluation rows and 436,242
+scalar endpoint values. All previous 6,739 rows and 423,970 scalar values remain
+present with unchanged metrics. Both decoder seeds include all five layouts
+and both validation/test splits. Plain MAE under a directory whose name
+contains `hmm` is correctly identified from its actual model metadata as
+no-HMM. Manifest membership, published hashes and ZIP integrity are checked.
+
+Validation: 15 comparison/catalog tests and 77 related completion, common-test
+and namespace tests passed, with Ruff lint/format and package isolation checks.
+Playwright verified all 6,898 HTML rows, both seeds across all five test layouts,
+seed filtering, visible seed columns and filtered CSV downloads, with no
+JavaScript errors.
+Numerical receipts are under the operation's
+`all_seeds_20261116/numerical_validation.json` and `catalog_validation.json`.
+The refreshed full catalog is
+`studies/all_experiment_metrics_20261115_v1/catalog/` within the artifact root;
+its sibling `catalog.zip` is overwritten as well.

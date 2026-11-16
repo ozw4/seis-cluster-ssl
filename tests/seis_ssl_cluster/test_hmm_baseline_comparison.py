@@ -23,6 +23,7 @@ def cell(survey, layout='layout_000', **overrides):
 		decoder_seed=42000,
 		model='with_hmm',
 		shared_identity='fixed',
+		comparison_identity='comparable',
 		metrics_file='hmm/metrics.json',
 		**overrides,
 	)
@@ -54,18 +55,36 @@ def test_signed_improvement_and_units_do_not_invert_horizon_accuracy():
 		assert r['without_hmm_primary'] == b['primary']
 
 
-def test_pairing_rejects_missing_duplicate_seed_or_support_mismatches():
+def test_pairing_rejects_missing_duplicate_or_support_mismatches():
 	a, b = cell('f3'), baseline('f3')
 	with pytest.raises(ValueError, match='missing'):
 		subject.pair([a], [])
 	with pytest.raises(ValueError, match='duplicate'):
 		subject.pair([a], [b, b])
-	with pytest.raises(ValueError, match='seed'):
-		subject.pair([a], [dict(b, decoder_seed=42001)])
+	with pytest.raises(ValueError, match='identity'):
+		subject.pair([a], [dict(b, decoder_seed=42001, comparison_identity='other')])
 	with pytest.raises(ValueError, match='identity'):
 		subject.pair([a], [dict(b, shared_identity='other')])
 	with pytest.raises(ValueError, match='identity'):
 		subject.pair([a], [dict(b, evaluation_split='validation')])
+
+
+def test_all_baseline_seeds_are_retained_and_aggregated_separately():
+	a = [cell('parihaka', f'layout_{i:03d}') for i in range(5)]
+	b = [baseline('parihaka', c['layout_id']) for c in a]
+	b.extend(dict(r, decoder_seed=42001, primary=0.8) for r in b.copy())
+	paired = subject.pair(a, b)
+	assert len(paired) == 10
+	assert {r['without_hmm_decoder_seed'] for r in paired} == {42000, 42001}
+	assert {r['with_hmm_decoder_seed'] for r in paired} == {42000}
+	assert {r['comparison_type'] for r in paired} == {
+		'same_decoder_seed',
+		'different_decoder_seed',
+	}
+	assert sum(r['same_decoder_seed'] for r in paired) == 5
+	groups = subject.summarize(paired)
+	assert len(groups) == 2
+	assert sorted(r['hmm_wins'] for r in groups) == [0, 5]
 
 
 def test_sd_is_computed_from_paired_differences_with_all_negative_rows_retained():
@@ -108,8 +127,35 @@ def test_actual_evaluation_metadata_distinguishes_no_hmm_from_a_parent_directory
 		subject.evaluation(p, 'parihaka', expected_hmm=False)
 	data['benchmark_identity']['training']['seed'] = 42001
 	p.write_text(json.dumps(data))
-	with pytest.raises(ValueError, match='seed'):
-		subject.evaluation(p, 'parihaka', expected_hmm=True)
+	assert subject.evaluation(p, 'parihaka', expected_hmm=True)['decoder_seed'] == 42001
+
+
+def test_cross_seed_identity_relaxes_only_decoder_rng_and_initial_weights(tmp_path):
+	p = tmp_path / 'metrics.json'
+	data = {
+		'model': 'mae',
+		'benchmark_identity': {
+			'training': {'seed': 42000, 'steps': 100},
+			'embedding': {},
+			'decoder_initial_state_sha256': 'a',
+			'mask_sha256': 'same',
+		},
+		'test': {'channel_iou': 0.4, 'channel_f1': 0.6},
+	}
+	p.write_text(json.dumps(data))
+	a = subject.evaluation(p, 'parihaka', expected_hmm=False)
+	data['benchmark_identity']['training']['seed'] = 42001
+	data['benchmark_identity']['decoder_initial_state_sha256'] = 'b'
+	p.write_text(json.dumps(data))
+	b = subject.evaluation(p, 'parihaka', expected_hmm=False)
+	assert a['shared_identity'] != b['shared_identity']
+	assert a['comparison_identity'] == b['comparison_identity']
+	data['benchmark_identity']['mask_sha256'] = 'changed'
+	p.write_text(json.dumps(data))
+	assert (
+		subject.evaluation(p, 'parihaka', expected_hmm=False)['comparison_identity']
+		!= a['comparison_identity']
+	)
 
 
 def test_f3_uses_recorded_model_tag_and_requires_the_common_test_support(tmp_path):
@@ -188,6 +234,15 @@ def test_exact_derived_and_review_sets_preserve_the_original_scores(
 	assert len(subject.rows(paired / 'factorial_comparison.csv')) == 108
 	with pytest.raises(FileExistsError):
 		subject.export(config, artifact, paired)
+	b.extend(
+		dict(r, decoder_seed=42001)
+		for r in b.copy()
+		if (r['survey'], r['source'], r['data_size']) == ('parihaka', 'mae', 'large')
+	)
+	subject.export(config, artifact, paired, overwrite=True)
+	assert len(subject.rows(paired / 'factorial_cells.csv')) == 560
+	assert len(subject.rows(paired / 'factorial_comparison.csv')) == 112
+	assert len(subject.rows(paired / 'no_hmm_cells.csv')) == 140
 	original = artifact / 'original'
 	original.mkdir()
 	for name in PUBLISHED_FILES:
@@ -209,3 +264,6 @@ def test_exact_derived_and_review_sets_preserve_the_original_scores(
 		subject.update_review(original, paired, artifact, out)
 	with pytest.raises(ValueError, match='artifacts'):
 		subject.update_review(out, paired, artifact, out)
+	(paired / 'unowned.txt').write_text('preserve me')
+	with pytest.raises(ValueError, match='unowned'):
+		subject.export(config, artifact, paired, overwrite=True)

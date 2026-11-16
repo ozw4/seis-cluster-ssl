@@ -48,6 +48,10 @@ GROUP_KEYS = (
 	'distillation_weight',
 	'consistency_weight',
 	'evaluation_split',
+	'with_hmm_decoder_seed',
+	'without_hmm_decoder_seed',
+	'comparison_type',
+	'baseline_reference_status',
 )
 BASE_KEYS = ('survey', 'source', 'layout_id', 'data_size')
 
@@ -105,8 +109,13 @@ def evaluation(path: Path, survey: str, *, expected_hmm: bool) -> dict[str, Any]
 		)
 		shared = {k: v for k, v in identity.items() if k not in ignored}
 		scores = data['test']['primary_common'] if survey == 'volve' else data['test']
-	if seed != 42000 or has_hmm != expected_hmm:
-		raise ValueError(f'decoder seed or HMM source mismatch: {path}')
+	if has_hmm != expected_hmm:
+		raise ValueError(f'HMM source mismatch: {path}')
+	# A cross-seed comparison may differ only in decoder RNG and initial weights.
+	comparable = json.loads(json.dumps(shared))
+	for training_key in ('train', 'training'):
+		comparable.get(training_key, {}).pop('seed', None)
+	comparable.pop('decoder_initial_state_sha256', None)
 	metric, _, _, secondary, _ = METRICS[survey]
 	primary, secondary_value = float(scores[metric]), float(scores[secondary])
 	if not all(math.isfinite(v) for v in (primary, secondary_value)):
@@ -117,66 +126,91 @@ def evaluation(path: Path, survey: str, *, expected_hmm: bool) -> dict[str, Any]
 		'primary': primary,
 		'secondary': secondary_value,
 		'shared_identity': digest(shared),
+		'comparison_identity': digest(comparable),
 	}
 
 
 def pair(
 	cells: list[dict[str, Any]], baselines: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-	"""Use each fixed baseline four times; orient improvements toward better results."""
-	lookup = {tuple(r[k] for k in BASE_KEYS): r for r in baselines}
-	if len(lookup) != len(baselines):
-		raise ValueError('duplicate no-HMM baseline')
+	"""Retain every baseline seed and explicitly identify cross-seed comparisons."""
+	lookup: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
+	seen = set()
+	for baseline in baselines:
+		key = tuple(baseline[k] for k in BASE_KEYS)
+		seed_key = (*key, baseline['decoder_seed'])
+		if seed_key in seen:
+			raise ValueError('duplicate no-HMM baseline')
+		seen.add(seed_key)
+		lookup[key].append(baseline)
 	paired = []
 	for c in cells:
 		key = tuple(c[k] for k in BASE_KEYS)
 		if key not in lookup:
 			raise ValueError(f'missing no-HMM baseline: {key}')
-		b = lookup[key]
-		if c['decoder_seed'] != b['decoder_seed'] or b['decoder_seed'] != 42000:
-			raise ValueError(f'paired decoder seed mismatch: {key}')
-		if (
-			c['evaluation_split'] != b['evaluation_split']
-			or c['shared_identity'] != b['shared_identity']
-		):
-			raise ValueError(f'paired evaluation or decoder identity mismatch: {key}')
-		metric, unit, direction, secondary, second_unit = METRICS[c['survey']]
-		with_primary, without_primary = float(c['primary']), float(b['primary'])
-		with_secondary, without_secondary = float(c['secondary']), float(b['secondary'])
-		paired.append(
-			{
-				**{
-					k: c[k]
-					for k in (
-						'survey',
-						'source',
-						'data_size',
-						'layout_id',
-						'distillation_weight',
-						'consistency_weight',
-						'evaluation_split',
-					)
-				},
-				'primary_metric': metric,
-				'primary_unit': unit,
-				'primary_direction': direction,
-				'without_hmm_primary': without_primary,
-				'with_hmm_primary': with_primary,
-				'primary_improvement': (without_primary - with_primary)
-				if direction == 'lower'
-				else (with_primary - without_primary),
-				'secondary_metric': secondary,
-				'secondary_unit': second_unit,
-				'without_hmm_secondary': without_secondary,
-				'with_hmm_secondary': with_secondary,
-				'secondary_improvement': with_secondary - without_secondary,
-				'decoder_seed': b['decoder_seed'],
-				'without_hmm_model': b['model'],
-				'without_hmm_metrics_file': b['metrics_file'],
-				'with_hmm_metrics_file': c['metrics_file'],
-				'shared_identity_sha256': c['shared_identity'],
-			}
-		)
+		for b in lookup[key]:
+			same_seed = c['decoder_seed'] == b['decoder_seed']
+			identity_key = 'shared_identity' if same_seed else 'comparison_identity'
+			if (
+				c['evaluation_split'] != b['evaluation_split']
+				or not c.get(identity_key)
+				or c[identity_key] != b.get(identity_key)
+			):
+				raise ValueError(
+					f'paired evaluation or decoder identity mismatch: {key}'
+				)
+			metric, unit, direction, secondary, second_unit = METRICS[c['survey']]
+			with_primary, without_primary = float(c['primary']), float(b['primary'])
+			with_secondary, without_secondary = (
+				float(c['secondary']),
+				float(b['secondary']),
+			)
+			paired.append(
+				{
+					**{
+						k: c[k]
+						for k in (
+							'survey',
+							'source',
+							'data_size',
+							'layout_id',
+							'distillation_weight',
+							'consistency_weight',
+							'evaluation_split',
+						)
+					},
+					'primary_metric': metric,
+					'primary_unit': unit,
+					'primary_direction': direction,
+					'without_hmm_primary': without_primary,
+					'with_hmm_primary': with_primary,
+					'primary_improvement': (without_primary - with_primary)
+					if direction == 'lower'
+					else (with_primary - without_primary),
+					'secondary_metric': secondary,
+					'secondary_unit': second_unit,
+					'without_hmm_secondary': without_secondary,
+					'with_hmm_secondary': with_secondary,
+					'secondary_improvement': with_secondary - without_secondary,
+					'with_hmm_decoder_seed': c['decoder_seed'],
+					'without_hmm_decoder_seed': b['decoder_seed'],
+					'same_decoder_seed': same_seed,
+					'comparison_type': 'same_decoder_seed'
+					if same_seed
+					else 'different_decoder_seed',
+					'baseline_reference_status': b.get(
+						'baseline_reference_status', 'canonical'
+					),
+					'without_hmm_model': b['model'],
+					'without_hmm_metrics_file': b['metrics_file'],
+					'with_hmm_metrics_file': c['metrics_file'],
+					'with_hmm_identity_sha256': c['shared_identity'],
+					'without_hmm_identity_sha256': b['shared_identity'],
+					'comparison_identity_sha256': c.get(
+						'comparison_identity', c['shared_identity']
+					),
+				}
+			)
 	return paired
 
 
@@ -267,7 +301,6 @@ def collect(  # noqa: C901, PLR0912, PLR0915
 				/ r['data_size']
 				/ 'metrics.json'
 			)
-	descriptors = {(r['survey'], r['source']): r for r in config['baselines']}
 	baselines, manifest = [], []
 
 	def read(path: Path, survey: str, *, hmm: bool) -> dict[str, Any]:
@@ -281,32 +314,34 @@ def collect(  # noqa: C901, PLR0912, PLR0915
 		manifest.append({'path': r['metrics_file'], 'sha256': file_sha256(path)})
 		return r
 
-	for survey in METRICS:
-		for source_name in ('mae', 'local_bt', 'random'):
-			d = descriptors[survey, source_name]
-			for layout in (f'layout_{i:03d}' for i in range(5)):
-				for size in ('small', 'medium', 'large'):
-					if survey == 'f3':
-						p = f3_index['none', source_name, '', '', layout, size]
-					else:
-						p = artifact / d['metrics_template'].format(
-							layout=layout, size=size
-						)
-					r = read(p, survey, hmm=False)
-					if r['model'] != d['model']:
-						raise ValueError('no-HMM model identity changed')
-					baselines.append(
-						dict(
-							r,
-							survey=survey,
-							source=source_name,
-							layout_id=layout,
-							data_size=size,
-							evaluation_split='common_test'
-							if survey == 'f3'
-							else 'test',
-						)
+	for d in config['baselines']:
+		survey, source_name = d['survey'], d['source']
+		for layout in (f'layout_{i:03d}' for i in range(5)):
+			for size in d.get('data_sizes', ('small', 'medium', 'large')):
+				if survey == 'f3':
+					p = f3_index['none', source_name, '', '', layout, size]
+				else:
+					p = artifact / d['metrics_template'].format(
+						layout=layout, size=size
 					)
+				r = read(p, survey, hmm=False)
+				if r['model'] != d['model'] or r['decoder_seed'] != d.get(
+					'decoder_seed', config['decoder_seed']
+				):
+					raise ValueError('no-HMM model or seed identity changed')
+				baselines.append(
+					dict(
+						r,
+						survey=survey,
+						source=source_name,
+						layout_id=layout,
+						data_size=size,
+						baseline_reference_status='historical'
+						if size in d.get('historical_data_sizes', [])
+						else 'canonical',
+						evaluation_split='common_test' if survey == 'f3' else 'test',
+					)
+				)
 	prefixes = {
 		'mae': 'mae100',
 		'local_bt': 'local_bt_rot90_asym_g060_3ep',
@@ -347,8 +382,8 @@ def collect(  # noqa: C901, PLR0912, PLR0915
 		if any(float(c[k]) != r[k] for k in ('primary', 'secondary')):
 			raise ValueError(f'original HMM score differs from source: {p}')
 		c.update(r)
-	if len(cells) != 540 or len(baselines) != 135:
-		raise ValueError('expected 540 HMM cells and 135 no-HMM baselines')
+	if len(cells) != 540 or len(baselines) != config['expected_no_hmm_cells']:
+		raise ValueError('incomplete HMM cells or no-HMM baselines')
 	keys = [
 		tuple(c[k] for k in (*BASE_KEYS, 'distillation_weight', 'consistency_weight'))
 		for c in cells
@@ -358,16 +393,23 @@ def collect(  # noqa: C901, PLR0912, PLR0915
 	return cells, baselines, manifest
 
 
-def export(config_path: Path, artifact: Path, output: Path) -> None:
-	"""Publish an exact immutable derived bundle; preserve the original score table."""
+def export(
+	config_path: Path, artifact: Path, output: Path, *, overwrite: bool = False
+) -> None:
+	"""Stage the exact derived bundle and optionally replace its owned files."""
 	config = yaml.safe_load(config_path.read_text())
 	cells, baselines, manifest = collect(config, artifact)
 	paired = pair(cells, baselines)
 	summary = summarize(paired)
-	if len(summary) != 108:
-		raise ValueError('expected 108 paired aggregate conditions')
+	if len(paired) != config.get('expected_comparisons', len(paired)) or len(
+		summary
+	) != config.get('expected_summaries', len(summary)):
+		raise ValueError('incomplete paired comparisons')
 	if output.exists():
-		raise FileExistsError(output)
+		if not overwrite:
+			raise FileExistsError(output)
+		if {p.name for p in output.iterdir()} != FILES:
+			raise ValueError('refusing to replace unowned comparison files')
 	output.parent.mkdir(parents=True, exist_ok=True)
 	with tempfile.TemporaryDirectory(prefix='.paired-', dir=output.parent) as temporary:
 		stage = Path(temporary)
@@ -379,8 +421,16 @@ def export(config_path: Path, artifact: Path, output: Path) -> None:
 				{
 					'config_sha256': file_sha256(config_path),
 					'original_hmm_cells': config['source_cells'],
-					'hmm_cells': 540,
-					'unique_no_hmm_cells': 135,
+					'hmm_cells': len(cells),
+					'comparison_rows': len(paired),
+					'aggregate_rows': len(summary),
+					'unique_no_hmm_cells': len(baselines),
+					'with_hmm_decoder_seeds': sorted(
+						{c['decoder_seed'] for c in cells}
+					),
+					'without_hmm_decoder_seeds': sorted(
+						{b['decoder_seed'] for b in baselines}
+					),
 					'baseline_reuse_per_cell': 4,
 					'source_files': manifest,
 					'published_files': sorted(FILES),
@@ -390,9 +440,13 @@ def export(config_path: Path, artifact: Path, output: Path) -> None:
 			+ '\n'
 		)
 		(stage / 'README.md').write_text(
-			'# HMM vs no HMM\n\n540 paired rows, 135 unique no-HMM baselines, '
-			'108 five-layout summaries.\n'
-			'All decoder seeds are 42000; F3 uses common test, others test.\n'
+			f'# HMM vs no HMM\n\n{len(paired)} paired rows, '
+			f'{len(baselines)} unique no-HMM baselines, '
+			f'{len(summary)} five-layout summaries.\n'
+			'Both decoder seeds are explicit. '
+			'Same-seed and cross-seed comparisons remain separate.\n'
+			'Parihaka MAE large: 42001 is canonical, 42000 is retained as historical.\n'
+			'F3 uses common test, others test.\n'
 			'Each baseline is reused for four HMM loss settings.\n'
 			'Positive primary_improvement favors HMM: HMM minus baseline for IoU, '
 			'baseline minus HMM for Volve MAE [samples]. '
@@ -403,7 +457,9 @@ def export(config_path: Path, artifact: Path, output: Path) -> None:
 		)
 		if {p.name for p in stage.iterdir()} != FILES:
 			raise ValueError('unexpected paired publication files')
-		stage.rename(output)
+		output.mkdir(exist_ok=True)
+		for name in [*sorted(FILES - {'provenance.json'}), 'provenance.json']:
+			(stage / name).replace(output / name)
 
 
 def update_review(summary: Path, paired: Path, artifact: Path, output: Path) -> None:
@@ -421,14 +477,17 @@ def update_review(summary: Path, paired: Path, artifact: Path, output: Path) -> 
 	if output.exists() and {p.name for p in output.iterdir()} != REVIEW_FILES:
 		raise ValueError('refusing to replace unowned review files')
 	metadata = json.loads((paired / 'provenance.json').read_text())
-	if metadata['hmm_cells'] != 540 or metadata['unique_no_hmm_cells'] != 135:
+	if metadata['hmm_cells'] != 540 or metadata['comparison_rows'] != len(
+		rows(paired / 'factorial_cells.csv')
+	):
 		raise ValueError('incomplete baseline pairing')
 	text = (
-		'# HMMあり・なしの性能比較（540条件）\n\n'
-		'同じデータセット・初期表現・レイアウト・ラベル量・評価分割・decoder seed '
-		'42000で対応づけています。F3は共通test、Parihaka/Volveはtestです。\n\n'
-		'- [540行の対応比較](factorial_cells.csv)\n'
-		'- [108条件の平均・標準偏差・勝敗数](factorial_comparison.csv)\n'
+		'# HMMあり・なしの性能比較\n\n'
+		f'540 HMM条件に対して{metadata["unique_no_hmm_cells"]}個の'
+		'HMMなし評価を対応づけた'
+		f'{metadata["comparison_rows"]}行です。F3は共通test、Parihaka/Volveはtestです。\n\n'
+		'- [全seedの対応比較](factorial_cells.csv)\n'
+		'- [seed別の平均・標準偏差・勝敗数](factorial_comparison.csv)\n'
 		'- [HMM損失設定間の効果・交互作用](factorial_contrasts.csv)\n'
 		'- [Barlow蒸留比較](barlow_comparison.csv)\n'
 		'- [v1蒸留比較](v1_comparison.csv)\n\n'
@@ -437,11 +496,16 @@ def update_review(summary: Path, paired: Path, artifact: Path, output: Path) -> 
 		'F3/Parihakaでは「あり−なし」、Volve MAEでは「なし−あり」としています。'
 		'指標名・単位は`primary_metric`・`primary_unit`列で確認できます。\n\n'
 		'副指標も同じ列構成です。改善量のSDは対応する5レイアウトの差から求めた'
-		'標本SD（ddof=1）で、個別SDの差ではありません。108行表にはHMMの勝・分・敗も示します。\n\n'
-		'135個のHMMなし評価を各4損失設定に再利用しています。MAEは既存の再構成継続モデル、'
+		'標本SD（ddof=1）で、個別SDの差ではありません。集計表にはHMMの勝・分・敗も示します。\n\n'
+		'`with_hmm_decoder_seed`と`without_hmm_decoder_seed`を各行に記載し、'
+		'`comparison_type`で同一seed／異なるseedを区別します。Parihaka / MAE / largeは'
+		'42001を`canonical`、42000を`historical`として両方掲載しています。'
+		'異なるseedの差にはdecoder乱数の影響が含まれます。seedを混ぜて平均していません。\n\n'
+		'HMMなし評価を各4損失設定に再利用しています。MAEは既存の再構成継続モデル、'
 		'Barlow Twinsは既存の3 epochモデル、Randomは未学習モデルです。学習予算を完全に'
-		'揃えた因果実験ではなく、既存ベンチマークとの性能比較です。Parihaka MAEの図用'
-		'seed 42001は含めていません。\n\n'
+		'揃えた因果実験ではなく、既存ベンチマークとの性能比較です。\n\n'
+		'この表は540 HMM条件とその対照の比較です。v1/v3・別checkpoint・archive等を含む'
+		'保存済み全実験はartifactsのall_experiment_metricsカタログCSV・HTMLに収録します。\n\n'
 		'継続学習seedは42です。5レイアウトはencoder seedの5反復ではなく、'
 		'ラベル量は包含関係にあります。F3は同一地域内の'
 		'transductiveなラベルholdoutです。\n\n'
@@ -473,8 +537,16 @@ def update_review(summary: Path, paired: Path, artifact: Path, output: Path) -> 
 					'paired_comparison': str(paired.relative_to(artifact)),
 					'paired_provenance_sha256': file_sha256(paired / 'provenance.json'),
 					'hmm_cells': 540,
-					'unique_no_hmm_cells': 135,
-					'decoder_seed': 42000,
+					**{
+						k: metadata[k]
+						for k in (
+							'unique_no_hmm_cells',
+							'comparison_rows',
+							'aggregate_rows',
+							'with_hmm_decoder_seeds',
+							'without_hmm_decoder_seeds',
+						)
+					},
 					'source_file_sha256': {
 						name: file_sha256(stage / name) for name in sorted(copied)
 					},
@@ -501,8 +573,11 @@ def main() -> None:
 	)
 	parser.add_argument('--output', type=Path, required=True)
 	parser.add_argument('--reuse-existing', action='store_true')
+	parser.add_argument('--overwrite', action='store_true')
 	parser.add_argument('--review-output', type=Path)
 	args = parser.parse_args()
+	if args.overwrite and args.reuse_existing:
+		parser.error('--overwrite and --reuse-existing are mutually exclusive')
 	artifact = args.artifact_root.resolve()
 	output = args.output.resolve()
 	if args.reuse_existing:
@@ -510,7 +585,7 @@ def main() -> None:
 		if metadata['config_sha256'] != file_sha256(args.config):
 			raise ValueError('existing baseline comparison config changed')
 	else:
-		export(args.config, artifact, output)
+		export(args.config, artifact, output, overwrite=args.overwrite)
 	if args.review_output:
 		update_review(
 			artifact / 'studies/hmm_v2/missing_controls_completion_v1/summary',

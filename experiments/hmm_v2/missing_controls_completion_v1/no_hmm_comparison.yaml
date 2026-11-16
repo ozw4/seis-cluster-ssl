@@ -3,6 +3,9 @@ source_cells:
   path: studies/hmm_v2/missing_controls_completion_v1/summary/factorial_cells.csv
   sha256: 52c15f8bfc98d16c7beacb4b13f5ecbbb251069c18289679ed24287da1cd12b3
 decoder_seed: 42000
+expected_no_hmm_cells: 140
+expected_comparisons: 560
+expected_summaries: 112
 baselines:
 - survey: f3
   source: mae
@@ -17,6 +20,14 @@ baselines:
   source: mae
   model: mae
   metrics_template: surveys/parihaka/facies_benchmark_v1/evaluation/channel_benchmark/ssl_hmm_four_way_v1/runs/model=mae/layout={layout}/size={size}/metrics.json
+  historical_data_sizes: [large]
+- survey: parihaka
+  source: mae
+  model: mae
+  decoder_seed: 42001
+  data_sizes: [large]
+  selection: experiments/parihaka/facies_benchmark_v1/47_mae_no_hmm_large_decoder_seed42001_v1/selection.yaml
+  metrics_template: surveys/parihaka/facies_benchmark_v1/benchmark/mae_no_hmm_large_decoder_seed42001_v1/runs/model=mae/layout={layout}/size={size}/metrics.json
 - survey: parihaka
   source: local_bt
   model: local_barlow_twins_rot90_asym_g060_3ep

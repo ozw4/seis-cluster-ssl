@@ -2,14 +2,22 @@
   "original_hmm_summary": "studies/hmm_v2/missing_controls_completion_v1/summary",
   "original_hmm_summary_sha256": "b4d78e7d9c324c88808791fd572ac66cbd4543c25e4f9d9ea1489d5d1ab41271",
   "paired_comparison": "studies/hmm_v2/missing_controls_completion_v1/hmm_vs_no_hmm_v1",
-  "paired_provenance_sha256": "bd957cb11c642988cf53a207b88a1ed42a12056ae43ea70d0925b8c07dfc8ab2",
+  "paired_provenance_sha256": "d50d824ac95b24d6a594a029c3c22944eba13900ac53302fa0649323f7796cc5",
   "hmm_cells": 540,
-  "unique_no_hmm_cells": 135,
-  "decoder_seed": 42000,
+  "unique_no_hmm_cells": 140,
+  "comparison_rows": 560,
+  "aggregate_rows": 112,
+  "with_hmm_decoder_seeds": [
+    42000
+  ],
+  "without_hmm_decoder_seeds": [
+    42000,
+    42001
+  ],
   "source_file_sha256": {
     "barlow_comparison.csv": "cab37d512733fb83d777b3dec60cc4d6f6b54d9ddbc25939a63773d25d7487d7",
-    "factorial_cells.csv": "d5a2050cb0038d7b71d96953851b691940d200165fcf8e5a16971fc705ed92c4",
-    "factorial_comparison.csv": "02cb5415a65cac8e4133d2db9446302845b8212eee2cc2df27c90718f0b3019f",
+    "factorial_cells.csv": "e2a7e40e05f56b85b8d690caf34928085743e444d9718a9d3de95d01b6157ab5",
+    "factorial_comparison.csv": "5abcfa41bdc5888d8fc8e711885f12ef594972bf9f5b2a48c5ba6a80e47a04d3",
     "factorial_contrasts.csv": "b793202e4301df67deec5075a8ade0bd0af2c675df9235b83410e032b7214945",
     "v1_comparison.csv": "2ad1bfa794c52f03258c858f74b4807c543e48c23769350cc8e1a60ef88670a4"
   },

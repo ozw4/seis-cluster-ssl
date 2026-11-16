@@ -19,8 +19,11 @@ studies. It resolves file aliases once, does not traverse directory aliases,
 and excludes generated catalog/figure bundles. It never reads `reports/`.
 Versioned YAML, recorded decoder/probe configs and encoder training sidecars
 supply condition identities. Explicit model identities take priority over
-shared parent directory names. Unavailable coefficients and split identities
-remain empty or unknown. Probe validation is recognized only when its recorded
+shared parent directory names: a plain MAE checkpoint under
+`ssl_hmm_continuation_v1/mae_continue/` remains no-HMM. Every saved decoder
+seed remains a separate row and a separate layout-summary group; a canonical
+reference designation never removes historical seed results. Unavailable
+coefficients and split identities remain empty or unknown. Probe validation is recognized only when its recorded
 config identifies validation tokens.
 
 The exact publication contract is `FIXED_FILES` in
@@ -28,7 +31,9 @@ The exact publication contract is `FIXED_FILES` in
 listed individually in `source_tables/`. `manifest.json` lists this exact set
 and hashes every member except itself. The fixed files are:
 
-- `index.html`: standalone filterable report; no network requests.
+- `index.html`: standalone filterable report; no network requests. Encoder and
+  decoder seeds appear in the evaluation and summary tables, with a decoder-seed
+  filter; filtered CSV downloads keep these columns.
 - `experiment_metrics.csv`: one row per saved evaluation split/support, with
   principal metrics and full experiment/source identities.
 - `metrics_long.csv`: all scalar endpoint metrics, including class, horizon,

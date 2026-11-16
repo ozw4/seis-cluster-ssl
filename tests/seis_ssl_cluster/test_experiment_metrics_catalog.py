@@ -26,6 +26,41 @@ def read_csv(path):
 		return list(csv.DictReader(stream))
 
 
+def test_all_decoder_seeds_are_kept_and_parent_hmm_name_does_not_define_protocol(
+	tmp_path,
+):
+	root = tmp_path / 'artifacts/seis_ssl_cluster'
+	for seed in (42000, 42001):
+		write_json(
+			root
+			/ f'surveys/parihaka/facies_benchmark_v1/benchmark/seed{seed}/metrics.json',
+			{
+				'model': 'mae',
+				'layout_id': 'layout_000',
+				'data_size': 'large',
+				'benchmark_identity': {
+					'training': {'seed': seed},
+					'embedding': {
+						'checkpoint_path': (
+							'ssl_hmm_continuation_v1/mae_continue/checkpoint.pt'
+						),
+						'model_source': {},
+					},
+				},
+				'test': {'channel_iou': 0.5},
+			},
+		)
+	output = tmp_path / 'catalog'
+	build_catalog(tmp_path, root, output)
+	rows = read_csv(output / 'experiment_metrics.csv')
+	assert len(rows) == 2
+	assert {r['decoder_seed'] for r in rows} == {'42000', '42001'}
+	assert {r['protocol'] for r in rows} == {'none'}
+	html = (output / 'index.html').read_text()
+	assert 'id="decoder_seed"' in html
+	assert "'encoder_seed','decoder_seed','label_budget'" in html
+
+
 def test_export_scope_provenance_nulls_and_exact_file_set(tmp_path):
 	root = tmp_path / 'artifacts/seis_ssl_cluster'
 	f3 = root / 'surveys/f3/facies_benchmark_v2/benchmark/run_a/runs'

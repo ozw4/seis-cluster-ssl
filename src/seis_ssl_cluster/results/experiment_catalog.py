@@ -510,7 +510,14 @@ def context(
 	protocol = 'none'
 	if 'kmeans' in model_text.lower():
 		protocol = 'k-means'
-	elif 'hmm' in model_text.lower() or head:
+	elif (
+		'hmm' in model.lower()
+		or head
+		or any(
+			bool(embedding.get('model_source', {}).get(key))
+			for key in ('stratigraphy_pretext', 'multi_head', 'hmm_k', 'pseudo_targets')
+		)
+	) and condition.get('version') != 'none':
 		protocol = next(
 			(
 				f'HMM v{v}'
