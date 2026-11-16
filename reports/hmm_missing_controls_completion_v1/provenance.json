@@ -2,22 +2,42 @@
   "original_hmm_summary": "studies/hmm_v2/missing_controls_completion_v1/summary",
   "original_hmm_summary_sha256": "b4d78e7d9c324c88808791fd572ac66cbd4543c25e4f9d9ea1489d5d1ab41271",
   "paired_comparison": "studies/hmm_v2/missing_controls_completion_v1/hmm_vs_no_hmm_v1",
-  "paired_provenance_sha256": "d50d824ac95b24d6a594a029c3c22944eba13900ac53302fa0649323f7796cc5",
-  "hmm_cells": 540,
+  "paired_provenance_sha256": "c95ac61273625f359dfce1ec819f7391370a34591778ac87dd7ed4c77bc4bb57",
+  "hmm_cells": 4689,
   "unique_no_hmm_cells": 140,
-  "comparison_rows": 560,
-  "aggregate_rows": 112,
+  "comparison_rows": 4754,
+  "aggregate_rows": 369,
   "with_hmm_decoder_seeds": [
-    42000
+    42,
+    42000,
+    42001,
+    42002,
+    42003,
+    42004
   ],
   "without_hmm_decoder_seeds": [
     42000,
     42001
   ],
+  "original_v2_cells": 540,
+  "saved_hmm_by_version": {
+    "legacy": 263,
+    "v1": 1696,
+    "v2": 2205,
+    "v3": 525
+  },
+  "comparison_rows_by_version": {
+    "legacy": 263,
+    "v1": 1716,
+    "v2": 2245,
+    "v3": 530
+  },
+  "matched_rows": 1785,
+  "unmatched_rows": 2969,
   "source_file_sha256": {
     "barlow_comparison.csv": "cab37d512733fb83d777b3dec60cc4d6f6b54d9ddbc25939a63773d25d7487d7",
-    "factorial_cells.csv": "e2a7e40e05f56b85b8d690caf34928085743e444d9718a9d3de95d01b6157ab5",
-    "factorial_comparison.csv": "5abcfa41bdc5888d8fc8e711885f12ef594972bf9f5b2a48c5ba6a80e47a04d3",
+    "factorial_cells.csv": "c8607d0f72d1e77d42f480030bfdc9f2d1812afaa0d2dc1273437fc810dccb28",
+    "factorial_comparison.csv": "f81a94e7b827ffc29f58fcbaf128842d063a6ac74e247fb7498147745c3df7bf",
     "factorial_contrasts.csv": "b793202e4301df67deec5075a8ade0bd0af2c675df9235b83410e032b7214945",
     "v1_comparison.csv": "2ad1bfa794c52f03258c858f74b4807c543e48c23769350cc8e1a60ef88670a4"
   },

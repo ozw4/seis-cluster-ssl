@@ -69,3 +69,6 @@ hmm_source_summaries:
   0.2|0.1:
     path: studies/hmm_v2/k6810_cons010_multi_source_evaluation_v1/summary/summary.json
     sha256: 76af6c4bfc0a3a07051b5622b191f74b61bd55a84a6613f9123568af84087666
+saved_catalog:
+  path: studies/all_experiment_metrics_20261115_v1/catalog/experiment_metrics.csv
+  sha256: 92b4d5b157c5dc09708af68c36f49da00cb120b228faa346a4e1891841042abc

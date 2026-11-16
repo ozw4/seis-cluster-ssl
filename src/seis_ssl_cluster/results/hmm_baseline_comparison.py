@@ -1,4 +1,4 @@
-"""Pair the 540 fixed HMM conditions with matched no-HMM decoder results."""
+"""Compare saved HMM versions with verified no-HMM decoder results."""
 
 # ruff: noqa: RUF001 - Japanese report prose uses native punctuation.
 from __future__ import annotations
@@ -43,6 +43,12 @@ METRICS = {
 }
 GROUP_KEYS = (
 	'survey',
+	'hmm_version',
+	'head_ks',
+	'with_hmm_model',
+	'source_cohort',
+	'evaluation_support',
+	'checkpoint_selection',
 	'source',
 	'data_size',
 	'distillation_weight',
@@ -54,6 +60,18 @@ GROUP_KEYS = (
 	'baseline_reference_status',
 )
 BASE_KEYS = ('survey', 'source', 'layout_id', 'data_size')
+DETAIL_KEYS = (
+	'hmm_version',
+	'head_ks',
+	'with_hmm_model',
+	'with_hmm_record_id',
+	'evaluation_support',
+	'source_evaluation_split',
+	'source_cohort',
+	'checkpoint_selection',
+	'archived',
+	'saved_status',
+)
 
 
 def rows(path: Path) -> list[dict[str, str]]:
@@ -103,9 +121,23 @@ def evaluation(path: Path, survey: str, *, expected_hmm: bool) -> dict[str, Any]
 			bool(model_source.get(k))
 			for k in ('stratigraphy_pretext', 'multi_head', 'hmm_k', 'pseudo_targets')
 		)
-		# Volve's benchmark name is descriptive; all scientific identity fields stay.
+		if not has_hmm and identity['embedding'].get('checkpoint_path'):
+			# Some v1 zero-distillation exports record only a recipe-arm identity.
+			# Verify the actual training schema rather than guessing from its path.
+			training_path = (
+				Path(identity['embedding']['checkpoint_path'])
+				.resolve()
+				.with_name('resolved_config.json')
+			)
+			if training_path.is_file():
+				training = json.loads(training_path.read_text())
+				has_hmm = training.get('stage') == 'train_strat_hmm_pretext' and bool(
+					training.get('head')
+				)
+		# Volve's benchmark name and available checkpoint-policy list describe
+		# the exporter. The actual selected checkpoint remains explicit per row.
 		ignored = {'model', 'embedding'} | (
-			{'benchmark'} if survey == 'volve' else set()
+			{'benchmark', 'checkpoint_selections'} if survey == 'volve' else set()
 		)
 		shared = {k: v for k, v in identity.items() if k not in ignored}
 		scores = data['test']['primary_common'] if survey == 'volve' else data['test']
@@ -167,6 +199,7 @@ def pair(
 			)
 			paired.append(
 				{
+					**{k: c.get(k, '') for k in DETAIL_KEYS},
 					**{
 						k: c[k]
 						for k in (
@@ -180,6 +213,8 @@ def pair(
 						)
 					},
 					'primary_metric': metric,
+					'comparison_status': 'paired',
+					'comparison_note': '',
 					'primary_unit': unit,
 					'primary_direction': direction,
 					'without_hmm_primary': without_primary,
@@ -214,14 +249,19 @@ def pair(
 	return paired
 
 
-def summarize(paired: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def summarize(
+	paired: list[dict[str, Any]], *, allow_partial: bool = False
+) -> list[dict[str, Any]]:
 	"""Compute matched five-layout means and SDs of the individual improvements."""
 	groups: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
 	for r in paired:
+		if r.get('comparison_status') != 'paired':
+			continue
 		groups[tuple(r[k] for k in GROUP_KEYS)].append(r)
 	out = []
 	for _, group in sorted(groups.items()):
-		if len(group) != 5 or len({r['layout_id'] for r in group}) != 5:
+		distinct = len({r['layout_id'] for r in group}) == len(group)
+		if not allow_partial and (len(group) != 5 or not distinct):
 			raise ValueError('each aggregate requires five distinct paired layouts')
 		first = group[0]
 		r = {k: first[k] for k in GROUP_KEYS}
@@ -237,7 +277,14 @@ def summarize(paired: list[dict[str, Any]]) -> list[dict[str, Any]]:
 				)
 			}
 		)
-		r['n'] = 5
+		r['n'] = len(group)
+		r['aggregation_status'] = (
+			'complete_five_layouts'
+			if len(group) == 5 and distinct
+			else 'partial_layouts'
+			if distinct
+			else 'duplicate_layouts_not_aggregated'
+		)
 		for name in (
 			'without_hmm_primary',
 			'with_hmm_primary',
@@ -247,13 +294,13 @@ def summarize(paired: list[dict[str, Any]]) -> list[dict[str, Any]]:
 			'secondary_improvement',
 		):
 			values = [float(c[name]) for c in group]
-			r[name + '_mean'], r[name + '_sample_sd'] = (
-				statistics.mean(values),
-				statistics.stdev(values),
+			r[name + '_mean'] = statistics.mean(values) if distinct else ''
+			r[name + '_sample_sd'] = (
+				statistics.stdev(values) if distinct and len(values) > 1 else ''
 			)
 		r['hmm_wins'] = sum(c['primary_improvement'] > 1e-12 for c in group)
 		r['hmm_ties'] = sum(abs(c['primary_improvement']) <= 1e-12 for c in group)
-		r['hmm_losses'] = 5 - r['hmm_wins'] - r['hmm_ties']
+		r['hmm_losses'] = len(group) - r['hmm_wins'] - r['hmm_ties']
 		out.append(r)
 	return out
 
@@ -382,6 +429,7 @@ def collect(  # noqa: C901, PLR0912, PLR0915
 		if any(float(c[k]) != r[k] for k in ('primary', 'secondary')):
 			raise ValueError(f'original HMM score differs from source: {p}')
 		c.update(r)
+		c.update(hmm_version='v2', head_ks='6|8|10', with_hmm_model=r['model'])
 	if len(cells) != 540 or len(baselines) != config['expected_no_hmm_cells']:
 		raise ValueError('incomplete HMM cells or no-HMM baselines')
 	keys = [
@@ -405,6 +453,17 @@ def export(
 		summary
 	) != config.get('expected_summaries', len(summary)):
 		raise ValueError('incomplete paired comparisons')
+	extra_provenance = {}
+	if 'saved_catalog' in config:
+		from seis_ssl_cluster.results.saved_hmm_comparison import (  # noqa: PLC0415
+			expand_saved,
+		)
+
+		paired, extra_provenance = expand_saved(
+			paired, baselines, artifact, config['saved_catalog']
+		)
+		manifest.extend(extra_provenance.pop('additional_sources'))
+		summary = summarize(paired, allow_partial=True)
 	if output.exists():
 		if not overwrite:
 			raise FileExistsError(output)
@@ -421,17 +480,23 @@ def export(
 				{
 					'config_sha256': file_sha256(config_path),
 					'original_hmm_cells': config['source_cells'],
-					'hmm_cells': len(cells),
+					'original_v2_cells': len(cells),
+					'hmm_cells': extra_provenance.get('saved_hmm_records', len(cells)),
+					**extra_provenance,
 					'comparison_rows': len(paired),
 					'aggregate_rows': len(summary),
 					'unique_no_hmm_cells': len(baselines),
 					'with_hmm_decoder_seeds': sorted(
-						{c['decoder_seed'] for c in cells}
+						{
+							int(c['with_hmm_decoder_seed'])
+							for c in paired
+							if c['with_hmm_decoder_seed'] != ''
+						}
 					),
 					'without_hmm_decoder_seeds': sorted(
 						{b['decoder_seed'] for b in baselines}
 					),
-					'baseline_reuse_per_cell': 4,
+					'original_v2_baseline_reuse_per_cell': 4,
 					'source_files': manifest,
 					'published_files': sorted(FILES),
 				},
@@ -442,12 +507,15 @@ def export(
 		(stage / 'README.md').write_text(
 			f'# HMM vs no HMM\n\n{len(paired)} paired rows, '
 			f'{len(baselines)} unique no-HMM baselines, '
-			f'{len(summary)} five-layout summaries.\n'
+			f'{len(summary)} layout summaries.\n'
+			'All saved HMM versions are retained when a saved_catalog is configured.\n'
+			'Unmatched rows retain HMM results, with empty baseline/delta '
+			'and an explicit reason.\n'
 			'Both decoder seeds are explicit. '
 			'Same-seed and cross-seed comparisons remain separate.\n'
 			'Parihaka MAE large: 42001 is canonical, 42000 is retained as historical.\n'
 			'F3 uses common test, others test.\n'
-			'Each baseline is reused for four HMM loss settings.\n'
+			'Check hmm_version, head_ks, model, split and support before comparisons.\n'
 			'Positive primary_improvement favors HMM: HMM minus baseline for IoU, '
 			'baseline minus HMM for Volve MAE [samples]. '
 			'Secondary improvement is HMM minus baseline.\n'
@@ -477,16 +545,16 @@ def update_review(summary: Path, paired: Path, artifact: Path, output: Path) -> 
 	if output.exists() and {p.name for p in output.iterdir()} != REVIEW_FILES:
 		raise ValueError('refusing to replace unowned review files')
 	metadata = json.loads((paired / 'provenance.json').read_text())
-	if metadata['hmm_cells'] != 540 or metadata['comparison_rows'] != len(
+	if metadata['original_v2_cells'] != 540 or metadata['comparison_rows'] != len(
 		rows(paired / 'factorial_cells.csv')
 	):
 		raise ValueError('incomplete baseline pairing')
 	text = (
 		'# HMMあり・なしの性能比較\n\n'
-		f'540 HMM条件に対して{metadata["unique_no_hmm_cells"]}個の'
-		'HMMなし評価を対応づけた'
-		f'{metadata["comparison_rows"]}行です。F3は共通test、Parihaka/Volveはtestです。\n\n'
-		'- [全seedの対応比較](factorial_cells.csv)\n'
+		f'保存済みHMM評価{metadata["hmm_cells"]}件を掲載した'
+		f'{metadata["comparison_rows"]}行です。v1・v2・v3・legacyを同じCSVに収録し、'
+		'`hmm_version`・`head_ks`・モデル・評価分割・評価対象を各行に明記しています。\n\n'
+		'- [全バージョン・全seedの結果と対応比較](factorial_cells.csv)\n'
 		'- [seed別の平均・標準偏差・勝敗数](factorial_comparison.csv)\n'
 		'- [HMM損失設定間の効果・交互作用](factorial_contrasts.csv)\n'
 		'- [Barlow蒸留比較](barlow_comparison.csv)\n'
@@ -495,18 +563,24 @@ def update_review(summary: Path, paired: Path, artifact: Path, output: Path) -> 
 		'`primary_improvement`が改善量です。正ならHMMで改善、負なら悪化です。'
 		'F3/Parihakaでは「あり−なし」、Volve MAEでは「なし−あり」としています。'
 		'指標名・単位は`primary_metric`・`primary_unit`列で確認できます。\n\n'
+		'`comparison_status=paired`は対照との評価・decoder条件が一致する比較です。'
+		'`unmatched_baseline`の行もHMMの実測値を残し、HMMなし・改善量は空欄とし、'
+		'理由を`comparison_note`に記載します。validationとtest、異なる評価対象を'
+		'対応づけていません。F3の対照は共通test、Parihaka/Volveはtestです。\n\n'
 		'副指標も同じ列構成です。改善量のSDは対応する5レイアウトの差から求めた'
-		'標本SD（ddof=1）で、個別SDの差ではありません。集計表にはHMMの勝・分・敗も示します。\n\n'
+		'標本SD（ddof=1）で、個別SDの差ではありません。集計表にはn・集計状態・'
+		'HMMの勝・分・敗も示します。5レイアウト未満は明示し、1件のSDは空欄です。'
+		'同一レイアウトが重複する集計は平均しません。\n\n'
 		'`with_hmm_decoder_seed`と`without_hmm_decoder_seed`を各行に記載し、'
 		'`comparison_type`で同一seed／異なるseedを区別します。Parihaka / MAE / largeは'
 		'42001を`canonical`、42000を`historical`として両方掲載しています。'
 		'異なるseedの差にはdecoder乱数の影響が含まれます。seedを混ぜて平均していません。\n\n'
-		'HMMなし評価を各4損失設定に再利用しています。MAEは既存の再構成継続モデル、'
+		'HMMなし評価は条件が一致するHMM評価に再利用しています。MAEは既存の再構成継続モデル、'
 		'Barlow Twinsは既存の3 epochモデル、Randomは未学習モデルです。学習予算を完全に'
 		'揃えた因果実験ではなく、既存ベンチマークとの性能比較です。\n\n'
-		'この表は540 HMM条件とその対照の比較です。v1/v3・別checkpoint・archive等を含む'
-		'保存済み全実験はartifactsのall_experiment_metricsカタログCSV・HTMLに収録します。\n\n'
-		'継続学習seedは42です。5レイアウトはencoder seedの5反復ではなく、'
+		'元のv2比較560行は保持しています。v1蒸留比較の405条件もこの主CSVに統合しています。'
+		'全実験カタログにはHMM以外の手法も含む全評価・指標を収録します。\n\n'
+		'5レイアウトはencoder seedの5反復ではなく、'
 		'ラベル量は包含関係にあります。F3は同一地域内の'
 		'transductiveなラベルholdoutです。\n\n'
 		'[実験記録]'
@@ -536,7 +610,7 @@ def update_review(summary: Path, paired: Path, artifact: Path, output: Path) -> 
 					),
 					'paired_comparison': str(paired.relative_to(artifact)),
 					'paired_provenance_sha256': file_sha256(paired / 'provenance.json'),
-					'hmm_cells': 540,
+					'hmm_cells': metadata['hmm_cells'],
 					**{
 						k: metadata[k]
 						for k in (
@@ -545,7 +619,18 @@ def update_review(summary: Path, paired: Path, artifact: Path, output: Path) -> 
 							'aggregate_rows',
 							'with_hmm_decoder_seeds',
 							'without_hmm_decoder_seeds',
+							'original_v2_cells',
 						)
+					},
+					**{
+						k: metadata[k]
+						for k in (
+							'saved_hmm_by_version',
+							'comparison_rows_by_version',
+							'matched_rows',
+							'unmatched_rows',
+						)
+						if k in metadata
 					},
 					'source_file_sha256': {
 						name: file_sha256(stage / name) for name in sorted(copied)

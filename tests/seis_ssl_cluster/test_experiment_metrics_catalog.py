@@ -26,6 +26,33 @@ def read_csv(path):
 		return list(csv.DictReader(stream))
 
 
+def test_recorded_single_head_v1_is_found_without_v1_in_the_model_name(tmp_path):
+	root = tmp_path / 'artifacts/seis_ssl_cluster'
+	checkpoint = root / 'surveys/parihaka/pretraining/old_hmm_k6/latest.pt'
+	write_json(
+		checkpoint.with_name('resolved_config.json'),
+		{
+			'stage': 'train_strat_hmm_pretext',
+			'head': {'num_prototypes': 6},
+			'loss': {'distillation_weight': 0.1},
+		},
+	)
+	write_json(
+		root / 'surveys/parihaka/benchmark/metrics.json',
+		{
+			'model': 'mae_hmm_k6_distill010',
+			'benchmark_identity': {'embedding': {'checkpoint_path': str(checkpoint)}},
+			'test': {'channel_iou': 0.5},
+		},
+	)
+	output = tmp_path / 'catalog'
+	build_catalog(tmp_path, root, output)
+	row = read_csv(output / 'experiment_metrics.csv')[0]
+	assert row['protocol'] == 'HMM v1'
+	assert row['hmm_version'] == 'v1'
+	assert row['distillation_weight'] == '0.1'
+
+
 def test_all_decoder_seeds_are_kept_and_parent_hmm_name_does_not_define_protocol(
 	tmp_path,
 ):

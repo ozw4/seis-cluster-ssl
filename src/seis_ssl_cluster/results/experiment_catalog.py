@@ -41,6 +41,7 @@ CONTEXT_FIELDS = (
 	'model',
 	'initialization',
 	'protocol',
+	'hmm_version',
 	'head_type',
 	'head_ks',
 	'distillation_weight',
@@ -531,6 +532,18 @@ def context(
 			if len(ks) > 1 or 'mh_' in model_text
 			else 'single-head K6 / legacy HMM'
 		)
+	# Early v1 model tags predate the literal "hmm_v1" spelling. The recorded
+	# single-head training schema and evaluation manifest identify that version.
+	if protocol not in ('none', 'k-means'):
+		if condition.get('version') in ('v1', 'v2', 'v3'):
+			protocol = f'HMM {condition["version"]}'
+		elif (
+			protocol == 'single-head K6 / legacy HMM'
+			and actual.get('stage') == 'train_strat_hmm_pretext'
+			and head.get('num_prototypes')
+			and not head.get('ks')
+		):
+			protocol = 'HMM v1'
 	experiment, definition = index.match(path)
 	cohort_parts = list(parts)
 	cut = next(
@@ -578,6 +591,11 @@ def context(
 		'model': str(model),
 		'initialization': _initialization(model, embedding, checkpoint, actual),
 		'protocol': protocol,
+		'hmm_version': protocol.removeprefix('HMM ')
+		if protocol.startswith('HMM v')
+		else 'legacy'
+		if 'legacy' in protocol
+		else '',
 		'head_type': 'multi' if '|' in ks_text else 'single' if ks_text else '',
 		'head_ks': ks_text,
 		'distillation_weight': loss.get(

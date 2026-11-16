@@ -56,7 +56,7 @@ artifact/review publication. The numerical receipt is in the operation's
 `no_hmm_comparison_20261116/numerical_validation.json`.
 
 
-## Retain all baseline seeds (2026-11-16)
+## Retain all baseline seeds (2026-11-16; expanded below)
 
 The initial paired table incorrectly omitted the five Parihaka MAE/large
 seed-42001 results. The current CSVs overwrite that derived table and retain
@@ -92,3 +92,50 @@ Numerical receipts are under the operation's
 The refreshed full catalog is
 `studies/all_experiment_metrics_20261115_v1/catalog/` within the artifact root;
 its sibling `catalog.zip` is overwritten as well.
+
+
+## All HMM versions in the main CSV (2026-11-16)
+
+The earlier 560-row table still restricted the main comparison to v2. The
+current file at the same path contains 4,754 rows covering all 4,689 saved HMM
+evaluation identities in the complete catalog. Those identities comprise
+1,696 v1, 2,205 v2, 525 v3 and 263 historical evaluations. Repeated comparison
+rows retain every compatible baseline seed. No version, seed, split, support,
+checkpoint selection or archived HMM endpoint is dropped from this inventory.
+
+All 405 aligned v1 reference cells are present with bit-identical principal and
+secondary scores and a verified no-HMM comparison, including distillation
+weights 0, 0.1 and 0.2 on all three surveys. The original 560 v2 comparisons also
+retain their original scores and improvements. Actual recorded HMM decoder
+seeds include 42 and 42000 through 42004; unknown seeds remain empty.
+
+There are 1,785 verified paired rows and 2,969 unpaired rows. Unpaired results
+retain their measured HMM scores with empty baseline/delta fields and an
+explicit reason; validation is not compared with test. The 369 aggregate rows
+separate version, K, model, cohort, selection, split, support and seeds. Partial
+layout coverage and duplicate-layout conflicts are explicit; n=1 SDs are empty.
+
+Early v1 tags without `hmm_v1` now use their recorded single-head training
+schema or evaluation manifest for version identification. Volve v1 zero-loss
+exports omit HMM flags, so their actual encoder training configs are checked.
+The list of checkpoint policies available in a Volve exporter is descriptive;
+it does not change the selected score or scientific decoder/support identity.
+
+Independent checks cover every saved HMM catalog identity, all 405 v1 reference
+cells, all 560 original comparisons, all 1,785 signed paired differences,
+2,214 aggregate metric checks and 3,589 original-source hashes. Immutable HMM
+summary inputs and the other three comparison tables remain unchanged.
+The five-file artifact and seven-file review publication contracts are retained.
+
+The full CSV/HTML catalog retains all 6,898 evaluation rows and metric values;
+HTML now exposes 1,696 rows under HMM v1, including the nonzero distillation
+settings previously shown as legacy. Playwright checked that filter and the
+Parihaka v1 test CSV download without JavaScript errors. The overwritten ZIP
+also includes the updated 4,754-row comparison as a copied source table.
+
+Validation: 22 comparison/catalog tests and 77 related completion, common-test
+and namespace tests passed, plus Ruff lint/format and package isolation.
+Evidence is under `operations/hmm_v2/missing_controls_completion_v1/` in
+`all_versions_20261116/`: `verify.py`, `numerical_validation.json`,
+`browser_validation.json`, and `publication.json`. No training, prediction or
+scientific evaluation was rerun.

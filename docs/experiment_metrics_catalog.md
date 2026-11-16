@@ -18,7 +18,10 @@ The exporter scans canonical survey directories, archives and cross-survey
 studies. It resolves file aliases once, does not traverse directory aliases,
 and excludes generated catalog/figure bundles. It never reads `reports/`.
 Versioned YAML, recorded decoder/probe configs and encoder training sidecars
-supply condition identities. Explicit model identities take priority over
+supply condition identities. `hmm_version` records v1/v2/v3 or an explicit
+legacy category. Early single-head v1 models are identified from their actual
+training schema and evaluation manifests even when the tag lacks `hmm_v1`;
+they appear under the HMM v1 filter in HTML. Explicit model identities take priority over
 shared parent directory names: a plain MAE checkpoint under
 `ssl_hmm_continuation_v1/mae_continue/` remains no-HMM. Every saved decoder
 seed remains a separate row and a separate layout-summary group; a canonical

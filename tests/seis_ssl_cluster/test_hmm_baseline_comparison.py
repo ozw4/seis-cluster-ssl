@@ -196,6 +196,67 @@ def test_f3_uses_recorded_model_tag_and_requires_the_common_test_support(tmp_pat
 		subject.evaluation(p, 'f3', expected_hmm=False)
 
 
+def test_volve_available_checkpoint_policies_do_not_change_the_selected_score(tmp_path):
+	p = tmp_path / 'metrics.json'
+	data = {
+		'model': 'mae',
+		'benchmark_identity': {'training': {'seed': 42000}, 'embedding': {}},
+		'test': {
+			'primary_common': {'macro_mae_samples': 3.0, 'macro_within_2_samples': 0.8}
+		},
+	}
+	p.write_text(json.dumps(data))
+	before = subject.evaluation(p, 'volve', expected_hmm=False)
+	data['benchmark_identity']['checkpoint_selections'] = [
+		'strict_lower_validation_macro_mae_v1'
+	]
+	p.write_text(json.dumps(data))
+	assert subject.evaluation(p, 'volve', expected_hmm=False) == before
+
+
+def test_zero_distillation_v1_uses_actual_training_config_when_export_flags_are_absent(
+	tmp_path,
+):
+	p = tmp_path / 'metrics.json'
+	checkpoint = tmp_path / 'encoder/latest.pt'
+	checkpoint.parent.mkdir()
+	checkpoint.with_name('resolved_config.json').write_text(
+		json.dumps(
+			{
+				'stage': 'train_strat_hmm_pretext',
+				'head': {'num_prototypes': 6},
+				'loss': {'distillation_weight': 0.0},
+			}
+		)
+	)
+	p.write_text(
+		json.dumps(
+			{
+				'model': 'mae100_hmm_v1_k6_distill000',
+				'benchmark_identity': {
+					'training': {'seed': 42000},
+					'embedding': {
+						'checkpoint_path': str(checkpoint),
+						'model_source': {
+							'role': 'recipe_arm',
+							'distillation_weight': 0.0,
+						},
+					},
+				},
+				'test': {
+					'primary_common': {
+						'macro_mae_samples': 3.0,
+						'macro_within_2_samples': 0.8,
+					}
+				},
+			}
+		)
+	)
+	assert subject.evaluation(p, 'volve', expected_hmm=True)['primary'] == 3.0
+	with pytest.raises(ValueError, match='HMM source'):
+		subject.evaluation(p, 'volve', expected_hmm=False)
+
+
 def test_exact_derived_and_review_sets_preserve_the_original_scores(
 	tmp_path, monkeypatch
 ):

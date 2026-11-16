@@ -115,7 +115,7 @@ and `v1_comparison.csv`. Publication refuses existing or incomplete outputs;
 focused tests verify membership and byte-preserving copies. Review files are
 never pipeline inputs. [Open the tracked comparison](../../../reports/hmm_missing_controls_completion_v1/README.md).
 
-## HMM versus no-HMM comparison
+## Original v2 HMM versus no-HMM comparison
 
 The shared `factorial_cells.csv` now contains 560 comparison rows for the
 original 540 HMM conditions. It places `without_hmm_primary`,
@@ -168,3 +168,37 @@ effects, recorded source identity, overwrite ownership and exact publication.
 This bounded HMM comparison is accompanied by the refreshed full saved-result
 CSV/HTML catalog, including all versions, seeds, checkpoints and archived
 outputs; see [catalog documentation](../../../docs/experiment_metrics_catalog.md).
+
+
+## Current comparison: all saved HMM versions
+
+The same `factorial_cells.csv` path now contains every HMM endpoint in the
+artifact-owned saved-results catalog, including v1, v2, v3 and historical
+variants, across saved splits, supports and checkpoint selections. The name is
+retained for existing links. The original 560 v2 comparisons remain present.
+All 405 aligned v1 distillation cells (0/0.1/0.2; three surveys, three sources,
+five layouts and three budgets) are included in this main table.
+
+`hmm_version`, `head_ks`, `with_hmm_model`, `source_cohort`,
+`source_evaluation_split`, `evaluation_support`, `checkpoint_selection`, both
+decoder seeds and source record ID identify each saved evaluation. Catalog
+coverage is checked by source file, split and support, rather than a fixed
+540-condition limit. The catalog snapshot and every consumed metric original
+are bound by SHA-256. No-HMM and k-means results remain in the full catalog.
+
+Compatible test results are paired against all matching retained baseline
+seeds. Evaluations without a verified matching baseline remain in the same
+CSV with `comparison_status=unmatched_baseline`, their measured HMM scores,
+empty baseline/difference columns, and an explicit `comparison_note`.
+Validation and test are never paired. Full decoder/support identity is checked;
+only decoder RNG and initialization hashes are relaxed for cross-seed pairs.
+Volve's descriptive benchmark label and list of available checkpoint policies
+are excluded from the scientific fingerprint; the actual checkpoint selection
+remains explicit per result.
+
+The summary separates versions, models, K, cohorts, checkpoint selections,
+splits, supports and seeds. `n` and `aggregation_status` expose partial coverage;
+SD for one layout is empty, and duplicate layouts are not averaged. Unpaired
+rows are not included in improvement aggregates. The existing five-file
+artifact and seven-file review publication sets remain unchanged. Use the
+same CLI with `--overwrite` to update those owned outputs.
