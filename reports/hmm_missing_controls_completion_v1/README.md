@@ -1,6 +1,6 @@
 # HMMあり・なしの性能比較
 
-保存済みHMM評価4689件を掲載した4754行です。v1・v2・v3・legacyを同じCSVに収録し、`hmm_version`・`head_ks`・モデル・評価分割・評価対象を各行に明記しています。
+保存済みHMM評価4709件を掲載した4779行です。v1・v2・v3・legacyを同じCSVに収録し、`hmm_version`・`head_ks`・モデル・評価分割・評価対象を各行に明記しています。
 
 - [全バージョン・全seedの結果と対応比較](factorial_cells.csv)
 - [seed別の平均・標準偏差・勝敗数](factorial_comparison.csv)

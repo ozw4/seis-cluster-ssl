@@ -71,4 +71,4 @@ hmm_source_summaries:
     sha256: 76af6c4bfc0a3a07051b5622b191f74b61bd55a84a6613f9123568af84087666
 saved_catalog:
   path: studies/all_experiment_metrics_20261115_v1/catalog/experiment_metrics.csv
-  sha256: 92b4d5b157c5dc09708af68c36f49da00cb120b228faa346a4e1891841042abc
+  sha256: 54725335cd41f25e5d52cbd6e461a7e2bc9959cb0e5a4afd21a6e7b1b7b89d28
