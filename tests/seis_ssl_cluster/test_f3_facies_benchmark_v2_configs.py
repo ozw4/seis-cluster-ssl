@@ -66,6 +66,7 @@ LOCAL_VICREG_EXTENSION_ROOT = V2_ROOT / '116_local_vicreg_extension_v1'
 # These suites check every declared candidate config and its source lineage.
 # Counts reject additional YAML that their explicit inventories do not cover.
 CANDIDATE_CONFIG_SUITES = {
+	'144_kmeans_k6810_dis0_con0_v1': ('test_kmeans_zero.py', 12),
 	'143_v2_dis0_con0_v1': ('test_v2_dis0_con0.py', 12),
 	'142_hmm_v2_barlow_zero_distillation_paper_sources_v1': (
 		'test_hmm_v2_dis0_paper_sections.py',

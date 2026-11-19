@@ -1157,7 +1157,7 @@ def resolve_strat_hmm_pretext_config(  # noqa: C901, PLR0912, PLR0915
 			or 'spatial_context' in resolved
 			or 'pseudo_target_refresh' in resolved
 			or pseudo_targets.get('target_representation', 'hard_viterbi_labels_v1')
-			!= 'hard_viterbi_labels_v1'
+			not in ('hard_viterbi_labels_v1', 'unordered_kmeans_labels_v1')
 		):
 			raise ValueError(
 				'feature diagnostics require unmasked fixed-target multi-head training'

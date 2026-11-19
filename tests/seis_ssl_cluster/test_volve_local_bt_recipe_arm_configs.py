@@ -228,6 +228,7 @@ def test_recipe_arm_namespace_has_only_declared_recipe_and_continuation_users() 
 		'43_hmm_v1_k6_zero_distillation_ablation_v1',
 		'44_hmm_v2_barlow_zero_distillation_paper_sources_v1',
 		'45_v2_dis0_con0_v1',
+		'46_kmeans_k6810_dis0_con0_v1',
 		'zero_distillation_paper_sections_v1',
 		'missing_controls_completion_v1',
 	}

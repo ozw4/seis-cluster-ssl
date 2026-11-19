@@ -1,0 +1,17 @@
+{
+  "study": "kmeans_k6810_dis0_con0_v1",
+  "status": "complete",
+  "cells": 135,
+  "published_files": [
+    "README.md",
+    "cells.csv",
+    "comparison.csv",
+    "provenance.json"
+  ],
+  "summary_sha256": "3f0fbf01ab6912821dd9315451122abee94d5ba8d1753ead394b5edd274afe0a",
+  "review_files_sha256": {
+    "cells.csv": "7ff3b8fcd97e130cfca17c004ce0c5e7dcf53e9b0546412c5c3d081bbdc41be1",
+    "README.md": "73c90cc61bbe5942809f8c6ec6d86a55617679cb31691c06d83a32e6be132712",
+    "comparison.csv": "18cc803f8d6106a8721093728bbdd4b53939cd0d39e91e4e121b3a90fe1e72ab"
+  }
+}

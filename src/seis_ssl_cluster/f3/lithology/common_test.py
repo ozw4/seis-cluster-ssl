@@ -33,6 +33,7 @@ V3_NAMESPACE = 'lithology_common_test_v3_v1'
 DISTILLATION_NAMESPACE = 'lithology_common_test_distillation_sensitivity_v1'
 RANDOM_DISTILLATION_NAMESPACE = 'lithology_common_test_random_distillation_v1'
 ZERO_CONSTRAINT_NAMESPACE = 'lithology_common_test_v2_dis0_con0_v1'
+KMEANS_ZERO_NAMESPACE = 'lithology_common_test_kmeans_dis0_con0_v1'
 V1_ZERO_DISTILLATION_NAMESPACE = 'lithology_common_test_v1_zero_distillation_v1'
 BARLOW_ZERO_DISTILLATION_NAMESPACE = 'lithology_common_test_barlow_zero_distillation_v1'
 CONDITION_KEYS = (
@@ -122,9 +123,15 @@ def _expected_conditions(namespace: str = NAMESPACE) -> set[tuple[str, ...]]:  #
 		return {
 			('v2', 'local_bt', '6|8|10', weight, '0.1') for weight in ('0.0', '0.2')
 		}
-	if namespace == ZERO_CONSTRAINT_NAMESPACE:
+	if namespace in (ZERO_CONSTRAINT_NAMESPACE, KMEANS_ZERO_NAMESPACE):
 		return {
-			('v2', source, '6|8|10', '0.0', '0')
+			(
+				'kmeans' if namespace == KMEANS_ZERO_NAMESPACE else 'v2',
+				source,
+				'6|8|10',
+				'0.0',
+				'0',
+			)
 			for source in ('mae', 'local_bt', 'random')
 		}
 	if namespace == RANDOM_DISTILLATION_NAMESPACE:
@@ -176,6 +183,7 @@ def _scope(config: Mapping[str, Any]) -> tuple[tuple[str, ...], set[tuple[str, .
 			DISTILLATION_NAMESPACE,
 			RANDOM_DISTILLATION_NAMESPACE,
 			ZERO_CONSTRAINT_NAMESPACE,
+			KMEANS_ZERO_NAMESPACE,
 			V1_ZERO_DISTILLATION_NAMESPACE,
 			BARLOW_ZERO_DISTILLATION_NAMESPACE,
 		)

@@ -467,7 +467,13 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 			'experiments/hmm_v2/missing_controls_completion_v1/no_hmm_comparison.yaml'
 		):
 			continue
-		if path.is_relative_to(Path('experiments/kmeans/kmeans_k6810_multi_source_v1')):
+		if any(
+			path.is_relative_to(Path('experiments/kmeans') / study)
+			for study in (
+				'kmeans_k6810_multi_source_v1',
+				'kmeans_k6810_dis0_con0_v1',
+			)
+		):
 			continue
 		# This ablation explicitly binds and reuses this source's frozen K6 targets.
 		if path.is_relative_to(
@@ -475,6 +481,9 @@ def test_candidate_namespace_is_unused_by_other_experiments() -> None:
 		):
 			continue
 		if path.parts[3] in {
+			'144_kmeans_k6810_dis0_con0_v1',
+			'55_kmeans_k6810_dis0_con0_v1',
+			'46_kmeans_k6810_dis0_con0_v1',
 			'143_v2_dis0_con0_v1',
 			'142_hmm_v2_barlow_zero_distillation_paper_sources_v1',
 			'141_hmm_v1_k6_zero_distillation_ablation_v1',

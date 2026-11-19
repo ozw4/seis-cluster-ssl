@@ -101,6 +101,12 @@ def collect_summary(matrix_path: Path, workspace: Path) -> dict[str, Any]:
 	for survey in SURVEYS:
 		for family in SOURCES:
 			arm = matrix['surveys'][survey][family]
+			if matrix['study'] == 'kmeans_k6810_dis0_con0_v1':
+				from seis_ssl_cluster.clustering.kmeans_zero import (
+					validate_full_history,
+				)
+
+				validate_full_history(arm, workspace)
 			lineage = [
 				audit_multi_head_source(workspace / path)
 				for path in (
@@ -178,9 +184,9 @@ def collect_summary(matrix_path: Path, workspace: Path) -> dict[str, Any]:
 						}
 					)
 	rows = comparison_rows(cells)
-	return {
+	payload = {
 		'schema_version': 1,
-		'study': STUDY,
+		'study': matrix['study'],
 		'status': 'complete',
 		'matrix': file_reference(matrix_path),
 		'cells': cells,
@@ -208,6 +214,11 @@ def collect_summary(matrix_path: Path, workspace: Path) -> dict[str, Any]:
 			'cross-head consistency; raw differences are kmeans minus HMM v2.'
 		),
 	}
+	if matrix['study'] == 'kmeans_k6810_dis0_con0_v1':
+		from seis_ssl_cluster.clustering.kmeans_zero import finalize_payload
+
+		payload = finalize_payload(payload)
+	return payload
 
 
 def publish_summary(output: Path, payload: dict[str, Any]) -> None:
@@ -223,8 +234,12 @@ def publish_summary(output: Path, payload: dict[str, Any]) -> None:
 		writer = csv.DictWriter(stream, fieldnames=list(payload['rows'][0]))
 		writer.writeheader()
 		writer.writerows(payload['rows'])
+	if payload.get('study') == 'kmeans_k6810_dis0_con0_v1':
+		from seis_ssl_cluster.hmm.distillation_sensitivity import write_rows
+
+		write_rows(output / 'cells.csv', payload['cells'])
 	lines = [
-		'# Unordered k-means versus canonical HMM v2',
+		'# Unordered k-means versus HMM v2: ' + payload.get('study', STUDY),
 		'',
 		payload['interpretation'],
 		'',
@@ -448,7 +463,7 @@ def build_parser() -> argparse.ArgumentParser:
 	return parser
 
 
-def main() -> None:  # noqa: C901, PLR0912
+def main() -> None:  # noqa: C901, PLR0912, PLR0915
 	"""Plan, validate, or execute the study and its individual stages."""
 	args = build_parser().parse_args()
 	workspace = Path(__file__).resolve().parents[3]
@@ -480,22 +495,44 @@ def main() -> None:  # noqa: C901, PLR0912
 			print(json.dumps(audit_multi_head_source(args.audit_config), indent=2))
 		return
 	if args.summarize:
+		matrix = validate_study(args.matrix, workspace)
+		if matrix['study'] == 'kmeans_k6810_dis0_con0_v1':
+			from seis_ssl_cluster.clustering.kmeans_zero import prepare_test
+
+			if not args.dry_run:
+				from seis_ssl_cluster.f3.lithology.common_test import (
+					inspect_test_plan,
+					run_test,
+				)
+
+				run_test(inspect_test_plan(prepare_test(matrix)), resume=True)
 		payload = collect_summary(args.matrix, workspace)
 		if not args.dry_run:
 			output = (
 				Path(os.environ['SEIS_SSL_CLUSTER_ARTIFACT_ROOT'])
 				/ 'studies'
 				/ 'kmeans'
-				/ STUDY
+				/ matrix['study']
 				/ 'summary'
 			)
 			publish_summary(output, payload)
+			if matrix['study'] == 'kmeans_k6810_dis0_con0_v1':
+				from seis_ssl_cluster.clustering.kmeans_zero import publish_review
+
+				publish_review(output, workspace / 'reports' / matrix['study'])
+				from seis_ssl_cluster.clustering.kmeans_zero import refresh_catalog
+
+				refresh_catalog(workspace)
 		return
 	commands = command_plan(args.matrix, workspace, args)
 	if args.plan or not (args.execute or args.dry_run):
 		for stage, command in commands:
 			print(stage + ': ' + shlex.join(command))
 		return
+	if validate_study(args.matrix, workspace)['study'] == 'kmeans_k6810_dis0_con0_v1':
+		from seis_ssl_cluster.clustering.kmeans_zero import validate_live_inputs
+
+		validate_live_inputs(validate_study(args.matrix, workspace), workspace)
 	if args.dry_run:
 		# Live preflight is read-only, including its logs.
 		for stage, command in commands:
@@ -514,11 +551,12 @@ def main() -> None:  # noqa: C901, PLR0912
 		return
 	from datetime import datetime, timezone
 
+	matrix = validate_study(args.matrix, workspace)
 	root = (
 		Path(os.environ['SEIS_SSL_CLUSTER_ARTIFACT_ROOT'])
 		/ 'operations'
 		/ 'kmeans'
-		/ STUDY
+		/ matrix['study']
 	)
 	root.mkdir(parents=True, exist_ok=True)
 	with (root / 'study.lock').open('a') as lock:
@@ -527,8 +565,36 @@ def main() -> None:  # noqa: C901, PLR0912
 		logs.mkdir()
 		for i, (stage, command) in enumerate(commands):
 			print(f'{i + 1}/{len(commands)}: {stage}', flush=True)
-			run_command(
-				stage, command, dry_run=False, log=logs / f'{i:03d}_{stage}.log'
+			from seis_ssl_cluster.clustering.kmeans_zero import execute_recorded
+
+			if matrix['study'] == 'kmeans_k6810_dis0_con0_v1':
+				execute_recorded(
+					matrix,
+					workspace,
+					root,
+					i,
+					len(commands),
+					stage,
+					command,
+					logs / f'{i:03d}_{stage}.log',
+				)
+			else:
+				run_command(
+					stage, command, dry_run=False, log=logs / f'{i:03d}_{stage}.log'
+				)
+		if matrix['study'] == 'kmeans_k6810_dis0_con0_v1':
+			(root / 'status.json').write_text(
+				json.dumps(
+					{
+						'status': 'complete'
+						if args.last == 'summary'
+						else 'complete_requested_stages',
+						'first_stage': args.first,
+						'last_stage': args.last,
+						'pid': os.getpid(),
+					}
+				)
+				+ '\n'
 			)
 
 

@@ -1,5 +1,7 @@
 """Matched nine-arm definitions for the unordered k-means ablation."""
 
+# ruff: noqa: PLC0415
+
 from __future__ import annotations
 
 import copy
@@ -118,9 +120,15 @@ def arm_configs(
 	return result
 
 
-def validate_study(matrix_path: Path, workspace: Path) -> dict[str, Any]:
+def validate_study(matrix_path: Path, workspace: Path) -> dict[str, Any]:  # noqa: C901
 	"""Reject missing arms, scientific drift, and candidate/output collisions."""
 	matrix = read_yaml(matrix_path)
+	if matrix.get('study') == 'kmeans_k6810_dis0_con0_v1':
+		from seis_ssl_cluster.clustering.kmeans_zero import (
+			validate_definition,
+		)
+
+		return validate_definition(matrix, workspace)
 	if (
 		matrix.get('schema_version') != 1
 		or matrix.get('study') != STUDY
