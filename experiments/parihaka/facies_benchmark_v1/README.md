@@ -68,3 +68,4 @@ and follows the shared recovery rule above.
 - [HMM distillation-weight screening](38_channel_hmm_distillation_weight_v1/README.md)
 - [Local-BT rot90 asymmetric-noise recipe transfer](39_channel_local_bt_rot90_asym_g060_v1/README.md)
 - [Nine-arm pretraining comparison completion](40_pretraining_comparison_completion_v1/README.md)
+- [HMM v2 zero/zero medium and large decoder seed repeat](54_hmm_v2_dis0_con0_decoder_seed42001_v1/README.md)

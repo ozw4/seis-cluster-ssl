@@ -1,0 +1,74 @@
+schema_version: 1
+experiment_id: 54_hmm_v2_dis0_con0_decoder_seed42001_v1
+layouts:
+- layout_000
+- layout_001
+- layout_002
+- layout_003
+- layout_004
+sizes:
+- medium
+- large
+baseline_decoder_seed: 42000
+decoder_seed: 42001
+cell_count: 30
+layout_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/30_channel_benchmark_v1/02_layouts.yaml
+layout_config_sha256: 25735a09b4cacb6d8a03711c52b139ded51d269d25fea2d9b123d5e36d91387e
+runs_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_dis0_con0_decoder_seed42001_v1/runs
+summary_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/surveys/parihaka/facies_benchmark_v1/benchmark/hmm_v2_dis0_con0_decoder_seed42001_v1/summary
+operations_root: ${SEIS_SSL_CLUSTER_ARTIFACT_ROOT}/operations/parihaka/hmm_v2_dis0_con0_decoder_seed42001_v1
+arms:
+- source: mae
+  model: mae100_hmm_v2_mh_k6810_distill000_cons000
+  baseline_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/50_downstream/mae100_hmm_v2_mh_k6810_distill000_cons000.yaml
+  baseline_config_sha256: 337bb24f13eab39c263d2e38aeaf8d6a2d0dda80856ca85882a22e325bc9c944
+  training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/30_pretraining/mae100_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+  training_config_sha256: 70596b1b8cd9fe86abbc358d052e6744ec5aba91bc37b60c71e3cea02697baac
+  checkpoint_sha256: 61dfdb49721e47a551b971d82e1ac33b564e278958e69514abe4b3152dc2a7cf
+  baseline_metrics_sha256:
+    layout_000/medium: 8231f2cc8198e33db4cf54796ac4afb0e83fc36a31a2f58c33516d27b864409c
+    layout_000/large: 73b7b74901c96600d0d88b95be7cfa94d9a3d3cdb9723fcb4cd4b78e87ebbe45
+    layout_001/medium: cba0a51ddc501b9f52a94f15693a0e614251ac09e92c5b78ea542afae36d8c3d
+    layout_001/large: 144f52a42f5b1eeee08d86a232bad7b54e0e1b8efff2954c854fde84154eb350
+    layout_002/medium: 915effff335c2b5ba870b3580862da9942755a6c7f46147d3b7d9a52fb187e9d
+    layout_002/large: 443f33458b798024e254a77afe4c43e75ce87d7bccf391e4ff3730700ad1d668
+    layout_003/medium: 1ef56786a73d1a0ddcb65b26cd80c283964de78092ed2d217e738973481ab50e
+    layout_003/large: 9318059ecee819e1bae20f32c5d7f69644c1788484d17016ef1d0f9c51b854e1
+    layout_004/medium: 58196fdabd4543568f9234536323ec97b9790e52e5bcdfa2d3850cc8dfc3fcb4
+    layout_004/large: ed4d74a37bd7180eda3701fe50d780a069e2b245a835bd02d29a54f159d65d8d
+- source: local_bt
+  model: local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000
+  baseline_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/50_downstream/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000.yaml
+  baseline_config_sha256: b7d15cc992de8a2b915cd9fa6c2637873f50a25901befde1bcdae8ef274de160
+  training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/30_pretraining/local_bt_rot90_asym_g060_3ep_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+  training_config_sha256: 5ae576401497e32d6bc7712b3c95c56aea9953c27a73fcd724bb2fbc406d770b
+  checkpoint_sha256: b4ec6aaaed991c9c748410eae05721f1fc865d627154eb77620e552eef68d7fd
+  baseline_metrics_sha256:
+    layout_000/medium: 90c43c316c8661b56dcd1346b2bef2625c7ec0099c3dda755f102ade21dfe8be
+    layout_000/large: 26577e124bcac34ef3bc5d8a2bb5bc3d98e85dea479c47942392b7b4d1fc05d2
+    layout_001/medium: b94b142c9fa93f14d8ff5682a80dd99524f9d78956cc35bba1bc05cbf3654fed
+    layout_001/large: 159efea94fc5966dbec65c0b55dec090a9d41e148fe0ad4603c819fd504d5256
+    layout_002/medium: 4e60133fee5d8e2c44e93efca375d5bff8344a80a4cb0958f7709d579c1c2a00
+    layout_002/large: 9601a0923b43087cfafda7f9fd53357074cff7c53eacced1c1f1e426e88c9041
+    layout_003/medium: 80e5d5a26690ca6cfa4ea7f4d4fc5fc5a4e040670f2f022a759a3d61330fdab2
+    layout_003/large: 7a08cf3f933bb64252587404c9d7d85b13f1090bbea674af339881dbe2c9160c
+    layout_004/medium: 7baa0bac773d5cca5af5480bc8893f3f324458d911e6914b20bddf71483e9d4b
+    layout_004/large: cb06edb397c46e591912831971167e463260ee395fc53c476e832d09f09c9a7a
+- source: random
+  model: random_init_hmm_v2_mh_k6810_distill000_cons000
+  baseline_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/50_downstream/random_init_hmm_v2_mh_k6810_distill000_cons000.yaml
+  baseline_config_sha256: ab84996a2f9bd81328f4b4b72dfea8bb2a4be63363b5568b5bb9b75541032f01
+  training_config: ${SEIS_SSL_CLUSTER_WORKSPACE}/experiments/parihaka/facies_benchmark_v1/53_v2_dis0_con0_v1/30_pretraining/random_init_hmm_v2_mh_k6810_distill000_cons000/02_full_25ep.yaml
+  training_config_sha256: 26c62cb969acc4ac6c2214f7788e7d5cf379fb9113148bd3d827e7f8f68a82c3
+  checkpoint_sha256: 5edceeaf233fff04c90716b53250a8ec6146ffe8ef5f098446decc21c988f6bb
+  baseline_metrics_sha256:
+    layout_000/medium: 19bde4656f4728644a7cf52bd7fd3620f837d0aaa92528247ec0b57c183a730c
+    layout_000/large: 71b39b098428c366b694a53499ea9fb6ed3c7e2fa439e359f155d63b47b92d06
+    layout_001/medium: 49ac19eb4f294b2b201dc2ddef7ae513a02964bd7dca5c7a603cfd8e116093d0
+    layout_001/large: 2d29b83b3f0e2274be91de8906dc9c15568cfd6a88ac393ecdb9c6062a31f1aa
+    layout_002/medium: eb1f3383e767ce638263d39ebd2768cdbb227c18e7e6f8b6dcfcdc2e7feae708
+    layout_002/large: c85b48b38bd87a66c4361ef74d5d146bd1aa9e7969299889b746ece342eab80a
+    layout_003/medium: 6a489297653265193509718f9fb94c48c8ca0f690c30cbc7af9f5d88fdcac8d1
+    layout_003/large: 35dbf35fa99ce38f6d76f5e62cd0dea9b1a40a5d78b8174e34a72256f00c30c9
+    layout_004/medium: 267f2adf08415e0569542dd4871e26872f5c7f83bf704ee8fc5201c74469065d
+    layout_004/large: 52e45b2f26aec23bc698c30881b716c7598970f3e7108721a6810c38aae258f8
