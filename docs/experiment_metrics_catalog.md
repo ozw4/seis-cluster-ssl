@@ -62,6 +62,27 @@ secondary-per-horizon support remain distinct. Archive and smoke results are
 explicitly flagged. Saved values do not certify completion of the entire plan.
 No overall ranking combines incompatible surveys or evaluation protocols.
 
+To regenerate the cross-method comparison, first refresh the `saved_catalog`
+checksum in the [HMM comparison definition](../experiments/hmm_v2/missing_controls_completion_v1/no_hmm_comparison.yaml)
+and regenerate the HMM/no-HMM bundle. Then run:
+
+```bash
+python -m seis_ssl_cluster.results.all_experiment_comparison \
+  --output artifacts/seis_ssl_cluster/studies/all_experiment_metrics_20261115_v1/comparison
+```
+
+`all_experiment_comparison.csv` keeps every endpoint and its original metric,
+split, support, version and seed columns. Verified HMM/no-HMM and HMM/k-means
+comparisons add reference columns, including both decoder seeds and the source
+comparison identifier. Each verified reference gets a row. Use `record_id`
+to count distinct evaluations. Standalone results retain their values with
+empty reference and difference fields. Positive `primary_improvement` favors
+the row model, with the sign reversed for Volve MAE. The older k-means study
+uses F3 validation and compares against HMM with consistency 0.1. The
+zero-weight study uses F3 common test and both auxiliary weights at zero.
+The comparison publication owns exactly the CSV, `README.md` and
+`provenance.json`. Its inputs are the saved catalog and derived artifact tables.
+
 Validate this isolated producer with:
 
 ```bash
